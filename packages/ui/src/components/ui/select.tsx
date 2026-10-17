@@ -162,7 +162,7 @@ function SelectTrigger({
       className={cn(
         // Shared trigger chrome: one source of truth for every dropdown trigger.
         dropdownTriggerVariants(),
-        "w-fit data-[placeholder]:text-muted-foreground aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive *:data-[slot=select-value]:min-w-0 *:data-[slot=select-value]:flex-1 *:data-[slot=select-value]:truncate",
+        "w-fit data-[placeholder]:text-muted-foreground *:data-[slot=select-value]:min-w-0 *:data-[slot=select-value]:flex-1 *:data-[slot=select-value]:truncate",
         className
       )}
       onPointerDownCapture={(event) => {
@@ -258,8 +258,10 @@ function SelectContent({
     });
   };
 
+  // `contents`: inside a dialog the portal node is one more flex child, and
+  // the dialog's gap grew the dialog by a row while the popup was open.
   return (
-    <BaseSelect.Portal container={portalToBody ? undefined : portalContainer || undefined}>
+    <BaseSelect.Portal className="contents" container={portalToBody ? undefined : portalContainer || undefined}>
       <BaseSelect.Positioner
         alignItemWithTrigger={alignItemWithTrigger}
         sideOffset={sideOffset}

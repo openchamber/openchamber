@@ -9,6 +9,8 @@ import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
 import { Icon } from '@/components/icon/Icon';
+import { Spinner } from '@/components/ui/spinner';
+import { PauseClock } from '@/components/ui/pause-clock';
 import { useBtwStore } from '@/stores/useBtwStore';
 import { useSync } from '@/sync/use-sync';
 import {
@@ -45,9 +47,10 @@ const IDLE_SESSION_STATUS = { type: 'idle' as const };
  * and the app navigates to it), destroy (the fork is deleted; the main
  * conversation is never touched).
  */
-const BtwPanelView: React.FC<{ parentSessionId: string; panel: BtwPanelState; onExit: () => void }> = ({
+const BtwPanelView: React.FC<{ parentSessionId: string; panel: BtwPanelState; hidden: boolean; onExit: () => void }> = ({
     parentSessionId,
     panel,
+    hidden,
     onExit,
 }) => {
     const { t } = useI18n();
@@ -99,7 +102,8 @@ const BtwPanelView: React.FC<{ parentSessionId: string; panel: BtwPanelState; on
         );
     }
 
-    return <AnimatePresence>{stage}</AnimatePresence>;
+    // `hidden`: collapsed while the parent's own request takes the dock.
+    return <AnimatePresence>{hidden ? null : stage}</AnimatePresence>;
 };
 
 const useBtwDestroy = (sessionRef: BtwSessionRef | null): (() => void) => {
@@ -253,7 +257,7 @@ const BtwFrame: React.FC<{
                     className="flex min-w-0 items-center gap-2 text-start text-muted-foreground transition-colors hover:text-foreground"
                 >
                     {headerSpinner ? (
-                        <Icon name="loader-4" className="size-3.5 shrink-0 animate-spin" />
+                        <Spinner className="size-3.5 shrink-0" />
                     ) : (
                         <Icon name="chat-ai-3" className="size-3.5 shrink-0" />
                     )}
@@ -476,7 +480,10 @@ const BtwMessages: React.FC<{
                     )}
                     aria-hidden={!data.sessionIsWorking}
                 >
-                    <Icon name="loader-4" className="size-3.5 animate-spin" />
+                    {/* Hidden, not removed: it must not keep stepping then. */}
+                    <PauseClock paused={!data.sessionIsWorking}>
+                        <Spinner className="size-3.5" />
+                    </PauseClock>
                     <span>{t('chat.btw.working')}</span>
                 </div>
             </div>

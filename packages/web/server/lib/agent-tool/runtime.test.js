@@ -44,7 +44,8 @@ const prepareManagedEnv = async (runtime, options) => {
 };
 
 /** Loads the generated plugin and returns the tools it registers, by name. */
-const loadTools = async (dataDir, tag) => {
+// `hooks` collects the session hooks the plugin registers, by name.
+const loadTools = async (dataDir, tag, hooks = {}) => {
   const entrypoint = path.join(pluginDirectoryFor(dataDir), 'index.js');
   const pluginModule = await import(`${pathToFileURL(entrypoint).href}?${tag}=${Date.now()}`);
   const registered = {};
@@ -53,6 +54,9 @@ const loadTools = async (dataDir, tag) => {
       transform: (edit) => {
         edit({ add: (tool) => { registered[tool.name] = tool; } });
       },
+    },
+    session: {
+      hook: async (name, callback) => { hooks[name] = callback; },
     },
   });
   return registered;
@@ -269,15 +273,19 @@ describe('managed agent tool runtime', () => {
   });
 
 
-  it('tells the agent to move into a worktree unasked only when the user chose that', async () => {
+  it('introduces the worktree move and leaves the choice to the user', async () => {
     const { runtime, dataDir } = await createRuntime();
 
-    await runtime.materializePlugin({ worktreeMoveWithoutAsking: true });
-    const tool = await loadTools(dataDir, 'unasked');
+    await runtime.materializePlugin({});
+    const tool = await loadTools(dataDir, 'worktree-intro');
 
-    expect(tool.openchamber.description).toContain('first move this session into a new worktree with session.moveToWorktree, without asking, and tell the user in one line');
-    expect(tool.openchamber.description).not.toContain("wait for the user's yes");
+    expect(tool.openchamber.description).toContain('Whether that fits depends on how the user works');
+    expect(tool.openchamber.description).toContain('such as a pull request of its own');
+    // OpenCode's own worktree_create makes a detached copy of the current commit.
+    expect(tool.openchamber.description).toContain('Unlike worktree_create, it makes a new branch from the default branch');
+    expect(tool.openchamber.description).not.toContain('without asking');
     expect(tool.openchamber.input.properties.action.oneOf.map((entry) => entry.const)).toContain('session.moveToWorktree');
+    expect(tool.openchamber.input.properties.parameters.properties.carry).toEqual(expect.objectContaining({ type: 'array' }));
   });
 
   it('materializes the plugin and mints a per-child callback token', async () => {
@@ -302,9 +310,6 @@ describe('managed agent tool runtime', () => {
     expect(tool.openchamber.description).toContain('final answer then arrives in this session as a message');
     // Agents also have OpenCode's own subagent tool; the line between the two is drawn up front.
     expect(tool.openchamber.description).toContain('use the subagent tool');
-    // The worktree rule is read before the tool is chosen, and asks by default.
-    expect(tool.openchamber.description).toContain('offer to move this session into a new worktree with session.moveToWorktree and wait for the user\'s yes');
-    expect(tool.openchamber.description).not.toContain('without asking');
     expect(tool.openchamber.input.properties.action.oneOf).toContainEqual({
       const: 'session.messages',
       description: 'Read text-only messages and current sessionStatus for sessionId; directory and limit 10 are defaults',
@@ -460,12 +465,61 @@ describe('managed agent tool runtime', () => {
     const tool = await loadTools(dataDir, 'render');
 
     expect(Object.keys(tool)).toEqual(['openchamber', 'openchamber_render']);
-    expect(Object.keys(tool.openchamber_render.input.properties.parameters.properties).sort()).toEqual(['html', 'title']);
+    expect(Object.keys(tool.openchamber_render.input.properties.parameters.properties).sort()).toEqual(['awaitAnswer', 'html', 'title']);
     expect(Object.keys(tool.openchamber.input.properties.parameters.properties)).not.toContain('html');
     expect(tool.openchamber_render.description).toContain('--chart-1');
   });
 
-  it('registers every tool as a direct tool unless Code Mode is asked for', async () => {
+  it('returns the answer a page waited for, or ends the wait when the user writes in the chat', async () => {
+    const service = createOpenChamberControlService({ sessionService: { resolveDirectory: async () => '/repo' } });
+    const { runtime, dataDir } = await createRuntime({
+      resolveSessionDirectory: async () => '/repo',
+      executeAction: (...args) => service.execute(...args),
+    });
+    const prepared = await prepareManagedEnv(runtime, { includeControl: false, includeWeb: false, includeMemory: false, includeRender: true });
+    const hooks = {};
+    const tools = await loadTools(dataDir, 'render-answer', hooks);
+    const app = express();
+    runtime.registerRoutes(app, express);
+    const server = await new Promise((resolve) => {
+      const listener = app.listen(0, '127.0.0.1', () => resolve(listener));
+    });
+    const originalUrl = process.env.OPENCHAMBER_AGENT_TOOL_URL;
+    const originalToken = process.env.OPENCHAMBER_AGENT_TOOL_TOKEN;
+    process.env.OPENCHAMBER_AGENT_TOOL_URL = `http://127.0.0.1:${server.address().port}/api/openchamber/agent-tool`;
+    process.env.OPENCHAMBER_AGENT_TOOL_TOKEN = prepared.OPENCHAMBER_AGENT_TOOL_TOKEN;
+    const ask = (id) => tools.openchamber_render.execute(
+      { action: 'render.page', parameters: { html: '<p>Pick</p>', title: 'Pick a layout', awaitAnswer: true } },
+      { sessionID: 'ses_caller', id, signal: new AbortController().signal, progress: async () => {} },
+    );
+    try {
+      const answered = ask('call_1');
+      await vi.waitFor(() => service.answerPage({ sessionId: 'ses_caller', callId: 'call_1', summary: 'Layout B', data: { layout: 'b' } }));
+      const result = await answered;
+      expect(JSON.parse(result.content)).toMatchObject({ ok: true, data: { answer: { answered: true, summary: 'Layout B', data: { layout: 'b' } } } });
+      expect(result.metadata.openchamber).toMatchObject({ ok: true, answer: { answered: true, summary: 'Layout B', data: { layout: 'b' } } });
+
+      const closed = ask('call_2');
+      // Lets the call reach the server and start waiting there.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      await hooks.prompt({ sessionID: 'ses_other' });
+      await hooks.prompt({ sessionID: 'ses_caller' });
+      const closedResult = await closed;
+      expect(JSON.parse(closedResult.content)).toMatchObject({ ok: true, data: { answer: { answered: false, reason: 'chat' } } });
+      expect(closedResult.metadata.openchamber).toMatchObject({ ok: true, answer: { answered: false, reason: 'chat' } });
+      // The server let go of the page too, so a late answer finds nothing.
+      await vi.waitFor(() => expect(() => service.answerPage({ sessionId: 'ses_caller', callId: 'call_2', summary: 'B' }))
+        .toThrow(expect.objectContaining({ statusCode: 404 })));
+    } finally {
+      if (originalUrl === undefined) delete process.env.OPENCHAMBER_AGENT_TOOL_URL;
+      else process.env.OPENCHAMBER_AGENT_TOOL_URL = originalUrl;
+      if (originalToken === undefined) delete process.env.OPENCHAMBER_AGENT_TOOL_TOKEN;
+      else process.env.OPENCHAMBER_AGENT_TOOL_TOKEN = originalToken;
+      await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    }
+  });
+
+  it('registers every tool as a direct tool unless Code Mode is asked for, and the render tool always direct', async () => {
     const { runtime, dataDir } = await createRuntime();
     await prepareManagedEnv(runtime, { includeControl: true, includeWeb: true, includeMemory: true, includeNotify: true });
     const direct = await loadTools(dataDir, 'direct');
@@ -473,11 +527,13 @@ describe('managed agent tool runtime', () => {
       expect(tool.options).toEqual({ codemode: false });
     }
 
-    await prepareManagedEnv(runtime, { includeControl: true, includeWeb: true, includeMemory: true, includeNotify: true, codeMode: true });
-    const behindExecute = await loadTools(dataDir, 'codemode');
+    await prepareManagedEnv(runtime, { includeControl: true, includeWeb: true, includeMemory: true, includeNotify: true, includeRender: true, codeMode: true });
+    const { openchamber_render: render, ...behindExecute } = await loadTools(dataDir, 'codemode');
+    expect(Object.keys(behindExecute).length).toBeGreaterThan(0);
     for (const tool of Object.values(behindExecute)) {
       expect(tool.options).toEqual({ codemode: true });
     }
+    expect(render.options).toEqual({ codemode: false });
   });
 
   it('refuses to inject a plugin with no tools in it', async () => {

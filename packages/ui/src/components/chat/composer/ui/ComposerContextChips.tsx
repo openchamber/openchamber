@@ -200,7 +200,7 @@ const DraftPreviewEntry: React.FC<{
                                 enterSubmits
                                 imagePaste={imagePaste}
                                 placeholder={t('chat.textSelection.comment.placeholder')}
-                                className="oc-surface-elevated mt-0.5 w-full rounded-md border border-border bg-surface-elevated px-2 py-1 text-sm leading-5 text-foreground focus-within:ring-2 focus-within:ring-ring"
+                                className="oc-surface-elevated oc-raised oc-field mt-0.5 w-full rounded-md bg-surface-elevated px-2 py-1 text-sm leading-5 text-foreground"
                             />
                         ) : (
                             <div className="mt-0.5 whitespace-pre-wrap break-words text-sm text-foreground">
@@ -423,9 +423,9 @@ function ComposerContextChipsView({ draftTarget, colors, previewHost }: Composer
                 >
                 {/* Shadow on the wrapper, never on the glass: see "Floating
                     composer" in composer/DOCUMENTATION.md. */}
-                <GlassPopupMotion className="origin-bottom-left rtl:origin-bottom-right rounded-xl shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)]">
+                <GlassPopupMotion className="origin-bottom-left rtl:origin-bottom-right rounded-xl">
                 <div
-                    className="oc-glass-popover overflow-hidden rounded-xl border border-[var(--interactive-border)]"
+                    className="oc-glass-popover oc-glass-floating overflow-hidden rounded-xl"
                     style={previewMaxHeight === null ? undefined : { maxHeight: previewMaxHeight }}
                 >
                     <div

@@ -2,6 +2,7 @@ import React from 'react';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui';
 import { Icon } from '@/components/icon/Icon';
+import { Spinner } from '@/components/ui/spinner';
 import { useI18n } from '@/lib/i18n';
 import { usePluginsStore } from '@/stores/usePluginsStore';
 import type { PluginRuntimeTarget } from './pluginLoadState';
@@ -25,7 +26,7 @@ export const PluginStatusBanner: React.FC<PluginStatusBannerProps> = ({ target, 
 
   if (status.kind === 'unknown') {
     return (
-      <div className="rounded-md border border-border bg-card p-3 flex items-start gap-3">
+      <div className="oc-tile rounded-md p-3 flex items-start gap-3">
         <Icon name="question" className="h-5 w-5 text-muted-foreground shrink-0 mt-0.5" />
         <div className="flex-1 min-w-0">
           <p className="typography-label text-foreground">{t('settings.plugins.status.unknown.title')}</p>
@@ -64,7 +65,7 @@ export const PluginStatusBanner: React.FC<PluginStatusBannerProps> = ({ target, 
         );
       case 'notReported':
         return (
-          <div className="rounded-md border border-border bg-card p-3 flex items-start gap-3">
+          <div className="oc-tile rounded-md p-3 flex items-start gap-3">
             <Icon name="time" className="h-5 w-5 text-muted-foreground shrink-0 mt-0.5" />
             <div className="flex-1 min-w-0">
               <p className="typography-label text-foreground">{t('settings.plugins.status.notReported.title')}</p>
@@ -76,7 +77,7 @@ export const PluginStatusBanner: React.FC<PluginStatusBannerProps> = ({ target, 
         );
       case 'failed':
         return (
-          <div className="rounded-md border border-border bg-card p-3 flex items-start gap-3">
+          <div className="oc-tile rounded-md p-3 flex items-start gap-3">
             <Icon name="error-warning" className="h-5 w-5 text-[var(--status-error)] shrink-0 mt-0.5" />
             <div className="flex-1 min-w-0">
               <p className="typography-label text-[var(--status-error)]">{t('settings.plugins.status.failed.title')}</p>
@@ -100,7 +101,7 @@ export const PluginStatusBanner: React.FC<PluginStatusBannerProps> = ({ target, 
     <div className="flex flex-col gap-3">
       {loadBlock}
       {showUpdate ? (
-        <div className="rounded-md border border-border bg-card p-3 flex items-start gap-3">
+        <div className="oc-tile rounded-md p-3 flex items-start gap-3">
           <Icon name="arrow-up" className="h-5 w-5 text-[var(--status-success)] shrink-0 mt-0.5" />
           <div className="flex-1 min-w-0">
             <p className="typography-label text-[var(--status-success)]">
@@ -123,7 +124,7 @@ export const PluginStatusBanner: React.FC<PluginStatusBannerProps> = ({ target, 
           <Button variant="default" size="sm" onClick={() => void handleUpdate()} disabled={isUpdating}>
             {isUpdating ? (
               <>
-                <Icon name="loader-4" className="size-4 animate-spin" />
+                <Spinner className="size-4" />
                 {t('settings.plugins.update.running')}
               </>
             ) : (

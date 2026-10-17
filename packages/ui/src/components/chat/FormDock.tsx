@@ -47,7 +47,7 @@ import {
  * the last); Cmd/Ctrl+Enter submits from anywhere in the dock.
  *
  * Mounted once per composer, inside the shared floating frame, so it shares
- * the frame's clearance and hides behind BTW like the queue does. The BTW
+ * the frame's clearance and hides behind an expanded BTW. The BTW
  * sheet keeps the inline `FormCard` for its child session's forms.
  */
 

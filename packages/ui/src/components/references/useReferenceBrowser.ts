@@ -10,6 +10,7 @@ import * as React from 'react';
 
 import { handleDropdownNavigationKey } from '@/components/ui/dropdown-navigation';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
+import { useMinuteTickerNow } from '@/hooks/useDurationTicker';
 import type { GitHubPullStatus, GitHubReference, GitHubReferenceKind, RepositoryReferenceFilter } from '@/lib/api/types';
 import { isIMECompositionEvent } from '@/lib/ime';
 
@@ -77,7 +78,8 @@ export function useReferenceBrowser({
     const debouncedQuery = useDebouncedValue(query, SEARCH_DEBOUNCE_MS);
     const [highlightedKey, setHighlightedKey] = React.useState<string | null>(null);
     const [mobilePreviewKey, setMobilePreviewKey] = React.useState<string | null>(null);
-    const [now] = React.useState(() => Date.now());
+    // "5m ago" labels; the board stays open for hours, so the clock moves.
+    const now = useMinuteTickerNow(true);
     const searchRef = React.useRef<HTMLInputElement>(null);
 
     const githubStatus = useGitHubSourceStatus(directory);

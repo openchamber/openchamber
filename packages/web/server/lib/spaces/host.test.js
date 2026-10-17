@@ -108,12 +108,15 @@ describe('createSpacesHost', () => {
     expect(await forwarded.json()).toMatchObject({ code: 'space_setup_failed' });
     const unknown = await fetch(url('/api/spaces/0f0f0f0f0f0f/health'));
     expect(unknown.status).toBe(404);
-    const guarded = await fetch(url(`/api/host?directory=/spaces/${id}/repo`));
-    expect(guarded.status).toBe(400);
+    // A request that names the space's directory takes the same way, and never reaches the host route.
+    const byDirectory = await fetch(url(`/api/host?directory=/spaces/${id}/repo`));
+    expect(byDirectory.status).toBe(502);
+    expect(await byDirectory.json()).toMatchObject({ code: 'space_setup_failed' });
     expect((await fetch(url('/api/host?directory=/home/me'))).status).toBe(200);
 
-    expect(host.skipsBodyParsing({ path: `/api/spaces/${id}/fs/raw` })).toBe(true);
-    expect(host.skipsBodyParsing({ path: '/api/fs/raw' })).toBe(false);
+    expect(host.skipsBodyParsing({ url: `/api/spaces/${id}/fs/raw`, headers: {} })).toBe(true);
+    expect(host.skipsBodyParsing({ url: '/api/fs/raw', headers: { 'x-opencode-directory': `/spaces/${id}/repo` } })).toBe(true);
+    expect(host.skipsBodyParsing({ url: '/api/fs/raw?directory=/home/me', headers: {} })).toBe(false);
     expect(host.refuseDirectory(`/spaces/${id}/repo`)).toMatch(/isolated space/);
     expect(host.refuseDirectory('/home/me/spaces')).toBeNull();
     expect(started).toBe(0);

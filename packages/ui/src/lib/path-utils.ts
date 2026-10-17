@@ -135,6 +135,48 @@ export const getRelativeFilePath = (filePath: string | null | undefined, directo
   return normalizedFilePath.slice(normalizedDirectory.length + 1);
 };
 
+const sameParts = (a: readonly string[], b: readonly string[]): boolean => (
+  a.length === b.length && a.every((part, index) => part === b[index])
+);
+
+/**
+ * Folders that tell apart open files sharing a name, keyed by the given path.
+ * Each path gets the shortest run of its closest folders no other same-named
+ * path ends with ("docs", "ui/src"). Files with a unique name, and a file that
+ * has no folders of its own (the project root), get no entry. Pass paths
+ * relative to the project, or the whole absolute path becomes the folder.
+ */
+export const getDisambiguatingFolders = (paths: readonly string[]): Map<string, string> => {
+  const byName = new Map<string, { path: string; folders: string[] }[]>();
+  for (const path of new Set(paths)) {
+    const parts = splitPathParts(normalizeFilePath(path));
+    const name = parts.pop();
+    if (!name) continue;
+    const group = byName.get(name) ?? [];
+    group.push({ path, folders: parts });
+    byName.set(name, group);
+  }
+
+  const result = new Map<string, string>();
+  for (const group of byName.values()) {
+    if (group.length < 2) continue;
+    for (const entry of group) {
+      const { folders } = entry;
+      let depth = 1;
+      while (depth < folders.length) {
+        const tail = folders.slice(-depth);
+        const clashes = group.some((other) => other !== entry && sameParts(other.folders.slice(-depth), tail));
+        if (!clashes) break;
+        depth += 1;
+      }
+      if (folders.length > 0) {
+        result.set(entry.path, folders.slice(-depth).join('/'));
+      }
+    }
+  }
+  return result;
+};
+
 export const getDirectoryForFilePath = (currentDirectory: string | null | undefined, filePath: string | null | undefined): string => {
   const normalizedDirectory = normalizeFilePath(currentDirectory);
   const normalizedPath = normalizeFilePath(filePath);

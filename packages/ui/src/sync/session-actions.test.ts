@@ -1596,80 +1596,40 @@ describe("optimisticSend target directory", () => {
     expect(removed).toEqual(ids)
   })
 
-  test("shows the prompt before late leading context resolves and admits that context first", async () => {
+  test("shows the prompt before the knowledge write finishes, and sends only after it", async () => {
     const targetStore = createStore({})
     const childStores = createChildStores([["/target/project", targetStore]])
     const added: Message[] = []
-    const removed: string[] = []
-    let sent: { messageID: string; contextIDs: Array<string | undefined>; texts: string[] } | null = null
-    let resolveLeading: (value: { text: string } | null) => void = () => {}
-    const leadingContext = new Promise<{ text: string } | null>((resolve) => { resolveLeading = resolve })
+    let sent: { messageID: string; texts: string[] } | null = null
+    let finishWrite: () => void = () => {}
+    const ready = new Promise<void>((resolve) => { finishWrite = resolve })
 
     const { optimisticSend, setActionRefs, setOptimisticRefs } = await import("./session-actions")
     setActionRefs(childStores, () => "/target/project")
-    setOptimisticRefs(
-      (input) => {
-        added.push(input.message)
-      },
-      (input) => {
-        removed.push(input.messageID)
-      },
-    )
+    setOptimisticRefs((input) => { added.push(input.message) }, () => {})
 
     const sending = optimisticSend({
-      sessionId: "session-leading",
+      sessionId: "session-ready",
       directory: "/target/project",
       content: "hello",
       context: [{ text: "quoted" }],
-      leadingContext,
+      ready,
       send: async (messageID, context) => {
-        sent = { messageID, contextIDs: context.map((item) => item.id), texts: context.map((item) => item.text) }
-        throw new Error("rejected")
+        sent = { messageID, texts: context.map((item) => item.text) }
       },
     })
     for (let tick = 0; tick < 50 && !added.some((message) => message.role === "user"); tick += 1) {
       await Promise.resolve()
     }
 
-    // The bubble is on screen while the knowledge is still on its way, and
-    // nothing has been sent without it.
+    // The bubble is on screen while the knowledge is still being written, and
+    // nothing has been sent ahead of it.
     expect(added.map((message) => message.role)).toEqual(["synthetic", "user"])
     expect(sent).toBe(null)
 
-    resolveLeading({ text: "pinned knowledge" })
-    await expect(sending).rejects.toThrow("rejected")
-
-    expect(added.map((message) => message.role)).toEqual(["synthetic", "user", "synthetic"])
-    const [quoted, prompt, leading] = added.map((message) => message.id)
-    // Reserved before the other ids, so it still sorts first.
-    expect(leading < quoted && quoted < prompt).toBe(true)
-    expect(sent).toEqual({ messageID: prompt, contextIDs: [leading, quoted], texts: ["pinned knowledge", "quoted"] })
-    // A rejected send leaves no optimistic record behind, the late one included.
-    expect([...removed].sort()).toEqual([leading, quoted, prompt])
-  })
-
-  test("sends without a leading record when the late context is empty", async () => {
-    const targetStore = createStore({})
-    const childStores = createChildStores([["/target/project", targetStore]])
-    const added: Message[] = []
-    let sentContext: string[] | null = null
-
-    const { optimisticSend, setActionRefs, setOptimisticRefs } = await import("./session-actions")
-    setActionRefs(childStores, () => "/target/project")
-    setOptimisticRefs((input) => { added.push(input.message) }, () => {})
-
-    await optimisticSend({
-      sessionId: "session-leading-empty",
-      directory: "/target/project",
-      content: "hello",
-      leadingContext: Promise.resolve(null),
-      send: async (_messageID, context) => {
-        sentContext = context.map((item) => item.text)
-      },
-    })
-
-    expect(added.map((message) => message.role)).toEqual(["user"])
-    expect(sentContext).toEqual([])
+    finishWrite()
+    await sending
+    expect(sent).toEqual({ messageID: added[1].id, texts: ["quoted"] })
   })
 
   test("runs appendSubmissions once for an ambiguous confirmation", async () => {
@@ -2459,8 +2419,8 @@ describe("revertToMessage passes session directory", () => {
     const session = sessionFixture("session-a")
     sessionRecords.set(session.id, session)
     const earlier = { id: "msg_1", sessionID: "session-a", role: "user", time: { created: 1 } } as Message
-    const firstCarrier = { id: "msg_ctx_1", sessionID: "session-a", role: "synthetic", time: { created: 2 } } as Message
-    const secondCarrier = { id: "msg_ctx_2", sessionID: "session-a", role: "synthetic", time: { created: 3 } } as Message
+    const firstCarrier = { id: "msg_ctx_1", sessionID: "session-a", role: "synthetic", time: { created: 2 }, text: "quoted selection" } as Message
+    const secondCarrier = { id: "msg_ctx_2", sessionID: "session-a", role: "synthetic", time: { created: 3 }, text: "review comment" } as Message
     const targetMessage = { id: "msg_2", sessionID: "session-a", role: "user", time: { created: 4 } } as Message
     const sessionStore = createStore({}, {
       session: [session],
@@ -2469,6 +2429,7 @@ describe("revertToMessage passes session directory", () => {
     })
     const { setActionRefs, revertToMessage } = await import("./session-actions")
     setActionRefs(createChildStores([["/test/project", sessionStore]]), () => "/test/project")
+    openchamberRouteRequests.length = 0
 
     await revertToMessage("session-a", "msg_2")
 

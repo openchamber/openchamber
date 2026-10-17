@@ -76,6 +76,12 @@ describe('the idle stop inside a space', () => {
     asked.sessions.p = { status: 'busy', lastUpdateAt: 0 };
     asked.pending.p = { permissions: [{ id: 'per-1' }], forms: [] };
     expect(await asked.at(2)).toBe(true);
+
+    // A page an agent shows that waits for the answer is the same wait.
+    const page = timerWith({ enabled: true, hours: 2 });
+    page.sessions.r = { status: 'busy', lastUpdateAt: 0 };
+    page.pending.r = { permissions: [], forms: [], pages: [{ id: 'call-1' }] };
+    expect(await page.at(2)).toBe(true);
   });
 
   it('counts a turn that began and ended between two checks, at the time it ended', async () => {

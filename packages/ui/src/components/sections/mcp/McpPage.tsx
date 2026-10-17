@@ -520,12 +520,12 @@ const getStatusDescription = (
 const statusCardClass = (status: string | undefined): string => {
   switch (status) {
     case 'failed':
-      return 'border-[var(--status-error-border)] bg-[var(--status-error-background)]';
+      return 'bg-[var(--status-error-background)]';
     case 'needs_auth':
     case 'blocked':
-      return 'border-[var(--status-warning-border)] bg-[var(--status-warning-background)]';
+      return 'bg-[var(--status-warning-background)]';
     default:
-      return 'border-[var(--interactive-border)] bg-[var(--surface-elevated)]';
+      return 'oc-tile';
   }
 };
 
@@ -1214,7 +1214,7 @@ export const McpPage: React.FC = () => {
         {/* Runtime Status - Simplified for connected, expanded for errors */}
         {!isNewServer && shouldShowFullStatusCard(effectiveStatusName) && (
           <SettingsSection divider={false}>
-            <div className={cn('rounded-lg border p-3', statusCardClass(effectiveStatusName))}>
+            <div className={cn('rounded-lg p-3', statusCardClass(effectiveStatusName))}>
               <div className="space-y-4">
                 <div className="min-w-0 space-y-1">
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -1340,22 +1340,29 @@ export const McpPage: React.FC = () => {
           settingsItem="mcp.command"
           // The section's content wrapper carries no spacing of its own, so the
           // kind tabs, the field and its hint would otherwise sit flush.
-          contentClassName="space-y-2"
+          contentClassName="space-y-3"
         >
             {/* Pasting a link or a command still flips this for you, but the
                 choice is a control you can see and press. As one sentence with
                 an inline link it was, in practice, undiscoverable. */}
-            <SortableTabsStrip
-              items={connectionKindTabs}
-              activeId={mcpType}
-              onSelect={(id) => {
-                setMcpType(id as 'local' | 'remote');
-                requestSave();
-              }}
-              layoutMode="fit"
-              variant="active-pill"
-              className="h-7"
-            />
+            {/* Sized by its two labels, like any segmented choice: stretched
+                across the pane each half read as a wide empty bar. */}
+            <div className="flex">
+              <SortableTabsStrip
+                items={connectionKindTabs}
+                activeId={mcpType}
+                onSelect={(id) => {
+                  setMcpType(id as 'local' | 'remote');
+                  requestSave();
+                }}
+                layoutMode="scrollable"
+                intrinsicWidth
+                variant="active-pill"
+                pillSize="form"
+                activePillButtonClassName="px-3"
+                className="h-8 flex-none"
+              />
+            </div>
 
             {mcpType === 'local' ? (
               <CommandTextarea
@@ -1422,7 +1429,7 @@ export const McpPage: React.FC = () => {
                         }}
                       >
                         <SelectTrigger
-                          className="!h-7 w-full max-w-[16rem] px-2"
+                          className="!h-7 w-fit max-w-[16rem] px-2"
                           aria-label={t('settings.mcp.page.advanced.protocol')}
                         >
                           <span className="truncate">{t(MCP_PROTOCOL_LABEL_KEYS[protocol])}</span>
@@ -1514,7 +1521,7 @@ export const McpPage: React.FC = () => {
                         }}
                       >
                         <SelectTrigger
-                          className="!h-7 w-full max-w-[16rem] px-2"
+                          className="!h-7 w-fit max-w-[16rem] px-2"
                           aria-label={t('settings.mcp.page.advanced.codemode')}
                         >
                           <span className="truncate">{t(MCP_CODEMODE_LABEL_KEYS[codemode])}</span>

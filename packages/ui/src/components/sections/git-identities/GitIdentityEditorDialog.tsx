@@ -1,7 +1,9 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { SettingsCheckboxRow, SETTINGS_FIELD_LABEL_CLASS, SETTINGS_HELPER_CLASS } from '@/components/sections/shared/SettingsSection';
+import { SettingsChipGroup, SETTINGS_FIELD_LABEL_CLASS, SETTINGS_HELPER_CLASS } from '@/components/sections/shared/SettingsSection';
+import { Checkbox } from '@/components/ui/checkbox';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
 import { toast } from '@/components/ui';
 import {
@@ -39,27 +41,43 @@ type AuthMethod = GitIdentityTransport;
 const AUTH_METHODS = [
   { method: 'system', icon: 'computer', labelKey: 'settings.gitIdentities.editor.auth.system', hintKey: 'settings.gitIdentities.editor.auth.systemHint' },
   { method: 'account', icon: 'user-3', labelKey: 'settings.gitIdentities.editor.auth.account', hintKey: 'settings.gitIdentities.editor.auth.accountHint' },
-  { method: 'ssh', icon: 'lock', labelKey: 'settings.gitIdentities.editor.auth.ssh', hintKey: null },
+  { method: 'ssh', icon: 'lock', labelKey: 'settings.gitIdentities.editor.auth.ssh', hintKey: 'settings.gitIdentities.editor.auth.sshHint' },
   { method: 'anonymous', icon: 'global', labelKey: 'settings.gitIdentities.editor.auth.anonymous', hintKey: 'settings.gitIdentities.editor.auth.anonymousHint' },
-] as const satisfies ReadonlyArray<{ method: AuthMethod; icon: IconName; labelKey: string; hintKey: string | null }>;
+] as const satisfies ReadonlyArray<{ method: AuthMethod; icon: IconName; labelKey: string; hintKey: string }>;
 
 const PROFILE_COLORS = [
-  { key: 'keyword', label: 'Green', cssVar: 'var(--syntax-keyword)' },
-  { key: 'error', label: 'Red', cssVar: 'var(--status-error)' },
-  { key: 'string', label: 'Cyan', cssVar: 'var(--syntax-string)' },
-  { key: 'function', label: 'Orange', cssVar: 'var(--syntax-function)' },
-  { key: 'type', label: 'Yellow', cssVar: 'var(--syntax-type)' },
-];
+  { key: 'keyword', labelKey: 'settings.gitIdentities.editor.color.green', cssVar: 'var(--syntax-keyword)' },
+  { key: 'error', labelKey: 'settings.gitIdentities.editor.color.red', cssVar: 'var(--status-error)' },
+  { key: 'string', labelKey: 'settings.gitIdentities.editor.color.cyan', cssVar: 'var(--syntax-string)' },
+  { key: 'function', labelKey: 'settings.gitIdentities.editor.color.orange', cssVar: 'var(--syntax-function)' },
+  { key: 'type', labelKey: 'settings.gitIdentities.editor.color.yellow', cssVar: 'var(--syntax-type)' },
+] as const;
 
-const PROFILE_ICONS: Array<{ key: string; Icon: IconName; label: string }> = [
-  { key: 'branch', Icon: 'git-branch', label: 'Branch' },
-  { key: 'briefcase', Icon: 'briefcase', label: 'Work' },
-  { key: 'house', Icon: 'home', label: 'Personal' },
-  { key: 'graduation', Icon: 'graduation-cap', label: 'School' },
-  { key: 'code', Icon: 'code', label: 'Code' },
+/** Product names stay literal; the rest are translated. */
+const PROFILE_ICONS = [
+  { key: 'branch', Icon: 'git-branch', labelKey: 'settings.gitIdentities.editor.icon.branch' },
+  { key: 'briefcase', Icon: 'briefcase', labelKey: 'settings.gitIdentities.editor.icon.work' },
+  { key: 'house', Icon: 'home', labelKey: 'settings.gitIdentities.editor.icon.personal' },
+  { key: 'graduation', Icon: 'graduation-cap', labelKey: 'settings.gitIdentities.editor.icon.school' },
+  { key: 'code', Icon: 'code', labelKey: 'settings.gitIdentities.editor.icon.code' },
   { key: 'github', Icon: 'github', label: 'GitHub' },
   { key: 'gitlab', Icon: 'gitlab', label: 'GitLab' },
-];
+] as const satisfies ReadonlyArray<{ key: string; Icon: IconName } & ({ labelKey: string } | { label: string })>;
+
+/**
+ * One form row: the label, with its hint, beside the control on a wide
+ * dialog and above it on a narrow one. The label keeps a control's height so
+ * it lines up with the first line of a control that grows below.
+ */
+const EditorRow: React.FC<{ label: React.ReactNode; info?: React.ReactNode; children: React.ReactNode }> = ({ label, info, children }) => (
+  <div className="flex flex-col gap-1.5 @md:flex-row @md:items-start @md:gap-4">
+    <div className="flex shrink-0 items-center gap-1.5 @md:h-8 @md:w-32">
+      <span className={SETTINGS_FIELD_LABEL_CLASS}>{label}</span>
+      {info != null ? <SettingsInfoHint contentClassName="max-w-xs">{info}</SettingsInfoHint> : null}
+    </div>
+    <div className="flex min-w-0 flex-1 items-center gap-2">{children}</div>
+  </div>
+);
 
 interface GitIdentityEditorDialogProps {
   open: boolean;
@@ -242,10 +260,10 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
     }
   };
 
-  const currentColorValue = React.useMemo(() => {
-    const colorConfig = PROFILE_COLORS.find(c => c.key === color);
-    return colorConfig?.cssVar || 'var(--syntax-keyword)';
-  }, [color]);
+  const currentColorValue = PROFILE_COLORS.find((c) => c.key === color)?.cssVar ?? 'var(--syntax-keyword)';
+  const currentIcon = PROFILE_ICONS.find((i) => i.key === icon)?.Icon ?? 'git-branch';
+  const iconLabel = (entry: (typeof PROFILE_ICONS)[number]) => ('labelKey' in entry ? t(entry.labelKey) : entry.label);
+  const methodHint = t(AUTH_METHODS.find((entry) => entry.method === method)?.hintKey ?? 'settings.gitIdentities.editor.auth.systemHint');
 
   const title = isNewProfile
     ? t('settings.gitIdentities.editor.title.newIdentity')
@@ -256,232 +274,211 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
+        <DialogContent className="max-w-xl max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{title}</DialogTitle>
-            <DialogDescription>
-              {isGlobalProfile
-                ? t('settings.gitIdentities.editor.description.globalReadOnly')
-                : isNewProfile
-                ? t('settings.gitIdentities.editor.description.newProfile')
-                : t('settings.gitIdentities.editor.description.editProfile')}
-            </DialogDescription>
+            {isGlobalProfile && (
+              <DialogDescription>{t('settings.gitIdentities.editor.description.globalReadOnly')}</DialogDescription>
+            )}
           </DialogHeader>
 
-          <div className="space-y-5 py-2">
-            {/* Profile Display */}
+          <div className="@container flex flex-col gap-6">
+            {/* The profile's own label: its icon, painted in its colour, and its name. */}
             {!isGlobalProfile && (
-              <div className="space-y-3">
-                <div>
-                  <label className={`${SETTINGS_FIELD_LABEL_CLASS} block mb-1.5`}>{t('settings.gitIdentities.editor.field.profileName')}</label>
-                  <Input
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    placeholder={t('settings.gitIdentities.editor.field.profileNamePlaceholder')}
-                    className="h-8"
-                  />
-                </div>
-
-                <div className="flex items-center justify-between gap-4">
-                  <span className="typography-ui-label text-foreground">{t('settings.gitIdentities.editor.field.color')}</span>
-                  <div className="flex gap-1.5">
-                    {PROFILE_COLORS.map((c) => (
-                      <button
-                        key={c.key}
-                        type="button"
-                        onClick={() => setColor(c.key)}
-                        className={cn(
-                          'w-6 h-6 rounded-md border-2 transition-all cursor-pointer',
-                          color === c.key
-                            ? 'border-foreground scale-110'
-                            : 'border-transparent hover:border-border'
-                        )}
-                        style={{ backgroundColor: c.cssVar }}
-                        title={c.label}
-                      />
-                    ))}
-                  </div>
-                </div>
-
-                <div className="flex items-center justify-between gap-4">
-                  <span className="typography-ui-label text-foreground">{t('settings.gitIdentities.editor.field.icon')}</span>
-                  <div className="flex gap-1.5">
-                    {PROFILE_ICONS.map((i) => {
-                      const iconName = i.Icon;
-                      return (
-                        <button
-                          key={i.key}
-                          type="button"
-                          onClick={() => setIcon(i.key)}
-                          className={cn(
-                            'w-7 h-7 rounded-md border-2 transition-all flex items-center justify-center cursor-pointer',
-                            icon === i.key
-                              ? 'border-[var(--interactive-border)] bg-[var(--surface-muted)]'
-                              : 'border-transparent hover:border-[var(--interactive-border)] hover:bg-[var(--surface-muted)]/50'
-                          )}
-                          title={i.label}
-                        >
-                          <Icon name={iconName}
-                            className="w-3.5 h-3.5"
-                            style={{ color: icon === i.key ? currentColorValue : 'var(--surface-muted-foreground)' }}
-                          />
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
+              <div className="flex items-center gap-2">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      className="shrink-0"
+                      aria-label={t('settings.gitIdentities.editor.appearance.aria')}
+                      title={t('settings.gitIdentities.editor.appearance.aria')}
+                    >
+                      <Icon name={currentIcon} className="size-4" style={{ color: currentColorValue }} />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" className="w-64 p-3">
+                    <div className="space-y-3">
+                      <div className="space-y-2">
+                        <div className={SETTINGS_FIELD_LABEL_CLASS}>{t('settings.gitIdentities.editor.field.color')}</div>
+                        <div className="flex items-center gap-2.5">
+                          {PROFILE_COLORS.map((c) => (
+                            <button
+                              key={c.key}
+                              type="button"
+                              onClick={() => setColor(c.key)}
+                              aria-pressed={color === c.key}
+                              aria-label={t(c.labelKey)}
+                              title={t(c.labelKey)}
+                              className={cn(
+                                'size-6 shrink-0 rounded-full transition-shadow',
+                                color === c.key && 'ring-2 ring-foreground ring-offset-2 ring-offset-background',
+                              )}
+                              style={{ backgroundColor: c.cssVar }}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        <div className={SETTINGS_FIELD_LABEL_CLASS}>{t('settings.gitIdentities.editor.field.icon')}</div>
+                        <div className="grid grid-cols-7 gap-1">
+                          {PROFILE_ICONS.map((entry) => {
+                            const selected = icon === entry.key;
+                            return (
+                              <button
+                                key={entry.key}
+                                type="button"
+                                onClick={() => setIcon(entry.key)}
+                                aria-pressed={selected}
+                                aria-label={iconLabel(entry)}
+                                title={iconLabel(entry)}
+                                className={cn(
+                                  'inline-flex size-8 items-center justify-center rounded-md',
+                                  selected ? 'bg-interactive-selection' : 'text-muted-foreground hover:bg-interactive-hover hover:text-foreground',
+                                )}
+                              >
+                                <Icon name={entry.Icon} className="size-4" style={selected ? { color: currentColorValue } : undefined} />
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                <Input
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder={t('settings.gitIdentities.editor.field.profileNamePlaceholder')}
+                  aria-label={t('settings.gitIdentities.editor.field.profileName')}
+                  className="min-w-0 flex-1"
+                />
               </div>
             )}
 
-            {/* Separator */}
-            {!isGlobalProfile && <div className="border-t border-border/40" />}
-
-            {/* Git Author */}
-            <div className="space-y-3">
-              <div>
-                <div className="flex items-center gap-1.5 mb-1.5">
-                  <label className={SETTINGS_FIELD_LABEL_CLASS}>{t('settings.gitIdentities.editor.field.userName')}</label>
-                  {!isGlobalProfile && <span className="text-[var(--status-error)] text-xs">*</span>}
-                  <SettingsInfoHint contentClassName="max-w-xs">
-                    {t('settings.gitIdentities.editor.field.userNameTooltip')}
-                  </SettingsInfoHint>
-                </div>
+            <div className="flex flex-col gap-3">
+              <EditorRow label={t('settings.gitIdentities.editor.field.userName')} info={t('settings.gitIdentities.editor.field.userNameTooltip')}>
                 <Input
                   value={userName}
                   onChange={(e) => setUserName(e.target.value)}
                   placeholder={t('settings.gitIdentities.editor.field.userNamePlaceholder')}
+                  aria-label={t('settings.gitIdentities.editor.field.userName')}
                   required={!isGlobalProfile}
                   readOnly={isGlobalProfile}
                   disabled={isGlobalProfile}
-                  className="h-8"
+                  className="min-w-0 flex-1"
                 />
-              </div>
-
-              <div>
-                <div className="flex items-center gap-1.5 mb-1.5">
-                  <label className={SETTINGS_FIELD_LABEL_CLASS}>{t('settings.gitIdentities.editor.field.emailAddress')}</label>
-                  {!isGlobalProfile && <span className="text-[var(--status-error)] text-xs">*</span>}
-                  <SettingsInfoHint contentClassName="max-w-xs">
-                    {t('settings.gitIdentities.editor.field.emailAddressTooltip')}
-                  </SettingsInfoHint>
-                </div>
+              </EditorRow>
+              <EditorRow label={t('settings.gitIdentities.editor.field.emailAddress')} info={t('settings.gitIdentities.editor.field.emailAddressTooltip')}>
                 <Input
                   type="email"
                   value={userEmail}
                   onChange={(e) => setUserEmail(e.target.value)}
                   placeholder={t('settings.gitIdentities.editor.field.emailAddressPlaceholder')}
+                  aria-label={t('settings.gitIdentities.editor.field.emailAddress')}
                   required={!isGlobalProfile}
                   readOnly={isGlobalProfile}
                   disabled={isGlobalProfile}
-                  className="h-8"
+                  className="min-w-0 flex-1"
                 />
-              </div>
+              </EditorRow>
+              {/* Commit signing is independent of transport authentication. The key
+                  field stays laid out while signing is off, so the toggle moves nothing. */}
+              {!isGlobalProfile && (
+                <EditorRow label={t('settings.gitIdentities.editor.section.commitSigning')}>
+                  <Checkbox
+                    checked={signCommits}
+                    onChange={setSignCommits}
+                    ariaLabel={t('settings.gitIdentities.editor.field.signCommits')}
+                  />
+                  <Input
+                    value={signingKey}
+                    onChange={(e) => setSigningKey(e.target.value)}
+                    placeholder={t('settings.gitIdentities.editor.field.signingKeyPlaceholder')}
+                    aria-label={t('settings.gitIdentities.editor.field.signingKey')}
+                    disabled={!signCommits}
+                    className="min-w-0 flex-1 font-mono text-xs"
+                  />
+                </EditorRow>
+              )}
             </div>
 
             {/* An identity is an account, a transport and a signature: the
                 three answers a repository needs, given once and named. */}
             {!isGlobalProfile && (
-              <>
-                <div className="border-t border-border/40" />
-                <div className="space-y-3">
-
-                  <div>
-                    <label className={`${SETTINGS_FIELD_LABEL_CLASS} block mb-1.5`}>
-                      {t('settings.gitIdentities.editor.field.account')}
-                    </label>
-                    <Select
-                      value={accountKey}
-                      onValueChange={setAccountKey}
-                    >
-                      <SelectTrigger className="w-full" aria-label={t('settings.gitIdentities.editor.field.account')}>
-                        <SelectValue>{selectedAccount?.label ?? storedAccount?.instance ?? t('settings.gitIdentities.editor.field.accountNone')}</SelectValue>
-                      </SelectTrigger>
-                      <SelectContent>
-                        {accountOptions.map((option) => (
-                          <SelectItem key={option.key} value={option.key}>{option.label}</SelectItem>
-                        ))}
-                        <SelectItem value={NO_ACCOUNT}>{t('settings.gitIdentities.editor.field.accountNone')}</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div>
-                    <label className={`${SETTINGS_FIELD_LABEL_CLASS} block mb-1.5`}>{t('settings.gitIdentities.editor.auth.label')}</label>
-                    <div className="flex flex-wrap items-center gap-1">
-                      {AUTH_METHODS.map((entry) => (
-                        <Button key={entry.method} size="sm" type="button" variant="chip"
-                          aria-pressed={method === entry.method}
-                          onClick={() => {
-                            setMethod(entry.method);
-                            if (entry.method !== 'ssh') setSshCredentialId('');
-                          }}
-                        >
-                          <Icon name={entry.icon} className="w-3.5 h-3.5 me-1" /> {t(entry.labelKey)}
-                        </Button>
+              <div className="flex flex-col gap-3">
+                <EditorRow label={t('settings.gitIdentities.editor.field.account')}>
+                  <Select value={accountKey} onValueChange={setAccountKey}>
+                    <SelectTrigger className="min-w-0 max-w-full" aria-label={t('settings.gitIdentities.editor.field.account')}>
+                      <SelectValue>{selectedAccount?.label ?? storedAccount?.instance ?? t('settings.gitIdentities.editor.field.accountNone')}</SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {accountOptions.map((option) => (
+                        <SelectItem key={option.key} value={option.key}>{option.label}</SelectItem>
                       ))}
-                    </div>
-                  </div>
+                      <SelectItem value={NO_ACCOUNT}>{t('settings.gitIdentities.editor.field.accountNone')}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </EditorRow>
 
+                <EditorRow label={t('settings.gitIdentities.editor.auth.label')} info={methodHint}>
+                  <SettingsChipGroup
+                    value={method}
+                    aria-label={t('settings.gitIdentities.editor.auth.label')}
+                    onChange={(next) => {
+                      setMethod(next);
+                      if (next !== 'ssh') setSshCredentialId('');
+                    }}
+                    options={AUTH_METHODS.map((entry) => ({
+                      value: entry.method,
+                      label: <><Icon name={entry.icon} className="size-3.5" />{t(entry.labelKey)}</>,
+                      tooltip: t(entry.hintKey),
+                    }))}
+                  />
+                </EditorRow>
+
+                {/* Laid out for every method and live only for SSH, so switching
+                    methods keeps the dialog's height. The picker mounts with SSH
+                    because mounting reads the saved keys. */}
+                <EditorRow label={t('settings.gitIdentities.editor.field.sshKey')} info={t('settings.sourceControl.ssh.hostSetup')}>
                   {transport === 'ssh' ? (
                     <ManagedSshCredentials selection={{ value: sshCredentialId, onChange: setSshCredentialId }} />
                   ) : (
-                    <p className={SETTINGS_HELPER_CLASS}>{t(AUTH_METHODS.find((entry) => entry.method === method)?.hintKey ?? 'settings.gitIdentities.editor.auth.systemHint')}</p>
-                  )}
-                </div>
-              </>
-            )}
-
-            {/* Commit signing is independent of transport authentication. */}
-            {!isGlobalProfile && (
-              <>
-                <div className="border-t border-border/40" />
-                <div className="space-y-3">
-                  <SettingsCheckboxRow
-                    checked={signCommits}
-                    onChange={setSignCommits}
-                    label={t('settings.gitIdentities.editor.field.signCommits')}
-                    info={t('settings.gitIdentities.editor.section.commitSigning')}
-                    ariaLabel={t('settings.gitIdentities.editor.field.signCommits')}
-                  />
-
-                  <div>
-                    <div className="flex items-center gap-1.5 mb-1.5">
-                      <label className={SETTINGS_FIELD_LABEL_CLASS}>
-                        {t('settings.gitIdentities.editor.field.signingKey')}
-                      </label>
+                    // Same shape as the picker, its status line included, so
+                    // picking SSH swaps content without adding a line.
+                    <div className="flex min-w-0 flex-1 flex-col gap-2">
+                      <Select value="" disabled>
+                        <SelectTrigger className="min-w-0 max-w-full" aria-label={t('settings.gitIdentities.editor.field.sshKey')}>
+                          <SelectValue placeholder={t('settings.sourceControl.ssh.title')} />
+                        </SelectTrigger>
+                        <SelectContent />
+                      </Select>
+                      <p aria-hidden="true" className={`${SETTINGS_HELPER_CLASS} min-h-[1lh]`} />
                     </div>
-                    <Input
-                      value={signingKey}
-                      onChange={(e) => setSigningKey(e.target.value)}
-                      placeholder={t('settings.gitIdentities.editor.field.signingKeyPlaceholder')}
-                      disabled={!signCommits}
-                      className="h-8 font-mono text-xs"
-                    />
-                  </div>
-                </div>
-              </>
+                  )}
+                </EditorRow>
+              </div>
             )}
           </div>
 
-          <DialogFooter className="gap-2">
-            {!isGlobalProfile && !isNewProfile && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setIsDeleteDialogOpen(true)}
-                className="text-[var(--status-error)] hover:text-[var(--status-error)] border-[var(--status-error)]/30 hover:bg-[var(--status-error)]/10 me-auto"
-              >
-                <Icon name="delete-bin" className="w-3.5 h-3.5 me-1" /> {t('settings.common.actions.delete')}
+          <DialogFooter className="sm:justify-between">
+            {!isGlobalProfile && !isNewProfile ? (
+              <Button type="button" variant="ghost" size="sm" className="text-[var(--status-error)]" onClick={() => setIsDeleteDialogOpen(true)}>
+                {t('settings.common.actions.delete')}
               </Button>
-            )}
-            <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)} className="text-foreground hover:bg-interactive-hover hover:text-foreground">
-              {isGlobalProfile ? t('settings.gitIdentities.editor.actions.close') : t('settings.common.actions.cancel')}
-            </Button>
-            {!isGlobalProfile && (
-              <Button size="sm" onClick={handleSave} disabled={isSaving}>
-                {isSaving ? t('settings.common.actions.saving') : isNewProfile ? t('settings.gitIdentities.editor.actions.create') : t('settings.gitIdentities.editor.actions.save')}
+            ) : <span />}
+            <div className="flex flex-col-reverse gap-2 sm:flex-row">
+              <Button type="button" variant="outline" size="sm" onClick={() => onOpenChange(false)}>
+                {isGlobalProfile ? t('settings.gitIdentities.editor.actions.close') : t('settings.common.actions.cancel')}
               </Button>
-            )}
+              {!isGlobalProfile && (
+                <Button type="button" size="sm" onClick={handleSave} disabled={isSaving}>
+                  {isSaving ? t('settings.common.actions.saving') : isNewProfile ? t('settings.gitIdentities.editor.actions.create') : t('settings.gitIdentities.editor.actions.save')}
+                </Button>
+              )}
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>

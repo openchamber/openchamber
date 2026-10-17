@@ -1,5 +1,6 @@
-// WebSocket upgrades under `/api/spaces/<id>/`, forwarded into the space over a stream of its
-// own from the place's `connect`: the terminal socket, the dev tunnel and the two event
+// WebSocket upgrades to a space, by the directory in their query or by the older
+// `/api/spaces/<id>/` prefix, forwarded into the space over a stream of its own from the place's
+// `connect`: the terminal socket, the dev tunnel and the two event
 // sockets of the server inside. The host authenticates the user the way its own socket
 // handlers do, applies the dispatcher's rules and guard, strips the user's credentials, adds
 // the space's session, and then joins the two sockets byte for byte, backpressure both ways.
@@ -18,8 +19,8 @@ import {
   describeFailure,
   forwardRequestHeaders,
   isDirectoryOfSpace,
-  parseSpaceRoute,
   requestedDirectories,
+  spaceRouteOf,
   stripCredentialQuery,
 } from './dispatcher.js';
 
@@ -285,11 +286,18 @@ export function createSpaceWebSocketForwarder({ dispatcher, connect, uiAuthContr
     }
   };
 
-  /** The `upgrade` handler: takes every upgrade under the prefix, leaves every other one alone. */
+  /**
+   * The `upgrade` handler: takes every upgrade to a space, leaves every other one alone. It runs
+   * before the host's own handlers, each of which takes one exact path; an upgrade addressed by
+   * its directory gets the prefixed form as its URL, so none of them takes it as well.
+   */
   const upgradeHandler = (req, socket, head) => {
     const url = new URL(req.url ?? '/', 'http://localhost');
-    const route = parseSpaceRoute(url.pathname);
+    const route = spaceRouteOf(req, url);
     if (!route) return;
+    if (!url.pathname.toLowerCase().startsWith('/api/spaces/')) {
+      req.url = `/api/spaces/${encodeURIComponent(route.spaceId)}${url.pathname.slice('/api'.length)}${url.search}`;
+    }
     socket.on('error', () => {});
     if (!isSpaceId(route.spaceId)) { refuse(socket, 404, 'space_not_found', 'There is no such space.'); return; }
     const rule = classifySpacePath(route.path);

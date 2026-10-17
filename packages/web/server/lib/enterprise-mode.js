@@ -52,6 +52,9 @@ import { z } from 'zod';
  *   crossing happens in the browser, so the UI is where it is held back.
  * - Web fonts that load from a public CDN fall back to the system fonts
  *   (`packages/ui` useFontPreferences); the stored choice is kept.
+ * - The integrations catalog, a bundled list of outside services to install,
+ *   is hidden (`packages/ui` SidebarHeader); administrator-curated sources for
+ *   it do not exist yet. MCP, plugin and skill entry in Settings is unchanged.
  * - The server listens only on this machine unless network access is allowed
  *   (`allowNetworkAccess` / `OPENCHAMBER_ALLOW_NETWORK_ACCESS`): it refuses
  *   to start on a network address and drops connections from other machines

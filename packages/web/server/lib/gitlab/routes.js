@@ -105,6 +105,20 @@ const UPLOAD_SECRET_RE = /^[0-9a-f]{32}$/;
 // Only what an `img` or a `video` draws is served; an uploaded page or SVG
 // opened from this server's origin could run script in it.
 const UPLOAD_MEDIA_TYPE_RE = /^(?:image\/(?:png|jpeg|gif|webp|avif)|video\/(?:mp4|webm|quicktime))$/;
+// GitLab's uploads API sends every file as `application/octet-stream`; then
+// the name says which of the types above it is, and anything else is refused.
+const UPLOAD_EXTENSION_TYPES = new Map([
+  ['png', 'image/png'], ['jpg', 'image/jpeg'], ['jpeg', 'image/jpeg'], ['gif', 'image/gif'], ['webp', 'image/webp'], ['avif', 'image/avif'],
+  ['mp4', 'video/mp4'], ['m4v', 'video/mp4'], ['webm', 'video/webm'], ['mov', 'video/quicktime'],
+]);
+
+/** The media type to serve an upload as; null when it is not a picture or a clip. */
+function uploadMediaType(upstreamType, filename) {
+  const type = upstreamType.split(';')[0].trim().toLowerCase();
+  if (UPLOAD_MEDIA_TYPE_RE.test(type)) return type;
+  if (type && type !== 'application/octet-stream') return null;
+  return UPLOAD_EXTENSION_TYPES.get(filename.split('.').at(-1).toLowerCase()) ?? null;
+}
 const UPLOAD_PASSED_HEADERS = ['content-length', 'content-range', 'accept-ranges', 'etag', 'last-modified'];
 
 /** Express has decoded the name already; a `/`, `.` or `..` would leave the upload's folder. */
@@ -1018,8 +1032,8 @@ export function registerGitLabRoutes(app, options = {}) {
         range: requestText(req.get('range')) || undefined,
         signal: abort.signal,
       });
-      const type = (upstream.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
-      if (!upstream.ok || !upstream.body || !UPLOAD_MEDIA_TYPE_RE.test(type)) {
+      const type = uploadMediaType(upstream.headers.get('content-type') || '', upload.filename);
+      if (!upstream.ok || !upstream.body || !type) {
         await upstream.body?.cancel().catch(() => {});
         // A refused read is the file's answer, never the account's: it does not invalidate it.
         return res.status(upstream.ok ? 415 : upstream.status === 416 ? 416 : 404).end();

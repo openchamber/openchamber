@@ -125,7 +125,8 @@ export const useCollapsedSessionActivityState = ({
       const pending = state.bySession.get(sessionId);
       if (!pending) continue;
       if (pending.permissions.length > 0) return 'permission';
-      if (pending.forms.length > 0) result = 'form';
+      // A page that waits for the user's answer blocks the agent like a form.
+      if (pending.forms.length > 0 || pending.pages.length > 0) result = 'form';
     }
     return result;
   }, [enabled, blockingIds]));

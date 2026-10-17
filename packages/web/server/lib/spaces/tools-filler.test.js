@@ -1,3 +1,5 @@
+import crypto from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -6,7 +8,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 
 import { TOOLS_MARKER_PATH } from './layout.js';
 import { runCommand } from './run-command.js';
-import { FILLER_PROGRAM, buildFillInput } from './tools-filler.js';
+import { FILLER_PROGRAM, buildFillInput, fillerProgram } from './tools-filler.js';
 
 const KEY = '0123456789abcdef';
 
@@ -50,15 +52,24 @@ describe.skipIf(process.platform === 'win32')('FILLER_PROGRAM, run', () => {
   const FAKE_NPM = `#!/bin/sh
 echo "$@" > npm-args.txt
 [ -f fail-npm ] && exit 3
-mkdir -p node_modules/.bin node_modules/@opencode/plugin node_modules/@opencode/cli
+mkdir -p node_modules/.bin node_modules/@opencode/plugin node_modules/@opencode/cli node_modules/bun
 touch node_modules/.bin/openchamber node_modules/.bin/opencode
 [ -f skip-plugin ] || echo '{}' > node_modules/@opencode/plugin/package.json
 echo "import fs from 'node:fs'; fs.writeFileSync('postinstall-ran', 'yes');" > node_modules/@opencode/cli/postinstall.mjs
+echo "require('node:fs').writeFileSync('install-ran', 'yes');" > node_modules/bun/install.js
+printf '#!/bin/sh\necho 1.0.0\n' > node_modules/.bin/bun
+printf '#!/bin/sh\necho 1.0.0\n' > node_modules/.bin/pnpm
+chmod +x node_modules/.bin/bun node_modules/.bin/pnpm
 `;
+  // The uv release for this CPU, as a stand-in: a tarball of two scripts, served by a fetch the
+  // test puts in place, under the checksum the test gives the program.
+  const UV_NAME = `uv-${process.arch === 'arm64' ? 'aarch64' : 'x86_64'}-unknown-linux-gnu`;
   let root;
   let tools;
   let staging;
   let originalPath;
+  let program;
+  let fetchStub;
 
   beforeAll(() => {
     originalPath = process.env.PATH;
@@ -76,13 +87,22 @@ echo "import fs from 'node:fs'; fs.writeFileSync('postinstall-ran', 'yes');" > n
     fs.mkdirSync(path.join(root, 'bin'));
     fs.writeFileSync(path.join(root, 'bin', 'npm'), FAKE_NPM, { mode: 0o755 });
     process.env.PATH = `${path.join(root, 'bin')}${path.delimiter}${originalPath}`;
+    const release = path.join(root, 'release', UV_NAME);
+    fs.mkdirSync(release, { recursive: true });
+    for (const name of ['uv', 'uvx']) fs.writeFileSync(path.join(release, name), '#!/bin/sh\necho uv 0.0.0\n', { mode: 0o755 });
+    const archive = path.join(root, 'uv.tar.gz');
+    execFileSync('tar', ['-czf', archive, '-C', path.join(root, 'release'), UV_NAME]);
+    const sum = crypto.createHash('sha256').update(fs.readFileSync(archive)).digest('hex');
+    program = fillerProgram({ aarch64: sum, x86_64: sum });
+    fetchStub = path.join(root, 'fetch-stub.mjs');
+    fs.writeFileSync(fetchStub, `import fs from 'node:fs'; globalThis.fetch = async (url) => { fs.writeFileSync(${JSON.stringify(path.join(root, 'fetched-url'))}, String(url)); return fs.existsSync(${JSON.stringify(path.join(root, 'tampered'))}) ? new Response('not uv') : new Response(fs.readFileSync(${JSON.stringify(archive)})); };`);
   });
 
   afterEach(() => {
     fs.rmSync(root, { recursive: true, force: true });
   });
 
-  const fill = (stdin) => runCommand(process.execPath, ['-e', FILLER_PROGRAM, tools, staging], { stdin, timeoutMs: 30_000 });
+  const fill = (stdin) => runCommand(process.execPath, ['--import', fetchStub, '-e', program, tools, staging], { stdin, timeoutMs: 30_000 });
   const rawInput = (header, ...bodies) => Buffer.concat([Buffer.from(`${JSON.stringify(header)}\n`), ...bodies.map((body) => Buffer.from(body))]);
 
   it('writes package.json to the tools directory, tarballs to staging, installs, and writes the marker last', async () => {
@@ -96,9 +116,23 @@ echo "import fs from 'node:fs'; fs.writeFileSync('postinstall-ran', 'yes');" > n
     expect(fs.readFileSync(path.join(tools, 'npm-args.txt'), 'utf8').trim()).toBe(`install --ignore-scripts --no-audit --no-fund --cache ${path.join(staging, 'npm-cache')}`);
     // The one install script that runs: the OpenCode launcher needs its binary linked.
     expect(fs.readFileSync(path.join(tools, 'node_modules', '@opencode/cli', 'postinstall-ran'), 'utf8')).toBe('yes');
+    // bun's install script runs for the same reason, and uv arrives beside the other programs.
+    expect(fs.readFileSync(path.join(tools, 'node_modules', 'bun', 'install-ran'), 'utf8')).toBe('yes');
+    expect(fs.readFileSync(path.join(root, 'fetched-url'), 'utf8')).toBe(`https://github.com/astral-sh/uv/releases/download/0.13.1/${UV_NAME}.tar.gz`);
+    for (const name of ['uv', 'uvx']) expect(fs.statSync(path.join(tools, 'node_modules', '.bin', name)).mode & 0o111).not.toBe(0);
     expect(fs.readFileSync(path.join(tools, '.filled'), 'utf8')).toBe(KEY);
     // The marker arrives through a rename, so a marker that exists is never half written.
     expect(fs.existsSync(path.join(tools, '.filled.new'))).toBe(false);
+  });
+
+  it('writes no marker when the uv download does not match its pinned checksum', async () => {
+    fs.writeFileSync(path.join(root, 'tampered'), '');
+    const result = await fill(buildFillInput({ key: KEY, packageJson: '{}' }));
+
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain('the uv download does not match its pinned checksum');
+    expect(fs.existsSync(path.join(tools, 'node_modules', '.bin', 'uv'))).toBe(false);
+    expect(fs.existsSync(path.join(tools, '.filled'))).toBe(false);
   });
 
   it('writes no marker when npm fails', async () => {

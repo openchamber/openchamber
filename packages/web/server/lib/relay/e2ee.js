@@ -19,6 +19,7 @@ export const MAX_PLAINTEXT_FRAME_BYTES = 64 * 1024;
 
 // Relay-assigned WebSocket close codes (subset the host needs).
 export const RelayCloseCode = {
+  ControlReplaced: 4001,
   RekeyMismatch: 1008,
   ChannelFailure: 1011,
 };

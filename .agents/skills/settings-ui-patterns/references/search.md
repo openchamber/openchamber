@@ -18,6 +18,7 @@ Settings search uses an explicit registry; it does not scrape JSX.
 - Add `descriptionKey` only when it improves context.
 - Add useful synonyms/acronyms as keywords.
 - Do not generate items for dynamic entities such as individual agents, providers, projects, skills, hosts, or sessions.
+- Generated items are fine for a fixed list the app defines: every in-app shortcut on the Shortcuts page comes from the shortcut schema (`shortcutSearchItemId`), so a new customizable action is searchable by its own label with no registry edit.
 
 ## Conditional Targets
 

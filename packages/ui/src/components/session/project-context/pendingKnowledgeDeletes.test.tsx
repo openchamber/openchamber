@@ -29,6 +29,9 @@ afterAll(async () => {
   // The Undo toast outlives the last test; unmount it while the DOM globals
   // still exist, or its scheduled render runs after they are removed.
   await act(async () => root.unmount());
+  // A dismissed toast removes itself on a timer Sonner keeps after unmount,
+  // and that state update reads `window`. Let it fire while `window` exists.
+  await new Promise(resolve => setTimeout(resolve, SONNER_EXIT_MS + 100));
   await browser.happyDOM.close();
   for (const [name, descriptor] of descriptors) {
     if (descriptor) Object.defineProperty(globalThis, name, descriptor);
@@ -37,6 +40,8 @@ afterAll(async () => {
 });
 
 const UNDO_WINDOW_MS = 20;
+// Sonner's TIME_BEFORE_UNMOUNT: how long a dismissed toast animates out.
+const SONNER_EXIT_MS = 200;
 // Undo has to land inside the window. On a loaded CI runner rendering the
 // toast and clicking took longer than 20ms, so the delete was already sent.
 const UNDO_CLICK_WINDOW_MS = 500;

@@ -1,15 +1,16 @@
 /**
- * Where a model's access comes from, as the create dialog and the grant dialog both ask it: the
- * host's own browser login, offered only when the host has one the space can be given (7c), an
- * environment variable of the host's, remembered by name and given again after every restart, or a
- * key typed once and kept nowhere. A provider that issues no key, GitHub Copilot, offers the login
- * alone (7d); a login whose token has no end says so, since the space keeps it until it is deleted.
+ * Where a model's access comes from, as the create dialog and the grant dialog both ask it, in one
+ * row: a picker of the source and, beside it, what that source needs. The host's own browser login
+ * is offered only when the host has one the space can be given (7c); an environment variable of the
+ * host's is remembered by name and given again after every restart; a key pasted once is kept
+ * nowhere. A provider that issues no key, GitHub Copilot, has the login alone (7d); a login whose
+ * token has no end says so, since the space keeps it until it is deleted.
  */
 
 import React from 'react';
 
 import { Input } from '@/components/ui/input';
-import { Radio } from '@/components/ui/radio';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useI18n } from '@/lib/i18n';
 import type { HostLoginOffer, KeySourceChoice, SpaceModelProviderOption } from './spaceModelKeys';
 
@@ -26,34 +27,43 @@ export const ModelKeySource: React.FC<{ provider: SpaceModelProviderOption; logi
       </div>
     );
   }
-  const option = (checked: boolean, onSelect: () => void, label: string) => (
-    <label className="flex cursor-pointer items-start gap-2">
-      <Radio checked={checked} onChange={onSelect} ariaLabel={label} className="mt-0.5" />
-      <span className="typography-ui-label text-foreground">{label}</span>
-    </label>
-  );
+  const loginNoEnd = login && login.expires === null && choice.source === 'login'
+    ? <p className="typography-meta text-status-warning">{t('spaces.create.access.loginNoEnd')}</p>
+    : null;
+  // A provider that issues no key: its login is the only way, so there is nothing to pick.
+  if (!provider.key) {
+    return login ? (
+      <div className="space-y-1">
+        <p className="typography-meta text-muted-foreground">{t('spaces.create.access.loginOnly', { name: login.name })}</p>
+        {loginNoEnd}
+      </div>
+    ) : null;
+  }
+  const labelOf = (source: KeySourceChoice['source']) => (source === 'login' && login
+    ? t('spaces.create.access.login', { name: login.name })
+    : source === 'typed' ? t('spaces.create.access.typed') : t('spaces.create.access.fromEnv'));
   return (
     <div className="space-y-1.5">
-      {login ? option(choice.source === 'login', () => onChange({ source: 'login' }), t('spaces.create.access.login', { name: login.name })) : null}
-      {login && login.expires === null ? <p className="ps-6 typography-meta text-status-warning">{t('spaces.create.access.loginNoEnd')}</p> : null}
-      {provider.key ? (
-        <>
-          {option(choice.source === 'env', () => onChange({ source: 'env' }), t('spaces.create.access.fromEnv'))}
-          {choice.source === 'env' ? (
-            <div className="ps-6">
-              <Input value={choice.envName} onChange={(event) => onChange({ envName: event.target.value })} className="max-w-sm font-mono" aria-label={t('spaces.create.access.envNameAria', { provider: provider.name })} />
-              <p className="mt-1 typography-meta text-muted-foreground">{t('spaces.create.access.envComesBack')}</p>
-            </div>
-          ) : null}
-          {option(choice.source === 'typed', () => onChange({ source: 'typed' }), t('spaces.create.access.typed'))}
-          {choice.source === 'typed' ? (
-            <div className="ps-6">
-              <Input type="password" autoComplete="off" value={choice.value} onChange={(event) => onChange({ value: event.target.value })} className="max-w-sm" aria-label={t('spaces.create.access.keyAria', { provider: provider.name })} />
-              <p className="mt-1 typography-meta text-status-warning">{t('spaces.create.access.typedNotKept')}</p>
-            </div>
-          ) : null}
-        </>
+      <Select<KeySourceChoice['source']> value={choice.source} onValueChange={(source) => onChange({ source })}>
+        <SelectTrigger className="w-fit" aria-label={t('spaces.create.access.sourceAria', { provider: provider.name })}>
+          <SelectValue>{labelOf(choice.source)}</SelectValue>
+        </SelectTrigger>
+        {/* On the body: inside a dialog the list would stretch the dialog while it is open. */}
+        <SelectContent portalToBody>
+          {login ? <SelectItem value="login">{labelOf('login')}</SelectItem> : null}
+          <SelectItem value="env">{labelOf('env')}</SelectItem>
+          <SelectItem value="typed">{labelOf('typed')}</SelectItem>
+        </SelectContent>
+      </Select>
+      {/* The field gets the whole row, so a variable name is read in full. */}
+      {choice.source === 'env' ? (
+        <Input value={choice.envName} onChange={(event) => onChange({ envName: event.target.value })} className="w-full font-mono" spellCheck={false} aria-label={t('spaces.create.access.envNameAria', { provider: provider.name })} />
+      ) : choice.source === 'typed' ? (
+        <Input type="password" autoComplete="off" value={choice.value} onChange={(event) => onChange({ value: event.target.value })} className="w-full" aria-label={t('spaces.create.access.keyAria', { provider: provider.name })} />
       ) : null}
+      {choice.source === 'env' ? <p className="typography-meta text-muted-foreground">{t('spaces.create.access.envComesBack')}</p> : null}
+      {choice.source === 'typed' ? <p className="typography-meta text-muted-foreground">{t('spaces.create.access.typedNotKept')}</p> : null}
+      {loginNoEnd}
     </div>
   );
 };

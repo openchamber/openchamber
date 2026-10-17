@@ -7,6 +7,30 @@ description: Conecta los servicios y suscripciones con los que trabaja OpenChamb
 
 En **Ajustes → Integraciones** inicias sesión en los servicios con los que trabaja OpenChamber. El inicio de sesión se guarda en el servidor de OpenChamber, así que la web, el escritorio y un teléfono emparejado lo comparten.
 
+## Catálogo de integraciones
+
+El catálogo de integraciones reúne más de 150 servicios que puedes darle al agente con un clic: Linear, Notion, Sentry, Supabase, Figma, herramientas de observabilidad, CRMs, notas de reuniones y más. Instalar uno suele añadir el servidor MCP del servicio, que es la conexión que el agente usa para leer y cambiar cosas ahí, y a veces skills o un plugin que lo acompañan. Se instala para tu usuario, así que todos los proyectos lo tienen.
+
+1. Elige el icono de la tienda en la cabecera de la barra lateral.
+2. Busca un servicio: por nombre, o acota la lista con una categoría como **Código** o **Calidad y operaciones**. **OpenChamber** lista nuestras propias extensiones y plugins.
+3. Elige **+** en su fila, o ábrelo y elige **Instalar**.
+4. Inicia sesión como pida el servicio:
+   - **OAuth**: la página de inicio de sesión del servicio se abre en tu navegador. Aprueba el acceso ahí.
+   - **Token**: pega un token de API en **Token de API**. **Obtener un token** abre la página donde el servicio los entrega.
+   - **Sin inicio de sesión**: no hay que hacer nada.
+
+Cuando termina, el servicio muestra una marca de verificación y aparece en **Instaladas** a la izquierda, y sus herramientas están disponibles en tu siguiente mensaje. Un punto amarillo o **Inicio de sesión requerido** significa que el inicio de sesión no terminó; abre el servicio y vuelve a iniciar sesión.
+
+Algunas entradas necesitan algo más que iniciar sesión:
+
+- **Servidores locales** se ejecutan en la máquina donde se ejecuta OpenCode y pueden necesitar Node.js, Python con uv o Docker. El primer arranque puede tardar un rato.
+- **Plugins** son código que se ejecuta dentro de OpenCode, así que el catálogo te pide confirmación y antes muestra la licencia del plugin.
+- **Skills** que acompañan a un servicio se instalan con él. Si falta alguna, su propio **Instalar** aparece en la página del servicio.
+
+Para quitar un servicio, ábrelo, elige **Más acciones** (**⋯**) y luego **Desinstalar**. Solo se quita lo que añadió el catálogo; tu cuenta en el servicio sigue como está. También puedes gestionar servidores MCP, plugins y skills en Ajustes como siempre.
+
+El catálogo está en la app web y en la app de escritorio. Se oculta en [modo empresa](/es/security/#modo-empresa).
+
 ## GitHub
 
 Despliega la tarjeta **GitHub** y elige **Connect GitHub** para iniciar sesión con un código de dispositivo corto. Una vez conectado, OpenChamber puede iniciar sesiones desde issues y pull requests, adjuntarlos a mensajes y abrir o actualizar PRs. Todo lo que GitHub puede hacer está en [Issues y PRs de GitHub](/es/github/).
@@ -78,6 +102,18 @@ Excalidraw te permite dibujar en archivos `.excalidraw` y en dibujos `.excalidra
 2. Vuelve a abrir el dibujo. El lienzo sustituye al texto del archivo, y Cmd/Ctrl+S, el guardado automático, el cambio a la vista de código fuente y la pantalla completa funcionan como en cualquier otro archivo.
 
 Desde la tarjeta actualizas la extensión cuando sale una versión nueva, la vuelves a activar si la pausaste y la eliminas. Tus dibujos no cambian al eliminarla; simplemente se abren como texto. Solo en web y escritorio.
+
+## Resource Monitor
+
+Resource Monitor muestra cuánta CPU y memoria usa tu equipo y cuánto de eso se lo llevan OpenChamber, OpenCode, todo lo que iniciaron y los servidores de desarrollo que se ejecutan bajo ellos. Es una extensión de OpenChamber y aparece en **OpenChamber extensions** en la misma página.
+
+1. Abre **Settings → Integrations** y elige **Install** en la tarjeta de Resource Monitor.
+2. Aprueba su servicio local en **Settings → Extensions**. Los números vienen de un pequeño proceso que OpenChamber inicia junto al panel. Mide únicamente mientras el panel o la sección **Resources** están en pantalla.
+3. Abre **Resource Monitor** desde la barra lateral derecha. También aparece un resumen breve en **Resources** dentro del panel Work Status.
+
+Stop en un servidor de desarrollo o una tarea termina ese comando con todo lo que inició, para que un watcher no vuelva a levantar el servidor. **Stop all** en el grupo Terminal termina todo lo que se ejecuta en el terminal y en las project actions y deja abiertas las pestañas del terminal. OpenChamber y el servidor de OpenCode no tienen Stop.
+
+Los servidores de desarrollo aparecen cuando se ejecutan bajo OpenChamber: iniciados en el terminal integrado, o por un agente cuando OpenChamber inició OpenCode por sí mismo. Un servidor que se separa de su proceso padre, o un contenedor iniciado con `docker compose up -d`, no aparece en la lista. Si estás conectado a un OpenChamber remoto, el monitor muestra esa máquina. Solo web y escritorio.
 
 ## Relacionado
 

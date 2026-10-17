@@ -3,6 +3,7 @@ import express from 'express';
 import {
   createWorktree as createWorktreeDefault,
   getBranches as getBranchesDefault,
+  getPathsWithoutChanges as getPathsWithoutChangesDefault,
   getWorktreeBootstrapStatus as getWorktreeBootstrapStatusDefault,
   listStashes as listStashesDefault,
   removeWorktree as removeWorktreeDefault,
@@ -457,6 +458,7 @@ export const createOpenChamberSessionService = (dependencies) => {
     removeWorktree = removeWorktreeDefault,
     getBranches = getBranchesDefault,
     stashPush = stashPushDefault,
+    getPathsWithoutChanges = getPathsWithoutChangesDefault,
     stashApply = stashApplyDefault,
     stashDrop = stashDropDefault,
     listStashes = listStashesDefault,
@@ -677,28 +679,21 @@ export const createOpenChamberSessionService = (dependencies) => {
       throw markGoalPartial(error);
     }
 
-    // A session the agent dispatched has no UI to attach the project's
-    // standing context, so it is asked for here. Never fails the dispatch:
+    // A session the agent dispatched has no UI to write the project's
+    // standing context into it, so it is written here. `sync` never throws:
     // a session that runs without its background beats one that never runs.
-    const knowledge = sessionKnowledgeRuntime
-      ? await sessionKnowledgeRuntime.resolvePendingForSession(sessionID, directory)
-        .catch(() => ({ text: '', signature: '' }))
-      : { text: '', signature: '' };
-    // After the send is accepted, so a rejected dispatch carries it again.
-    const recordKnowledge = async () => {
-      if (knowledge.text && sessionKnowledgeRuntime) {
-        await sessionKnowledgeRuntime.recordDelivered(sessionID, directory, knowledge.signature)
-          .catch(() => undefined);
+    if (sessionKnowledgeRuntime) {
+      try {
+        const session = await client.session.get({ sessionID });
+        const sessionDirectory = asNonEmptyString(session?.location?.directory);
+        if (sessionDirectory) await sessionKnowledgeRuntime.sync(sessionID, sessionDirectory);
+      } catch (error) {
+        console.warn('[OpenChamberSessions] Failed to read session directory for knowledge sync:', error?.message || error);
       }
-    };
+    }
 
     if (resolvedCommand) {
       try {
-        // The command route takes no extra parts, so the context goes in
-        // first as a synthetic message that does not start execution.
-        if (knowledge.text) {
-          await client.session.synthetic({ sessionID, text: knowledge.text, resume: false });
-        }
         await client.session.command({
           sessionID,
           // OpenCode 2.0.8 renamed the command body field `command` to `name`.
@@ -708,13 +703,9 @@ export const createOpenChamberSessionService = (dependencies) => {
       } catch (error) {
         throw markGoalPartial(error);
       }
-      await recordKnowledge();
     } else {
       let landedMessageID = null;
       try {
-        if (knowledge.text) {
-          await client.session.synthetic({ sessionID, text: knowledge.text, resume: false });
-        }
         const sent = await client.session.prompt({ sessionID, text: expandedPrompt });
         landedMessageID = asNonEmptyString(sent?.id);
         if (goalInput.enabled) {
@@ -729,7 +720,6 @@ export const createOpenChamberSessionService = (dependencies) => {
       } catch (error) {
         throw markGoalPartial(error);
       }
-      await recordKnowledge();
       if (!landedMessageID) {
         // v2 answers a prompt with the inbox item it recorded. No item id means
         // nothing is queued, so the dispatch must not be claimed as done.
@@ -1109,6 +1099,7 @@ export const createOpenChamberSessionService = (dependencies) => {
     removeWorktree,
     getBranches,
     stashPush,
+    getPathsWithoutChanges,
     stashApply,
     stashDrop,
     listStashes,
@@ -1122,8 +1113,8 @@ export const createOpenChamberSessionService = (dependencies) => {
 
   /**
    * Move an existing session into a new worktree of its repository, carrying
-   * the checkout's uncommitted changes along (`./worktree-move.js`). The
-   * worktree needs the same bootstrap as `create` gives a new one.
+   * the files the agent names along (`./worktree-move.js`). The worktree needs
+   * the same bootstrap as `create` gives a new one.
    */
   const moveToWorktree = async (sessionID, payload = {}) => {
     if (!(hydrateWorktreeCheckout instanceof Function)
@@ -1139,6 +1130,7 @@ export const createOpenChamberSessionService = (dependencies) => {
       branchName: asNonEmptyString(payload.worktree?.branchName),
       startRef: asNonEmptyString(payload.worktree?.startRef),
       existingBranch: asNonEmptyString(payload.worktree?.existingBranch),
+      carry: payload.carry,
     });
   };
 

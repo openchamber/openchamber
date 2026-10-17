@@ -28,14 +28,13 @@ const HANDSHAKE_TIMEOUT_MS = 15_000;
 const SPACE_ID = /^[0-9a-f]{12}$/;
 
 /**
- * The host's own tunnel, or the one of an isolated space on that host: the
- * host forwards `/api/spaces/<id>/dev-tunnel` to the server inside the space,
- * which dials the port on its own loopback, the space's.
+ * The host's own tunnel, or the one of an isolated space on that host: a
+ * tunnel that names the space's root as its `directory` is forwarded by the
+ * host to the server inside the space, which dials the port on its own
+ * loopback, the space's.
  */
-const tunnelPath = (spaceId) => (spaceId ? `/api/spaces/${spaceId}/dev-tunnel` : '/api/dev-tunnel');
-
 const toWebSocketUrl = (baseUrl, port, spaceId) => {
-  const parsed = new URL(tunnelPath(spaceId), baseUrl);
+  const parsed = new URL('/api/dev-tunnel', baseUrl);
   // WHATWG URL silently ignores a protocol assignment that crosses from a
   // non-special scheme (custom app protocols, relay-virtual URLs) to `ws:`.
   // Without this check the stale scheme survives into `new WebSocket(...)`,
@@ -46,6 +45,7 @@ const toWebSocketUrl = (baseUrl, port, spaceId) => {
   }
   parsed.protocol = parsed.protocol === 'https:' ? 'wss:' : 'ws:';
   parsed.searchParams.set('port', String(port));
+  if (spaceId) parsed.searchParams.set('directory', `/spaces/${spaceId}`);
   return parsed.toString();
 };
 

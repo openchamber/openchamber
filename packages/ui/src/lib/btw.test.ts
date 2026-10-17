@@ -56,6 +56,7 @@ mock.module('@/stores/useGlobalSessionsStore', () => ({
 mock.module('@/sync/sync-refs', () => ({
   registerSessionDirectory: (sessionId: string, directory: string) => { registeredDirectories.push(`${sessionId}:${directory}`); },
   getSyncMessages: () => parentSyncMessages,
+  getAllSyncSessionMap: () => new Map(),
   getSyncChildStores: () => ({
     // Mirrors ChildStoreManager.getChild: keys are normalized paths.
     getChild: (directory: string) => (normalizePath(directory) === '/project' || normalizePath(directory) === 'C:/project' ? {
@@ -69,6 +70,9 @@ const { preparePendingBtwSend, btwSessionTitle, startBtwSession, destroyBtwSessi
   await import('@/lib/btw');
 const { useBtwStore } = await import('@/stores/useBtwStore');
 const { useSelectionStore } = await import('@/sync/selection-store');
+const { useUIStore } = await import('@/stores/useUIStore');
+const { usePermissionStore } = await import('@/stores/permissionStore');
+const writtenModes: Array<[string, string]> = [];
 
 const makeSession = (id: string, directory?: string): Session => ({
   id,
@@ -113,6 +117,9 @@ beforeEach(() => {
   metadataPatches.length = 0;
   parentSyncMessages.length = 0;
   sessionMessageReads.length = 0;
+  writtenModes.length = 0;
+  useUIStore.setState({ permissionDefaultMode: 'auto' });
+  usePermissionStore.setState({ setSessionMode: async (sessionId, mode) => { writtenModes.push([sessionId, mode]); } });
   useBtwStore.setState({ byParent: {} });
   forkSessionImpl = () => Promise.reject(new Error('no forkSession stub'));
   getSessionMessagesImpl = () => Promise.resolve(page([record('msg-boundary')]));
@@ -202,6 +209,41 @@ describe('startBtwSession', () => {
     ]);
     // Transient creating flag is cleared once the flow settles.
     expect(useBtwStore.getState().byParent).toEqual({ 'parent-1': { creating: false } });
+  });
+
+  test('a fork in a space starts in the Settings default, which no server writes for it', async () => {
+    forkSessionImpl = (_sessionId, options) => Promise.resolve(makeSession('fork-1', options?.directory ?? undefined));
+
+    await startBtwSession({ ...startInput, directory: '/spaces/0123456789ab/project' });
+
+    expect(writtenModes).toEqual([['fork-1', 'auto']]);
+  });
+
+  test('a failed write of the default keeps the fork, a failed write of a choice ends it', async () => {
+    forkSessionImpl = (_sessionId, options) => Promise.resolve(makeSession('fork-1', options?.directory ?? undefined));
+    usePermissionStore.setState({ setSessionMode: () => Promise.reject(new Error('write failed')) });
+    const deleted: string[] = [];
+    deleteSessionImpl = (sessionId) => { deleted.push(sessionId); return Promise.resolve(true); };
+
+    const session = await startBtwSession({ ...startInput, directory: '/spaces/0123456789ab/project' });
+    expect(session.id).toBe('fork-1');
+    expect(deleted).toEqual([]);
+
+    let failed = false;
+    await startBtwSession({ ...startInput, parentSessionId: 'parent-2', directory: '/spaces/0123456789ab/project', permissionMode: 'auto' })
+      .catch(() => { failed = true; });
+    expect(failed).toBe(true);
+    expect(deleted).toEqual(['fork-1']);
+  });
+
+  test('a fork on the host leaves the default to the server; a choice is written anywhere', async () => {
+    forkSessionImpl = (_sessionId, options) => Promise.resolve(makeSession('fork-1', options?.directory ?? undefined));
+
+    await startBtwSession(startInput);
+    expect(writtenModes).toEqual([]);
+
+    await startBtwSession({ ...startInput, parentSessionId: 'parent-2', permissionMode: 'ask' });
+    expect(writtenModes).toEqual([['fork-1', 'ask']]);
   });
 
   test('inserts a fork returned with a native Windows path into the normalized directory store', async () => {

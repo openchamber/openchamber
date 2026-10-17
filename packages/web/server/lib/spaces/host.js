@@ -27,10 +27,12 @@ import { spaceProjectPath } from './layout.js';
 import { createSpaceManager } from './manager.js';
 import { createSpaceRecords } from './space-records.js';
 import { createSpaceEventSources } from './space-events.js';
+import { createSpaceFetch } from './space-fetch.js';
 import { createSpaceOpenCode } from './space-opencode.js';
 import { createSpaceSessionIndex, mergeSessionLists } from './space-sessions.js';
 import { createSpaceWebSocketForwarder } from './websocket.js';
 import { DOCKER_SSH_PLACE_ID, createDockerPlace } from './places/docker.js';
+import { createDockerSetup } from './places/docker-setup.js';
 import { createPlaceRegistry } from './places/registry.js';
 import { openCommandStream as openCommandStreamProcess, runCommand as runCommandProcess } from './run-command.js';
 import { createSpaceServerChannel } from './space-server.js';
@@ -114,7 +116,9 @@ export function readOrCreateOwner(dataDir) {
 
 /**
  * `dataDir` is the host's data directory, `dockerPath` the docker CLI to run, `colimaPath` the
- * colima CLI or null, used only after a disk clean-up on a Colima machine, `sshDockerHost` the
+ * colima CLI or null, used only after a disk clean-up on a Colima machine, `findProgram(name)`
+ * the path of a program on this computer or null, asked again at every look of the Docker setup
+ * (`places/docker-setup.js`), `sshDockerHost` the
  * `ssh://<machine>` of the Docker over SSH place or null for none, and `gitPath` the
  * host git that moves code in and out, with `hostEnvironment` as its environment: git starts
  * `docker exec` itself, so the PATH in it must find docker. `place` replaces the Docker place,
@@ -136,6 +140,7 @@ export function createSpacesHost({
   dataDir,
   dockerPath = 'docker',
   colimaPath = null,
+  findProgram = () => null,
   sshDockerHost = null,
   gitPath = 'git',
   hostEnvironment = process.env,
@@ -162,6 +167,8 @@ export function createSpacesHost({
   // The same Docker place on another machine's daemon: the local CLI runs every command there
   // over SSH, so the image, the tools volume and the spaces' volumes live on that machine.
   const sshPlace = sshDockerHost === null ? null : createDockerPlace({ runCommand, openCommandStream, dockerPath, dockerHost: sshDockerHost, id: DOCKER_SSH_PLACE_ID, owner, toolsSource });
+  // Getting Docker ready on this computer, for the local place only.
+  const dockerSetup = createDockerSetup({ runCommand, findProgram, dockerPath, environment: hostEnvironment, check: () => dockerPlace.check(), logger });
   const registry = createPlaceRegistry(sshPlace ? [dockerPlace, sshPlace] : [dockerPlace]);
   registry.seal();
   const records = createSpaceRecords({ dataDir, logger });
@@ -405,8 +412,14 @@ export function createSpacesHost({
     dispatcher,
     index,
     journey,
+    /** A `fetch` for the host's own reads of one space's sessions, for its notifications. */
+    openCodeFetchFor: createSpaceFetch({ requestInside: dispatcher.requestInside }),
     /** The places a space can be made on, for the funnel. */
     places: () => registry.list(),
+    /** What gets Docker going on this computer, and the action that does it, for the local place. */
+    dockerSetup,
+    /** The id of the place that `dockerSetup` is about. */
+    localPlaceId: dockerPlace.id,
     /** The dispatcher, to mount after the API auth gate and before every route that reads a directory. */
     middleware: dispatcher.middleware,
     /**
@@ -417,10 +430,14 @@ export function createSpacesHost({
       sockets = createSpaceWebSocketForwarder({ dispatcher, connect: connectReachable, uiAuthController, isRequestOriginAllowed, logger });
     },
     upgradeHandler: (...args) => sockets?.upgradeHandler(...args),
-    /** Follows the spaces: an event connection for each, into the host's hub, and the host's own ids from its events. */
-    startEvents: (globalEventHub) => {
+    /**
+     * Follows the spaces: an event connection for each, into the host's hub, and the host's own ids
+     * from its events; with `broadcastUiEvent`, the host's control stream, also each space's queue
+     * changes, and with `broadcastGlobalUiEvent`, its notification stream, each space's permission modes.
+     */
+    startEvents: (globalEventHub, { broadcastUiEvent = null, broadcastGlobalUiEvent = null } = {}) => {
       hub = globalEventHub;
-      events = createSpaceEventSources({ requestInside: dispatcher.requestInside, index, hub: globalEventHub, logger, now });
+      events = createSpaceEventSources({ requestInside: dispatcher.requestInside, index, hub: globalEventHub, broadcastUiEvent, broadcastGlobalUiEvent, logger, now });
       unsubscribeHostEvents = globalEventHub.subscribeEvent((event) => { if (event.spaceId === null) index.observeHostEvent(event.payload); });
       followTimer = setTimer(() => { void follow(); }, FOLLOW_INTERVAL_MS);
       followTimer?.unref?.();
@@ -435,10 +452,10 @@ export function createSpacesHost({
     /** For the proxy: the merged session list, or the host's own when no space exists. */
     mergeSessionList,
     /** For the body parsers: a request to a space keeps its body for the space. */
-    skipsBodyParsing: (req) => dispatcher.isSpaceRequestPath(req.path),
+    skipsBodyParsing: (req) => dispatcher.isSpaceRequest(req),
     /** For the directory gate: the reason a directory is refused on the host, or null. */
     refuseDirectory: (candidate) => (dispatcher.isSpaceDirectory(candidate)
-      ? 'A directory under /spaces/ belongs to an isolated space and is addressed as /api/spaces/<id>/... only'
+      ? 'A directory under /spaces/ belongs to an isolated space and is named in the query or the directory header of a request to it'
       : null),
     close: () => {
       if (followTimer !== null) clearTimer(followTimer);

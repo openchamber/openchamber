@@ -185,11 +185,10 @@ const openValidatedExternalUrl = async (url: string): Promise<boolean> => {
   }
 
   try {
-    const handle = window.open(normalizedTarget, '_blank', 'noopener,noreferrer');
-    // A popup blocker swallows the call and answers with null; report it so
-    // callers can fall back to a visible affordance instead of assuming the
-    // window opened.
-    return handle !== null;
+    // With `noopener` the call returns null even when the tab opened, so a
+    // null handle cannot tell a blocked popup from a successful open.
+    window.open(normalizedTarget, '_blank', 'noopener,noreferrer');
+    return true;
   } catch {
     return false;
   }

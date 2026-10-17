@@ -1,19 +1,18 @@
 // A creation started from the create dialog, carried to its end in this window: the space is asked
 // for, its group appears at once, a new-session draft opens on it, and the first message the user
 // sends waits for the space the way a draft waits for a new worktree (`pendingDraftWorktree.ts`).
-// When the space is ready the model access chosen in the dialog is given, and only then is the
-// waiting message let through; a message on a model the space was not given never leaves the
-// composer (`space-model-access.ts`). The access chosen lives in
-// this window's memory until it is given, a typed key and the name of an environment variable
-// alike: a reload in the middle loses all of it, and the space's group then says it has no model
-// access, with the way to the grant dialog.
+// The model access chosen in the dialog travels with the request: the host gives it once the
+// space runs, before it says "ready", so a reload or a closed window in the middle loses nothing.
+// The waiting message is let through at "ready" when every grant went in; a grant the host could
+// not give is listed on the space with its reason, and the message comes back to the composer. A
+// message on a model the space was not given never leaves the composer (`space-model-access.ts`).
 //
 // The project's setup commands travel with the request and run once the code arrived (5d-4). The
 // waiting message goes as soon as the space is ready, unless the project's "wait for setup
 // commands" setting is on: then it waits for them to end, and goes whether they passed or not.
 
-import { createSpace, grantSpaceAccess, SpacesRequestError, type CreateSpaceRequest, type GrantRequest, type SpaceEntry, type SpaceFailure } from './spaces-api';
-import { refreshSpacesJourney, useSpacesStore, type SpaceAccessFailure } from './spaces-store';
+import { createSpace, type CreateSpaceRequest, type GrantRequest, type SpaceEntry, type SpaceFailure } from './spaces-api';
+import { refreshSpacesJourney, useSpacesStore } from './spaces-store';
 import {
   createPendingDraftWorktreeRequest,
   rejectPendingDraftWorktreeRequest,
@@ -88,25 +87,9 @@ const waitForSetup = (spaceId: string): Promise<void> => new Promise((resolve) =
   });
 });
 
-const giveAccess = async (spaceId: string, access: readonly SpaceModelAccess[]): Promise<SpaceAccessFailure[]> => {
-  const failures: SpaceAccessFailure[] = [];
-  for (const grant of access) {
-    try {
-      useSpacesStore.getState().noteGrantGiven(spaceId, await grantSpaceAccess(spaceId, grant));
-    } catch (error) {
-      failures.push({
-        provider: grant.provider,
-        code: error instanceof SpacesRequestError ? error.code : 'space_request_failed',
-        message: error instanceof Error ? error.message : String(error),
-      });
-    }
-  }
-  return failures;
-};
-
 type StartSpaceCreationOptions = {
   projectId: string;
-  request: Omit<CreateSpaceRequest, 'setupCommands'>;
+  request: Omit<CreateSpaceRequest, 'setupCommands' | 'grants'>;
   setup: SpaceSetupPlan;
   access: readonly SpaceModelAccess[];
   /** The text a waiting message is refused with when the space cannot take it, already translated. */
@@ -119,7 +102,7 @@ type StartSpaceCreationOptions = {
  * for the dialog to show. Everything after that runs on its own and ends in the space's group.
  */
 export const startSpaceCreation = async ({ projectId, request, setup, access, refusalMessage }: StartSpaceCreationOptions): Promise<SpaceEntry> => {
-  const entry = await createSpace({ ...request, setupCommands: setup.commands });
+  const entry = await createSpace({ ...request, setupCommands: setup.commands, grants: [...access] });
   useSpacesStore.getState().addJourneyEntry(entry);
 
   const requestId = createPendingDraftWorktreeRequest();
@@ -133,21 +116,16 @@ export const startSpaceCreation = async ({ projectId, request, setup, access, re
   else sessionStore.openNewSessionDraft({ selectedProjectId: projectId, ...target });
 
   // Only a host that said it will run the commands is waited for; one before 5d-4 never runs them.
-  void finishCreation(entry.id, requestId, access, setup.waitBeforeSending && entry.setup?.state === 'queued', refusalMessage);
+  void finishCreation(entry.id, requestId, access.length > 0, setup.waitBeforeSending && entry.setup?.state === 'queued', refusalMessage);
   return entry;
 };
 
-const finishCreation = async (spaceId: string, requestId: string, access: readonly SpaceModelAccess[], waitForSetupCommands: boolean, refusalMessage: string): Promise<void> => {
+const finishCreation = async (spaceId: string, requestId: string, carriedAccess: boolean, waitForSetupCommands: boolean, refusalMessage: string): Promise<void> => {
   const outcome = await waitForOutcome(spaceId);
-  let failures: SpaceAccessFailure[] = [];
-  if (outcome.kind === 'ready' && access.length > 0) {
-    useSpacesStore.getState().noteCreationAccess(spaceId, { kind: 'giving' });
-    failures = await giveAccess(spaceId, access);
-    // The list learns the grants before the message is let through: a running space's model
-    // check reads them there.
-    await refreshSpacesJourney().catch(() => undefined);
-    useSpacesStore.getState().noteCreationAccess(spaceId, failures.length > 0 ? { kind: 'failed', failures } : null);
-  }
+  // The list read after "ready" says what the host gave and could not give; the progress event
+  // does not, and a running space's model check reads the grants there.
+  if (outcome.kind === 'ready' && carriedAccess) await refreshSpacesJourney().catch(() => undefined);
+  const failures = useSpacesStore.getState().journey?.get(spaceId)?.accessFailures ?? [];
   if (outcome.kind === 'ready' && failures.length === 0) {
     if (waitForSetupCommands) await waitForSetup(spaceId);
     // The draft stays where it is until its message is sent: moving it now would move the

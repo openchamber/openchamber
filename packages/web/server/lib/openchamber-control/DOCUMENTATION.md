@@ -45,10 +45,25 @@ other.
 - `render-page.js` runs `render.page` for the `openchamber_render` agent tool.
   The chat draws the page from the call's own input, so the action stores
   nothing: it checks `html` (at most 200,000 characters) and `title` (at most
-  120) and answers `403` while `agentRenderToolEnabled` is `false`.
+  120) and answers `403` while `agentRenderToolEnabled` is `false`. With
+  `awaitAnswer` the action waits in `createPageAnswers`, keyed by session and
+  call id, until `answerPage` resolves it (`POST /api/openchamber/render/answer`
+  from the chat: a summary of at most 500 characters and data of at most
+  16,000 characters as JSON) or the request is aborted. Nothing outlives the
+  call, so a second answer, an answer for a call that ended, and an answer
+  after a server restart are a `404`, never a silent success.
+  `onPageWaitChange` hears both ends of a wait. The server's wiring
+  (`index.js`) lists the page with the session's pending requests
+  (`trackWaitingPage` in `../opencode/session-runtime.js`), broadcasts
+  `openchamber:page-waiting` / `openchamber:page-settled` to the clients, and
+  sends the same "Input needed" notification a form gets.
+  `renderPageImageSources` lists the local images a page names by absolute
+  path (in quotes or a CSS `url()`, PNG, JPEG, GIF or WebP, at most 12). The
+  image grant route (`../markdown-image-grants/`) allows exactly those, and the
+  chat reads them with the same rule.
 - `routes.js` is the authenticated CLI HTTP adapter. It forwards one action,
   preserves service status and partial-result details, and propagates request
-  cancellation.
+  cancellation. It also carries the chat's answer to a waiting page.
 - `../agent-tool/runtime.js` is the managed-tool adapter. It wraps service
   results in the versioned native-tool envelope and uses a separate ephemeral
   loopback credential.
@@ -106,8 +121,9 @@ other.
   is required, `branch` and `startRef` are optional, and `existingBranch`
   checks out a branch that already exists in place of both. The worktree is made by
   the same `createWorktree` pipeline as `session.create`, waits for the same
-  bootstrap, then the checkout's uncommitted changes travel in one git stash
-  applied by hash, and the session is moved last through OpenCode's
+  bootstrap, then the uncommitted changes of the files named in `carry`
+  travel in one git stash applied by hash (nothing moves without it), and the
+  session is moved last through OpenCode's
   `session.move`. A failure after the worktree exists removes it again and
   puts the changes back; when restoring fails too, the error names the stash
   so nothing is lost. A 409 means the changes did not apply on the start ref.

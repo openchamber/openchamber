@@ -1,7 +1,7 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from 'bun:test';
 import { getRuntimeApiBaseUrl, getRuntimeKey, switchRuntimeEndpoint } from '@/lib/runtime-switch';
 import { configureRuntimeUrlResolver, getRuntimeUrlResolver, setRuntimeUrlResolver } from '@/lib/runtime-url';
-import { fetchSessionKnowledge, reportSessionKnowledgeDelivered } from '@/lib/sessionKnowledgeApi';
+import { syncSessionKnowledge } from '@/lib/sessionKnowledgeApi';
 import { useConfigStore } from '@/stores/useConfigStore';
 import {
   OpenCodeStartupError,
@@ -119,21 +119,17 @@ describe('openCodeStartupSignal', () => {
 describe('runAfterOpenCodeStartup', () => {
   const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-  // The session owes its project knowledge until a delivery report lands.
-  const installKnowledgeServer = () => {
-    let owed = true;
+  // Records each knowledge write, so a test can tell it went ahead of its post.
+  const installKnowledgeServer = (events: string[]) => {
     const refuse = globalThis.fetch;
     const resolver = getRuntimeUrlResolver();
     configureRuntimeUrlResolver({ apiBaseUrl: 'https://knowledge.example' });
     globalThis.fetch = async (input, init) => {
       const request = new Request(input, init);
-      if (request.url.includes('/api/session-knowledge/delivered')) {
-        await delay(15);
-        owed = false;
-        return Response.json({ ok: true });
-      }
-      if (request.url.includes('/api/session-knowledge')) {
-        return Response.json(owed ? { text: 'KNOWLEDGE', signature: 'sig' } : { text: '', signature: '' });
+      if (request.url.includes('/api/session-knowledge/sync')) {
+        const { sessionId } = await request.json() as { sessionId: string };
+        events.push(`sync ${sessionId}`);
+        return Response.json({ synced: true });
       }
       throw new Error(`unexpected request ${request.url}`);
     };
@@ -143,16 +139,14 @@ describe('runAfterOpenCodeStartup', () => {
     };
   };
 
-  test('held sends reach OpenCode in the order they were made, and the knowledge goes once', async () => {
-    const restoreFetch = installKnowledgeServer();
-    const posts: Array<{ message: string; knowledge: string }> = [];
-    // The session-ui-store send: knowledge, then the prompt POST, then the
-    // delivery report it does not wait for.
+  test('held sends reach OpenCode in the order they were made, each after its knowledge write', async () => {
+    const events: string[] = [];
+    const restoreFetch = installKnowledgeServer(events);
+    // The session-ui-store send: the knowledge write, then the prompt POST.
     const send = (message: string, workBeforePost: number) => runAfterOpenCodeStartup(async () => {
-      const knowledge = await fetchSessionKnowledge('/repo', 'ses_1');
+      await syncSessionKnowledge('/repo', 'ses_1');
       await delay(workBeforePost);
-      posts.push({ message, knowledge: knowledge.text });
-      if (knowledge.text) void reportSessionKnowledgeDelivered('/repo', 'ses_1', knowledge.signature);
+      events.push(`post ${message}`);
     });
 
     try {
@@ -165,12 +159,11 @@ describe('runAfterOpenCodeStartup', () => {
       const third = send('third', 0);
       await Promise.all([first, second, third]);
 
-      // Before: all released on one notification; "second" posted first and
-      // both carried the knowledge block.
-      expect(posts).toEqual([
-        { message: 'first', knowledge: 'KNOWLEDGE' },
-        { message: 'second', knowledge: '' },
-        { message: 'third', knowledge: '' },
+      // Before: all released on one notification, and "second" posted first.
+      expect(events).toEqual([
+        'sync ses_1', 'post first',
+        'sync ses_1', 'post second',
+        'sync ses_1', 'post third',
       ]);
     } finally {
       restoreFetch();

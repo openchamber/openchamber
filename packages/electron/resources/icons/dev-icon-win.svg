@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <!-- Dev variant of icon-win.svg: the same cube with construction tape across it -->
+  <g transform="translate(512, 512) scale(9.6)">
+
+    <!-- Black hexagon outline framing the outer contour of the cube (behind, sits just outside the white edges) -->
+    <path d="M0 -51.12 L44.27 -25.56 L44.27 25.56 L0 51.12 L-44.27 25.56 L-44.27 -25.56 Z"
+          fill="none" stroke="#000000" stroke-width="3.1" stroke-linejoin="round"/>
+
+    <!-- Isometric cube logo - unchanged from app-icon.svg -->
+    <!-- Left face -->
+    <path d="M0 0 L-41.568 -24 L-41.568 24 L0 48 Z" fill="#4b4b4b" stroke="white" stroke-width="2" stroke-linejoin="round"/>
+    <!-- Right face -->
+    <path d="M0 0 L41.568 -24 L41.568 24 L0 48 Z" fill="#6d6d6d" stroke="white" stroke-width="2" stroke-linejoin="round"/>
+    <!-- Top face - slightly darker than the left face -->
+    <path d="M0 -48 L-41.568 -24 L0 0 L41.568 -24 Z" fill="#3b3b3b" stroke="white" stroke-width="2" stroke-linejoin="round"/>
+    <!-- OpenCode logo on top face -->
+    <g transform="matrix(0.866, 0.5, -0.866, 0.5, 0, -24) scale(0.75)">
+      <path fill-rule="evenodd" clip-rule="evenodd" d="M-16 -20 L16 -20 L16 20 L-16 20 Z M-8 -12 L-8 12 L8 12 L8 -12 Z" fill="white"/>
+      <path d="M-8 -4 L8 -4 L8 12 L-8 12 Z" fill="white" fill-opacity="0.4"/>
+    </g>
+  </g>
+
+  <!-- Construction tape across the lower part of the cube, the same tape as dev-icon.png: marks a development copy -->
+  <defs>
+    <pattern id="tape-stripes" width="64" height="64" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <rect width="64" height="64" fill="#1b1b1b"/>
+      <rect width="32" height="64" fill="#d6a23c"/>
+    </pattern>
+    <filter id="tape-shadow" x="-10%" y="-50%" width="120%" height="200%">
+      <feDropShadow dx="0" dy="6" stdDeviation="6" flood-color="#000000" flood-opacity="0.45"/>
+    </filter>
+  </defs>
+  <g transform="rotate(-9 512 512)" filter="url(#tape-shadow)">
+    <rect x="-40" y="660" width="1104" height="150" fill="url(#tape-stripes)"/>
+  </g>
+</svg>

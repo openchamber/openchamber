@@ -29,6 +29,9 @@ export function createDockerTools({ engine, owner, toolsSource, image, now, wait
   const key = toolsContentKey(source, image);
   const volume = toolsResourceName(owner, key);
   let inFlight = null;
+  // Whether the run under way fills the volume, and who wants to hear when it starts to.
+  let filling = false;
+  const fillListeners = new Set();
 
   const labelsFor = (role) => labelArgs(buildToolsLabels({ role, owner, key, description: source.description, created: now().toISOString() }));
   const oneShotArgs = (role) => ({ containerName: toolsResourceName(owner, key, role), labelArguments: labelsFor(role), toolsVolume: volume, image });
@@ -154,14 +157,28 @@ export function createDockerTools({ engine, owner, toolsSource, image, now, wait
         throw new SpaceError('tools_volume_stuck', `The tools volume ${volume} was never filled to the end and could not be removed: ${problem.message}`);
       }
     }
+    filling = true;
+    for (const listener of fillListeners) listener();
     await fill();
     await prune();
     return volume;
   };
 
-  /** Resolves the name of the filled tools volume. Concurrent calls share one run, so one key is never filled twice at once. */
-  const ensure = () => {
-    inFlight ??= ensureOnce().finally(() => { inFlight = null; });
+  /**
+   * Resolves the name of the filled tools volume. Concurrent calls share one run, so one key is
+   * never filled twice at once. `onFill` hears that this run fills the volume, the slow part a
+   * screen names, also when the call joined a run whose fill had already begun.
+   */
+  const ensure = ({ onFill } = {}) => {
+    if (onFill) {
+      if (filling) onFill();
+      else fillListeners.add(onFill);
+    }
+    inFlight ??= ensureOnce().finally(() => {
+      inFlight = null;
+      filling = false;
+      fillListeners.clear();
+    });
     return inFlight;
   };
 

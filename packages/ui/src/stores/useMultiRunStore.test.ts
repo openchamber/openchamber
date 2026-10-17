@@ -95,8 +95,7 @@ mock.module('@/lib/opencode/client', () => ({
 }));
 
 mock.module('@/lib/sessionKnowledgeApi', () => ({
-  fetchSessionKnowledge: () => ({ text: '', signature: '' }),
-  reportSessionKnowledgeDelivered: async () => undefined,
+  syncSessionKnowledge: async () => undefined,
 }));
 
 mock.module('@/sync/session-archive-batch', () => ({

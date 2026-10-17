@@ -60,6 +60,7 @@ describe('the journey list and creation progress', () => {
     grants: [],
     access: null,
     needsAccess: [],
+    accessFailures: [],
     damage: null,
     setup: null,
     ...overrides,
@@ -159,20 +160,11 @@ describe('the journey list and creation progress', () => {
 describe('the grant dialog and access given through it', () => {
   beforeEach(() => useSpacesStore.getState().resetForRuntimeSwitch());
 
-  test('a provider given in the dialog leaves the failures of the creation', () => {
-    const failure = (provider: string) => ({ provider, code: 'secret_source_missing', message: 'not set' });
-    useSpacesStore.getState().noteCreationAccess(ID, { kind: 'failed', failures: [failure('openai'), failure('anthropic')] });
-    useSpacesStore.getState().noteProviderGranted(ID, 'openai');
-    expect(useSpacesStore.getState().creationAccess.get(ID)).toEqual({ kind: 'failed', failures: [failure('anthropic')] });
-    useSpacesStore.getState().noteProviderGranted(ID, 'anthropic');
-    expect(useSpacesStore.getState().creationAccess.has(ID)).toBe(false);
-  });
-
   test('a grant just given survives a read of the list that began before it', () => {
     const grant = { kind: 'model' as const, id: 'openai', provider: 'openai', upstream: 'https://api.openai.com/v1', source: { kind: 'typed' as const }, url: 'http://gatekeeper:8080/model/openai' };
     const running: SpaceEntry = {
       id: ID, name: 'One', placeId: 'docker', machine: null, projectDirectory: '/home/me/app', directory: `/spaces/${ID}/app`, projectFolder: { path: '/home/me/app', found: true }, state: 'running', stoppedIdle: false, step: null,
-      failure: null, network: { mode: 'allowlist', domains: [] }, grants: [], access: 'needs_access', needsAccess: ['openai'], damage: null, setup: null,
+      failure: null, network: { mode: 'allowlist', domains: [] }, grants: [], access: 'needs_access', needsAccess: ['openai'], accessFailures: [], damage: null, setup: null,
     };
     useSpacesStore.getState().applyJourney([running], 0);
     const before = useSpacesStore.getState().progressRevision;
@@ -184,6 +176,17 @@ describe('the grant dialog and access given through it', () => {
     // A read that began after it is the host's word again.
     useSpacesStore.getState().applyJourney([{ ...running, needsAccess: [] }], useSpacesStore.getState().progressRevision);
     expect(useSpacesStore.getState().journey?.get(ID)?.grants).toEqual([]);
+  });
+
+  test('a grant for a provider takes that provider off the access the creation could not give', () => {
+    const failure = (provider: string) => ({ provider, code: 'secret_source_missing', message: 'not set' });
+    const running: SpaceEntry = {
+      id: ID, name: 'One', placeId: 'docker', machine: null, projectDirectory: '/home/me/app', directory: `/spaces/${ID}/app`, projectFolder: { path: '/home/me/app', found: true }, state: 'running', stoppedIdle: false, step: null,
+      failure: null, network: { mode: 'allowlist', domains: [] }, grants: [], access: null, needsAccess: [], accessFailures: [failure('openai'), failure('anthropic')], damage: null, setup: null,
+    };
+    useSpacesStore.getState().applyJourney([running], 0);
+    useSpacesStore.getState().noteGrantGiven(ID, { kind: 'login', id: 'openai', provider: 'openai', method: 'chatgpt-browser', url: 'http://gatekeeper:8080/model/openai' });
+    expect(useSpacesStore.getState().journey?.get(ID)?.accessFailures).toEqual([failure('anthropic')]);
   });
 
   test('opens on a space and a provider, and a runtime switch closes it', () => {
@@ -199,7 +202,7 @@ describe('the grant dialog and access given through it', () => {
 describe('the lists of spaces', () => {
   const space = (id: string, projectDirectory: string | null): SpaceEntry => ({
     id, name: id, placeId: 'docker', machine: null, projectDirectory, directory: projectDirectory ? `/spaces/${id}/app` : null, projectFolder: { path: projectDirectory ?? '/home/me/old', found: true },
-    state: 'running', stoppedIdle: false, step: null, failure: null, network: null, grants: [], access: null, needsAccess: [], damage: null, setup: null,
+    state: 'running', stoppedIdle: false, step: null, failure: null, network: null, grants: [], access: null, needsAccess: [], accessFailures: [], damage: null, setup: null,
   });
   const journey = new Map([
     ['aaaaaaaaaaaa', space('aaaaaaaaaaaa', '/home/me/app')],

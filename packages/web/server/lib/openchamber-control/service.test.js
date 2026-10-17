@@ -259,6 +259,19 @@ describe('OpenChamber control service', () => {
     });
   });
 
+  it('passes the files to carry through to the move', async () => {
+    const moveToWorktree = vi.fn(async () => ({}));
+    const { service } = createService({ sessionService: { moveToWorktree } });
+
+    await service.execute('session.moveToWorktree', { worktree: 'fix', carry: ['src/a.ts'] }, '/repo', { contextSessionId: 'ses_me' });
+
+    expect(moveToWorktree).toHaveBeenCalledWith('ses_me', {
+      directory: '/repo',
+      worktree: { name: 'fix' },
+      carry: ['src/a.ts'],
+    });
+  });
+
   it('moves a named session from where that session lives', async () => {
     const moveToWorktree = vi.fn(async () => ({}));
     const { service, client } = createService({ sessionService: { moveToWorktree } });
@@ -647,6 +660,88 @@ describe('render.page', () => {
     const { service } = createService({ isRenderToolEnabled: async () => false });
     await expect(service.execute('render.page', { html: page, title: 'Coverage' }, '/repo'))
       .rejects.toMatchObject({ statusCode: 403 });
+  });
+
+  describe('with awaitAnswer', () => {
+    const ask = { html: page, title: 'Pick a layout', awaitAnswer: true };
+    const call = { contextSessionId: 'ses_1', contextCallId: 'call_1' };
+    // The call starts waiting once its checks have run.
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+    it('waits until the user answers and returns the answer', async () => {
+      const { service } = createService();
+      const pending = service.execute('render.page', ask, '/repo', call);
+      await settle();
+
+      expect(service.answerPage({ sessionId: 'ses_1', callId: 'call_1', summary: ' Layout B ', data: { layout: 'b' } })).toEqual({ answered: true });
+      const result = await pending;
+
+      expect(result).toMatchObject({ title: 'Pick a layout', answer: { answered: true, summary: 'Layout B', data: { layout: 'b' } } });
+      expect(result.note).toContain('answered on the page');
+    });
+
+    it('announces when the page starts and stops waiting', async () => {
+      const onPageWaitChange = vi.fn();
+      const { service } = createService({ onPageWaitChange });
+      const pending = service.execute('render.page', ask, '/repo', call);
+      await settle();
+
+      expect(onPageWaitChange).toHaveBeenCalledWith({ type: 'waiting', sessionId: 'ses_1', callId: 'call_1', title: 'Pick a layout', directory: '/repo' });
+      service.answerPage({ sessionId: 'ses_1', callId: 'call_1', summary: 'B' });
+      await pending;
+      expect(onPageWaitChange).toHaveBeenLastCalledWith({ type: 'settled', sessionId: 'ses_1', callId: 'call_1' });
+
+      const controller = new AbortController();
+      const aborted = service.execute('render.page', ask, '/repo', { ...call, signal: controller.signal });
+      await settle();
+      controller.abort();
+      await expect(aborted).rejects.toBeTruthy();
+      expect(onPageWaitChange).toHaveBeenLastCalledWith({ type: 'settled', sessionId: 'ses_1', callId: 'call_1' });
+    });
+
+    it('answers once: a second answer, or one for another call, finds nothing waiting', async () => {
+      const { service } = createService();
+      const pending = service.execute('render.page', ask, '/repo', call);
+      await settle();
+
+      expect(() => service.answerPage({ sessionId: 'ses_1', callId: 'call_2', summary: 'B' })).toThrow(expect.objectContaining({ statusCode: 404 }));
+      service.answerPage({ sessionId: 'ses_1', callId: 'call_1', summary: 'B' });
+      await expect(pending).resolves.toMatchObject({ answer: { data: null } });
+      expect(() => service.answerPage({ sessionId: 'ses_1', callId: 'call_1', summary: 'B' })).toThrow(expect.objectContaining({ statusCode: 404 }));
+    });
+
+    it('stops waiting when the call is aborted, and the page no longer takes an answer', async () => {
+      const { service } = createService();
+      const controller = new AbortController();
+      const pending = service.execute('render.page', ask, '/repo', { ...call, signal: controller.signal });
+      await settle();
+
+      controller.abort();
+
+      await expect(pending).rejects.toMatchObject({ message: expect.stringContaining('stopped waiting') });
+      expect(() => service.answerPage({ sessionId: 'ses_1', callId: 'call_1', summary: 'B' })).toThrow(expect.objectContaining({ statusCode: 404 }));
+    });
+
+    it.each([
+      [{ summary: '' }, 400],
+      [{ summary: 's'.repeat(501) }, 400],
+      [{ summary: 'B', data: 'x'.repeat(16_001) }, 413],
+      [{ sessionId: '', summary: 'B' }, 400],
+    ])('refuses the answer %o and keeps waiting', async (answer, statusCode) => {
+      const { service } = createService();
+      const pending = service.execute('render.page', ask, '/repo', call);
+      await settle();
+
+      expect(() => service.answerPage({ sessionId: 'ses_1', callId: 'call_1', ...answer })).toThrow(expect.objectContaining({ statusCode }));
+      service.answerPage({ sessionId: 'ses_1', callId: 'call_1', summary: 'B' });
+      await expect(pending).resolves.toMatchObject({ answer: { summary: 'B' } });
+    });
+
+    it('refuses to wait without a call id, so an older plugin falls back to asking in text', async () => {
+      const { service } = createService();
+      await expect(service.execute('render.page', ask, '/repo', { contextSessionId: 'ses_1' }))
+        .rejects.toMatchObject({ statusCode: 400, message: expect.stringContaining('without awaitAnswer') });
+    });
   });
 });
 

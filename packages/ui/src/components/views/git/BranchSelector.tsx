@@ -208,7 +208,7 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               placeholder={t('gitView.branch.searchPlaceholder')}
-              className="oc-surface-elevated h-9 w-full rounded-lg border border-border bg-surface-elevated px-3 typography-meta outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
+              className="oc-surface-elevated oc-raised oc-field h-9 w-full rounded-lg bg-surface-elevated px-3 typography-meta outline-none placeholder:text-muted-foreground"
             />
             {switchBlockedNotice ? (
               <div className="flex items-start gap-2 px-2 py-1">

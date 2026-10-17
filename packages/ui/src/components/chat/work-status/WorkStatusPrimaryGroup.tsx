@@ -182,8 +182,13 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
   const openContextOverview = useUIStore((state) => state.openContextOverview);
   const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
   const openSurface = React.useCallback(
-    (mode: 'git' | 'pr') => { if (directory) openContextSurface(directory, mode); },
-    [directory, openContextSurface],
+    (mode: 'git' | 'pr') => {
+      if (!directory) return;
+      // The branch's pull request is the Tracker's branch tab, whichever item tab was last in front.
+      if (mode === 'pr') openContextPanelTab(directory, { mode: 'pr' });
+      else openContextSurface(directory, mode);
+    },
+    [directory, openContextPanelTab, openContextSurface],
   );
   // Working-tree diff without a target path: the panel opens on the whole
   // change set rather than picking a file on the user's behalf.

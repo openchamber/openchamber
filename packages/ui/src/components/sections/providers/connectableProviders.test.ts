@@ -34,6 +34,14 @@ describe('listConnectableProviders', () => {
     expect(result.map((provider) => provider.id)).toEqual(['openrouter']);
   });
 
+  test('leaves out a plugin web search provider that is not connected yet', () => {
+    const result = listConnectableProviders(catalog([
+      integration('brave', 'Brave Search', { metadata: { websearch: true } }),
+      integration('openrouter', 'OpenRouter'),
+    ], new Set()), new Set());
+    expect(result.map((provider) => provider.id)).toEqual(['openrouter']);
+  });
+
   test('keeps web search providers when that list could not be read', () => {
     const result = listConnectableProviders(catalog([integration('exa', 'Exa')], null), new Set());
     expect(result.map((provider) => provider.id)).toEqual(['exa']);

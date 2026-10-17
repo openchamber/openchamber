@@ -52,6 +52,8 @@ const HOST_ISOLATION_MIN_ENGINE = 28;
 // What the CLI prints when SSH reached the machine but found no running daemon there, or no docker.
 const REMOTE_DAEMON_DOWN = /Cannot connect to the Docker daemon|Is the docker daemon running/i;
 const REMOTE_DOCKER_MISSING = /docker: (?:command )?not found|No such file or directory/i;
+// What the CLI prints when the daemon's socket refuses this user.
+const LOCAL_SOCKET_DENIED = /permission denied while trying to connect to the docker daemon/i;
 /** The machine a `docker --host` value names, for a message: `ssh://me@box:22` is `me@box:22`. */
 const machineOf = (dockerHost) => String(dockerHost).replace(/^[a-z]+:\/\//i, '');
 // While a space moves to a new tools volume, its old container waits under this suffix.
@@ -166,6 +168,11 @@ export function createDockerPlace({ runCommand, openCommandStream = openCommandS
       server = null;
     }
     if (version.code !== 0 || info.code !== 0 || !server) {
+      // On Linux a daemon that runs but whose socket this user may not open reads the same as one
+      // that is down, and the fix is another: the user joins the docker group.
+      if (machine === null && LOCAL_SOCKET_DENIED.test(`${version.stderr}\n${info.stderr}`)) {
+        return unavailable('docker_permission_denied', 'Docker is running, but this user may not use it. Add the user to the docker group, sign in again, then try again.');
+      }
       if (machine === null) {
         return unavailable('docker_daemon_unreachable', 'Docker is installed but not running. Start Docker Desktop or Colima, then try again.');
       }
@@ -212,11 +219,13 @@ export function createDockerPlace({ runCommand, openCommandStream = openCommandS
     return imagePull;
   };
 
-  const ensureImage = async () => {
+  /** Pulls the image when it is absent; `onPull` hears that a pull begins. */
+  const ensureImage = async (onPull = () => {}) => {
     const present = await inspect('image', SPACE_BASE_IMAGE);
     if (present) {
       return;
     }
+    onPull();
     await pullImage();
   };
 
@@ -302,7 +311,10 @@ export function createDockerPlace({ runCommand, openCommandStream = openCommandS
   const server = createSpaceServerChannel({ exec: execInContainer, wait, now: () => now().getTime() });
   const gatekeeper = createGatekeeperChannel({ exec: execInContainer, wait, now: () => now().getTime() });
 
-  const create = async ({ id, name, project, created, memoryBytes }) => {
+  // `onStep(step)` hears the slow parts as they begin, so the screen says what the wait is for:
+  // `downloading_image` only when the image is absent, `preparing_tools` only when the tools
+  // volume is filled, and `creating` again once those are done.
+  const create = async ({ id, name, project, created, memoryBytes }, { onStep = () => {} } = {}) => {
     requireMemoryBytes(memoryBytes);
     // Built first, so a bad spec is rejected before Docker is asked anything.
     const labelArguments = new Map([ROLE_NETWORK, ROLE_OUTER_NETWORK, ROLE_VOLUME, ROLE_SETUP, ROLE_GATEKEEPER, ROLE_SPACE].map((role) => (
@@ -339,10 +351,12 @@ export function createDockerPlace({ runCommand, openCommandStream = openCommandS
 
     let toolsVolume = null;
     try {
-      await ensureImage();
+      let slowStep = false;
+      await ensureImage(() => { slowStep = true; onStep('downloading_image'); });
       // The tools volume is shared by every space of this owner. It has a rollback of its own,
       // and the rollback below never touches a labelled one: it removes by space id and by the seven names only.
-      toolsVolume = await tools.ensure();
+      toolsVolume = await tools.ensure({ onFill: () => { slowStep = true; onStep('preparing_tools'); } });
+      if (slowStep) onStep('creating');
       await docker(buildSpaceNetworkArgs({ network: resources.network, labelArguments: labelsFor(ROLE_NETWORK) }), CHANGE_TIMEOUT_MS);
       await docker(buildGatekeeperNetworkArgs({ network: outerNetwork, labelArguments: labelsFor(ROLE_OUTER_NETWORK) }), CHANGE_TIMEOUT_MS);
       await docker(['volume', 'create', ...labelsFor(ROLE_VOLUME), resources.workVolume], CHANGE_TIMEOUT_MS);

@@ -119,7 +119,7 @@ export const DirtyBranchSwitchDialog: React.FC<DirtyBranchSwitchDialogProps> = (
             </DialogDescription>
           </DialogHeader>
 
-          <div className="flex items-center gap-2 rounded-lg border border-border/60 px-3 py-2 focus-within:border-border">
+          <div className="oc-raised oc-field flex items-center gap-2 rounded-lg px-3 py-2">
             <input
               value={commitMessage}
               onChange={(event) => setCommitMessage(event.target.value)}

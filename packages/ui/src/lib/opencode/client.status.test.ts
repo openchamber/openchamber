@@ -36,6 +36,8 @@ describe("v2 status and cancellation HTTP boundary", () => {
       expect(permissions.map((p) => p.id)).toEqual(["p-save", "p-once"])
       expect(permissions[0]?.save).toEqual(["git *"])
       expect(permissions[1]?.save).toBeUndefined()
+      // A host from before waiting pages sends no pages list; it reads as none.
+      expect(snapshot?.pending?.s1?.pages).toEqual([])
     } finally {
       fetch.mockRestore()
     }

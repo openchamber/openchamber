@@ -206,7 +206,6 @@ export const forgetRemovedSpace = async (spaceId: string): Promise<void> => {
   const store = useSpacesStore.getState();
   const generation = spacesRuntimeGeneration();
   store.noteAction(spaceId, { kind: 'running', action: 'remove' });
-  store.noteCreationAccess(spaceId, null);
   if (store.accessDialog?.spaceId === spaceId) store.closeAccessDialog();
   if (store.actionsSheet === spaceId) store.closeActionsSheet();
   if (store.applyDialog === spaceId) store.closeApplyDialog();

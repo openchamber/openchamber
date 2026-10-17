@@ -89,7 +89,7 @@ export const seedGlobalSessionStatusFromHost = (): Promise<void> => {
       const session = entities.get(sessionId);
       const directory = session ? resolveGlobalSessionDirectory(session) : null;
       if (!directory) continue;
-      pending.push({ sessionId, directory, permissions: entry.permissions, forms: entry.forms });
+      pending.push({ sessionId, directory, permissions: entry.permissions, forms: entry.forms, pages: entry.pages });
     }
     seedGlobalBlockingRequests(pending);
   })().finally(() => {

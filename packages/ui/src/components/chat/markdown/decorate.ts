@@ -497,20 +497,132 @@ const measureAvailableWidths = (tables: HTMLTableElement[]): number[] => {
   return widths;
 };
 
-export const stabilizeMarkdownTableWidths = (root: HTMLElement, wrapCells: boolean): void => {
+// The content width of the block the table's wrapper sits in: read without
+// writing anything, so a refit during a resize forces no extra layout.
+// Markdown blocks are `display: contents`, so the box is further up.
+const readContainerContentWidth = (table: HTMLTableElement): number => {
+  const view = table.ownerDocument.defaultView;
+  let container = table.closest('[data-markdown="table-wrapper"]')?.parentElement ?? null;
+  let style = container ? view?.getComputedStyle(container) : undefined;
+  while (container && style?.display === 'contents') {
+    container = container.parentElement;
+    style = container ? view?.getComputedStyle(container) : undefined;
+  }
+  if (!container) return 0;
+  return container.clientWidth - (Number.parseFloat(style?.paddingLeft ?? '') || 0) - (Number.parseFloat(style?.paddingRight ?? '') || 0);
+};
+
+// What a table's column widths are computed from, kept per table element: the
+// width each column takes unwrapped, which does not depend on the available
+// width, and how the available width relates to the container's content width
+// (the table box's border). A refit at a new width then needs only arithmetic.
+// Measured again when the table's font changes; new content is a new element.
+type TableMeasurement = { naturalWidths: number[]; font: string; availableOffset: number };
+const tableMeasurements = new WeakMap<HTMLTableElement, TableMeasurement>();
+const readTableFont = (table: HTMLTableElement): string => table.ownerDocument.defaultView?.getComputedStyle(table).font ?? '';
+
+const planTableColumns = (naturalWidths: number[], availableWidth: number, wrapCells: boolean) => {
+  // Without layout (for example, a hidden chat), retain the former limit.
+  const maxColumnWidth = Math.max(TABLE_COLUMN_MIN_WIDTH, availableWidth || TABLE_COLUMN_FALLBACK_MAX_WIDTH);
+  const cappedWidths = naturalWidths.map((width) => Math.min(maxColumnWidth, Math.max(TABLE_COLUMN_MIN_WIDTH, width)));
+  // Without layout there is no width to fit into, so wrapping waits.
+  const widths = wrapCells && availableWidth > 0 ? fitColumnWidths(cappedWidths, availableWidth) : cappedWidths;
+  return { widths, cappedColumns: naturalWidths.map((width, columnIndex) => width > (widths[columnIndex] ?? 0)) };
+};
+
+const applyTableColumns = (
+  table: HTMLTableElement,
+  { availableWidth, widths, cappedColumns, wrapMode }: { availableWidth: number; widths: number[]; cappedColumns: boolean[]; wrapMode: string },
+): void => {
+  // Identifiers stay on one line only while the column can hold them; in a
+  // column capped at the available width they wrap instead of overflowing
+  // into the neighbouring cell.
+  for (const row of Array.from(table.querySelectorAll<HTMLTableRowElement>('tr'))) {
+    const cells = Array.from(row.children).filter((child) => child.tagName === 'TH' || child.tagName === 'TD');
+    cells.forEach((cell, columnIndex) => {
+      const nowrap = !cappedColumns[columnIndex];
+      for (const code of Array.from(cell.querySelectorAll('code[data-markdown="inline-code"]'))) {
+        code.classList.toggle('whitespace-nowrap', nowrap);
+      }
+    });
+  }
+
+  const existingColumns = Array.from(table.children).find((child) => (
+    child.matches('colgroup[data-md-table-columns]')
+  ));
+  const existingCols = existingColumns ? Array.from(existingColumns.children) : [];
+  if (existingColumns && existingCols.length === widths.length) {
+    // The same columns: only their widths change, as on every frame of a resize.
+    existingCols.forEach((column, index) => {
+      if (column instanceof HTMLElement) column.style.width = `${widths[index]}px`;
+    });
+  } else {
+    existingColumns?.remove();
+    const colgroup = table.ownerDocument.createElement('colgroup');
+    colgroup.setAttribute('data-md-table-columns', '');
+    for (const width of widths) {
+      const column = table.ownerDocument.createElement('col');
+      column.style.width = `${width}px`;
+      colgroup.appendChild(column);
+    }
+    const firstSection = Array.from(table.children).find((child) => (
+      child.tagName === 'THEAD' || child.tagName === 'TBODY' || child.tagName === 'TFOOT'
+    )) ?? null;
+    table.insertBefore(colgroup, firstSection);
+  }
+  table.style.tableLayout = 'fixed';
+  table.style.width = `${widths.reduce((total, width) => total + width, 0)}px`;
+  table.setAttribute(TABLE_LAYOUT_ATTR, 'fixed');
+  table.setAttribute(TABLE_WRAP_ATTR, wrapMode);
+  table.setAttribute(TABLE_WIDTH_ATTR, String(availableWidth));
+};
+
+/**
+ * Fits the tables' columns to the available width. With `cachedOnly`, it
+ * refits only from widths measured before and does nothing, returning false,
+ * when any table would need measuring: a caller following a resize on every
+ * frame can afford arithmetic, not a measurement.
+ */
+export const stabilizeMarkdownTableWidths = (root: HTMLElement, wrapCells: boolean, options: { cachedOnly?: boolean } = {}): boolean => {
   const wrapMode = String(wrapCells);
   const allTables = Array.from(root.querySelectorAll<HTMLTableElement>('table[data-markdown="table"]'));
-  if (allTables.length === 0 || !root.isConnected) return;
-  const allAvailableWidths = measureAvailableWidths(allTables);
-  const stale = allTables
-    .map((table, index) => ({ table, availableWidth: allAvailableWidths[index] ?? 0 }))
-    .filter(({ table, availableWidth }) => (
-      table.getAttribute(TABLE_LAYOUT_ATTR) !== 'fixed'
-      || table.getAttribute(TABLE_WRAP_ATTR) !== wrapMode
-      || table.getAttribute(TABLE_WIDTH_ATTR) !== String(availableWidth)
-    ));
-  if (stale.length === 0) return;
-  const tables = stale.map(({ table }) => table);
+  if (allTables.length === 0 || !root.isConnected) return true;
+  // Reads first: container widths and fonts, then the stretched measurement
+  // for tables measured for the first time.
+  const known = allTables.map((table) => {
+    const measurement = tableMeasurements.get(table);
+    const contentWidth = readContainerContentWidth(table);
+    return { table, contentWidth, measurement: measurement && measurement.font === readTableFont(table) ? measurement : null };
+  });
+  const unmeasured = known.filter(({ measurement }) => !measurement);
+  if (options.cachedOnly && unmeasured.length > 0) return false;
+  const stretchedWidths = new Map<HTMLTableElement, number>();
+  if (unmeasured.length > 0) {
+    const widths = measureAvailableWidths(unmeasured.map(({ table }) => table));
+    unmeasured.forEach(({ table }, index) => stretchedWidths.set(table, widths[index] ?? 0));
+  }
+  const all = known.map(({ table, contentWidth, measurement }) => ({
+    table,
+    contentWidth,
+    measurement,
+    availableWidth: measurement
+      ? (contentWidth > 0 ? Math.max(0, Math.round(contentWidth + measurement.availableOffset)) : 0)
+      : (stretchedWidths.get(table) ?? 0),
+  }));
+  const stale = all.filter(({ table, availableWidth }) => (
+    table.getAttribute(TABLE_LAYOUT_ATTR) !== 'fixed'
+    || table.getAttribute(TABLE_WRAP_ATTR) !== wrapMode
+    || table.getAttribute(TABLE_WIDTH_ATTR) !== String(availableWidth)
+  ));
+  if (stale.length === 0) return true;
+
+  for (const { table, availableWidth, measurement } of stale) {
+    if (!measurement) continue;
+    applyTableColumns(table, { availableWidth, wrapMode, ...planTableColumns(measurement.naturalWidths, availableWidth, wrapCells) });
+  }
+  const toMeasure = stale.filter(({ measurement }) => !measurement);
+  if (toMeasure.length === 0) return true;
+  const tables = toMeasure.map(({ table }) => table);
 
   const measurementRoot = root.ownerDocument.createElement('div');
   measurementRoot.setAttribute('aria-hidden', 'true');
@@ -570,58 +682,20 @@ export const stabilizeMarkdownTableWidths = (root: HTMLElement, wrapCells: boole
 
   root.appendChild(measurementRoot);
   const plans = probes.map(({ table, columnProbes }, index) => {
-    const availableWidth = stale[index]?.availableWidth ?? 0;
-    // Without layout (for example, a hidden chat), retain the former limit.
-    const maxColumnWidth = Math.max(TABLE_COLUMN_MIN_WIDTH, availableWidth || TABLE_COLUMN_FALLBACK_MAX_WIDTH);
+    const { availableWidth, contentWidth } = toMeasure[index] ?? { availableWidth: 0, contentWidth: 0 };
     const naturalWidths = columnProbes.map((probe) => Math.ceil(probe.getBoundingClientRect().width));
-    const cappedWidths = naturalWidths.map((width) => Math.min(maxColumnWidth, Math.max(TABLE_COLUMN_MIN_WIDTH, width)));
-    // Without layout there is no width to fit into, so wrapping waits.
-    const widths = wrapCells && availableWidth > 0 ? fitColumnWidths(cappedWidths, availableWidth) : cappedWidths;
-    return {
-      table,
-      availableWidth,
-      widths,
-      cappedColumns: naturalWidths.map((width, columnIndex) => width > (widths[columnIndex] ?? 0)),
-    };
+    // Only a table laid out on screen has widths worth keeping.
+    if (availableWidth > 0 && contentWidth > 0) {
+      tableMeasurements.set(table, { naturalWidths, font: readTableFont(table), availableOffset: availableWidth - contentWidth });
+    }
+    return { table, availableWidth, ...planTableColumns(naturalWidths, availableWidth, wrapCells) };
   });
   measurementRoot.remove();
 
   for (const { table, availableWidth, widths, cappedColumns } of plans) {
-    // Identifiers stay on one line only while the column can hold them; in a
-    // column capped at the available width they wrap instead of overflowing
-    // into the neighbouring cell.
-    for (const row of Array.from(table.querySelectorAll<HTMLTableRowElement>('tr'))) {
-      const cells = Array.from(row.children).filter((child) => child.tagName === 'TH' || child.tagName === 'TD');
-      cells.forEach((cell, columnIndex) => {
-        const nowrap = !cappedColumns[columnIndex];
-        for (const code of Array.from(cell.querySelectorAll('code[data-markdown="inline-code"]'))) {
-          code.classList.toggle('whitespace-nowrap', nowrap);
-        }
-      });
-    }
-
-    const existingColumns = Array.from(table.children).find((child) => (
-      child.matches('colgroup[data-md-table-columns]')
-    ));
-    existingColumns?.remove();
-
-    const colgroup = root.ownerDocument.createElement('colgroup');
-    colgroup.setAttribute('data-md-table-columns', '');
-    for (const width of widths) {
-      const column = root.ownerDocument.createElement('col');
-      column.style.width = `${width}px`;
-      colgroup.appendChild(column);
-    }
-    const firstSection = Array.from(table.children).find((child) => (
-      child.tagName === 'THEAD' || child.tagName === 'TBODY' || child.tagName === 'TFOOT'
-    )) ?? null;
-    table.insertBefore(colgroup, firstSection);
-    table.style.tableLayout = 'fixed';
-    table.style.width = `${widths.reduce((total, width) => total + width, 0)}px`;
-    table.setAttribute(TABLE_LAYOUT_ATTR, 'fixed');
-    table.setAttribute(TABLE_WRAP_ATTR, wrapMode);
-    table.setAttribute(TABLE_WIDTH_ATTR, String(availableWidth));
+    applyTableColumns(table, { availableWidth, widths, cappedColumns, wrapMode });
   }
+  return true;
 };
 
 // ---------------------------------------------------------------------------

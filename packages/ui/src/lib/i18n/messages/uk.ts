@@ -9,12 +9,14 @@ import { routingI18n } from './routing.i18n';
 import { pluginPanelI18n } from './plugin-panel.i18n';
 import { surfacePanelI18n } from './surface-panel.i18n';
 import { fileArtifactsI18n } from './file-artifacts.i18n';
+import { fileContentSearchI18n } from './file-content-search.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
 import { sourceBoardI18n } from './source-board.i18n';
 import { projectActionsI18n } from './project-actions.i18n';
+import { gitIdentityEditorI18n } from './git-identity-editor.i18n';
 import { environmentI18n } from './environment.i18n';
 import { providersI18n } from './providers.i18n';
 import { mcpGridI18n } from './mcp-grid.i18n';
@@ -148,12 +150,14 @@ export const dict: Record<I18nKey, string> = {
   ...pluginPanelI18n.uk,
   ...surfacePanelI18n.uk,
   ...fileArtifactsI18n.uk,
+  ...fileContentSearchI18n.uk,
   ...htmlRenderI18n.uk,
   ...usageStatsI18n.uk,
   ...webSearchI18n.uk,
   ...isolatedSpacesI18n.uk,
   ...sourceBoardI18n.uk,
   ...projectActionsI18n.uk,
+  ...gitIdentityEditorI18n.uk,
   ...environmentI18n.uk,
   ...providersI18n.uk,
   ...mcpGridI18n.uk,
@@ -692,6 +696,8 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.session.work.markDone": "Позначити готовим",
   "sessions.sidebar.session.work.doneSuggested": "Схоже, готово",
   "sessions.sidebar.session.work.updateFailed": "Не вдалося оновити сесію",
+  "sessions.sidebar.session.pin.pinFailed": "Не вдалося закріпити сесію",
+  "sessions.sidebar.session.pin.unpinFailed": "Не вдалося відкріпити сесію",
   "chat.work.doneHint.text": "Схоже, тут усе готово.",
   "chat.work.doneHint.action": "Позначити готовим",
   "chat.work.reviewHint.text": "Зміни готові до перегляду.",
@@ -1320,8 +1326,10 @@ export const dict: Record<I18nKey, string> = {
   "contextPanel.mode.diff": "Зміни",
   "contextPanel.mode.stagedDiff": "Staged Diff",
   "contextPanel.mode.workingDiff": "Working Diff",
-  "contextPanel.mode.pr": "Pull Request",
-  'contextPanel.mode.mr': 'Merge Request',
+  'contextPanel.mode.pr': "Трекер",
+  'contextPanel.tracker.branchTab': "Поточна гілка",
+  'contextPanel.tracker.loadFailed': "Не вдалося завантажити цей елемент.",
+  'contextPanel.tracker.unavailable': "OpenChamber не може прочитати цей елемент тут.",
   'gitView.mergeRequest.title': 'MR',
   'gitView.mergeRequest.availableOnFeatureBranches': 'Доступно, коли поточна гілка може відкрити MR.',
   'gitView.mr.openMergeRequest': 'Відкрити merge request',
@@ -1450,8 +1458,7 @@ export const dict: Record<I18nKey, string> = {
   "walkthrough.blocked.serverUnsupported.description": "Сервер OpenChamber, до якого підключено застосунок, не відповів на walkthrough API — отже, він старіший за застосунок. Оновіть сервер до 1.18 або новішої версії та оновіть панель.",
   "walkthrough.blocked.contextTooSmall.descriptionUnknownModel": "Small model вміщає близько {available} тис. символів, а цьому diff потрібно близько {required} тис. Нічого не обрізається — оберіть модель із більшим контекстом.",
   "walkthrough.blocked.structuredOutput.descriptionUnknownModel": "Small model не підтримує структуровані відповіді, потрібні для розбору.",
-  "contextRail.surface.pr.description": "Створюйте, переглядайте та зливайте pull request поточної гілки",
-  "contextRail.surface.mr.description": "Створюйте, переглядайте та зливайте merge request поточної гілки",
+  'contextRail.surface.pr.description': "Pull request поточної гілки та issues, pull requests і задачі, відкриті з ваших сесій",
   "contextRail.surface.notes.description": "Нотатки, завдання, плани та памʼять агента для проєкту",
   "contextRail.surface.context.description": "Контекст сесії та використання токенів",
   "contextRail.surface.browser.description": "Вбудований браузер",
@@ -1784,6 +1791,12 @@ export const dict: Record<I18nKey, string> = {
   "diffView.unavailable.missingDescription": "Його видалили після того, як завантажився список змін. Список оновлюється.",
   "diffView.unavailable.nestedRepositoryTitle": "Окремий Git-репозиторій",
   "diffView.unavailable.nestedRepositoryDescription": "Ця тека має власну історію Git. Відкрийте її як проєкт, щоб побачити її зміни.",
+  "diffView.nestedRepository.description": "Ця тека має власну історію Git. Відкрийте її як проєкт, щоб закомітити ці зміни.",
+  "diffView.nestedRepository.openAsProject": "Відкрити як проєкт",
+  "diffView.nestedRepository.openFailed": "Не вдалося відкрити цю теку як проєкт",
+  "diffView.nestedRepository.loading": "Читаємо зміни репозиторію…",
+  "diffView.nestedRepository.loadFailed": "Не вдалося прочитати зміни репозиторію",
+  "diffView.nestedRepository.noChanges": "У цьому репозиторії немає змін",
   "diffView.unavailable.untrackedDirectoryTitle": "Тека з новими файлами",
   "diffView.unavailable.untrackedDirectoryDescription": "У цій теці забагато нових файлів, щоб показувати їх окремо. Застейджте її або додайте в .gitignore, якщо їй не місце в репозиторії.",
   "diffView.submodule.title": "Субмодуль",
@@ -1988,7 +2001,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.recap.label": "Підсумок:",
   "chat.sessionError.title": "OpenCode зупинив цю відповідь",
   "chat.sessionError.noDetails": "OpenCode не повідомив деталей. Звіт про стан показує останні помилки.",
-  "chat.sessionError.showStatus": "Показати статус OpenCode",
+  "chat.sessionError.showStatus": "Показати хронологію діагностики",
   "chat.sessionError.noReply": "OpenCode не почав відповідь на це повідомлення.",
   "chat.sessionError.interrupted": 'OpenCode перервав цю відповідь.',
   'chat.longError.expand': 'Показати помилку повністю',
@@ -2750,7 +2763,7 @@ export const dict: Record<I18nKey, string> = {
   "commandPalette.item.showContextUsage": "Показати використання контексту",
   "commandPalette.item.toggleTerminal": "Перемкнути термінал",
   "commandPalette.item.cycleTheme": "Перемкнути тему",
-  "commandPalette.item.showOpenCodeStatus": "Показати статус OpenCode",
+  "commandPalette.item.showOpenCodeStatus": "Показати хронологію діагностики",
   "commandPalette.item.restartOpenCode": "Перезапустити OpenCode",
   "commandPalette.item.toggleMemoryDebug": "Показати/сховати панель memory debug",
   "commandPalette.item.pinSession": "Прикріпити або відкріпити сесію",
@@ -2803,13 +2816,15 @@ export const dict: Record<I18nKey, string> = {
   "commandPalette.footer.navigate": "навігація",
   "commandPalette.footer.open": "відкрити",
   "commandPalette.footer.close": "закрити",
-  "openCodeStatusDialog.title": "Статус OpenCode",
-  "openCodeStatusDialog.description": "Перегляньте поточний стан OpenCode і діагностику.",
+  "openCodeStatusDialog.title": "Хронологія діагностики",
+  "openCodeStatusDialog.description": "Локальні події за часом. Приватний текст логів і віддалені джерела не включено.",
+  "openCodeStatusDialog.actions.download": "Завантажити лог",
+  "openCodeStatusDialog.toast.collectFailed": "Не вдалося зібрати діагностику",
   "openCodeStatusDialog.actions.copy": "Копіювати",
   "openCodeStatusDialog.empty.noData": "Немає даних.",
   "openCodeStatusDialog.toast.copiedTitle": "Скопійовано",
-  "openCodeStatusDialog.toast.copiedDescription": "Статус скопійовано в буфер обміну",
-  "openCodeStatusDialog.toast.copyFailed": "Не вдалося скопіювати статус",
+  "openCodeStatusDialog.toast.copiedDescription": "Діагностичний лог скопійовано в буфер обміну",
+  "openCodeStatusDialog.toast.copyFailed": "Не вдалося скопіювати діагностичний лог",
   "saveProjectPlanDialog.title": "Зберегти план проєкту",
   "saveProjectPlanDialog.description": "Збережіть цей план у своєму проєкті як файл Markdown.",
   "saveProjectPlanDialog.field.title": "Назва",

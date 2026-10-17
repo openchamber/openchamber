@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import {
   getDirectoryForFilePath,
+  getDisambiguatingFolders,
   getRelativeFilePath,
   isAbsoluteFilePath,
   isFilePathWithinDirectory,
@@ -67,5 +68,26 @@ describe('path-utils', () => {
       'C:/Users/Bohdan Triapitsyn/projects/openchamber/packages/ui/Button.tsx',
     )).toBe('C:/Users/Bohdan Triapitsyn/projects/openchamber/packages/ui');
     expect(getDirectoryForFilePath('', '/tmp/file.txt')).toBe('/tmp');
+  });
+
+  test('names the folders that tell same-named files apart', () => {
+    const folders = getDisambiguatingFolders([
+      'README.md',
+      'docs/README.md',
+      'packages/ui/src/index.ts',
+      'packages/web/src/index.ts',
+      'src/App.tsx',
+    ]);
+    expect(Object.fromEntries(folders)).toEqual({
+      'docs/README.md': 'docs',
+      'packages/ui/src/index.ts': 'ui/src',
+      'packages/web/src/index.ts': 'web/src',
+    });
+  });
+
+  test('shows all folders of a path that ends inside another', () => {
+    const folders = getDisambiguatingFolders(['a/README.md', 'x/a/README.md']);
+    expect(folders.get('a/README.md')).toBe('a');
+    expect(folders.get('x/a/README.md')).toBe('x/a');
   });
 });

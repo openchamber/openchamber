@@ -5,7 +5,7 @@ import { cn } from '@/lib/utils';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Icon } from '@/components/icon/Icon';
 import type { IconName } from '@/components/icon/icons';
-import { BusyDots } from './BusyDots';
+import { BusyDots } from '@/components/ui/busy-dots';
 import { BlockLine } from './BlockLine';
 import { useI18n } from '@/lib/i18n';
 import { useUIStore } from '@/stores/useUIStore';

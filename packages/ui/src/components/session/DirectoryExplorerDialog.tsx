@@ -831,7 +831,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
               onChange={(event) => setCloneRemoteUrl(event.target.value)}
               placeholder={t('directoryExplorerDialog.clone.remoteUrlPlaceholder')}
               aria-label={t('directoryExplorerDialog.clone.remoteUrlPlaceholder')}
-              className="min-w-0 flex-1 border-border/60 bg-[var(--surface-elevated)] font-mono typography-ui-label shadow-none"
+              className="min-w-0 flex-1 bg-[var(--surface-elevated)] font-mono typography-ui-label"
               spellCheck={false}
               autoComplete="off"
               autoCorrect="off"
@@ -852,7 +852,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
           onChange={(event) => setQuery(normalizeSeparators(event.target.value))}
           onKeyDown={handleKeyDown}
           placeholder={t('directoryExplorerDialog.pathInput.placeholder')}
-          className="border-transparent bg-transparent ps-9 font-mono typography-ui-label shadow-none focus-visible:ring-0"
+          className="bg-transparent ps-9 font-mono typography-ui-label"
           style={!isMobile && addButtonWidth > 0 ? { paddingRight: `${addButtonWidth + 24}px` } : undefined}
           spellCheck={false}
           autoComplete="off"

@@ -233,6 +233,42 @@ describe('live Activity with the real message body', () => {
         expect(container.querySelectorAll('iframe')).toHaveLength(1);
     });
 
+    test('draws what the agent does after a page below it while the turn works', async () => {
+        const page: Part = {
+            type: 'tool', tool: 'openchamber_render', id: 'page', callID: 'page', sessionID: 'session', messageID: 'asked',
+            state: {
+                status: 'completed', input: { action: 'render.page', html: '<p>pick</p>', title: 'Pick a layout', awaitAnswer: true },
+                output: '{}', metadata: { openchamber: { ok: true, answer: { answered: true, summary: 'B', data: null } } }, time: { start: 1, end: 2 },
+            },
+        };
+        const before = assistant('before', [text('before-text', 'Looking around'), readPart], 'tool-calls');
+        const asked = assistant('asked', [page], 'tool-calls');
+        // The reply is still being written: not yet marked final.
+        const writing = assistant('writing', [text('writing-text', 'Building layout B')], undefined);
+        await act(async () => root.render(<Harness record={turn([before, asked, writing])} />));
+
+        const html = container.innerHTML;
+        expect(html.indexOf('title="Pick a layout"')).toBeGreaterThan(-1);
+        expect(html.indexOf('Building layout B')).toBeGreaterThan(html.indexOf('title="Pick a layout"'));
+        expect(html.indexOf('Looking around')).toBeLessThan(html.indexOf('title="Pick a layout"'));
+        expect(container.querySelectorAll('iframe')).toHaveLength(1);
+    });
+
+    test('keeps a page that waits for the user\'s answer in view while its call runs', async () => {
+        const page: Part = {
+            type: 'tool', tool: 'openchamber_render', id: 'page', callID: 'page', sessionID: 'session', messageID: 'progress',
+            state: {
+                status: 'running', input: { action: 'render.page', html: '<p>pick</p>', title: 'Pick a layout', awaitAnswer: true },
+                time: { start: 1 },
+            },
+        };
+        const record = turn([assistant('progress', [text('progress-text', 'Asking'), readPart, page], 'tool-calls')]);
+        await act(async () => root.render(<Harness record={record} retired />));
+        expect(container.textContent).not.toContain('Asking');
+        expect([...container.querySelectorAll('iframe')].map((frame) => frame.getAttribute('title'))).toEqual(['Pick a layout']);
+        expect(container.querySelector('[data-html-render-status="waiting"]')).not.toBeNull();
+    });
+
     test('keeps thinking in the final message inside Activity, not outside with the answer', async () => {
         const thinking: Part = { type: 'reasoning', id: 'thinking', messageID: 'final', sessionID: 'session', text: 'Private reasoning content', time: { start: 1, end: 2 } };
         const final = assistant('final', [thinking, text('final-text', 'Public answer')], 'stop');

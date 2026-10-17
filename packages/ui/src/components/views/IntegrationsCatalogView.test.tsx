@@ -109,7 +109,7 @@ test('the catalog lists entries, filters by category and opens a detail page on 
   expect(body.textContent?.includes('Playwright')).toBe(false);
 
   // The detail breadcrumb returns to the grid.
-  const back = [...body.querySelectorAll('button')].find((button) => button.textContent?.includes('All integrations'));
+  const back = findClickable([...body.querySelectorAll('nav button')], 'Integrations');
   if (!back) throw new Error('Back button missing');
   await act(async () => back.click());
   expect(body.textContent?.includes('Playwright')).toBe(true);
@@ -125,7 +125,7 @@ test('the category filter narrows the grid', async () => {
     expect(body.textContent?.includes('Playwright')).toBe(false);
   });
 
-test('the installed filter shows only installed entries and returns to all', async () => {
+test('the rail lists installed integrations and opens one', async () => {
   useMcpConfigStore.setState({
     mcpServers: [{
       name: 'atlassian',
@@ -136,20 +136,16 @@ test('the installed filter shows only installed entries and returns to all', asy
   });
   await act(async () => root.render(<I18nProvider><IntegrationsCatalogView /></I18nProvider>));
   const body = browser.document.body;
+  const rail = body.querySelector('aside');
+  if (!rail) throw new Error('Rail missing');
+  expect(rail.textContent?.includes('Installed1')).toBe(true);
+  expect(rail.textContent?.includes('Linear')).toBe(false);
 
-  const installedChip = [...body.querySelectorAll('button')].find((button) => button.textContent?.startsWith('Installed'));
-  if (!installedChip) throw new Error('Installed filter missing');
-  // The rail shows the installed count next to the label.
-  expect(installedChip.textContent).toBe('Installed1');
-  await act(async () => installedChip.click());
-  expect(body.textContent?.includes('Atlassian')).toBe(true);
-  expect(body.textContent?.includes('Playwright')).toBe(false);
-
-  // "All" undoes the filter.
-  const allChip = [...body.querySelectorAll('button')].find((button) => button.textContent?.startsWith('All'));
-  if (!allChip) throw new Error('All filter missing');
-  await act(async () => allChip.click());
-  expect(body.textContent?.includes('Playwright')).toBe(true);
+  const atlassian = [...rail.querySelectorAll('button')].find((button) => button.textContent?.includes('Atlassian'));
+  if (!atlassian) throw new Error('Installed entry missing');
+  await act(async () => atlassian.click());
+  expect(body.querySelector('main h1')?.textContent).toBe('Atlassian');
+  expect(body.textContent?.includes('Connection')).toBe(true);
 });
 
 test('the catalog flag follows the mutually exclusive full-page surface contract', () => {
@@ -197,4 +193,44 @@ test('a needs-auth server shows the sign-in state on its detail page', async () 
   if (!linearCard) throw new Error('Linear card missing');
   await act(async () => linearCard.click());
   expect(browser.document.body.textContent?.includes('Waiting for sign-in')).toBe(true);
+});
+
+test('a same-named skill outside the catalog folder does not count as installed', async () => {
+  useSkillsStore.setState({
+    skills: [
+      { name: 'pdf', path: '/home/user/.claude/skills/pdf/SKILL.md', scope: 'user', source: 'claude' },
+      { name: 'pdf', path: '/repo/.agents/skills/pdf/SKILL.md', scope: 'project', source: 'agents' },
+    ],
+  });
+  await act(async () => root.render(<I18nProvider><IntegrationsCatalogView /></I18nProvider>));
+  const railText = () => browser.document.body.querySelector('aside')?.textContent ?? '';
+  expect(railText().includes('Installed0')).toBe(true);
+
+  // The catalog's own copy, in the user's OpenCode skills folder, counts.
+  await act(async () => useSkillsStore.setState({
+    skills: [
+      ...useSkillsStore.getState().skills,
+      { name: 'pdf', path: '/home/user/.config/opencode/skills/pdf/SKILL.md', scope: 'user', source: 'opencode' },
+    ],
+  }));
+  expect(railText().includes('Installed1')).toBe(true);
+});
+
+test('a detail page opens at its top and going back restores the browse scroll', async () => {
+  await act(async () => root.render(<I18nProvider><IntegrationsCatalogView /></I18nProvider>));
+  const body = browser.document.body;
+  const scroller = body.querySelector('main');
+  if (!scroller) throw new Error('Scroller missing');
+  scroller.scrollTop = 600;
+  await act(async () => scroller.dispatchEvent(new browser.Event('scroll')));
+
+  const card = findClickable([...body.querySelectorAll('main [role="button"]')], 'Notion');
+  if (!card) throw new Error('Notion row missing');
+  await act(async () => card.click());
+  expect(scroller.scrollTop).toBe(0);
+
+  const back = findClickable([...body.querySelectorAll('nav button')], 'Integrations');
+  if (!back) throw new Error('Back button missing');
+  await act(async () => back.click());
+  expect(scroller.scrollTop).toBe(600);
 });

@@ -8,9 +8,10 @@ import {
   SettingsFieldRow,
   SettingsCheckboxRow,
   SettingsChipGroup,
-  SettingsInset,
   SETTINGS_ICON_BUTTON_CLASS,
   SETTINGS_NUMBER_INPUT_CLASS,
+  SETTINGS_NUMBER_STEPPER_ROW_CLASS,
+  SETTINGS_NUMBER_UNIT_CLASS,
 } from '@/components/sections/shared/SettingsSection';
 import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
@@ -69,12 +70,21 @@ export const SessionRetentionSettings: React.FC = () => {
     }
   }, [runCleanup, t]);
 
+  const eligibleText = status === 'error'
+    ? t('sessions.sidebar.group.empty.loadFailed')
+    : status !== 'ready'
+    ? t('sessions.sidebar.group.empty.loadingSessions')
+    : action === 'archive'
+    ? t('settings.openchamber.sessionRetention.manualCleanup.eligibleArchiveNow', { count: pendingCount })
+    : t('settings.openchamber.sessionRetention.manualCleanup.eligibleDeleteNow', { count: pendingCount });
+
   return (
     <SettingsSection
       title={t('settings.openchamber.sessionRetention.title')}
       info={t(onlyArchived
         ? 'settings.openchamber.sessionRetention.archivedTooltip'
         : 'settings.openchamber.sessionRetention.tooltip')}
+      contentClassName="space-y-2"
     >
       <SettingsCheckboxRow
         settingsItem="sessions.auto-cleanup"
@@ -84,42 +94,53 @@ export const SessionRetentionSettings: React.FC = () => {
         ariaLabel={t('settings.openchamber.sessionRetention.field.enableAutoCleanupAria')}
       />
 
-      <SettingsInset className="space-y-0">
-        <SettingsCheckboxRow
+      {/* The period, the target and the action also drive "Run cleanup now",
+          so they stay editable while auto-cleanup is off. */}
+      <div>
+        <SettingsFieldRow
           settingsItem="sessions.retention-only-archived"
-          checked={onlyArchived}
-          onChange={setOnlyArchived}
-          disabled={isRunning}
-          label={t('settings.openchamber.sessionRetention.field.onlyArchived')}
-          ariaLabel={t('settings.openchamber.sessionRetention.field.onlyArchived')}
+          label={t('settings.layout.sessions.retention.target')}
           info={t('settings.openchamber.sessionRetention.field.onlyArchivedDescription')}
-        />
+        >
+          <SettingsChipGroup
+            value={onlyArchived ? 'archived' : 'unarchived'}
+            onChange={(value) => setOnlyArchived(value === 'archived')}
+            aria-label={t('settings.layout.sessions.retention.target')}
+            options={[
+              { value: 'unarchived', label: t('settings.layout.sessions.retention.target.unarchived'), disabled: isRunning },
+              { value: 'archived', label: t('settings.layout.sessions.retention.target.archived'), disabled: isRunning },
+            ]}
+          />
+        </SettingsFieldRow>
+
         <SettingsFieldRow
           settingsItem="sessions.retention-period"
           label={t('settings.openchamber.sessionRetention.field.retentionPeriod')}
         >
-          <NumberInput
-            value={autoDeleteAfterDays}
-            onValueChange={setAutoDeleteAfterDays}
-            min={MIN_DAYS}
-            max={MAX_DAYS}
-            step={1}
-            aria-label={t('settings.openchamber.sessionRetention.field.retentionPeriodAria')}
-            className={cn(SETTINGS_NUMBER_INPUT_CLASS, 'tabular-nums')}
-          />
-          <span className="typography-ui-label text-muted-foreground">{t('settings.openchamber.sessionRetention.field.days')}</span>
-          <Button
-            size="sm"
-            type="button"
-            variant="ghost"
-            onClick={() => setAutoDeleteAfterDays(DEFAULT_RETENTION_DAYS)}
-            disabled={autoDeleteAfterDays === DEFAULT_RETENTION_DAYS}
-            className={SETTINGS_ICON_BUTTON_CLASS}
-            aria-label={t('settings.openchamber.sessionRetention.actions.resetRetentionAria')}
-            title={t('settings.common.actions.reset')}
-          >
-            <Icon name="restart" className="h-3.5 w-3.5" />
-          </Button>
+          <div className={SETTINGS_NUMBER_STEPPER_ROW_CLASS}>
+            <NumberInput
+              value={autoDeleteAfterDays}
+              onValueChange={setAutoDeleteAfterDays}
+              min={MIN_DAYS}
+              max={MAX_DAYS}
+              step={1}
+              aria-label={t('settings.openchamber.sessionRetention.field.retentionPeriodAria')}
+              className={cn(SETTINGS_NUMBER_INPUT_CLASS, 'tabular-nums')}
+            />
+            <span className={SETTINGS_NUMBER_UNIT_CLASS}>{t('settings.openchamber.sessionRetention.field.days')}</span>
+            <Button
+              size="sm"
+              type="button"
+              variant="ghost"
+              onClick={() => setAutoDeleteAfterDays(DEFAULT_RETENTION_DAYS)}
+              disabled={autoDeleteAfterDays === DEFAULT_RETENTION_DAYS}
+              className={SETTINGS_ICON_BUTTON_CLASS}
+              aria-label={t('settings.openchamber.sessionRetention.actions.resetRetentionAria')}
+              title={t('settings.common.actions.reset')}
+            >
+              <Icon name="restart" className="h-3.5 w-3.5" />
+            </Button>
+          </div>
         </SettingsFieldRow>
 
         <SettingsFieldRow
@@ -136,32 +157,22 @@ export const SessionRetentionSettings: React.FC = () => {
             }))}
           />
         </SettingsFieldRow>
-      </SettingsInset>
 
-      <div className="mt-1 py-1.5 space-y-1">
-        <SettingsFieldRow
-          label={t('settings.openchamber.sessionRetention.manualCleanup.title')}
-        >
+        <SettingsFieldRow label={t('settings.openchamber.sessionRetention.manualCleanup.title')}>
           <Button
             type="button"
             variant="outline"
-            size="xs"
+            size="sm"
             onClick={handleRunCleanup}
             disabled={isRunning}
             className="!font-normal"
           >
             {isRunning ? t('settings.openchamber.sessionRetention.actions.cleaningUp') : t('settings.openchamber.sessionRetention.actions.runCleanupNow')}
           </Button>
+          <span className="typography-meta truncate text-muted-foreground" aria-live="polite" title={eligibleText}>
+            {eligibleText}
+          </span>
         </SettingsFieldRow>
-        <p className="typography-meta text-muted-foreground">
-          {status === 'error'
-            ? t('sessions.sidebar.group.empty.loadFailed')
-            : status !== 'ready'
-            ? t('sessions.sidebar.group.empty.loadingSessions')
-            : action === 'archive'
-            ? t('settings.openchamber.sessionRetention.manualCleanup.eligibleArchiveNow', { count: pendingCount })
-            : t('settings.openchamber.sessionRetention.manualCleanup.eligibleDeleteNow', { count: pendingCount })}
-        </p>
       </div>
     </SettingsSection>
   );

@@ -16,6 +16,11 @@ interface SettingsWindowProps {
 export const SettingsWindow: React.FC<SettingsWindowProps> = ({ open, onOpenChange }) => {
   const { t } = useI18n();
   const descriptionId = React.useId();
+  const popupRef = React.useRef<HTMLDivElement>(null);
+  const focusSettingsSearch = React.useCallback(() => {
+    const popup = popupRef.current;
+    return popup?.querySelector<HTMLElement>('[data-settings-search]') ?? popup ?? true;
+  }, []);
 
   const hasOpenFloatingMenu = React.useCallback(() => {
     if (typeof document === 'undefined') {
@@ -45,9 +50,13 @@ export const SettingsWindow: React.FC<SettingsWindowProps> = ({ open, onOpenChan
         />
         <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none">
           <Dialog.Popup
+            ref={popupRef}
             aria-describedby={descriptionId}
+            // Open straight into the settings search, so typing filters at
+            // once; the window itself if the field is not there.
+            initialFocus={focusSettingsSearch}
             className={cn(
-              'relative pointer-events-auto',
+              'relative pointer-events-auto outline-none',
               'w-[90vw] max-w-[1200px] h-[85vh] max-h-[900px]',
               'oc-window-corners border oc-modal-shadow overflow-hidden origin-center',
               'bg-background',

@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { Session } from '@/lib/opencode/model';
-import { isSessionPinned } from '@/stores/useSessionPinnedStore';
+import { isSessionPinned } from '@/lib/sessionPins';
 import { countSyncPerformance } from './performance-diagnostics';
 
 export type SessionActivityPhase = 'active' | 'settled';

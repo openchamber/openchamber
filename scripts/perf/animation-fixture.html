@@ -146,6 +146,22 @@
   .v-busy-dots-timer .busy-dots[data-phase="4"] span:nth-child(3),
   .v-busy-dots-timer .busy-dots[data-phase="5"] span:nth-child(3) { opacity: 1; }
 
+  /*
+    A waiting indicator as the app draws it (`useWaitingBlink`): no animation,
+    one shared 1 s timer toggles bright and dim on every indicator at once.
+  */
+  .v-blink-timer.dim svg { opacity: 0.4; }
+
+  /*
+    The composer caret. `caret-css` is CodeMirror's own `drawSelection()` rule
+    on its cursor layer; `caret-timer` writes the same 1.2 s rhythm from a
+    600 ms timer.
+  */
+  @keyframes cm-blink { 0% {} 50% { opacity: 0; } 100% {} }
+  .caret { width: 1.2px; height: 16px; background: #eee; }
+  .v-caret-css .caret { animation: steps(1) cm-blink 1.2s infinite; }
+  .v-caret-timer.caret-off .caret { opacity: 0; }
+
   .v-activity-static, .v-activity-collapse { display: block; }
   .v-activity-static .cell, .v-activity-collapse .cell { width: 680px; height: auto; overflow: hidden; }
   .activity-row { height: 18px; display: flex; gap: 12px; }
@@ -197,6 +213,7 @@
         + [0, 200, 400].map((delay) => '<span style="animation-delay:' + delay + 'ms">.</span>').join('')
         + '</span></span>';
     }
+    else if (variant.startsWith('caret-')) cell.innerHTML = '<div class="caret"></div>';
     else if (usesWrapper) cell.innerHTML = '<span class="wrap">' + SPINNER + '</span>';
     else if (usesButton) cell.innerHTML = '<button>' + spinner + '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4" fill="#456"/></svg></button>';
     else cell.innerHTML = SPINNER;
@@ -227,6 +244,9 @@
       for (const dots of grid.querySelectorAll('.busy-dots')) dots.dataset.phase = String(phase);
     }, 200);
   }
+
+  if (variant === 'blink-timer') setInterval(() => grid.classList.toggle('dim'), 1000);
+  if (variant === 'caret-timer') setInterval(() => grid.classList.toggle('caret-off'), 600);
 
   if (filler > 0) {
     const container = document.createElement('div');

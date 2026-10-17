@@ -109,11 +109,17 @@ manual project order with reordering, one header per project over its root
 sessions from every worktree and space, 7 at a time with Show more / Show
 fewer (collapsing a project resets it), two-line rows with a fixed-height
 second line, and the project's icon on that line in In work. The
-phone's Tree view follows the desktop tree: Pinned and In work use one-line
-rows unless Detailed rows is on, Chats one-line rows without a gutter, and project sessions are
+phone's Tree view follows the desktop tree: Chats, Pinned and In work list
+tree rows at level 0 (two-line timeline rows when Detailed rows is on, the
+zones showing all their sessions at once), and project sessions are
 tree rows (12px per level, subsession chevron on the left with a
-thumb-sized target, live state on the right) under worktree headers drawn as
-folder rows (chevron, 12px icon, medium-weight label), each opening with a
+thumb-sized target). A tree row shows its live state in the slot left of the
+title; a row with subsessions keeps its chevron there, since a phone has no
+hover to trade them, and shows its state on the right. Titles carry the state
+as on the desktop (`apps/mobileSessionTitle.ts`), and run titles are muted.
+Worktree headers are drawn as
+folder rows (chevron, 12px icon, medium-weight label a step below full
+strength), each opening with a
 small gap. Zone and project labels share the header size and no rule
 separates projects, as zones and projects are sections of equal weight. Its tree starts 32px in
 (`MOBILE_TREE_BASE_PADDING_PX`), so root session titles start where the
@@ -160,7 +166,7 @@ bootstrap work. Selection and activity subscriptions stay session-scoped so a
 structural list update does not make every row observe unrelated streaming
 updates.
 
-Session-row permission and form badges read the relevant directory-store buckets and show only whether something waits, without a count: one form can hold many questions, and a number that does not drop as the user answers them reads as wrong. A collapsed row covers its own pending requests and those of the descendants it hides; an expanded row covers only its own. Flat Timeline rows carry badge-only scopes from their full session tree while keeping their rendered node childless, so selection, search, and row nesting do not change. The lookup never bootstraps a directory; an unbootstrapped directory contributes nothing until live state arrives. Mobile rows show the same icon-only badges from the cross-directory index (`apps/usePendingRequests.ts`).
+Session-row permission and form badges read the relevant directory-store buckets and show only whether something waits, without a count: one form can hold many questions, and a number that does not drop as the user answers them reads as wrong. A collapsed row covers its own pending requests and those of the descendants it hides; an expanded row covers only its own. Flat Timeline rows carry badge-only scopes from their full session tree while keeping their rendered node childless, so selection, search, and row nesting do not change. The lookup never bootstraps a directory; an unbootstrapped directory contributes nothing until live state arrives. Mobile rows show the same icon-only badges from the cross-directory index (`apps/usePendingRequests.ts`). A page an agent shows that waits for the user's answer has no directory-store bucket, so the row lookup also reads it from the cross-directory index and shows it as a form.
 
 Session menus share `SessionAiRenameMenuItem` with header tabs and the
 single-session header. AI renaming uses the same leading spinner as a worktree
@@ -224,12 +230,15 @@ row, the PR or issue as a coloured mark without its number (its tooltip lists
 the links), the branch, project and model in the whole-row tooltip. The display
 menu's Detailed rows toggle (`detailedZoneRows`, `sidebarDetailedZoneRows`, per
 surface, off by default, offered in Tree only) gives Tree the two-line rows.
-Both never expand, with subsessions feeding the badges; a run row there opens
-its overview. Search
+The one-line Tree rows open to their subsessions like the project tree, with
+their own expansion state; in search they show the branches that lead to a
+match (`pruneSessionTreeForSidebarQuery`). The two-line rows, in List and with
+Detailed rows, never expand: their node drops its children, which feed the
+badges instead. A run row in either opens its overview. Search
 keeps a root whose subsession matches (`sessionTreeMatchesSidebarQuery`): those
 subsessions are nowhere else in the sidebar. The zone counts only sessions that match
-themselves (`countSessionTreeQueryMatches`) over the whole tree; the row drops
-its children, so the item carries that count as `searchMatchCount`. A group subtracts the trees
+themselves (`countSessionTreeQueryMatches`) over the whole tree, carried on the
+item as `searchMatchCount`, since a two-line row drops its children. A group subtracts the trees
 that moved out of it with the same counter its search data used
 (`countSessionSearchMatches`), so one exact id is one match; a group or project
 whose only matches moved renders nothing. Track / Done captures the runtime key at the
@@ -255,8 +264,8 @@ rows. Mobile swipe actions run left to right by how often they are used on a
 phone, because a short drag exposes the leftmost first: archive, pin (top-level
 rows), Track / Done (top-level rows, feature on), delete, rename; AI rename sits
 inside the rename editor. Top-level rows also show a pin marker beside the
-time; pins are the same device-local `useSessionPinnedStore` the desktop menu
-writes, so a pin set on one device does not appear on another. Mobile rows
+time; it is the same pin the desktop menu sets, so a pin set on one device
+shows on every other client of the server. Mobile rows
 also show the goal glyph and the permission/question badges
 (`apps/MobileSessionStateBadges.tsx`): before the time on grouped rows, at the
 end of the branch line on timeline rows. Counts come from the cross-directory
@@ -273,15 +282,27 @@ The display menu's Show pinned section toggle (`showPinnedSection`,
 activity zone between Chats and In work, in both views. It lists pinned
 top-level, unarchived project sessions in the shared lifecycle order; pinned
 chats stay pinned at the top of Chats. A pinned session in work is listed in
-Pinned only. Like In work, its sessions also stay in their projects, search
+Pinned only. In Tree its sessions also stay in their projects, like In work;
+List leaves them out of their project while the zone is shown. Search
 lists each of them once, in the zone (`zoneSessionIds` carries both zones' ids),
 and the rows follow the same render context. Its rows show no pin marker,
 because the header already says they are pinned; In work rows show it only
-while the zone is hidden, since otherwise no pinned session reaches In work. Pins are the device-local
-`useSessionPinnedStore`, so the zone differs between devices. The phone sheet
+while the zone is hidden, since otherwise no pinned session reaches In work.
+
+A pin lives in the session's metadata (`openchamber.pinned: { at }`,
+`lib/sessionPins.ts`), written through the metadata route like the work state,
+so every client of the server sees it; VS Code keeps it in its own metadata
+store. `useSessionPinnedStore` derives the pinned keys (runtime, directory,
+session) from the global session list and overlays a click until the server
+answers (`sync/session-pins.ts`, which reverts it and the caller toasts on
+failure). Older versions kept pins in this device's storage
+(`oc.sessions.pinned.v2`); those count as pinned until the first complete
+session list of their server, when they move into metadata, a pin whose
+session is gone is dropped, and one that fails to write stays for the next
+load. The phone sheet
 mirrors both toggles: its display menu offers Show pinned section and, in
-Tree, Detailed rows, and its Pinned and In work sections render
-`MobileTimelineRows` with `compact` in Tree unless detailed rows are on. VS Code
+Tree, Detailed rows, and its Pinned and In work sections render tree rows in
+Tree unless detailed rows are on. VS Code
 shows no section toggles, so it has no Pinned zone and its In work rows stay on
 one line.
 
@@ -321,7 +342,8 @@ all / Expand all.
 - Below Chats, Pinned and In work it renders one project
   header per project followed by that project's non-archived root sessions
   from every worktree and space, in the shared lifecycle order with pinned
-  sessions first. Projects keep the manual order whatever the stored project
+  sessions first; with the Pinned zone shown, its sessions are listed there
+  only. Projects keep the manual order whatever the stored project
   sort: dragging a header is the timeline's only sort, and the display menu
   hides both sort sections. A project reveals 7 sessions, 7 more per Show more
   (`timelineProjectContainerKey`); collapsing it, from its header or Collapse

@@ -6,6 +6,7 @@ import type { GitStatus } from '@/lib/api/types';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { describeChange } from './changeStatus';
+import { changedPathName } from './changesTree';
 
 interface ChangeRowProps {
   file: GitStatus['files'][number];
@@ -146,7 +147,7 @@ export const ChangeRow = React.memo<ChangeRowProps>(function ChangeRow({
                 style={{ direction: 'rtl', unicodeBidi: 'plaintext' }}
                 title={file.path}
               >
-                {file.path.slice(lastSlash + 1)}
+                {changedPathName(file.path)}
               </span>
             );
           }

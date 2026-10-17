@@ -10,8 +10,10 @@ event but never publishes it; the server's wire translator
 The runtime finds the newest completed `compaction` message,
 fetches every pinned message by ID, keeps non-empty text content, sorts them by
 the stored creation time, and posts one message to
-`/api/session/:id/synthetic` with `resume: false`, together with the session's
-pinned project knowledge. Missing individual messages are skipped without
+`/api/session/:id/synthetic` with `resume: false`. Project knowledge needs
+nothing here: it lives in the session's instruction entries, which OpenCode
+keeps through compaction (`../session-knowledge/DOCUMENTATION.md`). Missing
+individual messages are skipped without
 discarding the remaining context. Other events perform no work and make no
 requests.
 

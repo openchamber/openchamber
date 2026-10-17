@@ -2,6 +2,7 @@ import React from 'react';
 
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
+import { SettingsChipGroup } from '@/components/sections/shared/SettingsSection';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -122,13 +123,12 @@ export function UsageStatsView({ className }: { className?: string }): React.Rea
     <div className={cn('h-full overflow-y-auto', className)}>
       <div className="mx-auto flex w-full max-w-4xl flex-col gap-5 px-4 py-4 sm:px-6">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-          <div role="group" aria-label={t('usageStats.range.label')} className="flex flex-wrap items-center gap-1">
-            {USAGE_RANGES.map((option) => (
-              <Button key={option} type="button" variant="chip" size="xs" aria-pressed={range === option} onClick={() => setRange(option)}>
-                {t(RANGE_LABEL_KEYS[option])}
-              </Button>
-            ))}
-          </div>
+          <SettingsChipGroup
+            value={range}
+            onChange={setRange}
+            aria-label={t('usageStats.range.label')}
+            options={USAGE_RANGES.map((option) => ({ value: option, label: t(RANGE_LABEL_KEYS[option]) }))}
+          />
           <Select value={selectedProject ? selectedProject.id : ALL_PROJECTS} onValueChange={setProjectChoice}>
             <SelectTrigger className="w-fit min-w-[140px] max-w-64" aria-label={t('usageStats.scope.label')}>
               <SelectValue>
@@ -575,20 +575,12 @@ function ModelUsage({ models, formats }: { models: UsageModel[]; formats: Format
       title={t('usageStats.models.title')}
       actions={
         models.length > 0 ? (
-          <div role="group" aria-label={t('usageStats.models.compareBy')} className="flex flex-wrap items-center gap-1">
-            {MODEL_DIMENSIONS.map((option) => (
-              <Button
-                key={option}
-                type="button"
-                variant="chip"
-                size="xs"
-                aria-pressed={dimension === option}
-                onClick={() => setDimension(option)}
-              >
-                {t(MODEL_DIMENSION_LABEL_KEYS[option])}
-              </Button>
-            ))}
-          </div>
+          <SettingsChipGroup
+            value={dimension}
+            onChange={setDimension}
+            aria-label={t('usageStats.models.compareBy')}
+            options={MODEL_DIMENSIONS.map((option) => ({ value: option, label: t(MODEL_DIMENSION_LABEL_KEYS[option]) }))}
+          />
         ) : undefined
       }
     >

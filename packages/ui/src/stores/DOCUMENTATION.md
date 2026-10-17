@@ -278,6 +278,19 @@ switches reject stale completions. Full-snapshot revisions also cover omitted
 sessions, so a delayed mutation response cannot resurrect a cleared queue;
 session events newer than that snapshot survive reconciliation.
 
+A session in an isolated space has its queue in that space's own server, which
+sees the space's OpenCode go idle and delivers. Every request about such a
+session's queue names its directory, which sends it to the space; the host's
+snapshot owns only the host's sessions, and each space's snapshot, read with
+`refreshSpaceQueue`, owns only that space's. The two number their revisions
+apart, so snapshot revisions are kept per runtime and owner. The host forwards
+a space's queue changes on the same control stream, marked with `spaceId`, and
+a change applies only to a session of that space. `message-queue-sync.ts`
+reads a space's queue when the space first appears in the spaces store, when
+the host announces `openchamber:space-queue-stream` after following that
+space's queue again, and on every reconnect of the control stream. A space
+that cannot be read keeps what was last known of its queue.
+
 Mutations are optimistic and then settled on the server's copy; failed
 round-trips re-read instead of guessing. Empty legacy events without a directory
 clear all projections of their session in that runtime. Projection items carry
@@ -313,7 +326,7 @@ Global refresh rules:
 - Live directory-store sessions handed to a load or a directory refresh only fill gaps: they add sessions the cache does not hold, active or archived, and never replace a record it does. The cache hears every session event and action result itself, while a directory store can keep an old copy of a session it does not own; when that copy won, sessions the user had marked done came back under "In work" until the next full load. The desktop sidebar and the mobile sessions sheet apply the same rule when they combine the two sources.
 - Full and per-directory loads capture a mutation revision. At commit time they overlay only per-session create/update/archive/delete/move mutations newer than that baseline, including no-op deletion tombstones, so an older response cannot undo newer local authority.
 
-Permission auto-accept policy is authoritative in the active Web server or VS Code extension host. Owner snapshots carry a monotonic revision; the UI rejects lower revisions and any hydration or mutation completion captured before a runtime reset. Persisted UI policy is not live authority. The version-2 store retains an old unscoped policy only as a one-runtime legacy migration candidate, then removes it after successful migration.
+Permission auto-accept policy is authoritative in the active Web server or VS Code extension host. Owner snapshots carry a monotonic revision; the UI rejects lower revisions and any hydration or mutation completion captured before a runtime reset. Persisted UI policy is not live authority. A session in an isolated space has its mode in that space's own server, which answers its requests: `spaceModes` keeps each space's policy apart from the host's `modes`, a mode set for such a session is sent to the space, and `getSessionMode` reads the policy of the space the session's directory lies in. Each space numbers its own revisions. `sync/permission-mode-sync.ts` reads a space's policy when the space first appears in the spaces store, and `onSpacePermissionStream` in sync-context reads it again when the host announces `openchamber:space-permission-stream`; the host forwards a space's changes marked with `spaceId`. The version-2 store retains an old unscoped policy only as a one-runtime legacy migration candidate, then removes it after successful migration.
 
 Shared safe storage treats durable failures per key. A quota or access failure creates an ephemeral override or tombstone for that key without disabling reads and writes for unrelated keys; later writes retry the durable backend. Deferred adapters retain failed operations for a later flush, and malformed Zustand JSON is removed and treated as missing so hydration can recover.
 

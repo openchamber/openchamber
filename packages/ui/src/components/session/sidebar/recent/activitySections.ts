@@ -31,6 +31,20 @@ export const sessionTreeMatchesSidebarQuery = (node: SessionNode, query: string)
   || node.children.some((child) => sessionTreeMatchesSidebarQuery(child, query))
 );
 
+/**
+ * The part of a tree a search shows: a matching session with everything under
+ * it, otherwise only the branches that lead to a match, as project groups
+ * filter theirs. Null when nothing in the tree matches.
+ */
+export const pruneSessionTreeForSidebarQuery = (node: SessionNode, query: string): SessionNode | null => {
+  if (matchesSidebarSessionQuery(node.session, query)) return node;
+  const children = node.children.flatMap((child) => {
+    const pruned = pruneSessionTreeForSidebarQuery(child, query);
+    return pruned ? [pruned] : [];
+  });
+  return children.length > 0 ? { ...node, children } : null;
+};
+
 /** Sessions in a tree that answer the query themselves, ancestors kept only as context excluded. */
 export const countSessionTreeQueryMatches = (node: SessionNode, query: string): number => (
   (matchesSidebarSessionQuery(node.session, query) ? 1 : 0)

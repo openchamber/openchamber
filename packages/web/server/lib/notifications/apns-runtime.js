@@ -50,7 +50,7 @@ export const createApnsRuntime = (deps) => {
   let persistLock = Promise.resolve();
   let legacyKeysScrubQueued = false;
   let cachedJwt = null; // { token, issuedAtMs, keyId }
-  let cachedRelayKey = null; // { privateKey, publicJwk }
+  let cachedRelayKey = null; // { generation, keypair: { privateKey, publicJwk } }
   let warnedUnconfigured = false;
 
   // ---------------------------------------------------------------------------
@@ -62,10 +62,13 @@ export const createApnsRuntime = (deps) => {
 
   // Key access lives in lib/relay/signing-key.js now (shared with the private
   // relay identity — same keypair, same storage, same serverId derivation).
+  // Keyed by the store generation: resetting the relay identity mints a new key.
   const getOrCreateRelayKeypair = async () => {
-    if (cachedRelayKey) return cachedRelayKey;
-    cachedRelayKey = await getOrCreateRelaySigningKeypair({ crypto, relayKeyStore });
-    return cachedRelayKey;
+    const generation = relayKeyStore.generation();
+    if (cachedRelayKey?.generation === generation) return cachedRelayKey.keypair;
+    const keypair = await getOrCreateRelaySigningKeypair({ crypto, relayKeyStore });
+    cachedRelayKey = { generation, keypair };
+    return keypair;
   };
 
   const signRelayMessage = (privateKey, message) => signRelayMessageShared({ crypto }, privateKey, message);

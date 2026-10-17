@@ -1,21 +1,16 @@
 # Session Knowledge
 
-What a session must be told about the project — that session's pinned notes and
-plans, and the index of what the agent has remembered — and whether it has been
-told yet.
+What a session must be told about the project: that session's pinned notes and
+plans, the index of what the agent has remembered, the rules for the managed
+tools, and the branch it works on.
 
 ## Why it is here and not in the UI
 
 The client used to own this: it assembled the text, decided when to send it, and
-remembered what it had sent in a module-scoped map. Two consequences followed.
-
-A session started without a UI got nothing at all. Scheduled tasks and sessions
-the agent dispatches build their prompts on the server and never touch the
-browser, so pinned context and the memory index simply did not exist for them.
-
-And a tab's memory of what it sent survives compaction, while the conversation
-does not. After a summary the agent no longer holds the block, but the tab goes
-on believing it does and never sends it again.
+remembered what it had sent in a module-scoped map. A session started without a
+UI got nothing at all: scheduled tasks and sessions the agent dispatches build
+their prompts on the server and never touch the browser. So every sender calls
+`sync` here, the UI through `POST /api/session-knowledge/sync`.
 
 ## The contract
 
@@ -26,31 +21,45 @@ creates the session.
 
 Directories beneath the managed `~/.config/openchamber/chats` root resolve to that root before project context and project memory are read. Every ordinary chat therefore shares one Chats knowledge owner instead of creating an unreachable context store for each dated session directory.
 
-`session.metadata.openchamber.knowledge_context_delivered` holds the signature
-of what the session is carrying. It lives with the session, so it survives the
-tab closing and is visible to every sender, including the ones with no tab.
+## How it reaches the agent
 
-The signature covers content revisions, not just identity: editing a pinned note
-must re-send it, not merely renaming one.
+The text lives in OpenCode as the session's instruction entries
+(`PUT`/`DELETE /api/experimental/session/:id/instructions/entries/:key`), one per
+source:
 
-## Three moments, two deliveries
-
-| Moment | Delivery |
+| Key | Holds |
 |---|---|
-| A message from the UI | synthetic part on that message |
-| A scheduled task, a session the agent dispatched | synthetic part on that prompt |
-| After compaction | its own `prompt_async`, alongside the pinned messages |
+| `openchamber.pinned` | pinned notes and plan bodies |
+| `openchamber.memory` | the memory index and when to save |
+| `openchamber.guidance` | when to link, when to draw a page |
+| `openchamber.checkout` | the directory and branch the session works on |
 
-The first two attach to an outgoing message because there is one. Compaction has
-none, which is why it re-sends on its own — and it travels with
-`context-obligatory`'s pinned messages in a single turn, since two synthetic
-messages back to back read as the agent being interrupted twice.
+`sync` writes all of them right before a message goes out: the UI awaits it
+before the prompt request, the queue, scheduled tasks and dispatched sessions
+call it in process. An empty text removes the entry. A key left out of
+`buildKnowledgeEntries` keeps what the session holds.
+
+OpenCode does the rest. The first values go into the session's system prompt;
+a value that changed or went away is announced to the agent at its next step as
+a system message, and an unchanged write tells it nothing. Compaction keeps the
+current values, revert does not cut them, and a fork copies them. So OpenChamber
+keeps no record of what a session was told, and the knowledge is never a
+message in the transcript.
+
+It used to be one. The block went in as a synthetic message ahead of the prompt,
+a signature in the session metadata recorded what was delivered, compaction
+re-sent it, and a revert that cut it cleared the signature. The model read that
+message as one from the user: after an automatic compaction weaker models
+answered it instead of doing the work (#4877). Sessions from that time keep the
+old block in their transcript and hear the entries once more on their next
+message.
 
 ## Failure behaviour
 
 Nothing here may fail a send. A message without its background costs the agent
-some context; a failed send costs the user their message. Every caller treats an
-error as "no block this time".
+some context; a failed send costs the user their message. `sync` never throws:
+it resolves `false` and the message goes out. One entry that fails to write does
+not hold back the others.
 
 While memory is on, every session is told when to save, even with an empty
 store. The tool description alone is read only when the agent already means to
@@ -62,13 +71,11 @@ last step's text as the answer, so an agent that answered, then saved, then
 wrote one closing line had its whole answer folded into Activity.
 
 A source that will not load never blanks the rest: an unreadable memory store
-still delivers the pinned notes. A memory scope that failed to load is left out
+still writes the pinned notes. A memory scope that failed to load is left out
 rather than indexed as empty, which would teach the agent to store again what it
 already has.
 
-Delivery is recorded only after the send is accepted. Recording it when the text
-is handed over would leave a failed send believing the agent had context it never
-received.
+Each of the pinned and memory entries is cut at 8,000 characters, and says so.
 
 ## When to link
 
@@ -77,19 +84,28 @@ OpenChamber launched OpenCode) is also told when to link an issue or change to
 it with `session.link` (`SESSION_LINK_GUIDANCE`). The same rule leads the tool's
 own description. Stated only in the action's description it went unread: an
 agent handed an issue to investigate saw no reason to open a session-control
-tool, so it never linked anything. It rides the same signature (`l:on`), so it
-is sent once and again after compaction.
+tool, so it never linked anything. It goes into `openchamber.guidance`.
 
-## When to move into a worktree
+## Which branch the session works on
 
-The same session is told when to leave a busy branch: a new task on a checkout
-whose branch already carries an open pull request or changes that are not the
-agent's. The form follows the `agentWorktreeMoveWithoutAsking` setting
-(`WORKTREE_MOVE_GUIDANCE.ask` offers the move and waits, `.auto` moves first and
-says so), read through `isWorktreeMoveWithoutAsking` and only while the tool is
-there. It is part of the signature (`w:ask`, `w:auto`), so flipping the setting
-re-sends the rule. The tool description carries the same text
-(`../agent-tool/runtime.js`, `WORKTREE_MOVE_RULES`); change both together.
+While the agent has the managed `openchamber` tool, `openchamber.checkout`
+names the session's directory and the branch checked out there
+(`readCheckoutBranch`, read on every send). An agent once went on editing on a
+branch another session had switched the shared checkout to while it was
+talking with the user: nothing it could see said the branch had changed. Now
+OpenCode tells it the entry changed, and the agent decides what that means.
+The directory is in the value, so a session moved to another worktree reads as
+a move. Detached HEAD and directories outside a Git repository write
+"This session works in `<dir>`, with no branch checked out." A failed Git read
+leaves the previous entry as it is. Dispatched prompts resolve the target
+session's own `location.directory` through `client.session.get` before syncing;
+an unavailable location skips sync and preserves its entries. Without the tool
+the checkout entry is removed.
+
+What the agent can do about a busy checkout, moving into a worktree, is
+introduced in the tool's own description (`../agent-tool/DOCUMENTATION.md`),
+never stated here as a rule. Whether a busy checkout calls for a worktree
+depends on how the user works.
 
 ## When to draw a page
 
@@ -101,8 +117,10 @@ Stated only in the tool description, it went unread: asked for a breakdown of
 lines of code per package, an agent answered with a list and drew the chart
 only when asked again. The cases and the limits (no page for a few numbers, at
 most one per answer) are `RENDER_PAGE_WHEN` in
-`../openchamber-control/render-page.js`, which the tool description shares. It
-rides the signature as `r:on`.
+`../openchamber-control/render-page.js`, which the tool description shares. The
+guidance also names asking with a page (`awaitAnswer`) when the user has to
+choose between visual options. It goes into `openchamber.guidance`, so a
+change to the text reaches running sessions on their next message.
 
 ## Entries that read as instructions
 

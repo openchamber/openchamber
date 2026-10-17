@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 
-import { noteSpaceModelAccess, resetSpaceModelAccess, spaceModelRefusal, stoppedSpaceOfTarget } from './space-model-access';
+import { composerModelForSpaceAccess, noteSpaceModelAccess, resetSpaceModelAccess, spaceModelRefusal, stoppedSpaceOfTarget } from './space-model-access';
+import { useConfigStore } from '@/stores/useConfigStore';
+import { useUIStore } from '@/stores/useUIStore';
 import type { SpaceEntry } from './spaces-api';
 import { useSpacesStore } from './spaces-store';
 
@@ -23,6 +25,7 @@ const running = (change: Partial<SpaceEntry> = {}): SpaceEntry => ({
   grants: [anthropic],
   access: 'granted',
   needsAccess: [],
+  accessFailures: [],
   damage: null,
   setup: null,
   ...change,
@@ -137,11 +140,41 @@ describe('spaceModelRefusal', () => {
     expect(stoppedSpaceOfTarget(session)).toBeNull();
   });
 
-  test('while the creation in this window is still giving access, what it chose decides', () => {
+  test('while the space is still being made, what the creation in this window chose decides', () => {
     noteSpaceModelAccess({ requestId: 'r1', directory: DIRECTORY }, ['anthropic']);
-    listed(running({ grants: [], access: null }));
-    useSpacesStore.getState().noteCreationAccess(ID, { kind: 'giving' });
+    listed(running({ state: 'preparing', step: 'giving_access', grants: [], access: null }));
     expect(spaceModelRefusal(session, 'anthropic')).toBeNull();
     expect(spaceModelRefusal(session, 'openai')).toEqual({ spaceId: ID, providerId: 'openai', reason: 'not_granted' });
+  });
+});
+
+describe('the composer model for a new space', () => {
+  // A provider as the config store keeps it, in the shape its own tests use.
+  const model = (providerID: string, modelID: string) => ({
+    id: `${providerID}/${modelID}`, modelID, providerID, name: modelID,
+    capabilities: { tools: true, input: ['text'], output: ['text'] }, variants: [], time: { released: 0 },
+    cost: [{ input: 0, output: 0, cache: { read: 0, write: 0 } }], status: 'active' as const, enabled: true, limit: { context: 0, output: 0 },
+  });
+  const catalog = (providers: Array<{ id: string; models: string[] }>) => {
+    useConfigStore.setState({ providers: providers.map((provider) => ({ id: provider.id, name: provider.id, activation: 'enabled' as const, package: provider.id, models: provider.models.map((modelID) => model(provider.id, modelID)) })) });
+  };
+
+  test('moves off a provider the space was not given, to the model last used of one it was', () => {
+    catalog([{ id: 'opencode', models: ['big-pickle'] }, { id: 'openai', models: ['gpt-a', 'gpt-b'] }]);
+    useConfigStore.setState({ currentProviderId: 'opencode' });
+    useUIStore.setState({ recentModels: [{ providerID: 'openai', modelID: 'gpt-b' }], hiddenModels: [] });
+    expect(composerModelForSpaceAccess(['openai'])).toEqual({ providerId: 'openai', modelId: 'gpt-b' });
+
+    useUIStore.setState({ recentModels: [], hiddenModels: [{ providerID: 'openai', modelID: 'gpt-a' }] });
+    expect(composerModelForSpaceAccess(['openai'])).toEqual({ providerId: 'openai', modelId: 'gpt-b' });
+  });
+
+  test('stays when the composer is on a given provider, or none is known', () => {
+    catalog([{ id: 'openai', models: ['gpt-a'] }]);
+    useConfigStore.setState({ currentProviderId: 'openai' });
+    expect(composerModelForSpaceAccess(['openai'])).toBeNull();
+    useConfigStore.setState({ currentProviderId: 'opencode' });
+    expect(composerModelForSpaceAccess(['anthropic'])).toBeNull();
+    expect(composerModelForSpaceAccess([])).toBeNull();
   });
 });

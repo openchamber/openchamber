@@ -660,7 +660,36 @@ async function updateSkillNow(skillName, updates, workingDirectory, targetPath =
   console.log(`Updated skill: ${skillName} (path: ${mdPath})`);
 }
 
-function deleteSkill(skillName, workingDirectory) {
+/** The directory a skill of this name has in one scope and source, or null when that location needs a project. */
+function getSkillDirAt(location, skillName, workingDirectory) {
+  if (location.scope === SKILL_SCOPE.USER) {
+    if (location.source === 'agents') return getUserAgentsSkillDir(skillName);
+    if (location.source === 'claude') return getUserClaudeSkillDir(skillName);
+    return getUserSkillDir(skillName);
+  }
+  if (!workingDirectory) return null;
+  if (location.source === 'agents') return getProjectAgentsSkillDir(workingDirectory, skillName);
+  if (location.source === 'claude') return getClaudeSkillDir(workingDirectory, skillName);
+  return getProjectSkillDir(workingDirectory, skillName);
+}
+
+/**
+ * Deletes a skill by name. Without `location` every copy goes, in the project
+ * and the user's directories; with `location` ({ scope, source }) only the
+ * copy there, so a caller that installed a skill to one place cannot remove
+ * a same-named skill the user keeps elsewhere.
+ */
+function deleteSkill(skillName, workingDirectory, location) {
+  if (location) {
+    const dir = getSkillDirAt(location, skillName, workingDirectory);
+    if (!dir || !fs.existsSync(dir)) {
+      throw new Error(`Skill "${skillName}" not found`);
+    }
+    fs.rmSync(dir, { recursive: true, force: true });
+    console.log(`Deleted skill directory: ${dir}`);
+    return;
+  }
+
   let deleted = false;
 
   if (workingDirectory) {

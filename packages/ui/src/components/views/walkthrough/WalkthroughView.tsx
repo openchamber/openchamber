@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Icon } from '@/components/icon/Icon';
+import { Spinner } from '@/components/ui/spinner';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -34,6 +35,7 @@ import {
 } from '@/stores/useGitHubPrStatusStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useNestedGitDirectory } from '@/hooks/useNestedGitDirectory';
+import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useUIStore } from '@/stores/useUIStore';
 import { useWalkthroughStore } from '@/stores/useWalkthroughStore';
 import { cn } from '@/lib/utils';
@@ -207,6 +209,8 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
   const requestedTarget = useWalkthroughStore((state) => state.getRequestedTarget(directory));
   const clearRequestedTarget = useWalkthroughStore((state) => state.clearRequestedTarget);
   const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
+  // The panel this view lives in, which may show another project's PR here.
+  const panelDirectory = useEffectiveDirectory() ?? rootDirectory;
 
   const status = useGitStatus(directory || null);
   const runtimeKey = useGitStore((state) => state.runtimeKey);
@@ -710,7 +714,7 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
         <div className="ms-auto flex min-w-0 items-center gap-1">
           {isPrScope && selectedPr && <Button variant="ghost" size="sm"
             aria-label={t('contextPanel.mode.diff')} title={t('contextPanel.mode.diff')}
-            onClick={() => openContextPanelTab(rootDirectory, { mode: 'diff', diffScope: 'pr' })}>
+            onClick={() => openContextPanelTab(panelDirectory, { mode: 'diff', diffScope: 'pr', targetDirectory: rootDirectory })}>
             <Icon name="arrow-left-right" className="size-4" />
             {!compactHeader && t('contextPanel.mode.diff')}
           </Button>}
@@ -856,7 +860,7 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
           to Cancel — far too quiet for something that runs for tens of seconds. */}
       {entry.status === 'generating' && view && (
         <div className="flex shrink-0 items-center gap-2 border-b border-border/60 bg-[var(--status-info-background)] px-3 py-2">
-          <Icon name="loader-4" className="size-4 shrink-0 animate-spin text-[var(--status-info)]" />
+          <Spinner className="size-4 shrink-0 text-[var(--status-info)]" />
           <span className="typography-meta text-foreground">
             {entry.stage === 'collecting'
               ? t('walkthrough.stage.collecting')

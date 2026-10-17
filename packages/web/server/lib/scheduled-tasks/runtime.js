@@ -534,33 +534,20 @@ export const createScheduledTasksRuntime = (deps) => {
     return projectRunning < maxProjectConcurrency;
   };
 
-  // Never allowed to fail the run: a task that executes without its
-  // background is a lesser loss than a task that does not execute.
-  const resolveKnowledge = (sessionID, projectPath) => (sessionKnowledgeRuntime
-    ? sessionKnowledgeRuntime.resolvePendingForSession(sessionID, projectPath)
-      .catch(() => ({ text: '', signature: '' }))
-    : Promise.resolve({ text: '', signature: '' }));
-
-  // Recorded only after the send is accepted, so a failed dispatch carries
-  // the context again on the next run.
-  const recordKnowledge = async (sessionID, projectPath, knowledge) => {
-    if (knowledge.text && sessionKnowledgeRuntime) {
-      await sessionKnowledgeRuntime.recordDelivered(sessionID, projectPath, knowledge.signature)
-        .catch(() => undefined);
-    }
-  };
+  // Never fails the run (`sync` does not throw): a task that executes without
+  // its background is a lesser loss than a task that does not execute.
+  const syncKnowledge = (sessionID, projectPath) => (sessionKnowledgeRuntime
+    ? sessionKnowledgeRuntime.sync(sessionID, projectPath)
+    : Promise.resolve(false));
 
   const runPrompt = async ({ client, sessionID, projectPath, task }) => {
-    const knowledge = await resolveKnowledge(sessionID, projectPath);
+    await syncKnowledge(sessionID, projectPath);
 
-    // A v2 prompt carries a single authored text. Standing project context and
-    // the goal briefing therefore travel as synthetic messages sent first, so
-    // the model still reads the prompt against them exactly as before. A
-    // synthetic message schedules execution unless `resume: false`: without
-    // it the model would start on the briefing alone, before the task arrived.
-    if (knowledge.text) {
-      await client.session.synthetic({ sessionID, text: knowledge.text, resume: false });
-    }
+    // A v2 prompt carries a single authored text. The goal briefing therefore
+    // travels as a synthetic message sent first, so the model still reads the
+    // prompt against it exactly as before. A synthetic message schedules
+    // execution unless `resume: false`: without it the model would start on
+    // the briefing alone, before the task arrived.
     if (task.execution.goalEnabled) {
       await client.session.synthetic({ sessionID, text: buildGoalIntroText(task.execution.goalTokenBudget), resume: false });
     }
@@ -569,8 +556,6 @@ export const createScheduledTasksRuntime = (deps) => {
       sessionID,
       text: expandSnippets(task.execution.prompt, projectPath),
     });
-
-    await recordKnowledge(sessionID, projectPath, knowledge);
   };
 
   const resolveScheduledCommand = async ({ client, projectPath, task }) => {
@@ -595,12 +580,7 @@ export const createScheduledTasksRuntime = (deps) => {
   };
 
   const runScheduledCommand = async ({ client, sessionID, projectPath, command }) => {
-    // The command route takes no extra parts, so standing context goes in
-    // first as a synthetic message that does not start execution.
-    const knowledge = await resolveKnowledge(sessionID, projectPath);
-    if (knowledge.text) {
-      await client.session.synthetic({ sessionID, text: knowledge.text, resume: false });
-    }
+    await syncKnowledge(sessionID, projectPath);
     // Agent, model and variant are session properties in v2 and were already
     // set when the run created the session; the command body only carries text.
     await client.session.command({
@@ -609,7 +589,6 @@ export const createScheduledTasksRuntime = (deps) => {
       name: command.command,
       text: command.arguments,
     });
-    await recordKnowledge(sessionID, projectPath, knowledge);
   };
 
   const runTaskWithWatchdog = async (projectID, task, reason, onSessionCreated) => {

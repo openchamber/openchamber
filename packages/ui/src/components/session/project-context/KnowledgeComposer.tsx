@@ -65,7 +65,7 @@ export const KnowledgeComposer: React.FC<{
     <div
       className={cn(
         'oc-surface-elevated flex items-end gap-1 rounded-lg bg-[var(--surface-elevated)] py-1 pe-1 ps-3',
-        'ring-1 ring-inset ring-border/60 transition duration-200 ease-out focus-within:ring-2 focus-within:ring-[var(--interactive-focus-ring)]',
+        'oc-raised oc-field',
         disabled && 'opacity-50',
       )}
     >

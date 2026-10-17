@@ -9,12 +9,14 @@ import { routingI18n } from './routing.i18n';
 import { pluginPanelI18n } from './plugin-panel.i18n';
 import { surfacePanelI18n } from './surface-panel.i18n';
 import { fileArtifactsI18n } from './file-artifacts.i18n';
+import { fileContentSearchI18n } from './file-content-search.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
 import { sourceBoardI18n } from './source-board.i18n';
 import { projectActionsI18n } from './project-actions.i18n';
+import { gitIdentityEditorI18n } from './git-identity-editor.i18n';
 import { environmentI18n } from './environment.i18n';
 import { providersI18n } from './providers.i18n';
 import { mcpGridI18n } from './mcp-grid.i18n';
@@ -138,12 +140,14 @@ export const dict: Record<I18nKey, string> = {
   ...pluginPanelI18n.pl,
   ...surfacePanelI18n.pl,
   ...fileArtifactsI18n.pl,
+  ...fileContentSearchI18n.pl,
   ...htmlRenderI18n.pl,
   ...usageStatsI18n.pl,
   ...webSearchI18n.pl,
   ...isolatedSpacesI18n.pl,
   ...sourceBoardI18n.pl,
   ...projectActionsI18n.pl,
+  ...gitIdentityEditorI18n.pl,
   ...environmentI18n.pl,
   ...providersI18n.pl,
   ...mcpGridI18n.pl,
@@ -514,6 +518,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.work.markDone': 'Oznacz jako gotowe',
   'sessions.sidebar.session.work.doneSuggested': 'Wygląda na gotowe',
   'sessions.sidebar.session.work.updateFailed': 'Nie udało się zaktualizować sesji',
+  'sessions.sidebar.session.pin.pinFailed': 'Nie udało się przypiąć sesji',
+  'sessions.sidebar.session.pin.unpinFailed': 'Nie udało się odpiąć sesji',
   'chat.work.doneHint.text': 'Ta praca wygląda na skończoną.',
   'chat.work.doneHint.action': 'Oznacz jako gotowe',
   'chat.work.reviewHint.text': 'Zmiany są gotowe do przejrzenia.',
@@ -1633,7 +1639,7 @@ export const dict: Record<I18nKey, string> = {
   'commandPalette.item.toggleSidebar': 'Przełącz panel boczny',
   'commandPalette.item.toggleTerminal': 'Przełącz terminal',
   'commandPalette.item.cycleTheme': 'Przełącz motyw',
-  'commandPalette.item.showOpenCodeStatus': 'Pokaż status OpenCode',
+  'commandPalette.item.showOpenCodeStatus': 'Pokaż oś czasu diagnostyki',
   'commandPalette.item.restartOpenCode': 'Uruchom ponownie OpenCode',
   'commandPalette.item.toggleMemoryDebug': 'Przełącz panel debugowania pamięci',
   'commandPalette.item.pinSession': 'Przypnij lub odepnij sesję',
@@ -1697,8 +1703,10 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.mode.stagedDiff': 'Staged Diff',
   'contextPanel.mode.workingDiff': 'Working Diff',
   'contextPanel.mode.files': 'Pliki',
-  'contextPanel.mode.pr': 'Pull Request',
-  'contextPanel.mode.mr': 'Merge Request',
+  'contextPanel.mode.pr': "Tracker",
+  'contextPanel.tracker.branchTab': "Bieżąca gałąź",
+  'contextPanel.tracker.loadFailed': "Nie udało się wczytać tego elementu.",
+  'contextPanel.tracker.unavailable': "OpenChamber nie może tu odczytać tego elementu.",
   'gitView.mergeRequest.title': 'Merge request',
   'gitView.mergeRequest.availableOnFeatureBranches': 'Dostępne, gdy bieżąca gałąź może otworzyć merge request.',
   'gitView.mr.openMergeRequest': 'Otwórz merge request',
@@ -1826,8 +1834,7 @@ export const dict: Record<I18nKey, string> = {
   'walkthrough.blocked.serverUnsupported.description': 'Serwer OpenChamber, z którym połączona jest ta aplikacja, nie odpowiedział na API walkthroughu — jest więc starszy niż aplikacja. Zaktualizuj serwer do wersji 1.18 lub nowszej i odśwież.',
   'walkthrough.blocked.contextTooSmall.descriptionUnknownModel': 'Mały model mieści około {available} tys. znaków, a te różnice potrzebują około {required} tys. Nic nie jest obcinane — wybierz model z większym kontekstem.',
   'walkthrough.blocked.structuredOutput.descriptionUnknownModel': 'Mały model nie obsługuje ustrukturyzowanych odpowiedzi wymaganych przez przewodnik.',
-  'contextRail.surface.pr.description': 'Twórz, przeglądaj i scalaj pull request bieżącej gałęzi',
-  'contextRail.surface.mr.description': 'Twórz, przeglądaj i scalaj merge request bieżącej gałęzi',
+  'contextRail.surface.pr.description': "Pull request bieżącej gałęzi oraz issues, pull requesty i zgłoszenia otwarte z Twoich sesji",
   'contextRail.surface.notes.description': 'Notatki, zadania, plany i pamięć agenta dla projektu',
   'contextRail.surface.context.description': 'Kontekst sesji i zużycie tokenów',
   'contextRail.surface.browser.description': 'Wbudowana przeglądarka',
@@ -2148,6 +2155,12 @@ export const dict: Record<I18nKey, string> = {
   'diffView.unavailable.missingDescription': 'Został usunięty po wczytaniu listy zmian. Lista jest odświeżana.',
   'diffView.unavailable.nestedRepositoryTitle': 'Osobne repozytorium Git',
   'diffView.unavailable.nestedRepositoryDescription': 'Ten folder ma własną historię Git. Otwórz go jako projekt, aby zobaczyć jego zmiany.',
+  'diffView.nestedRepository.description': 'Ten folder ma własną historię Git. Otwórz go jako projekt, aby zatwierdzić te zmiany.',
+  'diffView.nestedRepository.openAsProject': 'Otwórz jako projekt',
+  'diffView.nestedRepository.openFailed': 'Nie udało się otworzyć tego folderu jako projektu',
+  'diffView.nestedRepository.loading': 'Odczytywanie zmian w repozytorium…',
+  'diffView.nestedRepository.loadFailed': 'Nie udało się odczytać zmian w repozytorium',
+  'diffView.nestedRepository.noChanges': 'Brak zmian w tym repozytorium',
   'diffView.unavailable.untrackedDirectoryTitle': 'Folder z nowymi plikami',
   'diffView.unavailable.untrackedDirectoryDescription': 'Ten folder zawiera zbyt wiele nowych plików, aby wyświetlić je pojedynczo. Dodaj go do indeksu (stage) albo wpisz do .gitignore, jeśli nie należy do repozytorium.',
   'diffView.submodule.title': 'Submoduł',
@@ -2735,7 +2748,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.recap.label': 'Podsumowanie:',
   'chat.sessionError.title': 'OpenCode przerwał tę odpowiedź',
   'chat.sessionError.noDetails': 'OpenCode nie podał szczegółów. Raport stanu pokazuje ostatnie błędy.',
-  'chat.sessionError.showStatus': 'Pokaż status OpenCode',
+  'chat.sessionError.showStatus': 'Pokaż oś czasu diagnostyki',
   'chat.sessionError.noReply': 'OpenCode nie rozpoczął odpowiedzi na tę wiadomość.',
   'chat.sessionError.interrupted': 'OpenCode przerwał tę odpowiedź.',
   'chat.longError.expand': 'Pokaż cały błąd',
@@ -2933,12 +2946,14 @@ export const dict: Record<I18nKey, string> = {
   'memoryDebugPanel.tooltip.logCurrentState': 'Zaloguj bieżący stan pamięci do konsoli przeglądarki',
   'openChamberLogo.aria.logo': 'Logo OpenChamber',
   'openCodeStatusDialog.actions.copy': 'Kopiuj',
-  'openCodeStatusDialog.description': 'Sprawdź bieżący status i diagnostykę OpenCode.',
+  'openCodeStatusDialog.actions.download': 'Pobierz dziennik',
+  'openCodeStatusDialog.toast.collectFailed': 'Nie udało się zebrać danych diagnostycznych',
+  'openCodeStatusDialog.description': 'Lokalne zdarzenia w kolejności chronologicznej. Prywatne treści dziennika i zdalne źródła są pomijane.',
   'openCodeStatusDialog.empty.noData': 'Brak danych.',
-  'openCodeStatusDialog.title': 'Status OpenCode',
-  'openCodeStatusDialog.toast.copiedDescription': 'Status skopiowany do schowka',
+  'openCodeStatusDialog.title': 'Oś czasu diagnostyki',
+  'openCodeStatusDialog.toast.copiedDescription': 'Dziennik diagnostyczny skopiowany do schowka',
   'openCodeStatusDialog.toast.copiedTitle': 'Skopiowano',
-  'openCodeStatusDialog.toast.copyFailed': 'Nie udało się skopiować statusu',
+  'openCodeStatusDialog.toast.copyFailed': 'Nie udało się skopiować dziennika diagnostycznego',
   'openInApp.actions.chooseAppAria': 'Wybierz aplikację do otwarcia',
   'openInApp.actions.copyPath': 'Kopiuj ścieżkę',
   'openInApp.actions.open': 'Otwórz',

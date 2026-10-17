@@ -223,6 +223,18 @@ export function createSpaceSessionIndex({ logger = console } = {}) {
       }
       return true;
     },
+    /**
+     * Why a space may not speak for one session in its own state, its queue or its permission
+     * mode: the session is the host's or one another space holds, or a directory given lies
+     * outside the space's root. Null when it may. Claims nothing.
+     */
+    spaceSessionDropCode(spaceId, sessionId, directory = null) {
+      if (directory !== null && (!directorySchema.safeParse(directory).success || !isDirectoryOfSpace(directory, spaceId))) return SPACE_DROP_CODES.eventOutsideRoot;
+      if (!idSchema.safeParse(sessionId).success) return SPACE_DROP_CODES.malformed;
+      if (isHostSessionId(sessionId)) return SPACE_DROP_CODES.eventHostSession;
+      if ((claimedBy(sessionId) ?? spaceId) !== spaceId) return SPACE_DROP_CODES.claimed;
+      return null;
+    },
     /** Every space's last accepted list with its state, for the merge. */
     snapshot() {
       return Array.from(spaces.values(), (entry) => ({ spaceId: entry.spaceId, state: entry.state, records: entry.records }));

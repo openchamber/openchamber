@@ -137,5 +137,27 @@ export const createRelayKeyStore = ({
     return store[field];
   });
 
-  return { getOrCreate };
+  // Bumped by reset(). Callers that cache keys derived from this store compare
+  // it on every use, so a reset reaches both the push relay and the private relay.
+  let generation = 0;
+
+  /**
+   * Drops both keypairs, legacy settings copies included, so the next
+   * getOrCreate mints a new identity. For a data dir copied to another
+   * machine: both copies hold one identity and evict each other at the relay.
+   */
+  const reset = () => serialized(async () => {
+    const { [SLOTS.signing.field]: _signing, [SLOTS.encryption.field]: _encryption, ...rest } = await readStore();
+    await writeStore(rest);
+    const raw = await readSettingsStrict();
+    const legacyKeys = Object.values(SLOTS).map(({ legacySettingsKey }) => legacySettingsKey).filter((key) => Object.hasOwn(raw, key));
+    if (legacyKeys.length > 0) {
+      const next = { ...(await readSettingsFromDiskMigrated()), ...raw };
+      for (const key of legacyKeys) delete next[key];
+      await writeSettingsToDisk(next);
+    }
+    generation += 1;
+  });
+
+  return { getOrCreate, reset, generation: () => generation };
 };

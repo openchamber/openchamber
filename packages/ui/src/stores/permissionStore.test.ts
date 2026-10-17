@@ -1,12 +1,16 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
 
-let fetchImpl: (input: string, init?: RequestInit) => Promise<Response>;
+type FetchInit = RequestInit & { directory?: string | null };
+let fetchImpl: (input: string, init?: FetchInit) => Promise<Response>;
 mock.module('@/lib/runtime-fetch', () => ({
-  runtimeFetch: (input: string, init?: RequestInit) => fetchImpl(input, init),
+  runtimeFetch: (input: string, init?: FetchInit) => fetchImpl(input, init),
 }));
-mock.module('@/sync/sync-refs', () => ({ getAllSyncSessionMap: () => new Map() }));
+// The sessions the sync layer knows, by id, with the directory each one runs in.
+let sessionMap = new Map<string, { id: string; directory: string }>();
+let sessionDirectory = '/project';
+mock.module('@/sync/sync-refs', () => ({ getAllSyncSessionMap: () => sessionMap }));
 mock.module('@/sync/session-ui-store', () => ({
-  useSessionUIStore: { getState: () => ({ getDirectoryForSession: () => '/project' }) },
+  useSessionUIStore: { getState: () => ({ getDirectoryForSession: () => sessionDirectory }) },
 }));
 mock.module('@/lib/opencode/client', () => ({
   opencodeClient: { getDirectory: () => '/fallback' },
@@ -17,6 +21,8 @@ const json = (value: unknown, status = 200) => new Response(JSON.stringify(value
 
 describe('permission store server policy', () => {
   beforeEach(() => {
+    sessionMap = new Map();
+    sessionDirectory = '/project';
     usePermissionStore.getState().reset();
     usePermissionStore.setState({ legacyCandidate: null, legacyRuntimeKey: null });
     fetchImpl = async () => json({ sessions: {} });
@@ -126,5 +132,62 @@ describe('permission store server policy', () => {
     usePermissionStore.getState().applySnapshot({ modes: { stale: 'auto' }, revision: 3 });
 
     expect(usePermissionStore.getState().modes).toEqual({ current: 'auto' });
+  });
+});
+
+// An isolated space's server keeps the modes of its own sessions and answers their requests, so a
+// space session's mode is written to that space and read from it, apart from the host's policy.
+describe('permission modes of a session in an isolated space', () => {
+  const SPACE = 'a1b2c3d4e5f6';
+  const spaceDirectory = `/spaces/${SPACE}/repo`;
+
+  beforeEach(() => {
+    usePermissionStore.getState().reset();
+    sessionMap = new Map([
+      ['space-1', { id: 'space-1', directory: spaceDirectory }],
+      ['host-1', { id: 'host-1', directory: '/project' }],
+    ]);
+    sessionDirectory = spaceDirectory;
+  });
+
+  test('a mode set in a space chat goes to the space and is read from its answer', async () => {
+    const directories: Array<string | null | undefined> = [];
+    fetchImpl = async (_input, init) => {
+      directories.push(init?.directory);
+      return json({ sessions: { 'space-1': true }, modes: { 'space-1': 'auto' }, revision: 1 });
+    };
+    await usePermissionStore.getState().setSessionMode('space-1', 'auto');
+    expect(directories).toEqual([spaceDirectory]);
+    expect(usePermissionStore.getState().modes).toEqual({});
+    expect(usePermissionStore.getState().getSessionMode('space-1')).toBe('auto');
+  });
+
+  test('the host policy and a space policy never stand in for each other', () => {
+    const { applySnapshot } = usePermissionStore.getState();
+    applySnapshot({ modes: { 'host-1': 'auto', 'space-1': 'auto' }, revision: 5 });
+    applySnapshot({ modes: { 'space-1': 'ask' }, revision: 1 }, undefined, SPACE);
+    expect(usePermissionStore.getState().getSessionMode('host-1')).toBe('auto');
+    expect(usePermissionStore.getState().getSessionMode('space-1')).toBe('ask');
+
+    // The space numbers its own revisions: an older one of its own is ignored, the host's do not count.
+    applySnapshot({ modes: { 'space-1': 'auto' }, revision: 3 }, undefined, SPACE);
+    applySnapshot({ modes: { 'space-1': 'ask' }, revision: 2 }, undefined, SPACE);
+    expect(usePermissionStore.getState().getSessionMode('space-1')).toBe('auto');
+    expect(usePermissionStore.getState().modes).toEqual({ 'host-1': 'auto', 'space-1': 'auto' });
+  });
+
+  test('a space policy is read from that space, and one that cannot be read keeps what was known', async () => {
+    const directories: Array<string | null | undefined> = [];
+    fetchImpl = async (_input, init) => {
+      directories.push(init?.directory);
+      return json({ sessions: { 'space-1': true }, modes: { 'space-1': 'safety' }, revision: 4 });
+    };
+    await usePermissionStore.getState().refreshSpaceModes(SPACE);
+    expect(directories).toEqual([`/spaces/${SPACE}`]);
+    expect(usePermissionStore.getState().getSessionMode('space-1')).toBe('safety');
+
+    fetchImpl = async () => json({}, 503);
+    await usePermissionStore.getState().refreshSpaceModes(SPACE);
+    expect(usePermissionStore.getState().getSessionMode('space-1')).toBe('safety');
   });
 });

@@ -50,13 +50,16 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
   // its pending list from OpenCode (that read creates a location), so this map
   // is their seed. Entries live until the matching reply, the session's
   // deletion, or an OpenCode restart, which drops every pending request.
+  // Pages an agent shows that wait for the user's answer sit beside them; they
+  // come from this server's own render.page calls, not from OpenCode, and
+  // leave when the call stops waiting (`trackWaitingPage`).
   const pendingRequestsBySession = new Map();
   let activeSessionCount = 0;
 
   const getOrCreatePendingRequests = (sessionId) => {
     let entry = pendingRequestsBySession.get(sessionId);
     if (!entry) {
-      entry = { permissions: new Map(), forms: new Map() };
+      entry = { permissions: new Map(), forms: new Map(), pages: new Map() };
       pendingRequestsBySession.set(sessionId, entry);
     }
     return entry;
@@ -69,7 +72,20 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
     // pending request of that kind we can still vouch for.
     if (requestId) entry[kind].delete(requestId);
     else entry[kind].clear();
-    if (entry.permissions.size === 0 && entry.forms.size === 0) pendingRequestsBySession.delete(sessionId);
+    if (entry.permissions.size === 0 && entry.forms.size === 0 && entry.pages.size === 0) pendingRequestsBySession.delete(sessionId);
+  };
+
+  /** A page that started (`waiting`) or stopped (`settled`) waiting for the user's answer. */
+  const trackWaitingPage = (change) => {
+    const sessionId = readRequestId(change?.sessionId);
+    const callId = readRequestId(change?.callId);
+    if (!sessionId || !callId) return;
+    if (change.type === 'waiting') {
+      const title = typeof change.title === 'string' ? change.title : '';
+      getOrCreatePendingRequests(sessionId).pages.set(callId, { id: callId, sessionID: sessionId, title });
+      return;
+    }
+    if (change.type === 'settled') settlePendingRequest('pages', sessionId, callId);
   };
 
   const processBlockingRequestPayload = (payload) => {
@@ -114,6 +130,7 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
       result[sessionId] = {
         permissions: [...entry.permissions.values()],
         forms: [...entry.forms.values()],
+        pages: [...entry.pages.values()],
       };
     }
     return result;
@@ -466,6 +483,7 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
     getActiveSessionCount,
     getSessionStateSnapshot,
     getPendingBlockingRequestsSnapshot,
+    trackWaitingPage,
     getSessionAttentionSnapshot,
     getSessionState,
     getSessionAttentionState,

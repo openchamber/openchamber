@@ -7,6 +7,30 @@ description: Verbind de diensten en abonnementen waarmee OpenChamber werkt.
 
 Bij **Instellingen → Integraties** meldt u zich aan bij diensten waarmee OpenChamber werkt. De aanmelding wordt op de OpenChamber-server bewaard, zodat web, desktop en een gekoppelde telefoon haar delen.
 
+## Integratiecatalogus
+
+De integratiecatalogus bevat meer dan 150 diensten die u de agent met één klik geeft: Linear, Notion, Sentry, Supabase, Figma, observability-tools, CRM's, vergadernotities en meer. Een installatie voegt meestal de MCP-server van de dienst toe, de verbinding waarmee de agent daar dingen leest en wijzigt, en soms skills of een plugin die erbij horen. De installatie geldt voor uw gebruiker, dus elk project krijgt haar.
+
+1. Kies het winkelpictogram in de kop van de zijbalk.
+2. Zoek een dienst op naam, of beperk de lijst met een categorie zoals **Code** of **Kwaliteit en beheer**. Onder **OpenChamber** staan onze eigen extensies en plugins.
+3. Kies **+** op de rij van de dienst, of open hem en kies **Installeren**.
+4. Meld u aan zoals de dienst vraagt:
+   - **OAuth**: de aanmeldpagina van de dienst opent in uw browser. Geef daar toegang.
+   - **Token**: plak een API-token in **API-token**. **Token aanmaken** opent de pagina waar de dienst er een uitgeeft.
+   - **Zonder aanmelding**: u hoeft niets te doen.
+
+Daarna krijgt de dienst een vinkje en staat hij links onder **Geïnstalleerd**. De tools zijn beschikbaar vanaf uw volgende bericht. Een gele stip of **Aanmelden vereist** betekent dat de aanmelding niet is afgerond. Open de dienst en meld u opnieuw aan.
+
+Sommige vermeldingen vragen meer dan een aanmelding:
+
+- **Lokale servers** draaien op de computer waarop OpenCode draait en hebben soms Node.js, Python met uv of Docker nodig. De eerste start kan even duren.
+- **Plugins** zijn code die binnen OpenCode draait. Daarom vraagt de catalogus om bevestiging en toont hij eerst de licentie van de plugin.
+- **Skills** die bij een dienst horen, worden met de dienst geïnstalleerd. Ontbreekt er een, dan verschijnt op de pagina van de dienst een eigen knop **Installeren**.
+
+Om een dienst te verwijderen opent u hem, kiest u **Meer acties** (**⋯**) en daarna **Verwijderen**. Dat verwijdert alleen wat de catalogus heeft toegevoegd; uw account bij de dienst blijft zoals het is. MCP-servers, plugins en skills kunt u ook gewoon in Instellingen beheren.
+
+De catalogus zit in de webapp en de desktopapp. In [enterprise-modus](/nl/security/#enterprise-modus) is hij verborgen.
+
 ## GitHub
 
 Klap de kaart **GitHub** open en kies **GitHub verbinden** om u met een korte apparaatcode aan te melden. Daarna kan OpenChamber sessies vanuit issues en pull requests starten, ze aan berichten koppelen en PR's openen of bijwerken. Alle mogelijkheden staan bij [GitHub-issues en PR's](/nl/github/).
@@ -78,6 +102,18 @@ Met Excalidraw tekent u rechtstreeks in Bestanden in `.excalidraw`-bestanden en 
 2. Open de tekening opnieuw. Het tekenvlak vervangt de bestandstekst. Cmd/Ctrl+S, automatisch opslaan, de bronweergave en volledig scherm werken zoals bij andere bestanden.
 
 Via de kaart werkt u de extensie bij, schakelt u haar opnieuw in als ze gepauzeerd is of verwijdert u haar. Verwijderen laat uw tekeningen intact; ze openen dan gewoon als tekst. Alleen beschikbaar op web en desktop.
+
+## Resource Monitor
+
+Resource Monitor laat zien hoeveel CPU en geheugen je computer gebruikt en hoeveel daarvan naar OpenChamber, OpenCode, alles wat ze hebben gestart en de dev-servers die eronder draaien gaat. Het is een OpenChamber-extensie en staat op dezelfde pagina onder **OpenChamber extensions**.
+
+1. Open **Settings → Integrations** en kies **Install** op de Resource Monitor-kaart.
+2. Keur de lokale dienst goed in **Settings → Extensions**. De cijfers komen van een klein proces dat OpenChamber naast het paneel start. Het meet alleen zolang het paneel of de sectie **Resources** in beeld is.
+3. Open **Resource Monitor** vanuit de rechterbalk. Een kort overzicht verschijnt ook onder **Resources** in het Work Status-paneel.
+
+Stop bij een dev-server of taak beëindigt dat commando met alles wat het heeft gestart, zodat een watcher de server niet opnieuw start. **Stop all** in de groep Terminal beëindigt alles wat in de terminal en project actions draait en laat de terminaltabbladen open. OpenChamber zelf en de OpenCode-server hebben geen Stop.
+
+Dev-servers verschijnen als ze onder OpenChamber draaien: gestart in de ingebouwde terminal, of door een agent als OpenChamber OpenCode zelf heeft gestart. Een server die zich losmaakt van zijn ouderproces, of een container die met `docker compose up -d` is gestart, staat er niet bij. Ben je verbonden met een externe OpenChamber, dan toont de monitor die machine. Alleen web en desktop.
 
 ## Zie ook
 

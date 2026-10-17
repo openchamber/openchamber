@@ -110,7 +110,6 @@ const ModelRow: React.FC<ModelRowProps> = ({ entry, provider, initiallyOpen, log
     try {
       const grant = await grantSpaceAccess(entry.id, modelGrantOf(provider, choice));
       useSpacesStore.getState().noteGrantGiven(entry.id, grant);
-      useSpacesStore.getState().noteProviderGranted(entry.id, provider.id);
       await refreshSpacesJourney().catch(() => undefined);
       setOpen(false);
       setChoice((current) => ({ ...current, value: '' }));

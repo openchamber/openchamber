@@ -23,7 +23,7 @@ import { cn } from '@/lib/utils';
 import type { SetStateInput, SourceControlCapabilities } from '@/lib/source-control/types';
 import { formatChangeRequestReference } from '@/lib/source-control/identity';
 import { usePullRequestSelectionStore } from '@/stores/usePullRequestSelectionStore';
-import { useUIStore } from '@/stores/useUIStore';
+import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUIStore';
 import { useWalkthroughStore } from '@/stores/useWalkthroughStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSession } from '@/sync/sync-context';
@@ -300,11 +300,14 @@ const LINK_CLASS = cn(
 
 /**
  * Where to look at a PR's changes: the diff view's PR comparison, or its
- * walkthrough. Both open beside the chat, in the folder the app shows when it
- * belongs to the project; otherwise the app moves to the project first.
+ * walkthrough. Both open in the panel beside the chat on screen and read the
+ * PR through the project's own folder: the folder the app shows when it
+ * belongs to the project, else the project's root, without the app moving
+ * there. With no chat on screen the app opens a draft of the project first.
  * The phone shell has no side panel: there Changes opens the workspace
- * drawer's Git tab on the PR, `onLeave` gives the chat back underneath it,
- * and the walkthrough is not offered.
+ * drawer's Git tab on the PR, in the project's draft when the app shows
+ * another, `onLeave` gives the chat back underneath it, and the walkthrough
+ * is not offered.
  */
 export const SourceBoardPullLinks: React.FC<{
     pull: GitHubPullReference;
@@ -319,23 +322,31 @@ export const SourceBoardPullLinks: React.FC<{
     const open = (surface: 'diff' | 'walkthrough') => {
         const source: PullRequestSource = { kind: 'pr', number: pull.number, sourceRepo: { owner: pull.sourceRepo.owner, repo: pull.sourceRepo.repo } };
         const ui = useUIStore.getState();
-        const directory = currentDirectory && projectOwnsDirectory(currentDirectory) ? currentDirectory : project.path;
-        if (directory === currentDirectory) ui.closeMainSurfaces();
+        const owned = Boolean(currentDirectory && projectOwnsDirectory(currentDirectory));
+        if (mobile) {
+            const directory = owned && currentDirectory ? currentDirectory : project.path;
+            if (directory === currentDirectory) ui.closeMainSurfaces();
+            else useSessionUIStore.getState().openNewSessionDraft({ selectedProjectId: project.id, directoryOverride: project.path });
+            // The phone's Changes looks requests up by the normalized folder.
+            usePullRequestSelectionStore.getState().requestDiff(normalizePath(directory) ?? directory, source);
+            onLeave?.();
+            mobile.openChanges();
+            return;
+        }
+        if (currentDirectory) ui.closeMainSurfaces();
         else useSessionUIStore.getState().openNewSessionDraft({ selectedProjectId: project.id, directoryOverride: project.path });
+        const panelDirectory = currentDirectory ?? project.path;
+        // Another project's PR is read through that project's root, the
+        // folder its tab names; the request is keyed by that same folder.
+        const targetDirectory = owned || !currentDirectory ? null : normalizeContextPanelDirectoryKey(project.path);
+        const directory = targetDirectory ?? panelDirectory;
         if (surface === 'diff') {
-            if (mobile) {
-                // The phone's Changes looks requests up by the normalized folder.
-                usePullRequestSelectionStore.getState().requestDiff(normalizePath(directory) ?? directory, source);
-                onLeave?.();
-                mobile.openChanges();
-                return;
-            }
             usePullRequestSelectionStore.getState().requestDiff(directory, source);
-            ui.openContextPanelTab(directory, { mode: 'diff', diffScope: 'pr' });
+            ui.openContextPanelTab(panelDirectory, { mode: 'diff', diffScope: 'pr', targetDirectory });
             return;
         }
         useWalkthroughStore.getState().requestTarget(directory, { source, context });
-        ui.openContextSurface(directory, 'walkthrough');
+        ui.openContextPanelTab(panelDirectory, { mode: 'walkthrough', targetDirectory });
     };
     return (
         <span className="inline-flex items-center gap-1">

@@ -4,7 +4,9 @@
  * Four OpenCode contracts meet here:
  * - `websearch.providers` (`GET /api/websearch/provider`): the providers the
  *   Location offers. Each one is also an integration of the same id that takes
- *   an optional API key (every built-in provider has a keyless tier).
+ *   an optional API key (every built-in provider has a keyless tier). A
+ *   plugin provider may join the list only once connected; its integration
+ *   carries `metadata.websearch` so the page can offer it before that.
  * - The `websearch` config key: `false` turns search off, `{ provider }` names
  *   a provider or `"random"`. Unset means OpenCode falls back to the answer
  *   the user gave its chat consent form (kept in its own store as
@@ -51,11 +53,36 @@ export type WebSearchKeyStatus =
   /** An environment variable the server can see. */
   | { kind: "env"; name: string }
 
+/** One text field a provider asks for when it connects, such as a server URL. */
+export interface WebSearchConnectField {
+  key: string
+  /** The provider's own label; plugins write it in English. */
+  label: string
+  /** The provider's own explanation of the field, in its language. */
+  description: string | null
+  /** An example value. */
+  placeholder: string | null
+  required: boolean
+  url: boolean
+}
+
+/** How the page connects a provider. */
+export type WebSearchConnectMethod =
+  /** An API key, plus any fields the key method's form asks for. */
+  | { kind: "key"; fields: WebSearchConnectField[] }
+  /** Only form fields, saved as a reference (a server the user runs). */
+  | { kind: "form"; methodID: string; fields: WebSearchConnectField[] }
+
 export interface WebSearchProviderAccess {
   key: WebSearchKeyStatus
   /** Environment variables OpenCode reads a key from, for the hint. */
   envNames: string[]
+  /** `null` exactly when `key` is `unsupported`. */
+  connect: WebSearchConnectMethod | null
 }
+
+/** The values a connect method's form fields were given, by field key. */
+export type WebSearchConnectAnswer = Record<string, string>
 
 const clientFor = (directory: string | null): OpenCodeClient =>
   directory ? opencodeClient.getScopedSdkClient(directory) : opencodeClient.getSdkClient()
@@ -96,34 +123,121 @@ export function webSearchSelectionToConfig(selection: WebSearchSelection): false
   }
 }
 
+type IntegrationMethod = IntegrationInfo["methods"][number]
+type FormField = NonNullable<Extract<IntegrationMethod, { type: "key" }>["form"]>[number]
+
+/**
+ * A plugin marks an integration that is the account of a web search provider
+ * with `metadata.websearch === true`. Such a provider joins OpenCode's
+ * `websearch` list only once it is connected, so the marker is how the page
+ * offers it before that, and how model provider lists leave it out.
+ */
+export function isWebSearchIntegration(integration: IntegrationInfo): boolean {
+  return integration.metadata?.websearch === true
+}
+
+/**
+ * The page renders plain text fields only. A form with any other field (a
+ * choice, a number, a conditional field) is left to OpenCode's own `/connect`.
+ */
+function toConnectFields(form: readonly FormField[] | undefined): WebSearchConnectField[] | null {
+  const fields: WebSearchConnectField[] = []
+  for (const field of form ?? []) {
+    if (field.type !== "string" || field.options?.length || field.when?.length) return null
+    if (field.hidden) continue
+    fields.push({
+      key: field.key,
+      label: field.title ?? field.key,
+      description: field.description ?? null,
+      placeholder: field.placeholder ?? null,
+      required: field.required === true,
+      url: field.format === "uri",
+    })
+  }
+  return fields
+}
+
+function toConnectMethod(methods: readonly IntegrationMethod[]): WebSearchConnectMethod | null {
+  for (const method of methods) {
+    if (method.type !== "key") continue
+    const fields = toConnectFields(method.form)
+    if (fields) return { kind: "key", fields }
+  }
+  for (const method of methods) {
+    if (method.type !== "external" || !method.form) continue
+    const fields = toConnectFields(method.form)
+    if (fields && fields.length > 0) return { kind: "form", methodID: method.id, fields }
+  }
+  return null
+}
+
 const toAccess = (integration: IntegrationInfo | undefined): WebSearchProviderAccess => {
-  const envNames = (integration?.methods ?? []).flatMap((method) => (method.type === "env" ? [...method.names] : []))
-  const acceptsKey = (integration?.methods ?? []).some((method) => method.type === "key")
-  if (!acceptsKey) return { key: { kind: "unsupported" }, envNames }
+  const methods = integration?.methods ?? []
+  const envNames = methods.flatMap((method) => (method.type === "env" ? [...method.names] : []))
+  const connect = toConnectMethod(methods)
+  if (!connect) return { key: { kind: "unsupported" }, envNames, connect: null }
   const connections = integration?.connections ?? []
   const stored = connections.flatMap((connection) => (connection.type === "credential" ? [connection.id] : []))
-  if (stored.length > 0) return { key: { kind: "stored", ids: stored }, envNames }
+  if (stored.length > 0) return { key: { kind: "stored", ids: stored }, envNames, connect }
   const env = connections.find((connection) => connection.type === "env")
-  if (env?.type === "env") return { key: { kind: "env", name: env.name }, envNames }
-  return { key: { kind: "none" }, envNames }
+  if (env?.type === "env") return { key: { kind: "env", name: env.name }, envNames, connect }
+  return { key: { kind: "none" }, envNames, connect }
 }
 
-/** How each provider's key is supplied, keyed by provider id. */
-export async function readWebSearchAccess(
+export interface WebSearchAccounts {
+  /** How each provider's key is supplied, keyed by provider id. */
+  access: Record<string, WebSearchProviderAccess>
+  /**
+   * Marked providers OpenCode does not list for search yet, because they are
+   * not connected. Sorted by name; `access` covers them too.
+   */
+  connectable: WebSearchProvider[]
+}
+
+/** The accounts behind the listed providers, and the marked providers not listed yet. */
+export function projectWebSearchAccounts(
+  integrations: readonly IntegrationInfo[],
+  providerIds: readonly string[],
+): WebSearchAccounts {
+  const listed = new Set(providerIds)
+  const connectable = integrations
+    .filter((integration) => isWebSearchIntegration(integration) && !listed.has(integration.id))
+    .map((integration) => ({ id: integration.id, name: integration.name || integration.id }))
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }))
+  const access: Record<string, WebSearchProviderAccess> = {}
+  for (const id of [...providerIds, ...connectable.map((provider) => provider.id)]) {
+    access[id] = toAccess(integrations.find((integration) => integration.id === id))
+  }
+  return { access, connectable }
+}
+
+export async function readWebSearchAccounts(
   directory: string | null,
   providerIds: readonly string[],
-): Promise<Record<string, WebSearchProviderAccess>> {
+): Promise<WebSearchAccounts> {
   const response = await call("integration.list", () => clientFor(directory).integration.list())
-  const access: Record<string, WebSearchProviderAccess> = {}
-  for (const id of providerIds) {
-    access[id] = toAccess(response.data.find((integration) => integration.id === id))
-  }
-  return access
+  return projectWebSearchAccounts(response.data, providerIds)
 }
 
-export async function saveWebSearchKey(providerId: string, key: string): Promise<void> {
-  await call("integration.connect.key", () =>
-    opencodeClient.getSdkClient().integration.connect.key({ integrationID: providerId, key }),
+/**
+ * Connects a provider. Scoped to the current directory like the reads: a
+ * plugin's provider exists in the locations that loaded the plugin, which the
+ * home location may not have done yet.
+ */
+export async function saveWebSearchCredential(
+  directory: string | null,
+  providerId: string,
+  connect: WebSearchConnectMethod,
+  input: { key: string; answer: WebSearchConnectAnswer },
+): Promise<void> {
+  const answer = Object.keys(input.answer).length > 0 ? input.answer : undefined
+  const integration = clientFor(directory).integration
+  if (connect.kind === "key") {
+    await call("integration.connect.key", () => integration.connect.key({ integrationID: providerId, key: input.key, answer }))
+    return
+  }
+  await call("integration.connect.external", () =>
+    integration.connect.external({ integrationID: providerId, methodID: connect.methodID, answer }),
   )
 }
 

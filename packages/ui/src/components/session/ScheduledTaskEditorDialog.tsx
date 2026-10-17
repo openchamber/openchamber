@@ -400,7 +400,7 @@ const TimePill: React.FC<TimePillProps> = ({
   return (
     <div
       className={cn(
-        'oc-surface-elevated inline-flex h-8 w-fit items-center gap-1 rounded-md border border-border bg-surface-elevated focus-within:ring-1 focus-within:ring-ring focus-within:border-ring',
+        'oc-surface-elevated oc-raised oc-field inline-flex h-8 w-fit items-center gap-1 rounded-md bg-surface-elevated',
         use24Hour ? 'px-2' : 'ps-2 pe-1',
       )}
     >
@@ -433,7 +433,7 @@ const TimePill: React.FC<TimePillProps> = ({
         <Select value={parts.meridiem} onValueChange={(next) => setPeriod(next as 'AM' | 'PM')}>
           <SelectTrigger
             aria-label={periodAriaLabel}
-            className="ms-1 h-7 w-fit border-0 bg-transparent ps-2 pe-1 shadow-none hover:bg-interactive-hover focus:ring-0"
+            className="ms-1 h-7 w-fit bg-transparent dark:bg-transparent ps-2 pe-1 shadow-none hover:bg-interactive-hover"
           >
             <SelectValue />
           </SelectTrigger>

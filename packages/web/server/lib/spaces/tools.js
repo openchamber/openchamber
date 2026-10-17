@@ -55,6 +55,12 @@ const requireRevision = (value) => {
 /** OpenCode and its plugin always share one version. */
 const openCodePackages = (version) => ({ '@opencode/cli': version, '@opencode/plugin': version });
 
+// The runtimes a project's setup commands and the agent reach for beside the image's node, npm,
+// yarn and python: bun and pnpm, at exact versions, on the PATH of every space through the tools
+// volume. uv for python packages comes as a pinned download, see `tools-filler.js`. The
+// maintainer's call of 2026-10-15; go, rust and java wait for project images.
+const RUNTIME_PACKAGES = Object.freeze({ bun: '1.4.3', pnpm: '12.11.2' });
+
 /**
  * The versions a released host installs: its own `@openchamber/web`, and OpenCode at the
  * version of the `@opencode/client` this server was built against.
@@ -76,6 +82,7 @@ export function createRegistryToolsSource({ webVersion, openCodeVersion, revisio
   const packages = {
     '@openchamber/web': requireVersion(webVersion, '@openchamber/web'),
     ...openCodePackages(requireVersion(openCodeVersion, 'OpenCode')),
+    ...RUNTIME_PACKAGES,
   };
   return finishSource({
     kind: 'registry',
@@ -103,7 +110,7 @@ export function createPackedToolsSource({ webTarballPath, sdkTarballPath, openCo
     { name: WEB_TARBALL_NAME, bytes: read(webTarballPath, 'web') },
     { name: SDK_TARBALL_NAME, bytes: read(sdkTarballPath, 'sdk') },
   ];
-  const packages = openCodePackages(requireVersion(openCodeVersion, 'OpenCode'));
+  const packages = { ...openCodePackages(requireVersion(openCodeVersion, 'OpenCode')), ...RUNTIME_PACKAGES };
   return finishSource({
     kind: 'packed',
     description: 'development build',

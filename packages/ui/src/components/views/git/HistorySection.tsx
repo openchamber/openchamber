@@ -165,7 +165,7 @@ export const HistorySection: React.FC<HistorySectionProps> = ({
         <>
           <div className="flex flex-col gap-0">
             {topEntries.length > 0 ? (
-              <div className="rounded-xl border border-border/60 bg-background/70 overflow-hidden">
+              <div className="rounded-xl oc-tile overflow-hidden">
                 {renderCommitList(topEntries)}
               </div>
             ) : null}
@@ -180,7 +180,7 @@ export const HistorySection: React.FC<HistorySectionProps> = ({
             </div>
 
             {bottomEntries.length > 0 ? (
-              <div className="rounded-xl border border-border/60 bg-background/70 overflow-hidden">
+              <div className="rounded-xl oc-tile overflow-hidden">
                 {renderCommitList(bottomEntries)}
               </div>
             ) : null}
@@ -201,7 +201,7 @@ export const HistorySection: React.FC<HistorySectionProps> = ({
       return <section className="h-full min-h-0">{content}</section>;
     }
     return (
-      <section className="h-full min-h-0 rounded-xl border border-border/60 bg-background/70 overflow-hidden">
+      <section className="h-full min-h-0 rounded-xl oc-tile overflow-hidden">
         {content}
       </section>
     );
@@ -211,7 +211,7 @@ export const HistorySection: React.FC<HistorySectionProps> = ({
     <Collapsible
       open={isOpen}
       onOpenChange={setIsOpen}
-      className="rounded-xl border border-border/60 bg-background/70 overflow-hidden"
+      className="rounded-xl oc-tile overflow-hidden"
     >
       <CollapsibleTrigger className="flex w-full items-center justify-between px-3 h-10 hover:bg-transparent">
         <h3 className="typography-ui-header font-semibold text-foreground">{t('gitView.history.title')}</h3>

@@ -10,6 +10,7 @@ import { SourceBoardLabels, SourceBoardReviewers } from '@/components/sourceBoar
 import { SourceBoardReply } from '@/components/sourceBoard/SourceBoardReply';
 import { usePullAttachments } from '@/components/sourceBoard/pullAttachments';
 import { useThreadActions } from '@/components/sourceBoard/threadActions';
+import { useMinuteTickerNow } from '@/hooks/useDurationTicker';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import type { GitHubPullReference, SourceControlReadContext } from '@/lib/api/types';
@@ -58,7 +59,8 @@ export const BranchPullRequestPreview: React.FC<{
     const activeProjectId = useProjectsStore((state) => state.activeProjectId);
     const [revision, setRevision] = React.useState(0);
     const [checksOpen, setChecksOpen] = React.useState(false);
-    const [now] = React.useState(() => Date.now());
+    // The Git panel stays mounted for hours; a frozen clock read every newer comment as "Just now".
+    const now = useMinuteTickerNow(true);
 
     const listed = useListedPull(context, changeRequest.number, revision);
     const reference = React.useMemo<GitHubPullReference>(() => {

@@ -85,29 +85,6 @@ export const useSessionRowMenuState = ({
     setOpenSidebarMenuKey(isMenuOpen ? null : menuInstanceKey);
   };
 
-  // Dismiss open menus when the browser window loses focus.
-  // Base UI's controlled ContextMenu.Root does not fire onOpenChange(false) on
-  // window blur, so the popover stays rendered while the app is in the
-  // background. When the user returns, clicks outside no longer dismiss it
-  // because Base UI's internal pointer tracking was reset.
-  // The blur listener lives as long as a menu stays open; it reads the
-  // handlers of the latest render, so a close follows current deferred work.
-  const openChangeHandlersRef = React.useRef({ menu: handleMenuOpenChange, contextMenu: handleContextMenuOpenChange });
-  openChangeHandlersRef.current = { menu: handleMenuOpenChange, contextMenu: handleContextMenuOpenChange };
-  React.useEffect(() => {
-    if (!isMenuOpen && !isContextMenuOpen) return;
-    const onBlur = () => {
-      if (isContextMenuOpen) {
-        openChangeHandlersRef.current.contextMenu(false);
-      }
-      if (isMenuOpen) {
-        openChangeHandlersRef.current.menu(false);
-      }
-    };
-    window.addEventListener('blur', onBlur);
-    return () => window.removeEventListener('blur', onBlur);
-  }, [isMenuOpen, isContextMenuOpen]);
-
   return {
     isMenuOpen,
     isContextMenuOpen,

@@ -19,6 +19,8 @@ import { TurnMessageWindow } from './TurnMessageWindow';
 import { useActivityRowGlide } from './useActivityRowGlide';
 import { TurnMessageWindowContext, isReaderAtTimelineEnd, openedFoldMessageWindow } from '../lib/turns/turnMessageWindow';
 
+const NO_MESSAGES: ChatMessageEntry[] = [];
+
 interface LiveTurnActivityProps {
     turn: TurnRecord;
     hasLaterAssistant: boolean;
@@ -71,6 +73,20 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, expanded, onToggle, 
     // without one. The fold no longer holds it, so it moves at most from the
     // bottom of the fold to the top of the answer.
     const pages = React.useMemo(() => getShownPages(turn.assistantMessages), [turn.assistantMessages]);
+    // While the turn works, what the agent does after its last page (more
+    // steps, the reply it is still writing) is drawn below the page, in the
+    // order it happened; drawn inside the fold, it sat above the page until
+    // the answer was marked final, and the page then jumped over it. Once the
+    // answer arrives everything but the answer folds away as before.
+    const lastPageMessageId = !finalMessage && pages.length > 0 ? pages[pages.length - 1]?.messageID : undefined;
+    const [messagesAbovePages, messagesBelowPages] = React.useMemo(() => {
+        const pageIndex = lastPageMessageId ? activityMessages.findIndex((message) => message.info.id === lastPageMessageId) : -1;
+        if (pageIndex < 0) return [shownMessages, NO_MESSAGES];
+        // The fold shows the tail of the turn, so the page's message may
+        // already be trimmed away; everything still shown then came after it.
+        const split = Math.max(0, pageIndex + 1 - (activityMessages.length - shownMessages.length));
+        return [shownMessages.slice(0, split), shownMessages.slice(split)];
+    }, [activityMessages, lastPageMessageId, shownMessages]);
     const hoistedPages = React.useMemo(() => new Set(pages.map((part) => part.id)), [pages]);
     const finalContext = React.useMemo(() => finalMessage ? {
         messageId: finalMessage.info.id, expanded: isExpanded, contentId: finalContentId, animateCollapse: animateFinalCollapse, pages,
@@ -135,7 +151,7 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, expanded, onToggle, 
                 <LiveActivityCollapse expanded={isExpanded} id={contentId}>
                     <div ref={rowsRef}>
                         <ActivityRowSkipContext.Provider value={rowSkip}>
-                            <TurnMessageWindow turnId={turn.turnId} messages={shownMessages} renderMessage={renderMessage} />
+                            <TurnMessageWindow turnId={turn.turnId} messages={messagesAbovePages} renderMessage={renderMessage} />
                         </ActivityRowSkipContext.Provider>
                     </div>
                 </LiveActivityCollapse>
@@ -143,6 +159,13 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, expanded, onToggle, 
                     <div className="chat-message-column">
                         {pages.map((part) => <ShownPage key={part.id} part={part} />)}
                     </div>
+                ) : null}
+                {messagesBelowPages.length > 0 ? (
+                    <ActivityRowSkipContext.Provider value={rowSkip}>
+                        {messagesBelowPages.map((message) => (
+                            <React.Fragment key={message.info.id}>{renderMessage(message)}</React.Fragment>
+                        ))}
+                    </ActivityRowSkipContext.Provider>
                 ) : null}
                 <LiveFinalActivityContext.Provider value={finalContext}>
                     {finalMessage ? renderMessage(finalMessage) : null}

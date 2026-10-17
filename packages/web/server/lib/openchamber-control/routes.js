@@ -33,4 +33,15 @@ export const registerOpenChamberControlRoutes = (app, { controlService }) => {
       res.off('close', abortOnDisconnect);
     }
   });
+
+  // The user answered a page an agent is waiting on (render.page with
+  // awaitAnswer). The agent's call holds the matching request open.
+  app.post('/api/openchamber/render/answer', express.json({ limit: '64kb' }), (req, res) => {
+    try {
+      return res.json(controlService.answerPage(req.body ?? {}));
+    } catch (error) {
+      const controlError = asControlError(error, 'Could not deliver the answer');
+      return res.status(controlError.statusCode).json({ error: controlError.message });
+    }
+  });
 };

@@ -1,7 +1,7 @@
-// Per-machine relay-host claim. Every OpenChamber instance on a machine shares
-// the same data dir and therefore the same relay signing key / serverId, so if
-// two processes run a relay host at once they fight over the single host slot
-// at the relay worker (each new connection closes the previous one with
+// Relay-host claim shared through the data dir. Every OpenChamber instance that
+// uses a data dir shares the same relay signing key / serverId, so if two
+// processes run a relay host at once they fight over the single host slot at
+// the relay worker (each new connection closes the previous one with
 // "4001: Control replaced") and paired devices land on whichever instance won
 // last — often a dev/worktree instance running different code.
 //
@@ -14,24 +14,49 @@
 //   - a running host that discovers another live process has claimed backs off
 //     instead of reconnecting, which is what ends the replace/reconnect fight.
 //
+// A data dir is not always private to one machine's process table: containers
+// that mount the same volume all run as pid 1, and a synced or network folder
+// is shared by processes this machine cannot see. So a claim names its holder
+// by a random per-process instance id and the host name. A claimant on this
+// host is live while its pid answers; one on another host or container is live
+// while it keeps refreshing the claim, which the holder does on every claim
+// check (the relay service checks every 30 s).
+//
 // This is a cooperative claim, not an OS lock: correctness does not depend on
 // atomicity (the relay worker still enforces a single host); the claim only
 // decides which process KEEPS retrying and which stands down.
+
+import { randomUUID } from 'node:crypto';
+import os from 'node:os';
+import { z } from 'zod';
+
+// Three missed 30 s refreshes.
+const REMOTE_CLAIM_STALE_MS = 90_000;
+
+// Claims written before instance ids carry only `pid`.
+const claimSchema = z.object({
+  pid: z.coerce.number().int().positive(),
+  instance: z.string().nullable().catch(null),
+  host: z.string().nullable().catch(null),
+  refreshedAt: z.number().catch(0),
+});
 
 /**
  * @param {{
  *   lockFilePath: string,
  *   fs?: typeof import('node:fs'),
  *   process?: NodeJS.Process,
+ *   hostname?: string,
+ *   now?: () => number,
  *   logger?: Pick<Console, 'warn'>,
  * }} deps
  */
-export const createRelayHostLock = ({ lockFilePath, fs, process: proc, logger = console }) => {
+export const createRelayHostLock = ({ lockFilePath, fs, process: proc, hostname = os.hostname(), now = Date.now, logger = console }) => {
   const fsImpl = fs;
   const selfPid = proc.pid;
+  const selfInstance = randomUUID();
 
   const isPidAlive = (pid) => {
-    if (!Number.isInteger(pid) || pid <= 0) return false;
     try {
       proc.kill(pid, 0);
       return true;
@@ -44,10 +69,8 @@ export const createRelayHostLock = ({ lockFilePath, fs, process: proc, logger = 
 
   const readClaim = () => {
     try {
-      const raw = fsImpl.readFileSync(lockFilePath, 'utf8');
-      const parsed = JSON.parse(raw);
-      const pid = Number(parsed?.pid);
-      return Number.isInteger(pid) && pid > 0 ? { pid } : null;
+      const parsed = claimSchema.safeParse(JSON.parse(fsImpl.readFileSync(lockFilePath, 'utf8')));
+      return parsed.success ? parsed.data : null;
     } catch {
       // Missing file or unparsable content: no valid claim.
       return null;
@@ -56,7 +79,7 @@ export const createRelayHostLock = ({ lockFilePath, fs, process: proc, logger = 
 
   const writeClaim = () => {
     try {
-      fsImpl.writeFileSync(lockFilePath, JSON.stringify({ pid: selfPid, claimedAt: new Date().toISOString() }));
+      fsImpl.writeFileSync(lockFilePath, JSON.stringify({ pid: selfPid, instance: selfInstance, host: hostname, refreshedAt: now() }));
       return true;
     } catch (error) {
       // An unwritable data dir must not take the relay down with it — fall back
@@ -66,30 +89,37 @@ export const createRelayHostLock = ({ lockFilePath, fs, process: proc, logger = 
     }
   };
 
-  /** The pid of the current live claimant, or null when the claim is free/stale. */
-  const liveClaimantPid = () => {
-    const claim = readClaim();
-    if (!claim) return null;
-    return isPidAlive(claim.pid) ? claim.pid : null;
+  const isOwn = (claim) => claim.instance === selfInstance;
+
+  const isLive = (claim) => {
+    if (isOwn(claim)) return true;
+    if (claim.host !== null && claim.host !== hostname) return now() - claim.refreshedAt < REMOTE_CLAIM_STALE_MS;
+    // A claim without an instance id that names our own pid is our previous
+    // life in a container that restarted from an older build.
+    if (claim.instance === null && claim.pid === selfPid) return false;
+    return isPidAlive(claim.pid);
   };
 
-  /** Claim unless another LIVE process already holds it. Re-claiming our own is a no-op refresh. */
+  /** The live claimant other than this process, or null when the claim is free, stale or ours. */
+  const otherLiveClaimant = () => {
+    const claim = readClaim();
+    if (!claim || isOwn(claim) || !isLive(claim)) return null;
+    return { pid: claim.pid, host: claim.host };
+  };
+
+  /** Claim unless another live process already holds it. Re-claiming our own refreshes it. */
   const tryClaim = () => {
-    const holder = liveClaimantPid();
-    if (holder !== null && holder !== selfPid) return false;
+    if (otherLiveClaimant() !== null) return false;
     return writeClaim();
   };
 
   /** Unconditional claim — explicit user intent (pairing) overrides any holder. */
   const forceClaim = () => writeClaim();
 
-  /** True while this process is the live claimant. */
-  const holdsClaim = () => liveClaimantPid() === selfPid;
-
   /** Release only our own claim; never delete another process's. */
   const release = () => {
     const claim = readClaim();
-    if (!claim || claim.pid !== selfPid) return;
+    if (!claim || !isOwn(claim)) return;
     try {
       fsImpl.unlinkSync(lockFilePath);
     } catch {
@@ -97,5 +127,5 @@ export const createRelayHostLock = ({ lockFilePath, fs, process: proc, logger = 
     }
   };
 
-  return { tryClaim, forceClaim, holdsClaim, liveClaimantPid, release };
+  return { tryClaim, forceClaim, otherLiveClaimant, release };
 };

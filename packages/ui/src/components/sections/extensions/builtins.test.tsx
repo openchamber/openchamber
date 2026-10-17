@@ -106,18 +106,18 @@ describe('built-in extension settings', () => {
 
   test('shows the built-in badge and enable/disable without removal or approval', async () => {
     await render(<ExtensionsPage />);
-    const trigger = [...container.querySelectorAll('button')].find((entry) => entry.textContent?.includes('SDK Demo'));
-    if (!trigger?.parentElement) throw new Error('Missing built-in card');
-    const card = trigger.parentElement;
+    const card = [...container.querySelectorAll('button')].find((entry) => entry.textContent?.includes('SDK Demo'));
+    if (!card) throw new Error('Missing built-in card');
     expect(card.textContent).toContain('Built-in');
-    await act(async () => { trigger.click(); });
-    expect([...card.querySelectorAll('button')].some((entry) => entry.textContent?.trim() === 'Remove')).toBe(false);
-    expect(card.textContent).not.toContain('Review permissions');
-    expect(card.textContent).not.toContain('Open source');
-    await act(async () => { button('Disable', card).click(); });
-    expect(button('Enable', card)).toBeTruthy();
-    await act(async () => { button('Enable', card).click(); });
-    expect(button('Disable', card)).toBeTruthy();
+    // The card opens the extension's own screen.
+    await act(async () => { card.click(); });
+    expect([...container.querySelectorAll('button')].some((entry) => entry.textContent?.trim() === 'Remove')).toBe(false);
+    expect(container.textContent).not.toContain('Review permissions');
+    expect(container.textContent).not.toContain('Open source');
+    await act(async () => { button('Disable').click(); });
+    expect(button('Enable')).toBeTruthy();
+    await act(async () => { button('Enable').click(); });
+    expect(button('Disable')).toBeTruthy();
     expect(requests.some((entry) => entry.includes('/capabilities'))).toBe(false);
     expect(requests.some((entry) => entry.startsWith('DELETE'))).toBe(false);
   });

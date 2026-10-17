@@ -22,7 +22,7 @@ import { cn } from '@/lib/utils';
 export const SETTINGS_CARD_GRID_CLASS = 'grid grid-cols-1 gap-3 @xl:grid-cols-2 @3xl:grid-cols-3';
 
 const CARD_CLASS = cn(
-  'group flex min-h-[132px] flex-col rounded-xl border p-4 text-start transition-colors duration-150',
+  'group flex min-h-[132px] flex-col rounded-xl p-4 text-start',
   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)]',
 );
 
@@ -33,7 +33,7 @@ const TONE_CLASS = {
   warning: 'bg-[var(--status-warning)]/15 text-[var(--status-warning)]',
   error: 'bg-[var(--status-error)]/15 text-[var(--status-error)]',
   info: 'bg-[var(--status-info)]/15 text-[var(--status-info)]',
-  neutral: 'bg-[var(--surface-muted)] text-muted-foreground',
+  neutral: 'oc-tile-inset text-muted-foreground',
 } satisfies Record<SettingsCardTone, string>;
 
 export const SettingsCardPill: React.FC<{ tone: SettingsCardTone; children: React.ReactNode }> = ({ tone, children }) => (
@@ -44,7 +44,7 @@ export const SettingsCardPill: React.FC<{ tone: SettingsCardTone; children: Reac
 
 /** Small outlined chip for the card footer (scope, source). */
 export const SettingsCardChip: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-  <span className="shrink-0 rounded-full border border-[var(--interactive-border)] px-2 py-px text-[10px] font-medium">
+  <span className="oc-tile-inset shrink-0 rounded-full px-2 py-px text-[10px] font-medium">
     {children}
   </span>
 );
@@ -89,7 +89,7 @@ export const SettingsCard: React.FC<SettingsCardProps> = ({ icon, title, subtitl
   const body = (
     <>
       <div className="flex items-start justify-between gap-2">
-        <span className={cn('flex size-10 shrink-0 items-center justify-center rounded-[10px] bg-[var(--surface-muted)]', muted && 'opacity-60')}>
+        <span className={cn('oc-tile-inset flex size-10 shrink-0 items-center justify-center rounded-[10px]', muted && 'opacity-60')}>
           {icon}
         </span>
         {badges ? <span className="flex min-w-0 flex-wrap justify-end gap-1">{badges}</span> : null}
@@ -122,13 +122,13 @@ export const SettingsCard: React.FC<SettingsCardProps> = ({ icon, title, subtitl
       onClick={onOpen}
       className={cn(
         CARD_CLASS,
-        'h-full w-full border-[var(--interactive-border)] bg-[var(--surface-elevated)] hover:border-[var(--interactive-border-hover)] hover:bg-[var(--interactive-hover)]/50',
+        'oc-tile oc-tile-hover h-full w-full',
       )}
     >
       {body}
     </button>
   ) : (
-    <div className={cn(CARD_CLASS, 'h-full border-[var(--interactive-border)] bg-[var(--surface-elevated)]')}>{body}</div>
+    <div className={cn(CARD_CLASS, 'oc-tile h-full')}>{body}</div>
   );
 
   if (!hasActions || !actions) return card;
@@ -188,10 +188,11 @@ export const SettingsAddCard: React.FC<{
     data-settings-item={settingsItem}
     className={cn(
       CARD_CLASS,
-      'items-center justify-center gap-2 text-center border-dashed border-[var(--interactive-border)] text-muted-foreground hover:bg-[var(--interactive-hover)]/50 hover:text-foreground',
+      // The one card drawn with a line: an empty slot reads as a dashed outline.
+      'oc-tile-hover items-center justify-center gap-2 text-center border border-dashed border-[color-mix(in_srgb,var(--foreground)_14%,transparent)] text-muted-foreground hover:text-foreground',
     )}
   >
-    <span className="flex size-10 items-center justify-center rounded-[10px] bg-[var(--surface-muted)]">
+    <span className="oc-tile-inset flex size-10 items-center justify-center rounded-[10px]">
       <Icon name="add" className="size-5" />
     </span>
     <span className="typography-ui-label font-medium">{label}</span>

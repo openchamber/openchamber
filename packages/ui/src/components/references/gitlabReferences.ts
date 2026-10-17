@@ -225,8 +225,9 @@ export const fetchGitLabReferenceDetail = async (
         const comments = (await reads.issueComments(context, reference.number, project)).map(toComment).sort(byCreation);
         return { number: reference.number, comments: comments.slice(-50), commentTotal: comments.length, pull: null };
     }
-    // The size comes from the changed files, which GitLab only lists with their diffs.
-    const changeRequestContext = await reads.changeRequestContext(context, reference.number, { project, includeDiff: true, includeTimeline: true });
+    // The size comes from the changed files, which GitLab only lists with their
+    // diffs; the pipeline's totals from its jobs, read only with CI details.
+    const changeRequestContext = await reads.changeRequestContext(context, reference.number, { project, includeDiff: true, includeTimeline: true, includeCIDetails: true });
     const comments = [
         ...threadedComments([...changeRequestContext.issueComments, ...changeRequestContext.reviewComments]),
         ...(changeRequestContext.verdicts ?? []).map(toVerdict),

@@ -184,7 +184,7 @@ function RunOverviewContent({ runKey }: { runKey: string }): React.ReactNode {
     return resolveLaneStatus({
       session,
       busy: activeSessionIds.has(sessionId),
-      blocking: pending?.permissions.length ? 'permission' : pending?.forms.length ? 'question' : null,
+      blocking: pending?.permissions.length ? 'permission' : pending?.forms.length || pending?.pages.length ? 'question' : null,
       reply: summaries.get(sessionId)?.reply,
     });
   };

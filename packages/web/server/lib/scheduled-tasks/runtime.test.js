@@ -334,8 +334,7 @@ describe('scheduled-tasks runtime prompt dispatch', () => {
       waitForOpenCodeReady: async () => {},
       persistSessionGoal: async () => undefined,
       sessionKnowledgeRuntime: {
-        resolvePendingForSession: async () => ({ text: 'Project background', signature: 'sig' }),
-        recordDelivered: async () => undefined,
+        sync: async (sessionID, directory) => { posts.push({ pathname: `knowledge:${sessionID}`, body: { directory } }); return true; },
       },
       logger: { info: () => {}, warn: () => {}, error: () => {} },
     });
@@ -345,9 +344,10 @@ describe('scheduled-tasks runtime prompt dispatch', () => {
 
     // The run is marked, so it stays out of In work.
     expect(posts.find((post) => post.pathname === '/api/session')?.body.metadata).toEqual({ openchamber: { kind: 'scheduled' } });
-    const dispatch = posts.filter((post) => post.pathname.startsWith('/api/session/ses_run/'));
-    expect(dispatch.map((post) => post.pathname.split('/').at(-1))).toEqual(['synthetic', 'synthetic', 'prompt']);
-    expect(dispatch[0].body).toMatchObject({ text: 'Project background', resume: false });
+    // The project knowledge is written into the session before anything is sent to it.
+    const dispatch = posts.filter((post) => post.pathname.startsWith('/api/session/ses_run/') || post.pathname.startsWith('knowledge:'));
+    expect(dispatch.map((post) => post.pathname.split('/').at(-1))).toEqual(['knowledge:ses_run', 'synthetic', 'prompt']);
+    expect(dispatch[0].body).toEqual({ directory: '/repo' });
     expect(dispatch[1].body.resume).toBe(false);
     expect(dispatch[2].body).toMatchObject({ text: 'Review open issues' });
     expect(dispatch[2].body.resume).toBeUndefined();

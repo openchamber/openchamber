@@ -30,7 +30,7 @@ export const GuestToolTable: React.FC<GuestToolTableProps> = ({ rows, columns })
 
     return (
         <div className="flex w-fit max-w-full flex-col gap-1">
-            <div className="overflow-x-auto rounded-lg border border-border/80 bg-[var(--surface-elevated)]">
+            <div className="oc-tile overflow-x-auto rounded-lg">
                 <table className="w-max border-collapse text-sm">
                     <thead>
                         <tr className="border-b border-border/60">

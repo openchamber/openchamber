@@ -404,7 +404,9 @@ const buildSnapshot = (instanceName: string, includeTray: boolean): TraySnapshot
       seen.add(request.id);
       approvals.push({ kind: 'permission', id: request.id, sessionId, sessionTitle, label: permissionLabel(request), directory: pending.directory, canSave: canSavePermission(request.save) });
     }
-    for (const request of pending.forms) {
+    // A page that waits for the user's answer is listed like a form: the tray
+    // only opens the session for either.
+    for (const request of [...pending.forms, ...pending.pages]) {
       if (seen.has(request.id)) continue;
       seen.add(request.id);
       approvals.push({ kind: 'form', id: request.id, sessionId, sessionTitle, label: formLabel(request), directory: pending.directory, canSave: false });

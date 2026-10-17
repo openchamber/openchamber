@@ -154,7 +154,7 @@ const ProjectAppearancePicker: React.FC<{
           <div className="space-y-3">
             {form.effectiveHasImageIcon ? (
               <div className="flex items-center gap-3">
-                <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-[var(--interactive-border)] bg-[var(--surface-elevated)]">
+                <span className="flex h-12 w-12 shrink-0 items-center justify-center oc-tile-inset rounded-xl">
                   <ProjectIconPreview form={form} className="h-7 w-7" />
                 </span>
                 <p className={SETTINGS_HELPER_CLASS}>{t('settings.projects.appearance.imageColorHint')}</p>
@@ -224,7 +224,7 @@ export const ProjectSettingsHeader: React.FC<{ form: ProjectIdentityFormState }>
           title={t('settings.projects.header.appearanceAria')}
           onPointerDownCapture={(event) => syncPortal(event.currentTarget)}
           onFocusCapture={(event) => syncPortal(event.currentTarget)}
-          className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-[var(--interactive-border)] bg-[var(--surface-elevated)] transition-colors hover:border-[var(--interactive-border-hover)] hover:bg-[var(--interactive-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)] data-[popup-open]:bg-interactive-selection"
+          className="relative flex h-12 w-12 shrink-0 items-center justify-center oc-tile-inset rounded-xl hover:bg-[var(--interactive-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)] data-[popup-open]:bg-interactive-selection"
         >
           <ProjectIconPreview form={form} className="h-6 w-6" />
           {/* Says the tile is a control: it opens the icon and colour picker. */}
@@ -256,7 +256,7 @@ export const ProjectSettingsHeader: React.FC<{ form: ProjectIdentityFormState }>
           onChange={(event) => form.setName(event.target.value)}
           placeholder={t('settings.projects.page.field.projectNamePlaceholder')}
           aria-label={t('settings.projects.page.field.projectName')}
-          className="-ms-2 w-full max-w-[24rem] bg-transparent px-2 ring-transparent hover:ring-border/60 typography-settings-section-title md:typography-settings-section-title"
+          className="-ms-2 w-full max-w-[24rem] bg-transparent px-2 [&:not(:hover):not(:focus)]:shadow-none typography-settings-section-title md:typography-settings-section-title"
         />
         <p className="truncate typography-meta text-muted-foreground" title={form.project.path}>
           {form.project.path}

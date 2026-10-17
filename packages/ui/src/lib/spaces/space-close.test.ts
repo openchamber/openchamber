@@ -5,7 +5,7 @@ import type { SpaceEntry } from './spaces-api';
 
 const space = (id: string, change: Partial<SpaceEntry> = {}): SpaceEntry => ({
   id, name: id, placeId: 'docker', machine: null, projectDirectory: '/home/me/app', directory: `/spaces/${id}/app`, projectFolder: { path: '/home/me/app', found: true },
-  state: 'running', stoppedIdle: false, step: null, failure: null, network: null, grants: [], access: null, needsAccess: [], damage: null, setup: null,
+  state: 'running', stoppedIdle: false, step: null, failure: null, network: null, grants: [], access: null, needsAccess: [], accessFailures: [], damage: null, setup: null,
   ...change,
 });
 

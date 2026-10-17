@@ -8,6 +8,7 @@ description: Use when creating or modifying OpenChamber Settings pages, dialogs,
 ## Required Companion Skills
 
 - Load `theme-system` for colors, buttons, icons, and visual states.
+- Load `openchamber-ui-guidance` for depth, surfaces, layout stability, sizing and composition.
 - Load `locale-ui-patterns` for every visible string, tooltip, placeholder, and accessible label.
 - Load `ui-api-decoupling` when a setting reads/writes runtime data or adds a capability, and write the surface list from its *Name The Surfaces Before Editing* step before adding or moving a settings page: a page that exists on desktop and is unreachable on a phone is the common way this goes wrong.
 
@@ -27,6 +28,25 @@ shape is genuinely missing.
 - Controls have one standard size (`h-9` / select `size="settings"`) and capped widths — no full-bleed inputs.
 - Layouts respond to the settings pane width via container queries (`@xl:` / `@3xl:`), never viewport `sm:`/`lg:` breakpoints (the pane is much narrower than the viewport inside the dialog).
 - Checkbox/radio state comes before labels; selected states are subtle and never shift layout.
+
+## Keep A Page From Turning Into A List
+
+Pages grow one control at a time, and each addition looks fine alone; the
+mess shows up as a whole. When adding to a page, read the page, not only the
+spot you add to:
+
+- A section holds one topic a user would name ("Terminal", "Sending"). A new
+  setting goes into the section it belongs to, or starts its own; never append
+  it to whatever section is last or nearest.
+- One row kind per run: field rows together, checkboxes together. A field row
+  (label + select, stepper, chips) between checkboxes is the clearest sign of
+  a page that needs regrouping.
+- Same shape for the same kind of choice: a short enum is chips in a field
+  row everywhere, never radios on one page and chips on the next.
+- A text line belongs to one option and sits under its label (`description`,
+  `footer`), never loose between two rows.
+- When a page passes about four sections or a scroll of mixed topics, split it
+  into tabs (`references/layout.md`, Pages With Tabs) rather than adding more.
 
 ## Load References By Task
 

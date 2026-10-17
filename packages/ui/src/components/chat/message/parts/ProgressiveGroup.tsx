@@ -31,7 +31,7 @@ const ExternalLinkFavicon: React.FC<{ href: string }> = ({ href }) => {
     }
 
     return (
-        <span className="inline-flex size-[18px] flex-shrink-0 items-center justify-center rounded border border-[var(--border)] bg-[var(--interactive-hover)]">
+        <span className="inline-flex size-[18px] flex-shrink-0 items-center justify-center rounded oc-tile-inset">
             <img
                 src={faviconUrl}
                 alt=""

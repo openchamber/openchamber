@@ -6,6 +6,8 @@
 // exactly like any remote client (bearer oc_client_* header, oc_url_token query).
 // Spec: packages/web/server/lib/relay/DOCUMENTATION.md (Layer 3).
 
+import { Readable, pipeline } from 'node:stream';
+import { createGzip } from 'node:zlib';
 import { WebSocket } from 'ws';
 
 import {
@@ -256,7 +258,14 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
     }
     const compress = shouldCompressResponse(request, method, response);
     if (compress) responseHeaders[TUNNEL_CONTENT_ENCODING_HEADER] = 'gzip';
-    const responseBody = compress ? response.body.pipeThrough(new CompressionStream('gzip')) : response.body;
+    // A Node stream pipeline, not CompressionStream: Node's web-stream adapter
+    // behind CompressionStream throws an uncaught "Controller is already
+    // closed" when the reader cancels while gzip still emits, which every
+    // aborted compressed request did. Leaving the loop below destroys this
+    // pipeline and the loopback body with it.
+    const responseBody = compress
+      ? pipeline(Readable.fromWeb(response.body), createGzip(), () => {})
+      : response.body;
 
     try {
       await sendJson(TunnelFrameType.HttpResponse, streamId, { status: response.status, headers: responseHeaders });

@@ -1,3 +1,19 @@
+## [2.4.0] - 2026-10-17
+
+### Improvements
+
+- Settings: Chat is split into three tabs and Sessions into clear sections.
+
+### Fixes
+
+- Performance: the extension puts much less load on the CPU and GPU, also while it sits idle (thanks to @yulia-ivashko).
+- Chat: text and tables stay in place while the panel gets wider or narrower.
+- Chat: the agent's question or permission request shows while a BTW is collapsed.
+- Chat: with Queue follow-up, Enter in an empty message box sends the whole queue again (thanks to @yulia-ivashko).
+- Usage: the OpenCode Go credit balance showed 100 times the real amount (thanks to @yulia-ivashko).
+- Dialogs: the red Archive and Delete buttons have a readable label (thanks to @yulia-ivashko).
+- Chinese: model tokens are called 词元 and 詞元 (thanks to @eltPlay).
+
 ## [2.3.3] - 2026-10-14
 
 ### New

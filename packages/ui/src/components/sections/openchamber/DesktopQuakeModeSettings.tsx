@@ -99,7 +99,7 @@ export const DesktopQuakeModeSettings: React.FC<DesktopQuakeModeSettingsProps> =
             </span>
           ) : undefined}
         >
-          <kbd className="min-w-32 rounded-md border border-border bg-muted px-2 py-1 text-center typography-meta text-foreground">
+          <kbd className="min-w-32 oc-tile-inset rounded-md px-2 py-1 text-center typography-meta text-foreground">
             {quake.combo
               ? formatShortcutForDisplay(quake.combo)
               : t('settings.openchamber.keyboardShortcuts.unassigned')}

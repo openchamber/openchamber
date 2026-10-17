@@ -3,7 +3,8 @@ import type { Session } from "@/lib/opencode/model"
 import { getRuntimeKey, subscribeRuntimeEndpointWillChange } from '@/lib/runtime-switch';
 import { getBtwSessionID } from '@/lib/sessionBtwMetadata';
 import { isSessionInWork } from '@/lib/sessionWorkMetadata';
-import { isSessionPinned, useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
+import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
+import { isSessionPinned, isSessionPinnedInMetadata } from '@/lib/sessionPins';
 import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useUIStore, type SessionRetentionAction } from '@/stores/useUIStore';
 import { useSessionUIStore } from './session-ui-store';
@@ -25,9 +26,14 @@ const isOlderThanCutoff = (session: Session, cutoff: number, onlyArchived: boole
   return Number.isFinite(timestamp) && timestamp > 0 && timestamp < cutoff;
 };
 
-/** Sessions the user asked to keep: pinned on this client, or in the In work block. */
+/**
+ * Sessions the user asked to keep: pinned or in the In work block. The pin is
+ * read from the session itself and from the pinned set, which also holds a
+ * pin clicked a moment ago and this device's older local pins that have not
+ * reached the server yet.
+ */
 export const isSessionKeptByUser = (session: Session, pinnedIds: Set<string> = useSessionPinnedStore.getState().ids): boolean => (
-  isSessionInWork(session) || isSessionPinned(pinnedIds, session.directory, session.id)
+  isSessionInWork(session) || isSessionPinnedInMetadata(session) || isSessionPinned(pinnedIds, session.directory, session.id)
 );
 
 type CandidateOptions = {

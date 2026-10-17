@@ -174,7 +174,8 @@ interface SkillsStore {
   createSkill: (config: SkillConfig, directory?: string | null) => Promise<boolean>;
   updateSkill: (name: string, config: Partial<SkillConfig>, directory?: string | null) => Promise<boolean>;
   renameSkill: (name: string, newName: string, directory?: string | null) => Promise<boolean>;
-  deleteSkill: (name: string, directory?: string | null) => Promise<boolean>;
+  /** `location` deletes only the copy in that scope and source; without it every copy of the name goes. */
+  deleteSkill: (name: string, directory?: string | null, location?: { scope: SkillScope; source: SkillSource }) => Promise<boolean>;
   getSkillByName: (name: string, directory?: string | null) => DiscoveredSkill | undefined;
   /**
    * Skills are discovered on the connected instance and cached by directory,
@@ -598,10 +599,17 @@ export const useSkillsStore = create<SkillsStore>()(
           }
         },
 
-        deleteSkill: async (name: string, requestedDirectory?: string | null) => {
+        deleteSkill: async (name: string, requestedDirectory?: string | null, location?: { scope: SkillScope; source: SkillSource }) => {
           try {
             const directory = resolveDirectory(requestedDirectory);
-            const queryParams = directory ? `?directory=${encodeURIComponent(directory)}` : '';
+            const params = new URLSearchParams();
+            if (directory) params.set('directory', directory);
+            if (location) {
+              params.set('scope', location.scope);
+              params.set('source', location.source);
+            }
+            const query = params.toString();
+            const queryParams = query ? `?${query}` : '';
 
             const response = await runtimeFetch(`/api/config/skills/${encodeURIComponent(name)}${queryParams}`, {
               method: 'DELETE',

@@ -25,6 +25,7 @@ import { formatRelativeShort, getSessionTimestamp } from './mobileSessionFields'
 import { MobileRunProviderLogos } from './MobileRunProviderLogos';
 import { MobileSessionGoalGlyph, MobileSessionPendingBadges } from './MobileSessionStateBadges';
 import { usePendingRequests } from './usePendingRequests';
+import { mobileSessionTitleClass } from './mobileSessionTitle';
 
 export type TimelineProject = MobileProjectIconProject & { label: string };
 
@@ -245,7 +246,7 @@ const MobileTimelineRow: React.FC<{
               />
             ) : (
               <span className="flex min-w-0 items-center gap-2">
-                <span dir="auto" className={cn('block min-w-0 flex-1 truncate oc-ui-start-align typography-ui-label', active ? 'text-primary' : 'text-foreground')}>
+                <span dir="auto" className={cn('block min-w-0 flex-1 truncate oc-ui-start-align typography-ui-label', mobileSessionTitleClass({ active, unread: showUnreadDot, running: isStreaming, pending: pendingRequests }))}>
                   {title}
                 </span>
                 {status}

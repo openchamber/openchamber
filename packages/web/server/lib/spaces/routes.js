@@ -1,7 +1,7 @@
 // The host's own routes of the isolated-spaces journey, under `/api/openchamber/spaces`: a
 // namespace of the host's, never forwarded, beside `/api/openchamber/tunnel`. A request to the
-// server inside a space is `/api/spaces/<id>/...` and belongs to the dispatcher; nothing here
-// touches that shape.
+// server inside a space names a space's directory, or has the older `/api/spaces/<id>/...`
+// form, and belongs to the dispatcher; nothing here touches either.
 //
 // Every route but the switch exists only while the switch is on: `getJourney()` answers null
 // while it is off, and then the journey routes say so with 404 and `isolated_spaces_off`, the same
@@ -16,6 +16,7 @@ import { z } from 'zod';
 import { SpaceError } from './errors.js';
 import { isSpaceId } from './labels.js';
 import { DOCKER_SSH_PLACE_ID } from './places/docker.js';
+import { DOCKER_SETUP_ACTIONS } from './places/docker-setup.js';
 import { sshHostSchema } from './places/ssh-host.js';
 
 export const SPACES_ROUTE = '/api/openchamber/spaces';
@@ -53,6 +54,8 @@ const STATUS_BY_CODE = new Map([
   ['space_creation_failed', 409],
   ['space_busy', 409],
   ['image_pulling', 409],
+  ['docker_setup_running', 409],
+  ['docker_setup_not_offered', 409],
   ['isolated_spaces_off', 404],
   ['space_not_running', 409],
   ['branch_exists', 409],
@@ -88,6 +91,7 @@ export const answerFailure = (res, error) => {
 const isObjectRecord = (value) => value instanceof Object && !Array.isArray(value);
 const switchBodySchema = z.object({ enabled: z.boolean() });
 const machineBodySchema = z.object({ machine: z.string() });
+const dockerSetupBodySchema = z.object({ action: z.enum(DOCKER_SETUP_ACTIONS) });
 
 /** The place of the other machine as the places route lists it, checked now, or null without one. */
 const describeSshPlace = async (host) => {
@@ -193,10 +197,10 @@ export function createSwitchController({ getHost, setHost, buildHost, startHost,
 
 /**
  * `getJourney()` is the journey of the running host or null, `getPlaces()` the places to check,
- * `readSwitch()` and `setSwitch(enabled)` the switch: `setSwitch(false)` stops the spaces and takes
+ * `getDockerSetup()` the local place's id with its Docker setup, or null, `readSwitch()` and `setSwitch(enabled)` the switch: `setSwitch(false)` stops the spaces and takes
  * the feature down, `setSwitch(true)` brings it up, and each resolves what the client shows.
  */
-export function registerSpaceRoutes(app, { getJourney, getPlaces = () => [], readSwitch, setSwitch, setMachine = async () => null, getArchive = () => null }) {
+export function registerSpaceRoutes(app, { getJourney, getPlaces = () => [], getDockerSetup = () => null, readSwitch, setSwitch, setMachine = async () => null, getArchive = () => null }) {
   const withJourney = (handler) => async (req, res) => {
     const journey = getJourney();
     if (!journey) {
@@ -252,10 +256,28 @@ export function registerSpaceRoutes(app, { getJourney, getPlaces = () => [], rea
     res.json(await journey.changeIdleStop(requireBody(req)));
   }));
 
-  // The places funnel: each place asked what it can do, now, because the user is looking.
+  // The places funnel: each place asked what it can do, now, because the user is looking. This
+  // computer's place also says what gets Docker going there, see `places/docker-setup.js`.
   app.get(`${SPACES_ROUTE}/places`, withJourney(async (_journey, _req, res) => {
-    const places = await Promise.all(getPlaces().map(async (place) => ({ id: place.id, machine: place.machine ?? null, ...(await place.check()) })));
+    const local = getDockerSetup();
+    const places = await Promise.all(getPlaces().map(async (place) => {
+      const checked = await place.check();
+      const setup = local && place.id === local.placeId ? await local.setup.describe(checked) : null;
+      return { id: place.id, machine: place.machine ?? null, ...checked, setup };
+    }));
     res.json({ places });
+  }));
+  // Getting Docker ready on this computer: the action under way or the last one that failed, read
+  // while the screen waits on it, and the start of the one action the place offers now.
+  app.get(`${SPACES_ROUTE}/places/local/setup`, withJourney(async (_journey, _req, res) => {
+    res.json({ job: getDockerSetup()?.setup.readJob() ?? null });
+  }));
+  app.post(`${SPACES_ROUTE}/places/local/setup`, withJourney(async (_journey, req, res) => {
+    const body = dockerSetupBodySchema.safeParse(req.body);
+    if (!body.success) throw new SpaceError('invalid_request_body', `The setup takes \`action\`, one of ${DOCKER_SETUP_ACTIONS.join(', ')}.`);
+    const local = getDockerSetup();
+    if (!local) throw new SpaceError('place_not_found', 'This computer has no Docker place.');
+    res.status(202).json({ job: await local.setup.start(body.data.action) });
   }));
   // The machine of the Docker over SSH place: the empty string takes the place away. Answers that
   // place as the list above shows it, checked, or null.

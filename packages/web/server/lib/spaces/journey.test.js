@@ -763,6 +763,31 @@ describe('the journey: grants', () => {
     await expect(journey.grantAccess('0f0f0f0f0f0f', anthropic)).rejects.toMatchObject({ code: 'space_not_found' });
   });
 
+  it('gives the access a creation carries before the space is ready, and lists what it could not give until a grant succeeds', async () => {
+    const made = journeyWith({ hostEnvironment: {} });
+    const { journey, records, events } = made;
+    const { id } = await journey.createSpace({ ...REQUEST, grants: [anthropic, openai] });
+    expect(await until(() => steps(events, id).includes('ready'))).toBe(true);
+    expect(steps(events, id)).toEqual(['checking_place', 'creating', 'setting_network', 'bringing_code', 'giving_access', 'ready']);
+
+    // The typed key went in; the variable the host does not have is listed with its reason.
+    expect(records.read(id).record.grants.map((grant) => grant.id)).toEqual(['anthropic']);
+    const listed = (await journey.listSpaces()).find((space) => space.id === id);
+    expect(listed.accessFailures).toEqual([expect.objectContaining({ provider: 'openai', code: 'secret_source_missing' })]);
+    expect(JSON.stringify(listed)).not.toContain(KEY);
+    expect(JSON.stringify(records.read(id).record)).not.toContain(KEY);
+
+    // A later grant for the provider takes its failure off the list.
+    await journey.grantAccess(id, { ...openai, secret: { kind: 'typed', value: 'sk-live-later' } });
+    expect((await journey.listSpaces()).find((space) => space.id === id).accessFailures).toEqual([]);
+  });
+
+  it('refuses a creation whose access is not model access', async () => {
+    const { journey } = journeyWith();
+    await expect(journey.createSpace({ ...REQUEST, grants: [registry] })).rejects.toMatchObject({ code: 'invalid_grant_request' });
+    await expect(journey.createSpace({ ...REQUEST, grants: [{ kind: 'model', provider: 'anthropic' }] })).rejects.toMatchObject({ code: 'invalid_grant_request' });
+  });
+
   it('keeps a grant whose configuration inside was not written, and writes it again at the next start', async () => {
     const { journey, records, calls, place, dataDir, id } = await ready();
     // A second journey over the same place and records, whose write inside fails.

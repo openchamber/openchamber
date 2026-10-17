@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 
-import { applySpaceWork, cleanUpSpaceDisk, createSpace, listSpacePlaces, listSpaces, previewSpaceApply, openSpaceDomain, pullSpaceImage, readSpaceDisk, readSpaceIdleStop, readSpaceJournal, readSpaceSetup, readSpacesSwitch, runSpaceSetup, setSpaceIdleStop, setSpaceMachine, SpacesRequestError } from './spaces-api';
+import { applySpaceWork, cleanUpSpaceDisk, createSpace, listSpacePlaces, listSpaces, previewSpaceApply, openSpaceDomain, pullSpaceImage, readDockerSetupJob, readSpaceDisk, readSpaceIdleStop, readSpaceJournal, readSpaceSetup, readSpacesSwitch, runSpaceSetup, setSpaceIdleStop, setSpaceMachine, SpacesRequestError, startDockerSetup } from './spaces-api';
 
 const ID = 'a1b2c3d4e5f6';
 const originalFetch = globalThis.fetch;
@@ -32,6 +32,7 @@ const entry = {
   grants: [],
   access: null,
   needsAccess: [],
+  accessFailures: [],
   damaged: false,
   missing: [],
   orphans: [],
@@ -112,10 +113,10 @@ describe('spaces-api', () => {
 
   test('a creation posts the four choices as JSON', async () => {
     const seen = answer(202, JSON.stringify(entry));
-    await createSpace({ projectDirectory: '/home/me/app', placeId: 'docker', name: 'Fix login', start: 'clean', network: { mode: 'open', domains: [] }, setupCommands: ['npm ci'] });
+    await createSpace({ projectDirectory: '/home/me/app', placeId: 'docker', name: 'Fix login', start: 'clean', network: { mode: 'open', domains: [] }, setupCommands: ['npm ci'], grants: [] });
     expect(seen[0]?.method).toBe('POST');
     expect(new URL(seen[0]?.url ?? '').pathname).toBe('/api/openchamber/spaces');
-    expect(await seen[0]?.json()).toEqual({ projectDirectory: '/home/me/app', placeId: 'docker', name: 'Fix login', start: 'clean', network: { mode: 'open', domains: [] }, setupCommands: ['npm ci'] });
+    expect(await seen[0]?.json()).toEqual({ projectDirectory: '/home/me/app', placeId: 'docker', name: 'Fix login', start: 'clean', network: { mode: 'open', domains: [] }, setupCommands: ['npm ci'], grants: [] });
   });
 });
 
@@ -126,8 +127,8 @@ describe('the places', () => {
       { id: 'docker-ssh', machine: 'me@box', available: false, code: 'place_unreachable', message: 'me@box did not answer' },
     ] }));
     expect(await listSpacePlaces()).toEqual([
-      { id: 'docker', machine: null, available: true, hostIsolation: true, version: '29.2.1' },
-      { id: 'docker-ssh', machine: 'me@box', available: false, code: 'place_unreachable', message: 'me@box did not answer' },
+      { id: 'docker', machine: null, available: true, hostIsolation: true, version: '29.2.1', setup: null },
+      { id: 'docker-ssh', machine: 'me@box', available: false, code: 'place_unreachable', message: 'me@box did not answer', setup: null },
     ]);
     answer(200, JSON.stringify({ spaces: [entry, { ...entry, id: 'b2c3d4e5f6a7', placeId: 'docker-ssh', machine: 'me@box', state: 'unreachable', step: null, failure: { code: 'place_unreachable', message: 'me@box did not answer' } }] }));
     const [local, away] = await listSpaces();
@@ -135,10 +136,35 @@ describe('the places', () => {
     expect(away).toMatchObject({ placeId: 'docker-ssh', machine: 'me@box', state: 'unreachable', failure: { code: 'place_unreachable' } });
   });
 
+  test('reads what gets Docker going on this computer, and a remedy from a later host as none', async () => {
+    const job = { action: 'start_colima', running: false, failure: { code: 'docker_setup_failed', message: 'colima start exited with code 1', output: 'vz: no memory' } };
+    answer(200, JSON.stringify({ places: [
+      { id: 'docker', available: false, code: 'docker_daemon_unreachable', message: 'down', setup: { remedy: 'start_colima', job, memory: null } },
+      { id: 'docker-next', available: false, code: 'docker_daemon_unreachable', message: 'down', setup: { remedy: 'start_podman', job: null, memory: null } },
+      { id: 'docker-up', available: true, hostIsolation: true, setup: { remedy: null, job: null, memory: { bytes: 2147483648, engine: 'colima', low: true } } },
+    ] }));
+    const [down, later, up] = await listSpacePlaces();
+    expect(down?.setup).toEqual({ remedy: 'start_colima', job, memory: null });
+    expect(later?.setup?.remedy).toBeNull();
+    expect(up?.setup?.memory).toEqual({ bytes: 2147483648, engine: 'colima', low: true });
+  });
+
+  test('starts a Docker setup action with a POST and reads the job it answers', async () => {
+    const posts = answer(202, JSON.stringify({ job: { action: 'install_all', running: true, failure: null } }));
+    expect(await startDockerSetup('install_all')).toEqual({ action: 'install_all', running: true, failure: null });
+    expect(posts[0].method).toBe('POST');
+    expect(new URL(posts[0].url).pathname).toBe('/api/openchamber/spaces/places/local/setup');
+    expect(await posts[0].json()).toEqual({ action: 'install_all' });
+    answer(200, JSON.stringify({ job: null }));
+    expect(await readDockerSetupJob()).toBeNull();
+    answer(409, JSON.stringify({ code: 'docker_setup_not_offered', message: 'Docker is in another state now. Check again.', details: null }));
+    expect(await startDockerSetup('start_colima').catch((error: Error) => error)).toMatchObject({ code: 'docker_setup_not_offered', status: 409 });
+  });
+
   test('sets the machine with a PUT and reads the place it answers, or none; a refusal keeps its code', async () => {
     const place = { id: 'docker-ssh', machine: 'me@box', available: true, hostIsolation: true, version: '29.2.1' };
     const puts = answer(200, JSON.stringify({ place }));
-    expect(await setSpaceMachine('me@box')).toEqual(place);
+    expect(await setSpaceMachine('me@box')).toEqual({ ...place, setup: null });
     expect(puts[0].method).toBe('PUT');
     expect(new URL(puts[0].url).pathname).toBe('/api/openchamber/spaces/machine');
     expect(await puts[0].json()).toEqual({ machine: 'me@box' });

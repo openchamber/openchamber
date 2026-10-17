@@ -97,8 +97,10 @@ Use `oc-surface-code` for code text and `syntax.background` for its painted body
 Fields retain their elevated base on hover and layer `interactive.hover` over it;
 `subtle` is neither hover nor disabled state. Dividers use `interactive.border`.
 
-Focus uses `interactive.focusRing` (`ring-ring`), not the primary action color.
-Keep focus indicators on the real focused control; global rules must not erase them.
+Depth, borders, surface classes (`oc-raised`, `oc-field`, `oc-tile*`,
+`oc-glass-floating`, …) and keyboard focus without rings belong to
+`openchamber-ui-guidance` (`references/surfaces.md`); this file covers only the
+tokens underneath them.
 
 ### Active Item
 

@@ -475,7 +475,7 @@ export const IntegrateCommitsSection: React.FC<{
           )}
 
           {ui.kind === 'conflict' && (
-            <div className="rounded-md border border-border/60 bg-background/60 p-3 space-y-2">
+            <div className="rounded-md oc-tile p-3 space-y-2">
               <div className="typography-meta text-foreground">
                 {t('gitView.integrate.conflictsInFiles', { count: ui.details.unmergedFiles.length })}
               </div>
@@ -484,7 +484,7 @@ export const IntegrateCommitsSection: React.FC<{
               </div>
               <div className="flex flex-wrap gap-1.5">
                 {ui.details.unmergedFiles.slice(0, 6).map((file) => (
-                  <span key={file} className="font-mono text-xs px-2 py-0.5 rounded bg-muted/40 text-muted-foreground">
+                  <span key={file} className="font-mono text-xs px-2 py-0.5 rounded oc-tile-inset text-muted-foreground">
                     {file}
                   </span>
                 ))}

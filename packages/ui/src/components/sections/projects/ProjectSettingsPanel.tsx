@@ -73,7 +73,8 @@ export const ProjectSettingsPanel: React.FC<ProjectSettingsPanelProps> = ({
       }}
       layoutMode="fit"
       variant="active-pill"
-      className="h-7 max-w-[32rem]"
+      pillSize="form"
+      className="h-8 max-w-[32rem]"
     />
   );
   const tabContent = (

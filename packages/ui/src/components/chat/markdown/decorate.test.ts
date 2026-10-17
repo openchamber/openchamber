@@ -90,6 +90,56 @@ describe('Markdown table actions', () => {
     }
   });
 
+  test('a refit at a new width reuses the measured columns, and a cached-only refit never measures', () => {
+    const proto = win.HTMLElement.prototype;
+    const rect = Object.getOwnPropertyDescriptor(proto, 'getBoundingClientRect');
+    const clientWidth = Object.getOwnPropertyDescriptor(proto, 'clientWidth');
+    let availableWidth = 600;
+    let measured = 0;
+    Object.defineProperty(proto, 'getBoundingClientRect', {
+      configurable: true,
+      value(this: HTMLElement) { measured += 1; return { width: (this.textContent?.length ?? 0) * 10 }; },
+    });
+    Object.defineProperty(proto, 'clientWidth', { configurable: true, get: () => availableWidth });
+
+    const root = document.createElement('div');
+    root.innerHTML = `<table><thead><tr><th>A</th><th>B</th><th>C</th></tr></thead>
+      <tbody><tr><td>short</td><td>${'b'.repeat(100)}</td><td>${'c'.repeat(60)}</td></tr></tbody></table>`;
+    document.body.appendChild(root);
+    const columnWidths = () => Array.from(root.querySelectorAll<HTMLElement>('colgroup col')).map((col) => col.style.width);
+
+    try {
+      decorateMarkdown(root, context);
+      // Nothing measured yet: the cached-only path declines and leaves the table alone.
+      expect(stabilizeMarkdownTableWidths(root, true, { cachedOnly: true })).toBe(false);
+      expect(columnWidths()).toEqual([]);
+      expect(measured).toBe(0);
+
+      expect(stabilizeMarkdownTableWidths(root, true)).toBe(true);
+      expect(columnWidths()).toEqual(['120px', '240px', '240px']);
+      const afterFirstLayout = measured;
+      expect(afterFirstLayout).toBeGreaterThan(0);
+
+      // Every frame of a resize: arithmetic only, the same columns as a full layout.
+      availableWidth = 1000;
+      expect(stabilizeMarkdownTableWidths(root, true, { cachedOnly: true })).toBe(true);
+      expect(columnWidths()).toEqual(['120px', '440px', '440px']);
+      availableWidth = 400;
+      expect(stabilizeMarkdownTableWidths(root, true, { cachedOnly: true })).toBe(true);
+      expect(columnWidths()).toEqual(['120px', '140px', '140px']);
+      expect(stabilizeMarkdownTableWidths(root, false, { cachedOnly: true })).toBe(true);
+      expect(columnWidths()).toEqual(['120px', '400px', '400px']);
+      expect(measured).toBe(afterFirstLayout);
+      expect(root.querySelectorAll('colgroup')).toHaveLength(1);
+    } finally {
+      root.remove();
+      if (rect) Object.defineProperty(proto, 'getBoundingClientRect', rect);
+      else Reflect.deleteProperty(proto, 'getBoundingClientRect');
+      if (clientWidth) Object.defineProperty(proto, 'clientWidth', clientWidth);
+      else Reflect.deleteProperty(proto, 'clientWidth');
+    }
+  });
+
   test('wrapping refits columns when the available width changes', () => {
     const proto = win.HTMLElement.prototype;
     const rect = Object.getOwnPropertyDescriptor(proto, 'getBoundingClientRect');

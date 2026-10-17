@@ -5,7 +5,7 @@ import { OpenChamberControlError, asControlError } from './error.js';
 import { OPENCHAMBER_ALL_ACTIONS, OPENCHAMBER_KNOWLEDGE_ACTIONS } from './actions.js';
 import { writeScreenshot } from './screenshots.js';
 import { createProjectKnowledgeActions } from './project-knowledge.js';
-import { createRenderPageAction } from './render-page.js';
+import { createPageAnswers, createRenderPageAction } from './render-page.js';
 
 const DEFAULT_WAIT_TIMEOUT_SECONDS = 600;
 const MAX_WAIT_TIMEOUT_SECONDS = 86_400;
@@ -224,6 +224,9 @@ export const createOpenChamberControlService = (dependencies) => {
     resolveProjectContextId = null,
     isKnowledgeToolEnabled = async () => true,
     isRenderToolEnabled = async () => true,
+    // Hears when a page an agent shows starts and stops waiting for the
+    // user's answer (render.page with awaitAnswer).
+    onPageWaitChange = () => {},
     // Puts a plan in front of the user; answers how many windows it reached.
     showPlan = null,
     // Delivers a dispatched session's result back to the session that asked
@@ -311,7 +314,8 @@ export const createOpenChamberControlService = (dependencies) => {
     resolveDirectory: (input) => sessionService.resolveDirectory(input),
   });
 
-  const renderPage = createRenderPageAction({ isEnabled: isRenderToolEnabled });
+  const pageAnswers = createPageAnswers({ onWaitChange: onPageWaitChange });
+  const renderPage = createRenderPageAction({ isEnabled: isRenderToolEnabled, pageAnswers });
 
   const models = async () => {
     const settings = await readSettingsFromDiskMigrated();
@@ -747,7 +751,12 @@ export const createOpenChamberControlService = (dependencies) => {
         return result.body;
       }
       if (action === 'render.page') {
-        return await renderPage(input);
+        return await renderPage(input, {
+          sessionId: asNonEmptyString(options.contextSessionId),
+          callId: asNonEmptyString(options.contextCallId),
+          directory: asNonEmptyString(contextDirectory),
+          signal: options.signal,
+        });
       }
       if (action === 'file.open') {
         if (!fileOpen) {
@@ -840,6 +849,7 @@ export const createOpenChamberControlService = (dependencies) => {
         if (existingBranch) worktree.existingBranch = existingBranch.trim();
         const payload = { worktree };
         if (directory) payload.directory = directory;
+        if (input.carry !== undefined) payload.carry = input.carry;
         return sessionService.moveToWorktree(sessionID, payload);
       }
       if (action.startsWith('session.')) {
@@ -922,5 +932,7 @@ export const createOpenChamberControlService = (dependencies) => {
   // The managed agent-tool plugin can no longer report the session's directory
   // (v2 dropped `context.directory` from a tool call), so it sends the session
   // id and the directory is resolved here, where it is authoritative.
-  return { execute, resolveSessionDirectory };
+  // `answerPage` is the chat's side of a page that waits (render.page with
+  // awaitAnswer).
+  return { execute, resolveSessionDirectory, answerPage: pageAnswers.answer };
 };

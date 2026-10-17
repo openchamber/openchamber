@@ -42,7 +42,7 @@ export const RegistryBanner: React.FC<RegistryBannerProps> = ({ entryId, spec })
     };
 
     return (
-      <div className="rounded-md border border-border bg-card p-3 flex items-start gap-3">
+      <div className="oc-tile rounded-md p-3 flex items-start gap-3">
         <Icon
           name="arrow-up"
           className="h-5 w-5 text-[var(--status-success)] shrink-0 mt-0.5"
@@ -74,7 +74,7 @@ export const RegistryBanner: React.FC<RegistryBannerProps> = ({ entryId, spec })
 
   if (info.kind === 'npm-network') {
     return (
-      <div className="rounded-md border border-border bg-card p-3 flex items-start gap-3">
+      <div className="oc-tile rounded-md p-3 flex items-start gap-3">
         <Icon
           name="cloud-off"
           className="h-5 w-5 text-muted-foreground shrink-0 mt-0.5"
@@ -108,7 +108,7 @@ export const RegistryBanner: React.FC<RegistryBannerProps> = ({ entryId, spec })
   })();
 
   return (
-    <div className="rounded-md border border-border bg-card p-3 flex items-start gap-3">
+    <div className="oc-tile rounded-md p-3 flex items-start gap-3">
       <Icon
         name={iconName}
         className="h-5 w-5 shrink-0 mt-0.5"

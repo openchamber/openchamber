@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { Command, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { dropdownMenuPopupClass } from '@/components/ui/dropdown-menu.styles';
+import { commandSearchAtBottomClass, usePopupSideOnOpen } from '@/components/ui/popup-side';
 import { handleDropdownNavigationKey } from '@/components/ui/dropdown-navigation';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useDeviceInfo } from '@/lib/device';
@@ -74,6 +75,7 @@ export function ThemePicker({ options, value, onValueChange, placeholder, ariaLa
   const [deletingId, setDeletingId] = React.useState<string | null>(null);
   const searchRef = React.useRef<HTMLInputElement>(null);
   const triggerRef = React.useRef<HTMLButtonElement>(null);
+  const popupSide = usePopupSideOnOpen(open, triggerRef);
   // Same containment as Select: portal into the enclosing dialog, keep the
   // popup inside main.
   const [portalContainer, setPortalContainer] = React.useState<HTMLElement | null>(null);
@@ -238,10 +240,12 @@ export function ThemePicker({ options, value, onValueChange, placeholder, ariaLa
         <Icon name="arrow-down-s" className="size-4 opacity-50" />
       </Popover.Trigger>
       <Popover.Portal container={portalContainer ?? undefined}>
-        {/* Anchored below the trigger with side flips disabled so the search
-            field stays put while the result list changes height. */}
+        {/* Side flips are disabled so the search field stays put while the
+            result list changes height; the side is picked once per open
+            instead, upward with the search field at the bottom when the
+            trigger sits low. */}
         <Popover.Positioner
-          side="bottom"
+          side={popupSide}
           align="start"
           sideOffset={4}
           collisionAvoidance={{ side: 'none' }}
@@ -256,7 +260,7 @@ export function ThemePicker({ options, value, onValueChange, placeholder, ariaLa
             finalFocus={false}
           >
             {/* rankByQuery owns filtering and order; cmdk must not re-filter. */}
-            <Command ref={commandRef} className="min-h-0 flex-1" shouldFilter={false} value={activeId} onValueChange={setActiveId}>
+            <Command ref={commandRef} className={cn('min-h-0 flex-1', popupSide === 'top' && commandSearchAtBottomClass)} shouldFilter={false} value={activeId} onValueChange={setActiveId}>
               <CommandInput
                 ref={searchRef}
                 aria-label={t('settings.openchamber.visual.field.searchThemes')}

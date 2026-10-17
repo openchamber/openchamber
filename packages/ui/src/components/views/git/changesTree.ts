@@ -29,6 +29,14 @@ export type FlattenedTreeRow<F extends TreeFile = GitStatus['files'][number]> =
       file: F;
     };
 
+/**
+ * Last segment of a changed path, for rows that show the name alone. Status
+ * lists a nested repository or an unexpanded untracked directory as `dir/`;
+ * that keeps its trailing slash so the row reads `dir/` instead of empty.
+ */
+export const changedPathName = (path: string): string =>
+  path.slice(path.lastIndexOf('/', path.length - 2) + 1);
+
 const normalizePathForTree = (value: string): string =>
   value.replace(/\\/g, '/').replace(/^\/+/, '').trim();
 

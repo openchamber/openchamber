@@ -551,15 +551,6 @@ div[data-chat-input-footer="true"] {
 }
 
 
-@keyframes spin-once {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
-}
-
 @keyframes oc-migrate-up {
   0% {
     opacity: 1;
@@ -568,27 +559,6 @@ div[data-chat-input-footer="true"] {
   100% {
     opacity: 0;
     transform: translateY(-10px);
-  }
-}
-
-@keyframes gradient-shimmer {
-  0% {
-    stop-color: currentColor;
-  }
-  50% {
-    stop-color: color-mix(in srgb, currentColor 60%, white 40%);
-  }
-  100% {
-    stop-color: currentColor;
-  }
-}
-
-@keyframes shimmer-position {
-  0% {
-    x: -100%;
-  }
-  100% {
-    x: 100%;
   }
 }
 
@@ -637,8 +607,8 @@ button svg,
  * value only WebKit parses, which keeps the rule where it was written for.
  */
 @supports (font: -apple-system-body) {
-  button svg:not(.animate-spin):not(.activity-spinner),
-  [role="button"] svg:not(.animate-spin):not(.activity-spinner) {
+  button svg:not(.animate-spin),
+  [role="button"] svg:not(.animate-spin) {
     transform: translateZ(0);
     -webkit-transform: translateZ(0);
   }
@@ -703,42 +673,20 @@ svg.animate-spin {
   }
 }
 
-@keyframes pulse-opacity {
-  0%,
-  100% {
-    opacity: 0.4;
-  }
-  50% {
-    opacity: 1;
-  }
-}
-
-@keyframes pulse-opacity-dim {
-  0%,
-  100% {
-    opacity: 0;
-  }
-  50% {
-    opacity: 0.7;
-  }
-}
-
 .app-region-drag {
   -webkit-app-region: drag;
 }
 
 /* Native drag regions still intercept pointer input beneath portal dialogs.
-   Restore them when the last dialog closes. */
-.oc-dialog-open .app-region-drag {
+   Restore them when the last dialog closes. Open menus do the same, so a
+   click on the title bar reaches the page and dismisses the menu. */
+.oc-dialog-open .app-region-drag,
+.oc-menu-open .app-region-drag {
   -webkit-app-region: no-drag;
 }
 
 .app-region-no-drag {
   -webkit-app-region: no-drag;
-}
-
-.animate-spin-once {
-  animation: spin-once 0.5s linear forwards;
 }
 
 /* Custom scrollbar styles */
@@ -1659,9 +1607,9 @@ html:not(.dark) .chat-scroll {
   width: 100%;
   padding-right: 5.25rem;
   border: 0;
-  border-bottom: 1px solid var(--interactive-border);
   border-radius: 0;
-  background: var(--surface-muted);
+  /* A tone step above the code body, not a ruled strip. */
+  background: color-mix(in srgb, var(--foreground) 4%, transparent);
 }
 
 /* Disable Streamdown's code block virtualization and keep block chrome fixed */
@@ -1679,8 +1627,9 @@ html:not(.dark) .chat-scroll {
   overflow: hidden;
   --foreground: var(--syntax-foreground);
   color: var(--foreground);
-  background: var(--syntax-background);
-  border: 1px solid var(--interactive-border);
+  /* Flat, separated from the page by tone. The small mix keeps the block
+     visible in themes whose code background equals the page. */
+  background: color-mix(in srgb, var(--syntax-foreground) 3%, var(--syntax-background));
   border-radius: 0.75rem;
 }
 
@@ -2163,115 +2112,22 @@ textarea[data-terminal-hidden-input="true"]::placeholder {
   }
 }
 
-@keyframes oc-busy-pulse {
-  0%, 100% {
-    opacity: 0.2;
-  }
-  50% {
-    opacity: 1;
-  }
-}
-
-.animate-busy-pulse {
-  animation: oc-busy-pulse 1.2s ease-in-out infinite;
+/*
+ * The dim half of a waiting indicator's 1 s bright/dim toggle
+ * (`useWaitingBlink`). No transition: a fade would draw every frame of it.
+ */
+.waiting-dim {
+  opacity: 0.4;
 }
 
 /*
- * The staggered dots of a busy indicator that stays on screen for as long as
- * the agent works. A smooth opacity pulse is composited, yet it still makes
- * the compositor and the GPU process draw sixty frames a second: about ten
- * percent of a core on an otherwise still page. Three steps per half cycle
- * last 200ms each, the same as the stagger between dots, so every dot changes
- * on the same five frames a second, which halves that cost. Keep the stagger
- * a multiple of one step or the dots stop sharing frames.
+ * A surface kept mounted while hidden is inert (a closed side panel at
+ * opacity 0): its CSS animations pause there instead of drawing every frame
+ * nobody sees. Clock-driven indicators pause through `PauseClock`.
  */
-.animate-busy-wave {
-  animation: oc-busy-pulse 1.2s steps(3, jump-none) infinite;
-}
-
-@keyframes oc-status-logo {
-  0%, 100% {
-    opacity: 0.6;
-  }
-  50% {
-    opacity: 1;
-  }
-}
-
-.animate-status-logo {
-  animation: oc-status-logo 4s steps(10, jump-none) infinite;
-}
-
-@keyframes activity-spin {
-  100% {
-    transform: rotate(360deg);
-  }
-}
-
-/* Running-session spinner (opt-in). steps() limits rotation changes to 20 per
-   second. This still adds compositor work while a running indicator is visible.
-   Technique from VS Code's codicon-modifier-spin. */
-.activity-spinner {
-  animation: activity-spin 1.5s steps(30) infinite;
-  transform-box: fill-box;
-  transform-origin: center center;
-}
-
-@keyframes navrail-dot-wave {
-  0%, 100% {
-    transform: scale(0.72);
-    opacity: 0.52;
-  }
-  50% {
-    transform: scale(1);
-    opacity: 1;
-  }
-}
-
-.animate-navrail-dot-wave {
-  animation: navrail-dot-wave 1.2s ease-in-out infinite;
-}
-
-@keyframes border-glow-pulse {
-  0%, 100% {
-    border-color: var(--interactive-border);
-    outline-color: transparent;
-  }
-  12.5% {
-    border-color: color-mix(in srgb, var(--primary) 22%, var(--interactive-border));
-    outline-color: color-mix(in srgb, var(--primary) 8%, transparent);
-  }
-  25% {
-    border-color: color-mix(in srgb, var(--primary) 40%, var(--interactive-border));
-    outline-color: color-mix(in srgb, var(--primary) 16%, transparent);
-  }
-  37.5% {
-    border-color: color-mix(in srgb, var(--primary) 62%, var(--interactive-border));
-    outline-color: color-mix(in srgb, var(--primary) 26%, transparent);
-  }
-  50% {
-    border-color: color-mix(in srgb, var(--primary) 78%, var(--interactive-border));
-    outline-color: color-mix(in srgb, var(--primary) 34%, transparent);
-  }
-  62.5% {
-    border-color: color-mix(in srgb, var(--primary) 62%, var(--interactive-border));
-    outline-color: color-mix(in srgb, var(--primary) 26%, transparent);
-  }
-  75% {
-    border-color: color-mix(in srgb, var(--primary) 40%, var(--interactive-border));
-    outline-color: color-mix(in srgb, var(--primary) 16%, transparent);
-  }
-  87.5% {
-    border-color: color-mix(in srgb, var(--primary) 22%, var(--interactive-border));
-    outline-color: color-mix(in srgb, var(--primary) 8%, transparent);
-  }
-}
-
-.animate-border-glow-pulse {
-  outline: 1px solid transparent;
-  outline-offset: 1px;
-  will-change: border-color, outline-color;
-  animation: border-glow-pulse 3.8s linear infinite;
+[inert],
+[inert] * {
+  animation-play-state: paused !important;
 }
 
 @keyframes marquee-scroll {
@@ -2284,11 +2140,14 @@ textarea[data-terminal-hidden-input="true"]::placeholder {
   100% { transform: translateX(-50%); }
 }
 
+/*
+ * A name too long for the header scrolls past once when the file opens, then
+ * stands still: the track holds the name twice, so it ends where it began.
+ */
 .open-file-name-marquee-track {
   display: inline-flex;
   min-width: max-content;
-  animation: open-file-name-marquee-scroll var(--open-file-name-marquee-duration, 14s) linear infinite;
-  will-change: transform;
+  animation: open-file-name-marquee-scroll var(--open-file-name-marquee-duration, 14s) linear 1;
 }
 
 .open-file-name-marquee-item {
@@ -2301,18 +2160,12 @@ textarea[data-terminal-hidden-input="true"]::placeholder {
   white-space: nowrap;
 }
 
-.marquee-text--auto {
-  animation: marquee-scroll 6s linear infinite alternate;
-  will-change: transform;
-}
-
 .group:hover .marquee-text--active,
 .marquee-text--active:hover {
   animation: marquee-scroll 5s linear infinite alternate;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .marquee-text--auto,
   .open-file-name-marquee-track,
   .group:hover .marquee-text--active,
   .marquee-text--active:hover {
@@ -2337,10 +2190,8 @@ textarea[data-terminal-hidden-input="true"]::placeholder {
     display: none;
   }
 
-  .animate-busy-pulse,
-  .animate-busy-wave,
-  .animate-status-logo {
-    animation: none;
+  .waiting-dim {
+    opacity: 1;
   }
 
 }

@@ -114,3 +114,40 @@ describe('notification template session info', () => {
     expect(variables.session_name).toBe('Nightly cleanup');
   });
 });
+
+describe('notification template session info for a chat of an isolated space', () => {
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const spaceSource = (title) => ({
+    buildOpenCodeUrl: (path) => `http://space${path}`,
+    getOpenCodeAuthHeaders: () => ({}),
+    fetchImpl: vi.fn(async () => Response.json({ data: { id: 'ses_1', title } })),
+  });
+  const renamed = (title) => ({ type: 'session.updated', properties: { info: { id: 'ses_1', title } } });
+
+  it('never lets a space\'s event name a host chat', async () => {
+    globalThis.fetch = vi.fn(async () => Response.json({ id: 'ses_1', title: 'Host chat' }));
+    const runtime = createRuntime();
+
+    runtime.maybeCacheSessionInfoFromEvent(renamed('Claimed by a space'), { spaceId: 'space1' });
+    const variables = await runtime.buildTemplateVariables({ properties: { info: {} } }, 'ses_1');
+
+    expect(variables.session_name).toBe('Host chat');
+  });
+
+  it('reads a space\'s chat inside the space, past what the host knows', async () => {
+    globalThis.fetch = vi.fn(async () => Response.json({ id: 'ses_1', title: 'Host chat' }));
+    const runtime = createRuntime();
+    runtime.maybeCacheSessionInfoFromEvent(renamed('Host chat'));
+    const source = spaceSource('Space chat');
+
+    const variables = await runtime.buildTemplateVariables({ properties: { info: {} } }, 'ses_1', source);
+    const again = await runtime.buildTemplateVariables({ properties: { info: {} } }, 'ses_1');
+
+    expect(variables.session_name).toBe('Space chat');
+    expect(again.session_name).toBe('Host chat');
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+});

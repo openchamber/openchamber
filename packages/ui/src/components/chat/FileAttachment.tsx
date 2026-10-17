@@ -109,7 +109,7 @@ const FileAttachmentButton = memo(() => {
             onClick={isVSCodeRuntime ? handleVSCodePick : () => fileInputRef.current?.click()}
             className={cn(
               'flex items-center justify-center rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
-              'hover:bg-muted text-muted-foreground',
+              'hover:bg-interactive-hover text-muted-foreground',
               buttonSizeClass
             )}
             aria-label={t('chat.fileAttachment.actions.attachAria')}
@@ -872,7 +872,7 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false, 
                     void openExternalUrl(file.url || '');
                   }}
                   className={cn(
-                    "flex items-center gap-2 p-2 rounded-lg border border-border/40 bg-muted/10 hover:bg-muted/20 transition-colors text-start",
+                    "flex items-center gap-2 p-2 rounded-lg oc-tile oc-tile-hover text-start",
                     compact ? "text-xs" : "text-sm"
                   )}
                 >
@@ -911,7 +911,7 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false, 
                     }
                   }}
                   className={cn(
-                    "flex items-center gap-2 p-2 rounded-lg border border-border/40 bg-muted/10 hover:bg-muted/20 transition-colors text-start cursor-pointer",
+                    "flex items-center gap-2 p-2 rounded-lg oc-tile oc-tile-hover text-start cursor-pointer",
                     compact ? "text-xs" : "text-sm"
                   )}
                 >
@@ -939,7 +939,7 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false, 
                   showFilePopup(file, fileName);
                 }}
                 className={cn(
-                  "flex items-center gap-2 p-2 rounded-lg border border-border/40 bg-muted/10 hover:bg-muted/20 transition-colors text-start",
+                  "flex items-center gap-2 p-2 rounded-lg oc-tile oc-tile-hover text-start",
                   compact ? "text-xs" : "text-sm"
                 )}
               >

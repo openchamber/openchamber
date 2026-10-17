@@ -33,7 +33,7 @@ export function GitOperationStatus({ entry, onRefresh, onCancel, className }: {
     || operation.state === 'outcome-unknown'));
   return (
     <section
-      className={cn('min-w-0 shrink-0 rounded-lg border border-border bg-[var(--surface-elevated)] p-3 typography-meta', className)}
+      className={cn('min-w-0 shrink-0 rounded-lg oc-tile p-3 typography-meta', className)}
       aria-live="polite"
       aria-busy={entry.checking}
       aria-label={t('gitView.operation.title')}

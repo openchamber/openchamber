@@ -68,12 +68,12 @@ export const SourceControlAccountList: React.FC<SourceControlAccountListProps> =
               <img
                 src={user.avatarUrl}
                 alt={avatarAlt(user.username)}
-                className="size-9 shrink-0 rounded-full border border-border bg-muted object-cover"
+                className="size-9 shrink-0 oc-tile-inset rounded-full object-cover"
                 loading="lazy"
                 referrerPolicy="no-referrer"
               />
             ) : (
-              <div className="flex size-9 shrink-0 items-center justify-center rounded-full border border-border bg-muted">
+              <div className="flex size-9 shrink-0 items-center justify-center oc-tile-inset rounded-full">
                 <Icon
                   name={user.provider === 'github' ? 'github-fill' : user.provider === 'gitlab' ? 'gitlab' : 'git-branch'}
                   className="size-4 text-muted-foreground"
@@ -112,7 +112,7 @@ export const SourceControlAccountList: React.FC<SourceControlAccountListProps> =
                       <span className="font-mono">{handle}</span>
                     </> : null}
                     {group.accounts.length > 1 && account.current
-                      ? <span className="rounded-full border border-border px-1.5">{currentLabel}</span> : null}
+                      ? <span className="oc-tile-inset rounded-full px-1.5">{currentLabel}</span> : null}
                   </div>
                   <div className="flex flex-wrap gap-2">{renderActions(account)}</div>
                 </div>

@@ -750,12 +750,8 @@ describe('message queue runtime', () => {
     expect(openCode.state.sent[0].body).toEqual({ name: 'review', text: 'src' });
   });
 
-  it('delivers captured context as synthetic messages, instructions first, before project knowledge', async () => {
-    const knowledge = {
-      resolvePendingForSession: async () => ({ text: 'pinned notes', signature: 'sig-1' }),
-      recordDelivered: async () => {},
-    };
-    const { runtime, openCode, emit } = createRuntime({ knowledge });
+  it('delivers captured context as synthetic messages, instructions first', async () => {
+    const { runtime, openCode, emit } = createRuntime();
     runtime.start();
     const metadata = { openchamberContext: { kind: 'github-pr', number: 7, title: 'PR', url: 'https://x/pr/7' } };
     await runtime.enqueue(SESSION, DIRECTORY, item({
@@ -777,15 +773,13 @@ describe('message queue runtime', () => {
       `/api/session/${SESSION}/synthetic`,
       `/api/session/${SESSION}/synthetic`,
       `/api/session/${SESSION}/synthetic`,
-      `/api/session/${SESSION}/synthetic`,
       `/api/session/${SESSION}/prompt`,
     ]);
-    expect(openCode.state.sent.slice(0, 5).map((entry) => entry.body)).toEqual([
+    expect(openCode.state.sent.slice(0, 4).map((entry) => entry.body)).toEqual([
       { text: 'how to read it', resume: false },
       { text: 'the diff', resume: false, metadata },
       { text: 'conflict payload', resume: false },
       { text: 'use the skill', resume: false },
-      { text: 'pinned notes', resume: false },
     ]);
     expect(openCode.state.sent.at(-1).body).toEqual({
       text: 'follow up',
@@ -837,25 +831,22 @@ describe('message queue runtime', () => {
     expect(openCode.state.sent[1].body).toEqual({ name: 'review', text: 'src "error handling"' });
   });
 
-  it('delivers pending project knowledge ahead of a queued command and records it', async () => {
-    const recorded = [];
+  it('writes the project knowledge into the session before a queued command', async () => {
+    const openCode = createOpenCode();
     const knowledge = {
-      resolvePendingForSession: async () => ({ text: 'pinned notes', signature: 'sig-1' }),
-      recordDelivered: async (sessionId, directory, signature) => { recorded.push({ sessionId, directory, signature }); },
+      sync: async (sessionId, directory) => { openCode.state.sent.push({ path: 'knowledge', body: { sessionId, directory } }); },
     };
-    const { runtime, openCode, emit } = createRuntime({ knowledge });
+    const { runtime, emit } = createRuntime({ openCode, knowledge });
     runtime.start();
     openCode.state.commands = [{ name: 'review' }];
     await runtime.enqueue(SESSION, DIRECTORY, item({ content: '/review', text: '/review' }));
     emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
     await settle();
 
-    expect(openCode.state.sent.map((entry) => entry.path)).toEqual([
-      `/api/session/${SESSION}/synthetic`,
-      `/api/session/${SESSION}/command`,
+    expect(openCode.state.sent).toEqual([
+      { path: 'knowledge', body: { sessionId: SESSION, directory: DIRECTORY } },
+      expect.objectContaining({ path: `/api/session/${SESSION}/command` }),
     ]);
-    expect(openCode.state.sent[0].body).toEqual({ text: 'pinned notes', resume: false });
-    expect(recorded).toEqual([{ sessionId: SESSION, directory: DIRECTORY, signature: 'sig-1' }]);
   });
 
   it('admits nothing when the command lookup fails, so a retry cannot duplicate the context', async () => {
@@ -886,26 +877,22 @@ describe('message queue runtime', () => {
     expect(taken.item.context).toEqual(context);
   });
 
-  it('attaches pending project knowledge and records its delivery', async () => {
-    const recorded = [];
+  it('writes the project knowledge into the session before the prompt, and sends anyway when that fails', async () => {
+    const openCode = createOpenCode();
     const knowledge = {
-      resolvePendingForSession: async () => ({ text: 'pinned notes', signature: 'sig-1' }),
-      recordDelivered: async (sessionId, directory, signature) => { recorded.push({ sessionId, directory, signature }); },
+      // `sync` reports failure by resolving false; it never throws.
+      sync: async (sessionId, directory) => { openCode.state.sent.push({ path: 'knowledge', body: { sessionId, directory } }); return false; },
     };
-    const { runtime, openCode, emit } = createRuntime({ knowledge });
+    const { runtime, emit } = createRuntime({ openCode, knowledge });
     runtime.start();
-    await runtime.enqueue(SESSION, DIRECTORY, item({ agentMention: 'reviewer', attachments: [{ id: 'a', filename: 'f.txt', mimeType: 'text/plain', size: 1, source: 'local', dataUrl: 'data:text/plain,hi' }] }));
+    await runtime.enqueue(SESSION, DIRECTORY, item({ context: [{ kind: 'context', text: 'quoted', metadata: {} }] }));
     emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
     await settle();
-    // Knowledge is admitted as a synthetic message ahead of the prompt.
-    expect(openCode.state.sent[0].path).toBe(`/api/session/${SESSION}/synthetic`);
-    expect(openCode.state.sent[0].body).toEqual({ text: 'pinned notes', resume: false });
-    expect(openCode.state.sent[1].path).toBe(`/api/session/${SESSION}/prompt`);
-    expect(openCode.state.sent[1].body).toEqual({
-      text: 'follow up',
-      files: [{ uri: 'data:text/plain,hi', name: 'f.txt' }],
-      agents: [{ name: 'reviewer' }],
-    });
-    expect(recorded).toEqual([{ sessionId: SESSION, directory: DIRECTORY, signature: 'sig-1' }]);
+    expect(openCode.state.sent.map((entry) => entry.path)).toEqual([
+      'knowledge',
+      `/api/session/${SESSION}/synthetic`,
+      `/api/session/${SESSION}/prompt`,
+    ]);
+    expect(openCode.state.sent[0].body).toEqual({ sessionId: SESSION, directory: DIRECTORY });
   });
 });

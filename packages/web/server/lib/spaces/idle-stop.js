@@ -39,8 +39,8 @@ const WORKING = new Set(['busy', 'retry']);
 
 /**
  * `settingsPath` is the file the host writes, `readSessionStates()` the server's own live status
- * by session, `{ [id]: { status, lastUpdateAt } }`, `readPendingRequests()` the permission asks
- * and forms still waiting for an answer by session, and `stopSpace()` ends the server. A session
+ * by session, `{ [id]: { status, lastUpdateAt } }`, `readPendingRequests()` the permission asks,
+ * forms and agent pages still waiting for an answer by session, and `stopSpace()` ends the server. A session
  * that is working counts as activity now, and every status change counts at the time it came, so
  * a turn that began and ended between two checks is not missed. A session that waits for the
  * user's answer stays busy in OpenCode's status the whole time; it counts as idle (the
@@ -65,7 +65,10 @@ export function createIdleStop({ settingsPath, readSessionStates, readPendingReq
   const noteActivity = () => {
     const current = now();
     const pending = readPendingRequests();
-    const waiting = (sessionId) => (pending[sessionId]?.permissions?.length ?? 0) + (pending[sessionId]?.forms?.length ?? 0) > 0;
+    // A page an agent shows that waits for the user's answer is a form here too.
+    const waiting = (sessionId) => (pending[sessionId]?.permissions?.length ?? 0)
+      + (pending[sessionId]?.forms?.length ?? 0)
+      + (pending[sessionId]?.pages?.length ?? 0) > 0;
     for (const [sessionId, state] of Object.entries(readSessionStates())) {
       if (WORKING.has(state.status) && !waiting(sessionId)) lastActive = current;
       else if (state.lastUpdateAt > lastActive) lastActive = Math.min(state.lastUpdateAt, current);

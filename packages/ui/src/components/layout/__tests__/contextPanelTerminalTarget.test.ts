@@ -25,7 +25,7 @@ describe('context panel terminal target wiring', () => {
   test('passes the stored terminal targetDirectory into the mounted TerminalView', () => {
     const renderStart = contextPanelSource.indexOf('{terminalTab ? (');
     expect(renderStart).toBeGreaterThan(-1);
-    const renderEnd = contextPanelSource.indexOf('{hasWalkthroughTab ? (', renderStart);
+    const renderEnd = contextPanelSource.indexOf('{walkthroughTab ? (', renderStart);
     expect(renderEnd).toBeGreaterThan(renderStart);
     const renderBlock = contextPanelSource.slice(renderStart, renderEnd);
 

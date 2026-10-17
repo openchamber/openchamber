@@ -7,6 +7,7 @@ import {
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { Icon } from '@/components/icon/Icon';
+import { Spinner } from '@/components/ui/spinner';
 import { useModelLists } from '@/hooks/useModelLists';
 import { useOpenCodeReadiness } from '@/hooks/useOpenCodeReadiness';
 import { useDeviceInfo } from '@/lib/device';
@@ -174,7 +175,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                     <div className="flex min-w-0 items-center gap-2">
                         {!displayReady ? (
                             <>
-                                <Icon name="loader-4" className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+                                {isUnavailable ? <Icon name="error-warning" className="h-3.5 w-3.5 text-muted-foreground" /> : <Spinner className="h-3.5 w-3.5 text-muted-foreground" />}
                                 <span className="typography-meta text-muted-foreground">{isUnavailable ? t('common.unavailable') : t('common.loading')}</span>
                             </>
                         ) : isAutoSelected ? (
@@ -215,7 +216,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                 >
                     {!displayReady ? (
                         <>
-                            <Icon name="loader-4" className="h-3.5 w-3.5 animate-spin text-muted-foreground flex-shrink-0" />
+                            {isUnavailable ? <Icon name="error-warning" className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" /> : <Spinner className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />}
                             {!compact && (
                                 <span className="typography-ui-label font-normal whitespace-nowrap text-muted-foreground">
                                     {isUnavailable ? t('common.unavailable') : t('common.loading')}

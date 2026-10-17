@@ -47,8 +47,8 @@ export const BrowserDeviceBar: React.FC<{
   };
 
   const inputClass = cn(
-    'h-6 w-14 rounded-full border border-border/50 bg-[var(--surface-elevated)] px-2 text-center',
-    'typography-micro tabular-nums text-foreground outline-none focus:border-[var(--interactive-focus-ring)]',
+    'oc-raised oc-field h-6 w-14 rounded-full bg-[var(--surface-elevated)] px-2 text-center',
+    'typography-micro tabular-nums text-foreground outline-none',
   );
 
   return (
@@ -61,8 +61,8 @@ export const BrowserDeviceBar: React.FC<{
         }}
         aria-label={t('contextPanel.browser.device.preset')}
         className={cn(
-          'h-6 shrink-0 rounded-full border border-border/50 bg-[var(--surface-elevated)] px-2',
-          'typography-micro text-foreground outline-none focus:border-[var(--interactive-focus-ring)]',
+          'oc-raised oc-field h-6 shrink-0 rounded-full bg-[var(--surface-elevated)] px-2',
+          'typography-micro text-foreground outline-none',
         )}
       >
         <option value="">{t('contextPanel.browser.device.responsive')}</option>

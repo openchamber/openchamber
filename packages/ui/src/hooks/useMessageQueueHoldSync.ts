@@ -15,49 +15,50 @@ const REASSERT_INTERVAL_MS = 2 * 60 * 1000;
  */
 export function useMessageQueueHoldSync(): void {
   const runs = useAutoReviewStore((state) => state.runsByOriginalSessionID);
-  const heldRef = React.useRef<Set<string>>(new Set());
+  // Session id → its directory, which names the server that owns the session's queue.
+  const heldRef = React.useRef<Map<string, string>>(new Map());
 
   const running = React.useMemo(() => {
-    if (!isServerOwnedMessageQueue()) return new Set<string>();
+    if (!isServerOwnedMessageQueue()) return new Map<string, string>();
     const runtimeKey = getRuntimeKey();
-    return new Set(
+    return new Map(
       Object.values(runs)
         .filter((run) => run.status === 'running' && run.runtimeKey === runtimeKey)
-        .map((run) => run.originalSessionID),
+        .map((run) => [run.originalSessionID, run.directory]),
     );
   }, [runs]);
 
   React.useEffect(() => {
-    const setHold = (sessionId: string, held: boolean) => {
-      useMessageQueueStore.getState().setServerHold(sessionId, held).catch((error) => {
+    const setHold = (sessionId: string, directory: string, held: boolean) => {
+      useMessageQueueStore.getState().setServerHold(sessionId, directory, held).catch((error) => {
         console.warn(`[queue] failed to ${held ? 'hold' : 'release'} the queue for ${sessionId}:`, error);
       });
     };
 
-    for (const sessionId of heldRef.current) {
+    for (const [sessionId, directory] of heldRef.current) {
       if (!running.has(sessionId)) {
         heldRef.current.delete(sessionId);
-        setHold(sessionId, false);
+        setHold(sessionId, directory, false);
       }
     }
-    for (const sessionId of running) {
+    for (const [sessionId, directory] of running) {
       if (!heldRef.current.has(sessionId)) {
-        heldRef.current.add(sessionId);
-        setHold(sessionId, true);
+        heldRef.current.set(sessionId, directory);
+        setHold(sessionId, directory, true);
       }
     }
 
     if (running.size === 0) return;
     const interval = setInterval(() => {
-      for (const sessionId of running) setHold(sessionId, true);
+      for (const [sessionId, directory] of running) setHold(sessionId, directory, true);
     }, REASSERT_INTERVAL_MS);
     return () => clearInterval(interval);
   }, [running]);
 
   React.useEffect(() => () => {
     const held = heldRef.current;
-    for (const sessionId of held) {
-      void useMessageQueueStore.getState().setServerHold(sessionId, false).catch(() => undefined);
+    for (const [sessionId, directory] of held) {
+      void useMessageQueueStore.getState().setServerHold(sessionId, directory, false).catch(() => undefined);
     }
     held.clear();
   }, []);

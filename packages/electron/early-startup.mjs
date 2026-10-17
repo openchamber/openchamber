@@ -168,7 +168,12 @@ export const readPreferredLocale = () => {
 
 export const getWindowIconPath = () => {
   if (process.platform !== 'win32' && process.platform !== 'linux') return undefined;
-  const iconFileName = process.platform === 'linux' ? 'icon.png' : 'icon.ico';
+  // A Windows dev copy shows the Windows icon behind construction tape
+  // (dev-icon-win.svg), like the macOS Dock's dev icon, in its taskbar, window
+  // and tray. GNOME takes the dock icon from the installed app's .desktop
+  // entry, whatever the window sets, so Linux keeps the usual icon.
+  const devWindowsIcon = isDev && process.platform === 'win32';
+  const iconFileName = devWindowsIcon ? 'dev-icon.ico' : process.platform === 'linux' ? 'icon.png' : 'icon.ico';
   const iconPath = isDev
     ? path.join(__dirname, 'resources', 'icons', iconFileName)
     : path.join(process.resourcesPath, 'icons', iconFileName);

@@ -3,6 +3,8 @@ import { useUIStore } from '@/stores/useUIStore';
 import { isDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
 import { toast } from '@/components/ui';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
+import { useWaitingBlink } from '@/hooks/useDurationTicker';
+import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { getClientPlatform } from '@/lib/platform';
@@ -73,6 +75,7 @@ export const NotificationSettings: React.FC = () => {
   const [pushSupported, setPushSupported] = React.useState(false);
   const [pushSubscribed, setPushSubscribed] = React.useState(false);
   const [pushBusy, setPushBusy] = React.useState(false);
+  const pushBusyBlink = useWaitingBlink(pushBusy);
 
   React.useEffect(() => {
     if (!isBrowser) {
@@ -627,7 +630,7 @@ export const NotificationSettings: React.FC = () => {
               ariaLabel={t('settings.notifications.page.push.enableAria')}
               labelAccessory={
                 pushBusy ? (
-                  <span className="inline-block h-1.5 w-1.5 rounded-full bg-current text-muted-foreground animate-busy-pulse" aria-label={t('settings.notifications.page.push.loadingAria')} />
+                  <span className={cn('inline-block h-1.5 w-1.5 rounded-full bg-current text-muted-foreground', pushBusyBlink)} aria-label={t('settings.notifications.page.push.loadingAria')} />
                 ) : null
               }
             />

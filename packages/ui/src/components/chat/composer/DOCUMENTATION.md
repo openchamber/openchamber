@@ -22,6 +22,10 @@ and `FormDock`. They mount inside the composer form, outside both the
 full editor and collapsed mobile pill, with one absolute `bottom-full`
 anchor, input-column width, gap, and glass surface. Appearing, disappearing,
 or collapsing a panel does not resize the transcript or composer.
+One panel shows at a time, in this order: an expanded BTW (its sheet or
+its unsent draft), a permission, a form, then a collapsed BTW strip. A collapsed BTW gives the
+composer back to the parent session, so the parent's own request takes the
+dock and the strip returns once it is answered (`btwHoldsDock`).
 The frame also owns the header row through its `header` and `compact` props;
 callers supply controls and content, not their own header padding.
 
@@ -114,10 +118,11 @@ its own queue. It stays visible under the form and permission docks.
 `selectComposerQueue` in the submission builder excludes server-scheduled items
 before the composer counts manual content or reads captured send configuration.
 Mixed queues use only ordinary items for manual send; a scheduled-only queue
-cannot trigger an empty composer send. Only the send button flushes the queue
-from an empty composer; Enter and Ctrl/Cmd+Enter with nothing typed do
-nothing, so a stray keystroke cannot push the queue into a running turn
-(#4749). Scheduled items stay visible in the
+cannot trigger an empty composer send. Enter and Ctrl/Cmd+Enter in an empty
+composer send the whole queue now, as one visible message (#4746). While a turn
+runs only Enter does this: the send button gives way to Stop until the turn
+ends, and a row's own Send sends just that message. Like any send, it dismisses
+open permission requests and forms. Scheduled items stay visible in the
 queue rows with reorder and remove, but no edit or send action.
 
 `BackgroundShellsStrip` lists the commands that went to the background (not the ones
@@ -415,6 +420,11 @@ answers with severe input lag. **That much is not platform-specific and must
 not be undone.** What differs is who paints the selection, and
 `composerSelectionExtension` (`editor/theme.ts`) picks that per platform.
 
+The drawn caret blinks from a 600 ms timer (`timerCaretBlink`,
+`lib/codemirror/caretBlink.ts`). CodeMirror's own blink is an infinite CSS
+animation that kept the compositor ticking every frame for as long as the
+composer had focus: 4.1% of a core against 1.3% on the animation fixture.
+
 When CodeMirror 6.43.9's iOS predicate does not match,
 `composerNativeSelectionExtension` layers over `drawSelection()`: it re-shows
 the native selection, and — only while a range is selected — the native caret,
@@ -583,20 +593,34 @@ and the send path reading the same grammar.
   including for **Insert and send**, and a toast says where it went.
 - `state/useDraftTarget.ts` — the draft can target a directory that does not
   exist yet (a worktree being created). It must survive not appearing in the
-  branch list, or the selector snaps back to the project root mid-creation. It
-  also owns the advisory dirty state for the selected directory, clearing it as
-  soon as the target changes so a warning never names a previous branch.
+  branch list, or the selector snaps back to the project root mid-creation. A
+  draft opened on a given directory (Mini Chat, a worktree or space row) pins
+  it with `preserveDirectoryOverride`: the app does not move the draft until
+  the directory shows up as a known branch. The pin stops only the app. A pick
+  in the project or worktree picker always applies and clears it, because a
+  project without git never lists a branch and its pin never clears by itself.
+  Re-picking what a pinned draft already shows changes nothing, so one click
+  cannot drop an unlisted space or worktree directory. Only a worktree still being created (`pendingWorktreeRequestId`,
+  `bootstrapPendingDirectory`) keeps both pickers inert. The hook also owns the
+  advisory dirty state for the selected directory, clearing it as soon as the
+  target changes so a warning never names a previous branch.
 - `ui/DraftTargetSelectors.tsx` owns the controlled project/worktree picker
   state and registers its application shortcuts locally. The desktop project
   picker is a searchable popup: it ranks the current projects with
   `rankByQuery` over display label and path, keeps the query and the active
   result as transient local state that resets on every close, and commits
   through the existing project-change flow only on explicit activation.
-  Filtering changes the result area below the anchored input without moving
-  the search field. The worktree picker remains a Select; mobile keeps its
-  bottom sheets. Both end with the two ways to make a worktree: **Quick
-  worktree** (`createWorktreeDraft`, auto-named, at once) and **New worktree…**,
-  which opens `NewWorktreeDialog` for the draft's own project. `ChatInput` hosts
+  Filtering changes the result area beyond the anchored input without moving
+  the search field. When less than 240px is left under the trigger and more
+  is above it, as in Mini Chat where the picker sits near the window's bottom,
+  the popup opens upward with the search field at its bottom, next to the
+  trigger, and the results above it. The side is chosen once per open
+  (`usePopupSideOnOpen`, `components/ui/popup-side.ts`) and never flips while
+  open. The worktree picker remains a Select and follows the same rule, with
+  its items in the same order either way; mobile keeps its bottom sheets.
+  Both end with the two ways to make a worktree: **Quick worktree**
+  (`createWorktreeDraft`, auto-named, at once) and **New worktree…**, which
+  opens `NewWorktreeDialog` for the draft's own project. `ChatInput` hosts
   that dialog, like the isolated-space one, because Timeline has no project
   headers to open it from; a plain worktree pins the draft to the new
   directory, one made for an issue or PR opens its session. `ProjectPickerSheet` shares the mobile project list and

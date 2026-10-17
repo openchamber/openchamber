@@ -55,6 +55,9 @@ const PANEL_ROW_INSET_Y_PX = 4;
 const PANEL_MAX_ROWS = 8;
 const PANEL_SCROLL_MARGIN_ROWS = 2;
 const PANEL_HIDE_DELAY_MS = 160;
+// A pointer only passing over the rail on its way elsewhere must not flash
+// the panel open; it opens once the pointer rests on the rail this long.
+const PANEL_SHOW_DELAY_MS = 220;
 
 const buildPromptEntries = (
     turnIds: string[],
@@ -310,23 +313,48 @@ export function PromptNavigatorRail({
         }
     }, []);
 
-    const handlePointerMove = React.useCallback((event: React.MouseEvent<HTMLDivElement>) => {
-        cancelScheduledHide();
-        pointerYRef.current = event.clientY;
-        const relative = relativeIndexFromPointer(event.clientY);
+    const highlightedIndexRef = React.useRef(highlightedIndex);
+    highlightedIndexRef.current = highlightedIndex;
+    const showTimerRef = React.useRef<number | null>(null);
+    const cancelScheduledShow = React.useCallback(() => {
+        if (showTimerRef.current !== null) {
+            window.clearTimeout(showTimerRef.current);
+            showTimerRef.current = null;
+        }
+    }, []);
+    React.useEffect(() => cancelScheduledShow, [cancelScheduledShow]);
+
+    const highlightFromPointer = React.useCallback((clientY: number) => {
+        const relative = relativeIndexFromPointer(clientY);
         if (relative !== null) {
             setHighlightedIndex(
                 Math.min(promptsLengthRef.current - 1, windowStartRef.current + relative),
             );
         }
+    }, [relativeIndexFromPointer]);
+
+    const handlePointerMove = React.useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+        cancelScheduledHide();
+        pointerYRef.current = event.clientY;
+        if (highlightedIndexRef.current !== null) {
+            // Open: the highlight follows the pointer at once.
+            highlightFromPointer(event.clientY);
+        } else if (showTimerRef.current === null) {
+            // Closed: open after a short rest, at wherever the pointer is then.
+            showTimerRef.current = window.setTimeout(() => {
+                showTimerRef.current = null;
+                if (pointerYRef.current !== null) highlightFromPointer(pointerYRef.current);
+            }, PANEL_SHOW_DELAY_MS);
+        }
         updateCarousel(event.clientY);
-    }, [cancelScheduledHide, relativeIndexFromPointer, updateCarousel]);
+    }, [cancelScheduledHide, highlightFromPointer, updateCarousel]);
 
     const handlePointerLeave = React.useCallback(() => {
         pointerYRef.current = null;
+        cancelScheduledShow();
         stopCarousel();
         scheduleHide();
-    }, [scheduleHide, stopCarousel]);
+    }, [cancelScheduledShow, scheduleHide, stopCarousel]);
 
     const closeKeyboardNav = React.useCallback(() => {
         if (!pinned) setPromptNavigatorPanelOpen(false);
@@ -341,11 +369,12 @@ export function PromptNavigatorRail({
             return;
         }
         onSelectTurn(prompt.turnId);
+        cancelScheduledShow();
         stopCarousel();
         setHighlightedIndex(null);
         closeKeyboardNav();
         gutterRef.current?.blur();
-    }, [closeKeyboardNav, onSelectTurn, prompts, stopCarousel]);
+    }, [cancelScheduledShow, closeKeyboardNav, onSelectTurn, prompts, stopCarousel]);
 
     const handleGutterClick = React.useCallback((event: React.MouseEvent<HTMLDivElement>) => {
         const relative = relativeIndexFromPointer(event.clientY);
@@ -421,16 +450,15 @@ export function PromptNavigatorRail({
     }, [activeIndex, closeKeyboardNav, ensureWindowContains, handleSelect, highlightedIndex, prompts.length]);
 
     const handleBlur = React.useCallback(() => {
+        cancelScheduledShow();
         stopCarousel();
         setHighlightedIndex(null);
         closeKeyboardNav();
-    }, [closeKeyboardNav, stopCarousel]);
+    }, [cancelScheduledShow, closeKeyboardNav, stopCarousel]);
 
     // Wheel over the panel steps the highlight instead of scrolling the chat
     // underneath; a native non-passive listener is required for preventDefault.
     const panelRef = React.useRef<HTMLDivElement | null>(null);
-    const highlightedIndexRef = React.useRef(highlightedIndex);
-    highlightedIndexRef.current = highlightedIndex;
     const isPanelVisible = highlightedIndex !== null;
     const wheelRemainderRef = React.useRef(0);
     React.useEffect(() => {
@@ -625,7 +653,8 @@ export function PromptNavigatorRail({
                             className={cn(
                                 'pointer-events-auto absolute inset-e-full top-1/2 z-30 me-3 -translate-y-1/2',
                                 'w-[min(20rem,calc(100vw-6rem))] overflow-hidden rounded-xl',
-                                'border border-[var(--interactive-border)]/60 bg-[var(--surface-elevated)] py-1 shadow-md',
+                                // Reads as a dropdown: the menus' glass and light, plain rows.
+                                'oc-glass-popover oc-glass-floating py-1',
                             )}
                             onMouseEnter={cancelScheduledHide}
                             onMouseLeave={scheduleHide}
@@ -676,12 +705,10 @@ export function PromptNavigatorRail({
                                             >
                                                 <div
                                                     className={cn(
-                                                        'flex h-full items-center rounded-lg border px-2 transition-colors',
+                                                        'flex h-full items-center rounded-lg px-2',
                                                         isActive
-                                                            ? 'border-transparent bg-[var(--interactive-selection)]'
-                                                            : isHighlighted
-                                                                ? 'border-[var(--interactive-border)]/60 bg-[var(--interactive-hover)]'
-                                                                : 'border-[var(--interactive-border)]/40',
+                                                            ? 'bg-[var(--interactive-selection)]'
+                                                            : isHighlighted && 'bg-[var(--interactive-hover)]',
                                                     )}
                                                 >
                                                     <span
@@ -691,7 +718,7 @@ export function PromptNavigatorRail({
                                                             'min-w-0 flex-1 line-clamp-2 [overflow-wrap:anywhere] typography-meta',
                                                             isActive
                                                                 ? 'text-interactive-selection-foreground'
-                                                                : 'text-muted-foreground',
+                                                                : isHighlighted ? 'text-foreground' : 'text-foreground/75',
                                                         )}
                                                     >
                                                         {prompt.preview.trim() || emptyPreviewLabel}

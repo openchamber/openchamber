@@ -4,9 +4,9 @@ import { getDefaultTheme } from '@/lib/theme/themes';
 
 import {
     buildHtmlRenderDocument,
-    HTML_RENDER_TOUCH_MAX_HEIGHT,
     clampHtmlRenderHeight,
     htmlRenderFileName,
+    htmlRenderSubmitReply,
     htmlRenderTheme,
     readHtmlRenderFrameMessage,
     type HtmlRenderTheme,
@@ -62,7 +62,49 @@ describe('buildHtmlRenderDocument', () => {
     });
 });
 
+describe('answer state', () => {
+    test('gives a page that asks ready option and button classes, kept across a theme switch', () => {
+        const document = buildHtmlRenderDocument('<p>a</p>', theme);
+        for (const rule of ['.oc-options{', '.oc-option{', '.oc-option[aria-pressed=true]{', '.oc-button{']) {
+            // Once in the theme style, once in the copy the bootstrap rewrites it with.
+            expect(document.split(rule).length - 1).toBe(2);
+        }
+    });
+
+    test('carries the page\'s answer as JSON that no data can break out of', () => {
+        const document = buildHtmlRenderDocument('<p>a</p>', theme, { answerState: { waiting: false, answer: { note: '</script><script>alert(1)</script>' } } });
+        const start = document.indexOf('<script type="application/json" id="oc-html-render-answer">');
+        const json = document.slice(document.indexOf('>', start) + 1, document.indexOf('</script>', start));
+        expect(JSON.parse(json)).toEqual({ waiting: false, answer: { note: '</script><script>alert(1)</script>' } });
+        // The bootstrap, the answer state and the answer script, nothing more.
+        expect(document.match(/<\/script>/g)?.length).toBe(3);
+    });
+
+    test('starts a page as not waiting unless told', () => {
+        expect(buildHtmlRenderDocument('<p>a</p>', theme)).toContain('{"waiting":false,"answer":null}');
+    });
+});
+
 describe('readHtmlRenderFrameMessage', () => {
+    test('reads openchamber.submit as an MCP Apps ui/message', () => {
+        const data = {
+            jsonrpc: '2.0',
+            id: 1,
+            method: 'ui/message',
+            params: { role: 'user', content: [{ type: 'text', text: ' Layout B ' }], _meta: { 'openchamber/data': { layout: 'b' } } },
+        };
+        expect(readHtmlRenderFrameMessage({ data })).toEqual({ kind: 'submit', id: 1, submission: { summary: 'Layout B', data: { layout: 'b' } } });
+        expect(readHtmlRenderFrameMessage({ data: { ...data, params: { ...data.params, _meta: undefined } } }))
+            .toEqual({ kind: 'submit', id: 1, submission: { summary: 'Layout B', data: null } });
+        expect(readHtmlRenderFrameMessage({ data: { ...data, method: 'tools/call' } })).toBeNull();
+        expect(readHtmlRenderFrameMessage({ data: { ...data, params: { ...data.params, role: 'assistant' } } })).toBeNull();
+    });
+
+    test('answers a submit with an empty result or an error', () => {
+        expect(htmlRenderSubmitReply(3)).toEqual({ jsonrpc: '2.0', id: 3, result: {} });
+        expect(htmlRenderSubmitReply(3, 'nope')).toEqual({ jsonrpc: '2.0', id: 3, error: { code: -32000, message: 'nope' } });
+    });
+
     test('reads the size and link messages the bootstrap posts', () => {
         expect(readHtmlRenderFrameMessage({ data: { type: 'openchamber:html-render:size', height: 321.5 } })).toEqual({ kind: 'size', height: 321.5 });
         expect(readHtmlRenderFrameMessage({ data: { type: 'openchamber:html-render:open-link', url: 'https://example.com/a' } }))
@@ -87,11 +129,12 @@ describe('readHtmlRenderFrameMessage', () => {
 });
 
 describe('helpers', () => {
-    test('clamps the frame between its minimum and the height past which the page scrolls', () => {
+    test('gives the frame the full page height, between its minimum and the runaway ceiling', () => {
         expect(clampHtmlRenderHeight(10)).toBe(48);
         expect(clampHtmlRenderHeight(300.2)).toBe(301);
-        expect(clampHtmlRenderHeight(5000)).toBe(1200);
-        expect(clampHtmlRenderHeight(5000, HTML_RENDER_TOUCH_MAX_HEIGHT)).toBe(5000);
+        // A long page takes its full height; only a runaway one is stopped.
+        expect(clampHtmlRenderHeight(5000)).toBe(5000);
+        expect(clampHtmlRenderHeight(1_000_000)).toBe(20_000);
     });
 
     test('names the download after the page title', () => {
@@ -102,7 +145,7 @@ describe('helpers', () => {
 
 describe('htmlRenderTheme', () => {
     test('leads the chart series with the accent and follows it with the fixed set for the mode', () => {
-        const fonts = { sans: 'sans-serif', mono: 'monospace' };
+        const fonts = { rem: 16, sans: 'sans-serif', mono: 'monospace' };
         for (const dark of [true, false]) {
             const theme = getDefaultTheme(dark);
             const { appearance, variables } = htmlRenderTheme(theme, fonts);

@@ -7,6 +7,30 @@ description: Connect the services and subscriptions OpenChamber works with.
 
 **Settings → Integrations** is where you sign in to the services OpenChamber works with. The sign-in is stored on the OpenChamber server, so web, desktop, and a paired phone share it.
 
+## Integrations catalog
+
+The integrations catalog lists over 150 services you can give the agent in one click: Linear, Notion, Sentry, Supabase, Figma, observability tools, CRMs, meeting notes and more. Installing one usually adds the service's MCP server (the connection the agent uses to read and change things there), and sometimes skills or a plugin that come with it. It installs for your user, so every project gets it.
+
+1. Choose the store icon in the sidebar header.
+2. Find a service: search by name, or narrow the list with a category such as **Code** or **Quality and ops**. **OpenChamber** lists our own extensions and plugins.
+3. Choose **+** on its row, or open it and choose **Install**.
+4. Sign in the way the service asks:
+   - **OAuth**: the service's sign-in page opens in your browser. Approve access there.
+   - **Token**: paste an API token into **API token**. **Get a token** opens the page where the service hands one out.
+   - **No sign-in**: nothing to do.
+
+When it's done, the service shows a check mark and appears under **Installed** on the left, and its tools are available in your next message. A yellow dot or **Sign-in required** means the sign-in didn't finish; open the service and sign in again.
+
+Some entries need more than a sign-in:
+
+- **Local servers** run on the machine OpenCode runs on and may need Node.js, Python with uv, or Docker. The first start can take a while.
+- **Plugins** are code that runs inside OpenCode, so the catalog asks you to confirm and shows the plugin's license first.
+- **Skills** that come with a service install with it. If one is missing, its own **Install** appears on the service's page.
+
+To remove a service, open it, choose **More actions** (**⋯**), then **Uninstall**. This removes only what the catalog added; your account on the service stays as it is. You can also manage MCP servers, plugins and skills in Settings as usual.
+
+The catalog is in the web app and desktop app. It's hidden in [enterprise mode](/security/#enterprise-mode).
+
 ## GitHub
 
 Expand the **GitHub** card and choose **Connect GitHub** to sign in with a short device code. Once connected, OpenChamber can start sessions from issues and pull requests, attach them to messages, and open or update PRs. Everything GitHub can do is on [GitHub Issues & PRs](/github/).
@@ -78,6 +102,18 @@ Excalidraw lets you draw in `.excalidraw` files and Obsidian `.excalidraw.md` dr
 2. Open the drawing again. The canvas replaces the file's text, and Cmd/Ctrl+S, autosave, the source toggle, and fullscreen work as for any file.
 
 The card updates the extension when a new version is out, turns it back on if you paused it, and removes it. Your drawings stay as they are when you remove it; they just open as text. Web and desktop only.
+
+## Resource Monitor
+
+Resource Monitor shows how much CPU and memory your machine uses and how much of it goes to OpenChamber, OpenCode, everything they started, and the dev servers running under them. It's an OpenChamber extension, listed under **OpenChamber extensions** on the same page.
+
+1. Open **Settings → Integrations** and choose **Install** on the Resource Monitor card.
+2. Approve its local service in **Settings → Extensions**. The numbers come from a small process OpenChamber starts next to the panel. It measures only while the panel or the **Resources** section is on screen.
+3. Open **Resource Monitor** from the right-hand rail. A short readout also appears under **Resources** in the Work Status panel.
+
+Stop on a dev server or a job ends that command with everything it started, so a watcher can't bring the server back. **Stop all** in the Terminal group ends everything running in the terminal and project actions and leaves the terminal tabs open. OpenChamber itself and the OpenCode server have no Stop.
+
+Dev servers show up when they run under OpenChamber: started in the built-in terminal, or by an agent when OpenChamber started OpenCode itself. A server that detaches from its parent, or a container started with `docker compose up -d`, isn't listed. When you're connected to a remote OpenChamber, the monitor shows that machine. Web and desktop only.
 
 ## Related
 

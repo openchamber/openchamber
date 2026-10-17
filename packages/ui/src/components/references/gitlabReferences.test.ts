@@ -100,18 +100,24 @@ describe('GitLab references', () => {
   test('the preview reads a merge request through its context', async () => {
     const page = await fetchGitLabReferencePage(reads(), context, 'pull', DEFAULT_REPOSITORY_FILTER, '', null);
     if (page.kind !== 'page') throw new Error('expected a page');
+    let askedCIDetails: boolean | undefined;
     const detail = await fetchGitLabReferenceDetail(reads({
-      changeRequestContext: async () => ({
-        identity, project, changeRequest: mergeRequest,
-        issueComments: [{ ...identity, id: 'c1', url: 'u', body: 'later', createdAt: '2026-02-01' }],
-        reviewComments: [{ ...identity, id: 'c2', url: 'u2', body: 'earlier', createdAt: '2026-01-01', path: 'a.ts', line: 4 }],
-        files: [{ path: 'a.ts', additions: 3, deletions: 1 }, { path: 'b.ts', additions: 2 }],
-        ci: { summary: { state: 'success', total: 1, success: 1, failure: 0, pending: 0 } },
-        commits: [{ sha: 'aaa', headline: 'first', authorName: 'Sam', committedAt: '2025-12-31', url: null }],
-        commitsComplete: false,
-        verdicts: [{ state: 'approved', createdAt: '2026-01-15', url: 'v' }],
-      }),
+      changeRequestContext: async (_context, _number, options) => {
+        askedCIDetails = options?.includeCIDetails;
+        return {
+          identity, project, changeRequest: mergeRequest,
+          issueComments: [{ ...identity, id: 'c1', url: 'u', body: 'later', createdAt: '2026-02-01' }],
+          reviewComments: [{ ...identity, id: 'c2', url: 'u2', body: 'earlier', createdAt: '2026-01-01', path: 'a.ts', line: 4 }],
+          files: [{ path: 'a.ts', additions: 3, deletions: 1 }, { path: 'b.ts', additions: 2 }],
+          ci: { summary: { state: 'success', total: 1, success: 1, failure: 0, pending: 0 } },
+          commits: [{ sha: 'aaa', headline: 'first', authorName: 'Sam', committedAt: '2025-12-31', url: null }],
+          commitsComplete: false,
+          verdicts: [{ state: 'approved', createdAt: '2026-01-15', url: 'v' }],
+        };
+      },
     }), context, page.items[0]!);
+    // The pipeline's totals come from its jobs, which only CI details read.
+    expect(askedCIDetails).toBe(true);
     expect(detail.comments.map((comment) => [comment.body, comment.review])).toEqual([['earlier', null], ['', 'approved'], ['later', null]]);
     expect(detail.comments[0]).toMatchObject({ path: 'a.ts', line: 4 });
     expect(detail.pull).toMatchObject({ additions: 5, deletions: 1, changedFiles: 2, checks: { state: 'success' } });

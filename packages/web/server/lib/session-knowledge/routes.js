@@ -1,11 +1,6 @@
 /**
- * What a session still owes in project knowledge, and the record that it was
- * delivered.
- *
- * Two calls rather than one, because only the sender knows whether the message
- * carrying the block actually went out. Handing over the text and recording it
- * as delivered in the same request would leave a failed send believing the
- * agent has context it never received.
+ * Project knowledge for the UI: writing it into a session before a send, what
+ * the session carries for display, and which notes and plans it pins.
  *
  * The body parser is attached per route: there is no global one, because the
  * generic OpenCode proxy needs an unread request stream.
@@ -25,28 +20,18 @@ export const registerSessionKnowledgeRoutes = (app, dependencies) => {
   const { sessionKnowledgeRuntime } = dependencies;
 
   /**
-   * Answers with the text to attach and the signature to report back once it
-   * has gone. An empty text means the session is already carrying it.
+   * Writes the session's project knowledge into its instruction entries; the
+   * client awaits it before the prompt goes out. Answers 200 either way: a
+   * message without its background is far better than no message at all.
    */
-  app.get('/api/session-knowledge', async (req, res) => {
-    const directory = asNonEmptyString(req.query.directory);
-    const sessionId = asNonEmptyString(req.query.sessionId);
-    if (!directory) {
-      return res.status(400).json({ error: 'directory is required' });
+  app.post('/api/session-knowledge/sync', parseJsonBody, async (req, res) => {
+    const body = isRecord(req.body) ? req.body : {};
+    const sessionId = asNonEmptyString(body.sessionId);
+    const directory = asNonEmptyString(body.directory);
+    if (!sessionId || !directory) {
+      return res.status(400).json({ error: 'sessionId and directory are required' });
     }
-
-    try {
-      const pending = sessionId
-        ? await sessionKnowledgeRuntime.resolvePendingForSession(sessionId, directory)
-        // A session that does not exist yet — a draft about to be created —
-        // has been told nothing, so everything is still owed.
-        : await sessionKnowledgeRuntime.resolvePending(directory, '');
-      return res.json(pending);
-    } catch (error) {
-      // Never fails the caller's send: a message without its background is far
-      // better than no message at all.
-      return res.json({ text: '', signature: '', unavailable: true, reason: error?.message ?? 'unknown' });
-    }
+    return res.json({ synced: await sessionKnowledgeRuntime.sync(sessionId, directory) });
   });
 
   /** Counts and names for the work status panel; assembles no text. */
@@ -80,28 +65,6 @@ export const registerSessionKnowledgeRoutes = (app, dependencies) => {
       return res.json({ pins: await sessionKnowledgeRuntime.setPin(sessionId, directory, kind, id, body.pinned) });
     } catch (error) {
       return res.status(500).json({ error: error?.message ?? 'Unable to update pin' });
-    }
-  });
-
-  app.post('/api/session-knowledge/delivered', parseJsonBody, async (req, res) => {
-    const body = req.body;
-    if (!isRecord(body)) {
-      return res.status(400).json({ error: 'Body must be an object' });
-    }
-    const sessionId = asNonEmptyString(body.sessionId);
-    const directory = asNonEmptyString(body.directory);
-    const signature = asNonEmptyString(body.signature);
-    if (!sessionId || !directory || !signature) {
-      return res.status(400).json({ error: 'sessionId, directory and signature are required' });
-    }
-
-    try {
-      await sessionKnowledgeRuntime.recordDelivered(sessionId, directory, signature);
-      return res.json({ recorded: true });
-    } catch (error) {
-      // The message is already sent; failing here only means the block may be
-      // sent once more, which is far better than reporting the send as failed.
-      return res.json({ recorded: false, reason: error?.message ?? 'unknown' });
     }
   });
 };

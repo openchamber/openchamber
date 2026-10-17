@@ -73,6 +73,7 @@ import { abortCurrentOperation } from '@/sync/session-actions';
 import { OverlayScrollbar } from '@/components/ui/OverlayScrollbar';
 import { Icon } from "@/components/icon/Icon";
 import { cn, formatDirectoryName } from '@/lib/utils';
+import { useWaitingBlink } from '@/hooks/useDurationTicker';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 
 // New sync system imports
@@ -238,6 +239,7 @@ type ChatViewportProps = {
     turnIds: string[];
     activeTurnId: string | null;
     onSelectTurn: (turnId: string) => void;
+    promptRailEnabled: boolean;
     showPromptNavigator: boolean;
     canLoadEarlierPrompts: boolean;
     isLoadingOlderPrompts: boolean;
@@ -275,6 +277,7 @@ const ChatViewport = React.memo(({
     turnIds,
     activeTurnId,
     onSelectTurn,
+    promptRailEnabled,
     showPromptNavigator,
     canLoadEarlierPrompts,
     isLoadingOlderPrompts,
@@ -539,6 +542,11 @@ const ChatViewport = React.memo(({
             )}
             ref={timelineRootRef}
             aria-hidden={isDesktopExpandedInput}
+            // The message column keeps clear of the prompt rail (typography.css).
+            // The room is reserved whenever the rail is enabled, before the
+            // rail itself appears with the second prompt, so its arrival does
+            // not shift the centered column sideways.
+            data-prompt-rail={promptRailEnabled ? '' : undefined}
         >
             <div className="absolute inset-0">
                 <MessageList
@@ -620,6 +628,7 @@ const ChatViewport = React.memo(({
         && prev.turnIds === next.turnIds
         && prev.activeTurnId === next.activeTurnId
         && prev.onSelectTurn === next.onSelectTurn
+        && prev.promptRailEnabled === next.promptRailEnabled
         && prev.showPromptNavigator === next.showPromptNavigator
         && prev.canLoadEarlierPrompts === next.canLoadEarlierPrompts
         && prev.isLoadingOlderPrompts === next.isLoadingOlderPrompts
@@ -659,6 +668,39 @@ const HYDRATING_SKELETON_ITEMS: Array<{
         textWidths: ['w-24', 'w-[84%]', 'w-[64%]'],
     },
 ];
+
+// Session messages loading. The wait can last minutes while OpenCode fails to
+// start, so the rows blink on the shared 1 s tick instead of pulsing, and stand
+// still while hidden behind the expanded composer.
+const HydrationSkeleton: React.FC<{ waiting: boolean }> = ({ waiting }) => {
+    const blink = useWaitingBlink(waiting);
+    return (
+        <div className={cn('space-y-4', blink)}>
+            {HYDRATING_SKELETON_ITEMS.map((item) => (
+                <div key={item.id} className="group w-full">
+                    <div className="chat-message-column">
+                        <div className="space-y-2.5 px-4 py-3">
+                            <div className="space-y-1.5">
+                                {item.toolRows.map((row) => (
+                                    <div key={`${item.id}-${row.id}`} className="flex items-center gap-2">
+                                        <Skeleton className="h-3.5 w-3.5 shrink-0 rounded-full" />
+                                        <Skeleton className={cn('h-4 rounded-md', row.titleWidth)} />
+                                        <Skeleton className={cn('h-4 rounded-md', row.detailWidth)} />
+                                    </div>
+                                ))}
+                            </div>
+                            <div className="space-y-1.5 pt-1">
+                                {item.textWidths.map((width, index) => (
+                                    <Skeleton key={`${item.id}-text-${index}`} className={cn('h-4 rounded-md', width)} />
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            ))}
+        </div>
+    );
+};
 
 // `onStop` is set while a subagent's turn runs: its session takes no
 // prompts, but the user can still stop it from here.
@@ -1378,9 +1420,10 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         void navigation.scrollToTurnId(turnId, { behavior: 'auto' });
     }, [navigation]);
     const canLoadEarlierPrompts = timelineController.historySignals.canLoadEarlier;
-    const showPromptNavigator = !isMobile
+    const promptRailEnabled = !isMobile
         && !isDesktopExpandedInput
-        && promptNavigatorEnabled
+        && promptNavigatorEnabled;
+    const showPromptNavigator = promptRailEnabled
         && timelineController.turnIds.length >= 2;
 
     React.useEffect(() => {
@@ -1677,30 +1720,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                     aria-hidden={isDesktopExpandedInput}
                 >
                     <div className="absolute inset-0 overflow-y-auto overflow-x-hidden bg-background pt-6" style={CHAT_SCROLL_STYLE}>
-                        <div className="space-y-4">
-                            {HYDRATING_SKELETON_ITEMS.map((item) => (
-                                <div key={item.id} className="group w-full">
-                                    <div className="chat-message-column">
-                                        <div className="space-y-2.5 px-4 py-3">
-                                            <div className="space-y-1.5">
-                                                {item.toolRows.map((row) => (
-                                                    <div key={`${item.id}-${row.id}`} className="flex items-center gap-2">
-                                                        <Skeleton className="h-3.5 w-3.5 shrink-0 rounded-full" />
-                                                        <Skeleton className={cn('h-4 rounded-md', row.titleWidth)} />
-                                                        <Skeleton className={cn('h-4 rounded-md', row.detailWidth)} />
-                                                    </div>
-                                                ))}
-                                            </div>
-                                            <div className="space-y-1.5 pt-1">
-                                                {item.textWidths.map((width, index) => (
-                                                    <Skeleton key={`${item.id}-text-${index}`} className={cn('h-4 rounded-md', width)} />
-                                                ))}
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
+                        <HydrationSkeleton waiting={!isDesktopExpandedInput} />
                     </div>
                 </div>
             );
@@ -1750,6 +1770,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                 turnIds={timelineController.turnIds}
                 activeTurnId={timelineController.activeTurnId}
                 onSelectTurn={handlePromptNavigatorSelect}
+                promptRailEnabled={promptRailEnabled}
                 showPromptNavigator={showPromptNavigator}
                 canLoadEarlierPrompts={canLoadEarlierPrompts}
                 isLoadingOlderPrompts={timelineController.isLoadingOlder}

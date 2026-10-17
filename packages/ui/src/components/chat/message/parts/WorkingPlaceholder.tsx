@@ -205,7 +205,7 @@ export function WorkingPlaceholder({
       // 16px box like the scroll pill's arrow icon. The padding normalizes
       // the mark to the arrow glyph's geometry (~10.4px wide, ~2.8px inset),
       // so equal boxes and equal paddings also mean equal visible edges.
-      className="animate-status-logo h-4 w-4 shrink-0 p-[1.3px] me-1.5"
+      className="h-4 w-4 shrink-0 p-[1.3px] me-1.5"
       style={{
         filter: isDarkTheme ? 'brightness(0.9) contrast(1.1) invert(1)' : 'brightness(0.9) contrast(1.1)',
       }}

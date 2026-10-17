@@ -175,6 +175,18 @@ describe("createEventPipeline", () => {
     expect(events[1]).toEqual({ type: "openchamber.permission-auto-accept", properties: { sessions: { ses_1: true }, modes: { ses_1: "safety" }, revision: 3 } })
   })
 
+  test("passes the server's waiting-page announcements through typed", async () => {
+    const { events } = await collect(
+      [
+        { type: "openchamber:page-waiting", properties: { sessionID: "ses_1", directory: "/repo", page: { id: "call_1", title: "Pick a layout" } } as never },
+        { type: "openchamber:page-settled", properties: { sessionID: "ses_1", pageID: "call_1" } },
+      ],
+      2,
+    )
+    expect(events[0]).toEqual({ type: "openchamber.page-waiting", properties: { sessionID: "ses_1", directory: "/repo", page: { id: "call_1", title: "Pick a layout" } } })
+    expect(events[1]).toEqual({ type: "openchamber.page-settled", properties: { sessionID: "ses_1", pageID: "call_1" } })
+  })
+
   test("ignores payloads that are neither wire events nor bridge events", async () => {
     const { events } = await collect([{ type: "something.else", properties: {} }, textEnded("x")], 1)
     expect(events.map(describeEvent)).toEqual(["updated:x"])
@@ -454,6 +466,19 @@ describe("classifyStreamPayload", () => {
       .toEqual({ kind: "space-setup", spaceId: "0123456789ab" })
     expect(classifyStreamPayload({ type: "openchamber:space-setup", properties: { spaceId: "bad" } }, undefined))
       .toEqual({ kind: "events", events: [] })
+    expect(classifyStreamPayload({ type: "openchamber:space-permission-stream", properties: { spaceId: "0123456789ab", status: "connected" } }, undefined))
+      .toEqual({ kind: "space-permission-stream", spaceId: "0123456789ab" })
+    expect(classifyStreamPayload({ type: "openchamber:space-permission-stream", properties: { spaceId: "bad", status: "connected" } }, undefined))
+      .toEqual({ kind: "events", events: [] })
+    // A space's policy and a request it left for the user keep the space's id for their owner.
+    expect(classifyStreamPayload({
+      type: "openchamber:permission-auto-accept.updated",
+      properties: { sessions: { ses_1: true }, modes: { ses_1: "auto" }, revision: 2, spaceId: "0123456789ab" },
+    }, undefined)).toMatchObject({ kind: "events", events: [{ event: { type: "openchamber.permission-auto-accept", properties: { spaceId: "0123456789ab" } } }] })
+    expect(classifyStreamPayload({
+      type: "openchamber:permission-auto-accept.left-for-user",
+      properties: { permissionId: "per_1", sessionId: "ses_1", directory: null, spaceId: "0123456789ab" },
+    }, undefined)).toMatchObject({ kind: "events", events: [{ event: { type: "openchamber.permission-left-for-user", properties: { spaceId: "0123456789ab" } } }] })
     expect(classifyStreamPayload({ type: "openchamber:session-archived", properties: { sessionID: "ses_1", archivedAt: 5 } }, "/frame"))
       .toMatchObject({ kind: "events", events: [{ directory: "/frame", event: { type: "session.patched" } }] })
     expect(classifyStreamPayload({ nothing: true }, undefined)).toEqual({ kind: "events", events: [] })

@@ -27,6 +27,7 @@ import process from "node:process"
 
 import { CdpClient, createPageTarget, launchChrome, reservePort, resolveChrome, resolveProfileDir, wait } from "./perf/cdp.mjs"
 import { metricMap, round } from "./perf/metrics.mjs"
+import { startFrameCount } from "./perf/frame-count.mjs"
 import { createProcessCpuSampler, openBrowserClient } from "./perf/process-cpu.mjs"
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url))
@@ -142,10 +143,12 @@ const measureVariant = async (client, browserClient, url, options) => {
   const processCpu = createProcessCpuSampler({ browserClient, serverProcesses: [] })
   const before = metricMap((await client.send("Performance.getMetrics")).metrics)
   await processCpu.sample()
+  const frameCount = await startFrameCount(client)
   const startedAt = Date.now()
   await wait(options.duration * 1000)
   const elapsedSeconds = (Date.now() - startedAt) / 1000
   await processCpu.sample()
+  const { framesPerSecond } = await frameCount.stop()
   const after = metricMap((await client.send("Performance.getMetrics")).metrics)
   const cpu = processCpu.summarize()
   const cpuOf = (type) => round(cpu.processes
@@ -154,6 +157,7 @@ const measureVariant = async (client, browserClient, url, options) => {
 
   const delta = (name) => Number(after[name] ?? 0) - Number(before[name] ?? 0)
   return {
+    framesPerSecond,
     recalcStylePerSecond: round(delta("RecalcStyleCount") / elapsedSeconds),
     layoutsPerSecond: round(delta("LayoutCount") / elapsedSeconds),
     mainThreadBusyPercent: round((delta("TaskDuration") / elapsedSeconds) * 100),
@@ -206,7 +210,8 @@ const main = async () => {
       results.push({ variant, ...measured })
       if (!options.json) {
         console.log(
-          `${variant.padEnd(30)} recalc/s ${String(measured.recalcStylePerSecond).padStart(8)}`
+          `${variant.padEnd(30)} frames/s ${String(measured.framesPerSecond).padStart(6)}`
+          + `   recalc/s ${String(measured.recalcStylePerSecond).padStart(8)}`
           + `   layout/s ${String(measured.layoutsPerSecond).padStart(6)}`
           + `   busy% ${String(measured.mainThreadBusyPercent).padStart(6)}`
           + `   cpu% renderer ${String(measured.rendererCpuPercent).padStart(6)}`

@@ -36,11 +36,6 @@ export const spaceMarkSchema = z.object({
   directory: z.string().nullable().default(null),
 });
 
-export type SpaceAccessFailure = { provider: string; code: string; message: string };
-
-/** The model access a creation in this window gives once the space is ready, while and after it does. */
-type SpaceCreationAccess = { kind: 'giving' } | { kind: 'failed'; failures: readonly SpaceAccessFailure[] };
-
 /** The actions on a space the user can take from its group, from soft to hard; `setup` runs the project's setup commands again. */
 export type SpaceAction = 'start' | 'stop' | 'restart_opencode' | 'restart' | 'setup' | 'remove';
 
@@ -71,14 +66,6 @@ type SpacesState = {
   noteProgress: (progress: SpaceProgress) => boolean;
   /** A creation this window started, shown at once, before the next read of the list. */
   addJourneyEntry: (entry: SpaceEntry) => void;
-  /**
-   * The model access a creation in this window is giving or could not give, per space. Only this
-   * window knows it: the host keeps no grant it could not deliver.
-   */
-  creationAccess: ReadonlyMap<string, SpaceCreationAccess>;
-  noteCreationAccess: (spaceId: string, access: SpaceCreationAccess | null) => void;
-  /** A provider the grant dialog gave: it no longer counts among the creation's failures. */
-  noteProviderGranted: (spaceId: string, providerId: string) => void;
   /**
    * A grant the host just accepted, entered into the space's entry at once and counted like a
    * step, so a read of the list that began before it cannot take it away; the next read that
@@ -168,22 +155,6 @@ export const useSpacesStore = create<SpacesState>((set, get) => ({
     journey.set(entry.id, entry);
     return { journey, progressRevision };
   }),
-  creationAccess: new Map(),
-  noteCreationAccess: (spaceId, access) => set((current) => {
-    const creationAccess = new Map(current.creationAccess);
-    if (access) creationAccess.set(spaceId, access);
-    else creationAccess.delete(spaceId);
-    return { creationAccess };
-  }),
-  noteProviderGranted: (spaceId, providerId) => set((current) => {
-    const access = current.creationAccess.get(spaceId);
-    if (access?.kind !== 'failed') return current;
-    const failures = access.failures.filter((failure) => failure.provider !== providerId);
-    const creationAccess = new Map(current.creationAccess);
-    if (failures.length > 0) creationAccess.set(spaceId, { kind: 'failed', failures });
-    else creationAccess.delete(spaceId);
-    return { creationAccess };
-  }),
   noteGrantGiven: (spaceId, grant) => set((current) => {
     const entry = current.journey?.get(spaceId);
     if (!entry) return current;
@@ -194,6 +165,8 @@ export const useSpacesStore = create<SpacesState>((set, get) => ({
       ...entry,
       grants: [...entry.grants.filter((known) => known.id !== grant.id), grant],
       needsAccess: entry.needsAccess.filter((id) => id !== grant.id),
+      // The host takes the provider's creation failure off its list with the grant; so does this copy.
+      accessFailures: grant.kind === 'domain' ? entry.accessFailures : entry.accessFailures.filter((failure) => failure.provider !== grant.provider),
     });
     return { journey, progressRevision };
   }),
@@ -255,7 +228,7 @@ export const useSpacesStore = create<SpacesState>((set, get) => ({
   resetForRuntimeSwitch: () => {
     progressAt.clear();
     journeyGeneration += 1;
-    set({ spaces: EMPTY, journey: null, progressRevision: 0, creationAccess: new Map(), customProviders: new Map(), accessDialog: null, actions: new Map(), applyDialog: null, deleteDialog: null, deleteUnsaved: null, archivedNotice: null, setupOutputDialog: null, actionsSheet: null });
+    set({ spaces: EMPTY, journey: null, progressRevision: 0, customProviders: new Map(), accessDialog: null, actions: new Map(), applyDialog: null, deleteDialog: null, deleteUnsaved: null, archivedNotice: null, setupOutputDialog: null, actionsSheet: null });
   },
   forgetForSwitchOff: () => get().resetForRuntimeSwitch(),
 }));

@@ -20,6 +20,7 @@ import {
   toolFileDiffs,
   toolInputPath,
 } from "./tools"
+import type { Metadata, ToolInput, ToolState } from "./model"
 
 describe("tool identity", () => {
   test("recognizes the v2 names, not the v1 ones", () => {
@@ -253,23 +254,38 @@ describe("execute call details", () => {
 
 describe("renderedPage", () => {
   const accepted = { openchamber: { ok: true } }
+  const completed = (input: ToolInput, metadata?: Metadata): ToolState => ({ status: "completed", input, output: "", metadata, time: { start: 1, end: 2 } })
+  const running = (input: ToolInput): ToolState => ({ status: "running", input, time: { start: 1 } })
 
   test("reads the page from parameters, or beside the action, once OpenChamber accepted it", () => {
-    expect(renderedPage("openchamber_render", { action: "render.page", parameters: { html: "<p>a</p>", title: "Chart" } }, accepted))
-      .toEqual({ html: "<p>a</p>", title: "Chart" })
-    expect(renderedPage("openchamber_render", { action: "render.page", html: "<p>b</p>", title: "Flat" }, accepted))
-      .toEqual({ html: "<p>b</p>", title: "Flat" })
+    expect(renderedPage("openchamber_render", completed({ action: "render.page", parameters: { html: "<p>a</p>", title: "Chart" } }, accepted)))
+      .toEqual({ html: "<p>a</p>", title: "Chart", ask: { kind: "show" } })
+    expect(renderedPage("openchamber_render", completed({ action: "render.page", html: "<p>b</p>", title: "Flat" }, accepted)))
+      .toEqual({ html: "<p>b</p>", title: "Flat", ask: { kind: "show" } })
     // An explicit parameters object wins, as it does in the plugin.
-    expect(renderedPage("openchamber_render", { html: "<p>flat</p>", parameters: { html: "<p>nested</p>", title: "T" } }, accepted))
-      .toEqual({ html: "<p>nested</p>", title: "T" })
+    expect(renderedPage("openchamber_render", completed({ html: "<p>flat</p>", parameters: { html: "<p>nested</p>", title: "T" } }, accepted)))
+      .toEqual({ html: "<p>nested</p>", title: "T", ask: { kind: "show" } })
+  })
+
+  test("shows a page that waits while its call runs, and its answer once it completes", () => {
+    const input = { action: "render.page", parameters: { html: "<p>a</p>", title: "Pick", awaitAnswer: true } }
+    expect(renderedPage("openchamber_render", running(input))?.ask).toEqual({ kind: "waiting" })
+    expect(renderedPage("openchamber_render", completed(input, { openchamber: { ok: true, answer: { answered: true, summary: "Layout B", data: { layout: "b" } } } }))?.ask)
+      .toEqual({ kind: "answered", summary: "Layout B", data: { layout: "b" } })
+    expect(renderedPage("openchamber_render", completed(input, { openchamber: { ok: true, answer: { answered: false, reason: "chat" } } }))?.ask)
+      .toEqual({ kind: "answered-in-chat" })
+    const stopped: ToolState = { status: "error", input, error: "aborted", time: { start: 1, end: 2 } }
+    expect(renderedPage("openchamber_render", stopped)?.ask).toEqual({ kind: "unanswered" })
   })
 
   test("leaves a refused, unfinished, empty or foreign call to its tool row", () => {
     const input = { action: "render.page", parameters: { html: "<p>a</p>", title: "Chart" } }
-    expect(renderedPage("openchamber_render", input, { openchamber: { ok: false } })).toBeNull()
-    expect(renderedPage("openchamber_render", input, undefined)).toBeNull()
-    expect(renderedPage("openchamber_render", { parameters: { html: "  ", title: "Chart" } }, accepted)).toBeNull()
-    expect(renderedPage("openchamber_render", { parameters: { html: "<p>a</p>" } }, accepted)).toBeNull()
-    expect(renderedPage("openchamber", input, accepted)).toBeNull()
+    expect(renderedPage("openchamber_render", completed(input, { openchamber: { ok: false } }))).toBeNull()
+    expect(renderedPage("openchamber_render", completed(input))).toBeNull()
+    expect(renderedPage("openchamber_render", running(input))).toBeNull()
+    expect(renderedPage("openchamber_render", { status: "error", input, error: "refused", time: { start: 1, end: 2 } })).toBeNull()
+    expect(renderedPage("openchamber_render", completed({ parameters: { html: "  ", title: "Chart" } }, accepted))).toBeNull()
+    expect(renderedPage("openchamber_render", completed({ parameters: { html: "<p>a</p>" } }, accepted))).toBeNull()
+    expect(renderedPage("openchamber", completed(input, accepted))).toBeNull()
   })
 })

@@ -187,9 +187,9 @@ export const BrowserToolbar: React.FC<BrowserToolbarProps> = ({
           aria-expanded={visibleSuggestions.length > 0}
           aria-controls="openchamber-browser-address-suggestions"
           className={cn(
-            'h-6 w-full rounded-full border border-border/50 bg-[var(--surface-elevated)] px-3',
+            'oc-raised oc-field h-6 w-full rounded-full bg-[var(--surface-elevated)] px-3',
             addressMark && 'ps-8',
-            'typography-micro text-foreground outline-none focus:border-[var(--interactive-focus-ring)]',
+            'typography-micro text-foreground outline-none',
           )}
           aria-label={t('contextPanel.browser.addressAria')}
         />

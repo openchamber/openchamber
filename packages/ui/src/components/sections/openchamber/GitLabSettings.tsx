@@ -1,12 +1,11 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Icon } from '@/components/icon/Icon';
+import { IntegrationCatalogCard } from '@/components/sections/integrations/IntegrationCatalogCard';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { openExternalUrl } from '@/lib/url';
 import { useI18n } from '@/lib/i18n';
-import { cn } from '@/lib/utils';
 import { getManagedCredentialSourceLabelKey } from '@/lib/source-control/identity';
 import type {
   SourceControlCapabilities,
@@ -17,7 +16,6 @@ import type {
 import {
   SETTINGS_CONTROL_CLUSTER_CLASS,
   SETTINGS_FIELDS_STACK_CLASS,
-  SettingsControlGroup,
   SettingsFieldRow,
 } from '@/components/sections/shared/SettingsSection';
 import { getSourceControlAuthKey, useSourceControlAuthEntry, useSourceControlAuthStore } from '@/stores/useSourceControlAuthStore';
@@ -28,9 +26,6 @@ import { DeviceFlowCode } from './DeviceFlowCode';
 const DEFAULT_GITLAB_IDENTITY: SourceControlIdentity = { provider: 'gitlab', instance: 'https://gitlab.com' };
 
 /** Sub-block inside the card body, same row chrome the Linear card uses for its workspaces. */
-const INSTANCE_BLOCK_CLASS = 'overflow-hidden rounded-md border border-[var(--surface-subtle)] bg-[var(--surface-muted)]';
-const INSTANCE_ROW_CLASS = 'px-3 py-3';
-const INSTANCE_ROW_DIVIDER_CLASS = 'border-t border-[var(--surface-subtle)]';
 
 const normalizeGitLabIdentity = (value: string): SourceControlIdentity | null => {
   try {
@@ -287,10 +282,15 @@ const GitLabInstanceItem: React.FC<GitLabInstanceItemProps> = ({ identity, sourc
   }
 
   return (
-    <div className={INSTANCE_BLOCK_CLASS}>
-      <div className={cn(INSTANCE_ROW_CLASS, 'flex items-start justify-between gap-4')}>
+    // One group per instance: the address heads it, its accounts and actions
+    // follow. Groups part with a line, never a filled box inside the card.
+    <div className="space-y-3 py-4 first:pt-0 last:pb-0">
+      <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
-          <div className="typography-ui-label truncate text-foreground">{identity.instance}</div>
+          {/* The address reads as a host; the full URL stays in the tooltip. */}
+          <div className="typography-ui-label truncate font-medium text-foreground" title={identity.instance}>
+            {identity.instance.replace(/^https?:\/\//, '')}
+          </div>
           {statusMessage ? (
             <div className="typography-meta mt-0.5 text-muted-foreground">
               {statusMessage}
@@ -305,7 +305,7 @@ const GitLabInstanceItem: React.FC<GitLabInstanceItemProps> = ({ identity, sourc
       </div>
 
       {accounts.length > 0 ? (
-        <div className={cn(INSTANCE_ROW_CLASS, INSTANCE_ROW_DIVIDER_CLASS)}>
+        <div>
           <SourceControlAccountList
             accounts={accounts}
             avatarAlt={(username) => username}
@@ -342,7 +342,7 @@ const GitLabInstanceItem: React.FC<GitLabInstanceItemProps> = ({ identity, sourc
       ) : null}
 
       {connected && !isAddingAccount && (
-        <div className={cn(INSTANCE_ROW_CLASS, INSTANCE_ROW_DIVIDER_CLASS)}>
+        <div>
           <Button size="sm" variant="outline" onClick={() => setIsAddingAccount(true)} disabled={busy}>
             {t('settings.github.page.actions.addAccount')}
           </Button>
@@ -350,7 +350,7 @@ const GitLabInstanceItem: React.FC<GitLabInstanceItemProps> = ({ identity, sourc
       )}
 
       {showConnectionMethods && (
-        <div className={cn(SETTINGS_FIELDS_STACK_CLASS, INSTANCE_ROW_CLASS, INSTANCE_ROW_DIVIDER_CLASS)}>
+        <div className={SETTINGS_FIELDS_STACK_CLASS}>
           {capabilities?.authenticationMethods.device.available && !flow && (
             <SettingsFieldRow label={t('settings.gitlab.device.label')}>
               <Button size="sm" onClick={startDeviceFlow} disabled={busy}>{t('settings.gitlab.actions.connect')}</Button>
@@ -389,8 +389,10 @@ const GitLabInstanceItem: React.FC<GitLabInstanceItemProps> = ({ identity, sourc
         </div>
       )}
 
-      {(connected || cli?.disabled) && cli && (cli.available || cli.disabled) && (
-        <div className={cn(INSTANCE_ROW_CLASS, INSTANCE_ROW_DIVIDER_CLASS)}>
+      {/* While glab is a listed account, its own row carries the switch. */}
+      {(connected || cli?.disabled) && cli && (cli.available || cli.disabled)
+        && (cli.disabled || !accounts.some((account) => account.source === 'cli')) && (
+        <div>
           <SettingsFieldRow label={t('settings.gitlab.cli.label')} info={t('settings.gitlab.cli.info')}>
             <Button size="sm" variant="outline" onClick={toggleCli} disabled={busy}>
               {cli.disabled ? t('settings.gitlab.actions.enableCli') : t('settings.gitlab.actions.disableCli')}
@@ -460,61 +462,31 @@ export const GitLabSettings: React.FC = () => {
         ? t('settings.sourceControl.accounts.connectedCount', { count: validAccounts.length })
         : connectedAccount.user.username.trim() || t('settings.gitlab.status.connected')
       : t('settings.gitlab.status.notConnected');
-  const statusClassName = connected
-    ? 'bg-[var(--status-success)]/15 text-[var(--status-success)]'
-    : 'bg-[var(--surface-muted)] text-muted-foreground';
-
   return (
-    <Collapsible open={open} onOpenChange={setOpen}>
-      <div
-        data-settings-item="git.gitlab-account"
-        className="overflow-hidden rounded-xl border border-[var(--interactive-border)] bg-[var(--surface-elevated)]"
-      >
-        <CollapsibleTrigger
-          className="flex w-full min-w-0 items-center gap-3 px-4 py-3 text-start hover:bg-[var(--interactive-hover)]/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--interactive-focus-ring)]"
-        >
-          <div className="flex size-10 shrink-0 items-center justify-center rounded-[10px] bg-[var(--surface-muted)]">
-            <Icon name="gitlab" className="size-5 text-foreground" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="truncate text-sm font-semibold text-foreground">
-              {t('settings.gitlab.title')}
+    <IntegrationCatalogCard
+      settingsItem="git.gitlab-account"
+      logo={<Icon name="gitlab" className="size-5 text-foreground" />}
+      name={t('settings.gitlab.title')}
+      description={t('settings.gitlab.info')}
+      status={statusLabel}
+      statusTone={connected ? 'success' : 'neutral'}
+      open={open}
+      onOpenChange={setOpen}
+    >
+          <div className="space-y-3" data-settings-item="git.gitlab-connect">
+            <div className="divide-y divide-[var(--interactive-border)]">
+              {visibleIdentities.map((item) => (
+                <GitLabInstanceItem
+                  key={`${getRuntimeKey()}:${item.instance}`}
+                  identity={item}
+                  sourceControl={sourceControl}
+                  onSaved={pendingIdentity?.instance === item.instance ? clearPendingIdentity : undefined}
+                />
+              ))}
             </div>
-            <p className="mt-0.5 line-clamp-1 text-xs leading-snug text-muted-foreground">
-              {t('settings.gitlab.info')}
-            </p>
-          </div>
-          <span
-            aria-live="polite"
-            className={cn('max-w-36 shrink-0 truncate rounded-full px-2 py-0.5 text-[10px] font-medium', statusClassName)}
-          >
-            {statusLabel}
-          </span>
-          <Icon
-            name="arrow-down-s"
-            className={cn(
-              'size-4 shrink-0 text-muted-foreground transition-transform duration-150 ease-out motion-reduce:transition-none',
-              open && 'rotate-180',
-            )}
-          />
-        </CollapsibleTrigger>
-        <CollapsibleContent className="border-t border-[var(--interactive-border)] px-4 py-4">
-          <SettingsControlGroup
-            title={t('settings.gitlab.instances.title')}
-            contentClassName="space-y-3"
-            settingsItem="git.gitlab-connect"
-          >
-            {visibleIdentities.map((item) => (
-              <GitLabInstanceItem
-                key={`${getRuntimeKey()}:${item.instance}`}
-                identity={item}
-                sourceControl={sourceControl}
-                onSaved={pendingIdentity?.instance === item.instance ? clearPendingIdentity : undefined}
-              />
-            ))}
 
             {isAddingInstance ? (
-              <div className={cn(INSTANCE_BLOCK_CLASS, INSTANCE_ROW_CLASS)}>
+              <div>
                 <SettingsFieldRow
                   label={t('settings.gitlab.instance.customLabel')}
                   info={t('settings.gitlab.instance.customInfo')}
@@ -544,9 +516,7 @@ export const GitLabSettings: React.FC = () => {
                 {t('settings.gitlab.actions.addInstance')}
               </Button>
             )}
-          </SettingsControlGroup>
-        </CollapsibleContent>
-      </div>
-    </Collapsible>
+          </div>
+    </IntegrationCatalogCard>
   );
 };

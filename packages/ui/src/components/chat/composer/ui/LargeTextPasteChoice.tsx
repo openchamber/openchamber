@@ -79,8 +79,7 @@ export const LargeTextPasteChoice: React.FC<LargeTextPasteChoiceProps> = ({ take
             className={cn(
                 'absolute bottom-full inset-s-3 z-50 mb-2',
                 'flex items-center whitespace-nowrap',
-                'oc-glass-popover rounded-full border border-[var(--interactive-border)]',
-                'shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)]',
+                'oc-glass-popover oc-glass-floating rounded-full',
                 'p-1',
             )}
         >

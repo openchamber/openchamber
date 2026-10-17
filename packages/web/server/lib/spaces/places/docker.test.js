@@ -180,6 +180,14 @@ describe('docker place: check', () => {
     expect(result.message).toMatch(/Start Docker Desktop or Colima/);
   });
 
+  it('tells a socket that refuses this user from a daemon that is down', async () => {
+    const stdout = JSON.stringify({ Client: { Version: '29.3.0' }, Server: null });
+    const stderr = 'permission denied while trying to connect to the Docker daemon socket at unix:///var/run/docker.sock: Get "http://%2Fvar%2Frun%2Fdocker.sock/v1.47/version": dial unix /var/run/docker.sock: connect: permission denied';
+    const result = await placeWith(async () => ({ code: 1, stdout, stderr })).check();
+    expect(result).toMatchObject({ available: false, code: 'docker_permission_denied' });
+    expect(result.message).toMatch(/docker group/);
+  });
+
   it('says the daemon is unreachable on a timeout', async () => {
     const place = placeWith(async () => { throw new SpaceError('command_timeout', 'too slow'); });
     expect((await place.check()).code).toBe('docker_daemon_unreachable');
@@ -350,6 +358,16 @@ describe('docker place: create', () => {
         if (args[index - 1] === '--ipc' || args[index - 1] === '--cgroupns') expect(arg).toBe('private');
       });
     }
+  });
+
+  it('names the slow parts it does as they begin, and none it skips', async () => {
+    const fresh = [];
+    await makePlace(createFakeDocker({ imagePresent: false })).create(SPEC, { onStep: (step) => fresh.push(step) });
+    expect(fresh).toEqual(['downloading_image', 'preparing_tools', 'creating']);
+
+    const ready = [];
+    await makePlace(createFakeDocker({ resources: [toolsResource()] })).create(SPEC, { onStep: (step) => ready.push(step) });
+    expect(ready).toEqual([]);
   });
 
   it('pulls the image, fills the tools, then makes the space, starts it, and waits for its server', async () => {

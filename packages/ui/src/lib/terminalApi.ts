@@ -6,7 +6,7 @@ import { runtimeFetch, type RuntimeFetchOptions } from './runtime-fetch';
 import { getRuntimeUrlResolver } from './runtime-url';
 import { clearRuntimeUrlAuthToken, refreshRuntimeUrlAuthToken } from './runtime-auth';
 import { isTerminalShell } from './terminalShell';
-import { spaceApiPath, spaceIdOfDirectory } from './spaces/space-route';
+import { spaceIdOfDirectory, spaceRootDirectory } from './spaces/space-route';
 import { z } from 'zod';
 
 type ClientMessage =
@@ -276,7 +276,7 @@ export class TerminalTransport {
   private generation = 0;
   private disposed = false;
 
-  constructor(private readonly dependencies: TerminalTransportDependencies = hostTransportDependencies()) {}
+  constructor(private readonly dependencies: TerminalTransportDependencies = hostTransportDependencies(null)) {}
 
   subscribe(sessionId: string, handlers: TerminalHandlers): () => void {
     this.cancelIdleClose();
@@ -558,26 +558,31 @@ export class TerminalTransport {
 }
 
 /**
- * One socket per target: the host, or one isolated space, whose terminals live behind
- * `/api/spaces/<id>/terminal/ws`. The target is the terminal's working directory, so every
- * call names it; a call without one is the host's.
+ * One socket per target: the host, or one isolated space, whose socket names the space's root
+ * as its `directory`, which the server sends into that space. The target is the terminal's
+ * working directory, so every call names it; a call without one is the host's.
  */
 const HOST_TARGET = '';
 const transports = new Map<string, TerminalTransport>();
 
-function hostTransportDependencies(directory?: string | null): TerminalTransportDependencies {
+const terminalSocketPath = (spaceId: string | null): string => (
+  spaceId === null ? '/api/terminal/ws' : `/api/terminal/ws?directory=${encodeURIComponent(spaceRootDirectory(spaceId))}`
+);
+
+function hostTransportDependencies(spaceId: string | null): TerminalTransportDependencies {
   return {
     refreshAuth: refreshRuntimeUrlAuthToken,
-    openSocket: () => openRuntimeWebSocket(getRuntimeUrlResolver().websocket(spaceApiPath('/api/terminal/ws', directory))),
+    openSocket: () => openRuntimeWebSocket(getRuntimeUrlResolver().websocket(terminalSocketPath(spaceId))),
     clearUrlAuthToken: clearRuntimeUrlAuthToken,
   };
 }
 
 function transportFor(directory?: string | null): TerminalTransport {
-  const target = spaceIdOfDirectory(directory) ?? HOST_TARGET;
+  const spaceId = spaceIdOfDirectory(directory);
+  const target = spaceId ?? HOST_TARGET;
   const existing = transports.get(target);
   if (existing) return existing;
-  const created = new TerminalTransport(hostTransportDependencies(directory));
+  const created = new TerminalTransport(hostTransportDependencies(spaceId));
   transports.set(target, created);
   return created;
 }

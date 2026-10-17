@@ -9,6 +9,7 @@ const makeKeyStore = (initial = {}) => {
   const slots = { ...initial };
   return {
     getOrCreate: async (slot, generate) => (slots[slot] ??= await generate()),
+    generation: () => 0,
     peek: () => slots,
   };
 };

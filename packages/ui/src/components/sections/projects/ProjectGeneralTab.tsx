@@ -173,10 +173,10 @@ const TeamFileSection: React.FC<{ projectRef: ProjectRef; setupState: ProjectSet
           {setup.trust.hash !== null ? (
             <div
               className={cn(
-                'flex max-w-[40rem] items-center gap-3 rounded-lg border p-3',
+                'flex max-w-[40rem] items-center gap-3 rounded-lg p-3',
                 setup.trust.trusted
-                  ? 'border-[var(--interactive-border)]'
-                  : 'border-[var(--status-warning)]/30 bg-[var(--status-warning)]/5',
+                  ? 'oc-tile'
+                  : 'bg-[var(--status-warning)]/10',
               )}
             >
               <Icon

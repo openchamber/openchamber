@@ -15,6 +15,8 @@ import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Icon } from "@/components/icon/Icon";
 import type { IconName } from '@/components/icon/icons';
 import { useI18n } from '@/lib/i18n';
+import { useWaitingBlink } from '@/hooks/useDurationTicker';
+import { cn } from '@/lib/utils';
 
 interface DebugPanelProps {
   onClose?: () => void;
@@ -51,6 +53,11 @@ const formatDuration = (durationMs: number): string => {
 // Fixed-width seconds format ("XX.XX s") for the percentile series so the
 // legend/labels don't jitter as values change. Pair with `tabular-nums`.
 const formatSeconds = (durationMs: number): string => `${(durationMs / 1000).toFixed(2)} s`;
+
+const StreamingIcon: React.FC = () => {
+  const blink = useWaitingBlink(true);
+  return <Icon name="pulse" className={cn('h-3 w-3 text-[var(--status-info)]', blink)} />;
+};
 
 const MetricCard: React.FC<{ label: string; value: React.ReactNode }> = ({ label, value }) => {
   return (
@@ -427,7 +434,7 @@ const DebugPanel: React.FC<DebugPanelProps> = ({ onClose }) => {
                 >
                   <div className="flex min-w-0 flex-1 items-center gap-2">
                     <span className="truncate text-[var(--surface-foreground)]">{stat.title}</span>
-                    {stat.isStreaming ? <Icon name="pulse" className="h-3 w-3 animate-pulse text-[var(--status-info)]" /> : null}
+                    {stat.isStreaming ? <StreamingIcon /> : null}
                     {stat.isZombie ? <span className="text-[var(--status-warning)]">!</span> : null}
                   </div>
                   <div className="flex items-center gap-2">

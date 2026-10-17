@@ -20,6 +20,17 @@ export type BtwPanelState = {
 };
 
 /**
+ * Whether the BTW panel takes the composer's floating dock. A collapsed panel
+ * hands the composer back to the parent session, so the parent's pending
+ * permission or question outranks its strip: otherwise the parent's turn
+ * waits on a request nobody can see.
+ */
+export const btwHoldsDock = (panel: BtwPanelState, parentHasRequest: boolean): boolean => {
+  const shown = Boolean((panel.btwSessionId && panel.btwDirectory) || panel.creating || panel.pending);
+  return shown && !(panel.collapsed && parentHasRequest);
+};
+
+/**
  * One value read from one live session, recomputed when the directory's
  * session list changes but published only when the value itself changes.
  *

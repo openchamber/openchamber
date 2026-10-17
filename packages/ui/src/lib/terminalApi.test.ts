@@ -583,7 +583,7 @@ describe('one terminal socket per target', () => {
     const stopSpaceAgain = connectTerminalStream('t-space-2', () => undefined, onError, `/spaces/${SPACE}/app/src`);
     await new Promise((resolve) => setTimeout(resolve, 0));
     // The dial fails in this test, which is fine: the path is what is under test.
-    expect(socketPaths).toEqual(['/api/terminal/ws', `/api/spaces/${SPACE}/terminal/ws`]);
+    expect(socketPaths).toEqual(['/api/terminal/ws', `/api/terminal/ws?directory=${encodeURIComponent(`/spaces/${SPACE}`)}`]);
     stopHost();
     stopSpace();
     stopSpaceAgain();

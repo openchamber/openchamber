@@ -168,9 +168,6 @@
     "agentToolsCodeMode": {
       "scope": "instance"
     },
-    "agentWorktreeMoveWithoutAsking": {
-      "scope": "instance"
-    },
     "agentMemoryToolEnabled": {
       "scope": "instance"
     },

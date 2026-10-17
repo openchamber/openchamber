@@ -7,6 +7,30 @@ description: OpenChamber’ın birlikte çalıştığı hizmetleri ve abonelikle
 
 **Settings → Integrations**, OpenChamber’ın birlikte çalıştığı servislere giriş yaptığınız yerdir. Giriş OpenChamber sunucusunda saklanır; böylece web, masaüstü ve eşleştirilmiş telefon aynı girişi paylaşır.
 
+## Entegrasyon kataloğu
+
+Entegrasyon kataloğu, ajana tek tıkla verebileceğiniz 150'den fazla servisi listeler: Linear, Notion, Sentry, Supabase, Figma, gözlemlenebilirlik araçları, CRM'ler, toplantı notları ve daha fazlası. Bir servisi kurmak genellikle o servisin MCP sunucusunu ekler, yani ajanın orada bir şeyleri okumak ve değiştirmek için kullandığı bağlantıyı. Bazen yanında gelen skill'ler ya da bir eklenti de eklenir. Kurulum kullanıcı düzeyinde yapılır, bu yüzden her projede kullanılabilir.
+
+1. Kenar çubuğu başlığındaki mağaza simgesini seçin.
+2. Bir servis bulun: adıyla arayın ya da listeyi **Kod** veya **Kalite ve operasyon** gibi bir kategoriyle daraltın. **OpenChamber** kendi uzantılarımızı ve eklentilerimizi listeler.
+3. Satırındaki **+** düğmesini seçin ya da servisi açıp **Kur** seçin.
+4. Servisin istediği şekilde giriş yapın:
+   - **OAuth**: servisin giriş sayfası tarayıcınızda açılır. Erişimi orada onaylayın.
+   - **Token**: bir API token'ını **API token** alanına yapıştırın. **Token alın**, servisin token verdiği sayfayı açar.
+   - **Oturumsuz**: yapmanız gereken bir şey yok.
+
+İşlem bittiğinde servis bir onay işareti gösterir ve soldaki **Kurulu** altında görünür. Araçları bir sonraki mesajınızda kullanılabilir. Sarı bir nokta ya da **Oturum açma gerekli**, girişin tamamlanmadığı anlamına gelir. Servisi açın ve yeniden giriş yapın.
+
+Bazı girdiler girişten fazlasını ister:
+
+- **Yerel sunucular**, OpenCode'un çalıştığı makinede çalışır ve Node.js, uv ile Python ya da Docker gerektirebilir. İlk başlatma biraz sürebilir.
+- **Eklentiler** OpenCode içinde çalışan kodlardır. Bu yüzden katalog önce onay ister ve eklentinin lisansını gösterir.
+- Bir servisle gelen **skill'ler** onunla birlikte kurulur. Biri eksikse servisin sayfasında kendi **Kur** düğmesi görünür.
+
+Bir servisi kaldırmak için onu açın, **Diğer işlemler** (**⋯**) ve ardından **Kaldır** seçin. Bu yalnızca kataloğun eklediklerini kaldırır. Servisteki hesabınız olduğu gibi kalır. MCP sunucularını, eklentileri ve skill'leri her zamanki gibi Settings'ten de yönetebilirsiniz.
+
+Katalog web uygulamasında ve masaüstü uygulamasında bulunur. [Kurumsal modda](/tr/security/#kurumsal-mod) gizlidir.
+
 ## GitHub
 
 **GitHub** kartını genişletin ve kısa bir cihaz koduyla giriş yapmak için **Connect GitHub** seçin. Bağlandıktan sonra OpenChamber issue’lardan ve pull request’lerden oturum başlatabilir, onları mesajlara ekleyebilir ve PR açıp güncelleyebilir. GitHub’ın yapabildiği her şey [GitHub Issues & PRs](/tr/github/) sayfasında.
@@ -78,6 +102,18 @@ Excalidraw, `.excalidraw` dosyalarında ve Obsidian `.excalidraw.md` çizimlerin
 2. Çizimi yeniden açın. Tuval dosyanın metninin yerini alır; Cmd/Ctrl+S, otomatik kaydetme, kaynak görünümü geçişi ve tam ekran her dosyada olduğu gibi çalışır.
 
 Kart, yeni bir sürüm çıktığında uzantıyı günceller, duraklattıysanız yeniden açar ve kaldırır. Kaldırdığınızda çizimleriniz olduğu gibi kalır; yalnızca metin olarak açılır. Yalnızca web ve masaüstü.
+
+## Resource Monitor
+
+Resource Monitor, bilgisayarınızın ne kadar CPU ve bellek kullandığını ve bunun ne kadarının OpenChamber'a, OpenCode'a, onların başlattığı her şeye ve altlarında çalışan geliştirme sunucularına gittiğini gösterir. Bir OpenChamber uzantısıdır ve aynı sayfada **OpenChamber extensions** altında listelenir.
+
+1. **Settings → Integrations** sayfasını açın ve Resource Monitor kartında **Install** seçeneğini seçin.
+2. Yerel hizmetini **Settings → Extensions** içinde onaylayın. Sayılar, OpenChamber'ın panelin yanında başlattığı küçük bir süreçten gelir. Bu süreç yalnızca panel veya **Resources** bölümü ekrandayken ölçer.
+3. Sağdaki çubuktan **Resource Monitor**'ı açın. Work Status panelinde **Resources** altında kısa bir özet de görünür.
+
+Bir geliştirme sunucusunda veya işte Stop, o komutu başlattığı her şeyle birlikte sonlandırır; böylece bir watcher sunucuyu yeniden başlatamaz. Terminal grubundaki **Stop all**, terminalde ve project actions içinde çalışan her şeyi sonlandırır ve terminal sekmelerini açık bırakır. OpenChamber'ın kendisinde ve OpenCode sunucusunda Stop yoktur.
+
+Geliştirme sunucuları OpenChamber altında çalıştıklarında görünür: yerleşik terminalde başlatılanlar ya da OpenCode'u OpenChamber'ın kendisi başlattıysa bir ajanın başlattıkları. Üst sürecinden ayrılan bir sunucu veya `docker compose up -d` ile başlatılan bir kapsayıcı listede yer almaz. Uzak bir OpenChamber'a bağlıysanız monitör o makineyi gösterir. Yalnızca web ve masaüstü.
 
 ## İlgili
 

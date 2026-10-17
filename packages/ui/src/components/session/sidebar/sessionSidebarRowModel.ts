@@ -1,7 +1,7 @@
 import type { Session } from '@/lib/opencode/model';
 import type { SessionFolder, SessionFoldersMap } from '@/stores/useSessionFoldersStore';
 import { compareSessionsByLifecycleOrder, EMPTY_SESSION_ORDER_RANKS } from '@/sync/session-ordering';
-import { isSessionPinned } from '@/stores/useSessionPinnedStore';
+import { isSessionPinned } from '@/lib/sessionPins';
 import type { GroupSearchData, SessionGroup, SessionNode } from './types';
 import type { ProjectSection } from './projects/sessionProjectRender';
 import { buildGroupRenderDescriptors } from './projects/sessionProjectRender';
@@ -768,10 +768,12 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
 
   if (timelineMode) {
     // One header per project, in the user's manual order, over its root
-    // sessions from every worktree in lifecycle order.
+    // sessions from every worktree in lifecycle order. A session the Pinned
+    // zone lists is left out of its project here; In work keeps it in both.
+    const pinnedZoneIds = new Set((args.pinnedItems ?? []).map((item) => item.node.session.id));
     const itemsByProject = new Map<string, SessionSidebarActivityItem[]>();
     for (const item of args.timelineItems ?? []) {
-      if (!item.projectId || isMovedToZone(item.node.session.id)) continue;
+      if (!item.projectId || isMovedToZone(item.node.session.id) || pinnedZoneIds.has(item.node.session.id)) continue;
       const list = itemsByProject.get(item.projectId);
       if (list) list.push(item);
       else itemsByProject.set(item.projectId, [item]);

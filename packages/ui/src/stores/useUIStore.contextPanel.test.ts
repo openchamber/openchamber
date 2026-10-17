@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
+import { z } from 'zod';
 import { CONTEXT_SURFACES, sortContextSurfaces } from '../lib/surfaces/registry';
 import {
   forgetBrowserTabOpenedWithAddress,
@@ -79,6 +80,78 @@ describe('useUIStore preview file tabs', () => {
       ['/repo/b.ts', false],
       ['/repo/c.ts', true],
     ]);
+  });
+});
+
+describe('useUIStore Tracker tabs', () => {
+  const trackerTabs = () => getContextPanelTabs('/repo').filter((tab) => tab.mode === 'pr');
+  const pull = { url: 'https://github.com/acme/app/pull/42', key: 'github.com/acme/app#42', label: '#42', targetDirectory: null };
+
+  test('an item opens beside the branch tab, once per item', () => {
+    const store = useUIStore.getState();
+    store.openTrackerItem('/repo', pull);
+    store.openTrackerItem('/repo', { ...pull, url: 'https://github.com/acme/app/pull/42/files' });
+
+    expect(trackerTabs().map((tab) => [tab.targetPath, tab.label])).toEqual([
+      [null, null],
+      ['https://github.com/acme/app/pull/42/files', '#42'],
+    ]);
+    expect(useUIStore.getState().contextPanelByDirectory['/repo'].activeTabId).toBe(trackerTabs()[1].id);
+  });
+
+  test('the branch tab never closes, and closing every item leaves it', () => {
+    const store = useUIStore.getState();
+    store.openTrackerItem('/repo', pull);
+    store.openTrackerItem('/repo', { ...pull, url: 'https://github.com/acme/app/issues/7', key: 'github.com/acme/app#7', label: '#7' });
+
+    store.closeContextPanelTabs('/repo', trackerTabs().map((tab) => tab.id));
+
+    expect(trackerTabs().map((tab) => tab.targetPath)).toEqual([null]);
+  });
+
+  test('an item keeps the project it is read through, unless it is the panel own', () => {
+    const store = useUIStore.getState();
+    store.openTrackerItem('/repo', { ...pull, targetDirectory: '/other/' });
+    store.openTrackerItem('/repo', { ...pull, url: 'https://github.com/acme/app/issues/7', key: 'github.com/acme/app#7', label: '#7', targetDirectory: '/repo' });
+
+    expect(trackerTabs().map((tab) => tab.targetDirectory)).toEqual([null, '/other', null]);
+  });
+
+  test("another project's Changes are saved as the panel's own, items keep their project", () => {
+    const saved: string[] = [];
+    useUIStore.persist.setOptions({ storage: {
+      getItem: () => null,
+      setItem: (_name, value) => { saved.push(JSON.stringify(value)); },
+      removeItem: () => undefined,
+    } });
+    try {
+      const store = useUIStore.getState();
+      store.openTrackerItem('/repo', { ...pull, targetDirectory: '/other' });
+      store.openContextPanelTab('/repo', { mode: 'diff', diffScope: 'pr', targetDirectory: '/other' });
+
+      const persisted = z.object({ state: z.object({ contextPanelByDirectory: z.record(z.string(), z.object({
+        tabs: z.array(z.object({ mode: z.string(), targetDirectory: z.string().nullable() })),
+      })) }) }).parse(JSON.parse(saved[saved.length - 1] ?? 'null'));
+      const tabs = persisted.state.contextPanelByDirectory['/repo']?.tabs ?? [];
+      expect(tabs.find((tab) => tab.mode === 'diff')?.targetDirectory).toBeNull();
+      expect(tabs.filter((tab) => tab.mode === 'pr').map((tab) => tab.targetDirectory)).toEqual([null, '/other']);
+      expect(getContextPanelTabs('/repo').find((tab) => tab.mode === 'diff')?.targetDirectory).toBe('/other');
+    } finally {
+      useUIStore.persist.setOptions(originalPersistOptions);
+    }
+  });
+
+  test("another project's Changes give way to this project's from the rail", () => {
+    const store = useUIStore.getState();
+    store.openContextPanelTab('/repo', { mode: 'diff', diffScope: 'pr', targetDirectory: '/other' });
+    expect(getContextPanelTabs('/repo').find((tab) => tab.mode === 'diff')?.targetDirectory).toBe('/other');
+
+    store.openContextPanelTab('/repo', { mode: 'git' });
+    store.openContextSurface('/repo', 'diff');
+
+    const diffTab = getContextPanelTabs('/repo').find((tab) => tab.mode === 'diff');
+    expect(diffTab?.targetDirectory).toBeNull();
+    expect(useUIStore.getState().contextPanelByDirectory['/repo'].activeTabId).toBe(diffTab?.id ?? '');
   });
 });
 
@@ -286,14 +359,14 @@ describe('useUIStore context panel tabs', () => {
     expect(chatTab?.targetDirectory).toBe('/other-project');
     expect(useUIStore.getState().contextPanelByDirectory['/other-project']).toBe(undefined);
 
-    // A chat tab opened without a directory carries none, and a mode that is
-    // neither terminal nor chat never does.
+    // A chat tab opened without a directory carries none, and a mode that
+    // always works in the panel's own directory never does.
     useUIStore.getState().openContextPanelTab('/repo', { mode: 'chat', dedupeKey: 'session:ses_2' });
-    useUIStore.getState().openContextPanelTab('/repo', { mode: 'diff', targetDirectory: '/other-project' });
+    useUIStore.getState().openContextPanelTab('/repo', { mode: 'git', targetDirectory: '/other-project' });
 
     const tabs = getContextPanelTabs('/repo');
     expect(tabs.find((tab) => tab.dedupeKey === 'session:ses_2')?.targetDirectory).toBe(null);
-    expect(tabs.find((tab) => tab.mode === 'diff')?.targetDirectory).toBe(null);
+    expect(tabs.find((tab) => tab.mode === 'git')?.targetDirectory).toBe(null);
   });
 
   test('persisted chat tabs keep a normalized session directory through rehydration', async () => {
@@ -320,7 +393,7 @@ describe('useUIStore context panel tabs', () => {
               tabs: [
                 { ...persistedTab, id: 'chat:session:ses_1', mode: 'chat', dedupeKey: 'session:ses_1', targetDirectory: '/other-project/' },
                 { ...persistedTab, id: 'chat:session:ses_2', mode: 'chat', dedupeKey: 'session:ses_2', targetDirectory: 42 },
-                { ...persistedTab, id: 'diff', mode: 'diff', dedupeKey: 'diff', diffScope: 'working', targetDirectory: '/other-project' },
+                { ...persistedTab, id: 'git', mode: 'git', dedupeKey: 'git', targetDirectory: '/other-project' },
               ],
             },
           },
@@ -337,7 +410,7 @@ describe('useUIStore context panel tabs', () => {
       const tabs = getContextPanelTabs('/repo');
       expect(tabs.find((tab) => tab.dedupeKey === 'session:ses_1')?.targetDirectory).toBe('/other-project');
       expect(tabs.find((tab) => tab.dedupeKey === 'session:ses_2')?.targetDirectory).toBe(null);
-      expect(tabs.find((tab) => tab.mode === 'diff')?.targetDirectory).toBe(null);
+      expect(tabs.find((tab) => tab.mode === 'git')?.targetDirectory).toBe(null);
     } finally {
       useUIStore.persist.setOptions(originalPersistOptions);
     }
@@ -428,14 +501,14 @@ describe('useUIStore context panel tabs', () => {
     expect(terminalTab?.targetDirectory).toBe('/repo/nested');
   });
 
-  test('ignores targetDirectory on non-terminal descriptors and sanitized tabs', () => {
+  test('ignores targetDirectory on modes that work in the panel directory, sanitized tabs too', () => {
     useUIStore.getState().openContextPanelTab('/repo-worktree', {
-      mode: 'diff',
+      mode: 'git',
       targetDirectory: '/repo',
     });
 
-    const diffTab = getContextPanelTabs('/repo-worktree').find((tab) => tab.mode === 'diff');
-    expect(diffTab?.targetDirectory).toBe(null);
+    const gitTab = getContextPanelTabs('/repo-worktree').find((tab) => tab.mode === 'git');
+    expect(gitTab?.targetDirectory).toBe(null);
 
     // SAFETY: the object mirrors the persisted context-panel shape exactly;
     // setState bypasses the persist middleware's typing, not its migration.
@@ -446,19 +519,19 @@ describe('useUIStore context panel tabs', () => {
           expanded: false,
           widthByMode: {},
           touchedAt: 1,
-          activeTabId: 'diff',
+          activeTabId: 'git',
           tabs: [
             {
-              id: 'diff',
-              mode: 'diff',
-              targetPath: '/repo/file.ts',
+              id: 'git',
+              mode: 'git',
+              targetPath: null,
               targetDirectory: '/stale',
-              dedupeKey: 'diff',
+              dedupeKey: 'git',
               label: null,
               sessionTitleFallback: null,
               readOnly: false,
               stagedDiff: false,
-              diffScope: 'working',
+              diffScope: null,
               touchedAt: 1,
             },
           ],
@@ -468,8 +541,8 @@ describe('useUIStore context panel tabs', () => {
 
     useUIStore.getState().openContextPanelTab('/repo-worktree', { mode: 'terminal' });
 
-    const sanitizedDiffTab = getContextPanelTabs('/repo-worktree').find((tab) => tab.mode === 'diff');
-    expect(sanitizedDiffTab?.targetDirectory).toBe(null);
+    const sanitizedGitTab = getContextPanelTabs('/repo-worktree').find((tab) => tab.mode === 'git');
+    expect(sanitizedGitTab?.targetDirectory).toBe(null);
   });
 });
 

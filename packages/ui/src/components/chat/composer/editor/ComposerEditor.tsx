@@ -44,6 +44,7 @@ import { composerEditorTheme, composerSelectionExtension } from './theme';
 import { handleComposerHostMouseDown } from './hostMouseDown';
 import { getComposerHeightLimit, isComposerContentCapped } from './heightLimit';
 import { restoreDeferredEnterModifiers } from '../keyboardPolicy';
+import { timerCaretBlink } from '@/lib/codemirror/caretBlink';
 
 export interface ComposerSelection {
     start: number;
@@ -271,6 +272,9 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
                         // makes CodeMirror enforce cursor association on the
                         // native selection, which iOS answers with severe lag.
                         drawSelection(),
+                        // Blinks the drawn caret from a timer; CodeMirror's
+                        // CSS blink keeps the compositor busy every frame.
+                        timerCaretBlink(),
                         composerSelectionExtension(),
                         EditorView.lineWrapping,
                         // Highest precedence: the composer's own keys must win

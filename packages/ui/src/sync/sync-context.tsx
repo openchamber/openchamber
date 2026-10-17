@@ -74,6 +74,7 @@ import { policySnapshotFromWire } from "@/stores/utils/permissionAutoAccept"
 import { selectSafetyNetAvailable, useRoutingStore } from "@/stores/useRoutingStore"
 import { useMessageQueueStore } from "@/stores/messageQueueStore"
 import { subscribeMessageQueueSync } from "./message-queue-sync"
+import { subscribeSpacePermissionModes } from "./permission-mode-sync"
 import {
   processVSCodePermissionAutoAccept,
   processVSCodeReconciledPermissionAutoAccept,
@@ -96,7 +97,7 @@ import {
   setSessionParentResolver,
   useGlobalSessionStatusStore,
 } from "./global-session-status"
-import { applyGlobalBlockingRequestEvents } from "./global-blocking-requests"
+import { applyGlobalBlockingRequestEvents, applyWaitingPageEvent, useGlobalBlockingRequestsStore } from "./global-blocking-requests"
 import { applyBackgroundShellEvents, directoriesWithRunningShells, refreshBackgroundShells } from "./background-shells"
 import {
   CHAT_LOCATION_RELEASE_DELAY_MS,
@@ -741,6 +742,16 @@ function getActiveSessionCandidateIds(directory: string, state: DirectoryStore):
     directory,
     viewedSession: getViewedSessionMaterializationTarget(directory),
   })
+}
+
+// Sessions with live work of their own: non-idle status or unresolved turns and
+// tools. The viewed session joins only when it is one of them. Polling an idle
+// viewed session every 5 s bought nothing the event stream does not deliver,
+// and over the private relay that cadence kept the relay awake for as long as a
+// session stayed open on any device. The stale-stream check still covers the
+// viewed session.
+function getLiveSessionCandidateIds(state: DirectoryStore): string[] {
+  return getReconnectCandidateSessionIds(state)
 }
 
 type DirectorySessionStatusSnapshot = NonNullable<
@@ -1730,34 +1741,40 @@ const isAnsweredWithoutUser = (sessionID: string): boolean => {
 // (`openchamber.permission-left-for-user`: the safety net held it, Jev failed,
 // or the reply did not go through), and dropped when it is answered.
 const MAX_EARLY_LEFT_FOR_USER = 100
+// Keyed by session and request, so a report names the request of its own session only.
 const permissionsAwaitingAutoAnswer = new Map<string, () => void>()
 // Reports that arrived before their request: the request is shown at once.
 const leftForUserBeforeAsked = new Set<string>()
+const autoAnswerKey = (sessionID: string, permissionID: string) => `${sessionID}\n${permissionID}`
 
 /** Whether a fresh `permission.asked` will be held back until the server rules on it. */
 const isHeldUntilAutoAnswered = (permission: PermissionRequest): boolean =>
-  !leftForUserBeforeAsked.has(permission.id) && !isVSCodeRuntime() && isAnsweredWithoutUser(permission.sessionID)
+  !leftForUserBeforeAsked.has(autoAnswerKey(permission.sessionID, permission.id)) && !isVSCodeRuntime() && isAnsweredWithoutUser(permission.sessionID)
 
 /** Hold `permission.asked` back until the server rules on it, when it may answer it. */
 const holdBackUntilAutoAnswered = (permission: PermissionRequest, replayAsAsk: () => void): boolean => {
-  if (leftForUserBeforeAsked.delete(permission.id)) return false
+  const key = autoAnswerKey(permission.sessionID, permission.id)
+  if (leftForUserBeforeAsked.delete(key)) return false
   if (!isHeldUntilAutoAnswered(permission)) return false
-  permissionsAwaitingAutoAnswer.set(permission.id, replayAsAsk)
+  permissionsAwaitingAutoAnswer.set(key, replayAsAsk)
   return true
 }
 
 const showPermissionLeftForUser = (
-  { permissionId, sessionId, directory }: Extract<SyncEvent, { type: "openchamber.permission-left-for-user" }>["properties"],
+  { permissionId, sessionId, directory, spaceId }: Extract<SyncEvent, { type: "openchamber.permission-left-for-user" }>["properties"],
 ): void => {
-  const replayAsAsk = permissionsAwaitingAutoAnswer.get(permissionId)
+  // A report the host forwarded from a space speaks only for a session of that space.
+  if (spaceId && spaceIdOfDirectory(useSessionUIStore.getState().getDirectoryForSession(sessionId)) !== spaceId) return
+  const key = autoAnswerKey(sessionId, permissionId)
+  const replayAsAsk = permissionsAwaitingAutoAnswer.get(key)
   if (replayAsAsk) {
-    permissionsAwaitingAutoAnswer.delete(permissionId)
+    permissionsAwaitingAutoAnswer.delete(key)
     replayAsAsk()
     return
   }
   // Already on screen: shown as an `ask` request, or loaded by a resync.
   if (directory && getDirectoryState(directory)?.permission[sessionId]?.some((entry) => entry.id === permissionId)) return
-  leftForUserBeforeAsked.add(permissionId)
+  leftForUserBeforeAsked.add(key)
   const oldest = leftForUserBeforeAsked.values().next()
   if (leftForUserBeforeAsked.size > MAX_EARLY_LEFT_FOR_USER && !oldest.done) leftForUserBeforeAsked.delete(oldest.value)
 }
@@ -1776,9 +1793,9 @@ const permissionReplayAsAsk = (
   handleEvent(rawDirectory, payload, childStores, routingIndex, expectedRuntimeKey, true, streamingDirectory, undefined, false)
 }
 
-const forgetAutoAnswerWait = (permissionID: string): void => {
-  permissionsAwaitingAutoAnswer.delete(permissionID)
-  leftForUserBeforeAsked.delete(permissionID)
+const forgetAutoAnswerWait = (sessionID: string, permissionID: string): void => {
+  permissionsAwaitingAutoAnswer.delete(autoAnswerKey(sessionID, permissionID))
+  leftForUserBeforeAsked.delete(autoAnswerKey(sessionID, permissionID))
 }
 
 const notifyFormCreated = (form: FormRequest, directory: string): void => {
@@ -1790,6 +1807,26 @@ const notifyFormCreated = (form: FormRequest, directory: string): void => {
     id: `form-${toastKey}`,
     description: FORM_TOAST_DESCRIPTION,
     action: formToastAction(sessionID, directory, form.id),
+  })
+}
+
+/**
+ * The in-app toast a form gets, for a page an agent showed that waits for the
+ * user's answer: shown while the user looks at another session, dismissed
+ * once the page stops waiting. The native notification comes from the server.
+ */
+const notifyWaitingPage = (event: Extract<SyncEvent, { type: "openchamber.page-waiting" | "openchamber.page-settled" }>): void => {
+  if (event.type === "openchamber.page-settled") {
+    toast.dismiss(`page-${event.properties.sessionID}:${event.properties.pageID}`)
+    return
+  }
+  const { sessionID, page } = event.properties
+  const directory = event.properties.directory ?? resolveCachedSessionDirectory(sessionID)
+  if (!directory || isViewedInCurrentSession(directory, sessionID)) return
+  toast.info(page.title, {
+    id: `page-${sessionID}:${page.id}`,
+    description: FORM_TOAST_DESCRIPTION,
+    action: { label: "Open session", onClick: () => openSessionFromToast(sessionID, directory) },
   })
 }
 
@@ -1858,8 +1895,17 @@ export function handleEvent(
     return
   }
 
+  // A page that waits for the user's answer lives only in the cross-directory
+  // index: no directory store holds it, since OpenCode never hears of the wait.
+  if (payload.type === "openchamber.page-waiting" || payload.type === "openchamber.page-settled") {
+    if (expectedRuntimeKey !== getRuntimeKey()) return
+    applyWaitingPageEvent(payload, resolveCachedSessionDirectory)
+    notifyWaitingPage(payload)
+    return
+  }
+
   if (payload.type === "openchamber.permission-auto-accept") {
-    usePermissionStore.getState().applySnapshot(policySnapshotFromWire(payload.properties), expectedRuntimeKey)
+    usePermissionStore.getState().applySnapshot(policySnapshotFromWire(payload.properties), expectedRuntimeKey, payload.properties.spaceId ?? "")
     return
   }
 
@@ -2024,7 +2070,7 @@ export function handleEvent(
   }
 
   if (payload.type === "permission.replied" && payload.properties.requestID) {
-    forgetAutoAnswerWait(payload.properties.requestID)
+    forgetAutoAnswerWait(payload.properties.sessionID, payload.properties.requestID)
   }
 
   if (!store) {
@@ -2909,6 +2955,7 @@ export function SyncProvider(props: {
   // Abort controller owned by the pipeline closure. Cleanup aborts + flushes.
   useEffect(() => {
     const unsubscribeQueueEvents = subscribeMessageQueueSync(runtimeKey)
+    const unsubscribeSpaceModes = subscribeSpacePermissionModes(runtimeKey)
     const resyncAfterStreamGap = (reason: SessionMaterializationReason) => {
       // Cached transcripts may have missed events too; each revalidates its
       // tail the next time it is opened. Mark first so the active sessions'
@@ -2986,6 +3033,10 @@ export function SyncProvider(props: {
         // The setup commands of a space moved on; what they do now is in the list.
         void refreshSpacesJourney().catch(() => undefined)
       },
+      onSpacePermissionStream: (spaceId) => {
+        if (runtimeKey !== getRuntimeKey()) return
+        void usePermissionStore.getState().refreshSpaceModes(spaceId)
+      },
       onReconnect: ({ replayReset }) => {
         // The first connection and every one after a gap: spaces being made or whose making failed
         // are known only to the journey list, and a step announced during the gap was missed.
@@ -3039,6 +3090,7 @@ export function SyncProvider(props: {
       }
       pipeline.cleanup()
       unsubscribeQueueEvents()
+      unsubscribeSpaceModes()
     }
   }, [props.sdk, childStores, messageLoader, routingIndex, messageStreamTransport, runtimeKey, triggerDirectoryResync])
 
@@ -3135,10 +3187,11 @@ export function SyncProvider(props: {
               continue
             }
 
+            const liveSessionIds = getLiveSessionCandidateIds(state)
             const lastStatusPollAt = lastStatusPollAtByDirectoryRef.current.get(directory) ?? 0
-            if (now - lastStatusPollAt >= ACTIVE_SESSION_STATUS_POLL_INTERVAL_MS) {
+            if (liveSessionIds.length > 0 && now - lastStatusPollAt >= ACTIVE_SESSION_STATUS_POLL_INTERVAL_MS) {
               lastStatusPollAtByDirectoryRef.current.set(directory, now)
-              void pollDirectoryStatuses(directory, store, candidateSessionIds).catch(() => undefined)
+              void pollDirectoryStatuses(directory, store, liveSessionIds).catch(() => undefined)
             }
 
             const lastFullResyncAt = lastFullResyncAtByDirectoryRef.current.get(directory) ?? 0
@@ -3150,9 +3203,9 @@ export function SyncProvider(props: {
             // Discover child sessions created by other OpenCode instances
             // that didn't broadcast a session.created event on this stream.
             const lastChildDiscoveryAt = lastChildDiscoveryAtByDirectoryRef.current.get(directory) ?? 0
-            if (now - lastChildDiscoveryAt >= CHILD_SESSION_DISCOVERY_INTERVAL_MS) {
+            if (liveSessionIds.length > 0 && now - lastChildDiscoveryAt >= CHILD_SESSION_DISCOVERY_INTERVAL_MS) {
               lastChildDiscoveryAtByDirectoryRef.current.set(directory, now)
-              void discoverChildSessions(directory, store, candidateSessionIds)
+              void discoverChildSessions(directory, store, liveSessionIds)
             }
           }
         })
@@ -3548,11 +3601,14 @@ export function useSessionBlockingRequests(
   const getSnapshot = React.useCallback(() => {
     let hasPermission = false
     let hasForm = false
+    // Pages that wait for the user's answer are only in the cross-directory
+    // index; they count as a form.
+    const indexed = useGlobalBlockingRequestsStore.getState().bySession
     for (const { sessionIDs, store } of scopedStores) {
       const { permission: permissions, form: forms } = store.getState()
       for (const sessionID of sessionIDs) {
         hasPermission ||= Boolean(permissions[sessionID]?.length)
-        hasForm ||= Boolean(forms[sessionID]?.length)
+        hasForm ||= Boolean(forms[sessionID]?.length) || Boolean(indexed.get(sessionID)?.pages.length)
       }
     }
     const previous = snapshotRef.current
@@ -3564,10 +3620,14 @@ export function useSessionBlockingRequests(
     return next
   }, [scopedStores])
   const subscribe = React.useCallback((notify: () => void) => {
-    const unsubscribers = scopedStores.flatMap(({ sessionIDs, store }) => [
-      subscribeDirectoryPermissions(store, sessionIDs, notify),
-      subscribeDirectoryForms(store, sessionIDs, notify),
-    ])
+    const unsubscribers = [
+      ...scopedStores.flatMap(({ sessionIDs, store }) => [
+        subscribeDirectoryPermissions(store, sessionIDs, notify),
+        subscribeDirectoryForms(store, sessionIDs, notify),
+      ]),
+      // Rare writes; getSnapshot keeps the same object when nothing changed.
+      useGlobalBlockingRequestsStore.subscribe(notify),
+    ]
     return () => {
       for (const unsubscribe of unsubscribers) unsubscribe()
     }

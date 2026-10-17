@@ -3,7 +3,7 @@ import type { FormField, FormValue } from '@opencode/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { toast } from '@/components/ui';
-import { Icon } from '@/components/icon/Icon';
+import { Spinner } from '@/components/ui/spinner';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { copyTextToClipboard } from '@/lib/clipboard';
@@ -37,6 +37,8 @@ interface ProviderOAuthMethodsProps {
   directory?: string | null;
   /** Layout only — the caller owns separation from whatever sits above. */
   className?: string;
+  /** Start the only sign-in method on mount, for a sign-in the user just asked for elsewhere. */
+  autoStart?: boolean;
 }
 
 type Flow =
@@ -75,6 +77,7 @@ export const ProviderOAuthMethods: React.FC<ProviderOAuthMethodsProps> = ({
   onConnected,
   directory,
   className,
+  autoStart = false,
 }) => {
   const { t } = useI18n();
   const sdk = React.useCallback(
@@ -222,6 +225,15 @@ export const ProviderOAuthMethods: React.FC<ProviderOAuthMethodsProps> = ({
     setFieldValues(defaultFieldValues(fields));
     setFlow({ phase: 'prompting', methodID: method.id, fields, error: null });
   };
+
+  const autoStartedRef = React.useRef(false);
+  React.useEffect(() => {
+    if (!autoStart || autoStartedRef.current || methods.length !== 1) return;
+    autoStartedRef.current = true;
+    beginConnect(methods[0]);
+    // Once per mount: a later render must not restart a sign-in the user cancelled.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoStart, methods]);
 
   const submitFields = (method: SignInMethod) => {
     if (flow.phase !== 'prompting') {
@@ -380,7 +392,7 @@ export const ProviderOAuthMethods: React.FC<ProviderOAuthMethodsProps> = ({
 
             {isActive && flow.phase === 'connecting' && (
               <p className="typography-meta text-muted-foreground flex items-center gap-2">
-                <Icon name="loader" className="h-3.5 w-3.5 animate-spin" />
+                <Spinner className="h-3.5 w-3.5" />
                 {method.type === 'external'
                   ? t('settings.providers.page.auth.external.connecting')
                   : t('settings.providers.page.auth.oauth.starting')}
@@ -392,7 +404,7 @@ export const ProviderOAuthMethods: React.FC<ProviderOAuthMethodsProps> = ({
                 {renderAttemptDetails(flow.attempt)}
                 <div className="flex items-center justify-between gap-2">
                   <p className="typography-meta text-muted-foreground flex items-center gap-2">
-                    <Icon name="loader" className="h-3.5 w-3.5 animate-spin" />
+                    <Spinner className="h-3.5 w-3.5" />
                     {t('settings.providers.page.auth.oauth.waiting')}
                   </p>
                   <Button variant="ghost" size="xs" className="!font-normal shrink-0" onClick={cancel}>

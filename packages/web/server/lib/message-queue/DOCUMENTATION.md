@@ -148,11 +148,11 @@ persisted "sending" flag would strand a message forever.
    agent are switched onto the session first (`POST /session/:id/model`,
    `/agent`), because v2 holds both on the session rather than in the body; a
    captured `openchamber/auto` is resolved into a real pair by the routing
-   runtime beforehand. Then the captured context goes ahead as synthetic
-   messages (`POST /session/:id/synthetic` with `resume: false`, an attached
-   item's metadata riding along), followed by pending project knowledge
-   (`sessionKnowledgeRuntime.resolvePendingForSession`, recorded as delivered
-   only after the send is accepted), and then the message itself:
+   runtime beforehand. The session's project knowledge is written into its
+   instruction entries (`sessionKnowledgeRuntime.sync`, which never fails the
+   send). Then the captured context goes ahead as synthetic messages
+   (`POST /session/:id/synthetic` with `resume: false`, an attached item's
+   metadata riding along), and then the message itself:
    - text starting with `/` that names a command in OpenCode's `/command`
      list (skills included) goes to `POST /session/:id/command` (body fields
      `name` and `text` since OpenCode 2.0.8) with its file attachments. The
@@ -168,7 +168,7 @@ persisted "sending" flag would strand a message forever.
    2 s → 60 s (doubling per consecutive failure of that item), and re-arms.
 6. The next item goes out after the next busy → idle cycle.
 
-A 2xx HTML app-shell response is a failed dispatch, not acceptance. The queued item stays persisted and uses the existing retry backoff. Project knowledge is recorded as delivered only after the prompt or command is accepted.
+A 2xx HTML app-shell response is a failed dispatch, not acceptance. The queued item stays persisted and uses the existing retry backoff.
 
 ## Holds
 
@@ -213,6 +213,11 @@ by the route family's 50 MB JSON limit.
 ## UI ownership
 
 `packages/ui/src/stores/messageQueueStore.ts` is the projection: see its
-section in `packages/ui/src/stores/DOCUMENTATION.md`. VS Code intentionally
+section in `packages/ui/src/stores/DOCUMENTATION.md`. A session in an isolated
+space is queued in this module inside that space, not on the host: the host's
+runtime sees the host's events only and never delivers into a space. The host
+forwards the space's `openchamber:message-queue.updated` changes to the
+browsers, see "Sessions and events" in
+`packages/web/server/lib/spaces/DOCUMENTATION.md`. VS Code intentionally
 does not use this module; with all OpenChamber webviews closed, queued
 messages there are not delivered.

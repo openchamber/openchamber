@@ -1,9 +1,8 @@
 import React from 'react';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Icon } from '@/components/icon/Icon';
 import { GitHubSettings } from '@/components/sections/openchamber/GitHubSettings';
+import { IntegrationCatalogCard } from '@/components/sections/integrations/IntegrationCatalogCard';
 import { useI18n } from '@/lib/i18n';
-import { cn } from '@/lib/utils';
 import { useSourceControlAuthEntry } from '@/stores/useSourceControlAuthStore';
 import { GITHUB_SOURCE_CONTROL_IDENTITY } from '@/lib/source-control/identity';
 
@@ -35,48 +34,18 @@ export const GitHubIntegration: React.FC = () => {
         ? t('settings.sourceControl.accounts.connectedCount', { count: accounts.length })
         : currentName || t('settings.github.page.status.active')
       : t('settings.integrations.github.status.notConnected');
-  const statusClassName = connected
-    ? 'bg-[var(--status-success)]/15 text-[var(--status-success)]'
-    : 'bg-[var(--surface-muted)] text-muted-foreground';
-
   return (
-    <Collapsible open={open} onOpenChange={setOpen}>
-      <div
-        data-settings-item="integrations.github"
-        className="overflow-hidden rounded-xl border border-[var(--interactive-border)] bg-[var(--surface-elevated)]"
-      >
-        <CollapsibleTrigger
-          className="flex w-full min-w-0 items-center gap-3 px-4 py-3 text-start hover:bg-[var(--interactive-hover)]/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--interactive-focus-ring)]"
-        >
-          <div className="flex size-10 shrink-0 items-center justify-center rounded-[10px] bg-[var(--surface-muted)]">
-            <Icon name="github-fill" className="size-5 text-foreground" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="truncate text-sm font-semibold text-foreground">
-              {t('settings.integrations.github.title')}
-            </div>
-            <p className="mt-0.5 line-clamp-1 text-xs leading-snug text-muted-foreground">
-              {t('settings.integrations.github.description')}
-            </p>
-          </div>
-          <span
-            aria-live="polite"
-            className={cn('max-w-36 shrink-0 truncate rounded-full px-2 py-0.5 text-[10px] font-medium', statusClassName)}
-          >
-            {statusLabel}
-          </span>
-          <Icon
-            name="arrow-down-s"
-            className={cn(
-              'size-4 shrink-0 text-muted-foreground transition-transform duration-150 ease-out motion-reduce:transition-none',
-              open && 'rotate-180',
-            )}
-          />
-        </CollapsibleTrigger>
-        <CollapsibleContent className="border-t border-[var(--interactive-border)] px-4 py-4">
-          <GitHubSettings embedded />
-        </CollapsibleContent>
-      </div>
-    </Collapsible>
+    <IntegrationCatalogCard
+      settingsItem="integrations.github"
+      logo={<Icon name="github-fill" className="size-5 text-foreground" />}
+      name={t('settings.integrations.github.title')}
+      description={t('settings.integrations.github.description')}
+      status={statusLabel}
+      statusTone={connected ? 'success' : 'neutral'}
+      open={open}
+      onOpenChange={setOpen}
+    >
+      <GitHubSettings embedded />
+    </IntegrationCatalogCard>
   );
 };

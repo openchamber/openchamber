@@ -41,6 +41,7 @@ const makeMemoryKeyStore = () => {
       }
       return slots[slot];
     },
+    generation: () => 0,
   };
   return store;
 };

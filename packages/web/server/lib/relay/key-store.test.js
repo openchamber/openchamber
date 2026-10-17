@@ -98,6 +98,23 @@ describe('relay key store', () => {
     expect(readJson(settingsPath()).relaySigningKey).toBeUndefined();
   });
 
+  it('reset drops both keys, keeps other fields and mints new keys on the next load', async () => {
+    const signing = makePair();
+    const encryption = makePair();
+    writeJson(identityPath(), { signingKey: signing, encryptionKey: encryption, futureField: 1 });
+    writeJson(settingsPath(), { theme: 'dark', relaySigningKey: signing });
+    const store = makeStore();
+
+    expect(store.generation()).toBe(0);
+    await store.reset();
+
+    expect(store.generation()).toBe(1);
+    expect(readJson(identityPath())).toEqual({ futureField: 1 });
+    expect(readJson(settingsPath())).toEqual({ theme: 'dark' });
+    const fresh = makePair();
+    expect(await store.getOrCreate('signing', async () => fresh)).toEqual(fresh);
+  });
+
   it('mints one key when two callers ask at the same time', async () => {
     const store = makeStore();
     let generations = 0;

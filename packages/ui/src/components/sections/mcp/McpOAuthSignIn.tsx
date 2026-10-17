@@ -10,6 +10,8 @@ interface McpOAuthSignInProps {
   directory: string | null;
   /** Runs after OpenCode has stored the credential, so the caller can reconnect. */
   onConnected: () => void | Promise<void>;
+  /** Start the sign-in as soon as the integration shows up. */
+  autoStart?: boolean;
 }
 
 /**
@@ -19,7 +21,7 @@ interface McpOAuthSignInProps {
  * (by server name, in the server's Location) is MCP-specific. Renders nothing
  * while the integration is unknown.
  */
-export const McpOAuthSignIn: React.FC<McpOAuthSignInProps> = ({ serverName, directory, onConnected }) => {
+export const McpOAuthSignIn: React.FC<McpOAuthSignInProps> = ({ serverName, directory, onConnected, autoStart }) => {
   const [integration, setIntegration] = React.useState<IntegrationInfo | null>(null);
 
   React.useEffect(() => {
@@ -69,6 +71,7 @@ export const McpOAuthSignIn: React.FC<McpOAuthSignInProps> = ({ serverName, dire
       methods={methods}
       directory={directory}
       onConnected={onConnected}
+      autoStart={autoStart}
     />
   );
 };

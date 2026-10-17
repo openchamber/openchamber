@@ -22,6 +22,7 @@ export const createRelayIdentityRuntime = (deps) => {
   const { crypto, relayKeyStore } = deps;
 
   let cachedIdentity = null;
+  let cachedGeneration = -1;
 
   const getOrCreateEncryptionKeypair = () => relayKeyStore.getOrCreate('encryption', async () => {
     // Loud on purpose: a new encryption key invalidates the E2EE trust anchor of
@@ -42,7 +43,8 @@ export const createRelayIdentityRuntime = (deps) => {
    * }>}
    */
   const getRelayIdentity = async () => {
-    if (cachedIdentity) return cachedIdentity;
+    const generation = relayKeyStore.generation();
+    if (cachedIdentity && cachedGeneration === generation) return cachedIdentity;
     const signing = await getOrCreateRelaySigningKeypair({ crypto, relayKeyStore });
     const serverId = deriveServerId({ crypto }, signing.publicJwk);
     const encryption = await getOrCreateEncryptionKeypair();
@@ -63,6 +65,7 @@ export const createRelayIdentityRuntime = (deps) => {
       hostEncPrivateKey,
       signRelayAuth,
     };
+    cachedGeneration = generation;
     return cachedIdentity;
   };
 

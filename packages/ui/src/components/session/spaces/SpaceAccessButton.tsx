@@ -22,8 +22,9 @@ export const SpaceAccessButton: React.FC<{ directory: string | null | undefined;
   const spaceId = spaceIdOfDirectory(directory);
   const lacking = useSpacesStore((state) => {
     if (!spaceId) return false;
-    if (state.creationAccess.get(spaceId)?.kind === 'failed') return true;
-    const notice = spaceAccessNoticeOf(state.journey?.get(spaceId));
+    const entry = state.journey?.get(spaceId);
+    if ((entry?.accessFailures.length ?? 0) > 0) return true;
+    const notice = spaceAccessNoticeOf(entry);
     return notice?.kind === 'needs_again' || notice?.kind === 'no_model';
   });
   if (!enabled || !spaceId || isVSCodeRuntime()) return null;

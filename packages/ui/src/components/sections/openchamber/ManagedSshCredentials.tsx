@@ -1,7 +1,7 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { SETTINGS_HELPER_CLASS, SettingsCheckboxRow, SettingsStackedField } from '../shared/SettingsSection';
+import { SETTINGS_HELPER_CLASS, SettingsCheckboxRow } from '../shared/SettingsSection';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
@@ -18,6 +18,14 @@ type InventoryState = {
   rejection?: RejectionReason;
   imported?: boolean;
 };
+
+type StatusTone = 'neutral' | 'error' | 'warning' | 'success';
+const STATUS_TONE_CLASS = {
+  neutral: '',
+  error: 'text-[var(--status-error)]',
+  warning: 'text-[var(--status-warning)]',
+  success: 'text-[var(--status-success)]',
+} satisfies Record<StatusTone, string>;
 
 const initialState = (): InventoryState => ({
   status: 'idle', credentials: [], candidates: [], truncated: false, discoveryAttempted: false,
@@ -135,21 +143,34 @@ export function ManagedSshCredentials({ selection, disabled = false }: {
   const selectedCredential = state.credentials.find((credential) => credential.credentialId === selection.value) ?? null;
   const rejection = rejectionMessage();
   const controlsDisabled = disabled || state.status === 'loading' || !git.managedSshCredentials;
+  // Most important first: what failed, what is in progress, what blocks the
+  // feature, then outcomes and empty states.
+  const status = (text: string, tone: StatusTone) => ({ text, tone });
+  const statusLine = rejection
+    ? status(rejection, 'error')
+    : state.status === 'error' ? status(t('settings.sourceControl.ssh.operationFailed'), 'error')
+    : state.status === 'loading' ? status(t('settings.sourceControl.transport.loading'), 'neutral')
+    : hostSetup || !git.managedSshCredentials ? status(t('settings.sourceControl.ssh.hostSetup'), 'neutral')
+    : state.truncated ? status(t('settings.sourceControl.ssh.discoveryTruncated'), 'warning')
+    : state.imported ? status(t('settings.sourceControl.ssh.imported'), 'success')
+    : state.status === 'ready' && state.discoveryAttempted && !state.candidates.length ? status(t('settings.sourceControl.ssh.discoveredEmpty'), 'neutral')
+    : state.status === 'ready' && !state.credentials.length ? status(t('settings.sourceControl.ssh.empty'), 'neutral')
+    : null;
 
-  const content = <>
-
-    <Select value={selection.value} onValueChange={selection.onChange} disabled={disabled || state.status !== 'ready'}>
-      <SelectTrigger className="w-full" aria-label={t('settings.sourceControl.ssh.title')}>
-        <SelectValue placeholder={t('settings.sourceControl.ssh.title')}>
-          {/* The value is an opaque reference; only the safe label may be shown. */}
-          {selectedCredential ? describeCredential(selectedCredential) : undefined}
-        </SelectValue>
-      </SelectTrigger>
-      <SelectContent>{state.credentials.map((credential) => <SelectItem key={credential.credentialId} value={credential.credentialId} disabled={credential.capability.status !== 'ready'}>
-        {describeCredential(credential)}
-      </SelectItem>)}</SelectContent>
-    </Select>
-    <div className="flex flex-wrap gap-2">
+  // The editor draws the field's label; this is the control column of its row.
+  return <div className="flex min-w-0 flex-1 flex-col gap-2">
+    <div className="flex min-w-0 flex-wrap items-center gap-2">
+      <Select value={selection.value} onValueChange={selection.onChange} disabled={disabled || state.status !== 'ready'}>
+        <SelectTrigger className="min-w-0 max-w-full" aria-label={t('settings.sourceControl.ssh.title')}>
+          <SelectValue placeholder={t('settings.sourceControl.ssh.title')}>
+            {/* The value is an opaque reference; only the safe label may be shown. */}
+            {selectedCredential ? describeCredential(selectedCredential) : undefined}
+          </SelectValue>
+        </SelectTrigger>
+        <SelectContent>{state.credentials.map((credential) => <SelectItem key={credential.credentialId} value={credential.credentialId} disabled={credential.capability.status !== 'ready'}>
+          {describeCredential(credential)}
+        </SelectItem>)}</SelectContent>
+      </Select>
       {/* The list loads as the editor opens; this only brings it back after
           a failed read or a runtime switch. */}
       {state.status === 'idle' || state.status === 'error' ? (
@@ -181,18 +202,15 @@ export function ManagedSshCredentials({ selection, disabled = false }: {
         {[candidate.label, candidateReason(candidate)].filter(Boolean).join(' · ')}
       </p>)}
     </div> : null}
-    {state.status === 'loading' ? <p role="status" className={SETTINGS_HELPER_CLASS}>{t('settings.sourceControl.transport.loading')}</p> : null}
-    {state.status === 'error' ? <p role="alert" className={cn(SETTINGS_HELPER_CLASS, 'text-[var(--status-error)]')}>{t('settings.sourceControl.ssh.operationFailed')}</p> : null}
-    {rejection ? <p role="alert" className={cn(SETTINGS_HELPER_CLASS, 'text-[var(--status-error)]')}>{rejection}</p> : null}
-    {state.imported ? <p role="status" className={cn(SETTINGS_HELPER_CLASS, 'text-[var(--status-success)]')}>{t('settings.sourceControl.ssh.imported')}</p> : null}
-    {state.status === 'ready' && !state.credentials.length ? <p className={SETTINGS_HELPER_CLASS}>{t('settings.sourceControl.ssh.empty')}</p> : null}
-    {state.status === 'ready' && state.discoveryAttempted && !state.candidates.length ? <p className={SETTINGS_HELPER_CLASS}>{t('settings.sourceControl.ssh.discoveredEmpty')}</p> : null}
-    {state.truncated ? <p role="status" className={cn(SETTINGS_HELPER_CLASS, 'text-[var(--status-warning)]')}>{t('settings.sourceControl.ssh.discoveryTruncated')}</p> : null}
-    {hostSetup || !git.managedSshCredentials ? <p role="status" className={SETTINGS_HELPER_CLASS}>{t('settings.sourceControl.ssh.hostSetup')}</p> : null}
-  </>;
-
-  return <SettingsStackedField className="min-w-0 w-full" controlClassName="max-w-none flex-col items-stretch gap-3"
-    label={t('settings.sourceControl.ssh.title')} info={t('settings.sourceControl.ssh.hostSetup')}>
-    {content}
-  </SettingsStackedField>;
+    {/* One status line, always in place: switching auth method or loading
+        the list must not grow the dialog, so the slot keeps its line even
+        when empty and shows only the most important message. */}
+    <p
+      role={statusLine?.tone === 'error' ? 'alert' : 'status'}
+      title={statusLine?.text}
+      className={cn(SETTINGS_HELPER_CLASS, 'min-h-[1lh] truncate', statusLine && STATUS_TONE_CLASS[statusLine.tone])}
+    >
+      {statusLine?.text}
+    </p>
+  </div>;
 }

@@ -88,6 +88,7 @@ const RUN_METRICS = {
     [metric("renderedCharacters"), "rendered characters (workload)", WORKLOAD],
   ],
   idle: [
+    [metric("framesPerSecond"), "frames drawn/s", LOWER],
     [metric("mainThreadBusyPercent"), "main-thread busy %", LOWER],
     [metric("scriptPercent"), "script %", LOWER],
     [metric("recalcStylePerSecond"), "style recalcs/s", LOWER],

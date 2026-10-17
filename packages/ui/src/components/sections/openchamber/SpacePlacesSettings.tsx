@@ -14,6 +14,8 @@
 import React from 'react';
 
 import { Icon } from '@/components/icon/Icon';
+import { Spinner } from '@/components/ui/spinner';
+import { DockerSetupNotice } from '@/components/session/spaces/DockerSetupNotice';
 import { SpaceRow } from '@/components/session/spaces/SpaceRow';
 import { failureOfError, spaceFailureText } from '@/components/session/spaces/spaceFailureText';
 import { Button } from '@/components/ui/button';
@@ -35,6 +37,7 @@ import {
   type SpacePlace,
 } from '@/lib/spaces/spaces-api';
 import { refreshSpacesJourney, useSpacesJourneyRead } from '@/lib/spaces/spaces-store';
+import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
 import { SettingsControlGroup, SettingsFieldRow } from '../shared/SettingsSection';
 import { IMAGE_SETTLE_REFRESH_MS, nextDiskReadDelay } from './spacePlacesDisk';
@@ -78,15 +81,22 @@ const useRead = <T,>(load: (signal: AbortSignal) => Promise<T>): [Read<T>, () =>
   return [state, retry, replace, fail];
 };
 
-const DiskLine: React.FC<{ disk: SpaceDisk }> = ({ disk }) => {
-  const { t } = useI18n();
-  const parts = [
-    ...(disk.imageBytes === null ? [] : [t('settings.openchamber.spaces.places.disk.image', { size: formatDiskSize(disk.imageBytes) })]),
-    t('settings.openchamber.spaces.places.disk.tools', { size: formatDiskSize(disk.toolsBytes) }),
-    t('settings.openchamber.spaces.places.disk.spaces', { size: formatDiskSize(disk.spacesBytes) }),
-  ];
-  return <p className="typography-meta text-muted-foreground">{t('settings.openchamber.spaces.places.disk.line', { parts: parts.join(' · ') })}</p>;
-};
+type StatusTone = 'ready' | 'todo' | 'busy';
+
+/**
+ * One line of a place's state: a check for what is ready, an open circle for what is not done yet
+ * and is not a fault, a spinner for what is under way.
+ */
+const StatusLine: React.FC<{ tone: StatusTone; children: React.ReactNode }> = ({ tone, children }) => (
+  <p className="flex items-start gap-1.5 typography-meta text-foreground" role="status">
+    {tone === 'busy' ? (
+      <Spinner className="mt-[0.2em] h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+    ) : (
+      <Icon name={tone === 'ready' ? 'checkbox-circle' : 'circle'} className={cn('mt-[0.2em] h-3.5 w-3.5 shrink-0', tone === 'ready' ? 'text-[var(--status-success)]' : 'text-muted-foreground')} />
+    )}
+    <span>{children}</span>
+  </p>
+);
 
 /** The one confirmation of a clean-up, with what it frees and, when the image goes, what that costs later. */
 const CleanUpConfirm: React.FC<{ disk: SpaceDisk | null; onCancel: () => void; onConfirm: () => void }> = ({ disk, onCancel, onConfirm }) => {
@@ -211,43 +221,47 @@ const PlaceDisk: React.FC<{ placeId: string }> = ({ placeId }) => {
     }
   };
 
-  if (disk.kind === 'reading') return <p className="typography-meta text-muted-foreground">{t('settings.openchamber.spaces.places.disk.reading')}</p>;
+  if (disk.kind === 'reading') return <StatusLine tone="busy">{t('settings.openchamber.spaces.places.disk.reading')}</StatusLine>;
   if (disk.kind === 'failed') {
     return <p className="typography-meta text-[var(--status-error)]">{t('settings.openchamber.spaces.places.disk.readFailed', { reason: spaceFailureText(t, failureOfError(disk.error)) })}</p>;
   }
-  const nothingToFree = disk.value.freeBytes === 0;
   // A download this window could not start, or the host's word on the last one while the image is absent.
   const imageFailure = download.kind === 'failed' ? failureOfError(download.error) : disk.value.imageFailure;
+  const downloading = disk.value.imagePulling || download.kind === 'starting';
+  const totalBytes = (disk.value.imageBytes ?? 0) + disk.value.toolsBytes + disk.value.spacesBytes;
+  // Offered only when it would free something, and never while the image downloads: the host refuses then.
+  const canFree = disk.value.freeBytes > 0 && !disk.value.imagePulling;
   return (
     <div className="space-y-2">
-      <DiskLine disk={disk.value} />
-      <div className="flex flex-wrap items-center gap-2">
-        {disk.value.imageBytes === null ? (
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={disk.value.imagePulling || download.kind === 'starting'}
-            onClick={() => void downloadImage()}
-          >
-            {disk.value.imagePulling || download.kind === 'starting' ? (
-              <>
-                <Icon name="loader-4" className="size-3.5 animate-spin" />
-                {t('settings.openchamber.spaces.places.image.downloading')}
-              </>
-            ) : t('settings.openchamber.spaces.places.image.download')}
+      {/* The image: not there yet is no fault, the first space downloads it; now is only sooner. */}
+      {downloading ? (
+        <StatusLine tone="busy">{t('settings.openchamber.spaces.places.image.downloadingNote')}</StatusLine>
+      ) : disk.value.imageBytes === null ? (
+        <div className="space-y-2">
+          <StatusLine tone="todo">{t('settings.openchamber.spaces.places.image.missing')}</StatusLine>
+          <Button size="sm" variant="outline" onClick={() => void downloadImage()}>
+            <Icon name="download" className="size-3.5" />
+            {t('settings.openchamber.spaces.places.image.downloadNow')}
           </Button>
-        ) : null}
-        <Button
-          size="sm"
-          variant="outline"
-          // The server refuses a clean-up while the image is being downloaded.
-          disabled={nothingToFree || cleanUp.kind === 'cleaning' || disk.value.imagePulling}
-          title={nothingToFree ? t('settings.openchamber.spaces.places.cleanUp.nothing') : undefined}
-          onClick={() => setCleanUp({ kind: 'confirming' })}
-        >
-          {cleanUp.kind === 'cleaning' ? t('settings.openchamber.spaces.places.cleanUp.running') : t('settings.openchamber.spaces.places.cleanUp.button')}
-        </Button>
-      </div>
+        </div>
+      ) : (
+        <StatusLine tone="ready">{t('settings.openchamber.spaces.places.image.ready')}</StatusLine>
+      )}
+      {totalBytes > 0 || cleanUp.kind === 'cleaning' ? (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <p className="typography-meta text-muted-foreground">{t('settings.openchamber.spaces.places.disk.total', { size: formatDiskSize(totalBytes) })}</p>
+          {cleanUp.kind === 'cleaning' ? (
+            <span className="inline-flex items-center gap-1.5 typography-meta text-muted-foreground" role="status">
+              <Spinner className="size-3.5" />
+              {t('settings.openchamber.spaces.places.cleanUp.running')}
+            </span>
+          ) : canFree ? (
+            <Button size="xs" variant="outline" onClick={() => setCleanUp({ kind: 'confirming' })}>
+              {t('settings.openchamber.spaces.places.cleanUp.freeUp', { size: formatDiskSize(disk.value.freeBytes) })}
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
       {imageFailure ? (
         <p className="typography-meta text-[var(--status-error)]" role="alert">{spaceFailureText(t, imageFailure)}</p>
       ) : null}
@@ -280,17 +294,23 @@ const DOCKER_PLACES: ReadonlySet<string> = new Set(['docker', SSH_PLACE_ID]);
 const PlaceBlock: React.FC<{ place: SpacePlace; title: string; field?: React.ReactNode; spaces: SpaceEntry[] | null; spacesError: Error | null; onRetry: () => void }> = ({ place, title, field = null, spaces, spacesError, onRetry }) => {
   const { t } = useI18n();
   const isMobile = useUIStore((state) => state.isMobile);
+  const setupShown = Boolean(place.setup?.remedy || place.setup?.job);
 
   if (!place.available) {
     return (
       <SettingsControlGroup title={title}>
         <div className="space-y-2">
           {field}
-          {/* What the user can do about it: one line with the info mark, as Settings' own notes read. */}
-          <p className="flex items-start gap-1.5 typography-meta text-foreground" role="status">
-            <Icon name="information" className="mt-[0.2em] h-3.5 w-3.5 shrink-0 text-[var(--status-info)]" />
-            <span>{spaceFailureText(t, place, place.machine === null ? undefined : { machine: place.machine })}</span>
-          </p>
+          {setupShown ? (
+            // This computer: the one action that gets Docker going, or the step to take, with its own "Check again".
+            <DockerSetupNotice place={place} onRecheck={onRetry} withCheck />
+          ) : (
+            // What the user can do about it: one line with the info mark, as Settings' own notes read.
+            <p className="flex items-start gap-1.5 typography-meta text-foreground" role="status">
+              <Icon name="information" className="mt-[0.2em] h-3.5 w-3.5 shrink-0 text-[var(--status-info)]" />
+              <span>{spaceFailureText(t, place, place.machine === null ? undefined : { machine: place.machine })}</span>
+            </p>
+          )}
           {spaces && spaces.length > 0 ? (
             <div className="space-y-1">
               <p className="typography-meta text-muted-foreground">
@@ -307,7 +327,7 @@ const PlaceBlock: React.FC<{ place: SpacePlace; title: string; field?: React.Rea
               ))}
             </div>
           ) : null}
-          <Button size="sm" variant="outline" onClick={onRetry}>{t('settings.openchamber.spaces.places.retry')}</Button>
+          {setupShown ? null : <Button size="sm" variant="outline" onClick={onRetry}>{t('settings.openchamber.spaces.places.retry')}</Button>}
         </div>
       </SettingsControlGroup>
     );
@@ -316,18 +336,27 @@ const PlaceBlock: React.FC<{ place: SpacePlace; title: string; field?: React.Rea
   const running = spaces?.filter((entry) => entry.state === 'running').length ?? 0;
   const stopped = spaces?.filter((entry) => entry.state === 'exited').length ?? 0;
   const gone = spaces?.filter((entry) => entry.state === 'missing') ?? [];
+  // Which engine runs Docker here, when this computer's Docker said so.
+  const engine = place.setup?.memory?.engine;
+  const dockerText = engine === 'colima'
+    ? t('settings.openchamber.spaces.places.dockerRunningColima', { version: place.version })
+    : engine === 'docker_desktop'
+      ? t('settings.openchamber.spaces.places.dockerRunningDesktop', { version: place.version })
+      : t('settings.openchamber.spaces.places.dockerRunning', { version: place.version });
   return (
     <SettingsControlGroup title={title}>
       <div className="space-y-2">
         {field}
-        {/* A product name and its version, the same in every language. */}
-        {DOCKER_PLACES.has(place.id) && place.version ? <p className="typography-meta text-muted-foreground">{`Docker ${place.version}`}</p> : null}
-        {spaces ? (
-          <p className="typography-meta text-muted-foreground">{t('settings.openchamber.spaces.places.counts', { running, stopped })}</p>
+        {DOCKER_PLACES.has(place.id) && place.version ? <StatusLine tone="ready">{dockerText}</StatusLine> : null}
+        {/* Too little memory for a space, on this computer. */}
+        <DockerSetupNotice place={place} onRecheck={onRetry} />
+        <PlaceDisk placeId={place.id} />
+        {/* The spaces here, once there are any: a count of zero says nothing. */}
+        {spaces && running + stopped > 0 ? (
+          <p className="typography-meta text-muted-foreground">{t('settings.openchamber.spaces.places.spaceCount', { running, stopped })}</p>
         ) : spacesError ? (
           <p className="typography-meta text-[var(--status-error)]">{t('spaces.page.loadFailed', { reason: spaceFailureText(t, failureOfError(spacesError)) })}</p>
         ) : null}
-        <PlaceDisk placeId={place.id} />
         {gone.length > 0 ? (
           <div className="space-y-1 pt-1">
             <p className="typography-ui-label text-foreground">{t('settings.openchamber.spaces.places.leftBehind')}</p>
@@ -400,7 +429,7 @@ const MachineField: React.FC<{ machine: string | null; onChange: (place: SpacePl
         <Button size="sm" variant="outline" className="shrink-0" disabled={saving || unchanged} onClick={() => void save(draft)}>
           {saving ? (
             <>
-              <Icon name="loader-4" className="size-3.5 animate-spin" />
+              <Spinner className="size-3.5" />
               {t('settings.openchamber.spaces.places.machine.checking')}
             </>
           ) : t('settings.openchamber.spaces.places.machine.check')}

@@ -156,6 +156,9 @@ export const launchChrome = ({ chrome, profileDir, port, headless, extraArgs = [
     "about:blank",
   ]
   if (headless) args.unshift("--headless=new", "--disable-gpu")
+  // Chrome refuses to start as root with its sandbox on, which is how
+  // containers and CI runners usually run it.
+  if (process.getuid?.() === 0) args.unshift("--no-sandbox")
   return spawn(chrome, args, { stdio: "ignore" })
 }
 

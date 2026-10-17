@@ -13,8 +13,15 @@ const makeService = (options = {}) => {
       publicJwk: publicKey.export({ format: 'jwk' }),
     },
   };
+  let keyGeneration = 0;
   const relayKeyStore = {
     getOrCreate: async (slot, generate) => (keySlots[slot] ??= await generate()),
+    reset: async () => {
+      delete keySlots.signing;
+      delete keySlots.encryption;
+      keyGeneration += 1;
+    },
+    generation: () => keyGeneration,
   };
   let settings = {
     privateRelay: { enabled: true, relayUrl: 'wss://relay.example.test/ws' },
@@ -23,8 +30,7 @@ const makeService = (options = {}) => {
   const hostLock = {
     tryClaim: vi.fn(() => true),
     forceClaim: vi.fn(() => true),
-    holdsClaim: vi.fn(() => true),
-    liveClaimantPid: vi.fn(() => null),
+    otherLiveClaimant: vi.fn(() => null),
     release: vi.fn(),
   };
   const service = createRelayService({
@@ -40,6 +46,21 @@ const makeService = (options = {}) => {
   });
   return { service, hostLock, getSettings: () => settings };
 };
+
+describe('relay service identity reset', () => {
+  it('gives this copy a new server id', async () => {
+    const { service } = makeService();
+    try {
+      const before = await service.getServerId();
+      await service.resetIdentity();
+      const after = await service.getServerId();
+      expect(after).not.toBe(before);
+      expect((await service.getStatus()).serverId).toBe(after);
+    } finally {
+      service.stop();
+    }
+  });
+});
 
 describe('relay service passive hosting', () => {
   it('never claims or starts the host passively when passive hosting is disabled', async () => {

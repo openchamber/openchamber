@@ -18,6 +18,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { Popover } from '@base-ui/react/popover';
 import { cn } from '@/lib/utils';
 import { dropdownMenuPopupClass } from '@/components/ui/dropdown-menu.styles';
+import { commandSearchAtBottomClass, usePopupSideOnOpen } from '@/components/ui/popup-side';
 import {
     Command,
     CommandInput,
@@ -177,6 +178,9 @@ function DraftTargetSelectorsView(props: DraftTargetProps) {
         setProjectPortalContainer(dialog instanceof HTMLElement ? dialog : null);
         setProjectCollisionBoundary(element?.closest('main') ?? null);
     }, []);
+    // Each picker picks its side when it opens and keeps it while open.
+    const projectPopupSide = usePopupSideOnOpen(openPicker === 'project', projectTriggerRef);
+    const worktreePopupSide = usePopupSideOnOpen(openPicker === 'worktree', worktreeTriggerRef);
     // The popover owns no shortcut suspension (unlike Select/DropdownMenu
     // wrappers), so suspend global shortcuts while the project popup is
     // open and restore them on close/unmount.
@@ -316,17 +320,20 @@ function DraftTargetSelectorsView(props: DraftTargetProps) {
                     </span>
                 </Popover.Trigger>
                 <Popover.Portal container={projectPortalContainer ?? undefined}>
-                    {/* side="bottom" anchors the popup's top edge at the
-                        trigger: the search field stays fixed at the
-                        selector's level while filtering, and only the
-                        results area below changes height. Disabling side
-                        flips keeps the input stationary during filtering.
-                        Horizontal shifting keeps the popup inside main. The
-                        --available-height cap comes free from the shared
-                        popup class, so the list scrolls within the space
-                        below the trigger. */}
+                    {/* The search field sits on the trigger's edge of the
+                        popup and stays fixed while filtering; only the
+                        results area beyond it changes height. Opening
+                        downward anchors the popup's top edge under the
+                        trigger. A low trigger (Mini Chat) opens it upward
+                        instead, anchored by its bottom edge, with the search
+                        field moved to the bottom. The side is chosen once per
+                        open and never flips while open, which would move the
+                        input. Horizontal shifting keeps the popup inside
+                        main. The --available-height cap comes free from the
+                        shared popup class, so the list scrolls within the
+                        space on the chosen side. */}
                     <Popover.Positioner
-                        side="bottom"
+                        side={projectPopupSide}
                         align="start"
                         sideOffset={4}
                         collisionAvoidance={{ side: 'none' }}
@@ -344,7 +351,12 @@ function DraftTargetSelectorsView(props: DraftTargetProps) {
                                 cmdk's own filter would re-filter and reorder the
                                 already-ranked rows. */}
                             <Command
-                                className="min-h-0 flex-1"
+                                className={cn(
+                                    'min-h-0 flex-1',
+                                    // Upward: the search field goes to the bottom, next to
+                                    // the trigger, with its divider above it.
+                                    projectPopupSide === 'top' && commandSearchAtBottomClass,
+                                )}
                                 shouldFilter={false}
                                 value={projectActiveId ?? undefined}
                                 onValueChange={setProjectActiveId}
@@ -420,7 +432,7 @@ function DraftTargetSelectorsView(props: DraftTargetProps) {
                             <SelectTrigger
                                 ref={worktreeTriggerRef}
                                 onKeyDown={handlePickerKeyDown}
-                                className="h-7 min-w-0 w-fit max-w-[48vw] sm:max-w-[20rem] border-transparent bg-transparent px-1.5 hover:[background-image:none] data-[popup-open]:[background-image:none]"
+                                className="h-7 min-w-0 w-fit max-w-[48vw] sm:max-w-[20rem] bg-transparent dark:bg-transparent shadow-none px-1.5 hover:[background-image:none] data-[popup-open]:[background-image:none]"
                             >
                                 {hasUncommittedChanges ? (
                                     <Icon
@@ -440,7 +452,7 @@ function DraftTargetSelectorsView(props: DraftTargetProps) {
                             </TooltipContent>
                         ) : null}
                     </Tooltip>
-                    <SelectContent side="bottom" align="start" sideOffset={4} collisionAvoidance={{ side: 'none' }} constrainToMain className="w-max min-w-48" onKeyDown={handlePickerKeyDown} finalFocus={getFinalFocus}>
+                    <SelectContent side={worktreePopupSide} align="start" sideOffset={4} collisionAvoidance={{ side: 'none' }} constrainToMain className="w-max min-w-48" onKeyDown={handlePickerKeyDown} finalFocus={getFinalFocus}>
                         {projectRootBranchOption ? (
                             <SelectGroup>
                                 <SelectLabel>{t('chat.chatInput.projectRoot')}</SelectLabel>

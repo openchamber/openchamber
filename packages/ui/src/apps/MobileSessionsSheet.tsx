@@ -74,7 +74,9 @@ import { useMobileSessionExpansionStore } from '@/stores/useMobileSessionExpansi
 import { useMobileSessionTreeStore } from '@/stores/useMobileSessionTreeStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionDisplayStore, type ProjectSortOrder } from '@/stores/useSessionDisplayStore';
-import { isSessionPinned, useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
+import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
+import { isSessionPinned } from '@/lib/sessionPins';
+import { toggleSessionPin } from '@/sync/session-pins';
 import { orderWorktrees, useWorktreeOrderStore } from '@/stores/useWorktreeOrderStore';
 import {
   EMPTY_SESSION_ORDER_RANKS,
@@ -128,6 +130,7 @@ import { MobileRunProviderLogos } from './MobileRunProviderLogos';
 import { MobileDisclosure } from './MobileDisclosure';
 import { MobileSessionGoalGlyph, MobileSessionPendingBadges } from './MobileSessionStateBadges';
 import { usePendingRequests } from './usePendingRequests';
+import { mobileSessionTitleClass } from './mobileSessionTitle';
 
 type MobileSessionsSheetProps = {
   open: boolean;
@@ -396,9 +399,25 @@ const SessionRow: React.FC<{
     [descendantIdsOf, expanded, hasChildren, session.id],
   );
   const pendingRequests = usePendingRequests(familyIds);
+  const hasLiveState = aiRename.pending || isStreaming || showUnreadDot;
+  const liveStateMark = aiRename.pending
+    ? <Icon name="loader-4" className="size-3 shrink-0 animate-spin text-primary" aria-label={t('sessions.aiRename.generating')} />
+    : <SessionActivityIndicator state={turnActivity ?? 'unread'} />;
+  // A tree row shows its state in the slot left of the title, as the desktop
+  // tree does, unless the slot holds the subsession chevron: a phone has no
+  // hover to trade one for the other, so a parent keeps its state on the right.
+  const stateInSlot = isTreeRow && hasLiveState && !(hasChildren && onToggleChildren);
 
   const rowContent = (
     <>
+      {stateInSlot ? (
+        <span
+          className="pointer-events-none absolute z-10 flex w-3.5 items-center justify-center"
+          style={{ insetInlineStart: treeRowLeft(treeDepth ?? 0), top: 0, bottom: 0 }}
+        >
+          {liveStateMark}
+        </span>
+      ) : null}
       {isTreeRow && hasChildren && onToggleChildren ? (
         // A thumb-sized target around the 14px chevron slot.
         <button
@@ -483,7 +502,7 @@ const SessionRow: React.FC<{
               dir="auto"
               className={cn(
                 'block min-w-0 flex-1 truncate oc-ui-start-align typography-ui-label',
-                active ? 'text-primary' : 'text-foreground',
+                mobileSessionTitleClass({ active, unread: showUnreadDot, running: isStreaming, pending: pendingRequests }),
               )}
             >
               {title}
@@ -491,13 +510,7 @@ const SessionRow: React.FC<{
             {pin?.pinned ? (
               <Icon name="pushpin" className="size-3 shrink-0 text-muted-foreground" aria-label={t('sessions.sidebar.session.status.pinned')} />
             ) : null}
-            {statusOnRight && (aiRename.pending || isStreaming || showUnreadDot) ? (
-              aiRename.pending
-                ? <Icon name="loader-4" className="size-3 shrink-0 animate-spin text-primary" aria-label={t('sessions.aiRename.generating')} />
-                : <SessionActivityIndicator
-                    state={turnActivity ?? 'unread'}
-                  />
-            ) : null}
+            {statusOnRight && hasLiveState && !stateInSlot ? liveStateMark : null}
             {showDoneHint ? (
               <Icon name="check" className="size-3.5 shrink-0 text-muted-foreground" aria-label={t('sessions.sidebar.session.work.doneSuggested')} />
             ) : null}
@@ -602,7 +615,8 @@ const MobileRunRow: React.FC<{ run: MultiRunSummary; laneNodes: readonly Session
       >
         <span className="flex min-w-0 flex-1 items-center gap-1.5">
           <ArrowsMerge className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-          <span dir="auto" className={cn('block min-w-0 flex-1 truncate oc-ui-start-align typography-ui-label', active ? 'text-primary' : 'text-foreground')}>
+          {/* Muted like an idle session title; the run's state shows in its mark. */}
+          <span dir="auto" className={cn('block min-w-0 flex-1 truncate oc-ui-start-align typography-ui-label', active ? 'text-primary' : 'text-muted-foreground')}>
             {run.title}
           </span>
         </span>
@@ -825,7 +839,6 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   const setShowPinnedSection = useSessionDisplayStore((state) => state.setShowPinnedSection);
   const detailedZoneRows = useSessionDisplayStore((state) => state.detailedZoneRows);
   const setDetailedZoneRows = useSessionDisplayStore((state) => state.setDetailedZoneRows);
-  const togglePinnedSession = useSessionPinnedStore((state) => state.toggle);
     // Branch per directory, for the second line of timeline-style rows (In
   // work, the List view): worktree sessions read their worktree's
   // branch, root sessions the project root's checked-out branch, which only
@@ -1483,10 +1496,12 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
 
   const handleTogglePin = (session: Session) => {
     const directory = getSessionDirectory(session);
-    if (directory) togglePinnedSession({ directory, sessionId: session.id });
+    if (!directory) return;
+    const failedKey = isPinned(session) ? 'sessions.sidebar.session.pin.unpinFailed' : 'sessions.sidebar.session.pin.pinFailed';
+    toggleSessionPin({ directory, sessionId: session.id }).catch(() => toast.error(t(failedKey)));
   };
 
-  /** Pin / Unpin for a top-level row, the same local pin the desktop menu sets. */
+  /** Pin / Unpin for a top-level row, the same server-side pin the desktop menu sets. */
   const pinActionFor = (session: Session): MobileSessionPinAction | undefined => {
     if (getParentId(session) || !getSessionDirectory(session)) return undefined;
     return { pinned: isPinned(session), onToggle: () => handleTogglePin(session) };
@@ -1850,7 +1865,8 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
               )}
             />
           )}
-          <span className="block min-w-0 flex-1 truncate typography-ui-label font-medium text-foreground">
+          {/* A step below full strength, as on the desktop sidebar. */}
+          <span className="block min-w-0 flex-1 truncate typography-ui-label font-medium text-foreground/85">
             {bucket.label}
           </span>
           {isActiveWt ? (
@@ -1880,11 +1896,17 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     );
   };
 
-  /** Pinned or In work: a collapsible section over its timeline rows; nothing when empty. */
+  /**
+   * Pinned or In work: a collapsible section; nothing when empty. Tree lists
+   * it as tree rows, with the state on the left and subsessions under a
+   * chevron, like the projects below; List and detailed rows use the
+   * timeline's flat rows.
+   */
   const renderZoneSection = (
     sectionId: string,
     icon: IconName,
     label: string,
+    bucket: WorktreeBucket,
     entries: readonly TimelineEntry[],
   ): React.ReactNode => {
     // The count is the rows: a run's lanes share one, and a session whose
@@ -1923,7 +1945,10 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
         </button>
         <MobileDisclosure open={expanded}>{() => (
           <div className="pb-2">
-            <MobileTimelineRows entries={entries} showProject compact={compactZoneRows} pinMarker={sectionId !== PINNED_SECTION_ID} handlers={timelineHandlers} />
+            {compactZoneRows
+              // The whole zone shows at once, as the timeline rows do.
+              ? renderBucketSessions(sectionId, bucket, 0, { pageSize: Number.MAX_SAFE_INTEGER })
+              : <MobileTimelineRows entries={entries} showProject compact={false} pinMarker={sectionId !== PINNED_SECTION_ID} handlers={timelineHandlers} />}
           </div>
         )}</MobileDisclosure>
       </section>
@@ -2244,11 +2269,13 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
                           renderBucketSessions(
                             chatsBucketKey,
                             chatsBucket,
-                            null,
+                            // Tree rows in Tree, state on the left as in the
+                            // zones and projects below; flat rows in List.
+                            sidebarViewMode === 'timeline' ? null : 0,
                             { pageSize: CHAT_PAGE_SIZE, alwaysVisibleIds: pinnedChatIds },
                           )
                         ) : (
-                          <p className="px-3 pb-1 typography-micro text-muted-foreground" style={{ paddingInlineStart: TIMELINE_CHAT_INDENT }}>
+                          <p className="px-3 pb-1 typography-micro text-muted-foreground" style={{ paddingInlineStart: sidebarViewMode === 'timeline' ? TIMELINE_CHAT_INDENT : treeTextLeft(0) }}>
                             {t('sessions.sidebar.activity.chatsEmpty')}
                           </p>
                         )}
@@ -2257,8 +2284,8 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
                   </section>
                 );
               })()}
-              {renderZoneSection(PINNED_SECTION_ID, 'pushpin', t('sessions.sidebar.activity.pinnedTitle'), pinnedTimelineEntries)}
-              {renderZoneSection(WORK_SECTION_ID, 'eye', t('sessions.sidebar.work.title'), workTimelineEntries)}
+              {renderZoneSection(PINNED_SECTION_ID, 'pushpin', t('sessions.sidebar.activity.pinnedTitle'), pinnedBucket, pinnedTimelineEntries)}
+              {renderZoneSection(WORK_SECTION_ID, 'eye', t('sessions.sidebar.work.title'), workBucket, workTimelineEntries)}
               {orderedNodes.map((node) => {
                 const projectExpanded = isProjectExpanded(node);
                 const buckets = normalizedQuery
@@ -2458,7 +2485,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
                 title={t('sourceBoard.title')}
                 style={{ touchAction: 'manipulation' }}
               >
-                <Icon name="todo" className="size-5" />
+                <Icon name="git-pull-request" className="size-5" />
               </Button>
               <Button
                 type="button"

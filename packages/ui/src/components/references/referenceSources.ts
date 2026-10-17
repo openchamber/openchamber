@@ -412,5 +412,11 @@ export function useLinearIssueDetail(issueId: string | null, settled: boolean) {
         if (!linear || !issueId) throw new Error('Linear is not available here');
         return fetchLinearIssue(linear, issueId);
     }, [issueId, linear]);
-    return { detail: useCachedValue(linearDetails, key, fetch, settled) };
+    const detail = useCachedValue(linearDetails, key, fetch, settled);
+    // After a change of state, read again without waiting for staleness.
+    const refresh = React.useCallback(
+        () => (key ? linearDetails.ensure(key, fetch, { force: true }).then(() => undefined, () => undefined) : Promise.resolve()),
+        [fetch, key],
+    );
+    return { detail, refresh };
 }

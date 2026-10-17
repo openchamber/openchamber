@@ -73,6 +73,7 @@ import type { WalkthroughTarget } from '@/lib/walkthrough/types';
 import { useWalkthroughStore } from '@/stores/useWalkthroughStore';
 import { usePullRequestSelectionStore } from '@/stores/usePullRequestSelectionStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionMessages } from '@/sync/sync-context';
 import { opencodeClient } from '@/lib/opencode/client';
 import { getFirstChangedModifiedLineFromPatch } from './diffPatchUtils';
@@ -621,6 +622,282 @@ const InlineDiffViewer = React.memo<InlineDiffViewerProps>(({
   );
 });
 
+const toNestedFileEntries = (status: GitStatus): FileEntry[] => status.files
+    .map((file) => {
+        const staged = status.diffStats?.staged?.[file.path];
+        const working = status.diffStats?.working?.[file.path];
+        return {
+            ...file,
+            insertions: (staged?.insertions ?? 0) + (working?.insertions ?? 0),
+            deletions: (staged?.deletions ?? 0) + (working?.deletions ?? 0),
+            isNew: isNewStatusFile(file),
+        };
+    })
+    .sort((a, b) => a.path.localeCompare(b.path));
+
+interface NestedRepositoryDiffProps {
+    renderSideBySide: boolean;
+    wrapLines: boolean;
+    hideWhitespace: boolean;
+}
+
+interface NestedRepositoryFileDiffProps extends NestedRepositoryDiffProps {
+    directory: string;
+    file: FileEntry;
+    revision: number;
+}
+
+/** One file of a nested repository, read-only. */
+const NestedRepositoryFileDiff = React.memo<NestedRepositoryFileDiffProps>(({
+    directory,
+    file,
+    revision,
+    renderSideBySide,
+    wrapLines,
+    hideWhitespace,
+}) => {
+    const { t } = useI18n();
+    const { git } = useRuntimeAPIs();
+    const [result, setResult] = React.useState<ComparisonDiffResult>(EMPTY_COMPARISON_DIFF);
+    const [forceRenderLarge, setForceRenderLarge] = React.useState(false);
+    // A file changed only in the index has an empty working diff.
+    const staged = isStagedStatusFile(file) && !isWorkingStatusFile(file);
+    const fileStatusKey = `${file.index}:${file.working_dir}:${file.insertions}:${file.deletions}`;
+
+    React.useEffect(() => {
+        let cancelled = false;
+        const runtimeKey = getRuntimeKey();
+        const request: Promise<DiffData> = isImageFile(file.path)
+            ? git.getGitFileDiff(directory, { path: file.path, staged }).then((response) => ({
+                original: response.original ?? '',
+                modified: response.modified ?? '',
+                isBinary: response.isBinary,
+                submodule: response.submodule,
+                contextMode: 'full',
+            }))
+            : git.getGitDiff(directory, { path: file.path, staged, contextLines: DEFAULT_CONTEXT_DIFF_LINES }).then((response) => ({
+                ...createTextDiffDataFromPatch(file.path, response.diff, 'patch'),
+                submodule: response.submodule,
+            }));
+        // A refetch keeps the diff on screen until its replacement arrives.
+        void request.then(
+            (data) => {
+                if (cancelled || runtimeKey !== getRuntimeKey()) return;
+                setResult({ status: 'ready', data });
+            },
+            (error) => {
+                if (cancelled || runtimeKey !== getRuntimeKey()) return;
+                const message = error instanceof GitPathUnavailableError
+                    ? error.reason === 'nested_repository'
+                        ? t('diffView.unavailable.nestedRepositoryTitle')
+                        : error.reason === 'untracked_directory'
+                            ? t('diffView.unavailable.untrackedDirectoryTitle')
+                            : t('diffView.unavailable.missingTitle')
+                    : error instanceof Error ? error.message : String(error);
+                setResult({ status: 'error', message });
+            },
+        );
+        return () => {
+            cancelled = true;
+        };
+    }, [directory, file.path, fileStatusKey, git, revision, staged, t]);
+
+    if (result.status === 'loading') {
+        return (
+            <div className="flex items-center justify-center gap-2 px-4 py-4 typography-meta text-muted-foreground">
+                <Icon name="loader-4" className="size-4 animate-spin" />
+                {t('diffView.state.loadingDiff')}
+            </div>
+        );
+    }
+    if (result.status === 'error') {
+        return <div className="px-4 py-4 text-center typography-meta text-muted-foreground">{result.message}</div>;
+    }
+    if (!forceRenderLarge && file.insertions + file.deletions > LARGE_DIFF_CHANGED_LINES) {
+        return (
+            <div className="flex flex-col items-center gap-2 px-4 py-4 typography-meta text-muted-foreground">
+                {t('diffView.state.largeDiff', { count: file.insertions + file.deletions })}
+                <button
+                    type="button"
+                    className="typography-ui-label text-primary hover:underline"
+                    onClick={() => setForceRenderLarge(true)}
+                >
+                    {t('diffView.actions.renderAnyway')}
+                </button>
+            </div>
+        );
+    }
+    return (
+        <InlineDiffViewer
+            filePath={file.path}
+            diff={result.data}
+            staged={staged}
+            renderSideBySide={renderSideBySide}
+            wrapLines={wrapLines}
+            hideWhitespace={hideWhitespace}
+        />
+    );
+});
+
+type NestedRepositoryStatus =
+    | { kind: 'loading' }
+    | { kind: 'ready'; files: FileEntry[] }
+    | { kind: 'error'; message: string };
+
+interface NestedRepositoryChangesProps extends NestedRepositoryDiffProps {
+    /** Absolute path of the nested repository. */
+    directory: string;
+    /** Bumped when the parent's working tree may have changed; the listing reads again. */
+    revision: number;
+}
+
+/**
+ * Body of a status row that is a Git repository of its own inside the
+ * project. The parent's status lists it as one `dir/` row, so its changes are
+ * read from the nested repository: the changed files, each diff opened on
+ * demand, read-only. Committing happens with that repository open as a project.
+ */
+const NestedRepositoryChanges = React.memo<NestedRepositoryChangesProps>(({
+    directory,
+    revision,
+    renderSideBySide,
+    wrapLines,
+    hideWhitespace,
+}) => {
+    const { t } = useI18n();
+    const { git } = useRuntimeAPIs();
+    const addProject = useProjectsStore((state) => state.addProject);
+    const openNewSessionDraft = useSessionUIStore((state) => state.openNewSessionDraft);
+    const [status, setStatus] = React.useState<NestedRepositoryStatus>({ kind: 'loading' });
+    const [retryNonce, setRetryNonce] = React.useState(0);
+    const [expandedFiles, setExpandedFiles] = React.useState<ReadonlySet<string>>(() => new Set());
+
+    React.useEffect(() => {
+        let cancelled = false;
+        const runtimeKey = getRuntimeKey();
+        // A refetch keeps the listing on screen until its replacement arrives.
+        void git.getGitStatus(directory, { fresh: true }).then(
+            (next) => {
+                if (cancelled || runtimeKey !== getRuntimeKey()) return;
+                setStatus({ kind: 'ready', files: toNestedFileEntries(next) });
+            },
+            (error) => {
+                if (cancelled || runtimeKey !== getRuntimeKey()) return;
+                setStatus({ kind: 'error', message: error instanceof Error ? error.message : String(error) });
+            },
+        );
+        return () => {
+            cancelled = true;
+        };
+    }, [directory, git, revision, retryNonce]);
+
+    const toggleFile = React.useCallback((path: string) => {
+        setExpandedFiles((previous) => {
+            const next = new Set(previous);
+            if (!next.delete(path)) next.add(path);
+            return next;
+        });
+    }, []);
+
+    const openAsProject = React.useCallback(async () => {
+        const project = await addProject(directory);
+        if (!project) {
+            toast.error(t('diffView.nestedRepository.openFailed'));
+            return;
+        }
+        openNewSessionDraft({ selectedProjectId: project.id, directoryOverride: project.path });
+    }, [addProject, directory, openNewSessionDraft, t]);
+
+    return (
+        <div className="flex flex-col gap-2 py-3">
+            <div className="flex items-center gap-3 px-3">
+                <div className="min-w-0 flex-1">
+                    <div className="typography-ui-label font-semibold text-foreground">
+                        {t('diffView.unavailable.nestedRepositoryTitle')}
+                    </div>
+                    <div className="typography-meta text-muted-foreground">
+                        {t('diffView.nestedRepository.description')}
+                    </div>
+                </div>
+                <Button variant="outline" size="sm" className="shrink-0" onClick={() => void openAsProject()}>
+                    {t('diffView.nestedRepository.openAsProject')}
+                </Button>
+            </div>
+            {status.kind === 'loading' ? (
+                <div className="flex items-center justify-center gap-2 px-4 py-4 typography-meta text-muted-foreground">
+                    <Icon name="loader-4" className="size-4 animate-spin" />
+                    {t('diffView.nestedRepository.loading')}
+                </div>
+            ) : null}
+            {status.kind === 'error' ? (
+                <div className="flex flex-col items-center gap-2 px-4 py-4">
+                    <div className="typography-ui-label font-semibold text-foreground">
+                        {t('diffView.nestedRepository.loadFailed')}
+                    </div>
+                    <div className="typography-meta text-muted-foreground max-w-[32rem] text-center">{status.message}</div>
+                    <button
+                        type="button"
+                        className="typography-ui-label text-primary hover:underline"
+                        onClick={() => setRetryNonce((nonce) => nonce + 1)}
+                    >
+                        {t('diffView.actions.retry')}
+                    </button>
+                </div>
+            ) : null}
+            {status.kind === 'ready' && status.files.length === 0 ? (
+                <div className="px-3 typography-meta text-muted-foreground">{t('diffView.nestedRepository.noChanges')}</div>
+            ) : null}
+            {status.kind === 'ready' && status.files.length > 0 ? (
+                <ul className="flex flex-col">
+                    {status.files.map((nestedFile) => {
+                        const isOpen = expandedFiles.has(nestedFile.path);
+                        const descriptor = describeChange(nestedFile);
+                        return (
+                            <li key={nestedFile.path}>
+                                <button
+                                    type="button"
+                                    aria-expanded={isOpen}
+                                    onClick={() => toggleFile(nestedFile.path)}
+                                    className="flex w-full items-center gap-2 px-3 py-1 text-start text-foreground/80 transition-colors hover:text-foreground"
+                                    title={nestedFile.path}
+                                >
+                                    <Icon name={isOpen ? 'arrow-down-s' : 'arrow-right-s'} className="size-4 shrink-0 text-muted-foreground" />
+                                    <span
+                                        className="typography-micro font-semibold w-4 shrink-0 text-center uppercase"
+                                        style={{ color: descriptor.color }}
+                                        title={t(descriptor.descriptionKey)}
+                                        aria-label={t(descriptor.descriptionKey)}
+                                    >
+                                        {descriptor.code}
+                                    </span>
+                                    <FileTypeIcon filePath={nestedFile.path} className="size-3.5 shrink-0" />
+                                    <span
+                                        className="oc-ui-start-align min-w-0 flex-1 truncate typography-meta"
+                                        style={{ direction: 'rtl', unicodeBidi: 'plaintext' }}
+                                    >
+                                        {nestedFile.path}
+                                    </span>
+                                    {formatDiffTotals(nestedFile.insertions, nestedFile.deletions)}
+                                </button>
+                                {isOpen ? (
+                                    <NestedRepositoryFileDiff
+                                        directory={directory}
+                                        file={nestedFile}
+                                        revision={revision}
+                                        renderSideBySide={renderSideBySide}
+                                        wrapLines={wrapLines}
+                                        hideWhitespace={hideWhitespace}
+                                    />
+                                ) : null}
+                            </li>
+                        );
+                    })}
+                </ul>
+            ) : null}
+        </div>
+    );
+});
+
 interface MultiFileDiffEntryProps {
     visible?: boolean;
     directory: string;
@@ -777,10 +1054,10 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
     }, [file.path, onSelect]);
 
     // Switching between the staged and unstaged side shows a different diff,
-    // so the side being switched to must not show what it held before.
+    // so the side being switched to must not show what it held before. Reset
+    // while hidden or collapsed too: the entry loads again only once shown.
     const appliedStagedRef = React.useRef(staged);
     React.useEffect(() => {
-        if (!visible) return;
         if (appliedStagedRef.current === staged) return;
         appliedStagedRef.current = staged;
         if (!staged) {
@@ -791,7 +1068,7 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
 
         setDiffLoadFailure(null);
         lastDiffRequestRef.current = null;
-    }, [staged, visible]);
+    }, [staged]);
 
     // Version the displayed live diff was fetched for: the content revision
     // and the file's status row, which moves with every edit. An older diff
@@ -1091,21 +1368,26 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                     {!isMounted && !diffLoadFailure ? (
                         <div className="h-40 border border-border/40 bg-background/40" />
                     ) : null}
-                    {diffLoadFailure?.kind === 'unavailable' ? (
+                    {diffLoadFailure?.kind === 'unavailable' && diffLoadFailure.reason === 'nested_repository' ? (
+                        <NestedRepositoryChanges
+                            directory={toAbsolutePath(directory, file.path)}
+                            revision={contentRevision}
+                            renderSideBySide={renderSideBySide}
+                            wrapLines={wrapLines}
+                            hideWhitespace={hideWhitespace}
+                        />
+                    ) : null}
+                    {diffLoadFailure?.kind === 'unavailable' && diffLoadFailure.reason !== 'nested_repository' ? (
                         <div className="flex flex-col items-center gap-2 px-4 py-8 text-sm text-muted-foreground">
                             <div className="typography-ui-label font-semibold text-foreground">
-                                {diffLoadFailure.reason === 'nested_repository'
-                                    ? t('diffView.unavailable.nestedRepositoryTitle')
-                                    : diffLoadFailure.reason === 'untracked_directory'
-                                        ? t('diffView.unavailable.untrackedDirectoryTitle')
-                                        : t('diffView.unavailable.missingTitle')}
+                                {diffLoadFailure.reason === 'untracked_directory'
+                                    ? t('diffView.unavailable.untrackedDirectoryTitle')
+                                    : t('diffView.unavailable.missingTitle')}
                             </div>
                             <div className="typography-meta text-muted-foreground max-w-[32rem] text-center">
-                                {diffLoadFailure.reason === 'nested_repository'
-                                    ? t('diffView.unavailable.nestedRepositoryDescription')
-                                    : diffLoadFailure.reason === 'untracked_directory'
-                                        ? t('diffView.unavailable.untrackedDirectoryDescription')
-                                        : t('diffView.unavailable.missingDescription')}
+                                {diffLoadFailure.reason === 'untracked_directory'
+                                    ? t('diffView.unavailable.untrackedDirectoryDescription')
+                                    : t('diffView.unavailable.missingDescription')}
                             </div>
                             {diffLoadFailure.reason === 'path_not_found' ? (
                                 <button
@@ -1196,6 +1478,12 @@ interface DiffViewProps {
     targetFilePath?: string | null;
     /** Render diff content flush with the container edges (no outer padding). */
     flushContent?: boolean;
+    /**
+     * Another project's folder, for a pull request opened from the Tracker:
+     * the view then shows that PR only, read through that project, with
+     * nothing tied to the session on screen. Null works in the panel's own.
+     */
+    directory?: string | null;
 }
 
 export const DiffView: React.FC<DiffViewProps> = ({
@@ -1208,13 +1496,16 @@ export const DiffView: React.FC<DiffViewProps> = ({
     onDiffScopeChange,
     targetFilePath = null,
     flushContent = false,
+    directory: targetDirectory = null,
 }) => {
     const { t } = useI18n();
     const inPanelHeader = useInContextPanelHeader();
     const toolbarRef = React.useRef<HTMLDivElement | null>(null);
     useDiffToolbarFit(toolbarRef);
     const { git, files, sourceControl } = useRuntimeAPIs();
-    const rootDirectory = useEffectiveDirectory();
+    const panelDirectory = useEffectiveDirectory();
+    const foreign = Boolean(targetDirectory);
+    const rootDirectory = targetDirectory ?? panelDirectory;
     const runtimeKey = useGitStore((state) => state.runtimeKey);
     // Diffs belong to the repository being diffed: when the root is not
     // itself a repository, operate on the resolved nested repository instead.
@@ -1223,6 +1514,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
     // The binding follows the repository actually being diffed.
     const binding = useRepositoryBinding(effectiveDirectory, sourceControl);
     const openContextSurface = useUIStore((state) => state.openContextSurface);
+    const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
     const requestWalkthroughTarget = useWalkthroughStore((state) => state.requestTarget);
     const { screenWidth, isMobile } = useDeviceInfo();
 
@@ -1268,7 +1560,9 @@ export const DiffView: React.FC<DiffViewProps> = ({
     const diffFileListMode = useUIStore((state) => state.diffFileListMode);
     const setDiffFileListMode = useUIStore((state) => state.setDiffFileListMode);
     const openContextFileAtLine = useUIStore((state) => state.openContextFileAtLine);
-    const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+    // Another project's PR has nothing to do with the session on screen.
+    const panelSessionId = useSessionUIStore((state) => state.currentSessionId);
+    const currentSessionId = foreign ? null : panelSessionId;
     const sessionMessages = useSessionMessages(activeDiffScope === 'turn' ? currentSessionId ?? '' : '', rootDirectory ?? undefined);
     const diffWrapLines = diffWrapLinesStore;
     const forcedStaged = activeDiffScope === 'staged' ? true : activeDiffScope === 'working' ? false : null;
@@ -1734,6 +2028,11 @@ export const DiffView: React.FC<DiffViewProps> = ({
         if (visibleSyncFrameRef.current !== null) return;
         visibleSyncFrameRef.current = window.requestAnimationFrame(syncVisibleStackedFiles);
     }, [syncVisibleStackedFiles, visible]);
+    // The file entries' callbacks reach the sync through this ref, so they
+    // keep their identity when the view is shown or hidden: a new callback
+    // re-rendered every entry (150 of them in a large change) on each open.
+    const queueVisibleStackedFilesSyncRef = React.useRef(queueVisibleStackedFilesSync);
+    queueVisibleStackedFilesSyncRef.current = queueVisibleStackedFilesSync;
 
     React.useEffect(() => {
         const scrollRoot = diffScrollRef.current;
@@ -1918,8 +2217,8 @@ export const DiffView: React.FC<DiffViewProps> = ({
         } else {
             map.delete(path);
         }
-        queueVisibleStackedFilesSync();
-    }, [queueVisibleStackedFilesSync]);
+        queueVisibleStackedFilesSyncRef.current();
+    }, []);
 
     const handleStackedEntryExpandedChange = React.useCallback((path: string, expanded: boolean) => {
         cancelPendingScrollAlignment();
@@ -1944,8 +2243,8 @@ export const DiffView: React.FC<DiffViewProps> = ({
                 return next;
             });
         }
-        queueVisibleStackedFilesSync();
-    }, [cancelPendingScrollAlignment, queueVisibleStackedFilesSync]);
+        queueVisibleStackedFilesSyncRef.current();
+    }, [cancelPendingScrollAlignment]);
 
     const handleExpandOrCollapseAll = React.useCallback(() => {
         cancelPendingScrollAlignment();
@@ -2238,12 +2537,20 @@ export const DiffView: React.FC<DiffViewProps> = ({
             setOpeningEditorFilePath((current) => (current === filePath ? null : current));
         }
     }, [activeDiffStaged, effectiveDirectory, files, git, openContextFileAtLine, setDiff]);
+    const handleOpenInEditor = React.useCallback((filePath: string, diffData: DiffData | null) => {
+        void openFileInEditorAtChange(filePath, diffData);
+    }, [openFileInEditorAtChange]);
+    const handleRetryComparisonDiff = React.useCallback(() => setComparisonRetryRevision((revision) => revision + 1), []);
 
     const renderStackedDiffView = () => {
         if (!effectiveDirectory) return null;
-        const renderEntry = (file: FileEntry, isSingleFile = false) => (
+        const renderEntry = (file: FileEntry, isSingleFile = false) => {
+            const isExpanded = isSingleFile || expandedFiles.has(file.path);
+            return (
             <MultiFileDiffEntry
-                visible={visible}
+                // Only an expanded entry loads while shown; a collapsed one
+                // stays out of the re-render when the view is shown or hidden.
+                visible={visible && isExpanded}
                 key={`${getRuntimeKey()}:${effectiveDirectory}:${file.path}`}
                 directory={effectiveDirectory}
                 file={file}
@@ -2251,16 +2558,14 @@ export const DiffView: React.FC<DiffViewProps> = ({
                 wrapLines={diffWrapLines}
                 hideWhitespace={diffHideWhitespace}
                 isSelected={false}
-                isExpanded={isSingleFile || expandedFiles.has(file.path)}
+                isExpanded={isExpanded}
                 isMounted={isSingleFile || mountedStackedFiles.has(file.path) || file.path === pinnedStackedTarget}
                 onSelect={handleSelectFile}
                 onExpandedChange={handleStackedEntryExpandedChange}
                 registerSectionRef={registerSectionRef}
-                showOpenInEditorAction={showOpenInEditorAction && activeDiffScope !== 'turn'}
+                showOpenInEditorAction={showOpenInEditorAction && activeDiffScope !== 'turn' && !foreign}
                 isOpeningInEditor={openingEditorFilePath === file.path}
-                onOpenInEditor={(filePath, diffData) => {
-                    void openFileInEditorAtChange(filePath, diffData);
-                }}
+                onOpenInEditor={handleOpenInEditor}
                 staged={getFileStaged(file.path)}
                 readOnlyActions={activeDiffScope === 'branch' || activeDiffScope === 'commit' || activeDiffScope === 'pr'}
                 hunkActionsEnabled={activeDiffScope === 'all' || activeDiffScope === 'working' || activeDiffScope === 'staged'}
@@ -2268,7 +2573,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
                 comparisonDiff={activeDiffScope === 'branch' || activeDiffScope === 'commit' || activeDiffScope === 'pr'
                     ? comparisonDiffData.get(file.path) ?? EMPTY_COMPARISON_DIFF
                     : undefined}
-                onRetryComparisonDiff={() => setComparisonRetryRevision((revision) => revision + 1)}
+                onRetryComparisonDiff={handleRetryComparisonDiff}
                 loadFullComparisonDiff={loadFullComparisonDiff}
                 initialDiffData={
                     activeDiffScope === 'turn'
@@ -2276,8 +2581,8 @@ export const DiffView: React.FC<DiffViewProps> = ({
                         : null
                 }
             />
-        );
-
+            );
+        };
 
         const getFileStaged = (path: string) => {
             if (forcedStaged !== null) {
@@ -2491,7 +2796,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
                         repositoryRoot={rootDirectory ?? undefined}
                     />
                 ) : null}
-                {!isMobile && (
+                {!isMobile && !foreign && (
                     activeDiffScope !== 'all' ? (
                         <ChangeScopeSelector
                             scope={activeDiffScope}
@@ -2618,7 +2923,8 @@ export const DiffView: React.FC<DiffViewProps> = ({
                             requestWalkthroughTarget(directory, activeDiffScope === 'pr' && selectedPr && pullRequestContext
                                 ? { source: selectedPr, context: pullRequestContext }
                                 : localSource);
-                            openContextSurface(rootDirectory ?? directory, 'walkthrough');
+                            if (foreign && panelDirectory) openContextPanelTab(panelDirectory, { mode: 'walkthrough', targetDirectory: rootDirectory });
+                            else openContextSurface(rootDirectory ?? directory, 'walkthrough');
                         }}
                         className={cn('diff-toolbar__walkthrough-button h-7 flex-shrink-0 gap-1.5 px-2', WALKTHROUGH_ACTION_CLASS)}
                         aria-label={t('walkthrough.action.open')}

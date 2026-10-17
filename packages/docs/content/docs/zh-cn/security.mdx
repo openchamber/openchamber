@@ -172,6 +172,7 @@ environment:
 - 更新检查照常运行，安全修复仍能送达，但它从不上报使用情况，连匿名安装 ID 也不上报。
 - [外部隧道](/zh-cn/tunnels/)（Cloudflare、ngrok）会关闭。隧道提供商会在其边缘解密流量，能以明文看到每一个请求。
 - `.drawio` 图表以 XML 文本打开。图表编辑器是 diagrams.net 的页面，在其中打开图表会把文件交给该页面。
+- 侧边栏中的集成目录会被隐藏。它会从 OpenChamber 自带的列表安装外部服务。在设置中添加 MCP 服务器、插件和技能仍和以前一样可用。
 - 从公共 CDN 加载的界面和代码字体会改用系统字体。你的选择会保留，待该模式关闭时恢复。
 - [Private Relay](/zh-cn/private-relay/) 只能通过你自己的中继使用。运行一个[自托管中继](https://github.com/openchamber/openchamber-relay)，并用策略文件中的 `relayUrl` 或 `OPENCHAMBER_RELAY_URL=wss://relay.example.com/ws` 让 OpenChamber 指向它。共享中继同样无法读取你的流量，因为它是端到端加密的，但你自己的中继能把连接元数据和进入这台机器的通道留在你的网络内。没有你自己的中继，就完全无法配对设备。
 - OpenChamber 只在它所运行的机器上监听。允许本地网络中其他设备打开应用的桌面设置会关闭，服务器也会拒绝在网络地址上启动，无论是通过 CLI（`--host`、`--lan`）还是通过环境。如果应用运行期间出现了策略文件，来自其他机器的连接会被断开，直到下次启动。要允许网络访问，请在策略文件中设置 `"allowNetworkAccess": true`，或在由环境开启企业模式的情况下设置 `OPENCHAMBER_ALLOW_NETWORK_ACCESS=1`。请注意连接是未加密的 HTTP，在共享网络中任何人都能读取；其他人要访问的服务器，请放在[你自己的 HTTPS](/zh-cn/reverse-proxy/) 后面。

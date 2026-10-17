@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, test } from 'bun:test';
 import type { SyncEvent } from '@/lib/opencode/events';
 import {
   applyGlobalBlockingRequestEvents,
+  applyWaitingPageEvent,
   resetGlobalBlockingRequests,
   seedGlobalBlockingRequests,
   useGlobalBlockingRequestsStore,
@@ -23,10 +24,38 @@ const bySession = () => useGlobalBlockingRequestsStore.getState().bySession;
 beforeEach(() => resetGlobalBlockingRequests());
 
 describe('global blocking requests index', () => {
+  test('keeps a waiting page beside the session\'s forms until the server says it stopped waiting', () => {
+    const noDirectory = () => null;
+    applyGlobalBlockingRequestEvents('/far', [formCreated(form('q1', 's1'))]);
+    applyWaitingPageEvent({ type: 'openchamber.page-waiting', properties: { sessionID: 's1', directory: '/far/', page: { id: 'call_1', title: 'Pick a layout' } } }, noDirectory);
+
+    expect(bySession().get('s1')).toEqual({ directory: '/far', permissions: [], forms: [form('q1', 's1')], pages: [{ id: 'call_1', sessionID: 's1', title: 'Pick a layout' }] });
+
+    // Settling the form leaves the page; settling the page empties the session.
+    applyGlobalBlockingRequestEvents('/far', [{ type: 'form.settled', properties: { sessionID: 's1', formID: 'q1' } }]);
+    expect(bySession().get('s1')?.pages.map((page) => page.id)).toEqual(['call_1']);
+    applyWaitingPageEvent({ type: 'openchamber.page-settled', properties: { sessionID: 's1', pageID: 'call_1' } }, noDirectory);
+    expect(bySession().has('s1')).toBe(false);
+  });
+
+  test('places a waiting page by its session when the server names no directory, and skips one it cannot place', () => {
+    const page = (sessionID: string) => ({ type: 'openchamber.page-waiting' as const, properties: { sessionID, directory: null, page: { id: 'call_1', title: 'Pick' } } });
+    applyWaitingPageEvent(page('s1'), (sessionId) => (sessionId === 's1' ? '/known' : null));
+    applyWaitingPageEvent(page('s2'), () => null);
+
+    expect(bySession().get('s1')?.directory).toBe('/known');
+    expect(bySession().has('s2')).toBe(false);
+  });
+
+  test('seeds waiting pages from the host', () => {
+    seedGlobalBlockingRequests([{ sessionId: 's1', directory: '/other', permissions: [], forms: [], pages: [{ id: 'call_1', sessionID: 's1', title: 'Pick' }] }]);
+    expect(bySession().get('s1')?.pages.map((page) => page.id)).toEqual(['call_1']);
+  });
+
   test('tracks asks per session and settles them by request id', () => {
     applyGlobalBlockingRequestEvents('/far/', [permissionAsked(permission('p1', 's1')), formCreated(form('q1', 's1')), permissionAsked(permission('p2', 's2'))]);
 
-    expect(bySession().get('s1')).toEqual({ directory: '/far', permissions: [permission('p1', 's1')], forms: [form('q1', 's1')] });
+    expect(bySession().get('s1')).toEqual({ directory: '/far', permissions: [permission('p1', 's1')], forms: [form('q1', 's1')], pages: [] });
     expect(bySession().get('s2')?.permissions.map((p) => p.id)).toEqual(['p2']);
 
     applyGlobalBlockingRequestEvents('/far', [

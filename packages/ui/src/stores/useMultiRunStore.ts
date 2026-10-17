@@ -4,7 +4,7 @@ import { routeMessage, useSessionUIStore } from '@/sync/session-ui-store';
 import { devtools } from 'zustand/middleware';
 import type { CreateMultiRunParams, CreateMultiRunResult } from '@/types/multirun';
 import { opencodeClient } from '@/lib/opencode/client';
-import { fetchSessionKnowledge, reportSessionKnowledgeDelivered } from '@/lib/sessionKnowledgeApi';
+import { syncSessionKnowledge } from '@/lib/sessionKnowledgeApi';
 import { getWorktreeSetupWaitEnabled, saveWorktreeSetupCommands } from '@/lib/openchamberConfig';
 import type { ProjectRef } from '@/lib/worktrees/worktreeManager';
 import { createWorktreeWithDefaults, resolveRootTrackingRemote } from '@/lib/worktrees/worktreeCreate';
@@ -98,12 +98,10 @@ export async function dispatchRunPrompt(input: {
 }): Promise<void> {
   input.assertCurrent();
   const expandText = useSnippetsStore.getState().expandText;
-  const [text, knowledge] = await Promise.all([
-    expandText(input.prompt).catch(() => input.prompt),
-    fetchSessionKnowledge(input.directory, input.sessionId),
-  ]);
+  const knowledgeSync = syncSessionKnowledge(input.directory, input.sessionId);
+  const text = await expandText(input.prompt).catch(() => input.prompt);
   input.assertCurrent();
-  const route = await routeMessage({
+  await routeMessage({
     runtimeKey: input.runtimeKey,
     sessionId: input.sessionId,
     directory: input.directory,
@@ -113,13 +111,8 @@ export async function dispatchRunPrompt(input: {
     variant: input.variant,
     agent: input.agent,
     files: input.files,
-    additionalParts: knowledge.text
-      ? [{ text: knowledge.text, synthetic: true, systemContext: 'session-knowledge' }]
-      : undefined,
+    knowledgeSync,
   });
-  if (knowledge.text && route !== 'shell') {
-    void reportSessionKnowledgeDelivered(input.directory, input.sessionId, knowledge.signature);
-  }
 }
 
 const resolveActiveProject = (): ProjectRef | null => {

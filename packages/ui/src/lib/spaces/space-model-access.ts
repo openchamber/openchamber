@@ -15,6 +15,8 @@
 // ("free tier can only be used from within OpenCode"), and no grant gives a space anything else.
 
 import { isSpaceGrantableProvider } from './model-access';
+import { useConfigStore } from '@/stores/useConfigStore';
+import { useUIStore } from '@/stores/useUIStore';
 import { spaceMenuActionsOf } from './space-repair';
 import { spaceIdOfDirectory } from './space-route';
 import { useSpacesStore } from './spaces-store';
@@ -85,14 +87,36 @@ export const spaceModelRefusal = (target: SpaceTarget, providerId: string): Spac
   if (!space) return null;
   const { spaceId, directory } = space;
   if (providerId === OPENCODE_PROVIDER_ID) return { spaceId, providerId, reason: 'opencode' };
-  const { journey, creationAccess, customProviders } = useSpacesStore.getState();
+  const { journey, customProviders } = useSpacesStore.getState();
   const entry = journey?.get(spaceId);
   // A provider of the user's own is grantable when the host lists it for the space's project;
   // a project not read yet refuses nothing, as the rule above says.
   const custom = entry?.projectDirectory ? customProviders.get(entry.projectDirectory)?.some((provider) => provider.id === providerId) === true : false;
   if (!custom && !isSpaceGrantableProvider(providerId)) return null;
-  if (entry?.state === 'running' && creationAccess.get(spaceId)?.kind !== 'giving') return refusalFromList(entry, providerId);
+  // The host gives the creation's access before it says "ready", so a running space is judged by the list.
+  if (entry?.state === 'running') return refusalFromList(entry, providerId);
   const chosen = chosenByDirectory.get(directory);
   if (chosen && !chosen.has(providerId)) return { spaceId, providerId, reason: 'not_granted' };
+  return null;
+};
+
+/**
+ * The model the composer moves to when a new space is given access to `providers` and the
+ * composer's model is on none of them: otherwise the first message on it would only come back
+ * with a refusal. The model last used of the first such provider the catalog has, else its first
+ * model the user did not hide; null when the composer's provider is among them or none is known.
+ */
+export const composerModelForSpaceAccess = (providers: readonly string[]): { providerId: string; modelId: string } | null => {
+  const { providers: catalog, currentProviderId } = useConfigStore.getState();
+  if (providers.length === 0 || providers.includes(currentProviderId)) return null;
+  const { recentModels, hiddenModels } = useUIStore.getState();
+  for (const providerId of providers) {
+    const provider = catalog.find((entry) => entry.id === providerId);
+    if (!provider) continue;
+    const recent = recentModels.find((entry) => entry.providerID === providerId && provider.models.some((model) => model.modelID === entry.modelID));
+    if (recent) return { providerId, modelId: recent.modelID };
+    const visible = provider.models.find((model) => !hiddenModels.some((hidden) => hidden.providerID === providerId && hidden.modelID === model.modelID));
+    if (visible) return { providerId, modelId: visible.modelID };
+  }
   return null;
 };

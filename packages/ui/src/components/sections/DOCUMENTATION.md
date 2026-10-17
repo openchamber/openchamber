@@ -122,7 +122,9 @@ provider logos, so Settings and every model picker agree.
 
 The "Connect provider" page lists `GET /api/integration` minus the
 integrations that already have a connection, MCP OAuth registrations
-(`mcp_*`), web search providers, and providers OpenCode already lists (those
+(`mcp_*`), web search providers (the ones `websearch` lists, and integrations
+a plugin marks with `metadata.websearch`, which it lists for search only once
+connected), and providers OpenCode already lists (those
 connect from their own page); v2's `GET /api/provider` lists only what is
 configured or connected right now, so it cannot offer anything new
 (`providers/connectableProviders.ts`). Popular providers come first as cards,

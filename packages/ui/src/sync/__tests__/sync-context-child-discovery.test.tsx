@@ -10,6 +10,7 @@ import type { SessionListOptions, SessionPage } from '@/lib/opencode/client'
 const DIRECTORY = '/repo/discovery'
 const cursorsSeenOnDiscoveryCalls: Array<string | undefined> = []
 const parentMessageFetches: string[] = []
+let activeStatusReads = 0
 
 const rootSession = (id: string, title: string, updated: number): Session => ({
   id,
@@ -75,7 +76,10 @@ mock.module('@/lib/opencode/client', () => ({
       project: { id: 'project', directory: DIRECTORY, canonical: DIRECTORY },
     }),
     getConfig: async () => ({}),
-    getActiveSessionStatuses: async () => ({}),
+    getActiveSessionStatuses: async () => {
+      activeStatusReads += 1
+      return {}
+    },
     listCommands: async () => [],
     listAgents: async () => [],
     listMcpServers: async () => [],
@@ -204,12 +208,14 @@ describe('SyncProvider child-session discovery pagination', () => {
         </SyncProvider>,
       ))
 
-      // Mark the parent as viewed so later ticks keep it as a discovery
-      // candidate even while bootstrap's children list is still pending.
       setActiveSession(DIRECTORY, 'ses_parent')
 
       const store = getSyncChildStores().getChild(DIRECTORY)
       expect(store).toBeDefined()
+      // A parent spawning subagents is running a turn. Discovery follows live
+      // work, so the busy parent stays a candidate while bootstrap's children
+      // list is still pending; an idle viewed session is not polled.
+      store?.setState((state) => ({ session_status: { ...state.session_status, ses_parent: { type: 'busy' } } }))
 
       let discovered = false
       let materialized = false
@@ -240,4 +246,42 @@ describe('SyncProvider child-session discovery pagination', () => {
       dom.restore()
     }
   }, 12000)
+})
+
+describe('SyncProvider active-session watchdog status poll', () => {
+  // Over the private relay a 5 s poll keeps the relay awake, so an open but
+  // idle session must not be polled; live work still is.
+  test('polls status for a busy session and not for an idle viewed one', async () => {
+    const dom = installHookTestDomWithStorage()
+    const sdk = OpenCode.make({ baseUrl: 'http://poll.test', fetch: () => hang<Response>() })
+    try {
+      seedPersistedSessions(DIRECTORY, [rootSession('ses_idle', 'idle', 1500)])
+      const root = createRoot(dom.container)
+      await act(async () => root.render(
+        <SyncProvider sdk={sdk} directory={DIRECTORY}>
+          <div />
+        </SyncProvider>,
+      ))
+      setActiveSession(DIRECTORY, 'ses_idle')
+      const store = getSyncChildStores().getChild(DIRECTORY)
+      // Rendered history makes the viewed session resolved and idle.
+      store?.setState((state) => ({
+        message: { ...state.message, ses_idle: [] },
+        session_status: { ...state.session_status, ses_idle: { type: 'idle' } },
+      }))
+
+      await new Promise((resolve) => setTimeout(resolve, 1000))
+      const idleBaseline = activeStatusReads
+      await new Promise((resolve) => setTimeout(resolve, 6000))
+      expect(activeStatusReads).toBe(idleBaseline)
+
+      store?.setState((state) => ({ session_status: { ...state.session_status, ses_idle: { type: 'busy' } } }))
+      expect(await waitFor(() => activeStatusReads > idleBaseline, 6000)).toBe(true)
+
+      await act(async () => root.unmount())
+    } finally {
+      setActiveSession('', '')
+      dom.restore()
+    }
+  }, 20000)
 })

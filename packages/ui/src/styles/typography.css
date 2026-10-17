@@ -233,6 +233,17 @@
   width: 100%;
 }
 
+/* While the prompt rail is enabled (it sits at the chat's end edge: 6px offset
+   + 28px gutter), the transcript's scroller pads that edge only, already before
+   the rail appears with the second prompt, enough on top of
+   the column's own padding to keep the text a few pixels clear of the rail
+   without narrowing the chat. On the scroller, not the message column:
+   columns nest (a turn's activity sits inside one), and a rule on the column
+   applied at every level. */
+[data-prompt-rail] .chat-scroll {
+  padding-inline-end: 1.5rem;
+}
+
 /* A message reached through a message link shows a selection tint behind its
    content for a moment, then fades out: the whole column for a reply, only
    the bubble for a user message, which sits narrower at the side. The

@@ -10,7 +10,7 @@ import type { IconName } from '@/components/icon/icons';
  *
  * Every readout is a labelled row — icon, name, trailing value — so a glance
  * answers "what is this number" without hovering. Sections carry a heading and
- * are separated by a hairline; the panel itself stays chrome-less, since it is
+ * are separated by space alone; the panel itself stays chrome-less, since it is
  * an object inside the chat rather than a docked pane.
  */
 
@@ -22,8 +22,7 @@ import type { IconName } from '@/components/icon/icons';
  */
 const SECTION_CLASS = cn(
   'flex flex-col',
-  '[&:not(:first-child)]:mt-3 [&:not(:first-child)]:border-t',
-  '[&:not(:first-child)]:border-[var(--interactive-border)] [&:not(:first-child)]:pt-3',
+  '[&:not(:first-child)]:mt-5',
 );
 
 const HEADING_CLASS = 'text-xs font-semibold text-foreground';

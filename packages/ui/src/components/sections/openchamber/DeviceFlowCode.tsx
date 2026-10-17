@@ -2,6 +2,7 @@ import React from 'react';
 import { Button } from '@/components/ui/button';
 import { SettingsGroupTitle } from '@/components/sections/shared/SettingsSection';
 import { useI18n } from '@/lib/i18n';
+import { BusyDots } from '@/components/ui/busy-dots';
 
 /**
  * Device-authorization step shared by the GitHub and GitLab cards: the code
@@ -18,7 +19,7 @@ export const DeviceFlowCode: React.FC<{
 }> = ({ code, description, openLabel, onOpen, onCancel, disabled = false }) => {
   const { t } = useI18n();
   return (
-    <div className="space-y-3 rounded-md border border-[var(--surface-subtle)] bg-[var(--surface-muted)] p-3">
+    <div className="oc-tile-inset space-y-3 rounded-md p-3">
       <div className="space-y-1">
         <SettingsGroupTitle>{t('settings.github.page.flow.title')}</SettingsGroupTitle>
         <p className="typography-meta text-muted-foreground">{description}</p>
@@ -30,8 +31,8 @@ export const DeviceFlowCode: React.FC<{
         <Button size="sm" onClick={onOpen}>{openLabel}</Button>
       </div>
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="typography-micro text-muted-foreground animate-pulse">
-          {t('settings.github.page.flow.waiting')}
+        <span className="typography-micro text-muted-foreground">
+          {t('settings.github.page.flow.waiting')}<BusyDots /> {t('settings.github.page.flow.autoRefresh')}
         </span>
         <Button size="sm" variant="ghost" disabled={disabled} onClick={onCancel}>
           {t('settings.common.actions.cancel')}

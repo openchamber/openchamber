@@ -1,9 +1,9 @@
-import { spaceApiPath } from '@/lib/spaces/space-route';
 import React from 'react';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 
 import { toast } from '@/components/ui';
 import { copyTextToClipboard } from '@/lib/clipboard';
+import { getDisambiguatingFolders } from '@/lib/path-utils';
 
 import {
   DropdownMenu,
@@ -30,6 +30,7 @@ import { CodeMirrorEditor } from '@/components/ui/CodeMirrorEditor';
 import { GoToLineDialog } from './GoToLineDialog';
 import { DocumentSymbolsPanel } from './DocumentSymbolsPanel';
 import { GitignoredToggleButton } from '@/components/layout/GitignoredToggleButton';
+import { useZoneInteractive } from '@/components/layout/zoneInteractiveContext';
 import { MarkdownPreviewSearch } from './MarkdownPreviewSearch';
 import { PreviewToggleButton } from './PreviewToggleButton';
 import { createFileContentPoller } from './fileContentPoller';
@@ -192,7 +193,7 @@ const OpenInAppListIcon = ({ label, iconDataUrl }: { label: string; iconDataUrl?
     <span
       className={cn(
         'size-4 rounded-sm flex items-center justify-center',
-        'bg-[var(--surface-muted)] text-[9px] font-medium text-muted-foreground'
+        'oc-tile-inset text-[9px] font-medium text-muted-foreground'
       )}
     >
       {initial}
@@ -284,7 +285,14 @@ const getDisplayPath = (root: string | null, path: string): string => {
 
 const DEFAULT_IGNORED_DIR_NAMES = new Set(['node_modules']);
 
-const ScrollingFileName: React.FC<{ name: string }> = ({ name }) => {
+// A folder before the name tells apart open files that share it.
+const FileNameText: React.FC<{ name: string; folder?: string }> = ({ name, folder }) => (
+  folder ? (
+    <span dir="ltr"><span className="text-muted-foreground opacity-70">{folder}/</span>{name}</span>
+  ) : <>{name}</>
+);
+
+const ScrollingFileName: React.FC<{ name: string; folder?: string }> = ({ name, folder }) => {
   const containerRef = React.useRef<HTMLSpanElement | null>(null);
   const textRef = React.useRef<HTMLSpanElement | null>(null);
   const [overflowing, setOverflowing] = React.useState(false);
@@ -308,18 +316,20 @@ const ScrollingFileName: React.FC<{ name: string }> = ({ name }) => {
     return () => {
       resizeObserver.disconnect();
     };
-  }, [name]);
+  }, [name, folder]);
 
+  const text = <FileNameText name={name} folder={folder} />;
   return (
     <span ref={containerRef} className="relative block min-w-0 flex-1 overflow-hidden whitespace-nowrap">
-      <span ref={textRef} aria-hidden="true" className="invisible absolute whitespace-nowrap">{name}</span>
+      <span ref={textRef} aria-hidden="true" className="invisible absolute whitespace-nowrap">{text}</span>
       {overflowing ? (
-        <span className="open-file-name-marquee-track">
-          <span className="open-file-name-marquee-item">{name}</span>
-          <span className="open-file-name-marquee-item" aria-hidden="true">{name}</span>
+        // Keyed by the file, so each newly opened name scrolls past once.
+        <span key={`${folder}/${name}`} className="open-file-name-marquee-track">
+          <span className="open-file-name-marquee-item">{text}</span>
+          <span className="open-file-name-marquee-item" aria-hidden="true">{text}</span>
         </span>
       ) : (
-        <span className="block min-w-0 truncate">{name}</span>
+        <span className="block min-w-0 truncate">{text}</span>
       )}
     </span>
   );
@@ -825,6 +835,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
   const alwaysShowActions = isMobile || isTablet;
   const showHidden = useDirectoryShowHidden();
   const showGitignored = useFilesViewShowGitignored();
+  const zoneInteractive = useZoneInteractive();
 
   const currentDirectory = useEffectiveDirectory() ?? '';
   const root = normalizePath(currentDirectory.trim());
@@ -1003,6 +1014,11 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
   }, []);
 
   const openFiles = React.useMemo(() => openPaths.map(toFileNode), [openPaths, toFileNode]);
+  const openFileFolders = React.useMemo(
+    () => getDisambiguatingFolders(openPaths.map((path) => getDisplayPath(root, path))),
+    [openPaths, root],
+  );
+  const getOpenFileFolder = (path: string) => openFileFolders.get(getDisplayPath(root, path));
   const effectiveSelectedPath = React.useMemo(() => {
     if (selectedPath) {
       const comparableSelected = toComparablePath(selectedPath);
@@ -3299,6 +3315,12 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
       return;
     }
 
+    // The jump focuses the editor, which does nothing inside a zone that is
+    // still opening (inert); it runs once the zone settles.
+    if (!zoneInteractive) {
+      return;
+    }
+
     const view = editorViewRef.current;
     if (!view) {
       scheduleNavigationRetry();
@@ -3366,10 +3388,12 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     setPendingFileNavigation,
     textViewMode,
     toFileNode,
+    zoneInteractive,
   ]);
 
   React.useEffect(() => {
-    if (!pendingFileFocusPath || !root) {
+    // Focus inside a zone that is still opening (inert) does nothing.
+    if (!pendingFileFocusPath || !root || !zoneInteractive) {
       return;
     }
 
@@ -3414,6 +3438,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     selectedFile?.path,
     setPendingFileFocusPath,
     textViewMode,
+    zoneInteractive,
   ]);
 
   const nudgeEditorSelectionAboveKeyboard = React.useCallback((view: EditorView | null) => {
@@ -3774,7 +3799,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     : '';
 
   const pdfSrc = selectedFile?.path && usesRawAssetUrl && pdfAssetAuthKey && pdfAssetAuthReadyKey === pdfAssetAuthKey
-    ? getRuntimeUrlResolver().authenticatedAsset(spaceApiPath('/api/fs/raw', root), {
+    ? getRuntimeUrlResolver().authenticatedAsset('/api/fs/raw', {
       path: selectedFile.path,
       allowOutsideWorkspace: selectedFileReadOptions.allowOutsideWorkspace ? 'true' : undefined,
       directory: root || undefined,
@@ -3846,7 +3871,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
         <div className="h-full min-h-0 overflow-hidden">
           <ErrorBoundary
             fallback={
-              <div className="m-3 rounded-md border border-destructive/20 bg-destructive/10 px-3 py-2">
+              <div className="m-3 rounded-md bg-destructive/10 px-3 py-2">
                 <div className="mb-1 font-medium text-destructive">{t('filesView.error.previewUnavailable')}</div>
                 <div className="text-sm text-muted-foreground">{t('filesView.error.switchToEditMode')}</div>
               </div>
@@ -4330,7 +4355,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
                 aria-label={ttsLabel}
                 onClick={toggleTTS}
               >
-                <Icon name="volume-up" className={cn('size-4', isTTSPlaying && 'animate-pulse text-[var(--primary-text)]')} />
+                <Icon name="volume-up" className={cn('size-4', isTTSPlaying && 'text-[var(--primary-text)]')} />
               </Button>
             </TooltipTrigger>
             <TooltipContent sideOffset={8}>{ttsLabel}</TooltipContent>
@@ -4886,7 +4911,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
                     aria-label={t('filesView.editor.openFilesAria')}
                   >
                     <FileTypeIcon filePath={selectedFile.path} extension={selectedFile.extension} className="size-3.5 flex-shrink-0" />
-                    <ScrollingFileName name={selectedFile.name} />
+                    <ScrollingFileName name={selectedFile.name} folder={getOpenFileFolder(selectedFile.path)} />
                     <Icon name="arrow-down-s" className="size-4 flex-shrink-0 text-muted-foreground" />
                   </button>
                 </DropdownMenuTrigger>
@@ -4913,7 +4938,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
                       >
                         <span className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
                           <FileTypeIcon filePath={file.path} extension={file.extension} className="size-3.5 flex-shrink-0" />
-                          <ScrollingFileName name={file.name} />
+                          <ScrollingFileName name={file.name} folder={getOpenFileFolder(file.path)} />
                         </span>
                         <button
                           type="button"
@@ -4956,6 +4981,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
                 >
                   {openFiles.map((file) => {
                     const isActive = selectedFile?.path === file.path;
+                    const folder = getOpenFileFolder(file.path);
                     return (
                       <div
                         key={file.path}
@@ -4975,9 +5001,9 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
                               void handleSelectFile(file);
                             }
                           }}
-                          className="max-w-[12rem] truncate text-start"
+                          className={cn(!folder && 'max-w-[12rem]', 'truncate text-start')}
                         >
-                          {file.name}
+                          <FileNameText name={file.name} folder={folder} />
                         </button>
                         <button
                           type="button"
@@ -5069,7 +5095,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
           ) : selectedFile && isJson && jsonViewMode === 'tree' ? (
             <ErrorBoundary
               fallback={
-                <div className="rounded-md border border-destructive/20 bg-destructive/10 px-3 py-2">
+                <div className="rounded-md bg-destructive/10 px-3 py-2">
                   <div className="mb-1 font-medium text-destructive">{t('filesView.error.jsonViewerUnavailable')}</div>
                   <div className="text-sm text-muted-foreground">
                     {t('filesView.error.switchToTextMode')}
@@ -5103,13 +5129,13 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
                   fileContent={fileContent}
                 />
                 {fileContent.length > 500 * 1024 && (
-                  <div className="mb-3 rounded-md border border-status-warning/20 bg-status-warning/10 px-3 py-2 text-sm text-status-warning">
+                  <div className="mb-3 rounded-md bg-status-warning/10 px-3 py-2 text-sm text-status-warning">
                     {t('filesView.warning.largeFilePreviewLimited', { sizeKb: Math.round(fileContent.length / 1024) })}
                   </div>
                 )}
                 <ErrorBoundary
                   fallback={
-                    <div className="rounded-md border border-destructive/20 bg-destructive/10 px-3 py-2">
+                    <div className="rounded-md bg-destructive/10 px-3 py-2">
                       <div className="mb-1 font-medium text-destructive">{t('filesView.error.previewUnavailable')}</div>
                       <div className="text-sm text-muted-foreground">
                         {t('filesView.error.switchToEditMode')}
@@ -5418,13 +5444,13 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
                 />
               ) : null}
               {fileContent.length > 500 * 1024 && (
-                  <div className="mb-3 rounded-md border border-status-warning/20 bg-status-warning/10 px-3 py-2 text-sm text-status-warning">
+                  <div className="mb-3 rounded-md bg-status-warning/10 px-3 py-2 text-sm text-status-warning">
                     {t('filesView.warning.largeFilePreviewLimited', { sizeKb: Math.round(fileContent.length / 1024) })}
                   </div>
                 )}
               <ErrorBoundary
                 fallback={
-                  <div className="rounded-md border border-destructive/20 bg-destructive/10 px-3 py-2">
+                  <div className="rounded-md bg-destructive/10 px-3 py-2">
                     <div className="mb-1 font-medium text-destructive">{t('filesView.error.previewUnavailable')}</div>
                     <div className="text-sm text-muted-foreground">
                       {t('filesView.error.switchToEditMode')}

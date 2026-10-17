@@ -40,73 +40,74 @@ const makeFakeProcess = (pid, alive = new Set([pid])) => ({
 const LOCK = '/data/relay-host.lock';
 const silentLogger = { warn: () => {} };
 
+const makeLock = (fs, proc, extra = {}) =>
+  createRelayHostLock({ lockFilePath: LOCK, fs, process: proc, hostname: 'mac', logger: silentLogger, ...extra });
+
 describe('relay host lock', () => {
-  it('claims a free lock and reports holding it', () => {
+  it('claims a free lock and keeps it on the next check', () => {
     const fs = makeFakeFs();
-    const lock = createRelayHostLock({ lockFilePath: LOCK, fs, process: makeFakeProcess(100), logger: silentLogger });
+    const lock = makeLock(fs, makeFakeProcess(100));
 
     expect(lock.tryClaim()).toBe(true);
-    expect(lock.holdsClaim()).toBe(true);
+    expect(lock.otherLiveClaimant()).toBe(null);
+    expect(lock.tryClaim()).toBe(true);
     expect(JSON.parse(fs.peek(LOCK)).pid).toBe(100);
   });
 
   it('refuses to claim while another LIVE process holds it', () => {
     const fs = makeFakeFs();
     const alive = new Set([100, 200]);
-    const first = createRelayHostLock({ lockFilePath: LOCK, fs, process: makeFakeProcess(100, alive), logger: silentLogger });
-    const second = createRelayHostLock({ lockFilePath: LOCK, fs, process: makeFakeProcess(200, alive), logger: silentLogger });
+    const first = makeLock(fs, makeFakeProcess(100, alive));
+    const second = makeLock(fs, makeFakeProcess(200, alive));
 
     expect(first.tryClaim()).toBe(true);
     expect(second.tryClaim()).toBe(false);
-    expect(second.holdsClaim()).toBe(false);
-    expect(second.liveClaimantPid()).toBe(100);
+    expect(second.otherLiveClaimant()).toEqual({ pid: 100, host: 'mac' });
   });
 
   it('treats a dead claimant as free (stale claim takeover)', () => {
     const fs = makeFakeFs();
     const alive = new Set([200]); // pid 100 is gone
     fs.writeFileSync(LOCK, JSON.stringify({ pid: 100 }));
-    const lock = createRelayHostLock({ lockFilePath: LOCK, fs, process: makeFakeProcess(200, alive), logger: silentLogger });
+    const lock = makeLock(fs, makeFakeProcess(200, alive));
 
-    expect(lock.liveClaimantPid()).toBe(null);
+    expect(lock.otherLiveClaimant()).toBe(null);
     expect(lock.tryClaim()).toBe(true);
-    expect(lock.holdsClaim()).toBe(true);
   });
 
   it('forceClaim overrides a live holder; the loser sees the takeover', () => {
     const fs = makeFakeFs();
     const alive = new Set([100, 200]);
-    const first = createRelayHostLock({ lockFilePath: LOCK, fs, process: makeFakeProcess(100, alive), logger: silentLogger });
-    const second = createRelayHostLock({ lockFilePath: LOCK, fs, process: makeFakeProcess(200, alive), logger: silentLogger });
+    const first = makeLock(fs, makeFakeProcess(100, alive));
+    const second = makeLock(fs, makeFakeProcess(200, alive));
 
     expect(first.tryClaim()).toBe(true);
     expect(second.forceClaim()).toBe(true);
-    expect(second.holdsClaim()).toBe(true);
-    expect(first.holdsClaim()).toBe(false);
-    expect(first.liveClaimantPid()).toBe(200);
+    expect(second.tryClaim()).toBe(true);
+    expect(first.tryClaim()).toBe(false);
+    expect(first.otherLiveClaimant()).toEqual({ pid: 200, host: 'mac' });
   });
 
   it('release removes only its own claim', () => {
     const fs = makeFakeFs();
     const alive = new Set([100, 200]);
-    const first = createRelayHostLock({ lockFilePath: LOCK, fs, process: makeFakeProcess(100, alive), logger: silentLogger });
-    const second = createRelayHostLock({ lockFilePath: LOCK, fs, process: makeFakeProcess(200, alive), logger: silentLogger });
+    const first = makeLock(fs, makeFakeProcess(100, alive));
+    const second = makeLock(fs, makeFakeProcess(200, alive));
 
     expect(first.tryClaim()).toBe(true);
     second.release(); // not the holder — must be a no-op
-    expect(first.holdsClaim()).toBe(true);
+    expect(second.otherLiveClaimant()).toEqual({ pid: 100, host: 'mac' });
 
     first.release();
     expect(fs.peek(LOCK)).toBeUndefined();
-    expect(first.liveClaimantPid()).toBe(null);
   });
 
   it('treats an unparsable claim file as free', () => {
     const fs = makeFakeFs();
     fs.writeFileSync(LOCK, 'not-json');
-    const lock = createRelayHostLock({ lockFilePath: LOCK, fs, process: makeFakeProcess(100), logger: silentLogger });
+    const lock = makeLock(fs, makeFakeProcess(100));
 
-    expect(lock.liveClaimantPid()).toBe(null);
+    expect(lock.otherLiveClaimant()).toBe(null);
     expect(lock.tryClaim()).toBe(true);
   });
 
@@ -121,9 +122,45 @@ describe('relay host lock', () => {
         throw error;
       },
     };
-    const lock = createRelayHostLock({ lockFilePath: LOCK, fs, process: proc, logger: silentLogger });
+    const lock = makeLock(fs, proc);
 
-    expect(lock.liveClaimantPid()).toBe(100);
+    expect(lock.otherLiveClaimant()).toEqual({ pid: 100, host: null });
     expect(lock.tryClaim()).toBe(false);
+  });
+
+  it('keeps two containers that both run as pid 1 apart', () => {
+    const fs = makeFakeFs();
+    const first = makeLock(fs, makeFakeProcess(1), { hostname: 'container-a' });
+    const second = makeLock(fs, makeFakeProcess(1), { hostname: 'container-b' });
+
+    expect(first.tryClaim()).toBe(true);
+    expect(second.tryClaim()).toBe(false);
+    expect(second.otherLiveClaimant()).toEqual({ pid: 1, host: 'container-a' });
+  });
+
+  it('keeps a claim from another host live only while it is refreshed', () => {
+    const fs = makeFakeFs();
+    let clock = 0;
+    const now = () => clock;
+    const remote = makeLock(fs, makeFakeProcess(100), { hostname: 'laptop', now });
+    const local = makeLock(fs, makeFakeProcess(200), { now });
+
+    expect(remote.tryClaim()).toBe(true);
+    clock = 60_000;
+    expect(local.tryClaim()).toBe(false);
+    expect(remote.tryClaim()).toBe(true);
+    clock = 140_000;
+    expect(local.tryClaim()).toBe(false);
+    clock = 240_000;
+    expect(local.tryClaim()).toBe(true);
+    expect(remote.tryClaim()).toBe(false);
+  });
+
+  it('reclaims its own pid from an older build after a container restart', () => {
+    const fs = makeFakeFs();
+    fs.writeFileSync(LOCK, JSON.stringify({ pid: 1, claimedAt: '2026-10-01T00:00:00Z' }));
+    const lock = makeLock(fs, makeFakeProcess(1));
+
+    expect(lock.tryClaim()).toBe(true);
   });
 });

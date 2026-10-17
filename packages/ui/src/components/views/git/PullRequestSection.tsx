@@ -12,6 +12,7 @@ import { openExternalUrl } from '@/lib/url';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useDeviceInfo } from '@/lib/device';
 import { Icon } from "@/components/icon/Icon";
+import { Spinner } from "@/components/ui/spinner";
 import { useUIStore } from '@/stores/useUIStore';
 import { useOpenSourceControlSettings } from '@/hooks/useOpenSourceControlSettings';
 import { useWalkthroughStore } from '@/stores/useWalkthroughStore';
@@ -1005,7 +1006,7 @@ export const PullRequestSection: React.FC<{
 
       <div className={bodyClassName}>
         {capabilitiesUnavailable ? (
-          <div className="space-y-2 rounded-md border border-[var(--status-error-border)] bg-[var(--status-error-background)] p-3">
+          <div className="space-y-2 rounded-md bg-[var(--status-error-background)] p-3">
             <div className="typography-ui-label text-[var(--status-error)]">{t('gitView.pr.capabilitiesUnavailable')}</div>
             <Button variant="outline" size="sm" onClick={() => setCapabilityReload((value) => value + 1)}>
               {t('settings.sourceControl.transport.retry')}
@@ -1043,13 +1044,13 @@ export const PullRequestSection: React.FC<{
 
             {(livePr || (!pr && !isInitialStatusResolved)) && !error && !shouldShowConnectionNotice && (binding.status === 'loading' || readContext) ? (
               <div className="flex items-center gap-2 typography-micro text-muted-foreground">
-                <Icon name="loader-4" className="size-4 animate-spin" />
+                <Spinner className="size-4" />
                 {t('gitView.pr.checkingStatus')}
               </div>
             ) : (
               <div className="flex flex-col gap-3">
                 {pr && isHistoricalPr ? (
-                  <div className="flex min-w-0 items-center gap-2 rounded-md border border-border/60 bg-surface-muted/40 px-2.5 py-2">
+                  <div className="flex min-w-0 items-center gap-2 rounded-md oc-tile-inset px-2.5 py-2">
                     <Icon
                       name={pr.state === 'merged' ? 'git-merge' : 'git-close-pull-request'}
                       className="size-4 shrink-0"

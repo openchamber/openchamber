@@ -18,7 +18,7 @@ Policies written before the modes stored booleans. The first read converts them 
 
 ## Default mode
 
-`permissionDefaultMode` (Settings → Sessions) is written onto each new top-level session when `session.created` arrives, and only when no policy exists for it yet: a mode the creating flow already set wins, and changing the default never reaches back into older sessions. Subagents inherit instead. `ask` writes nothing. Mode resolution waits for pending writes, so a session's first permission request sees its default.
+`permissionDefaultMode` (Settings → Sessions) is written onto each new top-level session when `session.created` arrives, and only when no policy exists for it yet: a mode the creating flow already set wins, and changing the default never reaches back into older sessions. Subagents inherit instead. `ask` writes nothing. Mode resolution waits for pending writes, so a session's first permission request sees its default. The server inside an isolated space reads its own settings, which hold no such default, so the UI writes it for a session it creates in a space: from a draft, and for a `/btw` fork. A mode chosen in the draft or for the fork wins there as on the host. A space session the UI creates any other way starts in `ask`.
 
 ## Runtime
 
@@ -45,7 +45,7 @@ These are normal authenticated OpenChamber runtime routes. They must not be adde
 
 ## UI ownership
 
-`packages/ui/src/stores/permissionStore.ts` is a projection of server policy and does not persist an independent policy. The server is the sole responder and the UI renders pending requests until the authoritative `permission.replied` event arrives. The composer's shield button cycles ask → safety → auto, skipping `safety` while no classification provider can run it (a `safety` session then shows as `ask`).
+`packages/ui/src/stores/permissionStore.ts` is a projection of server policy and does not persist an independent policy. A session in an isolated space has its mode in this module inside that space, which sees the space's OpenCode and answers there; the host's runtime sees the host's events only and never answers into a space. The host forwards the space's `updated` and `left-for-user` events to the browsers, see "Sessions and events" in `packages/web/server/lib/spaces/DOCUMENTATION.md`. The server is the sole responder and the UI renders pending requests until the authoritative `permission.replied` event arrives. The composer's shield button cycles ask → safety → auto, skipping `safety` while no classification provider can run it (a `safety` session then shows as `ask`).
 
 VS Code retains its foreground-only responder because it does not run the web server runtime. Its extension host persists and broadcasts an on/off policy across webviews, so VS Code has only `ask` and `auto` and no default mode. The active UI handles live events plus startup, reconnect, and enablement reconciliation. With all OpenChamber webviews closed or suspended, permissions are not auto-accepted; this is an intentional VS Code limitation.
 

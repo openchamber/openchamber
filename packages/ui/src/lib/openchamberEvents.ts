@@ -162,6 +162,7 @@ type TrackedItemsChangedEvent = { type: 'tracked-items-changed'; records: z.infe
 
 const eventStreamReadySchema = z.object({ connectionId: z.string().min(1).optional() });
 const sourceControlActivitySchema = z.object({ directory: z.string().min(1) });
+const spaceQueueStreamSchema = z.object({ spaceId: z.string().regex(/^[0-9a-f]{12}$/), status: z.literal('connected') });
 
 const notificationPropertiesSchema = z.object({
   title: z.string().optional(),
@@ -186,6 +187,8 @@ type OpenChamberEvent =
   | RoutingPermissionHeldEvent
   | RoutingSafetySkippedEvent
   | MessageQueueUpdatedEvent
+  /** The host follows this space's queue again; what changed in a gap is read from the space. */
+  | { type: 'space-queue-stream'; spaceId: string }
   | ScheduledTaskRanEvent
   | SessionCreatedEvent
   | WorktreeChangedEvent
@@ -390,6 +393,12 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
     if (parsed.success) {
       for (const listener of listeners) listener(parsed.data);
     }
+    return;
+  }
+
+  if (envelope.type === 'openchamber:space-queue-stream') {
+    const parsed = spaceQueueStreamSchema.safeParse(envelope.properties);
+    if (parsed.success) for (const listener of listeners) listener({ type: 'space-queue-stream', spaceId: parsed.data.spaceId });
     return;
   }
 

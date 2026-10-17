@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import type { JsonValue } from '@/lib/opencode/model';
+import { getReadableThemeColors } from '@/lib/theme/readableColors';
 import type { Theme } from '@/types/theme';
 
 /**
@@ -13,30 +15,37 @@ import type { Theme } from '@/types/theme';
  * theme), reports the page's content height so the frame fits it, and hands
  * http(s) link clicks to the host, which opens them in the browser; a page
  * never navigates the frame away from itself.
+ *
+ * A page that waits for the user's answer (`awaitAnswer`) sends it with
+ * `openchamber.submit(data, summary)`, an MCP Apps `ui/message` request the
+ * host answers with a JSON-RPC result or error.
  */
 
 export const HTML_RENDER_MIN_HEIGHT = 48;
-// Taller pages scroll inside the frame. The agent-facing description in
-// packages/web/server/lib/agent-tool/runtime.js states this limit.
-const HTML_RENDER_MAX_HEIGHT = 1200;
-// On a touch screen a page never scrolls inside its frame in the chat. A frame
-// that scrolls keeps a swipe that starts on it, and one as tall as the screen
-// left no place to swipe the chat from. This ceiling only stops a page whose
-// height grows with its frame from growing without end.
-export const HTML_RENDER_TOUCH_MAX_HEIGHT = 20_000;
+// A page takes its full height in the chat and never scrolls inside its
+// frame: a scrolling frame keeps the wheel or a swipe that starts on it, so
+// the chat stopped scrolling under the pointer until the page reached its own
+// end, and a page's button could sit out of view below the frame's edge. This
+// ceiling only stops a page whose height grows with its frame from growing
+// without end. The agent-facing description in
+// packages/web/server/lib/agent-tool/runtime.js states the behavior.
+const HTML_RENDER_MAX_HEIGHT = 20_000;
 
 const MESSAGE_PREFIX = 'openchamber:html-render:';
 const THEME_MESSAGE = `${MESSAGE_PREFIX}theme`;
 const SIZE_MESSAGE = `${MESSAGE_PREFIX}size`;
 const OPEN_LINK_MESSAGE = `${MESSAGE_PREFIX}open-link`;
 const KEY_MESSAGE = `${MESSAGE_PREFIX}key`;
+const ANSWER_STATE_MESSAGE = `${MESSAGE_PREFIX}answer-state`;
 
 export interface HtmlRenderTheme {
     appearance: 'light' | 'dark';
     variables: Record<string, string>;
 }
 
-interface HtmlRenderFonts {
+interface HtmlRenderMetrics {
+    /** The app's rem in px: the interface size setting scales it, and the controls with it. */
+    rem: number;
     sans: string;
     mono: string;
 }
@@ -59,8 +68,14 @@ const CHART_SERIES = {
  * convention models already write. The agent-facing description in
  * packages/web/server/lib/agent-tool/runtime.js lists them; change both together.
  */
-export function htmlRenderTheme(theme: Theme, fonts: HtmlRenderFonts): HtmlRenderTheme {
+export function htmlRenderTheme(theme: Theme, metrics: HtmlRenderMetrics): HtmlRenderTheme {
     const { surface, interactive, primary, status, syntax } = theme.colors;
+    const dark = theme.metadata.variant === 'dark';
+    // The app's main button (components/ui/button.tsx, TINT_PRIMARY): a pale
+    // accent fill and border with readable accent text. A dark theme mixes the
+    // accent into transparent so the tone sits on the surface behind it.
+    const tint = (amount: number, base: string) => `color-mix(in srgb,${primary.base} ${amount}%,${base})`;
+    const readable = getReadableThemeColors(theme);
     return {
         appearance: theme.metadata.variant,
         variables: {
@@ -83,12 +98,52 @@ export function htmlRenderTheme(theme: Theme, fonts: HtmlRenderFonts): HtmlRende
             // as the app's own; the rest are a fixed set (CHART_SERIES).
             '--chart-1': primary.base,
             ...Object.fromEntries(CHART_SERIES[theme.metadata.variant].map((color, index) => [`--chart-${index + 2}`, color])),
-            '--radius': '0.5rem',
-            '--font-sans': fonts.sans,
-            '--font-mono': fonts.mono,
+            '--oc-button-text': readable.tinted.primary,
+            '--oc-button-bg': dark ? tint(16, 'transparent') : tint(10, surface.background),
+            '--oc-button-hover': dark ? tint(22, 'transparent') : tint(16, surface.background),
+            '--oc-button-active': dark ? tint(30, 'transparent') : tint(22, surface.background),
+            '--oc-button-border': tint(dark ? 20 : 12, 'transparent'),
+            // The light the app's filled buttons take (`.oc-raised-button`
+            // in styles/design-system.css): a lit top line and a short
+            // shadow, plus a faint sheen in dark themes.
+            '--oc-button-shadow': dark
+                ? `inset 0 1px 0 0 color-mix(in srgb,${surface.foreground} 6%,transparent), 0 1px 1px 0 rgb(0 0 0 / 0.31), 0 2px 5px -2px rgb(0 0 0 / 0.4)`
+                : 'inset 0 1px 0 0 rgb(255 255 255 / 0.45), 0 1px 2px 0 rgb(0 0 0 / 0.08)',
+            '--oc-button-sheen': dark ? `linear-gradient(180deg,color-mix(in srgb,${surface.foreground} 1%,transparent),transparent 50%)` : 'none',
+            // What the app marks chosen with (a pressed chip): the selection
+            // fill and its readable text.
+            '--oc-selection': interactive.selection,
+            '--oc-selection-foreground': readable.selectionForeground,
+            '--oc-rem': `${metrics.rem}px`,
+            // The app's --radius (0.5625rem), at the app's scale.
+            '--radius': `${metrics.rem * 0.5625}px`,
+            '--font-sans': metrics.sans,
+            '--font-mono': metrics.mono,
         },
     };
 }
+
+// Ready classes for a page that asks the user to choose, in the app's look:
+// a grid of options, a selectable option card (the chosen one carries
+// aria-pressed="true") and the main button, drawn like the app's own main
+// button (the --oc-button-* and --oc-selection* variables from htmlRenderTheme). Agents style these themselves
+// otherwise, which costs output on every such page and looks different each
+// time. The agent-facing description in
+// packages/web/server/lib/agent-tool/runtime.js names them; change both together.
+const OPTION_CSS = '.oc-options{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(min(200px,100%),1fr))}'
+    // Option cards are the app's flat tiles (`.oc-tile`, `.oc-tile-hover` in
+    // styles/design-system.css): no border, set off by tone, a tone step more
+    // on hover, and the selection fill once chosen, like a pressed chip.
+    + '.oc-option{display:flex;flex-direction:column;justify-content:flex-start;align-items:flex-start;gap:4px;box-sizing:border-box;width:100%;padding:16px;border:0;border-radius:var(--radius);background-color:color-mix(in srgb,var(--foreground) 4%,transparent);color:var(--foreground);font:inherit;text-align:start;cursor:pointer;transition:background-color .15s,color .15s}'
+    + '.oc-option:hover,.oc-option:focus-visible{background-color:color-mix(in srgb,var(--foreground) 7%,transparent)}'
+    + '.oc-option[aria-pressed=true]{background-color:var(--oc-selection);color:var(--oc-selection-foreground)}'
+    // Sized in the app's rem like its Button (h-8 px-3 rounded-md, the UI
+    // label size), so it follows the interface size setting.
+    + '.oc-button{display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;height:calc(var(--oc-rem) * 2);padding:0 calc(var(--oc-rem) * .75);border:1px solid var(--oc-button-border);border-radius:calc(var(--oc-rem) * .4375);background-color:var(--oc-button-bg);background-image:var(--oc-button-sheen);box-shadow:var(--oc-button-shadow);color:var(--oc-button-text);font:inherit;font-size:calc(var(--oc-rem) * .84375);line-height:1.45;font-weight:500;white-space:nowrap;cursor:pointer;transition:background-color .15s}'
+    + '.oc-button:hover,.oc-button:focus-visible{background-color:var(--oc-button-hover)}.oc-button:active{background-color:var(--oc-button-active);background-image:none;box-shadow:none}'
+    + '.oc-button:disabled{opacity:.5;cursor:default;pointer-events:none}'
+    // Focus draws no ring in the app: a focused control takes its hover fill.
+    + '.oc-option:focus-visible,.oc-button:focus-visible{outline:none}';
 
 // The page sits on the chat's own background, and a scrollbar inside the
 // reply would read as a box within the thread, so it stays hidden. Media
@@ -98,7 +153,8 @@ export function htmlRenderTheme(theme: Theme, fonts: HtmlRenderFonts): HtmlRende
 // scrolls the chat. Only the horizontal bounce is turned off: turning off the
 // vertical one would also stop a vertical swipe from reaching the chat.
 const BASE_CSS = 'html{background:transparent;color:var(--foreground);font-family:var(--font-sans);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased;-webkit-text-size-adjust:100%;scrollbar-width:none;overflow-x:auto;overscroll-behavior-x:none}'
-    + 'html::-webkit-scrollbar{display:none}body{margin:0}a{color:var(--primary)}code,kbd,pre,samp{font-family:var(--font-mono)}img,svg,video,canvas{max-width:100%}';
+    + 'html::-webkit-scrollbar{display:none}body{margin:0}a{color:var(--primary)}code,kbd,pre,samp{font-family:var(--font-mono)}img,svg,video,canvas{max-width:100%}'
+    + OPTION_CSS;
 
 const CSS_VARIABLE_NAME = /^--[a-z0-9-]+$/;
 const sanitizeCssValue = (value: string): string => value.replace(/[;{}<>]/g, '');
@@ -155,6 +211,38 @@ const BOOTSTRAP_SCRIPT = `(function(){var s=document.getElementById("oc-html-ren
     + `new MutationObserver(function(m){for(var i=0;i<m.length;i++)if(m[i].type==="childList"||m[i].attributeName==="class")N=1;U(0);}).observe(document.documentElement,{subtree:true,childList:true,attributes:true,attributeFilter:["style","class"]});`
     + `["mouseover","click","touchstart","scroll","resize"].forEach(function(n){window.addEventListener(n,function(){U(0);},{capture:true,passive:true});});document.addEventListener("DOMContentLoaded",function(){U(1);});})();`;
 
+/**
+ * What the page knows about its answer: whether it may still send one, and
+ * what it sent. The page reads the second as `openchamber.answer`, so a page
+ * loaded again after the answer can show the choice.
+ */
+export interface HtmlRenderAnswerState {
+    waiting: boolean;
+    answer: JsonValue | null;
+}
+
+// `openchamber.submit` checks what it can in the page (the host checks the
+// gesture and the waiting state again, since a page can skip this script) and
+// sends `ui/message` with the summary as the text and the data in `_meta`.
+// The host's reply settles the promise; a state message from the host ends
+// the wait when it ended elsewhere (another device answered, or the user
+// wrote in the chat).
+const ANSWER_SCRIPT = `(function(){if(window.parent===window)return;var S=JSON.parse(document.getElementById("oc-html-render-answer").textContent),I=0,R={};`
+    + `var o=window.openchamber={answer:S.answer===null?undefined:S.answer,submit:function(data,summary){return new Promise(function(res,rej){`
+    + `if(!S.waiting)return rej(new Error("This page is not waiting for an answer"));`
+    + `if(navigator.userActivation&&!navigator.userActivation.isActive)return rej(new Error("openchamber.submit works only from a click"));`
+    + `if(typeof summary!=="string"||!summary.trim())return rej(new Error("summary is required: the choice in a few words"));`
+    + `var id=++I,v=data===undefined?null:data;R[id]={res:res,rej:rej,data:v};`
+    + `try{window.parent.postMessage({jsonrpc:"2.0",id:id,method:"ui/message",params:{role:"user",content:[{type:"text",text:summary}],_meta:{"openchamber/data":v}}},"*");}catch(x){delete R[id];rej(x);}});}};`
+    + `window.addEventListener("message",function(e){var d=e.data,r;if(e.source!==window.parent||!d)return;`
+    + `if(d.type===${JSON.stringify(ANSWER_STATE_MESSAGE)}){S={waiting:d.waiting===true,answer:d.answer===undefined?null:d.answer};o.answer=S.answer===null?undefined:S.answer;return;}`
+    + `if(d.jsonrpc!=="2.0"||!R[d.id])return;r=R[d.id];delete R[d.id];`
+    + `if(d.error)r.rej(new Error(String(d.error.message||"The answer was not sent")));else{S={waiting:false,answer:r.data};o.answer=r.data;r.res();}});})();`;
+
+// JSON inside a script element: "<" is escaped so no "</script>" in the data
+// can close it.
+const scriptJson = (value: HtmlRenderAnswerState): string => JSON.stringify(value).replace(/</g, '\\u003c');
+
 // Comments and raw-text elements are blanked to the same length before the
 // head is located, so a "<head>" written inside a script or comment is never
 // where the bootstrap lands.
@@ -167,9 +255,14 @@ const blankNonMarkup = (html: string): string => html.replace(
  * The document the frame loads: the agent's page with the bootstrap first in
  * its head. `contained` is for a frame with nothing around it to scroll (the
  * full-screen view): the page's own scrolling stops at its edges without the
- * elastic bounce.
+ * elastic bounce. `answerState` is where the page stands on its answer when
+ * it loads; later changes reach it as messages.
  */
-export function buildHtmlRenderDocument(html: string, theme: HtmlRenderTheme, { contained = false } = {}): string {
+export function buildHtmlRenderDocument(
+    html: string,
+    theme: HtmlRenderTheme,
+    { contained = false, answerState = { waiting: false, answer: null } }: { contained?: boolean; answerState?: HtmlRenderAnswerState } = {},
+): string {
     const scan = blankNonMarkup(html);
     const bootstrap = [
         /<meta\s[^>]*charset/i.test(scan.slice(0, 4096)) ? '' : '<meta charset="utf-8">',
@@ -178,6 +271,8 @@ export function buildHtmlRenderDocument(html: string, theme: HtmlRenderTheme, { 
         // Its own element: a theme switch rewrites the theme style whole.
         contained ? '<style>html{overscroll-behavior:none}</style>' : '',
         `<script>${BOOTSTRAP_SCRIPT}</script>`,
+        `<script type="application/json" id="oc-html-render-answer">${scriptJson(answerState)}</script>`,
+        `<script>${ANSWER_SCRIPT}</script>`,
     ].join('');
     const headOpen = /<head(?:\s[^>]*)?>/i.exec(scan);
     if (headOpen) {
@@ -199,6 +294,15 @@ export function buildHtmlRenderDocument(html: string, theme: HtmlRenderTheme, { 
 
 export const htmlRenderThemeMessage = (theme: HtmlRenderTheme) => ({ type: THEME_MESSAGE, ...theme });
 
+export const htmlRenderAnswerStateMessage = (state: HtmlRenderAnswerState) => ({ type: ANSWER_STATE_MESSAGE, ...state });
+
+type JsonRpcId = number | string;
+
+/** The host's reply to a page's `ui/message`: an empty result, or an error the page's promise rejects with. */
+export const htmlRenderSubmitReply = (id: JsonRpcId, error?: string) => (error === undefined
+    ? { jsonrpc: '2.0', id, result: {} }
+    : { jsonrpc: '2.0', id, error: { code: -32000, message: error } });
+
 const keyChordSchema = z.object({
     key: z.string().min(1).max(32),
     code: z.string().max(32),
@@ -212,10 +316,17 @@ const keyChordSchema = z.object({
 /** A key a page passed on; the host replays it as a keydown of its own. */
 export type HtmlRenderKeyChord = z.infer<typeof keyChordSchema>;
 
+/** What a page sent with `openchamber.submit`. */
+export interface HtmlRenderSubmission {
+    summary: string;
+    data: JsonValue;
+}
+
 type HtmlRenderFrameMessage =
     | { kind: 'size'; height: number }
     | { kind: 'open-link'; url: string }
-    | { kind: 'key'; chord: HtmlRenderKeyChord };
+    | { kind: 'key'; chord: HtmlRenderKeyChord }
+    | { kind: 'submit'; id: JsonRpcId; submission: HtmlRenderSubmission };
 
 const frameMessageSchema = z.discriminatedUnion('type', [
     z.object({ type: z.literal(SIZE_MESSAGE), height: z.number().positive() }),
@@ -223,8 +334,32 @@ const frameMessageSchema = z.discriminatedUnion('type', [
     keyChordSchema.extend({ type: z.literal(KEY_MESSAGE) }),
 ]);
 
+// MCP Apps `ui/message`. Only text content is read; the summary is its text.
+const uiMessageSchema = z.object({
+    jsonrpc: z.literal('2.0'),
+    id: z.union([z.number(), z.string().max(64)]),
+    method: z.literal('ui/message'),
+    params: z.object({
+        role: z.literal('user'),
+        content: z.array(z.object({ type: z.literal('text'), text: z.string() })).min(1),
+        _meta: z.object({ 'openchamber/data': z.json().optional() }).optional(),
+    }),
+});
+
 /** The message a page's bootstrap posted, or null for anything else. */
 export function readHtmlRenderFrameMessage(event: Pick<MessageEvent, 'data'>): HtmlRenderFrameMessage | null {
+    const submit = uiMessageSchema.safeParse(event.data);
+    if (submit.success) {
+        const { id, params } = submit.data;
+        return {
+            kind: 'submit',
+            id,
+            submission: {
+                summary: params.content.map((block) => block.text).join('\n').trim(),
+                data: params._meta?.['openchamber/data'] ?? null,
+            },
+        };
+    }
     const parsed = frameMessageSchema.safeParse(event.data);
     if (!parsed.success) return null;
     const message = parsed.data;
@@ -236,8 +371,8 @@ export function readHtmlRenderFrameMessage(event: Pick<MessageEvent, 'data'>): H
     return { kind: 'key', chord: keyChordSchema.parse(message) };
 }
 
-export const clampHtmlRenderHeight = (height: number, maxHeight: number = HTML_RENDER_MAX_HEIGHT): number => (
-    Math.min(maxHeight, Math.max(HTML_RENDER_MIN_HEIGHT, Math.ceil(height)))
+export const clampHtmlRenderHeight = (height: number): number => (
+    Math.min(HTML_RENDER_MAX_HEIGHT, Math.max(HTML_RENDER_MIN_HEIGHT, Math.ceil(height)))
 );
 
 /** A download name from the page title, without characters file systems reject. */

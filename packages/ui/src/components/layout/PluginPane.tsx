@@ -87,6 +87,7 @@ import { opencodeClient } from '@/lib/opencode/client';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSession, useSessionStatus } from '@/sync/sync-context';
 import { GuestPopover } from './GuestPopover';
+import { DockedPanelSurfaceContext, usePageColors } from '@/hooks/usePageColors';
 
 type PluginPaneProps = {
   mode: PluginContextPanelMode;
@@ -232,6 +233,8 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
   );
 
   const readableColors = React.useMemo(() => getReadableThemeColors(currentTheme), [currentTheme]);
+  // A frame in a docked panel paints the panel's colour, not the chat's.
+  const pageColors = usePageColors();
   const ready = React.useMemo<HostReadyContext>(() => {
     const features: NonNullable<HostReadyContext['features']> = {};
     if (guest?.storageId && globalThis.indexedDB) features.deviceStorage = true;
@@ -242,7 +245,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
     theme: {
       mode: currentTheme.metadata.variant === 'dark' ? 'dark' : 'light',
       tokens: {
-        background: currentTheme.colors.surface.background,
+        background: pageColors.background,
         elevated: currentTheme.colors.surface.elevated,
         foreground: currentTheme.colors.surface.foreground,
         muted: currentTheme.colors.surface.mutedForeground,
@@ -252,7 +255,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
         selection: currentTheme.colors.interactive.selection,
         focus: currentTheme.colors.interactive.focusRing,
         primary: currentTheme.colors.primary.base,
-        mutedSurface: currentTheme.colors.surface.muted,
+        mutedSurface: pageColors.mutedSurface,
         elevatedForeground: currentTheme.colors.surface.elevatedForeground,
         active: currentTheme.colors.interactive.active,
         selectionForeground: readableColors.selectionForeground,
@@ -290,7 +293,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
     popover: popoverHost?.context ?? popover,
     features,
     };
-  }, [currentTheme, readableColors, directory, guest?.backgroundEntry, guest?.storageId, headless, item, locale, oauthStatus, onStatusControls, popover, popoverHost, sessionSnapshot, surface]);
+  }, [currentTheme, pageColors, readableColors, directory, guest?.backgroundEntry, guest?.storageId, headless, item, locale, oauthStatus, onStatusControls, popover, popoverHost, sessionSnapshot, surface]);
 
   const fileEditorEntry = surface === 'file' && fileEditor
     ? guest?.fileEditors?.find((editor) => editor.id === fileEditor.editorId)?.entry ?? null
@@ -1022,6 +1025,8 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
             schedulePopoverClose(activePopover.activation, 'outside');
           }}
         >
+          {/* Floats over the app, so never on a docked panel's page. */}
+          <DockedPanelSurfaceContext.Provider value={false}>
           <PluginPane
             mode={mode}
             surface="popover"
@@ -1065,6 +1070,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
               else schedulePopoverClose(activePopover.activation, 'outside');
             }}
           />
+          </DockedPanelSurfaceContext.Provider>
         </GuestPopover>
       ) : null}
     </>

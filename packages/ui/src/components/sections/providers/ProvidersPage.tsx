@@ -893,7 +893,7 @@ export const ProvidersPage: React.FC = () => {
           <div
             className={cn(
               'space-y-4',
-              providerConnections.length > 0 && 'rounded-xl border border-[var(--interactive-border)] p-4',
+              providerConnections.length > 0 && 'oc-tile rounded-xl p-4',
             )}
           >
             {showApiKeyAuth ? (
@@ -1019,7 +1019,7 @@ export const ProvidersPage: React.FC = () => {
                         ) : (
                           <>
                         {tokenSummary ? (
-                          <span className="typography-micro text-muted-foreground flex-shrink-0 bg-[var(--surface-muted)] px-1.5 py-0.5 rounded">
+                          <span className="typography-micro text-muted-foreground flex-shrink-0 oc-tile-inset px-1.5 py-0.5 rounded">
                             {tokenSummary}
                           </span>
                         ) : null}
@@ -1028,7 +1028,7 @@ export const ProvidersPage: React.FC = () => {
                             {capabilityIcons.map(({ key, icon: iconName, label }) => (
                               <span
                                 key={key}
-                                className="flex h-5 w-5 rounded items-center justify-center text-muted-foreground bg-[var(--surface-muted)]"
+                                className="flex h-5 w-5 rounded items-center justify-center text-muted-foreground oc-tile-inset"
                                 title={label}
                                 aria-label={label}
                               >

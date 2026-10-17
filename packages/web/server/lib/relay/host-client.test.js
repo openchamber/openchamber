@@ -472,6 +472,50 @@ class BunLikeFailingSocket extends EventEmitter {
   ping() {}
 }
 
+describe('relay host-client control reconnect', () => {
+  const fakeIdentity = {
+    serverId: 'fake-server-id',
+    hostEncPrivateKey: null,
+    signRelayAuth: () => ({ ts: 1, sig: 'sig', pk: 'pk' }),
+  };
+
+  // Opens the control socket, has the relay close it with `code`, and reports
+  // how many control dials follow within 1.5 s.
+  const redialsAfterClose = async (code) => {
+    const sockets = [];
+    const host = startRelayHost({
+      relayUrl: 'wss://relay.example.test/ws',
+      identity: fakeIdentity,
+      getLocalPort: () => 1,
+      logger: { warn: () => {} },
+      createSocket: (url) => {
+        const socket = new BunLikeFailingSocket(url);
+        sockets.push(socket);
+        return socket;
+      },
+    });
+    try {
+      const control = sockets[0];
+      control.readyState = WebSocket.OPEN;
+      control.emit('open');
+      control.readyState = WebSocket.CLOSED;
+      control.emit('close', code, Buffer.from('reason'));
+      await sleep(1500);
+      return sockets.length - 1;
+    } finally {
+      host.stop();
+    }
+  };
+
+  it('reconnects after a dropped control socket on the short backoff', async () => {
+    expect(await redialsAfterClose(1006)).toBe(1);
+  });
+
+  it('holds off when another host with the same identity took the slot', async () => {
+    expect(await redialsAfterClose(4001)).toBe(0);
+  });
+});
+
 describe('relay host-client error redaction', () => {
   const fakeIdentity = {
     serverId: 'fake-server-id',

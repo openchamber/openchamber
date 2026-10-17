@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import type { InstalledGuest } from '@/lib/guests/types';
-import { EXCALIDRAW_EXTENSION, getCatalogExtensionState } from './catalogExtensions';
+import { CATALOG_EXTENSIONS, EXCALIDRAW_EXTENSION, RESOURCE_MONITOR_EXTENSION, getCatalogExtensionState } from './catalogExtensions';
 
 const installed = (overrides: Partial<InstalledGuest> = {}): InstalledGuest => ({
   id: 'excalidraw',
@@ -26,5 +26,13 @@ describe('getCatalogExtensionState', () => {
     expect(getCatalogExtensionState([unapproved], EXCALIDRAW_EXTENSION)).toMatchObject({ kind: 'needs-approval' });
     expect(getCatalogExtensionState([installed({ enabled: false, update: { version: '2.0.0' } })], EXCALIDRAW_EXTENSION))
       .toMatchObject({ kind: 'paused' });
+  });
+});
+
+describe('CATALOG_EXTENSIONS', () => {
+  test('every card installs a different extension', () => {
+    const ids = CATALOG_EXTENSIONS.map((definition) => definition.guestId);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(getCatalogExtensionState([installed({ id: 'resource-monitor' })], RESOURCE_MONITOR_EXTENSION)).toMatchObject({ kind: 'installed' });
   });
 });

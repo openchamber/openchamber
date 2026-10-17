@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { ErrorResponseDetails } from '@/components/chat/ErrorResponseDetails';
 import { useI18n } from '@/lib/i18n';
 import { showOpenCodeStatus } from '@/lib/openCodeStatus';
+import { DiagnosticDialogAvailableContext } from '@/lib/diagnostics/dialog-availability';
 import { getLastConversationMessage, type Message, type Part, type Session, type StructuredError } from '@/lib/opencode/model';
 import { useLatestSessionError } from '@/sync/notification-store';
 import { responseBodyOf, summarizeOpenCodeError } from '@/sync/session-error-log';
@@ -135,6 +136,8 @@ const useLastMessageState = (sessionId: string, directory?: string): LastMessage
  */
 export const SessionErrorNotice: React.FC<SessionErrorNoticeProps> = ({ sessionId, directory }) => {
   const { t } = useI18n();
+  // Only MainLayout mounts the dialog the status link opens.
+  const diagnosticDialogAvailable = React.useContext(DiagnosticDialogAvailableContext);
   const latestError = useLatestSessionError(sessionId);
   const status = useSessionStatus(sessionId, directory);
   const statusSnapshotReady = useSessionStatusSnapshotReady(directory, sessionId);
@@ -233,7 +236,7 @@ export const SessionErrorNotice: React.FC<SessionErrorNoticeProps> = ({ sessionI
             <div className="mt-1 ps-[1.375rem] typography-meta text-muted-foreground break-words">{visibleText}</div>
           )}
         </LongErrorText>
-        {!hasDetails ? (
+        {!hasDetails && diagnosticDialogAvailable ? (
           <div className="ps-[1.375rem]">
             <Button
               variant="link"

@@ -104,10 +104,15 @@ preview's footer holds actions instead of what the agent gets.
   (`resolveLinearMappedProjectPath`), else the mapping's default, else the
   board's project; the user can pick another for that issue. Its state pill
   in the preview opens the team's states (`SourceBoardLinearStatus`).
-- An issue, PR or Linear issue a session links to opens on the board, selected:
-  from the work-status panel and from the sidebar's badges and their tooltips
-  (`sourceBoard/openOnBoard.ts`), and from links in chat while
-  `openTrackerLinksOnBoard` is on (`chat/useOpenChatLink.ts`). The board moves to the session's project and
+- An issue, PR or Linear issue a session links to opens from the work-status
+  panel, the sidebar's badges and their tooltips, and links in chat while
+  `openTrackerLinksOnBoard` is on (`chat/useOpenChatLink.ts`), all through
+  `sourceBoard/openTrackerItem.ts`. On desktop and web it opens as a tab of
+  the Tracker beside the chat on screen, read through the session's project
+  without the app moving there (`lib/surfaces/DOCUMENTATION.md`, Tracker): the
+  board is a catalogue people go to, and nothing opens it for them. The phone,
+  which has no side panel, and a window with no folder on screen open it on
+  the board instead, selected. The board moves to the session's project and
   tab and previews the item, read on its own (`focusRepositoryItem` with its
   link, `focusLinearIssue` with its identifier, then the browser's
   `pinnedItem`) while the search stays empty and the list as it was. A link
@@ -144,12 +149,15 @@ preview's footer holds actions instead of what the agent gets.
 - Actions: start in a worktree (New Worktree opens with the item chosen,
   `initialSelection`), a new session in the project with the item attached,
   and for a PR its Changes (`usePullRequestSelectionStore.requestDiff` hands the
-  PR to the diff view's PR scope), Walkthrough, Merge (one split button named
+  PR to the diff view's PR scope, keyed by the folder the PR is read through), Walkthrough, Merge (one split button named
   after the remembered method, the arrow picks another; asks first) and Ready
   for review, and Close or Reopen for an issue or a PR that is not merged, in
   the menu of the preview's state pill (no confirmation: both are reversible). Changes and Walkthrough open
-  in the folder the app shows when it belongs to the project, else in a new
-  draft of the project. The phone offers Changes only: it closes the board and
+  in the panel beside the chat on screen and read the PR through the folder the
+  app shows when it belongs to the project, else through the project's root,
+  without the app moving there; only with no chat on screen does a draft of the
+  project open first. The phone offers Changes only, in the project's draft when
+  the app shows another: it closes the board and
   opens the workspace drawer's Git tab, whose PR mode takes the request
   (keyed by the normalized folder) the way the desktop diff view does.
 - Labels and reviewers (`SourceBoardMetaEditors`, `SourceBoardChoicePicker`):
@@ -170,9 +178,11 @@ preview's footer holds actions instead of what the agent gets.
   as inline drafts (`pr-comment`, `pr-check`), the way the PR panel always
   did. They go to the session in view or a new session's draft; with neither
   open, a toast says so.
-- The PR panel (`views/git/BranchPullRequestPreview.tsx`) shows the checked-out
+- The Tracker's branch tab (`views/git/BranchPullRequestPreview.tsx`) shows the checked-out
   branch's open PR with this same preview: no new-session or worktree actions,
-  since the branch is already here. `PullRequestSection` keeps the create form
+  since the branch is already here. Its item tabs (`views/TrackerItemView.tsx`)
+  show any issue, PR or Linear issue the same way, also without them: starting
+  work happens on the board and in New Worktree. `PullRequestSection` keeps the create form
   and the merged/closed state. The form is one row of branch → base (picked in
   place), the title (a one-commit branch is titled by that commit until edited),
   the description with Generate on it (its arrow adds notes only the generator

@@ -1,5 +1,6 @@
 import React from 'react';
 import { Icon } from '@/components/icon/Icon';
+import { Spinner } from '@/components/ui/spinner';
 import type { IconName } from '@/components/icon/icons';
 import { useI18n } from '@/lib/i18n';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -24,9 +25,8 @@ const PRESENTATION = {
  * Live-activity marker for one session row or aggregate. Each state has its
  * own static icon, so a row says why it is busy without motion; motion lives
  * in the 1 Hz elapsed counter (see faa9c243). The opt-in
- * `animatedActivityIndicators` preference replaces every running kind with a
- * `loader-4` spinner stepped to 20 fps (`.activity-spinner`, VS Code's
- * steps() throttling); the unread icon stays.
+ * `animatedActivityIndicators` preference replaces every running kind with the
+ * shared `Spinner` (four steps a second); the unread icon stays.
  */
 export const SessionActivityIndicator: React.FC<{
   state: SessionActivityIndicatorState;
@@ -53,7 +53,7 @@ export const SessionActivityIndicator: React.FC<{
       data-session-activity-indicator={state}
     >
       {running && animated ? (
-        <Icon name="loader-4" className="activity-spinner h-3 w-3 text-status-info" />
+        <Spinner className="h-3 w-3 text-status-info" />
       ) : (
         <Icon
           name={presentation.icon}

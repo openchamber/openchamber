@@ -24,6 +24,7 @@ The tool can list projects and model preferences, create and follow up on sessio
 
 - New session prompts return immediately by default. Follow the session in OpenChamber, or ask the agent to check it later.
 - A separate worktree is only created when you ask for one. Uncommitted changes from your current worktree are not copied into it.
+- When the checkout looks busy, for example another session works on the same branch, the agent may offer to move its own session into a new worktree. It moves after you agree, and takes along only the files it changed.
 - The tool cannot delete sessions or worktrees, register project paths, run arbitrary shell commands, or call arbitrary URLs.
 
 ## Turn the tool on or off

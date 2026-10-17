@@ -54,6 +54,7 @@ mock.module('@/sync/sync-context', () => ({
   useGlobalSessionStatus: () => null,
   useSessionPermissions: () => null,
   useSessionBlockingRequests: () => ({ hasPermission: false, hasForm: false }),
+  useSessionDirectory: () => undefined,
   useSyncSDK: () => null,
   useSyncDirectory: () => null,
   buildSessionMessageRecordsSnapshot: () => [],

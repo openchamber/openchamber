@@ -235,6 +235,7 @@ export function FilePreviewCommentMenu({ containerRef, filePath, fileContent }: 
       lineRange={lineRange ? { start: lineRange.start, end: lineRange.end } : undefined}
       onSave={saveComment}
       onCancel={hide}
+      floating
     />
   );
 
@@ -259,8 +260,8 @@ export function FilePreviewCommentMenu({ containerRef, filePath, fileContent }: 
             <div
               className={cn(
                 'mx-auto w-fit',
-                'oc-glass-popover rounded-full border border-[var(--interactive-border)]',
-                'p-1 shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)]',
+                'oc-glass-popover oc-glass-floating rounded-full',
+                'p-1',
               )}
             >
               <button
@@ -307,8 +308,7 @@ export function FilePreviewCommentMenu({ containerRef, filePath, fileContent }: 
         <div
           className={cn(
             'flex items-center whitespace-nowrap',
-            'oc-glass-popover rounded-full border border-[var(--interactive-border)]',
-            'shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)]',
+            'oc-glass-popover oc-glass-floating rounded-full',
             'p-1',
           )}
         >

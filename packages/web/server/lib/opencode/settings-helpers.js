@@ -745,9 +745,6 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.agentToolsCodeMode === 'boolean') {
       result.agentToolsCodeMode = candidate.agentToolsCodeMode;
     }
-    if (candidate.agentWorktreeMoveWithoutAsking === true || candidate.agentWorktreeMoveWithoutAsking === false) {
-      result.agentWorktreeMoveWithoutAsking = candidate.agentWorktreeMoveWithoutAsking;
-    }
     if (typeof candidate.isolatedSpacesEnabled === 'boolean') {
       result.isolatedSpacesEnabled = candidate.isolatedSpacesEnabled;
     }

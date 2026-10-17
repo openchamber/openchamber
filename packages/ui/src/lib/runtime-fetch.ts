@@ -3,13 +3,14 @@ import { TUNNEL_PARSE_BASE } from './relay/tunnel-payloads';
 import { buildRuntimeAuthHeaders } from './runtime-auth';
 import { observeRuntimeAuthResponse } from './runtime-auth-expiry';
 import { getRuntimeUrlResolver, type RuntimeUrlQuery } from './runtime-url';
-import { spaceApiPath } from './spaces/space-route';
+import { spaceDirectoryHeaders } from './spaces/space-route';
 
 export interface RuntimeFetchOptions extends RequestInit {
   query?: RuntimeUrlQuery;
   /**
-   * The directory the request is about, when the request does not name it in the open. A
-   * directory inside an isolated space sends the request to that space; see `addressSpace`.
+   * The directory the request is about, when the request does not name it in its query or
+   * its directory header. A directory inside an isolated space sends the request to that
+   * space; see `withSpaceDirectory`.
    */
   directory?: string | null;
 }
@@ -61,73 +62,32 @@ const appendRuntimeQuery = (url: URL, query?: RuntimeUrlQuery): void => {
 };
 
 // ── Isolated spaces ────────────────────────────────────────────────────────
-// A request about a directory inside an isolated space goes to that space, under
-// `/api/spaces/<id>/`. The directory is read where the request already names it in the
-// open, as the server's guards read it: the `directory` or `location[directory]` query, the
-// `x-opencode-directory` header (URI-encoded by the SDK, plain from the files API), or the
-// caller's explicit option for a request that carries it only in a body. Nothing is
-// remembered between calls.
-const decodeDirectoryHint = (value: string | null | undefined): string | null => {
-  if (!value) return null;
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    return value;
+// The server sends a request to an isolated space when the request names a directory inside
+// that space in its query or its `x-opencode-directory` header. A caller whose request names
+// its directory only in its body passes it as `directory`: a space's directory then travels
+// as that header, and a host directory adds nothing, so a host route reads the request as it
+// always did. A header the caller set itself is left as it is; a request that names two
+// different directories is the server's to refuse.
+const hasDirectoryHeader = (headers: HeadersInit | undefined): boolean => {
+  if (!headers) return false;
+  if (headers instanceof Headers) return headers.has('x-opencode-directory');
+  // Read without building a `Headers`: a caller's plain header may still hold characters the
+  // Headers API refuses, which `sanitizeHeadersForBrowser` encodes later on the way out.
+  const entries: Iterable<[string, string]> = Array.isArray(headers) ? headers : Object.entries(headers);
+  for (const [key] of entries) {
+    if (key.toLowerCase() === 'x-opencode-directory') return true;
   }
+  return false;
 };
 
-const directoryFromSearch = (search: string): string | null => {
-  const params = new URLSearchParams(search);
-  return decodeDirectoryHint(params.get('directory') ?? params.get('location[directory]'));
-};
-
-// Read without building a `Headers`: a caller's plain header may still hold characters the
-// Headers API refuses, which `sanitizeHeadersForBrowser` encodes later on the way out.
-const directoryFromHeaders = (headers: HeadersInit | undefined): string | null => {
-  if (!headers) return null;
-  const entries: Iterable<[string, string]> = headers instanceof Headers
-    ? headers.entries()
-    : Array.isArray(headers) ? headers : Object.entries(headers);
-  for (const [key, value] of entries) {
-    if (key.toLowerCase() === 'x-opencode-directory') return decodeDirectoryHint(value);
-  }
-  return null;
-};
-
-const splitPath = (raw: string): { path: string; rest: string; origin: string } | null => {
-  if (!isAbsoluteUrl(raw)) {
-    const index = raw.search(/[?#]/);
-    return index === -1 ? { path: raw, rest: '', origin: '' } : { path: raw.slice(0, index), rest: raw.slice(index), origin: '' };
-  }
-  try {
-    const url = new URL(raw);
-    if (isCurrentWindowUrl(url)) {
-      return { path: url.pathname, rest: `${url.search}${url.hash}`, origin: url.origin };
-    }
-    const servicePath = activeRuntimeServicePath(url);
-    if (servicePath === null || !shouldResolveApiPath(servicePath)) return null;
-    const prefix = url.pathname.slice(0, url.pathname.length - servicePath.length);
-    return { path: servicePath, rest: `${url.search}${url.hash}`, origin: `${url.origin}${prefix}` };
-  } catch {
-    return null;
-  }
-};
-
-/** The request addressed to the space its directory belongs to, or the request as it came. */
-const addressSpace = (input: string | URL | Request, init: RuntimeFetchOptions): string | URL | Request => {
-  const raw = input instanceof Request ? input.url : input.toString();
-  const parts = splitPath(raw);
-  if (!parts || !parts.path.startsWith('/api/')) return input;
-  const directory = init.directory
-    ?? directoryFromSearch(parts.rest)
-    ?? (init.query ? directoryFromSearch(new URLSearchParams(init.query instanceof URLSearchParams ? init.query : Object.entries(init.query).flatMap(([key, value]) => (value === null || value === undefined ? [] : [[key, String(value)]]))).toString()) : null)
-    ?? directoryFromHeaders(init.headers)
-    ?? (input instanceof Request ? directoryFromHeaders(input.headers) : null);
-  const path = spaceApiPath(parts.path, directory);
-  if (path === parts.path) return input;
-  const target = `${parts.origin}${path}${parts.rest}`;
-  if (input instanceof Request) return new Request(target, input);
-  return input instanceof URL ? new URL(target, input) : target;
+const withSpaceDirectory = (input: string | URL | Request, init: RequestInit, directory: string | null | undefined): RequestInit => {
+  const spaceHeaders = spaceDirectoryHeaders(directory);
+  if (spaceHeaders === null || hasDirectoryHeader(init.headers)) return init;
+  if (input instanceof Request && input.headers.has('x-opencode-directory')) return init;
+  const own: [string, string][] = !init.headers ? []
+    : init.headers instanceof Headers ? Array.from(init.headers.entries())
+    : Array.isArray(init.headers) ? init.headers : Object.entries(init.headers);
+  return { ...init, headers: [...own, ...Object.entries(spaceHeaders)] };
 };
 
 /**
@@ -357,10 +317,10 @@ const coalesceReadKey = (method: string, url: string, hasSignal: boolean, header
 };
 
 export const runtimeFetch = async (rawInput: string | URL | Request, init: RuntimeFetchOptions = {}): Promise<Response> => {
-  // Before either transport: the relay and the network see the same path.
-  const input = addressSpace(rawInput, init);
-  const { query, directory, ...requestInit } = init;
-  void directory;
+  const { query, directory, ...ownInit } = init;
+  // Before either transport: the relay and the network see the same headers.
+  const input = rawInput;
+  const requestInit = withSpaceDirectory(input, ownInit, directory);
 
   // Resolve the transport once — relay tunnel or network — then apply the SAME
   // read-coalescing to both. On a relay the tunnel is bandwidth/latency-bound, so

@@ -17,8 +17,9 @@ import {
   createSpaceDispatcher,
   isDirectoryOfSpace,
   isSpaceDirectory,
-  isSpaceRequestPath,
+  isSpaceRequest,
   parseSpaceRoute,
+  spaceRouteOf,
 } from './dispatcher.js';
 
 // The UI auth keeps its signing secret in the data directory, and reads that path when it loads.
@@ -146,7 +147,7 @@ const transportTo = (currentInside, { ids = [ID], token = TOKEN } = {}) => {
 const startHost = async (dispatcher, { commonMiddleware = false } = {}) => {
   const app = express();
   if (commonMiddleware) {
-    registerCommonRequestMiddleware(app, { express, skipBodyParsing: (req) => isSpaceRequestPath(req.path) });
+    registerCommonRequestMiddleware(app, { express, skipBodyParsing: isSpaceRequest });
   }
   app.use('/api', (req, _res, next) => { req.authenticatedByHost = true; next(); });
   app.use(dispatcher.middleware);
@@ -167,7 +168,28 @@ describe('space routes and directories', () => {
     expect(parseSpaceRoute(`/api/spaces/${ID}/`)).toEqual({ spaceId: ID, path: '/api/' });
     expect(parseSpaceRoute('/api/spaces//x')).toBeNull();
     expect(parseSpaceRoute('/api/session')).toBeNull();
-    expect(isSpaceRequestPath(`/api/spaces/${ID}/x`)).toBe(true);
+  });
+
+  it('finds the space of a request by its prefix or by the space directory it names', () => {
+    const routeOf = (target, headers = {}) => spaceRouteOf({ headers }, new URL(target, 'http://localhost'));
+    expect(routeOf(`/api/spaces/${ID}/session`)).toEqual({ spaceId: ID, path: '/api/session' });
+    expect(routeOf(`/api/session?directory=/spaces/${ID}/repo`)).toEqual({ spaceId: ID, path: '/api/session' });
+    expect(routeOf(`/api/session?location%5Bdirectory%5D=/spaces/${ID}`)).toEqual({ spaceId: ID, path: '/api/session' });
+    expect(routeOf('/api/session', { 'x-opencode-directory': encodeURIComponent(`/spaces/${ID}/repo`) })).toEqual({ spaceId: ID, path: '/api/session' });
+    // The first space directory decides; the guard then refuses a request that names another.
+    expect(routeOf(`/api/session?directory=/home/me&directory=/spaces/${ID}/repo`)).toEqual({ spaceId: ID, path: '/api/session' });
+    // A directory under /spaces/ that names no valid space is still a space's, never the host's.
+    expect(routeOf('/api/session?directory=/spaces')).toEqual({ spaceId: '', path: '/api/session' });
+    expect(routeOf(`/api/session?directory=/spaces/${ID}/../${OTHER}/repo`)).toEqual({ spaceId: OTHER, path: '/api/session' });
+    expect(routeOf('/api/session?directory=/home/me/spaces/project')).toBeNull();
+    expect(routeOf('/api/session')).toBeNull();
+    expect(routeOf(`/auth/session?directory=/spaces/${ID}`)).toBeNull();
+    // The host's `/api` mounts take any case, so the dispatcher reads the path the same way.
+    expect(routeOf(`/API/git/status?directory=/spaces/${ID}/repo`)).toEqual({ spaceId: ID, path: '/API/git/status' });
+    expect(routeOf(`/API/Spaces/${ID}/session`)).toEqual({ spaceId: ID, path: '/api/session' });
+    expect(isSpaceRequest({ url: `/api/x?directory=/spaces/${ID}/repo`, headers: {} })).toBe(true);
+    expect(isSpaceRequest({ url: `/api/spaces/${ID}/x`, headers: {} })).toBe(true);
+    expect(isSpaceRequest({ url: '/api/x', headers: { 'x-opencode-directory': '/home/me' } })).toBe(false);
   });
 
   it('knows which directories belong to spaces, and to which space', () => {
@@ -375,24 +397,85 @@ describe('space dispatcher', () => {
     expect(inside.seen).toHaveLength(2);
   });
 
-  // Guard two.
-  it('refuses an unprefixed request that names a space directory, before any host route runs', async () => {
-    await start();
-    for (const suffix of [`/api/host?directory=/spaces/${ID}/repo`, '/api/host?directory=/spaces', `/api/host?location%5Bdirectory%5D=/spaces/${ID}`]) {
-      const response = await fetch(host.url(suffix), { method: 'POST' });
-      expect(response.status, suffix).toBe(400);
-      expect(await response.json()).toMatchObject({ code: 'space_directory_needs_prefix' });
-    }
-    const byHeader = await fetch(host.url('/api/host'), { headers: { 'x-opencode-directory': `/spaces/${ID}/repo` } });
-    expect(byHeader.status).toBe(400);
-    // An SDK-style header, URI-encoded with no marker, names the same directory to OpenCode.
-    const byEncodedHeader = await fetch(host.url('/api/host'), { headers: { 'x-opencode-directory': encodeURIComponent(`/spaces/${ID}/repo`) } });
-    expect(byEncodedHeader.status).toBe(400);
+  it('sends an unprefixed request that names a space directory into that space, never to a host route', async () => {
+    await start({ host: { commonMiddleware: true } });
+    const directory = `/spaces/${ID}/repo`;
+    const byQuery = await fetch(host.url(`/api/echo?directory=${encodeURIComponent(directory)}&oc_url_token=secret-url`), {
+      headers: { cookie: 'oc_ui_session_3000=user-cookie', authorization: 'Bearer user-bearer' },
+    });
+    expect(byQuery.status).toBe(200);
+    expect(await byQuery.json()).toMatchObject({ url: `/api/echo?directory=${encodeURIComponent(directory)}` });
+    expect(inside.seen[0].headers.authorization).toBeUndefined();
+    expect(inside.seen[0].headers.cookie).toMatch(/^oc_ui_session_27600=[^;]+$/);
+    const byLocation = await fetch(host.url(`/api/echo?location%5Bdirectory%5D=${encodeURIComponent(directory)}`));
+    expect(byLocation.status).toBe(200);
+    const byHeader = await fetch(host.url('/api/echo'), { headers: { 'x-opencode-directory': directory } });
+    expect(byHeader.status).toBe(200);
+    // The SDK's header: URI-encoded, no marker.
+    const bySdkHeader = await fetch(host.url('/api/echo'), { headers: { 'x-opencode-directory': encodeURIComponent(directory) } });
+    expect(bySdkHeader.status).toBe(200);
+    // The body travels unread: the host's parsers leave it alone, as for a prefixed request.
+    const form = await fetch(host.url('/api/form'), {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded', 'x-opencode-directory': directory },
+      body: 'a=1&b=two%20words',
+    });
+    expect(await form.json()).toEqual({ raw: 'a=1&b=two%20words' });
+    expect(inside.seen).toHaveLength(5);
 
+    // A host route never sees a space's directory: an id that is no space, or no id at all, is no space.
+    for (const target of [`/api/host?directory=/spaces/${OTHER}/repo`, '/api/host?directory=/spaces', `/api/host?directory=/spaces/${ID}x`]) {
+      const response = await fetch(host.url(target), { method: 'POST' });
+      expect(response.status, target).toBe(404);
+      expect(await response.json()).toMatchObject({ code: 'space_not_found' });
+    }
+    // An upper-case path reaches the host's case-insensitive routes as well, so it goes to the space too.
+    const upper = await fetch(host.url(`/API/echo?directory=${encodeURIComponent(directory)}`));
+    expect(upper.status).toBe(200);
+    expect(inside.seen).toHaveLength(6);
+    const upperHost = await fetch(host.url(`/API/host?directory=/spaces/${OTHER}/repo`));
+    expect(upperHost.status).toBe(404);
+    expect(await upperHost.json()).toMatchObject({ code: 'space_not_found' });
     const ordinary = await fetch(host.url('/api/host?directory=/home/me/spaces/project'));
     expect(ordinary.status).toBe(200);
     expect(await ordinary.json()).toMatchObject({ host: true, directory: '/home/me/spaces/project' });
+    expect(inside.seen).toHaveLength(6);
+  });
+
+  it('applies the route rules to a request addressed by its directory', async () => {
+    await start();
+    const directory = encodeURIComponent(`/spaces/${ID}/repo`);
+    for (const [target, code] of [
+      [`/api/config/settings?directory=${directory}`, 'host_only_route'],
+      [`/api/provider?directory=${directory}`, 'host_only_route'],
+      [`/api/git/worktrees?directory=${directory}`, 'refused_across_boundary'],
+      [`/api/session/ses_1/move?directory=${directory}`, 'refused_across_boundary'],
+    ]) {
+      const response = await fetch(host.url(target), { method: 'POST' });
+      expect(response.status, target).toBe(403);
+      expect(await response.json()).toMatchObject({ code });
+    }
     expect(inside.seen).toHaveLength(0);
+  });
+
+  it('refuses a request that names a space directory and a directory outside that space, in either order', async () => {
+    await start();
+    const space = encodeURIComponent(`/spaces/${ID}/repo`);
+    const cases = [
+      [`/api/host?directory=${space}&directory=/home/me`, {}],
+      [`/api/host?directory=/home/me&directory=${space}`, {}],
+      [`/api/host?directory=${space}`, { 'x-opencode-directory': '/home/me' }],
+      ['/api/host?directory=/home/me', { 'x-opencode-directory': space }],
+      [`/api/host?directory=${space}&directory=/spaces/${OTHER}/repo`, {}],
+      [`/api/host?location%5Bdirectory%5D=/home/me`, { 'x-opencode-directory': `/spaces/${ID}/repo` }],
+    ];
+    for (const [target, headers] of cases) {
+      const response = await fetch(host.url(target), { method: 'POST', headers });
+      expect(response.status, target).toBe(400);
+      expect(await response.json()).toMatchObject({ code: 'directory_outside_space' });
+    }
+    expect(inside.seen).toHaveLength(0);
+    expect(transport.calls.connect).toBe(0);
   });
 
   it('refuses host-only routes and the routes that do not cross the boundary, without asking the space', async () => {

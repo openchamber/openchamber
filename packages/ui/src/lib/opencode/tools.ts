@@ -20,7 +20,7 @@
 
 import { z } from "zod"
 
-import type { Metadata, ToolInput } from "./model"
+import type { JsonValue, Metadata, ToolInput, ToolState } from "./model"
 
 /** Built-in tool names as the server reports them. */
 export const OPENCODE_TOOLS = {
@@ -197,7 +197,11 @@ type ParsedInput = z.infer<typeof inputSchema>
 
 const readInput = (input: ToolInput | undefined): ParsedInput => inputSchema.parse(input ?? {})
 
-const renderPageFields = z.object({ html: z.string().optional().catch(undefined), title: optionalText })
+const renderPageFields = z.object({
+  html: z.string().optional().catch(undefined),
+  title: optionalText,
+  awaitAnswer: z.boolean().optional().catch(undefined),
+})
 
 // The plugin accepts the inputs inside `parameters` or beside `action`, and an
 // explicit `parameters` object wins, so the page is read the same way.
@@ -205,8 +209,20 @@ const renderPageInputSchema = renderPageFields
   .extend({ parameters: renderPageFields.optional().catch(undefined) })
   .catch({})
 
+// What the user answered on a page that waited (render.page with
+// awaitAnswer), as the plugin records it in the call's metadata.
+const pageAnswerSchema = z.union([
+  z.object({ answered: z.literal(true), summary: z.string(), data: z.json().catch(null) }),
+  z.object({ answered: z.literal(false) }),
+])
+
 const openChamberResultSchema = z
-  .object({ openchamber: z.object({ ok: z.boolean().optional().catch(undefined) }).optional().catch(undefined) })
+  .object({
+    openchamber: z.object({
+      ok: z.boolean().optional().catch(undefined),
+      answer: pageAnswerSchema.optional().catch(undefined),
+    }).optional().catch(undefined),
+  })
   .catch({})
 
 /** One entry of a tool's `metadata.files` (`FileDiff.Info` on the wire). */
@@ -307,20 +323,42 @@ export function executeScript(input: ToolInput | undefined): string | undefined 
 /** The agent a `subagent` call runs (`input.agent`). */
 const isRenderTool = (toolName: ToolName): boolean => toolName === OPENCHAMBER_RENDER_TOOL
 
+/** Where a page stands on the user's answer. */
+export type RenderedPageAsk =
+  | { kind: "show" }
+  | { kind: "waiting" }
+  | { kind: "answered"; summary: string; data: JsonValue }
+  | { kind: "answered-in-chat" }
+  | { kind: "unanswered" }
+
 /**
  * The page an `openchamber_render` call showed: present once OpenChamber
- * accepted the call, so a refused or unfinished call keeps its tool row.
+ * accepted the call, so a refused or unfinished call keeps its tool row. A
+ * page that waits for the user's answer shows while its call runs, since the
+ * call runs until the user answers, and after a call that failed while waiting.
  */
 export function renderedPage(
   toolName: ToolName,
-  input: ToolInput | undefined,
-  metadata: Metadata | undefined,
-): { html: string; title: string } | null {
-  if (!isRenderTool(toolName) || openChamberResultSchema.parse(metadata ?? {}).openchamber?.ok !== true) return null
-  const parsed = renderPageInputSchema.parse(input ?? {})
+  state: ToolState,
+): { html: string; title: string; ask: RenderedPageAsk } | null {
+  if (!isRenderTool(toolName)) return null
+  const parsed = renderPageInputSchema.parse(state.input ?? {})
   const html = parsed.parameters?.html ?? parsed.html
   const title = parsed.parameters?.title ?? parsed.title
-  return html?.trim() && title ? { html, title } : null
+  if (!html?.trim() || !title) return null
+  // A page that waited stays in the chat when its call ends without an
+  // answer (the user stopped the turn), so the question it asked is still there.
+  if ((parsed.parameters?.awaitAnswer ?? parsed.awaitAnswer) === true) {
+    if (state.status === "running") return { html, title, ask: { kind: "waiting" } }
+    if (state.status === "error") return { html, title, ask: { kind: "unanswered" } }
+  }
+  if (state.status !== "completed") return null
+  const result = openChamberResultSchema.parse(state.metadata ?? {}).openchamber
+  if (result?.ok !== true) return null
+  const answer = result.answer
+  if (answer?.answered === true) return { html, title, ask: { kind: "answered", summary: answer.summary, data: answer.data } }
+  if (answer?.answered === false) return { html, title, ask: { kind: "answered-in-chat" } }
+  return { html, title, ask: { kind: "show" } }
 }
 
 export function subagentAgent(input: ToolInput | undefined): string | undefined {

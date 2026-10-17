@@ -1,10 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 
-import { RENDER_PAGE_GUIDANCE, SESSION_LINK_GUIDANCE, WORKTREE_MOVE_GUIDANCE, buildKnowledgeSignature, buildKnowledgeText, createSessionKnowledgeRuntime } from './runtime.js';
+import { KNOWLEDGE_ENTRY_KEYS, RENDER_PAGE_GUIDANCE, SESSION_LINK_GUIDANCE, buildKnowledgeEntries, createSessionKnowledgeRuntime } from './runtime.js';
 
 const DIRECTORY = '/work/project';
 const PROJECT_ID = 'path_project';
 const PINS = { notes: ['n1'], plans: ['p1'] };
+const NO_PINS = { notes: [], plans: [] };
+const { checkout: CHECKOUT, pinned: PINNED, memory: MEMORY, guidance: GUIDANCE } = KNOWLEDGE_ENTRY_KEYS;
 
 const note = (overrides = {}) => ({
   id: 'n1', body: 'Pinned note body.', createdAt: 1, updatedAt: 1, pinned: true, source: 'manual', ...overrides,
@@ -28,15 +30,20 @@ const createRuntime = (overrides = {}) => {
     readAll: async () => ({ global: [memory()], project: [], globalFailed: false, projectFailed: false }),
     ...overrides.agentMemoryRuntime,
   },
-  ...('readSessionMetadata' in overrides ? { readSessionMetadata: overrides.readSessionMetadata } : {}),
-  ...('persistSessionMetadata' in overrides ? { persistSessionMetadata: overrides.persistSessionMetadata } : {}),
-  ...('isAgentMemoryEnabled' in overrides ? { isAgentMemoryEnabled: overrides.isAgentMemoryEnabled } : {}),
-  ...('isSessionLinkingAvailable' in overrides ? { isSessionLinkingAvailable: overrides.isSessionLinkingAvailable } : {}),
   };
-  if ('isWorktreeMoveWithoutAsking' in overrides) dependencies.isWorktreeMoveWithoutAsking = overrides.isWorktreeMoveWithoutAsking;
-  if ('isPageRenderingAvailable' in overrides) dependencies.isPageRenderingAvailable = overrides.isPageRenderingAvailable;
+  for (const key of [
+    'readSessionMetadata', 'persistSessionMetadata', 'isAgentMemoryEnabled', 'isSessionLinkingAvailable',
+    'isPageRenderingAvailable', 'readCheckoutBranch', 'instructionEntries',
+  ]) {
+    if (key in overrides) dependencies[key] = overrides[key];
+  }
   return createSessionKnowledgeRuntime(dependencies);
 };
+
+/** What each entry should hold for a session with these pins. */
+const entriesFor = async (runtime, pins = PINS, directory = DIRECTORY) => (
+  buildKnowledgeEntries(await runtime.collect(directory, pins))
+);
 
 /** An in-memory stand-in for `session-metadata-store.js`. */
 const createMetadataStub = (initial = {}) => {
@@ -53,31 +60,106 @@ const createMetadataStub = (initial = {}) => {
   };
 };
 
-describe('when to link', () => {
-  const empty = { notes: [], plans: [], memory: { global: [], project: [], enabled: false, complete: false } };
+/** OpenCode's instruction entries for one session, as the API leaves them. */
+const createEntriesStub = ({ fail = new Set() } = {}) => {
+  const held = new Map();
+  const calls = [];
+  return {
+    held,
+    calls,
+    put: async (sessionId, directory, key, value) => {
+      calls.push(['put', sessionId, directory, key]);
+      if (fail.has(key)) throw new Error(`put ${key} failed`);
+      held.set(key, value);
+    },
+    remove: async (sessionId, directory, key) => {
+      calls.push(['remove', sessionId, directory, key]);
+      held.delete(key);
+    },
+  };
+};
 
+const pinnedStore = () => createMetadataStub({
+  ses_a: { openchamber: { project_context_pins: PINS } },
+});
+
+describe('writing the knowledge into a session', () => {
+  test('puts each source under its own key and removes the empty ones', async () => {
+    const instructionEntries = createEntriesStub();
+    const runtime = createRuntime({ ...pinnedStore(), instructionEntries });
+
+    expect(await runtime.sync('ses_a', DIRECTORY)).toBe(true);
+
+    expect(instructionEntries.held.get(PINNED)).toContain('Pinned note body.');
+    expect(instructionEntries.held.get(PINNED)).toContain('Plan body.');
+    expect(instructionEntries.held.get(MEMORY)).toContain('Uses bun');
+    // No tool: no guidance and no branch, so those keys are cleared.
+    expect(instructionEntries.calls).toContainEqual(['remove', 'ses_a', DIRECTORY, GUIDANCE]);
+    expect(instructionEntries.calls).toContainEqual(['remove', 'ses_a', DIRECTORY, CHECKOUT]);
+  });
+
+  test('an unpinned note takes its entry away', async () => {
+    const instructionEntries = createEntriesStub();
+    const store = pinnedStore();
+    const runtime = createRuntime({ ...store, instructionEntries, isAgentMemoryEnabled: async () => false });
+    await runtime.sync('ses_a', DIRECTORY);
+    expect(instructionEntries.held.has(PINNED)).toBe(true);
+
+    await runtime.setPin('ses_a', DIRECTORY, 'note', 'n1', false);
+    await runtime.setPin('ses_a', DIRECTORY, 'plan', 'p1', false);
+    await runtime.sync('ses_a', DIRECTORY);
+
+    expect(instructionEntries.held.has(PINNED)).toBe(false);
+  });
+
+  test('one entry that will not write does not hold back the others', async () => {
+    const instructionEntries = createEntriesStub({ fail: new Set([PINNED]) });
+    const runtime = createRuntime({ ...pinnedStore(), instructionEntries });
+
+    expect(await runtime.sync('ses_a', DIRECTORY)).toBe(false);
+    expect(instructionEntries.held.get(MEMORY)).toContain('Uses bun');
+  });
+
+  test('never throws, so a send goes out without its background', async () => {
+    const instructionEntries = createEntriesStub();
+    const runtime = createRuntime({
+      ...pinnedStore(),
+      instructionEntries,
+      projectContextRuntime: { readContext: async () => { throw new Error('unreadable'); } },
+      agentMemoryRuntime: { readAll: async () => { throw new Error('unreadable'); } },
+      isSessionLinkingAvailable: async () => { throw new Error('settings unreadable'); },
+    });
+    await expect(runtime.sync('ses_a', DIRECTORY)).resolves.toBe(true);
+
+    const broken = createSessionKnowledgeRuntime({ instructionEntries, readSessionMetadata: async () => ({}) });
+    await expect(broken.sync('ses_a', DIRECTORY)).resolves.toBe(false);
+    await expect(runtime.sync('', DIRECTORY)).resolves.toBe(false);
+  });
+
+  test('does nothing without OpenCode wired', async () => {
+    expect(await createRuntime(pinnedStore()).sync('ses_a', DIRECTORY)).toBe(false);
+  });
+});
+
+describe('when to link', () => {
   test('is told in a session whose agent has the tool, even with nothing else to tell', async () => {
     const runtime = createRuntime({
       isSessionLinkingAvailable: async () => true,
       isAgentMemoryEnabled: async () => false,
       projectContextRuntime: { readContext: async () => ({ notes: [], todos: [], plans: [] }) },
     });
-    const { text, signature } = await runtime.resolvePending(DIRECTORY, '', { notes: [], plans: [] });
+    const entries = await entriesFor(runtime, NO_PINS);
 
-    // The worktree rule rides with the tool, in its asking form by default.
-    expect(text).toBe(`${SESSION_LINK_GUIDANCE}\n\n${WORKTREE_MOVE_GUIDANCE.ask}`);
-    expect(signature).toBe('l:on|w:ask');
-    expect((await runtime.resolvePending(DIRECTORY, signature, { notes: [], plans: [] })).text).toBe('');
+    expect(entries[GUIDANCE]).toBe(SESSION_LINK_GUIDANCE);
+    expect(entries[PINNED]).toBe('');
+    expect(entries[MEMORY]).toBe('');
   });
 
   test('is left out without the tool, or when the check fails', async () => {
     for (const isSessionLinkingAvailable of [async () => false, async () => { throw new Error('settings unreadable'); }]) {
-      const { text } = await createRuntime({ isSessionLinkingAvailable }).resolvePending(DIRECTORY, '', PINS);
-      expect(text).not.toContain(SESSION_LINK_GUIDANCE);
-      expect(text).not.toContain('session.moveToWorktree');
+      const entries = await entriesFor(createRuntime({ isSessionLinkingAvailable }));
+      expect(entries[GUIDANCE]).toBe('');
     }
-    expect(buildKnowledgeText(empty)).toBe('');
-    expect(buildKnowledgeSignature(empty)).toBe('');
   });
 });
 
@@ -87,173 +169,181 @@ describe('when to draw a page', () => {
     projectContextRuntime: { readContext: async () => ({ notes: [], todos: [], plans: [] }) },
   };
 
-  test('is told in a session whose agent has the render tool, once', async () => {
-    const runtime = createRuntime({ ...bare, isPageRenderingAvailable: async () => true });
-    const { text, signature } = await runtime.resolvePending(DIRECTORY, '', { notes: [], plans: [] });
+  test('is told in a session whose agent has the render tool', async () => {
+    const entries = await entriesFor(createRuntime({ ...bare, isPageRenderingAvailable: async () => true }), NO_PINS);
 
-    expect(text).toBe(RENDER_PAGE_GUIDANCE);
-    expect(text).toContain('Do not use it for a few numbers');
-    expect(signature).toBe('r:on');
-    expect((await runtime.resolvePending(DIRECTORY, signature, { notes: [], plans: [] })).text).toBe('');
+    expect(entries[GUIDANCE]).toBe(RENDER_PAGE_GUIDANCE);
+    expect(entries[GUIDANCE]).toContain('Do not use it for a few numbers');
   });
 
   test('is left out without the tool, or when the check fails', async () => {
     for (const isPageRenderingAvailable of [async () => false, async () => { throw new Error('settings unreadable'); }]) {
-      const { text } = await createRuntime({ ...bare, isPageRenderingAvailable }).resolvePending(DIRECTORY, '', { notes: [], plans: [] });
-      expect(text).toBe('');
+      const entries = await entriesFor(createRuntime({ ...bare, isPageRenderingAvailable }), NO_PINS);
+      expect(entries[GUIDANCE]).toBe('');
     }
   });
 });
 
-describe('when to move into a worktree', () => {
-  const runtimeWith = (overrides) => createRuntime({
+describe('the worktree move', () => {
+  test('is introduced by the tool description, never told as a rule in the session', async () => {
+    const entries = await entriesFor(createRuntime({ isSessionLinkingAvailable: async () => true }));
+    expect(entries[GUIDANCE]).not.toContain('moveToWorktree');
+  });
+});
+
+describe('which branch the session works on', () => {
+  const runtimeOn = (branch, overrides = {}) => createRuntime({
     isSessionLinkingAvailable: async () => true,
     isAgentMemoryEnabled: async () => false,
-    projectContextRuntime: { readContext: async () => ({ notes: [], todos: [], plans: [] }) },
+    readCheckoutBranch: async () => {
+      if (branch instanceof Error) throw branch;
+      return branch;
+    },
     ...overrides,
   });
 
-  test('asks by default, and when the setting cannot be read', async () => {
-    for (const isWorktreeMoveWithoutAsking of [undefined, async () => false, async () => { throw new Error('settings unreadable'); }]) {
-      const { text, signature } = await runtimeWith({ isWorktreeMoveWithoutAsking }).resolvePending(DIRECTORY, '', { notes: [], plans: [] });
-      expect(text).toBe(`${SESSION_LINK_GUIDANCE}\n\n${WORKTREE_MOVE_GUIDANCE.ask}`);
-      expect(signature).toBe('l:on|w:ask');
+  test('names the directory and the branch', async () => {
+    const entries = await entriesFor(runtimeOn('main'));
+    expect(entries[CHECKOUT]).toBe('This session works in `/work/project`, on branch `main`.');
+  });
+
+  test('a switched branch changes the entry, which OpenCode announces to the agent', async () => {
+    const instructionEntries = createEntriesStub();
+    let branch = 'main';
+    const runtime = runtimeOn(null, {
+      ...pinnedStore(),
+      instructionEntries,
+      readCheckoutBranch: async () => branch,
+    });
+    await runtime.sync('ses_a', DIRECTORY);
+    const before = instructionEntries.held.get(CHECKOUT);
+
+    branch = 'fix/other-session';
+    await runtime.sync('ses_a', DIRECTORY);
+
+    expect(instructionEntries.held.get(CHECKOUT)).not.toBe(before);
+    expect(instructionEntries.held.get(CHECKOUT)).toContain('`fix/other-session`');
+  });
+
+  test('a session that moved to another directory names the new one', async () => {
+    const entries = await entriesFor(runtimeOn('feat/moved'), PINS, '/work/project-worktree');
+    expect(entries[CHECKOUT]).toBe('This session works in `/work/project-worktree`, on branch `feat/moved`.');
+  });
+
+  test('a branch that cannot be read keeps what the session holds', async () => {
+    for (const unreadable of [null, new Error('git failed')]) {
+      const entries = await entriesFor(runtimeOn(unreadable));
+      expect(entries).not.toHaveProperty(CHECKOUT);
     }
   });
 
-  test('moves unasked when the user chose that, and the change re-sends the rule', async () => {
-    const runtime = runtimeWith({ isWorktreeMoveWithoutAsking: async () => true });
-    const { text, signature } = await runtime.resolvePending(DIRECTORY, 'l:on|w:ask', { notes: [], plans: [] });
-    expect(text).toContain(WORKTREE_MOVE_GUIDANCE.auto);
-    expect(text).not.toContain(WORKTREE_MOVE_GUIDANCE.ask);
-    expect(signature).toBe('l:on|w:auto');
+  test('an empty branch replaces the old branch and directory; a failed read preserves it', async () => {
+    const instructionEntries = createEntriesStub();
+    let branch = 'main';
+    const runtime = runtimeOn(null, {
+      ...pinnedStore(),
+      instructionEntries,
+      readCheckoutBranch: async () => {
+        if (branch instanceof Error) throw branch;
+        return branch;
+      },
+    });
+    await runtime.sync('ses_a', DIRECTORY);
+    expect(instructionEntries.held.get(CHECKOUT)).toContain('on branch `main`');
+
+    branch = '';
+    await runtime.sync('ses_a', '/work/plain-directory');
+    const noBranch = 'This session works in `/work/plain-directory`, with no branch checked out.';
+    expect(instructionEntries.held.get(CHECKOUT)).toBe(noBranch);
+
+    branch = new Error('git failed');
+    await runtime.sync('ses_a', '/work/unreadable');
+    expect(instructionEntries.held.get(CHECKOUT)).toBe(noBranch);
+  });
+
+  test('is not read without the tool, and the entry is cleared', async () => {
+    const reads = [];
+    const runtime = createRuntime({
+      isSessionLinkingAvailable: async () => false,
+      readCheckoutBranch: async (directory) => { reads.push(directory); return 'main'; },
+    });
+    const entries = await entriesFor(runtime);
+
+    expect(reads).toEqual([]);
+    expect(entries[CHECKOUT]).toBe('');
   });
 });
 
-describe('what the session is owed', () => {
-  test('carries pinned notes, pinned plan bodies, and the memory index', async () => {
-    const { text } = await createRuntime().resolvePending(DIRECTORY, '', PINS);
+describe('what the session carries', () => {
+  test('pinned notes, pinned plan bodies, and the memory index', async () => {
+    const entries = await entriesFor(createRuntime());
 
-    expect(text).toContain('Pinned note body.');
-    expect(text).toContain('Migration plan');
-    expect(text).toContain('Plan body.');
-    expect(text).toContain('Uses bun');
+    expect(entries[PINNED]).toContain('Pinned note body.');
+    expect(entries[PINNED]).toContain('Migration plan');
+    expect(entries[PINNED]).toContain('Plan body.');
+    expect(entries[MEMORY]).toContain('Uses bun');
   });
 
   test('memory is indexed by title, never by body', async () => {
-    const { text } = await createRuntime().resolvePending(DIRECTORY, '');
-
-    expect(text).not.toContain('Full text.');
+    expect((await entriesFor(createRuntime()))[MEMORY]).not.toContain('Full text.');
   });
 
   test('unpinned notes and plans stay out', async () => {
-    const runtime = createRuntime({
-      projectContextRuntime: {
-        readContext: async () => ({ notes: [note({ pinned: false })], todos: [], plans: [] }),
-      },
-    });
-
-    const { text } = await runtime.resolvePending(DIRECTORY, '', { notes: [], plans: [] });
-
-    expect(text).not.toContain('Pinned note body.');
+    const entries = await entriesFor(createRuntime(), NO_PINS);
+    expect(entries[PINNED]).toBe('');
   });
 
-  test('nothing pinned with memory off owes nothing', async () => {
+  test('nothing pinned with memory off carries nothing', async () => {
     const runtime = createRuntime({
       projectContextRuntime: { readContext: async () => ({ notes: [], todos: [], plans: [] }) },
       isAgentMemoryEnabled: async () => false,
     });
-
-    const { text, signature } = await runtime.resolvePending(DIRECTORY, '');
-
-    expect(signature).toBe('');
-    expect(text).toBe('');
+    const entries = await entriesFor(runtime, NO_PINS);
+    expect(Object.values(entries).every((text) => text === '')).toBe(true);
   });
 
   test('an empty memory store still tells the session when to save', async () => {
     const runtime = createRuntime({
-      projectContextRuntime: { readContext: async () => ({ notes: [], todos: [], plans: [] }) },
       agentMemoryRuntime: {
         readAll: async () => ({ global: [], project: [], globalFailed: false, projectFailed: false }),
       },
     });
-
-    const first = await runtime.resolvePending(DIRECTORY, '');
-    expect(first.text).toContain('Save to it in the moment');
-    expect(first.text).toContain('Nothing is stored yet.');
-
-    const again = await runtime.resolvePending(DIRECTORY, first.signature);
-    expect(again.text).toBe('');
+    const entries = await entriesFor(runtime, NO_PINS);
+    expect(entries[MEMORY]).toContain('Save to it in the moment');
+    expect(entries[MEMORY]).toContain('Nothing is stored yet.');
   });
 
   test('a memory store that failed to load is not called empty', async () => {
     const runtime = createRuntime({
-      projectContextRuntime: { readContext: async () => ({ notes: [], todos: [], plans: [] }) },
       agentMemoryRuntime: {
         readAll: async () => ({ global: [], project: [], globalFailed: true, projectFailed: false }),
       },
     });
-
-    const { text } = await runtime.resolvePending(DIRECTORY, '');
-    expect(text).toContain('Save to it in the moment');
-    expect(text).not.toContain('Nothing is stored yet.');
-  });
-});
-
-describe('what has already been delivered', () => {
-  test('owes nothing when the signature matches', async () => {
-    const runtime = createRuntime();
-    const first = await runtime.resolvePending(DIRECTORY, '');
-
-    const second = await runtime.resolvePending(DIRECTORY, first.signature);
-
-    expect(second.text).toBe('');
-    expect(second.signature).toBe(first.signature);
+    const entries = await entriesFor(runtime, NO_PINS);
+    expect(entries[MEMORY]).toContain('Save to it in the moment');
+    expect(entries[MEMORY]).not.toContain('Nothing is stored yet.');
   });
 
-  test('an edited note owes the block again', async () => {
-    const before = buildKnowledgeSignature({
-      notes: [note()], plans: [], memory: { global: [], project: [] },
+  test('a memory saved mid-session changes only the memory entry', async () => {
+    const stored = [memory()];
+    const runtime = createRuntime({
+      agentMemoryRuntime: { readAll: async () => ({ global: [...stored], project: [], globalFailed: false, projectFailed: false }) },
     });
-    const after = buildKnowledgeSignature({
-      notes: [note({ updatedAt: 2 })], plans: [], memory: { global: [], project: [] },
-    });
+    const before = await entriesFor(runtime);
+    stored.push(memory({ id: 'm2', title: 'Ships on Fridays' }));
+    const after = await entriesFor(runtime);
 
-    expect(after).not.toBe(before);
-  });
-
-  test('a memory saved mid-session owes the block again', async () => {
-    const before = buildKnowledgeSignature({
-      notes: [], plans: [], memory: { global: [memory()], project: [] },
-    });
-    const after = buildKnowledgeSignature({
-      notes: [], plans: [], memory: { global: [memory()], project: [memory({ id: 'm2' })] },
-    });
-
-    expect(after).not.toBe(before);
-  });
-
-  test('the same set in a different order is the same signature', () => {
-    const a = buildKnowledgeSignature({
-      notes: [note({ id: 'a' }), note({ id: 'b' })], plans: [], memory: { global: [], project: [] },
-    });
-    const b = buildKnowledgeSignature({
-      notes: [note({ id: 'b' }), note({ id: 'a' })], plans: [], memory: { global: [], project: [] },
-    });
-
-    expect(a).toBe(b);
+    expect(after[MEMORY]).not.toBe(before[MEMORY]);
+    expect(after[PINNED]).toBe(before[PINNED]);
   });
 });
 
 describe('when a source will not load', () => {
-  test('a broken memory store still delivers the pinned notes', async () => {
+  test('a broken memory store still carries the pinned notes', async () => {
     const runtime = createRuntime({
       agentMemoryRuntime: { readAll: async () => { throw new Error('unreadable'); } },
     });
-
-    const { text } = await runtime.resolvePending(DIRECTORY, '', PINS);
-
-    expect(text).toContain('Pinned note body.');
+    expect((await entriesFor(runtime))[PINNED]).toContain('Pinned note body.');
   });
 
   test('a scope that failed to load is left out rather than indexed as empty', async () => {
@@ -262,10 +352,7 @@ describe('when a source will not load', () => {
         readAll: async () => ({ global: [memory()], project: [], globalFailed: true, projectFailed: false }),
       },
     });
-
-    const { text } = await runtime.resolvePending(DIRECTORY, '', PINS);
-
-    expect(text).not.toContain('Uses bun');
+    expect((await entriesFor(runtime))[MEMORY]).not.toContain('Uses bun');
   });
 
   test('an unreadable plan is marked, not dropped', async () => {
@@ -275,46 +362,35 @@ describe('when a source will not load', () => {
         readPlan: async () => { throw new Error('gone'); },
       },
     });
-
-    const { text } = await runtime.resolvePending(DIRECTORY, '', PINS);
-
-    expect(text).toContain('Migration plan');
-    expect(text).toContain('plan content unavailable');
+    const entries = await entriesFor(runtime);
+    expect(entries[PINNED]).toContain('Migration plan');
+    expect(entries[PINNED]).toContain('plan content unavailable');
   });
 
-  test('a broken project context still delivers memory', async () => {
+  test('a broken project context still carries memory', async () => {
     const runtime = createRuntime({
       projectContextRuntime: { readContext: async () => { throw new Error('unreadable'); } },
     });
-
-    const { text } = await runtime.resolvePending(DIRECTORY, '', PINS);
-
-    expect(text).toContain('Uses bun');
+    expect((await entriesFor(runtime))[MEMORY]).toContain('Uses bun');
   });
 });
 
 describe('the memory switch', () => {
   test('memory is left out entirely while the feature is off', async () => {
-    const runtime = createRuntime({ isAgentMemoryEnabled: async () => false });
-
-    const { text } = await runtime.resolvePending(DIRECTORY, '', PINS);
-
-    expect(text).not.toContain('Uses bun');
-    expect(text).toContain('Pinned note body.');
+    const entries = await entriesFor(createRuntime({ isAgentMemoryEnabled: async () => false }));
+    expect(entries[MEMORY]).toBe('');
+    expect(entries[PINNED]).toContain('Pinned note body.');
   });
 
   test('an unreadable setting keeps memory out rather than guessing', async () => {
     const runtime = createRuntime({
       isAgentMemoryEnabled: async () => { throw new Error('settings unreadable'); },
     });
-
-    const { text } = await runtime.resolvePending(DIRECTORY, '');
-
-    expect(text).not.toContain('Uses bun');
+    expect((await entriesFor(runtime))[MEMORY]).toBe('');
   });
 });
 
-describe('reading what a session was told', () => {
+describe('pins', () => {
   test('project context pins are isolated in each session metadata record', () => {
     const runtime = createRuntime();
 
@@ -327,9 +403,9 @@ describe('reading what a session was told', () => {
     expect(runtime.readPins({})).toEqual({ notes: [], plans: [] });
   });
 
-  test('pins into OpenChamber\'s own store and invalidates the delivered signature', async () => {
+  test('pins into OpenChamber\'s own store as a merge patch', async () => {
     const store = createMetadataStub({
-      ses_a: { openchamber: { project_context_pins: { notes: [], plans: [] }, knowledge_context_delivered: 'old' } },
+      ses_a: { openchamber: { project_context_pins: { notes: [], plans: [] } } },
     });
     const runtime = createRuntime(store);
 
@@ -338,12 +414,7 @@ describe('reading what a session was told', () => {
     expect(store.patches).toEqual([{
       sessionId: 'ses_a',
       directory: DIRECTORY,
-      patch: {
-        openchamber: {
-          project_context_pins: { notes: ['n1'], plans: [] },
-          knowledge_context_delivered: '',
-        },
-      },
+      patch: { openchamber: { project_context_pins: { notes: ['n1'], plans: [] } } },
     }]);
   });
 
@@ -356,51 +427,21 @@ describe('reading what a session was told', () => {
     await expect(runtime.setPin('ses_a', DIRECTORY, 'note', 'n1', false)).resolves.toEqual({ notes: ['n2'], plans: [] });
   });
 
-  test('records delivery as a merge patch, leaving neighbouring state alone', async () => {
-    const store = createMetadataStub();
-    const runtime = createRuntime(store);
-
-    await runtime.recordDelivered('ses_a', DIRECTORY, 'sig-1');
-
-    expect(store.patches).toEqual([{
-      sessionId: 'ses_a',
-      directory: DIRECTORY,
-      patch: { openchamber: { knowledge_context_delivered: 'sig-1' } },
-    }]);
-  });
-
   test('says so plainly when no metadata store is wired', async () => {
-    const runtime = createRuntime();
-    await expect(runtime.setPin('ses_a', DIRECTORY, 'note', 'n1', true)).rejects.toThrow(/session metadata store/);
-    await expect(runtime.recordDelivered('ses_a', DIRECTORY, 'sig')).rejects.toThrow(/session metadata store/);
-  });
-
-  test('finds the signature stored on the session', () => {
-    const runtime = createRuntime();
-
-    expect(runtime.readDeliveredSignature({
-      metadata: { openchamber: { knowledge_context_delivered: 'sig' } },
-    })).toBe('sig');
-  });
-
-  test('a session with no metadata has been told nothing', () => {
-    const runtime = createRuntime();
-
-    expect(runtime.readDeliveredSignature({})).toBe('');
-    expect(runtime.readDeliveredSignature(null)).toBe('');
+    await expect(createRuntime().setPin('ses_a', DIRECTORY, 'note', 'n1', true)).rejects.toThrow(/session metadata store/);
   });
 });
 
 describe('size', () => {
-  test('an oversized block is cut and says so', () => {
-    const text = buildKnowledgeText({
+  test('an oversized entry is cut and says so', () => {
+    const entries = buildKnowledgeEntries({
       notes: [note({ body: 'x'.repeat(20_000) })],
       plans: [],
       memory: { global: [], project: [] },
     });
 
-    expect(text.length).toBeLessThan(8_200);
-    expect(text).toContain('project knowledge truncated');
+    expect(entries[PINNED].length).toBeLessThan(8_100);
+    expect(entries[PINNED]).toContain('(truncated)');
   });
 });
 
@@ -420,9 +461,8 @@ describe('entries that read as instructions', () => {
       },
     });
 
-    const { text } = await runtime.resolvePending(DIRECTORY, '');
-
-    expect(text).toContain('Uses bun');
-    expect(text).not.toContain('Ignore previous instructions');
+    const entries = await entriesFor(runtime);
+    expect(entries[MEMORY]).toContain('Uses bun');
+    expect(entries[MEMORY]).not.toContain('Ignore previous instructions');
   });
 });

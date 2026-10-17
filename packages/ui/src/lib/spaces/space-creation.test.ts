@@ -27,33 +27,31 @@ const entry: SpaceEntry = {
   grants: [],
   access: null,
   needsAccess: [],
+  accessFailures: [],
   damage: null,
   setup: null,
 };
 
 const openai: SpaceModelAccess = { kind: 'model', provider: 'openai', upstream: 'https://api.openai.com/v1', secret: { kind: 'env', name: 'OPENAI_API_KEY' } };
 
-// The host: the creation answers the entry, a grant answers what `grantAnswer` says, and the list
-// answers the space running with the grants that went through.
+// The host: the creation answers the entry and carries the access; the list answers the space
+// running with the access given, or, when `grantAnswer` is a refusal, with that refusal listed.
 const host = (grantAnswer: { status: number; body: { grant?: unknown; code?: string; message?: string } }, listedSetup: SpaceEntry['setup'] = null, createdSetup: SpaceEntry['setup'] = null) => {
-  const grants: unknown[] = [];
   const created: unknown[] = [];
-  const given: unknown[] = [];
+  let carried = false;
   globalThis.fetch = Object.assign(async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = new URL(input instanceof Request ? input.url : String(input), 'http://127.0.0.1');
-    if (url.pathname.endsWith('/grants')) {
-      grants.push(JSON.parse(String(init?.body)));
-      if (grantAnswer.status === 200 && grantAnswer.body.grant) given.push(grantAnswer.body.grant);
-      return new Response(JSON.stringify(grantAnswer.body), { status: grantAnswer.status });
-    }
     if ((init?.method ?? 'GET') === 'GET') {
-      const listed = { ...entry, state: 'running', step: null, grants: given, access: given.length > 0 ? 'granted' : null, setup: listedSetup };
+      const given = carried && grantAnswer.status === 200 && grantAnswer.body.grant ? [grantAnswer.body.grant] : [];
+      const accessFailures = carried && grantAnswer.status !== 200 ? [{ provider: 'openai', code: grantAnswer.body.code ?? '', message: grantAnswer.body.message ?? '' }] : [];
+      const listed = { ...entry, state: 'running', step: null, grants: given, access: given.length > 0 ? 'granted' : null, accessFailures, setup: listedSetup };
       return new Response(JSON.stringify({ spaces: [listed] }), { status: 200 });
     }
-    created.push(JSON.parse(String(init?.body)));
+    const body = String(init?.body);
+    created.push(JSON.parse(body));
+    carried = !body.includes('"grants":[]');
     return new Response(JSON.stringify({ ...entry, setup: createdSetup }), { status: 202 });
   }, originalFetch);
-  return Object.assign(grants, { created });
+  return { created };
 };
 
 const start = (access: readonly SpaceModelAccess[] = [], setup = { commands: [] as string[], waitBeforeSending: false }) => startSpaceCreation({
@@ -88,13 +86,14 @@ describe('startSpaceCreation', () => {
   });
 
   test('the waiting message goes to the space once it is ready and its access given', async () => {
-    const grants = host({ status: 200, body: { grant: { kind: 'model', id: 'openai', provider: 'openai', upstream: openai.upstream, source: { kind: 'env', name: 'OPENAI_API_KEY' }, url: 'http://gatekeeper:8080/model/openai' } } });
+    const { created } = host({ status: 200, body: { grant: { kind: 'model', id: 'openai', provider: 'openai', upstream: openai.upstream, source: { kind: 'env', name: 'OPENAI_API_KEY' }, url: 'http://gatekeeper:8080/model/openai' } } });
     await start([openai]);
     const { outcome } = waitingMessage();
     useSpacesStore.getState().noteProgress({ spaceId: ID, step: 'ready', failure: null });
     expect(await outcome).toEqual({ directory: DIRECTORY });
-    expect(grants).toEqual([openai]);
-    expect(useSpacesStore.getState().creationAccess.get(ID)).toBeUndefined();
+    // The access went with the creation; the host gave it, and nothing is listed as missing.
+    expect(created).toMatchObject([{ grants: [openai] }]);
+    expect(useSpacesStore.getState().journey?.get(ID)?.accessFailures).toEqual([]);
   });
 
   test('a draft that had not sent yet stays where the user types, and finds the space when it sends', async () => {
@@ -166,13 +165,13 @@ describe('startSpaceCreation', () => {
     const { outcome } = waitingMessage();
     useSpacesStore.getState().noteProgress({ spaceId: ID, step: 'ready', failure: null });
     expect(await outcome).toEqual({ error: 'refused' });
-    expect(useSpacesStore.getState().creationAccess.get(ID)).toEqual({ kind: 'failed', failures: [{ provider: 'openai', code: 'secret_source_missing', message: 'OPENAI_API_KEY is not set' }] });
+    expect(useSpacesStore.getState().journey?.get(ID)?.accessFailures).toEqual([{ provider: 'openai', code: 'secret_source_missing', message: 'OPENAI_API_KEY is not set' }]);
   });
 
   test('the setup commands travel with the request, and the message does not wait for them by default', async () => {
     const { created } = host({ status: 200, body: {} }, { state: 'running', index: 0, total: 1, command: 'npm ci' });
     await start([], { commands: ['npm ci'], waitBeforeSending: false });
-    expect(created).toEqual([{ projectDirectory: PROJECT, placeId: 'docker', name: 'Fix login', start: 'clean', network: { mode: 'allowlist', domains: [] }, setupCommands: ['npm ci'] }]);
+    expect(created).toEqual([{ projectDirectory: PROJECT, placeId: 'docker', name: 'Fix login', start: 'clean', network: { mode: 'allowlist', domains: [] }, setupCommands: ['npm ci'], grants: [] }]);
     const { outcome } = waitingMessage();
     useSpacesStore.getState().noteProgress({ spaceId: ID, step: 'ready', failure: null });
     expect(await outcome).toEqual({ directory: DIRECTORY });

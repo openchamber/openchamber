@@ -24,6 +24,7 @@ const entry: SpaceEntry = {
   grants: [],
   access: null,
   needsAccess: [],
+  accessFailures: [],
   damage: null,
   setup: null,
 };

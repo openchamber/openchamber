@@ -26,12 +26,29 @@ describe('session runtime', () => {
     runtime.processOpenCodeSsePayload({ type: 'permission.asked', properties: permission });
     runtime.processOpenCodeSsePayload({ type: 'form.created', properties: { sessionID: 'session-2', form } });
     expect(runtime.getPendingBlockingRequestsSnapshot()).toEqual({
-      'session-1': { permissions: [permission], forms: [] },
-      'session-2': { permissions: [], forms: [form] },
+      'session-1': { permissions: [permission], forms: [], pages: [] },
+      'session-2': { permissions: [], forms: [form], pages: [] },
     });
 
     runtime.processOpenCodeSsePayload({ type: 'permission.replied', properties: { sessionID: 'session-1', requestID: 'perm-1' } });
     runtime.processOpenCodeSsePayload({ type: 'form.settled', properties: { sessionID: 'session-2' } });
+    expect(runtime.getPendingBlockingRequestsSnapshot()).toEqual({});
+  });
+
+  it('keeps a page that waits for an answer beside the session\'s forms until it stops waiting', () => {
+    const runtime = createSessionRuntime({
+      writeSseEvent() {},
+      getNotificationClients: () => new Set(),
+      broadcastEvent: () => {},
+    });
+    runtimes.push(runtime);
+
+    runtime.trackWaitingPage({ type: 'waiting', sessionId: 'session-1', callId: 'call-1', title: 'Pick a layout', directory: '/repo' });
+    expect(runtime.getPendingBlockingRequestsSnapshot()).toEqual({
+      'session-1': { permissions: [], forms: [], pages: [{ id: 'call-1', sessionID: 'session-1', title: 'Pick a layout' }] },
+    });
+
+    runtime.trackWaitingPage({ type: 'settled', sessionId: 'session-1', callId: 'call-1' });
     expect(runtime.getPendingBlockingRequestsSnapshot()).toEqual({});
   });
 

@@ -360,6 +360,29 @@
   background-color: var(--surface-elevated);
 }
 
+/* The desktop composer box in dark themes: the text fields' faint sheen,
+   fading down from the lit top edge. Light themes keep the plain fill. */
+.dark .oc-composer-sheen {
+  background-image: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--foreground) 1%, transparent),
+    transparent 50%
+  );
+}
+
+/* The composer is a place to type, so its top line is as quiet as a text
+   field's; the hairline and shadows stay the dropdown's, since it floats over
+   the chat. The selector outranks .dark .oc-glass-floating. */
+.dark .oc-glass-floating.oc-composer-sheen {
+  box-shadow:
+    inset 0 1px 0 0 rgb(255 255 255 / 0.025),
+    inset 0 0 0 1px rgb(255 255 255 / 0.08),
+    0 0 0 1px rgb(0 0 0 / 0.36),
+    0 1px 1px -0.5px rgb(0 0 0 / 0.22),
+    0 3px 3px -1.5px rgb(0 0 0 / 0.2),
+    0 6px 6px -3px rgb(0 0 0 / 0.16);
+}
+
 .oc-glass-floating {
   box-shadow:
     inset 0 1px 0 0 rgb(255 255 255 / 0.8),
@@ -372,7 +395,7 @@
 
 .dark .oc-glass-floating {
   box-shadow:
-    inset 0 1px 0 0 rgb(255 255 255 / 0.12),
+    inset 0 1px 0 0 rgb(255 255 255 / 0.06),
     inset 0 0 0 1px rgb(255 255 255 / 0.08),
     0 0 0 1px rgb(0 0 0 / 0.36),
     0 1px 1px -0.5px rgb(0 0 0 / 0.22),
@@ -381,9 +404,8 @@
 }
 
 /* Panels that are part of the layout (the context panel card, the work
-   status card beside the chat) take the dropdown's hairline ring and nothing
-   else of its lift: they hold their place rather than float, so no lit top
-   edge and only the faint shadow. The ring sits inside, on ::after above the
+   status card beside the chat) take a hairline ring and a short shadow: they
+   hold their place rather than float, so less lift than a dropdown. The ring sits inside, on ::after above the
    content: the context panel card is flush under the header in a clipping
    container, which cut an outside ring's top edge, and an editor or diff
    painting its own background would cover an inset on the card itself.
@@ -394,7 +416,10 @@
      with anything outside the card. Not a backdrop root, so the work status
      glass still blurs what is behind it. */
   isolation: isolate;
-  box-shadow: 0 2px 8px -3px rgb(0 0 0 / 0.08);
+  /* Kept within the card's gutter (about 8px), which the aside clips. */
+  box-shadow:
+    0 1px 2px 0 rgb(0 0 0 / 0.06),
+    0 4px 8px -3px rgb(0 0 0 / 0.12);
 }
 
 .oc-panel-edge::after {
@@ -409,8 +434,44 @@
   transition: opacity 200ms ease;
 }
 
+/* Dark themes add a faint lit top line to the hairline and a denser shadow,
+   since a shadow barely shows on a dark page. Still lower than the floating
+   card below, which is a dropdown. */
+.dark .oc-panel-edge {
+  box-shadow:
+    0 1px 1px 0 rgb(0 0 0 / 0.35),
+    0 4px 8px -3px rgb(0 0 0 / 0.45);
+}
+
+/* A docked panel takes the theme's muted surface (the sidebar's fill), so the
+   chat sits between two side surfaces of one tone; tiles
+   inside mix from it. It redefines the page colour for the whole card rather
+   than painting the card: this rule sits in the components layer, below the
+   card's bg-background utility, and the panes inside paint the page colour
+   over the card anyway. Surfaces coloured from the theme object (terminal,
+   extension frames) follow through usePageColors (hooks/usePageColors.ts).
+   Floating, the card keeps its glass. Light themes go only halfway to the
+   sidebar's fill: the full step read too heavy against a light chat. */
+:root {
+  /* The chat's page colour, kept under its own name because the panel rules
+     below redefine --surface-background and cannot mix from themselves. */
+  --oc-chat-background: var(--surface-background);
+}
+
+.oc-panel-edge:not([data-edge-floating]) {
+  --background: color-mix(in srgb, var(--surface-muted) 50%, var(--oc-chat-background));
+  --surface-background: color-mix(in srgb, var(--surface-muted) 50%, var(--oc-chat-background));
+}
+
+.dark .oc-panel-edge:not([data-edge-floating]) {
+  --background: var(--surface-muted);
+  --surface-background: var(--surface-muted);
+}
+
 .dark .oc-panel-edge::after {
-  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.08);
+  box-shadow:
+    inset 0 1px 0 0 color-mix(in srgb, var(--foreground) 3%, transparent),
+    inset 0 0 0 1px color-mix(in srgb, var(--foreground) 6%, transparent);
 }
 
 /* The work status card opened over the chat is a dropdown, and looks like
@@ -439,7 +500,7 @@
 
 .dark .oc-panel-edge[data-edge-floating]::after {
   box-shadow:
-    inset 0 1px 0 0 rgb(255 255 255 / 0.12),
+    inset 0 1px 0 0 rgb(255 255 255 / 0.06),
     inset 0 0 0 1px rgb(255 255 255 / 0.08);
 }
 
@@ -452,6 +513,148 @@
 
 .oc-panel-edge[data-edge-hidden]::after {
   opacity: 0;
+}
+
+/* Lit controls: the active tab pill (oc-raised) and every text field
+   (oc-raised oc-field). The hairline colour lives in --oc-raised-edge so
+   states change only it. Edges are inset, so a field inside a clipping
+   container keeps them. Layered as components, so a call site's shadow-none
+   or ring-0 still drops the edge for a chromeless field.
+
+   Light themes paint the elevated surface darker than the canvas, so lighting
+   it from above made fields look like buttons. There a field is pressed into
+   the page (crisp hairline, faint inner shadow) and a raised pill lifts on a
+   short shadow. Dark themes paint elevated lighter, and both field and pill
+   take the dropdown's lighting: a lit top edge, a soft sheen fading down and
+   a shadow below. */
+@layer components {
+.oc-raised {
+  --oc-raised-edge: color-mix(in srgb, var(--foreground) 10%, transparent);
+  box-shadow:
+    inset 0 0 0 1px var(--oc-raised-edge),
+    0 1px 2px 0 rgb(0 0 0 / 0.06);
+}
+
+.oc-field {
+  box-shadow:
+    inset 0 0 0 1px var(--oc-raised-edge),
+    inset 0 1px 2px 0 rgb(0 0 0 / 0.04);
+}
+
+.dark .oc-raised {
+  --oc-raised-edge: color-mix(in srgb, var(--foreground) 6%, transparent);
+  background-image: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--foreground) 1%, transparent),
+    transparent 50%
+  );
+  box-shadow:
+    inset 0 1px 0 0 color-mix(in srgb, var(--foreground) 1.5%, transparent),
+    inset 0 0 0 1px var(--oc-raised-edge),
+    0 1px 1px 0 rgb(0 0 0 / 0.28),
+    0 2px 3px -2px rgb(0 0 0 / 0.2);
+}
+
+/* A text field shares the controls' light but sits a tone lower: its fill is
+   washed halfway toward the canvas, so a field reads as a place to type and
+   the buttons and pickers beside it as things to press. */
+.dark .oc-raised.oc-field {
+  background-image: linear-gradient(
+    color-mix(in srgb, var(--surface-background) 50%, transparent),
+    color-mix(in srgb, var(--surface-background) 50%, transparent)
+  );
+}
+
+/* A chromeless field keeps its transparent fill. */
+.dark .oc-raised.bg-transparent {
+  background-image: none;
+}
+
+/* A text field shows focus by brightening its own hairline, with no ring
+   around it: the caret already marks where typing goes. An invalid field
+   keeps the error colour, focused or not. */
+.oc-field:focus,
+.oc-field:focus-within {
+  --oc-raised-edge: color-mix(in srgb, var(--foreground) 26%, transparent);
+}
+
+.oc-field:is([aria-invalid="true"], [data-invalid]),
+.oc-field:is([aria-invalid="true"], [data-invalid]):is(:focus, :focus-within) {
+  --oc-raised-edge: var(--status-error);
+}
+
+/* The track a raised pill moves in reads as pressed in. */
+.oc-recessed {
+  box-shadow: inset 0 1px 2px 0 rgb(0 0 0 / 0.05);
+}
+
+.dark .oc-recessed {
+  box-shadow: inset 0 1px 2px 0 rgb(0 0 0 / 0.4);
+}
+
+/* Filled buttons (primary, destructive, info) keep their tinted border as the
+   edge and take the controls' light on top of it: a lit top line and a short
+   shadow, the dark themes' faint sheen. Pressed, the button sinks flat. */
+.oc-raised-button {
+  box-shadow:
+    inset 0 1px 0 0 rgb(255 255 255 / 0.45),
+    0 1px 2px 0 rgb(0 0 0 / 0.08);
+}
+
+.dark .oc-raised-button {
+  background-image: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--foreground) 1%, transparent),
+    transparent 50%
+  );
+  box-shadow:
+    inset 0 1px 0 0 color-mix(in srgb, var(--foreground) 1.5%, transparent),
+    0 1px 1px 0 rgb(0 0 0 / 0.28),
+    0 2px 3px -2px rgb(0 0 0 / 0.2);
+}
+
+.oc-raised-button:active,
+.oc-raised:is(button, [role="button"]):active {
+  background-image: none;
+  box-shadow: inset 0 0 0 1px var(--oc-raised-edge, transparent);
+}
+
+/* Flat surfaces in the layout (cards, list tiles) separate from the page by
+   tone, with no border. Each step mixes the text colour into whatever sits
+   below, so it reads the same on the canvas, in a dialog and in light and
+   dark themes: a tile is one step, a block inside it (an icon square, a
+   neutral pill) is the next, and hover adds a step to what it sits on. */
+.oc-tile {
+  background-color: color-mix(in srgb, var(--foreground) 4%, transparent);
+}
+
+.oc-tile-inset {
+  background-color: color-mix(in srgb, var(--foreground) 6%, transparent);
+}
+
+.oc-tile-hover:hover {
+  background-color: color-mix(in srgb, var(--foreground) 3%, transparent);
+}
+
+.oc-tile.oc-tile-hover:hover {
+  background-color: color-mix(in srgb, var(--foreground) 7%, transparent);
+}
+}
+
+/* Keyboard focus draws no ring anywhere in the app. Chromium matches
+   :focus-visible not only on Tab but whenever focus moves after a key press
+   (a menu closed with Escape hands focus back to its trigger), so rings
+   surfaced at random. A focused control takes the hover fill instead, which
+   still shows where Tab is. Unlayered, so it outranks the ring utilities on
+   every component; text fields mark focus with their own edge (oc-field). */
+:focus-visible {
+  --tw-ring-color: transparent;
+  --tw-ring-offset-width: 0px;
+  outline: none;
+}
+
+:where(button, a[href], summary, [role="button"], [role="tab"], [role="menuitem"], [role="option"], [role="checkbox"], [role="switch"], [role="radio"]):focus-visible {
+  background-image: linear-gradient(var(--interactive-hover), var(--interactive-hover));
 }
 
 /* A modal window (dialogs, the command palette, Settings) lifts off the

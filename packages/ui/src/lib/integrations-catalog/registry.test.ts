@@ -35,9 +35,8 @@ describe('integrations catalog registry', () => {
     }
   });
 
-  test('every installable mcp component has exactly one of remote or local, and it is valid', () => {
+  test('every mcp component has exactly one of remote or local, and it is valid', () => {
     for (const entry of CATALOG_ENTRIES) {
-      if (entry.status === 'coming-soon') continue;
       const mcp = catalogMcpComponent(entry);
       if (!mcp) continue;
       const hasRemote = Boolean(mcp.remote);
@@ -56,16 +55,6 @@ describe('integrations catalog registry', () => {
         expect(mcp.local.command[0].includes('{')).toBe(false);
         expect(mcp.auth).toBe('none');
       }
-    }
-  });
-
-  test('coming-soon entries carry no installable endpoint', () => {
-    for (const entry of CATALOG_ENTRIES) {
-      if (entry.status !== 'coming-soon') continue;
-      const mcp = catalogMcpComponent(entry);
-      if (!mcp) continue;
-      expect(mcp.remote).toBeUndefined();
-      expect(mcp.local).toBeUndefined();
     }
   });
 
@@ -93,7 +82,10 @@ describe('integrations catalog registry', () => {
       for (const component of entry.components) {
         if (component.kind !== 'skill') continue;
         expect(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(component.source)).toBe(true);
-        expect(component.subpath.startsWith('skills/')).toBe(true);
+        // Vendors keep skills under `skills/`, `plugins/<name>/skills/` or
+        // `src/skills/`; the installer takes any repo-relative folder.
+        expect(component.subpath.startsWith('/') || component.subpath.split('/').includes('..')).toBe(false);
+        expect(component.subpath.split('/').at(-1)).toBe(component.skillDir);
       }
     }
   });

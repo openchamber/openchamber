@@ -7,6 +7,30 @@ description: Połącz usługi i subskrypcje, z którymi pracuje OpenChamber.
 
 W **Ustawienia → Integracje** logujesz się do usług, z którymi pracuje OpenChamber. Logowanie jest zapisywane na serwerze OpenChamber, więc web, desktop i sparowany telefon korzystają z niego wspólnie.
 
+## Katalog integracji
+
+Katalog integracji zawiera ponad 150 usług, które dasz agentowi jednym kliknięciem: Linear, Notion, Sentry, Supabase, Figma, narzędzia do obserwowalności, CRM-y, notatki ze spotkań i wiele innych. Instalacja zwykle dodaje serwer MCP usługi (połączenie, przez które agent czyta i zmienia w niej dane), a czasem także skille lub wtyczkę, które z nią przychodzą. Usługa instaluje się dla Twojego użytkownika, więc dostaje ją każdy projekt.
+
+1. Wybierz ikonę sklepu w nagłówku paska bocznego.
+2. Znajdź usługę: szukaj po nazwie albo zawęź listę kategorią, na przykład **Kod** lub **Jakość i operacje**. W **OpenChamber** są nasze własne rozszerzenia i wtyczki.
+3. Wybierz **+** w jej wierszu albo otwórz ją i wybierz **Zainstaluj**.
+4. Zaloguj się tak, jak prosi usługa:
+   - **OAuth**: strona logowania usługi otwiera się w przeglądarce. Zatwierdź tam dostęp.
+   - **Token**: wklej token API w pole **Token API**. **Uzyskaj token** otwiera stronę, na której usługa go wydaje.
+   - **Bez logowania**: nic nie trzeba robić.
+
+Gdy wszystko się uda, usługa ma znacznik wyboru i pojawia się w **Zainstalowane** po lewej, a jej narzędzia są dostępne od następnej wiadomości. Żółta kropka albo **Wymaga logowania** oznacza, że logowanie się nie zakończyło; otwórz usługę i zaloguj się ponownie.
+
+Niektóre pozycje wymagają czegoś więcej niż logowania:
+
+- **Serwery lokalne** działają na maszynie, na której działa OpenCode, i mogą wymagać Node.js, Pythona z uv albo Dockera. Pierwsze uruchomienie może chwilę potrwać.
+- **Wtyczki** to kod działający wewnątrz OpenCode, więc katalog prosi o potwierdzenie i najpierw pokazuje licencję wtyczki.
+- **Skille** dołączone do usługi instalują się razem z nią. Jeśli któregoś brakuje, na stronie usługi pojawia się jego własny przycisk **Zainstaluj**.
+
+Aby usunąć usługę, otwórz ją, wybierz **Więcej działań** (**⋯**), a potem **Odinstaluj**. Usuwa to tylko to, co dodał katalog; Twoje konto w usłudze zostaje bez zmian. Serwerami MCP, wtyczkami i skillami możesz też jak zwykle zarządzać w ustawieniach.
+
+Katalog jest dostępny w wersji web i desktop. W [trybie enterprise](/pl/security/#tryb-enterprise) jest ukryty.
+
 ## GitHub
 
 Rozwiń kartę **GitHub** i wybierz **Connect GitHub**, aby zalogować się krótkim kodem urządzenia. Po połączeniu OpenChamber może rozpoczynać sesje z issues i pull requestów, dołączać je do wiadomości oraz otwierać i aktualizować PR-y. Wszystko, co potrafi GitHub, opisuje strona [Issues i PR na GitHub](/pl/github/).
@@ -78,6 +102,18 @@ Excalidraw pozwala rysować w plikach `.excalidraw` i rysunkach Obsidian `.excal
 2. Otwórz rysunek ponownie. Płótno zastępuje tekst pliku, a Cmd/Ctrl+S, autozapis, przełącznik widoku źródła i tryb pełnoekranowy działają jak w każdym innym pliku.
 
 Karta aktualizuje rozszerzenie, gdy pojawi się nowa wersja, włącza je ponownie, jeśli je wstrzymano, i je usuwa. Po usunięciu Twoje rysunki pozostają bez zmian; po prostu otwierają się jako tekst. Tylko w wersji web i desktop.
+
+## Resource Monitor
+
+Resource Monitor pokazuje, ile procesora i pamięci zużywa komputer i ile z tego przypada na OpenChamber, OpenCode, wszystko, co uruchomiły, oraz serwery deweloperskie działające pod nimi. To rozszerzenie OpenChamber, widoczne w sekcji **OpenChamber extensions** na tej samej stronie.
+
+1. Otwórz **Settings → Integrations** i wybierz **Install** na karcie Resource Monitor.
+2. Zatwierdź jego lokalną usługę w **Settings → Extensions**. Liczby pochodzą z małego procesu, który OpenChamber uruchamia obok panelu. Proces mierzy tylko wtedy, gdy na ekranie jest panel albo sekcja **Resources**.
+3. Otwórz **Resource Monitor** z prawego paska. Krótkie podsumowanie pojawia się też w sekcji **Resources** panelu Work Status.
+
+Stop przy serwerze deweloperskim lub zadaniu kończy to polecenie razem ze wszystkim, co uruchomiło, więc watcher nie postawi serwera ponownie. **Stop all** w grupie Terminal kończy wszystko, co działa w terminalu i w project actions, a karty terminala zostają otwarte. Sam OpenChamber i serwer OpenCode nie mają przycisku Stop.
+
+Serwery deweloperskie są widoczne, gdy działają pod OpenChamber: uruchomione we wbudowanym terminalu albo przez agenta, gdy OpenCode uruchomił sam OpenChamber. Serwer, który odłącza się od procesu nadrzędnego, ani kontener uruchomiony przez `docker compose up -d` nie pojawią się na liście. Gdy łączysz się ze zdalnym OpenChamber, monitor pokazuje tamtą maszynę. Tylko wersja webowa i desktopowa.
 
 ## Powiązane
 

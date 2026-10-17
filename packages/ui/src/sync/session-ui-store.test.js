@@ -1602,7 +1602,7 @@ describe('routeMessage skill invocation', () => {
     expect(sendCommandCalls[0].context[0].metadata.openchamberContext.kind).toBe('code-comment');
   });
 
-  test('includes pinned knowledge with the skill prompt', async () => {
+  test('includes attached context with the skill prompt', async () => {
     useSkillsStore.setState({
       skillsByDirectory: { '/skills/project': [{ name: 'grill-with-docs', path: '/skills/grill-with-docs/SKILL.md', scope: 'user', source: 'opencode' }] },
     });
@@ -1613,12 +1613,12 @@ describe('routeMessage skill invocation', () => {
       content: '/grill-with-docs focus on auth',
       providerID: 'provider-a',
       modelID: 'model-a',
-      additionalParts: [{ text: 'Pinned project knowledge', synthetic: true, systemContext: 'session-knowledge' }],
+      additionalParts: [{ text: 'Attached context', synthetic: true }],
     });
 
     expect(sendCommandCalls).toHaveLength(0);
     expect(sendMessageCalls).toHaveLength(1);
-    expect(sendMessageCalls[0].context).toEqual([{ id: expect.stringMatching(/^msg_/), text: 'Pinned project knowledge', metadata: undefined }]);
+    expect(sendMessageCalls[0].context).toEqual([{ id: expect.stringMatching(/^msg_/), text: 'Attached context', metadata: undefined }]);
     expect(route).toBe('prompt');
   });
 
@@ -1640,7 +1640,7 @@ describe('routeMessage skill invocation', () => {
       providerID: 'provider-a',
       modelID: 'model-a',
       files,
-      additionalParts: [{ text: 'Pinned project knowledge', synthetic: true, systemContext: 'session-knowledge' }],
+      additionalParts: [{ text: 'Attached context', synthetic: true }],
     });
 
     expect(route).toBe('prompt');
@@ -2169,7 +2169,7 @@ describe('send does not wait for session knowledge before showing the message', 
     globalThis.fetch = originalFetch;
   });
 
-  test('inserts the user message before the knowledge request resolves, then sends the knowledge first', async () => {
+  test('inserts the user message before the knowledge write finishes, and sends the prompt after it', async () => {
     let state = { session: [], message: {}, part: {}, session_status: {} };
     const childStore = {
       getState: () => state,
@@ -2184,17 +2184,14 @@ describe('send does not wait for session knowledge before showing the message', 
       sendCalls.push(params);
       return 'msg';
     };
-    let releaseKnowledge = null;
-    const delivered = [];
+    let finishWrite = null;
+    const writes = [];
     globalThis.fetch = async (input, init) => {
       const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-      if (url.includes('/api/session-knowledge/delivered')) {
-        delivered.push(JSON.parse(init.body));
-        return Response.json({});
-      }
-      if (url.includes('/api/session-knowledge?')) {
+      if (url.includes('/api/session-knowledge/sync')) {
+        writes.push(JSON.parse(init.body));
         return new Promise((resolve) => {
-          releaseKnowledge = () => resolve(Response.json({ text: 'Pinned notes', signature: 'sig-1' }));
+          finishWrite = () => resolve(Response.json({ synced: true }));
         });
       }
       return Response.json({});
@@ -2212,27 +2209,22 @@ describe('send does not wait for session knowledge before showing the message', 
       'normal',
       { target: { runtimeKey: getRuntimeKey(), sessionId: 'session-knowledge', directory: '/repo' } },
     );
-    for (let tick = 0; tick < 50 && (added.length === 0 || !releaseKnowledge); tick += 1) {
+    for (let tick = 0; tick < 50 && (added.length === 0 || !finishWrite); tick += 1) {
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
 
-    // The bubble is already there; the prompt request waits for the knowledge.
+    // The bubble is already there; the prompt request waits for the write.
     expect(added.map((message) => message.role)).toEqual(['user']);
-    expect(releaseKnowledge).not.toBe(null);
+    expect(writes).toEqual([{ directory: '/repo', sessionId: 'session-knowledge' }]);
     expect(sendCalls).toHaveLength(0);
 
-    releaseKnowledge();
+    finishWrite();
     await sending;
 
-    expect(added.map((message) => message.role)).toEqual(['user', 'synthetic']);
-    const [userMessage, knowledgeMessage] = added;
-    expect(knowledgeMessage.id < userMessage.id).toBe(true);
+    // The knowledge lives in the session's instruction entries, never in a message.
+    expect(added.map((message) => message.role)).toEqual(['user']);
     expect(sendCalls).toHaveLength(1);
-    expect(sendCalls[0].messageId).toBe(userMessage.id);
-    expect(sendCalls[0].context).toEqual([{ id: knowledgeMessage.id, text: 'Pinned notes' }]);
-    for (let tick = 0; tick < 50 && delivered.length === 0; tick += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    }
-    expect(delivered).toEqual([{ directory: '/repo', sessionId: 'session-knowledge', signature: 'sig-1' }]);
+    expect(sendCalls[0].messageId).toBe(added[0].id);
+    expect(sendCalls[0].context).toBeUndefined();
   });
 });

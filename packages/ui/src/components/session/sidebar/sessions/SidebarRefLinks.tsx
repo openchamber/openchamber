@@ -1,7 +1,7 @@
 import React from 'react';
 import { Icon } from '@/components/icon/Icon';
 import type { IconName } from '@/components/icon/icons';
-import { useOpenOnBoard } from '@/components/sourceBoard/openOnBoard';
+import { useOpenTrackerItem } from '@/components/sourceBoard/openTrackerItem';
 import { cn } from '@/lib/utils';
 
 /** Sidebar tooltips that list PRs or issues linger this long after the pointer
@@ -23,9 +23,9 @@ export type SidebarRefLink = {
 // The tooltip is portaled, but React events still bubble through the row or
 // header that owns it: each link keeps its pointer and clicks to itself, so
 // opening it never selects, toggles or drags what sits underneath.
-// A click opens the item on the board in `directory`'s project; Cmd or Ctrl opens the link.
+// A click opens the item in the Tracker, read through `directory`'s project; Cmd or Ctrl opens the link.
 export const SidebarRefLinks: React.FC<{ items: readonly SidebarRefLink[]; directory: string | null }> = ({ items, directory }) => {
-  const openOnBoard = useOpenOnBoard();
+  const openTrackerItem = useOpenTrackerItem();
   return (
     <div className="flex min-w-0 flex-col gap-1">
       {items.map((item) => (
@@ -44,7 +44,7 @@ export const SidebarRefLinks: React.FC<{ items: readonly SidebarRefLink[]; direc
           onKeyDown={(event) => event.stopPropagation()}
           onClick={(event) => {
             event.stopPropagation();
-            if (item.url) openOnBoard(item.url, directory, event);
+            if (item.url) openTrackerItem(item.url, directory, event);
           }}
         >
           <span className="flex min-w-0 items-center gap-1.5 group-hover/ref:underline group-disabled/ref:no-underline">

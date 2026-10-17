@@ -77,10 +77,10 @@ const EnterpriseProvidersNotice: React.FC<{ directory: string | null; integratio
   return (
     <div
       className={cn(
-        'mb-4 flex items-start gap-2 rounded-lg border p-3',
+        'mb-4 flex items-start gap-2 rounded-lg p-3',
         warning
-          ? 'border-[var(--status-warning)]/30 bg-[var(--status-warning)]/5'
-          : 'border-[var(--status-info-border)] bg-[var(--status-info-background)]/30',
+          ? 'bg-[var(--status-warning)]/10'
+          : 'bg-[var(--status-info-background)]/60',
       )}
     >
       <Icon

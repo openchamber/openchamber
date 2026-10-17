@@ -20,6 +20,11 @@ export interface InlineCommentInputProps {
   maxWidth?: number;
   /** Fill of the selected lines the comment belongs to, when the host knows it. */
   bandColor?: string;
+  /**
+   * A floating pill like the chat's comment field, with no band: for rendered
+   * previews, where there are no selected lines for a band to continue.
+   */
+  floating?: boolean;
 }
 
 const MAX_FIELD_HEIGHT_PX = 120;
@@ -28,7 +33,8 @@ const MAX_FIELD_HEIGHT_PX = 120;
  * The comment editor shown under selected diff, editor and preview lines. It
  * sits in a band tinted like the selected lines it comments on (the editor's
  * selected-line fill, or `bandColor` from a diff), with the field and a round
- * attach button inside.
+ * attach button inside. Over a rendered preview it floats as a glass pill
+ * instead (`floating`), like the chat's comment field.
  *
  * The field is a plain textarea because it lives inside other editors' DOM: an
  * annotation slot of the diff viewer's shadow tree and a block widget of the
@@ -47,6 +53,7 @@ export function InlineCommentInput({
   className,
   maxWidth,
   bandColor,
+  floating = false,
 }: InlineCommentInputProps) {
   const { t } = useI18n();
   const { isMobile } = useDeviceInfo();
@@ -165,18 +172,26 @@ export function InlineCommentInput({
   return (
     <div
       className={cn(
-        'oc-inline-comment-band w-full max-w-[min(100%,calc(var(--oc-context-panel-width,100vw)-var(--oc-editor-gutter-width,0px)))] px-3 py-2 font-sans',
+        'w-full max-w-[min(100%,calc(var(--oc-context-panel-width,100vw)-var(--oc-editor-gutter-width,0px)))] font-sans',
+        !floating && 'oc-inline-comment-band px-3 py-2',
         className
       )}
       style={{
         maxWidth: maxWidth ? `${Math.max(200, Math.floor(maxWidth))}px` : undefined,
-        backgroundColor: bandColor,
+        backgroundColor: floating ? undefined : bandColor,
       }}
       data-comment-input="true"
       onPointerDown={(e) => e.stopPropagation()}
       onTouchStart={(e) => e.stopPropagation()}
     >
-      <div className="relative flex items-end gap-2 rounded-lg border border-[var(--interactive-border)] bg-[var(--surface-elevated)] py-1 ps-3 pe-1 text-foreground focus-within:ring-1 focus-within:ring-ring">
+      <div
+        className={cn(
+          'relative flex items-end gap-2 py-1 pe-1 text-foreground',
+          floating
+            ? 'oc-glass-popover oc-glass-floating rounded-3xl ps-4'
+            : 'oc-raised oc-field rounded-lg bg-[var(--surface-elevated)] ps-3',
+        )}
+      >
         {snippetPicker.picker}
         <textarea
           ref={textareaRef}

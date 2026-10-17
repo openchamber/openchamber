@@ -11,7 +11,9 @@ import type { FormRequest, PermissionRequest } from '@/lib/opencode/model';
 //
 // It is fed by the same rare events the directory reducer consumes
 // (`permission.asked`/`permission.replied`, `form.created`/`form.settled`,
-// `session.deleted`) and seeded once from the host. Nothing streams through
+// `session.deleted`) and seeded once from the host. Pages that wait for the
+// user's answer have no OpenCode event and no directory store; the server
+// announces them (`applyWaitingPageEvent`), and this index is their only home. Nothing streams through
 // here, so consumers subscribe per session ID without cost.
 //
 // Only the fields the consuming surfaces render are kept. The host seed can
@@ -19,11 +21,19 @@ import type { FormRequest, PermissionRequest } from '@/lib/opencode/model';
 // feeds disagree on shape for no gain.
 export type BlockingPermissionRequest = Pick<PermissionRequest, 'id' | 'sessionID' | 'action' | 'resources' | 'save'>;
 export type BlockingFormRequest = Pick<FormRequest, 'id' | 'sessionID' | 'title'>;
+/**
+ * A page an agent showed that waits for the user's answer (render.page with
+ * awaitAnswer). It blocks the agent like a form, so every surface shows it as
+ * one, but it is answered on the page in the chat: it is kept apart from
+ * forms so nothing tries to answer it as a form. `id` is the tool call id.
+ */
+type BlockingPageRequest = { id: string; sessionID: string; title: string };
 
 type PendingBlockingRequests = {
   directory: string;
   permissions: readonly BlockingPermissionRequest[];
   forms: readonly BlockingFormRequest[];
+  pages: readonly BlockingPageRequest[];
 };
 
 type GlobalBlockingRequestsState = {
@@ -74,6 +84,11 @@ const withoutRequest = <T extends { id: string }>(list: readonly T[], requestId:
 
 type Draft = Map<string, PendingBlockingRequests>;
 
+type BlockingRequest =
+  | { kind: 'permission'; request: BlockingPermissionRequest }
+  | { kind: 'form'; request: BlockingFormRequest }
+  | { kind: 'page'; request: BlockingPageRequest };
+
 class Reducer {
   private draft: Draft | null = null;
 
@@ -85,38 +100,35 @@ class Reducer {
 
   write(sessionId: string, entry: PendingBlockingRequests): void {
     this.draft ??= new Map(this.state.bySession);
-    if (entry.permissions.length === 0 && entry.forms.length === 0) this.draft.delete(sessionId);
+    if (entry.permissions.length === 0 && entry.forms.length === 0 && entry.pages.length === 0) this.draft.delete(sessionId);
     else this.draft.set(sessionId, entry);
   }
 
-  ask(directory: string, sessionId: string, request: BlockingPermissionRequest | null, form: BlockingFormRequest | null): void {
-    const existing = this.current(sessionId) ?? { directory, permissions: EMPTY, forms: EMPTY };
-    const permissions = request ? upsertRequest(existing.permissions, request) : null;
-    const forms = form ? upsertRequest(existing.forms, form) : null;
-    if (!permissions && !forms && existing.directory === directory) return;
+  ask(directory: string, sessionId: string, request: BlockingRequest): void {
+    const existing = this.current(sessionId) ?? { directory, permissions: EMPTY, forms: EMPTY, pages: EMPTY };
+    const permissions = request.kind === 'permission' ? upsertRequest(existing.permissions, request.request) : null;
+    const forms = request.kind === 'form' ? upsertRequest(existing.forms, request.request) : null;
+    const pages = request.kind === 'page' ? upsertRequest(existing.pages, request.request) : null;
+    if (!permissions && !forms && !pages && existing.directory === directory) return;
     this.write(sessionId, {
       directory,
       permissions: permissions ?? existing.permissions,
       forms: forms ?? existing.forms,
+      pages: pages ?? existing.pages,
     });
   }
 
-  settle(kind: 'permissions' | 'forms', sessionId: string, requestId: string | undefined): void {
+  settle(kind: 'permissions' | 'forms' | 'pages', sessionId: string, requestId: string | undefined): void {
     const existing = this.current(sessionId);
     if (!existing) return;
-    if (kind === 'permissions') {
-      const permissions = withoutRequest(existing.permissions, requestId);
-      if (permissions) this.write(sessionId, { ...existing, permissions });
-      return;
-    }
-    const forms = withoutRequest(existing.forms, requestId);
-    if (forms) this.write(sessionId, { ...existing, forms });
+    const remaining = withoutRequest<{ id: string }>(existing[kind], requestId);
+    if (remaining) this.write(sessionId, { ...existing, [kind]: remaining });
   }
 
   remove(sessionId: string): void {
     const existing = this.current(sessionId);
     if (!existing) return;
-    this.write(sessionId, { ...existing, permissions: EMPTY, forms: EMPTY });
+    this.write(sessionId, { ...existing, permissions: EMPTY, forms: EMPTY, pages: EMPTY });
   }
 
   publish(): void {
@@ -134,12 +146,12 @@ export const applyGlobalBlockingRequestEvents = (rawDirectory: string, payloads:
     switch (payload.type) {
       case 'permission.asked': {
         const request = payload.properties;
-        if (request.sessionID && request.id) reducer.ask(directory, request.sessionID, toBlockingPermission(request), null);
+        if (request.sessionID && request.id) reducer.ask(directory, request.sessionID, { kind: 'permission', request: toBlockingPermission(request) });
         continue;
       }
       case 'form.created': {
         const { form } = payload.properties;
-        if (form.sessionID && form.id) reducer.ask(directory, form.sessionID, null, toBlockingForm(form));
+        if (form.sessionID && form.id) reducer.ask(directory, form.sessionID, { kind: 'form', request: toBlockingForm(form) });
         continue;
       }
       case 'permission.replied': {
@@ -166,6 +178,29 @@ export const applyGlobalBlockingRequestEvents = (rawDirectory: string, payloads:
 };
 
 /**
+ * Applies the server's announcement that a page an agent showed started or
+ * stopped waiting for the user's answer. The server names the session's
+ * directory when it knows it; otherwise `resolveDirectory` finds it, and a
+ * page whose session this client cannot place is left out until the next
+ * seed.
+ */
+export const applyWaitingPageEvent = (
+  event: Extract<SyncEvent, { type: 'openchamber.page-waiting' | 'openchamber.page-settled' }>,
+  resolveDirectory: (sessionId: string) => string | null,
+): void => {
+  const reducer = new Reducer(useGlobalBlockingRequestsStore.getState());
+  if (event.type === 'openchamber.page-settled') {
+    reducer.settle('pages', event.properties.sessionID, event.properties.pageID);
+  } else {
+    const { sessionID, page } = event.properties;
+    const directory = event.properties.directory ?? resolveDirectory(sessionID);
+    if (!directory) return;
+    reducer.ask(normalizeDirectory(directory), sessionID, { kind: 'page', request: { id: page.id, sessionID, title: page.title } });
+  }
+  reducer.publish();
+};
+
+/**
  * Seeds requests the host still holds for sessions this client has no entry
  * for. Additive by session; absence from the host never clears anything,
  * because a live reply may already have settled a request the host map lags on.
@@ -176,17 +211,20 @@ export const seedGlobalBlockingRequests = (
     directory: string;
     permissions: readonly BlockingPermissionRequest[];
     forms: readonly BlockingFormRequest[];
+    pages?: readonly BlockingPageRequest[];
   }>,
 ): void => {
   const state = useGlobalBlockingRequestsStore.getState();
   const reducer = new Reducer(state);
   for (const entry of entries) {
     if (state.bySession.has(entry.sessionId)) continue;
-    if (entry.permissions.length === 0 && entry.forms.length === 0) continue;
+    const pages = entry.pages ?? EMPTY;
+    if (entry.permissions.length === 0 && entry.forms.length === 0 && pages.length === 0) continue;
     reducer.write(entry.sessionId, {
       directory: normalizeDirectory(entry.directory),
       permissions: entry.permissions,
       forms: entry.forms,
+      pages,
     });
   }
   reducer.publish();
