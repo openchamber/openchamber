@@ -71,9 +71,11 @@ project or pending worktree, the panel uses that directory for project, MCP,
 and usage readouts before a session exists.
 
 Managed Chats never render or warm the Project repository section. A Chat draft
-also passes no fallback directory to the panel, so an active project's branch
-cannot leak into the draft while directory-independent sections remain
-available.
+passes no fallback directory to the panel, so an active project's branch cannot
+leak into it. The MCP section prepares the draft's own directory through
+`prepareChatDraftDirectory`, shared with the header dropdown and first send.
+MCP reads and toggles wait for that directory; they never use the previous
+Chat's connections or the shared Chats root for a draft.
 
 `rowRef` is a **callback ref, not an object ref**. An object ref gives no signal
 when the node attaches, so the measuring effect read `.current`, found nothing

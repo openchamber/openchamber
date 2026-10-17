@@ -6,6 +6,7 @@ import { isIMECompositionEvent } from '@/lib/ime';
 import { Icon } from '@/components/icon/Icon';
 import { McpIcon } from '@/components/icons/McpIcon';
 import { McpDropdownContent } from '@/components/mcp/McpDropdown';
+import { useMcpDirectory } from '@/components/mcp/useMcpDirectory';
 import { ProjectContextPanel } from '@/components/layout/RightSidebarTabs';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { SortableTabsStrip, type SortableTabsStripItem } from '@/components/ui/sortable-tabs-strip';
@@ -14,7 +15,6 @@ import { useI18n } from '@/lib/i18n';
 import { orderMobileWorkspaceTabs, stripMobileWorkspaceTabs, type MobileWorkspaceTab } from '@/lib/mobileWorkspaceTabs';
 import type { ProjectRef } from '@/lib/projectContextApi';
 import { cn } from '@/lib/utils';
-import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useMcpConfigStore } from '@/stores/useMcpConfigStore';
 import { useMcpStore } from '@/stores/useMcpStore';
 import { useUIStore } from '@/stores/useUIStore';
@@ -37,17 +37,17 @@ const DRAWER_EASING = 'cubic-bezier(0.22, 1, 0.36, 1)';
 const McpWorkspacePane: React.FC<{ onOpenMcpSettings: () => void; active: boolean }> = ({ onOpenMcpSettings, active }) => {
   const { t } = useI18n();
   const [isRefreshing, setIsRefreshing] = React.useState(false);
-  const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
+  const directory = useMcpDirectory(false);
   const refreshMcpStatus = useMcpStore((state) => state.refresh);
   const loadMcpConfigs = useMcpConfigStore((state) => state.loadMcpConfigs);
 
   const refresh = () => {
-    if (isRefreshing) return;
+    if (isRefreshing || !directory) return;
     setIsRefreshing(true);
     const minSpinPromise = new Promise((resolve) => window.setTimeout(resolve, 500));
     void Promise.all([
-      refreshMcpStatus({ directory: currentDirectory || null, silent: true }),
-      loadMcpConfigs({ force: true }),
+      refreshMcpStatus({ directory, silent: true }),
+      loadMcpConfigs({ force: true, directory }),
       minSpinPromise,
     ]).finally(() => setIsRefreshing(false));
   };
@@ -69,7 +69,7 @@ const McpWorkspacePane: React.FC<{ onOpenMcpSettings: () => void; active: boolea
           type="button"
           className="flex size-10 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           onClick={refresh}
-          disabled={isRefreshing}
+          disabled={isRefreshing || !directory}
           aria-label={t('mcpDropdown.actions.refreshAria')}
           title={t('mcpDropdown.actions.refreshAria')}
           style={{ touchAction: 'manipulation' }}
