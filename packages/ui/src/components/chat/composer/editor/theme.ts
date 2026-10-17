@@ -60,12 +60,33 @@ export const COMPOSER_EDITOR_THEME_SPEC = {
         lineHeight: 'inherit',
         overflowX: 'hidden',
     },
+    // CSS placeholder (ComposerEditor drives the `cm-composer-empty` class and
+    // the `--composer-placeholder` text): CodeMirror's `placeholder()` renders
+    // a `contenteditable=false` widget span plus a zero-width buffer image
+    // around the caret of an empty document, which breaks the context probe
+    // smart-spacing IMEs run before committing — the first character then
+    // never arrives. A `::before` pseudo-element is invisible to that probe.
+    //
+    // It is taken OUT of flow: inline generated content occupies the line box
+    // and drags the caret geometry (WebKit's native selection rects, which the
+    // iOS cursor drawing reads) behind the hint text. Absolutely positioned at
+    // the line origin it paints at the same spot while the caret still
+    // measures an empty line. The line keeps its height through CodeMirror's
+    // own trailing <br>.
+    //
     // Kebab-case: the theme emits `--surface-muted-foreground`. A camelCased
-    // name here is not a missing colour but an invalid declaration, and since
-    // `color` inherits, the placeholder silently renders at full text
-    // brightness instead. The muted token already supplies secondary text;
-    // another opacity reduction makes the hint unreadable in subdued themes.
-    '.cm-placeholder': { color: 'var(--surface-muted-foreground)' },
+    // name here is an invalid declaration, and since `color` inherits, the
+    // placeholder silently renders at full text brightness instead.
+    '& .cm-content.cm-composer-empty .cm-line': { position: 'relative' },
+    '& .cm-content.cm-composer-empty .cm-line::before': {
+        content: 'var(--composer-placeholder)',
+        color: 'var(--surface-muted-foreground)',
+        position: 'absolute',
+        insetInlineStart: '0',
+        top: '0',
+        userSelect: 'none',
+        pointerEvents: 'none',
+    },
     // `drawSelection()` paints its own selection layer, and CodeMirror styles
     // it for the focused editor through
     // `&light.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground`

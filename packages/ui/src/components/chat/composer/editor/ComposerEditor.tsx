@@ -28,7 +28,6 @@ import {
     EditorView,
     drawSelection,
     keymap,
-    placeholder as placeholderExtension,
     type KeyBinding,
 } from '@codemirror/view';
 
@@ -174,6 +173,27 @@ function isDeferredSyntheticEvent(event: KeyboardEvent): boolean {
 const editableCompartment = new Compartment();
 const placeholderCompartment = new Compartment();
 
+/**
+ * CSS placeholder, not CodeMirror's `placeholder()` widget: a widget at
+ * position 0 wraps the caret in a zero-width buffer image and a
+ * `contenteditable=false` span, and IMEs that probe the text context before
+ * committing — iOS smart-spacing keyboards among them — fail that probe on an
+ * empty document, so the first character never arrives. The pseudo-element
+ * driven by these attributes is invisible to the probe.
+ */
+const composerEmptyClass = EditorView.contentAttributes.of((view) =>
+    view.state.doc.length === 0 ? { class: 'cm-composer-empty' } : null);
+
+function placeholderContentAttributes(text: string) {
+    return EditorView.contentAttributes.of({
+        'aria-placeholder': text,
+        // `content: attr(...)` reads the pseudo-element's own element, so the
+        // text reaches `.cm-line::before` through a custom property instead.
+        // JSON.stringify quotes it as a CSS string.
+        style: `--composer-placeholder: ${JSON.stringify(text)}`,
+    });
+}
+
 /** Marks the transaction that writes a changed `value` prop into the editor. */
 const valuePropWrite = Annotation.define<true>();
 
@@ -296,8 +316,9 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
                         editableCompartment.of(
                             EditorView.editable.of(handlersRef.current.editable ?? true),
                         ),
+                        composerEmptyClass,
                         placeholderCompartment.of(
-                            placeholderExtension(handlersRef.current.placeholder ?? ''),
+                            placeholderContentAttributes(handlersRef.current.placeholder ?? ''),
                         ),
                         composerEditorTheme,
                         EditorView.updateListener.of((update) => {
@@ -436,7 +457,9 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
 
         React.useEffect(() => {
             viewRef.current?.dispatch({
-                effects: placeholderCompartment.reconfigure(placeholderExtension(placeholder ?? '')),
+                effects: placeholderCompartment.reconfigure(
+                    placeholderContentAttributes(placeholder ?? ''),
+                ),
             });
         }, [placeholder]);
 
