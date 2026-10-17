@@ -470,6 +470,7 @@ export const createOpenChamberSessionService = (dependencies) => {
     // Whether routing can run Auto right now (the composer's own test). Null
     // when routing is not wired in.
     isAutoReady = null,
+    resumeSessionWork = null,
   } = dependencies;
 
   if ((!injectedArchiveStore || !injectedSessionMetadataStore) && !dataDir) {
@@ -813,8 +814,20 @@ export const createOpenChamberSessionService = (dependencies) => {
       throw new OpenChamberControlError(parsed.error, 400);
     }
 
-    const { restored, failedIds } = await archiveStore.unarchive(parsed.ids);
+    const resume = payload.resume;
+    if (resume !== undefined && (parsed.ids.length !== 1
+      || !Number.isSafeInteger(resume?.archivedAt) || resume.archivedAt <= 0
+      || !Number.isSafeInteger(resume?.requestAt) || resume.requestAt <= 0)) {
+      throw new OpenChamberControlError('resume requires one session and positive archivedAt and requestAt timestamps', 400);
+    }
+    const { restored, failedIds } = await archiveStore.unarchive(parsed.ids, resume?.archivedAt);
     for (const entry of restored) broadcastArchived(entry.id, null);
+    if (resume && restored.length && resumeSessionWork) {
+      // Restore is already committed. A work failure must never retry the accepted prompt.
+      await resumeSessionWork({ sessionId: restored[0].id, requestAt: resume.requestAt,
+        canOpen: () => archiveStore.isRestored(restored[0].id) })
+        .catch((error) => console.warn('[session-work] could not open a resumed session:', error?.message ?? error));
+    }
     return { restored, failedIds };
   };
 

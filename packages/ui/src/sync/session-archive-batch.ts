@@ -89,13 +89,13 @@ export type SessionUnarchiveBatchResult =
   | { outcome: 'unavailable'; reason: string };
 
 /** Clears `time.archived` for a batch of sessions. Mirrors the archive route. */
-export async function requestSessionUnarchiveBatch(ids: string[], directory?: string | null): Promise<SessionUnarchiveBatchResult> {
+export async function requestSessionUnarchiveBatch(ids: string[], directory?: string | null, resume?: { archivedAt: number; requestAt: number }): Promise<SessionUnarchiveBatchResult> {
   let response: Response;
   try {
     response = await runtimeFetch('/api/openchamber/sessions/unarchive', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ ids }),
+      body: JSON.stringify({ ids, resume }),
       directory,
     });
   } catch (error) {

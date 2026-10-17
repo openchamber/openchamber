@@ -6,7 +6,7 @@ import { unarchiveSession } from './session-actions';
 type ResumeDependencies = {
   runtimeKey: () => string;
   session: (id: string) => Session | undefined;
-  restore: (id: string, runtimeKey: string) => Promise<boolean>;
+  restore: (id: string, runtimeKey: string, resume: { archivedAt: number; requestAt: number }) => Promise<boolean>;
   reportFailure: () => Promise<void>;
 };
 
@@ -29,12 +29,13 @@ export function prepareUserMessageResume(
 ): () => Promise<void> {
   const session = deps.runtimeKey() === runtimeKey ? deps.session(sessionId) : undefined;
   const archivedAt = session?.parentID ? undefined : session?.time.archived;
+  const requestAt = Date.now();
   return async () => {
     if (!archivedAt || deps.runtimeKey() !== runtimeKey) return;
     // A later archive or a manual restore supersedes the send's original state.
     if (deps.session(sessionId)?.time.archived !== archivedAt) return;
     try {
-      if (await deps.restore(sessionId, runtimeKey)) return;
+      if (await deps.restore(sessionId, runtimeKey, { archivedAt, requestAt })) return;
     } catch {
       // The message is already accepted. Restoration must never retry it.
     }

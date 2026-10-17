@@ -14,7 +14,9 @@ function fixture(initial = session(10)) {
   const deps = {
     runtimeKey: () => state.runtime,
     session: (id: string) => id === 'session-a' ? state.session : undefined,
-    restore: async (id: string, runtime: string) => {
+    restore: async (id: string, runtime: string, captured: { archivedAt: number; requestAt: number }) => {
+      expect(captured.archivedAt).toBe(initial.time.archived);
+      expect(captured.requestAt).toBeGreaterThan(0);
       state.restored.push(`${runtime}/${id}`);
       return !state.fail;
     },

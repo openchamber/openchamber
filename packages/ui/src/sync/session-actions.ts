@@ -1760,8 +1760,8 @@ function commitArchivedSessions(stamps: SessionArchiveStamp[], directory: string
  * own. Restoring a top-level session brings its archived subsessions back with
  * it, so the agent runs it holds are whole again.
  */
-export async function unarchiveSession(sessionId: string, expectedRuntimeKey = getRuntimeKey()): Promise<boolean> {
-  const { restoredIds } = await restoreSessionTree(sessionId, expectedRuntimeKey)
+export async function unarchiveSession(sessionId: string, expectedRuntimeKey = getRuntimeKey(), resume?: { archivedAt: number; requestAt: number }): Promise<boolean> {
+  const { restoredIds } = await restoreSessionTree(sessionId, expectedRuntimeKey, resume)
   return restoredIds.includes(sessionId)
 }
 
@@ -1791,6 +1791,7 @@ function archivedSubsessionIds(rootId: string): string[] {
 async function restoreSessionTree(
   rootId: string,
   expectedRuntimeKey: string,
+  resume?: { archivedAt: number; requestAt: number },
 ): Promise<{ restoredIds: string[]; failedIds: string[] }> {
   if (useGlobalSessionsStore.getState().entityById.get(rootId)?.parentID) {
     recordSessionActionFailure(rootId, new Error("a subsession is restored with its parent"))
@@ -1798,7 +1799,7 @@ async function restoreSessionTree(
   }
   // Read before the root changes state: the walk follows the archived records.
   const subsessionIds = archivedSubsessionIds(rootId)
-  if (!await restoreArchivedSession(rootId, expectedRuntimeKey)) return { restoredIds: [], failedIds: [rootId] }
+  if (!await restoreArchivedSession(rootId, expectedRuntimeKey, resume)) return { restoredIds: [], failedIds: [rootId] }
   const restoredIds = [rootId]
   const failedIds: string[] = []
   for (const id of subsessionIds) {
@@ -1808,11 +1809,11 @@ async function restoreSessionTree(
   return { restoredIds, failedIds }
 }
 
-async function restoreArchivedSession(sessionId: string, expectedRuntimeKey: string): Promise<boolean> {
+async function restoreArchivedSession(sessionId: string, expectedRuntimeKey: string, resume?: { archivedAt: number; requestAt: number }): Promise<boolean> {
   if (isStaleRuntime(expectedRuntimeKey)) return false
   const sessionDirectory = getSessionDirectory(sessionId)
   try {
-    const result = await requestSessionUnarchiveBatch([sessionId], sessionDirectory)
+    const result = await requestSessionUnarchiveBatch([sessionId], sessionDirectory, resume)
     if (isStaleRuntime(expectedRuntimeKey)) return false
     if (result.outcome !== "restored") {
       throw new Error(`unarchive failed: ${result.reason}`)
@@ -1820,6 +1821,8 @@ async function restoreArchivedSession(sessionId: string, expectedRuntimeKey: str
     if (!result.restored.includes(sessionId)) {
       throw new Error("unarchive failed: server did not return the restored session")
     }
+    const currentArchive = useGlobalSessionsStore.getState().entityById.get(sessionId)?.time.archived
+    if (resume && currentArchive && currentArchive !== resume.archivedAt) return false
     const restored = withArchivedAt(sessionId, null)
     if (restored) useGlobalSessionsStore.getState().upsertSession(restored)
     if (sessionDirectory) registerSessionDirectory(sessionId, sessionDirectory)
