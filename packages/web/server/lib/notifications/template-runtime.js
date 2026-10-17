@@ -10,6 +10,10 @@ export const createNotificationTemplateRuntime = (deps) => {
   } = deps;
 
   const NOTIFICATION_BODY_MAX_CHARS = 1000;
+
+  // Where a session's record and messages are read: the host's OpenCode by default, the
+  // OpenCode inside a space for a session of that space (`runtime.js` builds that source).
+  const hostSource = { buildOpenCodeUrl, getOpenCodeAuthHeaders, fetchImpl: (...args) => fetch(...args) };
   const SESSION_INFO_CACHE_TTL_MS = 60 * 1000;
 
   const cachedZenModels = { models: [] };
@@ -133,16 +137,16 @@ export const createNotificationTemplateRuntime = (deps) => {
     return '';
   };
 
-  const fetchLastAssistantMessageText = async (sessionId, messageId, maxLength = NOTIFICATION_BODY_MAX_CHARS) => {
+  const fetchLastAssistantMessageText = async (sessionId, messageId, maxLength = NOTIFICATION_BODY_MAX_CHARS, source = hostSource) => {
     if (!sessionId) return '';
 
     try {
-      const url = buildOpenCodeUrl(`/api/session/${encodeURIComponent(sessionId)}/message`, '');
-      const response = await fetch(`${url}?limit=5`, {
+      const url = source.buildOpenCodeUrl(`/api/session/${encodeURIComponent(sessionId)}/message`, '');
+      const response = await source.fetchImpl(`${url}?limit=5`, {
         method: 'GET',
         headers: {
           Accept: 'application/json',
-          ...getOpenCodeAuthHeaders(),
+          ...source.getOpenCodeAuthHeaders(),
         },
         signal: AbortSignal.timeout(3000),
       });
@@ -181,8 +185,10 @@ export const createNotificationTemplateRuntime = (deps) => {
     return sessionTitleCache.get(sessionId) ?? null;
   };
 
-  const maybeCacheSessionInfoFromEvent = (payload) => {
-    if (!payload || typeof payload !== 'object') return;
+  // The caches hold the host's sessions only. A space's chat is read inside the space every
+  // time: an id a space names is its claim, and must never become a host chat's title.
+  const maybeCacheSessionInfoFromEvent = (payload, { spaceId = null } = {}) => {
+    if (!payload || typeof payload !== 'object' || spaceId) return;
     const type = payload.type;
     if (type !== 'session.updated' && type !== 'session.created') return;
     const info = payload.properties?.info;
@@ -190,21 +196,22 @@ export const createNotificationTemplateRuntime = (deps) => {
     cacheSessionTitle(info.id, info.title);
   };
 
-  const fetchSessionInfo = async (sessionId) => {
+  const fetchSessionInfo = async (sessionId, source) => {
     if (!sessionId) return null;
 
-    const cached = sessionInfoCache.get(sessionId);
+    const isHost = source === hostSource;
+    const cached = isHost ? sessionInfoCache.get(sessionId) : undefined;
     if (cached && Date.now() - cached.at < SESSION_INFO_CACHE_TTL_MS) {
       return cached.data;
     }
 
     try {
-      const url = buildOpenCodeUrl(`/api/session/${encodeURIComponent(sessionId)}`, '');
-      const response = await fetch(url, {
+      const url = source.buildOpenCodeUrl(`/api/session/${encodeURIComponent(sessionId)}`, '');
+      const response = await source.fetchImpl(url, {
         method: 'GET',
         headers: {
           Accept: 'application/json',
-          ...getOpenCodeAuthHeaders(),
+          ...source.getOpenCodeAuthHeaders(),
         },
         signal: AbortSignal.timeout(2000),
       });
@@ -214,7 +221,7 @@ export const createNotificationTemplateRuntime = (deps) => {
       }
       const data = unwrapOpenCodeResponse(await response.json().catch(() => null));
       if (data && typeof data === 'object') {
-        sessionInfoCache.set(sessionId, { data, at: Date.now() });
+        if (isHost) sessionInfoCache.set(sessionId, { data, at: Date.now() });
         return data;
       }
       return null;
@@ -224,12 +231,13 @@ export const createNotificationTemplateRuntime = (deps) => {
     }
   };
 
-  const buildTemplateVariables = async (payload, sessionId) => {
+  const buildTemplateVariables = async (payload, sessionId, source = hostSource) => {
     const info = payload?.properties?.info || {};
 
     let sessionTitle = payload?.properties?.sessionTitle || payload?.properties?.session?.title || (typeof info.sessionTitle === 'string' ? info.sessionTitle : '') || '';
 
-    if (!sessionTitle && sessionId) {
+    const isHost = source === hostSource;
+    if (!sessionTitle && sessionId && isHost) {
       const cached = getCachedSessionTitle(sessionId);
       if (cached) {
         sessionTitle = cached;
@@ -238,10 +246,10 @@ export const createNotificationTemplateRuntime = (deps) => {
 
     let sessionInfo = null;
     if (!sessionTitle && sessionId) {
-      sessionInfo = await fetchSessionInfo(sessionId);
+      sessionInfo = await fetchSessionInfo(sessionId, source);
       if (sessionInfo && typeof sessionInfo.title === 'string') {
         sessionTitle = sessionInfo.title;
-        cacheSessionTitle(sessionId, sessionTitle);
+        if (isHost) cacheSessionTitle(sessionId, sessionTitle);
       }
     }
 

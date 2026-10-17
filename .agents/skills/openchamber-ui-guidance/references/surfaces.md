@@ -17,7 +17,7 @@ the source of the values. Its comments say why each value is what it is.
 | Menu, popover, autocomplete, floating comment field | `oc-glass-popover oc-glass-floating` | No border and no extra `shadow-*` on it or a wrapper: either replaces the light. |
 | Surface always on screen over the transcript (composer, status pills) | `oc-surface-floating` + `oc-glass-floating` | Opaque on purpose: a blur there is redrawn every streamed frame. The composer adds `oc-composer-sheen`. |
 | Panel in the layout beside the chat (context panel card, work status card) | `oc-panel-edge` | A hairline ring and a short shadow, plus a faint lit top line in dark themes, by maintainer decision. Its page colour is the sidebar's (the theme's muted surface; halfway to it in light themes): JS-painted surfaces inside take it from `usePageColors`; it gains the full dropdown edge only while floating over the chat. |
-| Modal window | `DialogContent` (`oc-modal-shadow`) | Focus on open goes to the first text field, else the window, so no ring lands on the close cross. |
+| Modal window | `DialogContent` (`oc-modal-shadow`) | Canvas tone (`bg-background`), the same as the Settings window; a sticky header inside paints `bg-background` too. Focus on open goes to the first text field, else the window, so no ring lands on the close cross. |
 | Banner: warning, error, info | status background fill | No border. A very faint fill gets a stronger tint rather than a border back. |
 | Large code canvas (Files editor and tree, a diff) | its existing frame | The one place a full border stays: without it the canvas merges with the page. |
 

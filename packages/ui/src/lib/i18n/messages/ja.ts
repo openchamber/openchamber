@@ -9,6 +9,7 @@ import { routingI18n } from './routing.i18n';
 import { pluginPanelI18n } from './plugin-panel.i18n';
 import { surfacePanelI18n } from './surface-panel.i18n';
 import { fileArtifactsI18n } from './file-artifacts.i18n';
+import { fileContentSearchI18n } from './file-content-search.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
@@ -139,6 +140,7 @@ export const dict: Record<I18nKey, string> = {
   ...pluginPanelI18n.ja,
   ...surfacePanelI18n.ja,
   ...fileArtifactsI18n.ja,
+  ...fileContentSearchI18n.ja,
   ...htmlRenderI18n.ja,
   ...usageStatsI18n.ja,
   ...webSearchI18n.ja,
@@ -2029,7 +2031,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.recap.label': '要約:',
   'chat.sessionError.title': 'OpenCode がこの返答を停止しました',
   'chat.sessionError.noDetails': 'OpenCode から詳細は報告されませんでした。ステータスレポートで最近のエラーを確認できます。',
-  'chat.sessionError.showStatus': 'OpenCode のステータスを表示',
+  'chat.sessionError.showStatus': '診断タイムラインを表示',
   'chat.sessionError.noReply': 'OpenCode はこのメッセージへの返答を開始しませんでした。',
   'chat.sessionError.interrupted': 'OpenCode がこの応答を中断しました。',
   'chat.longError.expand': 'エラー全文を表示',
@@ -2806,7 +2808,7 @@ export const dict: Record<I18nKey, string> = {
   'commandPalette.item.showContextUsage': 'コンテキスト使用量を表示',
   'commandPalette.item.toggleTerminal': 'ターミナルの切り替え',
   'commandPalette.item.cycleTheme': 'テーマを順に切替',
-  'commandPalette.item.showOpenCodeStatus': 'OpenCode のステータスを表示',
+  'commandPalette.item.showOpenCodeStatus': '診断タイムラインを表示',
   'commandPalette.item.restartOpenCode': 'OpenCode を再起動',
   'commandPalette.item.toggleMemoryDebug': 'メモリデバッグパネルの切替',
   'commandPalette.item.pinSession': 'セッションをピン留め/解除',
@@ -2859,13 +2861,15 @@ export const dict: Record<I18nKey, string> = {
   'commandPalette.footer.navigate': '移動',
   'commandPalette.footer.open': '開く',
   'commandPalette.footer.close': '閉じる',
-  'openCodeStatusDialog.title': 'OpenCodeステータス',
-  'openCodeStatusDialog.description': '現在のOpenCodeステータスと診断情報を確認します。',
+  'openCodeStatusDialog.title': '診断タイムライン',
+  'openCodeStatusDialog.description': 'ローカルのイベントを時系列で表示します。非公開のログ内容やリモートの情報は含まれません。',
+  'openCodeStatusDialog.actions.download': 'ログをダウンロード',
+  'openCodeStatusDialog.toast.collectFailed': '診断情報を収集できませんでした',
   'openCodeStatusDialog.actions.copy': 'コピー',
   'openCodeStatusDialog.empty.noData': 'データがありません。',
   'openCodeStatusDialog.toast.copiedTitle': 'コピーしました',
-  'openCodeStatusDialog.toast.copiedDescription': 'ステータスをクリップボードにコピーしました',
-  'openCodeStatusDialog.toast.copyFailed': 'ステータスのコピーに失敗しました',
+  'openCodeStatusDialog.toast.copiedDescription': '診断ログをクリップボードにコピーしました',
+  'openCodeStatusDialog.toast.copyFailed': '診断ログをコピーできませんでした',
   'saveProjectPlanDialog.title': 'プロジェクト計画を保存',
   'saveProjectPlanDialog.description': 'この計画をMarkdownファイルとしてプロジェクトに保存します。',
   'saveProjectPlanDialog.field.title': 'タイトル',

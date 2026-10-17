@@ -8,6 +8,7 @@ import { routingI18n } from './routing.i18n';
 import { pluginPanelI18n } from './plugin-panel.i18n';
 import { surfacePanelI18n } from './surface-panel.i18n';
 import { fileArtifactsI18n } from './file-artifacts.i18n';
+import { fileContentSearchI18n } from './file-content-search.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
@@ -1985,7 +1986,7 @@ export const dict = {
   'chat.recap.label': 'סיכום:',
   'chat.sessionError.title': 'OpenCode עצר את התגובה הזו',
   'chat.sessionError.noDetails': 'OpenCode לא מסר פרטים. דוח המצב מציג את השגיאות האחרונות.',
-  'chat.sessionError.showStatus': 'הצג את מצב OpenCode',
+  'chat.sessionError.showStatus': 'הצג ציר זמן אבחון',
   'chat.sessionError.noReply': 'OpenCode לא התחיל תגובה להודעה הזו.',
   'chat.sessionError.interrupted': 'OpenCode קטע את התגובה הזו.',
   'chat.longError.expand': 'הצג את השגיאה המלאה',
@@ -2759,7 +2760,7 @@ export const dict = {
   'commandPalette.item.showContextUsage': 'הצג שימוש בהקשר',
   'commandPalette.item.toggleTerminal': 'הצג/הסתר מסוף',
   'commandPalette.item.cycleTheme': 'החלף ערכת נושא',
-  'commandPalette.item.showOpenCodeStatus': 'הצג את מצב OpenCode',
+  'commandPalette.item.showOpenCodeStatus': 'הצג ציר זמן אבחון',
   'commandPalette.item.restartOpenCode': 'הפעל מחדש את OpenCode',
   'commandPalette.item.toggleMemoryDebug': 'הצג/הסתר חלונית ניפוי זיכרון',
   'commandPalette.item.pinSession': 'הצמד או בטל הצמדה של הפעלה',
@@ -2812,13 +2813,15 @@ export const dict = {
   'commandPalette.footer.navigate': 'לניווט',
   'commandPalette.footer.open': 'לפתיחה',
   'commandPalette.footer.close': 'לסגירה',
-  'openCodeStatusDialog.title': 'מצב OpenCode',
-  'openCodeStatusDialog.description': 'בדיקת המצב והאבחון הנוכחיים של OpenCode.',
+  'openCodeStatusDialog.title': 'ציר זמן אבחון',
+  'openCodeStatusDialog.description': 'אירועים מקומיים לפי סדר הזמן. טקסט יומן פרטי ומקורות מרוחקים אינם נכללים.',
+  'openCodeStatusDialog.actions.download': 'הורד יומן',
+  'openCodeStatusDialog.toast.collectFailed': 'איסוף נתוני האבחון נכשל',
   'openCodeStatusDialog.actions.copy': 'העתק',
   'openCodeStatusDialog.empty.noData': 'אין נתונים.',
   'openCodeStatusDialog.toast.copiedTitle': 'הועתק',
-  'openCodeStatusDialog.toast.copiedDescription': 'המצב הועתק ללוח',
-  'openCodeStatusDialog.toast.copyFailed': 'העתקת המצב נכשלה',
+  'openCodeStatusDialog.toast.copiedDescription': 'יומן האבחון הועתק ללוח',
+  'openCodeStatusDialog.toast.copyFailed': 'העתקת יומן האבחון נכשלה',
   'saveProjectPlanDialog.title': 'שמירת תוכנית פרויקט',
   'saveProjectPlanDialog.description': 'שמירת התוכנית בפרויקט כקובץ Markdown.',
   'saveProjectPlanDialog.field.title': 'כותרת',
@@ -3777,6 +3780,7 @@ export const dict = {
   ...pluginPanelI18n.he,
   ...surfacePanelI18n.he,
   ...fileArtifactsI18n.he,
+  ...fileContentSearchI18n.he,
   ...htmlRenderI18n.he,
   ...usageStatsI18n.he,
   ...webSearchI18n.he,

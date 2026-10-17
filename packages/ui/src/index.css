@@ -678,8 +678,10 @@ svg.animate-spin {
 }
 
 /* Native drag regions still intercept pointer input beneath portal dialogs.
-   Restore them when the last dialog closes. */
-.oc-dialog-open .app-region-drag {
+   Restore them when the last dialog closes. Open menus do the same, so a
+   click on the title bar reaches the page and dismisses the menu. */
+.oc-dialog-open .app-region-drag,
+.oc-menu-open .app-region-drag {
   -webkit-app-region: no-drag;
 }
 

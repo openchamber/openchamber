@@ -18,6 +18,7 @@ import { rebaseMovedPath } from '@/lib/filePathMoves';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { noteBrowserTabOpenedWithAddress, requestBrowserTabLoad } from '@/lib/browser/devServerWait';
 import { isContextPanelMode, type ContextPanelMode } from '@/lib/surfaces/modes';
+import { CONTEXT_SURFACE_WIDTHS } from '@/lib/surfaces/registry';
 import {
   carrySurfaceToZone,
   getZoneView,
@@ -180,7 +181,7 @@ const isLegacyDefaultTemplates = (value: unknown): boolean => {
   );
 };
 
-const CONTEXT_PANEL_DEFAULT_WIDTH = 380;
+const CONTEXT_PANEL_DEFAULT_WIDTH = CONTEXT_SURFACE_WIDTHS.regular;
 const CONTEXT_PANEL_MIN_WIDTH = 320;
 const CONTEXT_PANEL_DEFAULT_HEIGHT = 320;
 const CONTEXT_PANEL_MIN_HEIGHT = 160;
@@ -1172,7 +1173,7 @@ interface UIStore {
   openContextFile: (directory: string, filePath: string, options?: { preview?: boolean }) => void;
   /** Turns a preview file tab into a regular one. */
   pinContextPanelTab: (directory: string, tabID: string) => void;
-  openContextFileAtLine: (directory: string, filePath: string, line: number, column?: number) => void;
+  openContextFileAtLine: (directory: string, filePath: string, line: number, column?: number, options?: { preview?: boolean }) => void;
   openContextOverview: (directory: string) => void;
   openContextPreview: (directory: string, url: string) => void;
   openContextBrowser: (directory: string, url?: string, options?: { reveal?: boolean }) => void;
@@ -1408,6 +1409,20 @@ interface UIStore {
   setFileEditorVimMappings: (value: string) => void;
 }
 
+
+// Opens a file tab, or reuses it. The preview this open replaces leaves the
+// editor's open files too, like any closed tab.
+const openFileTab = (state: UIStore, directory: string, filePath: string, preview: boolean) => {
+  const tabs = state.contextPanelByDirectory[directory]?.tabs ?? [];
+  const replacedPreviewPath = preview
+    ? tabs.find((tab) => tab.preview && tab.targetPath !== filePath)?.targetPath ?? null
+    : null;
+  const alreadyOpen = tabs.some((tab) => tab.mode === 'file' && tab.targetPath === filePath);
+  state.openContextPanelTab(directory, { mode: 'file', targetPath: filePath, preview });
+  if (replacedPreviewPath && !alreadyOpen) {
+    useFilesViewTabsStore.getState().removeOpenPath(directory, replacedPreviewPath);
+  }
+};
 
 export const useUIStore = create<UIStore>()(
   devtools(
@@ -1820,24 +1835,12 @@ export const useUIStore = create<UIStore>()(
             return;
           }
 
-          const preview = options?.preview === true;
-          // The preview this open replaces leaves the editor's open files too,
-          // like any closed tab.
-          const replacedPreviewPath = preview
-            ? get().contextPanelByDirectory[normalizedDirectory]?.tabs
-              .find((tab) => tab.preview && tab.targetPath !== normalizedFilePath)?.targetPath ?? null
-            : null;
-          const alreadyOpen = get().contextPanelByDirectory[normalizedDirectory]?.tabs
-            .some((tab) => tab.mode === 'file' && tab.targetPath === normalizedFilePath) ?? false;
-          get().openContextPanelTab(normalizedDirectory, { mode: 'file', targetPath: normalizedFilePath, preview });
-          if (replacedPreviewPath && !alreadyOpen) {
-            useFilesViewTabsStore.getState().removeOpenPath(normalizedDirectory, replacedPreviewPath);
-          }
+          openFileTab(get(), normalizedDirectory, normalizedFilePath, options?.preview === true);
           get().setPendingFileFocusPath(normalizedFilePath);
           get().setPendingFileNavigation(null);
         },
 
-        openContextFileAtLine: (directory, filePath, line, column) => {
+        openContextFileAtLine: (directory, filePath, line, column, options) => {
           const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
           const normalizedFilePath = normalizeContextTargetPath(filePath);
           const normalizedLine = Number.isFinite(line) ? Math.max(1, Math.trunc(line)) : 1;
@@ -1846,7 +1849,7 @@ export const useUIStore = create<UIStore>()(
             return;
           }
 
-          get().openContextPanelTab(normalizedDirectory, { mode: 'file', targetPath: normalizedFilePath });
+          openFileTab(get(), normalizedDirectory, normalizedFilePath, options?.preview === true);
           get().setPendingFileFocusPath(null);
           get().setPendingFileNavigation({
             path: normalizedFilePath,

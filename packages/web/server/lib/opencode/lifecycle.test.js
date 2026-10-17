@@ -24,6 +24,7 @@ vi.mock('./startup-performance.js', () => ({
 }));
 
 const { createOpenCodeLifecycleRuntime } = await import('./lifecycle.js');
+const { createServerDiagnosticJournal } = await import('../diagnostics/server-journal.js');
 
 const originalOpencodeBinary = process.env.OPENCODE_BINARY;
 const originalPath = process.env.PATH;
@@ -162,6 +163,38 @@ describe('OpenCode lifecycle', () => {
       // Credential reads take variable keys from the environment the current process got.
       expect(runtime.getManagedOpenCodeProcessEnv()).toBe(spawnMock.mock.calls[1][2].env);
       expect(runtime.getManagedOpenCodeProcessEnv()).toMatchObject({ SHELL_ONLY: 'yes' });
+    } finally {
+      await runtime.testState.openCodeProcess.close();
+    }
+  });
+
+  it('journals managed launch, readiness, exit and restart as fixed actions only', async () => {
+    const journal = createServerDiagnosticJournal();
+    spawnMock.mockImplementation(() => {
+      const child = createMockChild();
+      queueMicrotask(() => {
+        child.stderr.emit('data', 'plugin failed: token=secret-123 /private/file\n');
+        child.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n');
+      });
+      return child;
+    });
+    globalThis.fetch = vi.fn(async () => ({ ok: false }));
+    const runtime = createRuntime({ diagnosticJournal: journal });
+    const firstServer = await runtime.startOpenCode();
+    runtime.testState.openCodeProcess = firstServer;
+    try {
+      await runtime.restartOpenCode();
+      expect(journal.snapshot().events.map(({ action, detail }) => [action, detail])).toEqual([
+        ['managed launch', 'attempt=1'],
+        ['managed ready', 'attempt=1'],
+        ['managed restart started', undefined],
+        ['managed process exited', undefined],
+        ['managed launch', 'attempt=1'],
+        ['managed ready', 'attempt=1'],
+        ['managed restart ready', undefined],
+      ]);
+      expect(spawnMock.mock.calls[0][2].env).not.toHaveProperty('OPENCODE_PRINT_LOGS');
+      expect(JSON.stringify(journal.snapshot())).not.toMatch(/secret|private/);
     } finally {
       await runtime.testState.openCodeProcess.close();
     }

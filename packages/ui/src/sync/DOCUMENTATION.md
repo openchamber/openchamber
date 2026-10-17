@@ -371,10 +371,11 @@ host's `spaces` mark: one entry per space with its name, the state of its last
 answer (`complete`, `partial`, `stale`, `unknown`), the registered project it
 was made for and its directory inside. `lib/spaces/spaces-store.ts` keeps the
 marks of the last complete load, reset on a runtime switch. A space's sessions
-live at `/spaces/<id>/<folder>`; `lib/spaces/space-route.ts` turns that
-directory into the `/api/spaces/<id>/` prefix at call time, and `runtimeFetch`
-applies it from the directory a request names in the open, so the sidebar's
-per-directory reads of a space go to the space. Rules that follow from the
+live at `/spaces/<id>/<folder>`, and the server sends a request that names
+such a directory in its query or its directory header to that space, so the
+sidebar's per-directory reads of a space go to the space; a request that names
+its directory only in its body passes it to `runtimeFetch` as `directory`,
+which `lib/spaces/space-route.ts` turns into that header for a space. Rules that follow from the
 mark: a session of a space whose answer was not `complete` may be missing from
 the snapshot without being deleted, so the authoritative cleanup skips it; the
 event pipeline hands the host's `openchamber:space-stream` announcement to
@@ -652,10 +653,11 @@ happened. Before that no-reply notice shows, the session tail is re-read
 from the server (the live stream may have dropped the reply); the notice
 appears only if that read settles with the prompt still last, or fails. Two
 more reads, at 10 and 30 seconds, keep running under the visible notice so a
-late reply still replaces it. Both buffers — session errors and rejected sends — appear in the
-status report (`buildOpenCodeStatusReport`, Ctrl/Cmd+Shift+L or
-`__opencodeDebug.statusReport()`) together with the managed OpenCode
-process's last error and stderr tail and the expected log file locations.
+late reply still replaces it. Both buffers — session errors and rejected sends — appear in full
+in `__opencodeDebug.statusReport()` together with the managed OpenCode
+process's last error and stderr tail. The diagnostic timeline
+(Ctrl/Cmd+Shift+L, see `lib/diagnostics/DOCUMENTATION.md`) carries them
+with numbered session labels and the error class only.
 
 ## Loading diagnostics
 

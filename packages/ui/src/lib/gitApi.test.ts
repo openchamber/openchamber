@@ -179,7 +179,9 @@ describe("generateCommitMessage diff collection", () => {
   test("asks the server inside the space for a repository in an isolated space", async () => {
     await generateCommitMessage("/spaces/a1b2c3d4e5f6/repo", files.slice(0, 1))
 
-    const generateCalls = request.mock.calls.map(([input]) => String(input)).filter((url) => url.includes("/small-model/generate"))
-    expect(generateCalls).toEqual(["https://git.test/api/spaces/a1b2c3d4e5f6/small-model/generate"])
+    const generateCalls = request.mock.calls
+      .filter(([input]) => String(input).includes("/small-model/generate"))
+      .map(([input, init]) => `${String(input)} ${new Headers(init?.headers).get("x-opencode-directory")}`)
+    expect(generateCalls).toEqual([`https://git.test/api/small-model/generate ${encodeURIComponent("/spaces/a1b2c3d4e5f6/repo")}`])
   })
 })

@@ -5,6 +5,7 @@ import React from 'react';
 import { SessionActivityIndicator } from '@/components/session/SessionActivityIndicator';
 import type { Session } from '@/lib/opencode/model';
 import { ContextMenu } from '@base-ui/react/context-menu';
+import { ContextMenu as ContextMenuRoot } from '@/components/ui/context-menu';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -1785,7 +1786,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
   return (
     <React.Fragment key={session.id}>
       <DraggableSessionRow sessionId={session.id} dragKey={dragKey ?? sessionRowKey} ownerKey={folderOwnerKey ?? selectionScopeKey} sessionDirectory={sessionDirectory ?? null} sessionTitle={sessionTitle} archivedBucket={archivedBucket}>
-        <ContextMenu.Root open={isContextMenuOpen} onOpenChange={handleContextMenuOpenChange} onOpenChangeComplete={handleMenuOpenChangeComplete}>
+        <ContextMenuRoot open={isContextMenuOpen} onOpenChange={handleContextMenuOpenChange} onOpenChangeComplete={handleMenuOpenChangeComplete}>
           <ContextMenu.Trigger
             render={
               <div
@@ -2003,7 +2004,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
           </div>
           </ContextMenu.Trigger>
           {contextMenuContent}
-        </ContextMenu.Root>
+        </ContextMenuRoot>
       </DraggableSessionRow>
       {hasChildren && isExpanded ? children : null}
       <Dialog open={exportDialogOpen} onOpenChange={setExportDialogOpen}>

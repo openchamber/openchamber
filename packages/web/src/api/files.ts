@@ -1,5 +1,9 @@
+import { z } from 'zod';
+
 import type {
   DirectoryListResult,
+  FileContentSearchOutcome,
+  FileContentSearchQuery,
   FileSearchQuery,
   FileSearchResult,
   FilesAPI,
@@ -66,6 +70,24 @@ const directoryHeaders = (getDirectory?: () => string | undefined, override?: st
   const directory = override || getDirectory?.();
   return directory ? { 'x-opencode-directory': directory } : undefined;
 };
+
+const contentSearchResponseSchema = z.object({
+  matches: z.array(z.object({
+    path: z.string(),
+    relativePath: z.string(),
+    line: z.number().int().positive(),
+    column: z.number().int().positive(),
+    text: z.string(),
+    ranges: z.array(z.tuple([z.number().int().nonnegative(), z.number().int().nonnegative()])),
+    cutStart: z.boolean(),
+  })),
+  stopped: z.enum(['limit', 'deadline']).nullable(),
+});
+
+const contentSearchErrorSchema = z.object({
+  error: z.string().optional(),
+  reason: z.string().optional(),
+});
 
 export const createWebFilesAPI = ({ getDirectory }: WebFilesAPIOptions): FilesAPI => ({
   async listDirectory(path: string, options): Promise<DirectoryListResult> {
@@ -134,6 +156,52 @@ export const createWebFilesAPI = ({ getDirectory }: WebFilesAPIOptions): FilesAP
       path: normalizePath(`${directory}/${relativePath}`),
       preview: [normalizePath(relativePath)],
     }));
+  },
+
+  async searchContents(payload: FileContentSearchQuery): Promise<FileContentSearchOutcome> {
+    const directory = normalizePath(payload.directory);
+    const params = new URLSearchParams({ query: payload.query, regex: payload.regex ? 'true' : 'false' });
+    if (payload.limit !== undefined) {
+      params.set('limit', String(payload.limit));
+    }
+    if (payload.includeHidden) {
+      params.set('includeHidden', 'true');
+    }
+    if (payload.respectGitignore === false) {
+      params.set('respectGitignore', 'false');
+    }
+
+    const response = await runtimeFetch('/api/fs/find-in-files', {
+      query: params,
+      cache: 'no-store',
+      signal: payload.signal,
+      headers: directoryHeaders(getDirectory, directory),
+    });
+
+    if (response.ok) {
+      const parsed = contentSearchResponseSchema.safeParse(await response.json().catch(() => null));
+      if (!parsed.success) {
+        throw new FilesystemError('Content search returned an invalid response', { reason: 'invalid-response' });
+      }
+      return {
+        status: 'ok',
+        matches: parsed.data.matches.map((match) => ({ ...match, path: normalizePath(match.path) })),
+        stopped: parsed.data.stopped,
+      };
+    }
+
+    const failure = contentSearchErrorSchema.safeParse(await response.json().catch(() => null));
+    const reason = failure.success ? failure.data.reason : undefined;
+    if (response.status === 501 && reason === 'search-unavailable') {
+      return { status: 'unavailable' };
+    }
+    if (response.status === 400 && reason === 'invalid-pattern') {
+      return { status: 'invalid-pattern', message: failure.success && failure.data.error ? failure.data.error : 'Invalid regular expression' };
+    }
+    throw new FilesystemError(
+      (failure.success && failure.data.error) || response.statusText || 'Failed to search file contents',
+      { status: response.status },
+    );
   },
 
   async createDirectory(path: string): Promise<{ success: boolean; path: string }> {

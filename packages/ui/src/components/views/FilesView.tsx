@@ -1,4 +1,3 @@
-import { spaceApiPath } from '@/lib/spaces/space-route';
 import React from 'react';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 
@@ -3800,7 +3799,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     : '';
 
   const pdfSrc = selectedFile?.path && usesRawAssetUrl && pdfAssetAuthKey && pdfAssetAuthReadyKey === pdfAssetAuthKey
-    ? getRuntimeUrlResolver().authenticatedAsset(spaceApiPath('/api/fs/raw', root), {
+    ? getRuntimeUrlResolver().authenticatedAsset('/api/fs/raw', {
       path: selectedFile.path,
       allowOutsideWorkspace: selectedFileReadOptions.allowOutsideWorkspace ? 'true' : undefined,
       directory: root || undefined,

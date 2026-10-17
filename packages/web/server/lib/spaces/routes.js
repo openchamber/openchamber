@@ -1,7 +1,7 @@
 // The host's own routes of the isolated-spaces journey, under `/api/openchamber/spaces`: a
 // namespace of the host's, never forwarded, beside `/api/openchamber/tunnel`. A request to the
-// server inside a space is `/api/spaces/<id>/...` and belongs to the dispatcher; nothing here
-// touches that shape.
+// server inside a space names a space's directory, or has the older `/api/spaces/<id>/...`
+// form, and belongs to the dispatcher; nothing here touches either.
 //
 // Every route but the switch exists only while the switch is on: `getJourney()` answers null
 // while it is off, and then the journey routes say so with 404 and `isolated_spaces_off`, the same

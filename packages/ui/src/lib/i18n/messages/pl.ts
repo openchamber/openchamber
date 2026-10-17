@@ -9,6 +9,7 @@ import { routingI18n } from './routing.i18n';
 import { pluginPanelI18n } from './plugin-panel.i18n';
 import { surfacePanelI18n } from './surface-panel.i18n';
 import { fileArtifactsI18n } from './file-artifacts.i18n';
+import { fileContentSearchI18n } from './file-content-search.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
@@ -139,6 +140,7 @@ export const dict: Record<I18nKey, string> = {
   ...pluginPanelI18n.pl,
   ...surfacePanelI18n.pl,
   ...fileArtifactsI18n.pl,
+  ...fileContentSearchI18n.pl,
   ...htmlRenderI18n.pl,
   ...usageStatsI18n.pl,
   ...webSearchI18n.pl,
@@ -1637,7 +1639,7 @@ export const dict: Record<I18nKey, string> = {
   'commandPalette.item.toggleSidebar': 'Przełącz panel boczny',
   'commandPalette.item.toggleTerminal': 'Przełącz terminal',
   'commandPalette.item.cycleTheme': 'Przełącz motyw',
-  'commandPalette.item.showOpenCodeStatus': 'Pokaż status OpenCode',
+  'commandPalette.item.showOpenCodeStatus': 'Pokaż oś czasu diagnostyki',
   'commandPalette.item.restartOpenCode': 'Uruchom ponownie OpenCode',
   'commandPalette.item.toggleMemoryDebug': 'Przełącz panel debugowania pamięci',
   'commandPalette.item.pinSession': 'Przypnij lub odepnij sesję',
@@ -2746,7 +2748,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.recap.label': 'Podsumowanie:',
   'chat.sessionError.title': 'OpenCode przerwał tę odpowiedź',
   'chat.sessionError.noDetails': 'OpenCode nie podał szczegółów. Raport stanu pokazuje ostatnie błędy.',
-  'chat.sessionError.showStatus': 'Pokaż status OpenCode',
+  'chat.sessionError.showStatus': 'Pokaż oś czasu diagnostyki',
   'chat.sessionError.noReply': 'OpenCode nie rozpoczął odpowiedzi na tę wiadomość.',
   'chat.sessionError.interrupted': 'OpenCode przerwał tę odpowiedź.',
   'chat.longError.expand': 'Pokaż cały błąd',
@@ -2944,12 +2946,14 @@ export const dict: Record<I18nKey, string> = {
   'memoryDebugPanel.tooltip.logCurrentState': 'Zaloguj bieżący stan pamięci do konsoli przeglądarki',
   'openChamberLogo.aria.logo': 'Logo OpenChamber',
   'openCodeStatusDialog.actions.copy': 'Kopiuj',
-  'openCodeStatusDialog.description': 'Sprawdź bieżący status i diagnostykę OpenCode.',
+  'openCodeStatusDialog.actions.download': 'Pobierz dziennik',
+  'openCodeStatusDialog.toast.collectFailed': 'Nie udało się zebrać danych diagnostycznych',
+  'openCodeStatusDialog.description': 'Lokalne zdarzenia w kolejności chronologicznej. Prywatne treści dziennika i zdalne źródła są pomijane.',
   'openCodeStatusDialog.empty.noData': 'Brak danych.',
-  'openCodeStatusDialog.title': 'Status OpenCode',
-  'openCodeStatusDialog.toast.copiedDescription': 'Status skopiowany do schowka',
+  'openCodeStatusDialog.title': 'Oś czasu diagnostyki',
+  'openCodeStatusDialog.toast.copiedDescription': 'Dziennik diagnostyczny skopiowany do schowka',
   'openCodeStatusDialog.toast.copiedTitle': 'Skopiowano',
-  'openCodeStatusDialog.toast.copyFailed': 'Nie udało się skopiować statusu',
+  'openCodeStatusDialog.toast.copyFailed': 'Nie udało się skopiować dziennika diagnostycznego',
   'openInApp.actions.chooseAppAria': 'Wybierz aplikację do otwarcia',
   'openInApp.actions.copyPath': 'Kopiuj ścieżkę',
   'openInApp.actions.open': 'Otwórz',

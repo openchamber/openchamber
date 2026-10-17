@@ -5,7 +5,8 @@ import { useSkillsStore } from '@/stores/useSkillsStore';
 import { useMcpStore } from '@/stores/useMcpStore';
 import { useSession } from '@/sync/sync-context';
 import { getDistinctLinkedIssues, getLinkedGitHubPullRequests, getLinkedGitLabThreads, getLinkedSidebarIssues, getGitHubThreadRef, getGitLabThreadRef, isLinkedChange } from '@/lib/linkedIssues';
-import type { PrVisualSummary } from '@/stores/useGitHubPrStatusStore';
+import { useFreshestSourceControlVisualSummaryForBranch, type PrVisualSummary } from '@/stores/useGitHubPrStatusStore';
+import { useEffectiveGitDirectory, useGitStore } from '@/stores/useGitStore';
 import { useTrackedIssueStates, useTrackedLinearStates, useTrackedPullVisualSummaries } from '@/stores/useTrackedItemsStore';
 import { useTrackedItems } from '@/lib/trackedItems/interest';
 import { githubThread, gitlabThread, linearIssue } from '@/lib/trackedItems/fromLinks';
@@ -202,15 +203,25 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
   const linkedLinearStates = useTrackedLinearStates(linkedLinearItems);
   const gitlabChangeSummaries = useTrackedPullVisualSummaries(linkedGitLabChanges);
   const gitlabIssueStates = useTrackedIssueStates(linkedGitLabIssueItems);
+  // The pull request of the branch checked out here, read-only as in the
+  // repository readout. When it is also linked, its row shows this state, as
+  // the sidebar row does: a full status read carries more than a live summary,
+  // and the linked item's own state may not have arrived yet.
+  const gitDirectory = useEffectiveGitDirectory(directory);
+  const branch = useGitStore(React.useCallback(
+    (state) => (gitDirectory ? state.directories.get(gitDirectory)?.status?.current?.trim() || null : null),
+    [gitDirectory],
+  ));
+  const branchPrSummary = useFreshestSourceControlVisualSummaryForBranch(gitDirectory, branch);
   // Entry id (`owner/repo#number`, lowercased) -> the coloured status line.
   const liveLookById = React.useMemo(() => {
     const looks = new Map<string, { color: string; text: string }>();
-    for (const summary of linkedPrSummaries) {
+    const changeLook = (summary: PrVisualSummary, reference: string) => {
       const label = getPrStatusLabel(summary, t);
-      looks.set(`${summary.repo?.owner ?? ''}/${summary.repo?.repo ?? ''}#${summary.number}`.toLowerCase(), {
-        color: `var(--pr-${summary.visualState})`,
-        text: label ? `#${summary.number} · ${label}` : `#${summary.number}`,
-      });
+      return { color: `var(--pr-${summary.visualState})`, text: label ? `${reference} · ${label}` : reference };
+    };
+    for (const summary of linkedPrSummaries) {
+      looks.set(`${summary.repo?.owner ?? ''}/${summary.repo?.repo ?? ''}#${summary.number}`.toLowerCase(), changeLook(summary, `#${summary.number}`));
     }
     linkedIssueRefs.forEach((ref, index) => {
       const state = linkedIssueStates[index];
@@ -232,13 +243,23 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
     });
     linkedGitLabChanges.forEach(({ ref }, index) => {
       const summary = gitlabChangeSummaries[index];
-      if (!summary) return;
-      const label = getPrStatusLabel(summary, t);
-      looks.set(ref.key, {
-        color: `var(--pr-${summary.visualState})`,
-        text: label ? `!${ref.number} · ${label}` : `!${ref.number}`,
-      });
+      if (summary) looks.set(ref.key, changeLook(summary, `!${ref.number}`));
     });
+    if (branchPrSummary?.repo) {
+      const owner = branchPrSummary.repo.owner.toLowerCase();
+      const repo = branchPrSummary.repo.repo.toLowerCase();
+      if (branchPrSummary.provider === 'gitlab') {
+        const match = linkedGitLabChanges.find(({ ref }) => (
+          ref.number === branchPrSummary.number && ref.owner.toLowerCase() === owner && ref.repo.toLowerCase() === repo
+        ));
+        if (match) looks.set(match.ref.key, changeLook(branchPrSummary, `!${match.ref.number}`));
+      } else {
+        const key = `${owner}/${repo}#${branchPrSummary.number}`;
+        if (linkedPrs.some((link) => `${link.owner}/${link.repo}#${link.number}`.toLowerCase() === key)) {
+          looks.set(key, changeLook(branchPrSummary, `#${branchPrSummary.number}`));
+        }
+      }
+    }
     linkedGitLabIssues.forEach((ref, index) => {
       const state = gitlabIssueStates[index];
       if (!state) return;
@@ -246,7 +267,7 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
       looks.set(ref.key, { color: look.color, text: `#${ref.number} · ${t(look.statusKey)}` });
     });
     return looks;
-  }, [gitlabChangeSummaries, gitlabIssueStates, linkedGitLabChanges, linkedGitLabIssues, linkedIssueRefs, linkedIssueStates, linkedLinearIdentifiers, linkedLinearStates, linkedPrSummaries, t]);
+  }, [branchPrSummary, gitlabChangeSummaries, gitlabIssueStates, linkedGitLabChanges, linkedGitLabIssues, linkedIssueRefs, linkedIssueStates, linkedLinearIdentifiers, linkedLinearStates, linkedPrSummaries, linkedPrs, t]);
   const openTrackerItem = useOpenTrackerItem();
   // Connected servers only. A disabled server contributes nothing to the
   // context, so counting it here contradicts the MCP section right above,

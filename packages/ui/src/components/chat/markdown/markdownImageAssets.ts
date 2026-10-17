@@ -1,4 +1,3 @@
-import { spaceApiPath } from '@/lib/spaces/space-route';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeUrlResolver, type RuntimeUrlResolver } from '@/lib/runtime-url';
 import { isFilePathWithinDirectory, toAbsoluteFilePath } from '@/lib/path-utils';
@@ -263,7 +262,7 @@ export const getPreparedMarkdownImageUrl = (
   image: Extract<PreparedMarkdownImage, { status: 'ready' }>,
   directory: string,
 ): string => getRuntimeUrlResolver().authenticatedAsset(
-  spaceApiPath('/api/fs/raw', directory),
+  '/api/fs/raw',
   {
     path: image.path,
     directory,

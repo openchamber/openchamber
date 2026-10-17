@@ -270,13 +270,14 @@ describe('generation lifecycle', () => {
     const paths: string[] = [];
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async (input, init) => {
-      paths.push(new URL(new Request(input, init).url).pathname);
+      const request = new Request(input, init);
+      paths.push(`${new URL(request.url).pathname} ${request.headers.get('x-opencode-directory')}`);
       return Response.json({ text: 'A useful title' });
     };
     configureRuntimeUrlResolver({ apiBaseUrl: 'http://session-title.test' });
     try {
       await generateSessionTitle({ turns, currentTitle: 'Original', directory: '/spaces/a1b2c3d4e5f6/repo', signal: new AbortController().signal });
-      expect(paths).toEqual(['/api/spaces/a1b2c3d4e5f6/small-model/generate']);
+      expect(paths).toEqual([`/api/small-model/generate ${encodeURIComponent('/spaces/a1b2c3d4e5f6/repo')}`]);
     } finally { globalThis.fetch = originalFetch; configureRuntimeUrlResolver({ apiBaseUrl: '' }); }
   });
 

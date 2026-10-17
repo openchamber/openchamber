@@ -8,6 +8,7 @@ import { routingI18n } from './routing.i18n';
 import { pluginPanelI18n } from './plugin-panel.i18n';
 import { surfacePanelI18n } from './surface-panel.i18n';
 import { fileArtifactsI18n } from './file-artifacts.i18n';
+import { fileContentSearchI18n } from './file-content-search.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
@@ -77,6 +78,7 @@ export const dict = {
   ...pluginPanelI18n.tr,
   ...surfacePanelI18n.tr,
   ...fileArtifactsI18n.tr,
+  ...fileContentSearchI18n.tr,
   ...htmlRenderI18n.tr,
   ...usageStatsI18n.tr,
   ...webSearchI18n.tr,
@@ -1900,7 +1902,7 @@ export const dict = {
   'chat.recap.label': 'Özet:',
   'chat.sessionError.title': 'OpenCode bu yanıtı durdurdu',
   'chat.sessionError.noDetails': 'OpenCode ayrıntı bildirmedi. Durum raporu son hataları gösterir.',
-  'chat.sessionError.showStatus': 'OpenCode durumunu göster',
+  'chat.sessionError.showStatus': 'Tanılama zaman çizelgesini göster',
   'chat.sessionError.noReply': 'OpenCode bu mesaja yanıt vermeye başlamadı.',
   'chat.sessionError.interrupted': 'OpenCode bu yanıtı kesti.',
   'chat.longError.expand': 'Hatanın tamamını göster',
@@ -2678,13 +2680,15 @@ export const dict = {
   'commandPalette.footer.navigate': 'gezin',
   'commandPalette.footer.open': 'aç',
   'commandPalette.footer.close': 'kapat',
-  'openCodeStatusDialog.title': 'OpenCode Durumu',
-  'openCodeStatusDialog.description': 'Mevcut OpenCode durumunu ve tanılama bilgilerini inceleyin.',
+  'openCodeStatusDialog.title': 'Tanılama zaman çizelgesi',
+  'openCodeStatusDialog.description': 'Yerel olaylar zaman sırasıyla gösterilir. Özel günlük metinleri ve uzak kaynaklar dahil edilmez.',
+  'openCodeStatusDialog.actions.download': 'Günlüğü indir',
+  'openCodeStatusDialog.toast.collectFailed': 'Tanılama bilgileri toplanamadı',
   'openCodeStatusDialog.actions.copy': 'Kopyala',
   'openCodeStatusDialog.empty.noData': 'Veri yok.',
   'openCodeStatusDialog.toast.copiedTitle': 'Kopyalandı',
-  'openCodeStatusDialog.toast.copiedDescription': 'Durum panoya kopyalandı',
-  'openCodeStatusDialog.toast.copyFailed': 'Durum kopyalanamadı',
+  'openCodeStatusDialog.toast.copiedDescription': 'Tanılama günlüğü panoya kopyalandı',
+  'openCodeStatusDialog.toast.copyFailed': 'Tanılama günlüğü kopyalanamadı',
   'saveProjectPlanDialog.title': 'Proje Planını Kaydet',
   'saveProjectPlanDialog.description': 'Bu planı projenize Markdown dosyası olarak kaydedin.',
   'saveProjectPlanDialog.field.title': 'Başlık',
@@ -3476,7 +3480,7 @@ export const dict = {
   'chat.textSelection.comment.save': 'Yorumu kaydet',
   'chat.textSelection.comment.attachFailed': 'Yorum eklenemedi. Yorumu kısaltın veya ekli diğer bağlamı kaldırıp tekrar deneyin.',
   'commandPalette.item.cycleTheme': 'Temayı değiştir',
-  'commandPalette.item.showOpenCodeStatus': 'OpenCode durumunu göster',
+  'commandPalette.item.showOpenCodeStatus': 'Tanılama zaman çizelgesini göster',
   'commandPalette.item.restartOpenCode': 'OpenCode\'u yeniden başlat',
   'commandPalette.item.toggleMemoryDebug': 'Memory debug panelini aç/kapat',
   'commandPalette.item.pinSession': 'Session\'ı sabitle/kaldır',

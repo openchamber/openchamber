@@ -17,7 +17,7 @@ import { openRuntimeWebSocket } from '@/lib/relay/runtime-socket';
 import type { RelayTunnelWebSocket } from '@/lib/relay/tunnel-client';
 import { getRuntimeApiBaseUrl, getRuntimeKey, isSshForwardedRuntime, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { getRuntimeUrlResolver } from '@/lib/runtime-url';
-import { spaceIdOfDirectory } from '@/lib/spaces/space-route';
+import { spaceIdOfDirectory, spaceRootDirectory } from '@/lib/spaces/space-route';
 import { DEV_TUNNEL_HOSTNAME, isLoopbackUrl } from './url';
 
 type TunnelResult = { localPort: number };
@@ -29,9 +29,11 @@ const originByLocalPort = new Map<number, string>();
 const relaySockets = new Map<string, RelayTunnelWebSocket>();
 const pendingRelayConnections = new Set<string>();
 
-/** The host's tunnel, or the one the host forwards into an isolated space. */
-const tunnelPath = (spaceId: string | null): string => (
-  spaceId ? `/api/spaces/${spaceId}/dev-tunnel` : '/api/dev-tunnel'
+/** The host's tunnel, or the one the host forwards into the isolated space whose root it names. */
+const tunnelPath = (spaceId: string | null, port: number): string => (
+  spaceId
+    ? `/api/dev-tunnel?port=${port}&directory=${encodeURIComponent(spaceRootDirectory(spaceId))}`
+    : `/api/dev-tunnel?port=${port}`
 );
 
 const openRelayConnection = async (connectionId: string, remotePort: number, spaceId: string | null): Promise<void> => {
@@ -42,7 +44,7 @@ const openRelayConnection = async (connectionId: string, remotePort: number, spa
   }
   await refreshRuntimeUrlAuthToken(getRuntimeApiBaseUrl());
   if (!pendingRelayConnections.has(connectionId) || !getActiveRelayTunnel()) return;
-  const url = getRuntimeUrlResolver().websocket(`${tunnelPath(spaceId)}?port=${remotePort}`);
+  const url = getRuntimeUrlResolver().websocket(tunnelPath(spaceId, remotePort));
   const socket = openRuntimeWebSocket(url);
   relaySockets.set(connectionId, socket);
   socket.binaryType = 'arraybuffer';

@@ -1,4 +1,6 @@
-import type { PermissionMode } from '@/stores/utils/permissionAutoAccept';
+import { permissionModeForNewSession, type PermissionMode } from '@/stores/utils/permissionAutoAccept';
+import { isSpaceDirectory } from '@/lib/spaces/space-route';
+import { useUIStore } from '@/stores/useUIStore';
 import type { Message, Part, Session } from '@/lib/opencode/model';
 import { opencodeClient, type SkillMentions } from '@/lib/opencode/client';
 import * as sessionActions from '@/sync/session-actions';
@@ -221,10 +223,18 @@ export async function startBtwSession(input: StartBtwInput): Promise<Session> {
         selections.saveAgentModelForSession(forked.id, input.agent, input.providerID, input.modelID);
         selections.saveAgentModelVariantForSession(forked.id, input.agent, input.providerID, input.modelID, input.variant);
       }
-      if (input.permissionMode !== undefined) {
+      const permissionMode = permissionModeForNewSession(
+        input.permissionMode,
+        isSpaceDirectory(sessionDirectory),
+        useUIStore.getState().permissionDefaultMode,
+      );
+      if (permissionMode !== undefined) {
         const { usePermissionStore } = await import('@/stores/permissionStore');
         if (getRuntimeKey() !== expectedRuntimeKey) throw new Error('runtime changed');
-        await usePermissionStore.getState().setSessionMode(forked.id, input.permissionMode);
+        const write = usePermissionStore.getState().setSessionMode(forked.id, permissionMode);
+        // A mode the user picked must hold; the Settings default is best-effort, as for a draft.
+        if (input.permissionMode !== undefined) await write;
+        else await write.catch((error) => console.warn('Failed to apply the default permission mode to the btw fork:', error));
         if (getRuntimeKey() !== expectedRuntimeKey) throw new Error('runtime changed');
       }
       // Locate the inherited-history boundary by identity, not by ID ordering.

@@ -8,6 +8,7 @@ import { routingI18n } from './routing.i18n';
 import { pluginPanelI18n } from './plugin-panel.i18n';
 import { surfacePanelI18n } from './surface-panel.i18n';
 import { fileArtifactsI18n } from './file-artifacts.i18n';
+import { fileContentSearchI18n } from './file-content-search.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
@@ -138,6 +139,7 @@ export const dict = {
   ...pluginPanelI18n.nl,
   ...surfacePanelI18n.nl,
   ...fileArtifactsI18n.nl,
+  ...fileContentSearchI18n.nl,
   ...htmlRenderI18n.nl,
   ...usageStatsI18n.nl,
   ...webSearchI18n.nl,
@@ -2033,7 +2035,7 @@ export const dict = {
   'chat.recap.label': 'Samenvatting:',
   'chat.sessionError.title': 'OpenCode heeft dit antwoord gestopt',
   'chat.sessionError.noDetails': 'OpenCode heeft geen details gemeld. Het statusrapport bevat recente fouten.',
-  'chat.sessionError.showStatus': 'OpenCode-status tonen',
+  'chat.sessionError.showStatus': 'Diagnostische tijdlijn tonen',
   'chat.sessionError.noReply': 'OpenCode is geen antwoord op dit bericht begonnen.',
   'chat.sessionError.interrupted': 'OpenCode heeft dit antwoord onderbroken.',
   'chat.longError.expand': 'Volledige fout tonen',
@@ -2807,7 +2809,7 @@ export const dict = {
   'commandPalette.item.showContextUsage': 'Contextgebruik tonen',
   'commandPalette.item.toggleTerminal': 'Terminal tonen of verbergen',
   'commandPalette.item.cycleTheme': 'Thema wisselen',
-  'commandPalette.item.showOpenCodeStatus': 'OpenCode-status tonen',
+  'commandPalette.item.showOpenCodeStatus': 'Diagnostische tijdlijn tonen',
   'commandPalette.item.restartOpenCode': 'OpenCode herstarten',
   'commandPalette.item.toggleMemoryDebug': 'Debugpaneel voor geheugen tonen of verbergen',
   'commandPalette.item.pinSession': 'Sessie vastzetten of opheffen',
@@ -2860,13 +2862,15 @@ export const dict = {
   'commandPalette.footer.navigate': 'navigeren',
   'commandPalette.footer.open': 'openen',
   'commandPalette.footer.close': 'sluiten',
-  'openCodeStatusDialog.title': 'OpenCode-status',
-  'openCodeStatusDialog.description': 'Bekijk de huidige OpenCode-status en diagnostiek.',
+  'openCodeStatusDialog.title': 'Diagnostische tijdlijn',
+  'openCodeStatusDialog.description': 'Lokale gebeurtenissen in chronologische volgorde. Privélogtekst en externe bronnen worden niet opgenomen.',
+  'openCodeStatusDialog.actions.download': 'Logbestand downloaden',
+  'openCodeStatusDialog.toast.collectFailed': 'Kan diagnostische gegevens niet verzamelen',
   'openCodeStatusDialog.actions.copy': 'Kopiëren',
   'openCodeStatusDialog.empty.noData': 'Geen gegevens.',
   'openCodeStatusDialog.toast.copiedTitle': 'Gekopieerd',
-  'openCodeStatusDialog.toast.copiedDescription': 'Status naar klembord gekopieerd',
-  'openCodeStatusDialog.toast.copyFailed': 'Kan status niet kopiëren',
+  'openCodeStatusDialog.toast.copiedDescription': 'Diagnostisch logbestand naar klembord gekopieerd',
+  'openCodeStatusDialog.toast.copyFailed': 'Kan diagnostisch logbestand niet kopiëren',
   'saveProjectPlanDialog.title': 'Projectplan opslaan',
   'saveProjectPlanDialog.description': 'Sla dit plan op in uw project als Markdown-bestand.',
   'saveProjectPlanDialog.field.title': 'Titel',

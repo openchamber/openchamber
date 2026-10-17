@@ -19,6 +19,7 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS as DndCSS } from '@dnd-kit/utilities';
 import { ContextMenu } from '@base-ui/react/context-menu';
+import { ContextMenu as ContextMenuRoot } from '@/components/ui/context-menu';
 import type { Session } from '@/lib/opencode/model';
 
 import {
@@ -157,7 +158,7 @@ const SessionTabItem: React.FC<{
       {...attributes}
       {...listeners}
     >
-      <ContextMenu.Root
+      <ContextMenuRoot
         open={contextMenuOpen}
         onOpenChange={setContextMenuOpen}
         onOpenChangeComplete={(open) => onMenuOpenChangeComplete?.(open)}
@@ -293,7 +294,7 @@ const SessionTabItem: React.FC<{
             </ContextMenu.Popup>
           </ContextMenu.Positioner>
         </ContextMenu.Portal>
-      </ContextMenu.Root>
+      </ContextMenuRoot>
     </div>
   );
 };

@@ -27,6 +27,7 @@ import { spaceProjectPath } from './layout.js';
 import { createSpaceManager } from './manager.js';
 import { createSpaceRecords } from './space-records.js';
 import { createSpaceEventSources } from './space-events.js';
+import { createSpaceFetch } from './space-fetch.js';
 import { createSpaceOpenCode } from './space-opencode.js';
 import { createSpaceSessionIndex, mergeSessionLists } from './space-sessions.js';
 import { createSpaceWebSocketForwarder } from './websocket.js';
@@ -411,6 +412,8 @@ export function createSpacesHost({
     dispatcher,
     index,
     journey,
+    /** A `fetch` for the host's own reads of one space's sessions, for its notifications. */
+    openCodeFetchFor: createSpaceFetch({ requestInside: dispatcher.requestInside }),
     /** The places a space can be made on, for the funnel. */
     places: () => registry.list(),
     /** What gets Docker going on this computer, and the action that does it, for the local place. */
@@ -449,10 +452,10 @@ export function createSpacesHost({
     /** For the proxy: the merged session list, or the host's own when no space exists. */
     mergeSessionList,
     /** For the body parsers: a request to a space keeps its body for the space. */
-    skipsBodyParsing: (req) => dispatcher.isSpaceRequestPath(req.path),
+    skipsBodyParsing: (req) => dispatcher.isSpaceRequest(req),
     /** For the directory gate: the reason a directory is refused on the host, or null. */
     refuseDirectory: (candidate) => (dispatcher.isSpaceDirectory(candidate)
-      ? 'A directory under /spaces/ belongs to an isolated space and is addressed as /api/spaces/<id>/... only'
+      ? 'A directory under /spaces/ belongs to an isolated space and is named in the query or the directory header of a request to it'
       : null),
     close: () => {
       if (followTimer !== null) clearTimer(followTimer);

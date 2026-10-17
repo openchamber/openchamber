@@ -9,6 +9,7 @@ import { routingI18n } from './routing.i18n';
 import { pluginPanelI18n } from './plugin-panel.i18n';
 import { surfacePanelI18n } from './surface-panel.i18n';
 import { fileArtifactsI18n } from './file-artifacts.i18n';
+import { fileContentSearchI18n } from './file-content-search.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
@@ -149,6 +150,7 @@ export const dict: Record<I18nKey, string> = {
   ...pluginPanelI18n.es,
   ...surfacePanelI18n.es,
   ...fileArtifactsI18n.es,
+  ...fileContentSearchI18n.es,
   ...htmlRenderI18n.es,
   ...usageStatsI18n.es,
   ...webSearchI18n.es,
@@ -1999,7 +2001,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.recap.label": "Resumen:",
   "chat.sessionError.title": "OpenCode detuvo esta respuesta",
   "chat.sessionError.noDetails": "OpenCode no informó detalles. El informe de estado muestra los errores recientes.",
-  "chat.sessionError.showStatus": "Mostrar estado de OpenCode",
+  "chat.sessionError.showStatus": "Mostrar cronología de diagnósticos",
   "chat.sessionError.noReply": "OpenCode no comenzó una respuesta a este mensaje.",
   "chat.sessionError.interrupted": 'OpenCode interrumpió esta respuesta.',
   'chat.longError.expand': 'Mostrar el error completo',
@@ -2761,7 +2763,7 @@ export const dict: Record<I18nKey, string> = {
   "commandPalette.item.showContextUsage": "Mostrar uso del contexto",
   "commandPalette.item.toggleTerminal": "Mostrar u ocultar terminal",
   "commandPalette.item.cycleTheme": "Cambiar tema",
-  "commandPalette.item.showOpenCodeStatus": "Mostrar estado de OpenCode",
+  "commandPalette.item.showOpenCodeStatus": "Mostrar cronología de diagnósticos",
   "commandPalette.item.restartOpenCode": "Reiniciar OpenCode",
   "commandPalette.item.toggleMemoryDebug": "Alternar panel de depuración de memoria",
   "commandPalette.item.pinSession": "Anclar o desanclar sesión",
@@ -2814,13 +2816,15 @@ export const dict: Record<I18nKey, string> = {
   "commandPalette.footer.navigate": "navegar",
   "commandPalette.footer.open": "abrir",
   "commandPalette.footer.close": "cerrar",
-  "openCodeStatusDialog.title": "Estado de OpenCode",
-  "openCodeStatusDialog.description": "Inspecciona el estado actual de OpenCode y diagnósticos.",
+  "openCodeStatusDialog.title": "Cronología de diagnósticos",
+  "openCodeStatusDialog.description": "Eventos locales ordenados por hora. Se excluyen los textos privados y las fuentes remotas.",
+  "openCodeStatusDialog.actions.download": "Descargar registro",
+  "openCodeStatusDialog.toast.collectFailed": "No se pudieron recopilar los diagnósticos",
   "openCodeStatusDialog.actions.copy": "Copiar",
   "openCodeStatusDialog.empty.noData": "No hay datos.",
   "openCodeStatusDialog.toast.copiedTitle": "Copiado",
-  "openCodeStatusDialog.toast.copiedDescription": "Estado copiado al portapapeles",
-  "openCodeStatusDialog.toast.copyFailed": "No se pudo copiar el estado",
+  "openCodeStatusDialog.toast.copiedDescription": "Registro de diagnóstico copiado al portapapeles",
+  "openCodeStatusDialog.toast.copyFailed": "No se pudo copiar el registro de diagnóstico",
   "saveProjectPlanDialog.title": "Guardar plan del proyecto",
   "saveProjectPlanDialog.description": "Guarda este plan en tu proyecto como un archivo Markdown.",
   "saveProjectPlanDialog.field.title": "Título",

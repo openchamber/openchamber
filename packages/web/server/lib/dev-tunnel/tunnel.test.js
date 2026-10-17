@@ -175,9 +175,9 @@ describe('dev tunnel end to end', () => {
     expect(second.reused).toBe(true);
   });
 
-  test('a space tunnel dials the space prefix on the host, and is a tunnel of its own', async () => {
-    // The host forwards `/api/spaces/<id>/dev-tunnel` into the space; what matters
-    // here is that the client asks for exactly that path, under its own key.
+  test('a space tunnel names the space\'s root on the host, and is a tunnel of its own', async () => {
+    // The host forwards a tunnel that names `/spaces/<id>` into the space; what matters
+    // here is that the client asks for exactly that, under its own key.
     const paths = [];
     const server = http.createServer((_req, res) => res.end('host'));
     const sockets = trackSockets(server);
@@ -202,7 +202,7 @@ describe('dev tunnel end to end', () => {
 
     await expect(httpGet(space.localPort, '/')).rejects.toThrow();
     await expect(httpGet(host.localPort, '/')).rejects.toThrow();
-    expect(paths).toEqual(['/api/spaces/84369ed6edda/dev-tunnel?port=4321', '/api/dev-tunnel?port=4321']);
+    expect(paths).toEqual([`/api/dev-tunnel?port=4321&directory=${encodeURIComponent('/spaces/84369ed6edda')}`, '/api/dev-tunnel?port=4321']);
 
     expect(client.close({ baseUrl, port: 4321, spaceId: '84369ed6edda' })).toBe(true);
     expect(client.list()).toEqual([{ localPort: host.localPort, remotePort: 4321, baseUrl, spaceId: null }]);

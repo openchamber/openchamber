@@ -9,6 +9,7 @@ import { routingI18n } from './routing.i18n';
 import { pluginPanelI18n } from './plugin-panel.i18n';
 import { surfacePanelI18n } from './surface-panel.i18n';
 import { fileArtifactsI18n } from './file-artifacts.i18n';
+import { fileContentSearchI18n } from './file-content-search.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
@@ -149,6 +150,7 @@ export const dict: Record<I18nKey, string> = {
   ...pluginPanelI18n.uk,
   ...surfacePanelI18n.uk,
   ...fileArtifactsI18n.uk,
+  ...fileContentSearchI18n.uk,
   ...htmlRenderI18n.uk,
   ...usageStatsI18n.uk,
   ...webSearchI18n.uk,
@@ -1999,7 +2001,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.recap.label": "Підсумок:",
   "chat.sessionError.title": "OpenCode зупинив цю відповідь",
   "chat.sessionError.noDetails": "OpenCode не повідомив деталей. Звіт про стан показує останні помилки.",
-  "chat.sessionError.showStatus": "Показати статус OpenCode",
+  "chat.sessionError.showStatus": "Показати хронологію діагностики",
   "chat.sessionError.noReply": "OpenCode не почав відповідь на це повідомлення.",
   "chat.sessionError.interrupted": 'OpenCode перервав цю відповідь.',
   'chat.longError.expand': 'Показати помилку повністю',
@@ -2761,7 +2763,7 @@ export const dict: Record<I18nKey, string> = {
   "commandPalette.item.showContextUsage": "Показати використання контексту",
   "commandPalette.item.toggleTerminal": "Перемкнути термінал",
   "commandPalette.item.cycleTheme": "Перемкнути тему",
-  "commandPalette.item.showOpenCodeStatus": "Показати статус OpenCode",
+  "commandPalette.item.showOpenCodeStatus": "Показати хронологію діагностики",
   "commandPalette.item.restartOpenCode": "Перезапустити OpenCode",
   "commandPalette.item.toggleMemoryDebug": "Показати/сховати панель memory debug",
   "commandPalette.item.pinSession": "Прикріпити або відкріпити сесію",
@@ -2814,13 +2816,15 @@ export const dict: Record<I18nKey, string> = {
   "commandPalette.footer.navigate": "навігація",
   "commandPalette.footer.open": "відкрити",
   "commandPalette.footer.close": "закрити",
-  "openCodeStatusDialog.title": "Статус OpenCode",
-  "openCodeStatusDialog.description": "Перегляньте поточний стан OpenCode і діагностику.",
+  "openCodeStatusDialog.title": "Хронологія діагностики",
+  "openCodeStatusDialog.description": "Локальні події за часом. Приватний текст логів і віддалені джерела не включено.",
+  "openCodeStatusDialog.actions.download": "Завантажити лог",
+  "openCodeStatusDialog.toast.collectFailed": "Не вдалося зібрати діагностику",
   "openCodeStatusDialog.actions.copy": "Копіювати",
   "openCodeStatusDialog.empty.noData": "Немає даних.",
   "openCodeStatusDialog.toast.copiedTitle": "Скопійовано",
-  "openCodeStatusDialog.toast.copiedDescription": "Статус скопійовано в буфер обміну",
-  "openCodeStatusDialog.toast.copyFailed": "Не вдалося скопіювати статус",
+  "openCodeStatusDialog.toast.copiedDescription": "Діагностичний лог скопійовано в буфер обміну",
+  "openCodeStatusDialog.toast.copyFailed": "Не вдалося скопіювати діагностичний лог",
   "saveProjectPlanDialog.title": "Зберегти план проєкту",
   "saveProjectPlanDialog.description": "Збережіть цей план у своєму проєкті як файл Markdown.",
   "saveProjectPlanDialog.field.title": "Назва",

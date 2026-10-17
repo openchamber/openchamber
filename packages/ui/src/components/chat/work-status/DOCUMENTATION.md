@@ -114,7 +114,7 @@ which requests only providers enabled for this panel.
 | Subagents | child sessions from `useAllLiveSessions` (`parentID`) + `useAllSessionStatuses`; per-row cost from `computeRollup`'s `perChildCost` (each child's own subtree total, so nested subagent-of-subagent cost rolls up under its immediate parent row) | |
 | Subagent blockers | directory `permission` / `question` maps | one subscription covers every child |
 | Usage | `components/usage/usageGroups.ts` over `useQuotaStore` | grouping shared with the mobile popover; presentation is not |
-| Linked threads | `lib/linkedIssues.ts` over session metadata | written by the flows that attach an issue or PR |
+| Linked threads | `lib/linkedIssues.ts` over session metadata; state from tracked items | written by the flows that attach an issue or PR; a linked PR that is also the checked-out branch's PR shows the branch summary, as its sidebar row does |
 | Turn stats | `telemetry.ts` over `useSessionMessageRecords` | computed only while expanded and authoritatively idle; either rate above 5,000 tok/s is reported as unknown (see the two-rate description below) |
 | Goal | `useSessionGoal` | respects the Settings toggle |
 | MCP | `useMcpStore` | connect/disconnect reuses the dropdown's actions |

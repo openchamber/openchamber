@@ -213,6 +213,12 @@ interface HtmlRenderFrameProps {
  * frame takes the height the page reports, so the page scrolls with the chat;
  * full screen and download sit in the corner.
  */
+// Its own component: the blink re-renders this dot once a second, not the page around it.
+function WaitingDot() {
+    const blink = useWaitingBlink(true);
+    return <span aria-hidden="true" className={cn('size-1.5 shrink-0 rounded-full bg-[var(--primary-base)]', blink)} />;
+}
+
 function HtmlRenderFrame({ part, html, title, ask }: HtmlRenderFrameProps) {
     const { t } = useI18n();
     const partId = part.id;
@@ -285,7 +291,6 @@ function HtmlRenderFrame({ part, html, title, ask }: HtmlRenderFrameProps) {
                 ? t('chat.htmlRender.answeredInChat')
                 : ask.kind === 'unanswered' ? t('chat.htmlRender.unanswered') : null;
     const waiting = ask.kind === 'waiting' && answeredSummary === undefined;
-    const blink = useWaitingBlink(waiting);
 
     return (
         <div className="my-2">
@@ -337,9 +342,7 @@ function HtmlRenderFrame({ part, html, title, ask }: HtmlRenderFrameProps) {
         </div>
         {status ? (
             <div className="mt-1 flex items-center gap-1.5 typography-meta text-muted-foreground" data-html-render-status={ask.kind}>
-                {waiting ? (
-                    <span aria-hidden="true" className={cn('size-1.5 shrink-0 rounded-full bg-[var(--primary-base)]', blink)} />
-                ) : null}
+                {waiting ? <WaitingDot /> : null}
                 <span className="min-w-0 truncate" title={status}>{status}</span>
             </div>
         ) : null}

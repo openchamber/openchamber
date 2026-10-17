@@ -98,7 +98,7 @@ Motion that can stay on screen for minutes follows the state it shows:
 - **A spinner that lasts seconds** (a button after a click, a quick load, refresh) keeps `animate-spin`.
 - **Hidden stops.** A surface kept mounted while hidden wraps its content in `PauseClock` (`components/ui/pause-clock.tsx`); the context panel's zones already do. An `inert` subtree pauses its CSS animations (`index.css`).
 
-`Spinner`, `useWaitingBlink`, `BusyDots` and live counters (`useDurationTickerNow`) share one clock (`hooks/useDurationTicker.ts`): a page draws four frames a second while a spinner shows and one otherwise, however many indicators are on screen. `lib/infiniteAnimations.test.ts` fails on any new infinite CSS animation outside the short ones it lists. The cost behind these rules is in `performance-engineering`, "Motion That Stays On Screen".
+`Spinner`, `useWaitingBlink`, `BusyDots` and live counters (`useDurationTickerNow`) share one clock (`hooks/useDurationTicker.ts`): a page draws four frames a second while a spinner shows and one otherwise, however many indicators are on screen. Each tick re-renders the component that calls the hook, so it goes in the indicator itself, never in the page around it (`performance-engineering`, "Motion That Stays On Screen"). `lib/infiniteAnimations.test.ts` fails on any new infinite CSS animation outside the short ones it lists. The cost behind these rules is in `performance-engineering`, "Motion That Stays On Screen".
 
 For any other technique, load `performance-engineering` and `scripts/perf/DOCUMENTATION.md`, measure it with `bun run profile:animation`, and add a fixture variant when needed. This skill owns animation styling; `performance-engineering` owns performance evidence.
 

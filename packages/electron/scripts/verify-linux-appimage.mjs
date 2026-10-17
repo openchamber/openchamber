@@ -118,6 +118,7 @@ export const verifyExtractedPayload = ({
   if (actualVersion !== expectedOpenCodeVersion) {
     throw new Error(`OpenCode CLI version mismatch: expected ${expectedOpenCodeVersion}, got ${actualVersion || '(empty)'}`);
   }
+  assertElfArchitecture(path.join(root, 'resources', 'ripgrep', 'rg'), targetArchitecture, 'ripgrep');
 
   const unpackedModules = path.join(root, 'resources', 'app.asar.unpacked', 'node_modules');
   if (!fs.existsSync(unpackedModules)) throw new Error(`Missing unpacked native modules: ${unpackedModules}`);

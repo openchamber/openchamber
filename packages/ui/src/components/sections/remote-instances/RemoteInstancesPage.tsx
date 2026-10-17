@@ -1129,11 +1129,12 @@ export const RemoteInstancesPage: React.FC = () => {
 
 
   const status = selectedId ? statusesById[selectedId] : null;
-  // Ages the status line once a second, on the shared 1 s tick.
-  const clockMs = useDurationTickerNow(Boolean(status));
   const statusPhase = status?.phase;
   const isReady = statusPhase === 'ready';
   const isReconnecting = statusPhase === 'degraded';
+  // Only a reconnect needs the clock: it reads as stuck after 12 s. Ticking
+  // whenever a status exists re-rendered this whole page every second.
+  const clockMs = useDurationTickerNow(isReconnecting);
   const isConnecting = isConnectingPhase(statusPhase);
   const isBusy = isConnecting || isReconnecting;
   const canDisconnect = isReady || isBusy;

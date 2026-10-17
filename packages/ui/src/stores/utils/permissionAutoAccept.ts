@@ -30,6 +30,18 @@ export const nextPermissionMode = (mode: PermissionMode, safetyAvailable: boolea
   return "ask";
 };
 
+/**
+ * The mode the UI writes onto a session it has just created: the user's own
+ * choice, else, in an isolated space, the Settings default the composer showed.
+ * The host's server writes that default itself when the session is created;
+ * the server inside a space has no such setting. `undefined` writes nothing.
+ */
+export const permissionModeForNewSession = (
+  choice: PermissionMode | undefined,
+  inSpace: boolean,
+  defaultMode: PermissionMode,
+): PermissionMode | undefined => choice ?? (inSpace && defaultMode !== "ask" ? defaultMode : undefined);
+
 export type PermissionPolicySnapshot = {
   modes: PermissionModeMap;
   revision?: number;

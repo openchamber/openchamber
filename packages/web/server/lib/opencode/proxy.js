@@ -13,6 +13,7 @@ import { DEFAULT_UPSTREAM_STALL_TIMEOUT_MS } from '../event-stream/upstream-read
 import { recordStartupPerformance } from './startup-performance.js';
 import { getWorktreeBootstrapStatus } from '../git/service.js';
 import { PART_SHELLS_HEADER, parsePartShellsHeader, shellMessagePage } from './message-shells.js';
+import { diagnosticApiRoute, diagnosticErrorMessage } from '../diagnostics/vocabulary.js';
 
 const DEFAULT_SSE_HEARTBEAT_INTERVAL_MS = 20_000;
 
@@ -34,6 +35,33 @@ const OPENCODE_AGENT_OPTIONS = {
   maxSockets: Infinity,
   maxFreeSockets: OPENCODE_AGENT_MAX_FREE_SOCKETS,
   timeout: OPENCODE_AGENT_IDLE_TIMEOUT_MS,
+};
+
+const DIAGNOSTIC_PROXY_ERROR_CLASSES = new Map([
+  ['ECONNREFUSED', 'connection_refused'],
+  ['ECONNRESET', 'connection_reset'],
+  ['ETIMEDOUT', 'timeout'],
+  ['ESOCKETTIMEDOUT', 'timeout'],
+  ['ENOTFOUND', 'dns_failed'],
+  ['EAI_AGAIN', 'dns_failed'],
+]);
+
+const formatProxyFailure = (req, handler, error, timedOut = false) => {
+  const method = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(req?.method) ? req.method : 'OTHER';
+  let route = '/api/other';
+  try {
+    const mapped = diagnosticApiRoute(new URL(req?.originalUrl || req?.url, 'http://localhost').pathname);
+    if (mapped !== '/other') route = mapped;
+  } catch { /* Never use a malformed request URL as diagnostic text. */ }
+  let failureClass = timedOut ? 'timeout' : 'error';
+  let message = 'unavailable';
+  let cause = null;
+  try {
+    if (!timedOut) failureClass = DIAGNOSTIC_PROXY_ERROR_CLASSES.get(error?.code) ?? DIAGNOSTIC_PROXY_ERROR_CLASSES.get(error?.cause?.code) ?? 'error';
+    message = diagnosticErrorMessage(error?.message) ?? 'unavailable';
+    cause = diagnosticErrorMessage(error?.cause?.message);
+  } catch { /* Diagnostics must not prevent an upstream error response. */ }
+  return `method=${method} route=${route} function=${handler} class=${failureClass} message="${message}"${cause && cause !== message ? ` cause="${cause}"` : ''}`;
 };
 
 const isHttpsProxyTarget = (target) => {
@@ -716,7 +744,7 @@ export const registerOpenCodeProxy = (app, deps) => {
         }
         return;
       }
-      console.error('[proxy] OpenCode SSE proxy error:', error?.message ?? error);
+      console.error(`[proxy] OpenCode proxy error: ${formatProxyFailure(req, 'forwardSseRequest', error)}`);
       if (!res.headersSent) {
         res.status(503).json({ error: 'OpenCode service unavailable' });
       } else {
@@ -787,7 +815,7 @@ export const registerOpenCodeProxy = (app, deps) => {
     return canonicalizeDirectoryQuery(requestUrl);
   };
 
-  const forwardSanitizedSessionListRequest = async (req, res, next, logLabel) => {
+  const forwardSanitizedSessionListRequest = async (req, res, next) => {
     try {
       const upstreamPath = await getRequestUpstreamPath(req);
       const result = await fetchSessionListPayload(upstreamPath, { req });
@@ -819,7 +847,7 @@ export const registerOpenCodeProxy = (app, deps) => {
       if (isAbortError(error)) {
         return;
       }
-      console.error(`[proxy] OpenCode ${logLabel} proxy error:`, error?.message ?? error);
+      console.error(`[proxy] OpenCode proxy error: ${formatProxyFailure(req, 'forwardSanitizedSessionListRequest', error)}`);
       if (!res.headersSent) {
         res.status(503).json({ error: 'OpenCode service unavailable' });
         return;
@@ -946,12 +974,12 @@ export const registerOpenCodeProxy = (app, deps) => {
 
   // V2 lists sessions across directories on every platform and owns pagination.
   app.get('/api/session', (req, res, next) => {
-    return forwardSanitizedSessionListRequest(req, res, next, 'session.list');
+    return forwardSanitizedSessionListRequest(req, res, next);
   });
 
   // One session: the same overlay, so a detail read agrees with the list it
   // came from. Everything else about the record is forwarded untouched.
-  app.get('/api/session/:sessionID', async (req, res, next) => {
+  app.get('/api/session/:sessionID', async function forwardSessionGetRequest(req, res, next) {
     if (typeof getArchivedSessions !== 'function' && typeof getStoredSessionMetadata !== 'function') return next();
     try {
       const upstreamPath = await getRequestUpstreamPath(req);
@@ -980,7 +1008,7 @@ export const registerOpenCodeProxy = (app, deps) => {
       res.json(record.data && typeof record.data === 'object' ? { ...record, data: overlaid } : overlaid);
     } catch (error) {
       if (isAbortError(error)) return;
-      console.error('[proxy] OpenCode session.get proxy error:', error?.message ?? error);
+      console.error(`[proxy] OpenCode proxy error: ${formatProxyFailure(req, 'forwardSessionGetRequest', error)}`);
       if (!res.headersSent) {
         res.status(503).json({ error: 'OpenCode service unavailable' });
         return;
@@ -991,7 +1019,7 @@ export const registerOpenCodeProxy = (app, deps) => {
 
   // A client that asks for it gets message pages with finished tool results
   // shelled (see message-shells.js); anyone else reaches OpenCode untouched.
-  app.get('/api/session/:sessionID/message', async (req, res, next) => {
+  app.get('/api/session/:sessionID/message', async function forwardMessageListRequest(req, res, next) {
     const keepWhole = parsePartShellsHeader(req.get(PART_SHELLS_HEADER));
     if (!keepWhole) return next();
     try {
@@ -1007,7 +1035,7 @@ export const registerOpenCodeProxy = (app, deps) => {
       res.json(shellMessagePage(result.payload, keepWhole));
     } catch (error) {
       if (isAbortError(error)) return;
-      console.error('[proxy] OpenCode message.list proxy error:', error?.message ?? error);
+      console.error(`[proxy] OpenCode proxy error: ${formatProxyFailure(req, 'forwardMessageListRequest', error)}`);
       if (!res.headersSent) {
         res.status(503).json({ error: 'OpenCode service unavailable' });
         return;
@@ -1082,7 +1110,7 @@ export const registerOpenCodeProxy = (app, deps) => {
           }
         }
       },
-      error: (err, req, res) => {
+      error: function onApiProxyError(err, req, res) {
         if (
           req?.aborted ||
           res?.writableEnded ||
@@ -1092,7 +1120,7 @@ export const registerOpenCodeProxy = (app, deps) => {
         ) {
           return;
         }
-        console.error('[proxy] OpenCode proxy error:', err.message);
+        console.error(`[proxy] OpenCode proxy error: ${formatProxyFailure(req, 'onApiProxyError', err, Boolean(req?.[PROXY_TIMEOUT_MARKER]))}`);
         if (req?.[PROXY_TIMEOUT_MARKER]) {
           return;
         }

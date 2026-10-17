@@ -21,9 +21,11 @@ Full-screen extension pages are separate from this rail registry. `contributes.p
   `availability: 'has-content'` surfaces (chat) are hidden from the
   rail until a tab of their mode exists, and stay visible for as long as one
   does — they must not disappear while in use.
-- `defaultWidth` is the panel width in px, used until the user resizes that
-  surface (640 for the wide surfaces, 540 for most, 480 for Git; guest panels
-  540). A resize is remembered in px per mode in
+- `width` picks one of two default panel widths, used until the user resizes
+  that surface (`CONTEXT_SURFACE_WIDTHS`): `wide`, 640 px, for code beside the
+  chat (files, diff, terminal, walkthrough), and `regular`, 540 px, for every
+  other surface, guest panels included. Do not add a third size or a
+  per-surface number. A resize is remembered in px per mode in
   `useUIStore.contextPanelByDirectory[dir].widthByMode` and restored on reload.
   The width does not follow the chat area: a sidebar toggle or a window resize
   leaves it alone, and it only narrows when it would leave the chat less than

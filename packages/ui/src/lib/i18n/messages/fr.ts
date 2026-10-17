@@ -8,6 +8,7 @@ import { routingI18n } from './routing.i18n';
 import { pluginPanelI18n } from './plugin-panel.i18n';
 import { surfacePanelI18n } from './surface-panel.i18n';
 import { fileArtifactsI18n } from './file-artifacts.i18n';
+import { fileContentSearchI18n } from './file-content-search.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
@@ -138,6 +139,7 @@ export const dict = {
   ...pluginPanelI18n.fr,
   ...surfacePanelI18n.fr,
   ...fileArtifactsI18n.fr,
+  ...fileContentSearchI18n.fr,
   ...htmlRenderI18n.fr,
   ...usageStatsI18n.fr,
   ...webSearchI18n.fr,
@@ -1769,7 +1771,7 @@ export const dict = {
   'chat.recap.label': 'Récap :',
   'chat.sessionError.title': 'OpenCode a interrompu cette réponse',
   'chat.sessionError.noDetails': 'OpenCode n’a fourni aucun détail. Le rapport d’état affiche les erreurs récentes.',
-  'chat.sessionError.showStatus': 'Afficher le statut OpenCode',
+  'chat.sessionError.showStatus': 'Afficher la chronologie des diagnostics',
   'chat.sessionError.noReply': 'OpenCode n\'a pas commencé de réponse à ce message.',
   'chat.sessionError.interrupted': 'OpenCode a interrompu cette réponse.',
   'chat.longError.expand': 'Afficher l’erreur complète',
@@ -2484,7 +2486,7 @@ export const dict = {
   'commandPalette.item.showContextUsage': 'Afficher l\'utilisation du contexte',
   'commandPalette.item.toggleTerminal': 'Basculer le terminal',
   'commandPalette.item.cycleTheme': 'Changer de thème',
-  'commandPalette.item.showOpenCodeStatus': 'Afficher le statut OpenCode',
+  'commandPalette.item.showOpenCodeStatus': 'Afficher la chronologie des diagnostics',
   'commandPalette.item.restartOpenCode': 'Redémarrer OpenCode',
   'commandPalette.item.toggleMemoryDebug': 'Basculer le panneau de débogage mémoire',
   'commandPalette.item.pinSession': 'Épingler ou désépingler la session',
@@ -2537,13 +2539,15 @@ export const dict = {
   'commandPalette.footer.navigate': 'naviguer',
   'commandPalette.footer.open': 'ouvrir',
   'commandPalette.footer.close': 'fermer',
-  'openCodeStatusDialog.title': 'Statut OpenCode',
-  'openCodeStatusDialog.description': 'Inspectez l’état et les diagnostics actuels du OpenCode.',
+  'openCodeStatusDialog.title': 'Chronologie des diagnostics',
+  'openCodeStatusDialog.description': 'Événements locaux classés par date. Les textes privés et les sources distantes sont exclus.',
+  'openCodeStatusDialog.actions.download': 'Télécharger le journal',
+  'openCodeStatusDialog.toast.collectFailed': 'Impossible de collecter les diagnostics',
   'openCodeStatusDialog.actions.copy': 'Copie',
   'openCodeStatusDialog.empty.noData': 'Aucune donnée.',
   'openCodeStatusDialog.toast.copiedTitle': 'Copié',
-  'openCodeStatusDialog.toast.copiedDescription': 'Statut copié dans le presse-papiers',
-  'openCodeStatusDialog.toast.copyFailed': 'Échec de la copie du statut',
+  'openCodeStatusDialog.toast.copiedDescription': 'Journal de diagnostic copié dans le presse-papiers',
+  'openCodeStatusDialog.toast.copyFailed': 'Impossible de copier le journal de diagnostic',
   'saveProjectPlanDialog.title': 'Enregistrer le plan de projet',
   'saveProjectPlanDialog.description': 'Enregistrez ce plan dans votre projet en tant que fichier Markdown.',
   'saveProjectPlanDialog.field.title': 'Titre',

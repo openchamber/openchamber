@@ -13,6 +13,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import updaterPkg from 'electron-updater';
 import { ElectronSshManager } from './ssh-manager.mjs';
+import { collectLocalFileDiagnostics, collectSshBufferDiagnostics } from '@openchamber/web/server/lib/diagnostics/local-files.js';
 import { replaceFileWithRetry } from './windows-file-replace.mjs';
 import { createTrayController } from './tray.mjs';
 import { applyDevDockIdentity, applyDockBadge } from './dev-dock-identity.mjs';
@@ -2221,23 +2222,16 @@ const getMenuTargetWindow = () => {
 
 const dispatchMenuAction = (action) => {
   const target = getMenuTargetWindow();
-  // Zoom actions are consumed by the renderer's DOM listener. Sending them
-  // through both the IPC bridge and the DOM event would invoke the handler
-  // multiple times because preload fans the IPC event back into both paths.
   if (action === 'zoom-in' || action === 'zoom-out' || action === 'zoom-reset') {
     dispatchDomEventToWindow(target, 'openchamber:zoom', action);
     return;
   }
-  emitToWindow(target, 'openchamber:menu-action', action);
+  // Preload already fans IPC events into both its listeners and the DOM.
+  // Deliver menu actions through one path so a shortcut runs only once.
   dispatchDomEventToWindow(target, 'openchamber:menu-action', action);
 };
 
-// Append-style menu actions must reach the renderer exactly once. Dual IPC+DOM
-// delivery (dispatchMenuAction) would insert the selection twice.
-const dispatchAddSelectionToChat = () => {
-  const target = getMenuTargetWindow();
-  if (target) emitToWindow(target, 'openchamber:menu-action', 'add-selection-to-chat');
-};
+const dispatchAddSelectionToChat = () => dispatchMenuAction('add-selection-to-chat');
 
 // Mini-chat draft windows are not deduplicated, so this must reach the renderer
 // exactly once — emitToWindow alone (no DOM-event double dispatch). The renderer
@@ -2516,10 +2510,8 @@ const applyDesktopQuakeModeShortcut = () => {
 };
 
 const dispatchCheckForUpdates = () => {
+  // Preload dispatches this IPC notification as a DOM event.
   emitToAllWindows('openchamber:check-for-updates');
-  for (const browserWindow of BrowserWindow.getAllWindows()) {
-    dispatchDomEventToWindow(browserWindow, 'openchamber:check-for-updates');
-  }
 };
 
 const reloadMenuTargetWindow = () => {
@@ -4335,6 +4327,17 @@ const closeAllDevTunnels = () => {
 
 const handleInvoke = async (browserWindow, command, args = {}) => {
   switch (command) {
+    case 'desktop_collect_local_diagnostics':
+      {
+        const ssh = collectSshBufferDiagnostics(sshManager.diagnosticLogSnapshots());
+        let files;
+        try {
+          files = await collectLocalFileDiagnostics({ electronLogPath: log.transports.file.getFile().path });
+        } catch {
+          files = { events: [], coverage: [{ source: 'local files', status: 'unavailable' }] };
+        }
+        return { events: [...files.events, ...ssh.events], coverage: [...files.coverage, ...ssh.coverage] };
+      }
     // The page says whether Cmd/Ctrl+W has a tab of its own to close (a file
     // open in Files). The menu decides in this process, so a page that never
     // reports one, older or remote, keeps closing the window as before.

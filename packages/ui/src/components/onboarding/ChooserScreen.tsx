@@ -56,6 +56,12 @@ function InstallCommand({ windows, onCopy, copyTitle }: { windows: boolean; onCo
   );
 }
 
+// Its own component: the blink re-renders this dot once a second, not the whole screen.
+function WatchingDot() {
+  const blink = useWaitingBlink(true);
+  return <span className={cn('absolute inset-0 rounded-full', blink)} style={{ backgroundColor: 'var(--primary-base)' }} />;
+}
+
 export function ChooserScreen({ onCliAvailable, localAvailable = true }: ChooserScreenProps) {
   const { t } = useI18n();
   const [copied, setCopied] = React.useState(false);
@@ -235,7 +241,6 @@ export function ChooserScreen({ onCliAvailable, localAvailable = true }: Chooser
         : '/Users/you/.opencode/bin/opencode';
 
   const showLocal = localAvailable && (!isDesktopApp || activeTab === 'local');
-  const watchingBlink = useWaitingBlink(showLocal);
 
   return (
     <div
@@ -326,10 +331,7 @@ export function ChooserScreen({ onCliAvailable, localAvailable = true }: Chooser
 
             <div className="app-region-no-drag mt-3 flex items-center gap-2.5 px-1" role="status" aria-live="polite">
               <span className="relative inline-flex h-2 w-2 shrink-0" aria-hidden>
-                <span
-                  className={cn('absolute inset-0 rounded-full', watchingBlink)}
-                  style={{ backgroundColor: 'var(--primary-base)' }}
-                />
+                <WatchingDot />
               </span>
               <span className="min-w-0 flex-1 text-xs text-muted-foreground">
                 <span className="text-foreground">{t('onboarding.localSetup.status.watching')}</span>

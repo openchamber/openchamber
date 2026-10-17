@@ -16,7 +16,7 @@ import type { ContextPartMetadata } from "@/lib/messages/contextParts"
 import { create } from "zustand"
 import { isSameModelRef, toModelRef, type Metadata, type ModelRef, type Part, type Session, type TextPart } from "@/lib/opencode/model"
 import type { AttachedFile, SessionWorktreeAttachment } from "@/stores/types/sessionTypes"
-import type { PermissionMode } from "@/stores/utils/permissionAutoAccept"
+import { permissionModeForNewSession, type PermissionMode } from "@/stores/utils/permissionAutoAccept"
 import type { WorktreeMetadata } from "@/types/worktree"
 import { opencodeClient, type SkillMentions } from "@/lib/opencode/client"
 import { buildSkillMentionInstruction } from "@/lib/skillMentionInstruction"
@@ -38,6 +38,7 @@ import { prepareUserMessageResume } from "./user-message-resume"
 import { normalizePath } from "@/lib/pathNormalization"
 import { CHAT_DRAFT_PROJECT_ID, createChatDirectory, deleteChatDirectory, getChatsRootFromDirectory, isChatDirectoryPath, warmChatsRootDirectory } from "@/lib/chatDirectories"
 import { isSpaceArchiveDirectory } from "@/lib/spaces/space-archives"
+import { isSpaceDirectory } from "@/lib/spaces/space-route"
 import { isVSCodeRuntime } from "@/lib/desktop"
 import { composeForkSessionMessage } from "@/lib/messages/executionMeta"
 import { findLatestUserModelChoice } from "@/lib/messages/userModelChoice"
@@ -1110,10 +1111,14 @@ export async function materializeOpenDraftSession(selection: {
 
   store.initializeNewOpenChamberSession(created.id, configState.agents ?? [])
 
-  // Without a choice in the draft the server writes the default mode itself.
-  if (draftPermissionMode) {
+  const permissionMode = permissionModeForNewSession(
+    draftPermissionMode,
+    isSpaceDirectory(createdDirectory),
+    useUIStore.getState().permissionDefaultMode,
+  )
+  if (permissionMode) {
     void import("@/stores/permissionStore")
-      .then(({ usePermissionStore }) => usePermissionStore.getState().setSessionMode(created.id, draftPermissionMode))
+      .then(({ usePermissionStore }) => usePermissionStore.getState().setSessionMode(created.id, permissionMode))
       .catch((error) => {
         console.warn("Failed to apply the draft permission mode to the new session:", error)
       })

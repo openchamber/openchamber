@@ -283,6 +283,13 @@ costs 7 to 8% against 1% for a still page.
   step four times a second, blinks, dots and counters once, on the same
   beats, so the page pays for the fastest indicator on screen, not the sum.
   The styling rules live in `theme-system`, "Animation Contract".
+- **A tick re-renders its subscriber and everything under it.** Call the
+  clock hook in the leaf that shows the change (the dot, the counter), make
+  `active` true only while the readout moves, and keep it out of a page or a
+  preview: a status age on Remote instances re-rendered that whole page every
+  second while any instance was connected. Labels that change by the minute
+  ("5m ago") use `useMinuteTickerNow`, which re-renders only when the minute
+  turns.
 - **Native images count too.** The macOS menu bar icon's breath called
   `setImage` 13 times a second: 6.9 to 7.3% of the Electron main process,
   against 2.6 to 3.1% at five a second (`tray.mjs`).

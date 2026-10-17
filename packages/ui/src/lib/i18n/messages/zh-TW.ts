@@ -9,6 +9,7 @@ import { routingI18n } from './routing.i18n';
 import { pluginPanelI18n } from './plugin-panel.i18n';
 import { surfacePanelI18n } from './surface-panel.i18n';
 import { fileArtifactsI18n } from './file-artifacts.i18n';
+import { fileContentSearchI18n } from './file-content-search.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
@@ -139,6 +140,7 @@ export const dict: Record<I18nKey, string> = {
   ...pluginPanelI18n['zh-TW'],
   ...surfacePanelI18n['zh-TW'],
   ...fileArtifactsI18n['zh-TW'],
+  ...fileContentSearchI18n['zh-TW'],
   ...htmlRenderI18n['zh-TW'],
   ...usageStatsI18n['zh-TW'],
   ...webSearchI18n['zh-TW'],
@@ -2008,7 +2010,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.recap.label': '回顧：',
   'chat.sessionError.title': 'OpenCode 停止了本次回覆',
   'chat.sessionError.noDetails': 'OpenCode 未回報任何詳情。狀態報告會列出最近的錯誤。',
-  'chat.sessionError.showStatus': '顯示 OpenCode 狀態',
+  'chat.sessionError.showStatus': '顯示診斷時間軸',
   'chat.sessionError.noReply': 'OpenCode 沒有開始回覆這則訊息。',
   'chat.sessionError.interrupted': 'OpenCode 中斷了此回覆。',
   'chat.longError.expand': '顯示完整錯誤',
@@ -2782,7 +2784,7 @@ export const dict: Record<I18nKey, string> = {
   'commandPalette.item.showContextUsage': '顯示上下文用量',
   'commandPalette.item.toggleTerminal': '切換終端機',
   'commandPalette.item.cycleTheme': '輪換主題',
-  'commandPalette.item.showOpenCodeStatus': '顯示 OpenCode 狀態',
+  'commandPalette.item.showOpenCodeStatus': '顯示診斷時間軸',
   'commandPalette.item.restartOpenCode': '重新啟動 OpenCode',
   'commandPalette.item.toggleMemoryDebug': '切換記憶體偵錯面板',
   'commandPalette.item.pinSession': '釘選或取消釘選會話',
@@ -2835,13 +2837,15 @@ export const dict: Record<I18nKey, string> = {
   'commandPalette.footer.navigate': '瀏覽',
   'commandPalette.footer.open': '開啟',
   'commandPalette.footer.close': '關閉',
-  'openCodeStatusDialog.title': 'OpenCode 狀態',
-  'openCodeStatusDialog.description': '查看目前 OpenCode 狀態與診斷資訊。',
+  'openCodeStatusDialog.title': '診斷時間軸',
+  'openCodeStatusDialog.description': '依時間順序顯示本機事件。不包含私人日誌內容和遠端來源。',
+  'openCodeStatusDialog.actions.download': '下載日誌',
+  'openCodeStatusDialog.toast.collectFailed': '無法收集診斷資訊',
   'openCodeStatusDialog.actions.copy': '複製',
   'openCodeStatusDialog.empty.noData': '無資料。',
   'openCodeStatusDialog.toast.copiedTitle': '已複製',
-  'openCodeStatusDialog.toast.copiedDescription': '狀態已複製到剪貼簿',
-  'openCodeStatusDialog.toast.copyFailed': '複製狀態失敗',
+  'openCodeStatusDialog.toast.copiedDescription': '診斷日誌已複製到剪貼簿',
+  'openCodeStatusDialog.toast.copyFailed': '複製診斷日誌失敗',
   'saveProjectPlanDialog.title': '儲存專案計畫',
   'saveProjectPlanDialog.description': '將此計畫以 Markdown 檔案儲存到你的專案中。',
   'saveProjectPlanDialog.field.title': '標題',

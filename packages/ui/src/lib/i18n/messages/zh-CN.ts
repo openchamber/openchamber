@@ -9,6 +9,7 @@ import { routingI18n } from './routing.i18n';
 import { pluginPanelI18n } from './plugin-panel.i18n';
 import { surfacePanelI18n } from './surface-panel.i18n';
 import { fileArtifactsI18n } from './file-artifacts.i18n';
+import { fileContentSearchI18n } from './file-content-search.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
@@ -139,6 +140,7 @@ export const dict: Record<I18nKey, string> = {
   ...pluginPanelI18n['zh-CN'],
   ...surfacePanelI18n['zh-CN'],
   ...fileArtifactsI18n['zh-CN'],
+  ...fileContentSearchI18n['zh-CN'],
   ...htmlRenderI18n['zh-CN'],
   ...usageStatsI18n['zh-CN'],
   ...webSearchI18n['zh-CN'],
@@ -1999,7 +2001,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.recap.label': '回顾：',
   'chat.sessionError.title': 'OpenCode 停止了本次回复',
   'chat.sessionError.noDetails': 'OpenCode 未报告任何详情。状态报告会列出最近的错误。',
-  'chat.sessionError.showStatus': '显示 OpenCode 状态',
+  'chat.sessionError.showStatus': '显示诊断时间线',
   'chat.sessionError.noReply': 'OpenCode 没有开始回复这条消息。',
   'chat.sessionError.interrupted': 'OpenCode 中断了此回复。',
   'chat.longError.expand': '显示完整错误',
@@ -2773,7 +2775,7 @@ export const dict: Record<I18nKey, string> = {
   'commandPalette.item.showContextUsage': '显示上下文用量',
   'commandPalette.item.toggleTerminal': '切换终端',
   'commandPalette.item.cycleTheme': '轮换主题',
-  'commandPalette.item.showOpenCodeStatus': '显示 OpenCode 状态',
+  'commandPalette.item.showOpenCodeStatus': '显示诊断时间线',
   'commandPalette.item.restartOpenCode': '重启 OpenCode',
   'commandPalette.item.toggleMemoryDebug': '切换内存调试面板',
   'commandPalette.item.pinSession': '固定或取消固定会话',
@@ -2826,13 +2828,15 @@ export const dict: Record<I18nKey, string> = {
   'commandPalette.footer.navigate': '导航',
   'commandPalette.footer.open': '打开',
   'commandPalette.footer.close': '关闭',
-  'openCodeStatusDialog.title': 'OpenCode 状态',
-  'openCodeStatusDialog.description': '查看当前 OpenCode 状态与诊断信息。',
+  'openCodeStatusDialog.title': '诊断时间线',
+  'openCodeStatusDialog.description': '按时间顺序显示本地事件。不包含私人日志内容和远程来源。',
+  'openCodeStatusDialog.actions.download': '下载日志',
+  'openCodeStatusDialog.toast.collectFailed': '无法收集诊断信息',
   'openCodeStatusDialog.actions.copy': '复制',
   'openCodeStatusDialog.empty.noData': '无数据。',
   'openCodeStatusDialog.toast.copiedTitle': '已复制',
-  'openCodeStatusDialog.toast.copiedDescription': '状态已复制到剪贴板',
-  'openCodeStatusDialog.toast.copyFailed': '复制状态失败',
+  'openCodeStatusDialog.toast.copiedDescription': '诊断日志已复制到剪贴板',
+  'openCodeStatusDialog.toast.copyFailed': '复制诊断日志失败',
   'saveProjectPlanDialog.title': '保存项目计划',
   'saveProjectPlanDialog.description': '将此计划以 Markdown 文件保存到你的项目中。',
   'saveProjectPlanDialog.field.title': '标题',

@@ -38,7 +38,7 @@ import { GuestIcon } from './GuestRailIcon';
 import { useGuestsStore } from '@/lib/guests/store';
 import { FALLBACK_GUEST_ICON } from '@/lib/guests/icon';
 import { isPluginContextPanelMode, pluginIdFromMode } from '@/lib/surfaces/modes';
-import { getContextSurfaceDefaultWidth } from '@/lib/surfaces/registry';
+import { CONTEXT_SURFACE_WIDTHS, getContextSurfaceDefaultWidth } from '@/lib/surfaces/registry';
 import { beginLayoutAnimation, cancelWhenLayoutSettled, LAYOUT_ANIMATION_EASING, runWhenLayoutSettled } from '@/lib/layoutAnimation';
 import { useLayoutAnimationMs } from '@/hooks/useLayoutAnimationMs';
 import { WORK_STATUS_COLUMN_WIDTH } from '@/components/chat/work-status/useWorkStatusVisibility';
@@ -55,7 +55,7 @@ import { isZoneExposed } from './zoneInteractiveContext';
 import { DockedPanelSurfaceContext } from '@/hooks/usePageColors';
 
 const CONTEXT_PANEL_MIN_WIDTH = 320;
-const CONTEXT_PANEL_DEFAULT_WIDTH = 600;
+const CONTEXT_PANEL_DEFAULT_WIDTH = CONTEXT_SURFACE_WIDTHS.regular;
 // The panel has no absolute pixel ceiling: on large monitors the user may
 // want it nearly full-width (side-by-side diffs with the chat open). The
 // only limit during a drag is leaving the chat column this much width.

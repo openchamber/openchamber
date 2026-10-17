@@ -8,6 +8,7 @@ import { routingI18n } from './routing.i18n';
 import { pluginPanelI18n } from './plugin-panel.i18n';
 import { surfacePanelI18n } from './surface-panel.i18n';
 import { fileArtifactsI18n } from './file-artifacts.i18n';
+import { fileContentSearchI18n } from './file-content-search.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
@@ -1985,7 +1986,7 @@ export const dict = {
   'chat.recap.label': 'الملخص:',
   'chat.sessionError.title': 'أوقف OpenCode هذا الرد',
   'chat.sessionError.noDetails': 'لم يقدّم OpenCode أي تفاصيل. يعرض تقرير الحالة الأخطاء الأخيرة.',
-  'chat.sessionError.showStatus': 'عرض حالة OpenCode',
+  'chat.sessionError.showStatus': 'إظهار السجل الزمني للتشخيص',
   'chat.sessionError.noReply': 'لم يبدأ OpenCode ردًا على هذه الرسالة.',
   'chat.sessionError.interrupted': 'قاطع OpenCode هذا الرد.',
   'chat.longError.expand': 'عرض الخطأ كاملًا',
@@ -2759,7 +2760,7 @@ export const dict = {
   'commandPalette.item.showContextUsage': 'إظهار استخدام السياق',
   'commandPalette.item.toggleTerminal': 'إظهار/إخفاء الطرفية',
   'commandPalette.item.cycleTheme': 'التبديل بين السمات',
-  'commandPalette.item.showOpenCodeStatus': 'إظهار حالة OpenCode',
+  'commandPalette.item.showOpenCodeStatus': 'إظهار السجل الزمني للتشخيص',
   'commandPalette.item.restartOpenCode': 'إعادة تشغيل OpenCode',
   'commandPalette.item.toggleMemoryDebug': 'إظهار/إخفاء لوحة تصحيح الذاكرة',
   'commandPalette.item.pinSession': 'تثبيت الجلسة أو إلغاء تثبيتها',
@@ -2812,13 +2813,15 @@ export const dict = {
   'commandPalette.footer.navigate': 'للتنقل',
   'commandPalette.footer.open': 'للفتح',
   'commandPalette.footer.close': 'للإغلاق',
-  'openCodeStatusDialog.title': 'حالة OpenCode',
-  'openCodeStatusDialog.description': 'اطّلع على حالة OpenCode الحالية وبيانات التشخيص.',
+  'openCodeStatusDialog.title': 'السجل الزمني للتشخيص',
+  'openCodeStatusDialog.description': 'الأحداث المحلية بترتيبها الزمني. يُستبعد نص السجلات الخاص والمصادر البعيدة.',
+  'openCodeStatusDialog.actions.download': 'تنزيل السجل',
+  'openCodeStatusDialog.toast.collectFailed': 'تعذّر جمع بيانات التشخيص',
   'openCodeStatusDialog.actions.copy': 'نسخ',
   'openCodeStatusDialog.empty.noData': 'لا توجد بيانات.',
   'openCodeStatusDialog.toast.copiedTitle': 'تم النسخ',
-  'openCodeStatusDialog.toast.copiedDescription': 'تم نسخ الحالة إلى الحافظة',
-  'openCodeStatusDialog.toast.copyFailed': 'تعذّر نسخ الحالة',
+  'openCodeStatusDialog.toast.copiedDescription': 'تم نسخ سجل التشخيص إلى الحافظة',
+  'openCodeStatusDialog.toast.copyFailed': 'تعذّر نسخ سجل التشخيص',
   'saveProjectPlanDialog.title': 'حفظ خطة المشروع',
   'saveProjectPlanDialog.description': 'احفظ هذه الخطة في مشروعك كملف Markdown.',
   'saveProjectPlanDialog.field.title': 'العنوان',
@@ -3777,6 +3780,7 @@ export const dict = {
   ...pluginPanelI18n.ar,
   ...surfacePanelI18n.ar,
   ...fileArtifactsI18n.ar,
+  ...fileContentSearchI18n.ar,
   ...htmlRenderI18n.ar,
   ...usageStatsI18n.ar,
   ...webSearchI18n.ar,
