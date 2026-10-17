@@ -5,6 +5,8 @@ import { dirname, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { Window } from 'happy-dom';
 import type { RuntimeAPIs } from '@/lib/api/types';
+import type { QueuedMessage } from '@/stores/messageQueueStore';
+import type { AttachedFile } from '@/stores/types/sessionTypes';
 
 /**
  * Counts which components render per keystroke without instrumenting them.
@@ -114,9 +116,24 @@ Object.assign(globalThis, {
   IS_REACT_ACT_ENVIRONMENT: true,
 });
 
-// Nothing typed here reaches a server; every request answers empty.
+let serverQueue: QueuedMessage[] = [];
+let queueTakeRequests = 0;
+
+// Requests stay inside the fixture; queue takes model their destructive effect.
 spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
   const path = new URL(input instanceof Request ? input.url : input.toString(), 'http://localhost/').pathname;
+  if (path.includes('/message-queue/')) {
+    const items = serverQueue;
+    if (path.endsWith('/take')) {
+      queueTakeRequests += 1;
+      serverQueue = [];
+    }
+    return Response.json({
+      revision: queueTakeRequests + 1,
+      session: { sessionId: 'ses_submit', directory: '/workspace', items: serverQueue, sendingId: null },
+      items,
+    });
+  }
   if (path.endsWith('/location')) {
     return Response.json({ directory: '/workspace', project: { id: 'project', directory: '/workspace', canonical: '/workspace' } });
   }
@@ -175,6 +192,14 @@ const sdk = OpenCode.make({
 const runtimeAPIs = { runtime: { platform: 'web', isDesktop: false, isVSCode: false }, sourceControl: {} } as RuntimeAPIs;
 
 const { useSessionUIStore } = await import('@/sync/session-ui-store');
+const { useConfigStore } = await import('@/stores/useConfigStore');
+const { useUIStore } = await import('@/stores/useUIStore');
+const { useInputStore } = await import('@/sync/input-store');
+const { getSyncChildStores } = await import('@/sync/sync-refs');
+const { registerRuntimeAPIs } = await import('@/contexts/runtimeAPIRegistry');
+const { getRuntimeKey } = await import('@/lib/runtime-switch');
+const { createChatDraftIdentity } = await import('@/lib/chatDraftPersistence');
+const { createMessageQueueTarget, getMessageQueueKey, useMessageQueueStore } = await import('@/stores/messageQueueStore');
 
 const KEYSTROKES = 20;
 
@@ -306,3 +331,83 @@ test('typing in an existing session re-renders only the composer shell and its e
 test('typing in a new-session draft re-renders only the composer shell and its editor', async () => {
   expectOnlyTheEditorFollowsTheText(await measureTyping('draft'));
 });
+
+for (const isVSCode of [false, true]) {
+  test(`Mod+Enter sends the current draft and leaves the ${isVSCode ? 'local' : 'server-owned'} queue untouched`, async () => {
+    runtimeAPIs.runtime.isVSCode = isVSCode;
+    registerRuntimeAPIs(runtimeAPIs);
+    const target = createMessageQueueTarget('ses_submit', '/workspace', getRuntimeKey());
+    if (!target) throw new Error('Queue target missing');
+    const key = getMessageQueueKey(target);
+    const identity = createChatDraftIdentity(target.runtimeKey, target.directory, target.sessionId);
+    const attachment = (filename: string): AttachedFile => ({
+      id: filename, filename, mimeType: 'text/plain', size: 1, source: 'local',
+      file: new File(['x'], filename, { type: 'text/plain' }),
+      dataUrl: 'data:text/plain;base64,eA==',
+    });
+    const queued: QueuedMessage[] = ['A', 'B'].map((text) => ({
+      id: text, content: text, text, createdAt: 1,
+      attachments: [attachment(`${text}.txt`)],
+      context: [{ kind: 'synthetic', text: `${text} context` }],
+      sendConfig: { providerID: 'p', modelID: 'm' },
+    }));
+    serverQueue = queued;
+    queueTakeRequests = 0;
+    useDirectoryStore.setState({ currentDirectory: '/workspace' });
+    useSessionUIStore.setState({
+      currentSessionId: target.sessionId, currentSessionDirectory: target.directory,
+      newSessionDraft: { ...useSessionUIStore.getState().newSessionDraft, open: false },
+    });
+    useConfigStore.setState({ currentProviderId: 'p', currentModelId: 'm' });
+    useUIStore.setState({ isMobile: false, enterToSend: true, enterToSendConfigured: true });
+    useMessageQueueStore.setState({ queuedMessages: { [key]: queued }, sendingIds: {}, followUpBehavior: 'queue' });
+    useInputStore.getState().setAttachedFiles([attachment('C.txt')], identity);
+    useInputStore.getState().setPendingSyntheticParts([{ text: 'C context', synthetic: true }]);
+    const send = spyOn(useSessionUIStore.getState(), 'sendMessage');
+    const sent = new Promise<Parameters<typeof send>>((resolve) => {
+      send.mockImplementation(async (...args) => { resolve(args); });
+    });
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    try {
+      await act(async () => root.render(
+        <RuntimeAPIContext.Provider value={runtimeAPIs}>
+          <ThemeSystemProvider><I18nProvider><SyncProvider sdk={sdk} directory="/workspace">
+            <ChatInput />
+          </SyncProvider></I18nProvider></ThemeSystemProvider>
+        </RuntimeAPIContext.Provider>,
+      ));
+      await act(async () => {
+        getSyncChildStores().ensureChild('/workspace').setState({ session_status: { [target.sessionId]: { type: 'busy' } } });
+      });
+      const content = container.querySelector<HTMLElement>('.cm-content');
+      const view = content ? EditorView.findFromDOM(content) : null;
+      if (!view || !content) throw new Error('Composer editor missing');
+      await act(async () => view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: 'C' }, userEvent: 'input.type' }));
+      await act(async () => {
+        content.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', ctrlKey: isVSCode, metaKey: !isVSCode, bubbles: true, cancelable: true }));
+        await sent;
+      });
+      const args = await sent;
+      expect(send.mock.calls).toHaveLength(1);
+      expect(args[0]).toBe('C');
+      expect(args[4]?.map((file) => file.filename)).toEqual(['C.txt']);
+      expect(args[6]?.map((part) => part.text)).toEqual(['C context']);
+      expect(useMessageQueueStore.getState().getQueueForTarget(target)).toEqual(queued);
+      expect(serverQueue).toEqual(queued);
+      expect(queueTakeRequests).toBe(0);
+      expect(view.state.doc.toString()).toBe('');
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+      send.mockRestore();
+      useMessageQueueStore.setState({ queuedMessages: {}, sendingIds: {} });
+      useInputStore.getState().setAttachedFiles([], identity);
+      useInputStore.getState().setPendingSyntheticParts(null);
+      runtimeAPIs.runtime.isVSCode = false;
+      registerRuntimeAPIs(null);
+      serverQueue = [];
+    }
+  });
+}

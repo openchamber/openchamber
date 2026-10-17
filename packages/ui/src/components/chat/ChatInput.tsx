@@ -1338,6 +1338,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     type SubmitOptions = {
         queuedOnly?: boolean;
         queuedMessageId?: string;
+        includeQueued?: boolean;
         delivery?: 'steer';
         /** Submit this text instead of the composer input. Used by preset
             starter chips: on mobile the collapsed pill has no mounted textarea,
@@ -1601,6 +1602,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         const submitRuntimeKey = getRuntimeKey();
         const queuedOnly = options?.queuedOnly ?? false;
         const queuedMessageId = options?.queuedMessageId;
+        const includeQueued = options?.includeQueued ?? true;
         const delivery = options?.delivery === 'steer' && sessionPhase !== 'idle' ? 'steer' : undefined;
         const capturedTarget = messageQueueTarget;
         // Snapshot the draft and current-session identity before the first
@@ -1618,7 +1620,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
         if (queuedOnly) {
             if (!composerQueuedMessages.some((message) => !queuedMessageId || message.id === queuedMessageId) || !currentSessionId) return;
-        } else if ((!inputSnapshot.hasContent && !hasQueuedMessages) || (!currentSessionId && !newSessionDraftOpen)) {
+        } else if ((!inputSnapshot.hasContent && !(includeQueued && hasQueuedMessages)) || (!currentSessionId && !newSessionDraftOpen)) {
             return;
         }
 
@@ -1712,9 +1714,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         // The projection knows the captured send configuration; the full
         // messages are taken from the queue only once nothing below can still
         // bail out, so an early return leaves the queue untouched.
-        const queuedProjection = queuedMessageId
-            ? composerQueuedMessages.filter((message) => message.id === queuedMessageId)
-            : composerQueuedMessages;
+        const queuedProjection = includeQueued
+            ? composerQueuedMessages.filter((message) => !queuedMessageId || message.id === queuedMessageId)
+            : [];
         const capturedSendConfig = queuedOnly ? queuedProjection[0]?.sendConfig : undefined;
         const providerIdToSend = capturedSendConfig?.providerID ?? (isBtwActive ? effectiveBtwSelection.model?.providerId : currentProviderId);
         const modelIdToSend = capturedSendConfig?.modelID ?? (isBtwActive ? effectiveBtwSelection.model?.modelId : currentModelId);
@@ -1909,7 +1911,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         // skips anything already in flight, and a message already being
         // delivered stays out of this send so it cannot go out twice.
         let queuedMessagesToSend: QueuedMessage[] = [];
-        if (capturedTarget && hasQueuedMessages && !commandPlan) {
+        if (capturedTarget && queuedProjection.length > 0 && !commandPlan) {
             try {
                 queuedMessagesToSend = await takeForSend(capturedTarget, queuedMessageId);
             } catch (error) {
@@ -2562,19 +2564,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             // session (or an active auto-review run).
             const canQueue = !isBtwActive && !isPageWaiting && inputMode === 'normal' && hasContent && currentSessionId && (currentSessionPhase !== 'idle' || autoReviewRunning);
 
-            if (followUpBehavior === 'queue') {
-                if (isCtrlEnter || !canQueue) {
-                    handleSubmit();
-                } else {
-                    void handleQueueMessage();
-                }
+            if (isCtrlEnter) {
+                void handleSubmit({ includeQueued: false });
+            } else if (followUpBehavior === 'queue' && canQueue) {
+                void handleQueueMessage();
             } else {
-                // steer: Enter steers into the running turn, Ctrl+Enter sends now.
-                if (isCtrlEnter || !canQueue) {
-                    handleSubmit();
-                } else {
-                    handleSubmit({ delivery: 'steer' });
-                }
+                void handleSubmit(canQueue ? { delivery: 'steer' } : undefined);
             }
         }
     };
