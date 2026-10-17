@@ -81,7 +81,11 @@ both settings are `false`.
   `action`, because models produce both shapes; an explicit `parameters` object
   wins on a conflict. Rejecting the flattened shape turned a call that plainly
   carried a `url` into "url is required", which reads as a broken tool rather
-  than a malformed call.
+  than a malformed call. The generated schema declares every input in both
+  places with the same description, so the behavioral rules reach the model
+  whichever shape it fills in, and `additionalProperties: true` at the root
+  still lets an unknown field (a stale `wait` or `timeout`) through to the
+  adapter's usage error.
 
 ## Runtime flow
 
@@ -129,11 +133,17 @@ both settings are `false`.
   `lastAssistant` on a dispatch with a usage error naming `returnResult`
   (`agentOnlyUsageError`). `session.messages` does not wait either: it reads
   what is there. The control service keeps `wait` for the CLI only.
-- Boolean inputs are checked at the tool boundary: the plugin forwards raw
-  JSON, so a field declared `type: 'boolean'` in any tool's schema that
-  arrives as anything else (the string `"true"`) fails the call with a usage
-  error naming the field (`nonBooleanParameterError`), before any action runs.
-  Downstream `=== true` checks would otherwise read it as false.
+- Boolean inputs cross two checks. The generated adapter normalizes exactly
+  the strings `"true"` and `"false"` for the fields the calling tool's own
+  parameter schema declares `type: 'boolean'` (derived from that schema at
+  generation time), because a harness can stringify a boolean on the way and
+  every downstream `=== true` would read it as false. Every other value keeps
+  its identity, and the server check still refuses it: the plugin forwards raw
+  JSON, so a field declared `type: 'boolean'` in any tool's schema that arrives
+  as anything else fails the call with a usage error naming the field
+  (`nonBooleanParameterError`), before any action runs. A callback that
+  bypasses the adapter is refused the same way, so the strictness never depends
+  on the plugin having normalized first.
 - The description draws the line against OpenCode's own `subagent` tool:
   `subagent` when the agent delegates part of its own task and wants the
   answer for itself, `session.*` when the user asks for a separate session

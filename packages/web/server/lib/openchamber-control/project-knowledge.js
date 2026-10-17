@@ -51,6 +51,17 @@ const completedOf = (input) => {
 const expectedOf = (input) => (input.expected === undefined ? undefined : requiredString(input, 'expected', undefined, true));
 
 /**
+ * `expected` compares a replacement against the text the caller read. A create
+ * has nothing to compare against, and silently ignoring it would let an agent
+ * believe a conflict check ran, so it is refused before anything is written.
+ */
+const rejectExpectedOnCreate = (input) => {
+  if (input.expected !== undefined && input.id === undefined) {
+    throw new OpenChamberControlError('expected requires an id: pass the id of the note or plan you are replacing, or leave expected out to create', 400);
+  }
+};
+
+/**
  * The `openchamber_knowledge` actions over the server-owned knowledge store.
  * Four verbs, with `kind` naming notes, todos or plans. Reading and small
  * edits of a plan go through the agent's file tools on the path list gives.
@@ -108,6 +119,7 @@ export const createProjectKnowledgeActions = ({ projectContextRuntime: runtime, 
   };
 
   const saveNote = async (projectId, input, contextSessionId) => {
+    rejectExpectedOnCreate(input);
     const body = requiredString(input, 'body', NOTE_MAX_LENGTH);
     if (input.id === undefined) {
       const sessionId = asNonEmptyString(contextSessionId);
@@ -142,6 +154,7 @@ export const createProjectKnowledgeActions = ({ projectContextRuntime: runtime, 
   };
 
   const savePlan = async (projectId, input) => {
+    rejectExpectedOnCreate(input);
     const body = requiredString(input, 'body', PLAN_MAX_LENGTH);
     if (input.id === undefined) {
       if (!/^\s*#\s+\S/.test(body)) {
