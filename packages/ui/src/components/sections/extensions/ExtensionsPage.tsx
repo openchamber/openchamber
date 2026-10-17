@@ -4,12 +4,22 @@ import { Icon } from '@/components/icon/Icon';
 import { GuestIcon } from '@/components/layout/GuestRailIcon';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
 import {
+  SETTINGS_HELPER_CLASS,
   SETTINGS_ICON_BUTTON_CLASS,
+  SettingsFieldRow,
   SettingsSection,
-  SettingsStackedField,
 } from '@/components/sections/shared/SettingsSection';
+import {
+  SETTINGS_CARD_GRID_CLASS,
+  SettingsAddCard,
+  SettingsBackButton,
+  SettingsCard,
+  SettingsCardChip,
+  SettingsCardPill,
+  type SettingsCardAction,
+  type SettingsCardTone,
+} from '@/components/sections/shared/SettingsCards';
 import { Button } from '@/components/ui/button';
-import { IntegrationCatalogCard } from '@/components/sections/integrations/IntegrationCatalogCard';
 import {
   Dialog,
   DialogContent,
@@ -191,8 +201,41 @@ const SocketOverrideRow: React.FC<{
   );
 };
 
-type ExtensionCardProps = {
-  guest: InstalledGuest;
+/** What a card and the detail screen say about an extension's state. */
+const extensionState = (guest: InstalledGuest) => {
+  const enabled = guest.enabled !== false;
+  // Enterprise mode refuses what this package asks for; approving cannot change that.
+  const enterpriseBlocked = (guest.enterpriseBlocked?.length ?? 0) > 0;
+  const needsApproval = !enterpriseBlocked && guestNeedsApproval(guest);
+  const builtIn = guest.source === 'bundled';
+  const statusKey: I18nKey = enterpriseBlocked
+    ? 'settings.extensions.status.enterpriseBlocked'
+    : needsApproval
+      ? 'settings.extensions.status.needsApproval'
+      : enabled
+        ? 'settings.extensions.status.enabled'
+        : 'settings.extensions.status.disabled';
+  const statusTone: SettingsCardTone = enterpriseBlocked || needsApproval ? 'warning' : enabled ? 'success' : 'neutral';
+  return {
+    enabled,
+    enterpriseBlocked,
+    needsApproval,
+    builtIn,
+    canRemove: Boolean(guest.source && guest.source !== 'bundled'),
+    sourceUrl: getGuestSourceUrl(guest),
+    // Only a git install can move forward; folder and zip installs never do.
+    update: guest.source === 'git' ? guest.update : undefined,
+    statusKey,
+    statusTone,
+  };
+};
+
+const useGuestIconSrc = (guest: InstalledGuest) => React.useMemo(
+  () => guestPackageIconSrc(guest.id, guest.icon, getRuntimeUrlResolver().authenticatedAsset),
+  [guest.id, guest.icon],
+);
+
+type ExtensionHandlers = {
   busy: boolean;
   onReview: (guest: InstalledGuest) => void;
   onRemove: (id: string, name: string) => Promise<void>;
@@ -200,174 +243,230 @@ type ExtensionCardProps = {
   onUpdate: (guest: InstalledGuest) => Promise<void>;
 };
 
-const ExtensionCard: React.FC<ExtensionCardProps> = ({
+/** One extension in the grid: name, state, source; opens its detail screen. */
+const ExtensionCard: React.FC<ExtensionHandlers & { guest: InstalledGuest; onOpen: () => void }> = ({
   guest,
   busy,
+  onOpen,
   onReview,
   onRemove,
   onSetEnabled,
   onUpdate,
 }) => {
   const { t } = useI18n();
-  const [open, setOpen] = React.useState(false);
-  const enabled = guest.enabled !== false;
-  // Enterprise mode refuses what this package asks for; approving cannot change that.
-  const enterpriseBlocked = (guest.enterpriseBlocked?.length ?? 0) > 0;
-  const needsApproval = !enterpriseBlocked && guestNeedsApproval(guest);
-  const permissions = servicePermissionList(guest);
-  const canRemove = Boolean(guest.source && guest.source !== 'bundled');
-  const builtIn = guest.source === 'bundled';
-  const sourceUrl = getGuestSourceUrl(guest);
-  // Only a git install can move forward; folder and zip cards never get this.
-  const update = guest.source === 'git' ? guest.update : undefined;
-  const iconSrc = React.useMemo(
-    () => guestPackageIconSrc(guest.id, guest.icon, getRuntimeUrlResolver().authenticatedAsset),
-    [guest.id, guest.icon],
-  );
-  // The path is one unbreakable word; it lives in the expanded body so the
-  // header line never clamps right after the version.
-  const meta = [
-    builtIn ? null : t(sourceKey(guest.source)),
-    guest.version ? `v${guest.version}` : null,
-    guest.entry ? null : t('settings.extensions.source.noPanel'),
-  ].filter(Boolean).join(' · ');
-  const location = guest.path || guest.id;
-  const statusLabel = enterpriseBlocked
-    ? t('settings.extensions.status.enterpriseBlocked')
-    : needsApproval
-    ? t('settings.extensions.status.needsApproval')
-    : enabled
-      ? t('settings.extensions.status.enabled')
-      : t('settings.extensions.status.disabled');
+  const state = extensionState(guest);
+  const iconSrc = useGuestIconSrc(guest);
+  const actions: SettingsCardAction[] = busy ? [] : [
+    ...(state.update ? [{
+      label: t('settings.extensions.update.action'),
+      icon: 'arrow-up-s' as const,
+      onSelect: () => void onUpdate(guest),
+    }] : []),
+    ...(state.needsApproval ? [{
+      label: t('settings.extensions.review'),
+      icon: 'shield-check' as const,
+      onSelect: () => onReview(guest),
+    }] : []),
+    ...(state.enterpriseBlocked ? [] : [{
+      label: state.enabled ? t('settings.extensions.actions.disable') : t('settings.extensions.actions.enable'),
+      icon: state.enabled ? 'pause' as const : 'play' as const,
+      onSelect: () => void onSetEnabled(guest.id, guest.name, !state.enabled),
+    }]),
+    ...(state.sourceUrl ? [{
+      label: t('settings.extensions.actions.openSource'),
+      icon: 'external-link' as const,
+      onSelect: () => void openExternalUrl(state.sourceUrl ?? ''),
+    }] : []),
+    ...(state.canRemove ? [{
+      label: t('settings.extensions.remove'),
+      icon: 'delete-bin' as const,
+      destructive: true,
+      onSelect: () => void onRemove(guest.id, guest.name),
+    }] : []),
+  ];
   return (
-    <IntegrationCatalogCard
-      logo={(
-        <GuestIcon
-          icon={resolveGuestIconName(guest.icon)}
-          iconSrc={iconSrc}
-          className="size-5 text-foreground"
-        />
-      )}
-      name={guest.name}
-      description={meta}
+    <SettingsCard
+      icon={<GuestIcon icon={resolveGuestIconName(guest.icon)} iconSrc={iconSrc} className="size-5 text-foreground" />}
+      title={guest.name}
       badges={(
         <>
-          {builtIn ? (
-            <span className="oc-tile-inset shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
-              {t('settings.extensions.source.bundled')}
-            </span>
+          {state.update ? (
+            <SettingsCardPill tone="info">{t('settings.extensions.update.badge', { version: state.update.version })}</SettingsCardPill>
           ) : null}
-          {update ? (
-            <span className="max-w-40 shrink-0 truncate rounded-full bg-[var(--status-info)]/15 px-2 py-0.5 text-[10px] font-medium text-[var(--status-info)]">
-              {t('settings.extensions.update.badge', { version: update.version })}
-            </span>
-          ) : null}
+          <SettingsCardPill tone={state.statusTone}>{t(state.statusKey)}</SettingsCardPill>
         </>
       )}
-      status={statusLabel}
-      statusTone={enterpriseBlocked || needsApproval ? 'warning' : enabled ? 'success' : 'neutral'}
-      open={open}
-      onOpenChange={setOpen}
+      footer={(
+        <>
+          <span className="truncate">{extensionMeta(guest, t)}</span>
+          {state.builtIn ? <SettingsCardChip>{t('settings.extensions.source.bundled')}</SettingsCardChip> : null}
+        </>
+      )}
+      muted={!state.enabled}
+      onOpen={onOpen}
+      actionsLabel={t('settings.extensions.grid.actionsAria', { name: guest.name })}
+      actions={actions}
+    />
+  );
+};
+
+/** Source, version and "no panel" on one line; built-in shows no source. */
+const extensionMeta = (guest: InstalledGuest, t: ReturnType<typeof useI18n>['t']): string => [
+  guest.source === 'bundled' ? null : t(sourceKey(guest.source)),
+  guest.version ? `v${guest.version}` : null,
+  guest.entry ? null : t('settings.extensions.source.noPanel'),
+].filter(Boolean).join(' · ');
+
+/** One extension's screen: what needs doing, where it comes from, what it may do. */
+const ExtensionDetail: React.FC<ExtensionHandlers & { guest: InstalledGuest; onBack: () => void }> = ({
+  guest,
+  busy,
+  onBack,
+  onReview,
+  onRemove,
+  onSetEnabled,
+  onUpdate,
+}) => {
+  const { t } = useI18n();
+  const state = extensionState(guest);
+  const iconSrc = useGuestIconSrc(guest);
+  const permissions = servicePermissionList(guest);
+  const location = guest.path || guest.id;
+  const hasPermissions = Boolean(permissions) || Boolean(guest.service);
+
+  return (
+    <SettingsPageLayout
+      title={guest.name}
+      titleLeading={(
+        <>
+          <SettingsBackButton label={t('settings.extensions.detail.back')} onClick={onBack} />
+          <GuestIcon icon={resolveGuestIconName(guest.icon)} iconSrc={iconSrc} className="size-5 shrink-0 text-foreground" />
+        </>
+      )}
+      titleAccessory={<SettingsCardPill tone={state.statusTone}>{t(state.statusKey)}</SettingsCardPill>}
+      headerEnd={(
+        <div className="flex items-center gap-2">
+          {state.enterpriseBlocked ? null : (
+            <Button
+              type="button"
+              size="sm"
+              variant={state.enabled ? 'outline' : 'default'}
+              disabled={busy}
+              aria-label={state.enabled
+                ? t('settings.extensions.actions.disable.aria', { name: guest.name })
+                : t('settings.extensions.actions.enable.aria', { name: guest.name })}
+              onClick={() => void onSetEnabled(guest.id, guest.name, !state.enabled)}
+            >
+              {state.enabled ? t('settings.extensions.actions.disable') : t('settings.extensions.actions.enable')}
+            </Button>
+          )}
+          {state.canRemove ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="text-[var(--status-error)] hover:text-[var(--status-error)]"
+              disabled={busy}
+              aria-label={t('settings.extensions.remove.aria', { name: guest.name })}
+              onClick={() => void onRemove(guest.id, guest.name).then(onBack)}
+            >
+              <Icon name="delete-bin" className="size-3.5" />
+              {t('settings.extensions.remove')}
+            </Button>
+          ) : null}
+        </div>
+      )}
     >
-          <div className="space-y-3">
-            <p className="typography-meta truncate font-mono text-muted-foreground" title={location}>
-              {location}
-            </p>
-            {enterpriseBlocked ? <p className="typography-meta text-foreground">{t('settings.extensions.enterpriseBlocked')}</p> : null}
-            {builtIn ? <p className="typography-meta text-muted-foreground">{t('settings.extensions.builtIn.info')}</p> : null}
-            {permissions ? (
-              <p className="typography-meta truncate text-muted-foreground">
-                {t('settings.extensions.service.permissions', { list: permissions })}
-              </p>
-            ) : null}
-            {guest.service ? (
-              <p className="typography-meta text-muted-foreground">
-                {t('settings.extensions.service.warning')}
-              </p>
-            ) : null}
-            {enabled
-              ? (guest.service?.socketBindings ?? []).map((binding) => (
-                <SocketOverrideRow
-                  key={binding.id}
-                  guest={guest}
-                  binding={binding}
-                  busy={busy}
-                  onSaved={loadGuestCatalog}
-                />
-              ))
-              : null}
-            <div className="flex flex-wrap items-center gap-2">
-              {update ? (
-                <Button
-                  type="button"
-                  size="sm"
-                  disabled={busy}
-                  aria-label={t('settings.extensions.update.action.aria', { name: guest.name, version: update.version })}
-                  onClick={() => void onUpdate(guest)}
-                >
-                  {t('settings.extensions.update.action')}
-                </Button>
-              ) : null}
-              {needsApproval ? (
-                <Button
-                  type="button"
-                  size="sm"
-                  disabled={busy}
-                  aria-label={t('settings.extensions.review.aria', { name: guest.name })}
-                  onClick={() => onReview(guest)}
-                >
-                  {t('settings.extensions.review')}
-                </Button>
-              ) : null}
-              {enabled ? (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  disabled={busy}
-                  aria-label={t('settings.extensions.actions.disable.aria', { name: guest.name })}
-                  onClick={() => void onSetEnabled(guest.id, guest.name, false)}
-                >
-                  {t('settings.extensions.actions.disable')}
-                </Button>
-              ) : (
-                <Button
-                  type="button"
-                  size="sm"
-                  disabled={busy}
-                  aria-label={t('settings.extensions.actions.enable.aria', { name: guest.name })}
-                  onClick={() => void onSetEnabled(guest.id, guest.name, true)}
-                >
-                  {t('settings.extensions.actions.enable')}
-                </Button>
-              )}
-              {canRemove ? (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="destructive"
-                  disabled={busy}
-                  aria-label={t('settings.extensions.remove.aria', { name: guest.name })}
-                  onClick={() => void onRemove(guest.id, guest.name)}
-                >
-                  {t('settings.extensions.remove')}
-                </Button>
-              ) : null}
-              {sourceUrl ? (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  className="ms-auto"
-                  onClick={() => void openExternalUrl(sourceUrl)}
-                >
-                  <Icon name="external-link" className="size-4" />
-                  {t('settings.extensions.actions.openSource')}
-                </Button>
-              ) : null}
+      {state.enterpriseBlocked || state.needsApproval || state.update ? (
+        <SettingsSection divider={false} contentClassName="space-y-2">
+          {state.enterpriseBlocked ? (
+            <div className="rounded-lg bg-[var(--status-warning)]/10 p-3 typography-meta text-[var(--status-warning)]">
+              {t('settings.extensions.enterpriseBlocked')}
             </div>
-          </div>
-    </IntegrationCatalogCard>
+          ) : null}
+          {state.needsApproval ? (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-[var(--status-warning)]/10 p-3">
+              <span className="typography-meta text-[var(--status-warning)]">{t('settings.extensions.status.needsApproval')}</span>
+              <Button
+                type="button"
+                size="sm"
+                disabled={busy}
+                aria-label={t('settings.extensions.review.aria', { name: guest.name })}
+                onClick={() => onReview(guest)}
+              >
+                {t('settings.extensions.review')}
+              </Button>
+            </div>
+          ) : null}
+          {state.update ? (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-[var(--status-info)]/10 p-3">
+              <span className="typography-meta text-[var(--status-info)]">
+                {t('settings.extensions.update.badge', { version: state.update.version })}
+              </span>
+              <Button
+                type="button"
+                size="sm"
+                disabled={busy}
+                aria-label={t('settings.extensions.update.action.aria', { name: guest.name, version: state.update.version })}
+                onClick={() => void onUpdate(guest)}
+              >
+                {t('settings.extensions.update.action')}
+              </Button>
+            </div>
+          ) : null}
+        </SettingsSection>
+      ) : null}
+
+      <SettingsSection
+        title={t('settings.extensions.detail.section.details')}
+        divider={state.enterpriseBlocked || state.needsApproval || Boolean(state.update)}
+        contentClassName="space-y-3"
+      >
+        <div>
+          <SettingsFieldRow label={t('settings.extensions.detail.field.source')}>
+            <span className="typography-ui-label text-foreground">{t(sourceKey(guest.source))}</span>
+            {state.sourceUrl ? (
+              <Button type="button" size="sm" variant="ghost" onClick={() => void openExternalUrl(state.sourceUrl ?? '')}>
+                <Icon name="external-link" className="size-3.5" />
+                {t('settings.extensions.actions.openSource')}
+              </Button>
+            ) : null}
+          </SettingsFieldRow>
+          {guest.version ? (
+            <SettingsFieldRow label={t('settings.extensions.detail.field.version')}>
+              <span className="typography-ui-label tabular-nums text-foreground">{`v${guest.version}`}</span>
+            </SettingsFieldRow>
+          ) : null}
+          <SettingsFieldRow label={t('settings.extensions.detail.field.location')} alignEnd={false} controlClassName="min-w-0 @xl:flex-1">
+            <span className="typography-meta min-w-0 truncate font-mono text-muted-foreground" title={location}>{location}</span>
+          </SettingsFieldRow>
+        </div>
+        {state.builtIn ? <p className={SETTINGS_HELPER_CLASS}>{t('settings.extensions.builtIn.info')}</p> : null}
+      </SettingsSection>
+
+      {hasPermissions ? (
+        <SettingsSection title={t('settings.extensions.detail.section.permissions')} contentClassName="space-y-3">
+          {permissions ? (
+            <p className="typography-meta text-foreground">{t('settings.extensions.service.permissions', { list: permissions })}</p>
+          ) : null}
+          {guest.service ? (
+            // A security warning: stays visible.
+            <p className="typography-meta text-[var(--status-warning)]">{t('settings.extensions.service.warning')}</p>
+          ) : null}
+          {state.enabled
+            ? (guest.service?.socketBindings ?? []).map((binding) => (
+              <SocketOverrideRow
+                key={binding.id}
+                guest={guest}
+                binding={binding}
+                busy={busy}
+                onSaved={loadGuestCatalog}
+              />
+            ))
+            : null}
+        </SettingsSection>
+      ) : null}
+    </SettingsPageLayout>
   );
 };
 
@@ -384,32 +483,30 @@ const UnreadableExtensionCard: React.FC<{
   const name = guest.name ?? guest.id ?? t('settings.extensions.unreadable.unnamed');
   const removableId = guest.builtIn ? null : guest.id;
   return (
-    <div className="flex min-w-0 items-center gap-3 oc-tile rounded-xl px-4 py-3">
-      <div className="flex size-10 shrink-0 items-center justify-center oc-tile-inset rounded-[10px]">
-        <Icon name="error-warning" className="size-5 text-[var(--status-error)]" />
-      </div>
-      <div className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground">{name}</div>
-      <span
-        title={t('settings.extensions.unreadable.hint')}
-        className="max-w-36 shrink-0 truncate rounded-full bg-[var(--status-error)]/15 px-2 py-0.5 text-[10px] font-medium text-[var(--status-error)]"
-      >
-        {t('settings.extensions.status.unreadable')}
-      </span>
-      {removableId ? (
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          className={SETTINGS_ICON_BUTTON_CLASS}
-          disabled={busy}
-          title={t('settings.extensions.remove')}
-          aria-label={t('settings.extensions.remove.aria', { name })}
-          onClick={() => void onRemove(removableId, name)}
-        >
-          <Icon name="delete-bin" className="h-3.5 w-3.5" />
-        </Button>
-      ) : null}
-    </div>
+    <SettingsCard
+      icon={<Icon name="error-warning" className="size-5 text-[var(--status-error)]" />}
+      title={name}
+      badges={<SettingsCardPill tone="error">{t('settings.extensions.status.unreadable')}</SettingsCardPill>}
+      // Removing is the one thing to do with it, so the button is on the card.
+      footer={(
+        <>
+          <span className="min-w-0 flex-1 truncate" title={t('settings.extensions.unreadable.hint')}>{t('settings.extensions.unreadable.hint')}</span>
+          {removableId ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="xs"
+              className="shrink-0 !font-normal"
+              disabled={busy}
+              aria-label={t('settings.extensions.remove.aria', { name })}
+              onClick={() => void onRemove(removableId, name)}
+            >
+              {t('settings.extensions.remove')}
+            </Button>
+          ) : null}
+        </>
+      )}
+    />
   );
 };
 
@@ -436,6 +533,9 @@ export const ExtensionsPage: React.FC = () => {
   const [reinstall, setReinstall] = React.useState<{ source: InstallSource; name: string } | null>(null);
   const [approval, setApproval] = React.useState<InstalledGuest | null>(null);
   const [dropActive, setDropActive] = React.useState(false);
+  const [addOpen, setAddOpen] = React.useState(false);
+  // The shown extension is page-local: every visit starts at the grid.
+  const [selectedId, setSelectedId] = React.useState<string | null>(null);
   const dragDepth = React.useRef(0);
   const zipInputRef = React.useRef<HTMLInputElement | null>(null);
   // Desktop on its own machine can hand the server a path; every other
@@ -570,6 +670,7 @@ export const ExtensionsPage: React.FC = () => {
     }
     setInstallValue('');
     setReinstall(null);
+    setAddOpen(false);
     toast.success(
       result.replaced
         ? t('settings.extensions.toast.reinstalled', { name: result.guest.name })
@@ -743,42 +844,49 @@ export const ExtensionsPage: React.FC = () => {
     await loadGuestCatalog();
   };
 
-  return (
-    <SettingsPageLayout
-      title={t('settings.page.extensions.title')}
-      description={t('settings.page.extensions.description')}
-    >
-      {unsupported ? null : (
-        <SettingsSection
-          title={t('settings.extensions.add.action')}
-          info={enterpriseMode ? (
-            <>
-              <span className="block">{t('settings.extensions.add.enterpriseRule')}</span>
-              <span className="mt-2 block">{t('settings.extensions.add.info')}</span>
-            </>
-          ) : t('settings.extensions.add.info')}
-        >
-          <SettingsStackedField
-            label={t('settings.extensions.add.label')}
-            info={t(nativePaths ? 'settings.extensions.add.drop' : 'settings.extensions.add.drop.zipOnly')}
-            settingsItem="extensions.add"
-            controlClassName="w-full max-w-none"
+  const dropHandlers = {
+    onDragEnter,
+    onDragOver,
+    onDragLeave,
+    onDrop: (event: React.DragEvent<HTMLDivElement>) => void onDrop(event),
+  };
+  const handlers: ExtensionHandlers = {
+    busy,
+    onReview: setApproval,
+    onRemove: remove,
+    onSetEnabled: setEnabled,
+    onUpdate: update,
+  };
+  const selectedGuest = selectedId ? guests.find((guest) => guest.id === selectedId) ?? null : null;
+
+  const dialogs = (
+    <>
+      <Dialog open={addOpen} onOpenChange={(open) => { if (!busy) setAddOpen(open); }}>
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle>{t('settings.extensions.grid.addTitle')}</DialogTitle>
+            <DialogDescription>
+              {enterpriseMode ? (
+                <>
+                  <span className="block">{t('settings.extensions.add.enterpriseRule')}</span>
+                  <span className="mt-2 block">{t('settings.extensions.add.info')}</span>
+                </>
+              ) : t('settings.extensions.add.info')}
+            </DialogDescription>
+          </DialogHeader>
+          <div
+            className={cn(
+              'relative space-y-2 rounded-lg border border-dashed border-[color-mix(in_srgb,var(--foreground)_14%,transparent)] p-3 transition-colors',
+              dropActive && 'border-primary bg-primary/5',
+            )}
+            {...dropHandlers}
           >
-            <div
-              className={cn(
-                'relative -m-1 flex min-w-0 flex-1 items-center gap-2 rounded-md border border-dashed border-transparent p-1 transition-colors',
-                dropActive && 'border-primary bg-primary/5',
-              )}
-              onDragEnter={onDragEnter}
-              onDragOver={onDragOver}
-              onDragLeave={onDragLeave}
-              onDrop={(event) => void onDrop(event)}
-            >
-              {dropActive ? (
-                <span className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-md bg-background/80 typography-ui-label text-primary">
-                  {t('settings.extensions.add.drop.active')}
-                </span>
-              ) : null}
+            {dropActive ? (
+              <span className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-lg bg-background/80 typography-ui-label text-primary">
+                {t('settings.extensions.add.drop.active')}
+              </span>
+            ) : null}
+            <div className="flex min-w-0 items-center gap-2">
               <div className="relative flex min-w-0 flex-1 items-center">
                 <Input
                   value={installValue}
@@ -791,10 +899,7 @@ export const ExtensionsPage: React.FC = () => {
                   }}
                   placeholder={t('settings.extensions.add.placeholder')}
                   aria-label={t('settings.extensions.add.label')}
-                  className={cn(
-                    'h-8 min-w-0 flex-1 rounded-md ps-3',
-                    nativePaths ? 'pe-14' : 'pe-8',
-                  )}
+                  className={cn('h-8 min-w-0 flex-1 rounded-md ps-3', nativePaths ? 'pe-14' : 'pe-8')}
                   disabled={busy}
                 />
                 <input
@@ -835,7 +940,7 @@ export const ExtensionsPage: React.FC = () => {
                   </Button>
                 </div>
               </div>
-              <div className="shrink-0" data-settings-item="extensions.gitIdentity">
+              <div className="shrink-0">
                 <IdentityDropdown
                   activeProfile={selectedGitIdentity}
                   identities={identities}
@@ -844,72 +949,23 @@ export const ExtensionsPage: React.FC = () => {
                   iconOnly
                 />
               </div>
-              <Button
-                type="button"
-                size="sm"
-                disabled={busy}
-                aria-label={t('settings.extensions.add.aria')}
-                onClick={() => void add()}
-              >
-                <Icon name="add" className="h-4 w-4" />
-                {t('settings.extensions.add.action')}
-              </Button>
             </div>
-          </SettingsStackedField>
-          {identityLoadFailed ? <p className="typography-meta text-destructive">{t('settings.extensions.identity.loadFailed')}</p> : null}
-        </SettingsSection>
-      )}
-
-      <SettingsSection
-        title={t('settings.extensions.section.installed')}
-        contentClassName="space-y-3"
-        headerAction={unsupported ? null : (
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            data-settings-item="extensions.updates.check"
-            disabled={busy || checking || status !== 'ready'}
-            aria-label={t('settings.extensions.updates.check.aria')}
-            onClick={() => void checkForUpdates()}
-          >
-            <Icon name="refresh" className={cn('h-4 w-4', checking && 'animate-spin')} />
-            {t('settings.extensions.updates.check')}
-          </Button>
-        )}
-      >
-        {status === 'error' || catalogFailure ? (
-          <p className="typography-meta whitespace-pre-line text-destructive">
-            {t('settings.extensions.toast.loadFailed')}
-            {catalogFailure ? `\n${describeGuestRequestFailure(catalogFailure, t)}` : ''}
-          </p>
-        ) : null}
-        {unsupported ? (
-          <p className="typography-meta text-muted-foreground">{t('settings.extensions.unsupported')}</p>
-        ) : null}
-        {status === 'ready' && guests.length === 0 && unreadable.length === 0 ? (
-          <p className="typography-meta text-muted-foreground">{t('settings.extensions.empty')}</p>
-        ) : null}
-        {guests.map((guest) => (
-          <ExtensionCard
-            key={guest.id}
-            guest={guest}
-            busy={busy}
-            onReview={setApproval}
-            onRemove={remove}
-            onSetEnabled={setEnabled}
-            onUpdate={update}
-          />
-        ))}
-        {unreadable.map((guest, index) => (
-          <UnreadableExtensionCard
-            key={guest.id ?? `unreadable-${index}`}
-            guest={guest}
-            busy={busy}
-            onRemove={remove}
-          />
-        ))}
-      </SettingsSection>
+            <p className="typography-micro text-muted-foreground">
+              {t(nativePaths ? 'settings.extensions.add.drop' : 'settings.extensions.add.drop.zipOnly')}
+            </p>
+            {identityLoadFailed ? <p className="typography-meta text-destructive">{t('settings.extensions.identity.loadFailed')}</p> : null}
+          </div>
+          <DialogFooter>
+            <Button size="sm" variant="ghost" disabled={busy} onClick={() => setAddOpen(false)}>
+              {t('settings.common.actions.cancel')}
+            </Button>
+            <Button size="sm" disabled={busy} aria-label={t('settings.extensions.add.aria')} onClick={() => void add()}>
+              {busy ? <Icon name="loader-4" className="size-3.5 animate-spin" /> : <Icon name="add" className="h-4 w-4" />}
+              {t('settings.extensions.add.action')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <GuestApprovalDialog
         guest={approval}
@@ -955,6 +1011,85 @@ export const ExtensionsPage: React.FC = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </SettingsPageLayout>
+    </>
+  );
+
+
+  if (selectedGuest) {
+    return (
+      <>
+        <ExtensionDetail guest={selectedGuest} onBack={() => setSelectedId(null)} {...handlers} />
+        {dialogs}
+      </>
+    );
+  }
+
+  const hasItems = guests.length > 0 || unreadable.length > 0;
+
+  return (
+    <>
+      <SettingsPageLayout
+        title={t('settings.page.extensions.title')}
+        description={t('settings.page.extensions.description')}
+        headerEnd={unsupported ? null : (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-9 w-9 shrink-0 text-muted-foreground"
+            data-settings-item="extensions.updates.check"
+            disabled={busy || checking || status !== 'ready'}
+            aria-label={t('settings.extensions.updates.check.aria')}
+            title={t('settings.extensions.updates.check')}
+            onClick={() => void checkForUpdates()}
+          >
+            <Icon name="refresh" className={cn('size-4', checking && 'animate-spin')} />
+          </Button>
+        )}
+      >
+        {/* The whole grid takes a dropped folder or ZIP, not only the dialog. */}
+        <div className="relative" {...(unsupported ? {} : dropHandlers)}>
+          {dropActive && !addOpen ? (
+            <span className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-xl border border-dashed border-primary bg-background/80 typography-ui-label text-primary">
+              {t('settings.extensions.add.drop.active')}
+            </span>
+          ) : null}
+
+          {status === 'error' || catalogFailure ? (
+            <p className="mb-4 typography-meta whitespace-pre-line text-destructive">
+              {t('settings.extensions.toast.loadFailed')}
+              {catalogFailure ? `\n${describeGuestRequestFailure(catalogFailure, t)}` : ''}
+            </p>
+          ) : null}
+          {unsupported ? (
+            <p className="typography-meta text-muted-foreground">{t('settings.extensions.unsupported')}</p>
+          ) : (
+            <div className={SETTINGS_CARD_GRID_CLASS}>
+              <SettingsAddCard
+                label={t('settings.extensions.grid.addTitle')}
+                hint={t('settings.extensions.grid.addHint')}
+                onClick={() => setAddOpen(true)}
+                settingsItem="extensions.add"
+              />
+              {guests.map((guest) => (
+                <ExtensionCard key={guest.id} guest={guest} onOpen={() => setSelectedId(guest.id)} {...handlers} />
+              ))}
+              {unreadable.map((guest, index) => (
+                <UnreadableExtensionCard
+                  key={guest.id ?? `unreadable-${index}`}
+                  guest={guest}
+                  busy={busy}
+                  onRemove={remove}
+                />
+              ))}
+            </div>
+          )}
+          {status === 'ready' && !hasItems && !unsupported ? (
+            <p className="pt-4 typography-meta text-muted-foreground">{t('settings.extensions.empty')}</p>
+          ) : null}
+        </div>
+      </SettingsPageLayout>
+      {dialogs}
+    </>
   );
 };

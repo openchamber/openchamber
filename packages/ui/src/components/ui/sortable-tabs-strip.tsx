@@ -60,6 +60,11 @@ type SortableTabsStripProps = {
   variant?: 'default' | 'active-pill' | 'animated';
   activePillInsetClassName?: string;
   activePillButtonClassName?: string;
+  /** Active-pill height on desktop: `toolbar` is 28px like the toolbar
+      controls, `form` is 32px like the inputs and selects of a form (Settings).
+      Give the strip the matching height (`h-7` or `h-8`). Touch layouts keep
+      their own larger size either way. */
+  pillSize?: 'toolbar' | 'form';
   inactiveTabsIconOnly?: boolean;
   /** Every tab with an icon shows it alone, the active one too; the label
       stays its accessible name and tooltip. For a row short on width. */
@@ -152,6 +157,7 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
   variant = 'default',
   activePillInsetClassName,
   activePillButtonClassName,
+  pillSize = 'toolbar',
   inactiveTabsIconOnly = false,
   animateActivePill,
   nonCompositedIndicator = false,
@@ -628,9 +634,10 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
                         : 'w-full justify-center truncate px-3 text-center',
                     usesActivePillIndicator
                       // 24px buttons in a 2px-padded track: the switch is
-                      // 28px, as tall as the toolbar controls beside it.
-                      // Callers may add classes (padding) on top.
-                      ? cn(isActivePillVariant ? (isMobile ? 'h-[38px]' : 'h-6') : 'h-7', activePillButtonClassName)
+                      // 28px, as tall as the toolbar controls beside it (32px
+                      // with 28px buttons for a form). Callers may add classes
+                      // (padding) on top.
+                      ? cn(isActivePillVariant ? (isMobile ? 'h-[38px]' : pillSize === 'form' ? 'h-7' : 'h-6') : 'h-7', activePillButtonClassName)
                       : null,
                     usesActivePillIndicator
                       ? isActive

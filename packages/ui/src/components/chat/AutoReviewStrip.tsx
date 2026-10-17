@@ -1,7 +1,7 @@
 import React, { memo } from 'react';
 
-import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
+import { Spinner } from '@/components/ui/spinner';
 import { useI18n } from '@/lib/i18n';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
@@ -42,7 +42,7 @@ export const AutoReviewStrip = memo(() => {
 
   return (
     <div role="status" className="flex h-10 min-w-0 items-center gap-2 border-b border-border/60 ps-3 pe-1.5">
-      <Icon name="loader-4" className="size-3.5 shrink-0 animate-spin text-muted-foreground" aria-hidden="true" />
+      <Spinner className="size-3.5 text-muted-foreground" aria-hidden="true" />
       <span className="min-w-0 flex-1 truncate text-sm text-foreground">
         {t('chat.autoReview.title')}
         <span className="text-muted-foreground"> · {statusLabel}</span>

@@ -33,7 +33,11 @@ const pathLabel = (url: string): string => {
   }
 };
 
-/** Re-checked while the panel is open: a project's servers appear seconds apart. */
+/**
+ * Re-checked while the panel shows this tab: a project's servers appear seconds
+ * apart. A closed panel or a background tab asks nothing, since every look makes
+ * the server list listening ports, and asks again as soon as it is shown.
+ */
 const REFRESH_INTERVAL_MS = 2_000;
 
 /**
@@ -47,7 +51,8 @@ const isUnreachableFromHere = (directory: string): boolean => isRemoteWebLoopbac
 export const BrowserEmptyState: React.FC<{
   onOpen: (url: string) => void;
   directory?: string;
-}> = ({ onOpen, directory = '' }) => {
+  visible: boolean;
+}> = ({ onOpen, directory = '', visible }) => {
   const { t } = useI18n();
   const [discovery, setDiscovery] = React.useState<DevServerDiscovery>({ kind: 'loading' });
   const announced = useAnnouncedDevServers(directory);
@@ -66,6 +71,7 @@ export const BrowserEmptyState: React.FC<{
       setDiscovery({ kind: 'ready', servers: [] });
       return;
     }
+    if (!visible) return;
     let active = true;
     let timer: ReturnType<typeof setTimeout> | null = null;
     const controller = new AbortController();
@@ -85,7 +91,7 @@ export const BrowserEmptyState: React.FC<{
       if (timer) clearTimeout(timer);
       controller.abort();
     };
-  }, [directory, spaceStopped]);
+  }, [directory, spaceStopped, visible]);
 
   const candidates = React.useMemo(() => mergeDevServerCandidates({
     announced,

@@ -19,9 +19,11 @@ export const createOpenCodeWatcherRuntime = (deps) => {
   let unsubscribeStatus = null;
 
   // `onPayload` consumers speak the server's own event vocabulary, so the v2
-  // wire payload is translated here rather than in each consumer.
-  const emitTranslated = (payload) => {
-    for (const translated of translateWireEvent(payload)) onPayload(translated);
+  // wire payload is translated here rather than in each consumer. An event of
+  // an isolated space keeps the space's id beside it: its session lives in that
+  // space's OpenCode, never in the host's.
+  const emitTranslated = (payload, spaceId = null) => {
+    for (const translated of translateWireEvent(payload)) onPayload(translated, { spaceId });
   };
 
   const unwrapGlobalEventPayload = (eventData) => {
@@ -54,7 +56,7 @@ export const createOpenCodeWatcherRuntime = (deps) => {
         if (!payload || typeof payload !== 'object') {
           return;
         }
-        emitTranslated(payload);
+        emitTranslated(payload, event.spaceId ?? null);
       }, { spaces: true });
       unsubscribeStatus = globalEventHub.subscribeStatus((status) => {
         if (signal.aborted) {

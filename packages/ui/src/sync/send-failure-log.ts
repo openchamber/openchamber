@@ -7,7 +7,8 @@
  * nothing to report beyond "it disappeared".
  *
  * This buffer gives the failure somewhere to live until someone asks for it,
- * via the About dialog's diagnostics report or `__opencodeDebug`. It is
+ * via `__opencodeDebug`; the diagnostic timeline exports only transport status
+ * and ambiguity, not the raw reason. It is
  * in-memory only: never persisted, never sent anywhere, and dropped on reload.
  */
 
@@ -46,4 +47,3 @@ export function recordSendFailure(record: Omit<SendFailureRecord, 'at' | 'reason
 export function getRecentSendFailures(): SendFailureRecord[] {
   return [...records].reverse()
 }
-

@@ -332,6 +332,7 @@ mock.module('@/components/ui', () => ({
   },
 }));
 mock.module('@/components/icon/Icon', () => ({ Icon: () => null }));
+mock.module('@/components/ui/busy-dots', () => ({ BusyDots: () => null }));
 mock.module('@/components/ui/collapsible', () => ({
   Collapsible: ({ children }: ElementProps) => children ?? null,
   CollapsibleTrigger: ({ children }: ElementProps) => children ?? null,

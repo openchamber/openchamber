@@ -519,7 +519,7 @@ describe('managed agent tool runtime', () => {
     }
   });
 
-  it('registers every tool as a direct tool unless Code Mode is asked for', async () => {
+  it('registers every tool as a direct tool unless Code Mode is asked for, and the render tool always direct', async () => {
     const { runtime, dataDir } = await createRuntime();
     await prepareManagedEnv(runtime, { includeControl: true, includeWeb: true, includeMemory: true, includeNotify: true });
     const direct = await loadTools(dataDir, 'direct');
@@ -527,11 +527,13 @@ describe('managed agent tool runtime', () => {
       expect(tool.options).toEqual({ codemode: false });
     }
 
-    await prepareManagedEnv(runtime, { includeControl: true, includeWeb: true, includeMemory: true, includeNotify: true, codeMode: true });
-    const behindExecute = await loadTools(dataDir, 'codemode');
+    await prepareManagedEnv(runtime, { includeControl: true, includeWeb: true, includeMemory: true, includeNotify: true, includeRender: true, codeMode: true });
+    const { openchamber_render: render, ...behindExecute } = await loadTools(dataDir, 'codemode');
+    expect(Object.keys(behindExecute).length).toBeGreaterThan(0);
     for (const tool of Object.values(behindExecute)) {
       expect(tool.options).toEqual({ codemode: true });
     }
+    expect(render.options).toEqual({ codemode: false });
   });
 
   it('refuses to inject a plugin with no tools in it', async () => {

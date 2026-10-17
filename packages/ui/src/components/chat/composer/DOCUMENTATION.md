@@ -420,6 +420,11 @@ answers with severe input lag. **That much is not platform-specific and must
 not be undone.** What differs is who paints the selection, and
 `composerSelectionExtension` (`editor/theme.ts`) picks that per platform.
 
+The drawn caret blinks from a 600 ms timer (`timerCaretBlink`,
+`lib/codemirror/caretBlink.ts`). CodeMirror's own blink is an infinite CSS
+animation that kept the compositor ticking every frame for as long as the
+composer had focus: 4.1% of a core against 1.3% on the animation fixture.
+
 When CodeMirror 6.43.9's iOS predicate does not match,
 `composerNativeSelectionExtension` layers over `drawSelection()`: it re-shows
 the native selection, and — only while a range is selected — the native caret,

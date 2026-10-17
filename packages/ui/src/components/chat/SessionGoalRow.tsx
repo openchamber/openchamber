@@ -8,6 +8,7 @@ import { setSessionGoalStatus } from '@/lib/sessionGoalActions';
 import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
 import { useI18n } from '@/lib/i18n';
+import { Spinner } from '@/components/ui/spinner';
 
 interface SessionGoalRowProps {
   sessionId: string | null;
@@ -24,6 +25,9 @@ export const SessionGoalRow: React.FC<SessionGoalRowProps> = React.memo(({ sessi
   const objectiveContent = useGoalObjectiveContent(sessionId ?? '', goal);
   const sessionStatus = useSessionStatus(sessionId ?? '', directory);
   const [busy, setBusy] = React.useState(false);
+  // The agent stopped but the goal is still active: the server is sitting out
+  // the quiet window and running the audit.
+  const evaluating = Boolean(sessionId && enabled && goal?.status === 'active' && (!sessionStatus || sessionStatus.type === 'idle'));
 
   const handleToggleStatus = React.useCallback(async (nextStatus: 'active' | 'paused') => {
     if (!sessionId || busy) return;
@@ -68,12 +72,10 @@ export const SessionGoalRow: React.FC<SessionGoalRowProps> = React.memo(({ sessi
       <span className="min-w-0 flex-1 truncate text-sm text-foreground">
         {objectiveContent || t('chat.goal.dialog.titleManage')}
       </span>
-      {goal.status === 'active' && (!sessionStatus || sessionStatus.type === 'idle') ? (
-        // The agent stopped but the goal is still active: the server is
-        // sitting out the quiet window and running the audit — show that
-        // instead of a static "Active" that looks stuck.
+      {evaluating ? (
+        // Show the audit instead of a static "Active" that looks stuck.
         <span className="flex flex-shrink-0 items-center gap-1 typography-meta text-muted-foreground">
-          <Icon name="loader-4" className="h-3 w-3 animate-spin" aria-hidden="true" />
+          <Spinner className="h-3 w-3" aria-hidden="true" />
           {t('chat.goal.status.evaluating')}
         </span>
       ) : (

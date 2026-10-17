@@ -1,4 +1,4 @@
-import { spaceApiPath, spaceIdOfDirectory } from '@/lib/spaces/space-route';
+import { spaceIdOfDirectory } from '@/lib/spaces/space-route';
 import { z } from 'zod';
 import type {
   GitStatus,
@@ -791,8 +791,8 @@ function buildUrl(
   const query: Record<string, string | number | boolean | undefined> = { ...params };
   if (directory) query.directory = directory;
 
-  // A directory inside an isolated space addresses that space's git.
-  return getRuntimeUrlResolver().api(spaceApiPath(path, directory), query);
+  // The `directory` query also sends a request about a space's directory to that space's git.
+  return getRuntimeUrlResolver().api(path, query);
 }
 
 type ProjectOverviewField = 'repo' | 'status' | 'root' | 'worktrees';

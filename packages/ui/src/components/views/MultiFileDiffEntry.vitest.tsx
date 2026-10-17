@@ -94,14 +94,17 @@ test('status paths without file contents render what git records instead of an e
   const recorded = '1'.repeat(40);
   const moved = '2'.repeat(40);
   const statusRequests: string[] = [];
+  const diffRequests: string[] = [];
   const base = createWebAPIs();
   const apis = { ...base, git: { ...base.git,
     checkIsGitRepository: async () => true,
     getGitStatus: async (directory: string) => {
       statusRequests.push(directory);
-      return { current: 'main', tracking: null, ahead: 0, behind: 0, files: [], isClean: true, diffStats: { staged: {}, working: {} } };
+      const files = directory === '/repo/nested' ? [{ path: 'src/inner.ts', index: ' ', working_dir: 'M' }] : [];
+      return { current: 'main', tracking: null, ahead: 0, behind: 0, files, isClean: files.length === 0, diffStats: { staged: {}, working: { 'src/inner.ts': { insertions: 3, deletions: 1 } } } };
     },
-    getGitDiff: async (_directory: string, options: { path: string }) => {
+    getGitDiff: async (directory: string, options: { path: string }) => {
+      diffRequests.push(`${directory}:${options.path}`);
       if (options.path === 'nested/') throw new GitPathUnavailableError('Path is a separate Git repository: nested/', 'nested_repository');
       if (options.path === 'gone.txt') throw new GitPathUnavailableError('Path not found in working tree, index, or HEAD: gone.txt', 'path_not_found');
       return { diff: '', submodule: { headCommit: recorded, indexCommit: recorded, worktreeCommit: moved, hasTrackedChanges: false, hasUntrackedFiles: true, hasConflict: false } };
@@ -124,18 +127,25 @@ test('status paths without file contents render what git records instead of an e
     expect(container.textContent).toContain('Commit 1111111 → 2222222');
     expect(container.textContent).toContain('Has untracked files');
 
+    // A nested repository lists its own changes, read from that repository.
     await render('nested/');
     expect(container.textContent).toContain('Separate Git repository');
+    expect(container.textContent).toContain('Open as project');
+    expect(container.textContent).toContain('src/inner.ts');
+    expect(container.textContent).toContain('+3');
     expect(container.textContent).not.toContain('Failed to load diff');
     expect(container.textContent).not.toContain('Retry');
-    expect(statusRequests).toEqual([]);
+    expect(statusRequests).toEqual(['/repo/nested']);
+    const innerRow = Array.from(container.querySelectorAll('button')).find((button) => button.textContent?.includes('src/inner.ts'));
+    await act(async () => innerRow?.click());
+    expect(diffRequests).toContain('/repo/nested:src/inner.ts');
 
     await render('gone.txt');
     expect(container.textContent).toContain('File no longer exists');
     expect(container.textContent).not.toContain('Failed to load diff');
     // A row that stays listed after the refresh can still be retried.
     expect(container.textContent).toContain('Retry');
-    expect(statusRequests).toEqual(['/repo']);
+    expect(statusRequests).toEqual(['/repo/nested', '/repo']);
   } finally {
     await act(async () => root.unmount());
     restoreDom();

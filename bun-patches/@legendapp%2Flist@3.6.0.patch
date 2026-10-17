@@ -1,5 +1,8 @@
+diff --git a/node_modules/@legendapp/list/.bun-tag-d9cee12e0ece25f7 b/.bun-tag-d9cee12e0ece25f7
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
 diff --git a/react-native.web.js b/react-native.web.js
-index a0f962c42b7b28a49e7480ed3e16056b9e154a4c..449d7680fb561dc9cc7c4cb378a5573c1c4bd77c 100644
+index a0f962c42b7b28a49e7480ed3e16056b9e154a4c..70282a5cd94eee201014d4f18c3c2f64c6f13057 100644
 --- a/react-native.web.js
 +++ b/react-native.web.js
 @@ -1171,7 +1171,11 @@ function warnDevOnce(id, text) {
@@ -35,7 +38,20 @@ index a0f962c42b7b28a49e7480ed3e16056b9e154a4c..449d7680fb561dc9cc7c4cb378a5573c
          );
          for (const allocation of availableContainerAllocations) {
            const i = allocation.itemIndex;
-@@ -6098,7 +6107,11 @@ function useDOMOrder(ref) {
+@@ -5768,7 +5777,11 @@ function processContainerLayout({ containerId, ctx, rectangle, ref, state }) {
+       size: layout
+     });
+   };
+-  const shouldDeferWebShrinkLayoutUpdate = !isInMVCPActiveMode(listState) && previousSize !== void 0 && size + 1 < previousSize;
++  // A row that shrank because its width changed (text re-wrapping as the
++  // list narrows or widens) shrank for real: deferred a frame, the rows below
++  // and an end-pinned scroll position lagged it on every frame of a resize.
++  const widthChanged = state.lastSize !== void 0 && roundSize(state.lastSize.width) !== roundSize(rectangle.width);
++  const shouldDeferWebShrinkLayoutUpdate = !widthChanged && !isInMVCPActiveMode(listState) && previousSize !== void 0 && size + 1 < previousSize;
+   if (shouldDeferWebShrinkLayoutUpdate) {
+     scheduleWebShrinkMeasurement(state, () => {
+       var _a4;
+@@ -6098,7 +6111,11 @@ function useDOMOrder(ref) {
    const ctx = useStateContext();
    React3.useEffect(() => {
      let timeoutId;
@@ -49,7 +65,7 @@ index a0f962c42b7b28a49e7480ed3e16056b9e154a4c..449d7680fb561dc9cc7c4cb378a5573c
      const unsubscribe = listen$(ctx, "lastPositionUpdate", () => {
        const container = ref.current;
 diff --git a/react-native.web.mjs b/react-native.web.mjs
-index 9338287159778f842fa05b5a0467336bf5f50fe8..df59667796d9a544943a38ba6e0994302a202032 100644
+index 9338287159778f842fa05b5a0467336bf5f50fe8..8b8247bd2ec7eea7794b37f5dd7ac01b77da60d4 100644
 --- a/react-native.web.mjs
 +++ b/react-native.web.mjs
 @@ -1150,7 +1150,11 @@ function warnDevOnce(id, text) {
@@ -85,7 +101,20 @@ index 9338287159778f842fa05b5a0467336bf5f50fe8..df59667796d9a544943a38ba6e099430
          );
          for (const allocation of availableContainerAllocations) {
            const i = allocation.itemIndex;
-@@ -6077,7 +6086,11 @@ function useDOMOrder(ref) {
+@@ -5747,7 +5756,11 @@ function processContainerLayout({ containerId, ctx, rectangle, ref, state }) {
+       size: layout
+     });
+   };
+-  const shouldDeferWebShrinkLayoutUpdate = !isInMVCPActiveMode(listState) && previousSize !== void 0 && size + 1 < previousSize;
++  // A row that shrank because its width changed (text re-wrapping as the
++  // list narrows or widens) shrank for real: deferred a frame, the rows below
++  // and an end-pinned scroll position lagged it on every frame of a resize.
++  const widthChanged = state.lastSize !== void 0 && roundSize(state.lastSize.width) !== roundSize(rectangle.width);
++  const shouldDeferWebShrinkLayoutUpdate = !widthChanged && !isInMVCPActiveMode(listState) && previousSize !== void 0 && size + 1 < previousSize;
+   if (shouldDeferWebShrinkLayoutUpdate) {
+     scheduleWebShrinkMeasurement(state, () => {
+       var _a4;
+@@ -6077,7 +6090,11 @@ function useDOMOrder(ref) {
    const ctx = useStateContext();
    useEffect(() => {
      let timeoutId;
@@ -99,7 +128,7 @@ index 9338287159778f842fa05b5a0467336bf5f50fe8..df59667796d9a544943a38ba6e099430
      const unsubscribe = listen$(ctx, "lastPositionUpdate", () => {
        const container = ref.current;
 diff --git a/react.js b/react.js
-index a0f962c42b7b28a49e7480ed3e16056b9e154a4c..449d7680fb561dc9cc7c4cb378a5573c1c4bd77c 100644
+index a0f962c42b7b28a49e7480ed3e16056b9e154a4c..70282a5cd94eee201014d4f18c3c2f64c6f13057 100644
 --- a/react.js
 +++ b/react.js
 @@ -1171,7 +1171,11 @@ function warnDevOnce(id, text) {
@@ -135,7 +164,20 @@ index a0f962c42b7b28a49e7480ed3e16056b9e154a4c..449d7680fb561dc9cc7c4cb378a5573c
          );
          for (const allocation of availableContainerAllocations) {
            const i = allocation.itemIndex;
-@@ -6098,7 +6107,11 @@ function useDOMOrder(ref) {
+@@ -5768,7 +5777,11 @@ function processContainerLayout({ containerId, ctx, rectangle, ref, state }) {
+       size: layout
+     });
+   };
+-  const shouldDeferWebShrinkLayoutUpdate = !isInMVCPActiveMode(listState) && previousSize !== void 0 && size + 1 < previousSize;
++  // A row that shrank because its width changed (text re-wrapping as the
++  // list narrows or widens) shrank for real: deferred a frame, the rows below
++  // and an end-pinned scroll position lagged it on every frame of a resize.
++  const widthChanged = state.lastSize !== void 0 && roundSize(state.lastSize.width) !== roundSize(rectangle.width);
++  const shouldDeferWebShrinkLayoutUpdate = !widthChanged && !isInMVCPActiveMode(listState) && previousSize !== void 0 && size + 1 < previousSize;
+   if (shouldDeferWebShrinkLayoutUpdate) {
+     scheduleWebShrinkMeasurement(state, () => {
+       var _a4;
+@@ -6098,7 +6111,11 @@ function useDOMOrder(ref) {
    const ctx = useStateContext();
    React3.useEffect(() => {
      let timeoutId;
@@ -149,7 +191,7 @@ index a0f962c42b7b28a49e7480ed3e16056b9e154a4c..449d7680fb561dc9cc7c4cb378a5573c
      const unsubscribe = listen$(ctx, "lastPositionUpdate", () => {
        const container = ref.current;
 diff --git a/react.mjs b/react.mjs
-index 9338287159778f842fa05b5a0467336bf5f50fe8..df59667796d9a544943a38ba6e0994302a202032 100644
+index 9338287159778f842fa05b5a0467336bf5f50fe8..8b8247bd2ec7eea7794b37f5dd7ac01b77da60d4 100644
 --- a/react.mjs
 +++ b/react.mjs
 @@ -1150,7 +1150,11 @@ function warnDevOnce(id, text) {
@@ -185,7 +227,20 @@ index 9338287159778f842fa05b5a0467336bf5f50fe8..df59667796d9a544943a38ba6e099430
          );
          for (const allocation of availableContainerAllocations) {
            const i = allocation.itemIndex;
-@@ -6077,7 +6086,11 @@ function useDOMOrder(ref) {
+@@ -5747,7 +5756,11 @@ function processContainerLayout({ containerId, ctx, rectangle, ref, state }) {
+       size: layout
+     });
+   };
+-  const shouldDeferWebShrinkLayoutUpdate = !isInMVCPActiveMode(listState) && previousSize !== void 0 && size + 1 < previousSize;
++  // A row that shrank because its width changed (text re-wrapping as the
++  // list narrows or widens) shrank for real: deferred a frame, the rows below
++  // and an end-pinned scroll position lagged it on every frame of a resize.
++  const widthChanged = state.lastSize !== void 0 && roundSize(state.lastSize.width) !== roundSize(rectangle.width);
++  const shouldDeferWebShrinkLayoutUpdate = !widthChanged && !isInMVCPActiveMode(listState) && previousSize !== void 0 && size + 1 < previousSize;
+   if (shouldDeferWebShrinkLayoutUpdate) {
+     scheduleWebShrinkMeasurement(state, () => {
+       var _a4;
+@@ -6077,7 +6090,11 @@ function useDOMOrder(ref) {
    const ctx = useStateContext();
    useEffect(() => {
      let timeoutId;

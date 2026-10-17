@@ -12,6 +12,7 @@ import { openExternalUrl } from '@/lib/url';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useDeviceInfo } from '@/lib/device';
 import { Icon } from "@/components/icon/Icon";
+import { Spinner } from "@/components/ui/spinner";
 import { useUIStore } from '@/stores/useUIStore';
 import { useOpenSourceControlSettings } from '@/hooks/useOpenSourceControlSettings';
 import { useWalkthroughStore } from '@/stores/useWalkthroughStore';
@@ -1043,7 +1044,7 @@ export const PullRequestSection: React.FC<{
 
             {(livePr || (!pr && !isInitialStatusResolved)) && !error && !shouldShowConnectionNotice && (binding.status === 'loading' || readContext) ? (
               <div className="flex items-center gap-2 typography-micro text-muted-foreground">
-                <Icon name="loader-4" className="size-4 animate-spin" />
+                <Spinner className="size-4" />
                 {t('gitView.pr.checkingStatus')}
               </div>
             ) : (

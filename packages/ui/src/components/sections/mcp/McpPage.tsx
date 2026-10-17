@@ -1340,7 +1340,7 @@ export const McpPage: React.FC = () => {
           settingsItem="mcp.command"
           // The section's content wrapper carries no spacing of its own, so the
           // kind tabs, the field and its hint would otherwise sit flush.
-          contentClassName="space-y-2"
+          contentClassName="space-y-3"
         >
             {/* Pasting a link or a command still flips this for you, but the
                 choice is a control you can see and press. As one sentence with
@@ -1358,8 +1358,9 @@ export const McpPage: React.FC = () => {
                 layoutMode="scrollable"
                 intrinsicWidth
                 variant="active-pill"
+                pillSize="form"
                 activePillButtonClassName="px-3"
-                className="h-7 flex-none"
+                className="h-8 flex-none"
               />
             </div>
 

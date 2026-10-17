@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils"
 import { Icon } from "@/components/icon/Icon";
 import { shortcutRegistry } from "@/lib/shortcuts";
 import { handleDropdownNavigationKey } from "./dropdown-navigation";
+import { useMenuWindowDismiss } from "./menu-window-dismiss";
 import { dropdownMenuItemClass, dropdownMenuPopupClass, dropdownMenuSeparatorClass, dropdownMenuSubTriggerClass } from "./dropdown-menu.styles";
 import { GlassRedrawGuard } from "./glass-redraw-guard"
 
@@ -37,7 +38,8 @@ function renderFromAsChild(asChild: boolean | undefined, children: React.ReactNo
   return { children };
 }
 
-type DropdownMenuProps = React.ComponentProps<typeof BaseMenu.Root> & {
+// The wrapper owns `actionsRef` to close the menu on window blur.
+type DropdownMenuProps = Omit<React.ComponentProps<typeof BaseMenu.Root>, "actionsRef"> & {
   disableGlobalShortcuts?: boolean;
 };
 
@@ -52,6 +54,7 @@ function DropdownMenu({
   const [collisionBoundary, setCollisionBoundary] = React.useState<Element | null>(null);
   const [uncontrolledOpen, setUncontrolledOpen] = React.useState(defaultOpen ?? false);
   const isOpen = open ?? uncontrolledOpen;
+  const actionsRef = useMenuWindowDismiss(isOpen);
   const portalContextValue = React.useMemo<DropdownPortalContextValue>(() => ({
     portalContainer,
     collisionBoundary,
@@ -73,6 +76,7 @@ function DropdownMenu({
     <DropdownPortalContext.Provider value={portalContextValue}>
       <BaseMenu.Root
         {...props}
+        actionsRef={actionsRef}
         defaultOpen={defaultOpen}
         open={open}
         onOpenChange={handleOpenChange}

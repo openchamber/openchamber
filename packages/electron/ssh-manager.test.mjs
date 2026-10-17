@@ -51,6 +51,21 @@ afterEach(async () => {
 });
 
 describe('ElectronSshManager', () => {
+  test('bounds local diagnostic snapshots without reading any remote host', () => {
+    const manager = new ElectronSshManager({
+      settingsFilePath: path.join(os.tmpdir(), 'unused-settings.json'),
+      appVersion: '0.0.0-test', emit: () => undefined,
+    });
+    for (let index = 0; index < 22; index++) {
+      manager.appendLog(`connection-${index}`, 'Starting SSH connection');
+    }
+    manager.setStatus('connection-21', 'ready', 'private host name');
+    const snapshots = manager.diagnosticLogSnapshots();
+    expect(snapshots.omittedSources).toBe(2);
+    expect(snapshots.entries).toHaveLength(20);
+    expect(snapshots.entries.at(-1).phase).toBe('ready');
+    expect(snapshots.entries.at(-1)).not.toHaveProperty('detail');
+  });
   for (const scenario of ['explicit XDG with spaces', 'unset XDG', 'missing XDG with home fallback']) {
     test.skipIf(process.platform === 'win32')(`executes remote discovery, install and launch with ${scenario}`, async () => {
       const home = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber ssh paths-'));

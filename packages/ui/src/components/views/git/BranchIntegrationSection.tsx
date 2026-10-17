@@ -24,6 +24,7 @@ import {
 } from '@/components/ui/command';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Icon } from "@/components/icon/Icon";
+import { Spinner } from "@/components/ui/spinner";
 import { cn } from '@/lib/utils';
 import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { rankByQuery } from '@/lib/search/fuzzySearch';
@@ -184,7 +185,7 @@ export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> =
             <div key={index} className="flex items-start gap-2">
               <div className="mt-0.5 shrink-0">
                 {log.status === 'running' && (
-                  <Icon name="loader-4" className="size-3.5 animate-spin text-primary" />
+                  <Spinner className="size-3.5 text-primary" />
                 )}
                 {log.status === 'done' && (
                   <Icon name="check" className="size-3.5 text-success" />
@@ -451,7 +452,7 @@ export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> =
             disabled={isDisabled}
           >
             {isOperating ? (
-              <Icon name="loader-4" className="size-4 animate-spin" />
+              <Spinner className="size-4" />
             ) : (
               <Icon name="git-merge" className="size-4" />
             )}

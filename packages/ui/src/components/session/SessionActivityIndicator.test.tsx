@@ -68,7 +68,7 @@ describe('SessionActivityIndicator', () => {
     await renderIndicator({ state: 'unread' });
     expect(iconHref('unread')).toBe('#oc-checkbox-circle');
     expect(host.querySelector('[data-session-activity-indicator]')?.classList).toContain('shrink-0');
-    expect(host.innerHTML).not.toContain('activity-spinner');
+    expect(host.querySelector('[data-spinner]')).toBeNull();
   });
 
   test('labels the state for assistive technology and hover', async () => {
@@ -92,21 +92,20 @@ describe('SessionActivityIndicator', () => {
 
     for (const state of ['running', 'subagent', 'shell'] as const) {
       await renderIndicator({ state });
-      expect(iconHref(state)).toBe('#oc-loader-4');
-      expect(host.querySelector('.activity-spinner')).not.toBeNull();
+      expect(host.querySelector(`[data-session-activity-indicator="${state}"] [data-spinner]`)).not.toBeNull();
     }
     await renderIndicator({ state: 'unread' });
     expect(iconHref('unread')).toBe('#oc-checkbox-circle');
-    expect(host.querySelector('.activity-spinner')).toBeNull();
+    expect(host.querySelector('[data-spinner]')).toBeNull();
   });
 
   test('switches a mounted running indicator immediately and restores the icon', async () => {
     useSessionDisplayStore.setState({ animatedActivityIndicators: false });
     await renderIndicator({ state: 'running' });
     await act(async () => useSessionDisplayStore.getState().setAnimatedActivityIndicators(true));
-    expect(host.querySelector('.activity-spinner')?.classList).toContain('text-status-info');
+    expect(host.querySelector('[data-spinner]')?.classList).toContain('text-status-info');
     await act(async () => useSessionDisplayStore.getState().setAnimatedActivityIndicators(false));
-    expect(host.querySelector('.activity-spinner')).toBeNull();
+    expect(host.querySelector('[data-spinner]')).toBeNull();
     expect(iconHref('running')).toBe('#oc-circle');
   });
 });

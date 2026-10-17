@@ -1,4 +1,3 @@
-import { spaceApiPath } from '@/lib/spaces/space-route';
 import React from 'react';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 
@@ -31,6 +30,7 @@ import { CodeMirrorEditor } from '@/components/ui/CodeMirrorEditor';
 import { GoToLineDialog } from './GoToLineDialog';
 import { DocumentSymbolsPanel } from './DocumentSymbolsPanel';
 import { GitignoredToggleButton } from '@/components/layout/GitignoredToggleButton';
+import { useZoneInteractive } from '@/components/layout/zoneInteractiveContext';
 import { MarkdownPreviewSearch } from './MarkdownPreviewSearch';
 import { PreviewToggleButton } from './PreviewToggleButton';
 import { createFileContentPoller } from './fileContentPoller';
@@ -323,7 +323,8 @@ const ScrollingFileName: React.FC<{ name: string; folder?: string }> = ({ name, 
     <span ref={containerRef} className="relative block min-w-0 flex-1 overflow-hidden whitespace-nowrap">
       <span ref={textRef} aria-hidden="true" className="invisible absolute whitespace-nowrap">{text}</span>
       {overflowing ? (
-        <span className="open-file-name-marquee-track">
+        // Keyed by the file, so each newly opened name scrolls past once.
+        <span key={`${folder}/${name}`} className="open-file-name-marquee-track">
           <span className="open-file-name-marquee-item">{text}</span>
           <span className="open-file-name-marquee-item" aria-hidden="true">{text}</span>
         </span>
@@ -834,6 +835,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
   const alwaysShowActions = isMobile || isTablet;
   const showHidden = useDirectoryShowHidden();
   const showGitignored = useFilesViewShowGitignored();
+  const zoneInteractive = useZoneInteractive();
 
   const currentDirectory = useEffectiveDirectory() ?? '';
   const root = normalizePath(currentDirectory.trim());
@@ -3313,6 +3315,12 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
       return;
     }
 
+    // The jump focuses the editor, which does nothing inside a zone that is
+    // still opening (inert); it runs once the zone settles.
+    if (!zoneInteractive) {
+      return;
+    }
+
     const view = editorViewRef.current;
     if (!view) {
       scheduleNavigationRetry();
@@ -3380,10 +3388,12 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     setPendingFileNavigation,
     textViewMode,
     toFileNode,
+    zoneInteractive,
   ]);
 
   React.useEffect(() => {
-    if (!pendingFileFocusPath || !root) {
+    // Focus inside a zone that is still opening (inert) does nothing.
+    if (!pendingFileFocusPath || !root || !zoneInteractive) {
       return;
     }
 
@@ -3428,6 +3438,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     selectedFile?.path,
     setPendingFileFocusPath,
     textViewMode,
+    zoneInteractive,
   ]);
 
   const nudgeEditorSelectionAboveKeyboard = React.useCallback((view: EditorView | null) => {
@@ -3788,7 +3799,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     : '';
 
   const pdfSrc = selectedFile?.path && usesRawAssetUrl && pdfAssetAuthKey && pdfAssetAuthReadyKey === pdfAssetAuthKey
-    ? getRuntimeUrlResolver().authenticatedAsset(spaceApiPath('/api/fs/raw', root), {
+    ? getRuntimeUrlResolver().authenticatedAsset('/api/fs/raw', {
       path: selectedFile.path,
       allowOutsideWorkspace: selectedFileReadOptions.allowOutsideWorkspace ? 'true' : undefined,
       directory: root || undefined,
@@ -4344,7 +4355,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
                 aria-label={ttsLabel}
                 onClick={toggleTTS}
               >
-                <Icon name="volume-up" className={cn('size-4', isTTSPlaying && 'animate-pulse text-[var(--primary-text)]')} />
+                <Icon name="volume-up" className={cn('size-4', isTTSPlaying && 'text-[var(--primary-text)]')} />
               </Button>
             </TooltipTrigger>
             <TooltipContent sideOffset={8}>{ttsLabel}</TooltipContent>

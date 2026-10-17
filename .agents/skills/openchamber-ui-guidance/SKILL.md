@@ -24,9 +24,9 @@ The app has one rule for depth, and every surface follows from it:
 
 - **Controls are raised.** Anything you press or type into (buttons, dropdown
   triggers, the chosen option of a segmented choice, text fields, the
-  composer) carries a hairline edge, a lit top line and a short shadow. Text
-  fields and the composer sit a step quieter than buttons and pickers: a field
-  is a place to type, not something to press.
+  composer) carries a hairline edge, a lit top line and a short shadow. In
+  dark themes fields, buttons and pickers share one light; in light themes a
+  field is pressed in, because it is a place to type, not something to press.
 - **Layout is flat and set off by tone.** Cards, list tiles, groups and
   panels have no border; each is a tone step from what it sits on. A block
   inside a tile is the next step. Never box a box: a card inside a card, a

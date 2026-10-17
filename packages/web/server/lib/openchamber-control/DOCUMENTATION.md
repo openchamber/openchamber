@@ -57,6 +57,10 @@ other.
   (`trackWaitingPage` in `../opencode/session-runtime.js`), broadcasts
   `openchamber:page-waiting` / `openchamber:page-settled` to the clients, and
   sends the same "Input needed" notification a form gets.
+  `renderPageImageSources` lists the local images a page names by absolute
+  path (in quotes or a CSS `url()`, PNG, JPEG, GIF or WebP, at most 12). The
+  image grant route (`../markdown-image-grants/`) allows exactly those, and the
+  chat reads them with the same rule.
 - `routes.js` is the authenticated CLI HTTP adapter. It forwards one action,
   preserves service status and partial-result details, and propagates request
   cancellation. It also carries the chat's answer to a waiting page.

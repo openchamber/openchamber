@@ -39,6 +39,13 @@ the user can want independently:
   draw a page*). The description lists the theme variables the chat injects
   (`packages/ui/src/components/chat/message/parts/htmlRender.ts`); change both
   together.
+  The description names the image files a page may show by path, from
+  anywhere on the machine as the image grant route allows, and the temporary
+  directory to save a screenshot in (`os.tmpdir()/opencode`) so it stays out
+  of the project.
+  A mockup of the user's own project is the one page that does not use them:
+  the description tells the agent to take that page's look from the
+  project's code, since the point is how the user's product will look.
   With `awaitAnswer` the call waits for the user's answer on the page. The
   plugin sends the call id (`context.id`) with the callback so the server can
   find the waiting call when the chat answers it, and copies the answer into
@@ -66,7 +73,10 @@ both settings are `false`.
   size-limited catalog; with a few large MCP servers ours dropped out of it and
   agents concluded the tool did not exist. `agentToolsCodeMode: true` (the
   "Run through Code Mode" checkbox in the same section, off by default) flips
-  all of them to `codemode: true`.
+  all of them to `codemode: true`, except `openchamber_render`: the chat draws
+  a page from that tool's own call (its input and stored result), and inside
+  an `execute` script the call is only an entry in `execute`'s list, so the
+  page never showed.
 - The plugin accepts the action's inputs either inside `parameters` or beside
   `action`, because models produce both shapes; an explicit `parameters` object
   wins on a conflict. Rejecting the flattened shape turned a call that plainly

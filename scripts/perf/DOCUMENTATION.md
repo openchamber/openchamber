@@ -161,8 +161,8 @@ delivered. Everything it reports is therefore work the app performs while the
 user is doing nothing — the class of regression users notice as fan noise,
 battery drain, and a permanently busy tab.
 
-Reports per second of idle time: main-thread busy time, script, style
-recalculation and layout time and counts, DOM node / document / frame /
+Reports per second of idle time: frames the display compositor drew,
+main-thread busy time, script, style recalculation and layout time and counts, DOM node / document / frame /
 listener growth, heap trajectory including a least-squares growth rate, a CPU
 sampling profile with self time per function, and attribution of timer,
 animation-frame and observer work to the call site that scheduled it.
@@ -171,6 +171,16 @@ animation-frame and observer work to the call site that scheduled it.
 # Baseline, then compare a change against it and fail on a budget.
 bun run profile:idle -- --url http://127.0.0.1:4599 --output artifacts/before
 bun run profile:idle -- --url http://127.0.0.1:4599 --baseline artifacts/before --budget-cpu 5
+```
+
+Frames drawn come from a `viz`-only trace of `Display::DrawAndSwap`
+(`frame-count.mjs`) and are the metric that sees motion: a composited spinner
+or pulse costs the main thread nothing and draws 60 frames a second. A still
+app draws about 0, the shared 1 s waiting tick 1. `--budget-frames <n>` fails
+the run above `n`; prove the gate with the positive control, which must fail:
+
+```bash
+bun run profile:idle -- --url http://127.0.0.1:4799 --budget-frames 3 --inject-script scripts/perf/controls/pulse-dot.js
 ```
 
 Scenario options reach a specific mounted state, because idle cost depends on
@@ -373,7 +383,23 @@ Measured on this repository's fixture, at any element count from 1 to 32:
 
 Animate `transform` and `opacity`. Anything else recalculates style on every
 frame for as long as the animation runs, and geometry properties add layout on
-top. Note that `rotate: 360deg` is *not* equivalent to
+top.
+
+Every variant also reports frames drawn per second. Measured headed under
+Xvfb (software GL), two runs each, CPU of one core across Chrome's processes:
+
+| Variant | Frames/sec | CPU % |
+|---|---|---|
+| `none` (still page) | 0.1 | 0.9-1.2 |
+| `blink-timer` (1 s JS toggle, `useWaitingBlink`) | 1.0 | 0.9-1.0 |
+| `caret-css` (CodeMirror's `steps(1)` caret) | 1.7 | 4.1-4.4 |
+| `caret-timer` (600 ms JS toggle) | 1.7 | 1.2-1.5 |
+| `opacity` (smooth pulse) | 59-60 | 7.3-7.6 |
+| `transform-rotate` (spinner) | 60 | 7.7-8.2 |
+
+A stepped animation draws few frames and still keeps the compositor ticking
+every vsync, so `caret-css` costs three times `caret-timer` for the same
+frames. Note that `rotate: 360deg` is *not* equivalent to
 `transform: rotate(360deg)` in cost.
 
 Composited does not mean free. With `--headed` the command also reports process
@@ -382,11 +408,13 @@ the compositor and the GPU process draw every frame: the three pulsing dots of
 the chat status row (`busy-dots`) cost about 3% renderer plus 6.5% GPU process
 on an otherwise still page, against 0.2% with no animation. An infinite
 animation is paid for as long as it is on screen, so give it a bounded lifetime
-or step it. Stepping halves the cost only when staggered elements share their
+or stop it. Stepping halves the cost only when staggered elements share their
 frames: `busy-dots-steps-aligned` makes one step equal to the stagger and
 measures 4.7% against 10.3%. A running animation has a floor of its own, so
-fewer steps do not approach zero, and a timer that writes the same frames
-(`busy-dots-timer`) measured no cheaper.
+fewer steps do not approach zero. At five changes a second a timer that writes
+the same frames (`busy-dots-timer`) measured no cheaper; at one or two changes
+a second a timer drops below the animation's floor (`blink-timer`,
+`caret-timer` in the table above).
 
 VS Code uses `steps(30)` over 1.5 seconds specifically to reduce CPU usage.
 Local repeated 32-element runs showed median main-thread busy 0.04% smooth vs

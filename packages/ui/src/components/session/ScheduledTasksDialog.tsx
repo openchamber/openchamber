@@ -4,6 +4,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Checkbox } from '@/components/ui/checkbox';
 import { toast } from '@/components/ui';
 import { Icon } from "@/components/icon/Icon";
+import { Spinner } from "@/components/ui/spinner";
 import type { IconName } from "@/components/icon/icons";
 import { useUIStore } from '@/stores/useUIStore';
 import { formatTimeForPreference } from '@/lib/timeFormat';
@@ -657,7 +658,7 @@ export function ScheduledTasksView({ layout, onLeave }: {
                             className="inline-flex items-center gap-1"
                             style={{ color: `var(--status-${meta.tone})` }}
                           >
-                            <Icon name={meta.Icon} className="h-3.5 w-3.5" />
+                            {meta.spin ? <Spinner className="h-3.5 w-3.5" /> : <Icon name={meta.Icon} className="h-3.5 w-3.5" />}
                             {statusLabel}
                           </span>
                         ) : null}

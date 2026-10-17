@@ -125,7 +125,7 @@ An entry belongs here only when the extension actually mounts the surface: trace
 
 ## Credit
 
-End the bullet with `(thanks to @username)` using the GitHub login from the PR or commit. The maintainers `btriapitsyn` and `yulia-ivashko` get no credit line: their work is the project's own and goes in like any other OpenChamber change. In a shared credit, drop only their login.
+End the bullet with `(thanks to @username)` using the GitHub login from the PR or commit. `yulia-ivashko` is credited like any contributor; her commits carry the author name `𝖎𝖚𝖑𝖎𝖎𝖆` or `Iuliia Ivashko` with the email `yulia.ivashko@gmail.com`, and both are her. The maintainer `btriapitsyn` gets no credit line: his work is the project's own and goes in like any other OpenChamber change. In a shared credit, drop only his login.
 
 ## Done when
 

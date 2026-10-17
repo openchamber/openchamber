@@ -1,8 +1,11 @@
 import { describe, expect, test } from "bun:test"
 
+import type { IntegrationInfo } from "@opencode/client"
 import type { Config, FormRequest } from "./model"
 import {
+  isWebSearchIntegration,
   parseWebSearchOutput,
+  projectWebSearchAccounts,
   readWebSearchConsent,
   readWebSearchSelection,
   webSearchProviderOf,
@@ -97,6 +100,80 @@ describe("web search choice", () => {
     expect(webSearchSelectionToConfig({ kind: "off" })).toBe(false)
     expect(webSearchSelectionToConfig({ kind: "random" })).toBe("random")
     expect(webSearchSelectionToConfig({ kind: "provider", id: "tavily" })).toBe("tavily")
+  })
+})
+
+describe("projectWebSearchAccounts", () => {
+  const integration = (id: string, name: string, overrides: Partial<IntegrationInfo> = {}): IntegrationInfo => ({
+    id,
+    name,
+    methods: [],
+    connections: [],
+    ...overrides,
+  })
+  const keyAndEnv = (env: string): IntegrationInfo["methods"] => [
+    { type: "key", label: "API key" },
+    { type: "env", names: [env] },
+  ]
+  const searxng = integration("searxng", "SearXNG", {
+    metadata: { websearch: true },
+    methods: [
+      {
+        id: "server",
+        type: "external",
+        label: "Your SearXNG server",
+        form: [{ key: "url", type: "string", format: "uri", title: "Server URL", placeholder: "https://searx.example.org", required: true }],
+      },
+      { type: "env", names: ["SEARXNG_URL"] },
+    ],
+  })
+
+  test("offers marked providers OpenCode does not list yet, sorted by name", () => {
+    const accounts = projectWebSearchAccounts([
+      integration("exa", "Exa", { methods: keyAndEnv("EXA_API_KEY") }),
+      integration("serper", "Serper", { metadata: { websearch: true }, methods: keyAndEnv("SERPER_API_KEY") }),
+      searxng,
+      integration("brave", "Brave Search", { metadata: { websearch: true }, methods: keyAndEnv("BRAVE_API_KEY") }),
+      integration("openai", "OpenAI", { methods: keyAndEnv("OPENAI_API_KEY") }),
+    ], ["exa", "brave"])
+    expect(accounts.connectable).toEqual([
+      { id: "searxng", name: "SearXNG" },
+      { id: "serper", name: "Serper" },
+    ])
+    expect(Object.keys(accounts.access).sort()).toEqual(["brave", "exa", "searxng", "serper"])
+    expect(accounts.access.serper).toEqual({ key: { kind: "none" }, envNames: ["SERPER_API_KEY"], connect: { kind: "key", fields: [] } })
+  })
+
+  test("a server form becomes a form method with its fields", () => {
+    const accounts = projectWebSearchAccounts([searxng], [])
+    expect(accounts.access.searxng?.connect).toEqual({
+      kind: "form",
+      methodID: "server",
+      fields: [{ key: "url", label: "Server URL", description: null, placeholder: "https://searx.example.org", required: true, url: true }],
+    })
+  })
+
+  test("a saved credential or an environment variable counts for a form method too", () => {
+    const saved = projectWebSearchAccounts([{ ...searxng, connections: [{ type: "credential", id: "cred_1", label: "", method: "external" }] }], [])
+    expect(saved.access.searxng?.key).toEqual({ kind: "stored", ids: ["cred_1"] })
+    const env = projectWebSearchAccounts([{ ...searxng, connections: [{ type: "env", name: "SEARXNG_URL" }] }], [])
+    expect(env.access.searxng?.key).toEqual({ kind: "env", name: "SEARXNG_URL" })
+  })
+
+  test("a form with fields the page cannot render leaves the provider to OpenCode", () => {
+    const accounts = projectWebSearchAccounts([
+      integration("choice", "Choice", {
+        metadata: { websearch: true },
+        methods: [{ type: "key", form: [{ key: "region", type: "string", options: [{ value: "eu", label: "EU" }] }] }],
+      }),
+    ], [])
+    expect(accounts.access.choice).toEqual({ key: { kind: "unsupported" }, envNames: [], connect: null })
+  })
+
+  test("only metadata.websearch === true marks an integration", () => {
+    expect(isWebSearchIntegration(integration("a", "A", { metadata: { websearch: true } }))).toBe(true)
+    expect(isWebSearchIntegration(integration("b", "B", { metadata: { websearch: "yes" } }))).toBe(false)
+    expect(isWebSearchIntegration(integration("c", "C"))).toBe(false)
   })
 })
 

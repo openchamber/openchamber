@@ -28,7 +28,16 @@ recordEarlyStartupMark('electron.entry');
 
 // Set the product name early so electron-log derives its log directory as
 // ~/Library/Logs/OpenChamber/ (not ~/Library/Logs/@openchamber/electron/).
+const versionBeforeRename = app.getVersion();
 app.setName('OpenChamber');
+// An unpackaged run on Linux reports version "0.0" after the rename, and
+// electron-updater refuses a version that is not semver, so the dev app quit
+// before its first window. Restoring the version from before the rename gives
+// it Electron's own version, as on macOS. `setVersion` is undocumented;
+// Electron's default app uses it to apply a package.json version.
+if (app.getVersion() !== versionBeforeRename) {
+  app.setVersion(versionBeforeRename);
+}
 if (process.platform === 'linux') {
   app.setDesktopName('openchamber.desktop');
 }

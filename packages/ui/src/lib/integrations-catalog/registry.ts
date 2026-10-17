@@ -2466,6 +2466,19 @@ export const CATALOG_ENTRIES: readonly CatalogEntry[] = [
     status: 'stable',
     components: [{ kind: 'plugin', spec: '@openchamber/opencode-claude@^1', license: 'MIT' }],
   },
+  {
+    id: 'opencode-search-providers',
+    name: 'Search Providers',
+    publisher: 'OpenChamber',
+    verified: true,
+    descriptionKey: 'integrationsCatalog.entry.opencode-search-providers.description',
+    detailsKey: 'integrationsCatalog.entry.opencode-search-providers.details',
+    categories: ['openchamber', 'ai'],
+    icon: 'search',
+    homepage: 'https://github.com/openchamber/opencode-search-providers',
+    status: 'stable',
+    components: [{ kind: 'plugin', spec: '@openchamber/opencode-search-providers@^1', license: 'MIT' }],
+  },
 
   // --- OpenChamber extensions (installed from Git like Settings → Integrations) ---
   {

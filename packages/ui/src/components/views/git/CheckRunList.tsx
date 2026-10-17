@@ -1,6 +1,7 @@
 import React from 'react';
 
 import { Icon } from '@/components/icon/Icon';
+import { Spinner } from '@/components/ui/spinner';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent } from '@/components/ui/collapsible';
 import { useI18n } from '@/lib/i18n';
@@ -156,7 +157,7 @@ export const CheckRunList: React.FC<{
             className="flex w-full items-center gap-2 px-2.5 py-2 text-start disabled:cursor-default"
           >
             {isRunning ? (
-              <Icon name="loader-4" className="size-4 shrink-0 animate-spin text-[var(--status-warning)]" />
+              <Spinner className="size-4 shrink-0 text-[var(--status-warning)]" />
             ) : isQueued ? (
               <Icon name="time" className="size-4 shrink-0 text-muted-foreground" />
             ) : failed ? (

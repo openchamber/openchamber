@@ -366,7 +366,7 @@ const TimelineDialogBody: React.FC<TimelineDialogBodyProps> = ({
                             return (
                                 <React.Fragment key={message.info.id}>
                                     {showDateGroup && (
-                                        <div className="sticky top-0 z-10 flex items-center gap-3 bg-surface-elevated/95 py-2 backdrop-blur-sm">
+                                        <div className="sticky top-0 z-10 flex items-center gap-3 bg-background/95 py-2 backdrop-blur-sm">
                                             <div className="h-px flex-1 bg-border/60" />
                                             <span className="typography-meta text-muted-foreground">
                                                 {dateGroup}

@@ -29,6 +29,25 @@ shape is genuinely missing.
 - Layouts respond to the settings pane width via container queries (`@xl:` / `@3xl:`), never viewport `sm:`/`lg:` breakpoints (the pane is much narrower than the viewport inside the dialog).
 - Checkbox/radio state comes before labels; selected states are subtle and never shift layout.
 
+## Keep A Page From Turning Into A List
+
+Pages grow one control at a time, and each addition looks fine alone; the
+mess shows up as a whole. When adding to a page, read the page, not only the
+spot you add to:
+
+- A section holds one topic a user would name ("Terminal", "Sending"). A new
+  setting goes into the section it belongs to, or starts its own; never append
+  it to whatever section is last or nearest.
+- One row kind per run: field rows together, checkboxes together. A field row
+  (label + select, stepper, chips) between checkboxes is the clearest sign of
+  a page that needs regrouping.
+- Same shape for the same kind of choice: a short enum is chips in a field
+  row everywhere, never radios on one page and chips on the next.
+- A text line belongs to one option and sits under its label (`description`,
+  `footer`), never loose between two rows.
+- When a page passes about four sections or a scroll of mixed topics, split it
+  into tabs (`references/layout.md`, Pages With Tabs) rather than adding more.
+
 ## Load References By Task
 
 | Task | Required reference |

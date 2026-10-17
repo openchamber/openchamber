@@ -64,14 +64,38 @@ const mix = (color: string, pct: number, base = 'transparent'): string => (
 const focusFill = `background-image: linear-gradient(${hover}, ${hover});`;
 
 /**
- * The app's `oc-field` and `oc-raised` edges in their theme-neutral form: the guest
- * document does not know whether the theme is light or dark, so it skips the dark
- * theme's lit top and sheen. A field sits pressed in and recolours only its hairline.
+ * The app's `oc-field`, `oc-raised` and `oc-raised-button` light. Theme-dependent
+ * parts live in custom properties on the root, which `applyHostReady` marks with
+ * `data-oc-theme`: light themes press a field in and give a raised control the
+ * canvas colour; dark themes give fields, controls and tinted buttons one lit
+ * top line and one short shadow, and wash a field halfway toward the page so it
+ * sits a tone below the buttons beside it. Without the attribute (a preview
+ * outside the host) the light form applies.
  */
-const field = (edge: string): string => `box-shadow: inset 0 0 0 1px ${edge}, inset 0 1px 2px 0 rgb(0 0 0 / 0.05);`;
-const raised = `box-shadow: inset 0 0 0 1px ${mix(fg, 10)}, 0 1px 2px 0 rgb(0 0 0 / 0.12);`;
-/** Tinted buttons keep their border and take a lit top line and a short shadow, like the app's `oc-raised-button`. */
-const litButton = `box-shadow: inset 0 1px 0 0 rgb(255 255 255 / 0.12), 0 1px 2px 0 rgb(0 0 0 / 0.14);`;
+const field = (edge: string): string => `box-shadow: inset 0 0 0 1px ${edge}, var(--oc-sdk-field-lift);`;
+const raised = 'box-shadow: inset 0 0 0 1px var(--oc-sdk-edge), var(--oc-sdk-raised-lift);';
+const litButton = 'box-shadow: var(--oc-sdk-lit);';
+
+const darkLift = `inset 0 1px 0 0 ${mix(fg, 1.5)}, 0 1px 1px 0 rgb(0 0 0 / 0.28), 0 2px 3px -2px rgb(0 0 0 / 0.2)`;
+const THEME_VARS = `
+:root {
+  --oc-sdk-edge: ${mix(fg, 10)};
+  --oc-sdk-field-bg: ${elevated};
+  --oc-sdk-raised-bg: ${bg};
+  --oc-sdk-field-lift: inset 0 1px 2px 0 rgb(0 0 0 / 0.04);
+  --oc-sdk-raised-lift: 0 1px 2px 0 rgb(0 0 0 / 0.06);
+  --oc-sdk-lit: inset 0 1px 0 0 rgb(255 255 255 / 0.45), 0 1px 2px 0 rgb(0 0 0 / 0.08);
+  --oc-sdk-float: inset 0 1px 0 0 rgb(255 255 255 / 0.8), inset 0 0 0 1px rgb(0 0 0 / 0.04), 0 0 0 1px rgb(0 0 0 / 0.1), 0 1px 2px -0.5px rgb(0 0 0 / 0.08), 0 4px 8px -2px rgb(0 0 0 / 0.08), 0 12px 20px -4px rgb(0 0 0 / 0.08);
+}
+:root[data-oc-theme="dark"] {
+  --oc-sdk-edge: ${mix(fg, 6)};
+  --oc-sdk-field-bg: ${mix(bg, 50, elevated)};
+  --oc-sdk-raised-bg: ${elevated};
+  --oc-sdk-field-lift: ${darkLift};
+  --oc-sdk-raised-lift: ${darkLift};
+  --oc-sdk-lit: inset 0 1px 0 0 ${mix(fg, 1.5)}, 0 1px 1px 0 rgb(0 0 0 / 0.28), 0 2px 3px -2px rgb(0 0 0 / 0.2);
+  --oc-sdk-float: inset 0 1px 0 0 rgb(255 255 255 / 0.06), inset 0 0 0 1px rgb(255 255 255 / 0.08), 0 0 0 1px rgb(0 0 0 / 0.36), 0 1px 1px -0.5px rgb(0 0 0 / 0.22), 0 3px 3px -1.5px rgb(0 0 0 / 0.2), 0 6px 6px -3px rgb(0 0 0 / 0.16);
+}`;
 
 const tone = (name: 'success' | 'warning' | 'error' | 'info'): string => {
   const color = v(`status-${name}`, 'currentColor');
@@ -189,7 +213,7 @@ textarea.oc-sdk-input { height: auto; padding: 8px 10px; resize: vertical; }
  * follow the app's look without a rebuild. Selectors here keep the specificity
  * of the rules they override in older bundles.
  */
-export const GUEST_UI_LOOK_CSS = `
+export const GUEST_UI_LOOK_CSS = `${THEME_VARS}
 .oc-sdk { color: ${fg}; font-family: ${font}; }
 .oc-sdk :focus-visible, .oc-sdk:focus-visible { outline: none; }
 .oc-sdk :where(button, a[href], [role="button"], [role="tab"], [role="option"]):focus-visible, button.oc-sdk:focus-visible { ${focusFill} }
@@ -206,9 +230,9 @@ ${tone('success')}${tone('warning')}${tone('error')}${tone('info')}
 .oc-sdk-btn[data-variant="secondary"] { background: ${secondary}; color: var(--oc-fg); }
 .oc-sdk-btn[data-variant="secondary"]:hover { background-image: linear-gradient(${hover}, ${hover}); }
 .oc-sdk-btn[data-variant="secondary"]:active { background-image: linear-gradient(${active}, ${active}); }
-.oc-sdk-btn[data-variant="outline"] { background: ${elevated}; color: ${elevatedFg}; border-color: transparent; ${raised} }
+.oc-sdk-btn[data-variant="outline"] { background: var(--oc-sdk-raised-bg); color: ${elevatedFg}; border-color: transparent; ${raised} }
 .oc-sdk-btn[data-variant="outline"]:hover { background-image: linear-gradient(${hover}, ${hover}); }
-.oc-sdk-btn[data-variant="outline"]:active { background-image: linear-gradient(${active}, ${active}); box-shadow: inset 0 0 0 1px ${mix(fg, 10)}; }
+.oc-sdk-btn[data-variant="outline"]:active { background-image: linear-gradient(${active}, ${active}); box-shadow: inset 0 0 0 1px var(--oc-sdk-edge); }
 .oc-sdk-btn[data-variant="ghost"] { background: transparent; }
 .oc-sdk-btn[data-variant="ghost"]:hover { background: ${hover}; }
 .oc-sdk-btn[data-variant="ghost"]:active { background: ${active}; }
@@ -218,7 +242,7 @@ ${tone('success')}${tone('warning')}${tone('error')}${tone('info')}
 
 .oc-sdk-field-note { color: ${muted}; }
 .oc-sdk-field[data-invalid="true"] .oc-sdk-field-note { color: ${errorText}; }
-.oc-sdk-input { border-radius: ${controlRadius}; background: ${elevated}; color: ${elevatedFg}; ${field(mix(fg, 10))} transition: background 150ms ease-out; }
+.oc-sdk-input { border-radius: ${controlRadius}; background: var(--oc-sdk-field-bg); color: ${elevatedFg}; ${field('var(--oc-sdk-edge)')} transition: background 150ms ease-out; }
 .oc-sdk-input::placeholder { color: ${muted}; }
 .oc-sdk-input:hover:not(:focus) { background-image: linear-gradient(${hover}, ${hover}); }
 .oc-sdk-input:focus, .oc-sdk-input:focus-visible { ${field(mix(fg, 26))} }
@@ -230,12 +254,13 @@ ${tone('success')}${tone('warning')}${tone('error')}${tone('info')}
 .oc-sdk-search-clear { border-radius: ${smallRadius}; color: ${muted}; }
 .oc-sdk-search-clear:hover { background: ${hover}; color: ${fg}; }
 
-.oc-sdk-trigger { border-color: transparent; border-radius: ${controlRadius}; background: ${elevated}; color: ${elevatedFg}; ${raised} transition: background 150ms ease-out; }
+.oc-sdk-trigger { border-color: transparent; border-radius: ${controlRadius}; background: var(--oc-sdk-raised-bg); color: ${elevatedFg}; ${raised} transition: background 150ms ease-out; }
 .oc-sdk-trigger:hover { background-image: linear-gradient(${hover}, ${hover}); }
 .oc-sdk-trigger[aria-expanded="true"] { background-image: linear-gradient(${active}, ${active}); }
 .oc-sdk-trigger-value[data-empty="true"] { color: ${muted}; }
 .oc-sdk-trigger-chevron { color: ${muted}; }
-.oc-sdk-popup { --surface-foreground: ${elevatedFg}; border-color: ${mix(border, 60)}; border-radius: 12px; background: ${elevated}; color: ${elevatedFg}; box-shadow: 0 8px 24px ${mix(fg, 12)}; }
+/* The app's dropdown light: lit top, hairline rings and a layered shadow, no border. */
+.oc-sdk-popup { --surface-foreground: ${elevatedFg}; border-color: transparent; border-radius: 12px; background: ${elevated}; color: ${elevatedFg}; box-shadow: var(--oc-sdk-float); }
 .oc-sdk-option { border-radius: 8px; }
 .oc-sdk-option[data-active="true"] { background: ${hover}; }
 /* A selected option shows a check mark in the text colour, like the app's own pickers. Options without the mark come
@@ -263,7 +288,7 @@ ${tone('success')}${tone('warning')}${tone('error')}${tone('info')}
 .oc-sdk-tab { border-radius: 8px; color: ${muted}; transition: color 150ms ease-out, background 150ms ease-out; }
 .oc-sdk-tab:hover { color: ${fg}; }
 .oc-sdk-tab[aria-selected="true"] { color: ${selectionFg}; background: ${selection}; border-color: ${border}; }
-.oc-sdk-tabs[data-track="true"] .oc-sdk-tab[aria-selected="true"] { color: ${elevatedFg}; background: ${elevated}; border-color: transparent; ${raised} }
+.oc-sdk-tabs[data-track="true"] .oc-sdk-tab[aria-selected="true"] { color: ${elevatedFg}; background: var(--oc-sdk-raised-bg); border-color: transparent; ${raised} }
 .oc-sdk-tab-count { color: ${muted}; }
 
 .oc-sdk-badge { border-radius: 9999px; background: ${hover}; color: ${muted}; }
@@ -283,7 +308,8 @@ ${tone('success')}${tone('warning')}${tone('error')}${tone('info')}
 .oc-sdk-spinner { color: ${muted}; }
 .oc-sdk-spinner-ring { border-color: ${border}; border-top-color: ${primary}; border-radius: 9999px; }
 
-.oc-sdk-banner { border-color: ${mix('var(--oc-sdk-tone)', 40)}; border-radius: 8px; background: ${mix('var(--oc-sdk-tone)', 10)}; }
+/* Set apart by its tint alone, like the app's banners. */
+.oc-sdk-banner { border-color: transparent; border-radius: 8px; background: ${mix('var(--oc-sdk-tone)', 10)}; }
 .oc-sdk-banner-title { color: var(--oc-sdk-tone-text, var(--oc-sdk-tone)); }
 .oc-sdk-banner-body { color: ${muted}; }
 

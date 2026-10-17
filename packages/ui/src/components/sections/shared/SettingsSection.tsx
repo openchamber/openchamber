@@ -312,6 +312,10 @@ interface SettingsFieldRowProps {
 /**
  * Side-by-side form row: fixed label column + control cluster.
  * Use inside full-width sections or single columns.
+ *
+ * The row's own vertical padding keeps two stacked rows of 32px controls
+ * apart (8px between them), so a list of field rows needs no spacing of its
+ * own and labels keep one rhythm whatever control sits beside them.
  */
 export const SettingsFieldRow: React.FC<SettingsFieldRowProps> = ({
   label,
@@ -327,7 +331,7 @@ export const SettingsFieldRow: React.FC<SettingsFieldRowProps> = ({
     <div
       data-settings-item={settingsItem}
       className={cn(
-        'flex flex-col gap-2 py-0.5 @xl:flex-row @xl:items-center @xl:gap-8',
+        'flex flex-col gap-2 py-1 @xl:flex-row @xl:items-center @xl:gap-8',
         className,
       )}
     >
@@ -387,6 +391,12 @@ interface SettingsCheckboxRowProps {
   labelAccessory?: React.ReactNode;
   /** Helper text hidden behind an info icon next to the label. */
   info?: React.ReactNode;
+  /**
+   * A line under the label that holds its own controls (a link). It sits
+   * outside the clickable row, so the link is not a button inside a button,
+   * and lines up with the label.
+   */
+  footer?: React.ReactNode;
 }
 
 /** Shared checkbox setting row with keyboard support. */
@@ -401,6 +411,7 @@ export const SettingsCheckboxRow: React.FC<SettingsCheckboxRowProps> = ({
   className,
   labelAccessory,
   info,
+  footer,
 }) => {
   const toggle = () => {
     if (!disabled) onChange(!checked);
@@ -408,13 +419,13 @@ export const SettingsCheckboxRow: React.FC<SettingsCheckboxRowProps> = ({
 
   const hasDescription = description != null;
 
-  return (
+  const row = (
     <div
-      data-settings-item={settingsItem}
+      data-settings-item={footer != null ? undefined : settingsItem}
       className={cn(
         'group flex cursor-pointer gap-2 py-0.5',
         hasDescription ? 'items-start' : 'items-center',
-        disabled && 'cursor-not-allowed opacity-60',
+        disabled && 'cursor-not-allowed',
         className,
       )}
       role="button"
@@ -434,17 +445,31 @@ export const SettingsCheckboxRow: React.FC<SettingsCheckboxRowProps> = ({
         onChange={onChange}
         disabled={disabled}
         ariaLabel={ariaLabel}
+        // With a description below, the box lines up with the label's line
+        // rather than the middle of both lines.
+        className={hasDescription ? 'mt-0.5 self-start' : undefined}
       />
       <div className="flex min-w-0 flex-col">
         <div className="flex min-w-0 items-center gap-1.5">
-          <span className={SETTINGS_FIELD_LABEL_CLASS}>{label}</span>
+          <span className={cn(SETTINGS_FIELD_LABEL_CLASS, disabled && 'opacity-60')}>{label}</span>
           {labelAccessory}
           {info != null ? <SettingsInfoHint>{info}</SettingsInfoHint> : null}
         </div>
+        {/* A description stays at full strength on a disabled row: it is
+            usually what says why the option is off and how to turn it on. */}
         {hasDescription ? (
           <span className={SETTINGS_HELPER_CLASS}>{description}</span>
         ) : null}
       </div>
+    </div>
+  );
+
+  if (footer == null) return row;
+  return (
+    <div data-settings-item={settingsItem}>
+      {row}
+      {/* Checkbox (16px) plus the row's gap (8px): the footer starts under the label. */}
+      <div className="ps-6">{footer}</div>
     </div>
   );
 };
@@ -554,6 +579,8 @@ interface SettingsChipGroupProps<T extends string> {
 /**
  * Compact segmented enum picker, drawn like the active-pill tab strip: the
  * options sit in a recessed track and the chosen one is raised out of it.
+ * The track is as tall as the other settings controls (32px), so a row with
+ * chips lines up with a row holding a select or a stepper.
  */
 export function SettingsChipGroup<T extends string>({
   value,
@@ -578,11 +605,11 @@ export function SettingsChipGroup<T extends string>({
             key={option.value}
             type="button"
             variant="ghost"
-            size="xs"
+            size="sm"
             disabled={option.disabled}
             aria-pressed={selected}
             className={cn(
-              '!font-normal',
+              'rounded-md !font-normal',
               selected
                 // Light themes paint elevated darker than the canvas, so the
                 // raised option takes the canvas colour there, like the tab pill.

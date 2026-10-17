@@ -4,6 +4,7 @@ import { drawSelection, showPanel } from '@codemirror/view';
 import { getCM, Vim, vim } from '@replit/codemirror-vim';
 
 import { parseVimMappings, type VimMapping } from './vimMappings';
+import { timerCaretBlink } from './caretBlink';
 
 type VimStatusPlugin = {
   updateStatus: () => void;
@@ -50,7 +51,7 @@ export function createVimModeExtensions(enabled: boolean | undefined): Extension
     return [];
   }
 
-  return [vim(), showPanel.of(bottomVimStatusPanel), drawSelection()];
+  return [vim(), showPanel.of(bottomVimStatusPanel), drawSelection(), timerCaretBlink()];
 }
 
 // The Vim keymap is global to the page, so the mappings applied last are

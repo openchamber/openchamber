@@ -114,7 +114,7 @@ which requests only providers enabled for this panel.
 | Subagents | child sessions from `useAllLiveSessions` (`parentID`) + `useAllSessionStatuses`; per-row cost from `computeRollup`'s `perChildCost` (each child's own subtree total, so nested subagent-of-subagent cost rolls up under its immediate parent row) | |
 | Subagent blockers | directory `permission` / `question` maps | one subscription covers every child |
 | Usage | `components/usage/usageGroups.ts` over `useQuotaStore` | grouping shared with the mobile popover; presentation is not |
-| Linked threads | `lib/linkedIssues.ts` over session metadata | written by the flows that attach an issue or PR |
+| Linked threads | `lib/linkedIssues.ts` over session metadata; state from tracked items | written by the flows that attach an issue or PR; a linked PR that is also the checked-out branch's PR shows the branch summary, as its sidebar row does |
 | Turn stats | `telemetry.ts` over `useSessionMessageRecords` | computed only while expanded and authoritatively idle; either rate above 5,000 tok/s is reported as unknown (see the two-rate description below) |
 | Goal | `useSessionGoal` | respects the Settings toggle |
 | MCP | `useMcpStore` | connect/disconnect reuses the dropdown's actions |
@@ -395,7 +395,7 @@ describes the current frame, not a preference.
 ## Appearing and disappearing
 
 The card keeps its width and only fades, on the slot's duration and curve
-(`LAYOUT_ANIMATION_MS` through `useLayoutAnimationMs`, ease-out; zero when the `layoutAnimations` setting is off); the slot animates the width. It stays
+(`LAYOUT_ANIMATION_MS` and `LAYOUT_ANIMATION_EASING` through `useLayoutAnimationMs`; zero when the `layoutAnimations` setting is off); the slot animates the width. It stays
 mounted wherever it could ever show, so the fade has something to animate;
 its content is dropped once the fade finishes. A card whose sections all
 reported nothing gives its column back. When it is shown again the presence
@@ -452,7 +452,7 @@ Rows that name something the app can already show are buttons:
 | Context | the context overview (`openContextOverview`), same destination as the rail's Context surface |
 | Changes | working-tree diff (`openContextPanelTab`, `diffScope: 'working'`, no target path) |
 | Branch | git surface (`openContextSurface(dir, 'git')`) |
-| Pull request, Checks | PR surface (`openContextSurface(dir, 'pr')`) |
+| Pull request, Checks | The Tracker's branch tab (`openContextPanelTab(dir, { mode: 'pr' })`) |
 | App icon (Project heading, right) | opens the project in the chosen app (`OpenInAppButton`, desktop with a local host only); its chevron copies the path or picks another app. The project name beside the title is plain text |
 | Project action | runs or stops the selected project action (`ProjectActionsButton`); its chevron picks another action. The project's own actions come first and auto-discovery last, so with nothing picked the row offers the first configured action, or auto-discovery when there is none. The pick is stored per runtime and project (`lib/projectActionSelection.ts`) and survives remounts and restarts; a pick that no longer names an action falls back to the first one. A running action takes the row over an idle pick, and pressing the row acts on the action it shows, through the same shared-setup trust prompt as the menu. The row is a view: the runner lives in `ProjectActionsProvider` above the whole layout (see below). The header carries no action control, so a project without a repository still gets a Project section |
 | Subagent | that child session's chat tab, read-only |

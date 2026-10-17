@@ -9,6 +9,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Icon } from "@/components/icon/Icon";
+import { Spinner } from "@/components/ui/spinner";
 import type { GitRemote } from '@/lib/gitApi';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
@@ -117,7 +118,7 @@ export const SyncActions: React.FC<SyncActionsProps> = ({
               aria-label={publish ? publishLabel : t('gitView.sync.syncChanges')}
             >
               {syncAction === 'sync' || syncAction === 'publish' ? (
-                <Icon name="loader-4" className="size-4 animate-spin" />
+                <Spinner className="size-4" />
               ) : (
                 <Icon name="refresh" className="size-4" />
               )}
@@ -205,7 +206,7 @@ export const SyncActions: React.FC<SyncActionsProps> = ({
                     title={t('gitView.header.removeRemoteTitle', { name: remote.name })}
                   >
                     {removingRemoteName === remote.name ? (
-                      <Icon name="loader-4" className="size-3.5 animate-spin" />
+                      <Spinner className="size-3.5" />
                     ) : (
                       <Icon name="close" className="size-3.5" />
                     )}

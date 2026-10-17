@@ -255,3 +255,67 @@ describe('createWebFilesAPI', () => {
     expect(share).toHaveBeenCalledWith({ fileName: 'hello.txt', mimeType: 'text/plain', data: btoa('hello') });
   });
 });
+
+describe('createWebFilesAPI.searchContents', () => {
+  const request = () => {
+    const [url, init] = runtimeFetchMock.mock.calls.at(-1) ?? [];
+    return { url, init };
+  };
+
+  it('sends the search as the server expects and parses the matches', async () => {
+    const { createWebFilesAPI } = await import('./files');
+    const api = createWebFilesAPI({ urls, getDirectory: () => '/elsewhere' });
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({
+      matches: [{ path: 'C:\\repo\\src\\a.ts', relativePath: 'src/a.ts', line: 3, column: 7, text: 'const needle', ranges: [[6, 12]], cutStart: false }],
+      stopped: 'limit',
+    }));
+    const abort = new AbortController();
+
+    const outcome = await api.searchContents!({
+      directory: '/repo', query: 'needle', regex: true, limit: 50, includeHidden: true, respectGitignore: false, signal: abort.signal,
+    });
+
+    const { url, init } = request();
+    expect(url).toBe('/api/fs/find-in-files');
+    expect(Object.fromEntries(init.query)).toEqual({ query: 'needle', regex: 'true', limit: '50', includeHidden: 'true', respectGitignore: 'false' });
+    expect(init.headers).toEqual({ 'x-opencode-directory': '/repo' });
+    expect(init.signal).toBe(abort.signal);
+    expect(outcome).toEqual({
+      status: 'ok',
+      stopped: 'limit',
+      matches: [{ path: 'C:/repo/src/a.ts', relativePath: 'src/a.ts', line: 3, column: 7, text: 'const needle', ranges: [[6, 12]], cutStart: false }],
+    });
+  });
+
+  it('leaves default options out of the query', async () => {
+    const { createWebFilesAPI } = await import('./files');
+    const api = createWebFilesAPI({ urls, getDirectory: () => '/repo' });
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({ matches: [], stopped: null }));
+
+    await api.searchContents!({ directory: '/repo', query: 'needle', regex: false });
+
+    expect(Object.fromEntries(request().init.query)).toEqual({ query: 'needle', regex: 'false' });
+  });
+
+  it('turns the server’s unavailable and invalid-pattern answers into outcomes', async () => {
+    const { createWebFilesAPI } = await import('./files');
+    const api = createWebFilesAPI({ urls, getDirectory: () => '/repo' });
+
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({ error: 'no ripgrep', reason: 'search-unavailable' }, { status: 501 }));
+    expect(await api.searchContents!({ directory: '/repo', query: 'x', regex: false })).toEqual({ status: 'unavailable' });
+
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({ error: 'unclosed group', reason: 'invalid-pattern' }, { status: 400 }));
+    expect(await api.searchContents!({ directory: '/repo', query: '(', regex: true })).toEqual({ status: 'invalid-pattern', message: 'unclosed group' });
+  });
+
+  it('rejects other failures and malformed successes instead of answering no matches', async () => {
+    const { createWebFilesAPI } = await import('./files');
+    const api = createWebFilesAPI({ urls, getDirectory: () => '/repo' });
+
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({ error: 'ripgrep exited with code 2', reason: 'search-failed' }, { status: 500 }));
+    await expect(api.searchContents!({ directory: '/repo', query: 'x', regex: false })).rejects.toMatchObject({ message: 'ripgrep exited with code 2', status: 500 });
+
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({ matches: [{ path: '/a' }] }));
+    await expect(api.searchContents!({ directory: '/repo', query: 'x', regex: false })).rejects.toMatchObject({ reason: 'invalid-response' });
+  });
+});

@@ -13,6 +13,7 @@
 import React from 'react';
 
 import { Icon } from '@/components/icon/Icon';
+import { Spinner } from '@/components/ui/spinner';
 import { Button } from '@/components/ui/button';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { getCurrentIntlLocale, useI18n, type I18nKey } from '@/lib/i18n';
@@ -176,7 +177,7 @@ export const DockerSetupNotice: React.FC<DockerSetupNoticeProps> = ({ place, onR
   if (job?.running) {
     return (
       <p className="flex items-start gap-1.5 typography-meta text-muted-foreground" role="status">
-        <Icon name="loader-4" className="mt-[0.2em] h-3.5 w-3.5 shrink-0 animate-spin" />
+        <Spinner className="mt-[0.2em] h-3.5 w-3.5 shrink-0" />
         <span>{t(RUNNING_TEXT[job.action])}</span>
       </p>
     );

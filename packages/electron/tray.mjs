@@ -55,10 +55,11 @@ const computeTooltip = (counts, sessionCount) => {
   return `OpenChamber — ${sessionCount} session${sessionCount === 1 ? '' : 's'}${suffix}`;
 };
 
-// Frame cadence for the "breathing" busy animation. With the eased frame set
-// (denser near the extremes) a slower tick reads as a calm, continuous glow
-// rather than a snappy blink.
-const ANIM_INTERVAL_MS = 75;
+// Frame cadence for the "breathing" busy animation: five images a second.
+// A busy state can last hours, and every setImage costs the main process and
+// macOS's WindowServer; at thirteen a second (75 ms) the main process alone
+// used 2.5% of a core on an M-series Mac, against 0.2% for one a second.
+const ANIM_INTERVAL_MS = 200;
 
 const toTemplateImage = (p) => {
   let image = nativeImage.createFromPath(p);

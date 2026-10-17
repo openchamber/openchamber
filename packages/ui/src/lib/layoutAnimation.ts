@@ -3,10 +3,11 @@
  * the right slot (context panel and work-status card).
  *
  * While one runs, the chat column changes width on every frame and the
- * transcript re-wraps. Work that measures layout to follow a width (the
- * pinned-end scroll write, markdown table column widths, the active-turn spy)
- * would force a layout of the transcript on every one of those frames, so it
- * waits for the animation to end and runs once, at the final width.
+ * transcript re-wraps. Work that measures layout to follow a width (markdown
+ * table column widths, the active-turn spy) would force a layout of the
+ * transcript on every one of those frames, so it waits for the animation to
+ * end and runs once, at the final width. The pinned end is the exception: it
+ * is held on every frame, since a reader would see it slide away.
  *
  * The flag is also published as `data-panel-animating` on the document root,
  * for profiling and probes only. No stylesheet may select on it: an attribute
@@ -18,9 +19,14 @@
  * read it through `useLayoutAnimationMs`, which is zero when the user turned
  * the animations off (`layoutAnimations`, Settings › General › Navigation).
  */
-export const LAYOUT_ANIMATION_MS = 120;
-/** Their timing function: a plain ease-out. */
-export const LAYOUT_ANIMATION_EASING = 'ease-out';
+export const LAYOUT_ANIMATION_MS = 240;
+/**
+ * Their timing function, which starts slow. A column has its final width from
+ * the first frame and the moving edge uncovers it; at 120 ms ease-out the
+ * first frames uncovered a zone's leading column (the file tree beside the
+ * editor) at once and the rest crept in after it, which read as two steps.
+ */
+export const LAYOUT_ANIMATION_EASING = 'cubic-bezier(0.4, 0, 0.2, 1)';
 
 const ROOT_ATTRIBUTE = 'data-panel-animating';
 
@@ -46,20 +52,28 @@ const settle = () => {
 
 /**
  * Marks a side-column width animation that starts now. It ends one frame after
- * `durationMs` (at once with reduced motion), when the transition has drawn
- * its last frame; a second call while one runs extends it.
+ * `durationMs` (at once with reduced motion) counted from the next frame, when
+ * the transition begins, so it ends after the transition has drawn its last
+ * frame; a second call while one runs extends it. Counted from the call, it
+ * ended while the transition still ran whenever the toggle's own frame was
+ * slow (40 to 60 ms), and the work waiting for the end stalled the
+ * animation just short of its final width.
  */
 export const beginLayoutAnimation = (durationMs: number = LAYOUT_ANIMATION_MS): void => {
   if (!globalThis.document) return;
   const starting = !isLayoutAnimating();
   if (settleTimer !== null) clearTimeout(settleTimer);
   if (settleFrame !== null) cancelAnimationFrame(settleFrame);
-  settleFrame = null;
+  settleTimer = null;
   document.documentElement.setAttribute(ROOT_ATTRIBUTE, '');
-  settleTimer = setTimeout(() => {
-    settleTimer = null;
-    settleFrame = requestAnimationFrame(settle);
-  }, prefersReducedMotion() ? 0 : Math.max(0, durationMs));
+  const delay = prefersReducedMotion() ? 0 : Math.max(0, durationMs);
+  settleFrame = requestAnimationFrame(() => {
+    settleFrame = null;
+    settleTimer = setTimeout(() => {
+      settleTimer = null;
+      settleFrame = requestAnimationFrame(settle);
+    }, delay);
+  });
   if (starting) startListeners.forEach((listener) => listener());
 };
 

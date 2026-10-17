@@ -32,6 +32,7 @@ import {
   resolveUpdateFlag,
   type PluginRuntimeTarget,
 } from './pluginLoadState';
+import { pluginDisplayName } from './pluginDisplayName';
 import { usePluginPackageUpdate, usePluginRuntimeStatus } from './usePluginRuntimeStatus';
 
 /**
@@ -183,7 +184,7 @@ export const PluginsGrid: React.FC<{
     ...files.map((file): GridItem => ({ kind: 'file', file })),
   ];
   const filtered = rankByQuery(items, query, (item) => (
-    item.kind === 'entry' ? [item.entry.spec] : [item.file.fileName, item.file.absolutePath ?? '']
+    item.kind === 'entry' ? [pluginDisplayName(item.entry.spec), item.entry.spec] : [item.file.fileName, item.file.absolutePath ?? '']
   ));
   const hasQuery = query.trim().length > 0;
   const refreshing = isLoadingRegistry || isCheckingUpdates;
@@ -236,11 +237,13 @@ export const PluginsGrid: React.FC<{
         {filtered.map((item) => {
           if (item.kind === 'entry') {
             const { entry } = item;
+            const name = pluginDisplayName(entry.spec);
             return (
               <SettingsCard
                 key={entry.id}
                 icon={<SettingsCardIcon name={entry.parsedKind === 'npm' ? 'code-box' : 'folder'} />}
-                title={entry.spec}
+                title={name}
+                subtitle={name === entry.spec ? undefined : entry.spec}
                 badges={<PluginPills target={runtimeTargets.get(entry.id) ?? null} spec={entry.spec} />}
                 footer={(
                   <>

@@ -1240,6 +1240,40 @@ export interface FileSearchResult {
   preview?: string[];
 }
 
+/** Find in files: lines of workspace files containing a text or a regular expression. */
+export interface FileContentSearchQuery {
+  directory: string;
+  query: string;
+  regex: boolean;
+  limit?: number;
+  includeHidden?: boolean;
+  respectGitignore?: boolean;
+  signal?: AbortSignal;
+}
+
+export interface FileContentSearchMatch {
+  path: string;
+  relativePath: string;
+  line: number;
+  /** 1-based column of the first match on the line, in UTF-16 code units. */
+  column: number;
+  /** The line, without indentation and cut to what a result row can show. */
+  text: string;
+  /** `[start, end)` offsets of the matches inside `text`. */
+  ranges: Array<[number, number]>;
+  /** `text` begins after the line's start, so the row shows an ellipsis first. */
+  cutStart: boolean;
+}
+
+/** Why a search returned fewer matches than exist: the limit or the server's deadline. */
+export type FileContentSearchStop = 'limit' | 'deadline';
+
+export type FileContentSearchOutcome =
+  | { status: 'ok'; matches: FileContentSearchMatch[]; stopped: FileContentSearchStop | null }
+  | { status: 'invalid-pattern'; message: string }
+  /** The server has no ripgrep to search with. */
+  | { status: 'unavailable' };
+
 export interface CommandExecResult {
   command: string;
   success: boolean;
@@ -1264,6 +1298,12 @@ interface FileReadOptions {
 export interface FilesAPI {
   listDirectory(path: string, options?: ListDirectoryOptions): Promise<DirectoryListResult>;
   search(payload: FileSearchQuery): Promise<FileSearchResult[]>;
+  /**
+   * Find in files. Absent on runtimes without it (VS Code has its own
+   * search), so the files tree offers the mode only when it is here.
+   * Resolves to the search outcome; rejects on a transport or server failure.
+   */
+  searchContents?(payload: FileContentSearchQuery): Promise<FileContentSearchOutcome>;
   createDirectory(path: string): Promise<{ success: boolean; path: string }>;
   statFile?(path: string, options?: FileReadOptions): Promise<{ path: string; isFile: boolean; size: number; mtimeMs?: number }>;
   readFile?(path: string, options?: FileReadOptions): Promise<{ content: string; path: string }>;

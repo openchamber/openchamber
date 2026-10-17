@@ -14,6 +14,7 @@ import {
   type CustomizableShortcutAction,
 } from '@/lib/shortcuts';
 import { useI18n } from '@/lib/i18n';
+import { shortcutSearchItemId } from '@/lib/settings/search';
 import { getDesktopMiniChatGlobalShortcut, getDesktopQuakeMode, setDesktopMiniChatGlobalShortcut, setDesktopQuakeModeShortcut } from '@/lib/desktop';
 import { ShortcutRecordingDialog } from './ShortcutRecordingDialog';
 
@@ -126,9 +127,9 @@ export const KeyboardShortcutsSettings: React.FC = () => {
               </Button>
             ) : undefined}
           >
-            <div className="space-y-2">
+            <div>
               {categoryActions.map((action) => (
-                <SettingsFieldRow key={action.id} label={t(action.settingsLabelKey)}>
+                <SettingsFieldRow key={action.id} label={t(action.settingsLabelKey)} settingsItem={shortcutSearchItemId(action.id)}>
                   <kbd
                     className="min-w-32 oc-tile-inset rounded-md px-2 py-1 text-center typography-meta text-foreground"
                   >

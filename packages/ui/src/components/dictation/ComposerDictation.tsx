@@ -19,6 +19,7 @@ import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { cn } from '@/lib/utils';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { useDictation } from '@/hooks/useDictation';
+import { useWaitingBlink } from '@/hooks/useDurationTicker';
 import { DictationWaveform } from '@/components/dictation/DictationWaveform';
 import { isDictationCaptureSupported } from '@/lib/dictation/use-dictation-audio-source';
 import { isVSCodeRuntime } from '@/lib/desktop';
@@ -168,6 +169,7 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
         acceptPartialTranscript,
         discardFailedDictation,
     } = dictation;
+    const recordingBlink = useWaitingBlink(status === 'recording');
 
     const isModelDownloading = status === 'recording' && errorReason === 'model_download_in_progress';
     const downloadPercent = useModelDownloadProgress(isModelDownloading);
@@ -486,13 +488,9 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
                     >
                         {status === 'recording' ? (
                             <>
-                                <span className="relative ms-1 flex h-2 w-2 flex-shrink-0" aria-hidden="true">
+                                <span className="relative ms-1 flex size-1.5 flex-shrink-0" aria-hidden="true">
                                     <span
-                                        className="absolute inline-flex h-full w-full animate-ping rounded-full opacity-60"
-                                        style={{ backgroundColor: currentTheme.colors.status.error }}
-                                    />
-                                    <span
-                                        className="relative inline-flex h-2 w-2 rounded-full"
+                                        className={cn('relative inline-flex size-1.5 rounded-full', recordingBlink)}
                                         style={{ backgroundColor: currentTheme.colors.status.error }}
                                     />
                                 </span>

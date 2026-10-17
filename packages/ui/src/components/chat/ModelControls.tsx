@@ -20,6 +20,7 @@ import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Icon } from "@/components/icon/Icon";
+import { Spinner } from "@/components/ui/spinner";
 import { ArrowsMerge } from '@/components/icons/ArrowsMerge';
 import type { IconName } from "@/components/icon/icons";
 import { ModelPickerList, type ModelPickerEntry } from '@/components/model-picker/ModelPickerList';
@@ -365,6 +366,11 @@ type ModelControlsProps = {
         /** Offers the agent picker and saves the pick for `sessionId` (a chat pinned in the side panel). */
         agentSelectable?: boolean;
     }
+);
+
+/** Beside "Loading" the shared spinner; beside "Unavailable", an error, a still warning. */
+const ReadinessMark: React.FC<{ unavailable: boolean; className: string }> = ({ unavailable, className }) => (
+    unavailable ? <Icon name="error-warning" className={className} /> : <Spinner className={className} />
 );
 
 export const ModelControls: React.FC<ModelControlsProps> = ({
@@ -2629,7 +2635,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                 >
                                     {!modelSelectionReady ? (
                                         <>
-                                            <Icon name="loader-4" className={cn(controlIconSize, 'animate-spin text-muted-foreground flex-shrink-0')} />
+                                            <ReadinessMark unavailable={isUnavailable} className={cn(controlIconSize, 'text-muted-foreground flex-shrink-0')} />
                                             <span className={cn(
                                                 'model-controls__model-label',
                                                 controlTextSize,
@@ -2765,7 +2771,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                     >
                         {!modelSelectionReady ? (
                             <>
-                                <Icon name="loader-4" className={cn(controlIconSize, 'animate-spin text-muted-foreground flex-shrink-0')} />
+                                <ReadinessMark unavailable={isUnavailable} className={cn(controlIconSize, 'text-muted-foreground flex-shrink-0')} />
                                 <span className="typography-micro font-medium text-muted-foreground min-w-0">
                                     {readinessLabel}
                                 </span>
@@ -3041,10 +3047,10 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                     )}>
                                         {!agentSelectionReady ? (
                                             <>
-                                                <Icon name="loader-4"
+                                                <ReadinessMark unavailable={isUnavailable}
                                                     className={cn(
                                                         controlIconSize,
-                                                        'flex-shrink-0 animate-spin text-muted-foreground'
+                                                        'flex-shrink-0 text-muted-foreground'
                                                     )}
                                                 />
                                                 <span
@@ -3165,10 +3171,10 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             >
                 {!agentSelectionReady ? (
                     <>
-                        <Icon name="loader-4"
+                        <ReadinessMark unavailable={isUnavailable}
                             className={cn(
                                 controlIconSize,
-                                'flex-shrink-0 animate-spin text-muted-foreground'
+                                'flex-shrink-0 text-muted-foreground'
                             )}
                         />
                         <span

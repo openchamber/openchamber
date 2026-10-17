@@ -1,6 +1,7 @@
 /**
  * Settings → Web search state: the providers OpenCode offers, the `websearch`
- * config choice, and how each provider's optional key is supplied.
+ * config choice, how each provider's optional key is supplied, and the plugin
+ * providers that are offered once connected.
  *
  * OpenCode owns all three. The store reads them on demand (the page asks, and
  * `catalogRefresh` re-reads after `websearch.updated`, `config.updated` or a
@@ -13,11 +14,12 @@ import { z } from 'zod';
 import { opencodeClient } from '@/lib/opencode/client';
 import {
   listWebSearchProviders,
-  readWebSearchAccess,
+  readWebSearchAccounts,
   readWebSearchSelection,
   removeWebSearchKey,
-  saveWebSearchKey,
+  saveWebSearchCredential,
   webSearchSelectionToConfig,
+  type WebSearchConnectAnswer,
   type WebSearchProvider,
   type WebSearchProviderAccess,
   type WebSearchSelection,
@@ -32,6 +34,11 @@ export type WebSearchSnapshot = {
   selection: WebSearchSelection;
   /** `null` when the integration list could not be read: key status unknown, not "no key". */
   access: Record<string, WebSearchProviderAccess> | null;
+  /**
+   * Plugin providers that join `providers` once connected. Empty when the
+   * integration list could not be read (`access` is `null` then).
+   */
+  connectable: WebSearchProvider[];
   /**
    * The project config whose `websearch` overrides what Settings writes, so a
    * choice here would snap back. `null` when none, or when the check failed
@@ -51,7 +58,8 @@ type WebSearchStore = {
   load: () => Promise<void>;
   /** Resolves `false` when the write failed; the previous choice is restored. */
   setSelection: (selection: WebSearchSelection) => Promise<boolean>;
-  saveKey: (providerId: string, key: string) => Promise<boolean>;
+  /** Connects with the provider's own method: `key` is ignored by a form-only method. */
+  saveKey: (providerId: string, input: { key: string; answer: WebSearchConnectAnswer }) => Promise<boolean>;
   removeKey: (providerId: string) => Promise<boolean>;
 };
 
@@ -106,14 +114,26 @@ export const useWebSearchStore = create<WebSearchStore>()((set, get) => ({
         opencodeClient.getConfig(directory),
       ]);
       const projectOverride = await overridePromise;
-      const access = await readWebSearchAccess(directory, providers.map((provider) => provider.id)).catch(() => null);
+      const accounts = await readWebSearchAccounts(directory, providers.map((provider) => provider.id)).catch(() => null);
       if (generation !== readGeneration || getWebSearchScopeKey() !== scope) return;
       const current = get().state;
       const localChoiceIsNewer = selectionRevision !== revisionAtStart || selectionWritesInFlight > 0;
       const selection = localChoiceIsNewer && current.kind === 'ready' && current.snapshot.scope === scope
         ? current.snapshot.selection
         : readWebSearchSelection(config);
-      set({ state: { kind: 'ready', snapshot: { scope, providers, selection, access, projectOverride } } });
+      set({
+        state: {
+          kind: 'ready',
+          snapshot: {
+            scope,
+            providers,
+            selection,
+            access: accounts?.access ?? null,
+            connectable: accounts?.connectable ?? [],
+            projectOverride,
+          },
+        },
+      });
     } catch (error) {
       if (generation !== readGeneration || getWebSearchScopeKey() !== scope) return;
       console.warn('[web-search] failed to read providers', error);
@@ -167,9 +187,12 @@ export const useWebSearchStore = create<WebSearchStore>()((set, get) => ({
     return false;
   },
 
-  saveKey: async (providerId, key) => {
+  saveKey: async (providerId, input) => {
+    const current = get().state;
+    const connect = current.kind === 'ready' ? current.snapshot.access?.[providerId]?.connect : null;
+    if (!connect) return false;
     try {
-      await saveWebSearchKey(providerId, key);
+      await saveWebSearchCredential(currentDirectory(), providerId, connect, input);
     } catch (error) {
       console.warn('[web-search] failed to save the key', error);
       return false;

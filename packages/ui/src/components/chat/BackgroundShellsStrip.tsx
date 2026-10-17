@@ -21,7 +21,6 @@ interface BackgroundShellsStripProps {
   directory?: string;
 }
 
-const ELAPSED_TICK_MS = 1000;
 const COMMAND_TOOLTIP_DELAY_MS = 500;
 
 /**
@@ -45,7 +44,7 @@ const useSessionTreeShells = (sessionId: string): TrackedShell[] => {
 /** Its own leaf, so the once-a-second tick re-renders this text alone. */
 const ShellElapsed: React.FC<{ startedAt: number }> = ({ startedAt }) => {
   const { t } = useI18n();
-  const now = useDurationTickerNow(true, ELAPSED_TICK_MS);
+  const now = useDurationTickerNow(true);
   const label = formatSessionActivityDuration(now - startedAt, t);
   return (
     <span className="shrink-0 typography-meta tabular-nums text-muted-foreground" title={t('chat.backgroundShells.elapsed', { duration: label })}>

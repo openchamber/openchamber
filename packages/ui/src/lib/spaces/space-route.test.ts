@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { isSpaceDirectory, spaceApiPath, spaceIdOfDirectory } from './space-route';
+import { isSpaceDirectory, spaceDirectoryHeaders, spaceIdOfDirectory, spaceRootDirectory } from './space-route';
 
 const ID = 'a1b2c3d4e5f6';
 
@@ -25,14 +25,25 @@ describe('spaceIdOfDirectory', () => {
   });
 });
 
-describe('spaceApiPath', () => {
-  test('prefixes an /api/ path for a space directory and leaves everything else alone', () => {
-    expect(spaceApiPath('/api/session', `/spaces/${ID}/repo`)).toBe(`/api/spaces/${ID}/session`);
-    expect(spaceApiPath('/api/git/status?directory=x', `/spaces/${ID}/repo`)).toBe(`/api/spaces/${ID}/git/status?directory=x`);
-    expect(spaceApiPath('/api/session', '/home/me/project')).toBe('/api/session');
-    expect(spaceApiPath('/api/session', null)).toBe('/api/session');
-    expect(spaceApiPath(`/api/spaces/${ID}/session`, `/spaces/${ID}/repo`)).toBe(`/api/spaces/${ID}/session`);
-    expect(spaceApiPath('/health', `/spaces/${ID}/repo`)).toBe('/health');
-    expect(spaceApiPath('/auth/session', `/spaces/${ID}/repo`)).toBe('/auth/session');
+describe('spaceDirectoryHeaders', () => {
+  test('names a space directory in the directory header, URI-encoded and marked, and nothing else', () => {
+    expect(spaceDirectoryHeaders(`/spaces/${ID}/my repo`)).toEqual({
+      'x-opencode-directory': encodeURIComponent(`/spaces/${ID}/my repo`),
+      'x-opencode-directory-encoding': 'uri',
+    });
+    expect(spaceDirectoryHeaders('/home/me/project')).toBeNull();
+    expect(spaceDirectoryHeaders(`/home/spaces/${ID}`)).toBeNull();
+    expect(spaceDirectoryHeaders(null)).toBeNull();
+    expect(spaceRootDirectory(ID)).toBe(`/spaces/${ID}`);
+  });
+
+  test('adds nothing in VS Code, which never gets the feature', () => {
+    const originalWindow = globalThis.window;
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: { __VSCODE_CONFIG__: { workspaceFolder: '/home/me' } } });
+    try {
+      expect(spaceDirectoryHeaders(`/spaces/${ID}/repo`)).toBeNull();
+    } finally {
+      Object.defineProperty(globalThis, 'window', { configurable: true, value: originalWindow });
+    }
   });
 });

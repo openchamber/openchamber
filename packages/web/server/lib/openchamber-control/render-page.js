@@ -32,6 +32,27 @@ export const RENDER_PAGE_WHEN = "Use it when the answer is mostly data or struct
   + " Do not use it for a few numbers or a short list that reads fine as text, for code, or when the user asked for plain text."
   + " At most one page per answer.";
 
+// A local image a page names by its absolute path: a quoted string (an src
+// attribute, a CSS url("..."), a string in the page's script) or an unquoted
+// CSS url(...). The chat swaps each for the file's contents before drawing the
+// page, which cannot read files itself. The UI reads pages with the same rule
+// (packages/ui/src/components/chat/message/parts/renderPageImages.ts).
+// A quoted path may hold spaces (macOS names screenshots that way); an
+// unquoted url() ends at the first space or parenthesis.
+const LOCAL_IMAGE_RE = /(["'`])((?:file:\/\/|\/(?!\/)|[A-Za-z]:[\\/])[^"'`<>\n]*?\.(?:png|jpe?g|gif|webp))\1|url\(\s*((?:file:\/\/|\/(?!\/)|[A-Za-z]:[\\/])[^"'`<>()\s]*?\.(?:png|jpe?g|gif|webp))\s*\)/gi;
+// The image grant route prepares at most this many images in one request.
+const RENDER_PAGE_MAX_LOCAL_IMAGES = 12;
+
+/** The local image paths a page names, in order, at most RENDER_PAGE_MAX_LOCAL_IMAGES. */
+export const renderPageImageSources = (html) => {
+  const sources = new Set();
+  for (const match of html.matchAll(LOCAL_IMAGE_RE)) {
+    sources.add(match[2] ?? match[3]);
+    if (sources.size === RENDER_PAGE_MAX_LOCAL_IMAGES) break;
+  }
+  return [...sources];
+};
+
 const SHOWN_NOTE = "Shown to the user in the chat above your reply. Don't announce, describe or restate the page; reply with only what it doesn't already say.";
 
 const ANSWERED_NOTE = "The user answered on the page. summary is their choice in words, data is what the page sent. Continue the task from it; the chat already shows the summary under the page, so don't repeat it back.";

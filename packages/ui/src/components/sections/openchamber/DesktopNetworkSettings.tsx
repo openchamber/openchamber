@@ -4,45 +4,31 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
   getDesktopLanAddress,
-  getDesktopKeepAwake,
-  getDesktopLaunchAtLogin,
-  getDesktopMiniChatGlobalShortcut,
-  getDesktopMinimizeToTray,
   isDesktopLocalOriginActive,
   isDesktopShell,
   restartDesktopApp,
-  setDesktopKeepAwake,
-  setDesktopLaunchAtLogin,
-  setDesktopMiniChatGlobalShortcut,
-  setDesktopMinimizeToTray,
 } from '@/lib/desktop';
 import { useI18n } from '@/lib/i18n';
-import { loadDesktopSettings, updateDesktopSettings } from '@/lib/persistence';
+import { loadDesktopSettings } from '@/lib/persistence';
 import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
-import { formatShortcutForDisplay, getCustomizableShortcutActions, UNASSIGNED_SHORTCUT } from '@/lib/shortcuts';
 import {
   SettingsSection,
   SettingsCheckboxRow,
-  SETTINGS_OPTION_STACK_CLASS,
-  SettingsFieldRow,
   SettingsStackedField,
 } from '@/components/sections/shared/SettingsSection';
 import { useEnterprisePolicyStore } from '@/stores/useEnterprisePolicyStore';
-import { useUIStore } from '@/stores/useUIStore';
 
-import { DesktopQuakeModeSettings } from './DesktopQuakeModeSettings';
-import { ShortcutRecordingDialog } from './ShortcutRecordingDialog';
-import { useDesktopQuakeMode } from './useDesktopQuakeMode';
+import { saveDesktopRestartDrafts, useDesktopRestartDrafts } from './desktopRestartDrafts';
 
+/**
+ * Who may open the desktop app over the network: the UI password and access
+ * from the local network. Both apply on the next launch, so they are drafts
+ * until "Save + restart", which also saves the restart drafts of
+ * `DesktopAppSettings` (`desktopRestartDrafts.ts`).
+ */
 export const DesktopNetworkSettings: React.FC = () => {
   const { t } = useI18n();
   const isLocalDesktop = isDesktopShell() && isDesktopLocalOriginActive();
-  const isMacDesktop = isLocalDesktop
-    && typeof window !== 'undefined'
-    && window.__OPENCHAMBER_PLATFORM__ === 'darwin';
-  const isLinuxDesktop = isLocalDesktop
-    && typeof window !== 'undefined'
-    && window.__OPENCHAMBER_PLATFORM__ === 'linux';
   const [savedValue, setSavedValue] = React.useState(false);
   const [draftValue, setDraftValue] = React.useState(false);
   // The password is write-only: the server says whether one is set, and the
@@ -54,39 +40,7 @@ export const DesktopNetworkSettings: React.FC = () => {
   const [lanAccessBlockedReason, setLanAccessBlockedReason] = React.useState<string | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
   const [isSaving, setIsSaving] = React.useState(false);
-  const [launchAtLoginSupported, setLaunchAtLoginSupported] = React.useState(false);
-  const [launchAtLoginEnabled, setLaunchAtLoginEnabled] = React.useState(false);
-  const [isSavingLaunchAtLogin, setIsSavingLaunchAtLogin] = React.useState(false);
-  const [minimizeToTraySupported, setMinimizeToTraySupported] = React.useState(false);
-  const [minimizeToTrayEnabled, setMinimizeToTrayEnabled] = React.useState(false);
-  const [isSavingMinimizeToTray, setIsSavingMinimizeToTray] = React.useState(false);
-  const [savedMacMenuBarEnabled, setSavedMacMenuBarEnabled] = React.useState(true);
-  const [draftMacMenuBarEnabled, setDraftMacMenuBarEnabled] = React.useState(true);
-  const [savedLinuxNativeFrame, setSavedLinuxNativeFrame] = React.useState(false);
-  const [draftLinuxNativeFrame, setDraftLinuxNativeFrame] = React.useState(false);
-  const [keepAwakeSupported, setKeepAwakeSupported] = React.useState(false);
-  const [keepAwakeEnabled, setKeepAwakeEnabled] = React.useState(false);
-  const [isSavingKeepAwake, setIsSavingKeepAwake] = React.useState(false);
-  const [miniChatGlobalShortcutSupported, setMiniChatGlobalShortcutSupported] = React.useState(false);
-  const [miniChatGlobalShortcutCombo, setMiniChatGlobalShortcutCombo] = React.useState<string | null>(null);
-  const [miniChatGlobalShortcutActive, setMiniChatGlobalShortcutActive] = React.useState(false);
-  const [isSavingMiniChatGlobalShortcut, setIsSavingMiniChatGlobalShortcut] = React.useState(false);
-  const [editingMiniChatGlobalShortcut, setEditingMiniChatGlobalShortcut] = React.useState(false);
-  const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
-  const setShortcutOverride = useUIStore((state) => state.setShortcutOverride);
-  const miniChatGlobalShortcutAction = React.useMemo(
-    () => getCustomizableShortcutActions().find((action) => action.id === 'mini_chat_global') ?? null,
-    [],
-  );
   const [error, setError] = React.useState<string | null>(null);
-  const quake = useDesktopQuakeMode(isLocalDesktop, setError);
-  const { release: releaseQuakeShortcut } = quake;
-  // Recording the Quake combo offers a replace instead of a silent collision
-  // the main process would then refuse to register.
-  const miniChatRecorderOverrides = React.useMemo(
-    () => (quake.combo ? { ...shortcutOverrides, quake_mode_global: quake.combo } : shortcutOverrides),
-    [quake.combo, shortcutOverrides],
-  );
   const [lanAddress, setLanAddress] = React.useState<string | null>(null);
 
   React.useEffect(() => {
@@ -114,12 +68,6 @@ export const DesktopNetworkSettings: React.FC = () => {
         setRemovePassword(false);
         setLanAccessActive(data.desktopLanAccessActive === true);
         setLanAccessBlockedReason(data.desktopLanAccessBlockedReason ?? null);
-        const macMenuBarEnabled = data.desktopMacMenuBarEnabled !== false;
-        setSavedMacMenuBarEnabled(macMenuBarEnabled);
-        setDraftMacMenuBarEnabled(macMenuBarEnabled);
-        const linuxNativeFrame = data.desktopLinuxNativeFrame === true;
-        setSavedLinuxNativeFrame(linuxNativeFrame);
-        setDraftLinuxNativeFrame(linuxNativeFrame);
         setError(null);
       } catch (cause) {
         if (!cancelled) {
@@ -136,91 +84,6 @@ export const DesktopNetworkSettings: React.FC = () => {
       cancelled = true;
     };
   }, [isLocalDesktop, t]);
-
-  React.useEffect(() => {
-    if (!isLocalDesktop) {
-      setLaunchAtLoginSupported(false);
-      return;
-    }
-
-    let cancelled = false;
-    void (async () => {
-      const status = await getDesktopLaunchAtLogin();
-      if (cancelled) {
-        return;
-      }
-      setLaunchAtLoginSupported(status?.supported === true);
-      setLaunchAtLoginEnabled(status?.enabled === true);
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [isLocalDesktop]);
-
-  React.useEffect(() => {
-    if (!isLocalDesktop) {
-      setMinimizeToTraySupported(false);
-      return;
-    }
-
-    let cancelled = false;
-    void (async () => {
-      const status = await getDesktopMinimizeToTray();
-      if (cancelled) {
-        return;
-      }
-      setMinimizeToTraySupported(status?.supported === true);
-      setMinimizeToTrayEnabled(status?.enabled === true);
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [isLocalDesktop]);
-
-  React.useEffect(() => {
-    if (!isLocalDesktop) {
-      setKeepAwakeSupported(false);
-      return;
-    }
-
-    let cancelled = false;
-    void (async () => {
-      const status = await getDesktopKeepAwake();
-      if (cancelled) {
-        return;
-      }
-      setKeepAwakeSupported(status?.supported === true);
-      setKeepAwakeEnabled(status?.enabled === true);
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [isLocalDesktop]);
-
-  React.useEffect(() => {
-    if (!isLocalDesktop) {
-      setMiniChatGlobalShortcutSupported(false);
-      return;
-    }
-
-    let cancelled = false;
-    void (async () => {
-      const status = await getDesktopMiniChatGlobalShortcut();
-      if (cancelled) {
-        return;
-      }
-      setMiniChatGlobalShortcutSupported(status?.supported === true);
-      setMiniChatGlobalShortcutCombo(status?.combo ?? null);
-      setMiniChatGlobalShortcutActive(status?.active === true);
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [isLocalDesktop]);
 
   React.useEffect(() => {
     if (!isLocalDesktop || !draftValue) {
@@ -244,10 +107,7 @@ export const DesktopNetworkSettings: React.FC = () => {
 
   const nextPassword = draftPassword.trim();
   const passwordDirty = nextPassword.length > 0 || removePassword;
-  const isDirty = draftValue !== savedValue
-    || passwordDirty
-    || draftMacMenuBarEnabled !== savedMacMenuBarEnabled
-    || draftLinuxNativeFrame !== savedLinuxNativeFrame;
+  const isDirty = draftValue !== savedValue || passwordDirty;
   const currentPort = React.useMemo(() => {
     if (typeof window === 'undefined') {
       return null;
@@ -271,7 +131,20 @@ export const DesktopNetworkSettings: React.FC = () => {
   // loopback and the server refuses a network address, so there is no choice here.
   const lanBlockedByEnterprise = useEnterprisePolicyStore((state) => state.networkAccessBlocked)
     || lanAccessBlockedReason === 'enterprise-mode';
-  const saveDisabled = isLoading || isSaving || !isDirty || lanRequiresPassword;
+  const setRestartDraft = useDesktopRestartDrafts((state) => state.setDraft);
+  const hasPendingRestart = useDesktopRestartDrafts((state) => Boolean(state.patches.app || state.patches.network));
+  const saveDisabled = isLoading || isSaving || !hasPendingRestart || lanRequiresPassword;
+
+  // Publishes this section's pending changes, so a restart from the desktop
+  // app section saves them too, or waits while they cannot be saved.
+  React.useEffect(() => {
+    setRestartDraft('network', isDirty && !lanRequiresPassword ? {
+      ...(draftValue !== savedValue ? { desktopLanAccessEnabled: draftValue } : {}),
+      // Omitted when unchanged: the server keeps the password it has.
+      ...(nextPassword ? { desktopUiPassword: nextPassword } : removePassword ? { desktopUiPassword: '' } : {}),
+    } : null, lanRequiresPassword);
+  }, [draftValue, isDirty, lanRequiresPassword, nextPassword, removePassword, savedValue, setRestartDraft]);
+  React.useEffect(() => () => setRestartDraft('network', null, false), [setRestartDraft]);
 
   const handlePasswordChange = React.useCallback((value: string) => {
     setDraftPassword(value);
@@ -286,157 +159,14 @@ export const DesktopNetworkSettings: React.FC = () => {
     setDraftValue(false);
   }, []);
 
-  const handleLaunchAtLoginToggle = React.useCallback(async () => {
-    if (!launchAtLoginSupported || isSavingLaunchAtLogin) {
-      return;
-    }
-
-    const nextValue = !launchAtLoginEnabled;
-    setLaunchAtLoginEnabled(nextValue);
-    setIsSavingLaunchAtLogin(true);
-    setError(null);
-
-    try {
-      const status = await setDesktopLaunchAtLogin(nextValue);
-      if (!status?.supported) {
-        throw new Error(t('settings.openchamber.desktopNetwork.error.launchAtLoginUnsupported'));
-      }
-      setLaunchAtLoginEnabled(status.enabled);
-    } catch (cause) {
-      setLaunchAtLoginEnabled(!nextValue);
-      setError(cause instanceof Error ? cause.message : t('settings.openchamber.desktopNetwork.error.launchAtLoginSaveFailed'));
-    } finally {
-      setIsSavingLaunchAtLogin(false);
-    }
-  }, [isSavingLaunchAtLogin, launchAtLoginEnabled, launchAtLoginSupported, t]);
-
-  const handleMinimizeToTrayToggle = React.useCallback(async () => {
-    if (!minimizeToTraySupported || isSavingMinimizeToTray) {
-      return;
-    }
-
-    const nextValue = !minimizeToTrayEnabled;
-    setMinimizeToTrayEnabled(nextValue);
-    setIsSavingMinimizeToTray(true);
-    setError(null);
-
-    try {
-      const status = await setDesktopMinimizeToTray(nextValue);
-      if (!status) {
-        throw new Error(t('settings.openchamber.desktopNetwork.error.minimizeToTraySaveFailed'));
-      }
-      if (!status.supported) {
-        throw new Error(t('settings.openchamber.desktopNetwork.error.minimizeToTrayUnsupported'));
-      }
-      setMinimizeToTrayEnabled(status.enabled);
-    } catch (cause) {
-      setMinimizeToTrayEnabled(!nextValue);
-      setError(cause instanceof Error ? cause.message : t('settings.openchamber.desktopNetwork.error.minimizeToTraySaveFailed'));
-    } finally {
-      setIsSavingMinimizeToTray(false);
-    }
-  }, [isSavingMinimizeToTray, minimizeToTrayEnabled, minimizeToTraySupported, t]);
-
-  const handleKeepAwakeToggle = React.useCallback(async () => {
-    if (!keepAwakeSupported || isSavingKeepAwake) {
-      return;
-    }
-
-    const nextValue = !keepAwakeEnabled;
-    setKeepAwakeEnabled(nextValue);
-    setIsSavingKeepAwake(true);
-    setError(null);
-
-    try {
-      const status = await setDesktopKeepAwake(nextValue);
-      if (!status?.supported) {
-        throw new Error(t('settings.openchamber.desktopNetwork.error.keepAwakeUnsupported'));
-      }
-      setKeepAwakeEnabled(status.enabled);
-    } catch (cause) {
-      setKeepAwakeEnabled(!nextValue);
-      setError(cause instanceof Error ? cause.message : t('settings.openchamber.desktopNetwork.error.keepAwakeSaveFailed'));
-    } finally {
-      setIsSavingKeepAwake(false);
-    }
-  }, [isSavingKeepAwake, keepAwakeEnabled, keepAwakeSupported, t]);
-
-  // Resolves true only when the combo was stored, so callers can tie other
-  // changes to a successful save.
-  const handleMiniChatGlobalShortcutSave = React.useCallback(async (combo: string | null): Promise<boolean> => {
-    if (!miniChatGlobalShortcutSupported || isSavingMiniChatGlobalShortcut) {
-      return false;
-    }
-
-    setIsSavingMiniChatGlobalShortcut(true);
-    setError(null);
-
-    try {
-      const status = await setDesktopMiniChatGlobalShortcut(combo);
-      if (!status?.supported) {
-        throw new Error(t('settings.openchamber.desktopNetwork.error.miniChatGlobalShortcutSaveFailed'));
-      }
-      setMiniChatGlobalShortcutCombo(status.combo ?? null);
-      setMiniChatGlobalShortcutActive(status.active === true);
-      if (status.error === 'unsupported-combo') {
-        setError(t('settings.openchamber.desktopNetwork.error.miniChatGlobalShortcutUnsupported'));
-        return false;
-      }
-      return true;
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : t('settings.openchamber.desktopNetwork.error.miniChatGlobalShortcutSaveFailed'));
-      return false;
-    } finally {
-      setIsSavingMiniChatGlobalShortcut(false);
-    }
-  }, [isSavingMiniChatGlobalShortcut, miniChatGlobalShortcutSupported, t]);
-
-  // Mirrors the in-app shortcut save flow: when the recorded combo collides
-  // with a customizable in-app action, free that binding so the global
-  // shortcut owns the combo (both would otherwise fire simultaneously). The
-  // in-app binding is released only after the global combo was stored.
-  const handleMiniChatGlobalRecorderSave = React.useCallback((
-    _actionId: string,
-    combo: string,
-    replaceActionId?: string,
-  ) => {
-    void handleMiniChatGlobalShortcutSave(combo).then((saved) => {
-      if (!saved || !replaceActionId) return;
-      if (replaceActionId === 'quake_mode_global') {
-        releaseQuakeShortcut();
-        return;
-      }
-      setShortcutOverride(replaceActionId, UNASSIGNED_SHORTCUT);
-      void updateDesktopSettings({ shortcutOverrides: { ...shortcutOverrides, [replaceActionId]: UNASSIGNED_SHORTCUT } });
-    });
-  }, [handleMiniChatGlobalShortcutSave, releaseQuakeShortcut, setShortcutOverride, shortcutOverrides]);
-
-  const releaseMiniChatGlobalShortcut = React.useCallback(() => {
-    void setDesktopMiniChatGlobalShortcut(null).then((status) => {
-      if (!status) return;
-      setMiniChatGlobalShortcutCombo(status.combo ?? null);
-      setMiniChatGlobalShortcutActive(status.active === true);
-    });
-  }, []);
-
   const handleSaveAndRestart = React.useCallback(async () => {
-    if (!isDirty) {
-      return;
-    }
-
     setIsSaving(true);
     setError(null);
 
     try {
-      const result = await updateDesktopSettings({
-        desktopLanAccessEnabled: draftValue,
-        // Omitted when unchanged: the server keeps the password it has.
-        ...(nextPassword ? { desktopUiPassword: nextPassword } : removePassword ? { desktopUiPassword: '' } : {}),
-        desktopMacMenuBarEnabled: draftMacMenuBarEnabled,
-        desktopLinuxNativeFrame: draftLinuxNativeFrame,
-      });
-
-      if (!result.ok) {
+      // Saves the desktop app section's pending changes as well: the restart
+      // would drop them otherwise.
+      if (!await saveDesktopRestartDrafts()) {
         throw new Error(t('settings.openchamber.desktopNetwork.error.saveFailed'));
       }
 
@@ -448,8 +178,6 @@ export const DesktopNetworkSettings: React.FC = () => {
       }
       setDraftPassword('');
       setRemovePassword(false);
-      setSavedMacMenuBarEnabled(draftMacMenuBarEnabled);
-      setSavedLinuxNativeFrame(draftLinuxNativeFrame);
 
       const restarted = await restartDesktopApp();
       if (!restarted) {
@@ -459,234 +187,96 @@ export const DesktopNetworkSettings: React.FC = () => {
       setError(cause instanceof Error ? cause.message : t('settings.openchamber.desktopNetwork.error.saveFailed'));
       setIsSaving(false);
     }
-  }, [draftLinuxNativeFrame, draftMacMenuBarEnabled, draftValue, isDirty, nextPassword, removePassword, t]);
+  }, [draftValue, nextPassword, removePassword, t]);
 
   if (!isLocalDesktop) {
     return null;
   }
 
   return (
-    <SettingsSection title={t('settings.openchamber.desktopNetwork.title')}>
-      <div className="space-y-3">
-        {(launchAtLoginSupported || isMacDesktop || isLinuxDesktop || minimizeToTraySupported || keepAwakeSupported || miniChatGlobalShortcutSupported || quake.supported) ? (
-          <div className={SETTINGS_OPTION_STACK_CLASS}>
-            {launchAtLoginSupported ? (
-              <SettingsCheckboxRow
-                settingsItem="sessions.desktop-launch-at-login"
-                checked={launchAtLoginEnabled}
-                onChange={(checked) => {
-                  if (checked === launchAtLoginEnabled) return;
-                  void handleLaunchAtLoginToggle();
-                }}
-                disabled={isSavingLaunchAtLogin}
-                label={t('settings.openchamber.desktopNetwork.field.launchAtLogin')}
-                info={t('settings.openchamber.desktopNetwork.field.launchAtLoginDescription')}
-                ariaLabel={t('settings.openchamber.desktopNetwork.field.launchAtLoginAria')}
-              />
-            ) : null}
-
-            {isMacDesktop ? (
-              <SettingsCheckboxRow
-                settingsItem="sessions.desktop-mac-menu-bar"
-                checked={draftMacMenuBarEnabled}
-                onChange={setDraftMacMenuBarEnabled}
-                disabled={isLoading || isSaving}
-                label={t('settings.openchamber.desktopNetwork.field.macMenuBar')}
-                info={t('settings.openchamber.desktopNetwork.field.macMenuBarDescription')}
-                ariaLabel={t('settings.openchamber.desktopNetwork.field.macMenuBarAria')}
-              />
-            ) : null}
-
-            {isLinuxDesktop ? (
-              <SettingsCheckboxRow
-                settingsItem="sessions.desktop-linux-native-frame"
-                checked={draftLinuxNativeFrame}
-                onChange={setDraftLinuxNativeFrame}
-                disabled={isLoading || isSaving}
-                label={t('settings.openchamber.desktopNetwork.field.linuxNativeFrame')}
-                info={t('settings.openchamber.desktopNetwork.field.linuxNativeFrameDescription')}
-                ariaLabel={t('settings.openchamber.desktopNetwork.field.linuxNativeFrame')}
-              />
-            ) : null}
-
-            {minimizeToTraySupported ? (
-              <SettingsCheckboxRow
-                settingsItem="sessions.desktop-minimize-to-tray"
-                checked={minimizeToTrayEnabled}
-                onChange={(checked) => {
-                  if (checked === minimizeToTrayEnabled) return;
-                  void handleMinimizeToTrayToggle();
-                }}
-                disabled={isSavingMinimizeToTray}
-                label={t('settings.openchamber.desktopNetwork.field.minimizeToTray')}
-                info={t('settings.openchamber.desktopNetwork.field.minimizeToTrayDescription')}
-                ariaLabel={t('settings.openchamber.desktopNetwork.field.minimizeToTrayAria')}
-              />
-            ) : null}
-
-            {keepAwakeSupported ? (
-              <SettingsCheckboxRow
-                settingsItem="sessions.desktop-keep-awake"
-                checked={keepAwakeEnabled}
-                onChange={(checked) => {
-                  if (checked === keepAwakeEnabled) return;
-                  void handleKeepAwakeToggle();
-                }}
-                disabled={isSavingKeepAwake}
-                label={t('settings.openchamber.desktopNetwork.field.keepAwake')}
-                info={t('settings.openchamber.desktopNetwork.field.keepAwakeDescription')}
-                ariaLabel={t('settings.openchamber.desktopNetwork.field.keepAwakeAria')}
-              />
-            ) : null}
-
-            {miniChatGlobalShortcutSupported ? (
-              <SettingsFieldRow
-                settingsItem="sessions.desktop-mini-chat-global-shortcut"
-                label={t('settings.openchamber.desktopNetwork.field.miniChatGlobalShortcut')}
-                info={t('settings.openchamber.desktopNetwork.field.miniChatGlobalShortcutDescription')}
-                description={miniChatGlobalShortcutCombo && !miniChatGlobalShortcutActive ? (
-                  <span className="block text-[var(--status-warning)]">
-                    {t('settings.openchamber.desktopNetwork.field.miniChatGlobalShortcutInactive')}
-                  </span>
-                ) : undefined}
-              >
-                <kbd className="min-w-32 oc-tile-inset rounded-md px-2 py-1 text-center typography-meta text-foreground">
-                  {miniChatGlobalShortcutCombo
-                    ? formatShortcutForDisplay(miniChatGlobalShortcutCombo)
-                    : t('settings.openchamber.keyboardShortcuts.unassigned')}
-                </kbd>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="xs"
-                  className="!font-normal"
-                  disabled={isSavingMiniChatGlobalShortcut}
-                  onClick={() => setEditingMiniChatGlobalShortcut(true)}
-                >
-                  {t('settings.openchamber.keyboardShortcuts.actions.edit')}
-                </Button>
-                {miniChatGlobalShortcutCombo ? (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="xs"
-                    className="!font-normal"
-                    disabled={isSavingMiniChatGlobalShortcut}
-                    onClick={() => void handleMiniChatGlobalShortcutSave(null)}
-                  >
-                    {t('settings.common.actions.reset')}
-                  </Button>
-                ) : null}
-              </SettingsFieldRow>
-            ) : null}
-
-            <DesktopQuakeModeSettings
-              quake={quake}
-              miniChatCombo={miniChatGlobalShortcutCombo}
-              onReleaseMiniChatShortcut={releaseMiniChatGlobalShortcut}
-            />
-          </div>
-        ) : null}
-
-        <SettingsStackedField
-          settingsItem="sessions.desktop-ui-password"
-          label={(
-            <label htmlFor="desktop-ui-password">
-              {t('settings.openchamber.desktopPassword.field.password')}
-            </label>
-          )}
-          info={t('settings.openchamber.desktopPassword.field.passwordDescription')}
-        >
-          <Input
-            id="desktop-ui-password"
-            type="password"
-            className="h-8 min-w-0 flex-1"
-            value={draftPassword}
-            onChange={(event) => handlePasswordChange(event.target.value)}
-            placeholder={t(hasSavedPassword && !removePassword
-              ? 'settings.openchamber.desktopPassword.field.passwordSetPlaceholder'
-              : 'settings.openchamber.desktopPassword.field.passwordPlaceholder')}
-            disabled={isLoading || isSaving}
-            required={draftValue && !passwordWillBeSet}
-            aria-invalid={lanRequiresPassword}
-          />
-          {hasSavedPassword && !removePassword ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="xs"
-              onClick={handleRemovePassword}
-              disabled={isLoading || isSaving}
-              className="shrink-0 !font-normal"
-            >
-              {t('settings.openchamber.desktopPassword.actions.removePassword')}
-            </Button>
-          ) : null}
-        </SettingsStackedField>
-
-        <div className={SETTINGS_OPTION_STACK_CLASS}>
-          <SettingsCheckboxRow
-            settingsItem="sessions.desktop-lan-access"
-            checked={draftValue && !lanBlockedByEnterprise}
-            onChange={setDraftValue}
-            disabled={isLoading || isSaving || lanBlockedByEnterprise}
-            label={t('settings.openchamber.desktopNetwork.field.allowLanAccess')}
-            info={t('settings.openchamber.desktopNetwork.field.allowLanAccessDescription')}
-            description={lanBlockedByEnterprise ? (
-              <span className="block">{t('settings.openchamber.desktopNetwork.field.enterpriseBlocked')}</span>
-            ) : (
-              <>
-                <span className="block text-[var(--status-warning)]/85">
-                  {t('settings.openchamber.desktopNetwork.field.warning')}
-                </span>
-                {lanRequiresPassword || lanBlockedByMissingPassword ? (
-                  <span className="block text-[var(--status-warning)]/85">
-                    {t('settings.openchamber.desktopNetwork.field.passwordRequiredWarning')}
-                  </span>
-                ) : null}
-              </>
-            )}
-            ariaLabel={t('settings.openchamber.desktopNetwork.field.allowLanAccessAria')}
-          />
-        </div>
-
-        {error ? (
-          <div className="typography-micro text-[var(--status-error)]">{error}</div>
-        ) : null}
-
-        {lanUrl && !lanBlockedByEnterprise ? (
-          <div className="typography-micro text-muted-foreground/80">
-            {isDirty && !savedValue
-              ? t('settings.openchamber.desktopNetwork.hint.openAfterRestart')
-              : t('settings.openchamber.desktopNetwork.hint.openNow')}
-            <span className="font-mono text-foreground">{lanUrl}</span>
-          </div>
-        ) : null}
-
-        <div className="flex justify-start py-1.5">
+    <SettingsSection title={t('settings.layout.general.network.title')} contentClassName="space-y-4">
+      <SettingsStackedField
+        settingsItem="sessions.desktop-ui-password"
+        label={(
+          <label htmlFor="desktop-ui-password">
+            {t('settings.openchamber.desktopPassword.field.password')}
+          </label>
+        )}
+        info={t('settings.openchamber.desktopPassword.field.passwordDescription')}
+      >
+        <Input
+          id="desktop-ui-password"
+          type="password"
+          className="h-8 min-w-0 flex-1"
+          value={draftPassword}
+          onChange={(event) => handlePasswordChange(event.target.value)}
+          placeholder={t(hasSavedPassword && !removePassword
+            ? 'settings.openchamber.desktopPassword.field.passwordSetPlaceholder'
+            : 'settings.openchamber.desktopPassword.field.passwordPlaceholder')}
+          disabled={isLoading || isSaving}
+          required={draftValue && !passwordWillBeSet}
+          aria-invalid={lanRequiresPassword}
+        />
+        {hasSavedPassword && !removePassword ? (
           <Button
             type="button"
+            variant="ghost"
             size="xs"
-            onClick={handleSaveAndRestart}
-            disabled={saveDisabled}
+            onClick={handleRemovePassword}
+            disabled={isLoading || isSaving}
             className="shrink-0 !font-normal"
           >
-            {isSaving ? t('settings.common.actions.saving') : t('settings.openchamber.desktopNetwork.actions.saveAndRestart')}
+            {t('settings.openchamber.desktopPassword.actions.removePassword')}
           </Button>
-        </div>
-      </div>
-      <ShortcutRecordingDialog
-        action={editingMiniChatGlobalShortcut ? miniChatGlobalShortcutAction : null}
-        overrides={miniChatRecorderOverrides}
-        onSave={handleMiniChatGlobalRecorderSave}
-        onOpenChange={(open) => {
-          if (!open) {
-            setEditingMiniChatGlobalShortcut(false);
-          }
-        }}
-        maxChords={1}
-        maxKeys={5}
+        ) : null}
+      </SettingsStackedField>
+
+      <SettingsCheckboxRow
+        settingsItem="sessions.desktop-lan-access"
+        checked={draftValue && !lanBlockedByEnterprise}
+        onChange={setDraftValue}
+        disabled={isLoading || isSaving || lanBlockedByEnterprise}
+        label={t('settings.openchamber.desktopNetwork.field.allowLanAccess')}
+        info={t('settings.openchamber.desktopNetwork.field.allowLanAccessDescription')}
+        description={lanBlockedByEnterprise ? (
+          <span className="block">{t('settings.openchamber.desktopNetwork.field.enterpriseBlocked')}</span>
+        ) : (
+          <>
+            <span className="block text-[var(--status-warning)]/85">
+              {t('settings.openchamber.desktopNetwork.field.warning')}
+            </span>
+            {lanRequiresPassword || lanBlockedByMissingPassword ? (
+              <span className="block text-[var(--status-warning)]/85">
+                {t('settings.openchamber.desktopNetwork.field.passwordRequiredWarning')}
+              </span>
+            ) : null}
+          </>
+        )}
+        ariaLabel={t('settings.openchamber.desktopNetwork.field.allowLanAccessAria')}
       />
+
+      {lanUrl && !lanBlockedByEnterprise ? (
+        <p className="typography-meta text-muted-foreground">
+          {isDirty && !savedValue
+            ? t('settings.openchamber.desktopNetwork.hint.openAfterRestart')
+            : t('settings.openchamber.desktopNetwork.hint.openNow')}
+          <span className="font-mono text-foreground">{lanUrl}</span>
+        </p>
+      ) : null}
+
+      {error ? (
+        <p className="typography-micro text-[var(--status-error)]">{error}</p>
+      ) : null}
+
+      <Button
+        type="button"
+        size="xs"
+        onClick={handleSaveAndRestart}
+        disabled={saveDisabled}
+        className="!font-normal"
+      >
+        {isSaving ? t('settings.common.actions.saving') : t('settings.openchamber.desktopNetwork.actions.saveAndRestart')}
+      </Button>
     </SettingsSection>
   );
 };

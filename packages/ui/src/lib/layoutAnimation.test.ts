@@ -66,6 +66,7 @@ describe('layoutAnimation', () => {
     runWhenLayoutSettled(pin);
     runWhenLayoutSettled(pin);
     runWhenLayoutSettled(pin);
+    runFrame();
     await wait(10);
     expect(pins).toBe(0);
     expect(isLayoutAnimating()).toBe(true);
@@ -76,12 +77,27 @@ describe('layoutAnimation', () => {
     expect(attributes.has('data-panel-animating')).toBe(false);
   });
 
+  test('the duration counts from the next frame, when the transition starts', async () => {
+    let runs = 0;
+    beginLayoutAnimation(5);
+    runWhenLayoutSettled(() => { runs += 1; });
+    // A slow toggle frame: the duration has passed, the transition has not run.
+    await wait(10);
+    runFrame();
+    expect(runs).toBe(0);
+    await wait(10);
+    runFrame();
+    expect(runs).toBe(1);
+  });
+
   test('a second animation extends the first instead of settling in between', async () => {
     let runs = 0;
     beginLayoutAnimation(5);
     runWhenLayoutSettled(() => { runs += 1; });
+    runFrame();
     await wait(3);
     beginLayoutAnimation(15);
+    runFrame();
     await wait(8);
     runFrame();
     expect(runs).toBe(0);
@@ -90,11 +106,12 @@ describe('layoutAnimation', () => {
     expect(runs).toBe(1);
   });
 
-  test('with reduced motion the animation ends on the next frame', async () => {
+  test('with reduced motion the animation ends a frame after it starts', async () => {
     reducedMotion = true;
     let runs = 0;
     beginLayoutAnimation(500);
     runWhenLayoutSettled(() => { runs += 1; });
+    runFrame();
     await wait(2);
     runFrame();
     expect(runs).toBe(1);
@@ -106,11 +123,13 @@ describe('layoutAnimation', () => {
     beginLayoutAnimation(2);
     beginLayoutAnimation(2);
     expect(starts).toBe(1);
+    runFrame();
     await wait(5);
     runFrame();
     beginLayoutAnimation(2);
     expect(starts).toBe(2);
     release();
+    runFrame();
     await wait(5);
     runFrame();
   });
@@ -121,6 +140,7 @@ describe('layoutAnimation', () => {
     beginLayoutAnimation(1);
     runWhenLayoutSettled(task);
     cancelWhenLayoutSettled(task);
+    runFrame();
     await wait(5);
     runFrame();
     expect(runs).toBe(0);

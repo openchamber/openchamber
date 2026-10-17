@@ -6,6 +6,8 @@ Own filesystem API behavior for the web server runtime, including workspace-boun
 ## Entrypoints and structure
 - `packages/web/server/lib/fs/routes.js`: route registration and runtime-owned state for `/api/fs/*` endpoints.
 - `packages/web/server/lib/fs/search.js`: fuzzy filesystem search runtime used by non-FS routes (for example project icon discovery).
+- `packages/web/server/lib/fs/content-search.js`: find in files, run by ripgrep (`GET /api/fs/find-in-files`).
+- `packages/web/server/lib/fs/ripgrep.js`: where the ripgrep binary comes from.
 
 ## Public exports
 - `registerFsRoutes(app, dependencies)` from `routes.js`
@@ -36,6 +38,7 @@ Own filesystem API behavior for the web server runtime, including workspace-boun
      - `POST /api/fs/exec`
     - `GET /api/fs/exec/:jobId`
     - `GET /api/fs/list`
+    - `GET /api/fs/find-in-files` — find in files, see below.
     - `GET /api/fs/git-dirs` — shallow nested git repository discovery for the
       Git tab (breadth-first readdir walk, capped at depth 3 and 100 visited
       directories so shallow repositories are checked before deeper folders;
@@ -50,6 +53,49 @@ Own filesystem API behavior for the web server runtime, including workspace-boun
 - `createFsSearchRuntime({ fsPromises, path, spawn, resolveGitBinaryForSpawn })` from `search.js`
   - Returns `{ searchFilesystemFiles(rootPath, options) }`.
   - Supports fuzzy matching, hidden-file handling, and optional `git check-ignore` filtering.
+
+### Find in files
+
+`GET /api/fs/find-in-files?query=…&regex=true|false&limit=…&includeHidden=true&respectGitignore=false`
+searches the active workspace (resolved like every other fs route, from the
+`x-opencode-directory` header) for lines containing `query`, as text unless
+`regex=true`. ripgrep runs the search (`content-search.js`), so what it covers
+is what the file tree shows: `.gitignore` rules apply unless
+`respectGitignore=false`, hidden entries stay out unless `includeHidden=true`,
+binary files are skipped, and `.git` and `node_modules` never take part. A
+lowercase query matches any case; one with a capital letter matches exactly
+(`--smart-case`). The user's ripgrep configuration is ignored (`--no-config`).
+
+The answer is `{ matches, stopped }`. Each match is one line:
+`{ path, relativePath, line, column, text, ranges, cutStart }`, where `column`
+is the 1-based position of the first match in the original line, `text` is the
+line without indentation, cut to at most 200 characters, and `ranges` are
+`[start, end)` offsets inside `text` (UTF-16 code units, converted from
+ripgrep's byte offsets). A match more than 48 characters into a line is shown
+with 24 characters before it and `cutStart: true`. ripgrep runs in the
+canonical project directory, but `path` is built under the directory the client
+requested (`requestedDirectory`), so a project opened through a symlink gets the
+same paths as its file tree. Matches are sorted by path,
+then line.
+
+`limit` defaults to 200 and is capped at 500; when it is reached the process
+is killed and `stopped` is `'limit'`. A search running for 30 seconds is killed
+too and answers what it found with `stopped: 'deadline'`. Neither is an error.
+When the client closes the response (a new keystroke aborted the request) the
+process is killed and nothing is sent. A failed search is never an empty one:
+an invalid regular expression answers `400` with `reason: 'invalid-pattern'`
+and ripgrep's reason as `error`; a server without ripgrep answers `501` with
+`reason: 'search-unavailable'`; any other failure answers `500` with
+`reason: 'search-failed'`. ripgrep exits with code 2 after a search that found
+matches but could not read every file, which counts as a success.
+
+ripgrep itself (`ripgrep.js`, composed in `feature-routes-runtime.js`) is taken
+from, in order: `Resources/ripgrep` in a packaged desktop build, staged for the
+target architecture by `packages/electron/scripts/prepare-ripgrep.mjs`; the
+`@vscode/ripgrep` platform package, an optional dependency of this package that
+npm and Bun install for the current platform; `rg` on the PATH user commands
+get. A found binary is kept for the process lifetime; a miss is looked up again
+on the next search. The stderr pipe is read to the end, for the reason below.
 
 Both search and directory listing discard `git check-ignore` stderr at spawn.
 They consume stdout for ignore matches. Never create an unread stderr pipe:
@@ -85,5 +131,6 @@ The Git service validates a selected commit identity before planning or spawning
 - `GET /api/fs/raw` answers one `Range: bytes=…` span with `206`, `Content-Range` and a stream from disk (`byte-range.js` reduces the header to a span). Media elements send a span on every seek, and Chromium and WebKit refuse to seek without a `206`, so the viewer's audio and video players depend on this. A whole-file request streams from disk the same way, so a large PDF or recording never sits in server memory. The MIME table (`FILE_MIME_MAP`) is shared with `/api/fs/preview` and covers images, PDF, audio, video, fonts, CSV/TSV and Mermaid.
 - File read, raw and stat routes accept outside paths with `allowOutsideWorkspace=true` under the normal server authentication and OS permissions. They do not require a separate file grant. Legacy grant parameters are ignored. Workspace-scoped reads resolve symlinks after checking the requested path. Write routes keep canonical-target boundary checks.
 - If adding new `/api/fs/*` endpoints, add them in `routes.js` and extend this document.
+- `routes.js` and the sibling modules it imports (`byte-range.js`, `workspace-file-names.js`, `content-search.js`, `../shared/guards.js`, `../git/redaction.js`, `../path-realpath-cache.js`) load with Node built-ins only: `routes.test.js` imports a copy of them in a bare Node process without `node_modules`, the way a packaged desktop build once failed to load them. A new sibling module goes into that test's copy list and takes its value guards from `../shared/guards.js` rather than from a dependency.
 - `GET /api/fs/list` may resolve symlinks with `realpath` to read directory contents, but the response `path` and each entry `path` must stay in the caller's requested path space (`path.join(requestedPath, name)`). Returning real paths breaks file-tree expansion for directories reached through workspace symlinks.
 - `POST /api/fs/upload` accepts one `application/octet-stream` body with `path` and optional `overwrite=true` query parameters. The body streams into a same-directory temp file with a 100 MiB default cap configurable through `OPENCHAMBER_FS_UPLOAD_MAX_BYTES`; failed and oversized uploads clean up that temp file. New files commit through an atomic no-replace link, existing files return `409` unless overwrite is explicit, directory targets are rejected, and the destination parent resolves before writing so uploads cannot escape through workspace symlinks.

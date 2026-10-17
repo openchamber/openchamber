@@ -390,6 +390,7 @@ mock.module("@/lib/worktrees/worktreeCreate", () => ({
 
 const { materializeOpenDraftSession, useSessionUIStore } = await import("../session-ui-store")
 const { useSessionDisplayStore } = await import("@/stores/useSessionDisplayStore")
+const { useUIStore } = await import("@/stores/useUIStore")
 
 describe("issue 2039 draft auto-accept", () => {
   test("cycles the draft mode before a session exists", () => {
@@ -452,6 +453,7 @@ describe("issue 2039 draft auto-accept", () => {
     activationPending = undefined
     selectionSource = 'auto'
     createdSessionDirectory = undefined
+    useUIStore.setState({ permissionDefaultMode: "ask" })
     projectsState.projects = []
     projectsState.activeProjectId = null
     projectsState.setActiveProjectIdOnly = (projectId: string | null) => {
@@ -492,6 +494,43 @@ describe("issue 2039 draft auto-accept", () => {
     expect(createSessionCalls).toHaveLength(1)
     expect(permissionAutoAcceptCalls).toEqual([["ses_issue_2039", "safety"]])
     expect(useSessionUIStore.getState().currentSessionId).toBe("ses_issue_2039")
+  })
+
+  test("writes the Settings default onto a new space session, which no server does for it", async () => {
+    useUIStore.setState({ permissionDefaultMode: "auto" })
+    createdSessionDirectory = "/spaces/0123456789ab/project"
+    useSessionUIStore.getState().openNewSessionDraft({ target: "project", directoryOverride: "/spaces/0123456789ab/project" })
+
+    await materializeOpenDraftSession({ providerID: "provider", modelID: "model" })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(permissionAutoAcceptCalls).toEqual([["ses_issue_2039", "auto"]])
+  })
+
+  test("leaves the default to the host's server outside a space, and writes nothing for ask", async () => {
+    useUIStore.setState({ permissionDefaultMode: "auto" })
+    useSessionUIStore.getState().openNewSessionDraft({ target: "project", directoryOverride: "/repo" })
+    await materializeOpenDraftSession({ providerID: "provider", modelID: "model" })
+
+    useUIStore.setState({ permissionDefaultMode: "ask" })
+    createdSessionDirectory = "/spaces/0123456789ab/project"
+    useSessionUIStore.getState().openNewSessionDraft({ target: "project", directoryOverride: "/spaces/0123456789ab/project" })
+    await materializeOpenDraftSession({ providerID: "provider", modelID: "model" })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(permissionAutoAcceptCalls).toEqual([])
+  })
+
+  test("a choice made in a space draft wins over the Settings default", async () => {
+    useUIStore.setState({ permissionDefaultMode: "auto" })
+    createdSessionDirectory = "/spaces/0123456789ab/project"
+    useSessionUIStore.getState().openNewSessionDraft({ target: "project", directoryOverride: "/spaces/0123456789ab/project" })
+    useSessionUIStore.getState().setDraftPermissionMode("ask")
+
+    await materializeOpenDraftSession({ providerID: "provider", modelID: "model" })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(permissionAutoAcceptCalls).toEqual([["ses_issue_2039", "ask"]])
   })
 
   test("stores only an explicit draft variant as the session override", async () => {

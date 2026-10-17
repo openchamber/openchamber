@@ -92,7 +92,8 @@ the DOM: a component that re-renders with zero mutations is pure waste. Then
 ablate: switch one suspect off in the page and re-measure (the tooling for
 each step is under "Attribution" in `scripts/perf/DOCUMENTATION.md`). A suspect that does
 not move the number when disabled is not the cause, however busy it looks
-(an animation causing 13 style recalcs/s changed no CPU figure). Rank the
+(promoting a spinner to its own layer with `will-change`, `translateZ` or
+`contain` changed no CPU figure). Rank the
 findings by measured share of the budget, and keep "clearly wasteful" apart
 from "intentional but expensive", which is the owner's call (Know When To
 Stop).
@@ -252,10 +253,56 @@ A cache inside an `O(consumers × entities × candidates)` loop is a mitigation,
 - **Freshness comes from signals, never idle traffic.** Relay bytes are paid, so nothing polls or streams while nothing happens: refresh from events the client already gets (agent tool calls, git status, own operations), only for what is visible, batched (the Files tree re-lists at most once per 2 s per surface and never auto-re-lists a folder whose last listing had over 1000 entries).
 - **An inherited custom property on a transcript ancestor restyles the whole transcript.** Writing `--scroll-shadow-*` or `--chat-composer-*` on the chat column or scroller restyled ~47k elements (45 to 90 ms) at every reply start/end and composer line, and `--oc-titlebar-controls-width` on `<html>` restyled the whole document (~65k elements, ~100 ms) on every sidebar toggle. Write the value on the elements that read it (`composer/state/composerInsetReaders.ts`) or register it with `@property … { inherits: false }`.
 - **Hidden-state flips beside the transcript cost a frame when an accessibility client is on.** `aria-hidden` or `inert` changing on the sidebar's column re-serialized the whole transcript (40 to 55 ms, two dropped frames, every toggle); flip them on a small subtree inside it (`Sidebar.tsx` hides only its content, with `inert`). Headless runs never show it: measure with `--force-accessibility` (`scripts/perf/DOCUMENTATION.md`, "When An Accessibility Client Is On").
+- **Focus and inherited flips on a large subtree restyle all of it.** Tailwind's group variants compile to `:is(:where(.group):focus-visible *)`, so a focus change on an element restyles its whole subtree: focusing the context zone's aside cost 40 ms with a 300-row file tree open, focusing an empty element inside it cost nothing. `inert`, `pointer-events` and `user-select` flips cost the same. Measure such surfaces on a real repository: the perf fixture project has a few files, and a three-file tree hides costs that scale with rows.
 - **A closed surface still pays for its subscriptions.** An always-mounted dialog that reads session messages rebuilt itself on every streamed flush. Put the reading body inside `DialogContent` so it mounts only while open or closing (`TimelineDialog`, `SessionGoalDialog`).
 - **Whole-record session hooks re-render on every streamed step.** `useSession` and `useSessionMessages` change identity on each `session.updated` and flush; components that show one field read it through the leaf selectors in `sync/sync-context.tsx` (rule in `sync/DOCUMENTATION.md`).
 - **LegendList state lags the DOM by a frame.** `getState()` sizes come from estimates until rows are measured and from the footer a beat later; read `scrollHeight` when choosing a scroll target, and list state only to skip work mid-glide. Our bun patch hands out a fresh list's containers in item order, so its DOM-order pass has nothing to move after a session opens (`message/parts/DOCUMENTATION.md`).
 - **Count processes on server Git paths.** Look for a git spawn per item, the same read repeated within one operation, and network calls (`ls-remote`, `fetch`) where local refs answer. Batch into one read (`git remote -v`, not `get-url` per remote), keep a fallback when the batched read fails, prove the output matches the old method, and parse with `/\r?\n/`: Git for Windows may print CRLF, and spawns cost more there.
+
+## Motion That Stays On Screen
+
+An infinite CSS animation is paid for as long as it is on screen, and the bill
+lands outside the page: the GPU process and the OS compositor draw every frame.
+Main-thread busy time, style recalcs and `profile:idle`'s CPU budget all read
+it as free. Measured with process CPU on four machines, one spinner or smooth
+pulse took a still app from 2 to 9% of a core to 14 to 66%; in this
+repository's fixture, headless or under Xvfb, it draws 60 frames a second and
+costs 7 to 8% against 1% for a still page.
+
+- **`steps()` still pays.** A stepped animation keeps the compositor ticking
+  every frame, whatever it draws: CodeMirror's `steps(1)` caret draws 1.7
+  frames a second and costs 4.1%, the same blink from a 600 ms timer 1.3%
+  (`lib/codemirror/caretBlink.ts`).
+- **Layer promotion changes nothing.** `will-change`, `translateZ(0)` and
+  `contain` measured no different.
+- **Cost follows changes per second.** Driven from a JS timer, each change
+  is one drawn frame: measured headed on an M-series Mac, Chrome renderer plus
+  GPU, one indicator: still page 0.3%, 1 change a second 1.0%, 2 1.7%, 4
+  2.7%, 8 4.2%, a smooth spinner 8.6 to 9%, a smooth pulse 6.5%.
+- **One clock for every indicator** (`hooks/useDurationTicker.ts`): spinners
+  step four times a second, blinks, dots and counters once, on the same
+  beats, so the page pays for the fastest indicator on screen, not the sum.
+  The styling rules live in `theme-system`, "Animation Contract".
+- **A tick re-renders its subscriber and everything under it.** Call the
+  clock hook in the leaf that shows the change (the dot, the counter), make
+  `active` true only while the readout moves, and keep it out of a page or a
+  preview: a status age on Remote instances re-rendered that whole page every
+  second while any instance was connected. Labels that change by the minute
+  ("5m ago") use `useMinuteTickerNow`, which re-renders only when the minute
+  turns.
+- **Native images count too.** The macOS menu bar icon's breath called
+  `setImage` 13 times a second: 6.9 to 7.3% of the Electron main process,
+  against 2.6 to 3.1% at five a second (`tray.mjs`).
+- **Hidden surfaces stop.** A closed panel, a background tab or an element
+  under `opacity: 0` or `inert` neither animates nor polls. Gate on the
+  surface's own visibility prop (`PauseClock` for clock-driven indicators):
+  desktop windows run with `backgroundThrottling: false`, so
+  `document.visibilityState` stays `visible` there, and macOS keeps drawing a
+  minimized window at full cost.
+- **Measure motion with frames and process CPU, headed, with an ablation.**
+  `profile:animation` isolates one technique; `profile:idle` reports frames
+  drawn per second and fails `--budget-frames` (its positive control is
+  `scripts/perf/controls/pulse-dot.js`). Quote CPU only from headed runs.
 
 ## Repository Tooling
 
@@ -270,11 +317,11 @@ live in the documentation and `--help`.
 
 | Command | Answers |
 |---|---|
-| `bun run profile:idle` | What the app does while nobody interacts with it, in a chosen mounted state, with baseline and budget gating. |
+| `bun run profile:idle` | What the app does while nobody interacts with it, in a chosen mounted state: frames drawn and main-thread work, with baseline and budget gating (`--budget-frames`). |
 | `bun run profile:session` | What a streaming reply costs on deterministic fixtures (prose, code, unicode, tool-heavy): long tasks against the frame budget, the finalize spike, a trace breakdown. |
 | `bun run profile:switch` | How long a session switch takes until it is `visible`, cold and warm, the shift after reveal, and the bytes each switch fetches. The gate for sidebar, header, chat container and markdown first-paint changes. |
 | `bun run profile:startup` | Time from launch to a usable composer, web or packaged desktop, with the requests and bytes until then. |
-| `bun run profile:animation` | What a CSS animation costs in isolation. Animate only `transform` and `opacity`. |
+| `bun run profile:animation` | What a CSS animation or a timer costs in isolation: frames drawn, style and layout, process CPU. |
 | `bun run profile:browser` | A manually driven capture when the interaction cannot be scripted. |
 | `bun run profile:heap` | JS heap and DOM kept after hovering and opening N sessions. |
 | `bun run profile:composer` | Elements restyled per new composer line. |

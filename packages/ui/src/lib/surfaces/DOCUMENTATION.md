@@ -21,9 +21,11 @@ Full-screen extension pages are separate from this rail registry. `contributes.p
   `availability: 'has-content'` surfaces (chat) are hidden from the
   rail until a tab of their mode exists, and stay visible for as long as one
   does — they must not disappear while in use.
-- `defaultWidth` is the panel width in px, used until the user resizes that
-  surface (640 for the wide surfaces, 540 for most, 480 for Git; guest panels
-  540). A resize is remembered in px per mode in
+- `width` picks one of two default panel widths, used until the user resizes
+  that surface (`CONTEXT_SURFACE_WIDTHS`): `wide`, 640 px, for code beside the
+  chat (files, diff, terminal, walkthrough), and `regular`, 540 px, for every
+  other surface, guest panels included. Do not add a third size or a
+  per-surface number. A resize is remembered in px per mode in
   `useUIStore.contextPanelByDirectory[dir].widthByMode` and restored on reload.
   The width does not follow the chat area: a sidebar toggle or a window resize
   leaves it alone, and it only narrows when it would leave the chat less than
@@ -55,9 +57,9 @@ Full-screen extension pages are separate from this rail registry. `contributes.p
   `lib/shortcuts`): it drops surfaces the user hid
   (`useUIStore.contextRailHiddenSurfaces`, edited from the rail's trailing
   configure button — `ContextRailSurfacesDialog`),
-  drops the walkthrough on VS Code and below `WALKTHROUGH_MIN_WIDTH`, hides the pull-request surface
-  unless GitHub is connected (OAuth or `gh` CLI — signed in from Settings →
-  Integrations), and hides `has-content` surfaces
+  drops the walkthrough on VS Code and below `WALKTHROUGH_MIN_WIDTH`, hides the Tracker
+  unless a GitHub or GitLab account is connected (signed in from Settings →
+  Integrations) or an item is open in it, and hides `has-content` surfaces
   until a tab of their mode exists. Both consumers use it so the digit shown
   on a rail badge always maps to the same surface the shortcut opens.
 
@@ -114,6 +116,44 @@ keep the full height). The chat is always the centre and cannot move.
    still owns the list and HTTP. VS Code and mobile omit the row. Do not add
    a built-in mode for that guest.
 
+## Tracker
+
+The `pr` surface is the Tracker. Its strip lists instances like files and
+chats do. The first tab is always the checked-out branch's: its pull or merge
+request, or the form that creates one (`views/PullRequestView.tsx`). It sorts
+first, has no close button, and `closeContextPanelTabs` and the per-surface
+tab budget never remove it. Every other tab is one issue, pull or merge
+request or Linear issue (`views/TrackerItemView.tsx`), opened by
+`useUIStore.openTrackerItem` with the item's link as `targetPath`, a dedupe key
+naming the item whatever page of it the link opens, and the project it is read
+through as `targetDirectory` (none when that is the panel's own project).
+`components/sourceBoard/openTrackerItem.ts` decides that project from the
+session the link belongs to, so opening an item never moves the app to
+another project.
+
+The item tab reads and acts on the item the way the board's preview does,
+with no new-session or worktree actions; attaching it to the session on screen
+stays. A link its project cannot read, the host not knowing it or no account
+reading it, opens in the browser and its tab closes, but only for the click
+that just opened the tab and before it ever showed the item
+(`wasTrackerItemRequested`). A tab restored on launch, or one that showed its
+item before, says it cannot read it with a button to the browser, and a
+failed read shows Retry. Linear answers a missing issue and a failed read the
+same way, so a Linear tab falls back only on that first read.
+
+Changes and the walkthrough opened from another project's PR keep that
+project's folder as their tab's `targetDirectory`, so they read the PR through
+that project's binding beside the chat on screen. Changes then shows that PR
+only: no scope switch, no last-turn or review actions, no opening files in the
+editor, since none of those belong to the session on screen. Opening either
+surface from the rail, or Changes from anywhere that names no folder, returns
+it to the panel's own project. Such a tab is saved as the panel's own: the PR
+it was asked to show is held in memory only (`usePullRequestSelectionStore`),
+so after a restart it would show whatever that project has checked out.
+
+The rail icon is the project's host: GitHub, GitLab, or `ticket-2` for a
+project with neither.
+
 ## Panel header
 
 The panel has one header row. A single-instance surface with its own toolbar
@@ -146,7 +186,8 @@ chat/palette go through the `openContext*` actions in `useUIStore`.
   positions). Chat tab records stay open, but only the active chat tab's
   pinned chat column is mounted while the panel is open. A selected chat
   restores its state from the session stores. A closed panel mounts no chat.
-  Singleton surfaces (git, pr, notes, context) remount on switch. These
+  Surfaces rendered by the zone (git, the Tracker, notes, context) remount on
+  every switch, the Tracker on every switch between its tabs too. These
   surfaces must restore their state from stores or snapshots.
 - Portalled menus and dialogs handle their own Escape key. The panel's capture
   handler ignores their events so dismissing an overlay does not close the panel.

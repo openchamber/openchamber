@@ -404,9 +404,8 @@
 }
 
 /* Panels that are part of the layout (the context panel card, the work
-   status card beside the chat) take the dropdown's hairline ring and nothing
-   else of its lift: they hold their place rather than float, so no lit top
-   edge and only the faint shadow. The ring sits inside, on ::after above the
+   status card beside the chat) take a hairline ring and a short shadow: they
+   hold their place rather than float, so less lift than a dropdown. The ring sits inside, on ::after above the
    content: the context panel card is flush under the header in a clipping
    container, which cut an outside ring's top edge, and an editor or diff
    painting its own background would cover an inset on the card itself.
@@ -417,7 +416,10 @@
      with anything outside the card. Not a backdrop root, so the work status
      glass still blurs what is behind it. */
   isolation: isolate;
-  box-shadow: 0 2px 8px -3px rgb(0 0 0 / 0.08);
+  /* Kept within the card's gutter (about 8px), which the aside clips. */
+  box-shadow:
+    0 1px 2px 0 rgb(0 0 0 / 0.06),
+    0 4px 8px -3px rgb(0 0 0 / 0.12);
 }
 
 .oc-panel-edge::after {
@@ -432,8 +434,44 @@
   transition: opacity 200ms ease;
 }
 
+/* Dark themes add a faint lit top line to the hairline and a denser shadow,
+   since a shadow barely shows on a dark page. Still lower than the floating
+   card below, which is a dropdown. */
+.dark .oc-panel-edge {
+  box-shadow:
+    0 1px 1px 0 rgb(0 0 0 / 0.35),
+    0 4px 8px -3px rgb(0 0 0 / 0.45);
+}
+
+/* A docked panel takes the theme's muted surface (the sidebar's fill), so the
+   chat sits between two side surfaces of one tone; tiles
+   inside mix from it. It redefines the page colour for the whole card rather
+   than painting the card: this rule sits in the components layer, below the
+   card's bg-background utility, and the panes inside paint the page colour
+   over the card anyway. Surfaces coloured from the theme object (terminal,
+   extension frames) follow through usePageColors (hooks/usePageColors.ts).
+   Floating, the card keeps its glass. Light themes go only halfway to the
+   sidebar's fill: the full step read too heavy against a light chat. */
+:root {
+  /* The chat's page colour, kept under its own name because the panel rules
+     below redefine --surface-background and cannot mix from themselves. */
+  --oc-chat-background: var(--surface-background);
+}
+
+.oc-panel-edge:not([data-edge-floating]) {
+  --background: color-mix(in srgb, var(--surface-muted) 50%, var(--oc-chat-background));
+  --surface-background: color-mix(in srgb, var(--surface-muted) 50%, var(--oc-chat-background));
+}
+
+.dark .oc-panel-edge:not([data-edge-floating]) {
+  --background: var(--surface-muted);
+  --surface-background: var(--surface-muted);
+}
+
 .dark .oc-panel-edge::after {
-  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.08);
+  box-shadow:
+    inset 0 1px 0 0 color-mix(in srgb, var(--foreground) 3%, transparent),
+    inset 0 0 0 1px color-mix(in srgb, var(--foreground) 6%, transparent);
 }
 
 /* The work status card opened over the chat is a dropdown, and looks like
@@ -511,26 +549,20 @@
     transparent 50%
   );
   box-shadow:
-    inset 0 1px 0 0 color-mix(in srgb, var(--foreground) 3%, transparent),
-    inset 0 0 0 1px var(--oc-raised-edge),
-    0 1px 1px 0 rgb(0 0 0 / 0.31),
-    0 2px 5px -2px rgb(0 0 0 / 0.4);
-}
-
-/* Text fields sit lower than the buttons and pickers around them: a field is
-   a place to type, not something to press, so in dark themes it takes a much
-   fainter sheen and top line and a shorter shadow. */
-.dark .oc-raised.oc-field {
-  background-image: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--foreground) 1%, transparent),
-    transparent 50%
-  );
-  box-shadow:
     inset 0 1px 0 0 color-mix(in srgb, var(--foreground) 1.5%, transparent),
     inset 0 0 0 1px var(--oc-raised-edge),
     0 1px 1px 0 rgb(0 0 0 / 0.28),
     0 2px 3px -2px rgb(0 0 0 / 0.2);
+}
+
+/* A text field shares the controls' light but sits a tone lower: its fill is
+   washed halfway toward the canvas, so a field reads as a place to type and
+   the buttons and pickers beside it as things to press. */
+.dark .oc-raised.oc-field {
+  background-image: linear-gradient(
+    color-mix(in srgb, var(--surface-background) 50%, transparent),
+    color-mix(in srgb, var(--surface-background) 50%, transparent)
+  );
 }
 
 /* A chromeless field keeps its transparent fill. */
@@ -576,9 +608,9 @@
     transparent 50%
   );
   box-shadow:
-    inset 0 1px 0 0 color-mix(in srgb, var(--foreground) 6%, transparent),
-    0 1px 1px 0 rgb(0 0 0 / 0.31),
-    0 2px 5px -2px rgb(0 0 0 / 0.4);
+    inset 0 1px 0 0 color-mix(in srgb, var(--foreground) 1.5%, transparent),
+    0 1px 1px 0 rgb(0 0 0 / 0.28),
+    0 2px 3px -2px rgb(0 0 0 / 0.2);
 }
 
 .oc-raised-button:active,

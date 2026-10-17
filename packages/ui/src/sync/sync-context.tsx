@@ -744,6 +744,16 @@ function getActiveSessionCandidateIds(directory: string, state: DirectoryStore):
   })
 }
 
+// Sessions with live work of their own: non-idle status or unresolved turns and
+// tools. The viewed session joins only when it is one of them. Polling an idle
+// viewed session every 5 s bought nothing the event stream does not deliver,
+// and over the private relay that cadence kept the relay awake for as long as a
+// session stayed open on any device. The stale-stream check still covers the
+// viewed session.
+function getLiveSessionCandidateIds(state: DirectoryStore): string[] {
+  return getReconnectCandidateSessionIds(state)
+}
+
 type DirectorySessionStatusSnapshot = NonNullable<
   Awaited<ReturnType<typeof opencodeClient.getActiveSessionStatuses>>
 >
@@ -3177,10 +3187,11 @@ export function SyncProvider(props: {
               continue
             }
 
+            const liveSessionIds = getLiveSessionCandidateIds(state)
             const lastStatusPollAt = lastStatusPollAtByDirectoryRef.current.get(directory) ?? 0
-            if (now - lastStatusPollAt >= ACTIVE_SESSION_STATUS_POLL_INTERVAL_MS) {
+            if (liveSessionIds.length > 0 && now - lastStatusPollAt >= ACTIVE_SESSION_STATUS_POLL_INTERVAL_MS) {
               lastStatusPollAtByDirectoryRef.current.set(directory, now)
-              void pollDirectoryStatuses(directory, store, candidateSessionIds).catch(() => undefined)
+              void pollDirectoryStatuses(directory, store, liveSessionIds).catch(() => undefined)
             }
 
             const lastFullResyncAt = lastFullResyncAtByDirectoryRef.current.get(directory) ?? 0
@@ -3192,9 +3203,9 @@ export function SyncProvider(props: {
             // Discover child sessions created by other OpenCode instances
             // that didn't broadcast a session.created event on this stream.
             const lastChildDiscoveryAt = lastChildDiscoveryAtByDirectoryRef.current.get(directory) ?? 0
-            if (now - lastChildDiscoveryAt >= CHILD_SESSION_DISCOVERY_INTERVAL_MS) {
+            if (liveSessionIds.length > 0 && now - lastChildDiscoveryAt >= CHILD_SESSION_DISCOVERY_INTERVAL_MS) {
               lastChildDiscoveryAtByDirectoryRef.current.set(directory, now)
-              void discoverChildSessions(directory, store, candidateSessionIds)
+              void discoverChildSessions(directory, store, liveSessionIds)
             }
           }
         })

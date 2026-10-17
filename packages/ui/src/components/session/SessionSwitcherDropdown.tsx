@@ -11,6 +11,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Icon } from '@/components/icon/Icon';
 import { SessionActivityIndicator } from '@/components/session/SessionActivityIndicator';
+import { useWaitingBlink } from '@/hooks/useDurationTicker';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessionUnseenCount } from '@/sync/notification-store';
 import {
@@ -240,6 +241,7 @@ function SwitcherRow({ session, depth, variant, secondaryMeta, hasChildren, isEx
   const needsAttention = unseenCount > 0 && (!isSubtask || notifyOnSubtasks);
   const turnActivity = useSessionTurnActivity(session.id);
   const isStreaming = turnActivity !== null;
+  const runningBlink = useWaitingBlink(isStreaming);
   const showUnreadDot = !isStreaming && needsAttention && !isActive;
 
   const timestamp = getSessionActivityTime(session) || Date.now();
@@ -336,7 +338,7 @@ function SwitcherRow({ session, depth, variant, secondaryMeta, hasChildren, isEx
         <span className="flex h-3 w-3 flex-shrink-0 items-center justify-center self-center">
           <SessionActivityIndicator
             state={turnActivity ?? 'unread'}
-            runningClassName="animate-busy-pulse"
+            runningClassName={cn('h-2 w-2', runningBlink)}
           />
         </span>
       ) : null}

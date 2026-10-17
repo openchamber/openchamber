@@ -43,7 +43,7 @@ import { SourceBoardReply } from './SourceBoardReply';
 import { SourceBoardChecksDialog } from './SourceBoardChecksDialog';
 import { SourceBoardLabels, SourceBoardReviewers } from './SourceBoardMetaEditors';
 import { SourceBoardProjectPicker, SourceBoardTeamPicker } from './SourceBoardPickers';
-import { isSameRepositoryItemLink } from './openOnBoard';
+import { isSameRepositoryItemLink } from './openTrackerItem';
 import { usePullAttachments } from './pullAttachments';
 import { useThreadActions } from './threadActions';
 import { useBoardRevalidation } from './useBoardRevalidation';

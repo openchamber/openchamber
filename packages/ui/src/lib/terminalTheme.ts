@@ -28,16 +28,17 @@ export interface TerminalTheme {
   brightWhite: string;
 }
 
-export function convertThemeToXterm(theme: Theme): TerminalTheme {
+/** `background` is the page the terminal sits on (`usePageColors`). */
+export function convertThemeToXterm(theme: Theme, background = theme.colors.surface.background): TerminalTheme {
   const { colors } = theme;
   const syntax = colors.syntax.base;
 
   return {
 
-    background: colors.surface.background,
+    background,
     foreground: syntax.foreground,
     cursor: colors.interactive.cursor,
-    cursorAccent: colors.surface.background,
+    cursorAccent: background,
 
     selectionBackground: colors.interactive.selection,
     selectionForeground: colors.interactive.selectionForeground,

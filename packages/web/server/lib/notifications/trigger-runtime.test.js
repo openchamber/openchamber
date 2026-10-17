@@ -1,6 +1,7 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createNotificationTriggerRuntime } from './runtime.js';
+import { createNotificationTemplateRuntime } from './template-runtime.js';
 
 /**
  * The "ready" push is built from the translated `message.updated` events.
@@ -407,5 +408,143 @@ describe('input-needed notification for an MCP elicitation', () => {
     const push = sendPushToAllUiSessions.mock.calls[0][0];
     expect(push.data.url).toBe('/');
     expect(push.data.sessionId).toBeUndefined();
+  });
+});
+
+describe('notifications for a chat of an isolated space', () => {
+  // The chat lives in the OpenCode inside the space; the host's OpenCode answers 404 for it.
+  const SPACE = '32aa0c80b805';
+  const SESSION = 'ses_space_1';
+  const insideAnswers = ({ parentID = null, metadata = {} } = {}) => vi.fn(async (input) => {
+    const url = new URL(String(input));
+    if (url.pathname === '/api/session/active') return Response.json({ data: {} });
+    if (url.pathname === '/api/session') return Response.json({ data: [], cursor: {} });
+    if (url.pathname === `/api/session/${SESSION}`) return Response.json({ data: { id: SESSION, title: '2+2 answer', parentID, metadata } });
+    if (url.pathname === `/api/session/${SESSION}/message`) {
+      return Response.json({ data: [{ id: 'msg_1', type: 'assistant', finish: 'stop', content: [{ type: 'text', text: '2+2 is 4.' }] }], cursor: {} });
+    }
+    return new Response(null, { status: 404 });
+  });
+
+  const makeSpaceRuntime = ({ settings = {}, inside = insideAnswers(), isAutoAnswered = vi.fn(async () => false) } = {}) => {
+    const hostFetch = vi.fn(async () => new Response(null, { status: 404 }));
+    vi.stubGlobal('fetch', hostFetch);
+    const readSettingsFromDisk = async () => ({ nativeNotificationsEnabled: true, notificationMode: 'always', notifyOnCompletion: true, notifyOnQuestion: true, ...settings });
+    const templates = createNotificationTemplateRuntime({
+      readSettingsFromDisk,
+      buildOpenCodeUrl: (path) => `http://opencode.test${path}`,
+      getOpenCodeAuthHeaders: () => ({}),
+      resolveGitBinaryForSpawn: () => 'git',
+    });
+    const emitDesktopNotification = vi.fn(() => true);
+    const sendApnsToAllUiSessions = vi.fn(async () => undefined);
+    // The host's own metadata store reads the host's OpenCode.
+    const readSessionMetadata = vi.fn(async () => ({}));
+    const runtime = createNotificationTriggerRuntime({
+      readSettingsFromDisk,
+      readSessionMetadata,
+      prepareNotificationLastMessage: async ({ message }) => message,
+      buildTemplateVariables: templates.buildTemplateVariables,
+      extractLastMessageText: templates.extractLastMessageText,
+      fetchLastAssistantMessageText: templates.fetchLastAssistantMessageText,
+      resolveNotificationTemplate: templates.resolveNotificationTemplate,
+      shouldApplyResolvedTemplateMessage: templates.shouldApplyResolvedTemplateMessage,
+      emitDesktopNotification,
+      broadcastUiNotification: vi.fn(),
+      sendPushToAllUiSessions: vi.fn(async () => undefined),
+      sendApnsToAllUiSessions,
+      isAnyInteractiveClientVisible: () => false,
+      buildOpenCodeUrl: (path) => `http://opencode.test${path}`,
+      getOpenCodeAuthHeaders: () => ({}),
+      spaceFetchFor: (spaceId) => (spaceId === SPACE ? inside : null),
+    });
+    runtime.setGetIsSessionAutoAccepting(isAutoAnswered);
+    return { runtime, hostFetch, inside, emitDesktopNotification, sendApnsToAllUiSessions, isAutoAnswered, readSessionMetadata };
+  };
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  it('gives the phone the chat name and the reply, read inside the space', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { runtime, hostFetch, inside, emitDesktopNotification, sendApnsToAllUiSessions, readSessionMetadata } = makeSpaceRuntime();
+
+    await runtime.maybeSendPushForTrigger(stepStarted(SESSION, 'msg_1'), { spaceId: SPACE });
+    await runtime.maybeSendPushForTrigger(turnEnded(SESSION), { spaceId: SPACE });
+
+    expect(emitDesktopNotification).toHaveBeenCalledTimes(1);
+    expect(readSessionMetadata).not.toHaveBeenCalled();
+    expect(sendApnsToAllUiSessions.mock.calls[0][0]).toMatchObject({
+      body: '2+2 answer',
+      sealed: { title: '2+2 answer', body: '2+2 is 4.' },
+    });
+    expect(inside).toHaveBeenCalled();
+    expect(hostFetch).not.toHaveBeenCalled();
+  });
+
+  it('announces a main chat of a space with subagent notifications off', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { runtime, hostFetch, emitDesktopNotification } = makeSpaceRuntime({ settings: { notifyOnSubtasks: false } });
+
+    await runtime.maybeSendPushForTrigger(stepStarted(SESSION, 'msg_1'), { spaceId: SPACE });
+    await runtime.maybeSendPushForTrigger(turnEnded(SESSION), { spaceId: SPACE });
+
+    expect(emitDesktopNotification).toHaveBeenCalledTimes(1);
+    expect(hostFetch).not.toHaveBeenCalled();
+  });
+
+  it('stays quiet while a goal in the space\'s own record is active', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { runtime, emitDesktopNotification } = makeSpaceRuntime({
+      inside: insideAnswers({ metadata: { openchamber: { goal: { id: 'g', status: 'active', objective: 'x' } } } }),
+    });
+
+    await runtime.maybeSendPushForTrigger(stepStarted(SESSION, 'msg_1'), { spaceId: SPACE });
+    await runtime.maybeSendPushForTrigger(turnEnded(SESSION), { spaceId: SPACE });
+
+    expect(emitDesktopNotification).not.toHaveBeenCalled();
+  });
+
+  it('still stays quiet for a subagent of a space with subagent notifications off', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { runtime, emitDesktopNotification } = makeSpaceRuntime({ settings: { notifyOnSubtasks: false }, inside: insideAnswers({ parentID: 'ses_parent' }) });
+
+    await runtime.maybeSendPushForTrigger(stepStarted(SESSION, 'msg_1'), { spaceId: SPACE });
+    await runtime.maybeSendPushForTrigger(turnEnded(SESSION), { spaceId: SPACE });
+
+    expect(emitDesktopNotification).not.toHaveBeenCalled();
+  });
+
+  it('asks neither the host\'s OpenCode nor its permission policy about a space\'s request', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { runtime, hostFetch, isAutoAnswered, emitDesktopNotification, sendApnsToAllUiSessions } = makeSpaceRuntime();
+
+    await runtime.maybeSendPushForTrigger({
+      type: 'permission.asked',
+      properties: { id: 'per_1', sessionID: SESSION, directory: `/spaces/${SPACE}/project`, action: 'read', resources: ['/etc/hostname'] },
+    }, { spaceId: SPACE });
+    await vi.advanceTimersByTimeAsync(600);
+
+    expect(emitDesktopNotification).toHaveBeenCalledTimes(1);
+    expect(sendApnsToAllUiSessions.mock.calls[0][0]).toMatchObject({ body: '2+2 answer' });
+    expect(isAutoAnswered).not.toHaveBeenCalled();
+    expect(hostFetch).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the generic text, without the host\'s OpenCode, when the space cannot be asked', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { runtime, hostFetch, emitDesktopNotification, sendApnsToAllUiSessions } = makeSpaceRuntime({
+      inside: vi.fn(async () => { throw new Error('space_not_running'); }),
+    });
+
+    await runtime.maybeSendPushForTrigger(stepStarted(SESSION, 'msg_1'), { spaceId: SPACE });
+    await runtime.maybeSendPushForTrigger(turnEnded(SESSION), { spaceId: SPACE });
+
+    expect(emitDesktopNotification).toHaveBeenCalledTimes(1);
+    expect(sendApnsToAllUiSessions.mock.calls[0][0]).toMatchObject({ body: 'Session', sealed: undefined });
+    expect(hostFetch).not.toHaveBeenCalled();
   });
 });

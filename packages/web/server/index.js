@@ -937,6 +937,8 @@ const notificationTriggerRuntime = createNotificationTriggerRuntime({
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
   readSessionMetadata: readStoredSessionMetadata,
+  // Read at call time: the isolated-spaces switch turns the host on and off live.
+  spaceFetchFor: (spaceId) => spacesHost?.openCodeFetchFor(spaceId) ?? null,
 });
 
 const maybeSendPushForTrigger = (...args) => notificationTriggerRuntime.maybeSendPushForTrigger(...args);
@@ -1154,9 +1156,9 @@ const openCodeWatcherRuntime = createOpenCodeWatcherRuntime({
   getOpenCodeAuthHeaders,
   parseSseDataPayload: (...args) => parseSseDataPayload(...args),
   globalEventHub: globalMessageStreamHub,
-  onPayload: (payload) => {
-    maybeCacheSessionInfoFromEvent(payload);
-    void maybeSendPushForTrigger(payload);
+  onPayload: (payload, { spaceId }) => {
+    maybeCacheSessionInfoFromEvent(payload, { spaceId });
+    void maybeSendPushForTrigger(payload, { spaceId });
     sessionRuntime.processOpenCodeSsePayload(payload);
   },
 });
@@ -1191,18 +1193,18 @@ globalMessageStreamHub.subscribeEvent((event) => {
  * the client). The synthetic OpenChamber frames the UI also expects are derived
  * from the translated event, so the translation happens here.
  */
-const processForwardedEventPayload = (payload, emitSyntheticEvent) => {
+const processForwardedEventPayload = (payload, emitSyntheticEvent, { spaceId = null } = {}) => {
   if (!payload || typeof payload !== 'object' || typeof emitSyntheticEvent !== 'function') {
     return;
   }
 
   for (const translated of translateWireEvent(payload)) {
-    processForwardedServerEvent(translated, emitSyntheticEvent);
+    processForwardedServerEvent(translated, emitSyntheticEvent, spaceId);
   }
 };
 
-const processForwardedServerEvent = (payload, emitSyntheticEvent) => {
-  maybeCacheSessionInfoFromEvent(payload);
+const processForwardedServerEvent = (payload, emitSyntheticEvent, spaceId = null) => {
+  maybeCacheSessionInfoFromEvent(payload, { spaceId });
 
   if (payload.type !== 'session.status') {
     return;
@@ -2402,7 +2404,9 @@ async function main(options = {}) {
   // An archived chat of a deleted space is read and deleted, never run or changed.
   app.use(spaceArchive.guard);
   app.use((req, res, next) => (spacesHost ? spacesHost.middleware(req, res, next) : next()));
-  server.on('upgrade', (...args) => { spacesHost?.upgradeHandler(...args); });
+  // First of all upgrade handlers: a socket addressed to a space by its directory carries a path
+  // a host handler would take too, and the space's handler marks it as the space's before they run.
+  server.prependListener('upgrade', (...args) => { spacesHost?.upgradeHandler(...args); });
   const startSpacesHost = (host) => {
     host.prepareUpgrades({ uiAuthController, isRequestOriginAllowed });
     // Every space's events join the host's hub, and the host asks each space for its live status;

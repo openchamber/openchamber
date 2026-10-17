@@ -1,10 +1,9 @@
-import { cancelWhenLayoutSettled, runWhenLayoutSettled } from '@/lib/layoutAnimation';
-
 // One ResizeObserver serves every rendered message that contains a table, so
 // a long transcript does not create an observer per message.
 //
-// While a side column animates its width, laying the tables out again on every
-// frame forced a layout per frame; they are laid out once, at the final width.
+// It reports on every width change, in the observer's own step after layout,
+// so a refit lands in the frame that resized the text: tables then follow a
+// side column's animation or a drag with the prose around them.
 
 type Watch = { width: number | null; onWidthChange: () => void };
 
@@ -24,7 +23,7 @@ const ensureObserver = (): ResizeObserver | null => {
       // The first entry reports the width the tables were just laid out in.
       const initial = watch.width === null;
       watch.width = width;
-      if (!initial) runWhenLayoutSettled(watch.onWidthChange);
+      if (!initial) watch.onWidthChange();
     }
   });
   return sharedObserver;
@@ -37,10 +36,7 @@ export const observeMarkdownTableWidth = (target: HTMLElement, onWidthChange: ()
   watches.set(target, { width: null, onWidthChange });
   observer.observe(target);
   return () => {
-    const watch = watches.get(target);
-    if (!watch) return;
-    watches.delete(target);
-    cancelWhenLayoutSettled(watch.onWidthChange);
+    if (!watches.delete(target)) return;
     observer.unobserve(target);
     if (watches.size > 0) return;
     observer.disconnect();

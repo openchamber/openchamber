@@ -15,6 +15,7 @@ import { toast } from '@/components/ui';
 import { Icon } from '@/components/icon/Icon';
 import { DictationWaveform } from '@/components/dictation/DictationWaveform';
 import { useDictation } from '@/hooks/useDictation';
+import { useWaitingBlink } from '@/hooks/useDurationTicker';
 import { isDictationCaptureSupported } from '@/lib/dictation/use-dictation-audio-source';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { useI18n } from '@/lib/i18n';
@@ -73,6 +74,8 @@ export const InlineDictationButton: React.FC<InlineDictationButtonProps> = ({
     discardFailedDictation();
   }, [discardFailedDictation, error, partialTranscript, status, t]);
 
+  const recordingBlink = useWaitingBlink(status === 'recording');
+
   if (!supported || !dictationEnabled) {
     return null;
   }
@@ -93,9 +96,8 @@ export const InlineDictationButton: React.FC<InlineDictationButtonProps> = ({
         {/* The composer's recording signs: a live dot, the mic level and the
             elapsed time, so it is plain that speech is being heard. */}
         <span role="status" aria-label={t('chat.dictation.listening')} className="inline-flex min-w-0 items-center gap-1.5">
-          <span className="relative flex h-2 w-2 shrink-0" aria-hidden="true">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[var(--status-error)] opacity-60" />
-            <span className="relative inline-flex h-2 w-2 rounded-full bg-[var(--status-error)]" />
+          <span className="relative flex size-1.5 shrink-0" aria-hidden="true">
+            <span className={cn('relative inline-flex size-1.5 rounded-full bg-[var(--status-error)]', recordingBlink)} />
           </span>
           {downloadingModel ? (
             <span className="truncate typography-meta text-muted-foreground">{t('chat.dictation.downloadingModel')}</span>

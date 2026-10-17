@@ -233,8 +233,9 @@
   width: 100%;
 }
 
-/* While the prompt rail is shown at the chat's end edge (6px offset + 28px
-   gutter), the transcript's scroller pads that edge only, enough on top of
+/* While the prompt rail is enabled (it sits at the chat's end edge: 6px offset
+   + 28px gutter), the transcript's scroller pads that edge only, already before
+   the rail appears with the second prompt, enough on top of
    the column's own padding to keep the text a few pixels clear of the rail
    without narrowing the chat. On the scroller, not the message column:
    columns nest (a turn's activity sits inside one), and a rule on the column

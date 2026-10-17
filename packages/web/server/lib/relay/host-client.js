@@ -329,6 +329,7 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
       });
     };
 
+    const dialedAt = Date.now();
     socket.on('open', () => {
       if (entry.openTimer) {
         clearTimeout(entry.openTimer);
@@ -347,7 +348,10 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
           failChannel(RelayCloseCode.ChannelFailure, 'internal error');
         });
     });
-    socket.on('close', () => {
+    socket.on('close', (code, reason) => {
+      // One line per device drop, so a host that keeps losing devices shows why
+      // in its log: the code says which side closed and the lifetime how often.
+      logger.info?.(`[Relay] data socket closed connectionId=${connectionId} code=${code}${reason?.length ? ` reason=${reason.toString('utf8')}` : ''} after=${Math.round((Date.now() - dialedAt) / 1000)}s`);
       // A retry may already own this connectionId.
       if (dataSockets.get(connectionId) === entry) teardownDataSocket(connectionId);
     });
@@ -413,6 +417,7 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
       return;
     }
     controlSocket = socket;
+    const dialedAt = Date.now();
 
     // Liveness: ping on an interval; any pong (or message) proves the path.
     // A quiet window beyond interval+grace means the connection silently died —
@@ -460,6 +465,7 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
       if (controlSocket !== socket) return;
       controlSocket = null;
       const reason = reasonBuffer ? reasonBuffer.toString('utf8') : '';
+      logger.info?.(`[Relay] control socket closed code=${code}${reason ? ` reason=${reason}` : ''} after=${Math.round((Date.now() - dialedAt) / 1000)}s`);
       if (!lastError && code && code !== 1000) {
         lastError = `control socket closed (${code}${reason ? `: ${reason}` : ''})`;
       }

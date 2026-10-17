@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { useOptionalThemeSystem } from '@/contexts/useThemeSystem';
 import { useI18n } from '@/lib/i18n';
+import { useWaitingPhase } from '@/hooks/useDurationTicker';
 
 const LEFT_FACE_CELL_OPACITIES = [
   0.2, 0.45, 0.15, 0.55,
@@ -88,6 +89,9 @@ export const OpenChamberLogo: React.FC<OpenChamberLogoProps> = ({
 }) => {
   const { t } = useI18n();
   const themeContext = useOptionalThemeSystem();
+  // While loading, the glow switches on and off each second on the shared
+  // clock. A smooth drop-shadow pulse repainted the logo on every frame.
+  const glowing = useWaitingPhase(isAnimated, 2) === 1;
 
   let isDark = true;
   if (themeContext) {
@@ -207,7 +211,7 @@ export const OpenChamberLogo: React.FC<OpenChamberLogoProps> = ({
       aria-label={t('openChamberLogo.aria.logo')}
     >
       {isAnimated ? (
-        <style>{`@keyframes oc-logo-glow{0%,100%{filter:drop-shadow(0 0 0 transparent)}50%{filter:drop-shadow(0 0 4px var(--oc-glow-color))}}.oc-logo-glow{animation:oc-logo-glow 1.8s ease-in-out infinite}@media (prefers-reduced-motion:reduce){.oc-logo-glow{animation:none}}`}</style>
+        <style>{`.oc-logo-glow-on{filter:drop-shadow(0 0 4px var(--oc-glow-color))}@media (prefers-reduced-motion:reduce){.oc-logo-glow-on{filter:none}}`}</style>
       ) : null}
       {/* Left face - base fill */}
       <path
@@ -259,7 +263,7 @@ export const OpenChamberLogo: React.FC<OpenChamberLogoProps> = ({
       {/* OpenCode logo on top face */}
       <g
         opacity={1}
-        className={isAnimated ? 'oc-logo-glow' : undefined}
+        className={glowing ? 'oc-logo-glow-on' : undefined}
         style={isAnimated ? ({ '--oc-glow-color': strokeColor } as React.CSSProperties) : undefined}
       >
         {/*

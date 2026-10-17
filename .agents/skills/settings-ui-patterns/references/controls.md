@@ -55,7 +55,12 @@ no separate group title or description is needed.
 ```
 
 Row click + keyboard toggling are built in. A visible `description` is only
-for text that must stay visible (warnings, dynamic status).
+for text that must stay visible (warnings, dynamic status). It sits under the
+label, so text about one option never floats between two checkboxes. A
+disabled row dims its checkbox and label but keeps the description at full
+strength, since it usually says why the option is off. A line that holds a
+link (the Jev access note) goes in `footer`, which renders under the label but
+outside the clickable row, so the link is never a button inside a button.
 
 ## Mutually Exclusive Options
 
@@ -77,7 +82,15 @@ defined in `layout.md`.
 ```
 
 Skip per-option descriptions when labels are self-explanatory. For short
-segmented choices use `SettingsChipGroup` (chips with `aria-pressed`).
+segmented choices use `SettingsChipGroup` (chips with `aria-pressed`) as the
+control of a `SettingsFieldRow`: label left, chips right, in the same column
+as the selects and steppers around it. The chip track is 32px, the height of
+every other settings control. Keep a radio list (under a `SettingsControlGroup`
+title) only when the option labels are long sentences, like the large-paste
+choices.
+
+A sub-option that only matters while the option above it is on is indented
+under it (`ps-6`), like the reasoning options under "Show reasoning traces".
 
 ## Numeric Value / Override
 

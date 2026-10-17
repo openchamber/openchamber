@@ -6,8 +6,10 @@ import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
+import { useWaitingBlink } from '@/hooks/useDurationTicker';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { useI18n } from '@/lib/i18n';
+import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
 import { shareFileFromNativeApp } from '@/lib/nativeFileShare';
 import type { ToolPart } from '@/lib/opencode/model';
@@ -29,6 +31,7 @@ import {
     type HtmlRenderSubmission,
     type HtmlRenderTheme,
 } from './htmlRender';
+import { useRenderPageHtml } from './renderPageImages';
 
 const DEFAULT_SANS = '-apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif';
 const DEFAULT_MONO = 'ui-monospace, "SFMono-Regular", Menlo, monospace';
@@ -210,10 +213,20 @@ interface HtmlRenderFrameProps {
  * frame takes the height the page reports, so the page scrolls with the chat;
  * full screen and download sit in the corner.
  */
+// Its own component: the blink re-renders this dot once a second, not the page around it.
+function WaitingDot() {
+    const blink = useWaitingBlink(true);
+    return <span aria-hidden="true" className={cn('size-1.5 shrink-0 rounded-full bg-[var(--primary-base)]', blink)} />;
+}
+
 function HtmlRenderFrame({ part, html, title, ask }: HtmlRenderFrameProps) {
     const { t } = useI18n();
     const partId = part.id;
     const theme = useHtmlRenderTheme();
+    // The page with its local images in place; null while they load, and the
+    // frame keeps the page's space meanwhile.
+    const loadedHtml = useRenderPageHtml(part, html);
+    const pageHtml = loadedHtml ?? html;
     const [height, setHeight] = React.useState(() => rememberedHeights.get(partId) ?? HTML_RENDER_MIN_HEIGHT);
     const [fullscreen, setFullscreen] = React.useState(false);
 
@@ -232,7 +245,7 @@ function HtmlRenderFrame({ part, html, title, ask }: HtmlRenderFrameProps) {
         const fileName = htmlRenderFileName(title);
         // The saved page carries the theme it was viewed in, so it opens the
         // same way outside the app.
-        const file = new File([buildHtmlRenderDocument(html, theme)], fileName, { type: 'text/html' });
+        const file = new File([buildHtmlRenderDocument(pageHtml, theme)], fileName, { type: 'text/html' });
         try {
             if (isCapacitorMobileApp()) {
                 await shareFileFromNativeApp(file);
@@ -249,7 +262,7 @@ function HtmlRenderFrame({ part, html, title, ask }: HtmlRenderFrameProps) {
         } catch {
             toast.error(t('chat.htmlRender.downloadFailed'));
         }
-    }, [html, t, theme, title]);
+    }, [pageHtml, t, theme, title]);
 
     // What this client sent, shown until the call completes with the answer
     // OpenCode stores.
@@ -277,18 +290,21 @@ function HtmlRenderFrame({ part, html, title, ask }: HtmlRenderFrameProps) {
             : ask.kind === 'answered-in-chat'
                 ? t('chat.htmlRender.answeredInChat')
                 : ask.kind === 'unanswered' ? t('chat.htmlRender.unanswered') : null;
+    const waiting = ask.kind === 'waiting' && answeredSummary === undefined;
 
     return (
         <div className="my-2">
         <div className="group/html-render relative" style={{ height }} data-html-render={partId}>
-            <HtmlRenderDocument
-                html={html}
-                title={title}
-                className="block size-full border-0 bg-transparent"
-                answerState={answerState}
-                onSubmit={handleSubmit}
-                onContentHeight={handleContentHeight}
-            />
+            {loadedHtml === null ? null : (
+                <HtmlRenderDocument
+                    html={loadedHtml}
+                    title={title}
+                    className="block size-full border-0 bg-transparent"
+                    answerState={answerState}
+                    onSubmit={handleSubmit}
+                    onContentHeight={handleContentHeight}
+                />
+            )}
             {isMobile ? null : (
                 <>
                     <div className="absolute end-1 top-1 flex gap-1 opacity-0 transition-opacity duration-150 focus-within:opacity-100 group-hover/html-render:opacity-100 pointer-coarse:opacity-100">
@@ -317,7 +333,7 @@ function HtmlRenderFrame({ part, html, title, ask }: HtmlRenderFrameProps) {
                         <DialogContent className="max-w-[min(72rem,100%)] gap-0 overflow-hidden bg-background p-0">
                             <DialogTitle className="truncate px-5 py-4 pe-12">{title}</DialogTitle>
                             {fullscreen ? (
-                                <FullscreenPage html={html} title={title} initialHeight={height} answerState={answerState} onSubmit={handleSubmit} />
+                                <FullscreenPage html={pageHtml} title={title} initialHeight={height} answerState={answerState} onSubmit={handleSubmit} />
                             ) : null}
                         </DialogContent>
                     </Dialog>
@@ -326,9 +342,7 @@ function HtmlRenderFrame({ part, html, title, ask }: HtmlRenderFrameProps) {
         </div>
         {status ? (
             <div className="mt-1 flex items-center gap-1.5 typography-meta text-muted-foreground" data-html-render-status={ask.kind}>
-                {ask.kind === 'waiting' && answeredSummary === undefined ? (
-                    <span aria-hidden="true" className="size-1.5 shrink-0 animate-pulse rounded-full bg-[var(--primary-base)]" />
-                ) : null}
+                {waiting ? <WaitingDot /> : null}
                 <span className="min-w-0 truncate" title={status}>{status}</span>
             </div>
         ) : null}

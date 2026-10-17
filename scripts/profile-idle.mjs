@@ -9,6 +9,8 @@
  * noise, battery drain, and a permanently busy tab.
  *
  * Reported dimensions (per second of the idle window):
+ * - frames the display compositor drew, which catches a composited animation
+ *   (a spinner, a pulse) that costs the main thread nothing;
  * - main-thread busy time, script time, style recalculation, layout;
  * - style recalculation and layout counts;
  * - DOM node, document, frame, and JS event listener growth;
@@ -30,6 +32,7 @@ import { buildIdleProbeSource, IDLE_PROBE_GLOBAL } from "./perf/idle-probe.mjs"
 import { summarizeCpuProfile } from "./perf/cpu-profile.mjs"
 import { buildRenderProbeSource, printRenderProbe, readRenderProbe, RENDER_PROBE_GLOBAL, summarizeRenderProbe } from "./perf/render-probe.mjs"
 import { expandProjects, expandSessionLists } from "./perf/scenario.mjs"
+import { startFrameCount } from "./perf/frame-count.mjs"
 import { growthPerSecond, metricMap, round } from "./perf/metrics.mjs"
 
 const HELP = `Usage: bun run profile:idle -- [options]
@@ -75,6 +78,11 @@ Options:
                            With --render-probe, record the call stacks that
                            dispatch to this component's hook
   --baseline <directory>   Compare against a previous run directory
+  --budget-frames <n>      Fail when the compositor draws more frames per second
+                           than this. A still page draws about 0, the app's
+                           shared 1 s waiting tick 1, any running CSS animation
+                           up to 60. Positive control:
+                           --inject-script scripts/perf/controls/pulse-dot.js
   --budget-cpu <percent>   Fail when idle main-thread busy time exceeds this
   --budget-listeners <n>   Fail when net listener growth exceeds this
   --budget-heap <mb>       Fail when heap growth exceeds this
@@ -104,6 +112,7 @@ const parseArgs = (argv) => {
     renderProbe: false,
     renderProbeHook: null,
     baseline: null,
+    budgetFrames: null,
     budgetCpu: null,
     budgetListeners: null,
     budgetHeap: null,
@@ -132,6 +141,7 @@ const parseArgs = (argv) => {
     else if (value === "--render-probe") options.renderProbe = true
     else if (value === "--render-probe-hook") options.renderProbeHook = argv[++index]
     else if (value === "--baseline") options.baseline = argv[++index]
+    else if (value === "--budget-frames") options.budgetFrames = Number(argv[++index])
     else if (value === "--budget-cpu") options.budgetCpu = Number(argv[++index])
     else if (value === "--budget-listeners") options.budgetListeners = Number(argv[++index])
     else if (value === "--budget-heap") options.budgetHeap = Number(argv[++index])
@@ -225,6 +235,7 @@ const seedContextPanel = async (client, panels, sessionId) => {
 }
 
 const REPORTED_METRICS = [
+  { key: "framesPerSecond", label: "Frames drawn/sec", unit: "", lowerIsBetter: true },
   { key: "mainThreadBusyPercent", label: "Main-thread busy", unit: "%", lowerIsBetter: true },
   { key: "scriptPercent", label: "Script", unit: "%", lowerIsBetter: true },
   { key: "recalcStylePercent", label: "Style recalc", unit: "%", lowerIsBetter: true },
@@ -238,7 +249,7 @@ const REPORTED_METRICS = [
   { key: "heapMaxMb", label: "Heap max", unit: "MB", lowerIsBetter: true },
 ]
 
-const buildSummary = ({ options, before, after, samples, cpu, probe, elapsedSeconds }) => {
+const buildSummary = ({ options, before, after, samples, cpu, probe, frames, elapsedSeconds }) => {
   const delta = (name) => Number(after[name] ?? 0) - Number(before[name] ?? 0)
   const percent = (name) => round((delta(name) / elapsedSeconds) * 100)
   const heapSamples = samples.map((sample) => sample.jsHeapUsedMb)
@@ -250,6 +261,7 @@ const buildSummary = ({ options, before, after, samples, cpu, probe, elapsedSeco
     durationSeconds: round(elapsedSeconds),
     settleSeconds: options.settle,
     metrics: {
+      framesPerSecond: frames.framesPerSecond,
       mainThreadBusyPercent: percent("TaskDuration"),
       scriptPercent: percent("ScriptDuration"),
       recalcStylePercent: percent("RecalcStyleDuration"),
@@ -326,6 +338,7 @@ const evaluateBudgets = (summary, options) => {
     const value = summary.metrics[key]
     if (value > budget) failures.push(`${label} ${value}${unit} exceeds budget ${budget}${unit}`)
   }
+  check(options.budgetFrames, "framesPerSecond", "Idle frames drawn", "/s")
   check(options.budgetCpu, "mainThreadBusyPercent", "Idle main-thread busy", "%")
   check(options.budgetListeners, "listenerGrowth", "Listener growth", "")
   check(options.budgetHeap, "heapGrowthMbPerSecond", "Heap growth", "MB/s")
@@ -410,6 +423,7 @@ const main = async () => {
     await client.send("Profiler.setSamplingInterval", { interval: options.samplingInterval })
     await client.send("Profiler.start")
     const before = metricMap((await client.send("Performance.getMetrics")).metrics)
+    const frameCount = await startFrameCount(client)
     const startedAt = Date.now()
 
     console.log(`Recording ${options.duration}s of idle time. No input is delivered to the page.`)
@@ -425,6 +439,10 @@ const main = async () => {
         taskDuration: round(Number(current.TaskDuration ?? 0), 3),
       })
     }
+
+    // Stopped before the liveness probe below, whose animation frames would
+    // count as drawn frames.
+    const frames = await frameCount.stop()
 
     // A renderer that is throttled or occluded reports near-zero rendering work
     // no matter what the page does. Measuring frame liveness turns that failure
@@ -456,6 +474,7 @@ const main = async () => {
       samples,
       cpu: summarizeCpuProfile(profile),
       probe,
+      frames,
       elapsedSeconds,
     })
     summary.frameLiveness = frameLiveness

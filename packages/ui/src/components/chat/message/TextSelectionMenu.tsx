@@ -807,7 +807,7 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
                 title={readAloudLabel}
                 type="button"
               >
-                <Icon name="volume-up" className={cn('h-5 w-5 flex-shrink-0', isReading && 'animate-pulse text-[var(--primary-text)]')} />
+                <Icon name="volume-up" className={cn('h-5 w-5 flex-shrink-0', isReading && 'text-[var(--primary-text)]')} />
                 <span className="whitespace-normal hyphens-auto">
                   {isReading ? t('chat.textSelection.actions.stopReading') : t('chat.textSelection.actions.read')}
                 </span>
@@ -954,7 +954,7 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
                 title={readAloudLabel}
                 type="button"
               >
-                <Icon name="volume-up" className={cn('h-4 w-4', isReading && 'animate-pulse')} />
+                <Icon name="volume-up" className={cn('h-4 w-4', isReading && 'text-[var(--primary-text)]')} />
               </button>
             </>
           ) : null}

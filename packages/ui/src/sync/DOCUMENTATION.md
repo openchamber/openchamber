@@ -371,10 +371,11 @@ host's `spaces` mark: one entry per space with its name, the state of its last
 answer (`complete`, `partial`, `stale`, `unknown`), the registered project it
 was made for and its directory inside. `lib/spaces/spaces-store.ts` keeps the
 marks of the last complete load, reset on a runtime switch. A space's sessions
-live at `/spaces/<id>/<folder>`; `lib/spaces/space-route.ts` turns that
-directory into the `/api/spaces/<id>/` prefix at call time, and `runtimeFetch`
-applies it from the directory a request names in the open, so the sidebar's
-per-directory reads of a space go to the space. Rules that follow from the
+live at `/spaces/<id>/<folder>`, and the server sends a request that names
+such a directory in its query or its directory header to that space, so the
+sidebar's per-directory reads of a space go to the space; a request that names
+its directory only in its body passes it to `runtimeFetch` as `directory`,
+which `lib/spaces/space-route.ts` turns into that header for a space. Rules that follow from the
 mark: a session of a space whose answer was not `complete` may be missing from
 the snapshot without being deleted, so the authoritative cleanup skips it; the
 event pipeline hands the host's `openchamber:space-stream` announcement to
@@ -536,7 +537,7 @@ Child-session discovery (`child-session-discovery.ts`) adds only children the gl
 
 The active-session watchdog in `sync-context.tsx` sends status recovery through the active-session priority of `runBackgroundNetworkTask`. Its child-session discovery pages use `runSessionListNetworkTask`, alongside global and bootstrap session pages. Both lanes live in `@/lib/background-network`. Git, skills, and directory initialization use the background lane. These limits reserve browser connections for interactive message requests rather than letting startup fan-out occupy the whole pool.
 
-Reconnect and watchdog candidates come from non-idle status, the viewed session, or unresolved materialized messages and tool parts. Only ancestors of those candidates join recovery. Parentage in cached session history alone starts no status polling, child discovery, or message materialization; an idle directory with only cached metadata does not scan its history.
+Reconnect and watchdog candidates come from non-idle status, the viewed session, or unresolved materialized messages and tool parts. Only ancestors of those candidates join recovery. The watchdog's 5 s status poll and its child discovery run only for sessions with live work of their own; the viewed session joins them only when it is busy or unresolved. An idle viewed session gets its updates from the event stream, and the stale-stream check still covers it. Polling it every 5 s kept the private relay awake for as long as a session stayed open on any device, because the relay hibernates only after 10 s without a message. Parentage in cached session history alone starts no status polling, child discovery, or message materialization; an idle directory with only cached metadata does not scan its history.
 
 Visible sidebar change-request discovery is separate from child-store bootstrap demand. Worktree topology supplies directory ownership only. The sidebar acquires at most 50 unique demanded directories through the shared [repository binding owner](../lib/source-control/DOCUMENTATION.md), with cold reads behind the background-network gate, then asks the provider-neutral status store for one-shot status under each binding's primary provider account and revision. Binding publications refresh only the affected directory's status demand. Connected accounts outside the binding do not add requests. Hiding the sidebar or collapsing a project removes that demand; missing, unsupported, and failed binding reads issue no status request. A provider association must have ready endpoint authority; aggregate `needs-attention` on an unrelated provider or transport does not suppress it.
 The watchdog calls the stream stale after 20 s without stream activity. Stream activity is anything the event pipeline receives, reported through `onStreamActivity`: an event, a WebSocket frame, or a keepalive that carries no event. OpenCode 2 sends its heartbeat as an SSE comment and the WebSocket bridge sends `openchamber:heartbeat`, and neither becomes a delivered event. Counting delivered events alone made an idle viewed session look stale, so the stream reconnected and resynced every 15 to 20 s, as reported in #4062. Starting a connection attempt is not activity, so a stream that receives nothing still goes stale.
@@ -652,10 +653,11 @@ happened. Before that no-reply notice shows, the session tail is re-read
 from the server (the live stream may have dropped the reply); the notice
 appears only if that read settles with the prompt still last, or fails. Two
 more reads, at 10 and 30 seconds, keep running under the visible notice so a
-late reply still replaces it. Both buffers — session errors and rejected sends — appear in the
-status report (`buildOpenCodeStatusReport`, Ctrl/Cmd+Shift+L or
-`__opencodeDebug.statusReport()`) together with the managed OpenCode
-process's last error and stderr tail and the expected log file locations.
+late reply still replaces it. Both buffers — session errors and rejected sends — appear in full
+in `__opencodeDebug.statusReport()` together with the managed OpenCode
+process's last error and stderr tail. The diagnostic timeline
+(Ctrl/Cmd+Shift+L, see `lib/diagnostics/DOCUMENTATION.md`) carries them
+with numbered session labels and the error class only.
 
 ## Loading diagnostics
 

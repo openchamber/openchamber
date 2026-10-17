@@ -15,7 +15,8 @@ import { openExternalUrl } from '@/lib/url';
 import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
 import { formatTimeForPreference } from '@/lib/timeFormat';
 import { useUIStore, type TimeFormatPreference } from '@/stores/useUIStore';
-import { SettingsChipGroup, SettingsSection, SettingsGroupTitle, SETTINGS_FIELD_LABEL_CLASS, SETTINGS_CALLOUT_TITLE_CLASS, SETTINGS_DESCRIPTION_CLASS } from '@/components/sections/shared/SettingsSection';
+import { useDurationTickerNow, useWaitingBlink } from '@/hooks/useDurationTicker';
+import { SettingsChipGroup, SettingsFieldRow, SettingsSection, SettingsStackedField, SettingsGroupTitle, SETTINGS_FIELD_LABEL_CLASS, SETTINGS_CALLOUT_TITLE_CLASS, SETTINGS_DESCRIPTION_CLASS, SETTINGS_HELPER_CLASS, SETTINGS_SELECT_ROW_TRIGGER_CLASS } from '@/components/sections/shared/SettingsSection';
 import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
 
 type TunnelState =
@@ -353,6 +354,7 @@ export const TunnelSettings: React.FC = () => {
   const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
   const tUnsafe = React.useCallback((key: string) => t(key as Parameters<typeof t>[0]), [t]);
   const [state, setState] = React.useState<TunnelState>('checking');
+  const checkingBlink = useWaitingBlink(state === 'checking');
   const [enterpriseLocked, setEnterpriseLocked] = React.useState(false);
   const [tunnelInfo, setTunnelInfo] = React.useState<TunnelInfo | null>(null);
   const [activeTunnelMode, setActiveTunnelMode] = React.useState<TunnelMode | null>(null);
@@ -378,9 +380,10 @@ export const TunnelSettings: React.FC = () => {
   const [newPresetToken, setNewPresetToken] = React.useState('');
   const [bootstrapTtlMs, setBootstrapTtlMs] = React.useState<number | null>(30 * 60 * 1000);
   const [sessionTtlMs, setSessionTtlMs] = React.useState<number>(8 * 60 * 60 * 1000);
-  const [remainingText, setRemainingText] = React.useState<string>('');
   const [sessionRecords, setSessionRecords] = React.useState<TunnelSessionRecord[]>([]);
-  const [nowTs, setNowTs] = React.useState<number>(() => Date.now());
+  // Counts expiries down once a second, on the shared 1 s tick, while there
+  // is one to count.
+  const nowTs = useDurationTickerNow(Boolean(tunnelInfo?.bootstrapExpiresAt) || sessionRecords.length > 0);
   const [localPort, setLocalPort] = React.useState<number | null>(null);
   const managedLocalConfigExtensionError = t(MANAGED_LOCAL_CONFIG_EXTENSION_ERROR_KEY);
   const managedLocalConfigFileInputRef = React.useRef<HTMLInputElement>(null);
@@ -418,6 +421,9 @@ export const TunnelSettings: React.FC = () => {
       };
     });
   }, [nowTs, sessionRecords, t]);
+  const bootstrapRemainingText = tunnelInfo?.bootstrapExpiresAt && tunnelInfo.bootstrapExpiresAt > nowTs
+    ? formatRemaining(tunnelInfo.bootstrapExpiresAt - nowTs)
+    : t('settings.openchamber.tunnel.state.expired');
   const isConnectLinkLive = React.useMemo(() => {
     if (!tunnelInfo?.connectUrl) {
       return false;
@@ -634,98 +640,6 @@ export const TunnelSettings: React.FC = () => {
     };
   }, [tunnelInfo?.connectUrl]);
 
-  React.useEffect(() => {
-    if (!tunnelInfo?.bootstrapExpiresAt) {
-      setRemainingText(t('settings.openchamber.tunnel.state.noExpiry'));
-      return;
-    }
-
-    let rafId: number | null = null;
-    let lastTime = Date.now();
-    
-    const updateRemaining = () => {
-      const remaining = tunnelInfo.bootstrapExpiresAt ? tunnelInfo.bootstrapExpiresAt - Date.now() : 0;
-      if (remaining <= 0) {
-        setRemainingText(t('settings.openchamber.tunnel.state.expired'));
-      } else {
-        setRemainingText(formatRemaining(remaining));
-      }
-    };
-
-    const tick = () => {
-      const now = Date.now();
-      // Update only once per second
-      if (now - lastTime >= 1_000) {
-        updateRemaining();
-        lastTime = now;
-      }
-      rafId = requestAnimationFrame(tick);
-    };
-
-    updateRemaining();
-    
-    // Only run when visible
-    if (typeof document === 'undefined' || document.visibilityState === 'visible') {
-      rafId = requestAnimationFrame(tick);
-    }
-    
-    const onVisibility = () => {
-      if (document.visibilityState === 'visible' && rafId === null) {
-        rafId = requestAnimationFrame(tick);
-      } else if (document.visibilityState !== 'visible' && rafId !== null) {
-        cancelAnimationFrame(rafId);
-        rafId = null;
-      }
-    };
-    
-    document.addEventListener('visibilitychange', onVisibility);
-
-    return () => {
-      document.removeEventListener('visibilitychange', onVisibility);
-      if (rafId !== null) {
-        cancelAnimationFrame(rafId);
-      }
-    };
-  }, [t, tunnelInfo?.bootstrapExpiresAt]);
-
-  React.useEffect(() => {
-    // Use requestAnimationFrame for smoother updates without setInterval overhead
-    let rafId: number | null = null;
-    let lastTime = Date.now();
-    
-    const tick = () => {
-      const now = Date.now();
-      // Update only once per second
-      if (now - lastTime >= 1_000) {
-        setNowTs(now);
-        lastTime = now;
-      }
-      rafId = requestAnimationFrame(tick);
-    };
-    
-    // Only run when visible
-    if (typeof document === 'undefined' || document.visibilityState === 'visible') {
-      rafId = requestAnimationFrame(tick);
-    }
-    
-    const onVisibility = () => {
-      if (document.visibilityState === 'visible' && rafId === null) {
-        rafId = requestAnimationFrame(tick);
-      } else if (document.visibilityState !== 'visible' && rafId !== null) {
-        cancelAnimationFrame(rafId);
-        rafId = null;
-      }
-    };
-    
-    document.addEventListener('visibilitychange', onVisibility);
-
-    return () => {
-      document.removeEventListener('visibilitychange', onVisibility);
-      if (rafId !== null) {
-        cancelAnimationFrame(rafId);
-      }
-    };
-  }, []);
 
   React.useEffect(() => {
     if (state === 'starting' || state === 'stopping' || state === 'checking') {
@@ -1220,12 +1134,10 @@ export const TunnelSettings: React.FC = () => {
     toast.success(t('settings.openchamber.tunnel.toast.managedRemoteRemoved'));
   }, [managedRemoteTunnelPresets, saveTunnelSettings, selectedPresetId, sessionTokensByPresetId, t]);
 
-  const primaryCtaClass = 'gap-2 border-[var(--primary-base)] bg-[var(--primary-base)] text-[var(--primary-foreground)] hover:bg-[var(--primary-hover)] hover:text-[var(--primary-foreground)]';
-
   if (state === 'checking') {
     return (
       <div className="flex items-center justify-center py-12">
-        <span className="h-1.5 w-1.5 rounded-full bg-current animate-busy-pulse" aria-label={t('settings.openchamber.tunnel.state.loading')} />
+        <span className={cn('h-1.5 w-1.5 rounded-full bg-current', checkingBlink)} aria-label={t('settings.openchamber.tunnel.state.loading')} />
       </div>
     );
   }
@@ -1238,658 +1150,628 @@ export const TunnelSettings: React.FC = () => {
     );
   }
 
+  const controlsBusy = isSavingMode || state === 'starting' || state === 'stopping';
+  const modeLabel = tUnsafe(TUNNEL_MODE_OPTIONS.find((option) => option.value === tunnelMode)?.labelKey ?? 'settings.openchamber.tunnel.option.mode.quick.label');
+
   return (
-    <SettingsSection
-      title={t('settings.openchamber.tunnel.title')}
-      info={(
-        <div className="space-y-1">
-          <p>{t('settings.openchamber.tunnel.description')}</p>
-          <p>{t('settings.openchamber.tunnel.note.serverSideEnforced')}</p>
-          <p>{t('settings.openchamber.tunnel.note.connectLinksOneTime')}</p>
-        </div>
-      )}
-      divider={false}
-    >
-      <div className="space-y-6">
-      {renderedSessionRecords.length > 0 && (
-        <section className="space-y-2 px-2 pb-2 pt-0">
-          <div className="rounded-lg bg-[var(--status-info-background)]/60 p-3">
-            <div className="mb-2 flex items-center gap-2">
-              <Icon name="information" className="size-4 text-[var(--status-info)]" />
-              <p className={SETTINGS_CALLOUT_TITLE_CLASS}>{t('settings.openchamber.tunnel.section.redeemedAccessLinks')}</p>
-            </div>
-            <div className="space-y-1">
-              {renderedSessionRecords.map((record) => {
-                const isQuick = record.mode === 'quick';
-                const isManagedRemote = record.mode === 'managed-remote';
-                const modeBadgeClass = isQuick
-                  ? 'border-[var(--status-warning-border)] bg-[var(--status-warning-background)] text-[var(--status-warning)]'
-                  : isManagedRemote
-                    ? 'border-[var(--status-info-border)] bg-[var(--status-info-background)] text-[var(--status-info)]'
-                    : 'border-[var(--status-success-border)] bg-[var(--status-success-background)] text-[var(--status-success)]';
-                const statusDotClass = record.isActive
-                  ? (isQuick ? 'text-[var(--status-warning)]' : isManagedRemote ? 'text-[var(--status-info)]' : 'text-[var(--status-success)]')
-                  : 'text-muted-foreground/50';
-                const modeLabel = isQuick
-                  ? t('settings.openchamber.tunnel.badge.quick')
-                  : isManagedRemote
-                    ? t('settings.openchamber.tunnel.badge.remote')
-                    : t('settings.openchamber.tunnel.badge.local');
-
-                return (
-                  <div
-                    key={record.sessionId}
-                    className="flex flex-wrap items-center gap-x-2 gap-y-1 oc-tile-inset rounded px-2 py-1.5"
-                  >
-                    <Icon name="checkbox-blank-circle-fill" className={cn('size-2.5 shrink-0', statusDotClass)} />
-                    <span className={cn('typography-micro rounded px-1.5 py-0.5 uppercase', modeBadgeClass)}>
-                      {modeLabel}
-                    </span>
-                    <span className="typography-meta text-muted-foreground/80">
-                      {t('settings.openchamber.tunnel.session.redeemedAt', { time: formatAbsoluteTime(record.createdAt, timeFormatPreference) })}
-                    </span>
-                    <span className="typography-meta text-foreground">
-                      {record.isActive
-                        ? t('settings.openchamber.tunnel.session.expiresIn', { remaining: record.remainingTextForSession })
-                        : (record.inactiveLabel === t('settings.openchamber.tunnel.state.inactive')
-                          ? t('settings.openchamber.tunnel.state.inactive')
-                          : t('settings.openchamber.tunnel.session.inactiveWithReason', { reason: record.inactiveLabel }))}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
+    <>
+      {/* What the tunnel is: who carries it and which kind. The kind's caveat
+          and its setup sit right under the choice they depend on. */}
+      <SettingsSection
+        title={t('settings.layout.tunnel.section.setup')}
+        info={(
+          <div className="space-y-1">
+            <p>{t('settings.openchamber.tunnel.description')}</p>
+            <p>{t('settings.openchamber.tunnel.note.serverSideEnforced')}</p>
+            <p>{t('settings.openchamber.tunnel.note.connectLinksOneTime')}</p>
           </div>
-        </section>
-      )}
-
-      {state === 'not-available' && (
-        <section className="space-y-2 px-2 pb-2 pt-0">
+        )}
+        divider={false}
+        contentClassName="space-y-4"
+      >
+        {state === 'not-available' && (
           <div className="flex items-start gap-2 rounded-lg bg-[var(--status-warning)]/10 p-3">
             <Icon name="error-warning" className="mt-0.5 size-4 shrink-0 text-[var(--status-warning)]" />
-            <div className="space-y-1">
+            <div className="min-w-0 space-y-1">
               <p className={SETTINGS_CALLOUT_TITLE_CLASS}>
                 {t('settings.openchamber.tunnel.notAvailable.dependencyNotFound', { dependency: displayedDependencyInstallInfo.dependency })}
               </p>
-              <p className="typography-meta text-muted-foreground/70">{t('settings.openchamber.tunnel.notAvailable.installHint')}</p>
+              <p className="typography-meta text-muted-foreground">{t('settings.openchamber.tunnel.notAvailable.installHint')}</p>
               <code className="typography-code block rounded bg-muted/50 px-2 py-1 text-xs text-foreground">
                 {displayedDependencyInstallInfo.installCommand}
               </code>
             </div>
           </div>
-        </section>
-      )}
+        )}
 
-      {(
-        <section className="space-y-4 px-2 pb-2 pt-0">
-          <div className="space-y-3">
-            <div data-settings-item="tunnel.provider" className="space-y-1.5">
-              <p className={SETTINGS_FIELD_LABEL_CLASS}>{t('settings.openchamber.tunnel.field.provider')}</p>
-              <Select
-                value={tunnelProvider}
-                onValueChange={(value) => {
-                  void handleProviderChange(value);
-                }}
-                disabled={isSavingMode || state === 'starting' || state === 'stopping'}
-              >
-                <SelectTrigger className="max-w-[16rem]">
-                  <SelectValue placeholder={t('settings.openchamber.tunnel.field.providerPlaceholder')}>
-                    {getProviderLabel(tunnelProvider)}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  {providerCapabilities.length > 0
-                    ? providerCapabilities.map((capability) => (
-                      <SelectItem key={capability.provider} value={capability.provider}>
-                        <ProviderOptionLabel provider={capability.provider} />
-                      </SelectItem>
-                    ))
-                    : (
-                      <SelectItem value="cloudflare">
-                        <ProviderOptionLabel provider="cloudflare" />
-                      </SelectItem>
-                    )}
-                  <SelectItem value="__more-soon" disabled>{t('settings.openchamber.tunnel.option.moreProvidersSoon')}</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div data-settings-item="tunnel.type" className="space-y-1.5">
-              <p className={SETTINGS_FIELD_LABEL_CLASS}>{t('settings.openchamber.tunnel.field.tunnelType')}</p>
-              <SettingsChipGroup
-                value={tunnelMode}
-                aria-label={t('settings.openchamber.tunnel.field.tunnelType')}
-                onChange={(mode) => {
-                  void handleModeChange(mode);
-                }}
-                options={tunnelModeOptions.map((option) => ({
-                  value: option.value,
-                  label: tUnsafe(option.labelKey),
-                  tooltip: tUnsafe(option.tooltipKey),
-                  disabled: isSavingMode || state === 'starting' || state === 'stopping',
-                }))}
-              />
-            </div>
-          </div>
-
-          <div data-settings-item="tunnel.ttl" className="mt-2 grid grid-cols-1 gap-2 py-1.5 md:grid-cols-[14rem_auto] md:gap-x-8 md:gap-y-2">
-            <div className="flex min-w-0 items-center gap-2">
-              <span className={cn(SETTINGS_FIELD_LABEL_CLASS, 'shrink-0')}>{t('settings.openchamber.tunnel.field.connectLinkTtl')}</span>
-              <Select
-                value={ttlOptionValue(BOOTSTRAP_TTL_OPTIONS, bootstrapTtlMs, '1800000')}
-                onValueChange={(value) => {
-                  void handleBootstrapTtlChange(value);
-                }}
-                disabled={isSavingTtl || isSavingMode || state === 'starting' || state === 'stopping'}
-              >
-                <SelectTrigger className="max-w-[11rem] min-w-0">
-                  <SelectValue className="truncate">
-                    {ttlOptionLabel(BOOTSTRAP_TTL_OPTIONS, bootstrapTtlMs, '1800000')}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  {BOOTSTRAP_TTL_OPTIONS.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="flex min-w-0 items-center gap-2">
-              <span className={cn(SETTINGS_FIELD_LABEL_CLASS, 'shrink-0')}>{t('settings.openchamber.tunnel.field.tunnelSessionTtl')}</span>
-              <Select
-                value={ttlOptionValue(SESSION_TTL_OPTIONS, sessionTtlMs, '28800000')}
-                onValueChange={(value) => {
-                  void handleSessionTtlChange(value);
-                }}
-                disabled={isSavingTtl || isSavingMode || state === 'starting' || state === 'stopping'}
-              >
-                <SelectTrigger className="max-w-[11rem] min-w-0">
-                  <SelectValue className="truncate">
-                    {ttlOptionLabel(SESSION_TTL_OPTIONS, sessionTtlMs, '28800000')}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  {SESSION_TTL_OPTIONS.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-
-          {tunnelMode === 'quick' && (
-            <div className="rounded-lg bg-[var(--status-warning)]/10 p-3">
-              <div className="flex items-start gap-2">
-                <Icon name="error-warning" className="mt-0.5 size-4 shrink-0 text-[var(--status-warning)]" />
-                <div>
-                  <p className="typography-meta text-[var(--status-warning)]">
-                    {t('settings.openchamber.tunnel.option.mode.quick.tooltip')}
-                  </p>
-                  {providerSupportsManagedModes && (
-                    <p className="typography-meta mt-1 text-[var(--status-warning)]">
-                      {t('settings.openchamber.tunnel.warning.quickModeReliability')}
-                    </p>
+        <div>
+          <SettingsFieldRow label={t('settings.openchamber.tunnel.field.provider')} settingsItem="tunnel.provider">
+            <Select
+              value={tunnelProvider}
+              onValueChange={(value) => {
+                void handleProviderChange(value);
+              }}
+              disabled={controlsBusy}
+            >
+              <SelectTrigger className={SETTINGS_SELECT_ROW_TRIGGER_CLASS}>
+                <SelectValue placeholder={t('settings.openchamber.tunnel.field.providerPlaceholder')}>
+                  {getProviderLabel(tunnelProvider)}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                {providerCapabilities.length > 0
+                  ? providerCapabilities.map((capability) => (
+                    <SelectItem key={capability.provider} value={capability.provider}>
+                      <ProviderOptionLabel provider={capability.provider} />
+                    </SelectItem>
+                  ))
+                  : (
+                    <SelectItem value="cloudflare">
+                      <ProviderOptionLabel provider="cloudflare" />
+                    </SelectItem>
                   )}
-                </div>
-              </div>
-            </div>
-          )}
+                <SelectItem value="__more-soon" disabled>{t('settings.openchamber.tunnel.option.moreProvidersSoon')}</SelectItem>
+              </SelectContent>
+            </Select>
+          </SettingsFieldRow>
 
-          {tunnelMode === 'managed-remote' && (
-            <div data-settings-item="tunnel.managed-remote" className="oc-tile space-y-2 rounded-lg p-3">
-              {typeof suggestedConnectorPort === 'number' && (
-                <div className="rounded-md bg-[var(--status-info-background)]/60 px-2 py-1.5">
-                  <p className="typography-meta text-[var(--status-info)]">
-                    {t('settings.openchamber.tunnel.note.cloudflareConnectorTarget')} <code>http://localhost:{suggestedConnectorPort}</code>
-                  </p>
-                </div>
+          <SettingsFieldRow label={t('settings.openchamber.tunnel.field.tunnelType')} settingsItem="tunnel.type">
+            <SettingsChipGroup
+              value={tunnelMode}
+              aria-label={t('settings.openchamber.tunnel.field.tunnelType')}
+              onChange={(mode) => {
+                void handleModeChange(mode);
+              }}
+              options={tunnelModeOptions.map((option) => ({
+                value: option.value,
+                label: tUnsafe(option.labelKey),
+                tooltip: tUnsafe(option.tooltipKey),
+                disabled: controlsBusy,
+              }))}
+            />
+          </SettingsFieldRow>
+        </div>
+
+        {tunnelMode === 'quick' && (
+          <div className="flex items-start gap-2 rounded-lg bg-[var(--status-warning)]/10 p-3">
+            <Icon name="error-warning" className="mt-0.5 size-4 shrink-0 text-[var(--status-warning)]" />
+            <div className="space-y-1">
+              <p className="typography-meta text-[var(--status-warning)]">
+                {t('settings.openchamber.tunnel.option.mode.quick.tooltip')}
+              </p>
+              {providerSupportsManagedModes && (
+                <p className="typography-meta text-[var(--status-warning)]">
+                  {t('settings.openchamber.tunnel.warning.quickModeReliability')}
+                </p>
               )}
+            </div>
+          </div>
+        )}
 
-              <div className="mb-1 flex items-center justify-between gap-3">
-                <SettingsGroupTitle>{t('settings.openchamber.tunnel.section.savedManagedRemoteTunnels')}</SettingsGroupTitle>
-                <Button
-                  variant="ghost"
-                  size="xs"
-                  className="!font-normal"
-                  onClick={() => setIsAddingPreset((prev) => !prev)}
-                  disabled={state === 'starting' || state === 'stopping' || isSavingMode}
-                >
-                  <Icon name="add" className="h-3.5 w-3.5" />
-                  {t('settings.common.actions.create')}
-                </Button>
+        {tunnelMode === 'managed-remote' && (
+          <p className={SETTINGS_HELPER_CLASS}>
+            {t('settings.openchamber.tunnel.note.managedRemoteRequiresDomain')}
+            {' '}
+            <button
+              type="button"
+              className="inline-flex items-center gap-1 text-[var(--primary-text)] underline-offset-4 hover:underline"
+              onClick={() => {
+                void openExternal(MANAGED_REMOTE_TUNNEL_DOC_URL);
+              }}
+            >
+              {t('settings.openchamber.tunnel.actions.openManagedRemoteDocs')}
+              <Icon name="external-link" className="size-3.5" />
+            </button>
+          </p>
+        )}
+
+        {tunnelMode === 'managed-local' && (
+          <p className={SETTINGS_HELPER_CLASS}>
+            {t('settings.openchamber.tunnel.note.managedLocalUsesConfig')}
+            {' '}
+            <button
+              type="button"
+              className="inline-flex items-center gap-1 text-[var(--primary-text)] underline-offset-4 hover:underline"
+              onClick={() => {
+                void openExternal(MANAGED_LOCAL_TUNNEL_DOC_URL);
+              }}
+            >
+              {t('settings.openchamber.tunnel.actions.openManagedLocalDocs')}
+              <Icon name="external-link" className="size-3.5" />
+            </button>
+          </p>
+        )}
+
+        {tunnelMode === 'managed-remote' && (
+          <div data-settings-item="tunnel.managed-remote" className="oc-tile space-y-2 rounded-lg p-3">
+            {typeof suggestedConnectorPort === 'number' && (
+              <div className="rounded-md bg-[var(--status-info-background)]/60 px-2 py-1.5">
+                <p className="typography-meta text-[var(--status-info)]">
+                  {t('settings.openchamber.tunnel.note.cloudflareConnectorTarget')} <code>http://localhost:{suggestedConnectorPort}</code>
+                </p>
               </div>
+            )}
 
-              {managedRemoteTunnelPresets.length > 0 ? (
-                <div className="oc-tile-inset overflow-hidden rounded-md">
-                  {managedRemoteTunnelPresets.map((preset, index) => {
-                    const rowToken = sessionTokensByPresetId[preset.id] || '';
-                    const hasSavedToken = savedTokenPresetIds.has(preset.id);
-                    const isOpen = expandedManagedRemoteTunnels[preset.id] ?? false;
+            <div className="mb-1 flex items-center justify-between gap-3">
+              <SettingsGroupTitle>{t('settings.openchamber.tunnel.section.savedManagedRemoteTunnels')}</SettingsGroupTitle>
+              <Button
+                variant="ghost"
+                size="xs"
+                className="!font-normal"
+                onClick={() => setIsAddingPreset((prev) => !prev)}
+                disabled={state === 'starting' || state === 'stopping' || isSavingMode}
+              >
+                <Icon name="add" className="h-3.5 w-3.5" />
+                {t('settings.common.actions.create')}
+              </Button>
+            </div>
 
-                    return (
-                      <div
-                        key={preset.id}
-                        className={cn(index < managedRemoteTunnelPresets.length - 1 && 'border-b border-[var(--interactive-border)]')}
+            {managedRemoteTunnelPresets.length > 0 ? (
+              <div className="oc-tile-inset overflow-hidden rounded-md">
+                {managedRemoteTunnelPresets.map((preset, index) => {
+                  const rowToken = sessionTokensByPresetId[preset.id] || '';
+                  const hasSavedToken = savedTokenPresetIds.has(preset.id);
+                  const isOpen = expandedManagedRemoteTunnels[preset.id] ?? false;
+
+                  return (
+                    <div
+                      key={preset.id}
+                      className={cn(index < managedRemoteTunnelPresets.length - 1 && 'border-b border-[var(--interactive-border)]')}
+                    >
+                      <Collapsible
+                        open={isOpen}
+                        onOpenChange={(open) => {
+                          setExpandedManagedRemoteTunnels((prev) => ({ ...prev, [preset.id]: open }));
+                          if (open) {
+                            void handleSelectPreset(preset.id);
+                          }
+                        }}
+                        className="py-1.5"
                       >
-                        <Collapsible
-                          open={isOpen}
-                          onOpenChange={(open) => {
-                            setExpandedManagedRemoteTunnels((prev) => ({ ...prev, [preset.id]: open }));
-                            if (open) {
-                              void handleSelectPreset(preset.id);
-                            }
-                          }}
-                          className="py-1.5"
-                        >
-                          <div className="flex items-start gap-2 px-3">
-                            <CollapsibleTrigger
-                              type="button"
-                              className="group flex-1 justify-start gap-2 rounded-md px-0 py-1 pe-1 text-start hover:bg-[var(--interactive-hover)]"
-                              disabled={state === 'starting' || state === 'stopping' || isSavingMode}
-                            >
-                              {isOpen
-                                ? <Icon name="arrow-down-s" className="h-4 w-4 text-muted-foreground" />
-                                : <Icon name="arrow-right-s" className="h-4 w-4 text-muted-foreground" />}
-                              <span className="typography-ui-label min-w-0 flex-1 truncate text-foreground">{preset.name}</span>
-                            </CollapsibleTrigger>
+                        <div className="flex items-start gap-2 px-3">
+                          <CollapsibleTrigger
+                            type="button"
+                            className="group flex-1 justify-start gap-2 rounded-md px-0 py-1 pe-1 text-start hover:bg-[var(--interactive-hover)]"
+                            disabled={state === 'starting' || state === 'stopping' || isSavingMode}
+                          >
+                            {isOpen
+                              ? <Icon name="arrow-down-s" className="h-4 w-4 text-muted-foreground" />
+                              : <Icon name="arrow-right-s" className="h-4 w-4 text-muted-foreground" />}
+                            <span className="typography-ui-label min-w-0 flex-1 truncate text-foreground">{preset.name}</span>
+                          </CollapsibleTrigger>
 
-                            <Button
-                              variant="ghost"
-                              size="xs"
-                              className="h-7 w-7 p-0 text-muted-foreground hover:text-[var(--status-error)]"
-                              aria-label={t('settings.openchamber.tunnel.actions.removePresetAria', { name: preset.name })}
-                              onClick={() => {
-                                void handleRemovePreset(preset.id);
+                          <Button
+                            variant="ghost"
+                            size="xs"
+                            className="h-7 w-7 p-0 text-muted-foreground hover:text-[var(--status-error)]"
+                            aria-label={t('settings.openchamber.tunnel.actions.removePresetAria', { name: preset.name })}
+                            onClick={() => {
+                              void handleRemovePreset(preset.id);
+                            }}
+                            disabled={state === 'starting' || state === 'stopping' || isSavingMode}
+                          >
+                            <Icon name="delete-bin" className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+
+                        <CollapsibleContent className="pt-1.5">
+                          <div className="space-y-1 px-3 pb-2">
+                            <p className="typography-meta text-muted-foreground/70">{t('settings.openchamber.tunnel.field.hostnameLabel')} <code>{preset.hostname}</code></p>
+                            <Input
+                              type="password"
+                              value={rowToken}
+                              onChange={(event) => {
+                                const nextValue = event.target.value;
+                                setManagedRemoteValidationError(null);
+                                setSessionTokensByPresetId((prev) => ({ ...prev, [preset.id]: nextValue }));
                               }}
-                              disabled={state === 'starting' || state === 'stopping' || isSavingMode}
-                            >
-                              <Icon name="delete-bin" className="h-3.5 w-3.5" />
-                            </Button>
-                          </div>
-
-                          <CollapsibleContent className="pt-1.5">
-                            <div className="space-y-1 px-3 pb-2">
-                              <p className="typography-meta text-muted-foreground/70">{t('settings.openchamber.tunnel.field.hostnameLabel')} <code>{preset.hostname}</code></p>
-                              <Input
-                                type="password"
-                                value={rowToken}
-                                onChange={(event) => {
-                                  const nextValue = event.target.value;
-                                  setManagedRemoteValidationError(null);
-                                  setSessionTokensByPresetId((prev) => ({ ...prev, [preset.id]: nextValue }));
-                                }}
-                                onBlur={(event) => {
-                                  const tokenToSave = event.currentTarget.value.trim();
-                                  if (!tokenToSave) {
-                                    return;
-                                  }
+                              onBlur={(event) => {
+                                const tokenToSave = event.currentTarget.value.trim();
+                                if (!tokenToSave) {
+                                  return;
+                                }
+                                void persistManagedRemoteTunnelToken({
+                                  presetId: preset.id,
+                                  presetName: preset.name,
+                                  hostname: preset.hostname,
+                                  token: tokenToSave,
+                                });
+                              }}
+                              placeholder={hasSavedToken ? t('settings.openchamber.tunnel.field.savedTokenAvailablePlaceholder') : t('settings.openchamber.tunnel.field.pasteTokenPlaceholder')}
+                              className="h-7"
+                              disabled={state === 'starting' || state === 'stopping'}
+                            />
+                            <div className="flex items-center justify-end">
+                              <Button
+                                variant="ghost"
+                                size="xs"
+                                className="!font-normal"
+                                disabled={state === 'starting' || state === 'stopping' || rowToken.trim().length === 0}
+                                onClick={() => {
                                   void persistManagedRemoteTunnelToken({
                                     presetId: preset.id,
                                     presetName: preset.name,
                                     hostname: preset.hostname,
-                                    token: tokenToSave,
+                                    token: rowToken,
                                   });
                                 }}
-                                placeholder={hasSavedToken ? t('settings.openchamber.tunnel.field.savedTokenAvailablePlaceholder') : t('settings.openchamber.tunnel.field.pasteTokenPlaceholder')}
-                                className="h-7"
-                                disabled={state === 'starting' || state === 'stopping'}
-                              />
-                              <div className="flex items-center justify-end">
-                                <Button
-                                  variant="ghost"
-                                  size="xs"
-                                  className="!font-normal"
-                                  disabled={state === 'starting' || state === 'stopping' || rowToken.trim().length === 0}
-                                  onClick={() => {
-                                    void persistManagedRemoteTunnelToken({
-                                      presetId: preset.id,
-                                      presetName: preset.name,
-                                      hostname: preset.hostname,
-                                      token: rowToken,
-                                    });
-                                  }}
-                                >
-                                  {t('settings.openchamber.tunnel.actions.saveToken')}
-                                </Button>
-                              </div>
+                              >
+                                {t('settings.openchamber.tunnel.actions.saveToken')}
+                              </Button>
                             </div>
-                          </CollapsibleContent>
-                        </Collapsible>
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <p className="typography-meta text-muted-foreground/70">{t('settings.openchamber.tunnel.empty.noManagedRemoteTunnels')}</p>
-              )}
-
-              {isAddingPreset && (
-                <div className="oc-tile-inset space-y-2 rounded-md p-2">
-                  <Input
-                    value={newPresetName}
-                    onChange={(event) => setNewPresetName(event.target.value)}
-                    placeholder={t('settings.openchamber.tunnel.field.newPresetNamePlaceholder')}
-                    className="h-7"
-                    disabled={isSavingMode || state === 'starting' || state === 'stopping'}
-                  />
-                  <Input
-                    value={newPresetHostname}
-                    onChange={(event) => setNewPresetHostname(event.target.value)}
-                    placeholder={t('settings.openchamber.tunnel.field.newPresetHostnamePlaceholder')}
-                    className="h-7"
-                    disabled={isSavingMode || state === 'starting' || state === 'stopping'}
-                  />
-                  <Input
-                    type="password"
-                    value={newPresetToken}
-                    onChange={(event) => setNewPresetToken(event.target.value)}
-                    placeholder={t('settings.openchamber.tunnel.field.newPresetTokenPlaceholder')}
-                    className="h-7"
-                    disabled={isSavingMode || state === 'starting' || state === 'stopping'}
-                  />
-                  {typeof suggestedConnectorPort === 'number' && (
-                    <p className="typography-meta text-muted-foreground/70">
-                      {t('settings.openchamber.tunnel.note.cloudflareConnectorTargetUse')} <code>http://localhost:{suggestedConnectorPort}</code>.
-                    </p>
-                  )}
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="ghost"
-                      size="xs"
-                      className="!font-normal"
-                      onClick={() => {
-                        void handleSaveNewPreset();
-                      }}
-                      disabled={isSavingMode || state === 'starting' || state === 'stopping'}
-                    >
-                      {t('settings.common.actions.saveChanges')}
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="xs"
-                      className="!font-normal"
-                      onClick={() => {
-                        setIsAddingPreset(false);
-                        setNewPresetName('');
-                        setNewPresetHostname('');
-                        setNewPresetToken('');
-                      }}
-                      disabled={isSavingMode || state === 'starting' || state === 'stopping'}
-                    >
-                      {t('settings.common.actions.cancel')}
-                    </Button>
-                  </div>
-                </div>
-              )}
-
-              <div className="flex items-center gap-1.5">
-                <p className="typography-meta text-muted-foreground/80">{t('settings.openchamber.tunnel.note.tokensSavedPerTunnel')}</p>
-                <SettingsInfoHint>
-                  {t('settings.openchamber.tunnel.tooltip.tokensSavedPath')}
-                </SettingsInfoHint>
+                          </div>
+                        </CollapsibleContent>
+                      </Collapsible>
+                    </div>
+                  );
+                })}
               </div>
+            ) : (
+              <p className="typography-meta text-muted-foreground/70">{t('settings.openchamber.tunnel.empty.noManagedRemoteTunnels')}</p>
+            )}
 
-              {!selectedPreset && managedRemoteValidationError && (
-                <p className="typography-meta text-[var(--status-error)]">{managedRemoteValidationError}</p>
-              )}
-            </div>
-          )}
-
-          {tunnelMode === 'managed-local' && (
-            <div data-settings-item="tunnel.managed-local-config" className="oc-tile space-y-2 rounded-lg p-3">
-              <div className="space-y-1.5">
-                <p className={SETTINGS_FIELD_LABEL_CLASS}>{t('settings.openchamber.tunnel.field.configurationFile')}</p>
-                <input
-                  ref={managedLocalConfigFileInputRef}
-                  type="file"
-                  accept=".yml,.yaml,.json"
-                  className="hidden"
-                  onChange={(event) => {
-                    void handleManagedLocalConfigFileSelected(event);
-                  }}
+            {isAddingPreset && (
+              <div className="oc-tile-inset space-y-2 rounded-md p-2">
+                <Input
+                  value={newPresetName}
+                  onChange={(event) => setNewPresetName(event.target.value)}
+                  placeholder={t('settings.openchamber.tunnel.field.newPresetNamePlaceholder')}
+                  className="h-7"
+                  disabled={isSavingMode || state === 'starting' || state === 'stopping'}
                 />
-                <div className="flex items-center gap-2">
-                  <Input
-                    value={managedLocalConfigPath || ''}
-                    onChange={(event) => {
-                      handleManagedLocalConfigInputChange(event.target.value);
-                    }}
-                    onBlur={() => {
-                      void handleManagedLocalConfigInputBlur();
-                    }}
-                    placeholder={t('settings.openchamber.tunnel.field.configurationFilePlaceholder')}
-                    className="h-7"
-                    disabled={state === 'starting' || state === 'stopping' || isSavingMode}
-                  />
-                  <Button
-                    variant="outline"
-                    size="xs"
-                    className="h-7 w-7 p-0"
-                    aria-label={t('settings.openchamber.tunnel.actions.browseConfigFileAria')}
-                    onClick={() => {
-                      void handleBrowseManagedLocalConfig();
-                    }}
-                    disabled={state === 'starting' || state === 'stopping' || isSavingMode}
-                  >
-                    <Icon name="folder" className="size-3.5" />
-                  </Button>
-                  {managedLocalConfigPath && (
-                    <Button
-                      variant="ghost"
-                      size="xs"
-                      className="h-7 w-7 p-0"
-                      aria-label={t('settings.openchamber.tunnel.actions.clearConfigFileAria')}
-                      onClick={() => {
-                        void handleManagedLocalConfigClear();
-                      }}
-                      disabled={state === 'starting' || state === 'stopping' || isSavingMode}
-                    >
-                      <Icon name="close" className="size-3.5" />
-                    </Button>
-                  )}
-                </div>
-                <p className="typography-meta text-muted-foreground/70">
-                  {managedLocalConfigPath
-                    ? t('settings.openchamber.tunnel.note.customConfigUsed')
-                    : t('settings.openchamber.tunnel.note.defaultConfigUsed')}
-                </p>
-                {isManagedLocalConfigPathInvalid && (
-                  <p className="typography-meta text-[var(--status-error)]">{managedLocalConfigExtensionError}</p>
-                )}
-              </div>
-            </div>
-          )}
-
-          {!isSelectedModeTunnelReady && (
-            <div data-settings-item="tunnel.start" className="space-y-6">
-              <div className="rounded-lg bg-[var(--status-info-background)] p-3">
-                <div className="flex items-start gap-2">
-                  <Icon name="information" className="mt-0.5 size-4 shrink-0 text-[var(--status-info)]" />
-                  <div className="space-y-1">
-                    {tunnelMode === 'managed-remote' && (
-                      <>
-                        <p className="typography-meta text-[var(--status-info)]">
-                          {t('settings.openchamber.tunnel.note.managedRemoteRequiresDomain')}
-                        </p>
-                        <button
-                          type="button"
-                          className="typography-meta inline-flex items-center gap-1 text-[var(--status-info)] underline underline-offset-2 hover:opacity-90"
-                          onClick={() => {
-                            void openExternal(MANAGED_REMOTE_TUNNEL_DOC_URL);
-                          }}
-                        >
-                          {t('settings.openchamber.tunnel.actions.openManagedRemoteDocs')}
-                          <Icon name="external-link" className="size-3.5" />
-                        </button>
-                      </>
-                    )}
-                    {tunnelMode === 'managed-local' && (
-                      <>
-                        <p className="typography-meta text-[var(--status-info)]">
-                          {t('settings.openchamber.tunnel.note.managedLocalUsesConfig')}
-                        </p>
-                        <button
-                          type="button"
-                          className="typography-meta inline-flex items-center gap-1 text-[var(--status-info)] underline underline-offset-2 hover:opacity-90"
-                          onClick={() => {
-                            void openExternal(MANAGED_LOCAL_TUNNEL_DOC_URL);
-                          }}
-                        >
-                          {t('settings.openchamber.tunnel.actions.openManagedLocalDocs')}
-                          <Icon name="external-link" className="size-3.5" />
-                        </button>
-                      </>
-                    )}
-                    <p className="typography-meta text-[var(--status-info)]">
-                      {t('settings.openchamber.tunnel.note.startModeAndGenerateLink', {
-                        mode: tUnsafe(TUNNEL_MODE_OPTIONS.find((option) => option.value === tunnelMode)?.labelKey ?? 'settings.openchamber.tunnel.option.mode.quick.label'),
-                      })}
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              {tunnelMode === 'managed-remote' && (
-                <div className="space-y-1.5">
-                  <p className={SETTINGS_FIELD_LABEL_CLASS}>{t('settings.openchamber.tunnel.field.managedRemoteTunnelToConnect')}</p>
-                  <Select
-                    value={selectedPresetId || (managedRemoteTunnelPresets[0]?.id ?? '')}
-                    onValueChange={(presetId) => {
-                      void handleSelectPreset(presetId);
-                    }}
-                    disabled={
-                      isSavingMode
-                      || state === 'starting'
-                      || state === 'stopping'
-                      || managedRemoteTunnelPresets.length <= 1
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder={t('settings.openchamber.tunnel.field.selectSavedTunnelPlaceholder')}>
-                        {selectedPreset?.name}
-                      </SelectValue>
-                    </SelectTrigger>
-                    <SelectContent fitContent>
-                      {managedRemoteTunnelPresets.map((preset) => (
-                        <SelectItem key={preset.id} value={preset.id}>{preset.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-
-              {willReplaceActiveTunnel && (
-                <div className="rounded-lg bg-[var(--status-warning-background)] p-3">
-                  <div className="flex items-start gap-2">
-                    <Icon name="error-warning" className="mt-0.5 size-4 shrink-0 text-[var(--status-warning)]" />
-                    <p className="typography-meta text-[var(--status-warning)]">
-                      {t('settings.openchamber.tunnel.warning.replacesActiveTunnel')}
-                    </p>
-                  </div>
-                </div>
-              )}
-
-              <Button size="sm"
-                variant="outline"
-                onClick={handleStart}
-                disabled={
-                  state === 'starting'
-                  || isSavingMode
-                  || (tunnelMode === 'managed-remote' && !selectedPreset)
-                  || (tunnelMode === 'managed-local' && isManagedLocalConfigPathInvalid)
-                }
-                className={cn(primaryCtaClass, state === 'starting' && 'opacity-70')}
-              >
-                {state === 'starting'
-                  ? <><Icon name="loader-4" className="size-3.5 animate-spin" /> {t('settings.openchamber.tunnel.actions.startingTunnel')}</>
-                  : t('settings.openchamber.tunnel.actions.startTunnel')}
-              </Button>
-            </div>
-          )}
-
-        </section>
-      )}
-
-      {isSelectedModeTunnelReady && tunnelInfo && (
-        <section data-settings-item="tunnel.start" className="space-y-4 px-2 pb-2 pt-0">
-          <div className="space-y-3">
-            <div className="flex items-center gap-2">
-              <div className="size-2 shrink-0 rounded-full bg-[var(--status-success)]" />
-              <p className="typography-meta font-medium text-foreground">{t('settings.openchamber.tunnel.state.tunnelReady')}</p>
-            </div>
-
-            <div>
-              <p className="typography-meta mb-1 text-muted-foreground/70">{t('settings.openchamber.tunnel.field.publicUrlHint')}</p>
-              <code className="typography-code block truncate rounded bg-muted/50 px-2 py-1 text-xs text-foreground">
-                {tunnelInfo.url}
-              </code>
-            </div>
-
-            {isConnectLinkLive && tunnelInfo.connectUrl && (
-              <>
-                <div>
-                  <p className="typography-meta mb-1 text-muted-foreground/70">{t('settings.openchamber.tunnel.field.connectLink')}</p>
-                  <div className="flex items-center gap-2">
-                    <code className="typography-code flex-1 truncate rounded bg-muted/50 px-2 py-1 text-xs text-foreground">
-                      {tunnelInfo.connectUrl}
-                    </code>
-                    <Button size="sm" variant="ghost" onClick={handleCopyUrl} className="shrink-0 gap-1.5">
-                      {copied
-                        ? <Icon name="check" className="size-3.5 text-[var(--status-success)]" />
-                        : <Icon name="file-copy" className="size-3.5" />}
-                      {copied ? t('settings.openchamber.tunnel.actions.copied') : t('settings.common.actions.copyAll')}
-                    </Button>
-                  </div>
-                  <p className="typography-meta mt-1 text-muted-foreground/70">
-                    {t('settings.openchamber.tunnel.field.expires')}: {tunnelInfo.bootstrapExpiresAt ? remainingText : t('settings.openchamber.tunnel.state.never')}
+                <Input
+                  value={newPresetHostname}
+                  onChange={(event) => setNewPresetHostname(event.target.value)}
+                  placeholder={t('settings.openchamber.tunnel.field.newPresetHostnamePlaceholder')}
+                  className="h-7"
+                  disabled={isSavingMode || state === 'starting' || state === 'stopping'}
+                />
+                <Input
+                  type="password"
+                  value={newPresetToken}
+                  onChange={(event) => setNewPresetToken(event.target.value)}
+                  placeholder={t('settings.openchamber.tunnel.field.newPresetTokenPlaceholder')}
+                  className="h-7"
+                  disabled={isSavingMode || state === 'starting' || state === 'stopping'}
+                />
+                {typeof suggestedConnectorPort === 'number' && (
+                  <p className="typography-meta text-muted-foreground/70">
+                    {t('settings.openchamber.tunnel.note.cloudflareConnectorTargetUse')} <code>http://localhost:{suggestedConnectorPort}</code>.
                   </p>
+                )}
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="ghost"
+                    size="xs"
+                    className="!font-normal"
+                    onClick={() => {
+                      void handleSaveNewPreset();
+                    }}
+                    disabled={isSavingMode || state === 'starting' || state === 'stopping'}
+                  >
+                    {t('settings.common.actions.saveChanges')}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="xs"
+                    className="!font-normal"
+                    onClick={() => {
+                      setIsAddingPreset(false);
+                      setNewPresetName('');
+                      setNewPresetHostname('');
+                      setNewPresetToken('');
+                    }}
+                    disabled={isSavingMode || state === 'starting' || state === 'stopping'}
+                  >
+                    {t('settings.common.actions.cancel')}
+                  </Button>
                 </div>
+              </div>
+            )}
 
-                <div className="flex flex-col items-center gap-2 oc-tile rounded-lg p-4">
-                  {qrDataUrl
-                    ? <img src={qrDataUrl} alt={t('settings.openchamber.tunnel.field.connectQrAlt')} className="size-48" />
-                    : <div className="size-48 rounded bg-muted/30" />}
-                  <p className="typography-meta text-muted-foreground">{t('settings.openchamber.tunnel.note.scanQrToConnect')}</p>
-                </div>
-              </>
+            <div className="flex items-center gap-1.5">
+              <p className="typography-meta text-muted-foreground/80">{t('settings.openchamber.tunnel.note.tokensSavedPerTunnel')}</p>
+              <SettingsInfoHint>
+                {t('settings.openchamber.tunnel.tooltip.tokensSavedPath')}
+              </SettingsInfoHint>
+            </div>
+
+            {!selectedPreset && managedRemoteValidationError && (
+              <p className="typography-meta text-[var(--status-error)]">{managedRemoteValidationError}</p>
             )}
           </div>
+        )}
 
-          <div className="pt-1">
+        {tunnelMode === 'managed-local' && (
+          <div data-settings-item="tunnel.managed-local-config" className="oc-tile space-y-2 rounded-lg p-3">
+            <div className="space-y-1.5">
+              <p className={SETTINGS_FIELD_LABEL_CLASS}>{t('settings.openchamber.tunnel.field.configurationFile')}</p>
+              <input
+                ref={managedLocalConfigFileInputRef}
+                type="file"
+                accept=".yml,.yaml,.json"
+                className="hidden"
+                onChange={(event) => {
+                  void handleManagedLocalConfigFileSelected(event);
+                }}
+              />
+              <div className="flex items-center gap-2">
+                <Input
+                  value={managedLocalConfigPath || ''}
+                  onChange={(event) => {
+                    handleManagedLocalConfigInputChange(event.target.value);
+                  }}
+                  onBlur={() => {
+                    void handleManagedLocalConfigInputBlur();
+                  }}
+                  placeholder={t('settings.openchamber.tunnel.field.configurationFilePlaceholder')}
+                  className="h-7"
+                  disabled={state === 'starting' || state === 'stopping' || isSavingMode}
+                />
+                <Button
+                  variant="outline"
+                  size="xs"
+                  className="h-7 w-7 p-0"
+                  aria-label={t('settings.openchamber.tunnel.actions.browseConfigFileAria')}
+                  onClick={() => {
+                    void handleBrowseManagedLocalConfig();
+                  }}
+                  disabled={state === 'starting' || state === 'stopping' || isSavingMode}
+                >
+                  <Icon name="folder" className="size-3.5" />
+                </Button>
+                {managedLocalConfigPath && (
+                  <Button
+                    variant="ghost"
+                    size="xs"
+                    className="h-7 w-7 p-0"
+                    aria-label={t('settings.openchamber.tunnel.actions.clearConfigFileAria')}
+                    onClick={() => {
+                      void handleManagedLocalConfigClear();
+                    }}
+                    disabled={state === 'starting' || state === 'stopping' || isSavingMode}
+                  >
+                    <Icon name="close" className="size-3.5" />
+                  </Button>
+                )}
+              </div>
+              <p className="typography-meta text-muted-foreground/70">
+                {managedLocalConfigPath
+                  ? t('settings.openchamber.tunnel.note.customConfigUsed')
+                  : t('settings.openchamber.tunnel.note.defaultConfigUsed')}
+              </p>
+              {isManagedLocalConfigPathInvalid && (
+                <p className="typography-meta text-[var(--status-error)]">{managedLocalConfigExtensionError}</p>
+              )}
+            </div>
+          </div>
+        )}
+
+      </SettingsSection>
+
+      {/* Starting the tunnel, and once it runs: where to reach it. */}
+      <SettingsSection
+        title={t('settings.layout.tunnel.section.connection')}
+        settingsItem="tunnel.start"
+        contentClassName="space-y-4"
+      >
+        {!isSelectedModeTunnelReady && (
+          <>
+            <p className={SETTINGS_HELPER_CLASS}>
+              {t('settings.openchamber.tunnel.note.startModeAndGenerateLink', { mode: modeLabel })}
+            </p>
+
+            {tunnelMode === 'managed-remote' && (
+              <SettingsFieldRow label={t('settings.openchamber.tunnel.field.managedRemoteTunnelToConnect')}>
+                <Select
+                  value={selectedPresetId || (managedRemoteTunnelPresets[0]?.id ?? '')}
+                  onValueChange={(presetId) => {
+                    void handleSelectPreset(presetId);
+                  }}
+                  disabled={controlsBusy || managedRemoteTunnelPresets.length <= 1}
+                >
+                  <SelectTrigger className={SETTINGS_SELECT_ROW_TRIGGER_CLASS}>
+                    <SelectValue placeholder={t('settings.openchamber.tunnel.field.selectSavedTunnelPlaceholder')}>
+                      {selectedPreset?.name}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent fitContent>
+                    {managedRemoteTunnelPresets.map((preset) => (
+                      <SelectItem key={preset.id} value={preset.id}>{preset.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </SettingsFieldRow>
+            )}
+
+            {willReplaceActiveTunnel && (
+              <div className="flex items-start gap-2 rounded-lg bg-[var(--status-warning-background)] p-3">
+                <Icon name="error-warning" className="mt-0.5 size-4 shrink-0 text-[var(--status-warning)]" />
+                <p className="typography-meta text-[var(--status-warning)]">
+                  {t('settings.openchamber.tunnel.warning.replacesActiveTunnel')}
+                </p>
+              </div>
+            )}
+
+            <Button
+              size="sm"
+              onClick={handleStart}
+              disabled={
+                state === 'starting'
+                || isSavingMode
+                || (tunnelMode === 'managed-remote' && !selectedPreset)
+                || (tunnelMode === 'managed-local' && isManagedLocalConfigPathInvalid)
+              }
+            >
+              {state === 'starting'
+                ? <><Icon name="loader-4" className="size-3.5 animate-spin" /> {t('settings.openchamber.tunnel.actions.startingTunnel')}</>
+                : t('settings.openchamber.tunnel.actions.startTunnel')}
+            </Button>
+          </>
+        )}
+
+        {isSelectedModeTunnelReady && tunnelInfo && (
+          <>
+            <div className="flex items-center gap-2">
+              <div className="size-2 shrink-0 rounded-full bg-[var(--status-success)]" />
+              <p className="typography-ui-label font-medium text-foreground">{t('settings.openchamber.tunnel.state.tunnelReady')}</p>
+            </div>
+
+            <SettingsStackedField label={t('settings.openchamber.tunnel.field.publicUrlHint')} controlClassName="max-w-none">
+              <code className="typography-code block min-w-0 truncate rounded-md oc-tile-inset px-2 py-1.5 text-xs text-foreground" title={tunnelInfo.url}>
+                {tunnelInfo.url}
+              </code>
+            </SettingsStackedField>
+
+            {isConnectLinkLive && tunnelInfo.connectUrl && (
+              <div className="flex flex-col gap-4 @xl:flex-row @xl:items-start">
+                <SettingsStackedField
+                  label={t('settings.openchamber.tunnel.field.connectLink')}
+                  description={`${t('settings.openchamber.tunnel.field.expires')}: ${tunnelInfo.bootstrapExpiresAt ? bootstrapRemainingText : t('settings.openchamber.tunnel.state.never')}`}
+                  descriptionPlacement="after"
+                  className="min-w-0 flex-1"
+                  controlClassName="max-w-none"
+                >
+                  <code className="typography-code block min-w-0 flex-1 truncate rounded-md oc-tile-inset px-2 py-1.5 text-xs text-foreground" title={tunnelInfo.connectUrl}>
+                    {tunnelInfo.connectUrl}
+                  </code>
+                  <Button size="sm" variant="ghost" onClick={handleCopyUrl} className="shrink-0 gap-1.5">
+                    {copied
+                      ? <Icon name="check" className="size-3.5 text-[var(--status-success)]" />
+                      : <Icon name="file-copy" className="size-3.5" />}
+                    {copied ? t('settings.openchamber.tunnel.actions.copied') : t('settings.common.actions.copyAll')}
+                  </Button>
+                </SettingsStackedField>
+
+                <div className="flex shrink-0 flex-col items-center gap-2 oc-tile rounded-lg p-3">
+                  {qrDataUrl
+                    ? <img src={qrDataUrl} alt={t('settings.openchamber.tunnel.field.connectQrAlt')} className="size-40" />
+                    : <div className="size-40 rounded bg-muted/30" />}
+                  <p className="typography-micro text-muted-foreground">{t('settings.openchamber.tunnel.note.scanQrToConnect')}</p>
+                </div>
+              </div>
+            )}
+
             <div className="flex flex-wrap items-center gap-2">
-              <Button size="sm"
-                variant="outline"
+              <Button
+                size="sm"
                 onClick={handleStart}
                 disabled={state === 'stopping' || isSavingMode || (tunnelMode === 'managed-local' && isManagedLocalConfigPathInvalid)}
-                className={primaryCtaClass}
               >
                 <Icon name="restart" className="size-3.5" />
                 {t('settings.openchamber.tunnel.actions.newConnectLink')}
               </Button>
 
-              <Button size="sm"
+              <Button
+                size="sm"
                 variant="ghost"
                 onClick={handleStop}
                 disabled={state === 'stopping' || isSavingMode}
-                className="gap-2 text-[var(--status-error)]"
+                className="text-[var(--status-error)]"
               >
                 {state === 'stopping'
                   ? <><Icon name="loader-4" className="size-3.5 animate-spin" /> {t('settings.openchamber.tunnel.actions.stopping')}</>
                   : t('settings.openchamber.tunnel.actions.stopTunnel')}
               </Button>
             </div>
-          </div>
-        </section>
-      )}
+          </>
+        )}
 
-      {state === 'error' && errorMessage && (
-        <section className="space-y-3 px-2 pb-2 pt-0">
-          <p className="typography-meta text-[var(--status-error)]">{errorMessage}</p>
-          <Button size="sm" variant="ghost" onClick={handleStart}>{t('settings.openchamber.tunnel.actions.retry')}</Button>
-        </section>
+        {state === 'error' && errorMessage && (
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="typography-meta text-[var(--status-error)]">{errorMessage}</p>
+            <Button size="sm" variant="ghost" onClick={handleStart}>{t('settings.openchamber.tunnel.actions.retry')}</Button>
+          </div>
+        )}
+      </SettingsSection>
+
+      {/* How long a connect link and a device's access last. */}
+      <SettingsSection title={t('settings.layout.tunnel.section.lifetime')} settingsItem="tunnel.ttl">
+        <SettingsFieldRow label={t('settings.openchamber.tunnel.field.connectLinkTtl')}>
+          <Select
+            value={ttlOptionValue(BOOTSTRAP_TTL_OPTIONS, bootstrapTtlMs, '1800000')}
+            onValueChange={(value) => {
+              void handleBootstrapTtlChange(value);
+            }}
+            disabled={isSavingTtl || controlsBusy}
+          >
+            <SelectTrigger className={SETTINGS_SELECT_ROW_TRIGGER_CLASS}>
+              <SelectValue className="truncate">
+                {ttlOptionLabel(BOOTSTRAP_TTL_OPTIONS, bootstrapTtlMs, '1800000')}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              {BOOTSTRAP_TTL_OPTIONS.map((option) => (
+                <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </SettingsFieldRow>
+        <SettingsFieldRow label={t('settings.openchamber.tunnel.field.tunnelSessionTtl')}>
+          <Select
+            value={ttlOptionValue(SESSION_TTL_OPTIONS, sessionTtlMs, '28800000')}
+            onValueChange={(value) => {
+              void handleSessionTtlChange(value);
+            }}
+            disabled={isSavingTtl || controlsBusy}
+          >
+            <SelectTrigger className={SETTINGS_SELECT_ROW_TRIGGER_CLASS}>
+              <SelectValue className="truncate">
+                {ttlOptionLabel(SESSION_TTL_OPTIONS, sessionTtlMs, '28800000')}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              {SESSION_TTL_OPTIONS.map((option) => (
+                <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </SettingsFieldRow>
+      </SettingsSection>
+
+      {renderedSessionRecords.length > 0 && (
+        <SettingsSection title={t('settings.openchamber.tunnel.section.redeemedAccessLinks')} contentClassName="space-y-1">
+          {renderedSessionRecords.map((record) => {
+            const isQuick = record.mode === 'quick';
+            const isManagedRemote = record.mode === 'managed-remote';
+            const modeBadgeClass = isQuick
+              ? 'border-[var(--status-warning-border)] bg-[var(--status-warning-background)] text-[var(--status-warning)]'
+              : isManagedRemote
+                ? 'border-[var(--status-info-border)] bg-[var(--status-info-background)] text-[var(--status-info)]'
+                : 'border-[var(--status-success-border)] bg-[var(--status-success-background)] text-[var(--status-success)]';
+            const statusDotClass = record.isActive
+              ? (isQuick ? 'text-[var(--status-warning)]' : isManagedRemote ? 'text-[var(--status-info)]' : 'text-[var(--status-success)]')
+              : 'text-muted-foreground/50';
+            const modeLabel = isQuick
+              ? t('settings.openchamber.tunnel.badge.quick')
+              : isManagedRemote
+                ? t('settings.openchamber.tunnel.badge.remote')
+                : t('settings.openchamber.tunnel.badge.local');
+
+            return (
+              <div
+                key={record.sessionId}
+                className="flex flex-wrap items-center gap-x-2 gap-y-1 oc-tile rounded-md px-3 py-2"
+              >
+                <Icon name="checkbox-blank-circle-fill" className={cn('size-2.5 shrink-0', statusDotClass)} />
+                <span className={cn('rounded-full px-2 py-0.5 text-[10px] font-medium', modeBadgeClass)}>
+                  {modeLabel}
+                </span>
+                <span className="typography-meta text-muted-foreground">
+                  {t('settings.openchamber.tunnel.session.redeemedAt', { time: formatAbsoluteTime(record.createdAt, timeFormatPreference) })}
+                </span>
+                <span className="typography-meta text-foreground">
+                  {record.isActive
+                    ? t('settings.openchamber.tunnel.session.expiresIn', { remaining: record.remainingTextForSession })
+                    : (record.inactiveLabel === t('settings.openchamber.tunnel.state.inactive')
+                      ? t('settings.openchamber.tunnel.state.inactive')
+                      : t('settings.openchamber.tunnel.session.inactiveWithReason', { reason: record.inactiveLabel }))}
+                </span>
+              </div>
+            );
+          })}
+        </SettingsSection>
       )}
-      </div>
-    </SettingsSection>
+    </>
   );
 };

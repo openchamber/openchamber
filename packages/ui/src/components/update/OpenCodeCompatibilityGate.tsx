@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { OpenChamberLogo } from '@/components/ui/OpenChamberLogo';
 import { Icon } from '@/components/icon/Icon';
+import { Spinner } from '@/components/ui/spinner';
 import { Button } from '@/components/ui/button';
 import { DesktopHostSwitcherInline } from '@/components/desktop/DesktopHostSwitcher';
 import { useI18n } from '@/lib/i18n';
@@ -108,12 +109,12 @@ export const OpenCodeCompatibilityGate: React.FC<React.PropsWithChildren<{ enabl
         <div className="app-region-no-drag mt-7 flex flex-wrap items-center justify-center gap-2">
           {compatibility.canInstall && (
             <Button disabled={operation !== null} onClick={() => void recover('install-v2')}>
-              <Icon name={operation === 'install-v2' ? 'refresh' : 'download'} className={operation === 'install-v2' ? 'size-4 animate-spin' : 'size-4'} />
+              {operation === 'install-v2' ? <Spinner className="size-4" /> : <Icon name="download" className="size-4" />}
               <span role={operation === 'install-v2' ? 'status' : undefined}>{t(operation === 'install-v2' ? 'opencodeCompatibility.installing' : outdated ? 'opencodeCompatibility.update' : 'opencodeCompatibility.install')}</span>
             </Button>
           )}
           <Button variant={compatibility.canInstall ? 'ghost' : 'default'} disabled={operation !== null} onClick={() => void recover('reconnect')}>
-            <Icon name="refresh" className={operation === 'reconnect' ? 'size-4 animate-spin' : 'size-4'} />
+            {operation === 'reconnect' ? <Spinner className="size-4" /> : <Icon name="refresh" className="size-4" />}
             <span role={operation === 'reconnect' ? 'status' : undefined}>{t(operation === 'reconnect' ? 'opencodeCompatibility.reconnecting' : 'opencodeCompatibility.reconnect')}</span>
           </Button>
         </div>

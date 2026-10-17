@@ -1,6 +1,7 @@
 import React from 'react';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
+import { DockedPanelSurfaceContext } from '@/hooks/usePageColors';
 import { ScrollShadow } from '@/components/ui/ScrollShadow';
 import { Button } from '@/components/ui/button';
 import { useUIStore } from '@/stores/useUIStore';
@@ -243,7 +244,8 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
         // with the context panel card). Over the chat it is a dropdown and
         // takes the dropdown's full edge (`data-edge-floating`).
         'oc-panel-edge rounded-xl',
-        !overlay && 'bg-[var(--surface-muted)]/40',
+        // Takes the docked panels' lifted page colour (design-system.css).
+        !overlay && 'bg-background',
       )}
       // Hidden, the overlay's edge fades out alongside the glass fade: see
       // the opacity note below.
@@ -268,11 +270,12 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
         pointerEvents: interactive ? undefined : 'none',
       }}
     >
-      {/* Beside the transcript the translucent fill reads as depth; on top of
-          it, message bubbles showed straight through the rows, so the overlay
-          is frosted. The glass sits on this inner layer, away from the card's
+      {/* Beside the transcript the card is a docked panel (usePageColors);
+          on top of it, message bubbles showed straight through the rows, so
+          the overlay is frosted. The glass sits on this inner layer, away from the card's
           shadow: on one element Chromium grows the backdrop-filter layer by
           the shadow's blur and paints a grey band past the card's edge. */}
+      <DockedPanelSurfaceContext.Provider value={!overlay}>
       <div
         className={cn('flex min-h-0 flex-1 flex-col', overlay && 'oc-glass-panel')}
         style={overlay ? {
@@ -337,6 +340,7 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
         </div>
       ) : null}
       </div>
+      </DockedPanelSurfaceContext.Provider>
 
       <WorkStatusSectionsDialog open={sectionsDialogOpen} onOpenChange={setSectionsDialogOpen} />
     </aside>

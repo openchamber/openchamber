@@ -1,6 +1,7 @@
 import * as React from 'react';
 
 import { Icon } from '@/components/icon/Icon';
+import { Spinner } from '@/components/ui/spinner';
 import { Button } from '@/components/ui/button';
 import { referenceNumberLabel } from '@/components/references/referencePickerItems';
 import { ChecksSummaryLine } from '@/components/references/ReferencePreview';
@@ -88,7 +89,7 @@ export const SourceBoardChecksDialog: React.FC<{
                     </p>
                 ) : !ci || entry?.isLoading ? (
                     <div role="status" className="flex justify-center py-8">
-                        <Icon name="loader-4" className="size-5 animate-spin text-muted-foreground" />
+                        <Spinner className="size-5 text-muted-foreground" />
                     </div>
                 ) : (
                     <p className="py-6 text-center typography-meta text-muted-foreground">{t('sourceBoard.checks.empty')}</p>

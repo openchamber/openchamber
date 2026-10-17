@@ -7,6 +7,7 @@ import { openExternalUrl } from '@/lib/url';
 import { useI18n } from '@/lib/i18n';
 import { focusDesktopWindow, isDesktopShell } from '@/lib/desktop';
 import { Icon } from '@/components/icon/Icon';
+import { BusyDots } from '@/components/ui/busy-dots';
 import { IntegrationCatalogCard } from './IntegrationCatalogCard';
 import { LinearProjectMapping } from './LinearProjectMapping';
 import { LinearSessionComments } from './LinearSessionComments';
@@ -278,8 +279,8 @@ export const LinearSettings: React.FC = () => {
                 </>
               ) : isWaiting ? (
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="typography-micro text-muted-foreground animate-pulse">
-                    {t('settings.integrations.linear.flow.waiting')}
+                  <span className="typography-micro text-muted-foreground">
+                    {t('settings.integrations.linear.flow.waiting')}<BusyDots />
                   </span>
                   <Button type="button" size="sm" variant="ghost" disabled={isBusy} onClick={stopWaiting}>
                     {t('settings.common.actions.cancel')}

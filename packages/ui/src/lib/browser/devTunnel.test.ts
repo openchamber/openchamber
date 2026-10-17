@@ -217,7 +217,7 @@ describe('loopback navigations against a remote instance', () => {
     relayHandler?.({ connectionId: 'connection-space', remotePort: 4321, spaceId: '84369ed6edda', message: { type: 'connect' } });
     await Promise.resolve();
     await Promise.resolve();
-    expect(openedRelayUrl).toContain('/api/spaces/84369ed6edda/dev-tunnel?port=4321&oc_url_token=test');
+    expect(openedRelayUrl).toContain(`/api/dev-tunnel?port=4321&directory=${encodeURIComponent('/spaces/84369ed6edda')}&oc_url_token=test`);
   });
 
   test('a local instance resolves its own loopback correctly', async () => {

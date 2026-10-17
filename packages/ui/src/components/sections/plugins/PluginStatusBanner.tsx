@@ -2,6 +2,7 @@ import React from 'react';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui';
 import { Icon } from '@/components/icon/Icon';
+import { Spinner } from '@/components/ui/spinner';
 import { useI18n } from '@/lib/i18n';
 import { usePluginsStore } from '@/stores/usePluginsStore';
 import type { PluginRuntimeTarget } from './pluginLoadState';
@@ -123,7 +124,7 @@ export const PluginStatusBanner: React.FC<PluginStatusBannerProps> = ({ target, 
           <Button variant="default" size="sm" onClick={() => void handleUpdate()} disabled={isUpdating}>
             {isUpdating ? (
               <>
-                <Icon name="loader-4" className="size-4 animate-spin" />
+                <Spinner className="size-4" />
                 {t('settings.plugins.update.running')}
               </>
             ) : (

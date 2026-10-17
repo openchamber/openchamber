@@ -1884,8 +1884,9 @@ describe('batched project reads', () => {
       // One URL cannot serve a mixed batch, so the two routing contexts split.
       expect(projectCalls).toHaveLength(2);
       const urls = projectCalls.map((call) => String(call.input));
-      expect(urls.some((url) => url.includes(`/api/spaces/${spaceId}/git/projects`))).toBe(true);
-      expect(urls.some((url) => url.includes('/api/git/projects'))).toBe(true);
+      // Each batch names its own context in the URL, where the server reads it.
+      expect(urls.some((url) => url.includes(`/api/git/projects?directory=${encodeURIComponent(spaceDirectory)}`))).toBe(true);
+      expect(urls.some((url) => url.includes(`/api/git/projects?directory=${encodeURIComponent(hostDirectory)}`))).toBe(true);
       for (const call of projectCalls) {
         // SAFETY: the captured request body is this test's own JSON.stringify payload, so it parses to the { directories } shape the adapter sent.
         const sent = JSON.parse(String(call.init?.body)) as { directories: string[] };

@@ -122,11 +122,21 @@ describe.skipIf(!LIVE_DOCKER_ENABLED)('dispatcher over a real space: docker (liv
   });
 
   // The escape check: a request without the space prefix, but with a space
-  // directory, does not run on the host.
-  it('refuses an unprefixed request with the space\'s directory before any host route runs', async () => {
+  // directory, goes into the space and never runs on the host.
+  it('sends an unprefixed request with the space\'s directory into the space, and creates a session there by its header', async () => {
     const response = await fetch(url(`/api/git/status?directory=${encodeURIComponent(repo)}`));
-    expect(response.status).toBe(400);
-    expect(await response.json()).toMatchObject({ code: 'space_directory_needs_prefix' });
+    expect(response.status).toBe(200);
+    expect(await response.json()).not.toHaveProperty('ranOnHost');
+    const created = await fetch(url('/api/session'), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-opencode-directory': encodeURIComponent(repo) },
+      body: JSON.stringify({ location: { directory: repo } }),
+    });
+    expect(created.status, await created.clone().text()).toBe(200);
+    expect((await created.json()).data.location.directory).toBe(repo);
+    const conflict = await fetch(url(`/api/git/status?directory=${encodeURIComponent(repo)}`), { headers: { 'x-opencode-directory': '/tmp' } });
+    expect(conflict.status).toBe(400);
+    expect(await conflict.json()).toMatchObject({ code: 'directory_outside_space' });
     expect(hostRouteRuns).toBe(0);
     const ordinary = await fetch(url('/api/git/status?directory=/tmp'));
     expect(ordinary.status).toBe(200);
@@ -283,9 +293,9 @@ describe.skipIf(!LIVE_DOCKER_ENABLED)('the switch, on the real server (live)', (
       expect(prefixed.status).toBe(502);
       expect(await prefixed.json()).toMatchObject({ code: 'space_unreachable' });
       expect(run.daemon.connections()).toBeGreaterThan(0);
-      const guarded = await run.server.get('/api/git/status?directory=/spaces/aaaaaaaaaaaa/repo');
-      expect(guarded.status).toBe(400);
-      expect(await guarded.json()).toMatchObject({ code: 'space_directory_needs_prefix' });
+      const byDirectory = await run.server.get('/api/git/status?directory=/spaces/aaaaaaaaaaaa/repo');
+      expect(byDirectory.status).toBe(502);
+      expect(await byDirectory.json()).toMatchObject({ code: 'space_unreachable' });
       const hostOnly = await run.server.get('/api/spaces/aaaaaaaaaaaa/config/settings');
       expect(hostOnly.status).toBe(403);
       expect(fs.existsSync(path.join(run.dataDir, 'spaces', 'owner'))).toBe(true);

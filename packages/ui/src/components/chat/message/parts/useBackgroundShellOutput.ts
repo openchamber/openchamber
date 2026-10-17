@@ -2,6 +2,8 @@ import React from 'react';
 import { opencodeClient } from '@/lib/opencode/client';
 
 const POLL_INTERVAL_MS = 1_000;
+/** A quiet command, such as an idle dev server, is read at most this often. */
+const MAX_POLL_INTERVAL_MS = 4_000;
 /** The live view keeps the newest output only, like a terminal's scrollback. */
 const MAX_OUTPUT_CHARS = 256 * 1024;
 
@@ -16,9 +18,12 @@ const keepTail = (text: string): string => {
  * The output of a running background command, read while `enabled`.
  *
  * OpenCode streams the output to a file and serves it by byte cursor; there is
- * no output event, so the view reads on from its cursor once a second. It
- * starts from the tail of a long output and drops the first, partial line.
- * A failed read keeps what was shown and tries again on the next tick.
+ * no output event, so the view reads on from its cursor once a second. Each
+ * read that brings nothing doubles the wait, up to 4 s, and new output brings
+ * it back to 1 s, so a command that has gone quiet is not read every second
+ * for hours. It starts from the tail of a long output and drops the first,
+ * partial line. A failed read keeps what was shown and tries again on the
+ * next tick.
  */
 export const useBackgroundShellOutput = (shellID: string, directory: string | undefined, enabled: boolean): string => {
     const [output, setOutput] = React.useState('');
@@ -28,6 +33,7 @@ export const useBackgroundShellOutput = (shellID: string, directory: string | un
         let cancelled = false;
         let cursor: number | undefined;
         let timer: ReturnType<typeof setTimeout> | undefined;
+        let delay = POLL_INTERVAL_MS;
 
         const read = async () => {
             try {
@@ -42,10 +48,11 @@ export const useBackgroundShellOutput = (shellID: string, directory: string | un
                 }
                 if (first) setOutput(keepTail(text));
                 else if (text) setOutput((previous) => keepTail(previous + text));
+                delay = first || text ? POLL_INTERVAL_MS : Math.min(delay * 2, MAX_POLL_INTERVAL_MS);
             } catch {
                 // The next tick retries; the command's end is reported by the shell index.
             }
-            if (!cancelled) timer = setTimeout(read, POLL_INTERVAL_MS);
+            if (!cancelled) timer = setTimeout(read, delay);
         };
         void read();
 

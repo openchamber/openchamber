@@ -12,6 +12,7 @@
 import React from 'react';
 
 import { Icon } from '@/components/icon/Icon';
+import { Spinner } from '@/components/ui/spinner';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { useI18n, type I18nKey } from '@/lib/i18n';
@@ -64,7 +65,7 @@ const STATE_LINE = {
 
 const Line: React.FC<{ icon: 'loader-4' | 'error-warning' | 'alert' | 'stop'; tone: 'muted' | 'error' | 'warning'; children: React.ReactNode }> = ({ icon, tone, children }) => (
   <span className={tone === 'error' ? 'flex items-start gap-1.5 text-[var(--status-error)]' : tone === 'warning' ? 'flex items-start gap-1.5 text-[var(--status-warning)]' : 'flex items-start gap-1.5 text-muted-foreground'}>
-    <Icon name={icon} className={icon === 'loader-4' ? 'mt-px h-3 w-3 shrink-0 animate-spin' : 'mt-px h-3 w-3 shrink-0'} />
+    {icon === 'loader-4' ? <Spinner className="mt-px h-3 w-3 shrink-0" /> : <Icon name={icon} className="mt-px h-3 w-3 shrink-0" />}
     <span className="min-w-0 whitespace-normal break-words text-[11px] leading-tight">{children}</span>
   </span>
 );

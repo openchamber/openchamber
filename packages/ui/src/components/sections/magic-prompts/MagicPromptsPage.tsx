@@ -13,6 +13,8 @@ import {
 } from '@/lib/magicPrompts';
 import { useMagicPromptsStore } from '@/stores/useMagicPromptsStore';
 import { useI18n } from '@/lib/i18n';
+import { useWaitingBlink } from '@/hooks/useDurationTicker';
+import { cn } from '@/lib/utils';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
 import { SettingsSection } from '@/components/sections/shared/SettingsSection';
 import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
@@ -176,6 +178,7 @@ export const MagicPromptsPage: React.FC = () => {
   const tUnsafe = React.useCallback((key: string) => t(key as Parameters<typeof t>[0]), [t]);
   const selectedPromptId = useMagicPromptsStore((state) => state.selectedPromptId);
   const [loading, setLoading] = React.useState(true);
+  const blink = useWaitingBlink(loading);
   const [overrides, setOverrides] = React.useState<Record<string, string>>({});
   const [drafts, setDrafts] = React.useState<Record<string, string>>({});
   const [savingIds, setSavingIds] = React.useState<Record<string, boolean>>({});
@@ -280,7 +283,7 @@ export const MagicPromptsPage: React.FC = () => {
   if (loading) {
     return (
       <div className="py-6 px-6 flex items-center gap-2 text-muted-foreground">
-        <span className="inline-block h-1.5 w-1.5 rounded-full bg-current animate-busy-pulse" aria-label={t('settings.magicPrompts.page.loading.aria')} />
+        <span className={cn('inline-block h-1.5 w-1.5 rounded-full bg-current', blink)} aria-label={t('settings.magicPrompts.page.loading.aria')} />
         <span className="typography-ui">{t('settings.magicPrompts.page.loading.text')}</span>
       </div>
     );

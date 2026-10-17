@@ -27,6 +27,15 @@ describe('buildDiffTreeRows', () => {
     ]);
   });
 
+  test('names a directory entry such as a nested repository by its folder', () => {
+    const rows = buildDiffTreeRows([{ path: 'services/' }, { path: 'projects/api/' }], new Set());
+    expect(rows.map((row) => (row.kind === 'directory' ? `${row.depth}:${row.label}/` : `${row.depth}:${row.name}`))).toEqual([
+      '0:projects/',
+      '1:api/',
+      '0:services/',
+    ]);
+  });
+
   test('hides the contents of a collapsed directory by its merged path', () => {
     expect(describeRows(['packages/ui/src'])).toEqual([
       '0:packages/ (3)',

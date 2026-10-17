@@ -15,6 +15,7 @@ import { cn } from '@/lib/utils';
 import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { Icon } from "@/components/icon/Icon";
+import { Spinner } from '@/components/ui/spinner';
 import { useI18n } from '@/lib/i18n';
 import { useOpenCodeReadiness } from '@/hooks/useOpenCodeReadiness';
 
@@ -151,7 +152,7 @@ export const AgentSelector: React.FC<AgentSelectorProps> = ({
                     <div className="flex items-center gap-2">
                         {!isReady && !agentName ? (
                             <>
-                                <Icon name="loader-4" className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+                                {isUnavailable ? <Icon name="error-warning" className="h-3.5 w-3.5 text-muted-foreground" /> : <Spinner className="h-3.5 w-3.5 text-muted-foreground" />}
                                 <span className="typography-meta text-muted-foreground">{isUnavailable ? t('common.unavailable') : t('common.loading')}</span>
                             </>
                         ) : (
@@ -171,7 +172,13 @@ export const AgentSelector: React.FC<AgentSelectorProps> = ({
                     'w-fit opacity-60',
                     className
                 )}>
-                    <Icon name={agentName ? 'robot-2' : 'loader-4'} className={cn('h-3 w-3 text-muted-foreground flex-shrink-0', !agentName && 'animate-spin')} />
+                    {agentName ? (
+                        <Icon name="robot-2" className="h-3 w-3 text-muted-foreground flex-shrink-0" />
+                    ) : isUnavailable ? (
+                        <Icon name="error-warning" className="h-3 w-3 text-muted-foreground flex-shrink-0" />
+                    ) : (
+                        <Spinner className="h-3 w-3 text-muted-foreground flex-shrink-0" />
+                    )}
                     <span className="typography-micro font-medium whitespace-nowrap text-muted-foreground">
                         {agentName || (isUnavailable ? t('common.unavailable') : t('common.loading'))}
                     </span>

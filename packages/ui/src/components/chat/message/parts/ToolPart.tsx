@@ -128,16 +128,19 @@ interface ToolPartProps {
     animateTailText?: boolean;
 }
 
+// A finished run shows tenths; a running one counts whole seconds on the
+// shared 1 s tick, so a live row redraws once a second, in step with the
+// session list's counter.
 const formatDuration = (start: number, end?: number, now: number = Date.now()) => {
-    const duration = Math.max(0, (end ?? now) - start);
-    const seconds = duration / 1000;
-
-    const displaySeconds = seconds < 0.05 && end !== undefined ? 0.1 : seconds;
-    return `${displaySeconds.toFixed(1)}s`;
+    if (end === undefined) {
+        return `${Math.floor(Math.max(0, now - start) / 1000)}s`;
+    }
+    const seconds = Math.max(0, end - start) / 1000;
+    return `${Math.max(0.1, seconds).toFixed(1)}s`;
 };
 
 const LiveDuration: React.FC<{ start: number; end?: number; active: boolean }> = ({ start, end, active }) => {
-    const now = useDurationTickerNow(active, 250);
+    const now = useDurationTickerNow(active);
 
     return <>{formatDuration(start, end, now)}</>;
 };

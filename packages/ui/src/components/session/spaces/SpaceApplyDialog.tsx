@@ -12,6 +12,7 @@
 import React from 'react';
 
 import { Icon } from '@/components/icon/Icon';
+import { Spinner } from '@/components/ui/spinner';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -190,7 +191,7 @@ const ApplyDialogFor: React.FC<{ spaceId: string }> = ({ spaceId }) => {
 
       {read.kind === 'reading' ? (
         <p className="flex items-center gap-2 typography-meta text-muted-foreground">
-          <Icon name="loader-4" className="h-3.5 w-3.5 animate-spin" />
+          <Spinner className="h-3.5 w-3.5" />
           {t('spaces.apply.loading')}
         </p>
       ) : null}

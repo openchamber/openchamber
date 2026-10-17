@@ -14,6 +14,7 @@
 import React from 'react';
 
 import { Icon } from '@/components/icon/Icon';
+import { Spinner } from '@/components/ui/spinner';
 import { DockerSetupNotice } from '@/components/session/spaces/DockerSetupNotice';
 import { SpaceRow } from '@/components/session/spaces/SpaceRow';
 import { failureOfError, spaceFailureText } from '@/components/session/spaces/spaceFailureText';
@@ -89,7 +90,7 @@ type StatusTone = 'ready' | 'todo' | 'busy';
 const StatusLine: React.FC<{ tone: StatusTone; children: React.ReactNode }> = ({ tone, children }) => (
   <p className="flex items-start gap-1.5 typography-meta text-foreground" role="status">
     {tone === 'busy' ? (
-      <Icon name="loader-4" className="mt-[0.2em] h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
+      <Spinner className="mt-[0.2em] h-3.5 w-3.5 shrink-0 text-muted-foreground" />
     ) : (
       <Icon name={tone === 'ready' ? 'checkbox-circle' : 'circle'} className={cn('mt-[0.2em] h-3.5 w-3.5 shrink-0', tone === 'ready' ? 'text-[var(--status-success)]' : 'text-muted-foreground')} />
     )}
@@ -251,7 +252,7 @@ const PlaceDisk: React.FC<{ placeId: string }> = ({ placeId }) => {
           <p className="typography-meta text-muted-foreground">{t('settings.openchamber.spaces.places.disk.total', { size: formatDiskSize(totalBytes) })}</p>
           {cleanUp.kind === 'cleaning' ? (
             <span className="inline-flex items-center gap-1.5 typography-meta text-muted-foreground" role="status">
-              <Icon name="loader-4" className="size-3.5 animate-spin" />
+              <Spinner className="size-3.5" />
               {t('settings.openchamber.spaces.places.cleanUp.running')}
             </span>
           ) : canFree ? (
@@ -428,7 +429,7 @@ const MachineField: React.FC<{ machine: string | null; onChange: (place: SpacePl
         <Button size="sm" variant="outline" className="shrink-0" disabled={saving || unchanged} onClick={() => void save(draft)}>
           {saving ? (
             <>
-              <Icon name="loader-4" className="size-3.5 animate-spin" />
+              <Spinner className="size-3.5" />
               {t('settings.openchamber.spaces.places.machine.checking')}
             </>
           ) : t('settings.openchamber.spaces.places.machine.check')}

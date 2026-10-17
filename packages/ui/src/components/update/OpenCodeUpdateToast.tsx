@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { Icon } from '@/components/icon/Icon';
+import { Spinner } from '@/components/ui/spinner';
 import { toast } from '@/components/ui/toast';
 import { reloadOpenCodeConfiguration } from '@/stores/useAgentsStore';
 import { useUIStore } from '@/stores/useUIStore';
@@ -48,7 +49,7 @@ export const OpenCodeUpdateToast: React.FC = () => {
       id: UPGRADE_TOAST_ID,
       description: t('opencodeUpdate.toast.upgrading.description'),
       duration: Infinity,
-      icon: <Icon name="refresh" className="h-4 w-4 animate-spin text-muted-foreground" />,
+      icon: <Spinner className="h-4 w-4 text-muted-foreground" />,
     });
 
     try {

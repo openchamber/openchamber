@@ -28,7 +28,7 @@ type IntegrationCatalogCardProps = {
 };
 
 /**
- * One collapsible card on the Integrations and Extensions pages: logo, name,
+ * One collapsible card on the Integrations page: logo, name,
  * one-line description, status pill. Every integration, built-in or from an
  * extension, renders through it, so the cards stay identical.
  */

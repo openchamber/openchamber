@@ -117,17 +117,16 @@ mock.module('@/components/sections/openchamber/PermissionDefaultModeField', () =
   PermissionDefaultModeField: () => null,
 }));
 mock.module('@/components/sections/shared/SettingsSection', () => ({
-  SettingsSection: ({ children }: { children: React.ReactNode }) => <section>{children}</section>,
+  SettingsSection: ({ description, children }: { description?: React.ReactNode; children: React.ReactNode }) => (
+    <section>{description}{children}</section>
+  ),
   SettingsFieldRow: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   SettingsCheckboxRow: ({ children, label }: { children?: React.ReactNode; label?: React.ReactNode }) => (
     <div>{label}{children}</div>
   ),
-  SettingsInset: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  SettingsGroupTitle: ({ children }: { children: React.ReactNode }) => <h2>{children}</h2>,
   SETTINGS_CUSTOM_TRIGGER_CLASS: '',
   SETTINGS_SELECT_ROW_TRIGGER_CLASS: '',
   SETTINGS_OPTION_STACK_CLASS: '',
-  SETTINGS_FIELDS_STACK_CLASS: '',
 }));
 mock.module('@/components/ui/select', () => ({
   Select: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
