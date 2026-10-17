@@ -43,6 +43,8 @@ const normalizeLabel = (value, fallback) => {
   return normalized ? normalized.slice(0, 120) : fallback;
 };
 
+const normalizeOptionalLabel = (value) => normalizeLabel(value, '') || null;
+
 const normalizeHost = (value) => {
   if (typeof value !== 'string') {
     return '';
@@ -110,6 +112,7 @@ const parseStoredPasskey = (record) => {
     createdAt: typeof record.createdAt === 'number' ? record.createdAt : Date.now(),
     lastUsedAt: typeof record.lastUsedAt === 'number' ? record.lastUsedAt : null,
     label: normalizeLabel(record.label, 'Unnamed device'),
+    customLabel: normalizeOptionalLabel(record.customLabel),
     rpID: record.rpID,
   };
 };
@@ -243,7 +246,8 @@ export const createUiPasskeys = ({
 
     return getPasskeysForRpId(store, rpID).map((passkey) => ({
       id: passkey.id,
-      label: passkey.label,
+      label: passkey.customLabel ?? passkey.label,
+      customLabel: passkey.customLabel,
       createdAt: passkey.createdAt,
       lastUsedAt: passkey.lastUsedAt,
       deviceType: passkey.deviceType,
@@ -281,6 +285,57 @@ export const createUiPasskeys = ({
     return {
       revoked: true,
       passkeyCount: nextPasskeys.filter((passkey) => passkey.rpID === rpID).length,
+    };
+  };
+
+  const renamePasskey = (req, passkeyId, label) => {
+    assertEnabled();
+
+    const normalizedPasskeyId = passkeyId ? `${passkeyId}`.trim() : '';
+    if (!normalizedPasskeyId) {
+      const error = new Error('Passkey ID is required');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    const store = loadStore();
+    const rpID = getCurrentRpId(req);
+    const existingPasskey = store.passkeys.find((passkey) => passkey.id === normalizedPasskeyId && passkey.rpID === rpID);
+
+    if (!existingPasskey) {
+      const error = new Error('Passkey not found for this host');
+      error.statusCode = 404;
+      throw error;
+    }
+
+    // An empty label clears the custom name; the row then shows the
+    // auto-generated name captured at registration time.
+    const customLabel = normalizeOptionalLabel(label);
+    const nextPasskeys = store.passkeys.map((passkey) => (
+      passkey.id === normalizedPasskeyId && passkey.rpID === rpID
+        ? { ...passkey, customLabel }
+        : passkey
+    ));
+
+    persistStore({
+      ...store,
+      passwordBinding,
+      passkeys: nextPasskeys,
+    });
+
+    const updatedPasskey = nextPasskeys.find((passkey) => passkey.id === normalizedPasskeyId && passkey.rpID === rpID);
+
+    return {
+      renamed: true,
+      passkey: {
+        id: updatedPasskey.id,
+        label: updatedPasskey.customLabel ?? updatedPasskey.label,
+        customLabel: updatedPasskey.customLabel,
+        createdAt: updatedPasskey.createdAt,
+        lastUsedAt: updatedPasskey.lastUsedAt,
+        deviceType: updatedPasskey.deviceType,
+        backedUp: updatedPasskey.backedUp,
+      },
     };
   };
 
@@ -536,6 +591,7 @@ export const createUiPasskeys = ({
     getStatus,
     listPasskeys,
     revokePasskey,
+    renamePasskey,
     clearAllPasskeys,
     beginRegistration,
     finishRegistration,

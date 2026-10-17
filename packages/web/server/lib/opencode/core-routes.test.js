@@ -746,6 +746,7 @@ describe('client auth routes', () => {
         handlePasskeyRegistrationVerify: (_req, res) => res.json({}),
         handlePasskeyList: (_req, res) => res.json({ passkeys: [] }),
         handlePasskeyRevoke: (_req, res) => res.json({ revoked: true }),
+        handlePasskeyRename: (_req, res) => res.json({ renamed: true }),
         handleResetAuth: (_req, res) => res.json({ cleared: true }),
       },
       remoteClientAuthRuntime: {
@@ -969,6 +970,40 @@ describe('client auth routes', () => {
 
     expect(dependencies.testHooks.requireSessionAuth).toHaveBeenCalledTimes(2);
     expect(dependencies.testHooks.requireAuth).not.toHaveBeenCalled();
+  });
+
+  it('renames a passkey through the UI-session route', async () => {
+    const app = express();
+    const dependencies = createDependencies();
+    registerAuthAndAccessRoutes(app, dependencies);
+
+    await request(app)
+      .patch('/api/passkeys/credential-1')
+      .send({ label: 'Office laptop' })
+      .expect(200, { renamed: true });
+
+    expect(dependencies.testHooks.requireSessionAuth).toHaveBeenCalledTimes(1);
+    expect(dependencies.testHooks.requireAuth).not.toHaveBeenCalled();
+  });
+
+  it('keeps passkey renames off the tunnel scope', async () => {
+    const app = express();
+    const dependencies = createDependencies();
+    const tunnelAuthController = createTunnelAuth();
+    tunnelAuthController.setActiveTunnel({ tunnelId: 'tunnel-1', publicUrl: 'https://tunnel.example.com' });
+    dependencies.tunnelAuthController = tunnelAuthController;
+    dependencies.uiAuthController.handlePasskeyRename = vi.fn((_req, res) => res.json({ renamed: true }));
+
+    registerAuthAndAccessRoutes(app, dependencies);
+
+    const response = await request(app)
+      .patch('/api/passkeys/credential-1')
+      .set('Host', 'tunnel.example.com')
+      .send({ label: 'Office laptop' });
+
+    expect(response.status).toBe(403);
+    expect(response.body.tunnelLocked).toBe(true);
+    expect(dependencies.uiAuthController.handlePasskeyRename).not.toHaveBeenCalled();
   });
 
   it('treats private LAN hosts as local even when a tunnel is active', async () => {

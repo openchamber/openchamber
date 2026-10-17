@@ -764,6 +764,7 @@ headers }` or v1 `{ npm, options }`. The stored entry is always a
    - `POST /auth/passkey/register/options`
    - `POST /auth/passkey/register/verify`
    - `GET /api/passkeys`
+   - `PATCH /api/passkeys/:id`
    - `DELETE /api/passkeys/:id`
    - `POST /api/auth/reset`
    - `GET /connect`
