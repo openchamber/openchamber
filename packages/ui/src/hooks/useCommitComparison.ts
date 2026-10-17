@@ -29,7 +29,10 @@ export function useCommitComparison(directory: string | null, branch: string | n
     const requestRuntime = getRuntimeKey();
     setHistory({ key, status: 'loading' });
     try {
-      const result = await git.getGitLog(directory, { maxCount: 50, to: branch ? `refs/heads/${branch}` : 'HEAD' });
+      // A detached worktree reports its branch as the literal `HEAD`, which git
+      // rejects as a branch name, so qualifying it fails the whole request.
+      const to = branch && branch !== 'HEAD' ? `refs/heads/${branch}` : 'HEAD';
+      const result = await git.getGitLog(directory, { maxCount: 50, to });
       if (requestId.current !== id || getRuntimeKey() !== requestRuntime) return;
       const commits = result.all.slice(0, 50);
       setHistory({ key, status: 'ready', commits });
