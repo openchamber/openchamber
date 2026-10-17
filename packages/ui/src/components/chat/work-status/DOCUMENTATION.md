@@ -312,7 +312,11 @@ sections that render nothing leave no spacing wrappers. Secondary elements are
 created by the panel, so primary readout updates do not rerender them.
 
 The overlay's outside-click and Escape dismissal pauses while this dialog is
-open, since the dialog is portalled outside the panel.
+open, since the dialog is portalled outside the panel. Menus the panel opens
+carry `data-work-status-popup` for the same reason: a dropdown's items render in
+a body portal, so an unmarked press on one reads as an outside click and closes
+the card before the item's action runs. A menu added to the panel later has to
+carry the marker too.
 
 The first rendered section heading reserves space on its right for the panel's
 settings button. The scroller selects the first actual section DOM node, so

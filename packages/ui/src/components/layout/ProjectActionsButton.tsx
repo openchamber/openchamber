@@ -88,7 +88,7 @@ const ProjectActionsButtonComponent = () => {
             <Icon name="arrow-down-s" className="size-4" />
           </button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-60 max-h-[70vh] overflow-y-auto">
+        <DropdownMenuContent data-work-status-popup align="end" className="w-60 max-h-[70vh] overflow-y-auto">
           <DropdownMenuItem className="flex items-center gap-2" onClick={runner.openSettings}>
             <Icon name="add" className="h-4 w-4" />
             <span className="typography-ui-label text-foreground">{t('projectActions.actions.addNewAction')}</span>

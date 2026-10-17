@@ -158,6 +158,7 @@ const OpenInAppButtonComponent = ({ directory }: OpenInAppButtonProps) => {
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent
+          data-work-status-popup
           align="end"
           className="w-56 max-h-[70vh] overflow-y-auto"
         >

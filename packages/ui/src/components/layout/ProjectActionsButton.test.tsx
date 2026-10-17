@@ -125,7 +125,7 @@ const terminal = {
 
 mock.module('@/components/ui/dropdown-menu', () => ({
   DropdownMenu: ({ children }: { children: React.ReactNode }) => React.createElement(React.Fragment, null, children),
-  DropdownMenuContent: ({ children }: { children: React.ReactNode }) => React.createElement('div', null, children),
+  DropdownMenuContent: ({ children, ...props }: React.ComponentProps<'div'>) => React.createElement('div', props, children),
   DropdownMenuItem: ({ children, onClick, className }: { children: React.ReactNode; onClick?: () => void; className?: string }) => React.createElement('button', { type: 'button', onClick, className }, children),
   DropdownMenuSeparator: () => React.createElement('hr'),
   DropdownMenuTrigger: ({ children }: { children: React.ReactNode }) => React.createElement(React.Fragment, null, children),
@@ -269,6 +269,11 @@ describe('ProjectActionsButton lifecycle', () => {
 
 
 
+
+  test('the action picker menu carries the work-status popup marker', async () => {
+    await renderButton();
+    expect(host.querySelector('[data-work-status-popup]')).not.toBeNull();
+  });
 
   const primaryLabel = () => host.querySelector('button')?.getAttribute('aria-label') ?? '';
   const menuItem = (name: string) => [...host.querySelectorAll('button')]
