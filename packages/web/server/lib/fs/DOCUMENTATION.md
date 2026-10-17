@@ -53,6 +53,7 @@ Own filesystem API behavior for the web server runtime, including workspace-boun
 - `createFsSearchRuntime({ fsPromises, path, spawn, resolveGitBinaryForSpawn })` from `search.js`
   - Returns `{ searchFilesystemFiles(rootPath, options) }`.
   - Supports fuzzy matching, hidden-file handling, and optional `git check-ignore` filtering.
+  - An empty query stops at `limit` candidates. A query walks the tree until it is exhausted or 10,000 files are inspected (`FILE_SEARCH_MAX_VISITED_FILES`): weak shallow matches would otherwise exhaust a candidate budget before exact deeper matches are ever visited. The ceiling mirrors `packages/vscode/src/bridge-fs-helpers-runtime.ts`, and both suites pin the two runtimes' agreement.
 
 ### Find in files
 
@@ -100,7 +101,10 @@ on the next search. The stderr pipe is read to the end, for the reason below.
 Both search and directory listing discard `git check-ignore` stderr at spawn.
 They consume stdout for ignore matches. Never create an unread stderr pipe:
 Git diagnostics can fill it and block the child indefinitely, so repeated
-searches accumulate live Git processes. `git-process.test.js` exercises both
+searches accumulate live Git processes. Both also kill a `check-ignore` child
+that has not exited within `OPENCHAMBER_GIT_CHECK_IGNORE_TIMEOUT_MS` (default
+2500 ms, `0` disables it) and continue with no ignored names.
+`git-process.test.js` exercises both
 paths with real OS pipes, twelve concurrent checks, and 2 MiB of diagnostics
 per child. Successful completion must preserve ignore filtering and reap all
 twelve children.
