@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { buildKnownSessionDirectories } from './sessionListDirectories';
+import { buildKnownSessionDirectories, getSessionDirectoriesToSync } from './sessionListDirectories';
 import { buildSessionBootstrapDemands } from './sessionBootstrapDemands';
 
 describe('buildKnownSessionDirectories', () => {
@@ -46,5 +46,29 @@ describe('buildKnownSessionDirectories', () => {
       { path: '/srv/Project' }, { path: '/srv/project' },
       { path: 'c:\\Users\\Developer\\Project\\' }, { path: 'C:/Users/Developer/Project' },
     ], new Map())]).toEqual(['/srv/Project', '/srv/project', 'C:/Users/Developer/Project']);
+  });
+});
+
+describe('getSessionDirectoriesToSync', () => {
+  const projectRoots = new Set(['/repo']);
+
+  test('first full-app pass fetches only worktree directories', () => {
+    const known = new Set(['/repo', '/wt/a', '/wt/b']);
+    expect(getSessionDirectoriesToSync(known, null, { isVSCode: false, projectRoots })).toEqual(['/wt/a', '/wt/b']);
+  });
+
+  test('first VS Code pass fetches every known directory', () => {
+    const known = new Set(['/repo', '/other']);
+    expect(getSessionDirectoriesToSync(known, null, { isVSCode: true, projectRoots })).toEqual(['/repo', '/other']);
+  });
+
+  test('later passes fetch only newly added directories', () => {
+    const known = new Set(['/repo', '/wt/a', '/wt/b']);
+    expect(getSessionDirectoriesToSync(known, new Set(['/repo', '/wt/a']), { isVSCode: false, projectRoots })).toEqual(['/wt/b']);
+  });
+
+  test('later passes fetch nothing when the topology is unchanged', () => {
+    const known = new Set(['/repo']);
+    expect(getSessionDirectoriesToSync(known, new Set(['/repo']), { isVSCode: true, projectRoots })).toEqual([]);
   });
 });

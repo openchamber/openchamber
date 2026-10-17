@@ -22,3 +22,24 @@ export const buildKnownSessionDirectories = (
   }
   return directories;
 };
+
+/**
+ * Directories whose session list still has to be fetched for one sync pass.
+ * Once a previous pass exists, only newly added directories are fetched.
+ * On the first full-app pass the global bootstrap already covers the project
+ * roots, so only non-root (worktree) directories need a fetch; VS Code has no
+ * bootstrap for known directories and fetches everything it is allowed to see.
+ */
+export const getSessionDirectoriesToSync = (
+  knownDirectories: ReadonlySet<string>,
+  previous: ReadonlySet<string> | null,
+  options: { isVSCode: boolean; projectRoots: ReadonlySet<string> },
+): string[] => {
+  if (previous) {
+    return [...knownDirectories].filter((directory) => !previous.has(directory));
+  }
+  if (options.isVSCode) {
+    return [...knownDirectories];
+  }
+  return [...knownDirectories].filter((directory) => !options.projectRoots.has(directory));
+};
