@@ -217,6 +217,30 @@ describe('bridge git special runtime', () => {
     expect(sdkClient.generate.text.mock.calls[0][0].model).toEqual({ id: 'claude-sonnet-4-5', providerID: 'anthropic' });
   });
 
+  it('keeps the configured small model when a partial catalog omits it', async () => {
+    // A cold start can answer a non-empty list before every provider has
+    // loaded. Only a model the catalog lists as disabled is rejected, the same
+    // rule the server resolver applies.
+    gitService.getGitStatus.mockImplementation(async () => ({ files: [{ path: 'src/a.ts', index: ' ', working_dir: 'M' }] }));
+    gitService.getGitLog.mockImplementation(async () => ({ all: [{ message: 'fix: earlier change' }] }));
+    gitService.getGitDiff.mockImplementation(async () => ({ kind: 'diff', diff: 'diff --git a/src/a.ts b/src/a.ts\n+new line', submodule: null }));
+    sdkClient.model.list.mockImplementation(async () => ({ data: [{ providerID: 'other', id: 'some-model' }] }));
+    sdkClient.generate.text.mockImplementation(async () => ({ text: '{"subject":"feat: add a line","highlights":["adds a line"]}' }));
+
+    const response = await handleSpecialGitBridgeMessage({
+      id: 'partial1',
+      type: 'api:git/commit-message',
+      payload: { directory: '/repo' },
+    }, { manager: { getApiUrl: () => 'http://opencode.test', getOpenCodeAuthHeaders: () => ({}) } }, {
+      readSettings: () => ({ smallModelUseDefault: false, smallModelOverride: 'anthropic/claude-sonnet-4-5' }),
+      execGit: mock(),
+      readPromptOverrides: () => ({}),
+    });
+
+    expect(response.success).toBe(true);
+    expect(sdkClient.generate.text.mock.calls[0][0].model).toEqual({ id: 'claude-sonnet-4-5', providerID: 'anthropic' });
+  });
+
   it('scopes the catalog, agent, and generate reads to the flow directory', async () => {
     await handleSpecialGitBridgeMessage({
       id: 's1',

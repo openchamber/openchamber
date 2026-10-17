@@ -140,22 +140,17 @@ const resolveBridgeGitGenerationModel = async (
     ? titleModel
     : null;
 
-  // An unreadable or empty catalog is not proof a model is absent. On a cold
-  // start OpenCode answers the model list before the location's providers load,
-  // so the read fails or lists nothing yet; dropping the user's configured
-  // small model there sent generation to the zen default they cannot use, and
-  // the `Model unavailable` retry loop then retried that wrong model until it
-  // gave up. Keeping the named model lets the loop retry the right one once
-  // OpenCode warms up. The server-side resolver keeps a configured model it
-  // cannot list for the same reason. Only a catalog that actually listed models
-  // can reject one.
-  const verifiedRefs = catalog && catalog.refs.size > 0 ? catalog.refs : null;
-  const hasModel = (providerID: string, modelID: string): boolean => {
-    if (!verifiedRefs) {
-      return true;
-    }
-    return verifiedRefs.has(`${providerID}/${modelID}`);
-  };
+  // A catalog only rejects a model it lists as disabled, which is the rule the
+  // server-side resolver applies: a config can outlive the login behind it, and
+  // OpenCode's own titles move on to another model, but a model the catalog
+  // does not list at all (a plugin provider still loading, or a cold location
+  // that answered before its providers did) is kept. Gating on "listed" dropped
+  // the user's configured small model on every cold start, sent generation to
+  // the zen default they cannot use, and the `Model unavailable` retry loop
+  // then retried that wrong model until it gave up.
+  const hasModel = (providerID: string, modelID: string): boolean => (
+    !catalog?.disabled.has(`${providerID}/${modelID}`)
+  );
 
   return chooseBridgeGitGenerationModel(payloadModel, settings, hasModel, configuredModel);
 };
