@@ -1,0 +1,62 @@
+# Keeps the flake's baked dependency hashes in step with the two files that
+# decide them: bun.lock (the bun-deps fixed-output derivation) and
+# packages/electron/package.json (the pinned OpenCode CLI tag). When either
+# moves on main, the flake's build-time assertion fails until the hashes are
+# re-baked; this workflow runs the same `nix run .#update-hashes` a
+# contributor would run and opens a PR with the result.
+name: nix-hashes
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - bun.lock
+      - packages/electron/package.json
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: nix-hashes
+  cancel-in-progress: false
+
+jobs:
+  rehash:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - uses: cachix/install-nix-action@b85815f71a6de0ddee80b8a80a98d43f4bcc66c7 # v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Re-bake dependency hashes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          nix run .#update-hashes
+          if git diff --quiet; then
+            echo "hashes already current — nothing to bake"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B nix/hash-bake
+          git add flake.nix flake.lock nix/package.nix
+          git commit \
+            -m "chore(nix): re-bake dependency hashes" \
+            -m "Automated re-bake after a change to bun.lock or packages/electron/package.json (${GITHUB_SHA})." \
+            -m "Reproduce locally with nix run .#update-hashes."
+          git push --force origin nix/hash-bake
+          if [ "$(gh pr list --head nix/hash-bake --state open --json number --jq 'length')" = "1" ]; then
+            echo "an open PR for nix/hash-bake already exists — the force-push updated it"
+            exit 0
+          fi
+          gh pr create \
+            --base main \
+            --head nix/hash-bake \
+            --title "chore(nix): re-bake dependency hashes" \
+            --body "Automated re-bake after a change to bun.lock or packages/electron/package.json (commit ${GITHUB_SHA}). Reproduce locally with nix run .#update-hashes; the script verifies each baked hash with a clean build before exiting, so the diff is the hash lines only."
