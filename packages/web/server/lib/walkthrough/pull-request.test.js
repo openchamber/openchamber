@@ -114,14 +114,18 @@ describe('getPullRequestDiff', () => {
     await expect(read()).rejects.toThrow();
   });
 
-  it('requires the exact bound account before repository resolution', async () => {
+  it('requires the bound account, resolving the repository first for its host', async () => {
     getOctokitForAccountId.mockResolvedValue(null);
 
+    // The repository resolves first: its remote names the instance, and an
+    // enterprise host selects its own octokit, so no GitHub call can be made
+    // before that. A github.com repository with no exact account still fails
+    // closed with the 401 below.
     await expect(read()).rejects.toMatchObject({
       code: 'github-not-connected',
       statusCode: 401,
     });
-    expect(resolveGitHubRepoFromDirectory).not.toHaveBeenCalled();
+    expect(resolveGitHubRepoFromDirectory).toHaveBeenCalled();
   });
 
   it('treats an empty diff as a missing pull request rather than an empty review', async () => {

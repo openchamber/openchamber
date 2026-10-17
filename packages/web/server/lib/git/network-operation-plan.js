@@ -147,7 +147,7 @@ const parseCloneProviderAccount = (value, parsedEndpoint) => {
   let instance;
   try { instance = normalizeSourceControlProviderInstance(value.provider, value.instance); }
   catch { throw planError('Provider account instance is invalid'); }
-  const origin = new URL(value.provider === 'github' ? 'https://github.com' : instance);
+  const origin = new URL(value.provider === 'github' ? `https://${instance}` : instance);
   if (origin.hostname !== parsedEndpoint.host) throw planError('Provider account does not match the clone endpoint');
   const accountId = requiredString(value.accountId, 'provider accountId');
   if (accountId !== value.accountId || /[\0\r\n]/.test(accountId)) throw planError('Provider account is invalid');
@@ -701,7 +701,7 @@ export function createNetworkOperationPlanner({
         let instance;
         try { instance = normalizeSourceControlProviderInstance(account.provider, account.instance); }
         catch { throw planError('Credential account instance is invalid'); }
-        const origin = new URL(account.provider === 'github' ? 'https://github.com' : instance);
+        const origin = new URL(account.provider === 'github' ? `https://${instance}` : instance);
         if (origin.protocol !== 'https:' || origin.hostname !== parsedEndpoint.host
           || Number(origin.port || 443) !== parsedEndpoint.port) throw planError('Credential account does not match the HTTPS endpoint');
         if (account.provider === 'gitlab') gitLabInstances.push(instance);

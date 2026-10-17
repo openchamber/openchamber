@@ -1276,7 +1276,7 @@ describe("branch PR live state pushed by the server", () => {
     const key = boundKey("feature", "origin", "github.com#7")
     seed(key, openStatus())
     expect(getBranchTrackedPull(useGitHubPrStatusStore.getState().entries[key])).toEqual({
-      provider: "github", kind: "pull", owner: "acme", repo: "app", number: 7, accountId: "github.com#7",
+      provider: "github", kind: "pull", instance: "github.com", owner: "acme", repo: "app", number: 7, accountId: "github.com#7",
     })
     seed(key, openStatus({ pr: { ...openStatus().pr!, state: "merged" } }))
     expect(getBranchTrackedPull(useGitHubPrStatusStore.getState().entries[key])).toBeNull()

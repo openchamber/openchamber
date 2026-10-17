@@ -18,7 +18,7 @@ describe('tracked items routes', () => {
       .send({ connectionId: 'c1', visible: false, items: [item, { provider: 'nope' }] }).expect(200);
     expect(response.body.states).toHaveLength(1);
     const [connectionId, items, options] = setInterest.mock.calls[0];
-    expect([connectionId, [...items.keys()], options]).toEqual(['c1', ['github|pull|acme/app#1'], { visible: false }]);
+    expect([connectionId, [...items.keys()], options]).toEqual(['c1', ['github|github.com|pull|acme/app#1'], { visible: false }]);
   });
 
   it('asks a client on a closed connection to reconnect, and rejects malformed bodies', async () => {

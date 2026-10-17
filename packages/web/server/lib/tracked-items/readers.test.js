@@ -7,8 +7,8 @@ const rateLimitModule = (limited = false) => ({
   noteGitHubRateLimit: vi.fn(),
 });
 
-const readersWith = ({ octokit = {}, fetchPrSummaries = vi.fn(async () => ({ summaries: [{ number: 1 }], issueSummaries: [] })), limited = false, gitlab, linear } = {}) => createTrackedItemReaders({
-  loadGitHub: async () => ({ getOctokitOrNull: async () => octokit, getOctokitForAccountId: async (accountId) => (accountId === 'bound' ? { octokit: { bound: true } } : null) }),
+const readersWith = ({ octokit = {}, octokitFor = async () => octokit, fetchPrSummaries = vi.fn(async () => ({ summaries: [{ number: 1 }], issueSummaries: [] })), limited = false, gitlab, linear } = {}) => createTrackedItemReaders({
+  loadGitHub: async () => ({ getOctokitOrNull: octokitFor, getOctokitForAccountId: async (accountId) => (accountId === 'bound' ? { octokit: { bound: true } } : null) }),
   loadGitHubSummaries: async () => ({ fetchPrSummaries, isGraphqlRateLimitError: () => false }),
   loadGitHubRateLimit: async () => rateLimitModule(limited),
   loadLinear: async () => ({ getLinearIssueSummaries: linear ?? (async () => ({ connected: false })) }),
@@ -28,6 +28,38 @@ describe('tracked item readers', () => {
     await expect(readersWith({ limited: true }).github({ pulls: [], issues: [] })).resolves.toEqual({ status: 'unavailable' });
     const limitedNow = vi.fn(async () => { throw Object.assign(new Error('limit'), { status: 429 }); });
     await expect(readersWith({ fetchPrSummaries: limitedNow }).github({ pulls: [], issues: [] })).resolves.toEqual({ status: 'unavailable' });
+  });
+
+  it('reads each GitHub host on its own: its host-pinned octokit, per-host cooldown and a 401 that stays on the host', async () => {
+    const fetchPrSummaries = vi.fn(async () => ({ summaries: [{ number: 5 }], issueSummaries: [] }));
+    const seenHosts = [];
+    const octokitFor = async (host) => { seenHosts.push(host); return { host }; };
+    await expect(readersWith({ fetchPrSummaries, octokitFor }).github({ instance: 'github.acme.com', pulls: [], issues: [] }))
+      .resolves.toEqual({ status: 'ok', pulls: [{ number: 5 }], issues: [] });
+    expect(seenHosts).toEqual(['github.acme.com']);
+    await expect(readersWith({ fetchPrSummaries, octokitFor }).github({ instance: '', pulls: [], issues: [] }))
+      .resolves.toEqual({ status: 'ok', pulls: [{ number: 5 }], issues: [] });
+    expect(seenHosts).toEqual(['github.acme.com', 'github.com']);
+
+    // A rate limit is noted against the host that hit it, never a shared slot.
+    const hostLimited = vi.fn(async () => { throw Object.assign(new Error('limit'), { status: 429 }); });
+    const rateLimit = rateLimitModule();
+    await expect(createTrackedItemReaders({
+      loadGitHub: async () => ({ getOctokitOrNull: async () => ({}), getOctokitForAccountId: async () => null }),
+      loadGitHubSummaries: async () => ({ fetchPrSummaries: hostLimited, isGraphqlRateLimitError: () => false }),
+      loadGitHubRateLimit: async () => rateLimit,
+      readGitLabLiveSummaries: undefined,
+    }).github({ instance: 'github.acme.com', pulls: [], issues: [] })).resolves.toEqual({ status: 'unavailable' });
+    expect(rateLimit.noteGitHubRateLimit).toHaveBeenCalledWith(expect.any(Object), 'github.acme.com');
+    // A stale enterprise token 401s that host only; the answer is its
+    // disconnected, and no github.com login is involved.
+    const host401 = vi.fn(async () => { throw Object.assign(new Error('bad credentials'), { status: 401 }); });
+    await expect(createTrackedItemReaders({
+      loadGitHub: async () => ({ getOctokitOrNull: async () => ({}), getOctokitForAccountId: async () => null }),
+      loadGitHubSummaries: async () => ({ fetchPrSummaries: host401, isGraphqlRateLimitError: () => false }),
+      loadGitHubRateLimit: async () => rateLimitModule(),
+      readGitLabLiveSummaries: undefined,
+    }).github({ instance: 'github.acme.com', pulls: [], issues: [] })).resolves.toEqual({ status: 'disconnected' });
   });
 
   it('maps GitLab and Linear answers into the same terms', async () => {

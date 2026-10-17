@@ -1120,7 +1120,24 @@ describe('createWebSourceControlAPI', () => {
       body: JSON.stringify({ token: 'secret-token' }), query: new URLSearchParams({ instance: 'https://gitlab.example.com' }),
     }));
 
-    await expect(api.authStatus({ provider: 'github', instance: 'github.example.com' })).rejects.toThrow('only github.com is available');
+    // A GitHub Enterprise host is a valid github instance; the request goes to
+    // the github provider with the host as the instance.
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({
+      connected: true,
+      user: { id: 42, login: 'ghe-user' },
+      accounts: [{
+        id: 'github.example.com#cli:42', credentialId: 'github.example.com#cli:42', credentialRevision: 1,
+        providerUserId: 'github.example.com#42', providerUserStatus: 'available',
+        user: { id: 42, login: 'ghe-user' }, current: true, source: 'gh-cli', status: 'valid',
+      }],
+      ghCli: { available: true, disabled: false, active: true, user: { id: 42, login: 'ghe-user' } },
+    }));
+    await expect(api.authStatus({ provider: 'github', instance: 'github.example.com' })).resolves.toMatchObject({
+      status: 'connected', user: { provider: 'github', instance: 'github.example.com', id: '42', username: 'ghe-user' },
+    });
+    expect(runtimeFetchMock).toHaveBeenLastCalledWith('/api/source-control/github/auth/status', expect.objectContaining({
+      query: new URLSearchParams({ instance: 'github.example.com' }),
+    }));
   });
 
   it('parses provider-neutral GitLab merge request context without GitHub identities', async () => {

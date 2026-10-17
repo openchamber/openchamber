@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildReferenceSearchQuery, fetchReferenceDetail, parseReferenceLookup, readReferencePeople, readReferenceState, toReference } from './reference-search.js';
+import { buildReferenceSearchQuery, fetchReferenceDetail, parseReferenceLookup, readPullStatusRefs, readReferencePeople, readReferenceState, toReference } from './reference-search.js';
 
 const origin = { owner: 'acme', repo: 'app', source: 'origin' };
 const upstream = { owner: 'Upstream', repo: 'App', source: 'upstream' };
@@ -51,6 +51,38 @@ describe('buildReferenceSearchQuery', () => {
     expect(readReferenceState('merged')).toBe('merged');
     expect(readReferencePeople('everyone')).toBe('any');
     expect(readReferencePeople('created')).toBe('created');
+  });
+});
+
+describe('readPullStatusRefs', () => {
+  it('reads `owner/repo#number` refs without a host as github.com', () => {
+    expect(readPullStatusRefs('acme/app#1,  Upstream/App#42 ,acme/app#1')).toEqual([
+      { owner: 'acme', repo: 'app', number: 1 },
+      { owner: 'Upstream', repo: 'App', number: 42 },
+    ]);
+  });
+
+  it('carries an enterprise host, normalised, and keeps same-numbered refs on different hosts apart', () => {
+    expect(readPullStatusRefs('acme/app#1@GHE.Example.com')).toEqual([{ owner: 'acme', repo: 'app', number: 1, host: 'ghe.example.com' }]);
+    expect(readPullStatusRefs('acme/app#1@ghe.example.com,acme/app#1')).toEqual([
+      { owner: 'acme', repo: 'app', number: 1, host: 'ghe.example.com' },
+      { owner: 'acme', repo: 'app', number: 1 },
+    ]);
+  });
+
+  it('treats an explicit github.com host as the default', () => {
+    expect(readPullStatusRefs('acme/app#1@github.com,acme/app#2@github.com')).toEqual([
+      { owner: 'acme', repo: 'app', number: 1 },
+      { owner: 'acme', repo: 'app', number: 2 },
+    ]);
+  });
+
+  it('rejects an empty, malformed, or oversized list', () => {
+    expect(readPullStatusRefs('')).toBeNull();
+    expect(readPullStatusRefs('acme/app#x')).toBeNull();
+    expect(readPullStatusRefs('acme/app')).toBeNull();
+    expect(readPullStatusRefs('acme/app#1@a@b')).toBeNull();
+    expect(readPullStatusRefs(Array.from({ length: 31 }, (_, index) => `acme/app#${index + 1}`).join(','))).toBeNull();
   });
 });
 

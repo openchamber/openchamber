@@ -234,15 +234,17 @@ const normalizeIdentity = (identity: SourceControlIdentity): SourceControlIdenti
   let host = value;
   if (value.includes('://')) {
     try {
-      host = new URL(value).hostname.toLowerCase().replace(/\.$/, '');
+      const url = new URL(value);
+      if (url.protocol !== 'https:' || url.username || url.password || url.port || url.search || url.hash
+        || (url.pathname && url.pathname !== '/')) {
+        throw new Error(`Invalid GitHub instance: ${identity.instance}`);
+      }
+      host = url.hostname.toLowerCase().replace(/\.$/, '');
     } catch {
-      throw new Error(`Invalid source control instance: ${identity.instance}`);
+      throw new Error(`Invalid GitHub instance: ${identity.instance}`);
     }
   }
-  if (host !== 'github.com') {
-    throw new Error(`GitHub instance "${identity.instance}" is not supported; only github.com is available`);
-  }
-  return GITHUB_IDENTITY;
+  return host === 'github.com' ? GITHUB_IDENTITY : { provider: 'github', instance: host };
 };
 
 const providerPath = (identity: SourceControlIdentity, path: string): string => `/api/source-control/${identity.provider}${path}`;
@@ -481,7 +483,7 @@ const mutationTargetMatches = (
   && (context.target.headSha === undefined || target.headSha === context.target.headSha);
 
 const providerAccountMatches = (identity: SourceControlIdentity, providerAccountId: string): boolean => {
-  if (identity.provider === 'github') return /^github\.com#\d+$/.test(providerAccountId);
+  if (identity.provider === 'github') return /^[^#]+#\d+$/.test(providerAccountId);
   return providerAccountId.startsWith(`${identity.instance}#`)
     && /^\d+$/.test(providerAccountId.slice(identity.instance.length + 1));
 };

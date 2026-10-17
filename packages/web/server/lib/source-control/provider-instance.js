@@ -9,11 +9,19 @@ export function normalizeSourceControlProviderInstance(provider, instance) {
 
   let host = value.toLowerCase().replace(/\.$/, '');
   if (host.includes('://')) {
-    const url = new URL(host);
+    let url;
+    try {
+      url = new URL(host);
+    } catch {
+      throw new Error('GitHub instance must be an HTTPS origin');
+    }
     if (url.protocol !== 'https:' || url.username || url.password || url.port || url.search || url.hash
       || (url.pathname && url.pathname !== '/')) throw new Error('GitHub instance must be an HTTPS origin');
     host = url.hostname.toLowerCase().replace(/\.$/, '');
   }
-  if (host !== 'github.com') throw new Error('GitHub instance is unsupported');
-  return 'github.com';
+  // Any hostname is a syntactically valid GitHub instance: github.com is the
+  // default, GitHub Enterprise is any other host. This module checks only the
+  // form; whether a non-github.com host may actually receive a token is the
+  // trust gate's call (host-trust.js), never this one.
+  return host;
 }

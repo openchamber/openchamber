@@ -3,12 +3,11 @@ import { Octokit } from '@octokit/rest';
 import {
   getGitHubAuth,
   getGitHubAuthByAccountId,
-  githubAccountId,
-  githubCliAccountId,
   isGhCliActive,
   isGhCliDisabled,
 } from './auth.js';
 import { getGhCliToken } from './gh-cli-credential.js';
+import { isTrustedGitHubHost } from './host-trust.js';
 
 // Per-request timeout for every GitHub call. Octokit v22 uses native fetch,
 // which has no built-in timeout — without this, a stuck connection hangs until
@@ -76,14 +75,26 @@ const createConditionalFetch = (cacheIdentity) => async (url, options = {}) => {
   return response;
 };
 
-/** Create an Octokit instance with per-request timeout + ETag revalidation. */
-export function createOctokit(token, accountId = '') {
+/**
+ * Create an Octokit instance with per-request timeout + ETag revalidation.
+ *
+ * `host` targets a specific GitHub Enterprise API root. github.com (or omitted)
+ * keeps Octokit's default `api.github.com` base URL. The cache identity stays
+ * keyed by credential digest only: the request URL inside the cache carries the
+ * host, so one host's 304 replay can never serve another host's body.
+ */
+export function createOctokit(token, accountId = '', host = '') {
   const cacheIdentity = `github:${crypto.createHash('sha256')
     .update(accountId)
     .update('\0')
     .update(token)
     .digest('base64url')}`;
-  const octokit = new Octokit({ auth: token, request: { fetch: createConditionalFetch(cacheIdentity) } });
+  const options = { auth: token, request: { fetch: createConditionalFetch(cacheIdentity) } };
+  const normalizedHost = String(host ?? '').trim().toLowerCase();
+  if (normalizedHost && normalizedHost !== 'github.com') {
+    options.baseUrl = `https://${normalizedHost}/api/v3`;
+  }
+  const octokit = new Octokit(options);
   Object.defineProperty(octokit, 'openChamberCacheIdentity', {
     value: cacheIdentity,
   });
@@ -94,49 +105,119 @@ export function getOctokitCacheIdentity(octokit) {
   return octokit?.openChamberCacheIdentity || '';
 }
 
-export async function getOctokitOrNull() {
+/**
+ * Pick the token for a host. github.com (or an omitted host) keeps the
+ * existing gh-token/stored-token fallback. An enterprise host must NOT fall
+ * back to the stored OAuth token: that token is always a github.com credential
+ * (the device flow is hardcoded to github.com), so sending it to another
+ * instance's API root 401s there and can leak the token to whatever host a
+ * local remote names. Only the host-pinned gh token belongs on an enterprise
+ * host, and it is taken without the github.com CLI switch: a stored gh login
+ * for that host is itself the consent, matching getOctokitForAccountId.
+ */
+export function selectTokenForHost(host, { ghToken, storedToken, ghCliActive }) {
+  const normalizedHost = String(host ?? '').trim().toLowerCase();
+  if (!normalizedHost || normalizedHost === 'github.com') {
+    return ghCliActive ? ghToken || storedToken : storedToken;
+  }
+  return ghToken;
+}
+
+export async function getOctokitOrNull(host) {
+  // Never mint a token for a host the user never authenticated with: the only
+  // credential for an enterprise host is gh's host-pinned token, and sending
+  // it to an arbitrary remote host would leak it there. This gate runs before
+  // ANY token lookup, so a direct caller with a client-supplied host cannot
+  // bypass repo resolution. github.com (and an omitted host) is always fine.
+  const normalizedHost = String(host ?? '').trim().toLowerCase();
+  if (normalizedHost && normalizedHost !== 'github.com' && !isTrustedGitHubHost(normalizedHost)) {
+    return null;
+  }
   const auth = await getGitHubAuth();
-  // The gh CLI login is used only after the user switched to it in Settings:
-  // its token carries every scope ever granted to gh, so it is never picked
-  // up silently when OpenChamber has no account of its own.
-  const ghToken = isGhCliActive() && !isGhCliDisabled() ? getGhCliToken() : null;
-  const token = ghToken || auth?.accessToken;
+  // On github.com the gh CLI login is used only after the user switched to it
+  // in Settings: its token carries every scope ever granted to gh, so it is
+  // never picked up silently when OpenChamber has no account of its own. A
+  // trusted enterprise host takes its host-pinned gh token without that
+  // switch, matching getOctokitForAccountId and getOctokitForHost; a host gh
+  // login is the consent. isGhCliDisabled() still applies to both.
+  const enterpriseHost = Boolean(normalizedHost && normalizedHost !== 'github.com');
+  const ghToken = !isGhCliDisabled() && (enterpriseHost || isGhCliActive()) ? getGhCliToken(host) : null;
+  const token = selectTokenForHost(normalizedHost, {
+    ghToken,
+    storedToken: auth?.accessToken,
+    ghCliActive: isGhCliActive(),
+  });
   if (!token) {
     return null;
   }
   const accountId = token === auth?.accessToken ? auth.accountId : '';
-  return createOctokit(token, accountId);
+  return createOctokit(token, accountId, normalizedHost);
 }
 
 /**
  * The gh CLI account as a credential record shaped like a persisted one, for
- * Git transport. Same consent rule as getOctokitForAccountId: only while the
- * user has switched to the gh account, and only when gh is still signed in
- * as that same GitHub user. The CLI credential has no revisions beyond 1.
+ * Git transport. Same consent rule as getOctokitForAccountId: a
+ * `github.com#cli:` account resolves only while the user has switched to gh in
+ * Settings, while a trusted enterprise host's `<host>#cli:` account uses that
+ * host's host-pinned gh token without the switch. gh must still be signed in
+ * as that same user. The CLI credential has no revisions beyond 1.
  */
 export async function getGitHubCliCredential(accountId, revision) {
-  if (!accountId.startsWith('github.com#cli:') || !isGhCliActive() || isGhCliDisabled()) return null;
+  const cliMatch = /^([^#]+)#cli:(\d+)$/.exec(accountId ?? '');
+  if (!cliMatch) return null;
+  const host = cliMatch[1].toLowerCase();
+  if (host !== 'github.com' && !isTrustedGitHubHost(host)) return null;
+  if (isGhCliDisabled()) return null;
+  if (host === 'github.com' && !isGhCliActive()) return null;
   if (revision !== undefined && revision !== 1) return null;
-  const token = getGhCliToken();
+  const token = getGhCliToken(host);
   if (!token) return null;
   let response;
   try {
-    response = await createOctokit(token, accountId).rest.users.getAuthenticated();
+    response = await createOctokit(token, accountId, host).rest.users.getAuthenticated();
   } catch (error) {
     if (error?.status === 401) return null;
     throw error;
   }
-  if (githubCliAccountId(response.data.id) !== accountId) return null;
+  if (`${host}#cli:${response.data.id}` !== accountId) return null;
   return {
     credentialId: accountId,
     accountId,
     credentialRevision: 1,
-    providerUserId: githubAccountId(response.data.id),
+    providerUserId: `${host}#${response.data.id}`,
     accessToken: token,
     source: 'cli',
     status: 'valid',
     user: response.data,
   };
+}
+
+/**
+ * The host-pinned gh-token Octokit for a GitHub Enterprise host, or null when
+ * gh cannot supply a token for it. github.com is served by the account layer.
+ * Only trusted hosts are accepted, so a client-supplied host can never pick
+ * which token the server sends where.
+ */
+export async function getOctokitForHost(host, options = {}) {
+  const normalizedHost = String(host ?? '').trim().toLowerCase();
+  if (!normalizedHost || normalizedHost === 'github.com' || !isTrustedGitHubHost(normalizedHost)) {
+    return null;
+  }
+  if (isGhCliDisabled()) return null;
+  const token = getGhCliToken(normalizedHost);
+  if (!token) return null;
+  const octokit = createOctokit(token, '', normalizedHost);
+  octokit.hook.error('request', async (error) => {
+    const identity = { provider: 'github', instance: normalizedHost, accountId: null };
+    error.sourceControlIdentity = identity;
+    error.sourceControlPersistedAccount = false;
+    if (error.status === 401) {
+      await options.onUnauthorized?.(identity, false);
+      error.sourceControlInvalidated = true;
+    }
+    throw error;
+  });
+  return octokit;
 }
 
 export async function getOctokitForAccountId(accountId, options = {}) {
@@ -162,18 +243,25 @@ export async function getOctokitForAccountId(accountId, options = {}) {
       octokit,
     };
   }
-  // An exact CLI account id is not consent: the gh token is used only while
-  // the user has switched to the gh account in Settings.
-  if (!accountId.startsWith('github.com#cli:') || !isGhCliActive() || isGhCliDisabled()) return null;
-  const token = getGhCliToken();
+  // An exact CLI account id is not consent. On github.com the gh token is used
+  // only while the user has switched to the gh account in Settings. An
+  // enterprise host has no other credential: `<host>#cli:<id>` resolves through
+  // the trust gate with the host-pinned gh token, no switch involved.
+  const cliMatch = /^([^#]+)#cli:(\d+)$/.exec(accountId);
+  if (!cliMatch) return null;
+  const host = cliMatch[1].toLowerCase();
+  if (host !== 'github.com' && !isTrustedGitHubHost(host)) return null;
+  if (isGhCliDisabled()) return null;
+  if (host === 'github.com' && !isGhCliActive()) return null;
+  const token = getGhCliToken(host);
   if (!token) return null;
-  const octokit = createOctokit(token, accountId);
+  const octokit = createOctokit(token, accountId, host);
   let response;
   try {
     response = await octokit.rest.users.getAuthenticated();
   } catch (error) {
     if (error?.status === 401) {
-      const identity = { provider: 'github', instance: 'github.com', accountId };
+      const identity = { provider: 'github', instance: host, accountId };
       await options.onUnauthorized?.(identity, false);
       error.sourceControlIdentity = identity;
       error.sourceControlPersistedAccount = false;
@@ -181,12 +269,12 @@ export async function getOctokitForAccountId(accountId, options = {}) {
     }
     throw error;
   }
-  if (githubCliAccountId(response.data.id) !== accountId) {
-    await options.onUnauthorized?.({ provider: 'github', instance: 'github.com', accountId }, false);
+  if (`${host}#cli:${response.data.id}` !== accountId) {
+    await options.onUnauthorized?.({ provider: 'github', instance: host, accountId }, false);
     return null;
   }
   octokit.hook.error('request', async (error) => {
-    const identity = { provider: 'github', instance: 'github.com', accountId };
+    const identity = { provider: 'github', instance: host, accountId };
     error.sourceControlIdentity = identity;
     error.sourceControlPersistedAccount = false;
     if (error.status === 401) {
@@ -198,7 +286,7 @@ export async function getOctokitForAccountId(accountId, options = {}) {
   return {
     accountId,
     credentialRevision: 1,
-    providerUserId: githubAccountId(response.data.id),
+    providerUserId: `${host}#${response.data.id}`,
     source: 'cli',
     user: response.data,
     octokit,

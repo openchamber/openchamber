@@ -28,7 +28,9 @@ const instanceOrigin = (value) => {
  * read. GitLab owners are namespace paths and may contain subgroups; GitHub
  * owners and every repository name are single segments. `accountId` names the
  * account a repository is bound to (a branch's pull request); without it the
- * host's current account reads it (a linked item).
+ * host's current account reads it (a linked item). A GitHub `instance` is the
+ * repository's host; missing means github.com, exactly parallel to GitLab's
+ * required instance.
  */
 export function parseTrackedItem(value) {
   if (!isPlainRecord(value)) return null;
@@ -45,7 +47,8 @@ export function parseTrackedItem(value) {
   const accountId = text(value.accountId);
   const account = accountId ? { accountId } : {};
   if (provider === 'github') {
-    return SEGMENT.test(owner) ? { provider, kind, owner, repo, number, ...account } : null;
+    const instance = text(value.instance).toLowerCase();
+    return SEGMENT.test(owner) ? { provider, instance: instance || undefined, kind, owner, repo, number, ...account } : null;
   }
   if (provider === 'gitlab') {
     const instance = instanceOrigin(value.instance);
@@ -58,9 +61,12 @@ export function parseTrackedItem(value) {
 export function trackedItemKey(item) {
   if (item.provider === 'linear') return `linear|${item.identifier.toUpperCase()}`;
   const thread = `${item.kind}|${item.owner}/${item.repo}#${item.number}`.toLowerCase();
+  // A GitHub item's `instance` is its host; missing means github.com, and the
+  // same owner/repo/number on github.com and an enterprise host must stay apart.
+  const instance = (item.provider === 'gitlab' ? item.instance : (item.instance ?? 'github.com')).toLowerCase();
   // Account ids are opaque and case-sensitive; they stay as they are.
   const account = item.accountId ? `@${item.accountId}` : '';
-  return item.provider === 'gitlab' ? `gitlab|${item.instance}|${thread}${account}` : `github|${thread}${account}`;
+  return `${item.provider}|${instance}|${thread}${account}`;
 }
 
 /** Reads a list of items, dropping malformed ones and duplicates; null when the value is not a list. */

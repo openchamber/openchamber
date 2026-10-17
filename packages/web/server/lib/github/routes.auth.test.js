@@ -1179,6 +1179,23 @@ describe('gh CLI account consent', () => {
     process.env.PATH = previousPath;
   });
 
+  it('lists capabilities for a trusted enterprise host', async () => {
+    const ghConfigDir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-gh-hosts-'));
+    await fs.writeFile(path.join(ghConfigDir, 'hosts.yml'), 'github.example.com:\n  user: ghe-user\n  oauth_token: gho_ghe\n');
+    const previousConfigDir = process.env.GH_CONFIG_DIR;
+    process.env.GH_CONFIG_DIR = ghConfigDir;
+    try {
+      const response = await request(makeApp()).get('/api/source-control/github/capabilities?instance=github.example.com').expect(200);
+      expect(response.body.identity).toEqual({ provider: 'github', instance: 'github.example.com' });
+      expect(response.body.changeRequests).toBe(true);
+    } finally {
+      if (previousConfigDir === undefined) delete process.env.GH_CONFIG_DIR;
+      else process.env.GH_CONFIG_DIR = previousConfigDir;
+    }
+    const response = await request(makeApp()).get('/api/source-control/github/capabilities?instance=untrusted.example.com').expect(400);
+    expect(response.body.error).toBe('Unsupported GitHub instance');
+  });
+
   const stubGitHubUsers = () => {
     const fetch = vi.fn(async (url, init) => {
       const authorization = new Headers(init?.headers).get('authorization');
@@ -1238,6 +1255,32 @@ describe('gh CLI account consent', () => {
     const { getOctokitOrNull } = await import('./octokit.js');
     await (await getOctokitOrNull()).rest.users.getAuthenticated();
     expect(usedCliToken(fetch)).toBe(false);
+  });
+
+  it('answers for a trusted enterprise host with its host cli account', async () => {
+    const ghConfigDir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-gh-hosts-'));
+    await fs.writeFile(path.join(ghConfigDir, 'hosts.yml'), 'github.example.com:\n  user: ghe-user\n  oauth_token: gho_ghe\n');
+    const previousConfigDir = process.env.GH_CONFIG_DIR;
+    process.env.GH_CONFIG_DIR = ghConfigDir;
+    const fetch = vi.fn(async (url, init) => {
+      const authorization = new Headers(init?.headers).get('authorization');
+      if (String(url) === 'https://github.example.com/api/v3/user' && authorization === 'token cli-token') {
+        return Response.json({ id: 42, login: 'ghe-user' });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetch);
+    try {
+      const response = await request(makeApp()).get('/api/source-control/github/auth/status?instance=github.example.com').expect(200);
+      expect(response.body).toMatchObject({
+        connected: true,
+        user: { id: 42, login: 'ghe-user' },
+        accounts: [{ id: 'github.example.com#cli:42', providerUserId: 'github.example.com#42', status: 'valid' }],
+      });
+    } finally {
+      if (previousConfigDir === undefined) delete process.env.GH_CONFIG_DIR;
+      else process.env.GH_CONFIG_DIR = previousConfigDir;
+    }
   });
 
   it('keeps the switch to the gh account through a network failure and drops it once gh is rejected', async () => {

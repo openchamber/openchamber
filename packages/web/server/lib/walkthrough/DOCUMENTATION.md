@@ -21,8 +21,10 @@ has to ask for it.
 - `schema.js` — response schema, response normalization, tolerant JSON parsing.
 - `store.js` — content-addressed cache entries plus mutable pointers.
 - `pull-request.js` — PR diffs and per-file contents: GitHub through the
-  shared octokit helper, GitLab merge requests through the readers the runtime
-  injects from the GitLab module (`readGitLabChangeRequestPatch`/`File`).
+  shared octokit helper (the host is resolved from the checkout's remote, not
+  the PR's source repo, so an enterprise checkout pulls its diff from its own
+  host with that host's token), GitLab merge requests through the readers the
+  runtime injects from the GitLab module (`readGitLabChangeRequestPatch`/`File`).
 - `model-settings.js` — the feature's own model override.
 - `languages.js` — the languages the prose may be written in.
 - `index.js` — orchestration.

@@ -1,6 +1,7 @@
 import os from 'node:os';
 import path from 'node:path';
 import { registerGitHubRoutes } from '../github/routes.js';
+import { listTrustedGitHubHosts } from '../github/host-trust.js';
 import { registerGitLabRoutes } from '../gitlab/routes.js';
 import { createBindingService } from './binding-service.js';
 import { createBindingStore } from './binding-storage.js';
@@ -173,6 +174,9 @@ export function registerSourceControlRoutes(app, dependencies = {}) {
       return res.json({
         instances: [
           { provider: 'github', instance: 'github.com' },
+          // Trusted enterprise hosts gh is signed into, so GitHub Enterprise
+          // repositories become available without a github.com OAuth account.
+          ...listTrustedGitHubHosts().map((host) => ({ provider: 'github', instance: host })),
           { provider: 'gitlab', instance: 'https://gitlab.com' },
           ...configuredGitLabInstances
             .filter((instance) => instance !== 'https://gitlab.com')

@@ -1,4 +1,5 @@
 import { hostOf } from './binding-service.js';
+import { isTrustedGitHubHost } from '../github/host-trust.js';
 import { forkRemoteName } from '../git/contributor-remote.js';
 
 /**
@@ -26,7 +27,7 @@ export const createChangeRequestWorktreeSource = ({
 }) => {
   const identityForHost = (host, gitlabInstances) => {
     if (!host) return null;
-    if (host === 'github.com') return { provider: 'github', instance: 'github.com' };
+    if (isTrustedGitHubHost(host)) return { provider: 'github', instance: host };
     const instance = gitlabInstances.find((candidate) => hostOf(candidate) === host);
     return instance ? { provider: 'gitlab', instance } : null;
   };
