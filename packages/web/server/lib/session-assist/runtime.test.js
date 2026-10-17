@@ -313,4 +313,88 @@ describe('session assist runtime', () => {
     // above suppresses.
     expect(buildOpenCodeUrl).toHaveBeenCalled();
   });
+
+  it('logs the status, code, and message of a generation failure instead of a bare string', async () => {
+    const persistSessionAssist = vi.fn(async () => undefined);
+    const records = [
+      { id: 'msg_idle', type: 'idle', outcome: 'succeeded' },
+      { id: 'msg_a', type: 'assistant', content: [{ type: 'text', text: 'All done.' }], finish: 'stop', time: { completed: 2 }, model: { providerID: 'p', id: 'm' } },
+      { id: 'msg_u', type: 'user', text: 'Do the thing' },
+    ];
+    vi.stubGlobal('fetch', vi.fn(async (input) => {
+      const url = new URL(String(input));
+      let body;
+      if (url.pathname === '/api/session/ses_1') body = { data: { id: 'ses_1', location: { directory: '/repo' } } };
+      else if (url.pathname === '/api/session/ses_1/message') body = { data: records.slice(0, Number(url.searchParams.get('limit'))), cursor: {} };
+      else throw new Error(`unexpected ${url.pathname}`);
+      return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
+    }));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const failure = Object.assign(new Error('location is not ready'), { statusCode: 503, code: 'cold-start' });
+    const { runtime } = makeRuntime({
+      persistSessionAssist,
+      buildOpenCodeUrl: (fetchPath) => `http://opencode.test${fetchPath}`,
+      getSmallModelService: async () => ({
+        describeSmallModel: async () => ({ inputCharBudget: 20_000 }),
+        generateSmallModelText: async () => { throw failure; },
+      }),
+    });
+
+    runtime.processPayload(idle());
+    for (let i = 0; i < 30 && warn.mock.calls.length === 0; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    const logged = warn.mock.calls.map((args) => args.join(' ')).find((line) => line.includes('generation failed'));
+    expect(logged).toContain('status 503');
+    expect(logged).toContain('code cold-start');
+    expect(logged).toContain('location is not ready');
+    expect(persistSessionAssist).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
+  it('keeps the cause of a tagged SDK rejection that is not an Error', async () => {
+    // The small-model service rethrows raw SDK rejections untouched. Those are
+    // tagged objects, not Errors, so a formatter that reads only
+    // `error instanceof Error` would log the bare line this fix removes.
+    const persistSessionAssist = vi.fn(async () => undefined);
+    const records = [
+      { id: 'msg_idle', type: 'idle', outcome: 'succeeded' },
+      { id: 'msg_a', type: 'assistant', content: [{ type: 'text', text: 'All done.' }], finish: 'stop', time: { completed: 2 }, model: { providerID: 'p', id: 'm' } },
+      { id: 'msg_u', type: 'user', text: 'Do the thing' },
+    ];
+    vi.stubGlobal('fetch', vi.fn(async (input) => {
+      const url = new URL(String(input));
+      let body;
+      if (url.pathname === '/api/session/ses_1') body = { data: { id: 'ses_1', location: { directory: '/repo' } } };
+      else if (url.pathname === '/api/session/ses_1/message') body = { data: records.slice(0, Number(url.searchParams.get('limit'))), cursor: {} };
+      else throw new Error(`unexpected ${url.pathname}`);
+      return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
+    }));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const { runtime } = makeRuntime({
+      persistSessionAssist,
+      buildOpenCodeUrl: (fetchPath) => `http://opencode.test${fetchPath}`,
+      getSmallModelService: async () => ({
+        describeSmallModel: async () => ({ inputCharBudget: 20_000 }),
+        generateSmallModelText: async () => {
+          throw { _tag: 'ProviderAuthError', message: 'provider rejected the key\nretry later' };
+        },
+      }),
+    });
+
+    runtime.processPayload(idle());
+    for (let i = 0; i < 30 && warn.mock.calls.length === 0; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    const logged = warn.mock.calls.map((args) => args.join(' ')).find((line) => line.includes('generation failed'));
+    expect(logged).toContain('provider rejected the key');
+    expect(logged).toContain('tag ProviderAuthError');
+    // The cause stays one line.
+    expect(logged).not.toContain('\n');
+    vi.unstubAllGlobals();
+  });
 });

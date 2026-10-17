@@ -127,7 +127,13 @@ model context is small. Page/count bounds are not a network-byte quota.
    writer after the final read is not guarded atomically.
 
 Stopping the runtime clears pending timers/runs and aborts in-flight operations.
-No failed session blocks another session.
+No failed session blocks another session. A generation failure is logged with
+its cause (status, code, bounded message) so a cold-start 503 can be told from
+a permanent provider rejection; the two are retried differently upstream, and a
+bare "generation failed" hid which one happened. 404 and the expected
+context/output-budget codes stay quiet, and no failure retries here: this layer
+makes one attempt, and the small-model service owns the one retry it does for a
+cold catalog.
 
 ## Settings and consumers
 
