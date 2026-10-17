@@ -2,6 +2,8 @@ import { z } from 'zod';
 import { createVSCodeAPIs } from './api';
 import { createRemovalTombstones } from './inlineCommentRemovals';
 import { resolveCommentTarget } from './inlineCommentTarget';
+import { fetchLastAssistantMessageText } from './notificationMessage';
+import { findMessagePageItem } from '@openchamber/ui/lib/opencode/messagePaging';
 import { onCommand, onThemeChange, postBridgeNotification, proxyApiRequest, proxySessionMessageRequest, sendBridgeMessage, sendBridgeMessageWithOptions, startSseProxy, stopSseProxy } from './api/bridge';
 import { vscodeStreamPerfCount, vscodeStreamPerfMeasure, vscodeStreamPerfObserve } from './api/streamPerf';
 import { extractBodyBase64, extractBodyText, extractJsonBody, hasInitBody } from './requestBodyTransport';
@@ -19,7 +21,7 @@ import type { VSCodeActiveEditorFile } from '@/sync/input-store';
 import { usePermissionStore } from '@openchamber/ui/stores/permissionStore';
 import { permissionPolicyWireSchema, policySnapshotFromWire } from '@openchamber/ui/stores/utils/permissionAutoAccept';
 import { processVSCodePermissionAutoAccept } from '@openchamber/ui/sync/vscode-permission-auto-accept';
-import type { AssistantMessage, Part } from '@openchamber/ui/lib/opencode/model';
+import type { AssistantMessage } from '@openchamber/ui/lib/opencode/model';
 import { syncEventSessionID, type SyncEvent } from '@openchamber/ui/lib/opencode/events';
 import { focusChatInput } from '@openchamber/ui/components/chat/composer/editor/dom';
 import { hostViewerStateSchema, reportHostViewerState } from '@openchamber/ui/lib/surfaceAttention';
@@ -1899,30 +1901,6 @@ const formatNotificationLabel = (raw: string, fallback: string): string => {
   return raw.split(/[-_\s]+/).filter(Boolean).map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(' ');
 };
 
-const extractNotificationTextFromParts = (parts: readonly Part[] | undefined): string => {
-  if (!parts) return '';
-  return parts
-    .map((part) => (part.type === 'text' ? part.text : ''))
-    .filter(Boolean)
-    .join('\n')
-    .trim();
-};
-
-const fetchLastAssistantMessageText = async (sessionId: string, messageId?: string): Promise<string> => {
-  if (!sessionId) return '';
-
-  try {
-    // Newest first: the message we want is at the front, not the back.
-    const page = await opencodeClient.getSessionMessages(sessionId, { limit: 5 });
-    const target = messageId
-      ? page.items.find((item) => item.info.id === messageId && item.info.role === 'assistant')
-      : page.items.find((item) => item.info.role === 'assistant' && item.info.finish === 'stop');
-    return target ? extractNotificationTextFromParts(target.parts) : '';
-  } catch {
-    return '';
-  }
-};
-
 const getNotificationTemplate = (
   settings: { notificationTemplates?: Record<string, { title?: string; message?: string }> },
   key: 'completion' | 'subtask' | 'error' | 'question',
@@ -1986,7 +1964,7 @@ window.addEventListener('openchamber:vscode-notification-event', (event) => {
     const errorMessage = syncEvent.type === 'session.error'
       ? syncEvent.properties.error.message
       : assistant?.error?.message ?? '';
-    const rawLastMessage = errorMessage || await fetchLastAssistantMessageText(sessionId, assistant?.id);
+    const rawLastMessage = errorMessage || await fetchLastAssistantMessageText(findMessagePageItem, sessionId, assistant?.id);
     const lastMessage = prepareNotificationLastMessage(rawLastMessage, settings);
     const variables = buildNotificationVariables(syncEvent, directory, sessionId, lastMessage);
 
