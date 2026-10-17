@@ -9,6 +9,7 @@ import { readOpenCodeCredentials } from './opencodeAuth';
 import { readConfig } from './opencodeConfig';
 import { isRecord, toProviderEntity } from './opencode-config-v2';
 import { fetchExeDevUsage } from './exeDevQuota';
+import { refreshGoogleAccessToken } from '../../web/server/lib/quota/providers/google/oauth.js';
 
 type AuthEntry = Record<string, unknown> | string;
 type AuthFile = Record<string, AuthEntry>;
@@ -284,12 +285,6 @@ const ANTIGRAVITY_ACCOUNTS_PATHS = [
 // the client secret is obviously not treated as a secret.)"
 // ref: https://github.com/opgginc/opencode-bar
 
-const ANTIGRAVITY_GOOGLE_CLIENT_ID =
-  '1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com';
-const ANTIGRAVITY_GOOGLE_CLIENT_SECRET = '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';
-const GEMINI_GOOGLE_CLIENT_ID =
-  '681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com';
-const GEMINI_GOOGLE_CLIENT_SECRET = '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';
 const DEFAULT_PROJECT_ID = 'rising-fact-p41fc';
 const GOOGLE_FIVE_HOUR_WINDOW_SECONDS = 5 * 60 * 60;
 const GOOGLE_DAILY_WINDOW_SECONDS = 24 * 60 * 60;
@@ -1137,40 +1132,6 @@ const resolveGoogleAuthSources = (auth: AuthFile): GoogleAuthSource[] => {
   return sources;
 };
 
-const resolveGoogleOAuthClient = (sourceId: GoogleAuthSource['sourceId']) => {
-  if (sourceId === 'gemini') {
-    return {
-      clientId: GEMINI_GOOGLE_CLIENT_ID,
-      clientSecret: GEMINI_GOOGLE_CLIENT_SECRET,
-    };
-  }
-
-  return {
-    clientId: ANTIGRAVITY_GOOGLE_CLIENT_ID,
-    clientSecret: ANTIGRAVITY_GOOGLE_CLIENT_SECRET,
-  };
-};
-
-const refreshGoogleAccessToken = async (refreshToken: string, clientId: string, clientSecret: string) => {
-  const response = await fetch('https://oauth2.googleapis.com/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      client_id: clientId,
-      client_secret: clientSecret,
-      refresh_token: refreshToken,
-      grant_type: 'refresh_token',
-    }),
-  });
-
-  if (!response.ok) {
-    return null;
-  }
-
-  const data = await response.json() as Record<string, unknown>;
-  return typeof data?.access_token === 'string' ? data.access_token : null;
-};
-
 const fetchGoogleQuotaBuckets = async (accessToken: string, projectId?: string) => {
   const body = projectId ? { project: projectId } : {};
   const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
@@ -1261,13 +1222,12 @@ const fetchGoogleQuota = async (): Promise<ProviderResult> => {
         sourceErrors.push(`${source.sourceLabel}: Missing refresh token`);
         continue;
       }
-      const { clientId, clientSecret } = resolveGoogleOAuthClient(source.sourceId);
-      accessToken = (await refreshGoogleAccessToken(source.refreshToken, clientId, clientSecret)) ?? undefined;
-    }
-
-    if (!accessToken) {
-      sourceErrors.push(`${source.sourceLabel}: Failed to refresh OAuth token`);
-      continue;
+      const result = await refreshGoogleAccessToken(source.refreshToken, 'gemini', { fallbackToAntigravity: true });
+      if (!result.ok) {
+        sourceErrors.push(`${source.sourceLabel}: Failed to refresh OAuth token`);
+        continue;
+      }
+      accessToken = result.accessToken;
     }
 
     const projectId = source.projectId ?? DEFAULT_PROJECT_ID;
@@ -1427,8 +1387,8 @@ const fetchAntigravityQuota = async (): Promise<ProviderResult> => {
     });
   }
 
-  const { clientId, clientSecret } = resolveGoogleOAuthClient('antigravity');
-  const accessToken = await refreshGoogleAccessToken(auth.refreshToken, clientId, clientSecret);
+  const result = await refreshGoogleAccessToken(auth.refreshToken, 'antigravity');
+  const accessToken = result.ok ? result.accessToken : null;
   if (!accessToken) {
     return buildResult({
       providerId: 'antigravity',

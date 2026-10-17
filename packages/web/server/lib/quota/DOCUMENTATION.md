@@ -126,6 +126,33 @@ xAI quota reports the SuperGrok billing cycle from `POST https://grok.com/grok_a
 6. Update this file with the new provider ID, module path, and alias/auth details.
 7. Validate with `bun run type-check`, `bun run lint`, and `bun run build`.
 
+## Google OAuth client compatibility
+
+The `google` quota provider reads the active OpenCode login. Gemini CLI and
+Antigravity both pack project context into the refresh token with `|`, and a
+generic OAuth method with empty metadata does not identify its issuing client.
+The provider keeps the Gemini model keys and quota parsing for either login.
+
+Expired or missing access tokens first use the Gemini CLI OAuth client. Only
+HTTP 400/401 with the parsed OAuth code `unauthorized_client` permits one attempt
+with the Antigravity client. This compatibility probe leaves the selected
+credential unchanged. Other authorization errors, bare HTTP failures, malformed
+responses, rate limits, and transport failures never trigger the alternate
+client. A valid access token requires no exchange.
+
+`providers/google/oauth.js` owns the shared refresh logic and installed-app
+client constants for web/Electron and VS Code, including direct Antigravity
+refreshes which use only their own client. Exchanges go to the fixed Google token
+URL, reject redirects, and have a 15-second deadline each. Failures preserve HTTP
+status and an allowlisted OAuth code, or a transport/response category internally.
+The panel keeps its existing refresh failure text; raw error bodies and exception
+messages never reach the quota result. Failed refreshes
+return configured failure without querying quota with expired access.
+
+Refreshes are read-only with respect to OpenCode credentials. Neither a guessed
+client nor refreshed tokens are written back. Refresh-token rotation and changes
+to quota endpoint semantics are outside this compatibility fix.
+
 ## Antigravity quota and limit semantics
 
 Antigravity reports dual-layer quota for Google Cloud Code / Antigravity IDE accounts, querying Google's `retrieveUserQuotaSummary` endpoint (falling back to `daily-cloudcode-pa.googleapis.com` and `fetchAvailableModels` flat quotaInfo).

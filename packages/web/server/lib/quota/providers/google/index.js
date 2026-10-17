@@ -2,15 +2,14 @@ import { readOpenCodeCredentials } from '../../../opencode/auth.js';
 import { buildResult } from '../../utils/index.js';
 import {
   resolveGoogleAuthSources,
-  resolveGoogleOAuthClient,
   DEFAULT_PROJECT_ID
 } from './auth.js';
 import { transformQuotaBucket, transformModelData } from './transforms.js';
 import {
-  refreshGoogleAccessToken,
   fetchGoogleQuotaBuckets,
   fetchGoogleModels
 } from './api.js';
+import { refreshGoogleAccessToken } from './oauth.js';
 
 export { resolveGoogleAuthSources } from './auth.js';
 
@@ -44,13 +43,12 @@ export const fetchGoogleQuota = async () => {
         sourceErrors.push(`${source.sourceLabel}: Missing refresh token`);
         continue;
       }
-      const { clientId, clientSecret } = resolveGoogleOAuthClient(source.sourceId);
-      accessToken = await refreshGoogleAccessToken(source.refreshToken, clientId, clientSecret);
-    }
-
-    if (!accessToken) {
-      sourceErrors.push(`${source.sourceLabel}: Failed to refresh OAuth token`);
-      continue;
+      const refreshed = await refreshGoogleAccessToken(source.refreshToken, 'gemini', { fallbackToAntigravity: true });
+      if (!refreshed.ok) {
+        sourceErrors.push(`${source.sourceLabel}: Failed to refresh OAuth token`);
+        continue;
+      }
+      accessToken = refreshed.accessToken;
     }
 
     const projectId = source.projectId ?? DEFAULT_PROJECT_ID;
