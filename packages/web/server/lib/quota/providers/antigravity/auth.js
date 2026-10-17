@@ -12,6 +12,7 @@ import {
   toNumber
 } from '../../utils/index.js';
 import { parseGoogleRefreshToken } from '../google/transforms.js';
+import { resolveCliProxyAuth } from './cliproxy.js';
 
 export const DEFAULT_PROJECT_ID = 'rising-fact-p41fc';
 
@@ -42,4 +43,4 @@ export const resolveAntigravityAuth = () => {
   return null;
 };
 
-export const isConfigured = () => resolveAntigravityAuth() !== null;
+export const isConfigured = () => resolveAntigravityAuth() !== null || resolveCliProxyAuth() !== null;
