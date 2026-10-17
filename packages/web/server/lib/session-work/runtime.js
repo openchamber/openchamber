@@ -139,19 +139,26 @@ export function createSessionWorkRuntime({
   );
 
   /**
-   * The session record when it is one this feature serves: a top-level,
-   * unarchived project session that is not a review, a `/btw` side question
-   * or a scheduled task's run. Chats
-   * are plain conversations and never in work. Null otherwise.
+   * Why a session is or is not one this feature serves. `ok` carries the
+   * record; `terminal` is a session that can never open (a subsession, a chat
+   * directory, a review / `/btw` / scheduled run, or a record the server does
+   * not return); `archived` is a session that is eligible once restored, so a
+   * message that arrives while it is archived stays recoverable.
    */
-  const eligibleSession = async (client, sessionId, signal) => {
+  const classifySession = async (client, sessionId, signal) => {
     const session = await client.session.get({ sessionID: sessionId }, { signal });
     if (session?.id === sessionId) lineage?.remember(sessionId, session.parentID ?? null);
-    if (session?.id !== sessionId || session.parentID) return null;
-    if (isChatDirectory(session.location?.directory ?? session.directory)) return null;
-    if (notWorkSessionSchema.safeParse(session.metadata).success) return null;
-    if (await isSessionArchived(sessionId)) return null;
-    return session;
+    if (session?.id !== sessionId || session.parentID) return { kind: 'terminal' };
+    if (isChatDirectory(session.location?.directory ?? session.directory)) return { kind: 'terminal' };
+    if (notWorkSessionSchema.safeParse(session.metadata).success) return { kind: 'terminal' };
+    if (await isSessionArchived(sessionId)) return { kind: 'archived' };
+    return { kind: 'ok', session };
+  };
+
+  /** The eligible record, or null for any reason. For callers that do not retry. */
+  const eligibleSession = async (client, sessionId, signal) => {
+    const result = await classifySession(client, sessionId, signal);
+    return result.kind === 'ok' ? result.session : null;
   };
 
   const markSuggested = (sessionId, directory) => {
@@ -165,14 +172,28 @@ export function createSessionWorkRuntime({
   const onUserMessage = async ({ sessionId, directory, messageId, createdAt }) => {
     if (!getSettings().enabled) return;
     if (seenMessages.has(messageId)) return;
+    // Consumed up front so a duplicate delivery in flight is deduplicated. A
+    // transient failure or a recoverable ineligibility releases it again, so a
+    // redelivery can still open the session; only a terminal outcome (the work
+    // transition happened, or the session can never open) keeps it consumed.
     seenMessages.add(messageId);
     while (seenMessages.size > SEEN_MESSAGES_LIMIT) seenMessages.delete(seenMessages.values().next().value);
+    const release = () => seenMessages.delete(messageId);
 
-    // A session already in work costs no read of OpenCode.
-    if (readWork(await readMetadata(sessionId, directory))?.state === 'open') return;
-    const session = await eligibleSession(openCodeClient(directory), sessionId, AbortSignal.timeout(READ_TIMEOUT_MS));
-    if (!session || stopped) return;
-    await updateMetadata(sessionId, (metadata) => openPatch(metadata, { requestAt: createdAt, now: now() }), { directory });
+    try {
+      // A session already in work costs no read of OpenCode.
+      if (readWork(await readMetadata(sessionId, directory))?.state === 'open') return;
+      const result = await classifySession(openCodeClient(directory), sessionId, AbortSignal.timeout(READ_TIMEOUT_MS));
+      if (result.kind === 'terminal') return;
+      if (result.kind === 'archived' || stopped) {
+        release();
+        return;
+      }
+      await updateMetadata(sessionId, (metadata) => openPatch(metadata, { requestAt: createdAt, now: now() }), { directory });
+    } catch (error) {
+      release();
+      throw error;
+    }
   };
 
   const retireSuggestion = (sessionId) => {

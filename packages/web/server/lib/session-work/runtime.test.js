@@ -31,8 +31,9 @@ const stubOpenCode = ({ session = {}, records = answeredTurn } = {}) => {
   return fetchMock;
 };
 
-const makeRuntime = ({ metadata = {}, answers = {}, askError = null, settings = {}, endpoint = ENDPOINT, lineage = null } = {}) => {
+const makeRuntime = ({ metadata = {}, answers = {}, askError = null, settings = {}, endpoint = ENDPOINT, lineage = null, isSessionArchived = async () => false } = {}) => {
   const records = new Map([['ses_1', metadata]]);
+  const readMetadata = vi.fn(async (id) => records.get(id) ?? {});
   const updateMetadata = vi.fn(async (id, decide) => {
     const current = records.get(id) ?? {};
     const patch = decide(current);
@@ -49,13 +50,14 @@ const makeRuntime = ({ metadata = {}, answers = {}, askError = null, settings = 
     getSettings: () => ({ enabled: true, reviewOffer: true, ...settings }),
     classifierEndpoint: async () => endpoint,
     jev,
-    readMetadata: async (id) => records.get(id) ?? {},
+    readMetadata,
     updateMetadata,
+    isSessionArchived,
     chatRoots: ['/home/me/.config/openchamber/chats'],
     lineage,
     now: () => time++,
   });
-  return { runtime, jev, updateMetadata, records };
+  return { runtime, jev, readMetadata, updateMetadata, records };
 };
 
 const sent = (id = 'msg_new', text = 'Now fix the header') => ({
@@ -177,6 +179,65 @@ describe('session work runtime: a message was sent', () => {
       expect(updateMetadata).not.toHaveBeenCalled();
       vi.unstubAllGlobals();
     }
+  });
+
+  it('does not consume a message whose metadata read failed, so a redelivery retries', async () => {
+    stubOpenCode();
+    const { runtime, readMetadata, records } = makeRuntime();
+    readMetadata.mockRejectedValueOnce(new Error('transport'));
+
+    runtime.processPayload(sent('msg_retry'));
+    await settle(() => readMetadata.mock.calls.length === 1);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(records.get('ses_1').openchamber?.work?.state).toBeUndefined();
+
+    // The same id arrives again after the transient failure cleared.
+    runtime.processPayload(sent('msg_retry'));
+    await settle(() => records.get('ses_1').openchamber?.work?.state === 'open');
+    expect(records.get('ses_1').openchamber.work.state).toBe('open');
+  });
+
+  it('does not consume a message whose open write failed, so a redelivery retries', async () => {
+    stubOpenCode();
+    const { runtime, updateMetadata, records } = makeRuntime();
+    updateMetadata.mockRejectedValueOnce(new Error('write failed'));
+
+    runtime.processPayload(sent('msg_retry'));
+    await settle(() => updateMetadata.mock.calls.length === 1);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(records.get('ses_1').openchamber?.work?.state).toBeUndefined();
+
+    runtime.processPayload(sent('msg_retry'));
+    await settle(() => records.get('ses_1').openchamber?.work?.state === 'open');
+    expect(records.get('ses_1').openchamber.work.state).toBe('open');
+  });
+
+  it('does not consume a message accepted while the session was archived, so a redelivery after restore opens', async () => {
+    stubOpenCode();
+    let archived = true;
+    const { runtime, records } = makeRuntime({ isSessionArchived: async () => archived });
+
+    runtime.processPayload(sent('msg_restore'));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(records.get('ses_1').openchamber?.work?.state).toBeUndefined();
+
+    // The session is restored; the same id arrives again.
+    archived = false;
+    runtime.processPayload(sent('msg_restore'));
+    await settle(() => records.get('ses_1').openchamber?.work?.state === 'open');
+    expect(records.get('ses_1').openchamber.work.state).toBe('open');
+  });
+
+  it('consumes a message for a session that can never open', async () => {
+    stubOpenCode({ session: { parentID: 'ses_parent' } });
+    const { runtime, updateMetadata } = makeRuntime();
+
+    runtime.processPayload(sent('msg_child'));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    // A redelivery of the same id is not reconsidered for a terminal session.
+    runtime.processPayload(sent('msg_child'));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(updateMetadata).not.toHaveBeenCalled();
   });
 });
 
