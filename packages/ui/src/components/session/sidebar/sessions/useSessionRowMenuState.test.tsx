@@ -71,7 +71,7 @@ describe('session row menu state', () => {
   test('overflow menu closes after Rename and can reopen', async () => {
     const mounted = await mountHook();
     try {
-      await act(async () => mounted.capture.menu!.toggleMenu());
+      await act(async () => mounted.capture.menu!.handleMenuOpenChange(true));
       expect(mounted.capture.menu!.isMenuOpen).toBe(true);
 
       mounted.pendingRename.current = true;

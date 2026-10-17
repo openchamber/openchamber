@@ -80,17 +80,11 @@ export const useSessionRowMenuState = ({
     }
   };
 
-  const toggleMenu = () => {
-    setCloseRequested(false);
-    setOpenSidebarMenuKey(isMenuOpen ? null : menuInstanceKey);
-  };
-
   return {
     isMenuOpen,
     isContextMenuOpen,
     handleMenuOpenChange,
     handleContextMenuOpenChange,
     handleMenuOpenChangeComplete,
-    toggleMenu,
   };
 };
