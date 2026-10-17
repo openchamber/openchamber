@@ -681,7 +681,7 @@ const SkillsInstalledPage: React.FC = () => {
                 onChange={(e) => handleDescriptionChange(e.target.value)}
                 placeholder={t('settings.skills.page.field.descriptionPlaceholder')}
                 rows={2}
-                className="w-full resize-none min-h-[60px] max-h-32 bg-transparent"
+                className="w-full resize-none min-h-[60px] bg-transparent"
                 disabled={isReadOnlySkill}
               />
             </SettingsStackedField>
