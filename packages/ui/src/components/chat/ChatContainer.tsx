@@ -102,7 +102,7 @@ import { WorkStatusPanel } from './work-status/WorkStatusPanel';
 import { useWorkStatusVisibility } from './work-status/useWorkStatusVisibility';
 import { useShownSessionSelection } from './useShownSessionSelection';
 import { useRightSlotStore } from '@/components/layout/rightSlot';
-import { normalizeUserDisplayParts } from './message/normalizeUserDisplayParts';
+import { buildPromptPreviewsByTurnId } from './lib/promptPreviews';
 import { resolveChatPromptReadOnly } from './chatPromptReadOnly';
 import { PermissionDock } from './PermissionDock';
 import { FormDock } from './FormDock';
@@ -285,30 +285,8 @@ const ChatViewport = React.memo(({
 }: ChatViewportProps) => {
     const { t } = useI18n();
     const promptPreviewsByTurnIdRef = React.useRef<Map<string, Part[]>>(new Map());
-    // Cache normalized parts per source array so unchanged messages keep the
-    // same reference and the memo below can bail out to the previous map.
-    const normalizedPromptPartsCache = React.useRef(new WeakMap<Part[], Part[]>());
     const promptPreviewsByTurnId = React.useMemo(() => {
-        const next = new Map<string, Part[]>();
-        for (let index = 0; index < renderedMessages.length; index += 1) {
-            const message = renderedMessages[index];
-            if (message.info.role !== 'user') {
-                continue;
-            }
-            // v2 keeps injected context out of the user message: loop
-            // continuations and plan-mode injections arrive as their own
-            // `synthetic`-role messages, so every remaining user message is a
-            // turn the user actually sent and stays navigable.
-            let displayParts = normalizedPromptPartsCache.current.get(message.parts);
-            if (!displayParts) {
-                displayParts = normalizeUserDisplayParts(message.parts);
-                normalizedPromptPartsCache.current.set(message.parts, displayParts);
-            }
-            if (displayParts.length === 0) {
-                continue;
-            }
-            next.set(message.info.id, displayParts);
-        }
+        const next = buildPromptPreviewsByTurnId(renderedMessages);
         const prev = promptPreviewsByTurnIdRef.current;
         if (prev.size === next.size) {
             let unchanged = true;

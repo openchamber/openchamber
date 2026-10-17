@@ -15,6 +15,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { Icon } from "@/components/icon/Icon";
 import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
 import { getFullText, getMessagePreview } from './lib/messagePreview';
+import { foldPromptEntries } from './lib/promptPreviews';
 import { useDeviceInfo } from '@/lib/device';
 import { cn } from '@/lib/utils';
 
@@ -119,11 +120,11 @@ const TimelineDialogBody: React.FC<TimelineDialogBodyProps> = ({
     const pendingLoadAnchorRef = React.useRef<{ messageId: string; top: number } | null>(null);
     const preservingLoadPositionRef = React.useRef(false);
 
-    // Timeline actions are only valid for user messages.
+    // Timeline actions are only valid for user messages. Folding the injected
+    // context back on is what gives a quote-only prompt a title, and makes the
+    // quote itself searchable.
     const userMessages = React.useMemo(() => {
-        return messages
-            .filter((message) => message.info.role === 'user')
-            .map((message) => ({ message }));
+        return foldPromptEntries(messages).map((message) => ({ message }));
     }, [messages]);
 
     // Filter by search query using all text parts in each user message.
