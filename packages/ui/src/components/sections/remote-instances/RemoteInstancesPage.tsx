@@ -75,7 +75,7 @@ import { useEnterprisePolicyStore } from '@/stores/useEnterprisePolicyStore';
 import { loadDesktopSettings } from '@/lib/persistence';
 import { getRuntimeApiBaseUrl, switchRuntimeEndpoint } from '@/lib/runtime-switch';
 import { runtimeKeyForDesktopHost } from '@/lib/desktopCurrentHost';
-import { useDurationTickerNow, useWaitingBlink } from '@/hooks/useDurationTicker';
+import { useWaitingBlink } from '@/hooks/useDurationTicker';
 import { Spinner } from '@/components/ui/spinner';
 import { useSshConfirmation } from './useSshConfirmation';
 
@@ -1132,14 +1132,27 @@ export const RemoteInstancesPage: React.FC = () => {
   const statusPhase = status?.phase;
   const isReady = statusPhase === 'ready';
   const isReconnecting = statusPhase === 'degraded';
-  // Only a reconnect needs the clock: it reads as stuck after 12 s. Ticking
-  // whenever a status exists re-rendered this whole page every second.
-  const clockMs = useDurationTickerNow(isReconnecting);
+  const [reconnectAppearsStuck, setReconnectAppearsStuck] = React.useState(false);
+  React.useEffect(() => {
+    if (!isReconnecting || !status) {
+      setReconnectAppearsStuck(false);
+      return;
+    }
+    setReconnectAppearsStuck(false);
+    const remaining = status.updatedAtMs + 12_000 - Date.now();
+    if (remaining <= 0) {
+      setReconnectAppearsStuck(true);
+      return;
+    }
+    const timer = window.setTimeout(() => setReconnectAppearsStuck(true), remaining);
+    return () => {
+      window.clearTimeout(timer);
+      setReconnectAppearsStuck(false);
+    };
+  }, [isReconnecting, status]);
   const isConnecting = isConnectingPhase(statusPhase);
   const isBusy = isConnecting || isReconnecting;
   const canDisconnect = isReady || isBusy;
-  const statusAgeMs = status ? Math.max(0, clockMs - status.updatedAtMs) : 0;
-  const reconnectAppearsStuck = isReconnecting && statusAgeMs > 12_000;
   const retrySpinning = isConnecting || (isReconnecting && !reconnectAppearsStuck);
   const currentState = instanceState(statusPhase);
   const currentRemedy = currentState === 'error' ? errorRemedy(status?.detail) : null;

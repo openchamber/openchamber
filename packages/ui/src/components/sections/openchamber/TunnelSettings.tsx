@@ -383,7 +383,16 @@ export const TunnelSettings: React.FC = () => {
   const [sessionRecords, setSessionRecords] = React.useState<TunnelSessionRecord[]>([]);
   // Counts expiries down once a second, on the shared 1 s tick, while there
   // is one to count.
-  const nowTs = useDurationTickerNow(Boolean(tunnelInfo?.bootstrapExpiresAt) || sessionRecords.length > 0);
+  const clockShouldRunOptimistic = Boolean(tunnelInfo?.bootstrapExpiresAt) || sessionRecords.some((r) => r.status === 'active');
+  const [clockActive, setClockActive] = React.useState(clockShouldRunOptimistic);
+  const nowTs = useDurationTickerNow(clockActive);
+  const clockShouldRunActual = (tunnelInfo?.bootstrapExpiresAt != null && tunnelInfo.bootstrapExpiresAt > nowTs)
+    || sessionRecords.some((r) => r.status === 'active' && r.expiresAt > nowTs);
+  React.useEffect(() => {
+    if (clockShouldRunActual !== clockActive) {
+      setClockActive(clockShouldRunActual);
+    }
+  }, [clockShouldRunActual, clockActive]);
   const [localPort, setLocalPort] = React.useState<number | null>(null);
   const managedLocalConfigExtensionError = t(MANAGED_LOCAL_CONFIG_EXTENSION_ERROR_KEY);
   const managedLocalConfigFileInputRef = React.useRef<HTMLInputElement>(null);
