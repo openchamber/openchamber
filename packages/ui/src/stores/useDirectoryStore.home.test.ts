@@ -46,6 +46,8 @@ const setTestWindow = (value: TestWindow | undefined): void => {
 let loggedIn = false;
 let homeReads = 0;
 const directoriesSet: string[] = [];
+let runtimeKey = 'test';
+let probeDirectory = async (_directory: string): Promise<'available' | 'missing' | 'unknown'> => 'available';
 
 mock.module('@/lib/opencode/client', () => ({
   opencodeClient: {
@@ -53,6 +55,7 @@ mock.module('@/lib/opencode/client', () => ({
       directoriesSet.push(directory);
     },
     getDirectory: () => directoriesSet.at(-1) ?? '/',
+    getDirectoryAvailability: (directory: string) => probeDirectory(directory),
     getFilesystemHome: async () => {
       homeReads += 1;
       // Before login /api/fs/home answers 401, which this read reports as null.
@@ -86,7 +89,7 @@ mock.module('@/lib/persistence', () => ({
 mock.module('@/lib/runtime-switch', () => ({
   subscribeRuntimeEndpointChanged: () => () => undefined,
   getRuntimeApiBaseUrl: () => 'http://127.0.0.1:9',
-  getRuntimeKey: () => 'test',
+  getRuntimeKey: () => runtimeKey,
 }));
 
 mock.module('@/stores/useFileSearchStore', () => ({
@@ -191,5 +194,82 @@ describe('home directory on a first visit to a password-protected server', () =>
     loggedIn = true;
     await ensureHomeDirectoryResolved();
     expect(useDirectoryStore.getState()).toMatchObject({ currentDirectory: CHATS_ROOT, isHomeReady: true });
+  });
+});
+
+describe('saved directory restoration', () => {
+  afterEach(() => {
+    runtimeKey = 'test';
+    setTestWindow(undefined);
+  });
+
+  const prepare = async () => {
+    setTestWindow({
+      localStorage: testLocalStorage,
+      matchMedia: () => ({ matches: false }),
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+    });
+    const { useDirectoryStore } = await import('@/stores/useDirectoryStore');
+    useDirectoryStore.getState().setDirectory('/saved/chat');
+    await settle();
+    settingsUpdates.length = 0;
+    return useDirectoryStore;
+  };
+
+  for (const availability of ['available', 'missing', 'unknown'] as const) {
+    test(`restores a saved directory reported as ${availability}`, async () => {
+      const store = await prepare();
+      const probes: string[] = [];
+      probeDirectory = async (directory) => {
+        probes.push(directory);
+        return availability;
+      };
+      const { applyPersistedDirectoryPreferences } = await import('@/lib/directoryPersistence');
+      await applyPersistedDirectoryPreferences();
+      await settle();
+
+      expect(probes).toEqual(['/saved/chat']);
+      if (availability === 'missing') {
+        expect(store.getState()).toMatchObject({ currentDirectory: CHATS_ROOT, hasPersistedDirectory: false });
+        expect(directoriesSet.at(-1)).toBe(CHATS_ROOT);
+        expect(storage.has('lastDirectory')).toBe(false);
+        expect(settingsUpdates).toEqual([{ lastDirectory: '' }]);
+      } else {
+        expect(store.getState().currentDirectory).toBe('/saved/chat');
+        expect(storage.get('lastDirectory')).toBe('/saved/chat');
+      }
+    });
+  }
+
+  for (const change of ['directory', 'runtime', 'storage'] as const) {
+    test(`ignores a missing-directory probe after a newer ${change}`, async () => {
+      const store = await prepare();
+      let answerProbe: (value: 'missing') => void = () => undefined;
+      probeDirectory = () => new Promise((resolve) => { answerProbe = resolve; });
+      const { applyPersistedDirectoryPreferences } = await import('@/lib/directoryPersistence');
+      const restoration = applyPersistedDirectoryPreferences();
+      if (change === 'directory') store.getState().setDirectory('/new/project');
+      if (change === 'runtime') runtimeKey = 'other-host';
+      if (change === 'storage') storage.set('lastDirectory', '/new/project');
+      answerProbe('missing');
+      await restoration;
+      await settle();
+
+      expect(store.getState().currentDirectory).toBe(change === 'directory' ? '/new/project' : '/saved/chat');
+      expect(settingsUpdates.some((changes) => changes.lastDirectory === '')).toBe(false);
+      expect(storage.get('lastDirectory')).toBe(change === 'runtime' ? '/saved/chat' : '/new/project');
+    });
+  }
+
+  test('does not clear the saved directory if the runtime changes while resolving the fallback', async () => {
+    const store = await prepare();
+    const fallback = store.getState().goToNoProjectDirectory();
+    runtimeKey = 'other-host';
+    await fallback;
+    await settle();
+    expect(store.getState().currentDirectory).toBe('/saved/chat');
+    expect(storage.get('lastDirectory')).toBe('/saved/chat');
+    expect(settingsUpdates).toEqual([]);
   });
 });
