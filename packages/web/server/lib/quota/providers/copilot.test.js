@@ -1,12 +1,20 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+const copilotAuth = vi.hoisted(() => ({ enterpriseUrl: null }));
+
 vi.mock('../../opencode/auth.js', () => ({
-  readOpenCodeCredentials: async () => ({ 'github-copilot': { access: 'test-token' } }),
+  readOpenCodeCredentials: async () => ({
+    'github-copilot': {
+      access: 'test-token',
+      ...(copilotAuth.enterpriseUrl ? { enterpriseUrl: copilotAuth.enterpriseUrl } : undefined),
+    },
+  }),
 }));
 
 import { fetchQuota, fetchQuotaAddon } from './copilot.js';
 
 afterEach(() => {
+  copilotAuth.enterpriseUrl = null;
   vi.unstubAllGlobals();
 });
 
@@ -38,6 +46,53 @@ describe('GitHub Copilot quota provider', () => {
     expect(Object.keys(result.usage.windows)).toEqual(['premium_interactions']);
     expect(result.usage.windows.premium_interactions.usedPercent).toBe(25);
     expect(result.usage.windows.premium_interactions.valueLabel).toBe('225 / 300 left');
+  });
+
+  it.each([
+    ['primary provider', fetchQuota],
+    ['add-on provider', fetchQuotaAddon],
+  ])('uses the enterprise Copilot API for the %s', async (_name, fetchProviderQuota) => {
+    copilotAuth.enterpriseUrl = 'https://ghe.example.com/';
+    const fetchMock = vi.fn().mockResolvedValue(mockResponse());
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await fetchProviderQuota();
+
+    expect(result.ok).toBe(true);
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://api.ghe.example.com/copilot_internal/user',
+      expect.any(Object),
+    );
+  });
+
+  it('rejects malformed enterprise URLs without sending the credential', async () => {
+    copilotAuth.enterpriseUrl = 'https://ghe.example.com/copilot';
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await fetchQuota();
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe('Invalid GitHub Copilot Enterprise URL');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['credentials in the authority', 'https://user@ghe.example.com/'],
+    ['an explicit port', 'https://ghe.example.com:8443/'],
+    ['a query string', 'https://ghe.example.com/?next=evil.example.com'],
+    ['a non-HTTP scheme', 'file://ghe.example.com/'],
+    ['a host that is not a DNS name', 'ghe_example.com'],
+  ])('refuses %s instead of requesting a host derived from it', async (_case, enterpriseUrl) => {
+    copilotAuth.enterpriseUrl = enterpriseUrl;
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await fetchQuota();
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe('Invalid GitHub Copilot Enterprise URL');
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it.each([
