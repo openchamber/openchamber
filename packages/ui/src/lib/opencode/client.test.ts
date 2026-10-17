@@ -352,11 +352,14 @@ describe("error normalisation", () => {
     expect(error).toMatchObject({ status: 500, operation: "session.get" })
   })
 
-  test("a transport failure has no status", async () => {
+  test("a transport failure has no status and stays outcome-unknown", async () => {
     responses.push(new TypeError("Failed to fetch"))
     const error = await opencodeClient.getSession("ses_x").catch((e: unknown) => e)
     expect(error).toBeInstanceOf(OpencodeApiError)
     expect((error as { status?: number }).status).toBeUndefined()
+    // A lost response proves nothing about whether the server ran the request,
+    // so a prompt send it fails must confirm before rolling the message back.
+    expect(isAmbiguousSendFailure(error)).toBe(true)
   })
 
   test("fetchPermission maps 404 to resolved and everything else to unknown", async () => {

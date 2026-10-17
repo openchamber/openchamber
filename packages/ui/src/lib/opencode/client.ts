@@ -173,9 +173,9 @@ const validateRuntimeResponse = (response: Response): Response => {
 
 /**
  * Turns whatever the generated client threw into an `OpencodeApiError` with a
- * status the rest of the app can branch on. Transport failures keep their
- * relay "outcome unknown" marker so a lost response is not mistaken for a
- * request that never left.
+ * status the rest of the app can branch on. A transport failure is marked
+ * "outcome unknown" so a lost response is not mistaken for a request that never
+ * left; a routing failure proves the opposite and stays definite.
  */
 export function normalizeOpencodeError(operation: string, error: unknown): OpencodeApiError {
   if (error instanceof OpencodeApiError) return error
@@ -197,9 +197,12 @@ export function normalizeOpencodeError(operation: string, error: unknown): Openc
     const wrapped = new OpencodeApiError(operation, error.reason === "Transport" ? "transport failure" : error.reason, {
       cause: error.cause ?? error,
     })
-    if (error.reason === "Transport" && isAmbiguousTransportFailure(error.cause)) {
-      markAmbiguousTransportFailure(wrapped)
-    }
+    // A `Transport` reason means the request was handed to fetch and the
+    // response (or the connection carrying it) was lost. The outcome is
+    // therefore unknown: the server may already be running it. Only a routing
+    // failure proves the request never reached the API, and that is marked
+    // definite above.
+    if (error.reason === "Transport") markAmbiguousTransportFailure(wrapped)
     return wrapped
   }
   const tagged = taggedErrorSchema.safeParse(error)

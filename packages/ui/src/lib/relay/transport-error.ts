@@ -5,7 +5,9 @@
  * knows the response was lost — it does NOT know whether the server processed
  * the request. Over the relay tunnel this is the common case: a reconnect, a
  * host-side stream abort, or a dead channel all fail an in-flight POST that may
- * already be running server-side.
+ * already be running server-side. A plain fetch is no different: a rejection or
+ * a body that dies mid-read leaves the same question, and the SDK boundary tags
+ * it there (see `normalizeOpencodeError`).
  *
  * Callers must be able to tell that state apart from a definite failure, and
  * string-matching the message text is not a contract — a renamed abort reason
