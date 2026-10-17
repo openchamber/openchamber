@@ -82,6 +82,28 @@ const realDirectory = (directory) => {
 };
 
 /**
+ * Whether a request is OpenCode's `POST /api/vcs/init`, however the path is
+ * spelled. Cheap enough for a proxy middleware to run on every request: a
+ * method other than POST answers without touching the URL.
+ */
+export const isVcsInitRequest = (method, requestUrl) => {
+  if (String(method).toUpperCase() !== 'POST') return false;
+  const { pathname } = splitRequestUrl(requestUrl);
+  return isVcsInitPath(pathname);
+};
+
+/**
+ * The directory a VCS init request resolves to, or null when the request is
+ * not one. An empty `directory` is OpenCode's own working directory: a request
+ * without a location runs `git init` where OpenCode was started.
+ */
+export const parseVcsInitRequest = (method, requestUrl, headers) => {
+  if (!isVcsInitRequest(method, requestUrl)) return null;
+  const { query } = splitRequestUrl(requestUrl);
+  return { directory: requestDirectory(query, headers) };
+};
+
+/**
  * OpenCode's `POST /api/vcs/init` runs `git init` in the directory the request
  * resolves to, and a request without one resolves to OpenCode's own working
  * directory, the user's home for a managed OpenCode. Returns the refusal
@@ -90,12 +112,10 @@ const realDirectory = (directory) => {
  * request is not a VCS init or may go through.
  */
 export const vcsInitRefusal = (method, requestUrl, headers, home = os.homedir()) => {
-  if (String(method).toUpperCase() !== 'POST') return null;
-  const { pathname, query } = splitRequestUrl(requestUrl);
-  if (!isVcsInitPath(pathname)) return null;
-  const directory = requestDirectory(query, headers);
-  if (!directory) return 'Choose a project directory before initializing Git.';
-  const reason = unsupportedRepositoryRootReason(realDirectory(directory), home ? realDirectory(home) : home);
+  const request = parseVcsInitRequest(method, requestUrl, headers);
+  if (!request) return null;
+  if (!request.directory) return 'Choose a project directory before initializing Git.';
+  const reason = unsupportedRepositoryRootReason(realDirectory(request.directory), home ? realDirectory(home) : home);
   if (reason === 'home') return 'Git is not initialized in the home directory: a repository there covers every file you own.';
   if (reason === 'filesystem-root') return 'Git is not initialized at the root of a disk.';
   return null;

@@ -303,4 +303,33 @@ describe('Git initialization through the proxy', () => {
     // No proxy in this app: falling through reads as Express's 404.
     expect(response.status).toBe(404);
   });
+
+  it('refuses an init above a nested repository until the confirmation header is sent', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-vcs-init-proxy-'));
+    try {
+      // A `.git` entry is a nested repository on its own; no commits or
+      // working Git install are needed for the guard to see it.
+      const nested = path.join(root, 'nested');
+      fs.mkdirSync(nested);
+      fs.writeFileSync(path.join(nested, '.git'), 'gitdir: /elsewhere\n');
+
+      const refused = await request(createApp(vi.fn()))
+        .post('/api/vcs/init')
+        .set('x-opencode-directory', encodeURIComponent(root));
+      expect(refused.status).toBe(400);
+      expect(refused.body).toMatchObject({
+        _tag: 'VcsInitConfirmationRequiredError',
+        code: 'confirmation-required',
+      });
+
+      const confirmed = await request(createApp(vi.fn()))
+        .post('/api/vcs/init')
+        .set('x-opencode-directory', encodeURIComponent(root))
+        .set('x-openchamber-vcs-init-confirm', '1');
+      // No proxy in this app: falling through reads as Express's 404.
+      expect(confirmed.status).toBe(404);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
 });

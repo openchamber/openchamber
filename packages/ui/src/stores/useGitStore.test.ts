@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, mock, spyOn, test } from 'bun:test';
 import type { GitStatus } from '@/lib/api/types';
-import { useGitStore } from './useGitStore';
+import { resolveEffectiveGitDirectory, useGitStore } from './useGitStore';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { notifyGitStatusInvalidated } from '@/lib/gitStatusInvalidation';
 import { clearWorktreeBootstrapState, markWorktreeBootstrapPending } from '@/lib/worktrees/worktreeBootstrap';
@@ -8,7 +8,7 @@ import { clearWorktreeBootstrapState, markWorktreeBootstrapPending } from '@/lib
 // The real transport has no server in tests and fails as a generic error.
 // Tests that exercise other failure modes swap this implementation; the
 // default keeps every pre-existing expectation (generic failure → null).
-const listGitDirectoriesControl: { impl: (root: string) => Promise<string[]> } = {
+const listGitDirectoriesControl: { impl: (root: string) => Promise<{ repositories: string[]; complete: boolean }> } = {
   impl: async () => {
     throw new Error('network unavailable');
   },
@@ -113,6 +113,20 @@ describe('useGitStore', () => {
     const git: GitAPI = { ...createGitApi(async () => createStatus()), checkIsGitRepository: async () => false };
     expect(await useGitStore.getState().recheckRepository('/repo', git)).toBe(false);
     expect(useGitStore.getState().getDirectoryState('/repo')?.isGitRepo).toBe(false);
+  });
+
+  test('republishes a status whose unborn flag flipped with no other change', async () => {
+    setDirectoryStatus(createStatus());
+
+    const unbornGit = createGitApi(async () => ({ ...createStatus(), unborn: true }));
+    expect(await useGitStore.getState().fetchStatus('/repo', unbornGit, { force: true })).toBe(true);
+    expect(useGitStore.getState().getDirectoryState('/repo')?.status?.unborn).toBe(true);
+
+    // The first commit flips `unborn` alone; a swallowed change would leave
+    // the resolution flow reading the stale unborn state.
+    const committedGit = createGitApi(async () => ({ ...createStatus(), unborn: false }));
+    expect(await useGitStore.getState().fetchStatus('/repo', committedGit, { force: true })).toBe(true);
+    expect(useGitStore.getState().getDirectoryState('/repo')?.status?.unborn).toBe(false);
   });
 
   test('keeps timed-out diff requests inside the concurrency limit until they settle', async () => {
@@ -780,7 +794,7 @@ describe('useGitStore nested repository discovery', () => {
 
   test('runtime switch does not leak selections or discovery across runtimes', () => {
     useGitStore.getState().selectNestedRepo('/root-a', '/root-a/one');
-    useGitStore.setState({ nestedReposByRoot: new Map([['/root-a', ['/root-a/one']]]) });
+    useGitStore.setState({ nestedReposByRoot: new Map([['/root-a', { repositories: ['/root-a/one'], complete: true }]]) });
 
     useGitStore.getState().resetForRuntimeSwitch('runtime-b');
 
@@ -817,8 +831,15 @@ describe('useGitStore nested repository discovery', () => {
     expect(useGitStore.getState().nestedReposByRoot.get('/root-a')).toBe('unsupported');
   });
 
+  test('commits the scan completeness with the discovered repositories', async () => {
+    listGitDirectoriesControl.impl = async () => ({ repositories: [], complete: false });
+    await useGitStore.getState().ensureNestedRepos('/root-a');
+
+    expect(useGitStore.getState().nestedReposByRoot.get('/root-a')).toEqual({ repositories: [], complete: false });
+  });
+
   test('unsupported does not clobber a previous successful discovery', async () => {
-    listGitDirectoriesControl.impl = async () => ['/root-a/one'];
+    listGitDirectoriesControl.impl = async () => ({ repositories: ['/root-a/one'], complete: true });
     await useGitStore.getState().ensureNestedRepos('/root-a');
 
     listGitDirectoriesControl.impl = async () => {
@@ -826,7 +847,19 @@ describe('useGitStore nested repository discovery', () => {
     };
     await useGitStore.getState().ensureNestedRepos('/root-a', { force: true });
 
-    expect(useGitStore.getState().nestedReposByRoot.get('/root-a')).toEqual(['/root-a/one']);
+    expect(useGitStore.getState().nestedReposByRoot.get('/root-a')).toEqual({ repositories: ['/root-a/one'], complete: true });
+  });
+
+  test('a failed rescan does not clobber a previous successful discovery', async () => {
+    listGitDirectoriesControl.impl = async () => ({ repositories: ['/root-a/one'], complete: true });
+    await useGitStore.getState().ensureNestedRepos('/root-a');
+
+    listGitDirectoriesControl.impl = async () => {
+      throw new Error('network unavailable');
+    };
+    await useGitStore.getState().ensureNestedRepos('/root-a', { force: true });
+
+    expect(useGitStore.getState().nestedReposByRoot.get('/root-a')).toEqual({ repositories: ['/root-a/one'], complete: true });
   });
 
   test('dedupes concurrent discovery runs for the same root', async () => {
@@ -835,5 +868,64 @@ describe('useGitStore nested repository discovery', () => {
     await Promise.all([first, second]);
 
     expect(useGitStore.getState().nestedReposByRoot.get('/root-a')).toBeNull();
+  });
+});
+
+describe('resolveEffectiveGitDirectory', () => {
+  const stateFor = ({
+    isGitRepo,
+    unborn,
+    selection,
+  }: {
+    isGitRepo: boolean | null;
+    unborn?: boolean;
+    selection?: string;
+  }) => ({
+    directories: new Map<string, DirectoryGitState>([
+      ['/root', {
+        ...createDirectoryState(createStatus()),
+        isGitRepo,
+        status: isGitRepo === true ? { ...createStatus(), unborn: unborn ?? false } : null,
+      }],
+    ]),
+    nestedRepoSelection: new Map<string, string>(selection ? [['/root', selection]] : []),
+  });
+
+  test('an established root wins over a stored nested selection', () => {
+    const state = stateFor({ isGitRepo: true, unborn: false, selection: '/root/nested' });
+
+    expect(resolveEffectiveGitDirectory(state, '/root')).toBe('/root');
+  });
+
+  test('an unborn root resolves to its stored nested selection', () => {
+    const state = stateFor({ isGitRepo: true, unborn: true, selection: '/root/nested' });
+
+    expect(resolveEffectiveGitDirectory(state, '/root')).toBe('/root/nested');
+  });
+
+  test('an unborn root without a selection resolves to the root', () => {
+    const state = stateFor({ isGitRepo: true, unborn: true });
+
+    expect(resolveEffectiveGitDirectory(state, '/root')).toBe('/root');
+  });
+
+  test('a stored selection equal to the root keeps resolving to the root', () => {
+    expect(resolveEffectiveGitDirectory(stateFor({ isGitRepo: true, unborn: true, selection: '/root' }), '/root')).toBe('/root');
+    expect(resolveEffectiveGitDirectory(stateFor({ isGitRepo: false, selection: '/root' }), '/root')).toBe('/root');
+    expect(resolveEffectiveGitDirectory(stateFor({ isGitRepo: null, selection: '/root' }), '/root')).toBe('/root');
+  });
+
+  test('a non-repository root keeps resolving to its selection or itself', () => {
+    expect(resolveEffectiveGitDirectory(stateFor({ isGitRepo: false, selection: '/root/nested' }), '/root')).toBe('/root/nested');
+    expect(resolveEffectiveGitDirectory(stateFor({ isGitRepo: false }), '/root')).toBe('/root');
+  });
+
+  test('a root that has not probed yet keeps a stored selection', () => {
+    expect(resolveEffectiveGitDirectory(stateFor({ isGitRepo: null, selection: '/root/nested' }), '/root')).toBe('/root/nested');
+    expect(resolveEffectiveGitDirectory(stateFor({ isGitRepo: null }), '/root')).toBe('/root');
+  });
+
+  test('no root resolves to null', () => {
+    expect(resolveEffectiveGitDirectory(stateFor({ isGitRepo: true }), null)).toBeNull();
   });
 });

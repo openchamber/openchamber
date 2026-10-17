@@ -21,7 +21,7 @@ import {
 } from '../enterprise-mode.js';
 import { discoverProviderModels } from './model-discovery.js';
 import { readDisabledProviders, setProviderDisabled } from './providers.js';
-import { vcsInitRefusal, vcsInitRefusalBody } from '../git/repository-root.js';
+import { isVcsInitRequest } from '../git/repository-root.js';
 
 export const registerOpenCodeRoutes = (app, dependencies) => {
   const {
@@ -377,10 +377,25 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
   ));
 
   // `git init` in home or at a disk root makes a repository Git surfaces then
-  // ignore; refuse it here so no client can create one through the proxy.
+  // ignore, and `git init` above nested repositories hides them behind an
+  // empty root; refuse both here so no client can create one through the
+  // proxy. The nested check needs the Git service, so it loads only for an
+  // actual VCS init request; every other request stops at the method and path.
   app.use((req, res, next) => {
-    const refusal = vcsInitRefusal(req.method, req.originalUrl, req.headers);
-    return refusal ? res.status(400).json(vcsInitRefusalBody(refusal)) : next();
+    if (!isVcsInitRequest(req.method, req.originalUrl)) return next();
+    void (async () => {
+      const { resolveVcsInitRefusalBody } = await import('../git/vcs-init-guard.js');
+      const refusal = await resolveVcsInitRefusalBody(req.method, req.originalUrl, req.headers);
+      if (!refusal) {
+        next();
+        return;
+      }
+      res.status(400).json(refusal);
+    })().catch((error) => {
+      // A guard that cannot answer must not block a legitimate init.
+      console.warn('VCS init guard failed:', error?.message || error);
+      next();
+    });
   });
 
   app.put('/api/provider', refuseInEnterpriseMode, async (req, res) => {

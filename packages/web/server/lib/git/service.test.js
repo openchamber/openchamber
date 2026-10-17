@@ -38,6 +38,7 @@ import {
   stashApply,
   listStashes,
   getWorktrees,
+  inspectRepositoryBoundary,
   isGitRepository,
   isPatchEquivalentOfHead,
   observeWorktreeTopology,
@@ -1170,6 +1171,111 @@ describe('getStatus', () => {
     expect(status.diffStats.working['untracked.txt']).toEqual({ insertions: 2, deletions: 0 });
     expect(status.diffStats.staged['staged.txt']).toEqual({ insertions: 3, deletions: 0 });
     expect(status.diffStats.working['staged.txt']).toBeUndefined();
+  });
+
+  it('marks a repository without commits as unborn, in full and light modes', async () => {
+    if (!canRunGit()) return;
+
+    const repo = createTempDir();
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+
+    await expect(getStatus(repo)).resolves.toMatchObject({ current: 'main', unborn: true });
+    await expect(getStatus(repo, { mode: 'light' })).resolves.toMatchObject({ current: 'main', unborn: true });
+
+    runGit(repo, ['commit', '--allow-empty', '-m', 'Initial commit']);
+
+    await expect(getStatus(repo)).resolves.toMatchObject({ current: 'main', unborn: false });
+    await expect(getStatus(repo, { mode: 'light' })).resolves.toMatchObject({ unborn: false });
+  });
+
+  it('fails a corrupt repository read instead of reporting it as unborn', async () => {
+    if (!canRunGit()) return;
+
+    const repo = createTempDir();
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    runGit(repo, ['commit', '--allow-empty', '-m', 'Initial commit']);
+    // The same corrupt ref store that breaks the HEAD probe (exit 128, not the
+    // unborn signal) also fails `git status`, so the read must surface the
+    // failure instead of handing callers an unborn payload to act on.
+    runGit(repo, ['pack-refs', '--all']);
+    fs.appendFileSync(path.join(repo, '.git', 'packed-refs'), 'garbage line\n');
+
+    await expect(getStatus(repo)).rejects.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// inspectRepositoryBoundary
+// ---------------------------------------------------------------------------
+
+describe('inspectRepositoryBoundary', () => {
+  it('answers none, unborn, and established for the directory itself', async () => {
+    if (!canRunGit()) return;
+
+    const plain = createTempDir();
+    const unborn = createTempDir();
+    runGit(unborn, ['init', '-b', 'main']);
+    const established = createTempDir();
+    runGit(established, ['init', '-b', 'main']);
+    runGit(established, ['config', 'user.email', 'test@example.com']);
+    runGit(established, ['config', 'user.name', 'Test User']);
+    runGit(established, ['commit', '--allow-empty', '-m', 'Initial commit']);
+
+    await expect(inspectRepositoryBoundary(plain)).resolves.toBe('none');
+    await expect(inspectRepositoryBoundary(unborn)).resolves.toBe('unborn');
+    await expect(inspectRepositoryBoundary(established)).resolves.toBe('established');
+  });
+
+  it('answers none for a directory inside a repository and for an invalid .git entry', async () => {
+    if (!canRunGit()) return;
+
+    const repo = createTempDir();
+    runGit(repo, ['init', '-b', 'main']);
+    const subdirectory = path.join(repo, 'packages', 'app');
+    fs.mkdirSync(subdirectory, { recursive: true });
+
+    const invalid = createTempDir();
+    fs.mkdirSync(path.join(invalid, '.git'));
+
+    await expect(inspectRepositoryBoundary(subdirectory)).resolves.toBe('none');
+    await expect(inspectRepositoryBoundary(invalid)).resolves.toBe('none');
+  });
+
+  it('keeps the established answer when the HEAD probe fails operationally', async () => {
+    if (!canRunGit()) return;
+
+    const repo = createTempDir();
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    runGit(repo, ['commit', '--allow-empty', '-m', 'Initial commit']);
+    // A corrupt packed-refs is the real-git shape of an operational HEAD-probe
+    // failure: `rev-parse --verify --quiet HEAD` exits 128, not the unborn
+    // signal (exit 1), while `--show-toplevel` still resolves the repository
+    // root. The boundary must keep its established answer either way.
+    runGit(repo, ['pack-refs', '--all']);
+    fs.appendFileSync(path.join(repo, '.git', 'packed-refs'), 'garbage line\n');
+    expect(() => runGit(repo, ['rev-parse', '--verify', '--quiet', 'HEAD'])).toThrow();
+
+    await expect(inspectRepositoryBoundary(repo)).resolves.toBe('established');
+  });
+
+  it('follows a linked worktree to its own root', async () => {
+    if (!canRunGit()) return;
+
+    const repo = createTempDir();
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    runGit(repo, ['commit', '--allow-empty', '-m', 'Initial commit']);
+    const linked = path.join(createTempDir(), 'linked');
+    runGit(repo, ['worktree', 'add', '-q', linked, '-b', 'feature']);
+
+    await expect(inspectRepositoryBoundary(linked)).resolves.toBe('established');
   });
 });
 

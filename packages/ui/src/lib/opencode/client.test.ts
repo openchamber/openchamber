@@ -205,6 +205,19 @@ describe("request fidelity", () => {
     expect(requests).toHaveLength(1)
   })
 
+  test("initializing Git sends the confirmation header only when asked", async () => {
+    responses.push(noContent())
+    await opencodeClient.initializeGit("/repo/new")
+    expect(requests[0].url.pathname).toBe("/api/vcs/init")
+    expect(requests[0].method).toBe("POST")
+    expect(requests[0].headers.get("x-opencode-directory")).toBe(encodeURIComponent("/repo/new"))
+    expect(requests[0].headers.has("x-openchamber-vcs-init-confirm")).toBe(false)
+
+    responses.push(noContent())
+    await opencodeClient.initializeGit("/repo/new", { confirmShadowing: true })
+    expect(requests[1].headers.get("x-openchamber-vcs-init-confirm")).toBe("1")
+  })
+
   test("a global list sends no directory scope at all", async () => {
     opencodeClient.setDirectory("/repo/app")
     responses.push(json({ data: [], cursor: {} }))

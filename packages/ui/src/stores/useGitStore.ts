@@ -11,7 +11,7 @@ import type {
 } from '@/lib/api/types';
 import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
 import { getRuntimeKey } from '@/lib/runtime-switch';
-import { GitDirectoriesUnsupportedError, listGitDirectories } from '@/lib/gitApiHttp';
+import { GitDirectoriesUnsupportedError, listGitDirectories, type GitDirectoriesResult } from '@/lib/gitApiHttp';
 import { notifyGitStatusInvalidated, subscribeGitStatusInvalidations } from '@/lib/gitStatusInvalidation';
 import { getWorktreeBootstrapState } from '@/lib/worktrees/worktreeBootstrap';
 
@@ -33,10 +33,12 @@ const DIFF_CACHE_MAX_GLOBAL_ENTRIES = 200;
 type GitStatusFetchMode = 'full' | 'light';
 type GitStatusRequestOptions = { mode?: 'light'; fresh?: boolean };
 
-// Discovery outcome for a root that is not itself a git repository. The three
-// states are mutually exclusive: a repository list (possibly empty), a failed
+// Discovery outcome for a root whose nested repositories matter (a root that
+// is not itself a git repository, or an unborn root repository whose `.git`
+// does not hide them). The states are mutually exclusive: a scan result
+// (possibly empty, carrying whether the walk could check everything), a failed
 // scan (`null`), or a runtime without the discovery route (`'unsupported'`).
-export type NestedRepoDiscovery = string[] | null | 'unsupported';
+export type NestedRepoDiscovery = GitDirectoriesResult | null | 'unsupported';
 
 /** Two-sided file contents; `submodule` is set when the path is a submodule, whose contents are only commit lines. */
 type CachedGitDiff = {
@@ -102,8 +104,9 @@ interface GitStore {
 
   setLogMaxCount: (directory: string, maxCount: number) => void;
 
-  // Nested repository discovery: when the root directory is not itself a git
-  // repository, these hold the discovered repositories and the user's pick.
+  // Nested repository discovery: for a root that is not itself a git
+  // repository (or is an unborn one, whose `.git` does not hide nested
+  // repositories), these hold the discovered repositories and the user's pick.
   // `nestedReposByRoot` values are `null` when discovery failed — never a
   // valid empty result — `'unsupported'` when the runtime has no discovery
   // route, and absent when discovery has not run yet.
@@ -517,6 +520,9 @@ const hasStatusChanged = (oldStatus: GitStatus | null, newStatus: GitStatus | nu
   if (oldStatus.current !== newStatus.current) return true;
   if (oldStatus.tracking !== newStatus.tracking) return true;
   if (oldStatus.isClean !== newStatus.isClean) return true;
+  // The first commit flips an unborn repository to established with no other
+  // status field changing; resolution keys off this flag, so it must publish.
+  if (oldStatus.unborn !== newStatus.unborn) return true;
   if (
     newStatus.upstreamComparison !== undefined
     && haveRemoteComparisonChanged(oldStatus.upstreamComparison, newStatus.upstreamComparison)
@@ -1361,17 +1367,17 @@ export const useGitStore = create<GitStore>()(
         }
 
         const discovery = (async () => {
-          let repositories: string[] | null = null;
+          let result: GitDirectoriesResult | null = null;
           let unsupported = false;
           try {
-            repositories = await listGitDirectories(root);
+            result = await listGitDirectories(root);
           } catch (error) {
             if (error instanceof GitDirectoriesUnsupportedError) {
               unsupported = true;
             } else {
               console.error('Failed to discover nested git repositories:', error);
             }
-            repositories = null;
+            result = null;
           }
 
           // A runtime switch invalidates the discovery: resetForRuntimeSwitch
@@ -1385,7 +1391,7 @@ export const useGitStore = create<GitStore>()(
           // successful discovery.
           const nextValue: NestedRepoDiscovery = unsupported
             ? (previous ?? 'unsupported')
-            : (repositories ?? previous ?? null);
+            : (result ?? previous ?? null);
           const next = new Map(get().nestedReposByRoot);
           next.set(root, nextValue);
           set({ nestedReposByRoot: next });
@@ -1534,22 +1540,35 @@ export const useIsGitRepo = (directory: string | null) => {
   });
 };
 
-// Resolves the directory the Git tab operates on. A root that is itself a git
-// repository is always used directly; otherwise a per-root nested-repo
-// selection (when present) becomes the effective directory.
+/**
+ * Resolves the directory a git surface operates on for `root`. An established
+ * root repository (HEAD resolves) always wins. An unborn root (a fresh
+ * `git init` with no commits) is a repository, but its `.git` does not make
+ * nested repositories unreachable, so it resolves like a non-repository root:
+ * an explicit nested-repo selection when one exists, the root otherwise. That
+ * keeps the root the default and the choice reversible.
+ */
+export const resolveEffectiveGitDirectory = (
+  state: Pick<GitStore, 'directories' | 'nestedRepoSelection'>,
+  root: string | null,
+): string | null => {
+  if (!root) return null;
+  const rootState = state.directories.get(root);
+  const rootIsEstablished = rootState?.isGitRepo === true && rootState.status?.unborn !== true;
+  if (rootIsEstablished) {
+    return root;
+  }
+  return state.nestedRepoSelection.get(root) ?? root;
+};
+
 export const useEffectiveGitDirectory = (root: string | null) => {
-  return useGitStore((state) => {
-    if (!root) return null;
-    if (state.directories.get(root)?.isGitRepo === true) {
-      return root;
-    }
-    return state.nestedRepoSelection.get(root) ?? root;
-  });
+  return useGitStore((state) => resolveEffectiveGitDirectory(state, root));
 };
 
 // `undefined` = discovery not run yet, `null` = discovery failed,
-// `'unsupported'` = the runtime has no discovery route, otherwise the
-// discovered nested repository paths (possibly empty).
+// `'unsupported'` = the runtime has no discovery route, otherwise the scan
+// result: the discovered nested repository paths and whether the walk could
+// check every directory below the root.
 export const useNestedRepos = (root: string | null) => {
   return useGitStore((state) => {
     if (!root) return undefined;

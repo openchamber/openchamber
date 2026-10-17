@@ -316,6 +316,9 @@ const isEventStreamUrl = (url: URL): boolean => url.pathname.endsWith("/event") 
 /** Header the server reads to resolve a Location; the value is URI-encoded on both ends. */
 const OPENCODE_DIRECTORY_HEADER = "x-opencode-directory"
 
+/** Header that accepts initializing a root repository above nested repositories. */
+const VCS_INIT_CONFIRMATION_HEADER = "x-openchamber-vcs-init-confirm"
+
 type RuntimeOpencodeClientConfig = {
   baseUrl: string
   directory?: string
@@ -853,10 +856,15 @@ class OpencodeService {
   /**
    * Runs `git init` in a directory that has no repository yet (OpenCode
    * 2.0.23). OpenCode refreshes its own view of the directory; the caller
-   * refreshes the app's Git state.
+   * refreshes the app's Git state. `confirmShadowing` accepts initializing a
+   * root repository above nested repositories, which the server refuses until
+   * the request carries the confirmation header.
    */
-  async initializeGit(directory: string): Promise<void> {
-    return call("vcs.init", () => this.clientFor(directory).vcs.init())
+  async initializeGit(directory: string, options?: { confirmShadowing?: boolean }): Promise<void> {
+    return call("vcs.init", () => this.clientFor(directory).vcs.init(
+      undefined,
+      options?.confirmShadowing ? { headers: { [VCS_INIT_CONFIRMATION_HEADER]: "1" } } : undefined,
+    ))
   }
 
   // Get system information including home directory

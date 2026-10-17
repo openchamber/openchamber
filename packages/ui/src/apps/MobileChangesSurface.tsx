@@ -161,7 +161,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
   const { git, sourceControl } = useRuntimeAPIs();
   // When the root is not itself a repository, changes come from the resolved
   // nested repository instead.
-  const { rootIsGitRepo, gitDirectory, nestedRepos } = repository;
+  const { rootIsGitRepo, gitDirectory, nestedRepos, repositoryOptions } = repository;
   const currentDirectory = gitDirectory ?? rootDirectory;
   const status = useGitStatus(currentDirectory || null);
   const choosesPushDestination = useIsContributorWorktree(currentDirectory);
@@ -968,9 +968,9 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
             {status?.current || currentDirectory || ''}
           </p>
         </div>
-        {rootIsGitRepo === false && Array.isArray(nestedRepos) && nestedRepos.length > 0 ? (
+        {repositoryOptions ? (
           <NestedRepoPicker
-            repositories={nestedRepos}
+            repositories={repositoryOptions}
             selectedRepository={gitDirectory ?? null}
             onSelectRepository={(repository) => {
               if (rootDirectory) selectNestedRepo(rootDirectory, repository);

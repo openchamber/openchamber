@@ -5,10 +5,12 @@ import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import {
   useEffectiveGitDirectory,
   useGitStore,
+  useGitStatus,
   useIsGitRepo,
   useNestedRepoSelection,
   useNestedRepos,
   useStaleClearedSelections,
+  type NestedRepoDiscovery,
 } from '@/stores/useGitStore';
 
 type UseNestedGitDirectoryOptions = {
@@ -23,10 +25,65 @@ type UseNestedGitDirectoryOptions = {
 };
 
 /**
+ * Whether nested repository discovery applies to a root. A root that is not a
+ * repository has nested repositories to find. An unborn root repository (a
+ * fresh `git init` with no commits) is a repository, but its `.git` does not
+ * hide the directories below, so discovery runs for it too. An established
+ * root hides everything below it, so discovery stays off and its resolution
+ * keeps today's behavior.
+ */
+export const shouldDiscoverNestedRepositories = (
+  rootIsGitRepo: boolean | null,
+  rootIsUnborn: boolean,
+): boolean => rootIsGitRepo === false || (rootIsGitRepo === true && rootIsUnborn);
+
+/** Discovered repository paths, or `null` when discovery failed, is unsupported, or has not run. */
+const discoveredRepositories = (discovery: NestedRepoDiscovery | undefined): string[] | null =>
+  discovery !== undefined && discovery !== null && discovery !== 'unsupported'
+    ? discovery.repositories
+    : null;
+
+type RepositoryOptionsInput = {
+  root: string | null;
+  rootIsGitRepo: boolean | null;
+  rootIsUnborn: boolean;
+  nestedRepos: NestedRepoDiscovery | undefined;
+  nestedRepoSelection: string | null;
+};
+
+/**
+ * The options a repository picker should render, or `null` when no picker
+ * belongs on the surface. An unborn root lists itself first, so switching to a
+ * nested repository stays reversible. A non-repository root lists the
+ * discovered repositories once a nested one is selected: auto-select picks the
+ * first one, and until that lands resolution is still settling. A stored
+ * selection equal to the root is not a nested selection and counts as none.
+ * Anything else (established root, failed or unsupported discovery, no
+ * repositories) has no choice to offer.
+ */
+export const resolveRepositoryOptions = ({
+  root,
+  rootIsGitRepo,
+  rootIsUnborn,
+  nestedRepos,
+  nestedRepoSelection,
+}: RepositoryOptionsInput): string[] | null => {
+  const repositories = discoveredRepositories(nestedRepos);
+  if (!repositories || repositories.length === 0) return null;
+  if (rootIsUnborn) {
+    return root ? [root, ...repositories] : null;
+  }
+  if (rootIsGitRepo === false && nestedRepoSelection && nestedRepoSelection !== root) {
+    return repositories;
+  }
+  return null;
+};
+
+/**
  * Resolves the repository a git surface operates on when the project root may
- * not itself be a git repository. Owns the full resolution flow: probing the
- * root, discovering nested repositories, auto-selecting the first one, and
- * dropping a selection whose repository disappeared.
+ * not itself be an established git repository. Owns the full resolution flow:
+ * probing the root, discovering nested repositories, auto-selecting the first
+ * one, and dropping a selection whose repository disappeared.
  *
  * Consumers still fetch their own git data for the returned `gitDirectory`;
  * this hook only owns who that directory is.
@@ -39,6 +96,8 @@ export const useNestedGitDirectory = (
   const { git } = useRuntimeAPIs();
 
   const rootIsGitRepo = useIsGitRepo(root);
+  const rootStatus = useGitStatus(root);
+  const rootIsUnborn = rootStatus?.unborn === true;
   const gitDirectory = useEffectiveGitDirectory(root);
   const nestedRepos = useNestedRepos(root);
   const nestedRepoSelection = useNestedRepoSelection(root);
@@ -69,20 +128,26 @@ export const useNestedGitDirectory = (
   }, [enabled, ensureStatus, git, root, rootIsGitRepo]);
 
   // A cached "not a repository" answer may be stale: `git init` in a terminal
-  // or by an agent leaves no event behind. Opening the surface checks again,
-  // once per opening, so it never needs to poll.
+  // or by an agent leaves no event behind. A cached unborn answer goes stale
+  // the same way once its first commit lands, and until a fresh probe sees it
+  // the established-root behavior never takes effect. Opening the surface
+  // checks both again, once per opening, so it never needs to poll.
   React.useEffect(() => {
     if (!recheckOnOpen || !enabled || !root) return;
-    if (useGitStore.getState().directories.get(root)?.isGitRepo !== false) return;
+    const directoryState = useGitStore.getState().directories.get(root);
+    const cachedNotRepository = directoryState?.isGitRepo === false;
+    const cachedUnborn = directoryState?.isGitRepo === true && directoryState.status?.unborn === true;
+    if (!cachedNotRepository && !cachedUnborn) return;
     void recheckRepository(root, git);
   }, [enabled, git, recheckOnOpen, recheckRepository, root]);
 
-  // Discover nested repositories once the root probe confirms it is not one.
+  // Discover nested repositories once the root probe confirms it is not one,
+  // or is an unborn repository whose `.git` hides nothing below it.
   React.useEffect(() => {
     if (!enabled || !root) return;
-    if (rootIsGitRepo !== false) return;
+    if (!shouldDiscoverNestedRepositories(rootIsGitRepo, rootIsUnborn)) return;
     void ensureNestedRepos(root);
-  }, [enabled, ensureNestedRepos, root, rootIsGitRepo]);
+  }, [enabled, ensureNestedRepos, root, rootIsGitRepo, rootIsUnborn]);
 
   // Auto-select the first nested repository so the surface opens straight
   // into repository data; a picker (where rendered) switches between them.
@@ -92,15 +157,19 @@ export const useNestedGitDirectory = (
   // discovery + probe while the surface is visible. When every candidate has
   // failed, no selection is made — surfaces settle into their unresolved
   // state instead of churning requests. A manual picker pick is still free
-  // to select anything; it gets probed like any other.
+  // to select anything; it gets probed like any other. An unborn root never
+  // auto-selects: it is a repository the user may deliberately stay on.
   React.useEffect(() => {
     if (!enabled || !root) return;
     if (rootIsGitRepo !== false) return;
-    if (!Array.isArray(nestedRepos) || nestedRepos.length === 0) return;
-    if (nestedRepoSelection) return;
+    const repositories = discoveredRepositories(nestedRepos);
+    if (!repositories || repositories.length === 0) return;
+    // A stored selection equal to the root is not a nested pick: the root
+    // either stopped being a repository or never was one, so auto-select runs.
+    if (nestedRepoSelection && nestedRepoSelection !== root) return;
     const candidates = staleClearedSelections
-      ? nestedRepos.filter((repository) => !staleClearedSelections.has(repository))
-      : nestedRepos;
+      ? repositories.filter((repository) => !staleClearedSelections.has(repository))
+      : repositories;
     if (candidates.length === 0) return;
     selectNestedRepo(root, candidates[0]);
   }, [
@@ -114,9 +183,11 @@ export const useNestedGitDirectory = (
   ]);
 
   // A selected repository that is no longer a git repository is stale: drop
-  // the selection and re-scan so resolution reflects the current tree.
+  // the selection and re-scan so resolution reflects the current tree. A
+  // selection equal to the root is not a nested selection to recover.
   React.useEffect(() => {
     if (!enabled || !root || !nestedRepoSelection) return;
+    if (nestedRepoSelection === root) return;
     if (!gitDirectory || gitDirectory === root) return;
     if (selectedIsGitRepo !== false) return;
     clearNestedRepoSelection(root);
@@ -131,5 +202,20 @@ export const useNestedGitDirectory = (
     selectedIsGitRepo,
   ]);
 
-  return { rootIsGitRepo, gitDirectory, nestedRepos, nestedRepoSelection };
+  const repositoryOptions = resolveRepositoryOptions({
+    root,
+    rootIsGitRepo,
+    rootIsUnborn,
+    nestedRepos,
+    nestedRepoSelection,
+  });
+
+  return {
+    rootIsGitRepo,
+    rootIsUnborn,
+    gitDirectory,
+    nestedRepos,
+    nestedRepoSelection,
+    repositoryOptions,
+  };
 };

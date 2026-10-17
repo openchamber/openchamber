@@ -1,6 +1,7 @@
 import { createRealpathCache } from '../path-realpath-cache.js';
 import { redactGitText } from '../git/redaction.js';
 import { resolveByteRange } from './byte-range.js';
+import { findGitDirectories, GIT_DIRS_MAX_DEPTH, GIT_DIRS_MAX_DIRS } from './git-directories.js';
 import { createWorkspaceFileNameIndex } from './workspace-file-names.js';
 import {
   CONTENT_SEARCH_DEFAULT_LIMIT,
@@ -406,105 +407,6 @@ const resolveWorkspacePathFromContext = async ({ req, targetPath, resolveProject
   return worktree;
 };
 
-// Nested repository discovery bounds: only shallow walks are useful for the
-// Git tab's "pick a repository" picker, and deep/monorepo trees can explode
-// otherwise. Directories deeper than maxDepth or beyond the visit cap are
-// silently not searched.
-const GIT_DIRS_MAX_DEPTH = 3;
-const GIT_DIRS_MAX_DIRS = 100;
-const GIT_DIRS_SKIP_LIST = new Set(['node_modules', 'dist', 'build', '.venv', 'target', '.next']);
-
-// Walks rootPath and returns every nested git repository path (a directory
-// containing a `.git` entry — a directory, a worktree pointer file, or a
-// symlink). A repository boundary stops descent: nested repos inside repos
-// are not reported. The root itself, when it is a repo, yields no results.
-// Symlinked directories are followed, the way the file tree follows them: a
-// parent folder of links to repositories kept elsewhere is a common way to
-// group them into one project. Each real directory is walked once, so a link
-// loop or two links to one repository cannot repeat it, and repositories are
-// reported under the path the link gives them inside the project.
-// Breadth-first traversal checks shallow siblings before deeper subtrees can
-// exhaust the visit cap.
-const findGitDirectories = async ({ rootPath, fsPromises, path: pathModule, maxDepth, maxDirs }) => {
-  const results = [];
-  const walkedRealPaths = new Set();
-  const queue = [{ dir: rootPath, depth: 0 }];
-  let visited = 0;
-
-  const scanDirectory = async (dir, depth) => {
-    let realPath;
-    try {
-      realPath = await fsPromises.realpath(dir);
-    } catch (error) {
-      if (dir === rootPath) {
-        throw error;
-      }
-      return;
-    }
-    if (walkedRealPaths.has(realPath)) {
-      return;
-    }
-    walkedRealPaths.add(realPath);
-
-    let dirents;
-    try {
-      dirents = await fsPromises.readdir(dir, { withFileTypes: true });
-    } catch (error) {
-      // Unreadable subtree — skip it unless it is the root itself, which the
-      // route maps to 403/404/500 through the shared error handling.
-      if (dir === rootPath) {
-        throw error;
-      }
-      return;
-    }
-    visited += 1;
-
-    let isRepoBoundary = false;
-    const subdirectories = [];
-    for (const dirent of dirents) {
-      if (dirent.name === '.git') {
-        isRepoBoundary = true;
-        continue;
-      }
-      if (!dirent.isDirectory() && !dirent.isSymbolicLink()) {
-        continue;
-      }
-      if (GIT_DIRS_SKIP_LIST.has(dirent.name)) {
-        continue;
-      }
-      if (depth >= maxDepth) {
-        continue;
-      }
-      if (dirent.isSymbolicLink()) {
-        // A link to a file, or a dangling one, is not a place to look.
-        const target = await fsPromises.stat(pathModule.join(dir, dirent.name)).catch(() => null);
-        if (!target?.isDirectory()) {
-          continue;
-        }
-      }
-      subdirectories.push(dirent.name);
-    }
-
-    if (isRepoBoundary) {
-      if (dir !== rootPath) {
-        results.push(dir);
-      }
-      return;
-    }
-
-    subdirectories.sort();
-    for (const name of subdirectories) {
-      queue.push({ dir: pathModule.join(dir, name), depth: depth + 1 });
-    }
-  };
-
-  for (let index = 0; index < queue.length && visited < maxDirs; index += 1) {
-    const { dir, depth } = queue[index];
-    await scanDirectory(dir, depth);
-  }
-  return results;
-};
-
 const deriveCloneDirectoryName = (remoteUrl) => {
   const remote = typeof remoteUrl === 'string' ? remoteUrl.trim() : '';
   if (!remote) return '';
@@ -620,6 +522,7 @@ export const registerFsRoutes = (app, dependencies) => {
     managedChatsRoot,
     cloneRepository,
     environmentRuntime = null,
+    inspectGitRepositoryBoundary = null,
   } = dependencies;
   // Chat worktrees may live outside every project workspace; both managed
   // roots stay valid filesystem targets.
@@ -2074,12 +1977,21 @@ export const registerFsRoutes = (app, dependencies) => {
         return res.status(400).json({ error: 'Specified path is not a directory', reason: 'not-directory' });
       }
 
-      const repositories = await findGitDirectories({
+      // Only Git can tell a working repository from an unborn or invalid
+      // `.git` entry; the composition root wires that read in, and the FS
+      // module itself never spawns Git. Without it the root boundary counts
+      // as transparent, which is the safe direction: nested repositories stay
+      // visible rather than silently hidden.
+      const boundary = inspectGitRepositoryBoundary
+        ? await inspectGitRepositoryBoundary(resolved.resolved)
+        : 'none';
+      const { repositories, complete } = await findGitDirectories({
         rootPath: resolved.resolved,
         fsPromises,
         path,
         maxDepth: GIT_DIRS_MAX_DEPTH,
         maxDirs: GIT_DIRS_MAX_DIRS,
+        rootBoundaryIsTransparent: boundary !== 'established',
       });
 
       return res.json({
@@ -2088,6 +2000,7 @@ export const registerFsRoutes = (app, dependencies) => {
           path: repoPath,
           name: path.basename(repoPath),
         })),
+        complete,
       });
     } catch (error) {
       const err = error;

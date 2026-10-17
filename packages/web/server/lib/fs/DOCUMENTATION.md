@@ -5,6 +5,7 @@ Own filesystem API behavior for the web server runtime, including workspace-boun
 
 ## Entrypoints and structure
 - `packages/web/server/lib/fs/routes.js`: route registration and runtime-owned state for `/api/fs/*` endpoints.
+- `packages/web/server/lib/fs/git-directories.js`: bounded nested git repository walk shared by `/api/fs/git-dirs` and the VCS init guard.
 - `packages/web/server/lib/fs/search.js`: fuzzy filesystem search runtime used by non-FS routes (for example project icon discovery).
 - `packages/web/server/lib/fs/content-search.js`: find in files, run by ripgrep (`GET /api/fs/find-in-files`).
 - `packages/web/server/lib/fs/ripgrep.js`: where the ripgrep binary comes from.
@@ -40,12 +41,22 @@ Own filesystem API behavior for the web server runtime, including workspace-boun
     - `GET /api/fs/list`
     - `GET /api/fs/find-in-files` — find in files, see below.
     - `GET /api/fs/git-dirs` — shallow nested git repository discovery for the
-      Git tab (breadth-first readdir walk, capped at depth 3 and 100 visited
-      directories so shallow repositories are checked before deeper folders;
-      `.git` directory, file, or
-      symlink marks a repository boundary; junk directories are skipped;
-      symlinked directories are followed, each real directory walked once,
-      and repositories are reported under the link path)
+      Git tab, answered as `{ path, repositories, complete }`. The walk is in
+      `git-directories.js` (breadth-first readdir, capped at depth 3 and 100
+      visited directories so shallow repositories are checked before deeper
+      folders; `.git` directory, file, or symlink marks a repository boundary;
+      junk directories are skipped; symlinked directories are followed, each
+      real directory walked once, and repositories are reported under the link
+      path). `complete: false` says the walk could not check everything: a
+      directory or link the walk would have checked left unscanned by the
+      depth cap, queued directories left unscanned by the visit cap, an
+      unreadable directory, a realpath failure, or a symlink target that could
+      not be checked. Skip-list directories and the children below a
+      repository boundary are deliberate policy and keep it true. The root's
+      own `.git` entry is classified by the Git service through the injected
+      `inspectGitRepositoryBoundary` dependency: an established repository
+      answers no repositories without descending, while an unborn or invalid
+      `.git` at the root is walked past so nested repositories stay visible.
   - Owns exec job queue state (`execJobs`) and lifecycle/TTL pruning.
   - Exec commands run with the terminal's PATH plus the user's and the project's environment variables for their directory (`environmentRuntime`, see `../environment`).
   - Enforces workspace boundary checks with active project + worktree fallback support.
@@ -120,6 +131,8 @@ The Git service validates a selected commit identity before planning or spawning
 
 ## Notes for contributors
 - Keep filesystem policy (workspace root checks, error mapping, exec timeout behavior) inside this module, not in the composition root.
+- The FS module never spawns Git. `/api/fs/git-dirs` gets the root's repository-boundary classification through `inspectGitRepositoryBoundary`, wired by the composition root (`../opencode/feature-routes-runtime.js`) from the Git service; the bounded walk itself only reads directories. Without the dependency the root boundary counts as transparent, so nested repositories stay visible.
+- `findGitDirectories` reports `complete` for the scan, and its callers must not read a truncated walk as an authoritative empty answer. The VCS init guard (`../git/vcs-init-guard.js`) uses the same walk to refuse a `git init` that would hide nested repositories.
 - Keep Git process, transport, credential, cancellation, and clone cleanup policy in the Git network operation service. The legacy clone handler may resolve its compatibility target and map the service result, but must not spawn Git.
 - Workspace checks accept, besides the active workspace and its worktrees, the **managed roots**: the OpenChamber config root and the managed chats root (`managedChatsRoot` dependency; `OPENCHAMBER_CHATS_DIR` upstream, default `<config root>/chats`). Chat worktrees may legitimately live outside every project workspace. With no project directory resolved, only the chats roots are accepted: the managed chats root and `<config root>/chats`, each also by its canonical path. A first chat then works on an install with no project; the rest of the config root still needs a resolved project.
 - `GET /api/fs/home` preserves `{ home, chatsRoot }` and adds `canonicalChatsRoot` and `canonicalLegacyChatsRoot`, resolved by the server's filesystem. If a root does not exist yet, it resolves the nearest existing ancestor and appends the missing segments, without creating directories. Errors resolving the configured root fail the request. A failed legacy lookup warns and omits only that optional alias, retaining exact legacy matching without blocking an accessible relocated root. Clients use confirmed aliases for exact membership while keeping the original roots as folder/scope identities. `chatsRoot` is the server-resolved managed chats root; clients must use it instead of joining `home` + the well-known segment (a relocated root does not contain that segment).

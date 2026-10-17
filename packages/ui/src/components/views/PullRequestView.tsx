@@ -36,7 +36,7 @@ export const PullRequestView: React.FC = () => {
   const currentDirectory = useEffectiveDirectory();
   // When the root is not itself a repository, the pull-request workflow
   // operates on the resolved nested repository instead.
-  const { rootIsGitRepo, gitDirectory, nestedRepos } = useNestedGitDirectory(currentDirectory ?? null);
+  const { rootIsGitRepo, gitDirectory, nestedRepos, repositoryOptions } = useNestedGitDirectory(currentDirectory ?? null);
   const status = useGitStatus(gitDirectory ?? null);
   const branches = useGitBranches(gitDirectory ?? null);
   const isGitRepo = useIsGitRepo(gitDirectory ?? null);
@@ -213,17 +213,12 @@ export const PullRequestView: React.FC = () => {
     );
   }
 
-  // Repository switcher for non-repo roots with discovered nested
-  // repositories; the pick is shared per root across git surfaces.
-  const showRepositoryPicker =
-    rootIsGitRepo === false && Array.isArray(nestedRepos) && nestedRepos.length > 0;
-
   return (
     <div className="flex h-full min-h-0 flex-col">
-      {showRepositoryPicker ? (
+      {repositoryOptions ? (
         <div className="flex shrink-0 items-center border-b border-border/60 px-4 py-2">
           <NestedRepoPicker
-            repositories={nestedRepos}
+            repositories={repositoryOptions}
             selectedRepository={gitDirectory ?? null}
             onSelectRepository={(repository) => {
               if (currentDirectory) selectNestedRepo(currentDirectory, repository);

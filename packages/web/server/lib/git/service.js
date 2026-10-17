@@ -2538,6 +2538,46 @@ export async function isGitRepository(directory) {
   return false;
 }
 
+// HEAD's probe answer for a repository: `'resolved'` when HEAD names a commit,
+// `'unborn'` for a repository without commits (`git init`, nothing committed
+// yet). An unborn HEAD is exactly exit code 1 from
+// `rev-parse --verify --quiet HEAD`: the branch it names does not exist yet.
+// Any other failure — a spawn error, the probe timeout kill, a corrupt
+// repository's exit 128 — is operational and says nothing about HEAD.
+const probeHeadResolution = async (cwd) => {
+  const result = await runGitCommand(cwd, ['rev-parse', '--verify', '--quiet', 'HEAD'], { timeoutMs: GIT_PROBE_TIMEOUT_MS });
+  if (result.success) return 'resolved';
+  return result.exitCode === 1 ? 'unborn' : 'unknown';
+};
+
+/**
+ * What `directory` itself is as a Git boundary: `'established'` for a
+ * repository root whose HEAD resolves, `'unborn'` for a repository root
+ * without commits, and `'none'` for everything else: no `.git` entry, an
+ * entry that is not a valid repository, or a directory that merely sits inside
+ * another repository. Git answers through `--show-toplevel` and HEAD, so a
+ * linked worktree or a `.git` file resolves the same way a checkout does.
+ */
+export async function inspectRepositoryBoundary(directory) {
+  const directoryPath = normalizeDirectoryPath(directory);
+  if (!directoryPath) return 'none';
+
+  const topLevel = await runGitCommand(directoryPath, ['rev-parse', '--show-toplevel'], { timeoutMs: GIT_PROBE_TIMEOUT_MS });
+  if (!topLevel.success) return 'none';
+  const topLevelPath = normalizeGitOutputPath(String(topLevel.stdout || '').trim());
+  if (!topLevelPath) return 'none';
+  const repositoryRoot = path.resolve(path.isAbsolute(topLevelPath) ? topLevelPath : path.resolve(directoryPath, topLevelPath));
+  const ownPath = await fsp.realpath(directoryPath).catch(() => path.resolve(directoryPath));
+  if (path.resolve(ownPath) !== repositoryRoot) return 'none';
+
+  // Only the probe's unborn signal answers `'unborn'`. An operational probe
+  // failure keeps the established answer: the root check above passed, so this
+  // is a repository, and claiming unborn would make it transparent to nested
+  // discovery.
+  const headResolution = await probeHeadResolution(directoryPath);
+  return headResolution === 'unborn' ? 'unborn' : 'established';
+}
+
 export async function getGlobalIdentity() {
   const git = await createGitForGlobalConfig();
 
@@ -3000,7 +3040,12 @@ async function readStatus(normalizedDirectory, lightMode) {
     // in it: on a forgotten build or dependency directory that is a scan of
     // tens of thousands of files and hundreds of megabytes per status read.
     // Directories are expanded to their files afterwards, up to a bound.
-    const status = await git.status(['-unormal']);
+    // HEAD resolves in the same read: a fresh `git init` with no commits is
+    // the state clients must not read as an ordinary empty branch.
+    const [status, headResolution] = await Promise.all([
+      git.status(['-unormal']),
+      probeHeadResolution(repoRoot),
+    ]);
     status.files = await expandUntrackedDirectories(repoRoot, status.files);
 
     // Light mode: skip numstat + new-file line counting for faster response.
@@ -3260,6 +3305,10 @@ async function readStatus(normalizedDirectory, lightMode) {
     return {
       current: status.current,
       tracking,
+      // Only the probe's unborn signal reads as unborn; an operational probe
+      // failure keeps `false` so an established repository never shows the
+      // unborn state or offers the root in the nested-repository picker.
+      unborn: headResolution === 'unborn',
       ahead,
       behind,
       aheadBase,

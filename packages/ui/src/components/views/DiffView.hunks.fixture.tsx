@@ -444,7 +444,7 @@ export async function exerciseMobileComparisonContextExpansion() {
   try {
     await act(async () => root.render(<I18nProvider><SyncProvider sdk={opencodeClient.getSdkClient()} directory=""><RuntimeAPIContext.Provider value={createWebAPIs()}>
       <MobileChangesPane rootDirectory="/repo" visible initialDiff={null}
-        repository={{ rootIsGitRepo: true, gitDirectory: '/repo', nestedRepos: null, nestedRepoSelection: null }} />
+        repository={{ rootIsGitRepo: true, rootIsUnborn: false, gitDirectory: '/repo', nestedRepos: null, nestedRepoSelection: null, repositoryOptions: null }} />
     </RuntimeAPIContext.Provider></SyncProvider></I18nProvider>));
     await click('[aria-label="Select change mode"]');
     const commitMode = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find((element) => element.textContent === 'Commit');

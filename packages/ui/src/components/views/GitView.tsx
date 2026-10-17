@@ -294,7 +294,7 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
   // one, `gitDirectory` is the effective repository all git data and actions
   // operate on. The hook owns probing, discovery, auto-select, and
   // stale-selection recovery; data fetching below keys off its result.
-  const { rootIsGitRepo, gitDirectory, nestedRepos } = useNestedGitDirectory(
+  const { rootIsGitRepo, gitDirectory, nestedRepos, repositoryOptions } = useNestedGitDirectory(
     currentDirectory ?? null,
     { enabled: isActive, recheckOnOpen: true },
   );
@@ -2458,16 +2458,14 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
               // The branch's own tab of the Tracker, in the panel this view is in.
               gitDirectory ? () => openContextPanelTab(currentDirectory ?? gitDirectory, { mode: 'pr' }) : undefined
             }
-            repositoryOptions={
-              gitDirectory !== currentDirectory && Array.isArray(nestedRepos) ? nestedRepos : undefined
-            }
-            selectedRepository={gitDirectory !== currentDirectory ? gitDirectory : null}
+            repositoryOptions={repositoryOptions ?? undefined}
+            selectedRepository={repositoryOptions ? gitDirectory : null}
             onSelectRepository={
-              gitDirectory !== currentDirectory && currentDirectory
+              repositoryOptions && currentDirectory
                 ? (repository) => selectNestedRepo(currentDirectory, repository)
                 : undefined
             }
-            repositoryRoot={gitDirectory !== currentDirectory ? currentDirectory : undefined}
+            repositoryRoot={repositoryOptions ? currentDirectory ?? undefined : undefined}
           />
 
       {/* VS Code manages Git hosting itself; the webview projects remotes as a system binding without a settings surface. */}

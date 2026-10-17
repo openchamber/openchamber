@@ -124,7 +124,13 @@ directory, at a disk root, or in OpenCode's own working directory because no
 directory was named (`vcsInitRefusal` in `../git/repository-root.js`). Git
 surfaces ignore a repository there, so the user would get a repository that
 covers every file and a Git tab that still says "not a repository". The UI
-hides its Initialize Git button in the same places.
+hides its Initialize Git button in the same places. The same middleware
+refuses a `git init` that would create a root repository above nested
+repositories, or where the nested-repository scan could not check everything,
+with 400 `{ _tag: 'VcsInitConfirmationRequiredError', code:
+'confirmation-required' }` until the request carries
+`x-openchamber-vcs-init-confirm: 1` (`../git/vcs-init-guard.js`, loaded lazily
+after the method/path check).
 
 Keys OpenCode takes from environment variables (`ZAI_API_KEY`, ...) are never
 stored and `/api/credential` does not list them; `GET /api/integration` names
