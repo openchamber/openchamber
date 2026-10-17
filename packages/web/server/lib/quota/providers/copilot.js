@@ -5,7 +5,8 @@ import {
   buildResult,
   toUsageWindow,
   toNumber,
-  toTimestamp
+  toTimestamp,
+  formatCredits
 } from '../utils/index.js';
 
 const buildCopilotWindows = (payload) => {
@@ -17,6 +18,9 @@ const buildCopilotWindows = (payload) => {
   // (CopilotUserQuotaInfo): each snapshot carries entitlement, remaining,
   // unlimited, and percent_remaining. Unlimited plans report no usable
   // entitlement; percent_remaining is a server-computed fallback.
+  // `usedPercent` is computed from remaining/entitlement, and the value label
+  // derives its credits from the same `entitlement - quota_remaining` axis
+  // GitHub's own Copilot panel uses, so the percent and the label agree.
   const addWindow = (label, snapshot) => {
     if (!snapshot) return;
 
@@ -31,7 +35,12 @@ const buildCopilotWindows = (payload) => {
     }
 
     const entitlement = toNumber(snapshot.entitlement);
-    const remaining = toNumber(snapshot.remaining);
+    // `quota_remaining` is the precise twin of `remaining`: the endpoint sends it
+    // with one decimal (39078.5) and truncates it into `remaining` (39078).
+    // GitHub's own Copilot panel reports the used figure as
+    // `entitlement - quota_remaining` (20,836.9 / 60,000 used in the report that
+    // started this), so prefer it and fall back to the integer twin.
+    const remaining = toNumber(snapshot.quota_remaining) ?? toNumber(snapshot.remaining);
     let usedPercent = entitlement !== null && entitlement > 0 && remaining !== null
       ? Math.min(100, Math.max(0, 100 - (remaining / entitlement) * 100))
       : null;
@@ -41,9 +50,21 @@ const buildCopilotWindows = (payload) => {
         usedPercent = Math.min(100, Math.max(0, 100 - percentRemaining));
       }
     }
-    const valueLabel = entitlement !== null && entitlement > 0 && remaining !== null
-      ? `${remaining.toFixed(0)} / ${entitlement.toFixed(0)} left`
-      : null;
+    // `remaining` reports the axis opposite to everything else the quota UI
+    // renders (the percent above, the progress bar, the used/remaining toggle),
+    // so the old `remaining / entitlement left` label made OpenChamber state the
+    // opposite of GitHub's own Copilot panel for the same account. VS Code and
+    // GitHub both report `entitlement - quota_remaining` spent, so the label
+    // uses that axis and keeps the fractional credit rather than rounding it
+    // away, which also keeps it stable across the two twin fields.
+    const used = entitlement === null || entitlement <= 0
+      ? null
+      : remaining !== null
+        ? Math.max(0, Math.min(entitlement, entitlement - remaining))
+        : null;
+    const valueLabel = used === null
+      ? null
+      : `${formatCredits(used)} / ${formatCredits(entitlement)} used`;
     windows[label] = toUsageWindow({
       usedPercent,
       windowSeconds: null,

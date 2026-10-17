@@ -15,7 +15,7 @@ const payload = {
   quota_snapshots: {
     chat: { entitlement: 100, remaining: 80 },
     completions: { entitlement: 1000, remaining: 900 },
-    premium_interactions: { entitlement: 300, remaining: 225 },
+    premium_interactions: { entitlement: 60000, remaining: 39078, percent_remaining: 34.9 },
   },
 };
 
@@ -36,8 +36,56 @@ describe('GitHub Copilot quota provider', () => {
 
     expect(result.ok).toBe(true);
     expect(Object.keys(result.usage.windows)).toEqual(['premium_interactions']);
-    expect(result.usage.windows.premium_interactions.usedPercent).toBe(25);
-    expect(result.usage.windows.premium_interactions.valueLabel).toBe('225 / 300 left');
+    expect(result.usage.windows.premium_interactions.usedPercent).toBeCloseTo(34.87);
+    expect(result.usage.windows.premium_interactions.valueLabel).toBe('20,922 / 60,000 used');
+  });
+
+  it.each([
+    ['primary provider', fetchQuota],
+    ['add-on provider', fetchQuotaAddon],
+  ])('derives the credit label from the same used axis as VS Code on fractional credits for the %s', async (_name, fetchProviderQuota) => {
+    // The live Business-plan shape: `remaining` (39078) is the integer twin of
+    // `quota_remaining` (39078.5). GitHub's own Copilot panel reports
+    // 20,921.5 / 60,000 used for this snapshot, and the old label read
+    // "39078 / 60000 left".
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockResponse({
+      quota_reset_date: '2026-11-01T00:00:00.000Z',
+      quota_snapshots: {
+        premium_interactions: {
+          overage_count: 0,
+          overage_permitted: true,
+          percent_remaining: 65.1,
+          quota_remaining: 39078.5,
+          unlimited: false,
+          credits_used: 20910,
+          remaining: 39078,
+          entitlement: 60000,
+        },
+      },
+    })));
+
+    const result = await fetchProviderQuota();
+
+    expect(result.ok).toBe(true);
+    expect(result.usage.windows.premium_interactions.usedPercent).toBeCloseTo(34.87);
+    expect(result.usage.windows.premium_interactions.valueLabel).toBe('20,921.5 / 60,000 used');
+  });
+
+  it.each([
+    ['primary provider', fetchQuota],
+    ['add-on provider', fetchQuotaAddon],
+  ])('keeps the fractional credit rather than rounding it away for the %s', async (_name, fetchProviderQuota) => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockResponse({
+      quota_reset_date: '2026-09-01T00:00:00Z',
+      quota_snapshots: {
+        premium_interactions: { entitlement: 100, quota_remaining: 65.27 },
+      },
+    })));
+
+    const result = await fetchProviderQuota();
+
+    expect(result.ok).toBe(true);
+    expect(result.usage.windows.premium_interactions.valueLabel).toBe('34.7 / 100 used');
   });
 
   it.each([

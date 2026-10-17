@@ -842,7 +842,7 @@ describe('GitHub Copilot quota provider (VS Code parity)', () => {
       quota_snapshots: {
         chat: { entitlement: 100, remaining: 80 },
         completions: { entitlement: 1000, remaining: 900 },
-        premium_interactions: { entitlement: 300, remaining: 225 },
+        premium_interactions: { entitlement: 60000, remaining: 39078, percent_remaining: 34.9 },
       },
     })));
 
@@ -850,8 +850,8 @@ describe('GitHub Copilot quota provider (VS Code parity)', () => {
 
     assert.equal(result.ok, true);
     assert.deepEqual(Object.keys(result.usage!.windows), ['premium_interactions']);
-    assert.equal(result.usage!.windows.premium_interactions!.usedPercent, 25);
-    assert.equal(result.usage!.windows.premium_interactions!.valueLabel, '225 / 300 left');
+    assert.ok(Math.abs(result.usage!.windows.premium_interactions!.usedPercent! - 34.87) < 1e-9);
+    assert.equal(result.usage!.windows.premium_interactions!.valueLabel, '20,922 / 60,000 used');
   });
 
   test('add-on path mirrors the primary window shaping', async () => {
@@ -867,6 +867,62 @@ describe('GitHub Copilot quota provider (VS Code parity)', () => {
     assert.equal(result.ok, true);
     assert.deepEqual(Object.keys(result.usage!.windows), ['premium_interactions']);
     assert.equal(result.usage!.windows.premium_interactions!.usedPercent, 25);
+  });
+
+  test('derives the credit label from the same used axis as VS Code on fractional credits', async () => {
+    // The live Business-plan shape: `remaining` (39078) is the integer twin of
+    // `quota_remaining` (39078.5). GitHub's own Copilot panel reports
+    // 20,921.5 / 60,000 used for this snapshot, and the old label read
+    // "39078 / 60000 left".
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      quota_reset_date: '2026-11-01T00:00:00.000Z',
+      quota_snapshots: {
+        premium_interactions: {
+          overage_count: 0,
+          overage_permitted: true,
+          percent_remaining: 65.1,
+          quota_remaining: 39078.5,
+          unlimited: false,
+          credits_used: 20910,
+          remaining: 39078,
+          entitlement: 60000,
+        },
+      },
+    })));
+
+    const result = await fetchQuotaForProvider('github-copilot');
+
+    assert.equal(result.ok, true);
+    assert.ok(Math.abs(result.usage!.windows.premium_interactions!.usedPercent! - 34.86916666666666) < 1e-9);
+    assert.equal(result.usage!.windows.premium_interactions!.valueLabel, '20,921.5 / 60,000 used');
+  });
+
+  test('keeps the fractional credit rather than rounding it away', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      quota_reset_date: '2026-09-01T00:00:00Z',
+      quota_snapshots: {
+        premium_interactions: { entitlement: 100, quota_remaining: 65.27 },
+      },
+    })));
+
+    const result = await fetchQuotaForProvider('github-copilot');
+
+    assert.equal(result.ok, true);
+    assert.equal(result.usage!.windows.premium_interactions!.valueLabel, '34.7 / 100 used');
+  });
+
+  test('falls back to entitlement minus remaining when percent_remaining is absent', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      quota_reset_date: '2026-09-01T00:00:00Z',
+      quota_snapshots: {
+        premium_interactions: { entitlement: 1000, remaining: 250 },
+      },
+    })));
+
+    const result = await fetchQuotaForProvider('github-copilot');
+
+    assert.equal(result.ok, true);
+    assert.equal(result.usage!.windows.premium_interactions!.valueLabel, '750 / 1,000 used');
   });
 
   test('reports unlimited plans without a percent', async () => {
