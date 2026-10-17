@@ -114,7 +114,7 @@ which requests only providers enabled for this panel.
 | Subagents | child sessions from `useAllLiveSessions` (`parentID`) + `useAllSessionStatuses`; per-row cost from `computeRollup`'s `perChildCost` (each child's own subtree total, so nested subagent-of-subagent cost rolls up under its immediate parent row) | |
 | Subagent blockers | directory `permission` / `question` maps | one subscription covers every child |
 | Usage | `components/usage/usageGroups.ts` over `useQuotaStore` | grouping shared with the mobile popover; presentation is not |
-| Linked threads | `lib/linkedIssues.ts` over session metadata; state from tracked items | written by the flows that attach an issue or PR; a linked PR that is also the checked-out branch's PR shows the branch summary, as its sidebar row does |
+| Linked threads | `lib/linkedIssues.ts` over session metadata; state from tracked items | written by the flows that attach an issue or PR, and removable from the row; a linked PR that is also the checked-out branch's PR shows the branch summary, as its sidebar row does |
 | Turn stats | `telemetry.ts` over `useSessionMessageRecords` | computed only while expanded and authoritatively idle; either rate above 5,000 tok/s is reported as unknown (see the two-rate description below) |
 | Goal | `useSessionGoal` | respects the Settings toggle |
 | MCP | `useMcpStore` | connect/disconnect reuses the dropdown's actions |
@@ -514,12 +514,27 @@ something other than "tools available".
 ### Linked issues and pull requests
 
 Written by the flows that already attach a thread — sending a message with
-issues, PRs or guest items attached in the composer, and session creation from
-an issue or PR in `NewWorktreeDialog`. There is no manual "link this" control:
-attaching a thread to the work *is* the act of linking it. A message's
-references are written in one metadata patch (`sessionActions.addLinkedIssues`):
-each write replaces the whole list, so one write per item would keep only the
-last.
+issues, PRs or guest items attached in the composer, session creation from an
+issue or PR in `NewWorktreeDialog`, and an agent calling the `openchamber`
+tool's `session.link`. There is no manual "link this" control: attaching a
+thread to the work *is* the act of linking it. A message's references are
+written in one metadata patch (`sessionActions.addLinkedIssues`): each write
+replaces the whole list, so one write per item would keep only the last.
+
+Detaching is a control on the row, not a side effect of another action. An
+agent's link has no composer chip to dismiss once the message is sent, so
+without a control here it would be permanent unless session metadata were
+edited by hand. Each linked row carries a close control in its trailing value
+slot, the place row actions already occupy, with the pinned rows' hover and
+disabled styling; those pins are the behavioural precedent — the panel that
+shows what is attached can detach it — not the visual one. Pressing it writes
+the removal through the same `setLinkedIssue(…, false)` patch the attach flows
+use — one writer for the list, so a link cannot be dropped by a path that does
+not know the others. The write
+is deliberately user-initiated: an agent links but never removes, so it cannot
+drop a link the user set (`packages/web/server/lib/openchamber-sessions/session-link.js`).
+A failed removal reports `chat.workStatus.linkedIssues.unlinkFailed` rather than
+leaving the row looking removed.
 
 Stored in session metadata as a **snapshot** (`lib/linkedIssues.ts`, namespace
 `openchamber.linked_issues`), riding the same `patchSessionMetadata` channel as

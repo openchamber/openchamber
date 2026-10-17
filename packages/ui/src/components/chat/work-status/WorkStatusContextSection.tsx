@@ -1,10 +1,11 @@
 import React from 'react';
+import { toast } from 'sonner';
 import { useI18n } from '@/lib/i18n';
 import { Icon } from '@/components/icon/Icon';
 import { useSkillsStore } from '@/stores/useSkillsStore';
 import { useMcpStore } from '@/stores/useMcpStore';
 import { useSession } from '@/sync/sync-context';
-import { getDistinctLinkedIssues, getLinkedGitHubPullRequests, getLinkedGitLabThreads, getLinkedSidebarIssues, getGitHubThreadRef, getGitLabThreadRef, isLinkedChange } from '@/lib/linkedIssues';
+import { getDistinctLinkedIssues, getLinkedGitHubPullRequests, getLinkedGitLabThreads, getLinkedSidebarIssues, getGitHubThreadRef, getGitLabThreadRef, isLinkedChange, type LinkedIssue } from '@/lib/linkedIssues';
 import { useFreshestSourceControlVisualSummaryForBranch, type PrVisualSummary } from '@/stores/useGitHubPrStatusStore';
 import { useEffectiveGitDirectory, useGitStore } from '@/stores/useGitStore';
 import { useTrackedIssueStates, useTrackedLinearStates, useTrackedPullVisualSummaries } from '@/stores/useTrackedItemsStore';
@@ -13,6 +14,7 @@ import { githubThread, gitlabThread, linearIssue } from '@/lib/trackedItems/from
 import { getPrStatusLabel } from '@/components/session/sidebar/prStatusLabel';
 import { getIssueStateLook, getLinearIssueStateLook } from '@/components/session/sidebar/sessions/sessionPrSummaries';
 import { fetchSessionKnowledgeSummary, setSessionProjectContextPin, type SessionKnowledgeSummary } from '@/lib/sessionKnowledgeApi';
+import * as sessionActions from '@/sync/session-actions';
 import { useProjectContextStore } from '@/stores/useProjectContextStore';
 import { useAgentMemoryStore } from '@/stores/useAgentMemoryStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -152,6 +154,18 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
       if (pins) setKnowledge((current) => ({ ...current, plans: current.plans.filter((plan) => plan.id !== planId) }));
     });
   }, [directory, isDraft, sessionId, setDraftProjectContextPin]);
+
+  // Removing a linked thread, like unpinning: the panel that says what the
+  // session carries is the one that can take it back off, or an agent's link
+  // would be permanent unless metadata were edited by hand. The write is the
+  // same metadata patch the attach flows use, so the row leaves when the
+  // session's stored list loses the entry.
+  const unlinkLinkedThread = React.useCallback((issue: LinkedIssue) => {
+    if (!directory || !sessionId) return;
+    void sessionActions.setLinkedIssue(sessionId, directory, issue, false).catch(() => {
+      toast.error(t('chat.workStatus.linkedIssues.unlinkFailed'));
+    });
+  }, [directory, sessionId, t]);
 
   const memoryCount = visibleKnowledge.memory.global + visibleKnowledge.memory.project;
   const pinnedCount = visibleKnowledge.notes.length + visibleKnowledge.plans.length;
@@ -389,6 +403,23 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
           // In the Tracker, read through this session's project; Cmd or Ctrl,
           // and anything the app cannot show, opens the link.
           onClick={(event) => openTrackerItem(entry.url, directory, event)}
+          // The panel that shows what a session carries is the one that can
+          // take an item back off; a pinned row's control is the precedent.
+          // This sits in the trailing value slot, where row actions live.
+          value={(
+            <button
+              type="button"
+              disabled={!sessionId || !directory}
+              aria-label={t('chat.workStatus.linkedIssues.unlink')}
+              onClick={(event) => {
+                event.stopPropagation();
+                unlinkLinkedThread(entry);
+              }}
+              className="shrink-0 rounded p-0.5 transition-opacity hover:opacity-70 disabled:opacity-40"
+            >
+              <Icon name="close" className="size-3.5 text-muted-foreground" />
+            </button>
+          )}
           ariaLabel={entry.kind === 'linear'
             ? t('chat.workStatus.linkedIssues.openLinear', { identifier: entry.identifier })
             : entry.kind === 'guest' || entry.kind === 'external'
