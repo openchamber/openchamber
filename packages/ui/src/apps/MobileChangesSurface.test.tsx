@@ -1,6 +1,10 @@
 import React, { act } from 'react';
-import { expect, test } from 'bun:test';
+import { expect, spyOn, test } from 'bun:test';
 import { Window } from 'happy-dom';
+import { OpenCode, type FileDiffInfo } from '@opencode/client';
+import { SyncProvider } from '@/sync/sync-context';
+import { opencodeClient } from '@/lib/opencode/client';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 import type { GitLogEntry, GitStatus } from '@/lib/api/types';
 import type { SourceControlAuthStatus, SourceControlUser } from '@/lib/source-control/types';
 
@@ -16,6 +20,13 @@ const CONNECTED: SourceControlAuthStatus = {
     providerUserStatus: 'available', user: USER, current: true, source: 'oauth', status: 'valid',
   }],
 };
+
+// The Changes pane now reads session messages for the turn scope, so the surface
+// must render under a sync runtime. This stub answers the bootstrap with an empty list.
+const SYNC_SDK = OpenCode.make({
+  baseUrl: 'http://opencode.test',
+  fetch: async () => new Response('[]', { headers: { 'content-type': 'application/json' } }),
+});
 
 test('mobile comparisons drill into files, retry, resume, change source, and yield to external working diffs', async () => {
   const dom = new Window({ url: 'http://localhost' });
@@ -120,11 +131,11 @@ test('mobile comparisons drill into files, retry, resume, change source, and yie
   document.body.append(container);
   const root = createRoot(container);
   const render = () => act(async () => {
-    root.render(<I18nProvider><RuntimeAPIContext.Provider value={apis}>
+    root.render(<SyncProvider sdk={SYNC_SDK} directory={directory}><I18nProvider><RuntimeAPIContext.Provider value={apis}>
       <MobileChangesPane rootDirectory={directory}
         repository={{ rootIsGitRepo: true, gitDirectory: directory, nestedRepos: null, nestedRepoSelection: null }}
         visible={visible} initialDiff={initialDiff} />
-    </RuntimeAPIContext.Provider></I18nProvider>);
+    </RuntimeAPIContext.Provider></I18nProvider></SyncProvider>);
   });
   const click = async (selector: string) => {
     const element = document.querySelector<HTMLElement>(selector);
@@ -351,11 +362,11 @@ test('bounds Revert All fan-out to two in-flight revert requests', async () => {
   };
   try {
     await act(async () => {
-      root.render(<I18nProvider><RuntimeAPIContext.Provider value={apis}>
+      root.render(<SyncProvider sdk={SYNC_SDK} directory="/repo"><I18nProvider><RuntimeAPIContext.Provider value={apis}>
         <MobileChangesPane rootDirectory="/repo"
           repository={{ rootIsGitRepo: true, gitDirectory: '/repo', nestedRepos: null, nestedRepoSelection: null }}
           visible />
-      </RuntimeAPIContext.Provider></I18nProvider>);
+      </RuntimeAPIContext.Provider></I18nProvider></SyncProvider>);
     });
     const revertAll = [...container.querySelectorAll('button')].find((button) => button.textContent?.trim() === 'Revert all');
     if (!revertAll) throw new Error('Missing Revert all');
@@ -375,6 +386,243 @@ test('bounds Revert All fan-out to two in-flight revert requests', async () => {
     await settle(() => !container.textContent?.includes('Revert all'));
   } finally {
     await act(async () => root.unmount());
+    globalThis.fetch = originalFetch;
+    await dom.happyDOM.abort();
+    for (const [name, descriptor] of originals) {
+      if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+      else Reflect.deleteProperty(globalThis, name);
+    }
+  }
+}, 30_000);
+
+// The desktop Diff view computes the last turn's changes on request from the
+// session's snapshots. The mobile Changes surface mirrors it: a Last turn scope
+// in the selector, a fetch keyed on the current session, and a read-only list
+// whose status letters and counts come from the turn diff rather than from git.
+test('mobile changes last turn scope lists the turn diffs, opens one, and shows the empty copy', async () => {
+  const dom = new Window({ url: 'http://localhost' });
+  dom.happyDOM.setWindowSize({ width: 390, height: 844 });
+  const originals = new Map<string, PropertyDescriptor | undefined>();
+  const globals = {
+    window: dom, document: dom.document, navigator: dom.navigator, location: dom.location, localStorage: dom.localStorage,
+    Element: dom.Element, HTMLElement: dom.HTMLElement, HTMLInputElement: dom.HTMLInputElement, Node: dom.Node,
+    customElements: dom.customElements, CSSStyleSheet: dom.CSSStyleSheet,
+    Event: dom.Event, CustomEvent: dom.CustomEvent, KeyboardEvent: dom.KeyboardEvent, MouseEvent: dom.MouseEvent,
+    MutationObserver: dom.MutationObserver, ResizeObserver: dom.ResizeObserver,
+    getComputedStyle: dom.getComputedStyle.bind(dom), requestAnimationFrame: dom.requestAnimationFrame.bind(dom),
+    cancelAnimationFrame: dom.cancelAnimationFrame.bind(dom), IS_REACT_ACT_ENVIRONMENT: true,
+  };
+  for (const [name, value] of Object.entries(globals)) {
+    originals.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
+    Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
+  }
+  const originalFetch = globalThis.fetch;
+  const status: GitStatus = { current: 'feature', tracking: null, ahead: 0, behind: 0, files: [], isClean: true, diffStats: { staged: {}, working: {} } };
+  globalThis.fetch = Object.assign(async (input: RequestInfo | URL) => {
+    const url = new URL(input instanceof Request ? input.url : String(input), 'http://localhost');
+    if (url.pathname === '/api/fs/home' || url.pathname === '/api/session-folders') return new Promise<Response>(() => {});
+    switch (url.pathname) {
+      case '/api/git/remotes': return Response.json([]);
+      case '/api/git/identities': return Response.json([]);
+      case '/api/git/global-identity': return Response.json(null);
+      case '/api/git/remote-url': return Response.json({ url: null });
+      case '/api/git/branch-base': return Response.json({ base: null });
+      case '/api/git/status': return Response.json(status);
+      case '/api/git/branches': return Response.json({ all: ['feature', 'main'], current: 'feature', branches: {}, defaultBranches: { origin: 'main' } });
+      case '/api/source-control/binding': return Response.json({
+        status: 'bound', revision: 1,
+        repository: { supported: true, repositoryId: 'repo', configRevision: 'rev', bare: false,
+          remotes: [{ name: 'origin', fetch: ENDPOINT, push: ENDPOINT }] },
+        binding: { repositoryId: 'repo', configRevision: 'rev', revision: 1, state: 'bound',
+          providers: [{ provider: 'github', instance: 'github.com', accountId: ACCOUNT_ID, primaryRemote: 'origin', readiness: 'ready', endpoint: ENDPOINT }],
+          remotes: [], auxiliary: [] },
+      });
+      default: return Response.json({});
+    }
+  }, originalFetch);
+
+  const turnDiffs = spyOn(opencodeClient, 'getSessionTurnDiff').mockResolvedValue([
+    { file: 'src/added.ts', status: 'added', additions: 1, deletions: 0,
+      patch: 'diff --git a/src/added.ts b/src/added.ts\nindex 1111111..2222222 100644\nBinary files a/src/added.ts and b/src/added.ts differ\n' },
+    { file: 'src/modified.ts', status: 'modified', additions: 1, deletions: 1,
+      patch: 'diff --git a/src/modified.ts b/src/modified.ts\nindex 3333333..4444444 100644\nBinary files a/src/modified.ts and b/src/modified.ts differ\n' },
+  ]);
+  const { createRoot } = await import('react-dom/client');
+  const { I18nProvider } = await import('@/lib/i18n');
+  const { RuntimeAPIContext } = await import('@/contexts/runtimeAPIContext');
+  const { createWebAPIs } = await import('../../../web/src/api/index');
+  const { useGitStore } = await import('@/stores/useGitStore');
+  const { MobileChangesPane } = await import('./MobileChangesSurface');
+  const apis = createWebAPIs();
+  useGitStore.getState().setActiveDirectory('/repo');
+  const previous = useGitStore.getState().getDirectoryState('/repo');
+  if (!previous) throw new Error('Missing repository state');
+  const now = Date.now();
+  const directories = new Map(useGitStore.getState().directories);
+  directories.set('/repo', {
+    ...previous, status, isGitRepo: true,
+    branches: { all: ['feature', 'main'], current: 'feature', branches: {}, defaultBranches: { origin: 'main' } },
+    log: { all: [], latest: null, total: 0 }, identity: { userName: 'Test Author', userEmail: 'test@example.com' },
+    lastStatusFetch: now, lastBranchesFetch: now, lastLogFetch: now, lastIdentityFetch: now, lastRepoCheckAt: now,
+  });
+  useGitStore.setState({ directories });
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  const click = async (selector: string) => {
+    const element = document.querySelector<HTMLElement>(selector);
+    if (!element) throw new Error(`Missing ${selector}`);
+    await act(async () => { element.click(); });
+  };
+  const chooseMode = async (label: string) => {
+    await click('[aria-label="Select change mode"]');
+    const option = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find((element) => element.textContent === label);
+    if (!option) throw new Error(`Missing mode ${label}`);
+    await act(async () => { option.click(); });
+  };
+  const openFile = async (path: string) => {
+    const button = container.querySelector(`[title="${path}"]`)?.closest('button');
+    if (!button) throw new Error(`Missing file ${path}`);
+    await act(async () => { button.click(); });
+  };
+  try {
+    await act(async () => {
+      root.render(<SyncProvider sdk={SYNC_SDK} directory="/repo"><I18nProvider><RuntimeAPIContext.Provider value={apis}>
+        <MobileChangesPane rootDirectory="/repo"
+          repository={{ rootIsGitRepo: true, gitDirectory: '/repo', nestedRepos: null, nestedRepoSelection: null }}
+          visible />
+      </RuntimeAPIContext.Provider></I18nProvider></SyncProvider>);
+    });
+    await act(async () => { useSessionUIStore.setState({ currentSessionId: 'ses_turn' }); });
+    // The selector offers Last turn and choosing it asks the client for the turn.
+    await chooseMode('Last turn');
+    expect(turnDiffs.mock.calls[0]).toEqual(['ses_turn', { directory: '/repo' }]);
+    expect(container.querySelector('[title="src/added.ts"]')).not.toBeNull();
+    expect(container.querySelector('[title="src/modified.ts"]')).not.toBeNull();
+    // Status letters and counts are the turn diff's, not the working tree's.
+    const added = container.querySelector('[title="src/added.ts"]')?.closest('button');
+    const modified = container.querySelector('[title="src/modified.ts"]')?.closest('button');
+    expect(added?.textContent).toContain('A');
+    expect(added?.textContent).toContain('+1 -0');
+    expect(modified?.textContent).toContain('M');
+    expect(modified?.textContent).toContain('+1 -1');
+    await openFile('src/added.ts');
+    expect(container.querySelector('h2')?.textContent).toBe('src/added.ts');
+    expect(container.textContent).toContain('Last turn');
+    expect(container.textContent).toContain('Content of this file cannot be viewed.');
+    await click('[aria-label="Back"]');
+    // An empty turn renders the desktop's empty copy rather than a blank list.
+    turnDiffs.mockResolvedValue([]);
+    await chooseMode('Changes');
+    await chooseMode('Last turn');
+    expect(container.textContent).toContain('No last turn changes to display');
+  } finally {
+    await act(async () => root.unmount());
+    turnDiffs.mockRestore();
+    globalThis.fetch = originalFetch;
+    await dom.happyDOM.abort();
+    for (const [name, descriptor] of originals) {
+      if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+      else Reflect.deleteProperty(globalThis, name);
+    }
+  }
+}, 30_000);
+
+
+// The turn fetch is async, so the scope's first paint happens before any effect
+// can flip a loading flag. The list must decide loading during render instead of
+// showing the empty copy, which is only correct once a fetch has settled.
+test('mobile changes last turn scope paints loading before the turn fetch settles', async () => {
+  const dom = new Window({ url: 'http://localhost' });
+  dom.happyDOM.setWindowSize({ width: 390, height: 844 });
+  const originals = new Map<string, PropertyDescriptor | undefined>();
+  const globals = {
+    window: dom, document: dom.document, navigator: dom.navigator, location: dom.location, localStorage: dom.localStorage,
+    Element: dom.Element, HTMLElement: dom.HTMLElement, HTMLInputElement: dom.HTMLInputElement, Node: dom.Node,
+    customElements: dom.customElements, CSSStyleSheet: dom.CSSStyleSheet,
+    Event: dom.Event, CustomEvent: dom.CustomEvent, KeyboardEvent: dom.KeyboardEvent, MouseEvent: dom.MouseEvent,
+    MutationObserver: dom.MutationObserver, ResizeObserver: dom.ResizeObserver,
+    getComputedStyle: dom.getComputedStyle.bind(dom), requestAnimationFrame: dom.requestAnimationFrame.bind(dom),
+    cancelAnimationFrame: dom.cancelAnimationFrame.bind(dom), IS_REACT_ACT_ENVIRONMENT: true,
+  };
+  for (const [name, value] of Object.entries(globals)) {
+    originals.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
+    Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
+  }
+  const originalFetch = globalThis.fetch;
+  const status: GitStatus = { current: 'feature', tracking: null, ahead: 0, behind: 0, files: [], isClean: true, diffStats: { staged: {}, working: {} } };
+  globalThis.fetch = Object.assign(async (input: RequestInfo | URL) => {
+    const url = new URL(input instanceof Request ? input.url : String(input), 'http://localhost');
+    if (url.pathname === '/api/fs/home' || url.pathname === '/api/session-folders') return new Promise<Response>(() => {});
+    switch (url.pathname) {
+      case '/api/git/remotes': return Response.json([]);
+      case '/api/git/identities': return Response.json([]);
+      case '/api/git/global-identity': return Response.json(null);
+      case '/api/git/remote-url': return Response.json({ url: null });
+      case '/api/git/branch-base': return Response.json({ base: null });
+      case '/api/git/status': return Response.json(status);
+      case '/api/git/branches': return Response.json({ all: ['feature', 'main'], current: 'feature', branches: {}, defaultBranches: { origin: 'main' } });
+      case '/api/source-control/binding': return Response.json({ status: 'unbound', revision: 1, repository: { supported: true, repositoryId: 'repo', configRevision: 'rev', bare: false, remotes: [] } });
+      default: return Response.json({});
+    }
+  }, originalFetch);
+
+  let releaseTurn: (files: FileDiffInfo[]) => void = () => {};
+  const pendingTurn = new Promise<FileDiffInfo[]>((resolve) => { releaseTurn = resolve; });
+  const turnDiffs = spyOn(opencodeClient, 'getSessionTurnDiff').mockImplementation(() => pendingTurn);
+  const { createRoot } = await import('react-dom/client');
+  const { I18nProvider } = await import('@/lib/i18n');
+  const { RuntimeAPIContext } = await import('@/contexts/runtimeAPIContext');
+  const { createWebAPIs } = await import('../../../web/src/api/index');
+  const { useGitStore } = await import('@/stores/useGitStore');
+  const { MobileChangesPane } = await import('./MobileChangesSurface');
+  const apis = createWebAPIs();
+  useGitStore.getState().setActiveDirectory('/repo');
+  const previous = useGitStore.getState().getDirectoryState('/repo');
+  if (!previous) throw new Error('Missing repository state');
+  const now = Date.now();
+  const directories = new Map(useGitStore.getState().directories);
+  directories.set('/repo', {
+    ...previous, status, isGitRepo: true,
+    branches: { all: ['feature', 'main'], current: 'feature', branches: {}, defaultBranches: { origin: 'main' } },
+    log: { all: [], latest: null, total: 0 }, identity: { userName: 'Test Author', userEmail: 'test@example.com' },
+    lastStatusFetch: now, lastBranchesFetch: now, lastLogFetch: now, lastIdentityFetch: now, lastRepoCheckAt: now,
+  });
+  useGitStore.setState({ directories });
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  const chooseMode = async (label: string) => {
+    const trigger = document.querySelector<HTMLElement>('[aria-label="Select change mode"]');
+    if (!trigger) throw new Error('Missing mode trigger');
+    await act(async () => { trigger.click(); });
+    const option = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find((element) => element.textContent === label);
+    if (!option) throw new Error(`Missing mode ${label}`);
+    await act(async () => { option.click(); });
+  };
+  try {
+    await act(async () => {
+      root.render(<SyncProvider sdk={SYNC_SDK} directory="/repo"><I18nProvider><RuntimeAPIContext.Provider value={apis}>
+        <MobileChangesPane rootDirectory="/repo"
+          repository={{ rootIsGitRepo: true, gitDirectory: '/repo', nestedRepos: null, nestedRepoSelection: null }}
+          visible />
+      </RuntimeAPIContext.Provider></I18nProvider></SyncProvider>);
+    });
+    await act(async () => { useSessionUIStore.setState({ currentSessionId: 'ses_turn' }); });
+    // The fetch is still in flight here: the first paint must be loading, never
+    // the "no changes" copy.
+    await chooseMode('Last turn');
+    expect(container.textContent).toContain('Loading changes...');
+    expect(container.textContent).not.toContain('No last turn changes to display');
+    await act(async () => {
+      releaseTurn([{ file: 'src/late.ts', status: 'modified', additions: 2, deletions: 1,
+        patch: 'diff --git a/src/late.ts b/src/late.ts\nindex 5555555..6666666 100644\nBinary files a/src/late.ts and b/src/late.ts differ\n' }]);
+    });
+    expect(container.querySelector('[title="src/late.ts"]')).not.toBeNull();
+    expect(container.textContent).not.toContain('Loading changes...');
+  } finally {
+    await act(async () => root.unmount());
+    turnDiffs.mockRestore();
     globalThis.fetch = originalFetch;
     await dom.happyDOM.abort();
     for (const [name, descriptor] of originals) {
