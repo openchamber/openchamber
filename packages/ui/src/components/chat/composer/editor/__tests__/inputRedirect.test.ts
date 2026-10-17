@@ -150,6 +150,45 @@ test('a paste with nothing focused goes through the composer', () => {
     expect(main.view.state.doc.toString()).toBe('draft pasted');
 });
 
+test('a paste stays with the text field that has focus, even when it targets elsewhere', () => {
+    // The Linux middle-click paste case: the terminal's textarea has focus, but
+    // Chromium dispatches the primary-selection paste at the element under the
+    // pointer (its canvas) rather than the focused field. The composer must not
+    // claim it, or the text lands in the chat instead of the terminal.
+    const main = mountColumn('main', 'draft ');
+    const redirect = createComposerInputRedirect();
+    const terminal = document.createElement('textarea');
+    document.body.append(terminal);
+    terminal.focus();
+
+    const data = new DataTransfer();
+    data.setData('text/plain', 'from-primary-selection');
+    const event = new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true });
+    document.body.dispatchEvent(event);
+
+    expect(redirect.redirectPaste(event)).toBe(false);
+    expect(event.defaultPrevented).toBe(false);
+    expect(main.view.state.doc.toString()).toBe('draft ');
+});
+
+test('a focused button does not keep a paste away from the composer', () => {
+    // The focus gate is about fields that take text. A button consumes no
+    // paste, so a paste whose target takes no text still belongs to the draft,
+    // exactly as it did before the terminal fix.
+    const main = mountColumn('main', 'draft ');
+    const redirect = createComposerInputRedirect();
+    main.button.focus();
+    expect(document.activeElement).toBe(main.button);
+
+    const data = new DataTransfer();
+    data.setData('text/plain', 'pasted');
+    const event = new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true });
+    document.body.dispatchEvent(event);
+
+    expect(redirect.redirectPaste(event)).toBe(true);
+    expect(main.view.state.doc.toString()).toBe('draft pasted');
+});
+
 test('coming back to the window puts the caret in the composer unless focus takes text', () => {
     const main = mountColumn('main');
     const redirect = createComposerInputRedirect();

@@ -53,6 +53,20 @@ function isOpenTarget(event: Event): boolean {
     return !hasFloatingLayer();
 }
 
+/**
+ * Whether the element that has focus takes text on its own. A paste belongs to
+ * it, not to the composer, even when the event targets elsewhere: on Linux
+ * Chromium dispatches a middle-click primary-selection paste at the element
+ * under the pointer — a terminal's canvas — rather than the focused textarea,
+ * so `event.target` alone would hand the terminal's paste to the chat.
+ */
+function focusedElementTakesInput(): boolean {
+    // Only a field that takes text itself keeps the paste. A focused button or
+    // link consumes nothing, so a paste with no text target still belongs to
+    // the composer — the same line `refocusAfterWindowFocus` draws.
+    return Boolean(document.activeElement?.closest(EDITABLE_SELECTOR));
+}
+
 function isOnScreen(editor: HTMLElement | null): editor is HTMLElement {
     return Boolean(editor && editor.getClientRects().length > 0);
 }
@@ -119,6 +133,12 @@ export function createComposerInputRedirect(): ComposerInputRedirect {
         redirectPaste(event) {
             const data = event.clipboardData;
             if (!data || !isOpenTarget(event)) return false;
+            // A paste belongs to the focused text field even when it targets
+            // elsewhere: the terminal's middle-click paste is dispatched at its
+            // canvas while its textarea holds focus, and the composer must not
+            // take it. Keys are left alone — a keydown already targets the
+            // focused element, so `isOpenTarget` catches that case on its own.
+            if (focusedElementTakesInput()) return false;
             const view = targetView();
             if (!view) return false;
             event.preventDefault();
