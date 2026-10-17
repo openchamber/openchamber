@@ -24,6 +24,7 @@ import { cn } from '@/lib/utils';
 import { ContextPanelHeaderToolbar } from './contextPanelHeaderSlot';
 import { useInContextPanelHeader } from './contextPanelHeaderSlotContext';
 import { toolContentShellChars } from '@/lib/opencode/toolContentShells';
+import { composeContextBreakdown, type ContextBuckets } from './contextBreakdown';
 
 type SessionMessage = { info: Message; parts: Part[] };
 
@@ -46,13 +47,6 @@ type TokenBreakdown = {
   cacheRead: number;
   cacheWrite: number;
   total: number;
-};
-
-type ContextBuckets = {
-  user: number;
-  assistant: number;
-  tool: number;
-  other: number;
 };
 
 const EMPTY_BREAKDOWN: TokenBreakdown = {
@@ -365,11 +359,17 @@ export const ContextPanelContent: React.FC = () => {
 
     const computedBreakdown = computeContextBreakdown(sessionMessages, systemPrompt);
 
-    const userTokens = computedBreakdown.user;
-    const assistantTokens = computedBreakdown.assistant;
-    const toolTokens = computedBreakdown.tool;
-    const otherTokens = Math.max(0, tokenBreakdown.input - userTokens - assistantTokens - toolTokens);
-    const breakdownTotal = userTokens + assistantTokens + toolTokens + otherTokens;
+    // The bar sits under the readout, so it is measured against the same window
+    // the readout reports, not against its own estimate. `other` is then the
+    // real unattributed remainder — prompt, schemas, skills, estimation error —
+    // rather than a leftover clamped to zero.
+    //
+    // A completed compaction record can still carry the summarizing turn's
+    // tokens. The readout shows `—` for that state because the fill is unknown,
+    // so the bar must not denominate against the pre-compaction window either;
+    // zero sends it to the estimate, which is the same fallback the panel
+    // documents for an unknown window.
+    const breakdown = composeContextBreakdown(computedBreakdown, { windowTokens: tokenBreakdown.total, compacted: isCompacted });
 
     const firstMessageTs = sessionMessages[0]?.info?.time?.created;
     const lastMessageTs = sessionMessages.length > 0
@@ -389,13 +389,8 @@ export const ContextPanelContent: React.FC = () => {
       cacheHitRate,
       totalAssistantCost,
       contextLimit,
-      breakdown: {
-        user: userTokens,
-        assistant: assistantTokens,
-        tool: toolTokens,
-        other: otherTokens,
-      },
-      breakdownTotal,
+      breakdown,
+      breakdownTotal: breakdown.total,
     };
   }, [currentSessionId, providers, sessionMessages, sessions, t]);
 
