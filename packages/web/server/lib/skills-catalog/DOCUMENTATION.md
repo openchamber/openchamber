@@ -86,7 +86,7 @@ The following functions are internal helpers used by exported functions:
 - `ok`: Boolean indicating success.
 - `normalizedRepo`: Normalized repo string (`owner/repo`).
 - `effectiveSubpath`: Effective subpath used for scanning (may be from source string or defaultSubpath).
-- `items`: Array of skill items with `{ repoSource, repoSubpath, skillDir, skillName, frontmatterName, description, installable, warnings }`.
+- `items`: Array of skill items with `{ repoSource, repoSubpath, skillDir, skillName, frontmatterName, description, installable, warnings }`. `skillDir` is the directory relative to the repository root and already includes `repoSubpath`, so a consumer that builds a repository path must not prepend the subpath again. `repoSubpath` describes the source (and is what a reinstall passes back), not a prefix to strip from `skillDir`.
 - `error`: Error object with `{ kind, message }` on failure.
 
 ### Install Skills Response
