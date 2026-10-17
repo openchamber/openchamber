@@ -3,9 +3,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { RuntimeUrlQuery, RuntimeUrlResolver } from '@openchamber/ui/lib/runtime-url';
 
 const runtimeFetchMock = vi.fn();
+const searchFilesMock = vi.fn();
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.clearAllMocks();
 });
 
 vi.mock('@openchamber/ui/lib/runtime-fetch', () => ({
@@ -275,6 +277,36 @@ describe('createWebFilesAPI', () => {
 
     expect(registerPlugin).toHaveBeenCalledWith('FileShare');
     expect(share).toHaveBeenCalledWith({ fileName: 'hello.txt', mimeType: 'text/plain', data: btoa('hello') });
+  });
+
+  it('delegates file search to file.find and maps hits', async () => {
+    const { createWebFilesAPI } = await import('./files');
+    const api = createWebFilesAPI({ urls, getDirectory: () => '/workspace', searchFiles: searchFilesMock });
+    searchFilesMock.mockResolvedValueOnce([
+      { name: 'package.json', path: '/workspace/package.json', relativePath: 'package.json' },
+    ]);
+
+    const results = await api.search({ directory: '/workspace', query: 'package', maxResults: 40 });
+
+    expect(searchFilesMock).toHaveBeenCalledWith('package', {
+      directory: '/workspace',
+      limit: 40,
+      type: 'file',
+    });
+    expect(results).toEqual([{ path: '/workspace/package.json', preview: ['package.json'] }]);
+  });
+
+  it('propagates search failures instead of returning empty', async () => {
+    const { createWebFilesAPI } = await import('./files');
+    const api = createWebFilesAPI({ urls, getDirectory: () => '/workspace', searchFiles: searchFilesMock });
+    searchFilesMock.mockRejectedValueOnce(new Error('gone'));
+
+    await expect(api.search({ directory: '/workspace', query: 'package' })).rejects.toThrow('gone');
+    expect(searchFilesMock).toHaveBeenCalledWith('package', {
+      directory: '/workspace',
+      limit: undefined,
+      type: 'file',
+    });
   });
 });
 

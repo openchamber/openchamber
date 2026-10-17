@@ -8,6 +8,7 @@ import type {
   FileSearchResult,
   FilesAPI,
 } from '@openchamber/ui/lib/api/types';
+import { opencodeClient } from '@openchamber/ui/lib/opencode/client';
 import {
   FilesystemError,
   parseFilesystemErrorReason,
@@ -19,10 +20,16 @@ import { shareFileFromNativeApp } from '@openchamber/ui/lib/nativeFileShare';
 
 const normalizePath = (path: string): string => path.replace(/\\/g, '/');
 
+type SearchFiles = typeof opencodeClient.searchFiles;
+
 interface WebFilesAPIOptions {
   urls?: unknown;
   getDirectory?: () => string | undefined;
+  /** File search; defaults to OpenCode's `file.find` through the shared client. */
+  searchFiles?: SearchFiles;
 }
+
+const defaultSearchFiles: SearchFiles = (query, options) => opencodeClient.searchFiles(query, options);
 
 type WebDirectoryEntry = {
   name?: string;
@@ -98,7 +105,7 @@ const contentSearchErrorSchema = z.object({
   reason: z.string().optional(),
 });
 
-export const createWebFilesAPI = ({ getDirectory }: WebFilesAPIOptions): FilesAPI => ({
+export const createWebFilesAPI = ({ getDirectory, searchFiles = defaultSearchFiles }: WebFilesAPIOptions): FilesAPI => ({
   async listDirectory(path: string, options): Promise<DirectoryListResult> {
     const target = normalizePath(path);
     const params = new URLSearchParams();
@@ -133,37 +140,20 @@ export const createWebFilesAPI = ({ getDirectory }: WebFilesAPIOptions): FilesAP
   },
 
   async search(payload: FileSearchQuery): Promise<FileSearchResult[]> {
-    const params = new URLSearchParams();
-
+    // file.find answers file search on OpenCode 2.x; /api/find/file has no
+    // route there and falls through the generic proxy to a 404.
     const directory = normalizePath(payload.directory);
-    if (directory) {
-      params.set('directory', directory);
-    }
-
-    params.set('query', payload.query);
-    params.set('dirs', 'false');
-    params.set('type', 'file');
-
-    if (typeof payload.maxResults === 'number' && Number.isFinite(payload.maxResults)) {
-      params.set('limit', String(payload.maxResults));
-    }
-
-    const response = await runtimeFetch('/api/find/file', {
-      query: params,
-      headers: directoryHeaders(getDirectory, undefined, directory),
+    const hits = await searchFiles(payload.query, {
+      directory,
+      limit: typeof payload.maxResults === 'number' && Number.isFinite(payload.maxResults)
+        ? payload.maxResults
+        : undefined,
+      type: 'file',
     });
 
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: response.statusText }));
-      throw new Error((error as { error?: string }).error || 'Failed to search files');
-    }
-
-    const result = (await response.json()) as string[];
-    const files = Array.isArray(result) ? result : [];
-
-    return files.map((relativePath) => ({
-      path: normalizePath(`${directory}/${relativePath}`),
-      preview: [normalizePath(relativePath)],
+    return hits.map((hit) => ({
+      path: normalizePath(hit.path),
+      preview: [normalizePath(hit.relativePath)],
     }));
   },
 
