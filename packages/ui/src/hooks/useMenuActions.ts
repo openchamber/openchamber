@@ -1,7 +1,8 @@
 import React from 'react';
 import { toast } from '@/components/ui';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { getSyncSessions } from '@/sync/sync-refs';
+import { readOrderedActiveSessions, stepSession } from '@/lib/sessionListOrder';
+import { resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUIStore';
@@ -135,20 +136,12 @@ export const useMenuActions = (
   }, []);
 
   const navigateSession = React.useCallback((direction: -1 | 1) => {
-    const sessions = getSyncSessions();
-    if (sessions.length === 0) return;
-
     const currentSessionId = useSessionUIStore.getState().currentSessionId;
-    const currentIndex = sessions.findIndex((session) => session.id === currentSessionId);
-    let nextIndex = direction > 0 ? 0 : sessions.length - 1;
-    if (currentIndex >= 0) {
-      nextIndex = (currentIndex + direction + sessions.length) % sessions.length;
-    }
-    const nextSession = sessions[nextIndex];
+    const nextSession = stepSession(readOrderedActiveSessions(), currentSessionId, direction);
     if (!nextSession) return;
 
     setSessionSwitcherOpen(false);
-    useSessionUIStore.getState().setCurrentSession(nextSession.id);
+    useSessionUIStore.getState().setCurrentSession(nextSession.id, resolveGlobalSessionDirectory(nextSession));
   }, [setSessionSwitcherOpen]);
 
   const navigateProject = React.useCallback((direction: -1 | 1) => {
