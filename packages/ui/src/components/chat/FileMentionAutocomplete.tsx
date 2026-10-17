@@ -24,6 +24,7 @@ import {
 } from './fileMentionResults';
 import { matchesRankQuery, rankByQuery } from '@/lib/search/fuzzySearch';
 import { AutocompleteRowTooltip } from './composer/ui/AutocompleteRowTooltip';
+import { useAutocompleteDetails } from './composer/ui/useAutocompleteDetails';
 
 /** Subagents listed before the user types; the rest are a keystroke away. */
 const AGENTS_SHOWN_WITHOUT_QUERY = 6;
@@ -109,6 +110,8 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
   // Only the selected row scrolls an overflowing path, so only it is measured.
   const [selectedOverflow, setSelectedOverflow] = React.useState<{ index: number; duration: number } | null>(null);
   const itemRefs = React.useRef<(HTMLDivElement | null)[]>([]);
+  const { listRef, detailsVisible, onListScroll, onItemMouseMove, onKeyboardNavigate } =
+    useAutocompleteDetails(selectedIndex, itemRefs);
   const labelRefs = React.useRef<(HTMLSpanElement | null)[]>([]);
   const measureRefs = React.useRef<(HTMLSpanElement | null)[]>([]);
   const containerRef = React.useRef<HTMLDivElement | null>(null);
@@ -363,12 +366,6 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
   }, [selectedIndex]);
 
   React.useEffect(() => {
-    itemRefs.current[selectedIndex]?.scrollIntoView({
-      block: 'nearest'
-    });
-  }, [selectedIndex]);
-
-  React.useEffect(() => {
     let frameId: number | null = null;
 
     const updateOverflow = () => {
@@ -453,11 +450,13 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
       }
 
       if (key === 'ArrowDown') {
+        onKeyboardNavigate();
         setSelectedIndex((prev) => (prev + 1) % total);
         return;
       }
 
       if (key === 'ArrowUp') {
+        onKeyboardNavigate();
         setSelectedIndex((prev) => (prev - 1 + total) % total);
         return;
       }
@@ -480,7 +479,7 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
         }
       }
     }
-  }), [visibleResults, visibleRecentFiles, visibleAgents, onClose, handleFileSelect, handleAgentPick]);
+  }), [visibleResults, visibleRecentFiles, visibleAgents, onClose, handleFileSelect, handleAgentPick, onKeyboardNavigate]);
 
   const getFileIcon = (file: FileInfo) => {
     const ext = file.extension?.toLowerCase();
@@ -512,7 +511,7 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
         className="absolute z-[100] min-w-0 w-full max-w-[640px] max-h-64 oc-glass-popover oc-glass-floating rounded-xl bottom-full mb-2 inset-s-0 flex flex-col"
         style={mobileMaxHeight !== undefined ? { ...style, maxHeight: mobileMaxHeight } : style}
       >
-        <ScrollableOverlay preventOverscroll outerClassName="flex-1 min-h-0" className="px-0">
+        <ScrollableOverlay ref={listRef} onScroll={onListScroll} preventOverscroll outerClassName="flex-1 min-h-0" className="px-0">
         {loading ? (
           <div className="flex items-center justify-center py-4">
             <Icon name="refresh" className="h-4 w-4 animate-spin text-muted-foreground" />
@@ -522,7 +521,7 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
             {visibleAgents.map((agent, index) => {
               const isSelected = selectedIndex === index;
               return (
-                <AutocompleteRowTooltip description={agent.description} active={!isMobile && isSelected}>
+                <AutocompleteRowTooltip description={agent.description} active={!isMobile && isSelected && detailsVisible}>
                 <div
                   key={`agent-${agent.name}`}
                   ref={(el) => { itemRefs.current[index] = el; }}
@@ -531,7 +530,7 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
                     isSelected && 'bg-interactive-selection',
                   )}
                   onClick={() => handleAgentPick(agent.name)}
-                  onMouseMove={() => setSelectedIndex(index)}
+                  onMouseMove={() => { onItemMouseMove(); setSelectedIndex(index); }}
                 >
                   <div className="min-w-0 flex-1">
                     <div className="font-semibold truncate">@{agent.name}</div>
@@ -565,7 +564,7 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
                     isSelected && "bg-interactive-selection"
                   )}
                   onClick={() => handleFileSelect(file)}
-                  onMouseMove={() => setSelectedIndex(rowIndex)}
+                  onMouseMove={() => { onItemMouseMove(); setSelectedIndex(rowIndex); }}
                 >
                   {getFileIcon(file)}
                   <span
@@ -618,7 +617,7 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
                       isSelected && "bg-interactive-selection"
                   )}
                   onClick={() => handleFileSelect(file)}
-                  onMouseMove={() => setSelectedIndex(rowIndex)}
+                  onMouseMove={() => { onItemMouseMove(); setSelectedIndex(rowIndex); }}
                 >
                   {file.kind === 'directory'
                     ? <Icon name="folder-3-fill" className="h-3.5 w-3.5 text-primary/60" />
