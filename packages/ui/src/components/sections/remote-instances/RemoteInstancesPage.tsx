@@ -78,6 +78,7 @@ import { runtimeKeyForDesktopHost } from '@/lib/desktopCurrentHost';
 import { useWaitingBlink } from '@/hooks/useDurationTicker';
 import { Spinner } from '@/components/ui/spinner';
 import { useSshConfirmation } from './useSshConfirmation';
+import { useReconnectStuck } from './useReconnectStuck';
 
 const randomPort = (): number => {
   return Math.floor(20000 + Math.random() * 30000);
@@ -1132,24 +1133,8 @@ export const RemoteInstancesPage: React.FC = () => {
   const statusPhase = status?.phase;
   const isReady = statusPhase === 'ready';
   const isReconnecting = statusPhase === 'degraded';
-  const [reconnectAppearsStuck, setReconnectAppearsStuck] = React.useState(false);
-  React.useEffect(() => {
-    if (!isReconnecting || !status) {
-      setReconnectAppearsStuck(false);
-      return;
-    }
-    setReconnectAppearsStuck(false);
-    const remaining = status.updatedAtMs + 12_000 - Date.now();
-    if (remaining <= 0) {
-      setReconnectAppearsStuck(true);
-      return;
-    }
-    const timer = window.setTimeout(() => setReconnectAppearsStuck(true), remaining);
-    return () => {
-      window.clearTimeout(timer);
-      setReconnectAppearsStuck(false);
-    };
-  }, [isReconnecting, status]);
+  const statusUpdatedAtMs = status?.updatedAtMs;
+  const reconnectAppearsStuck = useReconnectStuck(isReconnecting, statusUpdatedAtMs);
   const isConnecting = isConnectingPhase(statusPhase);
   const isBusy = isConnecting || isReconnecting;
   const canDisconnect = isReady || isBusy;

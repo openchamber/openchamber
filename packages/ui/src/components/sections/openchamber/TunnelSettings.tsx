@@ -15,7 +15,8 @@ import { openExternalUrl } from '@/lib/url';
 import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
 import { formatTimeForPreference } from '@/lib/timeFormat';
 import { useUIStore, type TimeFormatPreference } from '@/stores/useUIStore';
-import { useDurationTickerNow, useWaitingBlink } from '@/hooks/useDurationTicker';
+import { useWaitingBlink } from '@/hooks/useDurationTicker';
+import { useTunnelClock } from './useTunnelClock';
 import { SettingsChipGroup, SettingsFieldRow, SettingsSection, SettingsStackedField, SettingsGroupTitle, SETTINGS_FIELD_LABEL_CLASS, SETTINGS_CALLOUT_TITLE_CLASS, SETTINGS_DESCRIPTION_CLASS, SETTINGS_HELPER_CLASS, SETTINGS_SELECT_ROW_TRIGGER_CLASS } from '@/components/sections/shared/SettingsSection';
 import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
 
@@ -383,16 +384,7 @@ export const TunnelSettings: React.FC = () => {
   const [sessionRecords, setSessionRecords] = React.useState<TunnelSessionRecord[]>([]);
   // Counts expiries down once a second, on the shared 1 s tick, while there
   // is one to count.
-  const clockShouldRunOptimistic = Boolean(tunnelInfo?.bootstrapExpiresAt) || sessionRecords.some((r) => r.status === 'active');
-  const [clockActive, setClockActive] = React.useState(clockShouldRunOptimistic);
-  const nowTs = useDurationTickerNow(clockActive);
-  const clockShouldRunActual = (tunnelInfo?.bootstrapExpiresAt != null && tunnelInfo.bootstrapExpiresAt > nowTs)
-    || sessionRecords.some((r) => r.status === 'active' && r.expiresAt > nowTs);
-  React.useEffect(() => {
-    if (clockShouldRunActual !== clockActive) {
-      setClockActive(clockShouldRunActual);
-    }
-  }, [clockShouldRunActual, clockActive]);
+  const [nowTs] = useTunnelClock(tunnelInfo, sessionRecords);
   const [localPort, setLocalPort] = React.useState<number | null>(null);
   const managedLocalConfigExtensionError = t(MANAGED_LOCAL_CONFIG_EXTENSION_ERROR_KEY);
   const managedLocalConfigFileInputRef = React.useRef<HTMLInputElement>(null);
