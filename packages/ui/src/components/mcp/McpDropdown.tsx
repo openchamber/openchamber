@@ -15,13 +15,13 @@ import { Switch } from '@/components/ui/switch';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { cn } from '@/lib/utils';
 import { useDeviceInfo } from '@/lib/device';
-import { useDirectoryStore } from '@/stores/useDirectoryStore';
-import { useMcpConfigStore } from '@/stores/useMcpConfigStore';
+import { selectMcpServersForDirectory, useMcpConfigStore } from '@/stores/useMcpConfigStore';
 import { computeMcpHealth, useMcpStore } from '@/stores/useMcpStore';
 import { McpIcon } from '@/components/icons/McpIcon';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
 import { toast } from 'sonner';
+import { useMcpDirectory } from './useMcpDirectory';
 
 // Matches the work-status MCP section: a status read boots the directory's
 // whole stdio fleet, so gated surfaces reuse a fresh one inside this window
@@ -74,33 +74,28 @@ interface McpDropdownContentProps {
 
 export const McpDropdownContent: React.FC<McpDropdownContentProps> = ({ active, className, headerAction, listClassName, hideHeader = false, mobileListDensity = false }) => {
   const { t } = useI18n();
-  const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
-  const directory = currentDirectory ?? null;
-  const status = useMcpStore((state) => state.getStatusForDirectory(directory));
+  const directory = useMcpDirectory(active);
+  const status = useMcpStore((state) => directory ? state.getStatusForDirectory(directory) : null);
   const refresh = useMcpStore((state) => state.refresh);
   const ensureFresh = useMcpStore((state) => state.ensureFresh);
   const connect = useMcpStore((state) => state.connect);
   const disconnect = useMcpStore((state) => state.disconnect);
-  const mcpServers = useMcpConfigStore((state) => state.mcpServers);
+  const mcpServers = useMcpConfigStore((state) => directory ? selectMcpServersForDirectory(state, directory) : null);
   const loadMcpConfigs = useMcpConfigStore((state) => state.loadMcpConfigs);
   const [isSpinning, setIsSpinning] = React.useState(false);
   const [busyName, setBusyName] = React.useState<string | null>(null);
 
   React.useEffect(() => {
-    void loadMcpConfigs({ force: true });
-  }, [loadMcpConfigs]);
-
-  React.useEffect(() => {
-    if (!active) return;
+    if (!active || !directory) return;
     void Promise.all([
       ensureFresh({ directory, silent: true, maxAgeMs: MCP_STATUS_MAX_AGE_MS }),
-      loadMcpConfigs({ force: true }),
+      loadMcpConfigs({ force: true, directory }),
     ]);
   }, [active, ensureFresh, directory, loadMcpConfigs]);
 
   const sortedNames = React.useMemo(() => {
-    const names = new Set<string>(Object.keys(status));
-    for (const server of mcpServers) {
+    const names = new Set<string>(Object.keys(status ?? {}));
+    for (const server of mcpServers ?? []) {
       if (server?.name) {
         names.add(server.name);
       }
@@ -110,7 +105,7 @@ export const McpDropdownContent: React.FC<McpDropdownContentProps> = ({ active, 
 
   const handleRefresh = React.useCallback((e?: React.MouseEvent) => {
     e?.preventDefault();
-    if (isSpinning) return;
+    if (isSpinning || !directory) return;
     setIsSpinning(true);
     const minSpinPromise = new Promise(resolve => setTimeout(resolve, 500));
     Promise.all([refresh({ directory }), minSpinPromise]).finally(() => {
@@ -135,7 +130,7 @@ export const McpDropdownContent: React.FC<McpDropdownContentProps> = ({ active, 
             <button
               type="button"
               className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              disabled={isSpinning}
+              disabled={isSpinning || !directory}
               onClick={handleRefresh}
               aria-label={t('mcpDropdown.actions.refreshAria')}
             >
@@ -149,7 +144,7 @@ export const McpDropdownContent: React.FC<McpDropdownContentProps> = ({ active, 
       <div className={cn('max-h-64 overflow-y-auto', mobileListDensity ? 'space-y-1 py-3' : 'px-3 py-2.5', listClassName)}>
         <div className={cn(!mobileListDensity && sortedNames.length > 0 && 'p-1.5')}>
         {sortedNames.map((serverName) => {
-          const serverStatus = status[serverName];
+          const serverStatus = status?.[serverName];
           const tone = statusTone(serverStatus);
           const isConnected = serverStatus?.status.status === 'connected';
           const isBusy = busyName === serverName;
@@ -194,6 +189,7 @@ export const McpDropdownContent: React.FC<McpDropdownContentProps> = ({ active, 
                 disabled={isBusy}
                 className="data-[checked]:bg-status-info"
                 onCheckedChange={async (checked) => {
+                  if (!directory) return;
                   setBusyName(serverName);
                   try {
                     if (checked) {
@@ -212,7 +208,7 @@ export const McpDropdownContent: React.FC<McpDropdownContentProps> = ({ active, 
           );
         })}
 
-        {sortedNames.length === 0 && (
+        {directory && sortedNames.length === 0 && (
           <div className="px-4 py-5 typography-ui-label text-muted-foreground text-center">
             {t('mcpDropdown.empty.configureInConfig')}
           </div>
@@ -229,15 +225,15 @@ export const McpDropdown: React.FC<McpDropdownProps> = ({ headerIconButtonClass 
   const [tooltipOpen, setTooltipOpen] = React.useState(false);
   const blockTooltipRef = React.useRef(false);
   const { isMobile } = useDeviceInfo();
-  const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
-  const directory = currentDirectory ?? null;
+  // Desktop content owns preparation once the dropdown opens.
+  const directory = useMcpDirectory(isMobile && open);
 
-  const status = useMcpStore((state) => state.getStatusForDirectory(directory));
+  const status = useMcpStore((state) => directory ? state.getStatusForDirectory(directory) : null);
   const refresh = useMcpStore((state) => state.refresh);
   const ensureFresh = useMcpStore((state) => state.ensureFresh);
   const connect = useMcpStore((state) => state.connect);
   const disconnect = useMcpStore((state) => state.disconnect);
-  const mcpServers = useMcpConfigStore((state) => state.mcpServers);
+  const mcpServers = useMcpConfigStore((state) => directory ? selectMcpServersForDirectory(state, directory) : null);
   const loadMcpConfigs = useMcpConfigStore((state) => state.loadMcpConfigs);
 
   const handleDropdownOpenChange = React.useCallback((isOpen: boolean) => {
@@ -265,18 +261,18 @@ export const McpDropdown: React.FC<McpDropdownProps> = ({ headerIconButtonClass 
   // can stay mounted (the VS Code header mounts it at startup). The read
   // waits for the dropdown to open.
   React.useEffect(() => {
-    if (!open) return;
+    if (!open || !directory) return;
     void Promise.all([
       ensureFresh({ directory, silent: true, maxAgeMs: MCP_STATUS_MAX_AGE_MS }),
-      loadMcpConfigs({ force: true }),
+      loadMcpConfigs({ force: true, directory }),
     ]);
   }, [open, ensureFresh, directory, loadMcpConfigs]);
 
   const health = React.useMemo(() => computeMcpHealth(status), [status]);
 
   const sortedNames = React.useMemo(() => {
-    const names = new Set<string>(Object.keys(status));
-    for (const server of mcpServers) {
+    const names = new Set<string>(Object.keys(status ?? {}));
+    for (const server of mcpServers ?? []) {
       if (server?.name) {
         names.add(server.name);
       }
@@ -286,7 +282,7 @@ export const McpDropdown: React.FC<McpDropdownProps> = ({ headerIconButtonClass 
 
   const handleRefresh = React.useCallback((e?: React.MouseEvent) => {
     e?.preventDefault();
-    if (isSpinning) return;
+    if (isSpinning || !directory) return;
     setIsSpinning(true);
     const minSpinPromise = new Promise(resolve => setTimeout(resolve, 500));
     Promise.all([refresh({ directory }), minSpinPromise]).finally(() => {
@@ -297,7 +293,7 @@ export const McpDropdown: React.FC<McpDropdownProps> = ({ headerIconButtonClass 
   const renderServerList = () => (
     <>
       {sortedNames.map((serverName) => {
-        const serverStatus = status[serverName];
+        const serverStatus = status?.[serverName];
         const tone = statusTone(serverStatus);
         const isConnected = serverStatus?.status.status === 'connected';
         const isBusy = busyName === serverName;
@@ -349,6 +345,7 @@ export const McpDropdown: React.FC<McpDropdownProps> = ({ headerIconButtonClass 
               disabled={isBusy}
               className="data-[checked]:bg-status-info"
               onCheckedChange={async (checked) => {
+                if (!directory) return;
                 setBusyName(serverName);
                 try {
                   if (checked) {
@@ -365,7 +362,7 @@ export const McpDropdown: React.FC<McpDropdownProps> = ({ headerIconButtonClass 
         );
       })}
 
-      {sortedNames.length === 0 && (
+      {directory && sortedNames.length === 0 && (
         <div className="px-2 py-3 typography-ui-label text-muted-foreground text-center">
           {t('mcpDropdown.empty.configureInConfig')}
         </div>
@@ -415,7 +412,7 @@ export const McpDropdown: React.FC<McpDropdownProps> = ({ headerIconButtonClass 
                 <button
                   type="button"
                   className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover transition-colors"
-                  disabled={isSpinning}
+                  disabled={isSpinning || !directory}
                   onClick={handleRefresh}
                   aria-label={t('mcpDropdown.actions.refreshAria')}
                 >
