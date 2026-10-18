@@ -36,3 +36,16 @@ Install OpenChamber from the [VS Code Marketplace](https://marketplace.visualstu
 ## Mobile
 
 Install the iPhone app through TestFlight or the Android app from the latest release, then pair it with your computer. [Mobile Apps](/mobile/) walks through both.
+
+## Nix
+
+On NixOS, or any Linux with Nix, the flake in the OpenChamber repository builds the same apps:
+
+```bash
+nix run github:openchamber/openchamber        # web server on http://localhost:3000
+nix run github:openchamber/openchamber#gui    # desktop app
+```
+
+The flake also exposes `packages.openchamber` and `packages.openchamber-desktop`, and a `nixosModules.openchamber` systemd module with `host`, `port`, `openFirewall` and `uiPasswordFile`. The password file is read through systemd's `LoadCredential`, so a root-owned 0400 secret works with the default dynamic user.
+
+Updates go through the flake. The packaged OpenCode CLI has its in-app updater turned off, because a Nix store path cannot update itself, so pull the flake and rebuild to update.
