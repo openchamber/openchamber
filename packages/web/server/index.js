@@ -88,6 +88,7 @@ import { configureProjectStartCommandSource, openCodeProjectStartCommandSource }
 import { createOpenCodeWatcherRuntime } from './lib/opencode/watcher.js';
 import { createSessionAssistRuntime } from './lib/session-assist/runtime.js';
 import { createSessionGoalRuntime } from './lib/session-goal/runtime.js';
+import { createAccountRotationRuntime, openCodeRotationAccounts } from './lib/account-rotation/runtime.js';
 import { createContextObligatoryRuntime } from './lib/context-obligatory/runtime.js';
 import { createLinearSessionStatusRuntime } from './lib/linear/status-runtime.js';
 import { createSessionKnowledgeRuntime } from './lib/session-knowledge/runtime.js';
@@ -968,6 +969,11 @@ const sessionAssistRuntime = createSessionAssistRuntime({
   lineage: sessionLineage,
 });
 
+const accountRotationRuntime = createAccountRotationRuntime({
+  dataDir: OPENCHAMBER_DATA_DIR,
+  accounts: openCodeRotationAccounts({ buildOpenCodeUrl, getOpenCodeAuthHeaders }),
+});
+
 const sessionGoalRuntime = createSessionGoalRuntime({
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
@@ -975,6 +981,7 @@ const sessionGoalRuntime = createSessionGoalRuntime({
   classifierEndpoint: () => routingRuntime.classifierEndpoint(),
   jev: createJevClient(),
   readSessionMetadata: readStoredSessionMetadata,
+  recoverUsageLimit: (input) => accountRotationRuntime.recover(input),
   persistSessionGoal: (sessionID, directory, goal) =>
     persistSessionMetadataPatch(sessionID, { openchamber: { goal } }, { directory }),
   emitGoalNotification: async ({ sessionId, directory, status, goal }) => {
@@ -2609,6 +2616,7 @@ async function main(options = {}) {
     worktreeBootstrapStore,
     messageQueueRuntime,
     routingRuntime,
+    accountRotationRuntime,
   });
 
   // After bootstrap: the upgrade gate needs the real UI auth controller.
