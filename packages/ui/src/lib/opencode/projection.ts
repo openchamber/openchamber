@@ -13,6 +13,7 @@ import type {
   Project as ProjectWire,
   PromptFileAttachment,
   VcsInfo,
+  SessionInboxSyntheticPayload,
   SessionInboxUserPayload,
   SessionInfo,
   SessionMessageAssistant,
@@ -35,6 +36,7 @@ import {
   type Session,
   type ToolPart,
   type ToolState,
+  type SyntheticMessage,
   type UserMessage,
   type Vcs,
 } from "./model"
@@ -265,6 +267,50 @@ function projectAssistantMessage(info: SessionMessageAssistant, sessionID: strin
 function fileAttachmentUrl(file: PromptFileAttachment): string {
   if (file.source.type === "uri") return file.source.uri
   return `data:${file.mime};base64,${file.data}`
+}
+
+/** The inbox items that stand for a message; control items carry no payload we read. */
+export type InboxMessageItem =
+  | { type: "user"; payload: SessionInboxUserPayload }
+  | { type: "synthetic"; payload: SessionInboxSyntheticPayload }
+  | { type: "compaction" | "move" }
+
+/**
+ * The message an inbox item stands for, as `session.inbox.enqueued` paints it
+ * live and a cold load repaints it from the pending inbox. Null for control
+ * items (compaction, move), which paint nothing.
+ */
+export function projectInboxMessage(
+  item: InboxMessageItem,
+  owner: { sessionID: string; messageID: string; created: number },
+): { info: UserMessage | SyntheticMessage; parts: Part[] | null } | null {
+  if (item.type === "user") {
+    return {
+      info: compact({
+        id: owner.messageID,
+        sessionID: owner.sessionID,
+        role: "user",
+        time: { created: owner.created },
+        metadata: item.payload.metadata,
+      }),
+      parts: projectUserParts(item.payload, owner),
+    }
+  }
+  if (item.type === "synthetic") {
+    return {
+      info: compact({
+        id: owner.messageID,
+        sessionID: owner.sessionID,
+        role: "synthetic",
+        time: { created: owner.created },
+        text: item.payload.text,
+        description: item.payload.description,
+        metadata: item.payload.metadata,
+      }),
+      parts: null,
+    }
+  }
+  return null
 }
 
 /**

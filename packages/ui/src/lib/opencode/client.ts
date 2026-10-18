@@ -60,6 +60,8 @@ import {
   type Session,
   type SessionStatus,
   type Skill,
+  type SyntheticMessage,
+  type UserMessage,
   type Vcs,
   toModelRef,
 } from "./model"
@@ -71,6 +73,7 @@ import {
   deniesAnyProvider,
   mergeConfigDocuments,
   projectAgent,
+  projectInboxMessage,
   projectMessages,
   projectProject,
   projectSession,
@@ -445,6 +448,16 @@ type DirectorySwitchResult = {
 export type MessagePage = {
   items: Array<{ info: Message; parts: Part[] }>
   cursor: { previous?: string; next?: string }
+}
+
+/**
+ * A message a session's pending OpenCode inbox item stands for, projected the
+ * way `session.inbox.enqueued` paints it live. Control items (compaction,
+ * move) paint nothing and are left out.
+ */
+export type PendingInboxMessage = {
+  info: UserMessage | SyntheticMessage
+  parts: Part[] | null
 }
 
 export type SessionPage = {
@@ -1082,6 +1095,26 @@ class OpencodeService {
       items,
       cursor: pageCursor({ ...response.cursor, next: lastPage ? undefined : response.cursor.next }),
     }
+  }
+
+  /**
+   * Pending items of one session's OpenCode inbox.
+   *
+   * A prompt steered into a running turn is not part of the message history
+   * until OpenCode admits it, so a client that starts (or restarts) while the
+   * session is busy has to read the inbox to paint those messages again.
+   */
+  async getSessionInbox(
+    id: string,
+    directory?: string | null,
+  ): Promise<readonly PendingInboxMessage[]> {
+    const items = await call("session.inbox.list", () =>
+      this.clientFor(directory).session.inbox.list({ sessionID: id }),
+    )
+    return items.flatMap((item) => {
+      const projected = projectInboxMessage(item, { sessionID: id, messageID: item.id, created: item.time.created })
+      return projected ? [projected] : []
+    })
   }
 
   /**
