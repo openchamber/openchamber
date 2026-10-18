@@ -699,4 +699,26 @@ describe('Dollar math rendering', () => {
     const multi = renderMarkdownSync('$$a$$ 段落\n\n$$b$$ 段落');
     expect(multi.match(/katex-display/g)).toHaveLength(2);
   });
+
+  test('keeps subscripts in display math out of emphasis', () => {
+    // openchamber/openchamber#5166: to the emphasis scanner, the `_` pairs in
+    // `\mathbf{v}_1 + \sum_{i=2}^n` are a `_..._` span, which it rendered away
+    // as `<em>` — the math then stayed literal text, `1 + \sum` in italics.
+    const html = renderMarkdownSync(
+      '$$A^k\\mathbf{x}^{(0)} = \\alpha_1\\lambda_1^k\\Big(\\mathbf{v}_1 + \\sum_{i=2}^n'
+      + ' \\frac{\\alpha_i}{\\alpha_1}\\Big[\\frac{\\lambda_i}{\\lambda_1}\\Big]^k \\mathbf{v}_i\\Big).$$',
+    );
+    expect(html).toContain('katex-display');
+    expect(html).not.toContain('<em>');
+    expect(html).not.toContain('katex-error');
+  });
+
+  test('keeps emphasis delimiters inside inline math literal and working outside it', () => {
+    // Same conflict one level down: `_1 + x_` in `$v_1 + x_2$` is a subscript
+    // pair to KaTeX and an emphasis pair to markdown.
+    const html = renderMarkdownSync('值 $v_1 + x_2$ 且 **真强调**');
+    expect(html).toContain('katex');
+    expect(html).not.toContain('<em>');
+    expect(html).toContain('<strong>真强调</strong>');
+  });
 });

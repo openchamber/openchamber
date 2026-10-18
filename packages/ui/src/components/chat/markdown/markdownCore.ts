@@ -414,9 +414,25 @@ const lexStreamBlocks = (text: string): MarkdownBlock[] => {
 // backslash escapes and strips the slash before any HTML post-process can see
 // them. Registering them as tokenizers also makes them code-safe for free
 // (marked tokenizes code spans/fences first, so these never fire inside code).
-// Dollar math (`$...$` inline, `$$...$$` display) survives marked untouched
-// (no backslash) and is rendered later from the parsed HTML, with currency
-// guards — see renderMathExpressions.
+// Dollar math (`$...$` inline, `$$...$$` display) has no backslash, so marked
+// passes it through and it is rendered later from the parsed HTML, with
+// currency guards — see renderMathExpressions. One rule must still be kept
+// from reading it: the emphasis scanner, for which `\mathbf{v}_1 +
+// \sum_{i=2}^n` is a `_..._` pair that it rendered away as `<em>` before
+// KaTeX ever saw the subscripts (openchamber/openchamber#5166). Every inline
+// pass hands the emphasis and strikethrough scanners a masked copy of the
+// source through marked's emStrongMask hook; covering the dollar regions in
+// that copy keeps `_`/`*`/`~~` inside math from pairing while every other
+// rule keeps reading the real source. The mask must keep each region's
+// length — the scanners match positions in the mask against the source. It
+// runs before any escaping, so unlike the render pass below raw `<`/`>`
+// occur here; a region masked but never rendered as math just stays literal
+// text.
+const DOLLAR_MATH_MASK_RE = /\$\$[\s\S]*?\$\$|\$(?![\s$])([^\s$](?:[^$]*?[^\s$])?)\$(?!\d)/g;
+
+const maskDollarMathFromEmphasis = (src: string): string =>
+  src.replace(DOLLAR_MATH_MASK_RE, (match) => 'a'.repeat(match.length));
+
 type MathToken = { type: string; raw: string; text: string };
 
 const renderKatex = (math: string, raw: string, displayMode: boolean): string => {
@@ -636,6 +652,7 @@ const createParser = (imageMode: MarkdownImageMode, rawHtml: MarkdownRawHtmlMode
     {
       gfm: true,
       breaks: false,
+      hooks: { emStrongMask: maskDollarMathFromEmphasis },
       extensions: [createInlineMathExtension(renderMath), createBlockMathExtension(renderMath), detailsExtension],
       renderer: {
         // Assistant output is untrusted. Markdown constructs still render as
