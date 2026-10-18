@@ -21,6 +21,10 @@ OpenChamber tworzy gałąź, konfiguruje folder i otwiera w nim nową sesję, go
 
 Bez pytań: wybierz **Szybki worktree** w tym samym menu gałęzi. OpenChamber sam nazwie gałąź i skieruje na nią nową sesję.
 
+## Projekty otwarte na folderze repozytorium
+
+Jeśli otwierasz projekt na folderze wewnątrz repozytorium, na przykład `repo/ai`, nowe worktree otwierają się w tym samym miejscu. Sesja w nowym worktree startuje w tym samym folderze checkoutu, więc OpenCode znajduje konfigurację, która w nim leży. Projekt otwarty na katalogu głównym repozytorium startuje w katalogu głównym worktree, jak dotąd. Jeśli gałąź nie ma takiego folderu, sesja startuje w katalogu głównym worktree, a OpenChamber o tym informuje.
+
 ## Przywróć pracę
 
 Gdy praca jest gotowa, użyj **Integrate** w widoku Git, aby przenieść commity worktree na inną gałąź (jak `main`). Jeśli zmiana powoduje konflikt, możesz przekazać konflikt agentowi do rozwiązania.

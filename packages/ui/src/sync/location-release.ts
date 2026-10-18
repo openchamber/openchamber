@@ -1,5 +1,6 @@
 import { normalizePath } from "@/lib/pathNormalization"
 import { normalizeProjectPath } from "@/lib/projectResolution"
+import { findWorktreeHoldingDirectory } from "@/lib/worktrees/worktreePaths"
 import type { WorktreeMetadata } from "@/types/worktree"
 import { directoriesWithRunningShells } from "./background-shells"
 import { useGlobalSessionStatusStore } from "./global-session-status"
@@ -129,7 +130,7 @@ export function directoryUse(
   return shellRuns ? "busy" : "free"
 }
 
-/** Whether `directory` is a known worktree of a project, not the project root itself. */
+/** Whether `directory` is a known worktree of a project or a sub-folder inside one, not the project root itself. */
 export function isWorktreeDirectory(
   directory: string,
   availableWorktreesByProject: ReadonlyMap<string, readonly WorktreeMetadata[]>,
@@ -139,7 +140,7 @@ export function isWorktreeDirectory(
   const projectRoots = [...availableWorktreesByProject.keys()].map((projectPath) => normalizePath(projectPath))
   if (projectRoots.includes(target)) return false
   for (const worktrees of availableWorktreesByProject.values()) {
-    if (worktrees.some((worktree) => normalizePath(worktree.path) === target)) return true
+    if (findWorktreeHoldingDirectory(worktrees, target)) return true
   }
   return false
 }

@@ -80,6 +80,13 @@ export async function resolveGitPrimaryRoot(directory: string): Promise<string> 
   return result.root;
 }
 
+/** Where `directory` sits inside its repository's checkout; `''` at the root. Rejects when unknown. */
+export async function resolveGitRepositoryPrefix(directory: string): Promise<string> {
+  const runtime = getRuntimeGit();
+  if (runtime?.resolveRepositoryPrefix) return runtime.resolveRepositoryPrefix(directory);
+  return gitHttp.resolveGitRepositoryPrefix(directory);
+}
+
 export async function resolveGitTopLevel(directory: string): Promise<string> {
   const result = await gitHttp.resolveGitTopLevel(directory);
   return result.root;
@@ -948,6 +955,21 @@ export async function resetToCommit(
   const runtime = getRuntimeGit();
   if (runtime) return runtimeStatusMutation(directory, runtime.resetToCommit(directory, hash, mode, force));
   return gitHttp.resetToCommit(directory, hash, mode, force);
+}
+
+/**
+ * Whether `directory` exists inside the checkout at `worktreeRoot` once both
+ * are canonicalized, so a symlink out of the checkout reports `insideWorktreeRoot: false`.
+ */
+export async function validateWorktreeDirectory(directory: string, worktreeRoot: string): Promise<{
+  valid: boolean;
+  insideWorktreeRoot: boolean;
+  resolvedWorktreeRoot: string | null;
+  resolvedCwd: string | null;
+}> {
+  const runtime = getRuntimeGit();
+  if (runtime?.validateWorktreeDirectory) return runtime.validateWorktreeDirectory(directory, worktreeRoot);
+  return gitHttp.validateWorktreeDirectory(directory, worktreeRoot);
 }
 
 export async function getConflictDetails(directory: string): Promise<import('./api/types').MergeConflictDetails> {

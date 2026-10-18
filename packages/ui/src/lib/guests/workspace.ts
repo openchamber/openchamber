@@ -8,6 +8,7 @@ import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
 import { getAllSyncSessionMap, getDirectoryState, getSyncChildStores } from '@/sync/sync-refs';
 import { getLinkedIssues } from '@/lib/linkedIssues';
 import { normalizePath } from '@/lib/pathNormalization';
+import { checkoutHoldsDirectory, checkoutHoldsSubfolder } from '@/lib/worktrees/worktreePaths';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { useUIStore } from '@/stores/useUIStore';
 import type { WorktreeMetadata } from '@/types/worktree';
@@ -37,8 +38,12 @@ const projectSession = (session: Session, projectId: string, guestId: string, wo
   const observation = live.observedById.get(session.id);
   const observed = observation && normalizePath(observation.directory) === normalizePath(directory) ? observation : undefined;
   const attached = useSessionUIStore.getState().worktreeMetadata.get(session.id);
-  const worktree = worktrees.get(normalizePath(directory) ?? directory)
-    ?? (attached && normalizePath(attached.path) === normalizePath(directory) ? toWorktree(attached) : null);
+  const sessionDirectory = normalizePath(directory) ?? directory;
+  const holdingRoot = [...worktrees.keys()].filter((root) => checkoutHoldsDirectory(root, sessionDirectory))
+    .sort((a, b) => b.length - a.length)[0];
+  const attachedRoot = normalizePath(attached?.path);
+  const worktree = (holdingRoot ? worktrees.get(holdingRoot) : undefined)
+    ?? (attached && attachedRoot && checkoutHoldsDirectory(attachedRoot, sessionDirectory) ? toWorktree(attached) : null);
   const connected = useConfigStore.getState().isConnected;
   const statusInvalidated = child?.sessionStatusInvalidated?.[session.id] === true;
   let activity: GuestSessionRecord['activity'] = 'unknown';
@@ -86,25 +91,33 @@ export const readGuestWorkspace = (query: GuestWorkspaceQuery, guestId: string):
     const state: GuestLoadState = bootstrap === 'failed' || global.status === 'error' ? 'error' : global.status === 'ready' ? 'ready' : 'loading';
     return { directory, state };
   });
+  const worktreeRoots = worktrees.map((worktree) => normalizePath(worktree.directory) ?? worktree.directory);
+  // A session of a project opened on a folder of its repository runs in that
+  // folder of its worktree (`<worktree>/ai`), so a worktree holds its sub-folders.
+  const belongsToProject = (directory: string): boolean => {
+    const key = normalizePath(directory) ?? directory;
+    return directories.has(key) || worktreeRoots.some((root) => checkoutHoldsSubfolder(root, key));
+  };
   const records = new Map<string, Session>();
   // Global records own complete membership, including archives. Child stores fill discovery gaps.
-  for (const directory of directories) {
-    for (const id of global.structure.activeIdsByDirectory.get(directory) ?? []) {
+  for (const [directory, ids] of global.structure.activeIdsByDirectory) {
+    if (!belongsToProject(directory)) continue;
+    for (const id of ids) {
       const session = global.entityById.get(id);
       if (session) records.set(id, session);
     }
   }
   for (const session of global.archivedSessions) {
-    if (directories.has(normalizePath(session.directory) ?? session.directory)) records.set(session.id, session);
+    if (belongsToProject(session.directory)) records.set(session.id, session);
   }
   for (const directory of directories) {
     for (const session of getDirectoryState(directory)?.session ?? []) {
-      if (directories.has(normalizePath(session.directory) ?? session.directory)) {
+      if (belongsToProject(session.directory)) {
         if (!records.has(session.id)) records.set(session.id, session);
       }
     }
   }
-  const worktreeByPath = new Map(worktrees.map((worktree) => [normalizePath(worktree.directory) ?? worktree.directory, worktree]));
+  const worktreeByPath = new Map(worktrees.map((worktree, index) => [worktreeRoots[index], worktree]));
   return { ...query, state: combinedState([topologyState, ...coverage.map((entry) => entry.state)]), coverage,
     sessions: [...records.values()].map((session) => projectSession(session, query.projectId, guestId, worktreeByPath)) };
 };

@@ -9,6 +9,7 @@ import { useSessionWorktreeStore } from '@/sync/session-worktree-store';
 import { useGitStatus, useGitBranches, useGitStore, useIsGitRepo } from '@/stores/useGitStore';
 import { useShallow } from 'zustand/react/shallow';
 import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
+import { findWorktreeHoldingDirectory } from '@/lib/worktrees/worktreePaths';
 import { useI18n } from '@/lib/i18n';
 import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
 import { useRepositoryHost } from '@/components/references/referenceSources';
@@ -59,20 +60,8 @@ export const PullRequestView: React.FC = () => {
       return undefined;
     }
 
-    const fromAvailable = availableWorktrees.find(
-      (metadata) => normalizePath(metadata.path) === normalizedCurrentDirectory
-    );
-    if (fromAvailable) {
-      return fromAvailable;
-    }
-
-    for (const metadata of worktreeMap.values()) {
-      if (normalizePath(metadata.path) === normalizedCurrentDirectory) {
-        return metadata;
-      }
-    }
-
-    return undefined;
+    return findWorktreeHoldingDirectory(availableWorktrees, normalizedCurrentDirectory)
+      ?? findWorktreeHoldingDirectory(worktreeMap.values(), normalizedCurrentDirectory);
   }, [availableWorktrees, normalizedCurrentDirectory, worktreeMap]);
 
   const storeWorktreeMetadata = React.useMemo(() => {

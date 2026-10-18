@@ -4028,6 +4028,23 @@ async function canonicalizePath(filePath: string): Promise<string> {
 }
 
 /**
+ * Where `directory` sits inside its checkout: `ai` for `<checkout>/ai`, an empty
+ * string at the root. Git resolves symlinks for it, so the answer holds for a
+ * directory reached through one. Rejects when git cannot tell.
+ */
+export async function resolveRepositoryPrefix(directory: string): Promise<string> {
+  const directoryPath = normalizeDirectoryPath(directory);
+  if (!directoryPath) {
+    throw new Error('Directory is required');
+  }
+  const result = await runGitCommand(directoryPath, ['rev-parse', '--show-prefix']);
+  if (!result.success) {
+    throw new Error(result.stderr || 'Failed to resolve the repository folder');
+  }
+  return result.stdout.trim().replace(/\/+$/, '');
+}
+
+/**
  * Validate that a directory is inside a given worktree root.
  */
 export async function validateWorktreeDirectory(

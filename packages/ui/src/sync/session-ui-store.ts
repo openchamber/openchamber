@@ -45,6 +45,7 @@ import { findLatestUserModelChoice } from "@/lib/messages/userModelChoice"
 import { noteDraftSendWaiting, waitForPendingDraftWorktreeRequest } from "@/lib/worktrees/pendingDraftWorktree"
 import { waitForWorktreeBootstrap } from "@/lib/worktrees/worktreeBootstrap"
 import { getWorktreeSetupWaitEnabled } from "@/lib/openchamberConfig"
+import { resolveCreatedWorktreeStartDirectory, resolveStartDirectory, resolveWorktreeStartDirectory } from "@/lib/worktrees/worktreeStartDirectory"
 import { resolveProjectForSessionDirectory } from "@/lib/projectResolution"
 import {
   getSyncSessions,
@@ -461,7 +462,8 @@ export type SessionUIState = {
   markSessionAsOpenChamberCreated: (sessionId: string) => void
   isOpenChamberCreatedSession: (sessionId: string) => boolean
   initializeNewOpenChamberSession: (sessionId: string, agents: unknown[]) => void
-  setWorktreeMetadata: (sessionId: string, metadata: WorktreeMetadata | null) => void
+  /** `cwd` is where the session runs inside the checkout; it defaults to the worktree root. */
+  setWorktreeMetadata: (sessionId: string, metadata: WorktreeMetadata | null, cwd?: string) => void
   overrideNewSessionDraftTarget: (options: Record<string, unknown>) => void
   resolvePendingDraftWorktreeTarget: (requestId: string, directory: string | null, options?: Record<string, unknown>) => void
   setDraftBootstrapPendingDirectory: (directory: string | null) => void
@@ -752,7 +754,18 @@ const applyDraftTargetSelectionDefaults = (
       projectDefaultVariant: currentProject?.defaultVariant,
     })
   }
-  const activation = activateConfigForDirectory(configDirectory, { preserveManualModel: !projectChanged && draft.target === 'project' })
+  const activationOptions = { preserveManualModel: !projectChanged && draft.target === 'project' }
+  // The first session of a worktree starts in the project's OpenCode folder,
+  // so the agents and models offered are the ones that folder's config defines.
+  // The preview stays quiet: the send reports a fallback to the worktree root.
+  const worktreeProject = projectOfWorktreeRoot(configDirectory, draft.selectedProjectId, availableWorktreesByProject)
+  const activation = configDirectory && worktreeProject
+    // A worktree that failed to populate has no folder to read; its root is the fallback.
+    ? resolveStartDirectory(worktreeProject, configDirectory).then(({ directory }) => directory, () => configDirectory).then(async (directory) => {
+      if (revision !== draftDefaultsRevision || getRuntimeKey() !== runtimeKey) return
+      await activateConfigForDirectory(directory, activationOptions)
+    })
+    : activateConfigForDirectory(configDirectory, activationOptions)
   applyDefaults()
   void activation.then(() => {
     const current = useSessionUIStore.getState()
@@ -832,6 +845,29 @@ const waitForWorktreeBootstrapIfConfigured = async (directory: string | null, pr
   if (project && await getWorktreeSetupWaitEnabled(project)) {
     await waitForWorktreeBootstrap(directory)
   }
+}
+
+/**
+ * The project of a draft aimed at a worktree's root, or null for any other
+ * directory, such as a project root or a folder already inside a worktree.
+ * Only a worktree's root starts in the project's configured OpenCode folder.
+ */
+const projectOfWorktreeRoot = (
+  directory: string | null,
+  projectId: string | null | undefined,
+  availableWorktreesByProject: ReadonlyMap<string, readonly WorktreeMetadata[]>,
+): { id: string; path: string } | null => {
+  if (!directory) return null
+  const target = normalizePath(directory)
+  const isWorktreeRoot = [...availableWorktreesByProject.values()]
+    .some((worktrees) => worktrees.some((worktree) => normalizePath(worktree.path) === target))
+  return isWorktreeRoot ? resolveProjectRefForWorktreeDirectory(directory, projectId) : null
+}
+
+/** Where the draft's first session starts; a fallback to the worktree root is reported to the user. */
+const resolveDraftStartDirectory = async (directory: string | null, projectId?: string | null): Promise<string | null> => {
+  const project = projectOfWorktreeRoot(directory, projectId, useSessionUIStore.getState().availableWorktreesByProject)
+  return directory && project ? resolveWorktreeStartDirectory(project, directory) : directory
 }
 
 const resolveActiveProjectDirectory = (draft: NewSessionDraftState): string | null => {
@@ -1038,6 +1074,7 @@ export async function materializeOpenDraftSession(selection: {
   }
 
   await waitForWorktreeBootstrapIfConfigured(draftDirectoryOverride, draftProjectId)
+  draftDirectoryOverride = await resolveDraftStartDirectory(draftDirectoryOverride, draftProjectId)
 
   const draftPins = draft.projectContextPins ?? { notes: [], plans: [] }
   // The draft already knows what the first turn runs on, so the session is
@@ -1691,12 +1728,12 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     // Stub — was a no-op in old store
   },
 
-  setWorktreeMetadata: (sessionId, metadata) => {
+  setWorktreeMetadata: (sessionId, metadata, cwd) => {
     // Write to authoritative session-worktree-store
     if (metadata) {
       useSessionWorktreeStore.getState().setAttachment(sessionId, {
         worktreeRoot: metadata.worktreeRoot ?? metadata.path ?? null,
-        cwd: metadata.path ?? null,
+        cwd: cwd ?? metadata.path ?? null,
         branch: metadata.branch ?? null,
         headState: metadata.headState ?? (metadata.branch ? 'branch' : 'detached'),
         worktreeStatus: metadata.worktreeStatus ?? 'ready',
@@ -2228,6 +2265,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       if (await configModule.getWorktreeSetupWaitEnabled(createdWorktreeProject)) {
         await waitForWorktreeBootstrap(sessionDirectory)
       }
+      sessionDirectory = await resolveCreatedWorktreeStartDirectory(createdWorktreeProject, createdWorktree)
     }
 
     const session = await get().createSession(undefined, sessionDirectory)
@@ -2243,8 +2281,8 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       get().setWorktreeMetadata(session.id, {
         ...createdWorktree,
         kind: "standard",
-      })
-      useDirectoryStore.getState().setDirectory(createdWorktree.path, { showOverlay: false })
+      }, sessionDirectory)
+      useDirectoryStore.getState().setDirectory(sessionDirectory, { showOverlay: false })
     }
 
     // "Run as goal" rides the same arm mechanism as the composer target

@@ -21,6 +21,10 @@ OpenChamber crea la rama, configura la carpeta y abre ahí una nueva sesión, li
 
 Para saltarte las preguntas, elige **Worktree rápido** en el mismo menú de ramas: OpenChamber le pone nombre a la rama y apunta la nueva sesión a ella.
 
+## Proyectos abiertos en una carpeta del repositorio
+
+Si abres un proyecto en una carpeta dentro de un repositorio, como `repo/ai`, los nuevos worktrees se abren también allí. Una sesión en un worktree nuevo empieza en la misma carpeta del checkout, así OpenCode encuentra la configuración que está en ella. Un proyecto abierto en la raíz del repositorio empieza en la raíz del worktree, como antes. Si una rama no tiene esa carpeta, la sesión empieza en la raíz del worktree y OpenChamber te lo indica.
+
 ## Trae el trabajo de vuelta
 
 Cuando el trabajo esté listo, usa **Integrate** en la vista de Git para traer los commits del worktree a otra rama (como `main`). Si un cambio entra en conflicto, puedes entregarle el conflicto al agente para que lo resuelva.

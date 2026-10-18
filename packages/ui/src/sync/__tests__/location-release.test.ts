@@ -191,4 +191,10 @@ describe("isWorktreeDirectory", () => {
     expect(isWorktreeDirectory(PROJECT, byProject)).toBe(false)
     expect(isWorktreeDirectory("/elsewhere", byProject)).toBe(false)
   })
+
+  test("a sub-folder of a listed worktree is one, a sibling that only shares the name prefix is not", () => {
+    const byProject = new Map([[PROJECT, [worktree(WORKTREE)]]])
+    expect(isWorktreeDirectory(`${WORKTREE}/ai`, byProject)).toBe(true)
+    expect(isWorktreeDirectory(`${WORKTREE}-other`, byProject)).toBe(false)
+  })
 })

@@ -65,6 +65,7 @@ import {
   listProjectWorktrees,
   partitionWorktreesByRegisteredProject,
 } from '@/lib/worktrees/worktreeManager';
+import { findWorktreeHoldingDirectory } from '@/lib/worktrees/worktreePaths';
 import { useWorktreeRemoving } from '@/lib/worktrees/worktreeRemovalState';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useGitAllBranches, useGitStore } from '@/stores/useGitStore';
@@ -244,8 +245,8 @@ const pathBelongsToRoot = (path: string, root: string): boolean => {
   );
 };
 
-const findExactWorktreeMatch = (project: ProjectMeta, normalizedDirectory: string): WorktreeMetadata | null => (
-  project.worktrees.find((worktree) => normalizePath(worktree.path) === normalizedDirectory) ?? null
+const findProjectWorktreeMatch = (project: ProjectMeta, normalizedDirectory: string): WorktreeMetadata | null => (
+  findWorktreeHoldingDirectory(project.worktrees, normalizedDirectory) ?? null
 );
 
 const sessionMatchesQuery = (session: Session, projectLabel: string, query: string): boolean =>
@@ -1223,7 +1224,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
       if (!owner) continue;
       const node = nodes.find((entry) => entry.project.id === owner.projectId);
       if (!node) continue;
-      const matchedWorktree = findExactWorktreeMatch(node.project, owner.scopeDirectory);
+      const matchedWorktree = findProjectWorktreeMatch(node.project, owner.scopeDirectory);
       // An isolated space is a bucket of its own, named after the space.
       const space = owner.kind === 'space' && owner.spaceId ? spaces.get(owner.spaceId) ?? null : null;
       const bucket = space
@@ -1443,7 +1444,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
       // session picked from search is actually visible — and the open-time
       // auto-scroll can land on it — the next time the drawer opens.
       setProjectExpanded(project.id, true);
-      const worktree = findExactWorktreeMatch(project, owner?.scopeDirectory ?? '');
+      const worktree = findProjectWorktreeMatch(project, owner?.scopeDirectory ?? '');
       if (worktree) setWorktreeExpanded(`${project.id}::${normalizePath(worktree.path)}`, true);
     }
     void setCurrentSession(session.id, directory);
@@ -1617,7 +1618,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
       if (!project) return getProjectLabel(directory) || directory;
       const space = owner?.kind === 'space' && owner.spaceId ? spaces.get(owner.spaceId) : undefined;
       if (space) return `${project.label} · ${space.name || t('sessions.sidebar.grouping.spaceUnnamed')}`;
-      const matchedWorktree = findExactWorktreeMatch(project, owner?.scopeDirectory ?? '');
+      const matchedWorktree = findProjectWorktreeMatch(project, owner?.scopeDirectory ?? '');
       if (matchedWorktree?.branch) return `${project.label} · ${matchedWorktree.branch}`;
       return project.label;
     },

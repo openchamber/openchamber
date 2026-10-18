@@ -14,6 +14,7 @@ import {
 } from '@/lib/worktrees/worktreeBootstrap';
 import { invalidateResolvedProjectRootCache, resolveProjectRoot } from '@/lib/worktrees/worktreeStatus';
 import { clearWorktreeRemoval, markWorktreeRemoving } from '@/lib/worktrees/worktreeRemovalState';
+import { checkoutHoldsSubfolder } from '@/lib/worktrees/worktreePaths';
 import type {
   CreateGitWorktreePayload,
   GitWorktreeBootstrapStatus,
@@ -312,12 +313,6 @@ export const worktreeMapsEqual = (
     }
   }
   return true;
-};
-
-/** True when `directory` lies inside `checkoutPath`. Both paths are normalized. */
-export const checkoutHoldsSubfolder = (checkoutPath: string, directory: string): boolean => {
-  const prefix = checkoutPath.endsWith('/') ? checkoutPath : `${checkoutPath}/`;
-  return directory.startsWith(prefix);
 };
 
 /**

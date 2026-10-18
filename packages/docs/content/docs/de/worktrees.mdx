@@ -21,6 +21,10 @@ OpenChamber legt den Branch an, richtet den Ordner ein und öffnet dort eine neu
 
 Ohne Rückfragen geht es mit **Schneller Worktree** im selben Branch-Menü: OpenChamber benennt den Branch selbst und richtet die neue Sitzung darauf aus.
 
+## Projekte, die auf einem Ordner des Repositorys geöffnet sind
+
+Öffnest du ein Projekt auf einem Ordner innerhalb eines Repositorys, etwa `repo/ai`, öffnen sich neue Worktrees ebenfalls dort. Eine Sitzung in einem neuen Worktree startet im selben Ordner des Checkouts, sodass OpenCode die Konfiguration findet, die dort liegt. Ein Projekt, das auf dem Repository-Stammverzeichnis geöffnet ist, startet wie bisher im Worktree-Stammverzeichnis. Hat ein Branch diesen Ordner nicht, startet die Sitzung im Worktree-Stammverzeichnis, und OpenChamber weist darauf hin.
+
 ## Die Arbeit zurückbringen
 
 Wenn die Arbeit gut ist, verwende **Integrate** in der Git-Ansicht, um die Commits des Worktrees auf einen anderen Branch (etwa `main`) zu übertragen. Wenn ein Konflikt auftritt, kannst du den Konflikt dem Agenten zur Lösung geben.

@@ -50,6 +50,7 @@ const createQuickWorktreeCalls: Array<{ project: ProjectRef; options: CreateQuic
 const metadataWrites: Array<{ sessionId: string; metadata: WorktreeMetadata | null }> = [];
 const toastSuccesses: string[] = [];
 const toastErrors: Array<{ title: string; description?: string }> = [];
+const toastWarnings: string[] = [];
 const directoryStates = new Map<string, DirectoryState>();
 const storedMetadata = new Map<string, WorktreeMetadata | null>();
 const originalConsoleWarn = console.warn;
@@ -99,6 +100,10 @@ let createQuickWorktreeImplementation: CreateQuickWorktreeImplementation = async
 });
 let resolveProjectRefImplementation: ResolveProjectRefImplementation = () => ({ id: 'project-1', path: '/repo' });
 let waitForWorktreeGitReadyImplementation: WaitForWorktreeGitReadyImplementation = async () => {};
+let projectFolderInRepository = '';
+// Folder per project path, for tests where projects share a repository; falls back to `projectFolderInRepository`.
+const projectFoldersByPath = new Map<string, string>();
+let directoryInsideCheckout = true;
 
 mock.module('@/components/ui', () => ({
   toast: {
@@ -108,6 +113,9 @@ mock.module('@/components/ui', () => ({
     error: (title: string, options?: { description?: string }) => {
       toastErrors.push({ title, description: options?.description });
     },
+    warning: (message: string) => {
+      toastWarnings.push(message);
+    },
   },
 }));
 
@@ -115,6 +123,8 @@ mock.module('@/lib/gitApi', () => ({
   checkIsGitRepository: (directory: string) => isGitRepositoryImplementation(directory),
   getGitStatus: (directory: string) => getGitStatusImplementation(directory),
   deleteRemoteBranch: mock(),
+  resolveGitRepositoryPrefix: mock((directory: string) => Promise.resolve(projectFoldersByPath.get(directory) ?? projectFolderInRepository)),
+  validateWorktreeDirectory: mock(() => Promise.resolve({ valid: directoryInsideCheckout, insideWorktreeRoot: directoryInsideCheckout, resolvedWorktreeRoot: null, resolvedCwd: null })),
   git: {
     worktree: {
       list: mock(() => Promise.resolve([])),
@@ -142,6 +152,8 @@ mock.module('@/lib/worktreeSessionCreator', () => ({
     return createQuickWorktreeImplementation(project, options);
   }),
   resolveProjectRef: mock((directory: string) => resolveProjectRefImplementation(directory)),
+  // Its folder rule is covered by `projectPathForCheckoutFolder` in worktreePaths.test.ts.
+  resolveFolderProjectRef: mock((directory: string) => Promise.resolve(resolveProjectRefImplementation(directory))),
 }));
 
 mock.module('@/lib/worktrees/worktreeBootstrap', () => ({
@@ -335,6 +347,7 @@ describe('moveSessionTreeToExistingWorktree', () => {
     metadataWrites.length = 0;
     toastSuccesses.length = 0;
     toastErrors.length = 0;
+    toastWarnings.length = 0;
     directoryStates.clear();
     storedMetadata.clear();
     sessionUIState.worktreeMetadata = new Map();
@@ -352,6 +365,9 @@ describe('moveSessionTreeToExistingWorktree', () => {
     createQuickWorktreeImplementation = async () => makeWorktreeMetadata({ path: '/created-worktree', worktreeSource: 'created-for-session' });
     resolveProjectRefImplementation = () => ({ id: 'project-1', path: '/repo' });
     waitForWorktreeGitReadyImplementation = async () => {};
+    projectFolderInRepository = '';
+    projectFoldersByPath.clear();
+    directoryInsideCheckout = true;
     console.warn = () => {};
   });
 
@@ -387,6 +403,70 @@ describe('moveSessionTreeToExistingWorktree', () => {
     ]);
     expect(refreshCalls).toEqual([['/source', '/destination']]);
     expect(removeWorktreeCalls).toEqual([]);
+  });
+
+  test('moves into the project folder inside an existing worktree while the metadata keeps the worktree root', async () => {
+    const root = makeSession('root');
+    setStatuses('/source', { root: 'idle' });
+    projectFolderInRepository = 'ai';
+
+    const result = await moveSessionTreeToExistingWorktree({
+      root,
+      descendants: [],
+      sourceDirectory: '/source',
+      destination: makeWorktreeMetadata(),
+    });
+
+    expect(result).toBe('/destination/ai');
+    expect(moveCalls).toEqual([{ sessionId: 'root', sourceDirectory: '/source', destinationDirectory: '/destination/ai' }]);
+    expect(metadataWrites).toEqual([{ sessionId: 'root', metadata: latestMetadataResult }]);
+  });
+
+  test('takes the folder from the project of the moved session when two projects share the repository', async () => {
+    const sourceDirectory = '/repo/ai/src';
+    setStatuses(sourceDirectory, { root: 'idle' });
+    projectFoldersByPath.set('/repo/ai', 'ai');
+    projectFoldersByPath.set('/repo/web', 'web');
+    resolveProjectRefImplementation = (directory) => (
+      directory === sourceDirectory ? { id: 'ai', path: '/repo/ai' } : { id: 'web', path: '/repo/web' }
+    );
+
+    const result = await moveSessionTreeToExistingWorktree({
+      root: makeSession('root', sourceDirectory),
+      descendants: [],
+      sourceDirectory,
+      destination: makeWorktreeMetadata(),
+    });
+
+    expect(result).toBe('/destination/ai');
+  });
+
+  test('moves to the worktree root when the project folder is missing there', async () => {
+    setStatuses('/source', { root: 'idle' });
+    projectFolderInRepository = 'ai';
+    directoryInsideCheckout = false;
+
+    const result = await moveSessionTreeToExistingWorktree({
+      root: makeSession('root'),
+      descendants: [],
+      sourceDirectory: '/source',
+      destination: makeWorktreeMetadata(),
+    });
+
+    expect(result).toBe('/destination');
+    expect(toastWarnings).toHaveLength(1);
+  });
+
+  test('refuses to move a session from inside a worktree folder into the same worktree', async () => {
+    setStatuses('/destination/ai', { root: 'idle' });
+
+    await expect(moveSessionTreeToExistingWorktree({
+      root: makeSession('root'),
+      descendants: [],
+      sourceDirectory: '/destination/ai',
+      destination: makeWorktreeMetadata(),
+    })).rejects.toThrow('Source and destination are the same');
+    expect(moveCalls).toEqual([]);
   });
 
   test('rejects a destination that normalizes to the source directory', async () => {

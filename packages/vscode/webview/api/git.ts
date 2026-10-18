@@ -802,6 +802,10 @@ export const createVSCodeGitAPI = (): GitAPI => ({
     }>('api:git/conflict-details', { directory });
   },
 
+  resolveRepositoryPrefix: async (directory: string): Promise<string> => {
+    return sendBridgeMessage<string>('api:git/repository-prefix', { directory });
+  },
+
   validateWorktreeDirectory: async (directory: string, worktreeRoot: string): Promise<{
     valid: boolean;
     insideWorktreeRoot: boolean;

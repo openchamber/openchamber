@@ -15,7 +15,7 @@ import { formatDirectoryName, formatPathForDisplay } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
 import { getWorktreeFirstSeenAt } from './worktreeFirstSeen';
-import { buildProjectWorktreeIndex } from '../worktreeIndex';
+import { buildProjectWorktreeIndex, findPrefixWorktreeEntry } from '../worktreeIndex';
 import type { SpaceMark } from '@/lib/spaces/spaces-store';
 
 type Args = {
@@ -153,7 +153,7 @@ export const useSessionGrouping = (args: Args) => {
         const sessionWorktreeMeta = args.worktreeMetadata.get(session.id) ?? null;
         if (sessionWorktreeMeta) return sessionWorktreeMeta;
         if (sessionDirectory) {
-          const worktree = worktreeByPath.get(sessionDirectory) ?? null;
+          const worktree = findPrefixWorktreeEntry(sessionDirectory, worktreeByPath);
           if (worktree && sessionDirectory !== normalizedProjectRoot) {
             return worktree;
           }
@@ -217,7 +217,9 @@ export const useSessionGrouping = (args: Args) => {
         const resolvedScope = sessionOwners?.get(session.id)?.scopeDirectory;
         if (resolvedScope) {
           if (resolvedScope === normalizedProjectRoot) return normalizedProjectRoot ?? '__project_root__';
-          if (worktreeByPath.has(resolvedScope) || spaceByDirectory.has(resolvedScope)) return resolvedScope;
+          if (spaceByDirectory.has(resolvedScope)) return resolvedScope;
+          const scopeWorktree = findPrefixWorktreeEntry(resolvedScope, worktreeByPath);
+          if (scopeWorktree) return normalizePath(scopeWorktree.path) ?? scopeWorktree.path;
         }
         const metadataPath = normalizePath(args.worktreeMetadata.get(session.id)?.path ?? null);
         const normalizedDir = metadataPath ?? resolveGlobalSessionDirectory(session);
@@ -225,8 +227,10 @@ export const useSessionGrouping = (args: Args) => {
         // worktree directory is still owned by this configured project, not an
         // archive; only archived records use the archive bucket.
         if (!normalizedDir) return normalizedProjectRoot ?? '__project_root__';
-        if (normalizedDir !== normalizedProjectRoot && worktreeByPath.has(normalizedDir)) return normalizedDir;
         if (normalizedDir === normalizedProjectRoot) return normalizedProjectRoot ?? '__project_root__';
+        // A session in `<worktree>/sub` belongs to the worktree's group.
+        const dirWorktree = findPrefixWorktreeEntry(normalizedDir, worktreeByPath);
+        if (dirWorktree) return normalizePath(dirWorktree.path) ?? dirWorktree.path;
         return normalizedProjectRoot ?? '__project_root__';
       };
 

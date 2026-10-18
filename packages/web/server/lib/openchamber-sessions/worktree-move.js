@@ -26,6 +26,8 @@ import { OpenChamberControlError, asControlError } from '../openchamber-control/
  * @param {(directory: string, input: object, options: object) => Promise<{ name: string, branch: string, path: string }>} dependencies.createWorktree
  * @param {(directory: string, input: object, options: object) => Promise<unknown>} dependencies.removeWorktree
  * @param {(directory: string) => Promise<void>} dependencies.waitForWorktreeReady
+ * @param {(input: { sourceDirectory: string, worktreeRoot: string }) => Promise<{ directory: string, fallback: string | null }>} dependencies.resolveStartDirectory
+ *   Where the session starts inside the new worktree: the project's OpenCode folder, else the root.
  * @param {(input: { directory: string, parentDirectory: string, parentRemoteName: string }) => Promise<unknown>} dependencies.hydrateCheckout
  * @param {object} dependencies.bootstrapStore
  * @param {(directory: string, options: { message: string, paths: string[] }) => Promise<unknown>} dependencies.stashPush
@@ -43,6 +45,7 @@ export const createSessionWorktreeMover = (dependencies) => {
     createWorktree,
     removeWorktree,
     waitForWorktreeReady,
+    resolveStartDirectory,
     hydrateCheckout,
     bootstrapStore,
     stashPush,
@@ -188,10 +191,12 @@ export const createSessionWorktreeMover = (dependencies) => {
     }
 
     let stash = null;
+    let start = { directory: worktree.path, fallback: null };
     try {
       await waitForWorktreeReady(worktree.path);
+      start = await resolveStartDirectory({ sourceDirectory: source, worktreeRoot: worktree.path });
       if (paths.length > 0) stash = await carryChanges({ source, destination: worktree.path, sessionId, name, paths });
-      await moveSession(sessionId, worktree.path);
+      await moveSession(sessionId, start.directory);
     } catch (error) {
       await removeCreatedWorktree(root, worktree, ownsBranch);
       const failure = asControlError(error, 'Failed to move the session into the worktree');
@@ -215,15 +220,17 @@ export const createSessionWorktreeMover = (dependencies) => {
       });
     }
 
-    return {
+    const result = {
       sessionId,
-      directory: worktree.path,
+      directory: start.directory,
       previousDirectory: source,
       worktree: { name: worktree.name, branch: worktree.branch, path: worktree.path, ...(existingBranch ? { existingBranch } : { startRef }) },
       changesMoved: stash !== null,
       // What the agent named; anything else uncommitted stayed where it was.
       carried: paths,
     };
+    if (start.fallback) result.startDirectoryFallback = start.fallback;
+    return result;
   };
 
   return { move, resolveDefaultStartRef };

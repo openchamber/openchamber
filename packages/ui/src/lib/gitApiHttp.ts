@@ -1102,6 +1102,25 @@ export async function resolveGitPrimaryRoot(directory: string): Promise<{ root: 
   return { root: overview.root ? overview.root : directory };
 }
 
+/**
+ * Where `directory` sits inside its repository's checkout: `ai` for `<checkout>/ai`,
+ * an empty string at the checkout root. Rejects when the answer is unavailable, so
+ * a caller never takes a failed read for "at the root".
+ */
+export async function resolveGitRepositoryPrefix(directory: string): Promise<string> {
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/toplevel`, directory));
+  if (!response.ok) {
+    throw new Error(`Failed to resolve the repository folder: ${response.statusText}`);
+  }
+  // SAFETY: the route answers `{ root, prefix }`; a body that is not that object leaves `prefix` undefined, and anything but a string is rejected below.
+  const payload = await response.json().catch(() => ({})) as { prefix?: string | null };
+  // A missing or null prefix is a failed read, not "at the root".
+  if (payload.prefix === undefined || payload.prefix === null) {
+    throw new Error('The server did not report the repository folder');
+  }
+  return payload.prefix;
+}
+
 export async function resolveGitTopLevel(directory: string): Promise<{ root: string }> {
   const response = await runtimeFetch(buildUrl(`${API_BASE}/toplevel`, directory));
   if (!response.ok) {

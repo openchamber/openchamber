@@ -1,4 +1,5 @@
 import { normalizePath } from '@/lib/pathNormalization';
+import { findWorktreeHoldingDirectory } from '@/lib/worktrees/worktreePaths';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 
 /**
@@ -11,8 +12,7 @@ export const useIsContributorWorktree = (directory: string | null | undefined): 
     const target = normalizePath(directory ?? null);
     if (!target) return false;
     for (const worktrees of state.availableWorktreesByProject.values()) {
-      if (worktrees.some((worktree) => worktree.provenance?.kind === 'contributor-fork'
-        && normalizePath(worktree.path) === target)) return true;
+      if (findWorktreeHoldingDirectory(worktrees, target)?.provenance?.kind === 'contributor-fork') return true;
     }
     return false;
   });

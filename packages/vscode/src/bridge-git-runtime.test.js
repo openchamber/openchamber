@@ -10,14 +10,43 @@ const gitService = {
   createWorktree: mock(),
   getWorktreeBootstrapStatus: mock(),
   removeWorktree: mock(),
+  resolveRepositoryPrefix: mock(),
 };
 
-const fetchMock = mock(async () => new Response(null, { status: 204 }));
+// OpenCode answers the location list with no running locations and every eviction with 204.
+const fetchMock = mock(async (input, init) => (
+  new Request(input, init).method === 'GET' ? Response.json([]) : new Response(null, { status: 204 })
+));
+const evictedDirectories = () => fetchMock.mock.calls
+  .map(([input, init]) => new Request(input, init))
+  .filter((request) => request.method === 'DELETE')
+  .map((request) => new URL(request.url).searchParams.get('location[directory]'));
 globalThis.fetch = fetchMock;
 
 mock.module('./gitService', () => gitService);
 
 const { handleStandardGitBridgeMessage } = await import('./bridge-git-runtime');
+
+describe('bridge git runtime repository prefix', () => {
+  it('answers where the directory sits inside its checkout', async () => {
+    gitService.resolveRepositoryPrefix.mockReset();
+    gitService.resolveRepositoryPrefix.mockResolvedValue('ai');
+
+    const response = await handleStandardGitBridgeMessage({ id: '1', type: 'api:git/repository-prefix', payload: { directory: '/repo/ai' } });
+
+    expect(response).toEqual({ id: '1', type: 'api:git/repository-prefix', success: true, data: 'ai' });
+    expect(gitService.resolveRepositoryPrefix).toHaveBeenCalledWith('/repo/ai');
+  });
+
+  it('rejects a request without a directory before reaching git', async () => {
+    gitService.resolveRepositoryPrefix.mockReset();
+
+    const response = await handleStandardGitBridgeMessage({ id: '1', type: 'api:git/repository-prefix', payload: {} });
+
+    expect(response?.success).toBe(false);
+    expect(gitService.resolveRepositoryPrefix).not.toHaveBeenCalled();
+  });
+});
 
 describe('bridge git runtime index mutations', () => {
   beforeEach(() => {
@@ -214,15 +243,49 @@ describe('bridge git runtime index mutations', () => {
     const disposeInstance = gitService.removeWorktree.mock.calls[0][1].disposeInstance;
     await disposeInstance('/repo/wt');
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [input, init] = fetchMock.mock.calls[0];
-    const request = new Request(input, init);
+    const evictions = fetchMock.mock.calls
+      .map(([input, init]) => new Request(input, init))
+      .filter((request) => request.method === 'DELETE');
+    expect(evictions).toHaveLength(1);
     // OpenCode 2's location eviction; the v1 /instance/dispose route is gone.
-    expect(request.method).toBe('DELETE');
-    const url = new URL(request.url);
+    const url = new URL(evictions[0].url);
     expect(url.origin + url.pathname).toBe('http://opencode.test/api/debug/location');
     expect(url.searchParams.get('location[directory]')).toBe('/repo/wt');
-    expect(request.headers.get('authorization')).toBe('Bearer test');
+    expect(evictions[0].headers.get('authorization')).toBe('Bearer test');
+  });
+
+  it('evicts every running location inside the removed worktree, such as a project folder', async () => {
+    gitService.removeWorktree.mockResolvedValue(true);
+    await handleStandardGitBridgeMessage({
+      id: 'remove-worktree',
+      type: 'api:git/worktrees',
+      payload: { directory: '/repo/ai', method: 'DELETE', body: { directory: '/repo/wt' } },
+    }, { manager: { getApiUrl: () => 'http://opencode.test', getOpenCodeAuthHeaders: () => ({}) } });
+
+    fetchMock.mockImplementationOnce(async () => Response.json([
+      { directory: '/repo' },
+      { directory: '/repo/ai' },
+      { directory: '/repo/wt/ai' },
+      { directory: '/repo/wt-other/ai' },
+    ]));
+    const disposeInstance = gitService.removeWorktree.mock.calls[0][1].disposeInstance;
+    await disposeInstance('/repo/wt');
+
+    expect(evictedDirectories().sort()).toEqual(['/repo/wt', '/repo/wt/ai']);
+  });
+
+  it('still evicts the worktree root when the location list cannot be read, and reports the failure', async () => {
+    gitService.removeWorktree.mockResolvedValue(true);
+    await handleStandardGitBridgeMessage({
+      id: 'remove-worktree',
+      type: 'api:git/worktrees',
+      payload: { directory: '/repo', method: 'DELETE', body: { directory: '/repo/wt' } },
+    }, { manager: { getApiUrl: () => 'http://opencode.test', getOpenCodeAuthHeaders: () => ({}) } });
+
+    fetchMock.mockImplementationOnce(async () => Response.json({ name: 'BadRequest', data: { message: 'List unavailable' } }, { status: 400 }));
+    const disposeInstance = gitService.removeWorktree.mock.calls[0][1].disposeInstance;
+    await expect(disposeInstance('/repo/wt')).rejects.toThrow('List unavailable');
+    expect(evictedDirectories()).toEqual(['/repo/wt']);
   });
 
   it('fails disposal when the managed runtime has no API URL', async () => {

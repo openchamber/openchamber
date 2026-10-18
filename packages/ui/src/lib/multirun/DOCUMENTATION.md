@@ -35,7 +35,10 @@ The run's model and agent are set on the session at creation (`selection`),
 because v2 pins a session to a model instead of taking one per prompt.
 
 A failed binding attempts to delete only that newly created session. Worktrees
-are retained because setup may already have written files. Successful siblings
+are retained because setup may already have written files. A lane, added lane
+or code fusion whose new worktree never populated has nothing in it; that
+worktree and its branch are removed (`resolveCreatedWorktreeStartDirectory`)
+and the lane counts as failed. Successful siblings
 remain usable and creation reports the failed count. Runtime changes stop later
 requests, registration and dispatch.
 
@@ -83,6 +86,14 @@ the kept one:
 3. archives its chat;
 4. removes its worktree and local branch, unless another active chat still
    lives there.
+
+A member of a project opened on a folder of its repository runs in that folder
+of its worktree (`<worktree>/ai`). `memberLocation.locateRunMember` finds the
+checkout that holds the member's directory and never answers a checkout that
+holds a registered project: git lists the primary checkout `repo` among the
+worktrees of the project `repo/ai`, and removing it would remove the project.
+OpenCode lists sessions by exact directory, so step 4 asks both the worktree
+root and the member's folder for other active chats.
 
 A failed step stops cleanup for that member only and leaves its worktree in
 place; the result reports it. The project root is never removed. Snapshot refs

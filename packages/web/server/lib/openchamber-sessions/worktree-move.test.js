@@ -11,7 +11,7 @@ const STASH = { ref: 'stash@{0}', message: 'On main: OpenChamber: session ses_1 
  * A git that records what happened: one stash list shared by every worktree,
  * the way `refs/stash` is, and switches for each step that can fail.
  */
-const createMover = ({ changes = true, applyFails = false, moveFails = false, restoreFails = false, removeFails = false, unchanged = [] } = {}) => {
+const createMover = ({ changes = true, applyFails = false, moveFails = false, restoreFails = false, removeFails = false, unchanged = [], start = null } = {}) => {
   const stashes = [];
   const calls = [];
   const getPathsWithoutChanges = vi.fn(async () => unchanged);
@@ -27,6 +27,11 @@ const createMover = ({ changes = true, applyFails = false, moveFails = false, re
       if (removeFails) throw new Error('worktree is locked');
     }),
     waitForWorktreeReady: vi.fn(async (directory) => { calls.push(['waitForWorktreeReady', directory]); }),
+    // `start` is the project's folder inside the worktree, where the session starts.
+    resolveStartDirectory: vi.fn(async ({ sourceDirectory, worktreeRoot }) => {
+      calls.push(['resolveStartDirectory', sourceDirectory, worktreeRoot]);
+      return start ? { directory: `${worktreeRoot}/${start.folder}`, fallback: start.fallback ?? null } : { directory: worktreeRoot, fallback: null };
+    }),
     hydrateCheckout: vi.fn(async (input) => { calls.push(['hydrateCheckout', input]); }),
     bootstrapStore: { read: vi.fn(), write: vi.fn() },
     // `created` is deliberately wrong here: it is read from git's localized
@@ -74,14 +79,14 @@ describe('moving a session into a new worktree', () => {
       carried: ['src/a.ts', 'src/b.ts'],
     });
     expect(calls.map(([step]) => step)).toEqual([
-      'createWorktree', 'hydrateCheckout', 'waitForWorktreeReady', 'stashPush', 'stashApply', 'moveSession', 'stashDrop',
+      'createWorktree', 'hydrateCheckout', 'waitForWorktreeReady', 'resolveStartDirectory', 'stashPush', 'stashApply', 'moveSession', 'stashDrop',
     ]);
     expect(calls[0]).toEqual(['createWorktree', ROOT, { mode: 'new', name: 'fix-login', startRef: 'main' }]);
     expect(calls[1][1]).toEqual({ directory: WORKTREE.path, parentDirectory: ROOT, parentRemoteName: '' });
     // Only the named files: everything else uncommitted stays in the checkout.
-    expect(calls[3]).toEqual(['stashPush', SOURCE, ['/repo/app/src/a.ts', '/repo/app/src/b.ts']]);
+    expect(calls[4]).toEqual(['stashPush', SOURCE, ['/repo/app/src/a.ts', '/repo/app/src/b.ts']]);
     // Applied by hash: a stash pushed in between would otherwise be the one applied.
-    expect(calls[4]).toEqual(['stashApply', WORKTREE.path, STASH.hash]);
+    expect(calls[5]).toEqual(['stashApply', WORKTREE.path, STASH.hash]);
     expect(stashes).toEqual([]);
   });
 
@@ -91,7 +96,27 @@ describe('moving a session into a new worktree', () => {
     const result = await mover.move({ sessionId: 'ses_1', directory: SOURCE, name: 'fix-login' });
 
     expect(result).toMatchObject({ changesMoved: false, carried: [] });
-    expect(calls.map(([step]) => step)).toEqual(['createWorktree', 'hydrateCheckout', 'waitForWorktreeReady', 'moveSession']);
+    expect(calls.map(([step]) => step)).toEqual(['createWorktree', 'hydrateCheckout', 'waitForWorktreeReady', 'resolveStartDirectory', 'moveSession']);
+  });
+
+  it('moves the session into the project folder inside the worktree while changes still go to the worktree root', async () => {
+    const { mover, calls } = createMover({ start: { folder: 'ai' } });
+
+    const result = await mover.move({ sessionId: 'ses_1', directory: SOURCE, name: 'fix-login', carry: ['src/a.ts'] });
+
+    expect(result).toMatchObject({ directory: `${WORKTREE.path}/ai`, worktree: { path: WORKTREE.path } });
+    expect(result).not.toHaveProperty('startDirectoryFallback');
+    expect(calls).toContainEqual(['resolveStartDirectory', SOURCE, WORKTREE.path]);
+    expect(calls).toContainEqual(['stashApply', WORKTREE.path, STASH.hash]);
+    expect(calls).toContainEqual(['moveSession', 'ses_1', `${WORKTREE.path}/ai`]);
+  });
+
+  it('names why the session did not start in the project folder', async () => {
+    const { mover } = createMover({ start: { folder: '', fallback: 'missing' } });
+
+    const result = await mover.move({ sessionId: 'ses_1', directory: SOURCE, name: 'fix-login' });
+
+    expect(result).toMatchObject({ startDirectoryFallback: 'missing' });
   });
 
   it('refuses a carry list that is not file paths before creating anything', async () => {
@@ -111,7 +136,7 @@ describe('moving a session into a new worktree', () => {
 
     expect(result.changesMoved).toBe(false);
     expect(calls[0]).toEqual(['createWorktree', ROOT, { mode: 'new', name: 'fix-login', branchName: 'iuliia/fix-login', startRef: 'develop' }]);
-    expect(calls.map(([step]) => step)).toEqual(['createWorktree', 'hydrateCheckout', 'waitForWorktreeReady', 'stashPush', 'moveSession']);
+    expect(calls.map(([step]) => step)).toEqual(['createWorktree', 'hydrateCheckout', 'waitForWorktreeReady', 'resolveStartDirectory', 'stashPush', 'moveSession']);
   });
 
   it('rejects every unchanged or unresolvable carry path before creating a worktree', async () => {
@@ -216,6 +241,7 @@ describe('moving a session into a new worktree', () => {
   it('names the stash message when the stash list cannot be read after the push', async () => {
     let listings = 0;
     const failingMover = createSessionWorktreeMover({
+      resolveStartDirectory: vi.fn(async ({ worktreeRoot }) => ({ directory: worktreeRoot, fallback: null })),
       ...Object.fromEntries(['createWorktree', 'removeWorktree', 'waitForWorktreeReady', 'hydrateCheckout', 'stashApply', 'stashDrop', 'moveSession'].map((name) => [name, vi.fn(async () => (name === 'createWorktree' ? WORKTREE : undefined))])),
       bootstrapStore: {},
       getPathsWithoutChanges: vi.fn(async () => []),

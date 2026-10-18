@@ -21,6 +21,10 @@ OpenChamber branch'i oluşturur, klasörü hazırlar ve orada ilk mesajınızı 
 
 Soruları atlamak için aynı dal menüsünden **Hızlı worktree** seçin: OpenChamber dala bir ad verir ve yeni oturumu ona yönlendirir.
 
+## Deponun bir klasöründe açılan projeler
+
+Bir projeyi `repo/ai` gibi deponun içindeki bir klasörde açtıysanız, yeni worktree'ler de orada açılır. Yeni bir worktree'deki oturum checkout içindeki aynı klasörde başlar; böylece OpenCode orada duran yapılandırmayı bulur. Deponun kök dizininde açılan bir proje eskisi gibi worktree kök dizininde başlar. Bir dalda bu klasör yoksa oturum worktree kök dizininde başlar ve OpenChamber sizi bilgilendirir.
+
 ## Çalışmayı geri alın
 
 İş hazır olduğunda, Git görünümündeki **Integrate** seçeneğini kullanarak worktree'nin commit'lerini başka bir branch'e, örneğin `main`'e taşıyın. Bir değişiklik çakışırsa, çakışmayı çözmesi için işi agent'a verebilirsiniz.

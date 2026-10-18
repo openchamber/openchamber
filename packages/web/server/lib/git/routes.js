@@ -27,7 +27,15 @@ const WORKTREE_INSTANCE_DISPOSE_TIMEOUT_MS = 5_000;
  * OpenCode runtime itself, and both are read at call time. OpenCode 2 has no
  * instance route; evicting the location drops its cached services (file
  * watchers, LSP, MCP), which is what held the worktree folder.
+ *
+ * A session of a project opened on a folder of its repository runs in that
+ * folder of the worktree (`<worktree>/ai`), which is a location of its own, so
+ * every running location inside the worktree is evicted along with its root.
+ * When the location list cannot be read, the root is still evicted and the
+ * list error is rethrown for the removal wrapper to log.
  */
+const toLocationKey = (directory) => String(directory || '').replace(/\\/g, '/').replace(/\/+$/, '');
+
 const createWorktreeInstanceDisposer = ({ buildOpenCodeUrl, getOpenCodeAuthHeaders }) => {
   return async (worktreeDirectory) => {
     const client = OpenCode.make({
@@ -35,7 +43,23 @@ const createWorktreeInstanceDisposer = ({ buildOpenCodeUrl, getOpenCodeAuthHeade
       headers: getOpenCodeAuthHeaders(),
       fetch: (input, init) => fetch(input, { ...init, signal: AbortSignal.timeout(WORKTREE_INSTANCE_DISPOSE_TIMEOUT_MS) }),
     });
-    await client.debug.location.evict({ location: { directory: worktreeDirectory } });
+    const root = toLocationKey(worktreeDirectory);
+    const errors = [];
+    const inside = await client.debug.location.list().then(
+      (locations) => locations.map((location) => location.directory)
+        .filter((directory) => toLocationKey(directory).startsWith(`${root}/`)),
+      (error) => {
+        errors.push(error);
+        return [];
+      },
+    );
+    const evictions = await Promise.allSettled([worktreeDirectory, ...inside].map((directory) => (
+      client.debug.location.evict({ location: { directory } })
+    )));
+    for (const eviction of evictions) {
+      if (eviction.status === 'rejected') errors.push(eviction.reason);
+    }
+    if (errors.length > 0) throw errors[0];
   };
 };
 

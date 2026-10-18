@@ -8,9 +8,11 @@ import {
   listStashes as listStashesDefault,
   removeWorktree as removeWorktreeDefault,
   resolvePrimaryWorktreeRoot,
+  resolveWorktreeTopLevel as resolveWorktreeTopLevelDefault,
   stashApply as stashApplyDefault,
   stashDrop as stashDropDefault,
   stashPush as stashPushDefault,
+  validateWorktreeDirectory as validateWorktreeDirectoryDefault,
 } from '../git/index.js';
 import { parseModelSelection } from '../opencode/config-v2.js';
 import { expandSnippets } from '../opencode/snippets.js';
@@ -25,6 +27,7 @@ import { createOpenCodeClient as defaultCreateOpenCodeClient } from './opencode-
 import { createSessionMetadataStore, createOpenCodeSessionMetadata } from './session-metadata-store.js';
 import { buildLinkedIssuesPatch, parseLinkOperation } from './session-linked-issues.js';
 import { createSessionWorktreeMover } from './worktree-move.js';
+import { createStartDirectoryResolver } from './worktree-start-directory.js';
 
 const asList = (value) => (Array.isArray(value) ? value : []);
 
@@ -366,7 +369,7 @@ const resolveRequestedDirectory = async ({ payload, readSettingsFromDiskMigrated
     }
     const validated = await validateDirectoryPath(project.path);
     return validated.ok
-      ? { ok: true, directory: validated.directory, projectId: projectID }
+      ? { ok: true, directory: validated.directory, projectId: projectID, projectPath: project.path }
       : { ok: false, status: 400, error: validated.error || 'Invalid project directory' };
   }
 
@@ -380,7 +383,7 @@ const resolveRequestedDirectory = async ({ payload, readSettingsFromDiskMigrated
     const { root } = await resolvePrimaryWorktreeRoot(validated.directory);
     project = projects.find((entry) => entry.path === root);
   }
-  return { ok: true, directory: validated.directory, ...(project ? { projectId: project.id } : {}) };
+  return { ok: true, directory: validated.directory, ...(project ? { projectId: project.id, projectPath: project.path } : {}) };
 };
 
 // createWorktree returns while the worktree is still being populated in the
@@ -467,6 +470,10 @@ export const createOpenChamberSessionService = (dependencies) => {
     stashApply = stashApplyDefault,
     stashDrop = stashDropDefault,
     listStashes = listStashesDefault,
+    // A project opened on a folder of its repository starts the sessions of its
+    // new worktrees in the same folder (`./worktree-start-directory.js`).
+    resolveWorktreeTopLevel = resolveWorktreeTopLevelDefault,
+    validateWorktreeDirectory = validateWorktreeDirectoryDefault,
     // Auto routing. Sessions dispatched here talk to OpenCode through the SDK,
     // not through the proxy that intercepts the Auto sentinel, so a default of
     // `openchamber/auto` (Session Defaults) is resolved here before the
@@ -496,6 +503,77 @@ export const createOpenChamberSessionService = (dependencies) => {
     headers: getOpenCodeAuthHeaders(),
     directory,
   });
+
+  const resolveStartDirectory = createStartDirectoryResolver({ resolveWorktreeTopLevel, validateWorktreeDirectory });
+
+  const toPathKey = (value) => String(value || '').replace(/\\/g, '/').replace(/\/+$/, '');
+  const holdsPath = (outer, inner) => inner === outer || inner.startsWith(`${outer}/`);
+  // The checkout root is the directory minus its folder, in the same spelling as
+  // the project paths; git's own root has symlinks resolved. Null when unknown,
+  // and then path containment alone decides.
+  const checkoutRootOf = (directoryKey, folder) => {
+    if (folder === null) return null;
+    if (folder === '') return directoryKey;
+    return directoryKey.endsWith(`/${folder}`) ? directoryKey.slice(0, -folder.length - 1) : null;
+  };
+
+  /**
+   * A session in a linked worktree (`<wtA>/ai/src`) belongs to no registered
+   * project path. Its folder inside that checkout (`ai/src`) names the project
+   * the same way the UI does: the longest registered project in the primary
+   * checkout whose folder holds that one, so `/repo/ai` wins over `/repo`.
+   */
+  const projectPathInPrimaryCheckout = async (directory, folder, projects) => {
+    const primaryRoot = toPathKey((await resolvePrimaryWorktreeRoot(directory)).root);
+    let best = null;
+    for (const project of projects) {
+      const projectKey = toPathKey(project.path);
+      if (!holdsPath(primaryRoot, projectKey)) continue;
+      const projectFolder = projectKey.slice(primaryRoot.length).replace(/^\/+/, '');
+      if (projectFolder && !holdsPath(projectFolder, folder)) continue;
+      if (!best || projectFolder.length > best.folder.length) best = { path: project.path, folder: projectFolder };
+    }
+    return best?.path ?? null;
+  };
+
+  /**
+   * Best effort: the path of the project the directory belongs to. That is the
+   * registered project whose path contains it (the longest one, so a session in
+   * `/repo/ai/src` belongs to the project `/repo/ai`) inside the same checkout;
+   * a project that only contains the checkout, such as `/repo` around a worktree
+   * at `/repo/.worktrees/a`, does not count. Else the project whose folder holds
+   * the directory's folder in the primary checkout, else the project resolved
+   * the way a create request does, else the directory itself.
+   */
+  const projectPathFor = async (directory) => {
+    const projects = await readSettingsFromDiskMigrated()
+      .then((settings) => sanitizeProjects(settings?.projects || []))
+      .catch(() => []);
+    const directoryKey = toPathKey(directory);
+    // `prefix` is absent when git could not read the directory.
+    const prefix = (await resolveWorktreeTopLevel(directory).catch(() => null))?.prefix;
+    const folder = prefix === undefined ? null : toPathKey(prefix);
+    const checkoutRoot = checkoutRootOf(directoryKey, folder);
+    let containing = null;
+    for (const project of projects) {
+      const projectKey = toPathKey(project.path);
+      if (!holdsPath(projectKey, directoryKey)) continue;
+      if (checkoutRoot && !holdsPath(checkoutRoot, projectKey)) continue;
+      if (!containing || projectKey.length > toPathKey(containing).length) containing = project.path;
+    }
+    if (containing) return containing;
+    if (folder !== null) {
+      const inPrimaryCheckout = await projectPathInPrimaryCheckout(directory, folder, projects).catch(() => null);
+      if (inPrimaryCheckout) return inPrimaryCheckout;
+    }
+    const resolved = await resolveRequestedDirectory({
+      payload: { directory },
+      readSettingsFromDiskMigrated,
+      sanitizeProjects,
+      validateDirectoryPath,
+    }).catch(() => null);
+    return resolved?.ok ? resolved.projectPath ?? resolved.directory : directory;
+  };
 
   const waitForWorktreeBootstrapReady = async ({ directory, bootstrapStore }) => {
     const deadline = Date.now() + WORKTREE_BOOTSTRAP_TIMEOUT_MS;
@@ -893,7 +971,10 @@ export const createOpenChamberSessionService = (dependencies) => {
 
     if (typeof waitForOpenCodeReady === 'function') await waitForOpenCodeReady(10_000, 250);
 
+    const projectPath = resolvedDirectory.projectPath ?? resolvedDirectory.directory;
     if (prompt) {
+      // Validated where the request points, the project's own folder: a new
+      // worktree does not exist yet, and its start folder mirrors this one.
       await validateRequestedSelection({
         directory: resolvedDirectory.directory,
         requestedModel: model,
@@ -942,6 +1023,14 @@ export const createOpenChamberSessionService = (dependencies) => {
       });
     }
 
+    let startDirectoryFallback = null;
+    if (worktree) {
+      ({ directory: sessionDirectory, fallback: startDirectoryFallback } = await resolveStartDirectory({
+        projectPath,
+        worktreeRoot: sessionDirectory,
+      }));
+    }
+
     const baseUrl = openCodeBaseUrl();
     const authHeaders = getOpenCodeAuthHeaders();
     const client = clientFor(sessionDirectory);
@@ -983,6 +1072,8 @@ export const createOpenChamberSessionService = (dependencies) => {
       ...(goalInput.enabled ? { goalEnabled: true } : {}),
       ...(goalInput.tokenBudget ? { goalTokenBudget: goalInput.tokenBudget } : {}),
     };
+    // Set when the project's folder could not be used and the session started at the worktree root.
+    if (startDirectoryFallback) result.startDirectoryFallback = startDirectoryFallback;
 
     try {
       emitSessionCreatedEvent?.({
@@ -1150,6 +1241,10 @@ export const createOpenChamberSessionService = (dependencies) => {
     resolvePrimaryWorktreeRoot,
     bootstrapStore: worktreeBootstrapStore,
     waitForWorktreeReady: (directory) => waitForWorktreeBootstrapReady({ directory, bootstrapStore: worktreeBootstrapStore }),
+    resolveStartDirectory: async ({ sourceDirectory, worktreeRoot }) => resolveStartDirectory({
+      projectPath: await projectPathFor(sourceDirectory),
+      worktreeRoot,
+    }),
     hydrateCheckout: hydrateWorktreeCheckout,
     // The move is global in v2: no directory header, the session id names it.
     moveSession: (sessionID, directory) => clientFor(undefined).session.move({ sessionID, directory }),

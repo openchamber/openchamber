@@ -17,6 +17,7 @@ import { captureDefaultSendSelection } from '@/lib/defaultSendSelection';
 import { resolveProjectRef } from '@/lib/worktreeSessionCreator';
 import { createWorktreeWithDefaults } from '@/lib/worktrees/worktreeCreate';
 import { waitForWorktreeBootstrap } from '@/lib/worktrees/worktreeBootstrap';
+import { resolveWorktreeStartDirectory } from '@/lib/worktrees/worktreeStartDirectory';
 import { getWorktreeSetupWaitEnabled } from '@/lib/openchamberConfig';
 import { resolveWorktreeSetupCommands } from '@/lib/sharedTrustConfirmation';
 import { guestProject, guestProjectWorktrees } from './workspace';
@@ -336,12 +337,16 @@ export const startGuestSession = async (args: {
     return { directory: latest.path, name: latest.name ?? latest.label, branch: latest.branch,
       status: latest.worktreeStatus === 'not-a-repo' ? 'invalid' : latest.worktreeStatus ?? 'ready' };
   };
-  const createTargetSession = async (title: string, directory: string): Promise<CreatedSession | null> => {
+  const createTargetSession = async (title: string, requestedDirectory: string): Promise<CreatedSession | null> => {
+    let directory = requestedDirectory;
     if (metadata && project) {
       failure = 'bootstrap-failed';
       const wait = await getWorktreeSetupWaitEnabled(project);
       assertCurrent();
       if (wait) await waitForWorktreeBootstrap(metadata.path);
+      // Rejects only when the checkout failed to populate: that is `bootstrap-failed`,
+      // and the SDK contract keeps the worktree for the guest to decide on (packages/sdk/API.md).
+      directory = await resolveWorktreeStartDirectory(project, metadata.path);
     }
     assertCurrent();
     failure = 'session-create-failed';
@@ -366,7 +371,7 @@ export const startGuestSession = async (args: {
     if (metadata) {
       const latest = project ? guestProjectWorktrees(project.path).find((entry) => entry.path === metadata?.path) : undefined;
       metadata = { ...metadata, worktreeStatus: latest?.worktreeStatus ?? metadata.worktreeStatus };
-      useSessionUIStore.getState().setWorktreeMetadata(session.id, metadata);
+      useSessionUIStore.getState().setWorktreeMetadata(session.id, metadata, createdDirectory);
     }
     return { id: session.id, directory: createdDirectory };
   };

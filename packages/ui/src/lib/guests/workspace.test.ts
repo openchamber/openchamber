@@ -56,6 +56,15 @@ describe('extension workspace projection', () => {
       expect(fetch.mock.calls.length).toBe(0);
     } finally { fetch.mockRestore(); }
   });
+  test('a session in the project folder of a worktree belongs to the project and to that worktree', () => {
+    useGlobalSessionsStore.getState().applySnapshot([
+      session('b-session', '/b-tree/ai'),
+      session('sibling-session', '/b-tree-other/ai'),
+    ], [], 'ready');
+    const [record, ...rest] = readB().sessions;
+    expect(rest).toEqual([]);
+    expect(record).toMatchObject({ id: 'b-session', worktree: { directory: '/b-tree', branch: 'fix' } });
+  });
   test('live outcomes work with the untouched diagnostic stream field and distinguish turn outcomes', () => {
     const store = manager.ensureChild('/b-tree', { bootstrap: false });
     store.setState({ sessionStatusReady: true });

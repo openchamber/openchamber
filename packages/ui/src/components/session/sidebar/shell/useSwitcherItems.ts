@@ -8,7 +8,7 @@ import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
 import { useGitAllBranches } from '@/stores/useGitStore';
 import type { SessionNode } from '../types';
 import { isPathWithinProject, normalizePath } from '../utils';
-import { buildWorktreeByPathIndex } from '../worktreeIndex';
+import { buildWorktreeByPathIndex, findPrefixWorktreeEntry } from '../worktreeIndex';
 import { compareSessionsByLifecycleOrder, useSessionOrderingStore } from '@/sync/session-ordering';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { isVSCodeRuntime } from '@/lib/desktop';
@@ -133,7 +133,7 @@ export const useSwitcherItems = (enabled: boolean, options: SwitcherItemsOptions
     (directory: string | null) => {
       if (!directory) return null;
       // Known worktree → its project, regardless of where the worktree lives.
-      const worktreeHit = worktreeByPath.get(normalizePath(directory) ?? directory);
+      const worktreeHit = findPrefixWorktreeEntry(normalizePath(directory) ?? directory, worktreeByPath);
       if (worktreeHit) return worktreeHit.project;
       const matches = normalizedProjects
         .filter((project) => isPathWithinProject(directory, project.normalizedPath))
@@ -189,7 +189,7 @@ export const useSwitcherItems = (enabled: boolean, options: SwitcherItemsOptions
       const projectLabel = formatProjectLabel(matchedProject);
       // Live git branch when available; the discovered worktree branch fills
       // in for directories whose git status hasn't been fetched yet.
-      const worktreeHit = directory ? worktreeByPath.get(normalizePath(directory) ?? directory) : null;
+      const worktreeHit = directory ? findPrefixWorktreeEntry(normalizePath(directory) ?? directory, worktreeByPath) : null;
       const liveBranch = directory ? branchesByDirectory.get(directory) : undefined;
       const branchLabel = liveBranch ?? worktreeHit?.meta.branch?.trim() ?? null;
       return {

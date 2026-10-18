@@ -10,6 +10,7 @@ import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useDeviceInfo } from '@/lib/device';
 import { checkIsGitRepository } from '@/lib/gitApi';
 import { listProjectWorktrees } from '@/lib/worktrees/worktreeManager';
+import { checkoutHoldsDirectory } from '@/lib/worktrees/worktreePaths';
 import { sessionEvents } from '@/lib/sessionEvents';
 import type { WorktreeMetadata } from '@/types/worktree';
 import { formatPathForDisplay, cn } from '@/lib/utils';
@@ -88,7 +89,7 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
       const sessionDir = (session as { directory?: string }).directory;
       if (sessionDir) {
         const normalizedSessionDir = normalize(sessionDir);
-        if (normalizedSessionDir === normalizedWorktreePath) {
+        if (checkoutHoldsDirectory(normalizedWorktreePath, normalizedSessionDir)) {
           return true;
         }
       }

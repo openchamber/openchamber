@@ -1,9 +1,9 @@
 import {
-  checkoutHoldsSubfolder,
   preserveClientTrackedWorktreeStatus,
   replaceRepositoryWorktrees,
   type ProjectRef,
 } from '@/lib/worktrees/worktreeManager';
+import { checkoutHoldsSubfolder } from '@/lib/worktrees/worktreePaths';
 import type { WorktreeMetadata } from '@/types/worktree';
 import { normalizePath } from '@/lib/pathNormalization';
 

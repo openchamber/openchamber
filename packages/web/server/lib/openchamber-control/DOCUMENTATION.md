@@ -129,6 +129,32 @@ other.
   `session.move`. A failure after the worktree exists removes it again and
   puts the changes back; when restoring fails too, the error names the stash
   so nothing is lost. A 409 means the changes did not apply on the start ref.
+- A session created in a new worktree (`session.create` with `worktree` or
+  `pullRequest`) or moved into one (`session.moveToWorktree`) starts in the same
+  folder of that worktree as the project opens on in its repository: a project
+  at `repo/ai` starts in `<worktree>/ai`, a project at the repository root
+  starts at the worktree root (`../openchamber-sessions/worktree-start-directory.js`,
+  the folder from `git rev-parse --show-prefix` through `resolveWorktreeTopLevel`).
+  The result's `directory` is that folder and `worktree.path` stays the checkout
+  root. When the checkout lacks the folder, it cannot be checked, or git cannot
+  report the project's folder, the session starts at the worktree root and the
+  result carries `startDirectoryFallback` (`missing`, `unverified` or `unknown`).
+  The field is for API callers; the OpenChamber UI does not read it, because it
+  resolves its own start folder and shows its own warning. `unknown` also covers a
+  failed git read: `resolveWorktreeTopLevel` answers without a `prefix` then,
+  which is never taken for "the project is at the repository root". For a move,
+  the project is the registered project whose path contains the session's
+  directory inside the same checkout (the longest one), so a session in
+  `repo/ai/src` follows `repo/ai`. A session in another worktree, `<wtA>/ai/src`,
+  lies in no project path; its folder in that checkout (`ai/src`) picks the
+  longest registered project of the primary checkout whose folder holds it, so it
+  also follows `repo/ai` when `repo` is registered too. A project around a
+  worktree placed inside the repository folder (`repo/.worktrees/a`) does not
+  count as containing it. The UI applies the same rule
+  (`projectPathForCheckoutFolder`). A requested agent or model is validated in the
+  directory the request names, the project's own folder, as before: a new worktree
+  does not exist yet, and its start folder mirrors that one. Git work (carrying
+  changes, removal) stays on the worktree root.
 - Default agents resolve from the owning project before global settings and
   OpenCode defaults. Directory-based requests identify the project before
   creating a worktree; existing linked worktrees resolve through Git's primary

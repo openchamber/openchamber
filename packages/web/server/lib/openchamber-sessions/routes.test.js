@@ -26,6 +26,7 @@ const sessionForkMock = vi.fn(async () => ({ id: 'ses_fork', title: 'Forked sess
 const sessionMessagesMock = vi.fn(async () => ({ data: [] }));
 const sessionGetMock = vi.fn(async ({ sessionID }) => ({ id: sessionID, location: { directory: '/repo/app' } }));
 const sessionUpdateMock = vi.fn(async () => undefined);
+const sessionMoveMock = vi.fn(async () => undefined);
 const sessionPromptMock = vi.fn(async () => ({ id: 'msg_dispatched' }));
 const sessionSyntheticMock = vi.fn(async () => ({ id: 'msg_synthetic' }));
 const sessionSwitchModelMock = vi.fn(async () => undefined);
@@ -77,8 +78,12 @@ const sessionCommandMock = vi.fn(async () => undefined);
 const commandListMock = vi.fn(async () => ({ data: [] }));
 globalThis.__openchamberCreateWorktreeMock = createWorktreeMock;
 globalThis.__openchamberGetWorktreeBootstrapStatusMock = getWorktreeBootstrapStatusMock;
+const defaultPrimaryWorktreeRoot = async (directory) => ({ root: directory === '/repo/worktrees/side-task' ? '/repo/app' : directory });
+const resolvePrimaryWorktreeRootMock = vi.fn(defaultPrimaryWorktreeRoot);
+globalThis.__openchamberResolvePrimaryWorktreeRootMock = resolvePrimaryWorktreeRootMock;
 
 let registerOpenChamberSessionRoutes;
+let createOpenChamberSessionService;
 let createSessionMetadataStore;
 let createOpenCodeSessionMetadata;
 
@@ -96,6 +101,7 @@ vi.mock('@opencode/client', () => ({
           fork: sessionForkMock,
           get: sessionGetMock,
           update: sessionUpdateMock,
+          move: sessionMoveMock,
           command: sessionCommandMock,
           prompt: sessionPromptMock,
           synthetic: sessionSyntheticMock,
@@ -115,7 +121,7 @@ vi.mock('@opencode/client', () => ({
 vi.mock('../git/index.js', () => ({
   createWorktree: (...args) => globalThis.__openchamberCreateWorktreeMock(...args),
   getWorktreeBootstrapStatus: (...args) => globalThis.__openchamberGetWorktreeBootstrapStatusMock(...args),
-  resolvePrimaryWorktreeRoot: async (directory) => ({ root: directory === '/repo/worktrees/side-task' ? '/repo/app' : directory }),
+  resolvePrimaryWorktreeRoot: (...args) => globalThis.__openchamberResolvePrimaryWorktreeRootMock(...args),
   // Only moving a session into a worktree reaches these; the route tests
   // inject their own through the service dependencies.
   removeWorktree: vi.fn(),
@@ -125,6 +131,8 @@ vi.mock('../git/index.js', () => ({
   stashApply: vi.fn(),
   stashDrop: vi.fn(),
   listStashes: vi.fn(),
+  validateWorktreeDirectory: vi.fn(async () => ({ valid: true, insideWorktreeRoot: true })),
+  resolveWorktreeTopLevel: vi.fn(async (directory) => ({ root: directory, prefix: '' })),
 }));
 
 /**
@@ -231,11 +239,13 @@ const createApp = (overrides = {}, options = {}) => {
 
 describe('openchamber session routes', () => {
   beforeAll(async () => {
-    ({ registerOpenChamberSessionRoutes } = await import('./routes.js'));
+    ({ registerOpenChamberSessionRoutes, createOpenChamberSessionService } = await import('./routes.js'));
     ({ createSessionMetadataStore, createOpenCodeSessionMetadata } = await import('./session-metadata-store.js'));
   });
 
   beforeEach(() => {
+    resolvePrimaryWorktreeRootMock.mockReset();
+    resolvePrimaryWorktreeRootMock.mockImplementation(defaultPrimaryWorktreeRoot);
     createWorktreeMock.mockClear();
     hydrateWorktreeCheckoutMock.mockClear();
     getWorktreeBootstrapStatusMock.mockClear();
@@ -999,6 +1009,118 @@ describe('openchamber session routes', () => {
       location: { directory: '/repo/worktrees/side-task' },
     }));
     expect(sessionPromptMock).toHaveBeenCalledWith({ sessionID: 'ses_123', text: 'Run this' });
+  });
+
+  it('starts the session in the project folder inside a new worktree and reports a folder the checkout lacks', async () => {
+    createWorktreeMock.mockResolvedValue({
+      head: 'abc123', name: 'side-task', branch: 'side-task', path: '/repo/worktrees/side-task',
+    });
+    const resolveWorktreeTopLevel = vi.fn(async (directory) => ({ root: '/repo', prefix: 'app' }));
+    const validateWorktreeDirectory = vi.fn(async () => ({ valid: true, insideWorktreeRoot: true }));
+    const { app } = createApp({ resolveWorktreeTopLevel, validateWorktreeDirectory });
+    const response = await request(app)
+      .post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', worktree: { name: 'side-task' } })
+      .expect(200);
+
+    const startDirectory = path.join('/repo/worktrees/side-task', 'app');
+    expect(resolveWorktreeTopLevel).toHaveBeenCalledWith('/repo/app');
+    expect(validateWorktreeDirectory).toHaveBeenCalledWith(startDirectory, '/repo/worktrees/side-task');
+    expect(response.body.directory).toBe(startDirectory);
+    expect(response.body.worktree.path).toBe('/repo/worktrees/side-task');
+    expect(response.body).not.toHaveProperty('startDirectoryFallback');
+    expect(sessionCreateMock).toHaveBeenCalledWith(expect.objectContaining({ location: { directory: startDirectory } }));
+
+    validateWorktreeDirectory.mockResolvedValue({ valid: false, insideWorktreeRoot: false });
+    const missing = await request(app)
+      .post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', worktree: { name: 'side-task' } })
+      .expect(200);
+    expect(missing.body.directory).toBe('/repo/worktrees/side-task');
+    expect(missing.body.startDirectoryFallback).toBe('missing');
+  });
+
+  it('validates the requested agent in the project folder itself, not in a folder below it', async () => {
+    const validateWorktreeDirectory = vi.fn(async () => ({ valid: true, insideWorktreeRoot: true }));
+    const { app } = createApp({
+      readSettingsFromDiskMigrated: async () => ({ projects: [{ id: 'proj_ai', path: '/repo/ai' }] }),
+      resolveWorktreeTopLevel: vi.fn(async () => ({ root: '/repo', prefix: 'ai' })),
+      validateWorktreeDirectory,
+    });
+    await request(app)
+      .post('/api/openchamber/sessions')
+      .send({ projectId: 'proj_ai', worktree: { name: 'side-task' }, prompt: 'Run this', model: 'openai/gpt-5.5' })
+      .expect(200);
+
+    const scopes = clientOptions.map((options) => JSON.stringify(options));
+    expect(scopes.some((scope) => scope.includes('%2Frepo%2Fai"'))).toBe(true);
+    expect(scopes.some((scope) => scope.includes('%2Fai%2Fai'))).toBe(false);
+  });
+
+  it('moves a session to the folder of the project that holds it, also from a subfolder, when projects share a repository', async () => {
+    const resolveWorktreeTopLevel = vi.fn(async (directory) => ({ root: '/repo', prefix: directory.replace('/repo/', '') }));
+    const service = createOpenChamberSessionService({
+      readSettingsFromDiskMigrated: async () => ({ projects: [
+        { id: 'proj_web', path: '/repo/web' },
+        { id: 'proj_ai', path: '/repo/ai' },
+      ] }),
+      sanitizeProjects: (projects) => projects,
+      validateDirectoryPath: async (directory) => ({ ok: true, directory }),
+      buildOpenCodeUrl: (route) => `http://opencode.test${route}`,
+      getOpenCodeAuthHeaders: () => ({}),
+      waitForOpenCodeReady: vi.fn(async () => undefined),
+      worktreeBootstrapStore,
+      hydrateWorktreeCheckout: hydrateWorktreeCheckoutMock,
+      archiveStore: createMemoryArchiveStore(),
+      sessionMetadataStore: createMemorySessionMetadataStore(),
+      getBranches: vi.fn(async () => ({ all: [], defaultBranches: {} })),
+      resolveWorktreeTopLevel,
+      validateWorktreeDirectory: vi.fn(async () => ({ valid: true, insideWorktreeRoot: true })),
+    });
+
+    const result = await service.moveToWorktree('ses_1', { directory: '/repo/ai/src', worktree: { name: 'side-task', startRef: 'main' } });
+
+    expect(resolveWorktreeTopLevel).toHaveBeenCalledWith('/repo/ai');
+    expect(result.directory).toBe(path.join('/repo/worktrees/side-task', 'ai'));
+    expect(result.worktree.path).toBe('/repo/worktrees/side-task');
+    expect(sessionMoveMock).toHaveBeenCalledWith({ sessionID: 'ses_1', directory: path.join('/repo/worktrees/side-task', 'ai') });
+  });
+
+  it('moves a session from a folder of another worktree to the folder of its project, as the UI does', async () => {
+    // `/repo/worktrees/wt-a/ai/src` is in no registered project path; its folder
+    // `ai/src` in the primary checkout `/repo` belongs to `/repo/ai`, not `/repo`.
+    resolvePrimaryWorktreeRootMock.mockImplementation(async (directory) => ({
+      root: directory.startsWith('/repo/worktrees/') ? '/repo' : directory,
+    }));
+    const resolveWorktreeTopLevel = vi.fn(async (directory) => (
+      directory === '/repo/worktrees/wt-a/ai/src'
+        ? { root: '/repo/worktrees/wt-a', prefix: 'ai/src' }
+        : { root: '/repo', prefix: directory.replace(/^\/repo\/?/, '') }
+    ));
+    const service = createOpenChamberSessionService({
+      readSettingsFromDiskMigrated: async () => ({ projects: [
+        { id: 'proj_repo', path: '/repo' },
+        { id: 'proj_ai', path: '/repo/ai' },
+      ] }),
+      sanitizeProjects: (projects) => projects,
+      validateDirectoryPath: async (directory) => ({ ok: true, directory }),
+      buildOpenCodeUrl: (route) => `http://opencode.test${route}`,
+      getOpenCodeAuthHeaders: () => ({}),
+      waitForOpenCodeReady: vi.fn(async () => undefined),
+      worktreeBootstrapStore,
+      hydrateWorktreeCheckout: hydrateWorktreeCheckoutMock,
+      archiveStore: createMemoryArchiveStore(),
+      sessionMetadataStore: createMemorySessionMetadataStore(),
+      getBranches: vi.fn(async () => ({ all: [], defaultBranches: {} })),
+      resolveWorktreeTopLevel,
+      validateWorktreeDirectory: vi.fn(async () => ({ valid: true, insideWorktreeRoot: true })),
+    });
+
+    const result = await service.moveToWorktree('ses_1', { directory: '/repo/worktrees/wt-a/ai/src', worktree: { name: 'side-task', startRef: 'main' } });
+
+    expect(resolveWorktreeTopLevel).toHaveBeenCalledWith('/repo/ai');
+    expect(result.directory).toBe(path.join('/repo/worktrees/side-task', 'ai'));
+    expect(sessionMoveMock).toHaveBeenCalledWith({ sessionID: 'ses_1', directory: path.join('/repo/worktrees/side-task', 'ai') });
   });
 
   it('waits for the worktree bootstrap to complete before creating the session', async () => {

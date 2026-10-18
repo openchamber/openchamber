@@ -72,8 +72,8 @@ store is at version 10 (v10 dropped the Recent toggle): missing preferences inhe
 while an explicitly saved choice survives reload.
 
 Full-app active records remain in the collection when their directory is no
-longer in known topology, such as a deleted worktree. Grouping first uses exact
-configured project/worktree ownership. It may then use authoritative OpenCode
+longer in known topology, such as a deleted worktree. Grouping first uses
+configured project/worktree ownership, matching a directory inside a worktree to that worktree. It may then use authoritative OpenCode
 project metadata only when that project's canonical worktree maps to a
 configured project root. OpenCode's catch-all `global` project id is excluded
 from that bridge: it is shared by every session whose directory resolves to no
@@ -365,9 +365,11 @@ all / Expand all.
   `buildActiveSessionTreeFromCache`, which builds the active tree from the
   global cache and stops at an archived session, as the project tree does. The
   export offers its sub-agent tasks dialog from that tree.
-- `worktreeIndex.ts` is the shared exact worktree index (normalized keys,
+- `worktreeIndex.ts` is the shared worktree index (normalized keys,
   project-root exclusion, first-wins dedupe) for In work and the timeline, project
-  grouping, and the session switcher. `recent/sessionLocation.ts` is the single
+  grouping, and the session switcher. A session in `<worktree>/sub` resolves to
+  its worktree through `findPrefixWorktreeEntry` (longest path wins); the group
+  key stays the worktree root. `recent/sessionLocation.ts` is the single
   owner of a session's project, directory, worktree and branch label: it resolves
   the project through the session ownership index first (managed worktrees live
   outside the project path), falls back to a path-prefix match, and finds the

@@ -4,12 +4,13 @@ import { normalizePath } from '@/lib/pathNormalization';
 import { snapshotGitWorktree } from '@/lib/gitApi';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { listProjectWorktrees, removeProjectWorktree, type ProjectRef } from '@/lib/worktrees/worktreeManager';
+import { checkoutHoldsDirectory } from '@/lib/worktrees/worktreePaths';
 import { listGlobalSessionPages, type SessionPageLister } from '@/stores/globalSessions';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import type { WorktreeMetadata } from '@/types/worktree';
 import { getMultiRunIdentity } from './identity';
+import { locateRunMember, type RunMemberLocation } from './memberLocation';
 import type { MultiRunSummary } from './runs';
 
 const listSessionPage: SessionPageLister = (options) => opencodeClient.listSessionsPage(options);
@@ -36,8 +37,6 @@ const projectRefFor = (path: string): ProjectRef => {
   return { id: project?.id ?? `path:${path}`, path };
 };
 
-export type RunMemberLocation = { project: ProjectRef; worktree: WorktreeMetadata | null };
-
 /**
  * Where a member lives: its project, and the worktree when it has one. A
  * member in the project root has no worktree and is never removed.
@@ -45,24 +44,16 @@ export type RunMemberLocation = { project: ProjectRef; worktree: WorktreeMetadat
 export async function resolveRunMemberLocation(session: Session, run: MultiRunSummary): Promise<RunMemberLocation | null> {
   const directory = normalizePath(session.directory);
   if (!directory) return null;
-  const known = useSessionUIStore.getState().getWorktreeMetadata(session.id);
-  const knownProject = normalizePath(known?.projectDirectory);
-  if (known && knownProject && normalizePath(known.path) === directory) {
-    return { project: projectRefFor(knownProject), worktree: knownProject === directory ? null : known };
-  }
   const member = [...run.lanes, ...run.fusions].find((entry) => entry.sessionId === session.id);
-  const legacyScope = member?.identity.group.kind === 'legacy' ? normalizePath(member.identity.group.scope) : null;
-  const projects = useProjectsStore.getState().projects
-    .map((project) => normalizePath(project.path))
-    .filter((path): path is string => Boolean(path));
-  if (projects.includes(directory)) return { project: projectRefFor(directory), worktree: null };
-  const candidates = legacyScope ? [legacyScope, ...projects.filter((path) => path !== legacyScope)] : projects;
-  for (const projectPath of candidates) {
-    const project = projectRefFor(projectPath);
-    const worktree = (await listProjectWorktrees(project)).find((entry) => normalizePath(entry.path) === directory);
-    if (worktree) return { project, worktree };
-  }
-  return null;
+  return locateRunMember(directory, {
+    projectPaths: useProjectsStore.getState().projects
+      .map((project) => normalizePath(project.path))
+      .filter((path): path is string => Boolean(path)),
+    known: useSessionUIStore.getState().getWorktreeMetadata(session.id),
+    legacyScope: member?.identity.group.kind === 'legacy' ? normalizePath(member.identity.group.scope) : null,
+    projectRefFor,
+    listWorktrees: listProjectWorktrees,
+  });
 }
 
 /**
@@ -130,8 +121,13 @@ export async function keepRunMember(
     if (!worktree || !location) continue;
 
     try {
-      // Another chat the user started in this worktree keeps it alive.
-      const remaining = await listGlobalSessionPages(listSessionPage, { directory: worktree.path, pageSize: 500 });
+      // Another chat the user started in this worktree keeps it alive. OpenCode
+      // lists sessions by exact directory, so the lane's own folder inside the
+      // checkout (`<worktree>/ai`) is asked too.
+      const directories = [...new Set([worktree.path, current.directory].map((entry) => normalizePath(entry) ?? entry))];
+      const remaining = (await Promise.all(directories.map((directory) => (
+        listGlobalSessionPages(listSessionPage, { directory, pageSize: 500 })
+      )))).flat();
       assertCurrent();
       if (remaining.some((session) => session.id !== sessionId && !session.time?.archived)) {
         result.failures.push({ sessionId, reason: 'worktree-in-use' });
@@ -140,7 +136,9 @@ export async function keepRunMember(
       await removeProjectWorktree(location.project, worktree, { deleteLocalBranch: true });
       assertCurrent();
       const directoryStore = useDirectoryStore.getState();
-      if (normalizePath(directoryStore.currentDirectory) === normalizePath(worktree.path)) {
+      const currentDirectory = normalizePath(directoryStore.currentDirectory);
+      const removedCheckout = normalizePath(worktree.path);
+      if (currentDirectory && removedCheckout && checkoutHoldsDirectory(removedCheckout, currentDirectory)) {
         directoryStore.setDirectory(location.project.path, { showOverlay: false });
       }
     } catch {

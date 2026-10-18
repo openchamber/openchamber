@@ -21,6 +21,10 @@ OpenChamber makes the branch, sets up the folder, and opens a new session there,
 
 To skip the questions, pick **Quick worktree** in the same branch menu: OpenChamber names the branch for you and points the new session at it.
 
+## Projects opened on a folder of the repository
+
+If you open a project on a folder inside a repository, such as `repo/ai`, new worktrees open there too. A session in a new worktree starts in the same folder of the checkout, so OpenCode finds the config that lives in it. A project opened on the repository root starts at the worktree root, as before. When a branch has no such folder, the session starts in the worktree root and OpenChamber tells you.
+
 ## Bring the work back
 
 When the work is good, use **Integrate** in the Git view to bring the worktree's commits onto another branch (like `main`). If a change conflicts, you can hand the conflict to the agent to resolve.

@@ -21,6 +21,10 @@ OpenChamber maakt de branch, richt de map in en opent daar een nieuwe sessie, kl
 
 Wil je geen vragen, kies dan **Snelle worktree** in hetzelfde branchmenu: OpenChamber geeft de branch een naam en richt de nieuwe sessie erop.
 
+## Projecten geopend op een map van de repository
+
+Open je een project op een map binnen een repository, zoals `repo/ai`, dan openen nieuwe worktrees ook daar. Een sessie in een nieuwe worktree start in dezelfde map van de checkout, zodat OpenCode de configuratie vindt die daar staat. Een project dat op de hoofdmap van de repository is geopend, start zoals voorheen in de hoofdmap van de worktree. Heeft een branch die map niet, dan start de sessie in de hoofdmap van de worktree en meldt OpenChamber dat.
+
 ## Het werk overnemen
 
 Is het werk klaar voor gebruik, kies dan **Integreren** in de Git-weergave om de commits uit de worktree naar een andere branch, zoals `main`, over te nemen. Bij een conflict kunt u de agent vragen het op te lossen.

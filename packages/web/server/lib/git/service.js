@@ -1532,12 +1532,17 @@ export async function getRepositoryRemoteUrls(directory) {
 }
 
 export async function resolveWorktreeTopLevel(directory) {
-  const result = await runGitCommand(directory, ['rev-parse', '--show-toplevel']);
+  const result = await runGitCommand(directory, ['rev-parse', '--show-toplevel', '--show-prefix']);
   if (!result.success) {
+    // No `prefix`: a failed read must not look like "at the repository root".
     return { root: directory };
   }
-  const root = normalizePath(normalizeGitOutputPath(String(result.stdout || '').trim()));
-  return { root: root || directory };
+  // Two lines: the checkout root, then where `directory` sits inside it
+  // ("ai/", or an empty line at the root). Git resolves symlinks for both, so
+  // the prefix stays right for a directory reached through one.
+  const [rootLine = '', prefixLine = ''] = String(result.stdout || '').split('\n');
+  const root = normalizePath(normalizeGitOutputPath(rootLine.trim()));
+  return { root: root || directory, prefix: prefixLine.trim().replace(/\/+$/, '') };
 }
 
 /** @public */

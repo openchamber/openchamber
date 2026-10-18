@@ -21,6 +21,10 @@ O OpenChamber cria o branch, configura a pasta e abre uma nova sessão ali, pron
 
 Para pular as perguntas, escolha **Worktree rápido** no mesmo menu de branches: o OpenChamber dá nome ao branch e aponta a nova sessão para ele.
 
+## Projetos abertos em uma pasta do repositório
+
+Se você abre um projeto em uma pasta dentro de um repositório, como `repo/ai`, os novos worktrees também abrem ali. Uma sessão em um novo worktree começa na mesma pasta do checkout, e assim o OpenCode encontra a configuração que está nela. Um projeto aberto na raiz do repositório começa na raiz do worktree, como antes. Se uma branch não tiver essa pasta, a sessão começa na raiz do worktree e o OpenChamber avisa você.
+
 ## Trazer o trabalho de volta
 
 Quando o trabalho estiver bom, use **Integrate** na visão de Git para trazer os commits do worktree para outro branch (como `main`). Se uma mudança conflitar, você pode entregar o conflito ao agente para resolver.

@@ -21,6 +21,10 @@ OpenChamber crée la branche, prépare le dossier et y ouvre une nouvelle sessio
 
 Pour éviter les questions, choisissez **Worktree rapide** dans le même menu : OpenChamber nomme la branche pour vous et y place la nouvelle session.
 
+## Projets ouverts sur un dossier du dépôt
+
+Si vous ouvrez un projet sur un dossier à l'intérieur d'un dépôt, comme `repo/ai`, les nouveaux worktrees s'ouvrent aussi à cet endroit. Une session dans un nouveau worktree démarre dans le même dossier du checkout, et OpenCode trouve ainsi la configuration qui s'y trouve. Un projet ouvert à la racine du dépôt démarre à la racine du worktree, comme avant. Si une branche n'a pas ce dossier, la session démarre à la racine du worktree et OpenChamber vous le signale.
+
 ## Ramener le travail
 
 Quand le travail est bon, utilisez **Integrate** dans la vue Git pour ramener les commits du worktree sur une autre branche (comme `main`). Si un changement entre en conflit, vous pouvez confier la résolution du conflit à l’agent.

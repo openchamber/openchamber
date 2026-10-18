@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, mock, test } from "bun:test"
+import { beforeEach, describe, expect, mock, spyOn, test } from "bun:test"
 import { cyclePermissionMode } from "../../components/chat/permissionAutoAccept"
 
 const storage = new Map<string, string>()
@@ -17,6 +17,7 @@ let configVariantOverride: string | null | undefined
 let activationPending: Promise<void> | undefined
 let selectionSource: 'auto' | 'manual' = 'auto'
 const createdWorktreeProjects: Array<{ id: string; path: string }> = []
+let waitForCheckoutImplementation: (directory: string) => Promise<void> = async () => undefined
 // Sync's session→directory index. `createSession` writes it, and directory
 // resolution reads it as the authoritative source, so the mock has to keep one.
 const sessionDirectoryRegistry = new Map<string, string>()
@@ -44,8 +45,9 @@ const projectsState = {
 
 const getMockCalls = (fn: unknown): unknown[][] => ((fn as { mock?: { calls: unknown[][] } }).mock?.calls ?? [])
 
-mock.module("zustand", () => ({
-  create: () => (initializer: (
+mock.module("zustand", () => {
+  // Both forms: `create(initializer)` and the curried `create<State>()(initializer)`.
+  const build = (initializer: (
     set: (patch: unknown | ((state: unknown) => unknown)) => void,
     get: () => unknown,
     api?: unknown,
@@ -77,8 +79,9 @@ mock.module("zustand", () => ({
     store.subscribe = () => () => undefined
 
     return store
-  },
-}))
+  }
+  return { create: (initializer?: Parameters<typeof build>[0]) => (initializer ? build(initializer) : build) }
+})
 
 const deferredStorage: Storage = {
   getItem: (key: string) => storage.get(key) ?? null,
@@ -218,6 +221,7 @@ mock.module("@/components/ui", () => ({
     error: () => undefined,
     info: () => undefined,
     success: () => undefined,
+    warning: () => undefined,
   },
 }))
 
@@ -365,6 +369,7 @@ mock.module("@/lib/git/branchNameGenerator", () => ({
 mock.module("@/lib/openchamberConfig", () => ({
   getWorktreeSetupCommands: async () => [],
   getWorktreeSetupWaitEnabled: async () => false,
+  substituteCommandVariables: (command: string) => command,
 }))
 mock.module("@/lib/sharedTrustConfirmation", () => ({
   resolveWorktreeSetupCommands: async () => [],
@@ -372,6 +377,11 @@ mock.module("@/lib/sharedTrustConfirmation", () => ({
 
 mock.module("@/lib/worktrees/worktreeBootstrap", () => ({
   waitForWorktreeBootstrap: async () => undefined,
+  clearWorktreeBootstrapState: () => undefined,
+  markWorktreeBootstrapPending: () => undefined,
+  setWorktreeBootstrapState: () => undefined,
+  startWorktreeBootstrapWatcher: () => undefined,
+  waitForWorktreeGitReady: async (directory: string) => waitForCheckoutImplementation(directory),
 }))
 
 mock.module("@/lib/worktrees/worktreeCreate", () => ({
@@ -855,6 +865,55 @@ describe("assistant answer worktree routing", () => {
     } finally {
       useSessionUIStore.setState({ createSession: originalCreateSession })
     }
+  })
+
+  test("removes the new worktree and surfaces the error when its checkout never populates", async () => {
+    projectsState.projects = [{ id: "project", path: "/repo" }]
+    createdWorktreeProjects.length = 0
+    const sourceWorktree = { path: "/worktrees/source", projectDirectory: "/repo", branch: "source", label: "source" }
+    const state = useSessionUIStore.getState()
+    const originalCreateSession = state.createSession
+    const originalWorktreeMetadata = state.worktreeMetadata
+    const requests: Array<{ url: string; method: string }> = []
+    let sessionCreated = false
+
+    // The project sits on the folder `ai` of its repository, so the start folder needs the checkout.
+    const fetchSpy = spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      requests.push({ url: String(input), method: init?.method ?? "GET" })
+      return new Response(JSON.stringify({ root: "/repo", prefix: "ai", success: true }), { status: 200 })
+    })
+    waitForCheckoutImplementation = async () => { throw new Error("checkout failed") }
+    useSessionUIStore.setState({
+      availableWorktreesByProject: new Map([["/repo", [sourceWorktree]]]),
+      worktreeMetadata: new Map([["source-session", sourceWorktree]]),
+      createSession: async () => {
+        sessionCreated = true
+        return null
+      },
+    })
+
+    try {
+      await expect(state.createSessionFromAssistantMessage({
+        sessionId: "source-session",
+        directory: "/worktrees/source",
+        text: "Implement the plan",
+      }, {
+        providerID: "provider",
+        modelID: "model",
+        variant: "",
+        agent: "build",
+        instructions: "Follow the answer",
+        createWorktree: true,
+      })).rejects.toThrow("checkout failed")
+    } finally {
+      fetchSpy.mockRestore()
+      waitForCheckoutImplementation = async () => undefined
+      useSessionUIStore.setState({ createSession: originalCreateSession, worktreeMetadata: originalWorktreeMetadata })
+      projectsState.projects = []
+    }
+
+    expect(sessionCreated).toBe(false)
+    expect(requests.some((request) => request.url.includes("worktree") && request.method !== "GET")).toBe(true)
   })
 
   test("creates a sibling worktree from the captured source worktree directory", async () => {

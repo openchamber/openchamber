@@ -639,7 +639,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ visible = true, savedProject
             return;
           }
           sessionId = created.id;
-          directoryHint = created.path;
+          directoryHint = created.directory;
         } else {
           const sessionResult = await createSession(undefined, sendTargetProject.path, undefined, {
             model: { providerID: execution.providerID, id: execution.modelID, variant: execution.variant || undefined },

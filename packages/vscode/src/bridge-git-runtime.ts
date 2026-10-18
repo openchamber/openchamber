@@ -16,7 +16,16 @@ const WORKTREE_INSTANCE_DISPOSE_TIMEOUT_MS = 5_000;
  * Builds the best-effort disposal hook for the extension's active runtime. The
  * API URL and auth headers are read at call time, and the client is created
  * per call so a restarted managed process is always addressed correctly.
+ *
+ * A session of a project opened on a folder of its repository runs in that
+ * folder of the worktree (`<worktree>/ai`), which is a location of its own, so
+ * every running location inside the worktree is evicted along with its root.
+ * When the location list cannot be read, the root is still evicted and the
+ * list error is rethrown for the removal wrapper to log. The web server's git
+ * routes do the same.
  */
+const toLocationKey = (directory: string): string => directory.replace(/\\/g, '/').replace(/\/+$/, '');
+
 const createWorktreeInstanceDisposer = (ctx?: BridgeContext) => {
   return async (worktreeDirectory: string): Promise<void> => {
     const apiUrl = ctx?.manager?.getApiUrl();
@@ -30,7 +39,23 @@ const createWorktreeInstanceDisposer = (ctx?: BridgeContext) => {
       headers: ctx?.manager?.getOpenCodeAuthHeaders() || {},
       fetch: (input, init) => fetch(input, { ...init, signal: AbortSignal.timeout(WORKTREE_INSTANCE_DISPOSE_TIMEOUT_MS) }),
     });
-    await client.debug.location.evict({ location: { directory: worktreeDirectory } });
+    const root = toLocationKey(worktreeDirectory);
+    const errors: unknown[] = [];
+    const inside = await client.debug.location.list().then(
+      (locations) => locations.map((location) => location.directory)
+        .filter((directory) => toLocationKey(directory).startsWith(`${root}/`)),
+      (error) => {
+        errors.push(error);
+        return [];
+      },
+    );
+    const evictions = await Promise.allSettled([worktreeDirectory, ...inside].map((directory) => (
+      client.debug.location.evict({ location: { directory } })
+    )));
+    for (const eviction of evictions) {
+      if (eviction.status === 'rejected') errors.push(eviction.reason);
+    }
+    if (errors.length > 0) throw errors[0];
   };
 };
 
@@ -220,6 +245,15 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
       const dirError = requireDirectory(id, type, directory);
       if (dirError) return dirError;
       const result = await gitService.previewWorktreeCreate(directory!, (payload || {}) as gitService.CreateGitWorktreePayload);
+      return { id, type, success: true, data: result };
+    }
+
+    case 'api:git/repository-prefix': {
+      // SAFETY: the webview sends `{ directory }` for this message type; `requireDirectory` rejects a missing one.
+      const { directory } = (payload || {}) as { directory?: string };
+      const dirError = requireDirectory(id, type, directory);
+      if (dirError) return dirError;
+      const result = await gitService.resolveRepositoryPrefix(directory!);
       return { id, type, success: true, data: result };
     }
 

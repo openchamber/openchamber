@@ -9,6 +9,7 @@ import { WindowsWindowControls } from '@/components/desktop/WindowsWindowControl
 import { SessionSwitcherDropdown } from '@/components/session/SessionSwitcherDropdown';
 import { cn } from '@/lib/utils';
 import { normalizePath } from '@/lib/pathNormalization';
+import { findWorktreeHoldingDirectory } from '@/lib/worktrees/worktreePaths';
 import { getInlineStartSide, useI18n } from '@/lib/i18n';
 import { invokeDesktop, isElectronShell } from '@/lib/desktop';
 import { useDesktopWindowControlsLayout } from '@/hooks/useDesktopWindowControlsLayout';
@@ -109,7 +110,7 @@ const MiniChatHeader: React.FC<{ mode: MiniChatMode }> = ({ mode }) => {
     const candidateDirectory = normalizePath(worktreeDirectory || sessionDirectory || '');
     if (!candidateDirectory) return null;
     for (const worktrees of state.availableWorktreesByProject.values()) {
-      const match = worktrees.find((worktree) => normalizePath(worktree.path) === candidateDirectory);
+      const match = findWorktreeHoldingDirectory(worktrees, candidateDirectory);
       const branch = match?.branch?.trim();
       if (branch) return branch;
     }

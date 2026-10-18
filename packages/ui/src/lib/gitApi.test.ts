@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test"
 import type { Spy } from "bun:test"
 import type { GitAPI, GitStatus } from "./api/types"
-import { generateCommitMessage, getGitStatus, stageGitFile, stageGitFiles, unstageGitFile, unstageGitFiles } from "./gitApi"
+import { generateCommitMessage, getGitStatus, resolveGitRepositoryPrefix, stageGitFile, stageGitFiles, unstageGitFile, unstageGitFiles } from "./gitApi"
 import { switchRuntimeEndpoint } from "./runtime-switch"
 
 const status: GitStatus = {
@@ -32,6 +32,63 @@ const withRuntimeGit = async (git: Partial<GitAPI>, callback: () => Promise<void
     }
   }
 }
+
+describe("resolveGitRepositoryPrefix", () => {
+  test("asks the runtime git API when one is registered", async () => {
+    let asked = ""
+    await withRuntimeGit({
+      resolveRepositoryPrefix: async (directory: string) => {
+        asked = directory
+        return "ai"
+      },
+    }, async () => {
+      expect(await resolveGitRepositoryPrefix("/repo/ai")).toBe("ai")
+    })
+    expect(asked).toBe("/repo/ai")
+  })
+
+  // The web runtime registers a git object that predates this operation, so a
+  // registered runtime without it has to reach the server instead of failing.
+  describe("when the registered runtime git object lacks the operation", () => {
+    let request: Spy<typeof fetch>
+    const answer = (body: string): Response =>
+      new Response(body, { status: 200, headers: { "Content-Type": "application/json" } })
+
+    afterEach(() => {
+      request.mockRestore()
+    })
+
+    test("asks the server's toplevel route", async () => {
+      request = spyOn(globalThis, "fetch").mockImplementation(async () => answer('{"root":"/repo","prefix":"ai"}'))
+      switchRuntimeEndpoint({ apiBaseUrl: "https://git.test", runtimeKey: "git-api-repository-prefix" })
+
+      await withRuntimeGit({}, async () => {
+        expect(await resolveGitRepositoryPrefix("/repo/ai")).toBe("ai")
+      })
+      expect(request.mock.calls.map(([input]) => String(input)).filter((url) => url.includes("/git/toplevel"))).toEqual([
+        `https://git.test/api/git/toplevel?directory=${encodeURIComponent("/repo/ai")}`,
+      ])
+    })
+
+    test("rejects when an older server does not report the folder, instead of answering the repository root", async () => {
+      request = spyOn(globalThis, "fetch").mockImplementation(async () => answer('{"root":"/repo"}'))
+      switchRuntimeEndpoint({ apiBaseUrl: "https://git.test", runtimeKey: "git-api-repository-prefix-old" })
+
+      await withRuntimeGit({}, async () => {
+        await expect(resolveGitRepositoryPrefix("/repo/ai")).rejects.toThrow("did not report")
+      })
+    })
+
+    test("rejects a null prefix", async () => {
+      request = spyOn(globalThis, "fetch").mockImplementation(async () => answer('{"root":"/repo","prefix":null}'))
+      switchRuntimeEndpoint({ apiBaseUrl: "https://git.test", runtimeKey: "git-api-repository-prefix-null" })
+
+      await withRuntimeGit({}, async () => {
+        await expect(resolveGitRepositoryPrefix("/repo/ai")).rejects.toThrow("did not report")
+      })
+    })
+  })
+})
 
 describe("getGitStatus", () => {
   test("forwards light-mode options to runtime git APIs", async () => {
