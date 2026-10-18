@@ -45,6 +45,7 @@ import { useEnterpriseMode } from '@/stores/useEnterprisePolicyStore';
 import { ClassificationProvidersPage } from '@/components/sections/classification/ClassificationProvidersPage';
 import { SettingsBackButton } from '@/components/sections/shared/SettingsCards';
 import { ProviderAccounts } from './ProviderAccounts';
+import { AccountRotationSettings } from './AccountRotationSettings';
 import { CustomProviderForm } from './CustomProviderForm';
 
 import { ProviderOAuthMethods } from './ProviderOAuthMethods';
@@ -799,7 +800,7 @@ export const ProvidersPage: React.FC = () => {
       title={selectedProvider.name || selectedProvider.id}
       titleLeading={providerTitleLeading}
       description={providerDescription}
-      showSaveStatus={false}
+      showSaveStatus
     >
       <SettingsSection
         title={t('settings.providers.accounts.title')}
@@ -918,6 +919,10 @@ export const ProvidersPage: React.FC = () => {
           </div>
         )}
       </SettingsSection>
+
+      {selectedProvider.id === 'openai' && usedIntegrationId === 'openai' ? (
+        <AccountRotationSettings accounts={usedCredentials} directory={settingsDirectory ?? null} />
+      ) : null}
 
       {showModelsSection ? (
       <SettingsSection

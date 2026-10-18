@@ -5,6 +5,7 @@ import { registerQuotaRoutes } from '../quota/routes.js';
 import { registerSmallModelRoutes } from '../small-model/routes.js';
 import { registerWalkthroughRoutes } from '../walkthrough/routes.js';
 import { registerSessionGoalRoutes } from '../session-goal/routes.js';
+import { registerAccountRotationRoutes } from '../account-rotation/runtime.js';
 import { registerSourceControlRoutes } from '../source-control/routes.js';
 import { registerLinearRoutes } from '../linear/routes.js';
 import { registerGuestRoutes } from '../guests/routes.js';
@@ -260,6 +261,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       worktreeBootstrapStore,
       messageQueueRuntime,
       routingRuntime,
+      accountRotationRuntime,
       globalEventHub,
       openchamberVersion,
     } = routeDependencies;
@@ -275,6 +277,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     registerPermissionAutoAcceptRoutes(app, permissionAutoAcceptRuntime);
     registerMessageQueueRoutes(app, messageQueueRuntime);
     registerRoutingRoutes(app, routingRuntime);
+    registerAccountRotationRoutes(app, { runtime: accountRotationRuntime, resolveProjectDirectory });
     // Before the generic OpenCode proxy: swallows the `openchamber/auto` model
     // switch and routes the sends that follow it.
     registerRoutingPromptRewrite(app, routingRuntime);
