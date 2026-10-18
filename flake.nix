@@ -32,6 +32,22 @@
         system:
         let
           pkgs = nixpkgs.legacyPackages.${system};
+          # The desktop's Electron: the major is read from packages/electron
+          # devDependencies ("electron": "^44.9.0") at eval time, the same
+          # file that pins the bundled CLI, so an upstream bump fails
+          # evaluation with the next step named instead of reaching the
+          # runtime as a startup crash (2.4.0 shipped while the flake still
+          # built electron_43, and every desktop launch died on "setZoomMode
+          # is not a function"). Only the major is asserted: nixpkgs' minor
+          # is allowed to trail the caret range, the 44.x headers still carry
+          # every 44.0 API the app's code uses, and they drive the node-pty
+          # rebuild either way.
+          electronSpec =
+            (builtins.fromJSON (builtins.readFile ./packages/electron/package.json)).devDependencies.electron;
+          electronMajor = nixpkgs.lib.versions.major (nixpkgs.lib.removePrefix "^" electronSpec);
+          electron =
+            pkgs.${"electron_${electronMajor}"}
+              or (throw "packages/electron pins electron ${electronSpec}, but nixpkgs has no electron_${electronMajor}. Pin an older electron in packages/electron or wait for nixpkgs-unstable to carry the major.");
           # OpenCode CLI built from upstream's own nix recipe at the pinned
           # tag. Three tag quirks handled here: upstream's nix/hashes.json
           # predates the bun in our nixpkgs pin (pass the hash it actually
@@ -78,12 +94,7 @@
             opencodeCli = opencode-cli;
             src = openchamber.passthru.src;
             openchamberCore = openchamber.passthru.core;
-            # Same major as packages/electron devDependencies ("electron":
-            # "^44.9.0" since 2.4.0 — the app calls webContents.setZoomMode,
-            # an Electron 44.0 API); bump both together, like nixpkgs'
-            # element-desktop does. nixpkgs' electron_44 is 44.7.2: below the
-            # caret range but above the 44.0 floor the app's API use needs.
-            electron = pkgs.electron_44;
+            inherit electron;
           };
           gui = openchamber-desktop;
           default = openchamber;

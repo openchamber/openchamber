@@ -1,6 +1,7 @@
 # Catches anything that breaks the flake's evaluation before merge: a PR
-# touching the flake must still evaluate every package. Read-only: no
-# builds, no cache, no write permissions.
+# touching the flake (or packages/electron/package.json, whose Electron
+# devDependency the desktop package reads at eval time) must still evaluate
+# every package. Read-only: no builds, no cache, no write permissions.
 name: nix-eval
 
 on:
@@ -9,6 +10,7 @@ on:
       - flake.nix
       - flake.lock
       - nix/**
+      - packages/electron/package.json
   workflow_dispatch:
 
 permissions:
