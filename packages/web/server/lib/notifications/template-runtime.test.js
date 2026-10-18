@@ -115,6 +115,42 @@ describe('notification template session info', () => {
   });
 });
 
+describe('notification template project of the session', () => {
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const settings = {
+    activeProjectId: 'open',
+    projects: [
+      { id: 'open', label: 'dotfiles', path: '/work/dotfiles' },
+      { id: 'own', label: 'opencode-claude', path: '/work/opencode-claude' },
+    ],
+  };
+  // What runtime.js builds from `session.idle`: no location on the event.
+  const turnEnded = { properties: { sessionTitle: 'Fix login', turnEnded: true, info: { sessionID: 'ses_1', role: 'assistant', finish: 'stop' } } };
+
+  it('names the session\'s project, not the one open in the UI, when a turn ends', async () => {
+    globalThis.fetch = vi.fn(async () => Response.json({ id: 'ses_1', title: 'Fix login', location: { directory: '/work/opencode-claude' } }));
+    const runtime = createRuntime(settings);
+
+    const variables = await runtime.buildTemplateVariables(turnEnded, 'ses_1');
+
+    expect(variables.project_name).toBe('opencode-claude');
+    expect(variables.worktree).toBe('/work/opencode-claude');
+  });
+
+  it('takes the directory the event names without reading the session', async () => {
+    globalThis.fetch = vi.fn();
+    const runtime = createRuntime(settings);
+
+    const variables = await runtime.buildTemplateVariables({ properties: { ...turnEnded.properties, directory: '/work/opencode-claude' } }, 'ses_1');
+
+    expect(variables.project_name).toBe('opencode-claude');
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+});
+
 describe('notification template session info for a chat of an isolated space', () => {
   afterEach(() => {
     globalThis.fetch = originalFetch;
@@ -144,10 +180,10 @@ describe('notification template session info for a chat of an isolated space', (
     const source = spaceSource('Space chat');
 
     const variables = await runtime.buildTemplateVariables({ properties: { info: {} } }, 'ses_1', source);
+    expect(globalThis.fetch).not.toHaveBeenCalled();
     const again = await runtime.buildTemplateVariables({ properties: { info: {} } }, 'ses_1');
 
     expect(variables.session_name).toBe('Space chat');
     expect(again.session_name).toBe('Host chat');
-    expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 });

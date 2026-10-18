@@ -272,13 +272,16 @@ export const createNotificationTemplateRuntime = (deps) => {
 
     let projectName = '';
     let branch = '';
+    // Turn-end events carry no location, so the session's record names the directory.
+    // A space's directory is a path inside the space: never matched or run git in on the host.
     let worktreeDir = '';
-
-    const infoPath = info.path;
-    if (typeof infoPath?.root === 'string' && infoPath.root.length > 0) {
-      worktreeDir = infoPath.root;
-    } else if (typeof infoPath?.cwd === 'string' && infoPath.cwd.length > 0) {
-      worktreeDir = infoPath.cwd;
+    if (isHost) {
+      worktreeDir = typeof payload?.properties?.directory === 'string' ? payload.properties.directory.trim() : '';
+      if (!worktreeDir && sessionId) {
+        sessionInfo ??= await fetchSessionInfo(sessionId, source);
+        const sessionDirectory = sessionInfo?.location?.directory;
+        if (typeof sessionDirectory === 'string') worktreeDir = sessionDirectory.trim();
+      }
     }
 
     try {

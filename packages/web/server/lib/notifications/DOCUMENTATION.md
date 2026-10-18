@@ -108,7 +108,7 @@ This module provides notification message preparation utilities for the web serv
   - `extractLastMessageText(payload, maxLength?)`
   - `fetchLastAssistantMessageText(sessionId, messageId, maxLength?, source?)`
   - `maybeCacheSessionInfoFromEvent(payload, { spaceId }?)`: caches a host session's title; an event of a space (`spaceId` set) is not cached, and a space's chat is never read from these caches, so a session id a space names cannot set a host chat's title.
-  - `buildTemplateVariables(payload, sessionId, source?)`: `source` (`{ buildOpenCodeUrl, getOpenCodeAuthHeaders, fetchImpl }`, the host's OpenCode by default) is where the session's title and messages are read; `runtime.js` passes the space's for a chat of an isolated space.
+  - `buildTemplateVariables(payload, sessionId, source?)`: `source` (`{ buildOpenCodeUrl, getOpenCodeAuthHeaders, fetchImpl }`, the host's OpenCode by default) is where the session's title and messages are read; `runtime.js` passes the space's for a chat of an isolated space. `{project_name}`, `{worktree}` and `{branch}` come from the event's `directory`, else the session record's `location.directory`; turn-end events carry no location, so they read the record. The project open in the UI is used only when neither names one, as for a form owned by no session, and for a space's chat, whose directory is a path inside the space and is never matched against host projects or run git in on the host.
   - `getCachedZenModels()`
 
 ## Constants
