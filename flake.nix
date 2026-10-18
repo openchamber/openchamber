@@ -79,8 +79,11 @@
             src = openchamber.passthru.src;
             openchamberCore = openchamber.passthru.core;
             # Same major as packages/electron devDependencies ("electron":
-            # "^43.7.0"); bump both together, like nixpkgs' element-desktop does.
-            electron = pkgs.electron_43;
+            # "^44.9.0" since 2.4.0 — the app calls webContents.setZoomMode,
+            # an Electron 44.0 API); bump both together, like nixpkgs'
+            # element-desktop does. nixpkgs' electron_44 is 44.7.2: below the
+            # caret range but above the 44.0 floor the app's API use needs.
+            electron = pkgs.electron_44;
           };
           gui = openchamber-desktop;
           default = openchamber;
