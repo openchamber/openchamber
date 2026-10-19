@@ -3018,8 +3018,8 @@ async function readStatus(normalizedDirectory, lightMode) {
     const [stagedStatsRaw, workingStatsRaw] = lightMode
       ? ['', '']
       : await Promise.all([
-          git.raw(['diff', '--cached', '--numstat']).catch(() => ''),
-          git.raw(['diff-files', '-M', '--numstat']).catch(() => ''),
+          git.raw(['diff', '--cached', '--numstat', '-z']).catch(() => ''),
+          git.raw(['diff-files', '-M', '--numstat', '-z']).catch(() => ''),
         ]);
 
     const stagedDiffStats = {};
@@ -3027,29 +3027,31 @@ async function readStatus(normalizedDirectory, lightMode) {
 
     const accumulateStats = (raw, target) => {
       if (!raw) return;
-      raw
-        .split('\n')
-        .map((line) => line.trim())
-        .filter(Boolean)
-        .forEach((line) => {
-          const parts = line.split('\t');
-          if (parts.length < 3) {
-            return;
-          }
-          const [insertionsRaw, deletionsRaw, ...pathParts] = parts;
-          const path = pathParts.join('\t');
-          if (!path) {
-            return;
-          }
-          const insertions = insertionsRaw === '-' ? 0 : parseInt(insertionsRaw, 10) || 0;
-          const deletions = deletionsRaw === '-' ? 0 : parseInt(deletionsRaw, 10) || 0;
+      // NUL-terminated records (`--numstat -z`) keep path bytes verbatim, so a
+      // key equals `status.files[].path` for names Git would otherwise quote
+      // (non-ASCII, quotes, control characters). A rename or copy record has an
+      // empty path field with the old and the new path as their own tokens; the
+      // counts belong to the destination path, the one status reports. Same
+      // record shape as the commit-file parser in getCommitFiles below.
+      const tokens = raw.split('\0');
+      for (let index = 0; index < tokens.length; index += 1) {
+        const match = /^(\d+|-)\t(\d+|-)\t([\s\S]*)$/.exec(tokens[index]);
+        if (!match) continue;
+        let path = match[3];
+        if (!path) {
+          path = tokens[index + 2];
+          index += 2;
+        }
+        if (!path) continue;
+        const insertions = match[1] === '-' ? 0 : parseInt(match[1], 10) || 0;
+        const deletions = match[2] === '-' ? 0 : parseInt(match[2], 10) || 0;
 
-          const existing = target[path] || { insertions: 0, deletions: 0 };
-          target[path] = {
-            insertions: existing.insertions + insertions,
-            deletions: existing.deletions + deletions,
-          };
-        });
+        const existing = target[path] || { insertions: 0, deletions: 0 };
+        target[path] = {
+          insertions: existing.insertions + insertions,
+          deletions: existing.deletions + deletions,
+        };
+      }
     };
 
     accumulateStats(stagedStatsRaw, stagedDiffStats);

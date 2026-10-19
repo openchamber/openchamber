@@ -1171,6 +1171,81 @@ describe('getStatus', () => {
     expect(status.diffStats.staged['staged.txt']).toEqual({ insertions: 3, deletions: 0 });
     expect(status.diffStats.working['staged.txt']).toBeUndefined();
   });
+
+  it('keys diff stats for non-ASCII paths by the same path status reports', async () => {
+    if (!canRunGit()) return;
+
+    const repo = createTempDir();
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    const file = 'docs/中文/说明.md';
+    fs.mkdirSync(path.dirname(path.join(repo, file)), { recursive: true });
+    fs.writeFileSync(path.join(repo, file), 'one\ntwo\n');
+    runGit(repo, ['add', file]);
+    runGit(repo, ['commit', '-m', 'initial']);
+
+    // Stage one new line, then keep editing without staging another.
+    fs.appendFileSync(path.join(repo, file), 'staged\n');
+    runGit(repo, ['add', file]);
+    fs.appendFileSync(path.join(repo, file), 'working\n');
+
+    const status = await getStatus(repo);
+
+    // Keys must match the path the file list reports, or the row falls back
+    // to +0/-0 in the UI.
+    expect(status.diffStats.staged[file]).toEqual({ insertions: 1, deletions: 0 });
+    expect(status.diffStats.working[file]).toEqual({ insertions: 1, deletions: 0 });
+
+    const light = await getStatus(repo, { mode: 'light' });
+    expect(light.diffStats).toBeUndefined();
+  });
+
+  it("keys a renamed file's staged stats by its destination path", async () => {
+    if (!canRunGit()) return;
+
+    const repo = createTempDir();
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    runGit(repo, ['config', 'diff.renames', 'true']);
+    const source = 'source.md';
+    const destination = 'docs/renamed.md';
+    fs.writeFileSync(path.join(repo, source), 'one\ntwo\nthree\n');
+    runGit(repo, ['add', source]);
+    runGit(repo, ['commit', '-m', 'initial']);
+
+    fs.mkdirSync(path.dirname(path.join(repo, destination)), { recursive: true });
+    runGit(repo, ['mv', source, destination]);
+    fs.appendFileSync(path.join(repo, destination), 'four\n');
+    runGit(repo, ['add', destination]);
+
+    const status = await getStatus(repo);
+
+    expect(status.diffStats.staged[destination]).toEqual({ insertions: 1, deletions: 0 });
+    expect(status.diffStats.staged[source]).toBeUndefined();
+  });
+
+  it('keys a working file whose name contains a quote character', async () => {
+    if (!canRunGit()) return;
+    // Windows file names cannot contain a quote character.
+    if (process.platform === 'win32') return;
+
+    const repo = createTempDir();
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    const file = 'quo"te.txt';
+    fs.writeFileSync(path.join(repo, file), 'one\n');
+    runGit(repo, ['add', file]);
+    runGit(repo, ['commit', '-m', 'initial']);
+
+    fs.appendFileSync(path.join(repo, file), 'two\n');
+
+    const status = await getStatus(repo);
+
+    expect(status.diffStats.working[file]).toEqual({ insertions: 1, deletions: 0 });
+  });
 });
 
 // ---------------------------------------------------------------------------
