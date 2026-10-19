@@ -38,6 +38,13 @@ let lastStep: { name: string; at: number } | null = null;
 // The chat image viewer's arrows, so stepping through images looks the same everywhere.
 const NEIGHBOR_BUTTON_CLASS = 'absolute top-1/2 -translate-y-1/2 z-10 h-10 w-10 flex items-center justify-center rounded-full bg-surface-elevated/90 text-surface-elevated-foreground hover:bg-surface-elevated focus:outline-none focus:ring-2 focus:ring-ring';
 
+type ImageArtifactProps = {
+  src: string;
+  name: string;
+  sizeBytes: number | null;
+  neighbors?: { previous: ImageNeighbor; next: ImageNeighbor } | null;
+};
+
 /**
  * An image the way a designer looks at one: whole first, then closer. Fit never
  * upscales, so a small icon stays its real size instead of blurring across the
@@ -50,12 +57,7 @@ const NEIGHBOR_BUTTON_CLASS = 'absolute top-1/2 -translate-y-1/2 z-10 h-10 w-10 
  * viewer has focus and the image is at fit; zoomed, the keys keep scrolling)
  * show the previous and next image of the folder.
  */
-export const ImageArtifact: React.FC<{
-  src: string;
-  name: string;
-  sizeBytes: number | null;
-  neighbors?: { previous: ImageNeighbor; next: ImageNeighbor } | null;
-}> = ({ src, name, sizeBytes, neighbors }) => {
+const ImageArtifactView: React.FC<ImageArtifactProps> = ({ src, name, sizeBytes, neighbors }) => {
   const { t, direction } = useI18n();
   // null is fit: the scale then follows the viewer's size.
   const [scale, setScale] = React.useState<number | null>(null);
@@ -66,11 +68,6 @@ export const ImageArtifact: React.FC<{
   const imageRef = React.useRef<HTMLImageElement | null>(null);
   const anchorRef = React.useRef<ZoomAnchor | null>(null);
   const dragRef = React.useRef<DragState | null>(null);
-
-  React.useEffect(() => {
-    setNatural(null);
-    setScale(null);
-  }, [src]);
 
   React.useEffect(() => {
     const element = viewportRef.current;
@@ -375,3 +372,13 @@ export const ImageArtifact: React.FC<{
     </div>
   );
 };
+
+/**
+ * A new source gets a new viewer, so the measured size and the zoom cannot
+ * outlive their image. Resetting them in an effect instead loses the size of an
+ * SVG shown from a data URL: that image fires `load` before React flushes the
+ * effect, so the reset erases the size the image just reported.
+ */
+export const ImageArtifact: React.FC<ImageArtifactProps> = (props) => (
+  <ImageArtifactView {...props} key={props.src} />
+);
