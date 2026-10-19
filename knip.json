@@ -8,7 +8,6 @@
   "workspaces": {
     ".": {
       "entry": [
-        "fix-deprecation.js",
         "oxlint.config.ts",
         "oxlint.anti-slop.config.ts",
         "postcss.config.js",
@@ -32,7 +31,6 @@
     },
     "packages/web": {
       "entry": [
-        "bin/cli.js",
         "src/mobile-main.tsx",
         "src/mini-chat-main.tsx",
         "src/main.tsx",
@@ -66,7 +64,6 @@
     },
     "packages/vscode": {
       "entry": [
-        "src/extension.ts",
         "webview/main.tsx",
         "src/**/*.{test,spec}.{js,cjs,mjs,ts,tsx}",
         "webview/**/*.{test,spec}.{js,cjs,mjs,ts,tsx}"
