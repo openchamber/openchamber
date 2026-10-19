@@ -1389,10 +1389,35 @@ export class GhosttyTerminalSurface {
     }, 100);
   };
 
+  private readonly onBeforeInput = (event: InputEvent) => {
+    if (this.composing || event.isComposing || event.inputType !== 'deleteContentBackward') return;
+    // Android keyboards can send Process/229 instead of an encodable keydown.
+    // Catch deletion here even when the textarea is empty and no input follows.
+    // Noncancelable edits are delivered by onInput after the browser edits it.
+    if (!event.cancelable) return;
+    event.preventDefault();
+    this.sendInputBackspace();
+  };
+
+  private sendInputBackspace(): void {
+    this.clearPrimedCopy();
+    this.clearCompositionInputSuppression();
+    this.input.value = '';
+    const key = new KeyboardEvent('keydown', { key: 'Backspace', code: 'Backspace' });
+    // Input events describe a complete edit, with no physical keyup to follow.
+    // The encoder includes a release only when the application requests it.
+    const data = this.core.encodeKey(key) + this.core.encodeKey(key, 'release');
+    if (data.length > 0) this.options.onData(data);
+  }
+
   private readonly onInput = (event: Event) => {
     // SAFETY: registered for the textarea's "input" event, which is dispatched as an InputEvent.
     const inputEvent = event as InputEvent;
     if (this.composing || inputEvent.isComposing) return;
+    if (inputEvent.inputType === 'deleteContentBackward') {
+      this.sendInputBackspace();
+      return;
+    }
     const data = this.input.value || inputEvent.data || '';
     if (data === this.compositionInputToSuppress && isTerminalCompositionCommitInput(inputEvent)) {
       this.clearCompositionInputSuppression();
@@ -1766,6 +1791,7 @@ export class GhosttyTerminalSurface {
     this.input.addEventListener('focus', this.onFocus);
     this.input.addEventListener('blur', this.onBlur);
     this.input.addEventListener('input', this.onInput);
+    this.input.addEventListener('beforeinput', this.onBeforeInput);
     this.input.addEventListener('paste', this.onPaste);
     this.input.addEventListener('copy', this.onCopyEvent);
     this.input.addEventListener('compositionstart', this.onCompositionStart);
@@ -1791,6 +1817,7 @@ export class GhosttyTerminalSurface {
     this.input.removeEventListener('focus', this.onFocus);
     this.input.removeEventListener('blur', this.onBlur);
     this.input.removeEventListener('input', this.onInput);
+    this.input.removeEventListener('beforeinput', this.onBeforeInput);
     this.input.removeEventListener('paste', this.onPaste);
     this.input.removeEventListener('copy', this.onCopyEvent);
     this.input.removeEventListener('compositionstart', this.onCompositionStart);
