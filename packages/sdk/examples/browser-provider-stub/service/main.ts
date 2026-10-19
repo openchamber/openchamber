@@ -77,7 +77,6 @@ const selectOptions = (): BrowserSnapshotOption[] => [
   { label: 'Canada', value: 'ca', selected: page.select.value === 'ca', disabled: false },
 ];
 
-// fallow-ignore-next-line code-duplication
 const elements = (): BrowserSnapshotElement[] => [
   { selector: '#name', tag: 'input', type: 'text', label: 'Name', bounds: { x: 16, y: 40, width: 240, height: 32 }, inViewport: true },
   { selector: '#country', tag: 'select', label: 'Country', multiple: false, options: selectOptions(), bounds: { x: 16, y: 136, width: 240, height: 32 }, inViewport: true },
@@ -98,7 +97,6 @@ const navigate = (url: string): void => {
 let lastCaller: BrowserProviderRequest['context'] = { directory: null, sessionId: null };
 
 const handle = (request: BrowserProviderRequest): BrowserProviderResult => {
-  // fallow-ignore-next-line code-duplication
   markAgentActive();
   lastCaller = request.context;
   // One page, no tabs: an id this stub never issued is refused, never

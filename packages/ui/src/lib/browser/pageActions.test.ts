@@ -409,6 +409,25 @@ describe('page action scripts', () => {
     });
   });
 
+  test('refuses an option inside a disabled optgroup and still selects its enabled siblings', () => {
+    const win = new Window({ url: 'http://localhost:3000/' });
+    win.document.body.innerHTML = `
+      <select id="country">
+        <optgroup label="Europe" disabled><option value="de">Germany</option></optgroup>
+        <optgroup label="Americas"><option value="ca">Canada</option></optgroup>
+      </select>`;
+
+    expect(JSON.parse(runInWindow(win, buildSelectScript({ selector: '#country', value: 'de' })))).toEqual({
+      ok: false,
+      error: 'The matching option in #country is disabled',
+    });
+    expect(JSON.parse(runInWindow(win, buildSelectScript({ selector: '#country', value: 'ca' })))).toMatchObject({
+      ok: true,
+      label: 'Canada',
+      value: 'ca',
+    });
+  });
+
   test('keeps hostile selector, label, and value strings inert', () => {
     const win = new Window({ url: 'http://localhost:3000/' });
     const hostile = `"); window.__owned = true; ("`;
