@@ -3407,6 +3407,7 @@ export const dict = {
   'chat.workStatus.breakdown.mcpCountSingle': '{count} MCP',
   'chat.workStatus.breakdown.mcpCountPlural': '{count} MCP',
   'chat.workStatus.sections.open': 'Bölümleri seç',
+  'chat.workStatus.panelPin.pin': 'Yan panel açıldığında açık tut',
   'chat.workStatus.sections.dialogTitle': 'Panel bölümleri',
   'chat.workStatus.sections.reorder': '{label} öğesini yeniden sıralamak için sürükleyin',
   'chat.workStatus.sections.dragInstructions': 'Bir bölümü seçmek için Boşluk tuşuna basın, ok tuşlarıyla taşıyın ve bırakmak için Boşluk tuşuna basın. İptal etmek için Escape tuşuna basın.',

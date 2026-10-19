@@ -209,21 +209,30 @@ export const Header: React.FC = () => {
   const workStatusPanelFits = useUIStore((state) => state.workStatusPanelFits);
   const workStatusOverlayOpen = useUIStore((state) => state.workStatusOverlayOpen);
   const setWorkStatusOverlayOpen = useUIStore((state) => state.setWorkStatusOverlayOpen);
+  const workStatusPanelPinned = useUIStore((state) => state.workStatusPanelPinned);
+  const setWorkStatusPanelPinned = useUIStore((state) => state.setWorkStatusPanelPinned);
 
   // Two meanings for one button. With room beside the chat it switches the
   // panel on and off. Without room it cannot be shown inline at all, so it
   // reads as off and opens the panel over the chat instead — the stored
   // preference is left alone, so the panel comes back on its own once the
-  // window is wide enough again.
+  // window is wide enough again. While pinned, the floating card is already
+  // up and the button releases the pin instead of toggling a flag the pin
+  // overrides.
   const workStatusPanelShownInline = workStatusPanelEnabled && workStatusPanelFits;
-  const workStatusToggleActive = workStatusPanelShownInline || workStatusOverlayOpen;
+  const workStatusToggleActive = workStatusPanelEnabled
+    && (workStatusPanelShownInline || workStatusOverlayOpen || workStatusPanelPinned);
   const handleWorkStatusToggle = React.useCallback(() => {
     if (workStatusPanelEnabled && !workStatusPanelFits) {
+      if (workStatusPanelPinned) {
+        setWorkStatusPanelPinned(false);
+        return;
+      }
       setWorkStatusOverlayOpen(!workStatusOverlayOpen);
       return;
     }
     setWorkStatusPanelEnabled(!workStatusPanelEnabled);
-  }, [setWorkStatusOverlayOpen, setWorkStatusPanelEnabled, workStatusOverlayOpen, workStatusPanelEnabled, workStatusPanelFits]);
+  }, [setWorkStatusOverlayOpen, setWorkStatusPanelEnabled, setWorkStatusPanelPinned, workStatusOverlayOpen, workStatusPanelEnabled, workStatusPanelFits, workStatusPanelPinned]);
 
   useQuotaAutoRefresh();
 
@@ -1334,7 +1343,7 @@ export const Header: React.FC = () => {
               </TooltipTrigger>
               <TooltipContent side="bottom">
                 {workStatusPanelEnabled && !workStatusPanelFits
-                  ? (workStatusOverlayOpen
+                  ? (workStatusOverlayOpen || workStatusPanelPinned
                     ? t('header.workStatusPanel.hide')
                     : t('header.workStatusPanel.showOverlay'))
                   : workStatusPanelEnabled

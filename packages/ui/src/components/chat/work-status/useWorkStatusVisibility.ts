@@ -34,6 +34,12 @@ type Result = {
   /** Layout can host the panel inline, regardless of the user's switch. */
   fits: boolean;
   /**
+   * The chat area's width has been read at least once. Until then `fits` only
+   * means "not measured", and a pinned card must not paint in the floating
+   * form for the frame before it docks.
+   */
+  measured: boolean;
+  /**
    * The chat area is wide enough for the panel's column, whether or not the
    * context panel is open. The right slot keeps the column for the card on
    * this, so closing the context panel goes straight back to it.
@@ -131,5 +137,5 @@ export const useWorkStatusVisibility = ({ isMobile, isVSCode }: Options): Result
   const fits = layoutAllows && roomy;
   const visible = panelEnabled && fits;
 
-  return { rowRef, visible, fits, roomy };
+  return { rowRef, visible, fits, roomy, measured: wideEnough !== null };
 };

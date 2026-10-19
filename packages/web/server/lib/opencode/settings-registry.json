@@ -318,6 +318,9 @@
     "workStatusPanelEnabled": {
       "scope": "profile"
     },
+    "workStatusPanelPinned": {
+      "scope": "profile"
+    },
     "workStatusHiddenSections": {
       "scope": "profile"
     },

@@ -3604,6 +3604,7 @@ export const dict = {
   'chat.workStatus.breakdown.mcpCountSingle': '{count} MCP',
   'chat.workStatus.breakdown.mcpCountPlural': '{count} MCP',
   'chat.workStatus.sections.open': 'Choose sections',
+  'chat.workStatus.panelPin.pin': 'Keep open when a side panel opens',
   'chat.workStatus.sections.dialogTitle': 'Panel sections',
   'chat.workStatus.sections.reorder': 'Drag {label} to reorder',
   'chat.workStatus.sections.dragInstructions': 'Press Space to pick up a section, use the arrow keys to move it, and press Space to drop. Press Escape to cancel.',

@@ -3549,6 +3549,7 @@ export const dict = {
   'chat.workStatus.breakdown.mcpCountSingle': 'MCP {count}',
   'chat.workStatus.breakdown.mcpCountPlural': '{count} שרתי MCP',
   'chat.workStatus.sections.open': 'בחר מקטעים',
+  'chat.workStatus.panelPin.pin': 'להישאר פתוח כשנפתחת חלונית צד',
   'chat.workStatus.sections.dialogTitle': 'מקטעי החלונית',
   'chat.workStatus.sections.reorder': 'גרור את {label} כדי לשנות את הסדר',
   'chat.workStatus.sections.dragInstructions': 'יש ללחוץ על רווח כדי להרים מקטע, להזיז אותו בעזרת מקשי החיצים וללחוץ על רווח כדי לשחרר. כדי לבטל, יש ללחוץ על Escape.',

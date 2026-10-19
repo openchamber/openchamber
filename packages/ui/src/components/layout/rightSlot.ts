@@ -9,6 +9,8 @@ import { create } from 'zustand';
  * The right zone's `ContextPanel` owns the slot and renders the card's host element;
  * `ChatContainer` portals the inline `WorkStatusPanel` into it. The card tells
  * the slot whether it wants its column while the context panel is closed.
+ * A pinned card that has no column is not in this slot at all: it renders its
+ * overlay form inside the chat column, so the slot's one-width rule holds.
  *
  * The slot clips its overflow and is never a scroll container: the closed
  * panel's content is wider than the card's column, and a `scrollIntoView`

@@ -3604,6 +3604,7 @@ export const dict = {
   'chat.workStatus.breakdown.mcpCountSingle': '{count} MCP',
   'chat.workStatus.breakdown.mcpCountPlural': '{count} MCP',
   'chat.workStatus.sections.open': 'Secties kiezen',
+  'chat.workStatus.panelPin.pin': 'Open houden wanneer een zijpaneel opent',
   'chat.workStatus.sections.dialogTitle': 'Paneelsecties',
   'chat.workStatus.sections.reorder': 'Sleep {label} om te herschikken',
   'chat.workStatus.sections.dragInstructions': 'Druk op Space om een sectie op te pakken, gebruik de pijltoetsen om te verplaatsen en druk op Space om neer te zetten. Druk op Escape om te annuleren.',

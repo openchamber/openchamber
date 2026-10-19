@@ -385,6 +385,7 @@ export const SETTINGS_REGISTRY = {
     ui: uiStore('workStatusSectionOrder', (value) => useUIStore.getState().setWorkStatusSectionOrder(value)),
   }),
   workStatusPanelEnabled: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('workStatusPanelEnabled', (v) => useUIStore.getState().setWorkStatusPanelEnabled(v)) }),
+  workStatusPanelPinned: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('workStatusPanelPinned', (v) => useUIStore.getState().setWorkStatusPanelPinned(v)) }),
   workStatusHiddenSections: field({
     scope: 'profile',
     parse: parseWorkStatusHiddenSections,

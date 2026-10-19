@@ -3593,6 +3593,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.breakdown.mcpCountSingle': '{count} MCP',
   'chat.workStatus.breakdown.mcpCountPlural': '{count} MCP',
   'chat.workStatus.sections.open': 'Обрати секції',
+  'chat.workStatus.panelPin.pin': 'Залишати відкритою, коли відкривається бічна панель',
   'chat.workStatus.sections.dialogTitle': 'Секції панелі',
   'chat.workStatus.sections.reorder': 'Перетягніть {label}, щоб змінити порядок',
   'chat.workStatus.sections.dragInstructions': 'Натисніть пробіл, щоб підняти секцію, перемістіть її стрілками й натисніть пробіл, щоб відпустити. Escape скасовує переміщення.',

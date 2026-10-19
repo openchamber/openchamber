@@ -3604,6 +3604,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.breakdown.mcpCountSingle': 'MCP {count} 個',
   'chat.workStatus.breakdown.mcpCountPlural': 'MCP {count} 個',
   'chat.workStatus.sections.open': 'セクションを選択',
+  'chat.workStatus.panelPin.pin': 'サイドパネルを開いても表示したままにする',
   'chat.workStatus.sections.dialogTitle': 'パネルのセクション',
   'chat.workStatus.sections.reorder': '{label}をドラッグして並び替え',
   'chat.workStatus.sections.dragInstructions': 'スペースキーでセクションを選択し、矢印キーで移動し、スペースキーで確定します。Escapeキーでキャンセルします。',
