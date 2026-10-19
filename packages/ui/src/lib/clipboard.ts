@@ -1,3 +1,17 @@
+import { Capacitor, registerPlugin } from '@capacitor/core';
+import { z } from 'zod';
+
+const textClipboard = registerPlugin<{ readText: () => Promise<{ text: string }> }>('TextClipboard');
+const clipboardTextSchema = z.object({ text: z.string() });
+
+export async function readTextFromClipboard(): Promise<string> {
+  // Android WebView denies browser clipboard reads even from a button tap.
+  if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
+    return clipboardTextSchema.parse(await textClipboard.readText()).text;
+  }
+  return navigator.clipboard.readText();
+}
+
 export type ClipboardCopyResult =
   | { ok: true; method: 'clipboard' | 'execCommand' }
   | { ok: false; error: string };

@@ -18,6 +18,8 @@ The viewport owns the desktop Copy/Paste context menu. Its trigger accepts only 
 
 ## Invariants
 
+- Native iOS and Android expose Paste beside Copy in the terminal toolbar. The viewport controller uses the same clipboard path as the desktop menu, including stale-read guards and terminal paste encoding. The button leaves touch selection gestures intact and adds no Enter; hosted mobile does not show it.
+
 - The paste shortcut starts a clipboard read and keeps the browser's native paste event; `TerminalPasteArbiter` lets exactly one deliver. Chromium fires the native event first and it cancels the read. WebKit resolves the read first, so the native event of the same keystroke is swallowed when it arrives within one second.
 - On macOS, unshifted Option+Left/Right sends ESC+b/f and Option+Backspace sends Ctrl+W at legacy prompts. `core.encodeMacWordShortcut` checks the active screen and Kitty keyboard flags before translating; alternate-screen and Kitty-enabled programs receive the original keys. `surface.ts` consumes the matching keyup for translated shortcuts. Other platforms, extra modifiers and Option character input retain normal encoding.
 - On macOS, Option that composed an ASCII symbol the key does not type on its own (Option+4 is `$` on Swedish, German and Ukrainian layouts) counts as a consumed modifier, so the symbol reaches the shell as text. Option letters and digits (Russian - PC types Latin letters with Option) and non-ASCII characters such as `€` or Polish `ą` keep the Meta encoding: Option+B sends ESC b. `ghosttyConsumedMods` reads the active layout through `navigator.keyboard.getLayoutMap()` where the engine has it and falls back to US letters and digits.

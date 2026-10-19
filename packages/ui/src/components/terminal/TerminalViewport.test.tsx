@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { act } from 'react';
+import { act, createRef, type Ref } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Window } from 'happy-dom';
 import { toast } from 'sonner';
@@ -7,7 +7,7 @@ import { toast } from 'sonner';
 import { I18nProvider } from '@/lib/i18n';
 import { useTerminalStore, type TerminalChunk } from '@/stores/useTerminalStore';
 
-import type { TerminalSurface, TerminalSurfaceFactory } from './TerminalViewport';
+import type { TerminalController, TerminalSurface, TerminalSurfaceFactory } from './TerminalViewport';
 
 // Base UI determines DOM availability when its modules load.
 const initialWindow = new Window({ url: 'http://localhost/' });
@@ -121,10 +121,11 @@ const buildReplacedBufferChunks = (content: string): TerminalChunk[] => {
   return [...useTerminalStore.getState().getBuffer(directory, tabId).chunks];
 };
 
-const renderViewport = (root: Root, chunks: TerminalChunk[], isVisible = true, sessionKey = 'session-1', enableTouchScroll = false) => act(async () => {
+const renderViewport = (root: Root, chunks: TerminalChunk[], isVisible = true, sessionKey = 'session-1', enableTouchScroll = false, ref?: Ref<TerminalController>) => act(async () => {
   root.render(
     <I18nProvider>
       <TerminalViewport
+        ref={ref}
         sessionKey={sessionKey}
         chunks={chunks}
         onInput={() => undefined}
@@ -264,6 +265,27 @@ describe('TerminalViewport integration', () => {
     await flushSurfaceLoad();
     await openContextMenu();
     expect(document.querySelector('[role="menu"]')).toBeNull();
+  });
+
+  test('pastes through the touch controller and drops its pending read after hiding', async () => {
+    const ref = createRef<TerminalController>();
+    await renderViewport(root, [], true, 'session-1', true, ref);
+    await flushSurfaceLoad();
+    await navigator.clipboard.writeText('touch paste');
+    await act(async () => { await ref.current?.pasteClipboard(); });
+    expect(terminalEvents.filter((event) => event.type === 'paste')).toEqual([
+      { type: 'paste', data: 'touch paste' },
+    ]);
+
+    let finishRead: (text: string) => void = () => { throw new Error('read not started'); };
+    Object.defineProperty(navigator.clipboard, 'readText', {
+      configurable: true,
+      value: () => new Promise<string>((resolve) => { finishRead = resolve; }),
+    });
+    const pending = ref.current?.pasteClipboard();
+    await renderViewport(root, [], false, 'session-1', true, ref);
+    await act(async () => { finishRead('stale paste'); await pending; });
+    expect(terminalEvents.filter((event) => event.type === 'paste')).toHaveLength(1);
   });
 
   test('drops a pending clipboard read when the terminal session changes', async () => {

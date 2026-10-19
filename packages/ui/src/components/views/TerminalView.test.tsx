@@ -14,6 +14,7 @@ const openContextPreviewCalls: Array<[string, string]> = [];
 const createSessionCalls: Array<{ cwd: string }> = [];
 const connectCalls: string[] = [];
 const ensureDirectoryCalls: string[] = [];
+const pasteCalls: string[] = [];
 const openContextPreview = (directory: string, url: string) => {
   openContextPreviewCalls.push([directory, url]);
 };
@@ -108,13 +109,14 @@ mock.module('@/stores/useInlineCommentDraftStore', () => ({ useInlineCommentDraf
 mock.module('@/components/terminal/TerminalViewport', () => ({
   TerminalViewport: React.forwardRef(function TerminalViewportMock(
     { sessionKey, chunks, isVisible, onResize }: { sessionKey: string; chunks: unknown[]; isVisible: boolean; onResize: (cols: number, rows: number) => void },
-    ref: React.ForwardedRef<{ focus: () => void; fit: () => void; getSelection: () => null }>,
+    ref: React.ForwardedRef<{ focus: () => void; fit: () => void; getSelection: () => null; pasteClipboard: () => Promise<void> }>,
   ) {
     React.useImperativeHandle(ref, () => ({
       focus: () => undefined,
       fit: () => undefined,
       getSelection: () => null,
-    }), []);
+      pasteClipboard: async () => { pasteCalls.push(sessionKey); },
+    }), [sessionKey]);
     // A real surface reports its fitted grid once it is visible; a visible tab
     // spawns its shell only after that report.
     React.useEffect(() => {
@@ -195,6 +197,7 @@ describe('TerminalView project action tab indicator', () => {
     createSessionCalls.length = 0;
     connectCalls.length = 0;
     ensureDirectoryCalls.length = 0;
+    pasteCalls.length = 0;
     connectBehavior = () => ({ close: () => undefined });
     windowInstance = new Window({ url: 'http://localhost/' });
     Object.assign(globalThis, {
@@ -276,6 +279,29 @@ describe('TerminalView project action tab indicator', () => {
     await act(async () => useTerminalStore.getState().setTabPreviewUrl('/spaces/a1b2c3d4e5f6/repo', tabId, 'https://preview.example.test'));
     host.querySelector<HTMLElement>('[title="terminalView.preview.openTitle"]')?.click();
     expect(openContextPreviewCalls).toEqual([['/repo', 'https://preview.example.test']]);
+  });
+
+  test('shows Paste beside Copy only in the native app and targets the active terminal', async () => {
+    await act(async () => root.render(<TerminalView visible />));
+    expect(host.querySelector('[aria-label="terminalView.actions.paste"]')).toBeNull();
+
+    Object.defineProperty(window, 'Capacitor', { configurable: true, value: { isNativePlatform: () => true } });
+    const tab = useTerminalStore.getState().getDirectoryState('/repo')!.tabs[0]!;
+    await act(async () => {
+      useTerminalStore.getState().setActiveTab('/repo', tab.id);
+      useTerminalStore.getState().setTabSessionId('/repo', tab.id, 'native-terminal');
+      useTerminalStore.getState().setConnecting('/repo', tab.id, false);
+      root.render(<TerminalView visible />);
+    });
+    const paste = host.querySelector<HTMLButtonElement>('[aria-label="terminalView.actions.paste"]');
+    expect(paste).not.toBeNull();
+    expect(paste?.previousElementSibling?.getAttribute('aria-label')).toBe('terminalView.actions.copySelection');
+    expect(paste?.disabled).toBe(false);
+    await act(async () => paste?.click());
+    expect(pasteCalls).toEqual([`/repo::${tab.id}`]);
+
+    await act(async () => useTerminalStore.getState().setConnecting('/repo', tab.id, true));
+    expect(paste?.disabled).toBe(true);
   });
 
   test('closing the last tab closes the surface instead of only replacing the tab', async () => {

@@ -22,6 +22,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui';
 import { copyTextToClipboard } from '@/lib/clipboard';
+import { isCapacitorApp } from '@/lib/platform';
 import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
 import { ContextMenuItem, ContextMenuSeparator } from '@/components/ui/context-menu';
 import { TerminalTabRenameDialog } from '@/components/terminal/TerminalTabRenameDialog';
@@ -1320,6 +1321,21 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
                             >
                                 <Icon name="file-copy" className="h-4 w-4" />
                             </Button>
+                            {isCapacitorApp() && (
+                                <Button
+                                    type="button"
+                                    size="xs"
+                                    variant="ghost"
+                                    className="h-7 w-7 p-0"
+                                    onPointerDown={preserveTerminalFocus}
+                                    onClick={() => { void terminalControllerRef.current?.pasteClipboard(); }}
+                                    disabled={quickKeysDisabled}
+                                    title={t('terminalView.actions.paste')}
+                                    aria-label={t('terminalView.actions.paste')}
+                                >
+                                    <Icon name="clipboard" className="h-4 w-4" />
+                                </Button>
+                            )}
                             {previewUrl ? (
                                 <Button
                                     type="button"
