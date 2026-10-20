@@ -11,7 +11,7 @@ interface CheckboxProps {
   ariaLabel?: string;
   className?: string;
   iconClassName?: string;
-  /** @deprecated size is fixed; prop retained for backwards compatibility */
+  /** @deprecated size comes from the spacing scale; prop retained for backwards compatibility */
   size?: 'sm' | 'default';
 }
 
@@ -24,8 +24,8 @@ export const Checkbox = React.memo<CheckboxProps>(function Checkbox({
   className,
   iconClassName,
 }) {
-  const boxSize = 'h-[14px] w-[14px] min-h-[14px] min-w-[14px]';
-  const iconSize = 'h-[10px] w-[10px] min-h-[10px] min-w-[10px]';
+  const boxSize = 'size-3.5 min-h-3.5 min-w-3.5';
+  const iconSize = 'size-2.5 min-h-2.5 min-w-2.5';
   const isOn = checked || indeterminate;
   // The checkbox owns its own toggle. Clicks stop at this wrapper so a
   // clickable parent row does not toggle the same value again; the wrapper
