@@ -229,7 +229,13 @@ const GitLabInstanceItem: React.FC<GitLabInstanceItemProps> = ({ identity, sourc
     setTokenRejected(false);
     try {
       const nextStatus = await sourceControl.authActivate(identity, accountId);
-      if (isCurrentRuntime()) setStatus(identity, nextStatus);
+      if (!isCurrentRuntime()) return;
+      setStatus(identity, nextStatus);
+      const instances = await refreshInstances(sourceControl, { force: true });
+      if (!isCurrentRuntime()) return;
+      if (instances.some((item) => item.provider === identity.provider && item.instance === identity.instance)) {
+        onSaved?.();
+      }
     } catch {
       if (isCurrentRuntime()) setOperationFailed(true);
     } finally {

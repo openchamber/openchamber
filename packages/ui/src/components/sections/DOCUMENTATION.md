@@ -65,6 +65,13 @@ on disk. Once the entity exists, the page switches to the autosave rules above.
 `skills/` follows the same split for supporting files: editing an existing file
 writes when the dialog closes, while a new file is only created on confirm.
 
+## GitLab instances
+
+Activating a CLI account refreshes the server-owned instance list before clearing
+the temporary custom-domain entry. The saved instance then remains visible when
+another domain is entered. A failed list refresh keeps the temporary entry, and
+an activation completed after a runtime switch cannot update the current state.
+
 ## Providers
 
 `providers/` is not an autosave page. Connecting a provider is an action, not a
