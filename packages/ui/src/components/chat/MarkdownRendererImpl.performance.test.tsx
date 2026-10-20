@@ -360,6 +360,59 @@ afterAll(() => {
 });
 
 describe('MarkdownRenderer DOM mount performance contract', () => {
+  test('skips email and numeric suffix probes while preserving file references', async () => {
+    const rejected = [
+      'user@gmail.com', '@someone.ts', '@scope/package.json', 'src/user@host.ts',
+      'gpt-5.4', '93.00', '3.49s', 'v1.2.3', '3.1.4', 'ls.1',
+      'https://example.com/file.ts',
+    ];
+    const accepted = [
+      '.env', '.config.json', './src/entry.ts', '../src/parent.ts', '/repo/absolute.ts',
+      'path with spaces/file name.ts', 'file.test.ts', 'my-file.tar.gz', 'a-b.c',
+      'shader.frag2', 'component.d-ts', 'README',
+      // These remain ambiguous with filenames that have letter-leading extensions.
+      '150.ms', 'accounts.google.com', 'client.messages.create', 'datetime.utcnow',
+      'log.transports.file.level',
+    ];
+    fileLinkTestDirectory = '/detector-test';
+    fileLinksInsideWorkspace = true;
+    const resolvedPath = (value: string) => value.startsWith('/') ? value : `/outside/${value}`;
+    existingTestFiles = new Set([...accepted, ...rejected, 'block/entry.ts'].map(resolvedPath));
+    statRequests.length = 0;
+    const host = document.createElement('div');
+    document.body.replaceChildren(host);
+    const root = createRoot(host);
+    const content = [
+      ...[...rejected, ...accepted].map((value) => `\`${value}\``),
+      '```\ngpt-5.4\nuser@gmail.com\nblock/entry.ts:7\n```',
+    ].join('\n\n');
+    try {
+      await act(async () => {
+        root.render(<MarkdownRenderer
+          content={content}
+          messageId="file-path-detector"
+          isAnimated={false}
+          isStreaming={false}
+          enableFileReferences
+        />);
+      });
+      const deadline = Date.now() + 3000;
+      while (!host.querySelector('[data-openchamber-file-link]') && Date.now() < deadline) {
+        await act(async () => { await new Promise<void>((resolve) => setImmediate(resolve)); });
+        await flushAnimationFrame();
+      }
+      expect([...statRequests].sort()).toEqual([...accepted, 'block/entry.ts'].map(resolvedPath).sort());
+      const links = host.querySelectorAll('[data-openchamber-file-link]');
+      expect(Array.from(links).map((link) => link.textContent)).toEqual([...accepted, 'block/entry.ts:7']);
+      expect(host.textContent).toContain('gpt-5.4');
+    } finally {
+      await act(async () => root.unmount());
+      fileLinkTestDirectory = null;
+      fileLinksInsideWorkspace = false;
+      existingTestFiles = new Set();
+    }
+  });
+
   test('does not annotate app links with file-looking labels as internal file links', async () => {
     fileLinkTestDirectory = '/repo';
     const host = document.createElement('div');

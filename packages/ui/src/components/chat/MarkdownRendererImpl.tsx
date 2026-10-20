@@ -194,11 +194,11 @@ const hasFileExtension = (path: string): boolean => {
   if (!base || base.endsWith('.')) {
     return false;
   }
-  return /\.[A-Za-z0-9_-]{1,16}$/.test(base);
+  return /\.[A-Za-z][A-Za-z0-9_-]{0,15}$/.test(base);
 };
 
 const isLikelyFilePathValue = (path: string): boolean => {
-  if (!path || path.startsWith('--') || path.includes('://')) {
+  if (!path || path.startsWith('--') || path.includes('://') || path.includes('@')) {
     return false;
   }
 
