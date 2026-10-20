@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import express from 'express';
 import fs from 'fs';
 import os from 'os';
@@ -96,6 +96,7 @@ describe('skill-routes directory soft fallback', () => {
   let appHandle = null;
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     if (appHandle) {
       await appHandle.close();
       appHandle = null;
@@ -412,6 +413,127 @@ describe('skill-routes directory soft fallback', () => {
       else process.env.OPENCHAMBER_DATA_DIR = previousDataDir;
       fs.rmSync(dataDir, { recursive: true, force: true });
     }
+  });
+
+  it('probes skill sources without synchronous filesystem calls', async () => {
+    projectRoot = createTempProject();
+    const skillDir = path.join(projectRoot, '.opencode', 'skill', 'probe-skill');
+    fs.mkdirSync(skillDir, { recursive: true });
+    const skillPath = path.join(skillDir, 'SKILL.md');
+    fs.writeFileSync(skillPath, '---\nname: probe-skill\ndescription: Legacy path\n---\nBody\n');
+    const discovered = { name: 'probe-skill', path: skillPath, scope: 'project', source: 'opencode' };
+    const exists = vi.spyOn(fs, 'existsSync');
+    const stat = vi.spyOn(fs, 'statSync');
+
+    const sources = await getSkillSources('probe-skill', projectRoot, discovered, { includeSupportingFiles: false });
+
+    expect(sources.projectMd.path).toBe(skillPath);
+    expect(sources.projectMd.exists).toBe(true);
+    expect(sources.md.instructions).toBe('Body');
+    expect(exists).not.toHaveBeenCalled();
+    expect(stat).not.toHaveBeenCalled();
+  });
+
+  it('reads each skill file once per list request and refreshes on the next request', async () => {
+    projectRoot = createTempProject();
+    const paths = [];
+    for (let index = 0; index < 72; index += 1) {
+      const name = `read-once-${index}`;
+      const skillDir = path.join(projectRoot, '.agents', 'skills', name);
+      fs.mkdirSync(skillDir, { recursive: true });
+      const skillPath = path.join(skillDir, 'SKILL.md');
+      fs.writeFileSync(skillPath, `---\nname: ${name}\ndescription: Read once\n---\nBody\n`);
+      paths.push(skillPath);
+    }
+    appHandle = startSkillsApp({ projectRoot });
+    const read = vi.spyOn(fs.promises, 'readFile');
+    const url = `${appHandle.baseUrl}/api/config/skills?directory=${encodeURIComponent(projectRoot)}`;
+    const response = await fetch(url);
+    expect(response.status).toBe(200);
+    const payload = await response.json();
+    expect(payload.skills.filter((skill) => skill.name.startsWith('read-once-'))).toHaveLength(paths.length);
+    expect(read.mock.calls.filter(([file]) => paths.includes(file))).toHaveLength(paths.length);
+    for (const skillPath of paths) {
+      expect(read.mock.calls.filter(([file]) => file === skillPath)).toHaveLength(1);
+    }
+
+    fs.writeFileSync(paths[0], '---\nname: read-once-0\ndescription: Updated\n---\nNew body\n');
+    const refreshed = await (await fetch(url)).json();
+    expect(refreshed.skills.find((skill) => skill.name === 'read-once-0').sources.md.instructions).toBe('New body');
+    for (const skillPath of paths) {
+      expect(read.mock.calls.filter(([file]) => file === skillPath)).toHaveLength(2);
+    }
+  });
+
+  it('keeps the serialized list response for duplicate names in different roots', async () => {
+    projectRoot = createTempProject();
+    const name = 'duplicate-response';
+    const claudePath = path.join(projectRoot, '.claude', 'skills', name, 'SKILL.md');
+    const projectPath = path.join(projectRoot, '.opencode', 'skills', name, 'SKILL.md');
+    for (const [file, description] of [[claudePath, 'Claude copy'], [projectPath, 'Project copy']]) {
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, `---\nname: ${name}\ndescription: ${description}\ndisable-model-invocation: true\n---\n${description} body\n`);
+    }
+    appHandle = startSkillsApp({
+      projectRoot,
+      overrides: {
+        discoverSkills: async (directory, options) => (await discoverSkills(directory, options))
+          .filter((skill) => skill.name === name),
+      },
+    });
+    const response = await fetch(`${appHandle.baseUrl}/api/config/skills`);
+    expect(response.status).toBe(200);
+    // Captured against the unchanged implementation; key order is intentional.
+    const expected = {
+      skills: [{
+        name, path: projectPath, scope: 'project', source: 'opencode', description: 'Project copy',
+        sources: {
+          md: {
+            exists: true, path: projectPath, dir: path.dirname(projectPath), scope: 'project', source: 'opencode',
+            fields: ['name', 'description', 'disable-model-invocation', 'instructions'], name,
+            description: 'Project copy', instructions: 'Project copy body', disableModelInvocation: true,
+          },
+          projectMd: { exists: true, path: projectPath, dir: path.dirname(projectPath) },
+          claudeMd: { exists: true, path: claudePath, dir: path.dirname(claudePath) },
+          userMd: { exists: false, path: path.join(SKILL_DIR, name, 'SKILL.md'), dir: null },
+          userClaudeMd: { exists: false, path: path.join(os.homedir(), '.claude', 'skills', name, 'SKILL.md'), dir: null },
+          userAgentsMd: { exists: false, path: path.join(os.homedir(), '.agents', 'skills', name, 'SKILL.md'), dir: null },
+        },
+        renamable: true,
+      }],
+      externalSkills: {
+        claudeDisabled: false,
+        allDisabled: false,
+      },
+      openCodeSkillsUnavailable: true,
+    };
+    expect(await response.text()).toBe(JSON.stringify(expected));
+  });
+
+  it('reuses the parsed copy at OpenCode\'s path when local discovery selects another root', async () => {
+    projectRoot = createTempProject();
+    const name = 'authoritative-copy';
+    const claudePath = path.join(projectRoot, '.claude', 'skills', name, 'SKILL.md');
+    const projectPath = path.join(projectRoot, '.opencode', 'skills', name, 'SKILL.md');
+    for (const [file, description] of [[claudePath, 'Claude copy'], [projectPath, 'Project copy']]) {
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, `---\nname: ${name}\ndescription: ${description}\n---\n${description} body\n`);
+    }
+    const parsedFiles = new Map();
+    const local = (await discoverSkills(projectRoot, { parsedFiles })).find((skill) => skill.name === name);
+    expect(local.path).toBe(projectPath);
+    const authoritative = { ...local, path: claudePath, source: 'claude' };
+    const read = vi.spyOn(fs.promises, 'readFile');
+    const sources = await getSkillSources(name, projectRoot, authoritative, { includeSupportingFiles: false, parsedFiles });
+    expect(sources.md.path).toBe(claudePath);
+    expect(sources.md.description).toBe('Claude copy');
+    expect(sources.md.instructions).toBe('Claude copy body');
+    expect(read).not.toHaveBeenCalled();
+
+    fs.unlinkSync(claudePath);
+    const missing = await getSkillSources(name, projectRoot, authoritative, { includeSupportingFiles: false, parsedFiles });
+    expect(missing.md.exists).toBe(false);
+    expect(missing.md.path).toBeNull();
   });
 
   it('leaves supporting files out of the list and keeps them in the skill detail', async () => {

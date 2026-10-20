@@ -305,7 +305,8 @@ export const registerSkillRoutes = (app, dependencies) => {
         return res.status(400).json({ error });
       }
       const openCodeSkills = await fetchOpenCodeDiscoveredSkills(directory);
-      const localSkills = await discoverSkills(directory);
+      const parsedFiles = new Map();
+      const localSkills = await discoverSkills(directory, { parsedFiles });
       const skills = mergeDiscoveredSkills(openCodeSkills ?? [], localSkills);
 
       // One skill at a time: each await hands the event loop back, so other
@@ -314,7 +315,7 @@ export const registerSkillRoutes = (app, dependencies) => {
       for (const skill of skills) {
         // The list carries no supporting files; the skill page reads them
         // from GET /api/config/skills/:name.
-        const sources = await getSkillSources(skill.name, directory, skill, { includeSupportingFiles: false });
+        const sources = await getSkillSources(skill.name, directory, skill, { includeSupportingFiles: false, parsedFiles });
         const skillPath = typeof skill.path === 'string' ? skill.path : null;
         enrichedSkills.push({
           ...skill,
