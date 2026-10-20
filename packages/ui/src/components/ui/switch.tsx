@@ -14,20 +14,18 @@ const Switch = React.forwardRef<
 >(({ className, loading = false, ...props }, ref) => (
   <BaseSwitch.Root
     className={cn(
-      'peer inline-flex shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent shadow-none transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50 data-[checked]:bg-primary data-[unchecked]:bg-[var(--interactive-border)]',
+      'peer inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full p-0.5 shadow-none transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50 data-[checked]:bg-primary data-[unchecked]:bg-[var(--interactive-border)]',
       className
     )}
-    style={{ width: '36px', height: '20px', minWidth: '36px', minHeight: '20px' }}
     {...props}
     aria-busy={loading || undefined}
     ref={ref}
   >
     <BaseSwitch.Thumb
       className={cn(
-        'pointer-events-none flex items-center justify-center rounded-full bg-muted-foreground data-[checked]:bg-primary-foreground shadow-none ring-0 transition-transform data-[checked]:translate-x-4 rtl:data-[checked]:-translate-x-4 data-[unchecked]:translate-x-0',
+        'pointer-events-none flex size-4 items-center justify-center rounded-full bg-muted-foreground data-[checked]:bg-primary-foreground shadow-none ring-0 transition-transform data-[checked]:translate-x-4 rtl:data-[checked]:-translate-x-4 data-[unchecked]:translate-x-0',
         loading && 'bg-status-warning text-background',
       )}
-      style={{ width: '16px', height: '16px', minWidth: '16px', minHeight: '16px' }}
     >
       {loading ? <Icon name="loader" className="size-3 animate-spin" /> : null}
     </BaseSwitch.Thumb>
