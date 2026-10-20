@@ -788,6 +788,10 @@
       "scope": "device",
       "local": true
     },
+    "mobileScreenAwakeMode": {
+      "scope": "device",
+      "local": true
+    },
     "contextSurfaceZones": {
       "scope": "device",
       "local": true

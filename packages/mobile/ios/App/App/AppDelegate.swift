@@ -135,6 +135,7 @@ class BridgeViewController: CAPBridgeViewController {
         observeHardwareKeyboard()
         // App-local plugin: iOS Shortcuts / Siri new-session requests (ShortcutRequests.swift).
         bridge?.registerPluginInstance(ShortcutRequestsPlugin())
+        bridge?.registerPluginInstance(ScreenAwakePlugin())
     }
 
     override func viewDidAppear(_ animated: Bool) {

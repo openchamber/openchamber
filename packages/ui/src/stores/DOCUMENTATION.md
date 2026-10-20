@@ -113,6 +113,12 @@ verbatim, a reply spoken in full) do not consult it; they silence the 404 on
 
 ### UI state stores
 
+`useUIStore.mobileScreenAwakeMode` is a device-local preference with `off`,
+`working`, and `always` values. Missing and malformed persisted values hydrate
+as `off`; server settings cannot seed or replace it. Only the Capacitor mobile
+root consumes it, through `apps/useNativeScreenAwake.ts`. See the mobile README
+for display scope and lifecycle rules.
+
 Sidebar visibility and its persisted width are independent. Opening or closing
 the sidebar never writes a width; only resizing changes the saved choice.
 The initial width is separate from the component's minimum resize width.

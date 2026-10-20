@@ -7,7 +7,7 @@
 
 import type { OpenCodeClient } from "@opencode/client"
 import type { Config } from "@/lib/opencode/model"
-import type { ChildStoreManager } from "./child-store"
+import { subscribeDirectorySessionMessages, type ChildStoreManager } from "./child-store"
 import { getSessionMaterializationStatus } from "./materialization"
 import type { State } from "./types"
 
@@ -15,6 +15,7 @@ let _childStores: ChildStoreManager | null = null
 let _directory: string = ""
 let _registerSessionDirectory: ((sessionID: string, directory: string) => void) | null = null
 const configListeners = new Set<(directory: string, config: Config) => void>()
+const ownerListeners = new Set<() => void>()
 let cachedSessionManager: ChildStoreManager | null = null
 let cachedSessionSlices = new Map<string, State["session"]>()
 let cachedSessionsById = new Map<string, State["session"][number]>()
@@ -26,6 +27,7 @@ export function setSyncRefs(
   directory: string,
   registerSessionDirectory?: (sessionID: string, directory: string) => void,
 ) {
+  const ownerChanged = _childStores !== childStores
   _childStores = childStores
   if (cachedSessionManager !== childStores) {
     cachedSessionManager = null
@@ -36,6 +38,43 @@ export function setSyncRefs(
   _directory = directory
   if (registerSessionDirectory) {
     _registerSessionDirectory = registerSessionDirectory
+  }
+  if (ownerChanged) for (const listener of ownerListeners) listener()
+}
+
+/** Watches existing stores only; it never creates or bootstraps a directory. */
+export function subscribeToSyncSessionWork(targets: ReadonlyMap<string, string>, listener: () => void): () => void {
+  let unsubscribeRegistry: (() => void) | undefined
+  let subscriptions: Array<() => void> = []
+  const watchSessions = () => {
+    subscriptions.forEach((unsubscribe) => unsubscribe())
+    subscriptions = []
+    for (const [sessionID, directory] of targets) {
+      const store = _childStores?.getChild(directory)
+      if (!store) continue
+      subscriptions.push(subscribeDirectorySessionMessages(store, sessionID, (change) => {
+        if (change.workChanged) listener()
+      }))
+    }
+  }
+  const watchOwner = () => {
+    unsubscribeRegistry?.()
+    unsubscribeRegistry = _childStores?.subscribeRegistry(() => {
+      watchSessions()
+      listener()
+    })
+    watchSessions()
+  }
+  const ownerChanged = () => {
+    watchOwner()
+    listener()
+  }
+  ownerListeners.add(ownerChanged)
+  watchOwner()
+  return () => {
+    ownerListeners.delete(ownerChanged)
+    unsubscribeRegistry?.()
+    subscriptions.forEach((unsubscribe) => unsubscribe())
   }
 }
 
