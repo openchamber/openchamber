@@ -31,7 +31,7 @@ const stubOpenCode = ({ session = {}, records = answeredTurn } = {}) => {
   return fetchMock;
 };
 
-const makeRuntime = ({ metadata = {}, answers = {}, askError = null, settings = {}, endpoint = ENDPOINT, lineage = null } = {}) => {
+const makeRuntime = ({ metadata = {}, answers = {}, askError = null, settings = {}, endpoint = ENDPOINT, lineage = null, isSessionArchived = async () => false } = {}) => {
   const records = new Map([['ses_1', metadata]]);
   const updateMetadata = vi.fn(async (id, decide) => {
     const current = records.get(id) ?? {};
@@ -53,6 +53,7 @@ const makeRuntime = ({ metadata = {}, answers = {}, askError = null, settings = 
     updateMetadata,
     chatRoots: ['/home/me/.config/openchamber/chats'],
     lineage,
+    isSessionArchived,
     now: () => time++,
   });
   return { runtime, jev, updateMetadata, records };
@@ -81,6 +82,71 @@ describe('session work decisions', () => {
 });
 
 describe('session work runtime: a message was sent', () => {
+  it('opens a restored archive after the accepted message was skipped and deduplicated', async () => {
+    const fetchMock = stubOpenCode();
+    let archived = true;
+    const { runtime, records, updateMetadata, jev } = makeRuntime({ isSessionArchived: async () => archived });
+    runtime.processPayload(sent());
+    await settle(() => fetchMock.mock.calls.length > 0);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(records.get('ses_1')).toEqual({});
+    archived = false;
+    await runtime.resumeSession({ sessionId: 'ses_1', requestAt: 50, canOpen: () => !archived });
+    runtime.processPayload(sent());
+    expect(records.get('ses_1')).toMatchObject({ openchamber: { work: { state: 'open', openedBy: 'auto' } } });
+    expect(updateMetadata).toHaveBeenCalledTimes(1);
+    expect(jev.ask).not.toHaveBeenCalled();
+  });
+
+  it('keeps newer Done and archive decisions during a composer restore', async () => {
+    stubOpenCode();
+    const done = makeRuntime({ metadata: { openchamber: { work: { state: 'done', doneAt: 60 } } } });
+    await done.runtime.resumeSession({ sessionId: 'ses_1', requestAt: 50, canOpen: () => true });
+    expect(done.records.get('ses_1').openchamber.work.state).toBe('done');
+    const archive = makeRuntime();
+    let checks = 0;
+    await archive.runtime.resumeSession({ sessionId: 'ses_1', requestAt: 50, canOpen: () => ++checks === 1 });
+    expect(archive.records.get('ses_1')).toEqual({});
+  });
+
+  it('checks Done in the metadata queue and the setting again at write time', async () => {
+    stubOpenCode();
+    const done = makeRuntime();
+    const write = done.updateMetadata.getMockImplementation();
+    done.updateMetadata.mockImplementationOnce(async (id, decide) => {
+      done.records.set(id, { openchamber: { work: { state: 'done', doneAt: 60 } } });
+      return write(id, decide);
+    });
+    await done.runtime.resumeSession({ sessionId: 'ses_1', requestAt: 50, canOpen: () => true });
+    expect(done.records.get('ses_1').openchamber.work.state).toBe('done');
+    const settings = { enabled: true };
+    const disabled = makeRuntime({ settings });
+    await disabled.runtime.resumeSession({ sessionId: 'ses_1', requestAt: 50, canOpen: () => {
+      settings.enabled = false;
+      return true;
+    } });
+    expect(disabled.records.get('ses_1')).toEqual({});
+  });
+
+  it('preserves settings, exclusions, stop, and read failures for composer restores', async () => {
+    for (const setup of [
+      { settings: { enabled: false } }, { session: { parentID: 'parent' } },
+      ...['review', 'btw', 'scheduled'].map((kind) => ({ session: { metadata: { openchamber: { kind } } } })),
+      { session: { location: { directory: '/home/me/.config/openchamber/chats/a' } } },
+      { archived: true }, { stopped: true },
+    ]) {
+      stubOpenCode({ session: setup.session });
+      const { runtime, records } = makeRuntime({ settings: setup.settings, isSessionArchived: async () => setup.archived === true });
+      if (setup.stopped) runtime.stop();
+      await runtime.resumeSession({ sessionId: 'ses_1', requestAt: 50, canOpen: () => true });
+      expect(records.get('ses_1')).toEqual({});
+    }
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('unavailable'); }));
+    const failed = makeRuntime();
+    await expect(failed.runtime.resumeSession({ sessionId: 'ses_1', requestAt: 50, canOpen: () => true })).rejects.toThrow();
+    expect(failed.records.get('ses_1')).toEqual({});
+  });
+
   it('opens the session on a sent message without asking Jev', async () => {
     stubOpenCode();
     const { runtime, jev, records } = makeRuntime();

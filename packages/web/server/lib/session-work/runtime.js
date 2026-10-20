@@ -183,6 +183,18 @@ export function createSessionWorkRuntime({
       .catch((error) => console.warn('[session-work] could not retire a hint:', errorMessage(error)));
   };
 
+  /** Explicit composer acceptance followed by a confirmed archive restore. */
+  const resumeSession = async ({ sessionId, requestAt, canOpen }) => {
+    if (stopped || !getSettings().enabled || !canOpen() || lineage?.isChild(sessionId) === true) return;
+    const session = await eligibleSession(openCodeClient(), sessionId, AbortSignal.timeout(READ_TIMEOUT_MS));
+    if (!session || stopped) return;
+    const directory = session.location?.directory ?? session.directory;
+    await updateMetadata(sessionId, (metadata) => (
+      !stopped && getSettings().enabled && canOpen()
+        ? openPatch(metadata, { requestAt, now: now() }) : null
+    ), { directory });
+  };
+
   const processPayload = (payload, directoryHint = '') => {
     if (stopped) return;
     const busy = busySchema.safeParse(payload);
@@ -285,5 +297,5 @@ export function createSessionWorkRuntime({
     turnGenerations.clear();
   };
 
-  return { processPayload, evaluateTurnEnd, stop };
+  return { processPayload, evaluateTurnEnd, resumeSession, stop };
 }

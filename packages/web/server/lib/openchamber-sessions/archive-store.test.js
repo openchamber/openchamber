@@ -23,6 +23,21 @@ afterEach(() => {
 });
 
 describe('createArchiveStore', () => {
+  it('conditionally restores only the archive captured by the composer', async () => {
+    const store = createArchiveStore({ dataDir: makeDataDir() });
+    await store.archive(['ses_1'], 10);
+    const newerArchive = store.archive(['ses_1'], 20);
+    const staleRestore = store.unarchive(['ses_1'], 10);
+    await newerArchive;
+    await expect(staleRestore).resolves.toEqual({ restored: [], failedIds: ['ses_1'] });
+    expect(store.isRestored('ses_1')).toBe(false);
+    await expect(store.unarchive(['ses_1'], 20)).resolves.toMatchObject({ restored: [{ id: 'ses_1', archivedAt: null }] });
+    expect(store.isRestored('ses_1')).toBe(true);
+    await store.archive(['ses_1'], 30);
+    expect(store.isRestored('ses_1')).toBe(false);
+    await expect(store.unarchive(['migrated'], 10)).resolves.toMatchObject({ restored: [{ id: 'migrated', archivedAt: null }] });
+    await expect(store.unarchive(['ses_1'], 10)).resolves.toEqual({ restored: [], failedIds: ['ses_1'] });
+  });
   it('starts empty when the file does not exist', async () => {
     const store = createArchiveStore({ dataDir: makeDataDir() });
     await expect(store.getAll()).resolves.toEqual({});

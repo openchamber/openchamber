@@ -1717,6 +1717,7 @@ const scheduledTaskService = createScheduledTaskService({
   chatsScope: scheduledChatsScope,
 });
 const openChamberSessionService = createOpenChamberSessionService({
+  resumeSessionWork: (input) => sessionWorkRuntime.resumeSession(input),
   readSettingsFromDiskMigrated,
   sanitizeProjects,
   validateDirectoryPath,
