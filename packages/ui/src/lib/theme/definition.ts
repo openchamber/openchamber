@@ -27,6 +27,14 @@ const syntax = z.object({
   tokens: z.record(z.string(), color).optional(),
   highlights: z.record(z.string(), color).optional(),
 });
+const userMessageChrome = z.object({
+  paddingX: cssValue.optional(),
+  paddingY: cssValue.optional(),
+  radius: cssValue.optional(),
+  tailRadius: cssValue.optional(),
+  borderWidth: cssValue.optional(),
+  borderColor: color.optional(),
+});
 const definition = z.object({
   metadata: z.object({ id: text, name: text, variant: z.enum(['light', 'dark']), description: z.string().default(''), version: z.string().default('1.0.0'), author: z.string().optional(), tags: z.array(z.string()).default([]) }),
   colors: z.object({
@@ -36,7 +44,7 @@ const definition = z.object({
     markdown: optionalColors(['link', 'linkHover', 'inlineCode', 'inlineCodeBackground', 'blockquote', 'blockquoteBorder', 'listMarker', 'bold', 'italic', 'strikethrough', 'hr']).optional(),
     tools: z.object({ border: color.optional(), icon: color.optional(), title: color.optional(), description: color.optional(), edit: optionalColors(['addedBackground', 'removedBackground', 'modifiedBackground', 'lineNumber']).optional() }).optional(),
   }),
-  config: z.object({ fonts: z.object({ sans: cssValue.optional(), mono: cssValue.optional(), heading: cssValue.optional() }).optional(), transitions: z.object({ fast: cssValue.optional(), normal: cssValue.optional(), slow: cssValue.optional() }).optional() }).optional(),
+  config: z.object({ fonts: z.object({ sans: cssValue.optional(), mono: cssValue.optional(), heading: cssValue.optional() }).optional(), transitions: z.object({ fast: cssValue.optional(), normal: cssValue.optional(), slow: cssValue.optional() }).optional(), chat: z.object({ userMessage: userMessageChrome.optional() }).optional() }).optional(),
 });
 
 export type ThemeDefinition = z.input<typeof definition>;

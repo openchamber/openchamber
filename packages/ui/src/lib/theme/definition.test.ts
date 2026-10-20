@@ -297,6 +297,21 @@ describe('theme values written into CSS', () => {
     expect(withFont('Inter; } * { background: url(https://example.test/x)')).toBe(false);
   });
 
+  test('accepts user message geometry and refuses values that leave the declaration', () => {
+    type ChatChrome = { userMessage: Record<string, string> };
+    const withChrome = (chat: ChatChrome) => themeSchema.safeParse({ ...minimal, config: { chat } }).success;
+    expect(withChrome({ userMessage: { paddingX: '12px', paddingY: '0.75rem', radius: '18px', tailRadius: '4px', borderWidth: '0', borderColor: 'transparent' } })).toBe(true);
+    expect(withChrome({ userMessage: { radius: '18px; } * { display: none' } })).toBe(false);
+  });
+
+  test('writes user message geometry as theme variables', () => {
+    const theme = requireTheme({ ...minimal, config: { chat: { userMessage: { paddingX: '12px', borderWidth: '0', borderColor: 'transparent' } } } });
+    const css = new CSSVariableGenerator().generate(theme);
+    expect(css.includes('--chat-user-message-padding-x: 12px;')).toBe(true);
+    expect(css.includes('--chat-user-message-border-width: 0;')).toBe(true);
+    expect(css.includes('--chat-user-message-border-color: transparent;')).toBe(true);
+  });
+
   test('every built-in theme still parses', () => {
     for (const theme of themes) {
       expect(themeSchema.safeParse(compactTheme(theme)).success).toBe(true);

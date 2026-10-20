@@ -468,6 +468,15 @@
   /* The chat's page colour, kept under its own name because the panel rules
      below redefine --surface-background and cannot mix from themselves. */
   --oc-chat-background: var(--surface-background);
+
+  /* User message bubble geometry. A theme's config.chat.userMessage overrides
+     these; the values here reproduce the default bubble. */
+  --chat-user-message-padding-x: 1.25rem;
+  --chat-user-message-padding-y: 0.75rem;
+  --chat-user-message-radius: var(--radius-xl);
+  --chat-user-message-tail-radius: var(--radius-sm);
+  --chat-user-message-border-width: 1px;
+  --chat-user-message-border-color: color-mix(in oklab, var(--primary) 5%, transparent);
 }
 
 .oc-panel-edge:not([data-edge-floating]) {

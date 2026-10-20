@@ -358,6 +358,16 @@ const sidebarBaseRgb = hexToRgb(theme.colors.surface.muted);
       if (config.transitions.slow) vars.push(`  --transition-slow: ${config.transitions.slow};`);
     }
 
+    if (config.chat?.userMessage) {
+      const chrome = config.chat.userMessage;
+      if (chrome.paddingX) vars.push(`  --chat-user-message-padding-x: ${chrome.paddingX};`);
+      if (chrome.paddingY) vars.push(`  --chat-user-message-padding-y: ${chrome.paddingY};`);
+      if (chrome.radius) vars.push(`  --chat-user-message-radius: ${chrome.radius};`);
+      if (chrome.tailRadius) vars.push(`  --chat-user-message-tail-radius: ${chrome.tailRadius};`);
+      if (chrome.borderWidth) vars.push(`  --chat-user-message-border-width: ${chrome.borderWidth};`);
+      if (chrome.borderColor) vars.push(`  --chat-user-message-border-color: ${chrome.borderColor};`);
+    }
+
     return vars;
   }
 

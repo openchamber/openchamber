@@ -128,5 +128,15 @@ export interface Theme {
       normal?: string;
       slow?: string;
     };
+    chat?: {
+      userMessage?: {
+        paddingX?: string;
+        paddingY?: string;
+        radius?: string;
+        tailRadius?: string;
+        borderWidth?: string;
+        borderColor?: string;
+      };
+    };
   };
 }

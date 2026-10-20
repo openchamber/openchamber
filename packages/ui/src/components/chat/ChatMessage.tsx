@@ -597,8 +597,6 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
         return null;
     }
 
-    const userMessageRadius = 'var(--radius-xl)';
-
     return (
         <>
             <div
@@ -629,10 +627,14 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                         <div
                                             style={{
                                                 backgroundColor: 'var(--chat-user-message-bg)',
-                                                borderRadius: userMessageRadius,
-                                                borderBottomRightRadius: 'var(--radius-sm)',
+                                                borderRadius: 'var(--chat-user-message-radius)',
+                                                borderBottomRightRadius: 'var(--chat-user-message-tail-radius)',
+                                                borderWidth: 'var(--chat-user-message-border-width)',
+                                                borderColor: 'var(--chat-user-message-border-color)',
+                                                paddingInline: 'var(--chat-user-message-padding-x)',
+                                                paddingBlock: 'var(--chat-user-message-padding-y)',
                                             }}
-                                            className="px-5 py-3 shadow-none border border-primary/5"
+                                            className="border shadow-none"
                                             data-user-message-bubble=""
                                         >
                                             <MessageBody
