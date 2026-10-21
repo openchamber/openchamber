@@ -255,6 +255,12 @@ Hard rules, verified against v2.0.8 (the completion stamp against v2.0.16)
 - Owns lazy auth library loading for provider auth checks/removal.
 - Keeps route behavior independent from composition root; `index.js` now supplies dependencies only.
 
+### Server-owned read deadlines
+
+Version and upgrade-status reads of `/api/info` use the health probe's 3-second
+timeout. An aborted read returns the route's existing error response. These
+routes register before the generic proxy and need their own deadline.
+
 ## CLI upgrades
 
 `cli-upgrade.js` runs the host-resolved executable and wrapper arguments with
