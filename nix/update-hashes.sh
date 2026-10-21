@@ -96,17 +96,16 @@ rehash() {
 
 FAKE_SENTINEL="sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 
-# ─── 1. bun dependencies (openchamber bun.lock) ───────────────
-
 bun_file="nix/hashes.json"
-bun_current=$(grep -oP '"bunDeps": "\Ksha256-[A-Za-z0-9+/=]+(?=")' "$bun_file" | head -1)
-log "bun-deps: current hash $bun_current"
-# Build the FOD itself (via its passthru), not the packages that consume it:
-# the hash check happens in the derivation, so the sdk/web builds and the
-# server assembly add nothing to the bake.
-rehash "$bun_file" "$bun_current" ".#openchamber.bunDeps" "bun-deps" "openchamber-bun-deps"
 
-# ─── 2. opencode CLI node_modules (upstream flake at the pin) ──
+# ─── 1. opencode CLI node_modules (upstream flake at the pin) ──
+#
+# This side runs first. It moves the opencode tag (re-locking the flake)
+# before any other bake build runs, so every bake build evaluates a synced
+# pin pair. The bun-deps FOD does not force the opencode-cli binding today
+# (it is a separate fixed-output derivation; Nix never instantiates the
+# parent for it), and this ordering keeps the bake true even if that
+# relationship ever changes.
 
 # The version source of truth is packages/electron's opencodeCli pin:
 # this script follows it, it does not bump it. Bumping the pin (together
@@ -134,5 +133,14 @@ fi
 cli_hash=$(opencode_hash "$bun_file")
 log "opencode-cli: current hash $cli_hash"
 rehash "$bun_file" "$cli_hash" ".#opencode-cli.node_modules" "opencode-cli" "opencode-node_modules"
+
+# ─── 2. bun dependencies (openchamber bun.lock) ───────────────
+
+bun_current=$(grep -oP '"bunDeps": "\Ksha256-[A-Za-z0-9+/=]+(?=")' "$bun_file" | head -1)
+log "bun-deps: current hash $bun_current"
+# Build the FOD itself (via its passthru), not the packages that consume it:
+# the hash check happens in the derivation, so the sdk/web builds and the
+# server assembly add nothing to the bake.
+rehash "$bun_file" "$bun_current" ".#openchamber.bunDeps" "bun-deps" "openchamber-bun-deps"
 
 log "done — commit nix/hashes.json (and flake.lock when the tag moved)"
