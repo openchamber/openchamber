@@ -2,7 +2,7 @@
  * Collecting the sessions an export covers.
  *
  * The export starts from one session and needs every session below it: the
- * subagents the orchestrator started, and their own subagents. The parent
+ * subagents the root agent started, and their own subagents. The parent
  * session's records name the children they started; the session list names
  * the rest of the lineage. Both are needed, because a subagent that is still
  * running may be named by a call that has not settled yet.

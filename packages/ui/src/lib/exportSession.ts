@@ -97,7 +97,7 @@ export const renderExportDocument = (
   mode: ProjectionMode,
   sessionTitle?: string | null,
 ): string => {
-  const { projection, timeline } = result;
+  const { projection, timeline, rootAgent } = result;
   const title = sessionTitle?.trim() || 'Session';
   const sessionCount = timeline.sessions.size;
 
@@ -105,9 +105,9 @@ export const renderExportDocument = (
     return renderExportJson(timeline);
   }
   if (format === 'html') {
-    return renderExportHtml(projection, { title, mode, findings: timeline.findings, sessionCount });
+    return renderExportHtml(projection, { title, mode, findings: timeline.findings, sessionCount, rootAgent });
   }
-  return renderExportMarkdown(projection, { title, mode, findings: timeline.findings, sessionCount });
+  return renderExportMarkdown(projection, { title, mode, findings: timeline.findings, sessionCount, rootAgent });
 };
 
 /**

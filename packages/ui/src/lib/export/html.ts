@@ -12,11 +12,12 @@
  * the entries are plain elements, and the filters only hide them.
  */
 
-import { getCurrentIntlLocale, type I18nKey } from '@/lib/i18n';
+import { getCurrentIntlLocale } from '@/lib/i18n';
 import { readTimestamp } from './values';
 import type { ExportFinding } from './events';
-import { orderingGuarantee } from './order';
+import { orderingGuarantee, type ConcurrentWork } from './order';
 import { exportText, findingText } from './i18n';
+import { agentLabel, concurrentLabel, readablePrompt, roleLabel, statusLabel } from './labels';
 import type { ProjectedEntry, ProjectedNode, ProjectedSubagent, ProjectedTool, ProjectionMode } from './project';
 
 /** Escapes text for an HTML text node or attribute. */
@@ -62,46 +63,6 @@ const formatDuration = (startedAt?: number, endedAt?: number): string => {
   return rest > 0 ? `${minutes}m ${rest}s` : `${minutes}m`;
 };
 
-/**
- * The label a role's messages carry in the export.
- *
- * The label is resolved when the document is written, not when the module is
- * loaded, so the document speaks the reader's current language.
- */
-const ROLE_LABEL_KEYS = new Map<string, I18nKey>([
-  ['user', 'export.role.user'],
-  ['assistant', 'export.role.assistant'],
-  ['context', 'export.role.context'],
-  ['system', 'export.role.system'],
-  ['skill', 'export.role.skill'],
-  ['shell', 'export.role.shell'],
-  ['compaction', 'export.role.compaction'],
-  ['agent-switched', 'export.role.agentSwitched'],
-  ['model-switched', 'export.role.modelSwitched'],
-  ['location-switched', 'export.role.locationSwitched'],
-  ['idle', 'export.role.idle'],
-]);
-
-/** The label of a role, when the export knows one. */
-const roleLabel = (role: string): string => {
-  const key = ROLE_LABEL_KEYS.get(role);
-  return key ? exportText(key) : role;
-};
-
-/** The label of a status, when the export knows one. */
-const statusLabel = (status: string): string => {
-  const key = STATUS_LABEL_KEYS.get(status);
-  return key ? exportText(key) : status;
-};
-
-/** The label a tool call's status carries in the export. */
-const STATUS_LABEL_KEYS = new Map<string, I18nKey>([
-  ['pending', 'export.toolStatus.pending'],
-  ['running', 'export.toolStatus.running'],
-  ['completed', 'export.toolStatus.completed'],
-  ['error', 'export.toolStatus.error'],
-]);
-
 /** One entry as the page's script needs it. */
 type EntryData = {
   id: string;
@@ -123,7 +84,7 @@ type SubagentData = {
   depth: number;
   startedAt?: number;
   endedAt?: number;
-  concurrentWith?: string[];
+  concurrentWith?: ConcurrentWork[];
 };
 
 /** The data the page's script filters and searches over. */
@@ -190,6 +151,20 @@ const searchTextOf = (entry: ProjectedEntry, mode: ProjectionMode): string => {
 };
 
 /**
+ * The agent an entry belongs to.
+ *
+ * The filter's value and the document's label come from the same name, so a
+ * reader who filters by an agent finds the entries the document shows under
+ * that name.
+ */
+type EntryOwner = {
+  /** The agent's name, when the session that owns the entry recorded one. */
+  name?: string;
+  /** Whether the entry sits inside a sub-agent's block. */
+  nested: boolean;
+};
+
+/**
  * Builds the data the page's script works with.
  *
  * The agent list is read off the entries themselves, not off the sessions:
@@ -197,15 +172,18 @@ const searchTextOf = (entry: ProjectedEntry, mode: ProjectionMode): string => {
  * list has to hold exactly the values the page carries. An entry inside a
  * sub-agent's block belongs to that sub-agent, and the page says so, so the
  * list names the sub-agent and not the agent the message happened to record.
+ * The root session's own entries belong to the root's agent, and the page
+ * names that agent in them, so the filter offers the same name the document
+ * shows.
  */
-const buildData = (nodes: ProjectedNode[], mode: ProjectionMode): HtmlExportData => {
+const buildData = (nodes: ProjectedNode[], mode: ProjectionMode, rootAgent?: string): HtmlExportData => {
   const entries: EntryData[] = [];
   const subagents: SubagentData[] = [];
   const tools = new Set<string>();
   const statuses = new Set<string>();
   const roles = new Set<string>();
 
-  const visit = (node: ProjectedNode, owningAgent?: string): void => {
+  const visit = (node: ProjectedNode, owner: EntryOwner): void => {
     if (node.kind === 'subagent') {
       if (node.task) {
         entries.push({
@@ -245,13 +223,13 @@ const buildData = (nodes: ProjectedNode[], mode: ProjectionMode): HtmlExportData
       });
       // The block's own sequence holds the nested blocks too, so the
       // entries are read from it and not from the child list as well.
-      for (const entry of node.entries) visit(entry, node.agent);
+      for (const entry of node.entries) visit(entry, { name: node.agent, nested: true });
       return;
     }
-    visitEntry(node, owningAgent);
+    visitEntry(node, owner);
   };
 
-  const visitEntry = (entry: ProjectedEntry, owningAgent?: string): void => {
+  const visitEntry = (entry: ProjectedEntry, owner: EntryOwner): void => {
     const id = entry.event.id;
     switch (entry.kind) {
       case 'message': {
@@ -260,7 +238,7 @@ const buildData = (nodes: ProjectedNode[], mode: ProjectionMode): HtmlExportData
           id,
           kind: 'message',
           role: entry.role,
-          agent: owningAgent ?? entry.agent,
+          agent: owner.name ?? entry.agent,
           model: entry.model,
           search: searchTextOf(entry, mode).toLowerCase(),
           depth: entry.depth,
@@ -278,7 +256,7 @@ const buildData = (nodes: ProjectedNode[], mode: ProjectionMode): HtmlExportData
           status: entry.tool.status,
           // The owner is the session the call ran in, not the agent the call
           // asked for: a sub-agent's own tool calls belong to the sub-agent.
-          agent: owningAgent ?? entry.tool.agent,
+          agent: owner.name ?? entry.tool.agent,
           search: searchTextOf(entry, mode).toLowerCase(),
           depth: entry.depth,
           timestamp: entry.timestamp,
@@ -320,7 +298,10 @@ const buildData = (nodes: ProjectedNode[], mode: ProjectionMode): HtmlExportData
     }
   };
 
-  for (const node of nodes) visit(node);
+  // The root session's own entries belong to the root agent, and the page
+  // names that agent in them, so the filter offers the same name the
+  // document shows.
+  for (const node of nodes) visit(node, { name: rootAgent, nested: false });
 
   // The agents the page's own attributes name. An entry without an agent
   // carries an empty attribute, which no filter offers.
@@ -341,22 +322,36 @@ const buildData = (nodes: ProjectedNode[], mode: ProjectionMode): HtmlExportData
 };
 
 /**
+ * The label an entry's header carries.
+ *
+ * A sub-agent's own message carries the sub-agent's name, the way the root's
+ * messages carry the root agent's. A message the user wrote inside a
+ * sub-agent's session, or a record the runtime added, keeps the role it was
+ * recorded with: it was not the agent speaking.
+ */
+const ownerLabel = (owner: EntryOwner): string => (
+  owner.nested
+    ? `↳ ${owner.name ?? exportText('export.dialog.subagentLabel')}`
+    : agentLabel(owner.name)
+);
+
+/**
  * Renders one entry as HTML.
  *
- * `agentLabel` names the agent whose message this is: inside a sub-agent's
- * block that is the sub-agent, not the orchestrator.
+ * `owner` names the agent whose message this is: inside a sub-agent's block
+ * that is the sub-agent, not the root agent.
  */
-const renderEntryHtml = (entry: ProjectedEntry, mode: ProjectionMode, agentLabel?: string, agentKey?: string): string => {
+const renderEntryHtml = (
+  entry: ProjectedEntry,
+  mode: ProjectionMode,
+  owner: EntryOwner,
+): string => {
   switch (entry.kind) {
     case 'message': {
-      // Inside a sub-agent's block the entry belongs to that sub-agent, so
-      // the filter names the sub-agent and not the agent the message
-      // happened to record. A message the subagent's user wrote keeps the
-      // role it was recorded with.
-      const label = agentLabel && entry.role === 'assistant'
-        ? agentLabel
+      const label = entry.role === 'assistant'
+        ? ownerLabel(owner)
         : roleLabel(entry.role);
-      const agent = agentKey ?? entry.agent ?? '';
+      const agent = owner.name ?? entry.agent ?? '';
       const time = formatTime(entry.timestamp);
       const model = entry.model;
       const meta = [time, model]
@@ -388,7 +383,8 @@ const renderEntryHtml = (entry: ProjectedEntry, mode: ProjectionMode, agentLabel
       const description = entry.tool.description ?? entry.tool.target ?? entry.tool.command ?? '';
       const details: string[] = [];
       if (entry.tool.prompt) {
-        details.push(`<details><summary>${escapeHtml(exportText('export.section.task'))}</summary><pre>${escapeHtml(entry.tool.prompt)}</pre></details>`);
+        const prompt = mode === 'readable' ? readablePrompt(entry.tool.prompt) : entry.tool.prompt;
+        details.push(`<details><summary>${escapeHtml(exportText('export.section.task'))}</summary><pre>${escapeHtml(prompt)}</pre></details>`);
       }
       if (entry.tool.error) {
         details.push(`<details><summary>${escapeHtml(exportText('export.section.error'))}</summary><pre>${escapeHtml(entry.tool.error)}</pre></details>`);
@@ -410,7 +406,7 @@ const renderEntryHtml = (entry: ProjectedEntry, mode: ProjectionMode, agentLabel
           details.push(`<details><summary>${escapeHtml(exportText('export.section.metadata'))}</summary><pre>${escapeHtml(JSON.stringify(metadata, null, 2))}</pre></details>`);
         }
       }
-      return `<article class="entry tool" data-id="${escapeHtml(entry.event.id)}" data-kind="tool" data-tool="${escapeHtml(entry.tool.name)}" data-status="${escapeHtml(entry.tool.status)}" data-agent="${escapeHtml(agentKey ?? entry.tool.agent ?? '')}">
+      return `<article class="entry tool" data-id="${escapeHtml(entry.event.id)}" data-kind="tool" data-tool="${escapeHtml(entry.tool.name)}" data-status="${escapeHtml(entry.tool.status)}" data-agent="${escapeHtml(owner.name ?? entry.tool.agent ?? '')}">
   <header><span class="tool-name">${escapeHtml(entry.tool.name)}</span>${meta ? `<span class="meta">${meta}</span>` : ''}</header>
   ${description ? `<div class="desc">${escapeHtml(description)}</div>` : ''}
   ${details.join('\n  ')}
@@ -441,8 +437,8 @@ const renderEntryHtml = (entry: ProjectedEntry, mode: ProjectionMode, agentLabel
 
 /** Renders a subagent's block as HTML. */
 const renderSubagentHtml = (subagent: ProjectedSubagent, mode: ProjectionMode, depth: number): string => {
-  const agentLabel = subagent.agent ? `↳ ${subagent.agent}` : `↳ ${exportText('export.dialog.subagentLabel')}`;
-  const label = agentLabel;
+  const blockLabel = subagent.agent ? `↳ ${subagent.agent}` : `↳ ${exportText('export.dialog.subagentLabel')}`;
+  const label = blockLabel;
   const time = formatTime(subagent.startedAt);
   const duration = formatDuration(subagent.startedAt, subagent.endedAt);
   const meta = [time, duration].filter(Boolean).map((value) => `<span>${escapeHtml(value)}</span>`).join('');
@@ -450,7 +446,7 @@ const renderSubagentHtml = (subagent: ProjectedSubagent, mode: ProjectionMode, d
     ? `<span class="subagent-title">${escapeHtml(subagent.title)}</span>`
     : '';
   const concurrent = subagent.concurrentWith && subagent.concurrentWith.length > 0
-    ? `<p class="note">${escapeHtml(exportText('export.concurrent', { names: subagent.concurrentWith.join(', ') }))}</p>`
+    ? `<p class="note">${escapeHtml(exportText('export.concurrent', { names: subagent.concurrentWith.map(concurrentLabel).join(', ') }))}</p>`
     : '';
 
   // The call that started the sub-agent is not a row of its own: its content
@@ -488,7 +484,7 @@ const renderSubagentHtml = (subagent: ProjectedSubagent, mode: ProjectionMode, d
   const task = subagent.task
     ? `<article class="entry task" data-id="${escapeHtml(`${subagent.childSessionID}:task`)}" data-kind="task" data-agent="${escapeHtml(subagent.agent ?? '')}">
   <header><span class="role">${escapeHtml(exportText('export.section.task'))}</span></header>
-  <pre>${escapeHtml(subagent.task)}</pre>
+  <pre>${escapeHtml(mode === 'readable' ? readablePrompt(subagent.task) : subagent.task)}</pre>
 </article>`
     : '';
 
@@ -498,7 +494,7 @@ const renderSubagentHtml = (subagent: ProjectedSubagent, mode: ProjectionMode, d
   const own = subagent.entries
     .map((entry) => (entry.kind === 'subagent'
       ? renderSubagentHtml(entry, mode, depth + 1)
-      : renderEntryHtml(entry, mode, agentLabel, subagent.agent)))
+      : renderEntryHtml(entry, mode, { name: subagent.agent, nested: true })))
     .filter(Boolean)
     .join('\n');
 
@@ -702,6 +698,13 @@ type HtmlRenderOptions = {
   mode: ProjectionMode;
   findings: ExportFinding[];
   sessionCount: number;
+  /**
+   * The agent the exported session ran.
+   *
+   * The document names the agent in its own messages instead of a role of
+   * its own, because the agent has a name and the reader knows it.
+   */
+  rootAgent?: string;
 };
 
 /**
@@ -711,11 +714,11 @@ export const renderExportHtml = (
   nodes: ProjectedNode[],
   options: HtmlRenderOptions,
 ): string => {
-  const data = buildData(nodes, options.mode);
+  const data = buildData(nodes, options.mode, options.rootAgent);
   const body = nodes
     .map((node) => (node.kind === 'subagent'
       ? renderSubagentHtml(node, options.mode, node.depth)
-      : renderEntryHtml(node, options.mode)))
+      : renderEntryHtml(node, options.mode, { name: options.rootAgent, nested: false })))
     .filter((html) => html.trim().length > 0)
     .join('\n');
 

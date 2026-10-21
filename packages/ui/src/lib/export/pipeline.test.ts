@@ -255,7 +255,7 @@ describe('export pipeline', () => {
     const output = markdown(input);
 
     expect(output.match(/The one transcript/g)).toHaveLength(1);
-    expect(output).toContain('Export integrity');
+    expect(output).toContain('Incomplete export');
     expect(output).toContain('More than one call names the sub-agent session');
   });
 
@@ -293,7 +293,7 @@ describe('export pipeline', () => {
     const output = markdown(input);
 
     expect(output).toContain('could not be loaded');
-    expect(output).toContain('Export integrity');
+    expect(output).toContain('Incomplete export');
   });
 
   test('events without a timestamp keep the order the source recorded', () => {
@@ -751,7 +751,7 @@ describe('export pipeline', () => {
       sessionCount: result.timeline.sessions.size,
     });
     expect(document).toContain('could not be loaded');
-    expect(document).toContain('Export integrity');
+    expect(document).toContain('Incomplete export');
     // The sub-agent is named, so the reader knows what is missing.
     expect(document).toContain('Child');
   });

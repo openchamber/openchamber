@@ -15,8 +15,8 @@ import { normalizeToolName } from '@/lib/opencode/tools';
 import type { JsonValue } from '@/lib/opencode/model';
 import { readTextField } from './values';
 import { findingText } from './i18n';
-import type { ExportEvent, ExportShellResult, ExportToolCall } from './events';
-import type { ExportNode, ExportTree } from './order';
+import type { ExportEvent, ExportShellResult, ExportToolCall, ExportTimeline } from './events';
+import type { ConcurrentWork, ExportNode, ExportTree } from './order';
 
 /** How a tool call appears in the readable view. */
 export type ProjectedTool = {
@@ -133,7 +133,7 @@ export type ProjectedSubagent = {
     call?: ProjectedTool;
   };
   resumedBy?: Array<{ sessionID: string; timestamp?: number }>;
-  concurrentWith?: string[];
+  concurrentWith?: ConcurrentWork[];
   /**
    * The agent the call named, when the call recorded one.
    *
@@ -404,4 +404,26 @@ export const projectExport = (tree: ExportTree, mode: ProjectionMode): Projected
   return tree.nodes
     .map((node) => projectNode(node, mode))
     .filter((node): node is ProjectedNode => node !== null);
+};
+
+/**
+ * The agent the exported session ran, when the history names one.
+ *
+ * The session's own agent is the name the document uses. A session that
+ * recorded none still has messages that recorded the agent that answered
+ * them, and that name is used rather than a neutral word: the document says
+ * who spoke, and the history says who did.
+ */
+export const readRootAgent = (timeline: ExportTimeline): string | undefined => {
+  const session = timeline.sessions.get(timeline.rootSessionID);
+  const fromSession = session?.agent?.trim();
+  if (fromSession) return fromSession;
+
+  for (const event of timeline.events) {
+    if (event.sessionID !== timeline.rootSessionID) continue;
+    if (event.kind !== 'message' || event.role !== 'assistant') continue;
+    const fromMessage = event.agent?.trim();
+    if (fromMessage) return fromMessage;
+  }
+  return undefined;
 };

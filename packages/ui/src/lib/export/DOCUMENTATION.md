@@ -21,7 +21,9 @@ envelope. This module uses them; it does not reimplement them.
 
 The document's own text lives in `../i18n/messages/export-document.i18n.ts`
 and is read through `i18n.ts`, so the exported file speaks the reader's
-language like the app around it.
+language like the app around it. `labels.ts` holds the names the document
+gives things — the agent, the role, the overlapping work, the cut of a long
+prompt — so the Markdown and the HTML cannot name them differently.
 
 ## Invariants
 
@@ -46,9 +48,18 @@ language like the app around it.
   the place of the call that started it, in the parent's own sequence. A
   parent that delegated work and then answered keeps the answer after the
   work it depends on.
+- **The document names the agent, not a role.** The root's own messages carry
+  the agent that wrote them, and a sub-agent's block carries the sub-agent's
+  name. The agent has a name in the history, and a role of the export's own
+  would be a claim the history does not support. A session that recorded no
+  agent gets a neutral label, never an invented one.
+- **One name for one agent.** The label in the document and the value in the
+  HTML filter come from the same name, so a reader who filters by an agent
+  finds the entries the document shows under that name.
 - **Compact never means lost.** The readable view cuts a long tool result
   down and marks the cut. The JSON export carries every source record, so
-  nothing is gone.
+  nothing is gone. The cut is the same in every format: a long prompt reads
+  the same in the Markdown and in the HTML.
 - **A partial export says so.** Everything the export could not establish —
   a child that would not load, a call that named no child, a session that was
   resumed, a part the model does not cover — lands in `findings`, and the
@@ -141,6 +152,26 @@ Two sub-agents that ran at the same time are shown at the same time. The
 block says which other work overlapped it, and the two blocks keep their own
 times. The rejected alternative was picking one order and hiding the overlap,
 which would tell the reader a sequence the runtime never recorded.
+
+The caption names the other work by its agent and by its session title. The
+title alone does not tell two sub-agents apart: the runtime names a child
+after the call that started it, so two children of one call carry the same
+title. The rejected alternative was the title on its own, which left the
+reader with a name that pointed at two different things.
+
+### Why the document names the agent instead of a role
+
+The root's own messages carry the name of the agent that wrote them, and the
+name comes from the history: the session records the agent it ran, and the
+messages record the agent that answered them. The rejected alternative was a
+role of the export's own — the export used to call every root message
+"Orchestrator" — which named a thing the product does not have. A reader who
+knows the session knows the agent, and a word the export made up is a claim
+the history cannot back.
+
+A session that recorded no agent gets a neutral label. The rejected
+alternative was inventing a name for it, which would put a claim in the
+document where the history has none.
 
 ### Why the JSON export keeps the source records next to the derived events
 

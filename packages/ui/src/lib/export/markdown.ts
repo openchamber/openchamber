@@ -8,17 +8,18 @@
  * The output is ordinary Markdown: no HTML, no script, no viewer. It reads
  * the same in GitHub, in Obsidian, in VS Code and in a plain text editor.
  *
- * The shape follows the conversation itself. The orchestrator's messages are
+ * The shape follows the conversation itself. The root agent's messages are
  * headings, so the reader can skim the thread; a subagent's messages are
  * bold lines, so they read as part of the message they belong to rather than
  * as a new section.
  */
 
-import { getCurrentIntlLocale, type I18nKey } from '@/lib/i18n';
+import { getCurrentIntlLocale } from '@/lib/i18n';
 import { readTimestamp } from './values';
 import type { ExportFinding } from './events';
 import { orderingGuarantee } from './order';
 import { exportText, findingText } from './i18n';
+import { agentLabel, concurrentLabel, readablePrompt, roleLabel, statusLabel } from './labels';
 import type { ProjectedEntry, ProjectedNode, ProjectedSubagent, ProjectionMode } from './project';
 
 /** The clock time of a timestamp, in the reader's locale. */
@@ -56,46 +57,6 @@ const formatDuration = (startedAt?: number, endedAt?: number): string => {
 };
 
 /**
- * The label a role's messages carry in the export.
- *
- * The label is resolved when the document is written, not when the module is
- * loaded, so the document speaks the reader's current language.
- */
-const ROLE_LABEL_KEYS = new Map<string, I18nKey>([
-  ['user', 'export.role.user'],
-  ['assistant', 'export.role.assistant'],
-  ['context', 'export.role.context'],
-  ['system', 'export.role.system'],
-  ['skill', 'export.role.skill'],
-  ['shell', 'export.role.shell'],
-  ['compaction', 'export.role.compaction'],
-  ['agent-switched', 'export.role.agentSwitched'],
-  ['model-switched', 'export.role.modelSwitched'],
-  ['location-switched', 'export.role.locationSwitched'],
-  ['idle', 'export.role.idle'],
-]);
-
-/** The label of a role, when the export knows one. */
-const roleLabel = (role: string): string => {
-  const key = ROLE_LABEL_KEYS.get(role);
-  return key ? exportText(key) : role;
-};
-
-/** The label of a status, when the export knows one. */
-const statusLabel = (status: string): string => {
-  const key = STATUS_LABEL_KEYS.get(status);
-  return key ? exportText(key) : status;
-};
-
-/** The label a tool call's status carries in the export. */
-const STATUS_LABEL_KEYS = new Map<string, I18nKey>([
-  ['pending', 'export.toolStatus.pending'],
-  ['running', 'export.toolStatus.running'],
-  ['completed', 'export.toolStatus.completed'],
-  ['error', 'export.toolStatus.error'],
-]);
-
-/**
  * A block of text as a Markdown blockquote, so an excerpt reads as a quote of
  * the source rather than as part of the conversation.
  */
@@ -104,9 +65,19 @@ const asQuote = (text: string): string => text.split('\n').map((line) => `> ${li
 /** The time of an event, or an empty string when the source had none. */
 const timeLabel = (timestamp: number | undefined): string => formatTime(timestamp);
 
-/** The heading an orchestrator-level message gets. */
-const messageHeading = (entry: ProjectedEntry & { kind: 'message' }, model?: string): string => {
-  const label = roleLabel(entry.role);
+/**
+ * The heading the root agent's message gets.
+ *
+ * The agent has a name, and the document uses it: a reader who knows the
+ * session knows the agent, and a made-up role would be a claim the history
+ * does not support. A session that recorded no agent gets a neutral label.
+ */
+const messageHeading = (
+  entry: ProjectedEntry & { kind: 'message' },
+  model?: string,
+  rootAgent?: string,
+): string => {
+  const label = entry.role === 'assistant' ? agentLabel(rootAgent) : roleLabel(entry.role);
   const time = timeLabel(entry.timestamp);
   const head = time ? `${time} · ${label}` : label;
   return model ? `### ${head} — ${model}` : `### ${head}`;
@@ -116,7 +87,7 @@ const messageHeading = (entry: ProjectedEntry & { kind: 'message' }, model?: str
  * The line a subagent's own message gets.
  *
  * A message the subagent itself wrote carries the subagent's own name, the
- * way the orchestrator's messages carry the orchestrator's. A message the
+ * way the root agent's messages carry the root agent's. A message the
  * user wrote inside the subagent's session, or a record the runtime added,
  * keeps the role it was recorded with: it was not the subagent speaking.
  */
@@ -175,15 +146,27 @@ type MarkdownRenderOptions = {
   findings: ExportFinding[];
   /** The sessions the export covered, for the header line. */
   sessionCount: number;
+  /**
+   * The agent the exported session ran.
+   *
+   * The document names the agent in its own messages instead of a role of
+   * its own, because the agent has a name and the reader knows it.
+   */
+  rootAgent?: string;
 };
 
 /**
- * Renders one projected entry at the orchestrator level.
+ * Renders one projected entry at the root level.
  */
-const renderEntry = (entry: ProjectedEntry, mode: ProjectionMode, model?: string): string => {
+const renderEntry = (
+  entry: ProjectedEntry,
+  mode: ProjectionMode,
+  model?: string,
+  rootAgent?: string,
+): string => {
   switch (entry.kind) {
     case 'message': {
-      const heading = messageHeading(entry, model);
+      const heading = messageHeading(entry, model, rootAgent);
       const body = entry.text.trim();
       const attachments = attachmentList(entry);
       if (!body && !attachments) return '';
@@ -223,10 +206,7 @@ const renderEntry = (entry: ProjectedEntry, mode: ProjectionMode, model?: string
         }
       } else {
         if (entry.tool.prompt) {
-          const excerpt = entry.tool.prompt.length > 400
-            ? `${entry.tool.prompt.slice(0, 400)}\n\n… [${exportText('export.excerpt')}]`
-            : entry.tool.prompt;
-          details.push(`**${exportText('export.section.task')}**\n\n${asQuote(excerpt)}`);
+          details.push(`**${exportText('export.section.task')}**\n\n${asQuote(readablePrompt(entry.tool.prompt))}`);
         }
         if (entry.tool.error) details.push(`**${exportText('export.section.error')}**\n\n${asQuote(entry.tool.error)}`);
         if (entry.tool.output) {
@@ -291,7 +271,8 @@ const renderSubagent = (subagent: ProjectedSubagent, mode: ProjectionMode): stri
   const parts: string[] = [subagentHeading(subagent)];
 
   if (subagent.concurrentWith && subagent.concurrentWith.length > 0) {
-    parts.push(`*${exportText('export.concurrent', { names: subagent.concurrentWith.join(', ') })}*`);
+    const names = subagent.concurrentWith.map(concurrentLabel).join(', ');
+    parts.push(`*${exportText('export.concurrent', { names })}*`);
   }
 
   // The task's own record carries what the first prompt carried besides its
@@ -300,9 +281,7 @@ const renderSubagent = (subagent: ProjectedSubagent, mode: ProjectionMode): stri
   const taskAttachments = subagent.taskEntry ? attachmentList(subagent.taskEntry) : '';
   if (subagent.task || taskAttachments) {
     const task = subagent.task
-      ? (mode === 'readable' && subagent.task.length > 600
-        ? `${subagent.task.slice(0, 600)}\n\n… [${exportText('export.excerpt')}]`
-        : subagent.task)
+      ? (mode === 'readable' ? readablePrompt(subagent.task) : subagent.task)
       : '';
     parts.push(`**${exportText('export.section.task')}**\n\n${asQuote(task)}`.trimEnd());
   }
@@ -413,11 +392,11 @@ export const renderExportMarkdown = (
     if (node.kind === 'message') {
       const model = node.model && node.model !== lastModel ? node.model : undefined;
       if (node.model) lastModel = node.model;
-      const rendered = renderEntry(node, mode, model);
+      const rendered = renderEntry(node, mode, model, options.rootAgent);
       if (rendered) body.push(rendered);
       continue;
     }
-    const rendered = renderEntry(node, mode);
+    const rendered = renderEntry(node, mode, undefined, options.rootAgent);
     if (rendered) body.push(rendered);
   }
 

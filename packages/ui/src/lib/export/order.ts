@@ -17,6 +17,20 @@ import { readTimestamp } from './values';
 import { orderByRecordedTime } from './ordering';
 import { exportText } from './i18n';
 
+/**
+ * A piece of work that ran at the same time as another.
+ *
+ * The agent and the title are kept apart, because the title alone does not
+ * tell two sub-agents apart: the runtime names a child after the call that
+ * started it, so two children of one call share a title.
+ */
+export type ConcurrentWork = {
+  /** The agent that did the work, when the session recorded one. */
+  agent?: string;
+  /** The session's own title. */
+  title: string;
+};
+
 /** One entry of the export's spine: a single event, or a subagent's block. */
 export type ExportNode =
   | { kind: 'event'; event: ExportEvent }
@@ -71,7 +85,7 @@ export type ExportNode =
       /** Further calls that named the same session, which resumed it. */
       resumedBy?: Array<{ sessionID: string; partID: string; timestamp?: number }>;
       /** The subagents whose work overlapped this one's. */
-      concurrentWith?: string[];
+      concurrentWith?: ConcurrentWork[];
     };
 
 /** A subagent's block in the export's spine. */
@@ -389,7 +403,10 @@ const markConcurrency = (nodes: ExportNode[]): ExportNode[] => {
       return block.startedAt <= otherEnd && other.startedAt <= blockEnd;
     });
     if (overlapping.length > 0) {
-      block.concurrentWith = overlapping.map((other) => other.session.title || other.childSessionID);
+      block.concurrentWith = overlapping.map((other) => ({
+        agent: other.session.agent,
+        title: other.session.title || other.childSessionID,
+      }));
     }
     block.children = markConcurrency(block.children);
   }

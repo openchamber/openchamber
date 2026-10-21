@@ -17,7 +17,7 @@ import {
 } from './collect';
 import { normalizeExportTimeline } from './normalize';
 import { buildExportTree } from './order';
-import { projectExport, type ProjectionMode } from './project';
+import { projectExport, readRootAgent, type ProjectionMode } from './project';
 import type { ExportTimeline } from './events';
 
 type ExportPipelineInput = {
@@ -53,6 +53,13 @@ export type ExportPipelineResult = {
   tree: ReturnType<typeof buildExportTree>;
   /** The export's view of the history, in the requested mode. */
   projection: ReturnType<typeof projectExport>;
+  /**
+   * The agent the exported session ran.
+   *
+   * The document names the agent in the root's own messages instead of a
+   * role of its own: the agent has a name, and the reader knows it.
+   */
+  rootAgent?: string;
 };
 
 /** Normalizes, orders and projects the collected sessions. */
@@ -73,7 +80,7 @@ const buildFromCollection = (
   const tree = buildExportTree(timeline);
   const projection = projectExport(tree, mode);
 
-  return { timeline, tree, projection };
+  return { timeline, tree, projection, rootAgent: readRootAgent(timeline) };
 };
 
 /**
