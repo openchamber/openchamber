@@ -157,7 +157,7 @@ export const SessionTimelineRowBody: React.FC<Props> = ({
       <div className={cn('@container relative flex h-5 w-full min-w-0 items-center gap-1', actionsReserveClass)}>
         {project ? <TimelineProjectIcon project={project} label={null} /> : null}
         {/* Starts past the 12px project icon and the 4px gap. */}
-        <span className={cn('min-w-0 flex-1 truncate typography-micro text-muted-foreground/85', project && '[--oc-actions-inset:16px]', actionsMaskClass)}>{projectLabel}</span>
+        <span className={cn('min-w-0 flex-1 truncate typography-micro text-muted-foreground/85', project && '[--oc-actions-inset:1rem]', actionsMaskClass)}>{projectLabel}</span>
         {meta}
       </div>
       <div className="flex h-5 w-full min-w-0 items-center">

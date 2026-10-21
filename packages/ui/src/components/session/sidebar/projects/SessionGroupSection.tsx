@@ -939,10 +939,10 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
   const groupHeaderRightPadding = alwaysShowActions
     ? (hasThirdHeaderAction ? 'pe-20' : hasSecondHeaderAction ? 'pe-14' : 'pe-7')
     : cn('pe-2', hasThirdHeaderAction
-        ? '[--oc-actions-reserve:68px]'
+        ? '[--oc-actions-reserve:4.25rem]'
         : hasSecondHeaderAction
-        ? '[--oc-actions-reserve:44px]'
-        : '[--oc-actions-reserve:18px]');
+        ? '[--oc-actions-reserve:2.75rem]'
+        : '[--oc-actions-reserve:1.125rem]');
   const headerActionsMaskClass = alwaysShowActions ? undefined : 'group-hover/gh:oc-actions-mask group-has-[:focus-visible]/gh:oc-actions-mask';
   const headerCoveredFadeClass = alwaysShowActions ? undefined : 'transition-opacity group-hover/gh:opacity-0 group-has-[:focus-visible]/gh:opacity-0';
   // An empty group keeps the chevron's place, so its label stays in line.

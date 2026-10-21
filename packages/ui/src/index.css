@@ -75,7 +75,7 @@
    edge. */
 @utility oc-actions-mask {
   --oc-actions-edge: calc(100cqw - var(--oc-actions-inset, 0px) - var(--oc-actions-reserve, 0px));
-  mask-image: linear-gradient(var(--oc-to-inline-end), #000 calc(var(--oc-actions-edge) - 14px), transparent calc(var(--oc-actions-edge) - 2px));
+  mask-image: linear-gradient(var(--oc-to-inline-end), #000 calc(var(--oc-actions-edge) - 0.875rem), transparent calc(var(--oc-actions-edge) - 0.125rem));
 
   /* A title whose own direction differs from the interface (dir="auto") starts
      on the side the actions cover, so fading there would hide its first

@@ -280,11 +280,11 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
   const showWorktreeAction = showCreateButtons && isRepo && !hideDirectoryControls && Boolean(onNewWorktreeSession);
   const groupedHeaderActionCount = (showWorktreeAction ? 1 : 0) + (hideDirectoryControls ? 0 : 1);
   const headerActionsReserveClass = groupedHeaderActionCount === 2
-    ? '[--oc-actions-reserve:66px]'
+    ? '[--oc-actions-reserve:4.125rem]'
     : groupedHeaderActionCount === 1 && showCreateButtons
-      ? '[--oc-actions-reserve:38px]'
+      ? '[--oc-actions-reserve:2.375rem]'
       : showCreateButtons || groupedHeaderActionCount === 1
-        ? '[--oc-actions-reserve:12px]'
+        ? '[--oc-actions-reserve:0.75rem]'
         : undefined;
   const headerLabelMaskClass = alwaysShowActions
     ? undefined
@@ -387,7 +387,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                       isCollapsed={isCollapsed}
                       alwaysShowActions={alwaysShowActions}
                       // The label starts past the 14px icon and the 6px gap.
-                      labelClassName={cn('[--oc-actions-inset:20px]', headerLabelMaskClass)}
+                      labelClassName={cn('[--oc-actions-inset:1.25rem]', headerLabelMaskClass)}
                     />
                     {folderMissing ? (
                       <span
