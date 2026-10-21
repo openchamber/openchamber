@@ -14,7 +14,8 @@
 
 import type { Message, Part } from '@/lib/opencode/model';
 import type { ExportEvent, ExportFinding, ExportSessionInfo, ExportTimeline } from './events';
-import { exportText } from './i18n';
+import { orderByRecordedTime } from './ordering';
+import { exportText, findingText } from './i18n';
 
 /**
  * The schema and ordering guarantees the JSON export documents.
@@ -51,7 +52,18 @@ type ExportJson = {
   sessions: Record<string, ExportSessionInfo>;
   events: ExportEvent[];
   source: Record<string, ExportJsonSession>;
-  findings: ExportFinding[];
+  findings: ExportJsonFinding[];
+};
+
+/**
+ * A finding, as the JSON export carries it.
+ *
+ * The finding keeps the key of its text and the values that text names, and
+ * the text itself in the reader's language. A tool that reads the export
+ * gets a sentence, not a key it has to resolve itself.
+ */
+type ExportJsonFinding = ExportFinding & {
+  detail: string;
 };
 
 /**
@@ -61,18 +73,17 @@ type ExportJson = {
  * grouped by session. The schema says the events are ordered by their
  * recorded timestamp, so the list is sorted here: by the timestamp, then by
  * the order the source recorded the event, then by the session it belongs to.
- * An event without a timestamp keeps the place the source gave it, at the
- * end of the list, and the source order breaks ties.
+ * An event without a timestamp keeps the place the source gave it, and the
+ * source order breaks ties.
  */
-const orderedEvents = (events: readonly ExportEvent[]): ExportEvent[] => [...events].sort((left, right) => {
-  const leftTime = left.timestamp ?? Number.MAX_SAFE_INTEGER;
-  const rightTime = right.timestamp ?? Number.MAX_SAFE_INTEGER;
-  if (leftTime !== rightTime) return leftTime - rightTime;
-  if (left.origin.sourceOrder !== right.origin.sourceOrder) {
-    return left.origin.sourceOrder - right.origin.sourceOrder;
-  }
-  return left.sessionID.localeCompare(right.sessionID);
-});
+const orderedEvents = (events: readonly ExportEvent[]): ExportEvent[] => orderByRecordedTime(
+  events.map((event) => ({
+    event,
+    timestamp: event.timestamp,
+    sourceOrder: event.origin.sourceOrder,
+    sessionID: event.sessionID,
+  })),
+).map((entry) => entry.event);
 
 /** The JSON export, as a plain object. */
 const buildExportJson = (timeline: ExportTimeline): ExportJson => ({
@@ -94,7 +105,10 @@ const buildExportJson = (timeline: ExportTimeline): ExportJson => ({
       },
     ]),
   ),
-  findings: timeline.findings,
+  findings: timeline.findings.map((finding) => ({
+    ...finding,
+    detail: findingText(finding.messageKey, finding.messageParams),
+  })),
 });
 
 /** The JSON export, as text. */

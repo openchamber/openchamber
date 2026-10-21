@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
+import { z } from 'zod';
 import type { BridgeResponse } from './bridge';
 
 type BridgeMessageInput = {
@@ -44,6 +45,40 @@ type FsExecCommandResult = {
   stderr?: string;
   error?: string;
 };
+
+/**
+ * The file type a save dialog offers.
+ *
+ * The caller names the format it wrote, so the dialog offers the type of
+ * file that is actually being saved. A caller that names nothing gets the
+ * Markdown filter, which is what the command always offered before.
+ */
+const saveFileFilterSchema = z.object({
+  name: z.string(),
+  extensions: z.array(z.string()),
+});
+
+const SAVE_FILE_FILTERS = {
+  markdown: { name: 'Markdown', extensions: ['md'] },
+  html: { name: 'HTML', extensions: ['html'] },
+  json: { name: 'JSON', extensions: ['json'] },
+} satisfies Record<string, z.infer<typeof saveFileFilterSchema>>;
+
+const saveFileFormatSchema = z.enum(['markdown', 'html', 'json']);
+
+/** The format a caller named for the file it is saving. */
+type SaveFileFormat = z.infer<typeof saveFileFormatSchema>;
+
+/** The payload of a save request, as the bridge reads it. */
+const saveMarkdownPayloadSchema = z.object({
+  fileName: z.string().default(''),
+  content: z.string(),
+  format: saveFileFormatSchema.default('markdown'),
+});
+
+const readSaveFileFilter = (value: SaveFileFormat): z.infer<typeof saveFileFilterSchema> => (
+  SAVE_FILE_FILTERS[value]
+);
 
 const createGitReadCacheTtlMs = () => {
   const raw = Number(process.env.OPENCHAMBER_GIT_READ_CACHE_TTL_MS);
@@ -584,23 +619,26 @@ export async function handleFsBridgeMessage(
     }
 
     case 'api:files/save-markdown': {
-      const rawFileName = (payload as { fileName?: unknown })?.fileName;
-      const rawContent = (payload as { content?: unknown })?.content;
-      const content = typeof rawContent === 'string' ? rawContent : '';
+      const parsed = saveMarkdownPayloadSchema.safeParse(payload);
+      const content = parsed.success ? parsed.data.content : '';
       if (!content) {
         return { id, type, success: false, error: 'Invalid markdown payload' };
       }
 
-      const defaultFileName = typeof rawFileName === 'string' && rawFileName.trim().length > 0
-        ? rawFileName.trim()
+      const defaultFileName = parsed.success && parsed.data.fileName.trim().length > 0
+        ? parsed.data.fileName.trim()
         : `session-${Date.now()}.md`;
+
+      // The caller names the format it wrote, so the dialog offers the type
+      // of file that is actually being saved rather than always Markdown.
+      const filter = readSaveFileFilter(parsed.success ? parsed.data.format : 'markdown');
 
       const saveUri = await vscode.window.showSaveDialog({
         saveLabel: 'Export session',
         defaultUri: vscode.workspace.workspaceFolders?.[0]
           ? vscode.Uri.joinPath(vscode.workspace.workspaceFolders[0].uri, defaultFileName)
           : undefined,
-        filters: { Markdown: ['md'] },
+        filters: { [filter.name]: filter.extensions },
       });
 
       if (!saveUri) {

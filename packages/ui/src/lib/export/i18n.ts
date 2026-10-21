@@ -13,3 +13,13 @@ import { formatMessage, useI18nStore, type I18nKey, type I18nParams } from '@/li
 export const exportText = (key: I18nKey, params?: I18nParams): string => (
   formatMessage(useI18nStore.getState().dictionary, key, params)
 );
+
+/**
+ * The text of a finding, in the reader's language.
+ *
+ * A finding is recorded by the pipeline with the key of its text and the
+ * values that text names. The text itself is resolved when the document is
+ * written, so a finding reads in the reader's language even though the
+ * pipeline never knew which language that was.
+ */
+export const findingText = (key: I18nKey, params?: I18nParams): string => exportText(key, params);

@@ -19,24 +19,24 @@ import { readJsonRecord, readTextField, readTimestamp } from './values';
 import { hasParts } from '@/lib/opencode/model';
 import { readContextPart } from '@/lib/messages/contextParts';
 import { formatContextMessage, formatMessageText } from '@/lib/messages/messageMarkdown';
-import {
-  isSubagentTool,
-  subagentAgent,
-  subagentDescription,
-  subagentSessionId,
-} from '@/lib/opencode/tools';
-import { readSubagentRun, readBackgroundSubagentChildID } from '@/lib/opencode/subagent-run';
+import { isSubagentTool, subagentAgent, subagentDescription } from '@/lib/opencode/tools';
+import { readSubagentRun } from '@/lib/opencode/subagent-run';
 import { readDispatchedSessionResult } from '@/lib/opencode/dispatched-session';
-import { readTaskSessionIdFromOutput, readTaskSessionIdFromRecord } from '@/components/chat/message/parts/taskToolModel';
+import {
+  readBackgroundChildID,
+  readInvocationChildSessionID,
+} from './childSession';
 import type {
   ExportEvent,
   ExportFinding,
   ExportPart,
   ExportRole,
   ExportSessionInfo,
+  ExportShellResult,
   ExportTimeline,
   ExportToolCall,
 } from './events';
+import { SOURCE_ORDER_PART_SCALE } from './events';
 import type { CollectedSession, MissingSession } from './collect';
 
 /** The message roles the export knows how to present. */
@@ -231,8 +231,53 @@ const readPartType = (part: Part): string => partTypeSchema.safeParse(part.type)
   ? part.type
   : 'unknown';
 
+/**
+ * The shell record's own result, when the record is one.
+ *
+ * A shell record carries what the command printed, how it ended and the code
+ * it exited with. Keeping them lets the readable view say that a command
+ * failed instead of showing only the command.
+ */
+const shellResultOf = (message: Message): ExportShellResult | undefined => {
+  if (message.role !== 'shell') return undefined;
+  const shell: ExportShellResult = { status: message.status };
+  if (message.exit !== undefined) shell.exit = message.exit;
+  const output = message.output?.output;
+  if (output) shell.output = output;
+  return shell;
+};
+
+/**
+ * Where a record's own message sits among its parts.
+ *
+ * The message is the record's text, and the text lives in its text parts. The
+ * last of them is where the message belongs: an answer that came after the
+ * work that produced it stays after that work, and a message that came before
+ * a tool call stays before it. The part's own time is kept, so a text part
+ * that says when it was written says so.
+ */
+type TextAnchor = {
+  /** The part's place inside the record. */
+  position: number;
+  /** The time the text part recorded, when it recorded one. */
+  timestamp?: number;
+};
+
+const textAnchor = (parts: readonly Part[]): TextAnchor => {
+  let position = 0;
+  let timestamp: number | undefined;
+  for (const [index, part] of parts.entries()) {
+    if (part.type !== 'text') continue;
+    position = index + 1;
+    timestamp = readTimestamp(part.time?.start);
+  }
+  return { position, timestamp };
+};
+
 /** The tool call a part carries, as the export sees it. */
-const exportToolCall = (part: Extract<Part, { type: 'tool' }>): ExportToolCall => {
+const exportToolCall = (
+  part: Extract<Part, { type: 'tool' }>,
+): ExportToolCall => {
   const state = part.state;
   const call: ExportToolCall = {
     name: part.tool,
@@ -243,7 +288,6 @@ const exportToolCall = (part: Extract<Part, { type: 'tool' }>): ExportToolCall =
 
   const metadata = 'metadata' in state ? readJsonRecord(state.metadata) : undefined;
   if (metadata) call.metadata = metadata;
-
 
   if (state.status === 'completed') {
     call.output = state.output;
@@ -263,55 +307,13 @@ const exportToolCall = (part: Extract<Part, { type: 'tool' }>): ExportToolCall =
     call.description = subagentDescription(state.input);
     const prompt = asText(readJsonRecord(state.input).prompt);
     if (prompt) call.prompt = prompt;
+    // A call that went to the background settles at once while its child
+    // keeps running. The call's own span says nothing about when the work
+    // was done, so the export reads the child's own activity instead.
+    if (readBackgroundChildID(part)) call.background = true;
   }
 
   return call;
-};
-
-/**
- * The child session a subagent call started, from every identity the runtime
- * recorded for it. The order matters: the call's own metadata is the
- * authoritative join, the output envelope is the older fallback, and the
- * session's parent link is the last resort.
- */
-const readInvocationChildSessionID = (part: Extract<Part, { type: 'tool' }>): string | undefined => {
-  if (!isSubagentTool(part.tool)) return undefined;
-  const state = part.state;
-  if (state.status === 'pending') return undefined;
-
-  const metadata = 'metadata' in state ? state.metadata : undefined;
-  const fromMetadata = subagentSessionId(metadata);
-  if (fromMetadata) return fromMetadata;
-
-  const fromRecord = readTaskSessionIdFromRecord(metadata);
-  if (fromRecord) return fromRecord;
-
-  if (state.status === 'completed') {
-    const fromOutput = readTaskSessionIdFromOutput(state.output);
-    if (fromOutput) return fromOutput;
-  }
-
-  const fromInput = readTaskSessionIdFromRecord(state.input);
-  if (fromInput) return fromInput;
-
-  return undefined;
-};
-
-/**
- * The child session a background subagent call left running. The call settles
- * at once with the child in its metadata; the report arrives later.
- */
-const readBackgroundChildID = (part: Extract<Part, { type: 'tool' }>): string | undefined => {
-  const background = readBackgroundSubagentChildID(part);
-  if (background) return background;
-  if (part.state.status === 'completed' && isSubagentTool(part.tool)) {
-    const metadata = readJsonRecord(part.state.metadata);
-    if (metadata?.status === 'running') {
-      const sessionID = asText(metadata.sessionID);
-      if (sessionID) return sessionID;
-    }
-  }
-  return undefined;
 };
 
 type NormalizeResult = {
@@ -335,8 +337,16 @@ export const normalizeExportTimeline = (options: {
   sessions: CollectedSession[];
   missing: MissingSession[];
   findings: ExportFinding[];
+  /**
+   * Whether the export covers the sub-agent sessions at all.
+   *
+   * A caller that asked for the root session only does not report the
+   * children it left out: they were excluded on purpose, not lost.
+   */
+  includeSubagents?: boolean;
 }): NormalizeResult => {
   const { rootSessionID, sessions, missing, findings } = options;
+  const includeSubagents = options.includeSubagents ?? true;
 
   const sessionsById = new Map<string, ExportSessionInfo>();
   const sourceRecords = new Map<string, ExportSourceSessionOfTimeline>();
@@ -345,8 +355,6 @@ export const normalizeExportTimeline = (options: {
 
   /** The child session a call started, and the call that started it. */
   const invocationByChildID = new Map<string, { sessionID: string; partID: string; description?: string; agent?: string; timestamp?: number }>();
-  /** The child sessions a session's calls started, in the order they were recorded. */
-  const invocationsBySessionID = new Map<string, string[]>();
 
   for (const collected of sessions) {
     const info: ExportSessionInfo = {
@@ -377,12 +385,12 @@ export const normalizeExportTimeline = (options: {
   /** Whether the export has already reported a record without a timestamp. */
   let reportedMissingTimestamp = false;
   for (const { session, depth } of missing) {
-    const detail = `The history of the sub-agent session "${session.title}" could not be loaded.`;
     localFindings.push({
       kind: 'missing-session',
       sessionID: session.id,
       childSessionID: session.id,
-      detail,
+      messageKey: 'export.finding.missingSession',
+      messageParams: { title: session.title },
     });
     sessionsById.set(session.id, {
       id: session.id,
@@ -401,7 +409,8 @@ export const normalizeExportTimeline = (options: {
       kind: 'gap',
       childSessionID: session.id,
       reason: 'unavailable',
-      detail,
+      messageKey: 'export.finding.missingSession',
+      messageParams: { title: session.title },
     });
   }
 
@@ -412,6 +421,14 @@ export const normalizeExportTimeline = (options: {
   // started; a child the caller knows only by its description carries the id
   // of the call that recorded that description, and the join uses it.
   const invocationByCallID = new Map<string, { childSessionID: string; sessionID: string; partID: string; description?: string; agent?: string; timestamp?: number }>();
+  /** The calls that named a child, whether the child was found or not. */
+  const invocationsByCall = new Map<string, {
+    childSessionID: string;
+    sessionID: string;
+    partID: string;
+    callID: string;
+    settled: boolean;
+  }>();
   for (const collected of sessions) {
     let order = 0;
     for (const record of collected.records) {
@@ -419,25 +436,41 @@ export const normalizeExportTimeline = (options: {
       for (const part of record.parts) {
         if (part.type !== 'tool' || !isSubagentTool(part.tool)) continue;
         const childSessionID = readInvocationChildSessionID(part) ?? readBackgroundChildID(part);
-        if (!childSessionID) continue;
+        if (!childSessionID) {
+          // A settled call that named no child at all: the export cannot
+          // say which transcript, if any, belongs to it. The call is still
+          // shown, and the export says the relationship is unresolved.
+          const settled = part.state.status === 'completed' || part.state.status === 'error';
+          if (!settled || !includeSubagents) continue;
+          localFindings.push({
+            kind: 'unresolved-invocation',
+            sessionID: collected.sessionID,
+            messageKey: 'export.finding.unnamedInvocation',
+            messageParams: { id: part.callID },
+          });
+          continue;
+        }
         if (invocationByChildID.has(childSessionID)) {
           localFindings.push({
             kind: 'resumed-session',
             sessionID: collected.sessionID,
             childSessionID,
-            detail: `More than one call names the sub-agent session "${childSessionID}"; the export keeps one transcript for it.`,
+            messageKey: 'export.finding.resumedSession',
+            messageParams: { id: childSessionID },
           });
           continue;
         }
         // A call names a child the export does not cover: the session is not
         // in the list, and no records were loaded for it. The call is still
-        // shown, and the export says its transcript is missing.
-        if (!sessionsById.has(childSessionID) && !missingSessionIDs.has(childSessionID)) {
+        // shown, and the export says its transcript is missing — unless the
+        // caller left the sub-agent sessions out on purpose.
+        if (includeSubagents && !sessionsById.has(childSessionID) && !missingSessionIDs.has(childSessionID)) {
           localFindings.push({
             kind: 'ambiguous-invocation',
             sessionID: collected.sessionID,
             childSessionID,
-            detail: `A call names the sub-agent session "${childSessionID}", which is not among the exported sessions; its transcript is not part of this export.`,
+            messageKey: 'export.finding.ambiguousInvocation',
+            messageParams: { id: childSessionID },
           });
         }
         const call = exportToolCall(part);
@@ -456,9 +489,15 @@ export const normalizeExportTimeline = (options: {
           agent: call.agent,
           timestamp: call.startedAt,
         });
-        const invocations = invocationsBySessionID.get(collected.sessionID) ?? [];
-        invocations.push(childSessionID);
-        invocationsBySessionID.set(collected.sessionID, invocations);
+        invocationsByCall.set(part.callID, {
+          childSessionID,
+          sessionID: collected.sessionID,
+          partID: part.id,
+          callID: part.callID,
+          // A call that has not settled yet names a child that may still be
+          // running. Its transcript is not missing; it is not there yet.
+          settled: part.state.status === 'completed' || part.state.status === 'error',
+        });
       }
     }
   }
@@ -511,13 +550,32 @@ export const normalizeExportTimeline = (options: {
         localFindings.push({
           kind: 'unsupported-message-role',
           sessionID: collected.sessionID,
-          detail: `A message with the role "${message.role}" is not represented in the export.`,
+          messageKey: 'export.finding.unsupportedMessageRole',
+          messageParams: { role: message.role },
         });
         continue;
       }
 
+      // A record without a recorded time cannot be placed in the timeline by
+      // time. It keeps the place the source gave it, and the export says so
+      // once — for every role, not only for the ones that carry parts.
+      const reportMissingTimestamp = (timestamp: number | undefined) => {
+        if (timestamp !== undefined || reportedMissingTimestamp) return;
+        reportedMissingTimestamp = true;
+        localFindings.push({
+          kind: 'missing-timestamp',
+          sessionID: collected.sessionID,
+          messageKey: 'export.finding.missingTimestamp',
+        });
+      };
+      reportMissingTimestamp(base.timestamp);
+
       const run = readSubagentRun(message);
       if (run) {
+        // The completion report carries the time the report arrived, so that
+        // is the time the event is placed by.
+        const reportedAt = readTimestamp(run.reportedAt);
+        reportMissingTimestamp(reportedAt);
         events.push({
           ...base,
           id: `${collected.sessionID}:${message.id}:run`,
@@ -526,13 +584,15 @@ export const normalizeExportTimeline = (options: {
           state: run.state,
           description: run.description,
           output: run.output,
-          timestamp: run.reportedAt,
+          timestamp: reportedAt,
         });
         continue;
       }
 
       const dispatched = readDispatchedSessionResult(message);
       if (dispatched) {
+        const reportedAt = readTimestamp(dispatched.reportedAt);
+        reportMissingTimestamp(reportedAt);
         events.push({
           ...base,
           id: `${collected.sessionID}:${message.id}:dispatched`,
@@ -541,26 +601,37 @@ export const normalizeExportTimeline = (options: {
           state: dispatched.state,
           description: dispatched.title,
           output: dispatched.output,
-          timestamp: dispatched.reportedAt,
+          timestamp: reportedAt,
         });
         continue;
       }
 
       if (hasParts(message)) {
+        // The message's own text is one event, and the parts that carry more
+        // than text become events of their own, each at the place the part
+        // held inside the record. The message sits at the place of its own
+        // text part, so an answer that came after the work it describes does
+        // not move before it.
         const text = messageText(message, record.parts);
         const attachments = record.parts
           .filter((part): part is Extract<Part, { type: 'file' }> => part.type === 'file')
           .map((part) => ({ filename: part.filename, mime: part.mime, url: part.url }));
+        const anchor = textAnchor(record.parts);
 
         if (text || attachments.length > 0) {
           events.push({
             ...base,
             id: `${collected.sessionID}:${message.id}:message`,
+            origin: {
+              ...base.origin,
+              sourceOrder: order * SOURCE_ORDER_PART_SCALE + anchor.position,
+            },
             kind: 'message',
             role,
             text,
             attachments: attachments.length > 0 ? attachments : undefined,
             parts: exportParts(record.parts),
+            timestamp: anchor.timestamp ?? base.timestamp,
           });
         }
 
@@ -575,19 +646,8 @@ export const normalizeExportTimeline = (options: {
           localFindings.push({
             kind: 'unsupported-part',
             sessionID: collected.sessionID,
-            detail: `A part of type "${partType}" is not represented in the readable export; it is kept in the JSON export.`,
-          });
-        }
-
-        // A message without a recorded time cannot be placed in the timeline
-        // by time. It keeps the place the source gave it, and the export says
-        // so once.
-        if (base.timestamp === undefined && !reportedMissingTimestamp) {
-          reportedMissingTimestamp = true;
-          localFindings.push({
-            kind: 'missing-timestamp',
-            sessionID: collected.sessionID,
-            detail: 'Some records carry no timestamp; they keep the order the source recorded them in.',
+            messageKey: 'export.finding.unsupportedPart',
+            messageParams: { partType },
           });
         }
 
@@ -601,7 +661,7 @@ export const normalizeExportTimeline = (options: {
             events.push({
               ...base,
               id: `${collected.sessionID}:${part.id}:tool`,
-              origin: { ...base.origin, partID: part.id, sourceOrder: order * 1000 + partOrder },
+              origin: { ...base.origin, partID: part.id, sourceOrder: order * SOURCE_ORDER_PART_SCALE + partOrder },
               kind: 'tool',
               call,
               timestamp: call.startedAt ?? base.timestamp,
@@ -612,7 +672,7 @@ export const normalizeExportTimeline = (options: {
             events.push({
               ...base,
               id: `${collected.sessionID}:${part.id}:reasoning`,
-              origin: { ...base.origin, partID: part.id, sourceOrder: order * 1000 + partOrder },
+              origin: { ...base.origin, partID: part.id, sourceOrder: order * SOURCE_ORDER_PART_SCALE + partOrder },
               kind: 'reasoning',
               text: part.text,
               timestamp: part.time?.start ?? base.timestamp,
@@ -636,13 +696,15 @@ export const normalizeExportTimeline = (options: {
       const plainText = message.role === 'synthetic'
         ? (readContextPart(message) ? formatContextMessage(message).trim() : '')
         : messageTextOf(message);
-      if (plainText.trim()) {
+      const shell = shellResultOf(message);
+      if (plainText.trim() || shell) {
         events.push({
           ...base,
           id: `${collected.sessionID}:${message.id}:message`,
           kind: 'message',
           role,
           text: plainText.trim(),
+          shell,
           parts: [],
         });
       }
@@ -659,7 +721,25 @@ export const normalizeExportTimeline = (options: {
       kind: 'unresolved-invocation',
       sessionID: collected.sessionID,
       childSessionID: collected.sessionID,
-      detail: `The sub-agent session "${collected.title}" was not tied to a call in the exported history.`,
+      messageKey: 'export.finding.unresolvedInvocation',
+      messageParams: { title: collected.title },
+    });
+  }
+
+  // A settled call whose child the export could not tie to any transcript is
+  // a relationship the export could not establish. A call that is still
+  // running names a child that is not there yet, which is not a gap.
+  for (const invocation of invocationsByCall.values()) {
+    if (!invocation.settled) continue;
+    if (sessionsById.has(invocation.childSessionID)) continue;
+    if (missingSessionIDs.has(invocation.childSessionID)) continue;
+    if (!includeSubagents) continue;
+    localFindings.push({
+      kind: 'unresolved-invocation',
+      sessionID: invocation.sessionID,
+      childSessionID: invocation.childSessionID,
+      messageKey: 'export.finding.unresolvedInvocation',
+      messageParams: { title: invocation.childSessionID },
     });
   }
 

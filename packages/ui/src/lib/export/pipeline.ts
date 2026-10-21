@@ -27,6 +27,13 @@ type ExportPipelineInput = {
   sessions: readonly ExportSession[];
   /** Loads one session's records; null when the session is gone. */
   load: ExportRecordLoader;
+  /**
+   * Whether the export covers the sub-agent sessions.
+   *
+   * A caller that left the sub-agent transcripts out on purpose does not
+   * want the export to report them as missing.
+   */
+  includeSubagents?: boolean;
 };
 
 /** The export built from sessions whose records the caller already holds. */
@@ -35,6 +42,8 @@ type LoadedExportPipelineInput = {
   sessions: readonly ExportSession[];
   /** The records of the sessions the caller holds, keyed by session id. */
   records: ReadonlyMap<string, ExportSourceRecord[]>;
+  /** Whether the export covers the sub-agent sessions. */
+  includeSubagents?: boolean;
 };
 
 export type ExportPipelineResult = {
@@ -51,12 +60,14 @@ const buildFromCollection = (
   collection: ReturnType<typeof collectLoadedSessions>,
   rootSessionID: string,
   mode: ProjectionMode,
+  includeSubagents: boolean,
 ): ExportPipelineResult => {
   const { timeline } = normalizeExportTimeline({
     rootSessionID,
     sessions: collection.sessions,
     missing: collection.missing,
     findings: collection.findings,
+    includeSubagents,
   });
 
   const tree = buildExportTree(timeline);
@@ -77,7 +88,7 @@ export const buildExportFromRecords = (
     sessions: input.sessions,
     records: input.records,
   });
-  return buildFromCollection(collection, input.root.id, mode);
+  return buildFromCollection(collection, input.root.id, mode, input.includeSubagents ?? true);
 };
 
 /**
@@ -92,5 +103,5 @@ export const buildExport = async (
     sessions: input.sessions,
     load: input.load,
   });
-  return buildFromCollection(collection, input.root.id, mode);
+  return buildFromCollection(collection, input.root.id, mode, input.includeSubagents ?? true);
 };

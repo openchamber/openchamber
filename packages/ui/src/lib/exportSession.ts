@@ -16,10 +16,11 @@
 import { z } from 'zod';
 import type { Message, Part } from '@/lib/opencode/model';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
-import { isVSCodeRuntime, openDesktopPath, revealDesktopPath, saveDesktopMarkdownFile } from '@/lib/desktop';
+import { isVSCodeRuntime, openDesktopPath, revealDesktopPath, saveDesktopMarkdownFile, type DesktopSaveFileFormat } from '@/lib/desktop';
 import { getRevealLabelKey } from '@/lib/utils';
 import { formatMessageText } from '@/lib/messages/messageMarkdown';
 import { readTextField } from '@/lib/export/values';
+import { readInvocationChildSessionID } from '@/lib/export/childSession';
 import { buildExportFromRecords, type ExportPipelineResult } from '@/lib/export/pipeline';
 import type { ExportSession } from '@/lib/export/collect';
 import { renderExportHtml } from '@/lib/export/html';
@@ -137,15 +138,18 @@ export const formatSessionAsMarkdown = (
   }];
 
   // A child without a session id is joined to the call that recorded its
-  // description. The call's own id is what the child carries, so the
-  // pipeline can tie the two together.
+  // description. The call names the child session it started, so the child
+  // takes that id and the pipeline ties the two together by it. A call that
+  // named no session at all leaves the child its own id, and the call's id
+  // is what ties the two together.
   const usedCallIDs = new Set<string>();
   let counter = 0;
   const visit = (nodes: ChildSessionExport[], parentID: string): void => {
     for (const child of nodes) {
       counter += 1;
-      const invocationKey = child.id ? undefined : matchCallByDescription(messages, child, usedCallIDs);
-      const id = child.id ?? invocationKey ?? `child-${counter}`;
+      const call = child.id ? undefined : matchCallByDescription(messages, child, usedCallIDs);
+      const invocationKey = call && !call.childSessionID ? call.callID : undefined;
+      const id = child.id ?? call?.childSessionID ?? invocationKey ?? `child-${counter}`;
       records.set(id, child.records);
       sessions.push({
         id,
@@ -168,7 +172,8 @@ export const formatSessionAsMarkdown = (
 };
 
 /**
- * The id of the call that recorded the child's description.
+ * The call that recorded the child's description, and the child session it
+ * names.
  *
  * The description is the only identity a child without a session id has, so
  * the call that wrote the same description is the one that started it. A
@@ -178,7 +183,7 @@ const matchCallByDescription = (
   messages: SessionMessageRecord[],
   child: ChildSessionExport,
   usedCallIDs: Set<string>,
-): string | undefined => {
+): { callID: string; childSessionID?: string } | undefined => {
   const description = child.title.trim();
   if (!description) return undefined;
   for (const record of messages) {
@@ -188,7 +193,10 @@ const matchCallByDescription = (
       const callDescription = readTextField(part.state.input.description);
       if (callDescription !== description) continue;
       usedCallIDs.add(part.callID);
-      return part.callID;
+      return {
+        callID: part.callID,
+        childSessionID: readInvocationChildSessionID(part),
+      };
     }
   }
   return undefined;
@@ -218,8 +226,25 @@ const saveResultSchema = z.object({
   path: z.string().optional(),
 });
 
-export async function saveAsMarkdownDesktop(content: string, filename: string): Promise<string | null> {
-  const desktopPath = await saveDesktopMarkdownFile(filename, content);
+/**
+ * The file type the save dialog offers for each export format.
+ *
+ * The dialog must name the type of file that is actually being written: a
+ * document saved as HTML is not a Markdown file, and the dialog that says
+ * otherwise misleads the person saving it.
+ */
+const SAVE_FORMATS = new Map<ExportFormat, DesktopSaveFileFormat>([
+  ['markdown', 'markdown'],
+  ['html', 'html'],
+  ['json', 'json'],
+]);
+
+export async function saveAsMarkdownDesktop(
+  content: string,
+  filename: string,
+  format: ExportFormat = 'markdown',
+): Promise<string | null> {
+  const desktopPath = await saveDesktopMarkdownFile(filename, content, SAVE_FORMATS.get(format) ?? 'markdown');
   if (desktopPath) {
     return desktopPath;
   }
@@ -229,7 +254,11 @@ export async function saveAsMarkdownDesktop(content: string, filename: string): 
   }
 
   try {
-    const answer = await getRegisteredRuntimeAPIs()?.vscode?.saveMarkdown?.({ fileName: filename, content });
+    const answer = await getRegisteredRuntimeAPIs()?.vscode?.saveMarkdown?.({
+      fileName: filename,
+      content,
+      format: SAVE_FORMATS.get(format) ?? 'markdown',
+    });
     const payload = saveResultSchema.safeParse(answer);
     if (!payload.success || payload.data.saved !== true) {
       return null;

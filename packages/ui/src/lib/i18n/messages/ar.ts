@@ -723,6 +723,8 @@ export const dict = {
   'sessions.sidebar.session.export.dialog.includeSubtasks': 'تضمين مهام الوكلاء الفرعيين',
   'sessions.sidebar.session.export.dialog.confirm': 'تصدير',
   'sessions.sidebar.session.export.dialog.descriptionNoSubtasks': 'التصدير سجل مقروء للمحادثة، مع عمل الوكلاء الفرعيين في موضعه.',
+  'sessions.sidebar.session.export.dialog.descriptionIncomplete': 'لا تزال قائمة الجلسات قيد التحميل، لذا لا يُعرف عدد مهام الوكيل الفرعي بعد. ويضم التصدير عمل الوكيل الفرعي الذي عثر عليه على أي حال.',
+  'sessions.sidebar.session.export.dialog.retryCount': 'تحقّق مجددًا',
   'sessions.sidebar.session.export.dialog.format': 'الصيغة',
   'sessions.sidebar.session.export.dialog.detail': 'التفصيل',
   'sessions.sidebar.session.export.dialog.detailReadable': 'مقروء',

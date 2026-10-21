@@ -55,7 +55,7 @@ const session = (id: string, overrides: Partial<Session> = {}): Session => ({
   ...overrides,
 });
 
-const resetSessions = () => {
+const resetSessions = (hasLoaded = true) => {
   useGlobalSessionsStore.setState({
     activeSessions: [],
     archivedSessions: [],
@@ -67,14 +67,14 @@ const resetSessions = () => {
       activeChildrenByParentId: new Map(),
       activeIdsByDirectory: new Map(),
     },
-    hasLoaded: false,
-    status: 'idle',
+    hasLoaded,
+    status: hasLoaded ? 'ready' : 'loading',
   });
 };
 
 /** Puts the given sessions into the store, the way the app holds them. */
-const setSessions = (sessions: Session[]) => {
-  resetSessions();
+const setSessions = (sessions: Session[], hasLoaded = true) => {
+  resetSessions(hasLoaded);
   useGlobalSessionsStore.getState().upsertSessions(sessions);
 };
 
@@ -154,6 +154,40 @@ describe('useSessionExportDialog', () => {
     await dialog.open('ses_root');
 
     expect(dialog.text()).not.toContain('Include sub-agent tasks');
+  });
+
+  test('a session list that is still loading says the coverage is unknown', async () => {
+    // The list arrives in pages, and it is the only place the lineage
+    // lives. A count taken from a partial list would name a number the
+    // document does not carry, so the dialog says the count is unknown.
+    setSessions([
+      session('ses_root', { title: 'Root' }),
+      session('ses_child', { title: 'Child', parentID: 'ses_root' }),
+    ], false);
+
+    const dialog = await renderHook();
+    await dialog.open('ses_root');
+
+    expect(dialog.text()).toContain('The session list is still loading');
+    expect(dialog.text()).not.toContain('1 sub-agent task');
+    expect(dialog.text()).toContain('Check again');
+  });
+
+  test('checking again counts the sub-agent tasks once the list is complete', async () => {
+    setSessions([
+      session('ses_root', { title: 'Root' }),
+      session('ses_child', { title: 'Child', parentID: 'ses_root' }),
+    ], false);
+
+    const dialog = await renderHook();
+    await dialog.open('ses_root');
+
+    // The list finished loading between the two looks at it.
+    useGlobalSessionsStore.setState({ hasLoaded: true });
+    await dialog.click('Check again');
+
+    expect(dialog.text()).toContain('1 sub-agent task');
+    expect(dialog.text()).toContain('Include sub-agent tasks');
   });
 
   test('the format and the detail level survive a closing', async () => {

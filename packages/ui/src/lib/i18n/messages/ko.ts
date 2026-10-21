@@ -756,6 +756,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.export.dialog.includeSubtasks': '서브 에이전트 작업 포함',
   'sessions.sidebar.session.export.dialog.confirm': '내보내기',
   'sessions.sidebar.session.export.dialog.descriptionNoSubtasks': '내보내기는 대화의 읽기 쉬운 기록이며, 서브 에이전트 작업이 해당 위치에 들어갑니다.',
+  'sessions.sidebar.session.export.dialog.descriptionIncomplete': '세션 목록을 아직 불러오는 중이라 서브에이전트 작업 수를 알 수 없습니다. 내보내기는 찾은 서브에이전트 작업은 포함합니다.',
+  'sessions.sidebar.session.export.dialog.retryCount': '다시 확인',
   'sessions.sidebar.session.export.dialog.format': '형식',
   'sessions.sidebar.session.export.dialog.detail': '세부 정보',
   'sessions.sidebar.session.export.dialog.detailReadable': '읽기 쉬움',

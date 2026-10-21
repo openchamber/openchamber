@@ -13,10 +13,11 @@
  */
 
 import type { ExportFinding, ExportSourceSession } from './events';
+import { readRecordedChildSessionIDs } from './childSession';
 
 /**
- * A session as the export reads it: the identity and the labels, without
- * the rest of the session record.
+ * A session as the export reads it: the identity and the labels, without the
+ * rest of the session record.
  */
 export type ExportSession = {
   id: string;
@@ -189,7 +190,7 @@ export const collectLoadedSessions = (options: {
     findings.push({
       kind: 'cyclic-lineage',
       sessionID: root.id,
-      detail: 'The session lineage points back at itself; the export stopped where the cycle begins.',
+      messageKey: 'export.finding.cyclicLineage',
     });
   }
 
@@ -198,7 +199,7 @@ export const collectLoadedSessions = (options: {
     findings.push({
       kind: 'load-failure',
       sessionID: root.id,
-      detail: 'The session history could not be loaded.',
+      messageKey: 'export.finding.loadFailure',
     });
     return { sessions: [], missing, findings };
   }
@@ -209,6 +210,7 @@ export const collectLoadedSessions = (options: {
     agent: root.agent,
     parentID: root.parentID,
     records: rootRecords,
+    createdAt: root.createdAt,
     depth: 0,
   }];
 
@@ -224,6 +226,7 @@ export const collectLoadedSessions = (options: {
       agent: session.agent,
       parentID: session.parentID,
       records: sessionRecords,
+      createdAt: session.createdAt,
       invocationKey: session.invocationKey,
       depth,
     });
@@ -238,6 +241,11 @@ export const collectLoadedSessions = (options: {
  *
  * A child that fails to load is recorded as missing and the export continues:
  * a partial history with an honest notice beats a failed export.
+ *
+ * The descendants come from two places. The session list names the lineage
+ * the client knows; the records themselves name the children whose calls and
+ * reports were recorded. A child that only the records name is loaded too, so
+ * an incomplete session list does not exclude a transcript that is there.
  */
 export const collectExportSessions = async (options: {
   root: ExportSession;
@@ -254,7 +262,7 @@ export const collectExportSessions = async (options: {
     findings.push({
       kind: 'cyclic-lineage',
       sessionID: root.id,
-      detail: 'The session lineage points back at itself; the export stopped where the cycle begins.',
+      messageKey: 'export.finding.cyclicLineage',
     });
   }
 
@@ -265,7 +273,7 @@ export const collectExportSessions = async (options: {
     findings.push({
       kind: 'load-failure',
       sessionID: root.id,
-      detail: 'The session history could not be loaded.',
+      messageKey: 'export.finding.loadFailure',
     });
     return { sessions: collected, missing, findings };
   }
@@ -282,19 +290,54 @@ export const collectExportSessions = async (options: {
 
   // The descendants are loaded in waves: a wide tree would otherwise open one
   // request per child at once.
+  //
+  // The queue grows while it is drained: a loaded session's own records name
+  // the children it started, and a child the session list does not mention is
+  // loaded as well. The waves stay the size limit, so a long lineage still
+  // loads in bounded batches.
   const queue = [...descendants];
+  const queued = new Set(queue.map((entry) => entry.session.id));
+  const loaded = new Set<string>([root.id]);
+
+  /**
+   * The children a session's own records name, that the export has not
+   * loaded yet.
+   *
+   * A child the session list does not mention is still a child the export
+   * can load: the call that started it recorded its id.
+   */
+  const enqueueRecordedChildren = (records: readonly ExportSourceRecord[], parentID: string, depth: number) => {
+    for (const record of records) {
+      for (const childSessionID of readRecordedChildSessionIDs(record)) {
+        if (loaded.has(childSessionID) || queued.has(childSessionID)) continue;
+        queued.add(childSessionID);
+        queue.push({
+          session: {
+            id: childSessionID,
+            title: childSessionID,
+            parentID,
+          },
+          depth,
+        });
+      }
+    }
+  };
+
+  enqueueRecordedChildren(rootRecords, root.id, 1);
+
   while (queue.length > 0) {
     const wave = queue.splice(0, MAX_CONCURRENT_LOADS);
-    const loaded = await Promise.all(wave.map(async ({ session, depth }) => {
+    const results = await Promise.all(wave.map(async ({ session, depth }) => {
       const records = await load(session.id).catch(() => null);
       return { session, depth, records };
     }));
 
-    for (const { session, depth, records } of loaded) {
+    for (const { session, depth, records } of results) {
       if (!records) {
         missing.push({ session, depth });
         continue;
       }
+      loaded.add(session.id);
       collected.push({
         sessionID: session.id,
         title: session.title,
@@ -305,6 +348,8 @@ export const collectExportSessions = async (options: {
         invocationKey: session.invocationKey,
         depth,
       });
+
+      enqueueRecordedChildren(records, session.id, depth + 1);
     }
   }
 

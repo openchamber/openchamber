@@ -723,6 +723,8 @@ export const dict = {
   'sessions.sidebar.session.export.dialog.includeSubtasks': 'כלול משימות של סוכני משנה',
   'sessions.sidebar.session.export.dialog.confirm': 'ייצא',
   'sessions.sidebar.session.export.dialog.descriptionNoSubtasks': 'הייצוא הוא תיעוד קריא של השיחה, עם עבודת סוכני המשנה במקומה.',
+  'sessions.sidebar.session.export.dialog.descriptionIncomplete': 'רשימת ההפעלות עדיין נטענת, ולכן מספר משימות התת-סוכנים עדיין אינו ידוע. הייצוא עדיין כולל את עבודת התת-סוכנים שנמצאה.',
+  'sessions.sidebar.session.export.dialog.retryCount': 'בדוק שוב',
   'sessions.sidebar.session.export.dialog.format': 'פורמט',
   'sessions.sidebar.session.export.dialog.detail': 'רמת פירוט',
   'sessions.sidebar.session.export.dialog.detailReadable': 'קריא',

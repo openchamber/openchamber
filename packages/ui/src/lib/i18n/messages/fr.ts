@@ -577,6 +577,8 @@ export const dict = {
   'sessions.sidebar.session.export.dialog.includeSubtasks': 'Inclure les tâches des sous-agents',
   'sessions.sidebar.session.export.dialog.confirm': 'Exporter',
   'sessions.sidebar.session.export.dialog.descriptionNoSubtasks': "L'exportation est un compte rendu lisible de la conversation, avec le travail des sous-agents à sa place.",
+  'sessions.sidebar.session.export.dialog.descriptionIncomplete': 'La liste des sessions est encore en cours de chargement, le nombre de tâches de sous-agent n’est donc pas encore connu. L’export inclut tout de même le travail de sous-agent qu’il trouve.',
+  'sessions.sidebar.session.export.dialog.retryCount': 'Revérifier',
   'sessions.sidebar.session.export.dialog.format': 'Format',
   'sessions.sidebar.session.export.dialog.detail': 'Détail',
   'sessions.sidebar.session.export.dialog.detailReadable': 'Lisible',

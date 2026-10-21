@@ -46,6 +46,26 @@ export const textPart = (messageID: string, content: string, id?: string): Part 
   text: content,
 });
 
+/**
+ * A text part that says when it was written.
+ *
+ * The time of a text part is what places a message among the parts of its
+ * own record: an answer that came after the work it describes says so.
+ */
+export const timedTextPart = (
+  messageID: string,
+  content: string,
+  start: number,
+  id?: string,
+): Part => ({
+  id: id ?? `${messageID}-text`,
+  sessionID: 'ses_root',
+  messageID,
+  type: 'text',
+  text: content,
+  time: { start },
+});
+
 export const userMessage = (sessionID: string, id: string, created: number, content: string): Record_ => ({
   info: { id, sessionID, role: 'user', time: { created } },
   parts: [{ ...textPart(id, content), sessionID }],

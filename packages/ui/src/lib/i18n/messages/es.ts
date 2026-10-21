@@ -757,6 +757,8 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.session.export.dialog.includeSubtasks": "Incluir tareas de subagente",
   "sessions.sidebar.session.export.dialog.confirm": "Exportar",
   'sessions.sidebar.session.export.dialog.descriptionNoSubtasks': 'La exportación es un registro legible de la conversación, con el trabajo de los subagentes en su sitio.',
+  'sessions.sidebar.session.export.dialog.descriptionIncomplete': 'La lista de sesiones todavía se está cargando, así que aún no se conoce el número de tareas de subagente. La exportación incluye igualmente el trabajo de subagente que encuentre.',
+  'sessions.sidebar.session.export.dialog.retryCount': 'Comprobar de nuevo',
   'sessions.sidebar.session.export.dialog.format': 'Formato',
   'sessions.sidebar.session.export.dialog.detail': 'Detalle',
   'sessions.sidebar.session.export.dialog.detailReadable': 'Legible',

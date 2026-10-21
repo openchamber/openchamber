@@ -735,7 +735,11 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
     const content = typeof (body as { content?: unknown }).content === 'string'
       ? (body as { content: string }).content
       : undefined;
-    const data = await sendBridgeMessage('api:files/save-markdown', { fileName, content });
+    // The format names the type of file the save dialog offers.
+    const format = typeof (body as { format?: unknown }).format === 'string'
+      ? (body as { format: string }).format
+      : undefined;
+    const data = await sendBridgeMessage('api:files/save-markdown', { fileName, content, format });
     return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
   }
 

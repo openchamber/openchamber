@@ -18,6 +18,7 @@
  */
 
 import type { JsonValue, Message, Part } from '@/lib/opencode/model';
+import type { I18nKey, I18nParams } from '@/lib/i18n';
 
 /** A session's identity and the labels a reader needs to recognize it. */
 export type ExportSessionInfo = {
@@ -43,11 +44,24 @@ type ExportEventOrigin = {
   /** The part's id, or the message id for a message-level event. */
   partID: string;
   /**
-   * The position of the source record in the source list. It is the tiebreaker
-   * for events that share a timestamp, and it keeps the export deterministic.
+   * The position of the source record in the source list, and the position of
+   * the part inside it.
+   *
+   * Both halves are one number, so every kind of event sorts on one scale:
+   * the record's place times a thousand, plus the part's place inside it. A
+   * message-level event and a tool call of the same record therefore keep the
+   * order the source gave them, whichever of the two the record holds first.
    */
   sourceOrder: number;
 };
+
+/**
+ * The scale one source record occupies in the source order.
+ *
+ * A record holds a handful of parts, so a thousand is more than any record
+ * needs and keeps a part's order inside its own record.
+ */
+export const SOURCE_ORDER_PART_SCALE = 1000;
 
 /** The kind of role a message carries, in the export's own vocabulary. */
 export type ExportRole =
@@ -96,6 +110,14 @@ export type ExportToolCall = {
   agent?: string;
   /** The prompt the call carried, when it had one. */
   prompt?: string;
+  /**
+   * Whether the call went to the background.
+   *
+   * A background call settles at once and its child keeps running, so the
+   * call's own span says nothing about when the work was done. The child
+   * reports its own completion later.
+   */
+  background?: boolean;
 };
 
 type ExportEventBase = {
@@ -122,8 +144,26 @@ type ExportMessageEvent = ExportEventBase & {
   text: string;
   /** The files the message carried, when it carried any. */
   attachments?: Array<{ filename?: string; mime: string; url: string }>;
+  /**
+   * The shell record's own result, when the message is a shell record.
+   *
+   * A shell record carries what the command printed, how it ended and the
+   * code it exited with. The export keeps them, so the readable view can say
+   * that a command failed instead of showing only the command.
+   */
+  shell?: ExportShellResult;
   /** The parts of the message, in their recorded order. */
   parts: ExportPart[];
+};
+
+/** A shell record's result, as the export carries it. */
+export type ExportShellResult = {
+  /** What the command printed, verbatim, when it printed anything. */
+  output?: string;
+  /** How the command ended, as the runtime recorded it. */
+  status?: string;
+  /** The code the command exited with, when it reported one. */
+  exit?: number;
 };
 
 type ExportToolEvent = ExportEventBase & {
@@ -159,7 +199,10 @@ type ExportGapEvent = ExportEventBase & {
   /** What the export knows about the missing session. */
   childSessionID?: string;
   reason: 'unavailable' | 'unresolved' | 'ambiguous';
-  detail: string;
+  /** The text of the notice, in the reader's language. */
+  messageKey: I18nKey;
+  /** The values the notice's text names. */
+  messageParams?: I18nParams;
 };
 
 export type ExportEvent =
@@ -198,8 +241,16 @@ export type ExportFinding = {
   sessionID?: string;
   /** The child session the finding is about, when it names one. */
   childSessionID?: string;
-  /** What the export knows, in one readable sentence. */
-  detail: string;
+  /**
+   * The text of the finding, in the reader's language.
+   *
+   * A finding is read by a person in the exported document, so it is written
+   * in the app's language: the renderer resolves `messageKey` when it writes
+   * the document, not when the pipeline records the finding.
+   */
+  messageKey: I18nKey;
+  /** The values the finding's text names. */
+  messageParams?: I18nParams;
 };
 
 /** The untouched source material of one session. */

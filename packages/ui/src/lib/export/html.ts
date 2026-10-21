@@ -16,8 +16,8 @@ import { getCurrentIntlLocale, type I18nKey } from '@/lib/i18n';
 import { readTimestamp } from './values';
 import type { ExportFinding } from './events';
 import { orderingGuarantee } from './order';
-import { exportText } from './i18n';
-import type { ProjectedEntry, ProjectedNode, ProjectedSubagent, ProjectionMode } from './project';
+import { exportText, findingText } from './i18n';
+import type { ProjectedEntry, ProjectedNode, ProjectedSubagent, ProjectedTool, ProjectionMode } from './project';
 
 /** Escapes text for an HTML text node or attribute. */
 const escapeHtml = (text: string): string => text
@@ -105,7 +105,7 @@ const STATUS_LABEL_KEYS = new Map<string, I18nKey>([
 /** One entry as the page's script needs it. */
 type EntryData = {
   id: string;
-  kind: 'message' | 'tool' | 'reasoning' | 'subagent-result' | 'gap' | 'task';
+  kind: 'message' | 'tool' | 'reasoning' | 'subagent-result' | 'gap' | 'task' | 'call';
   role?: string;
   agent?: string;
   model?: string;
@@ -134,8 +134,59 @@ type HtmlExportData = {
   tools: string[];
   statuses: string[];
   roles: string[];
-  /** The word the page counts its entries with, in the reader's language. */
-  entriesLabel: string;
+  /**
+   * The phrase the page counts its entries with, in the reader's language.
+   *
+   * The visible and the total counts are the two numbers of the phrase, and
+   * the order of the words is the language's business.
+   */
+  countLabel: string;
+};
+
+/**
+ * The text the page's search index holds for a tool call.
+ *
+ * The index holds what the page shows: a tool's arguments and metadata are
+ * on the page in the detailed view, so a search for a word that only appears
+ * there has to find the entry.
+ */
+const toolSearchText = (tool: ProjectedTool, mode: ProjectionMode): string => {
+  const parts = [
+    tool.name,
+    tool.description ?? '',
+    tool.output ?? '',
+    tool.error ?? '',
+    tool.prompt ?? '',
+    tool.target ?? '',
+    tool.command ?? '',
+  ];
+  if (mode === 'detailed') {
+    parts.push(JSON.stringify(tool.input));
+    if (tool.metadata) parts.push(JSON.stringify(tool.metadata));
+  }
+  return parts.join(' ');
+};
+
+/**
+ * The text the page's search index holds for one entry.
+ *
+ * The index holds what the page shows: a tool's arguments and metadata are
+ * on the page in the detailed view, so a search for a word that only appears
+ * there has to find the entry.
+ */
+const searchTextOf = (entry: ProjectedEntry, mode: ProjectionMode): string => {
+  switch (entry.kind) {
+    case 'message':
+      return `${entry.role} ${entry.text}`;
+    case 'tool':
+      return toolSearchText(entry.tool, mode);
+    case 'reasoning':
+      return entry.text;
+    case 'subagent-result':
+      return `${entry.state} ${entry.description ?? ''} ${entry.output}`;
+    case 'gap':
+      return entry.detail;
+  }
 };
 
 /**
@@ -143,11 +194,11 @@ type HtmlExportData = {
  *
  * The agent list is read off the entries themselves, not off the sessions:
  * the filter compares `data-agent` on the page with the chosen value, so the
- * list has to hold exactly the values the page carries. A message inside a
+ * list has to hold exactly the values the page carries. An entry inside a
  * sub-agent's block belongs to that sub-agent, and the page says so, so the
  * list names the sub-agent and not the agent the message happened to record.
  */
-const buildData = (nodes: ProjectedNode[]): HtmlExportData => {
+const buildData = (nodes: ProjectedNode[], mode: ProjectionMode): HtmlExportData => {
   const entries: EntryData[] = [];
   const subagents: SubagentData[] = [];
   const tools = new Set<string>();
@@ -165,6 +216,24 @@ const buildData = (nodes: ProjectedNode[]): HtmlExportData => {
           depth: node.depth,
         });
       }
+      // The call that started the sub-agent is shown in the block's header,
+      // not as a row of its own. Its own record is still searchable, so a
+      // word that only appears in the call's arguments finds the block. The
+      // detailed view is the one that shows the arguments, so the readable
+      // view does not promise them.
+      const call = node.dispatchedBy?.call;
+      if (call && mode === 'detailed') {
+        entries.push({
+          id: `${node.childSessionID}:call`,
+          kind: 'call',
+          agent: node.agent,
+          tool: call.name,
+          status: call.status,
+          search: toolSearchText(call, mode).toLowerCase(),
+          depth: node.depth,
+          timestamp: call.startedAt,
+        });
+      }
       subagents.push({
         id: node.childSessionID,
         title: node.title,
@@ -174,8 +243,9 @@ const buildData = (nodes: ProjectedNode[]): HtmlExportData => {
         endedAt: node.endedAt,
         concurrentWith: node.concurrentWith,
       });
+      // The block's own sequence holds the nested blocks too, so the
+      // entries are read from it and not from the child list as well.
       for (const entry of node.entries) visit(entry, node.agent);
-      for (const child of node.children) visit(child, node.agent);
       return;
     }
     visitEntry(node, owningAgent);
@@ -192,7 +262,7 @@ const buildData = (nodes: ProjectedNode[]): HtmlExportData => {
           role: entry.role,
           agent: owningAgent ?? entry.agent,
           model: entry.model,
-          search: `${entry.role} ${entry.text}`.toLowerCase(),
+          search: searchTextOf(entry, mode).toLowerCase(),
           depth: entry.depth,
           timestamp: entry.timestamp,
         });
@@ -206,8 +276,10 @@ const buildData = (nodes: ProjectedNode[]): HtmlExportData => {
           kind: 'tool',
           tool: entry.tool.name,
           status: entry.tool.status,
-          agent: entry.tool.agent,
-          search: `${entry.tool.name} ${entry.tool.description ?? ''} ${entry.tool.output ?? ''} ${entry.tool.error ?? ''} ${entry.tool.prompt ?? ''}`.toLowerCase(),
+          // The owner is the session the call ran in, not the agent the call
+          // asked for: a sub-agent's own tool calls belong to the sub-agent.
+          agent: owningAgent ?? entry.tool.agent,
+          search: searchTextOf(entry, mode).toLowerCase(),
           depth: entry.depth,
           timestamp: entry.timestamp,
         });
@@ -217,7 +289,7 @@ const buildData = (nodes: ProjectedNode[]): HtmlExportData => {
         entries.push({
           id,
           kind: 'reasoning',
-          search: entry.text.toLowerCase(),
+          search: searchTextOf(entry, mode).toLowerCase(),
           depth: entry.depth,
           timestamp: entry.timestamp,
         });
@@ -229,7 +301,7 @@ const buildData = (nodes: ProjectedNode[]): HtmlExportData => {
           id,
           kind: 'subagent-result',
           role: 'subagent-result',
-          search: `${entry.state} ${entry.description ?? ''} ${entry.output}`.toLowerCase(),
+          search: searchTextOf(entry, mode).toLowerCase(),
           depth: entry.depth,
           timestamp: entry.timestamp,
         });
@@ -239,7 +311,7 @@ const buildData = (nodes: ProjectedNode[]): HtmlExportData => {
         entries.push({
           id,
           kind: 'gap',
-          search: entry.detail.toLowerCase(),
+          search: searchTextOf(entry, mode).toLowerCase(),
           depth: entry.depth,
           timestamp: entry.timestamp,
         });
@@ -264,7 +336,7 @@ const buildData = (nodes: ProjectedNode[]): HtmlExportData => {
     tools: [...tools].sort(),
     statuses: [...statuses].sort(),
     roles: [...roles].sort(),
-    entriesLabel: exportText('export.html.entries'),
+    countLabel: exportText('export.html.count'),
   };
 };
 
@@ -277,10 +349,13 @@ const buildData = (nodes: ProjectedNode[]): HtmlExportData => {
 const renderEntryHtml = (entry: ProjectedEntry, mode: ProjectionMode, agentLabel?: string, agentKey?: string): string => {
   switch (entry.kind) {
     case 'message': {
-      const label = agentLabel ?? roleLabel(entry.role);
       // Inside a sub-agent's block the entry belongs to that sub-agent, so
       // the filter names the sub-agent and not the agent the message
-      // happened to record.
+      // happened to record. A message the subagent's user wrote keeps the
+      // role it was recorded with.
+      const label = agentLabel && entry.role === 'assistant'
+        ? agentLabel
+        : roleLabel(entry.role);
       const agent = agentKey ?? entry.agent ?? '';
       const time = formatTime(entry.timestamp);
       const model = entry.model;
@@ -294,9 +369,16 @@ const renderEntryHtml = (entry: ProjectedEntry, mode: ProjectionMode, agentLabel
       const body = entry.text
         ? `<div class="body">${escapeHtml(entry.text)}</div>`
         : '';
+      const shell = entry.shell
+        ? `<details><summary>${escapeHtml(exportText('export.section.result'))}</summary><pre>${escapeHtml([
+            entry.shell.output ?? '',
+            entry.shell.status ?? '',
+            entry.shell.exit !== undefined ? `exit ${entry.shell.exit}` : '',
+          ].filter(Boolean).join('\n'))}</pre></details>`
+        : '';
       return `<article class="entry message" data-id="${escapeHtml(entry.event.id)}" data-kind="message" data-role="${escapeHtml(entry.role)}" data-agent="${escapeHtml(agent)}" data-model="${escapeHtml(entry.model ?? '')}">
   <header><span class="role">${escapeHtml(label)}</span>${meta ? `<span class="meta">${meta}</span>` : ''}</header>
-  ${body}${attachments}
+  ${body}${attachments}${shell}
 </article>`;
     }
     case 'tool': {
@@ -328,7 +410,7 @@ const renderEntryHtml = (entry: ProjectedEntry, mode: ProjectionMode, agentLabel
           details.push(`<details><summary>${escapeHtml(exportText('export.section.metadata'))}</summary><pre>${escapeHtml(JSON.stringify(metadata, null, 2))}</pre></details>`);
         }
       }
-      return `<article class="entry tool" data-id="${escapeHtml(entry.event.id)}" data-kind="tool" data-tool="${escapeHtml(entry.tool.name)}" data-status="${escapeHtml(entry.tool.status)}" data-agent="${escapeHtml(entry.tool.agent ?? '')}">
+      return `<article class="entry tool" data-id="${escapeHtml(entry.event.id)}" data-kind="tool" data-tool="${escapeHtml(entry.tool.name)}" data-status="${escapeHtml(entry.tool.status)}" data-agent="${escapeHtml(agentKey ?? entry.tool.agent ?? '')}">
   <header><span class="tool-name">${escapeHtml(entry.tool.name)}</span>${meta ? `<span class="meta">${meta}</span>` : ''}</header>
   ${description ? `<div class="desc">${escapeHtml(description)}</div>` : ''}
   ${details.join('\n  ')}
@@ -383,6 +465,7 @@ const renderSubagentHtml = (subagent: ProjectedSubagent, mode: ProjectionMode, d
   const dispatchResult = mode === 'detailed' && dispatched?.output
     ? `<details><summary>${escapeHtml(exportText('export.dispatch.result'))}</summary><pre>${escapeHtml(dispatched.output)}</pre></details>`
     : '';
+  const dispatchDetails = renderDispatchCallDetails(subagent, mode);
 
   // The agent the call named, when it differs from the agent that ran: the
   // call asked for one agent, the session records the one that answered.
@@ -408,24 +491,63 @@ const renderSubagentHtml = (subagent: ProjectedSubagent, mode: ProjectionMode, d
   <pre>${escapeHtml(subagent.task)}</pre>
 </article>`
     : '';
-  const entries = subagent.entries
-    .map((entry) => renderEntryHtml(entry, mode, agentLabel, subagent.agent))
+
+  // The block's own sequence: the subagent's records and the blocks of the
+  // subagents it started, in the order they happened. A nested block sits at
+  // the call that started it, not after everything the parent said.
+  const own = subagent.entries
+    .map((entry) => (entry.kind === 'subagent'
+      ? renderSubagentHtml(entry, mode, depth + 1)
+      : renderEntryHtml(entry, mode, agentLabel, subagent.agent)))
     .filter(Boolean)
     .join('\n');
-  const children = subagent.children
-    .map((child) => renderSubagentHtml(child, mode, depth + 1))
-    .join('\n');
 
+  // The transcript folds away: the reader who wants the thread opens it.
+  // A native details element does that without any script, so the page
+  // works offline, and the entries inside stay in the document, so the
+  // search and the filters still reach them.
   return `<section class="subagent depth-${depth}" data-id="${escapeHtml(subagent.childSessionID)}" data-agent="${escapeHtml(subagent.agent ?? '')}">
-  <h2>${escapeHtml(label)} ${title}${meta ? `<span class="meta">${meta}</span>` : ''}</h2>
+  <details open><summary><span class="subagent-summary">${escapeHtml(label)} ${title}${meta ? `<span class="meta">${meta}</span>` : ''}</span></summary>
   ${concurrent}
   ${dispatchNote}
   ${dispatchResult}
+  ${dispatchDetails}
   ${invoked}
   ${task}
-${entries}
-${children}
+${own}
+  </details>
 </section>`;
+};
+
+/**
+ * The call that started a sub-agent, as the detailed view shows it.
+ *
+ * The call's arguments, its metadata and its identifier are the record of
+ * what the parent asked for. The call is an entry of its own, so a search
+ * for a word in the arguments keeps the call and hides the rest of the
+ * block.
+ */
+const renderDispatchCallDetails = (
+  subagent: ProjectedSubagent,
+  mode: ProjectionMode,
+): string => {
+  const call = subagent.dispatchedBy?.call;
+  if (!call || mode !== 'detailed') return '';
+  const details: string[] = [];
+  if (Object.keys(call.input).length > 0) {
+    details.push(`<details><summary>${escapeHtml(exportText('export.section.input'))}</summary><pre>${escapeHtml(JSON.stringify(call.input, null, 2))}</pre></details>`);
+  }
+  if (call.metadata && Object.keys(call.metadata).length > 0) {
+    details.push(`<details><summary>${escapeHtml(exportText('export.section.metadata'))}</summary><pre>${escapeHtml(JSON.stringify(call.metadata, null, 2))}</pre></details>`);
+  }
+  if (call.callID) {
+    details.push(`<details><summary>${escapeHtml(exportText('export.section.callId'))}</summary><pre>${escapeHtml(call.callID)}</pre></details>`);
+  }
+  if (details.length === 0) return '';
+  return `<article class="entry call" data-id="${escapeHtml(`${subagent.childSessionID}:call`)}" data-kind="call" data-tool="${escapeHtml(call.name)}" data-status="${escapeHtml(call.status)}" data-agent="${escapeHtml(subagent.agent ?? '')}">
+  <header><span class="tool-name">${escapeHtml(call.name)}</span><span class="meta"><span>${escapeHtml(statusLabel(call.status))}</span></span></header>
+  ${details.join('\n  ')}
+</article>`;
 };
 
 /** The page's own stylesheet. */
@@ -468,7 +590,7 @@ h3 { font-size: .95rem; margin: 0 0 .35rem; }
   position: sticky; top: 0; z-index: 5; background: var(--bg);
   border-bottom: 1px solid var(--border); padding: .6rem 0; margin-bottom: 1rem;
 }
-.bar .row { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; }
+.bar .row { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
 input[type="search"], select {
   font: inherit; font-size: .85rem; padding: .35rem .5rem;
   border: 1px solid var(--border); border-radius: .35rem; background: var(--bg); color: var(--fg);
@@ -488,6 +610,7 @@ summary { cursor: pointer; font-size: .85rem; color: var(--accent); }
 .subagent { border-left: 3px solid var(--accent); padding-left: .8rem; margin: 1rem 0 1.2rem; }
 .subagent.depth-2 { border-left-color: #9a6ef0; }
 .subagent.depth-3 { border-left-color: #3fa7a0; }
+.subagent > details > summary { font-size: 1.05rem; display: flex; gap: .5rem; align-items: baseline; flex-wrap: wrap; color: var(--fg); }
 .subagent .subagent-title { color: var(--muted); font-weight: 400; font-size: .9rem; }
 .files { margin: .5rem 0 0; padding-left: 1.1rem; color: var(--muted); font-size: .85rem; }
 .integrity { border: 1px solid var(--border); border-left: 3px solid #d08700; border-radius: .5rem; padding: .7rem .85rem; margin-top: 1.5rem; background: var(--card); }
@@ -503,6 +626,7 @@ const SCRIPT = `
 (function () {
   var data = JSON.parse(document.getElementById('export-data').textContent);
   var entries = Array.prototype.slice.call(document.querySelectorAll('.entry'));
+  var sections = Array.prototype.slice.call(document.querySelectorAll('.subagent'));
   var byId = {};
   data.entries.forEach(function (item) { byId[item.id] = item; });
 
@@ -547,7 +671,22 @@ const SCRIPT = `
       if (matches) visible += 1;
     });
 
-    count.textContent = visible + ' of ' + entries.length + ' ' + data.entriesLabel;
+    // A section whose entries are all hidden is hidden too, so an empty
+    // sub-agent block does not sit on the page while the reader searches.
+    // The deepest sections go first, so a parent is judged by what is left
+    // inside it. A section's own entries are the ones it holds directly; the
+    // entries of a nested block belong to that block.
+    sections.slice().reverse().forEach(function (section) {
+      var own = Array.prototype.slice.call(section.querySelectorAll('.entry')).filter(function (entry) {
+        return !entry.closest('.subagent') || entry.closest('.subagent') === section;
+      });
+      var anyVisible = own.some(function (entry) { return !entry.classList.contains('hidden'); });
+      section.classList.toggle('hidden', !anyVisible);
+    });
+
+    count.textContent = data.countLabel
+      .replace('{visible}', String(visible))
+      .replace('{total}', String(entries.length));
   }
 
   [search, agentFilter, toolFilter, statusFilter, roleFilter].forEach(function (control) {
@@ -572,7 +711,7 @@ export const renderExportHtml = (
   nodes: ProjectedNode[],
   options: HtmlRenderOptions,
 ): string => {
-  const data = buildData(nodes);
+  const data = buildData(nodes, options.mode);
   const body = nodes
     .map((node) => (node.kind === 'subagent'
       ? renderSubagentHtml(node, options.mode, node.depth)
@@ -586,7 +725,7 @@ export const renderExportHtml = (
   <p>${escapeHtml(options.findings.length === 1
     ? exportText('export.integrity.summarySingle')
     : exportText('export.integrity.summaryPlural', { count: options.findings.length }))}</p>
-  <ul>${options.findings.map((finding) => `<li>${escapeHtml(finding.detail)}</li>`).join('')}</ul>
+  <ul>${options.findings.map((finding) => `<li>${escapeHtml(findingText(finding.messageKey, finding.messageParams))}</li>`).join('')}</ul>
 </section>`
     : '';
 

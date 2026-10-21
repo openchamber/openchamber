@@ -35,10 +35,25 @@ type ExportSessionDialogProps = {
   onModeChange: (mode: ProjectionMode) => void;
   /** How many sub-agent tasks the session has, when it has any. */
   descendantCount?: number;
+  /**
+   * Whether the session list the count came from is the whole list.
+   *
+   * The list arrives in pages, and it is the only place the lineage lives.
+   * A count taken from a list that is still loading is not the number of
+   * sub-agent tasks the session has, so the dialog says so instead.
+   */
+  sessionListComplete?: boolean;
   /** Whether the sub-agent tasks are part of the export. */
   includeSubagents: boolean;
   onIncludeSubagentsChange: (include: boolean) => void;
   onConfirm: (format: ExportFormat, mode: ProjectionMode, includeSubagents: boolean) => void;
+  /**
+   * Called when the reader asks for the count again.
+   *
+   * The count comes from the session list, and the list is still loading.
+   * Asking again reads the list as it is now.
+   */
+  onRetryCount?: () => void;
   /** Whether the export is running. */
   busy?: boolean;
 };
@@ -65,9 +80,11 @@ export const ExportSessionDialog: React.FC<ExportSessionDialogProps> = ({
   mode,
   onModeChange,
   descendantCount = 0,
+  sessionListComplete = true,
   includeSubagents,
   onIncludeSubagentsChange,
   onConfirm,
+  onRetryCount,
   busy = false,
 }) => {
   const { t } = useI18n();
@@ -84,11 +101,13 @@ export const ExportSessionDialog: React.FC<ExportSessionDialogProps> = ({
         <DialogHeader>
           <DialogTitle>{t('sessions.sidebar.session.export.dialog.title')}</DialogTitle>
           <DialogDescription>
-            {hasSubagents
-              ? (descendantCount === 1
-                ? t('sessions.sidebar.session.export.dialog.descriptionSingle', { count: descendantCount })
-                : t('sessions.sidebar.session.export.dialog.descriptionMany', { count: descendantCount }))
-              : t('sessions.sidebar.session.export.dialog.descriptionNoSubtasks')}
+            {!sessionListComplete
+              ? t('sessions.sidebar.session.export.dialog.descriptionIncomplete')
+              : hasSubagents
+                ? (descendantCount === 1
+                  ? t('sessions.sidebar.session.export.dialog.descriptionSingle', { count: descendantCount })
+                  : t('sessions.sidebar.session.export.dialog.descriptionMany', { count: descendantCount }))
+                : t('sessions.sidebar.session.export.dialog.descriptionNoSubtasks')}
           </DialogDescription>
         </DialogHeader>
 
@@ -156,6 +175,12 @@ export const ExportSessionDialog: React.FC<ExportSessionDialogProps> = ({
             />
             {t('sessions.sidebar.session.export.dialog.includeSubtasks')}
           </label>
+        ) : null}
+
+        {!sessionListComplete ? (
+          <Button type="button" onClick={onRetryCount} variant="outline" size="sm" className="self-start">
+            {t('sessions.sidebar.session.export.dialog.retryCount')}
+          </Button>
         ) : null}
 
         <DialogFooter>

@@ -14,6 +14,7 @@
 
 import type { ExportEvent, ExportFinding, ExportSessionInfo, ExportTimeline } from './events';
 import { readTimestamp } from './values';
+import { orderByRecordedTime } from './ordering';
 import { exportText } from './i18n';
 
 /** One entry of the export's spine: a single event, or a subagent's block. */
@@ -25,7 +26,14 @@ export type ExportNode =
       session: ExportSessionInfo;
       /** How deep the subagent sits below the exported root. */
       depth: number;
-      /** The subagent's own history, in order. */
+      /**
+       * The subagent's own history, in order.
+       *
+       * The sequence is mixed: a subagent's own records and the blocks of
+       * the subagents it started share one list, so a nested block sits at
+       * the call that started it rather than after everything the parent
+       * said.
+       */
       children: ExportNode[];
       /** When the subagent's work started, when the source recorded it. */
       startedAt?: number;
@@ -52,6 +60,13 @@ export type ExportNode =
         output?: string;
         /** When the call settled, when the source recorded it. */
         endedAt?: number;
+        /**
+         * The call itself, verbatim.
+         *
+         * The call's own arguments, metadata and identifier are the record
+         * of what the parent asked for. The detailed view shows them.
+         */
+        call?: ExportEvent & { kind: 'tool' };
       };
       /** Further calls that named the same session, which resumed it. */
       resumedBy?: Array<{ sessionID: string; partID: string; timestamp?: number }>;
@@ -76,27 +91,22 @@ type Sortable = {
   sessionID: string;
 };
 
-const sortKey = (item: Sortable): [number, number, string] => [
-  item.timestamp ?? Number.MAX_SAFE_INTEGER,
-  item.sourceOrder,
-  item.sessionID,
-];
+/**
+ * The events of one session in the order the export writes them.
+ *
+ * The order comes from the recorded times, and an event without a time keeps
+ * the place the source gave it: it stays between the timed events around it
+ * instead of jumping to the end of the session.
+ */
+const orderedEvents = (events: readonly ExportEvent[]): ExportEvent[] => orderByRecordedTime(
+  events.map((event) => ({
+    event,
+    timestamp: event.timestamp,
+    sourceOrder: event.origin.sourceOrder,
+    sessionID: event.sessionID,
+  })),
+).map((entry) => entry.event);
 
-/** Orders by timestamp, then by the order the source recorded. */
-const compare = (left: Sortable, right: Sortable): number => {
-  const [leftTime, leftOrder, leftSession] = sortKey(left);
-  const [rightTime, rightOrder, rightSession] = sortKey(right);
-  if (leftTime !== rightTime) return leftTime - rightTime;
-  if (leftOrder !== rightOrder) return leftOrder - rightOrder;
-  return leftSession.localeCompare(rightSession);
-};
-
-/** The sort key of an event. */
-const eventKey = (event: ExportEvent): Sortable => ({
-  timestamp: event.timestamp,
-  sourceOrder: event.origin.sourceOrder,
-  sessionID: event.sessionID,
-});
 
 /**
  * The order the export reports events in, stated for the reader: timestamps
@@ -132,7 +142,8 @@ export const buildExportTree = (timeline: ExportTimeline): ExportTree => {
         kind: 'resumed-session',
         sessionID: event.sessionID,
         childSessionID,
-        detail: `More than one call names the sub-agent session "${childSessionID}"; its transcript appears once.`,
+        messageKey: 'export.finding.resumedSessionBlock',
+        messageParams: { id: childSessionID },
       });
       const resumed = resumedByChildID.get(childSessionID) ?? [];
       resumed.push({
@@ -185,12 +196,6 @@ export const buildExportTree = (timeline: ExportTimeline): ExportTree => {
       return true;
     });
 
-    const children: ExportNode[] = [];
-    for (const child of childSessionIDsByParent.get(childSessionID) ?? []) {
-      const block = buildBlock(child, depth + 1, nextSeen);
-      if (block) children.push(block);
-    }
-
     const dispatch = dispatchByChildID.get(childSessionID);
     if (dispatch) consumedDispatchEvents.add(dispatch.event.id);
 
@@ -206,7 +211,7 @@ export const buildExportTree = (timeline: ExportTimeline): ExportTree => {
     // times are the work's times. A background call settles at once, so its
     // span says nothing and the child's own events do.
     const dispatchCall = dispatch?.event.kind === 'tool' ? dispatch.event.call : undefined;
-    const background = dispatchCall?.status === 'running';
+    const background = dispatchCall?.background === true;
     const times = own
       .map((event) => event.timestamp)
       .filter((value): value is number => readTimestamp(value) !== undefined);
@@ -218,18 +223,42 @@ export const buildExportTree = (timeline: ExportTimeline): ExportTree => {
       ? dispatchCall.endedAt
       : (times.length > 0 ? Math.max(...times) : undefined);
 
+    // The nested blocks sit in the parent's own sequence, at the call that
+    // started them. A parent that delegated work and then answered keeps the
+    // answer after the work it depends on.
+    const childBlocks: SubagentBlock[] = [];
+    for (const child of childSessionIDsByParent.get(childSessionID) ?? []) {
+      const block = buildBlock(child, depth + 1, nextSeen);
+      if (block) childBlocks.push(block);
+    }
+
+    const ownNodes: ExportNode[] = orderedEvents(
+      own.filter((event) => !consumedDispatchEvents.has(event.id)),
+    ).map((event): ExportNode => ({ kind: 'event', event }));
+
+    // A nested block takes the place of the call that started it, so the
+    // sequence stays one list: the parent's own records and the work it
+    // delegated, in the order they happened. The block's place comes from
+    // the call's own record, and the call's record is one of the parent's
+    // own records, so the two never disagree.
+    const nodes = orderByRecordedTime(
+      [...ownNodes, ...childBlocks].map((node) => {
+        const position = positionInSequence(node);
+        return {
+          node,
+          timestamp: position.timestamp,
+          sourceOrder: position.sourceOrder,
+          sessionID: position.sessionID,
+        };
+      }),
+    ).map((entry) => entry.node);
+
     return {
       kind: 'subagent',
       childSessionID,
       session,
       depth,
-      children: [
-        ...own
-          .filter((event) => !consumedDispatchEvents.has(event.id))
-          .sort((left, right) => compare(eventKey(left), eventKey(right)))
-          .map((event): ExportNode => ({ kind: 'event', event })),
-        ...children,
-      ],
+      children: nodes,
       startedAt,
       endedAt,
       dispatchedBy: dispatch
@@ -243,9 +272,36 @@ export const buildExportTree = (timeline: ExportTimeline): ExportTree => {
             error: dispatch.event.kind === 'tool' ? dispatch.event.call.error : undefined,
             output: dispatch.event.kind === 'tool' ? dispatch.event.call.output : undefined,
             endedAt: dispatch.event.kind === 'tool' ? dispatch.event.call.endedAt : undefined,
+            // The call itself, so the detailed view can show its arguments,
+            // its metadata and its identifier.
+            call: dispatch.event.kind === 'tool' ? dispatch.event : undefined,
           }
         : undefined,
       resumedBy: resumedByChildID.get(childSessionID),
+    };
+  };
+
+  /**
+   * Where a node sits in its parent's sequence.
+   *
+   * A block sits where its call sat, so the call's place in the parent's
+   * recorded order decides between a block and the messages around it. A
+   * block with no call to anchor it falls back to the time its own work
+   * started.
+   */
+  const positionInSequence = (node: ExportNode): Sortable => {
+    if (node.kind === 'event') {
+      return {
+        timestamp: node.event.timestamp,
+        sourceOrder: node.event.origin.sourceOrder,
+        sessionID: node.event.sessionID,
+      };
+    }
+    const dispatched = node.dispatchedBy;
+    return {
+      timestamp: dispatched?.timestamp ?? node.startedAt,
+      sourceOrder: dispatched?.sourceOrder ?? Number.MAX_SAFE_INTEGER,
+      sessionID: node.session.id,
     };
   };
 
@@ -281,44 +337,38 @@ export const buildExportTree = (timeline: ExportTimeline): ExportTree => {
 
   // The root session's own events, with the calls that started a block
   // removed: the block's header carries that call.
-  const rootEvents = (eventsBySession.get(timeline.rootSessionID) ?? [])
-    .filter((event) => !consumedDispatchEvents.has(event.id))
-    .filter((event) => !consumedResultEvents.has(event.id) || event.kind !== 'subagent-result')
-    .sort((left, right) => compare(eventKey(left), eventKey(right)))
-    .map((event): ExportNode => ({ kind: 'event', event }));
+  const rootEvents = orderedEvents(
+    (eventsBySession.get(timeline.rootSessionID) ?? [])
+      .filter((event) => !consumedDispatchEvents.has(event.id))
+      .filter((event) => !consumedResultEvents.has(event.id) || event.kind !== 'subagent-result'),
+  ).map((event): ExportNode => ({ kind: 'event', event }));
 
   // A child's result that the parent recorded belongs to the parent's flow,
   // so it is restored there.
-  const rootResults = (eventsBySession.get(timeline.rootSessionID) ?? [])
-    .filter((event) => event.kind === 'subagent-result')
-    .sort((left, right) => compare(eventKey(left), eventKey(right)))
-    .map((event): ExportNode => ({ kind: 'event', event }));
+  const rootResults = orderedEvents(
+    (eventsBySession.get(timeline.rootSessionID) ?? [])
+      .filter((event) => event.kind === 'subagent-result'),
+  ).map((event): ExportNode => ({ kind: 'event', event }));
 
   const rootEventIDs = new Set(rootEvents.map((node) => (node.kind === 'event' ? node.event.id : '')));
   const missingResults = rootResults.filter((node) => node.kind === 'event' && !rootEventIDs.has(node.event.id));
 
-  /** Where a node sits in the parent's flow. */
-  const positionOf = (node: ExportNode): Sortable => {
-    if (node.kind === 'event') {
-      return { timestamp: node.event.timestamp, sourceOrder: node.event.origin.sourceOrder, sessionID: timeline.rootSessionID };
-    }
-    const dispatched = node.dispatchedBy;
-    return {
-      timestamp: dispatched?.timestamp ?? node.startedAt,
-      // A block sits where its call sat, so the call's place in the parent's
-      // recorded order decides between a block and the messages around it.
-      sourceOrder: dispatched?.sourceOrder ?? Number.MAX_SAFE_INTEGER,
-      sessionID: timeline.rootSessionID,
-    };
-  };
-
-  const nodes = [...rootEvents, ...missingResults, ...anchored].sort((left, right) => (
-    compare(positionOf(left), positionOf(right))
-  ));
+  // The spine is the root's own events and the blocks of the sub-agents it
+  // started, in one order. An event without a recorded time keeps the place
+  // the source gave it, so the whole spine is ordered by the same rule the
+  // events inside it are.
+  const spine = orderByRecordedTime(
+    [...rootEvents, ...missingResults, ...anchored].map((node) => ({
+      node,
+      timestamp: positionInSequence(node).timestamp,
+      sourceOrder: positionInSequence(node).sourceOrder,
+      sessionID: positionInSequence(node).sessionID,
+    })),
+  ).map((entry) => entry.node);
 
   return {
     rootSessionID: timeline.rootSessionID,
-    nodes: markConcurrency([...nodes, ...anchorless]),
+    nodes: markConcurrency([...spine, ...anchorless]),
     sessions: timeline.sessions,
     findings,
   };

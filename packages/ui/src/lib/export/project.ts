@@ -14,7 +14,8 @@
 import { normalizeToolName } from '@/lib/opencode/tools';
 import type { JsonValue } from '@/lib/opencode/model';
 import { readTextField } from './values';
-import type { ExportEvent, ExportToolCall } from './events';
+import { findingText } from './i18n';
+import type { ExportEvent, ExportShellResult, ExportToolCall } from './events';
 import type { ExportNode, ExportTree } from './order';
 
 /** How a tool call appears in the readable view. */
@@ -45,7 +46,7 @@ export type ProjectedTool = {
   childSessionID?: string;
   /** The prompt the call carried, when it had one. */
   prompt?: string;
-  /** The agent the call ran, when it ran one. */
+  /** The agent the call asked for, when it asked for one. */
   agent?: string;
   /** The call's description, as the model wrote it. */
   descriptionText?: string;
@@ -53,6 +54,8 @@ export type ProjectedTool = {
   input: Record<string, JsonValue>;
   /** The call's result metadata, verbatim, when the runtime reported it. */
   metadata?: Record<string, JsonValue>;
+  /** The call's own identifier, as the runtime recorded it. */
+  callID?: string;
 };
 
 /** One projected entry of the export. */
@@ -68,6 +71,8 @@ export type ProjectedEntry =
       variant?: string;
       timestamp?: number;
       depth: number;
+      /** The shell record's own result, when the record is a shell record. */
+      shell?: ExportShellResult;
     }
   | {
       kind: 'tool';
@@ -124,6 +129,8 @@ export type ProjectedSubagent = {
     output?: string;
     /** When the call settled, when the source recorded it. */
     endedAt?: number;
+    /** The call itself, so the detailed view can show it in full. */
+    call?: ProjectedTool;
   };
   resumedBy?: Array<{ sessionID: string; timestamp?: number }>;
   concurrentWith?: string[];
@@ -145,8 +152,29 @@ export type ProjectedSubagent = {
    * asked, and the call only knows what it asked for.
    */
   task?: string;
-  /** The entries, without the message the task came from. */
-  entries: ProjectedEntry[];
+  /**
+   * The task's own record, when the child session recorded one.
+   *
+   * The task is the child's first prompt. Keeping the record itself means
+   * the task's attachments, its time and its role survive into the export
+   * instead of being reduced to its text.
+   */
+  taskEntry?: ProjectedEntry & { kind: 'message' };
+  /**
+   * The subagent's own history, in order.
+   *
+   * The sequence is mixed: the subagent's own records and the blocks of the
+   * subagents it started share one list, so a nested block sits at the call
+   * that started it rather than after everything the parent said.
+   */
+  entries: ProjectedNode[];
+  /**
+   * The subagents this one started, in the order they were started.
+   *
+   * The blocks are also in `entries`, at the place they belong. This list
+   * names them on their own, for a reader that wants the tree rather than
+   * the thread.
+   */
   children: ProjectedSubagent[];
 };
 
@@ -222,6 +250,7 @@ const projectTool = (call: ExportToolCall, mode: ProjectionMode): ProjectedTool 
     descriptionText,
     input: call.input,
     metadata: call.metadata,
+    callID: call.callID,
     outputTruncated: false,
     outputOmitted: false,
   };
@@ -263,6 +292,7 @@ const projectEvent = (event: ExportEvent, mode: ProjectionMode): ProjectedEntry 
         variant: event.variant,
         timestamp: event.timestamp,
         depth: event.depth,
+        shell: event.shell,
       };
     case 'tool':
       return {
@@ -296,7 +326,7 @@ const projectEvent = (event: ExportEvent, mode: ProjectionMode): ProjectedEntry 
         kind: 'gap',
         event,
         reason: event.reason,
-        detail: event.detail,
+        detail: findingText(event.messageKey, event.messageParams),
         depth: event.depth,
         timestamp: event.timestamp,
       };
@@ -306,32 +336,39 @@ const projectEvent = (event: ExportEvent, mode: ProjectionMode): ProjectedEntry 
 /**
  * Projects a node of the export tree.
  *
- * A subagent's block keeps its own entries and its own subagents apart, so a
- * reader follows one thread down instead of jumping between sections.
+ * A subagent's block keeps one sequence: its own records and the blocks of
+ * the subagents it started share it, so a reader follows one thread down
+ * instead of jumping between sections.
  */
 const projectNode = (node: ExportNode, mode: ProjectionMode): ProjectedNode | null => {
   if (node.kind === 'event') {
     return projectEvent(node.event, mode);
   }
 
-  const entries: ProjectedEntry[] = [];
+  const sequence: ProjectedNode[] = [];
   const children: ProjectedSubagent[] = [];
   for (const child of node.children) {
     const projected = projectNode(child, mode);
     if (!projected) continue;
     if (projected.kind === 'subagent') children.push(projected);
-    else entries.push(projected);
+    sequence.push(projected);
   }
 
   // The subagent's first prompt is the task it was given. It is shown as
   // the task, not as a second message, so the delegation reads as one thing.
-  const first = entries[0];
-  const task = first && first.kind === 'message' && first.role === 'user'
-    ? first.text
+  // The record itself is kept, so the task's attachments, its time and its
+  // role survive into the export — a prompt that carried only a file is
+  // still a task.
+  const first = sequence[0];
+  const taskEntry = first && first.kind === 'message' && first.role === 'user'
+    ? first
+    : undefined;
+  const task = taskEntry
+    ? taskEntry.text
     : node.dispatchedBy?.task;
-  const rest = first && first.kind === 'message' && first.role === 'user'
-    ? entries.slice(1)
-    : entries;
+  const rest = taskEntry
+    ? sequence.slice(1)
+    : sequence;
 
   return {
     kind: 'subagent',
@@ -341,12 +378,20 @@ const projectNode = (node: ExportNode, mode: ProjectionMode): ProjectedNode | nu
     depth: node.depth,
     startedAt: node.startedAt,
     endedAt: node.endedAt,
-    dispatchedBy: node.dispatchedBy,
+    dispatchedBy: node.dispatchedBy
+      ? {
+          ...node.dispatchedBy,
+          call: node.dispatchedBy.call
+            ? projectTool(node.dispatchedBy.call.call, mode)
+            : undefined,
+        }
+      : undefined,
     resumedBy: node.resumedBy,
     concurrentWith: node.concurrentWith,
     invokedAs: node.session.invokedAs,
     invokedDescription: node.session.invokedDescription,
     task: task || undefined,
+    taskEntry,
     entries: rest,
     children,
   };

@@ -118,13 +118,16 @@ export const useSessionExport = (): UseSessionExport => {
         if (sessionID === target.sessionID) return rootRecords;
         return load(sessionID);
       },
+      // The sub-agent transcripts the user left out are excluded on purpose.
+      // The export says so, rather than reporting them as missing.
+      includeSubagents: choice.includeSubagents,
     }, choice.mode);
 
     const document = renderExportDocument(result, choice.format, choice.mode, target.title);
     const skipped = result.timeline.findings.filter((finding) => finding.kind === 'missing-session').length;
 
     const filename = buildExportFilename(target.title, EXTENSIONS.get(choice.format) ?? 'md');
-    const savedPath = await saveAsMarkdownDesktop(document, filename);
+    const savedPath = await saveAsMarkdownDesktop(document, filename, choice.format);
     if (!savedPath) {
       downloadAsText(document, filename, MIME_TYPES.get(choice.format) ?? 'text/plain');
     }

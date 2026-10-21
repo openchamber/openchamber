@@ -18,7 +18,7 @@ import { getCurrentIntlLocale, type I18nKey } from '@/lib/i18n';
 import { readTimestamp } from './values';
 import type { ExportFinding } from './events';
 import { orderingGuarantee } from './order';
-import { exportText } from './i18n';
+import { exportText, findingText } from './i18n';
 import type { ProjectedEntry, ProjectedNode, ProjectedSubagent, ProjectionMode } from './project';
 
 /** The clock time of a timestamp, in the reader's locale. */
@@ -112,10 +112,22 @@ const messageHeading = (entry: ProjectedEntry & { kind: 'message' }, model?: str
   return model ? `### ${head} — ${model}` : `### ${head}`;
 };
 
-/** The line a subagent's own message gets. */
-const subagentMessageLine = (entry: ProjectedEntry & { kind: 'message' }, label: string, model?: string): string => {
+/**
+ * The line a subagent's own message gets.
+ *
+ * A message the subagent itself wrote carries the subagent's own name, the
+ * way the orchestrator's messages carry the orchestrator's. A message the
+ * user wrote inside the subagent's session, or a record the runtime added,
+ * keeps the role it was recorded with: it was not the subagent speaking.
+ */
+const subagentMessageLine = (
+  entry: ProjectedEntry & { kind: 'message' },
+  label: string,
+  model?: string,
+): string => {
   const time = timeLabel(entry.timestamp);
-  const head = time ? `${time} · ${label}` : label;
+  const speaker = entry.role === 'assistant' ? label : roleLabel(entry.role);
+  const head = time ? `${time} · ${speaker}` : speaker;
   return model ? `**${head} — ${model}**` : `**${head}**`;
 };
 
@@ -145,6 +157,18 @@ const toolLine = (tool: ProjectedNode & { kind: 'tool' }): string => {
   return `*${parts.join(' · ')}*`;
 };
 
+/**
+ * The files a message carried, as a list.
+ *
+ * A message that carried only files has no text but is not empty: the files
+ * are what it said.
+ */
+const attachmentList = (entry: ProjectedEntry & { kind: 'message' }): string => (
+  entry.attachments?.length
+    ? entry.attachments.map((file) => `- ${file.filename ?? file.mime}`).join('\n')
+    : ''
+);
+
 type MarkdownRenderOptions = {
   title: string;
   mode: ProjectionMode;
@@ -161,11 +185,21 @@ const renderEntry = (entry: ProjectedEntry, mode: ProjectionMode, model?: string
     case 'message': {
       const heading = messageHeading(entry, model);
       const body = entry.text.trim();
-      const attachments = entry.attachments?.length
-        ? entry.attachments.map((file) => `- ${file.filename ?? file.mime}`).join('\n')
-        : '';
+      const attachments = attachmentList(entry);
       if (!body && !attachments) return '';
-      return [heading, body, attachments].filter(Boolean).join('\n\n');
+      const sections = [heading];
+      if (body) sections.push(body);
+      if (attachments) sections.push(attachments);
+      if (entry.shell) {
+        const shell = entry.shell;
+        const result = [
+          shell.output ? asQuote(shell.output) : '',
+          shell.status ? exportText('export.shell.status', { status: shell.status }) : '',
+          shell.exit !== undefined ? exportText('export.shell.exit', { code: shell.exit }) : '',
+        ].filter(Boolean).join('\n\n');
+        if (result) sections.push(`**${exportText('export.section.result')}**\n\n${result}`);
+      }
+      return sections.join('\n\n');
     }
     case 'tool': {
       const line = toolLine(entry);
@@ -226,6 +260,30 @@ const renderEntry = (entry: ProjectedEntry, mode: ProjectionMode, model?: string
 };
 
 /**
+ * Renders the call that started a sub-agent, when the detailed view shows
+ * the call's own record.
+ *
+ * The call's arguments, its metadata and its identifier are the record of
+ * what the parent asked for. The block's own header says how the call ended;
+ * this says what it carried.
+ */
+const renderDispatchCall = (dispatched: NonNullable<ProjectedSubagent['dispatchedBy']>): string[] => {
+  const call = dispatched.call;
+  if (!call) return [];
+  const details: string[] = [];
+  if (Object.keys(call.input).length > 0) {
+    details.push(`**${exportText('export.section.input')}**\n\n${asQuote(JSON.stringify(call.input, null, 2))}`);
+  }
+  if (call.metadata && Object.keys(call.metadata).length > 0) {
+    details.push(`**${exportText('export.section.metadata')}**\n\n${asQuote(JSON.stringify(call.metadata, null, 2))}`);
+  }
+  if (call.callID) {
+    details.push(`**${exportText('export.section.callId')}**\n\n${asQuote(call.callID)}`);
+  }
+  return details;
+};
+
+/**
  * Renders a subagent's block: its heading, the call that started it, its own
  * entries, and its own subagents.
  */
@@ -236,12 +294,19 @@ const renderSubagent = (subagent: ProjectedSubagent, mode: ProjectionMode): stri
     parts.push(`*${exportText('export.concurrent', { names: subagent.concurrentWith.join(', ') })}*`);
   }
 
-  if (subagent.task) {
-    const task = mode === 'readable' && subagent.task.length > 600
-      ? `${subagent.task.slice(0, 600)}\n\n… [${exportText('export.excerpt')}]`
-      : subagent.task;
-    parts.push(`**${exportText('export.section.task')}**\n\n${asQuote(task)}`);
+  // The task's own record carries what the first prompt carried besides its
+  // text: the files it came with. A prompt that carried only files is still
+  // a task, so the task line is shown even when there is no text to quote.
+  const taskAttachments = subagent.taskEntry ? attachmentList(subagent.taskEntry) : '';
+  if (subagent.task || taskAttachments) {
+    const task = subagent.task
+      ? (mode === 'readable' && subagent.task.length > 600
+        ? `${subagent.task.slice(0, 600)}\n\n… [${exportText('export.excerpt')}]`
+        : subagent.task)
+      : '';
+    parts.push(`**${exportText('export.section.task')}**\n\n${asQuote(task)}`.trimEnd());
   }
+  if (taskAttachments) parts.push(taskAttachments);
 
   // The agent the call named, when it differs from the agent that ran: the
   // call asked for one agent, the session records the one that answered.
@@ -264,6 +329,9 @@ const renderSubagent = (subagent: ProjectedSubagent, mode: ProjectionMode): stri
   if (mode === 'detailed' && dispatched?.output) {
     parts.push(`**${exportText('export.dispatch.result')}**\n\n${asQuote(dispatched.output)}`);
   }
+  if (mode === 'detailed' && dispatched) {
+    parts.push(...renderDispatchCall(dispatched));
+  }
 
   // A second call that named the same session resumed it. The transcript
   // appears once, and the block says that it was resumed.
@@ -277,22 +345,26 @@ const renderSubagent = (subagent: ProjectedSubagent, mode: ProjectionMode): stri
   // own model, and the reader has to see which.
   let lastModel: string | undefined;
 
+  // The block's own sequence: the subagent's records and the blocks of the
+  // subagents it started, in the order they happened. A nested block sits at
+  // the call that started it, not after everything the parent said.
   for (const entry of subagent.entries) {
+    if (entry.kind === 'subagent') {
+      parts.push(renderSubagent(entry, mode));
+      continue;
+    }
     if (entry.kind === 'message') {
       const model = entry.model && entry.model !== lastModel ? entry.model : undefined;
       if (entry.model) lastModel = entry.model;
       const heading = subagentMessageLine(entry, label, model);
       const body = entry.text.trim();
-      if (!body) continue;
-      parts.push([heading, body].join('\n\n'));
+      const attachments = attachmentList(entry);
+      if (!body && !attachments) continue;
+      parts.push([heading, body, attachments].filter(Boolean).join('\n\n'));
       continue;
     }
     const rendered = renderEntry(entry, mode);
     if (rendered) parts.push(rendered);
-  }
-
-  for (const child of subagent.children) {
-    parts.push(renderSubagent(child, mode));
   }
 
   return parts.join('\n\n');
@@ -301,7 +373,7 @@ const renderSubagent = (subagent: ProjectedSubagent, mode: ProjectionMode): stri
 /** The findings, as one compact notice at the end of the document. */
 const renderIntegrityNotice = (findings: ExportFinding[]): string => {
   if (findings.length === 0) return '';
-  const lines = findings.map((finding) => `- ${finding.detail}`);
+  const lines = findings.map((finding) => `- ${findingText(finding.messageKey, finding.messageParams)}`);
   const summary = findings.length === 1
     ? exportText('export.integrity.summarySingle')
     : exportText('export.integrity.summaryPlural', { count: findings.length });

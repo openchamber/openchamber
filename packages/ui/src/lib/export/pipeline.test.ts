@@ -113,8 +113,10 @@ describe('export pipeline', () => {
 
     expect(output).toContain('↳ reviewer');
     expect(output).toContain('↳ explore');
-    // The grandchild's work is inside the child's block, not beside it.
-    expect(output.indexOf('Grandchild work')).toBeGreaterThan(output.indexOf('Child work'));
+    // The grandchild's work is inside the child's block, not beside it, and
+    // it sits at the call that started it — before the text the child wrote
+    // after that call.
+    expect(output.indexOf('Grandchild work')).toBeLessThan(output.indexOf('Child work'));
     expect(output.indexOf('Grandchild work')).toBeLessThan(output.indexOf('Starting') + 1);
   });
 
@@ -503,6 +505,53 @@ describe('export pipeline', () => {
 
     // The filter's data and the page's own attributes must agree, or the
     // filter hides the wrong entries.
+    const dataMatch = html.match(/<script type="application\/json" id="export-data">([\s\S]*?)<\/script>/);
+    expect(dataMatch).toBeTruthy();
+    // SAFETY: the export writes the data block itself, so the match holds
+    // the page's own data.
+    const data = JSON.parse(dataMatch![1]) as { entries: Array<{ id: string; agent?: string }> };
+
+    const domAgent = new Map<string, string>();
+    for (const match of html.matchAll(/data-id="([^"]*)"[^>]*data-agent="([^"]*)"/g)) {
+      domAgent.set(match[1], match[2]);
+    }
+
+    for (const entry of data.entries) {
+      expect(domAgent.get(entry.id) ?? '').toBe(entry.agent ?? '');
+    }
+  });
+
+  test('the HTML export filters by the agent that produced the entry in the detailed view', () => {
+    // The detailed view shows the call that started a sub-agent, and that
+    // call is an entry of its own, so the filter reaches it.
+    const input = fixture({
+      root: session('ses_root', { title: 'Root' }),
+      sessions: [
+        session('ses_root', { title: 'Root' }),
+        session('ses_child', { title: 'Child', parentID: 'ses_root', agent: 'reviewer' }),
+      ],
+      records: {
+        ses_root: [
+          {
+            info: {
+              id: 'a1', sessionID: 'ses_root', role: 'assistant', agent: 'build',
+              providerID: 'anthropic', modelID: 'claude-opus-4-1', time: { created: 2000 },
+            },
+            parts: [subagentCall('a1', { childSessionID: 'ses_child', startedAt: 2000, endedAt: 3000 })],
+          },
+        ],
+        ses_child: [assistantMessage('ses_child', 'ca1', 2500, 'Child work')],
+      },
+    });
+
+    const { projection, timeline } = build(input, 'detailed');
+    const html = renderExportHtml(projection, {
+      title: 'Root',
+      mode: 'detailed',
+      findings: timeline.findings,
+      sessionCount: timeline.sessions.size,
+    });
+
     const dataMatch = html.match(/<script type="application\/json" id="export-data">([\s\S]*?)<\/script>/);
     expect(dataMatch).toBeTruthy();
     // SAFETY: the export writes the data block itself, so the match holds

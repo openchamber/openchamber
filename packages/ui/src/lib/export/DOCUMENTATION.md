@@ -29,14 +29,23 @@ language like the app around it.
   the same event model. They cannot disagree about what happened.
 - **One lineage walk.** The dialog's count of sub-agent tasks and the
   export's list of descendants come from `collect.ts`. The number the user is
-  shown and the number the document carries are one.
+  shown and the number the document carries are one. The count is only made
+  from a complete session list: the list arrives in pages, and a count taken
+  from a partial one would name a number the document does not carry.
 - **No invented chronology.** Events are ordered by their recorded timestamp.
   An event without one keeps the place the source gave it, and the source
   order breaks ties. The export never guesses an order.
+- **One order for every event.** Every event carries its place on one scale:
+  the record's own place, and the part's place inside it. A message and a
+  tool call of the same record therefore keep the order the source gave them.
 - **No invented relationships.** A call is joined to a child session through a
   recorded identity — the call's metadata, its output envelope, the report the
   runtime appended, the session's own parent link. Position in a list is
   never used: two sub-agents can start at the same moment.
+- **The sub-agent's work sits where it was delegated.** A nested block takes
+  the place of the call that started it, in the parent's own sequence. A
+  parent that delegated work and then answered keeps the answer after the
+  work it depends on.
 - **Compact never means lost.** The readable view cuts a long tool result
   down and marks the cut. The JSON export carries every source record, so
   nothing is gone.
@@ -46,10 +55,17 @@ language like the app around it.
   readable document reports them once at the end. A child that would not load
   also becomes a `gap` event, so the hole is visible where the sub-agent's
   work would have been. An ordinary message never carries a diagnostic line.
+  A child the user left out on purpose is not a gap: the export knows it was
+  left out.
+- **The export speaks the reader's language.** A finding carries the key of
+  its text and the values that text names; the renderer resolves the text
+  when it writes the document. The JSON export carries the resolved text
+  beside the key, so a tool that reads it gets a sentence.
 - **Deterministic.** The same source snapshot produces the same document.
 - **Bounded work.** The descendants are loaded in waves, and the lineage walk
   stops at a session it has already visited, so a cyclic lineage ends the
-  walk instead of looping.
+  walk instead of looping. A child the session list does not name is loaded
+  too, because the call that started it recorded its id.
 
 ## Decisions
 
@@ -75,6 +91,49 @@ The block is anchored at the call that started it, and the block's header
 carries the task and the agent. The rejected alternative was a strictly
 timestamp-sorted log: with hundreds of tool calls it reads as a log, not as a
 conversation, and it loses the thread of who was doing what.
+
+A nested block is anchored the same way, inside its parent's own sequence
+rather than after everything the parent said. The rejected alternative was to
+keep the parent's records and the nested blocks in two lists and print the
+blocks at the end: the parent's final answer would then stand before the
+work it depends on, which is the mistake the old export made at the top
+level.
+
+### Why an event without a timestamp keeps the place the source gave it
+
+The source recorded a record without a time. The export cannot say when it
+happened, so it does not say: the event keeps the place its own record put
+it, between the timed events around it.
+
+The rejected alternative was to sort an untimed event to the end of the
+session, which reads as a claim about when it happened. The rejected
+alternative on the other side — carrying the time of the previous event
+forward — was also a claim, and it moved the event away from where the source
+put it. The place is derived, but it is the source's place.
+
+### Why the pipeline loads a child the session list does not name
+
+The session list is where the lineage lives, and it arrives in pages. A child
+the list has not named yet would be left out of the export, and its
+transcript would be missing for a reason that has nothing to do with the
+history.
+
+The call that started the child recorded its id, so the collector reads the
+ids out of the loaded records and loads those children too. The rejected
+alternative was to trust the list alone: an incomplete list would then
+silently shorten the export, and the document would look complete.
+
+### Why a finding carries a key and not a sentence
+
+A finding is read by a person in the exported document, and the document
+speaks the app's language. The pipeline records which finding it is and the
+values the sentence names; the renderer resolves the text when it writes the
+document.
+
+The rejected alternative was to write the sentence where the finding is
+created: the pipeline would then bake one locale's wording into a model that
+every format reads, and the JSON export would carry a sentence in the
+language of whoever happened to run the export last.
 
 ### Why the concurrency is marked instead of serialized
 

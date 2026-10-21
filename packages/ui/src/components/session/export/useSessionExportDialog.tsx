@@ -42,15 +42,37 @@ export const useSessionExportDialog = (
   const [target, setTarget] = React.useState<SessionExportTarget | null>(null);
   const [includeSubagents, setIncludeSubagents] = React.useState(true);
   const [descendantCount, setDescendantCount] = React.useState(0);
+  /**
+   * Whether the session list is complete.
+   *
+   * The list arrives in pages, and it is also the only place the lineage
+   * lives. A count taken from a list that is still loading counts the
+   * sub-agent tasks the first page named, and no more, so the export would
+   * leave out the rest without saying so.
+   */
+  const [sessionListComplete, setSessionListComplete] = React.useState(false);
   const [format, setFormat] = React.useState<ExportFormat>('markdown');
   const [mode, setMode] = React.useState<ProjectionMode>('readable');
 
-  const openDialog = React.useCallback((next: SessionExportTarget) => {
-    setTarget(next);
-    // The sub-agent tasks the session has, counted with the same walk the
-    // export itself uses, so the number the dialog shows and the number the
-    // document carries are one.
-    const { activeSessions, archivedSessions } = useGlobalSessionsStore.getState();
+  /**
+   * Counts the sub-agent tasks the session has, with the same walk the
+   * export itself uses, so the number the dialog shows and the number the
+   * document carries are one.
+   *
+   * The count is only made from a complete session list. The list arrives
+   * in pages, and a count taken from a partial list would name a number the
+   * document does not carry.
+   */
+  const countDescendants = React.useCallback((next: SessionExportTarget) => {
+    const { activeSessions, archivedSessions, hasLoaded } = useGlobalSessionsStore.getState();
+    if (!hasLoaded) {
+      // The list is not the whole list yet. The count would be a guess, so
+      // the dialog says the coverage is unknown instead of naming a number
+      // that is wrong.
+      setSessionListComplete(false);
+      setDescendantCount(0);
+      return;
+    }
     const allSessions = readExportSessions([...activeSessions, ...archivedSessions]);
     const root = allSessions.find((session) => session.id === next.sessionID);
     const descendants = listDescendantSessions({
@@ -60,9 +82,15 @@ export const useSessionExportDialog = (
       agent: root?.agent,
       createdAt: root?.createdAt,
     }, allSessions);
+    setSessionListComplete(true);
     setDescendantCount(descendants.length);
     setIncludeSubagents(descendants.length > 0);
   }, []);
+
+  const openDialog = React.useCallback((next: SessionExportTarget) => {
+    setTarget(next);
+    countDescendants(next);
+  }, [countDescendants]);
 
   const handleConfirm = React.useCallback((
     nextFormat: ExportFormat,
@@ -84,11 +112,13 @@ export const useSessionExportDialog = (
       mode={mode}
       onModeChange={setMode}
       descendantCount={descendantCount}
+      sessionListComplete={sessionListComplete}
       includeSubagents={includeSubagents}
       onIncludeSubagentsChange={setIncludeSubagents}
       onConfirm={handleConfirm}
+      onRetryCount={target ? () => countDescendants(target) : undefined}
     />
-  ), [descendantCount, format, handleConfirm, includeSubagents, mode, target]);
+  ), [countDescendants, descendantCount, format, handleConfirm, includeSubagents, mode, sessionListComplete, target]);
 
   return { dialog, target, openDialog };
 };
