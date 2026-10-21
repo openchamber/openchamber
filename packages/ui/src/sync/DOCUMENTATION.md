@@ -809,7 +809,9 @@ the model and effort the user picks, from wherever the previous model stopped.
 starts from; `continue-with-model-runtime.ts` wires it to the stores and to
 `opencodeClient`; `lib/opencode/model-handoff.ts` owns the note the new model
 reads and the metadata that titles its notice row ("Continued with <model>",
-`lib/opencode/session-notices.ts`). The dialog
+`lib/opencode/session-notices.ts`). Where that row sits in the transcript, in
+the new turn below the model-changed divider, is decided with the other notices
+(`components/chat/message/parts/DOCUMENTATION.md`). The dialog
 (`components/chat/ContinueWithModelDialog.tsx`) only collects the choice; it
 starts from the composer's model and effort and from the Settings default
 (`continueWithModelMode`, Settings → Sessions). Entry points: the failed-turn

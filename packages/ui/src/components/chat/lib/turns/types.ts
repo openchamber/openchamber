@@ -59,9 +59,10 @@ export interface TurnRecord {
     assistantMessageIds: string[];
     assistantMessages: ChatMessageEntry[];
     /**
-     * Session notices that came after the prompt before the run's first step
-     * existed. They render in the turn until that step arrives and takes them
-     * as rows (`attachSyntheticContext`).
+     * Session notices waiting for the run's first step: the ones that came
+     * after the prompt, and a handoff note that came right before it. They
+     * render in the turn until that step arrives and takes them as rows
+     * (`attachSyntheticContext`).
      */
     waitingNotices?: ChatMessageEntry[];
     activityParts: TurnActivityRecord[];
