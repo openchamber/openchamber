@@ -3,6 +3,7 @@ import { create } from 'zustand';
 import { runBackgroundNetworkTask } from '@/lib/background-network';
 import { persist } from 'zustand/middleware';
 import { z } from 'zod';
+import { SOURCE_CONTROL_PROVIDERS } from '@/lib/source-control/providers';
 import type {
   ChangeRequest,
   ChangeRequestStatus,
@@ -35,8 +36,8 @@ const PR_MAX_ENTRIES = 200;
 
 const GITHUB_IDENTITY: SourceControlIdentity = { provider: 'github', instance: 'github.com' };
 const statusKeySchema = z.union([
-  z.tuple([z.string(), z.enum(['github', 'gitlab']), z.string(), z.string(), z.string(), z.number(), z.string(), z.string(), z.string()]),
-  z.tuple([z.string(), z.enum(['github', 'gitlab']), z.string(), z.string(), z.string(), z.string()]),
+  z.tuple([z.string(), z.enum(SOURCE_CONTROL_PROVIDERS), z.string(), z.string(), z.string(), z.number(), z.string(), z.string(), z.string()]),
+  z.tuple([z.string(), z.enum(SOURCE_CONTROL_PROVIDERS), z.string(), z.string(), z.string(), z.string()]),
   z.tuple([z.string(), z.string(), z.string(), z.string()]),
 ]);
 
@@ -716,7 +717,7 @@ const persistedPrStatusEntrySchema = z.object({
   lastDiscoveryPollAt: z.number(),
   identity: z.object({
     runtimeKey: z.string(),
-    provider: z.enum(['github', 'gitlab']),
+    provider: z.enum(SOURCE_CONTROL_PROVIDERS),
     instance: z.string(),
     accountId: z.string(),
     repositoryId: z.string(),

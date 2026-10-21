@@ -193,7 +193,7 @@ An identity is complete when it has a signature and a way to push:
 `isCompleteIdentity` accepts `account` with an account, a managed SSH key,
 anonymous HTTPS, or `system` (this machine's Git). The account is optional
 except for the `account` transport, so identities for hosts OpenChamber has no
-provider for (Bitbucket, Gitea, a private server) work. The editor creates
+provider for (Bitbucket, Forgejo, a private server) work. The editor creates
 nothing else and the server refuses anything else from a client.
 
 Records written before identities carried a transport have none; they read as

@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { constants as fsConstants } from 'node:fs';
 import { withSourceControlFileLock } from '../source-control/file-lock.js';
+import { isSourceControlProvider } from '../source-control/providers.js';
 
 const VERSION = 1;
 const DEFAULT_MAX_RECORDS = 512;
@@ -44,7 +45,7 @@ const parseRecord = (record) => {
     || !isIdentifier(provenance.endpointFingerprint)
     || !isIdentifier(provenance.sourceRef) || !provenance.sourceRef.startsWith('refs/heads/')
     || !isIdentifier(provenance.sourceProjectId) || !isIdentifier(provenance.targetProjectId)
-    || !['github', 'gitlab'].includes(provenance.provider) || !isIdentifier(provenance.instance)
+    || !isSourceControlProvider(provenance.provider) || !isIdentifier(provenance.instance)
     || !isIdentifier(provenance.accountId) || !Number.isSafeInteger(provenance.bindingRevision)
     || provenance.bindingRevision < 1 || !isIdentifier(provenance.primaryRemote)
     || !isIdentifier(provenance.projectId) || !isString(provenance.setupCommand)

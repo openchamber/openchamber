@@ -1,4 +1,5 @@
 import type { SourceControlProvider } from '@/lib/source-control/types';
+import { SOURCE_CONTROL_PROVIDERS } from '@/lib/source-control/providers';
 import { create } from 'zustand';
 import { z } from 'zod';
 import { devtools, persist } from 'zustand/middleware';
@@ -190,7 +191,7 @@ const persistedDraftSchema = z.object({
   text: z.string(),
   terminalId: z.string().optional(),
   anchor: chatQuoteAnchorSchema.optional(),
-  provider: z.enum(['github', 'gitlab']).optional(),
+  provider: z.enum(SOURCE_CONTROL_PROVIDERS).optional(),
   createdAt: z.number(),
 });
 

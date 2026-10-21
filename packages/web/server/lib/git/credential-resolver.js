@@ -1,4 +1,11 @@
 import { isPlainObject, isString } from '../shared/guards.js';
+import {
+  isSourceControlProvider,
+  providerCredentialSecret,
+  providerCredentialUsername,
+  providerOrigin,
+  unsupportedProviderError,
+} from '../source-control/providers.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
@@ -34,7 +41,7 @@ export function createHttpsCredentialReference({
   credentialRevision,
   providerUserId,
 }) {
-  if (!['github', 'gitlab'].includes(provider)) throw new Error('Invalid Git credential provider');
+  if (!isSourceControlProvider(provider)) throw new Error('Invalid Git credential provider');
   if (!Number.isSafeInteger(credentialRevision) || credentialRevision < 1) throw new Error('Invalid Git credential revision');
   return `${VERSIONED_REFERENCE_PREFIX}:https:${provider}:${encodePart(instance)}:${encodePart(credentialId)}:${credentialRevision}:${encodePart(providerUserId)}`;
 }
@@ -46,7 +53,7 @@ export function createSshCredentialReference(keyId) {
 export function parseGitCredentialReference(reference) {
   const parts = requiredString(reference, 'reference').split(':');
   if (parts[0] !== 'ocgit' || !['v1', 'v2'].includes(parts[1])) throw new Error('Invalid Git credential reference');
-  if (parts.length === 8 && parts[1] === 'v2' && parts[2] === 'https' && ['github', 'gitlab'].includes(parts[3])) {
+  if (parts.length === 8 && parts[1] === 'v2' && parts[2] === 'https' && isSourceControlProvider(parts[3])) {
     const credentialRevision = Number(parts[6]);
     if (!/^[1-9]\d*$/.test(parts[6]) || !Number.isSafeInteger(credentialRevision)) {
       throw new Error('Invalid Git credential reference');
@@ -364,7 +371,7 @@ const assertHttpsEndpoint = (reference, endpoint) => {
   }
   let instance;
   try {
-    instance = new URL(reference.provider === 'github' ? 'https://github.com' : reference.instance);
+    instance = providerOrigin(reference.provider, reference.instance);
   } catch {
     throw new Error('Invalid managed provider instance');
   }
@@ -415,14 +422,16 @@ export function createGitCredentialResolver({
       }
 
       assertHttpsEndpoint(reference, endpoint);
-      const readAccount = reference.provider === 'github' ? readGitHubAccount : readGitLabAccount;
-      if (!(readAccount instanceof Function)) throw new Error('Managed HTTPS credentials are unavailable');
+      const readAccount = reference.provider === 'github'
+        ? readGitHubAccount
+        : reference.provider === 'gitlab' ? readGitLabAccount : null;
+      if (!(readAccount instanceof Function)) throw unsupportedProviderError(reference.provider);
       const resolvedCredentialId = reference.credentialId;
       const credentialRevision = reference.credentialRevision;
       const account = reference.provider === 'github'
         ? await readAccount(resolvedCredentialId, credentialRevision)
         : await readAccount(reference.instance, resolvedCredentialId, credentialRevision);
-      const password = reference.provider === 'github' ? account?.accessToken : account?.token;
+      const password = providerCredentialSecret(reference.provider, account);
       const storedId = account?.credentialId;
       const storedRevision = account?.credentialRevision;
       const providerUserId = account?.providerUserId;
@@ -439,7 +448,7 @@ export function createGitCredentialResolver({
       return Object.freeze({
         mode: 'managed',
         transport: 'https',
-        username: reference.provider === 'github' ? 'x-access-token' : 'oauth2',
+        username: providerCredentialUsername(reference.provider, account),
         password,
         actor: Object.freeze({
           provider: reference.provider,

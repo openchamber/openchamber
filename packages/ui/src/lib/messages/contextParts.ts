@@ -15,6 +15,7 @@
  */
 
 import { z } from 'zod';
+import { SOURCE_CONTROL_PROVIDERS } from '@/lib/source-control/providers';
 import type { SourceControlProvider } from '@/lib/api/types';
 import type { JsonValue } from '@openchamber/sdk';
 import type { Metadata } from '@/lib/opencode/model';
@@ -340,14 +341,14 @@ const canonicalContextPayloadSchema = z.discriminatedUnion('kind', [
         label: z.string(),
         body: z.string(),
         text: z.string(),
-        provider: z.enum(['github', 'gitlab']).optional(),
+        provider: z.enum(SOURCE_CONTROL_PROVIDERS).optional(),
     }),
     z.object({
         kind: z.literal('pr-check'),
         label: z.string(),
         output: z.string(),
         text: z.string(),
-        provider: z.enum(['github', 'gitlab']).optional(),
+        provider: z.enum(SOURCE_CONTROL_PROVIDERS).optional(),
     }),
     z.object({
         kind: z.literal('file-quote'),
@@ -366,14 +367,14 @@ const canonicalContextPayloadSchema = z.discriminatedUnion('kind', [
     }),
     z.object({
         kind: z.literal('repository-issue'),
-        provider: z.enum(['github', 'gitlab']).optional(),
+        provider: z.enum(SOURCE_CONTROL_PROVIDERS).optional(),
         number: z.number().int().positive(),
         title: z.string(),
         url: z.string(),
     }),
     z.object({
         kind: z.literal('change-request'),
-        provider: z.enum(['github', 'gitlab']).optional(),
+        provider: z.enum(SOURCE_CONTROL_PROVIDERS).optional(),
         number: z.number().int().positive(),
         title: z.string(),
         url: z.string(),

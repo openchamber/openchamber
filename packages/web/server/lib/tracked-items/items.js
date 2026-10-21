@@ -51,6 +51,10 @@ export function parseTrackedItem(value) {
     const instance = instanceOrigin(value.instance);
     return instance && NAMESPACE.test(owner) ? { provider, instance, kind, owner, repo, number, ...account } : null;
   }
+  if (provider === 'gitea') {
+    const instance = instanceOrigin(value.instance);
+    return instance && SEGMENT.test(owner) ? { provider, instance, kind, owner, repo, number, ...account } : null;
+  }
   return null;
 }
 
@@ -60,7 +64,9 @@ export function trackedItemKey(item) {
   const thread = `${item.kind}|${item.owner}/${item.repo}#${item.number}`.toLowerCase();
   // Account ids are opaque and case-sensitive; they stay as they are.
   const account = item.accountId ? `@${item.accountId}` : '';
-  return item.provider === 'gitlab' ? `gitlab|${item.instance}|${thread}${account}` : `github|${thread}${account}`;
+  return item.provider === 'github'
+    ? `github|${thread}${account}`
+    : `${item.provider}|${item.instance.toLowerCase()}|${thread}${account}`;
 }
 
 /** Reads a list of items, dropping malformed ones and duplicates; null when the value is not a list. */

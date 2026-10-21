@@ -8,6 +8,7 @@ Repository bindings intentionally keep provider accounts, parent Git transport c
 
 ## Registration
 
+- `providers.js` owns the provider list, instance normalization, reference paths and credential shapes. A provider it names but no module registers (today Gitea, until its module lands) fails with `UNSUPPORTED_SOURCE_CONTROL_PROVIDER`; no shared path may treat it as GitLab or GitHub.
 - `routes.js` registers GitHub and GitLab before the generic OpenCode proxy.
 - GitHub resources use canonical `/api/source-control/github/*` routes. Auth and user aliases remain under `/api/github/*`; retired PR, repository, issue, and pull-context aliases return `410` before authority or provider work.
 - GitLab uses `/api/source-control/gitlab/*` only.

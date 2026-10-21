@@ -36,11 +36,14 @@ export const parseIssueReference = (value: string): IssueReference | null => {
     if (!owner || !name) return null;
 
     const github = url.hostname.toLowerCase() === 'github.com' && separatorIndex < 0;
+    const identity: SourceControlIdentity = github
+      ? { provider: 'github', instance: 'github.com' }
+      : separatorIndex >= 0
+        ? { provider: 'gitlab', instance: url.origin }
+        : { provider: 'gitea', instance: url.origin };
     return {
       number,
-      identity: github
-        ? { provider: 'github', instance: 'github.com' }
-        : { provider: 'gitlab', instance: url.origin },
+      identity,
       project: { owner, name },
     };
   } catch {

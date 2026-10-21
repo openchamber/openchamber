@@ -1,4 +1,5 @@
 import { isString } from '../shared/guards.js';
+import { providerTraits } from '../source-control/providers.js';
 
 const text = (value) => (isString(value) ? value.trim() : '');
 
@@ -26,7 +27,7 @@ const accountSignature = (account, user) => {
   return { userName, userEmail: '' };
 };
 
-const PROVIDER_LABELS = { github: 'GitHub', gitlab: 'GitLab' };
+const PROVIDER_LABELS = { github: 'GitHub', gitlab: 'GitLab', gitea: 'Gitea' };
 
 /** The host of an instance, for telling two self-hosted GitLabs apart. */
 const instanceLabel = (instance) => {
@@ -101,7 +102,7 @@ export function createGitIdentityProvisioning({ store, now = Date.now, randomId 
         account,
         transport: 'account',
         color: 'keyword',
-        icon: account.provider === 'github' ? 'github' : 'gitlab',
+        icon: providerTraits(account.provider).identityIcon,
       });
     },
 

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { SOURCE_CONTROL_PROVIDERS } from '@/lib/source-control/providers';
 
 export const gitIdentityProfileIdSchema = z.string().trim().min(1).max(200);
 const profileTextSchema = z.string().trim().min(1).max(512);
@@ -6,7 +7,7 @@ const optionalProfileTextSchema = z.string().trim().max(512).nullable().optional
 
 /** The provider account an identity acts as, addressed exactly as bindings address it. */
 const gitIdentityAccountSchema = z.object({
-  provider: z.enum(['github', 'gitlab']),
+  provider: z.enum(SOURCE_CONTROL_PROVIDERS),
   instance: profileTextSchema,
   accountId: profileTextSchema,
 }).strict();

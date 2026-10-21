@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { SOURCE_CONTROL_PROVIDERS } from '@/lib/source-control/providers';
 import type { SourceControlProvider } from '@/lib/api/types';
 
 /**
@@ -14,7 +15,7 @@ import type { SourceControlProvider } from '@/lib/api/types';
 const STORAGE_KEY = 'openchamber.repositoryProvider.v1';
 const MAX_ENTRIES = 500;
 
-const storedMemory = z.array(z.tuple([z.string(), z.enum(['github', 'gitlab'])]));
+const storedMemory = z.array(z.tuple([z.string(), z.enum(SOURCE_CONTROL_PROVIDERS)]));
 
 const listeners = new Set<() => void>();
 let memory: Map<string, SourceControlProvider> | null = null;

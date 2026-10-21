@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fingerprintRemoteUrl, redactRemoteUrl } from '../source-control/url-redaction.js';
 import { normalizeSourceControlProviderInstance } from '../source-control/provider-instance.js';
+import { isSourceControlProvider, providerCredentialSecret, providerOrigin } from '../source-control/providers.js';
 import { createHttpsCredentialReference, normalizeGitRemoteEndpoint } from './credential-resolver.js';
 
 const OPERATIONS = ['push', 'fetch', 'pull', 'delete-remote-branch', 'sync', 'clone', 'checkout-hydration'];
@@ -143,11 +144,11 @@ const parseHydrationTransfers = (value, requirements) => {
 const parseCloneProviderAccount = (value, parsedEndpoint) => {
   if (value === undefined) return null;
   if (!isPlainObject(value) || !hasExactKeys(value, ['provider', 'instance', 'accountId'])
-    || !['github', 'gitlab'].includes(value.provider)) throw planError('Provider account is invalid');
+    || !isSourceControlProvider(value.provider)) throw planError('Provider account is invalid');
   let instance;
   try { instance = normalizeSourceControlProviderInstance(value.provider, value.instance); }
   catch { throw planError('Provider account instance is invalid'); }
-  const origin = new URL(value.provider === 'github' ? 'https://github.com' : instance);
+  const origin = providerOrigin(value.provider, instance);
   if (origin.hostname !== parsedEndpoint.host) throw planError('Provider account does not match the clone endpoint');
   const accountId = requiredString(value.accountId, 'provider accountId');
   if (accountId !== value.accountId || /[\0\r\n]/.test(accountId)) throw planError('Provider account is invalid');
@@ -697,11 +698,11 @@ export function createNetworkOperationPlanner({
         if (Object.hasOwn(input, 'sshCredentialId')) throw planError('Managed SSH credentials require SSH');
         const account = input.credentialAccount;
         if (!isPlainObject(account) || !hasExactKeys(account, ['provider', 'instance', 'accountId'])
-          || !['github', 'gitlab'].includes(account.provider)) throw planError('An explicit credential account is required');
+          || !isSourceControlProvider(account.provider)) throw planError('An explicit credential account is required');
         let instance;
         try { instance = normalizeSourceControlProviderInstance(account.provider, account.instance); }
         catch { throw planError('Credential account instance is invalid'); }
-        const origin = new URL(account.provider === 'github' ? 'https://github.com' : instance);
+        const origin = providerOrigin(account.provider, instance);
         if (origin.protocol !== 'https:' || origin.hostname !== parsedEndpoint.host
           || Number(origin.port || 443) !== parsedEndpoint.port) throw planError('Credential account does not match the HTTPS endpoint');
         if (account.provider === 'gitlab') gitLabInstances.push(instance);
@@ -711,7 +712,7 @@ export function createNetworkOperationPlanner({
           throw planError('Managed HTTPS credential inventory is unavailable', 501, 'RUNTIME_UNSUPPORTED');
         }
         const resolved = await resolveSourceControlAccount({ provider: account.provider, instance, accountId });
-        const secret = account.provider === 'github' ? resolved?.accessToken : resolved?.token;
+        const secret = providerCredentialSecret(account.provider, resolved);
         if (resolved?.credentialId !== accountId || resolved?.status !== 'valid'
           || !Number.isSafeInteger(resolved?.credentialRevision) || resolved.credentialRevision < 1
           || !isString(resolved?.providerUserId) || !resolved.providerUserId

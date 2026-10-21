@@ -15,6 +15,11 @@ describe('change-request references', () => {
       identity: { provider: 'gitlab', instance: 'https://gitlab.example.com' },
       project: { owner: 'platform/tools', name: 'project' },
     });
+    expect(parseChangeRequestReference('https://gitea.example.com/owner/repo/pulls/16')).toEqual({
+      number: 16,
+      identity: { provider: 'gitea', instance: 'https://gitea.example.com' },
+      project: { owner: 'owner', name: 'repo' },
+    });
   });
 
   test('rejects invalid and unrelated references', () => {

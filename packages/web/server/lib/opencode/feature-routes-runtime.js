@@ -8,6 +8,7 @@ import { registerSessionGoalRoutes } from '../session-goal/routes.js';
 import { registerSessionWarmingRoutes } from '../session-warming/routes.js';
 import { setWarmingDuration, setWarmingEnabled } from './websearch-config.js';
 import { registerSourceControlRoutes } from '../source-control/routes.js';
+import { unsupportedProviderError } from '../source-control/providers.js';
 import { registerLinearRoutes } from '../linear/routes.js';
 import { registerGuestRoutes } from '../guests/routes.js';
 import { registerBuiltInGuests } from '../guests/catalog.js';
@@ -415,9 +416,12 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     // the user switched to; reads already accept both, so Git transport
     // (fork PR worktrees, clones) must too.
     const resolveSourceControlAccount = async ({ provider, instance, accountId, credentialRevision }) => {
-      if (provider !== 'github') return gitlabAuthStore.readAccount(instance, accountId, credentialRevision);
-      return await getGitHubAuthByAccountId(accountId, credentialRevision)
-        ?? getGitHubCliCredential(accountId, credentialRevision);
+      if (provider === 'github') {
+        return await getGitHubAuthByAccountId(accountId, credentialRevision)
+          ?? getGitHubCliCredential(accountId, credentialRevision);
+      }
+      if (provider === 'gitlab') return gitlabAuthStore.readAccount(instance, accountId, credentialRevision);
+      throw unsupportedProviderError(provider);
     };
     const resolveTransportRepository = createPrivateRepositoryIdentityResolver({
       getTransportRevision: (directory) => readEffectiveGitTransportRevision(directory, { gitBinary }),

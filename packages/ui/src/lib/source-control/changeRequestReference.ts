@@ -45,14 +45,28 @@ export const parseChangeRequestReference = (value: string): ChangeRequestReferen
   const separatorIndex = segments.findIndex((segment, index) => (
     segment === '-' && segments[index + 1] === 'merge_requests'
   ));
-  if (separatorIndex < 2 || separatorIndex + 2 >= segments.length) return null;
-  const number = positiveNumber(segments[separatorIndex + 2]);
-  const name = segments[separatorIndex - 1];
-  const owner = segments.slice(0, separatorIndex - 1).join('/');
-  if (!number || !owner || !name) return null;
-  return {
-    number,
-    identity: { provider: 'gitlab', instance: url.origin },
-    project: { owner, name },
-  };
+  if (separatorIndex >= 2 && separatorIndex + 2 < segments.length) {
+    const number = positiveNumber(segments[separatorIndex + 2]);
+    const name = segments[separatorIndex - 1];
+    const owner = segments.slice(0, separatorIndex - 1).join('/');
+    if (!number || !owner || !name) return null;
+    return {
+      number,
+      identity: { provider: 'gitlab', instance: url.origin },
+      project: { owner, name },
+    };
+  }
+
+  // Gitea keeps the same flat shape as GitHub, under /pulls/N.
+  if (segments.length === 4 && segments[2] === 'pulls') {
+    const number = positiveNumber(segments[3]);
+    if (!number) return null;
+    return {
+      number,
+      identity: { provider: 'gitea', instance: url.origin },
+      project: { owner: segments[0], name: segments[1] },
+    };
+  }
+
+  return null;
 };

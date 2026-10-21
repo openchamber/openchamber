@@ -1,4 +1,6 @@
-export type SourceControlProvider = 'github' | 'gitlab';
+import type { SourceControlProvider } from './providers';
+
+export type { SourceControlProvider } from './providers';
 
 export interface SourceControlIdentity {
   provider: SourceControlProvider;

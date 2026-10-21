@@ -14,6 +14,7 @@ import { createMutationStore } from './mutation-storage.js';
 import { createMutationExecutor } from './mutation-executor.js';
 import { createSourceControlAuthStore } from '../gitlab/auth-storage.js';
 import { getGitHubAuthAccounts, getGitHubAuthByAccountId } from '../github/auth.js';
+import { unsupportedProviderError } from './providers.js';
 
 const defaultConfigRoot = () => process.env.OPENCHAMBER_DATA_DIR
   ? path.resolve(process.env.OPENCHAMBER_DATA_DIR)
@@ -59,9 +60,11 @@ export function registerSourceControlRoutes(app, dependencies = {}) {
   });
   const readTransportAccount = dependencies.readTransportAccount ?? (({
     provider, instance, accountId, credentialRevision,
-  }) => provider === 'github'
-    ? getGitHubAuthByAccountId(accountId, credentialRevision)
-    : gitlabStore.readAccount(instance, accountId, credentialRevision));
+  }) => {
+    if (provider === 'github') return getGitHubAuthByAccountId(accountId, credentialRevision);
+    if (provider === 'gitlab') return gitlabStore.readAccount(instance, accountId, credentialRevision);
+    throw unsupportedProviderError(provider);
+  });
   const bindingService = dependencies.bindingService ?? createBindingService({
     store: createBindingStore({ filePath: path.join(configRoot, 'source-control-bindings.json') }),
     resolveRepository: resolveRepositoryIdentity,
@@ -296,12 +299,16 @@ export function registerSourceControlRoutes(app, dependencies = {}) {
     resolveChangeRequestWorktreeSource: createChangeRequestWorktreeSource({
       readBinding: bindingService.get,
       listGitLabInstances: gitlab.listInstances,
-      readCurrentAccountId: ({ provider, instance }) => (provider === 'github'
-        ? github.readCurrentAccountId()
-        : gitlab.readCurrentAccountId(instance)),
-      readChangeRequestHead: (input) => (input.context.provider === 'github'
-        ? github.readChangeRequestHead(input)
-        : gitlab.readChangeRequestHead(input)),
+      readCurrentAccountId: ({ provider, instance }) => {
+        if (provider === 'github') return github.readCurrentAccountId();
+        if (provider === 'gitlab') return gitlab.readCurrentAccountId(instance);
+        throw unsupportedProviderError(provider);
+      },
+      readChangeRequestHead: (input) => {
+        if (input.context.provider === 'github') return github.readChangeRequestHead(input);
+        if (input.context.provider === 'gitlab') return gitlab.readChangeRequestHead(input);
+        throw unsupportedProviderError(input.context.provider);
+      },
     }),
   });
 }

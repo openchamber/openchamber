@@ -34,13 +34,13 @@ const PERSIST_DEBOUNCE_MS = 2 * SECOND;
 const RETENTION_MS = 12 * 60 * MINUTE;
 const MAX_ENTRIES = 500;
 
-const BATCH_LIMIT = { github: 100, gitlab: 50, linear: 50 };
+const BATCH_LIMIT = { github: 100, gitlab: 50, gitea: 50, linear: 50 };
 const LINEAR_SETTLED_TYPES = new Set(['completed', 'canceled']);
 
 // One batch per provider, instance and reading account.
 const groupOf = (item) => {
   const account = item.accountId ? `@${item.accountId}` : '';
-  return item.provider === 'gitlab' ? `gitlab|${item.instance}${account}` : `${item.provider}${account}`;
+  return item.provider === 'github' ? `github${account}` : `${item.provider}|${item.instance}${account}`;
 };
 const threadRef = (item) => ({ owner: item.owner, repo: item.repo, number: item.number });
 const threadAnswerKey = (ref) => `${ref.owner}/${ref.repo}#${ref.number}`.toLowerCase();
@@ -238,7 +238,11 @@ export function createTrackedItemsService({
     const accountId = first.accountId ?? null;
     return first.provider === 'gitlab'
       ? readers.gitlab({ instance: first.instance, accountId, pulls, issues })
-      : readers.github({ accountId, pulls, issues });
+      : first.provider === 'gitea'
+        ? readers.gitea instanceof Function
+          ? readers.gitea({ instance: first.instance, accountId, pulls, issues })
+          : { status: 'unavailable' }
+        : readers.github({ accountId, pulls, issues });
   };
 
   const refreshGroup = async (group, groupEntries, changed) => {

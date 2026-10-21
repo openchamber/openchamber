@@ -23,6 +23,14 @@ describe('parseIssueReference', () => {
     });
   });
 
+  test('parses Gitea issue URLs', () => {
+    expect(parseIssueReference('https://gitea.example.com/openchamber/openchamber/issues/43')).toEqual({
+      number: 43,
+      identity: { provider: 'gitea', instance: 'https://gitea.example.com' },
+      project: { owner: 'openchamber', name: 'openchamber' },
+    });
+  });
+
   test('rejects unrelated and invalid references', () => {
     expect(parseIssueReference('https://github.com/openchamber/openchamber/pull/42')).toBeNull();
     expect(parseIssueReference('#0')).toBeNull();

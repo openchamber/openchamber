@@ -1,4 +1,5 @@
 import type { GitRemote, PageResult, SourceControlAuthAccount, SourceControlBindingRead, SourceControlIdentity, SourceControlProvider, SourceControlReadContext } from '@/lib/api/types';
+import { PROVIDER_CHANGE_REQUEST_PREFIX, PROVIDER_LABELS } from './providers';
 
 export const GITHUB_SOURCE_CONTROL_IDENTITY: SourceControlIdentity = { provider: 'github', instance: 'github.com' };
 const GITLAB_SOURCE_CONTROL_IDENTITY: SourceControlIdentity = { provider: 'gitlab', instance: 'https://gitlab.com' };
@@ -146,12 +147,12 @@ export const getSourceControlBaseUrl = (identity: SourceControlIdentity): string
   identity.instance.includes('://') ? identity.instance : `https://${identity.instance}`
 );
 
-export const getSourceControlProviderLabel = (provider: SourceControlProvider): 'GitHub' | 'GitLab' =>
-  provider === 'github' ? 'GitHub' : 'GitLab';
+export const getSourceControlProviderLabel = (provider: SourceControlProvider): string =>
+  PROVIDER_LABELS[provider];
 
-/** GitLab addresses merge requests as `!N`; GitHub addresses pull requests as `#N`. */
+/** GitLab addresses merge requests as `!N`; GitHub and Gitea as `#N`. */
 const getChangeRequestReferencePrefix = (provider: SourceControlProvider): '#' | '!' =>
-  provider === 'gitlab' ? '!' : '#';
+  PROVIDER_CHANGE_REQUEST_PREFIX[provider];
 
 export const formatChangeRequestReference = (provider: SourceControlProvider | null | undefined, number: number): string =>
   `${provider ? getChangeRequestReferencePrefix(provider) : '#'}${number}`;

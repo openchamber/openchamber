@@ -12,7 +12,8 @@ import type { GitHubIssueLiveSummary, GitHubPullRequestLiveSummary, LinearIssueL
  */
 export type TrackedThread<Kind extends 'pull' | 'issue' = 'pull' | 'issue'> =
   | { provider: 'github'; kind: Kind; owner: string; repo: string; number: number; accountId?: string }
-  | { provider: 'gitlab'; instance: string; kind: Kind; owner: string; repo: string; number: number; accountId?: string };
+  | { provider: 'gitlab'; instance: string; kind: Kind; owner: string; repo: string; number: number; accountId?: string }
+  | { provider: 'gitea'; instance: string; kind: Kind; owner: string; repo: string; number: number; accountId?: string };
 export type TrackedLinearIssue = { provider: 'linear'; identifier: string };
 export type TrackedItem = TrackedThread<'pull'> | TrackedThread<'issue'> | TrackedLinearIssue;
 
@@ -21,7 +22,9 @@ export const trackedItemKey = (item: TrackedItem): string => {
   const thread = `${item.kind}|${item.owner}/${item.repo}#${item.number}`.toLowerCase();
   // Account ids are opaque and case-sensitive; they stay as they are.
   const account = item.accountId ? `@${item.accountId}` : '';
-  return item.provider === 'gitlab' ? `gitlab|${item.instance.toLowerCase()}|${thread}${account}` : `github|${thread}${account}`;
+  return item.provider === 'github'
+    ? `github|${thread}${account}`
+    : `${item.provider}|${item.instance.toLowerCase()}|${thread}${account}`;
 };
 
 const checksSchema = z.object({

@@ -214,7 +214,8 @@ interface WebSourceControlAPIOptions {
 const GITHUB_IDENTITY: SourceControlIdentity = { provider: 'github', instance: 'github.com' };
 
 const normalizeIdentity = (identity: SourceControlIdentity): SourceControlIdentity => {
-  if (identity.provider === 'gitlab') {
+  if (identity.provider === 'gitlab' || identity.provider === 'gitea') {
+    const label = identity.provider === 'gitea' ? 'Gitea' : 'GitLab';
     const raw = identity.instance.trim();
     let url: URL;
     try {
@@ -225,9 +226,9 @@ const normalizeIdentity = (identity: SourceControlIdentity): SourceControlIdenti
     const loopback = ['localhost', '127.0.0.1', '::1', '[::1]'].includes(url.hostname.toLowerCase());
     if (url.username || url.password || url.search || url.hash || (url.pathname && url.pathname !== '/')
       || (url.protocol !== 'https:' && !(url.protocol === 'http:' && loopback))) {
-      throw new Error(`Invalid GitLab instance: ${identity.instance}`);
+      throw new Error(`Invalid ${label} instance: ${identity.instance}`);
     }
-    return { provider: 'gitlab', instance: url.origin };
+    return { provider: identity.provider, instance: url.origin };
   }
 
   const value = identity.instance.trim().toLowerCase().replace(/\.$/, '');
