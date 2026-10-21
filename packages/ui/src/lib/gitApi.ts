@@ -2,7 +2,7 @@
 import * as gitHttp from './gitApiHttp';
 import { mapWithConcurrency } from './concurrency';
 import { opencodeClient } from './opencode/client';
-import { renderMagicPrompt } from './magicPrompts';
+import { loadMagicPrompts } from './magicPrompts';
 import { requestSmallModel } from './smallModelRequest';
 import { materializeOpenDraftSession, useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
@@ -275,8 +275,9 @@ export async function generateCommitMessage(
   });
 
   const recentCommits = await collectRecentCommitSubjects(directory);
-  const visiblePrompt = await renderMagicPrompt('git.commit.generate.visible');
-  const hiddenPrompt = await renderMagicPrompt('git.commit.generate.instructions', {
+  const prompts = await loadMagicPrompts(directory);
+  const visiblePrompt = prompts.render('git.commit.generate.visible');
+  const hiddenPrompt = prompts.render('git.commit.generate.instructions', {
     selected_files: files.map((file) => `- ${file}`).join('\n'),
     recent_commits: recentCommits,
   });
@@ -464,10 +465,11 @@ export async function generatePullRequestDescription(
     changedFiles: changedFiles.length,
   });
 
-  const visiblePrompt = await renderMagicPrompt('git.pr.generate.visible', {
+  const prompts = await loadMagicPrompts(directory);
+  const visiblePrompt = prompts.render('git.pr.generate.visible', {
     change_request: payload.changeRequestProvider === 'gitlab' ? 'GitLab merge request' : 'GitHub pull request',
   });
-  const hiddenPrompt = await renderMagicPrompt('git.pr.generate.instructions', {
+  const hiddenPrompt = prompts.render('git.pr.generate.instructions', {
     base_branch: payload.base,
     head_branch: payload.head,
     commits: commits.map((commit) => {

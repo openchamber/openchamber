@@ -1172,6 +1172,7 @@ export const dict = {
   'gitView.sync.syncCounts': '{behind}↓ {ahead}↑',
   'gitView.branch.actionsUnavailable': 'إجراءات الفروع غير متاحة في حالة المستودع هذه',
   'gitView.conflict.noDetailsAvailable': 'لا تتوفر تفاصيل عن التعارض',
+  'magicPrompts.toast.loadFailed': 'تعذّر تحميل الموجّهات السحرية. لم يُرسَل شيء.',
   'gitView.empty.notGitRepository': 'هذا المجلد ليس مستودع Git',
   'gitView.empty.notGitRepositoryDescription': 'هيّئ Git في هذا المجلد أو افتح مستودعًا.',
   'gitView.empty.selectSessionOrDirectory': 'حدّد جلسة أو مجلدًا لعرض حالة Git',

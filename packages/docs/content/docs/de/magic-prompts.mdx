@@ -21,6 +21,18 @@ Einige Prompts haben einen sichtbaren Teil (die Nachricht, die du sehen würdest
 
 Anders entschieden? Jeder Prompt hat **Auf Standard zurücksetzen**, und es gibt **Alle zurücksetzen**, wenn du überall neu anfangen möchtest.
 
+## Projekt-Prompts
+
+Ein Prompt kann auch eine Überschreibung für ein einzelnes Projekt haben. OpenChamber nimmt die Projektüberschreibung, wenn es eine gibt, sonst deine globale Überschreibung, sonst den eingebauten Text. Eine gespeicherte Überschreibung zählt auch, wenn sie leer ist.
+
+Um eine anzulegen, wähle das Projekt in der Auswahl oben in der Seitenleiste und dann **Projekt** unter **Geltungsbereich**. Klicke unter jedem Block, den du änderst, auf **Speichern**. Die Schaltflächen zum Zurücksetzen ändern nur den Geltungsbereich, der gerade offen ist. In **Projekt** bringen **Projektüberschreibung entfernen** und **Alle Projektüberschreibungen entfernen** deine globale Überschreibung oder den eingebauten Text zurück. Speicherst du in **Global** den eingebauten Text, wird deine globale Überschreibung entfernt. In **Projekt** bleibt dieser Text gespeichert. So behält das Projekt den eingebauten Text, auch wenn deine globale Überschreibung etwas anderes sagt.
+
+Projektüberschreibungen stehen im Schlüssel `magicPrompts` von `.openchamber/project.json` im Checkout des Projekts. Das ist dieselbe Datei wie bei der [Repository-Konfiguration](/de/repository-config/). Committe sie, um die Prompts mit deinem Team zu teilen. Globale Überschreibungen bleiben in `magic-prompts.json` im Datenordner des Servers.
+
+Ein Worktree nutzt die Prompts des Projekts in seinem Haupt-Checkout, außer du hast den Worktree als eigenes Projekt hinzugefügt. Ein Chat ohne Projekt, ein Ordner, der zu keinem Projekt gehört, und Arbeit in einem isolierten Bereich nutzen nur globale Prompts. Die VS-Code-Erweiterung hat keine Seite Magische Prompts. Dort bearbeitest du die Dateien von Hand, und die globale Datei ist immer `~/.config/openchamber/magic-prompts.json`.
+
+Wenn die Projektdatei nicht gelesen werden kann, etwa weil sie kein gültiges JSON ist, brechen Abläufe, die sie brauchen, mit einem Fehler ab und greifen nicht auf den eingebauten Text zurück. Die Einstellungen zeigen den Grund und die Schaltfläche **Erneut versuchen**. Eine fehlende Projektdatei ist kein Fehler. Das Projekt übernimmt dann alle Prompts.
+
 ## Wo jeder Prompt verwendet wird
 
 Für jeden Prompt steht unten, wo er läuft und was ihn auslöst. Prüfe den Auslöser vor der Bearbeitung, dann weißt du, welchen Ablauf du änderst.

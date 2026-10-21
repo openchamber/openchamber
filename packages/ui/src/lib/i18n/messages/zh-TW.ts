@@ -1227,6 +1227,7 @@ export const dict: Record<I18nKey, string> = {
   'gitView.sync.syncCounts': '{behind}↓ {ahead}↑',
   'gitView.branch.actionsUnavailable': '目前儲存庫狀態下分支操作無法使用',
   'gitView.conflict.noDetailsAvailable': '沒有可用的衝突詳情',
+  'magicPrompts.toast.loadFailed': '無法載入魔法提示詞。未傳送任何內容。',
   'gitView.empty.notGitRepository': '目前目錄不是 Git 儲存庫',
   'gitView.empty.notGitRepositoryDescription': '請在此目錄初始化 Git，或開啟一個 Git 儲存庫。',
   'gitView.empty.selectSessionOrDirectory': '請選擇會话或目錄以查看 Git 狀態',

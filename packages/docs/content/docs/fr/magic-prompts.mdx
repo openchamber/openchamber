@@ -21,6 +21,18 @@ Certains prompts ont une partie visible (le message que vous verriez) et une par
 
 Vous avez changé d’avis ? Chaque prompt possède **reset to default**, et il existe aussi **reset all** si vous voulez tout reprendre depuis le début.
 
+## Prompts de projet
+
+Un prompt peut aussi avoir un remplacement pour un seul projet. OpenChamber utilise le remplacement du projet s’il existe, sinon votre remplacement global, sinon le texte intégré. Un remplacement enregistré compte même s’il est vide.
+
+Pour en créer un, choisissez le projet dans le sélecteur en haut de la barre latérale, puis **Projet** sous **Portée**. Cliquez sur **Enregistrer** sous chaque bloc que vous modifiez. Les boutons de réinitialisation ne changent que la portée ouverte. Dans **Projet**, **Supprimer le remplacement du projet** et **Supprimer tous les remplacements du projet** ramènent votre remplacement global ou le texte intégré. Enregistrer le texte intégré dans **Mondial** supprime votre remplacement global. Dans **Projet**, ce texte reste enregistré, donc le projet garde le texte intégré même si votre remplacement global dit autre chose.
+
+Les remplacements du projet sont enregistrés dans la clé `magicPrompts` de `.openchamber/project.json`, dans le checkout du projet. C’est le même fichier que la [configuration du dépôt](/fr/repository-config/). Committez-le pour partager les prompts avec votre équipe. Les remplacements globaux restent dans `magic-prompts.json`, dans le dossier de données du serveur.
+
+Un worktree utilise les prompts du projet de son checkout principal, sauf si vous avez ajouté le worktree comme projet à part entière. Un chat sans projet, un dossier qui n’appartient à aucun projet et le travail dans un espace isolé utilisent uniquement les prompts globaux. L’extension VS Code n’a pas de page Magic Prompts. Vous y modifiez les fichiers à la main, et le fichier global est toujours `~/.config/openchamber/magic-prompts.json`.
+
+Si le fichier du projet ne peut pas être lu, par exemple parce qu’il n’est pas du JSON valide, les flux qui en ont besoin s’arrêtent avec une erreur et ne se rabattent pas sur le texte intégré. Les Paramètres affichent la raison et un bouton **Réessayer**. Un fichier de projet absent n’est pas une erreur. Le projet hérite alors de tous les prompts.
+
 ## Où chaque prompt est utilisé
 
 Chaque prompt ci-dessous indique où il s’exécute et ce qui le déclenche. Vérifiez le déclencheur avant de modifier, pour savoir quel flux vous changez.

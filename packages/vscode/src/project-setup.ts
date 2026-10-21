@@ -56,10 +56,24 @@ export type SharedProjectConfig = {
   plansDir: string | null;
 };
 
+/** A value of a JSON document as `JSON.parse` returns it. */
+export type JsonValue = null | boolean | number | string | JsonValue[] | JsonObject;
+export type JsonObject = { [key: string]: JsonValue };
+
+/** A JSON value that is an object, the shape every shared file has. */
+const isJsonObject = (value: JsonValue | undefined): value is JsonObject =>
+  value instanceof Object && !Array.isArray(value);
+
+/**
+ * A read of the shared file. `document` is the parsed file as it was read:
+ * always there for `ok`, and for `invalid` when the file is a version-1
+ * object with a wrongly shaped setup key, so a setup write that repairs it
+ * keeps the keys it does not own.
+ */
 export type SharedProjectConfigRead =
   | { status: 'missing' }
-  | { status: 'ok'; config: SharedProjectConfig }
-  | { status: 'invalid'; reason: string };
+  | { status: 'ok'; config: SharedProjectConfig; document: JsonObject }
+  | { status: 'invalid'; reason: string; document?: JsonObject };
 
 export type ProjectSetupSource = 'shared' | 'personal';
 
@@ -78,6 +92,14 @@ export type ProjectSetupView = {
 
 export const SHARED_CONFIG_RELATIVE_PATH = '.openchamber/project.json';
 const SHARED_CONFIG_VERSION = 1;
+
+/**
+ * The keys of the shared file the setup writer owns. Every other key
+ * (`magicPrompts`, keys from newer builds) belongs to another writer and goes
+ * back out exactly as it was read.
+ */
+export const SHARED_SETUP_KEYS: readonly string[] = Object.freeze(['version', 'setupWorktree', 'setupWorktreeWait', 'projectActions', 'draftStarters', 'plansDir']);
+const SHARED_SETUP_KEY_SET: ReadonlySet<string> = new Set(SHARED_SETUP_KEYS);
 
 /**
  * The on-disk keys this module owns inside the personal config document, as
@@ -256,26 +278,32 @@ const EMPTY_SHARED: SharedProjectConfig = {
  * is `invalid` with a reason, never an empty config.
  */
 export const parseSharedProjectConfig = (raw: string): SharedProjectConfigRead => {
-  let parsed: unknown;
+  let parsed: JsonValue;
   try {
     parsed = JSON.parse(raw);
   } catch (error) {
     return { status: 'invalid', reason: `invalid JSON: ${error instanceof Error ? error.message : String(error)}` };
   }
-  if (!isObjectRecord(parsed)) return { status: 'invalid', reason: 'not an object' };
+  if (!isJsonObject(parsed)) return { status: 'invalid', reason: 'not an object' };
+  const document = parsed;
   if (parsed.version !== SHARED_CONFIG_VERSION) return { status: 'invalid', reason: `unsupported version ${JSON.stringify(parsed.version)}` };
-  if ('setupWorktree' in parsed && !Array.isArray(parsed.setupWorktree)) return { status: 'invalid', reason: 'setupWorktree must be an array' };
-  if ('setupWorktreeWait' in parsed && typeof parsed.setupWorktreeWait !== 'boolean') return { status: 'invalid', reason: 'setupWorktreeWait must be a boolean' };
-  if ('projectActions' in parsed && !Array.isArray(parsed.projectActions)) return { status: 'invalid', reason: 'projectActions must be an array' };
-  if ('draftStarters' in parsed && !Array.isArray(parsed.draftStarters)) return { status: 'invalid', reason: 'draftStarters must be an array' };
+  // From here on the file is a version-1 document: an invalid result still
+  // carries it, so a setup write that repairs a wrongly shaped setup key keeps
+  // every key it does not own (Magic Prompts, keys from newer builds).
+  const invalid = (reason: string): SharedProjectConfigRead => ({ status: 'invalid', reason, document });
+  if ('setupWorktree' in parsed && !Array.isArray(parsed.setupWorktree)) return invalid('setupWorktree must be an array');
+  if ('setupWorktreeWait' in parsed && typeof parsed.setupWorktreeWait !== 'boolean') return invalid('setupWorktreeWait must be a boolean');
+  if ('projectActions' in parsed && !Array.isArray(parsed.projectActions)) return invalid('projectActions must be an array');
+  if ('draftStarters' in parsed && !Array.isArray(parsed.draftStarters)) return invalid('draftStarters must be an array');
   let plansDir: string | null = null;
   if ('plansDir' in parsed && parsed.plansDir !== null) {
     plansDir = normalizePlansDir(parsed.plansDir);
-    if (!plansDir) return { status: 'invalid', reason: 'plansDir must be a relative path inside the repository' };
+    if (!plansDir) return invalid('plansDir must be a relative path inside the repository');
   }
   const wait = parsed.setupWorktreeWait;
   return {
     status: 'ok',
+    document,
     config: {
       setupWorktree: sanitizeSetupCommands(parsed.setupWorktree),
       setupWorktreeWait: typeof wait === 'boolean' ? wait : null,
@@ -331,24 +359,42 @@ const withoutEmptyIcon = (action: ProjectAction): Omit<ProjectAction, 'icon'> & 
   return icon === null ? rest : { ...rest, icon };
 };
 
-/** True when the shared config carries nothing: the file should not exist. */
-export const isSharedProjectConfigEmpty = (config: SharedProjectConfig): boolean => (
+/** The keys of a shared document the setup writer does not own, in file order. */
+const foreignSharedEntriesOf = (document: JsonObject): Array<[string, JsonValue]> => (
+  Object.entries(document).filter(([key]) => !SHARED_SETUP_KEY_SET.has(key))
+);
+
+/**
+ * True when the shared file should not exist: the setup carries nothing and
+ * the document has no key another writer owns.
+ */
+export const isSharedProjectConfigEmpty = (config: SharedProjectConfig, document: JsonObject = {}): boolean => (
   config.setupWorktree.length === 0
   && config.setupWorktreeWait === null
   && config.projectActions.length === 0
   && config.draftStarters.length === 0
   && config.plansDir === null
+  && foreignSharedEntriesOf(document).length === 0
 );
 
-/** The bytes of a shared file: version first, only the keys that carry something, pretty-printed. */
-export const serializeSharedProjectConfig = (config: SharedProjectConfig): string => {
-  const document: Record<string, unknown> = { version: SHARED_CONFIG_VERSION };
-  if (config.setupWorktree.length > 0) document.setupWorktree = config.setupWorktree;
-  if (config.setupWorktreeWait !== null) document.setupWorktreeWait = config.setupWorktreeWait;
-  if (config.projectActions.length > 0) document.projectActions = sanitizeProjectActions(config.projectActions).map(withoutEmptyIcon);
-  if (config.draftStarters.length > 0) document.draftStarters = config.draftStarters;
-  if (config.plansDir !== null) document.plansDir = config.plansDir;
-  return `${JSON.stringify(document, null, 2)}\n`;
+/**
+ * The bytes of a shared file: version first, then only the setup keys that
+ * carry something, in a fixed order, pretty-printed (the file is committed
+ * and reviewed), then every key of `document` the setup writer does not own,
+ * unchanged and in file order.
+ */
+export const serializeSharedProjectConfig = (config: SharedProjectConfig, document: JsonObject = {}): string => {
+  const output: Record<string, unknown> = { version: SHARED_CONFIG_VERSION };
+  if (config.setupWorktree.length > 0) output.setupWorktree = config.setupWorktree;
+  if (config.setupWorktreeWait !== null) output.setupWorktreeWait = config.setupWorktreeWait;
+  if (config.projectActions.length > 0) output.projectActions = sanitizeProjectActions(config.projectActions).map(withoutEmptyIcon);
+  if (config.draftStarters.length > 0) output.draftStarters = config.draftStarters;
+  if (config.plansDir !== null) output.plansDir = config.plansDir;
+  // defineProperty keeps a `__proto__` key an own property; assignment would set the prototype.
+  for (const [key, value] of foreignSharedEntriesOf(document)) {
+    Object.defineProperty(output, key, { value, enumerable: true, writable: true, configurable: true });
+  }
+  return `${JSON.stringify(output, null, 2)}\n`;
 };
 
 export const EMPTY_SHARED_PROJECT_CONFIG: SharedProjectConfig = EMPTY_SHARED;

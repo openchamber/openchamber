@@ -21,6 +21,18 @@ Niektóre prompty mają część widoczną (wiadomość, którą zobaczysz) i cz
 
 Zmieniłeś zdanie? Każdy prompt ma **reset to default**, a jest też **reset all**, jeśli chcesz zacząć wszystko od nowa.
 
+## Prompty projektu
+
+Prompt może też mieć nadpisanie dla jednego projektu. OpenChamber używa nadpisania projektu, jeśli istnieje, w przeciwnym razie twojego nadpisania globalnego, a jeśli i tego nie ma, tekstu wbudowanego. Zapisane nadpisanie liczy się nawet wtedy, gdy jest puste.
+
+Aby je dodać, wybierz projekt w selektorze na górze paska bocznego, a potem **Projekt** w sekcji **Zakres**. Kliknij **Save** pod każdym blokiem, który zmieniasz. Przyciski resetu zmieniają tylko otwarty zakres. W **Projekt** przyciski **Usuń nadpisanie projektu** i **Usuń wszystkie nadpisania projektu** przywracają twoje nadpisanie globalne albo tekst wbudowany. Zapisanie tekstu wbudowanego w **Globalne** usuwa twoje nadpisanie globalne. W **Projekt** ten tekst zostaje zapisany, więc projekt zachowuje tekst wbudowany, nawet gdy twoje nadpisanie globalne mówi coś innego.
+
+Nadpisania projektu zapisują się w kluczu `magicPrompts` pliku `.openchamber/project.json` w checkoucie projektu. To ten sam plik co [konfiguracja w repozytorium](/pl/repository-config/). Zrób jego commit, żeby udostępnić prompty zespołowi. Nadpisania globalne zostają w `magic-prompts.json` w folderze danych serwera.
+
+Worktree używa promptów projektu ze swojego głównego checkoutu, chyba że dodałeś worktree jako osobny projekt. Czat bez projektu, folder, który nie należy do żadnego projektu, i praca w izolowanej przestrzeni używają tylko promptów globalnych. Rozszerzenie VS Code nie ma strony Magic Prompts. Tam edytujesz pliki ręcznie, a plik globalny to zawsze `~/.config/openchamber/magic-prompts.json`.
+
+Jeśli pliku projektu nie da się odczytać, na przykład dlatego, że nie jest poprawnym JSON-em, przepływy, które go potrzebują, zatrzymują się z błędem i nie wracają do tekstu wbudowanego. Settings pokazuje powód i przycisk **Spróbuj ponownie**. Brak pliku projektu nie jest błędem. Projekt dziedziczy wtedy wszystkie prompty.
+
 ## Gdzie używany jest każdy prompt
 
 Dla każdego prompta poniżej podano, gdzie się wykonuje i co go uruchamia. Sprawdź wyzwalacz przed edycją, żeby wiedzieć, który przepływ zmieniasz.

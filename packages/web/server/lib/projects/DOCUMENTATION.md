@@ -25,7 +25,7 @@ A project's environment variables and environment command are not in this file e
 
 A second, optional source is the team's shared file, `<repo>/.openchamber/project.json`
 (`version: 1`; `setupWorktree`, `setupWorktreeWait`, `projectActions`, `draftStarters`,
-`plansDir`). The server reads it from the checkout the project id names
+`plansDir`, and `magicPrompts`, which `../magic-prompts` owns). The server reads it from the checkout the project id names
 (`projectPathFromId`). `GET /api/projects/:projectId/config`
 returns one merged view: what runs at the top level, plus `shared` and `personal`
 blocks so a page can edit the personal file without copying a teammate's entry into it.
@@ -45,12 +45,22 @@ served. It is never treated as "no shared setup".
 
 ### Writing the shared file
 
-`PUT /api/projects/:projectId/config/shared` (`updateSharedProjectSetup`) is
-the only writer. The patch replaces the keys it names over the current file
+The file has two writers: `updateSharedProjectSetup` for the setup keys and
+`updateSharedProjectEntry` for one key it does not own (`magicPrompts`). Both
+take the project's write lock (the in-process chain and the
+`<projectsDir>/<id>.json.lock` file) and replace the file through a temporary
+sibling, so a setup save and a prompt save never clobber each other. The lock
+covers only writers sharing one projects dir and project id; a server with
+another data dir, the VS Code extension host and a hand edit are last write wins.
+
+`PUT /api/projects/:projectId/config/shared` (`updateSharedProjectSetup`) writes
+the setup keys. The patch replaces the keys it names over the current file
 (a broken file counts as empty, so a write repairs it); the result is written
-pretty-printed with `version` first and only the keys that carry something
+pretty-printed with `version` first and only the setup keys that carry something
 (`serializeSharedProjectConfig`), because the file is committed and reviewed.
-A result with nothing in it removes the file and the `.openchamber` folder
+Every other key follows unchanged, also through a repair; only unparsable JSON,
+a non-object or another version is replaced whole. A result with nothing in it
+and no other key removes the file and the `.openchamber` folder
 when that leaves it empty, so unsharing the last item leaves no trace. The
 write refuses a checkout that does not exist and a `plansDir` outside the
 repo. The writer has seen what it shared, so its personal trust record is set
@@ -58,6 +68,11 @@ to the new hash; teammates still get the prompt. The shared UI moves an
 entry between the files as a write to the destination followed by a removal
 from the source (`packages/ui/src/components/sections/projects/projectSetupModel.ts`),
 so a failed second write leaves the entry in both files, never in neither.
+
+`updateSharedProjectEntry` never repairs. It refuses any file that is not valid
+version-1 setup (`shared_config_invalid`) and leaves its bytes, writes the rest
+of the document as read, never touches the personal file or its trust record,
+and removes the file when only `version` is left.
 
 ### Trust
 

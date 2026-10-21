@@ -21,6 +21,18 @@ Bazı istemlerin görünen bir kısmı vardır. Bu, sizin göreceğiniz mesajdı
 
 Fikrinizi mi değiştirdiniz? Her istemde **reset to default** vardır. Her şeyi baştan başlatmak isterseniz bir de **reset all** bulunur.
 
+## Proje istemleri
+
+Bir istemin tek bir projeye ait override'ı da olabilir. OpenChamber varsa proje override'ını, yoksa genel override'ınızı, o da yoksa yerleşik metni kullanır. Kaydedilmiş bir override boş olsa bile geçerlidir.
+
+Eklemek için kenar çubuğunun üstündeki seçiciden projeyi seçin, sonra **Kapsam** altında **Proje**'yi seçin. Değiştirdiğiniz her bloğun altındaki **Kaydet** düğmesine tıklayın. Sıfırlama düğmeleri yalnızca açık olan kapsamı değiştirir. **Proje** kapsamında **Proje override'ını kaldır** ve **Tüm proje override'larını kaldır**, genel override'ınızı ya da yerleşik metni geri getirir. **Genel** kapsamda yerleşik metni kaydetmek genel override'ınızı kaldırır. **Proje** kapsamında bu metin kayıtlı kalır. Böylece genel override'ınız başka bir şey söylese de proje yerleşik metni korur.
+
+Proje override'ları, projenin checkout'undaki `.openchamber/project.json` dosyasının `magicPrompts` anahtarında saklanır. Bu, [depo yapılandırması](/tr/repository-config/) ile aynı dosyadır. İstemleri ekibinizle paylaşmak için dosyayı commit edin. Genel override'lar sunucunun veri klasöründeki `magic-prompts.json` dosyasında kalır.
+
+Bir worktree, ana checkout'undaki projenin istemlerini kullanır. Worktree'yi ayrı bir proje olarak eklediyseniz kendi istemlerini kullanır. Projesi olmayan bir sohbet, hiçbir projeye ait olmayan bir klasör ve yalıtılmış bir alandaki çalışma yalnızca genel istemleri kullanır. VS Code eklentisinde Magic Prompts sayfası yoktur. Orada dosyaları elle düzenlersiniz ve genel dosya her zaman `~/.config/openchamber/magic-prompts.json` olur.
+
+Proje dosyası okunamazsa, örneğin geçerli bir JSON değilse, ona ihtiyaç duyan akışlar bir hatayla durur ve yerleşik metne geri dönmez. Settings nedeni ve bir **Yeniden dene** düğmesini gösterir. Proje dosyasının olmaması bir hata değildir. Bu durumda proje tüm istemleri devralır.
+
 ## Her istem nerede kullanılır
 
 Aşağıdaki her istem, nerede çalıştığını ve ne zaman tetiklendiğini listeler. Düzenlemeden önce tetikleyiciyi kontrol edin. Böylece hangi akışı değiştirdiğinizi bilirsiniz.

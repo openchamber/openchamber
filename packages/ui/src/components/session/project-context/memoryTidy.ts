@@ -1,6 +1,6 @@
 import type { AgentMemoryEntry, AgentMemoryScope } from '@/lib/agentMemoryApi';
 import { captureDefaultSendSelection } from '@/lib/defaultSendSelection';
-import { renderMagicPrompt } from '@/lib/magicPrompts';
+import { loadMagicPrompts } from '@/lib/magicPrompts';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 
@@ -49,10 +49,10 @@ export const startMemoryTidy = async (input: {
   const selection = captureDefaultSendSelection();
   if (!selection) return { ok: false, reason: 'no-model' };
 
-  const [visiblePrompt, instructions] = await Promise.all([
-    renderMagicPrompt('memory.tidy.visible'),
-    renderMagicPrompt('memory.tidy.instructions', { memory_entries: formatMemoryForTidy(input.memory) }),
-  ]);
+  // Throws when the prompts cannot be read; nothing has been created yet.
+  const prompts = await loadMagicPrompts(input.projectPath);
+  const visiblePrompt = prompts.render('memory.tidy.visible');
+  const instructions = prompts.render('memory.tidy.instructions', { memory_entries: formatMemoryForTidy(input.memory) });
 
   const store = useSessionUIStore.getState();
   const session = await store.createSession(input.title, input.projectPath, undefined, {

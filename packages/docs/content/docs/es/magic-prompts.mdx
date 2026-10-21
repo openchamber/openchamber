@@ -21,6 +21,18 @@ Algunos prompts tienen una parte visible (el mensaje que verías) y una parte de
 
 ¿Cambiaste de opinión? Cada prompt tiene **reset to default**, y hay un **reset all** si quieres empezar de cero en todas partes.
 
+## Prompts de proyecto
+
+Un prompt también puede tener una sobrescritura para un solo proyecto. OpenChamber usa la sobrescritura del proyecto si la hay; si no, tu sobrescritura global; y si tampoco, el texto integrado. Una sobrescritura guardada cuenta aunque esté vacía.
+
+Para crear una, elige el proyecto en el selector de la parte superior de la barra lateral y luego **Proyecto** en **Ámbito**. Pulsa **Guardar** debajo de cada bloque que cambies. Los botones para restablecer cambian solo el ámbito que tienes abierto. En **Proyecto**, **Quitar sobrescritura del proyecto** y **Quitar todas las sobrescrituras del proyecto** devuelven tu sobrescritura global o el texto integrado. Si guardas el texto integrado en **Global**, se quita tu sobrescritura global. En **Proyecto**, ese texto queda guardado, así que el proyecto mantiene el texto integrado aunque tu sobrescritura global diga otra cosa.
+
+Las sobrescrituras del proyecto se guardan en la clave `magicPrompts` de `.openchamber/project.json`, en el checkout del proyecto. Es el mismo archivo que la [configuración en el repositorio](/es/repository-config/). Haz commit de él para compartir los prompts con tu equipo. Las sobrescrituras globales siguen en `magic-prompts.json`, en la carpeta de datos del servidor.
+
+Un worktree usa los prompts del proyecto de su checkout principal, salvo que hayas añadido el worktree como proyecto propio. Un chat sin proyecto, una carpeta que no pertenece a ningún proyecto y el trabajo en un espacio aislado usan solo prompts globales. La extensión de VS Code no tiene la página Magic Prompts. Allí editas los archivos a mano, y el archivo global siempre es `~/.config/openchamber/magic-prompts.json`.
+
+Si no se puede leer el archivo del proyecto, por ejemplo porque no es JSON válido, los flujos que lo necesitan se detienen con un error y no recurren al texto integrado. Settings muestra el motivo y un botón **Reintentar**. Que falte el archivo del proyecto no es un error. El proyecto hereda entonces todos los prompts.
+
 ## Dónde se usa cada prompt
 
 Cada prompt de las tablas indica dónde se ejecuta y qué lo dispara. Revisa el disparador antes de editar, para saber qué flujo estás cambiando.

@@ -20,7 +20,7 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useInputStore } from '@/sync/input-store';
 import { rankByQuery } from '@/lib/search/fuzzySearch';
 import { getGitCommitSummaries } from '@/lib/gitApi';
-import { renderMagicPrompt } from '@/lib/magicPrompts';
+import { loadMagicPrompts } from '@/lib/magicPrompts';
 import {
   abortIntegrate,
   computeIntegratePlan,
@@ -186,11 +186,13 @@ export const IntegrateCommitsSection: React.FC<{
   const openNewSessionDraft = useSessionUIStore((s) => s.openNewSessionDraft);
 
   const buildConflictContext = React.useCallback(async (payload: { state: IntegrateInProgress; details: IntegrateConflictDetails }) => {
-    const visibleText = await renderMagicPrompt('git.integrate.cherrypick.resolve.visible', {
+    // The temporary worktree belongs to the repository's project, so its prompts are the project's.
+    const prompts = await loadMagicPrompts(payload.state.repoRoot);
+    const visibleText = prompts.render('git.integrate.cherrypick.resolve.visible', {
       current_commit: payload.state.currentCommit,
       target_branch: payload.state.targetBranch,
     });
-    const instructionsText = await renderMagicPrompt('git.integrate.cherrypick.resolve.instructions', {
+    const instructionsText = prompts.render('git.integrate.cherrypick.resolve.instructions', {
       repo_root: payload.state.repoRoot,
       temp_worktree_path: payload.state.tempWorktreePath,
       source_branch: payload.state.sourceBranch,
@@ -221,7 +223,14 @@ export const IntegrateCommitsSection: React.FC<{
     payload: { state: IntegrateInProgress; details: IntegrateConflictDetails },
     useNewSession: boolean
   ) => {
-    const context = await buildConflictContext(payload);
+    let context: Awaited<ReturnType<typeof buildConflictContext>>;
+    try {
+      context = await buildConflictContext(payload);
+    } catch (error) {
+      // The magic prompts could not be read; nothing is opened or filled in.
+      toast.error(t('magicPrompts.toast.loadFailed'), { description: error instanceof Error ? error.message : undefined });
+      return;
+    }
 
     if (useNewSession) {
       // Open new session with the conflict context as initial prompt + synthetic parts

@@ -1108,6 +1108,7 @@ export const dict = {
   'gitView.sync.syncCounts': '{behind}↓ {ahead}↑',
   'gitView.branch.actionsUnavailable': 'Bu repository durumunda branch işlemleri kullanılamıyor',
   'gitView.conflict.noDetailsAvailable': 'Çakışma detayları mevcut değil',
+  'magicPrompts.toast.loadFailed': 'Sihirli Promptlar yüklenemedi. Hiçbir şey gönderilmedi.',
   'gitView.empty.notGitRepository': 'Bu dizin bir Git repository\'si değil',
   'gitView.empty.notGitRepositoryDescription': 'Bu dizinde Git\'i başlatın veya bir repository açın.',
   'gitView.empty.retryDiscovery': 'Yeniden dene',

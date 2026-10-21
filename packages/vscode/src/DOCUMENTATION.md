@@ -22,7 +22,7 @@ Keep `bridge.ts` as a thin orchestration layer that delegates message handling t
   - A catalog rejects a model only when it lists that model as disabled, which is the rule the server-side resolver applies: a config can outlive the login behind it, but a model the catalog does not list at all — a plugin provider still loading, or a cold location that answered before its providers did — is kept. Gating on "listed" dropped the user's configured small model on a cold start, sent generation to the zen default they cannot use, and the `Model unavailable` retry loop then retried that wrong model until it gave up.
   - Catalog reads, the title-agent read, and generation all name the flow's directory through the `x-opencode-directory` header, and the model catalog cache is keyed by that directory. OpenCode resolves models per location, so an unscoped read would answer for OpenCode's own working directory and reject models that work in the repository.
   - Specialized Git flows (`commit-message`, `pr-description`, `conflict-details`) and generation helpers.
-  - Commit message prompt templates stay aligned with `git.commit.generate.*` in `packages/ui/src/lib/magicPrompts.ts`, including on-disk magic-prompt overrides.
+  - Commit message prompt templates stay aligned with `git.commit.generate.*` in `packages/ui/src/lib/magicPrompts.ts`. `api:git/commit-message` uses the overrides of its `directory` (`readPromptOverrides`); a read failure fails the generation.
 
 - `bridge-small-model-runtime.ts`
   - Answers `GET /api/small-model`, which the web server serves elsewhere and OpenCode does not know. The webview routes the path to `api:small-model:get` before the generic proxy.
@@ -35,6 +35,12 @@ Keep `bridge.ts` as a thin orchestration layer that delegates message handling t
 
 - `scmCommitMessage.ts`
   - Source Control title-bar command. Resolves the git repo, prefers staged files then unstaged/untracked, writes the result into `Repository.inputBox` only if that box still matches the value captured when generation started. Light theme reuses `icon.svg`. Dark theme uses `icon-scm-titlebar.svg` (`#C5C5C5`) because that slot does not theme `currentColor` and `icon-titlebar.svg` is mint. A blank icon over SSH/DevPod is [vscode-remote-release#11686](https://github.com/microsoft/vscode-remote-release/issues/11686), not a missing asset.
+  - Magic Prompts come from the project that owns the picked repository, not the project selected in the webview, so each root of a multi-root window uses its own file.
+
+- `magic-prompts.ts`
+  - Host side of `/api/magic-prompts` (no `vscode` import). It runs the server's `runtime.js` and `service.js` (`packages/web/server/lib/magic-prompts/DOCUMENTATION.md` is the contract) and adds what differs here: the bridge payload, the project list and owner resolution.
+  - Registered projects are the window's workspace folders with the ids the UI gives them; `settings.projects` is ignored. The global file is always `~/.config/openchamber/magic-prompts.json`; `OPENCHAMBER_DATA_DIR` does not move it.
+  - Owner resolution maps a linked worktree onto its primary checkout through `git worktree list --porcelain`. Only git's "not a git repository" means no repository; any other git failure fails the read, so a worktree never silently gets the global prompts.
 
 - `bridge-git-process-runtime.ts`
   - Git process execution and environment setup (`execGit`), including SSH agent socket resolution. Both bridge helpers and `gitService.ts` use this executor; the latter passes the Git binary selected by VS Code's Git extension.
@@ -107,6 +113,7 @@ The webview build emits each worker as one self-contained file. VS Code webviews
 
 - `bridge-project-setup-runtime.ts`
   - Extension-host side of `GET/PUT /api/projects/:projectId/config` (the webview handles the route locally and bridges `api:project-setup:get` / `api:project-setup:update`). Reads and writes the client-owned keys of `~/.config/openchamber/projects/<projectId>.json` (worktree setup commands, project actions, draft starters) with the rules in `project-setup.ts`, a mirror of the server's `packages/web/server/lib/projects/project-setup.js`; keep the two in sync. The file name follows the server's bounded rule (`projectConfigFileStemOf`, mirrored from `packages/web/server/lib/projects/project-id.js`): an id over 200 characters is stored as `path_sha256_<digest>.json` so a deeply nested checkout does not exceed the file name limit. A file an older build wrote under the long name is still read when the bounded one is missing and is removed once a write has moved its content. Writes to one file are chained; server-owned and unknown keys survive. The read also merges the team's optional `<workspace>/.openchamber/project.json` (checkout path decoded from the `path_<base64url>` id) by the same rules as the server, so the webview sees one view with `shared` / `personal` blocks. The shared UI (`openchamberConfig.ts`) no longer composes that path or reads it through the fs bridge.
+  - The store also follows the server's two-writer rules for that shared file (`packages/web/server/lib/projects/DOCUMENTATION.md`, *Writing the shared file*); `updateSharedEntry` is the Magic Prompts writer. Its write chain covers this extension host only.
 - `bridge-settings-runtime.ts`
   - Settings read/write and OpenCode skills discovery via API for bridge consumers.
   - Writes are gated by the generated registry snapshot (`settings-registry.json`, via `settings-registry-gate.ts`): keys the registry does not list, or marks `computed`, `local`, or `owner: desktop-shell`, never reach the shared settings files. Regenerate the snapshot with `bun run settings-registry:generate` when the UI registry changes.

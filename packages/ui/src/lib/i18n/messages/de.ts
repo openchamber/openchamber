@@ -1100,6 +1100,7 @@ export const dict = {
   'gitView.sync.syncCounts': '{behind}↓ {ahead}↑',
   'gitView.branch.actionsUnavailable': 'Zweigaktionen nicht verfügbar in diesem Repository-Zustand',
   'gitView.conflict.noDetailsAvailable': 'Keine Konfliktdetails verfügbar',
+  'magicPrompts.toast.loadFailed': 'Magic Prompts konnten nicht geladen werden. Es wurde nichts gesendet.',
   'gitView.empty.notGitRepository': 'Dieses Verzeichnis ist kein Git-Repository',
   'gitView.empty.notGitRepositoryDescription': 'Initialisieren Sie Git in diesem Verzeichnis oder öffnen Sie ein Repository.',
   'gitView.empty.selectSessionOrDirectory': 'Wählen Sie eine Sitzung oder ein Verzeichnis aus, um den Git-Status anzuzeigen',

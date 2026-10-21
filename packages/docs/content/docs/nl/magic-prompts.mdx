@@ -21,6 +21,18 @@ Sommige prompts hebben een zichtbaar deel, het bericht dat u zou zien, en een in
 
 Wilt u uw wijziging ongedaan maken? Elke prompt heeft **Terugzetten naar standaard**. Met **Alles terugzetten** begint u overal opnieuw.
 
+## Projectprompts
+
+Een prompt kan ook een overschrijving voor één project hebben. OpenChamber gebruikt de projectoverschrijving als die er is, anders uw globale overschrijving, anders de ingebouwde tekst. Een opgeslagen overschrijving telt ook als die leeg is.
+
+Kies daarvoor het project in de keuzelijst boven in de zijbalk en kies daarna **Project** onder **Bereik**. Klik op **Opslaan** onder elk blok dat u wijzigt. De knoppen om terug te zetten wijzigen alleen het bereik dat open staat. In **Project** brengen **Projectoverschrijving verwijderen** en **Alle projectoverschrijvingen verwijderen** uw globale overschrijving of de ingebouwde tekst terug. Slaat u in **Globaal** de ingebouwde tekst op, dan verdwijnt uw globale overschrijving. In **Project** blijft die tekst opgeslagen, zodat het project de ingebouwde tekst houdt, ook als uw globale overschrijving iets anders zegt.
+
+Projectoverschrijvingen staan in de sleutel `magicPrompts` van `.openchamber/project.json` in de checkout van het project. Dat is hetzelfde bestand als de [repositoryconfiguratie](/nl/repository-config/). Commit het om de prompts met uw team te delen. Globale overschrijvingen blijven in `magic-prompts.json` in de gegevensmap van de server.
+
+Een worktree gebruikt de prompts van het project in zijn hoofdcheckout, tenzij u de worktree als eigen project hebt toegevoegd. Een chat zonder project, een map die bij geen enkel project hoort en werk in een geïsoleerde ruimte gebruiken alleen globale prompts. De VS Code-extensie heeft geen pagina Magic Prompts. Daar bewerkt u de bestanden met de hand, en het globale bestand is altijd `~/.config/openchamber/magic-prompts.json`.
+
+Als het projectbestand niet gelezen kan worden, bijvoorbeeld omdat het geen geldige JSON is, stoppen functies die het nodig hebben met een foutmelding en vallen ze niet terug op de ingebouwde tekst. Instellingen toont de reden en de knop **Opnieuw proberen**. Een ontbrekend projectbestand is geen fout. Het project neemt dan alle prompts over.
+
 ## Waar elke prompt wordt gebruikt
 
 Hieronder staat voor elke prompt waar en wanneer die wordt gebruikt. Controleer dat voordat u gaat bewerken, zodat u weet welk gedrag u verandert.

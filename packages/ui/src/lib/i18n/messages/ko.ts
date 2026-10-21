@@ -1208,6 +1208,7 @@ export const dict: Record<I18nKey, string> = {
   'gitView.sync.syncCounts': '{behind}↓ {ahead}↑',
   'gitView.branch.actionsUnavailable': '현재 레포지토리 상태에서는 브랜치 작업을 사용할 수 없음',
   'gitView.conflict.noDetailsAvailable': '충돌 상세 정보 없음',
+  'magicPrompts.toast.loadFailed': '매직 프롬프트를 불러오지 못했습니다. 아무것도 전송되지 않았습니다.',
   'gitView.empty.notGitRepository': '이 디렉터리는 Git 레포지토리가 아닙니다',
   'gitView.empty.notGitRepositoryDescription': '이 디렉터리에서 Git을 초기화하거나 레포지토리를 여세요.',
   'gitView.empty.selectSessionOrDirectory': 'Git 상태를 볼 세션 또는 디렉터리를 선택하세요',

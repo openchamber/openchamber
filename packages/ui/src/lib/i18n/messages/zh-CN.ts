@@ -1208,6 +1208,7 @@ export const dict: Record<I18nKey, string> = {
   'gitView.sync.syncCounts': '{behind}↓ {ahead}↑',
   'gitView.branch.actionsUnavailable': '当前仓库状态下分支操作不可用',
   'gitView.conflict.noDetailsAvailable': '没有可用的冲突详情',
+  'magicPrompts.toast.loadFailed': '无法加载魔法提示词。未发送任何内容。',
   'gitView.empty.notGitRepository': '当前目录不是 Git 仓库',
   'gitView.empty.notGitRepositoryDescription': '请在此目录初始化 Git，或打开一个 Git 仓库。',
   'gitView.empty.selectSessionOrDirectory': '请选择会话或目录以查看 Git 状态',

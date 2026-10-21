@@ -178,6 +178,28 @@ folder name, not its display name. Statements from a connected OpenCode
 Console workspace are not in `/api/config`, so a server blocked only there is
 not marked.
 
+## Magic Prompts
+
+`magic-prompts/` is not an autosave page: each prompt block has its own Save
+and reset button. Storage and resolution belong to
+`packages/web/server/lib/magic-prompts/DOCUMENTATION.md`.
+
+The page opens on the Global scope. The Project scope edits the project the
+Settings project selector names, matched by exact path, so a worktree
+registered as its own project keeps its own id. Choosing it never moves the
+chat. Saving the built-in text in Global removes the global override; in
+Project the same text stays an override, because it still wins over a
+different global one.
+
+A failed read or an `invalid` scope shows the error with Retry and no editor,
+never editable built-in text. Drafts and writes are kept per runtime, scope,
+project and prompt. A context runs one write at a time, because every write
+answers with the whole scope and overlapping answers could land out of order,
+and a read older than the latest write is dropped. File paths render as their
+own `dir="ltr"` element so an RTL sentence never reorders them.
+
+The page is hidden in VS Code (`metadata.ts`).
+
 ## Entity shapes: OpenCode 2 only
 
 Every OpenCode entity these pages read and write speaks the v2 shape defined in

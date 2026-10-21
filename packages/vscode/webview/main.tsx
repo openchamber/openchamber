@@ -983,27 +983,32 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
     }
   }
 
-  if (pathname === '/api/magic-prompts') {
-    if (method === 'GET') {
-      const data = await sendBridgeMessage('api:magic-prompts:get');
-      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
-    }
-    if (method === 'DELETE') {
-      const data = await sendBridgeMessage('api:magic-prompts:reset-all');
-      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
-    }
-  }
-
-  if (pathname.startsWith('/api/magic-prompts/')) {
-    const id = decodeURIComponent(pathname.slice('/api/magic-prompts/'.length));
-    if (method === 'PUT') {
-      const body = await extractJsonBody(input, init, method);
-      const data = await sendBridgeMessage('api:magic-prompts:save', { id, text: body?.text });
-      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
-    }
-    if (method === 'DELETE') {
-      const data = await sendBridgeMessage('api:magic-prompts:reset', { id });
-      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  // Magic Prompts: the extension host answers with the server's statuses and
+  // bodies. Selectors stay in the query string, every value of a name is
+  // forwarded so a repeated one is refused there, and the routing directory
+  // plays no part in which file is read or written; a prompt read names its
+  // directory as `sessionDirectory`.
+  const isMagicPromptCollection = pathname === '/api/magic-prompts' && (method === 'GET' || method === 'DELETE');
+  const isMagicPromptItem = pathname.startsWith('/api/magic-prompts/') && (method === 'PUT' || method === 'DELETE');
+  if (isMagicPromptCollection || isMagicPromptItem) {
+    const readRequest = async () => ({
+      method,
+      id: isMagicPromptItem ? decodeURIComponent(pathname.slice('/api/magic-prompts/'.length)) : null,
+      query: {
+        projectId: url.searchParams.getAll('projectId'),
+        scope: url.searchParams.getAll('scope'),
+        sessionDirectory: url.searchParams.getAll('sessionDirectory'),
+      },
+      body: method === 'GET' ? undefined : await extractJsonBody(input, init, method),
+    });
+    // A malformed id encoding or JSON body is the client's error.
+    const request = await readRequest().catch(() => null);
+    if (!request) return jsonResponse({ error: 'Invalid magic prompt request' }, 400);
+    try {
+      const { status, body } = await sendBridgeMessage<{ status: number; body: unknown }>('api:magic-prompts', request);
+      return jsonResponse(body, status);
+    } catch (error) {
+      return jsonResponse({ error: error instanceof Error ? error.message : 'Magic prompt request failed' }, 500);
     }
   }
 

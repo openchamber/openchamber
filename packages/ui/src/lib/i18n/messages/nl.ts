@@ -1199,6 +1199,7 @@ export const dict = {
   'gitView.sync.syncCounts': '{behind}↓ {ahead}↑',
   'gitView.branch.actionsUnavailable': 'Branchacties niet beschikbaar in deze repositorystatus',
   'gitView.conflict.noDetailsAvailable': 'Geen conflictgegevens beschikbaar',
+  'magicPrompts.toast.loadFailed': 'Magic Prompts konden niet worden geladen. Er is niets verzonden.',
   'gitView.empty.notGitRepository': 'Deze map is geen Git-repository',
   'gitView.empty.notGitRepositoryDescription': 'Initialiseer Git in deze map of open een repository.',
   'gitView.empty.selectSessionOrDirectory': 'Selecteer een sessie of map om de Git-status te bekijken',

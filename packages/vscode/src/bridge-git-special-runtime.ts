@@ -29,8 +29,12 @@ type ExecGitResult = { stdout: string; stderr: string; exitCode: number };
 type SpecialGitDeps = {
   readSettings: (ctx?: BridgeContext) => Record<string, unknown>;
   execGit: (args: string[], cwd: string) => Promise<ExecGitResult>;
-  /** Magic prompt overrides keyed by prompt id; read through the host so this module stays free of `vscode`. */
-  readPromptOverrides: () => Record<string, string>;
+  /**
+   * The effective Magic Prompt overrides for work in a directory (its owning
+   * project over global), keyed by prompt id; read through the host so this
+   * module stays free of `vscode`. Rejects when a scope cannot be read.
+   */
+  readPromptOverrides: (directory: string) => Promise<Record<string, string>>;
 };
 
 const BRIDGE_GIT_GENERATION_TIMEOUT_MS = 2 * 60 * 1000;
@@ -275,8 +279,7 @@ export const generateBridgeCommitMessage = async ({
   apiUrl,
   authHeaders,
   settings,
-  visiblePromptOverride,
-  instructionsPromptOverride,
+  promptOverrides,
   payloadModel,
   execGit,
 }: {
@@ -285,8 +288,8 @@ export const generateBridgeCommitMessage = async ({
   apiUrl: string;
   authHeaders?: Record<string, string>;
   settings: Record<string, unknown>;
-  visiblePromptOverride?: string;
-  instructionsPromptOverride?: string;
+  /** Effective Magic Prompt overrides by prompt id; a present key wins even when empty. */
+  promptOverrides: Record<string, string>;
   payloadModel?: BridgeGitGenerationPayloadModel;
   execGit: SpecialGitDeps['execGit'];
 }): Promise<GeneratedCommitMessage> => {
@@ -309,13 +312,7 @@ export const generateBridgeCommitMessage = async ({
     throw new Error('No diffs available for selected files');
   }
 
-  const { system, prompt } = buildCommitGenerationPrompt(
-    selectedFiles,
-    recentCommits,
-    diffs,
-    visiblePromptOverride ?? '',
-    instructionsPromptOverride ?? '',
-  );
+  const { system, prompt } = buildCommitGenerationPrompt(selectedFiles, recentCommits, diffs, promptOverrides);
   const { providerID, modelID, variant } = await resolveBridgeGitGenerationModel(
     payloadModel ?? {},
     settings,
@@ -379,15 +376,13 @@ export async function handleSpecialGitBridgeMessage(
           return { id, type, success: false, error: 'OpenCode API unavailable' };
         }
 
-        const promptOverrides = deps.readPromptOverrides();
         const generated = await generateBridgeCommitMessage({
           directory,
           files: selectedFiles,
           apiUrl,
           authHeaders: ctx?.manager?.getOpenCodeAuthHeaders(),
           settings: deps.readSettings(ctx),
-          visiblePromptOverride: promptOverrides['git.commit.generate.visible'],
-          instructionsPromptOverride: promptOverrides['git.commit.generate.instructions'],
+          promptOverrides: await deps.readPromptOverrides(directory),
           payloadModel: { providerId, modelId, zenModel: payloadZenModel },
           execGit: deps.execGit,
         });

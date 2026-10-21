@@ -1207,6 +1207,7 @@ export const dict = {
   'gitView.sync.syncCounts': '{behind}↓ {ahead}↑',
   'gitView.branch.actionsUnavailable': 'Branch actions unavailable in this repository state',
   'gitView.conflict.noDetailsAvailable': 'No conflict details available',
+  'magicPrompts.toast.loadFailed': 'Could not load magic prompts. Nothing was sent.',
   'gitView.empty.notGitRepository': 'This directory is not a Git repository',
   'gitView.empty.notGitRepositoryDescription': 'Initialize Git in this directory or open a repository.',
   'gitView.empty.selectSessionOrDirectory': 'Select a session or directory to view Git status',

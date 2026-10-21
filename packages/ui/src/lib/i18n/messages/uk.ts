@@ -1199,6 +1199,7 @@ export const dict: Record<I18nKey, string> = {
   "gitView.sync.syncCounts": "{behind}↓ {ahead}↑",
   "gitView.branch.actionsUnavailable": "Дії з гілками недоступні в цьому стані сховища",
   "gitView.conflict.noDetailsAvailable": "Деталі конфлікту відсутні",
+  "magicPrompts.toast.loadFailed": "Не вдалося завантажити магічні промпти. Нічого не надіслано.",
   "gitView.empty.notGitRepository": "Цей каталог не є репозиторієм Git",
   "gitView.empty.notGitRepositoryDescription": "Ініціалізуйте Git у цьому каталозі або відкрийте сховище.",
   "gitView.empty.selectSessionOrDirectory": "Виберіть сесію або каталог, щоб переглянути статус Git",

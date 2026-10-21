@@ -32,7 +32,7 @@ const GuestAttachDialog = React.lazy(() => import('@/components/layout/GuestAtta
 import type { AttachIssueRequest } from '@openchamber/sdk';
 import { getInlineCommentDraftKey, useInlineCommentDraftStore, type InlineCommentDraft, type InlineCommentDraftTarget } from '@/stores/useInlineCommentDraftStore';
 import { useSnippetsStore } from '@/stores/useSnippetsStore';
-import { renderMagicPrompt } from '@/lib/magicPrompts';
+import { loadMagicPrompts } from '@/lib/magicPrompts';
 import { getRuntimeKey, subscribeRuntimeEndpointWillChange } from '@/lib/runtime-switch';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import {
@@ -1600,6 +1600,16 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         // Snapshot the draft and current-session identity before the first
         // async gap so a later sidebar selection cannot reroute the send.
         const capturedDraftSnapshot = newSessionDraftOpen ? { ...newSessionDraft } : null;
+        // Magic prompts come from the directory this send lands in, routed the
+        // way sendMessage routes it: the /btw fork, the session, else the
+        // draft. A new chat has no folder yet and reads the global prompts.
+        const magicPromptDirectory = isBtwActive
+            ? btwDirectory ?? currentSessionDirectoryForSync ?? currentDirectory
+            : capturedTarget || !capturedDraftSnapshot
+                ? capturedTarget?.directory ?? currentDirectory
+                : capturedDraftSnapshot.target === 'chat'
+                    ? null
+                    : capturedDraftSnapshot.bootstrapPendingDirectory ?? capturedDraftSnapshot.directoryOverride ?? currentDirectory;
         const inputSnapshot = options?.presetText != null
             ? {
                 message: options.presetText,
@@ -2052,8 +2062,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 const variables = buildCommandVariables(command, argument);
                 try {
                     await sessionActions.waitForConnectionOrThrow();
-                    const visibleText = await renderMagicPrompt(command.visiblePrompt, variables.visible);
-                    const instructionsText = await renderMagicPrompt(command.instructionsPrompt, variables.instructions);
+                    const prompts = await loadMagicPrompts(magicPromptDirectory);
+                    const visibleText = prompts.render(command.visiblePrompt, variables.visible);
+                    const instructionsText = prompts.render(command.instructionsPrompt, variables.instructions);
                     // Before the sent row commits, as for a plain send below.
                     scrollToBottom?.();
                     await sendMessage(

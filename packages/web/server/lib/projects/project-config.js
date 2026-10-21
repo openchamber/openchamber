@@ -6,7 +6,9 @@ import {
   DEFAULT_PLANS_DIR,
   EMPTY_SHARED_PROJECT_CONFIG,
   SHARED_CONFIG_RELATIVE_PATH,
+  SHARED_SETUP_KEYS,
   applySharedProjectSetupPatch,
+  defineOwnEntry,
   isSharedProjectConfigEmpty,
   mergeProjectSetup,
   parseSharedProjectConfig,
@@ -1016,9 +1018,9 @@ export const createProjectConfigRuntime = (deps) => {
   );
   const sharedConfigPathOf = (projectPath) => path.join(projectPath, ...SHARED_CONFIG_RELATIVE_PATH.split('/'));
 
-  const readSharedProjectConfig = async (projectID, personalRaw) => {
-    const projectPath = projectPathOf(projectID, personalRaw);
-    if (!projectPath) return { status: 'missing' };
+  // A missing file is `missing`; one that cannot be read or parsed is
+  // `invalid` with a reason, never "no shared setup".
+  const readSharedProjectFile = async (projectPath) => {
     let raw;
     try {
       raw = await fsPromises.readFile(sharedConfigPathOf(projectPath), 'utf8');
@@ -1027,6 +1029,43 @@ export const createProjectConfigRuntime = (deps) => {
       return { status: 'invalid', reason: error instanceof Error ? error.message : String(error) };
     }
     return parseSharedProjectConfig(raw);
+  };
+
+  const readSharedProjectConfig = async (projectID, personalRaw) => {
+    const projectPath = projectPathOf(projectID, personalRaw);
+    if (!projectPath) return { status: 'missing' };
+    return readSharedProjectFile(projectPath);
+  };
+
+  const assertProjectCheckout = async (projectPath) => {
+    if (!projectPath) throw new Error('project checkout not found');
+    try {
+      if (!(await fsPromises.stat(projectPath)).isDirectory()) throw new Error('project checkout not found');
+    } catch {
+      throw new Error('project checkout not found');
+    }
+  };
+
+  // Replace the shared file through a unique temporary sibling, so a failed
+  // write or rename leaves the previous bytes in place and no temporary file.
+  // An empty result removes the file, and the `.openchamber` folder when that
+  // leaves it empty.
+  const writeSharedProjectFile = async (projectPath, text) => {
+    const filePath = sharedConfigPathOf(projectPath);
+    if (text === null) {
+      await fsPromises.rm(filePath, { force: true });
+      await fsPromises.rmdir(path.dirname(filePath)).catch(() => {});
+      return;
+    }
+    await fsPromises.mkdir(path.dirname(filePath), { recursive: true });
+    const temporaryPath = `${filePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    try {
+      await fsPromises.writeFile(temporaryPath, text, 'utf8');
+      await fsPromises.rename(temporaryPath, filePath);
+    } catch (error) {
+      await fsPromises.rm(temporaryPath, { force: true }).catch(() => {});
+      throw error;
+    }
   };
 
   const mergedProjectSetupOf = async (projectID, personalRaw) => (
@@ -1061,31 +1100,19 @@ export const createProjectConfigRuntime = (deps) => {
     withProjectWriteLock(projectID, async () => {
       const personalRaw = await readRawProjectConfigFromDisk(projectID);
       const projectPath = projectPathOf(projectID, personalRaw);
-      if (!projectPath) throw new Error('project checkout not found');
-      try {
-        if (!(await fsPromises.stat(projectPath)).isDirectory()) throw new Error('project checkout not found');
-      } catch {
-        throw new Error('project checkout not found');
-      }
+      await assertProjectCheckout(projectPath);
       const currentRead = await readSharedProjectConfig(projectID, personalRaw);
       const current = currentRead.status === 'ok' ? currentRead.config : EMPTY_SHARED_PROJECT_CONFIG;
+      // Keys this writer does not own survive the write, and a repair of a
+      // wrongly shaped setup key too; only an unreadable, unparsable or
+      // other-version file is replaced whole.
+      const document = currentRead.document ?? {};
       const next = applySharedProjectSetupPatch(current, patch);
 
-      const filePath = sharedConfigPathOf(projectPath);
-      if (isSharedProjectConfigEmpty(next)) {
-        await fsPromises.rm(filePath, { force: true });
-        await fsPromises.rmdir(path.dirname(filePath)).catch(() => {});
-      } else {
-        await fsPromises.mkdir(path.dirname(filePath), { recursive: true });
-        const temporaryPath = `${filePath}.tmp-${process.pid}-${Date.now()}`;
-        try {
-          await fsPromises.writeFile(temporaryPath, serializeSharedProjectConfig(next), 'utf8');
-          await fsPromises.rename(temporaryPath, filePath);
-        } catch (error) {
-          await fsPromises.rm(temporaryPath, { force: true }).catch(() => {});
-          throw error;
-        }
-      }
+      await writeSharedProjectFile(
+        projectPath,
+        isSharedProjectConfigEmpty(next, document) ? null : serializeSharedProjectConfig(next, document),
+      );
 
       const hash = sharedTrustHashOf(next);
       const personalNext = { ...personalRaw };
@@ -1095,6 +1122,44 @@ export const createProjectConfigRuntime = (deps) => {
       return mergedProjectSetupOf(projectID, personalNext);
     })
   );
+
+  /**
+   * Change one key of the shared file that the setup writer does not own
+   * (Magic Prompts use `magicPrompts`), under the same lock as the setup
+   * writer. `projectPath` is the checkout the caller resolved for
+   * `projectID`; the lock is keyed by the id, so both writers of one project
+   * serialize. `mutate(current)` receives the stored value (`undefined` when
+   * absent) and returns the next one; `undefined` removes the key and the
+   * same value skips the write. The rest of the document goes back out
+   * exactly as read, so setup, `plansDir` and unknown keys keep their values
+   * and no trust record changes. A file that is unreadable, unparsable, of
+   * another version or has a wrongly shaped setup key is refused with
+   * `code: 'shared_config_invalid'` and left byte for byte; this writer
+   * never repairs. Removing the last key removes the file.
+   */
+  const updateSharedProjectEntry = async (projectID, projectPath, key, mutate) => {
+    if (SHARED_SETUP_KEYS.includes(key)) throw new Error(`${key} belongs to the shared setup writer`);
+    return withProjectWriteLock(projectID, async () => {
+      await assertProjectCheckout(projectPath);
+      const currentRead = await readSharedProjectFile(projectPath);
+      if (currentRead.status === 'invalid') {
+        throw Object.assign(new Error(`${SHARED_CONFIG_RELATIVE_PATH} is invalid: ${currentRead.reason}`), { code: 'shared_config_invalid' });
+      }
+      const document = currentRead.status === 'ok' ? currentRead.document : { version: 1 };
+      const current = Object.prototype.hasOwnProperty.call(document, key) ? document[key] : undefined;
+      const next = mutate(current);
+      if (next === current) return current;
+
+      const nextDocument = {};
+      for (const [entryKey, value] of Object.entries(document)) {
+        if (entryKey !== key) defineOwnEntry(nextDocument, entryKey, value);
+      }
+      if (next !== undefined) defineOwnEntry(nextDocument, key, next);
+      const onlyVersion = Object.keys(nextDocument).every((entryKey) => entryKey === 'version');
+      await writeSharedProjectFile(projectPath, onlyVersion ? null : `${JSON.stringify(nextDocument, null, 2)}\n`);
+      return next;
+    });
+  };
 
   /**
    * The absolute repository plans folder of a project: `plansDir` from the
@@ -1116,6 +1181,8 @@ export const createProjectConfigRuntime = (deps) => {
     readProjectSetup,
     updateProjectSetup,
     updateSharedProjectSetup,
+    readSharedProjectFile,
+    updateSharedProjectEntry,
     resolveSharedPlansDir,
     listScheduledTasks,
     upsertScheduledTask,

@@ -2487,6 +2487,7 @@ export const dict: Record<I18nKey, string> = {
   'gitView.conflict.noActiveSession': 'Brak aktywnej sesji',
   'gitView.conflict.noActiveSessionDescription': 'Otwórz lub utwórz sesję, aby rozwiązać konflikty.',
   'gitView.conflict.noDetailsAvailable': 'Brak szczegółów konfliktu',
+  'magicPrompts.toast.loadFailed': 'Nie udało się wczytać Magicznych Promptów. Nic nie zostało wysłane.',
   'gitView.conflict.resolveCurrentSession': 'Rozwiąż w bieżącej sesji',
   'gitView.conflict.resolveNewSession': 'Rozwiąż w nowej sesji',
   'gitView.empty.cleanDescription': 'All changes have been committed',

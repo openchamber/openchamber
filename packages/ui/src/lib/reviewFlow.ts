@@ -1,6 +1,6 @@
 import type { Message, Session } from '@/lib/opencode/model';
 import { opencodeClient } from '@/lib/opencode/client';
-import { renderMagicPrompt } from '@/lib/magicPrompts';
+import { loadMagicPrompts, type MagicPromptSnapshot } from '@/lib/magicPrompts';
 import { flattenAssistantTextParts } from '@/lib/messages/messageText';
 import {
   getOriginalSessionID,
@@ -185,8 +185,8 @@ const autoReviewReviewerInstructions = (): Array<{ text: string; synthetic: true
 
 // A review session starts with the same review rules as /workspace-review,
 // so its findings carry severities the loop's stop condition can rely on.
-const reviewSessionInstructions = async (autoReview: boolean | undefined): Promise<Array<{ text: string }>> => {
-  const reviewRules = { text: await renderMagicPrompt('session.review.instructions') };
+const reviewSessionInstructions = (prompts: MagicPromptSnapshot, autoReview: boolean | undefined): Array<{ text: string }> => {
+  const reviewRules = { text: prompts.render('session.review.instructions') };
   return autoReview ? [reviewRules, ...autoReviewReviewerInstructions()] : [reviewRules];
 };
 
@@ -525,10 +525,13 @@ export const startReviewFlow = async (input: StartReviewFlowInput): Promise<void
     variant: input.variant,
   };
   let reviewPrompt: string;
+  // One read for the whole flow: the half after the handoff renders from the
+  // same overrides as the request that started it.
+  const prompts = await loadMagicPrompts(input.directory);
 
   if (input.generateHandoff ?? true) {
-    const visibleText = await renderMagicPrompt('session.reviewHandoff.visible');
-    const instructionsText = await renderMagicPrompt('session.reviewHandoff.instructions');
+    const visibleText = prompts.render('session.reviewHandoff.visible');
+    const instructionsText = prompts.render('session.reviewHandoff.instructions');
     const startedAt = Date.now();
     await sendPlainMessage(input.originalSessionID, input.directory, visibleText, null, [
       { text: instructionsText },
@@ -537,11 +540,11 @@ export const startReviewFlow = async (input: StartReviewFlowInput): Promise<void
     const continueFromHandoff = async (): Promise<void> => {
       const handoff = await waitForAssistantText(input.originalSessionID, input.directory, startedAt);
       assertAutoReviewRuntimeStillCurrent(expectedAutoReviewRuntimeKey);
-      const handoffReviewPrompt = await renderMagicPrompt('session.reviewSession.visible', { handoff });
+      const handoffReviewPrompt = prompts.render('session.reviewSession.visible', { handoff });
       const reviewSession = await createOrReuseReviewSession(input.originalSessionID, input.directory, reviewSelection, expectedAutoReviewRuntimeKey);
       const runtimeKey = expectedAutoReviewRuntimeKey ?? getRuntimeKey();
       const waitAfterCreatedAt = Date.now();
-      const sentMessageID = await sendPlainMessage(reviewSession.id, input.directory, handoffReviewPrompt, reviewSelection, await reviewSessionInstructions(input.autoReview), input.autoReview ? runtimeKey : undefined);
+      const sentMessageID = await sendPlainMessage(reviewSession.id, input.directory, handoffReviewPrompt, reviewSelection, reviewSessionInstructions(prompts, input.autoReview), input.autoReview ? runtimeKey : undefined);
       if (input.autoReview) {
         startAutoReviewRun({
           originalSessionID: input.originalSessionID,
@@ -571,13 +574,13 @@ export const startReviewFlow = async (input: StartReviewFlowInput): Promise<void
     await continueFromHandoff();
     return;
   } else {
-    reviewPrompt = await renderMagicPrompt('session.reviewSessionWithoutHandoff.visible');
+    reviewPrompt = prompts.render('session.reviewSessionWithoutHandoff.visible');
   }
 
   const reviewSession = await createOrReuseReviewSession(input.originalSessionID, input.directory, reviewSelection, expectedAutoReviewRuntimeKey);
   const runtimeKey = expectedAutoReviewRuntimeKey ?? getRuntimeKey();
   const waitAfterCreatedAt = Date.now();
-  const sentMessageID = await sendPlainMessage(reviewSession.id, input.directory, reviewPrompt, reviewSelection, await reviewSessionInstructions(input.autoReview), input.autoReview ? runtimeKey : undefined);
+  const sentMessageID = await sendPlainMessage(reviewSession.id, input.directory, reviewPrompt, reviewSelection, reviewSessionInstructions(prompts, input.autoReview), input.autoReview ? runtimeKey : undefined);
   if (input.autoReview) {
     startAutoReviewRun({
       originalSessionID: input.originalSessionID,
@@ -602,7 +605,7 @@ export const sendReviewFeedbackToOriginal = async (reviewSessionID: string, dire
   const reviewSession = await opencodeClient.getSession(reviewSessionID, directory);
   const originalSessionID = getOriginalSessionID(reviewSession);
   if (!originalSessionID) throw new Error('Original session is missing');
-  const prompt = await renderMagicPrompt('session.reviewFeedbackToImplementer.visible', { review_feedback: reviewFeedback });
+  const prompt = (await loadMagicPrompts(directory)).render('session.reviewFeedbackToImplementer.visible', { review_feedback: reviewFeedback });
   assertAutoReviewRuntimeStillCurrent(expectedRuntimeKey);
   return sendPlainMessage(originalSessionID, directory, prompt, undefined, undefined, expectedRuntimeKey);
 };
@@ -620,7 +623,7 @@ export const sendImplementationResponseToReviewer = async (originalSessionID: st
     await patchSessionMetadata(originalSessionID, directory, (metadata) => withoutReviewSessionLink(metadata, reviewSessionID));
     throw error;
   }
-  const prompt = await renderMagicPrompt('session.implementationResponseToReviewer.visible', { implementation_response: implementationResponse });
+  const prompt = (await loadMagicPrompts(directory)).render('session.implementationResponseToReviewer.visible', { implementation_response: implementationResponse });
   assertAutoReviewRuntimeStillCurrent(expectedRuntimeKey);
   const sentMessageID = await sendPlainMessage(reviewSessionID, directory, prompt, undefined, autoReview ? autoReviewReviewerInstructions() : undefined, expectedRuntimeKey);
   if (!autoReview) {

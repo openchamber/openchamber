@@ -41,7 +41,8 @@ import { createWorktreeSessionForNewBranch } from '@/lib/worktreeSessionCreator'
 import { TodoSendDialog, type TodoSendExecution } from '@/components/session/TodoSendDialog';
 import { Icon } from "@/components/icon/Icon";
 import { useMessageTTS } from '@/hooks/useMessageTTS';
-import { renderMagicPrompt } from '@/lib/magicPrompts';
+import { toast } from '@/components/ui';
+import { loadMagicPrompts, type MagicPromptSnapshot } from '@/lib/magicPrompts';
 import { useI18n } from '@/lib/i18n';
 import { ContextPanelHeaderToolbar } from '@/components/layout/contextPanelHeaderSlot';
 import { useInContextPanelHeader } from '@/components/layout/contextPanelHeaderSlotContext';
@@ -613,37 +614,47 @@ export const PlanView: React.FC<PlanViewProps> = ({ visible = true, savedProject
         return;
       }
 
-      const visiblePrompt = await renderMagicPrompt(
-        pendingPlanSend.action === 'improve' ? 'plan.improve.visible' : 'plan.implement.visible',
-        {
-          plan_title: sendPromptTitle,
-        },
-      );
       // A saved plan is a markdown file too, so the agent reads it and ticks
       // its steps there like any other plan file.
       const planFilePath = loadedProjectPlanPath;
-      const instructionsText = await renderMagicPrompt(
-        pendingPlanSend.action === 'improve' ? 'plan.improve.instructions' : 'plan.implement.instructions',
-        {
-          plan_title: sendPromptTitle,
-          plan_path: planFilePath ?? '',
-        },
-      );
-      // A server that answered without the plan's path leaves the agent no
-      // file to read, so the plan substance rides along in the message.
-      const planSubstance = planFilePath
-        ? instructionsText
-        : [
-            instructionsText,
-            '',
-            'The plan is not stored as a file in the repository and has no file path. Its full current contents follow below this note and are the source of truth for the plan. Where the instructions above refer to the plan file, treat the plan as stored in OpenChamber project knowledge (it is edited through the OpenChamber UI): propose plan revisions as plan text in the chat rather than editing a file.',
-            '',
-            content,
-          ].join('\n');
-      const syntheticParts = [{ synthetic: true as const, text: planSubstance }];
       setIsPlanSendSubmitting(true);
 
       try {
+        let prompts: MagicPromptSnapshot;
+        try {
+          // The plan's project owns the prompts, also when the session lands in a new worktree.
+          prompts = await loadMagicPrompts(sendTargetProject.path);
+        } catch (error) {
+          // Nothing was created yet; the send dialog stays open with its choices.
+          toast.error(t('magicPrompts.toast.loadFailed'), { description: error instanceof Error ? error.message : undefined });
+          return;
+        }
+        const visiblePrompt = prompts.render(
+          pendingPlanSend.action === 'improve' ? 'plan.improve.visible' : 'plan.implement.visible',
+          {
+            plan_title: sendPromptTitle,
+          },
+        );
+        const instructionsText = prompts.render(
+          pendingPlanSend.action === 'improve' ? 'plan.improve.instructions' : 'plan.implement.instructions',
+          {
+            plan_title: sendPromptTitle,
+            plan_path: planFilePath ?? '',
+          },
+        );
+        // A server that answered without the plan's path leaves the agent no
+        // file to read, so the plan substance rides along in the message.
+        const planSubstance = planFilePath
+          ? instructionsText
+          : [
+              instructionsText,
+              '',
+              'The plan is not stored as a file in the repository and has no file path. Its full current contents follow below this note and are the source of truth for the plan. Where the instructions above refer to the plan file, treat the plan as stored in OpenChamber project knowledge (it is edited through the OpenChamber UI): propose plan revisions as plan text in the chat rather than editing a file.',
+              '',
+              content,
+            ].join('\n');
+        const syntheticParts = [{ synthetic: true as const, text: planSubstance }];
+
         routeToChat();
 
         let sessionId: string | null = null;
@@ -736,7 +747,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ visible = true, savedProject
         setIsPlanSendSubmitting(false);
       }
     },
-    [canCreateWorktree, content, createSession, currentProjectRef, initializeNewOpenChamberSession, isManagedChatPlan, loadedProjectPlanPath, pendingPlanSend, routeToChat, savedPlanId, savedPlanProjectRef, sendMessage, sendPromptTitle, setCurrentSession]
+    [canCreateWorktree, content, createSession, currentProjectRef, initializeNewOpenChamberSession, isManagedChatPlan, loadedProjectPlanPath, pendingPlanSend, routeToChat, savedPlanId, savedPlanProjectRef, sendMessage, sendPromptTitle, setCurrentSession, t]
   );
 
   const blockWidgets = React.useMemo(() => {

@@ -37,10 +37,7 @@ const createCtx = (workingDirectory, restartImpl = async () => undefined) => {
 const deps = {
   readSettings: () => ({}),
   persistSettings: async (changes) => changes,
-  readMagicPromptOverrides: () => ({ version: 1, overrides: {} }),
-  saveMagicPromptOverride: async () => ({ version: 1, overrides: {} }),
-  resetMagicPromptOverride: async () => ({ version: 1, overrides: {} }),
-  resetAllMagicPromptOverrides: async () => ({ version: 1, overrides: {} }),
+  handleMagicPromptRequest: async () => ({ status: 200, body: { version: 1, overrides: {} } }),
   fetchOpenCodeSkillsFromApi: async () => null,
   clientReloadDelayMs: 800,
 };
@@ -329,5 +326,26 @@ describe('VS Code config bridge plugin parity', () => {
       // v1 `enabled: false` becomes the inverse v2 `disabled: true`.
       disabled: true,
     });
+  });
+});
+
+describe('magic prompt bridge', () => {
+  test('hands the parsed request to the host and returns its status and body', async () => {
+    const handleMagicPromptRequest = mock(async () => ({ status: 409, body: { error: 'bad file', code: 'project_config_invalid' } }));
+    const send = (body) => handleConfigBridgeMessage({
+      id: 'm1',
+      type: 'api:magic-prompts',
+      payload: { method: 'PUT', id: 'plan.todo.instructions', query: { projectId: ['path_abc'], scope: ['project'], sessionDirectory: [] }, body },
+    }, undefined, { ...deps, handleMagicPromptRequest });
+
+    const response = await send({ text: '' });
+    // A selector in the body is reported, so the host refuses it instead of writing the global file.
+    await send({ text: 'x', scope: 'project' });
+
+    expect(handleMagicPromptRequest.mock.calls.map(([request]) => request)).toEqual([
+      { method: 'PUT', id: 'plan.todo.instructions', projectId: ['path_abc'], scope: ['project'], sessionDirectory: [], text: '', bodyNamesSelector: false },
+      { method: 'PUT', id: 'plan.todo.instructions', projectId: ['path_abc'], scope: ['project'], sessionDirectory: [], text: 'x', bodyNamesSelector: true },
+    ]);
+    expect(response).toEqual({ id: 'm1', type: 'api:magic-prompts', success: true, data: { status: 409, body: { error: 'bad file', code: 'project_config_invalid' } } });
   });
 });

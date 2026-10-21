@@ -68,6 +68,7 @@ import {
   type SkillsCatalogSourceConfig,
 } from './skillsCatalog';
 import { buildAppliedResponse } from './config-mutation-response';
+import { magicPromptRequestSchema, type MagicPromptHttpResponse, type MagicPromptRequest } from './magic-prompts';
 import type { BridgeContext, BridgeResponse } from './bridge';
 import { appendInstalledSources, removeInstalledSources } from '../../web/server/lib/skills-catalog/installed-sources.js';
 
@@ -80,10 +81,8 @@ type BridgeMessageInput = {
 type ConfigRuntimeDeps = {
   readSettings: (ctx?: BridgeContext) => Record<string, unknown>;
   persistSettings: (changes: Record<string, unknown>, ctx?: BridgeContext) => Promise<Record<string, unknown>>;
-  readMagicPromptOverrides: () => { version: number; overrides: Record<string, string> };
-  saveMagicPromptOverride: (id: string, text: string) => Promise<{ version: number; overrides: Record<string, string> }>;
-  resetMagicPromptOverride: (id: string) => Promise<{ version: number; overrides: Record<string, string> }>;
-  resetAllMagicPromptOverrides: () => Promise<{ version: number; overrides: Record<string, string> }>;
+  /** One `/api/magic-prompts` request; the webview answers with the returned status and body. */
+  handleMagicPromptRequest: (request: MagicPromptRequest) => Promise<MagicPromptHttpResponse>;
   fetchOpenCodeSkillsFromApi: (ctx: BridgeContext | undefined, workingDirectory?: string) => Promise<DiscoveredSkill[] | null>;
   clientReloadDelayMs: number;
 };
@@ -221,35 +220,11 @@ export async function handleConfigBridgeMessage(
       };
     }
 
-    case 'api:magic-prompts:get': {
-      return { id, type, success: true, data: deps.readMagicPromptOverrides() };
-    }
-
-    case 'api:magic-prompts:save': {
-      const request = (payload || {}) as { id?: string; text?: string };
-      const promptId = typeof request.id === 'string' ? request.id : '';
-      if (!promptId) {
-        return { id, type, success: false, error: 'Prompt id is required' };
-      }
-      if (typeof request.text !== 'string') {
-        return { id, type, success: false, error: 'Prompt text is required' };
-      }
-      const data = await deps.saveMagicPromptOverride(promptId, request.text);
-      return { id, type, success: true, data };
-    }
-
-    case 'api:magic-prompts:reset': {
-      const request = (payload || {}) as { id?: string };
-      const promptId = typeof request.id === 'string' ? request.id : '';
-      if (!promptId) {
-        return { id, type, success: false, error: 'Prompt id is required' };
-      }
-      const data = await deps.resetMagicPromptOverride(promptId);
-      return { id, type, success: true, data };
-    }
-
-    case 'api:magic-prompts:reset-all': {
-      const data = await deps.resetAllMagicPromptOverrides();
+    case 'api:magic-prompts': {
+      const request = magicPromptRequestSchema.safeParse(payload);
+      const data: MagicPromptHttpResponse = request.success
+        ? await deps.handleMagicPromptRequest(request.data)
+        : { status: 400, body: { error: 'Invalid magic prompt request' } };
       return { id, type, success: true, data };
     }
 

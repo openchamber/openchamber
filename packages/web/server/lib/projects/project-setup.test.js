@@ -167,15 +167,18 @@ describe('shared project config', () => {
   });
 
   it('parses a version-1 file and sanitizes its lists', () => {
-    expect(parseSharedProjectConfig(JSON.stringify({
+    const document = {
       version: 1,
       setupWorktree: ['bun install', ''],
       setupWorktreeWait: true,
       projectActions: [{ id: 'dev', name: 'Dev', command: 'bun run dev' }, { id: '', name: 'x', command: 'y' }],
       draftStarters: [{ type: 'skill', name: 's' }],
       plansDir: 'docs/plans',
-    }))).toEqual({
+      magicPrompts: { 'git.commit.generate.instructions': '' },
+    };
+    expect(parseSharedProjectConfig(JSON.stringify(document))).toEqual({
       status: 'ok',
+      document,
       config: {
         setupWorktree: ['bun install'],
         setupWorktreeWait: true,
@@ -186,6 +189,7 @@ describe('shared project config', () => {
     });
     expect(parseSharedProjectConfig('{"version":1}')).toEqual({
       status: 'ok',
+      document: { version: 1 },
       config: { setupWorktree: [], setupWorktreeWait: null, projectActions: [], draftStarters: [], plansDir: null },
     });
   });
@@ -550,6 +554,80 @@ describe('project setup runtime', () => {
       expect(view.shared.status).toBe('invalid');
       expect(view.shared.reason).toMatch(/invalid JSON/);
       expect(view.setupWorktree).toEqual(['mine']);
+    } finally {
+      await cleanup();
+    }
+  });
+});
+
+describe('shared file keys owned by other writers', () => {
+  const setupRepo = async (tempRoot, content) => {
+    const repo = path.join(tempRoot, 'repo');
+    await mkdir(path.join(repo, '.openchamber'), { recursive: true });
+    const sharedPath = path.join(repo, '.openchamber', 'project.json');
+    if (content !== undefined) await writeFile(sharedPath, content);
+    return { repo, sharedPath, projectId: createProjectIdFromPath(repo) };
+  };
+
+  it('keeps Magic Prompts and unknown keys through setup saves, repairs and the last setup removal', async () => {
+    const { runtime, tempRoot, cleanup } = await createRuntime();
+    try {
+      const { sharedPath, projectId } = await setupRepo(tempRoot, JSON.stringify({
+        version: 1,
+        setupWorktree: ['bun install'],
+        magicPrompts: { 'plan.todo.instructions': '' },
+        futureKey: [1],
+      }));
+      await runtime.updateSharedProjectSetup(projectId, { setupWorktree: [] });
+      expect(JSON.parse(await readFile(sharedPath, 'utf8'))).toEqual({ version: 1, magicPrompts: { 'plan.todo.instructions': '' }, futureKey: [1] });
+
+      // A wrongly shaped setup key is repaired; the keys around it stay.
+      await writeFile(sharedPath, JSON.stringify({ version: 1, setupWorktree: 'oops', magicPrompts: { 'a.visible': 'A' } }));
+      await runtime.updateSharedProjectSetup(projectId, { setupWorktree: ['x'] });
+      expect(JSON.parse(await readFile(sharedPath, 'utf8'))).toEqual({ version: 1, setupWorktree: ['x'], magicPrompts: { 'a.visible': 'A' } });
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('changes one foreign key without touching setup or the personal file, and refuses a file it would have to repair', async () => {
+    const { runtime, tempRoot, readRaw, cleanup } = await createRuntime();
+    try {
+      const { repo, sharedPath, projectId } = await setupRepo(tempRoot);
+      await runtime.updateSharedProjectSetup(projectId, { setupWorktree: ['bun install'] });
+      const personalBefore = await readRaw(projectId);
+      // Hand-written setup with entries the sanitizer would drop goes back out as written.
+      const handWritten = { version: 1, setupWorktree: ['bun install', ''], futureKey: true };
+      await writeFile(sharedPath, JSON.stringify(handWritten));
+
+      await runtime.updateSharedProjectEntry(projectId, repo, 'magicPrompts', () => ({ 'a.visible': 'A' }));
+      expect(JSON.parse(await readFile(sharedPath, 'utf8'))).toEqual({ ...handWritten, magicPrompts: { 'a.visible': 'A' } });
+      expect(await readRaw(projectId)).toEqual(personalBefore);
+
+      for (const content of ['{ broken', '{"version":1,"setupWorktree":"x"}']) {
+        await writeFile(sharedPath, content);
+        await expect(runtime.updateSharedProjectEntry(projectId, repo, 'magicPrompts', () => ({ 'a.visible': 'A' }))).rejects.toMatchObject({ code: 'shared_config_invalid' });
+        expect(await readFile(sharedPath, 'utf8')).toBe(content);
+      }
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('serializes setup and foreign-key writes from two runtimes sharing a projects dir', async () => {
+    const { runtime, tempRoot, cleanup } = await createRuntime();
+    try {
+      const other = createProjectConfigRuntime({ fsPromises: await import('fs/promises'), path, projectsDirPath: path.join(tempRoot, 'projects') });
+      const { repo, sharedPath, projectId } = await setupRepo(tempRoot);
+      const writes = [];
+      for (let index = 0; index < 6; index += 1) {
+        writes.push(runtime.updateSharedProjectSetup(projectId, { setupWorktree: [`cmd-${index}`] }));
+        writes.push(other.updateSharedProjectEntry(projectId, repo, 'magicPrompts', (current) => ({ ...(current ?? {}), [`p${index}.visible`]: `P${index}` })));
+      }
+      await Promise.all(writes);
+      const document = JSON.parse(await readFile(sharedPath, 'utf8'));
+      expect(Object.keys(document.magicPrompts)).toHaveLength(6);
+      expect(document.setupWorktree).toEqual(['cmd-5']);
     } finally {
       await cleanup();
     }

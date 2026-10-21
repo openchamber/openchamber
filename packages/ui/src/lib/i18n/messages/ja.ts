@@ -1204,6 +1204,7 @@ export const dict: Record<I18nKey, string> = {
   'gitView.sync.syncCounts': '{behind}↓ {ahead}↑',
   'gitView.branch.actionsUnavailable': 'このリポジトリ状態ではブランチ操作は利用できません',
   'gitView.conflict.noDetailsAvailable': '競合の詳細はありません',
+  'magicPrompts.toast.loadFailed': 'マジックプロンプトを読み込めませんでした。何も送信されていません。',
   'gitView.empty.notGitRepository': 'このディレクトリはGitリポジトリではありません',
   'gitView.empty.notGitRepositoryDescription': 'このディレクトリでGitを初期化するか、リポジトリを開いてください。',
   'gitView.empty.selectSessionOrDirectory': 'セッションまたはディレクトリを選択してGitステータスを表示',

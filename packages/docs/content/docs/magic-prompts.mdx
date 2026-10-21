@@ -21,6 +21,18 @@ Some prompts have a visible part (the message you'd see) and an instructions par
 
 Changed your mind? Each prompt has **reset to default**, and there's a **reset all** if you want to start over everywhere.
 
+## Project prompts
+
+A prompt can also have an override for one project. OpenChamber uses the project override when there is one, else your global override, else the built-in text. A saved override counts even when it's empty.
+
+To add one, pick the project in the selector at the top of the sidebar, then pick **Project** under **Scope**. Click **Save** under each block you change. The reset buttons change only the scope you have open. In **Project**, **Remove project override** and **Remove all project overrides** bring back your global override or the built-in text. Saving the built-in text in **Global** removes your global override. In **Project**, that text stays saved, so the project keeps the built-in text even when your global override says something else.
+
+Project overrides are saved in the `magicPrompts` key of `.openchamber/project.json` in the project's checkout, the same file as [Repository config](/repository-config/). Commit it to share the prompts with your team. Global overrides stay in `magic-prompts.json` in the server's data folder.
+
+A worktree uses the prompts of the project in its main checkout, unless you added the worktree as a project of its own. A chat without a project, a folder no project owns, and work in an isolated space use global prompts only. The VS Code extension has no Magic Prompts page. There you edit the files by hand, and the global file is always `~/.config/openchamber/magic-prompts.json`.
+
+When the project file can't be read, for example because it isn't valid JSON, flows that need it stop with an error and don't fall back to the built-in text. Settings shows the reason and a **Retry** button. A missing project file isn't an error, and the project then inherits every prompt.
+
 ## Where each prompt is used
 
 Every prompt below lists where it runs and the trigger that fires it. Check the trigger before editing, so you know which flow you're changing.

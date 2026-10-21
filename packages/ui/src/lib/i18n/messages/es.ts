@@ -1199,6 +1199,7 @@ export const dict: Record<I18nKey, string> = {
   "gitView.sync.syncCounts": "{behind}↓ {ahead}↑",
   "gitView.branch.actionsUnavailable": "Acciones de rama no disponibles en este estado del repositorio",
   "gitView.conflict.noDetailsAvailable": "No hay detalles de conflicto disponibles",
+  "magicPrompts.toast.loadFailed": "No se pudieron cargar los prompts mágicos. No se envió nada.",
   "gitView.empty.notGitRepository": "Este directorio no es un repositorio Git",
   "gitView.empty.notGitRepositoryDescription": "Inicializa Git en este directorio o abre un repositorio.",
   "gitView.empty.selectSessionOrDirectory": "Selecciona una sesión o directorio para ver el estado de Git",

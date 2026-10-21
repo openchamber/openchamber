@@ -1361,6 +1361,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['external repository', 'add source', 'catalog'],
   },
   {
+    id: 'magic-prompts.scope',
+    page: 'magic-prompts',
+    titleKey: 'settings.magicPrompts.page.scope.label',
+    keywords: ['global', 'project', 'project overrides', 'project.json', 'inherit'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
     id: 'magic-prompts.visible-prompt',
     page: 'magic-prompts',
     titleKey: 'settings.magicPrompts.page.block.visiblePrompt',

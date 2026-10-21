@@ -21,6 +21,18 @@ Alguns prompts têm uma parte visível (a mensagem que você veria) e uma parte 
 
 Mudou de ideia? Cada prompt tem **reset to default**, e há um **reset all** se você quiser recomeçar em tudo.
 
+## Prompts de projeto
+
+Um prompt também pode ter uma substituição para um único projeto. O OpenChamber usa a substituição do projeto quando existe uma; se não, a sua substituição global; e, se também não houver, o texto integrado. Uma substituição salva vale mesmo quando está vazia.
+
+Para criar uma, escolha o projeto no seletor no topo da barra lateral e depois **Projeto** em **Escopo**. Clique em **Salvar** abaixo de cada bloco que você mudar. Os botões de redefinição mudam só o escopo aberto. Em **Projeto**, **Remover substituição do projeto** e **Remover todas as substituições do projeto** trazem de volta a sua substituição global ou o texto integrado. Salvar o texto integrado em **Global** remove a sua substituição global. Em **Projeto**, esse texto continua salvo, então o projeto mantém o texto integrado mesmo quando a sua substituição global diz outra coisa.
+
+As substituições do projeto ficam na chave `magicPrompts` de `.openchamber/project.json`, no checkout do projeto. É o mesmo arquivo da [configuração no repositório](/pt-br/repository-config/). Faça commit dele para compartilhar os prompts com o seu time. As substituições globais continuam em `magic-prompts.json`, na pasta de dados do servidor.
+
+Um worktree usa os prompts do projeto do seu checkout principal, a menos que você tenha adicionado o worktree como projeto próprio. Um chat sem projeto, uma pasta que não pertence a nenhum projeto e o trabalho em um espaço isolado usam só prompts globais. A extensão do VS Code não tem a página Magic Prompts. Lá você edita os arquivos à mão, e o arquivo global é sempre `~/.config/openchamber/magic-prompts.json`.
+
+Quando o arquivo do projeto não pode ser lido, por exemplo porque não é um JSON válido, os fluxos que precisam dele param com um erro e não voltam para o texto integrado. Settings mostra o motivo e um botão **Tentar novamente**. A falta do arquivo do projeto não é um erro. Nesse caso, o projeto herda todos os prompts.
+
 ## Onde cada prompt é usado
 
 Cada prompt nas tabelas abaixo indica onde ele roda e o que o dispara. Confira o gatilho antes de editar, para saber qual fluxo você está mudando.

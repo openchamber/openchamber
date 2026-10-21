@@ -87,6 +87,48 @@ describe('bridge git special runtime', () => {
     expect(sdkClient.generate.text.mock.calls[0][0].prompt).toContain('+new line');
   });
 
+  it('reads the prompts of the directory it commits in and uses an empty instructions override as written', async () => {
+    gitService.getGitStatus.mockImplementation(async () => ({ files: [{ path: 'src/a.ts', index: ' ', working_dir: 'M' }] }));
+    gitService.getGitLog.mockImplementation(async () => ({ all: [] }));
+    gitService.getGitDiff.mockImplementation(async () => ({ kind: 'diff', diff: 'diff --git a/src/a.ts b/src/a.ts\n+new line', submodule: null }));
+    sdkClient.generate.text.mockImplementation(async () => ({ text: '{"subject":"feat: add a line","highlights":[]}' }));
+    const readPromptOverrides = mock(async () => ({
+      'git.commit.generate.visible': 'Project visible',
+      'git.commit.generate.instructions': '',
+    }));
+
+    const response = await handleSpecialGitBridgeMessage({
+      id: 'p1',
+      type: 'api:git/commit-message',
+      payload: { directory: '/repo-b' },
+    }, { manager: { getApiUrl: () => 'http://opencode.test', getOpenCodeAuthHeaders: () => ({}) } }, {
+      readSettings: () => ({}),
+      execGit: mock(),
+      readPromptOverrides,
+    });
+
+    expect(response.success).toBe(true);
+    expect(readPromptOverrides).toHaveBeenCalledWith('/repo-b');
+    const prompt = sdkClient.generate.text.mock.calls[0][0].prompt;
+    expect(prompt.startsWith('Project visible\n\n\n\nDiffs of the selected files:')).toBe(true);
+    expect(prompt).not.toContain('Return exactly one JSON object');
+  });
+
+  it('fails the generation when the prompts cannot be read instead of using the built-in text', async () => {
+    const response = await handleSpecialGitBridgeMessage({
+      id: 'p2',
+      type: 'api:git/commit-message',
+      payload: { directory: '/repo' },
+    }, { manager: { getApiUrl: () => 'http://opencode.test', getOpenCodeAuthHeaders: () => ({}) } }, {
+      readSettings: () => ({}),
+      execGit: mock(),
+      readPromptOverrides: async () => { throw new Error('Project magic prompts cannot be read: invalid JSON'); },
+    });
+
+    expect(response).toEqual({ id: 'p2', type: 'api:git/commit-message', success: false, error: 'Project magic prompts cannot be read: invalid JSON' });
+    expect(sdkClient.generate.text).not.toHaveBeenCalled();
+  });
+
   it('generates PR descriptions through the OpenCode generate route', async () => {
     const response = await handleSpecialGitBridgeMessage({
       id: '1',
