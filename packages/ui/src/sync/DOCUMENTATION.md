@@ -936,6 +936,21 @@ and it gives the transcript a turn of its own. The note tells the new model
 what nothing else does: that the model changed, where the previous one stopped,
 and what was stopped or keeps running.
 
+### Why the transcript's retry box gives way to the retry notice and is not removed
+
+The retry notice reads the retry OpenCode records on the step it will retry
+(`readScheduledRetry`) and says when the next attempt runs, why, and that
+waiting keeps the model. The older box in the transcript ("Opencode failed to
+send a message. Retry attempt info: ...", `applyRetryOverlay`) comes from the
+`retry` session status the OpenChamber server derives from the same event, so
+on web, desktop and both mobile apps it printed the same reason right above the
+notice. The box now steps aside whenever the step carries a retry, and stays
+for a retry status without one: an OpenCode that reports a retry only as a
+status, or a status that arrives before its step. VS Code gets no retry status
+and only ever shows the notice. Both read the session the chat column shows;
+every runtime draws the transcript through `ChatViewport`, which always puts
+the notice under it.
+
 ## Session action rules
 
 - Archive, restore and delete return booleans and id lists through the store contract shared by sidebar rows, the bulk bar and the mobile sheet. The reason behind a failure is recorded separately in `session-action-failures.ts` at the catch site and taken once by the surface that reports it, so the toast can quote the OpenCode status, error class and log `ref` (`OpencodeApiError` from `lib/opencode/client.ts`, which keeps `tag`, `detail` and `ref` from the tagged body) instead of a bare "failed". Rename fails loudly the same way and closes its form.

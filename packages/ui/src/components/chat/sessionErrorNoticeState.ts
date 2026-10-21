@@ -6,14 +6,18 @@ import { isStoppedTurnError } from '@/lib/messages/assistantError';
 export type ScheduledRetry = NonNullable<AssistantMessage['retry']>;
 
 /**
- * The retry OpenCode scheduled for the turn's latest step, while that step is
- * still open. `session.retry.scheduled` puts it on the assistant message it will
- * retry, and the next attempt clears it; a finished step keeps none.
+ * The retry OpenCode scheduled for `message`, while it is a step still open.
+ * `session.retry.scheduled` puts it on the assistant message it will retry,
+ * and the next attempt clears it; a finished step keeps none.
  */
-export const readScheduledRetry = (messages: readonly Message[] | undefined): ScheduledRetry | null => {
-  const last = getLastConversationMessage(messages);
-  return last?.role === 'assistant' && last.time.completed === undefined ? last.retry ?? null : null;
-};
+export const scheduledRetryOf = (message: Message | undefined): ScheduledRetry | null => (
+  message?.role === 'assistant' && message.time.completed === undefined ? message.retry ?? null : null
+);
+
+/** The retry OpenCode scheduled for the turn's latest step, while that step is still open. */
+export const readScheduledRetry = (messages: readonly Message[] | undefined): ScheduledRetry | null => (
+  scheduledRetryOf(getLastConversationMessage(messages))
+);
 
 export type LastMessageState = {
   role: Message['role'];
