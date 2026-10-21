@@ -182,7 +182,7 @@
     "@remixicon/react": "^4.7.0",
     "@tailwindcss/postcss": "^4.0.0",
     "@types/dom-speech-recognition": "^0.0.12",
-    "@types/node": "^24.3.1",
+    "@types/node": "^26.0.0",
     "@types/react": "^19.1.10",
     "@types/react-dom": "^19.1.7",
     "@vitejs/plugin-react": "^5.0.0",
