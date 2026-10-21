@@ -91,12 +91,20 @@ time; the reducer trims by creation time).
 The composer's top rows render inside the box and inside the mobile pill, so
 the surface stays one shape. Top to bottom: worktree setup and a message
 waiting for its space (`ComposerStatusStrip`), the goal (`SessionGoalRow`), a
-running review loop (`AutoReviewStrip`), background commands, a staged revert
+running review loop (`AutoReviewStrip`), background commands, the agent's
+terminals, a staged revert
 (`RevertedMessagesStrip`), the queue (`QueuedMessagesStrip`),
 the "looks done" hint or the review offer, the suggestion
 (`SessionSuggestionChip`). BTW hides all of them. A pending form, a nonempty
 queue, composer content and a new-session draft hide the suggestion; a
 new-session draft also hides the queue.
+
+The rows are siblings of one fragment, so no two of them may share a React
+key. The background commands strip and the agent terminals strip are keyed by
+strip and session, so an expanded list collapses on a session switch. Keyed by
+the session alone, the two collided, and every render of the composer left a
+frozen copy of the background commands strip on screen
+(`__tests__/ChatInput.topRows.test.tsx`).
 
 `RevertedMessagesStrip` lists the user messages a staged revert hides (see
 "Committing a revert" in `sync/DOCUMENTATION.md`). Its one action is Restore,

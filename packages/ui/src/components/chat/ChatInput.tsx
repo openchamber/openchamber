@@ -4225,10 +4225,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     ) : null;
     // Commands the agent left running sit in the same slot, first, so a
     // forgotten dev server is visible without scrolling the chat. Keyed by
-    // session so an expanded list collapses on a session switch.
+    // session so an expanded list collapses on a session switch. The top rows
+    // are siblings, so each strip's key names the strip too: two siblings with
+    // one key make React leave a frozen copy of a strip behind on every render.
     const backgroundShellsRow = !isBtwActive && !newSessionDraftOpen ? (
         <BackgroundShellsStrip
-            key={currentSessionId ?? ''}
+            key={`background-shells:${currentSessionId ?? ''}`}
             sessionId={currentSessionId}
             directory={currentSessionDirectoryForSync ?? currentDirectory}
         />
@@ -4239,7 +4241,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const hasSessionTerminals = useHasSessionTerminals(currentSessionId);
     const persistentTerminalsRow = !isBtwActive && !newSessionDraftOpen && hasSessionTerminals ? (
         <PersistentTerminalsStrip
-            key={currentSessionId ?? ''}
+            key={`agent-terminals:${currentSessionId ?? ''}`}
             sessionId={currentSessionId}
             directory={terminalsDirectory}
         />
