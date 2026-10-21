@@ -61,7 +61,9 @@ const AppIcon = ({
     <span
       className={cn(
         'h-4 w-4 rounded-sm flex items-center justify-center',
-        'bg-[var(--surface-muted)] text-[9px] font-medium text-muted-foreground'
+        // The letter keeps its size against the 1rem square at every
+        // interface size, which a px size would not.
+        'bg-[var(--surface-muted)] text-[0.5625rem] font-medium text-muted-foreground'
       )}
     >
       {initial}

@@ -221,7 +221,13 @@ export const WorkStatusSubagentsSection: React.FC<Props> = ({ sessionId, directo
                   </span>
                 )}
                 label={label}
-                tooltip={modelName || undefined}
+                // The title leads, since the row cuts a long one off.
+                tooltip={modelName ? (
+                  <>
+                    <p className="font-medium">{label}</p>
+                    <p>{modelName}</p>
+                  </>
+                ) : undefined}
                 value={(
                   <>
                     {blocked ? (

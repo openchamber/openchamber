@@ -20,6 +20,7 @@ import { formatCost } from './subagentCost';
 import { useSubagentCostRollup } from './useSubagentCostRollup';
 import {
   WorkStatusCallout,
+  WorkStatusFullTextTooltip,
   WorkStatusMeter,
   WorkStatusPill,
   WorkStatusRow,
@@ -254,7 +255,12 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
   // than the session I am looking at". Only worth a line once subagents exist —
   // without them the total *is* the session's own cost and the row would
   // restate the number directly above it.
-  const showCostBreakdown = cost !== null && subagentCount > 0 && subagentCost > 0;
+  const costBreakdown = cost !== null && subagentCount > 0 && subagentCost > 0
+    ? t('chat.workStatus.cost.breakdown', {
+      session: formatCost(ownCost),
+      subagents: formatCost(subagentCost),
+    })
+    : null;
   const hasSession = showSession && (contextUsage !== null || cost !== null || Boolean(goalRow));
   const hasRepository = showRepository && Boolean(branch || changed || prSummary || attentionLabel || projectActionsContext);
 
@@ -283,20 +289,19 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
               />
               <WorkStatusMeter percent={usagePercent ?? 0} color={meterColor} />
               {contextUsage.state === 'compacted' ? (
-                <p className="mx-1 mb-1 text-[11px] leading-4 text-muted-foreground">
+                <p className="mx-1 mb-1 typography-micro leading-4 text-muted-foreground">
                   {t('contextUsage.compacted.description')}
                 </p>
               ) : null}
               {/* Caption, not a row: it explains the figure above it rather
                   than reporting a reading of its own, so it carries no icon
                   and no label column. */}
-              {showCostBreakdown ? (
-                <p className="mx-1 mb-1 truncate text-[11px] leading-4 text-muted-foreground tabular-nums">
-                  {t('chat.workStatus.cost.breakdown', {
-                    session: formatCost(ownCost),
-                    subagents: formatCost(subagentCost),
-                  })}
-                </p>
+              {costBreakdown ? (
+                <WorkStatusFullTextTooltip content={costBreakdown}>
+                  <p className="mx-1 mb-1 truncate typography-micro leading-4 text-muted-foreground tabular-nums">
+                    {costBreakdown}
+                  </p>
+                </WorkStatusFullTextTooltip>
               ) : null}
             </>
           ) : null}

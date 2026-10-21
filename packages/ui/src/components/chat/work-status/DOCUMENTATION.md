@@ -20,6 +20,36 @@ Sections render nothing when they have no rows, so the panel collapses upward
 instead of reserving empty space. Turn stats keeps its header for a
 selected session even without metrics, so a saved collapsed state can reopen.
 
+### Text sizes follow the interface size
+
+Every text size in the panel comes from the typography scale: headings,
+heading summaries, pills and captions are `typography-micro`, row labels and
+values `typography-ui-label`. The scale is in rem, and the interface size
+setting scales the root font, so text grows with the icons, row heights and
+spacing around it while the card keeps its 300px width. A size in px stays
+put: row text fixed at 13px sat under 24px headings in 56px rows at 200%.
+`WorkStatusPrimitives.test.tsx` refuses a px text size in any file the panel
+draws.
+
+The fixed width means larger sizes cut more text off. Cut text shows in full
+in a tooltip above it (`WorkStatusFullTextTooltip`): row labels, section
+titles with their subject or summary, the cost breakdown and the callout.
+Whether text is cut is read from the layout when the tooltip is about to
+open, and text that fits shows no tooltip. A row that passes its own
+`tooltip` replaces the cut-label one, so such a row names itself in it, as
+subagent and Turn stats rows do.
+
+### Why every row is a tooltip trigger
+
+Every row renders its tooltip, even while nothing is cut. Mounting it only
+once a row is cut was the cheaper option, but the tooltip wraps the row, so
+the row's element would be replaced whenever its cut state changed, taking
+keyboard focus and the pointer's hover with it. The cost is measured: in a
+production build, one row render took 2 to 4 µs without a tooltip and 20 to
+35 µs with one (200 rows re-rendered 50 times, three interleaved runs). The
+Session and Project rows re-render on every streamed flush; with about five
+of them that is roughly 0.1 ms more per flush.
+
 ## What it is not
 
 It is **not** a context-panel surface. It is not registered in
@@ -157,9 +187,10 @@ removing cached sessions. Only the completed list establishes authoritative
 coverage and removes absent records; newer live updates and deletions win over
 both partial pages and the final snapshot.
 
-Hovering or focusing a row shows its session model's catalog display name,
-falling back to the formatted model ID. Missing model metadata produces no
-tooltip. Model-only session updates invalidate the live-session comparison.
+Hovering or focusing a row shows its title and its session model's catalog
+display name, falling back to the formatted model ID. Without model metadata
+the row shows its title in a tooltip only when the panel cuts it off.
+Model-only session updates invalidate the live-session comparison.
 
 ### Turn stats
 

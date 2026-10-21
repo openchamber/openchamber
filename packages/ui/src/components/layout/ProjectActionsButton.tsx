@@ -58,7 +58,7 @@ const ProjectActionsButtonComponent = () => {
               : t('projectActions.actions.runNamedAria', { name: shown.name })}
           >
             <Icon name={resolveProjectActionIconName(shown)} className="size-4 shrink-0 text-muted-foreground" />
-            <span className="min-w-0 flex-1 truncate text-[13px]">{shown.name}</span>
+            <span className="min-w-0 flex-1 truncate typography-ui-label">{shown.name}</span>
             {/* The state is the trailing value: what pressing the row does next. */}
             <ProjectActionRunIndicator run={shownRun} showIdle />
           </button>

@@ -291,7 +291,8 @@ describe('mounted turn telemetry with live sync stores', () => {
         [assistant.id]: [{ id: 'text', type: 'text', sessionID: sessionId, messageID: assistant.id, text: 'Final reply', time: { start: 3000, end: 5000 } }],
       },
     }));
-    const triggers = dom.container.querySelectorAll<HTMLElement>('[data-slot="tooltip-trigger"]');
+    // The section toggle is a trigger too, for a title the panel cuts off.
+    const triggers = dom.container.querySelectorAll<HTMLElement>('[data-slot="tooltip-trigger"]:not([aria-expanded])');
     expect(triggers.length).toBe(10);
     for (const trigger of triggers) expect(trigger.tabIndex).toBe(0);
     expect(dom.container.querySelectorAll('[title]').length).toBe(0);

@@ -25,7 +25,45 @@ const SECTION_CLASS = cn(
   '[&:not(:first-child)]:mt-5',
 );
 
-const HEADING_CLASS = 'text-xs font-semibold text-foreground';
+/*
+ * Text sizes come from the typography scale. It is in rem, so it follows the
+ * interface size setting together with the icons, row heights and spacing
+ * around it; a size in px stays put while all of those grow, which at 200%
+ * left 13px rows under 24px headings. Headings sit a step below row text.
+ */
+const HEADING_CLASS = 'typography-micro font-semibold text-foreground';
+const SUMMARY_CLASS = 'min-w-0 max-w-[60%] truncate text-end typography-micro text-muted-foreground tabular-nums';
+
+/** Whether text in `element` or inside it is cut off by the panel's width. */
+const isTextCut = (element: Element | undefined): boolean => {
+  if (!element) return false;
+  return [element, ...element.querySelectorAll('*')].some((node) => node.scrollWidth > node.clientWidth + 1);
+};
+
+/**
+ * Text the panel's width cuts off shows in full in a tooltip above it, as the
+ * UI guidance asks of every truncated value; text that fits shows none, unless
+ * `always` is set. Widths are read as the tooltip is about to open, so nothing
+ * touches the layout before a pointer or focus arrives. Above, as on every
+ * dense row, so it never covers the rows under it.
+ */
+export const WorkStatusFullTextTooltip: React.FC<{
+  content: React.ReactNode;
+  always?: boolean;
+  children: React.ReactElement;
+}> = ({ content, always = false, children }) => (
+  <Tooltip
+    delayDuration={300}
+    onOpenChange={(open, details) => {
+      if (open && !always && !isTextCut(details.trigger)) details.cancel();
+    }}
+  >
+    <TooltipTrigger asChild>{children}</TooltipTrigger>
+    <TooltipContent side="top" sideOffset={4} className="max-w-[min(320px,calc(100vw-24px))] whitespace-normal break-words text-start">
+      {content}
+    </TooltipContent>
+  </Tooltip>
+);
 
 export const WorkStatusSection: React.FC<{
   title: string;
@@ -34,20 +72,27 @@ export const WorkStatusSection: React.FC<{
   /** Aggregate for the whole section; belongs on the heading, not on a row. */
   summary?: React.ReactNode;
   children: React.ReactNode;
-}> = ({ title, subject, summary, children }) => (
-  <section className={SECTION_CLASS}>
-    <div data-work-status-heading className="mb-0.5 flex items-center gap-2 px-1">
-      <h3 className={cn(HEADING_CLASS, 'min-w-0 flex-1 truncate')}>
-        {title}
-        {subject ? <span className="ms-1.5 font-normal text-muted-foreground">{subject}</span> : null}
-      </h3>
-      {summary !== undefined && summary !== null ? (
-        <span dir="auto" className="min-w-0 max-w-[60%] truncate text-end text-xs text-muted-foreground tabular-nums">{summary}</span>
-      ) : null}
-    </div>
-    {children}
-  </section>
-);
+}> = ({ title, subject, summary, children }) => {
+  const heading = (
+    <>
+      {title}
+      {subject ? <span className="ms-1.5 font-normal text-muted-foreground">{subject}</span> : null}
+    </>
+  );
+  return (
+    <section className={SECTION_CLASS}>
+      <div data-work-status-heading className="mb-0.5 flex items-center gap-2 px-1">
+        <WorkStatusFullTextTooltip content={heading}>
+          <h3 className={cn(HEADING_CLASS, 'min-w-0 flex-1 truncate')}>{heading}</h3>
+        </WorkStatusFullTextTooltip>
+        {summary !== undefined && summary !== null ? (
+          <span dir="auto" className={SUMMARY_CLASS}>{summary}</span>
+        ) : null}
+      </div>
+      {children}
+    </section>
+  );
+};
 
 /**
  * Section whose body folds away. The chevron swaps on expand exactly as the
@@ -82,38 +127,48 @@ export const WorkStatusCollapsibleSection: React.FC<{
   );
   const setExpandedInStore = useUIStore((state) => state.setWorkStatusSectionExpanded);
   const expanded = stored ?? defaultExpanded;
+  const hasSummary = summary !== undefined && summary !== null;
   return (
     <section data-work-status-section={id} className={SECTION_CLASS}>
       <div data-work-status-heading className={cn('mb-0.5 flex items-center gap-1', actionLayout === 'inline' && 'h-6')}>
-        <button
-          type="button"
-          aria-expanded={expanded}
-          onClick={() => setExpandedInStore(id, !expanded)}
-          className={cn(
-            'group/section flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-1 text-start',
-            // No hover fill anywhere in the panel: at this row density the blocks
-            // of colour read as selection, not as affordance. Interactivity shows
-            // through the text instead.
-            'transition-colors hover:text-foreground',
+        <WorkStatusFullTextTooltip
+          content={(
+            <>
+              <p className="font-medium">{title}</p>
+              {hasSummary ? <p>{summary}</p> : null}
+            </>
           )}
         >
-          {iconNode ?? (icon ? (
+          <button
+            type="button"
+            aria-expanded={expanded}
+            onClick={() => setExpandedInStore(id, !expanded)}
+            className={cn(
+              'group/section flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-1 text-start',
+              // No hover fill anywhere in the panel: at this row density the blocks
+              // of colour read as selection, not as affordance. Interactivity shows
+              // through the text instead.
+              'transition-colors hover:text-foreground',
+            )}
+          >
+            {iconNode ?? (icon ? (
+              <Icon
+                name={icon}
+                className={cn('size-3.5 shrink-0', !iconColor && 'text-muted-foreground')}
+                style={iconColor ? { color: iconColor } : undefined}
+              />
+            ) : null)}
+            <span className={cn(HEADING_CLASS, 'min-w-0 truncate')}>{title}</span>
             <Icon
-              name={icon}
-              className={cn('size-3.5 shrink-0', !iconColor && 'text-muted-foreground')}
-              style={iconColor ? { color: iconColor } : undefined}
+              name={expanded ? 'arrow-down-s' : 'arrow-right-s'}
+              className="size-3.5 shrink-0 text-muted-foreground"
             />
-          ) : null)}
-          <span className={cn(HEADING_CLASS, 'min-w-0 truncate')}>{title}</span>
-          <Icon
-            name={expanded ? 'arrow-down-s' : 'arrow-right-s'}
-            className="size-3.5 shrink-0 text-muted-foreground"
-          />
-          <span className="flex-1" />
-          {summary !== undefined && summary !== null ? (
-            <span dir="auto" className="min-w-0 max-w-[60%] truncate text-end text-xs text-muted-foreground tabular-nums">{summary}</span>
-          ) : null}
-        </button>
+            <span className="flex-1" />
+            {hasSummary ? (
+              <span dir="auto" className={SUMMARY_CLASS}>{summary}</span>
+            ) : null}
+          </button>
+        </WorkStatusFullTextTooltip>
         {actionLayout === 'inline' ? action : null}
       </div>
       {actionLayout === 'below' ? action : null}
@@ -132,6 +187,11 @@ type RowProps = {
   /** Turns the row into a button; the caller decides what it opens. */
   onClick?: (event: React.MouseEvent<HTMLButtonElement>) => void;
   ariaLabel?: string;
+  /**
+   * What the row's tooltip says. Without one, a label the panel's width cuts
+   * off shows there in full, so a caller whose label can be cut names the row
+   * in its own tooltip too.
+   */
   tooltip?: React.ReactNode;
   className?: string;
 };
@@ -162,11 +222,11 @@ export const WorkStatusRow: React.FC<RowProps> = ({
           style={iconColor ? { color: iconColor } : undefined}
         />
       ) : null)}
-      <span id={labelId} className={cn('min-w-0 flex-1 truncate text-[13px]', muted && 'text-muted-foreground')}>
+      <span id={labelId} className={cn('min-w-0 flex-1 truncate typography-ui-label', muted && 'text-muted-foreground')}>
         {label}
       </span>
       {value !== undefined && value !== null ? (
-        <span className="flex shrink-0 items-center gap-1.5 text-[13px] tabular-nums">{value}</span>
+        <span className="flex shrink-0 items-center gap-1.5 typography-ui-label tabular-nums">{value}</span>
       ) : null}
     </>
   );
@@ -195,17 +255,11 @@ export const WorkStatusRow: React.FC<RowProps> = ({
     </div>
   ) : <div className={shared} tabIndex={tooltip ? 0 : undefined}>{body}</div>;
 
-  if (!tooltip) return row;
-
   return (
-    // Above the row, as on every dense row, so it never covers the rows
-    // under it or the actions beside it.
-    <Tooltip delayDuration={300}>
-      <TooltipTrigger asChild>{row}</TooltipTrigger>
-      <TooltipContent side="top" sideOffset={4} className="max-w-[min(320px,calc(100vw-24px))] whitespace-normal break-words text-start">
-        {tooltip}
-      </TooltipContent>
-    </Tooltip>
+    // A pinned message or a goal can run to paragraphs; four lines say which.
+    <WorkStatusFullTextTooltip always={Boolean(tooltip)} content={tooltip || <p className="line-clamp-4">{label}</p>}>
+      {row}
+    </WorkStatusFullTextTooltip>
   );
 };
 
@@ -258,7 +312,7 @@ export const WorkStatusRowAction: React.FC<{
         onClick();
       }}
       className={cn(
-        'shrink-0 rounded-full px-1.5 py-px text-[11px] font-medium leading-4 transition-opacity',
+        'shrink-0 rounded-full px-1.5 py-px typography-micro font-medium leading-4 transition-opacity',
         'hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-50',
         !color && 'bg-[var(--interactive-hover)] text-muted-foreground',
       )}
@@ -278,7 +332,7 @@ export const WorkStatusPill: React.FC<{
 }> = ({ children, color, background }) => (
   <span
     className={cn(
-      'rounded-full px-1.5 py-px text-[11px] font-medium leading-4',
+      'rounded-full px-1.5 py-px typography-micro font-medium leading-4',
       !color && 'bg-[var(--interactive-hover)] text-muted-foreground',
     )}
     style={color ? { color, backgroundColor: background } : undefined}
@@ -289,13 +343,15 @@ export const WorkStatusPill: React.FC<{
 
 /** Full-width callout for states that block the branch (merge, rebase, …). */
 export const WorkStatusCallout: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-  <div
-    className="mx-1 mb-1 flex items-center gap-2 rounded-md px-2 py-1.5 text-[13px] font-medium"
-    style={{ backgroundColor: 'var(--status-warning-background)', color: 'var(--status-warning)' }}
-  >
-    <Icon name="alert" className="size-3.5 shrink-0" />
-    <span className="min-w-0 truncate">{children}</span>
-  </div>
+  <WorkStatusFullTextTooltip content={children}>
+    <div
+      className="mx-1 mb-1 flex items-center gap-2 rounded-md px-2 py-1.5 typography-ui-label font-medium"
+      style={{ backgroundColor: 'var(--status-warning-background)', color: 'var(--status-warning-text)' }}
+    >
+      <Icon name="alert" className="size-3.5 shrink-0" />
+      <span className="min-w-0 truncate">{children}</span>
+    </div>
+  </WorkStatusFullTextTooltip>
 );
 
 /** Context-window fill, drawn under its row rather than inside it. */
