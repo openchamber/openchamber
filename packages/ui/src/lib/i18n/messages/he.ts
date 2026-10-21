@@ -2,6 +2,7 @@ import { settingsDict } from './he.settings';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
+import { exportDocumentI18n } from './export-document.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
@@ -691,7 +692,7 @@ export const dict = {
   'sessions.sidebar.session.menu.copied': 'הועתק',
   'sessions.sidebar.session.menu.copyLink': 'העתק קישור',
   'sessions.sidebar.session.menu.unshare': 'בטל שיתוף',
-  'sessions.sidebar.session.menu.exportMarkdown': 'ייצא ל-Markdown',
+  'sessions.sidebar.session.menu.exportSession': 'ייצוא הפעלה',
   'sessions.sidebar.session.menu.moveToWorktree': 'העבר לעץ עבודה חדש',
   'sessions.sidebar.session.menu.moveToWorktreeTargets': 'העבר לעץ עבודה',
   'sessions.sidebar.session.menu.newWorktree': 'עץ עבודה חדש…',
@@ -714,14 +715,20 @@ export const dict = {
   'sessions.sidebar.session.export.failedLoadHistory': 'לא ניתן היה לטעון את ההיסטוריה המלאה של ההפעלה',
   'sessions.sidebar.session.export.success': 'ההפעלה יוצאה',
   'sessions.sidebar.session.export.failedRevealPath': 'לא ניתן היה להציג את הנתיב',
-  'sessions.sidebar.session.export.untitledSubagent': 'סוכן משנה ללא שם',
   'sessions.sidebar.session.export.skippedSubtaskSingle': 'ההפעלה יוצאה, אבל דולגה {count} משימה של סוכן משנה שלא ניתן היה לטעון.',
   'sessions.sidebar.session.export.skippedSubtaskMany': 'ההפעלה יוצאה, אבל דולגו {count} משימות של סוכני משנה שלא ניתן היה לטעון.',
-  'sessions.sidebar.session.export.dialog.title': 'ייצוא ל-Markdown',
+  'sessions.sidebar.session.export.dialog.title': 'ייצוא הסשן',
   'sessions.sidebar.session.export.dialog.descriptionSingle': 'בהפעלה הזו יש {count} משימה של סוכן משנה. לכלול אותה בייצוא?',
   'sessions.sidebar.session.export.dialog.descriptionMany': 'בהפעלה הזו יש {count} משימות של סוכני משנה. לכלול אותן בייצוא?',
   'sessions.sidebar.session.export.dialog.includeSubtasks': 'כלול משימות של סוכני משנה',
   'sessions.sidebar.session.export.dialog.confirm': 'ייצא',
+  'sessions.sidebar.session.export.dialog.descriptionNoSubtasks': 'הייצוא הוא תיעוד קריא של השיחה, עם עבודת סוכני המשנה במקומה.',
+  'sessions.sidebar.session.export.dialog.format': 'פורמט',
+  'sessions.sidebar.session.export.dialog.detail': 'רמת פירוט',
+  'sessions.sidebar.session.export.dialog.detailReadable': 'קריא',
+  'sessions.sidebar.session.export.dialog.detailReadableHint': 'שיחה. תוצאות כלים ארוכות מקוצרות ומסומנות.',
+  'sessions.sidebar.session.export.dialog.detailFull': 'כל הפרטים',
+  'sessions.sidebar.session.export.dialog.detailFullHint': 'כל קלט, פלט ותוצאה של כלים, במלואם.',
   'sessions.sidebar.session.status.active': 'ההפעלה פעילה',
   'sessions.sidebar.session.status.unread': 'עדכונים שלא נקראו',
   'sessions.sidebar.session.status.backgroundSubagent': 'סוכן משנה פועל ברקע',
@@ -3802,6 +3809,7 @@ export const dict = {
   ...linearIssuePickerI18n.he,
   ...referencePickerI18n.he,
   ...sessionMenuHintsI18n.he,
+  ...exportDocumentI18n.he,
   ...projectKnowledgeI18n.he,
   ...linearPanelI18n.he,
   ...routingI18n.he,

@@ -3,6 +3,7 @@ import { settingsDict } from './pt-BR.settings';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
+import { exportDocumentI18n } from './export-document.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
@@ -147,6 +148,7 @@ export const dict: Record<I18nKey, string> = {
   ...linearIssuePickerI18n['pt-BR'],
   ...referencePickerI18n['pt-BR'],
   ...sessionMenuHintsI18n['pt-BR'],
+  ...exportDocumentI18n['pt-BR'],
   ...projectKnowledgeI18n['pt-BR'],
   ...linearPanelI18n['pt-BR'],
   ...routingI18n['pt-BR'],
@@ -724,7 +726,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.session.menu.copied": "Copiado",
   "sessions.sidebar.session.menu.copyLink": "Copiar link",
   "sessions.sidebar.session.menu.unshare": "Parar de compartilhar",
-  "sessions.sidebar.session.menu.exportMarkdown": "Exportar Markdown",
+  "sessions.sidebar.session.menu.exportSession": "Exportar sessão",
   "sessions.sidebar.session.menu.moveToWorktree": "Mover para um novo worktree",
   "sessions.sidebar.session.menu.moveToWorktreeTargets": "Mover para worktree",
   "sessions.sidebar.session.menu.newWorktree": "Novo worktree...",
@@ -747,14 +749,20 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.session.export.failedLoadHistory": "Não foi possível carregar o histórico completo da sessão",
   "sessions.sidebar.session.export.success": "Sessão exportada",
   "sessions.sidebar.session.export.failedRevealPath": "Não foi possível mostrar o caminho",
-  "sessions.sidebar.session.export.untitledSubagent": "Subagente sem título",
   "sessions.sidebar.session.export.skippedSubtaskSingle": "A sessão foi exportada, mas {count} tarefa de subagente não pôde ser carregada e foi ignorada.",
   "sessions.sidebar.session.export.skippedSubtaskMany": "A sessão foi exportada, mas {count} tarefas de subagente não puderam ser carregadas e foram ignoradas.",
-  "sessions.sidebar.session.export.dialog.title": "Exportar Markdown",
+  'sessions.sidebar.session.export.dialog.title': 'Exportar sessão',
   "sessions.sidebar.session.export.dialog.descriptionSingle": "Esta sessão tem {count} tarefa de subagente. Incluí-la na exportação?",
   "sessions.sidebar.session.export.dialog.descriptionMany": "Esta sessão tem {count} tarefas de subagente. Incluí-las na exportação?",
   "sessions.sidebar.session.export.dialog.includeSubtasks": "Incluir tarefas de subagente",
   "sessions.sidebar.session.export.dialog.confirm": "Exportar",
+  'sessions.sidebar.session.export.dialog.descriptionNoSubtasks': 'A exportação é um registro legível da conversa, com o trabalho dos subagentes no lugar certo.',
+  'sessions.sidebar.session.export.dialog.format': 'Formato',
+  'sessions.sidebar.session.export.dialog.detail': 'Detalhe',
+  'sessions.sidebar.session.export.dialog.detailReadable': 'Legível',
+  'sessions.sidebar.session.export.dialog.detailReadableHint': 'Uma conversa. Resultados longos de ferramentas são cortados e marcados.',
+  'sessions.sidebar.session.export.dialog.detailFull': 'Detalhes completos',
+  'sessions.sidebar.session.export.dialog.detailFullHint': 'Cada entrada, saída e resultado das ferramentas, por completo.',
   "sessions.sidebar.session.status.active": "Sessão ativa",
   "sessions.sidebar.session.status.unread": "Atualizações não lidas",
   "sessions.sidebar.session.status.backgroundSubagent": "Subagente em execução em segundo plano",

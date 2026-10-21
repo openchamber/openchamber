@@ -3,6 +3,7 @@ import { settingsDict } from './ja.settings';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
+import { exportDocumentI18n } from './export-document.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
@@ -137,6 +138,7 @@ export const dict: Record<I18nKey, string> = {
   ...linearIssuePickerI18n.ja,
   ...referencePickerI18n.ja,
   ...sessionMenuHintsI18n.ja,
+  ...exportDocumentI18n.ja,
   ...projectKnowledgeI18n.ja,
   ...linearPanelI18n.ja,
   ...routingI18n.ja,
@@ -723,7 +725,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.menu.copied': 'コピーしました',
   'sessions.sidebar.session.menu.copyLink': 'リンクをコピー',
   'sessions.sidebar.session.menu.unshare': '共有解除',
-  'sessions.sidebar.session.menu.exportMarkdown': 'Markdownでエクスポート',
+  'sessions.sidebar.session.menu.exportSession': 'セッションをエクスポート',
   'sessions.sidebar.session.menu.moveToWorktree': '新しいworktreeへ移動',
   'sessions.sidebar.session.menu.moveToWorktreeTargets': 'worktreeへ移動',
   'sessions.sidebar.session.menu.newWorktree': '新しいworktree...',
@@ -746,14 +748,20 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.export.failedLoadHistory': 'セッション履歴全体を読み込めませんでした',
   'sessions.sidebar.session.export.success': 'セッションをエクスポートしました',
   'sessions.sidebar.session.export.failedRevealPath': 'パスの表示に失敗しました',
-  'sessions.sidebar.session.export.untitledSubagent': '無題のサブエージェント',
   'sessions.sidebar.session.export.skippedSubtaskSingle': 'セッションをエクスポートしましたが、読み込めなかった{count}件のサブエージェントタスクをスキップしました。',
   'sessions.sidebar.session.export.skippedSubtaskMany': 'セッションをエクスポートしましたが、読み込めなかった{count}件のサブエージェントタスクをスキップしました。',
-  'sessions.sidebar.session.export.dialog.title': 'Markdownでエクスポート',
+  'sessions.sidebar.session.export.dialog.title': 'セッションをエクスポート',
   'sessions.sidebar.session.export.dialog.descriptionSingle': 'このセッションには{count}件のサブエージェントタスクがあります。エクスポートに含めますか？',
   'sessions.sidebar.session.export.dialog.descriptionMany': 'このセッションには{count}件のサブエージェントタスクがあります。エクスポートに含めますか？',
   'sessions.sidebar.session.export.dialog.includeSubtasks': 'サブエージェントタスクを含める',
   'sessions.sidebar.session.export.dialog.confirm': 'エクスポート',
+  'sessions.sidebar.session.export.dialog.descriptionNoSubtasks': 'エクスポートは会話の読みやすい記録で、サブエージェントの作業が該当箇所に配置されます。',
+  'sessions.sidebar.session.export.dialog.format': '形式',
+  'sessions.sidebar.session.export.dialog.detail': '詳細',
+  'sessions.sidebar.session.export.dialog.detailReadable': '読みやすい',
+  'sessions.sidebar.session.export.dialog.detailReadableHint': '会話として表示します。長いツール結果は省略され、その旨が示されます。',
+  'sessions.sidebar.session.export.dialog.detailFull': '詳細をすべて',
+  'sessions.sidebar.session.export.dialog.detailFullHint': 'すべてのツールの入力・出力・結果をそのまま含めます。',
   'sessions.sidebar.session.status.active': 'セッションアクティブ',
   'sessions.sidebar.session.status.unread': '未読の更新',
   'sessions.sidebar.session.status.backgroundSubagent': 'サブエージェントがバックグラウンドで実行中',

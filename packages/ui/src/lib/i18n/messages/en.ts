@@ -2,6 +2,7 @@ import { settingsDict } from './en.settings';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
+import { exportDocumentI18n } from './export-document.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
@@ -136,6 +137,7 @@ export const dict = {
   ...linearIssuePickerI18n.en,
   ...referencePickerI18n.en,
   ...sessionMenuHintsI18n.en,
+  ...exportDocumentI18n.en,
   ...projectKnowledgeI18n.en,
   ...linearPanelI18n.en,
   ...routingI18n.en,
@@ -722,7 +724,7 @@ export const dict = {
   'sessions.sidebar.session.menu.copied': 'Copied',
   'sessions.sidebar.session.menu.copyLink': 'Copy link',
   'sessions.sidebar.session.menu.unshare': 'Unshare',
-  'sessions.sidebar.session.menu.exportMarkdown': 'Export Markdown',
+  'sessions.sidebar.session.menu.exportSession': 'Export session',
   'sessions.sidebar.session.menu.moveToWorktree': 'Move to new worktree',
   'sessions.sidebar.session.menu.moveToWorktreeTargets': 'Move to worktree',
   'sessions.sidebar.session.menu.newWorktree': 'New worktree...',
@@ -745,14 +747,20 @@ export const dict = {
   'sessions.sidebar.session.export.failedLoadHistory': 'Failed to load the complete session history',
   'sessions.sidebar.session.export.success': 'Session exported',
   'sessions.sidebar.session.export.failedRevealPath': 'Failed to reveal path',
-  'sessions.sidebar.session.export.untitledSubagent': 'Untitled Sub-agent',
   'sessions.sidebar.session.export.skippedSubtaskSingle': 'Exported session, but skipped {count} sub-agent task that could not be loaded.',
   'sessions.sidebar.session.export.skippedSubtaskMany': 'Exported session, but skipped {count} sub-agent tasks that could not be loaded.',
-  'sessions.sidebar.session.export.dialog.title': 'Export Markdown',
+  'sessions.sidebar.session.export.dialog.title': 'Export session',
   'sessions.sidebar.session.export.dialog.descriptionSingle': 'This session has {count} sub-agent task. Include it in the export?',
   'sessions.sidebar.session.export.dialog.descriptionMany': 'This session has {count} sub-agent tasks. Include them in the export?',
   'sessions.sidebar.session.export.dialog.includeSubtasks': 'Include sub-agent tasks',
   'sessions.sidebar.session.export.dialog.confirm': 'Export',
+  'sessions.sidebar.session.export.dialog.descriptionNoSubtasks': 'The export is a readable record of the conversation, with the sub-agent work in place.',
+  'sessions.sidebar.session.export.dialog.format': 'Format',
+  'sessions.sidebar.session.export.dialog.detail': 'Detail',
+  'sessions.sidebar.session.export.dialog.detailReadable': 'Readable',
+  'sessions.sidebar.session.export.dialog.detailReadableHint': 'A conversation. Long tool results are cut down and marked.',
+  'sessions.sidebar.session.export.dialog.detailFull': 'Full details',
+  'sessions.sidebar.session.export.dialog.detailFullHint': 'Every tool input, output and result, in full.',
   'sessions.sidebar.session.status.active': 'Session active',
   'sessions.sidebar.session.status.unread': 'Unread updates',
   'sessions.sidebar.session.status.backgroundSubagent': 'Subagent running in the background',

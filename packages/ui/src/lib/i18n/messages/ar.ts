@@ -2,6 +2,7 @@ import { settingsDict } from './ar.settings';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
+import { exportDocumentI18n } from './export-document.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
@@ -691,7 +692,7 @@ export const dict = {
   'sessions.sidebar.session.menu.copied': 'تم النسخ',
   'sessions.sidebar.session.menu.copyLink': 'نسخ الرابط',
   'sessions.sidebar.session.menu.unshare': 'إلغاء المشاركة',
-  'sessions.sidebar.session.menu.exportMarkdown': 'تصدير Markdown',
+  'sessions.sidebar.session.menu.exportSession': 'تصدير الجلسة',
   'sessions.sidebar.session.menu.moveToWorktree': 'نقل إلى شجرة عمل جديدة',
   'sessions.sidebar.session.menu.moveToWorktreeTargets': 'نقل إلى شجرة عمل',
   'sessions.sidebar.session.menu.newWorktree': 'شجرة عمل جديدة…',
@@ -714,14 +715,20 @@ export const dict = {
   'sessions.sidebar.session.export.failedLoadHistory': 'تعذّر تحميل سجل الجلسة كاملًا',
   'sessions.sidebar.session.export.success': 'تم تصدير الجلسة',
   'sessions.sidebar.session.export.failedRevealPath': 'تعذّر إظهار المسار',
-  'sessions.sidebar.session.export.untitledSubagent': 'وكيل فرعي بلا عنوان',
   'sessions.sidebar.session.export.skippedSubtaskSingle': 'تم تصدير الجلسة، لكن تم تخطي {count} مهمة لوكيل فرعي تعذّر تحميلها.',
   'sessions.sidebar.session.export.skippedSubtaskMany': 'تم تصدير الجلسة، لكن تم تخطي {count} مهام لوكلاء فرعيين تعذّر تحميلها.',
-  'sessions.sidebar.session.export.dialog.title': 'تصدير Markdown',
+  'sessions.sidebar.session.export.dialog.title': 'تصدير الجلسة',
   'sessions.sidebar.session.export.dialog.descriptionSingle': 'تحتوي هذه الجلسة على {count} مهمة لوكيل فرعي. هل تريد تضمينها في التصدير؟',
   'sessions.sidebar.session.export.dialog.descriptionMany': 'تحتوي هذه الجلسة على {count} مهام لوكلاء فرعيين. هل تريد تضمينها في التصدير؟',
   'sessions.sidebar.session.export.dialog.includeSubtasks': 'تضمين مهام الوكلاء الفرعيين',
   'sessions.sidebar.session.export.dialog.confirm': 'تصدير',
+  'sessions.sidebar.session.export.dialog.descriptionNoSubtasks': 'التصدير سجل مقروء للمحادثة، مع عمل الوكلاء الفرعيين في موضعه.',
+  'sessions.sidebar.session.export.dialog.format': 'الصيغة',
+  'sessions.sidebar.session.export.dialog.detail': 'التفصيل',
+  'sessions.sidebar.session.export.dialog.detailReadable': 'مقروء',
+  'sessions.sidebar.session.export.dialog.detailReadableHint': 'محادثة. تُقتطع نتائج الأدوات الطويلة وتُعلَّم.',
+  'sessions.sidebar.session.export.dialog.detailFull': 'كل التفاصيل',
+  'sessions.sidebar.session.export.dialog.detailFullHint': 'كل إدخال ومخرج ونتيجة للأدوات كاملة.',
   'sessions.sidebar.session.status.active': 'الجلسة نشطة',
   'sessions.sidebar.session.status.unread': 'تحديثات غير مقروءة',
   'sessions.sidebar.session.status.backgroundSubagent': 'وكيل فرعي يعمل في الخلفية',
@@ -3802,6 +3809,7 @@ export const dict = {
   ...linearIssuePickerI18n.ar,
   ...referencePickerI18n.ar,
   ...sessionMenuHintsI18n.ar,
+  ...exportDocumentI18n.ar,
   ...projectKnowledgeI18n.ar,
   ...linearPanelI18n.ar,
   ...routingI18n.ar,

@@ -3,6 +3,7 @@ import { settingsDict } from './zh-TW.settings';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
+import { exportDocumentI18n } from './export-document.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
@@ -137,6 +138,7 @@ export const dict: Record<I18nKey, string> = {
   ...linearIssuePickerI18n['zh-TW'],
   ...referencePickerI18n['zh-TW'],
   ...sessionMenuHintsI18n['zh-TW'],
+  ...exportDocumentI18n['zh-TW'],
   ...projectKnowledgeI18n['zh-TW'],
   ...linearPanelI18n['zh-TW'],
   ...routingI18n['zh-TW'],
@@ -743,7 +745,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.menu.copied': '已複製',
   'sessions.sidebar.session.menu.copyLink': '複製連結',
   'sessions.sidebar.session.menu.unshare': '取消分享',
-  'sessions.sidebar.session.menu.exportMarkdown': '匯出 Markdown',
+  'sessions.sidebar.session.menu.exportSession': '匯出工作階段',
   'sessions.sidebar.session.menu.moveToWorktree': '移至新工作樹',
   'sessions.sidebar.session.menu.moveToWorktreeTargets': '移至工作樹',
   'sessions.sidebar.session.menu.newWorktree': '新增工作樹...',
@@ -766,14 +768,20 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.export.failedLoadHistory': '無法載入完整的工作階段記錄',
   'sessions.sidebar.session.export.success': '會話已匯出',
   'sessions.sidebar.session.export.failedRevealPath': '顯示路徑失敗',
-  'sessions.sidebar.session.export.untitledSubagent': '未命名子 Agent',
   'sessions.sidebar.session.export.skippedSubtaskSingle': '會話已匯出，但略過了 {count} 個無法載入的子 Agent 任務。',
   'sessions.sidebar.session.export.skippedSubtaskMany': '會話已匯出，但略過了 {count} 個無法載入的子 Agent 任務。',
-  'sessions.sidebar.session.export.dialog.title': '匯出 Markdown',
+  'sessions.sidebar.session.export.dialog.title': '匯出工作階段',
   'sessions.sidebar.session.export.dialog.descriptionSingle': '此會話有 {count} 個子 Agent 任務。是否包含在匯出中？',
   'sessions.sidebar.session.export.dialog.descriptionMany': '此會話有 {count} 個子 Agent 任務。是否包含在匯出中？',
   'sessions.sidebar.session.export.dialog.includeSubtasks': '包含子 Agent 任務',
   'sessions.sidebar.session.export.dialog.confirm': '匯出',
+  'sessions.sidebar.session.export.dialog.descriptionNoSubtasks': '匯出是對話的可讀記錄，子代理的工作會放在對應的位置。',
+  'sessions.sidebar.session.export.dialog.format': '格式',
+  'sessions.sidebar.session.export.dialog.detail': '詳細程度',
+  'sessions.sidebar.session.export.dialog.detailReadable': '可讀',
+  'sessions.sidebar.session.export.dialog.detailReadableHint': '以對話形式呈現。過長的工具結果會截斷並標示。',
+  'sessions.sidebar.session.export.dialog.detailFull': '完整詳情',
+  'sessions.sidebar.session.export.dialog.detailFullHint': '保留每個工具的輸入、輸出與結果。',
   'sessions.sidebar.session.status.active': '會話活躍中',
   'sessions.sidebar.session.status.unread': '有未讀更新',
   'sessions.sidebar.session.status.backgroundSubagent': '子代理程式正在背景執行',

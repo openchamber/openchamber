@@ -2,6 +2,7 @@ import { settingsDict } from './fr.settings';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
+import { exportDocumentI18n } from './export-document.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
@@ -136,6 +137,7 @@ export const dict = {
   ...linearIssuePickerI18n.fr,
   ...referencePickerI18n.fr,
   ...sessionMenuHintsI18n.fr,
+  ...exportDocumentI18n.fr,
   ...projectKnowledgeI18n.fr,
   ...linearPanelI18n.fr,
   ...routingI18n.fr,
@@ -544,7 +546,7 @@ export const dict = {
   'sessions.sidebar.session.menu.copied': 'Copié',
   'sessions.sidebar.session.menu.copyLink': 'Copier le lien',
   'sessions.sidebar.session.menu.unshare': 'Annuler le partage',
-  'sessions.sidebar.session.menu.exportMarkdown': 'Exporter le Markdown',
+  'sessions.sidebar.session.menu.exportSession': 'Exporter la session',
   'sessions.sidebar.session.menu.moveToWorktree': 'Déplacer vers un nouveau worktree',
   'sessions.sidebar.session.menu.moveToWorktreeTargets': 'Déplacer vers un worktree',
   'sessions.sidebar.session.menu.newWorktree': 'Nouveau worktree...',
@@ -567,14 +569,20 @@ export const dict = {
   'sessions.sidebar.session.export.failedLoadHistory': 'Impossible de charger l’historique complet de la session',
   'sessions.sidebar.session.export.success': 'Session exportée',
   'sessions.sidebar.session.export.failedRevealPath': 'Impossible de révéler le chemin',
-  'sessions.sidebar.session.export.untitledSubagent': 'Sous-agent sans titre',
   'sessions.sidebar.session.export.skippedSubtaskSingle': 'Session exportée, mais tâche de sous-agent {count} ignorée qui n\'a pas pu être chargée.',
   'sessions.sidebar.session.export.skippedSubtaskMany': 'Session exportée, mais tâches du sous-agent {count} ignorées qui n\'ont pas pu être chargées.',
-  'sessions.sidebar.session.export.dialog.title': 'Exporter le Markdown',
+  'sessions.sidebar.session.export.dialog.title': 'Exporter la session',
   'sessions.sidebar.session.export.dialog.descriptionSingle': 'Cette session comporte une tâche de sous-agent {count}. L\'inclure dans l\'exportation ?',
   'sessions.sidebar.session.export.dialog.descriptionMany': 'Cette session comporte des tâches de sous-agent {count}. Les inclure dans l\'exportation ?',
   'sessions.sidebar.session.export.dialog.includeSubtasks': 'Inclure les tâches des sous-agents',
   'sessions.sidebar.session.export.dialog.confirm': 'Exporter',
+  'sessions.sidebar.session.export.dialog.descriptionNoSubtasks': "L'exportation est un compte rendu lisible de la conversation, avec le travail des sous-agents à sa place.",
+  'sessions.sidebar.session.export.dialog.format': 'Format',
+  'sessions.sidebar.session.export.dialog.detail': 'Détail',
+  'sessions.sidebar.session.export.dialog.detailReadable': 'Lisible',
+  'sessions.sidebar.session.export.dialog.detailReadableHint': "Une conversation. Les longues sorties d'outils sont raccourcies et signalées.",
+  'sessions.sidebar.session.export.dialog.detailFull': 'Détails complets',
+  'sessions.sidebar.session.export.dialog.detailFullHint': "Chaque entrée, sortie et résultat d'outil, en entier.",
   'sessions.sidebar.session.status.active': 'Session active',
   'sessions.sidebar.session.status.unread': 'Mises à jour non lues',
   'sessions.sidebar.session.status.backgroundSubagent': 'Sous-agent en cours en arrière-plan',

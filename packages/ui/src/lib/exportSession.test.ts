@@ -22,8 +22,19 @@ const answer = (variant?: string): SessionRecord => ({
   parts: [text('a1', 'Fixed it')],
 });
 
-const assistantDetails = (markdown: string): string[] =>
-  [...markdown.matchAll(/\*\*Assistant\*\*\n\n\*[^*]*\(([^)]*)\)\*/g)].map((match) => match[1]);
+/**
+ * The model each assistant message ran with, in the order the document shows
+ * them. The export names the model in the message's heading, and repeats it
+ * only when the model changed. A sub-agent's messages carry their own
+ * heading, so both kinds are read.
+ */
+const assistantModels = (markdown: string): string[] =>
+  markdown
+    .split('\n')
+    // A heading that names a model carries the provider's id.
+    .filter((line) => /^(?:#{2,3} |\*\*)/.test(line) && / — \S+\/\S+/.test(line))
+    .map((line) => line.split(' — ')[1]?.replace(/\*+$/, '').trim())
+    .filter((model): model is string => Boolean(model));
 
 describe('session export', () => {
   test('exports attached context as context and drops server prompt plumbing', () => {
@@ -41,7 +52,7 @@ describe('session export', () => {
 
     const markdown = formatSessionAsMarkdown([plumbing, attached, user(), answer()], 'Session');
 
-    expect(markdown).toContain('**Context**');
+    expect(markdown).toContain('Context');
     expect(markdown).toContain('Fix this detail');
     expect(markdown).not.toContain('returning after a break');
     expect(markdown).toContain('Fixed it');
@@ -52,7 +63,7 @@ describe('session export', () => {
 
     const markdown = formatSessionAsMarkdown([user(), answer('high')], 'Session', [child]);
 
-    expect(assistantDetails(markdown)).toEqual([
+    expect(assistantModels(markdown)).toEqual([
       'anthropic/claude-opus-4-1, thinking: high',
       'anthropic/claude-opus-4-1, thinking: max',
     ]);
@@ -63,10 +74,44 @@ describe('session export', () => {
       .map((variant) => formatSessionAsMarkdown([answer(variant)], 'Session'))
       .join('\n');
 
-    expect(assistantDetails(markdown)).toEqual([
+    expect(assistantModels(markdown)).toEqual([
       'anthropic/claude-opus-4-1',
       'anthropic/claude-opus-4-1',
       'anthropic/claude-opus-4-1',
     ]);
+  });
+
+  test('a child without a session id joins the call that recorded its description', () => {
+    const call: Part = {
+      id: 'a1-call', sessionID: 'session', messageID: 'a1', type: 'tool',
+      callID: 'a1-call', tool: 'subagent',
+      state: {
+        status: 'completed',
+        input: { description: 'Review the change' },
+        output: 'Done',
+        metadata: { sessionID: 'ses_child' },
+        time: { start: 2, end: 3 },
+      },
+    };
+    const withCall: SessionRecord = {
+      info: {
+        id: 'a1', sessionID: 'session', role: 'assistant', agent: 'build',
+        providerID: 'anthropic', modelID: 'claude-opus-4-1', time: { created: 2, completed: 3 },
+      },
+      parts: [call],
+    };
+
+    const markdown = formatSessionAsMarkdown([user(), withCall], 'Session', [{
+      // The child has no session id of its own: the description is what
+      // ties it to the call.
+      title: 'Review the change',
+      records: [answer()],
+      children: [],
+    }], { rootSessionID: 'session' });
+
+    // The child's transcript is in the document, and the export did not
+    // report the child as missing.
+    expect(markdown).toContain('Fixed it');
+    expect(markdown).not.toContain('was not tied to a call');
   });
 });

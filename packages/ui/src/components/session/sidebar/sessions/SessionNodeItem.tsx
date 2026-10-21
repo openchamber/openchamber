@@ -22,13 +22,10 @@ import { getPrStatusLabel } from '../prStatusLabel';
 import { cn, formatDirectoryName } from '@/lib/utils';
 import { canUseElectronDesktopIPC, getMiniChatRuntimeArgs, invokeDesktop, isVSCodeRuntime } from '@/lib/desktop';
 import { toast } from '@/components/ui';
-import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { isSessionPinned } from '@/lib/sessionPins';
 import { toggleSessionPin } from '@/sync/session-pins';
 import { Icon } from "@/components/icon/Icon";
-import { buildExportFilename, downloadAsMarkdown, formatSessionAsMarkdown, getExportRevealLabelKey, revealExportedMarkdown, saveAsMarkdownDesktop } from '@/lib/exportSession';
-import type { ChildSessionExport } from '@/lib/exportSession';
+import { useSessionExport } from '@/components/session/export/useSessionExport';
 import { GuestIcon } from '@/components/layout/GuestRailIcon';
 import { useGuestActions } from '@/hooks/useGuestSurfaces';
 import { guestSessionActions, type GuestActionEntry } from '@/lib/guests/actions';
@@ -45,7 +42,7 @@ import { DraggableSessionRow } from '../folders/sessionFolderDnd';
 import { useSessionRowOrderRegistry } from './sessionRowOrder';
 import { canShowSessionWorktreeMenu, getSessionWorktreeMenuDisabled, nodeContainsSessionId, nodeHasPinnedMembershipChange, resolveSessionPrLookup, resolveTooltipBranchLabel, selectBlockingBadgeSessionScopes, type BlockingBadgeSessionScope } from './sessionNodeItemUtils';
 import { useSessionRowMenuState } from './useSessionRowMenuState';
-import { buildActiveSessionTreeFromCache, collectSessionMoveDescendants } from './sessionSubtreeActions';
+import { collectSessionMoveDescendants } from './sessionSubtreeActions';
 import type { SessionNode } from '../types';
 import { hasTreeSlotContext, isMultiLineTimelineContext, type SessionSidebarRenderContext } from '../sessionSidebarRowModel';
 import { SessionTimelineRowBody } from './SessionTimelineRowBody';
@@ -623,11 +620,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
     return out;
   }, []);
 
-  const [exportDialogOpen, setExportDialogOpen] = React.useState(false);
-  const [exportIncludeSubtasks, setExportIncludeSubtasks] = React.useState(true);
-  // The tree the open export dialog offers. A flat row's own node has no
-  // children, so the tree is resolved when the user picks Export Markdown.
-  const [exportTree, setExportTree] = React.useState<SessionNode | null>(null);
+  const sessionExport = useSessionExport();
 
   const legacyContextKey = `${renderContext}:${archivedBucket ? 'archived' : 'active'}:${session.id}`;
   const menuInstanceKey = rowKey ? `session-menu:${rowKey}` : legacyContextKey;
@@ -734,90 +727,17 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
   const isSessionMenuOpen = isMenuOpen || isContextMenuOpen;
   const multiRunKey = React.useMemo(() => getMultiRunIdentity(resolvedSession)?.key ?? null, [resolvedSession]);
 
-  const descendantCount = React.useMemo(() => (exportTree ? collectNodeDescendantIds(exportTree).length : 0), [collectNodeDescendantIds, exportTree]);
-
-  const collectChildExports = React.useCallback(async (children: SessionNode[]): Promise<{ children: ChildSessionExport[]; skipped: number }> => {
-    const results: ChildSessionExport[] = [];
-    let skipped = 0;
-    for (const child of children) {
-      try {
-        if (!sessionDirectory) throw new Error('Session directory is required for export');
-        const childRecords = await loadExportRecords({ directory: sessionDirectory, sessionID: child.session.id });
-        if (!childRecords) throw new Error('Session runtime changed during export');
-        const childTitle = child.session.title || t('sessions.sidebar.session.export.untitledSubagent');
-        // SAFETY: OpenCode session payloads may carry the optional agent label used by exports.
-        const childAgent = (child.session as Session & { agent?: string }).agent;
-        const grandChildren = await collectChildExports(child.children);
-        skipped += grandChildren.skipped;
-        results.push({
-          title: childTitle,
-          agent: childAgent,
-          records: childRecords,
-          children: grandChildren.children,
-        });
-      } catch {
-        skipped += collectNodeDescendantIds(child).length + 1;
-      }
-    }
-    return { children: results, skipped };
-  }, [collectNodeDescendantIds, loadExportRecords, sessionDirectory, t]);
-
-  const showSkippedSubtasksWarning = React.useCallback((count: number) => {
-    if (count <= 0) return;
-    toast.warning(count === 1
-      ? t('sessions.sidebar.session.export.skippedSubtaskSingle', { count })
-      : t('sessions.sidebar.session.export.skippedSubtaskMany', { count }));
-  }, [t]);
-
-  const doExportSession = React.useCallback(async (includeSubtasks: boolean, tree: SessionNode) => {
+  const doExportSession = React.useCallback(() => {
     if (!sessionDirectory) {
       toast.error(t('sessions.sidebar.session.export.nothingToExport'));
       return;
     }
-
-    const records = await loadExportRecords({ directory: sessionDirectory, sessionID: session.id }).catch(() => null);
-    if (!records) {
-      toast.error(t('sessions.sidebar.session.export.failedLoadHistory'));
-      return;
-    }
-    if (records.length === 0) {
-      toast.error(t('sessions.sidebar.session.export.nothingToExport'));
-      return;
-    }
-
-    let childExports: ChildSessionExport[] | undefined;
-    let skippedSubtaskCount = 0;
-    if (includeSubtasks && tree.children.length > 0) {
-      const collected = await collectChildExports(tree.children);
-      childExports = collected.children;
-      skippedSubtaskCount = collected.skipped;
-    }
-
-    const markdown = formatSessionAsMarkdown(records, resolvedSession.title ?? null, childExports);
-    const filename = buildExportFilename(resolvedSession.title ?? null);
-    const savedPath = await saveAsMarkdownDesktop(markdown, filename);
-
-    if (savedPath) {
-      toast.success(t('sessions.sidebar.session.export.success'), {
-        action: {
-          label: t(getExportRevealLabelKey()),
-          onClick: () => {
-            void revealExportedMarkdown(savedPath).then((revealed) => {
-              if (!revealed) {
-                toast.error(t('sessions.sidebar.session.export.failedRevealPath'));
-              }
-            });
-          },
-        },
-      });
-      showSkippedSubtasksWarning(skippedSubtaskCount);
-      return;
-    }
-
-    downloadAsMarkdown(markdown, filename);
-    toast.success(t('sessions.sidebar.session.export.success'));
-    showSkippedSubtasksWarning(skippedSubtaskCount);
-  }, [collectChildExports, loadExportRecords, resolvedSession.title, session.id, sessionDirectory, showSkippedSubtasksWarning, t]);
+    sessionExport.openExport({
+      sessionID: session.id,
+      title: resolvedSession.title ?? null,
+      directory: sessionDirectory,
+    });
+  }, [resolvedSession.title, session.id, sessionDirectory, sessionExport, t]);
   const guestActionEntries = useGuestActions();
   const guestSessionActionEntries = React.useMemo(() => guestSessionActions(guestActionEntries), [guestActionEntries]);
   const handleGuestSessionAction = React.useCallback((entry: GuestActionEntry) => {
@@ -831,16 +751,9 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
       onLoadFailed: () => toast.error(t('sessions.sidebar.session.export.failedLoadHistory')),
     });
   }, [loadExportRecords, resolvedSession.title, session.id, sessionDirectory, t]);
-  const handleExportSession = React.useCallback(async () => {
-    const tree = node.children.length > 0 ? node : buildActiveSessionTreeFromCache(resolvedSession);
-    if (tree.children.length > 0) {
-      setExportTree(tree);
-      setExportIncludeSubtasks(true);
-      setExportDialogOpen(true);
-      return;
-    }
-    await doExportSession(false, tree);
-  }, [doExportSession, node, resolvedSession]);
+  const handleExportSession = React.useCallback(() => {
+    doExportSession();
+  }, [doExportSession]);
 
   const handleOpenMiniChatWindow = React.useCallback(() => {
     if (!sessionDirectory) return;
@@ -1360,10 +1273,10 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
         </Item>
         </SessionMenuItemHint>
       ) : null}
-      <SessionMenuItemHint hint={t('sessions.sidebar.session.menuHint.exportMarkdown')}>
+      <SessionMenuItemHint hint={t('sessions.sidebar.session.menuHint.exportSession')}>
       <Item onClick={() => { void handleExportSession(); }} className="[&>svg]:me-1">
         <Icon name="download" className="me-1 h-4 w-4" />
-        {t('sessions.sidebar.session.menu.exportMarkdown')}
+        {t('sessions.sidebar.session.menu.exportSession')}
       </Item>
       </SessionMenuItemHint>
       {guestSessionActionEntries.map((entry) => (
@@ -2042,47 +1955,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
         </ContextMenuRoot>
       </DraggableSessionRow>
       {hasChildren && isExpanded ? children : null}
-      <Dialog open={exportDialogOpen} onOpenChange={setExportDialogOpen}>
-        <DialogContent showCloseButton={false} className="max-w-sm gap-5">
-          <DialogHeader>
-            <DialogTitle>{t('sessions.sidebar.session.export.dialog.title')}</DialogTitle>
-            <DialogDescription>
-              {descendantCount === 1
-                ? t('sessions.sidebar.session.export.dialog.descriptionSingle', { count: descendantCount })
-                : t('sessions.sidebar.session.export.dialog.descriptionMany', { count: descendantCount })}
-            </DialogDescription>
-          </DialogHeader>
-          <label className="flex items-center gap-2 typography-ui-label cursor-pointer">
-            <input
-              type="checkbox"
-              checked={exportIncludeSubtasks}
-              onChange={(e) => setExportIncludeSubtasks(e.target.checked)}
-              className="h-4 w-4 rounded border-border accent-primary"
-            />
-            {t('sessions.sidebar.session.export.dialog.includeSubtasks')}
-          </label>
-          <DialogFooter>
-            <Button
-              type="button"
-              onClick={() => setExportDialogOpen(false)}
-              variant="outline"
-              size="sm"
-            >
-              {t('sessions.sidebar.dialogs.cancel')}
-            </Button>
-            <Button
-              type="button"
-              onClick={() => {
-                setExportDialogOpen(false);
-                void doExportSession(exportIncludeSubtasks, exportTree ?? node);
-              }}
-              size="sm"
-            >
-              {t('sessions.sidebar.session.export.dialog.confirm')}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {sessionExport.dialog}
     </React.Fragment>
   );
 }

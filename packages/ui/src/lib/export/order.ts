@@ -1,0 +1,347 @@
+/**
+ * Putting the export's events into one readable order.
+ *
+ * The parent session's history is the spine. A subagent's transcript is a
+ * block placed where the call that started it sits in that spine, so the
+ * reader meets the work at the point where it was delegated. The block keeps
+ * the subagent's own order inside it.
+ *
+ * The order itself comes from recorded timestamps, with the source order of
+ * the records as the tiebreaker. Nothing is invented: an event without a
+ * timestamp keeps the place its source gave it, and the export says so once
+ * at the end rather than on every line.
+ */
+
+import type { ExportEvent, ExportFinding, ExportSessionInfo, ExportTimeline } from './events';
+import { readTimestamp } from './values';
+import { exportText } from './i18n';
+
+/** One entry of the export's spine: a single event, or a subagent's block. */
+export type ExportNode =
+  | { kind: 'event'; event: ExportEvent }
+  | {
+      kind: 'subagent';
+      childSessionID: string;
+      session: ExportSessionInfo;
+      /** How deep the subagent sits below the exported root. */
+      depth: number;
+      /** The subagent's own history, in order. */
+      children: ExportNode[];
+      /** When the subagent's work started, when the source recorded it. */
+      startedAt?: number;
+      /** When the subagent's work ended, when the source recorded it. */
+      endedAt?: number;
+      /**
+       * The call that started it, when one could be identified. It carries
+       * the task the call carried and how the call itself ended, so the
+       * block can show the delegation and not only the work.
+       */
+      dispatchedBy?: {
+        sessionID: string;
+        partID: string;
+        timestamp?: number;
+        /** The call's place in the parent's recorded order. */
+        sourceOrder?: number;
+        /** The task the call carried, when it had one. */
+        task?: string;
+        /** How the call itself ended. */
+        status?: string;
+        /** The failure text of the call, when it failed. */
+        error?: string;
+        /** The result the call returned, when it returned one. */
+        output?: string;
+        /** When the call settled, when the source recorded it. */
+        endedAt?: number;
+      };
+      /** Further calls that named the same session, which resumed it. */
+      resumedBy?: Array<{ sessionID: string; partID: string; timestamp?: number }>;
+      /** The subagents whose work overlapped this one's. */
+      concurrentWith?: string[];
+    };
+
+/** A subagent's block in the export's spine. */
+type SubagentBlock = Extract<ExportNode, { kind: 'subagent' }>;
+
+/** The ordered export, ready to project. */
+export type ExportTree = {
+  rootSessionID: string;
+  nodes: ExportNode[];
+  sessions: Map<string, ExportSessionInfo>;
+  findings: ExportFinding[];
+};
+
+type Sortable = {
+  timestamp?: number;
+  sourceOrder: number;
+  sessionID: string;
+};
+
+const sortKey = (item: Sortable): [number, number, string] => [
+  item.timestamp ?? Number.MAX_SAFE_INTEGER,
+  item.sourceOrder,
+  item.sessionID,
+];
+
+/** Orders by timestamp, then by the order the source recorded. */
+const compare = (left: Sortable, right: Sortable): number => {
+  const [leftTime, leftOrder, leftSession] = sortKey(left);
+  const [rightTime, rightOrder, rightSession] = sortKey(right);
+  if (leftTime !== rightTime) return leftTime - rightTime;
+  if (leftOrder !== rightOrder) return leftOrder - rightOrder;
+  return leftSession.localeCompare(rightSession);
+};
+
+/** The sort key of an event. */
+const eventKey = (event: ExportEvent): Sortable => ({
+  timestamp: event.timestamp,
+  sourceOrder: event.origin.sourceOrder,
+  sessionID: event.sessionID,
+});
+
+/**
+ * The order the export reports events in, stated for the reader: timestamps
+ * first, source order where a timestamp is missing.
+ *
+ * The wording is the reader's language, so it is resolved when the document
+ * is written rather than when this module is loaded.
+ */
+export const orderingGuarantee = (): string => exportText('export.ordering');
+
+/**
+ * Builds the export's spine.
+ *
+ * A subagent's events move out of the flat list and into a block, anchored at
+ * the call that started it. A call whose child could not be identified stays
+ * an ordinary tool event, so the reader still sees the call.
+ */
+export const buildExportTree = (timeline: ExportTimeline): ExportTree => {
+  const findings = [...timeline.findings];
+  const events = [...timeline.events];
+
+  // The child session each call named, and the call itself. A second call
+  // that names the same session resumed it: the transcript appears once, and
+  // the block names the call that resumed it.
+  const dispatchByChildID = new Map<string, { event: ExportEvent; sessionID: string; partID: string }>();
+  const resumedByChildID = new Map<string, Array<{ sessionID: string; partID: string; timestamp?: number }>>();
+  for (const event of events) {
+    if (event.kind !== 'tool') continue;
+    const childSessionID = event.call.childSessionID;
+    if (!childSessionID) continue;
+    if (dispatchByChildID.has(childSessionID)) {
+      findings.push({
+        kind: 'resumed-session',
+        sessionID: event.sessionID,
+        childSessionID,
+        detail: `More than one call names the sub-agent session "${childSessionID}"; its transcript appears once.`,
+      });
+      const resumed = resumedByChildID.get(childSessionID) ?? [];
+      resumed.push({
+        sessionID: event.sessionID,
+        partID: event.origin.partID,
+        timestamp: event.timestamp,
+      });
+      resumedByChildID.set(childSessionID, resumed);
+      continue;
+    }
+    dispatchByChildID.set(childSessionID, { event, sessionID: event.sessionID, partID: event.origin.partID });
+  }
+
+  // The events that belong to each session, and the child sessions of each
+  // session, taken from the sessions' own parent links.
+  const childSessionIDsByParent = new Map<string, string[]>();
+  for (const session of timeline.sessions.values()) {
+    if (!session.parentID) continue;
+    const siblings = childSessionIDsByParent.get(session.parentID) ?? [];
+    siblings.push(session.id);
+    childSessionIDsByParent.set(session.parentID, siblings);
+  }
+
+  // The events a session owns, minus the ones a call consumed as a block.
+  const eventsBySession = new Map<string, ExportEvent[]>();
+  for (const event of events) {
+    const list = eventsBySession.get(event.sessionID) ?? [];
+    list.push(event);
+    eventsBySession.set(event.sessionID, list);
+  }
+
+  const consumedDispatchEvents = new Set<string>();
+  const consumedResultEvents = new Set<string>();
+
+  /**
+   * The block for one child session: its own events in order, with its own
+   * child sessions nested inside.
+   */
+  const buildBlock = (childSessionID: string, depth: number, seen: Set<string>): SubagentBlock | null => {
+    if (seen.has(childSessionID)) return null;
+    const nextSeen = new Set(seen);
+    nextSeen.add(childSessionID);
+
+    const session = timeline.sessions.get(childSessionID);
+    if (!session) return null;
+
+    const own = (eventsBySession.get(childSessionID) ?? []).filter((event) => {
+      // A completion report belongs to the parent's flow, not to the child's.
+      if (event.kind === 'subagent-result' && event.sessionID !== childSessionID) return false;
+      return true;
+    });
+
+    const children: ExportNode[] = [];
+    for (const child of childSessionIDsByParent.get(childSessionID) ?? []) {
+      const block = buildBlock(child, depth + 1, nextSeen);
+      if (block) children.push(block);
+    }
+
+    const dispatch = dispatchByChildID.get(childSessionID);
+    if (dispatch) consumedDispatchEvents.add(dispatch.event.id);
+
+    // A report the parent recorded for this child stays in the parent's flow.
+    for (const event of events) {
+      if (event.kind === 'subagent-result' && event.childSessionID === childSessionID) {
+        consumedResultEvents.add(event.id);
+      }
+    }
+
+    // When the subagent ran is the span of the call that started it: a
+    // foreground call settles when the child settles, so the call's own
+    // times are the work's times. A background call settles at once, so its
+    // span says nothing and the child's own events do.
+    const dispatchCall = dispatch?.event.kind === 'tool' ? dispatch.event.call : undefined;
+    const background = dispatchCall?.status === 'running';
+    const times = own
+      .map((event) => event.timestamp)
+      .filter((value): value is number => readTimestamp(value) !== undefined);
+
+    const startedAt = dispatchCall && !background && dispatchCall.startedAt !== undefined
+      ? dispatchCall.startedAt
+      : (times.length > 0 ? Math.min(...times) : undefined);
+    const endedAt = dispatchCall && !background && dispatchCall.endedAt !== undefined
+      ? dispatchCall.endedAt
+      : (times.length > 0 ? Math.max(...times) : undefined);
+
+    return {
+      kind: 'subagent',
+      childSessionID,
+      session,
+      depth,
+      children: [
+        ...own
+          .filter((event) => !consumedDispatchEvents.has(event.id))
+          .sort((left, right) => compare(eventKey(left), eventKey(right)))
+          .map((event): ExportNode => ({ kind: 'event', event })),
+        ...children,
+      ],
+      startedAt,
+      endedAt,
+      dispatchedBy: dispatch
+        ? {
+            sessionID: dispatch.sessionID,
+            partID: dispatch.partID,
+            timestamp: dispatch.event.timestamp,
+            sourceOrder: dispatch.event.origin.sourceOrder,
+            task: dispatch.event.kind === 'tool' ? dispatch.event.call.prompt : undefined,
+            status: dispatch.event.kind === 'tool' ? dispatch.event.call.status : undefined,
+            error: dispatch.event.kind === 'tool' ? dispatch.event.call.error : undefined,
+            output: dispatch.event.kind === 'tool' ? dispatch.event.call.output : undefined,
+            endedAt: dispatch.event.kind === 'tool' ? dispatch.event.call.endedAt : undefined,
+          }
+        : undefined,
+      resumedBy: resumedByChildID.get(childSessionID),
+    };
+  };
+
+  // The blocks of the root session's direct children.
+  const rootBlocks: SubagentBlock[] = [];
+  for (const child of childSessionIDsByParent.get(timeline.rootSessionID) ?? []) {
+    const block = buildBlock(child, 1, new Set([timeline.rootSessionID]));
+    if (block) rootBlocks.push(block);
+
+  }
+
+  // A block with no call to anchor it has no recorded place in the parent's
+  // flow. It keeps the position of the parent's own events: it is shown
+  // after the parent event that was current when the child ran, and the
+  // export says the relationship could not be established.
+  const rootEventList = eventsBySession.get(timeline.rootSessionID) ?? [];
+  const anchorless = rootBlocks.filter((block) => block.startedAt === undefined);
+  const anchored = rootBlocks.filter((block) => block.startedAt !== undefined);
+
+  for (const block of anchorless) {
+    const first = block.children
+      .filter((child): child is Extract<ExportNode, { kind: 'event' }> => child.kind === 'event')
+      .map((child) => child.event.timestamp)
+      .filter((value): value is number => readTimestamp(value) !== undefined)
+      .sort((left, right) => left - right)[0];
+    if (first === undefined) continue;
+    const before = rootEventList.filter((event) => (event.timestamp ?? 0) <= first);
+    block.startedAt = before.length > 0
+      ? Math.max(...before.map((event) => event.timestamp ?? 0))
+      : first;
+  }
+
+
+  // The root session's own events, with the calls that started a block
+  // removed: the block's header carries that call.
+  const rootEvents = (eventsBySession.get(timeline.rootSessionID) ?? [])
+    .filter((event) => !consumedDispatchEvents.has(event.id))
+    .filter((event) => !consumedResultEvents.has(event.id) || event.kind !== 'subagent-result')
+    .sort((left, right) => compare(eventKey(left), eventKey(right)))
+    .map((event): ExportNode => ({ kind: 'event', event }));
+
+  // A child's result that the parent recorded belongs to the parent's flow,
+  // so it is restored there.
+  const rootResults = (eventsBySession.get(timeline.rootSessionID) ?? [])
+    .filter((event) => event.kind === 'subagent-result')
+    .sort((left, right) => compare(eventKey(left), eventKey(right)))
+    .map((event): ExportNode => ({ kind: 'event', event }));
+
+  const rootEventIDs = new Set(rootEvents.map((node) => (node.kind === 'event' ? node.event.id : '')));
+  const missingResults = rootResults.filter((node) => node.kind === 'event' && !rootEventIDs.has(node.event.id));
+
+  /** Where a node sits in the parent's flow. */
+  const positionOf = (node: ExportNode): Sortable => {
+    if (node.kind === 'event') {
+      return { timestamp: node.event.timestamp, sourceOrder: node.event.origin.sourceOrder, sessionID: timeline.rootSessionID };
+    }
+    const dispatched = node.dispatchedBy;
+    return {
+      timestamp: dispatched?.timestamp ?? node.startedAt,
+      // A block sits where its call sat, so the call's place in the parent's
+      // recorded order decides between a block and the messages around it.
+      sourceOrder: dispatched?.sourceOrder ?? Number.MAX_SAFE_INTEGER,
+      sessionID: timeline.rootSessionID,
+    };
+  };
+
+  const nodes = [...rootEvents, ...missingResults, ...anchored].sort((left, right) => (
+    compare(positionOf(left), positionOf(right))
+  ));
+
+  return {
+    rootSessionID: timeline.rootSessionID,
+    nodes: markConcurrency([...nodes, ...anchorless]),
+    sessions: timeline.sessions,
+    findings,
+  };
+};
+
+/**
+ * Marks the blocks whose work overlapped, so concurrent subagents are not
+ * read as one after the other.
+ */
+const markConcurrency = (nodes: ExportNode[]): ExportNode[] => {
+  const blocks = nodes.filter((node): node is Extract<ExportNode, { kind: 'subagent' }> => node.kind === 'subagent');
+  for (const block of blocks) {
+    const overlapping = blocks.filter((other) => {
+      if (other === block) return false;
+      if (block.startedAt === undefined || other.startedAt === undefined) return false;
+      const blockEnd = block.endedAt ?? Number.MAX_SAFE_INTEGER;
+      const otherEnd = other.endedAt ?? Number.MAX_SAFE_INTEGER;
+      return block.startedAt <= otherEnd && other.startedAt <= blockEnd;
+    });
+    if (overlapping.length > 0) {
+      block.concurrentWith = overlapping.map((other) => other.session.title || other.childSessionID);
+    }
+    block.children = markConcurrency(block.children);
+  }
+  return nodes;
+};

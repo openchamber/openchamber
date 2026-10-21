@@ -3,6 +3,7 @@ import { settingsDict } from './zh-CN.settings';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
+import { exportDocumentI18n } from './export-document.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
@@ -137,6 +138,7 @@ export const dict: Record<I18nKey, string> = {
   ...linearIssuePickerI18n['zh-CN'],
   ...referencePickerI18n['zh-CN'],
   ...sessionMenuHintsI18n['zh-CN'],
+  ...exportDocumentI18n['zh-CN'],
   ...projectKnowledgeI18n['zh-CN'],
   ...linearPanelI18n['zh-CN'],
   ...routingI18n['zh-CN'],
@@ -723,7 +725,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.menu.copied': '已复制',
   'sessions.sidebar.session.menu.copyLink': '复制链接',
   'sessions.sidebar.session.menu.unshare': '取消分享',
-  'sessions.sidebar.session.menu.exportMarkdown': '导出 Markdown',
+  'sessions.sidebar.session.menu.exportSession': '导出会话',
   'sessions.sidebar.session.menu.moveToWorktree': '移至新工作树',
   'sessions.sidebar.session.menu.moveToWorktreeTargets': '移至工作树',
   'sessions.sidebar.session.menu.newWorktree': '新建工作树...',
@@ -746,14 +748,20 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.export.failedLoadHistory': '无法加载完整的会话历史记录',
   'sessions.sidebar.session.export.success': '会话已导出',
   'sessions.sidebar.session.export.failedRevealPath': '显示路径失败',
-  'sessions.sidebar.session.export.untitledSubagent': '未命名子智能体',
   'sessions.sidebar.session.export.skippedSubtaskSingle': '会话已导出，但跳过了 {count} 个无法加载的子智能体任务。',
   'sessions.sidebar.session.export.skippedSubtaskMany': '会话已导出，但跳过了 {count} 个无法加载的子智能体任务。',
-  'sessions.sidebar.session.export.dialog.title': '导出 Markdown',
+  'sessions.sidebar.session.export.dialog.title': '导出会话',
   'sessions.sidebar.session.export.dialog.descriptionSingle': '此会话有 {count} 个子智能体任务。是否包含在导出中？',
   'sessions.sidebar.session.export.dialog.descriptionMany': '此会话有 {count} 个子智能体任务。是否包含在导出中？',
   'sessions.sidebar.session.export.dialog.includeSubtasks': '包含子智能体任务',
   'sessions.sidebar.session.export.dialog.confirm': '导出',
+  'sessions.sidebar.session.export.dialog.descriptionNoSubtasks': '导出是会话的可读记录，子代理的工作位于其对应的位置。',
+  'sessions.sidebar.session.export.dialog.format': '格式',
+  'sessions.sidebar.session.export.dialog.detail': '详细程度',
+  'sessions.sidebar.session.export.dialog.detailReadable': '可读',
+  'sessions.sidebar.session.export.dialog.detailReadableHint': '以对话形式呈现。过长的工具结果会截断并标注。',
+  'sessions.sidebar.session.export.dialog.detailFull': '完整详情',
+  'sessions.sidebar.session.export.dialog.detailFullHint': '保留每个工具的输入、输出与结果。',
   'sessions.sidebar.session.status.active': '会话活跃中',
   'sessions.sidebar.session.status.unread': '有未读更新',
   'sessions.sidebar.session.status.backgroundSubagent': '子智能体正在后台运行',

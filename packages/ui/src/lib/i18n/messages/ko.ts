@@ -3,6 +3,7 @@ import { settingsDict } from './ko.settings';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
+import { exportDocumentI18n } from './export-document.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
@@ -137,6 +138,7 @@ export const dict: Record<I18nKey, string> = {
   ...linearIssuePickerI18n.ko,
   ...referencePickerI18n.ko,
   ...sessionMenuHintsI18n.ko,
+  ...exportDocumentI18n.ko,
   ...projectKnowledgeI18n.ko,
   ...linearPanelI18n.ko,
   ...routingI18n.ko,
@@ -723,7 +725,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.menu.copied': '복사됨',
   'sessions.sidebar.session.menu.copyLink': '링크 복사',
   'sessions.sidebar.session.menu.unshare': '공유 해제',
-  'sessions.sidebar.session.menu.exportMarkdown': 'Markdown 내보내기',
+  'sessions.sidebar.session.menu.exportSession': '세션 내보내기',
   'sessions.sidebar.session.menu.moveToWorktree': '새 worktree로 이동',
   'sessions.sidebar.session.menu.moveToWorktreeTargets': 'worktree로 이동',
   'sessions.sidebar.session.menu.newWorktree': '새 worktree...',
@@ -746,14 +748,20 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.export.failedLoadHistory': '전체 세션 기록을 불러오지 못했습니다',
   'sessions.sidebar.session.export.success': '세션 내보냄',
   'sessions.sidebar.session.export.failedRevealPath': '경로 표시 실패',
-  'sessions.sidebar.session.export.untitledSubagent': '제목 없는 서브 에이전트',
   'sessions.sidebar.session.export.skippedSubtaskSingle': '세션을 내보냈지만 로드할 수 없는 서브 에이전트 작업 {count}개는 건너뛰었습니다.',
   'sessions.sidebar.session.export.skippedSubtaskMany': '세션을 내보냈지만 로드할 수 없는 서브 에이전트 작업 {count}개는 건너뛰었습니다.',
-  'sessions.sidebar.session.export.dialog.title': 'Markdown 내보내기',
+  'sessions.sidebar.session.export.dialog.title': '세션 내보내기',
   'sessions.sidebar.session.export.dialog.descriptionSingle': '이 세션에는 서브 에이전트 작업 {count}개가 있습니다. 내보내기에 포함할까요?',
   'sessions.sidebar.session.export.dialog.descriptionMany': '이 세션에는 서브 에이전트 작업 {count}개가 있습니다. 내보내기에 포함할까요?',
   'sessions.sidebar.session.export.dialog.includeSubtasks': '서브 에이전트 작업 포함',
   'sessions.sidebar.session.export.dialog.confirm': '내보내기',
+  'sessions.sidebar.session.export.dialog.descriptionNoSubtasks': '내보내기는 대화의 읽기 쉬운 기록이며, 서브 에이전트 작업이 해당 위치에 들어갑니다.',
+  'sessions.sidebar.session.export.dialog.format': '형식',
+  'sessions.sidebar.session.export.dialog.detail': '세부 정보',
+  'sessions.sidebar.session.export.dialog.detailReadable': '읽기 쉬움',
+  'sessions.sidebar.session.export.dialog.detailReadableHint': '대화 형식입니다. 긴 도구 결과는 잘리고 표시됩니다.',
+  'sessions.sidebar.session.export.dialog.detailFull': '전체 세부 정보',
+  'sessions.sidebar.session.export.dialog.detailFullHint': '모든 도구 입력, 출력, 결과를 그대로 담습니다.',
   'sessions.sidebar.session.status.active': '활성 세션',
   'sessions.sidebar.session.status.unread': '읽지 않은 업데이트',
   'sessions.sidebar.session.status.backgroundSubagent': '하위 에이전트가 백그라운드에서 실행 중',

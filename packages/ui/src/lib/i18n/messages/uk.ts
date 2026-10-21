@@ -3,6 +3,7 @@ import { settingsDict } from './uk.settings';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
+import { exportDocumentI18n } from './export-document.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
@@ -147,6 +148,7 @@ export const dict: Record<I18nKey, string> = {
   ...linearIssuePickerI18n.uk,
   ...referencePickerI18n.uk,
   ...sessionMenuHintsI18n.uk,
+  ...exportDocumentI18n.uk,
   ...projectKnowledgeI18n.uk,
   ...linearPanelI18n.uk,
   ...routingI18n.uk,
@@ -724,7 +726,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.session.menu.copied": "Скопійовано",
   "sessions.sidebar.session.menu.copyLink": "Копіювати посилання",
   "sessions.sidebar.session.menu.unshare": "Скасувати спільний доступ",
-  "sessions.sidebar.session.menu.exportMarkdown": "Експорт Markdown",
+  "sessions.sidebar.session.menu.exportSession": "Експорт сесії",
   "sessions.sidebar.session.menu.moveToWorktree": "Перенести в новий worktree",
   "sessions.sidebar.session.menu.moveToWorktreeTargets": "Перенести в worktree",
   "sessions.sidebar.session.menu.newWorktree": "Новий worktree...",
@@ -747,14 +749,20 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.session.export.failedLoadHistory": "Не вдалося завантажити повну історію сесії",
   "sessions.sidebar.session.export.success": "Сесія експортовано",
   "sessions.sidebar.session.export.failedRevealPath": "Не вдалося відкрити шлях",
-  "sessions.sidebar.session.export.untitledSubagent": "Під-агент без назви",
   "sessions.sidebar.session.export.skippedSubtaskSingle": "Сесію експортовано, але пропущено {count} завдання під-агента, яке не вдалося завантажити.",
   "sessions.sidebar.session.export.skippedSubtaskMany": "Сесію експортовано, але пропущено {count} завдань під-агента, які не вдалося завантажити.",
-  "sessions.sidebar.session.export.dialog.title": "Експорт Markdown",
+  'sessions.sidebar.session.export.dialog.title': 'Експорт сесії',
   "sessions.sidebar.session.export.dialog.descriptionSingle": "Ця сесія має {count} завдання під-агента. Додати його до експорту?",
   "sessions.sidebar.session.export.dialog.descriptionMany": "Ця сесія має {count} завдань під-агентів. Додати їх до експорту?",
   "sessions.sidebar.session.export.dialog.includeSubtasks": "Додати завдання під-агентів",
   "sessions.sidebar.session.export.dialog.confirm": "Експортувати",
+  'sessions.sidebar.session.export.dialog.descriptionNoSubtasks': 'Експорт — це читабельний запис розмови, де робота під-агентів стоїть на своєму місці.',
+  'sessions.sidebar.session.export.dialog.format': 'Формат',
+  'sessions.sidebar.session.export.dialog.detail': 'Детальність',
+  'sessions.sidebar.session.export.dialog.detailReadable': 'Читабельно',
+  'sessions.sidebar.session.export.dialog.detailReadableHint': 'Розмова. Довгі результати інструментів скорочено й позначено.',
+  'sessions.sidebar.session.export.dialog.detailFull': 'Повні деталі',
+  'sessions.sidebar.session.export.dialog.detailFullHint': 'Кожен вхід, вихід і результат інструментів повністю.',
   "sessions.sidebar.session.status.active": "Сесія активна",
   "sessions.sidebar.session.status.unread": "Непрочитані оновлення",
   "sessions.sidebar.session.status.backgroundSubagent": "Субагент працює у фоні",
