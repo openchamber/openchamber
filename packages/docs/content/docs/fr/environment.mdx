@@ -102,6 +102,22 @@ Empêche OpenChamber de démarrer son propre serveur OpenCode lorsqu’il vaut `
 
 Nom d’hôte d’écoute du serveur OpenCode géré par OpenChamber. La valeur par défaut est `127.0.0.1`.
 
+### `OPENCHAMBER_OPENCODE_HEALTH_TIMEOUT_MS`
+
+Délai maximal d'une vérification de l'état d'OpenCode, en millisecondes. La valeur par défaut est `5000`.
+
+### `OPENCHAMBER_OPENCODE_HEALTH_CONSECUTIVE_FAILURES`
+
+Nombre d'échecs consécutifs comptabilisés avant qu'OpenChamber redémarre un processus OpenCode géré encore en cours d'exécution. La valeur par défaut est `20`. Les sessions occupées peuvent retarder le redémarrage.
+
+### `OPENCHAMBER_OPENCODE_HEALTH_INTERVAL_MS`
+
+Remplace l'intervalle de vérification de l'état d'OpenCode géré, en millisecondes. Définit aussi le délai minimal entre les échecs comptabilisés. La valeur par défaut est `0`, qui conserve l'intervalle du serveur de `15000` millisecondes.
+
+### `OPENCHAMBER_OPENCODE_HEALTH_CACHE_MS`
+
+Durée en millisecondes pendant laquelle OpenChamber réutilise le résultat d'une vérification de l'état d'OpenCode géré, y compris un échec. La valeur par défaut est `750`.
+
 ### `OPENCODE_BINARY`
 
 Chemin vers l’exécutable `opencode` qu’OpenChamber doit lancer.
@@ -117,14 +133,6 @@ Chemin vers un dossier de configuration OpenCode précis pour la découverte des
 ### `OPENCODE_DATA_DIR`
 
 Dossier de données personnalisé pour le serveur OpenCode géré.
-
-### `OPENCODE_WSL_DISTRO`
-
-Sélectionne la distribution WSL utilisée pour l’intégration OpenCode sur Windows.
-
-### `OPENCHAMBER_OPENCODE_WSL_DISTRO`
-
-Alias propre à OpenChamber pour sélectionner la distribution WSL. `OPENCODE_WSL_DISTRO` a priorité lorsque les deux sont définies.
 
 ### `OPENCODE_JWT_SECRET`
 

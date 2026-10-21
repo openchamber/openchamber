@@ -104,6 +104,22 @@ OpenChamber 自身发出的请求（例如用量限额和技能目录）会通�
 
 OpenChamber 管理的 OpenCode server 绑定 hostname。默认是 `127.0.0.1`。
 
+### `OPENCHAMBER_OPENCODE_HEALTH_TIMEOUT_MS`
+
+OpenCode 单次健康检查的时间限制，单位为毫秒。默认值为 `5000`。
+
+### `OPENCHAMBER_OPENCODE_HEALTH_CONSECUTIVE_FAILURES`
+
+托管的 OpenCode 进程仍在运行时，OpenChamber 在重启前计入的连续健康检查失败次数。默认值为 `20`。忙碌的会话可能延迟重启。
+
+### `OPENCHAMBER_OPENCODE_HEALTH_INTERVAL_MS`
+
+覆盖托管 OpenCode 的健康检查间隔，单位为毫秒。也会设置计入失败次数的最短间隔。默认值为 `0`，保留服务器的 `15000` 毫秒间隔。
+
+### `OPENCHAMBER_OPENCODE_HEALTH_CACHE_MS`
+
+OpenChamber 重用托管 OpenCode 健康检查结果的时长，单位为毫秒，也包括失败的结果。默认值为 `750`。
+
 ### `OPENCODE_BINARY`
 
 OpenChamber 应该运行的 `opencode` executable 路径。
@@ -119,14 +135,6 @@ OpenChamber 应该运行的 `opencode` executable 路径。
 ### `OPENCODE_DATA_DIR`
 
 managed OpenCode server 的自定义数据目录。
-
-### `OPENCODE_WSL_DISTRO`
-
-选择 Windows 上 OpenCode 集成使用的 WSL distro。
-
-### `OPENCHAMBER_OPENCODE_WSL_DISTRO`
-
-OpenChamber 专用的 WSL distro alias。如果两个变量都设置，`OPENCODE_WSL_DISTRO` 优先。
 
 ### `OPENCODE_JWT_SECRET`
 

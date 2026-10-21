@@ -102,6 +102,22 @@ Verhindert, dass OpenChamber einen eigenen OpenCode-Server startet, wenn auf `tr
 
 Bind-Hostname für den von OpenChamber verwalteten OpenCode-Server. Standard ist `127.0.0.1`.
 
+### `OPENCHAMBER_OPENCODE_HEALTH_TIMEOUT_MS`
+
+Zeitlimit für eine OpenCode-Zustandsprüfung in Millisekunden. Der Standardwert ist `5000`.
+
+### `OPENCHAMBER_OPENCODE_HEALTH_CONSECUTIVE_FAILURES`
+
+Aufeinanderfolgende gezählte fehlgeschlagene Zustandsprüfungen, bevor OpenChamber einen noch laufenden verwalteten OpenCode-Prozess neu startet. Der Standardwert ist `20`. Beschäftigte Sitzungen können den Neustart verzögern.
+
+### `OPENCHAMBER_OPENCODE_HEALTH_INTERVAL_MS`
+
+Überschreibt das Intervall der Zustandsprüfungen für verwaltetes OpenCode in Millisekunden. Legt auch den Mindestabstand zwischen gezählten Fehlern fest. Der Standardwert `0` behält das Serverintervall von `15000` Millisekunden bei.
+
+### `OPENCHAMBER_OPENCODE_HEALTH_CACHE_MS`
+
+Dauer in Millisekunden, für die OpenChamber das Ergebnis einer Zustandsprüfung des verwalteten OpenCode wiederverwendet, einschließlich fehlgeschlagener Prüfungen. Der Standardwert ist `750`.
+
 ### `OPENCODE_BINARY`
 
 Pfad zur ausführbaren `opencode`-Datei, die OpenChamber ausführen soll.
@@ -117,14 +133,6 @@ Pfad zu einem bestimmten OpenCode-Konfigurationsverzeichnis für Agents, Skills,
 ### `OPENCODE_DATA_DIR`
 
 Benutzerdefiniertes Datenverzeichnis für den verwalteten OpenCode-Server.
-
-### `OPENCODE_WSL_DISTRO`
-
-Wählt die WSL-Distribution für die OpenCode-Integration unter Windows aus.
-
-### `OPENCHAMBER_OPENCODE_WSL_DISTRO`
-
-OpenChamber-spezifischer Alias zur Auswahl der WSL-Distribution. `OPENCODE_WSL_DISTRO` hat Vorrang, wenn beide gesetzt sind.
 
 ### `OPENCODE_JWT_SECRET`
 

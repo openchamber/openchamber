@@ -104,6 +104,22 @@ Prevents OpenChamber from starting its own OpenCode server when set to `true`.
 
 Bind hostname for the OpenCode server managed by OpenChamber. The default is `127.0.0.1`.
 
+### `OPENCHAMBER_OPENCODE_HEALTH_TIMEOUT_MS`
+
+Time limit for an OpenCode health probe, in milliseconds. The default is `5000`.
+
+### `OPENCHAMBER_OPENCODE_HEALTH_CONSECUTIVE_FAILURES`
+
+Consecutive counted health-check failures before OpenChamber restarts a managed OpenCode process that is still running. The default is `20`. Busy sessions can delay the restart.
+
+### `OPENCHAMBER_OPENCODE_HEALTH_INTERVAL_MS`
+
+Overrides the managed OpenCode health-check interval, in milliseconds. It also sets the minimum time between counted failures. The default is `0`, which keeps the server's `15000` millisecond interval.
+
+### `OPENCHAMBER_OPENCODE_HEALTH_CACHE_MS`
+
+How long OpenChamber reuses a managed OpenCode health-probe result, including a failure, in milliseconds. The default is `750`.
+
 ### `OPENCODE_BINARY`
 
 Path to the `opencode` executable OpenChamber should run.
@@ -119,14 +135,6 @@ Path to a specific OpenCode config directory for agents, skills, snippets, and c
 ### `OPENCODE_DATA_DIR`
 
 Custom data directory for the managed OpenCode server.
-
-### `OPENCODE_WSL_DISTRO`
-
-Selects the WSL distro used for OpenCode integration on Windows.
-
-### `OPENCHAMBER_OPENCODE_WSL_DISTRO`
-
-OpenChamber-specific alias for selecting the WSL distro. `OPENCODE_WSL_DISTRO` takes precedence when both are set.
 
 ### `OPENCODE_JWT_SECRET`
 

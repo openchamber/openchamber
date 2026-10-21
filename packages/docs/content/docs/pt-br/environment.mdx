@@ -102,6 +102,22 @@ Impede o OpenChamber de iniciar seu próprio servidor OpenCode quando definido c
 
 Hostname do servidor OpenCode gerenciado pelo OpenChamber. O padrão é `127.0.0.1`.
 
+### `OPENCHAMBER_OPENCODE_HEALTH_TIMEOUT_MS`
+
+Tempo limite de uma verificação de integridade do OpenCode, em milissegundos. O padrão é `5000`.
+
+### `OPENCHAMBER_OPENCODE_HEALTH_CONSECUTIVE_FAILURES`
+
+Falhas consecutivas contabilizadas antes que o OpenChamber reinicie um processo gerenciado do OpenCode que ainda está em execução. O padrão é `20`. Sessões ocupadas podem atrasar a reinicialização.
+
+### `OPENCHAMBER_OPENCODE_HEALTH_INTERVAL_MS`
+
+Substitui o intervalo de verificação de integridade do OpenCode gerenciado, em milissegundos. Também define o tempo mínimo entre falhas contabilizadas. O padrão é `0`, que mantém o intervalo do servidor de `15000` milissegundos.
+
+### `OPENCHAMBER_OPENCODE_HEALTH_CACHE_MS`
+
+Tempo em milissegundos durante o qual o OpenChamber reutiliza o resultado de uma verificação de integridade do OpenCode gerenciado, incluindo falhas. O padrão é `750`.
+
 ### `OPENCODE_BINARY`
 
 Caminho para o executável `opencode` que o OpenChamber deve usar.
@@ -117,14 +133,6 @@ Caminho para o diretório de configuração do OpenCode para agents, skills, sni
 ### `OPENCODE_DATA_DIR`
 
 Diretório de dados personalizado para o servidor OpenCode gerenciado.
-
-### `OPENCODE_WSL_DISTRO`
-
-Escolhe a distro WSL usada pela integração do OpenCode no Windows.
-
-### `OPENCHAMBER_OPENCODE_WSL_DISTRO`
-
-Alias específico do OpenChamber para escolher a distro WSL. `OPENCODE_WSL_DISTRO` tem prioridade quando ambas estão definidas.
 
 ### `OPENCODE_JWT_SECRET`
 
