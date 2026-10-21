@@ -36,6 +36,8 @@ import { isRightToLeft, useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { resolveLinearMappedProjectPath } from '@/lib/linearProjectMapping';
 import { normalizeProjectPath, resolveProjectForSessionDirectory } from '@/lib/projectResolution';
+import { linearIssue, trackedItemForReference } from '@/lib/trackedItems/fromLinks';
+import { refreshTrackedItems } from '@/lib/trackedItems/interest';
 import { useLinearAuthStore } from '@/stores/useLinearAuthStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSourceBoardChoice, useSourceBoardStore, type SourceBoardTab } from '@/stores/useSourceBoardStore';
@@ -460,19 +462,6 @@ const SourceBoardBody: React.FC<{
         </span>
     ) : null;
 
-    const actions = previewItem ? (
-        <SourceBoardActions
-            item={previewItem}
-            project={actionProject}
-            context={context}
-            onStartWorktree={(target, selection) => setWorktreeRequest({ project: target, selection })}
-            onChanged={browser.list.retry}
-            startIn={startIn}
-            onLeave={onLeave}
-            worktreeAvailable={!readsNestedRepository}
-        />
-    ) : null;
-
     const attachments = usePullAttachments(previewItem?.source === 'github' ? previewItem.reference : null);
 
     // The previewed PR's check runs, opened from its checks totals.
@@ -495,15 +484,50 @@ const SourceBoardBody: React.FC<{
         () => Promise.all([refreshGithubDetail(), retryList()]).then(() => undefined),
         [refreshGithubDetail, retryList],
     );
+    // The sidebar row shows the same item from the server's tracked state. A
+    // board refresh or state change asks it to re-read that item now, using the
+    // same key the host's row declared.
+    const refreshTrackedBoardItem = React.useCallback(() => {
+        if (!previewItem) return;
+        if (previewItem.source === 'linear') {
+            refreshTrackedItems([linearIssue(previewItem.issue.identifier)]);
+            return;
+        }
+        const item = trackedItemForReference(previewItem.reference, context);
+        if (item) refreshTrackedItems([item]);
+    }, [context, previewItem]);
+    const refreshBoardItem = React.useCallback(() => {
+        if (!previewItem) return;
+        refreshTrackedBoardItem();
+        if (previewItem.source === 'linear') {
+            void retryList();
+            return;
+        }
+        void refreshRepositoryItem();
+    }, [previewItem, refreshRepositoryItem, refreshTrackedBoardItem, retryList]);
     const threadActions = useThreadActions(previewItem?.source === 'github' ? previewItem.reference : null, context, refreshRepositoryItem);
     // The refresh button: for a change made on the host's own site, which the
     // server's short-lived answers would otherwise hide for up to half a minute.
     const refreshFromHost = async () => {
         if (context) await sourceControl.refreshProviderReads(context).catch(() => undefined);
+        refreshTrackedBoardItem();
         forgetGitHubPullStatuses();
         // The button spins until the item and the list are read again.
         await refreshRepositoryItem();
     };
+
+    const actions = previewItem ? (
+        <SourceBoardActions
+            item={previewItem}
+            project={actionProject}
+            context={context}
+            onStartWorktree={(target, selection) => setWorktreeRequest({ project: target, selection })}
+            onChanged={refreshBoardItem}
+            startIn={startIn}
+            onLeave={onLeave}
+            worktreeAvailable={!readsNestedRepository}
+        />
+    ) : null;
 
     const preview = (
         <ReferencePreview
@@ -518,13 +542,13 @@ const SourceBoardBody: React.FC<{
             onIncludeDiffChange={() => undefined}
             now={browser.now}
             footer={actions}
-            linearStateControl={previewItem?.source === 'linear' ? <SourceBoardLinearStatus issue={previewItem.issue} onChanged={browser.list.retry} /> : undefined}
+            linearStateControl={previewItem?.source === 'linear' ? <SourceBoardLinearStatus issue={previewItem.issue} onChanged={refreshBoardItem} /> : undefined}
             onOpenLinearIssue={(issue) => browser.openItem({ source: 'linear', issue })}
             onOpenChecks={previewPull && context ? () => setChecksOpenFor(previewKey) : undefined}
             onRefresh={previewItem?.source === 'github' && context ? refreshFromHost : undefined}
             threadActions={threadActions}
             stateMenu={previewItem?.source === 'github' && previewItem.reference.state !== 'merged' && context ? (
-                <SourceBoardStateMenuItems item={previewItem} context={context} onChanged={refreshRepositoryItem} />
+                <SourceBoardStateMenuItems item={previewItem} context={context} onChanged={refreshBoardItem} />
             ) : undefined}
             commentAttachments={previewItem?.source === 'github'
                 ? { onAttach: attachments.attachComment, onAttachAll: attachments.attachComments }
