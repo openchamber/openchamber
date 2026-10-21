@@ -90,6 +90,7 @@ export const TitlebarLeftControls: React.FC = () => {
     // and remain drag regions everywhere else, so window dragging still works
     // in the empty parts of the strip.
     <div
+      data-titlebar-left-controls=""
       className="app-region-no-drag absolute inset-s-0 top-0 z-30 flex select-none items-center pe-2"
       style={{
         height: 'var(--oc-header-height, 3rem)',

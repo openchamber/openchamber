@@ -34,9 +34,24 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, cl
     const resizingWidthRef = React.useRef<number | null>(null);
     const activeResizePointerIDRef = React.useRef<number | null>(null);
     const sidebarRef = React.useRef<HTMLDivElement | null>(null);
+    const titlebarOverlayRef = React.useRef<HTMLElement | null>(null);
 
     const clampSidebarWidth = React.useCallback((value: number) => {
         return Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, value));
+    }, []);
+
+    // The overlay lives outside the sidebar and is stable for the whole drag,
+    // so it is resolved once instead of on every pointermove. `isConnected`
+    // drops the cache when a layout switch remounts it.
+    const getTitlebarOverlay = React.useCallback(() => {
+        const cached = titlebarOverlayRef.current;
+        if (cached?.isConnected) {
+            return cached;
+        }
+
+        const overlay = document.querySelector<HTMLElement>('[data-titlebar-left-controls]');
+        titlebarOverlayRef.current = overlay;
+        return overlay;
     }, []);
 
     const applyLiveWidth = React.useCallback((nextWidth: number) => {
@@ -49,11 +64,16 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, cl
         sidebar.style.minWidth = `${nextWidth}px`;
         sidebar.style.maxWidth = `${nextWidth}px`;
         sidebar.style.setProperty('--oc-left-sidebar-width', `${nextWidth}px`);
-        // A drag writes the DOM directly and does not re-render, so the root
-        // copy has to be written here too or the titlebar overlay keeps
-        // capping itself to the width the drag started from.
-        document.documentElement.style.setProperty('--oc-left-sidebar-width', `${nextWidth}px`);
-    }, []);
+        // Keep the titlebar overlay in sync without restyling the whole
+        // document: its cap reads `--oc-left-sidebar-width`, so the drag sets
+        // that variable on the overlay itself instead of on <html>. The
+        // React-owned `maxWidth` stays untouched; React only rewrites a style
+        // key whose value changed, so clearing it would drop the cap.
+        const overlay = getTitlebarOverlay();
+        if (overlay) {
+            overlay.style.setProperty('--oc-left-sidebar-width', `${nextWidth}px`);
+        }
+    }, [getTitlebarOverlay]);
 
     React.useEffect(() => {
         if (isMobile && isResizing) {
@@ -84,7 +104,16 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, cl
     // whole document.
     React.useEffect(() => {
         document.documentElement.style.setProperty('--oc-left-sidebar-width', `${publishedWidth}px`);
-    }, [publishedWidth]);
+        // Same callback, so the two writes land in one commit: the overlay never
+        // paints a width the root variable disagrees with. After a drag the
+        // overlay's own copy and the settled width are equal, so removing it
+        // changes nothing on screen and leaves the root variable as the single
+        // source of truth, which a later width change not from a drag needs.
+        const overlay = titlebarOverlayRef.current;
+        if (!isResizing && overlay) {
+            overlay.style.removeProperty('--oc-left-sidebar-width');
+        }
+    }, [publishedWidth, isResizing]);
 
     // The session list stays mounted while the sidebar is closed, so opening it
     // does not build the list again. Once the close animation has finished its
