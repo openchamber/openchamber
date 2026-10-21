@@ -56,6 +56,15 @@ describe('settings search', () => {
     }
   });
 
+  test('finds the default for continuing with another model on every surface', () => {
+    for (const query of ['another model', 'provider down', 'subagent']) {
+      for (const context of [runtimeCtx, { ...runtimeCtx, isDesktop: true }, { ...runtimeCtx, isVSCode: true }, { ...runtimeCtx, isMobile: true }]) {
+        const results = buildSettingsSearchResults({ query, runtimeCtx: context, t, getPageTitle: (page) => page });
+        expect(results.find((result) => result.id === 'sessions.continue-with-model')?.page).toBe('sessions');
+      }
+    }
+  });
+
   test('Enter-to-send is searchable only outside mobile', () => {
     for (const isMobile of [false, true]) {
       const results = buildSettingsSearchResults({

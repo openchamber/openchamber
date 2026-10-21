@@ -1829,6 +1829,28 @@ class OpencodeService {
     await this.abortSession(params.childSessionID, params.directory)
   }
 
+  /**
+   * Adds a note for the agent without waking the session: a synthetic message
+   * the next turn reads first. The id is minted here, before the prompt that
+   * follows it, so the transcript keeps the order the two were admitted in.
+   */
+  async admitSessionNote(params: {
+    sessionID: string
+    directory?: string | null
+    note: { text: string; description: string; metadata: Metadata }
+  }): Promise<void> {
+    await call("session.synthetic", () =>
+      this.clientFor(params.directory).session.synthetic({
+        sessionID: params.sessionID,
+        id: ascendingId("msg"),
+        text: params.note.text,
+        description: params.note.description,
+        metadata: params.note.metadata,
+        resume: false,
+      }),
+    )
+  }
+
   /** Global pending items when requested, then each distinct directory. */
   private uniqueDirectories(entries: Array<string | null | undefined> | undefined): string[] {
     const unique = new Set<string>()

@@ -11,7 +11,10 @@ import { responseBodyOf, summarizeOpenCodeError } from '@/sync/session-error-log
 import { useDirectoryStore, useSessionStatus, useSessionStatusSnapshotReady } from '@/sync/sync-context';
 import { refetchSessionMessages } from '@/sync/session-actions';
 import { LongErrorText } from './LongErrorText';
-import { findRecordedTurnError, readLastMessageState, scheduleUnansweredRechecks, type LastMessageState } from './sessionErrorNoticeState';
+import { useContinueWithModelAction } from './continueWithModelContext';
+import { ContinueWithModelButton } from './components/ContinueWithModelButtons';
+import { findRecordedTurnError } from '@/lib/messages/assistantError';
+import { readLastMessageState, scheduleUnansweredRechecks, type LastMessageState } from './sessionErrorNoticeState';
 
 interface SessionErrorNoticeProps {
   sessionId: string;
@@ -112,7 +115,7 @@ const useLastMessageState = (sessionId: string, directory?: string): LastMessage
       return null;
     }
     const cached = cacheRef.current;
-    if (cached && cached.role === next.role && cached.timestamp === next.timestamp && cached.hasError === next.hasError) {
+    if (cached && cached.role === next.role && cached.timestamp === next.timestamp && cached.hasError === next.hasError && cached.failed === next.failed) {
       return cached;
     }
     cacheRef.current = next;
@@ -191,8 +194,21 @@ export const SessionErrorNotice: React.FC<SessionErrorNoticeProps> = ({ sessionI
     );
   }, [unansweredKey, sessionId]);
   const unanswered = unansweredKey !== null && verifiedKey === unansweredKey;
+  // A reply that failed shows its error itself, in the message; the action to
+  // continue elsewhere still sits here, under it.
+  const continueWithModel = useContinueWithModelAction();
+  const replyFailed = isIdle && lastMessage?.role === 'assistant' && lastMessage.failed;
 
-  if (!reportedError && !storedFailureApplies && !unanswered) return null;
+  if (!reportedError && !storedFailureApplies && !unanswered) {
+    if (!replyFailed || !continueWithModel) return null;
+    return (
+      <div className="chat-message-column">
+        <div className="mt-2 flex">
+          <ContinueWithModelButton onClick={continueWithModel} />
+        </div>
+      </div>
+    );
+  }
 
   let title: string;
   let detail: string;
@@ -249,6 +265,11 @@ export const SessionErrorNotice: React.FC<SessionErrorNoticeProps> = ({ sessionI
           </div>
         ) : null}
         {responseBody ? <ErrorResponseDetails body={responseBody} className="ps-[1.375rem]" /> : null}
+        {continueWithModel ? (
+          <div className="mt-1.5 ps-[1.375rem]">
+            <ContinueWithModelButton onClick={continueWithModel} />
+          </div>
+        ) : null}
       </div>
     </div>
   );

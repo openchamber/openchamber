@@ -48,6 +48,36 @@ describe('settings registry', () => {
       useUIStore.setState(original, true);
     }
   });
+
+  test('round-trips the default for running work when continuing with another model', async () => {
+    const options = useUIStore.persist.getOptions();
+    const original = useUIStore.getState();
+    let saved: Parameters<NonNullable<typeof options.storage>['setItem']>[1] = { state: original, version: options.version };
+    try {
+      useUIStore.persist.setOptions({ storage: { getItem: () => saved, setItem: (_name, value) => { saved = value; }, removeItem: () => undefined } });
+      expect(useUIStore.getState().continueWithModelMode).toBe('stop');
+      for (const mode of ['keep', 'stop'] as const) {
+        const parsed = parseSettingsDocument(JSON.parse(JSON.stringify({ continueWithModelMode: mode })));
+        expect(parsed).toEqual({ continueWithModelMode: mode });
+        if (!parsed) throw new Error('Expected a valid mode');
+        applySettingsToStores(parsed);
+        expect(useUIStore.getState().continueWithModelMode).toBe(mode);
+        // The value the auto-save sends to the server.
+        expect(readAutoSaveSnapshot().continueWithModelMode).toBe(mode);
+        const persisted = saved;
+        useUIStore.persist.setOptions({ storage: { getItem: () => persisted, setItem: () => undefined, removeItem: () => undefined } });
+        useUIStore.getState().setContinueWithModelMode(mode === 'keep' ? 'stop' : 'keep');
+        await useUIStore.persist.rehydrate();
+        expect(useUIStore.getState().continueWithModelMode).toBe(mode);
+        useUIStore.persist.setOptions({ storage: { getItem: () => saved, setItem: (_name, value) => { saved = value; }, removeItem: () => undefined } });
+      }
+      expect(parseSettingsDocument({ continueWithModelMode: 'pause' })).toEqual({});
+      expect(parseSettingsDocument({ continueWithModelMode: true })).toEqual({});
+    } finally {
+      useUIStore.persist.setOptions(options);
+      useUIStore.setState(original, true);
+    }
+  });
   test('accepts only interface languages the UI ships', () => {
     expect(parseSettingsDocument({ locale: 'zh-CN' })).toEqual({ locale: 'zh-CN' });
     expect(parseSettingsDocument({ locale: 'xx' })).toEqual({});

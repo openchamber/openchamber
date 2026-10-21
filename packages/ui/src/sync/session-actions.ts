@@ -2427,7 +2427,7 @@ export async function dismissOpenPermissionsForSession(sessionId: string): Promi
   const stores = _childStores
   if (!stores) return false
 
-  const toDismiss: Array<{ store: DirectoryStoreApi; sessionId: string; permission: PermissionRequest }> = []
+  const toDismiss: PermissionToDismiss[] = []
   const lookup = sessionRecordLookup()
   for (const [, store] of stores.children) {
     const state = store.getState()
@@ -2440,9 +2440,18 @@ export async function dismissOpenPermissionsForSession(sessionId: string): Promi
   }
 
   if (toDismiss.length === 0) return false
+  await dismissPermissionEntries(toDismiss)
+  return true
+}
 
-  // Optimistically clear the permissions from the local store so the prompt
-  // disappears immediately, before the reject round-trip.
+type PermissionToDismiss = { store: DirectoryStoreApi; sessionId: string; permission: PermissionRequest }
+
+/**
+ * Removes the cards at once, then rejects each request. A not-found answer
+ * keeps a card removed; any other failure puts it back, because the agent is
+ * still waiting on it and no event will bring it back.
+ */
+async function dismissPermissionEntries(toDismiss: readonly PermissionToDismiss[]): Promise<void> {
   for (const { sessionId: scopedSessionId, permission } of toDismiss) {
     removePermissionRequestFromChildStores(scopedSessionId, permission.id)
   }
@@ -2453,14 +2462,36 @@ export async function dismissOpenPermissionsForSession(sessionId: string): Promi
         await dismissPermission(scopedSessionId, permission.id)
       } catch (error) {
         if (isPermissionRequestNotFoundError(error)) return
-        // Swallow: a failed dismissal must not block the send. The permission
-        // is still pending server-side, so it goes back where it was.
-        console.error("[session-actions] Failed to dismiss open permission on send:", error)
+        console.error("[session-actions] Failed to dismiss open permission:", error)
         restorePermissionRequest(store, scopedSessionId, permission)
       }
     }),
   )
-  return true
+}
+
+/**
+ * Clears the permission cards an interrupt left behind. OpenCode drops the
+ * pending request of a call it interrupts without publishing anything (core
+ * `permission.ts`), so the card would stay up and answer not-found later.
+ * Rejecting it through the usual dismissal confirms that with the server: a
+ * not-found answer removes the card, and a request the interrupt has not
+ * reached yet is settled. `session` covers the session's own requests;
+ * `tree` adds its subagents' and every request its dock shows.
+ */
+export async function dismissPermissionsAfterInterrupt(sessionId: string, scope: "session" | "tree"): Promise<void> {
+  if (scope === "tree") {
+    await dismissOpenPermissionsForSession(sessionId)
+    return
+  }
+  const stores = _childStores
+  if (!sessionId || !stores) return
+  const toDismiss: PermissionToDismiss[] = []
+  for (const [, store] of stores.children) {
+    for (const permission of store.getState().permission?.[sessionId] ?? []) {
+      toDismiss.push({ store, sessionId, permission })
+    }
+  }
+  await dismissPermissionEntries(toDismiss)
 }
 
 // ---------------------------------------------------------------------------

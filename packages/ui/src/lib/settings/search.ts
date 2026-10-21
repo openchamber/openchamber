@@ -671,6 +671,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
+    id: 'sessions.continue-with-model',
+    page: 'sessions',
+    titleKey: 'settings.openchamber.defaults.field.continueWithModel',
+    descriptionKey: 'settings.openchamber.defaults.field.continueWithModelInfo',
+    keywords: ['switch model', 'another model', 'continue', 'retry', 'provider down', 'outage', 'background', 'shell', 'subagent', 'stop', 'handoff'],
+  },
+  {
     id: 'sessions.show-chats',
     page: 'sessions',
     titleKey: 'settings.openchamber.defaults.field.showChats',

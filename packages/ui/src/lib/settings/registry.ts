@@ -45,6 +45,7 @@ import { sidebarLayoutSchema } from '@/stores/sidebarLayout';
 import { useUIStore, type AgentTerminalsPlacement, type FileEditorKeymap, type LargeTextPasteBehavior } from '@/stores/useUIStore';
 import { isSessionGoalMaxAutoTurns } from '@/lib/sessionGoalTurnLimit';
 import { isSessionGoalCharLimit } from '@/lib/sessionGoalLimits';
+import { CONTINUE_WORK_MODES } from '@/lib/opencode/model-handoff';
 import { z } from 'zod';
 import {
   fromSchema,
@@ -564,6 +565,7 @@ export const SETTINGS_REGISTRY = {
   sessionRecapEnabled: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('sessionRecapEnabled', (v) => useUIStore.getState().setSessionRecapEnabled(v)) }),
   sessionSuggestionEnabled: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('sessionSuggestionEnabled', (v) => useUIStore.getState().setSessionSuggestionEnabled(v)) }),
   sessionWorkEnabled: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('sessionWorkEnabled', (v) => useUIStore.getState().setSessionWorkEnabled(v)) }),
+  continueWithModelMode: field({ scope: 'profile', parse: parseOneOf(CONTINUE_WORK_MODES), ui: uiStore('continueWithModelMode', (v) => useUIStore.getState().setContinueWithModelMode(v)) }),
   sessionReviewOfferEnabled: field({ scope: 'profile', surfaces: ['web', 'desktop', 'mobile'], parse: parseBoolean, ui: uiStore('sessionReviewOfferEnabled', (v) => useUIStore.getState().setSessionReviewOfferEnabled(v)) }),
   sessionGoalEnabled: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('sessionGoalEnabled', (v) => useUIStore.getState().setSessionGoalEnabled(v)) }),
   // Who checks goal progress. The goal loop runs on the OpenChamber server,

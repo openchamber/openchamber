@@ -871,7 +871,7 @@ describe('settings registry gate', () => {
     walkthroughModelOverride: 'anthropic/claude', zenModel: 'zen/model',
     favoriteModels: [{ providerID: 'anthropic', modelID: 'claude' }], hiddenModels: [{ providerID: 'openai', modelID: 'gpt' }], collapsedModelProviders: ['openai'],
     recentModels: [{ providerID: 'anthropic', modelID: 'claude' }], lastSelectedModel: 'anthropic/claude', recentAgents: ['build'], favoriteAgents: ['build'], recentEfforts: { 'anthropic/claude': ['high'] }, providerOrder: ['anthropic'],
-    sessionRecapEnabled: true, sessionSuggestionEnabled: true, sessionWorkEnabled: true, sessionReviewOfferEnabled: true, sessionGoalEnabled: true, sessionGoalChecker: 'small-model', sessionGoalMaxAutoTurns: 50, sessionGoalDefaultBudgetEnabled: true, sessionGoalDefaultBudget: 5,
+    sessionRecapEnabled: true, sessionSuggestionEnabled: true, sessionWorkEnabled: true, continueWithModelMode: 'keep', sessionReviewOfferEnabled: true, sessionGoalEnabled: true, sessionGoalChecker: 'small-model', sessionGoalMaxAutoTurns: 50, sessionGoalDefaultBudgetEnabled: true, sessionGoalDefaultBudget: 5,
     sessionGoalWriterEnabled: true, sessionGoalWriterModel: 'anthropic/claude', sessionGoalWriterReview: true, sessionGoalWriterSendMode: 'goal-as-message', sessionGoalRewriteAll: true, sessionGoalAutoCreate: 'review',
     sessionGoalWriterVariant: 'low', sessionGoalWriterRememberChoice: true, sessionGoalObjectiveCharLimit: 12_000, sessionGoalCheckObjectiveCharLimit: 30_000,
     summarizeLastMessage: true, summaryThreshold: 100, summaryLength: 50, maxLastMessageLength: 200, showDeletionDialog: true,
@@ -982,5 +982,21 @@ describe('settings registry gate', () => {
       autoSaveEnabled: false,
     });
     expect(helpers.sanitizeSettingsUpdate({ largeTextPasteBehavior: 'maybe', fileEditorKeymap: 'emacs' })).toEqual({});
+  });
+
+  it('keeps the default for running work when continuing with another model through a save', () => {
+    const helpers = createTestHelpersWithRealSanitizers();
+    for (const mode of ['stop', 'keep']) {
+      const accepted = helpers.sanitizeSettingsUpdate({ continueWithModelMode: mode });
+      expect(accepted).toEqual({ continueWithModelMode: mode });
+      const saved = helpers.mergePersistedSettings({ continueWithModelMode: mode === 'stop' ? 'keep' : 'stop' }, accepted);
+      expect(helpers.formatSettingsResponse(saved)).toMatchObject({ continueWithModelMode: mode });
+    }
+    for (const invalid of ['pause', '', 'KEEP', true, 1, null]) {
+      expect(helpers.sanitizeSettingsUpdate({ continueWithModelMode: invalid })).toEqual({});
+    }
+    // A save without the key leaves the stored choice alone.
+    const stored = helpers.mergePersistedSettings({ continueWithModelMode: 'keep' }, helpers.sanitizeSettingsUpdate({ sessionWorkEnabled: false }));
+    expect(helpers.formatSettingsResponse(stored)).toMatchObject({ continueWithModelMode: 'keep', sessionWorkEnabled: false });
   });
 });

@@ -17,6 +17,7 @@ import { sessionNoticesI18n } from './session-notices.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
+import { continueWithModelI18n } from './continue-with-model.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
 import { sourceBoardI18n } from './source-board.i18n';
 import { projectActionsI18n } from './project-actions.i18n';
@@ -155,6 +156,7 @@ export const dict: Record<I18nKey, string> = {
   ...usageStatsI18n['zh-CN'],
   ...webSearchI18n['zh-CN'],
   ...sessionWarmingI18n['zh-CN'],
+  ...continueWithModelI18n['zh-CN'],
   ...isolatedSpacesI18n['zh-CN'],
   ...sourceBoardI18n['zh-CN'],
   ...projectActionsI18n['zh-CN'],

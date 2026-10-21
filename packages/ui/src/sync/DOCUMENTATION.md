@@ -801,6 +801,139 @@ Mobile session rows expose the same action inside the manual rename editor
 VS Code has no Small Model route and exposes a disabled action with an explicit
 explanation.
 
+## Continuing with another model
+
+"Continue with another model" stops a session's turn and hands the session to
+the model and effort the user picks, from wherever the previous model stopped.
+`continue-with-model.ts` owns the sequence and the reading of the session it
+starts from; `continue-with-model-runtime.ts` wires it to the stores and to
+`opencodeClient`; `lib/opencode/model-handoff.ts` owns the note the new model
+reads and the metadata that titles its notice row ("Continued with <model>",
+`lib/opencode/session-notices.ts`). The dialog
+(`components/chat/ContinueWithModelDialog.tsx`) only collects the choice; it
+starts from the composer's model and effort and from the Settings default
+(`continueWithModelMode`, Settings → Sessions). Entry points: the failed-turn
+notice (`SessionErrorNotice`, also under a reply that carries its own error),
+the retry notice (`SessionRetryNotice`), the status chip and the scroll pill
+while the agent works, and the header's session and tab menus at any time. The
+chat column owns the dialog (`components/chat/continueWithModelContext.ts`), so a
+notice that goes away while it is open does not close it.
+
+Two modes:
+
+- `stop` (the default): stop the turn and every shell command and subagent the
+  session started, then continue.
+- `keep`: stop the turn but keep shell commands and subagents running; each
+  result reaches the session when it finishes, by then on the new model.
+
+Errors, retries and waits for the user (questions, permissions) stop in both.
+
+### What OpenCode does at each step
+
+Read in the OpenCode fork this was built against (`~/git/opencode`, commit
+`1668a0350b`, core 2.0.30; OpenChamber pins 2.0.32). Paths are under its
+`packages/`.
+
+| Step | What OpenCode does |
+|---|---|
+| `POST /api/session/:id/interrupt` | Interrupts the execution fiber and claims the wakes recorded so far; it answers before cleanup settles (`core/src/session/run-coordinator.ts:147-167`). A retry wait is a sleep in that fiber (`core/src/session/runner/retry.ts:94-115`), so it ends. A user stop then cancels only the job whose id is the session itself, its own subagent job when it is a child (`core/src/session/execution.ts:128-136`). |
+| Foreground shell command | The call waits in `jobs.block`; the interrupt cancels its job, which removes the process (`core/src/tool/plugin/shell.ts:243,266-268`). |
+| Foreground subagent | The interrupt interrupts the child session and cancels its job (`core/src/tool/plugin/subagent.ts:240-253`). |
+| Background shell command or subagent | A job in the Job service's own scope (`core/src/job.ts:252-297`), so the interrupt leaves it running. When it settles, OpenCode admits a synthetic message to the session with `steer` delivery and wakes it (`core/src/tool/plugin/shell.ts:161-193`, `core/src/session/subagent-completion.ts:22-48`; defaults in `core/src/session/session.ts:302,316`). |
+| Question | The form is cancelled and `form.cancelled` published (`core/src/form.ts:153-158,199-208`); the card goes. |
+| Permission | The pending request is deleted with no event (`core/src/permission.ts:247-258`); the card would stay. |
+| `POST /api/session/:id/background` | Moves the running jobs that block the session to the background and admits "User requested that active blocking work be moved to the background" (`core/src/session.ts:452-469`, `core/src/job.ts:387-409`). Each waiting call then settles with a "moved to the background" result and forks the observer that delivers its result later (`shell.ts:269-273`, `subagent.ts:254-257`). |
+| `POST /api/session/:id/model` | Records the switch, a no-op for the same model and effort (`core/src/session/session.ts:100-112`). Every step attempt, retries included, resolves the model from the session record (`core/src/session/runner/llm.ts:218`, `runner/model.ts:79-92`), yet the request says nothing about a switch between two models (`runner/to-llm-message.ts:242-251`). |
+| Retry state | `session.retry.scheduled` puts `retry: { attempt, at, error }` on the assistant message it will retry (`core/src/session/message-updater.ts:404-411`): 10 retries from 2 s capped at 10 s, a provider's retry-after up to 15 minutes, at most 3 timeouts (`retry.ts:31-60`). |
+
+Before this, Stop was the interrupt alone (`abortCurrentOperation`,
+`opencodeClient.abortSession`): background shell commands and subagents
+survived it and woke the session later on the old model, and the status chip
+said "Retrying in … (attempt n)" without the reason.
+
+### The sequence
+
+1. `keep` only: `session.background`, then wait until each call the turn waited
+   on has settled in the store (`findBlockingCalls`, `blockingCallsSettled`).
+2. Interrupt, then clear the interrupted session's permission cards
+   (`dismissPermissionsAfterInterrupt`).
+3. Switch the model and agent (`resolveSendSelection`), record the choice where
+   the composer reads it, and admit the note with `resume: false`.
+4. Send "Continue" through `optimisticSend`.
+5. `stop` only, even when the send failed: for each running subagent, deepest
+   first, stop its background commands, then the subagent
+   (`stopBackgroundShells`, `stopSubagent`, each of which tells the agent first
+   that the stop was the user's); then the session's own background commands;
+   then the permission cards of the whole tree.
+
+### Invariants
+
+- The switch and the note come before anything that can wake the session: every
+  wake after the interrupt runs on the new model and reads the note first,
+  because a drain takes the session's pending input in the order it was
+  admitted.
+- The prompt goes before `stop` stops the background work. A stopped command or
+  subagent reports back into the session and wakes it; sent first, the prompt
+  owns the new turn and those reports land in it, instead of starting a turn
+  of their own ahead of "Continue".
+- `keep` interrupts only after OpenCode handed each waited-on call to the
+  background. A call interrupted between that handoff and its observer fork
+  loses its result and keeps its foreground timeout. A handoff that does not
+  show within 5 seconds stops nothing, and the dialog stays open.
+- A step that fails before the interrupt changes nothing. After it, the result
+  says the session stopped and which step failed. One background item that
+  cannot be stopped does not keep the others or the continue from running.
+- One continue per session at a time (`busy`). A runtime switch ends the
+  sequence (`runtime-changed`).
+- Offered for a top-level session the user can prompt. A subagent's turn belongs
+  to the session that launched it, and interrupting it alone fails that call.
+
+### What neither mode touches
+
+- Queued messages keep the model they were queued with (the queue captures its
+  send configuration), so one sent later switches the session back.
+- A session goal pauses after the interrupt, as after Stop
+  (`web/server/lib/session-goal/runtime.js`).
+- Sessions the agent dispatched (`returnResult`) and persistent terminals keep
+  running; their results arrive as before.
+- In `keep`, tool calls other than shell commands and subagents stop, and a
+  running subagent keeps its own model.
+
+### Runtime parity
+
+Every call is an OpenCode route, so the sequence runs the same on web, desktop,
+VS Code, hosted mobile and Capacitor. The header menus exist only in the main
+layout (web, desktop); VS Code, the phone app and Mini Chat offer the action from
+the notices and from the status chip while the agent works.
+
+### Why the client runs the sequence and not the OpenChamber server
+
+Each step is an official route `opencodeClient` already calls, and VS Code has
+no OpenChamber server. A server route would need a second implementation for
+VS Code and would add nothing OpenCode does not already do.
+
+### Why `keep` uses OpenCode's background delivery and not a channel of its own
+
+OpenCode already hands every background result to the session as a synthetic
+message that wakes it. After the switch that wake runs on the new model, which
+is the delivery the mode promises; a second channel would deliver each result
+twice.
+
+### Why permission cards are rejected after the interrupt and not just removed
+
+The interrupt drops the request without an event. Rejecting it is the dismissal
+the send path uses (`dismissOpenPermissionsForSession`): a not-found answer
+confirms the drop and removes the card, and a request the interrupt has not
+reached yet is settled. `keep` clears the session's own requests only, so a
+background subagent waiting for the user keeps waiting.
+
+### Why a note before the "Continue" prompt and not the prompt alone
+
+The prompt is what the user typed by hand before ("stop, switch, continue"),
+and it gives the transcript a turn of its own. The note tells the new model
+what nothing else does: that the model changed, where the previous one stopped,
+and what was stopped or keeps running.
+
 ## Session action rules
 
 - Archive, restore and delete return booleans and id lists through the store contract shared by sidebar rows, the bulk bar and the mobile sheet. The reason behind a failure is recorded separately in `session-action-failures.ts` at the catch site and taken once by the surface that reports it, so the toast can quote the OpenCode status, error class and log `ref` (`OpencodeApiError` from `lib/opencode/client.ts`, which keeps `tag`, `detail` and `ref` from the tagged body) instead of a bare "failed". Rename fails loudly the same way and closes its form.

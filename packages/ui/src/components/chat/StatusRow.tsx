@@ -2,6 +2,8 @@ import React from "react";
 import { useChatSessionSelection } from './chatColumnSession';
 import { WorkingPlaceholder } from "./message/parts/WorkingPlaceholder";
 import { BackgroundWorkButton } from "./components/BackgroundWorkButton";
+import { ContinueWithModelIconButton } from "./components/ContinueWithModelButtons";
+import { cn } from "@/lib/utils";
 
 // The floating assistant-status chip that hovers above the composer while the
 // agent works ("Claude is working…"). ONLY that. The composer's
@@ -23,6 +25,8 @@ interface StatusRowProps {
   providerId?: string | null;
   /** Set while the turn waits on work OpenCode can move to the background. */
   onBackground?: () => void;
+  /** Set where the chat offers "Continue with another model". */
+  onContinueWithModel?: () => void;
 }
 
 export const StatusRow: React.FC<StatusRowProps> = ({
@@ -36,6 +40,7 @@ export const StatusRow: React.FC<StatusRowProps> = ({
   modelName,
   providerId,
   onBackground,
+  onContinueWithModel,
 }) => {
   const currentSessionId = useChatSessionSelection().sessionId;
 
@@ -83,9 +88,10 @@ export const StatusRow: React.FC<StatusRowProps> = ({
             />
           ) : null}
         </div>
-        {/* -me-1.5 keeps the button's right edge 3px inside the border now
+        {/* -me-1.5 keeps the last button's right edge 3px inside the border now
             that the chip's pe shrank to 8px. */}
-        {onBackground ? <BackgroundWorkButton onClick={onBackground} className="-me-1.5 h-6 w-6" /> : null}
+        {onBackground ? <BackgroundWorkButton onClick={onBackground} className={cn('h-6 w-6', !onContinueWithModel && '-me-1.5')} /> : null}
+        {onContinueWithModel ? <ContinueWithModelIconButton onClick={onContinueWithModel} className="-me-1.5 h-6 w-6" /> : null}
       </div>
     </div>
   );

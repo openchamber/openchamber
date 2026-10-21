@@ -3562,6 +3562,52 @@ describe("dismissOpenPermissionsForSession", () => {
   })
 })
 
+describe("dismissPermissionsAfterInterrupt", () => {
+  beforeEach(() => {
+    replyCalls.length = 0
+    permissionReplyError = null
+  })
+
+  const twoLevelStore = () => createStore({
+    "session-a": [buildPermission("perm-root", "session-a")],
+    "session-child": [buildPermission("perm-child", "session-child")],
+  }, {
+    session: [sessionFixture("session-a"), { ...sessionFixture("session-child"), parentID: "session-a" }],
+  })
+
+  // Keeping work running keeps a subagent that waits for the user waiting:
+  // only the interrupted session's own request goes.
+  test("the session scope clears the stopped session's request and leaves its subagent's", async () => {
+    const store = twoLevelStore()
+    const childStores = createChildStores([["/test/project", store]])
+    // The interrupt already dropped the request, so OpenCode no longer knows it.
+    permissionReplyError = Object.assign(new Error("permission.reply failed (404): PermissionNotFoundError"), { status: 404 })
+
+    const { setActionRefs, dismissPermissionsAfterInterrupt } = await import("./session-actions")
+    setActionRefs(childStores, () => "/test/project")
+
+    await dismissPermissionsAfterInterrupt("session-a", "session")
+
+    expect(replyCalls.filter((call) => call.method === "permission.reply").map((call) => call.params.requestID)).toEqual(["perm-root"])
+    expect(store.getState().permission["session-a"]).toBe(undefined)
+    expect(store.getState().permission["session-child"]).toHaveLength(1)
+  })
+
+  test("the tree scope clears the subagents' requests too", async () => {
+    const store = twoLevelStore()
+    const childStores = createChildStores([["/test/project", store]])
+
+    const { setActionRefs, dismissPermissionsAfterInterrupt } = await import("./session-actions")
+    setActionRefs(childStores, () => "/test/project")
+
+    await dismissPermissionsAfterInterrupt("session-a", "tree")
+
+    expect(replyCalls.filter((call) => call.method === "permission.reply").map((call) => call.params.requestID).sort()).toEqual(["perm-child", "perm-root"])
+    expect(store.getState().permission["session-a"]).toBe(undefined)
+    expect(store.getState().permission["session-child"]).toBe(undefined)
+  })
+})
+
 describe("setSessionWorkState", () => {
   const savedArchiveResponse = archiveBatchResponse
 

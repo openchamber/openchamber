@@ -60,6 +60,8 @@ import { useGuestActions } from '@/hooks/useGuestSurfaces';
 import { guestSessionActions, type GuestActionEntry } from '@/lib/guests/actions';
 import { runGuestSessionAction } from '@/lib/guests/session-action';
 import { SessionAiRenameMenuItem } from '@/components/session/SessionAiRenameMenuItem';
+import { ContinueWithModelDialog } from '@/components/chat/ContinueWithModelDialog';
+import { canContinueWithAnotherModel } from '@/sync/continue-with-model';
 import { handleSessionRenameKeyDown } from '@/components/session/sessionRenameKeyboard';
 import { useIsSessionAiRenamePending } from '@/sync/use-session-ai-rename';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -344,6 +346,16 @@ export const Header: React.FC = () => {
     return normalize(raw || '');
   }, [currentSession?.directory]);
   const isCurrentSessionAiRenaming = useIsSessionAiRenamePending(currentSessionId ?? '', sessionDirectory);
+  // The session the dialog was opened for; switching sessions does not redirect it.
+  const [continueWithModelTarget, setContinueWithModelTarget] = React.useState<{ sessionId: string; directory: string } | null>(null);
+  const canContinueCurrentSession = Boolean(sessionDirectory) && canContinueWithAnotherModel(
+    currentSessionId && currentSession ? { id: currentSessionId, parentID: currentSession.parentId ?? undefined } : null,
+  );
+  const openContinueWithModel = React.useCallback(() => {
+    // The directory the chat reads this session from, as the composer sends from it.
+    const directory = normalize(useSessionUIStore.getState().currentSessionDirectory || '') || sessionDirectory;
+    if (currentSessionId && directory) setContinueWithModelTarget({ sessionId: currentSessionId, directory });
+  }, [currentSessionId, sessionDirectory]);
 
   const draftDirectory = useSessionUIStore((state) => {
     if (!state.newSessionDraft?.open) {
@@ -957,6 +969,13 @@ export const Header: React.FC = () => {
             </Item>
           </SessionMenuItemHint>
         ) : null}
+        {isActive && canContinueCurrentSession ? (
+          <SessionMenuItemHint hint={t('chat.continueWithModel.menuHint')}>
+            <Item onClick={openContinueWithModel}>
+              <Icon name="arrow-left-right" className="me-1 size-4" />{t('chat.continueWithModel.action')}
+            </Item>
+          </SessionMenuItemHint>
+        ) : null}
         {hasElectronDesktopIPC ? (
           <Item onClick={() => openSessionInMiniChat(session.id, isActive ? currentSessionOpenDirectory : session.directory ?? '')}>
             <Icon name="picture-in-picture-2" className="me-1 size-4" />{t('sessions.sidebar.session.menu.openInMiniChat')}
@@ -1016,7 +1035,7 @@ export const Header: React.FC = () => {
         </SessionMenuItemHint>
       </>
     );
-  }, [copySessionIdFor, currentSession, currentSessionOpenDirectory, exportCurrentSession, hasElectronDesktopIPC, hasProjects, isChatContext, isCurrentSessionActive, isCurrentSessionMovingToWorktree, isVSCode, moveCurrentSessionToWorktree, openSessionInMiniChat, renderGuestSessionActionItems, sessionDirectory, t]);
+  }, [canContinueCurrentSession, copySessionIdFor, currentSession, currentSessionOpenDirectory, exportCurrentSession, hasElectronDesktopIPC, hasProjects, isChatContext, isCurrentSessionActive, isCurrentSessionMovingToWorktree, isVSCode, moveCurrentSessionToWorktree, openContinueWithModel, openSessionInMiniChat, renderGuestSessionActionItems, sessionDirectory, t]);
 
   const renderDesktop = () => (
     <div
@@ -1191,6 +1210,13 @@ export const Header: React.FC = () => {
                     <SessionMenuItemHint hint={t('sessions.sidebar.session.menuHint.copyId')}><DropdownMenuItem onClick={() => currentSessionId && copySessionIdFor(currentSessionId)}><Icon name="file-copy" className="me-1 size-4" />{t('sessions.sidebar.session.menu.copyId')}</DropdownMenuItem></SessionMenuItemHint>
                     <DropdownMenuSeparator />
                     <SessionMenuItemHint hint={t('sessions.sidebar.session.menuHint.exportMarkdown')}><DropdownMenuItem onClick={() => void exportCurrentSession()}><Icon name="download" className="me-1 size-4" />{t('sessions.sidebar.session.menu.exportMarkdown')}</DropdownMenuItem></SessionMenuItemHint>
+                    {canContinueCurrentSession ? (
+                      <SessionMenuItemHint hint={t('chat.continueWithModel.menuHint')}>
+                        <DropdownMenuItem onClick={openContinueWithModel}>
+                          <Icon name="arrow-left-right" className="me-1 size-4" />{t('chat.continueWithModel.action')}
+                        </DropdownMenuItem>
+                      </SessionMenuItemHint>
+                    ) : null}
                     {hasElectronDesktopIPC ? (
                       <DropdownMenuItem onClick={() => openSessionInMiniChat(currentSessionId, currentSessionOpenDirectory)}>
                         <Icon name="picture-in-picture-2" className="me-1 size-4" />{t('sessions.sidebar.session.menu.openInMiniChat')}
@@ -1365,6 +1391,14 @@ export const Header: React.FC = () => {
         onOpenChange={setMoveChatDialogOpen}
         onPick={moveCurrentChatToProject}
       />
+      {continueWithModelTarget ? (
+        <ContinueWithModelDialog
+          open
+          onOpenChange={(open) => { if (!open) setContinueWithModelTarget(null); }}
+          sessionId={continueWithModelTarget.sessionId}
+          directory={continueWithModelTarget.directory}
+        />
+      ) : null}
       <Dialog open={pendingHeaderRetentionAction !== null} onOpenChange={(open) => { if (!open) setPendingHeaderRetentionAction(null); }}>
         <DialogContent showCloseButton={false} className="max-w-sm gap-5">
           <DialogHeader>

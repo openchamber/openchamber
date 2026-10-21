@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
-import type { Message } from '@/lib/opencode/model';
-import { findRecordedTurnError, readLastMessageState, scheduleUnansweredRechecks } from './sessionErrorNoticeState';
+import type { AssistantMessage, Message } from '@/lib/opencode/model';
+import { findRecordedTurnError } from '@/lib/messages/assistantError';
+import { readLastMessageState, readScheduledRetry, scheduleUnansweredRechecks } from './sessionErrorNoticeState';
 
 // A user message never finishes a turn, so a stray `completed` on one — older
 // optimistic sends stamped `completed: 0` — must be ignored.
@@ -25,7 +26,7 @@ const assistantMessage = (time: { created: number; completed?: number }): Messag
 
 describe('readLastMessageState', () => {
   test('a stray completed: 0 on a user message is ignored in favour of created', () => {
-    expect(readLastMessageState(optimisticUserMessage)).toEqual({ role: 'user', timestamp: 1_000, hasError: false });
+    expect(readLastMessageState(optimisticUserMessage)).toEqual({ role: 'user', timestamp: 1_000, hasError: false, failed: false });
   });
 
   test('an unfinished assistant message uses created, a finished one uses completed', () => {
@@ -33,8 +34,40 @@ describe('readLastMessageState', () => {
     expect(readLastMessageState(assistantMessage({ created: 1_000, completed: 2_000 }))?.timestamp).toBe(2_000);
   });
 
+  test('a recorded error is a failure unless it is the user stopping the turn', () => {
+    const failed = { ...assistantMessage({ created: 1_000, completed: 2_000 }), error: { type: 'provider', message: 'model not found' } };
+    expect(readLastMessageState(failed)).toMatchObject({ hasError: true, failed: true });
+    const stopped = { ...assistantMessage({ created: 1_000, completed: 2_000 }), error: { type: 'MessageAbortedError', message: 'aborted' } };
+    expect(readLastMessageState(stopped)).toMatchObject({ hasError: true, failed: false });
+  });
+
   test('no message yields no state', () => {
     expect(readLastMessageState(null)).toBeNull();
+  });
+});
+
+describe('readScheduledRetry', () => {
+  const retry = { attempt: 3, at: 9_000, error: { type: 'provider', message: 'rate limited' } };
+  const retrying = (time: { created: number; completed?: number }): AssistantMessage => ({
+    id: 'msg_2',
+    sessionID: 'ses_1',
+    role: 'assistant',
+    modelID: 'model',
+    providerID: 'provider',
+    agent: 'build',
+    time,
+    retry,
+  });
+
+  test('the open step OpenCode will retry offers its attempt, time and error', () => {
+    expect(readScheduledRetry([optimisticUserMessage, retrying({ created: 2_000 })])).toEqual(retry);
+  });
+
+  test('no retry notice for a finished step, a step without a retry, or a prompt waiting for its reply', () => {
+    expect(readScheduledRetry([optimisticUserMessage, retrying({ created: 2_000, completed: 3_000 })])).toBeNull();
+    expect(readScheduledRetry([optimisticUserMessage, assistantMessage({ created: 2_000 })])).toBeNull();
+    expect(readScheduledRetry([retrying({ created: 2_000 }), optimisticUserMessage])).toBeNull();
+    expect(readScheduledRetry(undefined)).toBeNull();
   });
 });
 

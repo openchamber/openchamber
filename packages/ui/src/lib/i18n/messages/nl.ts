@@ -16,6 +16,7 @@ import { sessionNoticesI18n } from './session-notices.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
+import { continueWithModelI18n } from './continue-with-model.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
 import { sourceBoardI18n } from './source-board.i18n';
 import { projectActionsI18n } from './project-actions.i18n';
@@ -154,6 +155,7 @@ export const dict = {
   ...usageStatsI18n.nl,
   ...webSearchI18n.nl,
   ...sessionWarmingI18n.nl,
+  ...continueWithModelI18n.nl,
   ...isolatedSpacesI18n.nl,
   ...sourceBoardI18n.nl,
   ...projectActionsI18n.nl,

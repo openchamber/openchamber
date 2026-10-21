@@ -6,10 +6,12 @@ import {
   SettingsSection,
   SettingsFieldRow,
   SettingsCheckboxRow,
+  SettingsChipGroup,
   SETTINGS_CUSTOM_TRIGGER_CLASS,
   SETTINGS_SELECT_ROW_TRIGGER_CLASS,
   SETTINGS_OPTION_STACK_CLASS,
 } from '@/components/sections/shared/SettingsSection';
+import type { ContinueWorkMode } from '@/lib/opencode/model-handoff';
 import { SessionWarmingCheckbox } from './SessionWarmingCheckbox';
 import { SessionWarmingModeField } from './SessionWarmingModeField';
 import { PermissionDefaultModeField } from './PermissionDefaultModeField';
@@ -73,6 +75,8 @@ export const DefaultsSettings: React.FC = () => {
   const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
   const showDeletionDialog = useUIStore((state) => state.showDeletionDialog);
   const setShowDeletionDialog = useUIStore((state) => state.setShowDeletionDialog);
+  const continueWithModelMode = useUIStore((state) => state.continueWithModelMode);
+  const setContinueWithModelMode = useUIStore((state) => state.setContinueWithModelMode);
   const providers = useConfigStore((state) => state.providers);
   const modelsMetadata = useConfigStore((state) => state.modelsMetadata);
 
@@ -339,6 +343,21 @@ export const DefaultsSettings: React.FC = () => {
           {isVSCode ? null : <PermissionDefaultModeField agentName={defaultAgent} />}
           {/* VS Code has no OpenChamber server to warm chosen sessions: OpenCode's switch for all of them only. */}
           {isVSCode ? null : <SessionWarmingModeField />}
+          <SettingsFieldRow
+            settingsItem="sessions.continue-with-model"
+            label={t('settings.openchamber.defaults.field.continueWithModel')}
+            info={t('settings.openchamber.defaults.field.continueWithModelInfo')}
+          >
+            <SettingsChipGroup<ContinueWorkMode>
+              aria-label={t('settings.openchamber.defaults.field.continueWithModelAria')}
+              value={continueWithModelMode}
+              onChange={setContinueWithModelMode}
+              options={[
+                { value: 'stop', label: t('chat.continueWithModel.mode.stop') },
+                { value: 'keep', label: t('chat.continueWithModel.mode.keep') },
+              ]}
+            />
+          </SettingsFieldRow>
         </div>
 
         <div className={SETTINGS_OPTION_STACK_CLASS}>

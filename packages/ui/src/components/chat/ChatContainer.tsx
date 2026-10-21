@@ -60,6 +60,10 @@ import {
     withdrawComposerInsets,
 } from '@/components/chat/composer/state/composerInsetReaders';
 import { SessionErrorNotice } from '@/components/chat/SessionErrorNotice';
+import { SessionRetryNotice } from '@/components/chat/SessionRetryNotice';
+import { ContinueWithModelDialog } from '@/components/chat/ContinueWithModelDialog';
+import { ContinueWithModelContext } from '@/components/chat/continueWithModelContext';
+import { canContinueWithAnotherModel } from '@/sync/continue-with-model';
 import ScrollToBottomButton from './components/ScrollToBottomButton';
 import { PromptNavigatorRail } from './components/PromptNavigatorRail';
 import { useAuthSessionStore } from '@/lib/runtime-auth-expiry';
@@ -390,6 +394,7 @@ const ChatViewport = React.memo(({
     const listFooter = React.useMemo(() => (
         <>
             {/* Permissions and forms dock above the composer (`PermissionDock`, `FormDock`). */}
+            <SessionRetryNotice sessionId={currentSessionId} directory={directory} />
             <SessionErrorNotice sessionId={currentSessionId} directory={directory} />
 
             {/* Tail spacer. With a floating composer it reserves the band the
@@ -1194,6 +1199,21 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         readOnly,
     );
 
+    // "Continue with another model" belongs to the session this column shows.
+    // The dialog keeps the session it opened for, so switching sessions while
+    // it is open cannot redirect it.
+    const [continueTarget, setContinueTarget] = React.useState<{ sessionId: string; directory: string } | null>(null);
+    const continueWithModelAvailable = !promptReadOnly && canContinueWithAnotherModel(currentSession);
+    const openContinueWithModel = React.useMemo(
+        () => (continueWithModelAvailable && currentSessionId && effectiveSessionDirectory
+            ? () => setContinueTarget({ sessionId: currentSessionId, directory: effectiveSessionDirectory })
+            : null),
+        [continueWithModelAvailable, currentSessionId, effectiveSessionDirectory],
+    );
+    const closeContinueWithModel = React.useCallback((open: boolean) => {
+        if (!open) setContinueTarget(null);
+    }, []);
+
 
     // Selection policy reads the live selection, not the deferred one: right
     // after a click the deferred id still names the previous session (or
@@ -1817,6 +1837,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
 		    comment into this column's composer, never a sibling's. */}
 		<MobileCommentComposerContext.Provider value={mobileCommentComposer}>
 		<ChatQuoteHighlightContext.Provider value={chatQuoteHighlights}>
+		<ContinueWithModelContext.Provider value={openContinueWithModel}>
 		<ChatQuoteHighlightLayer
 			store={chatQuoteHighlights}
 			scrollNode={scrollNode}
@@ -1997,7 +2018,16 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                 isLoadingEarlier={timelineController.isLoadingOlder}
                 onLoadEarlier={handleLoadOlderClick}
             />
+            {continueTarget ? (
+                <ContinueWithModelDialog
+                    open
+                    onOpenChange={closeContinueWithModel}
+                    sessionId={continueTarget.sessionId}
+                    directory={continueTarget.directory}
+                />
+            ) : null}
         </div>
+        </ContinueWithModelContext.Provider>
         </ChatQuoteHighlightContext.Provider>
         </MobileCommentComposerContext.Provider>
         </ChatColumnExpandedInputContext.Provider>

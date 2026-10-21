@@ -636,6 +636,9 @@
     "sessionWorkEnabled": {
       "scope": "profile"
     },
+    "continueWithModelMode": {
+      "scope": "profile"
+    },
     "sessionReviewOfferEnabled": {
       "scope": "profile",
       "surfaces": [

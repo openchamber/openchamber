@@ -1,9 +1,26 @@
-import type { Message, StructuredError } from '@/lib/opencode/model';
+import type { AssistantMessage, Message } from '@/lib/opencode/model';
+import { getLastConversationMessage } from '@/lib/opencode/model';
+import { isStoppedTurnError } from '@/lib/messages/assistantError';
+
+/** A retry OpenCode scheduled for a step: the attempt it will make, when, and the error that caused it. */
+export type ScheduledRetry = NonNullable<AssistantMessage['retry']>;
+
+/**
+ * The retry OpenCode scheduled for the turn's latest step, while that step is
+ * still open. `session.retry.scheduled` puts it on the assistant message it will
+ * retry, and the next attempt clears it; a finished step keeps none.
+ */
+export const readScheduledRetry = (messages: readonly Message[] | undefined): ScheduledRetry | null => {
+  const last = getLastConversationMessage(messages);
+  return last?.role === 'assistant' && last.time.completed === undefined ? last.retry ?? null : null;
+};
 
 export type LastMessageState = {
   role: Message['role'];
   timestamp: number;
   hasError: boolean;
+  /** The error is a failure; a user's stop is recorded as an error too and is not one. */
+  failed: boolean;
 } | null;
 
 /**
@@ -23,24 +40,10 @@ export const readLastMessageState = (last: Message | null | undefined): LastMess
       role: last.role,
       timestamp: completed > 0 ? completed : last.time.created,
       hasError: Boolean(last.error),
+      failed: Boolean(last.error) && !isStoppedTurnError(last.error?.type, last.error?.message ?? ''),
     };
   }
-  return { role: last.role, timestamp: last.time.created, hasError: false };
-};
-
-/**
- * The error OpenCode recorded for the session's last turn (2.0.27+): the
- * newest `idle` record after the last prompt or reply decides, and only a
- * `failed` one carries an error. Older OpenCode records the outcome alone.
- */
-export const findRecordedTurnError = (messages: readonly Message[] | undefined): StructuredError | null => {
-  if (!messages) return null;
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index];
-    if (message.role === 'user' || message.role === 'assistant') return null;
-    if (message.role === 'idle') return message.outcome === 'failed' ? message.error ?? null : null;
-  }
-  return null;
+  return { role: last.role, timestamp: last.time.created, hasError: false, failed: false };
 };
 
 /**
