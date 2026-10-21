@@ -1,0 +1,227 @@
+{
+  "what": "Filesystem requests the built OpenChamber web app issued in the browser for one session message.",
+  "runtime": "OpenChamber 2.5.0 from packages/web/dist, Chromium 154.0.8037.0 headless, Linux x86_64",
+  "message": "These two must never be probed: `user@gmail.com` and `gpt-5.4`. / This real workspace path must still be probed and open: `src/components/Foo.tsx`. / An explicit markdown link must open through the viewer: [download](backup.7z)",
+  "workspace": "/tmp/opencode/5330-workspace (a real directory holding src/components/Foo.tsx and backup.7z)",
+  "note": "kind=probe is the annotation pass's existence check (optional=true); kind=viewer-read is the file viewer's own read, not a probe.",
+  "before": {
+    "build": "base 6491f51d (pre-PR)",
+    "browser": "154.0.8037.0",
+    "probes": [
+      "?path=/tmp/opencode/5330-workspace/user@gmail.com&optional=true",
+      "?path=/tmp/opencode/5330-workspace/gpt-5.4&optional=true",
+      "?path=/tmp/opencode/5330-workspace/src/components/Foo.tsx&optional=true",
+      "?path=/tmp/opencode/5330-workspace/backup.7z&optional=true"
+    ],
+    "annotatedFileLinks": [
+      "src/components/Foo.tsx",
+      "download"
+    ],
+    "popupsOpened": 0,
+    "markdownLinkOpenedInViewer": true,
+    "realPathOpenedInViewer": true,
+    "fsRequests": [
+      {
+        "method": "GET",
+        "path": "/api/fs/stat",
+        "query": "?path=/tmp/opencode/5330-workspace/user@gmail.com&optional=true",
+        "kind": "probe"
+      },
+      {
+        "method": "GET",
+        "path": "/api/fs/stat",
+        "query": "?path=/tmp/opencode/5330-workspace/gpt-5.4&optional=true",
+        "kind": "probe"
+      },
+      {
+        "method": "GET",
+        "path": "/api/fs/stat",
+        "query": "?path=/tmp/opencode/5330-workspace/src/components/Foo.tsx&optional=true",
+        "kind": "probe"
+      },
+      {
+        "method": "GET",
+        "path": "/api/fs/stat",
+        "query": "?path=/tmp/opencode/5330-workspace/backup.7z&optional=true",
+        "kind": "probe"
+      },
+      {
+        "method": "GET",
+        "path": "/api/fs/stat",
+        "query": "?path=/tmp/opencode/5330-workspace/src/components/Foo.tsx",
+        "kind": "viewer-read"
+      },
+      {
+        "method": "GET",
+        "path": "/api/fs/stat",
+        "query": "?path=/tmp/opencode/5330-workspace/src/components/Foo.tsx",
+        "kind": "viewer-read"
+      },
+      {
+        "method": "GET",
+        "path": "/api/fs/stat",
+        "query": "?path=/tmp/opencode/5330-workspace/src/components/Foo.tsx",
+        "kind": "viewer-read"
+      },
+      {
+        "method": "GET",
+        "path": "/api/fs/stat",
+        "query": "?path=/tmp/opencode/5330-workspace/src/components/Foo.tsx",
+        "kind": "viewer-read"
+      },
+      {
+        "method": "GET",
+        "path": "/api/fs/stat",
+        "query": "?path=/tmp/opencode/5330-workspace/src/components/Foo.tsx",
+        "kind": "viewer-read"
+      },
+      {
+        "method": "GET",
+        "path": "/api/fs/stat",
+        "query": "?path=/tmp/opencode/5330-workspace/src/components/Foo.tsx",
+        "kind": "viewer-read"
+      },
+      {
+        "method": "GET",
+        "path": "/api/fs/stat",
+        "query": "?path=/tmp/opencode/5330-workspace/src/components/Foo.tsx",
+        "kind": "viewer-read"
+      },
+      {
+        "method": "GET",
+        "path": "/api/fs/stat",
+        "query": "?path=/tmp/opencode/5330-workspace/src/components/Foo.tsx",
+        "kind": "viewer-read"
+      },
+      {
+        "method": "GET",
+        "path": "/api/fs/stat",
+        "query": "?path=/tmp/opencode/5330-workspace/backup.7z",
+        "kind": "viewer-read"
+      },
+      {
+        "method": "GET",
+        "path": "/api/fs/stat",
+        "query": "?path=/tmp/opencode/5330-workspace/backup.7z",
+        "kind": "viewer-read"
+      },
+      {
+        "method": "GET",
+        "path": "/api/fs/stat",
+        "query": "?path=/tmp/opencode/5330-workspace/backup.7z",
+        "kind": "viewer-read"
+      },
+      {
+        "method": "GET",
+        "path": "/api/fs/stat",
+        "query": "?path=/tmp/opencode/5330-workspace/backup.7z",
+        "kind": "viewer-read"
+      },
+      {
+        "method": "GET",
+        "path": "/api/fs/read",
+        "query": "?path=/tmp/opencode/5330-workspace/src/components/Foo.tsx",
+        "kind": "file-viewer-read"
+      }
+    ]
+  },
+  "after": {
+    "build": "PR branch 030a5e62",
+    "browser": "154.0.8037.0",
+    "probes": [
+      "?path=/tmp/opencode/5330-workspace/src/components/Foo.tsx&optional=true"
+    ],
+    "annotatedFileLinks": [
+      "src/components/Foo.tsx"
+    ],
+    "popupsOpened": 0,
+    "markdownLinkOpenedInViewer": true,
+    "realPathOpenedInViewer": true,
+    "fsRequests": [
+      {
+        "method": "GET",
+        "path": "/api/fs/stat",
+        "query": "?path=/tmp/opencode/5330-workspace/src/components/Foo.tsx&optional=true",
+        "kind": "probe"
+      },
+      {
+        "method": "GET",
+        "path": "/api/fs/stat",
+        "query": "?path=/tmp/opencode/5330-workspace/src/components/Foo.tsx",
+        "kind": "viewer-read"
+      },
+      {
+        "method": "GET",
+        "path": "/api/fs/stat",
+        "query": "?path=/tmp/opencode/5330-workspace/src/components/Foo.tsx",
+        "kind": "viewer-read"
+      },
+      {
+        "method": "GET",
+        "path": "/api/fs/stat",
+        "query": "?path=/tmp/opencode/5330-workspace/src/components/Foo.tsx",
+        "kind": "viewer-read"
+      },
+      {
+        "method": "GET",
+        "path": "/api/fs/stat",
+        "query": "?path=/tmp/opencode/5330-workspace/src/components/Foo.tsx",
+        "kind": "viewer-read"
+      },
+      {
+        "method": "GET",
+        "path": "/api/fs/stat",
+        "query": "?path=/tmp/opencode/5330-workspace/src/components/Foo.tsx",
+        "kind": "viewer-read"
+      },
+      {
+        "method": "GET",
+        "path": "/api/fs/stat",
+        "query": "?path=/tmp/opencode/5330-workspace/src/components/Foo.tsx",
+        "kind": "viewer-read"
+      },
+      {
+        "method": "GET",
+        "path": "/api/fs/stat",
+        "query": "?path=/tmp/opencode/5330-workspace/src/components/Foo.tsx",
+        "kind": "viewer-read"
+      },
+      {
+        "method": "GET",
+        "path": "/api/fs/stat",
+        "query": "?path=/tmp/opencode/5330-workspace/src/components/Foo.tsx",
+        "kind": "viewer-read"
+      },
+      {
+        "method": "GET",
+        "path": "/api/fs/stat",
+        "query": "?path=/tmp/opencode/5330-workspace/backup.7z",
+        "kind": "viewer-read"
+      },
+      {
+        "method": "GET",
+        "path": "/api/fs/stat",
+        "query": "?path=/tmp/opencode/5330-workspace/backup.7z",
+        "kind": "viewer-read"
+      },
+      {
+        "method": "GET",
+        "path": "/api/fs/stat",
+        "query": "?path=/tmp/opencode/5330-workspace/backup.7z",
+        "kind": "viewer-read"
+      },
+      {
+        "method": "GET",
+        "path": "/api/fs/stat",
+        "query": "?path=/tmp/opencode/5330-workspace/backup.7z",
+        "kind": "viewer-read"
+      },
+      {
+        "method": "GET",
+        "path": "/api/fs/read",
+        "query": "?path=/tmp/opencode/5330-workspace/src/components/Foo.tsx",
+        "kind": "file-viewer-read"
+      }
+    ]
+  }
+}
