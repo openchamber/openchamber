@@ -315,7 +315,7 @@ Installer output is discarded, not forwarded to clients or logs.
 - `createSessionActivityProbe({ buildOpenCodeUrl, getOpenCodeAuthHeaders, timeoutMs })`: whether a session's turn really ended. A parent goes idle while a background subagent works and runs again when OpenCode hands the result back. `fetchActiveSessionStatuses()` reads `/api/session/active`, `fetchChildSessionIds(id)` pages `GET /api/session?parentID=`, `hasWorkingChildren(id, statuses)` combines them. Every read answers `null` when OpenCode could not be asked. Used by the goal loop (waits) and the notification runtime (stays silent on the pause).
 
 ## Public exports (session-runtime.js)
-- `createSessionRuntime({ writeSseEvent, getNotificationClients, broadcastEvent? })`: creates runtime-owned state machine and APIs for session status.
+- `createSessionRuntime({ writeSseEvent, getNotificationClients, broadcastEvent?, buildOpenCodeUrl?, getOpenCodeAuthHeaders?, fetchImpl? })`: creates runtime-owned state machine and APIs for session status. When `buildOpenCodeUrl` and `getOpenCodeAuthHeaders` are provided, every session settled by `interruptBusySessionsAfterRestart()` also gets a restart-resume fallback armed (see below); without them the fallback is off and the runtime behaves as before.
 - Returned API:
   - `processOpenCodeSsePayload(payload)`
   - `getSessionActivitySnapshot()`
@@ -328,13 +328,15 @@ Installer output is discarded, not forwarded to clients or logs.
   - `markSessionUnviewed(sessionId, clientId)`
   - `markUserMessageSent(sessionId)`
   - `resetAllSessionActivityToIdle()`
-  - `interruptBusySessionsAfterRestart()`: settles every session whose authoritative status is `busy`/`retry` or whose activity phase is still busy, broadcasts `openchamber:session-status` idle plus an OpenCode-shaped `session.error`, resets leftover activity/cooldowns, and returns the interrupted session IDs in stable order.
+  - `interruptBusySessionsAfterRestart()`: settles every session whose authoritative status is `busy`/`retry` or whose activity phase is still busy, broadcasts `openchamber:session-status` idle plus an OpenCode-shaped `session.error`, resets leftover activity/cooldowns, returns the interrupted session IDs in stable order, and - when OpenCode access was injected - arms the restart-resume fallback for each of them.
+
+Restart-resume fallback: OpenCode's own boot sweep (`SessionRestart`) normally resumes an orphaned turn, but it only runs once the session's location has booted, which in the field can lag the restart by several minutes or not happen at all. So after `RESTART_RESUME_GRACE_MS` (60 s, exported) the runtime re-checks each settled session: if its authoritative status is already `busy`/`retry` (the sweep or the user resumed it, also detected live through the state machine) the fallback is dropped; otherwise it posts OpenChamber's own continuation to `POST /api/session/:id/synthetic` with `resume: true`, a stable message id per restart (a retry after a lost response lands as 409, not a duplicate), and `metadata.notice: 'opencode-restart'`. Up to 3 attempts at 15 s spacing; 404 (session deleted) and 409 stop quietly, other failures are warned and retried. `dispose()` clears pending fallback timers.
   - `dispose()`
 
 The runtime maintains active-session count incrementally from idempotent activity phase transitions. Upstream stall-timeout and lifecycle health checks read it in O(1); the hourly cleanup removes activity phases older than 24 hours without broadcasting synthetic state transitions. Snapshot generation remains reserved for the session-activity API.
 
 ## Public exports (lifecycle.js)
-- `createOpenCodeLifecycleRuntime(dependencies)`: creates lifecycle runtime for managed/external OpenCode process orchestration. The optional `onOpenCodeRestarted` dependency (default `null`) is fired after a successful managed restart. `index.js` rebinds event-stream readers to the possibly-new port (#2638), then calls `interruptBusySessionsAfterRestart()` and broadcasts one `opencode-restart-interrupted` UI notification when interrupted turns exist (#2943).
+- `createOpenCodeLifecycleRuntime(dependencies)`: creates lifecycle runtime for managed/external OpenCode process orchestration. The optional `onOpenCodeRestarted` dependency (default `null`) is fired after a successful managed restart. `index.js` rebinds event-stream readers to the possibly-new port (#2638), then calls `interruptBusySessionsAfterRestart()` (which arms the restart-resume fallback) and broadcasts one `opencode-restart-interrupted` UI notification when interrupted turns exist (#2943). The notification tells the user the interrupted chat resumes automatically, with sending a message as the manual fallback.
 - Returned API:
   - `startOpenCode()`
   - `restartOpenCode()`
