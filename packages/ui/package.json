@@ -96,7 +96,7 @@
     "@types/react": "^19.1.10",
     "@types/react-dom": "^19.1.7",
     "@remixicon/react": "^4.7.0",
-    "@vitejs/plugin-react": "^5.0.0",
+    "@vitejs/plugin-react": "^6.0.0",
     "autoprefixer": "^10.4.21",
     "concurrently": "^9.2.1",
     "cors": "^2.8.5",

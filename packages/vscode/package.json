@@ -295,7 +295,7 @@
   },
   "devDependencies": {
     "@types/vscode": "^1.85.0",
-    "@vitejs/plugin-react": "^5.0.0",
+    "@vitejs/plugin-react": "^6.0.0",
     "@vscode/vsce": "^4.0.0",
     "concurrently": "^9.2.1",
     "esbuild": "^0.28.0",
