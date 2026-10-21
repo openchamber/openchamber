@@ -39,6 +39,13 @@ const SHORTCUT_GROUPS = {
       settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.focus_input.label',
     },
     {
+      id: 'search_prompt_history',
+      defaultBinding: 'mod+arrowup',
+      customizable: true,
+      settingsLabelKey:
+        'settings.openchamber.keyboardShortcuts.action.search_prompt_history.label',
+    },
+    {
       id: 'open_timeline_dialog',
       defaultBinding: 'mod+k t',
       customizable: true,

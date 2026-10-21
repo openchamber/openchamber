@@ -3859,4 +3859,14 @@ export const dict = {
   'sessions.scheduledTasks.dialog.toast.alreadyRunning': 'Diese Aufgabe läuft bereits',
   'sessions.scheduledTasks.dialog.toast.alreadyQueued': 'Diese Aufgabe wartet bereits in der Warteschlange und läuft, sobald ein Platz frei wird',
   'chat.modelControls.agentFavoriteAdd': 'Zu Favoriten hinzufügen. Mit Favoriten wechselt Tab nur zwischen diesen',
+  'chat.promptHistorySearch.title': "Prompt-Verlauf durchsuchen",
+  'chat.promptHistorySearch.searchPlaceholder': "Gespeicherte Prompts durchsuchen",
+  'chat.promptHistorySearch.close': "Prompt-Verlaufssuche schließen",
+  'chat.promptHistorySearch.empty': "Noch keine Prompts zum Durchsuchen",
+  'chat.promptHistorySearch.noMatches': "Keine passenden Prompts",
+  'chat.promptHistorySearch.attachmentsSingle': "{count} Anhang",
+  'chat.promptHistorySearch.attachmentsPlural': "{count} Anhänge",
+  'chat.promptHistorySearch.hint': "↑ ↓ zum Durchsuchen · Enter zum Laden · Esc zum Schließen",
+  'helpDialog.item.searchPromptHistory': "Prompt-Verlauf durchsuchen (Chat-Eingabe)",
+
 };

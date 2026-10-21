@@ -3862,4 +3862,14 @@ export const dict: Record<I18nKey, string> = {
   'sessions.scheduledTasks.dialog.toast.alreadyRunning': 'Esta tarea ya tiene una ejecución en curso',
   'sessions.scheduledTasks.dialog.toast.alreadyQueued': 'Esta tarea ya está en la cola y se ejecutará cuando haya un hueco libre',
   'chat.modelControls.agentFavoriteAdd': 'Añadir a favoritos. Con favoritos, Tab alterna solo entre ellos',
+  'chat.promptHistorySearch.title': "Buscar en el historial de indicaciones",
+  'chat.promptHistorySearch.searchPlaceholder': "Buscar indicaciones recordadas",
+  'chat.promptHistorySearch.close': "Cerrar la búsqueda del historial de indicaciones",
+  'chat.promptHistorySearch.empty': "Aún no hay indicaciones para buscar",
+  'chat.promptHistorySearch.noMatches': "No hay indicaciones coincidentes",
+  'chat.promptHistorySearch.attachmentsSingle': "{count} archivo adjunto",
+  'chat.promptHistorySearch.attachmentsPlural': "{count} archivos adjuntos",
+  'chat.promptHistorySearch.hint': "↑ ↓ para explorar · Enter para cargar · Esc para cerrar",
+  'helpDialog.item.searchPromptHistory': "Buscar en el historial de indicaciones (entrada de chat)",
+
 };

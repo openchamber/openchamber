@@ -2606,4 +2606,6 @@ export const settingsDict = {
   'settings.agents.sidebar.toast.agentEnabled': '{name} vuelve a estar activado',
   'settings.agents.sidebar.toast.disableFailed': 'No se pudo desactivar el agente: no se pudo escribir su archivo de configuración',
   'settings.agents.sidebar.toast.enableFailed': 'No se pudo activar el agente: no se pudo escribir su archivo de configuración',
+  'settings.openchamber.keyboardShortcuts.action.search_prompt_history.label': "Buscar en el historial de indicaciones",
+
 } as const;

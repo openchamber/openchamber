@@ -3861,6 +3861,16 @@ export const dict = {
   'sessions.scheduledTasks.dialog.toast.alreadyRunning': 'This task already has a run in progress',
   'sessions.scheduledTasks.dialog.toast.alreadyQueued': 'This task is already waiting in the queue and will run when a slot frees up',
   'chat.modelControls.agentFavoriteAdd': 'Add to favorites. With favorites, Tab cycles through them only',
+  'chat.promptHistorySearch.title': "Search prompt history",
+  'chat.promptHistorySearch.searchPlaceholder': "Search remembered prompts",
+  'chat.promptHistorySearch.close': "Close prompt history search",
+  'chat.promptHistorySearch.empty': "No prompts to search yet",
+  'chat.promptHistorySearch.noMatches': "No matching prompts",
+  'chat.promptHistorySearch.attachmentsSingle': "{count} attachment",
+  'chat.promptHistorySearch.attachmentsPlural': "{count} attachments",
+  'chat.promptHistorySearch.hint': "↑ ↓ to browse · Enter to load · Esc to close",
+  'helpDialog.item.searchPromptHistory': "Search prompt history (chat input)",
+
 } as const;
 
 export type I18nKey = keyof typeof dict;

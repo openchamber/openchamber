@@ -3861,4 +3861,14 @@ export const dict: Record<I18nKey, string> = {
   'sessions.scheduledTasks.dialog.toast.alreadyRunning': 'このタスクはすでに実行中です',
   'sessions.scheduledTasks.dialog.toast.alreadyQueued': 'このタスクはすでにキューで待機中です。空きができ次第実行されます',
   'chat.modelControls.agentFavoriteAdd': 'お気に入りに追加。お気に入りがあると、Tab はその中だけを切り替えます',
+  'chat.promptHistorySearch.title': "プロンプト履歴を検索",
+  'chat.promptHistorySearch.searchPlaceholder': "記憶したプロンプトを検索",
+  'chat.promptHistorySearch.close': "プロンプト履歴の検索を閉じる",
+  'chat.promptHistorySearch.empty': "検索するプロンプトはまだありません",
+  'chat.promptHistorySearch.noMatches': "一致するプロンプトはありません",
+  'chat.promptHistorySearch.attachmentsSingle': "添付ファイル {count} 件",
+  'chat.promptHistorySearch.attachmentsPlural': "添付ファイル {count} 件",
+  'chat.promptHistorySearch.hint': "↑ ↓ で閲覧 · Enter で読み込み · Esc で閉じる",
+  'helpDialog.item.searchPromptHistory': "プロンプト履歴を検索（チャット入力）",
+
 };

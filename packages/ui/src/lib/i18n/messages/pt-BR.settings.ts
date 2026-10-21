@@ -2606,4 +2606,6 @@ export const settingsDict = {
   'settings.agents.sidebar.toast.agentEnabled': '{name} foi ativado de novo',
   'settings.agents.sidebar.toast.disableFailed': 'Não foi possível desativar o agente: o arquivo de configuração não pôde ser gravado',
   'settings.agents.sidebar.toast.enableFailed': 'Não foi possível ativar o agente: o arquivo de configuração não pôde ser gravado',
+  'settings.openchamber.keyboardShortcuts.action.search_prompt_history.label': "Pesquisar histórico de prompts",
+
 } as const;

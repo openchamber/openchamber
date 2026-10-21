@@ -3866,4 +3866,14 @@ export const dict: Record<I18nKey, string> = {
   'sessions.scheduledTasks.dialog.toast.alreadyRunning': 'To zadanie już trwa',
   'sessions.scheduledTasks.dialog.toast.alreadyQueued': 'To zadanie już czeka w kolejce i uruchomi się, gdy zwolni się miejsce',
   'chat.modelControls.agentFavoriteAdd': 'Dodaj do ulubionych. Gdy są ulubione, Tab przełącza tylko między nimi',
+  'chat.promptHistorySearch.title': "Przeszukaj historię poleceń",
+  'chat.promptHistorySearch.searchPlaceholder': "Szukaj zapamiętanych poleceń",
+  'chat.promptHistorySearch.close': "Zamknij wyszukiwanie historii poleceń",
+  'chat.promptHistorySearch.empty': "Nie ma jeszcze poleceń do przeszukania",
+  'chat.promptHistorySearch.noMatches': "Brak pasujących poleceń",
+  'chat.promptHistorySearch.attachmentsSingle': "{count} załącznik",
+   'chat.promptHistorySearch.attachmentsPlural': "Załączniki: {count}",
+  'chat.promptHistorySearch.hint': "↑ ↓ aby przeglądać · Enter aby wczytać · Esc aby zamknąć",
+  'helpDialog.item.searchPromptHistory': "Przeszukaj historię poleceń (pole czatu)",
+
 } as const;

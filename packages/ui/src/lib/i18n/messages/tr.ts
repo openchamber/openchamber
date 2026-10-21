@@ -3859,4 +3859,14 @@ export const dict = {
   'sessions.scheduledTasks.dialog.toast.alreadyRunning': 'Bu görevin bir çalıştırması zaten sürüyor',
   'sessions.scheduledTasks.dialog.toast.alreadyQueued': 'Bu görev zaten kuyrukta bekliyor; yer açılınca çalışacak',
   'chat.modelControls.agentFavoriteAdd': 'Favorilere ekle. Favori varsa Tab yalnızca onlar arasında geçiş yapar',
+  'chat.promptHistorySearch.title': "İstem geçmişinde ara",
+  'chat.promptHistorySearch.searchPlaceholder': "Hatırlanan istemlerde ara",
+  'chat.promptHistorySearch.close': "İstem geçmişi aramasını kapat",
+  'chat.promptHistorySearch.empty': "Henüz aranacak istem yok",
+  'chat.promptHistorySearch.noMatches': "Eşleşen istem yok",
+  'chat.promptHistorySearch.attachmentsSingle': "{count} ek",
+  'chat.promptHistorySearch.attachmentsPlural': "{count} ek",
+  'chat.promptHistorySearch.hint': "↑ ↓ ile gezin · Enter ile yükle · Esc ile kapat",
+  'helpDialog.item.searchPromptHistory': "İstem geçmişinde ara (sohbet girişi)",
+
 };

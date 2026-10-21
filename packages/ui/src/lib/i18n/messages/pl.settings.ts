@@ -2607,4 +2607,6 @@ export const settingsDict = {
   'settings.agents.sidebar.toast.agentEnabled': '{name} jest znowu włączony',
   'settings.agents.sidebar.toast.disableFailed': 'Nie udało się wyłączyć agenta: nie można zapisać jego pliku konfiguracji',
   'settings.agents.sidebar.toast.enableFailed': 'Nie udało się włączyć agenta: nie można zapisać jego pliku konfiguracji',
+  'settings.openchamber.keyboardShortcuts.action.search_prompt_history.label': "Przeszukaj historię poleceń",
+
 };
