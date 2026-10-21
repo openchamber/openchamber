@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fingerprintRemoteUrl, redactRemoteUrl } from '../source-control/url-redaction.js';
 import { normalizeSourceControlProviderInstance } from '../source-control/provider-instance.js';
-import { isSourceControlProvider, providerCredentialSecret, providerOrigin } from '../source-control/providers.js';
+import { isRegisteredSourceControlProvider, providerCredentialSecret, providerOrigin } from '../source-control/providers.js';
 import { createHttpsCredentialReference, normalizeGitRemoteEndpoint } from './credential-resolver.js';
 
 const OPERATIONS = ['push', 'fetch', 'pull', 'delete-remote-branch', 'sync', 'clone', 'checkout-hydration'];
@@ -144,7 +144,7 @@ const parseHydrationTransfers = (value, requirements) => {
 const parseCloneProviderAccount = (value, parsedEndpoint) => {
   if (value === undefined) return null;
   if (!isPlainObject(value) || !hasExactKeys(value, ['provider', 'instance', 'accountId'])
-    || !isSourceControlProvider(value.provider)) throw planError('Provider account is invalid');
+    || !isRegisteredSourceControlProvider(value.provider)) throw planError('Provider account is invalid');
   let instance;
   try { instance = normalizeSourceControlProviderInstance(value.provider, value.instance); }
   catch { throw planError('Provider account instance is invalid'); }
@@ -698,7 +698,7 @@ export function createNetworkOperationPlanner({
         if (Object.hasOwn(input, 'sshCredentialId')) throw planError('Managed SSH credentials require SSH');
         const account = input.credentialAccount;
         if (!isPlainObject(account) || !hasExactKeys(account, ['provider', 'instance', 'accountId'])
-          || !isSourceControlProvider(account.provider)) throw planError('An explicit credential account is required');
+          || !isRegisteredSourceControlProvider(account.provider)) throw planError('An explicit credential account is required');
         let instance;
         try { instance = normalizeSourceControlProviderInstance(account.provider, account.instance); }
         catch { throw planError('Credential account instance is invalid'); }

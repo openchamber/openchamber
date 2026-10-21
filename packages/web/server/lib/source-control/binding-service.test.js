@@ -626,6 +626,13 @@ describe('narrow provider association mutations', () => {
     expect(created.binding).toMatchObject({ providers: [provider], remotes: [], auxiliary: [], revision: 4 });
   });
 
+  it('refuses to persist a provider whose module this build does not register', async () => {
+    const { service, input } = await setup();
+    const gitea = { provider: 'gitea', instance: 'https://gitea.example.com', accountId: 'gitea#4', primaryRemote: 'mirror' };
+    await expect(service.mutateProvider({ ...input, operation: 'add', provider: gitea }))
+      .rejects.toMatchObject({ code: 'INVALID_SOURCE_CONTROL_BINDING' });
+  });
+
   it('rejects forged provider repository metadata and provider hosts', async () => {
     const { service, store, before, input, resolveRepository } = await setup();
     await expect(service.mutateProvider({ ...input, operation: 'add', provider: {

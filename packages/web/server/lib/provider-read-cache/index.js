@@ -22,7 +22,6 @@ const MAX_CACHED_BYTES = 2 * 1024 * 1024;
 const ROUTES = [
   { prefix: '/api/source-control/github', provider: 'github' },
   { prefix: '/api/source-control/gitlab', provider: 'gitlab' },
-  { prefix: '/api/source-control/gitea', provider: 'gitea' },
   { prefix: '/api/linear', provider: 'linear' },
 ];
 

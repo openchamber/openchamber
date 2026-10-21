@@ -446,12 +446,14 @@ describe('createWebSourceControlAPI', () => {
       instances: [
         { provider: 'github', instance: 'https://GitHub.com/' },
         { provider: 'gitlab', instance: 'gitlab.example.com' },
+        { provider: 'gitea', instance: 'Gitea.Example.com' },
       ],
     }));
 
     await expect(createWebSourceControlAPI({ fetch: runtimeFetchMock }).authInstances()).resolves.toEqual([
       { provider: 'github', instance: 'github.com' },
       { provider: 'gitlab', instance: 'https://gitlab.example.com' },
+      { provider: 'gitea', instance: 'https://gitea.example.com' },
     ]);
     expect(runtimeFetchMock).toHaveBeenCalledWith('/api/source-control/instances', {
       headers: { Accept: 'application/json' },

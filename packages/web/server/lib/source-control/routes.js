@@ -32,6 +32,9 @@ const sendBindingError = (res, error) => {
   if (error?.code === 'RUNTIME_UNSUPPORTED') {
     return res.status(501).json({ error: error.message || 'Source control operation is unavailable', code: error.code });
   }
+  if (error?.code === 'UNSUPPORTED_SOURCE_CONTROL_PROVIDER') {
+    return res.status(error.status ?? 501).json({ error: error.message, code: error.code });
+  }
   if (error?.code === 'SOURCE_CONTROL_BINDING_STALE'
     || error?.code === 'SOURCE_CONTROL_BINDING_REPOSITORY_MISMATCH') {
     return res.status(409).json({ error: error.message, code: error.code, current: error.current });

@@ -12,6 +12,18 @@ export const SOURCE_CONTROL_PROVIDERS = Object.freeze(['github', 'gitlab', 'gite
 
 export const isSourceControlProvider = (value) => SOURCE_CONTROL_PROVIDERS.includes(value);
 
+/**
+ * Providers whose module is registered in this build.
+ *
+ * Reads accept every provider in the contract, so a store written by a newer
+ * build stays readable. Writes and transports use this shorter list: until a
+ * provider has routes, persisting a binding for it would promise a repository
+ * access nothing can answer, and older builds would reject the whole store.
+ */
+export const REGISTERED_SOURCE_CONTROL_PROVIDERS = Object.freeze(['github', 'gitlab']);
+
+export const isRegisteredSourceControlProvider = (value) => REGISTERED_SOURCE_CONTROL_PROVIDERS.includes(value);
+
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
 
 const normalizeGitHubInstance = (value) => {
@@ -137,5 +149,5 @@ export const providerCredentialUsername = (provider, account) => {
 /** Provider accepted by the contract, but its module is not wired up yet. */
 export const unsupportedProviderError = (provider) => Object.assign(
   new Error(`Source control provider ${provider} is not available`),
-  { code: 'UNSUPPORTED_SOURCE_CONTROL_PROVIDER' },
+  { code: 'UNSUPPORTED_SOURCE_CONTROL_PROVIDER', status: 501 },
 );

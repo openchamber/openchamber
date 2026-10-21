@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseBinding } from './binding-contract.js';
+import { parseBinding, parseBindingStore } from './binding-contract.js';
 
 const binding = (provider, instance) => ({
   repositoryId: 'repo_one',
@@ -32,5 +32,10 @@ describe('source-control binding contract', () => {
 
   it('rejects a provider the registry does not know', () => {
     expect(() => parseBinding(binding('bitbucket', 'https://example.com'))).toThrow();
+  });
+
+  it('reads a store that carries a provider this build has no module for', () => {
+    const stored = { version: 2, repositories: { repo_one: { revision: 1, binding: binding('gitea', 'https://example.com') } } };
+    expect(parseBindingStore(stored).repositories.repo_one.binding.providers[0].provider).toBe('gitea');
   });
 });

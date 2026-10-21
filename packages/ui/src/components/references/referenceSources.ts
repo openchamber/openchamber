@@ -107,7 +107,6 @@ function pickReadContext(
 ): ReadContextState {
     const context = binding.contexts.find((candidate) => candidate.provider === 'github')
         ?? binding.contexts.find((candidate) => candidate.provider === 'gitlab')
-        ?? binding.contexts.find((candidate) => candidate.provider === 'gitea')
         ?? null;
     if (context) return context;
     if (binding.status === 'error') return 'missing';
@@ -151,7 +150,7 @@ export function useRepositoryHost(directory: string | null): SourceControlIdenti
     const instance = context?.instance ?? null;
     return React.useMemo(() => {
         if (provider && instance) return { provider, instance };
-        return hosts.find((host) => host.provider === 'github') ?? hosts.find((host) => host.provider === 'gitlab') ?? hosts.find((host) => host.provider === 'gitea') ?? null;
+        return hosts.find((host) => host.provider === 'github') ?? hosts.find((host) => host.provider === 'gitlab') ?? null;
     }, [hosts, instance, provider]);
 }
 
@@ -212,8 +211,7 @@ export function useRepositoryReferenceProvider(directory: string | null): Source
         const providers = new Set<SourceControlProvider>(binding.contexts.map((context) => context.provider));
         if (!providers.size) for (const host of hosts) providers.add(host.provider);
         if (providers.has('github')) return 'github';
-        if (providers.has('gitlab')) return 'gitlab';
-        return providers.has('gitea') ? 'gitea' : null;
+        return providers.has('gitlab') ? 'gitlab' : null;
     }, [binding.contexts, hosts]);
     React.useEffect(() => {
         if (known) rememberRepositoryProvider(runtimeKey, projectPath, known);

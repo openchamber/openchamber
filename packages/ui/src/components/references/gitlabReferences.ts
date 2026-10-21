@@ -109,7 +109,7 @@ export const fetchGitLabReferencePage = async (
     // A number or a link names one item, as on GitHub: it is read, not
     // searched for (GitLab's search matches titles and descriptions only).
     const lookup = kind === 'pull' ? parseChangeRequestReference(text) : parseIssueReference(text);
-    if (lookup && lookup.identity?.provider === 'gitlab') {
+    if (lookup && lookup.identity?.provider !== 'github' && lookup.identity?.provider !== 'gitea') {
         if (page > 1) return { kind: 'page', items: [], cursor: null, hasMore: false };
         if (kind === 'pull') {
             const found = await reads.changeRequestContext(context, lookup.number, lookup.project ? { project: lookup.project } : undefined);

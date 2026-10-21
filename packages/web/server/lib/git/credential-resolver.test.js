@@ -43,6 +43,26 @@ describe('Git credential resolver', () => {
     expect(readGitLabAccount).not.toHaveBeenCalled();
     expect(lookupManagedSshKey).not.toHaveBeenCalled();
   });
+
+  it('refuses a gitea credential instead of reading the GitLab account store', async () => {
+    const readGitHubAccount = vi.fn();
+    const readGitLabAccount = vi.fn();
+    const resolver = createGitCredentialResolver({ readGitHubAccount, readGitLabAccount });
+    const credentialId = createHttpsCredentialReference({
+      provider: 'gitea',
+      instance: 'https://gitea.example.com',
+      credentialId: 'gitea#1',
+      credentialRevision: 1,
+      providerUserId: 'https://gitea.example.com#1',
+    });
+    await expect(resolver.resolve({
+      mode: 'managed',
+      credentialId,
+      endpoint: normalizeGitRemoteEndpoint('https://gitea.example.com/owner/repo.git'),
+    })).rejects.toMatchObject({ code: 'UNSUPPORTED_SOURCE_CONTROL_PROVIDER' });
+    expect(readGitHubAccount).not.toHaveBeenCalled();
+    expect(readGitLabAccount).not.toHaveBeenCalled();
+  });
   it('normalizes HTTPS, ssh URLs, and scp-style remotes to exact credential endpoints', () => {
     expect(normalizeGitRemoteEndpoint('https://Example.com:8443/group/repo.git')).toEqual({
       protocol: 'https', host: 'example.com', port: 8443, path: 'group/repo.git',

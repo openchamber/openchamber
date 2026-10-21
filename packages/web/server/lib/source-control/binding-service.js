@@ -1,6 +1,6 @@
 import { isPlainObject, isString } from '../shared/guards.js';
 import { normalizeSourceControlProviderInstance } from './provider-instance.js';
-import { isSourceControlProvider, providerCredentialSecret, providerOrigin, providerUserIdFor } from './providers.js';
+import { isRegisteredSourceControlProvider, isSourceControlProvider, providerCredentialSecret, providerOrigin, providerUserIdFor } from './providers.js';
 import { resolvePrivateRepositoryIdentity } from './repository-identity.js';
 import { fingerprintRemoteUrl, redactRemoteUrl } from './url-redaction.js';
 import { createHttpsCredentialReference, normalizeGitRemoteEndpoint, parseGitCredentialReference } from '../git/credential-resolver.js';
@@ -50,7 +50,7 @@ const parseProviders = (value, repositoryRemotes) => {
     if (!isPlainObject(provider) || !hasExactKeys(provider,
       ['provider', 'instance', 'accountId', 'primaryRemote'], ['repository'])) throw bindingInputError('provider binding is invalid');
     const name = requiredString(provider.provider, 'provider');
-    if (!isSourceControlProvider(name)) throw bindingInputError('provider is unsupported');
+    if (!isRegisteredSourceControlProvider(name)) throw bindingInputError('provider is unsupported');
     const primaryRemote = requiredString(provider.primaryRemote, 'primaryRemote');
     if (!availableRemotes.has(primaryRemote)) throw bindingInputError(`remote ${primaryRemote} does not exist`);
     const endpoint = repositoryRemotes.find((remote) => remote.name === primaryRemote)?.fetch;
