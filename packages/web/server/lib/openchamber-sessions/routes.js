@@ -243,6 +243,20 @@ const resolveDefaultSelection = ({ agents, models, settings, projectDefaults, op
 };
 
 /**
+ * The model an agent the caller named is bound to, if any. It outranks every
+ * default: the binding is part of what running that agent means, and the
+ * composer applies the same rule when the user picks an agent. The binding is
+ * a v2 `ModelRef`, the shape `resolveDefaultSelection` reads for the
+ * default-resolved agent.
+ */
+const resolveNamedAgentModel = (agents, agentID, models) => {
+  const bound = agents.find((entry) => entry?.id === agentID)?.model;
+  if (!asNonEmptyString(bound?.providerID) || !asNonEmptyString(bound?.id)) return null;
+  const model = { providerID: bound.providerID, modelID: bound.id };
+  return { model, variant: resolveVariant(models, model.providerID, model.modelID, bound.variant) };
+};
+
+/**
  * v2 selects model and agent per session, not per prompt: the choice is
  * switched once and then persists, so every dispatch sets it explicitly rather
  * than passing it alongside the prompt.
@@ -688,6 +702,15 @@ export const createOpenChamberSessionService = (dependencies) => {
         projectDefaults: resolveProjectDefaults(inputs.settings, directory, projectId),
         autoAvailable,
       });
+      // A named agent runs on the model it is bound to, ahead of every
+      // default; the chain below only fills what nothing else named.
+      if (!model && agent) {
+        const named = resolveNamedAgentModel(inputs.agents, agent, inputs.models);
+        if (named) {
+          model = named.model;
+          if (variant == null) variant = named.variant;
+        }
+      }
       if (!model) {
         model = defaults.model;
         if (variant == null) variant = defaults.variant;

@@ -794,6 +794,135 @@ describe('openchamber session routes', () => {
       .toEqual({ providerID: 'openai', modelID: 'gpt-5.5' });
   });
 
+  it('runs a named agent on the model it is bound to when the prompt omits one', async () => {
+    useCatalog({
+      agents: [
+        { id: 'build', name: 'Build', mode: 'primary' },
+        { id: 'plan', name: 'Plan', mode: 'primary', model: { providerID: 'anthropic', id: 'claude-sonnet-5', variant: 'high' } },
+      ],
+    });
+    const { app } = createApp({
+      readSettingsFromDiskMigrated: async () => ({
+        defaultModel: 'openai/gpt-5.5',
+        defaultAgent: 'build',
+        projects: [{ id: 'proj_1', path: '/repo/app' }],
+      }),
+    });
+    const response = await request(app)
+      .post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', prompt: 'Run this', agent: 'plan' })
+      .expect(200);
+
+    // The binding outranks the settings default, and its effort comes with it.
+    expect(response.body.model).toEqual({ providerID: 'anthropic', modelID: 'claude-sonnet-5' });
+    expect(response.body.variant).toBe('high');
+    expect(sessionSwitchModelMock).toHaveBeenCalledWith({
+      sessionID: 'ses_123',
+      model: { id: 'claude-sonnet-5', providerID: 'anthropic', variant: 'high' },
+    });
+    expect(sessionSwitchAgentMock).toHaveBeenCalledWith({ sessionID: 'ses_123', agent: 'plan' });
+  });
+
+  it('falls back to the defaults chain when the named agent binds no model', async () => {
+    useCatalog({
+      agents: [
+        { id: 'build', name: 'Build', mode: 'primary' },
+        { id: 'plan', name: 'Plan', mode: 'primary' },
+      ],
+    });
+    const { app } = createApp({
+      readSettingsFromDiskMigrated: async () => ({
+        defaultModel: 'openai/gpt-5.5',
+        defaultAgent: 'build',
+        projects: [{ id: 'proj_1', path: '/repo/app' }],
+      }),
+    });
+    const response = await request(app)
+      .post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', prompt: 'Run this', agent: 'plan' })
+      .expect(200);
+
+    expect(response.body.model).toEqual({ providerID: 'openai', modelID: 'gpt-5.5' });
+    expect(response.body.agent).toBe('plan');
+  });
+
+  it('keeps an explicitly requested model over the named agent binding', async () => {
+    useCatalog({
+      agents: [
+        { id: 'build', name: 'Build', mode: 'primary' },
+        { id: 'plan', name: 'Plan', mode: 'primary', model: { providerID: 'anthropic', id: 'claude-sonnet-5' } },
+      ],
+    });
+    const { app } = createApp();
+    const response = await request(app)
+      .post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', prompt: 'Run this', model: 'openai/gpt-5.5', agent: 'plan' })
+      .expect(200);
+
+    expect(response.body.model).toEqual({ providerID: 'openai', modelID: 'gpt-5.5' });
+    expect(response.body.agent).toBe('plan');
+  });
+
+  it('keeps the session\'s previous model when send names an agent that binds one', async () => {
+    useCatalog({
+      agents: [
+        { id: 'build', name: 'Build', mode: 'primary' },
+        { id: 'plan', name: 'Plan', mode: 'primary', model: { providerID: 'anthropic', id: 'claude-sonnet-5', variant: 'high' } },
+      ],
+    });
+    sessionGetMock.mockImplementation(async ({ sessionID }) => ({
+      id: sessionID,
+      agent: 'build',
+      model: { providerID: 'openai', id: 'gpt-5.5' },
+      location: { directory: '/repo/app' },
+    }));
+    setSessionMessages([{ id: 'msg_before', type: 'assistant', time: { created: 10, completed: 20 } }]);
+
+    // Send/fork keep the session's own selection; the binding only fills a
+    // dispatch that has no model to reuse.
+    const { app } = createApp();
+    const response = await request(app)
+      .post('/api/openchamber/sessions/ses_source/send')
+      .send({ directory: '/repo/app', prompt: 'Continue where you left off', agent: 'plan' })
+      .expect(200);
+
+    expect(response.body.model).toEqual({ providerID: 'openai', modelID: 'gpt-5.5' });
+    expect(response.body.agent).toBe('plan');
+    // The binding did not take over: no switch to its model, no inherited effort.
+    expect(response.body.variant).toBeUndefined();
+    expect(sessionSwitchModelMock).toHaveBeenCalledWith({
+      sessionID: 'ses_source',
+      model: { id: 'gpt-5.5', providerID: 'openai' },
+    });
+  });
+
+  it('runs a sent-to session on the named agent binding when it has no model of its own', async () => {
+    useCatalog({
+      agents: [
+        { id: 'build', name: 'Build', mode: 'primary' },
+        { id: 'plan', name: 'Plan', mode: 'primary', model: { providerID: 'anthropic', id: 'claude-sonnet-5', variant: 'high' } },
+      ],
+    });
+    sessionGetMock.mockImplementation(async ({ sessionID }) => ({
+      id: sessionID,
+      location: { directory: '/repo/app' },
+    }));
+    setSessionMessages([{ id: 'msg_before', type: 'assistant', time: { created: 10, completed: 20 } }]);
+
+    const { app } = createApp();
+    const response = await request(app)
+      .post('/api/openchamber/sessions/ses_source/send')
+      .send({ directory: '/repo/app', prompt: 'Continue where you left off', agent: 'plan' })
+      .expect(200);
+
+    expect(response.body.model).toEqual({ providerID: 'anthropic', modelID: 'claude-sonnet-5' });
+    expect(response.body.variant).toBe('high');
+    expect(sessionSwitchModelMock).toHaveBeenCalledWith({
+      sessionID: 'ses_source',
+      model: { id: 'claude-sonnet-5', providerID: 'anthropic', variant: 'high' },
+    });
+  });
+
   it('resolves an Auto default through the routing hook before switching the session', async () => {
     useCatalog();
     const resolveAutoSelection = vi.fn(async () => ({

@@ -108,7 +108,7 @@ const ALL_PARAMETER_PROPERTIES = {
   targetSessionId: { type: 'string', description: 'Run in this session instead of a new one; empty on update clears it' },
   title: { type: 'string' },
   prompt: { type: 'string' },
-  model: { type: 'string', description: "provider/model. When the user names none, session.create picks from models.list favorites or recents, or omits it; send and fork omit it to keep the session's model" },
+  model: { type: 'string', description: "provider/model. session.create with an agent and no model runs that agent's bound model; with neither, it picks from models.list favorites or recents, or omits it; send and fork omit it to keep the session's model" },
   agent: { type: 'string', description: 'Only when the user asks. Default: build for a new session, unchanged for an existing one' },
   variant: { type: 'string', description: 'Only when the user asks' },
   worktree: { type: 'string', description: 'Folder name of a new worktree, named after the task (fix-login-timeout). Required for session.moveToWorktree; on session.create only when the user asks, and uncommitted changes stay behind' },
