@@ -1966,11 +1966,14 @@ const notificationTemplateDefaults = (key: NotificationTemplateKey) => ({
 const getNotificationTemplate = (
   settings: { notificationTemplates?: Record<string, { title?: string; message?: string }> },
   key: NotificationTemplateKey,
+  // A caller whose event has its own wording (a permission ask) passes those
+  // defaults, so an empty field falls back to it and not to the shared label.
+  overrides?: { title: string; message: string },
 ) => {
   const candidate = settings.notificationTemplates?.[key];
   const title = candidate?.title ?? '';
   const message = candidate?.message ?? '';
-  const defaults = notificationTemplateDefaults(key);
+  const defaults = overrides ?? notificationTemplateDefaults(key);
   return {
     title: title.trim().length > 0 ? title : defaults.title,
     message: message.trim().length > 0 ? message : defaults.message,
@@ -2107,7 +2110,7 @@ window.addEventListener('openchamber:vscode-notification-event', (event) => {
         ...notificationTemplateDefaults('question'),
         title: notificationText('notifications.permission.title'),
       };
-      const template = getNotificationTemplate(settings, 'question');
+      const template = getNotificationTemplate(settings, 'question', defaults);
       const title = resolveTemplate(template.title, permissionVariables) || resolveTemplate(defaults.title, permissionVariables);
       const body = resolveTemplate(template.message, permissionVariables);
       showOpenChamberNotification({

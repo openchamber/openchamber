@@ -1,3 +1,5 @@
+import fsPromises from 'fs/promises';
+
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -64,5 +66,37 @@ describe('notification template locales', () => {
     expect(withTemplateDefaults({ title: '   ', message: 'Meins' }, defaults.completion))
       .toEqual({ title: defaults.completion.title, message: 'Meins' });
     expect(withTemplateDefaults(undefined, defaults.error)).toEqual(defaults.error);
+  });
+});
+
+describe('notification defaults match the settings page', () => {
+  // The settings page renders these keys as the placeholder of an empty field,
+  // so the text the server sends has to be the same string. Read from disk:
+  // the server cannot import packages/ui, which is why the mirror exists.
+  const readUiDefaults = async (locale) => {
+    const file = new URL(`../../../../ui/src/lib/i18n/messages/${locale}.settings.ts`, import.meta.url);
+    const source = await fsPromises.readFile(file, 'utf8');
+    const value = async (key) => {
+      const match = source.match(new RegExp(`['"]settings\\.notifications\\.page\\.template\\.defaults\\.${key}['"]:\\s*(['"])((?:\\\\.|(?!\\1).)*)\\1`));
+      if (!match) throw new Error(`${locale} has no ${key}`);
+      return match[2].replace(/\\(['"])/g, '$1');
+    };
+    return {
+      completion: { title: await value('completion\\.title'), message: await value('completion\\.message') },
+      subtask: { title: await value('subtask\\.title'), message: await value('subtask\\.message') },
+      errorTitle: await value('error\\.title'),
+      questionTitle: await value('question\\.title'),
+    };
+  };
+
+  it('sends the text the placeholder promises, in every language', async () => {
+    for (const locale of Object.keys(NOTIFICATION_TEXT_BY_LOCALE)) {
+      const ui = await readUiDefaults(locale);
+      const server = defaultNotificationTemplates(locale);
+      expect(server.completion, locale).toEqual(ui.completion);
+      expect(server.subtask, locale).toEqual(ui.subtask);
+      expect(server.error, locale).toEqual({ title: ui.errorTitle, message: '{last_message}' });
+      expect(server.question, locale).toEqual({ title: ui.questionTitle, message: '{last_message}' });
+    }
   });
 });
