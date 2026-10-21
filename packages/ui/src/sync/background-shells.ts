@@ -26,9 +26,12 @@ import { normalizeProjectPath } from '@/lib/projectResolution';
 // command the turn waits for is short-lived next to one left running.
 //
 // A command that leaves the index moves to `ended` with how it ended, for
-// extensions that show recent jobs (`lib/guests/shells.ts`). Only the app's
-// own observation fills it: it starts empty, holds the latest
-// `ENDED_SHELLS_MAX` commands, and resets on a runtime switch.
+// extensions that show recent jobs (`lib/guests/shells.ts`) and for the
+// composer's strip, which keeps a background command's row after it ends
+// until the user dismisses it. Only the app's own observation fills it: it
+// starts empty, holds the latest `ENDED_SHELLS_MAX` commands, and resets on a
+// runtime switch. Dismissing hides a command from the strip only; `ended`
+// keeps it for extensions.
 
 export type TrackedShell = RunningShell & {
   directory: string;
@@ -54,15 +57,22 @@ type BackgroundShellsState = {
   sessionIds: ReadonlySet<string>;
   /** Commands seen running that have since ended, oldest end first. */
   ended: ReadonlyMap<string, EndedShell>;
+  /** Ended commands the user dismissed from the strip. */
+  dismissed: ReadonlySet<string>;
+  /** Sessions with an ended background command the strip still shows. */
+  endedSessionIds: ReadonlySet<string>;
 };
 
 const EMPTY_SESSION_IDS: ReadonlySet<string> = new Set();
+const EMPTY_DISMISSED: ReadonlySet<string> = new Set();
 export const ENDED_SHELLS_MAX = 200;
 
 export const useBackgroundShellsStore = create<BackgroundShellsState>(() => ({
   byId: new Map(),
   sessionIds: EMPTY_SESSION_IDS,
   ended: new Map(),
+  dismissed: EMPTY_DISMISSED,
+  endedSessionIds: EMPTY_SESSION_IDS,
 }));
 
 const normalizeDirectory = (directory: string): string => normalizeProjectPath(directory) ?? directory;
@@ -109,16 +119,57 @@ const backgroundedShellID = (payload: SyncEvent): string | undefined => {
   return readBackgroundShellIDFromMetadata(transition.metadata);
 };
 
+const sameIds = (next: ReadonlySet<string>, previous: ReadonlySet<string>): boolean => (
+  next.size === previous.size && [...next].every((id) => previous.has(id))
+);
+
 const sessionIdsOf = (byId: ReadonlyMap<string, TrackedShell>, previous: ReadonlySet<string>): ReadonlySet<string> => {
   const next = new Set<string>();
   for (const shell of byId.values()) next.add(shell.sessionID);
-  const same = next.size === previous.size && [...next].every((id) => previous.has(id));
-  return same ? previous : next;
+  return sameIds(next, previous) ? previous : next;
+};
+
+const endedSessionIdsOf = (
+  ended: ReadonlyMap<string, EndedShell>,
+  dismissed: ReadonlySet<string>,
+  previous: ReadonlySet<string>,
+): ReadonlySet<string> => {
+  const next = new Set<string>();
+  for (const shell of ended.values()) {
+    if (shell.background && !dismissed.has(shell.id)) next.add(shell.sessionID);
+  }
+  return sameIds(next, previous) ? previous : next;
 };
 
 const publish = (byId: ReadonlyMap<string, TrackedShell>, ended: ReadonlyMap<string, EndedShell> | null): void => {
   const state = useBackgroundShellsStore.getState();
-  useBackgroundShellsStore.setState({ byId, sessionIds: sessionIdsOf(byId, state.sessionIds), ended: ended ?? state.ended });
+  if (ended === null) {
+    useBackgroundShellsStore.setState({ byId, sessionIds: sessionIdsOf(byId, state.sessionIds) });
+    return;
+  }
+  // Dismissals of commands the ended list dropped are forgotten with them.
+  const dismissed = [...state.dismissed].every((id) => ended.has(id))
+    ? state.dismissed
+    : new Set([...state.dismissed].filter((id) => ended.has(id)));
+  useBackgroundShellsStore.setState({
+    byId,
+    sessionIds: sessionIdsOf(byId, state.sessionIds),
+    ended,
+    dismissed,
+    endedSessionIds: endedSessionIdsOf(ended, dismissed, state.endedSessionIds),
+  });
+};
+
+/** Removes ended commands from the strip. `ended` keeps them for extensions. */
+export const dismissEndedShells = (shellIDs: readonly string[]): void => {
+  const state = useBackgroundShellsStore.getState();
+  const added = shellIDs.filter((id) => state.ended.has(id) && !state.dismissed.has(id));
+  if (added.length === 0) return;
+  const dismissed = new Set([...state.dismissed, ...added]);
+  useBackgroundShellsStore.setState({
+    dismissed,
+    endedSessionIds: endedSessionIdsOf(state.ended, dismissed, state.endedSessionIds),
+  });
 };
 
 // A stop posts its note to the agent before it removes the command, and the
@@ -296,7 +347,13 @@ export const resetBackgroundShells = (): void => {
   touchedAt.clear();
   settledInBackground.clear();
   stopNoted.clear();
-  useBackgroundShellsStore.setState({ byId: new Map(), sessionIds: EMPTY_SESSION_IDS, ended: new Map() });
+  useBackgroundShellsStore.setState({
+    byId: new Map(),
+    sessionIds: EMPTY_SESSION_IDS,
+    ended: new Map(),
+    dismissed: EMPTY_DISMISSED,
+    endedSessionIds: EMPTY_SESSION_IDS,
+  });
 };
 
 /**
@@ -325,6 +382,8 @@ export const sessionsInTree = (
   return inTree.sort();
 };
 
+const byStart = (left: TrackedShell, right: TrackedShell): number => left.startedAt - right.startedAt || left.id.localeCompare(right.id);
+
 /** Commands of the given sessions that went to the background, oldest first. */
 export const backgroundShellsOfSessions = (
   byId: ReadonlyMap<string, TrackedShell>,
@@ -334,7 +393,24 @@ export const backgroundShellsOfSessions = (
   for (const shell of byId.values()) {
     if (shell.background && sessionIds.has(shell.sessionID)) shells.push(shell);
   }
-  return shells.sort((left, right) => left.startedAt - right.startedAt || left.id.localeCompare(right.id));
+  return shells.sort(byStart);
+};
+
+/**
+ * Ended background commands of the given sessions that the user has not
+ * dismissed, oldest start first, so a command keeps its place in the strip
+ * when it ends.
+ */
+export const endedBackgroundShellsOfSessions = (
+  ended: ReadonlyMap<string, EndedShell>,
+  dismissed: ReadonlySet<string>,
+  sessionIds: ReadonlySet<string>,
+): EndedShell[] => {
+  const shells: EndedShell[] = [];
+  for (const shell of ended.values()) {
+    if (shell.background && sessionIds.has(shell.sessionID) && !dismissed.has(shell.id)) shells.push(shell);
+  }
+  return shells.sort(byStart);
 };
 
 export const useRunningShell = (shellID: string | undefined): TrackedShell | undefined => (

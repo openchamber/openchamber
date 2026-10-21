@@ -6,6 +6,8 @@ import {
   applyBackgroundShellEvents,
   backgroundShellRevision,
   directoriesWithRunningShells,
+  dismissEndedShells,
+  endedBackgroundShellsOfSessions,
   refreshBackgroundShells,
   replaceDirectoryShells,
   resetBackgroundShells,
@@ -193,6 +195,64 @@ describe('ended commands', () => {
     expect(endedIds()).toEqual(ids.slice(5));
     resetBackgroundShells();
     expect(endedIds()).toEqual([]);
+  });
+});
+
+describe('ended commands in the strip', () => {
+  const stripRows = (sessionIds: string[]) => {
+    const { ended: byId, dismissed } = useBackgroundShellsStore.getState();
+    return endedBackgroundShellsOfSessions(byId, dismissed, new Set(sessionIds)).map((item) => item.id);
+  };
+
+  test('the background commands of the chosen sessions that ended, oldest start first', () => {
+    applyBackgroundShellEvents('/repo', [
+      started({ ...shell('sh_late'), startedAt: 3000 }),
+      started({ ...shell('sh_early'), startedAt: 1000 }),
+      started({ ...shell('sh_waited'), startedAt: 2000 }),
+      started({ ...shell('sh_foreign', 'ses_other'), startedAt: 500 }),
+      settledInBackground('sh_late'),
+      settledInBackground('sh_early'),
+      settledInBackground('sh_foreign'),
+    ]);
+    // Ended in the opposite order of their start.
+    applyBackgroundShellEvents('/repo', [ended('sh_late'), ended('sh_waited'), ended('sh_early'), ended('sh_foreign')]);
+
+    expect(stripRows(['ses_1'])).toEqual(['sh_early', 'sh_late']);
+    expect([...useBackgroundShellsStore.getState().endedSessionIds].sort()).toEqual(['ses_1', 'ses_other']);
+  });
+
+  test('a dismissed command leaves the strip, and the ended list keeps it for extensions', () => {
+    applyBackgroundShellEvents('/repo', [started(shell('sh_1')), started(shell('sh_2')), settledInBackground('sh_1'), settledInBackground('sh_2')]);
+    applyBackgroundShellEvents('/repo', [ended('sh_1'), ended('sh_2')]);
+
+    dismissEndedShells(['sh_1']);
+    expect(stripRows(['ses_1'])).toEqual(['sh_2']);
+    expect(endedIds()).toEqual(['sh_1', 'sh_2']);
+    expect([...useBackgroundShellsStore.getState().endedSessionIds]).toEqual(['ses_1']);
+
+    dismissEndedShells(['sh_2']);
+    expect(stripRows(['ses_1'])).toEqual([]);
+    expect(useBackgroundShellsStore.getState().endedSessionIds.size).toBe(0);
+  });
+
+  test('dismissing a running or unknown command, or one already dismissed, changes nothing', () => {
+    applyBackgroundShellEvents('/repo', [started(shell('sh_1')), settledInBackground('sh_1')]);
+    const before = useBackgroundShellsStore.getState();
+    dismissEndedShells(['sh_1', 'sh_missing']);
+    expect(useBackgroundShellsStore.getState()).toBe(before);
+  });
+
+  test('a dismissal is forgotten once its command leaves the ended list', () => {
+    applyBackgroundShellEvents('/repo', [started(shell('sh_first')), settledInBackground('sh_first')]);
+    applyBackgroundShellEvents('/repo', [ended('sh_first')]);
+    dismissEndedShells(['sh_first']);
+
+    const later = Array.from({ length: ENDED_SHELLS_MAX }, (_, index) => `sh_later_${index}`);
+    applyBackgroundShellEvents('/repo', later.map((id) => started(shell(id))));
+    applyBackgroundShellEvents('/repo', later.map((id) => ended(id)));
+
+    expect(useBackgroundShellsStore.getState().ended.has('sh_first')).toBe(false);
+    expect(useBackgroundShellsStore.getState().dismissed.has('sh_first')).toBe(false);
   });
 });
 

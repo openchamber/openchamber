@@ -147,6 +147,20 @@ new-session drafts. The elapsed text is a leaf on the shared one-second
 ticker, and the tree is compared as a string, so neither the tick nor
 session-list updates re-render the composer.
 
+A command that ends keeps its row, in the place its start gave it, until the
+user dismisses it (the row's close button, or Dismiss all on the count row once
+nothing runs). The timer and Stop give way to how it ended, as the shell index
+recorded it from OpenCode: `exit code N` (0 in the success colour, any other
+code in the error colour), `exited` when OpenCode reported the end without a
+code, `timed out`, `stopped` for a command removed while running (a Stop or
+an aborted turn), and `no longer running` when the end fell into an event gap
+and OpenCode keeps no record of it. OpenCode reports no code for a stop, so a
+stopped row has none. The command's tooltip stays available in every state.
+Dismissing hides a command from the strip only (`dismissEndedShells`); the
+index's ended list, which extensions read, keeps it. The expanded list shows
+four rows and then scrolls on its own (`overscroll-contain`), and a long
+command scrolls inside its tooltip the same way.
+
 The "looks done" hint (`SessionDoneHintRow`) and the review offer
 (`SessionReviewHintRow`, "Changes are ready to look over") take the same
 slot, below the background commands. Both show only while the session idles

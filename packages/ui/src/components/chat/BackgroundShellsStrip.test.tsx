@@ -4,7 +4,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 
 import { I18nProvider } from '@/lib/i18n';
-import type { RunningShell } from '@/lib/opencode/background-shell';
+import type { RunningShell, ShellEnd } from '@/lib/opencode/background-shell';
 import { opencodeClient } from '@/lib/opencode/client';
 import type { SyncEvent } from '@/lib/opencode/events';
 import type { Session } from '@/lib/opencode/model';
@@ -38,6 +38,11 @@ const start = (...shells: RunningShell[]) => act(async () => {
       },
     },
   ]));
+});
+
+/** OpenCode reports how a command ended. */
+const end = (shellID: string, value: ShellEnd) => act(async () => {
+  applyBackgroundShellEvents('/repo', [{ type: 'shell.ended', properties: { shellID, end: value, endedAt: Date.now() } }]);
 });
 
 describe('BackgroundShellsStrip', () => {
@@ -130,11 +135,13 @@ describe('BackgroundShellsStrip', () => {
       }]]);
       expect(button('Stop')?.disabled).toBe(true);
 
-      // The row leaves when OpenCode reports the end.
-      await act(async () => {
-        applyBackgroundShellEvents('/repo', [{ type: 'shell.ended', properties: { shellID: 'sh_child', end: { kind: 'removed' }, endedAt: 2000 } }]);
-      });
-      expect(host.innerHTML).toBe('');
+      // OpenCode reports the end: the row stays, says it was stopped, and
+      // offers no Stop.
+      await end('sh_child', { kind: 'removed' });
+      expect(host.textContent).toContain('vite preview');
+      expect(host.textContent).toContain('stopped');
+      expect(button('Stop')).toBeUndefined();
+      expect(button('Dismiss vite preview')).toBeDefined();
     } finally {
       stop.mockRestore();
     }
@@ -181,5 +188,100 @@ describe('BackgroundShellsStrip', () => {
     } finally {
       stop.mockRestore();
     }
+  });
+
+  /** The text of the one row's end status, with its colour: an ended row's only number-aligned text. */
+  const endStatus = () => {
+    const status = host.querySelector('span.tabular-nums');
+    return { text: status?.textContent, className: status?.className ?? '' };
+  };
+
+  test('a command that exits keeps its row with its exit code and offers no Stop', async () => {
+    await start(shell('sh_1', 'ses_root', 'bun run build'));
+    await end('sh_1', { kind: 'exited', status: 'exited', exit: 0 });
+
+    expect(host.textContent).toContain('bun run build');
+    expect(endStatus().text).toBe('exit code 0');
+    expect(endStatus().className).toContain('text-status-success');
+    expect(button('Stop')).toBeUndefined();
+    expect(button('Dismiss bun run build')).toBeDefined();
+  });
+
+  test('a non-zero exit shows its code in the error colour', async () => {
+    await start(shell('sh_1', 'ses_root', 'bun test'));
+    await end('sh_1', { kind: 'exited', status: 'exited', exit: 2 });
+
+    expect(endStatus().text).toBe('exit code 2');
+    expect(endStatus().className).toContain('text-status-error');
+  });
+
+  test('an end OpenCode reports without a code reads exited, and a timeout timed out', async () => {
+    await start(shell('sh_1', 'ses_root', 'sleep 600'));
+    await end('sh_1', { kind: 'exited', status: 'exited' });
+    expect(endStatus().text).toBe('exited');
+    expect(endStatus().className).toContain('text-muted-foreground');
+
+    await act(async () => button('Dismiss sleep 600')?.click());
+    await start(shell('sh_2', 'ses_root', 'curl --retry 99 localhost'));
+    await end('sh_2', { kind: 'exited', status: 'timeout' });
+    expect(endStatus().text).toBe('timed out');
+    expect(endStatus().className).toContain('text-status-error');
+  });
+
+  test('dismissing an ended command removes its row', async () => {
+    await start(shell('sh_1', 'ses_root', 'bun run build'));
+    await end('sh_1', { kind: 'exited', status: 'exited', exit: 0 });
+
+    await act(async () => button('Dismiss bun run build')?.click());
+    expect(host.innerHTML).toBe('');
+  });
+
+  test('a command that ends keeps its place among the others', async () => {
+    const now = Date.now();
+    await start(
+      shell('sh_1', 'ses_root', 'first', now - 3000),
+      shell('sh_2', 'ses_root', 'second', now - 2000),
+      shell('sh_3', 'ses_root', 'third', now - 1000),
+    );
+    await act(async () => buttons().find((item) => item.textContent === 'Background commands: 3')?.click());
+    const commands = () => [...host.querySelectorAll('.font-mono')].map((item) => item.textContent);
+    expect(commands()).toEqual(['first', 'second', 'third']);
+
+    await end('sh_2', { kind: 'exited', status: 'exited', exit: 1 });
+    expect(commands()).toEqual(['first', 'second', 'third']);
+    expect(host.textContent).toContain('Background commands: 3');
+    expect(buttons().filter((item) => item.textContent === 'Stop')).toHaveLength(2);
+  });
+
+  test('stop all stops only running commands, and once none runs the header dismisses the ended ones', async () => {
+    const stop = spyOn(opencodeClient, 'stopBackgroundShells').mockResolvedValue(undefined);
+    try {
+      await start(shell('sh_1', 'ses_root', 'bun run dev'), shell('sh_2', 'ses_root', 'bun run watch'));
+      await end('sh_1', { kind: 'exited', status: 'exited', exit: 0 });
+
+      await act(async () => button('Stop all')?.click());
+      expect(stop.mock.calls).toEqual([[{
+        sessionID: 'ses_root',
+        sessionDirectory: '/repo',
+        shells: [{ shellID: 'sh_2', shellDirectory: '/repo', command: 'bun run watch' }],
+      }]]);
+
+      await end('sh_2', { kind: 'removed' });
+      expect(button('Stop all')).toBeUndefined();
+      await act(async () => button('Dismiss all')?.click());
+      expect(host.innerHTML).toBe('');
+    } finally {
+      stop.mockRestore();
+    }
+  });
+
+  test('the expanded list scrolls on its own once it is longer than four rows', async () => {
+    await start(...['a', 'b', 'c', 'd', 'e'].map((id) => shell(`sh_${id}`, 'ses_root', `run ${id}`)));
+    const header = buttons().find((item) => item.textContent === 'Background commands: 5');
+    await act(async () => header?.click());
+    const list = document.getElementById(header?.getAttribute('aria-controls') ?? '');
+    expect(list?.className).toContain('max-h-40');
+    expect(list?.className).toContain('overflow-y-auto');
+    expect(list?.className).toContain('overscroll-contain');
   });
 });
