@@ -69,6 +69,27 @@ describe('i18n dictionaries', () => {
     }
   });
 
+  test('the background jobs strip reads in each locale\'s own words', () => {
+    // Loanwords: German and Dutch say "Terminals", Dutch and Polish "subagent".
+    const sameAsEnglish = new Set([
+      'de:chat.persistentTerminals.aria', 'de:chat.persistentTerminals.count',
+      'nl:chat.persistentTerminals.aria', 'nl:chat.persistentTerminals.count',
+      'nl:chat.backgroundShells.subagent', 'pl:chat.backgroundShells.subagent',
+    ]);
+    const english = Object.entries(enDict)
+      .filter(([key]) => key.startsWith('chat.backgroundShells.') || key.startsWith('chat.persistentTerminals.'));
+    expect(english.length).toBeGreaterThan(20);
+    const untranslated: string[] = [];
+    for (const [locale, dictionary] of Object.entries(localeDictionaries)) {
+      if (locale === 'en') continue;
+      const values = new Map(Object.entries(dictionary));
+      for (const [key, value] of english) {
+        if (values.get(key) === value && !sameAsEnglish.has(`${locale}:${key}`)) untranslated.push(`${locale}:${key}`);
+      }
+    }
+    expect(untranslated).toEqual([]);
+  });
+
   test('all locales expose language label keys', () => {
     for (const [, dictionary] of Object.entries(localeDictionaries)) {
       expect(dictionary['common.language.german']).toBeTruthy();
