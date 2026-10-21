@@ -9,6 +9,7 @@ const { isTrustedGitHubHost, hasStoredGhLogin, listTrustedGitHubHosts } = await 
 // tests just set and restore the environment around each case.
 const previousGhHost = process.env.GH_HOST;
 const previousGhConfigDir = process.env.GH_CONFIG_DIR;
+const previousXdgConfigHome = process.env.XDG_CONFIG_HOME;
 const createdDirs = [];
 
 const createHostsYaml = (content) => {
@@ -16,6 +17,7 @@ const createHostsYaml = (content) => {
   createdDirs.push(dir);
   fs.writeFileSync(path.join(dir, 'hosts.yml'), content);
   process.env.GH_CONFIG_DIR = dir;
+  return dir;
 };
 
 afterEach(() => {
@@ -23,9 +25,39 @@ afterEach(() => {
   else process.env.GH_HOST = previousGhHost;
   if (previousGhConfigDir === undefined) delete process.env.GH_CONFIG_DIR;
   else process.env.GH_CONFIG_DIR = previousGhConfigDir;
+  if (previousXdgConfigHome === undefined) delete process.env.XDG_CONFIG_HOME;
+  else process.env.XDG_CONFIG_HOME = previousXdgConfigHome;
   for (const dir of createdDirs.splice(0)) {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+describe('gh config directory', () => {
+  test('discovers enterprise logins under XDG_CONFIG_HOME', () => {
+    const dir = createHostsYaml('');
+    fs.mkdirSync(path.join(dir, 'gh'));
+    fs.writeFileSync(path.join(dir, 'gh', 'hosts.yml'), 'github.acme.com:\n  user: octocat\n');
+    process.env.XDG_CONFIG_HOME = dir;
+    process.env.GH_HOST = '';
+    delete process.env.GH_CONFIG_DIR;
+
+    expect(hasStoredGhLogin('github.acme.com')).toBe(true);
+    expect(isTrustedGitHubHost('github.acme.com')).toBe(true);
+    expect(listTrustedGitHubHosts()).toEqual(['github.acme.com']);
+  });
+
+  test('GH_CONFIG_DIR takes precedence without falling back to XDG_CONFIG_HOME', () => {
+    const dir = createHostsYaml('github.explicit.com:\n  user: octocat\n');
+    fs.mkdirSync(path.join(dir, 'gh'));
+    fs.writeFileSync(path.join(dir, 'gh', 'hosts.yml'), 'github.xdg.com:\n  user: octocat\n');
+    process.env.XDG_CONFIG_HOME = dir;
+
+    expect(hasStoredGhLogin('github.explicit.com')).toBe(true);
+    expect(hasStoredGhLogin('github.xdg.com')).toBe(false);
+
+    process.env.GH_CONFIG_DIR = path.join(dir, 'missing');
+    expect(hasStoredGhLogin('github.xdg.com')).toBe(false);
+  });
 });
 
 describe('isTrustedGitHubHost', () => {
