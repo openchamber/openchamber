@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createSessionGoalRuntime, normalizeMaxAutoTurns } from './runtime.js';
 
@@ -75,7 +75,7 @@ afterEach(() => {
  * `content[]`, `model`, `finish`, `tokens`), `{ location, data }` envelopes,
  * `/api/session/active` for busy state, and the three continuation calls.
  */
-const v2OpenCode = ({ messages, active = {}, childPages = [[]], childrenStatus = 200 }) => {
+const v2OpenCode = ({ messages, active = {}, childPages = [[]], childrenStatus = 200, sessionRead = async () => {} }) => {
   const calls = [];
   const json = (data, status = 200) => new Response(JSON.stringify({ location: { directory: '/repo' }, data }), {
     status,
@@ -96,7 +96,10 @@ const v2OpenCode = ({ messages, active = {}, childPages = [[]], childrenStatus =
       return json({ data, cursor: next }, childrenStatus);
     }
     if (url.pathname.endsWith('/message')) return json({ data: [...messages].reverse(), cursor: null });
-    if (url.pathname === `/api/session/${SESSION_ID}`) return json({ id: SESSION_ID, location: { directory: '/repo' } });
+    if (url.pathname === `/api/session/${SESSION_ID}`) {
+      await sessionRead();
+      return json({ id: SESSION_ID, location: { directory: '/repo' } });
+    }
     return json({});
   });
   vi.stubGlobal('fetch', fetchMock);
@@ -133,6 +136,264 @@ const runTick = async (runtime) => {
   // idleQuietMs / kickoffQuietMs are 1 ms; the tick itself is async.
   for (let i = 0; i < 20; i += 1) await new Promise((resolve) => setTimeout(resolve, 5));
 };
+
+describe('session goal session-read recovery', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    quiet();
+  });
+
+  afterEach(() => vi.useRealTimers());
+
+  const setup = (sessionRead = vi.fn(async () => { throw new Error('fetch failed'); }), serverOptions = {}) => {
+    const server = v2OpenCode({ messages: [assistantRecord()], sessionRead, ...serverOptions });
+    const metadata = { openchamber: { goal: activeGoal() } };
+    const seam = wired(metadata);
+    seam.persistSessionGoal.mockImplementation(async (_sessionId, _directory, goal) => {
+      metadata.openchamber.goal = goal;
+    });
+    const generate = vi.fn(async () => ({ text: smallModelSays({ remaining: true }) }));
+    const runtime = makeRuntime({
+      ...seam,
+      idleQuietMs: 15_000,
+      getSmallModelService: async () => ({ generateSmallModelText: generate }),
+    });
+    const start = async () => {
+      await runtime.runtime.notifyGoalChanged(SESSION_ID, '/repo', metadata);
+      await vi.advanceTimersByTimeAsync(1);
+    };
+    return { ...runtime, ...seam, ...server, metadata, sessionRead, generate, start };
+  };
+
+  it('retries a rejected initial read after the quiet window, then audits and continues', async () => {
+    const sessionRead = vi.fn().mockRejectedValueOnce(new Error('fetch failed')).mockResolvedValue(undefined);
+    const test = setup(sessionRead);
+    await test.start();
+    expect(sessionRead).toHaveBeenCalledTimes(1);
+    expect(test.generate).not.toHaveBeenCalled();
+    expect(test.persistSessionGoal).not.toHaveBeenCalled();
+    expect(test.calls.some((call) => call.method === 'POST')).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(14_999);
+    expect(sessionRead).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+
+    expect(sessionRead).toHaveBeenCalledTimes(2);
+    expect(test.generate).toHaveBeenCalledTimes(1);
+    expect(test.calls.filter((call) => call.method === 'POST')).toHaveLength(1);
+    expect(test.metadata.openchamber.goal).toMatchObject({ status: 'active', turnsUsed: 1 });
+    expect(test.emitGoalNotification).not.toHaveBeenCalled();
+  });
+
+  it('backs off for 3 retries, then blocks once with a reason and a settlement notification', async () => {
+    const test = setup();
+    await test.start();
+    for (const [index, delay] of [15_000, 30_000, 60_000].entries()) {
+      await vi.advanceTimersByTimeAsync(delay - 1);
+      expect(test.sessionRead).toHaveBeenCalledTimes(index + 1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(test.sessionRead).toHaveBeenCalledTimes(index + 2);
+    }
+
+    expect(test.persistSessionGoal).toHaveBeenCalledTimes(1);
+    expect(test.metadata.openchamber.goal).toMatchObject({
+      status: 'blocked',
+      statusReason: 'Session could not be read after repeated attempts. Resume to try again.',
+      turnsUsed: 0,
+    });
+    expect(test.emitGoalNotification).toHaveBeenCalledTimes(1);
+    expect(test.emitGoalNotification.mock.calls[0][0]).toMatchObject({ status: 'blocked' });
+    expect(test.generate).not.toHaveBeenCalled();
+    expect(test.calls.some((call) => call.method === 'POST')).toBe(false);
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(test.sessionRead).toHaveBeenCalledTimes(4);
+    expect(test.persistSessionGoal).toHaveBeenCalledTimes(1);
+    expect(test.emitGoalNotification).toHaveBeenCalledTimes(1);
+    test.runtime.processPayload(idle());
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(test.persistSessionGoal).toHaveBeenCalledTimes(1);
+    expect(test.emitGoalNotification).toHaveBeenCalledTimes(1);
+  });
+
+  it('resets the failure count after a successful read', async () => {
+    const sessionRead = vi.fn().mockRejectedValueOnce(new Error('fetch failed')).mockResolvedValue(undefined);
+    const test = setup(sessionRead, { childrenStatus: 500 });
+    await test.start();
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(sessionRead).toHaveBeenCalledTimes(2);
+    // The children read arms another quiet window without a new session event.
+    sessionRead.mockRejectedValue(new Error('fetch failed'));
+    await vi.advanceTimersByTimeAsync(15_000);
+    await vi.advanceTimersByTimeAsync(14_999);
+    expect(sessionRead).toHaveBeenCalledTimes(3);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(sessionRead).toHaveBeenCalledTimes(4);
+    expect(test.emitGoalNotification).not.toHaveBeenCalled();
+  });
+
+  for (const status of ['paused', 'complete', null]) {
+    it(`preserves a ${status ?? 'cleared'} goal while the final read fails`, async () => {
+      const gate = Promise.withResolvers();
+      const sessionRead = vi.fn()
+        .mockRejectedValueOnce(new Error('fetch failed'))
+        .mockRejectedValueOnce(new Error('fetch failed'))
+        .mockRejectedValueOnce(new Error('fetch failed'))
+        .mockImplementationOnce(() => gate.promise);
+      const test = setup(sessionRead);
+      await test.start();
+      await vi.advanceTimersByTimeAsync(105_000);
+      expect(sessionRead).toHaveBeenCalledTimes(4);
+      test.metadata.openchamber.goal = status ? activeGoal({ status }) : null;
+      gate.reject(new Error('fetch failed'));
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(test.persistSessionGoal).not.toHaveBeenCalled();
+      expect(test.emitGoalNotification).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(sessionRead).toHaveBeenCalledTimes(4);
+    });
+  }
+
+  it('lets a tick reading the session survive a mid-goal edit', async () => {
+    const gate = Promise.withResolvers();
+    const sessionRead = vi.fn().mockImplementationOnce(() => gate.promise).mockResolvedValue(undefined);
+    const test = setup(sessionRead);
+    await test.start();
+    expect(sessionRead).toHaveBeenCalledTimes(1);
+    // The user edits the objective while the tick waits on the session read.
+    await test.runtime.notifyGoalChanged(SESSION_ID, '/repo', { openchamber: { goal: activeGoal({ turnsUsed: 1 }) } });
+    gate.resolve();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(test.generate).toHaveBeenCalledTimes(1);
+    expect(test.calls.filter((call) => call.method === 'POST')).toHaveLength(1);
+  });
+
+  it('pauses a goal whose user aborts while the tick reads the session', async () => {
+    const gate = Promise.withResolvers();
+    const sessionRead = vi.fn().mockImplementationOnce(() => gate.promise).mockResolvedValue(undefined);
+    const test = setup(sessionRead, {
+      messages: [assistantRecord({ finish: undefined, error: { name: 'MessageAbortedError', data: {} } })],
+    });
+    await test.start();
+    test.runtime.processPayload({
+      type: 'session.idle',
+      properties: { sessionID: SESSION_ID, aborted: true, reason: 'user' },
+    });
+    gate.resolve();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(test.metadata.openchamber.goal).toMatchObject({ status: 'paused' });
+    expect(test.calls.some((call) => call.method === 'POST')).toBe(false);
+  });
+
+  it('rechecks active status at the settlement write', async () => {
+    const test = setup();
+    await test.start();
+    await vi.advanceTimersByTimeAsync(45_000);
+    // The goal changes between the exhaustion check and settlement write read.
+    test.readSessionMetadata
+      .mockResolvedValueOnce(test.metadata)
+      .mockResolvedValueOnce({ openchamber: { goal: activeGoal({ status: 'complete' }) } });
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(test.sessionRead).toHaveBeenCalledTimes(4);
+    expect(test.persistSessionGoal).not.toHaveBeenCalled();
+    expect(test.emitGoalNotification).not.toHaveBeenCalled();
+  });
+
+  for (const failure of ['readSessionMetadata', 'persistSessionGoal']) {
+    it(`logs and stops if ${failure} fails at exhaustion`, async () => {
+      const test = setup();
+      test[failure].mockRejectedValue(new Error('metadata unavailable'));
+      await test.start();
+      await vi.advanceTimersByTimeAsync(225_000);
+      expect(test.sessionRead).toHaveBeenCalledTimes(4);
+      expect(test.metadata.openchamber.goal.status).toBe('active');
+      expect(test.emitGoalNotification).not.toHaveBeenCalled();
+      expect(test.calls.some((call) => call.method === 'POST')).toBe(false);
+      expect(console.warn).toHaveBeenCalledWith('[session-goal] tick failed:', 'metadata unavailable');
+    });
+  }
+
+  for (const goal of [activeGoal({ status: 'paused' }), activeGoal({ status: 'complete' }), null, activeGoal({ id: 'goal_2' })]) {
+    it(`rejects settlement if the metadata write queue sees ${goal?.status ?? 'no goal'} ${goal?.id ?? ''}`, async () => {
+      const test = setup();
+      test.persistSessionGoal.mockImplementationOnce(async (_sessionId, _directory, _next, canWrite) => {
+        test.metadata.openchamber.goal = goal;
+        return canWrite(test.metadata);
+      });
+      await test.start();
+      await vi.advanceTimersByTimeAsync(105_000);
+      expect(test.persistSessionGoal).toHaveBeenCalledTimes(1);
+      expect(test.metadata.openchamber.goal).toEqual(goal);
+      expect(test.emitGoalNotification).not.toHaveBeenCalled();
+    });
+  }
+
+  it('keeps a later idle wakeup without running a second tick during the read', async () => {
+    const gate = Promise.withResolvers();
+    const sessionRead = vi.fn().mockImplementationOnce(() => gate.promise).mockResolvedValue(undefined);
+    const test = setup(sessionRead);
+    await test.start();
+    test.runtime.processPayload(idle());
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(sessionRead).toHaveBeenCalledTimes(1);
+    gate.reject(new Error('fetch failed'));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sessionRead).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(sessionRead).toHaveBeenCalledTimes(2);
+    expect(test.calls.filter((call) => call.method === 'POST')).toHaveLength(1);
+  });
+
+  it('honors pause and resume while a read is in flight with a fresh retry window', async () => {
+    const gate = Promise.withResolvers();
+    const sessionRead = vi.fn().mockRejectedValue(new Error('fetch failed'));
+    const test = setup(sessionRead);
+    await test.start();
+    await vi.advanceTimersByTimeAsync(45_000);
+    sessionRead.mockImplementationOnce(() => gate.promise);
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    test.metadata.openchamber.goal = activeGoal({ status: 'paused' });
+    await test.runtime.notifyGoalChanged(SESSION_ID, '/repo', test.metadata);
+    test.metadata.openchamber.goal = activeGoal({ statusReason: 'resumed' });
+    await test.runtime.notifyGoalChanged(SESSION_ID, '/repo', test.metadata);
+    await vi.advanceTimersByTimeAsync(250);
+    expect(sessionRead).toHaveBeenCalledTimes(4);
+    gate.reject(new Error('fetch failed'));
+    await vi.advanceTimersByTimeAsync(250);
+    expect(sessionRead).toHaveBeenCalledTimes(5);
+    expect(test.persistSessionGoal).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(sessionRead).toHaveBeenCalledTimes(6);
+    expect(test.persistSessionGoal).not.toHaveBeenCalled();
+  });
+
+  // An abort is not here: the in-flight tick keeps its read so it can reach
+  // its own abort check and pause the goal (see the abort test above).
+  for (const event of ['busy', 'pause', 'stop']) {
+    it(`cancels recovery on ${event} during an in-flight read`, async () => {
+      const gate = Promise.withResolvers();
+      const test = setup(vi.fn(() => gate.promise));
+      await test.start();
+      if (event === 'stop') test.runtime.stop();
+      if (event === 'pause') {
+        test.metadata.openchamber.goal = activeGoal({ status: 'paused' });
+        await test.runtime.notifyGoalChanged(SESSION_ID, '/repo', test.metadata);
+      }
+      if (event === 'busy') {
+        test.runtime.processPayload({ type: 'session.status', properties: { sessionID: SESSION_ID, status: { type: 'busy' } } });
+      }
+      gate.reject(new Error('fetch failed'));
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(test.sessionRead).toHaveBeenCalledTimes(1);
+      expect(test.persistSessionGoal).not.toHaveBeenCalled();
+      expect(test.emitGoalNotification).not.toHaveBeenCalled();
+      expect(test.calls.some((call) => call.method === 'POST')).toBe(false);
+    });
+  }
+});
 
 describe('session goal tick on v2 messages', () => {
   it('reads the flat v2 assistant record, audits it, and continues on the same model and agent', async () => {

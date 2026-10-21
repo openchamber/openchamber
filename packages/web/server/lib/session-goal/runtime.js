@@ -60,6 +60,7 @@ const KICKOFF_QUIET_MS = 3_000;
 // coalesces duplicate session.updated events.
 const RESUME_KICKOFF_MS = 250;
 const FETCH_TIMEOUT_MS = 10_000;
+const SESSION_READ_RETRIES = 3;
 const MESSAGE_FETCH_LIMIT = 40;
 const REASON_CHAR_LIMIT = 200;
 // Hard safety cap on auto-continuations per goal id. The audit and markers are
@@ -358,6 +359,7 @@ export const createSessionGoalRuntime = ({
 }) => {
   const timers = new Map();
   const inflight = new Set();
+  const sessionReadFailures = new Map();
   let stopped = false;
 
   const clearTimer = (sessionId) => {
@@ -423,27 +425,37 @@ export const createSessionGoalRuntime = ({
    */
   const readGoal = async (sessionId) => parseGoalMetadata({ metadata: await readSessionMetadata(sessionId) });
 
-  const writeGoal = async (sessionId, directory, expectedGoalId, mutate) => {
+  const writeGoal = async (sessionId, directory, expectedGoalId, mutate, isCurrent = null) => {
     const currentGoal = await readGoal(sessionId);
     if (!currentGoal || currentGoal.id !== expectedGoalId) return null;
-    const nextGoal = { ...currentGoal, ...mutate(currentGoal), updatedAt: Date.now() };
-    await persistSessionGoal(sessionId, directory, nextGoal);
+    const patch = mutate(currentGoal);
+    if (!patch) return null;
+    const nextGoal = { ...currentGoal, ...patch, updatedAt: Date.now() };
+    const canWrite = isCurrent ? (metadata) => {
+      const latest = parseGoalMetadata({ metadata });
+      return latest?.id === expectedGoalId && latest.status === 'active' && isCurrent();
+    } : null;
+    const persisted = await persistSessionGoal(sessionId, directory, nextGoal, canWrite);
+    if (persisted === false) return null;
     return nextGoal;
   };
 
-  const settleGoal = async ({ sessionId, directory, goal, status, statusReason, tokensUsed, tokensBaseline, tokensCommitted, lastAccountedMessageID, evaluationProviderID, evaluationModelID }) => {
-    const written = await writeGoal(sessionId, directory, goal.id, () => ({
-      status,
-      statusReason: clampText(statusReason, REASON_CHAR_LIMIT),
-      auditFailStreak: 0,
-      ...(tokensUsed !== undefined ? { tokensUsed } : {}),
-      ...(tokensBaseline !== undefined ? { tokensBaseline } : {}),
-      ...(tokensCommitted !== undefined ? { tokensCommitted } : {}),
-      ...(lastAccountedMessageID ? { lastAccountedMessageID } : {}),
-      // Written as a pair: Jev has no provider, and a leftover one from an
-      // earlier small-model check must not be shown next to Jev's model.
-      ...(evaluationModelID !== undefined ? { evaluationProviderID: evaluationProviderID ?? '', evaluationModelID } : {}),
-    }));
+  const settleGoal = async ({ sessionId, directory, goal, status, statusReason, tokensUsed, tokensBaseline, tokensCommitted, lastAccountedMessageID, evaluationProviderID, evaluationModelID, isCurrent = null }) => {
+    const written = await writeGoal(sessionId, directory, goal.id, (current) => {
+      if (current.status !== 'active' || (isCurrent && !isCurrent())) return null;
+      return {
+        status,
+        statusReason: clampText(statusReason, REASON_CHAR_LIMIT),
+        auditFailStreak: 0,
+        ...(tokensUsed !== undefined ? { tokensUsed } : {}),
+        ...(tokensBaseline !== undefined ? { tokensBaseline } : {}),
+        ...(tokensCommitted !== undefined ? { tokensCommitted } : {}),
+        ...(lastAccountedMessageID ? { lastAccountedMessageID } : {}),
+        // Written as a pair: Jev has no provider, and a leftover one from an
+        // earlier small-model check must not be shown next to Jev's model.
+        ...(evaluationModelID !== undefined ? { evaluationProviderID: evaluationProviderID ?? '', evaluationModelID } : {}),
+      };
+    }, isCurrent);
     if (!written) return;
     console.log(`[session-goal] ${sessionId} settled as ${status}${statusReason ? ` (${statusReason})` : ''}`);
     if (typeof emitGoalNotification === 'function') {
@@ -547,12 +559,33 @@ export const createSessionGoalRuntime = ({
     if (!isEnabled()) return;
     const maxAutoTurns = getMaxAutoTurns();
 
+    const attempt = sessionReadFailures.get(sessionId) ?? { failures: 0 };
+    sessionReadFailures.set(sessionId, attempt);
+    const isCurrent = () => !stopped && sessionReadFailures.get(sessionId) === attempt;
     const session = await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}`, { directory })
       .catch((error) => {
         console.warn(`[session-goal] session fetch failed: ${error?.message || error}`);
         return null;
       });
-    if (!session || typeof session !== 'object') return;
+    if (!isCurrent()) return;
+    if (!session || typeof session !== 'object') {
+      attempt.failures += 1;
+      if (attempt.failures <= SESSION_READ_RETRIES) {
+        armTimer(sessionId, directory, idleQuietMs * (2 ** (attempt.failures - 1)));
+      } else {
+        const goal = await readGoal(sessionId);
+        if (goal?.status === 'active' && isCurrent()) {
+          await settleGoal({
+            sessionId, directory, goal, status: 'blocked',
+            statusReason: 'Session could not be read after repeated attempts. Resume to try again.',
+            isCurrent,
+          });
+        }
+        if (isCurrent()) sessionReadFailures.delete(sessionId);
+      }
+      return;
+    }
+    sessionReadFailures.delete(sessionId);
     // Sub-agent/task sessions never carry user goals — skip them.
     if (typeof session.parentID === 'string' && session.parentID) return;
 
@@ -845,18 +878,29 @@ export const createSessionGoalRuntime = ({
     await sendContinuation({ sessionId, directory, goal: { ...written, objective: effectiveObjective }, maxAutoTurns });
   };
 
+  const finishInflight = (sessionId) => {
+    inflight.delete(sessionId);
+    const pending = timers.get(sessionId);
+    if (pending && !pending.timer) armTimer(sessionId, pending.directory, pending.quietMs);
+  };
+
   const armTimer = (sessionId, directory, quietMs) => {
     clearTimer(sessionId);
     const timer = setTimeout(() => {
+      if (stopped) return;
+      if (inflight.has(sessionId)) {
+        // Keep a wakeup that arrived during a read; run it after this tick ends.
+        timers.set(sessionId, { timer: null, directory, quietMs });
+        return;
+      }
       timers.delete(sessionId);
-      if (stopped || inflight.has(sessionId)) return;
       inflight.add(sessionId);
       tick(sessionId, directory)
         .catch((error) => {
           console.warn('[session-goal] tick failed:', error?.message || error);
         })
         .finally(() => {
-          inflight.delete(sessionId);
+          finishInflight(sessionId);
         });
     }, quietMs);
     if (typeof timer?.unref === 'function') timer.unref();
@@ -888,11 +932,16 @@ export const createSessionGoalRuntime = ({
     if (stopped || !isWired()) return;
     const goal = parseGoalMetadata({ metadata });
     if (!goal || goal.status !== 'active') {
+      sessionReadFailures.delete(sessionId);
       clearTimer(sessionId);
       return;
     }
+    // A mid-goal edit leaves a tick that is reading the session alone: that
+    // tick holds the only pending work, and cancelling it would leave the
+    // goal active without a timer.
     if (goal.turnsUsed !== 0 && goal.statusReason !== 'resumed') return;
-    if (timers.has(sessionId) || inflight.has(sessionId)) return;
+    sessionReadFailures.delete(sessionId);
+    clearTimer(sessionId);
 
     // A patch from the UI names no directory, and the loop needs one to scope
     // its own OpenCode calls. The session record is authoritative for it.
@@ -901,7 +950,7 @@ export const createSessionGoalRuntime = ({
       const session = await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}`).catch(() => null);
       resolved = typeof session?.location?.directory === 'string' ? session.location.directory : '';
     }
-    if (stopped || timers.has(sessionId) || inflight.has(sessionId)) return;
+    if (stopped || timers.has(sessionId)) return;
     armTimer(sessionId, resolved, goal.statusReason === 'resumed' ? RESUME_KICKOFF_MS : kickoffQuietMs);
   };
 
@@ -918,6 +967,9 @@ export const createSessionGoalRuntime = ({
 
     const aborted = extractAbortedAssistant(payload);
     if (aborted) {
+      // A tick already in flight reaches its own abort check and pauses the
+      // goal there; ending its read attempt now would drop it before that.
+      if (!inflight.has(aborted.sessionId)) sessionReadFailures.delete(aborted.sessionId);
       clearTimer(aborted.sessionId);
       if (!inflight.has(aborted.sessionId)) {
         inflight.add(aborted.sessionId);
@@ -926,7 +978,7 @@ export const createSessionGoalRuntime = ({
             console.warn('[session-goal] pause after abort failed:', error?.message || error);
           })
           .finally(() => {
-            inflight.delete(aborted.sessionId);
+            finishInflight(aborted.sessionId);
           });
       }
       return;
@@ -934,6 +986,7 @@ export const createSessionGoalRuntime = ({
 
     const status = extractSessionStatus(payload);
     if (status) {
+      sessionReadFailures.delete(status.sessionId);
       if (status.type === 'idle') {
         armTimer(status.sessionId, status.directory || directoryHint, idleQuietMs);
       } else {
@@ -969,6 +1022,7 @@ export const createSessionGoalRuntime = ({
       clearTimeout(timer);
     }
     timers.clear();
+    sessionReadFailures.clear();
   };
 
   return { processPayload, notifyGoalChanged, stop };

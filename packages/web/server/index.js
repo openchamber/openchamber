@@ -1002,8 +1002,13 @@ const sessionGoalRuntime = createSessionGoalRuntime({
   classifierEndpoint: () => routingRuntime.classifierEndpoint(),
   jev: createJevClient(),
   readSessionMetadata: readStoredSessionMetadata,
-  persistSessionGoal: (sessionID, directory, goal) =>
-    persistSessionMetadataPatch(sessionID, { openchamber: { goal } }, { directory }),
+  persistSessionGoal: async (sessionID, directory, goal, canWrite) => {
+    if (!canWrite) return persistSessionMetadataPatch(sessionID, { openchamber: { goal } }, { directory });
+    const result = await updateSessionMetadataWith(sessionID, (metadata) => (
+      canWrite(metadata) ? { openchamber: { goal } } : null
+    ), { directory });
+    return result.changed;
+  },
   emitGoalNotification: async ({ sessionId, directory, status, goal }) => {
     // The goal settle notification replaces the per-turn ready notifications
     // (suppressed while the goal is active) — so it obeys the same toggle.
