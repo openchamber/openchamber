@@ -796,6 +796,36 @@ export const getBranchTrackedPull = (entry: PrStatusEntry | undefined): TrackedT
   return identity.provider === 'github' ? { provider: 'github', ...thread } : null;
 };
 
+/**
+ * Every tracked pull a status read can name: the same request read with the
+ * bound account (a branch's own authority) and read as a link with the host's
+ * current account. Sidebar rows without a worktree show the link, so a manual
+ * refresh has to ask the server about both or the row waits for the cadence.
+ */
+export const getStatusTrackedPulls = (
+  status: SourceControlStatus | null | undefined,
+  accountId?: string | null,
+): TrackedThread<'pull'>[] => {
+  const pr = getStatusChangeRequest(status);
+  const project = status?.project;
+  const owner = project?.owner ?? status?.repo?.owner;
+  const repo = project?.name ?? status?.repo?.repo;
+  const identity = status?.identity;
+  if (!pr?.number || !owner || !repo || !identity) return [];
+  const thread = { kind: 'pull' as const, owner, repo, number: pr.number };
+  if (identity.provider === 'gitlab') {
+    if (!identity.instance) return [];
+    const linked: TrackedThread<'pull'> = { provider: 'gitlab', instance: identity.instance, ...thread };
+    return accountId
+      ? [{ provider: 'gitlab', instance: identity.instance, ...thread, accountId }, linked]
+      : [linked];
+  }
+  const linked: TrackedThread<'pull'> = { provider: 'github', ...thread };
+  return accountId
+    ? [{ provider: 'github', ...thread, accountId }, linked]
+    : [linked];
+};
+
 const sameChecks = (left: CISummary | null | undefined, right: CISummary | null | undefined): boolean => (
   (left ?? null) === (right ?? null)
   || Boolean(left && right

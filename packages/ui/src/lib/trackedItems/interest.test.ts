@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, jest, test } from 'bun:test';
 import { createTrackedItemsInterest } from './interest';
 import type { TrackedItem, TrackedItemState } from './model';
 
-type Request = { path: string; body: { connectionId: string; visible: boolean; items?: TrackedItem[] } };
+type Request = { path: string; body: { connectionId?: string; visible?: boolean; items?: TrackedItem[] } };
 
 const pull = (number: number): TrackedItem => ({ provider: 'github', kind: 'pull', owner: 'acme', repo: 'app', number });
 
@@ -76,6 +76,21 @@ describe('tracked items interest', () => {
     setVisible(false);
     await settle(0);
     expect(posts[2]).toEqual({ path: '/api/tracked-items/presence', body: { connectionId: 'c1', visible: false } });
+  });
+
+  test('asks the server to re-read given items now', async () => {
+    const { interest, posts, respondWith } = setup();
+    respondWith(() => Response.json({ ok: true }));
+    interest.refresh([pull(1), pull(2)]);
+    await settle(0);
+    expect(posts).toEqual([{
+      path: '/api/tracked-items/refresh',
+      body: { items: [pull(1), pull(2)] },
+    }]);
+
+    interest.refresh([]);
+    await settle(0);
+    expect(posts).toHaveLength(1);
   });
 
   test('retries a failed send later and waits for the next connection after a 409', async () => {

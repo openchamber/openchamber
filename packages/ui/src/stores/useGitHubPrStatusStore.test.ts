@@ -7,6 +7,7 @@ import type {
   SourceControlReadContext,
 } from "@/lib/api/types"
 import { getBoundSourceControlReadContexts } from "@/lib/source-control/identity"
+import type { SourceControlStatus } from "./useGitHubPrStatusStore"
 
 let runtimeKey = "runtime-a"
 mock.module("@/lib/runtime-switch", () => ({ getRuntimeKey: () => runtimeKey }))
@@ -20,6 +21,7 @@ const {
   getGitHubPrStatusKey,
   getLinkedChangeRequestVisualSummary,
   getSourceControlStatusKey,
+  getStatusTrackedPulls,
   useGitHubPrStatusStore,
 } = await import("./useGitHubPrStatusStore")
 
@@ -1280,6 +1282,31 @@ describe("branch PR live state pushed by the server", () => {
     })
     seed(key, openStatus({ pr: { ...openStatus().pr!, state: "merged" } }))
     expect(getBranchTrackedPull(useGitHubPrStatusStore.getState().entries[key])).toBeNull()
+  })
+
+  test("a status names the branch item and the same request read as a link", () => {
+    const status: SourceControlStatus = {
+      ...openStatus(),
+      identity: { provider: "github", instance: "github.com" },
+    }
+    expect(getStatusTrackedPulls(status, "github.com#7")).toEqual([
+      { provider: "github", kind: "pull", owner: "acme", repo: "app", number: 7, accountId: "github.com#7" },
+      { provider: "github", kind: "pull", owner: "acme", repo: "app", number: 7 },
+    ])
+    expect(getStatusTrackedPulls(status, null)).toEqual([
+      { provider: "github", kind: "pull", owner: "acme", repo: "app", number: 7 },
+    ])
+  })
+
+  test("a closed request is still refreshed, and no request names nothing", () => {
+    const merged: SourceControlStatus = {
+      ...openStatus({ pr: { ...openStatus().pr!, state: "merged" } }),
+      identity: { provider: "github", instance: "github.com" },
+    }
+    expect(getStatusTrackedPulls(merged, "github.com#7")[1]).toEqual({
+      provider: "github", kind: "pull", owner: "acme", repo: "app", number: 7,
+    })
+    expect(getStatusTrackedPulls({ ...merged, pr: null })).toEqual([])
   })
 
   test("a PR merged on GitHub turns merged and drops its checks", () => {

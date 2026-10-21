@@ -1,5 +1,6 @@
 import React from 'react';
 import { z } from 'zod';
+import { isVSCodeRuntime } from '@/lib/desktop';
 import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeKey } from '@/lib/runtime-switch';
@@ -33,10 +34,11 @@ type StreamEvent =
 
 type InterestRequest = { path: '/api/tracked-items/interest'; body: { connectionId: string; visible: boolean; items: TrackedItem[] } };
 type PresenceRequest = { path: '/api/tracked-items/presence'; body: { connectionId: string; visible: boolean } };
+type RefreshRequest = { path: '/api/tracked-items/refresh'; body: { items: TrackedItem[] } };
 
 type Dependencies = {
   subscribe: (listener: (event: StreamEvent) => void) => void;
-  post: (request: InterestRequest | PresenceRequest) => Promise<Response>;
+  post: (request: InterestRequest | PresenceRequest | RefreshRequest) => Promise<Response>;
   apply: (records: Array<{ key: string; record: TrackedItemState }>) => void;
   isVisible: () => boolean;
   onVisibilityChange: (listener: () => void) => void;
@@ -137,6 +139,17 @@ export function createTrackedItemsInterest({
       declarations.delete(token);
       scheduleFlush();
     },
+    /** Asks the server to re-read these followed items now instead of waiting for its cadence. */
+    refresh(items: readonly TrackedItem[]) {
+      if (items.length === 0) return;
+      void post({ path: '/api/tracked-items/refresh', body: { items: [...items] } })
+        .then((response) => {
+          if (!response.ok) throw new Error(`Tracked items refresh returned ${response.status}`);
+        })
+        .catch((error) => {
+          warn(`[tracked-items] could not refresh them now: ${String(error)}`);
+        });
+    },
   };
 }
 
@@ -159,6 +172,17 @@ const trackedItemsInterest = createTrackedItemsInterest({
   onWindowReturned: () => useGitHubPrStatusStore.getState().noteWindowReturned(),
   warn: (message) => console.warn(message),
 });
+
+/**
+ * Asks the server to re-read these followed items now. A manual refresh and
+ * our own mutations know state the cadence has not seen yet; the server still
+ * answers only what some connection shows, and pushes only real changes.
+ * VS Code has no event stream, so it has nothing to update.
+ */
+export const refreshTrackedItems = (items: readonly TrackedItem[]): void => {
+  if (isVSCodeRuntime()) return;
+  trackedItemsInterest.refresh(items);
+};
 
 /**
  * Follows these items while the calling component is mounted. The server

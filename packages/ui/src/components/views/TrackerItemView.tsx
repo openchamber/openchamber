@@ -28,6 +28,8 @@ import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import type { GitHubReferenceKind } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
 import { openExternalUrl } from '@/lib/url';
+import { githubThread } from '@/lib/trackedItems/fromLinks';
+import { refreshTrackedItems } from '@/lib/trackedItems/interest';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useUIStore } from '@/stores/useUIStore';
 
@@ -139,11 +141,27 @@ const RepositoryTrackerItem: React.FC<TrackerItemViewProps & { kind: GitHubRefer
         () => Promise.all([refreshDetail(), retryLookup()]).then(() => undefined),
         [refreshDetail, retryLookup],
     );
+    // The sidebar row shows this link from the server's tracked state; the
+    // panel's own reads do not touch it. Ask it now so the row moves with the
+    // panel instead of at the next cadence.
+    const refreshTrackedPull = React.useCallback(() => {
+        if (reference?.kind !== 'pull') return;
+        refreshTrackedItems([githubThread('pull', {
+            owner: reference.sourceRepo.owner,
+            repo: reference.sourceRepo.repo,
+            number: reference.number,
+        })]);
+    }, [reference]);
+    const refreshItemAndTracked = React.useCallback(() => {
+        void refreshItem();
+        refreshTrackedPull();
+    }, [refreshItem, refreshTrackedPull]);
     const threadActions = useThreadActions(reference, context, refreshItem);
     // For a change made on the host's own site, which the server's
     // short-lived answers would otherwise hide for up to half a minute.
     const refreshFromHost = async () => {
         if (context) await sourceControl.refreshProviderReads(context).catch(() => undefined);
+        refreshTrackedPull();
         forgetGitHubPullStatuses();
         await refreshItem();
     };
@@ -174,12 +192,12 @@ const RepositoryTrackerItem: React.FC<TrackerItemViewProps & { kind: GitHubRefer
                 onIncludeDiffChange={() => undefined}
                 now={now}
                 // Starting work happens on the board and in New Worktree; here the item is read and acted on.
-                footer={<SourceBoardActions item={item} project={null} context={context} onStartWorktree={() => undefined} onChanged={() => void refreshItem()} worktreeAvailable={false} />}
+                footer={<SourceBoardActions item={item} project={null} context={context} onStartWorktree={() => undefined} onChanged={refreshItemAndTracked} worktreeAvailable={false} />}
                 onOpenChecks={pull && context ? () => setChecksOpen(true) : undefined}
                 onRefresh={context ? refreshFromHost : undefined}
                 threadActions={threadActions}
                 stateMenu={reference.state !== 'merged' && context ? (
-                    <SourceBoardStateMenuItems item={item} context={context} onChanged={() => void refreshItem()} />
+                    <SourceBoardStateMenuItems item={item} context={context} onChanged={refreshItemAndTracked} />
                 ) : undefined}
                 commentAttachments={{ onAttach: attachments.attachComment, onAttachAll: attachments.attachComments }}
                 labelsControl={context ? <SourceBoardLabels reference={reference} context={context} onChanged={refreshItem} /> : undefined}

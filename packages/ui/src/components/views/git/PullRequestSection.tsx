@@ -25,8 +25,8 @@ import * as sessionActions from '@/sync/session-actions';
 import { buildLinkedIssue } from '@/lib/linkedIssues';
 import { normalizePath } from '@/lib/pathNormalization';
 import { getSourceControlAuthKey, getSourceControlReadContextAuthState, useSourceControlAuthStore } from '@/stores/useSourceControlAuthStore';
-import { getSourceControlStatusKey, useBranchTrackedPulls, useGitHubPrStatusStore, type SourceControlStatus } from '@/stores/useGitHubPrStatusStore';
-import { useTrackedItems } from '@/lib/trackedItems/interest';
+import { getSourceControlStatusKey, getStatusTrackedPulls, useBranchTrackedPulls, useGitHubPrStatusStore, type SourceControlStatus } from '@/stores/useGitHubPrStatusStore';
+import { refreshTrackedItems, useTrackedItems } from '@/lib/trackedItems/interest';
 import type {
   CreateChangeRequestInput,
   Project,
@@ -504,6 +504,14 @@ export const PullRequestSection: React.FC<{
     await refreshPrStatus(prStatusKey, options);
   }, [prStatusKey, refreshPrStatus]);
 
+  // The status store answers the panel and worktree rows. A row without a
+  // worktree shows the same pull request as a linked item, which the server
+  // owns; ask it now so that row does not wait for its 30-60 s cadence.
+  const refreshTrackedPulls = React.useCallback((statusKey: string) => {
+    const refreshed = useGitHubPrStatusStore.getState().entries[statusKey]?.status;
+    refreshTrackedItems(getStatusTrackedPulls(refreshed, readContext?.accountId ?? null));
+  }, [readContext?.accountId]);
+
   const scheduleActionRefresh = React.useCallback((capturedRuntimeKey: string, capturedStatusKey: string) => {
     pendingActionRefreshTimersRef.current.forEach((timerId) => {
       window.clearTimeout(timerId);
@@ -563,12 +571,13 @@ export const PullRequestSection: React.FC<{
     const startedAt = Date.now();
     try {
       await refresh({ force: true });
+      refreshTrackedPulls(prStatusKey);
     } finally {
       const remaining = PR_MANUAL_REFRESH_MIN_SPIN_MS - (Date.now() - startedAt);
       if (remaining > 0) await new Promise((resolve) => window.setTimeout(resolve, remaining));
       if (manualRefreshMountedRef.current) setIsManualRefreshing(false);
     }
-  }, [isManualRefreshing, refresh]);
+  }, [isManualRefreshing, prStatusKey, refresh, refreshTrackedPulls]);
 
   React.useEffect(() => {
     if (!readContext || !prStatusKey) return;
@@ -798,6 +807,7 @@ export const PullRequestSection: React.FC<{
       if (createdChangeRequest && createdChangeRequest.number === receipt.target.number) {
         linkCreatedChangeRequestToCurrentSession(directory, createdChangeRequest);
       }
+      refreshTrackedPulls(capturedStatusKey);
       scheduleActionRefresh(capturedRuntimeKey, capturedStatusKey);
     } catch (e) {
       const error = e instanceof Error ? e : new Error(String(e));
@@ -809,7 +819,7 @@ export const PullRequestSection: React.FC<{
       if (!mutationSettled) finishMutation(signature, idempotencyKey, retainMutationKey);
       setIsCreating(false);
     }
-  }, [beginMutation, body, branch, branchPush, detectedUpstream, directory, draft, error, finishMutation, isMutationScopeCurrent, needsPush, prStatusKey, readContext, reconcileUnknownOutcome, refresh, scheduleActionRefresh, sourceControl, sourceControlCapabilities?.changeRequests, statusProject, targetBaseBranch, title, useDetectedUpstream, t]);
+  }, [beginMutation, body, branch, branchPush, detectedUpstream, directory, draft, error, finishMutation, isMutationScopeCurrent, needsPush, prStatusKey, readContext, reconcileUnknownOutcome, refresh, refreshTrackedPulls, scheduleActionRefresh, sourceControl, sourceControlCapabilities?.changeRequests, statusProject, targetBaseBranch, title, useDetectedUpstream, t]);
 
   const containerClassName = 'border-0 bg-transparent rounded-none px-4 py-3';
 
@@ -858,7 +868,10 @@ export const PullRequestSection: React.FC<{
           directory={directory}
           context={readContext}
           changeRequest={liveChangeRequest}
-          onChanged={() => void refresh({ force: true, silent: true, markInitialResolved: true })}
+          onChanged={() => {
+            void refresh({ force: true, silent: true, markInitialResolved: true })
+              .then(() => refreshTrackedPulls(prStatusKey));
+          }}
         />
       </div>
     );
