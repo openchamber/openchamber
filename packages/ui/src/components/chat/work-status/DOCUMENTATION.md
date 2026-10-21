@@ -373,6 +373,19 @@ hidden and empty sections do not claim that space. Both heading variants expose
 width. Heading summaries truncate within a bounded share of the available width
 so project names and usage summaries cannot push actions under settings.
 
+### Why the settings button scrolls with the sections
+
+The button is positioned inside the scroller, over the space the first heading
+reserves, so it scrolls away with that heading and never sits on a row. Pinned
+to the card's corner, as it was, it stayed put while rows scrolled under it:
+values at a row's end, the project action and, at 200%, the merge or rebase
+callout's text. A header row of its own would keep it in view, at the cost of a
+row of height on every session. It is the scroller's last child, so the first
+section stays its first child for the rules above. With every section hidden,
+the empty state sits in the scroller too: an empty scroller is shorter than the
+button, which would overflow it and make it scroll. `WorkStatusPanel.test.tsx`
+pins both.
+
 ## Extension sections
 
 An installed extension can add its own section (`contributes.statusSection`,
