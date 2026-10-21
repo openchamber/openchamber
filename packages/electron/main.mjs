@@ -1,5 +1,5 @@
 import { canReuseManagedOpenCodePreflight } from './opencode-readiness.mjs';
-import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, MessageChannelMain, nativeTheme, net as electronNet, Notification, powerMonitor, powerSaveBlocker, protocol, screen, session, shell, webContents } from 'electron';
+import { app, BrowserWindow, clipboard, ClipboardItem, dialog, globalShortcut, ipcMain, Menu, MessageChannelMain, nativeTheme, net as electronNet, Notification, powerMonitor, powerSaveBlocker, protocol, screen, session, shell, webContents } from 'electron';
 import contextMenu from 'electron-context-menu';
 import log from 'electron-log/main.js';
 import dgram from 'node:dgram';
@@ -86,6 +86,7 @@ import {
   selectQuakeToggleAction,
 } from './quake-mode.mjs';
 import { createContextMenuLabels, menuLabel, normalizeMenuLocale, roleMenuItem } from './menu-locales.mjs';
+import { createCopyLinkMenuHook } from './context-menu-clipboard.mjs';
 import { resolveUpdaterFeed } from './updater-feed.mjs';
 import {
   buildLinuxInstalledApps,
@@ -5839,6 +5840,11 @@ const { labels: contextMenuLabels, apply: setContextMenuLocale } = createContext
 
 contextMenu({
   labels: contextMenuLabels,
+  prepend: createCopyLinkMenuHook({
+    clipboard,
+    ClipboardItem,
+    onError: () => log.warn('[context-menu] Failed to copy link to clipboard'),
+  }),
   showInspectElement: isDev,
   showSaveImageAs: true,
   showCopyImage: true,

@@ -105,6 +105,26 @@ opening failures do not fall back to a browser window for application links.
 
 Native menu actions reach the renderer as one DOM event per click. Main must not also send them over IPC: preload turns every IPC emit into a call to its bridge listeners and a DOM event, so the action would run again. Update-check notifications go over IPC only, for the same reason.
 
+Native Copy link uses `context-menu-clipboard.mjs` to write URL text and bookmark
+metadata together through Electron's `ClipboardItem` API. `electron-context-menu`
+4.1.2 still uses the old object-shaped clipboard write. Inside its `prepend` hook,
+`defaultActions.copyLink()` returns the existing item, so replacing that item's
+handler preserves menu order, visibility and live translations. Copy failures are
+logged without clipboard data.
+
+`scripts/smoke-context-menu.mjs`, run with Electron on an isolated display and
+clipboard, checks the real dependency's menu identity, translations and native
+clipboard writes. On Linux, run it inside a disposable container with its own Xvfb
+display; it writes synthetic data to that display's clipboard and selection.
+The fixture clicks the built menu item programmatically. A live right-click,
+menu selection and paste in the app still need a separate interaction check.
+
+From the repository root inside that disposable container:
+
+```bash
+xvfb-run -a packages/electron/node_modules/.bin/electron --no-sandbox packages/electron/scripts/smoke-context-menu.mjs
+```
+
 The local diagnostics IPC combines the desktop log with the SSH manager's in-memory history. `main.mjs` classifies SSH messages in the native process before returning them; host names, stderr and other raw SSH output never cross to the renderer. Remote SSH files are not read.
 
 A window whose renderer crashes is reloaded (`renderer-recovery.mjs`). A crash
