@@ -1,6 +1,6 @@
 import { useCallback } from 'react';
 import { create } from 'zustand';
-import { readBackgroundShellIDFromMetadata, readShellCancellation, type RunningShell, type ShellEnd } from '@/lib/opencode/background-shell';
+import { readBackgroundShellIDFromMetadata, readShellCancellation, type RunningShell, type ShellEnd, type ShellEndRecord } from '@/lib/opencode/background-shell';
 import type { SyncEvent } from '@/lib/opencode/events';
 import { normalizeProjectPath } from '@/lib/projectResolution';
 
@@ -116,7 +116,7 @@ const sessionIdsOf = (byId: ReadonlyMap<string, TrackedShell>, previous: Readonl
   return same ? previous : next;
 };
 
-const publish = (byId: Map<string, TrackedShell>, ended: ReadonlyMap<string, EndedShell> | null): void => {
+const publish = (byId: ReadonlyMap<string, TrackedShell>, ended: ReadonlyMap<string, EndedShell> | null): void => {
   const state = useBackgroundShellsStore.getState();
   useBackgroundShellsStore.setState({ byId, sessionIds: sessionIdsOf(byId, state.sessionIds), ended: ended ?? state.ended });
 };
@@ -219,8 +219,9 @@ export const applyBackgroundShellEvents = (rawDirectory: string, payloads: reado
 /**
  * Replaces one directory's commands with a complete list read from it.
  * `since` is the revision the read started at (`backgroundShellRevision()`).
+ * Returns the commands the list no longer has, ended as `unknown`.
  */
-export const replaceDirectoryShells = (rawDirectory: string, shells: readonly RunningShell[], since: number): void => {
+export const replaceDirectoryShells = (rawDirectory: string, shells: readonly RunningShell[], since: number): EndedShell[] => {
   const directory = normalizeDirectory(rawDirectory);
   const state = useBackgroundShellsStore.getState();
   let draft: Map<string, TrackedShell> | null = null;
@@ -240,24 +241,42 @@ export const replaceDirectoryShells = (rawDirectory: string, shells: readonly Ru
     draft.set(shell.id, shell);
   }
   if (draft) publish(draft, ended.length > 0 ? withEnded(state.ended, ended) : null);
+  return ended;
 };
 
 export const backgroundShellRevision = (): number => revision;
 
+/** Puts what OpenCode's record says in place of an `unknown` end. */
+const resolveUnknownEnd = (shellID: string, record: ShellEndRecord): void => {
+  const state = useBackgroundShellsStore.getState();
+  const recorded = state.ended.get(shellID);
+  if (recorded?.status !== 'unknown') return;
+  publish(state.byId, withEnded(state.ended, [endedFrom(recorded, record.end, record.endedAt ?? recorded.endedAt)]));
+};
+
 /**
  * Reads a directory's running commands and applies them. A failed read
- * rejects and changes nothing: it proves nothing about the commands.
+ * rejects and changes nothing: it proves nothing about the commands. A
+ * command the list no longer has ended inside an event gap; its end is read
+ * from OpenCode's record of it, and stays `unknown` when OpenCode no longer
+ * keeps one or the read fails.
  */
 export const refreshBackgroundShells = async (
   directory: string,
   listRunningShells: (directory: string) => Promise<{ directory: string; shells: RunningShell[] }>,
+  readShellEnd: (shellID: string, directory: string) => Promise<ShellEndRecord | undefined>,
 ): Promise<void> => {
   const startedGeneration = generation;
   const since = revision;
   const listed = await listRunningShells(directory);
   if (startedGeneration !== generation) return;
   // Keyed by the directory OpenCode answered for, which its events carry too.
-  replaceDirectoryShells(listed.directory, listed.shells, since);
+  const unknown = replaceDirectoryShells(listed.directory, listed.shells, since);
+  await Promise.all(unknown.map(async (shell) => {
+    const record = await readShellEnd(shell.id, shell.directory).catch(() => undefined);
+    if (record === undefined || startedGeneration !== generation) return;
+    resolveUnknownEnd(shell.id, record);
+  }));
 };
 
 /** Directories the index holds running commands for. */

@@ -13,10 +13,12 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Window } from 'happy-dom';
 import { OpenCode } from '@opencode/client';
+import type { RunningShell } from '@/lib/opencode/background-shell';
 import { opencodeClient } from '@/lib/opencode/client';
 import { adoptRelayTunnel, deactivateRelayTunnel } from '@/lib/relay/runtime-tunnel';
 import type { RelayTunnelClient, RelayTunnelWebSocket } from '@/lib/relay/tunnel-client';
 import { clearRuntimeUrlAuthToken, setRuntimeUrlAuthToken } from '@/lib/runtime-auth';
+import { applyBackgroundShellEvents, resetBackgroundShells, useBackgroundShellsStore } from '@/sync/background-shells';
 import { createFakeSocket } from './relay-socket-fixture';
 
 const DIRECTORY = '/repo/resume';
@@ -155,5 +157,68 @@ describe('SyncProvider stream reconnect', () => {
     await reconnectAfterBootWindow({ resumed: false, replayReset: true });
 
     expect(readsOf(DIRECTORY)).toBeGreaterThan(before);
+  });
+});
+
+/**
+ * A command whose end fell into the gap. The OpenCode stream never restarted,
+ * so no `server.connected` arrives: only the client's own reconnect can
+ * notice, and only by reading the command lists again.
+ */
+describe('SyncProvider stream reconnect and background commands', () => {
+  const OTHER_DIRECTORY = '/repo/no-store';
+  const listReads: string[] = [];
+  let listSpy: ReturnType<typeof spyOn<typeof opencodeClient, 'listRunningShells'>> | null = null;
+  let endSpy: ReturnType<typeof spyOn<typeof opencodeClient, 'readShellEnd'>> | null = null;
+
+  const runningShell = (id: string): RunningShell => ({ id, sessionID: VIEWED_SESSION, command: `bun run ${id}`, file: `/tmp/${id}.out`, startedAt: 1 });
+
+  beforeEach(() => {
+    resetBackgroundShells();
+    listReads.length = 0;
+    // OpenCode no longer runs anything: both commands ended during the gap,
+    // and it kept no record of how.
+    listSpy = spyOn(opencodeClient, 'listRunningShells').mockImplementation(async (directory: string) => {
+      listReads.push(directory);
+      return { directory, shells: [] };
+    });
+    endSpy = spyOn(opencodeClient, 'readShellEnd').mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    listSpy?.mockRestore();
+    endSpy?.mockRestore();
+    resetBackgroundShells();
+  });
+
+  /** Two commands seen running before the gap: one in the shown directory, one in a directory without a store. */
+  const startCommands = async (): Promise<void> => {
+    await act(async () => {
+      applyBackgroundShellEvents(DIRECTORY, [{ type: 'shell.started', properties: { shell: runningShell('sh_here') } }]);
+      applyBackgroundShellEvents(OTHER_DIRECTORY, [{ type: 'shell.started', properties: { shell: runningShell('sh_there') } }]);
+    });
+    expect([...useBackgroundShellsStore.getState().byId.keys()].sort()).toEqual(['sh_here', 'sh_there']);
+    listReads.length = 0;
+  };
+
+  test('a reconnect that resumed the cursor reads no command list', async () => {
+    await mountProvider();
+    await startCommands();
+
+    await reconnectAfterBootWindow({ resumed: true, replayReset: false });
+
+    expect(listReads).toEqual([]);
+    expect(useBackgroundShellsStore.getState().byId.size).toBe(2);
+  });
+
+  test('a reconnect that lost events reads the command list of every directory running one, and the ended commands leave', async () => {
+    await mountProvider();
+    await startCommands();
+
+    await reconnectAfterBootWindow({ resumed: false, replayReset: true });
+
+    expect([...new Set(listReads)].sort()).toEqual([DIRECTORY, OTHER_DIRECTORY].sort());
+    expect(useBackgroundShellsStore.getState().byId.size).toBe(0);
+    expect(useBackgroundShellsStore.getState().ended.get('sh_here')?.status).toBe('unknown');
   });
 });

@@ -1604,6 +1604,23 @@ async function refreshStoresActiveAfterGap(childStores: ChildStoreManager): Prom
   childStores.refreshStaleDirectoriesWithActiveSessions(new Set(Object.keys(active)))
 }
 
+/**
+ * A command whose end fell into a stream gap stays "running" until its
+ * directory's list is read again, and only a bootstrap reads it otherwise.
+ * After any gap, every directory the index holds running commands for is
+ * read, except those in `skip`, which a bootstrap is already re-reading.
+ */
+function rereadRunningShellDirectories(skip: ReadonlySet<string> = new Set()): void {
+  for (const dir of directoriesWithRunningShells()) {
+    if (skip.has(normalizePath(dir) ?? dir)) continue
+    void runBackgroundNetworkTask(() => refreshBackgroundShells(
+      dir,
+      (target) => opencodeClient.listRunningShells(target),
+      (shellID, target) => opencodeClient.readShellEnd(shellID, target),
+    )).catch(() => undefined)
+  }
+}
+
 type CatalogRuntime = { key: string; sdk: ReturnType<typeof opencodeClient.getSdkClient> }
 
 const isCatalogRuntimeCurrent = (runtime: CatalogRuntime): boolean =>
@@ -2145,13 +2162,7 @@ export function handleEvent(
       if (!recent) {
         getImperativeSessionMessageLoader()?.markHistoryStale()
         const refreshing = childStores.refreshAfterStreamRestart(opencodeClient.getDirectory())
-        // Bootstrap re-reads the commands of the directories it refreshes; a
-        // command in any other directory may have exited during the gap.
-        for (const dir of directoriesWithRunningShells()) {
-          if (refreshing.has(normalizePath(dir) ?? dir)) continue
-          void runBackgroundNetworkTask(() => refreshBackgroundShells(dir, (target) => opencodeClient.listRunningShells(target)))
-            .catch(() => undefined)
-        }
+        rereadRunningShellDirectories(refreshing)
         void refreshStoresActiveAfterGap(childStores)
       }
     }
@@ -3095,6 +3106,8 @@ export function SyncProvider(props: {
       // tail refreshes below count as that revalidation.
       messageLoader.markHistoryStale()
       for (const dir of childStores.children.keys()) triggerDirectoryResync(dir, reason)
+      // A directory resync reads statuses and transcripts, not command lists.
+      rereadRunningShellDirectories()
     }
     const pipeline = createEventPipeline({
       sdk: props.sdk,

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
-import type { RunningShell, ShellEnd } from '@/lib/opencode/background-shell';
+import type { RunningShell, ShellEnd, ShellEndRecord } from '@/lib/opencode/background-shell';
 import type { SyncEvent } from '@/lib/opencode/events';
 import {
   ENDED_SHELLS_MAX,
@@ -41,6 +41,8 @@ const isBackground = (shellID: string) => useBackgroundShellsStore.getState().by
 
 const ids = () => [...useBackgroundShellsStore.getState().byId.keys()].sort();
 const sessions = () => [...useBackgroundShellsStore.getState().sessionIds].sort();
+/** OpenCode keeps no record of any ended command. */
+const noRecord = async (): Promise<ShellEndRecord | undefined> => undefined;
 
 beforeEach(() => resetBackgroundShells());
 
@@ -83,13 +85,13 @@ describe('background shell index', () => {
     applyBackgroundShellEvents('/repo', [started(shell('sh_1'))]);
     await expect(refreshBackgroundShells('/repo', async () => {
       throw new Error('offline');
-    })).rejects.toThrow('offline');
+    }, noRecord)).rejects.toThrow('offline');
     expect(ids()).toEqual(['sh_1']);
   });
 
   test('a read that started before a runtime switch does not commit', async () => {
     let resolve: (listed: { directory: string; shells: RunningShell[] }) => void = () => undefined;
-    const pending = refreshBackgroundShells('/repo', () => new Promise((done) => { resolve = done; }));
+    const pending = refreshBackgroundShells('/repo', () => new Promise((done) => { resolve = done; }), noRecord);
     resetBackgroundShells();
     resolve({ directory: '/repo', shells: [shell('sh_stale')] });
     await pending;
@@ -98,7 +100,7 @@ describe('background shell index', () => {
 
   test('a list replaces the directory OpenCode answered for, which its events carry', async () => {
     applyBackgroundShellEvents('/private/tmp/repo', [started(shell('sh_exited'))]);
-    await refreshBackgroundShells('/tmp/repo', async () => ({ directory: '/private/tmp/repo', shells: [] }));
+    await refreshBackgroundShells('/tmp/repo', async () => ({ directory: '/private/tmp/repo', shells: [] }), noRecord);
     expect(ids()).toEqual([]);
   });
 });
@@ -154,6 +156,28 @@ describe('ended commands', () => {
     applyBackgroundShellEvents('/repo', [started(shell('sh_gap'))]);
     replaceDirectoryShells('/repo', [], backgroundShellRevision());
     expect(useBackgroundShellsStore.getState().ended.get('sh_gap')?.status).toBe('unknown');
+  });
+
+  test('a command a list no longer has takes the end OpenCode recorded for it', async () => {
+    applyBackgroundShellEvents('/repo', [started(shell('sh_failed')), started(shell('sh_stopped'))]);
+    const asked: string[] = [];
+    await refreshBackgroundShells('/repo', async () => ({ directory: '/repo', shells: [] }), async (shellID, directory) => {
+      asked.push(`${shellID}@${directory}`);
+      // OpenCode keeps the failed command's record; the stopped one lost its record when it was removed.
+      return shellID === 'sh_failed' ? { end: { kind: 'exited', status: 'exited', exit: 3 }, endedAt: 4000 } : undefined;
+    });
+    expect(asked.sort()).toEqual(['sh_failed@/repo', 'sh_stopped@/repo']);
+    const { ended: byId } = useBackgroundShellsStore.getState();
+    expect(byId.get('sh_failed')).toMatchObject({ status: 'exited', exit: 3, endedAt: 4000 });
+    expect(byId.get('sh_stopped')?.status).toBe('unknown');
+  });
+
+  test('a failed record read leaves the end unknown', async () => {
+    applyBackgroundShellEvents('/repo', [started(shell('sh_1'))]);
+    await refreshBackgroundShells('/repo', async () => ({ directory: '/repo', shells: [] }), async () => {
+      throw new Error('offline');
+    });
+    expect(useBackgroundShellsStore.getState().ended.get('sh_1')?.status).toBe('unknown');
   });
 
   test('an end the index never saw running records nothing', () => {
