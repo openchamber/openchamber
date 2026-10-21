@@ -1781,6 +1781,20 @@ class OpencodeService {
     return call("persistentPty.snapshot", () => this.clientFor(directory).experimental.persistentPty.snapshot({ ptyID }))
   }
 
+  /**
+   * A terminal's record: whether it still runs, and its exit code once it
+   * exited and the process left one. Undefined once OpenCode no longer has
+   * the terminal. Throws on any other failure.
+   */
+  async getTerminal(ptyID: string, directory: string): Promise<PersistentPtyInfo | undefined> {
+    try {
+      return await call("persistentPty.get", () => this.clientFor(directory).experimental.persistentPty.get({ ptyID }))
+    } catch (error) {
+      if (isOpencodeNotFound(error)) return undefined
+      throw error
+    }
+  }
+
   /** Ends a terminal's process and removes it. */
   async removeTerminal(ptyID: string, directory: string): Promise<void> {
     await call("persistentPty.remove", () => this.clientFor(directory).experimental.persistentPty.remove({ ptyID }))

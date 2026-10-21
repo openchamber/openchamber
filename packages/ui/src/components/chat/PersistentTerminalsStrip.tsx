@@ -51,7 +51,10 @@ export const PersistentTerminalsStrip: React.FC<PersistentTerminalsStripProps> =
         </Button>
       </div>
       {expanded ? (
-        <div id={listId}>
+        // Rows can open their output, so the list scrolls past half the
+        // window instead of pushing the editor off a short screen; each
+        // output scrolls inside it without moving the list or the page.
+        <div id={listId} className="max-h-[50vh] overflow-y-auto overscroll-contain">
           {terminals.map((pty) => (
             <AgentTerminalRow key={pty.id} pty={pty} />
           ))}

@@ -161,6 +161,30 @@ index's ended list, which extensions read, keeps it. The expanded list shows
 four rows and then scrolls on its own (`overscroll-contain`), and a long
 command scrolls inside its tooltip the same way.
 
+`PersistentTerminalsStrip` lists the terminals the agent started with the pty
+tool for the composer's session, after the background commands; the terminal
+panel or the sidebar shows the same rows (`AgentTerminalRow`), as the
+`agentTerminalsPlacement` setting says. A row keeps two lines in every state:
+the command with rename, Show and its action, then the session that started
+it (a link to it) and how the terminal is doing. Stop is offered only while
+the terminal runs. OpenCode announces no exit for these terminals, so
+`useSessionTerminalsLoaded` reads the session's list when the session shows
+and every 5 seconds while one of its terminals runs; an ended terminal reads
+`exit code N` (0 in the success colour, any other in the error colour), or
+`exited` when OpenCode reports no code. OpenCode maps a terminal that could not
+start to `exited` without a code too, so there is no separate "failed to
+start". Stop reads the terminal's record first: one that already exited keeps
+its exit; a running one is removed and its row stays as `stopped` (a stop
+leaves no code). An ended row offers to dismiss it: a stopped terminal is gone
+from OpenCode already, an exited one is removed there as well. Show reads the
+screen every 2 seconds while the terminal runs, once after it exited, and not
+after a stop, which removed it with its screen: what was shown stays, and a
+screen never read says the output is gone. The output follows its newest line
+while the reader is at its bottom and stays where a reader who scrolled up left
+it; the blank rows under the last line are dropped. The expanded list of
+several terminals scrolls past half the window, and each output scrolls inside
+it (`overscroll-contain`).
+
 The "looks done" hint (`SessionDoneHintRow`) and the review offer
 (`SessionReviewHintRow`, "Changes are ready to look over") take the same
 slot, below the background commands. Both show only while the session idles

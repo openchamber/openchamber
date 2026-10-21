@@ -40,6 +40,7 @@ import { replaceGlobalSessionStatusById } from '@/sync/global-session-status';
 import { resetGlobalBlockingRequests } from '@/sync/global-blocking-requests';
 import { resetPendingSessionAssists } from '@/sync/pending-session-assists';
 import { resetBackgroundShells } from '@/sync/background-shells';
+import { resetPersistentPtys } from '@/sync/persistent-ptys';
 import { useMultiRunStore } from '@/stores/useMultiRunStore';
 import { resetSessionOrdering } from '@/sync/session-ordering';
 import { resetSessionActivityTiming } from '@/sync/session-activity-timing';
@@ -95,6 +96,9 @@ export const resetAppForRuntimeEndpointChange = (detail: RuntimeEndpointChangedD
   resetGlobalBlockingRequests();
   resetPendingSessionAssists();
   resetBackgroundShells();
+  // Agent terminals, the ones the user stopped included, belong to the
+  // previous instance; its terminal ids can repeat on the new one.
+  resetPersistentPtys();
   resetSessionOrdering();
   // Turn timings belong to the previous instance's sessions, and the reset also
   // restarts the resume window so the switch is treated as a fresh load.
