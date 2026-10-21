@@ -254,8 +254,11 @@ export function createGlobalMessageStreamHub({
 
   // The silence a catch-up read tolerates before it hands its client over to live. A healthy
   // connection delivers its replay at once, so a read silent this long has nothing left to hand over.
-  // It is its own bound, not derived from the stall timeout: the bound must outlast a reader's
-  // reconnect, so a connection that went quiet is reconnected before the read gives up on it.
+  // It is its own bound, not derived from the stall timeout, and by default the shorter of the two:
+  // only events count here, so a quiet read is handed over at the bound while OpenCode's heartbeat
+  // keeps its connection from stalling. A connection that dies without closing is handed over the
+  // same way, before its reader's stall window would reconnect it, and its client goes live without
+  // whatever that connection had not delivered.
   const resumeIdleMs = () => resumeIdleTimeoutMs ?? DEFAULT_RESUME_IDLE_TIMEOUT_MS;
 
   // Reads what OpenCode holds after a cursor the replay buffer cannot answer, for one client. It

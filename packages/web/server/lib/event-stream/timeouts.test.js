@@ -8,15 +8,15 @@ import {
 } from './timeouts.js';
 
 const DEFAULTS = {
-  stallTimeoutMs: 10_000,
-  concurrentStallTimeoutMs: 20_000,
+  stallTimeoutMs: 20_000,
+  concurrentStallTimeoutMs: 60_000,
   resumeIdleTimeoutMs: 10_000,
 };
 
 describe('event stream timing windows', () => {
-  it('defaults to a 10 s stall window, 20 s while sessions run concurrently, and a 10 s resume idle bound', () => {
-    expect(DEFAULT_UPSTREAM_STALL_TIMEOUT_MS).toBe(10_000);
-    expect(UPSTREAM_STALL_TIMEOUT_CONCURRENT_MS).toBe(20_000);
+  it('defaults to a 20 s stall window, 60 s while sessions run concurrently, and a 10 s resume idle bound', () => {
+    expect(DEFAULT_UPSTREAM_STALL_TIMEOUT_MS).toBe(20_000);
+    expect(UPSTREAM_STALL_TIMEOUT_CONCURRENT_MS).toBe(60_000);
     expect(DEFAULT_RESUME_IDLE_TIMEOUT_MS).toBe(10_000);
 
     const warn = vi.fn();

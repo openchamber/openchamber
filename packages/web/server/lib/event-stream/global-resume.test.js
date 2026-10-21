@@ -1,15 +1,19 @@
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { createGlobalMessageStreamHub } from './global-hub.js';
 import { createGlobalMessageStreamWsBridge } from './global-ws-bridge.js';
 import { createMessageStreamWsRuntime } from './runtime.js';
+import { resolveEventStreamTimeouts } from './timeouts.js';
+import { DEFAULT_UPSTREAM_RECONNECT_DELAY_MS } from './upstream-reader.js';
 
 // OpenCode's side of the contract (packages/server/src/event-feed.ts): every frame carries
 // `id: <instance>:<sequence>`. A cursor from this instance is replayed from a bounded window; any
 // other cursor, or one that has aged out, is answered with one `server.resync` frame at the head.
-function createFakeOpenCode({ instance = randomUUID(), windowFrames = 1024 } = {}) {
+// With `heartbeatMs`, each connection also opens as OpenCode's does (packages/server/src/handlers/
+// event.ts): a `server.connected` greeting without an id line, then a heartbeat comment at that cadence.
+function createFakeOpenCode({ instance = randomUUID(), windowFrames = 1024, heartbeatMs = 0 } = {}) {
   let sequence = 0;
   const retained = [];
   const live = new Set();
@@ -52,9 +56,16 @@ function createFakeOpenCode({ instance = randomUUID(), windowFrames = 1024 } = {
       live.clear();
     },
     fetch(_url, { headers = {}, signal } = {}) {
-      const connection = createConnection(signal, () => live.delete(connection));
+      let heartbeat = null;
+      const connection = createConnection(signal, () => {
+        live.delete(connection);
+        clearInterval(heartbeat);
+      });
       const cursor = headers['Last-Event-ID'] ?? '';
       cursors.push(cursor);
+      if (heartbeatMs > 0) {
+        connection.push(`data: ${JSON.stringify({ id: `evt_connected_${cursors.length}`, type: 'server.connected', data: {} })}\n\n`);
+      }
       if (cursor) {
         const after = sequenceOf(cursor);
         const oldest = retained[0]?.seq ?? sequence + 1;
@@ -63,6 +74,10 @@ function createFakeOpenCode({ instance = randomUUID(), windowFrames = 1024 } = {
         } else {
           for (const entry of retained) if (entry.seq > after) connection.push(entry.frame);
         }
+      }
+      if (heartbeatMs > 0) {
+        connection.push(': heartbeat\n\n');
+        heartbeat = setInterval(() => connection.push(': heartbeat\n\n'), heartbeatMs);
       }
       live.add(connection);
       return Promise.resolve({ ok: true, status: 200, body: connection.body });
@@ -175,6 +190,7 @@ const connect = (runtime, lastEventId) => {
 
 const eventIds = (socket) => socket.sent.filter((frame) => frame.type === 'event').map((frame) => frame.eventId);
 const readyFrames = (socket) => socket.sent.filter((frame) => frame.type === 'ready');
+const greetings = (socket) => socket.sent.filter((frame) => frame.type === 'event' && frame.payload?.type === 'server.connected');
 // A ready frame's head is the hub's latest id at that moment, which a race with the feed can move: the
 // resume contract is checked here without it, and the head is pinned where the test fixes it.
 const readyWithoutHead = (socket) => readyFrames(socket).map((frame) => Object.fromEntries(
@@ -835,6 +851,45 @@ describe('WebSocket resume through the global hub', () => {
       first.close();
       hub.stop();
       await runtime.close();
+    }
+  });
+});
+
+describe('a quiet OpenCode stream', () => {
+  // OpenCode 2.x writes a heartbeat comment every 15 s while it has no event to send
+  // (packages/server/src/handlers/event.ts, `Stream.tick("15 seconds")`).
+  const OPENCODE_HEARTBEAT_MS = 15_000;
+  // The windows the server runs with when no environment variable sets them.
+  const windows = resolveEventStreamTimeouts({}, () => undefined);
+
+  it.each([
+    ['at most one session busy', windows.stallTimeoutMs],
+    ['several sessions busy', windows.concurrentStallTimeoutMs],
+  ])('stays on one upstream connection with %s, so a browser gets one ready frame and one greeting', async (_busy, stallTimeoutMs) => {
+    vi.useFakeTimers();
+    const feed = createFakeOpenCode({ heartbeatMs: OPENCODE_HEARTBEAT_MS });
+    const hub = createHub(feed.fetch, { upstreamStallTimeoutMs: stallTimeoutMs, upstreamReconnectDelayMs: DEFAULT_UPSTREAM_RECONNECT_DELAY_MS });
+    const runtime = createRuntime(hub);
+    const browser = connect(runtime);
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      const head = feed.publish();
+      // Three quiet minutes: OpenCode sends nothing but its heartbeat.
+      await vi.advanceTimersByTimeAsync(3 * 60_000);
+
+      // The premise: the browser was live and was sent the event.
+      expect(eventIds(browser).filter(Boolean)).toEqual([head]);
+      // A stall window shorter than the heartbeat reconnected this healthy stream at every window,
+      // and each reconnect reached the browser as a ready frame and OpenCode's new greeting, which the
+      // UI answers by re-reading what it shows.
+      expect(feed.connections).toBe(1);
+      expect(readyFrames(browser)).toHaveLength(1);
+      expect(greetings(browser)).toHaveLength(1);
+    } finally {
+      browser.close();
+      hub.stop();
+      await runtime.close();
+      vi.useRealTimers();
     }
   });
 });
