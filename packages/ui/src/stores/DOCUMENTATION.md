@@ -204,12 +204,18 @@ or runtime switch retires the probe; a runtime switch during fallback resolution
 also prevents it from changing the directory or persistence.
 
 Nothing about directories is carried from one host to another (the desktop
-host switcher, a mobile instance switch). Three rules hold that:
+host switcher, a mobile instance switch). Four rules hold that:
 
-- The home lookup for a switch starts after every subscriber of the
-  endpoint-changed event has run. One of them rebinds the client; a lookup
-  started earlier still reaches the previous host and takes its home for the
-  new one's.
+- The home and chats-root lookups read `/api/fs/home` through the route, which
+  resolves when the lookup runs, so they reach the host the runtime key names
+  at that moment. They never use the client's base URL: the desktop's boot-time
+  default-host restore switches the runtime before the app-wide reset that
+  rebinds the client is installed, so a lookup through that base would reach
+  the boot host and cache its chats root under the new host's key.
+- A lookup that answers after a switch stores nothing. Only the commit of the
+  newest resolution writes the home to local storage and to the host's
+  settings, so the host the window left cannot write its home into the new
+  host's settings.
 - After a switch, only the host's own answer names the home. System info (which
   derives a home from the stored last directory), the desktop shell's home, and
   the stored home all describe the host the window booted on, so they are used

@@ -177,24 +177,12 @@ const normalizeHomeCandidate = (value?: string | null) => {
   return normalized && normalized !== '/' ? normalized : null;
 };
 
-const persistResolvedHome = (resolved: string) => {
-  cachedHomeDirectory = resolved;
-  if (typeof window !== 'undefined') {
-    safeStorage.setItem('homeDirectory', resolved);
-  }
-  void updateDesktopSettings({ homeDirectory: resolved });
-  return resolved;
-};
-
+// Stores nothing: an answer can arrive after a runtime switch, and only the
+// generation-checked commit in resolveHomeDirectory may store a home.
 const initializeHomeDirectory = async () => {
-  const acceptCandidate = (candidate?: string | null) => {
-    const normalized = normalizeHomeCandidate(candidate);
-    return normalized ? persistResolvedHome(normalized) : null;
-  };
-
   try {
     const fsHome = await opencodeClient.getFilesystemHome();
-    const resolved = acceptCandidate(fsHome);
+    const resolved = normalizeHomeCandidate(fsHome);
     if (resolved) {
       return resolved;
     }
@@ -213,7 +201,7 @@ const initializeHomeDirectory = async () => {
 
   try {
     const info = await opencodeClient.getSystemInfo();
-    const resolved = acceptCandidate(info?.homeDirectory);
+    const resolved = normalizeHomeCandidate(info?.homeDirectory);
     if (resolved) {
       return resolved;
     }
@@ -223,7 +211,7 @@ const initializeHomeDirectory = async () => {
 
   try {
     const desktopHome = await getDesktopHomeDirectory();
-    const resolved = acceptCandidate(desktopHome);
+    const resolved = normalizeHomeCandidate(desktopHome);
     if (resolved) {
       return resolved;
     }
@@ -232,7 +220,7 @@ const initializeHomeDirectory = async () => {
   }
 
   const fallback = getHomeDirectory();
-  const resolvedFallback = acceptCandidate(fallback);
+  const resolvedFallback = normalizeHomeCandidate(fallback);
   if (resolvedFallback) {
     return resolvedFallback;
   }
@@ -509,6 +497,8 @@ const resolveHomeDirectory = (): Promise<void> => {
   const resolution: Promise<void> = Promise.all([initializeHomeDirectory(), resolveChatsRoot()])
     .then(([home, chatsRoot]) => {
       if (generation !== homeResolveGeneration) return;
+      const resolvedHome = normalizeHomeCandidate(home);
+      if (resolvedHome) safeStorage.setItem('homeDirectory', resolvedHome);
       useDirectoryStore.getState().synchronizeHomeDirectory(home, chatsRoot);
     })
     .finally(() => {
