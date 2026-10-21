@@ -125,14 +125,16 @@ const toShellToolPart = (message: Extract<Message, { role: 'shell' }>): ToolPart
     return { ...base, state: { status: 'completed', input, output, time: { start, end } } };
 };
 
-const ShellNotice: React.FC<{ message: Extract<Message, { role: 'shell' }> }> = ({ message }) => {
+// A shell row that opens the session gets the top spacing a first user
+// message has, so `!pwd` as the first prompt does not sit against the top.
+const ShellNotice: React.FC<{ message: Extract<Message, { role: 'shell' }>; isFirstRow: boolean }> = ({ message, isFirstRow }) => {
     const isMobile = useUIStore((state) => state.isMobile);
     const [expanded, setExpanded] = React.useState(false);
     const part = React.useMemo(() => toShellToolPart(message), [message]);
     const toggle = React.useCallback(() => setExpanded((value) => !value), []);
 
     return (
-        <NoticeRow>
+        <NoticeRow spacingClassName={cn('pb-2', isFirstRow && (isMobile ? 'pt-2' : 'pt-4'))}>
             <ToolPart part={part} isExpanded={expanded} onToggle={toggle} isMobile={isMobile} />
         </NoticeRow>
     );
@@ -317,7 +319,7 @@ const SubagentNotice: React.FC<{ message: SyntheticMessage }> = ({ message }) =>
  * The timeline row for a message, or `null` when the caller should render the
  * message itself.
  */
-export const TimelineNotice: React.FC<{ message: Message }> = ({ message }) => {
+export const TimelineNotice: React.FC<{ message: Message; isFirstRow?: boolean }> = ({ message, isFirstRow = false }) => {
     const notice = readSessionNotice(message);
     if (notice) {
         return (
@@ -332,7 +334,7 @@ export const TimelineNotice: React.FC<{ message: Message }> = ({ message }) => {
         case 'compaction':
             return <CompactionNotice message={message} />;
         case 'shell':
-            return <ShellNotice message={message} />;
+            return <ShellNotice message={message} isFirstRow={isFirstRow} />;
         default:
             return null;
     }

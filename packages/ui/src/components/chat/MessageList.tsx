@@ -13,7 +13,7 @@ import { LiveTurnActivity } from './components/LiveTurnActivity';
 import { getTurnsWithLaterAssistant, hasLiveActivity } from './lib/turns/liveActivity';
 import type { ChatMessageEntry, TurnRecord, TurnGroupingContext } from './lib/turns/types';
 import { useTurnRecords } from './hooks/useTurnRecords';
-import { buildHistoryEntries, type TimelineEntry } from './lib/turns/timelineEntries';
+import { buildHistoryEntries, findFirstVisibleMessageId, type TimelineEntry } from './lib/turns/timelineEntries';
 import { applyRetryOverlay } from './lib/turns/applyRetryOverlay';
 import { buildLiveStreamingEntry } from './lib/turns/streamingTailEntry';
 import { FULL_MESSAGE_WINDOW, TurnMessageWindowContext, createTurnMessageWindowStore } from './lib/turns/turnMessageWindow';
@@ -190,6 +190,7 @@ interface MessageRowProps {
     onUserAnimationConsumed?: (messageId: string) => void;
     scrollToBottom?: () => void;
     reviewTransferDirection?: ReviewTransferDirection | null;
+    isFirstRow?: boolean;
 }
 
 const MessageRow = React.memo<MessageRowProps>(({ 
@@ -203,13 +204,16 @@ const MessageRow = React.memo<MessageRowProps>(({
     onUserAnimationConsumed,
     scrollToBottom,
     reviewTransferDirection,
+    isFirstRow,
 }) => {
     // Roles that are not a conversation turn render as their own timeline row
     // (or as nothing); only user and assistant go through ChatMessage.
     const role = message.info.role;
     if (readSessionNotice(message.info)) return <TimelineNotice message={message.info} />;
     if (isSkippedTimelineMessage(message.info)) return null;
-    if (isTimelineNoticeRole(role) || isBackgroundReportEntry(message.info)) return <TimelineNotice message={message.info} />;
+    if (isTimelineNoticeRole(role) || isBackgroundReportEntry(message.info)) {
+        return <TimelineNotice message={message.info} isFirstRow={isFirstRow} />;
+    }
 
     return (
         <ChatMessage
@@ -238,7 +242,8 @@ const MessageRow = React.memo<MessageRowProps>(({
         && prev.assistantHeaderMessageId === next.assistantHeaderMessageId
         && prev.isInActiveTurn === next.isInActiveTurn
         && prev.activeStreamingPhase === next.activeStreamingPhase
-        && prev.reviewTransferDirection === next.reviewTransferDirection;
+        && prev.reviewTransferDirection === next.reviewTransferDirection
+        && prev.isFirstRow === next.isFirstRow;
 });
 
 MessageRow.displayName = 'MessageRow';
@@ -444,6 +449,7 @@ TurnBlock.displayName = 'TurnBlock';
 interface UngroupedMessageRowProps {
     message: ChatMessageEntry;
     nextMessage?: ChatMessageEntry;
+    isFirstRow?: boolean;
     scrollToBottom?: () => void;
     shouldAnimateUserMessage: (message: ChatMessageEntry) => boolean;
     onUserAnimationConsumed: (messageId: string) => void;
@@ -455,6 +461,7 @@ interface UngroupedMessageRowProps {
 const UngroupedMessageRow = React.memo(({
     message,
     nextMessage,
+    isFirstRow,
     scrollToBottom,
     shouldAnimateUserMessage,
     onUserAnimationConsumed,
@@ -472,6 +479,7 @@ const UngroupedMessageRow = React.memo(({
             isInActiveTurn={Boolean(activeStreamingMessageId) && message.info.id === activeStreamingMessageId}
             activeStreamingPhase={message.info.id === activeStreamingMessageId ? activeStreamingPhase : null}
             reviewTransferDirection={reviewTransferDirection}
+            isFirstRow={isFirstRow}
         />
     );
 });
@@ -523,6 +531,7 @@ const MessageListEntry = React.memo(({
             <UngroupedMessageRow
                 message={entry.message}
                 nextMessage={entry.nextMessage}
+                isFirstRow={entry.isFirstRow}
                 scrollToBottom={scrollToBottom}
                 shouldAnimateUserMessage={shouldAnimateUserMessage}
                 onUserAnimationConsumed={onUserAnimationConsumed}
@@ -936,6 +945,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
             key: `msg:${lastMessage.info.id}`,
             message: lastMessage,
             nextMessage: undefined,
+            isFirstRow: findFirstVisibleMessageId(displayMessages) === lastMessage.info.id,
         } satisfies RenderEntry;
     }, [displayMessages, projection.lastTurnId, projection.ungroupedMessageIds, streamingTurn]);
 
