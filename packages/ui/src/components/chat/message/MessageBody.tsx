@@ -11,6 +11,7 @@ import type { StreamPhase, ToolPopupContent, AgentMentionInfo } from './types';
 import type { TurnChangedFile, TurnGroupingContext } from '../lib/turns/types';
 import { cn } from '@/lib/utils';
 import { isEmptyTextPart, extractTextContent } from './partUtils';
+import { attachmentBasename } from '@/lib/attachmentIdentity';
 import { FadeInOnReveal } from './FadeInOnReveal';
 import { SessionNoticeBlock } from './SessionNoticeBlock';
 import { readSessionNoticePart } from '@/lib/opencode/session-notices';
@@ -443,7 +444,10 @@ const UserMessageBody = React.memo(({ messageId, parts, messageCreatedAt, isMobi
     }, [parts]);
 
     const attachmentFilenames = React.useMemo(() => parts.flatMap((part) => (
-        part.type === 'file' && part.filename ? [part.filename] : []
+        // The model-facing name may be a path (a desktop drop carries its
+        // on-disk location); the citation the composer inserted is the
+        // basename, so matching reduces to it here.
+        part.type === 'file' && part.filename ? [attachmentBasename(part.filename)] : []
     )), [parts]);
 
     const attachmentFiles = React.useMemo(() => parts.filter((part): part is FilePart => (

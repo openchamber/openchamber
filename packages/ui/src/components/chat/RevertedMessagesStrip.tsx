@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
 import { clearStagedRevert } from '@/sync/session-actions';
+import { attachmentBasename } from '@/lib/attachmentIdentity';
 import { useDirectorySync } from '@/sync/sync-context';
 import {
     EMPTY_REVERTED_MESSAGE_DOCK_STATE,
@@ -27,7 +28,8 @@ const getRevertedPreview = (parts: Part[], fallback: string): string => {
 
     if (text) return text;
     const filePart = parts.find((part) => part.type === 'file');
-    return filePart?.filename ? `[${filePart.filename}]` : fallback;
+    // The model-facing name may be a path; the reader sees the basename.
+    return filePart?.filename ? `[${attachmentBasename(filePart.filename)}]` : fallback;
 };
 
 const ROW_CLASS = 'flex oc-composer-row min-w-0 items-center gap-2 ps-3 pe-1.5';

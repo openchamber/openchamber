@@ -21,6 +21,14 @@ export interface AttachedFile {
     serverPath?: string;
     vscodePath?: string;
     vscodeSource?: 'file' | 'selection';
+    /**
+     * The file's on-disk path, when the runtime could resolve one (a desktop
+     * drop or picker). It is what the model is handed as the file's identity,
+     * so it can open the file instead of searching for a bare basename. The
+     * composer's own surfaces keep `filename` (the basename); see
+     * `lib/attachmentIdentity.ts`.
+     */
+    agentPath?: string;
     /** Shared ID linking entries extracted from the same document (PPTX, DOCX, etc.).
      *  Removing any entry with this ID cascades to all entries in the group. */
     sourceDocumentId?: string;

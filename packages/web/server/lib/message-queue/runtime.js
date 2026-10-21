@@ -111,6 +111,10 @@ const parseAttachment = (value) => {
   };
   const serverPath = asNonEmptyString(raw.serverPath);
   if (serverPath) attachment.serverPath = serverPath;
+  // The file's on-disk path, when the client resolved one (a desktop drop or
+  // picker). It is what the model is handed as the file identity.
+  const agentPath = asNonEmptyString(raw.agentPath);
+  if (agentPath) attachment.agentPath = agentPath;
   attachment.dataUrl = dataUrl;
   return attachment;
 };
@@ -508,10 +512,12 @@ export function createMessageQueueRuntime({
     };
   };
 
-  // v2 takes prompt attachments as URIs; a data URL is one.
+  // v2 takes prompt attachments as URIs; a data URL is one. The model reads
+  // `name` as the file identity, so a resolved on-disk path travels there
+  // instead of the basename.
   const toPromptFile = (attachment) => ({
     uri: attachment.dataUrl,
-    ...(attachment.filename ? { name: attachment.filename } : {}),
+    ...(attachment.agentPath || attachment.filename ? { name: attachment.agentPath || attachment.filename } : {}),
   });
 
   /**

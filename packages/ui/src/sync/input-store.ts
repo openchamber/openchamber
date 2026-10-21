@@ -8,6 +8,7 @@ import type { AttachIssueRequest } from '@openchamber/sdk'
 import type { ContextPartMetadata } from '@/lib/messages/contextParts'
 import type { AttachedFile } from "@/stores/types/sessionTypes"
 import { prepareAttachmentFiles } from "./attachment-files"
+import { pathForDroppedFile } from "@/lib/desktop"
 import { getChatDraftIdentityKey, subscribeChatDraftDeletion, type ChatDraftIdentity } from "@/lib/chatDraftPersistence"
 
 const FILE_URI_PREFIX = "file://"
@@ -65,6 +66,10 @@ export const prepareLocalAttachments = async (
   const preparedFiles = preparedOrPending instanceof Promise ? await preparedOrPending : preparedOrPending
   if (!preparedFiles || preparedFiles.length === 0) return
 
+  // Resolved once, before preparation splits a document into text and images:
+  // only the top-level file has an on-disk path.
+  const agentPath = pathForDroppedFile(file) ?? undefined
+
   const sourceDocumentId = preparedFiles.length > 1
     ? `${Date.now()}-${Math.random().toString(36).slice(2)}`
     : undefined
@@ -72,7 +77,7 @@ export const prepareLocalAttachments = async (
   for (const prepared of preparedFiles) {
     const dataUrl = await readFileAsDataUrl(prepared.file, prepared.mimeType)
     if (!dataUrl) return
-    attachedFiles.push({
+    const attached: AttachedFile = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
       file: prepared.file,
       dataUrl,
@@ -81,7 +86,15 @@ export const prepareLocalAttachments = async (
       size: prepared.file.size,
       source: "local",
       sourceDocumentId,
-    })
+    }
+    // Only a genuine pass-through keeps the path: a preparation that built a
+    // new File (HAR redaction, notebook text, HEIC conversion, a document
+    // split) changed the content, so the on-disk original is not what the
+    // attachment holds, and pointing the model at it would hand back exactly
+    // the content that preparation stripped. Identity is the check, not the
+    // name, because those preparations keep the original name.
+    if (agentPath && prepared.file === file) attached.agentPath = agentPath
+    attachedFiles.push(attached)
   }
   return attachedFiles
 }

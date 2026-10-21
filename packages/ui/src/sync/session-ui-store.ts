@@ -26,6 +26,7 @@ import { runAfterOpenCodeStartup } from "./opencode-startup-gate"
 import { useProjectsStore } from "@/stores/useProjectsStore"
 import { useSessionDisplayStore } from "@/stores/useSessionDisplayStore"
 import { syncSessionKnowledge } from "@/lib/sessionKnowledgeApi"
+import { attachmentWireName } from "@/lib/attachmentIdentity"
 import { useGlobalSessionsStore, resolveGlobalSessionDirectory } from "@/stores/useGlobalSessionsStore"
 import { isDirectoryUnknown, useDirectoryStore } from "@/stores/useDirectoryStore"
 import { useSessionFoldersStore } from "@/stores/useSessionFoldersStore"
@@ -1921,7 +1922,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
           type: "file" as const,
           mime: a.mimeType,
           url: a.dataUrl,
-          filename: a.filename,
+          filename: attachmentWireName(a),
         }))
 
         await applyArmedGoal(createdDraftSession.sessionId, createdDraftSession.directory)
@@ -1948,7 +1949,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
               type: "file" as const,
               mime: a.mimeType,
               url: a.dataUrl,
-              filename: a.filename,
+              filename: attachmentWireName(a),
             })),
           })),
         })
@@ -2014,7 +2015,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         type: "file" as const,
         mime: a.mimeType,
         url: a.dataUrl,
-        filename: a.filename,
+        filename: attachmentWireName(a),
       }))
 
       // Standing project context (pinned notes and plans, the memory index),
@@ -2062,7 +2063,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
             type: "file" as const,
             mime: a.mimeType,
             url: a.dataUrl,
-            filename: a.filename,
+            filename: attachmentWireName(a),
           })),
         })),
       })
