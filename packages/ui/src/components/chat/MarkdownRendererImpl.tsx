@@ -189,16 +189,22 @@ const toAbsolutePath = (basePath: string, targetPath: string): string => {
   return toAbsoluteFilePath(basePath, targetPath);
 };
 
-const hasFileExtension = (path: string): boolean => {
+type FileReferencePurpose = 'probe' | 'click';
+
+// Clicks keep the pre-PR path rules to prevent bogus target="_blank" navigation,
+// issue #3858. Only automatic annotation issues probes and needs the narrower rules.
+const hasFileExtension = (path: string, purpose: FileReferencePurpose): boolean => {
   const base = path.split('/').filter(Boolean).pop() ?? '';
   if (!base || base.endsWith('.')) {
     return false;
   }
-  return /\.[A-Za-z][A-Za-z0-9_-]{0,15}$/.test(base);
+  return purpose === 'click'
+    ? /\.[A-Za-z0-9_-]{1,16}$/.test(base)
+    : /\.[A-Za-z][A-Za-z0-9_-]{0,15}$/.test(base);
 };
 
-const isLikelyFilePathValue = (path: string): boolean => {
-  if (!path || path.startsWith('--') || path.includes('://') || path.includes('@')) {
+const isLikelyFilePathValue = (path: string, purpose: FileReferencePurpose = 'probe'): boolean => {
+  if (!path || path.startsWith('--') || path.includes('://') || (purpose === 'probe' && path.includes('@'))) {
     return false;
   }
 
@@ -217,15 +223,15 @@ const isLikelyFilePathValue = (path: string): boolean => {
     return true;
   }
 
-  return hasFileExtension(normalized);
+  return hasFileExtension(normalized, purpose);
 };
 
-const isLikelyFilePath = (value: string): boolean => {
+const isLikelyFilePath = (value: string, purpose: FileReferencePurpose = 'probe'): boolean => {
   const parsed = parseFileReference(value);
   if (!parsed) {
     return false;
   }
-  return isLikelyFilePathValue(parsed.path);
+  return isLikelyFilePathValue(parsed.path, purpose);
 };
 
 const unwrapBlockCodePathTokens = (container: HTMLElement): void => {
@@ -274,7 +280,7 @@ const extractHrefFileReferenceCandidate = (anchor: HTMLAnchorElement): string | 
   if (fileUrlPath) {
     return fileUrlPath;
   }
-  return isLikelyFilePath(href) ? href : null;
+  return isLikelyFilePath(href, 'click') ? href : null;
 };
 
 // A path-like token (`path[:line[:col]]`) inside a `<pre><code>` block, by
@@ -341,9 +347,9 @@ const wrapBlockCodePathTokens = (
   codeBlock.setAttribute(CODE_BLOCK_PATH_SCANNED_ATTR, 'true');
 };
 
-const getResolvedReference = (rawValue: string, effectiveDirectory: string): (ParsedFileReference & { resolvedPath: string }) | null => {
+const getResolvedReference = (rawValue: string, effectiveDirectory: string, purpose: FileReferencePurpose = 'probe'): (ParsedFileReference & { resolvedPath: string }) | null => {
   const parsed = parseFileReference(rawValue);
-  if (!parsed || !isLikelyFilePathValue(parsed.path)) {
+  if (!parsed || !isLikelyFilePathValue(parsed.path, purpose)) {
     return null;
   }
 
@@ -421,8 +427,10 @@ const useFileReferenceInteractions = ({
     };
 
     const openFileReference = async (sourceElement: HTMLElement, options?: { external: boolean }) => {
-      const raw = sourceElement.getAttribute('data-openchamber-file-ref') || extractPathCandidateFromElement(sourceElement);
-      const parsedReference = getResolvedReference(raw, effectiveDirectory);
+      const raw = sourceElement.getAttribute('data-openchamber-file-ref')
+        || (sourceElement instanceof HTMLAnchorElement ? extractHrefFileReferenceCandidate(sourceElement) : null)
+        || extractPathCandidateFromElement(sourceElement);
+      const parsedReference = getResolvedReference(raw, effectiveDirectory, 'click');
       if (!parsedReference) {
         return;
       }
@@ -468,7 +476,7 @@ const useFileReferenceInteractions = ({
 
     const attachClickGuard = () => attachFileRefClickGuard(container, {
       hrefCandidate: extractHrefFileReferenceCandidate,
-      isResolvable: (raw) => getResolvedReference(raw, effectiveDirectory) !== null,
+      isResolvable: (raw) => getResolvedReference(raw, effectiveDirectory, 'click') !== null,
       openFileReference,
     });
 
