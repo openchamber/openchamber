@@ -6,8 +6,8 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Icon } from "@/components/icon/Icon";
+import { WorkStatusFullTextTooltip } from '@/components/chat/work-status/WorkStatusPrimitives';
 import { useUIStore } from '@/stores/useUIStore';
 import { useTerminalStore } from '@/stores/useTerminalStore';
 import { useI18n } from '@/lib/i18n';
@@ -37,6 +37,7 @@ const ProjectActionsButtonComponent = () => {
   }
 
   const isStoppingShown = shownRun?.status === 'stopping';
+  const isAutoDiscover = shown.id === AUTO_DISCOVER_ACTION_ID;
   const handleOpenShownPreview = () => {
     if (!shownRun || !shownRunPreviewUrl) {
       return;
@@ -46,27 +47,33 @@ const ProjectActionsButtonComponent = () => {
 
   return (
     <div className="group/action relative flex h-7 w-full items-center gap-2 rounded-md px-1 text-muted-foreground transition-colors hover:text-foreground">
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            type="button"
-            onClick={() => runner.toggle(shown)}
-            disabled={runner.isLoading || isStoppingShown}
-            className="flex min-w-0 flex-1 items-center gap-2 rounded-md text-start focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--interactive-focus-ring)] disabled:cursor-not-allowed"
-            aria-label={shownRun
-              ? t('projectActions.actions.stopNamedAria', { name: shown.name })
-              : t('projectActions.actions.runNamedAria', { name: shown.name })}
-          >
-            <Icon name={resolveProjectActionIconName(shown)} className="size-4 shrink-0 text-muted-foreground" />
-            <span className="min-w-0 flex-1 truncate typography-ui-label">{shown.name}</span>
-            {/* The state is the trailing value: what pressing the row does next. */}
-            <ProjectActionRunIndicator run={shownRun} showIdle />
-          </button>
-        </TooltipTrigger>
-        {shown.id === AUTO_DISCOVER_ACTION_ID ? (
-          <TooltipContent side="left" sideOffset={8}>{t('projectActions.actions.autoDiscoverTooltip')}</TooltipContent>
-        ) : null}
-      </Tooltip>
+      {/* A name the panel's width cuts off shows in full, as on every row of
+          the panel. Auto-discovery names itself and then says what it does,
+          whether or not its name fits. */}
+      <WorkStatusFullTextTooltip
+        always={isAutoDiscover}
+        content={isAutoDiscover ? (
+          <>
+            <p className="font-medium">{shown.name}</p>
+            <p>{t('projectActions.actions.autoDiscoverTooltip')}</p>
+          </>
+        ) : shown.name}
+      >
+        <button
+          type="button"
+          onClick={() => runner.toggle(shown)}
+          disabled={runner.isLoading || isStoppingShown}
+          className="flex min-w-0 flex-1 items-center gap-2 rounded-md text-start focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--interactive-focus-ring)] disabled:cursor-not-allowed"
+          aria-label={shownRun
+            ? t('projectActions.actions.stopNamedAria', { name: shown.name })
+            : t('projectActions.actions.runNamedAria', { name: shown.name })}
+        >
+          <Icon name={resolveProjectActionIconName(shown)} className="size-4 shrink-0 text-muted-foreground" />
+          <span className="min-w-0 flex-1 truncate typography-ui-label">{shown.name}</span>
+          {/* The state is the trailing value: what pressing the row does next. */}
+          <ProjectActionRunIndicator run={shownRun} showIdle />
+        </button>
+      </WorkStatusFullTextTooltip>
       {shownRun && shownRunPreviewUrl ? (
         <button
           type="button"

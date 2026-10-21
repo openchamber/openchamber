@@ -32,12 +32,13 @@ put: row text fixed at 13px sat under 24px headings in 56px rows at 200%.
 draws.
 
 The fixed width means larger sizes cut more text off. Cut text shows in full
-in a tooltip above it (`WorkStatusFullTextTooltip`): row labels, section
-titles with their subject or summary, the cost breakdown and the callout.
-Whether text is cut is read from the layout when the tooltip is about to
-open, and text that fits shows no tooltip. A row that passes its own
-`tooltip` replaces the cut-label one, so such a row names itself in it, as
-subagent and Turn stats rows do.
+in a tooltip above it (`WorkStatusFullTextTooltip`): row labels, the project
+action's name, section titles with their subject or summary, the cost
+breakdown and the callout. Whether text is cut is read from the layout when
+the tooltip is about to open, and text that fits shows no tooltip. A row that
+passes its own `tooltip` replaces the cut-label one, so such a row names itself
+in it, as subagent and Turn stats rows do. The project action row does the same
+for auto-discovery: its name, then what it does, whether or not the name fits.
 
 ### Why every row is a tooltip trigger
 
