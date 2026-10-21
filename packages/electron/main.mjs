@@ -62,7 +62,7 @@ import {
 import { sanitizeRuntimeRequestHeaders } from './runtime-request-headers.mjs';
 import { isSplashColor, redactHostsConfigForRemote } from './remote-page-policy.mjs';
 import { connectDefaultSshInstanceAtStartup, resolveDefaultSshInstanceId } from './startup-ssh.mjs';
-import { normalizeNotificationInput, readTrimmedString, resolveHostEntryForRuntimeKey, stampForwardedNotification } from './notification-host-routing.mjs';
+import { normalizeNotificationInput, readTrimmedString, resolveHostEntryForRuntimeKey, runtimeKeyForDeepLinkHost, stampForwardedNotification } from './notification-host-routing.mjs';
 import { isPackagedUiRuntimeRequest } from './packaged-ui-routing.mjs';
 import { RUNTIME_CONFIG_SCRIPT_PATHNAME, claimRuntimeConfigScriptRequest, createRuntimeConfigGate, injectRuntimeConfig } from './packaged-runtime-config.mjs';
 import { settleMainProcessCompileCache } from './compile-cache.mjs';
@@ -2001,16 +2001,28 @@ const setTaskbarProgress = (value) => {
 const pendingDeepLinks = [];
 const PENDING_SESSION_LINK_FALLBACK_MS = 10_000;
 
+// A session link (`openchamber://session/<id>`) can also name the message to
+// show (`?message=<id>`) and the saved host that owns the session
+// (`?host=<id>`). The renderer validates the IDs and opens a session of
+// another host in that host's window, as for a notification click.
+const sessionDeepLinkTarget = (link) => {
+  const target = { sessionId: link.value };
+  const messageId = readDeepLinkQueryParam(link.raw, 'message');
+  if (messageId) target.messageId = messageId;
+  const runtimeKey = runtimeKeyForDeepLinkHost(readDeepLinkQueryParam(link.raw, 'host'));
+  if (runtimeKey) target.runtimeKey = runtimeKey;
+  return target;
+};
+
 // Hands the main window's renderer the session links that arrived before it
-// could listen, as { sessionId, messageId? }; the renderer validates both.
+// could listen, as { sessionId, messageId?, runtimeKey? }.
 const takePendingSessionDeepLinks = () => {
   const taken = [];
   for (let index = pendingDeepLinks.length - 1; index >= 0; index -= 1) {
     const link = pendingDeepLinks[index];
     if (link.type !== 'session' || !link.value) continue;
     pendingDeepLinks.splice(index, 1);
-    const messageId = readDeepLinkQueryParam(link.raw, 'message');
-    taken.unshift(messageId ? { sessionId: link.value, messageId } : { sessionId: link.value });
+    taken.unshift(sessionDeepLinkTarget(link));
   }
   return taken;
 };
@@ -2170,12 +2182,7 @@ const dispatchDeepLink = (link) => {
   }
 
   if (link.type === 'session' && link.value) {
-    // A message link (`openchamber://session/<id>?message=<id>`) also names
-    // the message to show; the renderer validates both IDs.
-    const messageId = readDeepLinkQueryParam(link.raw, 'message');
-    emitToPrimaryWindow('openchamber:open-session', messageId
-      ? { sessionId: link.value, messageId }
-      : { sessionId: link.value });
+    emitToPrimaryWindow('openchamber:open-session', sessionDeepLinkTarget(link));
     return;
   }
   if (link.type === 'host' && link.value) {

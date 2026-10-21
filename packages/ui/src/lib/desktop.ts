@@ -531,14 +531,16 @@ export const canRequestNativeDirectoryAccess = (): boolean => (
 const pendingSessionLinksSchema = z.array(z.object({
   sessionId: z.string().min(1),
   messageId: z.string().min(1).optional(),
+  runtimeKey: z.string().min(1).optional(),
 }));
 
-type PendingDesktopSessionLink = { sessionId: string; messageId: string | null };
+type PendingDesktopSessionLink = { sessionId: string; messageId: string | null; runtimeKey: string | null };
 
 /**
  * Session links (`openchamber://session/...`) that reached the desktop app
  * before this window could listen for them — the link that launched the app,
- * or "open in main window" from a closed main window. Taking them removes
+ * or "open in main window" from a closed main window. A link that names its
+ * host (`?host=<id>`) carries that host's runtime key. Taking them removes
  * them; outside the desktop local page there are none.
  */
 export const takePendingDesktopSessionLinks = async (): Promise<PendingDesktopSessionLink[]> => {
@@ -546,7 +548,11 @@ export const takePendingDesktopSessionLinks = async (): Promise<PendingDesktopSe
   try {
     const parsed = pendingSessionLinksSchema.safeParse(await invokeDesktop('desktop_take_pending_session_links'));
     return parsed.success
-      ? parsed.data.map((link) => ({ sessionId: link.sessionId, messageId: link.messageId ?? null }))
+      ? parsed.data.map((link) => ({
+        sessionId: link.sessionId,
+        messageId: link.messageId ?? null,
+        runtimeKey: link.runtimeKey ?? null,
+      }))
       : [];
   } catch (error) {
     console.warn('Failed to read pending session links', error);

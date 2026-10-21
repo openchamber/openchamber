@@ -61,6 +61,16 @@ export const resolveHostEntryForRuntimeKey = (rawKey, { hosts, localUrl, localCl
   return null;
 };
 
+// A session deep link names its owning host by id (`?host=<id>`, 'local' for
+// this app's server). It travels as the runtime key a notification click
+// carries, so the receiving window routes both the same way. The prefix is
+// always added: a crafted id cannot pose as a 'url:' key.
+export const runtimeKeyForDeepLinkHost = (rawHostId) => {
+  const hostId = readTrimmedString(rawHostId);
+  if (!hostId) return '';
+  return hostId === LOCAL_HOST_ENTRY_ID ? LOCAL_HOST_ENTRY_ID : `${HOST_RUNTIME_KEY_PREFIX}${hostId}`;
+};
+
 // A forwarded notification must name the owning runtime in the resolver's
 // vocabulary ('local' | 'host:<id>'). The forwarding window's own tag is
 // authoritative: a direct host window's renderer computes an unroutable

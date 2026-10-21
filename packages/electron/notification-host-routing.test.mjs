@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { resolveForwardedNotificationRuntimeKey, resolveHostEntryForRuntimeKey, stampForwardedNotification } from './notification-host-routing.mjs';
+import { resolveForwardedNotificationRuntimeKey, resolveHostEntryForRuntimeKey, runtimeKeyForDeepLinkHost, stampForwardedNotification } from './notification-host-routing.mjs';
 
 test('local runtime key resolves to a local host entry', () => {
   assert.deepEqual(resolveHostEntryForRuntimeKey('local', {
@@ -108,6 +108,22 @@ test('a forwarded payload from an untagged window keeps the renderer key', () =>
   );
   assert.equal(stamped.runtimeKey, 'url:https://b.example');
   assert.equal(stamped.payload, undefined);
+});
+
+test('a deep link host id resolves like a notification runtime key', () => {
+  const deps = {
+    hosts: [{ id: 'host-a', url: 'https://a.example.com' }],
+    localUrl: 'http://127.0.0.1:3912',
+    localClientToken: '',
+  };
+  assert.equal(runtimeKeyForDeepLinkHost(' host-a '), 'host:host-a');
+  assert.equal(resolveHostEntryForRuntimeKey(runtimeKeyForDeepLinkHost('host-a'), deps), deps.hosts[0]);
+  assert.equal(resolveHostEntryForRuntimeKey(runtimeKeyForDeepLinkHost('local'), deps)?.id, 'local');
+  assert.equal(resolveHostEntryForRuntimeKey(runtimeKeyForDeepLinkHost('missing'), deps), null);
+  // A crafted id stays a host id and cannot select a host by URL.
+  assert.equal(runtimeKeyForDeepLinkHost('url:https://a.example.com'), 'host:url:https://a.example.com');
+  assert.equal(runtimeKeyForDeepLinkHost(''), '');
+  assert.equal(runtimeKeyForDeepLinkHost(null), '');
 });
 
 test('a flat forwarded payload is stamped the same way', () => {

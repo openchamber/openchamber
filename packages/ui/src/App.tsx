@@ -517,6 +517,14 @@ function App({ apis }: AppProps) {
   React.useEffect(() => {
     if (typeof window === 'undefined') return;
 
+    // A notification click or a session link can name the runtime that owns
+    // the session. When this window is on another instance, the desktop shell
+    // opens the session in a window for the owning one.
+    const opensInOwningHostWindow = (sessionId: string, runtimeKey: string | null): boolean => {
+      if (!runtimeKey || runtimeKey === getRuntimeKey()) return false;
+      return openHostSession(runtimeKey, sessionId);
+    };
+
     const handler = (event: Event) => {
       const detail = (event as CustomEvent<{ sessionId?: string; directory?: string; messageId?: string; runtimeKey?: string }>).detail;
       const sessionId = typeof detail?.sessionId === 'string' ? detail.sessionId.trim() : '';
@@ -524,13 +532,7 @@ function App({ apis }: AppProps) {
       const directory = typeof detail?.directory === 'string' && detail.directory.trim().length > 0
         ? detail.directory.trim()
         : null;
-      // A notification click names the runtime that owns the session. When
-      // this window is on another instance, the desktop shell opens the
-      // session in a window for the owning one.
-      const runtimeKey = String(detail?.runtimeKey ?? '').trim();
-      if (runtimeKey && runtimeKey !== getRuntimeKey() && openHostSession(runtimeKey, sessionId)) {
-        return;
-      }
+      if (opensInOwningHostWindow(sessionId, String(detail?.runtimeKey ?? '').trim())) return;
       // A link (a desktop deep link, a link to this window's instance) carries
       // no directory; the route opener resolves it from the global session
       // list, as for a web link.
@@ -546,7 +548,10 @@ function App({ apis }: AppProps) {
     // desktop shell keeps it until the window asks. Taking is one-shot, so a
     // cleanup must not drop links already taken (Strict Mode re-runs this).
     void takePendingDesktopSessionLinks().then((links) => {
-      for (const link of links) void openSessionLink(link.sessionId, link.messageId);
+      for (const link of links) {
+        if (opensInOwningHostWindow(link.sessionId, link.runtimeKey)) continue;
+        void openSessionLink(link.sessionId, link.messageId);
+      }
     });
     return () => window.removeEventListener('openchamber:open-session', handler as EventListener);
   }, []);

@@ -1165,7 +1165,16 @@ keeps the external path. A session
 deep link that launches the desktop app arrives before the renderer listens:
 `main.mjs` keeps it pending and the main window takes it on mount through
 `desktop_take_pending_session_links` (`takePendingDesktopSessionLinks`); a
-late flush still emits it to a renderer that never asks.
+late flush still emits it to a renderer that never asks. A desktop session
+link can name the saved instance that owns the session (`?host=<id>`, `local`
+for the app's own server). Main passes it on as the runtime key a
+notification click carries, and the receiving window routes both the same
+way: a window on that instance opens the session in place, any other hands
+it to `openHostWindow` through `desktop_open_host_session`. The renderer
+decides because main cannot: the main window carries no host tag and can
+switch instance in place, so only its runtime key says what it shows. A main
+window switched in place to a direct instance holds a `url:` key, so a link
+that names that instance by id still opens a separate window for it.
 
 On launch the app reopens the session that was open when it closed
 (`sync/last-session-restore.ts`, used by `App` for web and desktop and by the
