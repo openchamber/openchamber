@@ -1,16 +1,19 @@
-import { describe, expect, test } from 'bun:test'
+import { describe, expect, jest, spyOn, test } from 'bun:test'
 import React, { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { Window } from 'happy-dom'
 import { mock } from 'bun:test'
 import { OpenCode } from '@opencode/client'
-import type { Session } from '@/lib/opencode/model'
+import type { Session, SessionStatus } from '@/lib/opencode/model'
 import type { SessionListOptions, SessionPage } from '@/lib/opencode/client'
 
 const DIRECTORY = '/repo/discovery'
 const cursorsSeenOnDiscoveryCalls: Array<string | undefined> = []
 const parentMessageFetches: string[] = []
 let activeStatusReads = 0
+let readActiveStatuses = async (_directory: string): Promise<Record<string, SessionStatus> | null> => ({})
+let readDiscoveryPage: ((options: SessionListOptions) => Promise<SessionPage>) | undefined
+let readSession: ((id: string, directory?: string) => Promise<Session>) | undefined
 
 const rootSession = (id: string, title: string, updated: number): Session => ({
   id,
@@ -30,6 +33,7 @@ const hang = <T,>(): Promise<T> => new Promise<T>(() => undefined)
 // pagination under test is driven here rather than through a fake transport.
 const listSessionsPage = async (options: SessionListOptions = {}): Promise<SessionPage> => {
   if (options.limit === 200) {
+    if (readDiscoveryPage) return readDiscoveryPage(options)
     cursorsSeenOnDiscoveryCalls.push(options.cursor)
     if (options.cursor === undefined) {
       // Page 1: a full page of root sessions, so the child on page 2 sits
@@ -41,6 +45,7 @@ const listSessionsPage = async (options: SessionListOptions = {}): Promise<Sessi
     }
     return { sessions: [childSession], cursor: {} }
   }
+  if (readDiscoveryPage) return { sessions: [], cursor: {} }
   if (options.limit === 500) {
     // Bootstrap's own list: hang. Resolving it would replace the store's
     // sessions after discovery merged them; in production the two race and the
@@ -76,9 +81,9 @@ mock.module('@/lib/opencode/client', () => ({
       project: { id: 'project', directory: DIRECTORY, canonical: DIRECTORY },
     }),
     getConfig: async () => ({}),
-    getActiveSessionStatuses: async () => {
+    getActiveSessionStatuses: async (directory: string) => {
       activeStatusReads += 1
-      return {}
+      return readActiveStatuses(directory)
     },
     listCommands: async () => [],
     listAgents: async () => [],
@@ -87,7 +92,7 @@ mock.module('@/lib/opencode/client', () => ({
     listPendingForms: async () => [],
     listPendingPermissions: async () => [],
     getProvidersForConfig: async () => ({ providers: [], models: [] }),
-    getSession: async (id: string) => rootSession(id, id, 1),
+    getSession: async (id: string, directory?: string) => readSession ? readSession(id, directory) : rootSession(id, id, 1),
     getSessionMessages: async (id: string) => {
       parentMessageFetches.push(id)
       return { items: [], cursor: {} }
@@ -248,7 +253,353 @@ describe('SyncProvider child-session discovery pagination', () => {
   }, 12000)
 })
 
+const withWatchdogFixture = async (run: (fixture: {
+  advance: (ms: number) => Promise<void>
+  manager: ReturnType<typeof getSyncChildStores>
+}) => Promise<void>) => {
+  const { useConfigStore } = await import('@/stores/useConfigStore')
+  const previousTransport = useConfigStore.getState().settingsMessageStreamTransport
+  useConfigStore.setState({ settingsMessageStreamTransport: 'sse' })
+  const dom = installHookTestDomWithStorage()
+  const root = createRoot(dom.container)
+  let now = Date.now()
+  const clock = spyOn(Date, 'now').mockImplementation(() => now)
+  jest.useFakeTimers()
+  const sdk = OpenCode.make({ baseUrl: 'http://watchdog.test', fetch: () => hang<Response>() })
+  // One activity signal, followed by a stalled stream. Watchdog reconnect
+  // requests cannot introduce a second stream's independent recovery reads.
+  const stream = spyOn(sdk.event, 'subscribe').mockImplementation(async function* (options) {
+    options?.onActivity?.()
+    yield await hang<never>()
+  })
+  const advance = async (ms: number) => {
+    for (let elapsed = 0; elapsed < ms; elapsed += 500) {
+      await act(async () => {
+        const step = Math.min(500, ms - elapsed)
+        now += step
+        jest.advanceTimersByTime(step)
+        await new Promise<void>((resolve) => setImmediate(resolve))
+      })
+    }
+  }
+  try {
+    readDiscoveryPage = async () => ({ sessions: [], cursor: {} })
+    await act(async () => root.render(<SyncProvider sdk={sdk} directory={DIRECTORY}><div /></SyncProvider>))
+    await run({ advance, manager: getSyncChildStores() })
+  } finally {
+    setActiveSession('', '')
+    await act(async () => root.unmount())
+    stream.mockRestore()
+    jest.useRealTimers()
+    clock.mockRestore()
+    readActiveStatuses = async () => ({})
+    readDiscoveryPage = undefined
+    readSession = undefined
+    useConfigStore.setState({ settingsMessageStreamTransport: previousTransport })
+    dom.restore()
+  }
+}
+
+describe('SyncProvider sibling watchdog reads', () => {
+  for (const failure of ['null', 'rejection']) {
+    test(`paces stale resync after a ${failure} status read and resets on success`, async () => {
+      await withWatchdogFixture(async ({ advance, manager }) => {
+        const store = manager.getChild(DIRECTORY)
+        if (!store) throw new Error('Directory store was not created')
+        const otherDirectory = '/repo/healthy-resync'
+        const other = manager.ensureChild(otherDirectory, { bootstrap: false })
+        // A resolved, idle viewed session needs stale recovery but no periodic
+        // status poll. The other directory remains busy and runs every path.
+        setActiveSession(DIRECTORY, 'ses_viewed')
+        store.setState({
+          session: [rootSession('ses_viewed', 'viewed', 1)],
+          message: { ses_viewed: [] },
+          session_status: { ses_viewed: { type: 'idle' } },
+        })
+        other.setState({
+          session: [{ ...rootSession('ses_healthy', 'healthy', 1), directory: otherDirectory }],
+          session_status: { ses_healthy: { type: 'busy' } },
+        })
+        const statusReads: string[] = []
+        const sessionReads: string[] = []
+        let failing = true
+        readActiveStatuses = async (directory) => {
+          statusReads.push(directory)
+          if (directory === DIRECTORY && failing) {
+            if (failure === 'rejection') throw new Error('Status unavailable')
+            return null
+          }
+          return { ses_healthy: { type: 'busy' } }
+        }
+        readSession = async (id, directory) => {
+          sessionReads.push(directory ?? '')
+          return { ...rootSession(id, id, 1), directory: directory ?? DIRECTORY }
+        }
+        const failedReads = () => statusReads.filter((directory) => directory === DIRECTORY).length
+        const healthyResyncs = () => sessionReads.filter((directory) => directory === otherDirectory).length
+        await advance(20_000)
+        expect(failedReads()).toBe(1)
+        expect(healthyResyncs()).toBe(1)
+        await advance(15_000)
+        expect(failedReads()).toBe(1)
+        expect(healthyResyncs()).toBe(2)
+        await advance(15_000)
+        expect(failedReads()).toBe(2)
+        await advance(55_000)
+        expect(failedReads()).toBe(2)
+        expect(healthyResyncs()).toBe(6)
+        await advance(5_000)
+        expect(failedReads()).toBe(3)
+        // A successful empty snapshot clears only this resync's delay.
+        failing = false
+        await advance(60_000)
+        expect(failedReads()).toBe(4)
+        await advance(15_000)
+        expect(failedReads()).toBe(5)
+        await advance(15_000)
+        expect(failedReads()).toBe(6)
+      })
+    })
+  }
+
+  for (const failure of ['session', 'messages', 'forms', 'permissions']) {
+    test(`paces failed ${failure} resyncs despite successful status polls and discovery`, async () => {
+      await withWatchdogFixture(async ({ advance, manager }) => {
+        const { opencodeClient } = await import('@/lib/opencode/client')
+        const store = manager.getChild(DIRECTORY)
+        if (!store) throw new Error('Directory store was not created')
+        store.setState({
+          session: [rootSession('ses_parent', 'parent', 1)],
+          session_status: { ses_parent: { type: 'busy' } },
+        })
+        let failing = true
+        let resyncReads = 0
+        readActiveStatuses = async () => ({ ses_parent: { type: 'busy' } })
+        readSession = async (id) => {
+          resyncReads += 1
+          if (failure === 'session' && failing) throw new Error('Session record unavailable')
+          return rootSession(id, id, 1)
+        }
+        const messages = spyOn(opencodeClient, 'getSessionMessages').mockImplementation(async () => {
+          if (failure === 'messages' && failing) throw new Error('transport failure')
+          return { items: [], cursor: {} }
+        })
+        const forms = spyOn(opencodeClient, 'listPendingForms').mockImplementation(async () => {
+          if (failure === 'forms' && failing) throw new Error('Form list unavailable')
+          return []
+        })
+        const permissions = spyOn(opencodeClient, 'listPendingPermissions').mockImplementation(async () => {
+          if (failure === 'permissions' && failing) throw new Error('Permission list unavailable')
+          return []
+        })
+        try {
+          await advance(25_000)
+          expect(resyncReads).toBe(1)
+          await advance(10_000)
+          expect(resyncReads).toBe(1)
+          await advance(30_000)
+          expect(resyncReads).toBe(2)
+          await advance(40_000)
+          expect(resyncReads).toBe(2)
+          await advance(15_000)
+          expect(resyncReads).toBe(3)
+          await advance(10_000)
+          expect(resyncReads).toBe(3)
+          failing = false
+          for (let elapsed = 0; resyncReads === 3 && elapsed < 70_000; elapsed += 500) await advance(500)
+          expect(resyncReads).toBe(4)
+          await advance(15_000)
+          expect(resyncReads).toBe(5)
+          expect(store.getState().session_status.ses_parent?.type).toBe('busy')
+        } finally {
+          messages.mockRestore()
+          forms.mockRestore()
+          permissions.mockRestore()
+        }
+      })
+    })
+  }
+
+  test('paces exhausted discovery pages independently of successful status polls and stale resyncs', async () => {
+    await withWatchdogFixture(async ({ advance, manager }) => {
+      const otherDirectory = '/repo/healthy-discovery'
+      const stores = [
+        { directory: DIRECTORY, store: manager.getChild(DIRECTORY), id: 'ses_parent' },
+        { directory: otherDirectory, store: manager.ensureChild(otherDirectory, { bootstrap: false }), id: 'ses_healthy' },
+      ]
+      for (const { directory, store, id } of stores) {
+        if (!store) throw new Error('Directory store was not created')
+        store.setState({
+          session: [{ ...rootSession(id, id, 1), directory }],
+          session_status: { [id]: { type: 'busy' } },
+        })
+      }
+      const discoveryReads: string[] = []
+      const statusReads: string[] = []
+      const sessionReads: string[] = []
+      let failing = true
+      readActiveStatuses = async (directory) => {
+        statusReads.push(directory)
+        return { ses_parent: { type: 'busy' }, ses_healthy: { type: 'busy' } }
+      }
+      readSession = async (id, directory) => {
+        sessionReads.push(directory ?? '')
+        return { ...rootSession(id, id, 1), directory: directory ?? DIRECTORY }
+      }
+      readDiscoveryPage = async (options) => {
+        discoveryReads.push(options.directory ?? '')
+        if (options.directory === DIRECTORY && failing) throw new Error('Session list unavailable')
+        return { sessions: [], cursor: {} }
+      }
+      const failedReads = () => discoveryReads.filter((directory) => directory === DIRECTORY).length
+      const healthyReads = () => discoveryReads.filter((directory) => directory === otherDirectory).length
+      // The page helper retains its three attempts, 500 then 1000 ms apart.
+      await advance(10_000)
+      expect(failedReads()).toBe(3)
+      await advance(25_000)
+      expect(failedReads()).toBe(3)
+      expect(healthyReads()).toBe(3)
+      expect(statusReads.filter((directory) => directory === DIRECTORY)).toHaveLength(9)
+      expect(sessionReads.filter((directory) => directory === DIRECTORY)).toHaveLength(2)
+      await advance(10_000)
+      expect(failedReads()).toBe(6)
+      await advance(55_000)
+      expect(failedReads()).toBe(6)
+      await advance(10_000)
+      expect(failedReads()).toBe(9)
+      failing = false
+      await advance(65_000)
+      expect(failedReads()).toBe(10)
+      await advance(15_000)
+      expect(failedReads()).toBe(11)
+      await advance(15_000)
+      expect(failedReads()).toBe(12)
+    })
+  })
+})
+
 describe('SyncProvider active-session watchdog status poll', () => {
+  for (const failure of ['null', 'rejection']) {
+    test(`backs off ${failure} failures per directory and resets after success`, async () => {
+      const { useConfigStore } = await import('@/stores/useConfigStore')
+      const previousTransport = useConfigStore.getState().settingsMessageStreamTransport
+      // Keep the fixture's pending stream on SSE so advancing all timers
+      // cannot trigger WebSocket fallback's separate status resync.
+      useConfigStore.setState({ settingsMessageStreamTransport: 'sse' })
+      const dom = installHookTestDomWithStorage()
+      const root = createRoot(dom.container)
+      const sdk = OpenCode.make({ baseUrl: 'http://backoff.test', fetch: () => hang<Response>() })
+      let now = Date.now()
+      const clock = spyOn(Date, 'now').mockImplementation(() => now)
+      jest.useFakeTimers()
+      const reads: string[] = []
+      let failing = true
+      readActiveStatuses = async (directory) => {
+        reads.push(directory)
+        if (directory === DIRECTORY && failing) {
+          if (failure === 'rejection') throw new Error('Upstream unavailable')
+          return null
+        }
+        return { ses_parent: { type: 'busy' }, ses_healthy: { type: 'busy' } }
+      }
+      const advance = async (ms: number) => {
+        await act(async () => {
+          now += ms
+          jest.advanceTimersByTime(ms)
+          await new Promise<void>((resolve) => setImmediate(resolve))
+        })
+      }
+      try {
+        await act(async () => root.render(<SyncProvider sdk={sdk} directory={DIRECTORY}><div /></SyncProvider>))
+        const manager = getSyncChildStores()
+        const store = manager.getChild(DIRECTORY)
+        if (!store) throw new Error('Directory store was not created')
+        const otherDirectory = '/repo/healthy'
+        const other = manager.ensureChild(otherDirectory)
+        for (const { directory, child } of [{ directory: DIRECTORY, child: store }, { directory: otherDirectory, child: other }]) {
+          const id = directory === DIRECTORY ? 'ses_parent' : 'ses_healthy'
+          child.setState({
+            session: [{ ...rootSession(id, 'parent', 1500), directory }],
+            session_status: { [id]: { type: 'busy' } },
+          })
+        }
+        reads.length = 0
+        await advance(5_000)
+        expect(reads.filter((directory) => directory === DIRECTORY)).toHaveLength(1)
+        expect(store.getState().session_status.ses_parent?.type).toBe('busy')
+
+        // Every skipped tick still polls the healthy directory. The failing
+        // directory retries after 10, 20, 40, then repeated 60 second waits.
+        let expectedReads = 1
+        for (const delay of [10_000, 20_000, 40_000, 60_000, 60_000]) {
+          for (let elapsed = 5_000; elapsed < delay; elapsed += 5_000) {
+            const healthyReads = reads.filter((directory) => directory === otherDirectory).length
+            await advance(5_000)
+            expect(reads.filter((directory) => directory === DIRECTORY)).toHaveLength(expectedReads)
+            expect(reads.filter((directory) => directory === otherDirectory)).toHaveLength(healthyReads + 1)
+          }
+          await advance(5_000)
+          expectedReads += 1
+          expect(reads.filter((directory) => directory === DIRECTORY)).toHaveLength(expectedReads)
+          expect(store.getState().session_status.ses_parent?.type).toBe('busy')
+        }
+
+        failing = false
+        await advance(60_000)
+        expectedReads += 1
+        expect(reads.filter((directory) => directory === DIRECTORY)).toHaveLength(expectedReads)
+        await advance(5_000)
+        expectedReads += 1
+        expect(reads.filter((directory) => directory === DIRECTORY)).toHaveLength(expectedReads)
+
+        let finishSlowPoll!: () => void
+        let slowPoll = true
+        readActiveStatuses = async (directory) => {
+          reads.push(directory)
+          if (directory !== DIRECTORY) return { ses_healthy: { type: 'busy' } }
+          if (slowPoll) await new Promise<void>((resolve) => { finishSlowPoll = resolve })
+          if (failure === 'rejection') throw new Error('Upstream unavailable')
+          return null
+        }
+        await advance(5_000)
+        expectedReads += 1
+        await advance(60_000)
+        expect(reads.filter((directory) => directory === DIRECTORY)).toHaveLength(expectedReads)
+        slowPoll = false
+        await act(async () => {
+          finishSlowPoll()
+          await new Promise<void>((resolve) => setImmediate(resolve))
+        })
+        await advance(5_000)
+        expect(reads.filter((directory) => directory === DIRECTORY)).toHaveLength(expectedReads)
+        await advance(5_000)
+        expect(reads.filter((directory) => directory === DIRECTORY)).toHaveLength(expectedReads + 1)
+
+        store.setState({ session_status: { ses_parent: { type: 'idle' } } })
+        await advance(5_000)
+        store.setState({ session_status: { ses_parent: { type: 'busy' } } })
+        await advance(5_000)
+        expect(reads.filter((directory) => directory === DIRECTORY)).toHaveLength(expectedReads + 2)
+
+        // An empty successful snapshot still follows normal authoritative
+        // recovery and settles a session whose idle event was lost.
+        readActiveStatuses = async (directory) => {
+          reads.push(directory)
+          return {}
+        }
+        await advance(10_000)
+        expect(store.getState().session_status.ses_parent?.type).toBe('idle')
+      } finally {
+        await act(async () => root.unmount())
+        jest.useRealTimers()
+        clock.mockRestore()
+        useConfigStore.setState({ settingsMessageStreamTransport: previousTransport })
+        readActiveStatuses = async () => ({})
+        dom.restore()
+      }
+    })
+  }
+
   // Over the private relay a 5 s poll keeps the relay awake, so an open but
   // idle session must not be polled; live work still is.
   test('polls status for a busy session and not for an idle viewed one', async () => {
