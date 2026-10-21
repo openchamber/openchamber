@@ -1,6 +1,7 @@
 import os from 'node:os';
 import path from 'node:path';
 import { registerGitHubRoutes } from '../github/routes.js';
+import { listTrustedGitHubHosts } from '../github/host-trust.js';
 import { registerGitLabRoutes } from '../gitlab/routes.js';
 import { createBindingService } from './binding-service.js';
 import { createBindingStore } from './binding-storage.js';
@@ -12,7 +13,7 @@ import { redactSensitiveText } from './url-redaction.js';
 import { createOAuthFlowRegistry } from './oauth-flow-registry.js';
 import { createMutationStore } from './mutation-storage.js';
 import { createMutationExecutor } from './mutation-executor.js';
-import { createSourceControlAuthStore } from '../gitlab/auth-storage.js';
+import { createSourceControlAuthStore } from './auth-storage.js';
 import { getGitHubAuthAccounts, getGitHubAuthByAccountId } from '../github/auth.js';
 
 const defaultConfigRoot = () => process.env.OPENCHAMBER_DATA_DIR
@@ -57,6 +58,12 @@ export function registerSourceControlRoutes(app, dependencies = {}) {
   const gitlabStore = dependencies.gitlab?.store ?? createSourceControlAuthStore({
     filePath: path.join(configRoot, 'source-control-auth.json'),
   });
+  // The GitHub Enterprise half of the same token store: a stored per-host PAT is
+  // what makes a host trusted without gh, so it must surface in the instance
+  // list, identity backfill, and startup repair next to gitlab's.
+  const sourceControlAuthStore = dependencies.sourceControlAuthStore ?? createSourceControlAuthStore({
+    filePath: path.join(configRoot, 'source-control-auth.json'),
+  });
   const readTransportAccount = dependencies.readTransportAccount ?? (({
     provider, instance, accountId, credentialRevision,
   }) => provider === 'github'
@@ -95,6 +102,16 @@ export function registerSourceControlRoutes(app, dependencies = {}) {
         }
       }
     } catch { /* an unreadable provider store leaves its accounts for next time */ }
+    try {
+      for (const host of await (sourceControlAuthStore.github?.listInstances?.() ?? [])) {
+        const instance = await sourceControlAuthStore.github?.readInstance(host);
+        for (const account of instance?.accounts ?? []) {
+          if (account?.status === 'valid' && account.credentialId) {
+            entries.push({ account: { provider: 'github', instance: host, accountId: account.credentialId }, user: account.user });
+          }
+        }
+      }
+    } catch { /* as above */ }
     try {
       for (const origin of await gitlabStore.listInstances()) {
         const instance = await gitlabStore.readInstance(origin);
@@ -170,9 +187,14 @@ export function registerSourceControlRoutes(app, dependencies = {}) {
   app.get('/api/source-control/instances', async (_req, res) => {
     try {
       const configuredGitLabInstances = await gitlab.listInstances();
+      const storedGitHubHosts = await (sourceControlAuthStore.github?.listInstances?.() ?? []);
+      const githubHosts = [...new Set([...listTrustedGitHubHosts(), ...storedGitHubHosts])];
       return res.json({
         instances: [
           { provider: 'github', instance: 'github.com' },
+          // GitHub Enterprise hosts the user can work with: gh is signed in,
+          // GH_HOST names one, or the user already stored a per-host PAT for it.
+          ...githubHosts.map((host) => ({ provider: 'github', instance: host })),
           { provider: 'gitlab', instance: 'https://gitlab.com' },
           ...configuredGitLabInstances
             .filter((instance) => instance !== 'https://gitlab.com')
@@ -268,6 +290,13 @@ export function registerSourceControlRoutes(app, dependencies = {}) {
       if (account?.status !== 'valid' || !account?.credentialId) continue;
       adoptConnectedAccount({ provider: 'github', instance: 'github.com', accountId: account.credentialId }, account);
     }
+    for (const host of (await sourceControlAuthStore.github?.listInstances?.()) ?? []) {
+      const instance = await sourceControlAuthStore.github?.readInstance(host);
+      for (const account of instance?.accounts ?? []) {
+        if (account?.status !== 'valid' || !account?.credentialId) continue;
+        adoptConnectedAccount({ provider: 'github', instance: host, accountId: account.credentialId }, account);
+      }
+    }
     for (const origin of (await gitlabStore.listInstances?.()) ?? []) {
       for (const account of (await gitlabStore.listAccounts?.(origin)) ?? []) {
         if (account?.status !== 'valid') continue;
@@ -297,7 +326,7 @@ export function registerSourceControlRoutes(app, dependencies = {}) {
       readBinding: bindingService.get,
       listGitLabInstances: gitlab.listInstances,
       readCurrentAccountId: ({ provider, instance }) => (provider === 'github'
-        ? github.readCurrentAccountId()
+        ? github.readCurrentAccountId(instance)
         : gitlab.readCurrentAccountId(instance)),
       readChangeRequestHead: (input) => (input.context.provider === 'github'
         ? github.readChangeRequestHead(input)

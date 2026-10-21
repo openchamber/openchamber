@@ -5,6 +5,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { withSourceControlFileLock } from '../source-control/file-lock.js';
+import { createSourceControlAuthStore } from '../source-control/auth-storage.js';
 
 const OPENCHAMBER_DATA_DIR = process.env.OPENCHAMBER_DATA_DIR
   ? path.resolve(process.env.OPENCHAMBER_DATA_DIR)
@@ -12,8 +13,24 @@ const OPENCHAMBER_DATA_DIR = process.env.OPENCHAMBER_DATA_DIR
 
 const STORAGE_DIR = OPENCHAMBER_DATA_DIR;
 const STORAGE_FILE = path.join(STORAGE_DIR, 'github-auth.json');
+// GitHub Enterprise instances keep their own credentials in the server token
+// store GitLab uses, one entry per host; this file stays github.com's own. The
+// github.com instance (device flow and accounts) keeps living here. The path is
+// resolved at call time (not module load) so the caller's OPENCHAMBER_DATA_DIR
+// at that moment wins even when the module was imported earlier in the process.
+const sourceControlAuthStoreFilePath = () => path.join(
+  process.env.OPENCHAMBER_DATA_DIR
+    ? path.resolve(process.env.OPENCHAMBER_DATA_DIR)
+    : path.join(os.homedir(), '.config', 'openchamber'),
+  'source-control-auth.json',
+);
 const SETTINGS_FILE = path.join(OPENCHAMBER_DATA_DIR, 'settings.json');
-const AUTH_VERSION = 2;
+// Version 3 holds one entry per instance. Version 2 was a flat github.com-only
+// list. github.com's device-flow accounts stay in this file; a GitHub
+// Enterprise host's personal access tokens live in the shared
+// `source-control-auth.json` next to GitLab's (`createSourceControlAuthStore`),
+// and the host-scoped accessors below route non-github.com hosts there.
+const AUTH_VERSION = 3;
 
 const DEFAULT_GITHUB_CLIENT_ID = 'Ov23lizomPOC3eFYo56r';
 const DEFAULT_GITHUB_SCOPES = 'repo read:org workflow read:user user:email';
@@ -39,8 +56,16 @@ export function githubCliAccountId(userId) {
   return `github.com#cli:${userId}`;
 }
 
+// A host key is always a normalized hostname; an omitted/empty host is
+// github.com, the only instance the device flow can serve.
+const normalizeInstance = (host) => {
+  const value = String(host ?? '').trim().toLowerCase();
+  return value ? value : 'github.com';
+};
+const providerUserIdFor = (host, userId) => `${normalizeInstance(host)}#${userId}`;
 const newCredentialId = () => `occred:v1:github:${randomUUID()}:r1`;
-const emptyState = () => ({ version: AUTH_VERSION, activeCredentialId: null, credentials: [] });
+const emptyState = () => ({ version: AUTH_VERSION, instances: {} });
+const emptyInstance = () => ({ activeCredentialId: null, credentials: [], cliDisabled: false, cliActive: false });
 
 function parseUser(value) {
   if (!isPlainObject(value) || !Number.isInteger(value.id) || !validText(value.login)
@@ -53,7 +78,7 @@ function parseUser(value) {
   return user;
 }
 
-function parseCredential(value) {
+function parseCredential(value, host) {
   if (!isPlainObject(value)
     || !exactKeys(value, [
       'credentialId', 'revision', 'providerUserId', 'accessToken', 'scope', 'tokenType',
@@ -65,21 +90,56 @@ function parseCredential(value) {
     || !Number.isFinite(value.createdAt) || value.createdAt < 0
     || !['oauth', 'pat'].includes(value.source) || !['valid', 'invalid'].includes(value.status)) throw invalidState();
   const user = parseUser(value.user);
-  if (githubAccountId(user.id) !== value.providerUserId) throw invalidState();
+  if (providerUserIdFor(host, user.id) !== value.providerUserId) throw invalidState();
   if (value.invalidReason !== undefined && !validText(value.invalidReason)) throw invalidState();
   if (value.status === 'valid' && value.invalidReason !== undefined) throw invalidState();
   return { ...value, user, accountId: value.credentialId, credentialRevision: value.revision };
 }
 
+function parseInstance(rawInstance) {
+  if (!isPlainObject(rawInstance)
+    || !exactKeys(rawInstance, ['activeCredentialId', 'credentials', 'cliDisabled', 'cliActive'])
+    || (rawInstance.activeCredentialId !== null && !validText(rawInstance.activeCredentialId))
+    || !Array.isArray(rawInstance.credentials)
+    || Object.prototype.toString.call(rawInstance.cliDisabled) !== '[object Boolean]'
+    || Object.prototype.toString.call(rawInstance.cliActive) !== '[object Boolean]'
+    || (rawInstance.cliDisabled && rawInstance.cliActive)) throw invalidState();
+  return rawInstance;
+}
+
+function parseVersionThree(value) {
+  if (!isPlainObject(value) || !exactKeys(value, ['version', 'instances'])
+    || value.version !== AUTH_VERSION || !isPlainObject(value.instances)) throw invalidState();
+  const state = emptyState();
+  for (const [rawHost, rawInstance] of Object.entries(value.instances)) {
+    const host = normalizeInstance(rawHost);
+    if (!validText(rawHost) || host !== rawHost || !isPlainObject(rawInstance)) throw invalidState();
+    const credentials = rawInstance.credentials.map((credential) => parseCredential(credential, host));
+    if (new Set(credentials.map((credential) => credential.credentialId)).size !== credentials.length) throw invalidState();
+    if (rawInstance.activeCredentialId !== null
+      && !credentials.some((credential) => credential.credentialId === rawInstance.activeCredentialId)) throw invalidState();
+    state.instances[host] = {
+      activeCredentialId: rawInstance.activeCredentialId,
+      credentials,
+      cliDisabled: rawInstance.cliDisabled,
+      cliActive: rawInstance.cliActive,
+    };
+  }
+  return state;
+}
+
+// Version 2 was the flat github.com-only shape `{ version: 2, activeCredentialId,
+// credentials }`. It migrates into the github.com instance so existing files
+// keep their credentials with the same ids and secrets.
 function parseVersionTwo(value) {
-  if (!isPlainObject(value) || !exactKeys(value, ['version', 'activeCredentialId', 'credentials'])
-    || value.version !== AUTH_VERSION || !Array.isArray(value.credentials)
-    || (value.activeCredentialId !== null && !validText(value.activeCredentialId))) throw invalidState();
-  const credentials = value.credentials.map(parseCredential);
-  if (new Set(credentials.map((credential) => credential.credentialId)).size !== credentials.length) throw invalidState();
-  if (value.activeCredentialId !== null
-    && !credentials.some((credential) => credential.credentialId === value.activeCredentialId)) throw invalidState();
-  return { version: AUTH_VERSION, activeCredentialId: value.activeCredentialId, credentials };
+  const { version: _version, ...flatValue } = value;
+  const flat = parseInstance({ ...flatValue, cliDisabled: false, cliActive: false });
+  return { version: AUTH_VERSION, instances: {
+    'github.com': {
+      ...flat,
+      credentials: flat.credentials.map((credential) => parseCredential(credential, 'github.com')),
+    },
+  } };
 }
 
 function parseLegacyUser(value) {
@@ -130,34 +190,40 @@ function migrateLegacy(value) {
     ?? credentials.find((credential) => credential.status === 'valid')
     ?? credentials[0];
   for (const credential of credentials) delete credential.legacyCurrent;
-  return { version: AUTH_VERSION, activeCredentialId: current?.credentialId ?? null, credentials };
+  const instance = { activeCredentialId: current?.credentialId ?? null, credentials, cliDisabled: false, cliActive: false };
+  return { version: AUTH_VERSION, instances: { 'github.com': instance } };
 }
 
 function serializeState(state) {
-  return {
-    version: AUTH_VERSION,
-    activeCredentialId: state.activeCredentialId,
-    credentials: state.credentials.map((credential) => {
-      const stored = {
-        credentialId: credential.credentialId,
-        revision: credential.revision,
-        providerUserId: credential.providerUserId,
-        accessToken: credential.accessToken,
-        scope: credential.scope,
-        tokenType: credential.tokenType,
-        createdAt: credential.createdAt,
-        user: credential.user,
-        source: credential.source,
-        status: credential.status,
-      };
-      if (credential.status === 'invalid') stored.invalidReason = credential.invalidReason;
-      return stored;
-    }),
-  };
+  const instances = {};
+  for (const [host, instance] of Object.entries(state.instances)) {
+    instances[host] = {
+      activeCredentialId: instance.activeCredentialId,
+      credentials: instance.credentials.map((credential) => {
+        const stored = {
+          credentialId: credential.credentialId,
+          revision: credential.revision,
+          providerUserId: credential.providerUserId,
+          accessToken: credential.accessToken,
+          scope: credential.scope,
+          tokenType: credential.tokenType,
+          createdAt: credential.createdAt,
+          user: credential.user,
+          source: credential.source,
+          status: credential.status,
+        };
+        if (credential.status === 'invalid') stored.invalidReason = credential.invalidReason;
+        return stored;
+      }),
+      cliDisabled: instance.cliDisabled,
+      cliActive: instance.cliActive,
+    };
+  }
+  return { version: AUTH_VERSION, instances };
 }
 
-function publicCredential(credential, state) {
-  const userHasValidCredential = state.credentials.some((candidate) => (
+function publicCredential(credential, instance) {
+  const userHasValidCredential = instance.credentials.some((candidate) => (
     candidate.providerUserId === credential.providerUserId && candidate.status === 'valid'
   ));
   return {
@@ -168,7 +234,7 @@ function publicCredential(credential, state) {
     providerUserStatus: userHasValidCredential ? 'available' : 'unavailable',
     user: credential.user,
     scope: credential.scope,
-    current: state.activeCredentialId === credential.credentialId,
+    current: instance.activeCredentialId === credential.credentialId,
     source: credential.source,
     status: credential.status,
   };
@@ -200,7 +266,10 @@ export function createGitHubAuthStore({ filePath, fsImpl = fs, lockWaitMs = 2_00
     let value;
     try { value = JSON.parse(encoded); }
     catch (error) { throw invalidState(error); }
-    if (isPlainObject(value) && Object.hasOwn(value, 'version')) return parseVersionTwo(value);
+    if (isPlainObject(value) && Object.hasOwn(value, 'version')) {
+      if (value.version === 2) return parseVersionTwo(value);
+      return parseVersionThree(value);
+    }
     const migrated = migrateLegacy(value);
     await writeState(migrated);
     return migrated;
@@ -217,37 +286,54 @@ export function createGitHubAuthStore({ filePath, fsImpl = fs, lockWaitMs = 2_00
     if (result.changed) await writeState(state);
     return result.value;
   });
-  const chooseActive = (state) => {
-    const current = state.credentials.find((credential) => credential.credentialId === state.activeCredentialId);
+  const instanceOf = (state, host) => state.instances[normalizeInstance(host)] ?? emptyInstance();
+  const chooseActive = (instance) => {
+    const current = instance.credentials.find((credential) => credential.credentialId === instance.activeCredentialId);
     if (current?.status === 'valid') return;
-    state.activeCredentialId = state.credentials.find((credential) => credential.status === 'valid')?.credentialId
-      ?? state.credentials[0]?.credentialId
+    instance.activeCredentialId = instance.credentials.find((credential) => credential.status === 'valid')?.credentialId
+      ?? instance.credentials[0]?.credentialId
       ?? null;
   };
-
-  return Object.freeze({
-    getActive: () => read((state) => {
-      const credential = state.credentials.find((candidate) => candidate.credentialId === state.activeCredentialId);
+  const retainInstance = (instances, host, instance) => {
+    if (!instance.credentials.length && !instance.cliDisabled && !instance.cliActive) delete instances[host];
+    else instances[host] = instance;
+  };
+  const readAccountIn = (instance, credentialId, revision) => {
+    const credential = instance.credentials.find((candidate) => candidate.credentialId === credentialId);
+    if (!credential || credential.status !== 'valid'
+      || (revision !== undefined && credential.revision !== revision)) return null;
+    return credential;
+  };
+  const hostMethods = {
+    getActiveForHost: (host) => read((state) => {
+      const instance = instanceOf(state, host);
+      const credential = instance.credentials.find((candidate) => candidate.credentialId === instance.activeCredentialId);
       return credential?.status === 'valid' ? credential : null;
     }),
-    listAccounts: () => read((state) => state.credentials.map((credential) => publicCredential(credential, state))),
-    readAccount: (credentialId, revision) => read((state) => {
-      const credential = state.credentials.find((candidate) => candidate.credentialId === credentialId);
-      if (!credential || credential.status !== 'valid'
-        || (revision !== undefined && credential.revision !== revision)) return null;
-      return credential;
+    listAccountsForHost: (host) => read((state) => instanceOf(state, host).credentials.map((credential) => publicCredential(credential, instanceOf(state, host)))),
+    readAccountForHost: (host, credentialId, revision) => read((state) => readAccountIn(instanceOf(state, host), credentialId, revision)),
+    // Credential ids are unique across instances (server-assigned), so an opaque
+    // credential id alone identifies its own instance. The returned record earns
+    // a `host` so callers know which API root the token belongs to.
+    readAccountAnyInstance: (credentialId, revision) => read((state) => {
+      for (const [host, instance] of Object.entries(state.instances)) {
+        const credential = readAccountIn(instance, credentialId, revision);
+        if (credential) return { ...credential, host };
+      }
+      return null;
     }),
-    setAccount: ({ accessToken, scope, tokenType, user, source = 'oauth' }) => mutate((state) => {
+    setAccountForHost: (host, { accessToken, scope, tokenType, user, source = 'oauth' }) => mutate((state) => {
       if (!validText(accessToken) || !['oauth', 'pat'].includes(source)) throw new Error('Valid GitHub credential is required');
+      const hostKey = normalizeInstance(host);
       const parsedUser = parseLegacyUser(user);
-      const providerUserId = githubAccountId(parsedUser.id);
       const credentialId = newCredentialId();
+      const instance = instanceOf(state, hostKey);
       const credential = {
         credentialId,
         accountId: credentialId,
         revision: 1,
         credentialRevision: 1,
-        providerUserId,
+        providerUserId: providerUserIdFor(hostKey, parsedUser.id),
         accessToken,
         scope: isString(scope) ? scope : '',
         tokenType: validText(tokenType) ? tokenType : 'bearer',
@@ -256,37 +342,91 @@ export function createGitHubAuthStore({ filePath, fsImpl = fs, lockWaitMs = 2_00
         source,
         status: 'valid',
       };
-      state.credentials.push(credential);
-      state.activeCredentialId = credentialId;
+      instance.credentials.push(credential);
+      instance.activeCredentialId = credentialId;
+      instance.cliActive = false;
+      state.instances[hostKey] = instance;
       return { changed: true, value: credential };
     }),
-    activate: (credentialId) => mutate((state) => {
-      const credential = state.credentials.find((candidate) => candidate.credentialId === credentialId && candidate.status === 'valid');
-      if (!credential) return { changed: false, value: false };
-      if (state.activeCredentialId === credentialId) return { changed: false, value: true };
-      state.activeCredentialId = credentialId;
-      return { changed: true, value: true };
+    activateForHost: (host, credentialId) => mutate((state) => {
+      const instance = state.instances[normalizeInstance(host)];
+      if (!instance?.credentials.some((credential) => credential.credentialId === credentialId && credential.status === 'valid')) {
+        return { changed: false, value: false };
+      }
+      const changed = instance.activeCredentialId !== credentialId || instance.cliActive;
+      instance.activeCredentialId = credentialId;
+      instance.cliActive = false;
+      state.instances[normalizeInstance(host)] = instance;
+      return { changed, value: true };
     }),
-    markInvalid: (credentialId, reason = 'unauthorized') => mutate((state) => {
-      const credential = state.credentials.find((candidate) => candidate.credentialId === credentialId);
+    markInvalidForHost: (host, credentialId, reason = 'unauthorized') => mutate((state) => {
+      const instance = state.instances[normalizeInstance(host)];
+      const credential = instance?.credentials.find((candidate) => candidate.credentialId === credentialId);
       if (!credential) return { changed: false, value: false };
       if (credential.status === 'invalid' && credential.invalidReason === reason) return { changed: false, value: false };
       credential.status = 'invalid';
       credential.invalidReason = validText(reason) ? reason : 'unauthorized';
-      chooseActive(state);
+      chooseActive(instance);
       return { changed: true, value: true };
     }),
-    removeAccount: (credentialId) => mutate((state) => {
-      const index = state.credentials.findIndex((candidate) => candidate.credentialId === credentialId);
+    removeAccountForHost: (host, credentialId) => mutate((state) => {
+      const instances = state.instances;
+      const instance = instances[normalizeInstance(host)];
+      const index = instance?.credentials.findIndex((credential) => credential.credentialId === credentialId) ?? -1;
       if (index < 0) return { changed: false, value: false };
-      state.credentials.splice(index, 1);
-      chooseActive(state);
+      instance.credentials.splice(index, 1);
+      chooseActive(instance);
+      retainInstance(instances, normalizeInstance(host), instance);
       return { changed: true, value: true };
     }),
+    setCliDisabledForHost: (host, disabled) => mutate((state) => {
+      const hostKey = normalizeInstance(host);
+      const instance = instanceOf(state, hostKey);
+      const nextDisabled = Boolean(disabled);
+      const nextActive = nextDisabled ? false : instance.cliActive;
+      const changed = instance.cliDisabled !== nextDisabled || instance.cliActive !== nextActive;
+      instance.cliDisabled = nextDisabled;
+      instance.cliActive = nextActive;
+      retainInstance(state.instances, hostKey, instance);
+      return { changed, value: instance.cliDisabled };
+    }),
+    setCliActiveForHost: (host, active) => mutate((state) => {
+      const hostKey = normalizeInstance(host);
+      const instance = instanceOf(state, hostKey);
+      const nextActive = Boolean(active) && !instance.cliDisabled;
+      const changed = instance.cliActive !== nextActive;
+      instance.cliActive = nextActive;
+      retainInstance(state.instances, hostKey, instance);
+      return { changed, value: instance.cliActive };
+    }),
+  };
+
+  return Object.freeze({
+    ...hostMethods,
+    // github.com shorthands kept for the account layer: a hostless call means
+    // github.com, and readAccount finds a credential id in whichever instance
+    // holds it (credential ids are server-assigned and unique across instances).
+    getActive: () => hostMethods.getActiveForHost('github.com'),
+    listAccounts: () => hostMethods.listAccountsForHost('github.com'),
+    readAccount: (credentialId, revision) => hostMethods.readAccountAnyInstance(credentialId, revision),
+    setAccount: (args) => hostMethods.setAccountForHost('github.com', args),
+    activate: (credentialId) => hostMethods.activateForHost('github.com', credentialId),
+    markInvalid: (credentialId, reason) => hostMethods.markInvalidForHost('github.com', credentialId, reason),
+    removeAccount: (credentialId) => hostMethods.removeAccountForHost('github.com', credentialId),
   });
 }
 
 const authStore = createGitHubAuthStore({ filePath: STORAGE_FILE });
+// The server token store GitLab uses, read and written from here for GitHub
+// Enterprise hosts: one entry per host, holding that host's personal access
+// tokens and its gh CLI switch. Its file lock and this file's are the same
+// `source-control-auth.json.lock`, so the desktop app and a web server share it
+// the way GitLab's accounts do. A fresh store per call, so the shared token
+// store's path — and therefore the OPENCHAMBER_DATA_DIR in effect at that
+// moment — is the one that wins, even when this module was imported earlier in
+// the same process; the github.com file and lock above keep module-load
+// behavior exactly.
+const instanceAuthStore = () => createSourceControlAuthStore({ filePath: sourceControlAuthStoreFilePath() });
 
 function readSettingsFile() {
   try {
@@ -302,9 +442,40 @@ function writeSettingsFile(settings) {
   fsSync.renameSync(tmpFile, SETTINGS_FILE);
 }
 
-export const getGitHubAuth = () => authStore.getActive();
-export const getGitHubAuthAccounts = () => authStore.listAccounts();
-export const getGitHubAuthByAccountId = (credentialId, revision) => authStore.readAccount(credentialId, revision);
+const githubInstanceAccounts = async (host) => {
+  const instance = await instanceAuthStore().github.readInstance(host);
+  return instance.accounts.map((credential) => publicCredential(credential, { activeCredentialId: instance.activeAccountId, credentials: instance.accounts }));
+};
+const getActiveForHost = async (host) => {
+  const instance = await instanceAuthStore().github.readInstance(host);
+  if (!instance.activeAccountId) return null;
+  return instanceAuthStore().github.readAccount(host, instance.activeAccountId);
+};
+// The active credential of one instance (github.com from github-auth.json, a
+// named enterprise host from the shared server token store); caller-scoped per
+// host, so github.com's OAuth token is never a candidate for another host.
+export const getGitHubAuthForHost = (host) => (normalizeInstance(host) === 'github.com'
+  ? authStore.getActiveForHost(host)
+  : getActiveForHost(host));
+export const getGitHubAuth = (host) => (normalizeInstance(host) === 'github.com'
+  ? authStore.getActiveForHost(host)
+  : getActiveForHost(host));
+export const getGitHubAuthAccounts = () => authStore.listAccountsForHost('github.com');
+export const getGitHubAuthAccountsForHost = async (host) => (normalizeInstance(host) === 'github.com'
+  ? authStore.listAccountsForHost(host)
+  : githubInstanceAccounts(host));
+export const getGitHubAuthByAccountId = async (credentialId, revision) => {
+  // Credential ids are server-assigned and opaque; github.com's live in
+  // `github-auth.json`, a named enterprise host's in the shared token store.
+  // Read the shared store first (the per-host path the GHE branch writes), then
+  // the github.com file, so a per-instance PAT never falls through.
+  const instanceCredential = await instanceAuthStore().github.readAccountAnyInstance(credentialId, revision);
+  if (instanceCredential) return instanceCredential;
+  return authStore.readAccountAnyInstance(credentialId, revision);
+};
+export const getGitHubAuthByHostAndAccountId = (host, credentialId, revision) => (normalizeInstance(host) === 'github.com'
+  ? authStore.readAccountForHost(host, credentialId, revision)
+  : instanceAuthStore().github.readAccount(host, credentialId, revision));
 
 export async function setGitHubAuth({ accessToken, scope, tokenType, user, accountId, source = 'oauth' }) {
   if (accountId !== undefined) throw new Error('GitHub credential IDs are server assigned');
@@ -314,14 +485,38 @@ export async function setGitHubAuth({ accessToken, scope, tokenType, user, accou
   return credential;
 }
 
+export async function setGitHubAuthForHost(host, { accessToken, scope, tokenType, user, source = 'oauth' }) {
+  const credential = normalizeInstance(host) === 'github.com'
+    ? await authStore.setAccountForHost(host, { accessToken, scope, tokenType, user, source })
+    : await instanceAuthStore().github.setAccount(host, { accessToken, scope, tokenType, user, source });
+  // The gh CLI for that instance stops being active: a stored credential is the
+  // preference until the instance's gh login is explicitly active again.
+  if (normalizeInstance(host) === 'github.com' && readSettingsFile().ghCliActive) setGhCliActive(false);
+  return credential;
+}
+
 export async function activateGitHubAuth(credentialId) {
   const activated = await authStore.activate(credentialId);
   // Switching to a saved account is switching away from the gh CLI login.
   if (activated && readSettingsFile().ghCliActive) setGhCliActive(false);
   return activated;
 }
+
+export async function activateGitHubAuthForHost(host, credentialId) {
+  const activated = normalizeInstance(host) === 'github.com'
+    ? await authStore.activateForHost(host, credentialId)
+    : await instanceAuthStore().github.activate(host, credentialId);
+  if (activated && normalizeInstance(host) === 'github.com' && readSettingsFile().ghCliActive) setGhCliActive(false);
+  return activated;
+}
 export const markGitHubAuthAccountInvalid = (credentialId, reason = 'unauthorized') => authStore.markInvalid(credentialId, reason);
+export const markGitHubAuthAccountInvalidForHost = (host, credentialId, reason = 'unauthorized') => (normalizeInstance(host) === 'github.com'
+  ? authStore.markInvalidForHost(host, credentialId, reason)
+  : instanceAuthStore().github.markAccountInvalid(host, credentialId, reason));
 export const removeGitHubAuthAccount = (credentialId) => authStore.removeAccount(credentialId);
+export const removeGitHubAuthAccountForHost = (host, credentialId) => (normalizeInstance(host) === 'github.com'
+  ? authStore.removeAccountForHost(host, credentialId)
+  : instanceAuthStore().github.removeAccount(host, credentialId));
 
 export function getGitHubClientId() {
   const raw = process.env.OPENCHAMBER_GITHUB_CLIENT_ID;
@@ -329,6 +524,18 @@ export function getGitHubClientId() {
   if (clientId) return clientId;
   const stored = readSettingsFile()?.githubClientId;
   return isString(stored) && stored.trim() ? stored.trim() : DEFAULT_GITHUB_CLIENT_ID;
+}
+
+/**
+ * Whether an operator explicitly configured a GitHub OAuth client (env or
+ * settings), as opposed to the built-in github.com default. The device flow is
+ * github.com-only; a non-github.com host never advertises it.
+ */
+export function hasGitHubClientOverride() {
+  const raw = process.env.OPENCHAMBER_GITHUB_CLIENT_ID;
+  if (isString(raw) && raw.trim()) return true;
+  const stored = readSettingsFile()?.githubClientId;
+  return isString(stored) && Boolean(stored.trim());
 }
 
 export function getGitHubScopes() {
@@ -362,3 +569,27 @@ export function setGhCliActive(active) {
   settings.ghCliActive = Boolean(active) && !settings.ghCliDisabled;
   writeSettingsFile(settings);
 }
+
+// The gh CLI switch is per instance: github.com keeps its Settings switch; an
+// enterprise host's gh login is used only after the user activated that instance.
+// The per-instance switch lives in the shared server token store like GitLab's;
+// github.com's lives in settings.json. The global `ghCliDisabled` is github.com's
+// own switch only — it never kills another host's gh login, so turning one
+// instance off cannot take the others with it.
+export const isGhCliDisabledForHost = async (host) => {
+  if (normalizeInstance(host) === 'github.com') return isGhCliDisabled();
+  return (await instanceAuthStore().github.readInstance(host)).cliDisabled;
+};
+
+export const isGhCliActiveForHost = async (host) => {
+  if (normalizeInstance(host) === 'github.com') return isGhCliActive();
+  return (await instanceAuthStore().github.readInstance(host)).cliActive;
+};
+
+export const setGhCliDisabledForHost = (host, disabled) => (normalizeInstance(host) === 'github.com'
+  ? setGhCliDisabled(disabled)
+  : instanceAuthStore().github.setCliDisabled(host, disabled));
+
+export const setGhCliActiveForHost = (host, active) => (normalizeInstance(host) === 'github.com'
+  ? setGhCliActive(active)
+  : instanceAuthStore().github.setCliActive(host, active));

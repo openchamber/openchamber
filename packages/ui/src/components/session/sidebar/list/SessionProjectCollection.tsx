@@ -545,11 +545,11 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
       addTarget(normalizePath(node.worktree?.path ?? null), node.worktree?.branch);
       if (!topology.isVSCode) {
         for (const link of getLinkedGitHubPullRequests(node.session)) {
-          linkedRefs.set(`${link.owner.toLowerCase()}/${link.repo.toLowerCase()}#${link.number}`, { owner: link.owner, repo: link.repo, number: link.number });
+          linkedRefs.set(`${link.instance ?? 'github.com'}/${link.owner.toLowerCase()}/${link.repo.toLowerCase()}#${link.number}`, { owner: link.owner, repo: link.repo, number: link.number, ...(link.instance ? { host: link.instance  } : null) });
         }
         for (const issue of getLinkedSidebarIssues(node.session)) {
           if (issue.source === 'github') {
-            linkedIssueRefs.set(`${issue.owner.toLowerCase()}/${issue.repo.toLowerCase()}#${issue.number}`, { owner: issue.owner, repo: issue.repo, number: issue.number });
+            linkedIssueRefs.set(`${issue.instance ?? 'github.com'}/${issue.owner.toLowerCase()}/${issue.repo.toLowerCase()}#${issue.number}`, { owner: issue.owner, repo: issue.repo, number: issue.number, ...(issue.instance ? { host: issue.instance  } : null) });
           } else if (issue.source === 'linear') {
             linearIdentifiers.add(issue.identifier.toUpperCase());
           }
@@ -771,8 +771,8 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
   const branchPulls = useBranchTrackedPulls(shownPrKeys);
   const shownTrackedItems = React.useMemo((): TrackedItem[] => [
     ...branchPulls,
-    ...shownPrs.linkedRefs.map((ref) => githubThread('pull', ref)),
-    ...shownPrs.linkedIssueRefs.map((ref) => githubThread('issue', ref)),
+    ...shownPrs.linkedRefs.map((ref) => githubThread('pull', ref, ref.host)),
+    ...shownPrs.linkedIssueRefs.map((ref) => githubThread('issue', ref, ref.host)),
     ...shownPrs.gitlabRefs.map((ref) => (ref.thread === 'pull' ? gitlabThread('pull', ref) : gitlabThread('issue', ref))),
     ...shownPrs.linearIdentifiers.map(linearIssue),
   ], [branchPulls, shownPrs]);

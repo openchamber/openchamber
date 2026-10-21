@@ -30,6 +30,15 @@ afterEach(async () => {
 });
 
 describe('GitHub auth credentials', () => {
+  it('keeps the gh CLI switch per instance: an enterprise host toggle never moves github.com', async () => {
+    await auth.setGhCliDisabledForHost('github.example.com', true);
+    expect(await auth.isGhCliDisabledForHost('github.example.com')).toBe(true);
+    expect(await auth.isGhCliDisabledForHost('github.com')).toBe(false);
+    // github.com's own switch stays the only one that gates github.com.
+    await auth.setGhCliDisabledForHost('github.com', true);
+    expect(await auth.isGhCliDisabledForHost('github.com')).toBe(true);
+    expect(await auth.isGhCliDisabledForHost('github.example.com')).toBe(true);
+  });
   it('migrates the shipped array once while preserving the exact legacy credential ID and secret', async () => {
     const filePath = path.join(directory, 'github-auth.json');
     await fs.writeFile(filePath, JSON.stringify([
@@ -49,8 +58,27 @@ describe('GitHub auth credentials', () => {
     })]);
     await expect(auth.getGitHubAuthByAccountId('github.com#7', 1)).resolves.toMatchObject({ accessToken: 'new-secret' });
     const stored = JSON.parse(await fs.readFile(filePath, 'utf8'));
-    expect(stored).toMatchObject({ version: 2, activeCredentialId: 'github.com#7' });
-    expect(stored.credentials).toEqual([expect.objectContaining({ credentialId: 'github.com#7', revision: 1, accessToken: 'new-secret' })]);
+    expect(stored).toMatchObject({ version: 3, instances: { 'github.com': expect.objectContaining({ activeCredentialId: 'github.com#7' }) } });
+    expect(stored.instances['github.com'].credentials).toEqual([expect.objectContaining({ credentialId: 'github.com#7', revision: 1, accessToken: 'new-secret' })]);
+  });
+
+  it('migrates a version 2 flat file into the github.com instance', async () => {
+    const filePath = path.join(directory, 'github-auth.json');
+    await fs.writeFile(filePath, JSON.stringify({
+      version: 2,
+      activeCredentialId: 'cred-1',
+      credentials: [
+        { credentialId: 'cred-1', revision: 1, providerUserId: 'github.com#7', accessToken: 'old-secret', scope: 'repo', tokenType: 'bearer', createdAt: 1, user: { id: 7, login: 'user' }, source: 'oauth', status: 'valid' },
+      ],
+    }), 'utf8');
+
+    await expect(auth.getGitHubAuthAccounts()).resolves.toEqual([expect.objectContaining({
+      id: 'cred-1', providerUserId: 'github.com#7', status: 'valid', current: true,
+    })]);
+    await auth.setGitHubAuth({ accessToken: 'new-secret', user: { id: 8, login: 'other' }, source: 'pat' });
+
+    const stored = JSON.parse(await fs.readFile(filePath, 'utf8'));
+    expect(stored).toMatchObject({ version: 3, instances: { 'github.com': expect.objectContaining({ activeCredentialId: expect.any(String) }) } });
   });
 
   it('keeps OAuth and PAT credentials for one provider user distinct and immutable', async () => {

@@ -176,14 +176,14 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
   // session need not be on screen in the sidebar.
   const linkedPrs = React.useMemo(() => getLinkedGitHubPullRequests(session), [session]);
   const linkedPullLinks = React.useMemo(
-    () => linkedPrs.map((link) => ({ item: githubThread('pull', link), url: link.url, title: link.title })),
+    () => linkedPrs.map((link) => ({ item: githubThread('pull', link, link.instance), url: link.url, title: link.title })),
     [linkedPrs],
   );
   const linkedIssueRefs = React.useMemo(
-    () => getLinkedSidebarIssues(session).flatMap((issue) => (issue.source === 'github' ? [{ owner: issue.owner, repo: issue.repo, number: issue.number }] : [])),
+    () => getLinkedSidebarIssues(session).flatMap((issue) => (issue.source === 'github' ? [{ owner: issue.owner, repo: issue.repo, number: issue.number, ...(issue.instance ? { instance: issue.instance } : null) }] : [])),
     [session],
   );
-  const linkedIssueItems = React.useMemo(() => linkedIssueRefs.map((ref) => githubThread('issue', ref)), [linkedIssueRefs]);
+  const linkedIssueItems = React.useMemo(() => linkedIssueRefs.map((ref) => githubThread('issue', ref, ref.instance)), [linkedIssueRefs]);
   const linkedLinearIdentifiers = React.useMemo(
     () => getLinkedSidebarIssues(session).flatMap((issue) => (issue.source === 'linear' ? [issue.identifier] : [])),
     [session],
@@ -235,13 +235,19 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
       return { color: `var(--pr-${summary.visualState})`, text: label ? `${reference} · ${label}` : reference };
     };
     for (const summary of linkedPrSummaries) {
-      looks.set(`${summary.repo?.owner ?? ''}/${summary.repo?.repo ?? ''}#${summary.number}`.toLowerCase(), changeLook(summary, `#${summary.number}`));
+      const link = linkedPrs.find((candidate) => (
+        candidate.owner.toLowerCase() === summary.repo?.owner?.toLowerCase()
+          && candidate.repo.toLowerCase() === summary.repo?.repo?.toLowerCase()
+          && candidate.number === summary.number
+      ));
+      const key = `${link?.instance ? `${link.instance}:` : ''}${summary.repo?.owner ?? ''}/${summary.repo?.repo ?? ''}#${summary.number}`;
+      looks.set(key.toLowerCase(), changeLook(summary, `#${summary.number}`));
     }
     linkedIssueRefs.forEach((ref, index) => {
       const state = linkedIssueStates[index];
       if (!state) return;
       const look = getIssueStateLook(state.state);
-      looks.set(`${ref.owner}/${ref.repo}#${ref.number}`.toLowerCase(), {
+      looks.set(`${ref.instance ? `${ref.instance}:` : ''}${ref.owner}/${ref.repo}#${ref.number}`.toLowerCase(), {
         color: look.color,
         text: `#${ref.number} · ${t(look.statusKey)}`,
       });
@@ -268,8 +274,11 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
         ));
         if (match) looks.set(match.ref.key, changeLook(branchPrSummary, `!${match.ref.number}`));
       } else {
-        const key = `${owner}/${repo}#${branchPrSummary.number}`;
-        if (linkedPrs.some((link) => `${link.owner}/${link.repo}#${link.number}`.toLowerCase() === key)) {
+        const match = linkedPrs.find((link) => (
+          link.owner.toLowerCase() === owner && link.repo.toLowerCase() === repo && link.number === branchPrSummary.number
+        ));
+        if (match) {
+          const key = `${match.instance ? `${match.instance}:` : ''}${owner}/${repo}#${branchPrSummary.number}`;
           looks.set(key, changeLook(branchPrSummary, `#${branchPrSummary.number}`));
         }
       }

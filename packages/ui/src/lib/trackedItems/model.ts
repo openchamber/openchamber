@@ -9,9 +9,11 @@ import type { GitHubIssueLiveSummary, GitHubPullRequestLiveSummary, LinearIssueL
 /**
  * `accountId` names the account a repository is bound to (a branch's pull
  * request); without it the host's current account reads the item (a link).
+ * A GitHub `instance` is the repository's host; missing means github.com,
+ * exactly parallel to GitLab's required instance.
  */
 export type TrackedThread<Kind extends 'pull' | 'issue' = 'pull' | 'issue'> =
-  | { provider: 'github'; kind: Kind; owner: string; repo: string; number: number; accountId?: string }
+  | { provider: 'github'; kind: Kind; instance?: string; owner: string; repo: string; number: number; accountId?: string }
   | { provider: 'gitlab'; instance: string; kind: Kind; owner: string; repo: string; number: number; accountId?: string };
 export type TrackedLinearIssue = { provider: 'linear'; identifier: string };
 export type TrackedItem = TrackedThread<'pull'> | TrackedThread<'issue'> | TrackedLinearIssue;
@@ -19,9 +21,12 @@ export type TrackedItem = TrackedThread<'pull'> | TrackedThread<'issue'> | Track
 export const trackedItemKey = (item: TrackedItem): string => {
   if (item.provider === 'linear') return `linear|${item.identifier.toUpperCase()}`;
   const thread = `${item.kind}|${item.owner}/${item.repo}#${item.number}`.toLowerCase();
+  // The same owner/repo/number can exist on github.com and an enterprise host;
+  // the host is part of the key so the two never collide or share a slot.
+  const instance = (item.provider === 'gitlab' ? item.instance : (item.instance ?? 'github.com')).toLowerCase();
   // Account ids are opaque and case-sensitive; they stay as they are.
   const account = item.accountId ? `@${item.accountId}` : '';
-  return item.provider === 'gitlab' ? `gitlab|${item.instance.toLowerCase()}|${thread}${account}` : `github|${thread}${account}`;
+  return `${item.provider}|${instance}|${thread}${account}`;
 };
 
 const checksSchema = z.object({
@@ -65,7 +70,7 @@ const linearSummarySchema = z.object({
 
 const threadFields = { owner: z.string().min(1), repo: z.string().min(1), number: z.number().int().positive(), kind: z.enum(['pull', 'issue']), accountId: z.string().min(1).optional() };
 const trackedItemSchema = z.discriminatedUnion('provider', [
-  z.object({ provider: z.literal('github'), ...threadFields }),
+  z.object({ provider: z.literal('github'), instance: z.string().min(1).optional(), ...threadFields }),
   z.object({ provider: z.literal('gitlab'), instance: z.string().min(1), ...threadFields }),
   z.object({ provider: z.literal('linear'), identifier: z.string().min(1) }),
 ]) satisfies z.ZodType<TrackedItem>;

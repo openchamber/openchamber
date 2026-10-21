@@ -11,7 +11,12 @@ const PR_STATUS_CACHE_MAX_ENTRIES = 200;
 const PR_STATUS_RESOLVE_TIMEOUT_MS = 12_000;
 const prStatusCache = new Map();
 const pendingPrStatusWrites = new Map();
-let resolvedAuthLoginPromise = null;
+// The login a merge-permission check resolves is memoized per Octokit host and
+// credential identity: an enterprise host's login must never be satisfied from
+// (or replayed onto) the github.com account's memo, and a host's changed
+// credential (a new per-instance PAT, a different gh login) resolves its own
+// login instead of the previous account's. An absent host means github.com.
+const authLoginByHost = new Map();
 const PR_CONTEXT_CACHE_TTL_MS = 30_000;
 const PR_CONTEXT_CACHE_MAX_ENTRIES = 50;
 const prContextCache = new Map();
@@ -168,13 +173,12 @@ function matchesGitHubRepositoryUrl(value, owner, repo) {
   if (!isProviderString(value) || !value.trim()) return false;
   const expectedPath = `${owner}/${repo}`.toLowerCase();
   const raw = value.trim();
-  const scpMatch = raw.match(/^git@github\.com:([^/\s]+)\/([^/\s]+?)(?:\.git)?$/i);
-  if (scpMatch) return `${scpMatch[1]}/${scpMatch[2]}`.toLowerCase() === expectedPath;
+  const scpMatch = raw.match(/^git@([^/\s:]+):([^/\s]+)\/([^/\s]+?)(?:\.git)?$/i);
+  if (scpMatch) return `${scpMatch[2]}/${scpMatch[3]}`.toLowerCase() === expectedPath;
 
   try {
     const url = new URL(raw);
     if (!['https:', 'ssh:'].includes(url.protocol)
-      || url.host.toLowerCase() !== 'github.com'
       || url.password || url.search || url.hash
       || (url.protocol === 'https:' && url.username)
       || (url.protocol === 'ssh:' && url.username !== 'git')) {
@@ -357,45 +361,56 @@ export function registerGitHubRoutes(app, options = {}) {
     return null;
   };
   const accountIdentity = (accountId) => ({ provider: 'github', instance: 'github.com', accountId });
-  const cliAccountView = (user, current) => ({
-    id: `github.com#cli:${user.id}`,
-    credentialId: `github.com#cli:${user.id}`,
+  const hostCliAccountView = (host, user, current) => ({
+    id: `${host}#cli:${user.id}`,
+    credentialId: `${host}#cli:${user.id}`,
     credentialRevision: 1,
-    providerUserId: `github.com#${user.id}`,
+    providerUserId: `${host}#${user.id}`,
     providerUserStatus: 'available',
     user,
     current,
-    source: 'gh-cli',
+    source: 'cli',
     status: 'valid',
   });
-  const invalidateAccount = async (accountId) => {
-    const { markGitHubAuthAccountInvalid } = await getGitHubLibraries();
-    await options.onAccountInvalidated?.(accountIdentity(accountId));
-    await markGitHubAuthAccountInvalid(accountId, 'unauthorized');
+  const cliAccountView = (user, current) => hostCliAccountView('github.com', user, current);
+  const invalidateAccount = async (identity, accountId) => {
+    const { markGitHubAuthAccountInvalidForHost } = await getGitHubLibraries();
+    await options.onAccountInvalidated?.(identity);
+    await markGitHubAuthAccountInvalidForHost(identity.instance, accountId, 'unauthorized');
   };
   const invalidateRequestAccount = async (error) => {
     const identity = error?.sourceControlIdentity;
     if (error?.status !== 401 || error?.sourceControlAccountUnavailable || !identity?.accountId) return false;
     if (error.sourceControlInvalidated) return true;
-    if (error.sourceControlPersistedAccount) await invalidateAccount(identity.accountId);
+    if (error.sourceControlPersistedAccount) await invalidateAccount(identity, identity.accountId);
     else await options.onAccountInvalidated?.(identity);
     return true;
+  };
+  const octokitForDirectoryHost = async (libraries, req) => {
+    const directoryValue = req.query?.directory !== undefined ? req.query.directory : '';
+    const remoteValue = typeof req.query?.remote === 'string' ? req.query.remote.trim() : '';
+    const { repo: hostRepo } = typeof directoryValue === 'string' && directoryValue
+      ? await libraries.resolveGitHubRepoFromDirectory(directoryValue, remoteValue).catch(() => ({ repo: null }))
+      : { repo: null };
+    const octokit = await libraries.getOctokitOrNull(hostRepo?.host);
+    return { octokit, host: hostRepo?.host ?? null };
   };
   const getOctokitForRequest = async (req, exactAccountId = '') => {
     const accountIdValue = exactAccountId || req.query?.accountId || req.body?.accountId;
     const accountId = Object.prototype.toString.call(accountIdValue) === '[object String]' ? accountIdValue.trim() : '';
     const libraries = await getGitHubLibraries();
     if (!accountId) {
-      const octokit = await libraries.getOctokitOrNull();
+      const { octokit, host } = await octokitForDirectoryHost(libraries, req);
       return octokit ? {
         octokit,
         cacheIdentity: libraries.getOctokitCacheIdentity(octokit),
-        user: (await libraries.getGitHubAuth())?.user ?? null,
-      } : null;
+        host,
+        user: (await libraries.getGitHubAuth(host))?.user ?? null,
+      } : { octokit: null, host };
     }
     const context = await libraries.getOctokitForAccountId(accountId, {
       onUnauthorized: async (identity, persisted) => {
-        if (persisted) await invalidateAccount(identity.accountId);
+        if (persisted) await invalidateAccount(identity, identity.accountId);
         else await options.onAccountInvalidated?.(identity);
       },
     });
@@ -413,7 +428,7 @@ export function registerGitHubRoutes(app, options = {}) {
   const getOctokitForRead = async (req, trustedContext) => {
     if (trustedContext) return getOctokitForRequest(req, trustedContext.accountId);
     const libraries = await getGitHubLibraries();
-    const octokit = await libraries.getOctokitOrNull();
+    const { octokit } = await octokitForDirectoryHost(libraries, req);
     return octokit ? {
       octokit,
       cacheIdentity: libraries.getOctokitCacheIdentity(octokit),
@@ -1045,10 +1060,16 @@ export function registerGitHubRoutes(app, options = {}) {
       const accountContext = await getOctokitForRequest(req, context.accountId);
       const octokit = accountContext.octokit;
       const actor = { provider: 'github', instance: context.instance, accountId: context.accountId };
-      if (accountContext.accountId !== context.accountId
+      // A `<host>#cli:<id>` request is satisfied by the host's stored credential
+      // when that instance's gh login is not active, so the resolved account may
+      // differ from the requested id; any other request must match exactly.
+      const requestedCli = /^([^#]+)#cli:\d+$/.exec(context.accountId ?? '');
+      const requestedCliForInstance = Boolean(requestedCli
+        && requestedCli[1].toLowerCase() === String(context.instance ?? '').toLowerCase());
+      if ((requestedCliForInstance ? false : accountContext.accountId !== context.accountId)
         || !Number.isSafeInteger(accountContext.credentialRevision) || accountContext.credentialRevision < 1
         || !isProviderString(accountContext.providerUserId)
-        || !/^github\.com#\d+$/.test(accountContext.providerUserId)) {
+        || !/^[^#]+#\d+$/.test(accountContext.providerUserId)) {
         throw canonicalMutationError('GitHub account is unavailable', 'SOURCE_CONTROL_ACCOUNT_UNAVAILABLE', 401);
       }
       const credential = {
@@ -1298,13 +1319,13 @@ export function registerGitHubRoutes(app, options = {}) {
   const getGitHubUserSummary = async (octokit) => {
     const me = await octokit.rest.users.getAuthenticated();
 
-    let email = typeof me.data.email === 'string' ? me.data.email : null;
+    let email = me.data.email ?? null;
     if (!email) {
       try {
         const emails = await octokit.rest.users.listEmailsForAuthenticatedUser({ per_page: 100 });
         const list = Array.isArray(emails?.data) ? emails.data : [];
-        const primaryVerified = list.find((e) => e && e.primary && e.verified && typeof e.email === 'string');
-        const anyVerified = list.find((e) => e && e.verified && typeof e.email === 'string');
+        const primaryVerified = list.find((e) => e && e.primary && e.verified && Boolean(e.email));
+        const anyVerified = list.find((e) => e && e.verified && Boolean(e.email));
         email = primaryVerified?.email || anyVerified?.email || null;
       } catch {
         // ignore (scope might be missing)
@@ -1328,19 +1349,30 @@ export function registerGitHubRoutes(app, options = {}) {
     return isProviderString(message) && message.trim() ? message : error.message;
   };
 
-  app.get('/api/source-control/github/capabilities', (req, res) => {
-    const requestedInstance = typeof req.query?.instance === 'string' ? req.query.instance.trim() : '';
-    if (requestedInstance && requestedInstance !== 'github.com') {
-      return res.status(400).json({ error: 'Unsupported GitHub instance' });
-    }
-    const instance = 'github.com';
+  app.get('/api/source-control/github/capabilities', async (req, res) => {
+    const { hasStoredGhLogin } = await import('./host-trust.js');
+    const requestedInstance = String(req.query?.instance ?? '').trim();
+    // Any named host is a GitHub Enterprise candidate — PAT entry is the act
+    // that names the host (the token is validated against https://<host>/api/v3/user
+    // before it is stored), the device flow stays github.com's, and the host's gh
+    // login is offered only where gh has one.
+    const instance = requestedInstance && requestedInstance !== 'github.com' ? requestedInstance : 'github.com';
+    const isEnterprise = instance !== 'github.com';
+    // The device flow is hardcoded to github.com: auth/start and device-flow.js
+    // always use the github.com device and access-token URLs. A GHE device flow
+    // would need a host-pinned operator OAuth app, which this server does not
+    // implement, so a non-github.com host never advertises it — a client-id
+    // override does not change that.
+    const device = isEnterprise
+      ? { available: false, reason: 'invalid-client' }
+      : { available: true };
     return res.json({
       identity: { provider: 'github', instance },
       authentication: true,
       authenticationMethods: {
-        device: { available: true },
-        pat: { available: false, reason: 'unsupported' },
-        cli: { available: true },
+        device,
+        pat: isEnterprise ? { available: true } : { available: false, reason: 'unsupported' },
+        cli: { available: isEnterprise ? hasStoredGhLogin(instance) : true },
       },
       multipleAccounts: true,
       projects: true,
@@ -1353,8 +1385,130 @@ export function registerGitHubRoutes(app, options = {}) {
     });
   });
 
-  app.get(githubAuthRoutePaths('/auth/status'), async (_req, res) => {
+  app.get(githubAuthRoutePaths('/auth/status'), async (req, res) => {
     try {
+      // A GitHub Enterprise instance's auth status is per instance: the stored
+      // personal access token for the host, or the host's gh login once that
+      // instance was activated. The trust gate (host-trust.js) decides which
+      // hosts qualify; github.com (and a missing instance query) keeps the
+      // account flow below.
+      const requestedInstance = String(req.query?.instance ?? '').trim().toLowerCase().replace(/\.$/, '');
+      const enterpriseHost = requestedInstance && requestedInstance !== 'github.com' ? requestedInstance : '';
+      if (enterpriseHost) {
+        const { isTrustedGitHubHostOrStored, hasStoredGhLogin, storedGhLoginUser } = await import('./host-trust.js');
+        const {
+          getGitHubAuthForHost, getGitHubAuthAccountsForHost, isGhCliActiveForHost, isGhCliDisabledForHost,
+          setGhCliActiveForHost, markGitHubAuthAccountInvalidForHost,
+        } = await getGitHubLibraries();
+        // A host the person names is a GitHub Enterprise host by that act: PAT
+        // entry and per-host storage are open for any named host (the token is
+        // validated against https://<host>/api/v3/user before it is stored), the
+        // device flow stays github.com's, and the host's gh login is offered only
+        // where gh has one.
+        if (!(await isTrustedGitHubHostOrStored(enterpriseHost))) {
+          return res.json({
+            connected: false,
+            accounts: [],
+            cli: { available: hasStoredGhLogin(enterpriseHost), disabled: false, active: false },
+          });
+        }
+        const buildEnterpriseStatus = async (host) => {
+          const { createOctokit } = await import('./octokit.js');
+          const cliDisabled = await isGhCliDisabledForHost(host);
+          const cliActive = await isGhCliActiveForHost(host);
+          // The host's gh login is listed whenever its own switch is not off, the
+          // same consent rule GitLab applies to glab: the account row offers it
+          // for activation, and its token is used only after the user activates
+          // that instance.
+          const available = cliDisabled ? false : hasStoredGhLogin(host);
+          let user = null;
+          let cliRejected = false;
+          if (cliActive && !cliDisabled) {
+            const { getGhCliToken } = await import('./gh-cli-credential.js');
+            const token = await getGhCliToken(host);
+            if (token !== null) {
+              try {
+                user = await getGitHubUserSummary(createOctokit(token, '', host));
+              } catch (error) {
+                cliRejected = error?.status === 401;
+              }
+            }
+            // The user's activation is undone only when that account is really
+            // gone: gh logged out, disabled here, or its token rejected. A network
+            // blip leaves this read without a user but keeps the choice.
+            if (!user && (token === null || cliRejected)) {
+              setGhCliActiveForHost(host, false);
+              return buildEnterpriseStatus(host);
+            }
+          }
+          // While the switch is off the gh login is still listed when gh has one,
+          // built from the hosts.yml user so the card can offer it — exactly the
+          // offer GitLab's glab account row makes — without running gh or asking
+          // the host who the login is. Its id is 0, a value GitHub never assigns,
+          // so this listing can never name a real stored account.
+          if (!cliActive && !user && available) {
+            user = storedGhLoginUser(host);
+          }
+          const active = cliActive ? null : await getGitHubAuthForHost(host);
+          const cliCurrent = Boolean(user && cliActive);
+          // `current` (and every token use) is what waits for the activation;
+          // while the switch is off the login is still listed so the card can
+          // offer it, exactly the offer GitLab's glab account row makes.
+          const accounts = (await getGitHubAuthAccountsForHost(host))
+            .map((account) => ({ ...account, current: Boolean(active && account.id === active.accountId && !cliCurrent) }))
+            .concat(user ? [hostCliAccountView(host, user, cliCurrent)] : []);
+          if (cliCurrent) {
+            return {
+              connected: true,
+              user,
+              scope: null,
+              accounts,
+              cli: { available: true, disabled: cliDisabled, active: true, user },
+            };
+          }
+          if (!active) {
+            return {
+              connected: false,
+              accounts,
+              cli: user
+                ? { available, disabled: cliDisabled, active: false, user }
+                : { available, disabled: cliDisabled, active: false },
+            };
+          }
+          let userFor = active.user ?? null;
+          let rejected = false;
+          try {
+            userFor = await getGitHubUserSummary(createOctokit(active.accessToken, active.accountId, host));
+          } catch (error) {
+            userFor = null;
+            rejected = error?.status === 401;
+          }
+          if (!userFor) {
+            if (rejected) await markGitHubAuthAccountInvalidForHost(host, active.accountId, 'unauthorized');
+            return {
+              connected: false,
+              accounts: (await getGitHubAuthAccountsForHost(host))
+                .map((account) => ({ ...account, current: false }))
+                .concat(user ? [hostCliAccountView(host, user, false)] : []),
+              cli: user
+                ? { available, disabled: cliDisabled, active: false, user }
+                : { available, disabled: cliDisabled, active: false },
+            };
+          }
+          return {
+            connected: true,
+            user: userFor,
+            scope: active.scope,
+            accounts: (await getGitHubAuthAccountsForHost(host))
+              .map((account) => ({ ...account, current: account.id === active.accountId }))
+              .concat(user ? [hostCliAccountView(host, user, cliCurrent)] : []),
+            cli: user
+              ? { available, disabled: cliDisabled, active: cliCurrent, user }
+              : { available, disabled: cliDisabled, active: cliCurrent },
+          };
+        };
+        return res.json(await buildEnterpriseStatus(enterpriseHost));
+      }
       const { getGitHubAuth, getOctokitOrNull, getGitHubAuthAccounts, githubCliAccountId, isGhCliActive, isGhCliDisabled, setGhCliActive } = await getGitHubLibraries();
       const { getGhCliToken } = await import('./gh-cli-credential.js');
 
@@ -1362,7 +1516,7 @@ export function registerGitHubRoutes(app, options = {}) {
       let accounts = await getGitHubAuthAccounts();
       const ghCliDisabled = isGhCliDisabled();
       const ghCliActive = isGhCliActive();
-      const ghToken = getGhCliToken();
+      const ghToken = await getGhCliToken();
       const usingOwnToken = Boolean(auth?.accessToken);
       const selectedPersisted = accounts.some((account) => account.current);
       let ghCliUser = null;
@@ -1403,6 +1557,9 @@ export function registerGitHubRoutes(app, options = {}) {
       if (selectedPersisted && !usingOwnToken && !ghCliCurrent) {
         return res.json({ connected: false, accounts, ghCli: buildGhCli() });
       }
+      // The github.com account flow manages github.com accounts; no client sends
+      // a directory here, so the octokit is the github.com one, never a host
+      // pinned by resolving a directory's remote.
       const octokit = await getOctokitOrNull();
       if (!octokit) {
         return res.json({ connected: false, accounts, ghCli: buildGhCli() });
@@ -1413,7 +1570,7 @@ export function registerGitHubRoutes(app, options = {}) {
         user = await getGitHubUserSummary(octokit);
       } catch (error) {
         if (isGitHubAuthInvalid(error)) {
-          if (usingOwnToken) await invalidateAccount(auth.accountId);
+          if (usingOwnToken) await invalidateAccount(accountIdentity(auth.accountId), auth.accountId);
           return res.json({ connected: false, accounts: await getGitHubAuthAccounts(), ghCli: buildGhCli() });
         }
       }
@@ -1456,6 +1613,27 @@ export function registerGitHubRoutes(app, options = {}) {
     } catch (error) {
       console.error('Failed to update gh CLI setting:', error);
       return res.status(500).json({ error: error.message || 'Failed to update gh CLI setting' });
+    }
+  });
+
+  // The per-instance gh CLI switch for a GitHub Enterprise host, mirroring
+  // GitLab's /auth/cli. The instance comes from the request; an untrusted host
+  // is refused before any toggle, and github.com keeps its own /auth/gh-cli.
+  app.post(githubAuthRoutePaths('/auth/cli'), async (req, res) => {
+    try {
+      const { isTrustedGitHubHostOrStored } = await import('./host-trust.js');
+      const requestedInstance = String(req.query?.instance ?? '').trim().toLowerCase().replace(/\.$/, '');
+      if (!requestedInstance || requestedInstance === 'github.com' || !(await isTrustedGitHubHostOrStored(requestedInstance))) {
+        return res.status(400).json({ error: 'Unsupported GitHub instance' });
+      }
+      const { setGhCliDisabledForHost, isGhCliDisabledForHost } = await getGitHubLibraries();
+      const disabled = Boolean(req.body?.disabled);
+      await setGhCliDisabledForHost(requestedInstance, disabled);
+      return res.json({ disabled: await isGhCliDisabledForHost(requestedInstance) });
+    } catch (error) {
+      const lockResponse = sendAuthStorageError(res, error);
+      if (lockResponse) return lockResponse;
+      return res.status(400).json({ error: error?.message || 'Failed to update gh CLI setting' });
     }
   });
 
@@ -1580,6 +1758,48 @@ export function registerGitHubRoutes(app, options = {}) {
     }
   });
 
+  app.post(githubAuthRoutePaths('/auth/token'), async (req, res) => {
+    try {
+      const requestedInstance = String(req.query?.instance ?? '').trim().toLowerCase().replace(/\.$/, '');
+      const host = requestedInstance && requestedInstance !== 'github.com' ? requestedInstance : 'github.com';
+      if (host === 'github.com') {
+        // PATs are the GitHub Enterprise credential; github.com's own token
+        // entry is its device flow.
+        return res.status(400).json({ error: 'Personal access tokens are only accepted for a GitHub Enterprise instance' });
+      }
+      const token = typeof req.body?.token === 'string' ? req.body.token.trim() : '';
+      if (!token) return res.status(400).json({ error: 'token is required' });
+      const { setGitHubAuthForHost, getGitHubAuthAccountsForHost } = await getGitHubLibraries();
+      const { createOctokit } = await import('./octokit.js');
+      const user = await getGitHubUserSummary(createOctokit(token, '', host));
+      const credential = await setGitHubAuthForHost(host, { accessToken: token, user, source: 'pat' });
+      // A connected account is a complete identity waiting to be written: who it
+      // is, what it authenticates with, and how it signs are all known here.
+      if (credential?.credentialId) {
+        const account = { provider: 'github', instance: host, accountId: credential.credentialId };
+        const superseded = (await getGitHubAuthAccountsForHost(host)).filter((candidate) =>
+          candidate.providerUserId === credential.providerUserId && candidate.id !== credential.credentialId);
+        options.onAccountConnected?.({
+          account,
+          user,
+          credential: { credentialRevision: credential.credentialRevision, providerUserId: credential.providerUserId },
+          renews: superseded.map((candidate) => ({ ...account, accountId: candidate.id })),
+        });
+      }
+      return res.json({ connected: true, user });
+    } catch (error) {
+      const lockResponse = sendAuthStorageError(res, error);
+      if (lockResponse) return lockResponse;
+      // The reason a token was refused is the person's to act on, so it is
+      // named by a code the interface can translate rather than folded into a
+      // generic failure.
+      if (error?.status === 401) {
+        return res.status(401).json({ error: gitHubRefusalMessage(error) || 'GitHub token is invalid', code: 'INVALID_TOKEN' });
+      }
+      return res.status(500).json({ error: error?.message || 'Failed to verify GitHub token' });
+    }
+  });
+
   app.post(githubAuthRoutePaths('/auth/activate'), async (req, res) => {
     try {
       const { activateGitHubAuth, getGitHubAuth, getOctokitOrNull, getGitHubAuthAccounts, GH_CLI_ACCOUNT_ID, githubCliAccountId, isGhCliDisabled, setGhCliActive } = await getGitHubLibraries();
@@ -1587,9 +1807,43 @@ export function registerGitHubRoutes(app, options = {}) {
       if (!accountId) {
         return res.status(400).json({ error: 'accountId is required' });
       }
+      const enterpriseCliMatch = /^([^#]+)#cli:(\d+)$/.exec(accountId);
+      const enterpriseCliHost = enterpriseCliMatch && enterpriseCliMatch[1] !== 'github.com' ? enterpriseCliMatch[1].toLowerCase() : '';
+      if (enterpriseCliHost) {
+        const { isTrustedGitHubHostOrStored } = await import('./host-trust.js');
+        if (!(await isTrustedGitHubHostOrStored(enterpriseCliHost))) {
+          return res.status(400).json({ error: 'Unsupported GitHub instance' });
+        }
+        const { setGhCliActiveForHost, isGhCliDisabledForHost, getGitHubAuthAccountsForHost } = await getGitHubLibraries();
+        const { createOctokit } = await import('./octokit.js');
+        const { getGhCliToken } = await import('./gh-cli-credential.js');
+        const token = !(await isGhCliDisabledForHost(enterpriseCliHost)) ? await getGhCliToken(enterpriseCliHost) : null;
+        if (!token) {
+          return res.status(404).json({ error: 'GitHub CLI account not found' });
+        }
+        const user = await getGitHubUserSummary(createOctokit(token, '', enterpriseCliHost));
+        // The listing for a not-yet-active host carries the placeholder id `#cli:0`
+        // because hosts.yml never proves the real user id without running gh; the
+        // Use offer sends that same id. It never collides with a real account
+        // (GitHub never assigns 0) and can only mean "this host's gh login", so
+        // both the placeholder and the known real id activate the host's gh.
+        if (accountId !== `${enterpriseCliHost}#cli:${user.id}` && accountId !== `${enterpriseCliHost}#cli:0`) {
+          return res.status(404).json({ error: 'GitHub CLI account not found' });
+        }
+        setGhCliActiveForHost(enterpriseCliHost, true);
+        const accounts = (await getGitHubAuthAccountsForHost(enterpriseCliHost))
+          .map((account) => ({ ...account, current: false }))
+          .concat(hostCliAccountView(enterpriseCliHost, user, true));
+        return res.json({
+          connected: true,
+          user,
+          accounts,
+          cli: { available: true, disabled: false, active: true, user },
+        });
+      }
       if (accountId === GH_CLI_ACCOUNT_ID || accountId.startsWith('github.com#cli:')) {
         const { getGhCliToken } = await import('./gh-cli-credential.js');
-        const ghToken = !isGhCliDisabled() ? getGhCliToken() : null;
+        const ghToken = !isGhCliDisabled() ? await getGhCliToken() : null;
         if (!ghToken) {
           return res.status(404).json({ error: 'GitHub CLI account not found' });
         }
@@ -1630,7 +1884,7 @@ export function registerGitHubRoutes(app, options = {}) {
 
       const { getGhCliToken } = await import('./gh-cli-credential.js');
       const ghCliDisabled = isGhCliDisabled();
-      const ghToken = !ghCliDisabled ? getGhCliToken() : null;
+      const ghToken = !ghCliDisabled ? await getGhCliToken() : null;
       let ghCliUser = null;
       if (ghToken) {
         try {
@@ -1642,6 +1896,9 @@ export function registerGitHubRoutes(app, options = {}) {
         }
       }
 
+      // The github.com account flow manages github.com accounts; no client sends
+      // a directory here, so the octokit is the github.com one, never a host
+      // pinned by resolving a directory's remote.
       const octokit = await getOctokitOrNull();
       if (!octokit) {
         return res.json({ connected: false, accounts, ghCli: { available: ghToken !== null, disabled: ghCliDisabled, active: false, ...(ghCliUser ? { user: ghCliUser } : {}) } });
@@ -1652,7 +1909,7 @@ export function registerGitHubRoutes(app, options = {}) {
         user = await getGitHubUserSummary(octokit);
       } catch (error) {
         if (isGitHubAuthInvalid(error)) {
-          await invalidateAccount(auth.accountId);
+          await invalidateAccount(accountIdentity(auth.accountId), auth.accountId);
           return res.json({ connected: false, accounts: await getGitHubAuthAccounts() });
         }
       }
@@ -1680,18 +1937,46 @@ export function registerGitHubRoutes(app, options = {}) {
   app.delete(githubAuthRoutePaths('/auth'), async (req, res) => {
     try {
       const {
-        getGitHubAuthAccounts, githubCliAccountId, isGhCliDisabled,
-        setGhCliActive, removeGitHubAuthAccount,
+        getGitHubAuthAccounts, githubCliAccountId, isGhCliDisabled, getGitHubAuthByAccountId,
+        setGhCliActive, removeGitHubAuthAccount, removeGitHubAuthAccountForHost,
       } = await getGitHubLibraries();
       const requested = req.query?.accountId ?? req.body?.accountId;
       const requestedAccountId = Object.prototype.toString.call(requested) === '[object String]' ? requested : '';
       if (!requestedAccountId || requestedAccountId.trim() !== requestedAccountId) {
         return res.status(400).json({ error: 'accountId is required' });
       }
+      const enterpriseCliMatch = /^([^#]+)#cli:(\d+)$/.exec(requestedAccountId);
+      if (enterpriseCliMatch && enterpriseCliMatch[1].toLowerCase() !== 'github.com') {
+        const { isTrustedGitHubHostOrStored } = await import('./host-trust.js');
+        const { getGitHubAuthAccountsForHost, setGhCliActiveForHost, isGhCliDisabledForHost } = await getGitHubLibraries();
+        const enteredHost = enterpriseCliMatch[1].toLowerCase();
+        if (!(await isTrustedGitHubHostOrStored(enteredHost))) {
+          return res.status(400).json({ error: 'Unsupported GitHub instance' });
+        }
+        const { getGhCliToken } = await import('./gh-cli-credential.js');
+        const token = await isGhCliDisabledForHost(enteredHost) ? null : await getGhCliToken(enteredHost);
+        if (!token) return res.json({ success: true, removed: false });
+        const { createOctokit } = await import('./octokit.js');
+        let user;
+        try {
+          user = await getGitHubUserSummary(createOctokit(token, '', enteredHost));
+        } catch (error) {
+          // A rejected token means "that account is really gone": answer
+          // removed:false, not a 500. A network or server failure rethrows.
+          if (error?.status === 401) return res.json({ success: true, removed: false });
+          throw error;
+        }
+        if (`${enteredHost}#cli:${user.id}` !== requestedAccountId) {
+          return res.json({ success: true, removed: false });
+        }
+        await options.onAccountRemoved?.({ provider: 'github', instance: enteredHost, accountId: requestedAccountId });
+        await setGhCliActiveForHost(enteredHost, false);
+        return res.json({ success: true, removed: true });
+      }
       const accounts = await getGitHubAuthAccounts();
       if (requestedAccountId.startsWith('github.com#cli:')) {
         const { getGhCliToken } = await import('./gh-cli-credential.js');
-        const token = isGhCliDisabled() ? null : getGhCliToken();
+        const token = isGhCliDisabled() ? null : await getGhCliToken();
         if (!token) return res.json({ success: true, removed: false });
         const { createOctokit } = await import('./octokit.js');
         const user = await getGitHubUserSummary(createOctokit(token));
@@ -1702,7 +1987,15 @@ export function registerGitHubRoutes(app, options = {}) {
         setGhCliActive(false);
         return res.json({ success: true, removed: true });
       }
-      if (!accounts.some((account) => account.id === requestedAccountId)) return res.json({ success: true, removed: false });
+      if (!accounts.some((account) => account.id === requestedAccountId)) {
+        // A per-host stored credential (an enterprise host's PAT) is removed by
+        // its exact credential id, whichever instance it belongs to.
+        const persisted = await getGitHubAuthByAccountId(requestedAccountId);
+        if (!persisted) return res.json({ success: true, removed: false });
+        await options.onAccountRemoved?.({ provider: 'github', instance: persisted.host, accountId: requestedAccountId });
+        const removed = await removeGitHubAuthAccountForHost(persisted.host, requestedAccountId);
+        return res.json({ success: true, removed });
+      }
       await options.onAccountRemoved?.(accountIdentity(requestedAccountId));
       const removed = await removeGitHubAuthAccount(requestedAccountId);
       return res.json({ success: true, removed });
@@ -1741,13 +2034,25 @@ export function registerGitHubRoutes(app, options = {}) {
       if (!directory || !branch) {
         return res.status(400).json({ error: 'directory and branch are required' });
       }
+      const { isTrustedGitHubHostOrStored } = await import('./host-trust.js');
 
       // Resolve exact accounts before consulting caches so removed or invalid
       // credentials can never receive a previously cached response.
       const accountContext = await getOctokitForRequest(req, trustedContext?.accountId);
       const octokit = accountContext?.octokit;
       if (!octokit) {
-        return res.json({ connected: false });
+        // No Octokit while the remote IS a GitHub (or github.com) host means the
+        // host is trusted but has no usable credential: no stored token and gh
+        // not usable. That is not a non-GitHub remote — answer disconnected so
+        // the UI can offer a connect action instead of silently reading "no PR".
+        // A remote on a host the server never authenticated with (a gitlab.com
+        // remote, for example) keeps the non-GitHub-remote answer —
+        // `connected: true, repo: null`, matching the unresolvable-repository
+        // response below — and never mints a token for that host.
+        if (accountContext?.host && (await isTrustedGitHubHostOrStored(accountContext.host))) {
+          return res.json({ connected: false, reason: 'no-credential', repo: null, branch, pr: null, checks: null, canMerge: false, defaultBranch: null, resolvedRemoteName: null });
+        }
+        return res.json({ connected: true, repo: null, branch, pr: null, checks: null, canMerge: false, defaultBranch: null, resolvedRemoteName: null });
       }
 
       cacheKey = trustedContext
@@ -1758,11 +2063,21 @@ export function registerGitHubRoutes(app, options = {}) {
         return res.json(cached.data);
       }
 
+      // The host this request works on, resolved first so the gate short-circuits
+      // only that host: an enterprise instance's cooldown must not pause
+      // github.com polling. The no-account path of getOctokitForRequest above
+      // already resolved the host; a request with an exact account carries no
+      // host, so that path reads the remote here.
+      let hostRepo = accountContext.host ? { host: accountContext.host, owner: '', repo: '' } : null;
+      if (!hostRepo) {
+        const { resolveGitHubRepoFromDirectory } = await getGitHubLibraries();
+        ({ repo: hostRepo } = await resolveGitHubRepoFromDirectory(directory, remote).catch(() => ({ repo: null })));
+      }
       // If GitHub recently rate-limited us, don't pile on more calls that will
       // also fail. Serve whatever we last cached (even if stale); otherwise
       // report a transient failure so the client keeps its last-known status.
       const { isGitHubRateLimited } = await import('./rate-limit.js');
-      if (isGitHubRateLimited()) {
+      if (isGitHubRateLimited(hostRepo?.host)) {
         if (cached) {
           return res.json(cached.data);
         }
@@ -1812,6 +2127,7 @@ export function registerGitHubRoutes(app, options = {}) {
           remoteName: remote,
           sourceRemoteName,
           force,
+          requestHost: hostRepo?.host,
         }),
         PR_STATUS_RESOLVE_TIMEOUT_MS,
         'resolveGitHubPrStatus',
@@ -1882,18 +2198,30 @@ export function registerGitHubRoutes(app, options = {}) {
       if (!isHistorical) {
         try {
           // gh-CLI tokens have no persisted user record; resolve the login from
-          // the API once (memoized) so permissions still resolve for them.
-          let username = accountContext?.user?.login;
+          // the API once per host and credential identity (memoized) so
+          // permissions still resolve for them. The stored OAuth login is a
+          // github.com identity, so it is only trusted for github.com requests;
+          // any other host (and a github.com request without a persisted user)
+          // resolves its own login through its own Octokit, and a failed
+          // resolution resets only that entry. The credential identity is part
+          // of the key, so a host whose active credential switched to another
+          // user (a new per-instance PAT, a different gh login) resolves its
+          // own login rather than replaying the previous account's.
+          const loginHost = String(hostRepo?.host ?? '').trim().toLowerCase() || GITHUB_OAUTH_INSTANCE;
+          const loginKey = `${loginHost}::${accountContext?.cacheIdentity ?? ''}`;
+          let username = loginHost === GITHUB_OAUTH_INSTANCE ? accountContext?.user?.login : null;
           if (!username) {
-            if (!resolvedAuthLoginPromise) {
-              resolvedAuthLoginPromise = octokit.rest.users.getAuthenticated()
+            let loginPromise = authLoginByHost.get(loginKey);
+            if (!loginPromise) {
+              loginPromise = octokit.rest.users.getAuthenticated()
                 .then((resp) => resp?.data?.login || null)
                 .catch(() => {
-                  resolvedAuthLoginPromise = null;
+                  authLoginByHost.delete(loginKey);
                   return null;
                 });
+              authLoginByHost.set(loginKey, loginPromise);
             }
-            username = await resolvedAuthLoginPromise;
+            username = await loginPromise;
           }
           if (username) {
             const perm = await octokit.rest.repos.getCollaboratorPermissionLevel({
@@ -2187,16 +2515,19 @@ export function registerGitHubRoutes(app, options = {}) {
       if (!octokit) {
         return res.json({ connected: false });
       }
-      const { isGitHubRateLimited } = await import('./rate-limit.js');
-      if (isGitHubRateLimited()) {
-        return res.status(503).json({ error: 'GitHub rate limited' });
-      }
       const resolveGitHubRepoFromDirectory = options.resolveGitHubRepoFromDirectory
         ?? (await import('./index.js')).resolveGitHubRepoFromDirectory;
       const resolveRepoNetwork = options.resolveRepoNetwork
         ?? (await import('./repo/fork-detection.js')).resolveRepoNetwork;
       const remoteName = trustedContext.primaryRemote;
+      // The gate short-circuits only this host — github.com's cooldown must not
+      // stall a differently-hosted instance, and an unresolvable checkout keeps
+      // the github.com default.
       const { repo } = await resolveGitHubRepoFromDirectory(directory, remoteName);
+      const { isGitHubRateLimited } = await import('./rate-limit.js');
+      if (isGitHubRateLimited(repo?.host)) {
+        return res.status(503).json({ error: 'GitHub rate limited' });
+      }
       if (!repo) {
         return res.json({ connected: true, repo: null, items: [], cursor: null, hasMore: false, total: 0 });
       }
@@ -2330,29 +2661,64 @@ export function registerGitHubRoutes(app, options = {}) {
       if (!trustedContext) {
         return res.status(501).json({ error: 'Bound source control read is unavailable' });
       }
-      const octokit = (await getOctokitForRead(req, trustedContext))?.octokit;
+      // The client names the item's host when it is not github.com; a named host
+      // resolves with that host's Octokit, and its repo must still be in the
+      // bound repository's network like every other named repo. A missing host
+      // keeps the checkout's own host resolution.
+      const requestedHost = readQueryString(req, 'host').toLowerCase();
+      const { getOctokitOrNull } = await getGitHubLibraries();
+      const octokit = requestedHost
+        ? await getOctokitOrNull(requestedHost)
+        : (await getOctokitForRead(req, trustedContext))?.octokit;
       if (!octokit) {
         return res.json({ connected: false });
       }
+      const resolveGitHubRepoFromDirectory = options.resolveGitHubRepoFromDirectory
+        ?? (await import('./index.js')).resolveGitHubRepoFromDirectory;
+      const { repo: checkoutRepo } = await resolveGitHubRepoFromDirectory(directory, trustedContext.primaryRemote);
+      // The gate short-circuits only the requested host — its cooldown must not
+      // stall a differently-hosted instance, and a missing host keeps the
+      // github.com default.
       const { isGitHubRateLimited } = await import('./rate-limit.js');
-      if (isGitHubRateLimited()) {
+      if (isGitHubRateLimited(requestedHost || checkoutRepo?.host)) {
         return res.status(503).json({ error: 'GitHub rate limited' });
       }
-      const repo = await resolveRepoForRequest(
-        octokit,
-        directory,
-        { owner, repo: repoName },
-        trustedContext.primaryRemote,
-        {
-          resolveGitHubRepoFromDirectory: options.resolveGitHubRepoFromDirectory,
-          resolveRepoNetwork: options.resolveRepoNetwork,
-          strictNetworkErrors: true,
-          strictMetadataErrors: true,
-          requireResolvedRepo: true,
-        },
-      );
-      if (!repo) {
-        return res.status(400).json({ error: 'Repository is not part of this project' });
+      let repo;
+      if (requestedHost) {
+        if (!checkoutRepo) {
+          return res.status(400).json({ error: 'Repository is not part of this project' });
+        }
+        const checkoutOctokit = await getOctokitOrNull(checkoutRepo.host || 'github.com');
+        if (!checkoutOctokit) {
+          return res.json({ connected: false });
+        }
+        const resolveRepoNetwork = options.resolveRepoNetwork
+          ?? (await import('./repo/fork-detection.js')).resolveRepoNetwork;
+        const repoNetwork = await resolveRepoNetwork(checkoutOctokit, directory, trustedContext.primaryRemote, { strictErrors: true });
+        const repos = requireGitHubRepoNetwork(repoNetwork, checkoutRepo) ?? [{ ...checkoutRepo, source: 'origin' }];
+        const inNetwork = repos.some((entry) => entry.owner.toLowerCase() === owner.toLowerCase()
+          && entry.repo.toLowerCase() === repoName.toLowerCase());
+        if (!inNetwork) {
+          return res.status(400).json({ error: 'Repository is not part of this project' });
+        }
+        repo = { owner, repo: repoName };
+      } else {
+        repo = await resolveRepoForRequest(
+          octokit,
+          directory,
+          { owner, repo: repoName },
+          trustedContext.primaryRemote,
+          {
+            resolveGitHubRepoFromDirectory: options.resolveGitHubRepoFromDirectory,
+            resolveRepoNetwork: options.resolveRepoNetwork,
+            strictNetworkErrors: true,
+            strictMetadataErrors: true,
+            requireResolvedRepo: true,
+          },
+        );
+        if (!repo) {
+          return res.status(400).json({ error: 'Repository is not part of this project' });
+        }
       }
       const detail = await fetchReferenceDetail({ octokit, owner: repo.owner, repo: repo.repo, number });
       return res.json({ connected: true, detail });
@@ -2432,9 +2798,12 @@ export function registerGitHubRoutes(app, options = {}) {
   });
 
   // What colours the PRs a picker page shows: checks and mergeability, from
-  // the same summaries the sidebar reads. Every PR must be in the bound
-  // repository's network. A PR GitHub could not resolve is left out, which
-  // the picker reads as "unknown".
+  // the same summaries the sidebar reads. Refs group by host — a missing host
+  // means github.com — and each host's refs run on its own Octokit; an
+  // untrusted or failed host drops only its own refs. Every PR on the
+  // checkout's own host (github.com when the checkout names none) must be in
+  // the bound repository's network. A PR GitHub could not resolve is left out,
+  // which the picker reads as "unknown".
   app.get(canonicalGitHubRoutePath('/references/status'), async (req, res) => {
     const { readPullStatusRefs } = await import('./reference-search.js');
     const directory = readQueryString(req, 'directory');
@@ -2447,32 +2816,64 @@ export function registerGitHubRoutes(app, options = {}) {
       if (!trustedContext) {
         return res.status(501).json({ error: 'Bound source control read is unavailable' });
       }
-      const octokit = (await getOctokitForRead(req, trustedContext))?.octokit;
-      if (!octokit) {
-        return res.json({ connected: false });
-      }
       const { isGitHubRateLimited } = await import('./rate-limit.js');
-      if (isGitHubRateLimited()) {
-        return res.status(503).json({ error: 'GitHub rate limited' });
-      }
       const resolveGitHubRepoFromDirectory = options.resolveGitHubRepoFromDirectory
         ?? (await import('./index.js')).resolveGitHubRepoFromDirectory;
       const resolveRepoNetwork = options.resolveRepoNetwork
         ?? (await import('./repo/fork-detection.js')).resolveRepoNetwork;
+      const { getOctokitOrNull } = await getGitHubLibraries();
+      const refsByHost = new Map();
+      for (const ref of refs) {
+        const host = ref.host ? String(ref.host).toLowerCase() : 'github.com';
+        if (!refsByHost.has(host)) refsByHost.set(host, []);
+        refsByHost.get(host).push(ref);
+      }
       const remoteName = trustedContext.primaryRemote;
+      // The gate short-circuits only the checkout's host — its cooldown must not
+      // pause a differently-hosted instance, and an unresolvable checkout keeps
+      // the github.com default.
       const { repo } = await resolveGitHubRepoFromDirectory(directory, remoteName);
+      if (isGitHubRateLimited(repo?.host)) {
+        return res.status(503).json({ error: 'GitHub rate limited' });
+      }
       if (!repo) {
         return res.status(400).json({ error: 'Repository is not part of this project' });
       }
-      const repoNetwork = await resolveRepoNetwork(octokit, directory, remoteName, { strictErrors: true });
+      const repoHostKey = String(repo.host ?? '').trim().toLowerCase() || 'github.com';
+      const checkoutOctokit = await getOctokitOrNull(repoHostKey);
+      if (!checkoutOctokit) {
+        return res.json({ connected: false });
+      }
+      const repoNetwork = await resolveRepoNetwork(checkoutOctokit, directory, remoteName, { strictErrors: true });
       const repos = requireGitHubRepoNetwork(repoNetwork, repo) ?? [{ ...repo, source: 'origin' }];
       const inNetwork = (ref) => repos.some((entry) => entry.owner.toLowerCase() === ref.owner.toLowerCase()
         && entry.repo.toLowerCase() === ref.repo.toLowerCase());
-      if (!refs.every(inNetwork)) {
+      if (!(refsByHost.get(repoHostKey) ?? []).every(inNetwork)) {
         return res.status(400).json({ error: 'Repository is not part of this project' });
       }
       const { fetchPrSummaries } = await import('./pr-summaries.js');
-      const { summaries } = await fetchPrSummaries({ octokit, refs });
+      // An untrusted, cooldown, or failed host drops just its own refs; the
+      // others answer. The checkout-host gate above already short-circuits the
+      // whole route, so this per-group gate is each other host's own: its
+      // cooldown skips only its own group, and a failed enterprise host drops
+      // just its own refs.
+      const summaries = [];
+      for (const [host, hostRefs] of refsByHost) {
+        if (isGitHubRateLimited(host)) continue;
+        const octokit = await getOctokitOrNull(host);
+        if (!octokit) continue;
+        try {
+          const { summaries: hostSummaries } = await fetchPrSummaries({ octokit, refs: hostRefs });
+          summaries.push(...hostSummaries);
+        } catch (error) {
+          // A failed enterprise host drops just its own refs; the others answer.
+          // The github.com group is github.com's own OAuth path and reaches the
+          // outer handler exactly as this route did before per-host groups: a 401
+          // invalidates and answers `connected: false`, anything else keeps its
+          // previous 503/500 behavior instead of an empty page.
+          if (host === 'github.com') throw error;
+        }
+      }
       const statuses = summaries.map((summary) => ({
         owner: summary.owner,
         repo: summary.repo,
@@ -3507,13 +3908,36 @@ export function registerGitHubRoutes(app, options = {}) {
     /**
      * The account GitHub reads use when none is named: the gh login while the
      * user has switched to it, else OpenChamber's active account. Null when
-     * neither is there.
+     * neither is there. An optional host resolves that host's current account
+     * instead: the host's gh login while that instance is active, else the
+     * host's active stored credential; null when neither.
      */
-    readCurrentAccountId: async () => {
+    readCurrentAccountId: async (host) => {
+      const hostName = String(host ?? '').trim().toLowerCase().replace(/\.$/, '');
+      if (hostName && hostName !== 'github.com') {
+        const {
+          getGitHubAuthForHost, isGhCliActiveForHost, isGhCliDisabledForHost, createOctokit,
+        } = await getGitHubLibraries();
+        if (await isGhCliActiveForHost(hostName) && !(await isGhCliDisabledForHost(hostName))) {
+          const { getGhCliToken } = await import('./gh-cli-credential.js');
+          const token = await getGhCliToken(hostName);
+          if (token) {
+            // Only a rejected token means "no account"; a network or server
+            // failure must not read as one, or another host's account answers.
+            try {
+              return `${hostName}#cli:${(await createOctokit(token, '', hostName).rest.users.getAuthenticated()).data.id}`;
+            } catch (error) {
+              if (error?.status === 401) return null;
+              throw error;
+            }
+          }
+        }
+        return (await getGitHubAuthForHost(hostName))?.accountId ?? null;
+      }
       const { getGitHubAuth, githubCliAccountId, isGhCliActive, isGhCliDisabled, createOctokit } = await getGitHubLibraries();
       if (isGhCliActive() && !isGhCliDisabled()) {
         const { getGhCliToken } = await import('./gh-cli-credential.js');
-        const token = getGhCliToken();
+        const token = await getGhCliToken();
         if (token) {
           // Only a rejected token means "no account"; a network or server
           // failure must not read as one, or another host's account answers.
@@ -3591,7 +4015,7 @@ export function registerGitHubRoutes(app, options = {}) {
         throw canonicalMutationError('Change request head changed', 'SOURCE_CONTROL_CHANGE_REQUEST_STALE', 409);
       }
       const parsed = new URL(endpoint);
-      if (parsed.protocol !== 'https:' || parsed.hostname !== 'github.com'
+      if (parsed.protocol !== 'https:'
         || parsed.pathname.replace(/^\//, '').replace(/\.git$/, '') !== `${headOwner}/${headName}`) {
         throw invalidProviderPayload('GitHub returned an invalid head repository endpoint');
       }

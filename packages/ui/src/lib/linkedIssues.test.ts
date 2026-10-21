@@ -1,6 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import type { Session } from '@/lib/opencode/model';
-import { buildLinkedGuestIssue, buildLinkedIssue, buildLinkedIssueId, buildLinkedLinearIssue, getDistinctLinkedIssues, getGitLabThreadRef, getLinkedGitHubPullRequests, getLinkedGitLabThreads, getLinkedIssues, getLinkedSidebarChanges, getLinkedSidebarIssues, type LinkedIssue } from './linkedIssues';
+import type { SessionMetadataRecord } from './sessionReviewMetadata';
+import { buildLinkedGuestIssue, buildLinkedIssue, buildLinkedIssueId, buildLinkedLinearIssue, getDistinctLinkedIssues, getGitLabThreadRef, getLinkedGitHubPullRequests, getLinkedGitLabThreads, getLinkedIssues, getLinkedSidebarChanges, getLinkedSidebarIssues, withLinkedIssue, type LinkedIssue } from './linkedIssues';
+import { githubThread } from './trackedItems/fromLinks';
+import { trackedItemKey } from './trackedItems/model';
 
 type LinkedRepositoryIssue = Extract<LinkedIssue, { kind: 'issue' | 'pull' }>;
 
@@ -68,8 +71,17 @@ describe('buildLinkedIssue', () => {
     const github = buildLinkedIssue({ url: 'https://github.com/team/repo/issues/12', number: 12, title: 'A', kind: 'issue', linkedAt: 1 });
     const gitlab = buildLinkedIssue({ url: 'https://gitlab.com/team/repo/-/issues/12', number: 12, title: 'B', kind: 'issue', linkedAt: 2 });
     const selfManaged = buildLinkedIssue({ url: 'https://git.example.com/team/repo/-/issues/12', number: 12, title: 'C', kind: 'issue', linkedAt: 3 });
-    const metadata = { openchamber: { linked_issues: [github, gitlab, selfManaged] } };
-    expect(metadata.openchamber.linked_issues.map((entry) => entry.title)).toEqual(['A', 'B', 'C']);
+    const metadata = [github, gitlab, selfManaged].reduce<SessionMetadataRecord>((current, issue) => withLinkedIssue(current, issue, true), {});
+    // SAFETY: withLinkedIssue always writes openchamber.linked_issues as a LinkedIssue array.
+    expect((metadata.openchamber as { linked_issues: LinkedIssue[] }).linked_issues.map((entry) => entry.title)).toEqual(['A', 'B', 'C']);
+  });
+
+  test('re-linking a GitLab thread stored before ids carried the host replaces it', () => {
+    const legacy = { ...buildLinkedIssue({ url: 'https://gitlab.com/team/repo/-/issues/12', number: 12, title: 'Old', kind: 'issue', linkedAt: 1 }), id: 'team/repo#12' };
+    const fresh = buildLinkedIssue({ url: 'https://gitlab.com/team/repo/-/issues/12', number: 12, title: 'New', kind: 'issue', linkedAt: 2 });
+    const metadata = withLinkedIssue({ openchamber: { linked_issues: [legacy] } }, fresh, true);
+    // SAFETY: withLinkedIssue always writes openchamber.linked_issues as a LinkedIssue array.
+    expect((metadata.openchamber as { linked_issues: LinkedIssue[] }).linked_issues.map((entry) => entry.title)).toEqual(['New']);
   });
 
   test('keeps GitLab merge requests distinct from issues with the same number', () => {
@@ -241,6 +253,60 @@ describe('getLinkedIssues', () => {
   });
 });
 
+// The `openchamber` slot is a typed fixture, not external input: these tests
+// just built it with withLinkedIssue, so `linked_issues` follows the LinkedIssue
+// schema the parser re-checks on read.
+const storedIssues = (metadata: SessionMetadataRecord): LinkedIssue[] => {
+  // SAFETY: metadata is built by these tests with withLinkedIssue, which always
+  // writes openchamber.linked_issues as a LinkedIssue array.
+  const openchamber = metadata.openchamber as { linked_issues: LinkedIssue[] };
+  return openchamber.linked_issues;
+};
+
+describe('withLinkedIssue', () => {
+  test('adds a link and preserves unrelated metadata', () => {
+    const next = withLinkedIssue(
+      { openchamber: { kind: 'review' }, other: 1 },
+      issue(),
+      true,
+    );
+    expect(next.other).toBe(1);
+    // SAFETY: withLinkedIssue preserves openchamber beside the linked_issues it writes.
+    expect((next.openchamber as { kind: 'review' }).kind).toBe('review');
+    expect(storedIssues(next)).toEqual([issue()]);
+  });
+
+  test('re-linking replaces the entry rather than duplicating it', () => {
+    // Linking again is how a drifted title gets refreshed.
+    const first = withLinkedIssue({}, issue({ title: 'Old' }), true);
+    const second = withLinkedIssue(first, issue({ title: 'New' }), true);
+    const stored = storedIssues(second);
+    expect(stored).toHaveLength(1);
+    expect(stored[0].title).toBe('New');
+  });
+
+  test('unlinking removes only the matching id', () => {
+    const other = issue({ id: 'owner/repo#99', number: 99 });
+    const both = withLinkedIssue(withLinkedIssue({}, issue(), true), other, true);
+    const next = withLinkedIssue(both, issue(), false);
+    expect(storedIssues(next)).toEqual([other]);
+  });
+
+  test('unlinking something absent is a no-op, not an error', () => {
+    const next = withLinkedIssue({}, issue(), false);
+    expect(storedIssues(next)).toEqual([]);
+  });
+
+  test('does not carry malformed stored entries forward', () => {
+    const next = withLinkedIssue(
+      { openchamber: { linked_issues: [{ id: 'broken' }] } },
+      issue(),
+      true,
+    );
+    expect(storedIssues(next)).toEqual([issue()]);
+  });
+});
+
 describe('getLinkedGitHubPullRequests', () => {
   test('reads the repository of each linked GitHub PR from its id', () => {
     const session = sessionWith([
@@ -309,6 +375,38 @@ describe('links to github.com from extensions and agents', () => {
     ]);
     expect(getLinkedSidebarIssues(session)).toEqual([
       { source: 'github', key: 'acme/app#9', owner: 'acme', repo: 'app', number: 9, url: 'https://github.com/acme/app/issues/9', title: 'Bug' },
+    ]);
+  });
+});
+
+describe('links to a GitHub-shaped address on an enterprise host', () => {
+  test('a github.com link keeps the thread shape it always had, an enterprise-host link carries its host', () => {
+    const session = sessionWith([
+      { id: 'link:https://github.com/acme/app/pull/7', kind: 'external', thread: 'change', identifier: 'github.com', title: 'Public', url: 'https://github.com/acme/app/pull/7', linkedAt: 1 },
+      { id: 'link:https://ghe.example.com/acme/app/pull/7', kind: 'external', thread: 'change', identifier: 'ghe.example.com', title: 'Internal', url: 'https://ghe.example.com/acme/app/pull/7', linkedAt: 2 },
+    ]);
+    expect(getLinkedGitHubPullRequests(session)).toEqual([
+      { owner: 'acme', repo: 'app', number: 7, url: 'https://github.com/acme/app/pull/7', title: 'Public' },
+      { owner: 'acme', repo: 'app', number: 7, url: 'https://ghe.example.com/acme/app/pull/7', title: 'Internal', instance: 'ghe.example.com' },
+    ]);
+    // The tracked items the two hosts produce are host-scoped: the same
+    // owner/repo/number on github.com and an enterprise host stay apart.
+    expect(getLinkedGitHubPullRequests(session).map((link) => trackedItemKey(githubThread('pull', link, link.instance)))).toEqual([
+      'github|github.com|pull|acme/app#7',
+      'github|ghe.example.com|pull|acme/app#7',
+    ]);
+  });
+
+  test('an enterprise-host link and its stored entry are the same thread, and the sidebar issue carries the host', () => {
+    const stored = issue({ id: 'ghe.example.com:acme/app#7', number: 7, kind: 'pull', url: 'https://ghe.example.com/acme/app/pull/7' });
+    const link = { id: 'link:https://ghe.example.com/acme/app/pull/7', kind: 'external', thread: 'change', identifier: 'ghe.example.com', title: 'Same PR', url: 'https://ghe.example.com/acme/app/pull/7', linkedAt: 2 };
+    expect(getLinkedGitHubPullRequests(sessionWith([stored, link]))).toEqual([
+      { owner: 'acme', repo: 'app', number: 7, url: 'https://ghe.example.com/acme/app/pull/7', title: 'Rail badge count', instance: 'ghe.example.com' },
+    ]);
+    const gheIssue = issue({ id: 'ghe.example.com:acme/app#9', number: 9, kind: 'issue', url: 'https://ghe.example.com/acme/app/issues/9' });
+    const sidebar = getLinkedSidebarIssues(sessionWith([gheIssue]));
+    expect(sidebar).toEqual([
+      { source: 'github', key: 'ghe.example.com:acme/app#9', owner: 'acme', repo: 'app', number: 9, url: 'https://ghe.example.com/acme/app/issues/9', title: 'Rail badge count', instance: 'ghe.example.com' },
     ]);
   });
 });

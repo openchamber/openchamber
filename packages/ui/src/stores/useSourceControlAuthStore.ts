@@ -69,6 +69,11 @@ const bumpVersion = (key: string): number => {
   return next;
 };
 let instancesInFlight: Promise<SourceControlIdentity[]> | null = null;
+let instancesInFlightForced = false;
+// The identities list gets the status reads' version rule: a forced refresh
+// (it follows a credential mutation) supersedes any read already on the wire,
+// and a response whose read started under an older version is discarded.
+let instancesVersion = 0;
 let generation = 0;
 
 const createEntry = (): SourceControlAuthEntry => ({ status: null, isLoading: false, hasChecked: false });
@@ -80,26 +85,36 @@ export const useSourceControlAuthStore = create<SourceControlAuthStore>((set, ge
   entries: {},
   refreshInstances: async (sourceControl, options) => {
     const current = get();
-    if (instancesInFlight) return instancesInFlight;
+    const force = Boolean(options?.force);
+    // A forced refresh follows a credential mutation, so an ordinary read that
+    // started before it cannot answer for it; forced reads issued together
+    // share one.
+    if (instancesInFlight && (!force || instancesInFlightForced)) return instancesInFlight;
     if (current.identitiesLoaded && !current.identitiesError && !options?.force) return current.identities;
     const requestGeneration = generation;
+    const requestVersion = instancesVersion + 1;
+    instancesVersion = requestVersion;
     set({ identitiesError: null });
     const request = (async () => {
       try {
         const identities = await sourceControl.authInstances();
-        if (requestGeneration !== generation) return [];
+        if (requestGeneration !== generation || requestVersion !== instancesVersion) return [];
         set({ identities, identitiesLoaded: true, identitiesError: null });
         return identities;
       } catch (error) {
-        if (requestGeneration !== generation) return [];
+        if (requestGeneration !== generation || requestVersion !== instancesVersion) return [];
         const message = error instanceof Error ? error.message : String(error);
         set({ identitiesError: message });
         return get().identities;
       } finally {
-        if (requestGeneration === generation) instancesInFlight = null;
+        if (requestGeneration === generation && requestVersion === instancesVersion) {
+          instancesInFlight = null;
+          instancesInFlightForced = false;
+        }
       }
     })();
     instancesInFlight = request;
+    instancesInFlightForced = force;
     return request;
   },
   refreshAll: async (sourceControl, options) => {
@@ -212,6 +227,7 @@ export const useSourceControlAuthStore = create<SourceControlAuthStore>((set, ge
     versions.clear();
     inFlightForced.clear();
     instancesInFlight = null;
+    instancesInFlightForced = false;
     set({ identities: [], identitiesLoaded: false, identitiesError: null, entries: {} });
   },
 }));

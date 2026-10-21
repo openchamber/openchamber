@@ -1,4 +1,5 @@
 import { hostOf } from './binding-service.js';
+import { isTrustedGitHubHostOrStored } from '../github/host-trust.js';
 import { forkRemoteName } from '../git/contributor-remote.js';
 
 /**
@@ -24,9 +25,9 @@ export const createChangeRequestWorktreeSource = ({
   readCurrentAccountId,
   readChangeRequestHead,
 }) => {
-  const identityForHost = (host, gitlabInstances) => {
+  const identityForHost = async (host, gitlabInstances) => {
     if (!host) return null;
-    if (host === 'github.com') return { provider: 'github', instance: 'github.com' };
+    if (await isTrustedGitHubHostOrStored(host)) return { provider: 'github', instance: host };
     const instance = gitlabInstances.find((candidate) => hostOf(candidate) === host);
     return instance ? { provider: 'gitlab', instance } : null;
   };
@@ -54,7 +55,7 @@ export const createChangeRequestWorktreeSource = ({
     const gitlabInstances = ['https://gitlab.com', ...await listGitLabInstances()];
     const remotes = [...read.repository.remotes].sort((a, b) => (a.name === 'origin' ? -1 : b.name === 'origin' ? 1 : 0));
     for (const remote of remotes) {
-      const identity = identityForHost(hostOf(remote.push.displayUrl) ?? hostOf(remote.fetch.displayUrl), gitlabInstances);
+      const identity = await identityForHost(hostOf(remote.push.displayUrl) ?? hostOf(remote.fetch.displayUrl), gitlabInstances);
       if (!identity || covered.has(identityKey(identity))) continue;
       const accountId = await readCurrentAccountId(identity);
       if (!accountId) continue;

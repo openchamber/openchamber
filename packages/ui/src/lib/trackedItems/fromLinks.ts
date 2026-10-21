@@ -3,8 +3,8 @@ import type { TrackedLinearIssue, TrackedThread } from './model';
 
 // The items behind a session's links, in the shape the server follows.
 
-export const githubThread = <Kind extends 'pull' | 'issue'>(kind: Kind, ref: { owner: string; repo: string; number: number }): TrackedThread<Kind> => (
-  { provider: 'github', kind, owner: ref.owner, repo: ref.repo, number: ref.number }
+export const githubThread = <Kind extends 'pull' | 'issue'>(kind: Kind, ref: { owner: string; repo: string; number: number }, host?: string): TrackedThread<Kind> => (
+  { provider: 'github', kind, owner: ref.owner, repo: ref.repo, number: ref.number, ...(host ? { instance: host  } : null) }
 );
 
 export const gitlabThread = <Kind extends 'pull' | 'issue'>(kind: Kind, ref: GitLabThreadRef): TrackedThread<Kind> => (

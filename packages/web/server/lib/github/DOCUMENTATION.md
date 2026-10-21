@@ -23,10 +23,13 @@
 
 ### Auth
 
-- `getGitHubAuth()`: current auth entry.
+- `getGitHubAuth()`: current auth entry for github.com.
 - `getGitHubAuthAccounts()`: all configured accounts.
-- `getGitHubAuthByAccountId(credentialId, revision?)`: exact valid persisted credential lookup with optional revision pinning and no current-account or CLI fallback. The returned record keeps `credentialId` separate from `providerUserId`.
-- `setGitHubAuth({ accessToken, scope, tokenType, user, accountId })`: save or update account; the new account becomes current and gh CLI activation is cleared.
+- `getGitHubAuthForHost(host)`: the active credential of one instance — github.com's account from `github-auth.json`, a named enterprise host's personal access token from the shared server token store (`source-control-auth.json`) — caller-scoped per host, so github.com's OAuth token is never a candidate for another host.
+- `getGitHubAuthByAccountId(credentialId, revision?)`: exact valid persisted credential lookup with optional revision pinning and no current-account or CLI fallback. The returned record keeps `credentialId` separate from `providerUserId`. The entry may live under any instance; the record carries its `host`.
+- `setGitHubAuthForHost(host, credential)`: save or update one instance's credential (a named enterprise host's PAT into `source-control-auth.json`, or github.com's account); the new account becomes that instance's active one and the instance's gh switch is cleared when saved on github.com.
+- `isGhCliActiveForHost(host)` / `setGhCliActiveForHost(host, active)`: the per-instance gh switch. `github.com` reads and writes the Settings switch in `settings.json`; a non-github.com host has its own switch, the same consent rule GitLab uses. `isGhCliDisabledForHost(host)` reads that same per-instance switch: github.com's own flag from `settings.json`, every other host's own flag from the auth store — one instance's kill switch never affects another. `POST /auth/cli` (per-instance) toggles a GitHub Enterprise host, `POST /auth/gh-cli` toggles github.com.
+- `setGitHubAuth({ accessToken, scope, tokenType, user, accountId })`: save or update a github.com account; the new account becomes current and gh CLI activation is cleared.
 - `activateGitHubAuth(accountId)`: switch active account; switching to a saved account clears gh CLI activation.
 - `clearGitHubAuth()`: clear current account.
 - `markGitHubAuthAccountInvalid(accountId)`: retain exact account metadata but make its credential unavailable.
@@ -42,18 +45,34 @@
 
 ### Octokit
 
-- `getOctokitOrNull()`: current Octokit or `null`.
+- `getOctokitOrNull(host)`: current Octokit, targeting the given Enterprise host when provided, or `null`. Caches and rate-limit cooldowns key off this host so one instance never leaks data or failures into another. Refuses (returns `null`) a host the server never authenticated with before any token lookup — see "Host trust" below.
 - `getOctokitForAccountId(accountId)`: exact persisted or verified CLI Octokit context with credential revision and provider-user identity. It never falls back to another account. A `github.com#cli:` id resolves only while the user has switched to the gh account (`isGhCliActive()`); the gh token is otherwise read only to list the gh account in Settings.
 - `getGitHubCliCredential(accountId, revision?)`: the same gh account as a credential record shaped like a persisted one (`credentialId`, `credentialRevision: 1`, `providerUserId`, `accessToken`, `status: 'valid'`), under the same consent rule plus a check that gh is still signed in as that user. The server's source-control account resolver falls back to it after `getGitHubAuthByAccountId`, so Git transport (fork PR worktrees, managed clones, the credential helper) accepts the gh account that reads already use.
 
 ### Repo
 
-- `parseGitHubRemoteUrl(raw)`: parse SSH or HTTPS remote URL into `{ owner, repo, url }`.
-- `resolveGitHubRepoFromDirectory(directory, remoteName)`: resolve GitHub repo from a local git remote.
+- `parseGitHubRemoteUrl(raw)`: parse an SSH or HTTPS remote URL (for any host, including GitHub Enterprise) into `{ owner, repo, host, url }`.
+- `resolveGitHubRepoFromDirectory(directory, remoteName)`: resolve GitHub repo from a local git remote. A remote whose host is not approved — github.com, the server's own `GH_HOST`, a gh `hosts.yml` login, or a host the user stored a per-host PAT for (`isTrustedGitHubHostOrStored`) — resolves to `repo: null` (the same shape as a non-GitHub remote), so every route skips it and no token is minted for that host.
 
+## Host trust
+
+- A non-github.com host is trusted when the server's own `GH_HOST` names it, gh has a `hosts.yml` login for it, or the user already stored a per-host PAT for it (registering the PAT is what trusts a host; the async gates use `isTrustedGitHubHostOrStored(host)`, and the sync `isTrustedGitHubHost(host)` stays gh/env-only for its sync consumers). The trust gate runs before any token lookup, nothing here throws or talks to the network, and nothing here talks to a host.
+- `github.com` (and an omitted host) is always trusted. The server's own `GH_HOST` is trusted. Any other host is trusted only when gh has a stored login for it: a top-level key equal to the host in `$GH_CONFIG_DIR/hosts.yml` (falling back to `~/.config/gh/hosts.yml`) recording an account — a direct `oauth_token`, a bare `user` (when the token lives in the OS keyring), or a non-empty `users` map. An unreadable or malformed file means "not trusted" (fail closed).
+- The gate is two layers. `resolveGitHubRepoFromDirectory` refuses unapproved hosts at the single choke point every remote resolution passes through (so `resolveRemoteCandidates` skips them too, and routes report `connected: true, repo: null` for GitLab-style remotes). `getOctokitOrNull(host)` re-checks before ANY token lookup as defense in depth, so a direct caller with a client-supplied host can never mint a token for an untrusted host.
+- Trusted non-github.com hosts are also github instances: `listTrustedGitHubHosts()` in `host-trust.js` enumerates the hosts gh has a stored login for plus the server's `GH_HOST`, and `GET /api/source-control/github/auth/status?instance=<host>` answers for such a host with that host's gh login as the `<host>#cli:<id>` account — a GitHub Enterprise repository can bind and read PRs with a gh login for its host and no github.com OAuth account. This adds instances, it does not relax trust: a host only appears once trusted, and `getOctokitForAccountId` still refuses every `<host>#cli:<id>` the trust gate rejects.
+
+## Authentication
+
+GitHub Enterprise authenticates per instance, the same model GitLab uses: each instance keeps its own stored credentials and its own gh CLI switch, and github.com's device flow and Settings switch stay as they were.
+
+- `GET /api/source-control/github/capabilities?instance=<host>` reports what an instance accepts. github.com keeps its device flow and can use the gh CLI via its Settings switch; PAT entry is reported `pat: { available: false, reason: 'unsupported' }` there. The device flow is github.com-only (auth/start and the device and access-token URLs are hardcoded to github.com, and a GHE device flow would need a host-pinned operator OAuth app this server does not implement), so a GitHub Enterprise instance always reports `device: { available: false, reason: 'invalid-client' }` and `pat: { available: true }` even for a host no credential names yet: naming a host is the act that makes it a PAT-entry candidate, and the trust gate applies when the token is used or the account removed (`DELETE /auth`), not to this read.
+- A GitHub Enterprise PAT is entered through `POST /api/source-control/github/auth/token?instance=<host>`. The route verifies the token against that instance with `users.getAuthenticated()` on an Octokit pinned to the host, stores it per instance in the shared server token store (`source-control-auth.json`), and answers `{ connected: true, user }`. A refusal answers `401` with GitHub's reason under `code: 'INVALID_TOKEN'`. No trust check precedes the verification: naming a host and registering a verified PAT for it is what makes the host trusted, and the trust gate applies when the token is used or the account removed, not to this read. github.com refuses PAT entry outright: its own token entry is its device flow.
+- Both signs of a GitHub Enterprise instance's gh login follow the instance switch. A trusted instance's `<host>#cli:` account is not usable until the user activates it (`setGhCliActiveForHost`); `auth/status?instance=<host>` lists the gh login as an account while the instance's switch is not off, so the account's Use offer can turn it on before any account connects, and disconnecting it deactivates it again. While the switch is off the listing is built from the hosts.yml user and the host's token is never consulted: no gh process runs and no request goes to the host, the way GitLab's cliActive gates its login. Its listed id is `0`, which GitHub never assigns, so the offer can never name a real stored account. Its token is consulted only once the user activated it.
+- Gates and `selectTokenForHost` apply to both kinds of instance with one rule: the stored token is the credential unless the instance is explicitly active, and a trusted instance with no stored credential and no usable gh login answers `connected: false` with `reason: 'no-credential'` on `/pr/status`. A remote on a host that is not a GitHub host at all keeps the plain `repo: null` answer, and no token is minted for it.
+- github.com's own gh switch is unchanged: its switch lives in Settings (`setGhCliActive` / `isGhCliActive`, stored in `settings.json`), and its `ghCliDisabled` kill switch turns github.com's CLI off. Each enterprise host's own switch and `cliDisabled` live with that instance, so turning one host off never takes another with it.
 ## Auth storage and config
 
-- Auth storage: `~/.config/openchamber/github-auth.json`
+- Auth storage: `~/.config/openchamber/github-auth.json` — github.com's device-flow accounts. A GitHub Enterprise host's personal access tokens and its gh switch live in `source-control-auth.json`, the server token store GitLab uses, one entry per host; each instance keeps its own `activeCredentialId`, credentials, `cliDisabled`, and `cliActive`. github.com's gh switch keeps living in `settings.json`; a non-github.com host's switch lives with its instance there. Versions 1 and 2 flat files migrate into the `github.com` instance on first write.
 - Writes are atomic and file mode is `0o600`.
 - Client ID resolution order: `OPENCHAMBER_GITHUB_CLIENT_ID` -> `settings.json` -> default.
 - Scope resolution order: `OPENCHAMBER_GITHUB_SCOPES` -> `settings.json` -> default.
@@ -64,7 +83,7 @@
 
 - `/api/source-control/github/capabilities` is the provider-neutral capability endpoint.
 - GitHub auth, PR, repository, issue, and pull-context handlers use `/api/source-control/github/*` as their canonical paths.
-- Account-management handlers retain `/api/github/*` aliases for login and account-inventory compatibility. Both `/api/github/me` and `/api/source-control/github/me` are retired with `410` and `SOURCE_CONTROL_ACCOUNT_CONTEXT_REQUIRED` because no production consumer supplies exact account authority. Legacy PR, repository, issue, and pull-context paths return `410` with `SOURCE_CONTROL_CONTEXT_REQUIRED` before account, repository, cache, or provider work.
+- Account-management handlers retain `/api/github/*` aliases for login and account-inventory compatibility. `/api/github/me` is retired with `410` and `SOURCE_CONTROL_ACCOUNT_CONTEXT_REQUIRED` because no production consumer supplies exact account authority. Legacy PR, repository, issue, and pull-context paths return `410` with `SOURCE_CONTROL_CONTEXT_REQUIRED` before account, repository, cache, or provider work.
 - `/api/source-control/github/auth/accounts` and its legacy alias return token-free persisted account inventory.
 - Device-flow start returns an opaque `flowId`, user code, verification URL, expiry, and polling interval. The process-local source-control registry retains the provider device code and starting client ID. Completion accepts only `flowId`; pending and slow-down responses release it for another poll, while success, denial, expiry, and malformed terminal responses consume it. Restart, unknown IDs, and consumed IDs return `410`; concurrent polls return `409`.
 - Canonical issue, upstream, branch, and pull reads require the repository read context. They validate the binding before exact credential lookup, repository or fork-network resolution, metadata cache access, or a GitHub call. A server without binding validation returns `501` for these reads.
@@ -106,7 +125,7 @@ GitHub keeps a chain of PRs, each targeting the branch of the one below, as a st
 - Canonical issue lists retain successful sibling repositories and return failed repository selectors in `failedRepos`. They reject if every repository fails.
 - Canonical issue search rejects search endpoint failures. It enriches matched issues through their repository, retains successful enrichments with `failedRepos` for failed repositories, and rejects when every matched enrichment fails.
 - Canonical issue search rejects malformed or out-of-network `repository_url` values instead of assigning those results to another repository in the fork network.
-- Canonical branch, issue, pull-list, and pull-context reads reject malformed provider collections and records, including pull requests, comments, reviews, files, and fork metadata. Head-repository web and clone URLs must resolve to the reported repository on `github.com`. Pull-list reads may report failed non-primary repositories, but failure of the trusted primary remote fails the read.
+- Canonical branch, issue, pull-list, and pull-context reads reject malformed provider collections and records, including pull requests, comments, reviews, files, and fork metadata. Head-repository web and clone URLs must resolve to the reported repository on that repository's GitHub host (github.com or an enterprise instance). Pull-list reads may report failed non-primary repositories, but failure of the trusted primary remote fails the read.
 - Canonical upstream reads propagate repository metadata, default-branch ref, rate-limit, and network failures. No ambient best-effort upstream route remains.
 - Malformed optional check-run or combined-status collections are never summarized as zero checks. A valid fallback may still supply CI; otherwise CI remains unavailable. Failed or malformed workflow-job detail remains non-authoritative and may leave the check run without job details.
 
@@ -128,7 +147,8 @@ that page, so callers cannot mistake a partial page for a complete one.
 - It ranks remotes in this order: explicit remote, tracking remote, `origin`, `upstream`, then the rest.
 - It resolves those remotes into GitHub repos.
 - The ranked-first remote is the branch's source unless the worktree was checked out from a contributor's fork PR. Such a worktree deliberately has no upstream, so `/pr/status` reads its contributor provenance (`readContributorProvenance`, supplied by the server runtime) and, when the provenance's source ref is this branch, passes the fork remote as `sourceRemoteName`. That remote, not the primary one, is then the only source, so the open PR from the fork is found. Unreadable provenance resolves as for any other branch.
-- It expands each repo through `parent` and `source` so PRs in upstream repos can still be found.
+- **Requests are scoped to one host.** The route pins Octokit to the requested remote's host, so candidate remotes are deduplicated and filtered by host: a same-named repo on another instance is a different repository, not a fork-network member, and is never queried through the wrong host's Octokit. The route threads that host into the resolver, so an explicit remote that fails to resolve cannot drag a differently-hosted repo into the request.
+- It expands each repo through `parent` and `source` so PRs in upstream repos can still be found. Parent/source candidates inherit the requesting repo's host.
 - It skips PR lookup when the current branch matches that repo's default branch.
 - It first searches for **open** PRs by likely source owner plus exact head branch.
 - If that fails, it falls back to broader GitHub search for open PRs on the branch name.
@@ -140,9 +160,17 @@ that page, so callers cannot mistake a partial page for a complete one.
 - The route skips the checks summary and the merge-permission lookup for a closed/merged PR: neither is actionable, and both cost extra GitHub calls.
 - A `404` during repo lookups is an expected gap, not a hard error. A `403` skips that remote while another resolves; when none resolves, `/pr/status` answers `403` with GitHub's own message, such as an organization restricting OAuth apps, and the Git view shows it under "Pull request status unavailable". A `404` there keeps the quiet `repo: null` answer.
 
+## Rate limiting
+
+- GitHub rate-limit (primary or secondary) surfaces as a thrown `403`/`429`; Octokit is used without the throttling plugin, so the module tracks it explicitly instead.
+- The route gate (`isGitHubRateLimited(host)`) short-circuits PR-status work on a host until its cooldown passes, serving the last cached status (even stale) or a `503` — so a burst does not pile more failing calls onto an instance.
+- **Cooldowns are keyed per host** (`rate-limit.js`): an enterprise instance exhausting its quota does not pause `github.com` polling, or vice versa. `github.com` and `api.github.com` share one key.
+- When the host is not passed explicitly, it is derived from the Octokit error's request URL.
+
 ## Batched live summaries
 
-- `fetchPrSummaries` (`pr-summaries.js`) reads the live state of PRs and issues already known by number, up to `100` `{ owner, repo, number }` in total, for the tracked-items service (`../tracked-items/`), which calls it with the account a branch's repository is bound to or, for linked items, the current github.com account. It has no route of its own. It answers `{ summaries, issueSummaries }`. An issue reads `open`, `completed`, or `not_planned` (GitHub's `NOT_PLANNED` and `DUPLICATE` close reasons); a PR number asked as an issue is simply absent.
+- `fetchPrSummaries` (`pr-summaries.js`) reads the live state of PRs and issues already known by number, up to `100` `{ owner, repo, number }` in total, for the tracked-items service (`../tracked-items/`), which calls it with the account a branch's repository is bound to (a per-instance PAT or gh account on a trusted host, github.com or enterprise; the host's current account when the bound account is absent or no longer resolves) or, for linked items, the host's current account. It has no route of its own. It answers `{ summaries, issueSummaries }`. An issue reads `open`, `completed`, or `not_planned` (GitHub's `NOT_PLANNED` and `DUPLICATE` close reasons); a PR number asked as an issue is simply absent.
+- Each ref may carry an optional `host` naming the instance it lives on (missing means github.com); refs are grouped by host and each group answers with its own octokit and its own rate-limit gate. A host with no trustworthy credentials (unapproved, or no stored login) is skipped — its refs are absent, never an error — and `connected` is true as long as at least one group had an octokit.
 - It sends one GraphQL document per `25` PRs, one after another. Each alias reads state, draft, title, head sha, base branch (`base`, so a PR retargeted on GitHub, such as a stack layer whose lower layer merged, reaches the branch's status and Changes' base within one follow), `mergeable`, `mergeStateStatus` (lowercased, same values as REST `mergeable_state`) and up to `100` check contexts of the head commit. GitHub prices such a document at one point of the GraphQL budget (measured), which is separate from the REST limit.
 - Checks go through the same summarizers as the REST routes (`checks-summary.js`), so sidebar, chat and Git view count the same runs. Do not switch to the rollup's `state` or `checkRunCountsByState`: both still count a failed run that a later re-run superseded, which paints a green PR as failing. A closed/merged PR gets `checks: null`.
 - A PR GitHub cannot resolve (deleted, lost access) is left out of `summaries`: absence means unknown, never closed. Partial GraphQL answers keep the resolved aliases.
@@ -266,5 +294,6 @@ that page, so callers cannot mistake a partial page for a complete one.
 - Prefer shared state over per-component fetches.
 - Prefer event-shaped refreshes over blind frequent polling.
 - Prefer correctness for fork and multi-remote setups over assuming `origin` is enough.
+- A request is scoped to one host at a time: the client probes other hosts via separate requests (the Git view passes a remote). Keep host-wide dedup/keys (`repoCacheKey`, rate-limit cooldowns) host-aware so one instance's data or failure never leaks into another's.
 - Device flow handles GitHub `authorization_pending` at caller level.
-- Repo parser supports `git@github.com:`, `ssh://git@github.com/`, and `https://github.com/`.
+- Repo parser supports scp, `ssh://`, and `https://` remotes for any host, including GitHub Enterprise; `getOctokitOrNull(host)` pairs each Enterprise host with that host's gh token. Remotes on hosts the server never authenticated with are refused before any token is looked up ("Host trust" above), so a gitlab.com (or arbitrary) remote resolves to `repo: null` instead of receiving an enterprise token.

@@ -133,7 +133,7 @@ interface AuthStatusDTO extends GitHubAuthStatus {
 }
 
 type DisconnectedSourceControlAuthStatus = Extract<SourceControlAuthStatus, { status: 'disconnected' }>;
-type GitLabAuthStatusDTO = SourceControlAuthStatus | {
+type ProviderAuthStatusDTO = SourceControlAuthStatus | {
   connected: false;
   status?: undefined;
   accounts?: SourceControlAuthAccount[];
@@ -217,6 +217,9 @@ interface WebSourceControlAPIOptions {
 
 const GITHUB_IDENTITY: SourceControlIdentity = { provider: 'github', instance: 'github.com' };
 
+/** GitHub Enterprise: any GitHub-like host that is not github.com. Its server runs a GitLab-shaped auth contract. */
+const isGitHubEnterprise = (identity: SourceControlIdentity): boolean => identity.provider === 'github' && identity.instance !== 'github.com';
+
 const normalizeIdentity = (identity: SourceControlIdentity): SourceControlIdentity => {
   if (identity.provider === 'gitlab') {
     const raw = identity.instance.trim();
@@ -238,15 +241,17 @@ const normalizeIdentity = (identity: SourceControlIdentity): SourceControlIdenti
   let host = value;
   if (value.includes('://')) {
     try {
-      host = new URL(value).hostname.toLowerCase().replace(/\.$/, '');
+      const url = new URL(value);
+      if (url.protocol !== 'https:' || url.username || url.password || url.port || url.search || url.hash
+        || (url.pathname && url.pathname !== '/')) {
+        throw new Error(`Invalid GitHub instance: ${identity.instance}`);
+      }
+      host = url.hostname.toLowerCase().replace(/\.$/, '');
     } catch {
-      throw new Error(`Invalid source control instance: ${identity.instance}`);
+      throw new Error(`Invalid GitHub instance: ${identity.instance}`);
     }
   }
-  if (host !== 'github.com') {
-    throw new Error(`GitHub instance "${identity.instance}" is not supported; only github.com is available`);
-  }
-  return GITHUB_IDENTITY;
+  return host === 'github.com' ? GITHUB_IDENTITY : { provider: 'github', instance: host };
 };
 
 const providerPath = (identity: SourceControlIdentity, path: string): string => `/api/source-control/${identity.provider}${path}`;
@@ -485,7 +490,7 @@ const mutationTargetMatches = (
   && (context.target.headSha === undefined || target.headSha === context.target.headSha);
 
 const providerAccountMatches = (identity: SourceControlIdentity, providerAccountId: string): boolean => {
-  if (identity.provider === 'github') return /^github\.com#\d+$/.test(providerAccountId);
+  if (identity.provider === 'github') return /^[^#]+#\d+$/.test(providerAccountId);
   return providerAccountId.startsWith(`${identity.instance}#`)
     && /^\d+$/.test(providerAccountId.slice(identity.instance.length + 1));
 };
@@ -1388,7 +1393,7 @@ const parseGitHubAuthAccounts = (
   };
 });
 
-const parseGitLabAuthStatus = (payload: GitLabAuthStatusDTO, identity: SourceControlIdentity): SourceControlAuthStatus => {
+const parseProviderAuthStatus = (payload: ProviderAuthStatusDTO, identity: SourceControlIdentity): SourceControlAuthStatus => {
   if (!payload.connected) {
     if (!payload.status) {
       const result: Extract<SourceControlAuthStatus, { status: 'disconnected' }> = {
@@ -1532,8 +1537,8 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
     },
     authStatus: async (identity) => {
       const normalized = normalizeIdentity(identity);
-      if (normalized.provider === 'gitlab') {
-        return parseGitLabAuthStatus(await request<GitLabAuthStatusDTO & ErrorResponse>(fetch, normalized, '/auth/status'), normalized);
+      if (normalized.provider === 'gitlab' || isGitHubEnterprise(normalized)) {
+        return parseProviderAuthStatus(await request<ProviderAuthStatusDTO & ErrorResponse>(fetch, normalized, '/auth/status'), normalized);
       }
       return mapAuthStatus(await request<AuthStatusDTO & ErrorResponse>(fetch, normalized, '/auth/status'), normalized);
     },
@@ -1583,8 +1588,8 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
     authSetToken: async (identity, token) => {
       const normalized = normalizeIdentity(identity);
       await post<{ connected: boolean; user?: GitHubUserSummary; error?: string }>(fetch, normalized, '/auth/token', { token });
-      if (normalized.provider === 'gitlab') {
-        return parseGitLabAuthStatus(await request<GitLabAuthStatusDTO & ErrorResponse>(fetch, normalized, '/auth/status'), normalized);
+      if (normalized.provider === 'gitlab' || isGitHubEnterprise(normalized)) {
+        return parseProviderAuthStatus(await request<ProviderAuthStatusDTO & ErrorResponse>(fetch, normalized, '/auth/status'), normalized);
       }
       return mapAuthStatus(await request<GitHubAuthStatus & ErrorResponse>(fetch, normalized, '/auth/status'), normalized);
     },
@@ -1601,14 +1606,14 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
     },
     authActivate: async (identity, accountId) => {
       const normalized = normalizeIdentity(identity);
-      if (normalized.provider === 'gitlab') {
-        return parseGitLabAuthStatus(await post<GitLabAuthStatusDTO & ErrorResponse>(fetch, normalized, '/auth/activate', { accountId }), normalized);
+      if (normalized.provider === 'gitlab' || isGitHubEnterprise(normalized)) {
+        return parseProviderAuthStatus(await post<ProviderAuthStatusDTO & ErrorResponse>(fetch, normalized, '/auth/activate', { accountId }), normalized);
       }
       return mapAuthStatus(await post<GitHubAuthStatus & ErrorResponse>(fetch, normalized, '/auth/activate', { accountId }), normalized);
     },
     authSetCliDisabled: async (identity, disabled) => {
       const normalized = normalizeIdentity(identity);
-      const payload = await post<{ disabled?: boolean; error?: string }>(fetch, normalized, normalized.provider === 'gitlab' ? '/auth/cli' : '/auth/gh-cli', { disabled });
+      const payload = await post<{ disabled?: boolean; error?: string }>(fetch, normalized, normalized.provider === 'gitlab' || isGitHubEnterprise(normalized) ? '/auth/cli' : '/auth/gh-cli', { disabled });
       return { disabled: Boolean(payload.disabled) };
     },
 

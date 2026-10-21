@@ -1142,7 +1142,24 @@ describe('createWebSourceControlAPI', () => {
       body: JSON.stringify({ token: 'secret-token' }), query: new URLSearchParams({ instance: 'https://gitlab.example.com' }),
     }));
 
-    await expect(api.authStatus({ provider: 'github', instance: 'github.example.com' })).rejects.toThrow('only github.com is available');
+    // A GitHub Enterprise host is a GHE instance; the request goes to the github
+    // provider with the host as the instance and the GitLab-shaped auth status.
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({
+      connected: true,
+      user: { id: 42, username: 'ghe-user' },
+      accounts: [{
+        id: 'github.example.com#cli:42', credentialId: 'github.example.com#cli:42', credentialRevision: 1,
+        providerUserId: 'github.example.com#42', providerUserStatus: 'available',
+        user: { id: 42, username: 'ghe-user' }, current: true, source: 'cli', status: 'valid',
+      }],
+      cli: { available: true, disabled: false, active: true, user: { id: 42, username: 'ghe-user' } },
+    }));
+    await expect(api.authStatus({ provider: 'github', instance: 'github.example.com' })).resolves.toMatchObject({
+      status: 'connected', user: { provider: 'github', instance: 'github.example.com', id: '42', username: 'ghe-user' },
+    });
+    expect(runtimeFetchMock).toHaveBeenLastCalledWith('/api/source-control/github/auth/status', expect.objectContaining({
+      query: new URLSearchParams({ instance: 'github.example.com' }),
+    }));
   });
 
   it('parses provider-neutral GitLab merge request context without GitHub identities', async () => {
@@ -1191,5 +1208,169 @@ describe('createWebSourceControlAPI', () => {
 
     runtimeFetchMock.mockResolvedValueOnce(Response.json({ connected: false }));
     await expect(api.issuesList(readContext)).rejects.toThrow('GitHub is not connected');
+  });
+});
+
+describe('GitHub Enterprise (GHE) auth flows', () => {
+  const gheIdentity: SourceControlIdentity = { provider: 'github', instance: 'https://ghe.example.com/' };
+  const providerUser = (id: string | number, username: string) => ({ id, username, provider: 'github', instance: 'ghe.example.com' });
+
+  it('reads capabilities for a GHE instance against the github route with the host instance', async () => {
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({
+      identity: { provider: 'github', instance: 'ghe.example.com' },
+      authentication: true,
+      authenticationMethods: {
+        device: { available: false },
+        pat: { available: true },
+        cli: { available: true },
+      },
+      multipleAccounts: true,
+      projects: true,
+      issues: true,
+      changeRequests: true,
+      draftChangeRequests: true,
+      mergeChangeRequests: true,
+      mergeMethods: ['merge', 'squash'],
+      ci: true,
+    }));
+
+    const result = await createWebSourceControlAPI({ fetch: runtimeFetchMock }).capabilities(gheIdentity);
+    expect(result.identity).toEqual({ provider: 'github', instance: 'ghe.example.com' });
+    expect(result.authenticationMethods.pat).toEqual({ available: true });
+    expect(runtimeFetchMock).toHaveBeenCalledWith('/api/source-control/github/capabilities', {
+      query: new URLSearchParams({ instance: 'ghe.example.com' }),
+      headers: { Accept: 'application/json' },
+    });
+  });
+
+  it('connects a GHE personal access token and reads the GitLab-shaped auth status', async () => {
+    const api = createWebSourceControlAPI({ fetch: runtimeFetchMock });
+    const statusDto = {
+      provider: 'github',
+      instance: 'ghe.example.com',
+      status: 'connected',
+      connected: true,
+      user: providerUser(42, 'ghe-user'),
+      scope: 'repo',
+      accounts: [
+        {
+          id: 'pat-account', credentialId: 'pat-account', credentialRevision: 1,
+          providerUserId: 'ghe.example.com#42', providerUserStatus: 'available',
+          user: providerUser(42, 'ghe-user'), current: true, source: 'pat', status: 'valid',
+        },
+        {
+          id: 'ghe.example.com#cli:7', credentialId: 'ghe.example.com#cli:7', credentialRevision: 1,
+          providerUserId: 'ghe.example.com#7', providerUserStatus: 'available',
+          user: providerUser(7, 'cli-user'), current: false, source: 'cli', status: 'valid',
+        },
+      ],
+      cli: { available: true, disabled: false, active: false, user: providerUser(7, 'cli-user') },
+    };
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({ connected: true, user: { id: 42, username: 'ghe-user' } }));
+    runtimeFetchMock.mockResolvedValueOnce(Response.json(statusDto));
+
+    const result = await api.authSetToken(gheIdentity, 'ghp_ghe_token');
+
+    expect(runtimeFetchMock).toHaveBeenNthCalledWith(1, '/api/source-control/github/auth/token', {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: 'ghp_ghe_token' }),
+      query: new URLSearchParams({ instance: 'ghe.example.com' }),
+    });
+    expect(runtimeFetchMock).toHaveBeenNthCalledWith(2, '/api/source-control/github/auth/status', expect.objectContaining({
+      query: new URLSearchParams({ instance: 'ghe.example.com' }),
+    }));
+    expect(result).toMatchObject({
+      provider: 'github',
+      instance: 'ghe.example.com',
+      status: 'connected',
+      connected: true,
+      user: { provider: 'github', instance: 'ghe.example.com', id: '42', username: 'ghe-user' },
+    });
+    expect(result.accounts).toBeDefined();
+    expect(result.accounts!).toHaveLength(2);
+    expect(result.accounts![0]).toMatchObject({ source: 'pat', status: 'valid', current: true });
+    expect(result.accounts![1]).toMatchObject({ source: 'cli', status: 'valid' });
+  });
+
+  it('surfaces a refused GHE token as INVALID_TOKEN', async () => {
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({ error: 'GitHub token is invalid', code: 'INVALID_TOKEN' }, { status: 401 }));
+
+    await expect(createWebSourceControlAPI({ fetch: runtimeFetchMock }).authSetToken(gheIdentity, 'bad-token'))
+      .rejects.toMatchObject({ code: 'INVALID_TOKEN' });
+  });
+
+  it('reads a disconnected GHE auth status with its cli account and activates it', async () => {
+    const api = createWebSourceControlAPI({ fetch: runtimeFetchMock });
+    const disconnected = {
+      provider: 'github',
+      instance: 'ghe.example.com',
+      status: 'disconnected',
+      connected: false,
+      accounts: [
+        {
+          id: 'ghe.example.com#cli:7', credentialId: 'ghe.example.com#cli:7', credentialRevision: 1,
+          providerUserId: 'ghe.example.com#7', providerUserStatus: 'available',
+          user: providerUser(7, 'cli-user'), current: false, source: 'cli', status: 'valid',
+        },
+      ],
+      cli: { available: true, disabled: false, active: false, user: providerUser(7, 'cli-user') },
+    };
+    runtimeFetchMock.mockResolvedValueOnce(Response.json(disconnected));
+    await expect(api.authStatus(gheIdentity)).resolves.toMatchObject({
+      provider: 'github', instance: 'ghe.example.com', status: 'disconnected', connected: false,
+      cli: { available: true, disabled: false, active: false },
+      accounts: [{ id: 'ghe.example.com#cli:7', source: 'cli', current: false }],
+    });
+
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({ ...disconnected, status: 'connected', connected: true, user: providerUser(7, 'cli-user') }));
+    await expect(api.authActivate(gheIdentity, 'ghe.example.com#cli:7')).resolves.toMatchObject({
+      provider: 'github', instance: 'ghe.example.com', status: 'connected', user: { username: 'cli-user' },
+    });
+    expect(runtimeFetchMock).toHaveBeenLastCalledWith('/api/source-control/github/auth/activate', {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ accountId: 'ghe.example.com#cli:7' }),
+      query: new URLSearchParams({ instance: 'ghe.example.com' }),
+    });
+  });
+
+  it('disconnects an account and toggles the gh cli through the GitLab-shaped cli route', async () => {
+    const api = createWebSourceControlAPI({ fetch: runtimeFetchMock });
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({ removed: true }));
+    await expect(api.authDisconnect(gheIdentity, 'ghe.example.com#7')).resolves.toEqual({ removed: true });
+    expect(runtimeFetchMock).toHaveBeenCalledWith('/api/source-control/github/auth', {
+      method: 'DELETE',
+      query: new URLSearchParams({ instance: 'ghe.example.com', accountId: 'ghe.example.com#7' }),
+      headers: { Accept: 'application/json' },
+    });
+
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({ available: false, disabled: true }));
+    await expect(api.authSetCliDisabled(gheIdentity, true)).resolves.toEqual({ disabled: true });
+    expect(runtimeFetchMock).toHaveBeenLastCalledWith('/api/source-control/github/auth/cli', {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ disabled: true }),
+      query: new URLSearchParams({ instance: 'ghe.example.com' }),
+    });
+  });
+
+  it('keeps github.com on its GitHub-shaped auth status route and parser', async () => {
+    const api = createWebSourceControlAPI({ fetch: runtimeFetchMock });
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({
+      connected: false,
+      accounts: [],
+      ghCli: { available: true, disabled: true, active: false },
+    }));
+
+    const result = await api.authStatus({ provider: 'github', instance: 'github.com' });
+    expect(runtimeFetchMock).toHaveBeenCalledWith('/api/source-control/github/auth/status', {
+      query: new URLSearchParams({ instance: 'github.com' }),
+      headers: { Accept: 'application/json' },
+    });
+    expect(result).toMatchObject({
+      provider: 'github', instance: 'github.com', status: 'disconnected', connected: false,
+      cli: { available: true, disabled: true, active: false },
+    });
   });
 });

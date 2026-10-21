@@ -1,6 +1,6 @@
 import type { Session } from '@/lib/opencode/model';
 import { isJsonValue, type JsonValue } from '@openchamber/sdk';
-import { getSessionMetadata } from './sessionReviewMetadata';
+import { getSessionMetadata, type SessionMetadataRecord } from './sessionReviewMetadata';
 
 /**
  * Source-control issues and change requests, and tracker issues, a user has
@@ -289,34 +289,44 @@ export type LinkedGitHubPullRequest = {
   number: number;
   url: string;
   title: string;
+  /** The repository's host; missing means github.com. */
+  instance?: string;
 };
 
 const LINKED_ISSUE_ID_PATTERN = /^([^/\s]+)\/([^/#\s]+)#(\d+)$/;
-const GITHUB_THREAD_URL_PATTERN = /^https?:\/\/(?:www\.)?github\.com\/([^/\s]+)\/([^/\s]+)\/(pull|issues)\/(\d+)(?:[/?#]|$)/i;
+// A github-shaped address on any host: github.com, or an enterprise instance.
+const GITHUB_THREAD_URL_PATTERN = /^https?:\/\/([^/\s]+)\/([^/\s]+)\/([^/\s]+)\/(pull|issues)\/(\d+)(?:[/?#]|$)/i;
 
-/** A linked thread that lives on github.com, wherever the link came from. */
-type GitHubThreadRef = { key: string; owner: string; repo: string; number: number; thread: 'pull' | 'issue' };
+/** A linked thread that lives on a GitHub host (github.com or an enterprise instance), wherever the link came from. */
+type GitHubThreadRef = { key: string; owner: string; repo: string; number: number; thread: 'pull' | 'issue'; instance?: string };
 
 /**
  * The GitHub thread behind a link, or null. A GitHub entry carries it in its
- * id; an extension's or agent's link to a github.com address is the same
+ * id; an extension's or agent's link to a github-shaped address is the same
  * thread, so it gets the same live state and is not listed twice. Entries
- * whose id is a URL that names no repository cannot be looked up.
+ * whose id is a URL that names no repository cannot be looked up. An
+ * enterprise host names itself as the instance; github.com keeps the bare
+ * shape every stored GitHub link already has.
  */
 export const getGitHubThreadRef = (entry: LinkedIssue): GitHubThreadRef | null => {
+  const match = GITHUB_THREAD_URL_PATTERN.exec(entry.url.trim());
+  if (!match) return null;
+  const host = match[1].toLowerCase();
+  const instance = host === 'github.com' || host === 'www.github.com' ? undefined : host;
   if (entry.kind === 'issue' || entry.kind === 'pull') {
     // GitLab issues and merge requests share these kinds and the same id
-    // shape; only a github.com address is a GitHub thread.
-    if (!GITHUB_THREAD_URL_PATTERN.test(entry.url)) return null;
-    const match = LINKED_ISSUE_ID_PATTERN.exec(entry.id);
-    if (!match || Number(match[3]) !== entry.number) return null;
-    return { key: entry.id, owner: match[1], repo: match[2], number: entry.number, thread: entry.kind };
+    // shape; only a github-shaped address is a GitHub thread. On an
+    // enterprise host the id's owner carries the host prefix, so its
+    // owner/repo come from the address instead.
+    const idMatch = LINKED_ISSUE_ID_PATTERN.exec(entry.id);
+    if (!idMatch || Number(idMatch[3]) !== entry.number) return null;
+    return { key: entry.id, owner: instance ? match[2] : idMatch[1], repo: instance ? match[3] : idMatch[2], number: entry.number, thread: entry.kind, ...(instance ? { instance  } : null) };
   }
   if (entry.kind === 'linear') return null;
-  const match = GITHUB_THREAD_URL_PATTERN.exec(entry.url);
-  if (!match) return null;
-  const number = Number(match[4]);
-  return { key: buildLinkedIssueId(match[1], match[2], number), owner: match[1], repo: match[2], number, thread: match[3].toLowerCase() === 'pull' ? 'pull' : 'issue' };
+  const number = Number(match[5]);
+  if (!Number.isSafeInteger(number) || number < 1) return null;
+  const key = instance ? `${instance}:${buildLinkedIssueId(match[2], match[3], number)}` : buildLinkedIssueId(match[2], match[3], number);
+  return { key, owner: match[2], repo: match[3], number, thread: match[4].toLowerCase() === 'pull' ? 'pull' : 'issue', ...(instance ? { instance  } : null) };
 };
 
 /** A linked thread on a GitLab instance: `owner` is the namespace path, subgroups included. */
@@ -387,7 +397,7 @@ export const getDistinctLinkedIssues = (session: Session | null | undefined): Li
 /** GitHub pull requests linked to a session, with their repository. */
 export const getLinkedGitHubPullRequests = (session: Session | null | undefined): LinkedGitHubPullRequest[] => (
   uniqueGitHubThreads(session, 'pull').map(({ ref, entry }) => (
-    { owner: ref.owner, repo: ref.repo, number: ref.number, url: entry.url, title: entry.title }
+    { owner: ref.owner, repo: ref.repo, number: ref.number, url: entry.url, title: entry.title, ...(ref.instance ? { instance: ref.instance  } : null) }
   ))
 );
 
@@ -428,7 +438,7 @@ export const getLinkedSidebarChanges = (session: Session | null | undefined): Li
 
 /** An issue linked to a session, as the sidebar shows it. */
 export type LinkedSidebarIssue =
-  | { source: 'github'; key: string; owner: string; repo: string; number: number; url: string; title: string }
+  | { source: 'github'; key: string; owner: string; repo: string; number: number; url: string; title: string; instance?: string }
   | { source: 'gitlab'; key: string; ref: GitLabThreadRef; identifier: string; url: string; title: string }
   | { source: 'linear' | 'guest' | 'external'; key: string; identifier: string; url: string; title: string };
 
@@ -452,7 +462,7 @@ export const getLinkedSidebarIssues = (session: Session | null | undefined): Lin
     if (ref) {
       // A GitHub issue, or a duplicate of one listed earlier; never a PR.
       const unique = githubIssues.get(entry.id);
-      return unique ? [{ source: 'github', key: unique.key, owner: unique.owner, repo: unique.repo, number: unique.number, url: entry.url, title: entry.title }] : [];
+      return unique ? [{ source: 'github', key: unique.key, owner: unique.owner, repo: unique.repo, number: unique.number, url: entry.url, title: entry.title, ...(unique.instance ? { instance: unique.instance  } : null) }] : [];
     }
     if (entry.kind === 'pull') return [];
     // An issue attached from a GitLab repository: no live state here yet.
@@ -470,4 +480,41 @@ export const getLinkedSidebarIssues = (session: Session | null | undefined): Lin
     }
     return [];
   });
+};
+
+const normalizedThreadUrl = (url: string): string => url.trim().replace(/\/+$/, '').toLowerCase();
+
+/**
+ * Whether two entries name the same thread. A repository entry stored before
+ * ids carried the host matches its new id by its address instead.
+ */
+const isSameLinkedEntry = (entry: LinkedIssue, issue: LinkedIssue): boolean => {
+  if (entry.id === issue.id) return true;
+  return (entry.kind === 'issue' || entry.kind === 'pull')
+    && entry.kind === issue.kind
+    && entry.number === issue.number
+    && normalizedThreadUrl(entry.url) === normalizedThreadUrl(issue.url);
+};
+
+export const withLinkedIssue = (
+  metadata: SessionMetadataRecord,
+  issue: LinkedIssue,
+  linked: boolean,
+): SessionMetadataRecord => {
+  const openchamber = isRecord(metadata.openchamber) ? metadata.openchamber : {};
+  const current = Array.isArray(openchamber.linked_issues)
+    ? openchamber.linked_issues.filter(isLinkedIssue)
+    : [];
+  const withoutIssue = current.filter((entry) => !isSameLinkedEntry(entry, issue));
+  // Re-linking an existing entry replaces it, so a stale title can be refreshed
+  // by linking again.
+  const next = linked ? [...withoutIssue, issue] : withoutIssue;
+
+  return {
+    ...metadata,
+    openchamber: {
+      ...openchamber,
+      linked_issues: next,
+    },
+  };
 };

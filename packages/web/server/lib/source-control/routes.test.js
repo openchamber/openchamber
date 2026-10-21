@@ -201,6 +201,11 @@ describe('source-control provider registry', () => {
   });
 
   it('lists defaults and configured self-managed GitLab instances without duplicates', async () => {
+    const previousConfigDir = process.env.GH_CONFIG_DIR;
+    process.env.GH_CONFIG_DIR = '/oc-no-gh-cli-config';
+    // The instance list also enumerates trusted enterprise hosts from the
+    // machine's gh config, so the answer must not depend on ~/.config/gh.
+    try {
     const handlers = new Map();
     const app = {
       get: vi.fn((route, handler) => {
@@ -223,6 +228,10 @@ describe('source-control provider registry', () => {
       { provider: 'gitlab', instance: 'https://gitlab.com' },
       { provider: 'gitlab', instance: 'https://gitlab.example.com' },
     ] });
+    } finally {
+      if (previousConfigDir === undefined) delete process.env.GH_CONFIG_DIR;
+      else process.env.GH_CONFIG_DIR = previousConfigDir;
+    }
   });
 
   it('does not expose generic whole-binding replacement or deletion routes', () => {

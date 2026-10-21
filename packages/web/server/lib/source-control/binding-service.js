@@ -31,7 +31,7 @@ const providerRepositoryForEndpoint = (provider, instance, endpoint) => {
   let normalized;
   try { normalized = normalizeGitRemoteEndpoint(endpoint.displayUrl); }
   catch { throw bindingInputError('provider endpoint is invalid'); }
-  const origin = new URL(provider === 'github' ? 'https://github.com' : instance);
+  const origin = new URL(provider === 'github' ? `https://${instance}` : instance);
   const expectedPort = Number(origin.port || (origin.protocol === 'http:' ? 80 : 443));
   if (normalized.host !== origin.hostname.toLowerCase()
     || (normalized.protocol !== 'ssh' && normalized.port !== expectedPort)) {
@@ -722,7 +722,7 @@ export function createBindingService({
           accountId: requiredString(account.accountId, 'credential accountId'),
         };
         if (reference.accountId !== account.accountId) throw bindingInputError('Credential account is invalid');
-        const origin = new URL(reference.provider === 'github' ? 'https://github.com' : reference.instance);
+        const origin = new URL(reference.provider === 'github' ? `https://${reference.instance}` : reference.instance);
         for (const endpoint of [remote.fetch, remote.push]) {
           let parsed;
           try { parsed = normalizeGitRemoteEndpoint(endpoint.rawUrl); }
@@ -904,7 +904,7 @@ export function createBindingService({
             accountId: requiredString(account.accountId, 'credential accountId'),
           };
           if (reference.accountId !== account.accountId) throw bindingInputError('Credential account is invalid');
-          const origin = new URL(reference.provider === 'github' ? 'https://github.com' : reference.instance);
+          const origin = new URL(reference.provider === 'github' ? `https://${reference.instance}` : reference.instance);
           const endpoint = normalizeGitRemoteEndpoint(discovered.endpoint.displayUrl);
           if (origin.protocol !== 'https:' || endpoint.host !== origin.hostname
             || endpoint.port !== Number(origin.port || 443)) throw bindingInputError('Credential account does not match the HTTPS endpoint');

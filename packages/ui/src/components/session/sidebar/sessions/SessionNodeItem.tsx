@@ -451,7 +451,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
     [isVSCode, session],
   );
   const linkedPullLinks = React.useMemo(
-    () => linkedPullRequests.map((link) => ({ item: githubThread('pull', link), url: link.url, title: link.title })),
+    () => linkedPullRequests.map((link) => ({ item: githubThread('pull', link, link.instance), url: link.url, title: link.title })),
     [linkedPullRequests],
   );
   const linkedPullVisuals = useTrackedPullVisualSummaries(linkedPullLinks);
@@ -503,7 +503,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
     [isVSCode, session],
   );
   const linkedGitHubIssueItems = React.useMemo(
-    () => linkedIssues.flatMap((issue) => (issue.source === 'github' ? [githubThread('issue', issue)] : [])),
+    () => linkedIssues.flatMap((issue) => (issue.source === 'github' ? [githubThread('issue', issue, issue.instance)] : [])),
     [linkedIssues],
   );
   const linkedIssueStates = useTrackedIssueStates(linkedGitHubIssueItems);

@@ -26,7 +26,7 @@ export const isFilesystemError = (error: unknown): error is FilesystemError => (
     error
     && typeof error === 'object'
     && 'reason' in error
-    && typeof (error as { reason?: unknown }).reason === 'string'
+    && typeof error.reason === 'string'
   )
 );
 

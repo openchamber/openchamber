@@ -101,14 +101,19 @@ describe('GitHub source-control route aliases', () => {
     });
   });
 
-  it('rejects unsupported GitHub instances', async () => {
+  it('lists a named GitHub Enterprise host as a PAT candidate', async () => {
     const app = express();
     registerGitHubRoutes(app);
 
-    await request(app)
+    const response = await request(app)
       .get('/api/source-control/github/capabilities')
       .query({ instance: 'github.example.com' })
-      .expect(400);
+      .expect(200);
+    expect(response.body.identity).toEqual({ provider: 'github', instance: 'github.example.com' });
+    expect(response.body.authenticationMethods).toMatchObject({
+      device: { available: false, reason: 'invalid-client' },
+      pat: { available: true },
+    });
   });
 
   it('returns 501 for canonical bound reads when binding validation is unavailable', async () => {

@@ -111,7 +111,7 @@ export const readTrackedPullVisualSummary = (
   if (record?.type !== 'pull' || !record.state) return null;
   const identity = item.provider === 'gitlab'
     ? { provider: 'gitlab' as const, instance: item.instance }
-    : { provider: 'github' as const, instance: 'github.com' };
+    : { provider: 'github' as const, instance: item.instance ?? 'github.com' };
   return getLinkedChangeRequestVisualSummary(id, { owner: item.owner, repo: item.repo, number: item.number, url, title }, record.state, identity);
 };
 

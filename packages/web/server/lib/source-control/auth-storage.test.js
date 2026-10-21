@@ -63,6 +63,81 @@ describe('source-control auth storage', () => {
     await expect(store.readInstance(secondOrigin)).resolves.toMatchObject({ activeAccountId: second.id });
   });
 
+  it('migrates a version 2 GitLab-only file to version 3 with an empty GitHub section', async () => {
+    const { directory, filePath, store } = await makeStore();
+    const origin = 'https://gitlab.example.com';
+    await fs.writeFile(filePath, JSON.stringify({
+      version: 2,
+      providers: { gitlab: { instances: { [origin]: {
+        activeCredentialId: 'cred-1',
+        credentials: [
+          { credentialId: 'cred-1', revision: 1, providerUserId: `${origin}#1`, token: 'glpat-1', user: { id: 1, login: 'one' }, source: 'pat', scope: 'api', status: 'valid' },
+        ],
+        cliDisabled: false,
+        cliActive: true,
+      } } } },
+    }), 'utf8');
+
+    await expect(store.readInstance(origin)).resolves.toMatchObject({ activeAccountId: 'cred-1' });
+    expect(JSON.parse(await fs.readFile(filePath, 'utf8'))).toMatchObject({
+      version: 3,
+      providers: {
+        gitlab: { instances: { [origin]: { activeCredentialId: 'cred-1' } } },
+        github: { instances: {} },
+      },
+    });
+  });
+
+  it('round trips a GitHub Enterprise personal access token per host in the github section', async () => {
+    const { store } = await makeStore();
+    const host = 'ghe.example.com';
+    const credential = await store.github.setAccount(host, { accessToken: 'github-pat', user: { id: 42, login: 'ghe-user' }, source: 'pat', scope: 'repo' });
+
+    expect(credential).toMatchObject({
+      credentialId: credential.id,
+      accountId: credential.id,
+      credentialRevision: 1,
+      providerUserId: `${host}#42`,
+      accessToken: 'github-pat',
+      source: 'pat',
+      status: 'valid',
+    });
+    await expect(store.github.listInstances()).resolves.toEqual([host]);
+    await expect(store.github.readAccount(host, credential.id, credential.credentialRevision)).resolves.toMatchObject({ accessToken: 'github-pat' });
+    await expect(store.github.readAccount('other.example.com', credential.id)).resolves.toBeNull();
+    await expect(store.github.readAccountAnyInstance(credential.id)).resolves.toMatchObject({ accessToken: 'github-pat', host });
+  });
+
+  it('keeps GitHub Enterprise hosts apart from GitLab origins in the same file', async () => {
+    const { store } = await makeStore();
+    const host = 'ghe.example.com';
+    const credential = await store.github.setAccount(host, { accessToken: 'pat', user: { id: 1, login: 'one' }, source: 'pat' });
+    await store.setAccount('https://gitlab.example.com', { token: 'glpat', user: { id: 1, login: 'one' }, source: 'pat' });
+
+    await expect(store.github.listAccounts(host)).resolves.toHaveLength(1);
+    await expect(store.listInstances()).resolves.toEqual(['https://gitlab.example.com']);
+    await expect(store.github.readAccount('https://gitlab.example.com', credential.id)).resolves.toBeNull();
+    await expect(store.github.readAccountAnyInstance(credential.id)).resolves.toMatchObject({ accessToken: 'pat', host });
+  });
+
+  it('targets one GitHub Enterprise credential while a sibling remains valid and keeps the host gh switch per host', async () => {
+    const { store } = await makeStore();
+    const host = 'ghe.example.com';
+    const first = await store.github.setAccount(host, { accessToken: 'one', user: { id: 1, login: 'one' }, source: 'pat' });
+    const second = await store.github.setAccount(host, { accessToken: 'two', user: { id: 2, login: 'two' }, source: 'pat' });
+
+    await expect(store.github.readAccount(host, first.id)).resolves.toMatchObject({ accessToken: 'one' });
+    await expect(store.github.markAccountInvalid(host, first.id, 'unauthorized')).resolves.toBe(true);
+    await expect(store.github.readAccount(host, first.id)).resolves.toBeNull();
+    await expect(store.github.readAccount(host, second.id)).resolves.toMatchObject({ accessToken: 'two' });
+    await expect(store.github.removeAccount(host, first.id)).resolves.toBe(false);
+    await expect(store.github.setCliActive(host, true)).resolves.toBe(true);
+    await expect(store.github.readInstance(host)).resolves.toMatchObject({ cliActive: true });
+    await expect(store.github.setCliDisabled(host, true)).resolves.toBe(true);
+    await expect(store.github.readInstance(host)).resolves.toMatchObject({ cliActive: false, cliDisabled: true });
+    await expect(store.github.setCliActive(host, true)).resolves.toBe(false);
+  });
+
   it('treats missing files as empty and rejects malformed or unsupported files without rewriting them', async () => {
     const { filePath, store } = await makeStore();
     await expect(store.readInstance('https://gitlab.com')).resolves.toEqual({ activeAccountId: null, accounts: [], cliDisabled: false, cliActive: false });

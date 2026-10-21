@@ -307,6 +307,53 @@ describe('source-control auth store', () => {
     expect(useSourceControlAuthStore.getState().entries[getSourceControlAuthKey(otherIdentity)]?.status?.status).toBe('unreachable');
   });
 
+  test('a forced instance refresh does not join an in-flight non-forced read', async () => {
+    const nonForcedResponse = deferred<SourceControlIdentity[]>();
+    const forcedResponse = deferred<SourceControlIdentity[]>();
+    const firstList = [{ ...identity, instance: 'https://gitlab.example.com/first' }];
+    const secondList = [{ ...identity, instance: 'https://gitlab.example.com/second' }];
+    let calls = 0;
+    const sourceControl = {
+      authInstances: mock(() => {
+        calls += 1;
+        return calls === 1 ? nonForcedResponse.promise : forcedResponse.promise;
+      }),
+    };
+    const store = useSourceControlAuthStore.getState();
+    const nonForced = store.refreshInstances(sourceControl);
+    const forced = store.refreshInstances(sourceControl, { force: true });
+    expect(calls).toBe(2);
+    nonForcedResponse.resolve(firstList);
+    await nonForced;
+    forcedResponse.resolve(secondList);
+    expect(await forced).toEqual(secondList);
+    expect(useSourceControlAuthStore.getState().identities).toEqual(secondList);
+  });
+
+  test('a stale non-forced read cannot overwrite a newer forced list', async () => {
+    const staleResponse = deferred<SourceControlIdentity[]>();
+    const forcedResponse = deferred<SourceControlIdentity[]>();
+    const staleList = [{ ...identity, instance: 'https://gitlab.example.com/stale' }];
+    const freshList = [{ ...identity, instance: 'https://gitlab.example.com/fresh' }];
+    let calls = 0;
+    const sourceControl = {
+      authInstances: mock(() => {
+        calls += 1;
+        return calls === 1 ? staleResponse.promise : forcedResponse.promise;
+      }),
+    };
+    const store = useSourceControlAuthStore.getState();
+    const nonForced = store.refreshInstances(sourceControl);
+    const forced = store.refreshInstances(sourceControl, { force: true });
+    expect(calls).toBe(2);
+    // The forced read answers first; the non-forced read that started before it
+    // resolves later and must not replace the newer forced result.
+    forcedResponse.resolve(freshList);
+    staleResponse.resolve(staleList);
+    await Promise.all([forced, nonForced]);
+    expect(useSourceControlAuthStore.getState().identities).toEqual(freshList);
+  });
+
   test('App auth bootstrap follows reachability and endpoint epochs without subscribing to auth results', () => {
     const appSource = readFileSync(new URL('../App.tsx', import.meta.url), 'utf8');
     // The effect also bootstraps Linear, which is not a source-control

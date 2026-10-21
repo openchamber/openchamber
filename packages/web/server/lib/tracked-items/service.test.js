@@ -44,6 +44,7 @@ describe('tracked items service', () => {
 
     expect(calls.github).toHaveLength(1);
     expect(calls.github[0]).toEqual({
+      instance: 'github.com',
       accountId: null,
       pulls: [{ owner: 'acme', repo: 'app', number: 1 }, { owner: 'acme', repo: 'app', number: 9 }],
       issues: [{ owner: 'acme', repo: 'app', number: 2 }],
@@ -53,6 +54,16 @@ describe('tracked items service', () => {
     const keysFor = (id) => sent.filter((entry) => entry.id === id).flatMap((entry) => entry.event.properties.states.map((state) => state.key)).sort();
     expect(keysFor('c1')).toEqual([githubPull(1), githubIssue(2), gitlabPull(3), linearIssue('OPE-7')].map(trackedItemKey).sort());
     expect(keysFor('c2')).toEqual([trackedItemKey(githubPull(9))]);
+  });
+
+  it('groups GitHub items per host, so one enterprise instance never shares a github.com slot', async () => {
+    const { service, calls } = setup();
+    service.setInterest('c1', itemsOf(githubPull(1), { ...githubPull(2), instance: 'github.acme.com' }));
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(calls.github).toHaveLength(2);
+    expect(calls.github[0]).toEqual({ instance: 'github.com', accountId: null, pulls: [{ owner: 'acme', repo: 'app', number: 1 }], issues: [] });
+    expect(calls.github[1]).toEqual({ instance: 'github.acme.com', accountId: null, pulls: [{ owner: 'acme', repo: 'app', number: 2 }], issues: [] });
   });
 
   it('stays quiet while nothing changed and while the client is hidden, and catches up when it returns', async () => {
@@ -178,7 +189,10 @@ describe('tracked item parsing', () => {
     expect([...items.keys()]).toEqual(['gitlab|https://gitlab.com|pull|group/sub/app#3']);
     // The same pull request read with a bound account is a separate item.
     const bound = parseTrackedItems([{ ...githubPull(1), accountId: 'github.com#7' }, githubPull(1)], 10);
-    expect([...bound.keys()]).toEqual(['github|pull|acme/app#1@github.com#7', 'github|pull|acme/app#1']);
+    expect([...bound.keys()]).toEqual(['github|github.com|pull|acme/app#1@github.com#7', 'github|github.com|pull|acme/app#1']);
+    // The same owner/repo on an enterprise host is a different item.
+    const hosts = parseTrackedItems([githubPull(1), { ...githubPull(1), instance: 'github.acme.com' }], 10);
+    expect([...hosts.keys()]).toEqual(['github|github.com|pull|acme/app#1', 'github|github.acme.com|pull|acme/app#1']);
     expect(parseTrackedItems('nope', 10)).toBeNull();
     expect(parseTrackedItems([gitlabPull(1), gitlabPull(2)], 1)).toBeNull();
   });

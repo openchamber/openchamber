@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { markGitHubAuthAccountInvalid } from '../github/auth.js';
-import { getOctokitForAccountId } from '../github/octokit.js';
+import { getOctokitForAccountId, getOctokitForHost } from '../github/octokit.js';
 import { resolveGitHubRepoFromDirectory } from '../github/repo/index.js';
 import { resolveRepoNetwork } from '../github/repo/fork-detection.js';
 
@@ -10,13 +10,16 @@ const sameRepository = (left, right) => left.owner.toLowerCase() === right.owner
 /**
  * The account and repository a pull request read goes to.
  *
- * The account comes from the exact read context and the repository from the
- * binding's primary remote. A caller may name the repository the pull request
- * lives in (`sourceRepo`). It is honoured only inside the bound repository's
- * network, the repository and the upstream it was forked from, which is exactly
- * what the bound pull request list reads with the same account. So every listed
- * pull request can be opened, and a name outside that network fails instead of
- * reaching a repository the binding never covered.
+ * The host comes from the local checkout, not the pull request: sourceRepo
+ * carries only owner/repo (the upstream for a fork), never the enterprise
+ * host. The octokit for that host pairs that host with the token for that
+ * host: github.com (or an omitted host) takes the read context's account; an
+ * enterprise host is served by its own host-pinned gh token. A caller may name the repository the pull
+ * request lives in (`sourceRepo`). It is honoured only inside the bound
+ * repository's network, the repository and the upstream it was forked from,
+ * which is exactly what the bound pull request list reads with the same
+ * account. So every listed pull request can be opened, and a name outside that
+ * network fails instead of reaching a repository the binding never covered.
  */
 async function resolvePullRequestRepo(directory, number, readContext, { sourceRepo = null, ...dependencies } = {}) {
   if (!readContext || readContext.provider !== 'github') {
@@ -25,22 +28,6 @@ async function resolvePullRequestRepo(directory, number, readContext, { sourceRe
       code: 'INVALID_SOURCE_CONTROL_READ_CONTEXT',
     });
   }
-  const getExactOctokit = dependencies.getOctokitForAccountId ?? getOctokitForAccountId;
-  const account = await getExactOctokit(readContext.accountId, {
-    onUnauthorized: async (identity, persisted) => {
-      await dependencies.onAccountUnavailable?.(identity);
-      if (persisted) await markGitHubAuthAccountInvalid(identity.accountId, 'unauthorized');
-    },
-  });
-  if (!account) {
-    throw Object.assign(new Error('GitHub account is unavailable'), {
-      statusCode: 401,
-      code: 'github-not-connected',
-    });
-  }
-
-  // The resolver returns `{ repo, remoteUrl }`, not the repo itself. Reading
-  // `.owner` off the wrapper made this check fail for every repository.
   const resolveRepository = dependencies.resolveGitHubRepoFromDirectory ?? resolveGitHubRepoFromDirectory;
   const { repo } = await resolveRepository(directory, readContext.primaryRemote);
   if (!repo?.owner || !repo?.repo) {
@@ -49,6 +36,34 @@ async function resolvePullRequestRepo(directory, number, readContext, { sourceRe
       code: 'no-github-remote',
     });
   }
+  const hostKey = String(repo.host ?? '').trim().toLowerCase();
+  let account;
+  if (hostKey && hostKey !== 'github.com') {
+    const getHostOctokit = dependencies.getOctokitForHost ?? getOctokitForHost;
+    const octokit = await getHostOctokit(hostKey);
+    if (!octokit) {
+      throw Object.assign(new Error('GitHub account is unavailable'), {
+        statusCode: 401,
+        code: 'github-not-connected',
+      });
+    }
+    account = { accountId: null, octokit };
+  } else {
+    const getExactOctokit = dependencies.getOctokitForAccountId ?? getOctokitForAccountId;
+    account = await getExactOctokit(readContext.accountId, {
+      onUnauthorized: async (identity, persisted) => {
+        await dependencies.onAccountUnavailable?.(identity);
+        if (persisted) await markGitHubAuthAccountInvalid(identity.accountId, 'unauthorized');
+      },
+    });
+    if (!account) {
+      throw Object.assign(new Error('GitHub account is unavailable'), {
+        statusCode: 401,
+        code: 'github-not-connected',
+      });
+    }
+  }
+
   let target = repo;
   if (sourceRepo && !sameRepository(sourceRepo, repo)) {
     const resolveNetwork = dependencies.resolveRepoNetwork ?? resolveRepoNetwork;

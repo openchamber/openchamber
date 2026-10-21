@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildReferenceSearchQuery, fetchReferenceDetail, parseReferenceLookup, readReferencePeople, readReferenceState, searchGitHubReferencesAcross, toReference } from './reference-search.js';
+import { buildReferenceSearchQuery, fetchReferenceDetail, parseReferenceLookup, readPullStatusRefs, readReferencePeople, readReferenceState, searchGitHubReferencesAcross, toReference } from './reference-search.js';
 
 const origin = { owner: 'acme', repo: 'app', source: 'origin' };
 const upstream = { owner: 'Upstream', repo: 'App', source: 'upstream' };
@@ -19,6 +19,72 @@ const common = (number, repository = { name: 'app', owner: { login: 'acme' } }) 
   repository,
 });
 
+describe('buildReferenceSearchQuery', () => {
+  it('lists open items of one kind across the network, newest activity first', () => {
+    expect(buildReferenceSearchQuery({ repos, kind: 'issue', state: 'open', people: 'any', text: '' }))
+      .toBe('repo:acme/app repo:Upstream/App is:issue is:open sort:updated-desc');
+    expect(buildReferenceSearchQuery({ repos: [origin], kind: 'pull', state: 'open', people: 'reviewRequested', text: ' crash ' }))
+      .toBe('repo:acme/app is:pr is:open sort:updated-desc review-requested:@me crash');
+  });
+
+  it('combines a state with whose items they are', () => {
+    expect(buildReferenceSearchQuery({ repos: [origin], kind: 'pull', state: 'closed', people: 'created', text: '' }))
+      .toBe('repo:acme/app is:pr is:closed sort:updated-desc author:@me');
+    expect(buildReferenceSearchQuery({ repos: [origin], kind: 'pull', state: 'merged', people: 'assigned', text: '' }))
+      .toBe('repo:acme/app is:pr is:merged sort:updated-desc assignee:@me');
+    expect(buildReferenceSearchQuery({ repos: [origin], kind: 'issue', state: 'all', people: 'any', text: '' }))
+      .toBe('repo:acme/app is:issue sort:updated-desc');
+  });
+
+  it('reads issue-only nonsense as the nearest list: merged as closed, review requests as anyone', () => {
+    expect(buildReferenceSearchQuery({ repos: [origin], kind: 'issue', state: 'merged', people: 'reviewRequested', text: '' }))
+      .toBe('repo:acme/app is:issue is:closed sort:updated-desc');
+  });
+
+  it('leaves state and sort to the user when their text sets them', () => {
+    expect(buildReferenceSearchQuery({ repos: [origin], kind: 'issue', state: 'open', people: 'assigned', text: 'is:closed sort:created-asc' }))
+      .toBe('repo:acme/app is:issue assignee:@me is:closed sort:created-asc');
+  });
+
+  it('reads unknown values as open and anyone', () => {
+    expect(readReferenceState('everything')).toBe('open');
+    expect(readReferenceState('merged')).toBe('merged');
+    expect(readReferencePeople('everyone')).toBe('any');
+    expect(readReferencePeople('created')).toBe('created');
+  });
+});
+
+describe('readPullStatusRefs', () => {
+  it('reads `owner/repo#number` refs without a host as github.com', () => {
+    expect(readPullStatusRefs('acme/app#1,  Upstream/App#42 ,acme/app#1')).toEqual([
+      { owner: 'acme', repo: 'app', number: 1 },
+      { owner: 'Upstream', repo: 'App', number: 42 },
+    ]);
+  });
+
+  it('carries an enterprise host, normalised, and keeps same-numbered refs on different hosts apart', () => {
+    expect(readPullStatusRefs('acme/app#1@GHE.Example.com')).toEqual([{ owner: 'acme', repo: 'app', number: 1, host: 'ghe.example.com' }]);
+    expect(readPullStatusRefs('acme/app#1@ghe.example.com,acme/app#1')).toEqual([
+      { owner: 'acme', repo: 'app', number: 1, host: 'ghe.example.com' },
+      { owner: 'acme', repo: 'app', number: 1 },
+    ]);
+  });
+
+  it('treats an explicit github.com host as the default', () => {
+    expect(readPullStatusRefs('acme/app#1@github.com,acme/app#2@github.com')).toEqual([
+      { owner: 'acme', repo: 'app', number: 1 },
+      { owner: 'acme', repo: 'app', number: 2 },
+    ]);
+  });
+
+  it('rejects an empty, malformed, or oversized list', () => {
+    expect(readPullStatusRefs('')).toBeNull();
+    expect(readPullStatusRefs('acme/app#x')).toBeNull();
+    expect(readPullStatusRefs('acme/app')).toBeNull();
+    expect(readPullStatusRefs('acme/app#1@a@b')).toBeNull();
+    expect(readPullStatusRefs(Array.from({ length: 31 }, (_, index) => `acme/app#${index + 1}`).join(','))).toBeNull();
+  });
+});
 describe('searchGitHubReferencesAcross', () => {
   const entries = Array.from({ length: 85 }, (_value, index) => ({ owner: 'acme', repo: `repo${index}`, source: 'origin', directory: `/folder/${index}` }));
   const node = (number, repo, updatedAt) => ({ __typename: 'Issue', ...common(number, { name: repo, owner: { login: 'acme' } }), updatedAt, state: 'OPEN', stateReason: null });
@@ -117,40 +183,6 @@ describe('searchGitHubReferencesAcross', () => {
   });
 });
 
-describe('buildReferenceSearchQuery', () => {
-  it('lists open items of one kind across the network, newest activity first', () => {
-    expect(buildReferenceSearchQuery({ repos, kind: 'issue', state: 'open', people: 'any', text: '' }))
-      .toBe('repo:acme/app repo:Upstream/App is:issue is:open sort:updated-desc');
-    expect(buildReferenceSearchQuery({ repos: [origin], kind: 'pull', state: 'open', people: 'reviewRequested', text: ' crash ' }))
-      .toBe('repo:acme/app is:pr is:open sort:updated-desc review-requested:@me crash');
-  });
-
-  it('combines a state with whose items they are', () => {
-    expect(buildReferenceSearchQuery({ repos: [origin], kind: 'pull', state: 'closed', people: 'created', text: '' }))
-      .toBe('repo:acme/app is:pr is:closed sort:updated-desc author:@me');
-    expect(buildReferenceSearchQuery({ repos: [origin], kind: 'pull', state: 'merged', people: 'assigned', text: '' }))
-      .toBe('repo:acme/app is:pr is:merged sort:updated-desc assignee:@me');
-    expect(buildReferenceSearchQuery({ repos: [origin], kind: 'issue', state: 'all', people: 'any', text: '' }))
-      .toBe('repo:acme/app is:issue sort:updated-desc');
-  });
-
-  it('reads issue-only nonsense as the nearest list: merged as closed, review requests as anyone', () => {
-    expect(buildReferenceSearchQuery({ repos: [origin], kind: 'issue', state: 'merged', people: 'reviewRequested', text: '' }))
-      .toBe('repo:acme/app is:issue is:closed sort:updated-desc');
-  });
-
-  it('leaves state and sort to the user when their text sets them', () => {
-    expect(buildReferenceSearchQuery({ repos: [origin], kind: 'issue', state: 'open', people: 'assigned', text: 'is:closed sort:created-asc' }))
-      .toBe('repo:acme/app is:issue assignee:@me is:closed sort:created-asc');
-  });
-
-  it('reads unknown values as open and anyone', () => {
-    expect(readReferenceState('everything')).toBe('open');
-    expect(readReferenceState('merged')).toBe('merged');
-    expect(readReferencePeople('everyone')).toBe('any');
-    expect(readReferencePeople('created')).toBe('created');
-  });
-});
 
 describe('parseReferenceLookup', () => {
   it('looks a number up in every repo of the network', () => {

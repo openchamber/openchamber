@@ -808,6 +808,25 @@ describe('GitHub account routes', () => {
     ]);
   });
 
+  it('invalidates the enterprise host account a 401 rejected on a canonical read', async () => {
+    const stored = await auth.setGitHubAuthForHost('github.example.com', {
+      accessToken: 'ghe-pat-token', user: { id: 11, login: 'ghe-user' }, source: 'pat',
+    });
+    const onAccountInvalidated = vi.fn();
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ message: 'Bad credentials' }, { status: 401 })));
+    await request(makeApp({
+      onAccountInvalidated,
+      resolveGitHubRepoFromDirectory: vi.fn(async () => ({ repo: { owner: 'owner', repo: 'repo' } })),
+    })).get('/api/source-control/github/repo/branches')
+      .query(boundQuery(stored.accountId, { owner: 'owner', repo: 'repo', instance: 'github.example.com' })).expect(401);
+
+    expect(onAccountInvalidated).toHaveBeenCalledWith({ provider: 'github', instance: 'github.example.com', accountId: stored.accountId });
+    expect(await auth.getGitHubAuthAccountsForHost('github.example.com')).toEqual([
+      expect.objectContaining({ id: stored.accountId, status: 'invalid' }),
+    ]);
+    expect(await auth.getGitHubAuthByAccountId(stored.accountId)).toBeNull();
+  });
+
   it('keeps the exact account valid after a network failure', async () => {
     const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 7, login: 'first' } });
     const onAccountInvalidated = vi.fn();
@@ -1167,16 +1186,48 @@ describe('gh CLI account consent', () => {
   let previousPath;
 
   beforeEach(async () => {
-    // A fake `gh` on PATH stands in for a real gh login.
+    // A fake `gh` on PATH stands in for a real gh login; every invocation is
+    // recorded so tests prove the instance switch gates it.
     const bin = path.join(directory, 'bin');
     await fs.mkdir(bin);
-    await fs.writeFile(path.join(bin, 'gh'), '#!/bin/sh\necho cli-token\n', { mode: 0o755 });
+    await fs.writeFile(path.join(bin, 'gh'), `#!/bin/sh\nprintf '%s\\n' "$GH_HOST" >> '${path.join(directory, 'invoked-hosts.txt')}'\necho cli-token\n`, { mode: 0o755 });
     previousPath = process.env.PATH;
     process.env.PATH = `${bin}${path.delimiter}${previousPath}`;
   });
 
   afterEach(() => {
     process.env.PATH = previousPath;
+  });
+
+  it('lists capabilities for a trusted enterprise host', async () => {
+    const ghConfigDir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-gh-hosts-'));
+    await fs.writeFile(path.join(ghConfigDir, 'hosts.yml'), 'github.example.com:\n  user: ghe-user\n  oauth_token: gho_ghe\n');
+    const previousConfigDir = process.env.GH_CONFIG_DIR;
+    const previousClientId = process.env.OPENCHAMBER_GITHUB_CLIENT_ID;
+    process.env.GH_CONFIG_DIR = ghConfigDir;
+    try {
+      const response = await request(makeApp()).get('/api/source-control/github/capabilities?instance=github.example.com').expect(200);
+      expect(response.body.identity).toEqual({ provider: 'github', instance: 'github.example.com' });
+      expect(response.body.authenticationMethods).toEqual({
+        device: { available: false, reason: 'invalid-client' },
+        pat: { available: true },
+        cli: { available: true },
+      });
+      expect(response.body.changeRequests).toBe(true);
+      // The device flow is github.com-only: auth/start and device-flow.js hardcode
+      // the github.com device URLs, so an operator client-id override must not
+      // make a GHE host advertise a flow the server cannot run on that host.
+      process.env.OPENCHAMBER_GITHUB_CLIENT_ID = 'override-client-id';
+      const withOverride = await request(makeApp()).get('/api/source-control/github/capabilities?instance=github.example.com').expect(200);
+      expect(withOverride.body.authenticationMethods.device).toEqual({ available: false, reason: 'invalid-client' });
+    } finally {
+      if (previousClientId === undefined) delete process.env.OPENCHAMBER_GITHUB_CLIENT_ID;
+      else process.env.OPENCHAMBER_GITHUB_CLIENT_ID = previousClientId;
+      if (previousConfigDir === undefined) delete process.env.GH_CONFIG_DIR;
+      else process.env.GH_CONFIG_DIR = previousConfigDir;
+    }
+    const response = await request(makeApp()).get('/api/source-control/github/capabilities?instance=untrusted.example.com').expect(200);
+    expect(response.body.authenticationMethods.pat).toEqual({ available: true });
   });
 
   const stubGitHubUsers = () => {
@@ -1238,6 +1289,144 @@ describe('gh CLI account consent', () => {
     const { getOctokitOrNull } = await import('./octokit.js');
     await (await getOctokitOrNull()).rest.users.getAuthenticated();
     expect(usedCliToken(fetch)).toBe(false);
+  });
+
+  it('lists a trusted enterprise host gh login as an offer row without running gh or asking the host while its switch is off', async () => {
+    const ghConfigDir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-gh-hosts-'));
+    await fs.writeFile(path.join(ghConfigDir, 'hosts.yml'), 'github.example.com:\n  user: ghe-user\n  oauth_token: gho_ghe\n');
+    const previousConfigDir = process.env.GH_CONFIG_DIR;
+    process.env.GH_CONFIG_DIR = ghConfigDir;
+    const ghInvokedFile = path.join(directory, 'invoked-hosts.txt');
+    const fetch = vi.fn(async (url, init) => {
+      const authorization = new Headers(init?.headers).get('authorization');
+      if (String(url) === 'https://github.example.com/api/v3/user' && authorization === 'token cli-token') {
+        return Response.json({ id: 42, login: 'ghe-user' });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetch);
+    try {
+      const before = await request(makeApp()).get('/api/source-control/github/auth/status?instance=github.example.com').expect(200);
+      // The instance's gh login is listed even before activation, the same
+      // offer the GitLab card makes for glab: the answer stays disconnected
+      // so the account row can offer the switch, and — while the switch is off —
+      // the login is built from hosts.yml alone: no gh process ran and no request
+      // went to the host, and its token is used only after the user activates
+      // that instance. The listing's id is 0, which GitHub never assigns, so it
+      // can never name a real stored account; the Use offer resolves the real id
+      // through gh once the user switches that host on.
+      expect(before.body).toMatchObject({
+        connected: false,
+        accounts: [{ id: 'github.example.com#cli:0', current: false, status: 'valid', user: { id: 0, login: 'ghe-user' } }],
+      });
+      expect(before.body.cli).toMatchObject({ available: true, active: false, user: { id: 0, login: 'ghe-user' } });
+      expect(await fs.access(ghInvokedFile).then(() => true, () => false)).toBe(false);
+      expect(fetch).not.toHaveBeenCalled();
+      // Activating the enterprise instance via the card's own route still works:
+      // the activation runs gh for that host, verifies the gh token against the
+      // host, then switches only that host on.
+      const response = await request(makeApp()).post('/api/source-control/github/auth/activate?instance=github.example.com')
+        .send({ accountId: 'github.example.com#cli:42' }).expect(200);
+      expect(response.body).toMatchObject({
+        connected: true,
+        user: { id: 42, login: 'ghe-user' },
+        accounts: [{ id: 'github.example.com#cli:42', providerUserId: 'github.example.com#42', current: true, status: 'valid' }],
+      });
+      expect(response.body.cli).toMatchObject({ available: true, active: true });
+      // The activation belongs to that instance: its own switch is on, and
+      // github.com's and any other host's stay as they were.
+      expect(await auth.isGhCliActiveForHost('github.example.com')).toBe(true);
+      expect(await auth.isGhCliActiveForHost('other.example.com')).toBe(false);
+      expect(auth.isGhCliActive()).toBe(false);
+    } finally {
+      if (previousConfigDir === undefined) delete process.env.GH_CONFIG_DIR;
+      else process.env.GH_CONFIG_DIR = previousConfigDir;
+    }
+  });
+
+  it('keeps an enterprise host switch through a network failure and drops it once gh is rejected', async () => {
+    const ghConfigDir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-gh-hosts-'));
+    await fs.writeFile(path.join(ghConfigDir, 'hosts.yml'), 'github.example.com:\n  user: ghe-user\n  oauth_token: gho_ghe\n');
+    const previousConfigDir = process.env.GH_CONFIG_DIR;
+    process.env.GH_CONFIG_DIR = ghConfigDir;
+    await auth.setGhCliActiveForHost('github.example.com', true);
+    let answer = 'network';
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      if (answer === 'network') throw new TypeError('fetch failed');
+      return Response.json({ message: 'Bad credentials' }, { status: 401 });
+    }));
+    try {
+      await request(makeApp()).get('/api/source-control/github/auth/status?instance=github.example.com').expect(200);
+      expect(await auth.isGhCliActiveForHost('github.example.com')).toBe(true);
+
+      answer = 'rejected';
+      await request(makeApp()).get('/api/source-control/github/auth/status?instance=github.example.com').expect(200);
+      expect(await auth.isGhCliActiveForHost('github.example.com')).toBe(false);
+    } finally {
+      if (previousConfigDir === undefined) delete process.env.GH_CONFIG_DIR;
+      else process.env.GH_CONFIG_DIR = previousConfigDir;
+      vi.unstubAllGlobals();
+    }
+  });
+
+  // The card's "Use gh cli" offer sends back exactly the listing id it was given,
+  // the placeholder `#cli:0`, if a real id was never resolved. This proves that
+  // path — status lists the host gh login, and activating by that same id turns
+  // the host on with the real id gh resolves.
+  it('activates a host gh login from the placeholder id the card lists', async () => {
+    const ghConfigDir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-gh-hosts-'));
+    await fs.writeFile(path.join(ghConfigDir, 'hosts.yml'), 'github.example.com:\n  user: ghe-user\n  oauth_token: gho_ghe\n');
+    const previousConfigDir = process.env.GH_CONFIG_DIR;
+    process.env.GH_CONFIG_DIR = ghConfigDir;
+    vi.stubGlobal('fetch', vi.fn(async (url, init) => {
+      const authorization = new Headers(init?.headers).get('authorization');
+      if (String(url) === 'https://github.example.com/api/v3/user' && authorization === 'token cli-token') {
+        return Response.json({ id: 42, login: 'ghe-user' });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    }));
+    try {
+      const before = await request(makeApp()).get('/api/source-control/github/auth/status?instance=github.example.com').expect(200);
+      expect(before.body.accounts).toMatchObject([{ id: 'github.example.com#cli:0', current: false, status: 'valid', user: { id: 0, login: 'ghe-user' } }]);
+      const response = await request(makeApp()).post('/api/source-control/github/auth/activate?instance=github.example.com')
+        .send({ accountId: 'github.example.com#cli:0' }).expect(200);
+      expect(response.body).toMatchObject({
+        connected: true,
+        user: { id: 42, login: 'ghe-user' },
+        accounts: [{ id: 'github.example.com#cli:42', providerUserId: 'github.example.com#42', current: true, status: 'valid' }],
+      });
+      expect(response.body.cli).toMatchObject({ available: true, active: true });
+    } finally {
+      if (previousConfigDir === undefined) delete process.env.GH_CONFIG_DIR;
+      else process.env.GH_CONFIG_DIR = previousConfigDir;
+      vi.unstubAllGlobals();
+    }
+  });
+
+  // A trusted host the person has not signed into gh for (named by GH_HOST) never
+  // offers its cli account and refuses activation, so the card stays PAT-only
+  // until a gh login for that host exists. `gh` is shimmed on PATH to fail, the
+  // deterministic stand-in for \"not signed in\" (a real `gh` would answer from
+  // its config or ambient credentials).
+  it('does not offer or accept gh for a trusted host with no gh login', async () => {
+    const shimDir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-gh-ghshim-'));
+    await fs.writeFile(path.join(shimDir, 'gh'), '#!/bin/sh\nexit 1\n');
+    await fs.chmod(path.join(shimDir, 'gh'), 0o755);
+    const previousHost = process.env.GH_HOST;
+    const previousPath = process.env.PATH;
+    process.env.PATH = `${shimDir}${path.delimiter}${previousPath}`;
+    process.env.GH_HOST = 'ghe.not-logged-in.example';
+    try {
+      const status = await request(makeApp()).get('/api/source-control/github/auth/status?instance=ghe.not-logged-in.example').expect(200);
+      expect(status.body).toMatchObject({ connected: false, accounts: [], cli: { available: false, active: false, disabled: false } });
+      await request(makeApp()).post('/api/source-control/github/auth/activate?instance=ghe.not-logged-in.example')
+        .send({ accountId: 'ghe.not-logged-in.example#cli:1' }).expect(404);
+    } finally {
+      if (previousHost === undefined) delete process.env.GH_HOST;
+      else process.env.GH_HOST = previousHost;
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+    }
   });
 
   it('keeps the switch to the gh account through a network failure and drops it once gh is rejected', async () => {

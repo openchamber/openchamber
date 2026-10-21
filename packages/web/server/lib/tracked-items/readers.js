@@ -16,24 +16,36 @@ export function createTrackedItemReaders({
   readGitLabLiveSummaries,
 }) {
   return {
-    async github({ accountId = null, pulls, issues }) {
+    async github({ instance = null, accountId = null, pulls, issues }) {
       const [github, { fetchPrSummaries, isGraphqlRateLimitError }, rateLimit] = await Promise.all([
         loadGitHub(), loadGitHubSummaries(), loadGitHubRateLimit(),
       ]);
-      if (rateLimit.isGitHubRateLimited()) return { status: 'unavailable' };
-      // A bound repository is read with its own account, a linked item with the current one.
-      const octokit = accountId
-        ? (await github.getOctokitForAccountId(accountId))?.octokit ?? null
-        : await github.getOctokitOrNull();
+      // The item's instance is its host; missing means github.com. Cooldowns are
+      // keyed per host, so one enterprise instance's rate limit or 401 is that
+      // host's problem only and never pauses github.com (or another instance).
+      const host = String(instance ?? '').trim().toLowerCase() || 'github.com';
+      if (rateLimit.isGitHubRateLimited(host)) return { status: 'unavailable' };
+      // A bound repository is read with its own account: on github.com and on a
+      // trusted enterprise host alike, the named account (a per-instance PAT or
+      // a gh account) resolves with `getOctokitForAccountId`, which refuses
+      // untrusted or nonexistent accounts with null. Only an absent bound
+      // account — or one that no longer resolves — falls back to the host's
+      // current credential, which is itself null for an untrusted host, so an
+      // untrusted host still reads nothing.
+      const bound = accountId ? await github.getOctokitForAccountId(accountId) : null;
+      const octokit = bound?.octokit ?? await github.getOctokitOrNull(host);
       if (!octokit) return { status: 'disconnected' };
       try {
         const { summaries, issueSummaries } = await fetchPrSummaries({ octokit, refs: pulls, issueRefs: issues });
         return { status: 'ok', pulls: summaries, issues: issueSummaries };
       } catch (error) {
+        // A github.com 401 means the stored login is gone; an enterprise 401
+        // (its gh token went stale) is that host's alone. Both are that response:
+        // the service backs off per host and never touches another host's login.
         if ((error?.status ?? error?.response?.status) === 401) return { status: 'disconnected' };
         if (isGraphqlRateLimitError(error) || rateLimit.isGitHubRateLimitError(error)) {
-          // The shared cooldown also holds back every other GitHub read.
-          rateLimit.noteGitHubRateLimit(error);
+          // The cooldown is keyed per host, as `isGitHubRateLimited` above.
+          rateLimit.noteGitHubRateLimit(error, host);
           return { status: 'unavailable' };
         }
         throw error;

@@ -161,7 +161,7 @@ describe('tray approvals carry whether a permission can be remembered', () => {
   let dom: Window;
   let root: Root;
   const snapshots: Array<{ approvals?: Array<{ id: string; canSave: boolean }> }> = [];
-  const invoke = async (command: string, args?: unknown) => {
+  const invoke = async (command: string, args?: { approvals?: Array<{ id: string; canSave: boolean }> }) => {
     if (command === 'desktop_tray_update') snapshots.push(args as never);
     return null;
   };
