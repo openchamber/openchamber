@@ -221,6 +221,18 @@ describe('createParsedStatus', () => {
         expect(statusOf([tool('1', 'read'), tool('2', 'read', 'completed')]).statusText).toBe('reading a file');
     });
 
+    test('names the running command or file in the status chip', () => {
+        const shell = tool('1', 'shell');
+        if (shell.type !== 'tool') throw new Error('expected a tool');
+        shell.state = { status: 'running', input: { command: 'npm test' }, time: { start: 1 } };
+        expect(statusOf([shell]).statusText).toBe('running a command · npm test');
+
+        const edit = tool('1', 'edit');
+        if (edit.type !== 'tool') throw new Error('expected a tool');
+        edit.state = { status: 'running', input: { path: 'src/a.ts' }, time: { start: 1 } };
+        expect(statusOf([edit]).statusText).toBe('editing a file · src/a.ts');
+    });
+
     test('shows the newest kind when different tools run together', () => {
         expect(statusOf([tool('1', 'read'), tool('2', 'shell')]).statusText).toBe('running a command');
         expect(statusOf([tool('1', 'shell'), tool('2', 'read')]).statusText).toBe('reading a file');

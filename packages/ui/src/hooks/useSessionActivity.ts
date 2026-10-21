@@ -1,5 +1,5 @@
 import React from 'react';
-import { getLastConversationMessage, isIncompleteAssistantTurn, type Message } from '@/lib/opencode/model';
+import { getLastConversationMessage, hasRunningToolInTurn, isIncompleteAssistantTurn, type Message } from '@/lib/opencode/model';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessionStatus, useSessionMessagesSelector, useSessionPermissions, useSessionForms } from '@/sync/sync-context';
 
@@ -39,6 +39,13 @@ const IDLE_RESULT: SessionActivityResult = {
 export function useSessionActivity(sessionId: string | null | undefined, directory?: string): SessionActivityResult {
   const status = useSessionStatus(sessionId ?? '', directory);
   const hasPendingAssistant = useSessionMessagesSelector(sessionId ?? '', directory, selectHasPendingAssistant);
+  const hasRunningTool = useSessionMessagesSelector(
+    sessionId ?? '',
+    directory,
+    (messages, state) => hasRunningToolInTurn(messages, (messageID) => state.part[messageID] ?? []),
+    Object.is,
+    true,
+  );
   const permissions = useSessionPermissions(sessionId ?? '', directory);
   const forms = useSessionForms(sessionId ?? '', directory);
 
@@ -55,19 +62,20 @@ export function useSessionActivity(sessionId: string | null | undefined, directo
     // waiting for session.status/message.updated to settle.
     const hasAuthoritativeStatus = status !== undefined;
     const statusWorking = hasAuthoritativeStatus && phase !== 'idle';
-    const isWorking = statusWorking || hasPendingAssistant;
-
-    if (hasAuthoritativeStatus && !statusWorking) return IDLE_RESULT;
+    // A step can report completed before its tools run: the last assistant
+    // message then has no incomplete flag, and the session status may already
+    // read idle. The running tool itself keeps the session working.
+    const isWorking = statusWorking || hasRunningTool || (!hasAuthoritativeStatus && hasPendingAssistant);
 
     if (!isWorking) return IDLE_RESULT;
 
     return {
       phase: statusWorking ? phase : 'busy',
       isWorking: true,
-      isBusy: phase === 'busy' || (!statusWorking && hasPendingAssistant),
+      isBusy: statusWorking ? phase === 'busy' : true,
       isCooldown: false,
     };
-  }, [sessionId, status, hasPendingAssistant, permissions, forms]);
+  }, [sessionId, status, hasPendingAssistant, hasRunningTool, permissions, forms]);
 }
 
 export function useCurrentSessionActivity(): SessionActivityResult {

@@ -2,7 +2,7 @@ import React from 'react';
 import { z } from 'zod';
 import { useChatSessionSelection } from '@/components/chat/chatColumnSession';
 import type { Message, ModelRef, Part, ReasoningPart, StructuredError, TextPart, ToolPart } from '@/lib/opencode/model';
-import { executeHasBackgroundableWork, executeToolCalls, isExecuteTool, isShellTool, isSubagentTool } from '@/lib/opencode/tools';
+import { executeHasBackgroundableWork, executeToolCalls, isExecuteTool, isShellTool, isSubagentTool, toolDescription, toolDescriptionText } from '@/lib/opencode/tools';
 
 import type { MessageStreamPhase } from '@/stores/types/sessionTypes';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -225,6 +225,12 @@ export const createParsedStatus = (parts: Part[], genericKey: string): ParsedSta
                     activePartType = bucket === 'edit' ? 'editing' : 'tool';
                     activeToolName = toolName;
                     activeToolPhrase = getRunningToolPhrase(part, toolName, runningToolCounts.get(bucket ?? toolName) ?? 1);
+                    const detail = toolDescriptionText(toolDescription(
+                        part.tool,
+                        part.state.input,
+                        toolStatus === 'running' ? part.state.metadata : undefined,
+                    ));
+                    if (detail) activeToolPhrase = `${activeToolPhrase} · ${detail}`;
                 }
                 break;
             }
