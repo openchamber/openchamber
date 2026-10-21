@@ -413,6 +413,43 @@ describe('MarkdownRenderer DOM mount performance contract', () => {
     }
   });
 
+  test('does not treat digit-leading extensions such as backup.7z, clip.3gp, and data.001 as file references', async () => {
+    const filenames = ['backup.7z', 'clip.3gp', 'data.001'];
+    const control = 'digit-extension/control.ts';
+    fileLinkTestDirectory = '/digit-extension-test';
+    fileLinksInsideWorkspace = true;
+    existingTestFiles = new Set([...filenames, control].map((value) => `/outside/${value}`));
+    statRequests.length = 0;
+    const host = document.createElement('div');
+    document.body.replaceChildren(host);
+    const root = createRoot(host);
+    try {
+      await act(async () => {
+        root.render(<MarkdownRenderer
+          content={[...filenames, control].map((value) => `\`${value}\``).join('\n\n')}
+          messageId="digit-leading-extension-rejection"
+          isAnimated={false}
+          isStreaming={false}
+          enableFileReferences
+        />);
+      });
+      const deadline = Date.now() + 3000;
+      while (!host.querySelector('[data-openchamber-file-link]') && Date.now() < deadline) {
+        await act(async () => { await new Promise<void>((resolve) => setImmediate(resolve)); });
+        await flushAnimationFrame();
+      }
+      // The existing control file proves annotation ran; the other existing files are deliberately skipped.
+      expect(statRequests).toEqual([`/outside/${control}`]);
+      expect(Array.from(host.querySelectorAll('[data-openchamber-file-link]')).map((link) => link.textContent)).toEqual([control]);
+      expect(Array.from(host.querySelectorAll('[data-markdown="inline-code"]')).map((code) => code.textContent)).toEqual([...filenames, control]);
+    } finally {
+      await act(async () => root.unmount());
+      fileLinkTestDirectory = null;
+      fileLinksInsideWorkspace = false;
+      existingTestFiles = new Set();
+    }
+  });
+
   test('does not annotate app links with file-looking labels as internal file links', async () => {
     fileLinkTestDirectory = '/repo';
     const host = document.createElement('div');
