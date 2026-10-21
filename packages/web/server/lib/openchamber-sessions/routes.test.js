@@ -929,6 +929,71 @@ describe('openchamber session routes', () => {
     });
   });
 
+  it('falls back to the catalogue id when the picked model overrides its upstream name', async () => {
+    useCatalog({
+      models: [
+        { id: 'derived-fast', modelID: 'vendor/base', providerID: 'custom-provider', variants: [] },
+      ],
+    });
+    const { app } = createApp();
+
+    await request(app)
+      .post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', prompt: 'Run this' })
+      .expect(200);
+
+    expect(sessionSwitchModelMock).toHaveBeenCalledWith({
+      sessionID: 'ses_123',
+      model: { id: 'derived-fast', providerID: 'custom-provider' },
+    });
+  });
+
+  it('resolves a reference to the exact catalogue id before a derived entry sharing its upstream name', async () => {
+    useCatalog({
+      models: [
+        { id: 'derived-fast', modelID: 'base', providerID: 'vendor', variants: [{ id: 'high' }] },
+        { id: 'base', modelID: 'base', providerID: 'vendor', variants: [] },
+      ],
+    });
+    const { app } = createApp();
+
+    const response = await request(app)
+      .post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', prompt: 'Run this', model: 'vendor/base', variant: 'high' })
+      .expect(400);
+
+    // The level belongs to the derived entry, so the base model refuses it.
+    expect(JSON.stringify(response.body)).toContain("Unknown variant 'high' for model 'vendor/base'");
+  });
+
+  it('accepts a provider/id reference whose catalogue id differs from its upstream modelID', async () => {
+    // OpenCode model references are `provider/id` (Model.Ref.parse). A custom
+    // provider may override the upstream name, so `modelID` differs from `id`;
+    // lookups must use the id, not the wire name.
+    useCatalog({
+      models: [
+        {
+          id: 'deepseek-flash',
+          modelID: 'deepseek/deepseek-flash',
+          providerID: 'deepseek-litellm',
+          variants: [{ id: 'high' }],
+        },
+      ],
+    });
+    const { app } = createApp();
+
+    const response = await request(app)
+      .post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', prompt: 'Run this', model: 'deepseek-litellm/deepseek-flash' })
+      .expect(200);
+
+    expect(response.body.model).toEqual({ providerID: 'deepseek-litellm', modelID: 'deepseek-flash' });
+    expect(sessionSwitchModelMock).toHaveBeenCalledWith({
+      sessionID: 'ses_123',
+      model: { id: 'deepseek-flash', providerID: 'deepseek-litellm' },
+    });
+  });
+
   it('resolves an Auto default through the routing hook before switching the session', async () => {
     useCatalog();
     const resolveAutoSelection = vi.fn(async () => ({

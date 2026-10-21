@@ -81,13 +81,22 @@ const isPrimaryAgentMode = (mode) => !mode || mode === 'primary' || mode === 'al
 
 // OpenCode 2.x serves one flat model catalogue instead of models nested under
 // providers: every entry already names its provider.
-const hasCatalogModel = (models, providerID, modelID) => models.some(
-  (model) => model?.providerID === providerID && model?.modelID === modelID,
-);
+//
+// A model reference is `providerID/<ref>`. The catalogue `id` is the selectable
+// name that Model.Ref, the picker and the agent's model search carry; `modelID`
+// is the name sent upstream and only differs for entries with an id override.
+// An exact `id` match wins over a `modelID` match regardless of catalogue
+// order, so a base model's id never lands on a derived entry whose upstream
+// name happens to equal it. `modelID` still answers references that carry the
+// provider's name (saved favourites/recents and the UI's model strings).
+const findCatalogModel = (models, providerID, ref) => {
+  const ofProvider = models.filter((model) => model?.providerID === providerID);
+  return ofProvider.find((model) => model?.id === ref)
+    || ofProvider.find((model) => model?.modelID === ref)
+    || null;
+};
 
-const findCatalogModel = (models, providerID, modelID) => models.find(
-  (model) => model?.providerID === providerID && model?.modelID === modelID,
-) || null;
+const hasCatalogModel = (models, providerID, ref) => findCatalogModel(models, providerID, ref) !== null;
 
 const resolveVariant = (models, providerID, modelID, variant) => {
   const normalized = asNonEmptyString(variant);
@@ -108,16 +117,18 @@ const isModelHidden = (hiddenModels, providerID, modelID) => hiddenModels.some(
 // come through here, so they stay honoured even when hidden. With every model
 // hidden the session still needs one, so the unfiltered pick stands.
 const resolveFallbackModel = (models, hiddenModels) => {
+  // The picker stores hidden models by catalogue id, and the selection object
+  // below carries the id in its `modelID` slot (see applySessionSelection).
   const isVisible = (providerID, modelID) => !isModelHidden(hiddenModels, providerID, modelID);
   const candidates = models.filter(
-    (entry) => asNonEmptyString(entry?.providerID) && asNonEmptyString(entry?.modelID),
+    (entry) => asNonEmptyString(entry?.providerID) && asNonEmptyString(entry?.id),
   );
   const bigPickle = findCatalogModel(candidates, FALLBACK_PROVIDER_ID, FALLBACK_MODEL_ID);
-  const pick = (bigPickle && isVisible(bigPickle.providerID, bigPickle.modelID) ? bigPickle : null)
-    || candidates.find((entry) => isVisible(entry.providerID, entry.modelID))
+  const pick = (bigPickle && isVisible(bigPickle.providerID, bigPickle.id) ? bigPickle : null)
+    || candidates.find((entry) => isVisible(entry.providerID, entry.id))
     || bigPickle
     || candidates[0];
-  return pick ? { providerID: pick.providerID, modelID: pick.modelID } : null;
+  return pick ? { providerID: pick.providerID, modelID: pick.id } : null;
 };
 
 const resolveProjectDefaults = (settings, directory, projectId) => {
