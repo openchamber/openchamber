@@ -4,6 +4,21 @@ const SESSION_ATTENTION_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const SESSION_ACTIVITY_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const SESSION_STATE_CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
 
+/**
+ * After a managed restart, OpenCode's own boot sweep usually resumes orphaned
+ * turns, but it only runs once the session's location has booted - in the
+ * field that can lag the restart by several minutes, and it does not run at
+ * all if the location never comes up. Until the grace deadline passes the
+ * restart is expected to take care of itself; after it, a still-idle session
+ * gets OpenChamber's own continuation.
+ */
+export const RESTART_RESUME_GRACE_MS = 60 * 1000;
+const RESTART_RESUME_RETRY_MS = 15 * 1000;
+const RESTART_RESUME_ATTEMPTS = 3;
+const RESTART_RESUME_TIMEOUT_MS = 15 * 1000;
+const RESTART_RESUME_TEXT =
+  'OpenChamber restarted OpenCode while a response was still running. Continue from where you left off without repeating completed work.';
+
 const extractSessionStatusUpdate = (payload) => {
   if (!payload || payload.type !== 'session.status') {
     return null;
@@ -40,11 +55,20 @@ const extractSessionStatusUpdate = (payload) => {
 
 const readRequestId = (value) => (typeof value === 'string' && value.trim() ? value.trim() : '');
 
-export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, broadcastEvent }) => {
+export const createSessionRuntime = ({
+  writeSseEvent,
+  getNotificationClients,
+  broadcastEvent,
+  buildOpenCodeUrl,
+  getOpenCodeAuthHeaders,
+  fetchImpl = fetch,
+}) => {
   const sessionActivityPhases = new Map();
   const sessionActivityCooldowns = new Map();
   const sessionStates = new Map();
   const sessionAttentionStates = new Map();
+  // One pending continuation per session interrupted by a managed restart.
+  const restartResumeTimers = new Map(); // sessionId -> { timer, attempt, id }
   // Pending permission requests and forms per session, kept from the same
   // upstream stream. Clients that do not initialize a directory cannot read
   // its pending list from OpenCode (that read creates a location), so this map
@@ -233,6 +257,7 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
       metadata: { ...existing?.metadata, ...metadata },
     });
 
+    if (status === 'busy' || status === 'retry') cancelRestartResume(sessionId);
     updateSessionAttentionStatus(sessionId, status);
     const attentionState = sessionAttentionStates.get(sessionId);
     const attentionChanged = !!attentionState && existingAttentionState?.needsAttention !== attentionState.needsAttention;
@@ -385,6 +410,85 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
     }
   };
 
+  const cancelRestartResume = (sessionId) => {
+    const check = restartResumeTimers.get(sessionId);
+    if (!check) return;
+    clearTimeout(check.timer);
+    restartResumeTimers.delete(sessionId);
+  };
+
+  const postRestartContinuation = async (sessionId, id) => {
+    const fetchPath = `/api/session/${encodeURIComponent(sessionId)}/synthetic`;
+    const response = await fetchImpl(buildOpenCodeUrl(fetchPath, ''), {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        ...getOpenCodeAuthHeaders(),
+      },
+      body: JSON.stringify({
+        // Stable for every attempt of one restart: a retry after a lost
+        // response lands as a 409, not a second continuation.
+        id,
+        text: RESTART_RESUME_TEXT,
+        resume: true,
+        metadata: { notice: 'opencode-restart' },
+      }),
+      signal: AbortSignal.timeout(RESTART_RESUME_TIMEOUT_MS),
+    });
+    if (!response.ok) {
+      const detail = await response.text().catch(() => '');
+      const error = new Error(`OpenCode POST ${fetchPath} failed with ${response.status}${detail ? `: ${detail.slice(0, 200)}` : ''}`);
+      error.status = response.status;
+      throw error;
+    }
+    await response.body?.cancel().catch(() => undefined);
+  };
+
+  const checkRestartResume = (sessionId, check) => {
+    if (restartResumeTimers.get(sessionId) !== check) return; // A newer interrupt superseded it.
+    const state = sessionStates.get(sessionId);
+    // OpenCode's own boot sweep (or the user) already resumed the turn.
+    if (!state || state.status === 'busy' || state.status === 'retry') {
+      restartResumeTimers.delete(sessionId);
+      return;
+    }
+    void (async () => {
+      try {
+        await postRestartContinuation(sessionId, check.id);
+        restartResumeTimers.delete(sessionId);
+        console.log(`[session-runtime] resumed interrupted session ${sessionId} after OpenCode restart`);
+      } catch (error) {
+        if (error?.status === 404) {
+          // Deleted in the meantime; nobody is left to resume.
+          restartResumeTimers.delete(sessionId);
+          return;
+        }
+        if (error?.status === 409) {
+          // A previous attempt's message was admitted after all.
+          restartResumeTimers.delete(sessionId);
+          return;
+        }
+        check.attempt += 1;
+        if (check.attempt >= RESTART_RESUME_ATTEMPTS) {
+          restartResumeTimers.delete(sessionId);
+          console.warn(`[session-runtime] could not resume interrupted session ${sessionId}:`, error?.message ?? error);
+          return;
+        }
+        check.timer = setTimeout(() => checkRestartResume(sessionId, check), RESTART_RESUME_RETRY_MS);
+      }
+    })();
+  };
+
+  const scheduleRestartResume = (sessionId) => {
+    if (typeof buildOpenCodeUrl !== 'function' || typeof getOpenCodeAuthHeaders !== 'function') return;
+    const existing = restartResumeTimers.get(sessionId);
+    if (existing) clearTimeout(existing.timer);
+    const check = { timer: null, attempt: 0, id: `opencode-restart-resume-${Date.now()}` };
+    restartResumeTimers.set(sessionId, check);
+    check.timer = setTimeout(() => checkRestartResume(sessionId, check), RESTART_RESUME_GRACE_MS);
+  };
+
   const interruptBusySessionsAfterRestart = () => {
     const interruptedSessionIds = new Set();
     for (const [sessionId, state] of sessionStates) {
@@ -416,6 +520,7 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
           },
         },
       });
+      scheduleRestartResume(sessionId);
     }
 
     resetAllSessionActivityToIdle();
@@ -469,6 +574,10 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
     for (const timer of sessionActivityCooldowns.values()) {
       clearTimeout(timer);
     }
+    for (const check of restartResumeTimers.values()) {
+      clearTimeout(check.timer);
+    }
+    restartResumeTimers.clear();
     sessionActivityCooldowns.clear();
     sessionActivityPhases.clear();
     sessionStates.clear();

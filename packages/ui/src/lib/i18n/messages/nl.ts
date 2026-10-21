@@ -2406,7 +2406,7 @@ export const dict = {
   'chat.revert.toast.redo': 'Opnieuw uitgevoerd',
   'chat.revert.toast.restored': 'Alle berichten hersteld',
   'chat.toast.opencodeRestartInterrupted.title': 'Chat onderbroken',
-  'chat.toast.opencodeRestartInterrupted.description': 'OpenCode is herstart terwijl er nog een antwoord liep. Stuur een bericht om verder te gaan.',
+  'chat.toast.opencodeRestartInterrupted.description': 'OpenCode is herstart terwijl er nog een antwoord liep. De chat gaat automatisch verder; stuur een bericht als dat niet gebeurt.',
   'chat.toast.opencodeRestartInterrupted.openSession': 'Sessie openen',
   'chat.errorBoundary.title': 'Chatfout',
   'chat.errorBoundary.description': 'Er is een fout opgetreden in de chatinterface. Dit komt mogelijk door een tijdelijk netwerkprobleem of beschadigde berichtgegevens.',

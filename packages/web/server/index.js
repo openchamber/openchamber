@@ -614,6 +614,11 @@ const sessionRuntime = createSessionRuntime({
   writeSseEvent,
   getNotificationClients: () => uiNotificationClients,
   broadcastEvent: broadcastGlobalUiEvent,
+  // Called, not captured: the OpenCode network bindings are declared further
+  // down. The resume check only runs after a managed restart, long after
+  // startup has finished.
+  buildOpenCodeUrl: (...args) => buildOpenCodeUrl(...args),
+  getOpenCodeAuthHeaders: () => getOpenCodeAuthHeaders(),
 });
 
 const getActiveSessionCount = () => sessionRuntime.getActiveSessionCount();
@@ -1552,8 +1557,8 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
         broadcastUiNotification({
           title: multiple ? 'Chats interrupted' : 'Chat interrupted',
           body: multiple
-            ? 'OpenCode restarted during running responses. Send a message in each chat to continue.'
-            : 'OpenCode restarted during a running response. Send a message to continue.',
+            ? 'OpenCode restarted during running responses. The chats will resume automatically; send a message in each chat if one does not.'
+            : 'OpenCode restarted during a running response. The chat will resume automatically; send a message if it does not.',
           tag: 'opencode-restart-interrupted',
           kind: 'opencode-restart-interrupted',
           sessionId: sessionIds[0],
