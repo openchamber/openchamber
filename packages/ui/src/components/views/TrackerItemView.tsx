@@ -28,7 +28,7 @@ import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import type { GitHubReferenceKind } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
 import { openExternalUrl } from '@/lib/url';
-import { githubThread } from '@/lib/trackedItems/fromLinks';
+import { linearIssue, trackedItemForReference } from '@/lib/trackedItems/fromLinks';
 import { refreshTrackedItems } from '@/lib/trackedItems/interest';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useUIStore } from '@/stores/useUIStore';
@@ -143,25 +143,23 @@ const RepositoryTrackerItem: React.FC<TrackerItemViewProps & { kind: GitHubRefer
     );
     // The sidebar row shows this link from the server's tracked state; the
     // panel's own reads do not touch it. Ask it now so the row moves with the
-    // panel instead of at the next cadence.
-    const refreshTrackedPull = React.useCallback(() => {
-        if (reference?.kind !== 'pull') return;
-        refreshTrackedItems([githubThread('pull', {
-            owner: reference.sourceRepo.owner,
-            repo: reference.sourceRepo.repo,
-            number: reference.number,
-        })]);
-    }, [reference]);
+    // panel instead of at the next cadence. Pull requests, merge requests and
+    // issues all use the same key the sidebar declared.
+    const refreshTrackedItem = React.useCallback(() => {
+        if (!reference) return;
+        const item = trackedItemForReference(reference, context);
+        if (item) refreshTrackedItems([item]);
+    }, [context, reference]);
     const refreshItemAndTracked = React.useCallback(() => {
         void refreshItem();
-        refreshTrackedPull();
-    }, [refreshItem, refreshTrackedPull]);
+        refreshTrackedItem();
+    }, [refreshItem, refreshTrackedItem]);
     const threadActions = useThreadActions(reference, context, refreshItem);
     // For a change made on the host's own site, which the server's
     // short-lived answers would otherwise hide for up to half a minute.
     const refreshFromHost = async () => {
         if (context) await sourceControl.refreshProviderReads(context).catch(() => undefined);
-        refreshTrackedPull();
+        refreshTrackedItem();
         forgetGitHubPullStatuses();
         await refreshItem();
     };
@@ -233,6 +231,10 @@ const LinearTrackerItem: React.FC<{ url: string; identifier: string; onUnavailab
     const { t } = useI18n();
     const source = useLinearSourceStatus();
     const { detail, refresh } = useLinearIssueDetail(source === 'ready' ? identifier : null, true);
+    const refreshLinearItem = React.useCallback(() => {
+        refreshTrackedItems([linearIssue(identifier)]);
+        void refresh();
+    }, [identifier, refresh]);
     const showTrackerItem = useShowTrackerItem();
     const now = useMinuteTickerNow(true);
 
@@ -268,8 +270,8 @@ const LinearTrackerItem: React.FC<{ url: string; identifier: string; onUnavailab
             includeDiff={false}
             onIncludeDiffChange={() => undefined}
             now={now}
-            footer={<SourceBoardActions item={item} project={null} context={null} onStartWorktree={() => undefined} onChanged={() => void refresh()} worktreeAvailable={false} />}
-            linearStateControl={<SourceBoardLinearStatus issue={detail.value} onChanged={() => void refresh()} />}
+            footer={<SourceBoardActions item={item} project={null} context={null} onStartWorktree={() => undefined} onChanged={refreshLinearItem} worktreeAvailable={false} />}
+            linearStateControl={<SourceBoardLinearStatus issue={detail.value} onChanged={refreshLinearItem} />}
             // A parent or sub-issue opens as a tab of its own.
             onOpenLinearIssue={(issue) => { showTrackerItem(issue.url, null); }}
         />

@@ -1309,6 +1309,36 @@ describe("branch PR live state pushed by the server", () => {
     expect(getStatusTrackedPulls({ ...merged, pr: null })).toEqual([])
   })
 
+  test("a GitLab status names the bound and linked change requests with its instance", () => {
+    const identity = { provider: "gitlab", instance: "https://gitlab.example.com" } as const
+    const project = { ...identity, id: "team/repo", owner: "team", name: "repo", url: "https://gitlab.example.com/team/repo" }
+    const status: SourceControlStatus = {
+      connected: true,
+      identity,
+      project,
+      branch: "feature",
+      changeRequest: {
+        ...identity,
+        id: "team/repo!12",
+        number: 12,
+        project,
+        title: "GitLab merge request",
+        url: "https://gitlab.example.com/team/repo/-/merge_requests/12",
+        state: "open",
+        draft: false,
+        base: "main",
+        head: "feature",
+      },
+      pr: null,
+      repo: null,
+    }
+
+    expect(getStatusTrackedPulls(status, "gitlab-account")).toEqual([
+      { provider: "gitlab", instance: "https://gitlab.example.com", kind: "pull", owner: "team", repo: "repo", number: 12, accountId: "gitlab-account" },
+      { provider: "gitlab", instance: "https://gitlab.example.com", kind: "pull", owner: "team", repo: "repo", number: 12 },
+    ])
+  })
+
   test("a PR merged on GitHub turns merged and drops its checks", () => {
     const key = boundKey("feature")
     seed(key, openStatus())
