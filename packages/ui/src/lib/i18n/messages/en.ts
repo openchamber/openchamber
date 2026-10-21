@@ -3855,6 +3855,10 @@ export const dict = {
   'sessions.scheduledTasks.dialog.toast.alreadyRunning': 'This task already has a run in progress',
   'sessions.scheduledTasks.dialog.toast.alreadyQueued': 'This task is already waiting in the queue and will run when a slot frees up',
   'chat.modelControls.agentFavoriteAdd': 'Add to favorites. With favorites, Tab cycles through them only',
+  'notifications.error.bodyFallback': 'An error occurred',
+  'notifications.question.bodyFallback': 'Agent is waiting for your response',
+  'notifications.permission.bodyFallback': 'Agent is waiting for your approval',
+  'notifications.permission.title': 'Permission required',
 } as const;
 
 export type I18nKey = keyof typeof dict;

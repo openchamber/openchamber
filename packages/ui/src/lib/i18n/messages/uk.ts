@@ -3856,4 +3856,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.scheduledTasks.dialog.toast.alreadyRunning': 'Ця задача вже виконується',
   'sessions.scheduledTasks.dialog.toast.alreadyQueued': 'Ця задача вже чекає в черзі й запуститься, щойно звільниться місце',
   'chat.modelControls.agentFavoriteAdd': 'Додати в обрані. Коли є обрані, Tab перемикає лише між ними',
+  'notifications.error.bodyFallback': 'Сталася помилка',
+  'notifications.question.bodyFallback': 'Агент чекає на вашу відповідь',
+  'notifications.permission.bodyFallback': 'Агент чекає на ваше схвалення',
+  'notifications.permission.title': 'Потрібен дозвіл',
 };

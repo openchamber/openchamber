@@ -3853,4 +3853,8 @@ export const dict = {
   'sessions.scheduledTasks.dialog.toast.alreadyRunning': 'Bu görevin bir çalıştırması zaten sürüyor',
   'sessions.scheduledTasks.dialog.toast.alreadyQueued': 'Bu görev zaten kuyrukta bekliyor; yer açılınca çalışacak',
   'chat.modelControls.agentFavoriteAdd': 'Favorilere ekle. Favori varsa Tab yalnızca onlar arasında geçiş yapar',
+  'notifications.error.bodyFallback': 'Bir hata oluştu',
+  'notifications.question.bodyFallback': 'Ajan yanıtınızı bekliyor',
+  'notifications.permission.bodyFallback': 'Ajan onayınızı bekliyor',
+  'notifications.permission.title': 'İzin gerekiyor',
 };

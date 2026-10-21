@@ -3856,4 +3856,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.scheduledTasks.dialog.toast.alreadyRunning': 'Esta tarea ya tiene una ejecución en curso',
   'sessions.scheduledTasks.dialog.toast.alreadyQueued': 'Esta tarea ya está en la cola y se ejecutará cuando haya un hueco libre',
   'chat.modelControls.agentFavoriteAdd': 'Añadir a favoritos. Con favoritos, Tab alterna solo entre ellos',
+  'notifications.error.bodyFallback': 'Se produjo un error',
+  'notifications.question.bodyFallback': 'El agente espera tu respuesta',
+  'notifications.permission.bodyFallback': 'El agente espera tu aprobación',
+  'notifications.permission.title': 'Permiso necesario',
 };

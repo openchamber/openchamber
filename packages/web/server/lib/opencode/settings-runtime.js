@@ -14,21 +14,47 @@ import {
   serializePreferencesDocument,
 } from './settings-files.js';
 
-const DEFAULT_NOTIFICATION_TEMPLATES = {
+// An empty field means "no custom text": the notification uses the default for
+// the interface language (see notifications/template-locales.js), and the
+// settings page shows that default as the placeholder. Persisting English text
+// here is what made a Chinese interface send English notifications.
+const EMPTY_NOTIFICATION_TEMPLATES = {
+  completion: { title: '', message: '' },
+  error: { title: '', message: '' },
+  question: { title: '', message: '' },
+  subtask: { title: '', message: '' },
+};
+
+const emptyNotificationTemplates = () => Object.fromEntries(
+  Object.entries(EMPTY_NOTIFICATION_TEMPLATES).map(([event, template]) => [event, { ...template }]),
+);
+
+// Builds before the language-aware defaults wrote this English set into every
+// install. It is cleared once so those installs follow their interface
+// language; anything the user typed stays untouched.
+const LEGACY_SEEDED_NOTIFICATION_TEMPLATES = {
   completion: { title: '{agent_name} is ready', message: '{model_name} completed the task' },
   error: { title: 'Tool error', message: '{last_message}' },
   question: { title: 'Input needed', message: '{last_message}' },
   subtask: { title: '{agent_name} is ready', message: '{model_name} completed the task' },
 };
 
+const isLegacySeededNotificationTemplates = (templates) => (
+  Object.keys(LEGACY_SEEDED_NOTIFICATION_TEMPLATES).every((event) => {
+    const legacy = LEGACY_SEEDED_NOTIFICATION_TEMPLATES[event];
+    const candidate = templates?.[event];
+    return candidate?.title === legacy.title && candidate?.message === legacy.message;
+  })
+);
+
 const ensureNotificationTemplateShape = (templates) => {
   const input = templates && typeof templates === 'object' ? templates : {};
   let changed = false;
   const next = {};
 
-  for (const event of Object.keys(DEFAULT_NOTIFICATION_TEMPLATES)) {
+  for (const event of Object.keys(EMPTY_NOTIFICATION_TEMPLATES)) {
     const currentEntry = input[event];
-    const base = DEFAULT_NOTIFICATION_TEMPLATES[event];
+    const base = EMPTY_NOTIFICATION_TEMPLATES[event];
     const currentTitle = typeof currentEntry?.title === 'string' ? currentEntry.title : base.title;
     const currentMessage = typeof currentEntry?.message === 'string' ? currentEntry.message : base.message;
     if (!currentEntry || typeof currentEntry.title !== 'string' || typeof currentEntry.message !== 'string') {
@@ -961,8 +987,17 @@ export const createSettingsRuntime = (deps) => {
     }
 
     const { templates, changed: templatesChanged } = ensureNotificationTemplateShape(settings.notificationTemplates);
-    if (templatesChanged || !settings.notificationTemplates || typeof settings.notificationTemplates !== 'object') {
-      next.notificationTemplates = templates;
+    // Clearing the old English seed is what lets an install that never edited
+    // the templates send notification text in its own language.
+    const wasSeeded = isLegacySeededNotificationTemplates(templates);
+    const nextTemplates = wasSeeded ? emptyNotificationTemplates() : templates;
+    if (
+      templatesChanged
+      || wasSeeded
+      || !settings.notificationTemplates
+      || typeof settings.notificationTemplates !== 'object'
+    ) {
+      next.notificationTemplates = nextTemplates;
       changed = true;
     }
 

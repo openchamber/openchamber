@@ -14,7 +14,7 @@ import {
   type VSCodeThemeKind,
   type VSCodeThemePayload,
 } from '@openchamber/ui/lib/theme/vscode/adapter';
-import { getBootstrapMessages, readStoredLocaleForBootstrap } from '@openchamber/ui/lib/i18n';
+import { formatMessage, getBootstrapMessages, readStoredLocaleForBootstrap, useI18nStore, type I18nKey } from '@openchamber/ui/lib/i18n';
 import type { VSCodeActiveEditorFile } from '@/sync/input-store';
 import { usePermissionStore } from '@openchamber/ui/stores/permissionStore';
 import { permissionPolicyWireSchema, policySnapshotFromWire } from '@openchamber/ui/stores/utils/permissionAutoAccept';
@@ -1931,15 +1931,49 @@ const fetchLastAssistantMessageText = async (sessionId: string, messageId?: stri
   }
 };
 
+type NotificationTemplateKey = 'completion' | 'subtask' | 'error' | 'question';
+
+// The same defaults the settings page shows as placeholders. An empty field
+// means "no custom text", so the notification follows the interface language.
+const NOTIFICATION_TEMPLATE_DEFAULT_KEYS = {
+  completion: {
+    title: 'settings.notifications.page.template.defaults.completion.title',
+    message: 'settings.notifications.page.template.defaults.completion.message',
+  },
+  subtask: {
+    title: 'settings.notifications.page.template.defaults.subtask.title',
+    message: 'settings.notifications.page.template.defaults.subtask.message',
+  },
+  error: {
+    title: 'settings.notifications.page.template.defaults.error.title',
+    message: 'settings.notifications.page.template.defaults.error.message',
+  },
+  question: {
+    title: 'settings.notifications.page.template.defaults.question.title',
+    message: 'settings.notifications.page.template.defaults.question.message',
+  },
+} satisfies Record<NotificationTemplateKey, { title: I18nKey; message: I18nKey }>;
+
+const notificationText = (key: I18nKey): string => (
+  formatMessage(useI18nStore.getState().dictionary, key)
+);
+
+const notificationTemplateDefaults = (key: NotificationTemplateKey) => ({
+  title: notificationText(NOTIFICATION_TEMPLATE_DEFAULT_KEYS[key].title),
+  message: notificationText(NOTIFICATION_TEMPLATE_DEFAULT_KEYS[key].message),
+});
+
 const getNotificationTemplate = (
   settings: { notificationTemplates?: Record<string, { title?: string; message?: string }> },
-  key: 'completion' | 'subtask' | 'error' | 'question',
-  fallback: { title: string; message: string },
+  key: NotificationTemplateKey,
 ) => {
   const candidate = settings.notificationTemplates?.[key];
+  const title = candidate?.title ?? '';
+  const message = candidate?.message ?? '';
+  const defaults = notificationTemplateDefaults(key);
   return {
-    title: typeof candidate?.title === 'string' ? candidate.title : fallback.title,
-    message: typeof candidate?.message === 'string' ? candidate.message : fallback.message,
+    title: title.trim().length > 0 ? title : defaults.title,
+    message: message.trim().length > 0 ? message : defaults.message,
   };
 };
 
@@ -2011,12 +2045,14 @@ window.addEventListener('openchamber:vscode-notification-event', (event) => {
       const lastAt = readyNotificationCooldowns.get(sessionId) ?? 0;
       if (now - lastAt < READY_NOTIFICATION_COOLDOWN_MS) return;
       readyNotificationCooldowns.set(sessionId, now);
-      const template = getNotificationTemplate(settings, isSubtask ? 'subtask' : 'completion', { title: '{agent_name} is ready', message: '{model_name} completed the task' });
-      const title = resolveTemplate(template.title, variables) || 'Agent is ready';
+      const templateKey: NotificationTemplateKey = isSubtask ? 'subtask' : 'completion';
+      const defaults = notificationTemplateDefaults(templateKey);
+      const template = getNotificationTemplate(settings, templateKey);
+      const title = resolveTemplate(template.title, variables) || resolveTemplate(defaults.title, variables);
       const body = resolveTemplate(template.message, variables);
       showOpenChamberNotification({
         title,
-        body: shouldApplyTemplateMessage(template.message, body, variables) ? body : `${variables.model_name} completed the task`,
+        body: shouldApplyTemplateMessage(template.message, body, variables) ? body : resolveTemplate(defaults.message, variables),
         sessionId,
         requireHidden,
       });
@@ -2029,12 +2065,13 @@ window.addEventListener('openchamber:vscode-notification-event', (event) => {
       const lastAt = errorNotificationCooldowns.get(sessionId) ?? 0;
       if (now - lastAt < READY_NOTIFICATION_COOLDOWN_MS) return;
       errorNotificationCooldowns.set(sessionId, now);
-      const template = getNotificationTemplate(settings, 'error', { title: 'Tool error', message: '{last_message}' });
-      const title = resolveTemplate(template.title, variables) || 'Tool error';
+      const defaults = notificationTemplateDefaults('error');
+      const template = getNotificationTemplate(settings, 'error');
+      const title = resolveTemplate(template.title, variables) || resolveTemplate(defaults.title, variables);
       const body = resolveTemplate(template.message, variables);
       showOpenChamberNotification({
         title,
-        body: shouldApplyTemplateMessage(template.message, body, variables) ? body : 'An error occurred',
+        body: shouldApplyTemplateMessage(template.message, body, variables) ? body : notificationText('notifications.error.bodyFallback'),
         sessionId,
         requireHidden,
       });
@@ -2046,12 +2083,13 @@ window.addEventListener('openchamber:vscode-notification-event', (event) => {
       if (!settings.notifyOnQuestion) return;
       const header = syncEvent.properties.form.title;
       const questionVariables = { ...variables, last_message: header };
-      const template = getNotificationTemplate(settings, 'question', { title: 'Input needed', message: '{last_message}' });
-      const title = resolveTemplate(template.title, questionVariables) || header || 'Input needed';
+      const defaults = notificationTemplateDefaults('question');
+      const template = getNotificationTemplate(settings, 'question');
+      const title = resolveTemplate(template.title, questionVariables) || header || resolveTemplate(defaults.title, questionVariables);
       const body = resolveTemplate(template.message, questionVariables);
       showOpenChamberNotification({
         title,
-        body: shouldApplyTemplateMessage(template.message, body, questionVariables) ? body : header || 'Agent is waiting for your response',
+        body: shouldApplyTemplateMessage(template.message, body, questionVariables) ? body : notificationText('notifications.question.bodyFallback'),
         sessionId,
         requireHidden,
       });
@@ -2063,10 +2101,14 @@ window.addEventListener('openchamber:vscode-notification-event', (event) => {
       const request = syncEvent.properties;
       const accepted = await processVSCodePermissionAutoAccept(request, directory ?? undefined);
       if (accepted) return;
-      const fallbackMessage = request.message || request.action || 'Agent is waiting for your approval';
+      const fallbackMessage = request.message || request.action || notificationText('notifications.permission.bodyFallback');
       const permissionVariables = { ...variables, last_message: fallbackMessage };
-      const template = getNotificationTemplate(settings, 'question', { title: 'Permission required', message: '{last_message}' });
-      const title = resolveTemplate(template.title, permissionVariables) || 'Permission required';
+      const defaults = {
+        ...notificationTemplateDefaults('question'),
+        title: notificationText('notifications.permission.title'),
+      };
+      const template = getNotificationTemplate(settings, 'question');
+      const title = resolveTemplate(template.title, permissionVariables) || resolveTemplate(defaults.title, permissionVariables);
       const body = resolveTemplate(template.message, permissionVariables);
       showOpenChamberNotification({
         title,

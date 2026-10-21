@@ -3855,4 +3855,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.scheduledTasks.dialog.toast.alreadyRunning': 'このタスクはすでに実行中です',
   'sessions.scheduledTasks.dialog.toast.alreadyQueued': 'このタスクはすでにキューで待機中です。空きができ次第実行されます',
   'chat.modelControls.agentFavoriteAdd': 'お気に入りに追加。お気に入りがあると、Tab はその中だけを切り替えます',
+  'notifications.error.bodyFallback': 'エラーが発生しました',
+  'notifications.question.bodyFallback': 'エージェントが回答を待っています',
+  'notifications.permission.bodyFallback': 'エージェントが承認を待っています',
+  'notifications.permission.title': '権限が必要です',
 };

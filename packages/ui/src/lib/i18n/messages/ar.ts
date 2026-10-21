@@ -3880,4 +3880,8 @@ export const dict = {
   'diffView.whitespace.shown': 'تغييرات المسافات ظاهرة',
   'session.newWorktree.trust.skip': 'تخطٍّ',
   'chat.revertPopover.toast.restoreFailed': 'تعذّرت استعادة الرسائل المتراجع عنها',
+  'notifications.error.bodyFallback': 'حدث خطأ',
+  'notifications.question.bodyFallback': 'الوكيل بانتظار ردك',
+  'notifications.permission.bodyFallback': 'الوكيل بانتظار موافقتك',
+  'notifications.permission.title': 'مطلوب إذن',
 } as const;

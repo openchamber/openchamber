@@ -3855,4 +3855,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.scheduledTasks.dialog.toast.alreadyRunning': '이 작업은 이미 실행 중입니다',
   'sessions.scheduledTasks.dialog.toast.alreadyQueued': '이 작업은 이미 대기열에 있으며 자리가 나면 실행됩니다',
   'chat.modelControls.agentFavoriteAdd': '즐겨찾기에 추가. 즐겨찾기가 있으면 Tab은 그 안에서만 전환합니다',
+  'notifications.error.bodyFallback': '오류가 발생했습니다',
+  'notifications.question.bodyFallback': '에이전트가 답변을 기다리고 있습니다',
+  'notifications.permission.bodyFallback': '에이전트가 승인을 기다리고 있습니다',
+  'notifications.permission.title': '권한 필요',
 };

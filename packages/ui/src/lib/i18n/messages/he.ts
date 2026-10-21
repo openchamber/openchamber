@@ -3880,4 +3880,8 @@ export const dict = {
   'diffView.whitespace.shown': 'שינויי רווחים מוצגים',
   'session.newWorktree.trust.skip': 'דילוג',
   'chat.revertPopover.toast.restoreFailed': 'לא ניתן היה לשחזר את ההודעות שבוטלו',
+  'notifications.error.bodyFallback': 'אירעה שגיאה',
+  'notifications.question.bodyFallback': 'הסוכן ממתין לתשובתך',
+  'notifications.permission.bodyFallback': 'הסוכן ממתין לאישורך',
+  'notifications.permission.title': 'נדרשת הרשאה',
 } as const;
