@@ -1,6 +1,7 @@
 import { Window } from 'happy-dom';
 import { createServer } from 'node:http';
 import { z } from 'zod';
+import type { DesktopSettings } from '@/lib/desktop';
 import { switchRuntimeEndpoint } from '@/lib/runtime-switch';
 import { getSuggestedTasksRuntime } from '@/lib/suggestedTasksRuntime';
 import type { SuggestedTasksSettings, Suggestion, SuggestionInbox } from '@/lib/suggestedTasksApi';
@@ -27,8 +28,15 @@ export const settings = (): SuggestedTasksSettings => ({
   presets: [], nextRunAt: null,
 });
 
-/** A real HTTP boundary with a per-test ephemeral port and controllable responses. */
-export const serveSuggestedTasks = async (handle: (request: Request) => Response | Promise<Response>) => {
+/**
+ * A real HTTP boundary with a per-test ephemeral port and controllable responses.
+ * `settingsDocument` answers `/api/config/settings`; the stores sync from it in
+ * the background, and an empty document empties the projects store.
+ */
+export const serveSuggestedTasks = async (
+  handle: (request: Request) => Response | Promise<Response>,
+  settingsDocument: DesktopSettings = {},
+) => {
   const server = createServer(async (incoming, outgoing) => {
     try {
       incoming.setEncoding('utf8');
@@ -38,7 +46,7 @@ export const serveSuggestedTasks = async (handle: (request: Request) => Response
       const path = new URL(request.url).pathname;
       const response = path.includes('url-token') ? Response.json({ error: 'Not found' }, { status: 404 })
         : path === '/api/fs/home' ? Response.json({ home: '/home/test', chatsRoot: '/home/test/chats' })
-          : path === '/api/config/settings' ? Response.json({}) : await handle(request);
+          : path === '/api/config/settings' ? Response.json(settingsDocument) : await handle(request);
       outgoing.writeHead(response.status, Object.fromEntries(response.headers));
       outgoing.end(await response.text());
     } catch (error) {

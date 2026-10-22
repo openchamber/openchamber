@@ -30,6 +30,7 @@ import {
   type ScheduledTaskStatus,
 } from '@/lib/scheduledTasksApi';
 import { ScheduledTaskEditorDialog } from './ScheduledTaskEditorDialog';
+import { SuggestedTasksSettingsDialog } from '@/components/suggested-tasks/SuggestedTasksSettingsDialog';
 import { canonicalizeTimezone } from '@/lib/timezones';
 import { getModelDisplayName } from '@/lib/modelDisplay';
 import { agentLabel } from '@/lib/agentLabel';
@@ -257,6 +258,8 @@ export function ScheduledTasksView({ layout, onLeave }: {
   const [editorOpen, setEditorOpen] = React.useState(false);
   const [editorTask, setEditorTask] = React.useState<ScheduledTask | null>(null);
   const [mutatingTaskID, setMutatingTaskID] = React.useState<string | null>(null);
+  // Edit on the Suggested tasks scan opens their Configure dialog.
+  const [configuringScan, setConfiguringScan] = React.useState(false);
   // Chats are scheduled like a project; each run starts a new chat. VS Code
   // has no chats, so the entry exists everywhere else.
   const chatsAvailable = !isVSCodeRuntime();
@@ -429,17 +432,22 @@ export function ScheduledTasksView({ layout, onLeave }: {
     }
     setMutatingTaskID(task.id);
     try {
-      const { sessionId, directory, persistError } = await runScheduledTaskNow(selectedProjectID, task.id);
+      const { sessionId, directory, persistError, skipped } = await runScheduledTaskNow(selectedProjectID, task.id);
       await Promise.all([
         reloadTasks(selectedProjectID, { silent: true }),
         refreshGlobalSessions(),
       ]);
       if (persistError) {
         toast.warning(t('sessions.scheduledTasks.dialog.toast.startedPersistWarning'));
+      } else if (task.suggestedScan && skipped) {
+        // The inbox says why under Last scan.
+        toast.info(t('suggestedTasks.run.status.skipped'));
       } else {
-        toast.success(t('sessions.scheduledTasks.dialog.toast.started'));
+        toast.success(task.suggestedScan ? t('suggestedTasks.toast.scanStarted') : t('sessions.scheduledTasks.dialog.toast.started'));
       }
-      if (sessionId) {
+      // A scan's sessions are its lenses: read-only, archived when the scan
+      // ends, and listed in the inbox under Last scan. Nothing to jump into.
+      if (sessionId && !task.suggestedScan) {
         // Jump straight into the started session.
         const project = projects.find((entry) => entry.id === selectedProjectID);
         useSessionUIStore.getState().setCurrentSession(sessionId, directory ?? project?.path ?? null);
@@ -453,7 +461,7 @@ export function ScheduledTasksView({ layout, onLeave }: {
           : startedAt
             ? t('sessions.scheduledTasks.dialog.toast.alreadyRunningSince', { time: formatClockTime(startedAt, timeFormatPreference) })
             : t('sessions.scheduledTasks.dialog.toast.alreadyRunning');
-        toast.info(message, error.busy === 'running' && task.state?.lastSessionId
+        toast.info(message, error.busy === 'running' && task.state?.lastSessionId && !task.suggestedScan
           ? { action: { label: t('sessions.scheduledTasks.dialog.actions.openSession'), onClick: () => openLastRunSession(task) } }
           : undefined);
         return;
@@ -553,6 +561,12 @@ export function ScheduledTasksView({ layout, onLeave }: {
                   : t('sessions.scheduledTasks.dialog.status.idle');
             const nextAt = task.state?.nextRunAt;
             const lastAt = task.state?.lastRunAt;
+            // The Suggested tasks scan is managed by their Configure: its
+            // lenses pick their own models, and a manual cadence keeps the
+            // task disabled without anyone having paused it.
+            const scan = task.suggestedScan === true;
+            const dimmed = !task.enabled && !scan;
+            const name = scan ? t('suggestedTasks.scheduledTask.name') : task.name;
 
             return (
               <div
@@ -561,16 +575,19 @@ export function ScheduledTasksView({ layout, onLeave }: {
                   'rounded-lg border border-border p-4 transition-opacity',
                 )}
               >
-                <div className={cn('min-w-0', !task.enabled && 'opacity-60')}>
-                  <div className="typography-ui-header truncate font-semibold text-foreground">
-                    {task.name}
+                <div className={cn('min-w-0', dimmed && 'opacity-60')}>
+                  <div className="flex min-w-0 items-center gap-1.5 typography-ui-header font-semibold text-foreground">
+                    {scan ? <Icon name="lightbulb" className="size-4 shrink-0 text-muted-foreground" /> : null}
+                    <span className="truncate">{name}</span>
                   </div>
                   <div className="typography-micro truncate text-muted-foreground">
-                    {formatSchedule(task, t)}
+                    {scan && !task.enabled ? t('suggestedTasks.settings.status.manual') : formatSchedule(task, t)}
                   </div>
-                  <div className="typography-micro flex min-w-0 items-center gap-1 text-muted-foreground/70" title={task.execution.useDefaults ? undefined : `${task.execution.providerID ?? ''}/${task.execution.modelID ?? ''}`}>
-                    <TaskModelLine task={task} />
-                  </div>
+                  {scan ? null : (
+                    <div className="typography-micro flex min-w-0 items-center gap-1 text-muted-foreground/70" title={task.execution.useDefaults ? undefined : `${task.execution.providerID ?? ''}/${task.execution.modelID ?? ''}`}>
+                      <TaskModelLine task={task} />
+                    </div>
+                  )}
                   {task.targetSessionId ? <TaskTargetLine sessionId={task.targetSessionId} /> : null}
                   {task.loopFile ? (
                     <div
@@ -582,7 +599,7 @@ export function ScheduledTasksView({ layout, onLeave }: {
                   ) : null}
                 </div>
 
-                <div className={cn('mt-3 flex flex-wrap items-center gap-x-5 gap-y-1 typography-micro text-muted-foreground', !task.enabled && 'opacity-60')}>
+                <div className={cn('mt-3 flex flex-wrap items-center gap-x-5 gap-y-1 typography-micro text-muted-foreground', dimmed && 'opacity-60')}>
                   <span className="inline-flex items-center gap-1.5">
                     <Icon name="timer" className="h-3.5 w-3.5" />
                     <span className="font-medium text-foreground">{t('sessions.scheduledTasks.dialog.nextRun.label')}</span>
@@ -629,7 +646,7 @@ export function ScheduledTasksView({ layout, onLeave }: {
 
                 {task.state?.lastError ? (
                   <div
-                    className={cn('mt-3 flex items-start gap-2 rounded-md border p-2 typography-micro', !task.enabled && 'opacity-60')}
+                    className={cn('mt-3 flex items-start gap-2 rounded-md border p-2 typography-micro', dimmed && 'opacity-60')}
                     style={toneStyle('error')}
                   >
                     <Icon name="error-warning" className="mt-0.5 h-3.5 w-3.5 shrink-0" />
@@ -638,29 +655,31 @@ export function ScheduledTasksView({ layout, onLeave }: {
                 ) : null}
 
                 <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
-                  <div className="inline-flex items-center gap-1">
-                    <label
-                      className={cn(
-                        'inline-flex cursor-pointer items-center gap-2 typography-micro font-medium',
-                        task.enabled ? 'text-foreground' : 'text-muted-foreground',
-                        isBusy && 'cursor-not-allowed opacity-50',
-                      )}
-                    >
-                      <Checkbox
-                        checked={task.enabled}
-                        onChange={(enabled) => void handleToggleEnabled(task, enabled)}
-                        ariaLabel={task.enabled
-                          ? t('sessions.scheduledTasks.dialog.taskToggle.pauseAria', { taskName: task.name })
-                          : t('sessions.scheduledTasks.dialog.taskToggle.enableAria', { taskName: task.name })}
-                        disabled={isBusy}
-                      />
-                      {task.enabled ? t('sessions.scheduledTasks.dialog.taskToggle.enabled') : t('sessions.scheduledTasks.dialog.taskToggle.paused')}
-                    </label>
-                    {task.loopApproval ? <LoopApprovalMark reason={task.loopApproval} /> : null}
-                  </div>
+                  {scan ? null : (
+                    <div className="inline-flex items-center gap-1">
+                      <label
+                        className={cn(
+                          'inline-flex cursor-pointer items-center gap-2 typography-micro font-medium',
+                          task.enabled ? 'text-foreground' : 'text-muted-foreground',
+                          isBusy && 'cursor-not-allowed opacity-50',
+                        )}
+                      >
+                        <Checkbox
+                          checked={task.enabled}
+                          onChange={(enabled) => void handleToggleEnabled(task, enabled)}
+                          ariaLabel={task.enabled
+                            ? t('sessions.scheduledTasks.dialog.taskToggle.pauseAria', { taskName: task.name })
+                            : t('sessions.scheduledTasks.dialog.taskToggle.enableAria', { taskName: task.name })}
+                          disabled={isBusy}
+                        />
+                        {task.enabled ? t('sessions.scheduledTasks.dialog.taskToggle.enabled') : t('sessions.scheduledTasks.dialog.taskToggle.paused')}
+                      </label>
+                      {task.loopApproval ? <LoopApprovalMark reason={task.loopApproval} /> : null}
+                    </div>
+                  )}
 
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    {task.state?.lastSessionId ? (
+                  <div className="ms-auto flex flex-wrap items-center gap-1.5">
+                    {task.state?.lastSessionId && !scan ? (
                       <Button
                         variant="ghost"
                         size="sm"
@@ -681,21 +700,23 @@ export function ScheduledTasksView({ layout, onLeave }: {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => handleEditTask(task)}
+                      onClick={() => (scan ? setConfiguringScan(true) : handleEditTask(task))}
                       disabled={isBusy}
-                      aria-label={t('sessions.scheduledTasks.dialog.actions.editAria', { taskName: task.name })}
+                      aria-label={t('sessions.scheduledTasks.dialog.actions.editAria', { taskName: name })}
                     >
                       <Icon name="edit-2" className="h-4 w-4" /> {t('sessions.scheduledTasks.dialog.actions.edit')}
                     </Button>
-                    <Button
-                      variant="destructive"
-                      size="sm"
-                      onClick={() => void handleDeleteTask(task)}
-                      disabled={isBusy}
-                      aria-label={t('sessions.scheduledTasks.dialog.actions.deleteAria', { taskName: task.name })}
-                    >
-                      <Icon name="delete-bin" className="h-4 w-4" />
-                    </Button>
+                    {scan ? null : (
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        onClick={() => void handleDeleteTask(task)}
+                        disabled={isBusy}
+                        aria-label={t('sessions.scheduledTasks.dialog.actions.deleteAria', { taskName: task.name })}
+                      >
+                        <Icon name="delete-bin" className="h-4 w-4" />
+                      </Button>
+                    )}
                   </div>
                 </div>
               </div>
@@ -752,6 +773,18 @@ export function ScheduledTasksView({ layout, onLeave }: {
         onOpenChange={setEditorOpen}
         onSave={handleSaveTask}
       />
+
+      {configuringScan && selectedProject ? (
+        <SuggestedTasksSettingsDialog
+          project={selectedProject}
+          onOpenChange={(open) => {
+            if (open) return;
+            setConfiguringScan(false);
+            // Configure can change the scan's cadence or turn Suggested tasks off.
+            void reloadTasks(selectedProjectID, { silent: true });
+          }}
+        />
+      ) : null}
     </>
   );
 }

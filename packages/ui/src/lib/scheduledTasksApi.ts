@@ -15,6 +15,9 @@ export type ScheduledTask = {
    *  never enabled on this machine (`required`), or changed since it was
    *  (`outdated`). Absent when nothing holds the loop back. */
   loopApproval?: 'required' | 'outdated';
+  /** The project's Suggested tasks scan. Its schedule comes from Suggested
+   *  tasks' Configure; the server refuses to save, pause or delete it here. */
+  suggestedScan?: boolean;
   schedule: {
     kind: 'daily' | 'weekly' | 'once' | 'cron';
     times?: string[];
@@ -195,6 +198,8 @@ const RunNowResponseSchema = z.object({
   sessionId: z.string().min(1).optional().catch(undefined),
   directory: z.string().min(1).optional().catch(undefined),
   persistError: z.string().trim().min(1).optional().catch(undefined),
+  // The task after the run. A Suggested tasks scan with nothing to do records `skipped`.
+  task: z.object({ state: z.object({ lastStatus: z.string() }) }).optional().catch(undefined),
 });
 
 const BusyResponseSchema = z.object({ busy: z.enum(['running', 'queued']) });
@@ -210,7 +215,7 @@ export class ScheduledTaskBusyError extends Error {
 export const runScheduledTaskNow = async (
   projectID: string,
   taskID: string,
-): Promise<{ sessionId?: string; directory?: string; persistError?: string }> => {
+): Promise<{ sessionId?: string; directory?: string; persistError?: string; skipped?: boolean }> => {
   const safeProjectID = ensureProjectID(projectID);
   const safeTaskID = ensureProjectID(taskID);
   const response = await runtimeFetch(`/api/projects/${encodeURIComponent(safeProjectID)}/scheduled-tasks/${encodeURIComponent(safeTaskID)}/run`, {
@@ -230,5 +235,7 @@ export const runScheduledTaskNow = async (
     throw new Error(await parseErrorMessage(response, 'Failed to run scheduled task'));
   }
   const parsed = RunNowResponseSchema.safeParse(await response.json().catch(() => null));
-  return parsed.success ? parsed.data : {};
+  if (!parsed.success) return {};
+  const { task, ...result } = parsed.data;
+  return { ...result, skipped: task?.state.lastStatus === 'skipped' };
 };

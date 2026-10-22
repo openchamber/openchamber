@@ -6,9 +6,9 @@ import type { ProjectEntry } from '@/lib/api/types';
 import { SuggestedTasksSettingsForm } from './SuggestedTasksSettingsForm';
 
 /**
- * The inbox's Configure dialog: the only place a project's Suggested tasks
- * settings are edited. Phones get the same dialog, so the lens editor it
- * opens stacks above it.
+ * Configure: a project's Suggested tasks settings over the page that opened
+ * it, the inbox or the scan's row on the scheduled tasks page. Phones get the
+ * same dialog, so the lens editor it opens stacks above it.
  */
 export function SuggestedTasksSettingsDialog({ project, onOpenChange }: {
   project: ProjectEntry;
