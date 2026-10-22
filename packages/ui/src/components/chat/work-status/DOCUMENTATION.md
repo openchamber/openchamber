@@ -26,12 +26,19 @@ Every text size in the panel comes from the typography scale: headings,
 heading summaries, pills and captions are `typography-micro`, row labels and
 values `typography-ui-label`. The scale is in rem, and the interface size
 setting scales the root font, so text grows with the icons, row heights and
-spacing around it while the card keeps its 300px width. A size in px stays
-put: row text fixed at 13px sat under 24px headings in 56px rows at 200%.
-`WorkStatusPrimitives.test.tsx` refuses a px text size in any file the panel
-draws.
+spacing around it. A size in px stays put: row text fixed at 13px sat under
+24px headings in 56px rows at 200%. `WorkStatusPrimitives.test.tsx` refuses a
+px text size in any file the panel draws.
 
-The fixed width means larger sizes cut more text off. Cut text shows in full
+The card grows with the text too: 300px at 100% and below, 300px times the
+interface size above it, up to 450px (150%). A 300px card cut the Context
+row's label at 150%; up to the cap the card cuts no more than at 100%, and at
+200% the Context row still fits (it needs 432px). `getWorkStatusWidths` in
+`useWorkStatusVisibility.ts` gives the card, its column and the width the
+panel needs to show; the card, the right slot and the visibility check all
+read it, so they agree at every size.
+
+Above 150% the card cuts more text off. Cut text shows in full
 in a tooltip above it (`WorkStatusFullTextTooltip`): row labels, the project
 action's name, section titles with their subject or summary, the cost
 breakdown and the callout. Whether text is cut is read from the layout when
@@ -69,7 +76,7 @@ the inline card keeps its lighter, non-blurred fill instead.
 portal into the right slot (`components/layout/rightSlot.ts`): the context
 panel's `aside` in `MainLayout`, which holds a right-anchored host for the card
 under the panel's content. The slot animates one width for both, from the
-card's column (`WORK_STATUS_COLUMN_WIDTH`, the card and its margins) to the
+card's column (`getWorkStatusWidths(...).column`, the card and its margins) to the
 panel's width and back, while the card fades out and the panel fades in over
 it. The chat column therefore narrows or widens once, in one direction.
 
@@ -91,8 +98,10 @@ The overlay form stays inside the chat column in `ChatContainer`.
   the same key the rail and the panel use. It is deliberately **not** the
   directory this panel reports about: a managed Chat reports about none, and
   that empty key answered "closed" for a context panel that was plainly open;
-- the row cannot fit `WORK_STATUS_MIN_CHAT_WIDTH` of transcript alongside
-  `WORK_STATUS_PANEL_WIDTH` of panel. Only that threshold decision is state
+- the row cannot fit `WORK_STATUS_MIN_CHAT_WIDTH` (560px) of transcript
+  alongside the card's column. The card widens with the interface size, so
+  the chat area it needs does too: 884px at 100%, 965px at 125%, 1046px at
+  150% and 1058px at 200%. Only that threshold decision is state
   (`roomy`); the width itself is not, because it changes on every frame of a
   sidebar animation and storing it re-rendered the whole chat each frame.
 

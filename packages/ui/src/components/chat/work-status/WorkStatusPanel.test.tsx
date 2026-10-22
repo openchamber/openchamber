@@ -120,4 +120,22 @@ describe('work status panel sections button', () => {
     expect(Boolean(empty?.closest('[data-scroll-shadow]'))).toBe(true);
     expect(sectionsButton()?.parentElement?.hasAttribute('data-scroll-shadow')).toBe(true);
   });
+
+  // The card was 300px at every interface size, so at 150% the Context row's
+  // label was cut to "Con…". It now grows with the text, up to a cap.
+  test('widens the card with the interface size', async () => {
+    const previousSize = useUIStore.getState().fontSize;
+    showOnly(['session']);
+    try {
+      const width = () => container.querySelector<HTMLElement>('aside')?.style.width;
+      await render();
+      expect(width()).toBe('300px');
+      await act(async () => useUIStore.setState({ fontSize: 125 }));
+      expect(width()).toBe('375px');
+      await act(async () => useUIStore.setState({ fontSize: 200 }));
+      expect(width()).toBe('450px');
+    } finally {
+      await act(async () => useUIStore.setState({ fontSize: previousSize }));
+    }
+  });
 });

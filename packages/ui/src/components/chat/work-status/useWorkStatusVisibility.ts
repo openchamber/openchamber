@@ -4,11 +4,20 @@ import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { isZoneShown } from '@/lib/workspace/zones';
 
 /**
- * Fixed panel width. The panel is not user-resizable: it is an object inside
- * the chat rather than a docked pane, so it has no resizer and no persisted
- * width.
+ * The card's width at 100% interface size. The panel is not user-resizable:
+ * it is an object inside the chat rather than a docked pane, so it has no
+ * resizer and no persisted width.
  */
-export const WORK_STATUS_PANEL_WIDTH = 300;
+const WORK_STATUS_PANEL_BASE_WIDTH = 300;
+
+/**
+ * Widest the card grows with the interface size: the 300px card at 150%. Up to there
+ * it grows with the text inside it, so it cuts no more than at 100%. The cap
+ * keeps the chat from losing more: above 150% the rows' fixed parts still
+ * fit, since the Context row with its switch, percentage and cost needs 432px
+ * at 200% before its label is cut (measured in Chrome with the app's CSS).
+ */
+const WORK_STATUS_PANEL_MAX_WIDTH = 450;
 
 /**
  * Minimum width the message column must keep for itself. Below this the panel
@@ -16,14 +25,33 @@ export const WORK_STATUS_PANEL_WIDTH = 300;
  */
 const WORK_STATUS_MIN_CHAT_WIDTH = 560;
 
-/** The card's own horizontal margins (`ms-2` + `me-4`). */
+/** The card's own horizontal margins (`ms-2` + `me-4`) at 100%; rem, so they scale. */
 const WORK_STATUS_PANEL_GUTTER = 8 + 16;
 
-/** The card's column in the right slot: the card and its margins. */
-export const WORK_STATUS_COLUMN_WIDTH = WORK_STATUS_PANEL_WIDTH + WORK_STATUS_PANEL_GUTTER;
+type WorkStatusWidths = {
+  /** The card. */
+  panel: number;
+  /** The card's column in the right slot: the card and its margins. */
+  column: number;
+  /** Row width below which the panel gives its space back to the transcript. */
+  requiredRow: number;
+};
 
-/** Row width below which the panel gives its space back to the transcript. */
-export const WORK_STATUS_REQUIRED_ROW_WIDTH = WORK_STATUS_COLUMN_WIDTH + WORK_STATUS_MIN_CHAT_WIDTH;
+/** Widths at an interface size in percent (`useUIStore` `fontSize`, 100 by default). */
+export const getWorkStatusWidths = (interfaceSize: number): WorkStatusWidths => {
+  const scale = interfaceSize / 100;
+  const panel = Math.min(
+    WORK_STATUS_PANEL_MAX_WIDTH,
+    Math.max(WORK_STATUS_PANEL_BASE_WIDTH, Math.round(WORK_STATUS_PANEL_BASE_WIDTH * scale)),
+  );
+  const column = panel + WORK_STATUS_PANEL_GUTTER * scale;
+  return { panel, column, requiredRow: column + WORK_STATUS_MIN_CHAT_WIDTH };
+};
+
+export const useWorkStatusWidths = (): WorkStatusWidths => {
+  const interfaceSize = useUIStore((state) => state.fontSize);
+  return React.useMemo(() => getWorkStatusWidths(interfaceSize), [interfaceSize]);
+};
 
 type Options = {
   isMobile: boolean;
@@ -113,19 +141,22 @@ export const useWorkStatusVisibility = ({ isMobile, isVSCode }: Options): Result
   //
   // It is also the stable input the oscillation argument needs: this panel's
   // own visibility cannot change the width being measured.
+  //
+  // The card widens with the interface size, so the width it needs does too.
+  const { requiredRow } = useWorkStatusWidths();
   React.useEffect(() => {
     if (!rowNode || typeof ResizeObserver === 'undefined') return undefined;
 
     const measured = rowNode.closest<HTMLElement>('[data-chat-area]') ?? rowNode;
-    setWideEnough(measured.getBoundingClientRect().width >= WORK_STATUS_REQUIRED_ROW_WIDTH);
+    setWideEnough(measured.getBoundingClientRect().width >= requiredRow);
     const observer = new ResizeObserver((entries) => {
       const entry = entries[0];
       if (!entry) return;
-      setWideEnough(entry.contentRect.width >= WORK_STATUS_REQUIRED_ROW_WIDTH);
+      setWideEnough(entry.contentRect.width >= requiredRow);
     });
     observer.observe(measured);
     return () => observer.disconnect();
-  }, [rowNode]);
+  }, [rowNode, requiredRow]);
 
   const roomy = !isMobile && !isVSCode && wideEnough === true;
   const fits = layoutAllows && roomy;

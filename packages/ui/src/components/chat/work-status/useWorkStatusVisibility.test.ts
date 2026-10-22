@@ -16,10 +16,11 @@ type SurfacePlacement = { git?: 'left' };
 let surfaceZones: SurfacePlacement = {};
 let panelEnabled = true;
 let effectiveDirectory: string | undefined = '/repo';
+let interfaceSize = 100;
 
 mock.module('@/stores/useUIStore', () => ({
   useUIStore: (selector: (state: unknown) => unknown) =>
-    selector({ contextPanelByDirectory: panelByDirectory, contextSurfaceZones: surfaceZones, workStatusPanelEnabled: panelEnabled }),
+    selector({ contextPanelByDirectory: panelByDirectory, contextSurfaceZones: surfaceZones, workStatusPanelEnabled: panelEnabled, fontSize: interfaceSize }),
   normalizeContextPanelDirectoryKey: (value: string) => value,
 }));
 
@@ -27,9 +28,8 @@ mock.module('@/hooks/useEffectiveDirectory', () => ({
   useEffectiveDirectory: () => effectiveDirectory,
 }));
 
-const { useWorkStatusVisibility, WORK_STATUS_REQUIRED_ROW_WIDTH: REQUIRED } = await import(
-  './useWorkStatusVisibility'
-);
+const { getWorkStatusWidths, useWorkStatusVisibility } = await import('./useWorkStatusVisibility');
+const REQUIRED = getWorkStatusWidths(100).requiredRow;
 
 /** Elements the stubbed ResizeObserver was asked to observe, in order. */
 let observed: unknown[] = [];
@@ -129,6 +129,7 @@ const renderVisibility = (args: Args, rowWidth: number) => {
   return {
     result,
     rowNode,
+    rerender: () => act(() => { root.render(React.createElement(Probe)); }),
     teardown: () => {
       act(() => { root.unmount(); });
       dom.restore();
@@ -140,6 +141,7 @@ beforeEach(() => {
   panelByDirectory = {};
   panelEnabled = true;
   effectiveDirectory = '/repo';
+  interfaceSize = 100;
   observed = [];
   notify = null;
 });
@@ -387,5 +389,45 @@ describe('useWorkStatusVisibility', () => {
     );
     expect(vscode.result.visible).toBe(false);
     vscode.teardown();
+  });
+});
+
+describe('work status widths', () => {
+  test('keep the 300px card at 100% and widen it with the interface size up to a cap', () => {
+    expect(getWorkStatusWidths(100)).toEqual({ panel: 300, column: 324, requiredRow: 884 });
+    // Smaller sizes keep the card; its rem margins shrink with the text.
+    expect(getWorkStatusWidths(80).panel).toBe(300);
+    expect(getWorkStatusWidths(125).panel).toBe(375);
+    // Up to 150% the card grows with the text inside it, then stops.
+    expect(getWorkStatusWidths(150)).toEqual({ panel: 450, column: 486, requiredRow: 1046 });
+    expect(getWorkStatusWidths(200)).toEqual({ panel: 450, column: 498, requiredRow: 1058 });
+  });
+
+  test('hide the panel at a larger interface size where the wider card leaves the chat too little', () => {
+    interfaceSize = 150;
+    const narrow = renderVisibility({ isMobile: false, isVSCode: false }, getWorkStatusWidths(150).requiredRow - 1);
+    // Positive control: the same chat area holds the 100% card.
+    expect(getWorkStatusWidths(150).requiredRow - 1).toBeGreaterThan(REQUIRED);
+    expect(narrow.result.visible).toBe(false);
+    narrow.teardown();
+
+    const wide = renderVisibility({ isMobile: false, isVSCode: false }, getWorkStatusWidths(150).requiredRow);
+    expect(wide.result.visible).toBe(true);
+    // A live resize is judged at the same size.
+    act(() => { notify?.([{ contentRect: { width: getWorkStatusWidths(150).requiredRow - 1 } }]); });
+    expect(wide.result.visible).toBe(false);
+    wide.teardown();
+  });
+
+  test('re-judge the same chat area when the interface size changes', () => {
+    const { result, rerender, teardown } = renderVisibility({ isMobile: false, isVSCode: false }, REQUIRED);
+    expect(result.visible).toBe(true);
+    interfaceSize = 150;
+    rerender();
+    expect(result.visible).toBe(false);
+    interfaceSize = 100;
+    rerender();
+    expect(result.visible).toBe(true);
+    teardown();
   });
 });

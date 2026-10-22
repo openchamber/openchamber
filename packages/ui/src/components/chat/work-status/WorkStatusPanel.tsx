@@ -5,7 +5,7 @@ import { DockedPanelSurfaceContext } from '@/hooks/usePageColors';
 import { ScrollShadow } from '@/components/ui/ScrollShadow';
 import { Button } from '@/components/ui/button';
 import { useUIStore } from '@/stores/useUIStore';
-import { WORK_STATUS_PANEL_WIDTH } from './useWorkStatusVisibility';
+import { useWorkStatusWidths } from './useWorkStatusVisibility';
 import { setWorkStatusReserved } from '@/components/layout/rightSlot';
 import { LAYOUT_ANIMATION_EASING } from '@/lib/layoutAnimation';
 import { useLayoutAnimationMs } from '@/hooks/useLayoutAnimationMs';
@@ -78,6 +78,7 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
   const { t, direction } = useI18n();
   // The card's fade and lift follow the side columns' animation setting.
   const panelTransitionMs = useLayoutAnimationMs();
+  const { panel: panelWidth } = useWorkStatusWidths();
   const setScrollTop = useUIStore((state) => state.setWorkStatusScrollTop);
   const setOverlayOpen = useUIStore((state) => state.setWorkStatusOverlayOpen);
   const hiddenSections = useUIStore((state) => state.workStatusHiddenSections);
@@ -259,7 +260,7 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
         // glass layer off from what is behind it, so the card showed clear,
         // unblurred, for the whole fade and frosted only at the end. The glass
         // layer fades itself; the edge fades with it.
-        width: WORK_STATUS_PANEL_WIDTH,
+        width: panelWidth,
         opacity: overlay || interactive ? 1 : 0,
         transform: overlay ? (visible ? 'translateY(0) scale(1)' : 'translateY(-6px) scale(0.98)') : undefined,
         // The overlay sits at the chat's end corner: top right, or top left in RTL.
