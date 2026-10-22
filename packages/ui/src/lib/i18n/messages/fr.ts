@@ -584,7 +584,7 @@ export const dict = {
   'sessions.sidebar.session.export.dialog.detailReadable': 'Lisible',
   'sessions.sidebar.session.export.dialog.detailReadableHint': "Une conversation. Les longues sorties d'outils sont raccourcies et signalées.",
   'sessions.sidebar.session.export.dialog.detailFull': 'Détails complets',
-  'sessions.sidebar.session.export.dialog.detailFullHint': "Chaque entrée, sortie et résultat d'outil, en entier.",
+  'sessions.sidebar.session.export.dialog.detailFullHint': "Chaque entrée, sortie et résultat d'outil, tels que la session les a enregistrés.",
   'sessions.sidebar.session.status.active': 'Session active',
   'sessions.sidebar.session.status.unread': 'Mises à jour non lues',
   'sessions.sidebar.session.status.backgroundSubagent': 'Sous-agent en cours en arrière-plan',

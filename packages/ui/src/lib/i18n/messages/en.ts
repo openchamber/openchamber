@@ -762,7 +762,7 @@ export const dict = {
   'sessions.sidebar.session.export.dialog.detailReadable': 'Readable',
   'sessions.sidebar.session.export.dialog.detailReadableHint': 'A conversation. Long tool results are cut down and marked.',
   'sessions.sidebar.session.export.dialog.detailFull': 'Full details',
-  'sessions.sidebar.session.export.dialog.detailFullHint': 'Every tool input, output and result, in full.',
+  'sessions.sidebar.session.export.dialog.detailFullHint': 'Every tool input, output and result, as the session recorded it.',
   'sessions.sidebar.session.status.active': 'Session active',
   'sessions.sidebar.session.status.unread': 'Unread updates',
   'sessions.sidebar.session.status.backgroundSubagent': 'Subagent running in the background',

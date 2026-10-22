@@ -764,7 +764,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.export.dialog.detailReadable': 'Legível',
   'sessions.sidebar.session.export.dialog.detailReadableHint': 'Uma conversa. Resultados longos de ferramentas são cortados e marcados.',
   'sessions.sidebar.session.export.dialog.detailFull': 'Detalhes completos',
-  'sessions.sidebar.session.export.dialog.detailFullHint': 'Cada entrada, saída e resultado das ferramentas, por completo.',
+  'sessions.sidebar.session.export.dialog.detailFullHint': 'Cada entrada, saída e resultado das ferramentas, como a sessão os registrou.',
   "sessions.sidebar.session.status.active": "Sessão ativa",
   "sessions.sidebar.session.status.unread": "Atualizações não lidas",
   "sessions.sidebar.session.status.backgroundSubagent": "Subagente em execução em segundo plano",

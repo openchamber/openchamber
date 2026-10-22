@@ -730,7 +730,7 @@ export const dict = {
   'sessions.sidebar.session.export.dialog.detailReadable': 'مقروء',
   'sessions.sidebar.session.export.dialog.detailReadableHint': 'محادثة. تُقتطع نتائج الأدوات الطويلة وتُعلَّم.',
   'sessions.sidebar.session.export.dialog.detailFull': 'كل التفاصيل',
-  'sessions.sidebar.session.export.dialog.detailFullHint': 'كل إدخال ومخرج ونتيجة للأدوات كاملة.',
+  'sessions.sidebar.session.export.dialog.detailFullHint': 'كل إدخال ومخرج ونتيجة للأدوات كما سجّلتها الجلسة.',
   'sessions.sidebar.session.status.active': 'الجلسة نشطة',
   'sessions.sidebar.session.status.unread': 'تحديثات غير مقروءة',
   'sessions.sidebar.session.status.backgroundSubagent': 'وكيل فرعي يعمل في الخلفية',

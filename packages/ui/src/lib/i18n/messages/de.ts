@@ -664,7 +664,7 @@ export const dict = {
   'sessions.sidebar.session.export.dialog.detailReadable': 'Lesbar',
   'sessions.sidebar.session.export.dialog.detailReadableHint': 'Ein Gespräch. Lange Werkzeugergebnisse werden gekürzt und markiert.',
   'sessions.sidebar.session.export.dialog.detailFull': 'Vollständige Details',
-  'sessions.sidebar.session.export.dialog.detailFullHint': 'Jede Eingabe, Ausgabe und jedes Ergebnis der Werkzeuge, vollständig.',
+  'sessions.sidebar.session.export.dialog.detailFullHint': 'Jede Eingabe, Ausgabe und jedes Ergebnis der Werkzeuge, wie die Sitzung sie aufgezeichnet hat.',
   'sessions.sidebar.session.status.active': 'Sitzung aktiv',
   'sessions.sidebar.session.status.unread': 'Ungelesene Updates',
   'sessions.sidebar.session.status.backgroundSubagent': 'Subagent läuft im Hintergrund',

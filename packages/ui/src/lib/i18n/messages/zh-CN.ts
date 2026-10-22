@@ -763,7 +763,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.export.dialog.detailReadable': '可读',
   'sessions.sidebar.session.export.dialog.detailReadableHint': '以对话形式呈现。过长的工具结果会截断并标注。',
   'sessions.sidebar.session.export.dialog.detailFull': '完整详情',
-  'sessions.sidebar.session.export.dialog.detailFullHint': '保留每个工具的输入、输出与结果。',
+  'sessions.sidebar.session.export.dialog.detailFullHint': '每个工具的输入、输出与结果，都与会话记录一致。',
   'sessions.sidebar.session.status.active': '会话活跃中',
   'sessions.sidebar.session.status.unread': '有未读更新',
   'sessions.sidebar.session.status.backgroundSubagent': '子智能体正在后台运行',

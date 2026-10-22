@@ -764,7 +764,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.export.dialog.detailReadable': 'Читабельно',
   'sessions.sidebar.session.export.dialog.detailReadableHint': 'Розмова. Довгі результати інструментів скорочено й позначено.',
   'sessions.sidebar.session.export.dialog.detailFull': 'Повні деталі',
-  'sessions.sidebar.session.export.dialog.detailFullHint': 'Кожен вхід, вихід і результат інструментів повністю.',
+  'sessions.sidebar.session.export.dialog.detailFullHint': 'Кожен вхід, вихід і результат інструментів такими, як їх записала сесія.',
   "sessions.sidebar.session.status.active": "Сесія активна",
   "sessions.sidebar.session.status.unread": "Непрочитані оновлення",
   "sessions.sidebar.session.status.backgroundSubagent": "Субагент працює у фоні",

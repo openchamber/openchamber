@@ -763,7 +763,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.export.dialog.detailReadable': '읽기 쉬움',
   'sessions.sidebar.session.export.dialog.detailReadableHint': '대화 형식입니다. 긴 도구 결과는 잘리고 표시됩니다.',
   'sessions.sidebar.session.export.dialog.detailFull': '전체 세부 정보',
-  'sessions.sidebar.session.export.dialog.detailFullHint': '모든 도구 입력, 출력, 결과를 그대로 담습니다.',
+  'sessions.sidebar.session.export.dialog.detailFullHint': '모든 도구 입력, 출력, 결과를 세션이 기록한 그대로 담습니다.',
   'sessions.sidebar.session.status.active': '활성 세션',
   'sessions.sidebar.session.status.unread': '읽지 않은 업데이트',
   'sessions.sidebar.session.status.backgroundSubagent': '하위 에이전트가 백그라운드에서 실행 중',

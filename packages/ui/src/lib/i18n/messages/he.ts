@@ -730,7 +730,7 @@ export const dict = {
   'sessions.sidebar.session.export.dialog.detailReadable': 'קריא',
   'sessions.sidebar.session.export.dialog.detailReadableHint': 'שיחה. תוצאות כלים ארוכות מקוצרות ומסומנות.',
   'sessions.sidebar.session.export.dialog.detailFull': 'כל הפרטים',
-  'sessions.sidebar.session.export.dialog.detailFullHint': 'כל קלט, פלט ותוצאה של כלים, במלואם.',
+  'sessions.sidebar.session.export.dialog.detailFullHint': 'כל קלט, פלט ותוצאה של כלים, כפי שההפעלה רשמה אותם.',
   'sessions.sidebar.session.status.active': 'ההפעלה פעילה',
   'sessions.sidebar.session.status.unread': 'עדכונים שלא נקראו',
   'sessions.sidebar.session.status.backgroundSubagent': 'סוכן משנה פועל ברקע',

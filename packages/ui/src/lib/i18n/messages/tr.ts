@@ -672,7 +672,7 @@ export const dict = {
   'sessions.sidebar.session.export.dialog.detailReadable': 'Okunabilir',
   'sessions.sidebar.session.export.dialog.detailReadableHint': 'Bir konuşma. Uzun araç çıktıları kısaltılır ve işaretlenir.',
   'sessions.sidebar.session.export.dialog.detailFull': 'Tüm ayrıntılar',
-  'sessions.sidebar.session.export.dialog.detailFullHint': 'Her aracın girdisi, çıktısı ve sonucu eksiksiz.',
+  'sessions.sidebar.session.export.dialog.detailFullHint': 'Her aracın girdisi, çıktısı ve sonucu oturumun kaydettiği gibi.',
   'sessions.sidebar.session.status.active': 'Session aktif',
   'sessions.sidebar.session.status.unread': 'Okunmamış güncellemeler',
   'sessions.sidebar.session.status.backgroundSubagent': 'Alt ajan arka planda çalışıyor',

@@ -763,7 +763,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.export.dialog.detailReadable': '読みやすい',
   'sessions.sidebar.session.export.dialog.detailReadableHint': '会話として表示します。長いツール結果は省略され、その旨が示されます。',
   'sessions.sidebar.session.export.dialog.detailFull': '詳細をすべて',
-  'sessions.sidebar.session.export.dialog.detailFullHint': 'すべてのツールの入力・出力・結果をそのまま含めます。',
+  'sessions.sidebar.session.export.dialog.detailFullHint': 'セッションが記録したとおり、すべてのツールの入力・出力・結果を含めます。',
   'sessions.sidebar.session.status.active': 'セッションアクティブ',
   'sessions.sidebar.session.status.unread': '未読の更新',
   'sessions.sidebar.session.status.backgroundSubagent': 'サブエージェントがバックグラウンドで実行中',

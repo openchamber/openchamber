@@ -754,7 +754,7 @@ export const dict = {
   'sessions.sidebar.session.export.dialog.detailReadable': 'Leesbaar',
   'sessions.sidebar.session.export.dialog.detailReadableHint': 'Een gesprek. Lange tooluitvoer wordt ingekort en gemarkeerd.',
   'sessions.sidebar.session.export.dialog.detailFull': 'Volledige details',
-  'sessions.sidebar.session.export.dialog.detailFullHint': 'Elke toolinvoer, uitvoer en resultaat, volledig.',
+  'sessions.sidebar.session.export.dialog.detailFullHint': 'Elke toolinvoer, uitvoer en resultaat, zoals de sessie ze heeft vastgelegd.',
   'sessions.sidebar.session.status.active': 'Sessie actief',
   'sessions.sidebar.session.status.unread': 'Ongelezen updates',
   'sessions.sidebar.session.status.backgroundSubagent': 'Subagent draait op de achtergrond',

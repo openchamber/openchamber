@@ -783,7 +783,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.export.dialog.detailReadable': '可讀',
   'sessions.sidebar.session.export.dialog.detailReadableHint': '以對話形式呈現。過長的工具結果會截斷並標示。',
   'sessions.sidebar.session.export.dialog.detailFull': '完整詳情',
-  'sessions.sidebar.session.export.dialog.detailFullHint': '保留每個工具的輸入、輸出與結果。',
+  'sessions.sidebar.session.export.dialog.detailFullHint': '每個工具的輸入、輸出與結果，都與工作階段記錄一致。',
   'sessions.sidebar.session.status.active': '會話活躍中',
   'sessions.sidebar.session.status.unread': '有未讀更新',
   'sessions.sidebar.session.status.backgroundSubagent': '子代理程式正在背景執行',
