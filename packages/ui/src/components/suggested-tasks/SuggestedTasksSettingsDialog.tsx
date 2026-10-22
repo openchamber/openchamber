@@ -1,14 +1,14 @@
 import React from 'react';
 import { ProjectLabel } from '@/components/layout/ProjectRailPage';
-import { ProjectSuggestedTasksTab } from '@/components/sections/projects/ProjectSuggestedTasksTab';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import type { ProjectEntry } from '@/lib/api/types';
+import { SuggestedTasksSettingsForm } from './SuggestedTasksSettingsForm';
 
 /**
- * The inbox's Configure dialog. It holds the project's Suggested tasks
- * settings, the same form as the project's tab in Settings → Projects. Phones
- * get the same dialog, so the lens editor it opens stacks above it.
+ * The inbox's Configure dialog: the only place a project's Suggested tasks
+ * settings are edited. Phones get the same dialog, so the lens editor it
+ * opens stacks above it.
  */
 export function SuggestedTasksSettingsDialog({ project, onOpenChange }: {
   project: ProjectEntry;
@@ -30,7 +30,7 @@ export function SuggestedTasksSettingsDialog({ project, onOpenChange }: {
         </div>
         <ScrollableOverlay outerClassName="min-h-0 flex-1" className="w-full">
           <div className="@container px-4 pb-6 sm:px-6 [&>section:first-of-type]:border-t-0 [&>section:first-of-type]:pt-0">
-            <ProjectSuggestedTasksTab projectRef={projectRef} overInbox />
+            <SuggestedTasksSettingsForm projectRef={projectRef} />
           </div>
         </ScrollableOverlay>
       </DialogContent>

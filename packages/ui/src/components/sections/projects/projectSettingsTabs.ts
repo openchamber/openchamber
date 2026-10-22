@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-export type ProjectSettingsTab = 'general' | 'actions' | 'worktrees' | 'environment' | 'suggested';
+export type ProjectSettingsTab = 'general' | 'actions' | 'worktrees' | 'environment';
 
 /**
  * The tab the Settings project page shows. It lives outside the page so a
@@ -27,8 +27,6 @@ const SEARCH_TARGET_TABS = new Map<string, ProjectSettingsTab>([
   ['projects.worktree.setup.wait', 'worktrees'],
   ['projects.worktree.setup.replace', 'worktrees'],
   ['projects.environment', 'environment'],
-  ['projects.suggestedTasks', 'suggested'],
-  ['projects.suggestedTasks.lenses', 'suggested'],
 ]);
 
 export const projectSettingsTabForSearchTarget = (id: string): ProjectSettingsTab | null => SEARCH_TARGET_TABS.get(id) ?? null;

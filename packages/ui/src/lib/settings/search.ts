@@ -1067,22 +1067,6 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
-    id: 'projects.suggestedTasks',
-    page: 'projects',
-    titleKey: 'suggestedTasks.settings.title',
-    descriptionKey: 'suggestedTasks.settings.info',
-    keywords: ['suggested tasks', 'suggestions', 'scan', 'lens', 'lenses', 'proactive', 'jules', 'inbox'],
-    isAvailable: (ctx) => !ctx.isVSCode,
-  },
-  {
-    id: 'projects.suggestedTasks.lenses',
-    page: 'projects',
-    titleKey: 'suggestedTasks.settings.lenses.title',
-    descriptionKey: 'suggestedTasks.settings.lenses.info',
-    keywords: ['lens', 'lenses', 'security', 'performance', 'todo', 'fixme', 'dead code', 'dependencies', 'accessibility', 'tests'],
-    isAvailable: (ctx) => !ctx.isVSCode,
-  },
-  {
     id: 'projects.shared',
     page: 'projects',
     titleKey: 'settings.projects.team.title',

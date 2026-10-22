@@ -6,7 +6,7 @@ import { discoverLoopFiles, loopFingerprint, parseLoopDefinition, setLoopFileEna
 
 // A project's Suggested tasks scan is timed by the scheduler but configured
 // in Settings; editing it here would be undone by the next settings save.
-const SUGGESTED_SCAN_MANAGED = new OpenChamberControlError('This task runs Suggested tasks. Change it in Settings, under the project\'s Suggested tasks.', 409);
+const SUGGESTED_SCAN_MANAGED = new OpenChamberControlError('This task runs Suggested tasks. Change it with Configure on the Suggested tasks page.', 409);
 
 // Same scope rule the scheduler applies: a file under the project's own
 // `.agents/loops` is a repository loop, even where it is also the user folder.

@@ -9,7 +9,6 @@ import { ProjectEnvironmentSection } from '@/components/sections/projects/Projec
 import { ProjectGeneralTab } from '@/components/sections/projects/ProjectGeneralTab';
 import { ProjectSettingsHeader } from '@/components/sections/projects/ProjectSettingsHeader';
 import { ProjectWorktreesTab } from '@/components/sections/projects/ProjectWorktreesTab';
-import { ProjectSuggestedTasksTab } from '@/components/sections/projects/ProjectSuggestedTasksTab';
 import type { ProjectSettingsTab } from '@/components/sections/projects/projectSettingsTabs';
 import { useProjectSetup } from '@/components/sections/projects/useProjectSetup';
 import {
@@ -35,7 +34,7 @@ type ProjectSettingsPanelProps = {
 };
 
 const isProjectSettingsTab = (id: string): id is ProjectSettingsTab => (
-  id === 'general' || id === 'actions' || id === 'worktrees' || id === 'environment' || id === 'suggested'
+  id === 'general' || id === 'actions' || id === 'worktrees' || id === 'environment'
 );
 
 /**
@@ -58,19 +57,15 @@ export const ProjectSettingsPanel: React.FC<ProjectSettingsPanelProps> = ({
 
   const projectRef = React.useMemo(() => ({ id: project.id, path: project.path }), [project.id, project.path]);
   const setupState = useProjectSetup(projectRef);
-  // VS Code runs no OpenChamber server that could apply environment settings
-  // or run Suggested tasks scans.
+  // VS Code runs no OpenChamber server that could apply environment settings.
   const hasServer = !isVSCodeRuntime();
-  const activeTab = (tab === 'environment' || tab === 'suggested') && !hasServer ? 'general' : tab;
+  const activeTab = tab === 'environment' && !hasServer ? 'general' : tab;
 
   const tabs = React.useMemo<SortableTabsStripItem[]>(() => [
     { id: 'general', label: t('settings.projects.tab.general') },
     { id: 'actions', label: t('settings.projects.tab.actions') },
     { id: 'worktrees', label: t('settings.projects.tab.worktrees') },
-    ...(hasServer ? [
-      { id: 'environment', label: t('settings.projects.tab.environment') },
-      { id: 'suggested', label: t('suggestedTasks.settings.tab') },
-    ] : []),
+    ...(hasServer ? [{ id: 'environment', label: t('settings.projects.tab.environment') }] : []),
   ], [hasServer, t]);
 
   const header = <ProjectSettingsHeader form={form} />;
@@ -93,7 +88,6 @@ export const ProjectSettingsPanel: React.FC<ProjectSettingsPanelProps> = ({
       {activeTab === 'actions' ? <ProjectActionsTab setupState={setupState} /> : null}
       {activeTab === 'worktrees' ? <ProjectWorktreesTab projectRef={projectRef} setupState={setupState} onOpenWorktrees={onOpenWorktrees} /> : null}
       {activeTab === 'environment' ? <ProjectEnvironmentSection projectRef={projectRef} /> : null}
-      {activeTab === 'suggested' ? <ProjectSuggestedTasksTab projectRef={projectRef} /> : null}
     </>
   );
 
