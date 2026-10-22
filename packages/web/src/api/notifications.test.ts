@@ -58,6 +58,7 @@ const installWindowMock = (overrides?: {
         removeItem: (key: string) => storage.delete(key),
       },
       location: {
+        origin: 'https://app.example',
         pathname: overrides?.pathname ?? '/',
         search: overrides?.search ?? '',
         assign,
@@ -94,6 +95,31 @@ afterEach(() => {
 });
 
 describe('web notifications API', () => {
+  it('switches from another session without reloading when the app router is mounted', async () => {
+    const assign = vi.fn();
+    const focus = vi.fn();
+    installWindowMock({ search: '?session=ses_other', focus, assign });
+    installFocusedDocument();
+    installEmptyNavigator();
+    const captured: CapturedNotification[] = [];
+    installNotificationMock(() => undefined, captured);
+    const { listenForNotificationNavigation } = await import('@openchamber/ui/lib/router/notificationNavigation');
+    const accept = vi.fn(() => true);
+    const cleanup = listenForNotificationNavigation(accept);
+    try {
+      const { createWebNotificationsAPI } = await import('./notifications');
+      await createWebNotificationsAPI().notifyAgentCompletion({ title: 'Ready', sessionId: 'ses_target' });
+      const instance = captured[0].instance;
+      instance.onclick?.call(instance, new Event('click'));
+      expect(assign).not.toHaveBeenCalled();
+      expect(accept).toHaveBeenCalledWith(new URL('https://app.example/?session=ses_target'));
+      expect(focus).toHaveBeenCalledOnce();
+      expect(instance.close).toHaveBeenCalledOnce();
+    } finally {
+      cleanup();
+    }
+  });
+
   it('deduplicates repeated foreground notifications by tag', async () => {
     installWindowMock();
     const created: Array<{ title: string; options?: NotificationOptions }> = [];
