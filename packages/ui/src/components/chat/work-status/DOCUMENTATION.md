@@ -10,6 +10,12 @@ Every readout is a **labelled row**: icon, name, trailing value. A number
 without a name is unreadable at a glance, which is what an unlabelled stream of
 values degenerates into.
 
+A pull request's state pill paints its text in `--pr-<state>-text` on an 18%
+tint of `--pr-<state>`. The state colour itself fell below 4.5:1 on that tint
+in most built-in themes; the theme computes a readable one
+(`lib/theme/readableColors.ts`), and `readableColors.test.ts` measures it in
+every built-in theme.
+
 Rows are grouped into **named sections**, one component each, composed in
 order by `WorkStatusPanel`. They are parted by space alone, no rule. The gap
 is a `:not(:first-child)` CSS rule rather than a prop, because every section renders

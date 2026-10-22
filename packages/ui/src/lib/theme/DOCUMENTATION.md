@@ -14,7 +14,7 @@ as a reference. Their background-to-background contrast stays at or below 1.10;
 this is a surface distinction budget, not a text contrast target. Custom themes
 retain their exact authored background. Bodies and gutters use the same fill.
 
-`color.ts` owns alpha composition and readable text selection. A solid status foreground is not the text for a tinted alert. `readableColors.ts` computes the palette used by both `cssGenerator.ts` and the extension host snapshot, including the corrected selection foreground. The SDK receives the computed text colors as required fields and applies them directly, without a second color algorithm. Color calculations run when the theme changes, not on each button render or session update.
+`color.ts` owns alpha composition and readable text selection. A solid status foreground is not the text for a tinted alert. `readableColors.ts` computes the palette used by both `cssGenerator.ts` and the extension host snapshot, including the corrected selection foreground. It also computes `--pr-<state>-text`, the text for a pull request state pill on an 18% tint of its own colour (`PR_PILL_TINT`); the app paints those pills, so the extension snapshot does not carry them. The SDK receives the computed text colors as required fields and applies them directly, without a second color algorithm. Color calculations run when the theme changes, not on each button render or session update.
 
 For authoring and supported fields, see `docs/CUSTOM_THEMES.md`. Surface semantics belong to `.agents/skills/theme-system/references/tokens-and-examples.md`.
 

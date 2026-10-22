@@ -275,3 +275,19 @@ test('a section title keeps its width and its summary is cut first', async () =>
     expect(canBeCut(subject)).toBe(true);
   });
 });
+
+/*
+ * The state colour as text on its own 18% tint fell below 4.5:1 in most
+ * built-in themes; the theme computes `--pr-<state>-text` for it, and
+ * readableColors.test.ts measures those against every theme. This pins that
+ * the pill uses them. Read from the source: the Project section needs the
+ * whole git and PR stack to render.
+ */
+test('the pull request pill paints its text in the readable colour', () => {
+  const source = readFileSync(fileURLToPath(new URL('./WorkStatusPrimaryGroup.tsx', import.meta.url)), 'utf8');
+  const pills = [...source.matchAll(/<WorkStatusPill\b([^>]*)>/g)].map((match) => match[1]);
+  // Positive control: the pill is there to check.
+  expect(pills).toHaveLength(1);
+  expect(/color=\{`var\(--pr-\$\{prSummary\.visualState\}-text\)`\}/.test(pills[0] ?? '')).toBe(true);
+  expect(/background=\{`color-mix\(in srgb, var\(--pr-\$\{prSummary\.visualState\}\) \$\{PR_PILL_TINT \* 100\}%, transparent\)`\}/.test(pills[0] ?? '')).toBe(true);
+});

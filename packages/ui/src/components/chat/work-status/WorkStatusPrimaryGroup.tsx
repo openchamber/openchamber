@@ -15,6 +15,7 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { resolveUsageTone } from '@/lib/quota';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { normalizePath } from '@/lib/pathNormalization';
+import { PR_PILL_TINT } from '@/lib/theme/readableColors';
 import { computeContextUsage } from './contextUsage';
 import { formatCost } from './subagentCost';
 import { useSubagentCostRollup } from './useSubagentCostRollup';
@@ -382,8 +383,10 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
                 label={prSummary.title ?? t(changeRequestCopy('chat.workStatus.pr.untitled', prSummary.provider))}
                 value={(
                   <WorkStatusPill
-                    color={`var(--pr-${prSummary.visualState})`}
-                    background={`color-mix(in srgb, var(--pr-${prSummary.visualState}) 18%, transparent)`}
+                    // The state colour itself is too faint as text on its own tint
+                    // in most themes; the theme computes a readable one (readableColors.ts).
+                    color={`var(--pr-${prSummary.visualState}-text)`}
+                    background={`color-mix(in srgb, var(--pr-${prSummary.visualState}) ${PR_PILL_TINT * 100}%, transparent)`}
                   >
                     {prSummary.draft ? t('chat.workStatus.pr.draft') : formatChangeRequestReference(prSummary.provider, prSummary.number)}
                   </WorkStatusPill>

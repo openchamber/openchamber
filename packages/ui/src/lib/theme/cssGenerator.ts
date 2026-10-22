@@ -4,6 +4,7 @@ import { isVSCodeRuntime } from '@/lib/desktop';
 import { resolveSyntaxTokens } from './syntax';
 import { withOpacity } from './color';
 import { getReadableThemeColors } from './readableColors';
+import { resolvePrColors } from './themes/prColors';
 
 const hexToRgb = (value: string | undefined | null): string | null => {
   if (!value) {
@@ -241,14 +242,7 @@ const sidebarBaseRgb = hexToRgb(theme.colors.surface.muted);
   }
 
   private generatePullRequestColors(theme: Theme): string[] {
-    const vars: string[] = [];
-    const pr = theme.colors.pr;
-    vars.push(`  --pr-open: ${pr?.open || theme.colors.status.success};`);
-    vars.push(`  --pr-draft: ${pr?.draft || theme.colors.surface.mutedForeground};`);
-    vars.push(`  --pr-blocked: ${pr?.blocked || theme.colors.status.warning};`);
-    vars.push(`  --pr-merged: ${pr?.merged || (theme.metadata.variant === 'dark' ? '#8957e5' : '#8250df')};`);
-    vars.push(`  --pr-closed: ${pr?.closed || theme.colors.status.error};`);
-    return vars;
+    return Object.entries(resolvePrColors(theme)).map(([state, color]) => `  --pr-${state}: ${color};`);
   }
 
   private generateSyntaxColors(syntax: Theme['colors']['syntax']): string[] {
@@ -279,6 +273,7 @@ const sidebarBaseRgb = hexToRgb(theme.colors.surface.muted);
     return [
       ...Object.entries(colors.tinted).map(([name, value]) => `  --${name}-text: ${value};`),
       ...Object.entries(colors.status).map(([name, value]) => `  --status-${name}-text: ${value};`),
+      ...Object.entries(colors.pr).map(([state, value]) => `  --pr-${state}-text: ${value};`),
       `  --interactive-selection-foreground: ${colors.selectionForeground};`,
     ];
   }
