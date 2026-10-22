@@ -10,6 +10,11 @@ Every readout is a **labelled row**: icon, name, trailing value. A number
 without a name is unreadable at a glance, which is what an unlabelled stream of
 values degenerates into.
 
+Row text is muted, under headings in the body colour. A `muted` row steps
+further back at 75% opacity: a disconnected MCP server, supporting counts and
+pinned items. Opacity keeps the inherited colour, so a clickable muted row
+still brightens on hover.
+
 A pull request's state pill paints its text in `--pr-<state>-text` on an 18%
 tint of `--pr-<state>`. The state colour itself fell below 4.5:1 on that tint
 in most built-in themes; the theme computes a readable one

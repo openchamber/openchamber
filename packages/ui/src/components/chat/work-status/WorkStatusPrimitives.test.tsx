@@ -8,6 +8,8 @@ import { Window } from 'happy-dom';
 
 import { useUIStore } from '@/stores/useUIStore';
 import { SEMANTIC_TYPOGRAPHY } from '@/lib/typography';
+import { themes } from '@/lib/theme/themes';
+import { contrastRatio, mixColor, withOpacity } from '@/lib/theme/color';
 
 // Imported once a DOM exists: the tooltip's layout effects check for one when
 // their module loads, and without it the popup never mounts.
@@ -274,6 +276,39 @@ test('a section title keeps its width and its summary is cut first', async () =>
     expect(classes(title)).toContain('shrink-0');
     expect(canBeCut(subject)).toBe(true);
   });
+});
+
+test('a muted row looks different from a plain one', async () => {
+  await withDom(async (container, render) => {
+    const { WorkStatusRow } = primitives;
+    await render(
+      <>
+        <WorkStatusRow label="connected-server" />
+        <WorkStatusRow label="disconnected-server" muted />
+      </>,
+    );
+    const plain = byText(container, 'span[id]', 'connected-server');
+    const muted = byText(container, 'span[id]', 'disconnected-server');
+    // Positive control: both labels rendered.
+    expect(plain).toBeDefined();
+    expect(muted).toBeDefined();
+    expect(classes(muted)).toContain('opacity-75');
+    expect(classes(plain)).not.toContain('opacity-75');
+    // The row's colour is inherited, so hovering a clickable row still brightens it.
+    expect(classes(muted).some((name) => name.startsWith('text-'))).toBe(false);
+  });
+});
+
+test('a muted label stays at 3:1 or more on the panel in every built-in theme', () => {
+  expect(themes.length).toBeGreaterThan(50);
+  const failures = themes.flatMap((theme) => {
+    const { surface } = theme.colors;
+    // The panel's page: the muted surface, halfway to it in light themes.
+    const page = theme.metadata.variant === 'dark' ? surface.muted : mixColor(surface.muted, surface.background, 0.5, surface.background);
+    const ratio = contrastRatio(withOpacity(surface.mutedForeground, 0.75), page, surface.background) ?? 0;
+    return ratio < 3 ? [`${theme.metadata.id}: ${ratio.toFixed(2)}`] : [];
+  });
+  expect(failures).toEqual([]);
 });
 
 /*
