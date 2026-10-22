@@ -298,6 +298,8 @@ Answer HTTP 200 with `{ "ok": true, "data": … }` or `{ "ok": false, "error": {
 | `mutation.perform` | Only the stored result keys (`number`, `merged`, `state`, `ready`, …) |
 | `mutation.reconcile` | `{ state: "succeeded" \| "failed" \| "outcome-unknown", result? }`: after a restart, whether the write recorded as running landed |
 
+A change request is in reach when the repository it targets is in the context's repository network (the primary remote's repository and its fork parent), as the built-in hosts do: refuse one whose target is outside it, and do not check where its head comes from. A maintainer's upstream clone reads, comments on, reviews and merges a contributor's fork pull request through the target repository, which the forge already authorises for the token. Creating one is the other direction: its `headRemote` must be in the network.
+
 A capability opens the mutation routes below; one that is off answers 501 there and never reaches the service. `mutation.*` calls carry the route's `kind`, and its normalized `input` (without the digest). A service that cannot perform a kind its capabilities open should answer `UNSUPPORTED` (501), but the user then sees an action fail that the board offered, so implement every kind of every capability you turn on.
 
 | Capability | Route | `kind` | Normalized `input` |

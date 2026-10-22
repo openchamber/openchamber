@@ -184,6 +184,23 @@ describe('readGitHubChangeRequestFile', () => {
     }));
   });
 
+  // The upstream clone's network is the upstream alone; the head lives in a
+  // contributor's fork and is read through the upstream repository.
+  it("reads a contributor's fork pull request through the upstream clone, at the fork's head", async () => {
+    dependencies.resolveRepoNetwork.mockResolvedValue([{ owner: 'o', repo: 'r', source: 'origin' }]);
+    request.mockImplementation(async (route, params) => {
+      if (route === 'GET /repos/{owner}/{repo}/pulls/{pull_number}') {
+        return { data: { head: { sha: HEAD, repo: { owner: { login: 'contributor' }, name: 'r' } }, base: { sha: BASE_TIP } } };
+      }
+      if (route === 'GET /repos/{owner}/{repo}/compare/{basehead}') return { data: { merge_base_commit: { sha: MERGE_BASE } } };
+      return { data: `${params.owner}/${params.repo}:${params.path}@${params.ref}` };
+    });
+
+    const result = await read({ owner: 'o', repo: 'r' }, { path: 'src/a.ts', status: 'M' });
+
+    expect(result).toEqual({ original: `o/r:src/a.ts@${MERGE_BASE}`, modified: `o/r:src/a.ts@${HEAD}` });
+  });
+
   it('skips the missing side of added and deleted files and follows renames', async () => {
     expect(await read({ owner: 'o', repo: 'r' }, { path: 'new.ts', status: 'A' }))
       .toEqual({ original: '', modified: `new.ts@${HEAD}` });

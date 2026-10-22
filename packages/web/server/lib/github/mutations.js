@@ -1,4 +1,5 @@
 import { digestMutationInput } from '../source-control/mutation-executor.js';
+import { changeRequestNetworkTarget } from '../source-control/repository-network.js';
 import {
   invalidProviderPayload,
   isPlainObject,
@@ -506,7 +507,7 @@ export function createGitHubMutations({ descriptor, octokitOf, resolveRepo, reso
       primary,
     );
     const projects = [repoProject(primary), ...(network ?? []).map(repoProject)];
-    if (!projects.some((project) => sameProject(project, context.target.project))) {
+    if (!changeRequestNetworkTarget(projects, context.target.project, sameProject)) {
       throw mutationError('GitHub mutation target is outside the bound repository network', 'SOURCE_CONTROL_MUTATION_TARGET_INVALID', 409);
     }
     return projects;

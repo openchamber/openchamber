@@ -1,3 +1,4 @@
+import { changeRequestNetworkTarget } from '../source-control/repository-network.js';
 import { mapGitLabCI, mapGitLabCommit, mapGitLabDiff, mapGitLabIssue, mapGitLabMergeRequest, mapGitLabNote, mapGitLabProject, mapGitLabUser, mapGitLabVerdictNote } from './mappers.js';
 import { resolveGitLabProjectsFromDirectory } from './repo.js';
 import { isPlainObject, isString } from './validation.js';
@@ -395,9 +396,10 @@ export function createGitLabResourceService({ origin, client, download, resolveP
       for (const target of selectedTargets) {
         try {
           const raw = await client.MergeRequests.show(target.project.id, number);
+          // The merge request must target this project of the network; its
+          // source project may be any fork (`changeRequestNetworkTarget`).
           if (options.requireNetwork
-            && (raw?.target_project_id !== target.raw.id
-              || !targets.some((candidate) => candidate.raw.id === raw?.source_project_id))) {
+            && changeRequestNetworkTarget(targets, raw?.target_project_id, (candidate, id) => candidate.raw.id === id) !== target) {
             throw Object.assign(new Error('GitLab merge request is outside the bound repository network'), { status: 404 });
           }
           return { target, raw };
@@ -1129,7 +1131,7 @@ export function createGitLabResourceService({ origin, client, download, resolveP
      * A merge request's changes as one unified diff. GitLab diffs a merge
      * request against its merge base, so, like a GitHub pull request diff,
      * work merged in from the target branch is not part of it. The merge
-     * request must belong to the bound repository's network.
+     * request must target a project of the bound repository's network.
      */
     async changeRequestPatch(directory, number, options = {}) {
       const { target } = await findByNumber(directory, number, options.project, {

@@ -243,6 +243,15 @@ describe('an extension provider', () => {
       expect(calls.at(-1).input).not.toHaveProperty('requestedRemoteName');
     });
 
+    // Only the target must be the asked project: a contributor's fork is
+    // reached through the change request, wherever it lives.
+    it("answers a contributor fork's source when the target is the asked project", async () => {
+      const session = await connect();
+      const fork = { id: '7', owner: 'octo', name: 'teapot' };
+      await expect(resolve(session, source({ sourceProject: fork, classification: 'contributor-fork', endpoint: `${INSTANCE}/octo/teapot.git` })))
+        .resolves.toMatchObject({ sourceProject: fork, targetProject: project, classification: 'contributor-fork' });
+    });
+
     it.each([
       ['an endpoint on another origin', { endpoint: 'https://evil.example/mona/teapot.git' }],
       ['an endpoint naming another project', { endpoint: `${INSTANCE}/mona/other.git` }],

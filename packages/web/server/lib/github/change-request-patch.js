@@ -3,6 +3,7 @@ import { markGitHubAuthAccountInvalid } from './auth.js';
 import { getOctokitForAccountId, getOctokitForHost } from './octokit.js';
 import { resolveGitHubRepoFromDirectory } from './repo/index.js';
 import { resolveRepoNetwork } from './repo/fork-detection.js';
+import { changeRequestNetworkTarget } from '../source-control/repository-network.js';
 
 /**
  * GitHub's pull request patch and file reads behind
@@ -64,7 +65,7 @@ async function resolvePullRequestRepo({ session, directory, remote, number, sour
   if (sourceRepo && !sameRepository(sourceRepo, repo)) {
     const resolveNetwork = dependencies.resolveRepoNetwork ?? resolveRepoNetwork;
     const network = await resolveNetwork(account.octokit, directory, remote, { strictErrors: true });
-    const member = Array.isArray(network) ? network.find((entry) => sameRepository(entry, sourceRepo)) : null;
+    const member = changeRequestNetworkTarget(network, sourceRepo, sameRepository);
     if (!member) {
       throw Object.assign(new Error(`Pull request #${number} belongs to ${sourceRepo.owner}/${sourceRepo.repo}, which is outside this checkout's repository network`), {
         statusCode: 409,

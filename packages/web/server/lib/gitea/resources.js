@@ -1,4 +1,5 @@
 import { isPlainObject, isString } from '../shared/guards.js';
+import { changeRequestNetworkTarget } from '../source-control/repository-network.js';
 import {
   asDraftTitle, asReadyTitle, branchRepoId, liveChangeRequestSummary, liveIssueSummary,
   mapGiteaChangedFile, mapGiteaCI, mapGiteaComment, mapGiteaCommit, mapGiteaIssue, mapGiteaPull, mapGiteaRepo,
@@ -128,10 +129,11 @@ export function createGiteaResourceService({ origin, client, resolveRepos = reso
   };
 
   /**
-   * A pull request by number in the bound network. With `requireNetwork`,
-   * its head must also come from a repository of that network.
+   * A pull request by number, targeting a repository of the bound network.
+   * Its head may come from any fork: the pull request is the authority for
+   * it (`changeRequestNetworkTarget`).
    */
-  const findPull = async (directory, number, selector, { remote, requireNetwork = false } = {}) => {
+  const findPull = async (directory, number, selector, { remote } = {}) => {
     const net = await network(directory, selector, remote, { requireComplete: true });
     const candidates = selector ? [net.target] : net.targets;
     for (const target of candidates) {
@@ -142,9 +144,8 @@ export function createGiteaResourceService({ origin, client, resolveRepos = reso
         if (statusOf(error) === 404) continue;
         throw error;
       }
-      if (branchRepoId(raw?.base) !== target.raw.id) throw malformed('Gitea returned a pull request of another repository');
-      if (requireNetwork && !net.targets.some((candidate) => candidate.raw.id === branchRepoId(raw?.head))) {
-        throw notFound('Gitea pull request is outside the bound repository network');
+      if (changeRequestNetworkTarget(net.targets, branchRepoId(raw?.base), (candidate, id) => candidate.raw.id === id) !== target) {
+        throw malformed('Gitea returned a pull request of another repository');
       }
       return { target, raw, request: requirePull(raw, target.project), net };
     }
@@ -473,9 +474,9 @@ export function createGiteaResourceService({ origin, client, resolveRepos = reso
       });
     },
 
-    /** The pull request's changes as one unified diff, from the bound network only. */
+    /** The pull request's changes as one unified diff; its target must be in the bound network. */
     async changeRequestPatch(directory, number, { project, remote } = {}) {
-      const { target } = await findPull(directory, number, project, { remote, requireNetwork: true });
+      const { target } = await findPull(directory, number, project, { remote });
       const patch = await client.text(`${repoPath(target.project)}/pulls/${number}.diff`);
       if (!isString(patch)) throw malformed('Gitea returned an invalid pull request diff');
       return { patch, meta: { owner: target.project.owner, repo: target.project.name, number } };
@@ -487,7 +488,7 @@ export function createGiteaResourceService({ origin, client, resolveRepos = reso
      * target repository's `refs/pull/<n>/head`, so both reads go there.
      */
     async changeRequestFileContents(directory, number, { project, remote, path, previousPath, status }) {
-      const { target, raw } = await findPull(directory, number, project, { remote, requireNetwork: true });
+      const { target, raw } = await findPull(directory, number, project, { remote });
       const baseSha = raw?.merge_base;
       const headSha = raw?.head?.sha;
       if (!COMMIT_SHA.test(String(baseSha)) || !COMMIT_SHA.test(String(headSha))) throw malformed('Gitea returned invalid pull request refs');
@@ -563,9 +564,7 @@ export function createGiteaResourceService({ origin, client, resolveRepos = reso
     },
 
     async resolveChangeRequestMutation(context, expected) {
-      const { target, request } = await findPull(context.directory, expected.number, expected.project, {
-        remote: context.primaryRemote, requireNetwork: true,
-      });
+      const { target, request } = await findPull(context.directory, expected.number, expected.project, { remote: context.primaryRemote });
       requireExpected(expected, request);
       return {
         providerTarget: { repoId: Number(target.project.id), owner: target.project.owner, name: target.project.name, number: request.number },

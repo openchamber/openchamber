@@ -775,6 +775,38 @@ describe('canonical GitHub mutations', () => {
       expect(store.records.get('request-one')).toMatchObject({ kind: 'change-request-comment', state: 'succeeded' });
     });
 
+    it("comments on and merges a contributor's fork pull request from the upstream clone", async () => {
+      const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+      // The network is acme/app alone; the head lives in a fork outside it.
+      const forkPull = pullRequest({
+        head: {
+          ref: 'feature', sha: 'abc123',
+          repo: {
+            owner: { login: 'contributor' }, name: 'app', html_url: 'https://github.com/contributor/app',
+            clone_url: 'https://github.com/contributor/app.git', ssh_url: 'git@github.com:contributor/app.git',
+          },
+        },
+      });
+      const requests = recordRequests((entry) => {
+        if (entry.method === 'GET') return jsonResponse(forkPull);
+        if (entry.path.endsWith('/merge-async')) return jsonResponse({ status: 'merged', details: { message: 'Merged', sha: 'def456' } });
+        return jsonResponse({ id: 11 }, 201);
+      });
+      const resolveNetwork = vi.fn(async () => [{ owner: 'acme', repo: 'app', url: 'https://github.com/acme/app', source: 'origin' }]);
+      const { app } = makeApp({ resolveNetwork });
+
+      await request(app).post('/api/source-control/github/pr/comment')
+        .send({ ...context(account.accountId, { target: pullTarget }), body: 'Thanks' }).expect(200);
+      const merged = await request(app).post('/api/source-control/github/pr/merge')
+        .send({ ...mergeBody(account.accountId), idempotencyKey: 'request-two' }).expect(200);
+
+      expect(merged.body.result).toEqual({ merged: true });
+      expect(requests.filter((entry) => entry.method !== 'GET').map((entry) => entry.path)).toEqual([
+        '/repos/acme/app/issues/7/comments',
+        '/repos/acme/app/pulls/7/merge-async',
+      ]);
+    });
+
     it('reviews the head commit the client read, with the text as the review body', async () => {
       const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
       const requests = recordRequests((entry) => (entry.method === 'GET'

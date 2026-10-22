@@ -616,8 +616,8 @@ describe('GitLab resource service', () => {
     })).rejects.toThrow('invalid merge request draft state');
   });
 
-  it('rejects merge requests whose source project is outside the allowed network', async () => {
-    const outside = { ...openMR, source_project_id: 99 };
+  it('rejects a mutation on a merge request whose target project is outside the allowed network', async () => {
+    const outside = { ...openMR, target_project_id: 99 };
     const { service, client } = setup({
       MergeRequests: { ...setup().client.MergeRequests, show: vi.fn(async () => outside) },
     }, { canonicalReads: true });
@@ -920,6 +920,69 @@ describe('GitLab merge request comparison reads', () => {
   });
 });
 
+
+describe("GitLab fork merge requests through the maintainer's upstream clone", () => {
+  // The clone's remote is team/repo, which forks nothing: the network is team/repo
+  // alone, and me/repo, where !5's source branch lives, is not in it.
+  const diffRefs = { base_sha: 'a'.repeat(40), head_sha: 'b'.repeat(40), start_sha: 'c'.repeat(40) };
+  const forkMR = { ...openMR, sha: diffRefs.head_sha, diff_refs: diffRefs };
+  const upstream = { owner: 'team', name: 'repo' };
+  const context = { directory: '/repo', repositoryId: 'repo_one', bindingRevision: 3, primaryRemote: 'origin' };
+  const setupUpstream = (overrides = {}) => {
+    const result = setup({
+      Projects: { show: vi.fn(async (id) => (Number(id) === 2 || id === 'team/repo' ? targetProject : sourceProject)) },
+      ...overrides,
+      MergeRequests: { ...setup().client.MergeRequests, show: vi.fn(async () => forkMR), ...overrides.MergeRequests },
+    }, { canonicalReads: true });
+    result.resolveProjects.mockImplementation(async () => ({
+      branch: 'main', tracking: 'origin/main',
+      projects: [{ projectPath: 'team/repo', remoteName: 'origin', url: `${origin}/team/repo` }],
+    }));
+    return result;
+  };
+
+  it("reads the patch, both sides of a file at the fork's head and the context from the upstream", async () => {
+    const showRaw = vi.fn(async (_project, path, ref) => `${path}@${ref.slice(0, 1)}`);
+    const { service, client } = setupUpstream({ RepositoryFiles: { showRaw } });
+
+    await expect(service.changeRequestPatch('/repo', 5, { project: upstream, remote: 'origin' }))
+      .resolves.toMatchObject({ meta: { owner: 'team', repo: 'repo', number: 5 } });
+    await expect(service.changeRequestFileContents('/repo', 5, { project: upstream, remote: 'origin', path: 'a.ts', status: 'M' }))
+      .resolves.toEqual({ original: 'a.ts@a', modified: 'a.ts@b' });
+    const result = await service.changeRequestContext('/repo', 5, { project: upstream, remote: 'origin', constrainToPrimary: true });
+
+    expect(result.changeRequest).toMatchObject({ project: { id: '2' }, headProject: { id: '1', owner: 'me', name: 'repo' } });
+    expect(client.MergeRequests.allDiffs).toHaveBeenCalledWith('2', 5, expect.anything());
+    expect(showRaw).toHaveBeenCalledWith('2', 'a.ts', diffRefs.head_sha);
+  });
+
+  it('comments on and merges the fork merge request', async () => {
+    const create = vi.fn(async () => ({ id: 8 }));
+    const merge = vi.fn(async () => ({ ...forkMR, state: 'merged' }));
+    const { service } = setupUpstream({ MergeRequestNotes: { ...setup().client.MergeRequestNotes, create }, MergeRequests: { merge } });
+
+    const resolved = await service.resolveChangeRequestMutation(context, { project: upstream, number: 5, headSha: diffRefs.head_sha });
+    expect(resolved.target).toMatchObject({ project: { id: '2', owner: 'team', name: 'repo' }, number: 5, headSha: diffRefs.head_sha });
+    await service.commentChangeRequest({ providerTarget: resolved.providerTarget, body: 'Thanks' });
+    await expect(service.mergeChangeRequest({
+      providerTarget: resolved.providerTarget, targetProject: resolved.target.project, expectedTarget: resolved.target, method: 'merge',
+    })).resolves.toMatchObject({ merged: true });
+
+    expect(create).toHaveBeenCalledWith('2', 5, 'Thanks');
+    expect(merge).toHaveBeenCalledWith('2', 5, expect.objectContaining({ sha: diffRefs.head_sha }));
+  });
+
+  it('still refuses a merge request whose target is outside the network', async () => {
+    const { service, client } = setupUpstream();
+
+    // me/repo is not in team/repo's network, so no selector reaches it.
+    await expect(service.changeRequestPatch('/repo', 5, { project: { owner: 'me', name: 'repo' }, remote: 'origin' }))
+      .rejects.toMatchObject({ status: 404 });
+    await expect(service.resolveChangeRequestMutation(context, { project: { owner: 'me', name: 'repo' }, number: 5 }))
+      .rejects.toMatchObject({ status: 404 });
+    expect(client.MergeRequests.show).not.toHaveBeenCalled();
+  });
+});
 
 describe('GitLab live summaries', () => {
   it('maps merge request and issue state onto the shared badge shape and skips what GitLab cannot answer', async () => {

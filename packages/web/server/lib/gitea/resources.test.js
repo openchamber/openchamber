@@ -156,13 +156,6 @@ describe('Gitea change request context', () => {
     expect(calls.filter((call) => call.url.pathname.endsWith('/issues/6/comments'))).toHaveLength(1);
   });
 
-  it('refuses a pull request whose head comes from outside the bound network', async () => {
-    const foreign = { ...fixtures.forkPull, head: { ...fixtures.forkPull.head, repo_id: 99, repo: null } };
-    const { service } = setup({ 'GET /repos/alice/app/pulls/1': foreign });
-
-    await expect(service.changeRequestPatch('/repo', 1, { remote: 'origin' })).rejects.toMatchObject({ status: 404 });
-  });
-
   it('reads both sides of a file at the merge base and the fork head, from the upstream', async () => {
     const { service, calls } = setup({
       'GET /repos/alice/app/raw/feature.js': (call) => (call.url.searchParams.get('ref') === HEAD ? 'export const feature = 2;\n' : 'old'),
@@ -172,6 +165,75 @@ describe('Gitea change request context', () => {
       .resolves.toEqual({ original: 'old', modified: 'export const feature = 2;\n' });
     expect(calls.filter((call) => call.url.pathname.includes('/raw/')).map((call) => call.url.searchParams.get('ref')).sort())
       .toEqual([MERGE_BASE, HEAD].sort());
+  });
+});
+
+describe("Gitea fork pull requests through the maintainer's upstream clone", () => {
+  // Alice's clone of alice/app: the network is alice/app alone, and bob's
+  // fork, where #1's head lives, is not in it.
+  const resolveUpstreamRemote = async () => ({ repos: [{ owner: 'alice', name: 'app', repoPath: 'alice/app', url: `${ORIGIN}/alice/app`, remoteName: 'origin' }] });
+  const setupUpstream = (extra = {}) => {
+    const gitea = fakeGitea(forkNetworkRoutes(extra));
+    const client = createGiteaClient({ origin: ORIGIN, token: 'pat-1', fetch: gitea.fetch, delay: async () => {} });
+    return { ...gitea, service: createGiteaResourceService({ origin: ORIGIN, client, resolveRepos: resolveUpstreamRemote }) };
+  };
+
+  it("reads the patch, both sides of a file at the fork's head and the context from the upstream", async () => {
+    const { service, calls } = setupUpstream({
+      'GET /repos/alice/app/pulls/1.diff': fixtures.forkPullDiff,
+      'GET /repos/alice/app/pulls/1/files': fixtures.forkPullFiles,
+      'GET /repos/alice/app/issues/1/comments': fixtures.comments,
+      'GET /repos/alice/app/pulls/1/reviews': fixtures.reviews,
+      [`GET /repos/alice/app/pulls/1/reviews/${fixtures.reviews[1].id}/comments`]: fixtures.reviewComments,
+      'GET /repos/alice/app/pulls/1/commits': fixtures.commits,
+      'GET /repos/alice/app/raw/feature.js': (call) => (call.url.searchParams.get('ref') === HEAD ? 'export const feature = 2;\n' : 'old'),
+    });
+
+    await expect(service.changeRequestPatch('/repo', 1, { project: upstream, remote: 'origin' }))
+      .resolves.toEqual({ patch: fixtures.forkPullDiff, meta: { owner: 'alice', repo: 'app', number: 1 } });
+    await expect(service.changeRequestFileContents('/repo', 1, { project: upstream, remote: 'origin', path: 'feature.js', status: 'M' }))
+      .resolves.toEqual({ original: 'old', modified: 'export const feature = 2;\n' });
+    const result = await service.changeRequestContext('/repo', 1, { includeDiff: true, remote: 'origin' });
+    expect(result.changeRequest).toMatchObject({ number: 1, headLabel: 'bob:feature', headProject: { id: '2', owner: 'bob' } });
+    // No read went to the fork's own pull request or files.
+    expect(calls.filter((call) => call.url.pathname.startsWith('/api/v1/repos/bob/app/')).map((call) => call.url.pathname)).toEqual([]);
+  });
+
+  it('comments on and merges the fork pull request', async () => {
+    const { service, calls } = setupUpstream({
+      'POST /repos/alice/app/issues/1/comments': { ...fixtures.comments[0], id: 77, body: 'Thanks' },
+      'POST /repos/alice/app/pulls/1/merge': new Response(null, { status: 200 }),
+    });
+
+    const comment = await service.resolveChangeRequestMutation(context, { project: upstream, number: 1 });
+    await expect(service.comment({ providerTarget: comment.providerTarget, body: 'Thanks' })).resolves.toEqual({});
+    const merge = await service.resolveChangeRequestMutation(context, { project: upstream, number: 1, headSha: HEAD });
+    expect(merge.target).toMatchObject({ project: { id: '1', owner: 'alice', name: 'app' }, number: 1, headSha: HEAD });
+    await service.mergeChangeRequest({ providerTarget: merge.providerTarget, expectedTarget: merge.target, method: 'merge' });
+
+    expect(calls.filter((call) => call.method === 'POST').map((call) => [call.url.pathname, call.body])).toEqual([
+      ['/api/v1/repos/alice/app/issues/1/comments', { body: 'Thanks' }],
+      ['/api/v1/repos/alice/app/pulls/1/merge', { Do: 'merge', head_commit_id: HEAD }],
+    ]);
+  });
+
+  it('still refuses a pull request whose target is outside the network', async () => {
+    const { service, calls } = setupUpstream({ 'GET /repos/bob/app/pulls/1': fixtures.forkPull });
+
+    // bob/app is not in alice's network, so no selector reaches it.
+    await expect(service.changeRequestPatch('/repo', 1, { project: { owner: 'bob', name: 'app' }, remote: 'origin' }))
+      .rejects.toMatchObject({ status: 404 });
+    await expect(service.resolveChangeRequestMutation(context, { project: { owner: 'bob', name: 'app' }, number: 1 }))
+      .rejects.toMatchObject({ status: 404 });
+    expect(calls.some((call) => call.url.pathname.includes('/pulls/'))).toBe(false);
+  });
+
+  it('refuses a pull request the upstream answers with another base repository', async () => {
+    const elsewhere = { ...fixtures.forkPull, base: { ...fixtures.forkPull.base, repo_id: 99 } };
+    const { service } = setupUpstream({ 'GET /repos/alice/app/pulls/1': elsewhere });
+
+    await expect(service.changeRequestPatch('/repo', 1, { project: upstream, remote: 'origin' }))
+      .rejects.toThrow('Gitea returned a pull request of another repository');
   });
 });
 
