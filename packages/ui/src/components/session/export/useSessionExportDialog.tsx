@@ -84,7 +84,11 @@ export const useSessionExportDialog = (
     }, allSessions);
     setSessionListComplete(true);
     setDescendantCount(descendants.length);
-    setIncludeSubagents(descendants.length > 0);
+    // The coverage follows the lineage until the reader turns it off. A
+    // session with no sub-agent tasks in the list shows no checkbox, so
+    // there is nothing to turn off: the export still carries a child the
+    // list has not named yet.
+    setIncludeSubagents(true);
   }, []);
 
   const openDialog = React.useCallback((next: SessionExportTarget) => {

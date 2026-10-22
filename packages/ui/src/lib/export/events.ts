@@ -61,7 +61,19 @@ type ExportEventOrigin = {
  * A record holds a handful of parts, so a thousand is more than any record
  * needs and keeps a part's order inside its own record.
  */
-export const SOURCE_ORDER_PART_SCALE = 1000;
+const SOURCE_ORDER_PART_SCALE = 1000;
+
+/**
+ * The place of an event in the source order.
+ *
+ * The scale is one for the whole export: the record's place times the part
+ * scale, and the part's place inside the record is added to it. An event
+ * that belongs to the record itself, and not to one of its parts, sits at
+ * the start of the record's place, so a record without parts and a record
+ * with parts keep the order the source gave them.
+ */
+export const sourceOrderOf = (recordOrder: number, partPosition: number): number =>
+  recordOrder * SOURCE_ORDER_PART_SCALE + partPosition;
 
 /** The kind of role a message carries, in the export's own vocabulary. */
 export type ExportRole =

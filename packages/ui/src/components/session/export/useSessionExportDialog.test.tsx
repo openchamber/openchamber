@@ -86,6 +86,7 @@ const renderHook = async (): Promise<{
   open: (sessionID: string) => Promise<void>;
   text: () => string;
   click: (label: string) => Promise<void>;
+  uncheck: () => Promise<void>;
   confirm: () => Promise<void>;
   chosen: Array<{ format: string; mode: string; includeSubagents: boolean }>;
 }> => {
@@ -128,6 +129,15 @@ const renderHook = async (): Promise<{
     },
     text: () => container.textContent ?? '',
     click,
+    // The sub-agent switch is a checkbox, and the reader turns it off by
+    // clicking it.
+    uncheck: async () => {
+      const box = container.querySelector<HTMLInputElement>('input[type="checkbox"]');
+      expect(box).toBeTruthy();
+      await act(async () => {
+        box?.click();
+      });
+    },
     confirm: () => click('Export'),
     chosen,
   };
@@ -154,6 +164,35 @@ describe('useSessionExportDialog', () => {
     await dialog.open('ses_root');
 
     expect(dialog.text()).not.toContain('Include sub-agent tasks');
+  });
+
+  test('a session without sub-agent tasks still covers the lineage', async () => {
+    // The list names no sub-agent task, so the dialog offers no switch and
+    // the reader expresses no choice. The coverage stays on, so a child the
+    // list has not named yet still reaches the export.
+    setSessions([session('ses_root', { title: 'Root' })]);
+
+    const dialog = await renderHook();
+    await dialog.open('ses_root');
+    await dialog.confirm();
+
+    expect(dialog.chosen).toHaveLength(1);
+    expect(dialog.chosen[0].includeSubagents).toBe(true);
+  });
+
+  test('turning the sub-agent tasks off is the reader\'s own choice', async () => {
+    setSessions([
+      session('ses_root', { title: 'Root' }),
+      session('ses_child', { title: 'Child', parentID: 'ses_root' }),
+    ]);
+
+    const dialog = await renderHook();
+    await dialog.open('ses_root');
+    await dialog.uncheck();
+    await dialog.confirm();
+
+    expect(dialog.chosen).toHaveLength(1);
+    expect(dialog.chosen[0].includeSubagents).toBe(false);
   });
 
   test('a session list that is still loading says the coverage is unknown', async () => {

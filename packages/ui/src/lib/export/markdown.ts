@@ -19,7 +19,7 @@ import { readTimestamp } from './values';
 import type { ExportFinding } from './events';
 import { orderingGuarantee } from './order';
 import { exportText, findingText } from './i18n';
-import { agentLabel, concurrentLabel, readablePrompt, roleLabel, statusLabel } from './labels';
+import { agentLabel, concurrentLabel, readablePrompt, roleLabel, runtimeTruncationNote, statusLabel } from './labels';
 import type { ProjectedEntry, ProjectedNode, ProjectedSubagent, ProjectionMode } from './project';
 
 /** The clock time of a timestamp, in the reader's locale. */
@@ -187,15 +187,20 @@ const renderEntry = (
     case 'tool': {
       const line = toolLine(entry);
       const details: string[] = [];
+      // The runtime's own cut of the result. It belongs next to the output:
+      // the reader is looking at the result there, and the note is what stops
+      // them from taking the part the runtime kept for the whole result.
+      const truncationNote = runtimeTruncationNote(entry.tool);
+      const truncationLine = truncationNote ? `*${truncationNote}*` : '';
 
       if (mode === 'detailed') {
         if (entry.tool.prompt) details.push(`**${exportText('export.section.task')}**\n\n${asQuote(entry.tool.prompt)}`);
         if (entry.tool.error) details.push(`**${exportText('export.section.error')}**\n\n${asQuote(entry.tool.error)}`);
         if (entry.tool.output) {
-          const output = entry.tool.outputOmitted
-            ? `${entry.tool.output}\n\n*[${exportText('export.restInJson')}]*`
-            : entry.tool.output;
-          details.push(`**${exportText('export.section.output')}**\n\n${asQuote(output)}`);
+          // The recorded result, as it is. The export cuts nothing here, so
+          // there is nothing to point at.
+          details.push(`**${exportText('export.section.output')}**\n\n${asQuote(entry.tool.output)}`);
+          if (truncationLine) details.push(truncationLine);
         }
         const { input, metadata } = entry.tool;
         if (Object.keys(input).length > 0) {
@@ -214,6 +219,7 @@ const renderEntry = (
             ? `${entry.tool.output}\n\n*[${exportText('export.excerpt')} — ${exportText('export.restInJson')}]*`
             : entry.tool.output;
           details.push(`**${exportText('export.section.result')}**\n\n${asQuote(output)}`);
+          if (truncationLine) details.push(truncationLine);
         }
       }
 

@@ -137,6 +137,24 @@ const collectDescendantSessions = (
 };
 
 /**
+ * The descendants the export covers.
+ *
+ * A caller that asked for the root session alone covers no descendant: the
+ * sub-agent transcripts were left out on purpose, so the export neither loads
+ * them nor reports them as missing. The lineage is not walked at all in that
+ * case, so a cycle among the excluded sessions is not the export's business.
+ */
+const coveredDescendants = (
+  root: ExportSession,
+  sessions: readonly ExportSession[],
+  includeSubagents: boolean,
+): DescendantSessions => (
+  includeSubagents
+    ? collectDescendantSessions(root, sessions)
+    : { descendants: [], cyclic: false }
+);
+
+/**
  * The sub-agent sessions below `root` in the session list.
  *
  * The export dialog counts the sub-agent tasks a session has with this, and
@@ -180,12 +198,20 @@ export const collectLoadedSessions = (options: {
   sessions: readonly ExportSession[];
   /** The records of the sessions the caller holds, keyed by session id. */
   records: ReadonlyMap<string, ExportSourceRecord[]>;
+  /**
+   * Whether the export covers the sub-agent sessions.
+   *
+   * A caller that left the sub-agent transcripts out on purpose gets a
+   * document without them, and no notice about the ones it left out.
+   */
+  includeSubagents?: boolean;
 }): CollectionResult => {
   const { root, sessions, records } = options;
+  const includeSubagents = options.includeSubagents ?? true;
   const findings: ExportFinding[] = [];
   const missing: MissingSession[] = [];
 
-  const { descendants, cyclic } = collectDescendantSessions(root, sessions);
+  const { descendants, cyclic } = coveredDescendants(root, sessions, includeSubagents);
   if (cyclic) {
     findings.push({
       kind: 'cyclic-lineage',
@@ -252,12 +278,21 @@ export const collectExportSessions = async (options: {
   /** Every session the client knows, active and archived. */
   sessions: readonly ExportSession[];
   load: ExportRecordLoader;
+  /**
+   * Whether the export covers the sub-agent sessions.
+   *
+   * A caller that left the sub-agent transcripts out on purpose gets a
+   * document without them: no descendant is loaded, and nothing is reported
+   * about the ones the caller left out.
+   */
+  includeSubagents?: boolean;
 }): Promise<CollectionResult> => {
   const { root, sessions, load } = options;
+  const includeSubagents = options.includeSubagents ?? true;
   const findings: ExportFinding[] = [];
   const missing: MissingSession[] = [];
 
-  const { descendants, cyclic } = collectDescendantSessions(root, sessions);
+  const { descendants, cyclic } = coveredDescendants(root, sessions, includeSubagents);
   if (cyclic) {
     findings.push({
       kind: 'cyclic-lineage',
@@ -304,9 +339,12 @@ export const collectExportSessions = async (options: {
    * loaded yet.
    *
    * A child the session list does not mention is still a child the export
-   * can load: the call that started it recorded its id.
+   * can load: the call that started it recorded its id. A caller that left
+   * the sub-agent transcripts out on purpose loads no child at all, so this
+   * does nothing for it.
    */
   const enqueueRecordedChildren = (records: readonly ExportSourceRecord[], parentID: string, depth: number) => {
+    if (!includeSubagents) return;
     for (const record of records) {
       for (const childSessionID of readRecordedChildSessionIDs(record)) {
         if (loaded.has(childSessionID) || queued.has(childSessionID)) continue;

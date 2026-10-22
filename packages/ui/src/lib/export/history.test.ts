@@ -271,6 +271,103 @@ describe('the text of a message keeps the place of its own part', () => {
     expect(orders).toHaveLength(2);
     expect(Math.abs(orders[0] - orders[1])).toBeLessThan(1000);
   });
+
+  test('a tool call stays between the texts the record wrote around it', () => {
+    // The record says one thing, calls a tool, and says another thing. The
+    // text before the call must not move behind it, in either view.
+    const input = fixture({
+      root: session('ses_root', { title: 'Root' }),
+      records: {
+        ses_root: [
+          {
+            info: {
+              id: 'a1', sessionID: 'ses_root', role: 'assistant', agent: 'build',
+              providerID: 'anthropic', modelID: 'claude-opus-4-1', time: { created: 2000 },
+            },
+            parts: [
+              timedTextPart('a1', 'Text before the call', 2000),
+              { ...shellCall('a1', 'bun test', 2100, 2150), id: 'a1-shell' },
+              timedTextPart('a1', 'Text after the call', 2200, 'a1-text-after'),
+            ],
+          },
+        ],
+      },
+    });
+
+    for (const mode of ['readable', 'detailed'] as const) {
+      const output = markdown(input, mode);
+
+      expect(output.indexOf('Text before the call')).toBeLessThan(output.indexOf('`shell`'));
+      expect(output.indexOf('`shell`')).toBeLessThan(output.indexOf('Text after the call'));
+    }
+  });
+
+  test('the text of a record\'s own parts is still one message', () => {
+    // The readable view glues a message's text parts into one message. A
+    // file the message carried does not break it apart.
+    const input = fixture({
+      root: session('ses_root', { title: 'Root' }),
+      records: {
+        ses_root: [
+          {
+            info: {
+              id: 'a1', sessionID: 'ses_root', role: 'assistant', agent: 'build',
+              providerID: 'anthropic', modelID: 'claude-opus-4-1', time: { created: 2000 },
+            },
+            parts: [
+              textPart('a1', 'The first half'),
+              { id: 'f1', sessionID: 'ses_root', messageID: 'a1', type: 'file', mime: 'text/plain', filename: 'notes.txt', url: 'file:///notes.txt' },
+              textPart('a1', 'The second half', 'a1-text-2'),
+            ],
+          },
+        ],
+      },
+    });
+
+    const timeline = timelineOf(input);
+    const messages = timeline.events.filter((event) => event.kind === 'message');
+
+    // One message, and the two halves are glued into it.
+    expect(messages).toHaveLength(1);
+    expect(messages[0].kind === 'message' ? messages[0].text : '').toContain('The first half');
+    expect(messages[0].kind === 'message' ? messages[0].text : '').toContain('The second half');
+  });
+
+  test('a record without parts keeps its place between the records with parts', () => {
+    // The three records share a time, so the order the source recorded is
+    // what decides. A record without parts must not fall behind the record
+    // that came before it.
+    const input = fixture({
+      root: session('ses_root', { title: 'Root' }),
+      records: {
+        ses_root: [
+          {
+            info: {
+              id: 'a1', sessionID: 'ses_root', role: 'assistant', agent: 'build',
+              providerID: 'anthropic', modelID: 'claude-opus-4-1', time: { created: 1000 },
+            },
+            parts: [textPart('a1', 'First')],
+          },
+          {
+            info: { id: 's1', sessionID: 'ses_root', role: 'system', text: 'The system note', time: { created: 1000 } },
+            parts: [],
+          },
+          {
+            info: {
+              id: 'a2', sessionID: 'ses_root', role: 'assistant', agent: 'build',
+              providerID: 'anthropic', modelID: 'claude-opus-4-1', time: { created: 1000 },
+            },
+            parts: [textPart('a2', 'Third')],
+          },
+        ],
+      },
+    });
+
+    const output = markdown(input);
+
+    expect(output.indexOf('First')).toBeLessThan(output.indexOf('The system note'));
+    expect(output.indexOf('The system note')).toBeLessThan(output.indexOf('Third'));
+  });
 });
 
 describe('the coverage of the sub-agent transcripts', () => {
@@ -386,6 +483,50 @@ describe('the coverage of the sub-agent transcripts', () => {
     // purpose, so the export does not say it is missing.
     expect(result.timeline.findings.some((finding) => finding.kind === 'ambiguous-invocation')).toBe(false);
     expect(result.timeline.findings.some((finding) => finding.kind === 'unresolved-invocation')).toBe(false);
+  });
+
+  test('a child the user left out is not in the document either', async () => {
+    // The user asked for the root session alone. The child's transcript must
+    // not be in the document, and the document must not say the child is
+    // missing: the user left it out on purpose.
+    const root = session('ses_root', { title: 'Root' });
+    const loaded: string[] = [];
+    const result = await buildExport({
+      root,
+      sessions: [root, session('ses_child', { title: 'Child', parentID: 'ses_root', agent: 'reviewer' })],
+      includeSubagents: false,
+      load: async (sessionID) => {
+        loaded.push(sessionID);
+        if (sessionID === 'ses_root') {
+          return [{
+            info: {
+              id: 'a1', sessionID: 'ses_root', role: 'assistant', agent: 'build',
+              providerID: 'anthropic', modelID: 'claude-opus-4-1', time: { created: 2000 },
+            },
+            parts: [subagentCall('a1', { childSessionID: 'ses_child' })],
+          }];
+        }
+        return [assistantMessage('ses_child', 'ca1', 2500, 'The child work')];
+      },
+    }, 'readable');
+
+    const document = renderExportMarkdown(result.projection, {
+      title: 'Root',
+      mode: 'readable',
+      findings: result.timeline.findings,
+      sessionCount: result.timeline.sessions.size,
+    });
+
+    // The child's history is not in the document, and it is not even read.
+    expect(document).not.toContain('The child work');
+    expect(loaded).toEqual(['ses_root']);
+    expect(result.timeline.events.some((event) => event.sessionID === 'ses_child')).toBe(false);
+    expect(result.projection.some((node) => node.kind === 'subagent')).toBe(false);
+    expect(result.timeline.sessions.size).toBe(1);
+
+    // The call that started the child is part of the root's own history, so
+    // it stays.
+    expect(result.timeline.events.some((event) => event.kind === 'tool')).toBe(true);
   });
 
   test('a settled call whose child is not there is reported', async () => {

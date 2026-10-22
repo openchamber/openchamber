@@ -152,13 +152,18 @@ export const buildExportTree = (timeline: ExportTimeline): ExportTree => {
     const childSessionID = event.call.childSessionID;
     if (!childSessionID) continue;
     if (dispatchByChildID.has(childSessionID)) {
-      findings.push({
-        kind: 'resumed-session',
-        sessionID: event.sessionID,
-        childSessionID,
-        messageKey: 'export.finding.resumedSessionBlock',
-        messageParams: { id: childSessionID },
-      });
+      // The transcript appears once, and the block says that it was
+      // resumed. A child the export does not carry has no block and no
+      // transcript, so there is nothing to say about it.
+      if (timeline.sessions.has(childSessionID)) {
+        findings.push({
+          kind: 'resumed-session',
+          sessionID: event.sessionID,
+          childSessionID,
+          messageKey: 'export.finding.resumedSessionBlock',
+          messageParams: { id: childSessionID },
+        });
+      }
       const resumed = resumedByChildID.get(childSessionID) ?? [];
       resumed.push({
         sessionID: event.sessionID,

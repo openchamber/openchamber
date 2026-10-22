@@ -30,8 +30,9 @@ type ExportPipelineInput = {
   /**
    * Whether the export covers the sub-agent sessions.
    *
-   * A caller that left the sub-agent transcripts out on purpose does not
-   * want the export to report them as missing.
+   * The choice reaches the collector: a caller that left the sub-agent
+   * transcripts out on purpose does not want the export to load them, and
+   * does not want it to report them as missing.
    */
   includeSubagents?: boolean;
 };
@@ -42,7 +43,11 @@ type LoadedExportPipelineInput = {
   sessions: readonly ExportSession[];
   /** The records of the sessions the caller holds, keyed by session id. */
   records: ReadonlyMap<string, ExportSourceRecord[]>;
-  /** Whether the export covers the sub-agent sessions. */
+  /**
+   * Whether the export covers the sub-agent sessions.
+   *
+   * The choice reaches the collector, as it does for the loading path.
+   */
   includeSubagents?: boolean;
 };
 
@@ -94,6 +99,7 @@ export const buildExportFromRecords = (
     root: input.root,
     sessions: input.sessions,
     records: input.records,
+    includeSubagents: input.includeSubagents ?? true,
   });
   return buildFromCollection(collection, input.root.id, mode, input.includeSubagents ?? true);
 };
@@ -109,6 +115,7 @@ export const buildExport = async (
     root: input.root,
     sessions: input.sessions,
     load: input.load,
+    includeSubagents: input.includeSubagents ?? true,
   });
   return buildFromCollection(collection, input.root.id, mode, input.includeSubagents ?? true);
 };

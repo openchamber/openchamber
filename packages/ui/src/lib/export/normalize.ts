@@ -4,8 +4,9 @@
  * Two things happen here, and they are kept apart on purpose:
  *
  * - **Normalizing** reads each session's records and produces one event per
- *   message, part and reported run. The events carry the source order they
- *   were recorded in, so nothing depends on wall-clock time alone.
+ *   part, per stretch of a message and per reported run. The events carry the
+ *   source order they were recorded in, so nothing depends on wall-clock time
+ *   alone.
  * - **Resolving** joins a subagent call to the child session it started. The
  *   join uses recorded identities only — the call's metadata, its output, the
  *   report the runtime appended, the session's own parent. Position in a list
@@ -36,7 +37,7 @@ import type {
   ExportTimeline,
   ExportToolCall,
 } from './events';
-import { SOURCE_ORDER_PART_SCALE } from './events';
+import { sourceOrderOf } from './events';
 import type { CollectedSession, MissingSession } from './collect';
 
 /** The message roles the export knows how to present. */
@@ -248,30 +249,64 @@ const shellResultOf = (message: Message): ExportShellResult | undefined => {
 };
 
 /**
- * Where a record's own message sits among its parts.
- *
- * The message is the record's text, and the text lives in its text parts. The
- * last of them is where the message belongs: an answer that came after the
- * work that produced it stays after that work, and a message that came before
- * a tool call stays before it. The part's own time is kept, so a text part
- * that says when it was written says so.
+ * One stretch of a record's parts: the message the record said in it.
  */
-type TextAnchor = {
-  /** The part's place inside the record. */
+type MessageSegment = {
+  /** The parts of the stretch, in the order the source recorded them. */
+  parts: Part[];
+  /**
+   * The place of the stretch in the record: the place of its first part.
+   *
+   * The parts are numbered the way the record holds them, so a stretch and
+   * the tool call next to it share one scale.
+   */
   position: number;
-  /** The time the text part recorded, when it recorded one. */
+  /** The time the stretch's last text part recorded, when it recorded one. */
   timestamp?: number;
 };
 
-const textAnchor = (parts: readonly Part[]): TextAnchor => {
+/**
+ * The record's parts, split into the stretches the export shows as messages.
+ *
+ * A part that has an event of its own — a tool call, a reasoning — is that
+ * event, and it ends the stretch before it. The parts between two such parts
+ * are the message the record said in that stretch: its text parts are glued
+ * into one text, the way the readable view shows a message, and the files it
+ * carried are its attachments.
+ *
+ * Every event of a record therefore sits at the place of the part it came
+ * from, and the text the source wrote before a tool call stays before it. A
+ * message glued across a tool call would move that text past the call, and
+ * the source's order would be a claim the export cannot back.
+ */
+const messageSegments = (parts: readonly Part[]): MessageSegment[] => {
+  const segments: MessageSegment[] = [];
+  let current: Part[] = [];
   let position = 0;
   let timestamp: number | undefined;
+
+  const close = () => {
+    if (current.length === 0) return;
+    segments.push({ parts: current, position, timestamp });
+    current = [];
+    timestamp = undefined;
+  };
+
   for (const [index, part] of parts.entries()) {
-    if (part.type !== 'text') continue;
-    position = index + 1;
-    timestamp = readTimestamp(part.time?.start);
+    if (part.type === 'tool' || part.type === 'reasoning') {
+      close();
+      continue;
+    }
+    if (current.length === 0) position = index + 1;
+    current.push(part);
+    // The stretch is placed by the time its last text part recorded: an
+    // answer that came after the work that produced it stays after that
+    // work.
+    if (part.type === 'text') timestamp = readTimestamp(part.time?.start);
   }
-  return { position, timestamp };
+  close();
+
+  return segments;
 };
 
 /** The tool call a part carries, as the export sees it. */
@@ -451,13 +486,18 @@ export const normalizeExportTimeline = (options: {
           continue;
         }
         if (invocationByChildID.has(childSessionID)) {
-          localFindings.push({
-            kind: 'resumed-session',
-            sessionID: collected.sessionID,
-            childSessionID,
-            messageKey: 'export.finding.resumedSession',
-            messageParams: { id: childSessionID },
-          });
+          // Two calls named the same child, so its transcript appears once.
+          // A caller that left the transcripts out on purpose has no
+          // transcript to keep, and nothing to report about it.
+          if (includeSubagents) {
+            localFindings.push({
+              kind: 'resumed-session',
+              sessionID: collected.sessionID,
+              childSessionID,
+              messageKey: 'export.finding.resumedSession',
+              messageParams: { id: childSessionID },
+            });
+          }
           continue;
         }
         // A call names a child the export does not cover: the session is not
@@ -537,7 +577,7 @@ export const normalizeExportTimeline = (options: {
       const role = roleOf(message);
       const { model, variant } = modelOf(message);
       const base = {
-        origin: { sessionID: collected.sessionID, messageID: message.id, partID: message.id, sourceOrder: order },
+        origin: { sessionID: collected.sessionID, messageID: message.id, partID: message.id, sourceOrder: sourceOrderOf(order, 0) },
         timestamp: readTimestamp(message.time?.created),
         sessionID: collected.sessionID,
         depth,
@@ -607,31 +647,30 @@ export const normalizeExportTimeline = (options: {
       }
 
       if (hasParts(message)) {
-        // The message's own text is one event, and the parts that carry more
-        // than text become events of their own, each at the place the part
-        // held inside the record. The message sits at the place of its own
-        // text part, so an answer that came after the work it describes does
-        // not move before it.
-        const text = messageText(message, record.parts);
-        const attachments = record.parts
-          .filter((part): part is Extract<Part, { type: 'file' }> => part.type === 'file')
-          .map((part) => ({ filename: part.filename, mime: part.mime, url: part.url }));
-        const anchor = textAnchor(record.parts);
-
-        if (text || attachments.length > 0) {
+        // The record's parts become events at the places they held inside
+        // it. A tool call and a reasoning part are events of their own, and
+        // the parts between them are the message the record said in that
+        // stretch. The stretch sits at its first part, so the text the
+        // source wrote before a tool call stays before it.
+        for (const segment of messageSegments(record.parts)) {
+          const text = messageText(message, segment.parts);
+          const attachments = segment.parts
+            .filter((part): part is Extract<Part, { type: 'file' }> => part.type === 'file')
+            .map((part) => ({ filename: part.filename, mime: part.mime, url: part.url }));
+          if (!text && attachments.length === 0) continue;
           events.push({
             ...base,
-            id: `${collected.sessionID}:${message.id}:message`,
+            id: `${collected.sessionID}:${message.id}:message:${segment.position}`,
             origin: {
               ...base.origin,
-              sourceOrder: order * SOURCE_ORDER_PART_SCALE + anchor.position,
+              sourceOrder: sourceOrderOf(order, segment.position),
             },
             kind: 'message',
             role,
             text,
             attachments: attachments.length > 0 ? attachments : undefined,
-            parts: exportParts(record.parts),
-            timestamp: anchor.timestamp ?? base.timestamp,
+            parts: exportParts(segment.parts),
+            timestamp: segment.timestamp ?? base.timestamp,
           });
         }
 
@@ -661,7 +700,7 @@ export const normalizeExportTimeline = (options: {
             events.push({
               ...base,
               id: `${collected.sessionID}:${part.id}:tool`,
-              origin: { ...base.origin, partID: part.id, sourceOrder: order * SOURCE_ORDER_PART_SCALE + partOrder },
+              origin: { ...base.origin, partID: part.id, sourceOrder: sourceOrderOf(order, partOrder) },
               kind: 'tool',
               call,
               timestamp: call.startedAt ?? base.timestamp,
@@ -672,7 +711,7 @@ export const normalizeExportTimeline = (options: {
             events.push({
               ...base,
               id: `${collected.sessionID}:${part.id}:reasoning`,
-              origin: { ...base.origin, partID: part.id, sourceOrder: order * SOURCE_ORDER_PART_SCALE + partOrder },
+              origin: { ...base.origin, partID: part.id, sourceOrder: sourceOrderOf(order, partOrder) },
               kind: 'reasoning',
               text: part.text,
               timestamp: part.time?.start ?? base.timestamp,

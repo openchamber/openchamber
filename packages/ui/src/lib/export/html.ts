@@ -17,7 +17,7 @@ import { readTimestamp } from './values';
 import type { ExportFinding } from './events';
 import { orderingGuarantee, type ConcurrentWork } from './order';
 import { exportText, findingText } from './i18n';
-import { agentLabel, concurrentLabel, readablePrompt, roleLabel, statusLabel } from './labels';
+import { agentLabel, concurrentLabel, readablePrompt, roleLabel, runtimeTruncationNote, statusLabel } from './labels';
 import type { ProjectedEntry, ProjectedNode, ProjectedSubagent, ProjectedTool, ProjectionMode } from './project';
 
 /** Escapes text for an HTML text node or attribute. */
@@ -390,10 +390,17 @@ const renderEntryHtml = (
         details.push(`<details><summary>${escapeHtml(exportText('export.section.error'))}</summary><pre>${escapeHtml(entry.tool.error)}</pre></details>`);
       }
       if (entry.tool.output) {
-        const note = entry.tool.outputTruncated
-          ? `<p class="note">${escapeHtml(exportText('export.html.shownInPart'))}</p>`
-          : '';
-        details.push(`<details><summary>${escapeHtml(exportText('export.section.output'))}</summary><pre>${escapeHtml(entry.tool.output)}</pre>${note}</details>`);
+        // The readable view's own cut is marked here; the detailed view cuts
+        // nothing, so it has nothing to mark. The runtime's own cut is
+        // marked in both: it belongs where the reader sees the output.
+        const truncationNote = runtimeTruncationNote(entry.tool);
+        const notes = [
+          entry.tool.outputTruncated
+            ? `<p class="note">${escapeHtml(exportText('export.html.shownInPart'))}</p>`
+            : '',
+          truncationNote ? `<p class="note">${escapeHtml(truncationNote)}</p>` : '',
+        ].join('');
+        details.push(`<details><summary>${escapeHtml(exportText('export.section.output'))}</summary><pre>${escapeHtml(entry.tool.output)}</pre>${notes}</details>`);
       }
       // The detailed view carries what the readable one leaves out: the
       // call's own arguments and the metadata the runtime reported.
@@ -669,14 +676,14 @@ const SCRIPT = `
 
     // A section whose entries are all hidden is hidden too, so an empty
     // sub-agent block does not sit on the page while the reader searches.
-    // The deepest sections go first, so a parent is judged by what is left
-    // inside it. A section's own entries are the ones it holds directly; the
-    // entries of a nested block belong to that block.
-    sections.slice().reverse().forEach(function (section) {
-      var own = Array.prototype.slice.call(section.querySelectorAll('.entry')).filter(function (entry) {
-        return !entry.closest('.subagent') || entry.closest('.subagent') === section;
+    // A match anywhere under a block keeps that block and every block above
+    // it on the page: a match inside a nested block belongs to the reader,
+    // and hiding the block above it would take the match away while the
+    // counter still counts it.
+    sections.forEach(function (section) {
+      var anyVisible = Array.prototype.slice.call(section.querySelectorAll('.entry')).some(function (entry) {
+        return !entry.classList.contains('hidden');
       });
-      var anyVisible = own.some(function (entry) { return !entry.classList.contains('hidden'); });
       section.classList.toggle('hidden', !anyVisible);
     });
 

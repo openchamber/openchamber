@@ -404,6 +404,147 @@ describe('export pipeline', () => {
     expect(detailed).toContain(long);
   });
 
+  test('a result the runtime cut names the file the rest is in', () => {
+    // The runtime cuts a long result itself and keeps the prefix in the
+    // record, so the document has to say so where the reader looks at the
+    // result — in both views.
+    const input = fixture({
+      root: session('ses_root', { title: 'Root' }),
+      records: {
+        ses_root: [
+          {
+            info: {
+              id: 'a1', sessionID: 'ses_root', role: 'assistant', agent: 'build',
+              providerID: 'anthropic', modelID: 'claude-opus-4-1', time: { created: 2000 },
+            },
+            parts: [{
+              id: 'a1-shell', sessionID: 'ses_root', messageID: 'a1', type: 'tool',
+              callID: 'a1-call', tool: 'shell',
+              state: {
+                status: 'completed',
+                input: { command: 'bun test' },
+                output: 'the part the runtime kept',
+                metadata: { truncated: true, outputPath: '/tmp/oc-output.json' },
+                time: { start: 1, end: 2 },
+              },
+            }],
+          },
+        ],
+      },
+    });
+
+    for (const mode of ['readable', 'detailed'] as const) {
+      const output = markdown(input, mode);
+      expect(output).toContain('The runtime cut this output short');
+      expect(output).toContain('/tmp/oc-output.json');
+    }
+
+    const { projection, timeline } = build(input, 'detailed');
+    const html = renderExportHtml(projection, {
+      title: 'Root',
+      mode: 'detailed',
+      findings: timeline.findings,
+      sessionCount: timeline.sessions.size,
+    });
+
+    expect(html).toContain('The runtime cut this output short');
+    expect(html).toContain('/tmp/oc-output.json');
+  });
+
+  test('a result the runtime cut without a file says only that it was cut', () => {
+    const input = fixture({
+      root: session('ses_root', { title: 'Root' }),
+      records: {
+        ses_root: [
+          {
+            info: {
+              id: 'a1', sessionID: 'ses_root', role: 'assistant', agent: 'build',
+              providerID: 'anthropic', modelID: 'claude-opus-4-1', time: { created: 2000 },
+            },
+            parts: [{
+              id: 'a1-shell', sessionID: 'ses_root', messageID: 'a1', type: 'tool',
+              callID: 'a1-call', tool: 'shell',
+              state: {
+                status: 'completed',
+                input: { command: 'bun test' },
+                output: 'the part the runtime kept',
+                metadata: { truncated: true },
+                time: { start: 1, end: 2 },
+              },
+            }],
+          },
+        ],
+      },
+    });
+
+    const output = markdown(input, 'detailed');
+
+    expect(output).toContain('The runtime cut this output short');
+    // The runtime named no file, so the document names none.
+    expect(output).not.toContain('{path}');
+  });
+
+  test('the detailed view carries a result the export does not cut', () => {
+    // The runtime cuts a long result itself, so the export has no cut of its
+    // own: what the history recorded is what the document carries, and there
+    // is nothing to point at.
+    const long = 'x'.repeat(200_100);
+    const input = fixture({
+      root: session('ses_root', { title: 'Root' }),
+      records: {
+        ses_root: [
+          {
+            info: {
+              id: 'a1', sessionID: 'ses_root', role: 'assistant', agent: 'build',
+              providerID: 'anthropic', modelID: 'claude-opus-4-1', time: { created: 2000 },
+            },
+            parts: [{
+              id: 'a1-shell', sessionID: 'ses_root', messageID: 'a1', type: 'tool',
+              callID: 'a1-call', tool: 'shell',
+              state: { status: 'completed', input: { command: 'bun test' }, output: long, time: { start: 1, end: 2 } },
+            }],
+          },
+        ],
+      },
+    });
+
+    const detailed = markdown(input, 'detailed');
+
+    expect(detailed).toContain(long);
+    expect(detailed).not.toContain('the rest of this result is in the JSON export');
+  });
+
+  test('the readable view keeps its own cut of a long result', () => {
+    // The readable view cuts the result down and says where the rest is.
+    // The cut is the export's own, so it has to stay marked.
+    const long = 'x'.repeat(2000);
+    const input = fixture({
+      root: session('ses_root', { title: 'Root' }),
+      records: {
+        ses_root: [
+          {
+            info: {
+              id: 'a1', sessionID: 'ses_root', role: 'assistant', agent: 'build',
+              providerID: 'anthropic', modelID: 'claude-opus-4-1', time: { created: 2000 },
+            },
+            parts: [{
+              id: 'a1-shell', sessionID: 'ses_root', messageID: 'a1', type: 'tool',
+              callID: 'a1-call', tool: 'shell',
+              state: { status: 'completed', input: { command: 'bun test' }, output: long, time: { start: 1, end: 2 } },
+            }],
+          },
+        ],
+      },
+    });
+
+    const readable = markdown(input, 'readable');
+
+    expect(readable).toContain('x'.repeat(600));
+    expect(readable).not.toContain(long);
+    expect(readable).toContain('excerpt');
+    expect(readable).toContain('the rest of this result is in the JSON export');
+  });
+
   test('the detailed view carries the tool input and metadata', () => {
     const input = fixture({
       root: session('ses_root', { title: 'Root' }),

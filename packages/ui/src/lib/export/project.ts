@@ -11,7 +11,7 @@
  * reaches the page, never which events exist.
  */
 
-import { normalizeToolName } from '@/lib/opencode/tools';
+import { executeOutputTruncation, normalizeToolName } from '@/lib/opencode/tools';
 import type { JsonValue } from '@/lib/opencode/model';
 import { readTextField } from './values';
 import { findingText } from './i18n';
@@ -36,8 +36,17 @@ export type ProjectedTool = {
   output?: string;
   /** Whether the result was cut down for the readable view. */
   outputTruncated: boolean;
-  /** Whether the result is shown in full, as the detailed view shows it. */
-  outputOmitted: boolean;
+  /**
+   * The runtime's own cut of the result, and where it put the rest.
+   *
+   * The runtime truncates a long tool result itself and keeps the prefix in
+   * the record, so the document says so where the reader sees the output: a
+   * reader must not take the part the runtime kept for the whole result.
+   */
+  runtimeTruncation?: {
+    /** The file the runtime wrote the rest to, when it named one. */
+    outputPath?: string;
+  };
   /** When the call started, when the source recorded it. */
   startedAt?: number;
   /** When the call settled, when the source recorded it. */
@@ -186,8 +195,6 @@ export type ProjectionMode = 'readable' | 'detailed';
 
 /** How much of a tool result the readable view keeps. */
 const MAX_READABLE_OUTPUT = 600;
-/** How much of a tool result the detailed view keeps before it points at the file. */
-const MAX_DETAILED_OUTPUT = 200_000;
 
 /** A tool result and whether it was cut down. */
 type TrimmedOutput = {
@@ -252,7 +259,6 @@ const projectTool = (call: ExportToolCall, mode: ProjectionMode): ProjectedTool 
     metadata: call.metadata,
     callID: call.callID,
     outputTruncated: false,
-    outputOmitted: false,
   };
 
   const target = targetOf(call);
@@ -265,14 +271,20 @@ const projectTool = (call: ExportToolCall, mode: ProjectionMode): ProjectedTool 
       const trimmed = trimOutput(call.output, MAX_READABLE_OUTPUT);
       projected.output = trimmed.text;
       projected.outputTruncated = trimmed.truncated;
-      projected.outputOmitted = false;
     } else {
-      const trimmed = trimOutput(call.output, MAX_DETAILED_OUTPUT);
-      projected.output = trimmed.text;
-      projected.outputTruncated = trimmed.truncated;
-      projected.outputOmitted = trimmed.truncated;
+      // The detailed view carries the recorded result as it is. The runtime
+      // cuts a long result itself and keeps the prefix, so a cut here would
+      // only lose what the runtime kept, and the promise of the full result
+      // would be ours to keep instead of the runtime's.
+      projected.output = call.output;
     }
   }
+
+  // The runtime's own cut, when it made one. It is a property of the
+  // record, not something the export could not establish, so it belongs
+  // where the reader sees the output.
+  const truncation = executeOutputTruncation(call.metadata);
+  if (truncation) projected.runtimeTruncation = truncation;
 
   return projected;
 };

@@ -13,6 +13,7 @@
 import type { I18nKey } from '@/lib/i18n';
 import { exportText } from './i18n';
 import type { ConcurrentWork } from './order';
+import type { ProjectedTool } from './project';
 
 /**
  * The label a role's messages carry in the export.
@@ -77,6 +78,23 @@ export const concurrentLabel = (work: ConcurrentWork): string => {
   const agent = work.agent?.trim();
   if (agent && work.title) return `${agent} — ${work.title}`;
   return agent || work.title;
+};
+
+/**
+ * The note that says the runtime cut a tool result short.
+ *
+ * The runtime truncates a long result itself and keeps the prefix in the
+ * record, so the reader has to be told that what the document shows is the
+ * part the runtime kept. The note is the same in every format, so a reader
+ * who compares the Markdown and the HTML does not find two different stories
+ * about the same call.
+ */
+export const runtimeTruncationNote = (tool: ProjectedTool): string => {
+  const truncation = tool.runtimeTruncation;
+  if (!truncation) return '';
+  return truncation.outputPath
+    ? exportText('export.tool.runtimeTruncatedAtPath', { path: truncation.outputPath })
+    : exportText('export.tool.runtimeTruncated');
 };
 
 /** How much of a long prompt the readable view keeps. */

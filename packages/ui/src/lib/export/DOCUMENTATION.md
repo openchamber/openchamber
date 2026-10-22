@@ -23,7 +23,8 @@ The document's own text lives in `../i18n/messages/export-document.i18n.ts`
 and is read through `i18n.ts`, so the exported file speaks the reader's
 language like the app around it. `labels.ts` holds the names the document
 gives things — the agent, the role, the overlapping work, the cut of a long
-prompt — so the Markdown and the HTML cannot name them differently.
+prompt, the runtime's own cut of a result — so the Markdown and the HTML
+cannot name them differently.
 
 ## Invariants
 
@@ -34,12 +35,24 @@ prompt — so the Markdown and the HTML cannot name them differently.
   shown and the number the document carries are one. The count is only made
   from a complete session list: the list arrives in pages, and a count taken
   from a partial one would name a number the document does not carry.
+- **The document carries what the user asked for.** The coverage choice
+  reaches the collector, not a filter over a loaded history: a user who left
+  the sub-agent transcripts out gets a document without them, and without a
+  notice that they were left out. The calls that started them stay, because
+  they belong to the root session's own history.
 - **No invented chronology.** Events are ordered by their recorded timestamp.
   An event without one keeps the place the source gave it, and the source
   order breaks ties. The export never guesses an order.
 - **One order for every event.** Every event carries its place on one scale:
-  the record's own place, and the part's place inside it. A message and a
-  tool call of the same record therefore keep the order the source gave them.
+  the record's own place, and the part's place inside it. A record without
+  parts and a record with parts therefore keep the order the source gave
+  them, and a message and a tool call of the same record keep the order the
+  source gave them.
+- **A message sits where its own parts are.** A record's parts become events
+  at the places they held inside it. A tool call and a reasoning part are
+  events of their own, and the parts between them are the message the record
+  said in that stretch, glued the way the readable view shows a message. The
+  text the source wrote before a tool call stays before it.
 - **No invented relationships.** A call is joined to a child session through a
   recorded identity — the call's metadata, its output envelope, the report the
   runtime appended, the session's own parent link. Position in a list is
@@ -56,10 +69,20 @@ prompt — so the Markdown and the HTML cannot name them differently.
 - **One name for one agent.** The label in the document and the value in the
   HTML filter come from the same name, so a reader who filters by an agent
   finds the entries the document shows under that name.
+- **A match stays on the page.** The HTML page's search hides the entries that
+  do not match, and a block that holds nothing else. A match inside a nested
+  block keeps that block and every block above it, so the count the page
+  reports counts matches the reader can see.
 - **Compact never means lost.** The readable view cuts a long tool result
   down and marks the cut. The JSON export carries every source record, so
   nothing is gone. The cut is the same in every format: a long prompt reads
   the same in the Markdown and in the HTML.
+- **The detailed view carries what was recorded.** It cuts nothing of its
+  own: a tool result is written as the history recorded it. The runtime cuts
+  a long result itself and keeps the prefix, so the document says so where
+  the reader looks at the output, and names the file the runtime wrote the
+  rest to. That is a property of the record, not something the export could
+  not establish, so it does not belong in the findings at the end.
 - **A partial export says so.** Everything the export could not establish —
   a child that would not load, a call that named no child, a session that was
   resumed, a part the model does not cover — lands in `findings`, and the
@@ -121,6 +144,48 @@ session, which reads as a claim about when it happened. The rejected
 alternative on the other side — carrying the time of the previous event
 forward — was also a claim, and it moved the event away from where the source
 put it. The place is derived, but it is the source's place.
+
+### Why a message sits at the first of its own parts
+
+A record's text lives in its text parts, and the readable view shows a
+message as one piece of text. The export keeps both: the parts that have an
+event of their own — a tool call, a reasoning — are events of their own, and
+the parts between them are the message the record said in that stretch.
+
+The rejected alternative was to glue a whole record's text into one event and
+place it at the last text part. A record that said one thing, called a tool
+and said another thing would then read as the call first and the text after
+it, and the text the source wrote before the call would move behind it. The
+rejected alternative on the other side — one event per text part — would
+break a message that was written in one go into pieces the reader has to put
+back together. A stretch of parts is the unit that satisfies both.
+
+### Why the detailed view has no cut of its own
+
+The runtime truncates a long tool result itself — two thousand lines, or fifty
+kilobytes — and writes the rest to a file, keeping the prefix in the record.
+A cut of the export's own could therefore only ever lose what the runtime
+kept, and the promise of a full result would be the export's instead of the
+runtime's.
+
+The rejected alternative was to cut the detailed view at two hundred thousand
+characters and point at the JSON export. At the standard configuration the
+runtime never lets a result grow that long, so the cut never happened: the
+promise was about a case that could not arrive, and it hid the case that
+does — the runtime's own cut. The detailed view now carries the recorded
+result, and the document says where the runtime put the rest.
+
+### Why the coverage choice reaches the collector
+
+The user chooses whether the sub-agent transcripts are part of the export.
+That choice is the collector's business: a user who left the transcripts out
+gets a document without them, and the history of a child is not even read.
+
+The rejected alternative was to load the whole lineage and drop the excluded
+sessions afterwards. The document would look right, but the export would have
+read every child's history to throw it away, and the count of sessions in the
+document would have to be kept in step with the choice by hand. The coverage
+is one decision, and it is made once, where the sessions are gathered.
 
 ### Why the pipeline loads a child the session list does not name
 

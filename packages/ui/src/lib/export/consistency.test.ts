@@ -113,6 +113,45 @@ describe('export consistency', () => {
     expect(descendants.map((entry) => entry.id)).toEqual(['ses_child']);
   });
 
+  test('the document carries the sessions the dialog counted', () => {
+    // The number the dialog shows and the number the document carries are
+    // one: the document holds the root and the descendants the count named.
+    const list = sessions.map((session) => ({
+      id: session.id,
+      title: session.title,
+      parentID: session.parentID,
+      agent: session.agent,
+    }));
+    const descendants = listDescendantSessions({ id: 'ses_root', title: 'Root' }, list);
+    const result = buildExportFromRecords({
+      root: sessions[0],
+      sessions: list,
+      records: new Map([['ses_root', rootRecords], ['ses_child', childRecords]]),
+    }, 'readable');
+
+    expect(result.timeline.sessions.size).toBe(descendants.length + 1);
+    expect([...result.timeline.sessions.keys()].sort()).toEqual(['ses_child', 'ses_root']);
+  });
+
+  test('a document that leaves the sub-agent transcripts out carries the root alone', () => {
+    // The user asked for the root session only, so the document holds the
+    // root session and nothing else.
+    const result = buildExportFromRecords({
+      root: sessions[0],
+      sessions: sessions.map((session) => ({
+        id: session.id,
+        title: session.title,
+        parentID: session.parentID,
+        agent: session.agent,
+      })),
+      records: new Map([['ses_root', rootRecords], ['ses_child', childRecords]]),
+      includeSubagents: false,
+    }, 'readable');
+
+    expect(result.timeline.sessions.size).toBe(1);
+    expect(result.timeline.events.some((event) => event.sessionID === 'ses_child')).toBe(false);
+  });
+
   test('the Header export and the Sidebar export carry the same sub-agent transcript', async () => {
     // The Header hands the pipeline the session list and a loader; the
     // Sidebar hands it the same list and the records it holds. The

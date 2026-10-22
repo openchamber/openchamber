@@ -27,7 +27,7 @@ import {
   type ExportFormat,
   type SessionMessageRecord,
 } from '@/lib/exportSession';
-import { listDescendantSessions, readExportSessions, type ExportSession } from '@/lib/export/collect';
+import { readExportSessions, type ExportSession } from '@/lib/export/collect';
 import { buildExport } from '@/lib/export/pipeline';
 import { useSessionExportDialog, type ExportChoice, type UseSessionExportDialog } from './useSessionExportDialog';
 
@@ -75,9 +75,9 @@ export const useSessionExport = (): UseSessionExport => {
     const allSessions = readExportSessions([...activeSessions, ...archivedSessions]);
     const root = allSessions.find((session) => session.id === target.sessionID);
 
-    // The descendants the export covers: the whole lineage below the root.
-    // The dialog counted the same sessions with the same walk, so the number
-    // the user was shown and the number the document carries are one.
+    // The root session the export starts from. The lineage below it is the
+    // collector's business: it walks the session list and loads what the
+    // user asked to be covered.
     const rootSession: ExportSession = {
       id: target.sessionID,
       title: target.title ?? 'Session',
@@ -85,11 +85,6 @@ export const useSessionExport = (): UseSessionExport => {
       agent: root?.agent,
       createdAt: root?.createdAt,
     };
-    // A user who does not want the sub-agent transcripts gets a document
-    // without them, not a document that says they are missing.
-    const descendants = choice.includeSubagents
-      ? listDescendantSessions(rootSession, allSessions)
-      : [];
 
     const load = async (sessionID: string): Promise<SessionMessageRecord[] | null> => {
       if (sessionID === target.sessionID) {
@@ -113,13 +108,15 @@ export const useSessionExport = (): UseSessionExport => {
     // sessions, so both produce the same document.
     const result = await buildExport({
       root: rootSession,
-      sessions: [rootSession, ...descendants],
+      // The whole list, so the collector walks the lineage itself. The
+      // coverage choice reaches the collector: a user who does not want the
+      // sub-agent transcripts gets a document without them, and without a
+      // notice that they were left out.
+      sessions: allSessions,
       load: async (sessionID) => {
         if (sessionID === target.sessionID) return rootRecords;
         return load(sessionID);
       },
-      // The sub-agent transcripts the user left out are excluded on purpose.
-      // The export says so, rather than reporting them as missing.
       includeSubagents: choice.includeSubagents,
     }, choice.mode);
 
