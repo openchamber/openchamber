@@ -30,14 +30,14 @@ cannot name them differently.
 
 - **One pipeline, three formats.** The Markdown, HTML and JSON renderers read
   the same event model. They cannot disagree about what happened.
-- **One lineage walk.** The dialog's count of sub-agent tasks and the
-  export's list of descendants come from the same walk in `collect.ts`: the
-  session list and the children the records name. The number the user is
-  shown and the number the document carries are one. The count is only made
-  from a complete session list: the list arrives in pages, and a count taken
-  from a partial one would name a number the document does not carry. The
-  walk is read at one moment, so a child that starts after the count is in
-  the document and not in the number.
+- **One lineage walk.** The dialog's count of sub-agent sessions and the
+  export's list of descendants come from the same walk: the tree the app
+  shows, which is the sessions the list attaches to the exported one. The
+  number the user is shown and the number the document carries are one. The
+  count is only made from a complete session list: the list arrives in pages,
+  and a count taken from a partial one would name a number the document does
+  not carry. The walk is read at one moment, so a session the app attaches
+  after the count is in the document and not in the number.
 - **The document carries what the user asked for.** The coverage choice
   reaches the collector, not a filter over a loaded history: a user who left
   the sub-agent transcripts out gets a document without them, and without a
@@ -50,10 +50,12 @@ cannot name them differently.
   An event without one keeps the place the source gave it, and the source
   order breaks ties. The export never guesses an order.
 - **One order for every event.** Every event carries its place on one scale:
-  the record's own place, and the part's place inside it. A record without
-  parts and a record with parts therefore keep the order the source gave
-  them, and a message and a tool call of the same record keep the order the
-  source gave them.
+  the record's own place, and the part's place inside it. A record's place is
+  as wide as the record needs, so the number of parts a record holds never
+  decides the order of the records after it. A record without parts and a
+  record with parts therefore keep the order the source gave them, and a
+  message and a tool call of the same record keep the order the source gave
+  them.
 - **A message sits where its own parts are.** A record's parts become events
   at the places they held inside it. A tool call and a reasoning part are
   events of their own, and the parts between them are the message the record
@@ -75,8 +77,11 @@ cannot name them differently.
   name. The agent has a name in the history, and a role of the export's own
   would be a claim the history does not support. A session that recorded no
   agent gets a neutral label, never an invented one. A message carries the
-  name of the agent that wrote it, so a session that switched agents is not
-  signed with one name throughout; the session's own agent is the fallback.
+  name of the agent that wrote it, wherever it is: a session that switched
+  agents is not signed with one name throughout, and the session's own agent
+  is the fallback. Inside a sub-agent's block the block's own name stays the
+  session's — that is the identity of the block, not the authorship of a
+  message.
 - **One name for one agent.** The label in the document and the value in the
   HTML filter come from the same name, so a reader who filters by an agent
   finds the entries the document shows under that name.
@@ -103,16 +108,16 @@ cannot name them differently.
   A child the user left out on purpose is not a gap: the export knows it was
   left out.
 - **The export speaks the reader's language.** A finding carries the key of
-  its text and the values that text names; the renderer resolves the text
-  when it writes the document. The JSON export carries the resolved text
-  beside the key, so a tool that reads it gets a sentence. The HTML page
-  declares that language in its `lang` attribute, so a screen reader reads
-  the text in the voice of the language the page names.
+  its text and the values that text names; the export resolves the text when
+  it builds the document — the projection and the render read the dictionary
+  then, not when the module is loaded. The JSON export carries the resolved
+  text beside the key, so a tool that reads it gets a sentence. The HTML
+  page declares that language in its `lang` attribute, so a screen reader
+  reads the text in the voice of the language the page names.
 - **Deterministic.** The same source snapshot produces the same document.
 - **Bounded work.** The descendants are loaded in waves, and the lineage walk
   stops at a session it has already visited, so a cyclic lineage ends the
-  walk instead of looping. A child the session list does not name is loaded
-  too, because the call that started it recorded its id.
+  walk instead of looping.
 
 ## Decisions
 
@@ -173,6 +178,25 @@ rejected alternative on the other side — one event per text part — would
 break a message that was written in one go into pieces the reader has to put
 back together. A stretch of parts is the unit that satisfies both.
 
+### Why a record's place is as wide as the record needs
+
+The source order is one number, so the places of the records are counted one
+after another: every record takes a place of its own, and the parts inside it
+follow, one place apart. A record's place is as wide as the record needs — one
+place for the record and one for each of its parts — and a thousand wide at
+the least, so the numbers of an ordinary export stay the ones they have
+always been.
+
+The rejected alternative was a fixed scale: the record's place times a
+thousand, plus the part's place inside it. A record with a thousand parts or
+more then filled the place of the record after it, and a record with more
+parts than that reached past it, so the record that was written later was
+read before the parts that came before it. The rejected alternative on the
+other side — a place per part and nothing besides — renumbered every export,
+and two sessions whose events share a recorded time could change their
+interleaving, so a document came out with other numbers in it and in another
+order.
+
 ### Why the detailed view has no cut of its own
 
 The runtime truncates a long tool result itself — two thousand lines, or fifty
@@ -215,23 +239,28 @@ read every child's history to throw it away, and the count of sessions in the
 document would have to be kept in step with the choice by hand. The coverage
 is one decision, and it is made once, where the sessions are gathered.
 
-### Why the pipeline loads a child the session list does not name
+### Why the export carries the sessions the app attaches
 
-The session list is where the lineage lives, and it arrives in pages. A child
-the list has not named yet would be left out of the export, and its
-transcript would be missing for a reason that has nothing to do with the
-history.
+The app knows which sessions belong to a session: the ones whose parent it
+is, and their own children in turn. That is the tree the sidebar shows, and
+the export carries the same tree — the same sessions, with the same
+transcripts, in the same place.
 
-The call that started the child recorded its id, so the collector reads the
-ids out of the loaded records and loads those children too. The rejected
-alternative was to trust the list alone: an incomplete list would then
-silently shorten the export, and the document would look complete.
+A session the app does not attach is not a sub-agent session of this one. A
+dispatched session is the clearest case: the app creates it without a parent
+and shows its result inside the dispatching session's transcript, as a
+notice, not as a nested session with a transcript of its own. The export
+carries that result the same way. The rejected alternative was to look for
+children in the records as well: a record names the session a call started,
+so the export could load it and show a transcript the app never shows. The
+records would then be a second source of truth about what belongs to the
+session, and the two would disagree — the export would carry a session the
+sidebar does not, and the count on the dialog would not name it.
 
-A child the records name is still the child the list knows, so the list says
-what it is called and which agent ran it. The rejected alternative was to
-write the raw id into the document: the title and the agent were in the list
-all along, and the export would have printed an id where a name was written
-down.
+A child the app attaches and the records do not name is still carried: the
+app shows it, so the export does too. What the records say about it is a
+question of relationship, not of membership, and the report the runtime
+appended answers it.
 
 ### Why a finding carries a key and not a sentence
 
@@ -273,12 +302,19 @@ alternative was inventing a name for it, which would put a claim in the
 document where the history has none.
 
 A message carries the name of the agent that wrote it, and the session's own
-agent is the fallback. The rejected alternative was to sign every message of
-a session with the session's agent: a session that switched agents would
-then carry one name over work another agent did, which is the claim the
-history cannot back. The rejected alternative on the other side — showing no
-name at all when the session recorded none — would lose the name the
-messages themselves carry.
+agent is the fallback. The rule is the same everywhere: a message inside a
+sub-agent's block is signed with the agent that wrote it, and the sub-agent
+session's own name is the fallback there as well. The rejected alternative
+was to sign every message of a session with the session's agent: a session
+that switched agents would then carry one name over work another agent did,
+which is the claim the history cannot back. The rejected alternative on the
+other side — showing no name at all when the session recorded none — would
+lose the name the messages themselves carry.
+
+The block's own header keeps the session's name in every case. The rejected
+alternative was to sign the block with the name of the last message in it:
+the block is the identity of the session's work, and a name that changed
+under the reader's feet would say that two sessions were one.
 
 ### Why the JSON export keeps the source records next to the derived events
 
@@ -319,14 +355,14 @@ descendants itself. It had the same wave size as the pipeline's, so the
 bounded work existed in two places and could drift apart — and the
 descendant count the dialog showed came from a third place again.
 
-The dialog's count comes from the collector's own walk, so the number the
-user is shown and the number the document carries are one. The rejected
-alternative was to count the session list alone: a child the records name
-and the list does not is a child the export covers, and the dialog would
-have said the session had no sub-agent tasks while the document carried one.
-The count is read at one moment, so a child that starts after the count is in
-the document and not in the number — the count is what the export could
-cover when the dialog was opened.
+The dialog's count comes from the app's tree, the same tree the export
+covers, so the number the user is shown and the number the document carries
+are one. The count is read at one moment, so a session the app attaches
+after the count is in the document and not in the number — the count is what
+the export could cover when the dialog was opened. The rejected alternative
+was to count the export's own walk: it would have loaded every record of
+every descendant to name a number the app already knows, and a number read
+later could land on a dialog that has moved on.
 
 ### Why a field that holds no text costs no error
 

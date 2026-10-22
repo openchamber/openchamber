@@ -1243,6 +1243,13 @@ describe('export scale', () => {
             },
             parts,
           },
+          {
+            info: {
+              id: 's1', sessionID: 'ses_root', role: 'shell', shellID: 'sh1', command: 'ls -la',
+              status: 'exited', time: { created: 1000 + toolCalls - 1 },
+            },
+            parts: [],
+          },
         ],
       },
     });
@@ -1262,4 +1269,14 @@ describe('export scale', () => {
       expect(output).toContain(`bun test --case ${size - 1}`);
     });
   }
+
+  test('the record after a thousand calls keeps its place', () => {
+    // The record holds more parts than the source order had room for. The
+    // record after it was written at the same moment as the last call, so
+    // the source order decides, and the record after it stays after every
+    // one of the calls.
+    const output = markdown(buildLarge(3000));
+
+    expect(output.indexOf('bun test --case 2999')).toBeLessThan(output.indexOf('ls -la'));
+  });
 });

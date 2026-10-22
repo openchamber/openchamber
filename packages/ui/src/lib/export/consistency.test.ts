@@ -13,9 +13,9 @@ import { fileURLToPath } from 'node:url';
 import type { Session } from '@/lib/opencode/model';
 import { renderExportDocument } from '@/lib/exportSession';
 import { buildExport, buildExportFromRecords } from '@/lib/export/pipeline';
-import { countSubagentTasks, listDescendantSessions } from '@/lib/export/collect';
+import { listDescendantSessions } from '@/lib/export/collect';
 import { renderExportMarkdown } from '@/lib/export/markdown';
-import { assistantMessage, subagentCall, textPart, userMessage, type Record_ } from './fixtures';
+import { assistantMessage, dispatchedSessionReport, subagentCall, textPart, userMessage, type Record_ } from './fixtures';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -178,25 +178,53 @@ describe('export consistency', () => {
   });
 
   test('the number the dialog shows is the number the document carries', async () => {
-    // The dialog counts with the export's own walk: the session list and the
-    // children the records name. A child the list does not name is a child
-    // the export covers, so it belongs in the count too.
-    const list = [{ id: 'ses_root', title: 'Root' }];
+    // The dialog counts the sessions the app attaches to the exported one,
+    // and the export covers the same tree. The number on the page and the
+    // number of sessions in the document are one.
+    const list = [
+      { id: 'ses_root', title: 'Root' },
+      { id: 'ses_child', title: 'Child', parentID: 'ses_root' },
+    ];
     const load = async (sessionID: string) => {
       if (sessionID === 'ses_root') return rootRecords;
       if (sessionID === 'ses_child') return childRecords;
       return null;
     };
 
-    const count = await countSubagentTasks({ root: { id: 'ses_root', title: 'Root' }, sessions: list, load });
+    const count = listDescendantSessions({ id: 'ses_root', title: 'Root' }, list).length;
     const result = await buildExport({ root: { id: 'ses_root', title: 'Root' }, sessions: list, load }, 'readable');
 
-    // The session list names no child, the root's records name one, and the
-    // export covers it: the count says one, and the document carries the
-    // root and that child.
     expect(count).toBe(1);
     expect(result.timeline.sessions.size).toBe(2);
     expect(count).toBe(result.timeline.sessions.size - 1);
+  });
+
+  test('a session the app does not attach is not in the document', async () => {
+    // A dispatched session has no parent, so the app does not attach it to
+    // the session that dispatched it: the app shows its result inside the
+    // transcript, as a notice, and the export carries the same notice.
+    const list = [{ id: 'ses_root', title: 'Root' }];
+    const loaded: string[] = [];
+    const load = async (sessionID: string) => {
+      loaded.push(sessionID);
+      if (sessionID === 'ses_root') {
+        return [dispatchedSessionReport('ses_root', 'r1', 2100, {
+          childSessionID: 'ses_dispatched',
+          output: 'The dispatched answer',
+        })];
+      }
+      return [assistantMessage('ses_dispatched', 'd1', 2200, 'The dispatched transcript')];
+    };
+
+    const result = await buildExport({ root: { id: 'ses_root', title: 'Root' }, sessions: list, load }, 'readable');
+
+    // The dispatched session is not loaded, so the export carries no
+    // transcript of it — and the result the parent holds is carried as the
+    // notice the app shows.
+    expect(loaded).toEqual(['ses_root']);
+    expect(result.timeline.sessions.size).toBe(1);
+    expect(result.timeline.events.some((event) => event.sessionID === 'ses_dispatched')).toBe(false);
+    expect(result.timeline.events.some((event) => event.kind === 'subagent-result')).toBe(true);
   });
 
   test('the Header export and the Sidebar export carry the same sub-agent transcript', async () => {

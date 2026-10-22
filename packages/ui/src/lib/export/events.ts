@@ -44,36 +44,55 @@ type ExportEventOrigin = {
   /** The part's id, or the message id for a message-level event. */
   partID: string;
   /**
-   * The position of the source record in the source list, and the position of
-   * the part inside it.
+   * The place of the event in the source order.
    *
-   * Both halves are one number, so every kind of event sorts on one scale:
-   * the record's place times a thousand, plus the part's place inside it. A
-   * message-level event and a tool call of the same record therefore keep the
-   * order the source gave them, whichever of the two the record holds first.
+   * One number carries both halves of the place: the record's own place, and
+   * the part's place inside it. A message-level event and a tool call of the
+   * same record therefore keep the order the source gave them, whichever of
+   * the two the record holds first.
    */
   sourceOrder: number;
 };
 
 /**
- * The scale one source record occupies in the source order.
+ * The width of the place one source record occupies in the source order.
  *
- * A record holds a handful of parts, so a thousand is more than any record
- * needs and keeps a part's order inside its own record.
+ * A record takes a place of its own, and the place is as wide as the record
+ * needs: one place for the record and one for each of its parts. A thousand
+ * is more than an ordinary record holds, and it keeps the numbers of an
+ * ordinary export what they have always been. A record with a thousand parts
+ * or more gets a place per part, so the parts of one record can never reach
+ * into the place of the record after it.
  */
-const SOURCE_ORDER_PART_SCALE = 1000;
+const SOURCE_ORDER_RECORD_WIDTH = 1000;
+
+/**
+ * The place of the first record of a session in the source order.
+ *
+ * The first record's place starts a width in, so the numbers of an ordinary
+ * export are the ones they have always been.
+ */
+export const SOURCE_ORDER_FIRST_PLACE = SOURCE_ORDER_RECORD_WIDTH;
+
+/**
+ * The number of places a record takes in the source order.
+ *
+ * The count is the record's own, so the number of parts a record holds never
+ * decides the order of the records after it.
+ */
+export const sourceOrderWidth = (partCount: number): number => (
+  Math.max(SOURCE_ORDER_RECORD_WIDTH, partCount + 1)
+);
 
 /**
  * The place of an event in the source order.
  *
- * The scale is one for the whole export: the record's place times the part
- * scale, and the part's place inside the record is added to it. An event
- * that belongs to the record itself, and not to one of its parts, sits at
- * the start of the record's place, so a record without parts and a record
- * with parts keep the order the source gave them.
+ * The place of the record, plus the place of the part inside it. The record
+ * itself is at zero and its parts count from one, so a record without parts
+ * and a record with parts keep the order the source gave them.
  */
-export const sourceOrderOf = (recordOrder: number, partPosition: number): number =>
-  recordOrder * SOURCE_ORDER_PART_SCALE + partPosition;
+export const sourceOrderOf = (recordPlace: number, partPosition: number): number =>
+  recordPlace + partPosition;
 
 /** The kind of role a message carries, in the export's own vocabulary. */
 export type ExportRole =

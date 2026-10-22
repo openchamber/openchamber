@@ -11,6 +11,7 @@ import * as React from 'react';
 import { ExportSessionDialog } from './ExportSessionDialog';
 import type { ExportFormat } from '@/lib/exportSession';
 import type { ProjectionMode } from '@/lib/export/project';
+import { listDescendantSessions, readExportSessions } from '@/lib/export/collect';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import type { SessionExportTarget } from './useSessionExport';
 
@@ -30,14 +31,6 @@ export type UseSessionExportDialog = {
 };
 
 /**
- * Counts the sub-agent tasks a session has.
- *
- * The count comes from the walk the export itself makes, so the number the
- * dialog shows and the number the document carries are one.
- */
-type SubagentCounter = (target: SessionExportTarget) => Promise<number>;
-
-/**
  * Holds the export dialog's state and hands back the element to render.
  *
  * The format and the detail level survive the dialog's closing, so a user
@@ -47,7 +40,6 @@ type SubagentCounter = (target: SessionExportTarget) => Promise<number>;
  */
 export const useSessionExportDialog = (
   onConfirm: (target: SessionExportTarget, choice: ExportChoice) => void,
-  countSubagents: SubagentCounter,
 ): UseSessionExportDialog => {
   const [target, setTarget] = React.useState<SessionExportTarget | null>(null);
   const [includeSubagents, setIncludeSubagents] = React.useState(true);
@@ -64,26 +56,25 @@ export const useSessionExportDialog = (
    *
    * The list arrives in pages, and it is also the only place the lineage
    * lives. A count taken from a list that is still loading counts the
-   * sub-agent tasks the first page named, and no more, so the export would
-   * leave out the rest without saying so.
+   * sub-agent sessions the first page named, and no more, so the export
+   * would leave out the rest without saying so.
    */
   const [sessionListComplete, setSessionListComplete] = React.useState(false);
   const [format, setFormat] = React.useState<ExportFormat>('markdown');
   const [mode, setMode] = React.useState<ProjectionMode>('readable');
 
   /**
-   * Counts the sub-agent tasks the session has, with the same walk the
-   * export itself uses, so the number the dialog shows and the number the
-   * document carries are one.
+   * Counts the sub-agent sessions the session has, with the tree the app
+   * shows: the sessions it attaches to this one, and their own children in
+   * turn. The number is what the document carries, because the export covers
+   * the same tree.
    *
    * The count is only made from a complete session list. The list arrives
    * in pages, and a count taken from a partial list would name a number the
-   * document does not carry. The count itself takes a moment: the walk reads
-   * the records, because a child the session list does not name is still a
-   * child the export covers.
+   * document does not carry.
    */
-  const countDescendants = React.useCallback(async (next: SessionExportTarget) => {
-    const { hasLoaded } = useGlobalSessionsStore.getState();
+  const countDescendants = React.useCallback((next: SessionExportTarget) => {
+    const { activeSessions, archivedSessions, hasLoaded } = useGlobalSessionsStore.getState();
     if (!hasLoaded) {
       // The list is not the whole list yet. The count would be a guess, so
       // the dialog says the coverage is unknown instead of naming a number
@@ -92,24 +83,29 @@ export const useSessionExportDialog = (
       setDescendantCount(0);
       return;
     }
-    // The count is being made, so the coverage is unknown until it is.
-    setSessionListComplete(false);
-    const count = await countSubagents(next);
+    const allSessions = readExportSessions([...activeSessions, ...archivedSessions]);
+    const root = allSessions.find((session) => session.id === next.sessionID);
+    const descendants = listDescendantSessions({
+      id: next.sessionID,
+      title: next.title ?? 'Session',
+      parentID: root?.parentID,
+      agent: root?.agent,
+      createdAt: root?.createdAt,
+    }, allSessions);
     setSessionListComplete(true);
-    setDescendantCount(count);
+    setDescendantCount(descendants.length);
     // The coverage is the reader's own choice, and the count does not make
     // it: a session the reader turned the sub-agent tasks off for keeps
     // that choice. A session with no sub-agent tasks shows no checkbox, so
-    // there is nothing to turn off, and the export still carries a child the
-    // list has not named yet.
-  }, [countSubagents]);
+    // there is nothing to turn off.
+  }, []);
 
   const openDialog = React.useCallback((next: SessionExportTarget) => {
     setTarget(next);
     // The choice the reader already made for this session. A session they
     // have not decided about yet covers the lineage.
     setIncludeSubagents(coverage[next.sessionID] ?? true);
-    void countDescendants(next);
+    countDescendants(next);
   }, [countDescendants, coverage]);
 
   /**
@@ -147,7 +143,7 @@ export const useSessionExportDialog = (
       includeSubagents={includeSubagents}
       onIncludeSubagentsChange={handleCoverageChange}
       onConfirm={handleConfirm}
-      onRetryCount={target ? () => { void countDescendants(target); } : undefined}
+      onRetryCount={target ? () => { countDescendants(target); } : undefined}
     />
   ), [countDescendants, descendantCount, format, handleConfirm, handleCoverageChange, includeSubagents, mode, sessionListComplete, target]);
 

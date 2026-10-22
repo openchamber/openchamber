@@ -6,8 +6,9 @@
  * things. The labels therefore live here, in one place, and both renderers
  * read them.
  *
- * The text is resolved when the document is written, not when the module is
- * loaded, so the document speaks the reader's current language.
+ * The text is resolved when the document is built — the projection and the
+ * render read the dictionary then, not when the module is loaded — so the
+ * document speaks the reader's current language.
  */
 
 import type { I18nKey } from '@/lib/i18n';
@@ -53,6 +54,22 @@ const STATUS_LABEL_KEYS = new Map<string, I18nKey>([
 export const statusLabel = (status: string): string => {
   const key = STATUS_LABEL_KEYS.get(status);
   return key ? exportText(key) : status;
+};
+
+/**
+ * The agent a message is signed with.
+ *
+ * The message names the agent that wrote it, and the session's own agent is
+ * the fallback. A message that names no agent is signed with the session's,
+ * and a session that names none leaves the message without a name — the
+ * document says "Assistant" then, and never invents one.
+ */
+export const messageAgent = (
+  own: string | undefined,
+  session: string | undefined,
+): string | undefined => {
+  if (own?.trim()) return own;
+  return session?.trim() ? session : undefined;
 };
 
 /**

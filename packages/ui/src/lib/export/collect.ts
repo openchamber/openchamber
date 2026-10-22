@@ -13,7 +13,6 @@
  */
 
 import type { ExportFinding, ExportSourceSession } from './events';
-import { readRecordedChildSessionIDs } from './childSession';
 
 /**
  * A session as the export reads it: the identity and the labels, without the
@@ -262,39 +261,15 @@ export const collectLoadedSessions = (options: {
 };
 
 /**
- * The sub-agent tasks a session has, counted the way the export counts them.
- *
- * The count comes from the export's own walk: the sessions the list names
- * below the root, and the children the records name. A child the session
- * list does not name is a child the export covers, so it belongs in the
- * count too — otherwise the dialog would promise a smaller document than
- * the export writes.
- *
- * A child whose history would not load is a child the export covers as a
- * gap, so it is counted as well.
- */
-export const countSubagentTasks = async (options: {
-  root: ExportSession;
-  /** Every session the client knows, active and archived. */
-  sessions: readonly ExportSession[];
-  load: ExportRecordLoader;
-}): Promise<number> => {
-  const collection = await collectExportSessions(options);
-  // The root is one of the sessions.
-  return collection.sessions.length + collection.missing.length - 1;
-};
-
-/**
  * Loads the exported session and every descendant, with a bounded number of
  * concurrent loads.
  *
  * A child that fails to load is recorded as missing and the export continues:
  * a partial history with an honest notice beats a failed export.
  *
- * The descendants come from two places. The session list names the lineage
- * the client knows; the records themselves name the children whose calls and
- * reports were recorded. A child that only the records name is loaded too, so
- * an incomplete session list does not exclude a transcript that is there.
+ * The descendants are the sessions the client attaches to the exported one —
+ * the ones whose parent is it, and their own children in turn. That is the
+ * tree the app shows, so the export carries the same work the app shows.
  */
 export const collectExportSessions = async (options: {
   root: ExportSession;
@@ -347,52 +322,10 @@ export const collectExportSessions = async (options: {
   });
 
   // The descendants are loaded in waves: a wide tree would otherwise open one
-  // request per child at once.
-  //
-  // The queue grows while it is drained: a loaded session's own records name
-  // the children it started, and a child the session list does not mention is
-  // loaded as well. The waves stay the size limit, so a long lineage still
-  // loads in bounded batches.
+  // request per child at once. The waves stay the size limit, so a long
+  // lineage still loads in bounded batches.
   const queue = [...descendants];
-  const queued = new Set(queue.map((entry) => entry.session.id));
   const loaded = new Set<string>([root.id]);
-  /** The sessions the client knows, by id. */
-  const sessionsByID = new Map(sessions.map((session) => [session.id, session]));
-
-  /**
-   * The children a session's own records name, that the export has not
-   * loaded yet.
-   *
-   * A child the session list does not mention is still a child the export
-   * can load: the call that started it recorded its id. A caller that left
-   * the sub-agent transcripts out on purpose loads no child at all, so this
-   * does nothing for it.
-   */
-  const enqueueRecordedChildren = (records: readonly ExportSourceRecord[], parentID: string, depth: number) => {
-    if (!includeSubagents) return;
-    for (const record of records) {
-      for (const childSessionID of readRecordedChildSessionIDs(record)) {
-        if (loaded.has(childSessionID) || queued.has(childSessionID)) continue;
-        queued.add(childSessionID);
-        // The session list knows what this child is called and which agent
-        // ran it. A child the list does not know keeps the id the history
-        // recorded, and the neutral label the document gives it.
-        const known = sessionsByID.get(childSessionID);
-        queue.push({
-          session: {
-            id: childSessionID,
-            title: known?.title ?? childSessionID,
-            agent: known?.agent,
-            createdAt: known?.createdAt,
-            parentID,
-          },
-          depth,
-        });
-      }
-    }
-  };
-
-  enqueueRecordedChildren(rootRecords, root.id, 1);
 
   while (queue.length > 0) {
     const wave = queue.splice(0, MAX_CONCURRENT_LOADS);
@@ -417,8 +350,6 @@ export const collectExportSessions = async (options: {
         invocationKey: session.invocationKey,
         depth,
       });
-
-      enqueueRecordedChildren(records, session.id, depth + 1);
     }
   }
 

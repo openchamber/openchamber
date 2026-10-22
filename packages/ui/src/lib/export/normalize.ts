@@ -37,7 +37,7 @@ import type {
   ExportTimeline,
   ExportToolCall,
 } from './events';
-import { sourceOrderOf } from './events';
+import { SOURCE_ORDER_FIRST_PLACE, sourceOrderOf, sourceOrderWidth } from './events';
 import type { CollectedSession, MissingSession } from './collect';
 
 /** The message roles the export knows how to present. */
@@ -474,9 +474,7 @@ export const normalizeExportTimeline = (options: {
     settled: boolean;
   }>();
   for (const collected of sessions) {
-    let order = 0;
     for (const record of collected.records) {
-      order += 1;
       for (const part of record.parts) {
         if (part.type !== 'tool' || !isSubagentTool(part.tool)) continue;
         const childSessionID = readInvocationChildSessionID(part) ?? readBackgroundChildID(part);
@@ -579,14 +577,18 @@ export const normalizeExportTimeline = (options: {
       }
     }
 
-    let order = 0;
+    // The place of the next record in this session's source order. Every
+    // record takes a place of its own, as wide as the record needs, so the
+    // parts of one record can never push the records after it out of order.
+    let recordPlace = SOURCE_ORDER_FIRST_PLACE;
     for (const record of collected.records) {
-      order += 1;
       const message = record.info;
+      const place = recordPlace;
+      recordPlace += sourceOrderWidth(record.parts.length);
       const role = roleOf(message);
       const { model, variant } = modelOf(message);
       const base = {
-        origin: { sessionID: collected.sessionID, messageID: message.id, partID: message.id, sourceOrder: sourceOrderOf(order, 0) },
+        origin: { sessionID: collected.sessionID, messageID: message.id, partID: message.id, sourceOrder: sourceOrderOf(place, 0) },
         timestamp: readTimestamp(message.time?.created),
         sessionID: collected.sessionID,
         depth,
@@ -674,7 +676,7 @@ export const normalizeExportTimeline = (options: {
             id: `${collected.sessionID}:${message.id}:message:${segment.position}`,
             origin: {
               ...base.origin,
-              sourceOrder: sourceOrderOf(order, segment.position),
+              sourceOrder: sourceOrderOf(place, segment.position),
             },
             kind: 'message',
             role,
@@ -711,7 +713,7 @@ export const normalizeExportTimeline = (options: {
             events.push({
               ...base,
               id: `${collected.sessionID}:${part.id}:tool`,
-              origin: { ...base.origin, partID: part.id, sourceOrder: sourceOrderOf(order, partOrder) },
+              origin: { ...base.origin, partID: part.id, sourceOrder: sourceOrderOf(place, partOrder) },
               kind: 'tool',
               call,
               timestamp: call.startedAt ?? base.timestamp,
@@ -722,7 +724,7 @@ export const normalizeExportTimeline = (options: {
             events.push({
               ...base,
               id: `${collected.sessionID}:${part.id}:reasoning`,
-              origin: { ...base.origin, partID: part.id, sourceOrder: sourceOrderOf(order, partOrder) },
+              origin: { ...base.origin, partID: part.id, sourceOrder: sourceOrderOf(place, partOrder) },
               kind: 'reasoning',
               text: part.text,
               timestamp: part.time?.start ?? base.timestamp,

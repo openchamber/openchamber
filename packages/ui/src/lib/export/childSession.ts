@@ -14,11 +14,10 @@
  * same question the same way.
  */
 
-import type { Message, Part } from '@/lib/opencode/model';
 import { isSubagentTool, subagentSessionId } from '@/lib/opencode/tools';
-import { readBackgroundSubagentChildID, readSubagentRun } from '@/lib/opencode/subagent-run';
-import { readDispatchedSessionResult } from '@/lib/opencode/dispatched-session';
+import { readBackgroundSubagentChildID } from '@/lib/opencode/subagent-run';
 import { readTaskSessionIdFromOutput, readTaskSessionIdFromRecord } from '@/components/chat/message/parts/taskToolModel';
+import type { Part } from '@/lib/opencode/model';
 import { readJsonRecord, readTextField } from './values';
 
 /** A tool part, as the identity readers need it. */
@@ -68,36 +67,4 @@ export const readBackgroundChildID = (part: ToolPart): string | undefined => {
     }
   }
   return undefined;
-};
-
-/**
- * The child sessions one record names, through its calls and its reports.
- *
- * A record names a child in two ways: a call says which session it started,
- * and a report says which session it is about. Both are recorded identities,
- * and a child that only one of them names is still a child the export can
- * try to load.
- */
-export const readRecordedChildSessionIDs = (record: {
-  info: Message;
-  parts: readonly Part[];
-}): string[] => {
-  const ids: string[] = [];
-  const add = (id: string | undefined) => {
-    if (!id || ids.includes(id)) return;
-    ids.push(id);
-  };
-
-  for (const part of record.parts) {
-    if (part.type !== 'tool') continue;
-    if (!isSubagentTool(part.tool)) continue;
-    add(readInvocationChildSessionID(part) ?? readBackgroundChildID(part));
-  }
-
-  const run = readSubagentRun(record.info);
-  if (run) add(run.childSessionID);
-  const dispatched = readDispatchedSessionResult(record.info);
-  if (dispatched) add(dispatched.sessionID);
-
-  return ids;
 };

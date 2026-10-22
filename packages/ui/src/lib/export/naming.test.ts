@@ -263,6 +263,64 @@ describe('the HTML agent filter offers the name the document shows', () => {
     expect(data.agents).toContain('builder');
   });
 
+  test('a message inside a sub-agent block is signed with the agent that wrote it', () => {
+    // The sub-agent session switched agents. The block keeps the session's
+    // own name, and the message after the switch is signed with the agent
+    // that wrote it.
+    const input = fixture({
+      root: session('ses_root', { title: 'Root', agent: 'planner' }),
+      sessions: [
+        session('ses_root', { title: 'Root', agent: 'planner' }),
+        session('ses_child', { title: 'Child', parentID: 'ses_root', agent: 'reviewer' }),
+      ],
+      records: {
+        ses_root: [{
+          info: {
+            id: 'a1', sessionID: 'ses_root', role: 'assistant', agent: 'planner',
+            providerID: 'anthropic', modelID: 'claude-opus-4-1', time: { created: 1000 },
+          },
+          parts: [textPart('a1', 'Root work'), subagentCall('a1', { childSessionID: 'ses_child' })],
+        }],
+        ses_child: [
+          assistantMessage('ses_child', 'ca1', 2000, 'Before the switch', { agent: 'reviewer' }),
+          {
+            info: {
+              id: 'sw1', sessionID: 'ses_child', role: 'agent-switched', agent: 'builder',
+              time: { created: 2500 },
+            },
+            parts: [],
+          },
+          assistantMessage('ses_child', 'ca2', 3000, 'After the switch', { agent: 'builder' }),
+        ],
+      },
+    });
+
+    const output = markdown(input);
+    const lines = output.split('\n').filter((line) => line.startsWith('**'));
+
+    // The block's own header keeps the session's name: that is the identity
+    // of the block, not the authorship of a message.
+    expect(lines[0]).toContain('↳ reviewer');
+    expect(lines[0]).toContain('Child');
+    // The message before the switch carries the session's own name, because
+    // that is the agent that wrote it.
+    expect(lines.some((line) => line.includes('↳ reviewer') && line.includes('claude-opus-4-1'))).toBe(true);
+    // The message after the switch carries the name of the agent that wrote
+    // it.
+    expect(lines.some((line) => line.includes('↳ builder'))).toBe(true);
+
+    // The page names the same agent, and its filter carries the same name.
+    const document = html(input);
+    const data = pageData(document);
+    const agents = domAgents(document);
+    const after = data.entries.find((entry) => entry.search.includes('after the switch'));
+
+    expect(after?.agent).toBe('builder');
+    expect(agents.get(after?.id ?? '') ?? '').toBe('builder');
+    expect(data.agents).toContain('builder');
+    expect(data.agents).toContain('reviewer');
+  });
+
   test('a sub-agent that recorded no agent does not borrow the root\'s name', () => {
     const input = fixture({
       root: session('ses_root', { title: 'Root', agent: 'code-orchestrator' }),

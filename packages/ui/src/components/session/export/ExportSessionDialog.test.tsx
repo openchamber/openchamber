@@ -153,9 +153,9 @@ describe('ExportSessionDialog', () => {
     expect(dialog.text()).not.toContain('Include sub-agent tasks');
   });
 
-  test('a session with sub-agent tasks offers them', async () => {
+  test('a session with sub-agent sessions offers them', async () => {
     const dialog = await render({ descendantCount: 2 });
     expect(dialog.text()).toContain('Include sub-agent tasks');
-    expect(dialog.text()).toContain('2 sub-agent tasks');
+    expect(dialog.text()).toContain('2 sub-agent sessions');
   });
 });

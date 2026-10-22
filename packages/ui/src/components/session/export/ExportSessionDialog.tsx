@@ -33,7 +33,7 @@ type ExportSessionDialogProps = {
   /** The detail level the dialog writes. */
   mode: ProjectionMode;
   onModeChange: (mode: ProjectionMode) => void;
-  /** How many sub-agent tasks the session has, when it has any. */
+  /** How many sub-agent sessions the session has, when it has any. */
   descendantCount?: number;
   /**
    * Whether the session list the count came from is the whole list.
@@ -104,7 +104,7 @@ export const ExportSessionDialog: React.FC<ExportSessionDialogProps> = ({
                 ? (descendantCount === 1
                   ? t('sessions.sidebar.session.export.dialog.descriptionSingle', { count: descendantCount })
                   : t('sessions.sidebar.session.export.dialog.descriptionMany', { count: descendantCount }))
-                : t('sessions.sidebar.session.export.dialog.descriptionNoSubtasks')}
+                : t('sessions.sidebar.session.export.dialog.descriptionNoSubagentSessions')}
           </DialogDescription>
         </DialogHeader>
 

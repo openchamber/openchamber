@@ -372,6 +372,120 @@ describe('the text of a message keeps the place of its own part', () => {
   });
 });
 
+describe('the source order holds for a record of any size', () => {
+  test('a record with a thousand parts does not push the record after it out of order', () => {
+    // The record holds more parts than the source order had room for. The
+    // record after it was written later, so it has to come after every one
+    // of those parts, in the document and in the JSON export.
+    const parts = [];
+    for (let index = 0; index < 1001; index += 1) {
+      parts.push(shellCall(`a1-${index}`, `bun test --case ${index}`, 1000, 1100));
+    }
+    const input = fixture({
+      root: session('ses_root', { title: 'Root' }),
+      records: {
+        ses_root: [
+          {
+            info: { id: 'u1', sessionID: 'ses_root', role: 'user', time: { created: 1000 } },
+            parts: [textPart('u1', 'First')],
+          },
+          {
+            info: {
+              id: 'a1', sessionID: 'ses_root', role: 'assistant', agent: 'build',
+              providerID: 'anthropic', modelID: 'claude-opus-4-1', time: { created: 1000 },
+            },
+            parts,
+          },
+          {
+            info: {
+              id: 's1', sessionID: 'ses_root', role: 'shell', shellID: 'sh1', command: 'ls -la',
+              status: 'exited', time: { created: 1000 },
+            },
+            parts: [],
+          },
+        ],
+      },
+    });
+
+    const output = markdown(input);
+
+    expect(output.indexOf('bun test --case 1000')).toBeLessThan(output.indexOf('ls -la'));
+
+    const parsed = JSON.parse(renderExportJson(timelineOf(input)));
+    const order = parsed.events.map((event: { origin: { messageID: string } }) => {
+      if (event.origin.messageID === 's1') return 'the record after';
+      if (event.origin.messageID === 'u1') return 'the first record';
+      return 'a part of the big record';
+    });
+
+    // The record after the big one is written last, so it is last.
+    expect(order[order.length - 1]).toBe('the record after');
+    expect(order.filter((label: string) => label === 'a part of the big record')).toHaveLength(1001);
+  });
+
+  test('the order of an ordinary document is the order the source recorded', () => {
+    // The ordinary case: a record with a handful of parts, a record without
+    // parts and a sub-agent of its own. The order of the events is the one
+    // the source recorded, and the place of a record does not depend on how
+    // many parts the record before it holds.
+    const input = fixture({
+      root: session('ses_root', { title: 'Root' }),
+      sessions: [
+        session('ses_root', { title: 'Root' }),
+        session('ses_child', { title: 'Child', parentID: 'ses_root', agent: 'reviewer' }),
+      ],
+      records: {
+        ses_root: [
+          userMessage('ses_root', 'u1', 1000, 'Do the work'),
+          {
+            info: {
+              id: 'a1', sessionID: 'ses_root', role: 'assistant', agent: 'build',
+              providerID: 'anthropic', modelID: 'claude-opus-4-1', time: { created: 2000 },
+            },
+            parts: [
+              timedTextPart('a1', 'Text before the call', 2000),
+              { ...shellCall('a1', 'bun test', 2100, 2150), id: 'a1-shell' },
+              timedTextPart('a1', 'Text after the call', 2200, 'a1-text-after'),
+            ],
+          },
+          {
+            info: {
+              id: 'a2', sessionID: 'ses_root', role: 'assistant', agent: 'build',
+              providerID: 'anthropic', modelID: 'claude-opus-4-1', time: { created: 3000 },
+            },
+            parts: [subagentCall('a2', { childSessionID: 'ses_child', startedAt: 3000, endedAt: 5000 })],
+          },
+          {
+            info: {
+              id: 's1', sessionID: 'ses_root', role: 'shell', shellID: 'sh1', command: 'ls -la',
+              status: 'exited', time: { created: 6000 },
+            },
+            parts: [],
+          },
+        ],
+        ses_child: [
+          assistantMessage('ses_child', 'ca1', 3500, 'The child answers'),
+        ],
+      },
+    });
+
+    const parsed = JSON.parse(renderExportJson(timelineOf(input)));
+    const order = parsed.events.map((event: { kind: string; text?: string; call?: { name: string } }) => (
+      event.kind === 'message' ? event.text : `tool:${event.call?.name ?? ''}`
+    ));
+
+    expect(order).toEqual([
+      'Do the work',
+      'Text before the call',
+      'tool:shell',
+      'Text after the call',
+      'tool:subagent',
+      'The child answers',
+      'ls -la',
+    ]);
+  });
+});
+
 describe('the coverage of the sub-agent transcripts', () => {
   test('a child the report named is not reported as unreadable', async () => {
     // The report the runtime appended names the child, and the export read
@@ -380,19 +494,16 @@ describe('the coverage of the sub-agent transcripts', () => {
     const root = session('ses_root', { title: 'Root' });
     const result = await buildExport({
       root,
-      sessions: [root],
+      sessions: [root, session('ses_child', { title: 'Child', parentID: 'ses_root', agent: 'reviewer' })],
       load: async (sessionID) => {
         if (sessionID === 'ses_root') {
           return [dispatchedSessionReport('ses_root', 'r1', 2100, {
-            childSessionID: 'ses_dispatched',
-            title: 'Peer session',
+            childSessionID: 'ses_child',
+            title: 'Child',
             output: 'The dispatched answer',
           })];
         }
-        if (sessionID === 'ses_dispatched') {
-          return [assistantMessage('ses_dispatched', 'd1', 2200, 'The dispatched transcript')];
-        }
-        return null;
+        return [assistantMessage('ses_child', 'd1', 2200, 'The child transcript')];
       },
     }, 'readable');
 
@@ -403,7 +514,7 @@ describe('the coverage of the sub-agent transcripts', () => {
       sessionCount: result.timeline.sessions.size,
     });
 
-    expect(document).toContain('The dispatched transcript');
+    expect(document).toContain('The child transcript');
     expect(result.timeline.findings.some((finding) => finding.kind === 'unresolved-invocation')).toBe(false);
     expect(document).not.toContain('Incomplete export');
   });
@@ -415,7 +526,7 @@ describe('the coverage of the sub-agent transcripts', () => {
     const root = session('ses_root', { title: 'Root' });
     const result = await buildExport({
       root,
-      sessions: [root],
+      sessions: [root, session('ses_bg', { title: 'Background', parentID: 'ses_root', agent: 'worker' })],
       load: async (sessionID) => {
         if (sessionID === 'ses_root') {
           return [subagentReport('ses_root', 'r1', 2100, {
@@ -423,10 +534,7 @@ describe('the coverage of the sub-agent transcripts', () => {
             output: 'The background answer',
           })];
         }
-        if (sessionID === 'ses_bg') {
-          return [assistantMessage('ses_bg', 'b1', 2200, 'The background transcript')];
-        }
-        return null;
+        return [assistantMessage('ses_bg', 'b1', 2200, 'The background transcript')];
       },
     }, 'readable');
 
@@ -442,24 +550,21 @@ describe('the coverage of the sub-agent transcripts', () => {
     expect(document).not.toContain('Incomplete export');
   });
 
-  test('a child the records name keeps the title and the agent the list knows', async () => {
-    // The child came in through the recorded id, so the list is the only
-    // place its title and its agent are written down.
+  test('an attached child keeps the title and the agent the list knows', async () => {
+    // The list is where the child's name and its agent are written down, and
+    // the export carries the session the list names.
     const root = session('ses_root', { title: 'Root' });
     const result = await buildExport({
       root,
       sessions: [
         root,
-        session('ses_dispatched', { title: 'Peer session', agent: 'writer' }),
+        session('ses_child', { title: 'Peer session', parentID: 'ses_root', agent: 'writer' }),
       ],
       load: async (sessionID) => {
         if (sessionID === 'ses_root') {
-          return [dispatchedSessionReport('ses_root', 'r1', 2100, { childSessionID: 'ses_dispatched' })];
+          return [userMessage('ses_root', 'u1', 1000, 'Do the work')];
         }
-        if (sessionID === 'ses_dispatched') {
-          return [assistantMessage('ses_dispatched', 'd1', 2200, 'The dispatched work')];
-        }
-        return null;
+        return [assistantMessage('ses_child', 'ca1', 2000, 'The child work')];
       },
     }, 'readable');
 
@@ -473,8 +578,8 @@ describe('the coverage of the sub-agent transcripts', () => {
 
     expect(document).toContain('Peer session');
     expect(document).toContain('writer');
-    expect(parsed.sessions.ses_dispatched.title).toBe('Peer session');
-    expect(parsed.sessions.ses_dispatched.agent).toBe('writer');
+    expect(parsed.sessions.ses_child.title).toBe('Peer session');
+    expect(parsed.sessions.ses_child.agent).toBe('writer');
   });
 
   test('a child no call and no report names stays reported', async () => {
@@ -546,14 +651,17 @@ describe('the coverage of the sub-agent transcripts', () => {
     expect(output).toContain('Ran at the same time as');
   });
 
-  test('a child the session list does not name is still loaded', async () => {
-    // The session list names the root only. The root's own records name
-    // the child, and the child's transcript is there to be read.
+  test('a child the session list does not name is not loaded', async () => {
+    // The session list names the root only. The root's own records name the
+    // child, but the app does not attach that child to this session, so the
+    // export does not carry its transcript: the app does not show it either.
     const root = session('ses_root', { title: 'Root' });
+    const loaded: string[] = [];
     const result = await buildExport({
       root,
       sessions: [root],
       load: async (sessionID) => {
+        loaded.push(sessionID);
         if (sessionID === 'ses_root') {
           return [{
             info: {
@@ -563,10 +671,7 @@ describe('the coverage of the sub-agent transcripts', () => {
             parts: [subagentCall('a1', { childSessionID: 'ses_hidden' })],
           }];
         }
-        if (sessionID === 'ses_hidden') {
-          return [assistantMessage('ses_hidden', 'ha1', 2500, 'The hidden child work')];
-        }
-        return null;
+        return [assistantMessage('ses_hidden', 'ha1', 2500, 'The hidden child work')];
       },
     }, 'readable');
 
@@ -577,8 +682,9 @@ describe('the coverage of the sub-agent transcripts', () => {
       sessionCount: result.timeline.sessions.size,
     });
 
-    expect(document).toContain('The hidden child work');
-    expect(result.timeline.findings.some((finding) => finding.kind === 'ambiguous-invocation')).toBe(false);
+    expect(loaded).toEqual(['ses_root']);
+    expect(document).not.toContain('The hidden child work');
+    expect(result.timeline.sessions.size).toBe(1);
   });
 
   test('a child the user left out is not reported as missing', async () => {
@@ -670,13 +776,13 @@ describe('the coverage of the sub-agent transcripts', () => {
       },
     }, 'readable');
 
-    // The call settled and named a child. The export tried to load that
-    // child and could not, so the export says the transcript is missing
-    // rather than looking complete.
+    // The call settled and named a child the app does not attach to this
+    // session, so the export says the transcript is not part of it rather
+    // than looking complete.
     const findings = result.timeline.findings;
-    expect(findings.some((finding) => finding.kind === 'missing-session')).toBe(true);
-    expect(findings.some((finding) => finding.kind === 'missing-session')
-      && findings.find((finding) => finding.kind === 'missing-session')?.messageParams?.title).toBe('ses_gone');
+    expect(findings.some((finding) => finding.kind === 'ambiguous-invocation')).toBe(true);
+    expect(findings.some((finding) => finding.kind === 'ambiguous-invocation')
+      && findings.find((finding) => finding.kind === 'ambiguous-invocation')?.messageParams?.id).toBe('ses_gone');
   });
 
   test('a call that is still running names a child that is not there yet', async () => {

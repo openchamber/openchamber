@@ -19,7 +19,7 @@ import { readTimestamp } from './values';
 import type { ExportFinding } from './events';
 import { orderingGuarantee } from './order';
 import { exportText, findingText } from './i18n';
-import { agentLabel, concurrentLabel, readablePrompt, roleLabel, runtimeTruncationNote, statusLabel } from './labels';
+import { agentLabel, concurrentLabel, messageAgent, readablePrompt, roleLabel, runtimeTruncationNote, statusLabel } from './labels';
 import type { ProjectedEntry, ProjectedNode, ProjectedSubagent, ProjectionMode } from './project';
 
 /** The clock time of a timestamp, in the reader's locale. */
@@ -81,7 +81,7 @@ const messageHeading = (
   // fallback: a session that switched agents has messages of more than one,
   // and the name on a message is the name of the agent that wrote it.
   const label = entry.role === 'assistant'
-    ? agentLabel(entry.agent ?? rootAgent)
+    ? agentLabel(messageAgent(entry.agent, rootAgent))
     : roleLabel(entry.role);
   const time = timeLabel(entry.timestamp);
   const head = time ? `${time} · ${label}` : label;
@@ -116,9 +116,17 @@ const subagentHeading = (subagent: ProjectedSubagent): string => {
   return `**${head}${title}**`;
 };
 
-/** The line a subagent's own message gets. */
-const subagentMessageLabel = (subagent: ProjectedSubagent): string => (
-  subagent.agent ? `↳ ${subagent.agent}` : `↳ ${exportText('export.dialog.subagentLabel')}`
+/**
+ * The line a subagent's own message gets.
+ *
+ * The name is the agent that wrote the message, and the sub-agent session's
+ * own name is the fallback: a sub-agent session that switched agents has
+ * messages of more than one, and the name on a message is the name of the
+ * agent that wrote it. The block's own header keeps the session's name — that
+ * is the identity of the block, not the authorship of a message.
+ */
+const subagentMessageLabel = (subagent: ProjectedSubagent, agent?: string): string => (
+  `↳ ${messageAgent(agent, subagent.agent) ?? exportText('export.dialog.subagentLabel')}`
 );
 
 /** The compact line a tool call becomes. */
@@ -337,7 +345,6 @@ const renderSubagent = (subagent: ProjectedSubagent, mode: ProjectionMode): stri
     parts.push(`*${exportText('export.dispatch.resumed', { count: subagent.resumedBy.length })}*`);
   }
 
-  const label = subagentMessageLabel(subagent);
   // The model is named on the first message of the block and again when it
   // changes. The parent's model does not carry over: a subagent ran on its
   // own model, and the reader has to see which.
@@ -354,7 +361,9 @@ const renderSubagent = (subagent: ProjectedSubagent, mode: ProjectionMode): stri
     if (entry.kind === 'message') {
       const model = entry.model && entry.model !== lastModel ? entry.model : undefined;
       if (entry.model) lastModel = entry.model;
-      const heading = subagentMessageLine(entry, label, model);
+      // The agent that wrote this message, and the sub-agent session's own
+      // name as the fallback.
+      const heading = subagentMessageLine(entry, subagentMessageLabel(subagent, entry.agent), model);
       const body = entry.text.trim();
       const attachments = attachmentList(entry);
       if (!body && !attachments) continue;

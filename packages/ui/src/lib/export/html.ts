@@ -17,7 +17,7 @@ import { readTimestamp } from './values';
 import type { ExportFinding } from './events';
 import { orderingGuarantee, type ConcurrentWork } from './order';
 import { exportText, findingText } from './i18n';
-import { agentLabel, concurrentLabel, readablePrompt, roleLabel, runtimeTruncationNote, statusLabel } from './labels';
+import { agentLabel, concurrentLabel, messageAgent, readablePrompt, roleLabel, runtimeTruncationNote, statusLabel } from './labels';
 import type { ProjectedEntry, ProjectedNode, ProjectedSubagent, ProjectedTool, ProjectionMode } from './project';
 
 /** Escapes text for an HTML text node or attribute. */
@@ -239,11 +239,8 @@ const buildData = (nodes: ProjectedNode[], mode: ProjectionMode, rootAgent?: str
           kind: 'message',
           role: entry.role,
           // The same name the entry shows: the agent that wrote the message,
-          // and the session's own agent as the fallback. Inside a sub-agent's
-          // block the block's name is the agent.
-          agent: owner.nested
-            ? (owner.name ?? entry.agent)
-            : (entry.agent ?? owner.name),
+          // and the session's own agent as the fallback.
+          agent: messageAgent(entry.agent, owner.name),
           model: entry.model,
           search: searchTextOf(entry, mode).toLowerCase(),
           depth: entry.depth,
@@ -336,8 +333,8 @@ const buildData = (nodes: ProjectedNode[], mode: ProjectionMode, rootAgent?: str
  */
 const ownerLabel = (owner: EntryOwner, agent?: string): string => (
   owner.nested
-    ? `↳ ${owner.name ?? exportText('export.dialog.subagentLabel')}`
-    : agentLabel(agent ?? owner.name)
+    ? `↳ ${messageAgent(agent, owner.name) ?? exportText('export.dialog.subagentLabel')}`
+    : agentLabel(messageAgent(agent, owner.name))
 );
 
 /**
@@ -358,10 +355,9 @@ const renderEntryHtml = (
         : roleLabel(entry.role);
       // The entry's agent: the message names the agent that wrote it, and
       // the session's own agent is the fallback. Inside a sub-agent's block
-      // the block's name is the agent.
-      const agent = owner.nested
-        ? (owner.name ?? entry.agent ?? '')
-        : (entry.agent ?? owner.name ?? '');
+      // the block's name is the fallback too — the block's own header keeps
+      // the session's name, and that is the block's identity.
+      const agent = messageAgent(entry.agent, owner.name) ?? '';
       const time = formatTime(entry.timestamp);
       const model = entry.model;
       const meta = [time, model]
