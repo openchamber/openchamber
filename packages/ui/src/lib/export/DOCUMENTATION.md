@@ -98,11 +98,17 @@ cannot name them differently.
 - **A match stays on the page.** The HTML page's search hides the entries that
   do not match, and a block that holds nothing else. A match inside a nested
   block keeps that block and every block above it, so the count the page
-  reports counts matches the reader can see. The search index holds the text
-  the page shows: a long prompt and a long sub-agent result are cut in the
-  readable view, and the index holds those cuts, so a search does not find a
-  word the reader cannot read. The reasoning the readable view does not draw
-  is not in the index at all.
+  reports counts matches the reader can see. A sub-agent's block is a fold the
+  reader can close, and a closed fold paints nothing: while a search or a
+  filter is active, the page opens the block that holds a match and every
+  block above it. The page only opens a fold, never closes one, so clearing
+  the search leaves the blocks as the reader last saw them. The folds inside
+  a row, such as a tool's output, stay where the reader put them, and with no
+  search or filter active the page touches no fold at all. The search index
+  holds the text the page shows: a long prompt and a long sub-agent result are
+  cut in the readable view, and the index holds those cuts, so a search does
+  not find a word the reader cannot read. The reasoning the readable view does
+  not draw is not in the index at all.
 - **Compact never means lost.** The readable view cuts a long tool result
   down and marks the cut. The mark says where the whole result is: the
   export of this session with full details, which carries the recorded
@@ -341,6 +347,24 @@ learns what the export covers.
 The JSON export carries the same fact in a field of its own, next to the
 findings and not among them: a tool that reads the export sees which
 sessions were left out and why.
+
+### Why a search opens only a sub-agent's fold
+
+A sub-agent's block folds its whole transcript away, so a match inside a
+closed block is counted and not drawn. While a search or a filter is active,
+the page opens the block that holds the match, and every block above it,
+because a nested block sits inside its parent and would otherwise stay hidden.
+It only opens a fold and never closes one, so clearing the search leaves the
+blocks as the reader last saw them. The folds inside a row are the reader's
+own detail view: the row stays on the page with its header, so the reader can
+find it and open the detail.
+
+The rejected alternative was to restore each block's state when the search
+ends. The reader would watch the page fold itself back up, and the block they
+opened to read a match would close under them. The rejected alternative on the
+other side was to open every `<details>` that holds a match: a tool's output
+section would spring open too, and the reader who closed it to scan the page
+would lose that choice to a search.
 
 ### Why a finding carries a key and not a sentence
 

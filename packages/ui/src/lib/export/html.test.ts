@@ -15,7 +15,7 @@ import type { Session } from '@/lib/opencode/model';
 import { useI18nStore } from '@/lib/i18n';
 import { buildExportFromRecords } from './pipeline';
 import { renderExportHtml } from './html';
-import { assistantMessage, reasoningPart, subagentCall, subagentReport, type Record_ } from './fixtures';
+import { assistantMessage, reasoningPart, shellCall, subagentCall, subagentReport, type Record_ } from './fixtures';
 
 const session = (id: string, overrides: Partial<Session> = {}): Session => ({
   id,
@@ -39,7 +39,18 @@ const delegation = (messageID: string, childSessionID: string, sessionID: string
 
 const rootRecords: Record_[] = [delegation('a1', 'ses_child', 'ses_root')];
 const childRecords: Record_[] = [delegation('ca1', 'ses_grand', 'ses_child')];
-const grandRecords: Record_[] = [assistantMessage('ses_grand', 'ga1', 2500, 'The needle is here')];
+const grandRecords: Record_[] = [
+  assistantMessage('ses_grand', 'ga1', 2500, 'The needle is here'),
+  // A tool row with a fold of its own: the reader can collapse its output
+  // inside the block, and a search must leave that fold alone.
+  {
+    info: {
+      id: 'ga2', sessionID: 'ses_grand', role: 'assistant', agent: 'build',
+      providerID: 'anthropic', modelID: 'claude-opus-4-1', time: { created: 2600 },
+    },
+    parts: [{ ...shellCall('ga2', 'bun test', 2600, 2700), sessionID: 'ses_grand' }],
+  },
+];
 
 /** The page the export writes, as text. */
 const pageHtml = (): string => {
@@ -91,9 +102,11 @@ const search = (dom: Window, term: string): void => {
 /**
  * Whether the entry is on the page.
  *
- * An entry is on the page when nothing hides it: not the entry itself, and
- * not a block above it. A hidden block takes its whole subtree with it. An
- * entry the page does not carry at all is not on the page either.
+ * An entry is on the page when nothing hides it: not the entry itself, not a
+ * block above it, and no closed fold above it. A hidden block takes its whole
+ * subtree with it, and a closed `<details>` paints none of its content, so an
+ * entry inside one is not on the page either. An entry the page does not
+ * carry at all is not on the page either.
  */
 const isOnPage = (entry: Element | null): boolean => {
   if (!entry) return false;
@@ -101,10 +114,37 @@ const isOnPage = (entry: Element | null): boolean => {
   let parent = entry.parentElement;
   while (parent) {
     if (parent.classList.contains('hidden')) return false;
+    if (parent.tagName === 'DETAILS' && !parent.hasAttribute('open')) return false;
     parent = parent.parentElement;
   }
   return true;
 };
+
+/** The sub-agent folds, outer before nested, as the page carries them. */
+const subagentFolds = (dom: Window): Element[] => [
+  ...dom.document.querySelectorAll('details.subagent-fold'),
+];
+
+/** Whether the fold is open, which is what the browser paints. */
+const isOpen = (fold: Element): boolean => fold.hasAttribute('open');
+
+/** Closes every sub-agent block, the way a reader navigating a long page would. */
+const closeSubagentBlocks = (dom: Window): void => {
+  for (const fold of subagentFolds(dom)) fold.removeAttribute('open');
+};
+
+/** Chooses a filter value, the way a reader picks one. */
+const chooseFilter = (dom: Window, id: string, value: string): void => {
+  const select = dom.document.getElementById(id);
+  if (!(select instanceof dom.HTMLSelectElement)) throw new Error(`The page has no ${id} filter`);
+  select.value = value;
+  select.dispatchEvent(new dom.Event('change'));
+};
+
+/** The entry whose text holds a word, as the page carries it. */
+const entryWith = (dom: Window, word: string): Element | null => (
+  [...dom.document.querySelectorAll('.entry')].find((entry) => (entry.textContent ?? '').includes(word)) ?? null
+);
 
 /** The data the page's own script works with. */
 const pageData = (dom: Window): {
@@ -170,6 +210,113 @@ describe('the HTML page keeps the match on the page', () => {
     }
     const count = dom.document.getElementById('count')?.textContent ?? '';
     expect(count).toContain('0');
+  });
+});
+
+describe('the HTML page opens a folded block around a match', () => {
+  test('a search opens the block the reader closed, and the count matches the page', () => {
+    const dom = openPage();
+    const match = entryWith(dom, 'needle');
+    const folds = subagentFolds(dom);
+    expect(folds).toHaveLength(2);
+
+    // The match sits in the grandchild's block, and the reader folded that
+    // block while navigating the document.
+    folds[1].removeAttribute('open');
+    expect(isOnPage(match)).toBe(false);
+
+    search(dom, 'needle');
+
+    expect(isOpen(folds[1])).toBe(true);
+    expect(isOnPage(match)).toBe(true);
+
+    // The counter names the entries the reader can see, and a match inside a
+    // closed block would be counted while staying invisible.
+    const entries = [...dom.document.querySelectorAll('.entry')];
+    const shown = entries.filter(isOnPage);
+    const count = dom.document.getElementById('count')?.textContent ?? '';
+    const expected = pageData(dom).countLabel
+      .replace('{visible}', String(shown.length))
+      .replace('{total}', String(entries.length));
+    expect(shown).toHaveLength(1);
+    expect(count).toBe(expected);
+  });
+
+  test('a filter opens the block the reader closed', () => {
+    const dom = openPage();
+    const folds = subagentFolds(dom);
+    folds[1].removeAttribute('open');
+    const match = entryWith(dom, 'needle');
+    expect(isOnPage(match)).toBe(false);
+
+    chooseFilter(dom, 'filter-agent', 'build');
+
+    expect(isOpen(folds[1])).toBe(true);
+    expect(isOnPage(match)).toBe(true);
+  });
+
+  test('a match in a nested block opens the nested block and the block above it', () => {
+    const dom = openPage();
+    closeSubagentBlocks(dom);
+    const [outer, inner] = subagentFolds(dom);
+    expect(isOpen(outer)).toBe(false);
+    expect(isOpen(inner)).toBe(false);
+
+    search(dom, 'needle');
+
+    // The match is in the grandchild's block: opening only that block would
+    // still hide it behind the closed child block.
+    expect(isOpen(outer)).toBe(true);
+    expect(isOpen(inner)).toBe(true);
+    expect(isOnPage(entryWith(dom, 'needle'))).toBe(true);
+  });
+
+  test('the folds inside a row stay as the reader left them', () => {
+    const dom = openPage();
+    closeSubagentBlocks(dom);
+    const tool = dom.document.querySelector('.entry.tool');
+    const output = tool?.querySelector('details') ?? null;
+    expect(tool).toBeTruthy();
+    expect(output).toBeTruthy();
+    output?.removeAttribute('open');
+
+    search(dom, 'shell');
+
+    // The row is a match, so the block that holds it opens. The tool's own
+    // output section is the reader's, and stays closed.
+    expect(isOnPage(tool)).toBe(true);
+    expect(output?.hasAttribute('open')).toBe(false);
+    for (const fold of subagentFolds(dom)) expect(isOpen(fold)).toBe(true);
+  });
+
+  test('clearing the search leaves the blocks open, and a later fold stays closed', () => {
+    const dom = openPage();
+    closeSubagentBlocks(dom);
+
+    search(dom, 'needle');
+    const folds = subagentFolds(dom);
+    for (const fold of folds) expect(isOpen(fold)).toBe(true);
+
+    search(dom, '');
+    for (const fold of folds) expect(isOpen(fold)).toBe(true);
+
+    // With no search running, the reader's hand is the only thing that
+    // changes a block.
+    folds[0].removeAttribute('open');
+    search(dom, '');
+    expect(isOpen(folds[0])).toBe(false);
+  });
+
+  test('a block without a match stays hidden and keeps its fold', () => {
+    const dom = openPage();
+    closeSubagentBlocks(dom);
+
+    search(dom, 'a word that is nowhere in the export');
+
+    for (const section of dom.document.querySelectorAll('.subagent')) {
+      expect(section.classList.contains('hidden')).toBe(true);
+    }
+    for (const fold of subagentFolds(dom)) expect(isOpen(fold)).toBe(false);
   });
 });
 

@@ -957,8 +957,9 @@ describe('the HTML export', () => {
     });
 
     // The block folds away with a native details element, so the page works
-    // without any script.
-    expect(html).toContain('<details open><summary><span class="subagent-label">');
+    // without any script. The fold carries a name of its own, so the page's
+    // script can tell it from the folds inside a row.
+    expect(html).toContain('<details class="subagent-fold" open><summary><span class="subagent-label">');
 
     // The title and the time are elements of their own, so the summary's
     // gap keeps the time from running into the title.

@@ -553,11 +553,15 @@ const renderSubagentHtml = (subagent: ProjectedSubagent, mode: ProjectionMode, d
   // works offline, and the entries inside stay in the document, so the
   // search and the filters still reach them.
   //
+  // The fold is named, so the page's script can tell it from the folds of
+  // a row: a search opens the block that holds a match, and the sections of
+  // a tool stay as the reader left them.
+  //
   // The label, the title and the time are three elements of their own, so
   // the summary's own gap keeps them apart: the time does not run into the
   // title. An entry's header separates its metadata the same way.
   return `<section class="subagent depth-${depth}" data-id="${escapeHtml(subagent.childSessionID)}" data-agent="${escapeHtml(subagent.agent ?? '')}">
-  <details open><summary><span class="subagent-label">${escapeHtml(label)}</span>${title}${meta ? `<span class="meta">${meta}</span>` : ''}</summary>
+  <details class="subagent-fold" open><summary><span class="subagent-label">${escapeHtml(label)}</span>${title}${meta ? `<span class="meta">${meta}</span>` : ''}</summary>
   ${concurrent}
   ${dispatchNote}
   ${dispatchResult}
@@ -707,6 +711,7 @@ const SCRIPT = `
     var tool = toolFilter.value;
     var status = statusFilter.value;
     var role = roleFilter.value;
+    var active = Boolean(term || agent || tool || status || role);
     var visible = 0;
 
     entries.forEach(function (entry) {
@@ -733,6 +738,20 @@ const SCRIPT = `
         return !entry.classList.contains('hidden');
       });
       section.classList.toggle('hidden', !anyVisible);
+
+      // A closed fold paints nothing, so a match inside one is counted while
+      // staying invisible. While a search or a filter is active, the block
+      // that holds a match opens, and so does every block above it: a nested
+      // block is inside its parent, and a match inside an open nested block
+      // would still be hidden behind a closed parent. The page only ever
+      // opens a fold, so clearing the search leaves the blocks as the reader
+      // last saw them. Only the sub-agent's own fold is touched: the folds
+      // inside a row, such as a tool's output, are the reader's own detail
+      // view and stay where the reader left them.
+      if (active && anyVisible) {
+        var fold = section.querySelector('details.subagent-fold');
+        if (fold) fold.open = true;
+      }
     });
 
     count.textContent = data.countLabel
