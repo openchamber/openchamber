@@ -184,31 +184,45 @@ describe('repositoryUrlOfItemLink', () => {
 
 describe('resolveBoardTab', () => {
   const tab = (overrides: Partial<Parameters<typeof resolveBoardTab>[0]>) => resolveBoardTab({
-    chosen: 'repository', hasRepository: false, repositoryStatus: 'ready', linear: 'disconnected', ...overrides,
+    chosen: 'repository', hasRepository: false, repositoryStatus: 'ready', trackers: { connected: [], pending: false }, ...overrides,
   });
+  const linear = { connected: ['linear'], pending: false };
 
   test('shows the repository tab when the project has one', () => {
     expect(tab({ hasRepository: true })).toBe('repository');
-    expect(tab({ hasRepository: true, linear: 'connected' })).toBe('repository');
-    expect(tab({ hasRepository: true, linear: 'pending' })).toBe('repository');
+    expect(tab({ hasRepository: true, trackers: linear })).toBe('repository');
+    expect(tab({ hasRepository: true, trackers: { connected: [], pending: true } })).toBe('repository');
   });
 
-  test('keeps Linear when the user chose it, connected or not', () => {
-    expect(tab({ chosen: 'linear', hasRepository: true })).toBe('linear');
-    expect(tab({ chosen: 'linear' })).toBe('linear');
-    expect(tab({ chosen: 'linear', linear: 'absent', hasRepository: true })).toBe('repository');
+  test('keeps a chosen tracker while it is connected', () => {
+    expect(tab({ chosen: 'tracker:linear', hasRepository: true, trackers: linear })).toBe('tracker:linear');
+    expect(tab({ chosen: 'tracker:linear', trackers: linear })).toBe('tracker:linear');
+    expect(tab({ chosen: 'tracker:linear', hasRepository: true })).toBe('repository');
+    expect(tab({ chosen: 'tracker:jira', trackers: linear })).toBe('tracker:linear');
   });
 
-  test('turns to Linear without a repository unless Linear is known to be disconnected', () => {
-    expect(tab({ linear: 'connected' })).toBe('linear');
-    expect(tab({ linear: 'unknown' })).toBe('linear');
+  test('waits for a chosen tracker whose status is still out instead of flashing the repository', () => {
+    expect(tab({ chosen: 'tracker:linear', hasRepository: true, trackers: { connected: [], pending: true } })).toBeNull();
+  });
+
+  test('a project on an unrecognized host turns to a connected tracker, else to the no-source note', () => {
+    expect(tab({ trackers: linear })).toBe('tracker:linear');
+    expect(tab({ trackers: { connected: ['jira', 'linear'], pending: false } })).toBe('tracker:jira');
     expect(tab({})).toBeNull();
-    expect(tab({ linear: 'absent' })).toBeNull();
     expect(tab({ repositoryStatus: 'failed' })).toBeNull();
+    expect(tab({ repositoryStatus: 'failed', trackers: linear })).toBe('tracker:linear');
   });
 
-  test('waits for the folder search and for Linear status before choosing', () => {
-    expect(tab({ repositoryStatus: 'pending', linear: 'connected' })).toBeNull();
-    expect(tab({ linear: 'pending' })).toBeNull();
+  test('a failed status read waits, then follows what the sources hook says', () => {
+    // While the read is out the board waits; once it failed, a tracker that was
+    // signed in keeps its tab and one never seen connected offers none.
+    expect(tab({ trackers: { connected: [], pending: true } })).toBeNull();
+    expect(tab({ trackers: linear })).toBe('tracker:linear');
+    expect(tab({ trackers: { connected: [], pending: false } })).toBeNull();
+  });
+
+  test('waits for the folder search and for the trackers\' status before choosing', () => {
+    expect(tab({ repositoryStatus: 'pending', trackers: linear })).toBeNull();
+    expect(tab({ trackers: { connected: ['linear'], pending: true } })).toBeNull();
   });
 });

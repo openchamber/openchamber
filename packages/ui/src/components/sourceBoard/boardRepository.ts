@@ -1,5 +1,6 @@
 import * as React from 'react';
 
+import { trackerOfSource, trackerReferenceSource } from '@/components/references/referencePickerItems';
 import { defaultSourceControlIdentities } from '@/lib/source-control/identity';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import type { GitRemote, SourceControlIdentity } from '@/lib/api/types';
@@ -86,31 +87,34 @@ export const shouldRememberAll = (resolution: BoardRepository, storedAll: boolea
 );
 
 /**
- * Linear as the board sees it: not in this runtime, its status not read yet,
- * connected, disconnected, or unknown because the read failed.
- */
-export type BoardLinear = 'absent' | 'pending' | 'connected' | 'disconnected' | 'unknown';
-
-/**
- * The tab the board shows, or null for its no-source or loading screen, which
- * keeps the project pickers. Linear stays the user's choice while the runtime
- * has it. Otherwise the repository tab when the project has one; until the
- * folder says whether it holds a repository, Linear is not the answer, and
- * without one the board turns to Linear on its own unless Linear is known to
- * be disconnected: an unconnected Linear tab lists nothing. A failed status
- * read is not taken for a disconnect, and the Linear tab keeps the project
- * pickers for such a project, so it is never a dead end.
+ * The tab the board shows, or null for its loading or no-source screen, both
+ * of which keep the project pickers. A chosen tracker tab stays while that
+ * tracker is connected. Otherwise the repository tab when the project has
+ * one. Without one the board waits until the folder says whether it holds a
+ * repository and until the trackers' statuses arrive, then turns to the first
+ * connected tracker, or to the no-source note when none is: a tracker nobody
+ * signed in to lists nothing. A chosen tracker whose status is still out is
+ * waited for too, so the board does not flash the repository tab first.
  */
 export function resolveBoardTab(options: {
     chosen: SourceBoardTab;
     hasRepository: boolean;
     repositoryStatus: BoardRepository['status'];
-    linear: BoardLinear;
+    trackers: {
+        /** Ids of the trackers with a tab: served and signed in. */
+        connected: readonly string[];
+        /** A served tracker's status has not arrived yet. */
+        pending: boolean;
+    };
 }): SourceBoardTab | null {
-    if (options.chosen === 'linear' && options.linear !== 'absent') return 'linear';
-    if (options.hasRepository) return 'repository';
-    if (options.repositoryStatus === 'pending' || options.linear === 'pending') return null;
-    return options.linear === 'connected' || options.linear === 'unknown' ? 'linear' : null;
+    const { chosen, hasRepository, repositoryStatus, trackers } = options;
+    const chosenTracker = trackerOfSource(chosen);
+    if (chosenTracker && trackers.connected.includes(chosenTracker)) return chosen;
+    if (chosenTracker && trackers.pending) return null;
+    if (hasRepository) return 'repository';
+    if (repositoryStatus === 'pending' || trackers.pending) return null;
+    const first = trackers.connected[0];
+    return first === undefined ? null : trackerReferenceSource(first);
 }
 
 /** A repository's path below the project's root, as the pickers name it. */

@@ -31,9 +31,14 @@ const plane: TrackerDescriptor = linearLikeTrackerDescriptor({
 const unexpected = (): never => { throw new Error('Unexpected runtime API access'); };
 
 const statusReads: string[] = [];
+let statusFails = false;
 const trackers: TrackerAPI = {
   providers: async () => [plane],
-  authStatus: async (provider) => { statusReads.push(provider); return { connected: false }; },
+  authStatus: async (provider) => {
+    statusReads.push(provider);
+    if (statusFails) throw new Error('offline');
+    return { connected: false };
+  },
   authStart: unexpected, authDisconnect: unexpected, authActivate: unexpected, list: unexpected,
   refreshListReads: unexpected, get: unexpected, states: unexpected, updateState: unexpected,
   mappingGet: unexpected, mappingSet: unexpected, sessionStatusPost: unexpected,
@@ -84,6 +89,7 @@ describe('a tracker no UI code names', () => {
       Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
     }
     statusReads.length = 0;
+    statusFails = false;
     useTrackerAuthStore.getState().resetForRuntimeSwitch();
     registerRuntimeAPIs(apis);
     container = document.createElement('div');
@@ -142,6 +148,29 @@ describe('a tracker no UI code names', () => {
     expect([offered, served]).toEqual([[], ['plane']]);
     await act(async () => { useTrackerAuthStore.getState().setStatus('plane', { connected: true }); });
     expect([offered, served]).toEqual([['plane'], ['plane']]);
+  });
+
+  test('the board waits for a served tracker\'s status, asking it if nobody has, and a failed read ends the wait', async () => {
+    const { useTrackerSourcesPending } = await import('./sources');
+    const { RuntimeAPIContext } = await import('@/contexts/runtimeAPIContext');
+    let pending: boolean[] = [];
+    const Probe = () => {
+      pending = [...pending, useTrackerSourcesPending()];
+      return null;
+    };
+    await render(<RuntimeAPIContext.Provider value={apis}><Probe /></RuntimeAPIContext.Provider>);
+    // Never asked: the hook asks, and the answer ends the wait.
+    expect(statusReads).toEqual(['plane']);
+    expect([pending[0], pending.at(-1)]).toEqual([true, false]);
+
+    await act(async () => { root?.unmount(); });
+    useTrackerAuthStore.getState().resetForRuntimeSwitch();
+    pending = [];
+    statusFails = true;
+    await render(<RuntimeAPIContext.Provider value={apis}><Probe /></RuntimeAPIContext.Provider>);
+    // A failed read is not a disconnect, but it is an answer: nothing to wait for.
+    expect(useTrackerAuthStore.getState().entries.plane?.hasChecked).toBe(false);
+    expect([pending[0], pending.at(-1)]).toEqual([true, false]);
   });
 
   test('a picker row shows its item with the features its descriptor serves', async () => {

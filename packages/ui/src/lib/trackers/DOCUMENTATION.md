@@ -83,7 +83,11 @@ on the source-control side (`lib/source-control/`).
   Worktree's sources, so nothing there shows a tracker that would only ask to
   connect. Settings, Settings search, link matching and name lookups read every
   served tracker (`useTrackerDescriptors()`), since connecting happens there.
-  Until a tracker's status answers it is not offered.
+  Until a tracker's status answers it is not offered. `useTrackerSourcesPending()`
+  says whether that answer may still change (the list or a served tracker's
+  status has not arrived), so the board can wait instead of reading "none
+  connected"; it asks a served tracker nobody asked yet, and a failed read
+  ends the wait without counting as a disconnect.
 - Settings follows the capability gates: one `TrackerSettings` card per served
   tracker (`components/sections/integrations/`), with the account switch and a
   second sign-in only where `multipleAccounts` is set, `TrackerProjectMapping`

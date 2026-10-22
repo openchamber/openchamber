@@ -21,6 +21,29 @@ export const useTrackerSources = (): readonly TrackerDescriptor[] => {
 };
 
 /**
+ * Whether the answer `useTrackerSources` gives may still change because it is
+ * not known yet: the server's tracker list has not arrived (a failed read of
+ * it has no list to wait for), or a served tracker's status has not. A failed
+ * status read counts as arrived: the tracker keeps a tab only if it was
+ * already signed in. A served tracker nobody asked about yet (one the list
+ * gained after a retry) is asked here, so the wait always ends.
+ */
+export const useTrackerSourcesPending = (): boolean => {
+  const { trackers } = useRuntimeAPIs();
+  const descriptors = useTrackerDescriptors();
+  const listPending = useTrackerRegistry((state) => !state.holdsList && state.status !== 'error');
+  const entries = useTrackerAuthStore((state) => state.entries);
+  React.useEffect(() => {
+    if (!trackers) return;
+    for (const descriptor of descriptors) {
+      if (!entries[descriptor.id]) void useTrackerAuthStore.getState().refreshStatus(trackers, descriptor.id);
+    }
+  }, [descriptors, entries, trackers]);
+  if (!trackers) return false;
+  return listPending || descriptors.some((descriptor) => !entries[descriptor.id]?.status);
+};
+
+/**
  * Whether a tracker's lists can be read: `unsupported` where the runtime has
  * no trackers or the server does not serve this one, `disconnected` once its
  * status answered that nobody is signed in, `ready` otherwise (also while the

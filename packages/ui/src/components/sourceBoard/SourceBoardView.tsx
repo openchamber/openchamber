@@ -40,7 +40,7 @@ import { cn } from '@/lib/utils';
 import { resolveTrackerMappedProjectPath } from '@/lib/trackers/projectMapping';
 import { trackerPresentation } from '@/lib/trackers/presentation';
 import { useTrackerDescriptor } from '@/lib/trackers/registry';
-import { useTrackerSources } from '@/lib/trackers/sources';
+import { useTrackerSources, useTrackerSourcesPending } from '@/lib/trackers/sources';
 import { useTrackedItems } from '@/lib/trackedItems/interest';
 import { isTrackedWorkItem, type TrackedItem } from '@/lib/trackedItems/model';
 import { normalizeProjectPath, resolveProjectForSessionDirectory } from '@/lib/projectResolution';
@@ -57,7 +57,7 @@ import { SourceBoardAcrossNote } from './SourceBoardAcrossNote';
 import { SourceBoardChecksDialog } from './SourceBoardChecksDialog';
 import { SourceBoardLabels, SourceBoardReviewers } from './SourceBoardMetaEditors';
 import { SourceBoardContainerPicker, SourceBoardProjectPicker, SourceBoardRepositoryPicker } from './SourceBoardPickers';
-import { choiceForFocus, shouldRememberAll, useBoardRepository } from './boardRepository';
+import { choiceForFocus, resolveBoardTab, shouldRememberAll, useBoardRepository } from './boardRepository';
 import { isSameRepositoryItemLink } from './openTrackerItem';
 import { usePullAttachments } from './pullAttachments';
 import { useThreadActions } from './threadActions';
@@ -172,6 +172,7 @@ const SourceBoard: React.FC<{ layout: SourceBoardLayout; onLeave?: () => void; o
     const { sourceControl } = useRuntimeAPIs();
     // Only signed-in trackers get a tab; connecting one happens in Settings.
     const trackerTabs = useTrackerSources();
+    const trackersPending = useTrackerSourcesPending();
     const projects = useProjectsStore((state) => state.projects);
     const activeProjectId = useProjectsStore((state) => state.activeProjectId);
     const choice = useSourceBoardChoice();
@@ -208,12 +209,13 @@ const SourceBoard: React.FC<{ layout: SourceBoardLayout; onLeave?: () => void; o
     const allRepositories = repository.all ? repository.repositories : null;
     const hostProvider = useRepositoryHostProvider(allRepositories ? null : directory);
     const hasRepository = allRepositories !== null || (hostProvider !== 'none' && hostProvider !== null);
-    const storedTracker = trackerOfSource(choice.tab);
-    const firstTrackerTab = trackerTabs[0] ? trackerReferenceSource(trackerTabs[0].id) : null;
-    // Until the folder says whether it holds a repository, a tracker is not the answer.
-    const tab: SourceBoardTab | null = storedTracker && trackerTabs.some((descriptor) => descriptor.id === storedTracker)
-        ? choice.tab
-        : hasRepository ? 'repository' : repository.status === 'pending' ? null : firstTrackerTab;
+    const connectedTrackers = React.useMemo(() => trackerTabs.map((descriptor) => descriptor.id), [trackerTabs]);
+    const tab = resolveBoardTab({
+        chosen: choice.tab,
+        hasRepository,
+        repositoryStatus: repository.status,
+        trackers: { connected: connectedTrackers, pending: trackersPending },
+    });
     const tracker = tab ? trackerOfSource(tab) : null;
 
     const trackerConnected = isTrackerConnected(useTrackerAuthEntry(tracker));
@@ -248,15 +250,20 @@ const SourceBoard: React.FC<{ layout: SourceBoardLayout; onLeave?: () => void; o
         />
     ) : null;
     const projectScope = <>{projectPicker}{repositoryPicker}</>;
-    // On a tracker the board lists a container (a Linear team), not a project.
+    // On a tracker the board lists a container (a Linear team). The project's
+    // pickers stay beside it when the project offers no repository tab, the
+    // only other way off the tracker.
     const scopePicker = tracker ? (
-        <SourceBoardContainerPicker
-            provider={tracker}
-            containers={containers}
-            selectedContainerId={containerId}
-            onSelectContainer={(next) => updateChoice({ trackerContainerByProvider: { [tracker]: next } })}
-            onAccountSwitched={() => updateChoice({ trackerContainerByProvider: { [tracker]: null } })}
-        />
+        <>
+            {hasRepository ? null : projectScope}
+            <SourceBoardContainerPicker
+                provider={tracker}
+                containers={containers}
+                selectedContainerId={containerId}
+                onSelectContainer={(next) => updateChoice({ trackerContainerByProvider: { [tracker]: next } })}
+                onAccountSwitched={() => updateChoice({ trackerContainerByProvider: { [tracker]: null } })}
+            />
+        </>
     ) : projectScope;
 
     const selectKind = (kind: SourceBoardKind) => {
@@ -276,7 +283,7 @@ const SourceBoard: React.FC<{ layout: SourceBoardLayout; onLeave?: () => void; o
                 ) : (
                     <div className="flex h-12 shrink-0 items-center gap-1 border-b border-border/60 px-2">{projectScope}</div>
                 )}
-                {repository.status === 'ready' ? (
+                {repository.status === 'ready' && !trackersPending ? (
                     <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center typography-meta text-muted-foreground">
                         <span>{t(projects.length === 0 ? 'sourceBoard.empty.noProjects' : 'sourceBoard.empty.noSource')}</span>
                         {projects.length > 0 ? (
@@ -284,10 +291,13 @@ const SourceBoard: React.FC<{ layout: SourceBoardLayout; onLeave?: () => void; o
                         ) : null}
                     </div>
                 ) : (
-                    // Looking for the folder's repositories, or unable to: neither says there are none.
+                    // Looking for the folder's repositories or asking the trackers
+                    // whether they are connected, or unable to: none says there is nothing.
                     <div role="status" className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center typography-meta text-muted-foreground">
-                        {repository.status === 'pending' ? <Icon name="loader-4" className="size-5 animate-spin" /> : null}
-                        <span>{t(repository.status === 'failed' ? 'gitView.empty.discoverFailed' : 'gitView.empty.discoveringRepositories')}</span>
+                        {repository.status !== 'failed' ? <Icon name="loader-4" className="size-5 animate-spin" /> : null}
+                        {repository.status !== 'ready' ? (
+                            <span>{t(repository.status === 'failed' ? 'gitView.empty.discoverFailed' : 'gitView.empty.discoveringRepositories')}</span>
+                        ) : null}
                         {repository.status === 'failed' ? (
                             <Button size="sm" variant="outline" onClick={repository.retry}>
                                 <Icon name="refresh" className="size-3.5" />

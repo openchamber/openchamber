@@ -218,11 +218,22 @@ preview's footer holds actions instead of what the agent gets.
   read again when it opens, when the window gets focus back and when an agent
   turn finishes.
 - The repository tab is the project's host only, the provider
-  `useRepositoryHostProvider` names; a project with no remote on a known host
-  shows its trackers alone. A tracker gets a tab only while an account is
-  signed in (`useTrackerSources`), named by the descriptor's product name; a
+  `useRepositoryHostProvider` names. A tracker gets a tab only while an account
+  is signed in (`useTrackerSources`), named by the descriptor's product name; a
   served tracker nobody signed in to is connected from Settings, which lists
-  every served one.
+  every served one. A project with no remote on a known host shows its
+  connected trackers alone, or the no-source note with the project pickers
+  when none is connected: an unconnected tracker tab lists nothing, and the
+  board remembers its project, so such a tab would leave nothing leading back.
+  `resolveBoardTab` (`sourceBoard/boardRepository.ts`) decides. Until the
+  folder says whether it holds a repository and until every served tracker's
+  status first arrives (`useTrackerSourcesPending`), the board shows a loading
+  state instead of guessing. A failed status read is not a disconnect: it ends
+  the wait, and the tracker keeps its tab if it was signed in before.
+- On a tracker the scope picker is the container picker
+  (`SourceBoardContainerPicker`). When the project offers no repository tab,
+  the project and repository pickers stay beside it: they are the only way
+  off the tracker for that project.
 - The board reads one folder, `useBoardRepository` (`sourceBoard/boardRepository.ts`):
   the project's root when it is a git repository, as always. When the root is
   not one but repositories lie under it, the board reads one of them, or all of
