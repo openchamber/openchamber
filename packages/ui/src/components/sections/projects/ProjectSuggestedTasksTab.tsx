@@ -132,11 +132,13 @@ const GlobList: React.FC<{ value: string[]; ariaLabel: string; placeholder: stri
 };
 
 /**
- * Settings → Projects → Suggested tasks: whether and when scans run, the
- * lenses they run, what they look at, how much they may report and cost,
- * and what happens after. Each change is saved on its own.
+ * A project's Suggested tasks settings, in Settings → Projects and in the
+ * inbox's Configure dialog: whether and when scans run, the lenses they run,
+ * what they look at, how much they may report and cost, and what happens
+ * after. Each change is saved on its own. Over the inbox the form does not
+ * link to it.
  */
-const ProjectSuggestedTasksSettings: React.FC<{ projectRef: ProjectRef }> = ({ projectRef }) => {
+const ProjectSuggestedTasksSettings: React.FC<{ projectRef: ProjectRef; overInbox: boolean }> = ({ projectRef, overInbox }) => {
   const projectId = projectRef.id;
   const { t } = useI18n();
   const timeFormat = useUIStore((state) => state.timeFormatPreference);
@@ -218,7 +220,7 @@ const ProjectSuggestedTasksSettings: React.FC<{ projectRef: ProjectRef }> = ({ p
     try {
       await runSuggestionScan(projectId, lensIds);
       if (!current()) return;
-      toast.success(t('suggestedTasks.toast.scanStarted'), {
+      toast.success(t('suggestedTasks.toast.scanStarted'), overInbox ? undefined : {
         action: { label: t('suggestedTasks.settings.openInbox'), onClick: openInbox },
       });
     } catch (error) {
@@ -277,9 +279,11 @@ const ProjectSuggestedTasksSettings: React.FC<{ projectRef: ProjectRef }> = ({ p
             <Button size="sm" variant="outline" disabled={!config.enabled || enabledLensCount === 0 || entry?.saving || scanning} onClick={() => void runLens()}>
               <Icon name="play" className="size-4" /> {t('suggestedTasks.page.runNow')}
             </Button>
-            <Button size="sm" variant="ghost" onClick={openInbox}>
-              <Icon name="lightbulb" className="size-4" /> {t('suggestedTasks.settings.openInbox')}
-            </Button>
+            {overInbox ? null : (
+              <Button size="sm" variant="ghost" onClick={openInbox}>
+                <Icon name="lightbulb" className="size-4" /> {t('suggestedTasks.settings.openInbox')}
+              </Button>
+            )}
           </div>
         </div>
       </SettingsSection>
@@ -561,7 +565,7 @@ const ProjectSuggestedTasksSettings: React.FC<{ projectRef: ProjectRef }> = ({ p
   );
 };
 
-export const ProjectSuggestedTasksTab: React.FC<{ projectRef: ProjectRef }> = ({ projectRef }) => {
+export const ProjectSuggestedTasksTab: React.FC<{ projectRef: ProjectRef; overInbox?: boolean }> = ({ projectRef, overInbox = false }) => {
   const runtime = useSuggestedTasksRuntime();
-  return <ProjectSuggestedTasksSettings key={`${runtime.generation}:${projectRef.id}:${projectRef.path}`} projectRef={projectRef} />;
+  return <ProjectSuggestedTasksSettings key={`${runtime.generation}:${projectRef.id}:${projectRef.path}`} projectRef={projectRef} overInbox={overInbox} />;
 };
