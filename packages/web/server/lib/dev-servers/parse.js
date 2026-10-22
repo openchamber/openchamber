@@ -168,10 +168,11 @@ const PROC_LOOPBACK_ADDRESSES = new Set(['0100007F', '00000000000000000000000001
 /**
  * Parses `/proc/net/tcp` and `/proc/net/tcp6`.
  *
- * The fallback for hosts without `lsof`, which is most containers — and a
- * deployed OpenChamber is exactly where a dev server needs discovering. Reads a
- * kernel file rather than shelling out, so it cannot be defeated by a missing
- * binary or a stripped PATH.
+ * The source for hosts without `lsof`, which is most containers — and a
+ * deployed OpenChamber is exactly where a dev server needs discovering. Where
+ * `lsof` runs, this fills in the sockets it cannot attribute, such as other
+ * users' listeners. Reads a kernel file rather than shelling out, so it cannot
+ * be defeated by a missing binary or a stripped PATH.
  *
  * No process name or pid: mapping a socket to its owner means walking every
  * /proc/<pid>/fd, which is far more work than the label is worth.
