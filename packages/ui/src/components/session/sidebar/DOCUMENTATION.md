@@ -157,8 +157,9 @@ its own manual worktree order (`useWorktreeOrderStore`).
 Every other list of projects shows them in the sidebar's order through
 `list/useProjectsInSidebarOrder.ts`: Settings > Projects, the project
 selector of the Settings pages, the composer's project picker until a search
-is typed, the move-chat, scheduled tasks and install-skill pickers, the
-Linear mapping, usage stats and the issues board. It applies the same
+is typed, the move-chat and install-skill pickers, the scheduled tasks and
+suggested tasks pages (their shared project rail, `layout/ProjectRailPage.tsx`,
+and their phone pickers), the Linear mapping, usage stats and the issues board. It applies the same
 `sortProjectsByOrder`, keeps the manual order while the sidebar shows the List
 view, and for `recent` ranks by `rankByLatestActivity` with the sidebar's
 ownership rules over the global session list, archived sessions included; a
