@@ -376,7 +376,11 @@ Invariants:
   providers in one render, and `useSourceControlProviderServing(id)` gates
   what only a served provider has (change-request diffs, walkthroughs): it is
   `unknown` until a list is held, and those surfaces wait on `unknown` as on
-  loading. Text built outside React (message previews, chat display parts)
+  loading. `useChangeRequestDiffServing(id)` narrows that to the diff: a
+  served provider with `features.changeRequestPatch` off reads as
+  `not-served`. A descriptor that does not name `changeRequestPatch` reads it
+  as on, the one feature not read as off when unnamed: every server older than
+  the field served the diff of every provider it listed. Text built outside React (message previews, chat display parts)
   takes the lookup as a parameter; React callers pass
   `useSourceControlDescriptorOf()` and keep it in their memo inputs, so wording
   first drawn with the generic fallback is redrawn when the list arrives.

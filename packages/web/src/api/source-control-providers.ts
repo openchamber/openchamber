@@ -21,7 +21,7 @@ type ProvidersFetch = (input: string, init?: RuntimeFetchOptions) => Promise<Res
 const BUILT_IN_FEATURES_OFF: SourceControlProviderDescriptor['features'] = {
   referenceSearch: false, referenceDetail: false, listStatuses: false, referencesAcross: false,
   startThread: false, authorCanReview: false, projectUploads: false, issueCloseReason: false,
-  changeRequestTemplates: [],
+  changeRequestTemplates: [], changeRequestPatch: false,
 };
 
 export const BUILT_IN_SOURCE_CONTROL_PROVIDERS: readonly SourceControlProviderDescriptor[] = [
@@ -54,6 +54,7 @@ export const BUILT_IN_SOURCE_CONTROL_PROVIDERS: readonly SourceControlProviderDe
     features: {
       ...BUILT_IN_FEATURES_OFF,
       referenceSearch: true, referenceDetail: true, listStatuses: true, referencesAcross: true, issueCloseReason: true,
+      changeRequestPatch: true,
     },
   },
   {
@@ -86,7 +87,7 @@ export const BUILT_IN_SOURCE_CONTROL_PROVIDERS: readonly SourceControlProviderDe
     },
     features: {
       ...BUILT_IN_FEATURES_OFF,
-      startThread: true, authorCanReview: true, projectUploads: true,
+      startThread: true, authorCanReview: true, projectUploads: true, changeRequestPatch: true,
       changeRequestTemplates: ['.gitlab/merge_request_templates/Default.md'],
     },
   },

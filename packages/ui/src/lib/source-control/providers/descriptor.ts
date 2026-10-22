@@ -115,6 +115,10 @@ const descriptorSchema = z.object({
     projectUploads: z.boolean().default(false),
     issueCloseReason: z.boolean().default(false),
     changeRequestTemplates: z.array(z.string().min(1).max(256)).max(8).default([]),
+    // Whether a change request's diff can be read (the comparison view and
+    // walkthroughs). The exception to "unnamed is off": every server older
+    // than this field served the diff of every provider it listed.
+    changeRequestPatch: z.boolean().default(true),
   }),
 });
 
@@ -170,7 +174,7 @@ export const unknownProviderDescriptor = (id: string): SourceControlProviderDesc
     features: {
       referenceSearch: false, referenceDetail: false, listStatuses: false, referencesAcross: false,
       startThread: false, authorCanReview: false, projectUploads: false, issueCloseReason: false,
-      changeRequestTemplates: [],
+      changeRequestTemplates: [], changeRequestPatch: false,
     },
   };
   unknownDescriptors.set(id, descriptor);

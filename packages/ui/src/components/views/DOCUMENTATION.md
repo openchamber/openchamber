@@ -226,7 +226,15 @@ serves (`useSourceControlProviderServing`); for a provider the server does
 not serve, PR mode is not offered and reads nothing. While the provider list
 is unknown (first visit, the first read out or failed and being retried) PR
 mode stays offered and the picker shows loading: an unknown list is never read
-as "not served" or "not connected". The mode, picker and messages use the provider's
+as "not served" or "not connected". A served provider whose descriptor has
+`features.changeRequestPatch` off lists and opens its change requests but does
+not serve their diff (`usePullRequestComparison().diffUnavailable`): Changes
+and mobile Changes keep the PR mode and picker, read no diff and say so with
+`ChangeRequestDiffUnavailable` (no retry, since nothing failed); the Walkthrough
+does not offer the PR scope, and a PR handed to it shows that note in place of
+generation and loads nothing; the board's Changes and Walkthrough links are
+left out. The scope picker shows a count only once it is known, so an unread
+PR never reads as one with 0 files. The mode, picker and messages use the provider's
 term (`changeRequestCopy(key, term)`: merge-request wording on GitLab) and
 its reference prefix (`!` on GitLab). It includes no local edits
 or unpushed commits. `lib/diff/pullRequestDiff.ts` splits the response once;

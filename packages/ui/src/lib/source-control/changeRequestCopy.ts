@@ -29,6 +29,7 @@ const mergeRequestCopy = new Map<I18nKey, I18nKey>([
   ['gitView.pr.actions.pushAndCreatePr', 'gitView.mr.actions.pushAndCreateMr'],
   ['gitView.pr.actions.pushAndCreateDraftPr', 'gitView.mr.actions.pushAndCreateDraftMr'],
   ['pullRequestComparison.pickAbove', 'gitView.mr.comparison.pickAbove'],
+  ['pullRequestComparison.diffUnavailable', 'gitView.mr.comparison.diffUnavailable'],
   ['pullRequestComparison.partial', 'gitView.mr.comparison.partial'],
   ['session.githubPrPicker.searchPlaceholder', 'gitView.mr.comparison.searchPlaceholder'],
   ['session.githubPrPicker.loading.pullRequests', 'gitView.mr.comparison.loading'],

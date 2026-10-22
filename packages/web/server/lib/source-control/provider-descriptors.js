@@ -82,6 +82,9 @@ export function publicProviderDescriptor(descriptor, order) {
     features: {
       ...presentation.features,
       changeRequestTemplates: [...presentation.features.changeRequestTemplates],
+      // Whether the change-request diff (and so the comparison view and
+      // walkthroughs) can be read; the list and context are read either way.
+      changeRequestPatch: descriptor.capabilities.changeRequestPatch === true,
     },
   };
   // Optional fields are left out, not sent empty, where a provider has none.

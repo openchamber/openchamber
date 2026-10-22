@@ -6,7 +6,7 @@ import { mergeIncompleteSourceControlPage, sourceControlReadContextParts } from 
 import type { PageResult } from '@/lib/source-control/types';
 import { useI18n } from '@/lib/i18n';
 import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
-import { useChangeRequestTerm, useSourceControlProviderServing } from '@/lib/source-control/providers/registry';
+import { useChangeRequestDiffServing, useChangeRequestTerm, useSourceControlProviderServing } from '@/lib/source-control/providers/registry';
 import { useRepositoryHost } from '@/components/references/referenceSources';
 import { useGitStore } from '@/stores/useGitStore';
 import { usePullRequestSelectionStore } from '@/stores/usePullRequestSelectionStore';
@@ -93,6 +93,9 @@ export function usePullRequestComparison(
   // loading instead of reading the host as not connected.
   const serving = useSourceControlProviderServing(readContext?.provider);
   const providersUnknown = readContext !== null && serving === 'unknown';
+  // A served host may list its change requests and still not serve their diff.
+  const diffServing = useChangeRequestDiffServing(readContext?.provider);
+  const diffUnavailable = serving === 'served' && diffServing === 'not-served';
   const latestContext = serving === 'served' ? readContext : null;
   const contextKey = latestContext ? JSON.stringify(sourceControlReadContextParts(latestContext)) : '';
   // Callers may hand over a fresh object each render; effects and callbacks key
@@ -215,6 +218,8 @@ export function usePullRequestComparison(
     readContext: context,
     /** The host the change requests come from, for wording and numbering. */
     provider,
+    /** The host lists its change requests but does not serve their diff: nothing to compare or walk through. */
+    diffUnavailable,
     // A chosen pull request waits too: nothing can read it before its provider is known to be served.
     selectedSource: providersUnknown ? null : pendingPreference ?? selectedSource,
     prs: current?.status === 'ready' ? current.prs : NO_PULL_REQUESTS,

@@ -16,7 +16,8 @@ import { dropdownMenuPopupClass } from '@/components/ui/dropdown-menu.styles';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { isRightToLeft, useI18n } from '@/lib/i18n';
 import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
-import { useChangeRequestTerm, useSourceControlProviderServing } from '@/lib/source-control/providers/registry';
+import { useChangeRequestDiffServing, useChangeRequestTerm } from '@/lib/source-control/providers/registry';
+import { ChangeRequestDiffUnavailable } from '@/components/views/git/ChangeRequestDiffUnavailable';
 import type { WalkthroughSource, WalkthroughTarget, WalkthroughWorkingTreeScope } from '@/lib/walkthrough/types';
 import { useBranchComparisonBase } from '@/hooks/useBranchComparisonBase';
 import { useBranchPullRequestRequest } from '@/hooks/useBranchPullRequestRequest';
@@ -246,8 +247,13 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
   const selectedPr = prComparison.selectedSource;
   // A change request on any provider the server serves has a published diff to walk through.
   const readsChangeRequests = prComparison.readContext !== null;
-  // Offered while the provider list is still unknown too; the picker waits for it.
-  const offersChangeRequests = useSourceControlProviderServing(readContext?.provider) !== 'not-served' && readContext !== null;
+  // Offered while the provider list is still unknown too; the picker waits for
+  // it. A host that lists change requests without serving their diff has
+  // nothing to walk through.
+  const offersChangeRequests = useChangeRequestDiffServing(readContext?.provider) !== 'not-served' && readContext !== null;
+  // A pull request scope kept from before (a handoff from Changes) on such a
+  // host says so instead of offering to generate.
+  const prDiffUnavailable = isPrScope && prComparison.diffUnavailable;
   const changeRequestTerm = useChangeRequestTerm(prComparison.provider);
 
   const target = useMemo<WalkthroughTarget>(
@@ -269,7 +275,7 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
   const branchNeedsBase = choosingBranchBase || (source.kind === 'branch' && !branchSource);
   const commitNeedsSelection = choosingCommit || (isCommitScope && !selectedCommitHash);
   const prNeedsSelection = isPrScope && !selectedPr;
-  const needsSourceSelection = branchNeedsBase || commitNeedsSelection || prNeedsSelection;
+  const needsSourceSelection = branchNeedsBase || commitNeedsSelection || prNeedsSelection || prDiffUnavailable;
 
   const selectWorkingTree = useCallback(
     (value: WalkthroughWorkingTreeScope) => {
@@ -489,14 +495,14 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
             />
           </div>
         )}
-        {isPrScope && (
+        {isPrScope && !prDiffUnavailable && (
           <div className="min-w-0 shrink">
             <PullRequestComparisonSelector key={JSON.stringify([directory, currentBranch])} comparison={prComparison} />
           </div>
         )}
 
         <div className="ms-auto flex shrink-0 items-center gap-1">
-          {isPrScope && selectedPr && <Button variant="ghost" size="sm" className="walkthrough-header__option"
+          {isPrScope && selectedPr && !prDiffUnavailable && <Button variant="ghost" size="sm" className="walkthrough-header__option"
             aria-label={t('contextPanel.mode.diff')} title={t('contextPanel.mode.diff')}
             onClick={openChanges}>
             <Icon name="arrow-left-right" className="size-4" />
@@ -555,7 +561,7 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
             </>
           )}
 
-          {(headerOffersGeneration || review.isGenerating) && (
+          {!prDiffUnavailable && (headerOffersGeneration || review.isGenerating) && (
             <WalkthroughGenerateButton
               review={review}
               hasView={Boolean(view)}
@@ -598,10 +604,12 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
       </header>
       </ContextPanelHeaderToolbar>
 
-      <WalkthroughBanners review={review} view={view} />
+      {!prDiffUnavailable && <WalkthroughBanners review={review} view={view} />}
 
       <div className={cn('flex min-h-0 flex-1', showToc ? 'flex-row' : 'flex-col')}>
-        {prNeedsSelection ? (
+        {prDiffUnavailable ? (
+          <ChangeRequestDiffUnavailable provider={prComparison.provider} className="p-8" />
+        ) : prNeedsSelection ? (
           <div className="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
             {!prComparison.error && !prComparison.loading && <Icon name="git-pull-request" className="size-6 text-muted-foreground" />}
             <p className="typography-meta text-muted-foreground">{prComparison.error ?? (prComparison.loading

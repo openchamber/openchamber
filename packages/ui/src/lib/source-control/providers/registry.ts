@@ -172,6 +172,20 @@ export const useSourceControlProviderServing = (id: string | null | undefined): 
 );
 
 /**
+ * Whether the server reads a provider's change-request diffs, which the
+ * comparison view and walkthroughs show. A served provider can list and open
+ * its change requests and still not serve their diff
+ * (`features.changeRequestPatch` off); `unknown` while no list is held.
+ */
+export const useChangeRequestDiffServing = (id: string | null | undefined): SourceControlProviderServing => (
+  useSourceControlProviderRegistry((state) => {
+    const descriptor = id ? state.byId.get(id) : undefined;
+    if (descriptor) return descriptor.features.changeRequestPatch ? 'served' : 'not-served';
+    return state.holdsList ? 'not-served' : 'unknown';
+  })
+);
+
+/**
  * A lookup from provider id to descriptor, for surfaces that name several
  * providers in one render (rows of different hosts). An id the registry does
  * not hold reads as the generic fallback. One function while the list stays.

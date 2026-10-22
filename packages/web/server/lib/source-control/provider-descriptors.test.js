@@ -105,6 +105,9 @@ describe('source control provider descriptors', () => {
     // The noun English model-facing text uses for the automation on a change request.
     expect(sourceControlProviderDescriptors.list().map((descriptor) => [descriptor.id, publicProviderDescriptor(descriptor, 0).terminology.ci]))
       .toEqual([['github', 'checks'], ['gitlab', 'pipeline'], ['gitea', 'checks']]);
+    // A host without the diff read publishes it off; every built-in reads it.
+    expect(publicProviderDescriptor({ ...gitea, capabilities: { ...gitea.capabilities, changeRequestPatch: false } }, 2).features.changeRequestPatch).toBe(false);
+    expect(sourceControlProviderDescriptors.list().every((descriptor) => publicProviderDescriptor(descriptor, 0).features.changeRequestPatch)).toBe(true);
   });
 
   // A server without the providers route serves exactly GitHub and GitLab, so

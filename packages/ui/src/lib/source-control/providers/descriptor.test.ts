@@ -41,8 +41,17 @@ describe('source-control provider descriptors', () => {
     expect(parsed?.features).toEqual({
       referenceSearch: true, referenceDetail: false, listStatuses: false, referencesAcross: false,
       startThread: false, authorCanReview: false, projectUploads: false, issueCloseReason: false,
-      changeRequestTemplates: [],
+      // Every server older than the field served change-request diffs.
+      changeRequestTemplates: [], changeRequestPatch: true,
     });
+  });
+
+  test('reads a host that does not serve change-request diffs as such', () => {
+    const descriptor = acmeDescriptor();
+    const [parsed] = sourceControlProviderListSchema.parse([{
+      ...descriptor, features: { ...descriptor.features, changeRequestPatch: false },
+    }]);
+    expect(parsed?.features.changeRequestPatch).toBe(false);
   });
 
   test('refuses an icon path that is not path data', () => {

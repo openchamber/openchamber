@@ -21,7 +21,7 @@ import type { PullRequestSource } from '@/lib/diff/pullRequestDiff';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import type { SetStateInput, SourceControlCapabilities } from '@/lib/source-control/types';
-import { useSourceControlProvider } from '@/lib/source-control/providers/registry';
+import { useChangeRequestDiffServing, useSourceControlProvider } from '@/lib/source-control/providers/registry';
 import { formatChangeRequestReference } from '@/lib/source-control/providers/terminology';
 import { usePullRequestSelectionStore } from '@/stores/usePullRequestSelectionStore';
 import { useUIStore } from '@/stores/useUIStore';
@@ -368,7 +368,8 @@ const LINK_CLASS = cn(
  * the app opens a draft of the project first. The phone shell has no side
  * panel: there Changes opens the workspace drawer's Git tab on the PR, in the
  * project's draft when the app shows another, `onLeave` gives the chat back
- * underneath it, and the walkthrough is not offered.
+ * underneath it, and the walkthrough is not offered. A host that does not
+ * serve change-request diffs gets neither link: both would only say so.
  */
 export const SourceBoardPullLinks: React.FC<{
     pull: RepositoryChangeRequestReference;
@@ -382,6 +383,7 @@ export const SourceBoardPullLinks: React.FC<{
 }> = ({ pull, project, repository, context, projectOwnsDirectory, currentDirectory, onLeave }) => {
     const { t } = useI18n();
     const mobile = useMobileAppActions();
+    const diffServing = useChangeRequestDiffServing(context.provider);
     const open = (surface: 'diff' | 'walkthrough') => {
         const source: PullRequestSource = { kind: 'pr', number: pull.number, sourceRepo: { owner: pull.sourceRepo.owner, repo: pull.sourceRepo.repo } };
         const ui = useUIStore.getState();
@@ -414,6 +416,7 @@ export const SourceBoardPullLinks: React.FC<{
         useWalkthroughStore.getState().requestTarget(requestDirectory, { source, context });
         ui.openContextPanelTab(panelDirectory, { mode: 'walkthrough', targetDirectory });
     };
+    if (diffServing === 'not-served') return null;
     return (
         <span className="inline-flex items-center gap-1">
             <button type="button" className={LINK_CLASS} onClick={() => open('diff')}>
