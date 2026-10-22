@@ -231,8 +231,8 @@ on the OpenChamber event stream.
 
 | Runtime | Behaviour |
 |---|---|
-| Web, Electron desktop | Full: inbox page from the sidebar, settings tab under Settings → Projects. |
-| Hosted mobile, Capacitor | Inbox surface from the sessions menu: scan, triage, approve. Settings → Projects is not part of the phone's Settings, so setup happens on a computer. |
+| Web, Electron desktop | Full: inbox page from the sidebar, whose Configure dialog holds the settings; the same form is the Suggested tasks tab under Settings → Projects. |
+| Hosted mobile, Capacitor | Full: inbox surface from the sessions menu with the same Configure dialog. Settings → Projects is not part of the phone's Settings, so the dialog is the only way to set it up there. |
 | VS Code | Not offered: no OpenChamber server in the extension. The sidebar entry, the page and the settings tab are absent, and the summary is never requested. |
 
 ## Compatibility

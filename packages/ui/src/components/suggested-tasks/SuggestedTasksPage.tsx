@@ -34,7 +34,7 @@ function SuggestedTasksRuntimeView({ layout, onLeave }: {
 
   // The subtree owns one project visit. Late actions may update its cache, but cannot navigate a later visit.
   const inbox = project
-    ? <SuggestedTasksInbox key={`${project.id}:${project.path}`} project={project} layout={layout} onLeave={onLeave} />
+    ? <SuggestedTasksInbox key={`${project.id}:${project.path}`} project={project} onLeave={onLeave} />
     : <p className="typography-meta text-muted-foreground">{t('suggestedTasks.empty.noProject')}</p>;
 
   if (layout === 'mobile') {

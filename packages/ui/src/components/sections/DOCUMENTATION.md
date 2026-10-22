@@ -302,8 +302,13 @@ commands and a link to the worktrees page), Environment and Suggested tasks
 (both absent in VS Code).
 Identity fields autosave through `useProjectIdentityAutoSave`, as before.
 
-Suggested tasks configuration is available on desktop web and Electron. Hosted
-mobile and Capacitor expose the inbox only. The settings and inbox visits are
+The Suggested tasks tab renders `ProjectSuggestedTasksTab`, and so does the
+inbox's Configure dialog (`components/suggested-tasks/SuggestedTasksSettingsDialog.tsx`)
+on every runtime with the inbox, phones included. With `overInbox` the form
+leaves out its links to the inbox. On phones the scheduled task editor opens
+as a bottom sheet, which sits above dialogs. The lens editor this form opens is
+a dialog, so on phones the form stays in a dialog as well.
+The settings and inbox visits are
 keyed by runtime lifetime and project, so an old load or action cannot replace
 another project's form or navigate another inbox visit. Worktree and draft-PR
 actions require `checkIsGitRepository` to confirm the project's directory.

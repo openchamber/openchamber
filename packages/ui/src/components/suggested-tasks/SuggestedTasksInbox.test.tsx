@@ -8,6 +8,7 @@ import { deferred, inbox, installSuggestedTasksDom, serveSuggestedTasks, setting
 const dom = installSuggestedTasksDom();
 const bootstrapServer = await serveSuggestedTasks(() => Response.json({}));
 const { checkIsGitRepository } = await import('@/lib/gitApi');
+const { ThemeSystemProvider } = await import('@/contexts/ThemeSystemContext');
 const { I18nProvider } = await import('@/lib/i18n');
 const { useSuggestedTasksSettingsStore } = await import('@/stores/useSuggestedTasksSettingsStore');
 const { useSuggestedTasksStore } = await import('@/stores/useSuggestedTasksStore');
@@ -46,9 +47,9 @@ const button = (label: string) => {
   if (!found) throw new Error(`Missing button: ${label}`);
   return found;
 };
-const renderInbox = async (layout: 'page' | 'mobile' = 'page') => {
+const renderInbox = async () => {
   await Promise.all([useSuggestedTasksStore.getState().loadInbox(project.id), useSuggestedTasksSettingsStore.getState().load(project.id)]);
-  await act(async () => root.render(<I18nProvider><SuggestedTasksInbox project={project} layout={layout} onLeave={() => undefined} /></I18nProvider>));
+  await act(async () => root.render(<ThemeSystemProvider><I18nProvider><SuggestedTasksInbox project={project} onLeave={() => undefined} /></I18nProvider></ThemeSystemProvider>));
   await act(async () => { await checkIsGitRepository(project.path); });
 };
 const approvalActions = async () => {
@@ -83,16 +84,21 @@ describe('Suggested tasks Git availability', () => {
     expect(actions).toContain('Work until a draft pull request');
   });
 
-  test('disables scans when the server says the feature is off and keeps mobile inbox-only', async () => {
-    // Given authoritative disabled settings on the mobile inbox.
+  test('disables scans when the server says the feature is off and sets the project up from Configure', async () => {
+    // Given authoritative disabled settings.
     enabled = false;
-
-    // When the inbox is rendered.
-    await renderInbox('mobile');
-
-    // Then Scan now is disabled and there is no unreachable Configure action.
+    await renderInbox();
     expect(button('Scan now').disabled).toBe(true);
-    expect([...document.querySelectorAll('button')].some((entry) => entry.textContent?.trim() === 'Configure')).toBe(false);
+
+    // When Configure is pressed.
+    await act(async () => button('Configure').click());
+    await act(async () => { await useSuggestedTasksSettingsStore.getState().load(project.id); });
+
+    // Then the project's settings open over the inbox, titled with the project and without a link back to it.
+    const dialog = document.querySelector('[role="dialog"]');
+    expect(dialog?.querySelector('h2')?.textContent).toBe('notes');
+    expect(dialog?.querySelector('[data-settings-item="projects.suggestedTasks"] [role="button"]')?.getAttribute('aria-pressed')).toBe('false');
+    expect([...(dialog?.querySelectorAll('button') ?? [])].some((entry) => entry.textContent?.trim() === 'Open the inbox')).toBe(false);
   });
 
   test('prevents selecting Git-only automatic actions in a non-Git lens editor', async () => {
