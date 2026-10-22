@@ -48,7 +48,7 @@
     "@lezer/highlight": "^1.2.3",
     "@opencode/client": "2.1.2",
     "@opencode/schema": "2.1.2",
-    "@pierre/diffs": "1.5.2",
+    "@pierre/diffs": "1.6.0",
     "@replit/codemirror-vim": "^6.4.0",
     "@simplewebauthn/browser": "13.3.0",
     "@tanstack/react-virtual": "3.14.21",
