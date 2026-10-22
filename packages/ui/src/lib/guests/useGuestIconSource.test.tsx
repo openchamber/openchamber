@@ -116,6 +116,14 @@ describe('guest icon loading', () => {
     expect(icon).toBe('blob:fixture-1');
   });
 
+  test('answers an inline SVG data URI as it is, with no request', async () => {
+    const inline = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg"><path d="M2 6h15"/></svg>')}`;
+    await render(inline);
+    expect(icon).toBe(inline);
+    expect(requests).toEqual([]);
+    expect(created).toBe(0);
+  });
+
   test('keeps a fallback instead of materializing an HTML error response', async () => {
     reply = async () => new Response('<html>Not an icon</html>', { headers: { 'content-type': 'text/html' } });
     await render();

@@ -5,8 +5,15 @@ import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { useGuestsStore } from './store';
 
-/** Load with current runtime credentials, not an expiring token embedded in a CSS URL. */
+/** An inline SVG the host built itself (a provider's icon path) needs no fetch. */
+const INLINE_SVG_PREFIX = 'data:image/svg+xml,';
+
+/**
+ * Load with current runtime credentials, not an expiring token embedded in a
+ * CSS URL. An inline `data:image/svg+xml` source is answered as it is.
+ */
 export const useGuestIconSource = (src: string): string | undefined => {
+  const inline = src.startsWith(INLINE_SVG_PREFIX);
   const [runtimeKey, setRuntimeKey] = React.useState(getRuntimeKey);
   const [loaded, setLoaded] = React.useState<{ key: string; url: string } | null>(null);
   const assetPath = React.useMemo(() => {
@@ -44,5 +51,6 @@ export const useGuestIconSource = (src: string): string | undefined => {
     };
   }, [assetPath, key, relay, runtimeKey]);
 
+  if (inline) return src;
   return loaded?.key === key ? loaded.url : undefined;
 };
