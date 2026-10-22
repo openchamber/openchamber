@@ -691,6 +691,15 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['in work', 'in progress', 'track', 'done', 'sidebar'],
   },
   {
+    id: 'sessions.work-entry',
+    page: 'sessions',
+    titleKey: 'settings.openchamber.sessionWork.entry.label',
+    descriptionKey: 'settings.openchamber.sessionWork.entry.info',
+    keywords: ['in work', 'automatic', 'every message', 'jev', 'classification', 'track'],
+    // Sessions enter on their own through the OpenChamber server; VS Code has only Track.
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
     id: 'sessions.small-model',
     page: 'sessions',
     titleKey: 'settings.openchamber.defaults.smallModel.title',

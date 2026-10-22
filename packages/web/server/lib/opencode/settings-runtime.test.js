@@ -220,6 +220,61 @@ describe('settings runtime', () => {
     }
   });
 
+  it('keeps every sent message putting sessions in work for someone who had switched In work on', async () => {
+    for (const [stored, expected] of [
+      [{ sessionWorkEnabled: true }, 'every-message'],
+      [{ sessionWorkEnabled: false }, 'off'],
+      [{}, 'off'],
+      [{ sessionWorkEnabled: true, sessionWorkEntry: 'jev' }, 'jev'],
+      [{ sessionWorkEnabled: true, sessionWorkEntry: 'off' }, 'off'],
+    ]) {
+      const { runtime, tempRoot, cleanup } = await createRuntime();
+      try {
+        await runtime.writeSettingsToDisk(stored);
+        expect((await runtime.readSettingsFromDiskMigrated()).sessionWorkEntry).toBe(expected);
+        // Written once, on disk, so every reader agrees.
+        const preferences = JSON.parse(await fsPromises.readFile(path.join(tempRoot, 'preferences.json'), 'utf8'));
+        expect(preferences.fields.sessionWorkEntry.value).toBe(expected);
+      } finally {
+        await cleanup();
+      }
+    }
+  });
+
+  it('writes the In work entry mode even when no other migration has anything to write', async () => {
+    const { runtime, cleanup } = await createRuntime();
+    try {
+      // Let every other migration settle, then take the entry mode away again:
+      // the document of someone upgrading whose settings are otherwise current.
+      await runtime.writeSettingsToDisk({ sessionWorkEnabled: true });
+      const settled = await runtime.readSettingsFromDiskMigrated();
+      delete settled.sessionWorkEntry;
+      await runtime.writeSettingsToDisk(settled);
+      expect(await runtime.readSettingsFromDisk()).not.toHaveProperty('sessionWorkEntry');
+
+      await runtime.readSettingsFromDiskMigrated();
+      expect((await runtime.readSettingsFromDisk()).sessionWorkEntry).toBe('every-message');
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('decides the In work entry mode once, so switching In work on later keeps it', async () => {
+    const { runtime, cleanup } = await createRuntime({
+      mergePersistedSettings: (current, changes) => ({ ...current, ...changes }),
+    });
+    try {
+      expect((await runtime.readSettingsFromDiskMigrated()).sessionWorkEntry).toBe('off');
+      await runtime.persistSettings({ sessionWorkEnabled: true });
+      expect((await runtime.readSettingsFromDiskMigrated()).sessionWorkEntry).toBe('off');
+
+      await runtime.persistSettings({ sessionWorkEntry: 'jev' });
+      expect((await runtime.readSettingsFromDiskMigrated()).sessionWorkEntry).toBe('jev');
+    } finally {
+      await cleanup();
+    }
+  });
+
   it('turns a stored last directory into a project only while one is stored', async () => {
     const { runtime, tempRoot, cleanup } = await createRuntime();
     try {

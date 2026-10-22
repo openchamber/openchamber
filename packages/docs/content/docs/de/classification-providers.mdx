@@ -15,10 +15,10 @@ Jev schreibt keinen Code und antwortet nicht in deinem Chat. Es liefert nur ein 
 | --- | --- |
 | [Berechtigungen und Sicherheitsnetz](/de/permissions/) | Soll der Agent dich fragen, bevor er diese Aktion ausführt? |
 | [Automatische Modellwahl](/de/auto-model-routing/) | Zu welcher deiner Kategorien gehört dieser Prompt? |
-| [Sitzungen in Arbeit](/de/sessions-in-work/) | Sieht dieser Zug nach dem Ende der Arbeit aus? |
+| [Sitzungen in Arbeit](/de/sessions-in-work/) | Mit **Jev entscheidet**: Beginnt mit dieser Nachricht oder diesem Zug Arbeit? Immer: Sieht dieser Zug nach dem Ende der Arbeit aus? |
 | [Zusammenfassung und Vorschlag für die nächste Nachricht](/de/sessions-in-work/) | Lohnt sich nach diesem Zug eine Zusammenfassung oder ein Vorschlag? |
 
-Ohne Anbieter sind das Sicherheitsnetz und Auto ausgeblendet, und Sitzungen in Arbeit bekommen keinen Hinweis „scheint erledigt“. In Arbeit kommen Sitzungen trotzdem, sobald du eine Nachricht sendest. Zusammenfassungen und Vorschläge funktionieren weiter, nur ohne den Filter.
+Ohne Anbieter sind das Sicherheitsnetz und Auto ausgeblendet, und Sitzungen in Arbeit bekommen keinen Hinweis „scheint erledigt“. **Jev entscheidet** verhält sich wie Aus, Sitzungen kommen also nur in Arbeit, wenn du sie verfolgst oder mit **Jede Nachricht**. Zusammenfassungen und Vorschläge funktionieren weiter, nur ohne den Filter.
 
 ## Einrichtung
 
@@ -96,7 +96,7 @@ Ist Jev bei einer einzelnen Anfrage langsam oder schlägt fehl, geht nichts kapu
 
 - Das Sicherheitsnetz lässt die Aktion auf dich warten.
 - Auto schickt den Prompt an dein Fallback-Modell.
-- Der Hinweis „scheint erledigt“ erscheint bei Sitzungen in Arbeit nicht.
+- Keine Sitzung kommt auf Jevs Urteil in Arbeit, und der Hinweis „scheint erledigt“ erscheint nicht.
 - Zusammenfassung und Vorschlag entstehen so, als gäbe es Jev nicht.
 
 ## Was Jev sieht

@@ -5,7 +5,7 @@ description: Üzerinde çalıştığınız oturumları, tamamlandı olarak işar
 
 # Devam eden oturumlar
 
-İçinde mesaj gönderdiğiniz her oturum, kenar çubuğunun üstündeki **Devam eden** bölümüne girer ve siz tamamlandı olarak işaretleyene kadar orada kalır; ne kadar zaman önce açmış olursanız olun. Projelerinizde şimdiye kadarki tüm oturumlar durur; Devam eden yalnızca henüz bitirmediklerinizi toplar.
+Kenar çubuğunun üstündeki **Devam eden** bölümü, üzerinde çalıştığınız oturumları siz tamamlandı olarak işaretleyene kadar tutar; ne kadar zaman önce açmış olursanız olun. Projelerinizde şimdiye kadarki tüm oturumlar durur; Devam eden yalnızca henüz bitirmediklerinizi toplar.
 
 ## Nerede bulunur
 
@@ -19,9 +19,15 @@ Sabitlenmiş oturumları Devam eden'in üstünde ayrı bir **Sabitlenenler** bö
 
 ## Oturumlar nasıl girer
 
-Bir oturumda mesaj gönderin, oturum devam edenlere girer. Bu, worktree'lerdeki oturumlar dahil her proje oturumu için geçerlidir.
+Bir oturumu aşağıda anlatıldığı gibi elle izleyebilir ya da **Ayarlar → Session'lar → Devam eden oturumlar** altındaki **Oturumların devam edenlere girmesi** ayarıyla oturumların kendiliğinden girmesini sağlayabilirsiniz:
 
-Tamamlandı olarak işaretlediğiniz bir oturum, içinde yeni bir mesaj gönderdiğinizde geri gelir.
+- **Kapalı**, varsayılan: yalnızca izlediğiniz oturumlar girer.
+- **Her mesaj:** bir oturumda mesaj gönderin, oturum girer. Tamamlandı olarak işaretlediğiniz bir oturum, içinde yeni bir mesaj gönderdiğinizde geri gelir.
+- **Jev karar verir:** bir [sınıflandırma sağlayıcısı](/tr/classification-providers/) kuruluysa Jev gönderdiğiniz her mesajı okur; bir değişiklik istediğinizde, bir hata bildirdiğinizde ya da yapmak üzere olduğunuz somut bir değişikliği tartıştığınızda oturumu devam edenlere alır. Sorular, açıklamalar ve araştırma sayılmaz. Ajan bir turu bitirdiğinde Jev yeniden bakar; böylece ancak yanıttan anlaşılan işi de yakalar. Tamamlandı olarak işaretlediğiniz bir oturum, yalnızca sonrasında gönderilen bir mesajda Jev yeni iş görürse geri gelir. Sınıflandırma sağlayıcısı yoksa Jev karar verir, Kapalı gibi davranır.
+
+Bu, worktree'lerdeki oturumlar dahil her proje oturumu için geçerlidir.
+
+Bu ayar gelmeden önce **Devam eden oturumları göster** seçeneğini kendiniz açtıysanız ayar **Her mesaj** ile başlar; oturumlar o zamana kadar böyle giriyordu. Aksi halde Kapalı ile başlar.
 
 Sohbetler, arşivlenmiş oturumlar, inceleme oturumları ve [zamanlanmış görevlerin](/tr/scheduled-tasks/) çalıştırmaları asla girmez; bir çalıştırmayı üzerinde çalışmaya devam etmek için fork ederseniz fork girer. Alt oturumlar tek başlarına girmez; üst oturumlarıyla birlikte gelir.
 
@@ -56,16 +62,19 @@ Bunları **Ayarlar → Sohbet → Session Yardımı** bölümünden açıp kapat
 
 ## Ayarlar
 
-**Ayarlar → Session'lar → Devam eden oturumlar** bölümünü açın. Burada tek bir ayar vardır: **Devam eden oturumları göster**, varsayılan olarak açık. Kapatırsanız özelliğin tamamı kapanır: Bölüm görünmez ve mesaj göndermek oturumu artık devam edenlere almaz.
+**Ayarlar → Session'lar → Devam eden oturumlar** bölümünü açın:
+
+- **Devam eden oturumları göster**, varsayılan olarak açık: kapatırsanız özelliğin tamamı kapanır; bölüm görünmez ve hiçbir oturum kendiliğinden girmez.
+- **Oturumların devam edenlere girmesi**: Kapalı, Her mesaj ya da Jev karar verir; yukarıda anlatıldığı gibi çalışır.
 
 Yalnızca bölümü gizlemek için kenar çubuğunun görünüm menüsündeki **Devam eden bölümünü göster** seçeneğini kullanın.
 
 ## Nerede çalışır
 
-Bölüm ve elle izleme ile bitirme, VS Code dahil her yerde çalışır. Mesaj gönderdiğinizde oturumu devam edenlere alma, "tamamlanmış görünüyor" ipucu ve özetler için Jev filtresi OpenChamber sunucusuna ihtiyaç duyar; bu yüzden masaüstü uygulamasında, web uygulamasında ve telefonda çalışır, VS Code'da çalışmaz. VS Code'da oturumları elle izlersiniz.
+Bölüm ve elle izleme ile bitirme, VS Code dahil her yerde çalışır. Oturumların kendiliğinden devam edenlere girmesi, "tamamlanmış görünüyor" ipucu ve özetler için Jev filtresi OpenChamber sunucusuna ihtiyaç duyar; bu yüzden masaüstü uygulamasında, web uygulamasında ve telefonda çalışır, VS Code'da çalışmaz. VS Code'da oturumları elle izlersiniz.
 
 ## İlgili
 
-- [Sınıflandırma sağlayıcıları (Jev)](/tr/classification-providers/): "tamamlanmış görünüyor" ipucunu kurun
+- [Sınıflandırma sağlayıcıları (Jev)](/tr/classification-providers/): Jev karar verir seçeneğini ve "tamamlanmış görünüyor" ipucunu kurun
 - [Sohbetler](/tr/chats/): devam eden işlere girmeyen konuşmalar
 - [Oturum hedefleri](/tr/session-goals/): ajanı bitiş çizgisine kadar çalıştırın

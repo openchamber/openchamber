@@ -15,10 +15,10 @@ Jev asla kod yazmaz ve sohbetinizde yanıt vermez. Yalnızca bir karar döndür�
 | --- | --- |
 | [İzinler ve güvenlik ağı](/tr/permissions/) | Ajan bu eylemi çalıştırmadan önce size sormalı mı? |
 | [Otomatik model yönlendirme](/tr/auto-model-routing/) | Bu istem kategorilerinizden hangisine ait? |
-| [Devam eden oturumlar](/tr/sessions-in-work/) | Bu tur işin sonu gibi mi görünüyor? |
+| [Devam eden oturumlar](/tr/sessions-in-work/) | **Jev karar verir** seçiliyse: bu mesaj ya da tur bir işi başlatıyor mu? Her zaman: bu tur işin sonu gibi mi görünüyor? |
 | [Özet ve sonraki mesaj önerisi](/tr/sessions-in-work/) | Bu turdan sonra bir özet ya da öneri üretmeye değer mi? |
 
-Sağlayıcı yoksa güvenlik ağı ve Auto gizlenir, devam eden oturumlarda "tamamlanmış görünüyor" ipucu da çıkmaz. Oturumlar yine de mesaj gönderdiğinizde devam edenlere girer. Özetler ve öneriler çalışmaya devam eder, sadece filtre olmadan.
+Sağlayıcı yoksa güvenlik ağı ve Auto gizlenir, devam eden oturumlarda "tamamlanmış görünüyor" ipucu da çıkmaz. **Jev karar verir**, Kapalı gibi davranır; oturumlar yalnızca onları izlediğinizde ya da **Her mesaj** seçiliyken devam edenlere girer. Özetler ve öneriler çalışmaya devam eder, sadece filtre olmadan.
 
 ## Kurulum
 
@@ -96,7 +96,7 @@ Jev tek bir istekte yavaş kalırsa ya da hata verirse hiçbir şey bozulmaz. He
 
 - Güvenlik ağı eylemi sizin kararınızı beklemeye bırakır.
 - Auto istemi yedek modelinize gönderir.
-- Devam eden oturumlarda "tamamlanmış görünüyor" ipucu çıkmaz.
+- Hiçbir oturum Jev'in kararıyla devam edenlere girmez ve "tamamlanmış görünüyor" ipucu çıkmaz.
 - Özet ve öneri, Jev hiç yokmuş gibi üretilir.
 
 ## Jev neyi görür

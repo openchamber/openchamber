@@ -115,6 +115,13 @@ describe('settings search', () => {
     expect(results.some((result) => result.id === 'chat.input-history-limit')).toBe(true);
   });
 
+  test('finds how sessions enter In work everywhere but VS Code, which has only Track', () => {
+    for (const isVSCode of [false, true]) {
+      const results = buildSettingsSearchResults({ query: 'every message', runtimeCtx: { ...runtimeCtx, isVSCode }, t, getPageTitle: (page) => page });
+      expect(results.find((result) => result.id === 'sessions.work-entry')?.page).toBe(isVSCode ? undefined : 'sessions');
+    }
+  });
+
   test('hides Linear connect in VS Code', () => {
     const results = buildSettingsSearchResults({
       query: 'linear',

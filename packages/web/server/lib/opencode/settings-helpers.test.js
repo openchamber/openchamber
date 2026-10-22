@@ -209,6 +209,16 @@ describe('settings helpers', () => {
     expect(helpers.sanitizeSettingsUpdate({ draftStartersVisible: 'false' })).toEqual({});
   });
 
+  it('keeps a known In work entry mode through a save and drops anything else', () => {
+    const helpers = createTestHelpers();
+
+    for (const sessionWorkEntry of ['off', 'every-message', 'jev']) {
+      expect(helpers.sanitizeSettingsUpdate({ sessionWorkEntry })).toEqual({ sessionWorkEntry });
+    }
+    expect(helpers.sanitizeSettingsUpdate({ sessionWorkEntry: 'always' })).toEqual({});
+    expect(helpers.sanitizeSettingsUpdate({ sessionWorkEntry: true })).toEqual({});
+  });
+
   it('sanitizes both Enter settings independently', () => {
     const helpers = createTestHelpers();
 
@@ -871,7 +881,7 @@ describe('settings registry gate', () => {
     walkthroughModelOverride: 'anthropic/claude', zenModel: 'zen/model',
     favoriteModels: [{ providerID: 'anthropic', modelID: 'claude' }], hiddenModels: [{ providerID: 'openai', modelID: 'gpt' }], collapsedModelProviders: ['openai'],
     recentModels: [{ providerID: 'anthropic', modelID: 'claude' }], lastSelectedModel: 'anthropic/claude', recentAgents: ['build'], favoriteAgents: ['build'], recentEfforts: { 'anthropic/claude': ['high'] }, providerOrder: ['anthropic'],
-    sessionRecapEnabled: true, sessionSuggestionEnabled: true, sessionWorkEnabled: true, sessionReviewOfferEnabled: true, sessionGoalEnabled: true, sessionGoalChecker: 'small-model', sessionGoalMaxAutoTurns: 50, sessionGoalDefaultBudgetEnabled: true, sessionGoalDefaultBudget: 5,
+    sessionRecapEnabled: true, sessionSuggestionEnabled: true, sessionWorkEnabled: true, sessionWorkEntry: 'jev', sessionReviewOfferEnabled: true, sessionGoalEnabled: true, sessionGoalChecker: 'small-model', sessionGoalMaxAutoTurns: 50, sessionGoalDefaultBudgetEnabled: true, sessionGoalDefaultBudget: 5,
     sessionGoalWriterEnabled: true, sessionGoalWriterModel: 'anthropic/claude', sessionGoalWriterReview: true, sessionGoalWriterSendMode: 'goal-as-message', sessionGoalRewriteAll: true, sessionGoalAutoCreate: 'review',
     sessionGoalWriterVariant: 'low', sessionGoalWriterRememberChoice: true, sessionGoalObjectiveCharLimit: 12_000, sessionGoalCheckObjectiveCharLimit: 30_000,
     summarizeLastMessage: true, summaryThreshold: 100, summaryLength: 50, maxLastMessageLength: 200, showDeletionDialog: true,

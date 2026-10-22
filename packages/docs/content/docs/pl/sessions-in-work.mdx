@@ -5,7 +5,7 @@ description: Trzymaj sesje, nad którymi pracujesz, na widoku w pasku bocznym, d
 
 # Sesje w toku
 
-Każda sesja, w której wyślesz wiadomość, trafia do bloku **W toku** na górze paska bocznego i zostaje tam, dopóki nie oznaczysz jej jako gotowej, bez względu na to, jak dawno ją otwierałeś. W projektach są wszystkie twoje sesje; W toku zbiera tylko to, czego jeszcze nie skończyłeś.
+Blok **W toku** na górze paska bocznego trzyma sesje, nad którymi pracujesz, dopóki nie oznaczysz ich jako gotowych, bez względu na to, jak dawno je otwierałeś. W projektach są wszystkie twoje sesje; W toku zbiera tylko to, czego jeszcze nie skończyłeś.
 
 ## Gdzie go znaleźć
 
@@ -19,9 +19,15 @@ W widoku drzewa każda sesja w bloku zajmuje jeden wiersz: tytuł, stan i czas, 
 
 ## Jak sesje tam trafiają
 
-Wyślij wiadomość w sesji, a trafi do toku. Dotyczy to każdej sesji projektu, także sesji w worktree.
+Śledź sesję ręcznie, jak opisano niżej, albo pozwól sesjom trafiać tam same dzięki opcji **Dodawanie do sesji w toku** w **Ustawienia → Sesje → Sesje w toku**:
 
-Sesja oznaczona jako gotowa wraca, gdy wyślesz w niej nową wiadomość.
+- **Wyłączone**, domyślnie: trafiają tam tylko sesje, które śledzisz.
+- **Każda wiadomość:** wyślij wiadomość w sesji, a trafi do toku. Sesja oznaczona jako gotowa wraca, gdy wyślesz w niej nową wiadomość.
+- **Decyduje Jev:** gdy masz skonfigurowanego [dostawcę klasyfikacji](/pl/classification-providers/), Jev czyta każdą wysłaną wiadomość i przenosi sesję do toku, gdy prosisz o zmianę, zgłaszasz błąd albo omawiasz konkretną zmianę, którą zamierzasz wprowadzić. Pytania, wyjaśnienia i wyszukiwanie informacji się nie liczą. Jev patrzy jeszcze raz, gdy agent kończy turę, więc wyłapuje pracę, która wynika dopiero z odpowiedzi. Sesja oznaczona jako gotowa wraca tylko wtedy, gdy Jev zobaczy nową pracę w wiadomości wysłanej później. Bez dostawcy klasyfikacji Decyduje Jev działa jak Wyłączone.
+
+Dotyczy to każdej sesji projektu, także sesji w worktree.
+
+Jeśli przed pojawieniem się tej opcji sam włączyłeś **Pokazuj sesje w toku**, zaczyna się ona od **Każda wiadomość**, bo tak sesje trafiały tam do tej pory. W przeciwnym razie zaczyna się od Wyłączone.
 
 Czaty, zarchiwizowane sesje, sesje przeglądu i uruchomienia [zaplanowanych zadań](/pl/scheduled-tasks/) nigdy tam nie trafiają; jeśli zrobisz fork uruchomienia, żeby dalej nad nim pracować, fork tam trafi. Podsesje nie trafiają tam same; idą razem ze swoją sesją nadrzędną.
 
@@ -56,16 +62,19 @@ Włączysz je i wyłączysz w **Ustawienia → Czat → Wsparcie sesji**.
 
 ## Ustawienia
 
-Otwórz **Ustawienia → Sesje → Sesje w toku**. Jest tam jedna opcja, **Pokazuj sesje w toku**, domyślnie włączona. Po jej wyłączeniu wyłącza się cała funkcja: nie ma bloku, a wysłana wiadomość nie przenosi już sesji do toku.
+Otwórz **Ustawienia → Sesje → Sesje w toku**:
+
+- **Pokazuj sesje w toku**, domyślnie włączona: po jej wyłączeniu wyłącza się cała funkcja, nie ma bloku i żadna sesja nie trafia tam sama.
+- **Dodawanie do sesji w toku**: Wyłączone, Każda wiadomość albo Decyduje Jev, jak opisano wyżej.
 
 Żeby ukryć tylko blok, użyj **Pokaż sekcję W toku** w menu widoku paska bocznego.
 
 ## Gdzie to działa
 
-Blok oraz ręczne śledzenie i kończenie działają wszędzie, także w VS Code. Przenoszenie sesji do toku po wysłaniu wiadomości, wskazówka „wygląda na skończoną” i filtr Jev dla podsumowań potrzebują serwera OpenChamber, więc działają w aplikacji desktopowej, w aplikacji webowej i na telefonie, ale nie w VS Code. W VS Code śledzisz sesje ręcznie.
+Blok oraz ręczne śledzenie i kończenie działają wszędzie, także w VS Code. Samodzielne trafianie sesji do toku, wskazówka „wygląda na skończoną” i filtr Jev dla podsumowań potrzebują serwera OpenChamber, więc działają w aplikacji desktopowej, w aplikacji webowej i na telefonie, ale nie w VS Code. W VS Code śledzisz sesje ręcznie.
 
 ## Powiązane
 
-- [Dostawcy klasyfikacji (Jev)](/pl/classification-providers/): skonfiguruj wskazówkę „wygląda na skończoną”
+- [Dostawcy klasyfikacji (Jev)](/pl/classification-providers/): skonfiguruj Decyduje Jev i wskazówkę „wygląda na skończoną”
 - [Czaty](/pl/chats/): rozmowy, które nie trafiają do toku
 - [Cele sesji](/pl/session-goals/): niech agent pracuje aż do mety

@@ -1,4 +1,5 @@
 import { createProjectIdFromPath, projectConfigFileStemOf } from '../projects/project-id.js';
+import { isSessionWorkEntry, resolveSessionWorkEntry } from '../session-work/settings.js';
 import {
   buildPreferencesFields,
   flattenPreferences,
@@ -1054,6 +1055,17 @@ export const createSettingsRuntime = (deps) => {
     return { settings: { ...settings, agentScheduleToolEnabled: false }, changed: true };
   };
 
+  // How sessions enter In work became one choice. The choice is written the
+  // first time settings are read, so a later change of `sessionWorkEnabled`
+  // never picks it again: someone who had switched In work on keeps every
+  // sent message putting a session in work, everyone else starts at Off.
+  const migrateSettingsSessionWorkEntry = (settings) => {
+    if (isSessionWorkEntry(settings.sessionWorkEntry)) {
+      return { settings, changed: false };
+    }
+    return { settings: { ...settings, sessionWorkEntry: resolveSessionWorkEntry(settings) }, changed: true };
+  };
+
   let hasCleanedOrphanedTempFiles = false;
 
   const readSettingsFromDiskMigrated = async ({ surface = null } = {}) => {
@@ -1071,12 +1083,13 @@ export const createSettingsRuntime = (deps) => {
     const migration7 = await migrateSettingsToDeterministicProjectIds(migration6.settings);
     const migration8 = migrateSettingsRemoveApprovedDirectories(migration7.settings);
     const migration9 = migrateSettingsScheduleToolFromControl(migration8.settings);
-    if (migration1.changed || migration2.changed || migration3.changed || migration4.changed || migration5.changed || migration6.changed || migration7.changed || migration8.changed || migration9.changed) {
-      await writeSettingsToDisk(migration9.settings);
+    const migration10 = migrateSettingsSessionWorkEntry(migration9.settings);
+    if (migration1.changed || migration2.changed || migration3.changed || migration4.changed || migration5.changed || migration6.changed || migration7.changed || migration8.changed || migration9.changed || migration10.changed) {
+      await writeSettingsToDisk(migration10.settings);
     }
     // Migrations run on the base view; a surface asks for its own resolution
     // of the per-surface keys on top of the migrated files.
-    return normalizeSettingsSurface(surface) ? readSettingsFromDisk({ surface }) : migration9.settings;
+    return normalizeSettingsSurface(surface) ? readSettingsFromDisk({ surface }) : migration10.settings;
   };
 
   // Settings writes run one at a time. The chain continues past a failed

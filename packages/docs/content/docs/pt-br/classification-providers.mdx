@@ -15,10 +15,10 @@ O Jev nunca escreve código nem responde no seu chat. Ele só devolve um veredit
 | --- | --- |
 | [Permissões e rede de segurança](/pt-br/permissions/) | O agente deve perguntar a você antes de executar esta ação? |
 | [Roteamento automático de modelos](/pt-br/auto-model-routing/) | A qual das suas categorias este prompt pertence? |
-| [Sessões em andamento](/pt-br/sessions-in-work/) | Este turno parece o fim do trabalho? |
+| [Sessões em andamento](/pt-br/sessions-in-work/) | Com **Jev decide**: esta mensagem ou turno começa um trabalho? Sempre: este turno parece o fim do trabalho? |
 | [Resumo e sugestão da próxima mensagem](/pt-br/sessions-in-work/) | Vale a pena gerar um resumo ou uma sugestão depois deste turno? |
 
-Sem provedor, a rede de segurança e o Auto ficam ocultos, e as sessões em andamento não recebem a dica "parece concluído". As sessões continuam indo para em andamento quando você envia uma mensagem. Resumos e sugestões continuam funcionando, só que sem o filtro.
+Sem provedor, a rede de segurança e o Auto ficam ocultos, e as sessões em andamento não recebem a dica "parece concluído". **Jev decide** funciona como Desligado, então as sessões só vão para em andamento quando você as acompanha ou com **Cada mensagem**. Resumos e sugestões continuam funcionando, só que sem o filtro.
 
 ## Configuração
 
@@ -96,7 +96,7 @@ Se o Jev estiver lento ou falhar em uma solicitação, nada quebra. Cada funçã
 
 - A rede de segurança deixa a ação esperando por você.
 - O Auto manda o prompt para o seu modelo de reserva.
-- A dica "parece concluído" não aparece nas sessões em andamento.
+- Nenhuma sessão vai para em andamento pela avaliação do Jev, e a dica "parece concluído" não aparece.
 - O resumo e a sugestão são gerados como se o Jev não existisse.
 
 ## O que o Jev vê

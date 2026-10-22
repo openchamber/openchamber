@@ -5,7 +5,7 @@ description: Mantenha à vista na barra lateral as sessões em que você está t
 
 # Sessões em andamento
 
-Toda sessão em que você envia uma mensagem entra no bloco **Em andamento**, no topo da barra lateral, e fica lá até você marcá-la como concluída, não importa há quanto tempo você a abriu. Seus projetos guardam todas as sessões que você já teve; Em andamento reúne só o que você ainda não terminou.
+O bloco **Em andamento**, no topo da barra lateral, guarda as sessões em que você está trabalhando até você marcá-las como concluídas, não importa há quanto tempo você as abriu. Seus projetos guardam todas as sessões que você já teve; Em andamento reúne só o que você ainda não terminou.
 
 ## Onde encontrar
 
@@ -19,9 +19,15 @@ Para manter as sessões fixadas em um bloco **Fixadas** próprio, acima de Em an
 
 ## Como as sessões entram
 
-Envie uma mensagem numa sessão e ela vai para em andamento. Vale para qualquer sessão de projeto, inclusive sessões em worktrees.
+Acompanhe uma sessão manualmente, como descrito abaixo, ou deixe as sessões entrarem sozinhas com **Quando uma sessão entra em andamento** em **Configurações → Sessões → Sessões em andamento**:
 
-Uma sessão que você marcou como concluída volta quando você envia uma nova mensagem nela.
+- **Desligado**, o padrão: só entram as sessões que você acompanha.
+- **Cada mensagem:** envie uma mensagem numa sessão e ela entra. Uma sessão que você marcou como concluída volta quando você envia uma nova mensagem nela.
+- **Jev decide:** com um [provedor de classificação](/pt-br/classification-providers/) configurado, o Jev lê cada mensagem que você envia e coloca a sessão em andamento quando você pede uma mudança, relata um bug ou discute uma mudança concreta que vai fazer. Perguntas, explicações e pesquisa não contam. O Jev olha de novo quando o agente termina um turno, o que pega o trabalho que só fica claro pela resposta. Uma sessão que você marcou como concluída só volta quando o Jev vê trabalho novo numa mensagem enviada depois disso. Sem provedor de classificação, Jev decide funciona como Desligado.
+
+Vale para qualquer sessão de projeto, inclusive sessões em worktrees.
+
+Se você tinha ativado **Mostrar sessões em andamento** por conta própria antes de esta opção existir, ela começa em **Cada mensagem**, que era como as sessões entravam até então. Caso contrário, começa em Desligado.
 
 Conversas, sessões arquivadas, sessões de revisão e execuções de [tarefas agendadas](/pt-br/scheduled-tasks/) nunca entram; se você fizer um fork de uma execução para continuar trabalhando nela, o fork entra. Subsessões não entram sozinhas; elas vão junto com a sessão principal.
 
@@ -56,16 +62,19 @@ Ative ou desative em **Configurações → Chat → Assistência da sessão**.
 
 ## Configurações
 
-Abra **Configurações → Sessões → Sessões em andamento**. Há uma só opção, **Mostrar sessões em andamento**, ativada por padrão. Desativada, a função inteira desliga: não há bloco, e enviar uma mensagem não coloca mais a sessão em andamento.
+Abra **Configurações → Sessões → Sessões em andamento**:
+
+- **Mostrar sessões em andamento**, ativada por padrão: desativada, a função inteira desliga, sem bloco e sem sessões entrando sozinhas.
+- **Quando uma sessão entra em andamento**: Desligado, Cada mensagem ou Jev decide, como descrito acima.
 
 Para esconder só o bloco, use **Mostrar em andamento** no menu de exibição da barra lateral.
 
 ## Onde funciona
 
-O bloco e o acompanhamento manual funcionam em todo lugar, inclusive no VS Code. Colocar a sessão em andamento quando você envia uma mensagem, a dica "parece concluído" e o filtro do Jev para os resumos precisam do servidor do OpenChamber, então funcionam no app desktop, no app web e no celular, mas não no VS Code. No VS Code você acompanha as sessões manualmente.
+O bloco e o acompanhamento manual funcionam em todo lugar, inclusive no VS Code. As sessões entrarem sozinhas em andamento, a dica "parece concluído" e o filtro do Jev para os resumos precisam do servidor do OpenChamber, então funcionam no app desktop, no app web e no celular, mas não no VS Code. No VS Code você acompanha as sessões manualmente.
 
 ## Relacionado
 
-- [Provedores de classificação (Jev)](/pt-br/classification-providers/): configure a dica "parece concluído"
+- [Provedores de classificação (Jev)](/pt-br/classification-providers/): configure Jev decide e a dica "parece concluído"
 - [Conversas](/pt-br/chats/): conversas que ficam fora do trabalho em andamento
 - [Objetivos de sessão](/pt-br/session-goals/): faça o agente trabalhar até a linha de chegada

@@ -5,7 +5,7 @@ description: Gardez les sessions sur lesquelles vous travaillez bien en vue dans
 
 # Sessions en cours
 
-Chaque session dans laquelle vous envoyez un message passe dans le bloc **En cours**, en haut de la barre latérale, et y reste jusqu’à ce que vous la marquiez comme terminée, peu importe depuis quand vous ne l’avez pas ouverte. Vos projets gardent toutes vos sessions ; En cours ne contient que ce que vous n’avez pas encore terminé.
+Le bloc **En cours**, en haut de la barre latérale, garde les sessions sur lesquelles vous travaillez jusqu’à ce que vous les marquiez comme terminées, peu importe depuis quand vous ne les avez pas ouvertes. Vos projets gardent toutes vos sessions ; En cours ne contient que ce que vous n’avez pas encore terminé.
 
 ## Où le trouver
 
@@ -19,9 +19,15 @@ Pour regrouper les sessions épinglées dans leur propre bloc **Épinglées** au
 
 ## Comment les sessions y entrent
 
-Envoyez un message dans une session et elle passe en cours. Cela vaut pour toute session de projet, y compris les sessions dans un worktree.
+Suivez une session à la main, comme décrit plus bas, ou laissez les sessions y entrer seules avec **Quand une session passe en cours** dans **Paramètres → Sessions → Sessions en cours** :
 
-Une session marquée comme terminée revient dès que vous y envoyez un nouveau message.
+- **Désactivé**, par défaut : seules les sessions que vous suivez y entrent.
+- **Chaque message :** envoyez un message dans une session et elle y entre. Une session marquée comme terminée revient dès que vous y envoyez un nouveau message.
+- **Jev décide :** avec un [fournisseur de classification](/fr/classification-providers/) configuré, Jev lit chaque message que vous envoyez et fait passer la session en cours quand vous demandez une modification, signalez un bug ou discutez d’une modification concrète que vous allez faire. Les questions, les explications et les recherches ne comptent pas. Jev regarde à nouveau quand l’agent termine un tour, ce qui repère le travail qui n’apparaît que dans la réponse. Une session marquée comme terminée ne revient que si Jev voit du nouveau travail dans un message envoyé après. Sans fournisseur de classification, Jev décide fonctionne comme Désactivé.
+
+Cela vaut pour toute session de projet, y compris les sessions dans un worktree.
+
+Si vous aviez activé vous-même **Afficher les sessions en cours** avant l’arrivée de ce réglage, il démarre sur **Chaque message**, c’est ainsi que les sessions y entraient jusque-là. Sinon, il démarre sur Désactivé.
 
 Les discussions, les sessions archivées, les sessions de revue et les exécutions de [tâches planifiées](/fr/scheduled-tasks/) n’y entrent jamais ; si vous forkez une exécution pour continuer à travailler dessus, le fork y entre. Les sous-sessions n’y entrent pas seules ; elles suivent leur session parente.
 
@@ -56,16 +62,19 @@ Activez-les ou désactivez-les dans **Paramètres → Chat → Assistance de ses
 
 ## Paramètres
 
-Ouvrez **Paramètres → Sessions → Sessions en cours**. Il n’y a qu’un réglage, **Afficher les sessions en cours**, activé par défaut. Désactivé, il coupe toute la fonction : plus de bloc, et envoyer un message ne fait plus passer la session en cours.
+Ouvrez **Paramètres → Sessions → Sessions en cours** :
+
+- **Afficher les sessions en cours**, activé par défaut : désactivé, il coupe toute la fonction, sans bloc et sans session qui y entre seule.
+- **Quand une session passe en cours** : Désactivé, Chaque message ou Jev décide, comme décrit plus haut.
 
 Pour masquer seulement le bloc, utilisez **Afficher la section en cours** dans le menu d’affichage de la barre latérale.
 
 ## Où ça fonctionne
 
-Le bloc et le suivi manuel fonctionnent partout, VS Code compris. Le passage en cours à l’envoi d’un message, l’indication « semble terminé » et le filtre Jev pour les récapitulatifs ont besoin du serveur OpenChamber : ils fonctionnent donc dans l’application desktop, dans l’application web et sur le téléphone, mais pas dans VS Code. Dans VS Code, vous suivez les sessions à la main.
+Le bloc et le suivi manuel fonctionnent partout, VS Code compris. L’entrée automatique des sessions, l’indication « semble terminé » et le filtre Jev pour les récapitulatifs ont besoin du serveur OpenChamber : ils fonctionnent donc dans l’application desktop, dans l’application web et sur le téléphone, mais pas dans VS Code. Dans VS Code, vous suivez les sessions à la main.
 
 ## Voir aussi
 
-- [Fournisseurs de classification (Jev)](/fr/classification-providers/) : configurer l’indication « semble terminé »
+- [Fournisseurs de classification (Jev)](/fr/classification-providers/) : configurer Jev décide et l’indication « semble terminé »
 - [Discussions](/fr/chats/) : des conversations qui restent hors du travail en cours
 - [Objectifs de session](/fr/session-goals/) : faire travailler l’agent jusqu’à la ligne d’arrivée
