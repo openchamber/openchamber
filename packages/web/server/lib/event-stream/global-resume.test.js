@@ -11,9 +11,10 @@ import { DEFAULT_UPSTREAM_RECONNECT_DELAY_MS } from './upstream-reader.js';
 // OpenCode's side of the contract (packages/server/src/event-feed.ts): every frame carries
 // `id: <instance>:<sequence>`. A cursor from this instance is replayed from a bounded window; any
 // other cursor, or one that has aged out, is answered with one `server.resync` frame at the head.
-// With `heartbeatMs`, each connection also opens as OpenCode's does (packages/server/src/handlers/
-// event.ts): a `server.connected` greeting without an id line, then a heartbeat comment at that cadence.
-function createFakeOpenCode({ instance = randomUUID(), windowFrames = 1024, heartbeatMs = 0 } = {}) {
+// With `greet`, each connection opens as OpenCode's does (packages/server/src/handlers/event.ts): a
+// `server.connected` greeting without an id line, ahead of the replay or the resync. With
+// `heartbeatMs`, a heartbeat comment follows at that cadence.
+function createFakeOpenCode({ instance = randomUUID(), windowFrames = 1024, greet = false, heartbeatMs = 0 } = {}) {
   let sequence = 0;
   const retained = [];
   const live = new Set();
@@ -63,7 +64,7 @@ function createFakeOpenCode({ instance = randomUUID(), windowFrames = 1024, hear
       });
       const cursor = headers['Last-Event-ID'] ?? '';
       cursors.push(cursor);
-      if (heartbeatMs > 0) {
+      if (greet) {
         connection.push(`data: ${JSON.stringify({ id: `evt_connected_${cursors.length}`, type: 'server.connected', data: {} })}\n\n`);
       }
       if (cursor) {
@@ -867,7 +868,7 @@ describe('a quiet OpenCode stream', () => {
     ['several sessions busy', windows.concurrentStallTimeoutMs],
   ])('stays on one upstream connection with %s, so a browser gets one ready frame and one greeting', async (_busy, stallTimeoutMs) => {
     vi.useFakeTimers();
-    const feed = createFakeOpenCode({ heartbeatMs: OPENCODE_HEARTBEAT_MS });
+    const feed = createFakeOpenCode({ greet: true, heartbeatMs: OPENCODE_HEARTBEAT_MS });
     const hub = createHub(feed.fetch, { upstreamStallTimeoutMs: stallTimeoutMs, upstreamReconnectDelayMs: DEFAULT_UPSTREAM_RECONNECT_DELAY_MS });
     const runtime = createRuntime(hub);
     const browser = connect(runtime);
@@ -880,8 +881,7 @@ describe('a quiet OpenCode stream', () => {
       // The premise: the browser was live and was sent the event.
       expect(eventIds(browser).filter(Boolean)).toEqual([head]);
       // A stall window shorter than the heartbeat reconnected this healthy stream at every window,
-      // and each reconnect reached the browser as a ready frame and OpenCode's new greeting, which the
-      // UI answers by re-reading what it shows.
+      // and each reconnect reached the browser as a ready frame.
       expect(feed.connections).toBe(1);
       expect(readyFrames(browser)).toHaveLength(1);
       expect(greetings(browser)).toHaveLength(1);
@@ -890,6 +890,160 @@ describe('a quiet OpenCode stream', () => {
       hub.stop();
       await runtime.close();
       vi.useRealTimers();
+    }
+  });
+});
+
+// What makes the UI re-read what it shows (sync/sync-context.tsx): OpenCode's greeting, and a ready
+// frame that did not resume the stream or that reset its replay. Both are ignored while the UI boots.
+const rereadSignals = (socket) => socket.sent.flatMap((frame) => {
+  if (frame.type === 'event') return frame.payload?.type === 'server.connected' ? ['greeting'] : [];
+  if (frame.type !== 'ready') return [];
+  if (frame.replayReset === true) return ['replayReset'];
+  return frame.resumed === true ? [] : ['ready'];
+});
+
+describe('a reconnect that resumed from a cursor', () => {
+  it('reaches the browser as a resumed ready alone when OpenCode honours the cursor, with or without events to replay', async () => {
+    const feed = createFakeOpenCode({ greet: true });
+    const hub = createHub(feed.fetch);
+    const runtime = createRuntime(hub);
+    const browser = connect(runtime);
+    try {
+      // The first connection carries no cursor, so its greeting is the one a client starts from.
+      await expect.poll(() => greetings(browser).length).toBe(1);
+      const first = feed.publish();
+      await expect.poll(() => eventIds(browser).filter(Boolean)).toEqual([first]);
+      const before = rereadSignals(browser).length;
+
+      // OpenCode has nothing after the cursor; the next event is live.
+      feed.cut();
+      await expect.poll(() => readyFrames(browser).length).toBe(2);
+      const live = feed.publish();
+      await expect.poll(() => eventIds(browser).filter(Boolean)).toEqual([first, live]);
+
+      // OpenCode replays what the stream missed.
+      feed.cut();
+      const missed = feed.publish();
+      await expect.poll(() => eventIds(browser).filter(Boolean)).toEqual([first, live, missed]);
+
+      expect(feed.cursors).toEqual(['', first, live]);
+      expect(readyWithoutHead(browser).slice(1)).toEqual([
+        { type: 'ready', scope: 'global', resumed: true },
+        { type: 'ready', scope: 'global', resumed: true },
+      ]);
+      expect(rereadSignals(browser).slice(before)).toEqual([]);
+    } finally {
+      browser.close();
+      hub.stop();
+      await runtime.close();
+    }
+  });
+
+  it('still makes the browser re-read when the cursor aged out of OpenCode\'s window', async () => {
+    const feed = createFakeOpenCode({ greet: true, windowFrames: 2 });
+    const hub = createHub(feed.fetch);
+    const runtime = createRuntime(hub);
+    const browser = connect(runtime);
+    try {
+      await expect.poll(() => greetings(browser).length).toBe(1);
+      const first = feed.publish();
+      await expect.poll(() => eventIds(browser).filter(Boolean)).toEqual([first]);
+      const before = rereadSignals(browser).length;
+
+      // While the stream is down, OpenCode moves past its two-frame window.
+      feed.cut();
+      feed.publish();
+      feed.publish();
+      feed.publish();
+      await expect.poll(() => readyFrames(browser).some((frame) => frame.replayReset === true)).toBe(true);
+
+      expect(feed.cursors[1]).toBe(first);
+      expect(rereadSignals(browser).slice(before)).toEqual(['greeting', 'replayReset']);
+    } finally {
+      browser.close();
+      hub.stop();
+      await runtime.close();
+    }
+  });
+
+  it('still makes the browser re-read when OpenCode restarted', async () => {
+    let current = createFakeOpenCode({ greet: true });
+    const hub = createHub((url, options) => current.fetch(url, options));
+    const runtime = createRuntime(hub);
+    const browser = connect(runtime);
+    try {
+      await expect.poll(() => greetings(browser).length).toBe(1);
+      const first = current.publish();
+      await expect.poll(() => eventIds(browser).filter(Boolean)).toEqual([first]);
+      const before = rereadSignals(browser).length;
+
+      const previous = current;
+      current = createFakeOpenCode({ greet: true });
+      previous.cut();
+      await expect.poll(() => readyFrames(browser).some((frame) => frame.replayReset === true)).toBe(true);
+
+      // The hub asked the new instance for the old cursor, which it cannot know.
+      expect(current.cursors[0]).toBe(first);
+      expect(rereadSignals(browser).slice(before)).toEqual(['greeting', 'replayReset']);
+      const live = current.publish();
+      await expect.poll(() => eventIds(browser).filter(Boolean)).toEqual([first, live]);
+    } finally {
+      browser.close();
+      hub.stop();
+      await runtime.close();
+    }
+  });
+
+  // A cursor the new hub does not hold after an OpenChamber restart is resumed on a read of its own.
+  const resumeAfterOpenChamberRestart = async ({ openCodeRestarts }) => {
+    let current = createFakeOpenCode({ greet: true });
+    const fetchImpl = (url, options) => current.fetch(url, options);
+    const hub1 = createHub(fetchImpl);
+    const runtime1 = createRuntime(hub1);
+    const earlier = connect(runtime1);
+    await expect.poll(() => greetings(earlier).length).toBe(1);
+    current.publish();
+    const cursor = current.publish();
+    await expect.poll(() => eventIds(earlier).filter(Boolean).at(-1)).toBe(cursor);
+    earlier.close();
+    await runtime1.close();
+    hub1.stop();
+
+    if (openCodeRestarts) current = createFakeOpenCode({ greet: true });
+    const missed = current.publish();
+    const hub2 = createHub(fetchImpl);
+    const runtime2 = createRuntime(hub2);
+    const browser = connect(runtime2, cursor);
+    return {
+      browser,
+      missed,
+      async close() {
+        browser.close();
+        hub2.stop();
+        await runtime2.close();
+      },
+    };
+  };
+
+  it('resumes a browser on its own read with no greeting when OpenCode honours its cursor', async () => {
+    const { browser, missed, close } = await resumeAfterOpenChamberRestart({ openCodeRestarts: false });
+    try {
+      await expect.poll(() => eventIds(browser).filter(Boolean)).toEqual([missed]);
+      expect(readyWithoutHead(browser)).toEqual([{ type: 'ready', scope: 'global', resumed: true }]);
+      expect(rereadSignals(browser)).toEqual([]);
+    } finally {
+      await close();
+    }
+  });
+
+  it('makes a browser resuming on its own read re-read when OpenCode restarted too', async () => {
+    const { browser, close } = await resumeAfterOpenChamberRestart({ openCodeRestarts: true });
+    try {
+      await expect.poll(() => readyFrames(browser).some((frame) => frame.replayReset === true)).toBe(true);
+      expect(rereadSignals(browser)).toEqual(['greeting', 'replayReset']);
+    } finally {
+      await close();
     }
   });
 });

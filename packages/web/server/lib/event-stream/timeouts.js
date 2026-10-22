@@ -7,8 +7,7 @@
 // every window while nothing happens. OpenCode 2.x writes a heartbeat comment every 15 s
 // (packages/server/src/handlers/event.ts), and the control and notification streams read inside a
 // space write theirs every 25 and 20 s. With windows of 10 and 20 s, a quiet OpenCode stream was
-// reconnected every 10 s; each reconnect reached the browsers as a `ready` frame and OpenCode's
-// `server.connected` greeting, and the UI answered the greeting by re-reading what it shows.
+// reconnected every 10 s, and every reconnect sends each browser a fresh `ready` frame.
 
 export const DEFAULT_UPSTREAM_STALL_TIMEOUT_MS = 20_000;
 export const UPSTREAM_STALL_TIMEOUT_CONCURRENT_MS = 3 * DEFAULT_UPSTREAM_STALL_TIMEOUT_MS;
