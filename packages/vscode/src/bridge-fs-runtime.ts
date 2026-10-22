@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
+import { z } from 'zod';
 import type { BridgeResponse } from './bridge';
 
 type BridgeMessageInput = {
@@ -44,6 +45,82 @@ type FsExecCommandResult = {
   stderr?: string;
   error?: string;
 };
+
+/**
+ * The file type a save dialog offers.
+ *
+ * The caller names the format it wrote, so the dialog offers the type of
+ * file that is actually being saved. A caller that names nothing gets the
+ * Markdown filter, which is what the command always offered before.
+ */
+const saveFileFilterSchema = z.object({
+  name: z.string(),
+  extensions: z.array(z.string()),
+});
+
+const SAVE_FILE_FILTERS = {
+  markdown: { name: 'Markdown', extensions: ['md'] },
+  html: { name: 'HTML', extensions: ['html'] },
+  json: { name: 'JSON', extensions: ['json'] },
+} satisfies Record<string, z.infer<typeof saveFileFilterSchema>>;
+
+const saveFileFormatSchema = z.enum(['markdown', 'html', 'json']);
+
+/** The format a caller named for the file it is saving. */
+type SaveFileFormat = z.infer<typeof saveFileFormatSchema>;
+
+/** The name of a format, as a reader sees it in an error. */
+const saveFileFormatNameSchema = z.string();
+
+/**
+ * The format field of a save request, as the bridge reads it.
+ *
+ * The field only names the type of file the dialog offers, so it is read on
+ * its own and never fails the payload it came in: a name the bridge does not
+ * know is a problem with the format, not with the content, and it is
+ * reported as such.
+ */
+type SaveFileFormatField =
+  | { kind: 'supported'; format: SaveFileFormat }
+  | { kind: 'unsupported'; name: string };
+
+const saveFileFormatFieldSchema = z
+  .unknown()
+  .transform((value): SaveFileFormatField => {
+    const named = saveFileFormatNameSchema.safeParse(value);
+    if (!named.success) {
+      if (value === undefined) {
+        // A caller that names no format gets Markdown, which is what the
+        // command always offered before.
+        return { kind: 'supported', format: 'markdown' };
+      }
+      // A value that is not a name cannot name a file type either, so the
+      // reader is told what came instead.
+      const text = String(value);
+      return { kind: 'unsupported', name: text === '' ? 'not a name' : text };
+    }
+    const name = named.data.trim();
+    if (name === '') {
+      // A blank name names no format either.
+      return { kind: 'supported', format: 'markdown' };
+    }
+    const supported = saveFileFormatSchema.safeParse(name);
+    if (supported.success) {
+      return { kind: 'supported', format: supported.data };
+    }
+    return { kind: 'unsupported', name };
+  });
+
+/** The payload of a save request, as the bridge reads it. */
+const saveMarkdownPayloadSchema = z.object({
+  fileName: z.string().default(''),
+  content: z.string(),
+  format: saveFileFormatFieldSchema,
+});
+
+const readSaveFileFilter = (value: SaveFileFormat): z.infer<typeof saveFileFilterSchema> => (
+  SAVE_FILE_FILTERS[value]
+);
 
 const createGitReadCacheTtlMs = () => {
   const raw = Number(process.env.OPENCHAMBER_GIT_READ_CACHE_TTL_MS);
@@ -584,23 +661,39 @@ export async function handleFsBridgeMessage(
     }
 
     case 'api:files/save-markdown': {
-      const rawFileName = (payload as { fileName?: unknown })?.fileName;
-      const rawContent = (payload as { content?: unknown })?.content;
-      const content = typeof rawContent === 'string' ? rawContent : '';
+      const parsed = saveMarkdownPayloadSchema.safeParse(payload);
+      if (!parsed.success) {
+        return { id, type, success: false, error: 'Invalid markdown payload' };
+      }
+
+      const content = parsed.data.content;
       if (!content) {
         return { id, type, success: false, error: 'Invalid markdown payload' };
       }
 
-      const defaultFileName = typeof rawFileName === 'string' && rawFileName.trim().length > 0
-        ? rawFileName.trim()
+      // The format names the type of file the dialog offers. A name the
+      // bridge does not know is a problem with the format alone, so it is
+      // named here instead of turning a payload that is otherwise fine into
+      // an invalid one.
+      const format = parsed.data.format;
+      if (format.kind === 'unsupported') {
+        return { id, type, success: false, error: `Unsupported save format: ${format.name}` };
+      }
+
+      const defaultFileName = parsed.data.fileName.trim().length > 0
+        ? parsed.data.fileName.trim()
         : `session-${Date.now()}.md`;
+
+      // The caller names the format it wrote, so the dialog offers the type
+      // of file that is actually being saved rather than always Markdown.
+      const filter = readSaveFileFilter(format.format);
 
       const saveUri = await vscode.window.showSaveDialog({
         saveLabel: 'Export session',
         defaultUri: vscode.workspace.workspaceFolders?.[0]
           ? vscode.Uri.joinPath(vscode.workspace.workspaceFolders[0].uri, defaultFileName)
           : undefined,
-        filters: { Markdown: ['md'] },
+        filters: { [filter.name]: filter.extensions },
       });
 
       if (!saveUri) {

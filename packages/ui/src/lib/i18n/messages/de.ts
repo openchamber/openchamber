@@ -2,6 +2,7 @@ import { settingsDict } from './de.settings';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
+import { exportDocumentI18n } from './export-document.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
@@ -139,6 +140,7 @@ export const dict = {
   ...linearIssuePickerI18n.de,
   ...referencePickerI18n.de,
   ...sessionMenuHintsI18n.de,
+  ...exportDocumentI18n.de,
   ...projectKnowledgeI18n.de,
   ...linearPanelI18n.de,
   ...routingI18n.de,
@@ -646,7 +648,7 @@ export const dict = {
   'sessions.sidebar.session.menu.copied': 'Kopiert',
   'sessions.sidebar.session.menu.copyLink': 'Link kopieren',
   'sessions.sidebar.session.menu.unshare': 'Freigabe aufheben',
-  'sessions.sidebar.session.menu.exportMarkdown': 'Als Markdown exportieren',
+  'sessions.sidebar.session.menu.exportSession': 'Sitzung exportieren',
   'sessions.sidebar.session.menu.openInSidePanel': 'In Seitenleiste öffnen',
   'sessions.sidebar.session.actions.openInEditor': 'Im Editor öffnen',
   'sessions.sidebar.session.menu.label': 'Sitzungsmenü',
@@ -654,14 +656,23 @@ export const dict = {
   'sessions.sidebar.session.export.nothingToExport': 'Nichts zum Exportieren',
   'sessions.sidebar.session.export.success': 'Sitzung exportiert',
   'sessions.sidebar.session.export.failedRevealPath': 'Pfad konnte nicht angezeigt werden',
-  'sessions.sidebar.session.export.untitledSubagent': 'Unbenanntes Sub-Agent',
   'sessions.sidebar.session.export.skippedSubtaskSingle': 'Sitzung exportiert, aber {count} Unteraufgabe des Sub-Agents wurde übersprungen, da sie nicht geladen werden konnte.',
   'sessions.sidebar.session.export.skippedSubtaskMany': 'Sitzung exportiert, aber {count} Unteraufgaben des Sub-Agents wurden übersprungen, da sie nicht geladen werden konnten.',
-  'sessions.sidebar.session.export.dialog.title': 'Markdown exportieren',
-  'sessions.sidebar.session.export.dialog.descriptionSingle': 'Diese Sitzung hat {count} Unteraufgabe des Sub-Agents. Soll diese in den Export inkludiert werden?',
-  'sessions.sidebar.session.export.dialog.descriptionMany': 'Diese Sitzung hat {count} Unteraufgaben des Sub-Agents. Sollen diese in den Export inkludiert werden?',
+  'sessions.sidebar.session.export.dialog.title': 'Sitzung exportieren',
+  'sessions.sidebar.session.export.dialog.descriptionSingle': 'Diese Sitzung hat {count} Sub-Agent-Sitzung. Soll sie in den Export inkludiert werden?',
+  'sessions.sidebar.session.export.dialog.descriptionMany': 'Diese Sitzung hat {count} Sub-Agent-Sitzungen. Sollen sie in den Export inkludiert werden?',
   'sessions.sidebar.session.export.dialog.includeSubtasks': 'Unteraufgaben des Sub-Agents einbeziehen',
   'sessions.sidebar.session.export.dialog.confirm': 'Exportieren',
+  'sessions.sidebar.session.export.dialog.descriptionNoSubagentSessions': 'Der Export ist ein lesbarer Verlauf des Gesprächs, mit der Arbeit der Sub-Agents an der richtigen Stelle.',
+  'sessions.sidebar.session.export.dialog.descriptionIncompleteIncluding': 'Die Zahl der Sub-Agent-Sitzungen ist noch nicht bekannt, weil die Sitzungsliste noch gelesen wird. Der Export enthält die gefundene Sub-Agent-Arbeit.',
+  'sessions.sidebar.session.export.dialog.descriptionIncompleteExcluding': 'Die Zahl der Sub-Agent-Sitzungen ist noch nicht bekannt, weil die Sitzungsliste noch gelesen wird. Der Export lässt die Sub-Agent-Arbeit weg.',
+  'sessions.sidebar.session.export.dialog.retryCount': 'Erneut prüfen',
+  'sessions.sidebar.session.export.dialog.format': 'Format',
+  'sessions.sidebar.session.export.dialog.detail': 'Detailgrad',
+  'sessions.sidebar.session.export.dialog.detailReadable': 'Lesbar',
+  'sessions.sidebar.session.export.dialog.detailReadableHint': 'Ein Gespräch. Lange Werkzeugergebnisse werden gekürzt und markiert.',
+  'sessions.sidebar.session.export.dialog.detailFull': 'Vollständige Details',
+  'sessions.sidebar.session.export.dialog.detailFullHint': 'Jede Eingabe, Ausgabe und jedes Ergebnis der Werkzeuge, wie die Sitzung sie aufgezeichnet hat.',
   'sessions.sidebar.session.status.active': 'Sitzung aktiv',
   'sessions.sidebar.session.status.unread': 'Ungelesene Updates',
   'sessions.sidebar.session.status.backgroundSubagent': 'Subagent läuft im Hintergrund',

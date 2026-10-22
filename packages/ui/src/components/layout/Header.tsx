@@ -54,7 +54,7 @@ import { getInlineStartSide, useI18n } from '@/lib/i18n';
 import { useShallow } from 'zustand/react/shallow';
 import { toast } from '@/components/ui';
 import { copyTextToClipboard } from '@/lib/clipboard';
-import { buildExportFilename, downloadAsMarkdown, formatSessionAsMarkdown, saveAsMarkdownDesktop } from '@/lib/exportSession';
+import { useSessionExport } from '@/components/session/export/useSessionExport';
 import { GuestIcon } from '@/components/layout/GuestRailIcon';
 import { useGuestActions } from '@/hooks/useGuestSurfaces';
 import { guestSessionActions, type GuestActionEntry } from '@/lib/guests/actions';
@@ -400,6 +400,7 @@ export const Header: React.FC = () => {
     const trimmedTitle = currentSession?.title?.trim();
     return trimmedTitle && trimmedTitle.length > 0 ? trimmedTitle : 'Untitled Session';
   }, [activeProjectLabel, currentSession?.title, currentSessionId]);
+  const sessionExport = useSessionExport();
   const loadSessionRecords = useSessionMessageRecordsForExport();
   const updateSessionTitle = useSessionUIStore((state) => state.updateSessionTitle);
   const archiveSessions = useSessionUIStore((state) => state.archiveSessions);
@@ -478,26 +479,17 @@ export const Header: React.FC = () => {
     }).catch(() => toast.error(t('sessions.sidebar.session.copyId.error')));
   }, [t]);
 
-  const exportCurrentSession = React.useCallback(async () => {
+  const exportCurrentSession = React.useCallback(() => {
     if (!currentSessionId || !openDirectory) {
       toast.error(t('sessions.sidebar.session.export.nothingToExport'));
       return;
     }
-    const records = await loadSessionRecords({ sessionID: currentSessionId, directory: openDirectory }).catch(() => null);
-    if (!records) {
-      toast.error(t('sessions.sidebar.session.export.failedLoadHistory'));
-      return;
-    }
-    if (records.length === 0) {
-      toast.error(t('sessions.sidebar.session.export.nothingToExport'));
-      return;
-    }
-    const markdown = formatSessionAsMarkdown(records, currentSession?.title ?? null);
-    const filename = buildExportFilename(currentSession?.title ?? null);
-    const savedPath = await saveAsMarkdownDesktop(markdown, filename);
-    if (!savedPath) downloadAsMarkdown(markdown, filename);
-    toast.success(t('sessions.sidebar.session.export.success'));
-  }, [currentSession?.title, currentSessionId, loadSessionRecords, openDirectory, t]);
+    sessionExport.openExport({
+      sessionID: currentSessionId,
+      title: currentSession?.title ?? null,
+      directory: openDirectory,
+    });
+  }, [currentSession?.title, currentSessionId, openDirectory, sessionExport, t]);
 
   // Extension session actions on the current session. The conversation is
   // loaded the same way Export as Markdown loads it.
@@ -955,9 +947,9 @@ export const Header: React.FC = () => {
         </SessionMenuItemHint>
         <Separator />
         {isActive ? (
-          <SessionMenuItemHint hint={t('sessions.sidebar.session.menuHint.exportMarkdown')}>
+          <SessionMenuItemHint hint={t('sessions.sidebar.session.menuHint.exportSession')}>
             <Item onClick={() => void exportCurrentSession()}>
-              <Icon name="download" className="me-1 size-4" />{t('sessions.sidebar.session.menu.exportMarkdown')}
+              <Icon name="download" className="me-1 size-4" />{t('sessions.sidebar.session.menu.exportSession')}
             </Item>
           </SessionMenuItemHint>
         ) : null}
@@ -1194,7 +1186,7 @@ export const Header: React.FC = () => {
                     <SessionAiRenameMenuItem sessionID={currentSessionId} directory={sessionDirectory} open={isHeaderSessionMenuOpen} Item={DropdownMenuItem} />
                     <SessionMenuItemHint hint={t('sessions.sidebar.session.menuHint.copyId')}><DropdownMenuItem onClick={() => currentSessionId && copySessionIdFor(currentSessionId)}><Icon name="file-copy" className="me-1 size-4" />{t('sessions.sidebar.session.menu.copyId')}</DropdownMenuItem></SessionMenuItemHint>
                     <DropdownMenuSeparator />
-                    <SessionMenuItemHint hint={t('sessions.sidebar.session.menuHint.exportMarkdown')}><DropdownMenuItem onClick={() => void exportCurrentSession()}><Icon name="download" className="me-1 size-4" />{t('sessions.sidebar.session.menu.exportMarkdown')}</DropdownMenuItem></SessionMenuItemHint>
+                    <SessionMenuItemHint hint={t('sessions.sidebar.session.menuHint.exportSession')}><DropdownMenuItem onClick={() => void exportCurrentSession()}><Icon name="download" className="me-1 size-4" />{t('sessions.sidebar.session.menu.exportSession')}</DropdownMenuItem></SessionMenuItemHint>
                     {hasElectronDesktopIPC ? (
                       <DropdownMenuItem onClick={() => openSessionInMiniChat(currentSessionId, currentSessionOpenDirectory)}>
                         <Icon name="picture-in-picture-2" className="me-1 size-4" />{t('sessions.sidebar.session.menu.openInMiniChat')}
@@ -1369,6 +1361,7 @@ export const Header: React.FC = () => {
         onOpenChange={setMoveChatDialogOpen}
         onPick={moveCurrentChatToProject}
       />
+      {sessionExport.dialog}
       <Dialog open={pendingHeaderRetentionAction !== null} onOpenChange={(open) => { if (!open) setPendingHeaderRetentionAction(null); }}>
         <DialogContent showCloseButton={false} className="max-w-sm gap-5">
           <DialogHeader>

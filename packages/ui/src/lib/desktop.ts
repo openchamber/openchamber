@@ -894,9 +894,18 @@ export const revealDesktopPath = async (path: string): Promise<boolean> => {
   }
 };
 
+/**
+ * The file type a save dialog offers.
+ *
+ * The caller names the format it wrote, so the dialog offers the type of
+ * file that is actually being saved rather than always Markdown.
+ */
+export type DesktopSaveFileFormat = 'markdown' | 'html' | 'json';
+
 export const saveDesktopMarkdownFile = async (
   defaultFileName: string,
   content: string,
+  format: DesktopSaveFileFormat = 'markdown',
 ): Promise<string | null> => {
   if (!hasDesktopInvoke() || !isDesktopLocalOriginActive()) {
     return null;
@@ -911,6 +920,7 @@ export const saveDesktopMarkdownFile = async (
     const result = await invokeDesktop<string>('desktop_save_markdown_file', {
       defaultFileName: trimmedFileName,
       content,
+      filter: format,
     });
     return typeof result === 'string' && result.trim().length > 0 ? result : null;
   } catch (error) {

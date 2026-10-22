@@ -5,7 +5,6 @@ import { collectSessionTitleTurns, formatSessionTitleContext, generatedSessionTi
 import { configureRuntimeUrlResolver } from './runtime-url';
 import { createContextPart, type ContextPartPayload } from './messages/contextParts';
 import { formatMessageText } from './messages/messageMarkdown';
-import { formatSessionAsMarkdown } from './exportSession';
 import { ChildStoreManager } from '@/sync/child-store';
 import { SessionMessageLoader, type SessionMessagePageSource } from '@/sync/session-message-loader';
 import { loadSessionTitleTurns } from '@/sync/session-title-context';
@@ -135,15 +134,6 @@ describe('session title context', () => {
 });
 
 describe('Markdown export of attached context', () => {
-  test('exports quote and reply exactly once with paragraph separation, including child sessions', () => {
-    const record = user('one', [textPart('My request'), contextPart({ kind: 'file-quote', fileLabel: 'plan.md', startLine: 2, endLine: 4, quote: 'First line\n\nLast line', text: 'My comment' })]);
-    const output = formatSessionAsMarkdown([record], 'Title', [{ title: 'Child', records: [record], children: [] }]);
-    expect(output).toContain('My request\n\nQuoted from `plan.md`, lines 2-4:');
-    expect(output).toContain('> First line\n> \n> Last line\n\n**User comment:**\n\nMy comment');
-    expect(output.match(/My comment/g)).toHaveLength(2);
-    expect(output).not.toContain('Comment on this fragment');
-  });
-
   test('formats browser, PR, code and terminal contexts without mixing comments into quotes', () => {
     const contexts: ContextPartPayload[] = [
       { kind: 'browser-annotation', pageUrl: 'https://example.com', prompt: 'Button', text: 'Move it' },

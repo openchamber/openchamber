@@ -2,6 +2,7 @@ import { settingsDict } from './tr.settings';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
+import { exportDocumentI18n } from './export-document.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
@@ -78,6 +79,7 @@ export const dict = {
   ...linearIssuePickerI18n.tr,
   ...referencePickerI18n.tr,
   ...sessionMenuHintsI18n.tr,
+  ...exportDocumentI18n.tr,
   ...projectKnowledgeI18n.tr,
   ...linearPanelI18n.tr,
   ...routingI18n.tr,
@@ -639,7 +641,7 @@ export const dict = {
   'sessions.sidebar.session.menu.copied': 'Kopyalandı',
   'sessions.sidebar.session.menu.copyLink': 'Bağlantıyı kopyala',
   'sessions.sidebar.session.menu.unshare': 'Paylaşımı kaldır',
-  'sessions.sidebar.session.menu.exportMarkdown': 'Markdown olarak dışa aktar',
+  'sessions.sidebar.session.menu.exportSession': 'Oturumu dışa aktar',
   'sessions.sidebar.session.menu.moveToWorktree': 'Yeni worktree\'ye taşı',
   'sessions.sidebar.session.moveToWorktree.success': 'Session yeni bir worktree\'ye taşındı',
   'sessions.sidebar.session.moveToWorktree.failed': 'Session yeni bir worktree\'ye taşınamadı',
@@ -662,14 +664,23 @@ export const dict = {
   'sessions.sidebar.session.export.failedLoadHistory': 'Session geçmişinin tamamı yüklenemedi',
   'sessions.sidebar.session.export.success': 'Session dışa aktarıldı',
   'sessions.sidebar.session.export.failedRevealPath': 'Yol gösterilemedi',
-  'sessions.sidebar.session.export.untitledSubagent': 'Adsız alt agent',
   'sessions.sidebar.session.export.skippedSubtaskSingle': 'Session dışa aktarıldı ancak yüklenemeyen {count} alt agent görevi atlandı.',
   'sessions.sidebar.session.export.skippedSubtaskMany': 'Session dışa aktarıldı ancak yüklenemeyen {count} alt agent görevi atlandı.',
-  'sessions.sidebar.session.export.dialog.title': 'Markdown olarak dışa aktar',
-  'sessions.sidebar.session.export.dialog.descriptionSingle': 'Bu session\'da {count} alt agent görevi var. Dışa aktarmaya dahil edilsin mi?',
-  'sessions.sidebar.session.export.dialog.descriptionMany': 'Bu session\'da {count} alt agent görevi var. Dışa aktarmaya dahil edilsin mi?',
+  'sessions.sidebar.session.export.dialog.title': 'Oturumu dışa aktar',
+  'sessions.sidebar.session.export.dialog.descriptionSingle': 'Bu session\'da {count} alt ajan oturumu var. Dışa aktarmaya dahil edilsin mi?',
+  'sessions.sidebar.session.export.dialog.descriptionMany': 'Bu session\'da {count} alt ajan oturumu var. Dışa aktarmaya dahil edilsin mi?',
   'sessions.sidebar.session.export.dialog.includeSubtasks': 'Alt agent görevlerini dahil et',
   'sessions.sidebar.session.export.dialog.confirm': 'Dışa aktar',
+  'sessions.sidebar.session.export.dialog.descriptionNoSubagentSessions': 'Dışa aktarma, konuşmanın okunabilir bir kaydıdır; alt ajanların çalışması yerinde görünür.',
+  'sessions.sidebar.session.export.dialog.descriptionIncompleteIncluding': 'Alt ajan oturumlarının sayısı henüz bilinmiyor, çünkü oturum listesi okunuyor. Dışa aktarma, bulduğu alt ajan işini içerir.',
+  'sessions.sidebar.session.export.dialog.descriptionIncompleteExcluding': 'Alt ajan oturumlarının sayısı henüz bilinmiyor, çünkü oturum listesi okunuyor. Dışa aktarma, alt ajan işini dışarıda bırakır.',
+  'sessions.sidebar.session.export.dialog.retryCount': 'Yeniden denetle',
+  'sessions.sidebar.session.export.dialog.format': 'Biçim',
+  'sessions.sidebar.session.export.dialog.detail': 'Ayrıntı',
+  'sessions.sidebar.session.export.dialog.detailReadable': 'Okunabilir',
+  'sessions.sidebar.session.export.dialog.detailReadableHint': 'Bir konuşma. Uzun araç çıktıları kısaltılır ve işaretlenir.',
+  'sessions.sidebar.session.export.dialog.detailFull': 'Tüm ayrıntılar',
+  'sessions.sidebar.session.export.dialog.detailFullHint': 'Her aracın girdisi, çıktısı ve sonucu oturumun kaydettiği gibi.',
   'sessions.sidebar.session.status.active': 'Session aktif',
   'sessions.sidebar.session.status.unread': 'Okunmamış güncellemeler',
   'sessions.sidebar.session.status.backgroundSubagent': 'Alt ajan arka planda çalışıyor',

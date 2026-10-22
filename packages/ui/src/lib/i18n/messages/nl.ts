@@ -2,6 +2,7 @@ import { settingsDict } from './nl.settings';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
+import { exportDocumentI18n } from './export-document.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
@@ -139,6 +140,7 @@ export const dict = {
   ...linearIssuePickerI18n.nl,
   ...referencePickerI18n.nl,
   ...sessionMenuHintsI18n.nl,
+  ...exportDocumentI18n.nl,
   ...projectKnowledgeI18n.nl,
   ...linearPanelI18n.nl,
   ...routingI18n.nl,
@@ -721,7 +723,7 @@ export const dict = {
   'sessions.sidebar.session.menu.copied': 'Gekopieerd',
   'sessions.sidebar.session.menu.copyLink': 'Link kopiëren',
   'sessions.sidebar.session.menu.unshare': 'Delen stoppen',
-  'sessions.sidebar.session.menu.exportMarkdown': 'Markdown exporteren',
+  'sessions.sidebar.session.menu.exportSession': 'Sessie exporteren',
   'sessions.sidebar.session.menu.moveToWorktree': 'Naar nieuwe worktree verplaatsen',
   'sessions.sidebar.session.menu.moveToWorktreeTargets': 'Naar worktree verplaatsen',
   'sessions.sidebar.session.menu.newWorktree': 'Nieuwe worktree...',
@@ -744,14 +746,23 @@ export const dict = {
   'sessions.sidebar.session.export.failedLoadHistory': 'Kan volledige sessiegeschiedenis niet laden',
   'sessions.sidebar.session.export.success': 'Sessie geëxporteerd',
   'sessions.sidebar.session.export.failedRevealPath': 'Kan het pad niet tonen',
-  'sessions.sidebar.session.export.untitledSubagent': 'Naamloze sub-agent',
   'sessions.sidebar.session.export.skippedSubtaskSingle': 'Sessie geëxporteerd, maar {count} sub-agenttaak overgeslagen die niet kon worden geladen.',
   'sessions.sidebar.session.export.skippedSubtaskMany': 'Sessie geëxporteerd, maar {count} sub-agenttaken overgeslagen die niet konden worden geladen.',
-  'sessions.sidebar.session.export.dialog.title': 'Markdown exporteren',
-  'sessions.sidebar.session.export.dialog.descriptionSingle': 'Deze sessie heeft {count} sub-agenttaak. Opnemen in de export?',
-  'sessions.sidebar.session.export.dialog.descriptionMany': 'Deze sessie heeft {count} sub-agenttaken. Opnemen in de export?',
+  'sessions.sidebar.session.export.dialog.title': 'Sessie exporteren',
+  'sessions.sidebar.session.export.dialog.descriptionSingle': 'Deze sessie heeft {count} sub-agentsessie. Opnemen in de export?',
+  'sessions.sidebar.session.export.dialog.descriptionMany': 'Deze sessie heeft {count} sub-agentsessies. Opnemen in de export?',
   'sessions.sidebar.session.export.dialog.includeSubtasks': 'Sub-agenttaken opnemen',
   'sessions.sidebar.session.export.dialog.confirm': 'Exporteren',
+  'sessions.sidebar.session.export.dialog.descriptionNoSubagentSessions': 'De export is een leesbaar verslag van het gesprek, met het werk van de sub-agents op de juiste plek.',
+  'sessions.sidebar.session.export.dialog.descriptionIncompleteIncluding': 'Het aantal sub-agentsessies is nog niet bekend, omdat de sessielijst nog wordt gelezen. De export neemt de gevonden sub-agentwerk mee.',
+  'sessions.sidebar.session.export.dialog.descriptionIncompleteExcluding': 'Het aantal sub-agentsessies is nog niet bekend, omdat de sessielijst nog wordt gelezen. De export laat de sub-agentwerk weg.',
+  'sessions.sidebar.session.export.dialog.retryCount': 'Opnieuw controleren',
+  'sessions.sidebar.session.export.dialog.format': 'Formaat',
+  'sessions.sidebar.session.export.dialog.detail': 'Detailniveau',
+  'sessions.sidebar.session.export.dialog.detailReadable': 'Leesbaar',
+  'sessions.sidebar.session.export.dialog.detailReadableHint': 'Een gesprek. Lange tooluitvoer wordt ingekort en gemarkeerd.',
+  'sessions.sidebar.session.export.dialog.detailFull': 'Volledige details',
+  'sessions.sidebar.session.export.dialog.detailFullHint': 'Elke toolinvoer, uitvoer en resultaat, zoals de sessie ze heeft vastgelegd.',
   'sessions.sidebar.session.status.active': 'Sessie actief',
   'sessions.sidebar.session.status.unread': 'Ongelezen updates',
   'sessions.sidebar.session.status.backgroundSubagent': 'Subagent draait op de achtergrond',

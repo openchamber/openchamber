@@ -732,7 +732,12 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
     const content = typeof (body as { content?: unknown }).content === 'string'
       ? (body as { content: string }).content
       : undefined;
-    const data = await sendBridgeMessage('api:files/save-markdown', { fileName, content });
+    // The format names the type of file the save dialog offers. It goes on
+    // as it came: the bridge owns the format contract, so a format it does
+    // not know is named there instead of the webview dropping it and the
+    // document being saved as Markdown.
+    const format = body.format;
+    const data = await sendBridgeMessage('api:files/save-markdown', { fileName, content, format });
     return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
   }
 

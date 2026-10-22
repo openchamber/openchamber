@@ -19,18 +19,32 @@ mock.module('child_process', () => ({
   exec: execMock,
 }));
 
+const saveDialogs = [];
+const savedFiles = [];
+let saveDialogTarget = { fsPath: '/workspace/session.md' };
+
 mock.module('vscode', () => ({
   workspace: {
     workspaceFolders: [{ uri: { fsPath: '/workspace' } }],
-    fs: {},
+    fs: {
+      writeFile: async (uri, bytes) => {
+        savedFiles.push({ uri, bytes });
+      },
+    },
   },
   Uri: {
     file: (fsPath) => ({ fsPath }),
+    joinPath: (base, ...parts) => ({ fsPath: [base.fsPath, ...parts].join('/') }),
   },
   FileType: {
     Directory: 2,
   },
-  window: {},
+  window: {
+    showSaveDialog: async (options) => {
+      saveDialogs.push(options);
+      return saveDialogTarget;
+    },
+  },
 }));
 
 const { clearGitReadCacheForTests, handleFsBridgeMessage } = await import('./bridge-fs-runtime');
@@ -84,5 +98,70 @@ describe('bridge fs exec git read cache', () => {
     await handleFsBridgeMessage({ id: '2', type: 'api:fs:exec', payload: { commands: [command], cwd } }, deps);
 
     expect(execCalls).toHaveLength(2);
+  });
+});
+
+describe('bridge fs save markdown format', () => {
+  const save = (payload) => handleFsBridgeMessage(
+    { id: 'save', type: 'api:files/save-markdown', payload },
+    deps,
+  );
+
+  beforeEach(() => {
+    saveDialogs.length = 0;
+    savedFiles.length = 0;
+    saveDialogTarget = { fsPath: '/workspace/session.md' };
+  });
+
+  it('saves the content with the filter of the format it was given', async () => {
+    const response = await save({ fileName: 'session.html', content: '<p>hello</p>', format: 'html' });
+
+    expect(response?.success).toBe(true);
+    expect(saveDialogs[0]?.filters).toEqual({ HTML: ['html'] });
+    expect(savedFiles).toHaveLength(1);
+    expect(savedFiles[0].bytes.toString('utf8')).toBe('<p>hello</p>');
+  });
+
+  it('names a format it does not know instead of calling the payload invalid', async () => {
+    const response = await save({ fileName: 'session.md', content: '# hello', format: 'pdf' });
+
+    expect(response?.success).toBe(false);
+    expect(response?.error).toBe('Unsupported save format: pdf');
+    expect(saveDialogs).toHaveLength(0);
+    expect(savedFiles).toHaveLength(0);
+  });
+
+  it('names a format that is not a name at all', async () => {
+    const response = await save({ fileName: 'session.md', content: '# hello', format: 42 });
+
+    expect(response?.success).toBe(false);
+    expect(response?.error).toBe('Unsupported save format: 42');
+    expect(savedFiles).toHaveLength(0);
+  });
+
+  it('falls back to the Markdown filter when the request names no format', async () => {
+    const response = await save({ fileName: 'session.md', content: '# hello' });
+
+    expect(response?.success).toBe(true);
+    expect(saveDialogs[0]?.filters).toEqual({ Markdown: ['md'] });
+    expect(savedFiles).toHaveLength(1);
+    expect(savedFiles[0].bytes.toString('utf8')).toBe('# hello');
+  });
+
+  it('reads a blank format name as no format named', async () => {
+    const response = await save({ fileName: 'session.md', content: '# hello', format: '  ' });
+
+    expect(response?.success).toBe(true);
+    expect(saveDialogs[0]?.filters).toEqual({ Markdown: ['md'] });
+    expect(savedFiles).toHaveLength(1);
+  });
+
+  it('refuses an empty document and writes nothing', async () => {
+    const response = await save({ fileName: 'session.md', content: '', format: 'html' });
+
+    expect(response?.success).toBe(false);
+    expect(response?.error).toBe('Invalid markdown payload');
+    expect(saveDialogs).toHaveLength(0);
+    expect(savedFiles).toHaveLength(0);
   });
 });

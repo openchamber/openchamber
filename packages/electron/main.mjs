@@ -4362,6 +4362,36 @@ const closeAllDevTunnels = () => {
   pending.then((client) => client.closeAll()).catch(() => {});
 };
 
+/**
+ * The file type a save dialog offers.
+ *
+ * The caller names the format it wrote, so the dialog offers the type of
+ * file that is actually being saved. A caller that names nothing gets the
+ * Markdown filter, which is what the command always offered before.
+ */
+const SAVE_FILE_FILTERS = {
+  markdown: { name: 'Markdown', extensions: ['md'] },
+  html: { name: 'HTML', extensions: ['html'] },
+  json: { name: 'JSON', extensions: ['json'] },
+};
+
+const SAVE_FILE_FORMATS = Object.keys(SAVE_FILE_FILTERS);
+
+/**
+ * The format a caller named for the file it is saving.
+ *
+ * The caller sends the format it wrote, so the dialog offers the type of
+ * file that is actually being saved. A caller that names nothing, or names
+ * something the export does not write, gets the Markdown filter, which is
+ * what the command always offered before.
+ */
+const readSaveFileFormat = (value) => {
+  const name = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  return SAVE_FILE_FORMATS.includes(name) ? name : 'markdown';
+};
+
+const readSaveFileFilter = (format) => SAVE_FILE_FILTERS[format];
+
 const handleInvoke = async (browserWindow, command, args = {}) => {
   switch (command) {
     case 'desktop_collect_local_diagnostics':
@@ -4806,9 +4836,11 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       }
 
       const content = typeof args.content === 'string' ? args.content : '';
+      // The caller names the format it wrote, so the dialog offers the type
+      // of file that is actually being saved rather than always Markdown.
       const result = await dialog.showSaveDialog(browserWindow || undefined, {
         defaultPath,
-        filters: [{ name: 'Markdown', extensions: ['md'] }],
+        filters: [readSaveFileFilter(readSaveFileFormat(args.filter))],
       });
       if (result.canceled || !result.filePath) {
         return null;

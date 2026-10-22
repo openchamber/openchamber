@@ -3,6 +3,7 @@ import { settingsDict } from './es.settings';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
+import { exportDocumentI18n } from './export-document.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
@@ -150,6 +151,7 @@ export const dict: Record<I18nKey, string> = {
   ...linearIssuePickerI18n.es,
   ...referencePickerI18n.es,
   ...sessionMenuHintsI18n.es,
+  ...exportDocumentI18n.es,
   ...projectKnowledgeI18n.es,
   ...linearPanelI18n.es,
   ...routingI18n.es,
@@ -731,7 +733,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.session.menu.copied": "Copiado",
   "sessions.sidebar.session.menu.copyLink": "Copiar enlace",
   "sessions.sidebar.session.menu.unshare": "Dejar de compartir",
-  "sessions.sidebar.session.menu.exportMarkdown": "Exportar Markdown",
+  "sessions.sidebar.session.menu.exportSession": "Exportar sesión",
   "sessions.sidebar.session.menu.moveToWorktree": "Mover a un worktree nuevo",
   "sessions.sidebar.session.menu.moveToWorktreeTargets": "Mover a worktree",
   "sessions.sidebar.session.menu.newWorktree": "Nuevo worktree...",
@@ -754,14 +756,23 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.session.export.failedLoadHistory": "No se pudo cargar el historial completo de la sesión",
   "sessions.sidebar.session.export.success": "Sesión exportada",
   "sessions.sidebar.session.export.failedRevealPath": "No se pudo mostrar la ruta",
-  "sessions.sidebar.session.export.untitledSubagent": "Subagente sin título",
   "sessions.sidebar.session.export.skippedSubtaskSingle": "La sesión se exportó, pero se omitió {count} tarea de subagente que no se pudo cargar.",
   "sessions.sidebar.session.export.skippedSubtaskMany": "La sesión se exportó, pero se omitieron {count} tareas de subagente que no se pudieron cargar.",
-  "sessions.sidebar.session.export.dialog.title": "Exportar Markdown",
-  "sessions.sidebar.session.export.dialog.descriptionSingle": "Esta sesión tiene {count} tarea de subagente. ¿Incluirla en la exportación?",
-  "sessions.sidebar.session.export.dialog.descriptionMany": "Esta sesión tiene {count} tareas de subagente. ¿Incluirlas en la exportación?",
+  'sessions.sidebar.session.export.dialog.title': 'Exportar sesión',
+  'sessions.sidebar.session.export.dialog.descriptionSingle': 'Esta sesión tiene {count} sesión de subagente. ¿Incluirla en la exportación?',
+  'sessions.sidebar.session.export.dialog.descriptionMany': 'Esta sesión tiene {count} sesiones de subagente. ¿Incluirlas en la exportación?',
   "sessions.sidebar.session.export.dialog.includeSubtasks": "Incluir tareas de subagente",
   "sessions.sidebar.session.export.dialog.confirm": "Exportar",
+  'sessions.sidebar.session.export.dialog.descriptionNoSubagentSessions': 'La exportación es un registro legible de la conversación, con el trabajo de los subagentes en su sitio.',
+  'sessions.sidebar.session.export.dialog.descriptionIncompleteIncluding': 'Aún no se conoce el número de sesiones de subagente, porque la lista de sesiones se está leyendo. La exportación incluye el trabajo de subagente que encuentre.',
+  'sessions.sidebar.session.export.dialog.descriptionIncompleteExcluding': 'Aún no se conoce el número de sesiones de subagente, porque la lista de sesiones se está leyendo. La exportación deja fuera el trabajo de subagente.',
+  'sessions.sidebar.session.export.dialog.retryCount': 'Comprobar de nuevo',
+  'sessions.sidebar.session.export.dialog.format': 'Formato',
+  'sessions.sidebar.session.export.dialog.detail': 'Detalle',
+  'sessions.sidebar.session.export.dialog.detailReadable': 'Legible',
+  'sessions.sidebar.session.export.dialog.detailReadableHint': 'Una conversación. Los resultados largos de las herramientas se recortan y se marcan.',
+  'sessions.sidebar.session.export.dialog.detailFull': 'Detalles completos',
+  'sessions.sidebar.session.export.dialog.detailFullHint': 'Cada entrada, salida y resultado de las herramientas, tal como los registró la sesión.',
   "sessions.sidebar.session.status.active": "Sesión activa",
   "sessions.sidebar.session.status.unread": "Actualizaciones no leídas",
   "sessions.sidebar.session.status.backgroundSubagent": "Subagente en ejecución en segundo plano",

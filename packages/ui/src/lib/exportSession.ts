@@ -1,69 +1,35 @@
+/**
+ * The session export's public surface.
+ *
+ * The export itself lives in `./export/`: one pipeline that collects the
+ * sessions, normalizes their records into events, resolves the subagent
+ * relationships, orders the result and projects it into a view. This module
+ * keeps the API the rest of the app uses and the parts that touch the
+ * platform — the download, the desktop save dialog, the file name.
+ *
+ * The Markdown the app used to write is still written from the same messages,
+ * with the same model names and the same context handling. What changed is
+ * that the document is built from the shared pipeline, so the Header export
+ * and the Sidebar export now mean the same thing.
+ */
+
+import { z } from 'zod';
 import type { Message, Part } from '@/lib/opencode/model';
-import { hasParts } from '@/lib/opencode/model';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
-import { getCurrentIntlLocale } from '@/lib/i18n';
-import { isVSCodeRuntime, openDesktopPath, revealDesktopPath, saveDesktopMarkdownFile } from '@/lib/desktop';
+import { isVSCodeRuntime, openDesktopPath, revealDesktopPath, saveDesktopMarkdownFile, type DesktopSaveFileFormat } from '@/lib/desktop';
 import { getRevealLabelKey } from '@/lib/utils';
-import { readContextPart } from '@/lib/messages/contextParts';
-import { formatContextMessage, formatMessageText } from '@/lib/messages/messageMarkdown';
+import { formatMessageText } from '@/lib/messages/messageMarkdown';
+import { readTextField } from '@/lib/export/values';
+import type { ExportPipelineResult } from '@/lib/export/pipeline';
+import { renderExportHtml } from '@/lib/export/html';
+import { renderExportJson } from '@/lib/export/json';
+import { renderExportMarkdown } from '@/lib/export/markdown';
+import type { ProjectionMode } from '@/lib/export/project';
 
 export type SessionMessageRecord = { info: Message; parts: Part[] };
 
-export type ChildSessionExport = {
-  title: string;
-  agent?: string;
-  records: SessionMessageRecord[];
-  children: ChildSessionExport[];
-};
-
-function formatTimestamp(timestamp: number | undefined): string {
-  if (typeof timestamp !== 'number' || !Number.isFinite(timestamp)) {
-    return '';
-  }
-
-  const date = new Date(timestamp);
-  if (Number.isNaN(date.getTime())) {
-    return '';
-  }
-
-  const monthPart = date.toLocaleString(getCurrentIntlLocale(), { month: 'short' });
-  const dayPart = date.getDate();
-  const yearPart = date.getFullYear();
-  const hours = String(date.getHours()).padStart(2, '0');
-  const minutes = String(date.getMinutes()).padStart(2, '0');
-
-  return `${monthPart} ${dayPart}, ${yearPart}, ${hours}:${minutes}`;
-}
-
-function formatAssistantModel(record: SessionMessageRecord): string {
-  if (record.info.role !== 'assistant') {
-    return '';
-  }
-
-  const providerID = record.info.providerID.trim();
-  const modelID = record.info.modelID.trim();
-  const model = providerID && modelID ? `${providerID}/${modelID}` : (modelID || providerID);
-
-  // OpenCode records `default` when no level was picked; like the chat
-  // footer, the export names only a level the user chose.
-  const variant = record.info.variant?.trim();
-  if (!model || !variant || ['default', 'none'].includes(variant.toLowerCase())) {
-    return model;
-  }
-
-  return `${model}, thinking: ${variant}`;
-}
-
-function formatMessageHeader(record: SessionMessageRecord): string {
-  const label = record.info.role === 'user' ? 'User' : record.info.role === 'synthetic' ? 'Context' : 'Assistant';
-  const timestamp = formatTimestamp(record.info.time?.created);
-  const assistantModel = formatAssistantModel(record);
-  const details = timestamp && assistantModel
-    ? `${timestamp} (${assistantModel})`
-    : (timestamp || assistantModel);
-
-  return details ? `**${label}**\n\n*${details}*` : `**${label}**`;
-}
+/** The formats an export can be written in. */
+export type ExportFormat = 'markdown' | 'html' | 'json';
 
 /**
  * A message's text the way the Markdown export renders it. Guest message and
@@ -74,74 +40,34 @@ export function formatMessageRecordText(record: SessionMessageRecord): string {
   return formatMessageText(record.parts, { user: record.info.role === 'user' });
 }
 
-function formatMessageAsMarkdown(record: SessionMessageRecord): string {
-  // Only the conversation roles carry parts. A synthetic message is either
-  // context the user attached to the next prompt — exported as Context, the
-  // way v1 exported it from inside the user message — or prompt plumbing a
-  // server plugin injected. Plumbing is not something the user wrote or the
-  // agent said, so it stays out of the transcript entirely.
-  if (record.info.role === 'synthetic') {
-    if (!readContextPart(record.info)) return '';
-    const context = formatContextMessage(record.info).trim();
-    return context ? `${formatMessageHeader(record)}\n\n${context}` : '';
-  }
-  if (!hasParts(record.info)) return '';
-
-  const role = formatMessageHeader(record);
-  const text = formatMessageRecordText(record);
-
-  if (!text) return '';
-  return `${role}\n\n${text}`;
-}
-
-function formatChildSessionAsMarkdown(child: ChildSessionExport, depth: number): string {
-  const heading = '#'.repeat(Math.min(depth + 1, 6));
-  const agentLabel = child.agent ? ` — ${child.agent}` : '';
-  const childHeader = `${heading} Sub-agent: ${child.title}${agentLabel}\n\n---\n\n`;
-
-  const childBody = child.records
-    .map(formatMessageAsMarkdown)
-    .filter(Boolean)
-    .join('\n\n---\n\n');
-
-  const parts = [childHeader + childBody];
-
-  for (const grandchild of child.children) {
-    parts.push(formatChildSessionAsMarkdown(grandchild, depth + 1));
-  }
-
-  return parts.join('\n\n---\n\n');
-}
-
-export function formatSessionAsMarkdown(
-  messages: SessionMessageRecord[],
+/**
+ * Renders the export the pipeline produced, in the requested format.
+ *
+ * The pipeline's result is the one history: the three renderers read the same
+ * events, so they cannot disagree about what happened.
+ */
+export const renderExportDocument = (
+  result: ExportPipelineResult,
+  format: ExportFormat,
+  mode: ProjectionMode,
   sessionTitle?: string | null,
-  childSessions?: ChildSessionExport[],
-): string {
+): string => {
+  const { projection, timeline, rootAgent } = result;
   const title = sessionTitle?.trim() || 'Session';
-  const date = new Date().toISOString().split('T')[0];
+  const sessionCount = timeline.sessions.size;
 
-  const header = `# ${title}\n\n*Exported on ${date}*\n\n---\n\n`;
-
-  const body = messages
-    .map(formatMessageAsMarkdown)
-    .filter(Boolean)
-    .join('\n\n---\n\n');
-
-  let result = header + body;
-
-  if (childSessions && childSessions.length > 0) {
-    const childMarkdown = childSessions
-      .map((child) => formatChildSessionAsMarkdown(child, 1))
-      .join('\n\n---\n\n');
-    result += '\n\n---\n\n' + childMarkdown;
+  if (format === 'json') {
+    return renderExportJson(timeline);
   }
+  if (format === 'html') {
+    return renderExportHtml(projection, { title, mode, findings: timeline.findings, sessionCount, rootAgent, excluded: timeline.excluded });
+  }
+  return renderExportMarkdown(projection, { title, mode, findings: timeline.findings, sessionCount, rootAgent, excluded: timeline.excluded });
+};
 
-  return result;
-}
-
-export function downloadAsMarkdown(content: string, filename: string): void {
-  const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' });
+/** Downloads any exported text under the name the caller chose. */
+export function downloadAsText(content: string, filename: string, mimeType: string): void {
+  const blob = new Blob([content], { type: `${mimeType};charset=utf-8` });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = url;
@@ -152,8 +78,36 @@ export function downloadAsMarkdown(content: string, filename: string): void {
   URL.revokeObjectURL(url);
 }
 
-export async function saveAsMarkdownDesktop(content: string, filename: string): Promise<string | null> {
-  const desktopPath = await saveDesktopMarkdownFile(filename, content);
+/**
+ * The answer the VS Code bridge gives after a save.
+ *
+ * The bridge answers with whatever it has, so the answer is parsed at the
+ * call site and a malformed one is treated as no answer.
+ */
+const saveResultSchema = z.object({
+  saved: z.boolean().optional(),
+  path: z.string().optional(),
+});
+
+/**
+ * The file type the save dialog offers for each export format.
+ *
+ * The dialog must name the type of file that is actually being written: a
+ * document saved as HTML is not a Markdown file, and the dialog that says
+ * otherwise misleads the person saving it.
+ */
+const SAVE_FORMATS = new Map<ExportFormat, DesktopSaveFileFormat>([
+  ['markdown', 'markdown'],
+  ['html', 'html'],
+  ['json', 'json'],
+]);
+
+export async function saveAsMarkdownDesktop(
+  content: string,
+  filename: string,
+  format: ExportFormat = 'markdown',
+): Promise<string | null> {
+  const desktopPath = await saveDesktopMarkdownFile(filename, content, SAVE_FORMATS.get(format) ?? 'markdown');
   if (desktopPath) {
     return desktopPath;
   }
@@ -163,16 +117,17 @@ export async function saveAsMarkdownDesktop(content: string, filename: string): 
   }
 
   try {
-    const payload = await getRegisteredRuntimeAPIs()?.vscode?.saveMarkdown?.({ fileName: filename, content }) as { saved?: boolean; path?: string } | undefined;
-    if (!payload) {
-      return null;
-    }
-    if (payload.saved !== true) {
+    const answer = await getRegisteredRuntimeAPIs()?.vscode?.saveMarkdown?.({
+      fileName: filename,
+      content,
+      format: SAVE_FORMATS.get(format) ?? 'markdown',
+    });
+    const payload = saveResultSchema.safeParse(answer);
+    if (!payload.success || payload.data.saved !== true) {
       return null;
     }
 
-    const savedPath = typeof payload.path === 'string' ? payload.path.trim() : '';
-    return savedPath.length > 0 ? savedPath : null;
+    return readTextField(payload.data.path) ?? null;
   } catch {
     return null;
   }
@@ -200,7 +155,7 @@ export function getExportRevealLabelKey() {
   return getRevealLabelKey();
 }
 
-export function buildExportFilename(sessionTitle?: string | null): string {
+export function buildExportFilename(sessionTitle?: string | null, extension = 'md'): string {
   const base = sessionTitle?.trim() || 'session';
   const safe = base
     .normalize('NFKC')
@@ -210,5 +165,5 @@ export function buildExportFilename(sessionTitle?: string | null): string {
     .slice(0, 60);
   const normalizedBase = safe || 'session';
   const date = new Date().toISOString().split('T')[0];
-  return `${normalizedBase}-${date}.md`;
+  return `${normalizedBase}-${date}.${extension}`;
 }
