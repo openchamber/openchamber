@@ -127,6 +127,21 @@ describe('source-control binding read contexts', () => {
     // A host the binding answers for keeps its bound account.
     expect(getBoundSourceControlReadContexts(bindingRead('bound'), '/repo', active, defaults).map((context) => context.accountId)).toEqual(['github.com#7']);
   });
+
+  test('reads an unbound repository on a loopback instance with a port through its connected account', () => {
+    const url = 'http://127.0.0.1:3390/alice/app.git';
+    const read: SourceControlBindingRead = {
+      status: 'missing',
+      repository: { ...repository, remotes: [{ name: 'origin', fetch: { displayUrl: url, fingerprint: 'fetch' }, push: { displayUrl: url, fingerprint: 'push' } }] },
+      revision: 0,
+      binding: null,
+    };
+    const gitea: SourceControlIdentity = { provider: 'gitea', instance: 'http://127.0.0.1:3390' };
+    const active = (identity: SourceControlIdentity) => identity.provider === 'gitea' ? 'gitea#1' : null;
+    expect(getBoundSourceControlReadContexts(read, '/repo', active, [...defaults, gitea])).toEqual([{
+      directory: '/repo', repositoryId: 'repo-one', provider: 'gitea', instance: 'http://127.0.0.1:3390', accountId: 'gitea#1', bindingRevision: 0, primaryRemote: 'origin',
+    }]);
+  });
 });
 
 describe('activeIdentityFor', () => {

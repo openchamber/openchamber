@@ -816,7 +816,7 @@ Expected model:
 - sidebar bootstrap reads the authoritative repository binding for each demanded directory; missing and `needs-attention` bindings issue no status request
 - sidebar status keys include the bound account, repository, revision, provider instance, and primary remote, so rebinding cannot overwrite or reuse another authority's result
 - source-control status and detailed-context caches use soft count targets: watched or loading entries remain protected, and failed unique-context churn evicts older inactive entries instead of growing without bound
-- no live PR work for header
+- no live PR work for header: the visible Git view asks once for its branch's status through `useBranchPullRequestRequest` (TTL-deduped, no watching), which feeds the header chip
 - no background PR sweeps outside visible demand
 
 ## Known Intentional Fallbacks

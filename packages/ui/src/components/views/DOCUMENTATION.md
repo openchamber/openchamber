@@ -58,12 +58,13 @@ and jump to Branch when the base arrived). The Git view and the pull request
 view take the same base for a new pull request and for updates
 (`useBranchPullRequestBase`): a base chosen for the branch, its open pull
 request's target, or the parent it was made on (a lower layer of a stack),
-and the worktree's own guess only when none of those answers. Changes, mobile Changes and
-Walkthrough each ask for the branch's pull request themselves
-(`hooks/useBranchPullRequestRequest.ts`) while shown: the base prefers its
-target, and without asking a stacked branch checked out in the same worktree
-compared against the default branch until the Git view or the sidebar happened
-to ask. Entry points that name what they show keep
+and the worktree's own guess only when none of those answers. The Git view,
+Changes, mobile Changes and Walkthrough each ask for the branch's pull request
+themselves (`hooks/useBranchPullRequestRequest.ts`) while shown: the base
+prefers its target, and the Git header's pull request chip reads the same
+status. Without asking, a stacked branch checked out in the same worktree
+compared against the default branch, and a project's own checkout (which has no
+sidebar worktree row) showed no chip, until some other surface happened to ask. Entry points that name what they show keep
 their scope: the work-status Changes row counts working-tree changes and opens
 `working`, and a file opened from the Git panel or a tool card opens its own
 working or staged diff.

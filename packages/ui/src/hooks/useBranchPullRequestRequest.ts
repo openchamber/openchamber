@@ -7,10 +7,12 @@ import { getSourceControlAuthKey, getSourceControlReadContextAuthState, useSourc
 
 /**
  * Asks for the open pull or merge request of the checked-out branch through
- * the folder's bound context. Changes and Walkthrough compare a branch against
- * its pull request's base; without asking themselves they waited for the Git
- * view or the sidebar to have asked, so a stacked branch checked out in the
- * same worktree compared against the default branch until then. The status
+ * the folder's bound context. The Git view, Changes and Walkthrough compare a
+ * branch against its pull request's base, and the Git header shows its chip;
+ * without asking themselves they waited for another surface or the sidebar to
+ * have asked, so a stacked branch checked out in the same worktree compared
+ * against the default branch until then, and a project's own checkout showed
+ * no chip at all. The status
  * store dedupes by signature and throttles by TTL, so several surfaces asking
  * cost one request.
  */

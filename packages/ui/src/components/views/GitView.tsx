@@ -80,6 +80,7 @@ import { getFreshestSourceControlStatusForBranch, useGitHubPrStatusStore } from 
 import { getSourceControlAuthKey, getSourceControlReadContextAuthState, useSourceControlAuthStore, useConnectedAccountIds } from '@/stores/useSourceControlAuthStore';
 import { useRepositoryBinding } from '@/lib/source-control/repository-binding';
 import { useBranchPullRequestBase } from '@/hooks/useBranchComparisonBase';
+import { useBranchPullRequestRequest } from '@/hooks/useBranchPullRequestRequest';
 import { hasConfigChangedGrant } from '@/lib/source-control/types';
 import { createGitIndexMutationQueue, type GitIndexMutationDirection, type GitIndexMutationQueue } from './git/gitIndexMutationQueue';
 import type { GitRemote } from '@/lib/gitApi';
@@ -1590,6 +1591,10 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
   // The branch's own parent (a chosen base, its pull request's target, the
   // layer below it in a stack) wins over the worktree's guess.
   const baseBranch = useBranchPullRequestBase(gitDirectory ?? null, currentBranch, isActive, binding, branches, derivedBaseBranch);
+  // The header's pull request chip and the base above read the branch's pull
+  // request status; ask for it while shown, or a branch nothing else asked
+  // about (a project's own checkout has no sidebar worktree row) shows none.
+  useBranchPullRequestRequest(isActive ? gitDirectory ?? null : null, isActive ? currentBranch : null, binding);
 
   const updateTargetBranch = React.useMemo(() => {
     const primaryRemote = binding.contexts[0]?.primaryRemote;
