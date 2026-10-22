@@ -417,6 +417,26 @@ export type ToolDescription =
   /** An `execute` script, described by the tools it called. */
   | { kind: "tools"; calls: Array<{ name: string; count: number }>; overflow: number }
 
+/** One line for a tool's description, shared by the Activity header and the composer. */
+export const toolDescriptionText = (description: ToolDescription | null): string => {
+  if (!description) return ""
+  switch (description.kind) {
+    case "path":
+    case "text":
+      return description.value
+    case "questions":
+      return `${description.count} question${description.count === 1 ? "" : "s"}`
+    case "files":
+      return description.count === 1
+        ? description.files[0] ?? ""
+        : `${description.count} files`
+    case "tools":
+      return description.calls
+        .map((call) => (call.count > 1 ? `${call.name} ×${call.count}` : call.name))
+        .join(", ")
+  }
+}
+
 const MAX_COMMAND_LENGTH = 100
 /** How many distinct tools an `execute` row names before it counts the rest. */
 const MAX_DESCRIBED_TOOL_CALLS = 4

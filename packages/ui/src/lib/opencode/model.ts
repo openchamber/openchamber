@@ -468,3 +468,34 @@ export const getLastConversationRecord = <T extends { info: Message }>(
 /** An assistant turn OpenCode started and has not reported completed. */
 export const isIncompleteAssistantTurn = (message: Message | undefined): boolean =>
   message?.role === "assistant" && message.time.completed === undefined
+
+/**
+ * A tool call of the latest assistant turn is still running or being emitted.
+ * A step completes with `finish: "tool-calls"` before its tools start, so the
+ * last assistant message can already be complete while the session waits on
+ * one. A queued user prompt can also sit after that step; the search starts at
+ * the newest assistant step rather than the newest message.
+ */
+export const hasRunningToolInTurn = (
+  messages: readonly Message[],
+  partsForMessage: (messageID: string) => readonly Part[],
+): boolean => {
+  let lastAssistant = -1
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index]?.role === "assistant") {
+      lastAssistant = index
+      break
+    }
+  }
+  if (lastAssistant < 0) return false
+  for (let index = lastAssistant; index >= 0; index -= 1) {
+    const message = messages[index]
+    if (!message) continue
+    if (message.role === "user") return false
+    if (message.role !== "assistant") continue
+    if (partsForMessage(message.id).some((part) => (
+      part.type === "tool" && (part.state.status === "running" || part.state.status === "pending")
+    ))) return true
+  }
+  return false
+}

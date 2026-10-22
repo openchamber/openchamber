@@ -12,6 +12,7 @@ import {
 import type { ChatMessageEntry, TurnRecord } from '../lib/turns/types';
 import { getLiveFinalMessage, getShownPages } from '../lib/turns/liveActivity';
 import { summarizeLiveActivity } from '../lib/turns/liveActivitySummary';
+import { latestRunningTool } from '../lib/turns/liveActivityStatus';
 import { LiveActivityCollapse } from './LiveActivityCollapse';
 import { LiveFinalActivityContext, LiveTurnHoistedPagesContext } from './liveActivityContext';
 import { ShownPage } from '../message/parts/HtmlRenderFrame';
@@ -41,6 +42,10 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, expanded, onToggle, 
     );
     const settled = Boolean(finalMessage) || hasLaterAssistant;
     const isExpanded = !settled || expanded;
+    const liveTool = React.useMemo(
+        () => latestRunningTool(turn.activityParts.map((activity) => activity.part)),
+        [turn.activityParts],
+    );
     // One toggle for the whole turn. Folded, a working turn shows only its
     // latest rows (the header counts the earlier ones) and a settled one shows
     // none; opened, both show every row. The trim also stays while a settled
@@ -110,6 +115,16 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, expanded, onToggle, 
             <Icon name="stack" className="size-3.5 shrink-0 text-[var(--tools-icon)]" />
             <span className="shrink-0 font-semibold text-[var(--tools-title)]">{t('chat.liveActivity.title')}</span>
             <Icon name={expanded ? 'arrow-down-s' : 'arrow-right-s'} className="size-3 shrink-0" />
+            {liveTool && !expanded ? (
+                <span className="flex min-w-0 flex-1 items-center gap-1 typography-meta" data-live-tool="true">
+                    <span className="shrink-0 font-medium" style={{ color: 'var(--tools-title)' }}>{liveTool.label}</span>
+                    {liveTool.description ? (
+                        <span className="min-w-0 truncate font-mono" style={{ color: 'var(--tools-description)' }} title={liveTool.description}>
+                            {liveTool.description}
+                        </span>
+                    ) : null}
+                </span>
+            ) : null}
             {fileLabel ? (
                 <span className="flex min-w-0 items-center gap-1 typography-meta @min-[560px]:shrink-0">
                     <span className="truncate">{fileLabel}</span>
