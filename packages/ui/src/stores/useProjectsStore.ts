@@ -4,6 +4,7 @@ import { opencodeClient } from '@/lib/opencode/client';
 import { normalizePath } from '@/lib/pathNormalization';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import type { ProjectEntry } from '@/lib/api/types';
+import { getBoundSourceControlReadContexts } from '@/lib/source-control/identity';
 import type { DesktopSettings } from '@/lib/desktop';
 import { type SettingsSyncedDetail, updateDesktopSettings } from '@/lib/persistence';
 import { createProjectIdFromPath } from '@/lib/projectId';
@@ -15,6 +16,7 @@ import { COLOR_PRESETS } from '@/lib/colorPresets';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { getArchivedScopeKey } from '@/lib/sessionFolders/folderScopes';
 import { useSessionFoldersStore } from './useSessionFoldersStore';
+import { getSourceControlAuthKey, useSourceControlAuthStore } from './useSourceControlAuthStore';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
 import { getVSCodeBootstrapConfig } from '@/lib/vscodeBootstrap';
@@ -74,6 +76,7 @@ interface ProjectsStore {
   uploadProjectIcon: (id: string, file: File) => Promise<{ ok: boolean; error?: string }>;
   removeProjectIcon: (id: string) => Promise<{ ok: boolean; error?: string }>;
   discoverProjectIcon: (id: string, options?: { force?: boolean }) => Promise<{ ok: boolean; skipped?: boolean; reason?: string; error?: string }>;
+  fetchGitLabProjectIcon: (id: string) => Promise<{ ok: boolean; skipped?: boolean; error?: string }>;
   reorderProjects: (fromIndex: number, toIndex: number) => void;
   resetForRuntimeSwitch: () => void;
   validateProjectPath: (path: string) => ProjectPathValidationResult;
@@ -654,7 +657,7 @@ export const useProjectsStore = create<ProjectsStore>()(
       }
 
       get().setActiveProject(entry.id);
-      void get().discoverProjectIcon(entry.id);
+      void get().discoverProjectIcon(entry.id).then(() => get().fetchGitLabProjectIcon(entry.id));
       return entry;
     },
 
@@ -716,7 +719,7 @@ export const useProjectsStore = create<ProjectsStore>()(
       // Mirror addProject: the first newly added project becomes active.
       get().setActiveProject(entries[0].id);
       for (const entry of entries) {
-        void get().discoverProjectIcon(entry.id);
+        void get().discoverProjectIcon(entry.id).then(() => get().fetchGitLabProjectIcon(entry.id));
       }
       return entries;
     },
@@ -1002,6 +1005,35 @@ export const useProjectsStore = create<ProjectsStore>()(
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         return { ok: false, error: message || 'Failed to discover project icon' };
+      }
+    },
+
+    fetchGitLabProjectIcon: async (id: string) => {
+      const project = get().projects.find((entry) => entry.id === id);
+      const apis = getRegisteredRuntimeAPIs();
+      // A favicon found in the repository, or an icon the user chose, stays.
+      if (isVSCodeProjectsRuntime || !project || project.iconImage || !apis) return { ok: true, skipped: true };
+
+      try {
+        await useSourceControlAuthStore.getState().refreshAll(apis.sourceControl);
+        const bindingRead = await apis.sourceControl.repositoryBinding(project.path);
+        const auth = useSourceControlAuthStore.getState();
+        const context = getBoundSourceControlReadContexts(bindingRead, project.path, (identity) => {
+          const status = auth.entries[getSourceControlAuthKey(identity)]?.status;
+          return status?.status === 'connected' ? status.accounts.find((account) => account.current)?.id ?? null : null;
+        }, auth.identities).find((entry) => entry.provider === 'gitlab');
+        if (!context) return { ok: true, skipped: true };
+
+        const response = await runtimeFetch('/api/source-control/gitlab/repo/avatar', {
+          query: { ...context, bindingRevision: String(context.bindingRevision) },
+        });
+        // GitLab answers 404 for a project without an avatar.
+        if (response.status === 404) return { ok: true, skipped: true };
+        if (!response.ok) return { ok: false, error: 'Failed to fetch GitLab project avatar' };
+        const avatar = await response.blob();
+        return await get().uploadProjectIcon(id, new File([avatar], 'avatar', { type: avatar.type }));
+      } catch (error) {
+        return { ok: false, error: error instanceof Error ? error.message : String(error) };
       }
     },
 

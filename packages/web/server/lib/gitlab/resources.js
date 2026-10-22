@@ -696,6 +696,13 @@ export function createGitLabResourceService({ origin, client, download, resolveP
       return download(`projects/${target.project.id}/uploads/${secret}/${encodeURIComponent(filename)}`, { range, signal });
     },
 
+    /** The bound project's own avatar, as the upstream response. GitLab answers 404 when it has none. */
+    async readProjectAvatar(directory, remote, { signal } = {}) {
+      if (!download) throw new Error('GitLab file downloads are unavailable');
+      const { project } = (await resolveDirectoryProjects(directory, remote)).projects[0];
+      return download(`projects/${project.id}/avatar`, { signal });
+    },
+
     /** One page of the project's active members, inherited ones too: who can be asked to review. */
     async listReviewerCandidates(directory, selector, remote) {
       const target = await constrainedProject(directory, selector, remote);

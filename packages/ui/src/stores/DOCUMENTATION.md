@@ -242,6 +242,8 @@ Membership, fork handling, fusion and legacy compatibility are owned by
 
 `useProjectsStore.hasServerSnapshot` distinguishes a server-confirmed project list from persisted startup hints; `serverSnapshotFailed` records a failed settings sync without clearing the last confirmed list. Successful settings adoption clears that failure even for an unchanged list. Runtime switching clears both flags. Extension project subscriptions consume these flags and project records without changing active selection.
 
+`useProjectsStore.fetchGitLabProjectIcon` runs once when a project is added, after favicon discovery. It does nothing for a project that already has an icon, so a favicon found in the repository or an icon the user chose is never replaced. It reads the project's GitLab read context (the bound account, else the current account of the remote's host), fetches `GET /api/source-control/gitlab/repo/avatar`, and saves the image through `uploadProjectIcon`. The saved icon therefore has source `custom` and only PNG and JPEG avatars qualify. A project without a GitLab remote, without a connected account, or without an avatar is left as it is; nothing retries later, and VS Code skips it.
+
 Project parsing, project selection, directory navigation, mobile session paths, and the SDK adapter share `lib/pathNormalization.ts` for request paths. Tilde expansion happens before normalization. Windows drive roots retain their slash, and parent navigation stops at drive and UNC share roots. Selecting a spelling variant of the current directory preserves history and its forward entries. Bare drive-relative paths such as `C:` stay distinct from `C:/`; normalization does not guess their filesystem target.
 
 Examples:

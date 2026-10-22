@@ -1057,6 +1057,39 @@ export function registerGitLabRoutes(app, options = {}) {
     return undefined;
   });
 
+  // The bound project's avatar, for its icon in the sidebar. The web URL in a
+  // project's `avatar_url` needs a browser session; this API route takes the
+  // account's token.
+  app.get('/api/source-control/gitlab/repo/avatar', async (req, res) => {
+    const abort = new AbortController();
+    res.on('close', () => abort.abort());
+    try {
+      const origin = requestOrigin(req);
+      const directory = requestText(req.query?.directory);
+      const trustedContext = await validateReadContext(req, origin, directory);
+      if (!trustedContext) return res.status(501).json({ error: 'Bound source control status is unavailable' });
+      const service = await getResourceService(origin, trustedContext.accountId, true);
+      const upstream = await service.readProjectAvatar(directory, trustedContext.primaryRemote, { signal: abort.signal });
+      // GitLab sends the avatar as `application/octet-stream`; its name in Content-Disposition says the type.
+      const filename = /filename="([^"]+)"/.exec(upstream.headers.get('content-disposition') || '')?.[1] ?? '';
+      const type = uploadMediaType(upstream.headers.get('content-type') || '', filename);
+      if (!upstream.ok || !upstream.body || !type) {
+        await upstream.body?.cancel().catch(() => {});
+        return res.status(upstream.ok ? 415 : 404).end();
+      }
+      res.setHeader('Content-Type', type);
+      res.setHeader('Cache-Control', 'no-store');
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      await pipeline(Readable.fromWeb(upstream.body), res);
+    } catch (error) {
+      if (abort.signal.aborted) return undefined;
+      if (res.headersSent) return res.destroy();
+      if (isReadContextError(error)) return res.status(error.status ?? 400).json(sourceControlErrorBody(error));
+      return sendResourceError(res, error);
+    }
+    return undefined;
+  });
+
   app.post('/api/source-control/gitlab/pr/review', async (req, res) => {
     try {
       const body = req.body ?? {};

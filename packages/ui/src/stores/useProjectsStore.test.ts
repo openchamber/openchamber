@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test"
-import type { ProjectEntry } from "@/lib/api/types"
+import type { ProjectEntry, RuntimeAPIs, SourceControlAPI, SourceControlAuthStatus, SourceControlBindingRead, SourceControlIdentity } from "@/lib/api/types"
+import { registerRuntimeAPIs } from "@/contexts/runtimeAPIRegistry"
+import { useSourceControlAuthStore } from "./useSourceControlAuthStore"
 import type { DesktopSettings } from "@/lib/desktop"
 import { useProjectsStore } from "./useProjectsStore"
 import { useDirectoryStore } from "./useDirectoryStore"
@@ -232,5 +234,112 @@ describe("useProjectsStore.addProjects", () => {
 
     const home = useDirectoryStore.getState().homeDirectory;
     expect(added.map((p) => p.path)).toEqual(["/repo", "C:/repo", home ? `${home}/project` : "~/project"])
+  })
+})
+
+describe("useProjectsStore.fetchGitLabProjectIcon", () => {
+  test("keeps an icon the project already has without asking GitLab", async () => {
+    const previous = useProjectsStore.getState()
+    try {
+      const project: ProjectEntry = { id: "project-a", path: "/repo", label: "Repo", iconImage: { mime: "image/png", updatedAt: 1, source: "auto" } }
+      useProjectsStore.setState({ projects: [project], activeProjectId: project.id, manualProjectOrder: [project.id] })
+
+      expect(await useProjectsStore.getState().fetchGitLabProjectIcon(project.id)).toEqual({ ok: true, skipped: true })
+    } finally {
+      useProjectsStore.setState(previous, true)
+    }
+  })
+})
+
+class StubFileReader {
+  result: string | null = null
+  onload: (() => void) | null = null
+  onerror: (() => void) | null = null
+  readAsDataURL(blob: Blob) {
+    void blob.arrayBuffer().then((buffer) => {
+      this.result = `data:${blob.type};base64,${btoa(String.fromCharCode(...new Uint8Array(buffer)))}`
+      this.onload?.()
+    }, () => this.onerror?.())
+  }
+}
+
+describe("useProjectsStore.fetchGitLabProjectIcon with a GitLab remote", () => {
+  const instance = "https://gitlab.example.com"
+  const identity = { provider: "gitlab", instance } satisfies SourceControlIdentity
+  const user = { ...identity, id: "user-one", username: "owner" }
+  const status: SourceControlAuthStatus = {
+    ...identity,
+    status: "connected",
+    connected: true,
+    user,
+    accounts: [{
+      id: "account-one", credentialId: "account-one", credentialRevision: 1, providerUserId: "user-one",
+      providerUserStatus: "available", user, current: true, source: "pat", status: "valid",
+    }],
+  }
+  const remote = { displayUrl: `${instance}/team/repo`, fingerprint: "fetch" }
+  const bindingRead: SourceControlBindingRead = {
+    status: "missing",
+    repository: { repositoryId: "repo-one", configRevision: "config", bare: false, remotes: [{ name: "origin", fetch: remote, push: remote }] },
+    revision: 2,
+    binding: null,
+  }
+  const project: ProjectEntry = { id: "project-a", path: "/repo", label: "Repo" }
+
+  const run = async (avatar: Response) => {
+    const previous = useProjectsStore.getState()
+    const originalFetch = Object.getOwnPropertyDescriptor(globalThis, "fetch")
+    const originalFileReader = Object.getOwnPropertyDescriptor(globalThis, "FileReader")
+    Object.defineProperty(globalThis, "FileReader", { configurable: true, writable: true, value: StubFileReader })
+    const calls: Array<{ url: URL; method: string }> = []
+    const sourceControl: Pick<SourceControlAPI, "authInstances" | "authStatus" | "repositoryBinding"> = {
+      authInstances: async () => [identity],
+      authStatus: async () => status,
+      repositoryBinding: async () => bindingRead,
+    }
+    // SAFETY: the store reads only authInstances, authStatus and repositoryBinding from the registered source control API.
+    registerRuntimeAPIs({ sourceControl } as RuntimeAPIs)
+    useSourceControlAuthStore.getState().resetForRuntimeSwitch()
+    Object.defineProperty(globalThis, "fetch", {
+      configurable: true,
+      writable: true,
+      value: async (input: string | URL | Request, init?: RequestInit) => {
+        const url = new URL(String(input instanceof Request ? input.url : input), "http://localhost")
+        calls.push({ url, method: init?.method ?? "GET" })
+        if (url.pathname === "/api/source-control/gitlab/repo/avatar") return avatar
+        return Response.json({ settings: { projects: [{ ...project, iconImage: { mime: "image/png", updatedAt: 1, source: "custom" }, addedAt: 1, lastOpenedAt: 1 }] } })
+      },
+    })
+    try {
+      useProjectsStore.setState({ projects: [project], activeProjectId: project.id, manualProjectOrder: [project.id] })
+      const result = await useProjectsStore.getState().fetchGitLabProjectIcon(project.id)
+      return { result, calls, projects: useProjectsStore.getState().projects }
+    } finally {
+      useProjectsStore.setState(previous, true)
+      registerRuntimeAPIs(null)
+      if (originalFetch) Object.defineProperty(globalThis, "fetch", originalFetch)
+      if (originalFileReader) Object.defineProperty(globalThis, "FileReader", originalFileReader)
+      else Reflect.deleteProperty(globalThis, "FileReader")
+    }
+  }
+
+  test("reads the avatar with the current account and saves it as the project's icon", async () => {
+    const { result, calls, projects } = await run(new Response("png", { headers: { "content-type": "image/png" } }))
+
+    expect(result).toEqual({ ok: true })
+    const avatarCall = calls.find((call) => call.url.pathname === "/api/source-control/gitlab/repo/avatar")
+    expect(avatarCall?.url.searchParams.get("instance")).toBe(instance)
+    expect(avatarCall?.url.searchParams.get("accountId")).toBe("account-one")
+    expect(avatarCall?.url.searchParams.get("directory")).toBe("/repo")
+    expect(calls.some((call) => call.url.pathname === "/api/projects/project-a/icon" && call.method === "PUT")).toBe(true)
+    expect(projects[0]?.iconImage?.mime).toBe("image/png")
+  })
+
+  test("leaves the project without an icon when GitLab has no avatar for it", async () => {
+    const { result, calls, projects } = await run(new Response("{}", { status: 404 }))
+
+    expect(result).toEqual({ ok: true, skipped: true })
+    expect(calls.some((call) => call.method === "PUT")).toBe(false)
+    expect(projects[0]?.iconImage).toBeUndefined()
   })
 })

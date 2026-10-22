@@ -689,6 +689,24 @@ describe('GitLab routes', () => {
     expect(readUpload).toHaveBeenCalledTimes(4);
   });
 
+  it('serves the bound project avatar by the name GitLab gives it, and only as a picture', async () => {
+    const account = { id: `${origin}#9`, token: 'stored', user: { id: 9, login: 'user' }, source: 'pat', scope: '' };
+    const readProjectAvatar = vi.fn()
+      .mockResolvedValueOnce(new Response('png', { headers: { 'content-type': 'application/octet-stream', 'content-disposition': 'attachment; filename="logo.png"' } }))
+      .mockResolvedValueOnce(new Response('{}', { status: 404 }))
+      .mockResolvedValueOnce(new Response('<svg/>', { headers: { 'content-type': 'application/octet-stream', 'content-disposition': 'attachment; filename="logo.svg"' } }));
+    const app = appWith({ store: makeStore(account), createResourceService: vi.fn(() => ({ readProjectAvatar })) });
+    const query = { instance: origin, directory: '/repo', repositoryId: 'repo_one', bindingRevision: 3, accountId: account.id, primaryRemote: 'origin' };
+
+    const avatar = await request(app).get('/api/source-control/gitlab/repo/avatar').query(query).expect(200);
+    expect(avatar.headers['content-type']).toBe('image/png');
+    expect(avatar.headers['x-content-type-options']).toBe('nosniff');
+    expect(readProjectAvatar).toHaveBeenCalledWith('/repo', 'origin', expect.objectContaining({ signal: expect.anything() }));
+
+    await request(app).get('/api/source-control/gitlab/repo/avatar').query(query).expect(404);
+    await request(app).get('/api/source-control/gitlab/repo/avatar').query(query).expect(415);
+  });
+
   it('uses matching bound context and rejects it before provider creation when stale', async () => {
     const account = { id: `${origin}#9`, token: 'stored', user: { id: 9, login: 'user' }, source: 'pat', scope: '' };
     const store = makeStore(account);
