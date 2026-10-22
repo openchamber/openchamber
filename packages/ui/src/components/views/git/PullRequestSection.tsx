@@ -17,7 +17,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useOpenSourceControlSettings } from '@/hooks/useOpenSourceControlSettings';
 import { useWalkthroughStore } from '@/stores/useWalkthroughStore';
 import { WALKTHROUGH_ACTION_CLASS } from '@/components/views/walkthrough/walkthroughAction';
-import { GitHubAccountControl } from '@/components/github/GitHubAccountControl';
+import { SourceControlAccountControl } from '@/components/sourceControl/SourceControlAccountControl';
 import { useRepositoryHost } from '@/components/references/referenceSources';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -36,11 +36,12 @@ import type {
 } from '@/lib/api/types';
 import { useI18n, type I18nKey, type I18nParams } from '@/lib/i18n';
 import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
-import { formatChangeRequestReference, getSourceControlProviderLabel } from '@/lib/source-control/identity';
+import { formatChangeRequestReference } from '@/lib/source-control/providers/terminology';
+import { useSourceControlDescriptorOf, useSourceControlProviderRegistry } from '@/lib/source-control/providers/registry';
 import { useRepositoryBinding } from '@/lib/source-control/repository-binding';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { getDetectedUpstreamContextKey, loadDetectedUpstreamRepo } from './detectedUpstreamRepo';
-import type { ChangeRequest, SourceControlProvider } from '@/lib/source-control/types';
+import type { ChangeRequest } from '@/lib/source-control/types';
 import { prVisualStateOf, type PrVisualState } from '@/lib/source-control/prVisualState';
 import {
   hasUnknownMutationOutcomeCode,
@@ -252,9 +253,14 @@ export const PullRequestSection: React.FC<{
   const repositoryHost = useRepositoryHost(directory);
   // Every change-request message in this section speaks the host's wording:
   // merge requests on GitLab, pull requests elsewhere.
+  const descriptorOf = useSourceControlDescriptorOf();
+  const providersById = useSourceControlProviderRegistry((state) => state.byId);
+  // A walkthrough reads the change request's published diff, which the server serves for its own providers.
+  const descriptorRegistered = (provider: string) => providersById.has(provider);
+  const changeRequestTerm = descriptorOf(repositoryHost?.provider).terminology.changeRequest;
   const t = React.useCallback(
-    (key: I18nKey, params?: I18nParams) => translate(changeRequestCopy(key, repositoryHost?.provider), params),
-    [repositoryHost?.provider, translate],
+    (key: I18nKey, params?: I18nParams) => translate(changeRequestCopy(key, changeRequestTerm), params),
+    [changeRequestTerm, translate],
   );
   const openSourceControlSettings = useOpenSourceControlSettings();
   const { sourceControl } = useRuntimeAPIs();
@@ -404,7 +410,7 @@ export const PullRequestSection: React.FC<{
 
   const isLoading = statusEntry?.isLoading ?? false;
   const status = sourceControlAuth.connected ? statusEntry?.status ?? null : null;
-  const error = binding.error ? t('settings.gitlab.status.operationFailed') : statusEntry?.error ?? null;
+  const error = binding.error ? t('settings.sourceControl.instance.status.operationFailed') : statusEntry?.error ?? null;
   const isInitialStatusResolved = statusEntry?.isInitialStatusResolved ?? false;
 
   const availableBaseBranches = React.useMemo(() => {
@@ -725,10 +731,10 @@ export const PullRequestSection: React.FC<{
     setIsGenerating(true);
     try {
       const baseRef = commitRangeBase;
-      const payload: { base: string; head: string; context?: string; files?: string[]; changeRequestProvider?: SourceControlProvider } = {
+      const payload: Parameters<typeof generatePullRequestDescription>[1] = {
         base: baseRef,
         head: branch,
-        ...(readContext?.provider ? { changeRequestProvider: readContext.provider } : {}),
+        ...(readContext?.provider ? { changeRequestProvider: descriptorOf(readContext.provider) } : {}),
       };
       if (additionalContext) {
         payload.context = additionalContext;
@@ -748,7 +754,7 @@ export const PullRequestSection: React.FC<{
     } finally {
       setIsGenerating(false);
     }
-  }, [additionalContext, branch, commitRangeBase, directory, isGenerating, onGeneratedDescription, readContext, t]);
+  }, [additionalContext, branch, commitRangeBase, descriptorOf, directory, isGenerating, onGeneratedDescription, readContext, t]);
 
   const createPr = React.useCallback(async () => {
     if (sourceControlCapabilities?.changeRequests !== true) {
@@ -855,7 +861,7 @@ export const PullRequestSection: React.FC<{
           <div className="min-w-0 typography-meta text-muted-foreground">
             {t('gitView.pullRequest.availableOnFeatureBranches')}
           </div>
-          <GitHubAccountControl identity={repositoryHost ?? undefined} />
+          {repositoryHost ? <SourceControlAccountControl identity={repositoryHost} /> : null}
         </div>
       </section>
     );
@@ -907,7 +913,7 @@ export const PullRequestSection: React.FC<{
   const hostUnreadable = Boolean(!readContext && repositoryHost && binding.status === 'ready' && hostAuthChecked);
   const shouldShowConnectionNotice = Boolean(statusIdentity && sourceControlAuthChecked && status?.connected === false) || hostUnreadable;
   const noticeIdentity = statusIdentity ?? repositoryHost;
-  const providerName = noticeIdentity ? getSourceControlProviderLabel(noticeIdentity.provider) : null;
+  const providerName = noticeIdentity ? descriptorOf(noticeIdentity.provider).label : null;
   const prVisualState = getPrVisualState(status);
   const prColorVar = prVisualState ? `var(--pr-${prVisualState})` : 'var(--status-info)';
   const prStateIconName = prVisualState === 'draft'
@@ -989,7 +995,7 @@ export const PullRequestSection: React.FC<{
                 : t('gitView.header.openPullRequest')}
             </Button>
             <h3 className="typography-ui-header font-semibold text-foreground truncate">{t('gitView.pullRequest.title')}</h3>
-            <span className="typography-meta text-muted-foreground truncate">{formatChangeRequestReference(statusIdentity?.provider, pr.number)}</span>
+            <span className="typography-meta text-muted-foreground truncate">{formatChangeRequestReference(descriptorOf(statusIdentity?.provider), pr.number)}</span>
           </div>
           <div className="flex shrink-0 items-center gap-1">{refreshButton}</div>
         </div>
@@ -1010,7 +1016,7 @@ export const PullRequestSection: React.FC<{
             ) : null}
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
-            {showWalkthroughAction && (readContext?.provider === 'github' || readContext?.provider === 'gitlab') ? (
+            {showWalkthroughAction && readContext && descriptorRegistered(readContext.provider) ? (
               <Button
                 variant="outline"
                 size="sm"
@@ -1154,7 +1160,7 @@ export const PullRequestSection: React.FC<{
                 {parentChangeRequest ? (
                   <div className="flex min-w-0 items-center gap-1.5 typography-meta text-muted-foreground">
                     <Icon name="stack" className="size-3.5 shrink-0" />
-                    <span className="truncate">{t('stacks.create.stacksOn', { reference: formatChangeRequestReference(readContext?.provider, parentChangeRequest.number) })}</span>
+                    <span className="truncate">{t('stacks.create.stacksOn', { reference: formatChangeRequestReference(descriptorOf(readContext?.provider), parentChangeRequest.number) })}</span>
                   </div>
                 ) : null}
 

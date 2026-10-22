@@ -178,6 +178,67 @@ folder name, not its display name. Statements from a connected OpenCode
 Console workspace are not in `/api/config`, so a server blocked only there is
 not marked.
 
+## Integrations: provider cards
+
+`integrations/IntegrationsPage.tsx` draws one card per source-control provider
+and one per tracker the connected server serves, in the registries' order
+(`lib/source-control/providers/registry.ts`, `lib/trackers/registry.ts`). No
+card names a provider: a provider the server adds (Gitea) appears with no code
+here. Source-control cards are left out in VS Code, which uses the editor's own
+Git integration; tracker cards exist where the runtime has `RuntimeAPIs.trackers`.
+
+`integrations/SourceControlProviderCard.tsx` takes its name, mark and wording
+term from the descriptor. Its body is one `openchamber/ProviderInstanceAccounts`
+block per instance of that provider (the default instance stands in until one
+is listed), and "Add instance" where `instances.multiple` allows another or
+none is set up yet. A block offers the sign-in methods the descriptor names
+*and* the instance reports available (`capabilities.authenticationMethods`):
+device code, personal access token, and the provider's CLI login.
+`normalizeInstanceInput` reads what the user typed the way the descriptor
+says: an origin or a bare host, HTTPS only (HTTP on loopback where allowed), a
+port only where allowed, reserved instances refused.
+
+Invariants:
+
+- A token field is a password input that starts empty, is cleared once the
+  server accepts the token, and is never logged; a rejected token
+  (`INVALID_TOKEN`) stays in the field with the rejection under the address.
+- An instance's async work is dropped when the runtime switches mid-flight
+  (`captureRuntime`), so a late answer never writes into the next server's state.
+- The github.com device flow (`openchamber/GitHubComAccountSection.tsx`) shows
+  only for a descriptor whose `instances.legacyFlow.kind` is
+  `github-com-device`; the instance list under it leaves that instance out.
+- A descriptor that names a settings field kind this version cannot draw shows
+  an "update OpenChamber" line instead of the instance setup.
+- Settings search anchors: the card is `integrations.source-control.<id>`, its
+  body `.connect`; tracker cards keep `integrations.<id>` and its
+  `.add-workspace`, `.mapping` and `.session-comments` anchors, the ids
+  Linear's entries always had.
+
+`integrations/TrackerSettings.tsx` is the tracker card: browser sign-in with a
+poll that stops when a new or re-authorized account appears, disconnect, and the
+account switch where `multipleAccounts` is set. `TrackerProjectMapping` and
+`TrackerSessionComments` show where `projectMapping` and `sessionComments` are
+set. A tracker that offers no browser sign-in asks for an update instead of a
+dead Connect button.
+
+### Why `{provider}` keys and not keys per provider
+
+The sentences these cards show name the provider through `{provider}` and the
+CLI through `{cli}` (`settings.sourceControl.*`, `settings.integrations.tracker.*`),
+so a provider the server adds reads correct sentences with no keys of its own.
+`openchamber/sourceControlProviderSettings.ts` selects only what really differs:
+the description by change-request term and the instance hint by
+`allowLoopbackHttp`. `integrations/trackerSettingsCopy.ts` keeps whole sentences
+per tracker only where they carry the tracker's own nouns (Linear's workspace
+and team), because interpolating a noun breaks case and gender in de, pl, uk
+and fr; any other tracker reads the generic account and group sentences.
+
+### Why the instance list stays stacked rows and not a method switch
+
+Methods render as stacked rows, as the GitLab card did. A chip switch between
+them would change what the user sees first, which is a product decision.
+
 ## Magic Prompts
 
 `magic-prompts/` is not an autosave page: each prompt block has its own Save

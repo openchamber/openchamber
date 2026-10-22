@@ -66,7 +66,7 @@ export const selectComposerQueue = (messages: readonly QueuedMessage[]): readonl
 export type ComposerContextReference =
     | { kind: 'repository-issue'; provider?: SourceControlProvider; number: number; title: string; url: string; contextText: string }
     | { kind: 'change-request'; provider: SourceControlProvider; number: number; title: string; url: string; context: string }
-    | { kind: 'linear-issue'; identifier: string; title: string; url: string; contextText: string }
+    | { kind: 'tracker-item'; provider: string; identifier: string; title: string; url: string; contextText: string }
     | {
         kind: 'guest';
         providerId: string;
@@ -222,9 +222,9 @@ export function buildComposerContext(
                 attach(createContextPart({ kind: 'change-request', provider, number, title, url }, prContext));
                 break;
             }
-            case 'linear-issue': {
-                const { identifier, title, url, contextText } = reference;
-                attach(createContextPart({ kind: 'linear-issue', identifier, title, url }, contextText));
+            case 'tracker-item': {
+                const { provider, identifier, title, url, contextText } = reference;
+                attach(createContextPart({ kind: 'tracker-item', provider, identifier, title, url }, contextText));
                 break;
             }
             case 'guest': {

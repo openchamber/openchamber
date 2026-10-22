@@ -12,6 +12,7 @@ import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
 import { findWorktreeHoldingDirectory } from '@/lib/worktrees/worktreePaths';
 import { useI18n } from '@/lib/i18n';
 import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
+import { useChangeRequestTerm } from '@/lib/source-control/providers/registry';
 import { useRepositoryHost } from '@/components/references/referenceSources';
 import { normalizePath } from '@/lib/pathNormalization';
 import { ScrollShadow } from '@/components/ui/ScrollShadow';
@@ -167,14 +168,14 @@ export const PullRequestView: React.FC = () => {
   const baseBranch = useBranchPullRequestBase(gitDirectory ?? null, currentBranch, true, binding, branches, derivedBaseBranch);
 
   // Empty states name the host's own kind of change request.
-  const repositoryProvider = useRepositoryHost(currentDirectory ?? null)?.provider;
+  const changeRequestTerm = useChangeRequestTerm(useRepositoryHost(currentDirectory ?? null)?.provider);
 
   if (!currentDirectory) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
         <Icon name="git-pull-request" className="h-12 w-12 text-muted-foreground/50" />
-        <div className="typography-ui-header text-foreground">{t(changeRequestCopy('gitView.pullRequest.title', repositoryProvider))}</div>
-        <div className="max-w-sm typography-micro text-muted-foreground">{t(changeRequestCopy('gitView.pullRequest.createHint', repositoryProvider))}</div>
+        <div className="typography-ui-header text-foreground">{t(changeRequestCopy('gitView.pullRequest.title', changeRequestTerm))}</div>
+        <div className="max-w-sm typography-micro text-muted-foreground">{t(changeRequestCopy('gitView.pullRequest.createHint', changeRequestTerm))}</div>
       </div>
     );
   }
@@ -200,8 +201,8 @@ export const PullRequestView: React.FC = () => {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
         <Icon name="git-pull-request" className="h-12 w-12 text-muted-foreground/50" />
-        <div className="typography-ui-header text-foreground">{t(changeRequestCopy('gitView.pullRequest.title', repositoryProvider))}</div>
-        <div className="max-w-sm typography-micro text-muted-foreground">{t(changeRequestCopy('gitView.pullRequest.createHint', repositoryProvider))}</div>
+        <div className="typography-ui-header text-foreground">{t(changeRequestCopy('gitView.pullRequest.title', changeRequestTerm))}</div>
+        <div className="max-w-sm typography-micro text-muted-foreground">{t(changeRequestCopy('gitView.pullRequest.createHint', changeRequestTerm))}</div>
       </div>
     );
   }

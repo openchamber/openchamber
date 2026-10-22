@@ -1,6 +1,7 @@
 import React from 'react';
 import { mapWithConcurrency } from '@/lib/concurrency';
-import { getLinkedGitHubPullRequests, getLinkedSidebarChanges, getLinkedSidebarIssues } from '@/lib/linkedIssues';
+import { getLinkedSidebarChanges, getLinkedSidebarIssues } from '@/lib/linkedIssues';
+import { useRepositoryUrlMatcher } from '@/lib/source-control/repositoryUrlMatcher';
 import type { Session } from '@/lib/opencode/model';
 import {
   buildOverviewSessionSections,
@@ -22,7 +23,8 @@ import { normalizePath } from '@/lib/pathNormalization';
 import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
 import { resolveProjectColor } from '@/lib/projectMeta';
 import { getRuntimeKey } from '@/lib/runtime-switch';
-import { githubThread, gitlabThread, linearIssue } from '@/lib/trackedItems/fromLinks';
+import { repositoryThread, workItem } from '@/lib/trackedItems/fromLinks';
+import { trackerIssueLook } from '@/lib/trackers/stateLook';
 import { useTrackedItems } from '@/lib/trackedItems/interest';
 import type { TrackedItem } from '@/lib/trackedItems/model';
 import { findWorktreeHoldingDirectory } from '@/lib/worktrees/worktreePaths';
@@ -36,10 +38,10 @@ import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useMinuteTickerNow } from '@/hooks/useDurationTicker';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { readTrackedIssueState, readTrackedLinearState, readTrackedPullVisualSummary, useTrackedItemsStore } from '@/stores/useTrackedItemsStore';
+import { readTrackedIssueState, readTrackedPullVisualSummary, readTrackedWorkItemState, useTrackedItemsStore } from '@/stores/useTrackedItemsStore';
 import { useUIStore } from '@/stores/useUIStore';
-import type { GitHubIssueLiveSummary, LinearIssueLiveSummary, ProjectEntry, RepositoryReferenceFilter } from '@/lib/api/types';
-import { useGitHubAcrossReferenceList } from '@/components/references/referenceSources';
+import type { IssueLiveSummary, ProjectEntry, RepositoryReferenceFilter, TrackerLiveSummary } from '@/lib/api/types';
+import { useRepositoryAcrossReferenceList } from '@/components/references/referenceSources';
 import { useBackgroundShellsStore } from '@/sync/background-shells';
 import { useGlobalBlockingRequestsStore } from '@/sync/global-blocking-requests';
 import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
@@ -132,16 +134,18 @@ type OverviewReviewRequest = { url: string; title: string; number: number; repo:
 const REVIEW_REQUESTED: RepositoryReferenceFilter = { state: 'open', people: 'reviewRequested' };
 
 /**
- * Open PRs that ask for the user's review, in every GitHub repository of the
- * registered projects: one search across them. GitLab projects are not asked
- * by this search; they are left out until it covers them.
+ * Open change requests that ask for the user's review, in the registered
+ * projects: one search across them, asked of the first provider (by registry
+ * order) among the projects' providers whose descriptor has
+ * `features.referencesAcross`. Projects on other providers are not asked by
+ * this search.
  */
 type OverviewReviewRequests = { items: OverviewReviewRequest[]; hasMore: boolean };
 
 export function useOverviewReviewRequests(): OverviewReviewRequests {
   const projects = useProjectsStore((state) => state.projects);
   const directories = React.useMemo(() => projects.map((project) => project.path), [projects]);
-  const list = useGitHubAcrossReferenceList({ enabled: true, directories, kind: 'pull', filter: REVIEW_REQUESTED, query: '' });
+  const list = useRepositoryAcrossReferenceList({ enabled: true, directories, kind: 'pull', filter: REVIEW_REQUESTED, query: '' });
   const items = React.useMemo(() => {
     const seen = new Set<string>();
     return list.items.flatMap((item) => {
@@ -206,18 +210,18 @@ const rootOf = (sessionId: string, entityById: ReadonlyMap<string, Session>): st
   return current;
 };
 
-// GitHub and GitLab issues close as completed or not planned; Linear tickets
-// as completed or canceled. Not planned and canceled are dropped work.
-const issueStateOf = (state: GitHubIssueLiveSummary | null): OverviewIssueState => {
+// Repository issues close as completed or not planned; tracker items settle
+// as done or canceled. Not planned and canceled are dropped work.
+const issueStateOf = (state: IssueLiveSummary | null): OverviewIssueState => {
   if (!state) return null;
   if (state.state === 'open') return 'open';
   return state.state === 'completed' ? 'completed' : 'dropped';
 };
 
-const linearStateOf = (state: LinearIssueLiveSummary | null): OverviewIssueState => {
+const trackerStateOf = (state: TrackerLiveSummary | null): OverviewIssueState => {
   if (!state) return null;
-  if (state.state.type === 'completed') return 'completed';
-  return state.state.type === 'canceled' ? 'dropped' : 'open';
+  const look = trackerIssueLook(state.state.category);
+  return look === 'not_planned' ? 'dropped' : look;
 };
 
 /**
@@ -329,21 +333,20 @@ export function useOverviewData(): OverviewData {
 
   const followed = React.useMemo(() => topLevel.filter(isFollowed), [isFollowed, topLevel]);
 
+  const urlMatcher = useRepositoryUrlMatcher();
   // Keep the linked items and the worktree branches' open PRs live while on screen.
   const branchPulls = useBranchTrackedPulls(changeRequests.keys);
   const trackedItems = React.useMemo((): TrackedItem[] => {
     const items: TrackedItem[] = [...branchPulls];
     for (const session of followed) {
-      for (const link of getLinkedGitHubPullRequests(session)) items.push(githubThread('pull', link));
-      for (const change of getLinkedSidebarChanges(session)) if (change.gitlab) items.push(gitlabThread('pull', change.gitlab));
-      for (const issue of getLinkedSidebarIssues(session)) {
-        if (issue.source === 'github') items.push(githubThread('issue', issue));
-        else if (issue.source === 'gitlab') items.push(gitlabThread('issue', issue.ref));
-        else if (issue.source === 'linear') items.push(linearIssue(issue.identifier));
+      for (const change of getLinkedSidebarChanges(session, urlMatcher)) if (change.repository) items.push(repositoryThread('pull', change.repository));
+      for (const issue of getLinkedSidebarIssues(session, urlMatcher)) {
+        if (issue.source === 'repository') items.push(repositoryThread('issue', issue.ref));
+        else if (issue.source === 'tracker') items.push(workItem(issue.provider, issue.identifier));
       }
     }
     return items;
-  }, [branchPulls, followed]);
+  }, [branchPulls, followed, urlMatcher]);
   useTrackedItems(trackedItems);
 
   const factsOf = React.useCallback((session: Session): OverviewSessionFacts => {
@@ -369,24 +372,20 @@ export function useOverviewData(): OverviewData {
       if (entry.pr === 'unknown') prsPending = true;
       else if (entry.pr !== 'none') add(changeRequests.summaryOf(path));
     }
-    for (const link of getLinkedGitHubPullRequests(session)) {
-      add(readTrackedPullVisualSummary(trackedRecords, { item: githubThread('pull', link), url: link.url, title: link.title }));
+    for (const change of getLinkedSidebarChanges(session, urlMatcher)) {
+      if (!change.repository) continue;
+      add(readTrackedPullVisualSummary(trackedRecords, { item: repositoryThread('pull', change.repository), url: change.url, title: change.title }));
     }
-    for (const change of getLinkedSidebarChanges(session)) {
-      if (!change.gitlab) continue;
-      add(readTrackedPullVisualSummary(trackedRecords, { item: gitlabThread('pull', change.gitlab), url: change.url, title: change.title }));
-    }
-    const issues = getLinkedSidebarIssues(session).map((issue) => {
-      if (issue.source === 'github') return issueStateOf(readTrackedIssueState(trackedRecords, githubThread('issue', issue)));
-      if (issue.source === 'gitlab') return issueStateOf(readTrackedIssueState(trackedRecords, gitlabThread('issue', issue.ref)));
-      if (issue.source === 'linear') {
-        return linearStateOf(readTrackedLinearState(trackedRecords, linearIssue(issue.identifier)));
+    const issues = getLinkedSidebarIssues(session, urlMatcher).map((issue) => {
+      if (issue.source === 'repository') return issueStateOf(readTrackedIssueState(trackedRecords, repositoryThread('issue', issue.ref)));
+      if (issue.source === 'tracker') {
+        return trackerStateOf(readTrackedWorkItemState(trackedRecords, workItem(issue.provider, issue.identifier)));
       }
       return null;
     });
     const git = entry ? gitOf(entry.worktree.path) : null;
     return { ...base, prs, prsPending, issues, worktreeDirty: git ? git.losses.uncommittedFiles > 0 : null };
-  }, [activityByRoot, blockingByRoot, changeRequests, gitOf, isFollowed, trackedRecords, worktreeOf]);
+  }, [activityByRoot, blockingByRoot, changeRequests, gitOf, isFollowed, trackedRecords, urlMatcher, worktreeOf]);
 
   const sections = React.useMemo(
     () => buildOverviewSessionSections(topLevel.map(factsOf), { workEnabled, now }),

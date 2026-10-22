@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 
 import type { InlineCommentDraft } from '@/stores/useInlineCommentDraftStore';
 import {
@@ -10,6 +10,8 @@ import {
     readContextPart,
     type ContextPartPayload,
 } from './contextParts';
+import { acmeDescriptor, githubLikeDescriptor, gitlabLikeDescriptor } from '@/lib/source-control/providers/descriptor.fixture';
+import { useSourceControlProviderRegistry } from '@/lib/source-control/providers/registry';
 
 const draft = (overrides: Partial<InlineCommentDraft> = {}): InlineCommentDraft => ({
     id: 'icd-1',
@@ -76,18 +78,38 @@ describe('model-facing text', () => {
             .toBe('Comment on this fragment of `docs/CHANGELOG.md`:\n> a');
     });
 
-    test('PR comments and checks keep their attachment wording', () => {
-        expect(formatContextText(contextPayloadFromDraft(draft({ source: 'pr-comment', fileLabel: 'octo/repo#7', code: 'the comment', text: '' }))))
-            .toBe('Attached GitHub PR comment (octo/repo#7):\n\nthe comment');
-        expect(formatContextText(contextPayloadFromDraft(draft({ source: 'pr-check', fileLabel: 'CI / build', code: 'boom', text: 'why?' }))))
-            .toBe('Attached failed GitHub PR check (CI / build):\n```\nboom\n```\n\nwhy?');
-    });
+    describe('review comments and failed checks name the change request by the served provider', () => {
+        beforeEach(() => {
+            const providers = [githubLikeDescriptor(), gitlabLikeDescriptor(), acmeDescriptor()];
+            useSourceControlProviderRegistry.setState({ ordered: providers, byId: new Map(providers.map((entry) => [entry.id, entry])), status: 'ready', holdsList: true });
+        });
+        afterEach(() => {
+            useSourceControlProviderRegistry.setState({ ordered: [], byId: new Map(), status: 'idle', holdsList: false });
+        });
 
-    test('a GitLab merge request comment and pipeline job say so', () => {
-        expect(formatContextText(contextPayloadFromDraft(draft({ source: 'pr-comment', provider: 'gitlab', fileLabel: '!7 @octo', code: 'the comment', text: '' }))))
-            .toBe('Attached GitLab merge request comment (!7 @octo):\n\nthe comment');
-        expect(formatContextText(contextPayloadFromDraft(draft({ source: 'pr-check', provider: 'gitlab', fileLabel: '!7 · build', code: 'boom', text: '' }))))
-            .toBe('Attached failed GitLab merge request pipeline job (!7 · build):\n```\nboom\n```');
+        test('a GitHub pull request comment and check', () => {
+            expect(formatContextText(contextPayloadFromDraft(draft({ source: 'pr-comment', provider: 'github', fileLabel: 'octo/repo#7', code: 'the comment', text: '' }))))
+                .toBe('Attached GitHub pull request comment (octo/repo#7):\n\nthe comment');
+            expect(formatContextText(contextPayloadFromDraft(draft({ source: 'pr-check', provider: 'github', fileLabel: 'CI / build', code: 'boom', text: 'why?' }))))
+                .toBe('Attached failed GitHub pull request check (CI / build):\n```\nboom\n```\n\nwhy?');
+        });
+
+        test('a GitLab merge request comment and pipeline job', () => {
+            expect(formatContextText(contextPayloadFromDraft(draft({ source: 'pr-comment', provider: 'gitlab', fileLabel: '!7 @octo', code: 'the comment', text: '' }))))
+                .toBe('Attached GitLab merge request comment (!7 @octo):\n\nthe comment');
+            expect(formatContextText(contextPayloadFromDraft(draft({ source: 'pr-check', provider: 'gitlab', fileLabel: '!7 · build', code: 'boom', text: '' }))))
+                .toBe('Attached failed GitLab merge request pipeline job (!7 · build):\n```\nboom\n```');
+        });
+
+        test('a provider the UI has no code for reads from its descriptor', () => {
+            expect(formatContextText(contextPayloadFromDraft(draft({ source: 'pr-check', provider: 'acme', fileLabel: '#7 · build', code: 'boom', text: '' }))))
+                .toBe('Attached failed Acme Forge pull request check (#7 · build):\n```\nboom\n```');
+        });
+
+        test('a part from before parts named their provider reads as a plain pull request', () => {
+            expect(formatContextText(contextPayloadFromDraft(draft({ source: 'pr-comment', fileLabel: 'octo/repo#7', code: 'the comment', text: '' }))))
+                .toBe('Attached pull request comment (octo/repo#7):\n\nthe comment');
+        });
     });
 });
 
@@ -137,11 +159,35 @@ describe('round-trip through part metadata', () => {
         })).toEqual({ kind: 'change-request', provider: 'github', number: 4, title: 'Fix', url: 'https://x/pull/4' });
     });
 
-    test('linear references carry picker-built text and the identifier', () => {
-        const payload: ContextPartPayload = { kind: 'linear-issue', identifier: 'ENG-12', title: 'Login', url: 'https://linear.app/x/issue/ENG-12' };
+    test('reads source-control provider ids as open strings, old and new alike', () => {
+        for (const provider of ['github', 'gitlab', 'acme']) {
+            const payload: ContextPartPayload = { kind: 'change-request', provider, number: 4, title: 'Fix', url: 'https://x/pull/4' };
+            expect(readContextPart(asPart(payload, 'context'))).toEqual(payload);
+            const check: ContextPartPayload = { kind: 'pr-check', provider, label: 'build', output: 'boom', text: '' };
+            expect(readContextPart(asPart(check))).toEqual(check);
+        }
+        expect(readContextPart({
+            type: 'text',
+            metadata: { [CONTEXT_METADATA_KEY]: { kind: 'change-request', provider: 'Bad Id', number: 4, title: 'Fix', url: 'u' } },
+        })).toBeNull();
+    });
+
+    test('tracker references carry picker-built text, the tracker and the identifier', () => {
+        const payload: ContextPartPayload = { kind: 'tracker-item', provider: 'linear', identifier: 'ENG-12', title: 'Login', url: 'https://linear.app/x/issue/ENG-12' };
         const part = asPart(payload, 'Linear issue context (JSON)\n{}');
         expect(part.text).toBe('Linear issue context (JSON)\n{}');
         expect(readContextPart(part)).toEqual(payload);
+    });
+
+    test('reads a Linear reference from before trackers as a Linear tracker item', () => {
+        expect(readContextPart({
+            type: 'text',
+            metadata: { [CONTEXT_METADATA_KEY]: { kind: 'linear-issue', identifier: 'ENG-12', title: 'Login', url: 'https://linear.app/x/issue/ENG-12' } },
+        })).toEqual({ kind: 'tracker-item', provider: 'linear', identifier: 'ENG-12', title: 'Login', url: 'https://linear.app/x/issue/ENG-12' });
+        expect(readContextPart({
+            type: 'text',
+            metadata: { [CONTEXT_METADATA_KEY]: { kind: 'tracker-item', provider: 'Bad Id', identifier: 'ENG-12', title: 'Login', url: 'u' } },
+        })).toBeNull();
     });
 
     test('guest references carry picker-built text and no github number', () => {

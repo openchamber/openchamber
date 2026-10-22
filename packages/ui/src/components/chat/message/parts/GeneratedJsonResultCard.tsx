@@ -6,12 +6,13 @@ import { useI18n } from '@/lib/i18n';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useRepositoryReferenceProvider } from '@/components/references/referenceSources';
 import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
+import { useChangeRequestTerm } from '@/lib/source-control/providers/registry';
 import type { GeneratedResult } from './generatedJsonResult';
 
 export const GeneratedJsonResultCard: React.FC<{ result: GeneratedResult }> = ({ result }) => {
   const { t } = useI18n();
   // The result carries no provider; the session's repository says what it is called.
-  const repositoryProvider = useRepositoryReferenceProvider(useEffectiveDirectory() ?? null);
+  const changeRequestTerm = useChangeRequestTerm(useRepositoryReferenceProvider(useEffectiveDirectory() ?? null));
   const [copied, setCopied] = React.useState(false);
   const copiedResetTimerRef = React.useRef<number | null>(null);
 
@@ -51,7 +52,7 @@ export const GeneratedJsonResultCard: React.FC<{ result: GeneratedResult }> = ({
         <span className="font-mono text-[13px] text-muted-foreground">
           {result.kind === 'commit'
             ? t('chat.generatedResult.commit.title')
-            : t(changeRequestCopy('chat.generatedResult.pullRequest.title', repositoryProvider))}
+            : t(changeRequestCopy('chat.generatedResult.pullRequest.title', changeRequestTerm))}
         </span>
         <Button
           type="button"

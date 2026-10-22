@@ -16,6 +16,7 @@ import { dropdownMenuPopupClass } from '@/components/ui/dropdown-menu.styles';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { isRightToLeft, useI18n } from '@/lib/i18n';
 import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
+import { useChangeRequestTerm, useSourceControlProviderServing } from '@/lib/source-control/providers/registry';
 import type { WalkthroughSource, WalkthroughTarget, WalkthroughWorkingTreeScope } from '@/lib/walkthrough/types';
 import { useBranchComparisonBase } from '@/hooks/useBranchComparisonBase';
 import { useBranchPullRequestRequest } from '@/hooks/useBranchPullRequestRequest';
@@ -243,9 +244,11 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
   const prComparison = usePullRequestComparison(directory || null, currentBranch, readContext, visible && isPrScope,
     requestedTarget?.source.kind === 'pr' ? requestedTarget.source : undefined);
   const selectedPr = prComparison.selectedSource;
-  // Pull requests on GitHub and merge requests on GitLab both have a published diff to walk through.
-  const readsChangeRequests = readContext?.provider === 'github' || readContext?.provider === 'gitlab';
-  const changeRequestProvider = prComparison.provider;
+  // A change request on any provider the server serves has a published diff to walk through.
+  const readsChangeRequests = prComparison.readContext !== null;
+  // Offered while the provider list is still unknown too; the picker waits for it.
+  const offersChangeRequests = useSourceControlProviderServing(readContext?.provider) !== 'not-served' && readContext !== null;
+  const changeRequestTerm = useChangeRequestTerm(prComparison.provider);
 
   const target = useMemo<WalkthroughTarget>(
     () => isPrScope && selectedPr && readsChangeRequests && readContext
@@ -318,10 +321,10 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
   const [sourceMenuOpen, setSourceMenuOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const sourceValue = isPrScope ? 'pr' : isCommitScope ? 'commit' : isBranchScope ? 'branch' : source.kind === 'working-tree' ? source.scope : source.kind;
-  const sourceLabel = isPrScope ? t(changeRequestCopy('session.githubIntegration.tabs.pullRequests', changeRequestProvider)) : isCommitScope ? t('commitComparison.mode') : isBranchScope
+  const sourceLabel = isPrScope ? t(changeRequestCopy('session.githubIntegration.tabs.pullRequests', changeRequestTerm)) : isCommitScope ? t('commitComparison.mode') : isBranchScope
     ? t('walkthrough.scope.branch')
     : source.kind === 'pr'
-      ? t(changeRequestCopy('walkthrough.scope.pullRequest', changeRequestProvider), { number: source.number })
+      ? t(changeRequestCopy('walkthrough.scope.pullRequest', changeRequestTerm), { number: source.number })
       : scope === 'all'
         ? t('walkthrough.scope.all')
         : scope === 'staged'
@@ -446,9 +449,9 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
               <DropdownMenuRadioItem value="commit">
                 {t('commitComparison.mode')}
               </DropdownMenuRadioItem>
-              {readsChangeRequests && (
+              {offersChangeRequests && (
                 <DropdownMenuRadioItem value="pr">
-                  {t(changeRequestCopy('session.githubIntegration.tabs.pullRequests', changeRequestProvider))}
+                  {t(changeRequestCopy('session.githubIntegration.tabs.pullRequests', changeRequestTerm))}
                 </DropdownMenuRadioItem>
               )}
             </DropdownMenuRadioGroup>
@@ -602,8 +605,8 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
           <div className="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
             {!prComparison.error && !prComparison.loading && <Icon name="git-pull-request" className="size-6 text-muted-foreground" />}
             <p className="typography-meta text-muted-foreground">{prComparison.error ?? (prComparison.loading
-              ? t(changeRequestCopy('session.githubPrPicker.loading.pullRequests', changeRequestProvider))
-              : t(changeRequestCopy('pullRequestComparison.pickAbove', changeRequestProvider)))}</p>
+              ? t(changeRequestCopy('session.githubPrPicker.loading.pullRequests', changeRequestTerm))
+              : t(changeRequestCopy('pullRequestComparison.pickAbove', changeRequestTerm)))}</p>
           </div>
         ) : commitNeedsSelection ? (
           <div className="flex flex-1 items-center justify-center gap-2 p-8 typography-meta text-muted-foreground">

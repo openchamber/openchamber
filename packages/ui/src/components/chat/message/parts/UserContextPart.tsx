@@ -3,6 +3,8 @@ import React from 'react';
 import { Icon } from '@/components/icon/Icon';
 import type { IconName } from '@/components/icon/icons';
 import { useI18n } from '@/lib/i18n';
+import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
+import { useChangeRequestTerm } from '@/lib/source-control/providers/registry';
 import type { ContextPartPayload } from '@/lib/messages/contextParts';
 import { cn } from '@/lib/utils';
 import { withAttachmentChips } from './attachmentCitationChips';
@@ -139,6 +141,8 @@ const UserContextPart: React.FC<{
 }> = ({ payload, collapsed, onExpand, attachmentFilenames }) => {
     const { t } = useI18n();
     const quoteHighlights = useChatQuoteHighlightApi();
+    // A part without a provider was written before providers other than GitHub existed: a pull request.
+    const changeRequestTerm = useChangeRequestTerm(payload.kind === 'pr-comment' || payload.kind === 'pr-check' ? payload.provider : null);
     const shared = { collapsed, onExpand, attachmentFilenames };
 
     switch (payload.kind) {
@@ -182,7 +186,7 @@ const UserContextPart: React.FC<{
             return (
                 <ContextCard
                     icon="git-pull-request"
-                    summary={t(payload.provider === 'gitlab' ? 'chat.message.context.mrComment' : 'chat.message.context.prComment', { label: payload.label })}
+                    summary={t(changeRequestCopy('chat.message.context.prComment', changeRequestTerm), { label: payload.label })}
                     body={payload.body}
                     text={payload.text}
                     {...shared}
@@ -192,7 +196,7 @@ const UserContextPart: React.FC<{
             return (
                 <ContextCard
                     icon="close-circle"
-                    summary={t(payload.provider === 'gitlab' ? 'chat.message.context.mrCheck' : 'chat.message.context.prCheck', { label: payload.label })}
+                    summary={t(changeRequestCopy('chat.message.context.prCheck', changeRequestTerm), { label: payload.label })}
                     body={payload.output}
                     text={payload.text}
                     mono
@@ -228,7 +232,7 @@ const UserContextPart: React.FC<{
         }
         case 'repository-issue':
         case 'change-request':
-        case 'linear-issue':
+        case 'tracker-item':
         case 'guest-issue':
         case 'guest-pr':
             // Rendered as link attachments by normalizeUserDisplayParts.

@@ -47,7 +47,7 @@ describe('explicit remote transport configuration', () => {
     credentialRevision: 3,
     providerUserId: 'github.com#42',
     status: 'valid',
-    accessToken: 'canary-private-token',
+    secret: 'canary-private-token',
   };
   const accountReference = () => createHttpsCredentialReference({
     provider: account.provider,
@@ -378,6 +378,16 @@ describe('explicit remote transport configuration', () => {
     expect([...files.values()].join('')).not.toContain('canary-private-token');
   });
 
+  it('refuses a selected credential whose provider user belongs to another instance', async () => {
+    const { service, input, store } = await setup({
+      readTransportAccount: vi.fn(async () => ({ ...resolvedAccount, providerUserId: 'ghe.example.com#42' })),
+    });
+    const { unverifiedConfirmed: _confirmation, ...authority } = input;
+    await expect(service.configureTransportBinding({ ...authority, transport: 'https', credentialAccount: account }))
+      .rejects.toThrow('Selected credential account is unavailable');
+    expect(await store.read(context.repositoryId)).toEqual({ revision: 0, binding: null });
+  });
+
   it('removes one exact committed remote grant while preserving providers, siblings, auxiliary grants, and credentials', async () => {
     const { service, input, readTransportAccount } = await setup();
     const credentialId = accountReference();
@@ -498,7 +508,7 @@ describe('explicit remote transport configuration', () => {
     resolveTransportRepository.mockResolvedValue({ ...context, remotes: [origin] });
     const selectedCredential = {
       id: selectedAccount.accountId, credentialId: selectedAccount.accountId, credentialRevision: 4,
-      providerUserId: 'https://gitlab.example:8443#42', status: 'valid', token: 'private-gitlab-token',
+      providerUserId: 'https://gitlab.example:8443#42', status: 'valid', secret: 'private-gitlab-token',
     };
     readTransportAccount.mockResolvedValue(selectedCredential);
     const { unverifiedConfirmed: _confirmation, ...authority } = input;

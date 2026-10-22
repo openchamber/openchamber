@@ -29,7 +29,7 @@ const pull: ComposerReference = {
     contextText: 'pr 7',
 };
 
-const linear: ComposerReference = { kind: 'linear-issue', identifier: 'ENG-3', title: 'Login', url: 'https://linear.app/x/issue/ENG-3', contextText: 'linear' };
+const linear: ComposerReference = { kind: 'tracker-item', provider: 'linear', identifier: 'ENG-3', title: 'Login', url: 'https://linear.app/x/issue/ENG-3', contextText: 'linear' };
 
 const guest: ComposerReference = {
     kind: 'guest',
@@ -74,6 +74,6 @@ test('a reference sends its text and identity, and a guest keeps its data', () =
 test('a sent reference becomes the session link the sidebar reads', () => {
     expect(toLinkedIssue(pull, 5)).toMatchObject({ id: 'acme/app#7', kind: 'pull', number: 7, linkedAt: 5 });
     expect(toLinkedIssue(issue(3), 5)).toMatchObject({ id: 'acme/app#3', kind: 'issue' });
-    expect(toLinkedIssue(linear, 5)).toMatchObject({ id: 'linear:ENG-3', kind: 'linear' });
+    expect(toLinkedIssue(linear, 5)).toMatchObject({ id: 'linear:ENG-3', kind: 'tracker', provider: 'linear' });
     expect(toLinkedIssue(guest, 5)).toMatchObject({ id: 'guest:jira:OPS-2', kind: 'guest', thread: 'issue', data: { status: 'open' } });
 });

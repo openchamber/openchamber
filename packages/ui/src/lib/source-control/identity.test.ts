@@ -19,9 +19,12 @@ import {
   activeIdentityFor,
   remoteTraits,
   instanceHost,
+  defaultSourceControlIdentities,
 } from './identity';
+import { acmeDescriptor, githubLikeDescriptor, gitlabLikeDescriptor } from './providers/descriptor.fixture';
 
 const remote = (url: string): GitRemote => ({ name: 'origin', fetchUrl: url, pushUrl: url });
+const defaults = defaultSourceControlIdentities([githubLikeDescriptor(), gitlabLikeDescriptor(), acmeDescriptor()]);
 
 const repository = {
   repositoryId: 'repo-one',
@@ -51,10 +54,16 @@ const bindingRead = (status: 'bound' | 'needs-attention' | 'missing'): SourceCon
 };
 
 describe('source-control identity resolution', () => {
+  test('recognizes each provider\'s default instance and skips providers without one', () => {
+    expect(defaults).toEqual([{ provider: 'github', instance: 'github.com' }, { provider: 'gitlab', instance: 'https://gitlab.com' }]);
+  });
+
   test('recognizes GitLab.com HTTPS and SSH remotes', () => {
     const expected = { provider: 'gitlab', instance: 'https://gitlab.com' };
-    expect(resolveSourceControlIdentity(remote('https://gitlab.com/team/repo.git'), [])).toEqual(expected);
-    expect(resolveSourceControlIdentity(remote('git@gitlab.com:team/repo.git'), [])).toEqual(expected);
+    expect(resolveSourceControlIdentity(remote('https://gitlab.com/team/repo.git'), defaults)).toEqual(expected);
+    expect(resolveSourceControlIdentity(remote('git@gitlab.com:team/repo.git'), defaults)).toEqual(expected);
+    // Without the provider's default instance nothing names gitlab.com.
+    expect(resolveSourceControlIdentity(remote('git@gitlab.com:team/repo.git'), [])).toBeNull();
   });
 
   test('matches a known self-managed instance by remote host', () => {
@@ -64,8 +73,8 @@ describe('source-control identity resolution', () => {
 
   test('recognizes GitHub and rejects unknown hosts', () => {
     const expected = { provider: 'github', instance: 'github.com' };
-    expect(resolveSourceControlIdentity(remote('git@github.com:team/repo.git'), [])).toEqual(expected);
-    expect(resolveSourceControlIdentity(remote('git@example.com:team/repo.git'), [])).toBeNull();
+    expect(resolveSourceControlIdentity(remote('git@github.com:team/repo.git'), defaults)).toEqual(expected);
+    expect(resolveSourceControlIdentity(remote('git@example.com:team/repo.git'), defaults)).toBeNull();
   });
 
   test('strict target resolution rejects unknown and ambiguous remotes', () => {
@@ -73,7 +82,7 @@ describe('source-control identity resolution', () => {
 
     const upstream = { ...remote('https://github.com/team/repo.git'), name: 'upstream' };
     const origin = { ...remote('https://gitlab.com/team/repo.git'), name: 'origin' };
-    expect(resolveSourceControlTarget([upstream, origin], [])).toBeNull();
+    expect(resolveSourceControlTarget([upstream, origin], defaults)).toBeNull();
   });
 
   test('matches self-managed instances by host and port', () => {
@@ -86,8 +95,8 @@ describe('source-control identity resolution', () => {
   });
 
   test('normalizes provider instances for browser links', () => {
-    expect(getSourceControlBaseUrl({ provider: 'github', instance: 'github.com' })).toBe('https://github.com');
-    expect(getSourceControlBaseUrl({ provider: 'gitlab', instance: 'https://gitlab.example.com' })).toBe('https://gitlab.example.com');
+    expect(getSourceControlBaseUrl({ instance: 'github.com' })).toBe('https://github.com');
+    expect(getSourceControlBaseUrl({ instance: 'https://gitlab.example.com' })).toBe('https://gitlab.example.com');
   });
 });
 
@@ -107,16 +116,16 @@ describe('source-control binding read contexts', () => {
 
   test('an unbound repository is read with the current account of the host its remote points at', () => {
     const active = (identity: SourceControlIdentity) => (identity.provider === 'github' ? 'github.com#current' : null);
-    expect(getBoundSourceControlReadContexts(bindingRead('missing'), '/repo', active)).toEqual([{
+    expect(getBoundSourceControlReadContexts(bindingRead('missing'), '/repo', active, defaults)).toEqual([{
       provider: 'github', instance: 'github.com', accountId: 'github.com#current', primaryRemote: 'origin',
       directory: '/repo', repositoryId: 'repo-one', bindingRevision: 0,
     }]);
     // A bound account that is gone (signed out, or signed in again as a new
     // credential) gives the host back to the account signed in there now.
-    expect(getBoundSourceControlReadContexts(bindingRead('needs-attention'), '/repo', active).map((context) => context.accountId))
+    expect(getBoundSourceControlReadContexts(bindingRead('needs-attention'), '/repo', active, defaults).map((context) => context.accountId))
       .toEqual(['github.com#current']);
     // A host the binding answers for keeps its bound account.
-    expect(getBoundSourceControlReadContexts(bindingRead('bound'), '/repo', active).map((context) => context.accountId)).toEqual(['github.com#7']);
+    expect(getBoundSourceControlReadContexts(bindingRead('bound'), '/repo', active, defaults).map((context) => context.accountId)).toEqual(['github.com#7']);
   });
 });
 
@@ -305,6 +314,11 @@ describe('identityAccountConnected', () => {
   });
 });
 
+const github = githubLikeDescriptor();
+const gitlab = gitlabLikeDescriptor();
+github.auth = { ...github.auth, cliTransport: true };
+gitlab.auth = { ...gitlab.auth, cliTransport: false };
+
 describe('buildManagedAccountOptions', () => {
   const identity = { provider: 'gitlab', instance: 'https://gitlab.com' } as const;
   const account = (id: string, providerUserId: string, current: boolean) => ({
@@ -314,7 +328,7 @@ describe('buildManagedAccountOptions', () => {
   } as const);
 
   test('offers one option per person, preferring the current credential', () => {
-    const options = buildManagedAccountOptions(identity, [
+    const options = buildManagedAccountOptions(identity, gitlab, [
       account('occred:v1:gitlab:old:r1', 'gitlab#7', false),
       account('occred:v1:gitlab:new:r1', 'gitlab#7', true),
       account('occred:v1:gitlab:other:r1', 'gitlab#9', false),
@@ -325,14 +339,14 @@ describe('buildManagedAccountOptions', () => {
   });
 
   test('names the person and never the credential reference', () => {
-    const [option] = buildManagedAccountOptions(identity, [account('occred:v1:gitlab:new:r1', 'gitlab#7', true)], () => 'Personal access token');
+    const [option] = buildManagedAccountOptions(identity, gitlab, [account('occred:v1:gitlab:new:r1', 'gitlab#7', true)], () => 'Personal access token');
     expect(option.label).toBe('GitLab @ada · https://gitlab.com · Personal access token');
     expect(option.label).not.toContain('occred');
   });
 
   test('never offers the glab login, which Git transport cannot use', () => {
     const glab = { ...account('https://gitlab.com#cli:7', 'gitlab#7', true), source: 'cli' } as const;
-    expect(buildManagedAccountOptions(identity, [glab], () => 'CLI')).toEqual([]);
+    expect(buildManagedAccountOptions(identity, gitlab, [glab], () => 'CLI')).toEqual([]);
   });
 });
 
@@ -349,7 +363,7 @@ describe('buildManagedAccountOptions for GitHub', () => {
   const sourceLabel = (entry: { source: string }) => (entry.source === 'cli' ? 'CLI' : 'OAuth');
 
   test('offers the gh account beside the OAuth account of the same person while gh is in use', () => {
-    const options = buildManagedAccountOptions(identity, [oauth, gh(true)], sourceLabel);
+    const options = buildManagedAccountOptions(identity, github, [oauth, gh(true)], sourceLabel);
     expect(options.map((option) => option.label)).toEqual([
       'GitHub @ada · github.com · OAuth',
       'GitHub @ada · github.com · CLI',
@@ -358,18 +372,17 @@ describe('buildManagedAccountOptions for GitHub', () => {
   });
 
   test('leaves the gh account out while another GitHub account is in use', () => {
-    const options = buildManagedAccountOptions(identity, [{ ...oauth, current: true }, gh(false)], sourceLabel);
+    const options = buildManagedAccountOptions(identity, github, [{ ...oauth, current: true }, gh(false)], sourceLabel);
     expect(options.map((option) => option.reference.accountId)).toEqual([oauth.id]);
   });
 });
 
 describe('accountUsableByIdentity', () => {
-  test('a gh account counts only while it is the active GitHub account', () => {
-    const github = { provider: 'github', instance: 'github.com' } as const;
-    expect(accountUsableByIdentity(github, { source: 'cli', current: true })).toBe(true);
-    expect(accountUsableByIdentity(github, { source: 'cli', current: false })).toBe(false);
-    expect(accountUsableByIdentity(github, { source: 'oauth', current: false })).toBe(true);
-    expect(accountUsableByIdentity({ provider: 'gitlab', instance: 'https://gitlab.com' }, { source: 'cli', current: true })).toBe(false);
+  test('a CLI account counts only while it is the active account of a provider that uses it for transport', () => {
+    expect(accountUsableByIdentity({ source: 'cli', current: true }, true)).toBe(true);
+    expect(accountUsableByIdentity({ source: 'cli', current: false }, true)).toBe(false);
+    expect(accountUsableByIdentity({ source: 'oauth', current: false }, true)).toBe(true);
+    expect(accountUsableByIdentity({ source: 'cli', current: true }, false)).toBe(false);
   });
 
 });
@@ -378,15 +391,17 @@ describe('unavailableAccountReason', () => {
   const ghBound = { provider: 'github', instance: 'github.com', accountId: 'github.com#cli:9' } as const;
 
   test('a gh-bound identity points to switching only while no gh account is in use', () => {
-    expect(unavailableAccountReason(ghBound, [{ source: 'oauth', current: true }, { source: 'cli', current: false }])).toBe('cli-not-in-use');
+    expect(unavailableAccountReason(ghBound, [{ source: 'oauth', current: true }, { source: 'cli', current: false }], true)).toBe('cli-not-in-use');
     // Disabled or signed out: gh is not listed at all.
-    expect(unavailableAccountReason(ghBound, [{ source: 'oauth', current: true }])).toBe('cli-not-in-use');
+    expect(unavailableAccountReason(ghBound, [{ source: 'oauth', current: true }], true)).toBe('cli-not-in-use');
     // gh is in use, as another person: switching in Integrations cannot help.
-    expect(unavailableAccountReason(ghBound, [{ source: 'cli', current: true }])).toBe('gone');
+    expect(unavailableAccountReason(ghBound, [{ source: 'cli', current: true }], true)).toBe('gone');
   });
 
   test('any other account is gone', () => {
-    expect(unavailableAccountReason({ ...ghBound, accountId: 'occred:v1:github:oauth:r1' }, [])).toBe('gone');
+    expect(unavailableAccountReason({ ...ghBound, accountId: 'occred:v1:github:oauth:r1' }, [], true)).toBe('gone');
+    // A CLI login of a provider that does not use it for transport cannot be switched to.
+    expect(unavailableAccountReason({ ...ghBound, provider: 'gitlab' }, [], false)).toBe('gone');
   });
 });
 

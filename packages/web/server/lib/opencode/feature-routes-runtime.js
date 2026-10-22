@@ -9,6 +9,7 @@ import { registerSessionWarmingRoutes } from '../session-warming/routes.js';
 import { setWarmingDuration, setWarmingEnabled } from './websearch-config.js';
 import { registerSourceControlRoutes } from '../source-control/routes.js';
 import { registerLinearRoutes } from '../linear/routes.js';
+import { registerTrackerRoutes } from '../trackers/routes.js';
 import { registerGuestRoutes } from '../guests/routes.js';
 import { registerBuiltInGuests } from '../guests/catalog.js';
 import { extensionsPersistPath } from '../guests/persist.js';
@@ -68,10 +69,8 @@ import { scanSkillsRepository } from '../skills-catalog/scan.js';
 import { installSkillsFromRepository } from '../skills-catalog/install.js';
 import { fetchGitHubRepoMetas } from '../skills-catalog/github-meta.js';
 import crypto from 'node:crypto';
-import { getGitHubAuthByAccountId } from '../github/auth.js';
-import { getGitHubCliCredential } from '../github/octokit.js';
 import { createSourceControlAuthStore } from '../source-control/auth-storage.js';
-import { refreshGitLabAccessToken, resolveGitLabClientId } from '../gitlab/device-flow.js';
+import { createSourceControlProviders } from '../source-control/provider-registry.js';
 import { createGitCredentialResolver, createHttpsCredentialReference, parseGitCredentialReference } from '../git/credential-resolver.js';
 import { createGitRepositoryCredentialRuntime } from '../git/repository-credential-runtime.js';
 import { managedSshCommand } from '../git/network-operations.js';
@@ -86,8 +85,11 @@ import { createPrivateRepositoryIdentityResolver } from '../source-control/repos
 import { createSourceControlAuditStore } from '../source-control/audit-storage.js';
 
 export const createFeatureRoutesRuntime = (dependencies) => {
+  // `trackers` is the tracker registry the server builds once (`index.js`):
+  // routes, tracked-item readers, the read cache and guest host access.
   const {
     clientReloadDelayMs,
+    trackers,
   } = dependencies;
   const gitRuntimeIdentity = Object.freeze({
     id: `server_${crypto.randomUUID()}`,
@@ -129,25 +131,13 @@ export const createFeatureRoutesRuntime = (dependencies) => {
           directory,
           number,
           readContext,
-          {
-            allowEmpty,
-            sourceRepo,
-            onAccountUnavailable: walkthroughBindingService?.accountUnavailable,
-            readGitLabChangeRequestPatch: walkthroughBindingService?.readGitLabChangeRequestPatch,
-          },
+          { allowEmpty, sourceRepo, readChangeRequestPatch: walkthroughBindingService?.readChangeRequestPatch },
         ),
         getPullRequestFileContents: (directory, number, readContext, { path, previousPath, status, sourceRepo }) => pullRequest.getPullRequestFileContents(
           directory,
           number,
           readContext,
-          {
-            path,
-            previousPath,
-            status,
-            sourceRepo,
-            onAccountUnavailable: walkthroughBindingService?.accountUnavailable,
-            readGitLabChangeRequestFile: walkthroughBindingService?.readGitLabChangeRequestFile,
-          },
+          { path, previousPath, status, sourceRepo, readChangeRequestFile: walkthroughBindingService?.readChangeRequestFile },
         ),
       };
     }
@@ -404,21 +394,35 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     registerSmallModelRoutes(app, { getSmallModelService });
     registerSessionGoalRoutes(app);
     const gitBinary = resolveGitBinaryForSpawn();
-    const gitlabAuthStore = createSourceControlAuthStore({
+    // One server token store for every provider. OAuth tokens that expire
+    // (GitLab's live two hours) are renewed before they lapse, through the
+    // implementation of the provider that issued them.
+    const sourceControlAuthStore = createSourceControlAuthStore({
       filePath: path.join(openchamberDataDir, 'source-control-auth.json'),
-      // GitLab OAuth tokens live two hours; the store renews them before they lapse.
-      refreshOAuthToken: async ({ origin, refreshToken }) => refreshGitLabAccessToken({
-        origin, refreshToken, clientId: await resolveGitLabClientId(origin, readSettingsFromDisk),
-      }),
+      refreshOAuthToken: async ({ provider, origin, refreshToken }) => {
+        const impl = await sourceControlProviders.implementation(provider);
+        if (!(impl?.auth.refreshOAuthToken instanceof Function)) throw new Error('Source control OAuth renewal is unavailable');
+        return impl.auth.refreshOAuthToken({ instance: origin, refreshToken });
+      },
     });
-    // A GitHub account is either one OpenChamber stores or the gh CLI login
-    // the user switched to; reads already accept both, so Git transport
-    // (fork PR worktrees, clones) must too.
-    const resolveSourceControlAccount = async ({ provider, instance, accountId, credentialRevision }) => {
-      if (provider !== 'github') return gitlabAuthStore.readAccount(instance, accountId, credentialRevision);
-      return await getGitHubAuthByAccountId(accountId, credentialRevision)
-        ?? getGitHubCliCredential(accountId, credentialRevision);
-    };
+    // The provider registry: descriptors now, implementations on first use.
+    const sourceControlProviders = createSourceControlProviders({
+      authStore: sourceControlAuthStore,
+      readSettings: readSettingsFromDisk,
+      configRoot: openchamberDataDir,
+      hostServices: {
+        github: {
+          // A worktree made from a fork PR has no upstream; its provenance says
+          // which remote the branch came from, so PR status can find the PR.
+          readContributorProvenance: (directory) => contributorProvenance.read(directory),
+        },
+      },
+    });
+    // The exact credential behind an account reference, as a neutral transport
+    // credential (`secret`): a stored account, or a CLI login the user switched
+    // to, so Git transport (fork PR worktrees, clones) accepts what reads do.
+    const resolveSourceControlAccount = ({ provider, instance, accountId, credentialRevision }) => sourceControlProviders
+      .readTransportCredential({ provider, instance, credentialId: accountId, credentialRevision });
     const resolveTransportRepository = createPrivateRepositoryIdentityResolver({
       getTransportRevision: (directory) => readEffectiveGitTransportRevision(directory, { gitBinary }),
     });
@@ -463,11 +467,13 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       await configureRepositoryTransport(directory, { credentialHelper, sshCommand });
     };
     // Shared short-lived answers for provider reads; registered before the
-    // GitHub, GitLab and Linear routes it fronts. A change made through them,
+    // source-control and tracker routes it fronts. A change made through them,
     // or a refresh the user asked for, also reads the followed items again;
     // the tracked items service is created further down.
     let trackedItemsService = null;
     const providerReadCache = createProviderReadCache({
+      sourceControlProviderIds: sourceControlProviders.list().map((descriptor) => descriptor.id),
+      trackerIds: trackers.list(),
       onChange: (provider) => trackedItemsService?.refreshProvider(provider),
       onItemRefresh: (provider, item) => trackedItemsService?.refreshItem(provider, item),
     });
@@ -480,6 +486,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       resolveTransportRepository,
       auditStore: sourceControlAuditStore,
       runtimeIdentity: gitRuntimeIdentity,
+      providers: sourceControlProviders,
       readTransportAccount: resolveSourceControlAccount,
       resolveCheckoutAuxiliary: async ({ directory, parentEndpoint, parentRemoteName, kind, path: checkoutPath }) => {
         if (!(networkOperations?.inspectCheckoutHydration instanceof Function)) return null;
@@ -487,16 +494,6 @@ export const createFeatureRoutesRuntime = (dependencies) => {
           directory, parentEndpoint, parentRemoteName,
         });
         return inspection.requirements.find((entry) => entry.kind === kind && entry.path === checkoutPath) ?? null;
-      },
-      github: {
-        // A worktree made from a fork PR has no upstream; its provenance says
-        // which remote the branch came from, so PR status can find the PR.
-        readContributorProvenance: contributorProvenance.read,
-      },
-      gitlab: {
-        configRoot: openchamberDataDir,
-        store: gitlabAuthStore,
-        readSettings: readSettingsFromDisk,
       },
     });
     registerWalkthroughRoutes(app, {
@@ -512,7 +509,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       return null;
     };
     trackedItemsService = createTrackedItemsService({
-      readers: createTrackedItemReaders({ readGitLabLiveSummaries: walkthroughBindingService.readGitLabLiveSummaries }),
+      readers: createTrackedItemReaders({ readLiveSummaries: walkthroughBindingService.readLiveSummaries, trackers }),
       persistence: createTrackedItemsPersistence({ dataDir: openchamberDataDir }),
       isConnectionOpen: (connectionId) => findEventClient(connectionId) !== null,
       send: (connectionId, event) => {
@@ -577,12 +574,8 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       fsImpl: fsPromises,
     });
     const gitCredentialResolver = createGitCredentialResolver({
-      readGitHubAccount: (accountId, credentialRevision) => resolveSourceControlAccount({
-        provider: 'github', instance: 'github.com', accountId, credentialRevision,
-      }),
-      readGitLabAccount: (instance, accountId, credentialRevision) => resolveSourceControlAccount({
-        provider: 'gitlab', instance, accountId, credentialRevision,
-      }),
+      readTransportCredential: sourceControlProviders.readTransportCredential,
+      describeProvider: sourceControlProviders.describe,
       lookupManagedSshKey: sshCredentialStore.lookup,
       fsImpl: fsPromises,
       snapshotRoot: path.join(openchamberDataDir, 'git-ssh-operation-keys'),
@@ -639,6 +632,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     networkOperations = createNetworkOperations({
       validateManagedSshCredential: managedSshInventory.assertAvailable,
       resolveSourceControlAccount,
+      sourceControlProviders: sourceControlProviders.descriptors,
       bindClonedRepository: walkthroughBindingService.bindClonedRepository,
       validateGitTransportContext: walkthroughBindingService.validateGitTransportContext,
       validateGitAuxiliaryContext: walkthroughBindingService.validateGitAuxiliaryContext,
@@ -660,7 +654,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       trustedDirectoriesConfig: createTrustedDirectoriesConfig({ gitBinary }),
     });
     await registerBuiltInGuests({ persistPath: extensionsPersistPath(openchamberDataDir), root: routeDependencies.builtInExtensionsDir });
-    registerGuestRoutes(app, { openchamberDataDir, openchamberVersion, resolveGitBinaryForSpawn, resolveOptionalProjectDirectory, getSmallModelService, onGuestDeactivated, surfaceViewerHeaders });
+    registerGuestRoutes(app, { openchamberDataDir, openchamberVersion, resolveGitBinaryForSpawn, resolveOptionalProjectDirectory, getSmallModelService, onGuestDeactivated, surfaceViewerHeaders, trackers });
     gitWorktreeCreation = registerGitRoutes(app, {
       // Identities for accounts connected before identities carried one are
       // made the first time identities are listed: a moment someone asked for,
@@ -692,6 +686,9 @@ export const createFeatureRoutesRuntime = (dependencies) => {
         }
       },
     });
+    // `/api/tracker/*` first; the legacy `/api/linear/*` routes and the
+    // Linear OAuth callback stay for older clients and the SDK contract.
+    registerTrackerRoutes(app, { registry: trackers });
     registerLinearRoutes(app);
     registerDevServerRoutes(app, { scanner: devServerScanner, getOwnPorts });
     registerMagicPromptRoutes(app, {

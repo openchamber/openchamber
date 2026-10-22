@@ -50,7 +50,10 @@ const FREE_SOCKET_TIMEOUT_MS = 4_000;
 const ERROR_TEXT_CHARACTERS = 300;
 
 // Route families that exist on the host only, never in a space: provider and login pages,
-// settings, GitHub, Linear, voice, guests, project routes, and the host's own system routes.
+// settings, the legacy GitHub auth routes, trackers (Linear and its legacy routes), voice,
+// guests, project routes, and the host's own system routes. `/api/source-control` is forwarded:
+// the UI reads a space directory's binding and repository context there, and the server inside
+// answers from its own token store, never the host's.
 // A prefixed request for one of them is refused, whatever the server inside would answer.
 const HOST_ONLY_ROUTES = Object.freeze([
   '/api/provider',
@@ -63,6 +66,7 @@ const HOST_ONLY_ROUTES = Object.freeze([
   '/api/themes',
   '/api/github',
   '/api/linear',
+  '/api/tracker',
   '/api/voice',
   '/api/tts',
   '/api/dictation',

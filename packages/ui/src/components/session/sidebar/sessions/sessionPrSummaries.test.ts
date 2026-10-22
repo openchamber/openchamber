@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { PrVisualSummary } from '@/stores/useGitHubPrStatusStore';
-import type { LinkedSidebarIssue } from '@/lib/linkedIssues';
+import type { LinkedSidebarChange, LinkedSidebarIssue } from '@/lib/linkedIssues';
 import { buildSessionIssueItems, combineSessionPrSummaries, findLinkedPrsWithoutState, getPrStatusLabelKey } from './sessionPrSummaries';
 
 const summary = (number: number, visualState: string, overrides: Partial<PrVisualSummary> = {}): PrVisualSummary => ({
@@ -45,19 +45,25 @@ describe('combineSessionPrSummaries', () => {
 
 describe('findLinkedPrsWithoutState', () => {
   test('keeps linked PRs whose state has not arrived, matching repositories case-insensitively', () => {
-    const link = (number: number, owner = 'acme') => ({ owner, repo: 'app', number, url: `https://github.com/${owner}/app/pull/${number}`, title: `PR ${number}` });
-    expect(findLinkedPrsWithoutState([link(7, 'Acme'), link(8)], [summary(7, 'open')]).map((entry) => entry.number)).toEqual([8]);
+    const link = (number: number, owner = 'acme', provider = 'github'): LinkedSidebarChange => ({
+      key: `${owner}#${number}`, identifier: `#${number}`, url: `https://github.com/${owner}/app/pull/${number}`, title: `PR ${number}`,
+      repository: { key: `${owner}#${number}`, provider, instance: 'github.com', owner, repo: 'app', number, thread: 'pull' },
+    });
+    const other: LinkedSidebarChange = { key: 'guest:x', identifier: 'X-1', url: 'https://x', title: 'Guest' };
+    expect(findLinkedPrsWithoutState([link(7, 'Acme'), link(8), other], [summary(7, 'open')]).map((entry) => entry.repository?.number)).toEqual([8]);
     expect(findLinkedPrsWithoutState([link(7)], [])).toHaveLength(1);
+    // The same path and number on another provider is another change request.
+    expect(findLinkedPrsWithoutState([link(7, 'acme', 'acme-forge')], [summary(7, 'open')])).toHaveLength(1);
   });
 });
 
-describe('linked Linear issues', () => {
-  test('take the colour of their state type and show its team name', () => {
-    const linear = (identifier: string): LinkedSidebarIssue => ({ source: 'linear', key: `linear:${identifier}`, identifier, url: `https://linear.app/x/issue/${identifier}`, title: 'Old title' });
+describe('linked tracker items', () => {
+  test('take the colour of their state category and show the state\'s own name', () => {
+    const linear = (identifier: string): LinkedSidebarIssue => ({ source: 'tracker', provider: 'linear', key: `linear:${identifier}`, identifier, url: `https://linear.app/x/issue/${identifier}`, title: 'Old title' });
     const items = buildSessionIssueItems([linear('ENG-1'), linear('ENG-2'), linear('ENG-3')], [], [
-      { identifier: 'ENG-1', title: 'Shipped', state: { name: 'Done', type: 'completed' } },
+      { identifier: 'ENG-1', title: 'Shipped', state: { name: 'Done', category: 'done' } },
       null,
-      { identifier: 'ENG-3', title: 'Working', state: { name: 'In Progress', type: 'started' } },
+      { identifier: 'ENG-3', title: 'Working', state: { name: 'In Progress', category: 'in-progress' } },
     ]);
     expect(items.map((item) => [item.label, item.color, item.statusText, item.title])).toEqual([
       ['ENG-3', 'var(--pr-open)', 'In Progress', 'Working'],
@@ -92,10 +98,11 @@ describe('getPrStatusLabelKey', () => {
 
 describe('buildSessionIssueItems', () => {
   const github = (number: number): LinkedSidebarIssue => ({
-    source: 'github', key: `acme/app#${number}`, owner: 'acme', repo: 'app', number, url: `https://github.com/acme/app/issues/${number}`, title: `Issue ${number}`,
+    source: 'repository', key: `acme/app#${number}`, identifier: `#${number}`, url: `https://github.com/acme/app/issues/${number}`, title: `Issue ${number}`,
+    ref: { key: `acme/app#${number}`, provider: 'github', instance: 'github.com', owner: 'acme', repo: 'app', number, thread: 'issue' },
   });
   const state = (number: number, value: 'open' | 'completed' | 'not_planned') => ({ owner: 'acme', repo: 'app', number, title: `Live ${number}`, state: value });
-  const linear: LinkedSidebarIssue = { source: 'linear', key: 'linear:ENG-1', identifier: 'ENG-1', url: 'https://linear.app/x', title: 'Linear task' };
+  const linear: LinkedSidebarIssue = { source: 'tracker', provider: 'linear', key: 'linear:ENG-1', identifier: 'ENG-1', url: 'https://linear.app/x', title: 'Linear task' };
 
   test('open issues lead, unknown states follow, closed ones trail', () => {
     const items = buildSessionIssueItems(
@@ -118,15 +125,20 @@ describe('buildSessionIssueItems', () => {
     const [item] = buildSessionIssueItems([linear], []);
     expect(item).toMatchObject({ label: 'ENG-1', icon: 'linear', color: null, statusKey: null });
   });
+
+  test('a tracker the UI has no mark for wears the generic issue mark', () => {
+    const [item] = buildSessionIssueItems([{ ...linear, provider: 'acme-tickets' }], []);
+    expect(item.icon).toBe('record-circle');
+  });
 });
 
 describe('GitLab issues on a session row', () => {
   test('take their colour from their own live state, in order', () => {
-    const ref = (number: number) => ({ key: `https://gitlab.com/team/app#${number}`, instance: 'https://gitlab.com', owner: 'team', repo: 'app', number, thread: 'issue' as const });
+    const ref = (number: number) => ({ key: `gitlab|${number}`, provider: 'gitlab', instance: 'https://gitlab.com', owner: 'team', repo: 'app', number, thread: 'issue' as const });
     const items = buildSessionIssueItems([
-      { source: 'gitlab', key: 'a', ref: ref(1), identifier: '#1', url: 'u1', title: 'One' },
-      { source: 'gitlab', key: 'b', ref: ref(2), identifier: '#2', url: 'u2', title: 'Two' },
-    ], [], [], [
+      { source: 'repository', key: 'a', ref: ref(1), identifier: '#1', url: 'u1', title: 'One' },
+      { source: 'repository', key: 'b', ref: ref(2), identifier: '#2', url: 'u2', title: 'Two' },
+    ], [
       { owner: 'team', repo: 'app', number: 1, title: 'One', state: 'completed' },
       { owner: 'team', repo: 'app', number: 2, title: 'Two', state: 'open' },
     ]);
@@ -136,4 +148,3 @@ describe('GitLab issues on a session row', () => {
     ]);
   });
 });
-

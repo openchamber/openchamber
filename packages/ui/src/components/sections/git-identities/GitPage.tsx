@@ -1,5 +1,7 @@
 import { isCompleteIdentity } from '@/lib/api/git-identity';
 import { identityAccountConnected, identityDisplayName, unavailableAccountReason } from '@/lib/source-control/identity';
+import { useSourceControlDescriptorOf, useSourceControlProviderRegistry } from '@/lib/source-control/providers/registry';
+import { ProviderIcon } from '@/components/sourceControl/ProviderIcon';
 import React from 'react';
 import { toast } from '@/components/ui';
 import {
@@ -38,8 +40,6 @@ const ICON_MAP: Record<string, IconName> = {
   graduation: 'graduation-cap',
   code: 'code',
   heart: 'heart',
-  github: 'github',
-  gitlab: 'gitlab',
 };
 
 const COLOR_MAP: Record<string, string> = {
@@ -234,11 +234,19 @@ const IdentityRow: React.FC<IdentityRowProps> = ({
   const connectedAccountIds = useConnectedAccountIds();
   const authEntries = useSourceControlAuthStore((state) => state.entries);
   const [contextMenuOpen, setContextMenuOpen] = React.useState(false);
-  const iconName = ICON_MAP[profile.icon || 'branch'] || 'git-branch';
+  const descriptorOf = useSourceControlDescriptorOf();
+  const providers = useSourceControlProviderRegistry((state) => state.byId);
+  const iconName = ICON_MAP[profile.icon || 'branch'];
+  // An identity made from a connected account carries its provider's mark: the icon key is the provider id.
+  const iconProvider = !iconName && profile.icon ? providers.get(profile.icon) : undefined;
   // What keeps this identity from being chosen: a missing key, an account
   // that was disconnected, or the gh CLI login while it is not in use.
   const accountNoteKey = (account: NonNullable<GitIdentityProfile['account']>) => (
-    unavailableAccountReason(account, authEntries[getSourceControlAuthKey(account)]?.status?.accounts ?? null) === 'cli-not-in-use'
+    unavailableAccountReason(
+      account,
+      authEntries[getSourceControlAuthKey(account)]?.status?.accounts ?? null,
+      descriptorOf(account.provider).auth.cliTransport,
+    ) === 'cli-not-in-use'
       ? 'settings.gitIdentities.page.cliAccountInactive' as const
       : 'settings.gitIdentities.page.accountGone' as const
   );
@@ -296,7 +304,13 @@ const IdentityRow: React.FC<IdentityRowProps> = ({
         }
       >
       <div className="flex items-center gap-3 min-w-0">
-        <Icon name={iconName} className="w-4 h-4 shrink-0" style={{ color: iconColor }} />
+        {iconProvider ? (
+          <span className="inline-flex shrink-0" style={{ color: iconColor }}>
+            <ProviderIcon descriptor={iconProvider} className="w-4 h-4 shrink-0" />
+          </span>
+        ) : (
+          <Icon name={iconName ?? 'git-branch'} className="w-4 h-4 shrink-0" style={{ color: iconColor }} />
+        )}
         <div className="min-w-0">
           <div className="flex items-center gap-1.5">
             <span className="typography-ui-label text-foreground truncate">{identityDisplayName(profile, t)}</span>

@@ -22,7 +22,9 @@ left to build are in `ADR.md` beside this file.
 The page reads; it never owns state. In work is `lib/sessionWorkMetadata.ts`,
 unread is `sync/session-unread.ts`, branch PRs live in the shared
 `useGitHubPrStatusStore` (the page asks for its worktree branches under the
-sidebar's keys), linked items are `useTrackedItemsStore`.
+sidebar's keys), linked items are `useTrackedItemsStore`, read through the
+sidebar's one repository-thread path (`getLinkedSidebarChanges`,
+`getLinkedSidebarIssues` with `useRepositoryUrlMatcher()`).
 
 ## Invariants
 
@@ -133,8 +135,10 @@ grey list), then a main column with a rail and tinted section tiles (fills too
 loud, the rail truncated every stalled title, a project chip and a text badge
 on every row ran together).
 
-### Why review requests are GitHub only
+### Why review requests come from one provider
 
-They come from one search across the GitHub repositories of the registered
-projects (`useGitHubAcrossReferenceList`), which does not ask GitLab. GitLab
-projects join when that search covers them.
+They come from one search across the registered projects
+(`useRepositoryAcrossReferenceList`), which asks a single provider: the first
+in registry order whose descriptor has `features.referencesAcross`. Only
+GitHub has it today, so projects on GitLab or Gitea are left out until their
+provider offers that search.

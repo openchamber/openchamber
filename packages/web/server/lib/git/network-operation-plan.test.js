@@ -60,8 +60,7 @@ const makePlanner = (overrides = {}) => createNetworkOperationPlanner({
     credentialRevision: 3,
     providerUserId: provider === 'github' ? 'github.com#42' : `${instance}#42`,
     status: 'valid',
-    accessToken: 'github-secret',
-    token: 'gitlab-secret',
+    secret: 'provider-secret',
   })),
   resolveRef: vi.fn(async () => SHA),
   resolveSymbolicRef: vi.fn(async () => 'refs/heads/feature'),
@@ -773,7 +772,7 @@ describe('Git network operation planner', () => {
       credentialRevision: 7,
       providerUserId: 'https://example.com#42',
       status: 'valid',
-      token: 'private-token',
+      secret: 'private-token',
     }));
     const plans = await makePlanner({ resolveSourceControlAccount }).planNetworkOperation({
       operation: 'clone', remoteUrl: 'https://example.com/team/repo.git', destinationPath: '/new/repo',
@@ -798,10 +797,14 @@ describe('Git network operation planner', () => {
     };
     for (const resolved of [null, {
       credentialId: 'replacement', credentialRevision: 1, providerUserId: 'https://example.com#42',
-      status: 'valid', token: 'secret',
+      status: 'valid', secret: 'secret',
     }, {
       credentialId: 'credential-three', credentialRevision: 2, providerUserId: 'https://example.com#42',
-      status: 'invalid', token: 'secret',
+      status: 'invalid', secret: 'secret',
+    }, {
+      // A credential of another instance never stands in for this one.
+      credentialId: 'credential-three', credentialRevision: 2, providerUserId: 'https://other.example.com#42',
+      status: 'valid', secret: 'secret',
     }]) {
       await expect(makePlanner({ fsImpl: { stat }, resolveSourceControlAccount: vi.fn(async () => resolved) })
         .planNetworkOperation(input)).rejects.toMatchObject({ code: 'INVALID_REQUEST' });

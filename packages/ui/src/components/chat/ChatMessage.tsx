@@ -24,6 +24,7 @@ import type { StreamPhase, ToolPopupContent } from './message/types';
 import { deriveMessageRole } from './message/messageRole';
 import { filterVisibleParts, normalizeParts } from './message/partUtils';
 import { normalizeUserDisplayParts } from './message/normalizeUserDisplayParts';
+import { useSourceControlDescriptorOf } from '@/lib/source-control/providers/registry';
 import { isHiddenUserMessage } from './message/hiddenUserMessage';
 import { flattenAssistantTextParts, flattenUserTextParts } from '@/lib/messages/messageText';
 import { assistantErrorNotice } from '@/lib/messages/assistantError';
@@ -172,14 +173,16 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
         }))
     );
 
+    // Change-request chips are labelled by their provider; the lookup changes when the list lands.
+    const descriptorOf = useSourceControlDescriptorOf();
     const normalizedParts = React.useMemo(() => {
         const safeParts = normalizeParts(message.parts);
         if (!isUser) {
             return safeParts;
         }
 
-        return normalizeUserDisplayParts(safeParts);
-    }, [isUser, message.parts]);
+        return normalizeUserDisplayParts(safeParts, descriptorOf);
+    }, [descriptorOf, isUser, message.parts]);
 
     const agentName = React.useMemo(() => {
         if (isUser) return undefined;

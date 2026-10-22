@@ -1,5 +1,6 @@
 /**
- * The picker for GitHub issues and pull requests, and Linear issues.
+ * The picker for a project's issues and change requests, on whichever
+ * provider hosts it, and a tracker's work items (Linear issues).
  *
  * Desktop shows the list and a preview of the highlighted item side by side,
  * so the user sees what they are about to attach. Mobile shows the list, and
@@ -14,11 +15,13 @@
 import * as React from 'react';
 
 import { Icon } from '@/components/icon/Icon';
+import { ProviderIcon } from '@/components/sourceControl/ProviderIcon';
+import { trackerPresentation } from '@/lib/trackers/presentation';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
-import type { GitHubReferenceKind } from '@/lib/api/types';
+import type { RepositoryReferenceKind } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
@@ -42,10 +45,10 @@ type ReferencePickerDialogProps = {
     source: ReferencePickerSource;
     purpose: ReferencePreviewPurpose;
     selection: 'multiple' | 'single';
-    /** The project GitHub items come from. */
+    /** The project repository items come from. */
     directory: string | null;
-    /** Tab to open GitHub on; the last used one otherwise. */
-    initialGitHubKind?: GitHubReferenceKind;
+    /** Tab to open the repository source on; the last used one otherwise. */
+    initialGitHubKind?: RepositoryReferenceKind;
     /** Null closes the picker; a failure keeps it open with the message. */
     onConfirm: (selections: ReferencePickerSelection[]) => Promise<ReferencePickerConfirmFailure | null>;
 };
@@ -75,7 +78,7 @@ function ReferencePickerSurface({
     const [confirmError, setConfirmError] = React.useState<string | null>(null);
 
     const browser = useReferenceBrowser({ source, directory, isMobile, initialGitHubKind, retainedItems: checked });
-    const { highlightedItem, previewItem, previewKey, isGitLab } = browser;
+    const { highlightedItem, previewItem, previewKey, descriptor } = browser;
 
     const toggleChecked = React.useCallback((item: ReferencePickerItem) => {
         const key = referencePickerItemKey(item);
@@ -98,9 +101,9 @@ function ReferencePickerSurface({
     }, []);
 
     const toSelection = React.useCallback((item: ReferencePickerItem): ReferencePickerSelection => (
-        item.source === 'linear'
+        item.source === 'tracker'
             ? item
-            : { source: 'github', reference: item.reference, includeDiff: diffIncluded.has(referencePickerItemKey(item)) }
+            : { source: 'repository', reference: item.reference, includeDiff: diffIncluded.has(referencePickerItemKey(item)) }
     ), [diffIncluded]);
 
     /** Confirm the checked items plus `extra`, or just `extra` in single mode. */
@@ -135,11 +138,9 @@ function ReferencePickerSurface({
         void confirm(selection === 'multiple' && checked.size > 0 ? null : highlightedItem);
     };
 
-    const title = t(source === 'github'
-        ? (isGitLab
-            ? (purpose === 'worktree' ? 'references.picker.title.gitlab.worktree' : 'references.picker.title.gitlab.attach')
-            : (purpose === 'worktree' ? 'references.picker.title.github.worktree' : 'references.picker.title.github.attach'))
-        : (purpose === 'worktree' ? 'references.picker.title.linear.worktree' : 'references.picker.title.linear.attach'));
+    const title = browser.tracker
+        ? t(`references.picker.title.tracker.${purpose}`, { provider: browser.trackerDescriptor.name })
+        : t(`references.picker.title.repository.${purpose}`, { provider: descriptor.label });
 
     const openSettings = () => {
         const ui = useUIStore.getState();
@@ -169,9 +170,9 @@ function ReferencePickerSurface({
         <ReferencePreview
             item={previewItem}
             directory={browser.directory}
-            pullStatus={previewItem?.source === 'github' ? browser.pullStatusOf(previewItem.reference) : IDLE_PULL_STATUS}
-            linearDetail={browser.linearDetail}
-            githubDetail={browser.githubDetail}
+            pullStatus={previewItem?.source === 'repository' ? browser.pullStatusOf(previewItem.reference) : IDLE_PULL_STATUS}
+            trackerDetail={browser.trackerDetail}
+            repositoryDetail={browser.repositoryDetail}
             purpose={purpose}
             pinned={!isMobile}
             includeDiff={previewKey ? diffIncluded.has(previewKey) : false}
@@ -179,7 +180,7 @@ function ReferencePickerSurface({
                 if (previewKey) setIncludeDiff(previewKey, include);
             }}
             now={browser.now}
-            onOpenLinearIssue={(issue) => browser.openItem({ source: 'linear', issue })}
+            onOpenTrackerItem={(item) => browser.openItem({ source: 'tracker', provider: item.provider, item })}
         />
     );
 
@@ -269,7 +270,9 @@ function ReferencePickerSurface({
                 <div className="flex shrink-0 flex-col gap-3 border-b border-border/60 px-5 pb-3 pt-4">
                     <div className="flex flex-wrap items-center gap-3 pe-8">
                         <DialogTitle className="flex shrink-0 items-center gap-2 typography-ui-header">
-                            <Icon name={source === 'linear' ? 'linear' : isGitLab ? 'gitlab' : 'github'} className="size-5" />
+                            {browser.tracker
+                                ? <Icon name={trackerPresentation(browser.tracker).icon} className="size-5" />
+                                : <ProviderIcon descriptor={descriptor} className="size-5" />}
                             {title}
                         </DialogTitle>
                         <DialogDescription className="sr-only">

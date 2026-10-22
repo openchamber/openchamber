@@ -20,11 +20,14 @@ has to ask for it.
   `PROMPT_VERSION`.
 - `schema.js` — response schema, response normalization, tolerant JSON parsing.
 - `store.js` — content-addressed cache entries plus mutable pointers.
-- `pull-request.js` — PR diffs and per-file contents: GitHub through the
-  shared octokit helper (the host is resolved from the checkout's remote, not
-  the PR's source repo, so an enterprise checkout pulls its diff from its own
-  host with that host's token), GitLab merge requests through the readers the
-  runtime injects from the GitLab module (`readGitLabChangeRequestPatch`/`File`).
+- `pull-request.js` — change request diffs and per-file contents through the
+  provider-neutral readers the runtime injects from the source-control module
+  (`readChangeRequestPatch`/`File`), which dispatch by the context's provider
+  to its `resources.readChangeRequestPatch`/`File` (GitHub's are
+  `github/change-request-patch.js`, GitLab's `gitlab/resources.js`, Gitea's
+  `gitea/resources.js`). It also
+  says which providers walkthroughs serve: those whose descriptor has
+  `capabilities.changeRequestPatch`.
 - `model-settings.js` — the feature's own model override.
 - `languages.js` — the languages the prose may be written in.
 - `index.js` — orchestration.
@@ -106,7 +109,7 @@ only while PR mode is visible. Selection ownership and handoff rules are in
 `packages/ui/src/stores/DOCUMENTATION.md`.
 
 PR sources may include `sourceRepo: { owner, repo }`. `owner` is a single
-segment on GitHub and a namespace path on GitLab (`group/subgroup`), matching
+segment on GitHub and Gitea and a namespace path on GitLab (`group/subgroup`), matching
 what each provider's project mapper produces. It qualifies the cache/job
 key as `pr:<owner>/<repo>:<number>`, so equal numbers in different repositories
 stay apart. Number-only sources keep `pr:<number>` and read the repository behind
@@ -123,7 +126,8 @@ without one it reads nothing. It returns GitHub's complete published diff as
 text, with no model readiness checks or generation. A GitLab context returns
 the merge request's diff, rebuilt by `gitlab/resources.js` into the same git
 patch shape from GitLab's per-file hunks (GitLab diffs against the merge base,
-like GitHub). Successful empty patches return 200; auth,
+like GitHub). A Gitea context returns Gitea's own `.diff` of the pull request.
+Successful empty patches return 200; auth,
 GitHub and malformed-response failures remain errors. Walkthrough generation
 keeps its existing empty-diff refusal. UI comparison behavior is documented in
 `packages/ui/src/components/views/DOCUMENTATION.md`.
@@ -465,8 +469,9 @@ For a PR source, all four routes also require flat `provider`, `instance`,
 query or JSON body. They do not accept a nested context object. The source-control
 binding service validates these immutable fields before walkthrough service,
 cache, job, credential, repository-coordinate, or provider work. The server
-accepts a validated GitHub or GitLab context and refuses any other provider with
-`422 UNSUPPORTED_WALKTHROUGH_PROVIDER`. It resolves the exact bound
+accepts a validated context whose provider's descriptor has
+`capabilities.changeRequestPatch` (GitHub, GitLab and Gitea today) and refuses any
+other provider with `422 UNSUPPORTED_WALKTHROUGH_PROVIDER`. It resolves the exact bound
 account and trusted primary remote, with no active-account or default-remote
 fallback, and every successful PR response echoes the trusted `readContext`.
 An exact-account `401` reconciles the account through the source-control binding

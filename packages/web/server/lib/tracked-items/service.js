@@ -1,5 +1,6 @@
-// Server-owned live state of the pull requests, merge requests and issues the
-// connected clients show (sidebar badges, a session's Context sources).
+// Server-owned live state of the pull requests, merge requests, issues and
+// tracker work items the connected clients show (sidebar badges, a session's
+// Context sources).
 //
 // Clients say what they show and whether their window is visible; they never
 // poll. This service asks the providers on a cadence that follows each item's
@@ -8,7 +9,8 @@
 // actually moved. The last known state survives failures, rate limits and
 // restarts (persisted), so a client starts from it instead of an unknown.
 
-import { trackedItemKey } from './items.js';
+import { sourceControlProviderDescriptors } from '../source-control/provider-descriptors.js';
+import { isWorkItem, threadInstance, trackedItemKey } from './items.js';
 
 const SECOND = 1000;
 const MINUTE = 60 * SECOND;
@@ -17,7 +19,7 @@ const MINUTE = 60 * SECOND;
 const OPEN_CHANGE_INTERVAL_MS = MINUTE;
 const PENDING_CHECKS_INTERVAL_MS = 30 * SECOND;
 const SETTLED_INTERVAL_MS = 5 * MINUTE;
-const LINEAR_OPEN_INTERVAL_MS = 2 * MINUTE;
+const WORK_ITEM_OPEN_INTERVAL_MS = 2 * MINUTE;
 const UNKNOWN_INTERVAL_MS = MINUTE;
 // Coming back to the window refreshes what is older than this.
 const RETURN_FLOOR_MS = 15 * SECOND;
@@ -34,27 +36,30 @@ const PERSIST_DEBOUNCE_MS = 2 * SECOND;
 const RETENTION_MS = 12 * 60 * MINUTE;
 const MAX_ENTRIES = 500;
 
-const BATCH_LIMIT = { github: 100, gitlab: 50, linear: 50 };
-const LINEAR_SETTLED_TYPES = new Set(['completed', 'canceled']);
+// A source-control provider's batch size is its descriptor's; a tracker's is this.
+const WORK_ITEM_BATCH_LIMIT = 50;
+// Work item state categories (the tracker contract's) that no longer move.
+const SETTLED_WORK_ITEM_CATEGORIES = new Set(['done', 'canceled']);
 
-// One batch per provider, instance and reading account. A GitHub instance is the
-// repository's host (missing means github.com), so one enterprise host's
-// cooldown and failures never touch another host's items.
+// One batch per provider, instance and reading account. A host-form instance
+// missing on the item is its provider's default (github.com), so one
+// enterprise host's cooldown and failures never touch another host's items.
 const groupOf = (item) => {
+  if (isWorkItem(item)) return item.provider;
   const account = item.accountId ? `@${item.accountId}` : '';
-  if (item.provider === 'gitlab') return `gitlab|${item.instance}${account}`;
-  if (item.provider === 'github') return `github|${item.instance ?? 'github.com'}${account}`;
-  return `${item.provider}${account}`;
+  return `${item.provider}|${threadInstance(item)}${account}`;
 };
+const batchLimitOf = (item) => (isWorkItem(item)
+  ? WORK_ITEM_BATCH_LIMIT
+  : sourceControlProviderDescriptors.get(item.provider)?.trackedItems.batchLimit ?? WORK_ITEM_BATCH_LIMIT);
+const isSettledWorkItem = (state) => SETTLED_WORK_ITEM_CATEGORIES.has(state.state?.category);
 const threadRef = (item) => ({ owner: item.owner, repo: item.repo, number: item.number });
 const threadAnswerKey = (ref) => `${ref.owner}/${ref.repo}#${ref.number}`.toLowerCase();
 
 const refreshIntervalMs = (entry) => {
   const { item, state } = entry;
   if (!state) return UNKNOWN_INTERVAL_MS;
-  if (item.provider === 'linear') {
-    return LINEAR_SETTLED_TYPES.has(state.state?.type) ? SETTLED_INTERVAL_MS : LINEAR_OPEN_INTERVAL_MS;
-  }
+  if (isWorkItem(item)) return isSettledWorkItem(state) ? SETTLED_INTERVAL_MS : WORK_ITEM_OPEN_INTERVAL_MS;
   if (item.kind === 'pull') {
     if (state.state === 'merged') return Number.POSITIVE_INFINITY;
     if (state.state === 'closed') return SETTLED_INTERVAL_MS;
@@ -67,7 +72,7 @@ const refreshIntervalMs = (entry) => {
 const isLive = (entry) => {
   const { item, state } = entry;
   if (!state) return true;
-  if (item.provider === 'linear') return !LINEAR_SETTLED_TYPES.has(state.state?.type);
+  if (isWorkItem(item)) return !isSettledWorkItem(state);
   return state.state === 'open';
 };
 
@@ -75,10 +80,11 @@ const publicState = (key, entry) => ({ key, item: entry.item, state: entry.state
 
 /**
  * `readers` answer one provider batch each and never see other providers:
- * - `github({ accountId, pulls, issues })`, `gitlab({ instance, accountId, pulls, issues })` with
+ * - `sourceControl({ provider, instance, accountId, pulls, issues })` with
  *   `{ owner, repo, number }` refs, answering `{ status: 'ok', pulls, issues }`
- *   in GitHub's summary shape;
- * - `linear({ identifiers })` answering `{ status: 'ok', issues }`;
+ *   in the live summary shape;
+ * - `workItems({ provider, identifiers })` answering `{ status: 'ok', items }`
+ *   (tracker live summaries, whose `state.category` sets the cadence);
  * - or `{ status: 'disconnected' }` (no account there) /
  *   `{ status: 'unavailable', retryAfterMs? }` (rate limit, outage). A throw
  *   counts as unavailable.
@@ -214,9 +220,9 @@ export function createTrackedItemsService({
   // Matches answers back to the batch: a batch is always one provider.
   const answersFor = (batch, result) => {
     const answers = new Map();
-    if (batch[0][1].item.provider === 'linear') {
+    if (isWorkItem(batch[0][1].item)) {
       const byIdentifier = new Map(batch.map(([key, entry]) => [entry.item.identifier, key]));
-      for (const summary of result.issues ?? []) {
+      for (const summary of result.items ?? []) {
         const key = byIdentifier.get(String(summary?.identifier ?? '').toUpperCase());
         if (key) answers.set(key, summary);
       }
@@ -234,21 +240,18 @@ export function createTrackedItemsService({
 
   const readBatch = async (batch) => {
     const first = batch[0][1].item;
-    if (first.provider === 'linear') {
-      return readers.linear({ identifiers: batch.map(([, entry]) => entry.item.identifier) });
+    if (isWorkItem(first)) {
+      return readers.workItems({ provider: first.provider, identifiers: batch.map(([, entry]) => entry.item.identifier) });
     }
     const pulls = batch.filter(([, entry]) => entry.item.kind === 'pull').map(([, entry]) => threadRef(entry.item));
     const issues = batch.filter(([, entry]) => entry.item.kind === 'issue').map(([, entry]) => threadRef(entry.item));
-    const accountId = first.accountId ?? null;
-    // A GitHub instance is the repository's host; missing means github.com.
-    const instance = first.instance ?? 'github.com';
-    return first.provider === 'gitlab'
-      ? readers.gitlab({ instance: first.instance, accountId, pulls, issues })
-      : readers.github({ instance, accountId, pulls, issues });
+    return readers.sourceControl({
+      provider: first.provider, instance: threadInstance(first), accountId: first.accountId ?? null, pulls, issues,
+    });
   };
 
   const refreshGroup = async (group, groupEntries, changed) => {
-    const limit = BATCH_LIMIT[groupEntries[0][1].item.provider];
+    const limit = batchLimitOf(groupEntries[0][1].item);
     for (let start = 0; start < groupEntries.length; start += limit) {
       const batch = groupEntries.slice(start, start + limit);
       let result;
@@ -378,14 +381,20 @@ export function createTrackedItemsService({
     },
 
     /**
-     * One item a user asked to read again, by provider, project and number,
-     * whichever account or kind follows it: its state is asked now.
+     * One item a user asked to read again: a work item by identifier, else a
+     * change request or issue by project and number, whichever account or
+     * kind follows it. Its state is asked now.
      */
-    refreshItem(provider, { owner, repo, number }) {
+    refreshItem(provider, { owner, repo, number, identifier }) {
       const same = (left, right) => !left || String(left).toLowerCase() === String(right ?? '').toLowerCase();
+      const wanted = String(identifier ?? '').toUpperCase();
       for (const [key, entry] of entries) {
         const item = entry.item;
-        if (item.provider === provider && item.number === number && same(owner, item.owner) && same(repo, item.repo)) forced.add(key);
+        if (item.provider !== provider) continue;
+        const named = isWorkItem(item)
+          ? Boolean(wanted) && item.identifier === wanted
+          : item.number === number && same(owner, item.owner) && same(repo, item.repo);
+        if (named) forced.add(key);
       }
       scheduleNext();
     },

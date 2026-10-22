@@ -1,4 +1,5 @@
 import { isString } from '../shared/guards.js';
+import { sourceControlProviderDescriptors } from '../source-control/provider-descriptors.js';
 
 const text = (value) => (isString(value) ? value.trim() : '');
 
@@ -11,22 +12,21 @@ const sameAccount = (left, right) => Boolean(left) && Boolean(right)
  * The signature an identity for this account starts with.
  *
  * A provider that publishes an address gives it. GitHub often does not, and
- * answers that with its own no-reply address, which is the address its own web
- * interface commits as — so an identity is complete on the spot rather than
- * asking for something the person has to go and look up.
+ * answers that with its own no-reply address (the descriptor's
+ * `identity.noReplyEmail`), which is the address its own web interface commits
+ * as — so an identity is complete on the spot rather than asking for something
+ * the person has to go and look up.
  */
-const accountSignature = (account, user) => {
+const accountSignature = (descriptor, user) => {
   const login = text(user?.login) || text(user?.username);
   const userName = text(user?.name) || login;
   const email = text(user?.email);
   if (email) return { userName, userEmail: email };
-  if (account.provider === 'github' && login && Number.isInteger(user?.id)) {
-    return { userName, userEmail: `${user.id}+${login}@users.noreply.github.com` };
-  }
-  return { userName, userEmail: '' };
+  const noReply = login && descriptor.identity?.noReplyEmail instanceof Function
+    ? descriptor.identity.noReplyEmail({ id: user?.id, login })
+    : null;
+  return { userName, userEmail: noReply ?? '' };
 };
-
-const PROVIDER_LABELS = { github: 'GitHub', gitlab: 'GitLab' };
 
 /** The host of an instance, for telling two self-hosted GitLabs apart. */
 const instanceLabel = (instance) => {
@@ -43,11 +43,11 @@ const instanceLabel = (instance) => {
  * nobody which is which. It is qualified by where it lives instead, and the
  * first one keeps the plain name it already had.
  */
-const uniqueName = (profiles, candidate, account) => {
+const uniqueName = (profiles, candidate, account, providerLabel) => {
   const taken = new Set(profiles.map((profile) => text(profile.name).toLowerCase()));
   const free = (name) => !taken.has(name.toLowerCase());
   if (free(candidate)) return candidate;
-  const provider = PROVIDER_LABELS[account?.provider];
+  const provider = providerLabel;
   if (provider && free(`${candidate} (${provider})`)) return `${candidate} (${provider})`;
   const host = instanceLabel(account?.instance);
   if (host && free(`${candidate} (${host})`)) return `${candidate} (${host})`;
@@ -67,7 +67,12 @@ const uniqueName = (profiles, candidate, account) => {
  * credential an identity names, and the identity follows it, because "my GitHub
  * account" is expected to keep working after signing in again.
  */
-export function createGitIdentityProvisioning({ store, now = Date.now, randomId = () => Math.random().toString(36).slice(2, 9) }) {
+export function createGitIdentityProvisioning({
+  store,
+  describeProvider = sourceControlProviderDescriptors.get,
+  now = Date.now,
+  randomId = () => Math.random().toString(36).slice(2, 9),
+}) {
   if (!store || !(store.getProfiles instanceof Function) || !(store.createProfile instanceof Function)
     || !(store.updateProfile instanceof Function)) {
     throw new TypeError('Git identity provisioning dependencies are invalid');
@@ -77,10 +82,13 @@ export function createGitIdentityProvisioning({ store, now = Date.now, randomId 
     /** Creates the identity for a newly connected account, if it has none. */
     ensureAccountIdentity: ({ account, user }) => {
       if (!account?.provider || !text(account.instance) || !text(account.accountId)) return null;
+      // An account of a provider this build does not know describes nothing to sign as.
+      const descriptor = describeProvider(account.provider);
+      if (!descriptor) return null;
       const profiles = store.getProfiles();
       const existing = profiles.find((profile) => sameAccount(profile.account, account));
       if (existing) return existing;
-      const signature = accountSignature(account, user);
+      const signature = accountSignature(descriptor, user);
       // The same person connecting again after disconnecting is the same
       // identity, not a second one: their signature on this instance already
       // names them, so it follows the new credential instead of being cloned.
@@ -95,13 +103,13 @@ export function createGitIdentityProvisioning({ store, now = Date.now, randomId 
       const login = text(user?.login) || text(user?.username) || signature.userName;
       return store.createProfile({
         id: `identity-${now()}-${randomId()}`,
-        name: uniqueName(profiles, login, account),
+        name: uniqueName(profiles, login, account, descriptor.label),
         userName: signature.userName,
         userEmail: signature.userEmail,
         account,
         transport: 'account',
         color: 'keyword',
-        icon: account.provider === 'github' ? 'github' : 'gitlab',
+        icon: descriptor.iconId,
       });
     },
 

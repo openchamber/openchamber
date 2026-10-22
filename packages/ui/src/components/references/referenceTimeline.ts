@@ -1,6 +1,6 @@
 /** The preview's thread: comments and, for a PR, its commits, in the order they happened. */
 
-/** One comment in the preview's thread, from GitHub, GitLab or Linear. */
+/** One comment in the preview's thread, from a source-control provider or a tracker. */
 export type ReferenceCommentItem = {
     kind: 'comment';
     key: string;

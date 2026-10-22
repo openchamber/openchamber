@@ -9,7 +9,10 @@ import { cn } from '@/lib/utils';
 import { openExternalUrl } from '@/lib/url';
 import { formatFileSize } from '@/lib/fileSize';
 import { getLanguageFromExtension, isDrawioFile, isExcalidrawFile } from '@/lib/toolHelpers';
-import { decodeDataUrlText, getIssueLinkKind, isTextLikeFile, resolveAttachmentOpenTarget, type IssueLinkKind } from '@/lib/messages/attachmentPreview';
+import { trackerPresentation } from '@/lib/trackers/presentation';
+import { decodeDataUrlText, getIssueLinkKind, getRepositoryIssueLinkProvider, getTrackerItemLinkProvider, isTextLikeFile, resolveAttachmentOpenTarget, type IssueLinkKind } from '@/lib/messages/attachmentPreview';
+import { ProviderIcon } from '@/components/sourceControl/ProviderIcon';
+import { useSourceControlProvider } from '@/lib/source-control/providers/registry';
 import { useOpenAttachment } from './message/useOpenAttachment';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
@@ -552,12 +555,16 @@ interface FilePart {
   source?: Record<string, unknown>;
 }
 
-const issueLinkIcon = (kind: IssueLinkKind): 'github' | 'gitlab' | 'git-pull-request' | 'linear' | 'attachment-2' => {
-  if (kind === 'github-pr' || kind === 'guest-pr') return 'git-pull-request';
-  if (kind === 'gitlab-issue') return 'gitlab';
-  if (kind === 'linear-issue') return 'linear';
-  if (kind === 'guest-issue') return 'attachment-2';
-  return 'github';
+const issueLinkIcon = (kind: Exclude<IssueLinkKind, 'repository-issue' | 'tracker-item'>): 'git-pull-request' | 'attachment-2' => (
+  kind === 'guest-issue' ? 'attachment-2' : 'git-pull-request'
+);
+
+/** An issue or PR link chip's mark: a repository issue wears its provider's, a tracker item its tracker's. */
+const IssueLinkIcon: React.FC<{ file: { mime?: string }; kind: IssueLinkKind; className?: string }> = ({ file, kind, className }) => {
+  const provider = useSourceControlProvider(getRepositoryIssueLinkProvider(file));
+  if (kind === 'repository-issue') return <ProviderIcon descriptor={provider} className={className} />;
+  if (kind === 'tracker-item') return <Icon name={trackerPresentation(getTrackerItemLinkProvider(file)).icon} className={className} />;
+  return <Icon name={issueLinkIcon(kind)} className={className} />;
 };
 
 interface MessageFilesDisplayProps {
@@ -585,8 +592,8 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false, 
   };
 
   const resolveDisplayName = React.useCallback((file: FilePart): string => {
-    const isGitHubLink = getIssueLinkKind(file) !== null;
-    if (isGitHubLink && typeof file.filename === 'string' && file.filename.trim().length > 0) {
+    const isIssueLink = getIssueLinkKind(file) !== null;
+    if (isIssueLink && typeof file.filename === 'string' && file.filename.trim().length > 0) {
       return file.filename.trim();
     }
     return extractFilename(file.filename || file.url);
@@ -653,7 +660,7 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false, 
                         onClick={() => openAttachment(openTarget)}
                         className="inline-flex items-center bg-muted/30 border border-border/30 typography-meta gap-1 px-2 py-0.5 rounded-lg text-foreground hover:text-primary transition-colors"
                       >
-                        <Icon name={issueLinkIcon(issueLinkKind)} className="text-muted-foreground h-3.5 w-3.5" />
+                        <IssueLinkIcon file={file} kind={issueLinkKind} className="text-muted-foreground h-3.5 w-3.5" />
                         <div className="overflow-hidden max-w-[220px]">
                           <span className="truncate block" title={fileName}>{fileName}</span>
                         </div>
@@ -788,7 +795,7 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false, 
                   )}
                 >
                   <div className="flex-shrink-0">
-                    <Icon name={issueLinkIcon(issueLinkKind)} className={cn("text-muted-foreground", compact ? "h-3.5 w-3.5" : "h-4 w-4")} />
+                    <IssueLinkIcon file={file} kind={issueLinkKind} className={cn("text-muted-foreground", compact ? "h-3.5 w-3.5" : "h-4 w-4")} />
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="font-medium truncate">{fileName}</p>

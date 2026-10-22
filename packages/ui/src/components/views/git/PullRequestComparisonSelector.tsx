@@ -7,7 +7,8 @@ import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
-import { formatChangeRequestReference } from '@/lib/source-control/identity';
+import { formatChangeRequestReference } from '@/lib/source-control/providers/terminology';
+import { useSourceControlProvider } from '@/lib/source-control/providers/registry';
 import { useTabletLayout } from '@/lib/device';
 import { cn } from '@/lib/utils';
 import type { usePullRequestComparison } from '@/hooks/usePullRequestComparison';
@@ -17,9 +18,10 @@ export function PullRequestComparisonSelector({ comparison, mobile = false }: {
   mobile?: boolean;
 }) {
   const { t: translate } = useI18n();
-  // GitLab's own words and `!` numbers on a GitLab project.
-  const t = (key: I18nKey) => translate(changeRequestCopy(key, comparison.provider));
-  const reference = (number: number) => formatChangeRequestReference(comparison.provider, number);
+  // The provider's own words and numbers: `!` and merge requests on a GitLab project.
+  const descriptor = useSourceControlProvider(comparison.provider);
+  const t = (key: I18nKey) => translate(changeRequestCopy(key, descriptor.terminology.changeRequest));
+  const reference = (number: number) => formatChangeRequestReference(descriptor, number);
   const tablet = useTabletLayout();
   const sheet = mobile && !tablet.enabled;
   const [open, setOpen] = useState(false);

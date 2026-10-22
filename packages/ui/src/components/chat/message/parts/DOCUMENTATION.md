@@ -610,8 +610,12 @@ Why: only navigation tools use the compact static path; all other tools need obs
   routes to it when the part's metadata carries an `openchamberContext`
   payload (see `lib/messages/contextParts.ts`, which owns both the send-time
   builder and the read-back parser). Linked source-control issues/change
-  requests and Linear issues are instead converted to link file-parts in
-  `normalizeUserDisplayParts.ts`. Legacy pre-metadata messages still render
+  requests and tracker items are instead converted to link file-parts in
+  `normalizeUserDisplayParts.ts`; a tracker item's part names its tracker in
+  its type (`application/vnd.openchamber.tracker-item-link; provider=linear`)
+  so the chip wears the tracker's mark, and Linear's older type still reads as
+  Linear's. A `linear-issue` context payload from before trackers parses as a
+  `tracker-item` of Linear (`lib/messages/contextParts.ts`). Legacy pre-metadata messages still render
   via text sniffing (`<terminal_context>` blocks, `GitHub issue context (JSON)`
   and `Linear issue context (JSON)` prefixes).
 - Tools: `ToolPart.tsx`, `ToolPartDiffPreview.tsx`, `PlainDiffFallback.tsx`, `ProgressiveGroup.tsx`, `toolPresentation.tsx`, `toolRenderUtils.ts`, `ToolRevealOnMount.tsx`, `GuestToolTable.tsx`

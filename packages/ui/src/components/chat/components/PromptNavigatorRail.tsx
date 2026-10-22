@@ -4,6 +4,7 @@ import type { Part } from '@/lib/opencode/model';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n, type I18nKey, type I18nParams } from '@/lib/i18n';
 import { useUIStore } from '@/stores/useUIStore';
+import { useSourceControlDescriptorOf, type SourceControlDescriptorOf } from '@/lib/source-control/providers/registry';
 import { cn } from '@/lib/utils';
 import { getMessagePreview } from '../lib/messagePreview';
 import { useChatColumnActions } from '../chatColumnSession';
@@ -65,12 +66,13 @@ const buildPromptEntries = (
     turnIds: string[],
     previewsByTurnId: Map<string, Part[]>,
     t: (key: I18nKey, params?: I18nParams) => string,
+    descriptorOf: SourceControlDescriptorOf,
 ): PromptEntry[] => {
     return turnIds.map((turnId) => {
         const parts = previewsByTurnId.get(turnId) ?? [];
         return {
             turnId,
-            preview: getMessagePreview(parts, PREVIEW_MAX_CHARS, t),
+            preview: getMessagePreview(parts, PREVIEW_MAX_CHARS, t, descriptorOf),
         };
     });
 };
@@ -102,6 +104,7 @@ export function PromptNavigatorRail({
     onLoadEarlier,
 }: PromptNavigatorRailProps) {
     const { t } = useI18n();
+    const descriptorOf = useSourceControlDescriptorOf();
     // The keyboard shortcut drives the main chat's rail; a pinned column's
     // rail neither opens on it nor closes it.
     const { pinned } = useChatColumnActions();
@@ -138,8 +141,8 @@ export function PromptNavigatorRail({
     }, []);
 
     const prompts = React.useMemo(
-        () => buildPromptEntries(turnIds, previewsByTurnId, t),
-        [previewsByTurnId, t, turnIds],
+        () => buildPromptEntries(turnIds, previewsByTurnId, t, descriptorOf),
+        [descriptorOf, previewsByTurnId, t, turnIds],
     );
 
     const visibleCount = Math.min(prompts.length, MAX_VISIBLE_TICKS);

@@ -42,6 +42,15 @@ describe('buildLinkedIssuesPatch', () => {
     expect(Object.keys(patch.openchamber)).toEqual(['linked_issues']);
   });
 
+  test('a tracker entry is accepted and takes the place of the legacy Linear entry with its id', () => {
+    const legacy = { id: 'linear:ENG-1', identifier: 'ENG-1', title: 'Spec', url: 'https://linear.app/x/issue/ENG-1', kind: 'linear', linkedAt: 1 };
+    const tracker = { ...legacy, kind: 'tracker', provider: 'linear', linkedAt: 2 };
+    const operation = parseLinkOperation({ entries: [tracker], linked: true });
+    expect(operation.ok).toBe(true);
+    const patch = buildLinkedIssuesPatch({ openchamber: { linked_issues: [legacy] } }, operation.entries, true);
+    expect(patch.openchamber.linked_issues).toEqual([tracker]);
+  });
+
   test('re-linking refreshes the entry and moves it to the end', () => {
     const other = issue({ id: 'owner/repo#7', number: 7, url: 'https://github.com/owner/repo/issues/7' });
     const metadata = { openchamber: { linked_issues: [issue(), other] } };

@@ -1008,7 +1008,7 @@ interface UIStore {
   openLinksInBrowserPanel: boolean;
   /** How many of the user's browser tabs keep their page loaded, across projects (desktop only). */
   liveBrowserTabLimit: number;
-  /** Plain clicks on issue, PR and Linear links in chat open them on the issues and PRs board. */
+  /** Plain clicks on issue, PR and tracker item links in chat open them on the issues and PRs board. */
   openTrackerLinksOnBoard: boolean;
   autoDeleteAfterDays: number;
   sessionRetentionAction: SessionRetentionAction;
@@ -1177,7 +1177,7 @@ interface UIStore {
   openContextSurface: (directory: string, mode: ContextPanelMode) => void;
   openContextPanelTab: (directory: string, tab: ContextPanelTabDescriptor, options?: { reveal?: boolean }) => void;
   /**
-   * Opens an issue, pull or merge request or Linear issue in the panel's
+   * Opens an issue, pull or merge request or tracker item in the panel's
    * Tracker surface, one tab per item (`key` names the item, whatever page of
    * it the link opens). `targetDirectory` is the project it is read through.
    * Answers the tab's id.

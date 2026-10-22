@@ -35,6 +35,13 @@ The catalog is in the web app and desktop app. It's hidden in [enterprise mode](
 
 Expand the **GitHub** card and choose **Connect GitHub** to sign in with a short device code. Once connected, OpenChamber can start sessions from issues and pull requests, attach them to messages, and open or update PRs. Everything GitHub can do is on [GitHub Issues & PRs](/github/).
 
+## GitLab and Gitea
+
+GitLab and Gitea each have their own card next to GitHub. Once connected, their issues and pull requests (merge requests on GitLab) show on the [Issues and PRs](/issues-and-prs/) board and in the chat's **+** menu, like GitHub's.
+
+- **GitLab**: on gitlab.com, sign in with a short device code, a personal access token, or the `glab` login on the server. For a self-managed GitLab, add its address and paste a personal access token with the `api` scope. Device-code sign-in works there only when the server sets `OPENCHAMBER_GITLAB_CLIENT_ID` to an application registered on that instance.
+- **Gitea**: add your instance's address, such as `https://gitea.example.com`, and paste a personal access token with the `write:repository`, `write:issue` and `read:user` scopes. The card links to the page on your instance that creates one. Gitea has no device-code or CLI sign-in. It needs Gitea 1.21 or newer, served from the root of its address. Forgejo uses the same API and should work, but hasn't been tested.
+
 ## Linear
 
 ### Connect a workspace

@@ -19,11 +19,17 @@ function setup({ readers = {}, persistence = null } = {}) {
   const answers = {
     github: async (input) => ({ status: 'ok', pulls: input.pulls.map((ref) => pullSummary(ref)), issues: input.issues.map((ref) => ({ ...ref, title: 'Issue', state: 'open' })) }),
     gitlab: async (input) => ({ status: 'ok', pulls: input.pulls.map((ref) => pullSummary(ref)), issues: [] }),
-    linear: async (input) => ({ status: 'ok', issues: input.identifiers.map((identifier) => ({ identifier, title: identifier, state: { name: 'Todo', type: 'unstarted' } })) }),
+    linear: async (input) => ({ status: 'ok', items: input.identifiers.map((identifier) => ({ identifier, title: identifier, state: { name: 'Todo', category: 'todo' } })) }),
     ...readers,
   };
+  // The service sees two readers; the calls are kept per provider so each
+  // test reads one provider's batches.
+  const byProvider = ({ provider, ...input }) => {
+    calls[provider].push(input);
+    return answers[provider](input);
+  };
   const service = createTrackedItemsService({
-    readers: Object.fromEntries(Object.entries(answers).map(([name, read]) => [name, (input) => { calls[name].push(input); return read(input); }])),
+    readers: { sourceControl: byProvider, workItems: byProvider },
     send: (id, event) => { if (!open.has(id)) return false; sent.push({ id, event }); return true; },
     isConnectionOpen: (id) => open.has(id),
     persistence,
@@ -51,8 +57,9 @@ describe('tracked items service', () => {
     });
     expect(calls.gitlab[0]).toMatchObject({ instance: 'https://gitlab.com', pulls: [{ owner: 'group/sub', repo: 'app', number: 3 }] });
     expect(calls.linear[0]).toEqual({ identifiers: ['OPE-7'] });
+    expect(calls.gitlab[0]).toMatchObject({ accountId: null });
     const keysFor = (id) => sent.filter((entry) => entry.id === id).flatMap((entry) => entry.event.properties.states.map((state) => state.key)).sort();
-    expect(keysFor('c1')).toEqual([githubPull(1), githubIssue(2), gitlabPull(3), linearIssue('OPE-7')].map(trackedItemKey).sort());
+    expect(keysFor('c1')).toEqual([githubPull(1), githubIssue(2), gitlabPull(3), { provider: 'linear', kind: 'work-item', identifier: 'OPE-7' }].map(trackedItemKey).sort());
     expect(keysFor('c2')).toEqual([trackedItemKey(githubPull(9))]);
   });
 
@@ -167,6 +174,50 @@ describe('tracked items service', () => {
     expect(calls.github[1]).toMatchObject({ pulls: [{ owner: 'acme', repo: 'app', number: 2 }] });
   });
 
+  it('reads work items on a cadence set by their state category', async () => {
+    let category = 'in-progress';
+    const { service, calls } = setup({
+      readers: { linear: async (input) => ({ status: 'ok', items: input.identifiers.map((identifier) => ({ identifier, title: identifier, state: { name: 'S', category } })) }) },
+    });
+    service.setInterest('c1', itemsOf(linearIssue('ope-7')));
+    await vi.advanceTimersByTimeAsync(0);
+    // Open: every two minutes.
+    await vi.advanceTimersByTimeAsync(2 * 60_000);
+    expect(calls.linear).toHaveLength(2);
+    category = 'done';
+    await vi.advanceTimersByTimeAsync(2 * 60_000);
+    expect(calls.linear).toHaveLength(3);
+    // Settled (done or canceled): every five minutes.
+    await vi.advanceTimersByTimeAsync(4 * 60_000);
+    expect(calls.linear).toHaveLength(3);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(calls.linear).toHaveLength(4);
+  });
+
+  it('follows a work item in the legacy Linear shape and in the neutral one under the same key', async () => {
+    const { service, calls } = setup();
+    const legacy = itemsOf(linearIssue('ope-7'));
+    const neutral = itemsOf({ provider: 'linear', kind: 'work-item', identifier: 'OPE-7' });
+    expect([...legacy.keys()]).toEqual(['linear|OPE-7']);
+    expect([...neutral.keys()]).toEqual(['linear|OPE-7']);
+    expect([...legacy.values()]).toEqual([{ provider: 'linear', kind: 'work-item', identifier: 'OPE-7' }]);
+    service.setInterest('c1', legacy);
+    service.setInterest('c2', neutral);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls.linear).toEqual([{ identifiers: ['OPE-7'] }]);
+  });
+
+  it('reads one work item a user refreshed by its identifier', async () => {
+    const { service, calls } = setup();
+    service.setInterest('c1', itemsOf(linearIssue('ope-7'), linearIssue('ope-8'), githubPull(7)));
+    await vi.advanceTimersByTimeAsync(0);
+    service.refreshItem('linear', { identifier: 'ope-8' });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls.linear).toHaveLength(2);
+    expect(calls.linear[1]).toEqual({ identifiers: ['OPE-8'] });
+    expect(calls.github).toHaveLength(1);
+  });
+
   it('refuses interest from a connection that is not open and forgets closed ones', async () => {
     const { service, sent, open } = setup();
     expect(() => service.setInterest('gone', itemsOf(githubPull(1)))).toThrow(expect.objectContaining({ code: 'unknown-connection' }));
@@ -185,6 +236,10 @@ describe('tracked item parsing', () => {
       { provider: 'github', kind: 'pull', owner: 'a/b', repo: 'app', number: 1 },
       { provider: 'linear', identifier: 'not an id' },
       { provider: 'bitbucket', kind: 'pull', owner: 'a', repo: 'b', number: 1 },
+      // A source-control id or a reserved id never names a tracker.
+      { provider: 'github', kind: 'work-item', identifier: 'ENG-1' },
+      { provider: 'guest', kind: 'work-item', identifier: 'ENG-1' },
+      { provider: 'Bad Id', kind: 'work-item', identifier: 'ENG-1' },
     ], 10);
     expect([...items.keys()]).toEqual(['gitlab|https://gitlab.com|pull|group/sub/app#3']);
     // The same pull request read with a bound account is a separate item.
@@ -193,6 +248,9 @@ describe('tracked item parsing', () => {
     // The same owner/repo on an enterprise host is a different item.
     const hosts = parseTrackedItems([githubPull(1), { ...githubPull(1), instance: 'github.acme.com' }], 10);
     expect([...hosts.keys()]).toEqual(['github|github.com|pull|acme/app#1', 'github|github.acme.com|pull|acme/app#1']);
+    // A tracker this server does not register still parses: the reader decides.
+    const trackers = parseTrackedItems([{ provider: 'jira', kind: 'work-item', identifier: 'ops-7' }], 10);
+    expect([...trackers.entries()]).toEqual([['jira|OPS-7', { provider: 'jira', kind: 'work-item', identifier: 'OPS-7' }]]);
     expect(parseTrackedItems('nope', 10)).toBeNull();
     expect(parseTrackedItems([gitlabPull(1), gitlabPull(2)], 1)).toBeNull();
   });

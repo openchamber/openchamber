@@ -22,6 +22,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { getSourceControlAuthKey, useSourceControlAuthStore } from '@/stores/useSourceControlAuthStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { buildManagedAccountOptions, getManagedCredentialSourceLabelKey } from '@/lib/source-control/identity';
+import { useSourceControlDescriptorOf, useSourceControlProviders } from '@/lib/source-control/providers/registry';
+import { ProviderIcon } from '@/components/sourceControl/ProviderIcon';
 import type { GitIdentityTransport } from '@/lib/api/types';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
@@ -53,16 +55,14 @@ const PROFILE_COLORS = [
   { key: 'type', labelKey: 'settings.gitIdentities.editor.color.yellow', cssVar: 'var(--syntax-type)' },
 ] as const;
 
-/** Product names stay literal; the rest are translated. */
+/** The built-in marks; each source-control provider adds its own after them, named by its literal label. */
 const PROFILE_ICONS = [
   { key: 'branch', Icon: 'git-branch', labelKey: 'settings.gitIdentities.editor.icon.branch' },
   { key: 'briefcase', Icon: 'briefcase', labelKey: 'settings.gitIdentities.editor.icon.work' },
   { key: 'house', Icon: 'home', labelKey: 'settings.gitIdentities.editor.icon.personal' },
   { key: 'graduation', Icon: 'graduation-cap', labelKey: 'settings.gitIdentities.editor.icon.school' },
   { key: 'code', Icon: 'code', labelKey: 'settings.gitIdentities.editor.icon.code' },
-  { key: 'github', Icon: 'github', label: 'GitHub' },
-  { key: 'gitlab', Icon: 'gitlab', label: 'GitLab' },
-] as const satisfies ReadonlyArray<{ key: string; Icon: IconName } & ({ labelKey: string } | { label: string })>;
+] as const satisfies ReadonlyArray<{ key: string; Icon: IconName; labelKey: string }>;
 
 /**
  * One form row: the label, with its hint, beside the control on a wide
@@ -119,6 +119,8 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
   const [isDeleting, setIsDeleting] = React.useState(false);
 
   const { sourceControl } = useRuntimeAPIs();
+  const providers = useSourceControlProviders();
+  const descriptorOf = useSourceControlDescriptorOf();
   const identities = useSourceControlAuthStore((state) => state.identities);
   const authEntries = useSourceControlAuthStore((state) => state.entries);
   const refreshAccounts = useSourceControlAuthStore((state) => state.refreshAll);
@@ -131,8 +133,8 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
   const accountOptions = React.useMemo(() => identities.flatMap((identity) => {
     const entry = authEntries[getSourceControlAuthKey(identity)];
     if (!entry?.hasChecked || entry.status?.status !== 'connected') return [];
-    return buildManagedAccountOptions(identity, entry.status.accounts, (account) => t(getManagedCredentialSourceLabelKey(account.source)));
-  }), [authEntries, identities, t]);
+    return buildManagedAccountOptions(identity, descriptorOf(identity.provider), entry.status.accounts, (account) => t(getManagedCredentialSourceLabelKey(account.source)));
+  }), [authEntries, descriptorOf, identities, t]);
   const selectedAccount = accountOptions.find((option) => option.key === accountKey) ?? null;
   // A stored account the account list cannot show right now (status read
   // failed, provider offline) stays the identity's account: only choosing
@@ -261,8 +263,12 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
   };
 
   const currentColorValue = PROFILE_COLORS.find((c) => c.key === color)?.cssVar ?? 'var(--syntax-keyword)';
-  const currentIcon = PROFILE_ICONS.find((i) => i.key === icon)?.Icon ?? 'git-branch';
-  const iconLabel = (entry: (typeof PROFILE_ICONS)[number]) => ('labelKey' in entry ? t(entry.labelKey) : entry.label);
+  // An icon key that names a provider (an identity made from a connected account) draws its mark.
+  const iconChoices = [
+    ...PROFILE_ICONS.map((entry) => ({ key: entry.key, label: t(entry.labelKey), mark: (className: string) => <Icon name={entry.Icon} className={className} /> })),
+    ...providers.map((descriptor) => ({ key: descriptor.id, label: descriptor.label, mark: (className: string) => <ProviderIcon descriptor={descriptor} className={className} /> })),
+  ];
+  const currentIcon = iconChoices.find((entry) => entry.key === icon) ?? iconChoices[0];
   const methodHint = t(AUTH_METHODS.find((entry) => entry.method === method)?.hintKey ?? 'settings.gitIdentities.editor.auth.systemHint');
 
   const title = isNewProfile
@@ -296,7 +302,7 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
                       aria-label={t('settings.gitIdentities.editor.appearance.aria')}
                       title={t('settings.gitIdentities.editor.appearance.aria')}
                     >
-                      <Icon name={currentIcon} className="size-4" style={{ color: currentColorValue }} />
+                      <span className="inline-flex" style={{ color: currentColorValue }}>{currentIcon.mark('size-4')}</span>
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="start" className="w-64 p-3">
@@ -324,7 +330,7 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
                       <div className="space-y-2">
                         <div className={SETTINGS_FIELD_LABEL_CLASS}>{t('settings.gitIdentities.editor.field.icon')}</div>
                         <div className="grid grid-cols-7 gap-1">
-                          {PROFILE_ICONS.map((entry) => {
+                          {iconChoices.map((entry) => {
                             const selected = icon === entry.key;
                             return (
                               <button
@@ -332,14 +338,14 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
                                 type="button"
                                 onClick={() => setIcon(entry.key)}
                                 aria-pressed={selected}
-                                aria-label={iconLabel(entry)}
-                                title={iconLabel(entry)}
+                                aria-label={entry.label}
+                                title={entry.label}
                                 className={cn(
                                   'inline-flex size-8 items-center justify-center rounded-md',
                                   selected ? 'bg-interactive-selection' : 'text-muted-foreground hover:bg-interactive-hover hover:text-foreground',
                                 )}
                               >
-                                <Icon name={entry.Icon} className="size-4" style={selected ? { color: currentColorValue } : undefined} />
+                                <span className="inline-flex" style={selected ? { color: currentColorValue } : undefined}>{entry.mark('size-4')}</span>
                               </button>
                             );
                           })}

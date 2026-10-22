@@ -1,7 +1,8 @@
 /**
  * The issues and pull requests board: a full page over the chat area that
- * lists a project's repository items (GitHub or GitLab, whichever hosts it)
- * or Linear issues, previews the highlighted one and acts on it.
+ * lists a project's repository items (on whichever provider hosts it)
+ * or a tracker's work items (Linear issues), previews the highlighted one and
+ * acts on it.
  *
  * The board keeps its own project. It opens on the one it was left on and
  * switching it never changes the project the rest of the app shows; only an
@@ -25,33 +26,37 @@ import { NewWorktreeDialog } from '@/components/session/NewWorktreeDialog';
 import { ReferenceBrowserList, ReferenceBrowserSearch } from '@/components/references/ReferenceBrowser';
 import { IDLE_PULL_STATUS, useReferenceBrowser } from '@/components/references/useReferenceBrowser';
 import { ReferencePreview } from '@/components/references/ReferencePreview';
-import { DEFAULT_REPOSITORY_FILTER, referenceNumberLabel, referencePickerItemKey, type ReferencePickerItem, type ReferencePickerSelection } from '@/components/references/referencePickerItems';
+import { CHANGE_REQUEST_TAB_KEYS, DEFAULT_REPOSITORY_FILTER, referenceNumberLabel, referencePickerItemKey, trackerOfSource, trackerReferenceSource, type ReferencePickerItem, type ReferencePickerSelection } from '@/components/references/referencePickerItems';
 import { itemDirectory } from '@/components/references/acrossRepositories';
-import { forgetGitHubPullStatus, forgetGitHubPullStatuses, useGitHubAcrossReferenceList, useGitHubReadContext, useGitHubReferenceList, useLinearIssueDetail, useRepositoryHostProvider } from '@/components/references/referenceSources';
+import { forgetRepositoryPullStatus, forgetRepositoryPullStatuses, useRepositoryAcrossReferenceList, useTrackerItemDetail, useRepositoryHostProvider, useRepositoryReadContext, useRepositoryReferenceList } from '@/components/references/referenceSources';
 import { openExternalUrl } from '@/lib/url';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
-import type { GitHubReference, GitHubReferenceKind, LinearMappingResult, ProjectEntry, PullRequestStackLayer, SourceControlReadContext } from '@/lib/api/types';
+import type { RepositoryReference, RepositoryReferenceKind, ProjectEntry, PullRequestStackLayer, SourceControlReadContext, TrackerDescriptor, TrackerMappingResult } from '@/lib/api/types';
 import { isRightToLeft, useI18n } from '@/lib/i18n';
+import { useSourceControlProvider } from '@/lib/source-control/providers/registry';
+import { useRepositoryUrlMatcher } from '@/lib/source-control/repositoryUrlMatcher';
 import { cn } from '@/lib/utils';
-import { resolveLinearMappedProjectPath } from '@/lib/linearProjectMapping';
+import { resolveTrackerMappedProjectPath } from '@/lib/trackers/projectMapping';
+import { trackerPresentation } from '@/lib/trackers/presentation';
+import { useTrackerDescriptor, useTrackerDescriptors } from '@/lib/trackers/registry';
 import { useTrackedItems } from '@/lib/trackedItems/interest';
-import type { TrackedItem } from '@/lib/trackedItems/model';
+import { isTrackedWorkItem, type TrackedItem } from '@/lib/trackedItems/model';
 import { normalizeProjectPath, resolveProjectForSessionDirectory } from '@/lib/projectResolution';
-import { useLinearAuthStore } from '@/stores/useLinearAuthStore';
+import { currentTrackerAccountId, isTrackerConnected, useTrackerAuthEntry } from '@/stores/useTrackerAuthStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSourceBoardChoice, useSourceBoardStore, type SourceBoardTab } from '@/stores/useSourceBoardStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 
 import { SourceBoardActions, SourceBoardPullLinks, SourceBoardStateMenuItems, type SourceBoardProject } from './SourceBoardActions';
-import { SourceBoardLinearStatus } from './SourceBoardLinearStatus';
+import { SourceBoardTrackerStatus } from './SourceBoardTrackerStatus';
 import { SourceBoardReply } from './SourceBoardReply';
 import { SourceBoardAcrossNote } from './SourceBoardAcrossNote';
 import { SourceBoardChecksDialog } from './SourceBoardChecksDialog';
 import { SourceBoardLabels, SourceBoardReviewers } from './SourceBoardMetaEditors';
-import { SourceBoardProjectPicker, SourceBoardRepositoryPicker, SourceBoardTeamPicker } from './SourceBoardPickers';
-import { choiceForFocus, resolveBoardTab, shouldRememberAll, useBoardRepository, type BoardLinear } from './boardRepository';
+import { SourceBoardContainerPicker, SourceBoardProjectPicker, SourceBoardRepositoryPicker } from './SourceBoardPickers';
+import { choiceForFocus, shouldRememberAll, useBoardRepository } from './boardRepository';
 import { isSameRepositoryItemLink } from './openTrackerItem';
 import { usePullAttachments } from './pullAttachments';
 import { useThreadActions } from './threadActions';
@@ -70,19 +75,28 @@ const openIntegrationsSettings = () => {
     ui.setSettingsDialogOpen(true);
 };
 
-/** Linear's teams and which project each one works in, read once per open and workspace. */
-function useLinearMapping(enabled: boolean, workspaceId: string): LinearMappingResult | null {
-    const { linear } = useRuntimeAPIs();
-    const [loaded, setLoaded] = React.useState<{ workspaceId: string; mapping: LinearMappingResult } | null>(null);
+const NO_TRACKERS: readonly TrackerDescriptor[] = [];
+
+/**
+ * A tracker's containers (Linear teams) and which project each one works in,
+ * read once per open, tracker and account; null where the tracker has no
+ * project mapping or until it answers.
+ */
+function useTrackerMapping(provider: string | null, enabled: boolean): TrackerMappingResult | null {
+    const { trackers } = useRuntimeAPIs();
+    const mapsProjects = useTrackerDescriptor(provider).capabilities.projectMapping;
+    const accountId = currentTrackerAccountId(useTrackerAuthEntry(provider));
+    const scope = provider ? `${provider}:${accountId}` : '';
+    const [loaded, setLoaded] = React.useState<{ scope: string; mapping: TrackerMappingResult } | null>(null);
     React.useEffect(() => {
-        if (!enabled || !linear?.mappingGet) return;
+        if (!enabled || !provider || !mapsProjects || !trackers) return;
         let cancelled = false;
-        void linear.mappingGet()
-            .then((mapping) => { if (!cancelled) setLoaded({ workspaceId, mapping }); })
+        void trackers.mappingGet(provider)
+            .then((mapping) => { if (!cancelled) setLoaded({ scope, mapping }); })
             .catch(() => undefined);
         return () => { cancelled = true; };
-    }, [enabled, linear, workspaceId]);
-    return loaded && loaded.workspaceId === workspaceId ? loaded.mapping : null;
+    }, [enabled, mapsProjects, provider, scope, trackers]);
+    return loaded && loaded.scope === scope ? loaded.mapping : null;
 }
 
 /**
@@ -151,18 +165,21 @@ const MobileBoardHeader: React.FC<{ onClose?: () => void; onBack?: () => void; c
 
 type SourceBoardLayout = 'desktop' | 'mobile';
 
-/** What the board lists: the repository's issues or change requests, or Linear. */
-type SourceBoardKind = GitHubReferenceKind | 'linear';
+/** What the board lists: the repository's issues or change requests, or one tracker's items. */
+type SourceBoardKind = RepositoryReferenceKind | `tracker:${string}`;
 
 const SourceBoard: React.FC<{ layout: SourceBoardLayout; onLeave?: () => void; onClose?: () => void }> = ({ layout, onLeave, onClose }) => {
     const { t } = useI18n();
-    const { linear, sourceControl } = useRuntimeAPIs();
+    const { trackers, sourceControl } = useRuntimeAPIs();
+    const servedTrackers = useTrackerDescriptors();
+    // Every tracker the server serves gets a tab, signed in or not: its list asks to connect when it is not.
+    const trackerTabs = trackers ? servedTrackers : NO_TRACKERS;
     const projects = useProjectsStore((state) => state.projects);
     const activeProjectId = useProjectsStore((state) => state.activeProjectId);
     const choice = useSourceBoardChoice();
     const updateChoice = useSourceBoardStore((state) => state.update);
-    // The repository tab to land on when switching back from Linear.
-    const [repositoryKind, setRepositoryKind] = React.useState<GitHubReferenceKind | undefined>(undefined);
+    // The repository tab to land on when switching back from a tracker.
+    const [repositoryKind, setRepositoryKind] = React.useState<RepositoryReferenceKind | undefined>(undefined);
     // The phone's board page is mounted only while shown.
     const desktopBoardOpen = useUIStore((state) => state.isSourceBoardOpen);
     const onScreen = layout === 'mobile' || desktopBoardOpen;
@@ -189,24 +206,23 @@ const SourceBoard: React.FC<{ layout: SourceBoardLayout; onLeave?: () => void; o
         if (rememberAll && projectId) updateChoice({ allRepositoriesByProject: { [projectId]: true } });
     }, [projectId, rememberAll, updateChoice]);
     const directory = repository.directory;
-    // Across the repositories under the folder: GitHub's, which is what that search reads.
+    // Across the repositories under the folder: the provider that search asks is decided per list.
     const allRepositories = repository.all ? repository.repositories : null;
     const hostProvider = useRepositoryHostProvider(allRepositories ? null : directory);
-    const hasRepository = allRepositories !== null || hostProvider === 'github' || hostProvider === 'gitlab';
-    const hasLinear = Boolean(linear);
-    const linearStatus = useLinearAuthStore((state): BoardLinear => {
-        if (!hasLinear) return 'absent';
-        if (!state.status) return 'pending';
-        if (state.status.connected) return 'connected';
-        // The store leaves `hasChecked` false after a failed read.
-        return state.hasChecked ? 'disconnected' : 'unknown';
-    });
-    const tab = resolveBoardTab({ chosen: choice.tab, hasRepository, repositoryStatus: repository.status, linear: linearStatus });
+    const hasRepository = allRepositories !== null || (hostProvider !== 'none' && hostProvider !== null);
+    const storedTracker = trackerOfSource(choice.tab);
+    const firstTrackerTab = trackerTabs[0] ? trackerReferenceSource(trackerTabs[0].id) : null;
+    // Until the folder says whether it holds a repository, a tracker is not the answer.
+    const tab: SourceBoardTab | null = storedTracker && trackerTabs.some((descriptor) => descriptor.id === storedTracker)
+        ? choice.tab
+        : hasRepository ? 'repository' : repository.status === 'pending' ? null : firstTrackerTab;
+    const tracker = tab ? trackerOfSource(tab) : null;
 
-    const linearWorkspaceId = useLinearAuthStore((state) => state.status?.organization?.id ?? '');
-    const mapping = useLinearMapping(tab === 'linear' && linearStatus === 'connected', linearWorkspaceId);
-    const teams = mapping?.teams ?? [];
-    const linearTeamId = choice.linearTeamId && teams.some((team) => team.id === choice.linearTeamId) ? choice.linearTeamId : null;
+    const trackerConnected = isTrackerConnected(useTrackerAuthEntry(tracker));
+    const mapping = useTrackerMapping(tracker, trackerConnected);
+    const containers = mapping?.connected ? mapping.containers : [];
+    const storedContainerId = tracker ? choice.trackerContainerByProvider[tracker] ?? null : null;
+    const containerId = storedContainerId && containers.some((container) => container.id === storedContainerId) ? storedContainerId : null;
 
     const projectPicker = project ? (
         <SourceBoardProjectPicker
@@ -223,7 +239,7 @@ const SourceBoard: React.FC<{ layout: SourceBoardLayout; onLeave?: () => void; o
             repositories={repository.repositories}
             selected={allRepositories ? null : directory}
             root={projectRoot}
-            allAvailable={Boolean(sourceControl.githubReferencesAcross)}
+            allAvailable={Boolean(sourceControl.referencesAcross)}
             onSelect={(repositoryPath) => {
                 if (!project) return;
                 updateChoice(repositoryPath === null
@@ -234,23 +250,20 @@ const SourceBoard: React.FC<{ layout: SourceBoardLayout; onLeave?: () => void; o
         />
     ) : null;
     const projectScope = <>{projectPicker}{repositoryPicker}</>;
-    // On Linear the board lists a team. The project's pickers stay beside it
-    // when the project offers no repository tab, the only other way off Linear.
-    const scopePicker = tab === 'linear' ? (
-        <>
-            {hasRepository ? null : projectScope}
-            <SourceBoardTeamPicker
-                teams={teams}
-                selectedTeamId={linearTeamId}
-                onSelectTeam={(teamId) => updateChoice({ linearTeamId: teamId })}
-                onWorkspaceSwitched={() => updateChoice({ linearTeamId: null })}
-            />
-        </>
+    // On a tracker the board lists a container (a Linear team), not a project.
+    const scopePicker = tracker ? (
+        <SourceBoardContainerPicker
+            provider={tracker}
+            containers={containers}
+            selectedContainerId={containerId}
+            onSelectContainer={(next) => updateChoice({ trackerContainerByProvider: { [tracker]: next } })}
+            onAccountSwitched={() => updateChoice({ trackerContainerByProvider: { [tracker]: null } })}
+        />
     ) : projectScope;
 
     const selectKind = (kind: SourceBoardKind) => {
-        if (kind === 'linear') {
-            updateChoice({ tab: 'linear' });
+        if (kind !== 'issue' && kind !== 'pull') {
+            updateChoice({ tab: kind });
             return;
         }
         setRepositoryKind(kind);
@@ -265,7 +278,7 @@ const SourceBoard: React.FC<{ layout: SourceBoardLayout; onLeave?: () => void; o
                 ) : (
                     <div className="flex h-12 shrink-0 items-center gap-1 border-b border-border/60 px-2">{projectScope}</div>
                 )}
-                {repository.status === 'ready' && linearStatus !== 'pending' ? (
+                {repository.status === 'ready' ? (
                     <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center typography-meta text-muted-foreground">
                         <span>{t(projects.length === 0 ? 'sourceBoard.empty.noProjects' : 'sourceBoard.empty.noSource')}</span>
                         {projects.length > 0 ? (
@@ -273,13 +286,10 @@ const SourceBoard: React.FC<{ layout: SourceBoardLayout; onLeave?: () => void; o
                         ) : null}
                     </div>
                 ) : (
-                    // Looking for the folder's repositories or asking whether Linear is
-                    // connected, or unable to: none of these says there is nothing.
+                    // Looking for the folder's repositories, or unable to: neither says there are none.
                     <div role="status" className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center typography-meta text-muted-foreground">
-                        {repository.status !== 'failed' ? <Icon name="loader-4" className="size-5 animate-spin" /> : null}
-                        {repository.status !== 'ready' ? (
-                            <span>{t(repository.status === 'failed' ? 'gitView.empty.discoverFailed' : 'gitView.empty.discoveringRepositories')}</span>
-                        ) : null}
+                        {repository.status === 'pending' ? <Icon name="loader-4" className="size-5 animate-spin" /> : null}
+                        <span>{t(repository.status === 'failed' ? 'gitView.empty.discoverFailed' : 'gitView.empty.discoveringRepositories')}</span>
                         {repository.status === 'failed' ? (
                             <Button size="sm" variant="outline" onClick={repository.retry}>
                                 <Icon name="refresh" className="size-3.5" />
@@ -295,16 +305,16 @@ const SourceBoard: React.FC<{ layout: SourceBoardLayout; onLeave?: () => void; o
     return (
         // Remounted per source and project: a new list starts with an empty search.
         <SourceBoardBody
-            key={`${tab}:${tab === 'repository' ? `${allRepositories ? 'all:' : ''}${directory}` : linearTeamId ?? ''}`}
+            key={`${tab}:${tab === 'repository' ? `${allRepositories ? 'all:' : ''}${directory}` : containerId ?? ''}`}
             tab={tab}
             project={project}
             directory={directory}
             allRepositories={allRepositories}
-            linearTeamId={linearTeamId}
+            trackerContainerId={containerId}
             mapping={mapping}
             projects={projects}
             scopePicker={scopePicker}
-            kinds={{ repository: hasRepository ? (!allRepositories && hostProvider === 'gitlab' ? 'gitlab' : 'github') : null, linear: hasLinear }}
+            kinds={{ repository: hasRepository ? { provider: allRepositories || hostProvider === 'none' ? null : hostProvider } : null, trackers: trackerTabs }}
             initialRepositoryKind={repositoryKind}
             onSelectKind={selectKind}
             layout={layout}
@@ -322,13 +332,18 @@ const SourceBoardBody: React.FC<{
     directory: string | null;
     /** The repositories listed together, or null while one folder is read. */
     allRepositories: readonly string[] | null;
-    linearTeamId: string | null;
-    mapping: LinearMappingResult | null;
+    /** The tracker container (Linear team) a tracker tab lists; null lists every one. */
+    trackerContainerId: string | null;
+    mapping: TrackerMappingResult | null;
     projects: ProjectEntry[];
     scopePicker: React.ReactNode;
-    /** The tabs this project offers: its repository host's, and Linear's. */
-    kinds: { repository: 'github' | 'gitlab' | null; linear: boolean };
-    initialRepositoryKind?: GitHubReferenceKind;
+    /**
+     * The tabs this project offers: its repository host's, and one per
+     * tracker. The provider is null across repositories, where each list
+     * names its own.
+     */
+    kinds: { repository: { provider: string | null } | null; trackers: readonly TrackerDescriptor[] };
+    initialRepositoryKind?: RepositoryReferenceKind;
     onSelectKind: (kind: SourceBoardKind) => void;
     layout: SourceBoardLayout;
     /** False while the desktop board is kept mounted but closed: nothing it lists is followed then. */
@@ -336,27 +351,27 @@ const SourceBoardBody: React.FC<{
     onLeave?: () => void;
     /** The phone page's close button. */
     onClose?: () => void;
-}> = ({ tab, project, directory, allRepositories, linearTeamId, mapping, projects, scopePicker, kinds, initialRepositoryKind, onSelectKind, layout, onScreen, onLeave, onClose }) => {
+}> = ({ tab, project, directory, allRepositories, trackerContainerId, mapping, projects, scopePicker, kinds, initialRepositoryKind, onSelectKind, layout, onScreen, onLeave, onClose }) => {
     const isMobile = layout === 'mobile';
     const { t } = useI18n();
-    const { sourceControl, linear } = useRuntimeAPIs();
-    const source = tab === 'linear' ? 'linear' : 'github';
+    const { sourceControl, trackers } = useRuntimeAPIs();
+    const tracker = trackerOfSource(tab);
     // An item another surface asked to show: an issue or PR by its link, a
-    // Linear issue by its identifier. It is read on its own, not typed into the
+    // tracker item by its identifier. It is read on its own, not typed into the
     // search: the list stays as it was, and the preview opens on the item.
-    const [pinnedLink, setPinnedLink] = React.useState<{ kind: GitHubReferenceKind; url: string } | null>(null);
-    const [pinnedLinearId, setPinnedLinearId] = React.useState<string | null>(null);
+    const [pinnedLink, setPinnedLink] = React.useState<{ kind: RepositoryReferenceKind; url: string } | null>(null);
+    const [pinnedTrackerId, setPinnedTrackerId] = React.useState<string | null>(null);
     // Counts the requests to show an item, so each is shown once, and the one
     // shown before never answers for the one just asked.
     const [pinRequest, setPinRequest] = React.useState(0);
-    const pinnedSingle = useGitHubReferenceList({
+    const pinnedSingle = useRepositoryReferenceList({
         enabled: tab === 'repository' && pinnedLink !== null && allRepositories === null,
         directory,
         kind: pinnedLink?.kind ?? 'issue',
         filter: DEFAULT_REPOSITORY_FILTER,
         query: pinnedLink?.url ?? '',
     });
-    const pinnedAcross = useGitHubAcrossReferenceList({
+    const pinnedAcross = useRepositoryAcrossReferenceList({
         enabled: tab === 'repository' && pinnedLink !== null && allRepositories !== null,
         directories: allRepositories ?? NO_REPOSITORIES,
         kind: pinnedLink?.kind ?? 'issue',
@@ -364,55 +379,62 @@ const SourceBoardBody: React.FC<{
         query: pinnedLink?.url ?? '',
     });
     const pinnedLookup = allRepositories ? pinnedAcross : pinnedSingle;
-    const { detail: pinnedLinear, followed: pinnedLinearFollowed } = useLinearIssueDetail(tab === 'linear' ? pinnedLinearId : null, true);
+    // A tracker's get takes its human identifier as well as its own id.
+    const { detail: pinnedTracker, followed: pinnedTrackerFollowed } = useTrackerItemDetail(
+        tracker && pinnedTrackerId ? { provider: tracker, id: pinnedTrackerId } : null,
+        true,
+    );
+    const urls = useRepositoryUrlMatcher();
     // Only the item the link names: a lookup that fell back to a search lists others.
-    const namesPinnedLink = (item: GitHubReference) => pinnedLink !== null && isSameRepositoryItemLink(item.url, pinnedLink.url);
+    const namesPinnedLink = (item: RepositoryReference) => pinnedLink !== null && isSameRepositoryItemLink(item.url, pinnedLink.url, urls);
     const pinnedAcrossItem = tab === 'repository' && allRepositories ? pinnedAcross.items.find(namesPinnedLink) ?? null : null;
     const pinnedReference = tab === 'repository' && !allRepositories ? pinnedSingle.items.find(namesPinnedLink) ?? null : pinnedAcrossItem;
     // Across repositories the item names the folder it was read through.
     const pinnedFolder = pinnedAcrossItem?.directory;
-    const pinnedLinearIssue = tab === 'linear' && pinnedLinear.status === 'ready' ? pinnedLinear.value : null;
+    const pinnedTrackerItem = tracker && pinnedTracker.status === 'ready' ? pinnedTracker.value : null;
     const pinnedItem = React.useMemo<ReferencePickerItem | null>(() => {
-        if (pinnedReference) return { source: 'github', reference: pinnedReference, directory: pinnedFolder };
-        if (pinnedLinearIssue) return { source: 'linear', issue: pinnedLinearIssue };
+        if (pinnedReference) return { source: 'repository', reference: pinnedReference, directory: pinnedFolder };
+        if (pinnedTrackerItem) return { source: 'tracker', provider: pinnedTrackerItem.provider, item: pinnedTrackerItem };
         return null;
-    }, [pinnedFolder, pinnedLinearIssue, pinnedReference]);
+    }, [pinnedFolder, pinnedTrackerItem, pinnedReference]);
     const browser = useReferenceBrowser({
-        source,
-        directory: tab === 'linear' ? null : directory,
-        directories: tab === 'linear' ? null : allRepositories,
+        source: tab,
+        directory: tracker ? null : directory,
+        directories: tracker ? null : allRepositories,
         isMobile,
-        linearTeamId,
+        trackerContainerId,
         initialGitHubKind: initialRepositoryKind,
         pinnedItem,
         onScreen,
     });
     // The item a link asked to show is followed like a listed one; a lookup
     // that fell back to a search lists others, which are not.
-    const pinnedFollowed = React.useMemo(() => (pinnedItem?.source === 'linear'
-        ? pinnedLinearFollowed
-        : pinnedLookup.followed.filter((item) => item.provider !== 'linear' && item.number === pinnedReference?.number)
-    ), [pinnedItem, pinnedLinearFollowed, pinnedLookup.followed, pinnedReference]);
+    const pinnedFollowed = React.useMemo(() => (pinnedItem?.source === 'tracker'
+        ? pinnedTrackerFollowed
+        : pinnedLookup.followed.filter((item) => !isTrackedWorkItem(item) && item.number === pinnedReference?.number)
+    ), [pinnedItem, pinnedTrackerFollowed, pinnedLookup.followed, pinnedReference]);
     useTrackedItems(onScreen && pinnedItem ? pinnedFollowed : NO_FOLLOWED);
-    const { previewItem, setQuery, selectGitHubKind, showItem } = browser;
+    const { previewItem, setQuery, selectRepositoryKind, showItem } = browser;
     const shownPinRequestRef = React.useRef(0);
-    const linearFocus = useSourceBoardStore((state) => (tab === 'linear' ? state.linearFocus : null));
+    const trackerFocus = useSourceBoardStore((state) => (
+        tracker && state.trackerFocus?.provider === tracker ? state.trackerFocus.identifier : null
+    ));
     React.useEffect(() => {
-        if (!linearFocus) return;
+        if (!trackerFocus) return;
         setPinRequest((request) => request + 1);
         setQuery('');
-        setPinnedLinearId(linearFocus);
-        useSourceBoardStore.getState().clearLinearFocus();
-    }, [linearFocus, setQuery]);
+        setPinnedTrackerId(trackerFocus);
+        useSourceBoardStore.getState().clearTrackerFocus();
+    }, [trackerFocus, setQuery]);
     const repositoryFocus = useSourceBoardStore((state) => (tab === 'repository' ? state.repositoryFocus : null));
     React.useEffect(() => {
         if (!repositoryFocus) return;
         setPinRequest((request) => request + 1);
-        selectGitHubKind(repositoryFocus.kind);
+        selectRepositoryKind(repositoryFocus.kind);
         setQuery('');
         setPinnedLink({ kind: repositoryFocus.kind, url: repositoryFocus.query });
         useSourceBoardStore.getState().clearRepositoryFocus();
-    }, [repositoryFocus, selectGitHubKind, setQuery]);
+    }, [repositoryFocus, selectRepositoryKind, setQuery]);
     // Shown once found; the user then moves on from it like from any row. The
     // commit that takes a new request still holds the previous item, and the
     // previous request was already shown, so it is not shown over again.
@@ -422,19 +444,19 @@ const SourceBoardBody: React.FC<{
         showItem(referencePickerItemKey(pinnedItem));
     }, [pinRequest, pinnedItem, showItem]);
     // Not found: a link the project's host does not know opens in the browser;
-    // a Linear identifier is searched for instead.
+    // a tracker identifier is searched for instead.
     const pinnedLinkStatus = pinnedLookup.status;
     React.useEffect(() => {
         if (!pinnedLink || pinnedLinkStatus === 'loading' || pinnedReference) return;
         void openExternalUrl(pinnedLink.url);
         setPinnedLink(null);
     }, [pinnedLink, pinnedLinkStatus, pinnedReference]);
-    const pinnedLinearStatus = pinnedLinear.status;
+    const pinnedTrackerStatus = pinnedTracker.status;
     React.useEffect(() => {
-        if (!pinnedLinearId || pinnedLinearStatus !== 'error') return;
-        setQuery(pinnedLinearId);
-        setPinnedLinearId(null);
-    }, [pinnedLinearId, pinnedLinearStatus, setQuery]);
+        if (!pinnedTrackerId || pinnedTrackerStatus !== 'error') return;
+        setQuery(pinnedTrackerId);
+        setPinnedTrackerId(null);
+    }, [pinnedTrackerId, pinnedTrackerStatus, setQuery]);
     const currentDirectory = useEffectiveDirectory();
     const worktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
     // New Worktree opens on the previewed item, or on a new branch on top of a PR's.
@@ -449,28 +471,27 @@ const SourceBoardBody: React.FC<{
         setPinnedLink({ kind: 'pull', url: layer.url });
     }, []);
 
-    // A Linear issue starts in its team's project, else the mapping's default,
+    // A tracker item starts in its container's project, else the mapping's default,
     // else the project the board was last on; the user can pick another.
-    const [linearProjectChoice, setLinearProjectChoice] = React.useState<{ issueId: string; projectId: string } | null>(null);
-    const linearIssueId = previewItem?.source === 'linear' ? previewItem.issue.id : null;
-    const linearProjectOverride = linearProjectChoice && linearProjectChoice.issueId === linearIssueId ? linearProjectChoice.projectId : null;
-    const linearTeam = previewItem?.source === 'linear' ? previewItem.issue.team ?? null : null;
-    const mappedPath = previewItem?.source === 'linear' ? resolveLinearMappedProjectPath(mapping, linearTeam) : null;
+    const [trackerProjectChoice, setTrackerProjectChoice] = React.useState<{ itemKey: string; projectId: string } | null>(null);
+    const trackerItemKey = previewItem?.source === 'tracker' ? referencePickerItemKey(previewItem) : null;
+    const trackerProjectOverride = trackerProjectChoice && trackerProjectChoice.itemKey === trackerItemKey ? trackerProjectChoice.projectId : null;
+    const mappedPath = previewItem?.source === 'tracker' ? resolveTrackerMappedProjectPath(mapping, previewItem.item.container) : null;
     const mappedProject = mappedPath ? projects.find((entry) => normalizeProjectPath(entry.path) === normalizeProjectPath(mappedPath)) ?? null : null;
-    const actionProjectEntry = tab === 'linear'
-        ? projects.find((entry) => entry.id === linearProjectOverride) ?? mappedProject ?? project
+    const actionProjectEntry = tracker
+        ? projects.find((entry) => entry.id === trackerProjectOverride) ?? mappedProject ?? project
         : project;
     const actionPath = actionProjectEntry ? normalizeProjectPath(actionProjectEntry.path) : null;
     const actionProject: SourceBoardProject | null = actionProjectEntry && actionPath ? { id: actionProjectEntry.id, path: actionPath } : null;
-    // A Linear issue is read nowhere; an issue or PR is acted on in the repository it was listed from.
+    // A tracker item is read nowhere; an issue or PR is acted on in the repository it was listed from.
     // An item of a repository under a root that is not one: the project itself is no repository to branch from.
     const readsNestedRepository = tab === 'repository'
         && (allRepositories !== null || (actionPath !== null && directory !== null && directory !== actionPath));
     // An item is read and acted on through the folder it came from: its repository's, across several.
-    const readFolder = tab === 'linear'
+    const readFolder = tracker
         ? actionProject?.path ?? null
         : allRepositories ? itemDirectory(previewItem, null) : directory;
-    const actionContext = useGitHubReadContext(readFolder);
+    const actionContext = useRepositoryReadContext(readFolder);
     const context: SourceControlReadContext | null = actionContext && actionContext !== 'missing' ? actionContext : null;
 
     const projectOwnsDirectory = React.useCallback((candidate: string | undefined) => {
@@ -478,17 +499,23 @@ const SourceBoardBody: React.FC<{
         return resolveProjectForSessionDirectory(projects, worktreesByProject, candidate)?.id === actionProjectEntry.id;
     }, [actionProjectEntry, projects, worktreesByProject]);
 
-    const title = t(tab === 'linear' ? 'sourceBoard.list.linear' : browser.isGitLab ? 'sourceBoard.list.gitlab' : 'sourceBoard.list.github');
+    const title = tracker
+        ? t('sourceBoard.list.tracker', { provider: browser.trackerDescriptor.name })
+        : t(`sourceBoard.list.repository.${browser.term}`, { provider: browser.descriptor.label });
+    const previewDescriptor = useSourceControlProvider(previewItem?.source === 'repository' ? previewItem.reference.provider : null);
+    // The project's host names the change-request tab; across repositories, the provider the list asks.
+    const kindDescriptor = useSourceControlProvider(kinds.repository?.provider);
+    const repositoryTerm = kinds.repository?.provider ? kindDescriptor.terminology.changeRequest : browser.term;
 
-    // Where a Linear issue's session starts, changeable for that issue.
-    const startIn = tab === 'linear' && actionProjectEntry ? (
+    // Where a tracker item's session starts, changeable for that item.
+    const startIn = tracker && actionProjectEntry ? (
         <span className="flex min-w-0 items-center gap-1 typography-meta text-muted-foreground">
-            {t('sourceBoard.linear.startIn')}
+            {t('sourceBoard.tracker.startIn')}
             <SourceBoardProjectPicker
                 projects={projects}
                 selected={actionProjectEntry}
-                onSelect={(projectId) => { if (linearIssueId) setLinearProjectChoice({ issueId: linearIssueId, projectId }); }}
-                ariaLabel={t('sourceBoard.linear.startIn')}
+                onSelect={(projectId) => { if (trackerItemKey) setTrackerProjectChoice({ itemKey: trackerItemKey, projectId }); }}
+                ariaLabel={t('sourceBoard.tracker.startIn')}
                 size="inline"
                 sheet={isMobile}
             />
@@ -505,16 +532,16 @@ const SourceBoardBody: React.FC<{
             startIn={startIn}
             onLeave={onLeave}
             worktreeAvailable={!readsNestedRepository}
-            stack={previewItem?.source === 'github' && browser.githubDetail.status === 'ready' ? browser.githubDetail.value.pull?.stack ?? null : null}
+            stack={previewItem?.source === 'repository' && browser.repositoryDetail.status === 'ready' ? browser.repositoryDetail.value.pull?.stack ?? null : null}
             onStartOnTop={actionProject ? (pull) => setWorktreeRequest({ project: actionProject, onTopOf: pull.head }) : undefined}
         />
     ) : null;
 
-    const attachments = usePullAttachments(previewItem?.source === 'github' ? previewItem.reference : null);
+    const attachments = usePullAttachments(previewItem?.source === 'repository' ? previewItem.reference : null);
 
     // The previewed PR's check runs, opened from its checks totals.
     const [checksOpenFor, setChecksOpenFor] = React.useState<string | null>(null);
-    const previewPull = previewItem?.source === 'github' && previewItem.reference.kind === 'pull' ? previewItem.reference : null;
+    const previewPull = previewItem?.source === 'repository' && previewItem.reference.kind === 'pull' ? previewItem.reference : null;
     const previewKey = previewItem ? referencePickerItemKey(previewItem) : null;
     const checksDialog = previewPull && context ? (
         <SourceBoardChecksDialog
@@ -527,39 +554,39 @@ const SourceBoardBody: React.FC<{
     ) : null;
 
     // After a change to an issue or PR: its detail and the list read again.
-    const { refreshGithubDetail, list: { retry: retryList } } = browser;
+    const { refreshRepositoryDetail, list: { retry: retryList } } = browser;
     const refreshRepositoryItem = React.useCallback(
-        () => Promise.all([refreshGithubDetail(), retryList()]).then(() => undefined),
-        [refreshGithubDetail, retryList],
+        () => Promise.all([refreshRepositoryDetail(), retryList()]).then(() => undefined),
+        [refreshRepositoryDetail, retryList],
     );
-    const threadActions = useThreadActions(previewItem?.source === 'github' ? previewItem.reference : null, context, refreshRepositoryItem);
+    const threadActions = useThreadActions(previewItem?.source === 'repository' ? previewItem.reference : null, context, refreshRepositoryItem);
     // The preview's refresh button, for a change made on the host's own site,
     // which the server's short-lived answers would otherwise hide for up to
     // half a minute: the shown item alone, its state and checks included.
     const refreshFromHost = async () => {
-        if (context && previewItem?.source === 'github') {
+        if (context && previewItem?.source === 'repository') {
             const { sourceRepo, number } = previewItem.reference;
             const item = { owner: sourceRepo.owner, repo: sourceRepo.repo, number };
             await sourceControl.refreshProviderReads(context, { item }).catch(() => undefined);
-            forgetGitHubPullStatus(item);
+            forgetRepositoryPullStatus(item);
         }
-        await refreshGithubDetail();
+        await refreshRepositoryDetail();
     };
 
     // The list's refresh button: what is listed, and the checks of its PRs, read
     // again, such as a PR just opened on the host's own site.
-    const listContextValue = useGitHubReadContext(tab === 'linear' ? null : allRepositories?.[0] ?? directory);
+    const listContextValue = useRepositoryReadContext(tracker ? null : allRepositories?.[0] ?? directory);
     const listContext = listContextValue && listContextValue !== 'missing' ? listContextValue : null;
     const [listRefreshing, setListRefreshing] = React.useState(false);
     const refreshList = async () => {
         if (listRefreshing) return;
         setListRefreshing(true);
         try {
-            if (tab === 'linear') {
-                await linear?.refreshListReads().catch(() => undefined);
+            if (tracker) {
+                await trackers?.refreshListReads(tracker).catch(() => undefined);
             } else {
                 if (listContext) await sourceControl.refreshProviderReads(listContext, { lists: true }).catch(() => undefined);
-                forgetGitHubPullStatuses();
+                forgetRepositoryPullStatuses();
             }
             await retryList();
         } finally {
@@ -585,41 +612,41 @@ const SourceBoardBody: React.FC<{
         <ReferencePreview
             item={previewItem}
             directory={itemDirectory(previewItem, browser.directory)}
-            pullStatus={previewItem?.source === 'github' ? browser.pullStatusOf(previewItem.reference, previewItem.directory) : IDLE_PULL_STATUS}
-            linearDetail={browser.linearDetail}
-            githubDetail={browser.githubDetail}
+            pullStatus={previewItem?.source === 'repository' ? browser.pullStatusOf(previewItem.reference, previewItem.directory) : IDLE_PULL_STATUS}
+            trackerDetail={browser.trackerDetail}
+            repositoryDetail={browser.repositoryDetail}
             purpose="attach"
             pinned={!isMobile}
             includeDiff={false}
             onIncludeDiffChange={() => undefined}
             now={browser.now}
             footer={actions}
-            linearStateControl={previewItem?.source === 'linear' ? <SourceBoardLinearStatus issue={previewItem.issue} onChanged={browser.list.retry} /> : undefined}
-            onOpenLinearIssue={(issue) => browser.openItem({ source: 'linear', issue })}
+            trackerStateControl={previewItem?.source === 'tracker' ? <SourceBoardTrackerStatus item={previewItem.item} onChanged={browser.list.retry} /> : undefined}
+            onOpenTrackerItem={(item) => browser.openItem({ source: 'tracker', provider: item.provider, item })}
             onOpenStackLayer={openStackLayer}
             onOpenChecks={previewPull && context ? () => setChecksOpenFor(previewKey) : undefined}
-            onRefresh={previewItem?.source === 'github' && context ? refreshFromHost : undefined}
+            onRefresh={previewItem?.source === 'repository' && context ? refreshFromHost : undefined}
             threadActions={threadActions}
-            stateMenu={previewItem?.source === 'github' && previewItem.reference.state !== 'merged' && context ? (
+            stateMenu={previewItem?.source === 'repository' && previewItem.reference.state !== 'merged' && context ? (
                 <SourceBoardStateMenuItems item={previewItem} context={context} onChanged={refreshRepositoryItem} />
             ) : undefined}
-            commentAttachments={previewItem?.source === 'github'
+            commentAttachments={previewItem?.source === 'repository'
                 ? { onAttach: attachments.attachComment, onAttachAll: attachments.attachComments }
                 : undefined}
-            labelsControl={previewItem?.source === 'github' && context ? (
+            labelsControl={previewItem?.source === 'repository' && context ? (
                 <SourceBoardLabels key={referencePickerItemKey(previewItem)} reference={previewItem.reference} context={context} onChanged={refreshRepositoryItem} />
             ) : undefined}
-            reviewersControl={previewItem?.source === 'github' && previewItem.reference.kind === 'pull' && context ? (
+            reviewersControl={previewItem?.source === 'repository' && previewItem.reference.kind === 'pull' && context ? (
                 <SourceBoardReviewers
                     key={referencePickerItemKey(previewItem)}
                     pull={previewItem.reference}
-                    detail={browser.githubDetail}
+                    detail={browser.repositoryDetail}
                     context={context}
                     onChanged={refreshRepositoryItem}
                 />
             ) : undefined}
             // Keyed by the item: a draft never carries over to another one.
-            reply={previewItem?.source === 'github' && context ? (
+            reply={previewItem?.source === 'repository' && context ? (
                 <SourceBoardReply
                     key={referencePickerItemKey(previewItem)}
                     reference={previewItem.reference}
@@ -627,7 +654,7 @@ const SourceBoardBody: React.FC<{
                     onRefresh={refreshRepositoryItem}
                 />
             ) : undefined}
-            pullLinks={previewItem?.source === 'github' && previewItem.reference.kind === 'pull' && actionProject && context ? (
+            pullLinks={previewItem?.source === 'repository' && previewItem.reference.kind === 'pull' && actionProject && context ? (
                 <SourceBoardPullLinks
                     pull={previewItem.reference}
                     project={actionProject}
@@ -664,7 +691,7 @@ const SourceBoardBody: React.FC<{
             multiselectable={false}
             onOpenSettings={openIntegrationsSettings}
             onShow={() => setListOpen(false)}
-            notice={browser.across && directory ? <SourceBoardAcrossNote leftOut={browser.leftOut} root={directory} /> : null}
+            notice={browser.across && directory ? <SourceBoardAcrossNote leftOut={browser.leftOut} root={directory} askedProvider={browser.acrossProvider} /> : null}
         />
     );
     const search = (
@@ -686,11 +713,11 @@ const SourceBoardBody: React.FC<{
         />
     );
     const itemLabel = previewItem
-        ? previewItem.source === 'linear' ? previewItem.issue.identifier : referenceNumberLabel(previewItem.reference)
+        ? previewItem.source === 'tracker' ? previewItem.item.identifier : referenceNumberLabel(previewItem.reference, previewDescriptor)
         : t('sourceBoard.list.choose');
-    const itemIcon = previewItem?.source === 'linear' || tab === 'linear'
-        ? 'linear'
-        : browser.githubKind === 'pull' ? 'git-pull-request' : 'record-circle';
+    const itemIcon = tracker
+        ? trackerPresentation(tracker).icon
+        : browser.repositoryKind === 'pull' ? 'git-pull-request' : 'record-circle';
     const itemTrigger = (
         <button
             type="button"
@@ -723,21 +750,29 @@ const SourceBoardBody: React.FC<{
     const kindItems = [
         ...(kinds.repository ? [
             { id: 'issue', label: t('references.picker.tab.issues'), icon: <Icon name="record-circle" className="size-3.5" /> },
-            { id: 'pull', label: t(kinds.repository === 'gitlab' ? 'references.picker.tab.mergeRequests' : 'references.picker.tab.pulls'), icon: <Icon name="git-pull-request" className="size-3.5" /> },
+            { id: 'pull', label: t(CHANGE_REQUEST_TAB_KEYS[repositoryTerm]), icon: <Icon name="git-pull-request" className="size-3.5" /> },
         ] : []),
-        ...(kinds.linear ? [{ id: 'linear', label: 'Linear', icon: <Icon name="linear" className="size-3.5" /> }] : []),
+        // A tracker tab carries its product name, untranslated.
+        ...kinds.trackers.map((descriptor) => ({
+            id: trackerReferenceSource(descriptor.id),
+            label: descriptor.name,
+            icon: <Icon name={trackerPresentation(descriptor.id).icon} className="size-3.5" />,
+        })),
     ];
     const kindSwitch = (
         <div className={isMobile ? 'w-full' : 'shrink-0'}>
             <SortableTabsStrip
                 items={kindItems}
-                activeId={tab === 'linear' ? 'linear' : browser.githubKind}
+                activeId={tracker ? tab : browser.repositoryKind}
                 onSelect={(id) => {
-                    if (id === 'linear' || tab === 'linear') {
-                        onSelectKind(id === 'pull' ? 'pull' : id === 'issue' ? 'issue' : 'linear');
+                    if (id.startsWith('tracker:')) {
+                        onSelectKind(trackerReferenceSource(id.slice('tracker:'.length)));
                         return;
                     }
-                    browser.selectGitHubKind(id === 'pull' ? 'pull' : 'issue');
+                    const kind = id === 'pull' ? 'pull' : 'issue';
+                    // From a tracker tab the repository list remounts on the chosen kind.
+                    if (tracker) onSelectKind(kind);
+                    else browser.selectRepositoryKind(kind);
                 }}
                 variant="active-pill"
                 // Desktop: sized by its labels in a row that gives it no width of its

@@ -1,24 +1,36 @@
-import type { I18nKey } from '@/lib/i18n/store';
+import type { I18nKey, I18nParams } from '@/lib/i18n/store';
 import { getCustomizableShortcutActions } from '@/lib/shortcuts';
 import { isIsolatedSpacesPageVisible } from '@/lib/spaces/release';
 import { useUIStore } from '@/stores/useUIStore';
+import { trackerPresentation } from '@/lib/trackers/presentation';
+import type { TrackerDescriptor } from '@/lib/trackers/types';
+import type { ChangeRequestTerm, SourceControlProviderDescriptor } from '@/lib/source-control/providers/descriptor';
 import type { SettingsPageSlug, SettingsRuntimeContext } from './metadata';
 import { getSettingsPageMeta } from './metadata';
 
-interface SettingsSearchItem {
+/**
+ * A title is a translated key, or a literal for an entry named after a
+ * product the server describes (a source-control provider's label), since
+ * product names stay untranslated in every locale.
+ */
+type SettingsSearchTitle =
+  | { titleKey: I18nKey; titleParams?: I18nParams; literalTitle?: never }
+  | { literalTitle: string; titleKey?: never; titleParams?: never };
+
+type SettingsSearchItem = SettingsSearchTitle & {
   id: string;
   page: SettingsPageSlug;
-  titleKey: I18nKey;
   descriptionKey?: I18nKey;
+  descriptionParams?: I18nParams;
   keywords?: string[];
   isAvailable?: (ctx: SettingsSearchAvailabilityContext) => boolean;
-}
+};
 
-export interface SettingsSearchResult extends SettingsSearchItem {
+export type SettingsSearchResult = SettingsSearchItem & {
   title: string;
   description: string | null;
   pageTitle: string;
-}
+};
 
 interface SettingsSearchAvailabilityContext extends SettingsRuntimeContext {
   isMobile: boolean;
@@ -875,29 +887,6 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => !ctx.isVSCode && useUIStore.getState().agentMemoryFeatureAvailable,
   },
   {
-    id: 'git.gitlab-account',
-    page: 'integrations',
-    titleKey: 'settings.gitlab.title',
-    descriptionKey: 'settings.gitlab.info',
-    keywords: ['gitlab', 'account', 'oauth', 'pat', 'merge request', 'issues', 'glab'],
-    isAvailable: (ctx) => !ctx.isVSCode,
-  },
-  {
-    id: 'git.gitlab-connect',
-    page: 'integrations',
-    titleKey: 'settings.gitlab.actions.connect',
-    keywords: ['gitlab', 'connect', 'add account', 'oauth', 'pat', 'token', 'instance'],
-    isAvailable: (ctx) => !ctx.isVSCode,
-  },
-  {
-    id: 'git.github-enterprise-connect',
-    page: 'integrations',
-    titleKey: 'settings.github.enterprise.instance.customLabel',
-    descriptionKey: 'settings.github.enterprise.instance.customInfo',
-    keywords: ['github', 'enterprise', 'ghe', 'instance', 'connect', 'add account', 'pat', 'token', 'gh cli'],
-    isAvailable: (ctx) => !ctx.isVSCode,
-  },
-  {
     id: 'routing.token',
     page: 'routing',
     titleKey: 'settings.routing.token.label',
@@ -1507,45 +1496,6 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
-    id: 'integrations.github',
-    page: 'integrations',
-    titleKey: 'settings.integrations.github.title',
-    descriptionKey: 'settings.integrations.github.description',
-    keywords: ['github', 'account', 'oauth', 'gh', 'cli', 'prs', 'pull request', 'issues', 'connect'],
-    isAvailable: (ctx) => !ctx.isVSCode,
-  },
-  {
-    id: 'git.github-connect',
-    page: 'integrations',
-    titleKey: 'settings.github.page.actions.connect',
-    keywords: ['github', 'connect', 'add account', 'oauth', 'device flow'],
-    isAvailable: (ctx) => !ctx.isVSCode,
-  },
-  {
-    id: 'integrations.linear',
-    page: 'integrations',
-    titleKey: 'settings.integrations.linear.title',
-    descriptionKey: 'settings.integrations.linear.description',
-    keywords: ['linear', 'issues', 'oauth', 'connect', 'workspace'],
-    isAvailable: (ctx) => !ctx.isVSCode,
-  },
-  {
-    id: 'integrations.linear.add-workspace',
-    page: 'integrations',
-    titleKey: 'settings.integrations.linear.actions.addWorkspace',
-    descriptionKey: 'settings.integrations.linear.description',
-    keywords: ['linear', 'workspace', 'add', 'connect', 'oauth'],
-    isAvailable: (ctx) => !ctx.isVSCode,
-  },
-  {
-    id: 'integrations.linear.mapping',
-    page: 'integrations',
-    titleKey: 'settings.integrations.linear.mapping.defaultProject',
-    descriptionKey: 'settings.integrations.linear.mapping.defaultProject.info',
-    keywords: ['linear', 'project', 'team', 'map', 'workspace', 'directory'],
-    isAvailable: (ctx) => !ctx.isVSCode,
-  },
-  {
     id: 'integrations.third-party',
     page: 'integrations',
     titleKey: 'settings.integrations.thirdParty.title',
@@ -1630,8 +1580,98 @@ interface BuildSettingsSearchResultsOptions {
   query: string;
   runtimeCtx: SettingsSearchAvailabilityContext;
   visiblePageSlugs?: SettingsPageSlug[];
-  t: (key: I18nKey) => string;
+  t: (key: I18nKey, params?: I18nParams) => string;
   getPageTitle: (slug: SettingsPageSlug) => string;
+  /** The trackers the connected server serves; each adds its own entries. */
+  trackers?: readonly TrackerDescriptor[];
+  /** The source-control providers the connected server serves; each adds its card and connect entries. */
+  sourceControlProviders?: readonly SourceControlProviderDescriptor[];
+}
+
+const CHANGE_REQUEST_SEARCH_NOUNS = {
+  pullRequest: ['pull request', 'pr', 'issues'],
+  mergeRequest: ['merge request', 'mr', 'issues'],
+} satisfies Record<ChangeRequestTerm, string[]>;
+
+/**
+ * Each served source-control provider's entries on the Integrations page: its
+ * card, `integrations.source-control.<id>`, and the connect block inside it,
+ * `.connect`. The card is the anchor `SourceControlProviderCard` renders, so a
+ * provider the server adds is searchable with no entry of its own here.
+ */
+function sourceControlSearchItems(providers: readonly SourceControlProviderDescriptor[]): SettingsSearchItem[] {
+  const notInVSCode = (ctx: SettingsSearchAvailabilityContext) => !ctx.isVSCode;
+  return providers.flatMap((descriptor) => {
+    const term = descriptor.terminology.changeRequest;
+    const id = `integrations.source-control.${descriptor.id}`;
+    const params = { provider: descriptor.label };
+    const keywords = [
+      descriptor.id,
+      descriptor.label.toLowerCase(),
+      ...CHANGE_REQUEST_SEARCH_NOUNS[term],
+      'account',
+      'token',
+      ...(descriptor.auth.cliName ? [descriptor.auth.cliName] : []),
+    ];
+    return [
+      {
+        id,
+        page: 'integrations',
+        literalTitle: descriptor.label,
+        descriptionKey: `settings.sourceControl.provider.description.${term}`,
+        descriptionParams: params,
+        keywords,
+        isAvailable: notInVSCode,
+      },
+      {
+        id: `${id}.connect`,
+        page: 'integrations',
+        titleKey: 'settings.sourceControl.actions.connect',
+        titleParams: params,
+        keywords: [...keywords, 'connect', 'add account', 'instance', 'oauth', 'pat'],
+        isAvailable: notInVSCode,
+      },
+    ];
+  });
+}
+
+/**
+ * Each served tracker's entries on the Integrations page: the tracker itself,
+ * adding an account and its project mapping where its capabilities offer
+ * them. Ids are `integrations.<tracker>[.add-workspace|.mapping]`, the ids
+ * Linear's entries always had. A tracker without words of its own has none.
+ */
+function trackerSearchItems(trackers: readonly TrackerDescriptor[]): SettingsSearchItem[] {
+  const notInVSCode = (ctx: SettingsSearchAvailabilityContext) => !ctx.isVSCode;
+  return trackers.flatMap((descriptor) => {
+    const search = trackerPresentation(descriptor.id).settingsSearch;
+    if (!search) return [];
+    const id = `integrations.${descriptor.id}`;
+    const items: SettingsSearchItem[] = [
+      { id, page: 'integrations', titleKey: search.title, descriptionKey: search.description, keywords: search.keywords, isAvailable: notInVSCode },
+    ];
+    if (descriptor.capabilities.multipleAccounts) {
+      items.push({
+        id: `${id}.add-workspace`,
+        page: 'integrations',
+        titleKey: search.addAccount.title,
+        descriptionKey: search.description,
+        keywords: search.addAccount.keywords,
+        isAvailable: notInVSCode,
+      });
+    }
+    if (descriptor.capabilities.projectMapping) {
+      items.push({
+        id: `${id}.mapping`,
+        page: 'integrations',
+        titleKey: search.mapping.title,
+        descriptionKey: search.mapping.description,
+        keywords: search.mapping.keywords,
+        isAvailable: notInVSCode,
+      });
+    }
+    return items;
+  });
 }
 
 function normalizeSearchText(value: string): string {
@@ -1644,6 +1684,8 @@ export function buildSettingsSearchResults({
   visiblePageSlugs,
   t,
   getPageTitle,
+  trackers = [],
+  sourceControlProviders = [],
 }: BuildSettingsSearchResultsOptions): SettingsSearchResult[] {
   const normalizedQuery = normalizeSearchText(query);
   if (!normalizedQuery) {
@@ -1653,7 +1695,11 @@ export function buildSettingsSearchResults({
   const allowedPages = visiblePageSlugs ? new Set<SettingsPageSlug>(visiblePageSlugs) : null;
   const terms = normalizedQuery.split(/\s+/).filter(Boolean);
 
-  return SETTINGS_SEARCH_ITEMS.flatMap((item) => {
+  return [
+    ...SETTINGS_SEARCH_ITEMS,
+    ...sourceControlSearchItems(sourceControlProviders),
+    ...trackerSearchItems(trackers),
+  ].flatMap((item) => {
     if (allowedPages && !allowedPages.has(item.page)) {
       return [];
     }
@@ -1663,8 +1709,8 @@ export function buildSettingsSearchResults({
       return [];
     }
 
-    const title = t(item.titleKey);
-    const description = item.descriptionKey ? t(item.descriptionKey) : null;
+    const title = item.literalTitle !== undefined ? item.literalTitle : t(item.titleKey, item.titleParams);
+    const description = item.descriptionKey ? t(item.descriptionKey, item.descriptionParams) : null;
     const haystack = normalizeSearchText([
       title,
       description,

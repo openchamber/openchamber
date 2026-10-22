@@ -60,7 +60,7 @@ Full-screen extension pages are separate from this rail registry. `contributes.p
   (`useUIStore.contextRailHiddenSurfaces`, edited from the rail's trailing
   configure button — `ContextRailSurfacesDialog`),
   drops the walkthrough on VS Code and below `WALKTHROUGH_MIN_WIDTH`, hides the Tracker
-  unless a GitHub or GitLab account is connected (signed in from Settings →
+  unless a source-control account is connected (signed in from Settings →
   Integrations) or an item is open in it, and hides `has-content` surfaces
   until a tab of their mode exists. Both consumers use it so the digit shown
   on a rail badge always maps to the same surface the shortcut opens.
@@ -125,13 +125,16 @@ chats do. The first tab is always the checked-out branch's: its pull or merge
 request, or the form that creates one (`views/PullRequestView.tsx`). It sorts
 first, has no close button, and `closeContextPanelTabs` and the per-surface
 tab budget never remove it. Every other tab is one issue, pull or merge
-request or Linear issue (`views/TrackerItemView.tsx`), opened by
+request or tracker item (`views/TrackerItemView.tsx`), opened by
 `useUIStore.openTrackerItem` with the item's link as `targetPath`, a dedupe key
-naming the item whatever page of it the link opens, and the project it is read
+naming the item whatever page of it the link opens (`${provider}:${IDENTIFIER}`
+for a tracker item, `linear:ENG-12` as before), and the project it is read
 through as `targetDirectory` (none when that is the panel's own project).
 `components/sourceBoard/openTrackerItem.ts` decides that project from the
 session the link belongs to, so opening an item never moves the app to
-another project.
+another project. A tracker item link is one a served tracker's descriptor
+claims (`lib/trackers/matchTrackerUrl.ts`); a tracker the connected server
+does not serve opens its links in the browser.
 A project that is a folder of repositories, with no repository at its root,
 reads the item through the repository under it whose remote is the link's,
 origin first, then any other remote such as a fork's upstream
@@ -146,8 +149,9 @@ reading it, opens in the browser and its tab closes, but only for the click
 that just opened the tab and before it ever showed the item
 (`wasTrackerItemRequested`). A tab restored on launch, or one that showed its
 item before, says it cannot read it with a button to the browser, and a
-failed read shows Retry. Linear answers a missing issue and a failed read the
-same way, so a Linear tab falls back only on that first read.
+failed read shows Retry. A tracker answers a missing item and a failed read
+the same way, so a tracker item's tab, for every tracker, falls back only on
+that first read.
 
 Changes and the walkthrough opened from another project's PR keep that
 project's folder as their tab's `targetDirectory`, so they read the PR through
@@ -159,8 +163,12 @@ it to the panel's own project. Such a tab is saved as the panel's own: the PR
 it was asked to show is held in memory only (`usePullRequestSelectionStore`),
 so after a restart it would show whatever that project has checked out.
 
-The rail icon is the project's host: GitHub, GitLab, or `ticket-2` for a
-project with neither.
+The rail icon is the project's host: its provider's sprite icon, else the mark
+the descriptor serves as an icon URL (`providerIconSrc`), or `ticket-2` for a
+project with no host. While the host is still unknown the rail shows the first
+registered provider, as it did before hosts were read. Closing a Tracker whose
+account disconnected waits until any provider's default instance has answered
+an auth check.
 
 ## Panel header
 
@@ -204,6 +212,6 @@ chat/palette go through the `openContext*` actions in `useUIStore`.
   pass through its frame.
 - Runtime scope: desktop/web `MainLayout` only. VS Code and the dedicated
   mobile shell have their own layouts and do not consume this registry.
-  Linear has no rail surface: its issues list on the issues and PRs board
+  Trackers have no rail surface: their items list on the issues and PRs board
   (`components/sourceBoard`). A Linear tab persisted by an older version is
   dropped on load, like any unknown mode.

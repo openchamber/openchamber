@@ -1,7 +1,7 @@
 import React, { act } from 'react';
 import { afterAll, beforeAll, beforeEach, expect, test } from 'bun:test';
 import { Window } from 'happy-dom';
-import type { GitHubChecksSummary, GitHubPullReference, GitHubReference, SourceControlReadContext } from '@/lib/api/types';
+import type { CISummary, RepositoryChangeRequestReference, RepositoryReference, SourceControlReadContext } from '@/lib/api/types';
 import type { TrackedItemState, TrackedThread } from '@/lib/trackedItems/model';
 
 const github: SourceControlReadContext = {
@@ -9,14 +9,14 @@ const github: SourceControlReadContext = {
 };
 const gitlab: SourceControlReadContext = { ...github, provider: 'gitlab', instance: 'https://gitlab.com', accountId: 'gitlab#3' };
 
-const pull = (number: number, url = `https://github.com/acme/app/pull/${number}`): GitHubPullReference => ({
-  kind: 'pull', number, title: `PR ${number}`, url,
+const pull = (number: number, url = `https://github.com/acme/app/pull/${number}`): RepositoryChangeRequestReference => ({
+  kind: 'pull', provider: 'github', number, title: `PR ${number}`, url,
   body: '', bodyTruncated: false, createdAt: null, updatedAt: null, author: null, labels: [], commentCount: 0,
   sourceRepo: { owner: 'acme', repo: 'app', source: 'origin' },
   state: 'open', draft: false, head: `branch-${number}`, base: 'main', headSha: `sha-${number}`, headRepo: null,
 });
 
-const checks = (state: GitHubChecksSummary['state']): GitHubChecksSummary => ({
+const checks = (state: CISummary['state']): CISummary => ({
   state, total: 2, success: state === 'success' ? 2 : 0, failure: 0, pending: state === 'pending' ? 2 : 0,
 });
 
@@ -25,6 +25,7 @@ let live: typeof import('./liveReferences');
 let model: typeof import('@/lib/trackedItems/model');
 let store: typeof import('@/stores/useTrackedItemsStore');
 let runtime: typeof import('@/lib/runtime-switch');
+let providers: typeof import('@/lib/source-control/providers/registry');
 
 beforeAll(async () => {
   const dom = new Window({ url: 'http://localhost' });
@@ -39,6 +40,10 @@ beforeAll(async () => {
   model = await import('@/lib/trackedItems/model');
   store = await import('@/stores/useTrackedItemsStore');
   runtime = await import('@/lib/runtime-switch');
+  providers = await import('@/lib/source-control/providers/registry');
+  const { githubLikeDescriptor, gitlabLikeDescriptor } = await import('@/lib/source-control/providers/descriptor.fixture');
+  const ordered = [githubLikeDescriptor(), gitlabLikeDescriptor()];
+  providers.useSourceControlProviderRegistry.setState({ ordered, byId: new Map(ordered.map((entry) => [entry.id, entry])), status: 'ready', holdsList: true });
 });
 
 afterAll(() => {
@@ -50,8 +55,8 @@ beforeEach(() => {
 });
 
 /** The server's answer for a GitHub PR read with `context`'s account, at `fetchedAt`. */
-const pushPull = (reference: GitHubPullReference, context: SourceControlReadContext, fetchedAt: number, state: Partial<{ state: 'open' | 'merged'; checks: GitHubChecksSummary }>) => {
-  const item: TrackedThread<'pull'> = { provider: 'github', kind: 'pull', owner: 'acme', repo: 'app', number: reference.number, accountId: context.accountId };
+const pushPull = (reference: RepositoryChangeRequestReference, context: SourceControlReadContext, fetchedAt: number, state: Partial<{ state: 'open' | 'merged'; checks: CISummary }>) => {
+  const item: TrackedThread<'pull'> = { provider: 'github', instance: context.instance, kind: 'pull', owner: 'acme', repo: 'app', number: reference.number, accountId: context.accountId };
   const record: TrackedItemState = {
     type: 'pull', item, fetchedAt,
     state: { owner: item.owner, repo: item.repo, number: item.number, state: 'open', draft: false, title: reference.title, mergeable: true, mergeableState: 'clean', checks: null, ...state },
@@ -76,7 +81,7 @@ async function render<T>(hook: () => T): Promise<{ current: () => T; unmount: ()
 
 test('a listed PR takes the state followed after the list was read, never an older one', async () => {
   const readAt = Date.now();
-  const items: GitHubReference[] = [pull(1), pull(2)];
+  const items: RepositoryReference[] = [pull(1), pull(2)];
   const contextOf = () => github;
   const reads = [{ start: 0, read: { at: readAt, forced: false } }];
   const view = await render(() => live.useLiveReferences(items, contextOf, reads));
@@ -106,7 +111,7 @@ test('checks that finish while the list is on screen replace the status asked wi
 });
 
 test('a GitLab merge request is followed by its project path, subgroups included, and closed items not at all', async () => {
-  const items: GitHubReference[] = [pull(4, 'https://gitlab.com/group/sub/app/-/merge_requests/4'), { ...pull(5), state: 'closed' }];
+  const items: RepositoryReference[] = [pull(4, 'https://gitlab.com/group/sub/app/-/merge_requests/4'), { ...pull(5), state: 'closed' }];
   const contextOf = () => gitlab;
   const reads = [{ start: 0, read: { at: Date.now(), forced: false } }];
   const view = await render(() => live.useLiveReferences(items, contextOf, reads));
@@ -116,10 +121,22 @@ test('a GitLab merge request is followed by its project path, subgroups included
   view.unmount();
 });
 
+test('a listed enterprise PR is followed on its own instance', async () => {
+  const enterprise: SourceControlReadContext = { ...github, instance: 'ghe.example.com', accountId: 'ghe#1' };
+  const items: RepositoryReference[] = [pull(6, 'https://ghe.example.com/acme/app/pull/6')];
+  const contextOf = () => enterprise;
+  const reads = [{ start: 0, read: { at: Date.now(), forced: false } }];
+  const view = await render(() => live.useLiveReferences(items, contextOf, reads));
+  expect(view.current().followed).toEqual([
+    { provider: 'github', instance: 'ghe.example.com', kind: 'pull', owner: 'acme', repo: 'app', number: 6, accountId: 'ghe#1' },
+  ]);
+  view.unmount();
+});
+
 test('a read forced after a change, and a later page, stand against a state followed just before them', async () => {
   const firstPage = Date.now() - 120_000;
   const secondPage = Date.now();
-  const items: GitHubReference[] = [pull(1), { ...pull(2), title: 'Renamed' }];
+  const items: RepositoryReference[] = [pull(1), { ...pull(2), title: 'Renamed' }];
   const contextOf = () => github;
   // A state from 10 s before a forced read is older than what the read saw.
   const forced = [{ start: 0, read: { at: secondPage, forced: true } }];

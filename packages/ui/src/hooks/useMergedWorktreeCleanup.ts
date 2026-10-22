@@ -24,6 +24,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { archiveSessions, getSessionLiveActivity } from '@/sync/session-actions';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
+import { readSourceControlProvider } from '@/lib/source-control/providers/registry';
 
 const HANDLED_STORAGE_KEY = 'openchamber.mergedWorktreeCleanup.handled';
 const HANDLED_LIMIT = 200;
@@ -79,7 +80,8 @@ const report = (outcome: MergedWorktreeOutcome): void => {
   const dictionary = useI18nStore.getState().dictionary;
   const name = getWorktreeDisplayName(outcome.candidate.worktree);
   const params = { name, number: outcome.candidate.prNumber };
-  const key = (base: I18nKey) => changeRequestCopy(base, outcome.candidate.provider);
+  const term = readSourceControlProvider(outcome.candidate.provider).terminology.changeRequest;
+  const key = (base: I18nKey) => changeRequestCopy(base, term);
   if (outcome.kind === 'removed') {
     toast.success(formatMessage(dictionary, key('sessions.mergedCleanup.toast.removedTitle'), params), {
       description: formatMessage(dictionary, 'sessions.mergedCleanup.toast.removedDescription', params),

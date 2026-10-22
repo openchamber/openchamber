@@ -10,6 +10,7 @@
  */
 
 import type { Part } from '@/lib/opencode/model';
+import { readSourceControlProvider } from '@/lib/source-control/providers/registry';
 
 import { normalizeUserDisplayParts } from '../message/normalizeUserDisplayParts';
 import { attachSyntheticContext } from './attachSyntheticContext';
@@ -41,7 +42,9 @@ const normalizedByFoldedParts = new WeakMap<Part[], Part[]>();
 const normalizePromptParts = (parts: Part[]): Part[] => {
     const cached = normalizedByFoldedParts.get(parts);
     if (cached) return cached;
-    const normalized = normalizeUserDisplayParts(parts);
+    // The rail reads typed text and context captions, never a link chip's label,
+    // so the label's provider lookup can be the registry as it is now.
+    const normalized = normalizeUserDisplayParts(parts, readSourceControlProvider);
     normalizedByFoldedParts.set(parts, normalized);
     return normalized;
 };

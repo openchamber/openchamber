@@ -68,6 +68,8 @@ import {
   type SettingsPageMeta,
 } from '@/lib/settings/metadata';
 import { buildSettingsSearchResults, type SettingsSearchResult } from '@/lib/settings/search';
+import { useTrackerDescriptors } from '@/lib/trackers/registry';
+import { useSourceControlProviders } from '@/lib/source-control/providers/registry';
 
 // UI Kit: fixed split-page sidebar width
 const SETTINGS_SPLIT_SIDEBAR_WIDTH = 280;
@@ -337,6 +339,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
 
   const getPageTitle = React.useCallback((slug: SettingsPageSlug): string => t(settingsPageTitleKey(slug)), [t]);
 
+  const trackers = useTrackerDescriptors();
+  const sourceControlProviders = useSourceControlProviders();
   const settingsSearchResults = React.useMemo(() => {
     return buildSettingsSearchResults({
       query: settingsSearchQuery,
@@ -344,8 +348,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       visiblePageSlugs,
       t,
       getPageTitle,
+      trackers,
+      sourceControlProviders,
     });
-  }, [getPageTitle, isDesktopLocalOrigin, isMac, isWindows, isLinux, runtimeCtx, settingsSearchQuery, t, visiblePageSlugs]);
+  }, [getPageTitle, isDesktopLocalOrigin, isMac, isWindows, isLinux, runtimeCtx, settingsSearchQuery, sourceControlProviders, t, trackers, visiblePageSlugs]);
 
   const prepareSettingsSearchTarget = React.useCallback((result: SettingsSearchResult): string => {
     if (result.id.startsWith('agents.')) {

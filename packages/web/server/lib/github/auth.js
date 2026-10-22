@@ -46,7 +46,7 @@ const invalidState = (cause) => Object.assign(new Error('GitHub auth storage is 
   code: 'INVALID_GITHUB_AUTH',
 });
 
-export function githubAccountId(userId) {
+function githubAccountId(userId) {
   if (!Number.isInteger(userId)) return '';
   return `github.com#${userId}`;
 }
@@ -342,7 +342,6 @@ export function createGitHubAuthStore({ filePath, fsImpl = fs, lockWaitMs = 2_00
       return credential?.status === 'valid' ? credential : null;
     }),
     listAccountsForHost: (host) => read((state) => instanceOf(state, host).credentials.map((credential) => publicCredential(credential, instanceOf(state, host)))),
-    readAccountForHost: (host, credentialId, revision) => read((state) => readAccountIn(instanceOf(state, host), credentialId, revision)),
     // Credential ids are unique across instances (server-assigned), so an opaque
     // credential id alone identifies its own instance. The returned record earns
     // a `host` so callers know which API root the token belongs to.
@@ -434,16 +433,10 @@ export function createGitHubAuthStore({ filePath, fsImpl = fs, lockWaitMs = 2_00
 
   return Object.freeze({
     ...hostMethods,
-    // github.com shorthands kept for the account layer: a hostless call means
-    // github.com, and readAccount finds a credential id in whichever instance
-    // holds it (credential ids are server-assigned and unique across instances).
-    getActive: () => hostMethods.getActiveForHost('github.com'),
+    // github.com shorthands kept for the account layer: a hostless call means github.com.
     listAccounts: () => hostMethods.listAccountsForHost('github.com'),
-    readAccount: (credentialId, revision) => hostMethods.readAccountAnyInstance(credentialId, revision),
     setAccount: (args) => hostMethods.setAccountForHost('github.com', args),
-    activate: (credentialId) => hostMethods.activateForHost('github.com', credentialId),
     markInvalid: (credentialId, reason) => hostMethods.markInvalidForHost('github.com', credentialId, reason),
-    removeAccount: (credentialId) => hostMethods.removeAccountForHost('github.com', credentialId),
   });
 }
 
@@ -504,9 +497,6 @@ export const getGitHubAuthByAccountId = async (credentialId, revision) => {
   if (instanceCredential) return instanceCredential;
   return authStore.readAccountAnyInstance(credentialId, revision);
 };
-export const getGitHubAuthByHostAndAccountId = (host, credentialId, revision) => (normalizeInstance(host) === 'github.com'
-  ? authStore.readAccountForHost(host, credentialId, revision)
-  : instanceAuthStore().github.readAccount(host, credentialId, revision));
 
 export async function setGitHubAuth({ accessToken, scope, tokenType, user, accountId, source = 'oauth' }) {
   if (accountId !== undefined) throw new Error('GitHub credential IDs are server assigned');
@@ -526,13 +516,6 @@ export async function setGitHubAuthForHost(host, { accessToken, scope, tokenType
   return credential;
 }
 
-export async function activateGitHubAuth(credentialId) {
-  const activated = await authStore.activate(credentialId);
-  // Switching to a saved account is switching away from the gh CLI login.
-  if (activated && readSettingsFile().ghCliActive) setGhCliActive(false);
-  return activated;
-}
-
 export async function activateGitHubAuthForHost(host, credentialId) {
   const activated = normalizeInstance(host) === 'github.com'
     ? await authStore.activateForHost(host, credentialId)
@@ -544,7 +527,6 @@ export const markGitHubAuthAccountInvalid = (credentialId, reason = 'unauthorize
 export const markGitHubAuthAccountInvalidForHost = (host, credentialId, reason = 'unauthorized') => (normalizeInstance(host) === 'github.com'
   ? authStore.markInvalidForHost(host, credentialId, reason)
   : instanceAuthStore().github.markAccountInvalid(host, credentialId, reason));
-export const removeGitHubAuthAccount = (credentialId) => authStore.removeAccount(credentialId);
 export const removeGitHubAuthAccountForHost = (host, credentialId) => (normalizeInstance(host) === 'github.com'
   ? authStore.removeAccountForHost(host, credentialId)
   : instanceAuthStore().github.removeAccount(host, credentialId));
@@ -557,17 +539,6 @@ export function getGitHubClientId() {
   return isString(stored) && stored.trim() ? stored.trim() : DEFAULT_GITHUB_CLIENT_ID;
 }
 
-/**
- * Whether an operator explicitly configured a GitHub OAuth client (env or
- * settings), as opposed to the built-in github.com default. The device flow is
- * github.com-only; a non-github.com host never advertises it.
- */
-export function hasGitHubClientOverride() {
-  const raw = process.env.OPENCHAMBER_GITHUB_CLIENT_ID;
-  if (isString(raw) && raw.trim()) return true;
-  const stored = readSettingsFile()?.githubClientId;
-  return isString(stored) && Boolean(stored.trim());
-}
 
 export function getGitHubScopes() {
   const raw = process.env.OPENCHAMBER_GITHUB_SCOPES;
@@ -576,8 +547,6 @@ export function getGitHubScopes() {
   const stored = readSettingsFile()?.githubScopes;
   return isString(stored) && stored.trim() ? stored.trim() : DEFAULT_GITHUB_SCOPES;
 }
-
-export const GITHUB_AUTH_FILE = STORAGE_FILE;
 
 export function isGhCliDisabled() {
   return Boolean(readSettingsFile()?.ghCliDisabled);
@@ -590,7 +559,7 @@ export function setGhCliDisabled(disabled) {
   writeSettingsFile(settings);
 }
 
-export function isGhCliActive() {
+function isGhCliActive() {
   const settings = readSettingsFile();
   return !settings?.ghCliDisabled && Boolean(settings?.ghCliActive);
 }

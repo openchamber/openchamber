@@ -7,31 +7,32 @@ import { ReferenceLabelChips } from '@/components/references/ReferencePickerRow'
 import { toast } from '@/components/ui';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import type {
-    GitHubIssueLabel,
-    GitHubPullReference,
-    GitHubReference,
-    GitHubReferenceDetail,
-    GitHubReferenceReviewer,
+    Label,
+    RepositoryChangeRequestReference,
+    RepositoryReference,
+    RepositoryReferenceDetail,
+    RepositoryReferenceReviewer,
     SourceControlReadContext,
 } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
+import { useSourceControlProvider } from '@/lib/source-control/providers/registry';
 import { SourceBoardChoicePicker, type BoardChoice } from './SourceBoardChoicePicker';
 import { newMutationKey } from './mutationKey';
 
-const labelChoice = (label: GitHubIssueLabel): BoardChoice => ({
+const labelChoice = (label: Label): BoardChoice => ({
     id: label.name,
     label: label.name,
     content: <ReferenceLabelChips labels={[{ name: label.name, color: labelColor(label.color) }]} />,
 });
 
-const Person: React.FC<{ person: GitHubReferenceReviewer }> = ({ person }) => (
+const Person: React.FC<{ person: RepositoryReferenceReviewer }> = ({ person }) => (
     <span className="inline-flex min-w-0 items-center gap-1.5">
         {person.avatarUrl ? <img src={person.avatarUrl} alt="" className="size-4 shrink-0 rounded-full" loading="lazy" /> : null}
         <span className="truncate">{person.login}</span>
     </span>
 );
 
-const reviewerChoice = (person: GitHubReferenceReviewer): BoardChoice => ({
+const reviewerChoice = (person: RepositoryReferenceReviewer): BoardChoice => ({
     id: person.id,
     label: person.login,
     content: <Person person={person} />,
@@ -49,13 +50,14 @@ const MetaValue: React.FC<{ empty: boolean; children: React.ReactNode; picker: R
 
 /** An issue's or PR's labels, changed as one set from the repository's labels. */
 export const SourceBoardLabels: React.FC<{
-    reference: GitHubReference;
+    reference: RepositoryReference;
     context: SourceControlReadContext;
     onChanged: () => void;
 }> = ({ reference, context, onChanged }) => {
     const { t } = useI18n();
     const { sourceControl } = useRuntimeAPIs();
     const [busy, setBusy] = React.useState(false);
+    const descriptor = useSourceControlProvider(reference.provider);
     const project = { owner: reference.sourceRepo.owner, repo: reference.sourceRepo.repo };
 
     const commit = async (labels: string[]) => {
@@ -70,7 +72,7 @@ export const SourceBoardLabels: React.FC<{
             if (reference.kind === 'pull') await sourceControl.changeRequestSetLabels(payload);
             else await sourceControl.issueSetLabels(payload);
         } catch (error) {
-            toast.error(t('sourceBoard.toast.labelsFailed', { reference: referenceNumberLabel(reference) }), {
+            toast.error(t('sourceBoard.toast.labelsFailed', { reference: referenceNumberLabel(reference, descriptor) }), {
                 description: error instanceof Error ? error.message : String(error),
             });
         } finally {
@@ -102,8 +104,8 @@ export const SourceBoardLabels: React.FC<{
 
 /** Who an open PR asks to review, changed as one set from the people who can. */
 export const SourceBoardReviewers: React.FC<{
-    pull: GitHubPullReference;
-    detail: CachedValue<GitHubReferenceDetail>;
+    pull: RepositoryChangeRequestReference;
+    detail: CachedValue<RepositoryReferenceDetail>;
     context: SourceControlReadContext;
     onChanged: () => void;
 }> = ({ pull, detail, context, onChanged }) => {
@@ -111,6 +113,7 @@ export const SourceBoardReviewers: React.FC<{
     const { sourceControl } = useRuntimeAPIs();
     const [busy, setBusy] = React.useState(false);
     const reviewers = detail.status === 'ready' ? detail.value.pull?.reviewers ?? [] : null;
+    const descriptor = useSourceControlProvider(pull.provider);
     const project = { owner: pull.sourceRepo.owner, repo: pull.sourceRepo.repo };
 
     const commit = async (ids: string[]) => {
@@ -123,7 +126,7 @@ export const SourceBoardReviewers: React.FC<{
                 reviewers: ids,
             });
         } catch (error) {
-            toast.error(t('sourceBoard.toast.reviewersFailed', { reference: referenceNumberLabel(pull) }), {
+            toast.error(t('sourceBoard.toast.reviewersFailed', { reference: referenceNumberLabel(pull, descriptor) }), {
                 description: error instanceof Error ? error.message : String(error),
             });
         } finally {
@@ -147,8 +150,8 @@ export const SourceBoardReviewers: React.FC<{
                     selected={reviewers.map((person) => person.id)}
                     selectedChoices={reviewers.map(reviewerChoice)}
                     loadChoices={async () => (await sourceControl.referenceReviewers(context, project))
-                        // GitHub refuses to ask a PR's author for its review; GitLab allows it.
-                        .filter((person) => pull.provider === 'gitlab' || person.login !== pull.author?.login)
+                        // Some hosts refuse to ask a PR's author for its review (GitHub); others allow it (GitLab).
+                        .filter((person) => descriptor.features.authorCanReview || person.login !== pull.author?.login)
                         .map(reviewerChoice)}
                     onCommit={(ids) => void commit(ids)}
                     busy={busy}

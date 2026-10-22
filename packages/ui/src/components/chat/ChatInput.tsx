@@ -1,5 +1,7 @@
 import React from 'react';
-import { formatChangeRequestReference } from '@/lib/source-control/identity';
+import { formatChangeRequestLabel } from '@/lib/source-control/providers/terminology';
+import { useSourceControlDescriptorOf, useSourceControlProvider } from '@/lib/source-control/providers/registry';
+import { ProviderIcon } from '@/components/sourceControl/ProviderIcon';
 import { ComposerDictation } from '@/components/dictation/ComposerDictation';
 // sessionStore removed — currentSessionId comes from useSessionUIStore
 import { useConfigStore } from '@/stores/useConfigStore';
@@ -96,7 +98,11 @@ import {
     type ComposerReference,
 } from './composer/composerReferences';
 import { usePendingComposerReferences } from './composer/pendingComposerReferences';
-import { postLinearSessionStarted } from '@/lib/linearSessionStatus';
+import { postTrackerSessionStarted } from '@/lib/trackers/sessionStatus';
+import { trackerPresentation } from '@/lib/trackers/presentation';
+import { useTrackerDescriptors } from '@/lib/trackers/registry';
+import { trackerReferenceSource, type TrackerReferenceSource } from '@/components/references/referencePickerItems';
+import type { ComposerTrackerPicker } from './composer/ui/ComposerAttachmentControls';
 import { Icon } from "@/components/icon/Icon";
 import { DraftPresetChips } from './DraftPresetChips';
 import type { ResolvedStarter } from './useDraftStarters';
@@ -288,8 +294,8 @@ const getFileMentionInputSourceForInsertedText = (insertedText: string): FileMen
 const collectInlineSkillMentions = (text: string, skillNames: Set<string>): string[] =>
     collectKnownTokenNames(text, '$', skillNames, 'exact');
 
-/** Which reference picker is open, and for GitHub on which tab. */
-type ReferencePickerState = { source: 'github'; kind?: 'issue' | 'pull' } | { source: 'linear' } | null;
+/** Which reference picker is open, and for the repository on which tab. */
+type ReferencePickerState = { source: 'repository'; kind?: 'issue' | 'pull' } | { source: TrackerReferenceSource } | null;
 
 /**
  * Record what a session was pointed at, so the work-status panel can show it
@@ -702,7 +708,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     }, [getLargeTextPasteScope]);
     const { expanded: persistedExpandedInput, setExpanded: setExpandedInput } = useChatColumnExpandedInput();
     const isExpandedInput = !isBtwActive && persistedExpandedInput;
-    const { git: runtimeGit, vscode: vscodeApi, linear: runtimeLinear } = useRuntimeAPIs();
+    const { git: runtimeGit, vscode: vscodeApi, trackers: runtimeTrackers } = useRuntimeAPIs();
     const cycleAgentShortcutOverride = useUIStore((state) => state.shortcutOverrides.cycle_agent);
     const cycleAgentShortcut = React.useMemo(() => (
         getEffectiveShortcutCombo('cycle_agent', cycleAgentShortcutOverride ? { cycle_agent: cycleAgentShortcutOverride } : undefined)
@@ -1508,8 +1514,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                     includeDiff: false,
                     contextText: part.text,
                 });
-            } else if (payload.kind === 'linear-issue') {
-                restored.push({ kind: 'linear-issue', identifier: payload.identifier, title: payload.title, url: payload.url, contextText: part.text });
+            } else if (payload.kind === 'tracker-item') {
+                restored.push({ kind: 'tracker-item', provider: payload.provider, identifier: payload.identifier, title: payload.title, url: payload.url, contextText: part.text });
             } else if (payload.kind === 'guest-issue' || payload.kind === 'guest-pr') {
                 restored.push({
                     kind: 'guest',
@@ -1562,18 +1568,18 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     }, [isBtwActive, isExpandedInput, setExpandedInput]);
 
     const openGitHubPicker = React.useCallback(() => {
-        setReferencePicker({ source: 'github' });
+        setReferencePicker({ source: 'repository' });
     }, []);
     const referencePickerDirectory = currentSessionDirectoryForSync ?? currentDirectory ?? null;
     const repositoryProvider = useRepositoryReferenceProvider(isVSCodeRuntime() ? null : referencePickerDirectory);
+    const repositoryDescriptor = useSourceControlProvider(repositoryProvider);
+    const descriptorOf = useSourceControlDescriptorOf();
     const addLinkedReferences = React.useCallback((references: ComposerReference[]) => {
         setLinkedReferences((current) => withComposerReferences(current, references));
     }, []);
     const attachReferences = useAttachReferences(referencePickerDirectory, addLinkedReferences);
 
-    const openLinearPicker = React.useCallback(() => {
-        setReferencePicker({ source: 'linear' });
-    }, []);
+    const trackerDescriptors = useTrackerDescriptors();
 
     const getSubmitErrorMessage = (error: unknown, fallback: string) => {
         const message = error instanceof Error ? error.message : '';
@@ -2219,13 +2225,16 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             if (linkTargetSessionId) {
                 recordLinkedReferences(linkTargetSessionId, linkTargetDirectory, linkedReferences);
             }
-            // A session that starts with a Linear issue attached reports itself
-            // on that issue (the Linear card's Session comments), however it
-            // was started: a draft, a worktree made from the issue.
+            // A session that starts with a tracker item attached reports itself
+            // on that item (the tracker's Session comments, where it has them),
+            // however it was started: a draft, a worktree made from the item.
             if (!currentSessionId && linkTargetSessionId) {
                 for (const reference of linkedReferences) {
-                    if (reference.kind !== 'linear-issue') continue;
-                    postLinearSessionStarted(runtimeLinear, { sessionId: linkTargetSessionId, issueIdentifier: reference.identifier });
+                    if (reference.kind !== 'tracker-item') continue;
+                    void postTrackerSessionStarted(runtimeTrackers, reference.provider, {
+                        sessionId: linkTargetSessionId,
+                        identifier: reference.identifier,
+                    });
                 }
             }
 
@@ -3771,7 +3780,20 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             setLinkedReferences((current) => withComposerReferences(current, references));
         }
     }, [columnPinned, pendingComposerReferenceCount]);
-    const showLinearPicker = Boolean(runtimeLinear) && !isVSCode;
+    // Every tracker the server serves, signed in or not: its picker asks to connect when it is not.
+    const trackerPickers = React.useMemo<readonly ComposerTrackerPicker[]>(() => (
+        runtimeTrackers && !isVSCode
+            ? trackerDescriptors.map((descriptor) => {
+                const presentation = trackerPresentation(descriptor.id);
+                return {
+                    provider: descriptor.id,
+                    icon: presentation.icon,
+                    label: t('chat.chatInput.actions.linkTrackerItem', { provider: descriptor.name }),
+                    open: () => setReferencePicker({ source: trackerReferenceSource(descriptor.id) }),
+                };
+            })
+            : []
+    ), [isVSCode, runtimeTrackers, t, trackerDescriptors]);
     const showDraftTargetSelectors = newSessionDraftOpen && !isVSCode;
 
     // Which project and directory a new session will target.
@@ -3941,7 +3963,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                                 author={reference.author}
                                 openInBrowserLabel={t('chat.chatInput.linked.issue.openInBrowserAria')}
                                 removeLabel={t('chat.chatInput.linked.issue.removeAria')}
-                                onReopenPicker={() => setReferencePicker({ source: 'github', kind: 'issue' })}
+                                onReopenPicker={() => setReferencePicker({ source: 'repository', kind: 'issue' })}
                                 onRemove={remove}
                             />
                         );
@@ -3949,20 +3971,19 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         return (
                             <LinkedReferenceRow
                                 key={key}
-                                numberLabel={reference.provider === 'github'
-                                    ? t('chat.chatInput.linked.pr.number', { number: reference.number })
-                                    : formatChangeRequestReference(reference.provider, reference.number)}
+                                numberLabel={formatChangeRequestLabel(descriptorOf(reference.provider), reference.number)}
                                 title={reference.title}
                                 url={reference.url}
                                 author={reference.author}
                                 branches={reference.head && reference.base ? { head: reference.head, base: reference.base } : undefined}
-                                openInBrowserLabel={t(changeRequestCopy('chat.chatInput.linked.pr.openInBrowserAria', reference.provider))}
-                                removeLabel={t(changeRequestCopy('chat.chatInput.linked.pr.removeAria', reference.provider))}
-                                onReopenPicker={() => setReferencePicker({ source: 'github', kind: 'pull' })}
+                                openInBrowserLabel={t(changeRequestCopy('chat.chatInput.linked.pr.openInBrowserAria', descriptorOf(reference.provider).terminology.changeRequest))}
+                                removeLabel={t(changeRequestCopy('chat.chatInput.linked.pr.removeAria', descriptorOf(reference.provider).terminology.changeRequest))}
+                                onReopenPicker={() => setReferencePicker({ source: 'repository', kind: 'pull' })}
                                 onRemove={remove}
                             />
                         );
-                    case 'linear-issue':
+                    case 'tracker-item': {
+                        const trackerName = trackerDescriptors.find((descriptor) => descriptor.id === reference.provider)?.name ?? reference.provider;
                         return (
                             <LinkedReferenceRow
                                 key={key}
@@ -3970,12 +3991,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                                 title={reference.title}
                                 url={reference.url}
                                 author={reference.author}
-                                openInBrowserLabel={t('chat.chatInput.linked.linearIssue.openInBrowserAria')}
-                                removeLabel={t('chat.chatInput.linked.linearIssue.removeAria')}
-                                onReopenPicker={() => setReferencePicker({ source: 'linear' })}
+                                openInBrowserLabel={t('chat.chatInput.linked.trackerItem.openInBrowserAria', { provider: trackerName })}
+                                removeLabel={t('chat.chatInput.linked.trackerItem.removeAria', { provider: trackerName })}
+                                onReopenPicker={() => setReferencePicker({ source: trackerReferenceSource(reference.provider) })}
                                 onRemove={remove}
                             />
                         );
+                    }
                     case 'guest':
                         return (
                             <LinkedReferenceRow
@@ -4372,8 +4394,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         onPickLocalFiles={handlePickLocalFiles}
                         onOpenGitHubPicker={openGitHubPicker}
                         repositoryProvider={repositoryProvider}
-                        showLinearPicker={showLinearPicker}
-                        onOpenLinearPicker={openLinearPicker}
+                        trackerPickers={trackerPickers}
                         onOpenAttachSheet={openMobileAttachSheet}
                         onStartDictation={toggleDictation}
                         onAbort={handleAbort}
@@ -4581,8 +4602,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         onPickLocalFiles={handlePickLocalFiles}
                         onOpenGitHubPicker={openGitHubPicker}
                         repositoryProvider={repositoryProvider}
-                        showLinearPicker={showLinearPicker}
-                        onOpenLinearPicker={openLinearPicker}
+                        trackerPickers={trackerPickers}
                         attachGuests={isMobile ? NO_ATTACH_GUESTS : guestAttachItems}
                         onOpenGuestAttach={openGuestAttach}
                         onOpenAttachSheet={openMobileAttachSheet}
@@ -4681,7 +4701,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 purpose="attach"
                 selection="multiple"
                 directory={referencePickerDirectory}
-                initialGitHubKind={referencePicker.source === 'github' ? referencePicker.kind : undefined}
+                initialGitHubKind={referencePicker.source === 'repository' ? referencePicker.kind : undefined}
                 onConfirm={attachReferences}
             />
         ) : null}
@@ -4758,23 +4778,24 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                             requestAnimationFrame(openGitHubPicker);
                         }}
                     >
-                        <Icon name={repositoryProvider === 'gitlab' ? 'gitlab' : 'github'} className="h-[18px] w-[18px] flex-shrink-0 text-muted-foreground" />
-                        {t(repositoryProvider === 'gitlab' ? 'chat.chatInput.actions.linkGitlab' : 'chat.chatInput.actions.linkGithub')}
+                        <ProviderIcon descriptor={repositoryDescriptor} className="h-[18px] w-[18px] flex-shrink-0 text-muted-foreground" />
+                        {t(`chat.chatInput.actions.linkRepositoryItem.${repositoryDescriptor.terminology.changeRequest}`, { provider: repositoryDescriptor.label })}
                     </button>
-                    {showLinearPicker ? (
+                    {trackerPickers.map((picker) => (
                         <button
+                            key={picker.provider}
                             type="button"
                             className="flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 py-3 text-start typography-ui-label hover:bg-[var(--interactive-hover)]"
                             onClick={() => {
                                 mobileShell.skipNextOverlayCloseRestore();
                                 setMobileAttachMenuOpen(false);
-                                requestAnimationFrame(openLinearPicker);
+                                requestAnimationFrame(picker.open);
                             }}
                         >
-                            <Icon name="linear" className="h-[18px] w-[18px] flex-shrink-0 text-muted-foreground" />
-                            {t('chat.chatInput.actions.linkLinearIssue')}
+                            <Icon name={picker.icon} className="h-[18px] w-[18px] flex-shrink-0 text-muted-foreground" />
+                            {picker.label}
                         </button>
-                    ) : null}
+                    ))}
                 </div>
             </MobileOverlayPanel>
         ) : null}

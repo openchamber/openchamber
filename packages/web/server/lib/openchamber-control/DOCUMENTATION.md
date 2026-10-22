@@ -190,12 +190,18 @@ other.
   (`../session-knowledge/DOCUMENTATION.md`): what the work is about, never one
   mentioned in passing. It sends one service-neutral record (`url`, `title`, `kind`
   `change` or `issue`, optional `identifier`) and nothing is looked up, so any
-  tracker works. The URL decides what is stored: a GitHub pull or issue
+  tracker works. The URL decides what is stored: a github.com pull or issue
   address becomes the GitHub entry (kind from the path, live state as for any
-  link), a Linear issue address the Linear entry, anything else an `external`
-  entry shown by identifier. A GitLab merge request or issue address (the
-  `/-/merge_requests/N` shape on any host) is keyed by the thread, so linking
-  it again from a tab like `/diffs` or with a query refreshes the one entry. It only adds or refreshes links, never removes
+  link), an item link a registered tracker's `matchUrl` claims a tracker
+  entry (`{ id: '<provider>:<IDENTIFIER>', kind, provider, identifier }`;
+  Linear's id stays `linear:ENG-12` and its kind stays `linear` while the
+  `/api/linear` alias exists, so older bundled UIs keep showing and keeping
+  it; other trackers are `kind: 'tracker'`, see
+  `../trackers/DOCUMENTATION.md`), anything else an `external` entry shown by identifier.
+  A change request or issue address that a source-control provider's
+  `urls.thread` names (GitLab's `/-/merge_requests/N` shape on any host) is
+  keyed by the thread, so linking it again from a tab like `/diffs` or with a
+  query refreshes the one entry. It only adds or refreshes links, never removes
   one: the user owns removal. A missing field or a non-http(s) URL is a 400 and
   nothing is written.
 - `file.open` shows a file in the user's viewer. `file-open.js` resolves a

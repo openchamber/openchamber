@@ -4,6 +4,7 @@ import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
+import { useSourceControlDescriptorOf, type SourceControlDescriptorOf } from '@/lib/source-control/providers/registry';
 import { clearStagedRevert } from '@/sync/session-actions';
 import { useDirectorySync } from '@/sync/sync-context';
 import { readSubagentRun } from '@/lib/opencode/subagent-run';
@@ -20,8 +21,13 @@ import {
  * it: the typed text, else a label for its attached context (a quote, a
  * terminal selection), else an attached filename, else `fallback`.
  */
-const getRevertedPreview = (parts: Part[], fallback: string, t: Parameters<typeof getPromptPreviewText>[1]): string => {
-    const text = getPromptPreviewText(parts, t).replace(/\s+/g, ' ').trim();
+const getRevertedPreview = (
+    parts: Part[],
+    fallback: string,
+    t: Parameters<typeof getPromptPreviewText>[1],
+    descriptorOf: SourceControlDescriptorOf,
+): string => {
+    const text = getPromptPreviewText(parts, t, descriptorOf).replace(/\s+/g, ' ').trim();
     if (text) return text;
     const filePart = parts.find((part) => part.type === 'file');
     return filePart?.filename ? `[${filePart.filename}]` : fallback;
@@ -44,6 +50,7 @@ interface RevertedMessagesStripProps {
  */
 export const RevertedMessagesStrip: React.FC<RevertedMessagesStripProps> = React.memo(({ sessionId, directory }) => {
     const { t } = useI18n();
+    const descriptorOf = useSourceControlDescriptorOf();
     const [restoring, setRestoring] = React.useState(false);
     // The list opens for one revert point; a new revert starts collapsed.
     const [expandedFor, setExpandedFor] = React.useState<string | null>(null);
@@ -64,11 +71,11 @@ export const RevertedMessagesStrip: React.FC<RevertedMessagesStripProps> = React
         // plugin plumbing. A background report stays its own row.
         const entries = attachSyntheticContext(revertedState.records.map((record) => ({ info: record.message, parts: record.parts })));
         return entries.flatMap(({ info, parts }) => {
-            if (info.role === 'user') return [{ id: info.id, text: getRevertedPreview(parts, noTextContent, t) }];
+            if (info.role === 'user') return [{ id: info.id, text: getRevertedPreview(parts, noTextContent, t, descriptorOf) }];
             if (info.role === 'synthetic' && readSubagentRun(info)) return [{ id: info.id, text: info.description?.trim() || noTextContent }];
             return [];
         });
-    }, [noTextContent, revertedState, t]);
+    }, [descriptorOf, noTextContent, revertedState, t]);
 
     if (!sessionId || !revertedState.revertMessageID || items.length === 0) return null;
 

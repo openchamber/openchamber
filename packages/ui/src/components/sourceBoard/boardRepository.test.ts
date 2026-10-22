@@ -2,6 +2,11 @@ import { describe, expect, test } from 'bun:test';
 
 import { choiceForFocus, folderOfRepository, repositoryLabel, resolveBoardRepository, resolveBoardTab, resolvePullLinkTarget, shouldRememberAll } from './boardRepository';
 import { repositoryUrlOfItemLink } from './openTrackerItem';
+import { githubLikeDescriptor, gitlabLikeDescriptor } from '@/lib/source-control/providers/descriptor.fixture';
+import { createRepositoryUrlMatcher } from '@/lib/source-control/repositoryUrlMatcher';
+
+const descriptors = [githubLikeDescriptor(), gitlabLikeDescriptor()];
+const urls = createRepositoryUrlMatcher(descriptors, []);
 
 const ROOT = '/work';
 const REPOS = ['/work/app', '/work/api'];
@@ -120,18 +125,18 @@ describe('folderOfRepository', () => {
       { directory: '/work/fork', remotes: [remote('origin', 'git@github.com:me/api.git'), remote('upstream', 'https://github.com/acme/api.git')] },
       { directory: '/work/api', remotes: [remote('origin', 'https://github.com/Acme/API')] },
     ];
-    expect(folderOfRepository(API, folders, github)).toBe('/work/api');
-    expect(folderOfRepository(API, folders.slice(0, 1), github)).toBe('/work/fork');
+    expect(folderOfRepository(API, folders, github, descriptors)).toBe('/work/api');
+    expect(folderOfRepository(API, folders.slice(0, 1), github, descriptors)).toBe('/work/fork');
   });
 
   test('waits on a folder still being read unless an origin already answers', () => {
     const reading = { directory: '/work/app', remotes: null };
-    expect(folderOfRepository(API, [reading, { directory: '/work/fork', remotes: [remote('upstream', 'https://github.com/acme/api.git')] }], github)).toBeNull();
-    expect(folderOfRepository(API, [reading, { directory: '/work/api', remotes: [remote('origin', 'https://github.com/acme/api.git')] }], github)).toBe('/work/api');
+    expect(folderOfRepository(API, [reading, { directory: '/work/fork', remotes: [remote('upstream', 'https://github.com/acme/api.git')] }], github, descriptors)).toBeNull();
+    expect(folderOfRepository(API, [reading, { directory: '/work/api', remotes: [remote('origin', 'https://github.com/acme/api.git')] }], github, descriptors)).toBe('/work/api');
   });
 
   test('answers none when no remote is the repository', () => {
-    expect(folderOfRepository(API, [{ directory: '/work/app', remotes: [remote('origin', 'https://github.com/acme/app.git')] }, { directory: '/work/x', remotes: [] }], github)).toBe('none');
+    expect(folderOfRepository(API, [{ directory: '/work/app', remotes: [remote('origin', 'https://github.com/acme/app.git')] }, { directory: '/work/x', remotes: [] }], github, descriptors)).toBe('none');
   });
 });
 
@@ -171,9 +176,9 @@ describe('a link focus on a project', () => {
 
 describe('repositoryUrlOfItemLink', () => {
   test('names the repository a GitHub or GitLab link points into', () => {
-    expect(repositoryUrlOfItemLink('https://github.com/Acme/API/pull/12/files')).toBe('https://github.com/acme/api');
-    expect(repositoryUrlOfItemLink('https://gitlab.example.com/group/sub/repo/-/merge_requests/7')).toBe('https://gitlab.example.com/group/sub/repo');
-    expect(repositoryUrlOfItemLink('#12')).toBeNull();
+    expect(repositoryUrlOfItemLink('https://github.com/Acme/API/pull/12/files', urls)).toBe('https://github.com/acme/api');
+    expect(repositoryUrlOfItemLink('https://gitlab.example.com/group/sub/repo/-/merge_requests/7', urls)).toBe('https://gitlab.example.com/group/sub/repo');
+    expect(repositoryUrlOfItemLink('#12', urls)).toBeNull();
   });
 });
 

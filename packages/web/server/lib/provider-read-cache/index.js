@@ -1,3 +1,5 @@
+import { sourceControlProviderDescriptors } from '../source-control/provider-descriptors.js';
+
 // Short-lived shared answers for provider reads (issue and pull request lists,
 // previews, comments), so the picker, the comparison view, the PR panel and
 // every connected client asking the same thing within seconds cost one
@@ -15,21 +17,32 @@
 //
 // `POST <prefix>/read-cache/refresh` forgets answers on request, for a change
 // made on the provider's own site, as narrowly as the refresh asks:
-// `?scope=item&owner=&repo=&number=` (the preview's refresh button) forgets
-// what was read about that one item and reports it through
-// `onItemRefresh(provider, item)`; `?scope=lists` (the board's list refresh)
-// forgets the lists and the statuses read for them. Without a scope every
-// answer of the provider goes, as for a change.
+// `?scope=item&owner=&repo=&number=` (`?scope=item&identifier=` for a
+// tracker; the preview's refresh button) forgets what was read about that one
+// item and reports it through `onItemRefresh(provider, item)`;
+// `?scope=lists` (the board's list refresh) forgets the lists and the
+// statuses read for them. Without a scope every answer of the provider goes,
+// as for a change.
+//
+// The prefixes are built from the registries: `/api/source-control/<id>` per
+// source-control provider and `/api/tracker/<id>` per tracker, plus the
+// legacy `/api/linear` alias, which is the same provider as
+// `/api/tracker/linear`, so a change through either forgets both.
 
 const SECOND = 1000;
 const MAX_ENTRIES = 300;
 // A larger answer (a merge request context with its diff) is served but not kept.
 const MAX_CACHED_BYTES = 2 * 1024 * 1024;
 
-const ROUTES = [
-  { prefix: '/api/source-control/github', provider: 'github' },
-  { prefix: '/api/source-control/gitlab', provider: 'gitlab' },
-  { prefix: '/api/linear', provider: 'linear' },
+// The legacy Linear routes stay beside `/api/tracker/linear` for older clients.
+const LEGACY_TRACKER_PREFIXES = Object.freeze({ linear: '/api/linear' });
+
+const routesOf = (sourceControlProviderIds, trackerIds) => [
+  ...sourceControlProviderIds.map((provider) => ({ prefix: `/api/source-control/${provider}`, provider, tracker: false })),
+  ...trackerIds.flatMap((provider) => [
+    { prefix: `/api/tracker/${provider}`, provider, tracker: true },
+    ...(LEGACY_TRACKER_PREFIXES[provider] ? [{ prefix: LEGACY_TRACKER_PREFIXES[provider], provider, tracker: true }] : []),
+  ]),
 ];
 
 // Lists change when something is opened or closed; previews and comments are
@@ -43,6 +56,8 @@ const CACHED_READS = new Map([
   ['/issues/comments', 15 * SECOND],
   ['/pulls/list', 30 * SECOND],
   ['/pulls/context', 15 * SECOND],
+  ['/items/list', 30 * SECOND],
+  ['/items/get', 15 * SECOND],
 ]);
 
 // Reads sent as a POST because their request is too large for a query; they
@@ -50,11 +65,32 @@ const CACHED_READS = new Map([
 const POST_READS = new Set(['/references/across']);
 
 // Reads that list items, rather than read one: a list refresh forgets these.
-const LIST_READS = new Set(['/references', '/references/status', '/issues/list', '/pulls/list']);
+const LIST_READS = new Set(['/references', '/references/status', '/issues/list', '/pulls/list', '/items/list']);
 
-const routeOf = (path) => ROUTES.find((route) => path.startsWith(`${route.prefix}/`)) ?? null;
+// A tracker's reads of one item (the tracker routes and the legacy Linear ones).
+const TRACKER_ITEM_READS = new Set(['/items/get', '/issues/get']);
 
 const lower = (value) => String(value ?? '').toLowerCase();
+
+/** The one tracker item a scoped refresh names, by its identifier. */
+const refreshedWorkItem = (searchParams) => {
+  const identifier = String(searchParams.get('identifier') ?? '').trim().toUpperCase();
+  return identifier ? { identifier } : null;
+};
+
+/**
+ * Whether a kept tracker answer was read about the work item: its own read,
+ * which names it by the provider's id, so the answer's body says which one it
+ * was (a read still in flight has no body yet and is forgotten), and a
+ * search for its identifier.
+ */
+const trackerAnswerIsAbout = (subpath, params, item, body) => {
+  if (TRACKER_ITEM_READS.has(subpath)) {
+    const read = body?.item ?? body?.issue;
+    return body === undefined || String(read?.identifier ?? '').toUpperCase() === item.identifier;
+  }
+  return LIST_READS.has(subpath) && lower(params.get('query')).trim() === lower(item.identifier);
+};
 
 /** The one item a scoped refresh names, or null when the query names none. */
 const refreshedItem = (searchParams) => {
@@ -86,31 +122,50 @@ const answerIsAbout = (subpath, params, item) => {
   return Number(params.get('number')) === item.number && sameProject(params.get('owner'), params.get('repo'));
 };
 
-const requestKey = (req, provider) => {
+// A key names the provider and the prefix it was read under, so a forget that
+// matches by subpath slices each kept answer with its own prefix (the legacy
+// alias is shorter than the tracker route).
+const requestKey = (req, route) => {
   const url = new URL(req.originalUrl, 'http://localhost');
   const query = [...url.searchParams.entries()].sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0));
-  return `${provider}|${url.pathname}?${new URLSearchParams(query).toString()}`;
+  return `${route.provider}|${route.prefix}|${url.pathname}?${new URLSearchParams(query).toString()}`;
+};
+
+const parseKey = (key) => {
+  const [provider, prefix] = key.split('|', 2);
+  const url = new URL(key.slice(provider.length + prefix.length + 2), 'http://localhost');
+  return { provider, subpath: url.pathname.slice(prefix.length), params: url.searchParams };
 };
 
 const isConnectedAnswer = (body) => !(Object.prototype.toString.call(body) === '[object Object]' && body.connected === false);
 
-export function createProviderReadCache({ now = Date.now, onChange = () => {}, onItemRefresh = () => {} } = {}) {
+/**
+ * `sourceControlProviderIds` and `trackerIds` are the registered ids, in the
+ * one namespace both registries share.
+ */
+export function createProviderReadCache({
+  sourceControlProviderIds = sourceControlProviderDescriptors.list().map((descriptor) => descriptor.id),
+  trackerIds = [],
+  now = Date.now,
+  onChange = () => {},
+  onItemRefresh = () => {},
+} = {}) {
+  const routes = routesOf(sourceControlProviderIds, trackerIds);
+  const routeOf = (path) => routes.find((route) => path.startsWith(`${route.prefix}/`)) ?? null;
   const entries = new Map();
   const inFlight = new Map();
 
-  /** Forgets the provider's answers `matches(subpath, params)` picks; all of them without it. */
+  /** Forgets the provider's answers `matches(subpath, params, body)` picks; all of them without it. */
   const clear = (provider, matches = null) => {
-    const picked = (key) => {
-      if (provider && !key.startsWith(`${provider}|`)) return false;
-      if (!matches) return true;
-      const route = ROUTES.find((candidate) => candidate.provider === key.slice(0, key.indexOf('|')));
-      const url = new URL(key.slice(key.indexOf('|') + 1), 'http://localhost');
-      return Boolean(route) && matches(url.pathname.slice(route.prefix.length), url.searchParams);
+    const picked = (key, body) => {
+      const parsed = parseKey(key);
+      if (provider && parsed.provider !== provider) return false;
+      return !matches || matches(parsed.subpath, parsed.params, body);
     };
-    for (const key of entries.keys()) if (picked(key)) entries.delete(key);
+    for (const [key, entry] of entries) if (picked(key, entry.body)) entries.delete(key);
     // Requests already running may carry the old state; they still answer
     // their own callers, but their result is not kept.
-    for (const [key, flight] of inFlight) if (picked(key)) flight.stale = true;
+    for (const [key, flight] of inFlight) if (picked(key, undefined)) flight.stale = true;
   };
 
   const remember = (key, body, ttlMs) => {
@@ -129,6 +184,13 @@ export function createProviderReadCache({ now = Date.now, onChange = () => {}, o
     if (req.method === 'POST' && subpath === '/read-cache/refresh') {
       const { searchParams } = new URL(req.originalUrl, 'http://localhost');
       const scope = searchParams.get('scope');
+      if (scope === 'item' && route.tracker) {
+        const item = refreshedWorkItem(searchParams);
+        if (!item) return res.status(400).json({ error: 'identifier is required to refresh one item' });
+        clear(route.provider, (path, params, body) => trackerAnswerIsAbout(path, params, item, body));
+        onItemRefresh(route.provider, item);
+        return res.json({ ok: true });
+      }
       if (scope === 'item') {
         const item = refreshedItem(searchParams);
         if (!item) return res.status(400).json({ error: 'number is required to refresh one item' });
@@ -156,7 +218,7 @@ export function createProviderReadCache({ now = Date.now, onChange = () => {}, o
     }
     const ttlMs = CACHED_READS.get(subpath);
     if (!ttlMs) return next();
-    const key = requestKey(req, route.provider);
+    const key = requestKey(req, route);
     const cached = entries.get(key);
     if (cached && cached.expiresAt > now()) return res.json(cached.body);
     if (cached) entries.delete(key);

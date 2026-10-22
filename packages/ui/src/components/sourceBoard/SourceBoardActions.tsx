@@ -11,16 +11,18 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuRadioG
 import { useConfirmDialog } from '@/components/ui/confirm-dialog';
 import { usePendingComposerReferences } from '@/components/chat/composer/pendingComposerReferences';
 import type { ReferencePickerItem, ReferencePickerSelection } from '@/components/references/referencePickerItems';
-import { readLinearIssueDetail } from '@/components/references/referenceSources';
+import { readTrackerItemDetail } from '@/components/references/referenceSources';
+import { readTrackerDescriptor } from '@/lib/trackers/registry';
 import { resolveComposerReferences } from '@/components/references/resolveComposerReferences';
 import { readMergeMethod, rememberMergeMethod, type MergeMethod } from '@/components/views/git/mergeMethodPreference';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
-import type { GitHubPullReference, PullRequestStack, PullRequestStackLayer, SourceControlReadContext } from '@/lib/api/types';
+import type { RepositoryChangeRequestReference, PullRequestStack, PullRequestStackLayer, SourceControlReadContext } from '@/lib/api/types';
 import type { PullRequestSource } from '@/lib/diff/pullRequestDiff';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import type { SetStateInput, SourceControlCapabilities } from '@/lib/source-control/types';
-import { formatChangeRequestReference } from '@/lib/source-control/identity';
+import { useSourceControlProvider } from '@/lib/source-control/providers/registry';
+import { formatChangeRequestReference } from '@/lib/source-control/providers/terminology';
 import { usePullRequestSelectionStore } from '@/stores/usePullRequestSelectionStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useWalkthroughStore } from '@/stores/useWalkthroughStore';
@@ -44,6 +46,7 @@ const MERGE_METHOD_KEYS = {
     rebase: 'sourceBoard.merge.method.rebase',
 } as const;
 
+
 /** The open layers below `number` in its stack, bottom first. */
 const openLayersBelow = (stack: PullRequestStack, number: number): PullRequestStackLayer[] => {
     const index = stack.layers.findIndex((layer) => layer.number === number);
@@ -51,14 +54,14 @@ const openLayersBelow = (stack: PullRequestStack, number: number): PullRequestSt
 };
 
 /** A branch can be stacked on when it lives in the PR's own repository; a fork's cannot. */
-const isStackable = (pull: GitHubPullReference): boolean => (
+const isStackable = (pull: RepositoryChangeRequestReference): boolean => (
     !pull.headRepo
     || (pull.headRepo.owner.toLowerCase() === pull.sourceRepo.owner.toLowerCase() && pull.headRepo.repo.toLowerCase() === pull.sourceRepo.repo.toLowerCase())
 );
 
 /** What a session started from the item gets: the item itself, as a composer chip. */
 const selectionOf = (item: ReferencePickerItem): ReferencePickerSelection => (
-    item.source === 'linear' ? item : { source: 'github', reference: item.reference, includeDiff: false }
+    item.source === 'tracker' ? item : { source: 'repository', reference: item.reference, includeDiff: false }
 );
 
 /**
@@ -95,8 +98,8 @@ const ActionButton: React.FC<{
  * What the board does with the previewed item: start work on it, or merge
  * a pull request.
  *
- * `project` is where work starts; for a Linear issue the board picks it from
- * the team's mapping. `context` reads and changes the project's repository.
+ * `project` is where work starts; for a tracker item the board picks it from
+ * its container's mapping. `context` reads and changes the project's repository.
  */
 export const SourceBoardActions: React.FC<{
     item: ReferencePickerItem;
@@ -104,7 +107,7 @@ export const SourceBoardActions: React.FC<{
     context: SourceControlReadContext | null;
     onStartWorktree: (project: SourceBoardProject, selection: ReferencePickerSelection) => void;
     onChanged: () => void;
-    /** Left of the actions: where a Linear issue's session starts, with a way to pick another project. */
+    /** Left of the actions: where a tracker item's session starts, with a way to pick another project. */
     startIn?: React.ReactNode;
     /** The phone shell's page closes once a session starts; the desktop page closes on its own. */
     onLeave?: () => void;
@@ -117,14 +120,15 @@ export const SourceBoardActions: React.FC<{
      * layer of a stack. In the attach menu where the surface starts work there,
      * else a button of its own.
      */
-    onStartOnTop?: (pull: GitHubPullReference) => void;
+    onStartOnTop?: (pull: RepositoryChangeRequestReference) => void;
 }> = ({ item, project, context, onStartWorktree, onChanged, startIn, onLeave, worktreeAvailable, stack = null, onStartOnTop }) => {
     const { t } = useI18n();
-    const { sourceControl, linear } = useRuntimeAPIs();
+    const { sourceControl, trackers } = useRuntimeAPIs();
     const confirmation = useConfirmDialog();
     const [busy, setBusy] = React.useState<'merge' | 'ready' | null>(null);
 
-    const pull: GitHubPullReference | null = item.source === 'github' && item.reference.kind === 'pull' ? item.reference : null;
+    const pull: RepositoryChangeRequestReference | null = item.source === 'repository' && item.reference.kind === 'pull' ? item.reference : null;
+    const descriptor = useSourceControlProvider(pull?.provider);
     const openPull = pull && pull.state === 'open' ? pull : null;
     // Asked only while an open PR is previewed: nothing else merges.
     const capabilities = useCapabilities(openPull ? context : null);
@@ -138,9 +142,10 @@ export const SourceBoardActions: React.FC<{
         void resolveComposerReferences([selectionOf(item)], {
             sourceControl,
             context,
-            readLinearDetail: (issueId) => (linear
-                ? readLinearIssueDetail(linear, issueId)
-                : Promise.reject(new Error('Linear is not available here'))),
+            readTrackerDetail: (provider, itemId) => (trackers
+                ? readTrackerItemDetail(trackers, provider, itemId)
+                : Promise.reject(new Error('Trackers are not available here'))),
+            trackerName: (provider) => readTrackerDescriptor(provider).name,
         }).then(({ references, failures }) => {
             if (references.length > 0) usePendingComposerReferences.getState().push(references);
             const failure = failures[0];
@@ -173,8 +178,8 @@ export const SourceBoardActions: React.FC<{
         setChosenMethod(method);
         rememberMergeMethod(method);
     };
-    const reference = pull ? formatChangeRequestReference(pull.provider ?? 'github', pull.number) : '';
-    const referenceOf = (number: number) => formatChangeRequestReference(pull?.provider ?? 'github', number);
+    const reference = pull ? formatChangeRequestReference(descriptor, pull.number) : '';
+    const referenceOf = (number: number) => formatChangeRequestReference(descriptor, number);
     // GitHub merges a stacked PR together with the open layers below it, bottom first.
     const mergesBelow = openPull && stack?.number != null ? openLayersBelow(stack, openPull.number) : [];
 
@@ -190,7 +195,7 @@ export const SourceBoardActions: React.FC<{
                 ? t('stacks.merge.alsoBelow.one', { reference: referenceOf(mergesBelow[0].number) })
                 : t('stacks.merge.alsoBelow.other', { count: mergesBelow.length, references: mergesBelow.map((layer) => referenceOf(layer.number)).join(', ') });
         const approved = await confirmation.confirm({
-            title: t(context.provider === 'gitlab' ? 'sourceBoard.merge.confirmTitle.gitlab' : 'sourceBoard.merge.confirmTitle.github', { reference }),
+            title: t(`sourceBoard.merge.confirmTitle.${descriptor.terminology.changeRequest}`, { reference }),
             message: stackNote ? `${stackNote}\n\n${methodNote}` : methodNote,
             action: t('sourceBoard.actions.merge'),
         });
@@ -366,7 +371,7 @@ const LINK_CLASS = cn(
  * underneath it, and the walkthrough is not offered.
  */
 export const SourceBoardPullLinks: React.FC<{
-    pull: GitHubPullReference;
+    pull: RepositoryChangeRequestReference;
     project: SourceBoardProject;
     /** The folder the board reads; a repository under the project's root when the root is not one. */
     repository: string | null;
@@ -430,7 +435,7 @@ export const SourceBoardPullLinks: React.FC<{
 
 /**
  * Close or reopen for the previewed issue or PR, as items of its state pill's
- * menu. Null for a merged PR or Linear, which have neither here.
+ * menu. Null for a merged PR or a tracker item, which have neither here.
  */
 export const SourceBoardStateMenuItems: React.FC<{
     item: ReferencePickerItem;
@@ -440,19 +445,19 @@ export const SourceBoardStateMenuItems: React.FC<{
     const { t } = useI18n();
     const { sourceControl } = useRuntimeAPIs();
     // An open issue or PR closes, a closed one reopens; a merged PR stays as it is.
-    const repositoryItem = item.source === 'github' ? item.reference : null;
+    const repositoryItem = item.source === 'repository' ? item.reference : null;
+    const descriptor = useSourceControlProvider(repositoryItem?.provider);
     const nextState = !repositoryItem || repositoryItem.state === 'merged' ? null : repositoryItem.state === 'open' ? 'closed' : 'open';
     const stateLabel = (() => {
         if (!repositoryItem || !nextState) return '';
         if (repositoryItem.kind === 'issue') return t(nextState === 'closed' ? 'sourceBoard.actions.closeIssue' : 'sourceBoard.actions.reopenIssue');
-        const gitlab = repositoryItem.provider === 'gitlab';
-        if (nextState === 'closed') return t(gitlab ? 'sourceBoard.actions.closePull.gitlab' : 'sourceBoard.actions.closePull.github');
-        return t(gitlab ? 'sourceBoard.actions.reopenPull.gitlab' : 'sourceBoard.actions.reopenPull.github');
+        const term = descriptor.terminology.changeRequest;
+        return t(nextState === 'closed' ? `sourceBoard.actions.closePull.${term}` : `sourceBoard.actions.reopenPull.${term}`);
     })();
 
     const changeState = async () => {
         if (!repositoryItem || !nextState) return;
-        const label = referenceNumberLabel(repositoryItem);
+        const label = referenceNumberLabel(repositoryItem, descriptor);
         try {
             const payload: SetStateInput = {
                 ...context,

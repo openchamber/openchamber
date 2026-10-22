@@ -8,6 +8,9 @@ import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
 import { PullRequestView } from '@/components/views/PullRequestView';
 import { TrackerItemView } from '@/components/views/TrackerItemView';
 import { trackerTargetOfUrl } from '@/components/sourceBoard/openTrackerItem';
+import { useRepositoryUrlMatcher } from '@/lib/source-control/repositoryUrlMatcher';
+import { useTrackerUrlMatcher } from '@/lib/trackers/matchTrackerUrl';
+import { trackerPresentation } from '@/lib/trackers/presentation';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 import { getDisambiguatingFolders } from '@/lib/path-utils';
 
@@ -15,8 +18,6 @@ import { getDisambiguatingFolders } from '@/lib/path-utils';
 // plan statically pulls their stacks into the eager startup graph even when
 // no such tab is open. The keep-alive surfaces load in ContextSurfacePanes.
 const GitView = lazyWithChunkRecovery(() => import('@/components/views/GitView').then((m) => ({ default: m.GitView })));
-// The Linear rail icon stays hidden until a workspace is connected, so most
-// users never render this panel; keep it out of the main bundle.
 import { areTitleMapsEqual, buildSessionTitleMap, EMPTY_SESSION_TITLE_MAP, getSessionIDFromDedupeKey } from './contextPanelSessionTitles';
 import { ProjectContextPanel } from './RightSidebarTabs';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
@@ -44,6 +45,7 @@ import { useLayoutAnimationMs } from '@/hooks/useLayoutAnimationMs';
 import { WORK_STATUS_COLUMN_WIDTH } from '@/components/chat/work-status/useWorkStatusVisibility';
 import { setWorkStatusHost, useRightSlotStore } from './rightSlot';
 import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
+import { useChangeRequestTerm } from '@/lib/source-control/providers/registry';
 import { ContextPanelHeaderSlotProvider } from './contextPanelHeaderSlot';
 import { CLOSED_ZONE_VIEW, getZoneView, isZoneShown, resolveZoneActiveTab, type ContextZone } from '@/lib/workspace/zones';
 import { closeZoneOnEscape } from './zoneEscape';
@@ -209,6 +211,17 @@ const ChatTabIcon: React.FC<{ sessionId: string }> = ({ sessionId }) => {
     : <Icon name="chat-4" className="h-3.5 w-3.5" />;
 };
 
+// The branch's own tab, then what each item is.
+const TrackerTabIcon: React.FC<{ url: string | null }> = ({ url }) => {
+  const urls = useRepositoryUrlMatcher();
+  const trackerUrls = useTrackerUrlMatcher();
+  const target = url ? trackerTargetOfUrl(url, urls, trackerUrls) : null;
+  const name: IconName = !target ? 'git-branch'
+    : target.source === 'tracker' ? trackerPresentation(target.provider).icon
+      : target.kind === 'pull' ? 'git-pull-request' : 'record-circle';
+  return <Icon name={name} className="h-3.5 w-3.5" />;
+};
+
 const getTabIcon = (
   tab: { mode: ContextPanelMode; targetPath: string | null; dedupeKey?: string },
   faviconByOrigin: Record<string, string> = {},
@@ -232,7 +245,7 @@ const getTabIcon = (
   }
 
   if (tab.mode === 'pr') {
-    return <Icon name={trackerTabIcon(tab.targetPath)} className="h-3.5 w-3.5" />;
+    return <TrackerTabIcon url={tab.targetPath} />;
   }
 
   if (tab.mode === 'notes') {
@@ -270,13 +283,6 @@ const getTabIcon = (
   return undefined;
 };
 
-// The branch's own tab, then what each item is.
-const trackerTabIcon = (url: string | null): IconName => {
-  const target = url ? trackerTargetOfUrl(url) : null;
-  if (!target) return 'git-branch';
-  if (target.source === 'linear') return 'linear';
-  return target.kind === 'pull' ? 'git-pull-request' : 'record-circle';
-};
 
 const browserFaviconFor = (url: string, faviconByOrigin: Record<string, string>): string => {
   try {
@@ -400,11 +406,11 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
   const { t, direction } = useI18n();
   const isRtl = direction === 'rtl';
   const effectiveDirectory = useEffectiveDirectory() ?? '';
-  const repositoryProvider = useRepositoryReferenceProvider(effectiveDirectory || null);
+  const changeRequestTerm = useChangeRequestTerm(useRepositoryReferenceProvider(effectiveDirectory || null));
   // Tab names in this repository's words: a GitLab project's change request tab is a merge request.
   const tabT = React.useCallback<TranslateFn>(
-    (key, params) => t(changeRequestCopy(key, repositoryProvider), params),
-    [repositoryProvider, t],
+    (key, params) => t(changeRequestCopy(key, changeRequestTerm), params),
+    [changeRequestTerm, t],
   );
   const directoryKey = React.useMemo(() => normalizeDirectoryKey(effectiveDirectory), [effectiveDirectory]);
 

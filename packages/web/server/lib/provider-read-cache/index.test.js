@@ -152,4 +152,78 @@ describe('provider read cache', () => {
     await request(app).post('/api/source-control/gitlab/read-cache/refresh').expect(200);
     expect(changed).toEqual(['github', 'gitlab']);
   });
+
+  it('serves a tracker under its route and the legacy Linear alias as one provider', async () => {
+    const changed = [];
+    const cache = createProviderReadCache({ trackerIds: ['linear'], now: () => 1_000, onChange: (provider) => changed.push(provider) });
+    const app = express();
+    app.use(cache.middleware);
+    const calls = { tracker: 0, legacy: 0 };
+    app.get('/api/tracker/linear/items/list', (_req, res) => { calls.tracker += 1; res.json({ connected: true, items: [] }); });
+    app.get('/api/linear/issues/list', (_req, res) => { calls.legacy += 1; res.json({ connected: true, issues: [] }); });
+    app.post('/api/tracker/linear/items/update', (_req, res) => res.json({ connected: true }));
+    // `providers` is not a tracker: the descriptor list is never cached here.
+    app.get('/api/tracker/providers', (_req, res) => res.json({ providers: [] }));
+    const reads = () => Promise.all([
+      request(app).get('/api/tracker/linear/items/list').query({ state: 'open' }),
+      request(app).get('/api/linear/issues/list').query({ status: 'open' }),
+    ]);
+    await reads();
+    await reads();
+    expect(calls).toEqual({ tracker: 1, legacy: 1 });
+
+    // A change through the tracker route forgets the alias's answers too.
+    await request(app).post('/api/tracker/linear/items/update').expect(200);
+    expect(changed).toEqual(['linear']);
+    await reads();
+    expect(calls).toEqual({ tracker: 2, legacy: 2 });
+
+    // A list refresh through the alias, sliced with the alias's own prefix,
+    // forgets the tracker route's lists as well.
+    await request(app).post('/api/linear/read-cache/refresh').query({ scope: 'lists' }).expect(200);
+    await reads();
+    expect(calls).toEqual({ tracker: 3, legacy: 3 });
+  });
+
+  it('forgets one tracker item by its identifier and reports it', async () => {
+    const refreshed = [];
+    const cache = createProviderReadCache({
+      trackerIds: ['linear'],
+      now: () => 1_000,
+      onItemRefresh: (provider, item) => refreshed.push({ provider, ...item }),
+    });
+    const app = express();
+    app.use(cache.middleware);
+    const calls = {};
+    const count = (name, body) => (_req, res) => { calls[name] = (calls[name] ?? 0) + 1; res.json(body); };
+    app.get('/api/tracker/linear/items/get', (req, res) => count(`get-${req.query.id}`, {
+      connected: true, item: { identifier: req.query.id === 'uuid-12' ? 'ENG-12' : 'ENG-13' },
+    })(req, res));
+    app.get('/api/linear/issues/get', count('legacy-get', { connected: true, issue: { identifier: 'ENG-12' } }));
+    app.get('/api/tracker/linear/items/list', count('list', { connected: true, items: [] }));
+    const reads = () => Promise.all([
+      request(app).get('/api/tracker/linear/items/get').query({ id: 'uuid-12' }),
+      request(app).get('/api/tracker/linear/items/get').query({ id: 'uuid-13' }),
+      request(app).get('/api/linear/issues/get').query({ id: 'uuid-12' }),
+      request(app).get('/api/tracker/linear/items/list').query({ state: 'open' }),
+    ]);
+    await reads();
+    await request(app).post('/api/tracker/linear/read-cache/refresh').query({ scope: 'item' }).expect(400);
+    await request(app).post('/api/tracker/linear/read-cache/refresh').query({ scope: 'item', identifier: 'eng-12' }).expect(200);
+    await reads();
+    // ENG-12's reads under both prefixes go; ENG-13 and the list stay.
+    expect(calls).toEqual({ 'get-uuid-12': 2, 'get-uuid-13': 1, 'legacy-get': 2, list: 1 });
+    expect(refreshed).toEqual([{ provider: 'linear', identifier: 'ENG-12' }]);
+  });
+
+  it('caches only the source-control providers it was given', async () => {
+    const cache = createProviderReadCache({ sourceControlProviderIds: ['gitlab'] });
+    const app = express();
+    app.use(cache.middleware);
+    let calls = 0;
+    app.get('/api/source-control/github/pulls/list', (_req, res) => { calls += 1; res.json({ items: [] }); });
+    await request(app).get('/api/source-control/github/pulls/list');
+    await request(app).get('/api/source-control/github/pulls/list');
+    expect(calls).toBe(2);
+  });
 });

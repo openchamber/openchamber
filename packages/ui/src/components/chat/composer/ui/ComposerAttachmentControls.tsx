@@ -7,11 +7,13 @@
  * open.
  */
 
-import type { SourceControlProvider } from '@/lib/api/types';
 import React from 'react';
 
 import { Icon } from '@/components/icon/Icon';
+import { ProviderIcon } from '@/components/sourceControl/ProviderIcon';
+import { useSourceControlProvider } from '@/lib/source-control/providers/registry';
 import { GuestIcon } from '@/components/layout/GuestRailIcon';
+import type { IconName } from '@/components/icon/icons';
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -22,6 +24,9 @@ import type { GuestAttachItem } from '@/hooks/useGuestSurfaces';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 
+/** A tracker the attach menu offers: its mark, the translated action, and what opens its picker. */
+export type ComposerTrackerPicker = { provider: string; icon: IconName; label: string; open: () => void };
+
 type ComposerAttachmentControlsProps = {
     isVSCode: boolean;
     footerIconButtonClass: string;
@@ -29,9 +34,10 @@ type ComposerAttachmentControlsProps = {
     handlePickLocalFiles: () => void;
     openGitHubPicker: () => void;
     /** The host the project's issues and change requests come from. */
-    repositoryProvider?: SourceControlProvider;
-    showLinearPicker?: boolean;
-    openLinearPicker?: () => void;
+    /** The project's source-control provider id; its mark and wording label the link action. */
+    repositoryProvider?: string | null;
+    /** One entry per tracker the server serves, in its order. */
+    trackerPickers?: readonly ComposerTrackerPicker[];
     onOpenSettings?: () => void;
     onMenuOpenChange?: (open: boolean) => void;
     /** Mobile: open the attachment bottom sheet instead of the dropdown menu. */
@@ -53,14 +59,14 @@ export const ComposerAttachmentControls = React.memo(function ComposerAttachment
         iconSizeClass,
         handlePickLocalFiles,
         openGitHubPicker,
-        repositoryProvider = 'github',
-        showLinearPicker,
-        openLinearPicker,
+        repositoryProvider = null,
+        trackerPickers,
         onOpenSettings,
         attachGuests,
         onOpenGuestAttach,
         filesOnly = false,
     } = props;
+    const repositoryDescriptor = useSourceControlProvider(repositoryProvider);
 
     return (
         <div className="flex items-center gap-x-1.5">
@@ -121,19 +127,20 @@ export const ComposerAttachmentControls = React.memo(function ComposerAttachment
                                     requestAnimationFrame(openGitHubPicker);
                                 }}
                             >
-                                <Icon name={repositoryProvider === 'gitlab' ? 'gitlab' : 'github'}/>
-                                {t(repositoryProvider === 'gitlab' ? 'chat.chatInput.actions.linkGitlab' : 'chat.chatInput.actions.linkGithub')}
+                                <ProviderIcon descriptor={repositoryDescriptor}/>
+                                {t(`chat.chatInput.actions.linkRepositoryItem.${repositoryDescriptor.terminology.changeRequest}`, { provider: repositoryDescriptor.label })}
                             </DropdownMenuItem>
-                            {showLinearPicker && openLinearPicker ? (
+                            {trackerPickers?.map((picker) => (
                                 <DropdownMenuItem
+                                    key={picker.provider}
                                     onSelect={() => {
-                                        requestAnimationFrame(openLinearPicker);
+                                        requestAnimationFrame(picker.open);
                                     }}
                                 >
-                                    <Icon name="linear"/>
-                                    {t('chat.chatInput.actions.linkLinearIssue')}
+                                    <Icon name={picker.icon}/>
+                                    {picker.label}
                                 </DropdownMenuItem>
-                            ) : null}
+                            ))}
                             {attachGuests?.map((guest) => (
                                 <DropdownMenuItem
                                     key={guest.id}
@@ -167,7 +174,7 @@ export const ComposerAttachmentControls = React.memo(function ComposerAttachment
     prev.isVSCode === next.isVSCode
     && prev.footerIconButtonClass === next.footerIconButtonClass
     && prev.iconSizeClass === next.iconSizeClass
-    && prev.showLinearPicker === next.showLinearPicker
+    && prev.trackerPickers === next.trackerPickers
     && prev.onOpenSettings === next.onOpenSettings
     && prev.onMenuOpenChange === next.onMenuOpenChange
     && prev.onOpenMobileSheet === next.onOpenMobileSheet

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { sourceControlProviderDescriptors } from '../source-control/provider-descriptors.js';
 
 /**
  * Links a pull request, merge request or issue to a session: the agent's way
@@ -7,11 +8,13 @@ import { z } from 'zod';
  *
  * The agent hands over the whole record (url, title, kind, optional
  * identifier) in one service-neutral shape, so nothing is looked up and any
- * tracker works. Only the URL is trusted for what the thing is: a GitHub or
- * Linear address becomes the entry those services already have, with live
- * state for GitHub; any other address is stored as an `external` entry. The
- * shapes are the UI's (`packages/ui/src/lib/linkedIssues.ts`), under
- * `openchamber.linked_issues`.
+ * tracker works. Only the URL is trusted for what the thing is: a github.com
+ * pull request or issue becomes the native GitHub entry (with live state), a
+ * registered tracker's item link (its `matchUrl`) becomes a tracker entry
+ * (`trackerEntryKind`), and any other address is stored as an `external` entry, whose id is the
+ * thread's canonical address when a source-control provider's `urls.thread`
+ * names one. The shapes are the UI's (`packages/ui/src/lib/linkedIssues.ts`),
+ * under `openchamber.linked_issues`.
  *
  * Linking only: removing a link stays with the user, so an agent never drops
  * one the user set.
@@ -20,11 +23,9 @@ import { z } from 'zod';
 const MAX_TITLE_LENGTH = 300;
 const MAX_IDENTIFIER_LENGTH = 64;
 
-const GITHUB_PATTERN = /^\/([^/]+)\/([^/]+)\/(pull|issues)\/(\d+)(?:\/|$)/;
-const LINEAR_PATTERN = /^\/[^/]+\/issue\/([A-Za-z][A-Za-z0-9]*-\d+)(?:\/|$)/;
-// GitLab's own routes sit behind `/-/` on any instance, so this shape names a
-// merge request or issue whatever the host; tabs such as `/diffs` follow it.
-const GITLAB_THREAD_PATTERN = /^(\/.+\/-\/(?:merge_requests|issues|work_items)\/\d+)(?:\/|$)/;
+// The native entry the UI keeps for a repository thread exists for github.com
+// only (`linkedIssues.ts`): owner/repo#number, pull or issue.
+const NATIVE_THREAD = { provider: 'github', host: 'github.com' };
 
 const linkInputSchema = z.object({
   url: z.string().trim().min(1),
@@ -40,11 +41,39 @@ const parseHttpUrl = (value) => {
 };
 
 /**
- * The stored entry for an agent's link. The URL decides the service, and for
- * GitHub also whether it is a pull request: an address says that more
- * reliably than the kind a model filled in.
+ * The source-control provider whose `urls.thread` names this address as a
+ * change request or issue, with the pattern's match, else null. The match
+ * ends where the thread does, so tabs such as `/diffs` and a query fall
+ * outside it.
  */
-export const buildLinkEntry = (input, linkedAt) => {
+const threadPathOf = (host, pathname) => {
+  for (const descriptor of sourceControlProviderDescriptors.list()) {
+    const { hosts, pattern } = descriptor.urls.thread;
+    if (hosts !== 'any' && !hosts.includes(host)) continue;
+    const match = pattern.exec(pathname);
+    if (match) return { provider: descriptor.id, match };
+  }
+  return null;
+};
+
+/**
+ * The stored kind of a tracker's linked entry. Older bundled UIs (phone apps
+ * that talk to a newer server) know only `kind: 'linear'`: they drop any
+ * other kind from the list they show and write back, so a Linear link stored
+ * as `tracker` would vanish on their next link. While the `/api/linear` alias
+ * still serves those UIs, Linear keeps `kind: 'linear'` with `provider` beside
+ * it (older validators ignore the extra field); other trackers, which older
+ * UIs cannot show anyway, are `tracker`. Readers accept both.
+ */
+const trackerEntryKind = (provider) => (provider === 'linear' ? 'linear' : 'tracker');
+
+/**
+ * The stored entry for an agent's link. The URL decides the service, and for
+ * a native GitHub thread also whether it is a pull request: an address says
+ * that more reliably than the kind a model filled in. `matchTrackerUrl(url)`
+ * answers `{ provider, identifier }` for a registered tracker's item link.
+ */
+export const buildLinkEntry = (input, linkedAt, { matchTrackerUrl = () => null } = {}) => {
   const parsed = linkInputSchema.safeParse(input);
   if (!parsed.success) return { error: 'link needs url, title, and kind (change or issue); identifier is optional' };
   const { title, kind, identifier } = parsed.data;
@@ -52,36 +81,41 @@ export const buildLinkEntry = (input, linkedAt) => {
   if (!url) return { error: 'link.url must be an absolute http(s) URL' };
   const host = url.hostname.replace(/^www\./, '').toLowerCase();
 
-  if (host === 'github.com') {
-    const match = GITHUB_PATTERN.exec(url.pathname);
-    if (match) {
-      const number = Number(match[4]);
-      return { entry: {
-        id: `${match[1]}/${match[2]}#${number}`,
-        number,
-        title,
-        url: url.toString(),
-        kind: match[3] === 'pull' ? 'pull' : 'issue',
-        linkedAt,
-      } };
-    }
+  const thread = threadPathOf(host, url.pathname);
+  if (thread?.provider === NATIVE_THREAD.provider && host === NATIVE_THREAD.host) {
+    const [, owner, repo, threadKind, rawNumber] = thread.match;
+    const number = Number(rawNumber);
+    return { entry: {
+      id: `${owner}/${repo}#${number}`,
+      number,
+      title,
+      url: url.toString(),
+      kind: threadKind === 'pull' ? 'pull' : 'issue',
+      linkedAt,
+    } };
   }
 
-  if (host === 'linear.app') {
-    const match = LINEAR_PATTERN.exec(url.pathname);
-    if (match) {
-      const issueIdentifier = match[1].toUpperCase();
-      return { entry: { id: `linear:${issueIdentifier}`, identifier: issueIdentifier, title, url: url.toString(), kind: 'linear', linkedAt } };
-    }
+  const tracked = matchTrackerUrl(url.toString());
+  if (tracked) {
+    const itemIdentifier = tracked.identifier.toUpperCase();
+    return { entry: {
+      id: `${tracked.provider}:${itemIdentifier}`,
+      kind: trackerEntryKind(tracked.provider),
+      provider: tracked.provider,
+      identifier: itemIdentifier,
+      title,
+      url: url.toString(),
+      linkedAt,
+    } };
   }
 
   url.hash = '';
-  // One GitLab thread is one entry however its address was written: the same
-  // merge request linked again from its Changes tab, or with a query, refreshes
-  // the first link.
-  const gitlabThread = GITLAB_THREAD_PATTERN.exec(url.pathname);
+  // One thread is one entry however its address was written: the same merge
+  // request linked again from its Changes tab, or with a query, refreshes the
+  // first link.
+  const canonical = thread ? `${url.origin}${thread.match[0].replace(/\/$/, '')}` : null;
   return { entry: {
-    id: `link:${gitlabThread ? `${url.origin}${gitlabThread[1]}` : url.toString()}`,
+    id: `link:${canonical ?? url.toString()}`,
     kind: 'external',
     thread: kind,
     identifier: identifier || host,
@@ -117,10 +151,33 @@ export const buildLinkPatch = (metadata, entry) => {
   return { openchamber: { linked_issues: next } };
 };
 
-export const createSessionLinker = ({ updateMetadata, createError, now = Date.now }) => {
+/**
+ * A matcher over every registered tracker's `matchUrl`, in registry order. A
+ * tracker that fails to load is left out: its links are stored as external
+ * ones rather than refused.
+ */
+const trackerUrlMatcher = async (trackers) => {
+  const matchers = [];
+  for (const provider of trackers?.list() ?? []) {
+    try {
+      const tracker = await trackers.implementation(provider);
+      if (tracker?.matchUrl instanceof Function) matchers.push({ provider, matchUrl: tracker.matchUrl });
+    } catch { /* as above */ }
+  }
+  return (url) => {
+    for (const { provider, matchUrl } of matchers) {
+      const identifier = matchUrl(url);
+      if (identifier) return { provider, identifier };
+    }
+    return null;
+  };
+};
+
+/** `trackers` is the tracker registry; its trackers' links become tracker entries. */
+export const createSessionLinker = ({ updateMetadata, createError, trackers = null, now = Date.now }) => {
   const link = async ({ sessionId, directory, link: input }) => {
     if (!sessionId) throw createError('sessionId is required when the call does not come from a session', 400);
-    const { entry, error } = buildLinkEntry(input, now());
+    const { entry, error } = buildLinkEntry(input, now(), { matchTrackerUrl: await trackerUrlMatcher(trackers) });
     if (error) throw createError(error, 400);
 
     const { changed } = await updateMetadata(sessionId, (current) => buildLinkPatch(current, entry), { directory: directory ?? '' });

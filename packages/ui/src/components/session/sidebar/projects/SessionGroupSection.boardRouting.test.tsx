@@ -3,7 +3,7 @@ import { Window } from 'happy-dom';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 
-import type { GitHubReferenceKind, ProjectEntry } from '@/lib/api/types';
+import type { RepositoryReferenceKind, ProjectEntry } from '@/lib/api/types';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { I18nProvider } from '@/lib/i18n';
 import type { Metadata, Session } from '@/lib/opencode/model';
@@ -11,6 +11,8 @@ import { ChildStoreManager } from '@/sync/child-store';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSourceBoardStore } from '@/stores/useSourceBoardStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { githubLikeDescriptor } from '@/lib/source-control/providers/descriptor.fixture';
+import { useSourceControlProviderRegistry } from '@/lib/source-control/providers/registry';
 import type { SessionGroupSectionProps } from './SessionGroupSection';
 
 const browser = new Window({ url: 'http://localhost/' });
@@ -24,6 +26,9 @@ Object.assign(globalThis, {
 
 // The system browser is where a misrouted chip would end up.
 const childStores = new ChildStoreManager();
+// A linked issue reads as GitHub's through the served provider's URL patterns.
+const github = githubLikeDescriptor();
+useSourceControlProviderRegistry.setState({ ordered: [github], byId: new Map([[github.id, github]]), status: 'ready', holdsList: true });
 
 mock.module('@/components/ui/button', () => ({
   Button: ({ children }: { children?: React.ReactNode }) => <button>{children}</button>,
@@ -155,7 +160,7 @@ describe('SessionGroupSection chip routing', () => {
       windowOpens.push(url ?? '');
       return null;
     };
-    const boardFocus: { projectId: string; kind: GitHubReferenceKind; query: string }[] = [];
+    const boardFocus: { projectId: string; kind: RepositoryReferenceKind; query: string }[] = [];
     const originalProjects = useProjectsStore.getState().projects;
     const originalBoard = useSourceBoardStore.getState();
     const originalWorktrees = useSessionUIStore.getState().availableWorktreesByProject;

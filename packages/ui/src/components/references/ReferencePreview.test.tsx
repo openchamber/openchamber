@@ -4,21 +4,25 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { Window } from 'happy-dom';
 
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
-import type { GitHubPullReference, GitHubReferenceDetail, LinearIssue } from '@/lib/api/types';
+import type { RepositoryChangeRequestReference, RepositoryReferenceDetail, TrackerItem } from '@/lib/api/types';
 import { I18nProvider } from '@/lib/i18n';
+import { githubLikeDescriptor } from '@/lib/source-control/providers/descriptor.fixture';
+import { useSourceControlProviderRegistry } from '@/lib/source-control/providers/registry';
+import { linearLikeTrackerDescriptor } from '@/lib/trackers/descriptor.fixture';
+import { useTrackerRegistry } from '@/lib/trackers/registry';
 import { createWebAPIs } from '../../../../web/src/api';
 import { ReferencePreview } from './ReferencePreview';
 import type { CachedValue } from './referenceCache';
 import type { ReferencePickerItem } from './referencePickerItems';
 
-const pull: GitHubPullReference = {
-    kind: 'pull', number: 12, title: 'Preview layout', url: 'https://github.com/acme/app/pull/12',
+const pull: RepositoryChangeRequestReference = {
+    kind: 'pull', provider: 'github', number: 12, title: 'Preview layout', url: 'https://github.com/acme/app/pull/12',
     body: '', bodyTruncated: false, createdAt: null, updatedAt: null,
     author: { login: 'octocat' }, labels: [], commentCount: 0,
     sourceRepo: { owner: 'acme', repo: 'app', source: 'origin' },
     state: 'open', draft: false, head: 'feature', base: 'main', headSha: 'abc', headRepo: null,
 };
-const githubDetail: GitHubReferenceDetail = {
+const repositoryDetail: RepositoryReferenceDetail = {
     number: 12, comments: [], commentTotal: 0,
     pull: {
         additions: 3, deletions: 1, changedFiles: 1, reviewDecision: 'approved', reviewers: [],
@@ -26,21 +30,27 @@ const githubDetail: GitHubReferenceDetail = {
         commits: [], commitTotal: 0,
     },
 };
-const issue: LinearIssue = {
-    id: 'issue', identifier: 'ENG-12', title: 'Preview layout', url: 'https://linear.app/acme/issue/ENG-12',
-    state: { id: 'started', name: 'In progress', type: 'started' },
-    assignee: { name: 'alex', displayName: 'Alex', avatarUrl: null },
-    team: { id: 'eng', key: 'ENG', name: 'Engineering' }, priority: 2, labels: [],
+const issue: TrackerItem = {
+    provider: 'linear', id: 'issue', identifier: 'ENG-12', title: 'Preview layout', url: 'https://linear.app/acme/issue/ENG-12',
+    state: { id: 'started', name: 'In progress', category: 'in-progress' },
+    assignee: { name: 'Alex', avatarUrl: null },
+    container: { id: 'eng', key: 'ENG', name: 'Engineering' }, priority: 'high', labels: [],
     description: '', comments: [],
 };
 
-const items: ReferencePickerItem[] = [{ source: 'github', reference: pull }, { source: 'linear', issue }];
+const items: ReferencePickerItem[] = [{ source: 'repository', reference: pull }, { source: 'tracker', provider: 'linear', item: issue }];
 const apis = createWebAPIs();
+
+// Static rendering reads the provider registry's first state, not its current one.
+const github = githubLikeDescriptor();
+Object.assign(useSourceControlProviderRegistry.getInitialState(), { ordered: [github], byId: new Map([[github.id, github]]), status: 'ready', holdsList: true });
+const linear = linearLikeTrackerDescriptor();
+Object.assign(useTrackerRegistry.getInitialState(), { ordered: [linear], byId: new Map([[linear.id, linear]]), status: 'ready', holdsList: true });
 
 function renderPreview(item: ReferencePickerItem, pinned: boolean, status: 'ready' | 'loading' | 'error' = 'ready', customFooter = true) {
     const pending = status === 'error' ? { status, error: 'Host unavailable' } as const : { status: 'loading' } as const;
-    const github: CachedValue<GitHubReferenceDetail> = status === 'ready' ? { status, value: githubDetail } : pending;
-    const linear: CachedValue<LinearIssue> = status === 'ready' ? { status, value: issue } : pending;
+    const github: CachedValue<RepositoryReferenceDetail> = status === 'ready' ? { status, value: repositoryDetail } : pending;
+    const tracker: CachedValue<TrackerItem> = status === 'ready' ? { status, value: issue } : pending;
     const dom = new Window();
     const container = dom.document.createElement('div');
     container.innerHTML = renderToStaticMarkup(
@@ -48,7 +58,7 @@ function renderPreview(item: ReferencePickerItem, pinned: boolean, status: 'read
             <I18nProvider>
                 <ReferencePreview
                     item={item} directory={null} pinned={pinned} purpose="attach" now={0}
-                    pullStatus={{ status: 'idle' }} githubDetail={github} linearDetail={linear}
+                    pullStatus={{ status: 'idle' }} repositoryDetail={github} trackerDetail={tracker}
                     includeDiff onIncludeDiffChange={() => undefined}
                     footer={customFooter ? <button data-footer>Attach</button> : undefined}
                     labelsControl={<button>Edit labels</button>}
@@ -82,7 +92,7 @@ describe('ReferencePreview layout', () => {
                 expect(meta?.parentElement?.classList.contains('border-b')).toBe(true);
                 expect(scroller?.contains(header)).toBe(false);
                 expect(header?.querySelector('h3')?.textContent).toBe('Preview layout');
-                expect(header?.querySelector('a')?.textContent).toBe(item.source === 'github' ? 'GitHub' : 'Linear');
+                expect(header?.querySelector('a')?.textContent).toBe(item.source === 'repository' ? 'GitHub' : 'Linear');
                 expect(header?.parentElement?.classList.contains('shrink-0')).toBe(true);
                 expect(header?.parentElement?.classList.contains('border-b')).toBe(true);
                 expect(header?.parentElement?.querySelector('dl')).toBeNull();
@@ -90,7 +100,7 @@ describe('ReferencePreview layout', () => {
                 expect(footer?.parentElement?.classList.contains('shrink-0')).toBe(true);
                 expect(footer?.parentElement?.classList.contains('border-t')).toBe(true);
                 expect(scroller?.parentElement?.nextElementSibling).toBe(footer?.parentElement);
-                if (item.source === 'github') {
+                if (item.source === 'repository') {
                     expect(meta?.textContent).toContain('octocat');
                     expect(meta?.textContent).toContain('feature');
                     expect(meta?.textContent).toContain('Edit labels');

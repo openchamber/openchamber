@@ -2,24 +2,26 @@ import * as React from 'react';
 
 import { Icon } from '@/components/icon/Icon';
 import { Checkbox } from '@/components/ui/checkbox';
-import type { GitHubChecksSummary, GitHubIssueLabel, GitHubPullStatus, LinearIssueLabel, LinearSubIssueProgress } from '@/lib/api/types';
+import type { CISummary, Label, ChangeRequestListStatus, TrackerLabel, TrackerProgress } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
+import { useSourceControlProvider } from '@/lib/source-control/providers/registry';
+import { useTrackerDescriptor } from '@/lib/trackers/registry';
+import { trackerStateGlyph } from '@/lib/trackers/stateLook';
 import { cn } from '@/lib/utils';
 
 import {
-    githubStateLook,
+    repositoryStateLook,
     labelColor,
-    LINEAR_PRIORITY_KEYS,
-    linearStateLook,
     REFERENCE_META_TEXT,
     relativeTimeOf,
     type ReferencePickerItem,
     referenceNumberLabel,
+    TRACKER_PRIORITY_KEYS,
 } from './referencePickerItems';
 
-type Label = { name: string; color: string | null };
+type ChipLabel = { name: string; color: string | null };
 
-const toLabels = (labels: ReadonlyArray<GitHubIssueLabel | LinearIssueLabel> | undefined): Label[] => (
+const toLabels = (labels: ReadonlyArray<Label | TrackerLabel> | undefined): ChipLabel[] => (
     (labels ?? []).map((label) => ({ name: label.name, color: labelColor(label.color) }))
 );
 
@@ -49,7 +51,7 @@ const RowPerson: React.FC<{ name: string; avatarUrl: string | null | undefined }
     </span>
 );
 
-export const ReferenceLabelChips: React.FC<{ labels: Label[]; max?: number }> = ({ labels, max }) => {
+export const ReferenceLabelChips: React.FC<{ labels: ChipLabel[]; max?: number }> = ({ labels, max }) => {
     if (labels.length === 0) return null;
     const shown = max === undefined ? labels : labels.slice(0, max);
     const hidden = labels.length - shown.length;
@@ -73,12 +75,12 @@ export const ReferenceLabelChips: React.FC<{ labels: Label[]; max?: number }> = 
     );
 };
 
-/** A parent issue's sub-issues: finished of all, or only how many when not all were counted. */
-const SubIssueCount: React.FC<{ progress: LinearSubIssueProgress }> = ({ progress }) => {
+/** A parent item's children: finished of all, or only how many when not all were counted. */
+const SubIssueCount: React.FC<{ progress: TrackerProgress }> = ({ progress }) => {
     const { t } = useI18n();
     const label = progress.more
-        ? t('references.picker.linear.subIssuesMany', { count: progress.total })
-        : t('references.picker.linear.subIssuesDone', { done: progress.done, total: progress.total });
+        ? t('references.picker.tracker.childrenMany', { count: progress.total })
+        : t('references.picker.tracker.childrenDone', { done: progress.done, total: progress.total });
     return (
         <span className="inline-flex items-center gap-0.5 tabular-nums" title={label} aria-label={label}>
             <Icon name="node-tree" className="size-3.5" />
@@ -87,7 +89,7 @@ const SubIssueCount: React.FC<{ progress: LinearSubIssueProgress }> = ({ progres
     );
 };
 
-export const ChecksGlyph: React.FC<{ checks: GitHubChecksSummary | null }> = ({ checks }) => {
+export const ChecksGlyph: React.FC<{ checks: CISummary | null }> = ({ checks }) => {
     if (!checks || checks.total === 0) return null;
     if (checks.state === 'failure') return <Icon name="close-circle" className="size-3.5 text-[var(--status-error)]" />;
     if (checks.state === 'pending') return <Icon name="time" className="size-3.5 text-[var(--status-warning)]" />;
@@ -98,7 +100,7 @@ export const ChecksGlyph: React.FC<{ checks: GitHubChecksSummary | null }> = ({ 
 type RowProps = {
     item: ReferencePickerItem;
     /** An open PR's checks and mergeability, once they have arrived. */
-    pullStatus: GitHubPullStatus | null;
+    pullStatus: ChangeRequestListStatus | null;
     highlighted: boolean;
     /** Null in single-choice mode, where rows have no checkbox. */
     checked: boolean | null;
@@ -124,11 +126,14 @@ export const ReferencePickerRow = React.memo(function ReferencePickerRow({
     onActivate,
 }: RowProps) {
     const { t } = useI18n();
-    const look = item.source === 'github' ? githubStateLook(item.reference, pullStatus) : linearStateLook(item.issue);
-    const title = item.source === 'github' ? item.reference.title : item.issue.title;
-    const id = item.source === 'github' ? referenceNumberLabel(item.reference) : item.issue.identifier;
-    const updated = relativeTimeOf(item.source === 'github' ? item.reference.updatedAt : item.issue.updatedAt, now);
-    const labels = toLabels(item.source === 'github' ? item.reference.labels : item.issue.labels);
+    const descriptor = useSourceControlProvider(item.source === 'repository' ? item.reference.provider : null);
+    const tracker = item.source === 'tracker' ? item.item : null;
+    const { capabilities } = useTrackerDescriptor(item.source === 'tracker' ? item.provider : null);
+    const look = item.source === 'repository' ? repositoryStateLook(item.reference, pullStatus) : trackerStateGlyph(item.item.state?.category);
+    const title = item.source === 'repository' ? item.reference.title : item.item.title;
+    const id = item.source === 'repository' ? referenceNumberLabel(item.reference, descriptor) : item.item.identifier;
+    const updated = relativeTimeOf(item.source === 'repository' ? item.reference.updatedAt : item.item.updatedAt, now);
+    const labels = toLabels(item.source === 'repository' ? item.reference.labels : (capabilities.labels ? item.item.labels : undefined));
     const rowRef = React.useRef<HTMLDivElement>(null);
 
     React.useEffect(() => {
@@ -155,43 +160,43 @@ export const ReferencePickerRow = React.memo(function ReferencePickerRow({
             ) : null}
             <Icon name={look.icon} className="mt-0.5 size-4 shrink-0" style={{ color: look.color }} />
             <div className="min-w-0 flex-1">
-                {item.source === 'linear' && item.issue.parent ? (
+                {tracker?.parent && capabilities.children ? (
                     <div className={cn('mb-0.5 flex min-w-0 items-center gap-1 typography-micro', REFERENCE_META_TEXT)}>
                         <Icon name="corner-down-right" className="size-3.5 shrink-0" />
-                        <span className="shrink-0 font-mono">{item.issue.parent.identifier}</span>
-                        <span className="truncate">{item.issue.parent.title}</span>
+                        <span className="shrink-0 font-mono">{tracker.parent.identifier}</span>
+                        <span className="truncate">{tracker.parent.title}</span>
                     </div>
                 ) : null}
                 <div className={cn('typography-ui-header font-semibold line-clamp-2 break-words', !highlighted && 'text-foreground')}>{title}</div>
                 <div className={cn('mt-0.5 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-0.5 typography-micro', REFERENCE_META_TEXT)}>
                     <span className="font-mono">{id}</span>
-                    {item.source === 'github' && item.reference.author ? (
+                    {item.source === 'repository' && item.reference.author ? (
                         <RowPerson name={item.reference.author.login} avatarUrl={item.reference.author.avatarUrl} />
                     ) : null}
-                    {item.source === 'linear' && item.issue.assignee ? (
-                        <RowPerson name={item.issue.assignee.displayName || item.issue.assignee.name || '—'} avatarUrl={item.issue.assignee.avatarUrl} />
+                    {tracker?.assignee ? (
+                        <RowPerson name={tracker.assignee.name || '—'} avatarUrl={tracker.assignee.avatarUrl} />
                     ) : null}
                     {updated ? (
                         <span>{updated.key === 'common.relative.justNow' ? t(updated.key) : t(updated.key, { count: updated.count })}</span>
                     ) : null}
-                    {item.source === 'github' && item.reference.commentCount > 0 ? (
+                    {item.source === 'repository' && item.reference.commentCount > 0 ? (
                         <span className="inline-flex items-center gap-0.5">
                             <Icon name="chat-1" className="size-3.5" />
                             {item.reference.commentCount}
                         </span>
                     ) : null}
-                    {item.source === 'github' && item.reference.kind === 'pull' && diffIncluded ? (
+                    {item.source === 'repository' && item.reference.kind === 'pull' && diffIncluded ? (
                         <span className="inline-flex items-center gap-0.5" title={t('references.picker.preview.includeDiff')}>
                             <Icon name="file-code" className="size-3.5" />
                         </span>
                     ) : null}
-                    {item.source === 'linear' && item.issue.subIssueProgress ? (
-                        <SubIssueCount progress={item.issue.subIssueProgress} />
+                    {tracker?.progress && capabilities.children ? (
+                        <SubIssueCount progress={tracker.progress} />
                     ) : null}
-                    {item.source === 'linear' && item.issue.priority && item.issue.priority > 0 ? (
-                        <span>{t(LINEAR_PRIORITY_KEYS[item.issue.priority])}</span>
+                    {tracker?.priority && tracker.priority !== 'none' && capabilities.priority ? (
+                        <span>{t(TRACKER_PRIORITY_KEYS[tracker.priority])}</span>
                     ) : null}
-                    {item.source === 'github' && (showRepository || item.reference.sourceRepo.source === 'upstream') ? (
+                    {item.source === 'repository' && (showRepository || item.reference.sourceRepo.source === 'upstream') ? (
                         <span className="rounded bg-[var(--status-info-background)] px-1 typography-micro text-[var(--status-info-text)]">
                             {item.reference.sourceRepo.owner}/{item.reference.sourceRepo.repo}
                         </span>

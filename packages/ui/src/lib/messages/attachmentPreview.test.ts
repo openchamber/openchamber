@@ -4,9 +4,12 @@ import {
     collectOpenableAttachmentNames,
     decodeDataUrlText,
     findAttachmentPart,
+    getIssueLinkKind,
+    getTrackerItemLinkProvider,
     isOpenableAttachmentName,
     isTextLikeFile,
     resolveAttachmentOpenTarget,
+    trackerItemLinkMime,
 } from './attachmentPreview';
 
 const file = (over: Partial<FilePart> = {}): FilePart => ({
@@ -74,6 +77,15 @@ describe('what opening a sent attachment does', () => {
     test('an issue reference opens its page', () => {
         const issue = file({ mime: 'application/vnd.github.issue-link', filename: 'issue-1', url: 'https://github.com/o/r/issues/1' });
         expect(resolveAttachmentOpenTarget(issue, [issue])).toEqual({ kind: 'external', url: issue.url });
+    });
+
+    test('a tracker item link names its tracker; a Linear link from before trackers reads as Linear', () => {
+        expect(getTrackerItemLinkProvider({ mime: trackerItemLinkMime('linear') })).toBe('linear');
+        expect(getTrackerItemLinkProvider({ mime: 'application/vnd.openchamber.linear-issue-link' })).toBe('linear');
+        expect(getTrackerItemLinkProvider({ mime: 'application/vnd.github.issue-link' })).toBeNull();
+        expect(getIssueLinkKind({ mime: 'application/vnd.openchamber.linear-issue-link' })).toBe('tracker-item');
+        const item = file({ mime: trackerItemLinkMime('linear'), filename: 'ENG-1: Login', url: 'https://linear.app/x/issue/ENG-1' });
+        expect(resolveAttachmentOpenTarget(item, [item])).toEqual({ kind: 'external', url: item.url });
     });
 
     test('nothing opens for what the app cannot show', () => {

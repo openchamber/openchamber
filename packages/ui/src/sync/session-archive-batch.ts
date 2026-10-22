@@ -18,7 +18,7 @@
 import type { JsonValue, Metadata } from "@/lib/opencode/model"
 import { z } from 'zod';
 
-import type { LinkedIssue } from '@/lib/linkedIssues';
+import { toStoredLinkedIssue, type LinkedIssue } from '@/lib/linkedIssues';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 
 /**
@@ -219,7 +219,7 @@ export async function requestSessionLinksUpdate(
     response = await runtimeFetch(`/api/openchamber/sessions/${encodeURIComponent(sessionID)}/links`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ entries, linked }),
+      body: JSON.stringify({ entries: entries.map(toStoredLinkedIssue), linked }),
       directory,
     });
   } catch (error) {

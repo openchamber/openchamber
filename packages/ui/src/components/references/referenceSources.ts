@@ -5,8 +5,11 @@
  *
  * Repository items are read with the project's read context: the account its
  * binding names, or the current account of the host for a repository nobody
- * bound, the same one the Git view reads with. A GitLab project lists through
- * the same rows and preview as a GitHub one (`gitlabReferences.ts`).
+ * bound, the same one the Git view reads with. What the provider can do
+ * decides how: its own reference search and detail where its descriptor says
+ * so (`features.referenceSearch`, `features.referenceDetail`), else the
+ * neutral list reads (`listBackedReferences.ts`), through the same rows and
+ * preview.
  */
 
 import * as React from 'react';
@@ -14,24 +17,27 @@ import * as React from 'react';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import type {
     SourceControlBindingRead,
-    GitHubPullRequestRef,
-    GitHubPullStatus,
-    GitHubReference,
-    GitHubReferenceDetail,
+    RepositoryItemRef,
+    ChangeRequestListStatus,
+    RepositoryReference,
+    RepositoryReferenceDetail,
     RepositoryReferenceFilter,
-    GitHubReferenceKind,
-    LinearAPI,
-    LinearIssue,
-    LinearIssueSummary,
+    RepositoryReferenceKind,
+    TrackerAPI,
+    TrackerItem,
+    TrackerItemSummary,
     SourceControlIdentity,
     SourceControlProvider,
     SourceControlReadContext,
 } from '@/lib/api/types';
 import { getRuntimeKey } from '@/lib/runtime-switch';
-import { GITHUB_SOURCE_CONTROL_IDENTITY, resolveSourceControlIdentity } from '@/lib/source-control/identity';
+import { defaultSourceControlIdentities, resolveSourceControlIdentity } from '@/lib/source-control/identity';
+import { unknownProviderDescriptor, type SourceControlProviderDescriptor } from '@/lib/source-control/providers/descriptor';
+import { useSourceControlProvider, useSourceControlProviderRegistry, useSourceControlProviders } from '@/lib/source-control/providers/registry';
+import { useRepositoryUrlMatcher } from '@/lib/source-control/repositoryUrlMatcher';
 import { getSourceControlAuthKey, useSourceControlAuthStore } from '@/stores/useSourceControlAuthStore';
 import { useRepositoryBinding, useRepositoryBindings } from '@/lib/source-control/repository-binding';
-import { useLinearAuthStore } from '@/stores/useLinearAuthStore';
+import { currentTrackerAccountId, useTrackerAuthStore } from '@/stores/useTrackerAuthStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { normalizeProjectPath, resolveProjectForSessionDirectory } from '@/lib/projectResolution';
@@ -41,8 +47,6 @@ import {
     subscribeRepositoryProviderMemory,
 } from '@/lib/source-control/repositoryProviderMemory';
 
-
-import { fetchGitLabReferenceDetail, fetchGitLabReferencePage } from './gitlabReferences';
 import {
     NO_ACROSS_CONTEXTS,
     fetchAcrossPage,
@@ -56,34 +60,55 @@ import {
     type PullStatusGroup,
     type ReadContextState,
 } from './acrossRepositories';
-import { isNewerThanRead, useLiveLinearIssues, useLivePullStatuses, useLiveReferences, type LivePullStatus } from './liveReferences';
+import { fetchListBackedReferenceDetail, fetchListBackedReferencePage } from './listBackedReferences';
+import { isNewerThanRead, useLivePullStatuses, useLiveReferences, useLiveTrackerItems, type LivePullStatus } from './liveReferences';
 import { createListCache, createValueCache, useCachedList, useCachedValue, useReferenceRevalidation, type CachedValue, type ListPage, type PageRead, type ReadStamp } from './referenceCache';
-import type { LinearReferenceFilter } from './referencePickerItems';
+import type { TrackerReferenceFilter } from './referencePickerItems';
 
-const githubLists = createListCache<GitHubReference>();
-const githubAcrossLists = createListCache<AcrossReference>();
-const linearLists = createListCache<LinearIssueSummary>();
-const linearDetails = createValueCache<LinearIssue>();
-const githubDetails = createValueCache<GitHubReferenceDetail>();
+const repositoryLists = createListCache<RepositoryReference>();
+const repositoryAcrossLists = createListCache<AcrossReference>();
+const trackerLists = createListCache<TrackerItemSummary>();
+const trackerDetails = createValueCache<TrackerItem>();
+const repositoryDetails = createValueCache<RepositoryReferenceDetail>();
 
 export type ReferenceSourceStatus = 'ready' | 'disconnected' | 'unsupported';
 
-/** The hosts every remote is recognised on, whether or not an account there is connected. */
-export const BUILT_IN_SOURCE_CONTROL_IDENTITIES: readonly SourceControlIdentity[] = [
-    GITHUB_SOURCE_CONTROL_IDENTITY,
-    { provider: 'gitlab', instance: 'https://gitlab.com' },
-];
+/** A provider's place in the registry; one it does not hold comes after all it does. */
+const orderOf = (descriptors: readonly SourceControlProviderDescriptor[], provider: string): number => (
+    (descriptors.find((descriptor) => descriptor.id === provider) ?? unknownProviderDescriptor(provider)).order
+);
+
+/** The entry whose provider comes first by registry `order`; the earlier entry on a tie. */
+function firstByOrder<T extends { provider: string }>(entries: readonly T[], descriptors: readonly SourceControlProviderDescriptor[]): T | null {
+    let first: T | null = null;
+    for (const entry of entries) {
+        if (!first || orderOf(descriptors, entry.provider) < orderOf(descriptors, first.provider)) first = entry;
+    }
+    return first;
+}
+
+/**
+ * Whether the registry holds no list yet on a first visit to this runtime:
+ * nothing remembered, and the first request still out or failed and being
+ * retried. What a provider can do is unknown then, so nothing is read with a
+ * guess.
+ */
+const useProvidersPending = (): boolean => useSourceControlProviderRegistry((state) => !state.holdsList);
 
 /**
  * The project's binding and every host it lives on: the providers it is bound
  * to and the hosts its remotes point at, whether or not an account there works.
  */
-function repositoryHostsOf(read: SourceControlBindingRead | null, knownIdentities: readonly SourceControlIdentity[]): SourceControlIdentity[] {
+function repositoryHostsOf(
+    read: SourceControlBindingRead | null,
+    knownIdentities: readonly SourceControlIdentity[],
+    defaultIdentities: readonly SourceControlIdentity[],
+): SourceControlIdentity[] {
     if (!read) return [];
     const found = new Map<string, SourceControlIdentity>();
     const add = (identity: SourceControlIdentity) => found.set(getSourceControlAuthKey(identity), identity);
     for (const provider of read.binding?.providers ?? []) add({ provider: provider.provider, instance: provider.instance });
-    const identities = [...knownIdentities, ...BUILT_IN_SOURCE_CONTROL_IDENTITIES];
+    const identities = [...knownIdentities, ...defaultIdentities];
     for (const remote of read.repository.remotes) {
         const identity = resolveSourceControlIdentity(
             { name: remote.name, fetchUrl: remote.fetch.displayUrl, pushUrl: remote.push.displayUrl },
@@ -98,18 +123,25 @@ function useRepositoryHosts(directory: string | null) {
     const { sourceControl } = useRuntimeAPIs();
     const binding = useRepositoryBinding(directory, sourceControl, Boolean(directory));
     const knownIdentities = useSourceControlAuthStore((state) => state.identities);
-    const hosts = React.useMemo(() => repositoryHostsOf(binding.read, knownIdentities), [binding.read, knownIdentities]);
-    return { binding, hosts };
+    const descriptors = useSourceControlProviders();
+    const defaultIdentities = React.useMemo(() => defaultSourceControlIdentities(descriptors), [descriptors]);
+    const hosts = React.useMemo(
+        () => repositoryHostsOf(binding.read, knownIdentities, defaultIdentities),
+        [binding.read, defaultIdentities, knownIdentities],
+    );
+    return { binding, hosts, descriptors, defaultIdentities };
 }
 
-/** The context a folder is read with once its binding and accounts are known: GitHub's, else GitLab's. */
+/**
+ * The context a folder is read with once its binding and accounts are known:
+ * the one whose provider comes first by registry `order`.
+ */
 function pickReadContext(
     binding: { contexts: readonly SourceControlReadContext[]; status: 'idle' | 'loading' | 'ready' | 'stale' | 'error' },
     hostPending: boolean,
+    descriptors: readonly SourceControlProviderDescriptor[],
 ): ReadContextState {
-    const context = binding.contexts.find((candidate) => candidate.provider === 'github')
-        ?? binding.contexts.find((candidate) => candidate.provider === 'gitlab')
-        ?? null;
+    const context = firstByOrder(binding.contexts, descriptors);
     if (context) return context;
     if (binding.status === 'error') return 'missing';
     return binding.status === 'ready' && !hostPending ? 'missing' : null;
@@ -120,40 +152,45 @@ const NO_DIRECTORIES: readonly string[] = [];
 /**
  * The read contexts of several folders at once, for a list across the
  * repositories under a project folder. `ready` once every folder's context is
- * known; the GitHub ones are what a search is sent, the rest are left out.
+ * known; the folders of the provider asked are what a search is sent, the
+ * rest are left out (`partitionAcrossContexts`).
  */
-function useGitHubReadContexts(directories: readonly string[]): AcrossContexts {
+function useRepositoryReadContexts(directories: readonly string[]): AcrossContexts {
     const { sourceControl } = useRuntimeAPIs();
     const bindings = useRepositoryBindings(directories, sourceControl);
     const knownIdentities = useSourceControlAuthStore((state) => state.identities);
     const authEntries = useSourceControlAuthStore((state) => state.entries);
+    const descriptors = useSourceControlProviders();
+    const providersPending = useProvidersPending();
     return React.useMemo(() => {
         if (directories.length === 0) return NO_ACROSS_CONTEXTS;
+        const defaultIdentities = defaultSourceControlIdentities(descriptors);
         return partitionAcrossContexts(directories.map((directory, index) => {
             const binding = bindings[index];
-            if (!binding) return { directory, state: null };
-            const hostPending = repositoryHostsOf(binding.read, knownIdentities)
+            if (!binding || providersPending) return { directory, state: null };
+            const hostPending = repositoryHostsOf(binding.read, knownIdentities, defaultIdentities)
                 .some((host) => !authEntries[getSourceControlAuthKey(host)]?.hasChecked);
-            return { directory, state: pickReadContext(binding, hostPending) };
-        }));
-    }, [authEntries, bindings, directories, knownIdentities]);
+            return { directory, state: pickReadContext(binding, hostPending, descriptors) };
+        }), descriptors);
+    }, [authEntries, bindings, descriptors, directories, knownIdentities, providersPending]);
 }
 
 /**
  * The host whose account reads the project: its read context's, else the host
- * its remotes point at, GitHub first. Known even while no account there works,
- * so a surface can name GitLab and ask for that account instead of GitHub's.
- * Null while the binding loads or when the project lives on neither.
+ * its remotes point at, the first by registry `order`. Known even while no
+ * account there works, so a surface can name that provider and ask for its
+ * account. Null while the binding loads or when the project lives on no
+ * known host.
  */
 export function useRepositoryHost(directory: string | null): SourceControlIdentity | null {
-    const { binding, hosts } = useRepositoryHosts(directory);
-    const context = binding.contexts[0] ?? null;
+    const { binding, hosts, descriptors } = useRepositoryHosts(directory);
+    const context = firstByOrder(binding.contexts, descriptors);
     const provider = context?.provider ?? null;
     const instance = context?.instance ?? null;
     return React.useMemo(() => {
         if (provider && instance) return { provider, instance };
-        return hosts.find((host) => host.provider === 'github') ?? hosts.find((host) => host.provider === 'gitlab') ?? null;
-    }, [hosts, instance, provider]);
+        return firstByOrder(hosts, descriptors);
+    }, [descriptors, hosts, instance, provider]);
 }
 
 /**
@@ -172,16 +209,19 @@ export function useRepositoryHostProvider(directory: string | null): SourceContr
 
 /**
  * The read context a project's issues and change requests come from, once its
- * binding has been read: GitHub's when the project has one, else GitLab's.
- * Null while the binding or an account on one of its hosts is still loading,
- * and `missing` when no account can read it: no remote on a supported host, or
- * none of its hosts has a working account.
+ * binding has been read: the one whose provider comes first by registry
+ * `order`. Null while the binding, an account on one of its hosts, or the
+ * provider list on a first visit is still loading, and `missing` when no
+ * account can read it: no remote on a known host, or none of its hosts has a
+ * working account.
  */
-export function useGitHubReadContext(directory: string | null): SourceControlReadContext | 'missing' | null {
-    const { binding, hosts } = useRepositoryHosts(directory);
+export function useRepositoryReadContext(directory: string | null): SourceControlReadContext | 'missing' | null {
+    const { binding, hosts, descriptors } = useRepositoryHosts(directory);
     const hostPending = useSourceControlAuthStore((state) => hosts
         .some((host) => !state.entries[getSourceControlAuthKey(host)]?.hasChecked));
-    return pickReadContext(binding, hostPending);
+    const providersPending = useProvidersPending();
+    if (providersPending) return null;
+    return pickReadContext(binding, hostPending, descriptors);
 }
 
 /**
@@ -190,11 +230,11 @@ export function useGitHubReadContext(directory: string | null): SourceControlRea
  * Read contexts name it once the binding and the accounts have both loaded,
  * but either can still be loading, and a binding nobody watches goes stale
  * with no contexts. The project's remotes say where it lives in all of those
- * moments, so they answer meanwhile; GitHub only when nothing says otherwise.
- * GitHub wins over GitLab when a project has both, as the read context does.
+ * moments, so they answer meanwhile. Of several providers the first by
+ * registry `order` wins, as the read context does.
  */
-export function useRepositoryReferenceProvider(directory: string | null): SourceControlProvider {
-    const { binding, hosts } = useRepositoryHosts(directory);
+export function useRepositoryReferenceProvider(directory: string | null): SourceControlProvider | null {
+    const { binding, hosts, descriptors } = useRepositoryHosts(directory);
     // A worktree shares its project's host, so the answer is kept per project.
     const projects = useProjectsStore((state) => state.projects);
     const worktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
@@ -209,45 +249,39 @@ export function useRepositoryReferenceProvider(directory: string | null): Source
         () => rememberedRepositoryProvider(runtimeKey, projectPath),
     );
     // What the project itself says, or null while nothing has loaded that could.
-    const known = React.useMemo((): SourceControlProvider | null => {
-        const providers = new Set<SourceControlProvider>(binding.contexts.map((context) => context.provider));
-        if (!providers.size) for (const host of hosts) providers.add(host.provider);
-        if (providers.has('github')) return 'github';
-        return providers.has('gitlab') ? 'gitlab' : null;
-    }, [binding.contexts, hosts]);
+    const known = React.useMemo((): SourceControlProvider | null => (
+        firstByOrder(binding.contexts.length > 0 ? binding.contexts : hosts, descriptors)?.provider ?? null
+    ), [binding.contexts, descriptors, hosts]);
     React.useEffect(() => {
         if (known) rememberRepositoryProvider(runtimeKey, projectPath, known);
     }, [known, projectPath, runtimeKey]);
-    return known ?? remembered ?? 'github';
+    // Nothing known or remembered: the first served provider, or none on a runtime that serves none.
+    return known ?? remembered ?? descriptors[0]?.id ?? null;
 }
 
 /**
  * Whether the project's issues and change requests can be listed. A project
- * that lives on GitHub or GitLab but no account there can read it is
+ * that lives on a known host but no account there can read it is
  * disconnected, and so is a project with no remote at all while no account is
- * connected anywhere.
+ * connected anywhere (once a default instance's account is checked).
  */
-export function useGitHubSourceStatus(directory: string | null): ReferenceSourceStatus {
+export function useRepositorySourceStatus(directory: string | null): ReferenceSourceStatus {
     const { runtime } = useRuntimeAPIs();
-    const context = useGitHubReadContext(directory);
-    const { hosts } = useRepositoryHosts(directory);
+    const context = useRepositoryReadContext(directory);
+    const { hosts, defaultIdentities } = useRepositoryHosts(directory);
     const anyConnected = useSourceControlAuthStore((state) => Object.values(state.entries)
         .some((entry) => entry.status?.connected === true));
-    const githubChecked = useSourceControlAuthStore((state) => Boolean(
-        state.entries[getSourceControlAuthKey(GITHUB_SOURCE_CONTROL_IDENTITY)]?.hasChecked,
-    ));
+    const defaultChecked = useSourceControlAuthStore((state) => defaultIdentities
+        .some((identity) => state.entries[getSourceControlAuthKey(identity)]?.hasChecked));
     if (runtime.isVSCode) return 'unsupported';
     if (context !== 'missing') return 'ready';
-    return hosts.length > 0 || (githubChecked && !anyConnected) ? 'disconnected' : 'ready';
+    return hosts.length > 0 || (defaultChecked && !anyConnected) ? 'disconnected' : 'ready';
 }
 
-export function useLinearSourceStatus(): ReferenceSourceStatus {
-    const { linear } = useRuntimeAPIs();
-    const checked = useLinearAuthStore((state) => state.hasChecked);
-    const connected = useLinearAuthStore((state) => state.status?.connected === true);
-    if (!linear) return 'unsupported';
-    return checked && !connected ? 'disconnected' : 'ready';
-}
+/** The account a tracker's lists and details are read with; '' while unknown. */
+const useTrackerAccount = (provider: string | null): string => useTrackerAuthStore((state) => (
+    provider ? currentTrackerAccountId(state.entries[provider]) : ''
+));
 
 /**
  * Everything about a read context that changes what it answers: provider,
@@ -265,32 +299,36 @@ const readContextCacheKey = (context: SourceControlReadContext): unknown[] => [
     context.bindingRevision,
 ];
 
-export function useGitHubReferenceList(options: {
+export function useRepositoryReferenceList(options: {
     enabled: boolean;
     directory: string | null;
-    kind: GitHubReferenceKind;
+    kind: RepositoryReferenceKind;
     filter: RepositoryReferenceFilter;
     query: string;
 }) {
     const { sourceControl } = useRuntimeAPIs();
     const { enabled, directory, kind, filter, query } = options;
     const { state, people } = filter;
-    const context = useGitHubReadContext(enabled ? directory : null);
+    const context = useRepositoryReadContext(enabled ? directory : null);
+    const readable = context && context !== 'missing' ? context : null;
+    const descriptor = useSourceControlProvider(readable?.provider);
+    const urls = useRepositoryUrlMatcher();
     const text = query.trim();
-    const scope = context && context !== 'missing' ? readContextCacheKey(context) : 'missing';
+    const scope = readable ? readContextCacheKey(readable) : 'missing';
     const key = enabled && directory && context
         ? JSON.stringify([getRuntimeKey(), scope, directory, kind, filter.state, filter.people, text])
         : null;
-    const fetchPage = React.useCallback(async (cursor: string | null): Promise<ListPage<GitHubReference>> => {
-        if (!context || context === 'missing') return { kind: 'unavailable', reason: 'no-repo' };
-        if (context.provider === 'gitlab') return fetchGitLabReferencePage(sourceControl, context, kind, { state, people }, text, cursor);
-        const result = await sourceControl.githubReferences(context, { kind, state, people, query: text, cursor });
+    const fetchPage = React.useCallback(async (cursor: string | null): Promise<ListPage<RepositoryReference>> => {
+        if (!readable) return { kind: 'unavailable', reason: 'no-repo' };
+        if (!descriptor.features.referenceSearch) {
+            return fetchListBackedReferencePage(sourceControl, readable, { descriptor, urls }, kind, { state, people }, text, cursor);
+        }
+        const result = await sourceControl.references(readable, { kind, state, people, query: text, cursor });
         if (!result.connected) return { kind: 'unavailable', reason: 'disconnected' };
         if (!result.repo) return { kind: 'unavailable', reason: 'no-repo' };
         return { kind: 'page', items: result.items, cursor: result.cursor, hasMore: result.hasMore };
-    }, [context, kind, people, sourceControl, state, text]);
-    const list = useCachedList(githubLists, key, fetchPage);
-    const readable = context && context !== 'missing' ? context : null;
+    }, [descriptor, kind, people, readable, sourceControl, state, text, urls]);
+    const list = useCachedList(repositoryLists, key, fetchPage);
     const contextOf = React.useCallback(() => readable, [readable]);
     const live = useLiveReferences(list.items, contextOf, list.pageReads);
     return { ...list, items: live.items, followed: live.followed };
@@ -299,102 +337,110 @@ export function useGitHubReferenceList(options: {
 const NO_ACROSS_ITEMS: AcrossReference[] = [];
 
 /**
- * Issues or PRs of every GitHub repository under a project folder, one request
- * per page (`githubReferencesAcross`). Waits until every folder's context is
- * known, and its key carries the set of contexts asked, so a change in it
- * lists again. Folders on GitLab or without a context are not asked; those the
+ * Issues or PRs of every repository under a project folder on the provider
+ * asked (`partitionAcrossContexts`), one request per page
+ * (`referencesAcross`). Waits until every folder's context is known, and its
+ * key carries the set of contexts asked, so a change in it lists again.
+ * Folders on another provider or without a context are not asked; those the
  * answer skipped come back as `skipped`. `contexts` is what the list was built from.
  */
-export function useGitHubAcrossReferenceList(options: {
+export function useRepositoryAcrossReferenceList(options: {
     enabled: boolean;
     directories: readonly string[];
-    kind: GitHubReferenceKind;
+    kind: RepositoryReferenceKind;
     filter: RepositoryReferenceFilter;
     query: string;
 }) {
     const { sourceControl } = useRuntimeAPIs();
     const { enabled, directories, kind, filter, query } = options;
     const { state, people } = filter;
-    const contexts = useGitHubReadContexts(enabled ? directories : NO_DIRECTORIES);
+    const contexts = useRepositoryReadContexts(enabled ? directories : NO_DIRECTORIES);
     const text = query.trim();
     const key = enabled && contexts.ready
-        ? JSON.stringify([getRuntimeKey(), contexts.github.map(({ directory, context }) => [directory, readContextCacheKey(context)]), kind, state, people, text])
+        ? JSON.stringify([getRuntimeKey(), contexts.asked.map(({ directory, context }) => [directory, readContextCacheKey(context)]), kind, state, people, text])
         : null;
     const fetchPage = React.useCallback(async (cursor: string | null): Promise<ListPage<AcrossReference>> => {
         // Absent where the runtime cannot (VS Code); the board never offers the search there.
-        const search = sourceControl.githubReferencesAcross?.bind(sourceControl);
-        return fetchAcrossPage(search, contexts.github, { kind, state, people, query: text, cursor });
-    }, [contexts.github, kind, people, sourceControl, state, text]);
-    const list = useCachedList(githubAcrossLists, key, fetchPage);
+        const search = sourceControl.referencesAcross?.bind(sourceControl);
+        return fetchAcrossPage(search, contexts.asked, { kind, state, people, query: text, cursor });
+    }, [contexts.asked, kind, people, sourceControl, state, text]);
+    const list = useCachedList(repositoryAcrossLists, key, fetchPage);
     const contextOf = React.useCallback(
-        (item: AcrossReference) => contexts.github.find((entry) => entry.directory === item.directory)?.context ?? null,
-        [contexts.github],
+        (item: AcrossReference) => contexts.asked.find((entry) => entry.directory === item.directory)?.context ?? null,
+        [contexts.asked],
     );
     const live = useLiveReferences(list.items, contextOf, list.pageReads);
     return { ...list, items: live.items.length === 0 ? NO_ACROSS_ITEMS : live.items, followed: live.followed, contexts };
 }
 
-export function useLinearReferenceList(options: {
+/** One tracker's work items; the key carries the tracker and its account, so another account never sees this list. */
+export function useTrackerReferenceList(options: {
     enabled: boolean;
-    filter: LinearReferenceFilter;
+    provider: string | null;
+    filter: TrackerReferenceFilter;
     query: string;
-    /** One team's issues; every team's when absent. */
-    teamId?: string | null;
+    /** One container's items (a Linear team); every container's when absent. */
+    containerId?: string | null;
 }) {
-    const { linear } = useRuntimeAPIs();
-    const workspace = useLinearAuthStore((state) => state.status?.organization?.id ?? '');
-    const { enabled, filter, query } = options;
-    const teamId = options.teamId ?? null;
+    const { trackers } = useRuntimeAPIs();
+    const { enabled, provider, filter, query } = options;
+    const account = useTrackerAccount(provider);
+    const containerId = options.containerId ?? null;
     const text = query.trim();
-    const { status, people, priority } = filter;
-    const key = enabled && linear ? JSON.stringify([getRuntimeKey(), workspace, status, people, priority, text, teamId]) : null;
-    const fetchPage = React.useCallback(async (cursor: string | null): Promise<ListPage<LinearIssueSummary>> => {
-        if (!linear) return { kind: 'unavailable', reason: 'disconnected' };
-        const result = await linear.issuesList({
+    const { state, people, priority } = filter;
+    const key = enabled && trackers && provider
+        ? JSON.stringify([getRuntimeKey(), provider, account, state, people, priority, text, containerId])
+        : null;
+    const fetchPage = React.useCallback(async (cursor: string | null): Promise<ListPage<TrackerItemSummary>> => {
+        if (!trackers || !provider) return { kind: 'unavailable', reason: 'disconnected' };
+        const result = await trackers.list(provider, {
             query: text || undefined,
             cursor: cursor ?? undefined,
-            status,
-            assignee: people,
-            priority,
-            teamId: teamId ?? undefined,
+            state,
+            // A filter left at its default is not sent, so a tracker without it still lists.
+            people: people === 'any' ? undefined : people,
+            priority: priority === 'all' ? undefined : priority,
+            containerId,
         });
         if (result.connected === false) return { kind: 'unavailable', reason: 'disconnected' };
-        return { kind: 'page', items: result.issues ?? [], cursor: result.cursor ?? null, hasMore: Boolean(result.hasMore) };
-    }, [linear, people, priority, status, teamId, text]);
-    const list = useCachedList(linearLists, key, fetchPage);
-    const live = useLiveLinearIssues(list.items, list.pageReads);
+        return { kind: 'page', items: result.items, cursor: result.cursor, hasMore: result.hasMore };
+    }, [containerId, people, priority, provider, state, text, trackers]);
+    const list = useCachedList(trackerLists, key, fetchPage);
+    const live = useLiveTrackerItems(list.items, list.pageReads);
     return { ...list, items: live.items, followed: live.followed };
 }
 
 /**
  * Comments of the previewed issue or PR, and a PR's size and review. A cached
- * answer shows at once; GitHub is asked only once `settled` says the
+ * answer shows at once; the host is asked only once `settled` says the
  * highlight stopped on the item.
  */
-export function useGitHubReferenceDetail(directory: string | null, reference: GitHubReference | null, settled: boolean) {
+export function useRepositoryReferenceDetail(directory: string | null, reference: RepositoryReference | null, settled: boolean) {
     const { sourceControl } = useRuntimeAPIs();
-    const context = useGitHubReadContext(reference ? directory : null);
+    const context = useRepositoryReadContext(reference ? directory : null);
+    const readable = context && context !== 'missing' ? context : null;
+    const detailed = useSourceControlProvider(readable?.provider).features.referenceDetail;
     const owner = reference?.sourceRepo.owner ?? '';
     const repo = reference?.sourceRepo.repo ?? '';
     const number = reference?.number ?? 0;
-    // GitLab numbers issues and merge requests separately: #1 and !1 differ.
+    // Where issues and change requests are numbered apart, #1 and !1 differ.
     const kind = reference?.kind ?? 'issue';
-    const key = directory && reference && context && context !== 'missing'
-        ? JSON.stringify([getRuntimeKey(), readContextCacheKey(context), directory, kind, owner, repo, number])
+    const key = directory && reference && readable
+        ? JSON.stringify([getRuntimeKey(), readContextCacheKey(readable), directory, kind, owner, repo, number])
         : null;
-    const fetch = React.useCallback(async (): Promise<GitHubReferenceDetail> => {
-        if (!context || context === 'missing' || !reference) throw new Error('GitHub is not available here');
-        if (context.provider === 'gitlab') return fetchGitLabReferenceDetail(sourceControl, context, reference);
-        const result = await sourceControl.githubReferenceDetail(context, { owner, repo, number });
-        if (!result.connected) throw new Error('GitHub is not connected');
+    const fetch = React.useCallback(async (): Promise<RepositoryReferenceDetail> => {
+        if (!readable || !reference) throw new Error('The repository is not available here');
+        if (!detailed) return fetchListBackedReferenceDetail(sourceControl, readable, reference);
+        const result = await sourceControl.referenceDetail(readable, { owner, repo, number });
+        if (!result.connected) throw new Error(`${readable.provider} is not connected`);
         if (!result.detail) throw new Error('Not found');
         return result.detail;
-    }, [context, number, owner, reference, repo, sourceControl]);
-    const detail = useCachedValue(githubDetails, key, fetch, settled);
+    }, [detailed, number, owner, readable, reference, repo, sourceControl]);
+    const detail = useCachedValue(repositoryDetails, key, fetch, settled);
     // After a write (a comment, a review) the feed shows it without waiting for
     // staleness. Settles once it is read again; a failure shows in the preview.
     const refresh = React.useCallback(
-        () => (key ? githubDetails.ensure(key, fetch, { force: true }).then(() => undefined, () => undefined) : Promise.resolve()),
+        () => (key ? repositoryDetails.ensure(key, fetch, { force: true }).then(() => undefined, () => undefined) : Promise.resolve()),
         [fetch, key],
     );
     return { detail, refresh };
@@ -402,20 +448,20 @@ export function useGitHubReferenceDetail(directory: string | null, reference: Gi
 
 // A key per PR and head commit: a push asks again, a page loaded later
 // reuses what the earlier pages already answered.
-const githubPullStatuses = createValueCache<GitHubPullStatus | null>(200);
+const repositoryPullStatuses = createValueCache<ChangeRequestListStatus | null>(200);
 // A third of a listed page per request, asked together: GitHub answers a
 // page's checks in one query only after ~10 s, at the edge of the request's
 // timeout, so the first rows (and the preview) waited for the slowest PR.
 const PULL_STATUS_BATCH = 10;
-const IDLE: CachedValue<GitHubPullStatus | null> = { status: 'idle' };
+const IDLE: CachedValue<ChangeRequestListStatus | null> = { status: 'idle' };
 
 /** Forgets every PR's checks and mergeability, so the lists showing them ask again: the board's list refresh. */
-export const forgetGitHubPullStatuses = (): void => githubPullStatuses.clear();
+export const forgetRepositoryPullStatuses = (): void => repositoryPullStatuses.clear();
 
 /** Forgets one PR's checks and mergeability, at any head commit: the preview's refresh. */
-export const forgetGitHubPullStatus = (pull: GitHubPullRequestRef): void => {
+export const forgetRepositoryPullStatus = (pull: RepositoryItemRef): void => {
     const marker = `|${pull.owner}/${pull.repo}#${pull.number}@`.toLowerCase();
-    githubPullStatuses.forget((key) => key.toLowerCase().includes(marker));
+    repositoryPullStatuses.forget((key) => key.toLowerCase().includes(marker));
 };
 
 const pullStatusScope = (group: PullStatusGroup): string => (
@@ -425,7 +471,7 @@ const pullStatusScope = (group: PullStatusGroup): string => (
 /**
  * Checks and mergeability of the open PRs of each group, asked after the list
  * in batches of a page, so they colour like the sidebar. A group is a folder
- * and the GitHub context its PRs are read through; groups are asked
+ * and the context its PRs are read through; groups are asked
  * independently. The reader answers `idle` for anything outside them.
  */
 function usePullStatusGroups(groups: readonly PullStatusGroup[]) {
@@ -440,10 +486,10 @@ function usePullStatusGroups(groups: readonly PullStatusGroup[]) {
     // subscription (a list shown from the cache while its statuses are on the
     // way) still shows instead of leaving the row and preview loading.
     const subscribe = React.useCallback((listener: () => void) => {
-        const stops = keys.map((key) => githubPullStatuses.subscribe(key, listener));
+        const stops = keys.map((key) => repositoryPullStatuses.subscribe(key, listener));
         return () => stops.forEach((stop) => stop());
     }, [keys]);
-    const version = React.useSyncExternalStore(subscribe, githubPullStatuses.version, githubPullStatuses.version);
+    const version = React.useSyncExternalStore(subscribe, repositoryPullStatuses.version, repositoryPullStatuses.version);
     const revalidation = useReferenceRevalidation();
 
     // Runs again on every change and revalidation too, so statuses forgotten
@@ -451,10 +497,10 @@ function usePullStatusGroups(groups: readonly PullStatusGroup[]) {
     // skipped by `ensureMany`.
     React.useEffect(() => {
         ensurePullStatuses(
-            githubPullStatuses,
+            repositoryPullStatuses,
             groups,
             pullStatusScope,
-            (context, pulls) => sourceControl.githubPullStatuses(
+            (context, pulls) => sourceControl.changeRequestListStatuses(
                 context,
                 pulls.map((pull) => ({ owner: pull.sourceRepo.owner, repo: pull.sourceRepo.repo, number: pull.number })),
             ),
@@ -462,113 +508,117 @@ function usePullStatusGroups(groups: readonly PullStatusGroup[]) {
         );
     }, [groups, revalidation, sourceControl, version]);
 
-    return (reference: GitHubReference, directory: string | null): AskedPullStatus => {
+    return (reference: RepositoryReference, directory: string | null): AskedPullStatus => {
         const group = groups.find((candidate) => candidate.directory === directory);
         if (!group || !needsPullStatus(reference)) return { value: IDLE, read: null };
         const key = pullStatusKey(pullStatusScope(group), reference);
-        return { value: githubPullStatuses.read(key) ?? IDLE, read: githubPullStatuses.readOf(key) };
+        return { value: repositoryPullStatuses.read(key) ?? IDLE, read: repositoryPullStatuses.readOf(key) };
     };
 }
 
 /** A PR's status as asked for its list, and when it was read (null before an answer). */
-type AskedPullStatus = { value: CachedValue<GitHubPullStatus | null>; read: ReadStamp | null };
+type AskedPullStatus = { value: CachedValue<ChangeRequestListStatus | null>; read: ReadStamp | null };
 
 /**
  * A PR's status as asked for its list, or the followed one when that was
  * answered later (`liveReferences.ts`): checks that finish while the list
  * stays on screen recolour its row.
  */
-const newerStatus = (asked: AskedPullStatus, live: LivePullStatus | null): CachedValue<GitHubPullStatus | null> => {
+const newerStatus = (asked: AskedPullStatus, live: LivePullStatus | null): CachedValue<ChangeRequestListStatus | null> => {
     if (!live || (asked.read && !isNewerThanRead(live.fetchedAt, asked.read))) return asked.value;
     return { status: 'ready', value: live.status };
 };
 
 /**
- * Checks and mergeability of the open PRs a list shows. A GitHub project asks
- * for them with the list; a GitLab project's come from its followed merge
- * requests' pipelines. Issues and closed PRs answer `idle`. A ready null is a
- * PR GitHub could not resolve.
+ * Checks and mergeability of the open PRs a list shows. A provider with list
+ * statuses (`features.listStatuses`) is asked for them with the list; the
+ * others' come from the followed change requests' pipelines. Issues and closed
+ * PRs answer `idle`. A ready null is a PR the host could not resolve.
  */
-export function useGitHubPullStatuses(directory: string | null, references: readonly GitHubReference[]) {
-    const context = useGitHubReadContext(directory);
+export function useRepositoryPullStatuses(directory: string | null, references: readonly RepositoryReference[]) {
+    const context = useRepositoryReadContext(directory);
     const readable = context && context !== 'missing' ? context : null;
-    const github = readable?.provider === 'github' ? readable : null;
+    const listed = useSourceControlProvider(readable?.provider).features.listStatuses;
+    const asked = listed ? readable : null;
     const groups = React.useMemo(
-        () => (github && directory ? groupPullsByDirectory(references.map((reference) => ({ reference, directory })), partitionAcrossContexts([{ directory, state: github }])) : []),
-        [directory, github, references],
+        () => (asked && directory ? groupPullsByDirectory(references.map((reference) => ({ reference, directory })), [{ directory, context: asked }]) : []),
+        [asked, directory, references],
     );
     const askedOf = usePullStatusGroups(groups);
     const pulls = React.useMemo(() => references.map((reference) => ({ reference, context: readable })), [readable, references]);
     const liveOf = useLivePullStatuses(pulls);
-    return (reference: GitHubReference): CachedValue<GitHubPullStatus | null> => (
+    return (reference: RepositoryReference): CachedValue<ChangeRequestListStatus | null> => (
         newerStatus(askedOf(reference, directory), liveOf(reference, readable))
     );
 }
 
 /** The same for a list across repositories: each PR is asked through the context of the folder it came from. */
-export function useGitHubPullStatusesAcross(contexts: AcrossContexts, items: readonly AcrossReference[]) {
+export function useRepositoryPullStatusesAcross(contexts: AcrossContexts, items: readonly AcrossReference[]) {
+    const listed = useSourceControlProvider(contexts.provider).features.listStatuses;
     const groups = React.useMemo(
-        () => groupPullsByDirectory(items.map((item) => ({ reference: item, directory: item.directory })), contexts),
-        [contexts, items],
+        () => (listed ? groupPullsByDirectory(items.map((item) => ({ reference: item, directory: item.directory })), contexts.asked) : []),
+        [contexts.asked, items, listed],
     );
     const askedOf = usePullStatusGroups(groups);
     const contextOf = React.useCallback(
-        (directory: string | null) => contexts.github.find((entry) => entry.directory === directory)?.context ?? null,
-        [contexts.github],
+        (directory: string | null) => contexts.asked.find((entry) => entry.directory === directory)?.context ?? null,
+        [contexts.asked],
     );
     const pulls = React.useMemo(() => items.map((item) => ({ reference: item, context: contextOf(item.directory) })), [contextOf, items]);
     const liveOf = useLivePullStatuses(pulls);
-    return (reference: GitHubReference, directory: string | null): CachedValue<GitHubPullStatus | null> => (
+    return (reference: RepositoryReference, directory: string | null): CachedValue<ChangeRequestListStatus | null> => (
         newerStatus(askedOf(reference, directory), liveOf(reference, contextOf(directory)))
     );
 }
 
-const linearDetailKey = (workspace: string, issueId: string) => JSON.stringify([getRuntimeKey(), workspace, issueId]);
+const trackerDetailKey = (provider: string, account: string, itemId: string) => JSON.stringify([getRuntimeKey(), provider, account, itemId]);
 
-const fetchLinearIssue = async (linear: LinearAPI, issueId: string): Promise<LinearIssue> => {
-    const result = await linear.issueGet(issueId);
-    if (result.connected === false) throw new Error('Linear is not connected');
-    if (!result.issue) throw new Error('Issue not found');
-    return result.issue;
+const fetchTrackerItem = async (trackers: TrackerAPI, provider: string, itemId: string): Promise<TrackerItem> => {
+    const result = await trackers.get(provider, itemId);
+    if (result.connected === false) throw new Error(`${provider} is not connected`);
+    if (!result.item) throw new Error('Item not found');
+    return result.item;
 };
 
 /**
- * A Linear issue with its description and comments, from the same cache the
- * preview fills: attaching an issue that was previewed asks Linear nothing.
+ * A tracker item with its description and comments, from the same cache the
+ * preview fills: attaching an item that was previewed asks the tracker nothing.
  */
-export function readLinearIssueDetail(linear: LinearAPI, issueId: string): Promise<LinearIssue> {
-    const workspace = useLinearAuthStore.getState().status?.organization?.id ?? '';
-    return linearDetails.ensure(linearDetailKey(workspace, issueId), () => fetchLinearIssue(linear, issueId));
+export function readTrackerItemDetail(trackers: TrackerAPI, provider: string, itemId: string): Promise<TrackerItem> {
+    const account = currentTrackerAccountId(useTrackerAuthStore.getState().entries[provider]);
+    return trackerDetails.ensure(trackerDetailKey(provider, account, itemId), () => fetchTrackerItem(trackers, provider, itemId));
 }
 
-/** The previewed Linear issue's description and comments; asked once `settled`, like GitHub's. */
-export function useLinearIssueDetail(issueId: string | null, settled: boolean) {
-    const { linear } = useRuntimeAPIs();
-    const workspace = useLinearAuthStore((state) => state.status?.organization?.id ?? '');
-    const key = issueId && linear ? linearDetailKey(workspace, issueId) : null;
+/** The previewed tracker item's description and comments; asked once `settled`, like a repository item's. */
+export function useTrackerItemDetail(item: { provider: string; id: string } | null, settled: boolean) {
+    const { trackers } = useRuntimeAPIs();
+    const provider = item?.provider ?? null;
+    const itemId = item?.id ?? null;
+    const account = useTrackerAccount(provider);
+    const key = provider && itemId && trackers ? trackerDetailKey(provider, account, itemId) : null;
     const fetch = React.useCallback(async () => {
-        if (!linear || !issueId) throw new Error('Linear is not available here');
-        return fetchLinearIssue(linear, issueId);
-    }, [issueId, linear]);
-    const cached = useCachedValue(linearDetails, key, fetch, settled);
-    // The issue's state as the server follows it, once that is newer than the read.
-    const issues = React.useMemo(() => (cached.status === 'ready' ? [cached.value] : []), [cached]);
-    const read = key ? linearDetails.readOf(key) : null;
+        if (!trackers || !provider || !itemId) throw new Error('Trackers are not available here');
+        return fetchTrackerItem(trackers, provider, itemId);
+    }, [itemId, provider, trackers]);
+    const cached = useCachedValue(trackerDetails, key, fetch, settled);
+    // The item's state as the server follows it, once that is newer than the read.
+    const items = React.useMemo(() => (cached.status === 'ready' ? [cached.value] : []), [cached]);
+    const read = key ? trackerDetails.readOf(key) : null;
     const readAt = read?.at ?? 0;
     const readForced = read?.forced ?? false;
     const reads = React.useMemo<PageRead[]>(
         () => (readAt ? [{ start: 0, read: { at: readAt, forced: readForced } }] : []),
         [readAt, readForced],
     );
-    const live = useLiveLinearIssues(issues, reads);
-    const liveIssue = live.items[0];
-    const detail = React.useMemo<CachedValue<LinearIssue>>(
-        () => (cached.status === 'ready' && liveIssue && liveIssue !== cached.value ? { status: 'ready', value: liveIssue } : cached),
-        [cached, liveIssue],
+    const live = useLiveTrackerItems(items, reads);
+    const liveItem = live.items[0];
+    const detail = React.useMemo<CachedValue<TrackerItem>>(
+        () => (cached.status === 'ready' && liveItem && liveItem !== cached.value ? { status: 'ready', value: liveItem } : cached),
+        [cached, liveItem],
     );
     // After a change of state, read again without waiting for staleness.
     const refresh = React.useCallback(
-        () => (key ? linearDetails.ensure(key, fetch, { force: true }).then(() => undefined, () => undefined) : Promise.resolve()),
+        () => (key ? trackerDetails.ensure(key, fetch, { force: true }).then(() => undefined, () => undefined) : Promise.resolve()),
         [fetch, key],
     );
     return { detail, refresh, followed: live.followed };

@@ -68,7 +68,8 @@ import { findDiffScrollAnchor, getRestoredDiffScrollTop, type DiffScrollAnchor }
 import { isRightToLeft, useI18n } from '@/lib/i18n';
 import { useConfirmDialog } from '@/components/ui/confirm-dialog';
 import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
-import type { SourceControlProvider } from '@/lib/api/types';
+import { useChangeRequestTerm } from '@/lib/source-control/providers/registry';
+import type { ChangeRequestTerm } from '@/lib/source-control/providers/descriptor';
 import { buildDiffTreeRows } from './diffFileTree';
 import { fileDiffFromPatch, isBinaryPatch, extractHunkPatch, haveMatchingPatchVersions, getPatchHunkAnchors } from '@/lib/diff/patchFileDiff';
 import { isVSCodeRuntime } from '@/lib/desktop';
@@ -279,7 +280,7 @@ interface ChangeScopeSelectorProps {
     showCommitOption: boolean;
     showBranchOption: boolean;
     /** The host of the project's change requests, for the pull/merge request wording. */
-    changeRequestProvider?: SourceControlProvider | null;
+    changeRequestTerm: ChangeRequestTerm;
     onScopeChange?: (scope: PendingDiffScope) => void;
 }
 
@@ -293,13 +294,13 @@ const ChangeScopeSelector = React.memo<ChangeScopeSelectorProps>(({
     prCount,
     showCommitOption,
     showBranchOption,
-    changeRequestProvider,
+    changeRequestTerm,
     onScopeChange,
 }) => {
     const { t } = useI18n();
     const [open, setOpen] = React.useState(false);
     const currentCount = scope === 'pr' ? (prCount ?? 0) : scope === 'staged' ? stagedCount : scope === 'turn' ? turnCount : scope === 'branch' ? (branchCount ?? 0) : scope === 'commit' ? (commitCount ?? 0) : workingCount;
-    const currentLabel = scope === 'pr' ? t(changeRequestCopy('session.githubIntegration.tabs.pullRequests', changeRequestProvider)) : scope === 'staged'
+    const currentLabel = scope === 'pr' ? t(changeRequestCopy('session.githubIntegration.tabs.pullRequests', changeRequestTerm)) : scope === 'staged'
         ? t('diffView.scope.staged')
         : scope === 'turn'
             ? t('diffView.scope.lastTurn')
@@ -367,7 +368,7 @@ const ChangeScopeSelector = React.memo<ChangeScopeSelectorProps>(({
                     )}
                     {showCommitOption && <DropdownMenuRadioItem value="pr">
                         <span className="flex min-w-0 flex-1 items-center justify-between gap-3">
-                            <span>{t(changeRequestCopy('session.githubIntegration.tabs.pullRequests', changeRequestProvider))}</span>
+                            <span>{t(changeRequestCopy('session.githubIntegration.tabs.pullRequests', changeRequestTerm))}</span>
                             <span className="typography-meta text-muted-foreground">{prCount ?? '…'}</span>
                         </span>
                     </DropdownMenuRadioItem>}
@@ -1830,13 +1831,13 @@ export const DiffView: React.FC<DiffViewProps> = ({
 
     // ----- Branch scope (all changes on this branch vs its base) -----
     const currentBranch = status?.current ?? null;
-    const pullRequestContext = binding.contexts[0]?.provider === 'github' || binding.contexts[0]?.provider === 'gitlab'
-        ? binding.contexts[0]
-        : null;
     // A pull request opened from the issues and PRs board.
     const requestedPr = usePullRequestSelectionStore((state) => (effectiveDirectory ? state.diffRequests.get(effectiveDirectory) : undefined));
-    const prComparison = usePullRequestComparison(effectiveDirectory ?? null, currentBranch, pullRequestContext, visible && activeDiffScope === 'pr' && !isVSCodeRuntime(), requestedPr);
+    const prComparison = usePullRequestComparison(effectiveDirectory ?? null, currentBranch, binding.contexts[0] ?? null, visible && activeDiffScope === 'pr' && !isVSCodeRuntime(), requestedPr);
+    // Set only when the server serves the project's provider: change-request diffs exist only for those.
+    const pullRequestContext = prComparison.readContext;
     const selectedPr = prComparison.selectedSource;
+    const prChangeRequestTerm = useChangeRequestTerm(prComparison.provider);
     // Taken once the branch is known: the selection it landed in is the real one.
     React.useEffect(() => {
         if (!effectiveDirectory || !requestedPr || !status || selectedPr !== requestedPr) return;
@@ -3067,8 +3068,8 @@ export const DiffView: React.FC<DiffViewProps> = ({
                     {!comparison.error && !prComparison.error && !prComparison.loading
                         && <Icon name="git-pull-request" className="size-6 text-muted-foreground" />}
                     <p className="typography-meta text-muted-foreground">{comparison.error ?? prComparison.error ?? (prComparison.loading
-                        ? t(changeRequestCopy('session.githubPrPicker.loading.pullRequests', prComparison.provider))
-                        : t(changeRequestCopy('pullRequestComparison.pickAbove', prComparison.provider)))}</p>
+                        ? t(changeRequestCopy('session.githubPrPicker.loading.pullRequests', prChangeRequestTerm))
+                        : t(changeRequestCopy('pullRequestComparison.pickAbove', prChangeRequestTerm)))}</p>
                     {(comparison.error || prComparison.error) && <Button variant="outline" size="sm" onClick={() => {
                         if (selectedPr) void comparison.refresh();
                         else void prComparison.refresh();
@@ -3264,7 +3265,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
                             prCount={activeDiffScope === 'pr' ? comparison.files?.length ?? null : null}
                             showCommitOption={!isVSCodeRuntime()}
                             showBranchOption={showBranchOption}
-                            changeRequestProvider={prComparison.provider}
+                            changeRequestTerm={prChangeRequestTerm}
                             onScopeChange={(scope) => {
                                 setActiveDiffScope(scope);
                                 onDiffScopeChange?.(scope);

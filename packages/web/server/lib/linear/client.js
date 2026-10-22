@@ -14,7 +14,7 @@ const VIEWER_QUERY = '{ viewer { id name displayName email avatarUrl } organizat
 // uploads.linear.app images (comment screenshots, description images).
 const LINEAR_PUBLIC_FILE_URL_TTL_SECONDS = '3600';
 
-export class LinearApiError extends Error {
+class LinearApiError extends Error {
   constructor(message, status, options = {}) {
     super(message);
     this.name = 'LinearApiError';

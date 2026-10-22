@@ -16,39 +16,45 @@ import {
 import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { Input } from '@/components/ui/input';
 import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
-import { useI18n } from '@/lib/i18n';
+import { useI18n, type I18nKey } from '@/lib/i18n';
+import type { ChangeRequestTerm } from '@/lib/source-control/providers/descriptor';
 import { cn } from '@/lib/utils';
 
 import { ReferencePickerRow } from './ReferencePickerRow';
 import {
+    CHANGE_REQUEST_TAB_KEYS,
     REPOSITORY_PEOPLE,
     REPOSITORY_PEOPLE_LABEL_KEYS,
     REPOSITORY_STATE_LABEL_KEYS,
     REPOSITORY_STATES,
-    LINEAR_PEOPLE_FILTERS,
-    LINEAR_PEOPLE_LABEL_KEYS,
-    LINEAR_PRIORITY_FILTERS,
-    LINEAR_PRIORITY_LABEL_KEYS,
-    LINEAR_STATUS_FILTERS,
-    LINEAR_STATUS_LABEL_KEYS,
+    TRACKER_PEOPLE_FILTERS,
+    TRACKER_PEOPLE_LABEL_KEYS,
+    TRACKER_PRIORITY_FILTERS,
+    TRACKER_PRIORITY_LABEL_KEYS,
     referencePickerItemKey,
+    trackerStateFilterLabel,
     type ReferencePickerItem,
 } from './referencePickerItems';
 import { readyValue, type ReferenceBrowser } from './useReferenceBrowser';
 
-/** Issues and pull requests (merge requests on GitLab); GitHub only. */
+const NO_PULLS_KEYS = {
+    pullRequest: 'references.picker.empty.pulls',
+    mergeRequest: 'references.picker.empty.mergeRequests',
+} as const satisfies Record<ChangeRequestTerm, I18nKey>;
+
+/** Issues and change requests, named by the provider's term; the repository source only. */
 export const ReferenceBrowserTabs: React.FC<{ browser: ReferenceBrowser }> = ({ browser }) => {
     const { t } = useI18n();
-    if (browser.source !== 'github') return null;
+    if (browser.source !== 'repository') return null;
     return (
         <div className={cn(browser.isMobile ? 'w-full' : 'w-[16rem]')}>
             <SortableTabsStrip
                 items={[
                     { id: 'issue', label: t('references.picker.tab.issues'), icon: <Icon name="record-circle" className="size-3.5" /> },
-                    { id: 'pull', label: t(browser.isGitLab ? 'references.picker.tab.mergeRequests' : 'references.picker.tab.pulls'), icon: <Icon name="git-pull-request" className="size-3.5" /> },
+                    { id: 'pull', label: t(CHANGE_REQUEST_TAB_KEYS[browser.term]), icon: <Icon name="git-pull-request" className="size-3.5" /> },
                 ]}
-                activeId={browser.githubKind}
-                onSelect={(id) => browser.selectGitHubKind(id === 'pull' ? 'pull' : 'issue')}
+                activeId={browser.repositoryKind}
+                onSelect={(id) => browser.selectRepositoryKind(id === 'pull' ? 'pull' : 'issue')}
                 variant="active-pill"
                 layoutMode="fit"
             />
@@ -56,21 +62,26 @@ export const ReferenceBrowserTabs: React.FC<{ browser: ReferenceBrowser }> = ({ 
     );
 };
 
-/** Which items the list shows. Picking stays in the menu, so Linear's parts combine. */
+/**
+ * Which items the list shows. Picking stays in the menu, so a tracker's parts
+ * combine. A tracker offers its descriptor's state filters, and people and
+ * priority where its `filters` capabilities say so.
+ */
 const ReferenceFilterMenu: React.FC<{ browser: ReferenceBrowser }> = ({ browser }) => {
     const { t } = useI18n();
-    const { source } = browser;
-    const { status, people, priority } = browser.linearFilter;
-    const repository = browser.githubFilter;
-    const summary = source === 'github'
+    const { source, trackerDescriptor } = browser;
+    const { state, people, priority } = browser.trackerFilter;
+    const { filters } = trackerDescriptor.capabilities;
+    const repository = browser.repositoryFilter;
+    const summary = source === 'repository'
         ? [
             t(REPOSITORY_STATE_LABEL_KEYS[repository.state]),
             repository.people === 'any' ? null : t(REPOSITORY_PEOPLE_LABEL_KEYS[repository.people]),
         ].filter(Boolean).join(' · ')
         : [
-            t(LINEAR_STATUS_LABEL_KEYS[status]),
-            people === 'any' ? null : t(LINEAR_PEOPLE_LABEL_KEYS[people]),
-            priority === 'all' ? null : t(LINEAR_PRIORITY_LABEL_KEYS[priority]),
+            trackerStateFilterLabel(state, t),
+            people === 'any' ? null : t(TRACKER_PEOPLE_LABEL_KEYS[people]),
+            priority === 'all' ? null : t(TRACKER_PRIORITY_LABEL_KEYS[priority]),
         ].filter(Boolean).join(' · ');
 
     const group = <T extends string>(
@@ -111,19 +122,27 @@ const ReferenceFilterMenu: React.FC<{ browser: ReferenceBrowser }> = ({ browser 
                 </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-56">
-                {source === 'github' ? (
+                {source === 'repository' ? (
                     <>
-                        {group(t('references.picker.filter.group.status'), repository.state, REPOSITORY_STATES[browser.githubKind], (option) => t(REPOSITORY_STATE_LABEL_KEYS[option]), (option) => browser.selectGitHubFilter({ state: option }))}
+                        {group(t('references.picker.filter.group.status'), repository.state, REPOSITORY_STATES[browser.repositoryKind], (option) => t(REPOSITORY_STATE_LABEL_KEYS[option]), (option) => browser.selectRepositoryFilter({ state: option }))}
                         <DropdownMenuSeparator />
-                        {group(t('references.picker.filter.group.people'), repository.people, REPOSITORY_PEOPLE[browser.githubKind], (option) => t(REPOSITORY_PEOPLE_LABEL_KEYS[option]), (option) => browser.selectGitHubFilter({ people: option }))}
+                        {group(t('references.picker.filter.group.people'), repository.people, REPOSITORY_PEOPLE[browser.repositoryKind], (option) => t(REPOSITORY_PEOPLE_LABEL_KEYS[option]), (option) => browser.selectRepositoryFilter({ people: option }))}
                     </>
                 ) : (
                     <>
-                        {group(t('references.picker.filter.group.status'), status, LINEAR_STATUS_FILTERS, (option) => t(LINEAR_STATUS_LABEL_KEYS[option]), (option) => browser.selectLinearFilter({ status: option }))}
-                        <DropdownMenuSeparator />
-                        {group(t('references.picker.filter.group.people'), people, LINEAR_PEOPLE_FILTERS, (option) => t(LINEAR_PEOPLE_LABEL_KEYS[option]), (option) => browser.selectLinearFilter({ people: option }))}
-                        <DropdownMenuSeparator />
-                        {group(t('references.picker.filter.group.priority'), priority, LINEAR_PRIORITY_FILTERS, (option) => t(LINEAR_PRIORITY_LABEL_KEYS[option]), (option) => browser.selectLinearFilter({ priority: option }))}
+                        {group(t('references.picker.filter.group.status'), state, trackerDescriptor.stateFilters, (option) => trackerStateFilterLabel(option, t), (option) => browser.selectTrackerFilter({ state: option }))}
+                        {filters.people ? (
+                            <>
+                                <DropdownMenuSeparator />
+                                {group(t('references.picker.filter.group.people'), people, TRACKER_PEOPLE_FILTERS, (option) => t(TRACKER_PEOPLE_LABEL_KEYS[option]), (option) => browser.selectTrackerFilter({ people: option }))}
+                            </>
+                        ) : null}
+                        {filters.priority ? (
+                            <>
+                                <DropdownMenuSeparator />
+                                {group(t('references.picker.filter.group.priority'), priority, TRACKER_PRIORITY_FILTERS, (option) => t(TRACKER_PRIORITY_LABEL_KEYS[option]), (option) => browser.selectTrackerFilter({ priority: option }))}
+                            </>
+                        ) : null}
                     </>
                 )}
             </DropdownMenuContent>
@@ -139,11 +158,12 @@ export const ReferenceBrowserSearch: React.FC<{
     trailing?: React.ReactNode;
 }> = ({ browser, onKeyDown, trailing }) => {
     const { t } = useI18n();
-    const { source, isGitLab, isMobile, list, query, searchRef } = browser;
-    const placeholder = t(source === 'linear' ? 'references.picker.search.linear' : isGitLab ? 'references.picker.search.gitlab' : 'references.picker.search.github');
+    const { source, term, isMobile, list, query, searchRef } = browser;
+    const tracked = source !== 'repository';
+    const placeholder = t(tracked ? 'references.picker.search.tracker' : `references.picker.search.${term}`);
     // The phone's field shares its row with the filter, so it gets the short wording;
     // the label keeps the full one.
-    const shortPlaceholder = t(source === 'linear' ? 'references.picker.search.mobile.linear' : isGitLab ? 'references.picker.search.mobile.gitlab' : 'references.picker.search.mobile.github');
+    const shortPlaceholder = t(tracked ? 'references.picker.search.mobile.tracker' : `references.picker.search.mobile.${term}`);
 
     return (
         <div className={cn('flex items-center gap-2', !isMobile && 'min-w-[14rem] flex-1')}>
@@ -209,7 +229,7 @@ export const ReferenceBrowserList: React.FC<{
     notice?: React.ReactNode;
 }> = ({ browser, label, multiselectable, onOpenSettings, rowSelection, onActivate, onShow, notice }) => {
     const { t } = useI18n();
-    const { source, sourceStatus, list, items, isGitLab, isMobile, directory, debouncedQuery, githubKind } = browser;
+    const { source, sourceStatus, list, items, term, descriptor, isMobile, directory, debouncedQuery, repositoryKind, tracker } = browser;
 
     // Load the next page when the end of the list scrolls into view.
     const sentinelRef = React.useRef<HTMLDivElement>(null);
@@ -231,23 +251,23 @@ export const ReferenceBrowserList: React.FC<{
     );
     const emptyText = () => {
         if (debouncedQuery.trim()) return t('references.picker.empty.search');
-        if (source === 'linear') return t('references.picker.empty.linear');
-        if (githubKind === 'issue') return t('references.picker.empty.issues');
-        return t(isGitLab ? 'references.picker.empty.mergeRequests' : 'references.picker.empty.pulls');
+        if (tracker) return t('references.picker.empty.tracker');
+        if (repositoryKind === 'issue') return t('references.picker.empty.issues');
+        return t(NO_PULLS_KEYS[term]);
     };
 
     if (sourceStatus === 'unsupported') return centered(t('references.picker.empty.unsupported'));
     if (sourceStatus === 'disconnected' || list.unavailable === 'disconnected') {
         return centered(
             <>
-                <span>{t(source === 'linear'
-                    ? 'references.picker.empty.linear.notConnected'
-                    : isGitLab ? 'references.picker.empty.gitlab.notConnected' : 'references.picker.empty.github.notConnected')}</span>
+                <span>{tracker
+                    ? t('references.picker.empty.tracker.notConnected', { provider: browser.trackerDescriptor.name })
+                    : t(`references.picker.empty.notConnected.${term}`, { provider: descriptor.label })}</span>
                 <Button size="sm" variant="outline" onClick={onOpenSettings}>{t('references.picker.actions.openSettings')}</Button>
             </>,
         );
     }
-    if (source === 'github' && !directory) return centered(t('references.picker.empty.noProject'));
+    if (source === 'repository' && !directory) return centered(t('references.picker.empty.noProject'));
     if (list.unavailable === 'no-repo') {
         return (
             <>
@@ -290,7 +310,7 @@ export const ReferenceBrowserList: React.FC<{
                         <ReferencePickerRow
                             key={key}
                             item={item}
-                            pullStatus={item.source === 'github' ? readyValue(browser.pullStatusOf(item.reference, item.directory)) : null}
+                            pullStatus={item.source === 'repository' ? readyValue(browser.pullStatusOf(item.reference, item.directory)) : null}
                             showRepository={browser.across}
                             highlighted={!isMobile && key === browser.effectiveHighlightKey}
                             checked={selection?.checked ?? null}

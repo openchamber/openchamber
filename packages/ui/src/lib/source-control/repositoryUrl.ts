@@ -1,11 +1,16 @@
 import type { GitRemote, SourceControlIdentity, SourceControlProvider } from '@/lib/api/types';
 import { getSourceControlBaseUrl, resolveSourceControlIdentity } from './identity';
+import { unknownProviderDescriptor, type SourceControlProviderDescriptor } from './providers/descriptor';
 
 type RepositoryLink = { provider: SourceControlProvider; url: string };
 
-const repositoryLink = (endpoint: string, identities: readonly SourceControlIdentity[]): RepositoryLink | null => {
+const repositoryLink = (
+  endpoint: string,
+  identities: readonly SourceControlIdentity[],
+  descriptors: readonly SourceControlProviderDescriptor[],
+): RepositoryLink | null => {
   const value = endpoint.trim();
-  const identity = resolveSourceControlIdentity({ name: '', fetchUrl: value, pushUrl: value }, [...identities]);
+  const identity = resolveSourceControlIdentity({ name: '', fetchUrl: value, pushUrl: value }, identities);
   if (!identity) return null;
 
   let path: string;
@@ -28,7 +33,9 @@ const repositoryLink = (endpoint: string, identities: readonly SourceControlIden
   const prefix = base.pathname.replace(/^\/+|\/+$/g, '');
   if (prefix && path.startsWith(`${prefix}/`)) path = path.slice(prefix.length + 1);
   const segments = path.split('/');
-  if (segments.length < 2 || (identity.provider === 'github' && segments.length !== 2)) return null;
+  // A provider that nests namespaces (GitLab subgroups) names a project by its whole path; others by owner/name.
+  const descriptor = descriptors.find((entry) => entry.id === identity.provider) ?? unknownProviderDescriptor(identity.provider);
+  if (segments.length < 2 || (!descriptor.repository.nestedNamespaces && segments.length !== 2)) return null;
   if (segments.some((segment) => !/^[a-zA-Z0-9_.-]+$/.test(segment) || ['.', '..', '-'].includes(segment))) return null;
 
   base.pathname = `/${prefix ? `${prefix}/` : ''}${path}`;
@@ -37,15 +44,20 @@ const repositoryLink = (endpoint: string, identities: readonly SourceControlIden
   return { provider: identity.provider, url: base.toString() };
 };
 
-/** Origin first, then the first recognized remote. Fetch identifies the checkout before push. */
+/**
+ * Origin first, then the first recognized remote. Fetch identifies the
+ * checkout before push. `identities` include each provider's default instance
+ * (`defaultSourceControlIdentities`); `descriptors` are the registry's.
+ */
 export const repositoryLinkFromRemotes = (
   remotes: readonly GitRemote[],
   identities: readonly SourceControlIdentity[],
+  descriptors: readonly SourceControlProviderDescriptor[],
 ): RepositoryLink | null => {
   const origin = remotes.find((remote) => remote.name === 'origin');
   const ordered = origin ? [origin, ...remotes.filter((remote) => remote !== origin)] : remotes;
   for (const remote of ordered) {
-    const link = repositoryLink(remote.fetchUrl, identities) ?? repositoryLink(remote.pushUrl, identities);
+    const link = repositoryLink(remote.fetchUrl, identities, descriptors) ?? repositoryLink(remote.pushUrl, identities, descriptors);
     if (link) return link;
   }
   return null;

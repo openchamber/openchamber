@@ -5,6 +5,8 @@ import type { GitPathUnavailableReason } from './git-path-diff';
 import type {
   ChangeRequest,
   ChangeRequestContext,
+  CISummary,
+  Label,
   ChangeRequestStatus,
   CreateChangeRequestInput,
   Issue,
@@ -47,8 +49,11 @@ import type {
   GitAuxiliaryBindingResult,
   UpdateChangeRequestInput,
 } from '../source-control/types';
+import type { SourceControlProviderDescriptor } from '../source-control/providers/descriptor';
+import type { TrackerAPI } from '../trackers/types';
 
 export type * from '../source-control/types';
+export type * from '../trackers/types';
 export type {
   GitIdentityProfile,
   GitIdentitySummary,
@@ -1494,77 +1499,12 @@ export interface PushAPI {
   unregisterApnsToken(payload: ApnsTokenPayload): Promise<{ ok: true } | null>;
 }
 
-export type GitHubUserSummary = {
-  login: string;
-  id?: number;
-  avatarUrl?: string;
-  name?: string;
-  email?: string;
-};
-
 type GitHubRepoRef = {
   owner: string;
   repo: string;
   /** GitHub Enterprise host (e.g. "ghe.example.com"); github.com when absent. */
   host?: string;
   url: string;
-};
-
-export type GitHubChecksSummary = {
-  state: 'success' | 'failure' | 'pending' | 'unknown';
-  total: number;
-  success: number;
-  failure: number;
-  /** queued + in_progress + unconcluded runs. */
-  pending: number;
-  inProgress?: number;
-  queued?: number;
-  /** Earliest started_at among in-progress runs (ISO), for elapsed display. */
-  startedAt?: string;
-};
-
-export type GitHubCheckRun = {
-  id?: number;
-  name: string;
-  startedAt?: string;
-  completedAt?: string;
-  app?: {
-    name?: string;
-    slug?: string;
-  };
-  status?: string;
-  conclusion?: string | null;
-  detailsUrl?: string;
-  output?: {
-    title?: string;
-    summary?: string;
-    text?: string;
-  };
-  job?: {
-    runId?: number;
-    jobId?: number;
-    url?: string;
-    name?: string;
-    workflowName?: string;
-    conclusion?: string | null;
-    steps?: Array<{
-      name: string;
-      status?: string;
-      conclusion?: string | null;
-      number?: number;
-      startedAt?: string;
-      completedAt?: string;
-    }>;
-  };
-  annotations?: Array<{
-    path?: string;
-    startLine?: number;
-    endLine?: number;
-    level?: string;
-    message: string;
-    title?: string;
-    rawDetails?: string;
-  }>;
 };
 
 export type GitHubPullRequest = {
@@ -1589,82 +1529,13 @@ type GitHubPullRequestHeadRepo = {
   sshUrl?: string;
 };
 
-export type GitHubPullRequestSummary = GitHubPullRequest & {
-  author?: GitHubUserSummary | null;
-  body?: string;
-  createdAt?: string;
-  updatedAt?: string;
-  headLabel?: string;
-  headRepo?: GitHubPullRequestHeadRepo | null;
-  sourceRepo?: (GitHubRepoSelector & { source: string }) | null;
-};
-
-type GitHubPullRequestFile = {
-  filename: string;
-  status?: string;
-  additions?: number;
-  deletions?: number;
-  changes?: number;
-  patch?: string;
-};
-
-type GitHubPullRequestReviewComment = {
-  id: number;
-  url: string;
-  body: string;
-  author?: GitHubUserSummary | null;
-  path?: string;
-  line?: number | null;
-  position?: number | null;
-  createdAt?: string;
-  updatedAt?: string;
-};
-
-export type GitHubPullRequestsListResult = {
-  connected: boolean;
-  repo?: GitHubRepoRef | null;
-  prs?: GitHubPullRequestSummary[];
-  page?: number;
-  hasMore?: boolean;
-  failedRepos?: Array<{ owner: string; repo: string }>;
-};
-
-export type GitHubPullRequestContextResult = {
-  connected: boolean;
-  /** Server-side stamp of when the data was fetched from GitHub (ms epoch); survives server cache serves. */
-  fetchedAt?: number;
-  repo?: GitHubRepoRef | null;
-  pr?: GitHubPullRequestSummary | null;
-  issueComments?: GitHubIssueComment[];
-  reviewComments?: GitHubPullRequestReviewComment[];
-  files?: GitHubPullRequestFile[];
-  diff?: string;
-  checks?: GitHubChecksSummary | null;
-  checkRuns?: GitHubCheckRun[];
-  /** Sent only when the PR is a layer of a stack. */
-  stack?: PullRequestStack;
-};
-
-export type GitHubPullRequestStatus = {
-  connected: boolean;
-  /** Server-side stamp of when the data was fetched from GitHub (ms epoch); survives server cache serves. */
-  fetchedAt?: number;
-  repo?: GitHubRepoRef | null;
-  branch?: string;
-  pr?: GitHubPullRequest | null;
-  checks?: GitHubChecksSummary | null;
-  canMerge?: boolean;
-  defaultBranch?: string | null;
-  resolvedRemoteName?: string | null;
-};
-
-export type GitHubPullRequestRef = GitHubRepoSelector & { number: number; host?: string };
+export type RepositoryItemRef = RepositorySelector & { number: number; host?: string };
 
 /** What a refresh of the server's short-lived provider answers covers. */
-export type ProviderReadsRefreshScope = { item: GitHubPullRequestRef } | { lists: true };
+export type ProviderReadsRefreshScope = { item: RepositoryItemRef } | { lists: true };
 
 /** Live fields of a known PR, refreshed in batches for list surfaces. */
-export type GitHubPullRequestLiveSummary = GitHubPullRequestRef & {
+export type ChangeRequestLiveSummary = RepositoryItemRef & {
   state: GitHubPullRequest['state'];
   draft: boolean;
   title: string;
@@ -1674,62 +1545,22 @@ export type GitHubPullRequestLiveSummary = GitHubPullRequestRef & {
   mergeable: boolean | null;
   mergeableState: string | null;
   /** Null for closed/merged PRs, whose checks are not actionable. */
-  checks: GitHubChecksSummary | null;
+  checks: CISummary | null;
 };
 
 /** Live state of a known issue; a closed one says whether it was done or dropped. */
-export type GitHubIssueLiveSummary = GitHubPullRequestRef & {
+export type IssueLiveSummary = RepositoryItemRef & {
   title: string;
   state: 'open' | 'completed' | 'not_planned';
 };
 
 
-export type GitHubIssueLabel = {
-  name: string;
-  color?: string;
-};
-
-export type GitHubRepoSelector = {
+export type RepositorySelector = {
   owner: string;
   repo: string;
 };
 
-export type GitHubIssueSummary = {
-  number: number;
-  title: string;
-  url: string;
-  state: 'open' | 'closed';
-  author?: GitHubUserSummary | null;
-  labels?: GitHubIssueLabel[];
-  sourceRepo?: (GitHubRepoSelector & { source: string }) | null;
-};
-
-export type GitHubIssue = GitHubIssueSummary & {
-  body?: string;
-  assignees?: GitHubUserSummary[];
-  createdAt?: string;
-  updatedAt?: string;
-};
-
-export type GitHubIssueComment = {
-  id: number;
-  url: string;
-  body: string;
-  author?: GitHubUserSummary | null;
-  createdAt?: string;
-  updatedAt?: string;
-};
-
-export type GitHubIssuesListResult = {
-  connected: boolean;
-  repo?: GitHubRepoRef | null;
-  issues?: GitHubIssueSummary[];
-  page?: number;
-  hasMore?: boolean;
-  failedRepos?: Array<{ owner: string; repo: string }>;
-};
-
-export type GitHubReferenceKind = 'issue' | 'pull';
+export type RepositoryReferenceKind = 'issue' | 'pull';
 
 /** Which slice of open items the picker lists; `reviewRequested` is for PRs. */
 /** A repository list's state; `merged` applies to change requests. */
@@ -1738,8 +1569,8 @@ export type RepositoryReferenceState = 'open' | 'closed' | 'merged' | 'all';
 export type RepositoryReferencePeople = 'any' | 'assigned' | 'created' | 'reviewRequested';
 export type RepositoryReferenceFilter = { state: RepositoryReferenceState; people: RepositoryReferencePeople };
 
-export type GitHubReferencesOptions = {
-  kind: GitHubReferenceKind;
+export type RepositoryReferenceQuery = {
+  kind: RepositoryReferenceKind;
   state?: RepositoryReferenceState;
   people?: RepositoryReferencePeople;
   /** Search text, or a pasted link or number, which names one item of either kind. */
@@ -1747,7 +1578,7 @@ export type GitHubReferencesOptions = {
   cursor?: string | null;
 };
 
-type GitHubReferenceCommon = {
+type RepositoryReferenceCommon = {
   number: number;
   title: string;
   url: string;
@@ -1757,24 +1588,21 @@ type GitHubReferenceCommon = {
   createdAt: string | null;
   updatedAt: string | null;
   author: { login: string; avatarUrl?: string } | null;
-  labels: GitHubIssueLabel[];
+  labels: Label[];
   commentCount: number;
-  sourceRepo: GitHubRepoSelector & { source: string };
+  sourceRepo: RepositorySelector & { source: string };
   /** The provider's own project id (GitLab's is numeric); absent on GitHub, where `owner/repo` is the id. */
   projectId?: string;
-  /**
-   * Set on items read from a GitLab project, which the picker shows the same
-   * way; absent on GitHub's own answers.
-   */
-  provider?: SourceControlProvider;
+  /** The provider the item was read from; the adapter stamps it from the read context. */
+  provider: SourceControlProvider;
 };
 
-export type GitHubIssueReference = GitHubReferenceCommon & {
+export type RepositoryIssueReference = RepositoryReferenceCommon & {
   kind: 'issue';
-  state: GitHubIssueLiveSummary['state'];
+  state: IssueLiveSummary['state'];
 };
 
-export type GitHubPullReference = GitHubReferenceCommon & {
+export type RepositoryChangeRequestReference = RepositoryReferenceCommon & {
   kind: 'pull';
   state: GitHubPullRequest['state'];
   draft: boolean;
@@ -1785,7 +1613,7 @@ export type GitHubPullReference = GitHubReferenceCommon & {
 };
 
 /** A comment as the picker preview shows it; review entries carry their verdict or file and line. */
-export type GitHubReferenceComment = {
+export type RepositoryReferenceComment = {
   author: { login: string; avatarUrl?: string } | null;
   body: string;
   createdAt: string | null;
@@ -1794,11 +1622,11 @@ export type GitHubReferenceComment = {
   line: number | null;
   review: 'approved' | 'changes_requested' | 'commented' | 'dismissed' | null;
   /** Set when the comment opens a review thread. */
-  thread?: GitHubReferenceThread;
+  thread?: RepositoryReferenceThread;
 };
 
 /** A review thread a comment opens: the answers under it and whether it is resolved. */
-export type GitHubReferenceThread = {
+export type RepositoryReferenceThread = {
   /** The host's id: a GraphQL node id on GitHub, a discussion id on GitLab. */
   id: string;
   resolved: boolean;
@@ -1806,28 +1634,28 @@ export type GitHubReferenceThread = {
   canResolve: boolean;
   canReply: boolean;
   /** Oldest first. */
-  replies: GitHubReferenceComment[];
+  replies: RepositoryReferenceComment[];
 };
 
 /** Someone asked to review, or who can be; `id` is what the host names them by (a login on GitHub). */
-export type GitHubReferenceReviewer = {
+export type RepositoryReferenceReviewer = {
   id: string;
   login: string;
   avatarUrl?: string;
 };
 
 /** What the preview adds for one item; too slow to ask for a whole page. */
-export type GitHubReferenceDetail = {
+export type RepositoryReferenceDetail = {
   number: number;
   /** Oldest first: the newest 50 comments and, for a PR, its reviews. */
-  comments: GitHubReferenceComment[];
+  comments: RepositoryReferenceComment[];
   /** How many conversation comments the item has in all. */
   commentTotal: number;
   /** Null for an issue. */
   pull: {
     reviewDecision: 'approved' | 'changes_requested' | 'review_required' | null;
     /** Asked to review and not done yet (GitHub); everyone set as a reviewer (GitLab). */
-    reviewers: GitHubReferenceReviewer[];
+    reviewers: RepositoryReferenceReviewer[];
     additions: number;
     deletions: number;
     changedFiles: number;
@@ -1835,9 +1663,9 @@ export type GitHubReferenceDetail = {
      * GitLab merge requests only, null when closed or merged. A GitHub PR's
      * checks come with its status, the answer that also colours it.
      */
-    checks?: GitHubChecksSummary | null;
+    checks?: CISummary | null;
     /** The newest commits, oldest first, for the timeline beside the comments. */
-    commits: GitHubReferenceCommit[];
+    commits: RepositoryReferenceCommit[];
     /** How many commits the PR has in all; null when the host does not say. */
     commitTotal: number | null;
     /** The stack the PR is a layer of; null when it is in none, absent when the host could not say. */
@@ -1846,7 +1674,7 @@ export type GitHubReferenceDetail = {
 };
 
 
-export type GitHubReferenceCommit = {
+export type RepositoryReferenceCommit = {
   sha: string;
   headline: string;
   /** The host account behind the commit, when it is known. */
@@ -1856,39 +1684,39 @@ export type GitHubReferenceCommit = {
   url: string | null;
 };
 
-export type GitHubReferenceDetailResult =
+export type RepositoryReferenceDetailResult =
   | { connected: false }
-  | { connected: true; detail: GitHubReferenceDetail | null };
+  | { connected: true; detail: RepositoryReferenceDetail | null };
 
 /** An issue or PR as the reference picker lists and previews it. */
-export type GitHubReference = GitHubIssueReference | GitHubPullReference;
+export type RepositoryReference = RepositoryIssueReference | RepositoryChangeRequestReference;
 
 /** What colours a listed open PR: its checks and whether it conflicts. */
-export type GitHubPullStatus = GitHubPullRequestRef & {
-  checks: GitHubChecksSummary | null;
+export type ChangeRequestListStatus = RepositoryItemRef & {
+  checks: CISummary | null;
   mergeable: boolean | null;
   mergeableState: string | null;
 };
 
 /** PRs GitHub could not resolve are left out of `statuses`. */
-export type GitHubPullStatusesResult =
+export type ChangeRequestListStatusesResult =
   | { connected: false }
-  | { connected: true; statuses: GitHubPullStatus[] };
+  | { connected: true; statuses: ChangeRequestListStatus[] };
 
-export type GitHubReferencesResult =
+export type RepositoryReferencePage =
   | { connected: false }
   | {
       connected: true;
       /** Null when the project has no GitHub remote. */
       repo: GitHubRepoRef | null;
-      items: GitHubReference[];
+      items: RepositoryReference[];
       cursor: string | null;
       hasMore: boolean;
       total: number;
     };
 
 /** Why a folder asked for in a search across repositories was left out of it. */
-export type GitHubReferencesAcrossSkip = 'no-repo' | 'disconnected' | 'invalid-context' | 'error';
+export type RepositoryReferencesAcrossSkip = 'no-repo' | 'disconnected' | 'invalid-context' | 'error';
 
 /**
  * One page of issues or PRs across several repositories, each read through its
@@ -1896,9 +1724,9 @@ export type GitHubReferencesAcrossSkip = 'no-repo' | 'disconnected' | 'invalid-c
  * Repositories read with the same account are searched together; one folder
  * that cannot be read is reported in `repositories` and never empties the rest.
  */
-export type GitHubReferencesAcrossResult = {
+export type RepositoryReferencesAcrossResult = {
   /** Newest activity first. `directory` is the context folder the item was read through, for its preview and actions. */
-  items: Array<GitHubReference & { directory: string }>;
+  items: Array<RepositoryReference & { directory: string }>;
   /** Opaque; null on the last page. */
   cursor: string | null;
   hasMore: boolean;
@@ -1906,69 +1734,16 @@ export type GitHubReferencesAcrossResult = {
   /** Every folder asked for, in the order asked: its GitHub repository, or why it was left out. */
   repositories: Array<
     | { directory: string; status: 'included'; repo: GitHubRepoRef }
-    | { directory: string; status: GitHubReferencesAcrossSkip }
+    | { directory: string; status: RepositoryReferencesAcrossSkip }
   >;
 };
 
-export type GitHubRepoUpstreamResult = {
-  connected: boolean;
-  isFork: boolean;
-  upstream: { owner: string; repo: string; url: string; defaultBranch: string; defaultBranchSha: string | null; remoteName: string | null } | null;
-};
-
-export type GitHubIssueGetResult = {
-  connected: boolean;
-  repo?: GitHubRepoRef | null;
-  issue?: GitHubIssue | null;
-};
-
-export type GitHubIssueCommentsResult = {
-  connected: boolean;
-  repo?: GitHubRepoRef | null;
-  comments?: GitHubIssueComment[];
-};
-
-export type GitHubAuthStatus = {
-  connected: boolean;
-  user?: GitHubUserSummary | null;
-  scope?: string;
-  accounts?: GitHubAuthAccount[];
-  ghCli?: {
-    available: boolean;
-    disabled: boolean;
-    active: boolean;
-    user?: GitHubUserSummary | null;
-  } | null;
-};
-
-type GitHubAuthAccount = {
-  id: string;
-  credentialId: string;
-  credentialRevision: number;
-  providerUserId: string;
-  providerUserStatus: 'available' | 'unavailable';
-  user: GitHubUserSummary;
-  scope?: string;
-  current?: boolean;
-  source?: 'oauth' | 'pat' | 'cli' | 'gh-cli';
-  status?: 'valid' | 'invalid';
-};
-
-export type GitHubDeviceFlowStart = {
-  flowId: string;
-  userCode: string;
-  verificationUri: string;
-  verificationUriComplete?: string;
-  expiresIn: number;
-  interval: number;
-  scope?: string;
-};
-
-export type GitHubDeviceFlowComplete =
-  | { connected: true; user: GitHubUserSummary; scope?: string }
-  | { connected: false; status?: string; error?: string };
-
 export interface SourceControlAPI {
+  /**
+   * The providers the connected server serves, ordered. An authoritative
+   * empty list where no provider is served (VS Code); throws on failure.
+   */
+  providers(): Promise<SourceControlProviderDescriptor[]>;
   repositoryContext(directory: string): Promise<SourceControlRepositoryContext>;
   repositoryBinding(directory: string): Promise<SourceControlBindingRead>;
   resetRepositoryBinding(intent: SourceControlRepositoryBindingResetIntent): Promise<SourceControlBindingRead>;
@@ -2012,9 +1787,9 @@ export interface SourceControlAPI {
    */
   refreshProviderReads(identity: SourceControlIdentity, scope: ProviderReadsRefreshScope): Promise<void>;
   /** One page of a project's labels, for the board's picker. */
-  referenceLabels(context: SourceControlReadContext, project: GitHubRepoSelector): Promise<GitHubIssueLabel[]>;
+  referenceLabels(context: SourceControlReadContext, project: RepositorySelector): Promise<Label[]>;
   /** One page of the people who can be asked to review in a project. */
-  referenceReviewers(context: SourceControlReadContext, project: GitHubRepoSelector): Promise<GitHubReferenceReviewer[]>;
+  referenceReviewers(context: SourceControlReadContext, project: RepositorySelector): Promise<RepositoryReferenceReviewer[]>;
   changeRequestsList(
     context: SourceControlReadContext,
     options?: { page?: number; query?: string; state?: RepositoryReferenceState; people?: RepositoryReferencePeople },
@@ -2048,19 +1823,29 @@ export interface SourceControlAPI {
   projectUpstream(context: SourceControlReadContext): Promise<ProjectUpstream>;
   projectBranches(context: SourceControlReadContext, owner: string, project: string): Promise<string[]>;
 
-  /** GitHub only: one page of issues or PRs for the reference picker. Throws on failure. */
-  githubReferences(context: SourceControlReadContext, options: GitHubReferencesOptions): Promise<GitHubReferencesResult>;
   /**
-   * GitHub only: one page of issues or PRs across up to 100 repositories, each
-   * read through its own context. Absent where the runtime cannot. Throws when
-   * the whole request fails (rate limit, network); a single folder that cannot
-   * be read is reported in the result instead.
+   * One page of issues or change requests for the reference picker, for a
+   * provider whose descriptor offers `features.referenceSearch`. Throws on failure.
    */
-  githubReferencesAcross?(contexts: SourceControlReadContext[], options: GitHubReferencesOptions): Promise<GitHubReferencesAcrossResult>;
-  /** GitHub only: comments of one item the picker previews, and a PR's size, review and checks. Throws on failure. */
-  githubReferenceDetail(context: SourceControlReadContext, item: GitHubPullRequestRef): Promise<GitHubReferenceDetailResult>;
-  /** GitHub only: checks and mergeability of up to 30 listed PRs, for their colour. Throws on failure. */
-  githubPullStatuses(context: SourceControlReadContext, pulls: GitHubPullRequestRef[]): Promise<GitHubPullStatusesResult>;
+  references(context: SourceControlReadContext, query: RepositoryReferenceQuery): Promise<RepositoryReferencePage>;
+  /**
+   * One page of issues or change requests across up to 100 repositories of one
+   * provider (`features.referencesAcross`), each read through its own context.
+   * Absent where the runtime cannot. Throws when the whole request fails (rate
+   * limit, network); a single folder that cannot be read is reported in the
+   * result instead.
+   */
+  referencesAcross?(contexts: SourceControlReadContext[], query: RepositoryReferenceQuery): Promise<RepositoryReferencesAcrossResult>;
+  /**
+   * Comments of one item the picker previews, and a change request's size,
+   * review and checks (`features.referenceDetail`). Throws on failure.
+   */
+  referenceDetail(context: SourceControlReadContext, ref: RepositoryItemRef): Promise<RepositoryReferenceDetailResult>;
+  /**
+   * Checks and mergeability of up to 30 listed change requests, for their
+   * colour (`features.listStatuses`). Throws on failure.
+   */
+  changeRequestListStatuses(context: SourceControlReadContext, refs: RepositoryItemRef[]): Promise<ChangeRequestListStatusesResult>;
 }
 
 export interface RemoteClientRecord {
@@ -2159,230 +1944,6 @@ export interface RelayHostStatus {
   identityConflict: boolean;
 }
 
-export type LinearUserSummary = {
-  id: string;
-  name: string | null;
-  displayName: string | null;
-  email: string | null;
-  avatarUrl: string | null;
-};
-
-export type LinearOrganizationSummary = {
-  id: string;
-  name: string;
-  urlKey: string | null;
-};
-
-export type LinearWorkspaceSummary = {
-  id: string;
-  name: string | null;
-  urlKey: string | null;
-  current: boolean;
-  user?: LinearUserSummary | null;
-  authorizedAt?: number | null;
-};
-
-export type LinearAuthStatus = {
-  connected: boolean;
-  user?: LinearUserSummary | null;
-  organization?: LinearOrganizationSummary | null;
-  scope?: string;
-  workspaces?: LinearWorkspaceSummary[];
-};
-
-export type LinearAuthStart = {
-  authorizationUrl: string;
-  expiresIn: number;
-  scope: string;
-};
-
-export type LinearAuthOrigin = 'desktop' | 'web';
-
-export type LinearIssueState = {
-  id: string | null;
-  name: string | null;
-  type: string | null;
-};
-
-export type LinearWorkflowState = {
-  id: string;
-  name: string;
-  type: string | null;
-  position: number;
-};
-
-export type LinearIssueAssignee = {
-  name: string | null;
-  displayName: string | null;
-  avatarUrl: string | null;
-};
-
-export type LinearIssueTeam = {
-  id: string;
-  key: string;
-  name: string;
-};
-
-export type LinearIssuePriority = 0 | 1 | 2 | 3 | 4;
-
-export type LinearIssueLabel = {
-  id: string;
-  name: string;
-  color: string | null;
-};
-
-export type LinearIssueSummary = {
-  id: string;
-  identifier: string;
-  title: string;
-  url: string;
-  state?: LinearIssueState | null;
-  assignee?: LinearIssueAssignee | null;
-  team?: LinearIssueTeam | null;
-  priority?: LinearIssuePriority | null;
-  /** Absent on a related issue (a parent, a sub-issue): Linear is not asked for them there. */
-  labels?: LinearIssueLabel[];
-  updatedAt?: string | null;
-  /** The issue this one is a sub-issue of. */
-  parent?: LinearIssueSummary | null;
-  /** Null without sub-issues. Only the first few are counted; `more` says there are others. */
-  subIssueProgress?: LinearSubIssueProgress | null;
-};
-
-export type LinearSubIssueProgress = {
-  total: number;
-  /** Completed, canceled or a duplicate. */
-  done: number;
-  more: boolean;
-};
-
-export type LinearIssueComment = {
-  id: string;
-  body: string;
-  createdAt: string | null;
-  user?: { name: string | null; displayName: string | null; avatarUrl?: string | null } | null;
-};
-
-export type LinearIssue = LinearIssueSummary & {
-  description?: string | null;
-  comments?: LinearIssueComment[];
-  /** In Linear's order; the first page only, `subIssuesMore` says there are others. */
-  subIssues?: LinearIssueSummary[];
-  subIssuesMore?: boolean;
-};
-
-/** `open`: not done, canceled or a duplicate; the server's default. */
-export type LinearIssueListStatus = 'open' | 'all' | 'backlog' | 'todo' | 'started' | 'inReview' | 'completed' | 'canceled' | 'duplicate';
-/** Whose issues: anyone's, assigned to me, or created by me. */
-export type LinearIssueListAssignee = 'any' | 'me' | 'created';
-export type LinearIssueListPriority = 'all' | 'none' | 'urgent' | 'high' | 'medium' | 'low';
-
-export type LinearIssuesListOptions = {
-  query?: string;
-  cursor?: string;
-  status?: LinearIssueListStatus;
-  assignee?: LinearIssueListAssignee;
-  teamId?: string;
-  priority?: LinearIssueListPriority;
-};
-
-export type LinearIssuesListResult = {
-  connected: boolean;
-  issues?: LinearIssueSummary[];
-  cursor?: string | null;
-  hasMore?: boolean;
-};
-
-export type LinearIssueGetResult = {
-  connected: boolean;
-  issue?: LinearIssue | null;
-};
-
-/** Linear's workflow category; team-specific state names map onto these. */
-export type LinearStateType = 'triage' | 'backlog' | 'unstarted' | 'started' | 'completed' | 'canceled';
-
-/** Live state of a linked Linear issue, refreshed in batches for list surfaces. */
-export type LinearIssueLiveSummary = {
-  identifier: string;
-  title: string;
-  state: { name: string; type: LinearStateType };
-};
-
-
-export type LinearIssueStatesResult = {
-  connected: boolean;
-  states?: LinearWorkflowState[];
-};
-
-export type LinearIssueUpdateInput = {
-  id: string;
-  stateId: string;
-};
-
-export type LinearIssueUpdateResult = {
-  connected: boolean;
-  issue?: LinearIssue | null;
-};
-
-export type LinearTeamMapping = {
-  id: string;
-  key: string;
-  name: string;
-  projectPath: string | null;
-};
-
-export type LinearMappingResult = {
-  connected: boolean;
-  defaultProjectPath?: string | null;
-  teams?: LinearTeamMapping[];
-};
-
-export type LinearMappingWrite = {
-  defaultProjectPath: string | null;
-  teamProjectPaths: { [teamId: string]: string };
-};
-
-export type LinearSessionStatusKind = 'started' | 'completed' | 'failure';
-
-export type LinearSessionStatusPostInput = {
-  kind: LinearSessionStatusKind;
-  sessionId: string;
-  issueIdentifier?: string;
-  sessionOrigin?: string;
-};
-
-export type LinearSessionStatusPostResult =
-  | { connected: false }
-  | { connected: true; posted: true; commentId: string | null }
-  | {
-    connected: true;
-    posted: false;
-    skipped: 'already-posted' | 'issue-not-found' | 'not-started' | 'disabled' | 'origin-not-public';
-  };
-
-export type LinearPreferences = {
-  /** Status comments are off until the user opts in. */
-  sessionComments: boolean;
-};
-
-export interface LinearAPI {
-  authStatus(): Promise<LinearAuthStatus>;
-  authStart(origin?: LinearAuthOrigin): Promise<LinearAuthStart>;
-  authDisconnect(): Promise<{ removed: boolean }>;
-  authActivate(organizationId: string): Promise<LinearAuthStatus>;
-  issuesList(options?: LinearIssuesListOptions): Promise<LinearIssuesListResult>;
-  /** Forgets the server's short-lived Linear lists, so the next list read asks Linear: the board's list refresh. */
-  refreshListReads(): Promise<void>;
-  issueGet(id: string): Promise<LinearIssueGetResult>;
-  issueStates(teamId: string): Promise<LinearIssueStatesResult>;
-  issueUpdate(input: LinearIssueUpdateInput): Promise<LinearIssueUpdateResult>;
-  mappingGet(): Promise<LinearMappingResult>;
-  mappingSet(mapping: LinearMappingWrite): Promise<LinearMappingResult>;
-  sessionStatusPost(input: LinearSessionStatusPostInput): Promise<LinearSessionStatusPostResult>;
-  preferencesGet(): Promise<LinearPreferences>;
-  preferencesSet(preferences: LinearPreferences): Promise<LinearPreferences>;
-}
-
 export interface RuntimeAPIs {
   /** Native local picker. Web/mobile fall back to their browser file input; VS Code does not import themes. */
   themeFiles?: {
@@ -2396,7 +1957,8 @@ export interface RuntimeAPIs {
   permissions: PermissionsAPI;
   notifications: NotificationsAPI;
   sourceControl: SourceControlAPI;
-  linear?: LinearAPI;
+  /** Work-item trackers the server serves; VS Code has none. */
+  trackers?: TrackerAPI;
   push?: PushAPI;
   diagnostics?: DiagnosticsAPI;
   clientAuth?: ClientAuthAPI;

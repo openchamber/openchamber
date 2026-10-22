@@ -19,11 +19,13 @@ import { useGitStore } from '@/stores/useGitStore';
 import { useGitIdentitiesStore } from '@/stores/useGitIdentitiesStore';
 import { useGitHubPrStatusStore } from '@/stores/useGitHubPrStatusStore';
 import { useSourceControlAuthStore } from '@/stores/useSourceControlAuthStore';
+import { useSourceControlProviderRegistry } from '@/lib/source-control/providers/registry';
 import { repositoryBindingOwner } from '@/lib/source-control/repository-binding';
 import { useChangeRequestContextStore } from '@/stores/useChangeRequestContextStore';
 import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
 import { sessionEvents } from '@/lib/sessionEvents';
-import { useLinearAuthStore } from '@/stores/useLinearAuthStore';
+import { useTrackerRegistry } from '@/lib/trackers/registry';
+import { useTrackerAuthStore } from '@/stores/useTrackerAuthStore';
 import { useQuotaStore } from '@/stores/useQuotaStore';
 import { useMcpStore } from '@/stores/useMcpStore';
 import { useSkillsStore } from '@/stores/useSkillsStore';
@@ -106,6 +108,8 @@ export const resetAppForRuntimeEndpointChange = (detail: RuntimeEndpointChangedD
   sessionEvents.cancelPendingGitRefreshes();
   useGitIdentitiesStore.getState().resetForRuntimeSwitch(detail.runtimeKey);
   useSourceControlAuthStore.getState().resetForRuntimeSwitch();
+  // Another server may serve other providers; its own remembered list stands in until it answers.
+  useSourceControlProviderRegistry.getState().resetForRuntimeSwitch(detail.runtimeKey);
   repositoryBindingOwner.reset();
   useChangeRequestContextStore.getState().resetForRuntimeSwitch();
   useGitHubPrStatusStore.getState().resetForRuntimeSwitch();
@@ -118,11 +122,13 @@ export const resetAppForRuntimeEndpointChange = (detail: RuntimeEndpointChangedD
   // Guest OAuth status is answered by the instance too; a stale "connected"
   // would otherwise be pushed to a guest frame on the new instance.
   useGuestOauthStore.getState().resetForRuntimeSwitch();
-  // Linear and GitHub are authenticated on the instance, not in the browser.
+  // Trackers and source control are authenticated on the instance, not in the browser.
   // Left in place, the previous instance's login stayed visible and usable —
   // its rail tab, its issue pickers, its work-status rows — against a runtime
   // that has no such integration. `App` re-asks once the new instance answers.
-  useLinearAuthStore.getState().resetForRuntimeSwitch();
+  useTrackerAuthStore.getState().resetForRuntimeSwitch();
+  // Another server may serve other trackers; its own remembered list stands in until it answers.
+  useTrackerRegistry.getState().resetForRuntimeSwitch(detail.runtimeKey);
   useSourceControlAuthStore.getState().resetForRuntimeSwitch();
   // Work-status readouts served from the instance: quotas, MCP servers, skills
   // and agent memory. All were cached globally or by directory alone, so they

@@ -1,6 +1,20 @@
 import { describe, expect, test } from 'bun:test';
 import { mergeMetadataPatch } from './session-metadata-store.js';
 import { buildLinkEntry, buildLinkPatch, createSessionLinker } from './session-link.js';
+import { matchLinearUrl } from '../linear/tracker.js';
+
+const matchTrackerUrl = (url) => {
+  const identifier = matchLinearUrl(url);
+  return identifier ? { provider: 'linear', identifier } : null;
+};
+// A registry with Linear's own `matchUrl` and a tracker that fails to load.
+const trackers = {
+  list: () => ['linear', 'broken'],
+  implementation: async (id) => {
+    if (id === 'broken') throw new Error('load failed');
+    return { matchUrl: matchLinearUrl };
+  },
+};
 
 class TestError extends Error {
   constructor(message, status) {
@@ -12,6 +26,7 @@ class TestError extends Error {
 const createLinker = (metadata = {}) => {
   const store = { metadata, writes: 0 };
   const linker = createSessionLinker({
+    trackers,
     updateMetadata: async (_sessionId, decide) => {
       const patch = decide(store.metadata);
       if (!patch) return { metadata: store.metadata, changed: false };
@@ -33,10 +48,17 @@ describe('buildLinkEntry', () => {
     expect(buildLinkEntry({ url: 'https://github.com/acme/app/issues/12', title: 'Slow', kind: 'change' }, 1).entry.kind).toBe('issue');
   });
 
-  test('a Linear issue address becomes the Linear entry', () => {
-    expect(buildLinkEntry({ url: 'https://linear.app/acme/issue/eng-12/search', title: 'Search', kind: 'issue' }, 1).entry).toEqual({
-      id: 'linear:ENG-12', identifier: 'ENG-12', title: 'Search', url: 'https://linear.app/acme/issue/eng-12/search', kind: 'linear', linkedAt: 1,
+  test('a registered tracker\'s item address becomes a tracker entry under the same id as before', () => {
+    expect(buildLinkEntry({ url: 'https://linear.app/acme/issue/eng-12/search', title: 'Search', kind: 'issue' }, 1, { matchTrackerUrl }).entry).toEqual({
+      // Linear keeps the kind older bundled UIs know, with the provider beside it.
+      id: 'linear:ENG-12', kind: 'linear', provider: 'linear', identifier: 'ENG-12', title: 'Search', url: 'https://linear.app/acme/issue/eng-12/search', linkedAt: 1,
     });
+    // Any other tracker is a `tracker` entry.
+    const matchJira = () => ({ provider: 'jira', identifier: 'proj-4' });
+    expect(buildLinkEntry({ url: 'https://acme.atlassian.net/browse/PROJ-4', title: 'Bug', kind: 'issue' }, 1, { matchTrackerUrl: matchJira }).entry)
+      .toMatchObject({ id: 'jira:PROJ-4', kind: 'tracker', provider: 'jira', identifier: 'PROJ-4' });
+    // Without a tracker that claims it, the address is an external link.
+    expect(buildLinkEntry({ url: 'https://linear.app/acme/issue/eng-12/search', title: 'Search', kind: 'issue' }, 1).entry.kind).toBe('external');
   });
 
   test('any other service is stored as it was described', () => {
@@ -74,6 +96,24 @@ describe('buildLinkEntry', () => {
 
 describe('session.link', () => {
   const pull = { url: 'https://github.com/acme/app/pull/7', title: 'Add search', kind: 'change' };
+
+  test('links a tracker item through the registry, and a tracker that fails to load refuses nothing', async () => {
+    const { linker, store } = createLinker();
+    const result = await linker.link({ sessionId: 's1', link: { url: 'https://linear.app/acme/issue/ENG-3', title: 'T', kind: 'issue' } });
+    expect(result.linked).toMatchObject({ id: 'linear:ENG-3', kind: 'linear', provider: 'linear' });
+    expect(store.metadata.openchamber.linked_issues).toHaveLength(1);
+  });
+
+  test('re-linking an item stored as a legacy Linear entry refreshes it in place and keeps its kind', () => {
+    const legacy = { id: 'linear:ENG-1', identifier: 'ENG-1', title: 'Spec', url: 'https://linear.app/x/issue/ENG-1', kind: 'linear', linkedAt: 1 };
+    const same = buildLinkEntry({ url: 'https://linear.app/x/issue/ENG-1', title: 'Spec', kind: 'issue' }, 9, { matchTrackerUrl }).entry;
+    expect(buildLinkPatch({ openchamber: { linked_issues: [legacy] } }, same)).toBeNull();
+    // A renamed issue refreshes the snapshot; an older bundled UI still sees a `linear` entry.
+    const renamed = buildLinkEntry({ url: 'https://linear.app/x/issue/ENG-1', title: 'Spec v2', kind: 'issue' }, 9, { matchTrackerUrl }).entry;
+    expect(buildLinkPatch({ openchamber: { linked_issues: [legacy] } }, renamed).openchamber.linked_issues).toEqual([
+      { ...legacy, title: 'Spec v2', kind: 'linear', provider: 'linear' },
+    ]);
+  });
 
   test('appends to the links already there and keeps other metadata', async () => {
     const existing = { id: 'linear:ENG-1', identifier: 'ENG-1', title: 'Spec', url: 'https://linear.app/x', kind: 'linear', linkedAt: 1 };

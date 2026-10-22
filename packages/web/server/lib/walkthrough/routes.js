@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { parseSource } from './sources.js';
+import { supportsChangeRequestPatch } from './pull-request.js';
 
 // The composer's provider, which the model stays on; anything else is no provider.
 const providerIdSchema = z.string().trim().min(1).max(200).optional().catch(undefined);
@@ -58,8 +59,8 @@ export function registerWalkthroughRoutes(app, { getWalkthroughService, validate
       bindingRevision: Number(input?.bindingRevision),
       primaryRemote: input?.primaryRemote,
     });
-    if (readContext.provider !== 'github' && readContext.provider !== 'gitlab') {
-      throw Object.assign(new Error('Pull request walkthroughs support GitHub and GitLab only'), {
+    if (!supportsChangeRequestPatch(readContext.provider)) {
+      throw Object.assign(new Error('This source control provider does not offer change request walkthroughs'), {
         statusCode: 422,
         code: 'UNSUPPORTED_WALKTHROUGH_PROVIDER',
       });

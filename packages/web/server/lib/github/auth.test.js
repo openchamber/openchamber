@@ -111,8 +111,8 @@ describe('GitHub auth credentials', () => {
       expect.objectContaining({ id: oauth.accountId, status: 'invalid', providerUserStatus: 'available' }),
       expect.objectContaining({ id: pat.accountId, status: 'valid', providerUserStatus: 'available' }),
     ]);
-    await expect(auth.removeGitHubAuthAccount(oauth.accountId)).resolves.toBe(true);
-    await expect(auth.removeGitHubAuthAccount(oauth.accountId)).resolves.toBe(false);
+    await expect(auth.removeGitHubAuthAccountForHost('github.com', oauth.accountId)).resolves.toBe(true);
+    await expect(auth.removeGitHubAuthAccountForHost('github.com', oauth.accountId)).resolves.toBe(false);
   });
 
   it('fails closed on malformed or unsupported storage and leaves it untouched', async () => {

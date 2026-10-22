@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 
 import type {
-  GitHubPullReference,
-  GitHubPullStatus,
-  GitHubReferencesAcrossResult,
-  GitHubReferencesOptions,
+  RepositoryChangeRequestReference,
+  ChangeRequestListStatus,
+  RepositoryReferencesAcrossResult,
+  RepositoryReferenceQuery,
   SourceControlReadContext,
 } from '@/lib/api/types';
 
@@ -20,6 +20,14 @@ import {
   skippedOf,
 } from './acrossRepositories';
 import { createValueCache } from './referenceCache';
+import { githubLikeDescriptor, gitlabLikeDescriptor } from '@/lib/source-control/providers/descriptor.fixture';
+
+const across = { referencesAcross: true, listStatuses: true };
+const githubLike = githubLikeDescriptor();
+const descriptors = [
+  { ...githubLike, features: { ...githubLike.features, ...across } },
+  gitlabLikeDescriptor(),
+];
 
 const context = (directory: string, provider: 'github' | 'gitlab' = 'github'): SourceControlReadContext => ({
   provider,
@@ -31,36 +39,55 @@ const context = (directory: string, provider: 'github' | 'gitlab' = 'github'): S
   bindingRevision: 1,
 });
 
-const pull = (repo: string, number: number, state: 'open' | 'closed' = 'open'): GitHubPullReference => ({
-  kind: 'pull', number, title: `PR ${number}`, url: `https://github.com/acme/${repo}/pull/${number}`,
+const pull = (repo: string, number: number, state: 'open' | 'closed' = 'open'): RepositoryChangeRequestReference => ({
+  kind: 'pull', provider: 'github', number, title: `PR ${number}`, url: `https://github.com/acme/${repo}/pull/${number}`,
   body: '', bodyTruncated: false, createdAt: null, updatedAt: null, author: null, labels: [], commentCount: 0,
   sourceRepo: { owner: 'acme', repo, source: 'origin' },
   state, draft: false, head: `branch-${number}`, base: 'main', headSha: `sha-${number}`, headRepo: null,
 });
 
 describe('partitionAcrossContexts', () => {
-  test('asks the GitHub folders and leaves out GitLab and unreadable ones, in folder order', () => {
+  test('asks the folders of the provider that searches across repositories, and names the others, in folder order', () => {
     const result = partitionAcrossContexts([
       { directory: '/w/a', state: context('/w/a') },
       { directory: '/w/b', state: context('/w/b', 'gitlab') },
       { directory: '/w/c', state: 'missing' },
       { directory: '/w/d', state: context('/w/d') },
-    ]);
+    ], descriptors);
     expect(result.ready).toBe(true);
-    expect(result.github.map((entry) => entry.directory)).toEqual(['/w/a', '/w/d']);
-    expect(result.excluded).toEqual([{ directory: '/w/b', reason: 'gitlab' }, { directory: '/w/c', reason: 'missing' }]);
+    expect(result.provider).toBe('github');
+    expect(result.asked.map((entry) => entry.directory)).toEqual(['/w/a', '/w/d']);
+    expect(result.excluded).toEqual([
+      { directory: '/w/b', reason: 'unsupportedProvider', provider: 'gitlab' },
+      { directory: '/w/c', reason: 'missing' },
+    ]);
+  });
+
+  test('asks the lowest-order provider among those present that can search across repositories', () => {
+    const gitlab = gitlabLikeDescriptor();
+    const searchingGitLab = [githubLikeDescriptor(), { ...gitlab, features: { ...gitlab.features, ...across } }];
+    const folders = [
+      { directory: '/w/a', state: context('/w/a') },
+      { directory: '/w/b', state: context('/w/b', 'gitlab') },
+    ];
+    const result = partitionAcrossContexts(folders, searchingGitLab);
+    expect(result.provider).toBe('gitlab');
+    expect(result.asked.map((entry) => entry.directory)).toEqual(['/w/b']);
+    expect(result.excluded).toEqual([{ directory: '/w/a', reason: 'unsupportedProvider', provider: 'github' }]);
+    // No provider present can search: nothing is asked.
+    expect(partitionAcrossContexts(folders, [githubLikeDescriptor()])).toMatchObject({ provider: null, asked: [] });
   });
 
   test('is not ready while any folder still loads', () => {
-    const result = partitionAcrossContexts([{ directory: '/w/a', state: context('/w/a') }, { directory: '/w/b', state: null }]);
+    const result = partitionAcrossContexts([{ directory: '/w/a', state: context('/w/a') }, { directory: '/w/b', state: null }], descriptors);
     expect(result.ready).toBe(false);
-    expect(result.github.map((entry) => entry.directory)).toEqual(['/w/a']);
+    expect(result.asked.map((entry) => entry.directory)).toEqual(['/w/a']);
   });
 });
 
 describe('what a list leaves out', () => {
   test('joins the folders never asked with those the answer skipped', () => {
-    const contexts = partitionAcrossContexts([{ directory: '/w/a', state: 'missing' }]);
+    const contexts = partitionAcrossContexts([{ directory: '/w/a', state: 'missing' }], descriptors);
     const skipped = skippedOf([
       { directory: '/w/b', status: 'included', repo: { owner: 'acme', repo: 'b', url: '' } },
       { directory: '/w/c', status: 'error' },
@@ -75,12 +102,12 @@ describe('what a list leaves out', () => {
 
 describe('fetchAcrossPage', () => {
   const github = [{ directory: '/w/a', context: context('/w/a') }, { directory: '/w/b', context: context('/w/b') }];
-  const result = (overrides: Partial<GitHubReferencesAcrossResult>): GitHubReferencesAcrossResult => ({
+  const result = (overrides: Partial<RepositoryReferencesAcrossResult>): RepositoryReferencesAcrossResult => ({
     items: [], cursor: null, hasMore: false, total: 0, repositories: [], ...overrides,
   });
 
-  test('sends one request with the contexts of the GitHub folders, the filter and the cursor', async () => {
-    const calls: Array<{ contexts: SourceControlReadContext[]; options: GitHubReferencesOptions }> = [];
+  test('sends one request with the contexts of the asked folders, the filter and the cursor', async () => {
+    const calls: Array<{ contexts: SourceControlReadContext[]; options: RepositoryReferenceQuery }> = [];
     const page = await fetchAcrossPage(async (contexts, options) => {
       calls.push({ contexts, options });
       return result({ items: [{ ...pull('a', 1), directory: '/w/a' }], cursor: 'next', hasMore: true, repositories: [{ directory: '/w/a', status: 'included', repo: { owner: 'acme', repo: 'a', url: '' } }, { directory: '/w/b', status: 'no-repo' }] });
@@ -91,7 +118,7 @@ describe('fetchAcrossPage', () => {
     expect(page).toMatchObject({ kind: 'page', cursor: 'next', hasMore: true, skipped: [{ directory: '/w/b', reason: 'no-repo' }] });
   });
 
-  test('asks nothing without a GitHub folder or where the runtime cannot', async () => {
+  test('asks nothing without an asked folder or where the runtime cannot', async () => {
     let asked = 0;
     const search = async () => { asked += 1; return result({}); };
     expect(await fetchAcrossPage(search, [], { kind: 'issue' })).toEqual({ kind: 'unavailable', reason: 'no-repo' });
@@ -128,9 +155,9 @@ describe('fetchAcrossPage', () => {
 
 describe('an item finds its folder', () => {
   test('uses its own directory across repositories, else the list\'s', () => {
-    expect(itemDirectory({ source: 'github', reference: pull('a', 1), directory: '/w/a' }, '/w')).toBe('/w/a');
-    expect(itemDirectory({ source: 'github', reference: pull('a', 1) }, '/w/a')).toBe('/w/a');
-    expect(itemDirectory({ source: 'github', reference: pull('a', 1) }, null)).toBeNull();
+    expect(itemDirectory({ source: 'repository', reference: pull('a', 1), directory: '/w/a' }, '/w')).toBe('/w/a');
+    expect(itemDirectory({ source: 'repository', reference: pull('a', 1) }, '/w/a')).toBe('/w/a');
+    expect(itemDirectory({ source: 'repository', reference: pull('a', 1) }, null)).toBeNull();
     expect(itemDirectory(null, '/w')).toBe('/w');
   });
 });
@@ -140,7 +167,7 @@ describe('pull statuses across repositories', () => {
     { directory: '/w/a', state: context('/w/a') },
     { directory: '/w/b', state: context('/w/b') },
     { directory: '/w/c', state: context('/w/c', 'gitlab') },
-  ]);
+  ], descriptors);
 
   test('groups the open PRs of each folder with that folder\'s context', () => {
     const groups = groupPullsByDirectory([
@@ -149,19 +176,19 @@ describe('pull statuses across repositories', () => {
       { reference: pull('a', 3, 'closed'), directory: '/w/a' },
       { reference: pull('a', 4), directory: '/w/a' },
       { reference: pull('c', 5), directory: '/w/c' },
-    ], contexts);
+    ], contexts.asked);
     expect(groups.map((group) => [group.directory, group.context.directory, group.pulls.map((entry) => entry.number)]))
       .toEqual([['/w/a', '/w/a', [1, 4]], ['/w/b', '/w/b', [2]]]);
   });
 
   test('asks each group through its own context in batches, and one failing leaves the others', async () => {
-    const cache = createValueCache<GitHubPullStatus | null>(50);
+    const cache = createValueCache<ChangeRequestListStatus | null>(50);
     const groups = groupPullsByDirectory([
       { reference: pull('a', 1), directory: '/w/a' },
       { reference: pull('a', 2), directory: '/w/a' },
       { reference: pull('a', 3), directory: '/w/a' },
       { reference: pull('b', 7), directory: '/w/b' },
-    ], contexts);
+    ], contexts.asked);
     const asked: Array<[string, number[]]> = [];
     ensurePullStatuses(cache, groups, (group) => group.directory, async (askedContext, pulls) => {
       asked.push([askedContext.directory, pulls.map((entry) => entry.number)]);

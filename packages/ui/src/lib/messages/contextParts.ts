@@ -2,7 +2,7 @@
  * Structured context attached to an outgoing message.
  *
  * Every user-attached context item — an inline code comment, a terminal
- * selection, a browser annotation, a GitHub PR comment or failed check, a
+ * selection, a browser annotation, a change request comment or failed check, a
  * linked issue or PR — is sent as its own synthetic text part. The part's
  * `text` is what the model reads; the part's `metadata[CONTEXT_METADATA_KEY]`
  * carries the same information structured, so the timeline can render the
@@ -15,6 +15,8 @@
  */
 
 import { z } from 'zod';
+import { sourceControlProviderIdSchema } from '@/lib/source-control/providers/descriptor';
+import { readSourceControlProvider } from '@/lib/source-control/providers/registry';
 import type { SourceControlProvider } from '@/lib/api/types';
 import type { JsonValue } from '@openchamber/sdk';
 import type { Metadata } from '@/lib/opencode/model';
@@ -110,8 +112,10 @@ type ChangeRequestContext = {
     url: string;
 };
 
-type LinearIssueContext = {
-    kind: 'linear-issue';
+/** A tracker's work item. Messages from before trackers carry `linear-issue`, read as Linear's. */
+type TrackerItemContext = {
+    kind: 'tracker-item';
+    provider: string;
     identifier: string;
     title: string;
     url: string;
@@ -146,7 +150,7 @@ export type ContextPartPayload =
     | ChatQuoteContext
     | RepositoryIssueContext
     | ChangeRequestContext
-    | LinearIssueContext
+    | TrackerItemContext
     | GuestIssueContext
     | GuestPrContext;
 
@@ -174,6 +178,28 @@ export type ContextPart = {
 };
 
 /**
+ * English for the model naming a change request where it lives ("GitLab merge
+ * request"), from the provider's descriptor. A part written before parts named
+ * their provider reads as a plain pull request.
+ */
+function changeRequestNoun(provider: SourceControlProvider | undefined): string {
+    if (!provider) return 'pull request';
+    const { label, terminology } = readSourceControlProvider(provider);
+    return `${label} ${terminology.promptNoun}`;
+}
+
+/** The model-facing name of a review comment's source. */
+export function changeRequestCommentSource(provider: SourceControlProvider | undefined): string {
+    return `${changeRequestNoun(provider)} comment`;
+}
+
+/** The model-facing name of a failed check's source: a pipeline job or a check, by the provider's CI term. */
+export function changeRequestCheckSource(provider: SourceControlProvider | undefined): string {
+    const ci = provider ? readSourceControlProvider(provider).terminology.ci : 'checks';
+    return `${changeRequestNoun(provider)} ${ci === 'pipeline' ? 'pipeline job' : 'check'}`;
+}
+
+/**
  * The model-facing text for a context payload. The wording intentionally
  * matches what OpenChamber sent before parts carried metadata, so model
  * behavior does not change with the transport format.
@@ -196,7 +222,7 @@ export function formatContextText(payload: ContextPartPayload): string {
         case 'browser-annotation':
             return payload.text ? `${payload.prompt}\n\n${payload.text}` : payload.prompt;
         case 'pr-comment':
-            return `Attached ${payload.provider === 'gitlab' ? 'GitLab merge request' : 'GitHub PR'} comment (${payload.label}):\n\n${payload.body}${payload.text ? `\n\n${payload.text}` : ''}`;
+            return `Attached ${changeRequestCommentSource(payload.provider)} (${payload.label}):\n\n${payload.body}${payload.text ? `\n\n${payload.text}` : ''}`;
         case 'file-quote': {
             const location = payload.startLine != null && payload.endLine != null
                 ? ` lines ${payload.startLine}-${payload.endLine}`
@@ -209,10 +235,10 @@ export function formatContextText(payload: ContextPartPayload): string {
             return `Comment on this fragment of an earlier message in this conversation:\n${quoted}${payload.text ? `\n\n${payload.text}` : ''}`;
         }
         case 'pr-check':
-            return `Attached failed ${payload.provider === 'gitlab' ? 'GitLab merge request pipeline job' : 'GitHub PR check'} (${payload.label}):\n\`\`\`\n${payload.output}\n\`\`\`${payload.text ? `\n\n${payload.text}` : ''}`;
+            return `Attached failed ${changeRequestCheckSource(payload.provider)} (${payload.label}):\n\`\`\`\n${payload.output}\n\`\`\`${payload.text ? `\n\n${payload.text}` : ''}`;
         case 'repository-issue':
         case 'change-request':
-        case 'linear-issue':
+        case 'tracker-item':
         case 'guest-issue':
         case 'guest-pr':
             // Linked issues/PRs carry picker-built context text;
@@ -340,14 +366,14 @@ const canonicalContextPayloadSchema = z.discriminatedUnion('kind', [
         label: z.string(),
         body: z.string(),
         text: z.string(),
-        provider: z.enum(['github', 'gitlab']).optional(),
+        provider: sourceControlProviderIdSchema.optional(),
     }),
     z.object({
         kind: z.literal('pr-check'),
         label: z.string(),
         output: z.string(),
         text: z.string(),
-        provider: z.enum(['github', 'gitlab']).optional(),
+        provider: sourceControlProviderIdSchema.optional(),
     }),
     z.object({
         kind: z.literal('file-quote'),
@@ -366,20 +392,21 @@ const canonicalContextPayloadSchema = z.discriminatedUnion('kind', [
     }),
     z.object({
         kind: z.literal('repository-issue'),
-        provider: z.enum(['github', 'gitlab']).optional(),
+        provider: sourceControlProviderIdSchema.optional(),
         number: z.number().int().positive(),
         title: z.string(),
         url: z.string(),
     }),
     z.object({
         kind: z.literal('change-request'),
-        provider: z.enum(['github', 'gitlab']).optional(),
+        provider: sourceControlProviderIdSchema.optional(),
         number: z.number().int().positive(),
         title: z.string(),
         url: z.string(),
     }),
     z.object({
-        kind: z.literal('linear-issue'),
+        kind: z.literal('tracker-item'),
+        provider: z.string().regex(/^[a-z][a-z0-9-]{0,31}$/),
         identifier: z.string().min(1),
         title: z.string(),
         url: z.string(),
@@ -415,6 +442,12 @@ const contextPayloadSchema = z.union([
         title: z.string(),
         url: z.string(),
     }).transform(({ number, title, url }): ChangeRequestContext => ({ kind: 'change-request', provider: 'github', number, title, url })),
+    z.object({
+        kind: z.literal('linear-issue'),
+        identifier: z.string().min(1),
+        title: z.string(),
+        url: z.string(),
+    }).transform(({ identifier, title, url }): TrackerItemContext => ({ kind: 'tracker-item', provider: 'linear', identifier, title, url })),
 ]);
 
 /**
@@ -569,7 +602,7 @@ export function draftFromContextPayload(
             };
         case 'repository-issue':
         case 'change-request':
-        case 'linear-issue':
+        case 'tracker-item':
         case 'guest-issue':
         case 'guest-pr':
             return null;

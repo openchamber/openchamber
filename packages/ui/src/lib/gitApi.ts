@@ -10,7 +10,7 @@ import { useConfigStore } from '@/stores/useConfigStore';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { notifyGitStatusInvalidated } from './gitStatusInvalidation';
-import type { SourceControlProvider } from '@/lib/source-control/types';
+import type { SourceControlProviderDescriptor } from '@/lib/source-control/providers/descriptor';
 
 export type {
   GitRemote,
@@ -381,13 +381,11 @@ const readOptionalRepoTextFile = async (directory: string, relativePath: string)
 // A repository that ships a PR template expects descriptions in its shape, so
 // the template wins over the built-in section layout. Missing template is the
 // normal case, not a failure: probing stops at the first file that has content.
-const collectPullRequestTemplate = async (directory: string, provider: SourceControlProvider | undefined): Promise<string> => {
-  // A GitLab project's own merge request template comes before any GitHub-style one it may also carry.
-  const gitlabTemplate = '.gitlab/merge_request_templates/Default.md';
-  const paths = provider === 'gitlab'
-    ? [gitlabTemplate, ...PULL_REQUEST_TEMPLATE_PATHS.filter((candidate) => candidate !== gitlabTemplate)]
-    : PULL_REQUEST_TEMPLATE_PATHS;
-  const noun = provider === 'gitlab' ? 'merge request' : 'pull request';
+const collectPullRequestTemplate = async (directory: string, provider: ChangeRequestProviderWords | undefined): Promise<string> => {
+  // A provider's own templates (GitLab's merge request template) come before any GitHub-style one the project may also carry.
+  const own = provider?.features.changeRequestTemplates ?? [];
+  const paths = [...own, ...PULL_REQUEST_TEMPLATE_PATHS.filter((candidate) => !own.includes(candidate))];
+  const noun = provider?.terminology.promptNoun ?? 'pull request';
   for (const relativePath of paths) {
     const content = await readOptionalRepoTextFile(directory, relativePath);
     const trimmed = content?.trim();
@@ -412,9 +410,12 @@ const collectPullRequestTemplate = async (directory: string, provider: SourceCon
   return '';
 };
 
+/** What a generation prompt says of the project's provider: its name, its English noun, its template paths. */
+type ChangeRequestProviderWords = Pick<SourceControlProviderDescriptor, 'label' | 'terminology' | 'features'>;
+
 export async function generatePullRequestDescription(
   directory: string,
-  payload: { base: string; head: string; context?: string; zenModel?: string; providerId?: string; modelId?: string; changeRequestProvider?: SourceControlProvider }
+  payload: { base: string; head: string; context?: string; zenModel?: string; providerId?: string; modelId?: string; changeRequestProvider?: ChangeRequestProviderWords }
 ): Promise<import('./api/types').GeneratedPullRequestDescription> {
   const startedAt = Date.now();
 
@@ -467,7 +468,9 @@ export async function generatePullRequestDescription(
 
   const prompts = await loadMagicPrompts(directory);
   const visiblePrompt = prompts.render('git.pr.generate.visible', {
-    change_request: payload.changeRequestProvider === 'gitlab' ? 'GitLab merge request' : 'GitHub pull request',
+    change_request: payload.changeRequestProvider
+      ? `${payload.changeRequestProvider.label} ${payload.changeRequestProvider.terminology.promptNoun}`
+      : 'pull request',
   });
   const hiddenPrompt = prompts.render('git.pr.generate.instructions', {
     base_branch: payload.base,

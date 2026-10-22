@@ -1,55 +1,79 @@
 import type { IconName } from '@/components/icon/icons';
 import type {
-    GitHubPullStatus,
-    GitHubReference,
+    ChangeRequestListStatus,
+    RepositoryReference,
     RepositoryReferenceFilter,
     RepositoryReferencePeople,
     RepositoryReferenceState,
-    GitHubReferenceKind,
-    LinearIssueListAssignee,
-    LinearIssueListPriority,
-    LinearIssueListStatus,
-    LinearIssueSummary,
+    RepositoryReferenceKind,
+    TrackerItemSummary,
+    TrackerPeopleFilter,
+    TrackerPriority,
+    TrackerPriorityFilter,
 } from '@/lib/api/types';
 import type { I18nKey } from '@/lib/i18n';
 import { prVisualStateOf } from '@/lib/source-control/prVisualState';
+import type { ChangeRequestTerm, SourceControlProviderDescriptor } from '@/lib/source-control/providers/descriptor';
+import { formatChangeRequestReference } from '@/lib/source-control/providers/terminology';
 
-export type ReferencePickerSource = 'github' | 'linear';
+/** A tracker's list, named by its tracker id; the same string names its board tab. */
+export type TrackerReferenceSource = `tracker:${string}`;
+
+/** `repository`: the project's issues and change requests, on whichever provider hosts it; a tracker's work items otherwise. */
+export type ReferencePickerSource = 'repository' | TrackerReferenceSource;
+
+export const trackerReferenceSource = (provider: string): TrackerReferenceSource => `tracker:${provider}`;
+
+/** The tracker a source lists, or null for the repository. */
+export const trackerOfSource = (source: ReferencePickerSource): string | null => (
+    source.startsWith('tracker:') ? source.slice('tracker:'.length) : null
+);
 
 /** One row of the picker, from either source. */
 export type ReferencePickerItem =
     /** `directory`: in a list across several repositories, the folder whose read context the item belongs to. */
-    | { source: 'github'; reference: GitHubReference; directory?: string }
-    | { source: 'linear'; issue: LinearIssueSummary };
+    | { source: 'repository'; reference: RepositoryReference; directory?: string }
+    | { source: 'tracker'; provider: string; item: TrackerItemSummary };
 
 /** A confirmed choice: the item plus what the user set on it in the picker. */
 export type ReferencePickerSelection =
-    | { source: 'github'; reference: GitHubReference; includeDiff: boolean }
-    | { source: 'linear'; issue: LinearIssueSummary };
+    | { source: 'repository'; reference: RepositoryReference; includeDiff: boolean }
+    | { source: 'tracker'; provider: string; item: TrackerItemSummary };
 
-/** Linear lists combine a state, whose issues, and a priority. */
-export type LinearReferenceFilter = {
-    status: LinearIssueListStatus;
-    people: LinearIssueListAssignee;
-    priority: LinearIssueListPriority;
+/** Tracker lists combine a state filter (one of the descriptor's), whose items, and a priority. */
+export type TrackerReferenceFilter = {
+    state: string;
+    people: TrackerPeopleFilter;
+    priority: TrackerPriorityFilter;
 };
 
-export const DEFAULT_LINEAR_FILTER: LinearReferenceFilter = { status: 'open', people: 'any', priority: 'all' };
+export const DEFAULT_TRACKER_FILTER: TrackerReferenceFilter = { state: 'open', people: 'any', priority: 'all' };
 
-/** `#12` for an issue or a GitHub PR, `!12` for a GitLab merge request. */
-export const referenceNumberLabel = (reference: GitHubReference): string => (
-    reference.kind === 'pull' && reference.provider === 'gitlab' ? `!${reference.number}` : `#${reference.number}`
+/** How the item's provider writes its number: `#12` for an issue or a pull request, `!12` for a merge request. */
+export const referenceNumberLabel = (reference: RepositoryReference, descriptor: SourceControlProviderDescriptor): string => (
+    reference.kind === 'pull'
+        ? formatChangeRequestReference(descriptor, reference.number)
+        : `${descriptor.terminology.issuePrefix}${reference.number}`
 );
 
+/**
+ * An item's key on the picker and the board. In memory only. The kind is
+ * part of it on every provider: where issues and change requests are numbered
+ * apart (#1 and !1 on GitLab) they would collide otherwise, and where they
+ * share one number space it changes nothing.
+ */
 export const referencePickerItemKey = (item: ReferencePickerItem | ReferencePickerSelection): string => {
-    if (item.source === 'linear') return `linear:${item.issue.identifier.toUpperCase()}`;
+    if (item.source === 'tracker') return `${item.provider}:${item.item.identifier.toUpperCase()}`;
     const { sourceRepo, number, kind, provider } = item.reference;
-    // GitLab numbers issues (#1) and merge requests (!1) separately, so the
-    // kind is part of the key; on GitHub both share one number space.
-    const host = provider ?? 'github';
-    const marker = host === 'gitlab' && kind === 'pull' ? '!' : '#';
-    return `${host}:${sourceRepo.owner.toLowerCase()}/${sourceRepo.repo.toLowerCase()}${marker}${number}`;
+    const marker = kind === 'pull' ? '!' : '#';
+    return `${provider}:${sourceRepo.owner.toLowerCase()}/${sourceRepo.repo.toLowerCase()}${marker}${number}`;
 };
+
+/** The change-request tab, named by the provider's term. */
+export const CHANGE_REQUEST_TAB_KEYS = {
+    pullRequest: 'references.picker.tab.pulls',
+    mergeRequest: 'references.picker.tab.mergeRequests',
+} as const satisfies Record<ChangeRequestTerm, I18nKey>;
 
 export const DEFAULT_REPOSITORY_FILTER: RepositoryReferenceFilter = { state: 'open', people: 'any' };
 
@@ -57,44 +81,51 @@ export const DEFAULT_REPOSITORY_FILTER: RepositoryReferenceFilter = { state: 'op
 export const REPOSITORY_STATES = {
     issue: ['open', 'closed', 'all'],
     pull: ['open', 'merged', 'closed', 'all'],
-} as const satisfies Record<GitHubReferenceKind, readonly RepositoryReferenceState[]>;
+} as const satisfies Record<RepositoryReferenceKind, readonly RepositoryReferenceState[]>;
 export const REPOSITORY_PEOPLE = {
     issue: ['any', 'assigned', 'created'],
     pull: ['any', 'assigned', 'created', 'reviewRequested'],
-} as const satisfies Record<GitHubReferenceKind, readonly RepositoryReferencePeople[]>;
+} as const satisfies Record<RepositoryReferenceKind, readonly RepositoryReferencePeople[]>;
 
-export const LINEAR_STATUS_FILTERS = [
-    'open', 'all', 'backlog', 'todo', 'started', 'inReview', 'completed', 'canceled', 'duplicate',
-] as const satisfies readonly LinearIssueListStatus[];
-export const LINEAR_PEOPLE_FILTERS = ['any', 'me', 'created'] as const satisfies readonly LinearIssueListAssignee[];
-export const LINEAR_PRIORITY_FILTERS = ['all', 'urgent', 'high', 'medium', 'low', 'none'] as const satisfies readonly LinearIssueListPriority[];
+// A tracker's state filters are its descriptor's, in its menu order; people
+// and priority are offered where its `filters` capabilities say so.
+export const TRACKER_PEOPLE_FILTERS = ['any', 'me', 'created'] as const satisfies readonly TrackerPeopleFilter[];
+export const TRACKER_PRIORITY_FILTERS = ['all', 'urgent', 'high', 'medium', 'low', 'none'] as const satisfies readonly TrackerPriorityFilter[];
 
-export const LINEAR_STATUS_LABEL_KEYS = {
-    open: 'references.picker.filter.linear.status.open',
-    all: 'references.picker.filter.linear.status.all',
-    backlog: 'references.picker.filter.linear.status.backlog',
-    todo: 'references.picker.filter.linear.status.todo',
-    started: 'references.picker.filter.linear.status.started',
-    inReview: 'references.picker.filter.linear.status.inReview',
-    completed: 'references.picker.filter.linear.status.completed',
-    canceled: 'references.picker.filter.linear.status.canceled',
-    duplicate: 'references.picker.filter.linear.status.duplicate',
-} as const satisfies Record<LinearIssueListStatus, I18nKey>;
+const TRACKER_STATE_FILTER_LABEL_KEYS = new Map<string, I18nKey>([
+    ['open', 'references.picker.filter.tracker.state.open'],
+    ['all', 'references.picker.filter.tracker.state.all'],
+    ['triage', 'references.picker.filter.tracker.state.triage'],
+    ['backlog', 'references.picker.filter.tracker.state.backlog'],
+    ['todo', 'references.picker.filter.tracker.state.todo'],
+    ['in-progress', 'references.picker.filter.tracker.state.inProgress'],
+    ['done', 'references.picker.filter.tracker.state.done'],
+    ['canceled', 'references.picker.filter.tracker.state.canceled'],
+    // Linear's own filters.
+    ['inReview', 'references.picker.filter.tracker.linear.inReview'],
+    ['duplicate', 'references.picker.filter.tracker.linear.duplicate'],
+]);
 
-export const LINEAR_PEOPLE_LABEL_KEYS = {
-    any: 'references.picker.filter.linear.people.any',
+/** The translated label of a state filter id; a filter this version has no words for shows its id. */
+export const trackerStateFilterLabel = (state: string, t: (key: I18nKey) => string): string => {
+    const key = TRACKER_STATE_FILTER_LABEL_KEYS.get(state);
+    return key ? t(key) : state;
+};
+
+export const TRACKER_PEOPLE_LABEL_KEYS = {
+    any: 'references.picker.filter.tracker.people.any',
     me: 'references.picker.filter.assigned',
     created: 'references.picker.filter.created',
-} as const satisfies Record<LinearIssueListAssignee, I18nKey>;
+} as const satisfies Record<TrackerPeopleFilter, I18nKey>;
 
-export const LINEAR_PRIORITY_LABEL_KEYS = {
-    all: 'references.picker.filter.linear.priority.all',
-    urgent: 'contextPanel.linear.priority.urgent',
-    high: 'contextPanel.linear.priority.high',
-    medium: 'contextPanel.linear.priority.medium',
-    low: 'contextPanel.linear.priority.low',
-    none: 'references.picker.filter.linear.priority.none',
-} as const satisfies Record<LinearIssueListPriority, I18nKey>;
+export const TRACKER_PRIORITY_LABEL_KEYS = {
+    all: 'references.picker.filter.tracker.priority.all',
+    urgent: 'tracker.priority.urgent',
+    high: 'tracker.priority.high',
+    medium: 'tracker.priority.medium',
+    low: 'tracker.priority.low',
+    none: 'references.picker.filter.tracker.priority.none',
+} as const satisfies Record<TrackerPriorityFilter, I18nKey>;
 
 export const REPOSITORY_STATE_LABEL_KEYS = {
     open: 'references.picker.filter.open',
@@ -104,16 +135,13 @@ export const REPOSITORY_STATE_LABEL_KEYS = {
 } as const satisfies Record<RepositoryReferenceState, I18nKey>;
 
 export const REPOSITORY_PEOPLE_LABEL_KEYS = {
-    any: 'references.picker.filter.linear.people.any',
+    any: 'references.picker.filter.tracker.people.any',
     assigned: 'references.picker.filter.assigned',
     created: 'references.picker.filter.created',
     reviewRequested: 'references.picker.filter.reviewRequested',
 } as const satisfies Record<RepositoryReferencePeople, I18nKey>;
 
-/** How a state is drawn: an icon in a theme colour. */
-type StateGlyph = { icon: IconName; color: string };
-
-type StateLook = StateGlyph & { labelKey: I18nKey };
+type StateLook = { icon: IconName; color: string; labelKey: I18nKey };
 
 /**
  * Issue and PR states in the theme's PR colours, the way the sidebar shows
@@ -121,7 +149,7 @@ type StateLook = StateGlyph & { labelKey: I18nKey };
  * orange on failed checks or a conflict once its status has arrived
  * (`prVisualStateOf`); until then, and while checks run, it reads as open.
  */
-export const githubStateLook = (reference: GitHubReference, status: GitHubPullStatus | null): StateLook => {
+export const repositoryStateLook = (reference: RepositoryReference, status: ChangeRequestListStatus | null): StateLook => {
     if (reference.kind === 'issue') {
         switch (reference.state) {
             case 'open':
@@ -145,30 +173,13 @@ export const githubStateLook = (reference: GitHubReference, status: GitHubPullSt
     return { icon: 'git-pull-request', color: `var(--pr-${visual})`, labelKey: 'references.picker.state.open' };
 };
 
-/** Linear workflow types in the same colours; the state's own name is the label. */
-export const linearStateLook = (issue: LinearIssueSummary): StateGlyph => linearStateTypeLook(issue.state?.type ?? null);
-
-/** The look of a Linear workflow type, for a state that is not an issue's yet (a status menu). */
-export const linearStateTypeLook = (type: string | null): StateGlyph => {
-    switch (type) {
-        case 'started':
-            return { icon: 'record-circle', color: 'var(--pr-open)' };
-        case 'completed':
-            return { icon: 'checkbox-circle', color: 'var(--pr-merged)' };
-        case 'canceled':
-        case 'duplicate':
-            return { icon: 'close-circle', color: 'var(--pr-closed)' };
-        default:
-            return { icon: 'checkbox-blank-circle', color: 'var(--surface-muted-foreground)' };
-    }
-};
-
-export const LINEAR_PRIORITY_KEYS = {
-    1: 'contextPanel.linear.priority.urgent',
-    2: 'contextPanel.linear.priority.high',
-    3: 'contextPanel.linear.priority.medium',
-    4: 'contextPanel.linear.priority.low',
-} as const satisfies Record<1 | 2 | 3 | 4, I18nKey>;
+/** The label of an item's priority; `none` has no label of its own on an item. */
+export const TRACKER_PRIORITY_KEYS = {
+    urgent: 'tracker.priority.urgent',
+    high: 'tracker.priority.high',
+    medium: 'tracker.priority.medium',
+    low: 'tracker.priority.low',
+} as const satisfies Record<Exclude<TrackerPriority, 'none'>, I18nKey>;
 
 type RelativeTime =
     | { key: 'common.relative.justNow' }

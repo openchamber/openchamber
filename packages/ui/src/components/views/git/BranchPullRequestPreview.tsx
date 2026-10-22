@@ -1,8 +1,8 @@
 import * as React from 'react';
 
-import { pullReferenceFromChangeRequest } from '@/components/references/gitlabReferences';
+import { pullReferenceFromChangeRequest } from '@/components/references/listBackedReferences';
 import { ReferencePreview } from '@/components/references/ReferencePreview';
-import { forgetGitHubPullStatus, useGitHubReferenceDetail } from '@/components/references/referenceSources';
+import { forgetRepositoryPullStatus, useRepositoryReferenceDetail } from '@/components/references/referenceSources';
 import { IDLE_PULL_STATUS } from '@/components/references/useReferenceBrowser';
 import { SourceBoardActions, SourceBoardPullLinks } from '@/components/sourceBoard/SourceBoardActions';
 import { SourceBoardChecksDialog } from '@/components/sourceBoard/SourceBoardChecksDialog';
@@ -13,8 +13,9 @@ import { useThreadActions } from '@/components/sourceBoard/threadActions';
 import { useMinuteTickerNow } from '@/hooks/useDurationTicker';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
-import type { GitHubPullReference, SourceControlReadContext } from '@/lib/api/types';
+import type { RepositoryChangeRequestReference, SourceControlReadContext } from '@/lib/api/types';
 import type { ChangeRequest } from '@/lib/source-control/types';
+import { useSourceControlProvider } from '@/lib/source-control/providers/registry';
 import { NewWorktreeDialog } from '@/components/session/NewWorktreeDialog';
 import { useShowTrackerItem } from '@/components/sourceBoard/openTrackerItem';
 import { normalizeProjectPath, resolveProjectForSessionDirectory } from '@/lib/projectResolution';
@@ -22,26 +23,28 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 
 /**
- * Labels and the comment count the branch status does not carry: GitHub
- * answers `#N` with the PR as its lists show it. A GitLab merge request's
- * status carries its labels already, so it keeps what its status says.
+ * Labels and the comment count the branch status does not carry: a provider
+ * with a reference search (`features.referenceSearch`, GitHub) answers `#N`
+ * with the PR as its lists show it. A list-backed provider's status carries
+ * its labels already (GitLab), so it keeps what its status says.
  */
-function useListedPull(context: SourceControlReadContext, number: number, revision: number): GitHubPullReference | null {
+function useListedPull(context: SourceControlReadContext, number: number, revision: number): RepositoryChangeRequestReference | null {
     const { sourceControl } = useRuntimeAPIs();
-    const [listed, setListed] = React.useState<{ key: string; pull: GitHubPullReference } | null>(null);
+    const searchable = useSourceControlProvider(context.provider).features.referenceSearch;
+    const [listed, setListed] = React.useState<{ key: string; pull: RepositoryChangeRequestReference } | null>(null);
     const key = JSON.stringify([context.provider, context.repositoryId, context.bindingRevision, number]);
     React.useEffect(() => {
-        if (context.provider !== 'github') return;
+        if (!searchable) return;
         let cancelled = false;
-        void sourceControl.githubReferences(context, { kind: 'pull', query: `#${number}` })
+        void sourceControl.references(context, { kind: 'pull', query: `#${number}` })
             .then((result) => {
                 if (cancelled || !result.connected) return;
-                const pull = result.items.find((item): item is GitHubPullReference => item.kind === 'pull' && item.number === number);
+                const pull = result.items.find((item): item is RepositoryChangeRequestReference => item.kind === 'pull' && item.number === number);
                 if (pull) setListed({ key, pull });
             })
             .catch(() => undefined);
         return () => { cancelled = true; };
-    }, [context, key, number, revision, sourceControl]);
+    }, [context, key, number, revision, searchable, sourceControl]);
     return listed?.key === key ? listed.pull : null;
 }
 
@@ -68,12 +71,12 @@ export const BranchPullRequestPreview: React.FC<{
     const now = useMinuteTickerNow(true);
 
     const listed = useListedPull(context, changeRequest.number, revision);
-    const reference = React.useMemo<GitHubPullReference>(() => {
+    const reference = React.useMemo<RepositoryChangeRequestReference>(() => {
         const live = pullReferenceFromChangeRequest(changeRequest);
         // The status is the fresher source of state and head; the list adds what it lacks.
         return listed ? { ...live, labels: listed.labels, commentCount: listed.commentCount } : live;
     }, [changeRequest, listed]);
-    const { detail, refresh: refreshDetail } = useGitHubReferenceDetail(directory, reference, true);
+    const { detail, refresh: refreshDetail } = useRepositoryReferenceDetail(directory, reference, true);
     const attachments = usePullAttachments(reference);
 
     const refresh = React.useCallback(() => {
@@ -87,12 +90,12 @@ export const BranchPullRequestPreview: React.FC<{
     const refreshFromHost = async () => {
         const pull = { owner: reference.sourceRepo.owner, repo: reference.sourceRepo.repo, number: reference.number };
         await sourceControl.refreshProviderReads(context, { item: pull }).catch(() => undefined);
-        forgetGitHubPullStatus(pull);
+        forgetRepositoryPullStatus(pull);
         setRevision((value) => value + 1);
         await Promise.all([refreshDetail(), onChanged()]);
     };
 
-    const item = { source: 'github' as const, reference };
+    const item = { source: 'repository' as const, reference };
     const linksDirectory = rootDirectory ?? directory;
     const stack = detail.status === 'ready' ? detail.value.pull?.stack ?? null : null;
     // Another layer of the stack opens in the Tracker; a new one starts in a worktree on top of this branch.
@@ -108,8 +111,8 @@ export const BranchPullRequestPreview: React.FC<{
                 item={item}
                 directory={directory}
                 pullStatus={IDLE_PULL_STATUS}
-                linearDetail={{ status: 'idle' }}
-                githubDetail={detail}
+                trackerDetail={{ status: 'idle' }}
+                repositoryDetail={detail}
                 purpose="attach"
                 pinned
                 includeDiff={false}

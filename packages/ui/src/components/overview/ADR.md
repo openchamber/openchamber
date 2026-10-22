@@ -129,7 +129,8 @@ The repository's CODEOWNERS names the maintainer for everything, so
 `review-requested:@me` returned the whole open queue: 30 rows on the first try.
 Those are the board's catalogue, not something waiting on the user, so they are
 counted on one line that opens into the list. GitHub only for now: the search
-across repositories does not ask GitLab.
+across repositories asks one provider with `features.referencesAcross`, and
+GitLab and Gitea do not have it.
 
 ### The page reads what it needs itself
 
@@ -181,7 +182,7 @@ text colour or muted.
 ## Not built yet
 
 - **Projects section.** One quiet row per project with counts: PRs merged,
-  open PRs and issues with new ones, Linear done. Counts use calendar "today /
+  open PRs and issues with new ones, tracker items done. Counts use calendar "today /
   yesterday" in local time; the maintainer found that simpler than a rolling
   24 hours, and "since your last visit" was rejected because opening the page
   without reading it would wipe the counts.
@@ -189,7 +190,7 @@ text colour or muted.
   branches and linked ones).
 - **GitLab parity** for review requests and the counts: the maintainer requires
   GitLab to match GitHub.
-- **Linear completed counts.**
+- **Tracker completed counts** (Linear today).
 
 ## Where to look
 

@@ -4,8 +4,9 @@ import type { ReferenceThreadActions } from '@/components/references/ReferenceCo
 import { referenceNumberLabel } from '@/components/references/referencePickerItems';
 import { toast } from '@/components/ui';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
-import type { GitHubReference, SourceControlReadContext } from '@/lib/api/types';
+import type { RepositoryReference, SourceControlReadContext } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
+import { useSourceControlProvider } from '@/lib/source-control/providers/registry';
 
 import { newMutationKey } from './mutationKey';
 
@@ -16,15 +17,16 @@ import { newMutationKey } from './mutationKey';
  * repository context: its threads are then read only.
  */
 export function useThreadActions(
-    reference: GitHubReference | null,
+    reference: RepositoryReference | null,
     context: SourceControlReadContext | null,
     onChanged: () => void,
 ): ReferenceThreadActions | undefined {
     const { t } = useI18n();
     const { sourceControl } = useRuntimeAPIs();
+    const descriptor = useSourceControlProvider(reference?.provider);
     return React.useMemo(() => {
         if (!reference || reference.kind !== 'pull' || !context) return undefined;
-        const label = referenceNumberLabel(reference);
+        const label = referenceNumberLabel(reference, descriptor);
         const target = { project: { owner: reference.sourceRepo.owner, name: reference.sourceRepo.repo }, number: reference.number };
         const failed = (
             key: 'sourceBoard.thread.toast.replyFailed' | 'sourceBoard.thread.toast.resolveFailed' | 'sourceBoard.thread.toast.unresolveFailed',
@@ -55,5 +57,5 @@ export function useThreadActions(
                 }
             },
         };
-    }, [context, onChanged, reference, sourceControl, t]);
+    }, [context, descriptor, onChanged, reference, sourceControl, t]);
 }

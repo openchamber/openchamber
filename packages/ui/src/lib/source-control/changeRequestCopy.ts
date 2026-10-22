@@ -1,10 +1,10 @@
 import type { I18nKey } from '@/lib/i18n';
-import type { SourceControlProvider } from '@/lib/api/types';
+import type { ChangeRequestTerm } from './providers/descriptor';
 
 /**
- * GitLab calls a change request a merge request and numbers it with `!`. The
- * change-request copy (Git view, comparison, walkthrough) is written for GitHub; this names the GitLab
- * wording for each of those messages so one component speaks both.
+ * The change-request copy (Git view, comparison, walkthrough) is written for
+ * pull requests; this names the merge-request wording of each of those
+ * messages, so one component speaks whichever term the provider uses.
  */
 const mergeRequestCopy = new Map<I18nKey, I18nKey>([
   ['gitView.header.openPullRequest', 'gitView.mr.openMergeRequest'],
@@ -63,8 +63,8 @@ const mergeRequestCopy = new Map<I18nKey, I18nKey>([
 ]);
 
 /**
- * The message to show for `key` on a project hosted by `provider`: its GitLab
- * wording where one exists, else the key itself.
+ * The message to show for `key` where change requests go by `term`: its
+ * merge-request wording where one exists, else the key itself.
  */
-export const changeRequestCopy = (key: I18nKey, provider: SourceControlProvider | null | undefined): I18nKey =>
-  provider === 'gitlab' ? mergeRequestCopy.get(key) ?? key : key;
+export const changeRequestCopy = (key: I18nKey, term: ChangeRequestTerm): I18nKey =>
+  term === 'mergeRequest' ? mergeRequestCopy.get(key) ?? key : key;

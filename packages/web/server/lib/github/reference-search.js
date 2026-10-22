@@ -597,7 +597,6 @@ export function readPullStatusRefs(value) {
 
 const stateSchema = z.enum(['open', 'closed', 'merged', 'all']).catch('open');
 const peopleSchema = z.enum(['any', 'assigned', 'created', 'reviewRequested']).catch('any');
-const kindSchema = z.enum(['issue', 'pull']).nullable().catch(null);
 
 /** A list's state; anything else reads as `open`. */
 export function readReferenceState(value) {
@@ -609,10 +608,6 @@ export function readReferencePeople(value) {
   return peopleSchema.parse(value);
 }
 
-/** `issue` or `pull`; anything else is null. */
-export function readReferenceKind(value) {
-  return kindSchema.parse(value ?? null);
-}
 
 const searchResultSchema = z.object({
   search: z.object({

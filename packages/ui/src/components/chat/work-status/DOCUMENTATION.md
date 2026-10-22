@@ -531,7 +531,7 @@ a tab.
 
 ## Context sources
 
-Linked GitHub threads first, then skills and MCP counts.
+Linked issues and change requests first, then skills and MCP counts.
 
 Agents are deliberately absent: an agent is who does the work, not material
 loaded into the context. Tools are absent too — `Agent.tools` is a per-agent
@@ -569,12 +569,18 @@ Stored in session metadata as a **snapshot** (`lib/linkedIssues.ts`, namespace
 `openchamber.linked_issues`), persisted through the same server-owned metadata
 store as pinned messages. Number, title, url, author and avatar only — the
 body,
-comments and state belong to GitHub, and mirroring them would mean owning their
-staleness. The stored title can drift; that is the price of a store that never
-needs refreshing. A GitHub row opens github.com. A Linear row opens the
-right-hand Linear panel when Linear is connected on desktop/web; otherwise it
-opens the Linear URL (no rail in VS Code or the phone shell, and none while
-disconnected).
+comments and state belong to their provider, and mirroring them would mean
+owning their staleness. The stored title can drift; that is the price of a
+store that never needs refreshing. A repository row opens its link in the
+Tracker. Its live colour comes from the same repository thread the sidebar
+follows (`getRepositoryThreadRef`, `repositoryThread`), whatever the provider,
+and the heading speaks a provider's word for change requests only when every
+attached change shares it, else pull requests. A tracker row (a Linear issue)
+wears its tracker's mark and, once the server follows it, the tracker's own
+state name in the colour of its category (`getTrackerItemStateLook`). It opens
+as a Tracker tab beside the chat on desktop and web, on the issues and PRs
+board on the phone, and in the browser otherwise (VS Code, a tracker the
+server does not serve, or one that is disconnected).
 
 Writes happen **after** the send promise resolves and are deliberately
 swallowed on failure: the message went out, and a missing bookkeeping entry
@@ -621,11 +627,12 @@ Electron dev uses `local`; hosted pages use their HTTP origin. Without this,
 the quota loader treats a working proxy as a transient disconnected runtime
 and skips the initial load.
 
-Quotas, MCP status, skills, agent memory and the Linear/GitHub logins are all
+Quotas, MCP status, skills, agent memory and the tracker and source-control logins are all
 served by whichever OpenChamber instance is connected, and each was cached
 globally or by directory alone — which two instances can share. A switch left
-the previous instance's answers on screen, and its Linear login usable against
-a runtime that has no Linear. `apps/runtimeEndpointReset.ts` now drops all of
+the previous instance's answers on screen, and its tracker login usable against
+a runtime that has no such tracker. The tracker list itself is per runtime
+too (`lib/trackers/registry.ts`). `apps/runtimeEndpointReset.ts` now drops all of
 them, each store guarding its own in-flight requests with a generation so a
 response for the previous instance cannot land in the new one. The MCP and
 skills effects take `isConnected` as a dependency — not a gate — because

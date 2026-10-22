@@ -16,7 +16,7 @@ it('configures managed HTTPS through the web Git adapter, HTTP route and binding
   const account = { provider: 'github', instance: 'github.com', accountId: 'credential-one' };
   const resolvedAccount = {
     accountId: account.accountId, credentialId: account.accountId, credentialRevision: 2,
-    providerUserId: 'github.com#42', status: 'valid', accessToken: 'canary-runtime-secret',
+    providerUserId: 'github.com#42', status: 'valid', secret: 'canary-runtime-secret',
     source: 'oauth', user: { id: 42, login: 'safe-user' },
   };
   const service = createBindingService({
@@ -105,7 +105,7 @@ describe('source-control provider registry', () => {
     ['SOURCE_CONTROL_LOCK_FAILED', 500],
   ])('routes narrow provider mutations and preserves %s failures', async (code, httpStatus) => {
     const handlers = new Map();
-    const app = { get: vi.fn(), put: vi.fn(), delete: vi.fn(), post: vi.fn((route, handler) => handlers.set(route, handler)) };
+    const app = { get: vi.fn(), put: vi.fn(), delete: vi.fn(), use: vi.fn(), post: vi.fn((route, handler) => handlers.set(route, handler)) };
     const current = { revision: 2, binding: null };
     const mutateProvider = vi.fn().mockResolvedValueOnce(current).mockRejectedValueOnce(Object.assign(new Error('Reload and repair'), { code, current, status: httpStatus }));
     registerSourceControlRoutes(app, { bindingService: { mutateProvider }, gitlab: { store: {
@@ -133,6 +133,7 @@ describe('source-control provider registry', () => {
       post: vi.fn((path) => paths.push(path)),
       put: vi.fn((path) => paths.push(path)),
       delete: vi.fn((path) => paths.push(path)),
+      use: vi.fn(),
     };
     registerSourceControlRoutes(app, { gitlab: { authFile: '/unused/source-control-auth.json', store: {
       readInstance: async () => ({ activeAccountId: null, accounts: [], cliDisabled: false, cliActive: false }),
@@ -154,7 +155,7 @@ describe('source-control provider registry', () => {
     const handlers = new Map();
     const removeTransportBinding = vi.fn(async () => ({ revision: 3, binding: { remotes: [] } }));
     const resetRepositoryBinding = vi.fn(async () => ({ revision: 4, binding: null }));
-    const app = { get: vi.fn(), put: vi.fn(), delete: vi.fn(), post: vi.fn((route, handler) => handlers.set(route, handler)) };
+    const app = { get: vi.fn(), put: vi.fn(), delete: vi.fn(), use: vi.fn(), post: vi.fn((route, handler) => handlers.set(route, handler)) };
     registerSourceControlRoutes(app, { bindingService: { removeTransportBinding, resetRepositoryBinding }, gitlab: { store: {
       listInstances: async () => [], readInstance: async () => ({ activeAccountId: null, accounts: [], cliDisabled: false, cliActive: false }),
     } } });
@@ -180,7 +181,7 @@ describe('source-control provider registry', () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     const handlers = new Map();
     const committed = vi.fn(async () => ({ revision: 3, binding: { remotes: [] } }));
-    const app = { get: vi.fn(), put: vi.fn(), delete: vi.fn(), post: vi.fn((path, handler) => handlers.set(path, handler)) };
+    const app = { get: vi.fn(), put: vi.fn(), delete: vi.fn(), use: vi.fn(), post: vi.fn((path, handler) => handlers.set(path, handler)) };
     registerSourceControlRoutes(app, {
       bindingService: { configureTransportBinding: committed, removeTransportBinding: committed, resetRepositoryBinding: committed },
       onRepositoryTransportChanged: async () => { throw new Error('config locked'); },
@@ -214,6 +215,7 @@ describe('source-control provider registry', () => {
       post: vi.fn(),
       put: vi.fn(),
       delete: vi.fn(),
+      use: vi.fn(),
     };
     registerSourceControlRoutes(app, { gitlab: { store: {
       listInstances: async () => ['https://gitlab.com', 'https://gitlab.example.com'],
@@ -234,12 +236,44 @@ describe('source-control provider registry', () => {
     }
   });
 
+  it('lists the other providers\' instances when one provider cannot list its own', async () => {
+    const previousConfigDir = process.env.GH_CONFIG_DIR;
+    process.env.GH_CONFIG_DIR = '/oc-no-gh-cli-config';
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const handlers = new Map();
+      const app = {
+        get: vi.fn((route, handler) => {
+          if (Object.prototype.toString.call(route) === '[object String]') handlers.set(route, handler);
+        }),
+        post: vi.fn(), put: vi.fn(), delete: vi.fn(), use: vi.fn(),
+      };
+      registerSourceControlRoutes(app, { gitlab: { store: {
+        listInstances: async () => { throw new Error('store unreadable'); },
+        readInstance: async () => ({ activeAccountId: null, accounts: [], cliDisabled: false, cliActive: false }),
+      } } });
+      const json = vi.fn();
+
+      await handlers.get('/api/source-control/instances')({}, { json });
+
+      expect(json).toHaveBeenCalledWith({
+        instances: [{ provider: 'github', instance: 'github.com' }],
+        unavailableProviders: ['gitlab'],
+      });
+    } finally {
+      warn.mockRestore();
+      if (previousConfigDir === undefined) delete process.env.GH_CONFIG_DIR;
+      else process.env.GH_CONFIG_DIR = previousConfigDir;
+    }
+  });
+
   it('does not expose generic whole-binding replacement or deletion routes', () => {
     const app = {
       get: vi.fn(),
       post: vi.fn(),
       put: vi.fn(),
       delete: vi.fn(),
+      use: vi.fn(),
     };
     registerSourceControlRoutes(app, {
       bindingService: {},
@@ -264,6 +298,7 @@ describe('source-control provider registry', () => {
       delete: vi.fn((route, handler) => {
         if (Object.prototype.toString.call(route) === '[object String]') handlers.set(route, handler);
       }),
+      use: vi.fn(),
     };
     registerSourceControlRoutes(app, {
       bindingService: { accountUnavailable },
@@ -284,7 +319,7 @@ describe('source-control provider registry', () => {
 
   it('returns binding authority plus provider-neutral source resolution', async () => {
     const bindingService = { validateReadContext: vi.fn(), validateMutationContext: vi.fn(), accountUnavailable: vi.fn() };
-    const app = { get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() };
+    const app = { get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn(), use: vi.fn() };
 
     const registered = registerSourceControlRoutes(app, {
       bindingService,
@@ -312,7 +347,7 @@ describe('source-control provider registry', () => {
         readInstance: async () => ({ activeAccountId: null, accounts: [], cliDisabled: false, cliActive: false }),
       } },
     };
-    const app = { get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() };
+    const app = { get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn(), use: vi.fn() };
 
     expect(() => registerSourceControlRoutes(app, dependencies)).not.toThrow();
   });
@@ -320,7 +355,7 @@ describe('source-control provider registry', () => {
   it('builds the shared executor around an injected mutation store', () => {
     const mutationStore = { claim: vi.fn(), complete: vi.fn(), read: vi.fn(), withExecutionLock: vi.fn() };
     const bindingService = { validateReadContext: vi.fn(), validateMutationContext: vi.fn(), accountUnavailable: vi.fn() };
-    const app = { get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() };
+    const app = { get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn(), use: vi.fn() };
 
     expect(() => registerSourceControlRoutes(app, {
       configRoot: '/unused', bindingService, mutationStore,

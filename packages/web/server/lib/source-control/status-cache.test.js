@@ -38,6 +38,16 @@ describe('createChangeRequestStatusCache', () => {
     expect(cache.last(context({ accountId: 'other' }))).not.toBeNull();
   });
 
+  it('answers a read that started before an invalidation but does not store it', () => {
+    const cache = createChangeRequestStatusCache({ ttlMs: 100, now: () => 5 });
+    const started = cache.begin();
+    cache.invalidate({ repositoryId: 'repo_one' });
+    expect(cache.store(context(), { branch: 'feature' }, started)).toEqual({ branch: 'feature', fetchedAt: 5 });
+    expect(cache.last(context())).toBeNull();
+    cache.store(context(), { branch: 'feature' }, cache.begin());
+    expect(cache.last(context())).toEqual({ branch: 'feature', fetchedAt: 5 });
+  });
+
   it('evicts the oldest entry at capacity', () => {
     const cache = createChangeRequestStatusCache({ ttlMs: 100, maxEntries: 2 });
     cache.store(context({ branch: 'a' }), {});

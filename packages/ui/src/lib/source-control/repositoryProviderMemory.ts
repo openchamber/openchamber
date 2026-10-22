@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { sourceControlProviderIdSchema } from '@/lib/source-control/providers/descriptor';
 import type { SourceControlProvider } from '@/lib/api/types';
 
 /**
@@ -14,7 +15,9 @@ import type { SourceControlProvider } from '@/lib/api/types';
 const STORAGE_KEY = 'openchamber.repositoryProvider.v1';
 const MAX_ENTRIES = 500;
 
-const storedMemory = z.array(z.tuple([z.string(), z.enum(['github', 'gitlab'])]));
+// One malformed entry is dropped, never the rest.
+const storedMemory = z.array(z.tuple([z.string(), sourceControlProviderIdSchema]).nullable().catch(null))
+  .transform((entries) => entries.filter((entry) => entry !== null));
 
 const listeners = new Set<() => void>();
 let memory: Map<string, SourceControlProvider> | null = null;

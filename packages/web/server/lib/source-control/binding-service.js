@@ -1,5 +1,7 @@
 import { isPlainObject, isString } from '../shared/guards.js';
 import { normalizeSourceControlProviderInstance } from './provider-instance.js';
+import { isProviderId } from './provider-id.js';
+import { sourceControlProviderDescriptors } from './provider-descriptors.js';
 import { resolvePrivateRepositoryIdentity } from './repository-identity.js';
 import { fingerprintRemoteUrl, redactRemoteUrl } from './url-redaction.js';
 import { createHttpsCredentialReference, normalizeGitRemoteEndpoint, parseGitCredentialReference } from '../git/credential-resolver.js';
@@ -26,12 +28,18 @@ const requiredString = (value, name, makeError = bindingInputError) => {
   return value.trim();
 };
 
+const providerOrigin = (provider, instance) => {
+  const descriptor = sourceControlProviderDescriptors.get(provider);
+  if (!descriptor) throw bindingInputError('provider is unavailable');
+  return descriptor.instance.origin(instance);
+};
+
 const providerRepositoryForEndpoint = (provider, instance, endpoint) => {
   if (!isSafeRepositoryEndpoint(endpoint)) throw bindingInputError('provider endpoint is invalid');
   let normalized;
   try { normalized = normalizeGitRemoteEndpoint(endpoint.displayUrl); }
   catch { throw bindingInputError('provider endpoint is invalid'); }
-  const origin = new URL(provider === 'github' ? `https://${instance}` : instance);
+  const origin = providerOrigin(provider, instance);
   const expectedPort = Number(origin.port || (origin.protocol === 'http:' ? 80 : 443));
   if (normalized.host !== origin.hostname.toLowerCase()
     || (normalized.protocol !== 'ssh' && normalized.port !== expectedPort)) {
@@ -49,7 +57,7 @@ const parseProviders = (value, repositoryRemotes) => {
     if (!isPlainObject(provider) || !hasExactKeys(provider,
       ['provider', 'instance', 'accountId', 'primaryRemote'], ['repository'])) throw bindingInputError('provider binding is invalid');
     const name = requiredString(provider.provider, 'provider');
-    if (name !== 'github' && name !== 'gitlab') throw bindingInputError('provider is unsupported');
+    if (!sourceControlProviderDescriptors.has(name)) throw bindingInputError('provider is unavailable');
     const primaryRemote = requiredString(provider.primaryRemote, 'primaryRemote');
     if (!availableRemotes.has(primaryRemote)) throw bindingInputError(`remote ${primaryRemote} does not exist`);
     const endpoint = repositoryRemotes.find((remote) => remote.name === primaryRemote)?.fetch;
@@ -268,6 +276,24 @@ const normalizeProviderInstance = (provider, instance, makeError = bindingInputE
   }
 };
 
+/**
+ * The spelling two records of one provider compare by: the provider's own
+ * normalization, or the stored text itself for a provider this build does
+ * not know, so an association it wrote can still be named and removed.
+ */
+const providerInstanceKey = (provider, instance, makeError = bindingInputError) => (
+  sourceControlProviderDescriptors.has(provider)
+    ? normalizeProviderInstance(provider, instance, makeError)
+    : requiredString(instance, 'instance', makeError)
+);
+
+const unavailableProviderError = () => {
+  const error = new Error('Source control provider is unavailable');
+  error.code = 'SOURCE_CONTROL_PROVIDER_UNAVAILABLE';
+  error.status = 422;
+  return error;
+};
+
 /** The host a remote address or a provider instance points at, lowercased; null when it names none. */
 export const hostOf = (value) => {
   const text = String(value ?? '').trim();
@@ -381,8 +407,7 @@ export function createBindingService({
         || account.status !== 'valid' || !['oauth', 'pat', 'cli'].includes(account.source)
         || !Number.isInteger(account.user?.id) || account.user.id < 0
         || !safeProviderUsername(account.user.login)
-        || account.providerUserId !== (reference.provider === 'github'
-          ? `github.com#${account.user.id}` : `${instance}#${account.user.id}`)) return unavailablePresentation();
+        || account.providerUserId !== `${instance}#${account.user.id}`) return unavailablePresentation();
       return {
         status: 'available', transport: 'https', provider: reference.provider, instance,
         source: account.source, username: account.user.login, providerUserId: account.providerUserId,
@@ -427,7 +452,8 @@ export function createBindingService({
     const directory = requiredString(input.directory, 'directory', makeRequiredFieldError);
     const repositoryId = requiredString(input.repositoryId, 'repositoryId', makeRequiredFieldError);
     const provider = requiredString(input.provider, 'provider', makeRequiredFieldError);
-    if (provider !== 'github' && provider !== 'gitlab') throw makeContextError('Source control provider is invalid');
+    if (!isProviderId(provider)) throw makeContextError('Source control provider is invalid');
+    if (!sourceControlProviderDescriptors.has(provider)) throw unavailableProviderError();
     const instance = normalizeProviderInstance(provider, input.instance, makeRequiredFieldError);
     const accountId = requiredString(input.accountId, 'accountId', makeRequiredFieldError);
     const primaryRemote = requiredString(input.primaryRemote, 'primaryRemote', makeRequiredFieldError);
@@ -481,10 +507,10 @@ export function createBindingService({
       throw bindingInputError('Provider binding target is invalid');
     }
     const provider = requiredString(target.provider, 'provider');
-    if (provider !== 'github' && provider !== 'gitlab') throw bindingInputError('provider is unsupported');
+    if (!isProviderId(provider)) throw bindingInputError('provider is unsupported');
     return {
       provider,
-      instance: normalizeProviderInstance(provider, target.instance),
+      instance: providerInstanceKey(provider, target.instance),
       accountId: requiredString(target.accountId, 'accountId'),
       primaryRemote: requiredString(target.primaryRemote, 'primaryRemote'),
     };
@@ -715,14 +741,14 @@ export function createBindingService({
       if (input.transport === 'https') {
         const account = input.credentialAccount;
         if (!isPlainObject(account) || !hasExactKeys(account, ['provider', 'instance', 'accountId'])
-          || !['github', 'gitlab'].includes(account.provider)) throw bindingInputError('Credential account is invalid');
+          || !sourceControlProviderDescriptors.has(account.provider)) throw bindingInputError('Credential account is invalid');
         const reference = {
           provider: account.provider,
           instance: normalizeProviderInstance(account.provider, account.instance),
           accountId: requiredString(account.accountId, 'credential accountId'),
         };
         if (reference.accountId !== account.accountId) throw bindingInputError('Credential account is invalid');
-        const origin = new URL(reference.provider === 'github' ? `https://${reference.instance}` : reference.instance);
+        const origin = providerOrigin(reference.provider, reference.instance);
         for (const endpoint of [remote.fetch, remote.push]) {
           let parsed;
           try { parsed = normalizeGitRemoteEndpoint(endpoint.rawUrl); }
@@ -734,10 +760,10 @@ export function createBindingService({
         const id = resolved?.credentialId;
         const revision = resolved?.credentialRevision;
         const providerUserId = resolved?.providerUserId;
-        const secret = reference.provider === 'github' ? resolved?.accessToken : resolved?.token;
+        const secret = resolved?.secret;
         if (id !== reference.accountId || resolved?.status !== 'valid'
           || !Number.isSafeInteger(revision) || revision < 1
-          || !isString(providerUserId) || !providerUserId
+          || !isString(providerUserId) || !providerUserId.startsWith(`${reference.instance}#`)
           || !isString(secret) || !secret || /[\r\n\0]/.test(secret)) {
           throw bindingInputError('Selected credential account is unavailable');
         }
@@ -897,22 +923,22 @@ export function createBindingService({
           if (endpointProtocol !== 'https') throw bindingInputError('Managed HTTPS credentials require an HTTPS endpoint');
           const account = input.credentialAccount;
           if (!isPlainObject(account) || !hasExactKeys(account, ['provider', 'instance', 'accountId'])
-            || !['github', 'gitlab'].includes(account.provider)) throw bindingInputError('Credential account is invalid');
+            || !sourceControlProviderDescriptors.has(account.provider)) throw bindingInputError('Credential account is invalid');
           const reference = {
             provider: account.provider,
             instance: normalizeProviderInstance(account.provider, account.instance),
             accountId: requiredString(account.accountId, 'credential accountId'),
           };
           if (reference.accountId !== account.accountId) throw bindingInputError('Credential account is invalid');
-          const origin = new URL(reference.provider === 'github' ? `https://${reference.instance}` : reference.instance);
+          const origin = providerOrigin(reference.provider, reference.instance);
           const endpoint = normalizeGitRemoteEndpoint(discovered.endpoint.displayUrl);
           if (origin.protocol !== 'https:' || endpoint.host !== origin.hostname
             || endpoint.port !== Number(origin.port || 443)) throw bindingInputError('Credential account does not match the HTTPS endpoint');
           const resolved = await readTransportAccount?.(reference);
-          const secret = reference.provider === 'github' ? resolved?.accessToken : resolved?.token;
+          const secret = resolved?.secret;
           if (resolved?.credentialId !== reference.accountId || resolved?.status !== 'valid'
             || !Number.isSafeInteger(resolved?.credentialRevision) || resolved.credentialRevision < 1
-            || !isString(resolved?.providerUserId) || !resolved.providerUserId
+            || !isString(resolved?.providerUserId) || !resolved.providerUserId.startsWith(`${reference.instance}#`)
             || !isString(secret) || !secret || /[\r\n\0]/.test(secret)) {
             throw bindingInputError('Selected credential account is unavailable');
           }
@@ -979,7 +1005,7 @@ export function createBindingService({
       if (input.operation !== 'add') {
         const parsedTarget = parseProviderTarget(input.target);
         targetIndex = providers.findIndex((candidate) => candidate.provider === parsedTarget.provider
-          && normalizeProviderInstance(candidate.provider, candidate.instance) === parsedTarget.instance
+          && providerInstanceKey(candidate.provider, candidate.instance) === parsedTarget.instance
           && candidate.accountId === parsedTarget.accountId && candidate.primaryRemote === parsedTarget.primaryRemote);
         if (targetIndex < 0) throw staleBindingError('The edited provider association changed. Reload before editing.', current);
       }
@@ -1073,8 +1099,9 @@ export function createBindingService({
     accountConnected: async (identity) => {
       if (!isPlainObject(identity)) throw bindingInputError('account identity is required');
       const provider = requiredString(identity.provider, 'provider');
-      if (provider !== 'github' && provider !== 'gitlab') throw bindingInputError('provider is unsupported');
-      if (!(store.adoptAccount instanceof Function)) return [];
+      if (!isProviderId(provider)) throw bindingInputError('provider is unsupported');
+      // Nothing of a provider this build does not know can be adopted.
+      if (!sourceControlProviderDescriptors.has(provider) || !(store.adoptAccount instanceof Function)) return [];
       return store.adoptAccount({
         provider,
         instance: normalizeProviderInstance(provider, identity.instance),
@@ -1086,7 +1113,8 @@ export function createBindingService({
     accountUnavailable: async (identity) => {
       if (!isPlainObject(identity)) throw bindingInputError('account identity is required');
       const provider = requiredString(identity.provider, 'provider');
-      if (provider !== 'github' && provider !== 'gitlab') throw bindingInputError('provider is unsupported');
+      if (!isProviderId(provider)) throw bindingInputError('provider is unsupported');
+      if (!sourceControlProviderDescriptors.has(provider)) return [];
       return store.reconcileAccount({
         provider,
         instance: normalizeProviderInstance(provider, identity.instance),

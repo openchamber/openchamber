@@ -1,12 +1,15 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test"
 import type {
+  ChangeRequest,
   ChangeRequestStatus,
-  GitHubPullRequestLiveSummary,
-  GitHubPullRequestStatus,
+  ChangeRequestLiveSummary,
+  Project,
   RuntimeAPIs,
+  SourceControlIdentity,
   SourceControlReadContext,
 } from "@/lib/api/types"
 import { getBoundSourceControlReadContexts } from "@/lib/source-control/identity"
+import type { SourceControlStatus } from "./useGitHubPrStatusStore"
 
 let runtimeKey = "runtime-a"
 mock.module("@/lib/runtime-switch", () => ({ getRuntimeKey: () => runtimeKey }))
@@ -30,7 +33,7 @@ const deferred = <T>() => {
 }
 
 const readContext = (overrides: Partial<{
-  provider: "github" | "gitlab"
+  provider: string
   instance: string
   accountId: string
   repositoryId: string
@@ -39,7 +42,7 @@ const readContext = (overrides: Partial<{
   primaryRemote: string
 }> = {}) => ({
   directory: "/repo",
-  provider: "github" as const,
+  provider: "github",
   instance: "github.com",
   accountId: "github.com#1",
   repositoryId: "repo_one",
@@ -48,44 +51,31 @@ const readContext = (overrides: Partial<{
   ...overrides,
 })
 
-const canonicalStatus = (
-  status: GitHubPullRequestStatus,
-  context: SourceControlReadContext,
-  branch: string,
-): ChangeRequestStatus => {
-  const project = status.repo ? {
-    ...context,
-    id: `${status.repo.owner}/${status.repo.repo}`,
-    owner: status.repo.owner,
-    name: status.repo.repo,
-    url: status.repo.url,
-  } : null
-  const changeRequestProject = project ?? {
-    ...context,
-    id: context.repositoryId,
-    owner: "",
-    name: "",
-    url: "",
-  }
-  return {
-    identity: context,
-    fetchedAt: status.fetchedAt,
-    project,
-    branch: status.branch ?? branch,
-    changeRequest: status.pr ? {
-      ...context,
-      ...status.pr,
-      id: String(status.pr.number),
-      project: changeRequestProject,
-    } : null,
-    ci: status.checks ? { summary: status.checks } : null,
-    canMerge: status.canMerge,
-    defaultBranch: status.defaultBranch,
-    resolvedRemoteName: status.resolvedRemoteName,
-  }
-}
+// What the server answers for a branch: the neutral status DTO, as every provider emits it.
+const GITHUB: SourceControlIdentity = { provider: "github", instance: "github.com" }
+const ACME_APP: Project = { ...GITHUB, id: "acme/app", owner: "acme", name: "app", url: "https://github.com/acme/app" }
 
-const params = (loadStatus: () => Promise<GitHubPullRequestStatus>, branch = "main") => {
+const changeRequest = (
+  fields: Pick<ChangeRequest, "number" | "title" | "url" | "state"> & Partial<ChangeRequest>,
+): ChangeRequest => ({
+  ...GITHUB,
+  id: `acme/app#${fields.number}`,
+  project: ACME_APP,
+  draft: false,
+  base: "main",
+  head: "feature",
+  ...fields,
+})
+
+const loadedStatus = (fields: Partial<ChangeRequestStatus> = {}): ChangeRequestStatus => ({
+  identity: GITHUB,
+  project: null,
+  branch: "main",
+  changeRequest: null,
+  ...fields,
+})
+
+const params = (loadStatus: () => Promise<ChangeRequestStatus>, branch = "main") => {
   const context = readContext()
   return {
     directory: context.directory,
@@ -95,7 +85,7 @@ const params = (loadStatus: () => Promise<GitHubPullRequestStatus>, branch = "ma
     identity: context,
     readContext: context,
     sourceControl: {
-      changeRequestStatus: async () => canonicalStatus(await loadStatus(), context, branch),
+      changeRequestStatus: loadStatus,
     },
     authChecked: true,
     connected: true,
@@ -507,7 +497,7 @@ describe("GitHub PR status cache ownership", () => {
   })
 
   test("rejects a response after params change", async () => {
-    const request = deferred<GitHubPullRequestStatus>()
+    const request = deferred<ChangeRequestStatus>()
     const loadStatus = () => request.promise
     const key = getGitHubPrStatusKey("/repo", "main", "origin")
     useGitHubPrStatusStore.getState().ensureEntry(key)
@@ -515,7 +505,7 @@ describe("GitHub PR status cache ownership", () => {
     const loading = useGitHubPrStatusStore.getState().refresh(key, { force: true })
 
     useGitHubPrStatusStore.getState().setParams(key, params(loadStatus, "next"))
-    request.resolve({ connected: true, pr: null })
+    request.resolve(loadedStatus())
     await loading
 
     expect(useGitHubPrStatusStore.getState().entries[key]?.status).toBe(null)
@@ -523,7 +513,7 @@ describe("GitHub PR status cache ownership", () => {
   })
 
   test("rejects an old runtime response after reset", async () => {
-    const request = deferred<GitHubPullRequestStatus>()
+    const request = deferred<ChangeRequestStatus>()
     const loadStatus = () => request.promise
     const key = getGitHubPrStatusKey("/repo", "main", "origin")
     useGitHubPrStatusStore.getState().ensureEntry(key)
@@ -532,7 +522,7 @@ describe("GitHub PR status cache ownership", () => {
 
     runtimeKey = "runtime-b"
     useGitHubPrStatusStore.getState().resetForRuntimeSwitch()
-    request.resolve({ connected: true, pr: null })
+    request.resolve(loadedStatus())
     await loading
 
     expect(useGitHubPrStatusStore.getState().entries[key]?.status).toBe(null)
@@ -541,7 +531,7 @@ describe("GitHub PR status cache ownership", () => {
 
   test("throttles repeated non-forced refreshes after a failure", async () => {
     let requestCount = 0
-    const loadStatus = async (): Promise<GitHubPullRequestStatus> => {
+    const loadStatus = async (): Promise<ChangeRequestStatus> => {
       requestCount += 1
       throw new Error("GitHub rate limited")
     }
@@ -557,19 +547,19 @@ describe("GitHub PR status cache ownership", () => {
   })
 
   test("does not throttle replacement params when a queued request becomes stale", async () => {
-    const first = deferred<GitHubPullRequestStatus>()
-    const second = deferred<GitHubPullRequestStatus>()
+    const first = deferred<ChangeRequestStatus>()
+    const second = deferred<ChangeRequestStatus>()
     let staleRequestCount = 0
     let replacementRequestCount = 0
     const firstStatus = () => first.promise
     const secondStatus = () => second.promise
-    const staleStatus = async (): Promise<GitHubPullRequestStatus> => {
+    const staleStatus = async (): Promise<ChangeRequestStatus> => {
       staleRequestCount += 1
-      return { connected: true, pr: null }
+      return loadedStatus({ branch: "queued" })
     }
-    const replacementStatus = async (): Promise<GitHubPullRequestStatus> => {
+    const replacementStatus = async (): Promise<ChangeRequestStatus> => {
       replacementRequestCount += 1
-      return { connected: true, pr: null }
+      return loadedStatus({ branch: "queued" })
     }
     const firstKey = getGitHubPrStatusKey("/repo", "first", "origin")
     const secondKey = getGitHubPrStatusKey("/repo", "second", "origin")
@@ -589,8 +579,8 @@ describe("GitHub PR status cache ownership", () => {
     const staleRefresh = useGitHubPrStatusStore.getState().refresh(queuedKey, { force: true })
     await Promise.resolve()
     useGitHubPrStatusStore.getState().setParams(queuedKey, params(replacementStatus, "queued"))
-    first.resolve({ connected: true, pr: null })
-    second.resolve({ connected: true, pr: null })
+    first.resolve(loadedStatus({ branch: "first" }))
+    second.resolve(loadedStatus({ branch: "second" }))
     await Promise.all([firstRefresh, secondRefresh, staleRefresh])
 
     await useGitHubPrStatusStore.getState().refresh(queuedKey)
@@ -600,16 +590,15 @@ describe("GitHub PR status cache ownership", () => {
   })
 
   test("rejects a server-cached response older than the held status", async () => {
-    const newer: GitHubPullRequestStatus = {
-      connected: true,
+    const newer = loadedStatus({
       fetchedAt: 2_000,
-      pr: { number: 7, title: "t", url: "u", state: "open", draft: false, base: "main", head: "f" },
-      checks: { state: "pending", total: 3, success: 2, failure: 0, pending: 1 },
-    }
-    const older: GitHubPullRequestStatus = {
+      changeRequest: changeRequest({ number: 7, title: "t", url: "u", state: "open", head: "f" }),
+      ci: { summary: { state: "pending", total: 3, success: 2, failure: 0, pending: 1 } },
+    })
+    const older: ChangeRequestStatus = {
       ...newer,
       fetchedAt: 1_000,
-      checks: { state: "success", total: 3, success: 3, failure: 0, pending: 0 },
+      ci: { summary: { state: "success", total: 3, success: 3, failure: 0, pending: 0 } },
     }
 
     const responses = [newer, older]
@@ -687,16 +676,16 @@ describe("GitHub PR status stale terminal associations", () => {
   })
 
   test("forced refresh replaces a merged PR with a newer open PR", async () => {
-    const merged: GitHubPullRequestStatus = {
-      connected: true,
+    const merged = loadedStatus({
+      branch: "feature",
       fetchedAt: 1_000,
-      pr: { number: 12, title: "old", url: "u12", state: "merged", draft: false, base: "main", head: "feature" },
-    }
-    const newerOpen: GitHubPullRequestStatus = {
-      connected: true,
+      changeRequest: changeRequest({ number: 12, title: "old", url: "u12", state: "merged" }),
+    })
+    const newerOpen = loadedStatus({
+      branch: "feature",
       fetchedAt: 2_000,
-      pr: { number: 15, title: "new", url: "u15", state: "open", draft: false, base: "main", head: "feature" },
-    }
+      changeRequest: changeRequest({ number: 15, title: "new", url: "u15", state: "open" }),
+    })
     let requestCount = 0
     const loadStatus = async () => {
       requestCount += 1
@@ -716,18 +705,13 @@ describe("GitHub PR status stale terminal associations", () => {
   })
 
   test("forced refresh clears a merged PR when no open PR remains", async () => {
-    const merged: GitHubPullRequestStatus = {
+    const merged: SourceControlStatus = {
       connected: true,
       fetchedAt: 1_000,
       repo: { owner: "acme", repo: "app", url: "https://github.com/acme/app" },
       pr: { number: 12, title: "old", url: "u12", state: "merged", draft: false, base: "main", head: "feature" },
     }
-    const empty: GitHubPullRequestStatus = {
-      connected: true,
-      fetchedAt: 2_000,
-      repo: { owner: "acme", repo: "app", url: "https://github.com/acme/app" },
-      pr: null,
-    }
+    const empty = loadedStatus({ branch: "feature", fetchedAt: 2_000, project: ACME_APP })
     const loadStatus = async () => empty
     const key = getGitHubPrStatusKey("/repo", "feature", "origin")
     useGitHubPrStatusStore.getState().ensureEntry(key)
@@ -747,33 +731,20 @@ describe("GitHub PR status stale terminal associations", () => {
     await useGitHubPrStatusStore.getState().refresh(key, { force: true })
 
     expect(useGitHubPrStatusStore.getState().entries[key]?.status?.pr).toBeNull()
-    expect(useGitHubPrStatusStore.getState().entries[key]?.status?.repo).toEqual({
-      accountId: "github.com#1",
-      bindingRevision: 1,
-      directory: "/repo",
-      id: "acme/app",
-      instance: "github.com",
-      name: "app",
-      owner: "acme",
-      primaryRemote: "origin",
-      provider: "github",
-      repo: "app",
-      repositoryId: "repo_one",
-      url: "https://github.com/acme/app",
-    })
+    expect(useGitHubPrStatusStore.getState().entries[key]?.status?.repo).toEqual({ ...ACME_APP, repo: "app" })
   })
 
   test("watcher discovery revalidates a cached merged PR", async () => {
-    const merged: GitHubPullRequestStatus = {
-      connected: true,
+    const merged = loadedStatus({
+      branch: "feature",
       fetchedAt: 1_000,
-      pr: { number: 12, title: "old", url: "u12", state: "merged", draft: false, base: "main", head: "feature" },
-    }
-    const newerOpen: GitHubPullRequestStatus = {
-      connected: true,
+      changeRequest: changeRequest({ number: 12, title: "old", url: "u12", state: "merged" }),
+    })
+    const newerOpen = loadedStatus({
+      branch: "feature",
       fetchedAt: 2_000,
-      pr: { number: 15, title: "new", url: "u15", state: "open", draft: false, base: "main", head: "feature" },
-    }
+      changeRequest: changeRequest({ number: 15, title: "new", url: "u15", state: "open" }),
+    })
     const responses = [merged, newerOpen]
     let requestCount = 0
     const loadStatus = async () => {
@@ -806,16 +777,12 @@ describe("GitHub PR status stale terminal associations", () => {
   })
 
   test("watcher discovery clears a cached merged PR when no open PR exists", async () => {
-    const merged: GitHubPullRequestStatus = {
-      connected: true,
+    const merged = loadedStatus({
+      branch: "feature",
       fetchedAt: 1_000,
-      pr: { number: 12, title: "old", url: "u12", state: "merged", draft: false, base: "main", head: "feature" },
-    }
-    const empty: GitHubPullRequestStatus = {
-      connected: true,
-      fetchedAt: 2_000,
-      pr: null,
-    }
+      changeRequest: changeRequest({ number: 12, title: "old", url: "u12", state: "merged" }),
+    })
+    const empty = loadedStatus({ branch: "feature", fetchedAt: 2_000 })
     const responses = [merged, empty]
     let requestCount = 0
     const loadStatus = async () => {
@@ -844,7 +811,7 @@ describe("GitHub PR status stale terminal associations", () => {
   })
 
   test("seeds sibling entries from a closed PR without freezing discovery", () => {
-    const closed: GitHubPullRequestStatus = {
+    const closed: SourceControlStatus = {
       connected: true,
       fetchedAt: 1_000,
       pr: { number: 9, title: "closed", url: "u9", state: "closed", draft: false, base: "main", head: "feature" },
@@ -886,12 +853,12 @@ describe("GitHub PR status stale terminal associations", () => {
   })
 
   test("keeps a cached PR when a forced refresh fails", async () => {
-    const merged: GitHubPullRequestStatus = {
+    const merged: SourceControlStatus = {
       connected: true,
       fetchedAt: 1_000,
       pr: { number: 12, title: "old", url: "u12", state: "merged", draft: false, base: "main", head: "feature" },
     }
-    const loadStatus = async (): Promise<GitHubPullRequestStatus> => {
+    const loadStatus = async (): Promise<ChangeRequestStatus> => {
       throw new Error("GitHub unavailable")
     }
     const key = getGitHubPrStatusKey("/repo", "feature", "origin")
@@ -916,7 +883,7 @@ describe("GitHub PR status stale terminal associations", () => {
   })
 
   test("persists a merged branch association as history", () => {
-    const merged: GitHubPullRequestStatus = {
+    const merged: SourceControlStatus = {
       connected: true,
       fetchedAt: 1_000,
       pr: { number: 12, title: "old", url: "u12", state: "merged", draft: false, base: "main", head: "feature" },
@@ -939,12 +906,12 @@ describe("GitHub PR status stale terminal associations", () => {
 
     const persisted = useGitHubPrStatusStore.persist.getOptions().partialize?.(
       useGitHubPrStatusStore.getState(),
-    ) as { entries?: Record<string, { status?: GitHubPullRequestStatus | null }> } | undefined
+    ) as { entries?: Record<string, { status?: SourceControlStatus | null }> } | undefined
     expect(persisted?.entries?.[key]?.status?.pr?.number).toBe(12)
   })
 
   test("still persists an open branch association", () => {
-    const open: GitHubPullRequestStatus = {
+    const open: SourceControlStatus = {
       connected: true,
       fetchedAt: 1_000,
       pr: { number: 15, title: "new", url: "u15", state: "open", draft: false, base: "main", head: "feature" },
@@ -967,7 +934,7 @@ describe("GitHub PR status stale terminal associations", () => {
 
     const persisted = useGitHubPrStatusStore.persist.getOptions().partialize?.(
       useGitHubPrStatusStore.getState(),
-    ) as { entries?: Record<string, { status?: GitHubPullRequestStatus | null }> } | undefined
+    ) as { entries?: Record<string, { status?: SourceControlStatus | null }> } | undefined
     expect(persisted?.entries?.[key]?.status?.pr?.number).toBe(15)
   })
 
@@ -1007,7 +974,7 @@ describe("GitHub PR status stale terminal associations", () => {
       useGitHubPrStatusStore.getState(),
     ) as {
       entries: Record<string, {
-        status: GitHubPullRequestStatus | null
+        status: SourceControlStatus | null
         isInitialStatusResolved: boolean
         lastDiscoveryPollAt: number
       }>
@@ -1168,6 +1135,39 @@ describe("GitHub PR status stale terminal associations", () => {
     expect(serialized).not.toContain('"ci"')
   })
 
+  test("hydrates a bound entry for any served provider id, old and new alike", () => {
+    for (const [provider, instance] of [["github", "github.com"], ["gitlab", "https://gitlab.com"], ["acme", "https://forge.example.com"]]) {
+      const context = readContext({ provider, instance, accountId: `${instance}#1` })
+      const key = getSourceControlStatusKey(context, "feature")
+      const hydrated = useGitHubPrStatusStore.persist.getOptions().merge?.(
+        {
+          entries: {
+            [key]: {
+              status: null,
+              isInitialStatusResolved: true,
+              lastRefreshAt: Date.now(),
+              lastDiscoveryPollAt: Date.now(),
+              identity: {
+                runtimeKey: "runtime-a",
+                provider,
+                instance,
+                accountId: context.accountId,
+                repositoryId: context.repositoryId,
+                bindingRevision: context.bindingRevision,
+                directory: context.directory,
+                branch: "feature",
+                remoteName: context.primaryRemote,
+              },
+              resolvedRemoteName: context.primaryRemote,
+            },
+          },
+        },
+        useGitHubPrStatusStore.getState(),
+      )
+      expect(hydrated?.entries[key]?.identity?.provider).toBe(provider)
+    }
+  })
+
   test("rejects current persistence whose serialized key disagrees with embedded authority", () => {
     const keyContext = readContext({ accountId: "github.com#1", repositoryId: "repo_one", bindingRevision: 3 })
     const embeddedContext = readContext({ accountId: "github.com#2", repositoryId: "repo_two", bindingRevision: 7 })
@@ -1204,7 +1204,7 @@ describe("GitHub PR status stale terminal associations", () => {
 })
 
 describe("branch PR live state pushed by the server", () => {
-  const openStatus = (overrides: Partial<GitHubPullRequestStatus> = {}): GitHubPullRequestStatus => ({
+  const openStatus = (overrides: Partial<SourceControlStatus> = {}): SourceControlStatus => ({
     connected: true,
     fetchedAt: 1,
     repo: { owner: "acme", repo: "app", url: "https://github.com/acme/app" },
@@ -1214,7 +1214,7 @@ describe("branch PR live state pushed by the server", () => {
     ...overrides,
   })
 
-  const liveSummary = (overrides: Partial<GitHubPullRequestLiveSummary> = {}): GitHubPullRequestLiveSummary => ({
+  const liveSummary = (overrides: Partial<ChangeRequestLiveSummary> = {}): ChangeRequestLiveSummary => ({
     owner: "acme",
     repo: "app",
     number: 7,
@@ -1244,7 +1244,7 @@ describe("branch PR live state pushed by the server", () => {
     return key
   }
 
-  const seed = (key: string, status: GitHubPullRequestStatus) => {
+  const seed = (key: string, status: SourceControlStatus) => {
     const target = keyTargets.get(key)
     if (!target) throw new Error(`unknown test key ${key}`)
     useGitHubPrStatusStore.getState().ensureEntry(key)
@@ -1260,7 +1260,7 @@ describe("branch PR live state pushed by the server", () => {
   }
 
   // The record the server pushes for the pull request this entry follows.
-  const pushFor = (key: string, summary: GitHubPullRequestLiveSummary, fetchedAt = 10) => {
+  const pushFor = (key: string, summary: ChangeRequestLiveSummary, fetchedAt = 10) => {
     const item = getBranchTrackedPull(useGitHubPrStatusStore.getState().entries[key])
     if (!item) throw new Error("entry follows no pull request")
     useGitHubPrStatusStore.getState().applyTrackedPulls([{ key: trackedItemKey(item), record: { type: "pull", item, state: summary, fetchedAt } }])
@@ -1335,7 +1335,7 @@ describe("branch PR live state pushed by the server", () => {
     pushFor(key, liveSummary({ state: "merged", checks: null }), 20)
     expect(useGitHubPrStatusStore.getState().entries[key]?.status?.pr?.state).toBe("open")
 
-    const linked = { provider: "github" as const, kind: "pull" as const, owner: "acme", repo: "app", number: 7 }
+    const linked = { provider: "github", instance: "github.com", kind: "pull" as const, owner: "acme", repo: "app", number: 7 }
     useGitHubPrStatusStore.getState().applyTrackedPulls([{ key: trackedItemKey(linked), record: { type: "pull", item: linked, state: liveSummary({ state: "merged" }), fetchedAt: 100 } }])
     expect(useGitHubPrStatusStore.getState().entries[key]?.status?.pr?.state).toBe("open")
   })
@@ -1344,7 +1344,7 @@ describe("branch PR live state pushed by the server", () => {
 describe("linked change request summary URL canonicalization (#4541)", () => {
   const identity = { provider: "github" as const, instance: "github.com" }
   const link = { owner: "acme", repo: "app", number: 7, url: "https://github.com/acme/app/pull/7", title: "feature" }
-  const state: GitHubPullRequestLiveSummary = {
+  const state: ChangeRequestLiveSummary = {
     owner: "acme",
     repo: "app",
     number: 7,
@@ -1389,7 +1389,7 @@ describe("linked change request summary URL canonicalization (#4541)", () => {
     const key = "runtime-a|github|pull|acme/app#42"
     const upper = { owner: "Acme", repo: "app", number: 42, url: "https://github.com/Acme/app/pull/42", title: "feature" }
     const lower = { ...upper, owner: "acme", url: "https://github.com/acme/app/pull/42" }
-    const casingState: GitHubPullRequestLiveSummary = { ...state, owner: "acme", repo: "app", number: 42 }
+    const casingState: ChangeRequestLiveSummary = { ...state, owner: "acme", repo: "app", number: 42 }
     const first = getLinkedChangeRequestVisualSummary(key, upper, casingState, identity)
     const folded = getLinkedChangeRequestVisualSummary(key, lower, casingState, identity)
     const again = getLinkedChangeRequestVisualSummary(key, upper, casingState, identity)

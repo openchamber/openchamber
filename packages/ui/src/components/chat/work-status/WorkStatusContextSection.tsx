@@ -5,14 +5,19 @@ import { Icon } from '@/components/icon/Icon';
 import { useSkillsStore } from '@/stores/useSkillsStore';
 import { useMcpStore } from '@/stores/useMcpStore';
 import { useSession } from '@/sync/sync-context';
-import { getDistinctLinkedIssues, getLinkedGitHubPullRequests, getLinkedGitLabThreads, getLinkedSidebarIssues, getGitHubThreadRef, getGitLabThreadRef, isLinkedChange, type LinkedIssue } from '@/lib/linkedIssues';
+import { getDistinctLinkedIssues, getLinkedSidebarChanges, getLinkedSidebarIssues, getRepositoryThreadRef, isLinkedChange, type LinkedIssue, type RepositoryThreadRef } from '@/lib/linkedIssues';
+import { useRepositoryUrlMatcher } from '@/lib/source-control/repositoryUrlMatcher';
+import { formatChangeRequestReference } from '@/lib/source-control/providers/terminology';
+import type { ChangeRequestTerm } from '@/lib/source-control/providers/descriptor';
 import { useFreshestSourceControlVisualSummaryForBranch, type PrVisualSummary } from '@/stores/useGitHubPrStatusStore';
 import { useEffectiveGitDirectory, useGitStore } from '@/stores/useGitStore';
-import { useTrackedIssueStates, useTrackedLinearStates, useTrackedPullVisualSummaries } from '@/stores/useTrackedItemsStore';
+import { useTrackedIssueStates, useTrackedPullVisualSummaries, useTrackedWorkItemStates } from '@/stores/useTrackedItemsStore';
 import { useTrackedItems } from '@/lib/trackedItems/interest';
-import { githubThread, gitlabThread, linearIssue } from '@/lib/trackedItems/fromLinks';
+import { repositoryThread, workItem } from '@/lib/trackedItems/fromLinks';
+import { trackerPresentation } from '@/lib/trackers/presentation';
+import { useTrackerDescriptors } from '@/lib/trackers/registry';
 import { getPrStatusLabel } from '@/components/session/sidebar/prStatusLabel';
-import { getIssueStateLook, getLinearIssueStateLook } from '@/components/session/sidebar/sessions/sessionPrSummaries';
+import { getIssueStateLook, getTrackerItemStateLook } from '@/components/session/sidebar/sessions/sessionPrSummaries';
 import { fetchSessionKnowledgeSummary, setSessionProjectContextPin, type SessionKnowledgeSummary } from '@/lib/sessionKnowledgeApi';
 import * as sessionActions from '@/sync/session-actions';
 import { useProjectContextStore } from '@/stores/useProjectContextStore';
@@ -37,8 +42,8 @@ type Props = {
 };
 
 /**
- * What is loaded into the agent's context: the GitHub threads this session was
- * pointed at, plus how much ambient material is available.
+ * What is loaded into the agent's context: the issues and change requests this
+ * session was pointed at, plus how much ambient material is available.
  *
  * Agents are deliberately absent — an agent is who does the work, not material
  * the work is done with. Tools are absent for want of an honest source:
@@ -170,49 +175,37 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
   const memoryCount = visibleKnowledge.memory.global + visibleKnowledge.memory.project;
   const pinnedCount = visibleKnowledge.notes.length + visibleKnowledge.plans.length;
 
-  const linked = React.useMemo(() => getDistinctLinkedIssues(session), [session]);
-  // Live state of the session's linked PRs, merge requests and issues, from
-  // the server's tracked items. This panel follows its own session too: the
+  const urlMatcher = useRepositoryUrlMatcher();
+  const linked = React.useMemo(() => getDistinctLinkedIssues(session, urlMatcher), [session, urlMatcher]);
+  // Live state of the session's linked change requests and issues, from the
+  // server's tracked items. This panel follows its own session too: the
   // session need not be on screen in the sidebar.
-  const linkedPrs = React.useMemo(() => getLinkedGitHubPullRequests(session), [session]);
-  const linkedPullLinks = React.useMemo(
-    () => linkedPrs.map((link) => ({ item: githubThread('pull', link, link.instance), url: link.url, title: link.title })),
-    [linkedPrs],
+  const repositoryChanges = React.useMemo(
+    () => getLinkedSidebarChanges(session, urlMatcher).flatMap((change) => (
+      change.repository ? [{ ref: change.repository, item: repositoryThread('pull', change.repository), url: change.url, title: change.title }] : []
+    )),
+    [session, urlMatcher],
   );
-  const linkedIssueRefs = React.useMemo(
-    () => getLinkedSidebarIssues(session).flatMap((issue) => (issue.source === 'github' ? [{ owner: issue.owner, repo: issue.repo, number: issue.number, ...(issue.instance ? { instance: issue.instance } : null) }] : [])),
-    [session],
+  const linkedSidebarIssues = React.useMemo(() => getLinkedSidebarIssues(session, urlMatcher), [session, urlMatcher]);
+  const repositoryIssueRefs = React.useMemo(
+    () => linkedSidebarIssues.flatMap((issue) => (issue.source === 'repository' ? [issue.ref] : [])),
+    [linkedSidebarIssues],
   );
-  const linkedIssueItems = React.useMemo(() => linkedIssueRefs.map((ref) => githubThread('issue', ref, ref.instance)), [linkedIssueRefs]);
-  const linkedLinearIdentifiers = React.useMemo(
-    () => getLinkedSidebarIssues(session).flatMap((issue) => (issue.source === 'linear' ? [issue.identifier] : [])),
-    [session],
+  const repositoryIssueItems = React.useMemo(() => repositoryIssueRefs.map((ref) => repositoryThread('issue', ref)), [repositoryIssueRefs]);
+  const linkedTrackerEntries = React.useMemo(
+    () => linkedSidebarIssues.flatMap((issue) => (issue.source === 'tracker' ? [{ key: issue.key, identifier: issue.identifier, item: workItem(issue.provider, issue.identifier) }] : [])),
+    [linkedSidebarIssues],
   );
-  const linkedLinearItems = React.useMemo(() => linkedLinearIdentifiers.map(linearIssue), [linkedLinearIdentifiers]);
-  const linkedGitLab = React.useMemo(() => getLinkedGitLabThreads(session), [session]);
-  const linkedGitLabChanges = React.useMemo(() => {
-    const byKey = new Map(linked.flatMap((entry) => {
-      const ref = getGitLabThreadRef(entry);
-      return ref ? [[ref.key, entry] as const] : [];
-    }));
-    return linkedGitLab.filter((ref) => ref.thread === 'pull')
-      .map((ref) => ({ ref, item: gitlabThread('pull', ref), url: byKey.get(ref.key)?.url ?? '', title: byKey.get(ref.key)?.title ?? '' }));
-  }, [linked, linkedGitLab]);
-  const linkedGitLabIssues = React.useMemo(() => linkedGitLab.filter((ref) => ref.thread === 'issue'), [linkedGitLab]);
-  const linkedGitLabIssueItems = React.useMemo(() => linkedGitLabIssues.map((ref) => gitlabThread('issue', ref)), [linkedGitLabIssues]);
+  const linkedWorkItems = React.useMemo(() => linkedTrackerEntries.map((entry) => entry.item), [linkedTrackerEntries]);
   const trackedItems = React.useMemo(() => [
-    ...linkedPullLinks.map((link) => link.item),
-    ...linkedIssueItems,
-    ...linkedLinearItems,
-    ...linkedGitLabChanges.map((link) => link.item),
-    ...linkedGitLabIssueItems,
-  ], [linkedGitLabChanges, linkedGitLabIssueItems, linkedIssueItems, linkedLinearItems, linkedPullLinks]);
+    ...repositoryChanges.map((link) => link.item),
+    ...repositoryIssueItems,
+    ...linkedWorkItems,
+  ], [linkedWorkItems, repositoryChanges, repositoryIssueItems]);
   useTrackedItems(trackedItems);
-  const linkedPullVisuals = useTrackedPullVisualSummaries(linkedPullLinks);
-  const linkedIssueStates = useTrackedIssueStates(linkedIssueItems);
-  const linkedLinearStates = useTrackedLinearStates(linkedLinearItems);
-  const gitlabChangeSummaries = useTrackedPullVisualSummaries(linkedGitLabChanges);
-  const gitlabIssueStates = useTrackedIssueStates(linkedGitLabIssueItems);
+  const changeSummaries = useTrackedPullVisualSummaries(repositoryChanges);
+  const repositoryIssueStates = useTrackedIssueStates(repositoryIssueItems);
+  const linkedWorkItemStates = useTrackedWorkItemStates(linkedWorkItems);
   // The pull request of the branch checked out here, read-only as in the
   // repository readout. When it is also linked, its row shows this state, as
   // the sidebar row does: a full status read carries more than a live summary,
@@ -223,71 +216,51 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
     [gitDirectory],
   ));
   const branchPrSummary = useFreshestSourceControlVisualSummaryForBranch(gitDirectory, branch);
-  // Entry id (`owner/repo#number`, lowercased) -> the coloured status line.
+  // Repository thread key, or a tracker entry's id (`linear:ENG-12`) lowercased -> the coloured status line.
   const liveLookById = React.useMemo(() => {
     const looks = new Map<string, { color: string; text: string }>();
-    const changeLook = (summary: PrVisualSummary, reference: string) => {
-      const label = getPrStatusLabel(summary, t);
+    const changeLook = (summary: PrVisualSummary, ref: RepositoryThreadRef) => {
+      const descriptor = urlMatcher.descriptorOf(ref.provider);
+      const reference = formatChangeRequestReference(descriptor, ref.number);
+      const label = getPrStatusLabel(summary, descriptor.terminology.changeRequest, t);
       return { color: `var(--pr-${summary.visualState})`, text: label ? `${reference} · ${label}` : reference };
     };
     // A summary belongs to the link at its own index: the same owner/repo#number
-    // can be linked from github.com and from an enterprise host in one session,
-    // and only the position tells those two apart.
-    linkedPullVisuals.forEach((summary, index) => {
-      const link = linkedPrs[index];
-      if (!summary || !link) return;
-      const key = `${link.instance ? `${link.instance}:` : ''}${summary.repo?.owner ?? ''}/${summary.repo?.repo ?? ''}#${summary.number}`;
-      looks.set(key.toLowerCase(), changeLook(summary, `#${summary.number}`));
+    // can be linked from two instances in one session, and only the position
+    // tells those two apart.
+    repositoryChanges.forEach(({ ref }, index) => {
+      const summary = changeSummaries[index];
+      if (summary) looks.set(ref.key, changeLook(summary, ref));
     });
-    linkedIssueRefs.forEach((ref, index) => {
-      const state = linkedIssueStates[index];
+    repositoryIssueRefs.forEach((ref, index) => {
+      const state = repositoryIssueStates[index];
       if (!state) return;
       const look = getIssueStateLook(state.state);
-      looks.set(`${ref.instance ? `${ref.instance}:` : ''}${ref.owner}/${ref.repo}#${ref.number}`.toLowerCase(), {
-        color: look.color,
-        text: `#${ref.number} · ${t(look.statusKey)}`,
-      });
+      const identifier = `${urlMatcher.descriptorOf(ref.provider).terminology.issuePrefix}${ref.number}`;
+      looks.set(ref.key, { color: look.color, text: `${identifier} · ${t(look.statusKey)}` });
     });
-    // Linear shows its team's own state name; the colour comes from its type.
-    linkedLinearIdentifiers.forEach((identifier, index) => {
-      const state = linkedLinearStates[index];
+    // A tracker shows its own state name; the colour comes from its category.
+    linkedTrackerEntries.forEach(({ key, identifier }, index) => {
+      const state = linkedWorkItemStates[index];
       if (!state) return;
-      looks.set(`linear:${identifier}`.toLowerCase(), {
-        color: getLinearIssueStateLook(state.state.type).color,
+      looks.set(key.toLowerCase(), {
+        color: getTrackerItemStateLook(state.state.category).color,
         text: `${identifier} · ${state.state.name}`,
       });
-    });
-    linkedGitLabChanges.forEach(({ ref }, index) => {
-      const summary = gitlabChangeSummaries[index];
-      if (summary) looks.set(ref.key, changeLook(summary, `!${ref.number}`));
     });
     if (branchPrSummary?.repo) {
       const owner = branchPrSummary.repo.owner.toLowerCase();
       const repo = branchPrSummary.repo.repo.toLowerCase();
-      if (branchPrSummary.provider === 'gitlab') {
-        const match = linkedGitLabChanges.find(({ ref }) => (
-          ref.number === branchPrSummary.number && ref.owner.toLowerCase() === owner && ref.repo.toLowerCase() === repo
-        ));
-        if (match) looks.set(match.ref.key, changeLook(branchPrSummary, `!${match.ref.number}`));
-      } else {
-        const match = linkedPrs.find((link) => (
-          link.owner.toLowerCase() === owner && link.repo.toLowerCase() === repo && link.number === branchPrSummary.number
-        ));
-        if (match) {
-          const key = `${match.instance ? `${match.instance}:` : ''}${owner}/${repo}#${branchPrSummary.number}`;
-          looks.set(key, changeLook(branchPrSummary, `#${branchPrSummary.number}`));
-        }
-      }
+      const match = repositoryChanges.find(({ ref }) => (
+        ref.provider === branchPrSummary.provider && ref.number === branchPrSummary.number
+        && ref.owner.toLowerCase() === owner && ref.repo.toLowerCase() === repo
+      ));
+      if (match) looks.set(match.ref.key, changeLook(branchPrSummary, match.ref));
     }
-    linkedGitLabIssues.forEach((ref, index) => {
-      const state = gitlabIssueStates[index];
-      if (!state) return;
-      const look = getIssueStateLook(state.state);
-      looks.set(ref.key, { color: look.color, text: `#${ref.number} · ${t(look.statusKey)}` });
-    });
     return looks;
-  }, [branchPrSummary, gitlabChangeSummaries, gitlabIssueStates, linkedGitLabChanges, linkedGitLabIssues, linkedIssueRefs, linkedIssueStates, linkedLinearIdentifiers, linkedLinearStates, linkedPrs, linkedPullVisuals, t]);
+  }, [branchPrSummary, changeSummaries, linkedTrackerEntries, linkedWorkItemStates, repositoryChanges, repositoryIssueRefs, repositoryIssueStates, t, urlMatcher]);
   const openTrackerItem = useOpenTrackerItem();
+  const trackerDescriptors = useTrackerDescriptors();
   // Connected servers only. A disabled server contributes nothing to the
   // context, so counting it here contradicts the MCP section right above,
   // which shows the same servers switched off.
@@ -310,10 +283,12 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
   // when there is not. `1 · 33 · 2` said nothing without opening the section.
   const linkedChanges = linked.filter(isLinkedChange);
   const prCount = linkedChanges.length;
-  // GitLab's word only when every attached change is a GitLab merge request.
-  const changeProvider = linkedChanges.length > 0 && linkedChanges.every((entry) => getGitLabThreadRef(entry))
-    ? 'gitlab' as const
-    : 'github' as const;
+  // A provider's own word only when every attached change shares it.
+  const changeTerms = new Set(linkedChanges.map((entry) => {
+    const ref = getRepositoryThreadRef(entry, urlMatcher);
+    return ref ? urlMatcher.descriptorOf(ref.provider).terminology.changeRequest : 'pullRequest';
+  }));
+  const changeTerm: ChangeRequestTerm = changeTerms.size === 1 ? [...changeTerms][0] : 'pullRequest';
   const issueCount = linked.length - prCount;
   const summaryParts: string[] = [];
   if (issueCount > 0) {
@@ -323,8 +298,8 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
   }
   if (prCount > 0) {
     summaryParts.push(prCount === 1
-      ? t(changeRequestCopy('chat.workStatus.breakdown.prCountSingle', changeProvider), { count: prCount })
-      : t(changeRequestCopy('chat.workStatus.breakdown.prCountPlural', changeProvider), { count: prCount }));
+      ? t(changeRequestCopy('chat.workStatus.breakdown.prCountSingle', changeTerm), { count: prCount })
+      : t(changeRequestCopy('chat.workStatus.breakdown.prCountPlural', changeTerm), { count: prCount }));
   }
   // Pinned knowledge outranks ambient counts because the user chose it for this session.
   if (summaryParts.length === 0 && pinnedCount > 0) {
@@ -349,22 +324,29 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
   // number and state are what tell links apart, as in the sidebar. A GitHub
   // thread with a known state shows it in the sidebar's colours; anything
   // else keeps the plain muted identifier.
-  // Keyed by the GitHub thread, so an extension's link to a github.com PR
+  // Keyed by the repository thread, so an extension's link to a change request
   // shows the same live state as a direct one.
   const liveLookOf = (entry: (typeof linked)[number]) => {
-    if (entry.kind === 'linear') return liveLookById.get(entry.id.toLowerCase());
-    const ref = getGitHubThreadRef(entry);
-    if (ref) return liveLookById.get(ref.key.toLowerCase());
-    const gitlab = getGitLabThreadRef(entry);
-    return gitlab ? liveLookById.get(gitlab.key) : undefined;
+    if (entry.kind === 'tracker') return liveLookById.get(entry.id.toLowerCase());
+    const ref = getRepositoryThreadRef(entry, urlMatcher);
+    return ref ? liveLookById.get(ref.key) : undefined;
   };
   const renderedIdentifier = (entry: (typeof linked)[number]) => {
-    const ref = getGitHubThreadRef(entry);
-    const gitlab = ref ? null : getGitLabThreadRef(entry);
-    return ref ? `#${ref.number}`
-      : gitlab ? `${gitlab.thread === 'pull' ? '!' : '#'}${gitlab.number}`
-        : entry.kind === 'linear' || entry.kind === 'guest' || entry.kind === 'external' ? entry.identifier : `#${entry.number}`;
+    const ref = getRepositoryThreadRef(entry, urlMatcher);
+    if (ref) {
+      const descriptor = urlMatcher.descriptorOf(ref.provider);
+      return ref.thread === 'pull' ? formatChangeRequestReference(descriptor, ref.number) : `${descriptor.terminology.issuePrefix}${ref.number}`;
+    }
+    return entry.kind === 'tracker' || entry.kind === 'guest' || entry.kind === 'external' ? entry.identifier : `#${entry.number}`;
   };
+  const openLinkedAriaLabel = (entry: Extract<(typeof linked)[number], { kind: 'issue' | 'pull' }>) => {
+    const ref = getRepositoryThreadRef(entry, urlMatcher);
+    // A link no served provider recognises names no provider.
+    return ref
+      ? t('chat.workStatus.linkedIssues.openOnProvider', { reference: renderedIdentifier(entry), provider: urlMatcher.descriptorOf(ref.provider).label })
+      : t('chat.workStatus.linkedIssues.openGuest', { id: renderedIdentifier(entry) });
+  };
+  const trackerNameOf = (provider: string) => trackerDescriptors.find((descriptor) => descriptor.id === provider)?.name ?? provider;
   // The kind, never the author: an agent's link has no avatar, and a mix of
   // faces and icons hid which row was a PR. An issue reads as an issue
   // wherever it lives (GitHub, GitLab, an agent's or an extension's link) and
@@ -373,7 +355,7 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
     const color = liveLookOf(entry)?.color;
     return (
       <Icon
-        name={isLinkedChange(entry) ? 'git-pull-request' : entry.kind === 'linear' ? 'linear' : 'record-circle'}
+        name={isLinkedChange(entry) ? 'git-pull-request' : entry.kind === 'tracker' ? trackerPresentation(entry.provider).icon : 'record-circle'}
         className={cn('size-3.5 shrink-0', color ? 'oc-ref-tint' : 'text-muted-foreground')}
         style={color ? refTintStyle(color) : undefined}
       />
@@ -427,13 +409,11 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
               <Icon name="close" className="size-3.5" />
             </button>
           )}
-          ariaLabel={entry.kind === 'linear'
-            ? t('chat.workStatus.linkedIssues.openLinear', { identifier: entry.identifier })
+          ariaLabel={entry.kind === 'tracker'
+            ? t('chat.workStatus.linkedIssues.openTrackerItem', { identifier: entry.identifier, provider: trackerNameOf(entry.provider) })
             : entry.kind === 'guest' || entry.kind === 'external'
               ? t('chat.workStatus.linkedIssues.openGuest', { id: entry.identifier })
-              : getGitLabThreadRef(entry)
-                ? t('chat.workStatus.linkedIssues.openGitLab', { reference: renderedIdentifier(entry) })
-                : t('chat.workStatus.linkedIssues.open', { number: entry.number })}
+              : openLinkedAriaLabel(entry)}
         />
       ))}
 

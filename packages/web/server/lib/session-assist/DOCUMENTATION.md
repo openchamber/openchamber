@@ -54,7 +54,7 @@ formatter is `packages/ui/src/lib/messages/messageMarkdown.ts`.
 
 The server projects those persisted parts into model context without importing
 the UI runtime: code comments, file/chat quotes, browser annotations, PR comments,
-checks, terminal selections, and linked GitHub/Linear items remain attached to
+checks, terminal selections, and linked repository and tracker items remain attached to
 the user turn even when their transport part is synthetic. The OpenCode
 `opencodeComment` mirror is also accepted. Unrecognized synthetic prompts and
 ignored parts are excluded. Malformed attached text fails the generation.

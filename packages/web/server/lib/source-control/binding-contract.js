@@ -1,3 +1,9 @@
+import { isProviderId } from './provider-id.js';
+
+// Persisted parsers validate a provider id's syntax only; the provider
+// registry decides at read time whether that provider is available. A record
+// written by a provider this build does not know therefore parses, survives
+// every write untouched, and never fails the whole store.
 const plain = (value) => value !== null && Object.prototype.toString.call(value) === '[object Object]'
   && Object.getPrototypeOf(value) === Object.prototype;
 const string = (value) => Object.prototype.toString.call(value) === '[object String]';
@@ -5,20 +11,24 @@ const text = (value) => string(value) && value.length > 0;
 const safePresentationText = (value, maximum = 512) => text(value) && value.length <= maximum
   && value.trim() === value && !/[\0\r\n]/.test(value);
 const safeProviderUsername = (value) => safePresentationText(value, 255) && /^[A-Za-z0-9_.-]+$/.test(value);
+const LOOPBACK_HOSTS = ['localhost', '127.0.0.1', '::1', '[::1]'];
+// An instance is either a bare lowercase hostname (GitHub's form) or a
+// normalized origin (GitLab's form): HTTPS, or HTTP on a loopback host.
 const normalizedPresentationInstance = (value) => {
-  if (value.provider === 'github') return value.instance === 'github.com';
+  if (!value.instance.includes('://')) {
+    return /^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/.test(value.instance);
+  }
   try {
     const parsed = new URL(value.instance);
-    const loopback = ['localhost', '127.0.0.1', '::1', '[::1]'].includes(parsed.hostname.toLowerCase());
+    const loopback = LOOPBACK_HOSTS.includes(parsed.hostname.toLowerCase());
     return parsed.origin === value.instance && !parsed.username && !parsed.password
       && ['', '/'].includes(parsed.pathname) && !parsed.search && !parsed.hash
       && (parsed.protocol === 'https:' || parsed.protocol === 'http:' && loopback);
   } catch { return false; }
 };
-const providerUserIdentityMatches = (value) => value.provider === 'github'
-  ? /^github\.com#\d+$/.test(value.providerUserId)
-  : value.providerUserId.startsWith(`${value.instance}#`)
-    && /^\d+$/.test(value.providerUserId.slice(value.instance.length + 1));
+// A provider user is `<instance>#<numeric id>` on every provider.
+const providerUserIdentityMatches = (value) => value.providerUserId.startsWith(`${value.instance}#`)
+  && /^\d+$/.test(value.providerUserId.slice(value.instance.length + 1));
 const keys = (value, required, optional = []) => plain(value)
   && required.every((key) => Object.hasOwn(value, key))
   && Object.keys(value).every((key) => required.includes(key) || optional.includes(key));
@@ -59,7 +69,7 @@ const credentialPresentation = (value) => plain(value) && Object.hasOwn(value, '
     keys(value, ['status', 'transport', 'fingerprint']) && value.transport === 'ssh'
       && /^SHA256:[A-Za-z0-9+/]{43}=?$/.test(value.fingerprint)
     || keys(value, ['status', 'transport', 'provider', 'instance', 'source', 'username', 'providerUserId'])
-      && value.transport === 'https' && ['github', 'gitlab'].includes(value.provider)
+      && value.transport === 'https' && isProviderId(value.provider)
       && ['oauth', 'pat', 'cli'].includes(value.source) && safePresentationText(value.instance, 2048)
       && safeProviderUsername(value.username) && safePresentationText(value.providerUserId)
       && normalizedPresentationInstance(value) && providerUserIdentityMatches(value)
@@ -74,7 +84,7 @@ const validateBinding = (value, allowPresentation = false) => {
     || !Array.isArray(value.auxiliary)) throw invalid();
   for (const entry of value.providers) {
     if (!keys(entry, ['provider', 'instance', 'accountId', 'primaryRemote', 'readiness', 'endpoint'], ['repository'])
-      || !['github', 'gitlab'].includes(entry.provider) || !text(entry.instance) || !text(entry.accountId) || !text(entry.primaryRemote)
+      || !isProviderId(entry.provider) || !text(entry.instance) || !text(entry.accountId) || !text(entry.primaryRemote)
       || entry.repository !== undefined && (!keys(entry.repository, ['owner', 'name']) || !text(entry.repository.owner) || !text(entry.repository.name))
       || !['ready', 'confirmation-required', 'account-unavailable', 'config-changed'].includes(entry.readiness)
       || !(entry.endpoint === null && entry.readiness !== 'ready' || endpoint(entry.endpoint))) throw invalid();

@@ -4,21 +4,63 @@ import type { ToolPopupContent } from '@/components/chat/message/types';
 
 const TEXT_LIKE_MIME_PREFIXES = ['text/', 'application/json'];
 const DIRECTORY_MIME = 'application/x-directory';
-const GITHUB_ISSUE_LINK_MIME = 'application/vnd.github.issue-link';
-const GITLAB_ISSUE_LINK_MIME = 'application/vnd.openchamber.gitlab-issue-link';
-const GITHUB_PR_LINK_MIME = 'application/vnd.github.pull-request-link';
-const LINEAR_ISSUE_LINK_MIME = 'application/vnd.openchamber.linear-issue-link';
+const REPOSITORY_ISSUE_LINK_MIME = 'application/vnd.openchamber.repository-issue-link';
+// Messages shown before the provider moved into a parameter carry one type
+// per provider; they stay readable as that provider's issue links.
+const LEGACY_REPOSITORY_ISSUE_LINK_MIMES: ReadonlyMap<string, string> = new Map([
+    ['application/vnd.github.issue-link', 'github'],
+    ['application/vnd.openchamber.gitlab-issue-link', 'gitlab'],
+]);
+// Every provider's change requests share this type; the chip's mark is the generic pull request.
+const CHANGE_REQUEST_LINK_MIME = 'application/vnd.github.pull-request-link';
+const TRACKER_ITEM_LINK_MIME = 'application/vnd.openchamber.tracker-item-link';
+// Messages shown before trackers had one type carry Linear's own.
+const LEGACY_LINEAR_ISSUE_LINK_MIME = 'application/vnd.openchamber.linear-issue-link';
 const GUEST_ISSUE_LINK_MIME = 'application/vnd.openchamber.guest-issue-link';
 const GUEST_PR_LINK_MIME = 'application/vnd.openchamber.guest-pr-link';
 
-export type IssueLinkKind = 'github-issue' | 'gitlab-issue' | 'github-pr' | 'linear-issue' | 'guest-issue' | 'guest-pr';
+export type IssueLinkKind = 'repository-issue' | 'change-request' | 'tracker-item' | 'guest-issue' | 'guest-pr';
+
+/** The display type of a repository issue link part: the provider rides as a parameter. */
+export const repositoryIssueLinkMime = (provider: string): string => `${REPOSITORY_ISSUE_LINK_MIME}; provider=${provider}`;
+
+/** The display type of a tracker item link part: the tracker rides as a parameter. */
+export const trackerItemLinkMime = (provider: string): string => `${TRACKER_ITEM_LINK_MIME}; provider=${provider}`;
+
+/** The `provider` parameter of a type that is `base`; `''` when it has none, null for another type. */
+const providerParameterOf = (mime: string, base: string): string | null => {
+    const [type, ...parameters] = mime.split(';').map((segment) => segment.trim());
+    if (type.toLowerCase() !== base) return null;
+    for (const parameter of parameters) {
+        const [name, value] = parameter.split('=');
+        if (name?.trim().toLowerCase() === 'provider' && value) return value.trim();
+    }
+    return '';
+};
+
+/**
+ * The provider of a repository issue link part, or null for any other part.
+ * A neutral type without a `provider` parameter names no provider (`''`).
+ */
+export const getRepositoryIssueLinkProvider = (file: { mime?: string }): string | null => {
+    if (!file.mime) return null;
+    const legacy = LEGACY_REPOSITORY_ISSUE_LINK_MIMES.get(file.mime);
+    if (legacy) return legacy;
+    return providerParameterOf(file.mime, REPOSITORY_ISSUE_LINK_MIME);
+};
+
+/** The tracker of a tracker item link part (`''` when it names none), or null for any other part. */
+export const getTrackerItemLinkProvider = (file: { mime?: string }): string | null => {
+    if (!file.mime) return null;
+    if (file.mime === LEGACY_LINEAR_ISSUE_LINK_MIME) return 'linear';
+    return providerParameterOf(file.mime, TRACKER_ITEM_LINK_MIME);
+};
 
 /** The tracked-item kind of an issue/PR reference part, or null for an ordinary file. */
 export const getIssueLinkKind = (file: { mime?: string }): IssueLinkKind | null => {
-    if (file.mime === GITHUB_ISSUE_LINK_MIME) return 'github-issue';
-    if (file.mime === GITLAB_ISSUE_LINK_MIME) return 'gitlab-issue';
-    if (file.mime === GITHUB_PR_LINK_MIME) return 'github-pr';
-    if (file.mime === LINEAR_ISSUE_LINK_MIME) return 'linear-issue';
+    if (getRepositoryIssueLinkProvider(file) !== null) return 'repository-issue';
+    if (file.mime === CHANGE_REQUEST_LINK_MIME) return 'change-request';
+    if (getTrackerItemLinkProvider(file) !== null) return 'tracker-item';
     if (file.mime === GUEST_ISSUE_LINK_MIME) return 'guest-issue';
     if (file.mime === GUEST_PR_LINK_MIME) return 'guest-pr';
     return null;

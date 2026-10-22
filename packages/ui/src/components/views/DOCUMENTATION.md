@@ -219,11 +219,15 @@ A percentage max-height inside auto-height wrappers let the inner viewport grow 
 
 DiffView, mobile Changes and walkthrough share `PullRequestComparisonSelector`
 and the selection owned by `usePullRequestComparison`. PR mode reads the
-published patch of a GitHub pull request or a GitLab merge request through
-`/api/walkthrough/pr-diff`, always through the checkout's bound read context;
-without one, PR mode is not offered and reads nothing. On GitLab projects the
-mode, picker and messages use merge-request wording and `!` numbers through
-`changeRequestCopy`. It includes no local edits
+published patch of a change request through `/api/walkthrough/pr-diff`, always
+through the checkout's bound read context, and only for a provider the server
+serves (`useSourceControlProviderServing`); for a provider the server does
+not serve, PR mode is not offered and reads nothing. While the provider list
+is unknown (first visit, the first read out or failed and being retried) PR
+mode stays offered and the picker shows loading: an unknown list is never read
+as "not served" or "not connected". The mode, picker and messages use the provider's
+term (`changeRequestCopy(key, term)`: merge-request wording on GitLab) and
+its reference prefix (`!` on GitLab). It includes no local edits
 or unpushed commits. `lib/diff/pullRequestDiff.ts` splits the response once;
 `useGitComparison` serves file patches from that same snapshot. Snapshot revisions
 invalidate the view's patch cache atomically, including edits with unchanged
@@ -250,7 +254,7 @@ on panel switches; opening the picker or changing search still refreshes it.
 Working-tree mutations are unavailable for PR snapshots, and "Load full files"
 does not apply to them. Expanding collapsed context on one file works: the
 expander asks `useGitComparison.fetchFullFile`, which reads both sides of that
-file from GitHub through `/api/walkthrough/pr-file` (merge base and PR head),
+file from the provider through `/api/walkthrough/pr-file` (merge base and PR head),
 never from disk, so local edits and unfetched fork commits cannot leak in or
 block it. Existing inline comment controls still attach selected code to chat.
 Changes hands its PR source to walkthrough; walkthrough's Changes action opens
@@ -269,7 +273,7 @@ return to the panel's project (`lib/surfaces/DOCUMENTATION.md`, Tracker).
 
 Mobile Changes uses the same expansion for branch, commit and PR files: the
 patch opens with 3 lines of context, and expanding reads that file in full once
-(git with whole-file context, or both PR sides from GitHub), then replays the
+(git with whole-file context, or both PR sides from the provider), then replays the
 expansion. A failed read toasts and keeps the patch. Working-tree files there
 already load both full sides, so they expand without a read.
 

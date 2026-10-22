@@ -2,24 +2,27 @@
  * Turning what the picker chose into composer chips.
  *
  * The list shows enough to choose; what the agent receives is read fresh at
- * attach time, with the repository's account: a GitHub issue with all its
+ * attach time, with the repository's account: an issue with all its
  * comments, a PR with its comments, review comments, files, checks and
- * optionally its diff, a Linear issue with its comments. Each choice resolves on its own, so one that fails is reported
- * by key while the others still attach.
+ * optionally its diff, a tracker item with its comments. Each choice resolves
+ * on its own, so one that fails is reported by key while the others still
+ * attach.
  */
 
 import type { ComposerReference } from '@/components/chat/composer/composerReferences';
-import type { ChangeRequestContext, Issue, IssueComment, LinearIssue, SourceControlAPI, SourceControlReadContext } from '@/lib/api/types';
-import { buildIssueContextText as buildLinearContextText } from '@/lib/linearIssueContext';
+import type { ChangeRequestContext, Issue, IssueComment, SourceControlAPI, SourceControlReadContext, TrackerItem } from '@/lib/api/types';
+import { buildTrackerItemContextText } from '@/lib/trackers/itemContext';
 
 import { referencePickerItemKey, type ReferencePickerSelection } from './referencePickerItems';
 
 export type ReferenceResolveDeps = {
     sourceControl: Pick<SourceControlAPI, 'issueGet' | 'issueComments' | 'changeRequestContext'>;
-    /** The GitHub read context of the project the items belong to. */
+    /** The read context of the project the items belong to. */
     context: SourceControlReadContext | null;
-    /** A Linear issue with its comments, by Linear id; the preview's cache. */
-    readLinearDetail: (issueId: string) => Promise<LinearIssue>;
+    /** A tracker item with its comments, by tracker and the tracker's id; the preview's cache. */
+    readTrackerDetail: (provider: string, itemId: string) => Promise<TrackerItem>;
+    /** The tracker's name for the agent's context header (`Linear`). */
+    trackerName: (provider: string) => string;
 };
 
 export type ResolvedReferences = {
@@ -34,25 +37,26 @@ const buildChangeRequestContextText = (payload: ChangeRequestContext) =>
     `Source control change request context (JSON)\n${JSON.stringify(payload, null, 2)}`;
 
 const selectionLabel = (selection: ReferencePickerSelection): string => (
-    selection.source === 'linear' ? selection.issue.identifier : `#${selection.reference.number}`
+    selection.source === 'tracker' ? selection.item.identifier : `#${selection.reference.number}`
 );
 
 async function resolveOne(selection: ReferencePickerSelection, deps: ReferenceResolveDeps): Promise<ComposerReference> {
-    if (selection.source === 'linear') {
-        const issue = await deps.readLinearDetail(selection.issue.id);
-        const login = issue.assignee?.displayName || issue.assignee?.name;
+    if (selection.source === 'tracker') {
+        const item = await deps.readTrackerDetail(selection.provider, selection.item.id);
+        const login = item.assignee?.name;
         return {
-            kind: 'linear-issue',
-            identifier: issue.identifier,
-            title: issue.title,
-            url: issue.url,
-            contextText: buildLinearContextText({ issue, comments: issue.comments ?? [] }),
-            author: login ? { login, avatarUrl: issue.assignee?.avatarUrl || undefined } : undefined,
+            kind: 'tracker-item',
+            provider: selection.provider,
+            identifier: item.identifier,
+            title: item.title,
+            url: item.url,
+            contextText: buildTrackerItemContextText(item, deps.trackerName(selection.provider)),
+            author: login ? { login, avatarUrl: item.assignee?.avatarUrl || undefined } : undefined,
         };
     }
 
     const { sourceControl, context } = deps;
-    if (!context) throw new Error('GitHub is not available here');
+    if (!context) throw new Error('The repository is not available here');
     const { reference } = selection;
     const project = { owner: reference.sourceRepo.owner, name: reference.sourceRepo.repo };
     const author = reference.author ? { login: reference.author.login, avatarUrl: reference.author.avatarUrl } : undefined;

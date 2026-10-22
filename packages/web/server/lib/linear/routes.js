@@ -1,4 +1,5 @@
 import express from 'express';
+import { disconnectCurrentLinearWorkspace, readLinearAuthStatus, storeLinearAuthorization } from './auth-status.js';
 import { readTrimmedString } from './parse.js';
 
 const PENDING_JSON_LIMIT = '16kb';
@@ -53,35 +54,22 @@ ${desktopReturn ? `<a class="return" href="openchamber://focus/linear-auth">Retu
 </html>`;
 }
 
-async function storeAuthorizationResult(libraries, result) {
-  const { setLinearAuth, fetchLinearIdentity } = libraries;
-  let user = null;
-  let organization = null;
-  try {
-    const identity = await fetchLinearIdentity(result.accessToken);
-    user = identity.user;
-    organization = identity.organization;
-  } catch (error) {
-    console.error('Failed to load Linear identity after OAuth:', error);
-  }
-  return setLinearAuth({
-    accessToken: result.accessToken,
-    refreshToken: result.refreshToken,
-    tokenType: result.tokenType,
-    expiresAt: result.expiresAt,
-    scope: result.scope,
-    user,
-    organization,
-  });
-}
-
+/**
+ * Legacy Linear routes, kept in their Linear-shaped answers. Newer clients use
+ * the provider-neutral `/api/tracker/linear/*` routes (`../trackers/routes.js`).
+ * These stay for phone apps that bundle an older UI and talk to a newer
+ * server, and for the SDK's documented `GET /api/linear/issues/get` used by
+ * host-Linear guests. `/linear/oauth/callback` is the redirect URI registered
+ * with Linear for custom direct-redirect setups, so it stays here as well.
+ */
 export function registerLinearRoutes(app) {
-  let linearLibraries = null;
+  let loadedLibraries = null;
   const getLinearLibraries = async () => {
-    if (!linearLibraries) {
-      linearLibraries = await import('./index.js');
+    if (!loadedLibraries) {
+      const { linearLibraries } = await import('./index.js');
+      loadedLibraries = linearLibraries;
     }
-    return linearLibraries;
+    return loadedLibraries;
   };
 
   app.get('/linear/oauth/callback', async (req, res) => {
@@ -99,7 +87,7 @@ export function registerLinearRoutes(app) {
         errorDescription: queryValue(req, 'error_description'),
       });
 
-      await storeAuthorizationResult(libraries, result);
+      await storeLinearAuthorization(libraries, result);
 
       return finish(200, {
         title: 'Authorization Complete',
@@ -121,64 +109,7 @@ export function registerLinearRoutes(app) {
 
   app.get('/api/linear/auth/status', async (_req, res) => {
     try {
-      const libraries = await getLinearLibraries();
-      const {
-        getLinearAuth,
-        getLinearAuthWorkspaces,
-        getValidLinearAccessToken,
-        fetchLinearIdentity,
-        setLinearAuth,
-        clearLinearAuth,
-        toLinearPublicStatus,
-        pollAuthorizationBroker,
-        completeAuthorizationBroker,
-      } = libraries;
-
-      try {
-        const result = await pollAuthorizationBroker();
-        if (result) {
-          await storeAuthorizationResult(libraries, result);
-          await completeAuthorizationBroker(result.brokerReceipt).catch((error) => {
-            console.warn('Failed to acknowledge Linear authorization broker result:', error);
-          });
-        }
-      } catch (error) {
-        console.error('Failed to complete Linear authorization through broker:', error);
-      }
-
-      const accessToken = await getValidLinearAccessToken();
-      if (!accessToken) {
-        return res.json({ connected: false });
-      }
-
-      const auth = getLinearAuth();
-      try {
-        const identity = await fetchLinearIdentity(accessToken);
-        const next = setLinearAuth({
-          accessToken,
-          refreshToken: auth?.refreshToken,
-          tokenType: auth?.tokenType,
-          expiresAt: auth?.expiresAt,
-          scope: auth?.scope,
-          user: identity.user,
-          organization: identity.organization,
-          workspaceId: auth?.workspaceId,
-        }, { activate: false });
-        return res.json(toLinearPublicStatus(next, getLinearAuthWorkspaces()));
-      } catch (error) {
-        if (error?.status === 401) {
-          clearLinearAuth(auth?.workspaceId);
-          const remaining = getLinearAuth();
-          if (!remaining) {
-            return res.json({ connected: false });
-          }
-          return res.json(toLinearPublicStatus(remaining, getLinearAuthWorkspaces()));
-        }
-        if (auth) {
-          return res.json(toLinearPublicStatus(auth, getLinearAuthWorkspaces()));
-        }
-        throw error;
-      }
+      return res.json(await readLinearAuthStatus(await getLinearLibraries()));
     } catch (error) {
       console.error('Failed to get Linear auth status:', error);
       return res.status(500).json({ error: error.message || 'Failed to get Linear auth status' });
@@ -415,14 +346,7 @@ export function registerLinearRoutes(app) {
 
   app.delete('/api/linear/auth', async (_req, res) => {
     try {
-      const { getLinearAuth, clearLinearAuth, revokeToken } = await getLinearLibraries();
-      const auth = getLinearAuth();
-      if (auth?.refreshToken) {
-        await revokeToken(auth.refreshToken, 'refresh_token');
-      } else if (auth?.accessToken) {
-        await revokeToken(auth.accessToken, 'access_token');
-      }
-      const removed = clearLinearAuth(auth?.workspaceId);
+      const removed = await disconnectCurrentLinearWorkspace(await getLinearLibraries());
       return res.json({ success: true, removed });
     } catch (error) {
       console.error('Failed to disconnect Linear:', error);

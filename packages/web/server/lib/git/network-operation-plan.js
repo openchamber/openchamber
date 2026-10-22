@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fingerprintRemoteUrl, redactRemoteUrl } from '../source-control/url-redaction.js';
 import { normalizeSourceControlProviderInstance } from '../source-control/provider-instance.js';
+import { sourceControlProviderDescriptors } from '../source-control/provider-descriptors.js';
 import { createHttpsCredentialReference, normalizeGitRemoteEndpoint } from './credential-resolver.js';
 
 const OPERATIONS = ['push', 'fetch', 'pull', 'delete-remote-branch', 'sync', 'clone', 'checkout-hydration'];
@@ -140,14 +141,14 @@ const parseHydrationTransfers = (value, requirements) => {
  * fetch over SSH and still answer to a GitHub account — so it is accepted for
  * every transport and checked only against the endpoint it will be bound to.
  */
-const parseCloneProviderAccount = (value, parsedEndpoint) => {
+const parseCloneProviderAccount = (value, parsedEndpoint, providers) => {
   if (value === undefined) return null;
   if (!isPlainObject(value) || !hasExactKeys(value, ['provider', 'instance', 'accountId'])
-    || !['github', 'gitlab'].includes(value.provider)) throw planError('Provider account is invalid');
+    || !providers.has(value.provider)) throw planError('Provider account is invalid');
   let instance;
-  try { instance = normalizeSourceControlProviderInstance(value.provider, value.instance); }
+  try { instance = normalizeSourceControlProviderInstance(value.provider, value.instance, providers); }
   catch { throw planError('Provider account instance is invalid'); }
-  const origin = new URL(value.provider === 'github' ? `https://${instance}` : instance);
+  const origin = providers.get(value.provider).instance.origin(instance);
   if (origin.hostname !== parsedEndpoint.host) throw planError('Provider account does not match the clone endpoint');
   const accountId = requiredString(value.accountId, 'provider accountId');
   if (accountId !== value.accountId || /[\0\r\n]/.test(accountId)) throw planError('Provider account is invalid');
@@ -255,16 +256,18 @@ const parseCloneEndpoint = (value) => {
   return endpoint;
 };
 /**
- * GitLab answers an HTTPS repository address without `.git` with a redirect,
- * and managed and anonymous transfers never follow one, so a clone from a
- * GitLab instance uses the `.git` address GitLab itself offers. Other hosts
+ * Some providers (GitLab) answer an HTTPS repository address without `.git`
+ * with a redirect, and managed and anonymous transfers never follow one, so a
+ * clone from such a provider's instance uses the `.git` address it offers
+ * itself; the descriptor's `appendDotGitToHttpsClone` names them. Other hosts
  * keep the address as given: some serve a repository only under its own name.
+ * `dotGitOrigins` are those instances' origins.
  */
-const gitLabCloneEndpoint = (endpoint, gitLabInstances) => {
+const dotGitCloneEndpoint = (endpoint, dotGitOrigins) => {
   if (!endpoint.startsWith('https://')) return endpoint;
   const parsed = new URL(endpoint);
-  const onGitLab = gitLabInstances.some((instance) => new URL(instance).host === parsed.host);
-  if (!onGitLab || /\.git$/i.test(parsed.pathname)) return endpoint;
+  const onDotGitHost = dotGitOrigins.some((origin) => origin.host === parsed.host);
+  if (!onDotGitHost || /\.git$/i.test(parsed.pathname)) return endpoint;
   return `${endpoint}.git`;
 };
 const pathExists = async (target, fsImpl) => {
@@ -296,6 +299,7 @@ export function createNetworkOperationPlanner({
   validateGitTransportContext,
   validateManagedSshCredential,
   resolveSourceControlAccount,
+  sourceControlProviders = sourceControlProviderDescriptors,
   contributorProvenance,
   resolveRef,
   resolveSymbolicRef = async () => null,
@@ -675,7 +679,14 @@ export function createNetworkOperationPlanner({
     )) throw planError('Git clone input is invalid');
     const endpoint = parseCloneEndpoint(input.remoteUrl);
     const transportMode = parseTransportMode(input.transportMode);
-    const gitLabInstances = ['https://gitlab.com'];
+    const dotGitOrigins = [];
+    const noteDotGitInstance = (provider, instance) => {
+      const descriptor = sourceControlProviders.get(provider);
+      if (descriptor?.transport.appendDotGitToHttpsClone) dotGitOrigins.push(descriptor.instance.origin(instance));
+    };
+    for (const descriptor of sourceControlProviders.list()) {
+      for (const instance of descriptor.instance.defaultInstances) noteDotGitInstance(descriptor.id, instance);
+    }
     let credentialId;
     if (transportMode === 'system') {
       if (input.unverifiedConfirmed !== true || input.credentialAccount !== undefined || Object.hasOwn(input, 'sshCredentialId')) {
@@ -697,24 +708,24 @@ export function createNetworkOperationPlanner({
         if (Object.hasOwn(input, 'sshCredentialId')) throw planError('Managed SSH credentials require SSH');
         const account = input.credentialAccount;
         if (!isPlainObject(account) || !hasExactKeys(account, ['provider', 'instance', 'accountId'])
-          || !['github', 'gitlab'].includes(account.provider)) throw planError('An explicit credential account is required');
+          || !sourceControlProviders.has(account.provider)) throw planError('An explicit credential account is required');
         let instance;
-        try { instance = normalizeSourceControlProviderInstance(account.provider, account.instance); }
+        try { instance = normalizeSourceControlProviderInstance(account.provider, account.instance, sourceControlProviders); }
         catch { throw planError('Credential account instance is invalid'); }
-        const origin = new URL(account.provider === 'github' ? `https://${instance}` : instance);
+        const origin = sourceControlProviders.get(account.provider).instance.origin(instance);
         if (origin.protocol !== 'https:' || origin.hostname !== parsedEndpoint.host
           || Number(origin.port || 443) !== parsedEndpoint.port) throw planError('Credential account does not match the HTTPS endpoint');
-        if (account.provider === 'gitlab') gitLabInstances.push(instance);
+        noteDotGitInstance(account.provider, instance);
         const accountId = requiredString(account.accountId, 'credential accountId');
         if (accountId !== account.accountId || /[\0\r\n]/.test(accountId)) throw planError('Credential account is invalid');
         if (!(resolveSourceControlAccount instanceof Function)) {
           throw planError('Managed HTTPS credential inventory is unavailable', 501, 'RUNTIME_UNSUPPORTED');
         }
         const resolved = await resolveSourceControlAccount({ provider: account.provider, instance, accountId });
-        const secret = account.provider === 'github' ? resolved?.accessToken : resolved?.token;
+        const secret = resolved?.secret;
         if (resolved?.credentialId !== accountId || resolved?.status !== 'valid'
           || !Number.isSafeInteger(resolved?.credentialRevision) || resolved.credentialRevision < 1
-          || !isString(resolved?.providerUserId) || !resolved.providerUserId
+          || !isString(resolved?.providerUserId) || !resolved.providerUserId.startsWith(`${instance}#`)
           || !isString(secret) || !secret || /[\r\n\0]/.test(secret)) {
           throw planError('Selected managed HTTPS credential is unavailable', 400, 'INVALID_REQUEST');
         }
@@ -735,9 +746,9 @@ export function createNetworkOperationPlanner({
     );
     if (await pathExists(destination, fsImpl)) throw planError('Clone destination already exists');
     if (await pathExists(temporaryDirectory, fsImpl)) throw planError('Clone temporary directory already exists');
-    const providerAccount = parseCloneProviderAccount(input.providerAccount, normalizeGitRemoteEndpoint(endpoint));
-    if (providerAccount?.provider === 'gitlab') gitLabInstances.push(providerAccount.instance);
-    const transferEndpoint = gitLabCloneEndpoint(endpoint, gitLabInstances);
+    const providerAccount = parseCloneProviderAccount(input.providerAccount, normalizeGitRemoteEndpoint(endpoint), sourceControlProviders);
+    if (providerAccount) noteDotGitInstance(providerAccount.provider, providerAccount.instance);
+    const transferEndpoint = dotGitCloneEndpoint(endpoint, dotGitOrigins);
     const internal = { destination, temporaryDirectory, transportMode, auxiliaryGrants: parseAuxiliaryGrants(input.auxiliaryGrants) };
     if (providerAccount) internal.providerAccount = providerAccount;
     if (transportMode === 'system') internal.unverifiedConfirmed = true;

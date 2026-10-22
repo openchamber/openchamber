@@ -4,7 +4,7 @@ import type { TrackedItem, TrackedItemState } from './model';
 
 type Request = { path: string; body: { connectionId: string; visible: boolean; items?: TrackedItem[] } };
 
-const pull = (number: number): TrackedItem => ({ provider: 'github', kind: 'pull', owner: 'acme', repo: 'app', number });
+const pull = (number: number): TrackedItem => ({ provider: 'github', instance: 'github.com', kind: 'pull', owner: 'acme', repo: 'app', number });
 
 function setup() {
   let listener: ((event: { type: 'event-stream-ready'; connectionId: string | null }) => void) | null = null;

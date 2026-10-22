@@ -306,6 +306,15 @@ describe('ui auth client credential seam', () => {
       url: `/api/spaces/a1b2c3d4e5f6/fs/raw?path=x.png&oc_url_token=${encodeURIComponent(urlToken)}`,
       headers: { accept: 'image/png' },
     }, null)).toBe('client:device-1');
+    // A provider's uploads take the URL token only where its descriptor says it serves uploads.
+    const uploadOf = (provider) => ({
+      method: 'GET',
+      path: `/api/source-control/${provider}/uploads/abc/clip.png`,
+      url: `/api/source-control/${provider}/uploads/abc/clip.png?owner=o&repo=r&oc_url_token=${encodeURIComponent(urlToken)}`,
+      headers: { accept: 'image/png' },
+    });
+    expect(await auth.ensureSessionToken(uploadOf('gitlab'), null)).toBe('client:device-1');
+    expect(await auth.ensureSessionToken(uploadOf('github'), null)).toBe(null);
     expect(await auth.ensureSessionToken({
       method: 'GET',
       path: '/api/spaces/a1b2c3d4e5f6/session',

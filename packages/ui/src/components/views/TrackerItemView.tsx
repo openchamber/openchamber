@@ -3,20 +3,19 @@ import * as React from 'react';
 import { ReferencePreview } from '@/components/references/ReferencePreview';
 import { DEFAULT_REPOSITORY_FILTER, type ReferencePickerItem } from '@/components/references/referencePickerItems';
 import {
-    forgetGitHubPullStatus,
-    useGitHubPullStatuses,
-    useGitHubReadContext,
-    useGitHubReferenceDetail,
-    useGitHubReferenceList,
-    useLinearIssueDetail,
-    useLinearSourceStatus,
+    forgetRepositoryPullStatus,
+    useRepositoryPullStatuses,
+    useRepositoryReadContext,
+    useRepositoryReferenceDetail,
+    useRepositoryReferenceList,
+    useTrackerItemDetail,
 } from '@/components/references/referenceSources';
 import { IDLE_PULL_STATUS } from '@/components/references/useReferenceBrowser';
 import { SourceBoardActions, SourceBoardPullLinks, SourceBoardStateMenuItems } from '@/components/sourceBoard/SourceBoardActions';
 import { SourceBoardChecksDialog } from '@/components/sourceBoard/SourceBoardChecksDialog';
-import { SourceBoardLinearStatus } from '@/components/sourceBoard/SourceBoardLinearStatus';
 import { SourceBoardLabels, SourceBoardReviewers } from '@/components/sourceBoard/SourceBoardMetaEditors';
 import { SourceBoardReply } from '@/components/sourceBoard/SourceBoardReply';
+import { SourceBoardTrackerStatus } from '@/components/sourceBoard/SourceBoardTrackerStatus';
 import { isSameRepositoryItemLink, settleTrackerItemRequest, trackerTargetOfUrl, useShowTrackerItem, wasTrackerItemRequested } from '@/components/sourceBoard/openTrackerItem';
 import { useLinkRepository } from '@/components/sourceBoard/boardRepository';
 import { usePullAttachments } from '@/components/sourceBoard/pullAttachments';
@@ -25,10 +24,13 @@ import { useBoardRevalidation } from '@/components/sourceBoard/useBoardRevalidat
 import { Button } from '@/components/ui/button';
 import { useMinuteTickerNow } from '@/hooks/useDurationTicker';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
-import type { GitHubReferenceKind } from '@/lib/api/types';
+import type { RepositoryReferenceKind } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
+import { useRepositoryUrlMatcher } from '@/lib/source-control/repositoryUrlMatcher';
 import { useTrackedItems } from '@/lib/trackedItems/interest';
-import type { TrackedItem } from '@/lib/trackedItems/model';
+import { isTrackedWorkItem, type TrackedItem } from '@/lib/trackedItems/model';
+import { useTrackerUrlMatcher } from '@/lib/trackers/matchTrackerUrl';
+import { useTrackerSourceStatus } from '@/lib/trackers/sources';
 import { openExternalUrl } from '@/lib/url';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useUIStore } from '@/stores/useUIStore';
@@ -49,7 +51,7 @@ type TrackerItemViewProps = {
 };
 
 /**
- * One issue, pull or merge request or Linear issue in the Tracker, drawn as
+ * One issue, pull or merge request or tracker item in the Tracker, drawn as
  * the issues and PRs board previews it: description, activity, checks,
  * labels, reviewers, a reply box, merge and close. Nothing here starts a
  * session or a worktree; the item can be attached to the session on screen.
@@ -59,7 +61,9 @@ type TrackerItemViewProps = {
  * repository whose remote it points into.
  */
 export const TrackerItemView: React.FC<TrackerItemViewProps> = (props) => {
-    const target = trackerTargetOfUrl(props.url);
+    const urls = useRepositoryUrlMatcher();
+    const trackerUrls = useTrackerUrlMatcher();
+    const target = trackerTargetOfUrl(props.url, urls, trackerUrls);
     useBoardRevalidation(props.visible);
     const { panelDirectory, tabId, url } = props;
     const fallBack = React.useCallback(() => {
@@ -71,8 +75,8 @@ export const TrackerItemView: React.FC<TrackerItemViewProps> = (props) => {
 
     const content = !target
         ? <UnavailableState url={url} />
-        : target.source === 'linear'
-            ? <LinearTrackerItem url={url} identifier={target.identifier} visible={props.visible} onUnavailable={fallBack} onShown={settle} />
+        : target.source === 'tracker'
+            ? <TrackerWorkItem url={url} provider={target.provider} identifier={target.identifier} visible={props.visible} onUnavailable={fallBack} onShown={settle} />
             : <RepositoryTrackerItem {...props} kind={target.kind} onUnavailable={fallBack} onShown={settle} />;
 
     // The preview scrolls on its own, with its actions pinned under it.
@@ -103,7 +107,7 @@ const UnavailableState: React.FC<{ url: string }> = ({ url }) => {
 /** Opens the item in the browser and closes its tab when a click just opened it; else the tab says why. */
 type FallBack = () => void;
 
-const RepositoryTrackerItem: React.FC<TrackerItemViewProps & { kind: GitHubReferenceKind; onUnavailable: FallBack; onShown: () => void }> = ({
+const RepositoryTrackerItem: React.FC<TrackerItemViewProps & { kind: RepositoryReferenceKind; onUnavailable: FallBack; onShown: () => void }> = ({
     url, directory, panelDirectory, foreign, visible, kind, onUnavailable, onShown,
 }) => {
     const { t } = useI18n();
@@ -113,17 +117,18 @@ const RepositoryTrackerItem: React.FC<TrackerItemViewProps & { kind: GitHubRefer
     const linkRepository = useLinkRepository(directory, url);
     const readDirectory = linkRepository.directory;
     // The link itself is the search: it finds that one item, whatever its state.
-    const lookup = useGitHubReferenceList({ enabled: linkRepository.status === 'ready', directory: readDirectory, kind, filter: DEFAULT_REPOSITORY_FILTER, query: url });
+    const lookup = useRepositoryReferenceList({ enabled: linkRepository.status === 'ready', directory: readDirectory, kind, filter: DEFAULT_REPOSITORY_FILTER, query: url });
     // Only the item the link names: a lookup that fell back to a search lists others.
-    const reference = lookup.items.find((item) => isSameRepositoryItemLink(item.url, url)) ?? null;
+    const urls = useRepositoryUrlMatcher();
+    const reference = lookup.items.find((item) => isSameRepositoryItemLink(item.url, url, urls)) ?? null;
     // While the tab is on screen its item's state, checks included, follows the
     // host; the other rows of a lookup that fell back to a search do not.
     const followed = React.useMemo(
-        () => lookup.followed.filter((item) => item.provider !== 'linear' && item.number === reference?.number),
+        () => lookup.followed.filter((item) => !isTrackedWorkItem(item) && item.number === reference?.number),
         [lookup.followed, reference],
     );
     useTrackedItems(visible ? followed : NO_FOLLOWED);
-    const readContext = useGitHubReadContext(readDirectory);
+    const readContext = useRepositoryReadContext(readDirectory);
     const context = readContext && readContext !== 'missing' ? readContext : null;
 
     // Answered without it: the project's host does not know the link, or no
@@ -137,8 +142,8 @@ const RepositoryTrackerItem: React.FC<TrackerItemViewProps & { kind: GitHubRefer
         if (found) onShown();
     }, [found, onShown]);
 
-    const { detail, refresh: refreshDetail } = useGitHubReferenceDetail(readDirectory, reference, true);
-    const pullStatusOf = useGitHubPullStatuses(readDirectory, reference ? [reference] : []);
+    const { detail, refresh: refreshDetail } = useRepositoryReferenceDetail(readDirectory, reference, true);
+    const pullStatusOf = useRepositoryPullStatuses(readDirectory, reference ? [reference] : []);
     const attachments = usePullAttachments(reference);
     const [checksOpen, setChecksOpen] = React.useState(false);
     // The tab can stay open for hours; a frozen clock read every newer comment as "Just now".
@@ -161,7 +166,7 @@ const RepositoryTrackerItem: React.FC<TrackerItemViewProps & { kind: GitHubRefer
         if (context && reference) {
             const item = { owner: reference.sourceRepo.owner, repo: reference.sourceRepo.repo, number: reference.number };
             await sourceControl.refreshProviderReads(context, { item }).catch(() => undefined);
-            forgetGitHubPullStatus(item);
+            forgetRepositoryPullStatus(item);
         }
         await refreshItem();
     };
@@ -176,7 +181,7 @@ const RepositoryTrackerItem: React.FC<TrackerItemViewProps & { kind: GitHubRefer
             : <TrackerState message={t('common.loading')} />;
     }
 
-    const item: ReferencePickerItem = { source: 'github', reference };
+    const item: ReferencePickerItem = { source: 'repository', reference };
     const pull = reference.kind === 'pull' ? reference : null;
     return (
         <>
@@ -184,8 +189,8 @@ const RepositoryTrackerItem: React.FC<TrackerItemViewProps & { kind: GitHubRefer
                 item={item}
                 directory={readDirectory}
                 pullStatus={pull ? pullStatusOf(pull) : IDLE_PULL_STATUS}
-                linearDetail={{ status: 'idle' }}
-                githubDetail={detail}
+                trackerDetail={{ status: 'idle' }}
+                repositoryDetail={detail}
                 purpose="attach"
                 pinned
                 includeDiff={false}
@@ -230,16 +235,24 @@ const RepositoryTrackerItem: React.FC<TrackerItemViewProps & { kind: GitHubRefer
     );
 };
 
-const LinearTrackerItem: React.FC<{ url: string; identifier: string; visible: boolean; onUnavailable: FallBack; onShown: () => void }> = ({ url, identifier, visible, onUnavailable, onShown }) => {
+const TrackerWorkItem: React.FC<{
+    url: string;
+    provider: string;
+    identifier: string;
+    visible: boolean;
+    onUnavailable: FallBack;
+    onShown: () => void;
+}> = ({ url, provider, identifier, visible, onUnavailable, onShown }) => {
     const { t } = useI18n();
-    const source = useLinearSourceStatus();
-    const { detail, refresh, followed } = useLinearIssueDetail(source === 'ready' ? identifier : null, true);
+    const source = useTrackerSourceStatus(provider);
+    // A tracker's get takes its human identifier as well as its own id.
+    const { detail, refresh, followed } = useTrackerItemDetail(source === 'ready' ? { provider, id: identifier } : null, true);
     useTrackedItems(visible ? followed : NO_FOLLOWED);
     const showTrackerItem = useShowTrackerItem();
     const now = useMinuteTickerNow(true);
 
-    // Linear answers the same for an issue it cannot find and a read that
-    // failed, so only a tab just opened that never showed its issue gives up
+    // A tracker answers the same for an item it cannot find and a read that
+    // failed, so only a tab just opened that never showed its item gives up
     // on a failure; any other one offers Retry.
     const disconnected = source !== 'ready';
     const failed = detail.status === 'error';
@@ -257,23 +270,23 @@ const LinearTrackerItem: React.FC<{ url: string; identifier: string; visible: bo
     }
     if (detail.status !== 'ready') return <TrackerState message={t('common.loading')} />;
 
-    const item: ReferencePickerItem = { source: 'linear', issue: detail.value };
+    const item: ReferencePickerItem = { source: 'tracker', provider, item: detail.value };
     return (
         <ReferencePreview
             item={item}
             directory={null}
             pullStatus={IDLE_PULL_STATUS}
-            linearDetail={detail}
-            githubDetail={{ status: 'idle' }}
+            trackerDetail={detail}
+            repositoryDetail={{ status: 'idle' }}
             purpose="attach"
             pinned
             includeDiff={false}
             onIncludeDiffChange={() => undefined}
             now={now}
             footer={<SourceBoardActions item={item} project={null} context={null} onStartWorktree={() => undefined} onChanged={() => void refresh()} worktreeAvailable={false} />}
-            linearStateControl={<SourceBoardLinearStatus issue={detail.value} onChanged={() => void refresh()} />}
-            // A parent or sub-issue opens as a tab of its own.
-            onOpenLinearIssue={(issue) => { showTrackerItem(issue.url, null); }}
+            trackerStateControl={<SourceBoardTrackerStatus item={detail.value} onChanged={() => void refresh()} />}
+            // A parent or child opens as a tab of its own.
+            onOpenTrackerItem={(child) => { showTrackerItem(child.url, null); }}
         />
     );
 };

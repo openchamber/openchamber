@@ -65,7 +65,7 @@ copy:
   accepts values the strict predicate rejects. They keep their own name and
   shape; only modules asking for `isRecord` were migrated.
 - `source-control/mutation-executor.js` accepts null-prototype objects under an
-  `isPlainObject` name, and `github/routes.js` /
+  `isPlainObject` name, and `github/mappers.js` /
   `github/repo/fork-detection.js` classify by `[object Object]`; all three are
   divergent and stay put.
 - `quota/utils/transformers.js` exports an array-accepting `asObject`; it is not

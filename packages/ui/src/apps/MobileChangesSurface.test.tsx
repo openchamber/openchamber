@@ -6,7 +6,9 @@ import { SyncProvider } from '@/sync/sync-context';
 import { opencodeClient } from '@/lib/opencode/client';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import type { GitLogEntry, GitStatus } from '@/lib/api/types';
-import type { SourceControlAuthStatus, SourceControlUser } from '@/lib/source-control/types';
+import type {
+  ChangeRequest, ChangeRequestStatus, PageResult, Project, SourceControlAuthStatus, SourceControlIdentity, SourceControlUser,
+} from '@/lib/source-control/types';
 
 // Pull requests are read through the checkout's bound GitHub context, so the
 // repository here is bound to an account the auth store knows as valid.
@@ -19,6 +21,14 @@ const CONNECTED: SourceControlAuthStatus = {
     id: ACCOUNT_ID, credentialId: ACCOUNT_ID, credentialRevision: 1, providerUserId: 'github.com#7',
     providerUserStatus: 'available', user: USER, current: true, source: 'oauth', status: 'valid',
   }],
+};
+
+// The server emits neutral DTOs; the published pull request lives in the upstream project.
+const GITHUB: SourceControlIdentity = { provider: 'github', instance: 'github.com' };
+const UPSTREAM: Project = { ...GITHUB, id: 'upstream/project', owner: 'upstream', name: 'project', url: 'https://github.com/upstream/project' };
+const PUBLISHED_PR: ChangeRequest = {
+  ...GITHUB, id: 'upstream/project#42', number: 42, project: UPSTREAM, title: 'Published PR',
+  url: 'https://github.com/upstream/project/pull/42', state: 'open', draft: false, head: 'feature', base: 'main',
 };
 
 // The Changes pane now reads session messages for the turn scope, so the surface
@@ -86,12 +96,10 @@ test('mobile comparisons drill into files, retry, resume, change source, and yie
         }
         return Response.json({ path: url.searchParams.get('path'), original: '', modified: '', isBinary: true });
       // The bound status contract echoes the branch it answered for.
-      case '/api/source-control/github/pr/status': return Response.json({ connected: true, branch: url.searchParams.get('branch'),
-        repo: { owner: 'upstream', repo: 'project', url: 'https://github.com/upstream/project' },
-        pr: { number: 42, title: 'Published PR', url: 'https://github.com/upstream/project/pull/42', state: 'open', draft: false, head: 'feature', base: 'main' } });
-      case '/api/source-control/github/pulls/list': return Response.json({ connected: true, repo: { owner: 'upstream', repo: 'project' },
-        prs: [{ number: 42, title: 'Published PR', url: 'https://github.com/upstream/project/pull/42', state: 'open', draft: false,
-          head: 'feature', base: 'main', sourceRepo: { owner: 'upstream', repo: 'project', source: 'upstream' } }], hasMore: false });
+      case '/api/source-control/github/pr/status': return Response.json({ identity: GITHUB, project: UPSTREAM,
+        branch: url.searchParams.get('branch') ?? '', changeRequest: PUBLISHED_PR } satisfies ChangeRequestStatus);
+      case '/api/source-control/github/pulls/list':
+        return Response.json({ items: [PUBLISHED_PR], page: 1, hasMore: false } satisfies PageResult<ChangeRequest>);
       case '/api/walkthrough/pr-diff': return new Response('diff --git a/published.png b/published.png\nindex 1111111..2222222 100644\nBinary files a/published.png and b/published.png differ\n', { headers: { 'content-type': 'text/plain' } });
       default: throw new Error(`Unexpected request ${url.pathname}`);
     }
@@ -106,6 +114,11 @@ test('mobile comparisons drill into files, retry, resume, change source, and yie
   useSourceControlAuthStore.setState({
     entries: { [getSourceControlAuthKey({ provider: 'github', instance: 'github.com' })]: { status: CONNECTED, isLoading: false, hasChecked: true } },
   });
+  // Change-request diffs exist only for providers the server serves.
+  const { useSourceControlProviderRegistry } = await import('@/lib/source-control/providers/registry');
+  const { githubLikeDescriptor } = await import('@/lib/source-control/providers/descriptor.fixture');
+  const servedGitHub = githubLikeDescriptor();
+  useSourceControlProviderRegistry.setState({ ordered: [servedGitHub], byId: new Map([[servedGitHub.id, servedGitHub]]), status: 'ready', holdsList: true });
   const { MobileChangesPane } = await import('./MobileChangesSurface');
   const apis = createWebAPIs();
   const status: GitStatus = { current: 'feature', tracking: null, ahead: 0, behind: 0, files: [], isClean: true, diffStats: { staged: {}, working: {} } };
@@ -333,6 +346,11 @@ test('bounds Revert All fan-out to two in-flight revert requests', async () => {
   const { RuntimeAPIContext } = await import('@/contexts/runtimeAPIContext');
   const { createWebAPIs } = await import('../../../web/src/api/index');
   const { useGitStore } = await import('@/stores/useGitStore');
+  // Change-request diffs exist only for providers the server serves.
+  const { useSourceControlProviderRegistry } = await import('@/lib/source-control/providers/registry');
+  const { githubLikeDescriptor } = await import('@/lib/source-control/providers/descriptor.fixture');
+  const servedGitHub = githubLikeDescriptor();
+  useSourceControlProviderRegistry.setState({ ordered: [servedGitHub], byId: new Map([[servedGitHub.id, servedGitHub]]), status: 'ready', holdsList: true });
   const { MobileChangesPane } = await import('./MobileChangesSurface');
   const apis = createWebAPIs();
   const dirtyStatus: GitStatus = {
@@ -452,6 +470,11 @@ test('mobile changes last turn scope lists the turn diffs, opens one, and shows 
   const { RuntimeAPIContext } = await import('@/contexts/runtimeAPIContext');
   const { createWebAPIs } = await import('../../../web/src/api/index');
   const { useGitStore } = await import('@/stores/useGitStore');
+  // Change-request diffs exist only for providers the server serves.
+  const { useSourceControlProviderRegistry } = await import('@/lib/source-control/providers/registry');
+  const { githubLikeDescriptor } = await import('@/lib/source-control/providers/descriptor.fixture');
+  const servedGitHub = githubLikeDescriptor();
+  useSourceControlProviderRegistry.setState({ ordered: [servedGitHub], byId: new Map([[servedGitHub.id, servedGitHub]]), status: 'ready', holdsList: true });
   const { MobileChangesPane } = await import('./MobileChangesSurface');
   const apis = createWebAPIs();
   useGitStore.getState().setActiveDirectory('/repo');
@@ -589,6 +612,11 @@ test('mobile changes last turn scope paints loading before the turn fetch settle
   const { RuntimeAPIContext } = await import('@/contexts/runtimeAPIContext');
   const { createWebAPIs } = await import('../../../web/src/api/index');
   const { useGitStore } = await import('@/stores/useGitStore');
+  // Change-request diffs exist only for providers the server serves.
+  const { useSourceControlProviderRegistry } = await import('@/lib/source-control/providers/registry');
+  const { githubLikeDescriptor } = await import('@/lib/source-control/providers/descriptor.fixture');
+  const servedGitHub = githubLikeDescriptor();
+  useSourceControlProviderRegistry.setState({ ordered: [servedGitHub], byId: new Map([[servedGitHub.id, servedGitHub]]), status: 'ready', holdsList: true });
   const { MobileChangesPane } = await import('./MobileChangesSurface');
   const apis = createWebAPIs();
   useGitStore.getState().setActiveDirectory('/repo');
@@ -696,6 +724,11 @@ test('keeps the nested repository picker reachable once the working list resolve
   const { RuntimeAPIContext } = await import('@/contexts/runtimeAPIContext');
   const { createWebAPIs } = await import('../../../web/src/api/index');
   const { useGitStore } = await import('@/stores/useGitStore');
+  // Change-request diffs exist only for providers the server serves.
+  const { useSourceControlProviderRegistry } = await import('@/lib/source-control/providers/registry');
+  const { githubLikeDescriptor } = await import('@/lib/source-control/providers/descriptor.fixture');
+  const servedGitHub = githubLikeDescriptor();
+  useSourceControlProviderRegistry.setState({ ordered: [servedGitHub], byId: new Map([[servedGitHub.id, servedGitHub]]), status: 'ready', holdsList: true });
   const { MobileChangesPane } = await import('./MobileChangesSurface');
   const apis = createWebAPIs();
   const status: GitStatus = { current: 'feature', tracking: null, ahead: 0, behind: 0, files: [], isClean: true, diffStats: { staged: {}, working: {} } };

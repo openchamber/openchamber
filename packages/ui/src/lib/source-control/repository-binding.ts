@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'r
 import type { SourceControlAPI, SourceControlBindingRead, SourceControlReadContext } from '@/lib/api/types';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { waitForWorktreeGitReady } from '@/lib/worktrees/worktreeBootstrap';
-import { getBoundSourceControlReadContexts } from './identity';
+import { defaultSourceControlIdentities, getBoundSourceControlReadContexts } from './identity';
+import { useSourceControlProviderRegistry } from './providers/registry';
 import { getSourceControlAuthKey, useSourceControlAuthStore } from '@/stores/useSourceControlAuthStore';
 
 type BindingAPI = Pick<SourceControlAPI, 'repositoryBinding'> & Partial<Pick<SourceControlAPI, 'authStatus'>>;
@@ -120,7 +121,7 @@ export class RepositoryBindingOwner {
         return null;
       }
       return state.status?.status === 'connected' ? state.status.accounts.find((account) => account.current)?.id ?? null : null;
-    }, auth.identities);
+    }, [...auth.identities, ...defaultSourceControlIdentities(useSourceControlProviderRegistry.getState().ordered)]);
   }
 
   private authApi: Pick<SourceControlAPI, 'authStatus'> | null = null;
@@ -131,7 +132,7 @@ export class RepositoryBindingOwner {
     if (this.authApi === api) return;
     this.authApi = api;
     this.authUnsubscribe?.();
-    this.authUnsubscribe = useSourceControlAuthStore.subscribe(() => {
+    const republish = () => {
       for (const entry of this.entries.values()) {
         if (entry.state.status !== 'ready') continue;
         const contexts = this.contextsFor(entry, entry.state.read);
@@ -139,7 +140,17 @@ export class RepositoryBindingOwner {
           this.publish(entry, { ...entry.state, contexts });
         }
       }
+    };
+    // The providers' default instances decide which remotes count as theirs,
+    // so a provider list that lands after the accounts republishes too.
+    const unsubscribeAuth = useSourceControlAuthStore.subscribe(republish);
+    const unsubscribeProviders = useSourceControlProviderRegistry.subscribe((state, previous) => {
+      if (state.ordered !== previous.ordered) republish();
     });
+    this.authUnsubscribe = () => {
+      unsubscribeAuth();
+      unsubscribeProviders();
+    };
   }
 
   private scheduleTrim() {

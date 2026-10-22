@@ -178,22 +178,25 @@ identity cannot be used, and nothing binds a repository to a credential that
 is gone.
 
 `accountUsableByIdentity` decides which listed accounts count. The server uses
-the gh CLI login only while it is the active GitHub account in Integrations, so
-the identity editor offers it, and an identity naming it counts as connected,
-only while the gh account is current. The OAuth account and the gh account of
-the same person are separate options told apart by their source label. An
-identity that names the gh account while gh is not in use, disabled or signed
-out is not offered. `unavailableAccountReason` picks its Git Settings note:
-switch to the GitHub CLI account in Integrations (`cliAccountInactive`) while no
-gh account is in use, else `accountGone`, since a gh login in use as another
-person is not fixed by switching. The glab login is never offered:
-Git transport reads only GitLab credentials OpenChamber stores.
+a provider's CLI login for Git transport only where the descriptor says so
+(`auth.cliTransport`: the gh CLI), and only while it is the provider's active
+account in Integrations, so the identity editor offers it, and an identity
+naming it counts as connected, only while that account is current. The OAuth
+account and the CLI account of the same person are separate options told apart
+by their source label. An identity that names the CLI account while it is not
+in use, disabled or signed out is not offered. `unavailableAccountReason` picks
+its Git Settings note: switch to the CLI account in Integrations
+(`cliAccountInactive`) while no CLI account is in use, else `accountGone`,
+since a CLI login in use as another person is not fixed by switching. A CLI
+login of a provider without `cliTransport` (the glab login) is never offered:
+Git transport reads only the credentials OpenChamber stores. The account
+labels name the provider by its descriptor's `label`.
 
 An identity is complete when it has a signature and a way to push:
 `isCompleteIdentity` accepts `account` with an account, a managed SSH key,
 anonymous HTTPS, or `system` (this machine's Git). The account is optional
 except for the `account` transport, so identities for hosts OpenChamber has no
-provider for (Bitbucket, Gitea, a private server) work. The editor creates
+provider for (Bitbucket, a private server) work. The editor creates
 nothing else and the server refuses anything else from a client.
 
 Records written before identities carried a transport have none; they read as
@@ -282,6 +285,161 @@ hydration, scoped controls and durable guards. These tests do not prove behavior
 after browser storage is explicitly cleared or a webview is replaced with a new
 storage context.
 
+## Provider registry
+
+`providers/` owns what the UI knows about each source-control provider. The
+connected server describes its providers as plain data
+(`SourceControlAPI.providers()`, `GET /api/source-control/providers`);
+`descriptor.ts` parses that data, `registry.ts` holds it per runtime, and
+`urlMatchers.ts`, `terminology.ts` and `components/sourceControl/ProviderIcon.tsx`
+turn it into links, labels and marks. React code reads it through
+`useSourceControlProvider(id)`, `useSourceControlProviders()` and
+`useChangeRequestTerm(id)`; non-React code receives descriptors as a parameter
+and never reads the store itself.
+
+Invariants:
+
+- `useSourceControlProvider` always returns a descriptor. An id the registry
+  does not hold reads as `unknownProviderDescriptor(id)`: its id as the label,
+  pull-request wording with `#`, the branch icon, no auth methods, no URL
+  patterns and every feature off. It is cached per id, so selectors see one
+  stable object, and such a provider still lists through the neutral
+  `issuesList` / `changeRequestsList`.
+- Provider ids match `^[a-z][a-z0-9-]{0,31}$` and share one namespace with the
+  tracker registry: `linear`, `guest`, `link`, `external` and `repository` are
+  refused. One malformed or reserved descriptor is left out of a list and never
+  fails the others; a repeated id keeps its first entry. A value a newer server
+  may send reads as its closest known meaning: an unknown change-request term as
+  `pullRequest`, an unknown CI term as `checks`, an unknown auth method is
+  dropped, an unknown settings field kind as `unknown`, a missing feature as off.
+- `SourceControlProvider` is that open id, not a list of known providers.
+  Persisted values that name a provider (the change-request status cache,
+  comment drafts, message context parts, the remembered repository provider,
+  identity accounts) are checked for id syntax only: a value written for a
+  provider the server no longer serves still reads, and resolves through the
+  fallback descriptor. One malformed entry is dropped, never its neighbours.
+- No shared UI source names a provider: `providers/neutrality.test.ts` fails on
+  any mention of `gitea` and on any string-literal comparison of a provider
+  (`provider === 'x'`, or any value against a served id) outside its
+  allowlist, where each entry gives its reason and must still match.
+- A failed refresh never becomes an empty list. The registry keeps what it holds
+  (`stale`) and reports `error` only when it holds nothing; `holdsList` says
+  whether a list (remembered or answered) is held, and until it is, which
+  providers are served is unknown, not none. `error` is retried by the
+  registry itself after 2 s, doubling to at most a minute, until an answer or
+  a runtime switch. An answered empty
+  list, as VS Code gives, is authoritative; a server that lists providers none
+  of which can be read fails the read in the web adapter instead of answering
+  empty.
+- The list is remembered per runtime in `localStorage`
+  (`openchamber.sourceControlProviders.v1`, at most 16 runtimes, validated on
+  read; a corrupt snapshot is ignored) and stands in until the server answers,
+  so surfaces do not start generic and then flip. The registry refreshes next
+  to `refreshSourceControlAuth` (`App.tsx`, `VSCodeApp.tsx`, `MobileApp.tsx`)
+  and `resetForRuntimeSwitch(runtimeKey)` in `runtimeEndpointReset.ts` drops the
+  previous runtime's list, shows the next runtime's remembered one, and rejects
+  answers to requests started before the switch. `refresh` reads
+  `getRuntimeKey()` itself and first switches to that runtime's remembered list
+  when it differs from the held key: the store is created at import, before
+  the runtime endpoint is initialized. A transient key (`isTransientRuntimeKey`:
+  `url:default`, `mobile-disconnected`) is never a snapshot slot.
+- A refresh that answers the list already held keeps the held `ordered` and
+  `byId` objects (and the auth store keeps an unchanged `identities` array), so
+  a reconnect or resume does not rebuild every sidebar row's link matcher.
+- `parseRepositoryItemUrl` resolves a link in this order: a provider whose
+  instance the host is known to be (a connected account's instance or the
+  provider's default instance), else the only provider whose pattern matches,
+  else the first by `order`, so an unknown host with `/issues/N` or `/pull/N`
+  keeps reading as GitHub-shaped. Patterns name `{owner}` or `{namespace+}`,
+  `{repo}` and `{number}`; a pattern that does not name each once is ignored.
+- Remotes are recognised on the instances a caller passes:
+  `resolveSourceControlTarget`, `getBoundSourceControlReadContexts` and
+  `repositoryLinkFromRemotes` take the connected instances plus each
+  provider's default instance (`defaultSourceControlIdentities(descriptors)`);
+  `identity.ts` names no default of its own. The repository binding owner reads
+  the registry for them and republishes contexts when the provider list
+  changes, since a list that lands after the accounts changes which remotes are
+  a provider's. `repositoryLinkFromRemotes` takes the descriptors too: a
+  provider without `repository.nestedNamespaces` names a project by
+  owner/name only.
+- `GITHUB_SOURCE_CONTROL_IDENTITY` (github.com) is kept for the github.com
+  device flow and its legacy auth wire only; no other surface picks a provider
+  by it.
+- Links are read through one matcher per render
+  (`repositoryUrlMatcher.ts`): `useRepositoryUrlMatcher()` memoizes the
+  registry's descriptors with the auth store's connected instances, and
+  `createRepositoryUrlMatcher` builds the same object for tests and non-React
+  callers. Non-React code that reads links (`lib/linkedIssues.ts`,
+  `components/references/listBackedReferences.ts`) takes it as a parameter. The
+  matcher reads `www.` in front of a default instance's host as that instance.
+- `useSourceControlDescriptorOf()` is the lookup for surfaces that name several
+  providers in one render, and `useSourceControlProviderServing(id)` gates
+  what only a served provider has (change-request diffs, walkthroughs): it is
+  `unknown` until a list is held, and those surfaces wait on `unknown` as on
+  loading. Text built outside React (message previews, chat display parts)
+  takes the lookup as a parameter; React callers pass
+  `useSourceControlDescriptorOf()` and keep it in their memo inputs, so wording
+  first drawn with the generic fallback is redrawn when the list arrives.
+  `readSourceControlProvider(id)` reads the registry as it is now, for text
+  that is not redrawn (toasts, model-facing context text).
+- `components/sourceControl/SourceControlAccountControl.tsx` is the connected
+  account of a project's host (avatar and switcher), drawn from that host's
+  descriptor; a project with no known host shows none.
+- An identity's icon key is either a built-in mark (`branch`, `briefcase`, ...)
+  or a provider id; the Git header, Git Settings and the identity editor draw a
+  provider id with `ProviderIcon`, and the editor offers one mark per served
+  provider. Stored keys `github` and `gitlab` therefore keep their marks.
+- Settings draws one `SourceControlProviderCard` per served descriptor
+  (`components/sections/DOCUMENTATION.md`, "Integrations: provider cards"):
+  sign-in methods are the descriptor's `auth.methods` the instance reports
+  available, instance input follows `instances` (format, loopback HTTP, port,
+  reserved), the token link is `auth.token.createPath` on the instance, and an
+  unknown settings field kind asks for an update. The github.com device flow is
+  selected by `instances.legacyFlow`, never by id.
+- `changeRequestCopy(key, term)` picks a message's merge-request wording by
+  the provider's `ChangeRequestTerm`, never by provider id.
+- `ProviderIcon` draws a sprite icon the descriptor names, else the served path
+  (path data only, checked by the schema, drawn as a `d` attribute), else the
+  branch icon. `providerIconSrc` gives the same mark as a data URI for surfaces
+  that mask an icon URL.
+
+### Why descriptors are fetched and not mirrored in the UI
+
+Desktop and mobile connect to servers of other versions. A copy in the UI would
+describe the UI's own release rather than the server's, and would have to name
+every provider the server may serve. The snapshot covers first paint; only the
+very first visit to a runtime shows generic labels until the answer lands.
+
+### Why the registry retries a failed read itself
+
+A first read that fails leaves nothing to show, and the app refreshes the
+registry only on connect, a runtime switch or a resume. Left to them, a single
+failed read made every gated surface read the provider as unserved for the
+rest of the session. The registry owns the failure, so it owns the retry; the
+shared snapshot, no-op check and wait live in `providers/runtimeList.ts`, used
+by the tracker registry too.
+
+### Why `ChangeRequestTerm` and settings field kinds are closed
+
+Server-supplied text cannot be translated. The descriptor therefore names a
+term (`pullRequest` or `mergeRequest`), a CI term (`checks` or `pipeline`, which
+picks the English noun of model-facing context text) and field kinds (`instance-url`,
+`personal-access-token`) that select whole translated sentences in the UI;
+product names, prefixes, abbreviations and URLs are literal values that stay
+untranslated in every locale. A kind this version does not know asks to update
+the app instead of showing an untranslated form.
+
+### Why the older-server fallback lives in the web adapter
+
+A server that predates the providers route answers 404 and serves exactly
+GitHub and GitLab. `packages/web/src/api/source-control-providers.ts` answers
+with their built-in descriptors, kept identical to the server's, so
+`packages/ui` never names a provider. The adapter is the one place that knows
+which server versions exist, and it already names the github.com default host
+of the repository-reference wire. The same adapter normalizes instances by the
+descriptor's `instances.format`. Every provider's server module emits the
+neutral DTOs, so the adapter has no provider branches for resources or auth.
+
 ## Tests
 
 `repository-binding.test.ts` covers deferred failure, successful empty, a read
@@ -298,3 +456,12 @@ the gh CLI account rules. Account cases in
 These tests do not validate a packaged runtime, real credentials or browser paint.
 
 `SourceControlBindingSettings.test.tsx` covers the repository dialog's all-locale copy.
+
+`providers/descriptor.test.ts` covers id syntax and reserved ids, per-descriptor
+failure, forward-compatible values and the fallback; `providers/registry.test.ts`
+covers snapshot hydration, a corrupt snapshot, failure keeping the held list,
+shared requests and a runtime switch rejecting a late answer;
+`providers/urlMatchers.test.ts` covers github.com, GitHub Enterprise, nested
+GitLab namespaces, a provider the UI has no code for, known-instance precedence
+and the ambiguous case. The web adapter's 404 fallback and format-driven
+normalization are covered in `packages/web/src/api/source-control-providers.test.ts`.

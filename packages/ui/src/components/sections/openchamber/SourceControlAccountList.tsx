@@ -1,5 +1,6 @@
 import React from 'react';
-import { Icon } from '@/components/icon/Icon';
+import { ProviderIcon } from '@/components/sourceControl/ProviderIcon';
+import { useSourceControlProvider } from '@/lib/source-control/providers/registry';
 import type { SourceControlAuthAccount } from '@/lib/api/types';
 
 type SourceControlAccountGroup = {
@@ -39,6 +40,11 @@ const groupSourceControlAccounts = (
 const credentialHandle = (id: string): string | null =>
   /[0-9a-f]{8}(?=-[0-9a-f]{4}-)/i.exec(id)?.[0] ?? null;
 
+/** An account without an avatar shows its provider's mark. */
+const ProviderMark: React.FC<{ provider: string }> = ({ provider }) => (
+  <ProviderIcon descriptor={useSourceControlProvider(provider)} variant="fill" className="size-4 text-muted-foreground" />
+);
+
 type SourceControlAccountListProps = {
   accounts: SourceControlAuthAccount[];
   avatarAlt: (username: string) => string;
@@ -74,10 +80,7 @@ export const SourceControlAccountList: React.FC<SourceControlAccountListProps> =
               />
             ) : (
               <div className="flex size-9 shrink-0 items-center justify-center oc-tile-inset rounded-full">
-                <Icon
-                  name={user.provider === 'github' ? 'github-fill' : user.provider === 'gitlab' ? 'gitlab' : 'git-branch'}
-                  className="size-4 text-muted-foreground"
-                />
+                <ProviderMark provider={user.provider} />
               </div>
             )}
             <div className="min-w-0">

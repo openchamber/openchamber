@@ -6,10 +6,11 @@ import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
-import type { GitHubReference, SourceControlReadContext } from '@/lib/api/types';
+import type { RepositoryReference, SourceControlReadContext } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
 import { isIMECompositionEvent } from '@/lib/ime';
 import { formatShortcutForDisplay } from '@/lib/shortcuts';
+import { useSourceControlProvider } from '@/lib/source-control/providers/registry';
 import type { ReviewChangeRequestInput, ReviewVerdict } from '@/lib/source-control/types';
 import { newMutationKey } from './mutationKey';
 
@@ -21,7 +22,7 @@ type Busy = 'comment' | 'thread' | ReviewVerdict | null;
  * review's body. The text stays in the box until the host has it.
  */
 export const SourceBoardReply: React.FC<{
-    reference: GitHubReference;
+    reference: RepositoryReference;
     context: SourceControlReadContext;
     /**
      * The item's feed and the list read again: after a write so it shows, and
@@ -35,11 +36,13 @@ export const SourceBoardReply: React.FC<{
     const [text, setText] = React.useState('');
     const [busy, setBusy] = React.useState<Busy>(null);
 
-    const label = referenceNumberLabel(reference);
+    const descriptor = useSourceControlProvider(reference.provider);
+    const label = referenceNumberLabel(reference, descriptor);
     const project = { owner: reference.sourceRepo.owner, name: reference.sourceRepo.repo };
     const openPull = reference.kind === 'pull' && reference.state === 'open' ? reference : null;
-    // GitLab threads any merge request comment; GitHub's only start from a line in a review.
-    const canStartThread = reference.kind === 'pull' && reference.provider === 'gitlab';
+    // Some hosts thread any change request comment (GitLab); others start a
+    // thread only from a line in a review (GitHub).
+    const canStartThread = reference.kind === 'pull' && descriptor.features.startThread;
     const body = text.trim() ? text : null;
     const shortcut = formatShortcutForDisplay('mod+enter');
 

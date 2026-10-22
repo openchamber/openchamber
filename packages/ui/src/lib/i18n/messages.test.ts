@@ -40,6 +40,22 @@ describe('i18n dictionaries', () => {
       expect(dictionary['gitView.header.openRepository']).toContain('{provider}');
     }
   });
+  // A sentence that names its provider through `{provider}` serves every
+  // provider; a literal product name would put GitHub's words on Gitea's card.
+  test('provider sentences keep {provider} and name no product in every locale', () => {
+    const english: Record<string, string> = enDict;
+    const providerKeys = Object.keys(english).filter((key) => english[key].includes('{provider}'));
+    expect(providerKeys.length).toBeGreaterThan(0);
+    for (const [locale, dictionary] of Object.entries(localeDictionaries)) {
+      const translated: Record<string, string> = dictionary;
+      for (const key of providerKeys) {
+        const text = translated[key] ?? '';
+        expect(`${locale} ${key}: ${text.includes('{provider}')}`).toBe(`${locale} ${key}: true`);
+        expect(`${locale} ${key}: ${/GitHub|GitLab|Linear/.test(text)}`).toBe(`${locale} ${key}: false`);
+      }
+    }
+  });
+
   test('anonymous transport has a translated read-only label in every locale', () => {
     const key = 'settings.sourceControl.transport.anonymous';
     expect(enDict[key]).toBe('Anonymous HTTPS, read-only');

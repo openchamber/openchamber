@@ -1,8 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 import type { Session } from '@/lib/opencode/model';
 import type { SessionMetadataRecord } from './sessionReviewMetadata';
-import { buildLinkedGuestIssue, buildLinkedIssue, buildLinkedIssueId, buildLinkedLinearIssue, getDistinctLinkedIssues, getGitLabThreadRef, getLinkedGitHubPullRequests, getLinkedGitLabThreads, getLinkedIssues, getLinkedSidebarChanges, getLinkedSidebarIssues, withLinkedIssue, type LinkedIssue } from './linkedIssues';
-import { githubThread } from './trackedItems/fromLinks';
+import { buildLinkedGuestIssue, buildLinkedIssue, buildLinkedIssueId, buildLinkedTrackerItem, getDistinctLinkedIssues, toStoredLinkedIssue, getLinkedIssues, getLinkedSidebarChanges, getLinkedSidebarIssues, getRepositoryThreadRef, withLinkedIssue, type LinkedIssue } from './linkedIssues';
+import { acmeDescriptor, githubLikeDescriptor, gitlabLikeDescriptor } from './source-control/providers/descriptor.fixture';
+import { createRepositoryUrlMatcher } from './source-control/repositoryUrlMatcher';
+import { repositoryThread } from './trackedItems/fromLinks';
 import { trackedItemKey } from './trackedItems/model';
 
 type LinkedRepositoryIssue = Extract<LinkedIssue, { kind: 'issue' | 'pull' }>;
@@ -131,9 +133,10 @@ describe('buildLinkedIssue', () => {
   });
 });
 
-describe('buildLinkedLinearIssue', () => {
-  test('stores the Linear identifier without inventing a GitHub number', () => {
-    const built = buildLinkedLinearIssue({
+describe('buildLinkedTrackerItem', () => {
+  test('stores the tracker and its identifier without inventing a GitHub number', () => {
+    const built = buildLinkedTrackerItem({
+      provider: 'linear',
       identifier: 'ENG-12',
       title: 'Broken login',
       url: 'https://linear.app/openchamber/issue/ENG-12',
@@ -142,14 +145,31 @@ describe('buildLinkedLinearIssue', () => {
     });
     expect(built).toEqual({
       id: 'linear:ENG-12',
+      kind: 'tracker',
+      provider: 'linear',
       identifier: 'ENG-12',
       title: 'Broken login',
       url: 'https://linear.app/openchamber/issue/ENG-12',
-      kind: 'linear',
       author: 'Ada',
       authorAvatarUrl: 'https://avatars/1',
       linkedAt: 5,
     });
+  });
+});
+
+describe('toStoredLinkedIssue', () => {
+  // Clients from before trackers read only `kind: 'linear'` and rewrite the
+  // list without entries they cannot read; a Linear link stays one they keep.
+  test('stores a Linear link as `linear` with its provider, another tracker as `tracker`, and reads both back', () => {
+    const linear = buildLinkedTrackerItem({ provider: 'linear', identifier: 'ENG-12', title: 'Broken login', url: 'https://linear.app/openchamber/issue/ENG-12', linkedAt: 5 });
+    const acme = buildLinkedTrackerItem({ provider: 'acme-tickets', identifier: 'OPS-7', title: 'Pager', url: 'https://acme.example/OPS-7', linkedAt: 6 });
+    expect(toStoredLinkedIssue(linear)).toEqual({ ...linear, kind: 'linear', provider: 'linear' });
+    expect(toStoredLinkedIssue(acme)).toEqual(acme);
+    expect(toStoredLinkedIssue(issue())).toEqual(issue());
+
+    const metadata = [linear, acme].reduce<SessionMetadataRecord>((current, entry) => withLinkedIssue(current, entry, true), {});
+    expect(storedIssues(metadata).map((entry): string => entry.kind)).toEqual(['linear', 'tracker']);
+    expect(getLinkedIssues(sessionWith([toStoredLinkedIssue(linear), toStoredLinkedIssue(acme)]))).toEqual([linear, acme]);
   });
 });
 
@@ -237,15 +257,23 @@ describe('getLinkedIssues', () => {
     expect(getLinkedIssues(sessionWith([stored]))).toEqual([stored]);
   });
 
-  test('keeps Linear entries next to GitHub ones', () => {
+  test('keeps tracker entries next to GitHub ones', () => {
     const github = issue();
-    const linear = buildLinkedLinearIssue({
+    const linear = buildLinkedTrackerItem({
+      provider: 'linear',
       identifier: 'ENG-12',
       title: 'Broken login',
       url: 'https://linear.app/openchamber/issue/ENG-12',
       linkedAt: 2,
     });
     expect(getLinkedIssues(sessionWith([github, linear]))).toEqual([github, linear]);
+  });
+
+  test('reads a Linear entry stored before trackers had their own kind as a Linear tracker item', () => {
+    const stored = { id: 'linear:ENG-12', identifier: 'ENG-12', title: 'Broken login', url: 'https://linear.app/openchamber/issue/ENG-12', kind: 'linear', linkedAt: 2 };
+    expect(getLinkedIssues(sessionWith([stored]))).toEqual([{ ...stored, kind: 'tracker', provider: 'linear' }]);
+    // A tracker entry whose tracker id is malformed is dropped.
+    expect(getLinkedIssues(sessionWith([{ ...stored, kind: 'tracker', provider: 'Not An Id' }]))).toEqual([]);
   });
 
   test('survives a non-array payload', () => {
@@ -307,28 +335,60 @@ describe('withLinkedIssue', () => {
   });
 });
 
-describe('getLinkedGitHubPullRequests', () => {
-  test('reads the repository of each linked GitHub PR from its id', () => {
-    const session = sessionWith([
-      issue(),
-      issue({ id: 'acme/app#7', number: 7, kind: 'pull', title: 'Fix', url: 'https://github.com/acme/app/pull/7' }),
-      { id: 'linear:ENG-1', identifier: 'ENG-1', title: 'Linear', url: 'https://linear.app/x', kind: 'linear', linkedAt: 1 },
-    ]);
-    expect(getLinkedGitHubPullRequests(session)).toEqual([
-      { owner: 'acme', repo: 'app', number: 7, url: 'https://github.com/acme/app/pull/7', title: 'Fix' },
-    ]);
+const matcher = createRepositoryUrlMatcher([githubLikeDescriptor(), gitlabLikeDescriptor(), acmeDescriptor()], []);
+
+describe('getRepositoryThreadRef', () => {
+  test('reads a GitHub pull request entry with its instance', () => {
+    const entry = issue({ id: 'acme/app#7', number: 7, kind: 'pull', title: 'Fix', url: 'https://github.com/acme/app/pull/7' });
+    expect(getRepositoryThreadRef(entry, matcher)).toEqual({
+      key: 'github|github.com|acme/app|pull#7', provider: 'github', instance: 'github.com', owner: 'acme', repo: 'app', number: 7, thread: 'pull',
+    });
   });
 
-  test('skips a PR whose id could not name its repository', () => {
+  test('reads the instance, subgroup path and number of a GitLab thread', () => {
+    const mergeRequest = issue({ id: 'https://gitlab.example.com/g/sub/app/-/merge_requests/3#3', number: 3, kind: 'pull', url: 'https://gitlab.example.com/g/sub/app/-/merge_requests/3' });
+    expect(getRepositoryThreadRef(mergeRequest, matcher)).toMatchObject({
+      provider: 'gitlab', instance: 'https://gitlab.example.com', owner: 'g/sub', repo: 'app', number: 3, thread: 'pull',
+    });
+  });
+
+  test('reads a provider the UI has no code for from its own patterns', () => {
+    const link = { id: 'link:https://forge.example.com/org/tool/pulls/4', kind: 'external', thread: 'change', identifier: 'forge', title: 'Acme', url: 'https://forge.example.com/org/tool/pulls/4', linkedAt: 1 } as const;
+    expect(getRepositoryThreadRef(link, matcher)).toMatchObject({ provider: 'acme', instance: 'https://forge.example.com', number: 4, thread: 'pull' });
+  });
+
+  test('looks nothing up for Linear, an unreadable address, or an entry whose number disagrees', () => {
+    expect(getRepositoryThreadRef(buildLinkedTrackerItem({ provider: 'linear', identifier: 'ENG-1', title: 'x', url: 'https://linear.app/x', linkedAt: 1 }), matcher)).toBeNull();
+    expect(getRepositoryThreadRef(issue({ id: 'x', number: 1, url: 'https://example.com/not/a/thread' }), matcher)).toBeNull();
+    expect(getRepositoryThreadRef(issue({ number: 13 }), matcher)).toBeNull();
+  });
+});
+
+describe('getLinkedSidebarChanges', () => {
+  test('lists every linked change once, repository ones with their thread and provider reference', () => {
     const session = sessionWith([
-      issue({ id: 'https://ghe.example/acme/app/pull/7#7', number: 7, kind: 'pull', url: 'https://ghe.example/acme/app/pull/7' }),
+      issue({ id: 'acme/app#7', number: 7, kind: 'pull', title: 'Fix', url: 'https://github.com/acme/app/pull/7' }),
+      { id: 'guest:gitea:5', providerId: 'gitea', identifier: '5', title: 'Guest PR', url: 'https://gitea/x', kind: 'guest', thread: 'pull', linkedAt: 1 },
+      { id: 'link:https://gitlab.com/a/b/-/merge_requests/42', kind: 'external', thread: 'change', identifier: '!42', title: 'MR', url: 'https://gitlab.com/a/b/-/merge_requests/42', linkedAt: 1 },
+      { id: 'link:https://jira.example/OPS-7', kind: 'external', thread: 'issue', identifier: 'OPS-7', title: 'Outage', url: 'https://jira.example/OPS-7', linkedAt: 1 },
+      { id: 'linear:ENG-1', identifier: 'ENG-1', title: 'Linear', url: 'https://linear.app/x', kind: 'linear', linkedAt: 1 },
     ]);
-    expect(getLinkedGitHubPullRequests(session)).toEqual([]);
+    expect(getLinkedSidebarChanges(session, matcher)).toEqual([
+      {
+        key: 'github|github.com|acme/app|pull#7', identifier: '#7', url: 'https://github.com/acme/app/pull/7', title: 'Fix',
+        repository: { key: 'github|github.com|acme/app|pull#7', provider: 'github', instance: 'github.com', owner: 'acme', repo: 'app', number: 7, thread: 'pull' },
+      },
+      { key: 'guest:gitea:5', identifier: '5', url: 'https://gitea/x', title: 'Guest PR' },
+      {
+        key: 'gitlab|https://gitlab.com|a/b|pull#42', identifier: '!42', url: 'https://gitlab.com/a/b/-/merge_requests/42', title: 'MR',
+        repository: { key: 'gitlab|https://gitlab.com|a/b|pull#42', provider: 'gitlab', instance: 'https://gitlab.com', owner: 'a', repo: 'b', number: 42, thread: 'pull' },
+      },
+    ]);
   });
 });
 
 describe('getLinkedSidebarIssues', () => {
-  test('lists GitHub issues with their repository and trackers by identifier, never pull requests', () => {
+  test('lists repository issues with their thread and trackers by identifier, never pull requests', () => {
     const session = sessionWith([
       issue(),
       issue({ id: 'acme/app#7', number: 7, kind: 'pull', url: 'https://github.com/acme/app/pull/7' }),
@@ -336,9 +396,12 @@ describe('getLinkedSidebarIssues', () => {
       { id: 'guest:jira:OPS-2', providerId: 'jira', identifier: 'OPS-2', title: 'Ops', url: 'https://jira/x', kind: 'guest', thread: 'issue', linkedAt: 1 },
       { id: 'guest:gitea:5', providerId: 'gitea', identifier: '5', title: 'Guest PR', url: 'https://gitea/x', kind: 'guest', thread: 'pull', linkedAt: 1 },
     ]);
-    expect(getLinkedSidebarIssues(session)).toEqual([
-      { source: 'github', key: 'owner/repo#12', owner: 'owner', repo: 'repo', number: 12, url: 'https://github.com/owner/repo/issues/12', title: 'Rail badge count' },
-      { source: 'linear', key: 'linear:ENG-1', identifier: 'ENG-1', url: 'https://linear.app/x', title: 'Linear task' },
+    expect(getLinkedSidebarIssues(session, matcher)).toEqual([
+      {
+        source: 'repository', key: 'github|github.com|owner/repo|issue#12', identifier: '#12', url: 'https://github.com/owner/repo/issues/12', title: 'Rail badge count',
+        ref: { key: 'github|github.com|owner/repo|issue#12', provider: 'github', instance: 'github.com', owner: 'owner', repo: 'repo', number: 12, thread: 'issue' },
+      },
+      { source: 'tracker', provider: 'linear', key: 'linear:ENG-1', identifier: 'ENG-1', url: 'https://linear.app/x', title: 'Linear task' },
       { source: 'guest', key: 'guest:jira:OPS-2', identifier: 'OPS-2', url: 'https://jira/x', title: 'Ops' },
     ]);
   });
@@ -353,8 +416,20 @@ describe('getLinkedSidebarIssues', () => {
       'link:https://jira.example/OPS-7',
       'link:https://gitlab.com/a/b/-/merge_requests/42',
     ]);
-    expect(getLinkedSidebarIssues(session)).toEqual([
+    expect(getLinkedSidebarIssues(session, matcher)).toEqual([
       { source: 'external', key: 'link:https://jira.example/OPS-7', identifier: 'OPS-7', url: 'https://jira.example/OPS-7', title: 'Outage' },
+    ]);
+  });
+
+  test('gives a GitLab issue its thread once, however it was linked', () => {
+    const url = 'https://gitlab.com/team/app/-/issues/8';
+    const session = sessionWith([
+      issue({ id: 'gitlab.com:team/app#8', number: 8, kind: 'issue', url }),
+      { id: `link:${url}`, kind: 'external', thread: 'issue', identifier: '#8', title: 'Same issue', url, linkedAt: 2 },
+      issue({ id: 'mr', number: 3, kind: 'pull', url: 'https://gitlab.com/team/app/-/merge_requests/3' }),
+    ]);
+    expect(getLinkedSidebarIssues(session, matcher)).toMatchObject([
+      { source: 'repository', identifier: '#8', ref: { provider: 'gitlab', number: 8, thread: 'issue' } },
     ]);
   });
 });
@@ -368,45 +443,37 @@ describe('links to github.com from extensions and agents', () => {
       { id: 'link:https://github.com/acme/app/issues/9', kind: 'external', thread: 'issue', identifier: 'github.com', title: 'Bug', url: 'https://github.com/acme/app/issues/9', linkedAt: 1 },
       issue({ id: 'acme/app#9', number: 9, kind: 'issue', url: 'https://github.com/acme/app/issues/9' }),
     ]);
-    expect(getLinkedGitHubPullRequests(session).map((pr) => pr.number)).toEqual([7, 8]);
-    expect(getLinkedSidebarChanges(session)).toEqual([]);
-    expect(getDistinctLinkedIssues(session).map((entry) => entry.id)).toEqual([
+    expect(getLinkedSidebarChanges(session, matcher).map((change) => change.repository?.number)).toEqual([7, 8]);
+    expect(getDistinctLinkedIssues(session, matcher).map((entry) => entry.id)).toEqual([
       'acme/app#7', 'guest:gh:8', 'link:https://github.com/acme/app/issues/9',
     ]);
-    expect(getLinkedSidebarIssues(session)).toEqual([
-      { source: 'github', key: 'acme/app#9', owner: 'acme', repo: 'app', number: 9, url: 'https://github.com/acme/app/issues/9', title: 'Bug' },
+    expect(getLinkedSidebarIssues(session, matcher)).toMatchObject([
+      { source: 'repository', identifier: '#9', url: 'https://github.com/acme/app/issues/9', title: 'Bug', ref: { owner: 'acme', repo: 'app', number: 9 } },
     ]);
   });
 });
 
 describe('links to a GitHub-shaped address on an enterprise host', () => {
-  test('a github.com link keeps the thread shape it always had, an enterprise-host link carries its host', () => {
+  test('a github.com link keeps the tracked key it always had, an enterprise-host link carries its host', () => {
     const session = sessionWith([
-      { id: 'link:https://github.com/acme/app/pull/7', kind: 'external', thread: 'change', identifier: 'github.com', title: 'Public', url: 'https://github.com/acme/app/pull/7', linkedAt: 1 },
+      { id: 'link:https://www.github.com/acme/app/pull/7', kind: 'external', thread: 'change', identifier: 'github.com', title: 'Public', url: 'https://www.github.com/acme/app/pull/7', linkedAt: 1 },
       { id: 'link:https://ghe.example.com/acme/app/pull/7', kind: 'external', thread: 'change', identifier: 'ghe.example.com', title: 'Internal', url: 'https://ghe.example.com/acme/app/pull/7', linkedAt: 2 },
-    ]);
-    expect(getLinkedGitHubPullRequests(session)).toEqual([
-      { owner: 'acme', repo: 'app', number: 7, url: 'https://github.com/acme/app/pull/7', title: 'Public' },
-      { owner: 'acme', repo: 'app', number: 7, url: 'https://ghe.example.com/acme/app/pull/7', title: 'Internal', instance: 'ghe.example.com' },
     ]);
     // The tracked items the two hosts produce are host-scoped: the same
     // owner/repo/number on github.com and an enterprise host stay apart.
-    expect(getLinkedGitHubPullRequests(session).map((link) => trackedItemKey(githubThread('pull', link, link.instance)))).toEqual([
+    expect(getLinkedSidebarChanges(session, matcher).flatMap((change) => (
+      change.repository ? [trackedItemKey(repositoryThread('pull', change.repository))] : []
+    ))).toEqual([
       'github|github.com|pull|acme/app#7',
       'github|ghe.example.com|pull|acme/app#7',
     ]);
   });
 
-  test('an enterprise-host link and its stored entry are the same thread, and the sidebar issue carries the host', () => {
+  test('an enterprise-host link and its stored entry are the same thread', () => {
     const stored = issue({ id: 'ghe.example.com:acme/app#7', number: 7, kind: 'pull', url: 'https://ghe.example.com/acme/app/pull/7' });
     const link = { id: 'link:https://ghe.example.com/acme/app/pull/7', kind: 'external', thread: 'change', identifier: 'ghe.example.com', title: 'Same PR', url: 'https://ghe.example.com/acme/app/pull/7', linkedAt: 2 };
-    expect(getLinkedGitHubPullRequests(sessionWith([stored, link]))).toEqual([
-      { owner: 'acme', repo: 'app', number: 7, url: 'https://ghe.example.com/acme/app/pull/7', title: 'Rail badge count', instance: 'ghe.example.com' },
-    ]);
-    const gheIssue = issue({ id: 'ghe.example.com:acme/app#9', number: 9, kind: 'issue', url: 'https://ghe.example.com/acme/app/issues/9' });
-    const sidebar = getLinkedSidebarIssues(sessionWith([gheIssue]));
-    expect(sidebar).toEqual([
-      { source: 'github', key: 'ghe.example.com:acme/app#9', owner: 'acme', repo: 'app', number: 9, url: 'https://ghe.example.com/acme/app/issues/9', title: 'Rail badge count', instance: 'ghe.example.com' },
+    expect(getLinkedSidebarChanges(sessionWith([stored, link]), matcher)).toMatchObject([
+      { url: 'https://ghe.example.com/acme/app/pull/7', title: 'Rail badge count', repository: { instance: 'ghe.example.com', owner: 'acme', repo: 'app', number: 7 } },
     ]);
   });
 });
@@ -418,50 +485,6 @@ describe('links to a GitLab thread', () => {
       { id: 'link:https://gitlab.com/a/b/-/merge_requests/600/diffs', kind: 'external', thread: 'change', identifier: '!600', title: 'MR review', url: 'https://gitlab.com/a/b/-/merge_requests/600/diffs', linkedAt: 2 },
       { id: 'link:https://gitlab.com/a/b/-/merge_requests/601', kind: 'external', thread: 'change', identifier: '!601', title: 'Other', url: 'https://gitlab.com/a/b/-/merge_requests/601', linkedAt: 3 },
     ]);
-    expect(getDistinctLinkedIssues(session).map((entry) => entry.title)).toEqual(['MR', 'Other']);
-  });
-});
-
-describe('getLinkedSidebarChanges', () => {
-  test('lists merge and pull requests from other services, never GitHub ones or issues', () => {
-    const session = sessionWith([
-      issue({ id: 'acme/app#7', number: 7, kind: 'pull', url: 'https://github.com/acme/app/pull/7' }),
-      { id: 'guest:gitea:5', providerId: 'gitea', identifier: '5', title: 'Guest PR', url: 'https://gitea/x', kind: 'guest', thread: 'pull', linkedAt: 1 },
-      { id: 'link:https://gitlab.com/a/b/-/merge_requests/42', kind: 'external', thread: 'change', identifier: '!42', title: 'Fix', url: 'https://gitlab.com/a/b/-/merge_requests/42', linkedAt: 1 },
-      { id: 'link:https://jira.example/OPS-7', kind: 'external', thread: 'issue', identifier: 'OPS-7', title: 'Outage', url: 'https://jira.example/OPS-7', linkedAt: 1 },
-    ]);
-    expect(getLinkedSidebarChanges(session)).toEqual([
-      { key: 'guest:gitea:5', identifier: '5', url: 'https://gitea/x', title: 'Guest PR' },
-      {
-        key: 'link:https://gitlab.com/a/b/-/merge_requests/42', identifier: '!42', url: 'https://gitlab.com/a/b/-/merge_requests/42', title: 'Fix',
-        gitlab: { key: 'https://gitlab.com/a/b!42', instance: 'https://gitlab.com', owner: 'a', repo: 'b', number: 42, thread: 'pull' },
-      },
-    ]);
-  });
-});
-
-describe('GitLab threads', () => {
-  test('reads the instance, subgroup path and number from the address, and leaves GitHub alone', () => {
-    const mergeRequest = issue({ id: 'https://gitlab.example.com/g/sub/app/-/merge_requests/3#3', number: 3, kind: 'pull', url: 'https://gitlab.example.com/g/sub/app/-/merge_requests/3' });
-    expect(getGitLabThreadRef(mergeRequest)).toEqual({
-      key: 'https://gitlab.example.com/g/sub/app!3', instance: 'https://gitlab.example.com', owner: 'g/sub', repo: 'app', number: 3, thread: 'pull',
-    });
-    const gitlabIssue = issue({ id: 'gitlab.com:team/app#8', number: 8, kind: 'issue', url: 'https://gitlab.com/team/app/-/issues/8' });
-    expect(getGitLabThreadRef(gitlabIssue)).toMatchObject({ owner: 'team', repo: 'app', number: 8, thread: 'issue' });
-    expect(getGitLabThreadRef(issue({ id: 'acme/app#7', number: 7, kind: 'pull', url: 'https://github.com/acme/app/pull/7' }))).toBeNull();
-    expect(getGitLabThreadRef(issue({ id: 'x', number: 1, kind: 'issue', url: 'https://example.com/not/a/thread' }))).toBeNull();
-  });
-
-  test('lists each linked merge request and issue once and gives sidebar issues their thread', () => {
-    const url = 'https://gitlab.com/team/app/-/issues/8';
-    const session = sessionWith([
-      issue({ id: 'gitlab.com:team/app#8', number: 8, kind: 'issue', url }),
-      { id: `link:${url}`, kind: 'external', thread: 'issue', identifier: '#8', title: 'Same issue', url, linkedAt: 2 },
-      issue({ id: 'mr', number: 3, kind: 'pull', url: 'https://gitlab.com/team/app/-/merge_requests/3' }),
-    ]);
-    expect(getLinkedGitLabThreads(session).map((ref) => ref.key)).toEqual(['https://gitlab.com/team/app#8', 'https://gitlab.com/team/app!3']);
-    expect(getLinkedSidebarIssues(session)).toMatchObject([
-      { source: 'gitlab', identifier: '#8', ref: { number: 8, thread: 'issue' } },
-    ]);
+    expect(getDistinctLinkedIssues(session, matcher).map((entry) => entry.title)).toEqual(['MR', 'Other']);
   });
 });

@@ -3,6 +3,7 @@ import type { Message, Part } from '@/lib/opencode/model';
 import { deriveMessageRole } from './messageRole';
 import { filterVisibleParts, normalizeParts } from './partUtils';
 import { normalizeUserDisplayParts } from './normalizeUserDisplayParts';
+import { readSourceControlProvider } from '@/lib/source-control/providers/registry';
 
 /**
  * A user message is hidden when none of its parts survive display
@@ -25,7 +26,8 @@ export const isHiddenUserMessage = (
         return cached;
     }
 
-    const parts = normalizeUserDisplayParts(normalizeParts(entry.parts));
+    // Only whether anything is left counts here, not a chip's label.
+    const parts = normalizeUserDisplayParts(normalizeParts(entry.parts), readSourceControlProvider);
     const hidden = filterVisibleParts(parts, { includeReasoning: true }).length === 0;
     hiddenByParts.set(entry.parts, hidden);
     return hidden;

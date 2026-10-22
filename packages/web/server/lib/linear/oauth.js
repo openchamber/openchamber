@@ -16,7 +16,7 @@ const PENDING_AUTHORIZATION_TTL_MS = 10 * 60_000;
 const pendingByState = new Map();
 const brokerPollsByState = new Map();
 
-export class LinearOAuthError extends Error {
+class LinearOAuthError extends Error {
   constructor(message, code = 'LINEAR_OAUTH_FAILED') {
     super(message);
     this.name = 'LinearOAuthError';

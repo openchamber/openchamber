@@ -10,7 +10,12 @@
 
 import type { FilePart, Part, TextPart } from '@/lib/opencode/model';
 import { readContextPart } from '@/lib/messages/contextParts';
-import { formatChangeRequestReference } from '@/lib/source-control/identity';
+import { formatChangeRequestLabel } from '@/lib/source-control/providers/terminology';
+import type { SourceControlDescriptorOf } from '@/lib/source-control/providers/registry';
+import { repositoryIssueLinkMime, trackerItemLinkMime } from '@/lib/messages/attachmentPreview';
+
+// An issue part written before providers other than GitHub existed names none: it is GitHub's.
+const LEGACY_ISSUE_PROVIDER = 'github';
 
 const redundantCommentFileUrls = (parts: Part[]): Set<string> => {
     const comments = parts
@@ -48,7 +53,7 @@ const redundantCommentFileUrls = (parts: Part[]): Set<string> => {
  * keeps the identity of the context part it replaces, and never goes back to
  * the server.
  */
-const linkAttachmentPart = (part: TextPart): FilePart | null => {
+const linkAttachmentPart = (part: TextPart, descriptorOf: SourceControlDescriptorOf): FilePart | null => {
     const payload = readContextPart(part);
     if (!payload) return null;
 
@@ -59,8 +64,8 @@ const linkAttachmentPart = (part: TextPart): FilePart | null => {
             return {
                 ...identity,
                 type: 'file',
-                // GitLab's has its own type so the chip shows GitLab's mark, not GitHub's.
-                mime: payload.provider === 'gitlab' ? 'application/vnd.openchamber.gitlab-issue-link' : 'application/vnd.github.issue-link',
+                // The type names the provider so the chip shows its mark.
+                mime: repositoryIssueLinkMime(payload.provider ?? LEGACY_ISSUE_PROVIDER),
                 filename: `Issue #${payload.number}: ${payload.title}`,
                 url: payload.url,
             };
@@ -69,14 +74,15 @@ const linkAttachmentPart = (part: TextPart): FilePart | null => {
                 ...identity,
                 type: 'file',
                 mime: 'application/vnd.github.pull-request-link',
-                filename: `${payload.provider === 'gitlab' ? 'MR' : 'PR'} ${formatChangeRequestReference(payload.provider, payload.number)}: ${payload.title}`,
+                filename: `${formatChangeRequestLabel(descriptorOf(payload.provider), payload.number)}: ${payload.title}`,
                 url: payload.url,
             };
-        case 'linear-issue':
+        case 'tracker-item':
             return {
                 ...identity,
                 type: 'file',
-                mime: 'application/vnd.openchamber.linear-issue-link',
+                // The type names the tracker so the chip shows its mark.
+                mime: trackerItemLinkMime(payload.provider),
                 filename: `${payload.identifier}: ${payload.title}`,
                 url: payload.url,
             };
@@ -101,9 +107,15 @@ const linkAttachmentPart = (part: TextPart): FilePart | null => {
     }
 };
 
-export const normalizeUserDisplayParts = (parts: Part[]): Part[] => {
+/**
+ * `descriptorOf` names a change request's provider (`!12` for a merge request).
+ * React callers pass `useSourceControlDescriptorOf()` and keep it in their memo
+ * inputs, so a label first drawn before the provider list arrived is redrawn
+ * when it does.
+ */
+export const normalizeUserDisplayParts = (parts: Part[], descriptorOf: SourceControlDescriptorOf): Part[] => {
     const redundantFileUrls = redundantCommentFileUrls(parts);
     return parts
         .filter((part) => !(part.type === 'file' && redundantFileUrls.has(part.url)))
-        .map((part) => (part.type === 'text' ? linkAttachmentPart(part) ?? part : part));
+        .map((part) => (part.type === 'text' ? linkAttachmentPart(part, descriptorOf) ?? part : part));
 };

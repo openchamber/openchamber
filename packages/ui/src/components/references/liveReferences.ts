@@ -13,16 +13,17 @@
 import * as React from 'react';
 
 import type {
-    GitHubIssueReference,
-    GitHubPullReference,
-    GitHubPullStatus,
-    GitHubReference,
-    LinearIssueSummary,
+    RepositoryIssueReference,
+    RepositoryChangeRequestReference,
+    ChangeRequestListStatus,
+    RepositoryReference,
     SourceControlReadContext,
+    TrackerItemSummary,
 } from '@/lib/api/types';
-import { parseGitLabThreadUrl } from '@/lib/linkedIssues';
-import { linearIssue } from '@/lib/trackedItems/fromLinks';
-import { trackedItemKey, type TrackedItem, type TrackedItemState, type TrackedLinearIssue, type TrackedThread } from '@/lib/trackedItems/model';
+import { useRepositoryUrlMatcher, type RepositoryUrlMatcher } from '@/lib/source-control/repositoryUrlMatcher';
+import { workItem } from '@/lib/trackedItems/fromLinks';
+import { trackedItemKey, type TrackedItem, type TrackedItemState, type TrackedThread, type TrackedWorkItem } from '@/lib/trackedItems/model';
+import { isSettledTrackerState } from '@/lib/trackers/stateLook';
 import { useTrackedRecords } from '@/stores/useTrackedItemsStore';
 
 import type { PageRead, ReadStamp } from './referenceCache';
@@ -35,7 +36,6 @@ const SERVER_CACHE_MS = 30_000;
 // their page said. The server reads GitHub PRs 25 to a query, one query after
 // another, and a slow tick delays the sidebar's updates too: two queries.
 const FOLLOW_LIMIT = 50;
-const SETTLED_LINEAR_TYPES = new Set(['completed', 'canceled']);
 
 /** Whether a followed answer from `answeredAt` came after a snapshot read at `read`. */
 export const isNewerThanRead = (answeredAt: number, read: ReadStamp): boolean => (
@@ -51,29 +51,39 @@ const pageReadOf = (pageReads: readonly PageRead[], index: number): ReadStamp | 
 
 /**
  * The item the server follows for a listed issue or PR, read with the account
- * the list was read with; null for one that is no longer open.
+ * the list was read with; null for one that is no longer open. The address
+ * names the repository the way the provider does (a GitLab project's full
+ * path, subgroups included); an address no pattern of the context's provider
+ * reads falls back to the listed repository.
  */
-function trackedThreadOf(reference: GitHubReference, context: SourceControlReadContext | null): TrackedThread | null {
+function trackedThreadOf(
+    reference: RepositoryReference,
+    context: SourceControlReadContext | null,
+    urls: RepositoryUrlMatcher,
+): TrackedThread | null {
     if (!context || reference.state !== 'open') return null;
-    if (context.provider === 'gitlab') {
-        // GitLab names a project by its full path, subgroups included; the address carries it.
-        const ref = parseGitLabThreadUrl(reference.url);
-        if (!ref) return null;
-        return { provider: 'gitlab', instance: context.instance, kind: reference.kind, owner: ref.owner, repo: ref.repo, number: reference.number, accountId: context.accountId };
-    }
-    const { owner, repo } = reference.sourceRepo;
-    return { provider: 'github', kind: reference.kind, owner, repo, number: reference.number, accountId: context.accountId };
+    const match = urls.match(reference.url);
+    const named = match && match.provider === context.provider ? match : null;
+    return {
+        provider: context.provider,
+        instance: context.instance,
+        kind: reference.kind,
+        owner: named?.owner ?? reference.sourceRepo.owner,
+        repo: named?.repo ?? reference.sourceRepo.repo,
+        number: reference.number,
+        accountId: context.accountId,
+    };
 }
 
-const trackedLinearOf = (issue: LinearIssueSummary): TrackedLinearIssue | null => (
-    SETTLED_LINEAR_TYPES.has(issue.state?.type ?? '') ? null : linearIssue(issue.identifier)
+const trackedWorkItemOf = (item: TrackerItemSummary): TrackedWorkItem | null => (
+    isSettledTrackerState(item.state?.category) ? null : workItem(item.provider, item.identifier)
 );
 
-type PullPatch = Partial<Pick<GitHubPullReference, 'state' | 'draft' | 'title' | 'headSha'>>;
-type IssuePatch = Partial<Pick<GitHubIssueReference, 'state' | 'title'>>;
+type PullPatch = Partial<Pick<RepositoryChangeRequestReference, 'state' | 'draft' | 'title' | 'headSha'>>;
+type IssuePatch = Partial<Pick<RepositoryIssueReference, 'state' | 'title'>>;
 
 /** What the followed state changes on a listed item; null when nothing. */
-function referencePatch(reference: GitHubReference, record: TrackedItemState): PullPatch | IssuePatch | null {
+function referencePatch(reference: RepositoryReference, record: TrackedItemState): PullPatch | IssuePatch | null {
     if (reference.kind === 'pull' && record.type === 'pull' && record.state) {
         const { state, draft, title } = record.state;
         const headSha = record.state.headSha ?? reference.headSha;
@@ -88,13 +98,13 @@ function referencePatch(reference: GitHubReference, record: TrackedItemState): P
     return null;
 }
 
-function linearPatch(issue: LinearIssueSummary, record: TrackedItemState): Pick<LinearIssueSummary, 'title' | 'state'> | null {
-    if (record.type !== 'linear' || !record.state) return null;
+function workItemPatch(item: TrackerItemSummary, record: TrackedItemState): Pick<TrackerItemSummary, 'title' | 'state'> | null {
+    if (record.type !== 'work-item' || !record.state) return null;
     const { title, state } = record.state;
-    if (title === issue.title && state.name === issue.state?.name && state.type === issue.state?.type) return null;
-    // A state Linear renamed keeps its id; a different state's id is not known here.
-    const id = state.name === issue.state?.name ? issue.state?.id ?? null : null;
-    return { title, state: { id, name: state.name, type: state.type } };
+    if (title === item.title && state.name === item.state?.name && state.category === item.state?.category) return null;
+    // A state the tracker renamed keeps its id; a different state's id is not known here.
+    const id = state.name === item.state?.name ? item.state?.id ?? null : null;
+    return { title, state: { id, name: state.name, category: state.category } };
 }
 
 /** Lays newer followed states over `items`; the same array when none applies. */
@@ -126,44 +136,47 @@ const followedOf = (tracked: ReadonlyArray<TrackedItem | null>): TrackedItem[] =
 export type LiveItems<T> = { items: T[]; followed: TrackedItem[] };
 
 /** A followed PR's checks and mergeability, and when the server read them. */
-export type LivePullStatus = { status: GitHubPullStatus; fetchedAt: number };
+export type LivePullStatus = { status: ChangeRequestListStatus; fetchedAt: number };
 
 /**
  * Listed issues and PRs with their followed state. `contextOf` names the read
  * context an item came through; `pageReads` says when each page was read.
  */
-export function useLiveReferences<T extends GitHubReference>(
+export function useLiveReferences<T extends RepositoryReference>(
     items: T[],
     contextOf: (item: T) => SourceControlReadContext | null,
     pageReads: readonly PageRead[],
 ): LiveItems<T> {
-    const tracked = React.useMemo(() => items.map((item) => trackedThreadOf(item, contextOf(item))), [contextOf, items]);
+    const urls = useRepositoryUrlMatcher();
+    const tracked = React.useMemo(() => items.map((item) => trackedThreadOf(item, contextOf(item), urls)), [contextOf, items, urls]);
     const records = useTrackedRecords(tracked);
     const live = React.useMemo(() => overlay(items, records, pageReads, referencePatch), [items, pageReads, records]);
     const followed = React.useMemo(() => followedOf(tracked), [tracked]);
     return { items: live, followed };
 }
 
-/** The same for Linear issues: their state and title. */
-export function useLiveLinearIssues<T extends LinearIssueSummary>(items: T[], pageReads: readonly PageRead[]): LiveItems<T> {
-    const tracked = React.useMemo(() => items.map(trackedLinearOf), [items]);
+/** The same for tracker work items: their state and title. */
+export function useLiveTrackerItems<T extends TrackerItemSummary>(items: T[], pageReads: readonly PageRead[]): LiveItems<T> {
+    const tracked = React.useMemo(() => items.map(trackedWorkItemOf), [items]);
     const records = useTrackedRecords(tracked);
-    const live = React.useMemo(() => overlay(items, records, pageReads, linearPatch), [items, pageReads, records]);
+    const live = React.useMemo(() => overlay(items, records, pageReads, workItemPatch), [items, pageReads, records]);
     const followed = React.useMemo(() => followedOf(tracked), [tracked]);
     return { items: live, followed };
 }
 
 /**
  * The followed checks and mergeability of each open PR in `pulls`, by item
- * key, with when they were answered. A GitLab merge request's come from its
- * pipeline, which no list status carries.
+ * key, with when they were answered. For a provider without list statuses
+ * (`features.listStatuses`, GitLab) this is the only source of a change
+ * request's checks.
  */
 export function useLivePullStatuses(
-    pulls: ReadonlyArray<{ reference: GitHubReference; context: SourceControlReadContext | null }>,
-): (reference: GitHubReference, context: SourceControlReadContext | null) => LivePullStatus | null {
+    pulls: ReadonlyArray<{ reference: RepositoryReference; context: SourceControlReadContext | null }>,
+): (reference: RepositoryReference, context: SourceControlReadContext | null) => LivePullStatus | null {
+    const urls = useRepositoryUrlMatcher();
     const tracked = React.useMemo(
-        () => pulls.map(({ reference, context }) => (reference.kind === 'pull' ? trackedThreadOf(reference, context) : null)),
-        [pulls],
+        () => pulls.map(({ reference, context }) => (reference.kind === 'pull' ? trackedThreadOf(reference, context, urls) : null)),
+        [pulls, urls],
     );
     const records = useTrackedRecords(tracked);
     const byKey = React.useMemo(() => {
@@ -176,7 +189,7 @@ export function useLivePullStatuses(
         return map;
     }, [records]);
     return React.useCallback((reference, context) => {
-        const item = reference.kind === 'pull' ? trackedThreadOf(reference, context) : null;
+        const item = reference.kind === 'pull' ? trackedThreadOf(reference, context, urls) : null;
         return item ? byKey.get(trackedItemKey(item)) ?? null : null;
-    }, [byKey]);
+    }, [byKey, urls]);
 }

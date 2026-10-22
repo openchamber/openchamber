@@ -215,6 +215,8 @@ export const registerGuestRoutes = (app, {
   getSmallModelService,
   onGuestDeactivated = async () => false,
   surfaceViewerHeaders = () => null,
+  // The tracker registry: a host-auth guest borrows its tracker's sign-in.
+  trackers = null,
 }) => {
   const persistPath = extensionsPersistPath(openchamberDataDir);
   const authPath = guestAuthPersistPath(openchamberDataDir);
@@ -360,7 +362,7 @@ export const registerGuestRoutes = (app, {
       const stored = await takeUsableGuestAuth(guest, authPath);
       const auth = resolveIntegrationAuth(guest.integration ?? {});
       res.json({
-        ...await toGuestAuthResponse(guest.integration, stored),
+        ...await toGuestAuthResponse(guest.integration, stored, trackers),
         redirectUri: auth === 'oauth' && origin ? guestRedirectUri(origin, guest.id) : '',
       });
     } catch (error) {
@@ -410,7 +412,7 @@ export const registerGuestRoutes = (app, {
       }
       await saveGuestAccessToken({ guest, persistPath: authPath, token: parsed.data.token, username: parsed.data.username });
       const stored = await getGuestAuth(guest.id, authPath);
-      res.json(await toGuestAuthResponse(guest.integration, stored));
+      res.json(await toGuestAuthResponse(guest.integration, stored, trackers));
     } catch (error) {
       if (error instanceof GuestOAuthError) {
         const status = 400;
@@ -439,7 +441,7 @@ export const registerGuestRoutes = (app, {
         settings[key] = value.trim().slice(0, 2000);
       }
       const stored = await patchGuestAuth(guest.id, { settings }, authPath);
-      res.json(await toGuestAuthResponse(guest.integration, stored));
+      res.json(await toGuestAuthResponse(guest.integration, stored, trackers));
     } catch (error) {
       console.error('Failed to save guest settings:', error);
       res.status(500).json({ error: 'Failed to save guest settings' });
@@ -454,7 +456,7 @@ export const registerGuestRoutes = (app, {
       }
       const auth = resolveIntegrationAuth(guest.integration);
       if (auth === 'host') {
-        const started = await startHostGuestAuthorization(guest.integration);
+        const started = await startHostGuestAuthorization(guest.integration, trackers);
         if (!started) {
           return res.status(400).json({ error: 'NO_INTEGRATION' });
         }
@@ -509,10 +511,10 @@ export const registerGuestRoutes = (app, {
       if (!guest) {
         return res.status(404).json({ error: 'not-found' });
       }
-      await disconnectHostGuest(guest.integration);
+      await disconnectHostGuest(guest.integration, trackers);
       await disconnectGuestAuth(guest.id, authPath);
       const stored = await getGuestAuth(guest.id, authPath);
-      res.json(await toGuestAuthResponse(guest.integration, stored));
+      res.json(await toGuestAuthResponse(guest.integration, stored, trackers));
     } catch (error) {
       console.error('Failed to disconnect guest oauth:', error);
       res.status(500).json({ error: 'Failed to disconnect guest oauth' });
@@ -544,6 +546,7 @@ export const registerGuestRoutes = (app, {
       }
       const result = await proxyGuestRequest({
         guest,
+        trackers,
         persistPath: authPath,
         method: parsed.data.method,
         path: parsed.data.path,

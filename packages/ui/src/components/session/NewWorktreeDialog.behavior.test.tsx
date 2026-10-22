@@ -23,7 +23,6 @@ let confirmReference: ReferenceConfirm | null = null;
 
 const projectStoreState = { getActiveProject: () => project };
 const githubAuthState = { status: { connected: true }, hasChecked: true };
-const linearAuthState = { status: null, hasChecked: true };
 const uiState = { isMobile: false };
 const gitState = { fetchBranches: async () => undefined };
 let worktreeCreations = 0;
@@ -32,7 +31,6 @@ let lastCreateNames: { branchName?: string; worktreeName?: string } | undefined;
 
 const selectProjectState = <T,>(selector: (state: typeof projectStoreState) => T): T => selector(projectStoreState);
 const selectSourceControlAuthEntry = () => githubAuthState;
-const selectLinearAuthState = <T,>(selector: (state: typeof linearAuthState) => T): T => selector(linearAuthState);
 const selectUIState = <T,>(selector: (state: typeof uiState) => T): T => selector(uiState);
 const selectGitState = <T,>(selector: (state: typeof gitState) => T): T => selector(gitState);
 
@@ -109,7 +107,6 @@ mock.module('@/lib/utils', () => ({ cn: (...values: Array<string | false | null 
 
 const actualProjectsStore = await import('@/stores/useProjectsStore');
 const actualSourceControlAuthStore = await import('@/stores/useSourceControlAuthStore');
-const actualLinearAuthStore = await import('@/stores/useLinearAuthStore');
 const actualUIStore = await import('@/stores/useUIStore');
 const actualGitStore = await import('@/stores/useGitStore');
 
@@ -120,10 +117,6 @@ mock.module('@/stores/useProjectsStore', () => ({
 mock.module('@/stores/useSourceControlAuthStore', () => ({
   ...actualSourceControlAuthStore,
   useSourceControlAuthEntry: selectSourceControlAuthEntry,
-}));
-mock.module('@/stores/useLinearAuthStore', () => ({
-  ...actualLinearAuthStore,
-  useLinearAuthStore: selectLinearAuthState,
 }));
 mock.module('@/stores/useUIStore', () => ({
   ...actualUIStore,
@@ -140,7 +133,7 @@ mock.module('@/sync/session-actions', () => ({
   updateSessionTitle: async () => undefined,
 }));
 mock.module('@/hooks/useRuntimeAPIs', () => ({
-  useRuntimeAPIs: () => ({ sourceControl: {}, git: null, linear: null }),
+  useRuntimeAPIs: () => ({ sourceControl: {}, git: null }),
 }));
 mock.module('@/stores/useGitStore', () => ({
   ...actualGitStore,
@@ -179,7 +172,8 @@ const actualReferenceSources = await import('@/components/references/referenceSo
 // reach a PR, so no binding is read.
 mock.module('@/components/references/referenceSources', () => ({
   ...actualReferenceSources,
-  useGitHubReadContext: () => null,
+  useRepositoryReadContext: () => null,
+  useRepositorySourceStatus: () => 'ready',
   useRepositoryReferenceProvider: () => 'github',
 }));
 mock.module('@/components/references/ReferencePickerDialog', () => ({
@@ -337,10 +331,11 @@ describe('NewWorktreeDialog behavior', () => {
             open
             onOpenChange={() => undefined}
             initialSelection={{
-              source: 'github',
+              source: 'repository',
               includeDiff: false,
               reference: {
                 kind: 'issue',
+                provider: 'github',
                 number: 7,
                 title: 'Started from the board',
                 url: 'https://github.com/acme/project/issues/7',
@@ -379,17 +374,19 @@ describe('NewWorktreeDialog behavior', () => {
         </I18nProvider>,
       ));
       await clickButton(dom.container, (button) => button.getAttribute('role') === 'button' && Boolean(button.textContent?.startsWith('PR or issue')), 'PR or issue option');
-      const startFromGitHub = dom.container.querySelector<HTMLButtonElement>('button[aria-label="A GitHub issue or pull request"]');
+      // The registry is empty here, so the provider reads by its id.
+      const startFromGitHub = dom.container.querySelector<HTMLButtonElement>('button[aria-label="A github issue or pull request"]');
       if (!startFromGitHub) throw new Error('Missing start-from-GitHub button');
       await act(async () => startFromGitHub.click());
       if (!confirmReference) throw new Error('Expected the reference picker to open');
 
       await act(async () => {
         await confirmReference?.([{
-          source: 'github',
+          source: 'repository',
           includeDiff: false,
           reference: {
             kind: 'issue',
+            provider: 'github',
             number: 42,
             title: 'Keep the selected issue',
             url: 'https://github.com/acme/project/issues/42',

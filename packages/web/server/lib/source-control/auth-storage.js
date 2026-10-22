@@ -1,11 +1,18 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { normalizeGitLabInstance } from '../gitlab/instance.js';
-import { isPlainObject, isString } from '../gitlab/validation.js';
+import { isPlainObject, isString } from '../shared/guards.js';
 import { withSourceControlFileLock } from './file-lock.js';
+import { normalizeOriginInstance } from './origin-instance.js';
+import { isProviderId } from './provider-id.js';
 
 const AUTH_VERSION = 3;
+// Version 3 plus one origin-keyed section per further provider (Gitea and
+// whatever follows). Written only while such a section holds something.
+const EXTRA_SECTIONS_VERSION = 4;
+// The two sections every version-3 file carries; any other provider id is an
+// extra section.
+const BUILT_IN_SECTIONS = ['gitlab', 'github'];
 const emptyState = () => ({ version: AUTH_VERSION, providers: { gitlab: { instances: {} }, github: { instances: {} } } });
 const emptyInstance = () => ({ activeCredentialId: null, credentials: [], cliDisabled: false, cliActive: false });
 const invalidState = (cause) => Object.assign(new Error('Source control auth storage is invalid', { cause }), {
@@ -22,12 +29,8 @@ function providerUserId(origin, userId) {
   return `${origin}#${userId}`;
 }
 
-function newCredentialId() {
-  return `occred:v1:gitlab:${randomUUID()}:r1`;
-}
-
-function newGitHubCredentialId() {
-  return `occred:v1:github:${randomUUID()}:r1`;
+function newCredentialId(provider) {
+  return `occred:v1:${provider}:${randomUUID()}:r1`;
 }
 
 function parseUser(value) {
@@ -110,15 +113,18 @@ function parseProviderInstances(rawInstances, { parseInstanceKey, parseCredentia
   return instances;
 }
 
-const gitlabInstanceParser = {
+// Every section except GitHub's is keyed by instance origin, with the
+// credential shape GitLab introduced.
+const originInstanceParser = (provider) => ({
   parseInstanceKey: (raw) => {
     let origin;
-    try { origin = normalizeGitLabInstance(raw); }
+    try { origin = normalizeOriginInstance(raw, { label: provider }); }
     catch (error) { throw invalidState(error); }
     return origin;
   },
   parseCredentialFor: parseCredential,
-};
+});
+const gitlabInstanceParser = originInstanceParser('gitlab');
 const githubInstanceParser = {
   parseInstanceKey: (raw) => {
     if (!validText(raw)) throw invalidState();
@@ -144,21 +150,35 @@ function parseVersionTwo(value) {
 // version 3 shape in memory but stays version 2 on disk until a GitHub
 // Enterprise credential is stored: earlier releases read only version 2, so
 // a user who never added an enterprise host can still go back to one.
-function parseVersionThree(value) {
-  if (!isPlainObject(value) || !exactKeys(value, ['version', 'providers']) || value.version !== AUTH_VERSION || !isPlainObject(value.providers)
-    || !exactKeys(value.providers, ['gitlab', 'github'])) throw invalidState();
-  return {
-    version: AUTH_VERSION,
-    providers: {
-      gitlab: { instances: parseProviderInstances(value.providers.gitlab.instances, gitlabInstanceParser) },
-      github: { instances: parseProviderInstances(value.providers.github.instances, githubInstanceParser) },
-    },
-  };
+function parseSection(value, parser) {
+  if (!isPlainObject(value) || !exactKeys(value, ['instances'])) throw invalidState();
+  return { instances: parseProviderInstances(value.instances, parser) };
 }
 
-function serializeState(state) {
+// Version 4 is version 3 plus extra sections keyed by provider id. An id is
+// checked for syntax only, and an extra section is kept as read (`raw`) until
+// a provider of this build asks for it, which parses it strictly then. A
+// section no provider asks for is written back untouched, whatever its shape,
+// so an older or newer provider set never loses another's credentials, and a
+// section that does not parse fails only its own provider's calls.
+function parseVersionThreeOrFour(value) {
+  if (!isPlainObject(value) || !exactKeys(value, ['version', 'providers'])
+    || ![AUTH_VERSION, EXTRA_SECTIONS_VERSION].includes(value.version) || !isPlainObject(value.providers)) throw invalidState();
+  const extraIds = Object.keys(value.providers).filter((id) => !BUILT_IN_SECTIONS.includes(id));
+  if (!BUILT_IN_SECTIONS.every((id) => Object.hasOwn(value.providers, id))
+    || (value.version === AUTH_VERSION && extraIds.length)
+    || extraIds.some((id) => !isProviderId(id) || !isPlainObject(value.providers[id]))) throw invalidState();
+  const providers = {
+    gitlab: parseSection(value.providers.gitlab, gitlabInstanceParser),
+    github: parseSection(value.providers.github, githubInstanceParser),
+  };
+  for (const id of extraIds) providers[id] = { raw: value.providers[id] };
+  return { version: AUTH_VERSION, providers };
+}
+
+function serializeOriginSection(section) {
   const instances = {};
-  for (const [origin, instance] of Object.entries(state.providers.gitlab.instances)) {
+  for (const [origin, instance] of Object.entries(section.instances)) {
     instances[origin] = {
       activeCredentialId: instance.activeCredentialId,
       credentials: instance.credentials.map((credential) => {
@@ -181,6 +201,21 @@ function serializeState(state) {
       cliActive: instance.cliActive,
     };
   }
+  return instances;
+}
+
+const isEmptyRawSection = (raw) => exactKeys(raw, ['instances'])
+  && isPlainObject(raw.instances) && Object.keys(raw.instances).length === 0;
+
+/**
+ * The oldest version that can hold the state, so a user who never needed a
+ * newer one can still go back to a release that reads only the older:
+ * version 2 while only GitLab holds anything, version 3 once a GitHub
+ * Enterprise host is stored, version 4 only while an extra section is not
+ * empty.
+ */
+function serializeState(state) {
+  const instances = serializeOriginSection(state.providers.gitlab);
   const githubInstances = {};
   for (const [host, instance] of Object.entries(state.providers.github.instances)) {
     githubInstances[host] = {
@@ -205,6 +240,21 @@ function serializeState(state) {
       cliActive: instance.cliActive,
     };
   }
+  const extras = {};
+  for (const [id, section] of Object.entries(state.providers)) {
+    if (BUILT_IN_SECTIONS.includes(id)) continue;
+    if (section.raw !== undefined) {
+      if (!isEmptyRawSection(section.raw)) extras[id] = section.raw;
+      continue;
+    }
+    if (Object.keys(section.instances).length) extras[id] = { instances: serializeOriginSection(section) };
+  }
+  if (Object.keys(extras).length) {
+    return {
+      version: EXTRA_SECTIONS_VERSION,
+      providers: { gitlab: { instances }, github: { instances: githubInstances }, ...extras },
+    };
+  }
   if (Object.keys(githubInstances).length === 0) return { version: 2, providers: { gitlab: { instances } } };
   return { version: AUTH_VERSION, providers: { gitlab: { instances }, github: { instances: githubInstances } } };
 }
@@ -226,9 +276,9 @@ const REFRESH_MARGIN_MS = 5 * 60_000;
 const RENEW_LOCK_WAIT_MS = 15_000;
 
 /**
- * `refreshOAuthToken({ origin, refreshToken })` trades an OAuth refresh token
- * for `{ accessToken, refreshToken?, expiresIn? }`. Without it, stored OAuth
- * tokens are handed out as they are.
+ * `refreshOAuthToken({ provider, origin, refreshToken })` trades an OAuth
+ * refresh token for `{ accessToken, refreshToken?, expiresIn? }`. Without it,
+ * stored OAuth tokens are handed out as they are.
  */
 export function createSourceControlAuthStore({ filePath, fsImpl = fs, lockWaitMs = 2_000, refreshOAuthToken, now = Date.now }) {
   let transactions = Promise.resolve();
@@ -259,8 +309,7 @@ export function createSourceControlAuthStore({ filePath, fsImpl = fs, lockWaitMs
     if (value.version === 2) {
       return { version: AUTH_VERSION, providers: { ...parseGitLabSection(value.providers), github: { instances: {} } } };
     }
-    if (value.version !== AUTH_VERSION) throw invalidState();
-    return parseVersionThree(value);
+    return parseVersionThreeOrFour(value);
   };
   const transaction = (operation) => {
     const next = transactions.then(() => withSourceControlFileLock(`${filePath}.lock`, operation, { fsImpl, waitMs: lockWaitMs }));
@@ -296,7 +345,19 @@ export function createSourceControlAuthStore({ filePath, fsImpl = fs, lockWaitMs
     && Boolean(credential.refreshToken) && credential.expiresAt !== undefined
     && credential.expiresAt - now() < REFRESH_MARGIN_MS;
   const renewals = new Map();
-  const findCredential = (state, origin, credentialId) => state.providers.gitlab.instances[origin]?.credentials
+  // An origin section that was never written reads as empty. An extra section
+  // still as read parses strictly here, for the provider that asks for it.
+  const sectionInstances = (state, provider) => {
+    if (!Object.hasOwn(state.providers, provider)) return {};
+    const section = state.providers[provider];
+    if (section.raw !== undefined) state.providers[provider] = parseSection(section.raw, originInstanceParser(provider));
+    return state.providers[provider].instances;
+  };
+  const writableInstances = (state, provider) => {
+    if (!Object.hasOwn(state.providers, provider)) state.providers[provider] = { instances: {} };
+    return sectionInstances(state, provider);
+  };
+  const findCredential = (state, provider, origin, credentialId) => sectionInstances(state, provider)[origin]?.credentials
     .find((candidate) => candidate.credentialId === credentialId) ?? null;
   /**
    * Renews one OAuth credential, once per credential however many readers
@@ -310,24 +371,24 @@ export function createSourceControlAuthStore({ filePath, fsImpl = fs, lockWaitMs
    * keep working. A rejected refresh leaves the credential as it is; the
    * request that then fails marks it invalid the usual way.
    */
-  const renew = (origin, credential) => {
-    const key = `${origin}\0${credential.credentialId}`;
+  const renew = (provider, origin, credential) => {
+    const key = `${provider}\0${origin}\0${credential.credentialId}`;
     const pending = renewals.get(key);
     if (pending) return pending;
     const spent = credential.refreshToken;
     const running = withSourceControlFileLock(`${filePath}.renew.lock`, async () => {
-      const current = await read((state) => findCredential(state, origin, credential.credentialId));
+      const current = await read((state) => findCredential(state, provider, origin, credential.credentialId));
       if (current?.status !== 'valid') return false;
       if (current.refreshToken !== spent) return true;
       let renewed;
       try {
-        renewed = await refreshOAuthToken({ origin, refreshToken: spent });
+        renewed = await refreshOAuthToken({ provider, origin, refreshToken: spent });
       } catch {
         return false;
       }
       if (!validText(renewed?.accessToken)) return false;
       return mutate((state) => {
-        const stored = findCredential(state, origin, credential.credentialId);
+        const stored = findCredential(state, provider, origin, credential.credentialId);
         if (!stored || stored.refreshToken !== spent) return { changed: false, value: false };
         stored.token = renewed.accessToken;
         if (validText(renewed.refreshToken)) stored.refreshToken = renewed.refreshToken;
@@ -339,20 +400,25 @@ export function createSourceControlAuthStore({ filePath, fsImpl = fs, lockWaitMs
     renewals.set(key, running);
     return running;
   };
-  const renewExpiring = async (origin, credentialId) => {
+  const renewExpiring = async (provider, origin, credentialId) => {
     if (!(refreshOAuthToken instanceof Function)) return;
-    const expiring = await read((state) => (state.providers.gitlab.instances[origin]?.credentials ?? [])
+    const expiring = await read((state) => (sectionInstances(state, provider)[origin]?.credentials ?? [])
       .filter((credential) => (!credentialId || credential.credentialId === credentialId) && needsRenewal(credential)));
     // A renewal still busy elsewhere leaves this read with the token as stored;
     // a request it then fails renews on demand.
-    await Promise.all(expiring.map((credential) => renew(origin, credential).catch((error) => {
+    await Promise.all(expiring.map((credential) => renew(provider, origin, credential).catch((error) => {
       if (error?.code !== 'SOURCE_CONTROL_LOCK_BUSY') throw error;
     })));
   };
 
-  return Object.freeze({
-    listInstances: () => read((state) => Object.keys(state.providers.gitlab.instances)),
-    listAccounts: (origin) => read((state) => state.providers.gitlab.instances[origin]?.credentials ?? []),
+  /**
+   * One origin-keyed section: GitLab's, and the one every further provider
+   * gets under its own id. Credentials are the GitLab shape (`token`, optional
+   * OAuth refresh), keyed by normalized origin; the caller normalizes.
+   */
+  const originSection = (provider) => Object.freeze({
+    listInstances: () => read((state) => Object.keys(sectionInstances(state, provider))),
+    listAccounts: (origin) => read((state) => sectionInstances(state, provider)[origin]?.credentials ?? []),
     /**
      * Renews an OAuth credential now, whatever its expiry says. For a request
      * GitLab just refused: true means a fresh token is stored and the account
@@ -360,19 +426,19 @@ export function createSourceControlAuthStore({ filePath, fsImpl = fs, lockWaitMs
      */
     renewAccount: async (origin, credentialId) => {
       if (!(refreshOAuthToken instanceof Function)) return false;
-      const credential = await read((state) => state.providers.gitlab.instances[origin]?.credentials
+      const credential = await read((state) => sectionInstances(state, provider)[origin]?.credentials
         .find((candidate) => candidate.credentialId === credentialId) ?? null);
       if (credential?.status !== 'valid' || !credential.refreshToken) return false;
-      return renew(origin, credential);
+      return renew(provider, origin, credential);
     },
     readInstance: async (origin) => {
-      await renewExpiring(origin);
-      return read((state) => publicInstance(state.providers.gitlab.instances[origin] ?? emptyInstance()));
+      await renewExpiring(provider, origin);
+      return read((state) => publicInstance(sectionInstances(state, provider)[origin] ?? emptyInstance()));
     },
     readAccount: async (origin, credentialId, revision) => {
-      await renewExpiring(origin, credentialId);
+      await renewExpiring(provider, origin, credentialId);
       return read((state) => {
-      const credential = state.providers.gitlab.instances[origin]?.credentials
+      const credential = sectionInstances(state, provider)[origin]?.credentials
         .find((candidate) => candidate.credentialId === credentialId);
       if (!credential || credential.status !== 'valid'
         || (revision !== undefined && credential.revision !== revision)) return null;
@@ -382,7 +448,7 @@ export function createSourceControlAuthStore({ filePath, fsImpl = fs, lockWaitMs
     setAccount: (origin, { token, user, source, scope = '', refreshToken, expiresIn }) => mutate((state) => {
       if (!validText(token) || !['oauth', 'pat'].includes(source) || !isString(scope)) throw invalidState();
       const parsedUser = parseUser(user);
-      const credentialId = newCredentialId();
+      const credentialId = newCredentialId(provider);
       const credential = runtimeCredential({
         credentialId,
         revision: 1,
@@ -395,7 +461,7 @@ export function createSourceControlAuthStore({ filePath, fsImpl = fs, lockWaitMs
       });
       if (source === 'oauth' && validText(refreshToken)) credential.refreshToken = refreshToken;
       if (source === 'oauth' && Number.isFinite(expiresIn) && expiresIn > 0) credential.expiresAt = now() + expiresIn * 1000;
-      const instances = state.providers.gitlab.instances;
+      const instances = writableInstances(state, provider);
       const instance = instances[origin] ?? emptyInstance();
       instance.credentials.push(credential);
       instance.activeCredentialId = credentialId;
@@ -404,7 +470,7 @@ export function createSourceControlAuthStore({ filePath, fsImpl = fs, lockWaitMs
       return { changed: true, value: credential };
     }),
     activate: (origin, credentialId) => mutate((state) => {
-      const instance = state.providers.gitlab.instances[origin];
+      const instance = sectionInstances(state, provider)[origin];
       if (!instance?.credentials.some((credential) => credential.credentialId === credentialId && credential.status === 'valid')) {
         return { changed: false, value: false };
       }
@@ -414,7 +480,7 @@ export function createSourceControlAuthStore({ filePath, fsImpl = fs, lockWaitMs
       return { changed, value: true };
     }),
     removeAccount: (origin, credentialId) => mutate((state) => {
-      const instances = state.providers.gitlab.instances;
+      const instances = writableInstances(state, provider);
       const instance = instances[origin];
       const index = instance?.credentials.findIndex((credential) => credential.credentialId === credentialId) ?? -1;
       if (index < 0) return { changed: false, value: false };
@@ -424,7 +490,7 @@ export function createSourceControlAuthStore({ filePath, fsImpl = fs, lockWaitMs
       return { changed: true, value: true };
     }),
     markAccountInvalid: (origin, credentialId, reason = 'unauthorized') => mutate((state) => {
-      const instance = state.providers.gitlab.instances[origin];
+      const instance = sectionInstances(state, provider)[origin];
       const credential = instance?.credentials.find((candidate) => candidate.credentialId === credentialId);
       if (!credential) return { changed: false, value: false };
       if (credential.status === 'invalid' && credential.invalidReason === reason) return { changed: false, value: false };
@@ -434,7 +500,7 @@ export function createSourceControlAuthStore({ filePath, fsImpl = fs, lockWaitMs
       return { changed: true, value: true };
     }),
     setCliDisabled: (origin, disabled) => mutate((state) => {
-      const instances = state.providers.gitlab.instances;
+      const instances = writableInstances(state, provider);
       const instance = instances[origin] ?? emptyInstance();
       const nextDisabled = Boolean(disabled);
       const nextActive = nextDisabled ? false : instance.cliActive;
@@ -445,7 +511,7 @@ export function createSourceControlAuthStore({ filePath, fsImpl = fs, lockWaitMs
       return { changed, value: instance.cliDisabled };
     }),
     setCliActive: (origin, active) => mutate((state) => {
-      const instances = state.providers.gitlab.instances;
+      const instances = writableInstances(state, provider);
       const instance = instances[origin] ?? emptyInstance();
       const nextActive = Boolean(active) && !instance.cliDisabled;
       const changed = instance.cliActive !== nextActive;
@@ -453,6 +519,18 @@ export function createSourceControlAuthStore({ filePath, fsImpl = fs, lockWaitMs
       retainInstance(instances, origin, instance);
       return { changed, value: instance.cliActive };
     }),
+  });
+  const sections = new Map();
+  const section = (provider) => {
+    if (!isProviderId(provider) || provider === 'github') throw new Error(`Source control auth section is invalid: ${provider}`);
+    if (!sections.has(provider)) sections.set(provider, originSection(provider));
+    return sections.get(provider);
+  };
+
+  return Object.freeze({
+    // GitLab's section is the store's own surface, as it was before sections.
+    ...section('gitlab'),
+    section,
     // GitHub Enterprise lives in this same server token store, next to GitLab:
     // one entry per host, each with its own credentials, active account and gh
     // CLI switch. github.com's device-flow accounts stay in github-auth.json;
@@ -474,7 +552,7 @@ export function createSourceControlAuthStore({ filePath, fsImpl = fs, lockWaitMs
       setAccount: (host, { accessToken, user, source, scope = '', tokenType = 'bearer' }) => mutate((state) => {
         if (!validText(accessToken) || !['oauth', 'pat'].includes(source) || !isString(scope) || !validText(tokenType)) throw invalidState();
         const parsedUser = parseUser(user);
-        const credentialId = newGitHubCredentialId();
+        const credentialId = newCredentialId('github');
         const instances = state.providers.github.instances;
         const instance = instances[host] ?? emptyInstance();
         const credential = runtimeGitHubCredential({

@@ -1,32 +1,43 @@
 import { z } from 'zod';
-import type { GitHubIssueLiveSummary, GitHubPullRequestLiveSummary, LinearIssueLiveSummary } from '@/lib/api/types';
+import { sourceControlProviderIdSchema } from '@/lib/source-control/providers/descriptor';
+import type { IssueLiveSummary, ChangeRequestLiveSummary, TrackerLiveSummary } from '@/lib/api/types';
+import { trackerProviderIdSchema } from '@/lib/trackers/descriptor';
+import { linearStateCategory } from '@/lib/trackers/legacyLinear';
 
 /**
- * A pull request, merge request or issue whose live state the server follows
+ * A pull request, merge request, issue or tracker work item whose live state the server follows
  * for this client. The key is the server's: `trackedItemKey` here and in
  * `packages/web/server/lib/tracked-items/items.js` must agree.
  */
 /**
  * `accountId` names the account a repository is bound to (a branch's pull
  * request); without it the host's current account reads the item (a link).
- * A GitHub `instance` is the repository's host; missing means github.com,
- * exactly parallel to GitLab's required instance.
+ * `provider` is any source-control provider id and `instance` its instance
+ * (a host or an origin, as the provider names it).
  */
-export type TrackedThread<Kind extends 'pull' | 'issue' = 'pull' | 'issue'> =
-  | { provider: 'github'; kind: Kind; instance?: string; owner: string; repo: string; number: number; accountId?: string }
-  | { provider: 'gitlab'; instance: string; kind: Kind; owner: string; repo: string; number: number; accountId?: string };
-export type TrackedLinearIssue = { provider: 'linear'; identifier: string };
-export type TrackedItem = TrackedThread<'pull'> | TrackedThread<'issue'> | TrackedLinearIssue;
+export type TrackedThread<Kind extends 'pull' | 'issue' = 'pull' | 'issue'> = {
+  provider: string;
+  instance: string;
+  kind: Kind;
+  owner: string;
+  repo: string;
+  number: number;
+  accountId?: string;
+};
+/** A tracker's work item (a Linear issue), named by its tracker id and its human identifier. */
+export type TrackedWorkItem = { provider: string; kind: 'work-item'; identifier: string };
+export type TrackedItem = TrackedThread<'pull'> | TrackedThread<'issue'> | TrackedWorkItem;
+
+export const isTrackedWorkItem = (item: TrackedItem): item is TrackedWorkItem => item.kind === 'work-item';
 
 export const trackedItemKey = (item: TrackedItem): string => {
-  if (item.provider === 'linear') return `linear|${item.identifier.toUpperCase()}`;
+  if (isTrackedWorkItem(item)) return `${item.provider}|${item.identifier.toUpperCase()}`;
   const thread = `${item.kind}|${item.owner}/${item.repo}#${item.number}`.toLowerCase();
-  // The same owner/repo/number can exist on github.com and an enterprise host;
-  // the host is part of the key so the two never collide or share a slot.
-  const instance = (item.provider === 'gitlab' ? item.instance : (item.instance ?? 'github.com')).toLowerCase();
+  // The same owner/repo/number can exist on two instances of one provider;
+  // the instance is part of the key so the two never collide or share a slot.
   // Account ids are opaque and case-sensitive; they stay as they are.
   const account = item.accountId ? `@${item.accountId}` : '';
-  return `${item.provider}|${instance}|${thread}${account}`;
+  return `${item.provider}|${item.instance.toLowerCase()}|${thread}${account}`;
 };
 
 const checksSchema = z.object({
@@ -52,7 +63,7 @@ const pullSummarySchema = z.object({
   mergeable: z.boolean().nullable(),
   mergeableState: z.string().nullable(),
   checks: checksSchema.nullable(),
-}) satisfies z.ZodType<GitHubPullRequestLiveSummary>;
+}) satisfies z.ZodType<ChangeRequestLiveSummary>;
 
 const issueSummarySchema = z.object({
   owner: z.string(),
@@ -60,19 +71,52 @@ const issueSummarySchema = z.object({
   number: z.number(),
   title: z.string(),
   state: z.enum(['open', 'completed', 'not_planned']),
-}) satisfies z.ZodType<GitHubIssueLiveSummary>;
+}) satisfies z.ZodType<IssueLiveSummary>;
 
-const linearSummarySchema = z.object({
+const workItemStateSchema = z.object({
+  name: z.string(),
+  category: z.enum(['triage', 'backlog', 'todo', 'in-progress', 'done', 'canceled']),
+});
+// Linear's raw `{ name, type }` state, without `category`: what a server before
+// trackers sends, and what records stored before then hold.
+const legacyLinearStateSchema = z.object({ name: z.string(), type: z.string(), category: z.undefined() });
+
+// The server also sends Linear's raw `state.type` while older phone UIs read it; it is stripped here.
+const workItemSummarySchema = z.object({
   identifier: z.string(),
   title: z.string(),
-  state: z.object({ name: z.string(), type: z.enum(['triage', 'backlog', 'unstarted', 'started', 'completed', 'canceled']) }),
-}) satisfies z.ZodType<LinearIssueLiveSummary>;
+  state: z.preprocess((value) => {
+    const legacy = legacyLinearStateSchema.safeParse(value);
+    return legacy.success ? { name: legacy.data.name, category: linearStateCategory(legacy.data.type) } : value;
+  }, workItemStateSchema),
+}) satisfies z.ZodType<TrackerLiveSummary>;
 
-const threadFields = { owner: z.string().min(1), repo: z.string().min(1), number: z.number().int().positive(), kind: z.enum(['pull', 'issue']), accountId: z.string().min(1).optional() };
-const trackedItemSchema = z.discriminatedUnion('provider', [
-  z.object({ provider: z.literal('github'), instance: z.string().min(1).optional(), ...threadFields }),
-  z.object({ provider: z.literal('gitlab'), instance: z.string().min(1), ...threadFields }),
-  z.object({ provider: z.literal('linear'), identifier: z.string().min(1) }),
+// GitHub threads were the one shape that ever left `instance` out: on the
+// wire and in stored records a GitHub thread without one is on github.com, so
+// its key reads exactly as it always did.
+const legacyGitHubThreadSchema = z.looseObject({ provider: z.literal('github'), instance: z.undefined() });
+
+const trackedThreadSchema = z.object({
+  provider: sourceControlProviderIdSchema,
+  instance: z.string().min(1),
+  owner: z.string().min(1),
+  repo: z.string().min(1),
+  number: z.number().int().positive(),
+  kind: z.enum(['pull', 'issue']),
+  accountId: z.string().min(1).optional(),
+});
+// Records written before trackers had a `kind` are Linear issues: `{ provider: 'linear', identifier }`.
+const legacyWorkItemSchema = z.looseObject({ provider: z.literal('linear'), kind: z.undefined(), identifier: z.string() });
+
+const trackedItemSchema = z.union([
+  z.preprocess((value) => {
+    const legacy = legacyWorkItemSchema.safeParse(value);
+    return legacy.success ? { ...legacy.data, kind: 'work-item' } : value;
+  }, z.object({ provider: trackerProviderIdSchema, kind: z.literal('work-item'), identifier: z.string().min(1) })),
+  z.preprocess((value) => {
+    const legacy = legacyGitHubThreadSchema.safeParse(value);
+    return legacy.success ? { ...legacy.data, instance: 'github.com' } : value;
+  }, trackedThreadSchema),
 ]) satisfies z.ZodType<TrackedItem>;
 
 /**
@@ -80,9 +124,9 @@ const trackedItemSchema = z.discriminatedUnion('provider', [
  * answered, or no longer answered); `fetchedAt` is when it last answered.
  */
 export type TrackedItemState =
-  | { type: 'pull'; item: TrackedThread<'pull'>; state: GitHubPullRequestLiveSummary | null; fetchedAt: number }
-  | { type: 'issue'; item: TrackedThread<'issue'>; state: GitHubIssueLiveSummary | null; fetchedAt: number }
-  | { type: 'linear'; item: TrackedLinearIssue; state: LinearIssueLiveSummary | null; fetchedAt: number };
+  | { type: 'pull'; item: TrackedThread<'pull'>; state: ChangeRequestLiveSummary | null; fetchedAt: number }
+  | { type: 'issue'; item: TrackedThread<'issue'>; state: IssueLiveSummary | null; fetchedAt: number }
+  | { type: 'work-item'; item: TrackedWorkItem; state: TrackerLiveSummary | null; fetchedAt: number };
 
 const recordSchema = z.object({ key: z.string(), item: trackedItemSchema, state: z.unknown(), fetchedAt: z.number() });
 
@@ -90,10 +134,10 @@ type ParsedRecord = { key: string; record: TrackedItemState };
 
 const toRecord = ({ key, item, state, fetchedAt }: z.infer<typeof recordSchema>): ParsedRecord | null => {
   if (key !== trackedItemKey(item)) return null;
-  if (item.provider === 'linear') {
-    const summary = state === null ? null : linearSummarySchema.safeParse(state);
+  if (isTrackedWorkItem(item)) {
+    const summary = state === null ? null : workItemSummarySchema.safeParse(state);
     if (summary && !summary.success) return null;
-    return { key, record: { type: 'linear', item, state: summary ? summary.data : null, fetchedAt } };
+    return { key, record: { type: 'work-item', item, state: summary ? summary.data : null, fetchedAt } };
   }
   if (item.kind === 'pull') {
     const summary = state === null ? null : pullSummarySchema.safeParse(state);

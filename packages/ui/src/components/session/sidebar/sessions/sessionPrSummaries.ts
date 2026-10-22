@@ -1,5 +1,8 @@
-import type { GitHubIssueLiveSummary, LinearIssueLiveSummary, LinearStateType } from '@/lib/api/types';
-import type { LinkedGitHubPullRequest, LinkedSidebarIssue } from '@/lib/linkedIssues';
+import type { IconName } from '@/components/icon/icons';
+import type { IssueLiveSummary, TrackerLiveSummary, TrackerStateCategory } from '@/lib/api/types';
+import { trackerPresentation } from '@/lib/trackers/presentation';
+import { trackerIssueLook } from '@/lib/trackers/stateLook';
+import type { LinkedSidebarChange, LinkedSidebarIssue } from '@/lib/linkedIssues';
 import type { PrVisualSummary } from '@/stores/useGitHubPrStatusStore';
 
 // Which PR a row leads with when a session has several: the one that needs
@@ -16,8 +19,10 @@ const priorityOf = (summary: PrVisualSummary): number => VISUAL_STATE_PRIORITY.g
 
 // The provider is part of who a change request is: GitHub's octo/repo#7 and
 // GitLab's octo/repo!7 are different things.
+const changeIdentity = (provider: string, owner: string, repo: string, number: number): string =>
+  `${provider}:${owner.toLowerCase()}/${repo.toLowerCase()}#${number}`;
 const identityOf = (summary: PrVisualSummary): string =>
-  `${summary.provider ?? 'github'}:${summary.repo?.owner.toLowerCase() ?? ''}/${summary.repo?.repo.toLowerCase() ?? ''}#${summary.number}`;
+  changeIdentity(summary.provider ?? '', summary.repo?.owner ?? '', summary.repo?.repo ?? '', summary.number);
 
 /**
  * Every PR a session row shows: its worktree branch's PR and the PRs linked to
@@ -41,16 +46,19 @@ export const combineSessionPrSummaries = (
 };
 
 /**
- * Linked PRs whose state has not arrived: not fetched yet, GitHub signed out,
- * or the batch failed. They are still the session's PRs, so the row lists
- * them, uncoloured, and they keep its issues out as any PR does.
+ * Linked change requests whose state has not arrived: not fetched yet, the
+ * provider signed out, or the batch failed. They are still the session's
+ * change requests, so the row lists them, uncoloured, and they keep its issues
+ * out as any change request does.
  */
 export const findLinkedPrsWithoutState = (
-  links: readonly LinkedGitHubPullRequest[],
+  changes: readonly LinkedSidebarChange[],
   summaries: readonly PrVisualSummary[],
-): LinkedGitHubPullRequest[] => {
+): LinkedSidebarChange[] => {
   const known = new Set(summaries.map(identityOf));
-  return links.filter((link) => !known.has(`github:${link.owner.toLowerCase()}/${link.repo.toLowerCase()}#${link.number}`));
+  return changes.filter(({ repository }) => (
+    repository && !known.has(changeIdentity(repository.provider, repository.owner, repository.repo, repository.number))
+  ));
 };
 
 type PrStatusLabelKey =
@@ -99,9 +107,10 @@ type IssueStatusLabelKey =
 /** A linked issue the way a session row shows it. */
 type SessionIssueItem = {
   key: string;
-  /** `#12` for GitHub, the tracker's identifier otherwise. */
+  /** The provider's issue reference (`#12`), the tracker's identifier otherwise. */
   label: string;
-  icon: 'record-circle' | 'linear';
+  /** A repository issue's mark, or its tracker's. */
+  icon: IconName;
   /** Theme PR colour for a known state; null when the state is unknown. */
   color: string | null;
   statusKey: IssueStatusLabelKey | null;
@@ -118,27 +127,19 @@ const ISSUE_STATE_LOOK = {
   open: { color: 'var(--pr-open)', statusKey: 'sessions.sidebar.group.issue.status.open', priority: 0 },
   completed: { color: 'var(--pr-merged)', statusKey: 'sessions.sidebar.group.issue.status.completed', priority: 2 },
   not_planned: { color: 'var(--pr-closed)', statusKey: 'sessions.sidebar.group.issue.status.notPlanned', priority: 3 },
-} satisfies Record<GitHubIssueLiveSummary['state'], { color: string; statusKey: IssueStatusLabelKey; priority: number }>;
+} satisfies Record<IssueLiveSummary['state'], { color: string; statusKey: IssueStatusLabelKey; priority: number }>;
 /** How an issue in a known state looks: its PR-token colour and status line. */
-export const getIssueStateLook = (state: GitHubIssueLiveSummary['state']): { color: string; statusKey: IssueStatusLabelKey } => {
+export const getIssueStateLook = (state: IssueLiveSummary['state']): { color: string; statusKey: IssueStatusLabelKey } => {
   const { color, statusKey } = ISSUE_STATE_LOOK[state];
   return { color, statusKey };
 };
 
-// Linear names its states per team; their type is what maps onto the colours.
-// Not done yet reads as open, done as completed, dropped as not planned.
-const LINEAR_STATE_LOOK: Record<LinearStateType, keyof typeof ISSUE_STATE_LOOK> = {
-  triage: 'open',
-  backlog: 'open',
-  unstarted: 'open',
-  started: 'open',
-  completed: 'completed',
-  canceled: 'not_planned',
-};
-
-/** How a Linear issue in a known state looks: the GitHub issue colour of its type. */
-export const getLinearIssueStateLook = (type: LinearStateType): { color: string; priority: number } => {
-  const { color, priority } = ISSUE_STATE_LOOK[LINEAR_STATE_LOOK[type]];
+/**
+ * How a tracker item in a known state looks: trackers name their states per
+ * team, so the state's category picks the issue colour (`trackerIssueLook`).
+ */
+export const getTrackerItemStateLook = (category: TrackerStateCategory): { color: string; priority: number } => {
+  const { color, priority } = ISSUE_STATE_LOOK[trackerIssueLook(category)];
   return { color, priority };
 };
 
@@ -148,23 +149,21 @@ const UNKNOWN_ISSUE_PRIORITY = 1;
 
 /**
  * The issues a session row shows, most relevant first: open issues, then
- * ones whose state is unknown, then closed ones. `states` lines up with the
- * GitHub issues among `issues`, in order; `linearStates` with the Linear ones;
- * `gitlabStates` with the GitLab ones.
+ * ones whose state is unknown, then closed ones. `repositoryStates` lines up
+ * with the repository issues among `issues`, in order; `trackerStates` with the
+ * tracker items.
  */
 export const buildSessionIssueItems = (
   issues: readonly LinkedSidebarIssue[],
-  states: ReadonlyArray<GitHubIssueLiveSummary | null>,
-  linearStates: ReadonlyArray<LinearIssueLiveSummary | null> = [],
-  gitlabStates: ReadonlyArray<GitHubIssueLiveSummary | null> = [],
+  repositoryStates: ReadonlyArray<IssueLiveSummary | null>,
+  trackerStates: ReadonlyArray<TrackerLiveSummary | null> = [],
 ): SessionIssueItem[] => {
-  let githubIndex = 0;
-  let linearIndex = 0;
-  let gitlabIndex = 0;
+  let repositoryIndex = 0;
+  let trackerIndex = 0;
   const ranked = issues.map((issue) => {
-    if (issue.source === 'gitlab') {
-      const state = gitlabStates[gitlabIndex] ?? null;
-      gitlabIndex += 1;
+    if (issue.source === 'repository') {
+      const state = repositoryStates[repositoryIndex] ?? null;
+      repositoryIndex += 1;
       const look = state ? ISSUE_STATE_LOOK[state.state] : null;
       const item: SessionIssueItem = {
         key: issue.key,
@@ -178,14 +177,14 @@ export const buildSessionIssueItems = (
       };
       return { item, priority: look?.priority ?? UNKNOWN_ISSUE_PRIORITY };
     }
-    if (issue.source === 'linear') {
-      const state = linearStates[linearIndex] ?? null;
-      linearIndex += 1;
-      const look = state ? getLinearIssueStateLook(state.state.type) : null;
+    if (issue.source === 'tracker') {
+      const state = trackerStates[trackerIndex] ?? null;
+      trackerIndex += 1;
+      const look = state ? getTrackerItemStateLook(state.state.category) : null;
       const item: SessionIssueItem = {
         key: issue.key,
         label: issue.identifier,
-        icon: 'linear',
+        icon: trackerPresentation(issue.provider).icon,
         color: look?.color ?? null,
         statusKey: null,
         statusText: state?.state.name ?? null,
@@ -194,33 +193,17 @@ export const buildSessionIssueItems = (
       };
       return { item, priority: look?.priority ?? UNKNOWN_ISSUE_PRIORITY };
     }
-    if (issue.source !== 'github') {
-      const item: SessionIssueItem = {
-        key: issue.key,
-        label: issue.identifier,
-        icon: 'record-circle',
-        color: null,
-        statusKey: null,
-        statusText: null,
-        url: issue.url,
-        title: issue.title,
-      };
-      return { item, priority: UNKNOWN_ISSUE_PRIORITY };
-    }
-    const state = states[githubIndex] ?? null;
-    githubIndex += 1;
-    const look = state ? ISSUE_STATE_LOOK[state.state] : null;
     const item: SessionIssueItem = {
       key: issue.key,
-      label: `#${issue.number}`,
+      label: issue.identifier,
       icon: 'record-circle',
-      color: look?.color ?? null,
-      statusKey: look?.statusKey ?? null,
+      color: null,
+      statusKey: null,
       statusText: null,
       url: issue.url,
-      title: state?.title || issue.title,
+      title: issue.title,
     };
-    return { item, priority: look?.priority ?? UNKNOWN_ISSUE_PRIORITY };
+    return { item, priority: UNKNOWN_ISSUE_PRIORITY };
   });
   // Array sort is stable: equal priorities keep link order.
   return ranked.sort((left, right) => left.priority - right.priority).map((entry) => entry.item);

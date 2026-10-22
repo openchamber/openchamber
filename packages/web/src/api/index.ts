@@ -14,7 +14,7 @@ import { createWebSettingsAPI } from './settings';
 import { createWebPermissionsAPI } from './permissions';
 import { createWebNotificationsAPI } from './notifications';
 import { createWebPushAPI } from './push';
-import { createWebLinearAPI } from './linear';
+import { createWebTrackerAPI } from './trackers';
 import { createWebClientAuthAPI } from './clientAuth';
 import { createWebSourceControlAPI } from './source-control';
 
@@ -48,7 +48,7 @@ export const createWebAPIs = (options: WebAPIsOptions = {}): RuntimeAPIs => {
   permissions: createWebPermissionsAPI(),
   notifications: createWebNotificationsAPI(),
   sourceControl: createWebSourceControlAPI(),
-  linear: createWebLinearAPI(),
+  trackers: createWebTrackerAPI(),
   push: createWebPushAPI(),
   clientAuth: createWebClientAuthAPI(),
   };

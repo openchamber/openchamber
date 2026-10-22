@@ -2,7 +2,10 @@ import React, { act } from 'react';
 import { expect, test } from 'bun:test';
 import { Window } from 'happy-dom';
 import type { PullRequestSource } from '@/lib/diff/pullRequestDiff';
-import type { SourceControlAuthStatus, SourceControlReadContext, SourceControlUser } from '@/lib/source-control/types';
+import type {
+  ChangeRequest, ChangeRequestStatus, PageResult, Project, SourceControlAuthStatus, SourceControlIdentity, SourceControlReadContext,
+  SourceControlUser,
+} from '@/lib/source-control/types';
 
 // The picker reads through the checkout's bound GitHub context, so the fixture
 // is a binding context plus an account that context names.
@@ -18,6 +21,16 @@ const CONNECTED: SourceControlAuthStatus = {
     providerUserStatus: 'available', user: USER, current: true, source: 'oauth', status: 'valid',
   }],
 };
+
+// The server emits neutral DTOs; a pull request's source repository is its project.
+const IDENTITY: SourceControlIdentity = { provider: 'github', instance: 'github.com' };
+const project = (owner: string): Project => ({
+  ...IDENTITY, id: `${owner}/project`, owner, name: 'project', url: `https://github.com/${owner}/project`,
+});
+const pullRequest = (owner: string, index: number): ChangeRequest => ({
+  ...IDENTITY, id: `${owner}/project#42`, number: 42, project: project(owner), title: `${owner} PR`,
+  url: `https://github.com/${owner}/project/pull/42`, state: 'open', draft: false, base: 'main', head: `feature-${index}`,
+});
 
 const checkPullRequestSelection = async (mobile: boolean, tablet = false) => {
   const dom = new Window({ url: 'http://localhost' });
@@ -43,19 +56,20 @@ const checkPullRequestSelection = async (mobile: boolean, tablet = false) => {
     const url = new URL(input instanceof Request ? input.url : String(input), 'http://localhost');
     if (url.pathname === '/api/fs/home' || url.pathname === '/api/session-folders') return new Promise<Response>(() => {});
     // The bound status contract echoes the branch it answered for.
-    if (url.pathname === '/api/source-control/github/pr/status') return Response.json({ connected: true, branch: url.searchParams.get('branch'),
-      repo: { owner: 'upstream', repo: 'project', url: 'https://github.com/upstream/project' },
-      pr: { number: 42, title: 'Resolved PR', url: 'https://github.com/upstream/project/pull/42', state: 'open', draft: false, head: 'feature-0', base: 'main' } });
+    if (url.pathname === '/api/source-control/github/pr/status') {
+      const status: ChangeRequestStatus = { identity: IDENTITY, project: project('upstream'), branch: url.searchParams.get('branch') ?? '',
+        changeRequest: { ...pullRequest('upstream', 0), title: 'Resolved PR' } };
+      return Response.json(status);
+    }
     if (url.pathname !== '/api/source-control/github/pulls/list') throw new Error(`Unexpected request ${url.pathname}`);
     // Every list read carries the bound context, never an ambient account.
     expect(url.searchParams.get('accountId')).toBe(CONTEXT.accountId);
     requestCount += 1;
-    if (url.searchParams.get('page') === '2' && failNextPage) return Response.json({ error: 'Next page failed' }, { status: 503 });
-    if (url.searchParams.get('query') === 'missing') return Response.json({ connected: true, repo: { owner: 'upstream', repo: 'project' }, prs: [], hasMore: false });
-    return Response.json({ connected: true, repo: { owner: 'upstream', repo: 'project' }, hasMore: url.searchParams.get('page') !== '2',
-      prs: ['upstream', 'fork'].map((owner, index) => ({ number: 42, title: `${owner} PR`,
-        url: `https://github.com/${owner}/project/pull/42`, state: 'open', draft: false, base: 'main', head: `feature-${index}`,
-        sourceRepo: { owner, repo: 'project', source: owner } })) });
+    const page = Number(url.searchParams.get('page') ?? '1');
+    if (page === 2 && failNextPage) return Response.json({ error: 'Next page failed' }, { status: 503 });
+    if (url.searchParams.get('query') === 'missing') return Response.json({ items: [], page, hasMore: false } satisfies PageResult<ChangeRequest>);
+    return Response.json({ items: ['upstream', 'fork'].map((owner, index) => pullRequest(owner, index)), page,
+      hasMore: page !== 2 } satisfies PageResult<ChangeRequest>);
   }, originalFetch);
   const { createRoot } = await import('react-dom/client');
   const { I18nProvider } = await import('@/lib/i18n');
@@ -69,6 +83,11 @@ const checkPullRequestSelection = async (mobile: boolean, tablet = false) => {
   useSourceControlAuthStore.setState({
     entries: { [getSourceControlAuthKey(CONTEXT)]: { status: CONNECTED, isLoading: false, hasChecked: true } },
   });
+  // Change-request diffs exist only for providers the server serves.
+  const { useSourceControlProviderRegistry } = await import('@/lib/source-control/providers/registry');
+  const { githubLikeDescriptor } = await import('@/lib/source-control/providers/descriptor.fixture');
+  const servedGitHub = githubLikeDescriptor();
+  useSourceControlProviderRegistry.setState({ ordered: [servedGitHub], byId: new Map([[servedGitHub.id, servedGitHub]]), status: 'ready', holdsList: true });
   const { PullRequestComparisonSelector } = await import('./PullRequestComparisonSelector');
   const apis = createWebAPIs();
   let directory = '/repo';

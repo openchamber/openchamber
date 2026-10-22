@@ -30,24 +30,28 @@ afterEach(async () => {
   host.remove();
 });
 
-// A status without a workspace list, before it loads or while Linear is not
-// connected, once sent the team picker into React's "maximum update depth"
-// loop and took the whole board down.
-test('the team picker renders while the Linear status has no workspace list', async () => {
+// A status without an account list, before it loads or while the tracker is
+// not connected, once sent the team picker into React's "maximum update
+// depth" loop and took the whole board down.
+test('the container picker renders while the tracker status has no account list', async () => {
   const { I18nProvider } = await import('@/lib/i18n');
   const { RuntimeAPIContext } = await import('@/contexts/runtimeAPIContext');
   const { createWebAPIs } = await import('../../../../web/src/api/index');
-  const { useLinearAuthStore } = await import('@/stores/useLinearAuthStore');
-  const { SourceBoardTeamPicker } = await import('./SourceBoardPickers');
+  const { useTrackerAuthStore } = await import('@/stores/useTrackerAuthStore');
+  const { useTrackerRegistry } = await import('@/lib/trackers/registry');
+  const { linearLikeTrackerDescriptor } = await import('@/lib/trackers/descriptor.fixture');
+  const { SourceBoardContainerPicker } = await import('./SourceBoardPickers');
   const apis = createWebAPIs();
+  const linear = linearLikeTrackerDescriptor();
+  useTrackerRegistry.setState({ ordered: [linear], byId: new Map([[linear.id, linear]]), status: 'ready', holdsList: true });
 
-  for (const status of [null, { connected: false }]) {
-    useLinearAuthStore.setState({ status });
+  for (const status of [null, { connected: false as const }]) {
+    useTrackerAuthStore.setState({ entries: { linear: { status, isLoading: false, hasChecked: status !== null } } });
     await act(async () => {
       root.render(
         <I18nProvider>
           <RuntimeAPIContext.Provider value={apis}>
-            <SourceBoardTeamPicker teams={[]} selectedTeamId={null} onSelectTeam={() => {}} onWorkspaceSwitched={() => {}} />
+            <SourceBoardContainerPicker provider="linear" containers={[]} selectedContainerId={null} onSelectContainer={() => {}} onAccountSwitched={() => {}} />
           </RuntimeAPIContext.Provider>
         </I18nProvider>,
       );

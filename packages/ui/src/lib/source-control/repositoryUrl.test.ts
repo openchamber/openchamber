@@ -1,6 +1,13 @@
 import { expect, test } from 'bun:test';
 import type { GitRemote, SourceControlIdentity } from '@/lib/api/types';
-import { repositoryLinkFromRemotes } from './repositoryUrl';
+import { defaultSourceControlIdentities } from './identity';
+import { acmeDescriptor, githubLikeDescriptor, gitlabLikeDescriptor } from './providers/descriptor.fixture';
+import { repositoryLinkFromRemotes as linkFromRemotes } from './repositoryUrl';
+
+const descriptors = [githubLikeDescriptor(), gitlabLikeDescriptor(), acmeDescriptor()];
+const defaults = defaultSourceControlIdentities(descriptors);
+// Remotes are recognised on the connected instances and each provider's default one.
+const repositoryLinkFromRemotes = (remotes: GitRemote[], identities: SourceControlIdentity[]) => linkFromRemotes(remotes, [...identities, ...defaults], descriptors);
 
 const remote = (name: string, fetchUrl: string, pushUrl = fetchUrl): GitRemote => ({ name, fetchUrl, pushUrl });
 const link = (url: string, identities: SourceControlIdentity[] = []) => repositoryLinkFromRemotes([remote('origin', url)], identities);
@@ -48,4 +55,10 @@ test('unsupported origin falls back to another recognized remote or push endpoin
     .toEqual({ provider: 'gitlab', url: 'https://gitlab.com/group/project' });
   expect(repositoryLinkFromRemotes([remote('origin', '', 'git@github.com:team/repo.git')], []))
     .toEqual({ provider: 'github', url: 'https://github.com/team/repo' });
+});
+
+test('a provider without nested namespaces names a project by owner and name only', () => {
+  const identities: SourceControlIdentity[] = [{ provider: 'github', instance: 'ghe.example.com' }];
+  expect(link('https://ghe.example.com/team/repo.git', identities)).toEqual({ provider: 'github', url: 'https://ghe.example.com/team/repo' });
+  expect(link('https://ghe.example.com/team/sub/repo.git', identities)).toBeNull();
 });

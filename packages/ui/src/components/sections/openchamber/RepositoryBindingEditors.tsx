@@ -176,7 +176,7 @@ export const AdditionalRemoteGrants: React.FC<SourceControlBindingSettingsProps>
           </div>
         );
       })}
-      {error ? <EditorStatus error>{t('settings.gitlab.status.operationFailed')}</EditorStatus> : null}
+      {error ? <EditorStatus error>{t('settings.sourceControl.instance.status.operationFailed')}</EditorStatus> : null}
     </SettingsControlGroup>
   );
 };
@@ -397,7 +397,7 @@ export const AuxiliaryBindingSettings: React.FC<SourceControlBindingSettingsProp
       {latest?.hydration?.status === 'client-missing' ? <p role="alert" className={cn(SETTINGS_HELPER_CLASS, 'text-[var(--status-warning)]')}>
         {t('gitView.hydration.lfsMissing')}
       </p> : null}
-      {error ? <EditorStatus error>{t('settings.gitlab.status.operationFailed')}</EditorStatus> : null}
+      {error ? <EditorStatus error>{t('settings.sourceControl.instance.status.operationFailed')}</EditorStatus> : null}
       <div className={EDITOR_ACTIONS_CLASS}>
         <Button size="sm" variant="outline" disabled={!parentRemote || recovery.blocked || saving} onClick={() => void retryHydration()}>
           {t('gitView.hydration.retry')}

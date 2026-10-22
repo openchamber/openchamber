@@ -17,7 +17,7 @@ const rateLimitedUntilByHost = new Map();
 
 // github.com and its REST root (api.github.com) are one host; every other
 // instance keys by its own hostname.
-export const hostKeyFor = (value) => {
+const hostKeyFor = (value) => {
   const normalized = String(value ?? '').trim().toLowerCase();
   if (!normalized || normalized === 'github.com' || normalized === 'api.github.com') {
     return 'github.com';

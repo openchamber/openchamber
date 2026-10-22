@@ -15,12 +15,12 @@
 
 import * as React from 'react';
 
-import type { GitHubReferencesAcrossSkip } from '@/lib/api/types';
+import type { RepositoryReferencesAcrossSkip } from '@/lib/api/types';
 
 const FRESH_MS = 60_000;
 
 /** A folder a list over several repositories could not read, and why. */
-export type ListSkip = { directory: string; reason: GitHubReferencesAcrossSkip };
+export type ListSkip = { directory: string; reason: RepositoryReferencesAcrossSkip };
 
 const mergeSkipped = (shown: readonly ListSkip[], next: readonly ListSkip[]): ListSkip[] => {
     const known = new Set(shown.map((skip) => skip.directory));

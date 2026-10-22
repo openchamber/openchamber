@@ -1,0 +1,77 @@
+{
+  "_comment": "Hand-written Gitea API v1 answers shaped after the published swagger (gitea.com/swagger.v1.json), not recorded from a live instance. Origin https://gitea.example.com; no real tokens or addresses.",
+  "version": { "version": "1.22.3" },
+  "user": {
+    "id": 7, "login": "alice", "full_name": "Alice Example", "email": "alice@example.invalid",
+    "avatar_url": "https://gitea.example.com/avatars/alice"
+  },
+  "forkRepo": {
+    "id": 11, "name": "app", "full_name": "alice/app", "fork": true,
+    "owner": { "id": 7, "login": "alice" },
+    "html_url": "https://gitea.example.com/alice/app",
+    "clone_url": "https://gitea.example.com/alice/app.git",
+    "ssh_url": "git@gitea.example.com:alice/app.git",
+    "default_branch": "main",
+    "parent": { "id": 10, "name": "app", "full_name": "team/app", "owner": { "id": 3, "login": "team" } }
+  },
+  "upstreamRepo": {
+    "id": 10, "name": "app", "full_name": "team/app", "fork": false,
+    "owner": { "id": 3, "login": "team" },
+    "html_url": "https://gitea.example.com/team/app",
+    "clone_url": "https://gitea.example.com/team/app.git",
+    "ssh_url": "git@gitea.example.com:team/app.git",
+    "default_branch": "main",
+    "parent": null
+  },
+  "forkPull": {
+    "id": 501, "number": 5, "title": "Add feature", "body": "Adds the feature.",
+    "html_url": "https://gitea.example.com/team/app/pulls/5",
+    "state": "open", "merged": false, "draft": false, "mergeable": true,
+    "merge_base": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "user": { "id": 7, "login": "alice" },
+    "labels": [{ "id": 1, "name": "bug", "color": "#ee0701" }],
+    "requested_reviewers": [{ "id": 8, "login": "bob" }],
+    "head": {
+      "label": "alice:feature", "ref": "feature", "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "repo_id": 11,
+      "repo": {
+        "id": 11, "name": "app", "full_name": "alice/app", "owner": { "id": 7, "login": "alice" },
+        "html_url": "https://gitea.example.com/alice/app", "clone_url": "https://gitea.example.com/alice/app.git"
+      }
+    },
+    "base": { "label": "main", "ref": "main", "sha": "cccccccccccccccccccccccccccccccccccccccc", "repo_id": 10 },
+    "created_at": "2026-10-01T10:00:00Z", "updated_at": "2026-10-02T10:00:00Z"
+  },
+  "combinedStatus": {
+    "state": "pending", "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "total_count": 2,
+    "statuses": [
+      { "id": 1, "context": "ci / test (push)", "status": "success", "target_url": "https://gitea.example.com/team/app/actions/runs/1", "created_at": "2026-10-02T10:00:00Z", "updated_at": "2026-10-02T10:05:00Z" },
+      { "id": 2, "context": "ci / lint (push)", "status": "pending", "created_at": "2026-10-02T10:00:00Z", "updated_at": "2026-10-02T10:00:00Z" }
+    ]
+  },
+  "diff": "diff --git a/src/app.js b/src/app.js\nindex 1111111..2222222 100644\n--- a/src/app.js\n+++ b/src/app.js\n@@ -1 +1,2 @@\n export const app = 1;\n+export const feature = true;\ndiff --git a/old.txt b/old.txt\ndeleted file mode 100644\nindex 3333333..0000000\n--- a/old.txt\n+++ /dev/null\n@@ -1 +0,0 @@\n-gone\n",
+  "files": [
+    { "filename": "src/app.js", "status": "changed", "additions": 1, "deletions": 0, "changes": 1 },
+    { "filename": "old.txt", "status": "deleted", "additions": 0, "deletions": 1, "changes": 1 }
+  ],
+  "reviews": [
+    { "id": 30, "state": "APPROVED", "body": "Looks good", "user": { "id": 8, "login": "bob" }, "html_url": "https://gitea.example.com/team/app/pulls/5#issuecomment-30", "submitted_at": "2026-10-02T11:00:00Z", "comments_count": 1, "dismissed": false },
+    { "id": 31, "state": "REQUEST_CHANGES", "body": "", "user": { "id": 9, "login": "carol" }, "submitted_at": "2026-10-02T09:00:00Z", "comments_count": 0, "dismissed": true }
+  ],
+  "reviewComments": [
+    { "id": 40, "body": "Nit", "path": "src/app.js", "position": 2, "original_position": 0, "user": { "id": 8, "login": "bob" }, "html_url": "https://gitea.example.com/team/app/pulls/5/files#issuecomment-40", "created_at": "2026-10-02T11:00:00Z" }
+  ],
+  "comments": [
+    { "id": 20, "body": "First!", "user": { "id": 9, "login": "carol" }, "html_url": "https://gitea.example.com/team/app/pulls/5#issuecomment-20", "created_at": "2026-10-01T12:00:00Z" }
+  ],
+  "commits": [
+    { "sha": "dddddddddddddddddddddddddddddddddddddddd", "html_url": "https://gitea.example.com/team/app/commit/dddd", "commit": { "message": "Start feature\n\nBody", "author": { "name": "Alice" }, "committer": { "date": "2026-10-01T09:00:00Z" } } },
+    { "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "html_url": "https://gitea.example.com/team/app/commit/aaaa", "commit": { "message": "Finish feature", "author": { "name": "Alice" }, "committer": { "date": "2026-10-02T09:00:00Z" } } }
+  ],
+  "collaborators": [{ "id": 8, "login": "bob" }, { "id": 9, "login": "carol", "avatar_url": "https://gitea.example.com/avatars/carol" }],
+  "labels": [{ "id": 1, "name": "bug", "color": "ee0701" }, { "id": 2, "name": "ready", "color": "00aa00" }],
+  "issue": {
+    "id": 601, "number": 3, "title": "Crash on start", "body": "It crashes.", "state": "open",
+    "html_url": "https://gitea.example.com/alice/app/issues/3", "user": { "id": 9, "login": "carol" },
+    "labels": [], "assignees": [{ "id": 7, "login": "alice" }], "pull_request": null
+  }
+}

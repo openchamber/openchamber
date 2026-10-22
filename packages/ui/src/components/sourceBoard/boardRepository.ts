@@ -1,11 +1,14 @@
 import * as React from 'react';
 
-import { BUILT_IN_SOURCE_CONTROL_IDENTITIES } from '@/components/references/referenceSources';
+import { defaultSourceControlIdentities } from '@/lib/source-control/identity';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import type { GitRemote, SourceControlIdentity } from '@/lib/api/types';
 import { normalizePath } from '@/lib/pathNormalization';
 import { useRepositoryBindings } from '@/lib/source-control/repository-binding';
 import { repositoryLinkFromRemotes } from '@/lib/source-control/repositoryUrl';
+import type { SourceControlProviderDescriptor } from '@/lib/source-control/providers/descriptor';
+import { useSourceControlProviders } from '@/lib/source-control/providers/registry';
+import { useRepositoryUrlMatcher } from '@/lib/source-control/repositoryUrlMatcher';
 import { useGitStore, useIsGitRepo, useNestedRepos, type NestedRepoDiscovery } from '@/stores/useGitStore';
 import type { SourceBoardTab } from '@/stores/useSourceBoardStore';
 import { useSourceControlAuthStore } from '@/stores/useSourceControlAuthStore';
@@ -203,7 +206,7 @@ function useFolderRepositories(root: string | null) {
  */
 export function useBoardRepository(root: string | null, choice: RepositoryChoice): BoardRepository & { retry: () => void } {
     const { sourceControl } = useRuntimeAPIs();
-    const acrossAvailable = Boolean(sourceControl.githubReferencesAcross);
+    const acrossAvailable = Boolean(sourceControl.referencesAcross);
     const { rootIsGitRepo, nestedRepos, retry } = useFolderRepositories(root);
     const resolution = React.useMemo(
         () => resolveBoardRepository(root, rootIsGitRepo, nestedRepos, { path: choice.path, all: choice.all }, acrossAvailable),
@@ -225,8 +228,9 @@ export function folderOfRepository(
     repositoryUrl: string,
     folders: readonly FolderRemotes[],
     identities: readonly SourceControlIdentity[],
+    descriptors: readonly SourceControlProviderDescriptor[],
 ): string | 'none' | null {
-    const names = (remote: GitRemote) => repositoryLinkFromRemotes([remote], identities)?.url.replace(/\/+$/, '').toLowerCase() === repositoryUrl;
+    const names = (remote: GitRemote) => repositoryLinkFromRemotes([remote], identities, descriptors)?.url.replace(/\/+$/, '').toLowerCase() === repositoryUrl;
     const byOrigin = folders.find((folder) => folder.remotes?.some((remote) => remote.name === 'origin' && names(remote)));
     if (byOrigin) return byOrigin.directory;
     if (folders.some((folder) => folder.remotes === null)) return null;
@@ -249,7 +253,9 @@ export function useLinkRepository(root: string, url: string): LinkRepository {
     const candidates = rootIsGitRepo === false && Array.isArray(nestedRepos) ? nestedRepos : NO_FOLDERS;
     const bindings = useRepositoryBindings(candidates, sourceControl);
     const knownIdentities = useSourceControlAuthStore((state) => state.identities);
-    const repositoryUrl = repositoryUrlOfItemLink(url);
+    const descriptors = useSourceControlProviders();
+    const urls = useRepositoryUrlMatcher();
+    const repositoryUrl = repositoryUrlOfItemLink(url, urls);
     const match = React.useMemo(() => {
         if (!repositoryUrl || candidates.length === 0) return 'none';
         const folders = candidates.map((directory, index): FolderRemotes => {
@@ -262,8 +268,8 @@ export function useLinkRepository(root: string, url: string): LinkRepository {
             }
             return { directory, remotes: binding?.status === 'error' ? [] : null };
         });
-        return folderOfRepository(repositoryUrl, folders, [...knownIdentities, ...BUILT_IN_SOURCE_CONTROL_IDENTITIES]);
-    }, [bindings, candidates, knownIdentities, repositoryUrl]);
+        return folderOfRepository(repositoryUrl, folders, [...knownIdentities, ...defaultSourceControlIdentities(descriptors)], descriptors);
+    }, [bindings, candidates, descriptors, knownIdentities, repositoryUrl]);
 
     if (rootIsGitRepo === null || (rootIsGitRepo === false && nestedRepos === undefined)) return { status: 'pending', directory: root, retry };
     if (rootIsGitRepo === false && nestedRepos === null) return { status: 'failed', directory: root, retry };

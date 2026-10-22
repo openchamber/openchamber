@@ -34,7 +34,7 @@ interface MobileComposerHolders {
     controlsPanelOpen: boolean;
     attachMenuOpen: boolean;
     draftPickerOpen: boolean;
-    /** The GitHub or Linear reference picker. */
+    /** The repository or tracker reference picker. */
     referencePickerOpen: boolean;
     isDragging: boolean;
 }

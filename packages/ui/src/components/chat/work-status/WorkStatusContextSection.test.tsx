@@ -21,8 +21,8 @@ const githubIssue: LinkedIssue = {
   kind: 'issue', author: 'someone', linkedAt: 1,
 };
 const linearIssue: LinkedIssue = {
-  id: 'linear:ENG-7', identifier: 'ENG-7', title: 'Broken login', url: 'https://linear.app/acme/issue/ENG-7',
-  kind: 'linear', linkedAt: 2,
+  id: 'linear:ENG-7', kind: 'tracker', provider: 'linear', identifier: 'ENG-7', title: 'Broken login', url: 'https://linear.app/acme/issue/ENG-7',
+  linkedAt: 2,
 };
 const sessionWith = (linked: LinkedIssue[]): Session => ({
   id: sessionId, projectID: 'project', directory, title: 'Unlink', cost: 0,

@@ -2,8 +2,8 @@
  * Issues, pull requests and tracker tickets attached to the composer.
  *
  * A message may carry any number of them, from any source: repository issues
- * and change requests (GitHub, or GitLab on a message restored from the
- * queue), Linear issues, and items extensions hand over through `attach`. Each
+ * and change requests on any source-control provider, tracker work items
+ * (Linear issues), and items extensions hand over through `attach`. Each
  * one becomes its own context part on send, in the order it was attached.
  * Attaching an item that is already on the composer replaces it in place,
  * so reopening the picker to toggle a PR's diff never duplicates the chip.
@@ -13,7 +13,7 @@ import type { JsonValue } from '@openchamber/sdk';
 
 import type { SourceControlProvider } from '@/lib/api/types';
 
-import { buildLinkedGuestIssue, buildLinkedIssue, buildLinkedLinearIssue, type LinkedIssue } from '@/lib/linkedIssues';
+import { buildLinkedGuestIssue, buildLinkedIssue, buildLinkedTrackerItem, type LinkedIssue } from '@/lib/linkedIssues';
 
 import type { ComposerContextReference } from './submit/buildOutgoingMessage';
 
@@ -44,7 +44,8 @@ export type ComposerReference =
         author?: ComposerReferenceAuthor;
     }
     | {
-        kind: 'linear-issue';
+        kind: 'tracker-item';
+        provider: string;
         identifier: string;
         title: string;
         url: string;
@@ -72,8 +73,8 @@ export const composerReferenceKey = (reference: ComposerReference): string => {
         case 'repository-issue':
         case 'change-request':
             return `repository:${reference.url.toLowerCase()}`;
-        case 'linear-issue':
-            return `linear:${reference.identifier.toUpperCase()}`;
+        case 'tracker-item':
+            return `${reference.provider}:${reference.identifier.toUpperCase()}`;
         case 'guest':
             return `guest:${reference.providerId}:${reference.id}`;
     }
@@ -113,8 +114,9 @@ export const toLinkedIssue = (reference: ComposerReference, linkedAt: number): L
                 author: reference.author,
                 linkedAt,
             });
-        case 'linear-issue':
-            return buildLinkedLinearIssue({
+        case 'tracker-item':
+            return buildLinkedTrackerItem({
+                provider: reference.provider,
                 identifier: reference.identifier,
                 title: reference.title,
                 url: reference.url,
@@ -158,8 +160,15 @@ export const toContextReference = (reference: ComposerReference): ComposerContex
                 url: reference.url,
                 context: reference.contextText,
             };
-        case 'linear-issue':
-            return { kind: 'linear-issue', identifier: reference.identifier, title: reference.title, url: reference.url, contextText: reference.contextText };
+        case 'tracker-item':
+            return {
+                kind: 'tracker-item',
+                provider: reference.provider,
+                identifier: reference.identifier,
+                title: reference.title,
+                url: reference.url,
+                contextText: reference.contextText,
+            };
         case 'guest': {
             const entry: Extract<ComposerContextReference, { kind: 'guest' }> = {
                 kind: 'guest',

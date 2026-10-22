@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createChangeRequestWorktreeSource } from './change-request-worktree.js';
+import { sourceControlProviderDescriptors } from './provider-descriptors.js';
+import { ownedOriginInstance } from './origin-instance.js';
 
 const remote = (name, url) => ({
   name,
@@ -18,12 +20,37 @@ const head = {
   headOwner: 'Alice',
 };
 
-const setup = ({ binding, accounts = {}, gitlabInstances = [] }) => {
+/**
+ * The registry's two built-in descriptors (priority order, default
+ * instances, labels) with fake implementations whose `ownsHost` follows each
+ * provider's rule: a GitHub host by name, a GitLab one only as a known origin.
+ */
+const registryWith = ({ gitlabInstances = [], order = ['github', 'gitlab'], failing = [] } = {}) => {
+  const implementations = {
+    github: { auth: {
+      listInstances: async () => [],
+      ownsHost: ({ host, knownInstances }) => (knownInstances.includes(host) ? host : null),
+    } },
+    gitlab: { auth: {
+      listInstances: async () => gitlabInstances,
+      ownsHost: ownedOriginInstance,
+    } },
+  };
+  return {
+    list: () => order.map((id) => sourceControlProviderDescriptors.get(id)),
+    implementation: async (id) => {
+      if (failing.includes(id)) throw new Error(`${id} failed to load`);
+      return implementations[id] ?? null;
+    },
+  };
+};
+
+const setup = ({ binding, accounts = {}, gitlabInstances = [], order, failing }) => {
   const readChangeRequestHead = vi.fn(async () => head);
   const readCurrentAccountId = vi.fn(async ({ provider, instance }) => accounts[`${provider}:${instance}`] ?? null);
   const resolve = createChangeRequestWorktreeSource({
     readBinding: vi.fn(async () => binding),
-    listGitLabInstances: vi.fn(async () => gitlabInstances),
+    providers: registryWith({ gitlabInstances, order, failing }),
     readCurrentAccountId,
     readChangeRequestHead,
   });
@@ -71,15 +98,19 @@ describe('change request source for a worktree made by number', () => {
     expect(readChangeRequestHead.mock.calls[0][0].context).toMatchObject({ accountId: 'github.com#9', bindingRevision: 4 });
   });
 
-  it('prefers GitHub over GitLab, as the dialog does', async () => {
-    const { resolve, readChangeRequestHead } = setup({
-      binding: read({ remotes: [remote('origin', 'https://gitlab.com/acme/app.git'), remote('mirror', 'https://github.com/acme/app.git')] }),
-      accounts: { 'gitlab:https://gitlab.com': 'gitlab#1', 'github:github.com': 'github.com#7' },
-    });
+  it('prefers the earlier provider in registry order (GitHub over GitLab), as the dialog does', async () => {
+    const binding = read({ remotes: [remote('origin', 'https://gitlab.com/acme/app.git'), remote('mirror', 'https://github.com/acme/app.git')] });
+    const accounts = { 'gitlab:https://gitlab.com': 'gitlab#1', 'github:github.com': 'github.com#7' };
+    const { resolve, readChangeRequestHead } = setup({ binding, accounts });
 
     await resolve({ directory: '/repo', number: 42 });
 
     expect(readChangeRequestHead.mock.calls[0][0].context).toMatchObject({ provider: 'github', primaryRemote: 'mirror' });
+
+    // The order is the registry's, not a provider name's.
+    const reversed = setup({ binding, accounts, order: ['gitlab', 'github'] });
+    await reversed.resolve({ directory: '/repo', number: 42 });
+    expect(reversed.readChangeRequestHead.mock.calls[0][0].context).toMatchObject({ provider: 'gitlab', primaryRemote: 'origin' });
   });
 
   it('reads a merge request on a connected self-hosted GitLab', async () => {
@@ -95,6 +126,37 @@ describe('change request source for a worktree made by number', () => {
       number: 7,
       context: { provider: 'gitlab', instance: 'https://gitlab.example.com', accountId: 'https://gitlab.example.com#3' },
     });
+  });
+
+  it('tells two GitLab instances on one host apart by the remote\'s port', async () => {
+    const { resolve, readChangeRequestHead } = setup({
+      binding: read({ remotes: [remote('origin', 'https://gitlab.example.com:8443/team/app.git')] }),
+      accounts: {
+        'gitlab:https://gitlab.example.com': 'https://gitlab.example.com#3',
+        'gitlab:https://gitlab.example.com:8443': 'https://gitlab.example.com:8443#4',
+      },
+      gitlabInstances: ['https://gitlab.example.com', 'https://gitlab.example.com:8443'],
+    });
+
+    await resolve({ directory: '/repo', number: 7 });
+
+    expect(readChangeRequestHead.mock.calls[0][0].context)
+      .toMatchObject({ instance: 'https://gitlab.example.com:8443', accountId: 'https://gitlab.example.com:8443#4' });
+  });
+
+  it('still reads with GitHub when another provider fails to load', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { resolve, readChangeRequestHead } = setup({
+      binding: read({ remotes: [remote('origin', 'https://github.com/acme/app.git')] }),
+      accounts: { 'github:github.com': 'github.com#7' },
+      failing: ['gitlab'],
+    });
+
+    await resolve({ directory: '/repo', number: 42 });
+
+    expect(readChangeRequestHead.mock.calls[0][0].context).toMatchObject({ provider: 'github' });
+    expect(warn).toHaveBeenCalledOnce();
+    warn.mockRestore();
   });
 
   it('refuses a project no connected account can read, before asking any provider', async () => {

@@ -4,6 +4,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { withSourceControlFileLockSync } from '../source-control/file-lock.js';
+import { isProviderId } from '../source-control/provider-id.js';
 
 const FILE_NAME = 'git-identities.json';
 const legacyDataDir = () => path.join(os.homedir(), '.config', 'openchamber');
@@ -31,7 +32,7 @@ const parseIdentityAccount = (value) => {
   if (!isPlainObject(value)
     || Object.keys(value).length !== ACCOUNT_KEYS.length
     || !ACCOUNT_KEYS.every((key) => validProfileText(value[key], { required: true }))
-    || !['github', 'gitlab'].includes(value.provider)) {
+    || !isProviderId(value.provider)) {
     throw new TypeError('Invalid Git identity account');
   }
   return { provider: value.provider, instance: value.instance.trim(), accountId: value.accountId.trim() };

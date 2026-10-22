@@ -172,7 +172,7 @@ describe('source-control auth store', () => {
   });
 
   test('rejects stale completion after a runtime reset', async () => {
-    let resolveStatus!: (value: { provider: 'gitlab'; instance: string; status: 'disconnected'; connected: false }) => void;
+    let resolveStatus!: (value: { provider: string; instance: string; status: 'disconnected'; connected: false }) => void;
     const api = {
       authStatus: mock(() => new Promise<SourceControlAuthStatus>((resolve) => { resolveStatus = resolve; })),
     };
@@ -251,6 +251,17 @@ describe('source-control auth store', () => {
     stale.resolve({ ...identity, status: 'disconnected', connected: false, accounts: [] });
     await before;
     expect(useSourceControlAuthStore.getState().entries[getSourceControlAuthKey(identity)]?.status).toBe(connectedStatus);
+  });
+
+  test('an unchanged inventory keeps the held list, a changed one replaces it', async () => {
+    const other = { provider: 'github', instance: 'github.com' } satisfies SourceControlIdentity;
+    const store = useSourceControlAuthStore.getState();
+    await store.refreshInstances({ authInstances: async () => [{ ...identity }] }, { force: true });
+    const held = useSourceControlAuthStore.getState().identities;
+    await store.refreshInstances({ authInstances: async () => [{ ...identity }] }, { force: true });
+    expect(useSourceControlAuthStore.getState().identities).toBe(held);
+    await store.refreshInstances({ authInstances: async () => [{ ...identity }, other] }, { force: true });
+    expect(useSourceControlAuthStore.getState().identities).toEqual([identity, other]);
   });
 
   test('successful empty inventory replaces stale credentials', async () => {

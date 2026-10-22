@@ -24,6 +24,8 @@ export const createVSCodeSourceControlAPI = (): SourceControlAPI => ({
   repositoryBinding: readSystemRepositoryBinding,
   resetRepositoryBinding: (intent) => readSystemRepositoryBinding(intent.directory),
   repositoryProviderBindingMutate: unsupported,
+  // No provider is served here: an authoritative empty list, not a failure.
+  providers: async () => [],
   // The known identity lets shared auth consumers settle on an explicit checked state.
   authInstances: async () => [GITHUB_IDENTITY],
   capabilities: async (identity: SourceControlIdentity): Promise<SourceControlCapabilities> => ({
@@ -81,7 +83,7 @@ export const createVSCodeSourceControlAPI = (): SourceControlAPI => ({
   issueComments: unsupported,
   projectUpstream: unsupported,
   projectBranches: unsupported,
-  githubReferences: unsupported,
-  githubReferenceDetail: unsupported,
-  githubPullStatuses: unsupported,
+  references: unsupported,
+  referenceDetail: unsupported,
+  changeRequestListStatuses: unsupported,
 });
