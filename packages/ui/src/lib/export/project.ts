@@ -104,6 +104,8 @@ export type ProjectedEntry =
       state: string;
       description?: string;
       output: string;
+      /** Whether the result was cut down for the readable view. */
+      outputTruncated: boolean;
       depth: number;
       timestamp?: number;
     }
@@ -195,6 +197,9 @@ export type ProjectionMode = 'readable' | 'detailed';
 
 /** How much of a tool result the readable view keeps. */
 const MAX_READABLE_OUTPUT = 600;
+
+/** How much of a subagent's result the readable view keeps. */
+const MAX_READABLE_SUBAGENT_RESULT = 800;
 
 /** A tool result and whether it was cut down. */
 type TrimmedOutput = {
@@ -330,17 +335,25 @@ const projectEvent = (event: ExportEvent, mode: ProjectionMode): ProjectedEntry 
         depth: event.depth,
         timestamp: event.timestamp,
       };
-    case 'subagent-result':
+    case 'subagent-result': {
+      // The readable view's own cut of the subagent's result, the way it
+      // cuts a tool result: the cut is the export's own, so it has to stay
+      // marked where the reader sees the result. The detailed view carries
+      // the result as the history recorded it, so it has nothing to mark.
+      const trimmed = event.output.trim();
+      const truncated = mode === 'readable' && trimmed.length > MAX_READABLE_SUBAGENT_RESULT;
       return {
         kind: 'subagent-result',
         event,
         childSessionID: event.childSessionID,
         state: event.state,
         description: event.description,
-        output: event.output,
+        output: truncated ? trimmed.slice(0, MAX_READABLE_SUBAGENT_RESULT) : event.output,
+        outputTruncated: truncated,
         depth: event.depth,
         timestamp: event.timestamp,
       };
+    }
     case 'gap':
       return {
         kind: 'gap',

@@ -584,6 +584,58 @@ describe('export pipeline', () => {
     expect(html).not.toContain('JSON export');
   });
 
+  test('the readable view marks its cut of a long sub-agent result', () => {
+    // A sub-agent's result is cut the way a tool result is cut, and the mark
+    // says where the whole result is: the export of this session with full
+    // details. The detailed view carries the result as it is, so it has
+    // nothing to point at.
+    const long = 'x'.repeat(2000);
+    const input = fixture({
+      root: session('ses_root', { title: 'Root' }),
+      sessions: [
+        session('ses_root', { title: 'Root' }),
+        session('ses_child', { title: 'Child', parentID: 'ses_root', agent: 'reviewer' }),
+      ],
+      records: {
+        ses_root: [
+          {
+            info: {
+              id: 'a1', sessionID: 'ses_root', role: 'assistant', agent: 'build',
+              providerID: 'anthropic', modelID: 'claude-opus-4-1', time: { created: 2000 },
+            },
+            parts: [subagentCall('a1', { childSessionID: 'ses_child' })],
+          },
+          subagentReport('ses_root', 'r1', 9000, { childSessionID: 'ses_child', output: long }),
+        ],
+        ses_child: [assistantMessage('ses_child', 'ca1', 8500, 'Background work')],
+      },
+    });
+
+    const readable = markdown(input, 'readable');
+    const detailed = markdown(input, 'detailed');
+    const { projection, timeline } = build(input, 'readable');
+    const html = renderExportHtml(projection, {
+      title: 'Root',
+      mode: 'readable',
+      findings: timeline.findings,
+      sessionCount: timeline.sessions.size,
+    });
+
+    // The cut is the same in both formats, and both mark it the way an
+    // ordinary tool result is marked.
+    expect(readable).toContain('x'.repeat(800));
+    expect(readable).not.toContain(long);
+    expect(readable).toContain('excerpt');
+    expect(readable).toContain('the rest of this result is in the export of this session with full details');
+    expect(html).toContain('x'.repeat(800));
+    expect(html).not.toContain(long);
+    expect(html).toContain('The full result is in the export of this session with full details.');
+
+    // The full details carry the whole result and no mark.
+    expect(detailed).toContain(long);
+    expect(detailed).not.toContain('the rest of this result is in the export of this session with full details');
+  });
+
   test('the call that started a sub-agent says when the runtime cut its result short', () => {
     // The same fact an ordinary tool call carries, on the call that started
     // the sub-agent.

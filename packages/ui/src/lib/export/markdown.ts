@@ -256,8 +256,12 @@ const renderEntry = (
         ? `**${exportText('export.section.subagentResult')}**`
         : `**${exportText('export.section.subagentState', { state: entry.state })}**`;
       const output = entry.output.trim();
-      const body = mode === 'readable' && output.length > 800
-        ? `${output.slice(0, 800)}\n\n… [${exportText('export.excerpt')}]`
+      // The readable view's own cut of the result. The note says where the
+      // whole result is: the export of this session with full details, which
+      // carries the recorded result as it is. The same note an ordinary tool
+      // result carries, so a reader is told the same thing either way.
+      const body = entry.outputTruncated
+        ? `${output}\n\n… [${exportText('export.excerpt')} — ${exportText('export.restInFullDetails')}]`
         : output;
       return [label, body].filter(Boolean).join('\n\n');
     }

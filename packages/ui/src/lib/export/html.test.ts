@@ -15,7 +15,7 @@ import type { Session } from '@/lib/opencode/model';
 import { useI18nStore } from '@/lib/i18n';
 import { buildExportFromRecords } from './pipeline';
 import { renderExportHtml } from './html';
-import { assistantMessage, subagentCall, type Record_ } from './fixtures';
+import { assistantMessage, subagentCall, subagentReport, type Record_ } from './fixtures';
 
 const session = (id: string, overrides: Partial<Session> = {}): Session => ({
   id,
@@ -312,5 +312,68 @@ describe('the HTML page searches what it shows', () => {
     const tool = dom.document.querySelector('.entry.tool');
     expect(tool).toBeTruthy();
     expect(isOnPage(tool)).toBe(true);
+  });
+});
+
+/**
+ * A sub-agent's result long enough for the readable view to cut it.
+ *
+ * The head of the result is what the page shows, the tail is what the cut
+ * took away.
+ */
+const RESULT_HEAD = 'resultheadmarker';
+const RESULT_TAIL = 'resulttailmarker';
+const longResult = `${RESULT_HEAD} ${'b'.repeat(900)} ${RESULT_TAIL}`;
+
+/** The page with a long sub-agent result in it. */
+const longResultPage = (): string => {
+  const result = buildExportFromRecords({
+    root: session('ses_root', { title: 'Root' }),
+    sessions: [session('ses_root', { title: 'Root' })],
+    records: new Map([
+      ['ses_root', [
+        subagentReport('ses_root', 'r1', 2100, { childSessionID: 'ses_child', output: longResult }),
+      ]],
+    ]),
+  }, 'readable');
+
+  return renderExportHtml(result.projection, {
+    title: 'Root',
+    mode: 'readable',
+    findings: result.timeline.findings,
+    sessionCount: result.timeline.sessions.size,
+  });
+};
+
+/** The page with a long sub-agent result in it, with its own script running. */
+const openLongResultPage = (): Window => {
+  const html = longResultPage();
+  const dom = new Window({ url: 'https://localhost/' });
+  dom.document.write(html);
+  const script = html.match(/<script>([\s\S]*?)<\/script>/);
+  if (!script) throw new Error('The export wrote no page script');
+  new Function('document', script[1])(dom.document);
+  return dom;
+};
+
+describe('the HTML page searches what it shows of a sub-agent result', () => {
+  test('a word the page shows of a sub-agent result is found', () => {
+    const dom = openLongResultPage();
+
+    search(dom, RESULT_HEAD);
+
+    const result = dom.document.querySelector('.entry.result');
+    expect(result).toBeTruthy();
+    expect(isOnPage(result)).toBe(true);
+  });
+
+  test('a word the readable view cut away of a sub-agent result is not found', () => {
+    const dom = openLongResultPage();
+
+    // The tail of the sub-agent's result is not on the page: the readable
+    // view cut it. A search must not find a word the reader cannot read.
+    search(dom, RESULT_TAIL);
+
+    expect(visibleEntries(dom)).toHaveLength(0);
   });
 });

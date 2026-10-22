@@ -454,9 +454,17 @@ const renderEntryHtml = (
       const label = entry.state === 'completed'
         ? exportText('export.section.subagentResult')
         : exportText('export.section.subagentState', { state: entry.state });
+      // The readable view's own cut of the result is marked here, and the
+      // mark says where the whole result is: the export of this session with
+      // full details. The detailed view cuts nothing, so it has nothing to
+      // mark. It is the same note an ordinary tool result carries.
+      const note = entry.outputTruncated
+        ? `<p class="note">${escapeHtml(exportText('export.html.shownInPart'))}</p>`
+        : '';
       return `<article class="entry result" data-id="${escapeHtml(entry.event.id)}" data-kind="subagent-result" data-role="subagent-result" data-agent="">
   <header><span class="role">${escapeHtml(label)}</span><span class="meta"><span>${escapeHtml(entry.description ?? '')}</span></span></header>
   <div class="body">${escapeHtml(entry.output)}</div>
+  ${note}
 </article>`;
     }
     case 'gap': {
