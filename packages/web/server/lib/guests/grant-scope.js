@@ -1,4 +1,4 @@
-import { resolveIntegrationApi } from '@openchamber/sdk';
+import { resolveIntegrationApi, serviceProvides } from '@openchamber/sdk';
 
 // What a grant covered when the user approved it. `filesystem` is the
 // declared pattern list, `origins` the origins the frame may reach, `network` the API origin, `service` the exec names
@@ -9,8 +9,8 @@ import { resolveIntegrationApi } from '@openchamber/sdk';
 const sortedUnique = (values) => [...new Set(values)].sort();
 
 /**
- * @param {{ filesystem?: string[], integration?: object, service?: { permissions?: { exec?: string[], sockets?: Array<{ id: string }> } } }} guest
- * @returns {{ filesystem?: string[], apiOrigin?: string, service?: { exec: string[], sockets: string[] } }}
+ * @param {{ filesystem?: string[], integration?: object, service?: { provides?: string[], permissions?: { exec?: string[], sockets?: Array<{ id: string }> } }, sourceControl?: { instances: { defaultInstances: string[], custom: boolean } } }} guest
+ * @returns {{ filesystem?: string[], apiOrigin?: string, service?: { exec: string[], sockets: string[], sourceControl?: { defaultInstances: string[], custom: boolean } } }}
  */
 export const guestGrantScope = (guest) => {
   const scope = {};
@@ -39,6 +39,15 @@ export const guestGrantScope = (guest) => {
       exec: sortedUnique(guest.service.permissions?.exec ?? []),
       sockets: sortedUnique((guest.service.permissions?.sockets ?? []).map((binding) => binding.id)),
     };
+    // A Git host role sends what the user writes to the instances it names,
+    // so the service grant covers those too; absent for every other service,
+    // which keeps their stored approvals as they are.
+    if (serviceProvides(guest.service, 'source-control') && guest.sourceControl) {
+      scope.service.sourceControl = {
+        defaultInstances: sortedUnique(guest.sourceControl.instances.defaultInstances),
+        custom: guest.sourceControl.instances.custom,
+      };
+    }
   }
   return scope;
 };
@@ -57,6 +66,11 @@ export const sameCredentialTarget = (stored, current) => (
 );
 
 const sameList = (a, b) => a.length === b.length && a.every((value, index) => value === b[index]);
+
+/** Both without the Git host role, or both with it reaching the same instances. */
+const sameSourceControl = (a, b) => (
+  (!a && !b) || Boolean(a && b && a.custom === b.custom && sameList(a.defaultInstances, b.defaultInstances))
+);
 
 /**
  * The grants that still hold for the package as it is now. A scoped
@@ -81,7 +95,8 @@ export const effectiveGrants = (granted, stored, current) => granted.filter((cap
   if (capability === 'service') {
     return Boolean(stored?.service)
       && sameList(stored.service.exec, current.service?.exec ?? [])
-      && sameList(stored.service.sockets, current.service?.sockets ?? []);
+      && sameList(stored.service.sockets, current.service?.sockets ?? [])
+      && sameSourceControl(stored.service.sourceControl, current.service?.sourceControl);
   }
   return true;
 });

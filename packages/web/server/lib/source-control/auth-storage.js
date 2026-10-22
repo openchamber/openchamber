@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { isPlainObject, isString } from '../shared/guards.js';
 import { withSourceControlFileLock } from './file-lock.js';
 import { normalizeOriginInstance } from './origin-instance.js';
-import { isProviderId } from './provider-id.js';
+import { isExtensionProviderId, isProviderId } from './provider-id.js';
 
 const AUTH_VERSION = 3;
 // Version 3 plus one origin-keyed section per further provider (Gitea and
@@ -527,10 +527,26 @@ export function createSourceControlAuthStore({ filePath, fsImpl = fs, lockWaitMs
     return sections.get(provider);
   };
 
+  /**
+   * Forgets an extension provider's whole section, every instance and
+   * credential, in one locked write: removing an extension removes its
+   * accounts. A built-in provider's section is never dropped this way. True
+   * when the file held the section.
+   */
+  const dropSection = (provider) => {
+    if (!isExtensionProviderId(provider)) return Promise.reject(new Error(`Source control auth section cannot be dropped: ${provider}`));
+    return mutate((state) => {
+      if (!Object.hasOwn(state.providers, provider)) return { changed: false, value: false };
+      delete state.providers[provider];
+      return { changed: true, value: true };
+    });
+  };
+
   return Object.freeze({
     // GitLab's section is the store's own surface, as it was before sections.
     ...section('gitlab'),
     section,
+    dropSection,
     // GitHub Enterprise lives in this same server token store, next to GitLab:
     // one entry per host, each with its own credentials, active account and gh
     // CLI switch. github.com's device-flow accounts stay in github-auth.json;

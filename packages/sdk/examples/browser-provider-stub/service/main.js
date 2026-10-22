@@ -157,6 +157,7 @@ var readBrowserProviderRequest = (body) => {
     return null;
   return { requestId, action, parameters, context: readContext(context) };
 };
+var SOURCE_CONTROL_PROVIDER_IDLE_MS = 10 * 60000;
 // packages/sdk/src/service-surface.ts
 var SURFACE_FRAME_PATH = "/surface/frame";
 var SURFACE_INPUT_PATH = "/surface/input";

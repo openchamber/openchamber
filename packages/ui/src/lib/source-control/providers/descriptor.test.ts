@@ -59,6 +59,25 @@ describe('source-control provider descriptors', () => {
     expect(parsed).toEqual([]);
   });
 
+  test('keeps the extension that serves a provider, and drops a malformed marker without dropping the provider', () => {
+    const extension = { guestId: 'acme-forge', name: 'Acme Forge', version: '1.2.0' };
+    const [served, malformed, builtIn] = sourceControlProviderListSchema.parse([
+      { ...acmeDescriptor({ id: 'ext-acme-forge', order: 1 }), extension },
+      { ...acmeDescriptor({ id: 'ext-other', order: 2 }), extension: { guestId: '', name: 'Other' } },
+      acmeDescriptor({ order: 3 }),
+    ]);
+    expect(served?.extension).toEqual(extension);
+    expect(malformed?.id).toBe('ext-other');
+    expect(malformed?.extension).toBeUndefined();
+    expect(builtIn?.extension).toBeUndefined();
+    expect(unknownProviderDescriptor('ext-gone').extension).toBeUndefined();
+  });
+
+  test('refuses an icon path that is not path data', () => {
+    const parsed = sourceControlProviderListSchema.parse([acmeDescriptor({ icon: { path: 'M0 0"/><script>' } })]);
+    expect(parsed).toEqual([]);
+  });
+
   test('round-trips its own output, so a stored list reads back unchanged', () => {
     const list = sourceControlProviderListSchema.parse([acmeDescriptor(), gitlabLikeDescriptor()]);
     expect(sourceControlProviderListSchema.parse(JSON.parse(JSON.stringify(list)))).toEqual(list);

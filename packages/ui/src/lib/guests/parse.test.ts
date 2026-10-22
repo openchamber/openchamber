@@ -227,6 +227,23 @@ describe('parseGuestCatalogJson', () => {
     expect(newer?.service).toEqual({ runtime: 'host', granted: true });
   });
 
+  test('keeps the Git host a source-control provider declares, and drops a malformed slice without the row', () => {
+    const slice = { label: 'Acme Forge', defaultInstances: ['https://forge.example.com'], custom: true };
+    const row = (sourceControl: typeof slice | { label: string; custom: string }) => ({
+      id: 'acme-forge', name: 'Acme Forge', icon: 'git-branch',
+      capabilities: { requested: ['service'], granted: [] },
+      service: { runtime: 'host', granted: false, provides: ['source-control'] },
+      sourceControl,
+    });
+    const [guest, malformed] = readGuests(JSON.stringify({
+      guests: [row(slice), { ...row({ label: '', custom: 'yes' }), id: 'other-forge' }],
+    })) ?? [];
+    expect(guest?.service?.provides).toEqual(['source-control']);
+    expect(guest?.sourceControl).toEqual(slice);
+    expect(malformed?.id).toBe('other-forge');
+    expect(malformed?.sourceControl).toBeUndefined();
+  });
+
   test('keeps declared tool presentations and drops a malformed list', () => {
     const tools = [
       { match: 'mcp.tasks.*', name: 'Tasks', icon: 'checkbox-circle', title: '{input.id}', output: 'table', columns: ['id', 'title'] },

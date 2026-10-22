@@ -168,7 +168,9 @@ export function registerSourceControlRoutes(app, dependencies = {}) {
     return [...new Set([...defaults, ...known])];
   };
   app.get('/api/source-control/providers', (_req, res) => {
-    res.json({ providers: providers.list().map((descriptor, order) => publicProviderDescriptor(descriptor, order)) });
+    // Built-ins in priority order, then extension providers sorted by id
+    // (the facade's order), each marked with the extension that serves it.
+    res.json({ providers: providers.list().map((descriptor, order) => publicProviderDescriptor(descriptor, order, descriptor.extension)) });
   });
   // A provider that fails to load or list is named in `unavailableProviders`
   // instead of failing the answer, so the others still list their instances.
@@ -263,6 +265,8 @@ export function registerSourceControlRoutes(app, dependencies = {}) {
       return sendBindingError(res, error);
     }
   });
+  // Extension providers' routers, after every literal route and before the catch-all.
+  app.use(shell.extensionDispatcher);
   // Nothing under the module's prefix reaches the OpenCode proxy: an unknown
   // provider or an unregistered path answers here.
   app.use('/api/source-control', (_req, res) => {
@@ -277,6 +281,25 @@ export function registerSourceControlRoutes(app, dependencies = {}) {
   return Object.freeze({
     ...bindingService,
     backfillConnectedIdentities,
+    /**
+     * Serves an extension's Git host (`extension-providers.js` decides when):
+     * the registry builds its implementation, the shell mounts its routes,
+     * and bindings left on its accounts' earlier credentials move over, as
+     * they do for built-ins at start.
+     */
+    registerExtensionProvider: ({ descriptor, guest }) => {
+      providers.registerExtension({ descriptor, guest });
+      shell.mountExtension(descriptor);
+      void (async () => {
+        const impl = await providers.implementation(descriptor.id);
+        for (const { account, credential } of (await impl?.auth.listConnectedAccounts()) ?? []) adoptConnectedAccount(account, credential);
+      })().catch((error) => console.warn('Failed to repair repository bindings of an extension provider:', redactSensitiveText(error?.message)));
+    },
+    /** Its routes 404 and bindings naming it answer as an unavailable provider; its accounts stay. */
+    unregisterExtensionProvider: (id) => {
+      shell.unmountExtension(id);
+      providers.unregisterExtension(id);
+    },
     // Change request reads for the comparison view, walkthroughs and tracked
     // items; the caller passes a read context it has already validated.
     readChangeRequestPatch: shell.readChangeRequestPatch,

@@ -88,3 +88,54 @@ describe('account events', () => {
     await expect(events.removed({ accountId: 'one' })).rejects.toMatchObject({ code: 'SOURCE_CONTROL_LOCK_BUSY' });
   });
 });
+
+describe('extension providers in the registry', () => {
+  const descriptor = Object.freeze({
+    ...gitlabDescriptor, id: 'ext-forge', label: 'Forge',
+    extension: { guestId: 'forge', name: 'Forge', version: '1.0.0', token: { header: 'authorization', scheme: 'token' } },
+  });
+  const guest = { id: 'forge', name: 'Forge', packageRoot: '/pkg', service: { entry: 'service/main.js' }, capabilityGrants: ['service'] };
+  const setup = () => {
+    const descriptors = createProviderDescriptors([githubDescriptor]);
+    const handles = { revokeGuest: vi.fn() };
+    const authStore = { section: vi.fn((id) => ({ id })) };
+    const providers = createSourceControlProviders({ descriptors, authStore, loaders: {}, extensionServices: { handles, persistPath: '/store.json' } });
+    return { providers, descriptors, handles, authStore };
+  };
+
+  it('lists a registered extension after the built-ins and builds it on first use with its own auth section', async () => {
+    const { providers, authStore } = setup();
+    providers.registerExtension({ descriptor, guest });
+    expect(providers.list().map(({ id }) => id)).toEqual(['github', 'ext-forge']);
+    expect(providers.has('ext-forge')).toBe(true);
+    const impl = await providers.implementation('ext-forge');
+    expect(impl.descriptor).toBe(descriptor);
+    expect(authStore.section).toHaveBeenCalledWith('ext-forge');
+    await expect(providers.implementation('ext-forge')).resolves.toBe(impl);
+  });
+
+  it('unregistering forgets the implementation and ends the guest handles', async () => {
+    const { providers, handles } = setup();
+    providers.registerExtension({ descriptor, guest });
+    await providers.implementation('ext-forge');
+    expect(providers.unregisterExtension('ext-forge')).toBe(true);
+    expect(handles.revokeGuest).toHaveBeenCalledWith('forge');
+    expect(providers.has('ext-forge')).toBe(false);
+    await expect(providers.implementation('ext-forge')).resolves.toBeNull();
+    expect(providers.unregisterExtension('ext-forge')).toBe(false);
+  });
+
+  it('unregistering disposes the built implementation, so a running call cannot store an account', async () => {
+    const { providers } = setup();
+    providers.registerExtension({ descriptor, guest });
+    const impl = await providers.implementation('ext-forge');
+    providers.unregisterExtension('ext-forge');
+    await vi.waitFor(() => expect(impl.auth.activate({ instance: 'https://forge.example', accountId: 'a' }))
+      .rejects.toMatchObject({ code: 'SOURCE_CONTROL_PROVIDER_UNAVAILABLE' }));
+  });
+
+  it('refuses an extension where the runtime offers no extension services', () => {
+    const providers = createSourceControlProviders({ descriptors: createProviderDescriptors([githubDescriptor]), loaders: {} });
+    expect(() => providers.registerExtension({ descriptor, guest })).toThrow('unavailable');
+  });
+});

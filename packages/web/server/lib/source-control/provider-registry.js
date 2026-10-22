@@ -45,6 +45,13 @@ export function createAccountEvents() {
  * adds `descriptor`, `authStore`, `readSettings`, `configRoot`, `fetch` and the
  * shared account `events`. Implementations take JSON in and give JSON out, so
  * nothing here depends on how a provider talks to its service.
+ *
+ * Extension providers (`ext-<guestId>`) join and leave at runtime:
+ * `registerExtension` attaches the descriptor to the facade (so every reader
+ * of it sees the provider) and builds the implementation on first use with
+ * `extensionServices` (`{ handles, persistPath, currentGuest, reconcile, proxy? }`,
+ * see `extension-provider.js`); `unregisterExtension` detaches it, disposes
+ * and drops the implementation and revokes the guest's outbound handles.
  */
 export function createSourceControlProviders({
   authStore,
@@ -54,11 +61,29 @@ export function createSourceControlProviders({
   hostServices = {},
   descriptors = sourceControlProviderDescriptors,
   loaders = BUILT_IN_LOADERS,
+  extensionServices = null,
 } = {}) {
   const events = createAccountEvents();
   const implementations = new Map();
+  /** @type {Map<string, { descriptor: object, guest: object, loading: Promise<object> | null }>} */
+  const extensions = new Map();
+
+  const extensionImplementation = (entry) => {
+    entry.loading ??= import('./extension-provider.js').then((module) => module.createExtensionProvider({
+      ...extensionServices,
+      descriptor: entry.descriptor,
+      guest: entry.guest,
+      store: authStore.section(entry.descriptor.id),
+      events,
+    }));
+    // A failed build is not cached: the next request tries again.
+    entry.loading.catch(() => { entry.loading = null; });
+    return entry.loading;
+  };
 
   const implementation = (id) => {
+    const extension = extensions.get(id);
+    if (extension) return extensionImplementation(extension);
     const descriptor = descriptors.get(id);
     const load = descriptor ? loaders[id] : null;
     if (!(load instanceof Function)) return Promise.resolve(null);
@@ -81,9 +106,35 @@ export function createSourceControlProviders({
     return implementations.get(id);
   };
 
+  /** Serves `descriptor` (an `ext-` id) through `guest`'s service, replacing an earlier registration. */
+  const registerExtension = ({ descriptor, guest }) => {
+    if (!extensionServices) throw new Error('Extension source-control providers are unavailable in this runtime');
+    const previous = extensions.get(descriptor.id);
+    descriptors.attachExtension(descriptor);
+    extensions.set(descriptor.id, { descriptor, guest, loading: null });
+    if (previous) extensionServices.handles.revokeGuest(previous.guest.id);
+  };
+
+  /**
+   * True when the id named a registered extension provider. The built
+   * implementation is disposed, so a call still running cannot write an
+   * account back after removal dropped the provider's section.
+   */
+  const unregisterExtension = (id) => {
+    const entry = extensions.get(id);
+    if (!entry) return false;
+    extensions.delete(id);
+    descriptors.detachExtension(id);
+    extensionServices.handles.revokeGuest(entry.guest.id);
+    entry.loading?.then((impl) => impl.dispose(), () => undefined);
+    return true;
+  };
+
   return Object.freeze({
     descriptors,
     events,
+    registerExtension,
+    unregisterExtension,
     has: (id) => descriptors.has(id),
     list: () => descriptors.list(),
     describe: (id) => descriptors.get(id),

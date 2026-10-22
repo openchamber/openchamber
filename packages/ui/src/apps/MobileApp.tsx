@@ -31,6 +31,7 @@ import { useUpdatePolling } from '@/hooks/useUpdatePolling';
 import { useWindowTitle } from '@/hooks/useWindowTitle';
 import { useEnterprisePolicySync } from '@/hooks/useEnterprisePolicySync';
 import { useRoutingSync } from '@/hooks/useRoutingSync';
+import { useSourceControlProviderSync } from '@/hooks/useSourceControlProviderSync';
 import { useAgentMemorySync } from '@/hooks/useAgentMemorySync';
 import { resolvePlanRequestOwner } from '@/hooks/useProjectContextOwner';
 import { opencodeClient } from '@/lib/opencode/client';
@@ -1349,6 +1350,7 @@ function MobileAppContent({ apis }: MobileAppProps) {
   useWindowTitle();
   useRoutingSync();
   useEnterprisePolicySync();
+  useSourceControlProviderSync(apis.sourceControl);
   // Same as App.tsx: the session's memory index and the Memory tab both read
   // this snapshot, and without it the phone showed no memory at all.
   useAgentMemorySync(currentDirectory || null);

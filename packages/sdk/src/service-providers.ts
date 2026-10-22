@@ -260,3 +260,393 @@ export const readBrowserProviderRequest = (body: string): BrowserProviderRequest
   // and the host validated the parameters for this action before posting.
   return { requestId, action, parameters, context: readContext(context) } as BrowserProviderRequest;
 };
+
+/*
+ * Source control: a service with `provides: ["source-control"]` is the Git
+ * host `contributes.sourceControl` describes. OpenChamber keeps the user's
+ * accounts and tokens, the bindings, the idempotent mutation records and the
+ * caches; it forwards the resource reads and the three mutation steps to the
+ * service at `SOURCE_CONTROL_PROVIDER_PATH`. The service never sees a token: it
+ * reaches the forge through OpenChamber's outbound proxy
+ * (`createSourceControlForge`), which pins the instance origin and adds the
+ * stored token itself.
+ */
+
+/** Route on the service loopback OpenChamber posts every source-control call to. */
+export const SOURCE_CONTROL_PROVIDER_PATH = '/source-control';
+/** The `v` of every request; a service answers a version it does not know with HTTP 400. */
+export const SOURCE_CONTROL_PROVIDER_WIRE_VERSION = 1;
+
+/**
+ * Every call OpenChamber forwards. `auth.verify` reads who a candidate token
+ * belongs to and `auth.probe` whether the instance is this forge; the fifteen
+ * reads take the shell's own input without the session; the three
+ * `mutation.*` steps are the part of a write the service owns, while
+ * OpenChamber owns the kind, the normalized input, its digest, the
+ * idempotency record and when each step runs.
+ */
+export const SOURCE_CONTROL_PROVIDER_METHODS = [
+  'auth.verify',
+  'auth.probe',
+  'changeRequestStatus',
+  'listChangeRequests',
+  'changeRequestContext',
+  'listIssues',
+  'getIssue',
+  'issueComments',
+  'projectUpstream',
+  'projectBranches',
+  'listLabels',
+  'listReviewerCandidates',
+  'readChangeRequestPatch',
+  'readChangeRequestFile',
+  'liveSummaries',
+  'readChangeRequestHead',
+  'resolveChangeRequestSource',
+  'mutation.resolveTarget',
+  'mutation.perform',
+  'mutation.reconcile',
+] as const;
+export type SourceControlProviderMethod = (typeof SOURCE_CONTROL_PROVIDER_METHODS)[number];
+export type SourceControlMutationMethod = Extract<SourceControlProviderMethod, `mutation.${string}`>;
+export type SourceControlResourceMethod = Exclude<SourceControlProviderMethod, `auth.${string}` | SourceControlMutationMethod>;
+
+/** `changeRequestStatus` answers within the badge's own deadline; past it the last known status shows. */
+export const SOURCE_CONTROL_PROVIDER_STATUS_TIMEOUT_MS = 12_000;
+export const SOURCE_CONTROL_PROVIDER_READ_TIMEOUT_MS = 20_000;
+export const SOURCE_CONTROL_PROVIDER_MUTATION_TIMEOUT_MS = 30_000;
+export const SOURCE_CONTROL_PROVIDER_AUTH_TIMEOUT_MS = 15_000;
+/** Answers are read up to this many bytes, enough for a change request's patch or one file. */
+export const SOURCE_CONTROL_PROVIDER_RESPONSE_MAX = 8_000_000;
+/** Characters of `error.message` OpenChamber reads. */
+export const SOURCE_CONTROL_PROVIDER_ERROR_MESSAGE_MAX = 2_000;
+/** No call for this long stops the service; the next call starts it again. */
+export const SOURCE_CONTROL_PROVIDER_IDLE_MS = 10 * 60_000;
+/** Characters of a mutation's `providerTarget` JSON, which OpenChamber stores with the record. */
+export const SOURCE_CONTROL_PROVIDER_TARGET_MAX = 4_096;
+
+/** How long OpenChamber waits for the service to answer `method`. */
+export const sourceControlProviderTimeoutMs = (method: SourceControlProviderMethod): number => {
+  if (method === 'changeRequestStatus') return SOURCE_CONTROL_PROVIDER_STATUS_TIMEOUT_MS;
+  if (method === 'auth.verify' || method === 'auth.probe') return SOURCE_CONTROL_PROVIDER_AUTH_TIMEOUT_MS;
+  if (method.startsWith('mutation.')) return SOURCE_CONTROL_PROVIDER_MUTATION_TIMEOUT_MS;
+  return SOURCE_CONTROL_PROVIDER_READ_TIMEOUT_MS;
+};
+
+/**
+ * Environment variable with the base URL of OpenChamber's callback listener
+ * (`http://127.0.0.1:<port>`). Set only for a service that provides
+ * `source-control`; `createSourceControlForge` reads it.
+ */
+export const OPENCHAMBER_HOST_CALLBACK_URL = 'OPENCHAMBER_HOST_CALLBACK_URL';
+/** Route on the callback listener a service sends a forge request to. */
+export const SOURCE_CONTROL_OUTBOUND_PATH = '/source-control/outbound';
+export const SOURCE_CONTROL_OUTBOUND_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const;
+export type SourceControlOutboundMethod = (typeof SOURCE_CONTROL_OUTBOUND_METHODS)[number];
+/** Request headers OpenChamber passes to the forge; it sets every other header itself. */
+export const SOURCE_CONTROL_OUTBOUND_REQUEST_HEADERS = ['accept', 'content-type', 'if-none-match', 'range'] as const;
+/** Response headers OpenChamber hands back, plus any starting with `SOURCE_CONTROL_OUTBOUND_RESPONSE_HEADER_PREFIX`. */
+export const SOURCE_CONTROL_OUTBOUND_RESPONSE_HEADERS = ['content-type', 'link', 'etag', 'x-total-count', 'x-total', 'retry-after'] as const;
+export const SOURCE_CONTROL_OUTBOUND_RESPONSE_HEADER_PREFIX = 'x-ratelimit-';
+/** Characters of an outbound request body. */
+export const SOURCE_CONTROL_OUTBOUND_BODY_MAX = 1_000_000;
+/** Bytes of a forge answer OpenChamber reads; a longer one is refused whole. */
+export const SOURCE_CONTROL_OUTBOUND_RESPONSE_MAX = 8_000_000;
+/** One forge request may take this long; the call's own deadline may end it sooner. */
+export const SOURCE_CONTROL_OUTBOUND_TIMEOUT_MS = 20_000;
+
+export type SourceControlJson = null | boolean | number | string | SourceControlJson[] | { [key: string]: SourceControlJson };
+export type SourceControlJsonObject = { [key: string]: SourceControlJson };
+
+/** The forge account a call acts as; `null` in `auth.verify` and `auth.probe`, before one is known. */
+export type SourceControlProviderUser = { id: number; login: string };
+
+/**
+ * Who a call is for. `instance` is the normalized origin (`https://git.example.com`).
+ * `handle` is the capability for this one call: pass it to
+ * `createSourceControlForge(...).request`. It stops working when the call
+ * ends; never store it.
+ */
+export type SourceControlProviderSession = {
+  instance: string;
+  handle: string;
+  user: SourceControlProviderUser | null;
+};
+
+/**
+ * One call, as OpenChamber posts it. `provider` is the id OpenChamber gave this
+ * Git host (`ext-<panel.id>`): put it in every DTO's `provider` field.
+ * `input` was built and validated by OpenChamber; its shape per method is
+ * `SourceControlProviderInputs`.
+ */
+export type SourceControlProviderRequest = {
+  v: typeof SOURCE_CONTROL_PROVIDER_WIRE_VERSION;
+  requestId: string;
+  method: SourceControlProviderMethod;
+  provider: string;
+  session: SourceControlProviderSession | null;
+  input: SourceControlJsonObject;
+};
+
+export type SourceControlProjectSelector = { owner: string; name: string };
+export type SourceControlProjectRef = { id: string; owner: string; name: string };
+
+/** The bound context OpenChamber validated: binding, account and the remote it reads through. */
+type ReadInput = { context: SourceControlJsonObject; directory: string; remote: string };
+type ListInput = ReadInput & { page: number; query?: string; state: string; people: string };
+
+/**
+ * The durable target of a mutation, exactly the keys OpenChamber stores:
+ * the binding it was made under and what it acts on.
+ */
+export type SourceControlMutationTarget = {
+  repositoryId: string;
+  bindingRevision: number;
+  primaryRemote: string;
+  project: SourceControlProjectRef;
+  number?: number;
+  head?: string;
+  base?: string;
+  headSha?: string;
+};
+
+/** `providerTarget` is the service's own coordinates for the write (≤ `SOURCE_CONTROL_PROVIDER_TARGET_MAX` bytes of JSON). */
+export type SourceControlMutationResolution = { providerTarget: SourceControlJsonObject; target: SourceControlMutationTarget };
+
+type MutationStepInput = {
+  route: string;
+  kind: string;
+  input: SourceControlJsonObject;
+  resolved: SourceControlMutationResolution;
+};
+
+/** What each method's `input` holds. */
+export type SourceControlProviderInputs = {
+  'auth.verify': Record<string, never>;
+  'auth.probe': Record<string, never>;
+  changeRequestStatus: ReadInput & { branch: string; force: boolean };
+  listChangeRequests: ListInput;
+  changeRequestContext: ReadInput & {
+    number: number; project?: SourceControlProjectSelector; includeDiff: boolean; includeCIDetails: boolean; includeTimeline: boolean;
+  };
+  listIssues: ListInput;
+  getIssue: ReadInput & { number: number; project?: SourceControlProjectSelector };
+  issueComments: ReadInput & { number: number; project?: SourceControlProjectSelector };
+  projectUpstream: ReadInput;
+  projectBranches: ReadInput & { project: SourceControlProjectSelector };
+  listLabels: ReadInput & { project: SourceControlProjectSelector };
+  listReviewerCandidates: ReadInput & { project: SourceControlProjectSelector };
+  readChangeRequestPatch: ReadInput & { number: number; sourceRepo?: { owner: string; repo: string } };
+  readChangeRequestFile: ReadInput & {
+    number: number; sourceRepo?: { owner: string; repo: string }; path: string; previousPath?: string; status?: string;
+  };
+  liveSummaries: {
+    refs: Array<{ owner: string; repo: string; number: number }>;
+    issueRefs: Array<{ owner: string; repo: string; number: number }>;
+  };
+  readChangeRequestHead: ReadInput & { number: number };
+  resolveChangeRequestSource: ReadInput & { project: SourceControlProjectRef; number: number; expectedHeadSha: string };
+  'mutation.resolveTarget': { context: SourceControlJsonObject; kind: string; input: SourceControlJsonObject; replayOf?: SourceControlJsonObject };
+  'mutation.perform': MutationStepInput;
+  'mutation.reconcile': MutationStepInput;
+};
+
+export type SourceControlForgeUser = { id: number; login: string; name?: string; email?: string; avatarUrl?: string };
+export type SourceControlVerifyData = { user: SourceControlForgeUser };
+export type SourceControlProbeData = { supported: boolean; version?: string; message?: string };
+export type SourceControlChangeRequestHead = { project: SourceControlProjectRef; headSha: string; headBranch: string; headOwner: string };
+/** OpenChamber adds the context and the requested remote name; the service names where the head lives. */
+export type SourceControlChangeRequestSource = {
+  sourceProject: SourceControlProjectRef;
+  targetProject: SourceControlProjectRef;
+  classification: 'same-repository' | 'contributor-fork';
+  headSha: string;
+  headRef: string;
+  /** The head repository's HTTPS clone URL on the instance. */
+  endpoint: string;
+};
+/** Only these keys are stored with a finished mutation. */
+export type SourceControlMutationResult = {
+  project?: SourceControlProjectRef;
+  number?: number;
+  head?: string;
+  base?: string;
+  headSha?: string;
+  state?: string;
+  merged?: boolean;
+  outcome?: 'queued' | 'merging';
+  stacked?: boolean;
+  ready?: boolean;
+  commented?: boolean;
+  failureStatus?: number;
+  failureCode?: string;
+};
+export type SourceControlReconcileData = {
+  state: 'succeeded' | 'failed' | 'outcome-unknown';
+  result?: SourceControlMutationResult;
+};
+
+/**
+ * An answer. `error.status` is the HTTP status OpenChamber should treat the
+ * failure as (a 4xx the forge gave, say); a 401 only counts when OpenChamber's
+ * proxy saw the forge answer 401 itself. `error.code` is `[A-Z_]{1,64}`.
+ */
+export type SourceControlProviderError = { message: string; status?: number; code?: string };
+export type SourceControlProviderResult =
+  | { ok: true; data: SourceControlJson }
+  | { ok: false; error: SourceControlProviderError };
+
+export const isSourceControlProviderMethod = (value: string): value is SourceControlProviderMethod => (
+  SOURCE_CONTROL_PROVIDER_METHODS.some((method) => method === value)
+);
+
+type WireSourceControlUser = { id?: unknown; login?: unknown };
+type WireSourceControlSession = { instance?: unknown; handle?: unknown; user?: WireSourceControlUser | null };
+type WireSourceControlRequest = {
+  v?: unknown; requestId?: unknown; method?: unknown; provider?: unknown; session?: WireSourceControlSession | null; input?: unknown;
+};
+
+/** `undefined` is a user that is neither `null` nor `{ id, login }`. */
+const readSessionUser = (user: WireSourceControlUser | null | undefined): SourceControlProviderUser | null | undefined => {
+  if (user === null) return null;
+  if (Object(user) !== user || user === undefined) return undefined;
+  const { id, login } = user;
+  if (!Number.isSafeInteger(id) || String(login) !== login || login.length === 0) return undefined;
+  return { id: Number(id), login };
+};
+
+/** `undefined` is a session that is neither `null` nor `{ instance, handle, user }`. */
+const readSession = (session: WireSourceControlSession | null | undefined): SourceControlProviderSession | null | undefined => {
+  if (session === null) return null;
+  if (Object(session) !== session || session === undefined) return undefined;
+  const { instance, handle } = session;
+  if (String(instance) !== instance || instance.length === 0 || String(handle) !== handle || handle.length === 0) return undefined;
+  const user = readSessionUser(session.user);
+  if (user === undefined) return undefined;
+  return { instance, handle, user };
+};
+
+/**
+ * A service's read of the body OpenChamber posted to
+ * `SOURCE_CONTROL_PROVIDER_PATH`. OpenChamber built and validated `input`, so
+ * this checks the envelope, not every field, and the service bundle needs no
+ * schema library. `null` is a body that is not a source-control call of this
+ * wire version; answer it with HTTP 400.
+ */
+export const readSourceControlProviderRequest = (body: string): SourceControlProviderRequest | null => {
+  let wire: WireSourceControlRequest;
+  try {
+    const parsed: WireSourceControlRequest | null = JSON.parse(body);
+    if (Object(parsed) !== parsed || parsed === null) return null;
+    wire = parsed;
+  } catch {
+    return null;
+  }
+  const { v, requestId, method, provider, input } = wire;
+  if (v !== SOURCE_CONTROL_PROVIDER_WIRE_VERSION) return null;
+  if (String(requestId) !== requestId || requestId.length === 0) return null;
+  if (String(provider) !== provider || provider.length === 0) return null;
+  if (String(method) !== method || !isSourceControlProviderMethod(method)) return null;
+  if (Object(input) !== input || Array.isArray(input)) return null;
+  const session = readSession(wire.session);
+  if (session === undefined) return null;
+  // SAFETY: `input` is a plain object parsed from JSON, so every value in it is JSON.
+  return { v: SOURCE_CONTROL_PROVIDER_WIRE_VERSION, requestId, method, provider, session, input: input as SourceControlJsonObject };
+};
+
+/** A request to the forge, relative to the call's instance origin. */
+export type SourceControlOutboundRequest = {
+  method: SourceControlOutboundMethod;
+  /** Starts with `/`; stays on the instance origin. */
+  path: string;
+  query?: Record<string, string>;
+  /** Only `SOURCE_CONTROL_OUTBOUND_REQUEST_HEADERS`; OpenChamber adds the token itself. */
+  headers?: Record<string, string>;
+  /** At most `SOURCE_CONTROL_OUTBOUND_BODY_MAX` characters. */
+  body?: string;
+};
+
+/** The forge's answer as OpenChamber relayed it: any status, the allowed headers, the body as text. */
+export type SourceControlOutboundResponse = {
+  status: number;
+  headers: Record<string, string>;
+  body: string;
+};
+
+/**
+ * OpenChamber refused the request (an expired handle, a path off the
+ * instance, a body too large), could not reach the forge, or did not answer.
+ * `status` is the callback listener's HTTP status, `0` when it gave none;
+ * `code` is its error code (`HOST_UNAVAILABLE` when there was no usable answer).
+ */
+export class SourceControlForgeError extends Error {
+  readonly code: string;
+  readonly status: number;
+  constructor(message: string, code: string, status: number) {
+    super(message);
+    this.name = 'SourceControlForgeError';
+    this.code = code;
+    this.status = status;
+  }
+}
+
+export type SourceControlForge = {
+  /** Sends `request` to the forge of the call `handle` belongs to, with the stored token when the call has one. */
+  request(handle: string, request: SourceControlOutboundRequest): Promise<SourceControlOutboundResponse>;
+};
+
+type OutboundAnswer = {
+  status?: unknown; headers?: unknown; body?: unknown; error?: { message?: unknown; code?: unknown };
+};
+
+/**
+ * The service's way to the forge: OpenChamber's callback listener
+ * (`OPENCHAMBER_HOST_CALLBACK_URL`), which checks the handle, keeps the request
+ * on the instance origin and adds the token. Plain `fetch`, no dependencies.
+ * Throws `SourceControlForgeError` when OpenChamber refuses the request; a
+ * forge answer of any status, 401 included, resolves.
+ */
+export const createSourceControlForge = ({ env }: { env: Record<string, string | undefined> }): SourceControlForge => {
+  const base = env[OPENCHAMBER_HOST_CALLBACK_URL];
+  if (!base) throw new Error(`${OPENCHAMBER_HOST_CALLBACK_URL} is not set: only a service that provides "source-control" can reach a forge.`);
+  const url = `${base.replace(/\/+$/, '')}${SOURCE_CONTROL_OUTBOUND_PATH}`;
+  return {
+    async request(handle, request) {
+      let response: Response;
+      try {
+        response = await fetch(url, {
+          method: 'POST',
+          headers: { authorization: `Bearer ${handle}`, 'content-type': 'application/json' },
+          body: JSON.stringify(request),
+          // A little past OpenChamber's own deadline, so its answer wins.
+          signal: AbortSignal.timeout(SOURCE_CONTROL_OUTBOUND_TIMEOUT_MS + 5_000),
+        });
+      } catch (error) {
+        throw new SourceControlForgeError(`OpenChamber did not answer: ${error instanceof Error ? error.message : String(error)}`, 'HOST_UNAVAILABLE', 0);
+      }
+      let answer: OutboundAnswer;
+      try {
+        answer = Object(await response.json());
+      } catch {
+        throw new SourceControlForgeError('OpenChamber answered with something other than JSON', 'HOST_UNAVAILABLE', response.status);
+      }
+      if (!response.ok) {
+        const message = answer.error?.message;
+        const code = answer.error?.code;
+        throw new SourceControlForgeError(
+          String(message) === message && message.length > 0 ? message : `OpenChamber refused the request (${response.status})`,
+          String(code) === code && code.length > 0 ? code : 'OUTBOUND_REFUSED',
+          response.status,
+        );
+      }
+      if (!Number.isSafeInteger(answer.status) || String(answer.body) !== answer.body) {
+        throw new SourceControlForgeError('OpenChamber relayed a malformed forge answer', 'HOST_UNAVAILABLE', response.status);
+      }
+      const headers: SourceControlOutboundResponse['headers'] = {};
+      for (const [name, text] of Object.entries(Object(answer.headers ?? {}))) {
+        if (String(text) === text) headers[name] = text;
+      }
+      return { status: Number(answer.status), headers, body: answer.body };
+    },
+  };
+};

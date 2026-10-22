@@ -1,7 +1,7 @@
 import { linearTracker } from '../linear/tracker.js';
 import { isPlainObject } from '../shared/guards.js';
 import { sourceControlProviderDescriptors } from '../source-control/provider-descriptors.js';
-import { isProviderId, isReservedProviderId } from '../source-control/provider-id.js';
+import { EXTENSION_PROVIDER_PREFIX, isProviderId, isReservedProviderId } from '../source-control/provider-id.js';
 
 /** @typedef {import('./tracker-contract').TrackerEntry} TrackerEntry */
 /** @typedef {import('./tracker-contract').TrackerDescriptor} TrackerDescriptor */
@@ -31,8 +31,10 @@ const invalidEntry = (id, reason) => new Error(`Tracker registration is invalid 
  *
  * Tracker ids share one namespace with source-control provider ids (tracked
  * items and the read cache key on `provider`), so an id a source-control
- * provider owns is refused, as are the reserved ids and malformed ones. A
- * bad registration is a programming error and throws at construction.
+ * provider owns is refused, as are the reserved ids and malformed ones. So is
+ * any `ext-` id: extension source-control providers attach after this
+ * registry is built, so the prefix is refused rather than a snapshot of ids.
+ * A bad registration is a programming error and throws at construction.
  *
  * @param {TrackerEntry[]} [entries]
  * @param {{ foreignIds?: string[] }} [options] ids owned by the other registry.
@@ -47,7 +49,7 @@ export function createTrackerRegistry(
     const id = entry?.descriptor?.id;
     if (!isProviderId(id)) throw invalidEntry(id, 'malformed id');
     if (isReservedProviderId(id)) throw invalidEntry(id, 'reserved id');
-    if (foreignIds.includes(id)) throw invalidEntry(id, 'id belongs to a source-control provider');
+    if (foreignIds.includes(id) || id.startsWith(EXTENSION_PROVIDER_PREFIX)) throw invalidEntry(id, 'id belongs to a source-control provider');
     if (byId.has(id)) throw invalidEntry(id, 'duplicate id');
     if (!(entry.load instanceof Function)) throw invalidEntry(id, 'missing loader');
     byId.set(id, {

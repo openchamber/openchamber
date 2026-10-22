@@ -34,6 +34,11 @@ const deferred = <T,>() => {
   return { promise, resolve, reject };
 };
 
+/** Lets a read the registry started itself (a scheduled retry) settle; a refresh would add a follow-up read. */
+const settle = async () => {
+  for (let tick = 0; tick < 10; tick += 1) await Promise.resolve();
+};
+
 const ids = (list: readonly SourceControlProviderDescriptor[]) => list.map((descriptor) => descriptor.id);
 
 beforeEach(() => {
@@ -94,19 +99,42 @@ describe('source-control provider registry', () => {
     expect(registry.getState()).toMatchObject({ status: 'stale', ordered: [] });
   });
 
-  test('shares one request between concurrent refreshes', async () => {
+  test('answers refreshes made during a read with one more read after it', async () => {
     const registry = await loadRegistry();
     registry.getState().resetForRuntimeSwitch(connectTo('runtime-a'));
+    const answers = [deferred<SourceControlProviderDescriptor[]>(), deferred<SourceControlProviderDescriptor[]>()];
     let calls = 0;
-    const answer = deferred<SourceControlProviderDescriptor[]>();
-    const sourceControl = { providers: () => { calls += 1; return answer.promise; } };
+    const sourceControl = { providers: () => { calls += 1; return answers[calls - 1]?.promise ?? Promise.resolve([]); } };
     const first = registry.getState().refresh(sourceControl);
+    // The server announced a change after the first read went out: its answer may predate it.
     const second = registry.getState().refresh(sourceControl);
+    const third = registry.getState().refresh(sourceControl);
     expect(registry.getState().status).toBe('loading');
-    answer.resolve([acmeDescriptor()]);
-    await Promise.all([first, second]);
     expect(calls).toBe(1);
+    answers[0].resolve([githubLikeDescriptor()]);
+    await first;
+    await Promise.resolve();
+    expect(calls).toBe(2);
+    answers[1].resolve([githubLikeDescriptor(), acmeDescriptor()]);
+    await Promise.all([second, third]);
+    expect(calls).toBe(2);
     expect(registry.getState().status).toBe('ready');
+    expect(ids(registry.getState().ordered)).toEqual(['github', 'acme']);
+  });
+
+  test('a runtime switch cancels the follow-up read of the previous runtime', async () => {
+    const registry = await loadRegistry();
+    registry.getState().resetForRuntimeSwitch(connectTo('runtime-a'));
+    const late = deferred<SourceControlProviderDescriptor[]>();
+    let calls = 0;
+    const sourceControl = { providers: () => { calls += 1; return late.promise; } };
+    void registry.getState().refresh(sourceControl);
+    const followUp = registry.getState().refresh(sourceControl);
+    registry.getState().resetForRuntimeSwitch(connectTo('runtime-b'));
+    late.resolve([acmeDescriptor()]);
+    await followUp;
+    expect(calls).toBe(1);
+    expect(registry.getState()).toMatchObject({ status: 'idle', ordered: [] });
   });
 
   test('a runtime switch drops a late answer from the previous runtime', async () => {
@@ -178,7 +206,7 @@ describe('source-control provider registry', () => {
     jest.advanceTimersByTime(1_999);
     expect(calls).toBe(1);
     jest.advanceTimersByTime(1);
-    await registry.getState().refresh(sourceControl);
+    await settle();
     expect(calls).toBe(2);
     expect(registry.getState().status).toBe('error');
 
@@ -187,7 +215,7 @@ describe('source-control provider registry', () => {
     jest.advanceTimersByTime(3_999);
     expect(calls).toBe(2);
     jest.advanceTimersByTime(1);
-    await registry.getState().refresh(sourceControl);
+    await settle();
     expect(calls).toBe(3);
     expect(registry.getState()).toMatchObject({ status: 'ready', holdsList: true });
     expect(ids(registry.getState().ordered)).toEqual(['acme']);

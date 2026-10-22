@@ -7,9 +7,12 @@ import path from 'node:path';
 import {
   GUEST_REQUEST_RESPONSE_MAX,
   GUEST_REQUEST_TIMEOUT_MS,
+  OPENCHAMBER_HOST_CALLBACK_URL,
   isGuestRequestPath,
+  serviceProvides,
 } from '@openchamber/sdk';
 
+import { hostCallbackUrl } from './host-callback.js';
 import { readExtensionStore, updateExtensionStore } from './persist.js';
 import { readBoundedResponseText } from './response-body.js';
 import {
@@ -415,6 +418,7 @@ const startGuestService = async ({
   entry,
   socketBindings = [],
   socketOverrides = {},
+  hostCallback = false,
   epoch,
   lifecycle,
 }) => {
@@ -471,6 +475,11 @@ const startGuestService = async ({
   };
   if (Object.keys(socketEnv).length > 0) {
     env.OPENCHAMBER_SERVICE_SOCKETS = JSON.stringify(socketEnv);
+  }
+  // Only a service that stands in for a Git host may call OpenChamber back
+  // (`host-callback.js`); every other service never learns the listener.
+  if (hostCallback) {
+    env[OPENCHAMBER_HOST_CALLBACK_URL] = await hostCallbackUrl();
   }
   if (cancelled()) {
     throw stoppedError();
@@ -668,6 +677,7 @@ export const openGuestServiceRequest = async ({
       entry: service.entry,
       socketBindings,
       socketOverrides,
+      hostCallback: serviceProvides(service, 'source-control'),
       epoch,
       lifecycle,
     });

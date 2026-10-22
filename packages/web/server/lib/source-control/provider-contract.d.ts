@@ -4,7 +4,7 @@
  * server publishes to clients. Types only; the server modules are JavaScript.
  */
 
-/** `^[a-z][a-z0-9-]{0,31}$`, persisted verbatim; `github` and `gitlab` are never renamed. */
+/** `^[a-z][a-z0-9-]{0,31}$`, persisted verbatim; `github` and `gitlab` are never renamed; `ext-` names an extension's provider. */
 export type ProviderId = string;
 
 export type ChangeRequestTerm = 'pullRequest' | 'mergeRequest';
@@ -88,6 +88,17 @@ export interface ProviderDescriptor {
     retiredPost: string[];
     extraAuthAliases: Record<string, string>;
   };
+  /**
+   * Extension providers only (`ext-<guestId>`, `extension-descriptor.js`): the
+   * guest that serves it and how the outbound proxy sends its token.
+   * Server-only; clients see `PublicProviderDescriptor.extension`.
+   */
+  extension?: {
+    guestId: string;
+    name: string;
+    version: string;
+    token: { header: 'authorization' | 'private-token'; scheme: 'bearer' | 'token' | 'none' };
+  };
 }
 
 /** `GET /api/source-control/providers` → `{ providers: PublicProviderDescriptor[] }`. */
@@ -125,6 +136,8 @@ export interface PublicProviderDescriptor {
   settings: { fields: Array<{ id: string; kind: SettingsFieldKind; secret: boolean }> };
   urls: { changeRequest: string[]; issue: string[] };
   features: ProviderDescriptor['presentation']['features'];
+  /** Present when an installed extension serves the provider. */
+  extension?: { guestId: string; name: string; version: string };
 }
 
 export interface AccountIdentity { provider: ProviderId; instance: string; accountId: string }

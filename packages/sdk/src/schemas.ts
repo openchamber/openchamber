@@ -18,7 +18,12 @@ export {
   parseGuestMessage,
   parseHostMessage,
 } from './protocol.ts';
-export { browserControlActionSchema, browserProviderResultSchema } from './service-provider-schemas.ts';
+export {
+  browserControlActionSchema,
+  browserProviderResultSchema,
+  sourceControlProviderMethodSchema,
+  sourceControlProviderSchemasV1,
+} from './service-provider-schemas.ts';
 export {
   surfaceClipboardAnswerSchema,
   surfaceControllerSchema,
