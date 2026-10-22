@@ -20,6 +20,16 @@ Policies written before the modes stored booleans. The first read converts them 
 
 `permissionDefaultMode` (Settings → Sessions) is written onto each new top-level session when `session.created` arrives, and only when no policy exists for it yet: a mode the creating flow already set wins, and changing the default never reaches back into older sessions. Subagents inherit instead. `ask` writes nothing. Mode resolution waits for pending writes, so a session's first permission request sees its default. The server inside an isolated space has no such setting; it reads the default from a file the host keeps current instead (`readDefaultMode`), see "Default permission mode" in `../spaces/DOCUMENTATION.md`. The UI also writes the default for a session it creates in a space from a draft or for a `/btw` fork, which covers a space still running an older server; a mode chosen there wins as on the host.
 
+## Fork inheritance
+
+On `session.forked`, the runtime copies the source session's effective mode into the fork's own policy, including an implicit `ask`. The Settings default applies to ordinary new sessions. A fork keeps its copied mode when the source changes, and an explicit policy already set on the fork wins. Duplicate events do not replace that policy. Permission resolution waits for pending inheritance, including when the source is itself a new fork.
+
+Source lookup or persistence failure leaves the fork unconfigured and logs the failure; unknown policy remains `ask`. Failed writes preserve the previous policy and do not block later writes. Existing forks are not backfilled.
+
+### Why fork permissions are copied rather than linked
+
+The fork event's `parentID` identifies the source transcript, not subagent lineage. Copying the effective mode gives the fork an independent policy and covers forks made by any connected client without relying on a `session.created` event, which OpenCode does not emit for forks.
+
 ## Runtime
 
 `createPermissionAutoAcceptRuntime` loads and serializes policy writes, subscribes to the global OpenCode event hub, caches session lineage, retries transient replies, and reconciles pending permissions after startup, reconnect, and when a session moves to `safety` or `auto`. It keeps handling requests without a connected UI. Startup and reconnect ask the pending list of each running session's directory (`/api/session/active`, then each session's record), never a list without a directory: OpenCode 2 answers that one for its own working directory only and starts that location, MCP servers included.
@@ -50,6 +60,8 @@ These are normal authenticated OpenChamber runtime routes. They must not be adde
 `packages/ui/src/stores/permissionStore.ts` is a projection of server policy and does not persist an independent policy. A session in an isolated space has its mode in this module inside that space, which sees the space's OpenCode and answers there; the host's runtime sees the host's events only and never answers into a space. The host forwards the space's `updated` and `left-for-user` events to the browsers, see "Sessions and events" in `packages/web/server/lib/spaces/DOCUMENTATION.md`. The server is the sole responder and the UI renders pending requests until the authoritative `permission.replied` event arrives. The composer's shield button cycles ask → safety → auto, skipping `safety` while no classification provider can run it (a `safety` session then shows as `ask`).
 
 VS Code retains its foreground-only responder because it does not run the web server runtime. Its extension host persists and broadcasts an on/off policy across webviews, so VS Code has only `ask` and `auto` and no default mode. The active UI handles live events plus startup, reconnect, and enablement reconciliation. With all OpenChamber webviews closed or suspended, permissions are not auto-accepted; this is an intentional VS Code limitation.
+
+For forks initiated in the VS Code UI, the shared fork action refreshes the extension host's policy and saves the source mode onto the fork through the existing permission bridge. A fork policy already present is preserved. A failed read or write rejects the action while retaining the created fork; runtime changes stop subsequent inheritance work.
 
 ## Tests
 
