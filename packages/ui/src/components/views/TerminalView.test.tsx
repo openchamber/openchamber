@@ -33,8 +33,9 @@ const terminalRuntime = {
     return connectBehavior(sessionId, handlers);
   },
 };
-const runtimeApis = {
-  runtime: { platform: 'web' as const },
+type TerminalRuntimeFixture = { runtime: { platform: 'web' | 'vscode' }; terminal: typeof terminalRuntime };
+const runtimeApis: TerminalRuntimeFixture = {
+  runtime: { platform: 'web' },
   terminal: terminalRuntime,
 };
 const i18n = { t: (key: string) => key };
@@ -194,6 +195,7 @@ describe('TerminalView project action tab indicator', () => {
 
   beforeEach(() => {
     effectiveDirectory = '/repo';
+    runtimeApis.runtime.platform = 'web';
     openContextPreviewCalls.length = 0;
     createSessionCalls.length = 0;
     connectCalls.length = 0;
@@ -251,6 +253,13 @@ describe('TerminalView project action tab indicator', () => {
     sessionUiState.newSessionDraft = null;
     resetSpaceCreationRequests();
     useSpacesStore.getState().resetForRuntimeSwitch();
+  });
+
+  test('the embedded VS Code terminal omits tab actions', async () => {
+    runtimeApis.runtime.platform = 'vscode';
+    await act(async () => root.render(<TerminalView visible />));
+    expect(host.querySelector('[data-tabs-strip]')).toBeNull();
+    expect(host.querySelector('[title="terminalView.tabs.newTabTitle"]')).toBeNull();
   });
 
   test('a draft waiting for a new space opens no shell until the space runs, then opens it in the space', async () => {

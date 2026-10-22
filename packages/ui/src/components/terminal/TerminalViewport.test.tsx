@@ -19,6 +19,7 @@ type TerminalEvent =
   | { type: 'reset'; data: string; size?: { cols: number; rows: number } }
   | { type: 'visible'; visible: boolean }
   | { type: 'paste'; data: string }
+  | { type: 'font'; size?: number }
   | { type: 'dispose' };
 const terminalEvents: TerminalEvent[] = [];
 let selectedText = '';
@@ -35,7 +36,8 @@ class TerminalSurfaceDouble implements TerminalSurface {
     terminalEvents.push(event);
   }
   setTheme() {}
-  setFont() {
+  setFont(font: { size?: number }) {
+    terminalEvents.push({ type: 'font', size: font.size });
     return Promise.resolve();
   }
   setVisible(visible: boolean) {
@@ -123,7 +125,7 @@ const buildReplacedBufferChunks = (content: string): TerminalChunk[] => {
 
 const controller = createRef<TerminalController>();
 
-const renderViewport = (root: Root, chunks: TerminalChunk[], isVisible = true, sessionKey = 'session-1', enableTouchScroll = false) => act(async () => {
+const renderViewport = (root: Root, chunks: TerminalChunk[], isVisible = true, sessionKey = 'session-1', enableTouchScroll = false, fontSize = 14) => act(async () => {
   root.render(
     <I18nProvider>
       <TerminalViewport
@@ -135,7 +137,7 @@ const renderViewport = (root: Root, chunks: TerminalChunk[], isVisible = true, s
         theme={theme}
         monoFont="system-mono"
         fontFamily="Menlo"
-        fontSize={14}
+        fontSize={fontSize}
         isVisible={isVisible}
         enableTouchScroll={enableTouchScroll}
         createSurface={createSurface}
@@ -148,6 +150,21 @@ describe('TerminalViewport integration', () => {
   let windowInstance: Window;
   let host: HTMLDivElement;
   let root: Root;
+
+  test('font changes keep the mounted terminal and output through hide and reveal', async () => {
+    const chunks: TerminalChunk[] = [];
+    await renderViewport(root, chunks);
+    await flushSurfaceLoad();
+    const canvas = host.querySelector('canvas');
+    terminalEvents.length = 0;
+    await renderViewport(root, chunks, true, 'session-1', false, 20);
+    expect(terminalEvents.some(event => event.type === 'font' && event.size === 20)).toBe(true);
+    await renderViewport(root, chunks, false, 'session-1', false, 24);
+    await renderViewport(root, chunks, true, 'session-1', false, 24);
+    expect(terminalEvents.some(event => event.type === 'font' && event.size === 24)).toBe(true);
+    expect(terminalEvents.some(event => event.type === 'dispose' || event.type === 'reset')).toBe(false);
+    expect(host.querySelector('canvas')).toBe(canvas);
+  });
 
   beforeEach(() => {
     terminalEvents.length = 0;

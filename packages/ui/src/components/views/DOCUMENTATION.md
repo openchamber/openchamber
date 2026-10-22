@@ -1,5 +1,21 @@
 # Retained context views
 
+## Terminal font size
+
+While terminal input has focus, Cmd/Ctrl+= increases its font size and
+Cmd/Ctrl+- decreases it by 1 px. Cmd/Ctrl+0 resets it to 14 px. The shortcuts
+change the existing saved `terminalFontSize` preference for every tab on the
+current profile and surface kind, shared with Settings. Sizes are whole pixels
+from 9 through 32. Font changes update the mounted emulator and fit its grid;
+they do not replace the terminal or restart its shell.
+
+### Why terminal zoom consumes the focused key
+
+`ThemeProvider` captures these keys only while terminal input is focused and
+routes them through `openchamber:zoom`. Preventing their default action avoids
+browser page zoom or a second desktop zoom. Other focused content keeps its
+existing shortcuts. The terminal toolbar has no font-size controls.
+
 `ContextPanel` keeps file, diff and walkthrough views mounted to preserve
 navigation, expanded sections and editor state. Its `visible` prop combines
 the panel's open state with the selected tab. Hiding via CSS alone does not

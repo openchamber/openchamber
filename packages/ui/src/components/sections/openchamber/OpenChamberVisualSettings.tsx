@@ -5,6 +5,7 @@ import { ThemePicker } from './ThemePicker';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import type { ThemeMode } from '@/types/theme';
 import { useUIStore } from '@/stores/useUIStore';
+import { DEFAULT_TERMINAL_FONT_SIZE, MIN_TERMINAL_FONT_SIZE, MAX_TERMINAL_FONT_SIZE } from '@/lib/terminalFontSize';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -930,8 +931,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             <NumberInput
                                                 value={terminalFontSize}
                                                 onValueChange={setTerminalFontSize}
-                                                min={9}
-                                                max={52}
+                                                min={MIN_TERMINAL_FONT_SIZE}
+                                                max={MAX_TERMINAL_FONT_SIZE}
                                                 step={1}
                                                 className={SETTINGS_NUMBER_INPUT_CLASS}
                                             />
@@ -939,8 +940,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             <Button size="sm"
                                                 type="button"
                                                 variant="ghost"
-                                                onClick={() => setTerminalFontSize(13)}
-                                                disabled={terminalFontSize === 13}
+                                                onClick={() => setTerminalFontSize(DEFAULT_TERMINAL_FONT_SIZE)}
+                                                disabled={terminalFontSize === DEFAULT_TERMINAL_FONT_SIZE}
                                                 className={SETTINGS_ICON_BUTTON_CLASS}
                                                 aria-label={t('settings.openchamber.visual.actions.resetTerminalFontSizeAria')}
                                                 title={t('settings.common.actions.reset')}

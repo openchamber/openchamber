@@ -3,6 +3,7 @@
 
 import { collectWrappedTerminalLinkLine, extractTerminalLinks } from './terminalLinks';
 import { canvasFontFamilies, isMonospaceFamily } from './fonts';
+import { normalizeTerminalFontSize } from '@/lib/terminalFontSize';
 import {
   GhosttyTerminalCore,
   type GhosttyScrollbar,
@@ -21,9 +22,6 @@ import {
 // cell grid must be measured with the faces that will actually render.
 const symbolsFontUrl = new URL('./fonts/SymbolsNerdFontMono-Regular.woff2', import.meta.url).href;
 
-const DEFAULT_TERMINAL_FONT_SIZE = 13;
-const MIN_TERMINAL_FONT_SIZE = 6;
-const MAX_TERMINAL_FONT_SIZE = 32;
 const SELECTION_MULTI_CLICK_INTERVAL_MS = 500;
 // Compatibility mouse events follow a touch within this window; they must not
 // summon the soft keyboard when the host owns touch gestures.
@@ -126,8 +124,7 @@ export async function loadTerminalFontFamily(
 }
 
 export function terminalFontSize(size?: number): number {
-  if (size === undefined || !Number.isFinite(size)) return DEFAULT_TERMINAL_FONT_SIZE;
-  return Math.max(MIN_TERMINAL_FONT_SIZE, Math.min(MAX_TERMINAL_FONT_SIZE, Math.round(size)));
+  return normalizeTerminalFontSize(size);
 }
 
 /**

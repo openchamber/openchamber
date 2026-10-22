@@ -10,7 +10,7 @@ test('zoom works without App menu listeners and routes by focused content', asyn
   for (const [name, value] of Object.entries({
     window: dom, document: dom.document, navigator: dom.navigator,
     Element: dom.Element, HTMLElement: dom.HTMLElement, Node: dom.Node,
-    Event: dom.Event, CustomEvent: dom.CustomEvent, IS_REACT_ACT_ENVIRONMENT: true,
+    Event: dom.Event, CustomEvent: dom.CustomEvent, KeyboardEvent: dom.KeyboardEvent, IS_REACT_ACT_ENVIRONMENT: true,
   })) {
     originals.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
     Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
@@ -37,12 +37,42 @@ test('zoom works without App menu listeners and routes by focused content', asyn
     await act(async () => zoom('zoom-reset'));
     expect(useUIStore.getState().terminalFontSize).toBe(14);
 
+    const key = (value: string, modifiers: KeyboardEventInit) => {
+      const event = new KeyboardEvent('keydown', { key: value, bubbles: true, cancelable: true, ...modifiers });
+      document.activeElement?.dispatchEvent(event);
+      return event;
+    };
+    for (const modifier of [{ metaKey: true }, { ctrlKey: true }]) {
+      await act(async () => {
+        expect(key('=', modifier).defaultPrevented).toBe(true);
+        expect(key('=', modifier).defaultPrevented).toBe(true);
+      });
+      expect(useUIStore.getState().terminalFontSize).toBe(16);
+      expect(useUIStore.getState().fontSize).toBe(120);
+      await act(async () => { key('-', modifier); });
+      expect(useUIStore.getState().terminalFontSize).toBe(15);
+      await act(async () => { key('0', modifier); });
+      expect(useUIStore.getState().terminalFontSize).toBe(14);
+    }
+    expect(key('=', { ctrlKey: true, altKey: true }).defaultPrevented).toBe(false);
+    expect(key('=', { ctrlKey: true, isComposing: true }).defaultPrevented).toBe(false);
+    expect(key('=', {}).defaultPrevented).toBe(false);
+    useUIStore.getState().setTerminalFontSize(32);
+    await act(async () => { key('=', { metaKey: true }); });
+    expect(useUIStore.getState().terminalFontSize).toBe(32);
+    useUIStore.getState().setTerminalFontSize(9);
+    await act(async () => { key('-', { ctrlKey: true }); });
+    expect(useUIStore.getState().terminalFontSize).toBe(9);
+    await act(async () => { key('0', { ctrlKey: true }); });
+
     const editor = document.createElement('div');
     editor.className = 'cm-editor';
     const editorInput = document.createElement('textarea');
     editor.append(editorInput);
     container.append(editor);
     editorInput.focus();
+    expect(key('=', { metaKey: true }).defaultPrevented).toBe(false);
+    expect(useUIStore.getState().terminalFontSize).toBe(14);
     await act(async () => zoom('zoom-out'));
     expect(useUIStore.getState().editorFontSize).toBe(12);
     expect(useUIStore.getState().fontSize).toBe(120);

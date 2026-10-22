@@ -87,8 +87,8 @@ describe('terminal font resolution', () => {
   });
 
   test('clamps requested font sizes to the supported range', () => {
-    expect(terminalFontSize(undefined)).toBe(13);
-    expect(terminalFontSize(2)).toBe(6);
+    expect(terminalFontSize(undefined)).toBe(14);
+    expect(terminalFontSize(2)).toBe(9);
     expect(terminalFontSize(99)).toBe(32);
     expect(terminalFontSize(14.4)).toBe(14);
   });

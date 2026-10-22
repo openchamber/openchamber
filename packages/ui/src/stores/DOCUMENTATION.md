@@ -113,6 +113,12 @@ verbatim, a reply spoken in full) do not consult it; they silence the 404 on
 
 ### UI state stores
 
+`terminalFontSize` is a saved profile preference with per-surface settings
+behavior. Its setter and the renderer share normalization in
+`lib/terminalFontSize.ts`. Store version 25 clamps older local values to
+9 through 32 px, defaulting invalid values to 14 px; incoming server settings
+use the same setter.
+
 Sidebar visibility and its persisted width are independent. Opening or closing
 the sidebar never writes a width; only resizing changes the saved choice.
 The initial width is separate from the component's minimum resize width.

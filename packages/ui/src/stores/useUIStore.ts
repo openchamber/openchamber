@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { DEFAULT_TERMINAL_FONT_SIZE, normalizeTerminalFontSize } from '@/lib/terminalFontSize';
 import { DEFAULT_SESSION_GOAL_MAX_AUTO_TURNS, isSessionGoalMaxAutoTurns } from '@/lib/sessionGoalTurnLimit';
 import { z } from 'zod';
 import { devtools, persist } from 'zustand/middleware';
@@ -1553,7 +1554,7 @@ export const useUIStore = create<UIStore>()(
         messageLimit: 200,
         fontSize: 100,
         globalDraftStarters: null,
-        terminalFontSize: 14,
+        terminalFontSize: DEFAULT_TERMINAL_FONT_SIZE,
         terminalShell: 'auto',
         terminalLoginShells: [],
         editorFontSize: 13,
@@ -2741,9 +2742,7 @@ export const useUIStore = create<UIStore>()(
         },
 
         setTerminalFontSize: (size) => {
-          const rounded = Math.round(size);
-          const clamped = Math.max(9, Math.min(52, rounded));
-          set({ terminalFontSize: clamped });
+          set({ terminalFontSize: normalizeTerminalFontSize(size) });
         },
 
         setTerminalShell: (shell) => {
@@ -3411,12 +3410,18 @@ export const useUIStore = create<UIStore>()(
       {
         name: 'ui-store',
         storage: createDeferredSafeJSONStorage(),
-        version: 24,
+        version: 25,
         migrate: (persistedState, version) => {
           if (!persistedState || typeof persistedState !== 'object') {
             return persistedState;
           }
           const state = persistedState as Record<string, unknown>;
+
+          // v24 -> v25: match the saved size to the renderer's supported range.
+          if (version < 25) {
+            const savedFontSize = z.number().safeParse(state.terminalFontSize);
+            state.terminalFontSize = normalizeTerminalFontSize(savedFontSize.success ? savedFontSize.data : undefined);
+          }
 
           // v22 -> v23: table cell wrap is on by default. The local copy only
           // ever held the old default; a choice the user made is restored from
