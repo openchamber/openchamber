@@ -193,7 +193,12 @@ type RowProps = {
   leading?: React.ReactNode;
   label: React.ReactNode;
   value?: React.ReactNode;
-  muted?: boolean;
+  /**
+   * Switched off or not connected, such as a disconnected MCP server: the
+   * label steps back from the other rows. Everything else stays at full
+   * contrast (maintainer decision).
+   */
+  inactive?: boolean;
   /** Turns the row into a button; the caller decides what it opens. */
   onClick?: (event: React.MouseEvent<HTMLButtonElement>) => void;
   ariaLabel?: string;
@@ -216,7 +221,7 @@ export const WorkStatusRow: React.FC<RowProps> = ({
   leading,
   label,
   value,
-  muted,
+  inactive,
   onClick,
   ariaLabel,
   tooltip,
@@ -232,11 +237,12 @@ export const WorkStatusRow: React.FC<RowProps> = ({
           style={iconColor ? { color: iconColor } : undefined}
         />
       ) : null)}
-      {/* Every row's text is already muted, so a muted row steps further back,
-          and still brightens with the row on hover. 75% keeps the label at
-          3:1 or more on the panel in every built-in theme; it is under 4.5:1
-          in all but one. */}
-      <span id={labelId} className={cn('min-w-0 flex-1 truncate typography-ui-label', muted && 'opacity-75')}>
+      {/* Row text is already muted-foreground, so an inactive row steps
+          further back by opacity, which still brightens with the row on hover.
+          75% keeps the label at 3:1 or more on the panel in every built-in
+          theme; it is under 4.5:1 in all but one, which is why only inactive
+          rows take it. */}
+      <span id={labelId} className={cn('min-w-0 flex-1 truncate typography-ui-label', inactive && 'opacity-75')}>
         {label}
       </span>
       {value !== undefined && value !== null ? (

@@ -347,7 +347,6 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
               onClick={directory ? () => openSurface('git') : undefined}
               ariaLabel={t('chat.workStatus.action.openGit')}
               label={nestedRepoLabel}
-              muted
             />
           ) : null}
 
@@ -398,7 +397,6 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
                   onClick={directory ? () => openSurface('pr') : undefined}
                   ariaLabel={t(changeRequestCopy('chat.workStatus.action.openPr', prSummary.provider))}
                   label={t('chat.workStatus.pr.checks')}
-                  muted
                   value={(
                     <>
                       {prSummary.checks.failure > 0 ? (

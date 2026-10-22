@@ -278,35 +278,53 @@ test('a section title keeps its width and its summary is cut first', async () =>
   });
 });
 
-test('a muted row looks different from a plain one', async () => {
+test('an inactive row steps back and every other row keeps full contrast', async () => {
   await withDom(async (container, render) => {
     const { WorkStatusRow } = primitives;
     await render(
       <>
         <WorkStatusRow label="connected-server" />
-        <WorkStatusRow label="disconnected-server" muted />
+        <WorkStatusRow label="disconnected-server" inactive />
       </>,
     );
     const plain = byText(container, 'span[id]', 'connected-server');
-    const muted = byText(container, 'span[id]', 'disconnected-server');
+    const inactive = byText(container, 'span[id]', 'disconnected-server');
     // Positive control: both labels rendered.
     expect(plain).toBeDefined();
-    expect(muted).toBeDefined();
-    expect(classes(muted)).toContain('opacity-75');
-    expect(classes(plain)).not.toContain('opacity-75');
+    expect(inactive).toBeDefined();
+    expect(classes(inactive)).toContain('opacity-75');
+    // A plain row's label is the row's own colour, unfaded.
+    expect(classes(plain).some((name) => name.startsWith('opacity-') || name.startsWith('text-'))).toBe(false);
     // The row's colour is inherited, so hovering a clickable row still brightens it.
-    expect(classes(muted).some((name) => name.startsWith('text-'))).toBe(false);
+    expect(classes(inactive).some((name) => name.startsWith('text-'))).toBe(false);
   });
 });
 
-test('a muted label stays at 3:1 or more on the panel in every built-in theme', () => {
+/*
+ * Only a disconnected MCP server steps back (maintainer decision): the step
+ * is under 4.5:1 in all but one built-in theme, so a row the reader needs,
+ * such as skills, pinned items or the Checks label, stays at full contrast.
+ */
+test('only the MCP section marks a row inactive, for a server that is not connected', () => {
+  const dir = fileURLToPath(new URL('.', import.meta.url));
+  const uses = readdirSync(dir)
+    .filter((file) => file.endsWith('.tsx') && !file.includes('.test.') && file !== 'WorkStatusPrimitives.tsx')
+    .flatMap((file) => [...readFileSync(join(dir, file), 'utf8').matchAll(/\binactive\b[^\n]*/g)].map((match) => `${file}: ${match[0].trim()}`));
+  expect(uses).toEqual(['WorkStatusMcpSection.tsx: inactive={!connected}']);
+});
+
+test('a disconnected MCP server stays at 3:1 or more on the panel, and other rows at 4.5:1, in every built-in theme', () => {
   expect(themes.length).toBeGreaterThan(50);
   const failures = themes.flatMap((theme) => {
     const { surface } = theme.colors;
     // The panel's page: the muted surface, halfway to it in light themes.
     const page = theme.metadata.variant === 'dark' ? surface.muted : mixColor(surface.muted, surface.background, 0.5, surface.background);
-    const ratio = contrastRatio(withOpacity(surface.mutedForeground, 0.75), page, surface.background) ?? 0;
-    return ratio < 3 ? [`${theme.metadata.id}: ${ratio.toFixed(2)}`] : [];
+    const inactive = contrastRatio(withOpacity(surface.mutedForeground, 0.75), page, surface.background) ?? 0;
+    const plain = contrastRatio(surface.mutedForeground, page, surface.background) ?? 0;
+    return [
+      ...(inactive < 3 ? [`${theme.metadata.id} inactive: ${inactive.toFixed(2)}`] : []),
+      ...(plain < 4.5 ? [`${theme.metadata.id} plain: ${plain.toFixed(2)}`] : []),
+    ];
   });
   expect(failures).toEqual([]);
 });

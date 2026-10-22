@@ -149,7 +149,6 @@ export const WorkStatusPinnedSection: React.FC<Props> = ({ sessionId, directory 
               <Icon name="pushpin-2-fill" className="size-3.5" style={{ color: 'var(--primary)' }} />
             </button>
           )}
-          muted
           label={entry.text ?? t('chat.workStatus.pinned.unavailable')}
           value={inFlightId === entry.id
             ? <Icon name="loader-4" className="size-3.5 animate-spin text-muted-foreground" aria-hidden />
