@@ -76,6 +76,24 @@ command costs no patch reads, and an edit costs one for the edited file. A
 listing without revisions falls back to the status revision for every file.
 Desktop Changes and mobile Changes share this.
 
+## Pushing for review
+
+Where the repository's host creates changes by pushing for review
+(`features.createByPush`), the Git panel's change section replaces the pull
+request form: the tip commit's subject read only (the commit message is the
+description), topic, hashtags, work in progress (sharing the draft choice's
+remembered value) and private, and one action, Push for review. It shows on
+the target branch itself too, the usual way to work on such a host. Before it
+is enabled the commits between the target and HEAD are read
+(`git/changeIdPreflight.ts`): none to send, or an older commit without a
+Change-Id, holds it back; the checked-out commit alone without one offers Add
+Change-Id, which amends it after a confirmation (`GitAPI.addChangeIdToHead`).
+With an open change, a strip above it offers Upload patchset while the
+status's `localRevision.uploadedAs` is null. The push is a tracked network
+operation through `useBranchPush().pushForReview`, never Publish. The Git
+header's change chip shows its place in the status's chain
+(`stacks.preview.position`).
+
 ## Nested repositories
 
 A folder inside the project that holds its own `.git` and is not a submodule

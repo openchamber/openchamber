@@ -19,6 +19,7 @@ import type { SourceControlProviderDescriptor } from '@/lib/source-control/provi
 
 import type { ListPage, ListSkip, ValueCache } from './referenceCache';
 import type { ReferencePickerItem } from './referencePickerItems';
+import { joinProjectPath } from '@/lib/source-control/projectPath';
 
 /** An item of a list across repositories: the folder whose read context it belongs to comes with it. */
 export type AcrossReference = RepositoryReference & { directory: string };
@@ -116,7 +117,7 @@ export function groupPullsByDirectory(
 
 /** A key per PR and head commit within its group's scope: a push asks again, a later page reuses earlier answers. */
 export const pullStatusKey = (scope: string, pull: RepositoryChangeRequestReference): string => (
-    `${scope}|${pull.sourceRepo.owner}/${pull.sourceRepo.repo}#${pull.number}@${pull.headSha}`
+    `${scope}|${joinProjectPath(pull.sourceRepo.owner, pull.sourceRepo.repo)}#${pull.number}@${pull.headSha}`
 );
 
 const samePull = (status: ChangeRequestListStatus, pull: RepositoryChangeRequestReference) => (

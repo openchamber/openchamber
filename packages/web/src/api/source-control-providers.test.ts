@@ -3,7 +3,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { SourceControlReadContext } from '@openchamber/ui/lib/api/types';
 import type { RuntimeFetchOptions } from '@openchamber/ui/lib/runtime-fetch';
 import { createWebSourceControlAPI } from './source-control';
+import { sourceControlProviderListSchema } from '@openchamber/ui/lib/source-control/providers/descriptor';
 import { BUILT_IN_SOURCE_CONTROL_PROVIDERS } from './source-control-providers';
+
+// The fallback is the published shape; the UI reads it through its schema.
+const BUILT_IN_PARSED = sourceControlProviderListSchema.parse(BUILT_IN_SOURCE_CONTROL_PROVIDERS);
 
 const runtimeFetchMock = vi.fn(async (_input: string, _init?: RuntimeFetchOptions): Promise<Response> => Response.json({}));
 
@@ -29,13 +33,13 @@ describe('web source-control providers', () => {
   it('answers with the built-in GitHub and GitLab descriptors when the server predates the route', async () => {
     runtimeFetchMock.mockResolvedValueOnce(new Response('Not Found', { status: 404 }));
     const providers = await createWebSourceControlAPI({ fetch: runtimeFetchMock }).providers();
-    expect(providers).toEqual([...BUILT_IN_SOURCE_CONTROL_PROVIDERS]);
+    expect(providers).toEqual(BUILT_IN_PARSED);
     expect(providers.map((provider) => provider.id)).toEqual(['github', 'gitlab']);
   });
 
   it('keeps the built-in descriptors valid against the UI schema', async () => {
     runtimeFetchMock.mockResolvedValueOnce(Response.json({ providers: BUILT_IN_SOURCE_CONTROL_PROVIDERS }));
-    await expect(createWebSourceControlAPI({ fetch: runtimeFetchMock }).providers()).resolves.toEqual([...BUILT_IN_SOURCE_CONTROL_PROVIDERS]);
+    await expect(createWebSourceControlAPI({ fetch: runtimeFetchMock }).providers()).resolves.toEqual(BUILT_IN_PARSED);
   });
 
   it('fails instead of answering an empty list when the read fails or the answer is malformed', async () => {

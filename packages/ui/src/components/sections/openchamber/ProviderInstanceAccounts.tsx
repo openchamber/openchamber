@@ -21,7 +21,7 @@ import { useSourceControlAuthEntry, useSourceControlAuthStore } from '@/stores/u
 import { getRuntimeKey, subscribeRuntimeEndpointWillChange } from '@/lib/runtime-switch';
 import { SourceControlAccountList } from './SourceControlAccountList';
 import { DeviceFlowCode } from './DeviceFlowCode';
-import { providerSettingsCopy, tokenCreationUrl } from './sourceControlProviderSettings';
+import { asksForUsername, providerSettingsCopy, tokenCreationUrl } from './sourceControlProviderSettings';
 
 /** The ways to add an account in the form; the CLI login has its own row. */
 type ConnectMethod = 'device' | 'pat';
@@ -64,6 +64,9 @@ export const ProviderInstanceAccounts: React.FC<ProviderInstanceAccountsProps> =
   const [pollDelayMs, setPollDelayMs] = React.useState(0);
   const [pollAttempt, setPollAttempt] = React.useState(0);
   const [token, setToken] = React.useState('');
+  const [username, setUsername] = React.useState('');
+  // An HTTP Basic host verifies the token as this username's password, so both are needed.
+  const needsUsername = asksForUsername(descriptor);
   const [isAddingAccount, setIsAddingAccount] = React.useState(false);
   const [chosenMethod, setChosenMethod] = React.useState<ConnectMethod | null>(null);
   const [busy, setBusy] = React.useState(false);
@@ -176,16 +179,19 @@ export const ProviderInstanceAccounts: React.FC<ProviderInstanceAccountsProps> =
   };
 
   const saveToken = async () => {
-    if (!token.trim()) return;
+    if (!token.trim() || (needsUsername && !username.trim())) return;
     const isCurrentRuntime = captureRuntime();
     setBusy(true);
     setOperationFailed(false);
     setTokenRejected(false);
     try {
-      const nextStatus = await sourceControl.authSetToken(identity, token.trim());
+      const nextStatus = needsUsername
+        ? await sourceControl.authSetToken(identity, token.trim(), { username: username.trim() })
+        : await sourceControl.authSetToken(identity, token.trim());
       if (!isCurrentRuntime()) return;
       setStatus(identity, nextStatus);
       setToken('');
+      setUsername('');
       setIsAddingAccount(false);
       await refreshStatus(sourceControl, identity, { force: true });
       if (!isCurrentRuntime()) return;
@@ -265,6 +271,7 @@ export const ProviderInstanceAccounts: React.FC<ProviderInstanceAccountsProps> =
     setPollDelayMs(0);
     setPollAttempt(0);
     setToken('');
+    setUsername('');
     setOperationFailed(false);
     setTokenRejected(false);
   };
@@ -395,10 +402,27 @@ export const ProviderInstanceAccounts: React.FC<ProviderInstanceAccountsProps> =
               onCancel={cancelAddAccount}
             />
           )}
+          {method === 'pat' && !flow && needsUsername && (
+            <SettingsFieldRow label={t('settings.sourceControl.field.username.label')} info={t('settings.sourceControl.field.username.info', { provider })}>
+              <div className={SETTINGS_CONTROL_CLUSTER_CLASS}>
+                <Input
+                  className="h-8 w-full min-w-0 rounded-md"
+                  value={username}
+                  onChange={(event) => setUsername(event.target.value)}
+                  aria-label={t('settings.sourceControl.field.username.label')}
+                  // Not the sign-in login: a password manager would fill it,
+                  // and its sign-in password into the secret field below.
+                  autoComplete="off"
+                  autoCapitalize="off"
+                  spellCheck={false}
+                />
+              </div>
+            </SettingsFieldRow>
+          )}
           {method === 'pat' && !flow && (
             <SettingsFieldRow
               label={t(copy.tokenLabel)}
-              info={t(copy.tokenInfo, { scopes })}
+              info={t(copy.tokenInfo, { scopes, provider })}
               description={createTokenUrl || scopes ? (
                 <span className="flex flex-col items-start gap-0.5">
                   {createTokenUrl ? (
@@ -417,9 +441,11 @@ export const ProviderInstanceAccounts: React.FC<ProviderInstanceAccountsProps> =
                   value={token}
                   onChange={(event) => setToken(event.target.value)}
                   aria-label={t(copy.tokenLabel)}
-                  autoComplete="off"
+                  // Browsers ignore "off" on a password field; "new-password"
+                  // keeps a saved sign-in password out of it.
+                  autoComplete="new-password"
                 />
-                <Button className="w-full @xl:w-auto" size="sm" onClick={saveToken} disabled={busy || !token.trim()}>{t('settings.common.actions.saveChanges')}</Button>
+                <Button className="w-full @xl:w-auto" size="sm" onClick={saveToken} disabled={busy || !token.trim() || (needsUsername && !username.trim())}>{t('settings.common.actions.saveChanges')}</Button>
               </div>
             </SettingsFieldRow>
           )}

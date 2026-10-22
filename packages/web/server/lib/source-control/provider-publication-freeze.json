@@ -1,0 +1,434 @@
+{
+  "providers": [
+    {
+      "id": "github",
+      "label": "GitHub",
+      "order": 0,
+      "terminology": {
+        "changeRequest": "pullRequest",
+        "changeRequestPrefix": "#",
+        "issuePrefix": "#",
+        "sharedNumberSpace": true,
+        "abbreviation": "PR",
+        "promptNoun": "pull request",
+        "ci": "checks"
+      },
+      "icon": {
+        "sprite": "github",
+        "filledSprite": "github-fill"
+      },
+      "repository": {
+        "nestedNamespaces": false
+      },
+      "instances": {
+        "format": "host",
+        "defaultInstance": "github.com",
+        "multiple": true,
+        "allowLoopbackHttp": false,
+        "allowPort": false,
+        "reserved": [
+          "github.com"
+        ],
+        "placeholder": "https://github.example.com",
+        "legacyFlow": {
+          "instance": "github.com",
+          "kind": "github-com-device"
+        }
+      },
+      "auth": {
+        "methods": [
+          "device",
+          "pat",
+          "cli"
+        ],
+        "cliTransport": true,
+        "cliName": "gh",
+        "token": {
+          "scopes": [
+            "repo",
+            "read:org",
+            "workflow",
+            "read:user",
+            "user:email"
+          ],
+          "createPath": "/settings/tokens"
+        }
+      },
+      "settings": {
+        "fields": [
+          {
+            "id": "instance",
+            "kind": "instance-url",
+            "secret": false
+          },
+          {
+            "id": "token",
+            "kind": "personal-access-token",
+            "secret": true
+          }
+        ]
+      },
+      "urls": {
+        "changeRequest": [
+          "/{owner}/{repo}/pull/{number}"
+        ],
+        "issue": [
+          "/{owner}/{repo}/issues/{number}"
+        ]
+      },
+      "features": {
+        "referenceSearch": true,
+        "referenceDetail": true,
+        "listStatuses": true,
+        "referencesAcross": true,
+        "startThread": false,
+        "authorCanReview": false,
+        "projectUploads": false,
+        "issueCloseReason": true,
+        "changeRequestTemplates": [],
+        "changeRequestPatch": true
+      }
+    },
+    {
+      "id": "gitlab",
+      "label": "GitLab",
+      "order": 1,
+      "terminology": {
+        "changeRequest": "mergeRequest",
+        "changeRequestPrefix": "!",
+        "issuePrefix": "#",
+        "sharedNumberSpace": false,
+        "abbreviation": "MR",
+        "promptNoun": "merge request",
+        "ci": "pipeline"
+      },
+      "icon": {
+        "sprite": "gitlab"
+      },
+      "repository": {
+        "nestedNamespaces": true
+      },
+      "instances": {
+        "format": "origin",
+        "defaultInstance": "https://gitlab.com",
+        "multiple": true,
+        "allowLoopbackHttp": true,
+        "allowPort": true,
+        "reserved": [],
+        "placeholder": "https://gitlab.example.com"
+      },
+      "auth": {
+        "methods": [
+          "device",
+          "pat",
+          "cli"
+        ],
+        "cliTransport": false,
+        "cliName": "glab",
+        "token": {
+          "scopes": [
+            "api"
+          ],
+          "createPath": "/-/user_settings/personal_access_tokens"
+        }
+      },
+      "settings": {
+        "fields": [
+          {
+            "id": "instance",
+            "kind": "instance-url",
+            "secret": false
+          },
+          {
+            "id": "token",
+            "kind": "personal-access-token",
+            "secret": true
+          }
+        ]
+      },
+      "urls": {
+        "changeRequest": [
+          "/{namespace+}/{repo}/-/merge_requests/{number}"
+        ],
+        "issue": [
+          "/{namespace+}/{repo}/-/issues/{number}",
+          "/{namespace+}/{repo}/-/work_items/{number}"
+        ]
+      },
+      "features": {
+        "referenceSearch": false,
+        "referenceDetail": false,
+        "listStatuses": false,
+        "referencesAcross": false,
+        "startThread": true,
+        "authorCanReview": true,
+        "projectUploads": true,
+        "issueCloseReason": false,
+        "changeRequestTemplates": [
+          ".gitlab/merge_request_templates/Default.md"
+        ],
+        "changeRequestPatch": true
+      }
+    },
+    {
+      "id": "gitea",
+      "label": "Gitea",
+      "order": 2,
+      "terminology": {
+        "changeRequest": "pullRequest",
+        "changeRequestPrefix": "#",
+        "issuePrefix": "#",
+        "sharedNumberSpace": true,
+        "abbreviation": "PR",
+        "promptNoun": "pull request",
+        "ci": "checks"
+      },
+      "icon": {
+        "path": "M2 6h15v5.5a6.5 6.5 0 0 1-6.5 6.5h-2A6.5 6.5 0 0 1 2 11.5zM17 7h2.5a3.5 3.5 0 0 1 0 7H17v-2h2.5a1.5 1.5 0 0 0 0-3H17zM3 20h13v1.5H3z"
+      },
+      "repository": {
+        "nestedNamespaces": false
+      },
+      "instances": {
+        "format": "origin",
+        "defaultInstance": null,
+        "multiple": true,
+        "allowLoopbackHttp": true,
+        "allowPort": true,
+        "reserved": [],
+        "placeholder": "https://gitea.example.com"
+      },
+      "auth": {
+        "methods": [
+          "pat"
+        ],
+        "cliTransport": false,
+        "token": {
+          "scopes": [
+            "write:repository",
+            "write:issue",
+            "read:user"
+          ],
+          "createPath": "/user/settings/applications"
+        }
+      },
+      "settings": {
+        "fields": [
+          {
+            "id": "instance",
+            "kind": "instance-url",
+            "secret": false
+          },
+          {
+            "id": "token",
+            "kind": "personal-access-token",
+            "secret": true
+          }
+        ]
+      },
+      "urls": {
+        "changeRequest": [
+          "/{owner}/{repo}/pulls/{number}"
+        ],
+        "issue": [
+          "/{owner}/{repo}/issues/{number}"
+        ]
+      },
+      "features": {
+        "referenceSearch": false,
+        "referenceDetail": false,
+        "listStatuses": false,
+        "referencesAcross": false,
+        "startThread": false,
+        "authorCanReview": false,
+        "projectUploads": false,
+        "issueCloseReason": false,
+        "changeRequestTemplates": [
+          ".gitea/pull_request_template.md",
+          ".gitea/PULL_REQUEST_TEMPLATE.md",
+          ".github/pull_request_template.md"
+        ],
+        "changeRequestPatch": true
+      }
+    }
+  ],
+  "capabilities": {
+    "github": {
+      "identity": {
+        "provider": "github",
+        "instance": "github.com"
+      },
+      "authentication": true,
+      "authenticationMethods": {
+        "pat": {
+          "available": true
+        }
+      },
+      "multipleAccounts": true,
+      "projects": true,
+      "issues": true,
+      "changeRequests": true,
+      "draftChangeRequests": true,
+      "mergeChangeRequests": true,
+      "mergeMethods": [
+        "merge",
+        "squash",
+        "rebase"
+      ],
+      "ci": true
+    },
+    "gitlab": {
+      "identity": {
+        "provider": "gitlab",
+        "instance": "https://gitlab.com"
+      },
+      "authentication": true,
+      "authenticationMethods": {
+        "pat": {
+          "available": true
+        }
+      },
+      "multipleAccounts": true,
+      "projects": true,
+      "issues": true,
+      "changeRequests": true,
+      "draftChangeRequests": true,
+      "mergeChangeRequests": true,
+      "mergeMethods": [
+        "merge",
+        "squash"
+      ],
+      "ci": true
+    },
+    "gitea": {
+      "identity": {
+        "provider": "gitea",
+        "instance": "https://gitea.example.com"
+      },
+      "authentication": true,
+      "authenticationMethods": {
+        "pat": {
+          "available": true
+        }
+      },
+      "multipleAccounts": true,
+      "projects": true,
+      "issues": true,
+      "changeRequests": true,
+      "draftChangeRequests": true,
+      "mergeChangeRequests": true,
+      "mergeMethods": [
+        "merge",
+        "squash",
+        "rebase"
+      ],
+      "ci": true
+    }
+  },
+  "gerrit": {
+    "provider": {
+      "id": "gerrit",
+      "label": "Gerrit",
+      "order": 3,
+      "terminology": {
+        "changeRequest": "change",
+        "changeRequestPrefix": "#",
+        "issuePrefix": "#",
+        "sharedNumberSpace": true,
+        "abbreviation": "CL",
+        "promptNoun": "change",
+        "ci": "checks"
+      },
+      "icon": {
+        "path": "M7 2a3 3 0 1 1 0 6a3 3 0 1 1 0-6zM7 16a3 3 0 1 1 0 6a3 3 0 1 1 0-6zM6 8h2v8H6zM13 10.5l1.5-1.5 2 2 4-4 1.5 1.5-5.5 5.5z"
+      },
+      "repository": {
+        "nestedNamespaces": true,
+        "pathStyle": "path"
+      },
+      "instances": {
+        "format": "origin",
+        "defaultInstance": null,
+        "multiple": true,
+        "allowLoopbackHttp": true,
+        "allowPort": true,
+        "reserved": [],
+        "placeholder": "https://gerrit.example.com"
+      },
+      "auth": {
+        "methods": [
+          "pat"
+        ],
+        "cliTransport": false,
+        "token": {
+          "scopes": [],
+          "createPath": "/settings/#HTTPCredentials"
+        }
+      },
+      "settings": {
+        "fields": [
+          {
+            "id": "instance",
+            "kind": "instance-url",
+            "secret": false
+          },
+          {
+            "id": "username",
+            "kind": "username",
+            "secret": false
+          },
+          {
+            "id": "token",
+            "kind": "http-password",
+            "secret": true
+          }
+        ]
+      },
+      "urls": {
+        "changeRequest": [
+          "/c/{project+}/+/{number}"
+        ],
+        "issue": []
+      },
+      "features": {
+        "referenceSearch": false,
+        "referenceDetail": false,
+        "listStatuses": false,
+        "referencesAcross": false,
+        "startThread": false,
+        "authorCanReview": true,
+        "projectUploads": false,
+        "issueCloseReason": false,
+        "changeRequestTemplates": [],
+        "branchHeads": false,
+        "submitRequirements": true,
+        "changeRequestPatch": true,
+        "reviewModel": "votes",
+        "revisions": true,
+        "createByPush": true
+      }
+    },
+    "capabilities": {
+      "identity": {
+        "provider": "gerrit",
+        "instance": "https://gerrit.example.com"
+      },
+      "authentication": true,
+      "authenticationMethods": {
+        "pat": {
+          "available": true
+        }
+      },
+      "multipleAccounts": true,
+      "projects": true,
+      "issues": false,
+      "changeRequests": true,
+      "draftChangeRequests": true,
+      "mergeChangeRequests": true,
+      "mergeMethods": [
+        "submit"
+      ],
+      "ci": false
+    }
+  }
+}

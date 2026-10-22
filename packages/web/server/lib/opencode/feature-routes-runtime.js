@@ -131,17 +131,17 @@ export const createFeatureRoutesRuntime = (dependencies) => {
         ...service,
         // Forward only the request options by name: the remaining slots are
         // dependency overrides and must not be reachable from a route.
-        getPullRequestDiff: (directory, number, readContext, { allowEmpty, sourceRepo } = {}) => pullRequest.getPullRequestDiff(
+        getPullRequestDiff: (directory, number, readContext, { allowEmpty, sourceRepo, revision } = {}) => pullRequest.getPullRequestDiff(
           directory,
           number,
           readContext,
-          { allowEmpty, sourceRepo, readChangeRequestPatch: walkthroughBindingService?.readChangeRequestPatch },
+          { allowEmpty, sourceRepo, revision, readChangeRequestPatch: walkthroughBindingService?.readChangeRequestPatch },
         ),
-        getPullRequestFileContents: (directory, number, readContext, { path, previousPath, status, sourceRepo }) => pullRequest.getPullRequestFileContents(
+        getPullRequestFileContents: (directory, number, readContext, { path, previousPath, status, sourceRepo, revision }) => pullRequest.getPullRequestFileContents(
           directory,
           number,
           readContext,
-          { path, previousPath, status, sourceRepo, readChangeRequestFile: walkthroughBindingService?.readChangeRequestFile },
+          { path, previousPath, status, sourceRepo, revision, readChangeRequestFile: walkthroughBindingService?.readChangeRequestFile },
         ),
       };
     }
@@ -719,6 +719,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       resolveChangeRequestSource: walkthroughBindingService.resolveChangeRequestSource,
       createHttpsCredentialReference,
       getSourceControlBinding: walkthroughBindingService.get,
+      onBranchRewritten: walkthroughBindingService.invalidateBranchStatus,
       resolveSourceControlAccount,
       errorRedactionSecrets: [openchamberDataDir],
       worktreeBootstrapStore,

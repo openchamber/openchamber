@@ -4,10 +4,11 @@ import { SimpleMarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
-import type { CISummary, ChangeRequestListStatus, RepositoryReference, RepositoryReferenceComment, RepositoryReferenceDetail, TrackerItem, TrackerItemSummary, PullRequestStackLayer } from '@/lib/api/types';
-import { useI18n } from '@/lib/i18n';
+import type { CISummary, ChangeRequestListStatus, ChangeRequestRevision, ChangeRequestRevisionKind, RepositoryReference, RepositoryReferenceComment, RepositoryReferenceDetail, TrackerItem, TrackerItemSummary, PullRequestStackLayer } from '@/lib/api/types';
+import { useI18n, type I18nKey } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 
 import type { CachedValue } from './referenceCache';
@@ -30,6 +31,7 @@ import {
     referenceNumberLabel,
     TRACKER_PRIORITY_KEYS,
 } from './referencePickerItems';
+import { joinProjectPath } from '@/lib/source-control/projectPath';
 
 export type ReferencePreviewPurpose = 'attach' | 'worktree';
 
@@ -131,6 +133,88 @@ const REVIEW_KEYS = {
 
 const Pending = () => <Icon name="loader-4" className="size-3.5 animate-spin text-muted-foreground" />;
 
+const REVISION_KIND_KEYS = {
+    rework: 'references.picker.preview.revision.kind.rework',
+    'trivial-rebase': 'references.picker.preview.revision.kind.trivialRebase',
+    'merge-first-parent-update': 'references.picker.preview.revision.kind.mergeUpdate',
+    'no-code-change': 'references.picker.preview.revision.kind.noCodeChange',
+    'no-change': 'references.picker.preview.revision.kind.noChange',
+} as const satisfies Record<ChangeRequestRevisionKind, I18nKey>;
+
+/** A change's revisions to choose from, oldest first, and the one shown: null for the latest. */
+export type RevisionChoice = {
+    revisions: ChangeRequestRevision[];
+    selected: string | null;
+    onSelect: (sha: string | null) => void;
+};
+
+/**
+ * Which revision (patchset) of a change the Changes row shows, beside it.
+ * Only where there is more than one to choose from.
+ */
+const RevisionPicker: React.FC<{ choice: RevisionChoice }> = ({ choice }) => {
+    const { t } = useI18n();
+    const latest = choice.revisions.at(-1);
+    if (!latest || choice.revisions.length < 2) return null;
+    const shown = choice.revisions.find((revision) => revision.sha === choice.selected) ?? latest;
+    const labelOf = (revision: ChangeRequestRevision) => (revision === latest
+        ? t('references.picker.preview.revision.latest', { number: revision.number })
+        : t('references.picker.preview.revision.number', { number: revision.number }));
+    return (
+        <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+                <button
+                    type="button"
+                    className={cn(dropdownTriggerVariants(), 'min-w-0 max-w-[14rem] font-normal')}
+                    aria-label={t('references.picker.preview.revision.label')}
+                >
+                    <span className="truncate">{labelOf(shown)}</span>
+                    <Icon name="arrow-down-s" className="size-3.5" />
+                </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-64">
+                <DropdownMenuRadioGroup
+                    value={shown.sha}
+                    onValueChange={(value) => choice.onSelect(value === latest.sha ? null : String(value))}
+                >
+                    {[...choice.revisions].reverse().map((revision) => (
+                        <DropdownMenuRadioItem key={revision.sha} value={revision.sha}>
+                            <span className="min-w-0 flex-1 truncate">{labelOf(revision)}</span>
+                            {revision.kind && revision.kind !== 'rework' ? (
+                                <span className={cn('shrink-0 typography-meta', REFERENCE_META_TEXT)}>{t(REVISION_KIND_KEYS[revision.kind])}</span>
+                            ) : null}
+                        </DropdownMenuRadioItem>
+                    ))}
+                </DropdownMenuRadioGroup>
+            </DropdownMenuContent>
+        </DropdownMenu>
+    );
+};
+
+/** A review host's flags on a change: work in progress, private, its topic. Nothing for other hosts. */
+const ChangeFlags: React.FC<{ reference: RepositoryReference }> = ({ reference }) => {
+    const { t } = useI18n();
+    if (reference.kind !== 'pull') return null;
+    const flags = [
+        // The state pill already says Draft for a draft; saying work in progress beside it repeats it.
+        reference.workInProgress && !reference.draft ? t('references.picker.preview.wip') : null,
+        reference.private ? t('references.picker.preview.private') : null,
+    ].filter((flag): flag is string => flag !== null);
+    if (flags.length === 0 && !reference.topic) return null;
+    return (
+        <span className="flex min-w-0 flex-wrap items-center gap-1.5">
+            {flags.map((flag) => (
+                <span key={flag} className="inline-flex h-5 shrink-0 items-center rounded-full bg-surface-muted px-2 typography-micro text-muted-foreground">{flag}</span>
+            ))}
+            {reference.topic ? (
+                <span className={cn('min-w-0 truncate typography-meta', REFERENCE_META_TEXT)} title={reference.topic}>
+                    {t('references.picker.preview.topic', { topic: reference.topic })}
+                </span>
+            ) : null}
+        </span>
+    );
+};
+
 /** Description with images and the HTML GitHub allows; the agent gets the source. */
 const ReferenceBody: React.FC<{ content: string }> = ({ content }) => {
     const rewrite = React.useContext(ReferenceMarkdownRewriteContext);
@@ -215,13 +299,15 @@ const PullDetailRows: React.FC<{
     links?: React.ReactNode;
     /** Opens the PR's check runs; the totals become a button. */
     onOpenChecks?: () => void;
-}> = ({ detail, checks, links, onOpenChecks }) => {
+    revisionChoice?: RevisionChoice;
+}> = ({ detail, checks, links, onOpenChecks, revisionChoice }) => {
     const { t } = useI18n();
     const pull = detail.status === 'ready' ? detail.value.pull : null;
     return (
         <>
             <MetaRow label={t('references.picker.preview.changes')}>
                 <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                    {revisionChoice ? <RevisionPicker choice={revisionChoice} /> : null}
                     {detail.status === 'error' ? <LoadError error={detail.error} /> : pull ? (
                         <span className="inline-flex items-center gap-2">
                             <span className="text-[var(--status-success)]">+{pull.additions}</span>
@@ -306,7 +392,8 @@ const RepositoryPreview: React.FC<{
     onRefresh?: () => Promise<void>;
     threadActions?: ReferenceThreadActions;
     onOpenStackLayer?: (layer: PullRequestStackLayer) => void;
-}> = ({ reference, pullStatus, detail, purpose, pinned, includeDiff, onIncludeDiffChange, now, footer: footerOverride, pullLinks, reply, labelsControl, reviewersControl, onOpenChecks, commentAttachments, stateMenu, onRefresh, threadActions, onOpenStackLayer }) => {
+    revisionChoice?: RevisionChoice;
+}> = ({ reference, pullStatus, detail, purpose, pinned, includeDiff, onIncludeDiffChange, now, footer: footerOverride, pullLinks, reply, labelsControl, reviewersControl, onOpenChecks, commentAttachments, stateMenu, onRefresh, threadActions, onOpenStackLayer, revisionChoice }) => {
     const { t } = useI18n();
     const [refreshing, setRefreshing] = React.useState(false);
     const refresh = onRefresh ? () => {
@@ -403,7 +490,7 @@ const RepositoryPreview: React.FC<{
                             <StatePill icon={look.icon} color={look.color} label={t(look.labelKey)} />
                         )}
                         <span className={cn('truncate typography-meta', REFERENCE_META_TEXT)}>
-                            {reference.sourceRepo.owner}/{reference.sourceRepo.repo} {referenceNumberLabel(reference, descriptor)}
+                            {joinProjectPath(reference.sourceRepo.owner, reference.sourceRepo.repo)} {referenceNumberLabel(reference, descriptor)}
                         </span>
                         {refresh ? (
                             <button
@@ -428,6 +515,7 @@ const RepositoryPreview: React.FC<{
                         </a>
                     </div>
                     <h3 className="typography-ui-header font-semibold break-words text-foreground">{reference.title}</h3>
+                    <ChangeFlags reference={reference} />
                 </>
             }
             meta={
@@ -446,13 +534,24 @@ const RepositoryPreview: React.FC<{
                     {reference.kind === 'pull' ? (
                         <>
                             <MetaRow label={t('references.picker.preview.branch')}>
-                                <span className="inline-flex max-w-full items-center gap-1 font-mono">
-                                    <span className="truncate">{reference.head}</span>
-                                    <Icon name="arrow-right" className="size-3 shrink-0 text-muted-foreground" />
-                                    <span className="truncate">{reference.base}</span>
-                                </span>
+                                {descriptor.features.branchHeads ? (
+                                    <span className="inline-flex max-w-full items-center gap-1 font-mono">
+                                        <span className="truncate">{reference.head}</span>
+                                        <Icon name="arrow-right" className="size-3 shrink-0 text-muted-foreground" />
+                                        <span className="truncate">{reference.base}</span>
+                                    </span>
+                                ) : (
+                                    // The head is a revision's ref, not a branch: only where it lands reads as one.
+                                    <span className="block truncate font-mono">{reference.base}</span>
+                                )}
                             </MetaRow>
-                            <PullDetailRows detail={detail} checks={previewChecks(reference, pullStatus, detail)} links={pullLinks} onOpenChecks={onOpenChecks} />
+                            <PullDetailRows
+                                detail={detail}
+                                checks={previewChecks(reference, pullStatus, detail)}
+                                links={pullLinks}
+                                onOpenChecks={onOpenChecks}
+                                revisionChoice={descriptor.features.revisions ? revisionChoice : undefined}
+                            />
                         </>
                     ) : null}
                     {reviewersControl && reference.kind === 'pull' ? (
@@ -729,7 +828,9 @@ export const ReferencePreview: React.FC<{
     threadActions?: ReferenceThreadActions;
     /** Opens another layer of the previewed PR's stack; without it the layers are plain text. */
     onOpenStackLayer?: (layer: PullRequestStackLayer) => void;
-}> = ({ item, directory, pullStatus, trackerDetail, repositoryDetail, purpose, pinned, includeDiff, onIncludeDiffChange, now, footer, pullLinks, trackerStateControl, reply, labelsControl, reviewersControl, onOpenChecks, commentAttachments, stateMenu, onOpenTrackerItem, onRefresh, threadActions, onOpenStackLayer }) => {
+    /** A change's revisions to pick the shown one from, where the host keeps revisions. */
+    revisionChoice?: RevisionChoice;
+}> = ({ item, directory, pullStatus, trackerDetail, repositoryDetail, purpose, pinned, includeDiff, onIncludeDiffChange, now, footer, pullLinks, trackerStateControl, reply, labelsControl, reviewersControl, onOpenChecks, commentAttachments, stateMenu, onOpenTrackerItem, onRefresh, threadActions, onOpenStackLayer, revisionChoice }) => {
     const { t } = useI18n();
     const rewriteMarkdown = useProjectUploadRewrite(directory, item?.source === 'repository' ? item.reference : null);
     if (!item) {
@@ -764,6 +865,7 @@ export const ReferencePreview: React.FC<{
                 onRefresh={onRefresh}
                 threadActions={threadActions}
                 onOpenStackLayer={onOpenStackLayer}
+                revisionChoice={revisionChoice}
             />
         </ReferenceMarkdownRewriteContext.Provider>
     );

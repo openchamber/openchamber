@@ -13,7 +13,8 @@ import { useThreadActions } from '@/components/sourceBoard/threadActions';
 import { useMinuteTickerNow } from '@/hooks/useDurationTicker';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
-import type { RepositoryChangeRequestReference, SourceControlReadContext } from '@/lib/api/types';
+import type { CachedValue } from '@/components/references/referenceCache';
+import type { PullRequestStack, RepositoryChangeRequestReference, RepositoryReferenceDetail, SourceControlReadContext } from '@/lib/api/types';
 import type { ChangeRequest } from '@/lib/source-control/types';
 import { useSourceControlProvider } from '@/lib/source-control/providers/registry';
 import { NewWorktreeDialog } from '@/components/session/NewWorktreeDialog';
@@ -61,7 +62,12 @@ export const BranchPullRequestPreview: React.FC<{
     changeRequest: ChangeRequest;
     /** Asks the branch status again after a change. */
     onChanged: () => Promise<void>;
-}> = ({ directory, context, changeRequest, onChanged }) => {
+    /**
+     * The chain the branch status names, where changes are created by pushing
+     * for review; shown until the change's own detail says.
+     */
+    statusStack?: PullRequestStack | null;
+}> = ({ directory, context, changeRequest, onChanged, statusStack }) => {
     const { sourceControl } = useRuntimeAPIs();
     const rootDirectory = useEffectiveDirectory();
     const activeProjectId = useProjectsStore((state) => state.activeProjectId);
@@ -76,7 +82,11 @@ export const BranchPullRequestPreview: React.FC<{
         // The status is the fresher source of state and head; the list adds what it lacks.
         return listed ? { ...live, labels: listed.labels, commentCount: listed.commentCount } : live;
     }, [changeRequest, listed]);
-    const { detail, refresh: refreshDetail } = useRepositoryReferenceDetail(directory, reference, true);
+    // The revision picked to look at; null shows the latest. Another change starts on its latest again.
+    const [revisionChoice, setRevisionChoice] = React.useState<{ number: number; sha: string } | null>(null);
+    const shownRevision = revisionChoice?.number === changeRequest.number ? revisionChoice.sha : null;
+    const { detail, latest, refresh: refreshDetail } = useRepositoryReferenceDetail(directory, reference, true, shownRevision);
+    const latestPull = latest.status === 'ready' ? latest.value.pull : null;
     const attachments = usePullAttachments(reference);
 
     const refresh = React.useCallback(() => {
@@ -97,7 +107,13 @@ export const BranchPullRequestPreview: React.FC<{
 
     const item = { source: 'repository' as const, reference };
     const linksDirectory = rootDirectory ?? directory;
-    const stack = detail.status === 'ready' ? detail.value.pull?.stack ?? null : null;
+    // The change's own detail says which chain it is in; until it does, or where it cannot, the status's chain stands in.
+    const shownDetail = React.useMemo<CachedValue<RepositoryReferenceDetail>>(() => (
+        detail.status === 'ready' && detail.value.pull && detail.value.pull.stack === undefined && statusStack !== undefined
+            ? { status: 'ready', value: { ...detail.value, pull: { ...detail.value.pull, stack: statusStack } } }
+            : detail
+    ), [detail, statusStack]);
+    const stack = shownDetail.status === 'ready' ? shownDetail.value.pull?.stack ?? null : statusStack ?? null;
     // Another layer of the stack opens in the Tracker; a new one starts in a worktree on top of this branch.
     const showTrackerItem = useShowTrackerItem();
     const projects = useProjectsStore((state) => state.projects);
@@ -112,7 +128,7 @@ export const BranchPullRequestPreview: React.FC<{
                 directory={directory}
                 pullStatus={IDLE_PULL_STATUS}
                 trackerDetail={{ status: 'idle' }}
-                repositoryDetail={detail}
+                repositoryDetail={shownDetail}
                 purpose="attach"
                 pinned
                 includeDiff={false}
@@ -129,8 +145,16 @@ export const BranchPullRequestPreview: React.FC<{
                         worktreeAvailable={false}
                         stack={stack}
                         onStartOnTop={ownProject ? () => setOnTopOpen(true) : undefined}
+                        submitRequirements={latestPull?.submitRequirements}
+                        submitRequirementsUnreadable={latest.status === 'error'}
+                        mergeable={changeRequest.mergeable ?? null}
                     />
                 )}
+                revisionChoice={latestPull?.revisions ? {
+                    revisions: latestPull.revisions,
+                    selected: shownRevision,
+                    onSelect: (sha) => setRevisionChoice(sha ? { number: changeRequest.number, sha } : null),
+                } : undefined}
                 onOpenStackLayer={(layer) => { showTrackerItem(layer.url, directory); }}
                 onOpenChecks={() => setChecksOpen(true)}
                 onRefresh={refreshFromHost}
@@ -138,7 +162,17 @@ export const BranchPullRequestPreview: React.FC<{
                 threadActions={threadActions}
                 labelsControl={<SourceBoardLabels reference={reference} context={context} onChanged={refresh} />}
                 reviewersControl={<SourceBoardReviewers pull={reference} detail={detail} context={context} onChanged={refresh} />}
-                reply={<SourceBoardReply key={reference.number} reference={reference} context={context} onRefresh={refresh} />}
+                reply={(
+                    <SourceBoardReply
+                        key={reference.number}
+                        reference={reference}
+                        context={context}
+                        onRefresh={refresh}
+                        voteLabels={latestPull?.voteLabels}
+                        latestRevision={latestPull?.revisions?.at(-1)?.sha}
+                        onLatestRevision={shownRevision === null}
+                    />
+                )}
                 pullLinks={(
                     <SourceBoardPullLinks
                         pull={reference}
@@ -147,6 +181,7 @@ export const BranchPullRequestPreview: React.FC<{
                         context={context}
                         projectOwnsDirectory={() => true}
                         currentDirectory={linksDirectory}
+                        revision={shownRevision}
                     />
                 )}
             />

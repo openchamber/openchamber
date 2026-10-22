@@ -1224,6 +1224,45 @@ describe('contributes.sourceControl', () => {
     }
   });
 
+  test('a change-based host declares the change term, votes, revisions, submit and basic auth', () => {
+    const result = withSourceControl({
+      terminology: { changeRequest: 'change', ci: 'checks' },
+      capabilities: { ...sourceControl.capabilities, reviews: true, merge: { methods: ['submit'] }, reviewModel: 'votes', revisions: true },
+      token: { header: 'authorization', scheme: 'basic', username: true, scopes: [], createPath: '/settings/' },
+      presentation: { ...sourceControl.presentation, features: { submitRequirements: true } },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const parsed = result.manifest.contributes.sourceControl;
+    expect(parsed?.terminology.changeRequest).toBe('change');
+    expect(parsed?.capabilities).toMatchObject({ merge: { methods: ['submit'] }, reviewModel: 'votes', revisions: true });
+    expect(parsed?.token).toMatchObject({ scheme: 'basic', username: true });
+    expect(parsed?.presentation.features).toEqual({ authorCanReview: false, issueCloseReason: false, submitRequirements: true });
+    expect(withSourceControl({ capabilities: { ...sourceControl.capabilities, reviewModel: 'stars' } })).toMatchObject({ ok: false, code: 'invalid-service' });
+    expect(withSourceControl({ terminology: { changeRequest: 'patch', ci: 'checks' } })).toMatchObject({ ok: false, code: 'invalid-service' });
+  });
+
+  test('submit is the only merge method when present', () => {
+    const merge = (methods: string[]) => withSourceControl({ capabilities: { ...sourceControl.capabilities, merge: { methods } } });
+    expect(merge(['submit']).ok).toBe(true);
+    for (const methods of [['submit', 'merge'], ['squash', 'submit'], ['submit', 'submit']]) {
+      const result = merge(methods);
+      expect(result).toMatchObject({ ok: false, code: 'invalid-service' });
+      if (!result.ok) expect(result.message.startsWith('contributes.sourceControl.capabilities.merge')).toBe(true);
+    }
+  });
+
+  test('the basic scheme needs a username field, and only basic takes one', () => {
+    const token = <T,>(patch: T) => withSourceControl({ token: { ...sourceControl.token, ...patch } });
+    expect(token({ scheme: 'basic', username: true }).ok).toBe(true);
+    const missing = token({ scheme: 'basic' });
+    expect(missing).toMatchObject({ ok: false, code: 'invalid-service' });
+    if (!missing.ok) expect(missing.message.startsWith('contributes.sourceControl.token')).toBe(true);
+    expect(token({ scheme: 'basic', username: false })).toMatchObject({ ok: false, code: 'invalid-service' });
+    expect(token({ scheme: 'token', username: true })).toMatchObject({ ok: false, code: 'invalid-service' });
+    expect(token({ header: 'private-token', scheme: 'basic', username: true })).toMatchObject({ ok: false, code: 'invalid-service' });
+  });
+
   test('URL templates take only the known placeholders as whole segments, never a pattern', () => {
     const urls = (changeRequest: string[], repositoryPath = 'owner/name') => withSourceControl({
       repositoryPath,

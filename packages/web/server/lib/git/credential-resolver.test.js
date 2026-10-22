@@ -197,6 +197,27 @@ describe('Git credential resolver', () => {
     })).rejects.toThrow('Invalid managed provider instance');
   });
 
+  it('reaches a loopback HTTP instance of a provider that allows one, and no plain HTTP host besides', async () => {
+    const credentialFor = (instance) => createHttpsCredentialReference({
+      provider: 'gitea', instance, credentialId: 'credential-one', credentialRevision: 1, providerUserId: `${instance}#7`,
+    });
+    const readTransportCredential = vi.fn(async ({ instance }) => ({
+      credentialId: 'credential-one', credentialRevision: 1, providerUserId: `${instance}#7`, status: 'valid', secret: 'secret', user: { login: 'alice' },
+    }));
+    const resolver = createGitCredentialResolver({ readTransportCredential, describeProvider });
+    const local = 'http://localhost:3000';
+    await expect(resolver.resolve({
+      mode: 'managed', credentialId: credentialFor(local), endpoint: { protocol: 'http', host: 'localhost', port: 3000, path: 'team/repo.git' },
+    })).resolves.toMatchObject({ transport: 'https', username: 'alice', allowedEndpoint: { protocol: 'http', host: 'localhost', port: 3000 } });
+    // The same host over HTTPS is another origin, and an HTTPS instance is never reached over HTTP.
+    await expect(resolver.resolve({
+      mode: 'managed', credentialId: credentialFor(local), endpoint: { protocol: 'https', host: 'localhost', port: 3000, path: 'team/repo.git' },
+    })).rejects.toThrow('outside the managed credential policy');
+    await expect(resolver.resolve({
+      mode: 'managed', credentialId: credentialFor('https://gitea.example.com'), endpoint: { protocol: 'http', host: 'gitea.example.com', path: 'team/repo.git' },
+    })).rejects.toThrow('outside the managed credential policy');
+  });
+
   it('fails closed on a provider this build does not know, before any credential lookup', async () => {
     const readTransportCredential = vi.fn();
     const credentialId = createHttpsCredentialReference({

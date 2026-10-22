@@ -13,6 +13,10 @@
  * because the next read must see the provider's answer, not this one; a read
  * that started before an invalidation answers its caller but stores nothing,
  * so it cannot refill what the invalidation dropped.
+ *
+ * A host whose status is derived from the local branch tip (a change found
+ * by the tip's Change-Id) passes that tip as `localTip`, so a new commit or a
+ * rewritten one is a different entry and never answered from the old one.
  */
 export const createChangeRequestStatusCache = ({ ttlMs, maxEntries = 500, now = Date.now }) => {
   const entries = new Map();
@@ -20,7 +24,7 @@ export const createChangeRequestStatusCache = ({ ttlMs, maxEntries = 500, now = 
 
   const keyOf = (context) => JSON.stringify([
     context.instance, context.accountId, context.credentialRevision,
-    context.repositoryId, context.bindingRevision, context.directory, context.branch, context.remote,
+    context.repositoryId, context.bindingRevision, context.directory, context.branch, context.remote, context.localTip ?? null,
   ]);
 
   return Object.freeze({
@@ -43,7 +47,10 @@ export const createChangeRequestStatusCache = ({ ttlMs, maxEntries = 500, now = 
         const oldest = entries.keys().next().value;
         if (oldest !== undefined) entries.delete(oldest);
       }
-      entries.set(key, { data: stamped, fetchedAt, instance: context.instance, accountId: context.accountId, repositoryId: context.repositoryId });
+      entries.set(key, {
+        data: stamped, fetchedAt, instance: context.instance, accountId: context.accountId, repositoryId: context.repositoryId,
+        directory: context.directory, branch: context.branch,
+      });
       return stamped;
     },
     /** Drops every entry whose stored scope matches all given fields. */

@@ -8,7 +8,13 @@ import type {
   ChangeRequest,
   ChangeRequestCommit,
   ChangeRequestContext,
+  ChangeRequestLocalRevision,
+  ChangeRequestReviewComment,
+  ChangeRequestRevision,
+  ChangeRequestSubmitRequirement,
   ChangeRequestVerdict,
+  ChangeRequestVote,
+  ChangeRequestVoteLabel,
   PullRequestStack,
   ChangeRequestStatus,
   CI,
@@ -174,22 +180,28 @@ interface MutationResultDTO {
   state?: string;
 }
 
+/** A review on the wire: `{ verdict, body? }` as before, or `{ votes, body? }` for a host that reviews by votes. */
+type ReviewBody = MutationBody<SourceControlExistingMutationTarget> & { body?: string } & (
+  | { verdict: NonNullable<ReviewChangeRequestInput['verdict']> }
+  | { votes: Record<string, number> }
+);
+
 type SourceControlFetch = (input: string, init?: RuntimeFetchOptions) => Promise<Response>;
 type PostBody =
   | { flowId: string }
-  | { token: string }
+  | { token: string; username?: string }
   | { accountId: string }
   | { disabled: boolean }
   | CreateBody
   | UpdateBody
-  | (MutationBody<SourceControlExistingMutationTarget> & { method: 'merge' | 'squash' | 'rebase' })
+  | (MutationBody<SourceControlExistingMutationTarget> & { method: MergeChangeRequestInput['method'] })
   | (MutationBody<SourceControlExistingMutationTarget> & { body: string })
   | (MutationBody<SourceControlExistingMutationTarget> & { threadId: string; body: string })
   | (MutationBody<SourceControlExistingMutationTarget> & { threadId: string; resolved: boolean })
   | (MutationBody<SourceControlExistingMutationTarget> & { state: SetStateInput['state'] })
   | (MutationBody<SourceControlExistingMutationTarget> & { labels: string[] })
   | (MutationBody<SourceControlExistingMutationTarget> & { reviewers: string[] })
-  | (MutationBody<SourceControlExistingMutationTarget> & { verdict: ReviewChangeRequestInput['verdict']; body?: string })
+  | ReviewBody
   | MutationBody;
 
 interface WebSourceControlAPIOptions {
@@ -204,13 +216,26 @@ interface WebSourceControlAPIOptions {
  * uses.
  */
 type InstanceFormat = SourceControlProviderDescriptor['instances']['format'];
-const providerInstances = new Map<string, { format: InstanceFormat; label: string }>();
+const providerInstances = new Map<string, { format: InstanceFormat; label: string; pathStyle: boolean }>();
 
-const rememberProviderInstances = (descriptors: readonly SourceControlProviderDescriptor[]): void => {
+const rememberProviderInstances = (descriptors: ReadonlyArray<Pick<SourceControlProviderDescriptor, 'id' | 'label' | 'instances' | 'repository'>>): void => {
   for (const descriptor of descriptors) {
-    providerInstances.set(descriptor.id, { format: descriptor.instances.format, label: descriptor.label });
+    providerInstances.set(descriptor.id, {
+      format: descriptor.instances.format, label: descriptor.label, pathStyle: descriptor.repository.pathStyle === 'path',
+    });
   }
 };
+
+/**
+ * A project owner as `identity`'s provider allows it: never empty, except a
+ * path-style provider's top-level project, whose owner is the empty string.
+ * A provider whose descriptor has not been read yet may be path-style, so its
+ * empty owner passes and the server, which knows the provider, validates it.
+ */
+const isProjectOwner = (identity: SourceControlIdentity, owner: BoundaryScalar): owner is string => (
+  isStringValue(owner)
+    && (owner.trim().length > 0 || (owner === '' && providerInstances.get(identity.provider)?.pathStyle !== false))
+);
 rememberProviderInstances(BUILT_IN_SOURCE_CONTROL_PROVIDERS);
 
 const providerLabel = (identity: SourceControlIdentity): string => providerInstances.get(identity.provider)?.label ?? identity.provider;
@@ -426,7 +451,7 @@ function mutationBody(
   if (!isNonEmptyString(payload.directory) || !isNonEmptyString(payload.repositoryId)
     || !isNonEmptyString(payload.accountId) || !isNonNegativeSafeInteger(payload.bindingRevision)
     || !isNonEmptyString(payload.primaryRemote) || !isNonEmptyString(payload.idempotencyKey)
-    || !target || !isNonEmptyString(target.project?.owner) || !isNonEmptyString(target.project?.name)
+    || !target || !isProjectOwner(identity, target.project?.owner) || !isNonEmptyString(target.project?.name)
     || (operation === 'create' && ('number' in target || 'headSha' in target))
     || (operation === 'create' && (!isNonEmptyString(target.head) || !isNonEmptyString(target.base)))
     || (operation === 'existing' && !isPositiveSafeInteger(target.number))
@@ -510,7 +535,7 @@ const parseMutationReceipt = <TResult>(
     ])
     || !isNonEmptyString(target.repositoryId) || !isNonNegativeSafeInteger(target.bindingRevision)
     || !isNonEmptyString(target.primaryRemote) || !project || !hasExactKeys(project, ['id', 'owner', 'name'])
-    || !isNonEmptyString(project.id) || !isNonEmptyString(project.owner) || !isNonEmptyString(project.name)
+    || !isNonEmptyString(project.id) || !isProjectOwner(identity, project.owner) || !isNonEmptyString(project.name)
     || (target.number !== undefined && !isPositiveSafeInteger(target.number))
     || (target.head !== undefined && !isNonEmptyString(target.head))
     || (target.base !== undefined && !isNonEmptyString(target.base))
@@ -643,7 +668,7 @@ const parseSourceUser = (user: SourceUserDTO, identity: SourceControlIdentity): 
 };
 
 const parseSourceProject = (project: Project, identity: SourceControlIdentity): Project => {
-  if (!project || !isValidId(project.id) || !isNonEmptyString(project.owner) || !isNonEmptyString(project.name)
+  if (!project || !isValidId(project.id) || !isProjectOwner(identity, project.owner) || !isNonEmptyString(project.name)
     || !isHttpUrl(project.url) || !hasMatchingIdentity(project, identity)
     || (project.cloneUrl !== undefined && !isNonEmptyString(project.cloneUrl))
     || (project.sshUrl !== undefined && !isNonEmptyString(project.sshUrl))
@@ -763,7 +788,12 @@ const parseSourceChangeRequest = (request: ChangeRequest, identity: SourceContro
     || (request.mergeable !== undefined && request.mergeable !== null && !isBooleanValue(request.mergeable))
     || (request.mergeableState !== undefined && request.mergeableState !== null && !isStringValue(request.mergeableState))
     || (request.labels !== undefined && (!Array.isArray(request.labels) || request.labels.some((label) => !label
-      || !isNonEmptyString(label.name) || (label.color !== undefined && !isStringValue(label.color)))))) {
+      || !isNonEmptyString(label.name) || (label.color !== undefined && !isStringValue(label.color)))))
+    || (request.workInProgress !== undefined && !isBooleanValue(request.workInProgress))
+    || (request.private !== undefined && !isBooleanValue(request.private))
+    || (request.topic !== undefined && !isStringValue(request.topic))
+    || (request.hashtags !== undefined && (!Array.isArray(request.hashtags) || request.hashtags.some((tag) => !isNonEmptyString(tag))))
+    || (request.revisionNumber !== undefined && !isPositiveSafeInteger(request.revisionNumber))) {
     throw new Error('Source control response contained an invalid change request');
   }
   const result: ChangeRequest = {
@@ -790,6 +820,11 @@ const parseSourceChangeRequest = (request: ChangeRequest, identity: SourceContro
   if (request.mergeable !== undefined) result.mergeable = request.mergeable;
   if (request.mergeableState !== undefined) result.mergeableState = request.mergeableState;
   if (request.labels !== undefined) result.labels = request.labels.map((label) => ({ name: label.name, color: label.color }));
+  if (request.workInProgress !== undefined) result.workInProgress = request.workInProgress;
+  if (request.private !== undefined) result.private = request.private;
+  if (request.topic) result.topic = request.topic;
+  if (request.hashtags !== undefined) result.hashtags = [...request.hashtags];
+  if (request.revisionNumber !== undefined) result.revisionNumber = request.revisionNumber;
   return result;
 };
 
@@ -877,6 +912,80 @@ const parseSourceVerdict = (verdict: ChangeRequestVerdict, identity: SourceContr
   }
   const result: ChangeRequestVerdict = { state: verdict.state, url: verdict.url, createdAt: verdict.createdAt };
   if (verdict.author) result.author = parseSourceUser(verdict.author, identity);
+  return result;
+};
+
+const VOTE_STATUSES = ['approved', 'rejected', 'recommended', 'disliked', 'neutral'] as const;
+const REQUIREMENT_STATUSES = ['satisfied', 'unsatisfied', 'overridden', 'not-applicable', 'error', 'forced'] as const;
+const REVISION_KINDS = ['rework', 'trivial-rebase', 'merge-first-parent-update', 'no-code-change', 'no-change'] as const;
+const isVoteValue = (value: BoundaryScalar): value is number => isNumberValue(value) && Number.isInteger(value) && value >= -10 && value <= 10;
+
+const parseSourceVote = (vote: ChangeRequestVote, identity: SourceControlIdentity): ChangeRequestVote => {
+  if (!vote || !isVoteValue(vote.value) || (vote.revision !== undefined && !isPositiveSafeInteger(vote.revision))) {
+    throw new Error('Source control response contained an invalid vote');
+  }
+  const result: ChangeRequestVote = { user: parseSourceUser(vote.user, identity), value: vote.value };
+  if (vote.revision !== undefined) result.revision = vote.revision;
+  return result;
+};
+
+const parseSourceVoteLabel = (label: ChangeRequestVoteLabel, identity: SourceControlIdentity): ChangeRequestVoteLabel => {
+  const status = VOTE_STATUSES.find((candidate) => candidate === label?.status);
+  if (!label || !isNonEmptyString(label.name) || !status || !isVoteValue(label.defaultValue) || !isBooleanValue(label.blocking)
+    || !Array.isArray(label.values) || label.values.some((entry) => !entry || !isVoteValue(entry.value) || !isStringValue(entry.description))
+    || !Array.isArray(label.permitted) || label.permitted.some((value) => !isVoteValue(value))
+    || !Array.isArray(label.votes)) {
+    throw new Error('Source control response contained an invalid vote label');
+  }
+  return {
+    name: label.name,
+    values: label.values.map((entry) => ({ value: entry.value, description: entry.description })),
+    defaultValue: label.defaultValue,
+    permitted: [...label.permitted],
+    blocking: label.blocking,
+    status,
+    votes: label.votes.map((vote) => parseSourceVote(vote, identity)),
+  };
+};
+
+const parseSourceSubmitRequirement = (requirement: ChangeRequestSubmitRequirement): ChangeRequestSubmitRequirement => {
+  const status = REQUIREMENT_STATUSES.find((candidate) => candidate === requirement?.status);
+  if (!requirement || !isNonEmptyString(requirement.name) || !status
+    || (requirement.description !== undefined && !isStringValue(requirement.description))) {
+    throw new Error('Source control response contained an invalid submit requirement');
+  }
+  const result: ChangeRequestSubmitRequirement = { name: requirement.name, status };
+  if (requirement.description) result.description = requirement.description;
+  return result;
+};
+
+const parseSourceRevision = (revision: ChangeRequestRevision, identity: SourceControlIdentity): ChangeRequestRevision => {
+  const kind = revision?.kind === undefined ? undefined : REVISION_KINDS.find((candidate) => candidate === revision.kind);
+  if (!revision || !isPositiveSafeInteger(revision.number) || !isNonEmptyString(revision.sha) || !isNonEmptyString(revision.ref)
+    || (revision.createdAt !== null && !isNonEmptyString(revision.createdAt)) || (revision.kind !== undefined && !kind)) {
+    throw new Error('Source control response contained an invalid revision');
+  }
+  const result: ChangeRequestRevision = { number: revision.number, sha: revision.sha, createdAt: revision.createdAt, ref: revision.ref };
+  if (revision.uploader) result.uploader = parseSourceUser(revision.uploader, identity);
+  if (kind) result.kind = kind;
+  return result;
+};
+
+const parseSourceLocalRevision = (local: ChangeRequestLocalRevision): ChangeRequestLocalRevision => {
+  if (!local || !isNonEmptyString(local.sha)
+    || (local.changeId !== null && !isNonEmptyString(local.changeId))
+    || (local.uploadedAs !== null && !isPositiveSafeInteger(local.uploadedAs))) {
+    throw new Error('Source control response contained an invalid local revision');
+  }
+  return { sha: local.sha, changeId: local.changeId, uploadedAs: local.uploadedAs };
+};
+
+const parseSourceReviewComment = (comment: ChangeRequestReviewComment, identity: SourceControlIdentity): ChangeRequestReviewComment => {
+  if (comment?.revision !== undefined && !isPositiveSafeInteger(comment.revision)) {
+    throw new Error('Source control response contained an invalid review comment');
+  }
+  const result: ChangeRequestReviewComment = { ...parseSourceComment(comment, identity), path: comment.path, line: comment.line, position: comment.position };
+  if (comment.revision !== undefined) result.revision = comment.revision;
   return result;
 };
 
@@ -992,6 +1101,12 @@ const parseSourceChangeRequestStatus = (
   if (payload.defaultBranch !== undefined) result.defaultBranch = payload.defaultBranch;
   if (payload.resolvedRemoteName !== undefined) result.resolvedRemoteName = payload.resolvedRemoteName;
   if (payload.fetchedAt !== undefined) result.fetchedAt = payload.fetchedAt;
+  if (payload.localRevision !== undefined) result.localRevision = parseSourceLocalRevision(payload.localRevision);
+  if (payload.stack === null) result.stack = null;
+  else if (payload.stack !== undefined) {
+    const stack = parseOptionalStack(payload.stack);
+    if (stack) result.stack = stack;
+  }
   return result;
 };
 
@@ -1165,9 +1280,9 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
       }
       return { status: 'error', code, message: payload.error || payload.status || `${providerLabel(identity)} authentication failed` };
     },
-    authSetToken: async (identity, token) => {
+    authSetToken: async (identity, token, tokenOptions) => {
       const normalized = normalizeIdentity(identity);
-      await post<ErrorResponse>(fetch, normalized, '/auth/token', { token });
+      await post<ErrorResponse>(fetch, normalized, '/auth/token', tokenOptions?.username ? { token, username: tokenOptions.username } : { token });
       return parseProviderAuthStatus(await request<ProviderAuthStatusDTO & ErrorResponse>(fetch, normalized, '/auth/status'), normalized);
     },
     authDisconnect: async (identity, accountId) => {
@@ -1262,9 +1377,18 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
     },
     changeRequestReview: async (payload: ReviewChangeRequestInput) => {
       const identity = normalizeIdentity(payload);
-      const body: MutationBody<SourceControlExistingMutationTarget> & { verdict: ReviewChangeRequestInput['verdict']; body?: string } = {
-        ...mutationBody(payload, identity, 'existing'), verdict: payload.verdict,
-      };
+      const context = mutationBody(payload, identity, 'existing');
+      // Exactly one of the two: a verdict as before, or votes; never both, never a guess between them.
+      let body: ReviewBody;
+      if (payload.votes !== undefined) {
+        const entries = Object.entries(payload.votes);
+        if (payload.verdict !== undefined || entries.length === 0 || entries.some(([label, value]) => !isNonEmptyString(label) || !isVoteValue(value))) {
+          throw new Error('Source control review input is invalid');
+        }
+        body = { ...context, votes: Object.fromEntries(entries) };
+      } else {
+        body = { ...context, verdict: payload.verdict };
+      }
       if (payload.body !== undefined) body.body = payload.body;
       const result = await post<MutationReceiptDTO>(fetch, identity, '/pr/review', body);
       return parseMutationReceipt(result, payload, identity, parseReviewMutationResult);
@@ -1337,6 +1461,7 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
       if (contextOptions?.includeDiff) query.set('diff', '1');
       if (contextOptions?.includeCIDetails) query.set('checkDetails', '1');
       if (contextOptions?.includeTimeline) query.set('timeline', '1');
+      if (contextOptions?.revision) query.set('revision', contextOptions.revision);
       if (contextOptions?.project) {
         query.set('owner', contextOptions.project.owner);
         query.set('repo', contextOptions.project.name);
@@ -1347,7 +1472,7 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
         project: payload.project ? parseSourceProject(payload.project, normalized) : null,
         changeRequest: payload.changeRequest ? parseSourceChangeRequest(payload.changeRequest, normalized) : null,
         issueComments: payload.issueComments.map((comment) => parseSourceComment(comment, normalized)),
-        reviewComments: payload.reviewComments.map((comment) => ({ ...parseSourceComment(comment, normalized), path: comment.path, line: comment.line, position: comment.position })),
+        reviewComments: payload.reviewComments.map((comment) => parseSourceReviewComment(comment, normalized)),
         files: payload.files.map((file) => ({ ...file })),
         diff: payload.diff,
         ci: parseSourceCI(payload.ci, normalized),
@@ -1364,6 +1489,19 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
       else if (payload.stack !== undefined) {
         const stack = parseOptionalStack(payload.stack);
         if (stack) result.stack = stack;
+      }
+      // A review host's labels, requirements and revisions; absent for every other host.
+      if (payload.voteLabels !== undefined) {
+        if (!Array.isArray(payload.voteLabels)) throw new Error('Source control response contained invalid vote labels');
+        result.voteLabels = payload.voteLabels.map((label) => parseSourceVoteLabel(label, normalized));
+      }
+      if (payload.submitRequirements !== undefined) {
+        if (!Array.isArray(payload.submitRequirements)) throw new Error('Source control response contained invalid submit requirements');
+        result.submitRequirements = payload.submitRequirements.map(parseSourceSubmitRequirement);
+      }
+      if (payload.revisions !== undefined) {
+        if (!Array.isArray(payload.revisions)) throw new Error('Source control response contained invalid revisions');
+        result.revisions = payload.revisions.map((revision) => parseSourceRevision(revision, normalized));
       }
       return result;
     },

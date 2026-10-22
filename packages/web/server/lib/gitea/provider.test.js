@@ -186,7 +186,7 @@ describe('Gitea in the registry (smoke)', () => {
 
     const providers = await request(app).get('/api/source-control/providers');
     expect(providers.status).toBe(200);
-    expect(providers.body.providers.map((provider) => [provider.id, provider.order])).toEqual([['github', 0], ['gitlab', 1], ['gitea', 2]]);
+    expect(providers.body.providers.map((provider) => [provider.id, provider.order])).toEqual([['github', 0], ['gitlab', 1], ['gitea', 2], ['gerrit', 3]]);
 
     const status = await request(app).get('/api/source-control/gitea/auth/status').query({ instance: 'https://gitea.example.com' });
     expect(status.status).toBe(200);

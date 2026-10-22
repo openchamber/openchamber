@@ -7,11 +7,16 @@
 /** `^[a-z][a-z0-9-]{0,31}$`, persisted verbatim; `github` and `gitlab` are never renamed; `ext-` names an extension's provider. */
 export type ProviderId = string;
 
-export type ChangeRequestTerm = 'pullRequest' | 'mergeRequest';
+/** `change`: a host that reviews one commit at a time (Gerrit); its reviews are votes, its merge is submit. */
+export type ChangeRequestTerm = 'pullRequest' | 'mergeRequest' | 'change';
 /** What a provider calls the automation on a change request; English model-facing text picks its noun by it. */
 type CiTerm = 'checks' | 'pipeline';
-export type SettingsFieldKind = 'instance-url' | 'personal-access-token';
-export type MergeMethod = 'merge' | 'squash' | 'rebase';
+/** `username` is not secret; `http-password` is the secret a Basic-auth host pairs with it. */
+export type SettingsFieldKind = 'instance-url' | 'personal-access-token' | 'username' | 'http-password';
+/** `submit` merges the way the host's project is set up; when present it is the only method. */
+export type MergeMethod = 'merge' | 'squash' | 'rebase' | 'submit';
+/** `verdict`: approve / request changes. `votes`: integer votes on labels the change's context lists. */
+export type ReviewModel = 'verdict' | 'votes';
 
 export interface ProviderCapabilities {
   projects: boolean;
@@ -32,6 +37,12 @@ export interface ProviderCapabilities {
   liveSummaries: boolean;
   referencePicker: boolean;
   multipleAccounts: boolean;
+  /** Absent means `verdict`: `/pr/review` takes `{ verdict, body? }`. `votes` takes `{ votes, body? }` instead. */
+  reviewModel?: ReviewModel;
+  /** The host keeps every uploaded revision of a change; reads may name one by its 40-hex SHA. */
+  revisions?: boolean;
+  /** Absent means `api` (`/pr/create`). `push`: a change is created by pushing to `refs/for/<branch>`. */
+  createVia?: 'api' | 'push';
 }
 
 /** Synchronous and SDK-free: the Git layer, bindings and tracked items read it directly. */
@@ -50,7 +61,18 @@ export interface ProviderDescriptor {
     /** The HTTPS (or loopback HTTP) origin of a normalized instance. */
     origin(instance: string): URL;
   };
-  repositoryPath: 'owner/name' | 'namespace/name';
+  /**
+   * `path`: projects are any path, with or without an owner segment (Gerrit's
+   * `demo`, `team/app/sub`). A selector keeps `{ owner, name }`, split on the
+   * last slash (`project-path.js`), and `owner` may be the empty string.
+   */
+  repositoryPath: 'owner/name' | 'namespace/name' | 'path';
+  /**
+   * The project path a remote's URL path names, when the host adds to it (a
+   * Gerrit HTTP remote may carry its `/a/` authentication prefix). Without
+   * it the path is the URL path less a trailing `.git`.
+   */
+  projectPathOfRemote?(remote: { protocol: 'https' | 'http' | 'ssh'; path: string }): string;
   capabilities: ProviderCapabilities;
   authMethods: { device: boolean; pat: boolean; cli: false | { tool: string } };
   transport: {
@@ -79,6 +101,10 @@ export interface ProviderDescriptor {
       referenceSearch: boolean; referenceDetail: boolean; listStatuses: boolean; referencesAcross: boolean;
       startThread: boolean; authorCanReview: boolean; projectUploads: boolean; issueCloseReason: boolean;
       changeRequestTemplates: string[];
+      /** False when a change request's head is a revision ref, not a branch (no stack-on-top, no branch row). Absent means true. */
+      branchHeads?: boolean;
+      /** The context carries `submitRequirements`, and `mergeable` follows them. */
+      submitRequirements?: boolean;
     };
   };
   /** GitHub only, declarative: the `/api/github` aliases its routes keep. */
@@ -116,7 +142,8 @@ export interface PublicProviderDescriptor {
     ci: CiTerm;
   };
   icon: { sprite?: string; filledSprite?: string; path?: string };
-  repository: { nestedNamespaces: boolean };
+  /** `pathStyle: 'path'` only for a `repositoryPath: 'path'` provider (absent otherwise, so built-ins publish as before). */
+  repository: { nestedNamespaces: boolean; pathStyle?: 'path' };
   instances: {
     format: 'host' | 'origin';
     defaultInstance: string | null;
@@ -135,7 +162,20 @@ export interface PublicProviderDescriptor {
   };
   settings: { fields: Array<{ id: string; kind: SettingsFieldKind; secret: boolean }> };
   urls: { changeRequest: string[]; issue: string[] };
-  features: ProviderDescriptor['presentation']['features'];
+  /**
+   * The presentation features, plus the capability-derived ones a change
+   * host declares (`reviewModel`, `revisions`, `createByPush`).
+   * Each is published only when declared, so a host that declares none
+   * publishes exactly what it did before.
+   */
+  features: ProviderDescriptor['presentation']['features'] & {
+    /** `capabilities.reviewModel`. */
+    reviewModel?: ReviewModel;
+    /** `capabilities.revisions`. */
+    revisions?: boolean;
+    /** `capabilities.createVia === 'push'`. */
+    createByPush?: boolean;
+  };
   /** Present when an installed extension serves the provider. */
   extension?: { guestId: string; name: string; version: string };
 }
@@ -208,7 +248,8 @@ export interface ProviderImplementation {
     }>;
     /** Calls `consume()` once the flow reached a terminal answer. */
     completeDeviceFlow?(input: { instance: string; deviceCode: string; clientId: string }, control: { consume(): void }): Promise<{ pending: boolean; body: Json }>;
-    connectToken?(input: { instance: string; token: string }): Promise<Json>;
+    /** `username` only for a provider whose settings declare a `username` field (Basic auth). */
+    connectToken?(input: { instance: string; token: string; username?: string }): Promise<Json>;
     activate?(input: { instance: string; accountId: string }): Promise<Json>;
     setCliDisabled?(input: { instance: string; disabled: boolean }): Promise<{ available: boolean; disabled: boolean }>;
     /** Reports `removed` before the provider changes its store. */
@@ -238,6 +279,8 @@ export interface ProviderImplementation {
     listChangeRequests?(input: ReadInput & { page: number; query?: string; state: string; people: string }): Promise<Json>;
     changeRequestContext?(input: ReadInput & {
       number: number; project?: ProjectSelector; includeDiff: boolean; includeCIDetails: boolean; includeTimeline: boolean;
+      /** Only with `capabilities.revisions`: files and diff of that revision (40-hex). */
+      revision?: string;
     }): Promise<Json>;
     listIssues?(input: ReadInput & { page: number; query?: string; state: string; people: string }): Promise<Json>;
     getIssue?(input: ReadInput & { number: number; project?: ProjectSelector }): Promise<Json>;
@@ -248,9 +291,10 @@ export interface ProviderImplementation {
     listReviewerCandidates?(input: ReadInput & { project: ProjectSelector }): Promise<Json>;
     /** The attachment as the provider's fetch Response; the shell checks its type and streams it. */
     readUpload?(input: ReadInput & { project: ProjectSelector; secret: string; filename: string; range?: string; signal: AbortSignal }): Promise<Response>;
-    readChangeRequestPatch?(input: ReadInput & { number: number; sourceRepo?: { owner: string; repo: string } }): Promise<Json>;
+    /** `revision` (40-hex) only when the descriptor declares `capabilities.revisions`; absent means the current one. */
+    readChangeRequestPatch?(input: ReadInput & { number: number; sourceRepo?: { owner: string; repo: string }; revision?: string }): Promise<Json>;
     readChangeRequestFile?(input: ReadInput & {
-      number: number; sourceRepo?: { owner: string; repo: string }; path: string; previousPath?: string; status?: string;
+      number: number; sourceRepo?: { owner: string; repo: string }; path: string; previousPath?: string; status?: string; revision?: string;
     }): Promise<Json>;
     liveSummaries?(input: { session: ProviderSession; refs: Json[]; issueRefs: Json[] }): Promise<Json>;
     readChangeRequestHead?(input: ReadInput & { number: number }): Promise<{
@@ -286,4 +330,73 @@ export interface ProviderImplementation {
     /** How a failed mutation answers, after the shell wrote off a refused account; without it the shell's own mapping. */
     presentError?(error: Error): { status: number; body: Json };
   };
+}
+
+/**
+ * Account verification for a provider built on `pat-account-auth.js`.
+ * `credentials` is passed only when the descriptor declares a `username`
+ * settings field (Basic auth): the username typed at connect, then the
+ * stored `user.login` on every re-verify. Other providers get `(origin, token)`.
+ */
+export type VerifyToken = (origin: string, token: string, credentials?: { username: string }) => Promise<TransportCredential['user']>;
+/** Without a token: whether the instance is supported. With one (Basic-auth hosts at connect): read as that user when anonymous reads are blocked. */
+export type ProbeInstance = (origin: string, token?: string, credentials?: { username: string }) => Promise<{ supported: boolean; version?: string; message?: string }>;
+
+/*
+ * Optional DTO fields of change-based review hosts. The DTOs themselves are
+ * `Json` here (the UI's `types.ts` owns their full shape); these name the
+ * fields a host that declares the matching capability may add. Hosts that
+ * declare none never send them.
+ */
+
+/** One label of a votes host's change (`ChangeRequestContext.voteLabels`). */
+export interface ChangeRequestVoteLabel {
+  name: string;
+  values: Array<{ value: number; description: string }>;
+  defaultValue: number;
+  /** What the caller may vote on the current revision. */
+  permitted: number[];
+  blocking: boolean;
+  status: 'approved' | 'rejected' | 'recommended' | 'disliked' | 'neutral';
+  votes: Array<{ user: Json; value: number; revision?: number }>;
+}
+
+export interface ChangeRequestSubmitRequirement {
+  name: string;
+  status: 'satisfied' | 'unsatisfied' | 'overridden' | 'not-applicable' | 'error' | 'forced';
+  description?: string;
+}
+
+/** One uploaded revision, oldest first (`ChangeRequestContext.revisions`). */
+export interface ChangeRequestRevision {
+  number: number;
+  sha: string;
+  createdAt: string;
+  uploader?: Json;
+  kind?: 'rework' | 'trivial-rebase' | 'merge-first-parent-update' | 'no-code-change' | 'no-change';
+  /** The revision's fetchable ref (`refs/changes/NN/NNNN/P`). */
+  ref: string;
+}
+
+export interface ChangeRequestContextExtensions {
+  voteLabels?: ChangeRequestVoteLabel[];
+  submitRequirements?: ChangeRequestSubmitRequirement[];
+  revisions?: ChangeRequestRevision[];
+}
+
+export interface ChangeRequestExtensions {
+  private?: boolean;
+  topic?: string;
+  /** The number of the revision `headSha` names. */
+  revisionNumber?: number;
+}
+
+export interface ChangeRequestStatusExtensions {
+  /**
+   * Push-create hosts: the local tip's Change-Id and which uploaded revision
+   * equals local HEAD (`uploadedAs: null` means local commits are not uploaded).
+   */
+  localRevision?: { sha: string; changeId: string | null; uploadedAs: number | null };
+  /** Push-create hosts: open changes stacked on the branch, bottom first (`number: null`). */
+  stack?: Json;
 }

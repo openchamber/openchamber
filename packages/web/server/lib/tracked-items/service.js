@@ -11,6 +11,7 @@
 
 import { sourceControlProviderDescriptors } from '../source-control/provider-descriptors.js';
 import { isWorkItem, threadInstance, trackedItemKey } from './items.js';
+import { joinProjectPath } from '../source-control/project-path.js';
 
 const SECOND = 1000;
 const MINUTE = 60 * SECOND;
@@ -54,7 +55,7 @@ const batchLimitOf = (item) => (isWorkItem(item)
   : sourceControlProviderDescriptors.get(item.provider)?.trackedItems.batchLimit ?? WORK_ITEM_BATCH_LIMIT);
 const isSettledWorkItem = (state) => SETTLED_WORK_ITEM_CATEGORIES.has(state.state?.category);
 const threadRef = (item) => ({ owner: item.owner, repo: item.repo, number: item.number });
-const threadAnswerKey = (ref) => `${ref.owner}/${ref.repo}#${ref.number}`.toLowerCase();
+const threadAnswerKey = (ref) => `${joinProjectPath(ref.owner, ref.repo)}#${ref.number}`.toLowerCase();
 
 const refreshIntervalMs = (entry) => {
   const { item, state } = entry;

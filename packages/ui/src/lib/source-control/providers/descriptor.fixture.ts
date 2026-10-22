@@ -26,7 +26,8 @@ export const acmeDescriptor = (overrides: Partial<SourceControlProviderDescripto
   features: {
     referenceSearch: false, referenceDetail: false, listStatuses: false, referencesAcross: false,
     startThread: false, authorCanReview: false, projectUploads: false, issueCloseReason: true,
-    changeRequestTemplates: [], changeRequestPatch: true,
+    changeRequestTemplates: [], changeRequestPatch: true, reviewModel: 'verdict', revisions: false,
+    submitRequirements: false, createByPush: false, branchHeads: true,
   },
   ...overrides,
 });
@@ -62,3 +63,30 @@ export const gitlabLikeDescriptor = (): SourceControlProviderDescriptor => acmeD
     issue: ['/{namespace+}/{repo}/-/issues/{number}', '/{namespace+}/{repo}/-/work_items/{number}'],
   },
 });
+
+/** A change-based review host: votes on labels, patchsets, submit, and changes created by pushing for review. */
+export const changeHostDescriptor = (): SourceControlProviderDescriptor => {
+  const base = acmeDescriptor();
+  return acmeDescriptor({
+    id: 'review-host',
+    label: 'Review Host',
+    order: 3,
+    terminology: {
+      changeRequest: 'change', changeRequestPrefix: '#', issuePrefix: '#',
+      sharedNumberSpace: true, abbreviation: 'CL', promptNoun: 'change', ci: 'checks',
+    },
+    settings: {
+      fields: [
+        { id: 'instance', kind: 'instance-url', secret: false },
+        { id: 'username', kind: 'username', secret: false },
+        { id: 'password', kind: 'http-password', secret: true },
+      ],
+    },
+    repository: { nestedNamespaces: true, pathStyle: 'path' },
+    urls: { changeRequest: ['/c/{project+}/+/{number}'], issue: [] },
+    features: {
+      ...base.features,
+      reviewModel: 'votes', revisions: true, submitRequirements: true, createByPush: true, branchHeads: false,
+    },
+  });
+};

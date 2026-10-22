@@ -24,7 +24,7 @@ import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
 import { NewWorktreeDialog } from '@/components/session/NewWorktreeDialog';
 import { ReferenceBrowserList, ReferenceBrowserSearch } from '@/components/references/ReferenceBrowser';
-import { IDLE_PULL_STATUS, useReferenceBrowser } from '@/components/references/useReferenceBrowser';
+import { IDLE_PULL_STATUS, readyValue, useReferenceBrowser } from '@/components/references/useReferenceBrowser';
 import { ReferencePreview } from '@/components/references/ReferencePreview';
 import { CHANGE_REQUEST_TAB_KEYS, DEFAULT_REPOSITORY_FILTER, referenceNumberLabel, referencePickerItemKey, trackerOfSource, trackerReferenceSource, type ReferencePickerItem, type ReferencePickerSelection } from '@/components/references/referencePickerItems';
 import { itemDirectory } from '@/components/references/acrossRepositories';
@@ -530,6 +530,14 @@ const SourceBoardBody: React.FC<{
         </span>
     ) : null;
 
+    // The latest revision's detail names the revisions, the votes and what submission needs, whichever one is shown.
+    const latestPull = previewItem?.source === 'repository' && browser.repositoryLatestDetail.status === 'ready'
+        ? browser.repositoryLatestDetail.value.pull
+        : null;
+    // The listed change's status says whether the host would submit it.
+    const previewPullStatus = previewItem?.source === 'repository' && previewItem.reference.kind === 'pull'
+        ? readyValue(browser.pullStatusOf(previewItem.reference, previewItem.directory))
+        : null;
     const actions = previewItem ? (
         <SourceBoardActions
             item={previewItem}
@@ -542,6 +550,9 @@ const SourceBoardBody: React.FC<{
             worktreeAvailable={!readsNestedRepository}
             stack={previewItem?.source === 'repository' && browser.repositoryDetail.status === 'ready' ? browser.repositoryDetail.value.pull?.stack ?? null : null}
             onStartOnTop={actionProject ? (pull) => setWorktreeRequest({ project: actionProject, onTopOf: pull.head }) : undefined}
+            submitRequirements={latestPull?.submitRequirements}
+            submitRequirementsUnreadable={previewItem?.source === 'repository' && browser.repositoryLatestDetail.status === 'error'}
+            mergeable={previewPullStatus?.mergeable ?? null}
         />
     ) : null;
 
@@ -632,6 +643,7 @@ const SourceBoardBody: React.FC<{
             trackerStateControl={previewItem?.source === 'tracker' ? <SourceBoardTrackerStatus item={previewItem.item} onChanged={browser.list.retry} /> : undefined}
             onOpenTrackerItem={(item) => browser.openItem({ source: 'tracker', provider: item.provider, item })}
             onOpenStackLayer={openStackLayer}
+            revisionChoice={latestPull?.revisions ? { revisions: latestPull.revisions, selected: browser.previewRevision, onSelect: browser.selectPreviewRevision } : undefined}
             onOpenChecks={previewPull && context ? () => setChecksOpenFor(previewKey) : undefined}
             onRefresh={previewItem?.source === 'repository' && context ? refreshFromHost : undefined}
             threadActions={threadActions}
@@ -660,6 +672,9 @@ const SourceBoardBody: React.FC<{
                     reference={previewItem.reference}
                     context={context}
                     onRefresh={refreshRepositoryItem}
+                    voteLabels={latestPull?.voteLabels}
+                    latestRevision={latestPull?.revisions?.at(-1)?.sha}
+                    onLatestRevision={browser.previewRevision === null}
                 />
             ) : undefined}
             pullLinks={previewItem?.source === 'repository' && previewItem.reference.kind === 'pull' && actionProject && context ? (
@@ -671,6 +686,7 @@ const SourceBoardBody: React.FC<{
                     projectOwnsDirectory={projectOwnsDirectory}
                     currentDirectory={currentDirectory}
                     onLeave={onLeave}
+                    revision={browser.previewRevision}
                 />
             ) : null}
         />

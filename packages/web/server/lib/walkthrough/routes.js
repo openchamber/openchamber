@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import { parseSource } from './sources.js';
-import { supportsChangeRequestPatch } from './pull-request.js';
+import { supportsChangeRequestPatch, supportsChangeRequestRevisions } from './pull-request.js';
+import { allowsTopLevelProjects } from '../source-control/project-path.js';
+import { sourceControlProviderDescriptors } from '../source-control/provider-descriptors.js';
 
 // The composer's provider, which the model stays on; anything else is no provider.
 const providerIdSchema = z.string().trim().min(1).max(200).optional().catch(undefined);
@@ -65,6 +67,17 @@ export function registerWalkthroughRoutes(app, { getWalkthroughService, validate
         code: 'UNSUPPORTED_WALKTHROUGH_PROVIDER',
       });
     }
+    // An empty owner names a top-level project, which only a path-style provider has.
+    if (source.sourceRepo?.owner === '' && !allowsTopLevelProjects(sourceControlProviderDescriptors.get(readContext.provider))) {
+      throw Object.assign(new Error('pr sources require a valid repository'), { statusCode: 400 });
+    }
+    // A named revision only where the host keeps revisions; elsewhere it would read as the current one.
+    if (source.revision !== undefined && !supportsChangeRequestRevisions(readContext.provider)) {
+      throw Object.assign(new Error('This source control provider does not keep change request revisions'), {
+        statusCode: 400,
+        code: 'INVALID_SOURCE_CONTROL_READ_CONTEXT',
+      });
+    }
     return readContext;
   };
 
@@ -113,6 +126,7 @@ export function registerWalkthroughRoutes(app, { getWalkthroughService, validate
       const { patch } = await getPullRequestDiff(readContext?.directory ?? directory, source.number, readContext, {
         allowEmpty: true,
         sourceRepo: source.sourceRepo ?? null,
+        revision: source.revision,
       });
       res.type('text/plain').send(patch);
     } catch (error) {
@@ -140,6 +154,7 @@ export function registerWalkthroughRoutes(app, { getWalkthroughService, validate
         previousPath,
         status,
         sourceRepo: source.sourceRepo ?? null,
+        revision: source.revision,
       }));
     } catch (error) {
       respondWithError(res, error, 'Failed to load pull request file');

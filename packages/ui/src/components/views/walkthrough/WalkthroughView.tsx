@@ -56,6 +56,7 @@ import { useToolbarFit } from '@/components/views/useDiffToolbarFit';
 import { useRepositoryBinding } from '@/lib/source-control/repository-binding';
 import { NestedRepoResolutionStates } from '@/components/views/git/NestedRepoResolutionStates';
 import { NestedRepoPicker } from '@/components/views/git/NestedRepoPicker';
+import { revisionSuffix } from '@/lib/diff/pullRequestDiff';
 import { ContextPanelHeaderToolbar } from '@/components/layout/contextPanelHeaderSlot';
 import { useInContextPanelHeader } from '@/components/layout/contextPanelHeaderSlotContext';
 
@@ -330,7 +331,7 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
   const sourceLabel = isPrScope ? t(changeRequestCopy('session.githubIntegration.tabs.pullRequests', changeRequestTerm)) : isCommitScope ? t('commitComparison.mode') : isBranchScope
     ? t('walkthrough.scope.branch')
     : source.kind === 'pr'
-      ? t(changeRequestCopy('walkthrough.scope.pullRequest', changeRequestTerm), { number: source.number })
+      ? `${t(changeRequestCopy('walkthrough.scope.pullRequest', changeRequestTerm), { number: source.number })}${revisionSuffix(source)}`
       : scope === 'all'
         ? t('walkthrough.scope.all')
         : scope === 'staged'

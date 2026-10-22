@@ -1,6 +1,7 @@
 import { githubDescriptor } from '../github/descriptor.js';
 import { gitlabDescriptor } from '../gitlab/descriptor.js';
 import { giteaDescriptor } from '../gitea/descriptor.js';
+import { gerritDescriptor } from '../gerrit/descriptor.js';
 import {
   EXTENSION_PROVIDER_PREFIX, isExtensionProviderId, isProviderId, isReservedProviderId,
 } from './provider-id.js';
@@ -12,7 +13,9 @@ import {
  * items read them synchronously; implementations load lazily through the
  * provider registry.
  */
-const BUILT_IN_DESCRIPTORS = Object.freeze([githubDescriptor, gitlabDescriptor, giteaDescriptor]);
+// Appended in order of arrival, so the web adapter's fallback for an older
+// server (GitHub and GitLab) stays the list's leading entries.
+const BUILT_IN_DESCRIPTORS = Object.freeze([githubDescriptor, gitlabDescriptor, giteaDescriptor, gerritDescriptor]);
 
 /**
  * The hosts the built-ins serve by default (github.com, gitlab.com). Their
@@ -26,6 +29,21 @@ export const builtInDefaultHosts = Object.freeze(new Set(BUILT_IN_DESCRIPTORS.fl
 const SHELL_ROUTE_NAMES = Object.freeze(['binding', 'instances', 'providers', 'repository-context']);
 
 const invalidId = (id) => new Error(`Source control provider id is invalid: ${String(id)}`);
+
+/**
+ * The optional change-host capabilities must hold values the clients know,
+ * and `submit` (merge the way the host's project is set up) is never one
+ * choice among others: a host that submits offers nothing else.
+ */
+function assertChangeCapabilities(descriptor) {
+  const { capabilities } = descriptor;
+  const invalid = (what) => new Error(`Source control provider ${descriptor.id} has an invalid ${what}`);
+  const methods = capabilities.merge ? capabilities.merge.methods : [];
+  if (methods.includes('submit') && methods.length !== 1) throw invalid('merge method list: submit must be the only method');
+  if (capabilities.reviewModel !== undefined && !['verdict', 'votes'].includes(capabilities.reviewModel)) throw invalid('review model');
+  if (capabilities.revisions !== undefined && capabilities.revisions !== true && capabilities.revisions !== false) throw invalid('revisions capability');
+  if (capabilities.createVia !== undefined && !['api', 'push'].includes(capabilities.createVia)) throw invalid('create method');
+}
 
 /**
  * A descriptor facade over a list; the default instance serves the built-ins.
@@ -44,6 +62,7 @@ export function createProviderDescriptors(descriptors = BUILT_IN_DESCRIPTORS) {
       || SHELL_ROUTE_NAMES.includes(descriptor.id) || byId.has(descriptor.id)) {
       throw invalidId(descriptor?.id);
     }
+    assertChangeCapabilities(descriptor);
     byId.set(descriptor.id, descriptor);
   }
   const fixed = [...byId.values()];
@@ -60,6 +79,7 @@ export function createProviderDescriptors(descriptors = BUILT_IN_DESCRIPTORS) {
     /** Adds an extension provider's descriptor, or replaces the one with its id. */
     attachExtension: (descriptor) => {
       if (!isExtensionProviderId(descriptor?.id)) throw invalidId(descriptor?.id);
+      assertChangeCapabilities(descriptor);
       extensions.set(descriptor.id, descriptor);
       rebuild();
     },
@@ -81,6 +101,9 @@ export const sourceControlProviderDescriptors = createProviderDescriptors();
  * policy or other server-only fields leave the server. `order` is the
  * registry's priority order. `extension` (`{ guestId, name, version }`) marks
  * a provider an installed extension serves; older clients drop the field.
+ * The change-host features (`reviewModel`, `revisions`, `createByPush`, and
+ * the presentation's `branchHeads` and `submitRequirements`) appear only when
+ * the descriptor declares them.
  */
 export function publicProviderDescriptor(descriptor, order, extension) {
   const { presentation } = descriptor;
@@ -101,7 +124,8 @@ export function publicProviderDescriptor(descriptor, order, extension) {
       ci: descriptor.terminology.ci,
     },
     icon: { ...presentation.icon },
-    repository: { nestedNamespaces: descriptor.repositoryPath === 'namespace/name' },
+    // A path provider also nests namespaces; older clients read just that.
+    repository: { nestedNamespaces: descriptor.repositoryPath !== 'owner/name' },
     instances: {
       format: descriptor.instance.form,
       defaultInstance: descriptor.instance.defaultInstances[0] ?? null,
@@ -134,6 +158,13 @@ export function publicProviderDescriptor(descriptor, order, extension) {
     published.auth.token = { scopes: [...presentation.token.scopes] };
     if (presentation.token.createPath) published.auth.token.createPath = presentation.token.createPath;
   }
+  if (descriptor.repositoryPath === 'path') published.repository.pathStyle = 'path';
+  // A change host's capability-derived features, each only when declared, so
+  // a provider that declares none publishes exactly what it always did.
+  const { capabilities } = descriptor;
+  if (capabilities.reviewModel !== undefined) published.features.reviewModel = capabilities.reviewModel;
+  if (capabilities.revisions !== undefined) published.features.revisions = capabilities.revisions;
+  if (capabilities.createVia !== undefined) published.features.createByPush = capabilities.createVia === 'push';
   if (extension) {
     published.extension = { guestId: extension.guestId, name: extension.name, version: extension.version };
   }

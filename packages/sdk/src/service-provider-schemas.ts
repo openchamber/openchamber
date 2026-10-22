@@ -166,6 +166,33 @@ const liveSummariesSchema = z.object({
 const identitySchema = z.object({ provider: text, instance: text }).passthrough();
 const projectSchema = z.object({ provider: text, instance: text, id: text, owner: text, name: text, url: text }).passthrough();
 
+const STACK_LAYERS_MAX = 50;
+
+/** Change requests stacked on one another, bottom layer first (`PullRequestStack` in the UI). */
+const changeRequestStackSchema = z.object({
+  number: positiveInteger.nullable(),
+  base: text,
+  layers: z.array(z.object({
+    number: positiveInteger,
+    title: z.string().max(4_096),
+    url: text,
+    state: z.enum(['open', 'closed', 'merged']),
+    draft: z.boolean(),
+    head: text,
+  }).passthrough()).max(STACK_LAYERS_MAX),
+}).passthrough();
+
+/**
+ * The local branch tip as a change-based host sees it: its sha, the change id
+ * its commit message carries (null when none), and the revision number it was
+ * uploaded as (null when this commit is not on the host yet).
+ */
+const localRevisionSchema = z.object({
+  sha: commitSha,
+  changeId: z.string().min(1).max(128).nullable(),
+  uploadedAs: positiveInteger.nullable(),
+}).strict();
+
 /** The status OpenChamber caches per branch and shows on every badge. */
 const changeRequestStatusSchema = z.object({
   identity: identitySchema,
@@ -189,6 +216,8 @@ const changeRequestStatusSchema = z.object({
   canMerge: z.boolean().optional(),
   defaultBranch: z.string().max(1_024).nullable().optional(),
   resolvedRemoteName: z.string().max(1_024).nullable().optional(),
+  localRevision: localRevisionSchema.optional(),
+  stack: changeRequestStackSchema.nullable().optional(),
 }).strict();
 
 /** A read OpenChamber passes on unread: a JSON object or array within the response cap. */

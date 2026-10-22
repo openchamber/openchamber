@@ -5,6 +5,7 @@
 
 import { sourceControlProviderDescriptors as descriptors } from '../source-control/provider-descriptors.js';
 import { isProviderId, isReservedProviderId } from '../source-control/provider-id.js';
+import { allowsTopLevelProjects, joinProjectPath } from '../source-control/project-path.js';
 
 const isText = (value) => Object.prototype.toString.call(value) === '[object String]';
 const text = (value) => (isText(value) ? value.trim() : '');
@@ -58,7 +59,9 @@ const parseThread = (value, descriptor) => {
   const repo = text(value.repo);
   const number = positiveNumber(value.number);
   if (!THREAD_KINDS.has(kind) || !SEGMENT.test(repo) || number === null) return null;
-  if (!(descriptor.trackedItems.nestedOwners ? NAMESPACE : SEGMENT).test(owner)) return null;
+  // A path provider's top-level project (Gerrit's `demo`) has no owner.
+  const topLevel = owner === '' && allowsTopLevelProjects(descriptor);
+  if (!topLevel && !(descriptor.trackedItems.nestedOwners ? NAMESPACE : SEGMENT).test(owner)) return null;
   const accountId = text(value.accountId);
   const account = accountId ? { accountId } : {};
   if (descriptor.instance.form === 'origin') {
@@ -91,7 +94,8 @@ export const threadInstance = (item) => (
 /** Case-insensitive identity, the same one the UI computes for the same item. */
 export function trackedItemKey(item) {
   if (isWorkItem(item)) return `${item.provider}|${item.identifier.toUpperCase()}`;
-  const thread = `${item.kind}|${item.owner}/${item.repo}#${item.number}`.toLowerCase();
+  // The joined project path: `owner/repo` as always, `repo` for a top-level project.
+  const thread = `${item.kind}|${joinProjectPath(item.owner, item.repo)}#${item.number}`.toLowerCase();
   // The same owner/repo/number on two instances (github.com and an enterprise
   // host) must stay apart, so the instance is always part of the key.
   const instance = threadInstance(item).toLowerCase();

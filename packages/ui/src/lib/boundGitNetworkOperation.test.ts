@@ -19,6 +19,7 @@ import {
   runContributorAwarePush,
   runContributorPush,
   runBoundRemoteBranchDelete,
+  runBoundReviewPush,
   runGitClone,
   runCheckoutHydration,
   prepareGitPublish,
@@ -1439,5 +1440,85 @@ describe('bound Git network operation runtime safety', () => {
       if (error instanceof BoundGitNetworkOperationError) errorCode = error.code;
     }
     expect(errorCode).toBe('stale-runtime');
+  });
+});
+
+describe('push for review', () => {
+  const reviewRead: SourceControlBindingRead = {
+    ...boundRead,
+    binding: {
+      ...boundRead.binding,
+      providers: [{
+        provider: 'review-host', instance: 'https://review.example.com', accountId: 'review#1', primaryRemote: 'upstream',
+        readiness: 'ready', endpoint: PUSH_ENDPOINT,
+      }],
+    },
+  };
+  const reviewPlan: GitNetworkOperationPlan = {
+    ...plan, transport: transport.push,
+    target: {
+      operation: 'push', repositoryId: 'repository-one', bindingRevision: 7, configRevision: 'config-one',
+      remote: { name: 'upstream', endpoint: PUSH_ENDPOINT }, sourceRef: `refs/heads/${status.current}`,
+      destinationRef: 'refs/for/main',
+    },
+  };
+  const gitFor = (requests: GitNetworkOperationRequest[]) => ({
+    getGitStatus: async () => status,
+    planNetworkOperation: async (request: GitNetworkOperationRequest) => { requests.push(request); return reviewPlan; },
+    executeNetworkOperation: async (): Promise<GitNetworkOperation> => ({ ...reviewPlan, state: 'succeeded' }),
+    getNetworkOperation,
+  });
+
+  test('pushes the branch to refs/for on the provider association\'s remote with only the options given, and no upstream', async () => {
+    const requests: GitNetworkOperationRequest[] = [];
+    const completion = await runBoundReviewPush({
+      directory: '/repo', git: gitFor(requests), sourceControl: { repositoryBinding: async () => reviewRead }, runtimeKey: () => 'runtime-one',
+      review: { target: 'refs/heads/main', topic: 'login-flow', wip: true, private: false, hashtags: ['ui'] },
+    });
+    expect(completion.state).toBe('succeeded');
+    expect(requests).toEqual([{
+      operation: 'push', directory: '/repo', repositoryId: 'repository-one', bindingRevision: 7, configRevision: 'config-one',
+      remote: { name: 'upstream', endpoint: PUSH_ENDPOINT }, transportMode: 'managed',
+      sourceRef: `refs/heads/${status.current}`, destinationRef: 'refs/for/main',
+      review: { target: 'main', topic: 'login-flow', wip: true, hashtags: ['ui'] },
+    }]);
+  });
+
+  test('a hashtag typed with a leading # is sent as its bare name', async () => {
+    const requests: GitNetworkOperationRequest[] = [];
+    await runBoundReviewPush({
+      directory: '/repo', git: gitFor(requests), sourceControl: { repositoryBinding: async () => reviewRead }, runtimeKey: () => 'runtime-one',
+      review: { target: 'main', hashtags: ['#bugfix', 'ui', '#'] },
+    });
+    expect(requests).toMatchObject([{ review: { target: 'main', hashtags: ['bugfix', 'ui'] } }]);
+  });
+
+  test('refuses before planning: an option the host would need escaped, no provider association, or a read-only remote', async () => {
+    const cases: Array<[SourceControlBindingRead, Parameters<typeof runBoundReviewPush>[0]['review'], string]> = [
+      [reviewRead, { target: 'main', topic: 'two words' }, 'review-option-invalid'],
+      [reviewRead, { target: 'main', hashtags: ['ok', 'a%b'] }, 'review-option-invalid'],
+      [reviewRead, { target: ' ' }, 'publish-target-required'],
+      [boundRead, { target: 'main' }, 'binding-required'],
+      [{ ...reviewRead, binding: { ...reviewRead.binding, remotes: [{ name: 'upstream', fetch: FETCH_ENDPOINT, push: PUSH_ENDPOINT, mode: 'anonymous', readiness: 'ready' }] } }, { target: 'main' }, 'anonymous-read-only'],
+    ];
+    for (const [bindingRead, review, code] of cases) {
+      const requests: GitNetworkOperationRequest[] = [];
+      await expect(runBoundReviewPush({
+        directory: '/repo', git: gitFor(requests), sourceControl: { repositoryBinding: async () => bindingRead }, runtimeKey: () => 'runtime-one', review,
+      })).rejects.toThrow(code);
+      expect(requests).toEqual([]);
+    }
+  });
+
+  test('a push the host refuses reads as failed, with its redacted message', async () => {
+    const requests: GitNetworkOperationRequest[] = [];
+    const refused: GitNetworkOperation = {
+      ...reviewPlan, state: 'failed',
+      error: { code: 'TRANSPORT_FAILED', message: 'remote rejected: missing Change-Id in message footer' },
+    };
+    await expect(runBoundReviewPush({
+      directory: '/repo', sourceControl: { repositoryBinding: async () => reviewRead }, runtimeKey: () => 'runtime-one',
+      git: { ...gitFor(requests), executeNetworkOperation: async () => refused }, review: { target: 'main' },
+    })).rejects.toThrow('missing Change-Id');
   });
 });

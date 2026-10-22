@@ -2463,6 +2463,7 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
             pullRequest={prChipStatus?.changeRequest ?? prChipStatus?.pr ?? null}
             pullRequestProvider={prChipStatus?.changeRequest?.provider ?? null}
             prChecks={prChipStatus?.ci?.summary ?? prChipStatus?.checks ?? null}
+            pullRequestStack={prChipStatus?.stack ?? null}
             onOpenPullRequest={
               // The branch's own tab of the Tracker, in the panel this view is in.
               gitDirectory ? () => openContextPanelTab(panelDirectory ?? gitDirectory, { mode: 'pr' }) : undefined

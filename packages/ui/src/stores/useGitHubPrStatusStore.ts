@@ -55,6 +55,8 @@ export type SourceControlStatus = ChangeRequestStatus & {
   canMerge?: boolean;
   defaultBranch?: string | null;
   resolvedRemoteName?: string | null;
+  localRevision?: ChangeRequestStatus['localRevision'];
+  stack?: ChangeRequestStatus['stack'];
   pr?: {
     number: number;
     title: string;

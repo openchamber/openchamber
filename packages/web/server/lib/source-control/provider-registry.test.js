@@ -10,7 +10,7 @@ describe('source control provider registry', () => {
   it('lists the descriptors in priority order without loading any implementation', () => {
     const loaders = { github: vi.fn(), gitlab: vi.fn() };
     const providers = createSourceControlProviders({ loaders });
-    expect(providers.list().map((descriptor) => descriptor.id)).toEqual(['github', 'gitlab', 'gitea']);
+    expect(providers.list().map((descriptor) => descriptor.id)).toEqual(['github', 'gitlab', 'gitea', 'gerrit']);
     expect(providers.describe('gitlab')).toBe(gitlabDescriptor);
     expect(providers.has('forgejo')).toBe(false);
     expect(loaders.github).not.toHaveBeenCalled();

@@ -28,6 +28,9 @@ const gitState = { fetchBranches: async () => undefined };
 let worktreeCreations = 0;
 let lastSetupCommands: string[] | undefined;
 let lastCreateNames: { branchName?: string; worktreeName?: string } | undefined;
+let validatedNames: Array<{ branchName?: string; worktreeName?: string }> = [];
+let referenceProvider = 'github';
+let readContext: import('@/lib/api/types').SourceControlReadContext | null = null;
 
 const selectProjectState = <T,>(selector: (state: typeof projectStoreState) => T): T => selector(projectStoreState);
 const selectSourceControlAuthEntry = () => githubAuthState;
@@ -143,7 +146,10 @@ mock.module('@/stores/useGitStore', () => ({
 }));
 mock.module('@/lib/worktrees/worktreeManager', () => ({
   ...actualWorktreeManager,
-  validateWorktreeCreate: async () => ({ ok: true, errors: [] }),
+  validateWorktreeCreate: async (_project: unknown, args: { branchName?: string; worktreeName?: string }) => {
+    validatedNames.push({ branchName: args.branchName, worktreeName: args.worktreeName });
+    return { ok: true, errors: [] };
+  },
 }));
 mock.module('@/lib/worktrees/worktreeCreate', () => ({ createWorktreeWithDefaults: async (_project: { id: string; path: string }, args: { setupCommands?: string[]; branchName?: string; worktreeName?: string }) => {
   worktreeCreations += 1;
@@ -168,13 +174,13 @@ mock.module('@/lib/git/branchNameGenerator', () => ({
 }));
 
 const actualReferenceSources = await import('@/components/references/referenceSources');
-// The project's GitHub read context comes from its binding; these tests never
-// reach a PR, so no binding is read.
+// The project's read context comes from its binding; a test that reaches a
+// change request sets it here instead.
 mock.module('@/components/references/referenceSources', () => ({
   ...actualReferenceSources,
-  useRepositoryReadContext: () => null,
+  useRepositoryReadContext: () => readContext,
   useRepositorySourceStatus: () => 'ready',
-  useRepositoryReferenceProvider: () => 'github',
+  useRepositoryReferenceProvider: () => referenceProvider,
 }));
 mock.module('@/components/references/ReferencePickerDialog', () => ({
   ReferencePickerDialog: ({ onConfirm }: { onConfirm: ReferenceConfirm }) => {
@@ -359,6 +365,50 @@ describe('NewWorktreeDialog behavior', () => {
     } finally {
       await act(async () => root.unmount());
       dom.restore();
+    }
+  });
+
+  test('a change from a review host gets a branch named after the change, not its patchset ref', async () => {
+    const { useSourceControlProviderRegistry } = await import('@/lib/source-control/providers/registry');
+    const { githubLikeDescriptor, changeHostDescriptor } = await import('@/lib/source-control/providers/descriptor.fixture');
+    const previousRegistry = useSourceControlProviderRegistry.getState();
+    const ordered = [githubLikeDescriptor(), changeHostDescriptor()];
+    useSourceControlProviderRegistry.setState({ ordered, byId: new Map(ordered.map((entry) => [entry.id, entry])), status: 'ready', holdsList: true });
+    referenceProvider = 'review-host';
+    readContext = {
+      provider: 'review-host', instance: 'https://review.example.com', directory: project.path, repositoryId: 'repo', accountId: 'review#1', bindingRevision: 1, primaryRemote: 'origin',
+    };
+    validatedNames = [];
+    const dom = installDom();
+    const root = createRoot(dom.container);
+    try {
+      await act(async () => root.render(
+        <I18nProvider>
+          <NewWorktreeDialog
+            open
+            onOpenChange={() => undefined}
+            initialSelection={{
+              source: 'repository',
+              includeDiff: false,
+              reference: {
+                kind: 'pull', provider: 'review-host', number: 1234, title: 'A change', url: 'https://review.example.com/c/tools/app/+/1234',
+                body: '', bodyTruncated: false, createdAt: null, updatedAt: null, author: null, labels: [], commentCount: 0,
+                sourceRepo: { owner: 'tools', repo: 'app', source: 'origin' },
+                state: 'open', draft: false, head: 'refs/changes/34/1234/5', base: 'main', headSha: 'a'.repeat(40), headRepo: null,
+              },
+            }}
+          />
+        </I18nProvider>,
+      ));
+      const branchInput = dom.container.querySelector<HTMLInputElement>('input[placeholder="feature/my-awesome-feature"]');
+      expect(branchInput?.value).toBe('change-1234');
+      expect(validatedNames).toEqual([{ branchName: 'change-1234', worktreeName: 'change-1234' }]);
+    } finally {
+      await act(async () => root.unmount());
+      dom.restore();
+      referenceProvider = 'github';
+      readContext = null;
+      useSourceControlProviderRegistry.setState(previousRegistry);
     }
   });
 

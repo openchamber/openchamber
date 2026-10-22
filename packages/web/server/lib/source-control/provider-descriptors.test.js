@@ -14,7 +14,7 @@ const gitea = sourceControlProviderDescriptors.get('gitea');
 
 describe('source control provider descriptors', () => {
   it('lists the built-in providers in priority order', () => {
-    expect(sourceControlProviderDescriptors.list().map((descriptor) => descriptor.id)).toEqual(['github', 'gitlab', 'gitea']);
+    expect(sourceControlProviderDescriptors.list().map((descriptor) => descriptor.id)).toEqual(['github', 'gitlab', 'gitea', 'gerrit']);
     expect(sourceControlProviderDescriptors.has('gitlab')).toBe(true);
     expect(sourceControlProviderDescriptors.get('forgejo')).toBeNull();
   });
@@ -105,7 +105,7 @@ describe('source control provider descriptors', () => {
     expect(publicProviderDescriptor(gitlab, 1).auth).toMatchObject({ methods: ['device', 'pat', 'cli'], cliName: 'glab' });
     // The noun English model-facing text uses for the automation on a change request.
     expect(sourceControlProviderDescriptors.list().map((descriptor) => [descriptor.id, publicProviderDescriptor(descriptor, 0).terminology.ci]))
-      .toEqual([['github', 'checks'], ['gitlab', 'pipeline'], ['gitea', 'checks']]);
+      .toEqual([['github', 'checks'], ['gitlab', 'pipeline'], ['gitea', 'checks'], ['gerrit', 'checks']]);
     // A host without the diff read publishes it off; every built-in reads it.
     expect(publicProviderDescriptor({ ...gitea, capabilities: { ...gitea.capabilities, changeRequestPatch: false } }, 2).features.changeRequestPatch).toBe(false);
     expect(sourceControlProviderDescriptors.list().every((descriptor) => publicProviderDescriptor(descriptor, 0).features.changeRequestPatch)).toBe(true);
@@ -141,9 +141,9 @@ describe('extension provider descriptors', () => {
     sourceControlProviderDescriptors.attachExtension(extension('ext-alpha'));
 
     const listed = sourceControlProviderDescriptors.list();
-    expect(listed.map((descriptor) => descriptor.id)).toEqual(['github', 'gitlab', 'gitea', 'ext-alpha', 'ext-zeta']);
+    expect(listed.map((descriptor) => descriptor.id)).toEqual(['github', 'gitlab', 'gitea', 'gerrit', 'ext-alpha', 'ext-zeta']);
     expect(Object.isFrozen(listed)).toBe(true);
-    expect(before.map((descriptor) => descriptor.id)).toEqual(['github', 'gitlab', 'gitea']);
+    expect(before.map((descriptor) => descriptor.id)).toEqual(['github', 'gitlab', 'gitea', 'gerrit']);
     expect(sourceControlProviderDescriptors.has('ext-alpha')).toBe(true);
     expect(sourceControlProviderDescriptors.get('ext-zeta').id).toBe('ext-zeta');
   });
@@ -192,4 +192,40 @@ describe('provider ids', () => {
     expect(isExtensionProviderId('ext-forge')).toBe(true);
     for (const id of ['gitea', 'ext-', 'ext-Forge', `ext-${'a'.repeat(29)}`, 7]) expect(isExtensionProviderId(id)).toBe(false);
   });
+
+  describe('change-host extensions', () => {
+    const changeHost = (capabilities, features = {}) => ({
+      ...gitea,
+      id: 'review',
+      capabilities: { ...gitea.capabilities, ...capabilities },
+      presentation: { ...gitea.presentation, features: { ...gitea.presentation.features, ...features } },
+    });
+
+    it('publishes the change-host features only when declared', () => {
+      const published = publicProviderDescriptor(changeHost(
+        { merge: { methods: ['submit'] }, reviewModel: 'votes', revisions: true, createVia: 'push' },
+        { branchHeads: false, submitRequirements: true },
+      ), 3);
+      expect(published.features).toMatchObject({
+        reviewModel: 'votes', revisions: true, createByPush: true, branchHeads: false, submitRequirements: true,
+      });
+      for (const descriptor of [github, gitlab, gitea]) {
+        const features = publicProviderDescriptor(descriptor, 0).features;
+        for (const key of ['reviewModel', 'revisions', 'createByPush', 'branchHeads', 'submitRequirements']) {
+          expect(features).not.toHaveProperty(key);
+        }
+      }
+    });
+
+    it('refuses submit beside another merge method, and unknown change-host values', () => {
+      expect(() => createProviderDescriptors([changeHost({ merge: { methods: ['submit', 'merge'] } })])).toThrow('submit must be the only method');
+      expect(() => createProviderDescriptors([changeHost({ reviewModel: 'stars' })])).toThrow('review model');
+      expect(() => createProviderDescriptors([changeHost({ createVia: 'email' })])).toThrow('create method');
+      expect(() => createProviderDescriptors([changeHost({ revisions: 'yes' })])).toThrow('revisions');
+      expect(createProviderDescriptors([changeHost({ merge: { methods: ['submit'] } })]).has('review')).toBe(true);
+      const facade = createProviderDescriptors([]);
+      expect(() => facade.attachExtension({ ...changeHost({ merge: { methods: ['squash', 'submit'] } }), id: 'ext-review' })).toThrow('submit');
+    });
+  });
 });
+

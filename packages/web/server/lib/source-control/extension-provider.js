@@ -12,8 +12,10 @@ import {
 import { sourceControlProviderSchemasV1 } from '@openchamber/sdk/schemas';
 
 import { GuestServiceError, proxyGuestServiceRequest } from '../guests/service.js';
+import { isString } from '../shared/guards.js';
 import { isSourceControlProviderGuest } from './extension-providers.js';
 import { createPatAccountAuth } from './pat-account-auth.js';
+import { isProviderUsername } from './provider-id.js';
 import { createStandardMutations } from './standard-mutations.js';
 
 /**
@@ -48,6 +50,12 @@ import { createStandardMutations } from './standard-mutations.js';
  * Answers are checked with the SDK's `sourceControlProviderSchemasV1`; one
  * that does not parse is `502 MALFORMED_PROVIDER_RESPONSE`, never an empty
  * answer.
+ *
+ * Inputs a service built against an older manifest would not understand go
+ * out only to a host whose manifest declares them: a read's `revision` needs
+ * `capabilities.revisions`, a review's `votes` needs `reviewModel: 'votes'`.
+ * Otherwise the call is refused with a 400 before anything is sent, as the
+ * shell refuses it, so a service never answers a question it ignored.
  */
 
 const schemas = sourceControlProviderSchemasV1;
@@ -86,6 +94,13 @@ const READ_ONLY = Object.freeze(['GET']);
 /** The forge methods a forwarded call may send. */
 const outboundMethodsOf = (method) => (method === 'mutation.perform' ? SOURCE_CONTROL_OUTBOUND_METHODS : READ_ONLY);
 
+/** A refusal of the input itself: nothing was sent, so a write it stopped counts as failed. */
+const refusedInput = (code, message) => Object.assign(new Error(message), {
+  status: 400, code, sourceControlNotReached: true,
+});
+
+const REVISION = /^[0-9a-f]{40}$/i;
+
 /** Thrown into a running call's account write after its provider was unregistered. */
 const disposedError = (label) => Object.assign(new Error(`${label} is no longer available`), {
   status: 404, code: 'SOURCE_CONTROL_PROVIDER_UNAVAILABLE',
@@ -112,6 +127,7 @@ export function createExtensionProvider({
 }) {
   const { id, label } = descriptor;
   const tokenFormat = descriptor.extension.token;
+  const basicAuth = tokenFormat.scheme === 'basic';
 
   // After the registry unregisters the provider, a call still running (a
   // connect waiting on the service) must not write an account back into a
@@ -151,17 +167,23 @@ export function createExtensionProvider({
 
   /**
    * One forwarded call. `token` is the secret the handle carries (null for
-   * none), `user` the acting account (null before one is known). Answers the
-   * parsed data and what the proxy saw the call send to the forge.
+   * none), `user` the acting account (null before one is known), `login` the
+   * username a `basic` token is sent with. Answers the parsed data and what
+   * the proxy saw the call send to the forge.
    */
-  const forward = async (method, { instance, token, user, input }) => {
+  const forward = async (method, { instance, token, user, login = null, input }) => {
+    if (token && basicAuth && !isProviderUsername(login)) {
+      throw refusedInput('SOURCE_CONTROL_USERNAME_REQUIRED', `${label} signs in with a username, and this account has none it can send`);
+    }
     const current = await eligibleGuest();
     const timeoutMs = sourceControlProviderTimeoutMs(method);
+    const credential = token ? { token, header: tokenFormat.header, scheme: tokenFormat.scheme } : null;
+    if (credential && basicAuth) credential.login = login;
     const grant = handles.mint({
       guestId: guest.id,
       providerId: id,
       origin: new URL(instance).origin,
-      credential: token ? { token, header: tokenFormat.header, scheme: tokenFormat.scheme } : null,
+      credential,
       deadline: Date.now() + timeoutMs,
       methods: outboundMethodsOf(method),
     });
@@ -221,7 +243,10 @@ export function createExtensionProvider({
   };
 
   // The token behind a session stays in `pat-account-auth.js`; `tokenFor` reads it.
-  const verify = async (origin, token) => (await forward('auth.verify', { instance: origin, token, user: null, input: {} })).data.user;
+  // A `basic` host's token is checked together with the username it is sent with.
+  const verify = async (origin, token, { username = null } = {}) => (await forward('auth.verify', {
+    instance: origin, token, user: null, login: username, input: {},
+  })).data.user;
   const probe = async (origin) => (await forward('auth.probe', { instance: origin, token: null, user: null, input: {} })).data;
   const classifyFailure = (error) => error?.kind ?? 'provider-error';
   const accounts = createPatAccountAuth({ descriptor, store, events, verify, probe, classifyFailure });
@@ -236,7 +261,11 @@ export function createExtensionProvider({
   const forwardAs = async (method, session, input) => {
     try {
       return await forward(method, {
-        instance: session.instance, token: accounts.tokenFor(session) ?? null, user: await userOf(session), input,
+        instance: session.instance,
+        token: accounts.tokenFor(session) ?? null,
+        user: await userOf(session),
+        login: accounts.loginFor(session) ?? null,
+        input,
       });
     } catch (error) {
       if (error?.status === 401) {
@@ -247,8 +276,22 @@ export function createExtensionProvider({
     }
   };
 
+  /** `revision` goes out only to a host that declares revisions, and only as a commit sha. */
+  const requireRevisionInput = (input) => {
+    if (input.revision === undefined) return;
+    if (!descriptor.capabilities.revisions) {
+      throw refusedInput('INVALID_SOURCE_CONTROL_READ_CONTEXT', `${label} does not read change request revisions`);
+    }
+    if (!isString(input.revision) || !REVISION.test(input.revision)) {
+      throw refusedInput('INVALID_SOURCE_CONTROL_READ_CONTEXT', 'revision must be a commit SHA');
+    }
+  };
+
   /** A resource read: the shell's input without the session, in plain JSON. */
-  const read = (method) => async ({ session, ...input }) => (await forwardAs(method, session, json(input))).data;
+  const read = (method) => async ({ session, ...input }) => {
+    requireRevisionInput(input);
+    return (await forwardAs(method, session, json(input))).data;
+  };
 
   /** The head's clone URL on the instance, naming the head project; else the answer is malformed. */
   const requireEndpoint = (instance, source) => {
@@ -296,9 +339,12 @@ export function createExtensionProvider({
   };
 
   const standardMutations = createStandardMutations(descriptor);
-  /** The normalized input without the digest fields the host keeps for itself. */
+  /** The normalized input without the digest fields the host keeps for itself; votes only to a votes host. */
   const stepInput = (input) => {
     const { digest: _digest, ...rest } = input;
+    if (rest.votes !== undefined && descriptor.capabilities.reviewModel !== 'votes') {
+      throw refusedInput('INVALID_SOURCE_CONTROL_MUTATION_CONTEXT', `${label} reviews with a verdict, not votes`);
+    }
     return json(rest);
   };
 

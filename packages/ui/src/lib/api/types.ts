@@ -5,6 +5,9 @@ import type { GitPathUnavailableReason } from './git-path-diff';
 import type {
   ChangeRequest,
   ChangeRequestContext,
+  ChangeRequestRevision,
+  ChangeRequestSubmitRequirement,
+  ChangeRequestVoteLabel,
   CISummary,
   Label,
   ChangeRequestStatus,
@@ -496,6 +499,8 @@ export type GitNetworkOperationRequest =
       forceWithLease?: { expectedRemoteSha: string };
       configureUpstream?: boolean;
       destinationSelectionId?: string;
+      /** A push for review (`destinationRef` is `refs/for/<target>`); the server composes the refspec from these fields. */
+      review?: GitPushReviewIntent;
     })
   | (ExistingRepositoryNetworkOperationRequest & { operation: 'fetch'; fetchScope?: 'ref' })
   | (Omit<ExistingRepositoryNetworkOperationRequest, 'sourceRef' | 'destinationRef'> & {
@@ -559,6 +564,19 @@ export type GitNetworkOperationRequest =
       | { transportMode: 'managed'; credentialAccount: SourceControlIdentity & { accountId: string }; sshCredentialId?: never; unverifiedConfirmed?: never }
       | { transportMode: 'managed'; sshCredentialId: string; credentialAccount?: never; unverifiedConfirmed?: never }
     ));
+
+/**
+ * What a push for review asks of a review host: the branch the change is for,
+ * and the options the host applies to it. Topic and hashtags take letters,
+ * digits, dots, dashes and underscores only.
+ */
+export type GitPushReviewIntent = {
+  target: string;
+  topic?: string;
+  wip?: boolean;
+  private?: boolean;
+  hashtags?: string[];
+};
 
 export type GitManagedSshCredential = {
   credentialId: string;
@@ -1165,6 +1183,12 @@ export interface GitAPI {
   createBranch(directory: string, name: string, startPoint?: string): Promise<{ success: boolean; branch: string }>;
   renameBranch(directory: string, oldName: string, newName: string): Promise<{ success: boolean; branch: string }>;
   getGitLog(directory: string, options?: GitLogOptions): Promise<GitLogResponse>;
+  /**
+   * Amends the checked-out commit to carry a Change-Id trailer, computed the
+   * way a review host's commit-msg hook computes it. Refuses when HEAD is no
+   * longer `expectedHead` or already has one. Absent where the runtime cannot.
+   */
+  addChangeIdToHead?(directory: string, expectedHead: string): Promise<{ sha: string; changeId: string }>;
   getCommitFiles(directory: string, hash: string): Promise<GitCommitFilesResponse>;
   getGitCommitDiff?(directory: string, options: GetGitCommitDiffOptions): Promise<GitDiffResponse>;
   getCommitFileDiff?(directory: string, hash: string, filePath: string, isBinary: boolean): Promise<CommitFileDiffResponse>;
@@ -1610,6 +1634,12 @@ export type RepositoryChangeRequestReference = RepositoryReferenceCommon & {
   base: string;
   headSha: string;
   headRepo: GitHubPullRequestHeadRepo | null;
+  /** A review host's flags and topic, where it sends them. */
+  workInProgress?: boolean;
+  private?: boolean;
+  topic?: string;
+  /** The revision (patchset) `headSha` is, where the host keeps revisions. */
+  revisionNumber?: number;
 };
 
 /** A comment as the picker preview shows it; review entries carry their verdict or file and line. */
@@ -1670,6 +1700,12 @@ export type RepositoryReferenceDetail = {
     commitTotal: number | null;
     /** The stack the PR is a layer of; null when it is in none, absent when the host could not say. */
     stack?: PullRequestStack | null;
+    /** Where the host reviews by votes: the labels, what this account may cast, and who voted. */
+    voteLabels?: ChangeRequestVoteLabel[];
+    /** Where the host says what submission needs. */
+    submitRequirements?: ChangeRequestSubmitRequirement[];
+    /** Where the host keeps revisions (patchsets), oldest first. */
+    revisions?: ChangeRequestRevision[];
   } | null;
 };
 
@@ -1753,7 +1789,8 @@ export interface SourceControlAPI {
   authStatus(identity: SourceControlIdentity): Promise<SourceControlAuthStatus>;
   authStart(identity: SourceControlIdentity): Promise<SourceControlDeviceFlowStart>;
   authComplete(identity: SourceControlIdentity, flowId: string): Promise<SourceControlDeviceFlowComplete>;
-  authSetToken(identity: SourceControlIdentity, token: string): Promise<SourceControlAuthStatus>;
+  /** `username` goes with the token where the provider's settings name a username field (HTTP Basic hosts). */
+  authSetToken(identity: SourceControlIdentity, token: string, options?: { username?: string }): Promise<SourceControlAuthStatus>;
   authDisconnect(identity: SourceControlIdentity, accountId: string): Promise<{ removed: boolean }>;
   authActivate(identity: SourceControlIdentity, accountId: string): Promise<SourceControlAuthStatus>;
   authSetCliDisabled(identity: SourceControlIdentity, disabled: boolean): Promise<{ disabled: boolean }>;
@@ -1803,6 +1840,8 @@ export interface SourceControlAPI {
       /** Also its commits and review verdicts, for a timeline. GitLab only; GitHub's preview reads them with its detail. */
       includeTimeline?: boolean;
       project?: { owner: string; name: string };
+      /** The files and diff of this revision (a 40-hex commit) instead of the latest; only where the provider has `features.revisions`. */
+      revision?: string;
     },
   ): Promise<ChangeRequestContext>;
 

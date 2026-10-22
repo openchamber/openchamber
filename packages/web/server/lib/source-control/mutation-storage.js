@@ -3,6 +3,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { withSourceControlFileLock } from './file-lock.js';
+import { allowsTopLevelProjects } from './project-path.js';
+import { sourceControlProviderDescriptors } from './provider-descriptors.js';
 
 const VERSION = 1;
 const DEFAULT_MAX_RECORDS = 500;
@@ -66,13 +68,16 @@ const isActor = (value) => isPlainObject(value)
   && isNonEmptyString(value.instance)
   && isNonEmptyString(value.accountId);
 
-const isProject = (value) => isPlainObject(value)
+// A project's owner is empty only for a top-level project of a provider whose
+// projects need none (`repositoryPath: 'path'`, Gerrit's `demo`).
+const isProject = (value, provider) => isPlainObject(value)
   && hasExactKeys(value, ['id', 'owner', 'name'])
   && isNonEmptyString(value.id)
-  && isNonEmptyString(value.owner)
+  && (isNonEmptyString(value.owner)
+    || (value.owner === '' && allowsTopLevelProjects(sourceControlProviderDescriptors.get(provider))))
   && isNonEmptyString(value.name);
 
-const isTarget = (value) => isPlainObject(value)
+const isTarget = (value, provider) => isPlainObject(value)
   && hasExactKeys(
     value,
     ['repositoryId', 'bindingRevision', 'primaryRemote', 'project'],
@@ -81,15 +86,15 @@ const isTarget = (value) => isPlainObject(value)
   && isNonEmptyString(value.repositoryId)
   && isNonNegativeInteger(value.bindingRevision)
   && isNonEmptyString(value.primaryRemote)
-  && isProject(value.project)
+  && isProject(value.project, provider)
   && (value.number === undefined || isPositiveInteger(value.number))
   && (value.head === undefined || isNonEmptyString(value.head))
   && (value.base === undefined || isNonEmptyString(value.base))
   && (value.headSha === undefined || isNonEmptyString(value.headSha));
 
-const isTerminalResult = (value) => isPlainObject(value)
+const isTerminalResult = (value, provider) => isPlainObject(value)
   && hasExactKeys(value, [], ['project', ...RESULT_KEYS])
-  && (value.project === undefined || isProject(value.project))
+  && (value.project === undefined || isProject(value.project, provider))
   && (value.number === undefined || isPositiveInteger(value.number))
   && (value.head === undefined || isNonEmptyString(value.head))
   && (value.base === undefined || isNonEmptyString(value.base))
@@ -115,7 +120,7 @@ const isRecord = (value, key) => {
     || !isNonEmptyString(value.inputDigest)
     || !KINDS.includes(value.kind)
     || !isActor(value.actor)
-    || !isTarget(value.target)
+    || !isTarget(value.target, value.actor.provider)
     || !STATES.includes(value.state)
     || !isTimestamp(value.startedAt)
     || !isTimestamp(value.updatedAt)
@@ -123,7 +128,7 @@ const isRecord = (value, key) => {
     || value.startedAt > value.updatedAt
     || value.updatedAt > value.expiresAt) return false;
   if (value.state === 'running') return value.result === undefined;
-  return value.result === undefined || isTerminalResult(value.result);
+  return value.result === undefined || isTerminalResult(value.result, value.actor.provider);
 };
 
 const parseState = (value) => {
@@ -276,12 +281,13 @@ export function createMutationStore({
       || !isNonEmptyString(inputDigest)
       || !isPlainObject(completion)
       || !hasExactKeys(completion, ['state'], ['result'])
-      || ![...TERMINAL_STATES, 'outcome-unknown'].includes(completion.state)
-      || (completion.result !== undefined && !isTerminalResult(completion.result))) throw invalidState();
-    const result = copyResult(completion.result);
+      || ![...TERMINAL_STATES, 'outcome-unknown'].includes(completion.state)) throw invalidState();
     const state = await readState();
     const existing = Object.hasOwn(state.records, key) ? state.records[key] : undefined;
     if (!existing) throw mutationError('SOURCE_CONTROL_MUTATION_NOT_FOUND', 'Source control mutation record was not found');
+    // The result's project is checked against the record's provider.
+    if (completion.result !== undefined && !isTerminalResult(completion.result, existing.actor.provider)) throw invalidState();
+    const result = copyResult(completion.result);
     if (existing.inputDigest !== inputDigest) {
       throw mutationError('SOURCE_CONTROL_MUTATION_CONFLICT', 'Source control mutation digest changed', existing);
     }

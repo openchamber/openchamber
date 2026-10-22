@@ -1591,6 +1591,7 @@ interface BuildSettingsSearchResultsOptions {
 const CHANGE_REQUEST_SEARCH_NOUNS = {
   pullRequest: ['pull request', 'pr', 'issues'],
   mergeRequest: ['merge request', 'mr', 'issues'],
+  change: ['change', 'code review', 'patchset'],
 } satisfies Record<ChangeRequestTerm, string[]>;
 
 /**

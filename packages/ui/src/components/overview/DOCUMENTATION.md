@@ -140,5 +140,5 @@ on every row ran together).
 They come from one search across the registered projects
 (`useRepositoryAcrossReferenceList`), which asks a single provider: the first
 in registry order whose descriptor has `features.referencesAcross`. Only
-GitHub has it today, so projects on GitLab or Gitea are left out until their
+GitHub has it today, so projects on GitLab, Gitea or Gerrit are left out until their
 provider offers that search.

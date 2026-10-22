@@ -14,7 +14,11 @@ export type WalkthroughSource =
   | { kind: 'working-tree'; scope: WalkthroughWorkingTreeScope }
   | { kind: 'branch'; baseRef: string; headRef: string }
   | { kind: 'commit'; hash: string }
-  | { kind: 'pr'; number: number; sourceRepo?: { owner: string; repo: string } };
+  /**
+   * `revision`: a full commit SHA naming an earlier revision (a patchset) on
+   * a host that keeps them; absent, the change request's current one.
+   */
+  | { kind: 'pr'; number: number; sourceRepo?: { owner: string; repo: string }; revision?: string };
 
 type WalkthroughLocalSource = Exclude<WalkthroughSource, { kind: 'pr' }>;
 type WalkthroughPullRequestSource = Extract<WalkthroughSource, { kind: 'pr' }>;

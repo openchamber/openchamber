@@ -312,6 +312,11 @@ Invariants:
   may send reads as its closest known meaning: an unknown change-request term as
   `pullRequest`, an unknown CI term as `checks`, an unknown auth method is
   dropped, an unknown settings field kind as `unknown`, a missing feature as off.
+  The change-review features (*Change-based review hosts* below) read a
+  missing or unknown value as the behavior every older host has:
+  `reviewModel: 'verdict'`, `revisions`, `submitRequirements` and
+  `createByPush` off, `branchHeads` on. A bad value in one of them never
+  drops the provider.
 - `SourceControlProvider` is that open id, not a list of known providers.
   Persisted values that name a provider (the change-request status cache,
   comment drafts, message context parts, the remembered repository provider,
@@ -370,7 +375,8 @@ Invariants:
   provider's default instance), else the only provider whose pattern matches,
   else the first by `order`, so an unknown host with `/issues/N` or `/pull/N`
   keeps reading as GitHub-shaped. Patterns name `{owner}` or `{namespace+}`,
-  `{repo}` and `{number}`; a pattern that does not name each once is ignored.
+  `{repo}` and `{number}`, or `{project+}` (a whole project path, split on its
+  last slash) and `{number}`; a pattern that does not name each once is ignored.
 - Remotes are recognised on the instances a caller passes:
   `resolveSourceControlTarget`, `getBoundSourceControlReadContexts` and
   `repositoryLinkFromRemotes` take the connected instances plus each
@@ -419,8 +425,11 @@ Invariants:
   reserved), the token link is `auth.token.createPath` on the instance, and an
   unknown settings field kind asks for an update. The github.com device flow is
   selected by `instances.legacyFlow`, never by id.
-- `changeRequestCopy(key, term)` picks a message's merge-request wording by
-  the provider's `ChangeRequestTerm`, never by provider id.
+- `changeRequestCopy(key, term)` picks a message's wording by the provider's
+  `ChangeRequestTerm`, never by provider id: `TERM_COPY` holds one table per
+  term other than `pullRequest`, and every table words every message another
+  one does (`changeRequestCopy.test.ts` checks the keys exist in English and
+  take the same values).
 - `ProviderIcon` draws a sprite icon the descriptor names, else the served path
   (path data only, checked by the schema, drawn as a `d` attribute), else the
   branch icon. `providerIconSrc` gives the same mark as a data URI for surfaces
@@ -445,9 +454,9 @@ by the tracker registry too.
 ### Why `ChangeRequestTerm` and settings field kinds are closed
 
 Server-supplied text cannot be translated. The descriptor therefore names a
-term (`pullRequest` or `mergeRequest`), a CI term (`checks` or `pipeline`, which
+term (`pullRequest`, `mergeRequest` or `change`), a CI term (`checks` or `pipeline`, which
 picks the English noun of model-facing context text) and field kinds (`instance-url`,
-`personal-access-token`) that select whole translated sentences in the UI;
+`personal-access-token`, `username`, `http-password`) that select whole translated sentences in the UI;
 product names, prefixes, abbreviations and URLs are literal values that stay
 untranslated in every locale. A kind this version does not know asks to update
 the app instead of showing an untranslated form.
@@ -462,6 +471,78 @@ which server versions exist, and it already names the github.com default host
 of the repository-reference wire. The same adapter normalizes instances by the
 descriptor's `instances.format`. Every provider's server module emits the
 neutral DTOs, so the adapter has no provider branches for resources or auth.
+
+## Change-based review hosts
+
+A host that reviews changes patchset by patchset declares it through
+descriptor features, never through its id, and the shared UI serves it from
+those alone (`neutrality.test.ts` also fails on the first such host's name
+anywhere under `packages/ui/src`).
+
+- `terminology.changeRequest: 'change'` words every change-request message
+  through `changeRequestCopy` and the term-suffixed key families.
+- `features.reviewModel`: `reviewLabelsOf(descriptor, context)`
+  (`reviewLabels.ts`) is what the board reviews on. A verdict host gets one
+  implicit `approval` label, so `SourceBoardReply` keeps its two buttons and
+  sends `{ verdict, body }`; a votes host gets the labels its change's context
+  names (`voteLabels`), drawn by `SourceBoardVotes` with the values this
+  account may cast, and sends `{ votes, body }`. Votes go on the latest
+  revision only.
+- `features.revisions`: the context lists the change's revisions, the
+  preview offers a picker when there is more than one, and the detail of an
+  older one is read with `revision` (`useRepositoryReferenceDetail`), cached
+  apart from the latest.
+- `features.submitRequirements`: submit (`MergeMethod` `submit`, alone) waits
+  for the context's requirements and stays disabled while one is unmet
+  (`sourceBoard/mergeChoice.ts`). Methods this version has no words for are
+  dropped (`isKnownMergeMethod`), and submit is never remembered as the merge
+  method (`mergeMethodPreference.ts`).
+- `features.createByPush`: the Git panel creates a change by pushing for
+  review (`runBoundReviewPush`, a `push` operation with a `review` intent to
+  `refs/for/<target>` on the provider association's primary remote) and
+  uploads a new patchset while the status's `localRevision.uploadedAs` is
+  null. The status may also carry the change's chain (`stack`).
+- `features.branchHeads: false`: the head is a revision's ref, not a branch,
+  so nothing offers to stack on it or shows it as a branch, and a worktree
+  made from a change gets the branch `change-<number>`, the name the server
+  gives it.
+- `repository.pathStyle: 'path'`: a project is any path, top-level ones
+  included. Selectors keep `{ owner, name }` with an empty owner for a
+  top-level project; `projectPath.ts` joins (`owner ? owner/name : name`) and
+  splits (on the last slash) the path, and URL patterns name it as one
+  `{project+}` token. Keys and labels use the joined path, so every other
+  provider's keys stay byte-identical (`projectPath.test.ts`). The web
+  adapter refuses an empty owner from a provider whose descriptor says it is
+  not path-style, and lets one through from a provider whose descriptor it has
+  not read yet, for the server to validate. A one-segment remote path links
+  only for a path-style provider.
+- Settings field kinds `username` and `http-password`: the card asks for both
+  and sends the username with the token (`authSetToken(…, { username })`).
+
+### Why the verdict hosts' review goes through an implicit label
+
+One label model for both kinds of host would have changed the buttons, the
+wire and the stored digests of every existing host. The implicit `approval`
+label keeps the verdict branch exactly as it was, and votes stay a branch of
+their own that only a votes host reaches.
+
+### Why votes go on the latest revision only
+
+Review hosts refuse votes on an older patchset, and a vote meant for what the
+person is reading would land on a revision they did not read. The reply shows
+why it offers no votes while an older one is picked.
+
+### Why a push for review never falls back to Publish
+
+Pushing to `refs/heads/*` on a review host creates a branch that bypasses
+review. The change flow goes only through the review push, which the server
+plans only on a change host's primary remote.
+
+### Why only the checked-out commit gets a Change-Id here
+
+Amending the tip rewrites one commit and leaves its parents alone. An older
+commit without one needs a rebase the person should drive, so the push is held
+back and the message points at the host's commit-msg hook.
 
 ## Tests
 
@@ -481,7 +562,8 @@ These tests do not validate a packaged runtime, real credentials or browser pain
 `SourceControlBindingSettings.test.tsx` covers the repository dialog's all-locale copy.
 
 `providers/descriptor.test.ts` covers id syntax and reserved ids, per-descriptor
-failure, forward-compatible values and the fallback; `providers/registry.test.ts`
+failure, forward-compatible values (the change-review features included), a
+change host's descriptor and the fallback; `providers/registry.test.ts`
 covers snapshot hydration, a corrupt snapshot, failure keeping the held list,
 shared requests and a runtime switch rejecting a late answer;
 `providers/urlMatchers.test.ts` covers github.com, GitHub Enterprise, nested

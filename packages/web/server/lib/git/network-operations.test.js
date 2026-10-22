@@ -16,6 +16,8 @@ import { createHttpsCredentialReference, createSshCredentialReference } from './
 import { createNetworkOperations, createTrustedDirectoriesConfig } from './network-operations.js';
 import { createBindingService } from '../source-control/binding-service.js';
 import { createBindingStore } from '../source-control/binding-storage.js';
+import { createProviderDescriptors } from '../source-control/provider-descriptors.js';
+import { giteaDescriptor } from '../gitea/descriptor.js';
 import { resolveRepositoryIdentity } from '../source-control/repository-identity.js';
 
 const SHA = 'a'.repeat(40);
@@ -132,7 +134,7 @@ const createSpawn = (results = [], responder) => {
   return { spawnImpl, calls, children };
 };
 
-const setup = ({ mode = 'managed', transport = 'https', credentialId = 'opaque-credential', keyPath = '/keys/selected key', spawnResults, spawnResponder, env, timeoutMs, fsImpl, validateGitIdentity = async () => {}, validateManagedSshCredential, resolveSourceControlAccount = vi.fn(async () => CLONE_CREDENTIAL), applyGitIdentity, bindClonedRepository = async () => {}, inspectMergeState, enumerateManagedConfigKeys = vi.fn(async () => []), resolveChangeRequestSource, validateGitAuxiliaryContext, onCheckoutHydrated, auditStore, operationStore, authorityFor, trustedDirectoriesConfig } = {}) => {
+const setup = ({ mode = 'managed', transport = 'https', credentialId = 'opaque-credential', keyPath = '/keys/selected key', spawnResults, spawnResponder, env, timeoutMs, fsImpl, validateGitIdentity = async () => {}, validateManagedSshCredential, resolveSourceControlAccount = vi.fn(async () => CLONE_CREDENTIAL), applyGitIdentity, bindClonedRepository = async () => {}, inspectMergeState, enumerateManagedConfigKeys = vi.fn(async () => []), resolveChangeRequestSource, validateGitAuxiliaryContext, onCheckoutHydrated, auditStore, operationStore, authorityFor, trustedDirectoriesConfig, sourceControlProviders } = {}) => {
   const authority = {
     endpoint: transport === 'ssh' ? 'git@example.com:owner/repository.git' : ENDPOINT,
     endpointFingerprint: fingerprintRemoteUrl(transport === 'ssh' ? 'git@example.com:owner/repository.git' : ENDPOINT),
@@ -192,6 +194,7 @@ const setup = ({ mode = 'managed', transport = 'https', credentialId = 'opaque-c
     auditStore,
     operationStore,
     trustedDirectoriesConfig,
+    sourceControlProviders,
   });
   return { service, authority, validateGitTransportContext, resolveRef, resolveSymbolicRef, credentialResolver, credentialBroker, ...spawned };
 };
@@ -1473,6 +1476,54 @@ process.exit(safe ? 0 : 1);
       kind: 'provider', provider: 'gitlab', instance: 'https://example.com', accountId: 'https://example.com#42',
     });
     expect(setupValue.credentialBroker.revoke).toHaveBeenCalledWith(plan.operationId);
+  });
+
+  it('pushes for review with the composed refspec, writes no tracking ref, and stops when the gate closed', async () => {
+    const changeHost = { ...giteaDescriptor, id: 'review', capabilities: { ...giteaDescriptor.capabilities, createVia: 'push' } };
+    let primaryOf = ['review'];
+    const reviewSetup = () => setup({
+      sourceControlProviders: createProviderDescriptors([giteaDescriptor, changeHost]),
+      authorityFor: (_input, authority) => ({ ...authority, primaryOf }),
+      spawnResponder: ({ args }) => (args.includes('check-ref-format') ? { code: 0, stdout: 'main\n' } : undefined),
+    });
+    const reviewRequest = request('push', { review: { target: 'main', topic: 'sync', wip: true } });
+    delete reviewRequest.destinationRef;
+
+    const setupValue = reviewSetup();
+    const plan = await setupValue.service.plan(reviewRequest);
+    expect(plan.target.destinationRef).toBe('refs/for/main');
+    await expect(setupValue.service.execute(plan.operationId)).resolves.toMatchObject({ state: 'succeeded' });
+    const pushes = setupValue.calls.filter((call) => call.args.includes('push'));
+    expect(pushes.map((call) => call.args.slice(-3))).toEqual([['--', ENDPOINT, `${SHA}:refs/for/main%topic=sync,wip`]]);
+    expect(setupValue.calls.some((call) => call.args.includes('update-ref'))).toBe(false);
+
+    // The association went away between plan and execute: nothing is sent.
+    const closed = reviewSetup();
+    const closedPlan = await closed.service.plan(reviewRequest);
+    primaryOf = [];
+    await expect(closed.service.execute(closedPlan.operationId)).resolves.toMatchObject({ state: 'conflicted', error: { code: 'REMOTE_CHANGED' } });
+    expect(closed.calls.some((call) => call.args.includes('push'))).toBe(false);
+  });
+
+  it('leads a refused push\'s error with the remote\'s rejection, without its progress output', async () => {
+    const stderr = [
+      'remote: Processing changes: refs: 1',
+      'remote: Processing changes: refs: 1, done',
+      'remote: ERROR: commit 1a2b3c4: missing Change-Id in message footer',
+      'remote:',
+      'remote: Hint: to automatically insert a Change-Id, install the hook:',
+      'To https://example.com/owner/repository.git',
+      ' ! [remote rejected] abc -> refs/for/main (commit 1a2b3c4: missing Change-Id in message footer)',
+      'error: failed to push some refs to \'https://example.com/owner/repository.git\'',
+    ].join('\n');
+    const setupValue = setup({ spawnResponder: ({ args }) => (args.includes('push') ? { code: 1, stderr } : undefined) });
+    const plan = await setupValue.service.plan(request());
+    const result = await setupValue.service.execute(plan.operationId);
+    expect(result.state).toBe('failed');
+    expect(result.error.message.split('\n')).toEqual([
+      '! [remote rejected] abc -> refs/for/main (commit 1a2b3c4: missing Change-Id in message footer)',
+      'remote: ERROR: commit 1a2b3c4: missing Change-Id in message footer',
+    ]);
   });
 
   it('configures the exact local upstream only after a successful push', async () => {

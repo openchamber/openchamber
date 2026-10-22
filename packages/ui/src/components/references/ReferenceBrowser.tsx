@@ -40,6 +40,7 @@ import { readyValue, type ReferenceBrowser } from './useReferenceBrowser';
 const NO_PULLS_KEYS = {
     pullRequest: 'references.picker.empty.pulls',
     mergeRequest: 'references.picker.empty.mergeRequests',
+    change: 'references.picker.empty.changes',
 } as const satisfies Record<ChangeRequestTerm, I18nKey>;
 
 /** Issues and change requests, named by the provider's term; the repository source only. */

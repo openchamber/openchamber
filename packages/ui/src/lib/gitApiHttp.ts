@@ -2069,6 +2069,23 @@ export async function getGitLog(
   return gitLogSchema.parse(await response.json());
 }
 
+const changeIdAmendSchema = z.object({ sha: z.string().regex(/^[0-9a-f]{40}$/), changeId: z.string().regex(/^I[0-9a-f]{40}$/) });
+
+/** `GitAPI.addChangeIdToHead`: the server amends HEAD, refusing when it moved past `expectedHead`. */
+export async function addChangeIdToHead(directory: string, expectedHead: string): Promise<{ sha: string; changeId: string }> {
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/change-id`, directory), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ expectedHead }),
+  });
+  if (!response.ok) {
+    const message = await response.json().catch(() => ({ error: response.statusText }));
+    throw new Error(message.error || 'Failed to add a Change-Id');
+  }
+  invalidateGitStatusCache(directory);
+  return changeIdAmendSchema.parse(await response.json());
+}
+
 export async function getCommitFiles(
   directory: string,
   hash: string

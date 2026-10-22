@@ -21,6 +21,7 @@ import type {
   GitRemote,
   GitRemoteComparison,
   GitHubPullRequest,
+  PullRequestStack,
   CISummary,
 } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
@@ -84,6 +85,8 @@ interface GitHeaderProps {
   /** Whose change request `pullRequest` is; GitLab's reads `!N` and "merge request". */
   pullRequestProvider?: string | null;
   prChecks?: CISummary | null;
+  /** The chain the branch's change is in, as its status names it (hosts that create changes by pushing for review). */
+  pullRequestStack?: PullRequestStack | null;
   onOpenPullRequest?: () => void;
   // Nested repository picker: shown when the Git tab's root is not a
   // repository, or is one with no commits yet, and has repositories nested
@@ -367,6 +370,7 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
   pullRequest,
   pullRequestProvider,
   prChecks,
+  pullRequestStack,
   onOpenPullRequest,
   repositoryOptions,
   selectedRepository,
@@ -478,6 +482,11 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
     })
     : null;
 
+  // Counted from the bottom, as the preview counts layers.
+  const stackPosition = pullRequest && pullRequestStack
+    ? pullRequestStack.layers.findIndex((layer) => layer.number === pullRequest.number) + 1
+    : 0;
+
   const prChip = pullRequest && onOpenPullRequest ? (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -493,6 +502,12 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
             style={{ color: `var(--pr-${prVisualState})` }}
           />
           <span className="tabular-nums text-foreground/80">{formatChangeRequestLabel(pullRequestDescriptor, pullRequest.number)}</span>
+          {pullRequestStack && stackPosition > 0 ? (
+            <span className="inline-flex items-center gap-0.5 tabular-nums text-muted-foreground">
+              <Icon name="stack" className="size-3" />
+              {t('stacks.preview.position', { position: stackPosition, size: pullRequestStack.layers.length })}
+            </span>
+          ) : null}
           {prChecksColor ? (
             <span
               aria-hidden="true"

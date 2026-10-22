@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { sourceControlProviderIdSchema, sourceControlProviderListSchema, unknownProviderDescriptor } from './descriptor';
-import { acmeDescriptor, githubLikeDescriptor, gitlabLikeDescriptor } from './descriptor.fixture';
+import { acmeDescriptor, changeHostDescriptor, githubLikeDescriptor, gitlabLikeDescriptor } from './descriptor.fixture';
 
 describe('source-control provider descriptors', () => {
   test('accepts syntactic provider ids and refuses reserved ones', () => {
@@ -42,7 +42,35 @@ describe('source-control provider descriptors', () => {
       referenceSearch: true, referenceDetail: false, listStatuses: false, referencesAcross: false,
       startThread: false, authorCanReview: false, projectUploads: false, issueCloseReason: false,
       // Every server older than the field served change-request diffs.
-      changeRequestTemplates: [], changeRequestPatch: true,
+      changeRequestTemplates: [], changeRequestPatch: true, reviewModel: 'verdict', revisions: false,
+      submitRequirements: false, createByPush: false, branchHeads: true,
+    });
+  });
+
+  test('reads a change host: its term, review model, revisions, submit, push-created changes and credential fields', () => {
+    const [parsed] = sourceControlProviderListSchema.parse([changeHostDescriptor()]);
+    expect(parsed?.terminology).toMatchObject({ changeRequest: 'change', abbreviation: 'CL', changeRequestPrefix: '#' });
+    expect(parsed?.features).toMatchObject({
+      reviewModel: 'votes', revisions: true, submitRequirements: true, createByPush: true, branchHeads: false,
+    });
+    expect(parsed?.settings.fields.map((field) => field.kind)).toEqual(['instance-url', 'username', 'http-password']);
+  });
+
+  test('reads a host that names none of the change-review features exactly as before', () => {
+    const { reviewModel: _reviewModel, revisions: _revisions, submitRequirements: _submit, createByPush: _push, branchHeads: _heads, ...older } = acmeDescriptor().features;
+    const [parsed] = sourceControlProviderListSchema.parse([{ ...acmeDescriptor(), features: older }]);
+    expect(parsed?.features).toEqual(acmeDescriptor().features);
+  });
+
+  test('reads a change-review feature value this version does not know as its older meaning, keeping the provider', () => {
+    const descriptor = acmeDescriptor();
+    const [parsed] = sourceControlProviderListSchema.parse([{
+      ...descriptor,
+      features: { ...descriptor.features, reviewModel: 'scores', revisions: 'yes', submitRequirements: 1, createByPush: null, branchHeads: 'no' },
+    }]);
+    expect(parsed?.id).toBe('acme');
+    expect(parsed?.features).toMatchObject({
+      reviewModel: 'verdict', revisions: false, submitRequirements: false, createByPush: false, branchHeads: true,
     });
   });
 
@@ -91,6 +119,10 @@ describe('source-control provider descriptors', () => {
     expect(fallback.icon.sprite).toBe('git-branch');
     expect(fallback.auth.methods).toEqual([]);
     expect(fallback.urls).toEqual({ changeRequest: [], issue: [] });
-    expect(Object.values(fallback.features).filter((value) => value === true)).toEqual([]);
+    // `branchHeads` is how every host has behaved, not a feature turned on.
+    const { branchHeads, reviewModel, ...features } = fallback.features;
+    expect(Object.values(features).filter((value) => value === true)).toEqual([]);
+    expect(branchHeads).toBe(true);
+    expect(reviewModel).toBe('verdict');
   });
 });

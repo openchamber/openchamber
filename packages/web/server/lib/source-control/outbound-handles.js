@@ -10,6 +10,8 @@ import { sourceControlProviderSchemasV1 } from '@openchamber/sdk/schemas';
 
 import { joinGuestRequestUrl } from '../guests/request.js';
 import { readBoundedResponseText } from '../guests/response-body.js';
+import { isString } from '../shared/guards.js';
+import { isProviderUsername } from './provider-id.js';
 
 /**
  * Outbound handles and the proxy behind them: how an extension's Git host
@@ -33,10 +35,14 @@ const HANDLE_BYTES = 32;
 
 const refuse = (status, code, message) => ({ status, body: { error: { message, code } } });
 
-/** The header value for a stored token, per `contributes.sourceControl.token`. */
-const tokenHeaderValue = (token, scheme) => {
+/**
+ * The header value for a stored token, per `contributes.sourceControl.token`.
+ * `basic` pairs it with the account's login, which `mint` required.
+ */
+const tokenHeaderValue = ({ token, scheme, login }) => {
   if (scheme === 'bearer') return `Bearer ${token}`;
   if (scheme === 'token') return `token ${token}`;
+  if (scheme === 'basic') return `Basic ${Buffer.from(`${login}:${token}`, 'utf8').toString('base64')}`;
   return token;
 };
 
@@ -55,17 +61,23 @@ const relayedHeaders = (headers) => {
  * @param {{ fetch?: typeof fetch, now?: () => number }} [options]
  */
 export function createOutboundHandles({ fetch: fetchImpl = (input, init) => fetch(input, init), now = Date.now } = {}) {
-  /** @type {Map<string, { guestId: string, providerId: string, origin: string, credential: { token: string, header: string, scheme: string } | null, deadline: number, methods: readonly string[], outbound: Array<{ method: string, status: number | null }> }>} */
+  /** @type {Map<string, { guestId: string, providerId: string, origin: string, credential: { token: string, header: string, scheme: string, login?: string } | null, deadline: number, methods: readonly string[], outbound: Array<{ method: string, status: number | null }> }>} */
   const grants = new Map();
 
   /**
-   * A handle for one forwarded call. `credential` is `{ token, header, scheme }`,
-   * or null for a call that must not carry a token (`auth.probe`). `methods`
+   * A handle for one forwarded call. `credential` is `{ token, header, scheme }`
+   * (plus `login` for the `basic` scheme, refused without a usable one), or
+   * null for a call that must not carry a token (`auth.probe`). `methods`
    * are the forge methods the call may send: a read gets `['GET']`, so only
    * the mutation step the executor records can write. The returned
    * `outbound` list fills as the service uses the handle; `revoke` ends it.
    */
   const mint = ({ guestId, providerId, origin, credential = null, deadline, methods }) => {
+    if (credential?.scheme === 'basic' && !isProviderUsername(credential.login)) {
+      throw Object.assign(new Error('This Git host signs in with a username, and the account has none OpenChamber can send'), {
+        status: 400, code: 'SOURCE_CONTROL_USERNAME_REQUIRED',
+      });
+    }
     const handle = crypto.randomBytes(HANDLE_BYTES).toString('base64url');
     const grant = { guestId, providerId, origin, credential, deadline, methods: Object.freeze([...methods]), outbound: [] };
     grants.set(handle, grant);
@@ -115,7 +127,7 @@ export function createOutboundHandles({ fetch: fetchImpl = (input, init) => fetc
 
     const headers = { ...request.headers };
     if (grant.credential) {
-      headers[grant.credential.header] = tokenHeaderValue(grant.credential.token, grant.credential.scheme);
+      headers[grant.credential.header] = tokenHeaderValue(grant.credential);
     }
     // Recorded before it is sent: a write still in flight when the call ends
     // may land, so it must never count as one that was refused.

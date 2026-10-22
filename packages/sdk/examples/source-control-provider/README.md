@@ -1,7 +1,7 @@
 # Source-control provider: Teahouse
 
-An extension that adds a Git host to OpenChamber, next to GitHub, GitLab and
-Gitea. It declares `contributes.service.provides: ["source-control"]` and
+An extension that adds a Git host to OpenChamber, next to GitHub, GitLab, Gitea
+and Gerrit. It declares `contributes.service.provides: ["source-control"]` and
 describes the host in `contributes.sourceControl`: its name, its terms, which
 instances it accepts, what it can do, and how its token travels. OpenChamber
 calls the host `ext-source-control-provider` and draws its Settings card, its
@@ -63,6 +63,46 @@ installs there once `package.json` says 2.5.1 or newer.
 
 The service runs `git remote get-url` in the project to find the repository,
 which is why the manifest lists `git` under `permissions.exec`.
+
+## Change-based hosts
+
+Teahouse is a pull-request host and declares none of the fields below. A host
+that reviews one change at a time, with revisions and per-label votes the way
+Gerrit does, adds them to `contributes.sourceControl`:
+
+```json
+{
+  "terminology": { "changeRequest": "change", "ci": "checks" },
+  "capabilities": {
+    "changeRequests": true,
+    "reviews": true,
+    "merge": { "methods": ["submit"] },
+    "reviewModel": "votes",
+    "revisions": true
+  },
+  "token": { "header": "authorization", "scheme": "basic", "username": true, "scopes": [] },
+  "presentation": { "features": { "submitRequirements": true } }
+}
+```
+
+- `reviewModel: "votes"`: `/pr/review` reaches `mutation.perform` as
+  `{ votes: { "Code-Review": 2 }, body? }`. Each change's context lists its
+  `voteLabels`, with the scores the caller may give.
+- `revisions: true`: `changeRequestContext`, `readChangeRequestPatch` and
+  `readChangeRequestFile` may carry `revision`, a commit sha. The context lists
+  `revisions`, oldest first.
+- `merge: { methods: ["submit"] }`: `submit` is the only method when present.
+  With `submitRequirements`, the context lists what must hold before a submit.
+- `scheme: "basic"` with `username: true`: Settings asks for a username, and
+  OpenChamber sends `Basic base64(<login>:<token>)` on every forge request.
+- `changeRequestStatus` may add `localRevision` and `stack`.
+
+OpenChamber sends `revision` and `votes` only to a host that declares the
+capability, so Teahouse never sees them. Creating a change by pushing to
+`refs/for/<branch>` stays with OpenChamber's built-in hosts; an extension's
+host opens one through `/pr/create`. Older OpenChamber builds refuse a manifest
+with these fields, so raise `engines.openchamber` to the first release that
+has them. The full contract is in `GUEST_SERVICES.md`.
 
 ## Tests
 

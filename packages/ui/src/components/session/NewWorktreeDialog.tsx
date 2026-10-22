@@ -51,6 +51,7 @@ import { resolvePrWorktreeConfig, type PrWorktreeSource } from './prWorktreeConf
 import { useConfirmDialog } from '@/components/ui/confirm-dialog';
 import type { CreateWorktreeArgs, ProjectRef } from '@/lib/worktrees/worktreeManager';
 import { useI18n, type I18nKey } from '@/lib/i18n';
+import { joinProjectPath } from '@/lib/source-control/projectPath';
 
 /** The dialog's tabs: a fresh branch, a branch that exists, or the branch of an issue or PR. */
 type Mode = 'new-branch' | 'existing-branch' | 'from-item';
@@ -555,11 +556,14 @@ export function NewWorktreeDialog({
       return null;
     }
 
+    // A review host's head is a patchset ref, not a branch: the worktree's
+    // branch is named after the change, as the server names it.
+    const branch = descriptorOf(reference.provider).features.branchHeads ? reference.head : `change-${reference.number}`;
     // A PR's branch can live in one worktree only.
     if (projectRef) {
       const failure = (message: string): ReferencePickerConfirmFailure => ({ failedKeys: [referencePickerItemKey(choice)], message });
       try {
-        const result = await validateWorktreeCreate(projectRef, { mode: 'new', branchName: reference.head, worktreeName: reference.head });
+        const result = await validateWorktreeCreate(projectRef, { mode: 'new', branchName: branch, worktreeName: branch });
         if (result.errors.some((entry) => entry.code === 'branch_in_use')) {
           return failure(t('session.githubIntegration.validation.branchAlreadyCheckedOut'));
         }
@@ -578,12 +582,12 @@ export function NewWorktreeDialog({
       headSha: reference.headSha,
       headProject: reference.headRepo ? { owner: reference.headRepo.owner } : null,
       project: {
-        id: reference.projectId ?? `${reference.sourceRepo.owner}/${reference.sourceRepo.repo}`,
+        id: reference.projectId ?? joinProjectPath(reference.sourceRepo.owner, reference.sourceRepo.repo),
         owner: reference.sourceRepo.owner,
         name: reference.sourceRepo.repo,
       },
     };
-    linkItem({ kind: 'pr', pr, context: repositoryContext, includeDiff: choice.includeDiff, selection: choice }, reference.head);
+    linkItem({ kind: 'pr', pr, context: repositoryContext, includeDiff: choice.includeDiff, selection: choice }, branch);
     return null;
   };
 

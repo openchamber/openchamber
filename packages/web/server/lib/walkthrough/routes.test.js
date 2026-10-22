@@ -167,6 +167,22 @@ describe('walkthrough routes', () => {
     expect(generateCalls).toBe(before);
   });
 
+  it('refuses a named revision on a provider that keeps none, before reading', async () => {
+    const response = await prDiff({ kind: 'pr', number: 42, revision: 'c'.repeat(40) });
+    expect(response.status).toBe(400);
+    expect((await response.json()).code).toBe('INVALID_SOURCE_CONTROL_READ_CONTEXT');
+    expect(lastArgs).toBeUndefined();
+  });
+
+  it('takes a top-level project (an empty owner) only from a path-style provider', async () => {
+    const source = { kind: 'pr', number: 42, sourceRepo: { owner: '', repo: 'demo' } };
+    expect((await prDiff(source)).status).toBe(400);
+    expect(lastArgs).toBeUndefined();
+    const response = await prDiff(source, { ...PR_CONTEXT, provider: 'gerrit', instance: 'https://gerrit.example.com' });
+    expect(response.status).toBe(200);
+    expect(lastArgs.options.sourceRepo).toEqual({ owner: '', repo: 'demo' });
+  });
+
   it('reads no pull request diff without a validated binding context', async () => {
     validateReadContext.mockRejectedValue(Object.assign(new Error('Binding changed'), { code: 'INVALID_SOURCE_CONTROL_READ_CONTEXT' }));
     const response = await prDiff({ kind: 'pr', number: 42 });

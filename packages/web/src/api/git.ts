@@ -68,6 +68,7 @@ export const createWebGitAPI = (): GitAPI => ({
   getGitLog(directory: string, options?: GitLogOptions) {
     return gitApiHttp.getGitLog(directory, options);
   },
+  addChangeIdToHead: gitApiHttp.addChangeIdToHead,
   getCommitFiles: gitApiHttp.getCommitFiles,
   getGitCommitDiff: gitApiHttp.getGitCommitDiff,
   getCurrentGitIdentity: gitApiHttp.getCurrentGitIdentity,

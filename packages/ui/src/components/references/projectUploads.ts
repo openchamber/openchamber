@@ -16,6 +16,7 @@ import { useSourceControlProvider } from '@/lib/source-control/providers/registr
 import type { SourceControlReadContext } from '@/lib/source-control/types';
 
 import { useRepositoryReadContext } from './referenceSources';
+import { joinProjectPath } from '@/lib/source-control/projectPath';
 
 const UPLOAD_PATH = String.raw`\/uploads\/[0-9a-f]{32}\/[^\s)"'<>]+`;
 // An image destination or an HTML `src`: drawn here, so read through the server.
@@ -59,7 +60,7 @@ const uploadUrls = (context: SourceControlReadContext, project: RepositoryRefere
         owner: project.owner,
         repo: project.repo,
     }), window.location.href).toString(),
-    link: (path) => new URL(`${project.owner}/${project.repo}${path}`, `${context.instance.replace(/\/+$/, '')}/`).toString(),
+    link: (path) => new URL(`${joinProjectPath(project.owner, project.repo)}${path}`, `${context.instance.replace(/\/+$/, '')}/`).toString(),
 });
 
 /**

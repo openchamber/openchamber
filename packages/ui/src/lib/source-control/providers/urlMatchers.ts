@@ -1,11 +1,15 @@
 import type { RepositoryReferenceKind } from '@/lib/api/types';
 import type { SourceControlProviderDescriptor } from './descriptor';
+import { splitProjectPath } from '../projectPath';
 
 /** An issue or change request a link names, and the provider instance it lives on. */
 export interface RepositoryItemUrlMatch {
   provider: SourceControlProviderDescriptor['id'];
   instance: string;
-  /** The owner, or for nested namespaces the whole namespace path (`group/subgroup`). */
+  /**
+   * The owner, or for nested namespaces the whole namespace path
+   * (`group/subgroup`). Empty for a top-level project of a path-style provider.
+   */
   owner: string;
   repo: string;
   number: number;
@@ -15,14 +19,15 @@ export interface RepositoryItemUrlMatch {
 interface CompiledPattern {
   kind: RepositoryReferenceKind;
   regex: RegExp;
-  owner: number;
-  repo: number;
+  /** Groups of `{owner}`/`{namespace+}` and `{repo}`, or of the whole `{project+}` path. */
+  project: { owner: number; repo: number } | { path: number };
   number: number;
 }
 
 const PLACEHOLDER_SOURCE: ReadonlyMap<string, string> = new Map([
   ['{owner}', '([^/]+)'],
   ['{namespace+}', '([^/]+(?:/[^/]+)*?)'],
+  ['{project+}', '([^/]+(?:/[^/]+)*?)'],
   ['{repo}', '([^/]+)'],
   ['{number}', '(\\d+)'],
 ]);
@@ -31,7 +36,8 @@ const escapeLiteral = (segment: string): string => segment.replace(/[.*+?^${}()|
 
 /**
  * A descriptor URL pattern as a regular expression over the link's path, or
- * null when it does not name exactly one owner (or namespace), repo and number.
+ * null when it does not name exactly one owner (or namespace) and repo, or one
+ * whole project path (`{project+}`), and one number.
  * Literal segments compare case-insensitively; the path may continue after
  * the number (`/pull/12/files`).
  */
@@ -51,9 +57,14 @@ const compilePattern = (pattern: string, kind: RepositoryReferenceKind): Compile
   }
   const owner = groups.indexOf('{owner}');
   const repo = groups.indexOf('{repo}');
+  const path = groups.indexOf('{project+}');
   const number = groups.indexOf('{number}');
-  if (owner < 0 || repo < 0 || number < 0 || new Set(groups).size !== groups.length) return null;
-  return { kind, regex: new RegExp(`${source}(?:/.*)?$`, 'i'), owner: owner + 1, repo: repo + 1, number: number + 1 };
+  if (number < 0 || new Set(groups).size !== groups.length) return null;
+  const project = path >= 0
+    ? (owner < 0 && repo < 0 ? { path: path + 1 } : null)
+    : (owner >= 0 && repo >= 0 ? { owner: owner + 1, repo: repo + 1 } : null);
+  if (!project) return null;
+  return { kind, regex: new RegExp(`${source}(?:/.*)?$`, 'i'), project, number: number + 1 };
 };
 
 const compiledByDescriptor = new WeakMap<SourceControlProviderDescriptor, CompiledPattern[]>();
@@ -87,11 +98,14 @@ const matchDescriptor = (url: URL, descriptor: SourceControlProviderDescriptor):
   for (const pattern of patternsOf(descriptor)) {
     const found = pattern.regex.exec(url.pathname);
     if (!found) continue;
+    const { owner, repo } = 'path' in pattern.project
+      ? splitProjectPath(found[pattern.project.path])
+      : { owner: found[pattern.project.owner], repo: found[pattern.project.repo] };
     return {
       provider: descriptor.id,
       instance: instanceOf(url, descriptor),
-      owner: found[pattern.owner],
-      repo: found[pattern.repo],
+      owner,
+      repo,
       number: Number(found[pattern.number]),
       kind: pattern.kind,
     };

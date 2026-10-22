@@ -39,3 +39,14 @@ export function extensionProviderId(guestId) {
   const id = `${EXTENSION_PROVIDER_PREFIX}${guestId}`;
   return isProviderId(id) ? id : null;
 }
+
+/**
+ * A provider account's username, as HTTP Basic auth and Git credentials can
+ * carry it: printable ASCII except `:` (the Basic separator), so `@` and `+`
+ * pass (an LDAP-backed Gerrit's `jane@corp.com`), control characters do not,
+ * at most 256 characters and no surrounding spaces. The one rule for the
+ * sign-in route, an extension's Basic login and the binding's credential
+ * presentation, so a username one of them takes is never refused by another.
+ */
+export const isProviderUsername = (value) => Object.prototype.toString.call(value) === '[object String]'
+  && /^[\x20-\x39\x3b-\x7e]{1,256}$/.test(value) && value.trim() === value;

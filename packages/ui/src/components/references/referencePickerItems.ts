@@ -73,6 +73,7 @@ export const referencePickerItemKey = (item: ReferencePickerItem | ReferencePick
 export const CHANGE_REQUEST_TAB_KEYS = {
     pullRequest: 'references.picker.tab.pulls',
     mergeRequest: 'references.picker.tab.mergeRequests',
+    change: 'references.picker.tab.changes',
 } as const satisfies Record<ChangeRequestTerm, I18nKey>;
 
 export const DEFAULT_REPOSITORY_FILTER: RepositoryReferenceFilter = { state: 'open', people: 'any' };

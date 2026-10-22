@@ -263,9 +263,20 @@ export interface SourceControlCapabilities {
   changeRequests: boolean;
   draftChangeRequests: boolean;
   mergeChangeRequests: boolean;
-  mergeMethods?: Array<'merge' | 'squash' | 'rebase'>;
+  mergeMethods?: MergeMethod[];
   ci: boolean;
 }
+
+/**
+ * How a change request lands: merge, squash or rebase on a forge, or
+ * `submit` on a review host, which lands it the way the project is set up and
+ * is then the only method.
+ */
+export type MergeMethod = 'merge' | 'squash' | 'rebase' | 'submit';
+const MERGE_METHODS: readonly MergeMethod[] = ['merge', 'squash', 'rebase', 'submit'];
+
+/** Whether this version knows `value` as a method; a newer server may name others. */
+export const isKnownMergeMethod = (value: string): value is MergeMethod => MERGE_METHODS.some((method) => method === value);
 
 export interface SourceControlAuthMethodCapability {
   available: boolean;
@@ -347,6 +358,16 @@ export interface ChangeRequest extends SourceControlIdentity {
   mergeable?: boolean | null;
   mergeableState?: string | null;
   labels?: Label[];
+  /** A review host's work-in-progress flag; `draft` carries the same meaning for gating. */
+  workInProgress?: boolean;
+  /** Visible only to its owner and reviewers (a review host's private change). */
+  private?: boolean;
+  /** The topic a review host groups related changes under. */
+  topic?: string;
+  /** A review host's hashtags; read only, and also listed among `labels`. */
+  hashtags?: string[];
+  /** The number of the revision (patchset) `headSha` is, where the host keeps revisions. */
+  revisionNumber?: number;
 }
 
 export interface ChangeRequestFile {
@@ -362,6 +383,68 @@ export interface ChangeRequestReviewComment extends IssueComment {
   path?: string;
   line?: number | null;
   position?: number | null;
+  /** The revision (patchset) the comment was made on, where the host keeps revisions. */
+  revision?: number;
+}
+
+/** What a new revision changed against the one before it, as a review host classifies it. */
+export type ChangeRequestRevisionKind = 'rework' | 'trivial-rebase' | 'merge-first-parent-update' | 'no-code-change' | 'no-change';
+
+/** One revision (patchset) of a change: each upload makes a new one. */
+export interface ChangeRequestRevision {
+  number: number;
+  sha: string;
+  createdAt: string | null;
+  uploader?: SourceControlUser;
+  kind?: ChangeRequestRevisionKind;
+  /** The ref the revision can be fetched from. */
+  ref: string;
+}
+
+/** One value a vote label takes, with the host's description of it ("Looks good to me"). */
+export interface ChangeRequestVoteValue {
+  value: number;
+  description: string;
+}
+
+/** A vote someone cast on a label; `revision` is the patchset it was cast on, when the host says. */
+export interface ChangeRequestVote {
+  user: SourceControlUser;
+  value: number;
+  revision?: number;
+}
+
+/**
+ * A label a change is voted on (a review host's Code-Review, Verified, or a
+ * project's own). Named `voteLabels` on the context: `labels` already means
+ * tags on a change request.
+ */
+export interface ChangeRequestVoteLabel {
+  name: string;
+  values: ChangeRequestVoteValue[];
+  defaultValue: number;
+  /** The values this account may cast; empty when it may not vote on the label. */
+  permitted: number[];
+  /** Whether the label holds submission back until it is satisfied. */
+  blocking: boolean;
+  status: 'approved' | 'rejected' | 'recommended' | 'disliked' | 'neutral';
+  votes: ChangeRequestVote[];
+}
+
+/** One condition a change must meet before it can be submitted. */
+export interface ChangeRequestSubmitRequirement {
+  name: string;
+  status: 'satisfied' | 'unsatisfied' | 'overridden' | 'not-applicable' | 'error' | 'forced';
+  description?: string;
+}
+
+/** The checked-out commit against a review host's change. */
+export interface ChangeRequestLocalRevision {
+  sha: string;
+  /** The Change-Id trailer of the commit; null when it has none. */
+  changeId: string | null;
+  /** The patchset whose commit is the local one; null when the local commits are not uploaded. */
+  uploadedAs: number | null;
 }
 
 export type CIState = 'success' | 'failure' | 'pending' | 'unknown';
@@ -494,6 +577,12 @@ export interface ChangeRequestContext {
    * (null in none). Absent when it could not be read.
    */
   stack?: PullRequestStack | null;
+  /** The labels the change is voted on, where the host reviews by votes. */
+  voteLabels?: ChangeRequestVoteLabel[];
+  /** What the change needs before it can be submitted, where the host says. */
+  submitRequirements?: ChangeRequestSubmitRequirement[];
+  /** The change's revisions (patchsets), oldest first, where the host keeps them. */
+  revisions?: ChangeRequestRevision[];
 }
 
 export interface ChangeRequestStatus {
@@ -506,6 +595,10 @@ export interface ChangeRequestStatus {
   canMerge?: boolean;
   defaultBranch?: string | null;
   resolvedRemoteName?: string | null;
+  /** Where changes are created by pushing for review: the checked-out commit against the change. */
+  localRevision?: ChangeRequestLocalRevision;
+  /** Where changes are created by pushing for review: the chain the change is in, null when none. */
+  stack?: PullRequestStack | null;
 }
 
 export interface ProjectUpstream {
@@ -625,7 +718,7 @@ export interface UpdateChangeRequestInput extends SourceControlMutationContext<S
 }
 
 export interface MergeChangeRequestInput extends SourceControlMutationContext<SourceControlExistingMutationTarget> {
-  method: 'merge' | 'squash' | 'rebase';
+  method: MergeMethod;
 }
 
 export type ReadyChangeRequestInput = SourceControlMutationContext<SourceControlExistingMutationTarget>;
@@ -663,8 +756,14 @@ export interface SetStateInput extends SourceControlMutationContext<SourceContro
   state: 'open' | 'closed';
 }
 
-/** The target's `headSha` is the commit the verdict is for; a push past it refuses the review. */
-export interface ReviewChangeRequestInput extends SourceControlMutationContext<SourceControlExistingMutationTarget> {
-  verdict: ReviewVerdict;
+/**
+ * A review: a verdict where the host reviews by verdicts, or votes on labels
+ * (label name to value) where it reviews by votes. The target's `headSha` is
+ * the commit the review is for; a push past it refuses the review.
+ */
+export type ReviewChangeRequestInput = SourceControlMutationContext<SourceControlExistingMutationTarget> & {
   body?: string;
-}
+} & (
+  | { verdict: ReviewVerdict; votes?: never }
+  | { votes: Record<string, number>; verdict?: never }
+);

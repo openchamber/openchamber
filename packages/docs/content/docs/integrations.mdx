@@ -35,12 +35,15 @@ The catalog is in the web app and desktop app. It's hidden in [enterprise mode](
 
 Expand the **GitHub** card and choose **Connect GitHub** to sign in with a short device code. Once connected, OpenChamber can start sessions from issues and pull requests, attach them to messages, and open or update PRs. Everything GitHub can do is on [GitHub Issues & PRs](/github/).
 
-## GitLab and Gitea
+## GitLab, Gitea and Gerrit
 
-GitLab and Gitea each have their own card next to GitHub. Once connected, their issues and pull requests (merge requests on GitLab) show on the [Issues and PRs](/issues-and-prs/) board and in the chat's **+** menu, like GitHub's.
+GitLab, Gitea and Gerrit each have their own card next to GitHub. Once connected, their issues and pull requests (merge requests on GitLab, changes on Gerrit) show on the [Issues and PRs](/issues-and-prs/) board and in the chat's **+** menu, like GitHub's.
 
 - **GitLab**: on gitlab.com, sign in with a short device code, a personal access token, or the `glab` login on the server. For a self-managed GitLab, add its address and paste a personal access token with the `api` scope. Device-code sign-in works there only when the server sets `OPENCHAMBER_GITLAB_CLIENT_ID` to an application registered on that instance.
 - **Gitea**: add your instance's address, such as `https://gitea.example.com`, and paste a personal access token with the `write:repository`, `write:issue` and `read:user` scopes. The card links to the page on your instance that creates one. Gitea has no device-code or CLI sign-in. It needs Gitea 1.21 or newer, served from the root of its address. Forgejo uses the same API and should work, but hasn't been tested.
+- **Gerrit**: add your instance's address, such as `https://gerrit.example.com`, then your Gerrit username and an HTTP password. Generate the password in Gerrit under **Settings → HTTP Credentials**; the card links there. Your sign-in password won't work, and an account without a username can't connect. It needs Gerrit 3.8 or newer, served from the root of its address. Sites whose review address differs from the Git address, such as googlesource.com with `.gitcookies`, aren't supported.
+
+On Gerrit you review changes. Each upload of a change is a patchset, and the change's preview lets you pick an earlier one to read. You review by voting on the project's labels, such as Code-Review and Verified, and land a change with **Submit** once its submit requirements are met. Gerrit has no issues, so only changes show. To create a change, or upload a new patchset to one, use **Push for review** in the Git panel; see [Git](/git/#push-for-review-on-gerrit).
 
 ## Linear
 

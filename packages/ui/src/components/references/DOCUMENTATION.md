@@ -154,6 +154,33 @@ Tracker then show one state for the same PR.
 - Children (Linear sub-issues), where the tracker's `children` capability says so: a child's row names its parent above the title, a parent's row shows how many children are finished (`2/5`, or `20+` when the list counted only the first 20). The preview has a Parent row and, once the detail lands, a Sub-issues section. Clicking either previews that item through `openItem`, kept like a pinned item while the list does not hold it; the picker and the board both pass `onOpenTrackerItem`. A parent or child comes without labels, so the preview takes labels and parent from its detail when it has one. Labels and priority likewise show only where the `labels` and `priority` capabilities say so. The agent gets the parent and children with the item's JSON.
 - The composer keeps attached items as a list (`chat/composer/composerReferences.ts`). The same item attached again replaces its chip in place.
 
+## Changes on review hosts
+
+Where the provider keeps revisions (`features.revisions`) and a change has
+more than one, the Changes row starts with a revision picker, on the latest by
+default; picking another reads that revision's files and diff with
+`revision` (`useRepositoryReferenceDetail`, cached under its own key), while
+the latest detail keeps naming the revisions, the votes and the submit
+requirements. The Changes and Walkthrough links beside the counts
+(`SourceBoardPullLinks`) take the picked revision into their source
+(`{ kind: 'pr', …, revision }`), so the comparison, its file reads and the
+walkthrough show the same revision as the counts; the comparison picker and the
+walkthrough label name it by its short SHA. A change's private and topic flags show under its title, and
+work in progress too unless the state pill already says Draft. Where heads are revisions rather than branches
+(`features.branchHeads: false`) the branch row shows only the target branch.
+
+On the board a votes host's reply votes on the labels the change names
+(`SourceBoardVotes`) and only on the latest revision, the one the latest
+detail names rather than the listed head; submit waits for the change's
+requirements and names the unmet ones beside the disabled button
+(`sourceBoard/mergeChoice.ts`). It also holds while the change's status says
+it is not mergeable, and says so; when the latest detail could not be read it
+says the requirements could not be read rather than staying silently disabled.
+Submitting a change also submits every open change below it in its relation
+chain (`status.stack`/`pull.stack`, the layers before it whose state is open),
+so when there are any the line beside Submit says how many, and the
+confirmation's title and message do too (`landsWithIt` in `mergeChoice.ts`).
+
 ## Stacked pull requests
 
 A PR that is a layer of a stack (GitHub's own, or on GitLab a chain of merge

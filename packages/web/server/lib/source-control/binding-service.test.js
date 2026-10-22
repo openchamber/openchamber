@@ -923,6 +923,30 @@ describe('source-control binding service', () => {
     });
   });
 
+  it('names the providers whose ready association uses the remote as its primary remote', async () => {
+    const association = (provider, primaryRemote, readiness = 'ready') => ({
+      provider, instance: 'https://review.example.com', accountId: `${provider}-account`, primaryRemote, readiness,
+      endpoint: repository.remotes[0].fetch,
+    });
+    const binding = {
+      repositoryId: 'repo_one', revision: 3, state: 'bound', configRevision: 'config_one', auxiliary: [],
+      providers: [association('gitea', 'origin'), association('gitlab', 'origin', 'account-unavailable'), association('github', 'upstream')],
+      remotes: [{
+        name: 'origin', fetch: repository.remotes[0].fetch, push: repository.remotes[0].push,
+        mode: 'managed', credentialId: 'credential_one', readiness: 'ready',
+      }],
+    };
+    const service = createBindingService({
+      store: { read: vi.fn(async () => ({ revision: 3, binding })), compareAndSwap: vi.fn() },
+      resolveRepository: async () => repository,
+      resolveTransportRepository: async () => transportRepository,
+    });
+    await expect(service.validateGitTransportContext({
+      directory: '/repository', repositoryId: 'repo_one', bindingRevision: 3,
+      configRevision: 'config_one', remote: 'origin', endpointKind: 'push',
+    })).resolves.toMatchObject({ primaryOf: ['gitea'] });
+  });
+
   it('requires an exact auxiliary path grant and returns only its endpoint credential', async () => {
     const childEndpoint = 'https://example.com/owner/child.git';
     const binding = {

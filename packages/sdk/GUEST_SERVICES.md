@@ -233,7 +233,7 @@ Every action may carry `tabId` (`BrowserTabTarget`): an id from the `tabs` your 
 
 ## Source-control provider (`provides: ["source-control"]`)
 
-A service with this role is a Git host next to GitHub, GitLab and Gitea: its own card in Settings → Integrations, its pull requests and issues on the board, its badges on branches, worktrees from its pull requests. The role needs `contributes.sourceControl` in the same manifest, and the manifest needs it only with the role; either alone fails as `invalid-service`. Hosts older than the role refuse the manifest the same way, so declare an `engines.openchamber` floor.
+A service with this role is a Git host next to GitHub, GitLab, Gitea and Gerrit: its own card in Settings → Integrations, its pull requests and issues on the board, its badges on branches, worktrees from its pull requests. The role needs `contributes.sourceControl` in the same manifest, and the manifest needs it only with the role; either alone fails as `invalid-service`. Hosts older than the role refuse the manifest the same way, so declare an `engines.openchamber` floor.
 
 OpenChamber names the host `ext-<panel.id>` (provider ids are at most 32 characters, so `panel.id` is at most `SOURCE_CONTROL_GUEST_ID_MAX`, 28). The id stays the same across versions; accounts, bindings and mutation records are stored under it. `sourceControlProviderIdOf(guestId)` spells it.
 
@@ -245,18 +245,35 @@ Declared in the manifest, not answered by the service: OpenChamber reads it to d
 |---|---|
 | `wire` | `1` |
 | `label` | Product name, 1–64 characters, shown untranslated |
-| `terminology` | `{ changeRequest: "pullRequest" \| "mergeRequest", ci: "checks" \| "pipeline" }` |
+| `terminology` | `{ changeRequest: "pullRequest" \| "mergeRequest" \| "change", ci: "checks" \| "pipeline" }` |
 | `referencePrefix` | `{ changeRequest, issue }`, 1–4 characters each (`#`, `!`) |
 | `repositoryPath` | `"owner/name"` or `"namespace/name"` (nested groups) |
 | `instances` | `{ defaultInstances: up to 4 https origins, custom, allowLoopbackHttp, allowPort, placeholder }`. With `custom: false` the user can add only the default instances, and there must be at least one |
-| `capabilities` | `projects`, `issues`, `changeRequests`, `draftChangeRequests`, `merge` (`false` or `{ methods: ["merge" \| "squash" \| "rebase"] }`), `ci`, `comments`, `reviews`, `state`, `labels`, `reviewers`, `changeRequestPatch`, `liveSummaries`. One left out is off. Review threads, uploads, stacks, the reference picker and multiple accounts are fixed by OpenChamber |
-| `token` | `{ header: "authorization" \| "private-token", scheme: "bearer" \| "token" \| "none", scopes, createPath? }`. `private-token` takes the bare token (`none`); `authorization` takes `Bearer` or `token` |
+| `capabilities` | `projects`, `issues`, `changeRequests`, `draftChangeRequests`, `merge` (`false` or `{ methods: ["merge" \| "squash" \| "rebase" \| "submit"] }`, with `submit` the only method when present), `ci`, `comments`, `reviews`, `state`, `labels`, `reviewers`, `changeRequestPatch`, `liveSummaries`, `reviewModel?` (`"verdict"` by default, or `"votes"`), `revisions?`. One left out is off. Review threads, uploads, stacks, the reference picker, multiple accounts and how a change request is created are fixed by OpenChamber |
+| `token` | `{ header: "authorization" \| "private-token", scheme: "bearer" \| "token" \| "basic" \| "none", username?, scopes, createPath? }`. `private-token` takes the bare token (`none`); `authorization` takes `Bearer`, `token` or `basic`. `basic` needs `username: true`, and `username: true` is refused with any other scheme |
 | `transport` | `{ httpsUsername: { kind: "login" } \| { kind: "fixed", value }, appendDotGitToHttpsClone }`: how Git over HTTPS signs in with the stored token |
 | `limits` | `{ commentMaxLength (≤ 1 000 000), reviewerId: "numeric" \| "login", labelsMax (≤ 100), reviewersMax (≤ 50) }` |
 | `trackedItems` | `{ batchLimit }`, 1–50 items per `liveSummaries` call |
-| `presentation` | `{ abbreviation (1–8), promptNoun, sharedNumberSpace, iconPath? (24×24 SVG path data), urls: { changeRequest[], issue[] }, features: { authorCanReview, issueCloseReason }, changeRequestTemplates[] }` |
+| `presentation` | `{ abbreviation (1–8), promptNoun, sharedNumberSpace, iconPath? (24×24 SVG path data), urls: { changeRequest[], issue[] }, features: { authorCanReview, issueCloseReason, submitRequirements? }, changeRequestTemplates[] }` |
 
 `presentation.urls` are web path templates such as `/{owner}/{repo}/pulls/{number}`: `/`, then segments that are each a literal (`[A-Za-z0-9._~-]`) or one placeholder (`SOURCE_CONTROL_URL_TOKENS`). `{repo}` and `{number}` appear once, and the owner once as `{owner}` for `owner/name` paths or `{namespace+}` (one or more segments) for `namespace/name` paths. OpenChamber compiles them into the pattern that recognises a pasted link; an extension never supplies a regular expression. `changeRequestTemplates` are repository file paths (`.gitea/pull_request_template.md`), first match wins.
+
+### Change-based hosts
+
+A host that reviews one change at a time, with numbered revisions and per-label votes (Gerrit is the model), declares the fields below. Each is optional, and a manifest without them parses, installs and publishes exactly as before. Hosts older than these fields refuse a manifest that uses them as `invalid-service`, because every object is strict. Declare an `engines.openchamber` floor of the first release that has them, newer than 2.5.0.
+
+| Field | Effect |
+|---|---|
+| `terminology.changeRequest: "change"` | The UI says "change" where other hosts say pull request or merge request |
+| `capabilities.reviewModel: "votes"` | `/pr/review` takes `{ votes, body? }` instead of a verdict. `votes` maps a label name to an integer score. The labels, their ranges and the caller's permitted scores come with each change's context as `voteLabels`. A verdict sent to a votes host, or votes sent to a verdict host, is refused with a 400 before the service sees it |
+| `capabilities.revisions: true` | `changeRequestContext`, `readChangeRequestPatch` and `readChangeRequestFile` may carry `revision`, a 40-hex commit sha, to read that revision. The context lists them as `revisions`, oldest first. Without the capability a read with `revision` is a 400 and never reaches the service |
+| `capabilities.merge: { methods: ["submit"] }` | The merge button reads Submit. `/pr/merge` carries `{ method: "submit" }` |
+| `presentation.features.submitRequirements: true` | The context carries `submitRequirements`, `[{ name, status, description? }]`, and the UI lists the unmet ones by the Submit button |
+| `token: { header: "authorization", scheme: "basic", username: true }` | Settings asks for a username beside the token. The proxy sends `Authorization: Basic base64(<login>:<token>)` with the account's stored login. `auth.verify` goes out with the username the user typed; a login with a `:` or a control character is refused |
+
+`changeRequestStatus` may add `localRevision: { sha, changeId, uploadedAs }` (the local tip, the change id in its commit message or `null`, the revision number it was uploaded as or `null`) and `stack: { number: null, base, layers }` with layers bottom first.
+
+Creating a change by pushing to `refs/for/<branch>` stays host-only. An extension's host creates through `/pr/create`, and its change request heads are branches, so declare `changeRequests` only if the forge's API can open one. `auth.probe` never carries a token, with `basic` too: answer it from an anonymous request, or answer `{ supported: true }` when the instance refuses anonymous reads and let `auth.verify` decide.
 
 The catalog row carries `toPublicSourceControl(contribution)`: `{ label, defaultInstances, custom }`, what the approval dialog shows.
 
@@ -312,7 +329,7 @@ A capability opens the mutation routes below; one that is off answers 501 there 
 | `state` | `/pr/state`, `/issues/state` | `change-request-state`, `issue-state` | `{ state }`: `open` or `closed` |
 | `labels` | `/pr/labels`, `/issues/labels` | `change-request-labels`, `issue-labels` | `{ names }`: the whole set |
 | `reviewers` | `/pr/reviewers` | `change-request-reviewers` | `{ names }`: the whole set, as `limits.reviewerId` spells them |
-| `reviews` | `/pr/review` | `change-request-review` | `{ verdict: "approve" \| "request-changes", body? }`, for the `headSha` in the target |
+| `reviews` | `/pr/review` | `change-request-review` | `{ verdict: "approve" \| "request-changes", body? }`, for the `headSha` in the target. With `reviewModel: "votes"`, `{ votes, body? }` instead |
 
 Review threads have routes too, but they stay off for an extension's Git host.
 
@@ -324,7 +341,7 @@ OpenChamber decides, not the service, what a failure means. A mutation counts as
 
 The service never holds a token. `createSourceControlForge({ env: process.env })` returns `{ request(handle, req) }`, which posts to `${OPENCHAMBER_HOST_CALLBACK_URL}/source-control/outbound` with `Authorization: Bearer <handle>`. `OPENCHAMBER_HOST_CALLBACK_URL` is a separate loopback listener, set only for services with this role.
 
-- Request (`SourceControlOutboundRequest`): `{ method: GET|POST|PUT|PATCH|DELETE, path, query?, headers?, body? }`. `path` starts with one `/` and stays on the call's instance origin. `headers` (lower-case names) may be `accept`, `content-type`, `if-none-match` and `range`; OpenChamber sets the rest, the token included, per `token.header` and `token.scheme`. `body` is text up to `SOURCE_CONTROL_OUTBOUND_BODY_MAX` (1 MB).
+- Request (`SourceControlOutboundRequest`): `{ method: GET|POST|PUT|PATCH|DELETE, path, query?, headers?, body? }`. `path` starts with one `/` and stays on the call's instance origin. `headers` (lower-case names) may be `accept`, `content-type`, `if-none-match` and `range`; OpenChamber sets the rest, the token included, per `token.header` and `token.scheme` (with `basic`, the account's login too). `body` is text up to `SOURCE_CONTROL_OUTBOUND_BODY_MAX` (1 MB).
 - Answer: HTTP 200 with `{ status, headers, body }`, the forge's status (any, 401 included), the headers in `SOURCE_CONTROL_OUTBOUND_RESPONSE_HEADERS` plus `x-ratelimit-*`, and the body as text up to `SOURCE_CONTROL_OUTBOUND_RESPONSE_MAX` (8 MB). Redirects are not followed. `request` resolves with it.
 - Refusal: any other status with `{ error: { message, code } }` (an expired or unknown handle, a path off the instance, a body too large). `request` throws `SourceControlForgeError` with that `code` and `status`; `HOST_UNAVAILABLE` when there was no usable answer.
 

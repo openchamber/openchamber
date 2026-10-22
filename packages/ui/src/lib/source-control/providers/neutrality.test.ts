@@ -102,6 +102,17 @@ describe('provider neutrality of the shared UI', () => {
     });
   }
 
+  // The first change-based review host ships in core; the shared UI serves it
+  // through its descriptor alone, with no allowlist entry. The name is spelled
+  // in two parts so this file does not match itself.
+  // Production sources only: docs describe hosts by name and i18n tests list
+  // product names in their "names no product" assertions.
+  test('no source file of the shared UI names the first change-based review host', () => {
+    const host = new RegExp(['ger', 'rit'].join(''), 'i');
+    const naming = files.filter((path) => host.test(readFileSync(join(SRC, path), 'utf8')));
+    expect(naming).toEqual([]);
+  });
+
   test('every allowlisted file still needs its entry', () => {
     const stale = Object.entries(ALLOWLIST)
       .filter(([path, { rule }]) => findings(rule, readFileSync(join(SRC, path), 'utf8')).length === 0)

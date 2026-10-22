@@ -28,9 +28,13 @@ export const sourceControlProviderIdSchema = z.string()
 /** A source-control provider id: open, whatever the connected server serves. */
 export type SourceControlProviderId = z.output<typeof sourceControlProviderIdSchema>;
 
-/** How a provider names a change request. Closed: the UI owns the sentences for each term. */
-export type ChangeRequestTerm = 'pullRequest' | 'mergeRequest';
-const changeRequestTermSchema = z.enum(['pullRequest', 'mergeRequest']);
+/**
+ * How a provider names a change request. Closed: the UI owns the sentences for
+ * each term. `change` is a review host's change, reviewed patchset by patchset.
+ */
+export type ChangeRequestTerm = 'pullRequest' | 'mergeRequest' | 'change';
+const changeRequestTermSchema = z.enum(['pullRequest', 'mergeRequest', 'change']);
+
 
 /** What a provider calls the automation that runs on a change request: checks or a pipeline. Closed, like the term. */
 const ciTermSchema = z.enum(['checks', 'pipeline']);
@@ -40,7 +44,7 @@ const authMethodSchema = z.enum(['device', 'pat', 'cli']);
 
 /** Settings field kinds the UI can draw; any other kind reads as `unknown` and asks to update the app. */
 const settingsFieldKindSchema = z.union([
-  z.enum(['instance-url', 'personal-access-token']),
+  z.enum(['instance-url', 'personal-access-token', 'username', 'http-password']),
   z.string().transform((): 'unknown' => 'unknown'),
 ]);
 
@@ -72,7 +76,14 @@ const descriptorSchema = z.object({
     /** A 24x24 path `d`, drawn when the sprite does not carry the provider's mark. */
     path: iconPathSchema.optional(),
   }),
-  repository: z.object({ nestedNamespaces: z.boolean() }),
+  repository: z.object({
+    nestedNamespaces: z.boolean(),
+    /**
+     * `path`: a project is any path, top-level ones included (its owner is
+     * then empty). Absent for every other provider; an unknown value reads as absent.
+     */
+    pathStyle: z.literal('path').optional().catch(undefined),
+  }),
   instances: z.object({
     /** `host`: a bare lowercase host (github.com). `origin`: a full origin (https://gitlab.com). */
     format: z.enum(['host', 'origin']),
@@ -119,6 +130,18 @@ const descriptorSchema = z.object({
     // walkthroughs). The exception to "unnamed is off": every server older
     // than this field served the diff of every provider it listed.
     changeRequestPatch: z.boolean().default(true),
+    // Added later than the features above: a value this version cannot read
+    // falls back to the meaning every older host has, never dropping the provider.
+    /** How the host reviews: `verdict` (approve or request changes) or `votes` on labels each change names. */
+    reviewModel: z.enum(['verdict', 'votes']).default('verdict').catch('verdict'),
+    /** Changes keep their revisions (patchsets), and reads can ask for one. */
+    revisions: z.boolean().default(false).catch(false),
+    /** The change's context lists what it needs before it can be submitted. */
+    submitRequirements: z.boolean().default(false).catch(false),
+    /** A change is created by pushing for review, not through the API. */
+    createByPush: z.boolean().default(false).catch(false),
+    /** A change request's head is a branch that can be checked out and stacked on. */
+    branchHeads: z.boolean().default(true).catch(true),
   }),
   /**
    * The installed extension that serves this provider; absent for a built-in.
@@ -132,6 +155,8 @@ const descriptorSchema = z.object({
 });
 
 export type SourceControlProviderDescriptor = z.output<typeof descriptorSchema>;
+/** A descriptor as a server publishes it: optional fields may be absent, the schema fills them in. */
+export type PublishedSourceControlProviderDescriptor = z.input<typeof descriptorSchema>;
 
 const byOrder = (a: SourceControlProviderDescriptor, b: SourceControlProviderDescriptor): number => (
   a.order - b.order || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
@@ -183,7 +208,8 @@ export const unknownProviderDescriptor = (id: string): SourceControlProviderDesc
     features: {
       referenceSearch: false, referenceDetail: false, listStatuses: false, referencesAcross: false,
       startThread: false, authorCanReview: false, projectUploads: false, issueCloseReason: false,
-      changeRequestTemplates: [], changeRequestPatch: false,
+      changeRequestTemplates: [], changeRequestPatch: false, reviewModel: 'verdict', revisions: false,
+      submitRequirements: false, createByPush: false, branchHeads: true,
     },
   };
   unknownDescriptors.set(id, descriptor);

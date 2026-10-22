@@ -192,4 +192,52 @@ describe('PAT account auth', () => {
     });
     await expect(accounts.readCredential({ instance: ORIGIN, credentialId, credentialRevision: 2 })).resolves.toBeNull();
   });
+
+  describe('Basic-auth hosts (a username settings field)', () => {
+    const basicDescriptor = { ...descriptor, settings: [{ key: 'username', type: 'username', secret: false, scope: 'instance' }] };
+    const basicSetup = () => {
+      const store = fakeStore();
+      const events = { connected: vi.fn(), invalidated: vi.fn(), removed: vi.fn() };
+      const verify = vi.fn(async () => ({ id: 7, login: 'reported-name' }));
+      const probe = vi.fn(async () => ({ supported: true }));
+      const accounts = createPatAccountAuth({
+        descriptor: basicDescriptor, store, events, verify, probe, classifyFailure: (error) => error?.kind ?? 'provider-error',
+      });
+      return { accounts, auth: accounts.auth, verify, probe };
+    };
+
+    it('verifies and probes with the typed username and keeps it as the login', async () => {
+      const { auth, accounts, verify, probe } = basicSetup();
+      await expect(auth.connectToken({ instance: ORIGIN, token: 'http-pass', username: 'alice' }))
+        .resolves.toEqual({ connected: true, user: { id: 7, login: 'alice' } });
+      expect(verify).toHaveBeenCalledWith(ORIGIN, 'http-pass', { username: 'alice' });
+      expect(probe).toHaveBeenCalledWith(ORIGIN, 'http-pass', { username: 'alice' });
+
+      verify.mockClear();
+      await auth.status({ instance: ORIGIN });
+      expect(verify).toHaveBeenCalledWith(ORIGIN, 'http-pass', { username: 'alice' });
+      const session = await auth.resolveAccount({ instance: ORIGIN });
+      expect(accounts.loginFor(session)).toBe('alice');
+      expect(accounts.tokenFor(session)).toBe('http-pass');
+    });
+
+    it('refuses a connect without a username before any request', async () => {
+      const { auth, verify } = basicSetup();
+      await expect(auth.connectToken({ instance: ORIGIN, token: 'http-pass' })).rejects.toMatchObject({
+        sourceControlResponse: { status: 400, body: { error: 'username is required' } },
+      });
+      expect(verify).not.toHaveBeenCalled();
+    });
+
+    it('calls a token-only provider exactly as before, ignoring a username', async () => {
+      const verify = vi.fn(async () => ({ id: 7, login: 'alice' }));
+      const probe = vi.fn(async () => ({ supported: true }));
+      const { auth } = setup({ verify, probe });
+      await auth.connectToken({ instance: ORIGIN, token: 'pat-1', username: 'ignored' });
+      expect(verify.mock.calls[0]).toEqual([ORIGIN, 'pat-1']);
+      expect(probe.mock.calls[0]).toEqual([ORIGIN]);
+      await auth.status({ instance: ORIGIN });
+      expect(verify.mock.calls[1]).toEqual([ORIGIN, 'pat-1']);
+    });
+  });
 });

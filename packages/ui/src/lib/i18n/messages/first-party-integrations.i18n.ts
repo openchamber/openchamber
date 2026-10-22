@@ -3,6 +3,7 @@ export const firstPartyIntegrationsI18n = {
   en: {
     'settings.sourceControl.provider.description.pullRequest': 'Connect a {provider} account for pull requests and issues.',
     'settings.sourceControl.provider.description.mergeRequest': 'Connect a {provider} account for merge requests, issues, and CI.',
+    'settings.sourceControl.provider.description.change': 'Connect a {provider} account for changes and code review.',
     'settings.integrations.firstParty.title': 'Built-in integrations',
     'settings.integrations.firstParty.info': 'Accounts for services and built-in extensions shipped with OpenChamber. Credentials stay on the selected instance.',
     'settings.integrations.linear.title': 'Linear',
@@ -57,6 +58,7 @@ export const firstPartyIntegrationsI18n = {
   nl: {
     'settings.sourceControl.provider.description.pullRequest': 'Verbind een {provider}-account voor pull requests en issues.',
     'settings.sourceControl.provider.description.mergeRequest': 'Verbind een {provider}-account voor merge requests, issues en CI.',
+    'settings.sourceControl.provider.description.change': 'Verbind een {provider}-account voor wijzigingen en codereview.',
     'settings.integrations.firstParty.title': 'Ingebouwde integraties',
     'settings.integrations.firstParty.info': 'Accounts voor diensten en ingebouwde extensies die met OpenChamber worden meegeleverd. Toegangsgegevens blijven op de geselecteerde instantie.',
     'settings.integrations.linear.title': 'Linear',
@@ -111,6 +113,7 @@ export const firstPartyIntegrationsI18n = {
   de: {
     'settings.sourceControl.provider.description.pullRequest': '{provider}-Konto für Pull Requests und Issues verbinden.',
     'settings.sourceControl.provider.description.mergeRequest': '{provider}-Konto für Merge Requests, Issues und CI verbinden.',
+    'settings.sourceControl.provider.description.change': '{provider}-Konto für Änderungen und Code-Review verbinden.',
     'settings.integrations.firstParty.title': 'Eingebaute Integrationen',
     'settings.integrations.firstParty.info': 'Konten für Dienste und integrierte Erweiterungen von OpenChamber. Zugangsdaten bleiben auf der ausgewählten Instanz.',
     'settings.integrations.linear.title': 'Linear',
@@ -165,6 +168,7 @@ export const firstPartyIntegrationsI18n = {
   fr: {
     'settings.sourceControl.provider.description.pullRequest': 'Connecter un compte {provider} pour les pull requests et les issues.',
     'settings.sourceControl.provider.description.mergeRequest': 'Connecter un compte {provider} pour les demandes de fusion, les tickets et la CI.',
+    'settings.sourceControl.provider.description.change': 'Connecter un compte {provider} pour les changements et la revue de code.',
     'settings.integrations.firstParty.title': 'Intégrations natives',
     'settings.integrations.firstParty.info': "Comptes des services et extensions intégrées fournis avec OpenChamber. Les identifiants restent sur l'instance sélectionnée.",
     'settings.integrations.linear.title': 'Linear',
@@ -219,6 +223,7 @@ export const firstPartyIntegrationsI18n = {
   es: {
     'settings.sourceControl.provider.description.pullRequest': 'Conecta una cuenta de {provider} para pull requests e issues.',
     'settings.sourceControl.provider.description.mergeRequest': 'Conecta una cuenta de {provider} para solicitudes de fusión, incidencias y CI.',
+    'settings.sourceControl.provider.description.change': 'Conecta una cuenta de {provider} para cambios y revisión de código.',
     'settings.integrations.firstParty.title': 'Integraciones nativas',
     'settings.integrations.firstParty.info': 'Cuentas de los servicios y extensiones integradas de OpenChamber. Las credenciales se guardan en la instancia seleccionada.',
     'settings.integrations.linear.title': 'Linear',
@@ -273,6 +278,7 @@ export const firstPartyIntegrationsI18n = {
   ja: {
     'settings.sourceControl.provider.description.pullRequest': 'プルリクエストと Issue のために {provider} アカウントを接続します。',
     'settings.sourceControl.provider.description.mergeRequest': 'マージリクエスト、Issue、CI のために {provider} アカウントを接続します。',
+    'settings.sourceControl.provider.description.change': '変更とコードレビューのために {provider} アカウントを接続します。',
     'settings.integrations.firstParty.title': '標準連携',
     'settings.integrations.firstParty.info': 'OpenChamber に同梱されたサービスと組み込み拡張機能のアカウントです。認証情報は選択中のインスタンスに保存されます。',
     'settings.integrations.linear.title': 'Linear',
@@ -327,6 +333,7 @@ export const firstPartyIntegrationsI18n = {
   ko: {
     'settings.sourceControl.provider.description.pullRequest': '풀 리퀘스트와 이슈를 위해 {provider} 계정을 연결합니다.',
     'settings.sourceControl.provider.description.mergeRequest': '병합 요청, 이슈 및 CI를 위해 {provider} 계정을 연결합니다.',
+    'settings.sourceControl.provider.description.change': '변경과 코드 리뷰를 위해 {provider} 계정을 연결합니다.',
     'settings.integrations.firstParty.title': '기본 제공 통합',
     'settings.integrations.firstParty.info': 'OpenChamber에 포함된 서비스와 기본 제공 확장의 계정입니다. 인증 정보는 선택한 인스턴스에 저장됩니다.',
     'settings.integrations.linear.title': 'Linear',
@@ -381,6 +388,7 @@ export const firstPartyIntegrationsI18n = {
   pl: {
     'settings.sourceControl.provider.description.pullRequest': 'Połącz konto {provider} dla pull requestów i issues.',
     'settings.sourceControl.provider.description.mergeRequest': 'Połącz konto {provider}, aby obsługiwać merge requesty, zgłoszenia i CI.',
+    'settings.sourceControl.provider.description.change': 'Połącz konto {provider}, aby obsługiwać zmiany i code review.',
     'settings.integrations.firstParty.title': 'Wbudowane integracje',
     'settings.integrations.firstParty.info': 'Konta usług i wbudowanych rozszerzeń dostarczanych z OpenChamber. Dane logowania pozostają na wybranej instancji.',
     'settings.integrations.linear.title': 'Linear',
@@ -435,6 +443,7 @@ export const firstPartyIntegrationsI18n = {
   'pt-BR': {
     'settings.sourceControl.provider.description.pullRequest': 'Conecte uma conta do {provider} para pull requests e issues.',
     'settings.sourceControl.provider.description.mergeRequest': 'Conecte uma conta do {provider} para merge requests, issues e CI.',
+    'settings.sourceControl.provider.description.change': 'Conecte uma conta do {provider} para alterações e revisão de código.',
     'settings.integrations.firstParty.title': 'Integrações nativas',
     'settings.integrations.firstParty.info': 'Contas dos serviços e extensões integradas do OpenChamber. As credenciais ficam na instância selecionada.',
     'settings.integrations.linear.title': 'Linear',
@@ -489,6 +498,7 @@ export const firstPartyIntegrationsI18n = {
   uk: {
     'settings.sourceControl.provider.description.pullRequest': 'Підключіть акаунт {provider} для pull request-ів та issues.',
     'settings.sourceControl.provider.description.mergeRequest': 'Підключіть акаунт {provider} для merge requests, issues та CI.',
+    'settings.sourceControl.provider.description.change': 'Підключіть акаунт {provider} для змін і код-рев’ю.',
     'settings.integrations.firstParty.title': 'Вбудовані інтеграції',
     'settings.integrations.firstParty.info': 'Облікові записи сервісів і вбудованих розширень OpenChamber. Дані авторизації зберігаються на вибраному інстансі.',
     'settings.integrations.linear.title': 'Linear',
@@ -543,6 +553,7 @@ export const firstPartyIntegrationsI18n = {
   'zh-CN': {
     'settings.sourceControl.provider.description.pullRequest': '连接 {provider} 账号以处理拉取请求和议题。',
     'settings.sourceControl.provider.description.mergeRequest': '连接 {provider} 账号以使用合并请求、议题和 CI。',
+    'settings.sourceControl.provider.description.change': '连接 {provider} 账号以使用变更和代码评审。',
     'settings.integrations.firstParty.title': '内置集成',
     'settings.integrations.firstParty.info': 'OpenChamber 自带服务和内置扩展的账户。凭据保存在所选实例上。',
     'settings.integrations.linear.title': 'Linear',
@@ -597,6 +608,7 @@ export const firstPartyIntegrationsI18n = {
   'zh-TW': {
     'settings.sourceControl.provider.description.pullRequest': '連接 {provider} 帳號以處理拉取請求與議題。',
     'settings.sourceControl.provider.description.mergeRequest': '連接 {provider} 帳號以使用合併請求、議題與 CI。',
+    'settings.sourceControl.provider.description.change': '連接 {provider} 帳號以使用變更與程式碼審查。',
     'settings.integrations.firstParty.title': '內建整合',
     'settings.integrations.firstParty.info': 'OpenChamber 內建服務和擴充功能的帳戶。憑證儲存在所選執行個體上。',
     'settings.integrations.linear.title': 'Linear',
@@ -651,6 +663,7 @@ export const firstPartyIntegrationsI18n = {
   tr: {
     'settings.sourceControl.provider.description.pullRequest': "Pull request ve issue'lar için bir {provider} hesabı bağlayın.",
     'settings.sourceControl.provider.description.mergeRequest': "Merge request'ler, issue'lar ve CI için bir {provider} hesabı bağlayın.",
+    'settings.sourceControl.provider.description.change': 'Değişiklikler ve kod incelemesi için bir {provider} hesabı bağlayın.',
     'settings.integrations.firstParty.title': 'Yerleşik entegrasyonlar',
     'settings.integrations.firstParty.info': 'OpenChamber ile gelen hizmetlerin ve yerleşik eklentilerin hesapları. Kimlik bilgileri seçili örnekte kalır.',
     'settings.integrations.linear.title': 'Linear',
@@ -705,6 +718,7 @@ export const firstPartyIntegrationsI18n = {
   ar: {
     'settings.sourceControl.provider.description.pullRequest': 'اربط حساب {provider} لطلبات السحب والمشكلات.',
     'settings.sourceControl.provider.description.mergeRequest': 'اربط حساب {provider} لطلبات الدمج والمشكلات وCI.',
+    'settings.sourceControl.provider.description.change': 'اربط حساب {provider} للتغييرات ومراجعة الشيفرة.',
     'settings.integrations.firstParty.title': 'التكاملات المدمجة',
     'settings.integrations.firstParty.info': 'حسابات للخدمات والإضافات المدمجة المرفقة مع OpenChamber. تبقى بيانات الاعتماد على النسخة المحددة.',
     'settings.integrations.linear.title': 'Linear',
@@ -759,6 +773,7 @@ export const firstPartyIntegrationsI18n = {
   he: {
     'settings.sourceControl.provider.description.pullRequest': 'חיבור חשבון {provider} עבור בקשות משיכה ובעיות.',
     'settings.sourceControl.provider.description.mergeRequest': 'חיבור חשבון {provider} עבור בקשות מיזוג, issues ו-CI.',
+    'settings.sourceControl.provider.description.change': 'חיבור חשבון {provider} עבור שינויים וסקירת קוד.',
     'settings.integrations.firstParty.title': 'שילובים מובנים',
     'settings.integrations.firstParty.info': 'חשבונות לשירותים ולהרחבות מובנות שמגיעים עם OpenChamber. פרטי ההתחברות נשארים במופע שנבחר.',
     'settings.integrations.linear.title': 'Linear',

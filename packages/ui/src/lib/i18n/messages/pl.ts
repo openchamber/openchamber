@@ -20,6 +20,7 @@ import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
 import { sourceBoardI18n } from './source-board.i18n';
 import { stacksI18n } from './stacks.i18n';
+import { changeReviewI18n } from './change-review.i18n';
 import { projectActionsI18n } from './project-actions.i18n';
 import { gitIdentityEditorI18n } from './git-identity-editor.i18n';
 import { environmentI18n } from './environment.i18n';
@@ -158,6 +159,7 @@ export const dict: Record<I18nKey, string> = {
   ...isolatedSpacesI18n.pl,
   ...sourceBoardI18n.pl,
   ...stacksI18n.pl,
+  ...changeReviewI18n.pl,
   ...projectActionsI18n.pl,
   ...gitIdentityEditorI18n.pl,
   ...environmentI18n.pl,
@@ -2658,9 +2660,9 @@ export const dict: Record<I18nKey, string> = {
   'gitView.pr.providerNotConnected': '{provider} nie jest połączony',
   'gitView.pr.history.merged': 'PR #{number} został scalony do {base}.',
   'gitView.pr.history.closed': 'PR #{number} został zamknięty.',
-  'gitView.pr.mergeMethod.merge': 'Create a merge commit',
-  'gitView.pr.mergeMethod.rebase': 'Rebase and merge',
-  'gitView.pr.mergeMethod.squash': 'Squash and merge',
+  'gitView.pr.mergeMethod.merge': 'Utwórz commit scalający',
+  'gitView.pr.mergeMethod.rebase': 'Rebase i scal',
+  'gitView.pr.mergeMethod.squash': 'Squash i scal',
   'gitView.pr.notMergeable': 'Nie można scalić',
   'gitView.pr.segment.checks': 'Kontrole',
   'gitView.pr.comments.addAll': 'Dołącz wszystko do czatu',

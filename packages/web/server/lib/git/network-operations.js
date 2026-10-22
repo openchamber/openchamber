@@ -9,7 +9,7 @@ import os from 'node:os';
 import { createGitCredentialBroker, GIT_CREDENTIAL_NONCE_ENV } from './credential-broker.js';
 import { helperShellCommand } from './helper-launch.js';
 import { gitLfsCredentialEndpointAliases, normalizeGitRemoteEndpoint, parseGitCredentialReference } from './credential-resolver.js';
-import { createNetworkOperationPlanner } from './network-operation-plan.js';
+import { createNetworkOperationPlanner, isChangeReviewRemote } from './network-operation-plan.js';
 import { createNetworkOperationRegistry } from './network-operation-registry.js';
 import { createGitRedactor, redactGitText } from './redaction.js';
 import { parseSubmoduleManifest, SUBMODULE_DISCOVERY_LIMITS } from './submodule-discovery.js';
@@ -330,6 +330,24 @@ const awaitMutation = async (work, controls, deadline, record = async () => {}) 
   return value;
 };
 
+// What a remote said when it refused a push: Git's `! [remote rejected]` /
+// `! [rejected]` lines and the host's own `remote: error` lines.
+const REJECTED_LINE_RE = /^!\s*\[(?:remote )?rejected\]/;
+const REMOTE_ERROR_LINE_RE = /^remote:\s*(?:error|fatal)\b/i;
+/**
+ * A refused push's message: the rejection lines first, then the remote's
+ * error lines, each once, without the progress and hints around them. Null
+ * when the output names no rejection, so other failures read as before.
+ */
+const remoteRejection = (detail) => {
+  const lines = [...new Set(detail.split('\n').map((line) => line.trim()).filter(Boolean))];
+  const rejected = lines.filter((line) => REJECTED_LINE_RE.test(line));
+  const errors = lines.filter((line) => REMOTE_ERROR_LINE_RE.test(line));
+  return rejected.length || errors.length ? [...rejected, ...errors].slice(0, 12).join('\n') : null;
+};
+/** A redacted failure text, led by the remote's rejection when it refused a push. */
+const leadWithRejection = (text) => remoteRejection(text) ?? text;
+
 export function createNetworkOperations({
   validateGitTransportContext,
   validateManagedSshCredential,
@@ -540,6 +558,16 @@ export function createNetworkOperations({
     }
     return result.stdout;
   });
+  // Git's own branch-name rule for a review push's target; null when Git refuses the name.
+  const checkBranchNameImpl = async (directory, name) => {
+    const result = await run({
+      cwd: directory,
+      args: ['check-ref-format', '--branch', name],
+      env: { ...inheritedEnv, GIT_ALLOW_PROTOCOL: '', GIT_NO_LAZY_FETCH: '1', GIT_NO_REPLACE_OBJECTS: '1' },
+      deadline: Date.now() + timeoutMs,
+    });
+    return result.code === 0 && !result.timedOut && !result.cancelled ? result.stdout.trim() : null;
+  };
   const planner = createNetworkOperationPlanner({
     validateGitTransportContext,
     validateManagedSshCredential,
@@ -549,6 +577,7 @@ export function createNetworkOperations({
     resolveRef: resolveRefImpl,
     resolveSymbolicRef: resolveSymbolicRefImpl,
     resolveRemoteFetchMapping: resolveRemoteFetchMappingImpl,
+    checkBranchName: checkBranchNameImpl,
     inspectCheckoutHydration: (input) => inspectCheckoutHydration(input),
     runtimeIdentity,
     idFactory,
@@ -605,6 +634,11 @@ export function createNetworkOperations({
       || authority.transportRevision !== plan.transportRevision
       || (authority.credentialId ?? null) !== (plan.credentialId ?? null)) {
       throw operationError('REMOTE_CHANGED', 'Git remote or transport binding changed', 409);
+    }
+    // Review refs stay behind the gate they were planned under: the remote is
+    // still the primary remote of a ready change-host association.
+    if (plan.changeReviewRemote && !isChangeReviewRemote(authority, sourceControlProviders)) {
+      throw operationError('REMOTE_CHANGED', 'The remote is no longer a change host\'s primary remote', 409);
     }
     if (plan.sourceSha) {
       const sourceSha = String(await awaitPhase(
@@ -1620,7 +1654,8 @@ export function createNetworkOperations({
             'push', ...lease, '--', plan.rawEndpoint,
             plan.target.operation === 'delete-remote-branch'
               ? `:${plan.target.destinationRef}`
-              : `${plan.sourceSha}:${plan.target.destinationRef}`,
+              // A push for review carries the options the planner composed.
+              : plan.pushRefspec ?? `${plan.sourceSha}:${plan.target.destinationRef}`,
           ], context, deadline, { transfer: true });
           pushTransferred = true;
           await controls.markStepCompleted('transferred');
@@ -1706,7 +1741,7 @@ export function createNetworkOperations({
           'AUTHENTICATION_REQUIRED', 'AUTHENTICATION_FAILED', 'GIT_LFS_CLIENT_MISSING', 'INVALID_REQUEST', 'RUNTIME_UNSUPPORTED', 'UNKNOWN',
         ].includes(error.code) ? error.code : 'TRANSPORT_FAILED';
         result = terminal(code.startsWith('STALE_') || code === 'REMOTE_CHANGED' ? 'conflicted' : 'failed', code,
-          `${lfsUploaded ? 'LFS objects were uploaded, but Git ref publication failed. ' : ''}${createGitRedactor({ secrets: [...(context?.secrets ?? []), plan.directory] }).error(error)}`);
+          `${lfsUploaded ? 'LFS objects were uploaded, but Git ref publication failed. ' : ''}${leadWithRejection(createGitRedactor({ secrets: [...(context?.secrets ?? []), plan.directory] }).error(error))}`);
       }
     }
 
@@ -1861,9 +1896,9 @@ export function createNetworkOperations({
     } catch (error) {
       const cleanupFailed = await safeRevoke(context, plan.operationId);
       const output = `${error.stderr ?? ''}\n${error.stdout ?? ''}`;
-      const redacted = createGitRedactor({
+      const redacted = leadWithRejection(createGitRedactor({
         secrets: [...(context?.secrets ?? []), plan.directory],
-      }).error(error);
+      }).error(error));
       if (activeStep === 'pull' && /\bCONFLICT\b|automatic merge failed|unmerged files|could not apply/i.test(output)) {
         const publicFailure = publicError('CONFLICT', 'Sync pull left conflicts in the local repository; resolve them and continue the rebase');
         step('pull', 'conflicted', publicFailure);

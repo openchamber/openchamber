@@ -215,8 +215,19 @@ export function useReferenceBrowser({
         previewItem?.source === 'tracker' ? { provider: previewItem.provider, id: previewItem.item.id } : null,
         previewSettled,
     );
+    // The revision picked for the previewed change; another item, or the latest, reads as none.
+    const [revisionChoice, setRevisionChoice] = React.useState<{ key: string; sha: string } | null>(null);
+    const previewRevision = revisionChoice && previewKey !== null && revisionChoice.key === previewKey ? revisionChoice.sha : null;
+    const selectPreviewRevision = React.useCallback((sha: string | null) => {
+        setRevisionChoice(sha && previewKey !== null ? { key: previewKey, sha } : null);
+    }, [previewKey]);
     // Each item is read through the folder it came from.
-    const { detail: repositoryDetail, refresh: refreshRepositoryDetail } = useRepositoryReferenceDetail(itemDirectory(previewItem, directory), previewItem?.source === 'repository' ? previewItem.reference : null, previewSettled);
+    const { detail: repositoryDetail, latest: repositoryLatestDetail, refresh: refreshRepositoryDetail } = useRepositoryReferenceDetail(
+        itemDirectory(previewItem, directory),
+        previewItem?.source === 'repository' ? previewItem.reference : null,
+        previewSettled,
+        previewRevision,
+    );
 
     const selectRepositoryKind = (kind: RepositoryReferenceKind) => {
         lastRepositoryKind = kind;
@@ -311,7 +322,10 @@ export function useReferenceBrowser({
         closeMobilePreview: () => setMobilePreviewKey(null),
         trackerDetail,
         repositoryDetail,
+        repositoryLatestDetail,
         refreshRepositoryDetail,
+        previewRevision,
+        selectPreviewRevision,
         now,
         searchRef,
         handleNavigationKey,

@@ -306,6 +306,8 @@ export function registerSourceControlRoutes(app, dependencies = {}) {
     readChangeRequestFile: shell.readChangeRequestFile,
     readLiveSummaries: shell.readLiveSummaries,
     resolveChangeRequestSource: shell.resolveChangeRequestSource,
+    // The Change-Id amend (`POST /api/git/change-id`) rewrites a branch tip.
+    invalidateBranchStatus: shell.invalidateBranchStatus,
     // A worktree from a pull or merge request given by number (session.create).
     resolveChangeRequestWorktreeSource: createChangeRequestWorktreeSource({
       readBinding: bindingService.get,

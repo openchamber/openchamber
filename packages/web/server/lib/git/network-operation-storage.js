@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import os from 'node:os';
 import { constants as fsConstants } from 'node:fs';
 import { withSourceControlFileLock } from '../source-control/file-lock.js';
+import { isLoopbackHost } from './loopback-http.js';
 
 const VERSION = 1;
 const DEFAULT_MAX_RECORDS = 256;
@@ -92,7 +93,9 @@ const isSafeDisplayEndpoint = (value) => {
   try {
     const endpoint = new URL(value);
     const pathname = decodeURIComponent(endpoint.pathname);
-    return ['https:', 'ssh:'].includes(endpoint.protocol)
+    // Plain HTTP only to this machine (a provider's loopback development
+    // instance); the planner decided it may be reached.
+    return (['https:', 'ssh:'].includes(endpoint.protocol) || (endpoint.protocol === 'http:' && isLoopbackHost(endpoint.hostname)))
       && !endpoint.username && !endpoint.password && !endpoint.search && !endpoint.hash
       && Boolean(endpoint.hostname && endpoint.pathname && endpoint.pathname !== '/')
       && !/[\0-\x20\x7f\\]/.test(pathname)

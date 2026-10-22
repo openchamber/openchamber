@@ -11,6 +11,14 @@ import { ownedOriginInstance } from './origin-instance.js';
  *   refused the token, which writes the account off.
  * - `probe(origin)` answers `{ supported, version?, message? }` without a
  *   token: whether the instance is one this provider can serve.
+ *
+ * A provider whose settings declare a `username` field signs in with HTTP
+ * Basic (Gerrit: username plus HTTP password), so the token alone cannot
+ * verify. For it, and only for it, connect takes a `username` and calls
+ * `verify(origin, token, { username })` and `probe(origin, token, { username })`
+ * (an instance may refuse anonymous reads). The typed username is stored as
+ * the account's `user.login`, so every later re-verify, `loginFor(session)`
+ * and Git transport use exactly what Basic auth accepted. Other providers are called exactly as before.
  */
 
 const UNSUPPORTED_METHOD = Object.freeze({ available: false, reason: 'unsupported' });
@@ -19,6 +27,11 @@ const UNSUPPORTED_METHOD = Object.freeze({ available: false, reason: 'unsupporte
 const responseError = (status, body) => Object.assign(new Error(body.error), { sourceControlResponse: { status, body } });
 
 export function createPatAccountAuth({ descriptor, store, events, verify, probe, classifyFailure }) {
+  const takesUsername = descriptor.settings?.some((field) => field.type === 'username') === true;
+  const loginOf = (account) => account.user?.login ?? account.user?.username ?? '';
+  const verifyAccount = (origin, account) => (takesUsername
+    ? verify(origin, account.token, { username: loginOf(account) })
+    : verify(origin, account.token));
   const identityFor = (origin, accountId) => ({ provider: descriptor.id, instance: origin, accountId });
 
   const accountView = (origin, account, current, accounts) => ({
@@ -64,7 +77,7 @@ export function createPatAccountAuth({ descriptor, store, events, verify, probe,
     const accounts = instance.accounts.map((account) => accountView(origin, account, Boolean(active && account.id === active.id), instance.accounts));
     if (!active) return { provider: descriptor.id, instance: origin, status: 'disconnected', connected: false, accounts };
     try {
-      const user = await verify(origin, active.token);
+      const user = await verifyAccount(origin, active);
       return {
         provider: descriptor.id, instance: origin, status: 'connected', connected: true,
         user: { ...user, provider: descriptor.id, instance: origin }, scope: active.scope, accounts,
@@ -82,6 +95,7 @@ export function createPatAccountAuth({ descriptor, store, events, verify, probe,
   // The token behind each session the shell holds stays in this module, never
   // in the session object, so serializing a session can never leak it.
   const tokens = new WeakMap();
+  const logins = new WeakMap();
 
   /** The exact account asked for, else the instance's current one. */
   const resolveAccount = async ({ instance: origin, accountId: requestedAccountId = '' }) => {
@@ -108,6 +122,7 @@ export function createPatAccountAuth({ descriptor, store, events, verify, probe,
       persisted: true,
     });
     tokens.set(session, account.token);
+    logins.set(session, loginOf(account));
     return session;
   };
 
@@ -130,9 +145,13 @@ export function createPatAccountAuth({ descriptor, store, events, verify, probe,
       return instance.accounts.map((account) => accountView(origin, account, account.id === instance.activeAccountId, instance.accounts));
     },
     /** The token's user first, then the instance's support; nothing is stored unless both pass. */
-    connectToken: async ({ instance: origin, token }) => {
-      const user = await verify(origin, token);
-      const { version, supported, message } = await probe(origin);
+    connectToken: async ({ instance: origin, token, username }) => {
+      if (takesUsername && !username) throw responseError(400, { error: 'username is required' });
+      const credentials = { username };
+      // A Basic-auth host's stored login is the username the user typed, the
+      // one Basic auth accepted, whatever name the host reports for the account.
+      const user = takesUsername ? { ...(await verify(origin, token, credentials)), login: username } : await verify(origin, token);
+      const { version, supported, message } = takesUsername ? await probe(origin, token, credentials) : await probe(origin);
       if (!supported) {
         throw responseError(400, {
           error: message || (version ? `${descriptor.label} ${version} is not supported` : `${descriptor.label} is not supported`),
@@ -184,6 +203,8 @@ export function createPatAccountAuth({ descriptor, store, events, verify, probe,
     auth,
     /** The token behind a session `resolveAccount` returned; undefined for any other object. */
     tokenFor: (session) => tokens.get(session),
+    /** The stored login of that session's account (a Basic-auth host's username); undefined for any other object. */
+    loginFor: (session) => logins.get(session),
     /** Git transport's view of an exact stored credential, or null. */
     readCredential: async ({ instance, credentialId, credentialRevision }) => {
       const account = await store.readAccount(instance, credentialId, credentialRevision);

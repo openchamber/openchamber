@@ -229,6 +229,10 @@ account came from (`oauth` is the device code, `pat` the token), else the
 first one the descriptor names. The CLI login keeps its own row. The token
 form shows the scopes the descriptor names, literally, under "Create token";
 the info hint stays.
+Where the descriptor's settings have a `username` field, the token form asks
+for a username above the token and sends both (`authSetToken(…, { username })`);
+an `http-password` field names the secret an HTTP password instead of a token
+(`sourceControlProviderSettings.ts`). Gerrit signs in this way.
 `normalizeInstanceInput` reads what the user typed the way the descriptor
 says: an origin or a bare host, HTTPS only (HTTP on loopback where allowed), a
 port only where allowed, reserved instances refused.

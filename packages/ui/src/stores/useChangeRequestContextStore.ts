@@ -7,6 +7,7 @@ import type {
   SourceControlAPI,
   SourceControlReadContext,
 } from '@/lib/api/types';
+import { joinProjectPath } from '@/lib/source-control/projectPath';
 
 const CONTEXT_TTL_MS = 30_000;
 const CONTEXT_MAX_ENTRIES = 20;
@@ -21,7 +22,7 @@ export const getChangeRequestContextKey = (
   project?: { owner: string; name: string },
 ): string => JSON.stringify([
   getRuntimeKey(), ...sourceControlReadContextParts(context), number,
-  project ? `${project.owner}/${project.name}` : '',
+  project ? joinProjectPath(project.owner, project.name) : '',
 ]);
 
 const parseContextKey = (key: string): {

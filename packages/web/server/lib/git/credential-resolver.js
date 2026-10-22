@@ -6,6 +6,7 @@ import { constants as fsConstants } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { isProviderId } from '../source-control/provider-id.js';
+import { descriptorAllowsLoopbackHttp, isLoopbackHost } from './loopback-http.js';
 
 const REFERENCE_PREFIX = 'ocgit:v1';
 const VERSIONED_REFERENCE_PREFIX = 'ocgit:v2';
@@ -359,12 +360,26 @@ export async function inspectManagedSshCredential(record, { snapshotRoot, fsImpl
 }
 
 /**
+ * Whether a normalized Git endpoint is a provider instance's own origin: the
+ * same host and port over HTTPS, or over plain HTTP when the instance is a
+ * loopback origin of a provider that allows loopback HTTP
+ * (`loopback-http.js`). No other host is ever reached in the clear.
+ */
+export const endpointIsInstanceOrigin = (descriptor, origin, endpoint) => {
+  const https = origin.protocol === 'https:' && endpoint.protocol === 'https';
+  const loopbackHttp = origin.protocol === 'http:' && endpoint.protocol === 'http'
+    && isLoopbackHost(origin.hostname) && descriptorAllowsLoopbackHttp(descriptor);
+  return (https || loopbackHttp) && origin.hostname.toLowerCase() === endpoint.host
+    && Number(origin.port || (https ? 443 : 80)) === endpoint.port;
+};
+
+/**
  * A managed HTTPS credential reaches only its own instance: the descriptor's
  * origin, and only the default instances when the provider grants transport
  * nowhere else (GitHub Enterprise tokens never clone or push).
  */
 const assertHttpsEndpoint = (descriptor, reference, endpoint) => {
-  if (endpoint.protocol !== 'https') throw new Error('Managed HTTPS credentials require HTTPS');
+  if (!['https', 'http'].includes(endpoint.protocol)) throw new Error('Managed HTTPS credentials require HTTPS');
   if (descriptor.transport.managedHttpsInstances === 'default-only'
     && !descriptor.instance.defaultInstances.includes(reference.instance)) {
     throw new Error('Invalid managed provider instance');
@@ -375,8 +390,7 @@ const assertHttpsEndpoint = (descriptor, reference, endpoint) => {
   } catch {
     throw new Error('Invalid managed provider instance');
   }
-  const instancePort = instance.port ? Number(instance.port) : 443;
-  if (instance.protocol !== 'https:' || instance.hostname.toLowerCase() !== endpoint.host || instancePort !== endpoint.port) {
+  if (!endpointIsInstanceOrigin(descriptor, instance, endpoint)) {
     throw new Error('Git endpoint is outside the managed credential policy');
   }
 };

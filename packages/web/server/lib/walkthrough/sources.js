@@ -1,5 +1,7 @@
 import { getDiff, getRangeDiff, getCommitDiff, getUntrackedDiffs, listUntrackedPaths } from '../git/service.js';
 import assert from 'node:assert/strict';
+import { isString } from '../shared/guards.js';
+import { joinProjectPath } from '../source-control/project-path.js';
 
 // A walkthrough source resolves to one or more diff *sections*. A section is a
 // patch plus the scope its hunk ids live in; keeping staged and working-tree
@@ -46,6 +48,16 @@ export function parseSource(raw) {
     if (!Number.isInteger(number) || number <= 0) {
       throw new WalkthroughSourceError('pr sources require a positive number');
     }
+    // A host that keeps revisions (Gerrit's patchsets) may name one by its
+    // full commit SHA; without it the change request's current one is read.
+    let revision;
+    if (raw.revision !== undefined) {
+      if (!isString(raw.revision) || !/^[0-9a-f]{40}$/i.test(raw.revision)) {
+        throw new WalkthroughSourceError('pr sources require a full revision SHA');
+      }
+      revision = raw.revision.toLowerCase();
+    }
+    const withRevision = (source) => (revision ? { ...source, revision } : source);
     if (raw.sourceRepo !== undefined) {
       const { owner, repo } = raw.sourceRepo ?? {};
       try {
@@ -54,14 +66,16 @@ export function parseSource(raw) {
         // repo name with dots kept internal, so "." and ".." can never be a
         // segment. Downstream the owner is only compared against the bound
         // repository's network, never turned into a filesystem path.
-        assert.match(owner, /^[a-zA-Z0-9_-]+(?:\.[a-zA-Z0-9_-]+)*(?:\/[a-zA-Z0-9_-]+(?:\.[a-zA-Z0-9_-]+)*)*$/);
+        // An empty owner is a path-style provider's top-level project (Gerrit's
+        // `demo`); the routes accept it only for such a provider.
+        if (owner !== '') assert.match(owner, /^[a-zA-Z0-9_-]+(?:\.[a-zA-Z0-9_-]+)*(?:\/[a-zA-Z0-9_-]+(?:\.[a-zA-Z0-9_-]+)*)*$/);
         assert.match(repo, /^[a-zA-Z0-9_.-]+$/);
       } catch {
         throw new WalkthroughSourceError('pr sources require a valid repository');
       }
-      return { kind: 'pr', number, sourceRepo: { owner, repo } };
+      return withRevision({ kind: 'pr', number, sourceRepo: { owner, repo } });
     }
-    return { kind: 'pr', number };
+    return withRevision({ kind: 'pr', number });
   }
 
   if (raw.kind === 'commit') {
@@ -87,7 +101,9 @@ export function sourceKey(source) {
   if (source.kind === 'working-tree') return `working-tree:${source.scope}`;
   if (source.kind === 'branch') return `branch:${source.baseRef}...${source.headRef}`;
   if (source.kind === 'commit') return `commit:${source.hash}`;
-  return source.sourceRepo ? `pr:${source.sourceRepo.owner}/${source.sourceRepo.repo}:${source.number}` : `pr:${source.number}`;
+  const pr = source.sourceRepo ? `pr:${joinProjectPath(source.sourceRepo.owner, source.sourceRepo.repo)}:${source.number}` : `pr:${source.number}`;
+  // A named revision is its own walkthrough; the current one keeps the key it always had.
+  return source.revision ? `${pr}@${source.revision}` : pr;
 }
 
 // `git diff` never reports untracked files, so a brand-new file would be
@@ -145,9 +161,9 @@ export async function loadSourceSections(directory, source, { getPullRequestDiff
     throw new WalkthroughSourceError('Pull request diffs are unavailable', 500);
   }
 
-  const { patch, meta } = await getPullRequestDiff(directory, source.number, readContext, {
-    sourceRepo: source.sourceRepo ?? null,
-  });
+  const options = { sourceRepo: source.sourceRepo ?? null };
+  if (source.revision) options.revision = source.revision;
+  const { patch, meta } = await getPullRequestDiff(directory, source.number, readContext, options);
   return {
     sections: patch && patch.trim() ? [{ scope: `pr:${source.number}`, patch }] : [],
     meta: meta || {},

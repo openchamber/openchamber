@@ -70,29 +70,37 @@ const toIssueReference = (issue: Issue): RepositoryIssueReference => ({
  * branch status carry this shape; the comment count is not in it, and labels
  * only where the host sends them.
  */
-export const pullReferenceFromChangeRequest = (changeRequest: ChangeRequest): RepositoryChangeRequestReference => ({
-    kind: 'pull',
-    provider: changeRequest.provider,
-    number: changeRequest.number,
-    title: changeRequest.title,
-    url: changeRequest.url,
-    ...body(changeRequest.body),
-    createdAt: changeRequest.createdAt ?? null,
-    updatedAt: changeRequest.updatedAt ?? null,
-    author: author(changeRequest.author),
-    labels: (changeRequest.labels ?? []).map((label) => ({ name: label.name, color: label.color })),
-    commentCount: 0,
-    sourceRepo: sourceRepo(changeRequest.project),
-    state: changeRequest.state,
-    draft: changeRequest.draft,
-    head: changeRequest.head,
-    base: changeRequest.base,
-    headSha: changeRequest.headSha ?? '',
-    headRepo: changeRequest.headProject
-        ? { owner: changeRequest.headProject.owner, repo: changeRequest.headProject.name, url: changeRequest.headProject.url }
-        : null,
-    projectId: changeRequest.project.id,
-});
+export const pullReferenceFromChangeRequest = (changeRequest: ChangeRequest): RepositoryChangeRequestReference => {
+    const reference: RepositoryChangeRequestReference = {
+        kind: 'pull',
+        provider: changeRequest.provider,
+        number: changeRequest.number,
+        title: changeRequest.title,
+        url: changeRequest.url,
+        ...body(changeRequest.body),
+        createdAt: changeRequest.createdAt ?? null,
+        updatedAt: changeRequest.updatedAt ?? null,
+        author: author(changeRequest.author),
+        labels: (changeRequest.labels ?? []).map((label) => ({ name: label.name, color: label.color })),
+        commentCount: 0,
+        sourceRepo: sourceRepo(changeRequest.project),
+        state: changeRequest.state,
+        draft: changeRequest.draft,
+        head: changeRequest.head,
+        base: changeRequest.base,
+        headSha: changeRequest.headSha ?? '',
+        headRepo: changeRequest.headProject
+            ? { owner: changeRequest.headProject.owner, repo: changeRequest.headProject.name, url: changeRequest.headProject.url }
+            : null,
+        projectId: changeRequest.project.id,
+    };
+    // A review host's flags travel only where it sends them, so other hosts' items keep their shape.
+    if (changeRequest.workInProgress !== undefined) reference.workInProgress = changeRequest.workInProgress;
+    if (changeRequest.private !== undefined) reference.private = changeRequest.private;
+    if (changeRequest.topic) reference.topic = changeRequest.topic;
+    if (changeRequest.revisionNumber !== undefined) reference.revisionNumber = changeRequest.revisionNumber;
+    return reference;
+};
 
 /** The provider a list-backed page is read from, and how links are read. */
 export type ListBackedProvider = {
@@ -231,6 +239,9 @@ const pullDetail = (context: ChangeRequestContext): RepositoryReferenceDetail['p
     };
     // Absent when the chain could not be read, which is not the same as in none.
     if (context.stack !== undefined) pull.stack = context.stack;
+    if (context.voteLabels) pull.voteLabels = context.voteLabels;
+    if (context.submitRequirements) pull.submitRequirements = context.submitRequirements;
+    if (context.revisions) pull.revisions = context.revisions;
     return pull;
 };
 
@@ -245,11 +256,16 @@ const toVerdict = (verdict: ChangeRequestVerdict): RepositoryReferenceComment =>
     review: verdict.state,
 });
 
-/** Comments, and a change request's size and pipeline, for the previewed item. */
+/**
+ * Comments, and a change request's size and pipeline, for the previewed item;
+ * `revision` reads one revision's files instead of the latest (a host with
+ * `features.revisions` only).
+ */
 export const fetchListBackedReferenceDetail = async (
     reads: ListBackedReads,
     context: SourceControlReadContext,
     reference: RepositoryReference,
+    revision?: string,
 ): Promise<RepositoryReferenceDetail> => {
     const project = { owner: reference.sourceRepo.owner, name: reference.sourceRepo.repo };
     if (reference.kind === 'issue') {
@@ -258,7 +274,9 @@ export const fetchListBackedReferenceDetail = async (
     }
     // The size comes from the changed files, which the neutral read only lists with their
     // diffs; the pipeline's totals from its jobs, read only with CI details.
-    const changeRequestContext = await reads.changeRequestContext(context, reference.number, { project, includeDiff: true, includeTimeline: true, includeCIDetails: true });
+    const options: Parameters<ListBackedReads['changeRequestContext']>[2] = { project, includeDiff: true, includeTimeline: true, includeCIDetails: true };
+    if (revision) options.revision = revision;
+    const changeRequestContext = await reads.changeRequestContext(context, reference.number, options);
     const comments = [
         ...threadedComments([...changeRequestContext.issueComments, ...changeRequestContext.reviewComments]),
         ...(changeRequestContext.verdicts ?? []).map(toVerdict),

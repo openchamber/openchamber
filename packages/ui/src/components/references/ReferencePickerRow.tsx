@@ -18,6 +18,7 @@ import {
     referenceNumberLabel,
     TRACKER_PRIORITY_KEYS,
 } from './referencePickerItems';
+import { joinProjectPath } from '@/lib/source-control/projectPath';
 
 type ChipLabel = { name: string; color: string | null };
 
@@ -198,7 +199,7 @@ export const ReferencePickerRow = React.memo(function ReferencePickerRow({
                     ) : null}
                     {item.source === 'repository' && (showRepository || item.reference.sourceRepo.source === 'upstream') ? (
                         <span className="rounded bg-[var(--status-info-background)] px-1 typography-micro text-[var(--status-info-text)]">
-                            {item.reference.sourceRepo.owner}/{item.reference.sourceRepo.repo}
+                            {joinProjectPath(item.reference.sourceRepo.owner, item.reference.sourceRepo.repo)}
                         </span>
                     ) : null}
                     {labels.length > 0 ? (

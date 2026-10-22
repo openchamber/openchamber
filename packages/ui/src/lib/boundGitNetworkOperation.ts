@@ -5,6 +5,7 @@ import type {
   GitNetworkOperation,
   GitNetworkOperationPlan,
   GitNetworkOperationRequest,
+  GitPushReviewIntent,
   GitStatus,
   SourceControlAPI,
   SourceControlBindingRead,
@@ -32,6 +33,7 @@ export class BoundGitNetworkOperationError extends Error {
     | 'stale-runtime'
     | 'contributor-publish-cancelled'
     | 'contributor-publish-cancelled-after-update'
+    | 'review-option-invalid'
     | 'operation-unavailable'
     | 'operation-result'
     | 'operation-storage'
@@ -217,6 +219,70 @@ export const runBoundRemoteBranchDelete = async ({
   const plan = await planOperation(git, request, runtimeKey, capturedRuntime);
   requireCurrentRuntime(runtimeKey, capturedRuntime);
   const completion = await executePlan(git, plan, runtimeKey, capturedRuntime);
+  return completion;
+};
+
+/** A topic or hashtag a review host takes as a push option without escaping. */
+const REVIEW_OPTION = /^[A-Za-z0-9._-]{1,128}$/;
+const isValidReviewOption = (value: string): boolean => REVIEW_OPTION.test(value);
+
+/**
+ * Pushes the checked-out branch for review: to `refs/for/<target>` on the
+ * remote the repository's provider association reads, never another one, as
+ * a tracked network operation. The server composes the refspec from the
+ * intent's fields and sets no upstream, so the branch keeps tracking what it
+ * tracked. Nothing here falls back to a branch push, which could bypass review.
+ */
+export const runBoundReviewPush = async ({
+  directory,
+  git,
+  sourceControl,
+  review,
+  runtimeKey = getRuntimeKey,
+  onOperation,
+}: BoundGitNetworkDependencies & {
+  directory: string;
+  git: Pick<GitAPI, 'getGitStatus' | 'planNetworkOperation' | 'executeNetworkOperation' | 'getNetworkOperation'>;
+  review: GitPushReviewIntent;
+}): Promise<GitNetworkOperation> => {
+  const target = review.target.trim().replace(/^refs\/heads\//, '');
+  if (!target || target === 'HEAD') fail('publish-target-required');
+  // People type hashtags as `#tag`; the host takes the bare name.
+  const hashtags = (review.hashtags ?? []).map((tag) => tag.replace(/^#/, '')).filter(Boolean);
+  if ((review.topic !== undefined && !isValidReviewOption(review.topic)) || !hashtags.every(isValidReviewOption)) {
+    fail('review-option-invalid');
+  }
+  const capturedRuntime = runtimeKey();
+  const [bindingRead, status] = await Promise.all([sourceControl.repositoryBinding(directory), git.getGitStatus(directory)]);
+  requireCurrentRuntime(runtimeKey, capturedRuntime);
+  const binding = effectiveRepositoryBinding(bindingRead);
+  const primaryRemote = binding.providers[0]?.primaryRemote;
+  if (!primaryRemote) fail('binding-required');
+  const remote = requireRemoteReady(bindingRead, primaryRemote ?? '');
+  if (remote.mode === 'anonymous') fail('anonymous-read-only');
+  const branch = status.current?.trim() ?? '';
+  if (!branch || branch === 'HEAD') fail('branch-required');
+  const intent: GitPushReviewIntent = { target };
+  if (review.topic) intent.topic = review.topic;
+  if (review.wip) intent.wip = true;
+  if (review.private) intent.private = true;
+  if (hashtags.length > 0) intent.hashtags = hashtags;
+  const request: GitNetworkOperationRequest = {
+    operation: 'push',
+    directory,
+    repositoryId: binding.repositoryId,
+    bindingRevision: binding.revision,
+    configRevision: bindingRead.repository.configRevision,
+    remote: { name: remote.name, endpoint: remote.push },
+    sourceRef: `refs/heads/${branch}`,
+    destinationRef: `refs/for/${target}`,
+    transportMode: remote.mode,
+    review: intent,
+  };
+  const plan = await planOperation(git, request, runtimeKey, capturedRuntime, onOperation);
+  requireCurrentRuntime(runtimeKey, capturedRuntime);
+  const completion = await executePlan(git, plan, runtimeKey, capturedRuntime, onOperation);
+  announcePush(directory, capturedRuntime);
   return completion;
 };
 

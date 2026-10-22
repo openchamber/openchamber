@@ -64,6 +64,24 @@ describe('outbound handles', () => {
     expect(seen.at(-1).headers[header]).toBe(value);
   });
 
+  it('sends a basic token as Basic base64(login:token)', async () => {
+    const handles = createOutboundHandles();
+    const grant = handles.mint({
+      guestId: 'forge', providerId: 'ext-forge', methods: SOURCE_CONTROL_OUTBOUND_METHODS, origin,
+      credential: { token: 'http-pass/word', header: 'authorization', scheme: 'basic', login: 'mona' }, deadline: Date.now() + 5_000,
+    });
+    await handles.serve({ bearer: grant.handle, body: { method: 'GET', path: '/a/accounts/self' } });
+    expect(seen.at(-1).headers.authorization).toBe(`Basic ${Buffer.from('mona:http-pass/word').toString('base64')}`);
+  });
+
+  it.each([undefined, '', 'mo:na', 'mo\nna'])('refuses a basic credential without a login it can send (%j)', (login) => {
+    const handles = createOutboundHandles();
+    expect(() => handles.mint({
+      guestId: 'forge', providerId: 'ext-forge', methods: SOURCE_CONTROL_OUTBOUND_METHODS, origin,
+      credential: { token: 't', header: 'authorization', scheme: 'basic', login }, deadline: Date.now() + 5_000,
+    })).toThrow(expect.objectContaining({ status: 400, code: 'SOURCE_CONTROL_USERNAME_REQUIRED' }));
+  });
+
   it('sends no token for a handle without one, and records a 401 the forge gave', async () => {
     const handles = createOutboundHandles();
     const grant = handles.mint({ guestId: 'forge', providerId: 'ext-forge', methods: SOURCE_CONTROL_OUTBOUND_METHODS, origin, credential: null, deadline: Date.now() + 5_000 });

@@ -5,7 +5,10 @@ import { pipeline } from 'node:stream/promises';
 import { isString } from '../shared/guards.js';
 import { createOAuthFlowRegistry } from './oauth-flow-registry.js';
 import { mutationReceipt } from './mutation-executor.js';
+import { readBranchTip } from './change-id.js';
 import { createChangeRequestStatusCache } from './status-cache.js';
+import { allowsTopLevelProjects } from './project-path.js';
+import { isProviderUsername } from './provider-id.js';
 
 /**
  * The generic source-control route shell. For every registered provider it
@@ -47,11 +50,17 @@ function errorStatus(kind) {
   return kind === 'temporarily-unavailable' ? 503 : kind === 'unreachable' ? 502 : 500;
 }
 
+/**
+ * Whether an error carries one of this module's string codes. A local Git
+ * process failure carries its numeric exit status as `code`, which is none.
+ */
+const hasCodePrefix = (error, prefix) => isString(error?.code) && error.code.startsWith(prefix);
+
 /** An answer the implementation chose itself, or a storage failure that is never an empty answer; else null. */
 function sendAuthStorageError(res, error) {
   const answered = sendProviderResponse(res, error);
   if (answered) return answered;
-  if (error?.code?.startsWith('SOURCE_CONTROL_LOCK_')) {
+  if (hasCodePrefix(error, 'SOURCE_CONTROL_LOCK_')) {
     return res.status(error.status).json({ error: error.message, code: error.code });
   }
   if (error?.code === 'INVALID_SOURCE_CONTROL_AUTH') {
@@ -121,8 +130,8 @@ function readUploadParams(params) {
   return UPLOAD_SECRET_RE.test(secret) && plainName ? { secret, filename } : null;
 }
 
-const isReadContextError = (error) => error?.code?.startsWith('SOURCE_CONTROL_BINDING_')
-  || error?.code?.startsWith('SOURCE_CONTROL_LOCK_')
+const isReadContextError = (error) => hasCodePrefix(error, 'SOURCE_CONTROL_BINDING_')
+  || hasCodePrefix(error, 'SOURCE_CONTROL_LOCK_')
   || error?.code === 'SOURCE_CONTROL_PROVIDER_UNAVAILABLE'
   || error?.code === 'INVALID_SOURCE_CONTROL_READ_CONTEXT'
   || error?.code === 'INVALID_SOURCE_CONTROL_BINDING';
@@ -158,8 +167,8 @@ const requireReplayMatch = (record, kind, actor, context) => {
 /** A 4xx the provider answered after dispatch is a definite failure; anything else may have happened. */
 const classifyMutationError = (error) => {
   const status = upstreamStatusOf(error);
-  const localSourceControlError = error?.code?.startsWith('SOURCE_CONTROL_')
-    || error?.code?.startsWith('INVALID_SOURCE_CONTROL_');
+  const localSourceControlError = hasCodePrefix(error, 'SOURCE_CONTROL_')
+    || hasCodePrefix(error, 'INVALID_SOURCE_CONTROL_');
   if (!localSourceControlError && Number.isInteger(status) && status >= 400 && status < 500) {
     if (!Number.isInteger(error.status)) error.status = status;
     return 'failed';
@@ -177,6 +186,30 @@ const changeRequestReceipt = (record, replayed, providerAccountId) => {
   const { number, ...result } = receipt.result;
   return { ...receipt, target: { ...receipt.target, number }, result };
 };
+
+// A revision is named by its full commit SHA.
+const REVISION_RE = /^[0-9a-f]{40}$/;
+const invalidReadContext = (message) => Object.assign(new Error(message), {
+  code: 'INVALID_SOURCE_CONTROL_READ_CONTEXT', status: 400,
+});
+const namesRevision = (value) => value !== undefined && value !== '';
+/**
+ * Why a read's `revision` is refused, or null. A provider without the
+ * capability refuses one rather than answer for the current revision.
+ */
+const revisionProblem = (descriptor, value) => {
+  if (!namesRevision(value)) return null;
+  if (!descriptor?.capabilities.revisions) return 'This source control provider does not keep change request revisions';
+  return isString(value) && REVISION_RE.test(value.trim().toLowerCase()) ? null : 'revision must be a full commit SHA';
+};
+/** The 40-hex revision a read names, or undefined when it names none. */
+const readRevision = (descriptor, value) => {
+  const problem = revisionProblem(descriptor, value);
+  if (problem) throw invalidReadContext(problem);
+  return namesRevision(value) ? value.trim().toLowerCase() : undefined;
+};
+/** `input` with `revision` added only when one was named, so providers without revisions see the call they always did. */
+const withRevision = (input, revision) => (revision === undefined ? input : { ...input, revision });
 
 const unsupportedCapability = (res) => res.status(501).json({
   error: 'This source control provider does not support this operation',
@@ -310,6 +343,22 @@ export function registerProviderRoutes(app, {
       target[method](path, handler);
     };
 
+    /**
+     * The project a request's `owner` and `repo` name: `{ owner, name }`,
+     * `none` when it names neither, `incomplete` otherwise. A path provider's
+     * top-level project (Gerrit's `demo`) names a repo and an empty owner.
+     */
+    const topLevelProjects = allowsTopLevelProjects(descriptor);
+    const requestedProject = (req) => {
+      const owner = requestText(req.query?.owner);
+      const name = requestText(req.query?.repo);
+      if (name && (owner || topLevelProjects)) return { state: 'project', project: { owner, name } };
+      return { state: owner || name ? 'incomplete' : 'none' };
+    };
+    const namesProject = (req) => requestedProject(req).state === 'project';
+    const optionalProject = (req) => requestedProject(req).project;
+    const projectSelectorProblem = (req) => requestedProject(req).state === 'incomplete';
+
     const invalidateAccount = async (impl, identity, persisted) => {
       statusCache.invalidate({ instance: identity.instance, accountId: identity.accountId });
       return impl.auth.invalidateAccount({ instance: identity.instance, accountId: identity.accountId, persisted });
@@ -322,7 +371,7 @@ export function registerProviderRoutes(app, {
         await invalidateAccount(impl, error.sourceControlIdentity, Boolean(error.sourceControlPersistedAccount));
         return null;
       } catch (failure) {
-        if (failure?.code?.startsWith('SOURCE_CONTROL_LOCK_')) {
+        if (hasCodePrefix(failure, 'SOURCE_CONTROL_LOCK_')) {
           return res.status(failure.status).json({ error: failure.message, code: failure.code });
         }
         throw failure;
@@ -367,7 +416,7 @@ export function registerProviderRoutes(app, {
         try {
           impl = await loadImplementation(id);
           const early = validate?.(req);
-          if (early) return res.status(400).json({ error: early });
+          if (early) return res.status(400).json(isString(early) ? { error: early } : early);
           const instance = requestInstance(req);
           const late = validateAfterInstance?.(req);
           if (late) return res.status(400).json({ error: late });
@@ -513,6 +562,7 @@ export function registerProviderRoutes(app, {
       }
     }, authPaths('/auth/complete'));
 
+    const takesUsername = descriptor.settings.some((field) => field.type === 'username');
     target.post(authPaths('/auth/token'), async (req, res) => {
       let impl;
       try {
@@ -528,7 +578,14 @@ export function registerProviderRoutes(app, {
         }
         const token = isString(req.body?.token) ? req.body.token.trim() : '';
         if (!token) return res.status(400).json({ error: 'token is required' });
-        return res.json(await impl.auth.connectToken({ instance, token }));
+        // A Basic-auth host (its settings declare a username field) needs the
+        // username before the first request; every other host never gets one.
+        if (!takesUsername) return res.json(await impl.auth.connectToken({ instance, token }));
+        const username = isString(req.body?.username) ? req.body.username.trim() : '';
+        if (!isProviderUsername(username)) {
+          return res.status(400).json({ error: 'username is required' });
+        }
+        return res.json(await impl.auth.connectToken({ instance, token, username }));
       } catch (error) {
         const lockResponse = sendAuthStorageError(res, error);
         if (lockResponse) return lockResponse;
@@ -599,6 +656,9 @@ export function registerProviderRoutes(app, {
         instance, accountId: session.accountId, credentialRevision: session.credentialRevision,
         repositoryId: trustedContext.repositoryId, bindingRevision: trustedContext.bindingRevision,
         directory, branch, remote,
+        // A push-to-create host finds the change by the tip's Change-Id, so
+        // its answer is only as current as the tip it was read for.
+        localTip: descriptor.capabilities.createVia === 'push' ? await readBranchTip(directory, branch) : null,
       };
       if (!force) {
         const fresh = statusCache.fresh(cacheContext);
@@ -705,7 +765,7 @@ export function registerProviderRoutes(app, {
         const { status, body } = impl.mutations.presentError(error);
         return res.status(status).json(body);
       }
-      if (error?.code?.startsWith('SOURCE_CONTROL_') || error?.code?.startsWith('INVALID_SOURCE_CONTROL_')) {
+      if (hasCodePrefix(error, 'SOURCE_CONTROL_') || hasCodePrefix(error, 'INVALID_SOURCE_CONTROL_')) {
         return res.status(error.status ?? 409).json(sourceControlErrorBody(error));
       }
       if (!impl) return res.status(500).json({ error: error?.message || `${label} resource request failed` });
@@ -732,11 +792,10 @@ export function registerProviderRoutes(app, {
       boundRead(capability, suffix, async ({ req, res, impl, instance, directory, trustedContext }) => {
         const read = requireResource(impl, method);
         const session = await sessionFor(impl, instance, trustedContext.accountId);
-        const project = { owner: requestText(req.query?.owner), name: requestText(req.query?.repo) };
+        const project = optionalProject(req);
         return res.json({ connected: true, items: await read({ session, directory, project, context: trustedContext, remote: trustedContext.primaryRemote }) });
       }, {
-        validate: (req) => (!requestText(req.query?.owner) || !requestText(req.query?.repo)
-          ? 'a complete project selector is required' : null),
+        validate: (req) => (!namesProject(req) ? 'a complete project selector is required' : null),
       });
     }
 
@@ -779,12 +838,12 @@ export function registerProviderRoutes(app, {
       const session = await sessionFor(impl, instance, trustedContext.accountId);
       return res.json(await read({
         session, directory, context: trustedContext, remote: trustedContext.primaryRemote,
-        project: { owner: requestText(req.query?.owner), name: requestText(req.query?.repo) },
+        project: optionalProject(req),
         number: requestIssueNumber(req.query?.number),
         host: requestText(req.query?.host),
       }));
     }, {
-      validate: (req) => (!requestText(req.query?.directory) || !requestText(req.query?.owner) || !requestText(req.query?.repo)
+      validate: (req) => (!requestText(req.query?.directory) || !namesProject(req)
         || !requestIssueNumber(req.query?.number) ? 'directory, owner, repo and number are required' : null),
     });
 
@@ -812,10 +871,9 @@ export function registerProviderRoutes(app, {
       let impl;
       try {
         impl = await loadImplementation(id);
-        const owner = requestText(req.query?.owner);
-        const repo = requestText(req.query?.repo);
+        const project = optionalProject(req);
         const upload = readUploadParams(req.params);
-        if (!owner || !repo || !upload) return res.status(400).json({ error: 'a project selector and an upload path are required' });
+        if (!project || !upload) return res.status(400).json({ error: 'a project selector and an upload path are required' });
         const instance = requestInstance(req);
         const directory = requestText(req.query?.directory);
         const trustedContext = await readContextOf(req, instance, directory);
@@ -823,7 +881,7 @@ export function registerProviderRoutes(app, {
         const readUpload = requireResource(impl, 'readUpload');
         const session = await sessionFor(impl, instance, trustedContext.accountId);
         const upstream = await readUpload({
-          session, directory, project: { owner, name: repo }, context: trustedContext, remote: trustedContext.primaryRemote,
+          session, directory, project, context: trustedContext, remote: trustedContext.primaryRemote,
           ...upload,
           range: requestText(req.get('range')) || undefined,
           signal: abort.signal,
@@ -869,22 +927,25 @@ export function registerProviderRoutes(app, {
     boundRead('changeRequests', '/pulls/context', async ({ req, res, impl, instance, directory, trustedContext }) => {
       const number = requestNumber(req.query?.number);
       if (!number) return res.status(400).json({ error: 'number is required' });
-      const owner = requestText(req.query?.owner);
-      const repo = requestText(req.query?.repo);
+      const revision = readRevision(descriptor, req.query?.revision);
       const session = await sessionFor(impl, instance, trustedContext.accountId);
-      return res.json(await impl.resources.changeRequestContext({
+      return res.json(await impl.resources.changeRequestContext(withRevision({
         session,
         directory,
         number,
         includeDiff: req.query?.diff === '1',
         includeCIDetails: req.query?.checkDetails === '1',
         includeTimeline: req.query?.timeline === '1',
-        project: owner ? { owner, name: repo } : undefined,
+        project: optionalProject(req),
         context: trustedContext, remote: trustedContext.primaryRemote,
-      }));
+      }, revision)));
     }, {
-      validate: (req) => (Boolean(requestText(req.query?.owner)) !== Boolean(requestText(req.query?.repo))
-        ? 'complete project selector is required' : null),
+      validate: (req) => {
+        if (projectSelectorProblem(req)) return 'complete project selector is required';
+        // Refused before any context or account work.
+        const problem = revisionProblem(descriptor, req.query?.revision);
+        return problem ? { error: problem, code: 'INVALID_SOURCE_CONTROL_READ_CONTEXT' } : null;
+      },
     });
 
     boundRead('issues', '/issues/list', async ({ req, res, impl, instance, directory, trustedContext }) => {
@@ -901,19 +962,17 @@ export function registerProviderRoutes(app, {
 
     for (const [suffix, method] of [['/issues/get', 'getIssue'], ['/issues/comments', 'issueComments']]) {
       boundRead('issues', suffix, async ({ req, res, impl, instance, directory, trustedContext }) => {
-        const owner = requestText(req.query?.owner);
-        const repo = requestText(req.query?.repo);
         const session = await sessionFor(impl, instance, trustedContext.accountId);
         return res.json(await impl.resources[method]({
           session,
           directory,
           number: requestIssueNumber(req.query?.number),
-          project: owner ? { owner, name: repo } : undefined,
+          project: optionalProject(req),
           context: trustedContext, remote: trustedContext.primaryRemote,
         }));
       }, {
         validate: (req) => (!requestIssueNumber(req.query?.number)
-          || Boolean(requestText(req.query?.owner)) !== Boolean(requestText(req.query?.repo))
+          || projectSelectorProblem(req)
           ? 'valid number and complete project selector are required' : null),
       });
     }
@@ -929,12 +988,12 @@ export function registerProviderRoutes(app, {
         branches: await impl.resources.projectBranches({
           session,
           directory,
-          project: { owner: requestText(req.query?.owner), name: requestText(req.query?.repo) },
+          project: optionalProject(req),
           context: trustedContext, remote: trustedContext.primaryRemote,
         }),
       });
     }, {
-      validate: (req) => (!requestText(req.query?.owner) || !requestText(req.query?.repo) ? 'owner and repo are required' : null),
+      validate: (req) => (!namesProject(req) ? 'owner and repo are required' : null),
     });
 
     // The ambient account route is retired: account presentation comes from
@@ -992,6 +1051,10 @@ export function registerProviderRoutes(app, {
     mountExtension,
     unmountExtension,
     extensionDispatcher,
+    /** Forgets every provider's status of one local branch, after the server rewrote its tip. */
+    invalidateBranchStatus: ({ directory, branch }) => {
+      for (const cache of statusCaches.values()) cache.invalidate({ directory, branch });
+    },
     /**
      * Live state of known change requests and issues, read with the
      * instance's current or named account. A provider may answer with the
@@ -1012,9 +1075,13 @@ export function registerProviderRoutes(app, {
       }
       return { connected: true, ...(await impl.resources.liveSummaries({ session, refs, issueRefs })) };
     },
-    readChangeRequestPatch: ({ context, number, sourceRepo }) => readWithBoundAccount(context, 'readChangeRequestPatch', { number, sourceRepo }),
-    readChangeRequestFile: ({ context, number, sourceRepo, path, previousPath, status }) => readWithBoundAccount(
-      context, 'readChangeRequestFile', { number, sourceRepo, path, previousPath, status },
+    /** `revision` (40-hex) only for a provider that keeps revisions; others refuse it with 400. */
+    readChangeRequestPatch: async ({ context, number, sourceRepo, revision }) => readWithBoundAccount(
+      context, 'readChangeRequestPatch', withRevision({ number, sourceRepo }, readRevision(providers.describe(context?.provider), revision)),
+    ),
+    readChangeRequestFile: async ({ context, number, sourceRepo, path, previousPath, status, revision }) => readWithBoundAccount(
+      context, 'readChangeRequestFile',
+      withRevision({ number, sourceRepo, path, previousPath, status }, readRevision(providers.describe(context?.provider), revision)),
     ),
     /** A change request's head on the context's primary project network, for a worktree made from it. */
     readChangeRequestHead: (input) => trustedRead(input, 'readChangeRequestHead', () => ({ number: input.number })),

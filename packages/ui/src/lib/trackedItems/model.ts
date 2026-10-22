@@ -3,6 +3,7 @@ import { sourceControlProviderIdSchema } from '@/lib/source-control/providers/de
 import type { IssueLiveSummary, ChangeRequestLiveSummary, TrackerLiveSummary } from '@/lib/api/types';
 import { trackerProviderIdSchema } from '@/lib/trackers/descriptor';
 import { linearStateCategory } from '@/lib/trackers/legacyLinear';
+import { joinProjectPath } from '@/lib/source-control/projectPath';
 
 /**
  * A pull request, merge request, issue or tracker work item whose live state the server follows
@@ -32,7 +33,8 @@ export const isTrackedWorkItem = (item: TrackedItem): item is TrackedWorkItem =>
 
 export const trackedItemKey = (item: TrackedItem): string => {
   if (isTrackedWorkItem(item)) return `${item.provider}|${item.identifier.toUpperCase()}`;
-  const thread = `${item.kind}|${item.owner}/${item.repo}#${item.number}`.toLowerCase();
+  // The joined project path: `owner/repo` as always, `repo` for a path-style provider's top-level project.
+  const thread = `${item.kind}|${joinProjectPath(item.owner, item.repo)}#${item.number}`.toLowerCase();
   // The same owner/repo/number can exist on two instances of one provider;
   // the instance is part of the key so the two never collide or share a slot.
   // Account ids are opaque and case-sensitive; they stay as they are.
@@ -99,7 +101,8 @@ const legacyGitHubThreadSchema = z.looseObject({ provider: z.literal('github'), 
 const trackedThreadSchema = z.object({
   provider: sourceControlProviderIdSchema,
   instance: z.string().min(1),
-  owner: z.string().min(1),
+  // Empty for a path-style provider's top-level project; the server, which knows the provider, refuses it elsewhere.
+  owner: z.string(),
   repo: z.string().min(1),
   number: z.number().int().positive(),
   kind: z.enum(['pull', 'issue']),

@@ -34,8 +34,10 @@ const repositoryLink = (
   if (prefix && path.startsWith(`${prefix}/`)) path = path.slice(prefix.length + 1);
   const segments = path.split('/');
   // A provider that nests namespaces (GitLab subgroups) names a project by its whole path; others by owner/name.
+  // A path-style provider's project may also be top level, one segment.
   const descriptor = descriptors.find((entry) => entry.id === identity.provider) ?? unknownProviderDescriptor(identity.provider);
-  if (segments.length < 2 || (!descriptor.repository.nestedNamespaces && segments.length !== 2)) return null;
+  const fewest = descriptor.repository.pathStyle === 'path' ? 1 : 2;
+  if (segments.length < fewest || (!descriptor.repository.nestedNamespaces && segments.length !== 2)) return null;
   if (segments.some((segment) => !/^[a-zA-Z0-9_.-]+$/.test(segment) || ['.', '..', '-'].includes(segment))) return null;
 
   base.pathname = `/${prefix ? `${prefix}/` : ''}${path}`;

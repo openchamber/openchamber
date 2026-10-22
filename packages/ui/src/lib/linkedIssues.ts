@@ -4,6 +4,7 @@ import { isJsonValue, type JsonValue } from '@openchamber/sdk';
 import { getSessionMetadata, type SessionMetadataRecord } from './sessionReviewMetadata';
 import type { RepositoryUrlMatcher } from './source-control/repositoryUrlMatcher';
 import { formatChangeRequestReference } from './source-control/providers/terminology';
+import { joinProjectPath } from './source-control/projectPath';
 import { storedTrackerLinkKind } from './trackers/legacyLinear';
 
 /**
@@ -350,7 +351,7 @@ export const getRepositoryThreadRef = (entry: LinkedIssue, matcher: RepositoryUr
   if (repositoryEntry && match.number !== entry.number) return null;
   const thread = repositoryEntry ? entry.kind : match.kind;
   return {
-    key: `${match.provider}|${match.instance}|${match.owner}/${match.repo}|${thread}#${match.number}`.toLowerCase(),
+    key: `${match.provider}|${match.instance}|${joinProjectPath(match.owner, match.repo)}|${thread}#${match.number}`.toLowerCase(),
     provider: match.provider,
     instance: match.instance,
     owner: match.owner,

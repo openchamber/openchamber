@@ -5,7 +5,8 @@ import path from 'node:path';
 import { fingerprintRemoteUrl, redactRemoteUrl } from '../source-control/url-redaction.js';
 import { normalizeSourceControlProviderInstance } from '../source-control/provider-instance.js';
 import { sourceControlProviderDescriptors } from '../source-control/provider-descriptors.js';
-import { createHttpsCredentialReference, normalizeGitRemoteEndpoint } from './credential-resolver.js';
+import { createHttpsCredentialReference, endpointIsInstanceOrigin, normalizeGitRemoteEndpoint } from './credential-resolver.js';
+import { loopbackHttpPermitted } from './loopback-http.js';
 
 const OPERATIONS = ['push', 'fetch', 'pull', 'delete-remote-branch', 'sync', 'clone', 'checkout-hydration'];
 const SHA_PATTERN = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/i;
@@ -197,9 +198,11 @@ const parseAuxiliaryGrants = (value) => {
  * Whether Git may receive this endpoint: HTTPS, `ssh://`, or strict SCP.
  * An SSH URL may name its login user, as SCP does; HTTPS userinfo and any
  * password are credentials and never pass. Clone and every existing-remote
- * transfer share this rule.
+ * transfer share this rule. With `providers`, plain HTTP passes for a
+ * loopback host when a provider allows loopback HTTP instances
+ * (`loopback-http.js`); never for any other host.
  */
-const isSafeTransferEndpoint = (value) => {
+const isSafeTransferEndpoint = (value, providers = null) => {
   if (value.length > 4096) return false;
   if (!value.includes('://')) {
     const match = value.match(/^(?:[A-Za-z0-9._-]+@)?[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?:([^\s:\\]+)$/);
@@ -214,15 +217,16 @@ const isSafeTransferEndpoint = (value) => {
   } catch {
     return false;
   }
-  return ['https:', 'ssh:'].includes(parsed.protocol)
+  const loopbackHttp = parsed.protocol === 'http:' && loopbackHttpPermitted(parsed.hostname, providers);
+  return (['https:', 'ssh:'].includes(parsed.protocol) || loopbackHttp)
     && (!parsed.username || (parsed.protocol === 'ssh:' && /^[A-Za-z0-9._][A-Za-z0-9._-]*$/.test(parsed.username)))
     && !parsed.password && !parsed.search && !parsed.hash
     && Boolean(parsed.hostname) && Boolean(parsed.pathname) && parsed.pathname !== '/'
     && !/[\0-\x20\x7f\\]/.test(pathname)
     && pathname.split('/').slice(1).every((part) => part && part !== '.' && part !== '..');
 };
-const assertSafeExistingEndpoint = (endpoint) => {
-  if (!isSafeTransferEndpoint(requiredString(endpoint, 'Git endpoint'))) throw planError('Git endpoint is invalid');
+const assertSafeExistingEndpoint = (endpoint, providers = null) => {
+  if (!isSafeTransferEndpoint(requiredString(endpoint, 'Git endpoint'), providers)) throw planError('Git endpoint is invalid');
 };
 // Display URLs are redacted, so a URL-form display never carries userinfo.
 const assertSafeDisplayEndpoint = (endpoint) => {
@@ -241,6 +245,72 @@ const parseExactRef = (value, name, namespaces) => {
   return ref;
 };
 
+/**
+ * Whether a remote may carry a change host's review refs: it is the primary
+ * remote of a ready provider association (`authority.primaryOf`, from the
+ * binding service) whose descriptor creates changes by push. Checked at
+ * planning and again before every transfer.
+ */
+export const isChangeReviewRemote = (authority, providers = sourceControlProviderDescriptors) => (
+  Array.isArray(authority?.primaryOf)
+  && authority.primaryOf.some((id) => providers.get(id)?.capabilities.createVia === 'push')
+);
+
+// Topics and hashtags go into the push refspec after `%` unencoded, so they
+// are limited to characters that can never end or extend an option.
+const REVIEW_OPTION_RE = /^[A-Za-z0-9._-]{1,128}$/;
+const REVIEW_HASHTAGS_MAX = 16;
+// `refs/changes/<last two digits>/<change>/<revision>`, a change host's revision ref.
+const CHANGE_REF_RE = /^refs\/changes\/(\d{2})\/([1-9]\d{0,9})\/([1-9]\d{0,5})$/;
+const isChangeRef = (ref) => {
+  const match = CHANGE_REF_RE.exec(ref);
+  return Boolean(match) && match[2].padStart(2, '0').slice(-2) === match[1];
+};
+
+/**
+ * A push for review: the target branch and the change's options, every one
+ * validated here because the server writes them into the refspec itself
+ * (`<sha>:refs/for/<target>%topic=…,wip,private,t=…`). The caller names no
+ * refspec, destination ref, force lease or upstream.
+ */
+const parseReviewPush = (value) => {
+  if (!isPlainObject(value) || !hasExactKeys(value, ['target'], ['topic', 'wip', 'private', 'hashtags'])) {
+    throw planError('review is invalid');
+  }
+  const target = requiredString(value.target, 'review target');
+  // `%` starts the push options and `,` separates them; a branch may contain both.
+  if (target !== value.target || /[%,]/.test(target)) throw planError('review target is invalid');
+  parseExactRef(`refs/for/${target}`, 'review target', ['refs/for/']);
+  const review = { target };
+  if (value.topic !== undefined) {
+    if (!isString(value.topic) || !REVIEW_OPTION_RE.test(value.topic)) throw planError('review topic is invalid');
+    review.topic = value.topic;
+  }
+  for (const flag of ['wip', 'private']) {
+    if (value[flag] === undefined) continue;
+    if (!isBoolean(value[flag])) throw planError(`review ${flag} is invalid`);
+    review[flag] = value[flag];
+  }
+  if (value.hashtags !== undefined) {
+    if (!Array.isArray(value.hashtags) || value.hashtags.length > REVIEW_HASHTAGS_MAX
+      || value.hashtags.some((tag) => !isString(tag) || !REVIEW_OPTION_RE.test(tag))) {
+      throw planError('review hashtags are invalid');
+    }
+    review.hashtags = [...new Set(value.hashtags)];
+  }
+  return review;
+};
+/** The refspec a review push sends, composed only from validated fields. */
+const reviewRefspec = (sourceSha, review) => {
+  const options = [
+    ...(review.topic ? [`topic=${review.topic}`] : []),
+    ...(review.wip ? ['wip'] : []),
+    ...(review.private ? ['private'] : []),
+    ...(review.hashtags ?? []).map((tag) => `t=${tag}`),
+  ];
+  return `${sourceSha}:refs/for/${review.target}${options.length ? `%${options.join(',')}` : ''}`;
+};
+
 const parseRemoteFetchMapping = (remoteName, output) => {
   if (remoteName.length > 512) throw planError('Remote Fetch remote name is invalid');
   parseExactRef(`refs/remotes/${remoteName}/branch`, 'remote name', ['refs/remotes/']);
@@ -250,9 +320,9 @@ const parseRemoteFetchMapping = (remoteName, output) => {
   }
   return { refspec: output.slice(0, -1), force: output.startsWith('+') };
 };
-const parseCloneEndpoint = (value) => {
+const parseCloneEndpoint = (value, providers) => {
   const endpoint = requiredString(value, 'remoteUrl');
-  if (!isSafeTransferEndpoint(endpoint)) throw planError('remoteUrl is invalid');
+  if (!isSafeTransferEndpoint(endpoint, providers)) throw planError('remoteUrl is invalid');
   return endpoint;
 };
 /**
@@ -304,6 +374,7 @@ export function createNetworkOperationPlanner({
   resolveRef,
   resolveSymbolicRef = async () => null,
   resolveRemoteFetchMapping,
+  checkBranchName,
   inspectCheckoutHydration,
   runtimeIdentity,
   idFactory = () => `git_${crypto.randomUUID()}`,
@@ -418,7 +489,7 @@ export function createNetworkOperationPlanner({
     const pushAuthority = await validateGitTransportContext(authorityInput(pushRemote, 'push'));
     const validateAuthority = (authority, remote, transportMode) => {
       const transportRevision = parseDigest(authority.transportRevision, 'transportRevision');
-      assertSafeExistingEndpoint(authority.endpoint);
+      assertSafeExistingEndpoint(authority.endpoint, sourceControlProviders);
       if (transportMode === 'anonymous' && (authority.credentialId !== undefined
         || normalizeGitRemoteEndpoint(authority.endpoint).protocol !== 'https')) {
         throw planError('Anonymous Git transport requires credential-free HTTPS', 501, 'RUNTIME_UNSUPPORTED');
@@ -505,15 +576,19 @@ export function createNetworkOperationPlanner({
 
   const planExisting = async (input) => {
     const remoteFetch = input.operation === 'fetch' && input.fetchScope === 'remote';
+    // A push for review names a target branch; the server composes the destination.
+    const reviewPush = input.operation === 'push' && Object.hasOwn(input, 'review');
     const pushMutation = input.operation === 'push' || input.operation === 'delete-remote-branch';
+    // A review push may echo its destination, which must then be exactly `refs/for/<target>`.
     const optional = input.operation === 'push'
-      ? ['forceWithLease', 'configureUpstream', 'destinationSelectionId'] : [];
+      ? (reviewPush ? ['destinationRef'] : ['forceWithLease', 'configureUpstream', 'destinationSelectionId']) : [];
     if (input.operation === 'fetch') optional.push('fetchScope');
     const required = [
       'operation', 'directory', 'repositoryId', 'bindingRevision', 'configRevision',
       'remote', 'transportMode',
     ];
-    if (!remoteFetch) required.push('destinationRef');
+    if (reviewPush) required.push('review');
+    else if (!remoteFetch) required.push('destinationRef');
     if (!remoteFetch && input.operation !== 'delete-remote-branch') required.push('sourceRef');
     if (!hasExactKeys(input, required, optional)) throw planError('Git network operation input is invalid');
     if (input.operation === 'fetch' && input.fetchScope !== undefined && !['ref', 'remote'].includes(input.fetchScope)) {
@@ -525,14 +600,24 @@ export function createNetworkOperationPlanner({
     const repositoryId = requiredString(input.repositoryId, 'repositoryId');
     const configRevision = parseDigest(input.configRevision, 'configRevision');
     const remote = parseRemote(input.remote);
-    const sourceNamespaces = ['refs/heads/', 'refs/tags/'];
+    // A single-ref fetch may take a change host's revision ref, under the review gate below.
+    const sourceNamespaces = operation === 'fetch' ? ['refs/heads/', 'refs/tags/', 'refs/changes/'] : ['refs/heads/', 'refs/tags/'];
     const destinationNamespaces = operation === 'fetch'
       ? ['refs/remotes/', 'refs/heads/', 'refs/tags/']
       : operation === 'pull' || operation === 'delete-remote-branch' ? ['refs/heads/'] : ['refs/heads/', 'refs/tags/'];
     const sourceRef = remoteFetch || operation === 'delete-remote-branch'
       ? undefined
       : parseExactRef(input.sourceRef, 'sourceRef', sourceNamespaces);
-    const destinationRef = remoteFetch ? undefined : parseExactRef(input.destinationRef, 'destinationRef', destinationNamespaces);
+    const changeRefFetch = operation === 'fetch' && sourceRef?.startsWith('refs/changes/');
+    if (changeRefFetch && !isChangeRef(sourceRef)) throw planError('sourceRef is invalid');
+    const review = reviewPush ? parseReviewPush(input.review) : undefined;
+    if (review && !sourceRef.startsWith('refs/heads/')) throw planError('A push for review sends a branch');
+    if (review && input.destinationRef !== undefined && input.destinationRef !== `refs/for/${review.target}`) {
+      throw planError('destinationRef is invalid');
+    }
+    const destinationRef = remoteFetch ? undefined
+      : review ? `refs/for/${review.target}`
+        : parseExactRef(input.destinationRef, 'destinationRef', destinationNamespaces);
     const transportMode = parseTransportMode(input.transportMode);
     if (pushMutation && transportMode === 'anonymous') throw planError('Anonymous Git transport is read-only', 400, 'INVALID_REQUEST');
     if (contributor && operation === 'delete-remote-branch') {
@@ -573,7 +658,7 @@ export function createNetworkOperationPlanner({
       endpointKind,
     });
     const transportRevision = parseDigest(authority.transportRevision, 'transportRevision');
-    assertSafeExistingEndpoint(authority.endpoint);
+    assertSafeExistingEndpoint(authority.endpoint, sourceControlProviders);
     if (transportMode === 'anonymous' && (authority.credentialId !== undefined
       || normalizeGitRemoteEndpoint(authority.endpoint).protocol !== 'https')) {
       throw planError('Anonymous Git transport requires credential-free HTTPS', 501, 'RUNTIME_UNSUPPORTED');
@@ -585,6 +670,15 @@ export function createNetworkOperationPlanner({
     }
     if (transportMode === 'managed' && !authority.credentialId) {
       throw planError('Managed Git transport credential is required', 409, 'GIT_NETWORK_OPERATION_AUTHORITY_CHANGED');
+    }
+    // Review refs reach only a change host, through the remote its association
+    // names; anywhere else `refs/for/*` would create an ordinary branch.
+    if ((review || changeRefFetch) && !isChangeReviewRemote(authority, sourceControlProviders)) {
+      throw planError('Review refs are only available on the primary remote of a change host', 400, 'INVALID_REQUEST');
+    }
+    if (review) {
+      if (!(checkBranchName instanceof Function)) throw planError('Push for review is unavailable', 501, 'RUNTIME_UNSUPPORTED');
+      if (await checkBranchName(directory, review.target) !== review.target) throw planError('review target is invalid');
     }
     let fetchMapping;
     if (remoteFetch) {
@@ -654,6 +748,8 @@ export function createNetworkOperationPlanner({
     };
     if (fetchMapping) internal.fetchRefspec = fetchMapping.refspec;
     if (sourceSha) internal.sourceSha = sourceSha;
+    if (review) internal.pushRefspec = reviewRefspec(sourceSha, review);
+    if (review || changeRefFetch) internal.changeReviewRemote = true;
     if (contributor) {
       internal.contributorAuthority = {
         worktreeId: contributor.worktreeId,
@@ -677,7 +773,7 @@ export function createNetworkOperationPlanner({
       ['operation', 'remoteUrl', 'destinationPath', 'transportMode'],
       ['credentialAccount', 'providerAccount', 'sshCredentialId', 'unverifiedConfirmed', 'gitIdentityId', 'auxiliaryGrants'],
     )) throw planError('Git clone input is invalid');
-    const endpoint = parseCloneEndpoint(input.remoteUrl);
+    const endpoint = parseCloneEndpoint(input.remoteUrl, sourceControlProviders);
     const transportMode = parseTransportMode(input.transportMode);
     const dotGitOrigins = [];
     const noteDotGitInstance = (provider, instance) => {
@@ -712,9 +808,10 @@ export function createNetworkOperationPlanner({
         let instance;
         try { instance = normalizeSourceControlProviderInstance(account.provider, account.instance, sourceControlProviders); }
         catch { throw planError('Credential account instance is invalid'); }
-        const origin = sourceControlProviders.get(account.provider).instance.origin(instance);
-        if (origin.protocol !== 'https:' || origin.hostname !== parsedEndpoint.host
-          || Number(origin.port || 443) !== parsedEndpoint.port) throw planError('Credential account does not match the HTTPS endpoint');
+        const descriptor = sourceControlProviders.get(account.provider);
+        if (!endpointIsInstanceOrigin(descriptor, descriptor.instance.origin(instance), parsedEndpoint)) {
+          throw planError('Credential account does not match the HTTPS endpoint');
+        }
         noteDotGitInstance(account.provider, instance);
         const accountId = requiredString(account.accountId, 'credential accountId');
         if (accountId !== account.accountId || /[\0\r\n]/.test(accountId)) throw planError('Credential account is invalid');
@@ -795,7 +892,7 @@ export function createNetworkOperationPlanner({
       remote: remote.name,
       endpointKind: 'fetch',
     });
-    assertSafeExistingEndpoint(authority.endpoint);
+    assertSafeExistingEndpoint(authority.endpoint, sourceControlProviders);
     if (authority.endpointFingerprint !== remote.endpoint.fingerprint
       || redactRemoteUrl(authority.endpoint) !== remote.endpoint.displayUrl) {
       throw planError('Git checkout hydration source changed', 409, 'GIT_NETWORK_OPERATION_AUTHORITY_CHANGED');

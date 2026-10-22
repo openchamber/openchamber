@@ -15,6 +15,7 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSourceBoardStore } from '@/stores/useSourceBoardStore';
 import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { joinProjectPath } from '@/lib/source-control/projectPath';
 
 type TrackerTarget =
     | { source: 'repository'; kind: RepositoryReferenceKind }
@@ -49,14 +50,14 @@ const repositoryItemOfUrl = (url: string, urls: RepositoryUrlMatcher): string | 
     if (!item) return null;
     const shared = urls.descriptorOf(item.provider).terminology.sharedNumberSpace;
     const marker = !shared && item.kind === 'pull' ? '!' : '#';
-    return `${item.instance}/${item.owner}/${item.repo}${marker}${item.number}`.toLowerCase();
+    return `${item.instance}/${joinProjectPath(item.owner, item.repo)}${marker}${item.number}`.toLowerCase();
 };
 
 /** The repository a link to an issue or PR points into, as `https://host/owner/name` in lowercase; null for anything else. */
 export const repositoryUrlOfItemLink = (url: string, urls: RepositoryUrlMatcher): string | null => {
     const item = urls.match(url);
     if (!item) return null;
-    return `${new URL(url.trim()).origin}/${item.owner}/${item.repo}`.toLowerCase();
+    return `${new URL(url.trim()).origin}/${joinProjectPath(item.owner, item.repo)}`.toLowerCase();
 };
 
 /** Whether two links name the same issue or PR, whatever page of it each opens. */

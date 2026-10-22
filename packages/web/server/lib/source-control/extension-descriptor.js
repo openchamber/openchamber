@@ -11,23 +11,27 @@ import { extensionProviderId } from './provider-id.js';
  * @typedef {{
  *   wire: 1,
  *   label: string,
- *   terminology: { changeRequest: 'pullRequest' | 'mergeRequest', ci: 'checks' | 'pipeline' },
+ *   terminology: { changeRequest: 'pullRequest' | 'mergeRequest' | 'change', ci: 'checks' | 'pipeline' },
  *   referencePrefix: { changeRequest: string, issue: string },
  *   repositoryPath: 'owner/name' | 'namespace/name',
  *   instances: { defaultInstances: string[], custom: boolean, allowLoopbackHttp: boolean, allowPort: boolean, placeholder: string },
  *   capabilities: {
  *     projects: boolean, issues: boolean, changeRequests: boolean, draftChangeRequests: boolean,
- *     merge: false | { methods: Array<'merge' | 'squash' | 'rebase'> }, ci: boolean, comments: boolean, reviews: boolean,
+ *     merge: false | { methods: Array<'merge' | 'squash' | 'rebase' | 'submit'> }, ci: boolean, comments: boolean, reviews: boolean,
  *     state: boolean, labels: boolean, reviewers: boolean, changeRequestPatch: boolean, liveSummaries: boolean,
+ *     reviewModel?: 'verdict' | 'votes', revisions?: boolean,
  *   },
- *   token: { header: 'authorization' | 'private-token', scheme: 'bearer' | 'token' | 'none', scopes: string[], createPath?: string },
+ *   token: {
+ *     header: 'authorization' | 'private-token', scheme: 'bearer' | 'token' | 'basic' | 'none', username?: boolean,
+ *     scopes: string[], createPath?: string,
+ *   },
  *   transport: { httpsUsername: { kind: 'login' } | { kind: 'fixed', value: string }, appendDotGitToHttpsClone: boolean },
  *   limits: { commentMaxLength: number, reviewerId: 'numeric' | 'login', labelsMax: number, reviewersMax: number },
  *   trackedItems: { batchLimit: number },
  *   presentation: {
  *     abbreviation: string, promptNoun: string, sharedNumberSpace: boolean, iconPath?: string,
  *     urls: { changeRequest: string[], issue: string[] },
- *     features: { authorCanReview: boolean, issueCloseReason: boolean },
+ *     features: { authorCanReview: boolean, issueCloseReason: boolean, submitRequirements?: boolean },
  *     changeRequestTemplates: string[],
  *   },
  * }} SourceControlContribution
@@ -105,6 +109,17 @@ const freezeList = (list) => Object.freeze([...list]);
  * pattern compiled from templates, and the features PR 2 does not forward
  * (review threads, uploads, stacks, the reference picker) off.
  *
+ * A change request is created through the API only: pushing for review needs
+ * host code paths (the planner's `refs/for/` destination, the Change-Id
+ * status lookup) that are not open to extensions. The manifest cannot declare
+ * `createVia` or `branchHeads`, and the descriptor leaves both out, which
+ * means `api` and true: written out, they would be published and change what
+ * an existing extension's descriptor looks like to clients. The change-based
+ * fields an extension may declare (the `change` term, the review model,
+ * revisions, `submit`, submit requirements, the basic scheme with its
+ * username field) pass through, each only when declared, so a manifest
+ * without them builds and publishes the same descriptor as before.
+ *
  * `extension` records which guest serves it, and how the outbound proxy
  * sends its token; it never reaches a client except through
  * `publicProviderDescriptor`'s explicit marker.
@@ -145,6 +160,18 @@ export function buildExtensionDescriptor({ guestId, contribution, guest }) {
   const token = { scopes: freezeList(contribution.token.scopes) };
   if (contribution.token.createPath) token.createPath = contribution.token.createPath;
 
+  // Basic auth sends `login:token`, so the Settings card asks for the login.
+  const settings = [Object.freeze({ key: 'instance', type: 'instance-url', secret: false, scope: 'instance' })];
+  if (contribution.token.scheme === 'basic') {
+    settings.push(Object.freeze({ key: 'username', type: 'username', secret: false, scope: 'instance' }));
+  }
+  settings.push(Object.freeze({ key: 'token', type: 'personal-access-token', secret: true, scope: 'instance' }));
+
+  const changeBased = {};
+  if (capabilities.reviewModel) changeBased.reviewModel = capabilities.reviewModel;
+  if (capabilities.revisions) changeBased.revisions = true;
+  const submitRequirements = presentation.features.submitRequirements ? { submitRequirements: true } : {};
+
   return Object.freeze({
     id,
     label,
@@ -179,6 +206,8 @@ export function buildExtensionDescriptor({ guestId, contribution, guest }) {
       liveSummaries: capabilities.liveSummaries,
       referencePicker: false,
       multipleAccounts: true,
+      // No `createVia`: absent means `api`, so an extension creates through `/pr/create`.
+      ...changeBased,
     }),
     authMethods: Object.freeze({ device: false, pat: true, cli: false }),
     transport: Object.freeze({
@@ -207,10 +236,7 @@ export function buildExtensionDescriptor({ guestId, contribution, guest }) {
       reviewersMax: limits.reviewersMax,
     }),
     identity: Object.freeze({ noReplyEmail: null }),
-    settings: Object.freeze([
-      Object.freeze({ key: 'instance', type: 'instance-url', secret: false, scope: 'instance' }),
-      Object.freeze({ key: 'token', type: 'personal-access-token', secret: true, scope: 'instance' }),
-    ]),
+    settings: Object.freeze(settings),
     instances: Object.freeze({ legacyFlow: null }),
     presentation: Object.freeze({
       sharedNumberSpace: presentation.sharedNumberSpace,
@@ -238,6 +264,7 @@ export function buildExtensionDescriptor({ guestId, contribution, guest }) {
         authorCanReview: presentation.features.authorCanReview,
         projectUploads: false,
         issueCloseReason: presentation.features.issueCloseReason,
+        ...submitRequirements,
         changeRequestTemplates: freezeList(presentation.changeRequestTemplates),
       }),
     }),

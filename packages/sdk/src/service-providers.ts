@@ -394,6 +394,12 @@ export type SourceControlProjectRef = { id: string; owner: string; name: string 
 /** The bound context OpenChamber validated: binding, account and the remote it reads through. */
 type ReadInput = { context: SourceControlJsonObject; directory: string; remote: string };
 type ListInput = ReadInput & { page: number; query?: string; state: string; people: string };
+/**
+ * `revision` (a 40-hex commit sha) asks for one revision of the change
+ * request instead of its current one. OpenChamber sends it only to a host
+ * that declares `capabilities.revisions`.
+ */
+type RevisionInput = { revision?: string };
 
 /**
  * The durable target of a mutation, exactly the keys OpenChamber stores:
@@ -413,6 +419,12 @@ export type SourceControlMutationTarget = {
 /** `providerTarget` is the service's own coordinates for the write (≤ `SOURCE_CONTROL_PROVIDER_TARGET_MAX` bytes of JSON). */
 export type SourceControlMutationResolution = { providerTarget: SourceControlJsonObject; target: SourceControlMutationTarget };
 
+/**
+ * `input` is the normalized input of the route. A `/pr/review` on a host that
+ * declares `capabilities.reviewModel: "votes"` carries `votes` (label name to
+ * score) and an optional `body` instead of `verdict`; OpenChamber sends `votes`
+ * to no other host.
+ */
 type MutationStepInput = {
   route: string;
   kind: string;
@@ -426,7 +438,7 @@ export type SourceControlProviderInputs = {
   'auth.probe': Record<string, never>;
   changeRequestStatus: ReadInput & { branch: string; force: boolean };
   listChangeRequests: ListInput;
-  changeRequestContext: ReadInput & {
+  changeRequestContext: ReadInput & RevisionInput & {
     number: number; project?: SourceControlProjectSelector; includeDiff: boolean; includeCIDetails: boolean; includeTimeline: boolean;
   };
   listIssues: ListInput;
@@ -436,8 +448,8 @@ export type SourceControlProviderInputs = {
   projectBranches: ReadInput & { project: SourceControlProjectSelector };
   listLabels: ReadInput & { project: SourceControlProjectSelector };
   listReviewerCandidates: ReadInput & { project: SourceControlProjectSelector };
-  readChangeRequestPatch: ReadInput & { number: number; sourceRepo?: { owner: string; repo: string } };
-  readChangeRequestFile: ReadInput & {
+  readChangeRequestPatch: ReadInput & RevisionInput & { number: number; sourceRepo?: { owner: string; repo: string } };
+  readChangeRequestFile: ReadInput & RevisionInput & {
     number: number; sourceRepo?: { owner: string; repo: string }; path: string; previousPath?: string; status?: string;
   };
   liveSummaries: {

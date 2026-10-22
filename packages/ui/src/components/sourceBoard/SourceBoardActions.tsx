@@ -14,13 +14,13 @@ import type { ReferencePickerItem, ReferencePickerSelection } from '@/components
 import { readTrackerItemDetail } from '@/components/references/referenceSources';
 import { readTrackerDescriptor } from '@/lib/trackers/registry';
 import { resolveComposerReferences } from '@/components/references/resolveComposerReferences';
-import { readMergeMethod, rememberMergeMethod, type MergeMethod } from '@/components/views/git/mergeMethodPreference';
+import { readMergeMethod, rememberMergeMethod, type RememberedMergeMethod } from '@/components/views/git/mergeMethodPreference';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
-import type { RepositoryChangeRequestReference, PullRequestStack, PullRequestStackLayer, SourceControlReadContext } from '@/lib/api/types';
+import type { RepositoryChangeRequestReference, PullRequestStack, SourceControlReadContext } from '@/lib/api/types';
 import type { PullRequestSource } from '@/lib/diff/pullRequestDiff';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
-import type { SetStateInput, SourceControlCapabilities } from '@/lib/source-control/types';
+import type { ChangeRequestSubmitRequirement, SetStateInput, SourceControlCapabilities } from '@/lib/source-control/types';
 import { useChangeRequestDiffServing, useSourceControlProvider } from '@/lib/source-control/providers/registry';
 import { formatChangeRequestReference } from '@/lib/source-control/providers/terminology';
 import { usePullRequestSelectionStore } from '@/stores/usePullRequestSelectionStore';
@@ -29,6 +29,7 @@ import { useWalkthroughStore } from '@/stores/useWalkthroughStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSession } from '@/sync/sync-context';
 import { resolvePullLinkTarget } from './boardRepository';
+import { landsWithIt, mergeChoiceOf } from './mergeChoice';
 import { newMutationKey } from './mutationKey';
 
 /** A project the board acts in: its id and root folder. */
@@ -38,20 +39,16 @@ const MERGE_METHOD_LABELS = {
     squash: 'gitView.pr.mergeMethod.squash',
     merge: 'gitView.pr.mergeMethod.merge',
     rebase: 'gitView.pr.mergeMethod.rebase',
+    submit: 'gitView.pr.mergeMethod.submit',
 } as const;
 
 const MERGE_METHOD_KEYS = {
     merge: 'sourceBoard.merge.method.merge',
     squash: 'sourceBoard.merge.method.squash',
     rebase: 'sourceBoard.merge.method.rebase',
+    submit: 'sourceBoard.merge.method.submit',
 } as const;
 
-
-/** The open layers below `number` in its stack, bottom first. */
-const openLayersBelow = (stack: PullRequestStack, number: number): PullRequestStackLayer[] => {
-    const index = stack.layers.findIndex((layer) => layer.number === number);
-    return index <= 0 ? [] : stack.layers.slice(0, index).filter((layer) => layer.state === 'open');
-};
 
 /** A branch can be stacked on when it lives in the PR's own repository; a fork's cannot. */
 const isStackable = (pull: RepositoryChangeRequestReference): boolean => (
@@ -121,7 +118,16 @@ export const SourceBoardActions: React.FC<{
      * else a button of its own.
      */
     onStartOnTop?: (pull: RepositoryChangeRequestReference) => void;
-}> = ({ item, project, context, onStartWorktree, onChanged, startIn, onLeave, worktreeAvailable, stack = null, onStartOnTop }) => {
+    /**
+     * What the previewed change needs before it can be submitted, once its
+     * detail says (`features.submitRequirements`); submit waits until then.
+     */
+    submitRequirements?: ChangeRequestSubmitRequirement[];
+    /** The read that names `submitRequirements` failed: submit stays held and says why. */
+    submitRequirementsUnreadable?: boolean;
+    /** Whether the host would merge or submit the previewed change, from its status; null when it does not say. */
+    mergeable?: boolean | null;
+}> = ({ item, project, context, onStartWorktree, onChanged, startIn, onLeave, worktreeAvailable, stack = null, onStartOnTop, submitRequirements, submitRequirementsUnreadable = false, mergeable = null }) => {
     const { t } = useI18n();
     const { sourceControl, trackers } = useRuntimeAPIs();
     const confirmation = useConfirmDialog();
@@ -168,36 +174,51 @@ export const SourceBoardActions: React.FC<{
         attachToComposer();
     };
 
-    const mergeMethods = capabilities?.mergeChangeRequests ? capabilities.mergeMethods ?? [] : [];
     // The last method chosen anywhere, while this repository allows it.
-    const [chosenMethod, setChosenMethod] = React.useState<MergeMethod>(readMergeMethod);
-    const mergeMethod = mergeMethods.includes(chosenMethod) ? chosenMethod : mergeMethods[0] ?? null;
+    const [chosenMethod, setChosenMethod] = React.useState<RememberedMergeMethod>(readMergeMethod);
+    const { methods: mergeMethods, method: mergeMethod, unmet, hold: submitHold, blocked: submitBlocked } = mergeChoiceOf({
+        allowed: capabilities?.mergeChangeRequests ? capabilities.mergeMethods ?? [] : [],
+        remembered: chosenMethod,
+        checksRequirements: descriptor.features.submitRequirements,
+        requirements: submitRequirements,
+        requirementsUnreadable: submitRequirementsUnreadable,
+        mergeable,
+    });
     const chooseMergeMethod = (value: string) => {
         const method = mergeMethods.find((candidate) => candidate === value);
-        if (!method) return;
+        if (!method || method === 'submit') return;
         setChosenMethod(method);
         rememberMergeMethod(method);
     };
+    const submits = mergeMethod === 'submit';
     const reference = pull ? formatChangeRequestReference(descriptor, pull.number) : '';
     const referenceOf = (number: number) => formatChangeRequestReference(descriptor, number);
-    // GitHub merges a stacked PR together with the open layers below it, bottom first.
-    const mergesBelow = openPull && stack?.number != null ? openLayersBelow(stack, openPull.number) : [];
+    // The open layers below that land with it: GitHub's stack on merge, a change's chain on submit.
+    const landsBelow = openPull ? landsWithIt({ stack, number: openPull.number, method: mergeMethod }) : [];
+    const submitsBelow = submits && landsBelow.length > 0
+        ? t(landsBelow.length === 1 ? 'sourceBoard.submit.alsoBelow.one' : 'sourceBoard.submit.alsoBelow.other', { count: landsBelow.length })
+        : null;
 
-    const stackOnTop = onStartOnTop && openPull && isStackable(openPull) ? () => onStartOnTop(openPull) : null;
+    // A change whose head is a revision rather than a branch has nothing to stack on.
+    const stackOnTop = onStartOnTop && openPull && descriptor.features.branchHeads && isStackable(openPull) ? () => onStartOnTop(openPull) : null;
     const stackOnTopLabel = t('stacks.actions.newOnTop');
 
     const merge = async () => {
-        if (!openPull || !context || !mergeMethod) return;
+        if (!openPull || !context || !mergeMethod || submitBlocked) return;
         const methodNote = t(MERGE_METHOD_KEYS[mergeMethod], { base: openPull.base });
-        const stackNote = mergesBelow.length === 0
-            ? null
-            : mergesBelow.length === 1
-                ? t('stacks.merge.alsoBelow.one', { reference: referenceOf(mergesBelow[0].number) })
-                : t('stacks.merge.alsoBelow.other', { count: mergesBelow.length, references: mergesBelow.map((layer) => referenceOf(layer.number)).join(', ') });
+        const stackNote = submits
+            ? submitsBelow
+            : landsBelow.length === 0
+                ? null
+                : landsBelow.length === 1
+                    ? t('stacks.merge.alsoBelow.one', { reference: referenceOf(landsBelow[0].number) })
+                    : t('stacks.merge.alsoBelow.other', { count: landsBelow.length, references: landsBelow.map((layer) => referenceOf(layer.number)).join(', ') });
         const approved = await confirmation.confirm({
-            title: t(`sourceBoard.merge.confirmTitle.${descriptor.terminology.changeRequest}`, { reference }),
+            title: submitsBelow
+                ? t(landsBelow.length === 1 ? 'sourceBoard.submit.confirmTitleWithChain.one' : 'sourceBoard.submit.confirmTitleWithChain.other', { reference, count: landsBelow.length })
+                : t(`sourceBoard.merge.confirmTitle.${descriptor.terminology.changeRequest}`, { reference }),
             message: stackNote ? `${stackNote}\n\n${methodNote}` : methodNote,
-            action: t('sourceBoard.actions.merge'),
+            action: t(submits ? 'gitView.pr.mergeMethod.submit' : 'sourceBoard.actions.merge'),
         });
         if (!approved) return;
         setBusy('merge');
@@ -209,12 +230,15 @@ export const SourceBoardActions: React.FC<{
                 method: mergeMethod,
             });
             const { merged, outcome, message } = receipt.result;
-            if (merged) {
-                toast.success(mergesBelow.length === 0
+            if (submits) {
+                if (merged) toast.success(t('sourceBoard.toast.submitted', { reference }));
+                else toast.message(t('sourceBoard.toast.notSubmitted', { reference }), { description: message });
+            } else if (merged) {
+                toast.success(landsBelow.length === 0
                     ? t('sourceBoard.toast.merged', { reference })
-                    : mergesBelow.length === 1
+                    : landsBelow.length === 1
                         ? t('stacks.toast.mergedWithBelow.one', { reference })
-                        : t('stacks.toast.mergedWithBelow.other', { reference, count: mergesBelow.length }));
+                        : t('stacks.toast.mergedWithBelow.other', { reference, count: landsBelow.length }));
             } else if (outcome === 'queued') {
                 toast.message(t('sourceBoard.toast.mergeQueued', { reference }));
             } else if (outcome === 'merging') {
@@ -223,7 +247,7 @@ export const SourceBoardActions: React.FC<{
                 toast.message(t('sourceBoard.toast.notMerged', { reference }), { description: message });
             }
         } catch (error) {
-            toast.error(t('sourceBoard.toast.mergeFailed', { reference }), { description: error instanceof Error ? error.message : String(error) });
+            toast.error(t(submits ? 'sourceBoard.toast.submitFailed' : 'sourceBoard.toast.mergeFailed', { reference }), { description: error instanceof Error ? error.message : String(error) });
         } finally {
             setBusy(null);
             onChanged();
@@ -259,7 +283,7 @@ export const SourceBoardActions: React.FC<{
                         variant="outline"
                         // Two halves of one control: the inner corners stay square.
                         className={cn(mergeMethods.length > 1 && 'rounded-e-none')}
-                        disabled={busy === 'merge'}
+                        disabled={busy === 'merge' || submitBlocked}
                         onClick={() => void merge()}
                     >
                         <Icon name={busy === 'merge' ? 'loader-4' : 'git-merge'} className={busy === 'merge' ? 'size-3.5 animate-spin' : 'size-3.5'} />
@@ -288,6 +312,24 @@ export const SourceBoardActions: React.FC<{
                         </DropdownMenu>
                     ) : null}
                 </div>
+            ) : null}
+            {openPull && !openPull.draft && unmet.length > 0 ? (
+                // A disabled button shows no tooltip, so what it waits for is said beside it.
+                <span
+                    className="min-w-0 max-w-[16rem] truncate typography-meta text-muted-foreground"
+                    title={unmet.map((requirement) => requirement.description ? `${requirement.name}: ${requirement.description}` : requirement.name).join('\n')}
+                >
+                    {t('sourceBoard.submit.needs', { requirements: unmet.map((requirement) => requirement.name).join(', ') })}
+                </span>
+            ) : openPull && !openPull.draft && submitHold ? (
+                <span className="min-w-0 max-w-[16rem] truncate typography-meta text-muted-foreground">
+                    {t(submitHold === 'unreadable' ? 'sourceBoard.submit.unreadable' : 'sourceBoard.submit.notSubmittable')}
+                </span>
+            ) : openPull && !openPull.draft && submitsBelow ? (
+                // Submitting lands the open changes below it in the chain too.
+                <span className="min-w-0 max-w-[16rem] truncate typography-meta text-muted-foreground" title={submitsBelow}>
+                    {submitsBelow}
+                </span>
             ) : null}
             {openPull?.draft && capabilities?.draftChangeRequests ? (
                 <ActionButton icon="git-pull-request" label={t('sourceBoard.actions.markReady')} busy={busy === 'ready'} onClick={() => void markReady()} />
@@ -370,6 +412,8 @@ const LINK_CLASS = cn(
  * project's draft when the app shows another, `onLeave` gives the chat back
  * underneath it, and the walkthrough is not offered. A host that does not
  * serve change-request diffs gets neither link: both would only say so.
+ * With an earlier revision picked (`revision`), both read that revision, the
+ * one whose counts sit beside them.
  */
 export const SourceBoardPullLinks: React.FC<{
     pull: RepositoryChangeRequestReference;
@@ -380,12 +424,17 @@ export const SourceBoardPullLinks: React.FC<{
     projectOwnsDirectory: (directory: string | undefined) => boolean;
     currentDirectory: string | undefined;
     onLeave?: () => void;
-}> = ({ pull, project, repository, context, projectOwnsDirectory, currentDirectory, onLeave }) => {
+    /** The earlier revision (a patchset's full SHA) the preview shows; null for the current one. */
+    revision?: string | null;
+}> = ({ pull, project, repository, context, projectOwnsDirectory, currentDirectory, onLeave, revision = null }) => {
     const { t } = useI18n();
     const mobile = useMobileAppActions();
     const diffServing = useChangeRequestDiffServing(context.provider);
     const open = (surface: 'diff' | 'walkthrough') => {
-        const source: PullRequestSource = { kind: 'pr', number: pull.number, sourceRepo: { owner: pull.sourceRepo.owner, repo: pull.sourceRepo.repo } };
+        const source: PullRequestSource = {
+            kind: 'pr', number: pull.number, sourceRepo: { owner: pull.sourceRepo.owner, repo: pull.sourceRepo.repo },
+            ...(revision ? { revision } : {}),
+        };
         const ui = useUIStore.getState();
         const target = resolvePullLinkTarget({
             projectPath: project.path,

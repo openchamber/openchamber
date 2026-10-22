@@ -48,6 +48,25 @@ describe('createChangeRequestStatusCache', () => {
     expect(cache.last(context())).toEqual({ branch: 'feature', fetchedAt: 5 });
   });
 
+  it('keys a status read for a local tip by that tip', () => {
+    const cache = createChangeRequestStatusCache({ ttlMs: 100 });
+    cache.store(context({ localTip: 'a'.repeat(40) }), { branch: 'feature' });
+    expect(cache.last(context({ localTip: 'a'.repeat(40) }))).not.toBeNull();
+    expect(cache.last(context({ localTip: 'b'.repeat(40) }))).toBeNull();
+    expect(cache.last(context())).toBeNull();
+  });
+
+  it('drops one local branch of one directory, leaving other branches and directories', () => {
+    const cache = createChangeRequestStatusCache({ ttlMs: 100 });
+    cache.store(context({ branch: 'a' }), {});
+    cache.store(context({ branch: 'b' }), {});
+    cache.store(context({ branch: 'a', directory: '/other' }), {});
+    cache.invalidate({ directory: context().directory, branch: 'a' });
+    expect(cache.last(context({ branch: 'a' }))).toBeNull();
+    expect(cache.last(context({ branch: 'b' }))).not.toBeNull();
+    expect(cache.last(context({ branch: 'a', directory: '/other' }))).not.toBeNull();
+  });
+
   it('evicts the oldest entry at capacity', () => {
     const cache = createChangeRequestStatusCache({ ttlMs: 100, maxEntries: 2 });
     cache.store(context({ branch: 'a' }), {});

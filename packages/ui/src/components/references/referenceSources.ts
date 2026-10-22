@@ -64,6 +64,7 @@ import { fetchListBackedReferenceDetail, fetchListBackedReferencePage } from './
 import { isNewerThanRead, useLivePullStatuses, useLiveReferences, useLiveTrackerItems, type LivePullStatus } from './liveReferences';
 import { createListCache, createValueCache, useCachedList, useCachedValue, useReferenceRevalidation, type CachedValue, type ListPage, type PageRead, type ReadStamp } from './referenceCache';
 import type { TrackerReferenceFilter } from './referencePickerItems';
+import { joinProjectPath } from '@/lib/source-control/projectPath';
 
 const repositoryLists = createListCache<RepositoryReference>();
 const repositoryAcrossLists = createListCache<AcrossReference>();
@@ -414,12 +415,18 @@ export function useTrackerReferenceList(options: {
  * Comments of the previewed issue or PR, and a PR's size and review. A cached
  * answer shows at once; the host is asked only once `settled` says the
  * highlight stopped on the item.
+ *
+ * `revision` (a commit of the change, where the provider has
+ * `features.revisions`) reads that revision's files beside the latest:
+ * `detail` is then the revision's, `latest` stays the latest one, which names
+ * the revisions to pick from and carries the votes.
  */
-export function useRepositoryReferenceDetail(directory: string | null, reference: RepositoryReference | null, settled: boolean) {
+export function useRepositoryReferenceDetail(directory: string | null, reference: RepositoryReference | null, settled: boolean, revision: string | null = null) {
     const { sourceControl } = useRuntimeAPIs();
     const context = useRepositoryReadContext(reference ? directory : null);
     const readable = context && context !== 'missing' ? context : null;
-    const detailed = useSourceControlProvider(readable?.provider).features.referenceDetail;
+    const features = useSourceControlProvider(readable?.provider).features;
+    const detailed = features.referenceDetail;
     const owner = reference?.sourceRepo.owner ?? '';
     const repo = reference?.sourceRepo.repo ?? '';
     const number = reference?.number ?? 0;
@@ -436,14 +443,25 @@ export function useRepositoryReferenceDetail(directory: string | null, reference
         if (!result.detail) throw new Error('Not found');
         return result.detail;
     }, [detailed, number, owner, readable, reference, repo, sourceControl]);
-    const detail = useCachedValue(repositoryDetails, key, fetch, settled);
+    const latest = useCachedValue(repositoryDetails, key, fetch, settled);
+    // An older revision is its own answer; the latest one keeps its key, so it is shared as before.
+    const pickedRevision = features.revisions && kind === 'pull' && !detailed ? revision : null;
+    const revisionKey = key && pickedRevision ? JSON.stringify([key, pickedRevision]) : null;
+    const fetchRevision = React.useCallback(async (): Promise<RepositoryReferenceDetail> => {
+        if (!readable || !reference || !pickedRevision) throw new Error('The repository is not available here');
+        return fetchListBackedReferenceDetail(sourceControl, readable, reference, pickedRevision);
+    }, [pickedRevision, readable, reference, sourceControl]);
+    const revisionDetail = useCachedValue(repositoryDetails, revisionKey, fetchRevision, settled);
     // After a write (a comment, a review) the feed shows it without waiting for
     // staleness. Settles once it is read again; a failure shows in the preview.
     const refresh = React.useCallback(
-        () => (key ? repositoryDetails.ensure(key, fetch, { force: true }).then(() => undefined, () => undefined) : Promise.resolve()),
-        [fetch, key],
+        () => (key ? Promise.all([
+            repositoryDetails.ensure(key, fetch, { force: true }),
+            ...(revisionKey ? [repositoryDetails.ensure(revisionKey, fetchRevision, { force: true })] : []),
+        ]).then(() => undefined, () => undefined) : Promise.resolve()),
+        [fetch, fetchRevision, key, revisionKey],
     );
-    return { detail, refresh };
+    return { detail: revisionKey ? revisionDetail : latest, latest, refresh };
 }
 
 // A key per PR and head commit: a push asks again, a page loaded later
@@ -460,7 +478,7 @@ export const forgetRepositoryPullStatuses = (): void => repositoryPullStatuses.c
 
 /** Forgets one PR's checks and mergeability, at any head commit: the preview's refresh. */
 export const forgetRepositoryPullStatus = (pull: RepositoryItemRef): void => {
-    const marker = `|${pull.owner}/${pull.repo}#${pull.number}@`.toLowerCase();
+    const marker = `|${joinProjectPath(pull.owner, pull.repo)}#${pull.number}@`.toLowerCase();
     repositoryPullStatuses.forget((key) => key.toLowerCase().includes(marker));
 };
 

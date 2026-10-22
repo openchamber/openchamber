@@ -1,11 +1,12 @@
 import { isPlainObject, isString } from '../shared/guards.js';
 import { normalizeSourceControlProviderInstance } from './provider-instance.js';
-import { isProviderId } from './provider-id.js';
+import { isProviderId, isProviderUsername } from './provider-id.js';
 import { sourceControlProviderDescriptors } from './provider-descriptors.js';
 import { resolvePrivateRepositoryIdentity } from './repository-identity.js';
 import { fingerprintRemoteUrl, redactRemoteUrl } from './url-redaction.js';
-import { createHttpsCredentialReference, normalizeGitRemoteEndpoint, parseGitCredentialReference } from '../git/credential-resolver.js';
+import { createHttpsCredentialReference, endpointIsInstanceOrigin, normalizeGitRemoteEndpoint, parseGitCredentialReference } from '../git/credential-resolver.js';
 import { bindingSummary, isSafeRepositoryEndpoint, resolveBindingReadiness } from './binding-contract.js';
+import { allowsTopLevelProjects, splitProjectPath } from './project-path.js';
 
 const bindingInputError = (message) => {
   const error = new Error(message);
@@ -16,7 +17,6 @@ const bindingInputError = (message) => {
 
 const safePresentationText = (value, maximum = 512) => isString(value) && value.length > 0
   && value.length <= maximum && value.trim() === value && !/[\0\r\n]/.test(value);
-const safeProviderUsername = (value) => safePresentationText(value, 255) && /^[A-Za-z0-9_.-]+$/.test(value);
 const hasExactKeys = (value, required, optional = []) => {
   const keys = Object.keys(value);
   return required.every((key) => keys.includes(key))
@@ -45,9 +45,25 @@ const providerRepositoryForEndpoint = (provider, instance, endpoint) => {
     || (normalized.protocol !== 'ssh' && normalized.port !== expectedPort)) {
     throw bindingInputError('provider instance does not match the selected remote host');
   }
-  const parts = normalized.path.replace(/\.git$/i, '').split('/');
-  if (parts.length < 2 || parts.some((part) => !part)) throw bindingInputError('provider repository path is invalid');
-  return { owner: parts.slice(0, -1).join('/'), name: parts.at(-1) };
+  const descriptor = sourceControlProviderDescriptors.get(provider);
+  const path = descriptor.projectPathOfRemote instanceof Function
+    ? descriptor.projectPathOfRemote({ protocol: normalized.protocol, path: normalized.path })
+    : normalized.path.replace(/\.git$/i, '');
+  const parts = isString(path) ? path.split('/') : [];
+  // A path provider (Gerrit) also hosts projects with no owner segment.
+  const minimum = allowsTopLevelProjects(descriptor) ? 1 : 2;
+  if (parts.length < minimum || parts.some((part) => !part)) throw bindingInputError('provider repository path is invalid');
+  return splitProjectPath(path);
+};
+
+/**
+ * Sets the association's informational `repository`, left out for a
+ * top-level project (an empty owner): persisted bindings keep a non-empty
+ * owner, so the file stays readable by builds that predate such projects.
+ */
+const assignRepository = (association, repository) => {
+  if (repository.owner) association.repository = repository;
+  else delete association.repository;
 };
 
 const parseProviders = (value, repositoryRemotes) => {
@@ -71,14 +87,15 @@ const parseProviders = (value, repositoryRemotes) => {
       primaryRemote,
       readiness: 'ready',
       endpoint: { displayUrl: endpoint.displayUrl, fingerprint: endpoint.fingerprint },
-      repository,
     };
+    assignRepository(result, repository);
     if (provider.repository !== undefined) {
       if (!isPlainObject(provider.repository) || !hasExactKeys(provider.repository, ['owner', 'name'])) {
         throw bindingInputError('provider repository is invalid');
       }
+      const topLevel = allowsTopLevelProjects(sourceControlProviderDescriptors.get(name)) && provider.repository.owner === '';
       const requestedRepository = {
-        owner: requiredString(provider.repository.owner, 'repository owner'),
+        owner: topLevel ? '' : requiredString(provider.repository.owner, 'repository owner'),
         name: requiredString(provider.repository.name, 'repository name'),
       };
       if (requestedRepository.owner !== repository.owner || requestedRepository.name !== repository.name) {
@@ -330,7 +347,8 @@ const transportContextError = (message) => readContextError(
   400,
 );
 
-const parseTarget = (value) => {
+/** A mutation target; `owner` may be empty only for a provider whose projects need none (`repositoryPath: 'path'`). */
+const parseTarget = (value, provider) => {
   if (!isPlainObject(value)
     || !hasExactKeys(value, ['project'], ['number', 'head', 'base', 'headSha'])
     || !isPlainObject(value.project)
@@ -339,7 +357,8 @@ const parseTarget = (value) => {
   }
   const target = {
     project: {
-      owner: requiredString(value.project.owner, 'target project owner', mutationContextError),
+      owner: allowsTopLevelProjects(sourceControlProviderDescriptors.get(provider)) && value.project.owner === ''
+        ? '' : requiredString(value.project.owner, 'target project owner', mutationContextError),
       name: requiredString(value.project.name, 'target project name', mutationContextError),
     },
   };
@@ -406,7 +425,7 @@ export function createBindingService({
         || account.providerUserId !== reference.providerUserId
         || account.status !== 'valid' || !['oauth', 'pat', 'cli'].includes(account.source)
         || !Number.isInteger(account.user?.id) || account.user.id < 0
-        || !safeProviderUsername(account.user.login)
+        || !isProviderUsername(account.user.login)
         || account.providerUserId !== `${instance}#${account.user.id}`) return unavailablePresentation();
       return {
         status: 'available', transport: 'https', provider: reference.provider, instance,
@@ -585,6 +604,13 @@ export function createBindingService({
       transportMode: boundRemote.mode,
     };
     if (boundRemote.credentialId) authority.credentialId = boundRemote.credentialId;
+    // The providers this remote is the primary remote of, through a ready
+    // association: the Git planner opens a change host's review refs
+    // (`refs/for/*`, `refs/changes/*`) on such a remote only.
+    const primaryOf = (current.binding?.providers ?? [])
+      .filter((candidate) => candidate.primaryRemote === remote && candidate.readiness === 'ready')
+      .map((candidate) => candidate.provider);
+    if (primaryOf.length) authority.primaryOf = primaryOf;
     return Object.freeze(authority);
   };
   const validateGitAuxiliaryContext = async (input) => {
@@ -650,7 +676,7 @@ export function createBindingService({
       return {
         ...context,
         idempotencyKey: requiredString(input.idempotencyKey, 'idempotencyKey', mutationContextError),
-        target: parseTarget(input.target),
+        target: parseTarget(input.target, context.provider),
       };
     },
     validateGitTransportContext,
@@ -753,8 +779,9 @@ export function createBindingService({
           let parsed;
           try { parsed = normalizeGitRemoteEndpoint(endpoint.rawUrl); }
           catch { throw bindingInputError('Managed HTTPS endpoint is invalid'); }
-          if (origin.protocol !== 'https:' || parsed.protocol !== 'https' || parsed.host !== origin.hostname
-            || parsed.port !== Number(origin.port || 443)) throw bindingInputError('Credential account does not match the HTTPS endpoint');
+          if (!endpointIsInstanceOrigin(sourceControlProviderDescriptors.get(reference.provider), origin, parsed)) {
+            throw bindingInputError('Credential account does not match the HTTPS endpoint');
+          }
         }
         const resolved = await readTransportAccount?.(reference);
         const id = resolved?.credentialId;
@@ -920,7 +947,7 @@ export function createBindingService({
           try { await validateManagedSshCredential(credentialId); }
           catch { throw bindingInputError('Selected managed SSH credential is unavailable'); }
         } else if (input.transport === 'https') {
-          if (endpointProtocol !== 'https') throw bindingInputError('Managed HTTPS credentials require an HTTPS endpoint');
+          if (!['https', 'http'].includes(endpointProtocol)) throw bindingInputError('Managed HTTPS credentials require an HTTPS endpoint');
           const account = input.credentialAccount;
           if (!isPlainObject(account) || !hasExactKeys(account, ['provider', 'instance', 'accountId'])
             || !sourceControlProviderDescriptors.has(account.provider)) throw bindingInputError('Credential account is invalid');
@@ -932,8 +959,9 @@ export function createBindingService({
           if (reference.accountId !== account.accountId) throw bindingInputError('Credential account is invalid');
           const origin = providerOrigin(reference.provider, reference.instance);
           const endpoint = normalizeGitRemoteEndpoint(discovered.endpoint.displayUrl);
-          if (origin.protocol !== 'https:' || endpoint.host !== origin.hostname
-            || endpoint.port !== Number(origin.port || 443)) throw bindingInputError('Credential account does not match the HTTPS endpoint');
+          if (!endpointIsInstanceOrigin(sourceControlProviderDescriptors.get(reference.provider), origin, endpoint)) {
+            throw bindingInputError('Credential account does not match the HTTPS endpoint');
+          }
           const resolved = await readTransportAccount?.(reference);
           const secret = resolved?.secret;
           if (resolved?.credentialId !== reference.accountId || resolved?.status !== 'valid'
@@ -1023,7 +1051,7 @@ export function createBindingService({
         // Account repair retains the approved endpoint. A changed destination needs a new association.
         if (previous?.endpoint && previous.primaryRemote === provider.primaryRemote) {
           provider.endpoint = previous.endpoint;
-          provider.repository = providerRepositoryForEndpoint(provider.provider, provider.instance, previous.endpoint);
+          assignRepository(provider, providerRepositoryForEndpoint(provider.provider, provider.instance, previous.endpoint));
         }
         if (providers.some((candidate, index) => index !== targetIndex && candidate.provider === provider.provider
           && normalizeProviderInstance(candidate.provider, candidate.instance) === provider.instance

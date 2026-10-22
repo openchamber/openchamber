@@ -13,18 +13,21 @@ import type { SourceControlIdentity } from '@openchamber/ui/lib/api/types';
 import type { RuntimeFetchOptions } from '@openchamber/ui/lib/runtime-fetch';
 import {
   sourceControlProviderListSchema,
+  type PublishedSourceControlProviderDescriptor,
   type SourceControlProviderDescriptor,
 } from '@openchamber/ui/lib/source-control/providers/descriptor';
 
 type ProvidersFetch = (input: string, init?: RuntimeFetchOptions) => Promise<Response>;
 
-const BUILT_IN_FEATURES_OFF: SourceControlProviderDescriptor['features'] = {
+// Exactly what the server publishes for them: the change-review features are
+// published only where declared, and the UI schema reads their absence.
+const BUILT_IN_FEATURES_OFF = {
   referenceSearch: false, referenceDetail: false, listStatuses: false, referencesAcross: false,
   startThread: false, authorCanReview: false, projectUploads: false, issueCloseReason: false,
   changeRequestTemplates: [], changeRequestPatch: false,
-};
+} satisfies PublishedSourceControlProviderDescriptor['features'];
 
-export const BUILT_IN_SOURCE_CONTROL_PROVIDERS: readonly SourceControlProviderDescriptor[] = [
+export const BUILT_IN_SOURCE_CONTROL_PROVIDERS: readonly PublishedSourceControlProviderDescriptor[] = [
   {
     id: 'github',
     label: 'GitHub',
@@ -106,7 +109,7 @@ const errorSchema = z.object({ error: z.string() });
  */
 export const fetchSourceControlProviders = async (fetch: ProvidersFetch): Promise<SourceControlProviderDescriptor[]> => {
   const response = await fetch('/api/source-control/providers', { headers: { Accept: 'application/json' } });
-  if (response.status === 404) return [...BUILT_IN_SOURCE_CONTROL_PROVIDERS];
+  if (response.status === 404) return sourceControlProviderListSchema.parse(BUILT_IN_SOURCE_CONTROL_PROVIDERS);
   const payload = await response.json().catch(() => null);
   if (!response.ok) {
     const failure = errorSchema.safeParse(payload);

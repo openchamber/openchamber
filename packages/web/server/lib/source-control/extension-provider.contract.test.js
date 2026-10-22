@@ -167,7 +167,7 @@ describe('an extension as a Git host, end to end', () => {
     const approved = await request('PUT', `/api/guests/${GUEST}/capabilities`, { granted: installed.body.guest.capabilities.requested });
     expect(approved.status).toBe(200);
     const listed = (await request('GET', '/api/source-control/providers')).body.providers;
-    expect(listed.map(({ id }) => id)).toEqual(['github', 'gitlab', 'gitea', PROVIDER]);
+    expect(listed.map(({ id }) => id)).toEqual(['github', 'gitlab', 'gitea', 'gerrit', PROVIDER]);
     expect(listed.at(-1)).toMatchObject({ label: 'Teahouse', extension: { guestId: GUEST, name: 'Teahouse Git host', version: '1.0.0' } });
     expect(changes).toBe(1);
   });
@@ -359,6 +359,6 @@ describe('an extension as a Git host, end to end', () => {
     expect((await request('DELETE', `/api/guests/${GUEST}`)).status).toBe(204);
     const after = JSON.parse(fs.readFileSync(path.join(dataDir, 'source-control-auth.json'), 'utf8'));
     expect(JSON.stringify(after)).not.toContain(PROVIDER);
-    expect((await request('GET', '/api/source-control/providers')).body.providers.map(({ id }) => id)).toEqual(['github', 'gitlab', 'gitea']);
+    expect((await request('GET', '/api/source-control/providers')).body.providers.map(({ id }) => id)).toEqual(['github', 'gitlab', 'gitea', 'gerrit']);
   });
 });

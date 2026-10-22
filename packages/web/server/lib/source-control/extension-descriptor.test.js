@@ -80,6 +80,39 @@ describe('extension source-control descriptors', () => {
     expect(descriptor.trackedItems).toEqual({ nestedOwners: false, defaultInstance: null, batchLimit: 25 });
   });
 
+  it('creates through the API only and builds the same descriptor when no change-based field is declared', () => {
+    const descriptor = build();
+    // Absent means `api`: an extension never creates by push.
+    expect(descriptor.capabilities).not.toHaveProperty('createVia');
+    expect(descriptor.capabilities).not.toHaveProperty('reviewModel');
+    expect(descriptor.capabilities).not.toHaveProperty('revisions');
+    // Branch heads keep the UI's default: an extension cannot turn them off.
+    expect(descriptor.presentation.features).not.toHaveProperty('branchHeads');
+    expect(descriptor.presentation.features).not.toHaveProperty('submitRequirements');
+    expect(descriptor.settings.map((field) => field.key)).toEqual(['instance', 'token']);
+  });
+
+  it('passes the change-based fields through, and still creates through the API', () => {
+    const descriptor = build({
+      terminology: { changeRequest: 'change', ci: 'checks' },
+      capabilities: { ...contribution().capabilities, reviews: true, merge: { methods: ['submit'] }, reviewModel: 'votes', revisions: true },
+      token: { header: 'authorization', scheme: 'basic', username: true, scopes: [] },
+      presentation: { ...contribution().presentation, features: { authorCanReview: false, issueCloseReason: false, submitRequirements: true } },
+    });
+    expect(isDeeplyFrozen(descriptor)).toBe(true);
+    expect(descriptor.terminology.changeRequest).toBe('change');
+    expect(descriptor.capabilities).toMatchObject({
+      merge: { methods: ['submit'] }, reviewModel: 'votes', revisions: true, stacks: false,
+    });
+    expect(descriptor.capabilities).not.toHaveProperty('createVia');
+    expect(descriptor.presentation.features.submitRequirements).toBe(true);
+    expect(descriptor.presentation.features).not.toHaveProperty('branchHeads');
+    expect(descriptor.extension.token).toEqual({ header: 'authorization', scheme: 'basic' });
+    expect(descriptor.settings.map((field) => [field.key, field.type, field.secret])).toEqual([
+      ['instance', 'instance-url', false], ['username', 'username', false], ['token', 'personal-access-token', true],
+    ]);
+  });
+
   it('serves only the declared instances unless the extension allows custom ones', () => {
     const pinned = build();
     expect(pinned.instance.form).toBe('origin');
@@ -197,10 +230,31 @@ describe('extension source-control descriptors', () => {
     expect(sourceControlProviderListSchema.parse([publicProviderDescriptor(markless, 4)])[0].icon).toEqual({ sprite: 'git-branch' });
   });
 
+  it('publishes the change-based features only when declared', () => {
+    const plain = publicProviderDescriptor(build(), 3, build().extension);
+    for (const key of ['reviewModel', 'revisions', 'createByPush', 'branchHeads', 'submitRequirements']) {
+      expect(plain.features).not.toHaveProperty(key);
+    }
+    expect(plain.settings.fields.map((field) => field.kind)).toEqual(['instance-url', 'personal-access-token']);
+
+    const change = build({
+      terminology: { changeRequest: 'change', ci: 'checks' },
+      capabilities: { ...contribution().capabilities, reviews: true, merge: { methods: ['submit'] }, reviewModel: 'votes', revisions: true },
+      token: { header: 'authorization', scheme: 'basic', username: true, scopes: [] },
+      presentation: { ...contribution().presentation, features: { authorCanReview: false, issueCloseReason: false, submitRequirements: true } },
+    });
+    const published = publicProviderDescriptor(change, 3, change.extension);
+    expect(published.terminology.changeRequest).toBe('change');
+    expect(published.features).toMatchObject({ reviewModel: 'votes', revisions: true, submitRequirements: true });
+    expect(published.features).not.toHaveProperty('createByPush');
+    expect(published.features).not.toHaveProperty('branchHeads');
+    expect(published.settings.fields).toContainEqual({ id: 'username', kind: 'username', secret: false });
+  });
+
   it('is visible through the process-wide facade once attached', () => {
     const descriptor = build();
     sourceControlProviderDescriptors.attachExtension(descriptor);
     expect(sourceControlProviderDescriptors.get('ext-forge')).toBe(descriptor);
-    expect(sourceControlProviderDescriptors.list().map((entry) => entry.id)).toEqual(['github', 'gitlab', 'gitea', 'ext-forge']);
+    expect(sourceControlProviderDescriptors.list().map((entry) => entry.id)).toEqual(['github', 'gitlab', 'gitea', 'gerrit', 'ext-forge']);
   });
 });

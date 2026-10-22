@@ -284,7 +284,7 @@ describe('SourceControlProviderCard', () => {
     const input = passwordInput();
     if (!input) throw new Error('Missing token input');
     expect(input.value).toBe('');
-    expect(input.getAttribute('autocomplete')).toBe('off');
+    expect(input.getAttribute('autocomplete')).toBe('new-password');
 
     tokenAccepted = false;
     await type(input, '  secret-token  ');

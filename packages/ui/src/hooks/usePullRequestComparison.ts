@@ -18,6 +18,7 @@ import {
 } from '@/stores/useGitHubPrStatusStore';
 import { useRuntimeAPIs } from './useRuntimeAPIs';
 import { useDebouncedValue } from './useDebouncedValue';
+import { joinProjectPath } from '@/lib/source-control/projectPath';
 
 type PullRequestList =
   | { key: string; status: 'loading' }
@@ -55,7 +56,7 @@ const sourceOf = (pr: ChangeRequest): PullRequestSource => ({
   kind: 'pr', number: pr.number, sourceRepo: { owner: pr.project.owner, repo: pr.project.name },
 });
 
-const pullRequestKey = (pr: ChangeRequest) => `${pr.project.owner}/${pr.project.name}#${pr.number}`;
+const pullRequestKey = (pr: ChangeRequest) => `${joinProjectPath(pr.project.owner, pr.project.name)}#${pr.number}`;
 
 /**
  * Folds one page of pull requests into what the picker already shows. A

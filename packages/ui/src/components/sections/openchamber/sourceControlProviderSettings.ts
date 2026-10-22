@@ -41,7 +41,7 @@ export const normalizeInstanceInput = (descriptor: SourceControlProviderDescript
   return instance;
 };
 
-/** Where the provider lets a person create a personal access token on this instance, or null without one. */
+/** Where the provider lets a person create a personal access token (or HTTP password) on this instance, or null without one. */
 export const tokenCreationUrl = (descriptor: SourceControlProviderDescriptor, instance: string): string | null => {
   const createPath = descriptor.auth.token?.createPath;
   if (!createPath) return null;
@@ -89,10 +89,6 @@ const SHARED_COPY = {
   connected: 'settings.sourceControl.provider.status.connected',
   notConnected: 'settings.sourceControl.provider.status.notConnected',
   operationFailed: 'settings.sourceControl.instance.status.operationFailed',
-  tokenRejected: 'settings.sourceControl.token.rejected',
-  tokenLabel: 'settings.sourceControl.token.label',
-  tokenInfo: 'settings.sourceControl.token.info',
-  createToken: 'settings.sourceControl.token.create',
   tokenScopes: 'settings.sourceControl.token.scopes',
   deviceLabel: 'settings.sourceControl.device.label',
   connect: 'settings.sourceControl.actions.connect',
@@ -109,10 +105,37 @@ const SHARED_COPY = {
   useInstance: 'settings.sourceControl.instance.use',
   addInstance: 'settings.sourceControl.instance.add',
   updateApp: 'settings.sourceControl.provider.updateApp',
-} as const satisfies Omit<ProviderSettingsCopy, 'description' | 'instanceInfo'>;
+} as const satisfies Omit<ProviderSettingsCopy, 'description' | 'instanceInfo' | keyof typeof TOKEN_COPY>;
+
+/** Whether the token is an HTTP password that goes with a username (HTTP Basic hosts), as the descriptor's fields say. */
+const usesHttpPassword = (descriptor: SourceControlProviderDescriptor): boolean => (
+  descriptor.settings.fields.some((field) => field.kind === 'http-password')
+);
+
+/** Whether the token is saved together with a username the person types. */
+export const asksForUsername = (descriptor: SourceControlProviderDescriptor): boolean => (
+  descriptor.settings.fields.some((field) => field.kind === 'username')
+);
+
+// The secret a person pastes: a personal access token, or where the host signs
+// in with a username and an HTTP password, that password, named as such.
+const TOKEN_COPY = {
+  tokenRejected: 'settings.sourceControl.token.rejected',
+  tokenLabel: 'settings.sourceControl.token.label',
+  tokenInfo: 'settings.sourceControl.token.info',
+  createToken: 'settings.sourceControl.token.create',
+} as const satisfies Partial<ProviderSettingsCopy>;
+
+const HTTP_PASSWORD_COPY = {
+  tokenRejected: 'settings.sourceControl.field.httpPassword.rejected',
+  tokenLabel: 'settings.sourceControl.field.httpPassword.label',
+  tokenInfo: 'settings.sourceControl.field.httpPassword.info',
+  createToken: 'settings.sourceControl.field.httpPassword.create',
+} as const satisfies Partial<ProviderSettingsCopy>;
 
 export const providerSettingsCopy = (descriptor: SourceControlProviderDescriptor): ProviderSettingsCopy => ({
   ...SHARED_COPY,
+  ...(usesHttpPassword(descriptor) ? HTTP_PASSWORD_COPY : TOKEN_COPY),
   description: `settings.sourceControl.provider.description.${descriptor.terminology.changeRequest}`,
   instanceInfo: descriptor.instances.allowLoopbackHttp
     ? 'settings.sourceControl.instance.infoLoopback'

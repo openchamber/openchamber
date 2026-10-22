@@ -182,6 +182,31 @@ describe('source-control provider contract', () => {
     expect(schemas.data.changeRequestStatus.safeParse({ ...status, secret: 'x' }).success).toBe(false);
   });
 
+  test('a change-based host\'s status may carry the local revision and the stack', () => {
+    const project = { provider: 'ext-review', instance: 'https://review.example.com', id: 'tea', owner: 'tea', name: 'tea', url: 'https://review.example.com/q/project:tea' };
+    const status = { identity: { provider: 'ext-review', instance: 'https://review.example.com' }, project, branch: 'feature', changeRequest: null };
+    const localRevision = { sha: 'C'.repeat(40), changeId: `I${'a'.repeat(40)}`, uploadedAs: null };
+    const parsed = schemas.data.changeRequestStatus.safeParse({ ...status, localRevision });
+    expect(parsed.success && parsed.data.localRevision).toEqual({ ...localRevision, sha: 'c'.repeat(40) });
+    expect(schemas.data.changeRequestStatus.safeParse({ ...status, localRevision: { ...localRevision, changeId: null, uploadedAs: 3 } }).success).toBe(true);
+    expect(schemas.data.changeRequestStatus.safeParse({ ...status, localRevision: { ...localRevision, sha: 'abc' } }).success).toBe(false);
+    expect(schemas.data.changeRequestStatus.safeParse({ ...status, localRevision: { ...localRevision, extra: 1 } }).success).toBe(false);
+
+    const layer = { number: 12, title: 'Bottom', url: 'https://review.example.com/c/tea/+/12', state: 'open', draft: false, head: 'refs/changes/12/12/3' };
+    const stack = { number: null, base: 'main', layers: [layer, { ...layer, number: 13, title: 'Top' }] };
+    expect(schemas.data.changeRequestStatus.safeParse({ ...status, stack }).success).toBe(true);
+    expect(schemas.data.changeRequestStatus.safeParse({ ...status, stack: null }).success).toBe(true);
+    expect(schemas.data.changeRequestStatus.safeParse({ ...status, stack: { ...stack, layers: [{ ...layer, state: 'draft' }] } }).success).toBe(false);
+    expect(schemas.data.changeRequestStatus.safeParse({ ...status, stack: { ...stack, layers: Array.from({ length: 51 }, () => layer) } }).success).toBe(false);
+
+    // Vote labels, submit requirements and revisions ride on the context, which the UI parses itself.
+    expect(schemas.data.changeRequestContext.safeParse({
+      voteLabels: [{ name: 'Code-Review', values: [{ value: 2, description: 'Looks good' }], defaultValue: 0, permitted: [-1, 0, 1], blocking: false, status: 'neutral', votes: [] }],
+      submitRequirements: [{ name: 'Code-Review', status: 'unsatisfied' }],
+      revisions: [{ number: 1, sha: 'd'.repeat(40), createdAt: '2026-10-01T00:00:00Z', ref: 'refs/changes/12/12/1' }],
+    }).success).toBe(true);
+  });
+
   test('reads the UI parses itself pass as any JSON object or array', () => {
     expect(schemas.data.listIssues.safeParse({ items: [], page: 1, hasMore: false }).success).toBe(true);
     expect(schemas.data.projectBranches.safeParse(['main']).success).toBe(true);

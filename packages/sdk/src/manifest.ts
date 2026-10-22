@@ -349,7 +349,8 @@ export const SOURCE_CONTROL_URL_TEMPLATE_MAX = 256;
  */
 export const SOURCE_CONTROL_URL_TOKENS = ['{owner}', '{namespace+}', '{repo}', '{number}'] as const;
 
-export type SourceControlMergeMethod = 'merge' | 'squash' | 'rebase';
+/** `submit` is a change-based host's own merge (Gerrit's): when declared it is the only method. */
+export type SourceControlMergeMethod = 'merge' | 'squash' | 'rebase' | 'submit';
 
 /**
  * What the Git host can do. A capability left out is off. `merge` lists the
@@ -371,6 +372,17 @@ export type SourceControlCapabilities = {
   reviewers: boolean;
   changeRequestPatch: boolean;
   liveSummaries: boolean;
+  /**
+   * How a review is given. `verdict` (the default when left out): approve or
+   * request changes. `votes`: per-label scores, such as Code-Review -2..+2;
+   * the labels and their ranges come with each change request's context.
+   */
+  reviewModel?: 'verdict' | 'votes';
+  /**
+   * Whether a change request has numbered revisions (patchsets) that can be
+   * read one at a time: reads then may carry `revision`, a commit sha.
+   */
+  revisions?: boolean;
 };
 
 /**
@@ -384,7 +396,8 @@ export type SourceControlContribution = {
   wire: 1;
   /** The product name, shown untranslated. 1 to 64 characters. */
   label: string;
-  terminology: { changeRequest: 'pullRequest' | 'mergeRequest'; ci: 'checks' | 'pipeline' };
+  /** `change` names a change-based host's unit of review (Gerrit's change). */
+  terminology: { changeRequest: 'pullRequest' | 'mergeRequest' | 'change'; ci: 'checks' | 'pipeline' };
   /** `#`, `!`: what precedes a number. 1 to 4 characters. */
   referencePrefix: { changeRequest: string; issue: string };
   /** `owner/name`: two segments. `namespace/name`: nested groups before the name. */
@@ -405,8 +418,13 @@ export type SourceControlContribution = {
   /** How OpenChamber sends the token: which header, with which prefix. */
   token: {
     header: 'authorization' | 'private-token';
-    /** `bearer` → `Bearer <token>`, `token` → `token <token>`, `none` → the bare token (only with `private-token`). */
-    scheme: 'bearer' | 'token' | 'none';
+    /**
+     * `bearer` → `Bearer <token>`, `token` → `token <token>`, `basic` →
+     * `Basic base64(<login>:<token>)`, `none` → the bare token (only with `private-token`).
+     */
+    scheme: 'bearer' | 'token' | 'basic' | 'none';
+    /** Settings asks for the account's username beside the token. Required with, and only with, `basic`. */
+    username?: boolean;
     /** Scopes the Settings card asks the user to grant. */
     scopes: string[];
     /** Path on the instance where tokens are created, linked from Settings. */
@@ -446,7 +464,11 @@ export type SourceControlContribution = {
      * Review threads are not part of the role: OpenChamber keeps starting one
      * off for an extension's Git host, so there is no `startThread` here.
      */
-    features: { authorCanReview: boolean; issueCloseReason: boolean };
+    /**
+     * `submitRequirements`: each change request's context lists what must
+     * hold before it can be submitted, and the UI shows them by the Submit button.
+     */
+    features: { authorCanReview: boolean; issueCloseReason: boolean; submitRequirements?: boolean };
     /** Repository paths read as the change request template, first match wins. */
     changeRequestTemplates: string[];
   };

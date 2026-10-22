@@ -35,13 +35,17 @@ let store;
 let currentRow;
 let reconcile;
 let granted;
+let forgeHeaders;
 
 const ok = (data) => ({ ok: true, data });
 const fail = (error) => ({ ok: false, error });
 
 /** The service answers with `service(request)`; `forge(status)` inside it sends one request through the handle. */
 const setup = (descriptor = buildExtensionDescriptor({ guestId: 'forge', contribution, guest })) => {
-  handles = createOutboundHandles({ fetch: async () => new Response('{}', { status: forgeStatuses.shift() ?? 200 }) });
+  handles = createOutboundHandles({ fetch: async (_url, init) => {
+    forgeHeaders.push(init.headers);
+    return new Response('{}', { status: forgeStatuses.shift() ?? 200 });
+  } });
   const authStore = createSourceControlAuthStore({ filePath: path.join(dir, 'source-control-auth.json') });
   store = authStore.section(descriptor.id);
   events = createAccountEvents();
@@ -78,6 +82,7 @@ beforeEach(() => {
   currentRow = guest;
   reconcile = vi.fn(async () => undefined);
   granted = [];
+  forgeHeaders = [];
   setup();
 });
 afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -353,6 +358,109 @@ describe('an extension provider', () => {
       };
       const status = await provider.resources.changeRequestStatus({ session, ...readInput({ branch: 'main', force: false }) }).catch((error) => error);
       expect(status).toMatchObject({ code: 'MALFORMED_PROVIDER_RESPONSE', sourceControlOutbound: [{ method: 'GET', status: 200 }] });
+    });
+  });
+
+  describe('change-based inputs', () => {
+    const REVISION = 'c'.repeat(40);
+    const changeBased = (overrides = {}) => setup(buildExtensionDescriptor({
+      guestId: 'forge', guest, contribution: {
+        ...contribution,
+        capabilities: { ...contribution.capabilities, reviews: true, reviewModel: 'votes', revisions: true },
+        ...overrides,
+      },
+    }));
+    const resolved = { providerTarget: {}, target: { repositoryId: 'r', bindingRevision: 1, primaryRemote: 'origin', project, number: 2, headSha: SHA } };
+    const review = (session, input) => provider.mutations.perform({
+      session, route: '/pr/review', kind: 'change-request-review', input, resolved,
+    });
+
+    it.each(['changeRequestContext', 'readChangeRequestPatch', 'readChangeRequestFile'])(
+      '%s forwards a revision to a host that declares revisions', async (method) => {
+        changeBased();
+        const session = await connect();
+        service = async () => ok({});
+        await provider.resources[method]({ session, ...readInput({ number: 2, revision: REVISION }) });
+        expect(calls.at(-1)).toMatchObject({ method, input: { number: 2, revision: REVISION } });
+      },
+    );
+
+    it('refuses a revision, before anything is sent, to a host that does not declare revisions', async () => {
+      const session = await connect();
+      const sent = calls.length;
+      await expect(provider.resources.changeRequestContext({ session, ...readInput({ number: 2, revision: REVISION }) }))
+        .rejects.toMatchObject({ status: 400, code: 'INVALID_SOURCE_CONTROL_READ_CONTEXT' });
+      expect(calls.length).toBe(sent);
+      service = async () => ok({});
+      await provider.resources.changeRequestContext({ session, ...readInput({ number: 2 }) });
+      expect(calls.at(-1).input).not.toHaveProperty('revision');
+    });
+
+    it('refuses a revision that is not a commit SHA', async () => {
+      changeBased();
+      const session = await connect();
+      await expect(provider.resources.readChangeRequestPatch({ session, ...readInput({ number: 2, revision: 'HEAD' }) }))
+        .rejects.toMatchObject({ status: 400, code: 'INVALID_SOURCE_CONTROL_READ_CONTEXT' });
+    });
+
+    it('forwards votes to a votes host', async () => {
+      changeBased();
+      const session = await connect();
+      service = async () => ok({});
+      const votes = { 'Code-Review': 2, Verified: 1 };
+      await review(session, { votes, body: 'ship it', digest: { votes, body: 'ship it' } });
+      expect(calls.at(-1).input).toMatchObject({ route: '/pr/review', input: { votes, body: 'ship it' } });
+    });
+
+    it('refuses votes to a verdict host before anything is sent, as a failed write', async () => {
+      const session = await connect();
+      const sent = calls.length;
+      const error = await review(session, { votes: { 'Code-Review': 2 }, digest: {} }).catch((caught) => caught);
+      expect(error).toMatchObject({ status: 400, code: 'INVALID_SOURCE_CONTROL_MUTATION_CONTEXT' });
+      expect(provider.mutations.classifyError(error)).toBe('failed');
+      await expect(provider.mutations.resolveTarget({ session, context: { repositoryId: 'r', target: {} }, kind: 'change-request-review', input: { votes: {} } }))
+        .rejects.toMatchObject({ status: 400 });
+      expect(calls.length).toBe(sent);
+    });
+
+    describe('a basic host', () => {
+      const basic = () => changeBased({ token: { header: 'authorization', scheme: 'basic', username: true, scopes: [] } });
+
+      const basicHeader = (login, token) => `Basic ${Buffer.from(`${login}:${token}`).toString('base64')}`;
+
+      it('verifies with the typed username, then sends the stored login on every call', async () => {
+        basic();
+        service = async (request, forge) => { await forge(); return request.method === 'auth.verify' ? ok({ user: USER }) : ok({ supported: true }); };
+        await provider.auth.connectToken({ instance: INSTANCE, token: 'http-password', username: 'mona' });
+        const verifyIndex = calls.findIndex((call) => call.method === 'auth.verify');
+        expect(forgeHeaders[verifyIndex].authorization).toBe(basicHeader('mona', 'http-password'));
+        // The probe never carries a token, whatever the host's scheme.
+        expect(forgeHeaders[calls.findIndex((call) => call.method === 'auth.probe')]).not.toHaveProperty('authorization');
+
+        const session = await provider.auth.resolveAccount({ instance: INSTANCE });
+        service = async (_request, forge) => { await forge(); return ok({ items: [], page: 1, hasMore: false }); };
+        await provider.resources.listIssues({ session, ...readInput({ page: 1, state: 'open', people: 'any' }) });
+        expect(forgeHeaders.at(-1).authorization).toBe(basicHeader('mona', 'http-password'));
+        expect(JSON.stringify(calls)).not.toContain('http-password');
+      });
+
+      it('refuses to sign in without a username, sending nothing', async () => {
+        basic();
+        service = async () => ok({ user: USER });
+        await expect(provider.auth.connectToken({ instance: INSTANCE, token: 'http-password' })).rejects.toThrow(/username/);
+        expect(calls).toEqual([]);
+        expect((await store.readInstance(INSTANCE)).accounts).toEqual([]);
+      });
+
+      it('refuses a call as an account whose login Basic auth cannot carry, as a failed write', async () => {
+        basic();
+        await store.setAccount(INSTANCE, { token: 'http-password', user: { id: 7, login: 'mo:na' }, source: 'pat' });
+        const session = await provider.auth.resolveAccount({ instance: INSTANCE });
+        const error = await review(session, { votes: { 'Code-Review': 1 }, digest: {} }).catch((caught) => caught);
+        expect(error).toMatchObject({ status: 400, code: 'SOURCE_CONTROL_USERNAME_REQUIRED' });
+        expect(provider.mutations.classifyError(error)).toBe('failed');
+        expect(calls).toEqual([]);
+      });
     });
   });
 

@@ -275,8 +275,10 @@ const sourceControlCapabilitiesSchema = z.object({
   merge: z.union([
     z.literal(false),
     z.object({
-      methods: z.array(z.enum(['merge', 'squash', 'rebase'])).min(1).max(3)
-        .refine((methods) => new Set(methods).size === methods.length, { message: 'merge methods must be unique' }),
+      methods: z.array(z.enum(['merge', 'squash', 'rebase', 'submit'])).min(1).max(3)
+        .refine((methods) => new Set(methods).size === methods.length, { message: 'merge methods must be unique' })
+        // A host that submits a change merges it the one way its project is set up.
+        .refine((methods) => !methods.includes('submit') || methods.length === 1, { message: '"submit" is the only merge method when present' }),
     }).strict(),
   ]).default(false),
   ci: z.boolean().default(false),
@@ -287,6 +289,9 @@ const sourceControlCapabilitiesSchema = z.object({
   reviewers: z.boolean().default(false),
   changeRequestPatch: z.boolean().default(false),
   liveSummaries: z.boolean().default(false),
+  // Left out rather than defaulted, so a manifest that does not use them parses as before.
+  reviewModel: z.enum(['verdict', 'votes']).optional(),
+  revisions: z.boolean().optional(),
 }).strict();
 
 // A Git username OpenChamber puts before the token in an HTTPS credential.
@@ -298,7 +303,7 @@ const sourceControlSchema = z.object({
   wire: z.literal(1),
   label: literalSchema,
   terminology: z.object({
-    changeRequest: z.enum(['pullRequest', 'mergeRequest']),
+    changeRequest: z.enum(['pullRequest', 'mergeRequest', 'change']),
     ci: z.enum(['checks', 'pipeline']),
   }).strict(),
   referencePrefix: z.object({ changeRequest: prefixSchema, issue: prefixSchema }).strict(),
@@ -318,12 +323,17 @@ const sourceControlSchema = z.object({
   capabilities: sourceControlCapabilitiesSchema,
   token: z.object({
     header: z.enum(['authorization', 'private-token']),
-    scheme: z.enum(['bearer', 'token', 'none']),
+    scheme: z.enum(['bearer', 'token', 'basic', 'none']),
+    username: z.boolean().optional(),
     scopes: z.array(z.string().trim().min(1).max(64)).max(32),
     createPath: z.string().trim().max(256).refine(isSafeApiPath, { message: 'must be a path on the instance starting with "/", with no "." or ".." segment' }).optional(),
   }).strict().refine(
     (token) => (token.header === 'private-token') === (token.scheme === 'none'),
-    { message: 'private-token takes the bare token; authorization takes a bearer or token scheme' },
+    { message: 'private-token takes the bare token; authorization takes a bearer, token or basic scheme' },
+  ).refine(
+    // Basic sends `login:token`, so Settings must ask for the login; no other scheme uses one.
+    (token) => (token.scheme === 'basic') === (token.username === true),
+    { message: 'the basic scheme needs username: true, and username is only for the basic scheme' },
   ),
   transport: z.object({
     httpsUsername: z.union([
@@ -348,6 +358,7 @@ const sourceControlSchema = z.object({
     features: z.object({
       authorCanReview: z.boolean().default(false),
       issueCloseReason: z.boolean().default(false),
+      submitRequirements: z.boolean().optional(),
     }).strict(),
     changeRequestTemplates: z.array(z.string().trim().max(256).refine(isRepositoryFilePath, {
       message: 'must be a file path inside the repository, like .gitea/pull_request_template.md, with no "." or ".." segment',

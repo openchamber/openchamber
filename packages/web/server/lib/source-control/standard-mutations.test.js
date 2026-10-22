@@ -100,4 +100,80 @@ describe('standard mutations', () => {
     }
     expect(() => prepare('/pr/comment', { body: 'x'.repeat(11) })).toThrow('must fit a Forge comment');
   });
+
+  describe('votes hosts', () => {
+    const votesDescriptor = {
+      ...descriptor,
+      label: 'Review',
+      capabilities: { merge: { methods: ['submit'] }, reviewModel: 'votes' },
+      limits: { ...descriptor.limits, commentMaxLength: 100 },
+    };
+    const reviewAccount = 'occred:v1:review:one:r1';
+    const reviewTarget = { ...numbered, headSha: 'a'.repeat(40) };
+    delete reviewTarget.head;
+    delete reviewTarget.base;
+    const prepareVotes = (input, context = reviewTarget) => createStandardMutations(votesDescriptor).prepare({
+      route: '/pr/review', input, context: { primaryRemote: 'origin', target: context },
+      actor: { provider: 'review', instance: 'https://review.example.com', accountId: reviewAccount },
+      credential: { accountId: reviewAccount, credentialRevision: 1 },
+    });
+
+    it('takes votes under the review kind with its own frozen digest', () => {
+      const prepared = prepareVotes({ votes: { Verified: 1, 'Code-Review': 2 }, body: 'Ship it' });
+      expect(prepared.kind).toBe('change-request-review');
+      expect(prepared.input).toEqual({
+        votes: { Verified: 1, 'Code-Review': 2 }, body: 'Ship it',
+        digest: { votes: { Verified: 1, 'Code-Review': 2 }, body: 'Ship it' },
+      });
+      expect(prepared.digest(reviewTarget)).toBe('461d29165e83c496a567c1f959f5bcc33ca38b9f528f6c04600544c961810046');
+      // Key order does not matter: the digest's JSON is canonical.
+      expect(prepareVotes({ body: 'Ship it', votes: { 'Code-Review': 2, Verified: 1 } }).digest(reviewTarget)).toBe(prepared.digest(reviewTarget));
+    });
+
+    it('accepts votes alone or a message alone', () => {
+      expect(prepareVotes({ votes: { 'Code-Review': -1 } }).input.digest).toEqual({ votes: { 'Code-Review': -1 }, body: null });
+      expect(prepareVotes({ body: 'A question' }).input.digest).toEqual({ votes: {}, body: 'A question' });
+    });
+
+    it.each([
+      [{}],
+      [{ votes: {} }],
+      [{ votes: { '-bad': 1 } }],
+      [{ votes: { 'Code Review': 1 } }],
+      [{ votes: { 'Code-Review': 11 } }],
+      [{ votes: { 'Code-Review': 1.5 } }],
+      [{ votes: { 'Code-Review': '+1' } }],
+      [{ votes: ['Code-Review'] }],
+      [{ votes: Object.fromEntries(Array.from({ length: 17 }, (_, index) => [`L${index}`, 0])) }],
+      [{ votes: { 'Code-Review': 1 }, body: '   ' }],
+    ])('refuses the review %j', (input) => {
+      expect(() => prepareVotes(input)).toThrow(expect.objectContaining({ code: 'INVALID_SOURCE_CONTROL_MUTATION_CONTEXT', status: 400 }));
+    });
+
+    it('refuses votes without the revision they are for', () => {
+      expect(() => prepareVotes({ votes: { 'Code-Review': 1 } }, numbered)).toThrow('head SHA');
+    });
+
+    it('submits only a named patchset, under the unchanged `{ method }` digest', () => {
+      const prepareMerge = (context) => createStandardMutations(votesDescriptor).prepare({
+        route: '/pr/merge', input: { method: 'submit' }, context: { primaryRemote: 'origin', target: context },
+        actor: { provider: 'review', instance: 'https://review.example.com', accountId: reviewAccount },
+        credential: { accountId: reviewAccount, credentialRevision: 1 },
+      });
+      expect(() => prepareMerge(numbered)).toThrow(expect.objectContaining({ status: 400, message: expect.stringContaining('head SHA') }));
+      expect(prepareMerge(reviewTarget).input).toEqual({ method: 'submit', digest: { method: 'submit' } });
+    });
+
+    it('refuses a verdict, telling an older client to update', () => {
+      expect(() => prepareVotes({ verdict: 'approve' })).toThrow(expect.objectContaining({
+        status: 400, message: expect.stringContaining('update the app'),
+      }));
+    });
+
+    it('refuses votes on a verdict host', () => {
+      const prepare = prepareWith(createStandardMutations(descriptor));
+      expect(() => prepare('/pr/review', { verdict: 'approve', votes: { 'Code-Review': 1 } }, reviewTarget))
+        .toThrow(expect.objectContaining({ status: 400, message: expect.stringContaining('not votes') }));
+    });
+  });
 });
