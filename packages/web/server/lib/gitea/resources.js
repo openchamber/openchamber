@@ -21,6 +21,8 @@ const LIST_DETAIL_CONCURRENCY = 4;
 const MAX_FULL_FILE_BYTES = 5 * 1024 * 1024;
 const COMMIT_SHA = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
 const LIST_STATES = { open: 'open', closed: 'closed', merged: 'closed', all: 'all' };
+/** Review states that keep a user among a pull request's reviewers; `REQUEST_REVIEW` and `PENDING` do not. */
+const SUBMITTED_REVIEW_STATES = new Set(['APPROVED', 'REQUEST_CHANGES', 'COMMENT']);
 
 const statusOf = (error) => error?.status ?? error?.response?.status;
 const notFound = (message) => Object.assign(new Error(message), { status: 404 });
@@ -713,6 +715,18 @@ export function createGiteaResourceService({ origin, client, resolveRepos = reso
       const currentLogins = current.map((user) => user.login);
       const add = wanted.filter((login) => !currentLogins.includes(login));
       const remove = currentLogins.filter((login) => !wanted.includes(login));
+      if (remove.length) {
+        // Gitea answers 204 to removing someone who already reviewed and keeps
+        // them, so that removal is refused before anything is sent.
+        const reviews = await client.collection(`${repoPath(repo)}/pulls/${providerTarget.number}/reviews`, {}, { limit: PAGE_LIMIT, maxItems: COLLECTION_MAX_ITEMS, message: 'Gitea pull request has more reviews than OpenChamber reads' });
+        const reviewed = remove.filter((login) => reviews.some((review) => isPlainObject(review) && review.user?.login === login
+          && SUBMITTED_REVIEW_STATES.has(review.state) && review.dismissed !== true));
+        if (reviewed.length) {
+          throw Object.assign(new Error(`${reviewed.join(', ')} already reviewed this pull request; Gitea keeps reviewers who reviewed`), {
+            status: 400, code: 'GITEA_REVIEWER_HAS_REVIEWED',
+          });
+        }
+      }
       const path = `${repoPath(repo)}/pulls/${providerTarget.number}/requested_reviewers`;
       if (add.length) await client.post(path, { reviewers: add });
       if (remove.length) await client.delete(path, { reviewers: remove });

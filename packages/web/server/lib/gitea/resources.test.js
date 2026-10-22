@@ -229,6 +229,8 @@ describe('Gitea mutations', () => {
   it('sets reviewers by id as the username additions and removals Gitea takes', async () => {
     const { service, calls } = setup({
       'GET /repos/alice/app/collaborators': fixtures.collaborators,
+      // Alice's approval was dismissed, so removing her takes effect.
+      'GET /repos/alice/app/pulls/1/reviews': fixtures.reviews.map((review) => (review.user.login === 'alice' ? { ...review, dismissed: true } : review)),
       'POST /repos/alice/app/pulls/1/requested_reviewers': [],
       'DELETE /repos/alice/app/pulls/1/requested_reviewers': new Response(null, { status: 204 }),
     });
@@ -239,6 +241,34 @@ describe('Gitea mutations', () => {
       ['POST', { reviewers: ['bob'] }], ['DELETE', { reviewers: ['alice'] }],
     ]);
     await expect(service.setReviewers({ providerTarget, reviewers: ['404'] })).rejects.toMatchObject({ status: 422 });
+  });
+
+  it('refuses to remove a reviewer who already reviewed, before sending anything', async () => {
+    expect(fixtures.reviews.map((review) => [review.user.login, review.state])).toEqual([['alice', 'APPROVED'], ['carol', 'COMMENT']]);
+    const { service, calls } = setup({
+      'GET /repos/alice/app/collaborators': fixtures.collaborators,
+      'GET /repos/alice/app/pulls/1/reviews': fixtures.reviews,
+    });
+
+    await expect(service.setReviewers({ providerTarget, reviewers: ['2', '3'] })).rejects.toMatchObject({
+      status: 400, code: 'GITEA_REVIEWER_HAS_REVIEWED', message: 'alice already reviewed this pull request; Gitea keeps reviewers who reviewed',
+    });
+    await expect(service.setReviewers({ providerTarget, reviewers: [] })).rejects.toMatchObject({
+      message: 'alice, carol already reviewed this pull request; Gitea keeps reviewers who reviewed',
+    });
+    expect(calls.filter((call) => call.method !== 'GET')).toEqual([]);
+  });
+
+  it('removes a reviewer whose only review entry is the request itself', async () => {
+    const { service, calls } = setup({
+      'GET /repos/alice/app/collaborators': fixtures.collaborators,
+      'GET /repos/alice/app/pulls/1/reviews': fixtures.reviews.map((review) => (review.user.login === 'carol' ? { ...review, state: 'REQUEST_REVIEW' } : review)),
+      'DELETE /repos/alice/app/pulls/1/requested_reviewers': new Response(null, { status: 204 }),
+    });
+
+    await service.setReviewers({ providerTarget, reviewers: ['1'] });
+
+    expect(calls.filter((call) => call.method !== 'GET').map((call) => [call.method, call.body])).toEqual([['DELETE', { reviewers: ['carol'] }]]);
   });
 
   it('reconciles an emptied reviewer set from the null Gitea 1.21 answers', async () => {
