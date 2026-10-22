@@ -76,7 +76,15 @@ on the source-control side (`lib/source-control/`).
   filters, `projectMapping` the container picker and start-in project,
   `multipleAccounts` the account switch, `sessionComments` the session status
   post. A session started before the tracker list is held waits for it
-  (bounded, dropped on a runtime switch) before that gate is read. Settings follows the same gates: one `TrackerSettings` card per served
+  (bounded, dropped on a runtime switch) before that gate is read.
+- Where a tracker is offered depends on sign-in (`sources.ts`):
+  `useTrackerSources()` is the served trackers with a connected account, and
+  it alone feeds the board's tabs, the composer's attach rows and New
+  Worktree's sources, so nothing there shows a tracker that would only ask to
+  connect. Settings, Settings search, link matching and name lookups read every
+  served tracker (`useTrackerDescriptors()`), since connecting happens there.
+  Until a tracker's status answers it is not offered.
+- Settings follows the capability gates: one `TrackerSettings` card per served
   tracker (`components/sections/integrations/`), with the account switch and a
   second sign-in only where `multipleAccounts` is set, `TrackerProjectMapping`
   where `projectMapping` is, `TrackerSessionComments` where `sessionComments`
@@ -105,3 +113,11 @@ A server older than `/api/tracker` serves exactly Linear, in Linear's shapes.
 Answering only its built-in descriptor would show a Linear tab that fails every
 read; the adapter instead reads those routes and maps them to the neutral
 shapes, so `packages/ui` never sees which server version answered.
+
+### Why surfaces offer only signed-in trackers and not every served one
+
+Every tracker the server serves used to get a board tab and an attach row
+that asked to connect. A server ships trackers whether or not anyone uses
+them, so people who never use Linear saw a Linear tab and menu row that led
+only to a sign-in prompt. Connecting is a Settings task; the working surfaces
+show what the person can already read.

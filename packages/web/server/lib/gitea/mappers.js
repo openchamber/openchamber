@@ -96,7 +96,9 @@ export function mapGiteaPull(value, identity, project) {
   if (author) request.author = author;
   if (text(value.created_at)) request.createdAt = value.created_at;
   if (text(value.updated_at)) request.updatedAt = value.updated_at;
-  if (text(value.head.label)) request.headLabel = value.head.label;
+  // Gitea's `head.label` is the bare branch name even for a fork's branch;
+  // the label other providers send is `owner:branch`.
+  if (text(value.head.repo?.owner?.login)) request.headLabel = `${value.head.repo.owner.login}:${value.head.ref}`;
   request.labels = mapLabels(value.labels);
   if (state === 'open' && (value.mergeable === true || value.mergeable === false)) {
     request.mergeable = value.mergeable;
@@ -219,13 +221,14 @@ export function splitUnifiedDiff(diff) {
   return parts;
 }
 
-const SUCCESS = new Set(['success', 'skipped', 'warning']);
-const FAILURE = new Set(['failure', 'error']);
+const SUCCESS = new Set(['success', 'skipped']);
+const FAILURE = new Set(['failure', 'error', 'warning']);
 
 /**
  * A commit's combined status as CI: Gitea Actions and external CI both
- * report as commit statuses. `warning` does not fail the summary, matching
- * how Gitea itself lets a pull request merge on it. Null when nothing reported.
+ * report as commit statuses. `warning` fails the summary, as Gitea's own
+ * combined state never reads success with one (1.21 answers `warning`, 1.27
+ * `failure`). Null when nothing reported.
  */
 export function mapGiteaCI(combined, identity) {
   if (!isPlainObject(combined) || !Array.isArray(combined.statuses) || combined.statuses.length === 0) return null;

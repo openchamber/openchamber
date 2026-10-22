@@ -14,7 +14,8 @@ import { useTrackerRegistry } from './registry';
  * A tracker no UI code names: the server serves `plane`, and the picker, the
  * board's scope picker and the settings card name it and pick its features
  * from that descriptor alone, with the generic mark and the generic
- * sentences: nothing it shows names Linear.
+ * sentences: nothing it shows names Linear. Settings lists it as served; the
+ * board and the attach menus offer it only once it is signed in.
  */
 
 const GENERIC_MARK = 'use[href="#oc-record-circle"]';
@@ -121,6 +122,26 @@ describe('a tracker no UI code names', () => {
     expect(state.status).toBe('ready');
     expect(state.ordered.map((descriptor) => descriptor.name)).toEqual(['Plane']);
     expect(createTrackerUrlMatcher(state.ordered)(item.url)).toMatchObject({ provider: 'plane', identifier: 'PLN-3' });
+  });
+
+  test('the board and the attach menus offer it only once signed in; Settings sees it either way', async () => {
+    const { useTrackerSources } = await import('./sources');
+    const { useTrackerDescriptors } = await import('./registry');
+    const { RuntimeAPIContext } = await import('@/contexts/runtimeAPIContext');
+    let offered: string[] = [];
+    let served: string[] = [];
+    const Probe = () => {
+      offered = useTrackerSources().map((descriptor) => descriptor.id);
+      served = useTrackerDescriptors().map((descriptor) => descriptor.id);
+      return null;
+    };
+    await render(<RuntimeAPIContext.Provider value={apis}><Probe /></RuntimeAPIContext.Provider>);
+    // Not asked yet, then answered as signed out: served, not offered.
+    expect([offered, served]).toEqual([[], ['plane']]);
+    await act(async () => { await useTrackerAuthStore.getState().refreshStatus(trackers, 'plane'); });
+    expect([offered, served]).toEqual([[], ['plane']]);
+    await act(async () => { useTrackerAuthStore.getState().setStatus('plane', { connected: true }); });
+    expect([offered, served]).toEqual([['plane'], ['plane']]);
   });
 
   test('a picker row shows its item with the features its descriptor serves', async () => {

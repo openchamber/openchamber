@@ -139,7 +139,8 @@ function mutationTable(descriptor) {
         if (!context.target.number || !context.target.headSha || !['approve', 'request-changes'].includes(input.verdict)) {
           throw invalidMutationContext('target number, head SHA and review verdict are required');
         }
-        const text = commentText(input.body, false);
+        // Gitea refuses REQUEST_CHANGES without a body (422 on 1.21 and 1.27).
+        const text = commentText(input.body, input.verdict === 'request-changes');
         return { verdict: input.verdict, body: text, digest: { verdict: input.verdict, body: text ?? null } };
       },
       perform: (service, normalized, resolved) => service.reviewChangeRequest(call(resolved, { verdict: normalized.verdict, body: normalized.body })),

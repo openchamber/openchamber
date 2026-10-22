@@ -83,6 +83,8 @@ describe('SourceControlProviderCard', () => {
   let beforeActivation = async () => {};
   let available = { device: true, pat: true, cli: true };
   let withCliLogin = true;
+  // Where the listed login came from: the CLI, or a stored token.
+  let accountSource: 'cli' | 'pat' = 'cli';
   let cliDisabled = false;
   // The instance the server lists before anything is added (GitLab's default).
   let listedDefault: SourceControlIdentity[] = [];
@@ -103,7 +105,7 @@ describe('SourceControlProviderCard', () => {
       providerUserStatus: 'available' as const,
       user,
       current,
-      source: 'cli' as const,
+      source: accountSource,
       status: 'valid' as const,
     }];
     const cli = { available: accounts.length > 0, disabled: false, active: current, user };
@@ -186,6 +188,7 @@ describe('SourceControlProviderCard', () => {
     beforeActivation = async () => {};
     available = { device: true, pat: true, cli: true };
     withCliLogin = true;
+    accountSource = 'cli';
     cliDisabled = false;
     listedDefault = [{ provider: 'gitlab', instance: 'https://gitlab.com' }];
     useSourceControlAuthStore.getState().resetForRuntimeSwitch();
@@ -296,11 +299,50 @@ describe('SourceControlProviderCard', () => {
     expect(passwordInput()?.value ?? '').toBe('');
   });
 
-  test('links to the provider\'s token page on the instance', async () => {
+  test('links to the provider\'s token page on the instance and names the scopes it needs', async () => {
     withCliLogin = false;
-    await mount(acme);
+    await mount({ ...acme, auth: { ...acme.auth, token: { scopes: ['repo', 'read:org'], createPath: '/user/settings/applications' } } });
     await addInstance('https://forge.example.com', 'https://forge.example.com');
     expect(buttonLabels()).toContain('Create token');
+    expect(container.textContent).toContain('Scopes: repo, read:org');
+  });
+
+  test('switches between sign-in methods with one form showing at a time', async () => {
+    withCliLogin = false;
+    await mount(gitlab);
+    const chips = () => [...container.querySelectorAll<HTMLButtonElement>('[role="group"] button[aria-pressed]')];
+    // Starts on the first method the descriptor names: the device code, without a token field.
+    expect(chips().map((chip) => [chip.textContent, chip.getAttribute('aria-pressed')])).toEqual([
+      ['Device code', 'true'], ['Personal access token', 'false'],
+    ]);
+    expect(buttonLabels()).toContain('Connect GitLab');
+    expect(passwordInput()).toBeNull();
+
+    await act(async () => { chips()[1]?.click(); });
+    expect(chips()[1]?.getAttribute('aria-pressed')).toBe('true');
+    expect(passwordInput()).not.toBeNull();
+    expect(buttonLabels()).not.toContain('Connect GitLab');
+  });
+
+  test('adding another account starts on the method the existing one came from', async () => {
+    accountSource = 'pat';
+    await mount(gitlab);
+    await addInstance('https://gitlab.example.com', 'https://gitlab.first.example');
+    await click('Add account');
+    // The last switch is the added instance's; gitlab.com above still shows its own.
+    const groups = [...container.querySelectorAll('[role="group"]')];
+    const chips = [...(groups.at(-1)?.querySelectorAll<HTMLButtonElement>('button[aria-pressed]') ?? [])];
+    expect(chips.map((chip) => [chip.textContent, chip.getAttribute('aria-pressed')])).toEqual([
+      ['Device code', 'false'], ['Personal access token', 'true'],
+    ]);
+  });
+
+  test('shows no method switch when the instance offers one way to connect', async () => {
+    withCliLogin = false;
+    available = { device: false, pat: true, cli: false };
+    await mount(gitlab);
+    expect(container.querySelector('[role="group"] button[aria-pressed]')).toBeNull();
+    expect(passwordInput()).not.toBeNull();
   });
 
   test('refuses an instance the descriptor does not accept and keeps the field open', async () => {
@@ -316,13 +358,22 @@ describe('SourceControlProviderCard', () => {
     const withFlow = githubLikeDescriptor();
     await mount({ ...withFlow, instances: { ...withFlow.instances, legacyFlow: { instance: 'github.com', kind: 'github-com-device' } } });
     expect(buttonLabels()).toContain('Connect GitHub');
-    expect(container.textContent).toContain('Enterprise instances');
+    expect(container.textContent).toContain('Other instances');
 
     await act(async () => { root?.unmount(); });
     useSourceControlAuthStore.getState().resetForRuntimeSwitch();
     await mount(githubLikeDescriptor());
     expect(buttonLabels()).not.toContain('Connect GitHub');
-    expect(container.textContent).not.toContain('Enterprise instances');
+    expect(container.textContent).not.toContain('Other instances');
+  });
+
+  test('offers no Add instance for a provider whose settings take no instance address', async () => {
+    await mount(acmeDescriptor({ settings: { fields: [{ id: 'token', kind: 'personal-access-token', secret: true }] } }));
+    expect(buttonLabels()).not.toContain('Add instance');
+
+    await act(async () => { root?.unmount(); });
+    await mount(acme);
+    expect(buttonLabels()).toContain('Add instance');
   });
 
   test('asks for an update instead of a form when the descriptor names a field kind this version cannot draw', async () => {

@@ -10,7 +10,7 @@ import { createSourceControlProviders } from '../source-control/provider-registr
 import { registerProviderRoutes } from '../source-control/provider-routes.js';
 import { registerSourceControlRoutes } from '../source-control/routes.js';
 import { giteaDescriptor } from './descriptor.js';
-import { fakeGitea, fixtures, forkNetworkRoutes, ORIGIN, resolveForkRemote } from './fixtures/fake-fetch.js';
+import { fakeGitea, fixtures, forkNetworkRoutes, HEAD, ORIGIN, resolveForkRemote } from './fixtures/fake-fetch.js';
 
 const directories = [];
 afterEach(async () => {
@@ -41,13 +41,13 @@ describe('Gitea provider authentication', () => {
   it('connects with a verified personal access token and reports the account', async () => {
     const { impl, events, calls } = await setup();
 
-    await expect(impl.auth.connectToken({ instance: ORIGIN, token: 'pat-1' })).resolves.toMatchObject({ connected: true, user: { id: 7, login: 'alice' } });
+    await expect(impl.auth.connectToken({ instance: ORIGIN, token: 'pat-1' })).resolves.toMatchObject({ connected: true, user: { id: 1, login: 'alice' } });
 
     expect(calls.map((call) => call.url.pathname)).toEqual(['/api/v1/user', '/api/v1/version']);
     expect(calls[1].headers.authorization).toBeUndefined();
     expect(events.connected).toHaveBeenCalledWith(expect.objectContaining({
       account: expect.objectContaining({ provider: 'gitea', instance: ORIGIN }),
-      credential: expect.objectContaining({ providerUserId: `${ORIGIN}#7` }),
+      credential: expect.objectContaining({ providerUserId: `${ORIGIN}#1` }),
     }));
     await expect(impl.auth.status({ instance: ORIGIN })).resolves.toMatchObject({ status: 'connected', user: { login: 'alice', provider: 'gitea' } });
   });
@@ -90,7 +90,7 @@ describe('Gitea provider authentication', () => {
 
     const credential = await providers.readTransportCredential({ provider: 'gitea', instance: ORIGIN, credentialId: accountId, credentialRevision: 1 });
 
-    expect(credential).toMatchObject({ source: 'pat', secret: 'pat-1', user: { login: 'alice' }, providerUserId: `${ORIGIN}#7` });
+    expect(credential).toMatchObject({ source: 'pat', secret: 'pat-1', user: { login: 'alice' }, providerUserId: `${ORIGIN}#1` });
     expect(giteaDescriptor.transport.httpsUsername).toEqual({ kind: 'login' });
   });
 
@@ -102,7 +102,7 @@ describe('Gitea provider authentication', () => {
 
     expect(Object.isFrozen(session)).toBe(true);
     expect(JSON.stringify(session)).not.toContain('pat-1');
-    expect(session).toMatchObject({ instance: ORIGIN, providerUserId: `${ORIGIN}#7`, secretKind: 'pat' });
+    expect(session).toMatchObject({ instance: ORIGIN, providerUserId: `${ORIGIN}#1`, secretKind: 'pat' });
   });
 
   it('owns only hosts of instances it knows', async () => {
@@ -115,6 +115,22 @@ describe('Gitea provider authentication', () => {
     expect(impl.auth.ownsHost({ host: 'gitea.example.com', port: 443, knownInstances: twoPorts })).toBe(ORIGIN);
     expect(impl.auth.ownsHost({ host: 'gitea.example.com', port: 3000, knownInstances: twoPorts })).toBeNull();
     expect(impl.auth.ownsHost({ host: 'gitea.example.com', knownInstances: twoPorts })).toBe(ORIGIN);
+  });
+});
+
+describe('Gitea mutation input', () => {
+  it('refuses a request for changes without a body before anything is sent, as Gitea would', async () => {
+    const { impl, calls } = await setup();
+    const prepare = (input) => impl.mutations.prepare({
+      route: '/pr/review', input, context: { target: { number: 1, headSha: HEAD } }, actor: 'actor', credential: 'credential',
+    });
+
+    expect(() => prepare({ verdict: 'request-changes' })).toThrow(expect.objectContaining({ code: 'INVALID_SOURCE_CONTROL_MUTATION_CONTEXT', status: 400 }));
+    expect(() => prepare({ verdict: 'request-changes', body: '  ' })).toThrow(expect.objectContaining({ status: 400 }));
+    expect(prepare({ verdict: 'request-changes', body: 'Please fix' }).input).toMatchObject({ verdict: 'request-changes', body: 'Please fix' });
+    expect(prepare({ verdict: 'approve' }).input).toMatchObject({ verdict: 'approve', body: undefined });
+    expect(fixtures.errors.reviewRequestChangesWithoutBody.status).toBe(422);
+    expect(calls).toHaveLength(0);
   });
 });
 
@@ -133,7 +149,7 @@ describe('Gitea behind the route shell', () => {
   it('invalidates the bound account when a read is refused with 401', async () => {
     let refuse = false;
     const { app, impl, events } = await appWith(forkNetworkRoutes({
-      'GET /repos/alice/app': () => (refuse ? new Response('{}', { status: 401 }) : fixtures.forkRepo),
+      'GET /repos/bob/app': () => (refuse ? new Response('{}', { status: 401 }) : fixtures.forkRepo),
     }));
     await impl.auth.connectToken({ instance: ORIGIN, token: 'pat-1' });
     const accountId = await impl.auth.readCurrentAccountId({ instance: ORIGIN });

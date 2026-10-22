@@ -36,7 +36,7 @@ type ComposerAttachmentControlsProps = {
     /** The host the project's issues and change requests come from. */
     /** The project's source-control provider id; its mark and wording label the link action. */
     repositoryProvider?: string | null;
-    /** One entry per tracker the server serves, in its order. */
+    /** One entry per signed-in tracker, in the server's order. */
     trackerPickers?: readonly ComposerTrackerPicker[];
     onOpenSettings?: () => void;
     onMenuOpenChange?: (open: boolean) => void;

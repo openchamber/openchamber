@@ -71,8 +71,10 @@ export const SourceControlProviderCard: React.FC<{ descriptor: SourceControlProv
     instanceIdentities.push(pendingIdentity);
   }
   if (instanceIdentities.length === 0 && defaultIdentity) instanceIdentities.push(defaultIdentity);
-  // A provider that keeps one instance still needs a way to name it when it has no default.
-  const canAddInstance = instances.multiple || instanceIdentities.length === 0;
+  // A provider that keeps one instance still needs a way to name it when it has
+  // no default; a provider whose settings take no instance address has none to add.
+  const takesInstanceUrl = descriptor.settings.fields.some((field) => field.kind === 'instance-url');
+  const canAddInstance = takesInstanceUrl && (instances.multiple || instanceIdentities.length === 0);
 
   // The pill counts every instance, the special-flow one included even before it is listed.
   const legacyIdentity = legacyFlow && !providerIdentities.some((item) => item.instance === legacyFlow.instance)
@@ -181,7 +183,7 @@ export const SourceControlProviderCard: React.FC<{ descriptor: SourceControlProv
         {legacyFlow ? (
           <>
             <GitHubComAccountSection />
-            <SettingsControlGroup title={t(copy.instancesTitle, { provider })} contentClassName="space-y-3">
+            <SettingsControlGroup title={t(copy.instancesTitle)} contentClassName="space-y-3">
               {instanceSetup}
             </SettingsControlGroup>
           </>

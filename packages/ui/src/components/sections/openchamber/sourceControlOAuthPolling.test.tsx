@@ -347,6 +347,8 @@ mock.module('@/components/sections/shared/SettingsSection', () => ({
   SETTINGS_HELPER_CLASS: '',
   SETTINGS_SELECT_ROW_TRIGGER_CLASS: '',
   SettingsControlGroup: ({ children }: ElementProps) => children ?? null,
+  SettingsChipGroup: ({ options, onChange }: { options: Array<{ value: string; label: string }>; onChange: (value: string) => void }) =>
+    options.map((option) => jsx('button', { children: option.label, onClick: () => onChange(option.value) })),
   SettingsFieldRow: ({ children, description }: ElementProps) => [description ?? null, children ?? null],
   SettingsStackedField: ({ children }: ElementProps) => children ?? null,
   SettingsCheckboxRow: ({ label, onChange, checked, disabled }: { label: string; onChange: (checked: boolean) => void; checked: boolean; disabled?: boolean }) =>
@@ -466,6 +468,12 @@ const findInput = (node: TestNode, ariaLabel: string): ElementNode | null => {
   if (!(node instanceof Object)) return null;
   if (node.type === 'input' && node.props['aria-label'] === ariaLabel) return node;
   return findInput(node.props.children, ariaLabel);
+};
+
+// GitLab offers a device code first; the token form shows once its chip is chosen.
+const renderWithTokenForm = async (): Promise<TestNode> => {
+  await click(await renderSettled(GitLabSettingsHarness), 'settings.sourceControl.token.label');
+  return renderSettled(GitLabSettingsHarness);
 };
 
 
@@ -738,7 +746,7 @@ describe('GitLab auth lifecycle', () => {
     test(`ignores late PAT ${outcome} and associated UI effects after a runtime round trip`, async () => {
       const completion = deferred<SourceControlAuthStatus>();
       setTokenAuth = () => completion.promise;
-      let tree = await renderSettled(GitLabSettingsHarness);
+      let tree = await renderWithTokenForm();
       const input = findInput(tree, 'settings.sourceControl.token.label');
       expect(input?.props.onChange).toBeDefined();
       input?.props.onChange?.({ target: { value: 'test-token' } });
@@ -765,7 +773,7 @@ describe('GitLab auth lifecycle', () => {
   }
 
   test('stops PAT follow-up discovery if the runtime switches during status refresh', async () => {
-    let tree = await renderSettled(GitLabSettingsHarness);
+    let tree = await renderWithTokenForm();
     findInput(tree, 'settings.sourceControl.token.label')?.props.onChange?.({ target: { value: 'test-token' } });
     tree = await renderSettled(GitLabSettingsHarness);
     const statusRead = deferred<SourceControlAuthStatus | null>();
@@ -783,7 +791,7 @@ describe('GitLab auth lifecycle', () => {
   });
 
   test('same-runtime PAT success updates inventory and clears the input', async () => {
-    let tree = await renderSettled(GitLabSettingsHarness);
+    let tree = await renderWithTokenForm();
     findInput(tree, 'settings.sourceControl.token.label')?.props.onChange?.({ target: { value: 'test-token' } });
     tree = await renderSettled(GitLabSettingsHarness);
     refreshStatusCalls = 0;
@@ -799,7 +807,7 @@ describe('GitLab auth lifecycle', () => {
 
   test('preserves valid capabilities after deferred read failure and retries without a request loop', async () => {
     authStoreState.identities = [gitLabIdentity];
-    let tree = await renderSettled(GitLabSettingsHarness);
+    let tree = await renderWithTokenForm();
     expect(findInput(tree, 'settings.sourceControl.token.label')).not.toBeNull();
 
     const capabilitiesRead = deferred<typeof availableCapabilities>();
@@ -830,12 +838,15 @@ describe('GitLab auth lifecycle', () => {
     readCapabilities = async () => { throw new Error('offline'); };
     let tree = await renderSettled(GitLabSettingsHarness);
     expect(collectText(tree)).toContain('settings.sourceControl.instance.status.operationFailed');
-    expect(findInput(tree, 'settings.sourceControl.token.label')).toBeNull();
+    expect(findButton(tree, 'settings.sourceControl.actions.connect')).toBeNull();
+    expect(findButton(tree, 'settings.sourceControl.token.label')).toBeNull();
 
     readCapabilities = async () => availableCapabilities;
     await click(tree, 'sessionAuth.error.retry');
     tree = await renderSettled(GitLabSettingsHarness);
-    expect(findInput(tree, 'settings.sourceControl.token.label')).not.toBeNull();
+    // The methods come back: the switch and the device code it starts on.
+    expect(findButton(tree, 'settings.sourceControl.token.label')).not.toBeNull();
+    expect(findButton(tree, 'settings.sourceControl.actions.connect')).not.toBeNull();
     expect(collectText(tree)).not.toContain('settings.sourceControl.instance.status.operationFailed');
   });
 

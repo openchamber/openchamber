@@ -219,8 +219,10 @@ preview's footer holds actions instead of what the agent gets.
   turn finishes.
 - The repository tab is the project's host only, the provider
   `useRepositoryHostProvider` names; a project with no remote on a known host
-  shows its trackers alone. Every tracker the server serves gets a tab, signed
-  in or not (its list asks to connect), named by the descriptor's product name.
+  shows its trackers alone. A tracker gets a tab only while an account is
+  signed in (`useTrackerSources`), named by the descriptor's product name; a
+  served tracker nobody signed in to is connected from Settings, which lists
+  every served one.
 - The board reads one folder, `useBoardRepository` (`sourceBoard/boardRepository.ts`):
   the project's root when it is a git repository, as always. When the root is
   not one but repositories lie under it, the board reads one of them, or all of

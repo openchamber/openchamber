@@ -64,6 +64,7 @@ type ProviderSettingsCopy = {
   tokenLabel: I18nKey;
   tokenInfo: I18nKey;
   createToken: I18nKey;
+  tokenScopes: I18nKey;
   deviceLabel: I18nKey;
   connect: I18nKey;
   deviceWaiting: I18nKey;
@@ -92,6 +93,7 @@ const SHARED_COPY = {
   tokenLabel: 'settings.sourceControl.token.label',
   tokenInfo: 'settings.sourceControl.token.info',
   createToken: 'settings.sourceControl.token.create',
+  tokenScopes: 'settings.sourceControl.token.scopes',
   deviceLabel: 'settings.sourceControl.device.label',
   connect: 'settings.sourceControl.actions.connect',
   deviceWaiting: 'settings.sourceControl.device.waiting',
@@ -102,7 +104,7 @@ const SHARED_COPY = {
   disableCli: 'settings.sourceControl.cli.disable',
   useCli: 'settings.sourceControl.cli.use',
   // Shown only under the github.com special flow (`instances.legacyFlow`).
-  instancesTitle: 'settings.github.enterprise.instances.title',
+  instancesTitle: 'settings.sourceControl.instance.othersTitle',
   instanceLabel: 'settings.sourceControl.instance.label',
   useInstance: 'settings.sourceControl.instance.use',
   addInstance: 'settings.sourceControl.instance.add',

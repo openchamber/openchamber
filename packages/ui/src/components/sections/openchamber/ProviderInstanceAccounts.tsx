@@ -14,6 +14,7 @@ import type {
 import {
   SETTINGS_CONTROL_CLUSTER_CLASS,
   SETTINGS_FIELDS_STACK_CLASS,
+  SettingsChipGroup,
   SettingsFieldRow,
 } from '@/components/sections/shared/SettingsSection';
 import { useSourceControlAuthEntry, useSourceControlAuthStore } from '@/stores/useSourceControlAuthStore';
@@ -21,6 +22,9 @@ import { getRuntimeKey, subscribeRuntimeEndpointWillChange } from '@/lib/runtime
 import { SourceControlAccountList } from './SourceControlAccountList';
 import { DeviceFlowCode } from './DeviceFlowCode';
 import { providerSettingsCopy, tokenCreationUrl } from './sourceControlProviderSettings';
+
+/** The ways to add an account in the form; the CLI login has its own row. */
+type ConnectMethod = 'device' | 'pat';
 
 interface ProviderInstanceAccountsProps {
   descriptor: SourceControlProviderDescriptor;
@@ -35,6 +39,11 @@ interface ProviderInstanceAccountsProps {
  * descriptor names and the instance reports available
  * (`capabilities.authenticationMethods`), so a provider offers only what both
  * the server's provider module and this instance support.
+ *
+ * When the instance offers more than one way to add an account, a chip switch
+ * picks one and only its form shows, so the card opens on a single Connect
+ * choice. It starts on the method an existing account came from, else the
+ * first one offered.
  *
  * A personal access token is typed into a password field that starts empty,
  * is cleared once the server accepts it, and is never logged or shown again.
@@ -56,6 +65,7 @@ export const ProviderInstanceAccounts: React.FC<ProviderInstanceAccountsProps> =
   const [pollAttempt, setPollAttempt] = React.useState(0);
   const [token, setToken] = React.useState('');
   const [isAddingAccount, setIsAddingAccount] = React.useState(false);
+  const [chosenMethod, setChosenMethod] = React.useState<ConnectMethod | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [operationFailed, setOperationFailed] = React.useState(false);
   const [tokenRejected, setTokenRejected] = React.useState(false);
@@ -261,6 +271,14 @@ export const ProviderInstanceAccounts: React.FC<ProviderInstanceAccountsProps> =
 
   // Offered where the descriptor names the method and this instance reports it available.
   const methods = new Set(descriptor.auth.methods.filter((method) => capabilities?.authenticationMethods[method].available));
+  const connectMethods = descriptor.auth.methods.filter((method): method is ConnectMethod => (
+    (method === 'device' || method === 'pat') && methods.has(method)
+  ));
+  const accountMethod: ConnectMethod | null = accounts.some((account) => account.source === 'pat')
+    ? 'pat'
+    : accounts.some((account) => account.source === 'oauth') ? 'device' : null;
+  const defaultMethod = accountMethod && connectMethods.includes(accountMethod) ? accountMethod : connectMethods[0] ?? null;
+  const method = chosenMethod && connectMethods.includes(chosenMethod) ? chosenMethod : defaultMethod;
   const scopes = descriptor.auth.token?.scopes.join(', ') ?? '';
   const createTokenUrl = tokenCreationUrl(descriptor, identity.instance);
   const connected = accounts.length > 0;
@@ -350,7 +368,20 @@ export const ProviderInstanceAccounts: React.FC<ProviderInstanceAccountsProps> =
 
       {showConnectionMethods && (
         <div className={SETTINGS_FIELDS_STACK_CLASS}>
-          {methods.has('device') && !flow && (
+          {connectMethods.length > 1 && !flow && (
+            <SettingsFieldRow label={t('settings.sourceControl.method.label')}>
+              <SettingsChipGroup<ConnectMethod>
+                aria-label={t('settings.sourceControl.method.label')}
+                value={method ?? connectMethods[0]}
+                options={connectMethods.map((value) => ({
+                  value,
+                  label: t(value === 'device' ? copy.deviceLabel : copy.tokenLabel),
+                }))}
+                onChange={setChosenMethod}
+              />
+            </SettingsFieldRow>
+          )}
+          {method === 'device' && !flow && (
             <SettingsFieldRow label={t(copy.deviceLabel)}>
               <Button size="sm" onClick={startDeviceFlow} disabled={busy}>{t(copy.connect, { provider })}</Button>
             </SettingsFieldRow>
@@ -364,14 +395,19 @@ export const ProviderInstanceAccounts: React.FC<ProviderInstanceAccountsProps> =
               onCancel={cancelAddAccount}
             />
           )}
-          {methods.has('pat') && (
+          {method === 'pat' && !flow && (
             <SettingsFieldRow
               label={t(copy.tokenLabel)}
               info={t(copy.tokenInfo, { scopes })}
-              description={createTokenUrl ? (
-                <Button size="xs" variant="link" className="h-auto p-0" onClick={() => void openExternalUrl(createTokenUrl)}>
-                  {t(copy.createToken)}
-                </Button>
+              description={createTokenUrl || scopes ? (
+                <span className="flex flex-col items-start gap-0.5">
+                  {createTokenUrl ? (
+                    <Button size="xs" variant="link" className="h-auto p-0" onClick={() => void openExternalUrl(createTokenUrl)}>
+                      {t(copy.createToken)}
+                    </Button>
+                  ) : null}
+                  {scopes ? <span>{t(copy.tokenScopes, { scopes })}</span> : null}
+                </span>
               ) : undefined}
             >
               <div className={`${SETTINGS_CONTROL_CLUSTER_CLASS} flex flex-col gap-2 @xl:flex-row @xl:items-center`}>

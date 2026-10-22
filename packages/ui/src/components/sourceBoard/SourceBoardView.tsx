@@ -39,7 +39,8 @@ import { useRepositoryUrlMatcher } from '@/lib/source-control/repositoryUrlMatch
 import { cn } from '@/lib/utils';
 import { resolveTrackerMappedProjectPath } from '@/lib/trackers/projectMapping';
 import { trackerPresentation } from '@/lib/trackers/presentation';
-import { useTrackerDescriptor, useTrackerDescriptors } from '@/lib/trackers/registry';
+import { useTrackerDescriptor } from '@/lib/trackers/registry';
+import { useTrackerSources } from '@/lib/trackers/sources';
 import { useTrackedItems } from '@/lib/trackedItems/interest';
 import { isTrackedWorkItem, type TrackedItem } from '@/lib/trackedItems/model';
 import { normalizeProjectPath, resolveProjectForSessionDirectory } from '@/lib/projectResolution';
@@ -74,8 +75,6 @@ const openIntegrationsSettings = () => {
     ui.setSettingsPage('integrations');
     ui.setSettingsDialogOpen(true);
 };
-
-const NO_TRACKERS: readonly TrackerDescriptor[] = [];
 
 /**
  * A tracker's containers (Linear teams) and which project each one works in,
@@ -170,10 +169,9 @@ type SourceBoardKind = RepositoryReferenceKind | `tracker:${string}`;
 
 const SourceBoard: React.FC<{ layout: SourceBoardLayout; onLeave?: () => void; onClose?: () => void }> = ({ layout, onLeave, onClose }) => {
     const { t } = useI18n();
-    const { trackers, sourceControl } = useRuntimeAPIs();
-    const servedTrackers = useTrackerDescriptors();
-    // Every tracker the server serves gets a tab, signed in or not: its list asks to connect when it is not.
-    const trackerTabs = trackers ? servedTrackers : NO_TRACKERS;
+    const { sourceControl } = useRuntimeAPIs();
+    // Only signed-in trackers get a tab; connecting one happens in Settings.
+    const trackerTabs = useTrackerSources();
     const projects = useProjectsStore((state) => state.projects);
     const activeProjectId = useProjectsStore((state) => state.activeProjectId);
     const choice = useSourceBoardChoice();

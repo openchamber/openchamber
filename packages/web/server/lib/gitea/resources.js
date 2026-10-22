@@ -160,26 +160,29 @@ export function createGiteaResourceService({ origin, client, resolveRepos = reso
   };
 
   /**
-   * The open pull request from `branch` of one of `sourceIds` into `target`.
-   * First the direct lookup on the default branch (one request on Gitea
-   * 1.21+), then a bounded scan of open pull requests: a scan cut off by the
-   * bound fails instead of reporting that there is none.
+   * The open pull request from `branch` of one of `sourceIds` into `target`,
+   * else the newest closed one as history. First the direct lookup on the
+   * default branch (Gitea 1.22+; 1.21 answers 404), then a bounded scan of
+   * open pull requests: a scan cut off by the bound fails instead of
+   * reporting that there is none. The direct lookup answers one pull request
+   * of the pair, not the open or newest one, so a closed answer only joins
+   * the history candidates from the first page of closed pull requests.
    */
   const findBranchPull = async (target, branch, sources) => {
     const sourceIds = new Set(sources.map((source) => source.raw.id));
     const matches = (raw) => isPlainObject(raw) && raw.head?.ref === branch
       && sourceIds.has(branchRepoId(raw.head)) && branchRepoId(raw.base) === target.raw.id;
-    let history = null;
+    const closed = [];
     const base = target.project.defaultBranch;
-    // A branch name with a slash cannot ride in one path segment of that route.
-    if (base && !branch.includes('/') && !base.includes('/')) {
+    if (base) {
       for (const source of sources) {
+        // Encoded, a slash in either branch name stays inside its path segment.
         const head = source.raw.id === target.raw.id ? seg(branch) : `${seg(source.project.owner)}:${seg(branch)}`;
         try {
           const raw = await client.get(`${repoPath(target.project)}/pulls/${seg(base)}/${head}`);
           if (matches(raw)) {
             if (raw.state === 'open') return { raw, history: null };
-            history ??= raw;
+            closed.push(raw);
           }
         } catch (error) {
           if (statusOf(error) !== 404) throw error;
@@ -190,7 +193,11 @@ export function createGiteaResourceService({ origin, client, resolveRepos = reso
       const result = await client.page(`${repoPath(target.project)}/pulls`, { state: 'open', sort: 'recentupdate' }, { page, limit: PAGE_LIMIT });
       const raw = result.items.find(matches);
       if (raw) return { raw, history: null };
-      if (!result.hasMore) return { raw: null, history };
+      if (result.hasMore) continue;
+      const recent = await client.page(`${repoPath(target.project)}/pulls`, { state: 'closed', sort: 'recentupdate' }, { page: 1, limit: PAGE_LIMIT });
+      closed.push(...recent.items.filter(matches));
+      const history = closed.reduce((newest, candidate) => (!newest || candidate.number > newest.number ? candidate : newest), null);
+      return { raw: null, history };
     }
     throw malformed('Gitea repository has more open pull requests than OpenChamber scans for a branch');
   };
@@ -243,25 +250,29 @@ export function createGiteaResourceService({ origin, client, resolveRepos = reso
   };
 
   /**
-   * The newest commits, oldest first. The order Gitea pages them in is not
-   * relied on: the first and the last page are read and sorted by date.
+   * The newest commits, oldest first. Gitea pages a pull request's commits
+   * in `git log` order, newest first (1.21 and 1.27), so the first page holds
+   * the newest ones; reversing it keeps commits made within one second in
+   * order, which sorting by their second-precision dates would not.
    */
   const readTimelineCommits = async (repo, number) => {
-    const query = { files: false, verification: false };
-    const first = await client.page(`${repo}/pulls/${number}/commits`, query, { page: 1, limit: TIMELINE_COMMIT_LIMIT });
-    let raw = first.items;
-    if (first.hasMore && first.total) {
-      const last = await client.page(`${repo}/pulls/${number}/commits`, query, { page: Math.ceil(first.total / TIMELINE_COMMIT_LIMIT), limit: TIMELINE_COMMIT_LIMIT });
-      raw = [...raw, ...last.items];
-    }
-    const seen = new Set();
-    const items = raw.flatMap((commit) => {
+    const first = await client.page(`${repo}/pulls/${number}/commits`, { files: false, verification: false }, { page: 1, limit: TIMELINE_COMMIT_LIMIT });
+    const items = first.items.flatMap((commit) => {
       const mapped = mapGiteaCommit(commit);
-      if (!mapped || seen.has(mapped.sha)) return [];
-      seen.add(mapped.sha);
-      return [mapped];
-    }).sort((a, b) => String(a.committedAt ?? '').localeCompare(String(b.committedAt ?? '')));
-    return { items: items.slice(-TIMELINE_COMMIT_LIMIT), complete: !first.hasMore };
+      return mapped ? [mapped] : [];
+    }).reverse();
+    return { items, complete: !first.hasMore };
+  };
+
+  /**
+   * An issue's or pull request's comments. Gitea answers them all in one
+   * list and ignores `page` and `limit` here (1.21 and 1.27), so paging would
+   * read the same list again.
+   */
+  const readIssueComments = async (repo, number) => {
+    const comments = await client.get(`${repoPath(repo)}/issues/${number}/comments`);
+    if (!Array.isArray(comments)) throw malformed('Gitea returned an invalid comment list');
+    return comments;
   };
 
   return {
@@ -337,7 +348,7 @@ export function createGiteaResourceService({ origin, client, resolveRepos = reso
       const { target, raw, request, net } = await findPull(directory, number, options.project, { remote: options.remote });
       const repo = repoPath(target.project);
       const [comments, reviews, diffText, changedFiles, ci, headProject, commits] = await Promise.all([
-        client.collection(`${repo}/issues/${number}/comments`, {}, { limit: PAGE_LIMIT, maxItems: COLLECTION_MAX_ITEMS, message: 'Gitea pull request has more comments than OpenChamber reads' }),
+        readIssueComments(target.project, number),
         client.collection(`${repo}/pulls/${number}/reviews`, {}, { limit: PAGE_LIMIT, maxItems: COLLECTION_MAX_ITEMS, message: 'Gitea pull request has more reviews than OpenChamber reads' }),
         options.includeDiff ? client.text(`${repo}/pulls/${number}.diff`) : Promise.resolve(''),
         options.includeDiff
@@ -418,9 +429,7 @@ export function createGiteaResourceService({ origin, client, resolveRepos = reso
     async issueComments(directory, number, selector, remote) {
       const { target } = await network(directory, selector, remote);
       const issue = requireIssue(await client.get(`${repoPath(target.project)}/issues/${number}`), target.project);
-      const comments = await client.collection(`${repoPath(target.project)}/issues/${number}/comments`, {}, {
-        limit: PAGE_LIMIT, maxItems: COLLECTION_MAX_ITEMS, message: 'Gitea issue has more comments than OpenChamber reads',
-      });
+      const comments = await readIssueComments(target.project, number);
       return comments.map((comment) => requireMapped(mapGiteaComment(comment, identity, issue.url), 'Gitea returned an invalid issue comment'));
     },
 
@@ -612,8 +621,10 @@ export function createGiteaResourceService({ origin, client, resolveRepos = reso
 
     /**
      * Merges only the head that was reviewed: `head_commit_id` makes Gitea
-     * refuse (409) once the branch moved. A 409 is re-read to tell a moved
-     * head from another conflict.
+     * refuse with 409 once the branch moved. Gitea checks mergeability
+     * first, so a push that also made the pull request unmergeable answers
+     * 405 instead; both are re-read to tell a moved head from a refusal of
+     * the reviewed one.
      */
     async mergeChangeRequest({ providerTarget, method, expectedTarget }) {
       const payload = { Do: method };
@@ -621,7 +632,7 @@ export function createGiteaResourceService({ origin, client, resolveRepos = reso
       try {
         await client.post(`${repoPath(targetRepo(providerTarget))}/pulls/${providerTarget.number}/merge`, payload);
       } catch (error) {
-        if (statusOf(error) === 409 && expectedTarget.headSha) {
+        if ((statusOf(error) === 409 || statusOf(error) === 405) && expectedTarget.headSha) {
           const current = await readTargetPull(providerTarget).catch(() => null);
           if (current && current.head?.sha !== expectedTarget.headSha) throw mismatch('headSha');
         }
@@ -714,8 +725,10 @@ export function createGiteaResourceService({ origin, client, resolveRepos = reso
       const raw = kind === 'issue-labels'
         ? await client.get(`${repo}/issues/${providerTarget.number}`)
         : await client.get(`${repo}/pulls/${providerTarget.number}`);
+      // Gitea 1.21 answers no review requests as `null`, not an empty list.
+      const reviewers = isPlainObject(raw) && raw.requested_reviewers === null ? [] : raw?.requested_reviewers;
       const current = kind === 'change-request-reviewers'
-        ? (Array.isArray(raw?.requested_reviewers) ? raw.requested_reviewers.map((user) => String(user?.id)) : null)
+        ? (Array.isArray(reviewers) ? reviewers.map((user) => String(user?.id)) : null)
         : (Array.isArray(raw?.labels) ? raw.labels.map((label) => label?.name) : null);
       if (!current || current.length !== names.length || !current.every((entry) => names.includes(entry))) return { state: 'outcome-unknown' };
       return { state: 'succeeded', result: {} };

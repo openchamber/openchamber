@@ -101,6 +101,7 @@ import { usePendingComposerReferences } from './composer/pendingComposerReferenc
 import { postTrackerSessionStarted } from '@/lib/trackers/sessionStatus';
 import { trackerPresentation } from '@/lib/trackers/presentation';
 import { useTrackerDescriptors } from '@/lib/trackers/registry';
+import { useTrackerSources } from '@/lib/trackers/sources';
 import { trackerReferenceSource, type TrackerReferenceSource } from '@/components/references/referencePickerItems';
 import type { ComposerTrackerPicker } from './composer/ui/ComposerAttachmentControls';
 import { Icon } from "@/components/icon/Icon";
@@ -1580,6 +1581,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const attachReferences = useAttachReferences(referencePickerDirectory, addLinkedReferences);
 
     const trackerDescriptors = useTrackerDescriptors();
+    const trackerSources = useTrackerSources();
 
     const getSubmitErrorMessage = (error: unknown, fallback: string) => {
         const message = error instanceof Error ? error.message : '';
@@ -3780,10 +3782,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             setLinkedReferences((current) => withComposerReferences(current, references));
         }
     }, [columnPinned, pendingComposerReferenceCount]);
-    // Every tracker the server serves, signed in or not: its picker asks to connect when it is not.
+    // Only signed-in trackers are offered; connecting one happens in Settings.
     const trackerPickers = React.useMemo<readonly ComposerTrackerPicker[]>(() => (
-        runtimeTrackers && !isVSCode
-            ? trackerDescriptors.map((descriptor) => {
+        !isVSCode
+            ? trackerSources.map((descriptor) => {
                 const presentation = trackerPresentation(descriptor.id);
                 return {
                     provider: descriptor.id,
@@ -3793,7 +3795,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 };
             })
             : []
-    ), [isVSCode, runtimeTrackers, t, trackerDescriptors]);
+    ), [isVSCode, t, trackerSources]);
     const showDraftTargetSelectors = newSessionDraftOpen && !isVSCode;
 
     // Which project and directory a new session will target.

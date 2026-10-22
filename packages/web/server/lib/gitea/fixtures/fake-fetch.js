@@ -31,18 +31,27 @@ export function fakeGitea(routes = {}) {
   return { fetch, calls };
 }
 
-/** The usual network: alice/app (remote `origin`) forked from team/app, with pull request #5. */
+export const HEAD = fixtures.forkPull.head.sha;
+export const MERGE_BASE = fixtures.forkPull.merge_base;
+
+/** The recorded network: bob/app (remote `origin`) forked from alice/app, with pull request #1 from bob:feature. */
 export function forkNetworkRoutes(extra = {}) {
   return {
     'GET /user': fixtures.user,
     'GET /version': fixtures.version,
-    'GET /repos/alice/app': fixtures.forkRepo,
-    'GET /repositories/10': fixtures.upstreamRepo,
-    'GET /repos/team/app': fixtures.upstreamRepo,
-    'GET /repos/team/app/pulls/5': fixtures.forkPull,
-    'GET /repos/team/app/commits/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/status': fixtures.combinedStatus,
+    'GET /repos/bob/app': fixtures.forkRepo,
+    'GET /repositories/1': fixtures.upstreamRepo,
+    'GET /repos/alice/app': fixtures.upstreamRepo,
+    'GET /repos/alice/app/pulls/1': fixtures.forkPull,
+    [`GET /repos/alice/app/commits/${HEAD}/status`]: fixtures.combinedStatus,
     ...extra,
   };
 }
 
-export const resolveForkRemote = async () => ({ repos: [{ owner: 'alice', name: 'app', repoPath: 'alice/app', url: `${ORIGIN}/alice/app`, remoteName: 'origin' }] });
+export const resolveForkRemote = async () => ({ repos: [{ owner: 'bob', name: 'app', repoPath: 'bob/app', url: `${ORIGIN}/bob/app`, remoteName: 'origin' }] });
+
+/** A recorded refusal (`fixtures.errors.*`) as the response Gitea sent. */
+export const replay = ({ status, body }) => new Response(body, {
+  status,
+  headers: { 'content-type': body.startsWith('{') ? 'application/json' : 'text/plain' },
+});

@@ -190,10 +190,17 @@ Git integration; tracker cards exist where the runtime has `RuntimeAPIs.trackers
 `integrations/SourceControlProviderCard.tsx` takes its name, mark and wording
 term from the descriptor. Its body is one `openchamber/ProviderInstanceAccounts`
 block per instance of that provider (the default instance stands in until one
-is listed), and "Add instance" where `instances.multiple` allows another or
-none is set up yet. A block offers the sign-in methods the descriptor names
-*and* the instance reports available (`capabilities.authenticationMethods`):
-device code, personal access token, and the provider's CLI login.
+is listed), and "Add instance" where the descriptor's settings take an address
+(an `instance-url` field) and `instances.multiple` allows another or none is
+set up yet. A block offers the sign-in methods the descriptor names *and* the
+instance reports available (`capabilities.authenticationMethods`): device
+code, personal access token, and the provider's CLI login. When both the
+device code and a token are offered, a chip switch (`SettingsChipGroup`)
+picks one and only its form shows; it starts on the method an existing
+account came from (`oauth` is the device code, `pat` the token), else the
+first one the descriptor names. The CLI login keeps its own row. The token
+form shows the scopes the descriptor names, literally, under "Create token";
+the info hint stays.
 `normalizeInstanceInput` reads what the user typed the way the descriptor
 says: an origin or a bare host, HTTPS only (HTTP on loopback where allowed), a
 port only where allowed, reserved instances refused.
@@ -207,7 +214,8 @@ Invariants:
   (`captureRuntime`), so a late answer never writes into the next server's state.
 - The github.com device flow (`openchamber/GitHubComAccountSection.tsx`) shows
   only for a descriptor whose `instances.legacyFlow.kind` is
-  `github-com-device`; the instance list under it leaves that instance out.
+  `github-com-device`; the instance list under it, titled "Other instances",
+  leaves that instance out.
 - A descriptor that names a settings field kind this version cannot draw shows
   an "update OpenChamber" line instead of the instance setup.
 - Settings search anchors: the card is `integrations.source-control.<id>`, its
@@ -234,10 +242,13 @@ per tracker only where they carry the tracker's own nouns (Linear's workspace
 and team), because interpolating a noun breaks case and gender in de, pl, uk
 and fr; any other tracker reads the generic account and group sentences.
 
-### Why the instance list stays stacked rows and not a method switch
+### Why a method switch and not stacked rows
 
-Methods render as stacked rows, as the GitLab card did. A chip switch between
-them would change what the user sees first, which is a product decision.
+The sign-in methods used to stack, the device code's Connect above the token
+field, so a first visit read as two competing forms. The maintainer chose a
+chip switch: the card opens on one Connect choice and the other method is one
+click away. A chip group rather than radios because the labels are short and
+`settings-ui-patterns` puts short exclusive choices in chips.
 
 ## Magic Prompts
 
