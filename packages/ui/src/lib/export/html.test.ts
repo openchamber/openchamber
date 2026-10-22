@@ -92,9 +92,11 @@ const search = (dom: Window, term: string): void => {
  * Whether the entry is on the page.
  *
  * An entry is on the page when nothing hides it: not the entry itself, and
- * not a block above it. A hidden block takes its whole subtree with it.
+ * not a block above it. A hidden block takes its whole subtree with it. An
+ * entry the page does not carry at all is not on the page either.
  */
-const isOnPage = (entry: Element): boolean => {
+const isOnPage = (entry: Element | null): boolean => {
+  if (!entry) return false;
   if (entry.classList.contains('hidden')) return false;
   let parent = entry.parentElement;
   while (parent) {
@@ -180,5 +182,135 @@ describe('the HTML page names the language it is written in', () => {
     } finally {
       useI18nStore.setState({ locale: previous });
     }
+  });
+});
+
+/**
+ * A prompt long enough for the readable view to cut it.
+ *
+ * The head of the prompt is what the page shows, the tail is what the cut
+ * took away.
+ */
+const longPrompt = (head: string, tail: string): string => `${head} ${'a'.repeat(700)} ${tail}`;
+
+const TASK_HEAD = 'taskheadmarker';
+const TASK_TAIL = 'tasktailmarker';
+const CALL_HEAD = 'callheadmarker';
+const CALL_TAIL = 'calltailmarker';
+
+/**
+ * The page with two long prompts in it.
+ *
+ * One is the task of a sub-agent block: the call that started the child
+ * carried it, and the child recorded no prompt of its own. The other is a
+ * call that named no child, so it stays a row of the parent's own sequence.
+ */
+const longPromptPage = (): string => {
+  const result = buildExportFromRecords({
+    root: session('ses_root', { title: 'Root' }),
+    sessions: [
+      session('ses_root', { title: 'Root' }),
+      session('ses_child', { title: 'Child', parentID: 'ses_root', agent: 'reviewer' }),
+    ],
+    records: new Map([
+      ['ses_root', [
+        {
+          info: {
+            id: 'a1', sessionID: 'ses_root', role: 'assistant', agent: 'build',
+            providerID: 'anthropic', modelID: 'claude-opus-4-1', time: { created: 2000 },
+          },
+          parts: [subagentCall('a1', {
+            childSessionID: 'ses_child',
+            sessionID: 'ses_root',
+            prompt: longPrompt(TASK_HEAD, TASK_TAIL),
+            startedAt: 2000,
+            endedAt: 3000,
+          })],
+        },
+        {
+          info: {
+            id: 'a2', sessionID: 'ses_root', role: 'assistant', agent: 'build',
+            providerID: 'anthropic', modelID: 'claude-opus-4-1', time: { created: 4000 },
+          },
+          parts: [subagentCall('a2', {
+            sessionID: 'ses_root',
+            prompt: longPrompt(CALL_HEAD, CALL_TAIL),
+            startedAt: 4000,
+            endedAt: 5000,
+          })],
+        },
+      ]],
+      // The child recorded no prompt of its own, so the task of its block is
+      // the prompt the call carried.
+      ['ses_child', [assistantMessage('ses_child', 'ca1', 2500, 'The child work')]],
+    ]),
+  }, 'readable');
+
+  return renderExportHtml(result.projection, {
+    title: 'Root',
+    mode: 'readable',
+    findings: result.timeline.findings,
+    sessionCount: result.timeline.sessions.size,
+  });
+};
+
+/** The page with its own script running in it. */
+const openLongPromptPage = (): Window => {
+  const html = longPromptPage();
+  const dom = new Window({ url: 'https://localhost/' });
+  dom.document.write(html);
+  const script = html.match(/<script>([\s\S]*?)<\/script>/);
+  if (!script) throw new Error('The export wrote no page script');
+  new Function('document', script[1])(dom.document);
+  return dom;
+};
+
+/** The entries the reader can see after the search. */
+const visibleEntries = (dom: Window): Element[] => (
+  [...dom.document.querySelectorAll('.entry')].filter(isOnPage)
+);
+
+describe('the HTML page searches what it shows', () => {
+  test('a word the page shows is found', () => {
+    const dom = openLongPromptPage();
+
+    // The head of the long prompt is on the page, in the task of the
+    // sub-agent's block.
+    search(dom, TASK_HEAD);
+
+    const task = dom.document.querySelector('.entry.task');
+    expect(task).toBeTruthy();
+    expect(task?.textContent ?? '').toContain(TASK_HEAD);
+    expect(isOnPage(task)).toBe(true);
+  });
+
+  test('a word the readable view cut away is not found', () => {
+    const dom = openLongPromptPage();
+
+    // The tail of the long prompt is not on the page: the readable view cut
+    // it. A search must not find a word the reader cannot read.
+    search(dom, TASK_TAIL);
+
+    expect(visibleEntries(dom)).toHaveLength(0);
+  });
+
+  test('a word the readable view cut away of a tool prompt is not found', () => {
+    const dom = openLongPromptPage();
+
+    // The same holds for a call's own prompt: the page shows the cut, so
+    // the index holds the cut.
+    search(dom, CALL_TAIL);
+
+    expect(visibleEntries(dom)).toHaveLength(0);
+  });
+
+  test('a word the page shows of a tool prompt is found', () => {
+    const dom = openLongPromptPage();
+
+    search(dom, CALL_HEAD);
+
+    const tool = dom.document.querySelector('.entry.tool');
+    expect(tool).toBeTruthy();
+    expect(isOnPage(tool)).toBe(true);
   });
 });

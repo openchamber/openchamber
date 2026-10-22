@@ -7,15 +7,19 @@
  * differ only in where the export starts from.
  *
  * The export loads the session's own history and the history of every
- * descendant the session list names, then hands them to the one pipeline. A
+ * descendant the app attaches to it, then hands them to the one pipeline. A
  * descendant that cannot be loaded is reported in the document and in a
  * toast; it never fails the export.
+ *
+ * Every session is read from the directory it runs in. A descendant that runs
+ * in another directory lives in another session store, and the root's
+ * directory would never find it.
  */
 
 import * as React from 'react';
 import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
-import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
+import { useGlobalSessionsStore, resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
 import { useSessionMessageRecordsForExport } from '@/sync/use-sync';
 import {
   buildExportFilename,
@@ -75,6 +79,16 @@ export const useSessionExport = (): UseSessionExport => {
     const allSessions = readExportSessions([...activeSessions, ...archivedSessions]);
     const root = allSessions.find((session) => session.id === target.sessionID);
 
+    // The directory each session runs in. A descendant that runs in another
+    // directory lives in another session store, so the root's directory
+    // would never find its records.
+    const directoryBySessionID = new Map(
+      [...activeSessions, ...archivedSessions].map((session) => [
+        session.id,
+        resolveGlobalSessionDirectory(session),
+      ]),
+    );
+
     // The root session the export starts from. The lineage below it is the
     // collector's business: it walks the session list and loads what the
     // user asked to be covered.
@@ -87,10 +101,12 @@ export const useSessionExport = (): UseSessionExport => {
     };
 
     const load = async (sessionID: string): Promise<SessionMessageRecord[] | null> => {
-      if (sessionID === target.sessionID) {
-        return loadRecords({ sessionID: target.sessionID, directory: target.directory }).catch(() => null);
-      }
-      return loadRecords({ sessionID, directory: target.directory }).catch(() => null);
+      // The exported session is read from the directory the export starts
+      // from; every other session from the directory it runs in.
+      const directory = sessionID === target.sessionID
+        ? target.directory
+        : (directoryBySessionID.get(sessionID) ?? target.directory);
+      return loadRecords({ sessionID, directory }).catch(() => null);
     };
 
     const rootRecords = await load(target.sessionID);
@@ -108,7 +124,8 @@ export const useSessionExport = (): UseSessionExport => {
     // sessions, so both produce the same document.
     const result = await buildExport({
       root: rootSession,
-      // The whole list, so the collector walks the lineage itself. The
+      // The whole list, so the collector walks the lineage itself: the live
+      // sessions the app attaches to this one, and no archived one. The
       // coverage choice reaches the collector: a user who does not want the
       // sub-agent transcripts gets a document without them, and without a
       // notice that they were left out.

@@ -195,7 +195,6 @@ export const buildExportTree = (timeline: ExportTimeline): ExportTree => {
   }
 
   const consumedDispatchEvents = new Set<string>();
-  const consumedResultEvents = new Set<string>();
 
   /**
    * The block for one child session: its own events in order, with its own
@@ -217,13 +216,6 @@ export const buildExportTree = (timeline: ExportTimeline): ExportTree => {
 
     const dispatch = dispatchByChildID.get(childSessionID);
     if (dispatch) consumedDispatchEvents.add(dispatch.event.id);
-
-    // A report the parent recorded for this child stays in the parent's flow.
-    for (const event of events) {
-      if (event.kind === 'subagent-result' && event.childSessionID === childSessionID) {
-        consumedResultEvents.add(event.id);
-      }
-    }
 
     // When the subagent ran is the span of the call that started it: a
     // foreground call settles when the child settles, so the call's own
@@ -333,8 +325,10 @@ export const buildExportTree = (timeline: ExportTimeline): ExportTree => {
   }
 
   // A block with no call to anchor it has no recorded place in the parent's
-  // flow. It keeps the position of the parent's own events: it is shown
-  // after the parent event that was current when the child ran, and the
+  // flow. It takes the time of the parent's own last event at or before the
+  // child's first recorded moment, so the caption says when the work sat in
+  // the conversation and the overlapping work can be told from it. The block
+  // itself has no place to take, so it goes to the end of the spine, and the
   // export says the relationship could not be established.
   const rootEventList = eventsBySession.get(timeline.rootSessionID) ?? [];
   const anchorless = rootBlocks.filter((block) => block.startedAt === undefined);
@@ -355,29 +349,19 @@ export const buildExportTree = (timeline: ExportTimeline): ExportTree => {
 
 
   // The root session's own events, with the calls that started a block
-  // removed: the block's header carries that call.
+  // removed: the block's header carries that call. A result the parent
+  // recorded for a child stays here, in the parent's own flow.
   const rootEvents = orderedEvents(
     (eventsBySession.get(timeline.rootSessionID) ?? [])
-      .filter((event) => !consumedDispatchEvents.has(event.id))
-      .filter((event) => !consumedResultEvents.has(event.id) || event.kind !== 'subagent-result'),
+      .filter((event) => !consumedDispatchEvents.has(event.id)),
   ).map((event): ExportNode => ({ kind: 'event', event }));
-
-  // A child's result that the parent recorded belongs to the parent's flow,
-  // so it is restored there.
-  const rootResults = orderedEvents(
-    (eventsBySession.get(timeline.rootSessionID) ?? [])
-      .filter((event) => event.kind === 'subagent-result'),
-  ).map((event): ExportNode => ({ kind: 'event', event }));
-
-  const rootEventIDs = new Set(rootEvents.map((node) => (node.kind === 'event' ? node.event.id : '')));
-  const missingResults = rootResults.filter((node) => node.kind === 'event' && !rootEventIDs.has(node.event.id));
 
   // The spine is the root's own events and the blocks of the sub-agents it
   // started, in one order. An event without a recorded time keeps the place
   // the source gave it, so the whole spine is ordered by the same rule the
   // events inside it are.
   const spine = orderByRecordedTime(
-    [...rootEvents, ...missingResults, ...anchored].map((node) => ({
+    [...rootEvents, ...anchored].map((node) => ({
       node,
       timestamp: positionInSequence(node).timestamp,
       sourceOrder: positionInSequence(node).sourceOrder,

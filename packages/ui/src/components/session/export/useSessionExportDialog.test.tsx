@@ -55,6 +55,12 @@ const session = (id: string, overrides: Partial<Session> = {}): Session => ({
   ...overrides,
 });
 
+/** The session as the list holds it after it was archived. */
+const archived = (entry: Session): Session => ({
+  ...entry,
+  time: { ...entry.time, archived: 1000 },
+});
+
 const resetSessions = (hasLoaded = true) => {
   useGlobalSessionsStore.setState({
     activeSessions: [],
@@ -173,6 +179,36 @@ describe('useSessionExportDialog', () => {
     await dialog.open('ses_root');
 
     expect(dialog.text()).toContain('2 sub-agent sessions');
+  });
+
+  test('an archived child is not counted', async () => {
+    // The count comes from the tree the app shows, and the app does not
+    // attach an archived session to its parent. The export covers the same
+    // tree, so the archived child is in neither the number nor the document.
+    setSessions([
+      session('ses_root', { title: 'Root' }),
+      archived(session('ses_child', { title: 'Child', parentID: 'ses_root' })),
+    ]);
+
+    const dialog = await renderHook();
+    await dialog.open('ses_root');
+
+    expect(dialog.text()).not.toContain('Include sub-agent tasks');
+    expect(dialog.text()).not.toContain('1 sub-agent session');
+  });
+
+  test('an archived session the reader exports keeps its live descendants in the count', async () => {
+    // The reader chose this session on purpose, from the archive bin. The
+    // work below it that is still live is part of it, so it is counted.
+    setSessions([
+      archived(session('ses_root', { title: 'Root' })),
+      session('ses_child', { title: 'Child', parentID: 'ses_root' }),
+    ]);
+
+    const dialog = await renderHook();
+    await dialog.open('ses_root');
+
+    expect(dialog.text()).toContain('1 sub-agent session');
   });
 
   test('a session without sub-agent sessions does not offer them', async () => {

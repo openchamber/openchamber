@@ -63,6 +63,17 @@ const formatDuration = (startedAt?: number, endedAt?: number): string => {
   return rest > 0 ? `${minutes}m ${rest}s` : `${minutes}m`;
 };
 
+/**
+ * A prompt as the page shows it.
+ *
+ * The readable view cuts a long prompt down, and the page shows that cut. The
+ * search index holds the same text, so a search finds what the reader can
+ * read on the page and nothing else.
+ */
+const promptOnPage = (prompt: string, mode: ProjectionMode): string => (
+  mode === 'readable' ? readablePrompt(prompt) : prompt
+);
+
 /** One entry as the page's script needs it. */
 type EntryData = {
   id: string;
@@ -109,7 +120,8 @@ type HtmlExportData = {
  *
  * The index holds what the page shows: a tool's arguments and metadata are
  * on the page in the detailed view, so a search for a word that only appears
- * there has to find the entry.
+ * there has to find the entry. The readable view cuts a long prompt down, so
+ * the index holds that cut: a word the page does not show must not be found.
  */
 const toolSearchText = (tool: ProjectedTool, mode: ProjectionMode): string => {
   const parts = [
@@ -117,7 +129,7 @@ const toolSearchText = (tool: ProjectedTool, mode: ProjectionMode): string => {
     tool.description ?? '',
     tool.output ?? '',
     tool.error ?? '',
-    tool.prompt ?? '',
+    tool.prompt === undefined ? '' : promptOnPage(tool.prompt, mode),
     tool.target ?? '',
     tool.command ?? '',
   ];
@@ -190,7 +202,7 @@ const buildData = (nodes: ProjectedNode[], mode: ProjectionMode, rootAgent?: str
           id: `${node.childSessionID}:task`,
           kind: 'task',
           agent: node.agent,
-          search: node.task.toLowerCase(),
+          search: promptOnPage(node.task, mode).toLowerCase(),
           depth: node.depth,
         });
       }
@@ -394,7 +406,7 @@ const renderEntryHtml = (
       const desc = [description, agent].filter(Boolean).join(' · ');
       const details: string[] = [];
       if (entry.tool.prompt) {
-        const prompt = mode === 'readable' ? readablePrompt(entry.tool.prompt) : entry.tool.prompt;
+        const prompt = promptOnPage(entry.tool.prompt, mode);
         details.push(`<details><summary>${escapeHtml(exportText('export.section.task'))}</summary><pre>${escapeHtml(prompt)}</pre></details>`);
       }
       if (entry.tool.error) {
@@ -504,11 +516,12 @@ const renderSubagentHtml = (subagent: ProjectedSubagent, mode: ProjectionMode, d
   ].join('');
 
   // The task is an entry of its own, so a search for a word in it keeps
-  // the task and hides the rest of the block.
+  // the task and hides the rest of the block. The index holds the text the
+  // page shows, so a word the page cut away is not found.
   const task = subagent.task
     ? `<article class="entry task" data-id="${escapeHtml(`${subagent.childSessionID}:task`)}" data-kind="task" data-agent="${escapeHtml(subagent.agent ?? '')}">
   <header><span class="role">${escapeHtml(exportText('export.section.task'))}</span></header>
-  <pre>${escapeHtml(mode === 'readable' ? readablePrompt(subagent.task) : subagent.task)}</pre>
+  <pre>${escapeHtml(promptOnPage(subagent.task, mode))}</pre>
 </article>`
     : '';
 

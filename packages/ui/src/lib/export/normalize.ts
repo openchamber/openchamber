@@ -17,7 +17,7 @@
 import { z } from 'zod';
 import type { JsonValue, Message, Part } from '@/lib/opencode/model';
 import { readJsonRecord, readTextField, readTimestamp } from './values';
-import { hasParts } from '@/lib/opencode/model';
+import { hasParts, type AssistantMessage, type UserMessage } from '@/lib/opencode/model';
 import { readContextPart } from '@/lib/messages/contextParts';
 import { formatContextMessage, formatMessageText } from '@/lib/messages/messageMarkdown';
 import { isSubagentTool, subagentAgent, subagentDescription } from '@/lib/opencode/tools';
@@ -149,18 +149,14 @@ const modelOf = (message: Message): ModelIdentity => {
 /**
  * The text of a message, in the form the export shows it.
  *
- * A synthetic message is either context the user attached to the next prompt
- * or plumbing a server plugin injected. Plumbing is not something the user
- * wrote or the agent said, so it stays out of the transcript entirely.
+ * Only a record with parts says something this way. A synthetic message is
+ * context the user attached to the next prompt or plumbing a server plugin
+ * injected, and it carries no parts: such a record is read with the records
+ * that carry their text in the record itself.
  */
-const messageText = (message: Message, parts: readonly Part[]): string => {
-  if (message.role === 'synthetic') {
-    if (!readContextPart(message)) return '';
-    return formatContextMessage(message).trim();
-  }
-  if (!hasParts(message)) return '';
-  return formatMessageText(parts, { user: message.role === 'user' });
-};
+const messageText = (message: UserMessage | AssistantMessage, parts: readonly Part[]): string => (
+  formatMessageText(parts, { user: message.role === 'user' })
+);
 
 /**
  * The type a part carries, as the record wrote it.

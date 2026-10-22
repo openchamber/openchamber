@@ -32,12 +32,12 @@ cannot name them differently.
   the same event model. They cannot disagree about what happened.
 - **One lineage walk.** The dialog's count of sub-agent sessions and the
   export's list of descendants come from the same walk: the tree the app
-  shows, which is the sessions the list attaches to the exported one. The
-  number the user is shown and the number the document carries are one. The
-  count is only made from a complete session list: the list arrives in pages,
-  and a count taken from a partial one would name a number the document does
-  not carry. The walk is read at one moment, so a session the app attaches
-  after the count is in the document and not in the number.
+  shows, which is the live sessions the list attaches to the exported one.
+  The number the user is shown and the number the document carries are one.
+  The count is only made from a complete session list: the list arrives in
+  pages, and a count taken from a partial one would name a number the
+  document does not carry. The walk is read at one moment, so a session the
+  app attaches after the count is in the document and not in the number.
 - **The document carries what the user asked for.** The coverage choice
   reaches the collector, not a filter over a loaded history: a user who left
   the sub-agent transcripts out gets a document without them, and without a
@@ -88,7 +88,9 @@ cannot name them differently.
 - **A match stays on the page.** The HTML page's search hides the entries that
   do not match, and a block that holds nothing else. A match inside a nested
   block keeps that block and every block above it, so the count the page
-  reports counts matches the reader can see.
+  reports counts matches the reader can see. The search index holds the text
+  the page shows: a long prompt is cut in the readable view, and the index
+  holds that cut, so a search does not find a word the reader cannot read.
 - **Compact never means lost.** The readable view cuts a long tool result
   down and marks the cut. The JSON export carries every source record, so
   nothing is gone. The cut is the same in every format: a long prompt reads
@@ -261,6 +263,17 @@ A child the app attaches and the records do not name is still carried: the
 app shows it, so the export does too. What the records say about it is a
 question of relationship, not of membership, and the report the runtime
 appended answers it.
+
+An archived session is not attached to anything: the app cuts it out of the
+tree, at every depth, so a child below an archived session is out of the tree
+too. The export cuts it the same way, and does not even read its history. The
+rejected alternative was to carry the archived child: the document would then
+hold a transcript the app shows nowhere, and the number on the dialog would
+name a session the document's tree does not have.
+
+The session the reader asked for is the exception. They export it on purpose,
+from the archive bin, so it is carried even when it is archived — and the
+live work below it travels with it.
 
 ### Why a finding carries a key and not a sentence
 

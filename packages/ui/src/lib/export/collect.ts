@@ -7,6 +7,10 @@
  * the rest of the lineage. Both are needed, because a subagent that is still
  * running may be named by a call that has not settled yet.
  *
+ * The lineage is the live one: the sessions the app attaches to the exported
+ * one. An archived session is not attached to anything — the app cuts it from
+ * the tree it shows — so the export does not carry it either.
+ *
  * Loading is bounded: a session with hundreds of subagents must not open
  * hundreds of requests at once, and one child that fails to load must not
  * fail the export.
@@ -23,6 +27,14 @@ export type ExportSession = {
   parentID?: string;
   title: string;
   agent?: string;
+  /**
+   * Whether the session was archived.
+   *
+   * The app attaches the live sessions to a session, and an archived one is
+   * not among them: it is out of the tree the app shows. The export carries
+   * the same tree, so an archived child is not carried either.
+   */
+  archived?: boolean;
   /** The session's creation time, in milliseconds since the epoch. */
   createdAt?: number;
   /**
@@ -92,10 +104,13 @@ type DescendantSessions = {
 /**
  * The descendants of `root` in the session list, each before its children.
  *
+ * The walk follows the tree the app shows: the live sessions, with an
+ * archived one cut out at every depth. A child that is missing from the list
+ * is not an error: the export may still have its records from the call that
+ * started it.
+ *
  * The walk stops at a session it has already visited, so a lineage that points
- * back at itself ends the walk instead of looping. A child that is missing
- * from the list is not an error: the export may still have its records from
- * the call that started it.
+ * back at itself ends the walk instead of looping.
  *
  * This is the one place the lineage is walked. The dialog's count of
  * sub-agent tasks and the export's own list of descendants come from here, so
@@ -110,6 +125,10 @@ const collectDescendantSessions = (
   for (const session of sessions) {
     const parentId = session.parentID;
     if (!parentId) continue;
+    // An archived session is not attached to its parent: the app cuts it out
+    // of the tree, and so does the export. The cut is at every depth, so the
+    // children of an archived session are out of the tree as well.
+    if (session.archived) continue;
     const siblings = childrenByParentId.get(parentId) ?? [];
     siblings.push(session);
     childrenByParentId.set(parentId, siblings);
@@ -156,6 +175,9 @@ const coveredDescendants = (
 /**
  * The sub-agent sessions below `root` in the session list.
  *
+ * These are the live ones: an archived session is not attached to its parent,
+ * so it is not a sub-agent session of it.
+ *
  * The export dialog counts the sub-agent tasks a session has with this, and
  * the export covers the same sessions with it. One walk, two callers.
  */
@@ -168,19 +190,22 @@ export const listDescendantSessions = (
  * The sessions the client knows, as the export reads them.
  *
  * The session list is the only place the lineage lives, so both the dialog
- * and the export read the lineage from the same list, in the same shape.
+ * and the export read the lineage from the same list, in the same shape. The
+ * list says which sessions are archived, and the lineage follows it: an
+ * archived session is not attached to its parent.
  */
 export const readExportSessions = (sessions: readonly {
   id: string;
   parentID?: string;
   title: string;
   agent?: string;
-  time: { created: number };
+  time: { created: number; archived?: number };
 }[]): ExportSession[] => sessions.map((session) => ({
   id: session.id,
   parentID: session.parentID,
   title: session.title,
   agent: session.agent,
+  archived: Boolean(session.time.archived),
   createdAt: session.time.created,
 }));
 
@@ -193,7 +218,13 @@ export const readExportSessions = (sessions: readonly {
  */
 export const collectLoadedSessions = (options: {
   root: ExportSession;
-  /** Every session the client knows, active and archived. */
+  /**
+   * Every session the client knows, active and archived.
+   *
+   * The archived ones are in the list because the exported session may be
+   * one of them. They are not descendants of anything: the walk cuts them
+   * out, the way the app's tree does.
+   */
   sessions: readonly ExportSession[];
   /** The records of the sessions the caller holds, keyed by session id. */
   records: ReadonlyMap<string, ExportSourceRecord[]>;
@@ -269,11 +300,18 @@ export const collectLoadedSessions = (options: {
  *
  * The descendants are the sessions the client attaches to the exported one —
  * the ones whose parent is it, and their own children in turn. That is the
- * tree the app shows, so the export carries the same work the app shows.
+ * tree the app shows, so the export carries the same work the app shows. An
+ * archived session is not attached to anything, so it is not a descendant.
  */
 export const collectExportSessions = async (options: {
   root: ExportSession;
-  /** Every session the client knows, active and archived. */
+  /**
+   * Every session the client knows, active and archived.
+   *
+   * The archived ones are in the list because the exported session may be
+   * one of them. They are not descendants of anything: the walk cuts them
+   * out, the way the app's tree does.
+   */
   sessions: readonly ExportSession[];
   load: ExportRecordLoader;
   /**
@@ -325,7 +363,6 @@ export const collectExportSessions = async (options: {
   // request per child at once. The waves stay the size limit, so a long
   // lineage still loads in bounded batches.
   const queue = [...descendants];
-  const loaded = new Set<string>([root.id]);
 
   while (queue.length > 0) {
     const wave = queue.splice(0, MAX_CONCURRENT_LOADS);
@@ -339,7 +376,6 @@ export const collectExportSessions = async (options: {
         missing.push({ session, depth });
         continue;
       }
-      loaded.add(session.id);
       collected.push({
         sessionID: session.id,
         title: session.title,
