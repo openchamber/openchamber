@@ -62,7 +62,7 @@ const markdown = (input: Fixture, mode: 'readable' | 'detailed' = 'readable'): s
   return renderExportMarkdown(projection, {
     title: input.root.title,
     mode,
-    findings: timeline.findings,
+    findings: timeline.findings, excluded: timeline.excluded,
     sessionCount: timeline.sessions.size,
     rootAgent,
   });
@@ -73,7 +73,7 @@ const html = (input: Fixture, mode: 'readable' | 'detailed' = 'readable'): strin
   return renderExportHtml(projection, {
     title: input.root.title,
     mode,
-    findings: timeline.findings,
+    findings: timeline.findings, excluded: timeline.excluded,
     sessionCount: timeline.sessions.size,
     rootAgent,
   });

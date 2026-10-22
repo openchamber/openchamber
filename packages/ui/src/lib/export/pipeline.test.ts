@@ -67,7 +67,7 @@ const markdown = (input: Fixture, mode: 'readable' | 'detailed' = 'readable'): s
   return renderExportMarkdown(projection, {
     title: input.root.title,
     mode,
-    findings: timeline.findings,
+    findings: timeline.findings, excluded: timeline.excluded,
     sessionCount: timeline.sessions.size,
   });
 };
@@ -443,7 +443,7 @@ describe('export pipeline', () => {
     const html = renderExportHtml(projection, {
       title: 'Root',
       mode: 'detailed',
-      findings: timeline.findings,
+      findings: timeline.findings, excluded: timeline.excluded,
       sessionCount: timeline.sessions.size,
     });
 
@@ -574,7 +574,7 @@ describe('export pipeline', () => {
     const html = renderExportHtml(projection, {
       title: 'Root',
       mode: 'readable',
-      findings: timeline.findings,
+      findings: timeline.findings, excluded: timeline.excluded,
       sessionCount: timeline.sessions.size,
     });
 
@@ -617,7 +617,7 @@ describe('export pipeline', () => {
     const html = renderExportHtml(projection, {
       title: 'Root',
       mode: 'readable',
-      findings: timeline.findings,
+      findings: timeline.findings, excluded: timeline.excluded,
       sessionCount: timeline.sessions.size,
     });
 
@@ -673,7 +673,7 @@ describe('export pipeline', () => {
     const html = renderExportHtml(projection, {
       title: 'Root',
       mode: 'detailed',
-      findings: timeline.findings,
+      findings: timeline.findings, excluded: timeline.excluded,
       sessionCount: timeline.sessions.size,
     });
 
@@ -831,7 +831,7 @@ describe('export pipeline', () => {
     const html = renderExportHtml(projection, {
       title: 'Root',
       mode: 'readable',
-      findings: timeline.findings,
+      findings: timeline.findings, excluded: timeline.excluded,
       sessionCount: timeline.sessions.size,
     });
 
@@ -880,7 +880,7 @@ describe('export pipeline', () => {
     const html = renderExportHtml(projection, {
       title: 'Root',
       mode: 'detailed',
-      findings: timeline.findings,
+      findings: timeline.findings, excluded: timeline.excluded,
       sessionCount: timeline.sessions.size,
     });
 
@@ -928,7 +928,7 @@ describe('export pipeline', () => {
     const html = renderExportHtml(projection, {
       title: 'Root',
       mode: 'readable',
-      findings: timeline.findings,
+      findings: timeline.findings, excluded: timeline.excluded,
       sessionCount: timeline.sessions.size,
     });
 
@@ -965,7 +965,7 @@ describe('export pipeline', () => {
     const html = renderExportHtml(projection, {
       title: 'Root',
       mode: 'readable',
-      findings: timeline.findings,
+      findings: timeline.findings, excluded: timeline.excluded,
       sessionCount: timeline.sessions.size,
     });
 
@@ -1013,7 +1013,7 @@ describe('export pipeline', () => {
     const html = renderExportHtml(projection, {
       title: 'Root',
       mode: 'detailed',
-      findings: timeline.findings,
+      findings: timeline.findings, excluded: timeline.excluded,
       sessionCount: timeline.sessions.size,
     });
 
@@ -1079,7 +1079,7 @@ describe('export pipeline', () => {
     const document = renderExportMarkdown(result.projection, {
       title: 'Root',
       mode: 'readable',
-      findings: result.timeline.findings,
+      findings: result.timeline.findings, excluded: result.timeline.excluded,
       sessionCount: result.timeline.sessions.size,
     });
     expect(document).toContain('could not be loaded');

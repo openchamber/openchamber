@@ -14,10 +14,10 @@
 
 import { getCurrentIntlLocale } from '@/lib/i18n';
 import { readTimestamp } from './values';
-import type { ExportFinding } from './events';
+import type { ExportExcludedSession, ExportFinding } from './events';
 import { orderingGuarantee, type ConcurrentWork } from './order';
 import { exportText, findingText } from './i18n';
-import { agentLabel, concurrentLabel, messageAgent, readablePrompt, roleLabel, runtimeTruncationNote, statusLabel } from './labels';
+import { agentLabel, concurrentLabel, excludedArchivedNote, messageAgent, readablePrompt, roleLabel, runtimeTruncationNote, statusLabel } from './labels';
 import type { ProjectedEntry, ProjectedNode, ProjectedSubagent, ProjectedTool, ProjectionMode } from './project';
 
 /** Escapes text for an HTML text node or attribute. */
@@ -751,6 +751,13 @@ type HtmlRenderOptions = {
   findings: ExportFinding[];
   sessionCount: number;
   /**
+   * The sessions the export left out on purpose, and why.
+   *
+   * The page says so as a fact, once, under the header: the export carries
+   * the tree the app shows, and an archived session is not in it.
+   */
+  excluded: ExportExcludedSession[];
+  /**
    * The agent the exported session ran.
    *
    * The document names the agent in its own messages instead of a role of
@@ -788,6 +795,14 @@ export const renderExportHtml = (
     ? exportText('export.header.sessionSingle')
     : exportText('export.header.sessionsPlural', { count: options.sessionCount });
 
+  // The sessions the export left out on purpose. The page says so once,
+  // under the header, where the reader learns what the export covers: it is
+  // a fact about the coverage, not a finding about a hole in the history.
+  const excludedNote = excludedArchivedNote(options.excluded);
+  const excludedLine = excludedNote
+    ? `  <p class="note">${escapeHtml(excludedNote)}</p>\n`
+    : '';
+
   // The page speaks the reader's language, so it declares that language: a
   // screen reader reads the text in the voice of the language the page names,
   // and the browser's spell checker and hyphenation follow it too.
@@ -803,7 +818,7 @@ export const renderExportHtml = (
 <main>
   <h1>${escapeHtml(options.title)}</h1>
   <p class="subtitle">${escapeHtml(sessionLabel)} · ${escapeHtml(options.mode === 'readable' ? exportText('export.header.view.readable') : exportText('export.header.view.detailed'))} · ${escapeHtml(exportText('export.header.exported', { time: formatDateTime(Date.now()) ?? '' }))}</p>
-  <div class="bar">
+${excludedLine}  <div class="bar">
     <div class="row">
       <input type="search" id="search" placeholder="${escapeHtml(exportText('export.html.searchPlaceholder'))}" aria-label="${escapeHtml(exportText('export.html.searchLabel'))}">
       <select id="filter-agent" aria-label="${escapeHtml(exportText('export.html.filterAgent'))}"><option value="">${escapeHtml(exportText('export.html.allAgents'))}</option></select>

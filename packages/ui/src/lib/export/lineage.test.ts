@@ -59,7 +59,7 @@ const documentOf = (result: ReturnType<typeof buildExportFromRecords>): string =
   renderExportMarkdown(result.projection, {
     title: 'Root',
     mode: 'readable',
-    findings: result.timeline.findings,
+    findings: result.timeline.findings, excluded: result.timeline.excluded,
     sessionCount: result.timeline.sessions.size,
   })
 );

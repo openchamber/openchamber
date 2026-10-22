@@ -29,6 +29,7 @@ import {
 } from './childSession';
 import type {
   ExportEvent,
+  ExportExcludedSession,
   ExportFinding,
   ExportPart,
   ExportRole,
@@ -38,7 +39,7 @@ import type {
   ExportToolCall,
 } from './events';
 import { SOURCE_ORDER_FIRST_PLACE, sourceOrderOf, sourceOrderWidth } from './events';
-import type { CollectedSession, MissingSession } from './collect';
+import type { CollectedSession, ExcludedSession, MissingSession } from './collect';
 
 /** The message roles the export knows how to present. */
 /**
@@ -367,6 +368,15 @@ export const normalizeExportTimeline = (options: {
   rootSessionID: string;
   sessions: CollectedSession[];
   missing: MissingSession[];
+  /**
+   * The sessions the export left out on purpose.
+   *
+   * A call that names one of them found its child; the child's transcript is
+   * not part of the export because the session is not part of the lineage.
+   * That is a fact, not an incompleteness, so the document states it and
+   * reports nothing.
+   */
+  excluded: ExcludedSession[];
   findings: ExportFinding[];
   /**
    * Whether the export covers the sub-agent sessions at all.
@@ -376,7 +386,7 @@ export const normalizeExportTimeline = (options: {
    */
   includeSubagents?: boolean;
 }): NormalizeResult => {
-  const { rootSessionID, sessions, missing, findings } = options;
+  const { rootSessionID, sessions, missing, findings, excluded } = options;
   const includeSubagents = options.includeSubagents ?? true;
 
   const sessionsById = new Map<string, ExportSessionInfo>();
@@ -420,6 +430,8 @@ export const normalizeExportTimeline = (options: {
   // reader knows what is missing, and the gap sits where the sub-agent's own
   // events would have sat.
   const missingSessionIDs = new Set(missing.map((entry) => entry.session.id));
+  /** The sessions the export left out on purpose, and why. */
+  const excludedSessionIDs = new Set(excluded.map((entry) => entry.session.id));
   /** The part types the export has already reported as unknown. */
   const reportedPartTypes = new Set<string>();
   /** Whether the export has already reported a record without a timestamp. */
@@ -461,14 +473,6 @@ export const normalizeExportTimeline = (options: {
   // started; a child the caller knows only by its description carries the id
   // of the call that recorded that description, and the join uses it.
   const invocationByCallID = new Map<string, { childSessionID: string; sessionID: string; partID: string; description?: string; agent?: string; timestamp?: number }>();
-  /** The calls that named a child, whether the child was found or not. */
-  const invocationsByCall = new Map<string, {
-    childSessionID: string;
-    sessionID: string;
-    partID: string;
-    callID: string;
-    settled: boolean;
-  }>();
   for (const collected of sessions) {
     for (const record of collected.records) {
       for (const part of record.parts) {
@@ -506,8 +510,15 @@ export const normalizeExportTimeline = (options: {
         // A call names a child the export does not cover: the session is not
         // in the list, and no records were loaded for it. The call is still
         // shown, and the export says its transcript is missing — unless the
-        // caller left the sub-agent sessions out on purpose.
-        if (includeSubagents && !sessionsById.has(childSessionID) && !missingSessionIDs.has(childSessionID)) {
+        // caller left the sub-agent sessions out on purpose, or the child is
+        // one the export left out on purpose.
+        //
+        // The child is never reported as "not tied to a call" as well: the
+        // call is in the exported history, and the reader can see it there.
+        if (includeSubagents
+          && !sessionsById.has(childSessionID)
+          && !missingSessionIDs.has(childSessionID)
+          && !excludedSessionIDs.has(childSessionID)) {
           localFindings.push({
             kind: 'ambiguous-invocation',
             sessionID: collected.sessionID,
@@ -531,15 +542,6 @@ export const normalizeExportTimeline = (options: {
           description: call.description,
           agent: call.agent,
           timestamp: call.startedAt,
-        });
-        invocationsByCall.set(part.callID, {
-          childSessionID,
-          sessionID: collected.sessionID,
-          partID: part.id,
-          callID: part.callID,
-          // A call that has not settled yet names a child that may still be
-          // running. Its transcript is not missing; it is not there yet.
-          settled: part.state.status === 'completed' || part.state.status === 'error',
         });
       }
     }
@@ -778,22 +780,11 @@ export const normalizeExportTimeline = (options: {
     });
   }
 
-  // A settled call whose child the export could not tie to any transcript is
-  // a relationship the export could not establish. A call that is still
-  // running names a child that is not there yet, which is not a gap.
-  for (const invocation of invocationsByCall.values()) {
-    if (!invocation.settled) continue;
-    if (sessionsById.has(invocation.childSessionID)) continue;
-    if (missingSessionIDs.has(invocation.childSessionID)) continue;
-    if (!includeSubagents) continue;
-    localFindings.push({
-      kind: 'unresolved-invocation',
-      sessionID: invocation.sessionID,
-      childSessionID: invocation.childSessionID,
-      messageKey: 'export.finding.unresolvedInvocation',
-      messageParams: { title: invocation.childSessionID },
-    });
-  }
+  const excludedSessions: ExportExcludedSession[] = excluded.map((entry) => ({
+    id: entry.session.id,
+    title: entry.session.title,
+    reason: 'archived',
+  }));
 
   return {
     timeline: {
@@ -802,6 +793,7 @@ export const normalizeExportTimeline = (options: {
       events,
       findings: [...findings, ...localFindings],
       sourceRecords,
+      excluded: excludedSessions,
     },
   };
 };

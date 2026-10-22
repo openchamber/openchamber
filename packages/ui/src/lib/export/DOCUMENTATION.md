@@ -42,6 +42,11 @@ cannot name them differently.
   says so. The switch stays: the choice is the reader's, and it has to stay
   reachable when the number is not known. The text says what the choice will
   do, so the promise and the export agree.
+- **Every session is read from its own directory.** A descendant that runs in
+  another directory lives in another session store, so the root's directory
+  would never find it. The export reads each session where it runs, and a
+  session it cannot read is a gap the document reports where the sub-agent's
+  work would have been.
 - **The document carries what the user asked for.** The coverage choice
   reaches the collector, not a filter over a loaded history: a user who left
   the sub-agent transcripts out gets a document without them, and without a
@@ -117,6 +122,15 @@ cannot name them differently.
   work would have been. An ordinary message never carries a diagnostic line.
   A child the user left out on purpose is not a gap: the export knows it was
   left out.
+- **A session cut out of the tree is named, not reported.** An archived
+  session is not attached to the session you exported, so the export does not
+  carry it. The document says that once, as a fact under the header: the
+  transcript is not part of the export because the session is not carried
+  along, and not because something was lost. The call that started it stays,
+  because it belongs to the root session's own history, and the document
+  never says the child was not tied to that call. A session that is not there
+  at all, and a session whose history could not be read, are still reported:
+  the export could not establish those.
 - **The export speaks the reader's language.** A finding carries the key of
   its text and the values that text names; the export resolves the text when
   it builds the document — the projection and the render read the dictionary
@@ -299,6 +313,32 @@ name a session the document's tree does not have.
 The session the reader asked for is the exception. They export it on purpose,
 from the archive bin, so it is carried even when it is archived — and the
 live work below it travels with it.
+
+### Why an archived child is named once, and not reported as a gap
+
+An archived child is cut out of the tree the app shows, so the export does
+not carry its transcript. The document says that once, as a fact under the
+header, and names the session it is about. The call that started the child
+stays, because it belongs to the root session's own history, and the reader
+can see it there.
+
+The rejected alternative was to report the missing transcript as a finding.
+The document would then carry an "Incomplete export" notice over an export
+that is complete against the tree the app shows, and it would claim that the
+child was not tied to a call while the call sat right above the notice. The
+rejected alternative on the other side — saying nothing at all — would leave
+a reader who looks for the transcript of a call they can see without an
+answer, and the export knew the answer.
+
+The rejected alternative was a note next to every call that names such a
+child. The document's rule is that an ordinary message never carries a
+diagnostic line, and a document with one note per call reads like a log of
+what went wrong. The note belongs to the document, once, where the reader
+learns what the export covers.
+
+The JSON export carries the same fact in a field of its own, next to the
+findings and not among them: a tool that reads the export sees which
+sessions were left out and why.
 
 ### Why a finding carries a key and not a sentence
 

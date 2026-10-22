@@ -78,6 +78,7 @@ const buildFromCollection = (
     rootSessionID,
     sessions: collection.sessions,
     missing: collection.missing,
+    excluded: collection.excluded,
     findings: collection.findings,
     includeSubagents,
   });

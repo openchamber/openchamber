@@ -78,6 +78,13 @@ type CollectionResult = {
    * which sub-agent is missing and place the gap where the reader expects it.
    */
   missing: MissingSession[];
+  /**
+   * The sessions the export left out on purpose.
+   *
+   * The collector knows them and why, so the document can name them as a
+   * fact: they are not part of the lineage, and nothing was lost.
+   */
+  excluded: ExcludedSession[];
   /** What the collection could not establish. */
   findings: ExportFinding[];
 };
@@ -89,6 +96,18 @@ export type MissingSession = {
   depth: number;
 };
 
+/**
+ * A session the export left out on purpose.
+ *
+ * An archived session is not attached to its parent, so it is not part of
+ * the tree the app shows and the export does not carry it. The collector
+ * knows it and why, and the document says so as a fact rather than as a
+ * finding: the export is complete against the tree the app shows.
+ */
+export type ExcludedSession = {
+  session: ExportSession;
+};
+
 /** A descendant session and how deep it sits below the exported root. */
 type DescendantSession = {
   session: ExportSession;
@@ -98,6 +117,8 @@ type DescendantSession = {
 /** The descendants of a session, and whether the lineage loops. */
 type DescendantSessions = {
   descendants: DescendantSession[];
+  /** The sessions the walk cut out of the tree, and why. */
+  excluded: ExcludedSession[];
   cyclic: boolean;
 };
 
@@ -122,23 +143,36 @@ const collectDescendantSessions = (
   sessions: readonly ExportSession[],
 ): DescendantSessions => {
   const childrenByParentId = new Map<string, ExportSession[]>();
+  const archivedByParentId = new Map<string, ExportSession[]>();
   for (const session of sessions) {
     const parentId = session.parentID;
     if (!parentId) continue;
     // An archived session is not attached to its parent: the app cuts it out
     // of the tree, and so does the export. The cut is at every depth, so the
     // children of an archived session are out of the tree as well.
-    if (session.archived) continue;
+    if (session.archived) {
+      const archived = archivedByParentId.get(parentId) ?? [];
+      archived.push(session);
+      archivedByParentId.set(parentId, archived);
+      continue;
+    }
     const siblings = childrenByParentId.get(parentId) ?? [];
     siblings.push(session);
     childrenByParentId.set(parentId, siblings);
   }
 
   const descendants: DescendantSession[] = [];
+  const excluded: ExcludedSession[] = [];
   const visited = new Set<string>([root.id]);
   let cyclic = false;
 
   const visit = (parentId: string, depth: number): void => {
+    // The archived children of a session the walk reached. They are cut out
+    // of the tree, and the export names them as a fact instead of reporting
+    // them as missing.
+    for (const archived of archivedByParentId.get(parentId) ?? []) {
+      excluded.push({ session: archived });
+    }
     for (const child of childrenByParentId.get(parentId) ?? []) {
       if (visited.has(child.id)) {
         cyclic = true;
@@ -151,7 +185,7 @@ const collectDescendantSessions = (
   };
   visit(root.id, 1);
 
-  return { descendants, cyclic };
+  return { descendants, excluded, cyclic };
 };
 
 /**
@@ -169,7 +203,7 @@ const coveredDescendants = (
 ): DescendantSessions => (
   includeSubagents
     ? collectDescendantSessions(root, sessions)
-    : { descendants: [], cyclic: false }
+    : { descendants: [], excluded: [], cyclic: false }
 );
 
 /**
@@ -241,7 +275,7 @@ export const collectLoadedSessions = (options: {
   const findings: ExportFinding[] = [];
   const missing: MissingSession[] = [];
 
-  const { descendants, cyclic } = coveredDescendants(root, sessions, includeSubagents);
+  const { descendants, excluded, cyclic } = coveredDescendants(root, sessions, includeSubagents);
   if (cyclic) {
     findings.push({
       kind: 'cyclic-lineage',
@@ -257,7 +291,7 @@ export const collectLoadedSessions = (options: {
       sessionID: root.id,
       messageKey: 'export.finding.loadFailure',
     });
-    return { sessions: [], missing, findings };
+    return { sessions: [], missing, excluded, findings };
   }
 
   const collected: CollectedSession[] = [{
@@ -288,7 +322,7 @@ export const collectLoadedSessions = (options: {
     });
   }
 
-  return { sessions: collected, missing, findings };
+  return { sessions: collected, missing, excluded, findings };
 };
 
 /**
@@ -328,7 +362,7 @@ export const collectExportSessions = async (options: {
   const findings: ExportFinding[] = [];
   const missing: MissingSession[] = [];
 
-  const { descendants, cyclic } = coveredDescendants(root, sessions, includeSubagents);
+  const { descendants, excluded, cyclic } = coveredDescendants(root, sessions, includeSubagents);
   if (cyclic) {
     findings.push({
       kind: 'cyclic-lineage',
@@ -346,7 +380,7 @@ export const collectExportSessions = async (options: {
       sessionID: root.id,
       messageKey: 'export.finding.loadFailure',
     });
-    return { sessions: collected, missing, findings };
+    return { sessions: collected, missing, excluded, findings };
   }
 
   collected.push({
@@ -389,5 +423,5 @@ export const collectExportSessions = async (options: {
     }
   }
 
-  return { sessions: collected, missing, findings };
+  return { sessions: collected, missing, excluded, findings };
 };

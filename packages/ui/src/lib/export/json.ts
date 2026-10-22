@@ -13,7 +13,7 @@
  */
 
 import type { Message, Part } from '@/lib/opencode/model';
-import type { ExportEvent, ExportFinding, ExportSessionInfo, ExportTimeline } from './events';
+import type { ExportEvent, ExportExcludedSession, ExportFinding, ExportSessionInfo, ExportTimeline } from './events';
 import { orderByRecordedTime } from './ordering';
 import { exportText, findingText } from './i18n';
 
@@ -33,6 +33,7 @@ const jsonExportSchema = () => ({
     'events': exportText('export.json.schema.events'),
     'source': exportText('export.json.schema.source'),
     'findings': exportText('export.json.schema.findings'),
+    'excluded': exportText('export.json.schema.excluded'),
   },
 });
 
@@ -53,6 +54,13 @@ type ExportJson = {
   events: ExportEvent[];
   source: Record<string, ExportJsonSession>;
   findings: ExportJsonFinding[];
+  /**
+   * The sessions the export left out on purpose, and why.
+   *
+   * They are not findings: the export is complete against the tree the app
+   * shows, and an archived session is not in that tree.
+   */
+  excluded: ExportExcludedSession[];
 };
 
 /**
@@ -109,6 +117,7 @@ const buildExportJson = (timeline: ExportTimeline): ExportJson => ({
     ...finding,
     detail: findingText(finding.messageKey, finding.messageParams),
   })),
+  excluded: timeline.excluded,
 });
 
 /** The JSON export, as text. */

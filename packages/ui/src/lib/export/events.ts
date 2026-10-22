@@ -294,6 +294,20 @@ export type ExportSourceSession = {
 };
 
 /**
+ * A session the export left out on purpose.
+ *
+ * The export carries the tree the app shows, and an archived session is not
+ * in that tree. The document says so as a fact: the session is not part of
+ * the export, and nothing was lost.
+ */
+export type ExportExcludedSession = {
+  id: string;
+  title: string;
+  /** Why the session is not part of the export. */
+  reason: 'archived';
+};
+
+/**
  * The whole export: the events in their resolved order, the sessions they came
  * from, and what the export could not establish.
  */
@@ -308,4 +322,6 @@ export type ExportTimeline = {
   findings: ExportFinding[];
   /** The source records of every contributing session, keyed by session id. */
   sourceRecords: Map<string, ExportSourceSession>;
+  /** The sessions the export left out on purpose, and why. */
+  excluded: ExportExcludedSession[];
 };

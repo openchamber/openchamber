@@ -16,10 +16,10 @@
 
 import { getCurrentIntlLocale } from '@/lib/i18n';
 import { readTimestamp } from './values';
-import type { ExportFinding } from './events';
+import type { ExportExcludedSession, ExportFinding } from './events';
 import { orderingGuarantee } from './order';
 import { exportText, findingText } from './i18n';
-import { agentLabel, concurrentLabel, messageAgent, readablePrompt, roleLabel, runtimeTruncationNote, statusLabel } from './labels';
+import { agentLabel, concurrentLabel, excludedArchivedNote, messageAgent, readablePrompt, roleLabel, runtimeTruncationNote, statusLabel } from './labels';
 import type { ProjectedEntry, ProjectedNode, ProjectedSubagent, ProjectionMode } from './project';
 
 /** The clock time of a timestamp, in the reader's locale. */
@@ -163,6 +163,13 @@ type MarkdownRenderOptions = {
   findings: ExportFinding[];
   /** The sessions the export covered, for the header line. */
   sessionCount: number;
+  /**
+   * The sessions the export left out on purpose, and why.
+   *
+   * The document says so as a fact, once, under the header: the export
+   * carries the tree the app shows, and an archived session is not in it.
+   */
+  excluded: ExportExcludedSession[];
   /**
    * The agent the exported session ran.
    *
@@ -412,10 +419,16 @@ export const renderExportMarkdown = (
   const { title, mode, findings } = options;
   const exportedAt = formatDateTime(Date.now());
 
+  // The sessions the export left out on purpose. The document says so once,
+  // under the header, where the reader learns what the export covers: it is
+  // a fact about the coverage, not a finding about a hole in the history.
+  const excludedNote = excludedArchivedNote(options.excluded);
+
   const header = [
     `# ${title}`,
     '',
     `*${options.sessionCount === 1 ? exportText('export.header.sessionSingle') : exportText('export.header.sessionsPlural', { count: options.sessionCount })} · ${mode === 'readable' ? exportText('export.header.view.readable') : exportText('export.header.view.detailed')} · ${exportText('export.header.exported', { time: exportedAt })}*`,
+    ...(excludedNote ? ['', `*${excludedNote}*`] : []),
   ].join('\n');
 
   const body: string[] = [];

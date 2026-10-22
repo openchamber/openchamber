@@ -15,6 +15,7 @@ import type { I18nKey } from '@/lib/i18n';
 import { exportText } from './i18n';
 import type { ConcurrentWork } from './order';
 import type { ProjectedTool } from './project';
+import type { ExportExcludedSession } from './events';
 
 /**
  * The label a role's messages carry in the export.
@@ -128,3 +129,23 @@ export const readablePrompt = (text: string): string => (
     ? `${text.slice(0, MAX_READABLE_PROMPT)}\n\n… [${exportText('export.excerpt')}]`
     : text
 );
+
+/**
+ * The note that says the export left a session out on purpose.
+ *
+ * An archived session is not attached to the session the reader exported, so
+ * the export does not carry it. The document says that as a fact, once, and
+ * not as a finding: nothing was lost, and the export is complete against the
+ * tree the app shows.
+ *
+ * The note is the same in every format, and it names the sessions it is
+ * about, so a reader who looks for a transcript finds the reason it is not
+ * there.
+ */
+export const excludedArchivedNote = (excluded: readonly ExportExcludedSession[]): string => {
+  if (excluded.length === 0) return '';
+  const titles = excluded.map((session) => session.title);
+  return titles.length === 1
+    ? exportText('export.excluded.archivedSingle', { title: titles[0] })
+    : exportText('export.excluded.archivedPlural', { titles: titles.join(', ') });
+};

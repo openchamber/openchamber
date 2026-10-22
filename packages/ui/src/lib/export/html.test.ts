@@ -60,7 +60,7 @@ const pageHtml = (): string => {
   return renderExportHtml(result.projection, {
     title: 'Root',
     mode: 'readable',
-    findings: result.timeline.findings,
+    findings: result.timeline.findings, excluded: result.timeline.excluded,
     sessionCount: result.timeline.sessions.size,
   });
 };
@@ -249,7 +249,7 @@ const longPromptPage = (): string => {
   return renderExportHtml(result.projection, {
     title: 'Root',
     mode: 'readable',
-    findings: result.timeline.findings,
+    findings: result.timeline.findings, excluded: result.timeline.excluded,
     sessionCount: result.timeline.sessions.size,
   });
 };
@@ -340,7 +340,7 @@ const longResultPage = (): string => {
   return renderExportHtml(result.projection, {
     title: 'Root',
     mode: 'readable',
-    findings: result.timeline.findings,
+    findings: result.timeline.findings, excluded: result.timeline.excluded,
     sessionCount: result.timeline.sessions.size,
   });
 };
