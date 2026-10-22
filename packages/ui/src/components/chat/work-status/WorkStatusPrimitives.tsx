@@ -73,17 +73,24 @@ export const WorkStatusSection: React.FC<{
   summary?: React.ReactNode;
   children: React.ReactNode;
 }> = ({ title, subject, summary, children }) => {
-  const heading = (
-    <>
-      {title}
-      {subject ? <span className="ms-1.5 font-normal text-muted-foreground">{subject}</span> : null}
-    </>
-  );
+  const subjectClass = 'ms-1.5 font-normal text-muted-foreground';
   return (
     <section className={SECTION_CLASS}>
       <div data-work-status-heading className="mb-0.5 flex items-center gap-2 px-1">
-        <WorkStatusFullTextTooltip content={heading}>
-          <h3 className={cn(HEADING_CLASS, 'min-w-0 flex-1 truncate')}>{heading}</h3>
+        <WorkStatusFullTextTooltip
+          content={(
+            <>
+              {title}
+              {subject ? <span className={subjectClass}>{subject}</span> : null}
+            </>
+          )}
+        >
+          {/* The title never shrinks, so the subject and then the summary are
+              cut first: the heading's narrowest is its title. */}
+          <h3 className={cn(HEADING_CLASS, 'flex flex-1')}>
+            <span className="shrink-0">{title}</span>
+            {subject ? <span className={cn(subjectClass, 'min-w-0 truncate')}>{subject}</span> : null}
+          </h3>
         </WorkStatusFullTextTooltip>
         {summary !== undefined && summary !== null ? (
           <span dir="auto" className={SUMMARY_CLASS}>{summary}</span>
@@ -158,7 +165,10 @@ export const WorkStatusCollapsibleSection: React.FC<{
                 style={iconColor ? { color: iconColor } : undefined}
               />
             ) : null)}
-            <span className={cn(HEADING_CLASS, 'min-w-0 truncate')}>{title}</span>
+            {/* With a summary beside it the title keeps its width, so the
+                summary is cut first ("Usage" read "Us…" while the summary
+                kept its 60%). Alone, it may still be cut. */}
+            <span className={cn(HEADING_CLASS, 'truncate', hasSummary ? 'shrink-0' : 'min-w-0')}>{title}</span>
             <Icon
               name={expanded ? 'arrow-down-s' : 'arrow-right-s'}
               className="size-3.5 shrink-0 text-muted-foreground"

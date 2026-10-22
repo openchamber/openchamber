@@ -221,3 +221,57 @@ test('text the panel cuts off shows in full in a tooltip, and text that fits sho
     expect(tooltipText()).toBe('UsageAI Credits');
   });
 });
+
+const classes = (element: Element | null | undefined) => (element?.getAttribute('class') ?? '').split(/\s+/);
+/** Shrinks below its text and shows an ellipsis. */
+const canBeCut = (element: Element | null | undefined) => classes(element).includes('min-w-0') && classes(element).includes('truncate');
+
+/*
+ * happy-dom does no layout, so these pin the flex rules that decide what is
+ * cut first. A flex item without `min-w-0` or with `shrink-0` cannot shrink
+ * below its text; `min-w-0` with `truncate` can.
+ */
+test('a section title keeps its width and its summary is cut first', async () => {
+  await withDom(async (container, render) => {
+    const { WorkStatusCollapsibleSection, WorkStatusSection } = primitives;
+    await render(
+      <>
+        <WorkStatusSection title="Project" subject="a-project-name-longer-than-the-panel" summary="2 apps">
+          <span>Body</span>
+        </WorkStatusSection>
+        <WorkStatusCollapsibleSection id="probe-usage" title="Usage" icon="timer" summary="Five-hour window 42%" defaultExpanded>
+          <span>Body</span>
+        </WorkStatusCollapsibleSection>
+        <WorkStatusCollapsibleSection id="probe-alone" title="An extension with a long title" defaultExpanded>
+          <span>Body</span>
+        </WorkStatusCollapsibleSection>
+      </>,
+    );
+
+    const usage = byText(container, 'button[aria-expanded] span', 'Usage');
+    const usageSummary = byText(container, '[data-work-status-heading] [dir="auto"]', 'Five-hour window 42%');
+    // Positive control: the elements checked rendered.
+    expect(usage).toBeDefined();
+    expect(usageSummary).toBeDefined();
+    expect(classes(usage)).toContain('shrink-0');
+    expect(classes(usage)).not.toContain('min-w-0');
+    expect(canBeCut(usageSummary)).toBe(true);
+
+    // Without a summary there is nothing to cut first, so the title may be cut.
+    const alone = byText(container, 'button[aria-expanded] span', 'An extension with a long title');
+    expect(canBeCut(alone)).toBe(true);
+    expect(classes(alone)).not.toContain('shrink-0');
+
+    // The project's name is cut before its title, and the heading cannot
+    // shrink below the title, so the summary beside it gives way first.
+    const heading = container.querySelector('h3');
+    const title = byText(container, 'h3 span', 'Project');
+    const subject = byText(container, 'h3 span', 'a-project-name-longer-than-the-panel');
+    expect(heading?.textContent).toBe('Projecta-project-name-longer-than-the-panel');
+    expect(classes(heading)).toContain('flex');
+    expect(classes(heading)).not.toContain('min-w-0');
+    expect(classes(heading)).not.toContain('truncate');
+    expect(classes(title)).toContain('shrink-0');
+    expect(canBeCut(subject)).toBe(true);
+  });
+});

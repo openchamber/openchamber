@@ -38,7 +38,8 @@ row's label at 150%; up to the cap the card cuts no more than at 100%, and at
 panel needs to show; the card, the right slot and the visibility check all
 read it, so they agree at every size.
 
-Above 150% the card cuts more text off. Cut text shows in full
+Above 150% the card cuts more text off. Section titles keep their width: the
+project's name and then a section's summary are cut first. Cut text shows in full
 in a tooltip above it (`WorkStatusFullTextTooltip`): row labels, the project
 action's name, section titles with their subject or summary, the cost
 breakdown and the callout. Whether text is cut is read from the layout when
