@@ -16,6 +16,7 @@ import { IsolatedSpacesSettings } from './IsolatedSpacesSettings';
 import { OpenChamberToolsSettings } from './OpenChamberToolsSettings';
 import { DesktopNetworkSettings } from './DesktopNetworkSettings';
 import { DesktopAppSettings } from './DesktopAppSettings';
+import { MobileAppSettings } from './MobileAppSettings';
 import { ChatSettings } from './ChatSettings';
 import { GeneralConnectionAndPrivacySettings, GeneralWorkspaceSettings } from './GeneralWorkspaceSettings';
 import { KeyboardShortcutsSettings } from './KeyboardShortcutsSettings';
@@ -124,13 +125,15 @@ const GeneralSectionContent: React.FC = () => {
     const isVSCode = isVSCodeRuntime();
     const runtimeEndpointEpoch = useRuntimeEndpointEpoch();
     const isLocalDesktop = isDesktopShell() && isDesktopLocalOriginActive();
+    const isNativeMobile = isCapacitorApp();
     // Passkeys only work against the browser's WebAuthn UI on the web surface —
     // desktop shell, VS Code, and the Capacitor app never show the login screen.
     const showPasskeySettings = isWebRuntime() && !isDesktopShell() && !isVSCode && !isCapacitorApp();
     return (
         <>
             {isLocalDesktop && <DesktopAppSettings />}
-            <GeneralWorkspaceSettings firstSection={!isLocalDesktop} />
+            {isNativeMobile && <MobileAppSettings />}
+            <GeneralWorkspaceSettings firstSection={!isLocalDesktop && !isNativeMobile} />
             {isLocalDesktop && <DesktopNetworkSettings />}
             {showPasskeySettings && <PasskeySettings />}
             <AppLinkSecuritySettings />

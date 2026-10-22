@@ -89,6 +89,7 @@ import { useFontsReady } from './useFontsReady';
 import { useDeepLinkHandlers, useDeepLinkSource } from './deepLinkNavigation';
 import { useEdgeSwipe } from './useEdgeSwipe';
 import { useNativePushRegistration } from './useNativePushRegistration';
+import { useNativeScreenAwake } from './useNativeScreenAwake';
 import { IpadSidebarResizeHandle } from './IpadSidebarResizeHandle';
 import {
   IPAD_LEFT_SIDEBAR_WIDTH,
@@ -974,6 +975,7 @@ function MobileAppContent({ apis }: MobileAppProps) {
   }, [agentsCount, apis.sourceControl, apis.linear, initializeApp, loadAgents, loadProviders, providersCount, refreshSourceControlAuth, refreshLinearAuthStatus]);
 
   useNativeMobileChrome();
+  useNativeScreenAwake(isNativeMobileApp);
   useNativeMobileLifecycle(handleNativeResume);
 
   // Network-change re-probe. The resume hook only fires on background→foreground,

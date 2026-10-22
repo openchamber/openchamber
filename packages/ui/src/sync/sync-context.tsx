@@ -2372,7 +2372,7 @@ export function handleEvent(
     const eventMessageID = syncEventMessageID(payload)
     if (isPartEvent(payload.type) && eventMessageID) {
       const partSessionID = eventSessionID ?? routingIndex.messageSessionById.get(eventMessageID)
-      if (partSessionID) markDirectorySessionPartChanged(store, partSessionID, eventMessageID)
+      if (partSessionID) markDirectorySessionPartChanged(store, partSessionID, eventMessageID, payload.type !== "message.part.delta")
     }
     if (batch) {
       batch.states.set(store, draft as DirectoryStore)

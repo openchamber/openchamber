@@ -7,6 +7,7 @@ import {
   getDirectoryOwnedSessionIds,
   hasActiveSubagent,
   setSessionParentResolver,
+  subscribeGlobalSessionActivity,
   useGlobalSessionStatusStore,
   replaceGlobalSessionStatusById,
 } from "./global-session-status"
@@ -22,6 +23,28 @@ beforeEach(() => {
 
 describe("global session status index", () => {
   const activeSessionIds = (): ReadonlySet<string> => useGlobalSessionStatusStore.getState().activeSessionIds
+
+  test("activity confirmation includes unchanged events and snapshots without publishing membership", () => {
+    applyGlobalSessionStatusEvent("/project", { type: "session.status", properties: { sessionID: "a", status: { type: "busy" } } })
+    const original = useGlobalSessionStatusStore.getState()
+    const confirmations: string[][] = []
+    const unsubscribe = subscribeGlobalSessionActivity((ids) => confirmations.push([...ids]))
+    try {
+      applyGlobalSessionStatusEvent("/project", { type: "session.status", properties: { sessionID: "a", status: { type: "busy" } } })
+      applyGlobalSessionStatusSnapshot("/project", { a: { type: "busy" } })
+      expect(useGlobalSessionStatusStore.getState()).toBe(original)
+      expect(confirmations).toEqual([["a"], ["a"]])
+      applyGlobalSessionStatusEvents("/project", [
+        { type: "session.status", properties: { sessionID: "b", status: { type: "busy" } } },
+        { type: "session.idle", properties: { sessionID: "b" } },
+      ])
+      expect(confirmations).toHaveLength(2)
+    } finally {
+      unsubscribe()
+    }
+    applyGlobalSessionStatusEvent("/project", { type: "session.status", properties: { sessionID: "a", status: { type: "busy" } } })
+    expect(confirmations).toHaveLength(2)
+  })
 
   test("a parent directory snapshot cannot settle a worktree session merely contained in its list", () => {
     const sessions = ["/repo", "/tree"].map((directory) => ({

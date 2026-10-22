@@ -24,11 +24,13 @@ type SessionMessageChange = {
   messagesChanged: boolean
   reset: boolean
   partMessageIDs: readonly string[]
+  workChanged: boolean
 }
 
 type SessionMessageSubscriber = (change: SessionMessageChange) => void
 const messageSubscribersByStore = new WeakMap<StoreApi<DirectoryStore>, Map<string, Set<SessionMessageSubscriber>>>()
 const pendingPartChangesByStore = new WeakMap<StoreApi<DirectoryStore>, Map<string, Set<string>>>()
+const pendingWorkChangesByStore = new WeakMap<StoreApi<DirectoryStore>, Set<string>>()
 
 export function subscribeDirectorySessionMessages(
   store: StoreApi<DirectoryStore>,
@@ -57,6 +59,7 @@ export function markDirectorySessionPartChanged(
   store: StoreApi<DirectoryStore>,
   sessionID: string,
   messageID: string,
+  workChanged = true,
 ): void {
   if (!sessionID || !messageID) return
   let bySession = pendingPartChangesByStore.get(store)
@@ -70,6 +73,14 @@ export function markDirectorySessionPartChanged(
     bySession.set(sessionID, messageIDs)
   }
   messageIDs.add(messageID)
+  if (workChanged) {
+    let sessions = pendingWorkChangesByStore.get(store)
+    if (!sessions) {
+      sessions = new Set()
+      pendingWorkChangesByStore.set(store, sessions)
+    }
+    sessions.add(sessionID)
+  }
 }
 
 export function subscribeDirectoryPermission(
@@ -183,14 +194,16 @@ const notifyChangedSessionMessages = (
 ): void => {
   const subscribers = messageSubscribersByStore.get(store)
   const pendingParts = pendingPartChangesByStore.get(store)
+  const pendingWork = pendingWorkChangesByStore.get(store)
   pendingPartChangesByStore.delete(store)
+  pendingWorkChangesByStore.delete(store)
   if (!subscribers || subscribers.size === 0) return
 
   const notifications = new Map<string, SessionMessageChange>()
   if (current.message !== previous.message) {
     for (const sessionID of subscribers.keys()) {
       if (current.message[sessionID] === previous.message[sessionID]) continue
-      notifications.set(sessionID, { messagesChanged: true, reset: false, partMessageIDs: [] })
+      notifications.set(sessionID, { messagesChanged: true, reset: false, partMessageIDs: [], workChanged: true })
     }
   }
 
@@ -203,6 +216,7 @@ const notifyChangedSessionMessages = (
           messagesChanged: existing?.messagesChanged ?? false,
           reset: existing?.reset ?? false,
           partMessageIDs: [...messageIDs],
+          workChanged: existing?.workChanged === true || pendingWork?.has(sessionID) === true,
         })
       }
     } else {
@@ -212,6 +226,7 @@ const notifyChangedSessionMessages = (
           messagesChanged: existing?.messagesChanged ?? false,
           reset: true,
           partMessageIDs: existing?.partMessageIDs ?? [],
+          workChanged: true,
         })
       }
     }

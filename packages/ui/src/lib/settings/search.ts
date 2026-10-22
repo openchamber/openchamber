@@ -2,6 +2,7 @@ import type { I18nKey } from '@/lib/i18n/store';
 import { getCustomizableShortcutActions } from '@/lib/shortcuts';
 import { isIsolatedSpacesPageVisible } from '@/lib/spaces/release';
 import { useUIStore } from '@/stores/useUIStore';
+import { isCapacitorApp } from '@/lib/platform';
 import type { SettingsPageSlug, SettingsRuntimeContext } from './metadata';
 import { getSettingsPageMeta } from './metadata';
 
@@ -35,6 +36,14 @@ interface SettingsSearchAvailabilityContext extends SettingsRuntimeContext {
 export const shortcutSearchItemId = (actionId: string): string => `shortcuts.action.${actionId}`;
 
 const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
+  {
+    id: 'general.mobile-screen-awake',
+    page: 'general',
+    titleKey: 'settings.mobile.screenAwake.label',
+    descriptionKey: 'settings.mobile.screenAwake.info',
+    keywords: ['screen', 'awake', 'sleep', 'lock', 'timeout', 'battery'],
+    isAvailable: () => isCapacitorApp(),
+  },
   {
     id: 'chat.activity-default',
     page: 'chat',

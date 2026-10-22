@@ -45,6 +45,14 @@ const initialState: GlobalSessionStatusState = {
 export const useGlobalSessionStatusStore = create<GlobalSessionStatusState>(() => initialState);
 useGlobalSessionStatusStore.subscribe(() => countSyncPerformance('globalStatusPublications'));
 
+// A repeated busy event or unchanged snapshot still confirms activity after a
+// connection gap, even when membership subscribers correctly see no change.
+const activityObservers = new Set<(activeIds: Iterable<string>) => void>();
+export const subscribeGlobalSessionActivity = (observer: (activeIds: Iterable<string>) => void): (() => void) => {
+  activityObservers.add(observer);
+  return () => { activityObservers.delete(observer); };
+};
+
 /**
  * Replaces the status map wholesale and derives active membership from it.
  * This is the ONE sanctioned way to swap statusById from outside the event
@@ -293,6 +301,13 @@ export const applyGlobalSessionStatusEvents = (directory: string, payloads: read
   }
   applySessionOrderingMutations(orderingMutations);
   applySessionActivityTimingMutations(timingMutations);
+  if (activityObservers.size > 0) {
+    const confirmed = payloads.flatMap((event) => (
+      event.type === 'session.status' && event.properties.status.type !== 'idle' && finalActiveIds.has(event.properties.sessionID)
+        ? [event.properties.sessionID] : []
+    ));
+    if (confirmed.length > 0) for (const observer of activityObservers) observer(confirmed);
+  }
 };
 
 export const applyGlobalSessionStatusEvent = (directory: string, payload: SyncEvent): void => {
@@ -382,4 +397,5 @@ export const applyGlobalSessionStatusSnapshot = (
       activeSessionIds: nextActiveSessionIds ?? state.activeSessionIds,
     } : state;
   });
+  for (const observer of activityObservers) observer(activeSessionIds);
 };

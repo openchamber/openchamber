@@ -10,6 +10,7 @@ import type { DraftStarterRef } from '@/lib/draftStarters';
 import type { CustomProviderIcon } from '@/lib/customProviderIcons';
 import { DEFAULT_MONO_FONT, DEFAULT_UI_FONT, type MonoFontOption, type UiFontOption } from '@/lib/fontOptions';
 import { getStoredMobileKeyboardMode, type MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
+import { mobileScreenAwakeModeSchema, type MobileScreenAwakeMode } from '@/lib/mobileScreenAwake';
 import type { TerminalShell } from '@/lib/api/types';
 import type { PermissionMode } from './utils/permissionAutoAccept';
 import { directoryMayHaveActiveProjectAction, useTerminalStore } from '@/stores/useTerminalStore';
@@ -1034,6 +1035,8 @@ interface UIStore {
   cornerRadius: number;
   inputBarOffset: number;
   mobileKeyboardMode: MobileKeyboardMode;
+  mobileScreenAwakeMode: MobileScreenAwakeMode;
+  setMobileScreenAwakeMode: (mode: MobileScreenAwakeMode) => void;
 
   favoriteModels: Array<{ providerID: string; modelID: string }>;
   hiddenModels: Array<{ providerID: string; modelID: string }>;
@@ -1565,6 +1568,7 @@ export const useUIStore = create<UIStore>()(
         cornerRadius: 18,
         inputBarOffset: 0,
         mobileKeyboardMode: getStoredMobileKeyboardMode(),
+        mobileScreenAwakeMode: 'off',
         favoriteModels: [],
         hiddenModels: [],
         providerOrder: [],
@@ -2896,6 +2900,11 @@ export const useUIStore = create<UIStore>()(
           set((state) => state.mobileKeyboardMode === mode ? state : { mobileKeyboardMode: mode });
         },
 
+        setMobileScreenAwakeMode: (value) => {
+          const mode = mobileScreenAwakeModeSchema.parse(value);
+          if (get().mobileScreenAwakeMode !== mode) set({ mobileScreenAwakeMode: mode });
+        },
+
         toggleFavoriteModel: (providerID, modelID) => {
           set((state) => {
             const exists = state.favoriteModels.some(
@@ -3412,6 +3421,10 @@ export const useUIStore = create<UIStore>()(
         name: 'ui-store',
         storage: createDeferredSafeJSONStorage(),
         version: 24,
+        merge: (persisted, current) => {
+          const saved = z.object({ mobileScreenAwakeMode: mobileScreenAwakeModeSchema }).passthrough().safeParse(persisted);
+          return saved.success ? { ...current, ...saved.data } : current;
+        },
         migrate: (persistedState, version) => {
           if (!persistedState || typeof persistedState !== 'object') {
             return persistedState;
@@ -3804,6 +3817,7 @@ export const useUIStore = create<UIStore>()(
           desktopWindowControlsPosition: state.desktopWindowControlsPosition,
           desktopWindowControlsStyle: state.desktopWindowControlsStyle,
           inputBarOffset: state.inputBarOffset,
+          mobileScreenAwakeMode: state.mobileScreenAwakeMode,
           mermaidRenderingMode: state.mermaidRenderingMode,
           userMessageRenderingMode: state.userMessageRenderingMode,
           collapsibleUserMessages: state.collapsibleUserMessages,
