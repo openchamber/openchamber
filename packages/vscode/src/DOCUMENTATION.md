@@ -66,6 +66,7 @@ Keep `bridge.ts` as a thin orchestration layer that delegates message handling t
 - `bridge-fs-runtime.ts`
   - Bridge handlers for filesystem-related message routes.
   - Uses shared FS helpers via injected dependencies.
+  - A save request names the format of the file it writes, and the save dialog offers that file type. The format is read apart from the payload, so a name the bridge does not know is reported as an unsupported format instead of turning a payload whose content is fine into an invalid one. A request that names no format (no field, or a blank one) gets the Markdown filter, which is what the command always offered before.
 
 - `bridge-fs-helpers-runtime.ts`
   - Filesystem/path/search helper functions:
