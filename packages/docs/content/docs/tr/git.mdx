@@ -1,9 +1,9 @@
 ---
-title: Git ve GitHub İş Akışları
+title: Git İş Akışları
 description: OpenChamber'dan çıkmadan branch'leri hazırlayın, commit edin ve yönetin.
 ---
 
-# Git ve GitHub İş Akışları
+# Git İş Akışları
 
 OpenChamber'da yerleşik bir git görünümü vardır. Böylece terminale geçmeden değişiklikleri gözden geçirebilir, commit edebilir ve branch'leri yönetebilirsiniz. Sağ kenar çubuğundaki **Git** sekmesinden açın.
 
@@ -28,7 +28,15 @@ Git görünümü günlük git işlerinin geri kalanını da kapsar:
 
 ## Pull request'ler
 
-GitHub'ı bağlayın. Bkz. [GitHub Issues & PRs](/github/). Sonra **PR** sekmesiyle pull request açabilir, güncelleyebilir, hazır diye işaretleyebilir ya da merge edebilirsiniz. Başlık ve açıklamasını da commit mesajlarında olduğu gibi oluşturur.
+Projenin sunucusunda bir hesap bağlıyken **PR** sekmesiyle pull request açabilir, güncelleyebilir, hazır diye işaretleyebilir ya da merge edebilirsiniz. OpenChamber başlığını ve açıklamasını commit mesajlarında olduğu gibi yazabilir. Bu GitHub, Gitea ve GitLab'de çalışır; GitLab'de sekme merge request açar. Gerrit'in kendi formu vardır: **İncelemeye push et**. Bir sunucuyu bağlamak [Git sunucuları](/github/) sayfasında anlatılıyor.
+
+## Gerrit'te incelemeye push etme
+
+Gerrit projesinde pull request formu **İncelemeye push et** olur. Commit'lerinizi `refs/for/<branch>` adresine push eder; bu bir değişiklik (change) oluşturur ya da daha önce push ettiğiniz bir değişikliğin yeni bir yama setini (patchset) yükler. Değişikliğin açıklaması commit mesajıdır, bu yüzden form başlık ve gövde yerine son commit'in konusunu gösterir. Hedef branch'i ve isterseniz bir topic, hashtag'ler, **Devam ediyor** ve **Özel** seçin. Form hedef branch'in kendisinde de çalışır; Gerrit ile genelde böyle çalışılır.
+
+Gerrit commit'leri değişikliklerle, commit-msg hook'unun her mesaja eklediği `Change-Id` satırıyla eşler. Bu satır yalnızca son commit'te eksikse **Change-Id ekle**, sorduktan sonra o commit'i amend eder; siz push edene kadar hiçbir şey push edilmez. Daha eski commit'lerde eksikse push, hook'u kurup her birine bir Change-Id verene kadar bekler.
+
+İlk push'tan sonra yerel commit'leriniz değişikliğe henüz yüklenmemişse panel **Yama seti yükle** seçeneğini sunar. Bir değişiklik zincirindeki değişiklik, rozetinin yanında zincirdeki yerini gösterir, örneğin **3 katmandan 2.**
 
 ## Çakışmaları içeri alma
 
@@ -36,6 +44,6 @@ Bir merge, rebase ya da integrate çakışmaya takılırsa, OpenChamber neyin s�
 
 ## İlgili
 
-- [GitHub Issues & PRs](/github/) — GitHub'ı bağlayın ve işlere issue'lardan başlayın
+- [Git sunucuları](/github/) — bir sunucu bağlayın ve işlere issue'lardan başlayın
 - [Worktree Sessions](/worktrees/) — bir branch'i kendi klasöründe izole edin
 - [Git Identities](/git-identities/) — her repo için doğru kişi olarak commit edin

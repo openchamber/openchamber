@@ -33,7 +33,7 @@ The catalog is in the web app and desktop app. It's hidden in [enterprise mode](
 
 ## GitHub
 
-Expand the **GitHub** card and choose **Connect GitHub** to sign in with a short device code. Once connected, OpenChamber can start sessions from issues and pull requests, attach them to messages, and open or update PRs. Everything GitHub can do is on [GitHub Issues & PRs](/github/).
+Expand the **GitHub** card and choose **Connect GitHub** to sign in with a short device code. Once connected, OpenChamber can start sessions from issues and pull requests, attach them to messages, and open or update PRs. Everything the git hosts can do is on [Git hosts](/github/).
 
 ## GitLab, Gitea and Gerrit
 
@@ -44,6 +44,8 @@ GitLab, Gitea and Gerrit each have their own card next to GitHub. Once connected
 - **Gerrit**: add your instance's address, such as `https://gerrit.example.com`, then your Gerrit username and an HTTP password. Generate the password in Gerrit under **Settings → HTTP Credentials**; the card links there. Your sign-in password won't work, and an account without a username can't connect. It needs Gerrit 3.8 or newer, served from the root of its address. Sites whose review address differs from the Git address, such as googlesource.com with `.gitcookies`, aren't supported.
 
 On Gerrit you review changes. Each upload of a change is a patchset, and the change's preview lets you pick an earlier one to read. You review by voting on the project's labels, such as Code-Review and Verified, and land a change with **Submit** once its submit requirements are met. Gerrit has no issues, so only changes show. To create a change, or upload a new patchset to one, use **Push for review** in the Git panel; see [Git](/git/#push-for-review-on-gerrit).
+
+The project's remote decides which card's account OpenChamber uses, and an account on any of these cards can be a project's [Git identity](/git-identities/). An [extension](/extensions/#an-extension-as-a-git-host) can add another host with a card of its own.
 
 ## Linear
 
@@ -127,5 +129,5 @@ Dev servers show up when they run under OpenChamber: started in the built-in ter
 
 ## Related
 
-- [GitHub Issues & PRs](/github/) — everything GitHub can do in OpenChamber
+- [Git hosts](/github/) — everything GitHub, GitLab, Gitea and Gerrit can do in OpenChamber
 - [Worktree Sessions](/worktrees/) — where issue sessions can start

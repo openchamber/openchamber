@@ -1,9 +1,9 @@
 ---
-title: Przepływy Git i GitHub
+title: Przepływy Git
 description: Dodawaj do indeksu, commituj i zarządzaj gałęziami bez wychodzenia z OpenChamber.
 ---
 
-# Przepływy Git i GitHub
+# Przepływy Git
 
 OpenChamber ma wbudowany widok git, dzięki czemu możesz przeglądać zmiany, commitować i zarządzać gałęziami bez przełączania się na terminal. Otwórz go z zakładki **Git** w prawym pasku bocznym.
 
@@ -28,7 +28,15 @@ Widok git obejmuje też resztę codziennej pracy z git:
 
 ## Pull requesty
 
-Połącz GitHub (zobacz [Issues i PR na GitHub](/pl/github/)), a zakładka **PR** pozwoli Ci otworzyć pull request, zaktualizować go, oznaczyć jako gotowy lub scalić — oraz wygenerować jego tytuł i opis w ten sam sposób co komunikaty commitów.
+Gdy na hoście projektu masz połączone konto, zakładka **PR** pozwala otworzyć pull request, zaktualizować go, oznaczyć jako gotowy lub scalić. OpenChamber może napisać jego tytuł i opis w ten sam sposób co komunikaty commitów. Działa to na GitHub, Gitea i GitLab, gdzie zakładka otwiera merge requesty. Gerrit ma własny formularz, **Wypchnij do recenzji**. Jak połączyć host, opisuje strona [Hosty Git](/pl/github/).
+
+## Wypychanie do recenzji w Gerrit
+
+W projekcie na Gerrit formularz pull requesta zmienia się w **Wypchnij do recenzji**. Wypycha on Twoje commity do `refs/for/<branch>`, co tworzy zmianę (change) albo nowy zestaw poprawek (patchset) zmiany, którą już wypchnąłeś. Opisem zmiany jest komunikat commita, więc zamiast tytułu i treści formularz pokazuje temat ostatniego commita. Wybierz gałąź docelową i, jeśli chcesz, topic, hashtagi, **W toku** i **Prywatna**. Działa to także na samej gałęzi docelowej, bo tak zwykle pracuje się z Gerrit.
+
+Gerrit dopasowuje commity do zmian po linii `Change-Id`, którą jego hook commit-msg dodaje do każdego komunikatu. Jeśli brakuje jej tylko w ostatnim commicie, **Dodaj Change-Id** po zapytaniu poprawia (amend) ten commit; nic nie zostaje wypchnięte, dopóki sam nie wypchniesz. Jeśli brakuje jej w starszych commitach, wypchnięcie czeka, aż zainstalujesz hook i nadasz każdemu z nich Change-Id.
+
+Po pierwszym wypchnięciu panel proponuje **Prześlij zestaw poprawek**, gdy Twoich lokalnych commitów jeszcze nie ma w zmianie. Zmiana w łańcuchu zmian pokazuje obok swojego znacznika swoje miejsce w łańcuchu, na przykład **2 z 3**.
 
 ## Rozwiązywanie konfliktów
 
@@ -36,6 +44,6 @@ Jeśli scalanie, rebase lub integracja napotka konflikt, OpenChamber pokazuje, c
 
 ## Powiązane
 
-- [Issues i PR na GitHub](/pl/github/) — połącz GitHub i rozpocznij pracę od issue
+- [Hosty Git](/pl/github/) — połącz host i rozpocznij pracę od issue
 - [Sesje worktree](/pl/worktrees/) — izoluj gałąź w jej własnym folderze
 - [Tożsamości Git](/pl/git-identities/) — commituj jako właściwa osoba w każdym repozytorium

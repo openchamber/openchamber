@@ -13,11 +13,11 @@ Una sesión de worktree se ejecuta en su propia copia del repositorio, en su pro
 2. En **Start from**, elige una opción:
    - **nueva rama** — nombra la rama
    - **rama existente** — haz checkout de una rama que ya tengas
-   - **PR or issue** — elige uno de GitHub, Linear o una extensión; la rama toma su nombre (un PR hace checkout de su propia rama) y el elemento se adjunta a tu primer mensaje
+   - **PR or issue** — elige uno de GitHub, GitLab, Gitea, Gerrit, Linear o una extensión; la rama toma su nombre (un PR hace checkout de su propia rama, un cambio de Gerrit su último patchset en `change-<number>`) y el elemento se adjunta a tu primer mensaje
 3. Revisa **Based on** (la rama desde la que parte una nueva; por defecto, la rama predeterminada del remoto, como `origin/main`) y **Folder name**; cámbialos solo si lo necesitas.
 4. Créala. Si el proyecto tiene comandos de configuración, se ejecutan justo después.
 
-OpenChamber crea la rama, configura la carpeta y abre ahí una nueva sesión, lista para tu primer mensaje. También puedes arrancar una directamente desde una [tarea](/es/notes-todos-plans/) o desde una [issue o PR de GitHub](/es/github/).
+OpenChamber crea la rama, configura la carpeta y abre ahí una nueva sesión, lista para tu primer mensaje. También puedes arrancar una directamente desde una [tarea](/es/notes-todos-plans/) o desde una [issue o pull request](/es/github/).
 
 Para saltarte las preguntas, elige **Worktree rápido** en el mismo menú de ramas: OpenChamber le pone nombre a la rama y apunta la nueva sesión a ella.
 
@@ -40,4 +40,4 @@ Un worktree puede requerir atención si su carpeta desapareció, su rama está e
 ## Relacionado
 
 - [Multi-run](/es/multi-run/) — lanza muchas sesiones de worktree a la vez
-- [Flujos de trabajo de Git y GitHub](/es/git/) — haz commit e integra desde dentro de OpenChamber
+- [Flujos de trabajo de Git](/es/git/) — haz commit e integra desde dentro de OpenChamber

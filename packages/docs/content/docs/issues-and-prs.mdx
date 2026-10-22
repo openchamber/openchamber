@@ -19,7 +19,7 @@ The board reopens on the project, tab and team you left it on.
 
 ## Find items
 
-Everything sits in one toolbar row. On the left is the project picker, with project icons and a search. Next to it you switch between **Issues**, **Pull requests** and **Linear**. Issues and pull requests come from the project's own host: GitHub, GitLab, Gitea or Gerrit. A project on none of them shows only **Linear** if you've connected it, and otherwise says there's nothing to list. A remote on a host alias from `~/.ssh/config`, such as `github.com-work`, counts as none of them.
+Everything sits in one toolbar row. On the left is the project picker, with project icons and a search. Next to it you switch between **Issues**, **Pull requests** and **Linear**. Issues and pull requests come from the project's own host: GitHub, GitLab, Gitea, Gerrit, or a host an [extension](/extensions/#an-extension-as-a-git-host) adds. The **Linear** tab appears only once Linear is connected. A project on none of these hosts shows only that tab, or says there's nothing to list. A remote on a host alias from `~/.ssh/config`, such as `github.com-work`, counts as none of them.
 
 If a project's folder isn't a Git repository itself but has repositories inside it, a second picker next to the project picker chooses what the board lists. **All repositories** is first and is the default: the board lists the issues and pull requests of every GitHub repository in the folder together, and each row names its repository. Search works across all of them, including a pasted link or a number. A note above the list says how many repositories aren't included, for example one on GitLab, Gitea or Gerrit or one no connected account can read, and its menu shows which and why. Pick a single repository to list only that one. The board remembers the choice for each project, and it's separate from the repository the Git view has selected.
 
@@ -77,6 +77,6 @@ An open issue or pull request also has **Close issue** or **Close pull request**
 
 ## Related
 
-- [GitHub Issues & PRs](/github/): connect GitHub and attach issues to messages
+- [Git hosts](/github/): connect GitHub, GitLab, Gitea or Gerrit and attach items to messages
 - [Worktree Sessions](/worktrees/): where worktree sessions start
 - [Integrations](/integrations/): connect Linear and map teams to projects

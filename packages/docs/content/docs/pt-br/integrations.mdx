@@ -33,7 +33,19 @@ O catálogo está no app web e no app desktop. Ele fica oculto no [modo empresar
 
 ## GitHub
 
-Expanda o cartão **GitHub** e escolha **Connect GitHub** para entrar com um código curto de dispositivo. Conectado, o OpenChamber pode iniciar sessões a partir de issues e pull requests, anexá-los a mensagens e abrir ou atualizar PRs. Tudo o que o GitHub pode fazer está em [Issues e PRs do GitHub](/pt-br/github/).
+Expanda o cartão **GitHub** e escolha **Connect GitHub** para entrar com um código curto de dispositivo. Conectado, o OpenChamber pode iniciar sessões a partir de issues e pull requests, anexá-los a mensagens e abrir ou atualizar PRs. Tudo o que os hosts Git podem fazer está em [Hosts Git](/pt-br/github/).
+
+## GitLab, Gitea e Gerrit
+
+GitLab, Gitea e Gerrit têm cada um seu próprio cartão ao lado do GitHub. Depois de conectados, as issues e pull requests deles (merge requests no GitLab, alterações no Gerrit) aparecem no quadro [Issues e PRs](/pt-br/issues-and-prs/) e no menu **+** do chat, como os do GitHub.
+
+- **GitLab**: no gitlab.com, entre com um código curto de dispositivo, um personal access token ou o login do `glab` no servidor. Para um GitLab self-managed, adicione o endereço dele e cole um personal access token com o escopo `api`. O login por código de dispositivo só funciona ali quando o servidor define `OPENCHAMBER_GITLAB_CLIENT_ID` com um aplicativo registrado naquela instância.
+- **Gitea**: adicione o endereço da sua instância, como `https://gitea.example.com`, e cole um personal access token com os escopos `write:repository`, `write:issue` e `read:user`. O cartão tem um link para a página da sua instância que cria um. O Gitea não tem login por código de dispositivo nem por CLI. Ele precisa do Gitea 1.21 ou mais novo, servido na raiz do próprio endereço. O Forgejo usa a mesma API e deve funcionar, mas não foi testado.
+- **Gerrit**: adicione o endereço da sua instância, como `https://gerrit.example.com`, e depois seu nome de usuário do Gerrit e uma senha HTTP. Gere a senha no Gerrit em **Settings → HTTP Credentials**; o cartão tem um link para lá. Sua senha de login não funciona, e uma conta sem nome de usuário não consegue conectar. Ele precisa do Gerrit 3.8 ou mais novo, servido na raiz do próprio endereço. Sites cujo endereço de revisão é diferente do endereço Git, como o googlesource.com com `.gitcookies`, não são suportados.
+
+No Gerrit você revisa alterações. Cada envio de uma alteração é um patchset, e a prévia da alteração permite escolher um anterior para ler. Você revisa votando nos labels do projeto, como Code-Review e Verified, e integra uma alteração com **Submeter** quando os requisitos de submissão dela são atendidos. O Gerrit não tem issues, então só aparecem alterações. Para criar uma alteração, ou enviar um novo patchset para ela, use **Enviar para revisão** no painel Git; veja [Git](/pt-br/git/#enviar-para-revisão-no-gerrit).
+
+O remoto do projeto decide de qual cartão vem a conta que o OpenChamber usa, e uma conta em qualquer um desses cartões pode ser a [identidade Git](/pt-br/git-identities/) de um projeto. Uma [extensão](/pt-br/extensions/#uma-extensão-como-host-git) pode adicionar outro host com um cartão próprio.
 
 ## Linear
 
@@ -117,5 +129,5 @@ Os servidores de desenvolvimento aparecem quando rodam sob o OpenChamber: inicia
 
 ## Relacionado
 
-- [Issues e PRs do GitHub](/pt-br/github/) — tudo o que o GitHub pode fazer no OpenChamber
+- [Hosts Git](/pt-br/github/) — tudo o que GitHub, GitLab, Gitea e Gerrit podem fazer no OpenChamber
 - [Sessões em worktree](/pt-br/worktrees/) — onde as sessões a partir de issues podem começar

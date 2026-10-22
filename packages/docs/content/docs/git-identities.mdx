@@ -1,30 +1,34 @@
 ---
 title: Git Identities
-description: Commit as the right name and email for each repository.
+description: Commit and push as the right person for each repository.
 ---
 
 # Git Identities
 
-A git identity is the name and email your commits are signed with. If you work across personal and work repos, you can save identities and apply the right one per repository, instead of relying on a single global setting. Manage them at **Settings → Git**.
+A git identity is the name and email your commits carry, and the way a repository signs in to its remote. If you work across personal and work repos, you can save identities and apply the right one per repository. Manage them at **Settings → Git**.
 
 ## Add an identity
 
 1. Open **Settings → Git** and choose **New**.
-2. Enter the **name** and **email** to commit with.
-3. Pick how it authenticates with the remote:
-   - **SSH** — point it at an SSH key
-   - **token** — use a saved credential for a host
+2. Enter the **User name** and **Email address** to commit with.
+3. Pick an **Auth method**, how it pushes and pulls:
+   - **This machine**: whatever Git on this machine already uses, such as SSH keys, a credential manager or the `gh` CLI
+   - **Account**: the **Source control account** you pick, any account connected on a host card in [Integrations](/integrations/), such as GitHub, GitLab, Gitea or Gerrit; pushes go over HTTPS with that account's token
+   - **SSH**: a key OpenChamber keeps for this identity
+   - **Anonymous**: reads public repositories over HTTPS without signing in, and can't push
 4. Optionally give it a color and icon so it's easy to spot.
 
 Your system's global identity is shown too, as read-only.
 
+On Gerrit, an account identity signs in to Git with your Gerrit username and the HTTP password you connected. A GitHub Enterprise account serves issues and pull requests, but cloning and pushing there go through **This machine** or **SSH**.
+
 ## Apply an identity to a repo
 
-Applying an identity writes it to that repository's **local** git config — it only affects that repo, not your global setting. SSH identities also set the SSH command to use your key; token identities set up credential storage for the host.
+Choose the identity button at the top of the [Git panel](/git/) and pick one. The add and clone screens offer the same choice. An identity that can't reach the repository stays in the list, turned off, with the reason: an account on another host, an account or **Anonymous** on an SSH remote, or an SSH key on an HTTPS remote.
 
-You can import identities OpenChamber discovers from your existing git credentials and save them as token identities.
+Applying an identity writes it to that repository's **local** git config, so it affects only that repo and your global setting stays as it is. Git in the terminal and the agent's shell use it too. **System identity** removes what OpenChamber wrote, so your own Git configuration answers again.
 
 ## Related
 
-- [Git & GitHub Workflows](/git/) — commit using the identity you set
-- [GitHub Issues & PRs](/github/) — connect a GitHub account for PRs
+- [Git Workflows](/git/): commit using the identity you set
+- [Git hosts](/github/): connect an account on GitHub, GitLab, Gitea or Gerrit

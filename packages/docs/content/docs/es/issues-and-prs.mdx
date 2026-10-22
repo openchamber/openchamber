@@ -5,7 +5,7 @@ description: Revisa las issues y pull requests de un proyecto, o tus issues de L
 
 # Issues y PRs
 
-El tablero **Issues and PRs** es una página completa que lista las issues y pull requests de GitHub o GitLab de un proyecto (merge requests en GitLab), o tus issues de Linear. Elige un elemento y su vista previa se abre junto a la lista. Mirar otro proyecto aquí no cambia el proyecto en el que está el resto de la app.
+El tablero **Issues and PRs** es una página completa que lista las issues y pull requests de GitHub, GitLab, Gitea o Gerrit de un proyecto (merge requests en GitLab, cambios en Gerrit, que no tiene issues), o tus issues de Linear. Elige un elemento y su vista previa se abre junto a la lista. Mirar otro proyecto aquí no cambia el proyecto en el que está el resto de la app.
 
 ## Abre el tablero
 
@@ -19,13 +19,13 @@ El tablero se vuelve a abrir en el proyecto, la pestaña y el equipo en que lo d
 
 ## Encuentra elementos
 
-Todo está en una sola fila de la barra de herramientas. A la izquierda está el selector de proyecto, con iconos de proyecto y búsqueda. Al lado cambias entre **Issues**, **Pull requests** y **Linear**. Las issues y los pull requests vienen del host propio del proyecto, GitHub o GitLab. Un proyecto sin ese remoto muestra solo **Linear**.
+Todo está en una sola fila de la barra de herramientas. A la izquierda está el selector de proyecto, con iconos de proyecto y búsqueda. Al lado cambias entre **Issues**, **Pull requests** y **Linear**. Las issues y los pull requests vienen del host propio del proyecto: GitHub, GitLab, Gitea, Gerrit, o un host que añade una [extensión](/es/extensions/#una-extensión-como-host-git). La pestaña **Linear** solo aparece cuando Linear está conectado. Un proyecto que no está en ninguno de estos hosts muestra solo esa pestaña, o dice que no hay nada que listar. Un remoto en un alias de host de `~/.ssh/config`, como `github.com-work`, no cuenta como ninguno de ellos.
 
 En **Linear**, el selector de proyecto pasa a ser un selector de equipo: elige **All teams** o un equipo. Si conectaste más de un espacio de trabajo de Linear, cámbialo desde el mismo menú. Cómo conectar Linear está en [Integraciones](/es/integrations/).
 
 La búsqueda acepta un título, un número o un enlace pegado. El menú de filtros sigue abierto mientras eliges, así que puedes combinar filtros.
 
-Para GitHub y GitLab:
+Para GitHub, GitLab, Gitea y Gerrit:
 
 - Estado: **Open**, **Closed**, **All**, y **Merged** para pull requests
 - Personas: **Anyone**, **Assigned to me**, **Created by me**, y **Review requested** para pull requests
@@ -44,9 +44,11 @@ La fila **Labels** tiene un botón de lápiz que abre una lista con buscador de 
 
 ## Comenta y revisa
 
-Debajo de la actividad de una issue o un pull request hay un cuadro de comentario. **Comment** publica tu texto en GitHub o GitLab, igual que <kbd>⌘</kbd>+<kbd>Enter</kbd> (<kbd>Ctrl</kbd>+<kbd>Enter</kbd> en Windows y Linux). El texto se queda en el cuadro hasta que se publica, así que un envío fallido no pierde nada. Al pasar a otro elemento, el cuadro se vacía. Las issues de Linear no lo tienen.
+Debajo de la actividad de una issue o un pull request hay un cuadro de comentario. **Comment** publica tu texto en el host del repositorio, igual que <kbd>⌘</kbd>+<kbd>Enter</kbd> (<kbd>Ctrl</kbd>+<kbd>Enter</kbd> en Windows y Linux). El texto se queda en el cuadro hasta que se publica, así que un envío fallido no pierde nada. Al pasar a otro elemento, el cuadro se vacía. Las issues de Linear no lo tienen.
 
 Un pull request abierto (merge request en GitLab) también tiene **Approve** y **Request changes**, y el texto del cuadro va con la revisión. **Request changes** necesita un texto que diga qué cambiar. La revisión es para los commits que muestra la vista previa. Si alguien hizo push desde entonces, se rechaza y la vista previa se actualiza para que vuelvas a mirar. En GitLab, **Request changes** funciona si eres revisor del merge request, y el texto de la revisión se publica como un comentario aparte. Si solo falla ese comentario, la revisión cuenta igual y tu texto se queda en el cuadro.
+
+Un cambio de Gerrit tiene una fila para cada etiqueta del proyecto, como Code-Review y Verified, con las puntuaciones que puedes dar. Elígelas y pulsa **Votar**. Tu texto va con los votos como mensaje. Los votos van al último patchset, así que no se ofrecen mientras lees uno anterior.
 
 ## Empieza a trabajar
 
@@ -65,10 +67,12 @@ Junto al tamaño hay dos botones. **Changes** abre el diff del pull request en e
 
 Al pie, **Merge** pregunta antes de fusionar y usa tu método de merge habitual. Un borrador también tiene **Ready for review**.
 
+En Gerrit, la vista previa también muestra el topic del cambio y si es privado o está en curso. Cuando un cambio tiene más de un patchset, un selector junto a **Changes** elige de cuál salen los archivos y el diff; empieza en el último. **Merge** es **Enviar**, y sigue desactivado hasta que el cambio cumple sus requisitos de envío, con los que faltan nombrados al lado. **Close** y **Reopen** son **Abandonar cambio** y **Restaurar cambio**.
+
 Una issue o un pull request abiertos también tienen al pie **Close issue** o **Close pull request** (**Close merge request** en GitLab), y uno cerrado tiene **Reopen issue** o **Reopen pull request** (**Reopen merge request**). No piden confirmación, porque se puede deshacer. Un pull request fusionado no se puede cerrar ni reabrir. En GitHub, una issue se cierra como completada.
 
 ## Relacionado
 
-- [Issues y PRs de GitHub](/es/github/): conecta GitHub y adjunta issues a los mensajes
+- [Hosts Git](/es/github/): conecta GitHub, GitLab, Gitea o Gerrit y adjunta elementos a los mensajes
 - [Sesiones de worktree](/es/worktrees/): dónde empiezan las sesiones de worktree
 - [Integraciones](/es/integrations/): conecta Linear y asigna equipos a proyectos

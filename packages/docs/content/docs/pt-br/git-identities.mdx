@@ -1,30 +1,34 @@
 ---
 title: Identidades Git
-description: Faça commit com o nome e e-mail certos para cada repositório.
+description: Faça commit e push como a pessoa certa em cada repositório.
 ---
 
 # Identidades Git
 
-Uma identidade git é o nome e o e-mail com que seus commits são assinados. Se você trabalha em repositórios pessoais e de trabalho, pode salvar identidades e aplicar a certa por repositório, em vez de depender de uma única configuração global. Gerencie-as em **Settings → Git**.
+Uma identidade git é o nome e o e-mail que seus commits levam, e a forma como um repositório entra no seu remoto. Se você trabalha em repositórios pessoais e de trabalho, pode salvar identidades e aplicar a certa por repositório. Gerencie-as em **Settings → Git**.
 
 ## Adicionar uma identidade
 
 1. Abra **Settings → Git** e escolha **New**.
-2. Insira o **nome** e o **e-mail** com que fazer commit.
-3. Escolha como ela se autentica com o remoto:
-   - **SSH** — aponte-a para uma chave SSH
-   - **token** — use uma credencial salva para um host
+2. Preencha **Nome de usuário** e **Endereço de e-mail** com que fazer commit.
+3. Em **Autenticação**, escolha como ela faz push e pull:
+   - **Esta máquina**: o que o Git desta máquina já usa, como chaves SSH, um gerenciador de credenciais ou a CLI `gh`
+   - **Conta**: a **Conta de controle de código** que você escolher, qualquer conta conectada num cartão de host em [Integrações](/pt-br/integrations/), como GitHub, GitLab, Gitea ou Gerrit; o push vai por HTTPS com o token dessa conta
+   - **SSH**: uma chave que o OpenChamber guarda para esta identidade
+   - **Anônimo**: lê repositórios públicos por HTTPS sem entrar, e não consegue fazer push
 4. Opcionalmente, dê a ela uma cor e um ícone para ser fácil de identificar.
 
 A identidade global do seu sistema também é exibida, somente leitura.
 
+No Gerrit, uma identidade de conta entra no Git com seu nome de usuário do Gerrit e a senha HTTP que você conectou. Uma conta do GitHub Enterprise atende issues e pull requests, mas clonar e fazer push ali passam por **Esta máquina** ou **SSH**.
+
 ## Aplicar uma identidade a um repositório
 
-Aplicar uma identidade a escreve na configuração git **local** daquele repositório — afeta apenas aquele repositório, não a sua configuração global. As identidades SSH também definem o comando SSH para usar sua chave; as identidades de token configuram o armazenamento de credenciais para o host.
+Escolha o botão de identidade no topo do [painel Git](/pt-br/git/) e selecione uma. As telas de adicionar e clonar oferecem a mesma escolha. Uma identidade que não consegue alcançar o repositório continua na lista, desativada, com o motivo: uma conta em outro host, uma conta ou **Anônimo** num remoto SSH, ou uma chave SSH num remoto HTTPS.
 
-Você pode importar identidades que o OpenChamber descobre nas suas credenciais git existentes e salvá-las como identidades de token.
+Aplicar uma identidade a escreve na configuração git **local** daquele repositório, então afeta só aquele repositório e sua configuração global fica como está. O Git no terminal e o shell do agente também a usam. **Identidade do sistema** remove o que o OpenChamber escreveu, e sua própria configuração do Git volta a valer.
 
 ## Relacionado
 
-- [Fluxos de Git e GitHub](/pt-br/git/) — faça commit usando a identidade que você definiu
-- [Issues e PRs do GitHub](/pt-br/github/) — conecte uma conta do GitHub para PRs
+- [Fluxos de Git](/pt-br/git/): faça commit usando a identidade que você definiu
+- [Hosts Git](/pt-br/github/): conecte uma conta no GitHub, GitLab, Gitea ou Gerrit

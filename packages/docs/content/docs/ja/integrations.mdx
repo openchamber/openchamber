@@ -33,7 +33,19 @@ description: OpenChamber と連携するサービスやサブスクリプショ�
 
 ## GitHub
 
-**GitHub** カードを展開し、**Connect GitHub** を選んで短いデバイスコードでサインインします。接続後は、Issue やプルリクエストからセッションを開始し、メッセージに添付し、PR を作成・更新できます。GitHub でできることは [GitHub Issues と PR](/ja/github/) にまとめています。
+**GitHub** カードを展開し、**Connect GitHub** を選んで短いデバイスコードでサインインします。接続後は、Issue やプルリクエストからセッションを開始し、メッセージに添付し、PR を作成・更新できます。Git ホストでできることは [Git ホスト](/ja/github/) にまとめています。
+
+## GitLab、Gitea、Gerrit
+
+GitLab、Gitea、Gerrit には、GitHub の隣にそれぞれ専用のカードがあります。接続すると、その Issue とプルリクエスト（GitLab ではマージリクエスト、Gerrit では変更）が、GitHub と同じように [Issues と PR](/ja/issues-and-prs/) ボードとチャットの **+** メニューに表示されます。
+
+- **GitLab**: gitlab.com では、短いデバイスコード、Personal Access Token、またはサーバー上の `glab` のログインでサインインします。セルフマネージドの GitLab では、そのアドレスを追加し、`api` スコープを持つ Personal Access Token を貼り付けます。そこでデバイスコードによるサインインが使えるのは、サーバーが `OPENCHAMBER_GITLAB_CLIENT_ID` にそのインスタンスで登録したアプリケーションを設定している場合だけです。
+- **Gitea**: `https://gitea.example.com` のようなインスタンスのアドレスを追加し、`write:repository`、`write:issue`、`read:user` スコープを持つ Personal Access Token を貼り付けます。カードには、インスタンス上でトークンを作成するページへのリンクがあります。Gitea にはデバイスコードや CLI によるサインインはありません。Gitea 1.21 以降が必要で、アドレスのルートで提供されている必要があります。Forgejo は同じ API を使うので動くはずですが、テストはしていません。
+- **Gerrit**: `https://gerrit.example.com` のようなインスタンスのアドレスを追加し、Gerrit のユーザー名と HTTP パスワードを入力します。パスワードは Gerrit の **Settings → HTTP Credentials** で生成します。カードにそこへのリンクがあります。サインイン用のパスワードは使えず、ユーザー名のないアカウントは接続できません。Gerrit 3.8 以降が必要で、アドレスのルートで提供されている必要があります。googlesource.com と `.gitcookies` のように、レビュー用のアドレスと Git のアドレスが異なるサイトには対応していません。
+
+Gerrit では変更をレビューします。変更をアップロードするたびにパッチセットができ、変更のプレビューでは以前のパッチセットを選んで読めます。レビューは Code-Review や Verified といったプロジェクトのラベルへの投票で行い、サブミット要件を満たした変更は **サブミット** で取り込みます。Gerrit には Issue がないので、表示されるのは変更だけです。変更を作成したり、変更に新しいパッチセットをアップロードしたりするには、Git パネルの **レビューへプッシュ** を使います。[Git](/ja/git/#gerrit-でレビューへプッシュする) を参照してください。
+
+OpenChamber がどのカードのアカウントを使うかは、プロジェクトのリモートで決まります。これらのカードのアカウントはどれも、プロジェクトの [Git ID](/ja/git-identities/) にできます。[拡張機能](/ja/extensions/#git-ホストとしての拡張機能) は、専用のカードを持つ別のホストを追加できます。
 
 ## Linear
 
@@ -117,5 +129,5 @@ Resource Monitor は、マシン全体の CPU とメモリの使用量と、そ�
 
 ## 関連情報
 
-- [GitHub Issues と PR](/ja/github/) — OpenChamber で GitHub にできること
+- [Git ホスト](/ja/github/) — OpenChamber で GitHub、GitLab、Gitea、Gerrit にできること
 - [ワークツリーセッション](/ja/worktrees/) — Issue からのセッションを開始できる場所

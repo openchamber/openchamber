@@ -13,11 +13,11 @@ Une session worktree s’exécute dans sa propre copie extraite de votre dépôt
 2. Sous **Start from**, choisissez une option :
    - **new branch** — nommez la branche
    - **existing branch** — récupérez une branche que vous avez déjà
-   - **PR or issue** — choisissez-en un depuis GitHub, Linear ou une extension ; la branche prend son nom (une PR récupère sa propre branche) et l'élément est joint à votre premier message
+   - **PR or issue** — choisissez-en un depuis GitHub, GitLab, Gitea, Gerrit, Linear ou une extension ; la branche prend son nom (une PR récupère sa propre branche, un changement Gerrit son dernier patchset sur `change-<number>`) et l'élément est joint à votre premier message
 3. Vérifiez **Based on** (la branche de départ d'une nouvelle branche, par défaut la branche par défaut du dépôt distant, par exemple `origin/main`) et **Folder name** ; ne les modifiez que si nécessaire.
 4. Créez-le. Si le projet a des commandes de configuration, elles s'exécutent juste après.
 
-OpenChamber crée la branche, prépare le dossier et y ouvre une nouvelle session, prête pour votre premier message. Vous pouvez aussi en lancer une directement depuis une [todo](/notes-todos-plans/) ou une [issue ou PR GitHub](/github/).
+OpenChamber crée la branche, prépare le dossier et y ouvre une nouvelle session, prête pour votre premier message. Vous pouvez aussi en lancer une directement depuis une [todo](/notes-todos-plans/) ou une [issue ou pull request](/github/).
 
 Pour éviter les questions, choisissez **Worktree rapide** dans le même menu : OpenChamber nomme la branche pour vous et y place la nouvelle session.
 
@@ -40,4 +40,4 @@ Un worktree peut demander votre attention si son dossier a disparu, si sa branch
 ## Pages liées
 
 - [Multi-run](/multi-run/) — lancer plusieurs sessions worktree à la fois
-- [Workflows Git et GitHub](/git/) — commiter et intégrer depuis OpenChamber
+- [Workflows Git](/git/) — commiter et intégrer depuis OpenChamber

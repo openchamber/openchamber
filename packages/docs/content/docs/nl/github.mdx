@@ -1,38 +1,59 @@
 ---
-title: GitHub-issues en PR's
-description: Verbind GitHub en start sessies vanuit issues en pull requests.
+title: "Git-hosts: issues en pull requests"
+description: Verbind GitHub, GitLab, Gitea of Gerrit en werk vanuit OpenChamber met issues en pull requests.
 ---
 
-# GitHub-issues en PR's
+# Git-hosts: issues en pull requests
 
-Verbind uw GitHub-account om issues en pull requests op te halen, er direct een sessie vanuit te starten en PR's te openen of bij te werken.
+Verbind een account op de host waar uw project staat. OpenChamber kan dan de issues en pull requests ervan tonen, er een sessie vanuit starten en pull requests voor u openen, reviewen en mergen. Er zijn vier hosts ingebouwd: GitHub, inclusief GitHub Enterprise; GitLab, inclusief zelfbeheerde GitLab; Gitea; en Gerrit. Een [extensie](/nl/extensions/#een-extensie-als-git-host) kan er nog een toevoegen.
 
-## GitHub verbinden
+De remote van het project bepaalt met welke host OpenChamber praat. Een project waarvan `origin` op gitlab.com staat, gebruikt uw GitLab-account voor het bord, het pull-request-label bij de branches en de Git-weergave. Een remote op een hostalias uit `~/.ssh/config`, zoals `github.com-work`, wordt aan geen enkele host gekoppeld.
 
-1. Open **Instellingen → Integraties** en klap de kaart **GitHub** open.
-2. Kies **GitHub verbinden**. OpenChamber toont een link en een korte code.
-3. Open de link, voer de code in en geef toestemming.
+De woorden volgen de host. GitLab spreekt van merge requests, Gerrit van wijzigingen.
 
-Na het verbinden verschijnt uw account op de kaart. U kunt meerdere accounts verbinden, ertussen wisselen en op elk moment de verbinding verbreken. Als de `gh` CLI op dezelfde computer is aangemeld, kan OpenChamber die als terugval gebruiken.
+## Een host verbinden
 
-## Beginnen vanuit een issue of PR
+1. Open **Instellingen → Integraties**. Elke host heeft een eigen kaart.
+2. Klap de kaart van de host van uw project open en meld u aan:
+   - **GitHub**: kies **GitHub verbinden**, open de getoonde link, voer de korte code in en geef toestemming. Kies voor GitHub Enterprise **Instantie toevoegen** onder **Andere instanties**, vul het adres van uw server in en plak een persoonlijk toegangstoken.
+   - **GitLab**: meld u op gitlab.com aan met een korte code, een persoonlijk toegangstoken of de `glab`-aanmelding. Voeg voor een zelfbeheerde GitLab het adres toe en plak een persoonlijk toegangstoken.
+   - **Gitea**: voeg het adres van uw server toe en plak een persoonlijk toegangstoken.
+   - **Gerrit**: voeg het adres van uw server toe, en daarna uw Gerrit-gebruikersnaam en een HTTP-wachtwoord.
 
-Wanneer GitHub verbonden is, kunt u een nieuwe [worktree-sessie](/nl/worktrees/) starten vanuit een issue of een pull request:
+Na het verbinden verschijnt uw account op de kaart. U kunt meerdere accounts op een host verbinden, ertussen wisselen en op elk moment de verbinding verbreken. Als de `gh` CLI op dezelfde computer is aangemeld, kan OpenChamber die ook voor GitHub gebruiken. Welke scopes elk token nodig heeft en welke versie elke host nodig heeft, staat bij [Integraties](/nl/integrations/#gitlab-gitea-en-gerrit).
+
+Een verbonden account kan ook de [Git-identiteit](/nl/git-identities/) van het project zijn. Commits krijgen dan de naam van dat account en pushes via HTTPS gebruiken het token ervan.
+
+## Beginnen vanuit een issue of pull request
+
+Wanneer u een [worktree-sessie](/nl/worktrees/) maakt, kunt u die starten vanuit een issue of een pull request van de host van het project:
 
 - kies een **issue** om de branch ernaar te laten noemen
-- kies een **pull request** om de PR-branch uit te checken; voeg desgewenst de diff toe, zodat de agent de volledige wijziging heeft
+- kies een **pull request** om de branch ervan uit te checken; voeg desgewenst de diff toe, zodat de agent de hele wijziging heeft
+- kies een **Gerrit-wijziging** om de nieuwste patchset uit te checken op een branch met de naam `change-<number>`
 
-De nieuwe sessie opent met het issue of de PR al toegevoegd aan het berichtveld. Er wordt niets voor u verstuurd: kies het model en de agent, zeg wat er moet gebeuren en verstuur.
+De nieuwe sessie opent met het item al toegevoegd aan het berichtveld. Er wordt niets voor u verstuurd: kies het model en de agent, zeg wat er moet gebeuren en verstuur.
+
+Het bord [Issues en PR's](/nl/issues-and-prs/) toont dezelfde items, met filters, een voorvertoning, reacties en reviews. Ook daar kunt u sessies starten.
 
 ## Pull requests openen en beheren
 
-In het tabblad **PR** van de [Git-weergave](/nl/git/) kunt u een pull request aanmaken, bijwerken, een concept gereed voor review melden of mergen. OpenChamber kan de titel en beschrijving uit uw wijzigingen genereren.
+In het tabblad **PR** van de [Git-weergave](/nl/git/) kunt u een pull request aanmaken, bijwerken, een concept gereed voor review melden of mergen. OpenChamber kan de titel en beschrijving uit uw wijzigingen schrijven.
 
-## Een issue of PR aan een bericht koppelen
+- **GitLab**: hetzelfde tabblad opent merge requests. Bij mergen kunt u kiezen voor mergen of squashen.
+- **Gitea**: hetzelfde als op GitHub.
+- **Gerrit**: u maakt een wijziging door ter review te pushen, en elke volgende push uploadt een nieuwe patchset. Zie [Ter review pushen op Gerrit](/nl/git/#ter-review-pushen-op-gerrit). Mergen heet hier **Indienen**, en dat wacht tot de wijziging aan haar indieningsvereisten voldoet. Reviews zijn stemmen op de labels van het project, zoals Code-Review en Verified.
 
-Open in het chatinvoerveld het menu **+** en kies **GitHub**. Kies een of meer issues of pull requests: elk gaat als context mee met uw volgende bericht (een PR kan de diff meenemen). Het werkstatuspaneel van de sessie bewaart een link ernaartoe. Toevoegen geeft alleen context; in uw bericht zegt u wat ermee moet gebeuren.
+## Een issue of pull request aan een bericht koppelen
+
+Open in het chatinvoerveld het menu **+** en kies de koppeloptie voor uw host, zoals **GitHub-issue of -PR koppelen**, **GitLab-issue of MR koppelen** of **Gerrit-wijziging koppelen**. Kies een of meer items. Elk item gaat als context mee met uw volgende bericht, een pull request kan de diff meenemen, en het werkstatuspaneel van de sessie bewaart een link ernaartoe. Toevoegen geeft alleen context; in uw bericht zegt u wat ermee moet gebeuren.
+
+Gerrit heeft geen issues, dus daar verschijnen alleen wijzigingen.
 
 ## Zie ook
 
-- [Werken met Git en GitHub](/nl/git/) om commits te maken en branches te beheren
-- [Worktree-sessies](/nl/worktrees/) waarin sessies vanuit issues en PR's beginnen
+- [Issues en PR's](/nl/issues-and-prs/): items bekijken, filteren, erop reageren en ze reviewen
+- [Git-workflows](/nl/git/): commits maken, branches beheren en ter review pushen
+- [Worktree-sessies](/nl/worktrees/): waar sessies vanuit issues en pull requests beginnen
+- [Git-identiteiten](/nl/git-identities/): committen en pushen als een verbonden account
+- [Integraties](/nl/integrations/): elke hostkaart in detail

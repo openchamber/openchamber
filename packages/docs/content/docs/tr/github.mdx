@@ -1,38 +1,59 @@
 ---
-title: GitHub Issues & PRs
-description: GitHub'ı bağlayın ve issue'lar ile pull request'lerden oturum başlatın.
+title: "Git sunucuları: issue'lar ve pull request'ler"
+description: GitHub, GitLab, Gitea ya da Gerrit'i bağlayın ve OpenChamber'dan issue'lar ve pull request'lerle çalışın.
 ---
 
-# GitHub Issues & PRs
+# Git sunucuları: issue'lar ve pull request'ler
 
-GitHub hesabınızı bağlayın. OpenChamber issue'ları ve pull request'leri içeri çekebilir, birinden doğrudan oturum başlatabilir ve sizin yerinize PR açıp güncelleyebilir.
+Projenizin bulunduğu sunucuda bir hesap bağlayın. OpenChamber o sunucunun issue'larını ve pull request'lerini listeleyebilir, birinden oturum başlatabilir, sizin yerinize pull request açabilir, inceleyebilir ve merge edebilir. Dört sunucu yerleşiktir: GitHub Enterprise dahil GitHub; self-managed GitLab dahil GitLab; Gitea; ve Gerrit. Bir [uzantı](/extensions/#git-sunucusu-olarak-bir-uzantı) bir tane daha ekleyebilir.
 
-## GitHub'ı bağlayın
+OpenChamber'ın hangi sunucuyla konuşacağına projenin remote'u karar verir. `origin`'i gitlab.com'da olan bir proje; pano, branch'lerindeki pull request rozeti ve Git paneli için GitLab hesabınızı kullanır. `~/.ssh/config` içindeki bir host takma adındaki remote, örneğin `github.com-work`, hiçbir sunucuyla eşleşmez.
 
-1. **Settings → Integrations** bölümünü açın ve **GitHub** kartını genişletin.
-2. **Connect GitHub** seçin. OpenChamber bir bağlantı ve kısa bir kod gösterir.
-3. Bağlantıyı açın, kodu girin ve onaylayın.
+Kullanılan sözcükler sunucuya göre değişir. GitLab merge request der, Gerrit ise change (değişiklik) der.
 
-Bağlantı kurulunca hesabınız kartta görünür. Birden fazla hesap bağlayabilir, aralarında geçiş yapabilir ya da istediğiniz zaman bağlantıyı kesebilirsiniz. Aynı makinede `gh` CLI ile giriş yapılmışsa OpenChamber onu yedek olarak kullanabilir.
+## Bir sunucu bağlayın
 
-## Bir issue veya PR'den işe başlayın
+1. **Settings → Integrations** bölümünü açın. Her sunucunun kendi kartı vardır.
+2. Projenizin sunucusunun kartını genişletin ve giriş yapın:
+   - **GitHub**: **GitHub'a Bağlan** seçin, gösterilen bağlantıyı açın, kısa kodu girin ve onaylayın. GitHub Enterprise için **Diğer instance'lar** altında **Instance ekle** seçin, sunucunuzun adresini girin ve bir personal access token yapıştırın.
+   - **GitLab**: gitlab.com'da kısa bir kodla, bir personal access token ile ya da `glab` oturumuyla giriş yapın. Self-managed bir GitLab için adresini ekleyin ve bir personal access token yapıştırın.
+   - **Gitea**: sunucunuzun adresini ekleyin ve bir personal access token yapıştırın.
+   - **Gerrit**: sunucunuzun adresini, ardından Gerrit kullanıcı adınızı ve bir HTTP parolası ekleyin.
 
-GitHub bağlıyken bir [worktree session](/worktrees/) oluşturduğunuzda, onu bir issue ya da pull request üzerinden başlatabilirsiniz:
+Bağlantı kurulunca hesabınız kartta görünür. Bir sunucuda birden fazla hesap bağlayıp aralarında geçiş yapabilir ya da istediğiniz zaman bağlantıyı kesebilirsiniz. Aynı makinede `gh` CLI ile giriş yapılmışsa OpenChamber onu GitHub için de kullanabilir. Her jetonun ihtiyaç duyduğu kapsamlar ve her sunucunun gerektirdiği sürümler [Entegrasyonlar](/integrations/#gitlab-gitea-ve-gerrit) sayfasında.
+
+Bağlı bir hesap projenin [Git kimliği](/git-identities/) de olabilir; böylece commit'ler onun adını taşır, HTTPS üzerinden push da onun jetonunu kullanır.
+
+## Bir issue veya pull request'ten işe başlayın
+
+Bir [worktree session](/worktrees/) oluşturduğunuzda, onu projenin sunucusundaki bir issue ya da pull request üzerinden başlatabilirsiniz:
 
 - bir **issue** seçin. OpenChamber branch'i onun adına göre adlandırır
-- bir **pull request** seçin. PR'nin branch'ini checkout eder. İsterseniz PR'nin diff'ini de ekleyebilirsiniz, böylece agent değişikliğin tamamını görür
+- bir **pull request** seçin. Pull request'in branch'ini checkout eder. İsterseniz diff'ini de ekleyebilirsiniz, böylece agent değişikliğin tamamını görür
+- bir **Gerrit değişikliği** seçin. Son yama setini `change-<number>` adlı bir branch'e checkout eder
 
-Yeni oturum, issue ya da PR mesaj kutusuna zaten eklenmiş halde açılır. Sizin yerinize hiçbir şey gönderilmez: modeli ve agent'ı seçin, ne yapılmasını istediğinizi yazın ve gönderin.
+Yeni oturum, öğe mesaj kutusuna zaten eklenmiş halde açılır. Sizin yerinize hiçbir şey gönderilmez: modeli ve agent'ı seçin, ne yapılmasını istediğinizi yazın ve gönderin.
+
+[Issue'lar ve PR'lar](/issues-and-prs/) panosu aynı öğeleri filtreler, önizleme, yorumlar ve incelemelerle listeler ve oradan da oturum başlatır.
 
 ## Pull request açma ve yönetme
 
-[git view](/git/) içindeki **PR** sekmesinden pull request oluşturabilir, güncelleyebilir, taslağı hazır diye işaretleyebilir ya da merge edebilirsiniz. OpenChamber PR başlığını ve açıklamasını değişikliklerinizden oluşturabilir.
+[Git paneli](/git/) içindeki **PR** sekmesinden pull request oluşturabilir, güncelleyebilir, taslağı hazır diye işaretleyebilir ya da merge edebilirsiniz. OpenChamber başlığı ve açıklamayı değişikliklerinizden yazabilir.
 
-## Bir issue ya da PR'ı mesaja bağlayın
+- **GitLab**: aynı sekme merge request açar. Merge, merge ve squash seçeneklerini sunar.
+- **Gitea**: GitHub'dakiyle aynı.
+- **Gerrit**: değişikliği incelemeye push ederek oluşturursunuz, sonraki her push yeni bir yama seti yükler. Bkz. [Gerrit'te incelemeye push etme](/git/#gerritte-incelemeye-push-etme). Merge burada **Gönder** olur ve değişiklik gönderim gereksinimlerini karşılayana kadar bekler. İncelemeler, projenin Code-Review ve Verified gibi etiketlerine verilen oylardır.
 
-Sohbet yazma alanında **+** menüsünü açın ve **GitHub** seçin. Bir veya daha fazla issue ya da pull request seçin: her biri bir sonraki mesajınıza bağlam olarak eklenir (bir PR diff'ini de getirebilir) ve oturumun çalışma durumu paneli ona bir bağlantı tutar. Eklemek yalnızca bağlam sağlar; onunla ne yapılacağını mesajınız söyler.
+## Bir issue ya da pull request'i mesaja bağlayın
+
+Sohbet yazma alanında **+** menüsünü açın ve sunucunuza ait bağlama seçeneğini seçin, örneğin **GitHub issue veya PR bağla**, **GitLab issue veya MR bağla** ya da **Gerrit değişikliği bağla**. Bir veya daha fazla öğe seçin. Her biri bir sonraki mesajınıza bağlam olarak eklenir, bir pull request diff'ini de getirebilir ve oturumun çalışma durumu paneli ona bir bağlantı tutar. Eklemek yalnızca bağlam sağlar; onunla ne yapılacağını mesajınız söyler.
+
+Gerrit'te issue yoktur, bu yüzden orada yalnızca değişiklikler görünür.
 
 ## İlgili
 
-- [Git & GitHub Workflows](/git/) — branch'leri commit edin ve yönetin
-- [Worktree Sessions](/worktrees/) — issue ve PR oturumlarının başladığı yer
+- [Issue'lar ve PR'lar](/issues-and-prs/): öğelere göz atın, filtreleyin, yorum yapın ve inceleyin
+- [Git İş Akışları](/git/): commit edin, branch'leri yönetin ve incelemeye push edin
+- [Worktree Sessions](/worktrees/): issue ve pull request oturumlarının başladığı yer
+- [Git Kimlikleri](/git-identities/): bağlı bir hesap olarak commit ve push edin
+- [Entegrasyonlar](/integrations/): her sunucu kartının ayrıntıları

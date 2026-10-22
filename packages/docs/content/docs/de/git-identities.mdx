@@ -1,30 +1,34 @@
 ---
 title: Git-Identitäten
-description: Committe mit dem richtigen Namen und der richtigen E-Mail für jedes Repository.
+description: Committe und pushe für jedes Repository als die richtige Person.
 ---
 
 # Git-Identitäten
 
-Eine Git-Identität ist der Name und die E-Mail-Adresse, mit denen deine Commits signiert werden. Wenn du zwischen privaten und Arbeits-Repos wechselst, kannst du Identitäten speichern und pro Repository die richtige anwenden, statt dich auf eine einzige globale Einstellung zu verlassen. Verwalte sie unter **Einstellungen → Git**.
+Eine Git-Identität ist der Name und die E-Mail-Adresse, die deine Commits tragen, und die Art, wie sich ein Repository bei seinem Remote anmeldet. Wenn du zwischen privaten und Arbeits-Repos wechselst, kannst du Identitäten speichern und pro Repository die richtige anwenden. Verwalte sie unter **Einstellungen → Git**.
 
 ## Eine Identität hinzufügen
 
 1. Öffne **Einstellungen → Git** und wähle **New**.
-2. Gib den **name** und die **email** ein, mit denen committen werden soll.
-3. Wähle aus, wie sie sich beim Remote authentifiziert:
-   - **SSH** — verweise auf einen SSH-Schlüssel
-   - **token** — verwende eine gespeicherte Anmeldedaten für einen Host
+2. Gib den **Benutzername** und die **E-Mail-Adresse** ein, mit denen committet werden soll.
+3. Wähle unter **Authentifizierung**, wie gepusht und gepullt wird:
+   - **Dieser Rechner**: was Git auf diesem Rechner schon nutzt, etwa SSH-Schlüssel, einen Credential Manager oder die `gh`-CLI
+   - **Konto**: das gewählte **Versionsverwaltungskonto**, also ein beliebiges Konto, das auf einer Host-Karte unter [Integrationen](/integrations/) verbunden ist, etwa GitHub, GitLab, Gitea oder Gerrit; Pushes laufen über HTTPS mit dem Token dieses Kontos
+   - **SSH**: ein Schlüssel, den OpenChamber für diese Identität aufbewahrt
+   - **Anonym**: liest öffentliche Repositories über HTTPS ohne Anmeldung und kann nicht pushen
 4. Gib ihr optional eine Farbe und ein Symbol, damit sie leicht zu erkennen ist.
 
 Auch deine globale System-Identität wird angezeigt, allerdings nur lesbar.
 
+Bei Gerrit meldet sich eine Konto-Identität bei Git mit deinem Gerrit-Benutzernamen und dem verbundenen HTTP-Passwort an. Ein GitHub-Enterprise-Konto liefert Issues und Pull Requests, Klonen und Pushen laufen dort aber über **Dieser Rechner** oder **SSH**.
+
 ## Eine Identität auf ein Repo anwenden
 
-Das Anwenden einer Identität schreibt sie in die **lokale** Git-Konfiguration dieses Repositories — sie betrifft nur dieses Repo, nicht deine globale Einstellung. SSH-Identitäten setzen außerdem den zu verwendenden SSH-Befehl auf deinen Schlüssel; Token-Identitäten richten die Anmeldedatenspeicherung für den Host ein.
+Wähle die Identitäts-Schaltfläche oben im [Git-Panel](/git/) und dort eine Identität. Die Bildschirme zum Hinzufügen und Klonen bieten dieselbe Auswahl. Eine Identität, die das Repository nicht erreichen kann, bleibt deaktiviert in der Liste, mit dem Grund: ein Konto bei einem anderen Host, ein Konto oder **Anonym** bei einem SSH-Remote oder ein SSH-Schlüssel bei einem HTTPS-Remote.
 
-Du kannst Identitäten importieren, die OpenChamber aus deinen vorhandenen Git-Anmeldedaten erkennt, und sie als Token-Identitäten speichern.
+Das Anwenden einer Identität schreibt sie in die **lokale** Git-Konfiguration dieses Repositories. Sie betrifft also nur dieses Repo, und deine globale Einstellung bleibt, wie sie ist. Auch Git im Terminal und die Shell des Agenten nutzen sie. **System-Identität** entfernt, was OpenChamber geschrieben hat, sodass wieder deine eigene Git-Konfiguration gilt.
 
 ## Verwandt
 
-- [Git- & GitHub-Workflows](/git/) — mit der von dir festgelegten Identität committen
-- [GitHub Issues & PRs](/github/) — ein GitHub-Konto für PRs verbinden
+- [Git-Workflows](/git/): mit der von dir festgelegten Identität committen
+- [Git-Hosts](/github/): ein Konto bei GitHub, GitLab, Gitea oder Gerrit verbinden

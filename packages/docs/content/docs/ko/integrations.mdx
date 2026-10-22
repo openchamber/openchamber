@@ -33,7 +33,19 @@ description: OpenChamber와 함께 쓰는 서비스와 구독을 연결합니다
 
 ## GitHub
 
-**GitHub** 카드를 펼치고 **Connect GitHub**를 선택해 짧은 기기 코드로 로그인합니다. 연결되면 OpenChamber가 이슈와 풀 리퀘스트에서 세션을 시작하고, 메시지에 첨부하고, PR을 열거나 업데이트할 수 있습니다. GitHub로 할 수 있는 모든 것은 [GitHub 이슈 및 PR](/ko/github/)에 있습니다.
+**GitHub** 카드를 펼치고 **Connect GitHub**를 선택해 짧은 기기 코드로 로그인합니다. 연결되면 OpenChamber가 이슈와 풀 리퀘스트에서 세션을 시작하고, 메시지에 첨부하고, PR을 열거나 업데이트할 수 있습니다. Git 호스트로 할 수 있는 모든 것은 [Git 호스트](/ko/github/)에 있습니다.
+
+## GitLab, Gitea, Gerrit
+
+GitLab, Gitea, Gerrit는 GitHub 옆에 각자의 카드가 있습니다. 연결하면 그 이슈와 풀 리퀘스트(GitLab에서는 머지 리퀘스트, Gerrit에서는 변경)가 GitHub처럼 [이슈 및 PR](/ko/issues-and-prs/) 보드와 채팅의 **+** 메뉴에 표시됩니다.
+
+- **GitLab**: gitlab.com에서는 짧은 기기 코드, 개인 액세스 토큰 또는 서버의 `glab` 로그인으로 로그인합니다. 자체 관리형 GitLab에서는 주소를 추가하고 `api` 범위가 있는 개인 액세스 토큰을 붙여 넣습니다. 그곳에서 기기 코드 로그인은 서버가 `OPENCHAMBER_GITLAB_CLIENT_ID`를 그 인스턴스에 등록한 애플리케이션으로 설정한 경우에만 동작합니다.
+- **Gitea**: `https://gitea.example.com` 같은 인스턴스 주소를 추가하고 `write:repository`, `write:issue`, `read:user` 범위가 있는 개인 액세스 토큰을 붙여 넣습니다. 카드에는 인스턴스에서 토큰을 만드는 페이지로 가는 링크가 있습니다. Gitea에는 기기 코드나 CLI 로그인이 없습니다. Gitea 1.21 이상이 필요하며, 주소의 루트에서 제공되어야 합니다. Forgejo는 같은 API를 쓰므로 동작할 것으로 보이지만 테스트하지는 않았습니다.
+- **Gerrit**: `https://gerrit.example.com` 같은 인스턴스 주소를 추가한 다음 Gerrit 사용자 이름과 HTTP 비밀번호를 입력합니다. 비밀번호는 Gerrit의 **Settings → HTTP Credentials**에서 생성하며, 카드에 그곳으로 가는 링크가 있습니다. 로그인 비밀번호는 쓸 수 없고, 사용자 이름이 없는 계정은 연결할 수 없습니다. Gerrit 3.8 이상이 필요하며, 주소의 루트에서 제공되어야 합니다. googlesource.com과 `.gitcookies`처럼 리뷰 주소와 Git 주소가 다른 사이트는 지원하지 않습니다.
+
+Gerrit에서는 변경을 리뷰합니다. 변경을 업로드할 때마다 패치셋이 생기며, 변경의 미리보기에서 이전 패치셋을 골라 읽을 수 있습니다. 리뷰는 Code-Review, Verified 같은 프로젝트 라벨에 투표하는 방식이며, 제출 요건을 충족한 변경은 **제출**로 반영합니다. Gerrit에는 이슈가 없으므로 변경만 표시됩니다. 변경을 만들거나 변경에 새 패치셋을 업로드하려면 Git 패널의 **리뷰로 푸시**를 사용하세요. [Git](/ko/git/#gerrit에서-리뷰로-푸시하기)을 참고하세요.
+
+OpenChamber가 어느 카드의 계정을 쓸지는 프로젝트의 원격 저장소가 정하며, 이 카드들의 계정은 모두 프로젝트의 [Git 아이덴티티](/ko/git-identities/)가 될 수 있습니다. [확장](/ko/extensions/#git-호스트-역할을-하는-확장)은 자체 카드가 있는 다른 호스트를 추가할 수 있습니다.
 
 ## Linear
 
@@ -117,5 +129,5 @@ Resource Monitor는 컴퓨터가 사용하는 CPU와 메모리, 그리고 그중
 
 ## 관련 문서
 
-- [GitHub 이슈 및 PR](/ko/github/) — OpenChamber에서 GitHub로 할 수 있는 모든 것
+- [Git 호스트](/ko/github/) — OpenChamber에서 GitHub, GitLab, Gitea, Gerrit로 할 수 있는 모든 것
 - [워크트리 세션](/ko/worktrees/) — 이슈 세션을 시작할 수 있는 곳

@@ -60,6 +60,18 @@ En plus de son panneau dans la barre latérale, une extension peut ajouter des e
 
 Certaines extensions affichent une image en direct au lieu d'un panneau à elles : ce dans quoi un agent travaille sur le serveur, par exemple un navigateur ou un simulateur. Cliquez dans l'image ou tapez pour prendre le contrôle ; la ligne d'état indique **Vous avez le contrôle** et les actions de navigateur de l'agent sont refusées jusqu'à ce que vous appuyiez sur **Rendre à l'agent**. Copier et coller fonctionnent normalement. Un autre appareil connecté en même temps voit qui a le contrôle et ne peut pas le prendre. Une telle extension peut ajouter ses propres commandes à côté de l'image, par exemple une barre d'adresse au-dessus ou une colonne d'outils sur le côté.
 
+## Une extension comme hébergeur Git
+
+Une extension peut ajouter un hébergeur Git à côté de GitHub, GitLab, Gitea et Gerrit. Sa boîte de dialogue d'autorisations contient alors une ligne qui commence par **Sert d'hôte Git** et nomme l'hébergeur. La ligne dit aussi ce qu'OpenChamber lui envoie : les noms de dépôts, les branches et le texte que tu écris dans les issues et pull requests.
+
+Une fois autorisé, l'hébergeur a sa propre carte dans **Paramètres → Intégrations**, à côté des hébergeurs intégrés. Connecte ton compte là avec un jeton, et l'adresse de l'hébergeur si la carte la demande. Ensuite, un projet dont le remote est sur cet hébergeur fonctionne comme les autres : ses issues et pull requests sont sur le tableau [Issues et PR](/issues-and-prs/) et dans le menu **+** du chat, ses branches affichent des badges de pull request, et tu peux démarrer un worktree depuis l'une de ses pull requests. Voir [Hôtes Git](/github/) pour ce que fait chacun de ces éléments.
+
+Ton jeton reste dans OpenChamber. L'extension demande à OpenChamber d'appeler l'hébergeur pour elle, et OpenChamber ajoute le jeton à chaque appel, uniquement pour l'adresse que tu as connectée. L'extension ne le reçoit jamais.
+
+Mettre l'extension en pause retire l'hébergeur jusqu'à ce que tu la réactives, et ton compte reste. Retirer l'extension oublie le compte. VS Code n'affiche pas les hébergeurs Git des extensions.
+
+Le SDK OpenChamber contient un exemple fonctionnel, `examples/source-control-provider`, comme point de départ pour en créer un. Voir [Créer une extension](/sdk/).
+
 ## Connecter son compte
 
 Une extension qui parle à un service reçoit une carte dans **Paramètres → Intégrations** sous **Comptes d’extensions**. Selon le service, la carte demande un jeton d'API, un nom d'utilisateur et un jeton, ou un client id pour une connexion. Choisis **Connecter** ; **Déconnecter** oublie le jeton enregistré. Les champs supplémentaires que l'extension déclare s'enregistrent tout seuls quand tu les quittes.

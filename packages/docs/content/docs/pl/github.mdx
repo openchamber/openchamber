@@ -1,38 +1,59 @@
 ---
-title: Issues i PR na GitHub
-description: Połącz GitHub i rozpoczynaj sesje od issues i pull requestów.
+title: "Hosty Git: issues i pull requesty"
+description: Połącz GitHub, GitLab, Gitea albo Gerrit i pracuj z issues i pull requestami w OpenChamber.
 ---
 
-# Issues i PR na GitHub
+# Hosty Git: issues i pull requesty
 
-Połącz swoje konto GitHub, a OpenChamber może pobierać issues i pull requesty, rozpocząć sesję bezpośrednio z jednego z nich oraz otwierać lub aktualizować za Ciebie PR-y.
+Połącz konto na hoście, na którym jest Twój projekt, a OpenChamber może wyświetlać jego issues i pull requesty, rozpocząć sesję od jednego z nich oraz otwierać, recenzować i scalać za Ciebie pull requesty. Wbudowane są cztery hosty: GitHub, w tym GitHub Enterprise; GitLab, w tym self-managed GitLab; Gitea; oraz Gerrit. [Rozszerzenie](/pl/extensions/#rozszerzenie-jako-host-git) może dodać kolejny.
 
-## Połącz GitHub
+To remote projektu decyduje, z którym hostem rozmawia OpenChamber. Projekt, którego `origin` jest na gitlab.com, używa Twojego konta GitLab dla tablicy, znacznika pull requesta na swoich gałęziach i panelu Git. Remote na aliasie hosta z `~/.ssh/config`, takim jak `github.com-work`, nie jest dopasowywany do żadnego hosta.
 
-1. Otwórz **Settings → Integrations** i rozwiń kartę **GitHub**.
-2. Wybierz **Connect GitHub**. OpenChamber pokazuje link i krótki kod.
-3. Otwórz link, wpisz kod i zatwierdź.
+Słownictwo zależy od hosta. GitLab mówi merge request, a Gerrit mówi change (zmiana).
 
-Po połączeniu Twoje konto pojawia się na karcie. Możesz połączyć więcej niż jedno konto i przełączać się między nimi albo rozłączyć w dowolnym momencie. Jeśli CLI `gh` jest zalogowane na tej samej maszynie, OpenChamber może użyć go jako zapasowego źródła.
+## Połącz host
 
-## Rozpocznij pracę od issue lub PR
+1. Otwórz **Settings → Integrations**. Każdy host ma własną kartę.
+2. Rozwiń kartę hosta swojego projektu i zaloguj się:
+   - **GitHub**: wybierz **Połącz z GitHub**, otwórz pokazany link, wpisz krótki kod i zatwierdź. Dla GitHub Enterprise wybierz **Dodaj instancję** w sekcji **Inne instancje**, wpisz adres swojego serwera i wklej personal access token.
+   - **GitLab**: na gitlab.com zaloguj się krótkim kodem, personal access tokenem albo logowaniem `glab`. Dla self-managed GitLab dodaj jego adres i wklej personal access token.
+   - **Gitea**: dodaj adres swojego serwera i wklej personal access token.
+   - **Gerrit**: dodaj adres swojego serwera, a potem swoją nazwę użytkownika Gerrit i hasło HTTP.
 
-Gdy tworzysz [sesję worktree](/pl/worktrees/) z połączonym GitHub, możesz ją zacząć od issue albo pull requesta:
+Po połączeniu Twoje konto pojawia się na karcie. Na jednym hoście możesz połączyć więcej niż jedno konto i przełączać się między nimi albo rozłączyć w dowolnym momencie. Jeśli CLI `gh` jest zalogowane na tej samej maszynie, OpenChamber może go użyć także dla GitHub. Zakresy potrzebne każdemu tokenowi i wersje wymagane przez każdy host opisują [Integracje](/pl/integrations/#gitlab-gitea-i-gerrit).
+
+Połączone konto może też być [tożsamością Git](/pl/git-identities/) projektu, więc commity mają jego nazwę, a wypychanie przez HTTPS używa jego tokena.
+
+## Rozpocznij pracę od issue lub pull requesta
+
+Gdy tworzysz [sesję worktree](/pl/worktrees/), możesz ją zacząć od issue albo pull requesta z hosta projektu:
 
 - wybierz **issue**, a OpenChamber nazwie gałąź jego nazwą
-- wybierz **pull request**, a wyewidencjonuje on gałąź PR; możesz dołączyć diff PR, aby agent miał całą zmianę
+- wybierz **pull request**, a wyewidencjonuje on gałąź pull requesta; możesz dołączyć jego diff, aby agent miał całą zmianę
+- wybierz **zmianę Gerrit**, a wyewidencjonuje on jej najnowszy zestaw poprawek na gałęzi `change-<number>`
 
-Nowa sesja otwiera się z issue albo PR już dołączonym do pola wiadomości. Nic nie jest wysyłane za Ciebie: wybierz model i agenta, napisz, co ma zostać zrobione, i wyślij.
+Nowa sesja otwiera się z elementem już dołączonym do pola wiadomości. Nic nie jest wysyłane za Ciebie: wybierz model i agenta, napisz, co ma zostać zrobione, i wyślij.
+
+Tablica [Issues i PR-y](/pl/issues-and-prs/) pokazuje te same elementy z filtrami, podglądem, komentarzami i recenzjami, i z niej też można zaczynać sesje.
 
 ## Otwieraj pull requesty i nimi zarządzaj
 
-Z zakładki **PR** w [widoku git](/pl/git/) możesz utworzyć pull request, zaktualizować go, oznaczyć szkic jako gotowy lub scalić go. OpenChamber może wygenerować tytuł i opis PR na podstawie Twoich zmian.
+Z zakładki **PR** w [panelu Git](/pl/git/) możesz utworzyć pull request, zaktualizować go, oznaczyć szkic jako gotowy lub scalić go. OpenChamber może napisać tytuł i opis na podstawie Twoich zmian.
 
-## Dołącz issue lub PR do wiadomości
+- **GitLab**: ta sama zakładka otwiera merge requesty. Scalanie oferuje merge i squash.
+- **Gitea**: tak samo jak na GitHub.
+- **Gerrit**: zmianę tworzysz, wypychając do recenzji, a każde kolejne wypchnięcie przesyła nowy zestaw poprawek. Zobacz [Wypychanie do recenzji w Gerrit](/pl/git/#wypychanie-do-recenzji-w-gerrit). Scalanie to **Wprowadź** i czeka, aż zmiana spełni swoje wymagania (submit requirements). Recenzje to głosy na etykietach projektu, takich jak Code-Review i Verified.
 
-W polu czatu otwórz menu **+** i wybierz **GitHub**. Wybierz jedno lub więcej issue albo pull requestów: każde trafia jako kontekst do Twojej następnej wiadomości (PR może przynieść swój diff), a panel statusu pracy sesji zachowuje do niego link. Dołączenie dodaje tylko kontekst; to Twoja wiadomość mówi, co z nim zrobić.
+## Dołącz issue lub pull request do wiadomości
+
+W polu czatu otwórz menu **+** i wybierz pozycję dla swojego hosta, na przykład **Połącz issue lub PR z GitHub**, **Połącz zgłoszenie lub MR z GitLab** albo **Połącz zmianę z Gerrit**. Wybierz jeden lub więcej elementów. Każdy trafia jako kontekst do Twojej następnej wiadomości, pull request może przynieść swój diff, a panel statusu pracy sesji zachowuje do niego link. Dołączenie dodaje tylko kontekst; to Twoja wiadomość mówi, co z nim zrobić.
+
+Gerrit nie ma issues, więc widać tam tylko zmiany.
 
 ## Powiązane
 
-- [Przepływy Git i GitHub](/pl/git/) — commituj i zarządzaj gałęziami
-- [Sesje worktree](/pl/worktrees/) — gdzie startują sesje issue i PR
+- [Issues i PR-y](/pl/issues-and-prs/): przeglądaj, filtruj, komentuj i recenzuj elementy
+- [Przepływy Git](/pl/git/): commituj, zarządzaj gałęziami i wypychaj do recenzji
+- [Sesje worktree](/pl/worktrees/): gdzie startują sesje issue i pull requestów
+- [Tożsamości Git](/pl/git-identities/): commituj i wypychaj jako połączone konto
+- [Integracje](/pl/integrations/): każda karta hosta ze szczegółami

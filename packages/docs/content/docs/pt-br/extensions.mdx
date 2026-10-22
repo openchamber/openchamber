@@ -60,6 +60,18 @@ Além do painel na barra lateral, uma extensão pode adicionar entradas a menus 
 
 Algumas extensões mostram uma imagem ao vivo em vez de um painel próprio: aquilo em que um agente está trabalhando no servidor, como um navegador ou um simulador. Clique na imagem ou digite para assumir o controle; a linha de status mostra **Você está no controle** e as ações de navegador do agente são recusadas até você pressionar **Devolver ao agente**. Copiar e colar funcionam normalmente. Outro dispositivo conectado ao mesmo tempo vê quem está no controle e não pode tomá-lo. Uma extensão assim pode adicionar seus próprios controles ao lado da imagem, por exemplo uma barra de endereço acima ou uma coluna de ferramentas ao lado.
 
+## Uma extensão como host Git
+
+Uma extensão pode adicionar um host Git ao lado do GitHub, GitLab, Gitea e Gerrit. A caixa de permissões dela passa a ter uma linha que começa com **Atua como o host Git** e dá o nome do host. A linha também diz o que o OpenChamber envia a ela: nomes de repositórios, branches e o texto de issues e pull requests que você escreve.
+
+Depois que você permite, o host ganha seu próprio card em **Configurações → Integrações**, ao lado dos hosts integrados. Conecte sua conta ali com um token, e com o endereço do host se o card pedir. A partir daí, um projeto cujo remoto está nesse host funciona como qualquer outro: as issues e pull requests dele aparecem no quadro [Issues e PRs](/pt-br/issues-and-prs/) e no menu **+** do chat, os branches dele mostram selos de pull request e você pode começar um worktree a partir de um dos pull requests dele. Veja [Hosts Git](/pt-br/github/) para o que cada uma dessas coisas faz.
+
+Seu token fica no OpenChamber. A extensão pede ao OpenChamber que chame o host por ela, e o OpenChamber adiciona o token a cada chamada, só para o endereço que você conectou. A extensão nunca o recebe.
+
+Pausar a extensão tira o host até você ligá-la de novo, e sua conta continua. Remover a extensão esquece a conta. O VS Code não mostra hosts Git de extensões.
+
+O SDK do OpenChamber tem um exemplo funcional, `examples/source-control-provider`, para começar ao construir um. Veja [Construir uma extensão](/pt-br/sdk/).
+
 ## Conectar a conta dela
 
 Uma extensão que fala com um serviço ganha um card em **Configurações → Integrações** sob **Contas de extensões**. Dependendo do serviço, o card pede um token de API, um usuário e token, ou um client id para um fluxo de login. Escolha **Conectar**; **Desconectar** esquece o token guardado. Campos extras que a extensão declara são salvos sozinhos quando você sai deles.

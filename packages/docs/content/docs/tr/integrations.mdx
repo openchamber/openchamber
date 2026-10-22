@@ -33,7 +33,19 @@ Katalog web uygulamasında ve masaüstü uygulamasında bulunur. [Kurumsal modda
 
 ## GitHub
 
-**GitHub** kartını genişletin ve kısa bir cihaz koduyla giriş yapmak için **Connect GitHub** seçin. Bağlandıktan sonra OpenChamber issue’lardan ve pull request’lerden oturum başlatabilir, onları mesajlara ekleyebilir ve PR açıp güncelleyebilir. GitHub’ın yapabildiği her şey [GitHub Issues & PRs](/tr/github/) sayfasında.
+**GitHub** kartını genişletin ve kısa bir cihaz koduyla giriş yapmak için **Connect GitHub** seçin. Bağlandıktan sonra OpenChamber issue’lardan ve pull request’lerden oturum başlatabilir, onları mesajlara ekleyebilir ve PR açıp güncelleyebilir. Git sunucularının yapabildiği her şey [Git sunucuları](/tr/github/) sayfasında.
+
+## GitLab, Gitea ve Gerrit
+
+GitLab, Gitea ve Gerrit'in her birinin GitHub'ın yanında kendi kartı vardır. Bağlandıktan sonra issue'ları ve pull request'leri (GitLab'de merge request'ler, Gerrit'te değişiklikler) GitHub'ınkiler gibi [Issue'lar ve PR'lar](/tr/issues-and-prs/) panosunda ve sohbetin **+** menüsünde görünür.
+
+- **GitLab**: gitlab.com'da kısa bir cihaz koduyla, bir personal access token ile ya da sunucudaki `glab` oturumuyla giriş yapın. Self-managed bir GitLab için adresini ekleyin ve `api` kapsamlı bir personal access token yapıştırın. Orada cihaz koduyla giriş yalnızca sunucu `OPENCHAMBER_GITLAB_CLIENT_ID` değerini o instance'ta kayıtlı bir uygulamaya ayarladığında çalışır.
+- **Gitea**: instance'ınızın adresini ekleyin, örneğin `https://gitea.example.com`, ve `write:repository`, `write:issue` ve `read:user` kapsamlı bir personal access token yapıştırın. Kart, instance'ınızda bu jetonu oluşturan sayfaya bağlantı verir. Gitea'da cihaz koduyla ya da CLI ile giriş yoktur. Adresinin kökünden sunulan Gitea 1.21 veya daha yenisi gerekir. Forgejo aynı API'yi kullanır ve çalışması beklenir, ancak test edilmedi.
+- **Gerrit**: instance'ınızın adresini ekleyin, örneğin `https://gerrit.example.com`, ardından Gerrit kullanıcı adınızı ve bir HTTP parolası girin. Parolayı Gerrit'te **Settings → HTTP Credentials** altında oluşturun; kart oraya bağlantı verir. Giriş parolanız çalışmaz ve kullanıcı adı olmayan bir hesap bağlanamaz. Adresinin kökünden sunulan Gerrit 3.8 veya daha yenisi gerekir. İnceleme adresi Git adresinden farklı olan siteler, örneğin `.gitcookies` ile googlesource.com, desteklenmez.
+
+Gerrit'te değişiklikleri incelersiniz. Bir değişikliğin her yüklemesi bir yama setidir ve değişikliğin önizlemesinde okumak için daha eski birini seçebilirsiniz. Projenin Code-Review ve Verified gibi etiketlerinde oy vererek incelersiniz ve gönderim gereksinimleri karşılandığında değişikliği **Gönder** ile alırsınız. Gerrit'te issue yoktur, bu yüzden yalnızca değişiklikler görünür. Bir değişiklik oluşturmak ya da ona yeni bir yama seti yüklemek için Git panelindeki **İncelemeye push et** seçeneğini kullanın; bkz. [Git](/tr/git/#gerritte-incelemeye-push-etme).
+
+OpenChamber'ın hangi kartın hesabını kullanacağına projenin remote'u karar verir ve bu kartlardan herhangi birindeki hesap bir projenin [Git kimliği](/tr/git-identities/) olabilir. Bir [uzantı](/tr/extensions/#git-sunucusu-olarak-bir-uzantı) kendi kartıyla başka bir sunucu ekleyebilir.
 
 ## Linear
 
@@ -117,5 +129,5 @@ Geliştirme sunucuları OpenChamber altında çalıştıklarında görünür: ye
 
 ## İlgili
 
-- [GitHub Issues & PRs](/tr/github/) — GitHub’ın OpenChamber’da yapabildiği her şey
+- [Git sunucuları](/tr/github/) — GitHub, GitLab, Gitea ve Gerrit'in OpenChamber'da yapabildiği her şey
 - [Worktree oturumları](/tr/worktrees/) — issue oturumlarının başlayabileceği yer

@@ -1,30 +1,34 @@
 ---
 title: Git Kimlikleri
-description: Her repo için doğru ad ve e-posta ile commit edin.
+description: Her repo için doğru kişi olarak commit ve push edin.
 ---
 
 # Git Kimlikleri
 
-Bir git kimliği, commit'lerinizin hangi ad ve e-posta ile imzalandığıdır. Kişisel ve iş repoları arasında çalışıyorsanız, tek bir global ayara güvenmek yerine kimlikleri kaydedip her repo için doğru olanı uygulayabilirsiniz. Bunları **Settings → Git** bölümünden yönetin.
+Bir git kimliği, commit'lerinizin taşıdığı ad ve e-posta ile bir repo'nun kendi remote'una giriş yapma biçimidir. Kişisel ve iş repoları arasında çalışıyorsanız kimlikleri kaydedip her repo için doğru olanı uygulayabilirsiniz. Bunları **Settings → Git** bölümünden yönetin.
 
 ## Bir kimlik ekleyin
 
 1. **Settings → Git** bölümünü açın ve **New** seçin.
-2. Commit edeceğiniz **name** ve **email** bilgilerini girin.
-3. Uzak depo ile nasıl doğrulanacağını seçin:
-   - **SSH** — bir SSH anahtarına yönlendirin
-   - **token** — bir host için kayıtlı bir kimlik bilgisi kullanın
+2. Commit edeceğiniz **Kullanıcı adı** ve **E-posta adresi** bilgilerini girin.
+3. **Kimlik doğrulama** altında push ve pull'un nasıl yapılacağını seçin:
+   - **Bu makine**: bu makinedeki Git'in zaten kullandığı yöntem, örneğin SSH anahtarları, bir kimlik bilgisi yöneticisi ya da `gh` CLI
+   - **Hesap**: seçtiğiniz **Kaynak kontrolü hesabı**, yani [Entegrasyonlar](/integrations/) içindeki bir sunucu kartında bağlı herhangi bir hesap, örneğin GitHub, GitLab, Gitea ya da Gerrit; push o hesabın jetonuyla HTTPS üzerinden gider
+   - **SSH**: OpenChamber'ın bu kimlik için sakladığı bir anahtar
+   - **Anonim**: herkese açık repoları giriş yapmadan HTTPS üzerinden okur ve push edemez
 4. İsterseniz kolay seçmek için bir renk ve simge verin.
 
 Sisteminizin global kimliği de salt okunur olarak gösterilir.
 
+Gerrit'te hesap kimliği Git'e Gerrit kullanıcı adınız ve bağladığınız HTTP parolasıyla giriş yapar. Bir GitHub Enterprise hesabı issue'lar ve pull request'ler için çalışır, ama orada clone ve push **Bu makine** ya da **SSH** üzerinden yapılır.
+
 ## Bir kimliği bir repo'ya uygulayın
 
-Bir kimliği uygulamak, onu o repo'nun **local** git config'ine yazar. Yalnızca o repo'yu etkiler, global ayarınızı etkilemez. SSH kimlikleri ayrıca kullanılacak SSH komutunu anahtarınızı kullanacak şekilde ayarlar. token kimlikleri de host için kimlik bilgisi depolamasını kurar.
+[Git paneli](/git/) üstündeki kimlik düğmesini seçin ve bir kimlik seçin. Ekleme ve clone ekranları da aynı seçimi sunar. Repo'ya ulaşamayan bir kimlik listede kalır ama kapalıdır ve nedeni yazar: başka bir sunucudaki hesap, SSH remote'unda bir hesap ya da **Anonim**, veya HTTPS remote'unda bir SSH anahtarı.
 
-OpenChamber'ın mevcut git kimlik bilgilerinizden keşfettiği kimlikleri içe aktarabilir ve token kimlikleri olarak kaydedebilirsiniz.
+Bir kimliği uygulamak, onu o repo'nun **local** git config'ine yazar. Yalnızca o repo'yu etkiler, global ayarınız olduğu gibi kalır. Terminaldeki Git ve agent'ın shell'i de onu kullanır. **Sistem kimliği**, OpenChamber'ın yazdıklarını kaldırır, böylece yeniden sizin kendi Git yapılandırmanız geçerli olur.
 
 ## İlgili
 
-- [Git & GitHub Workflows](/git/) — ayarladığınız kimlikle commit edin
-- [GitHub Issues & PRs](/github/) — PR'ler için bir GitHub hesabı bağlayın
+- [Git İş Akışları](/git/) — ayarladığınız kimlikle commit edin
+- [Git sunucuları](/github/) — GitHub, GitLab, Gitea ya da Gerrit'te bir hesap bağlayın

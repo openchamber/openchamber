@@ -33,7 +33,19 @@ De catalogus zit in de webapp en de desktopapp. In [enterprise-modus](/nl/securi
 
 ## GitHub
 
-Klap de kaart **GitHub** open en kies **GitHub verbinden** om u met een korte apparaatcode aan te melden. Daarna kan OpenChamber sessies vanuit issues en pull requests starten, ze aan berichten koppelen en PR's openen of bijwerken. Alle mogelijkheden staan bij [GitHub-issues en PR's](/nl/github/).
+Klap de kaart **GitHub** open en kies **GitHub verbinden** om u met een korte apparaatcode aan te melden. Daarna kan OpenChamber sessies vanuit issues en pull requests starten, ze aan berichten koppelen en PR's openen of bijwerken. Wat de Git-hosts allemaal kunnen, staat bij [Git-hosts](/nl/github/).
+
+## GitLab, Gitea en Gerrit
+
+GitLab, Gitea en Gerrit hebben elk een eigen kaart naast GitHub. Na het verbinden staan hun issues en pull requests (merge requests op GitLab, wijzigingen op Gerrit) op het bord [Issues en PR's](/nl/issues-and-prs/) en in het menu **+** van de chat, net als die van GitHub.
+
+- **GitLab**: meld u op gitlab.com aan met een korte apparaatcode, een persoonlijk toegangstoken of de `glab`-aanmelding op de server. Voeg voor een zelfbeheerde GitLab het adres toe en plak een persoonlijk toegangstoken met de scope `api`. Aanmelden met een apparaatcode werkt daar alleen als de server `OPENCHAMBER_GITLAB_CLIENT_ID` instelt op een applicatie die op die instantie is geregistreerd.
+- **Gitea**: voeg het adres van uw instantie toe, zoals `https://gitea.example.com`, en plak een persoonlijk toegangstoken met de scopes `write:repository`, `write:issue` en `read:user`. De kaart linkt naar de pagina op uw instantie waar u er een aanmaakt. Gitea heeft geen aanmelding met een apparaatcode of CLI. Het vereist Gitea 1.21 of nieuwer, bereikbaar op de root van het adres. Forgejo gebruikt dezelfde API en zou moeten werken, maar is niet getest.
+- **Gerrit**: voeg het adres van uw instantie toe, zoals `https://gerrit.example.com`, en daarna uw Gerrit-gebruikersnaam en een HTTP-wachtwoord. Maak het wachtwoord aan in Gerrit onder **Settings → HTTP Credentials**; de kaart linkt daarheen. Uw gewone aanmeldwachtwoord werkt niet, en een account zonder gebruikersnaam kan geen verbinding maken. Het vereist Gerrit 3.8 of nieuwer, bereikbaar op de root van het adres. Sites waar het reviewadres afwijkt van het Git-adres, zoals googlesource.com met `.gitcookies`, worden niet ondersteund.
+
+Op Gerrit reviewt u wijzigingen. Elke upload van een wijziging is een patchset, en in de voorvertoning van de wijziging kunt u een eerdere kiezen om te lezen. U reviewt door te stemmen op de labels van het project, zoals Code-Review en Verified, en u voert een wijziging door met **Indienen** zodra aan haar indieningsvereisten is voldaan. Gerrit heeft geen issues, dus alleen wijzigingen verschijnen. Gebruik **Ter review pushen** in de Git-weergave om een wijziging te maken of er een nieuwe patchset naar te uploaden; zie [Git](/nl/git/#ter-review-pushen-op-gerrit).
+
+De remote van het project bepaalt welk account van welke kaart OpenChamber gebruikt, en een account op elk van deze kaarten kan de [Git-identiteit](/nl/git-identities/) van een project zijn. Een [extensie](/nl/extensions/#een-extensie-als-git-host) kan nog een host toevoegen, met een eigen kaart.
 
 ## Linear
 
@@ -117,5 +129,5 @@ Dev-servers verschijnen als ze onder OpenChamber draaien: gestart in de ingebouw
 
 ## Zie ook
 
-- [GitHub-issues en PR's](/nl/github/) voor alle GitHub-functies
+- [Git-hosts](/nl/github/) voor alles wat GitHub, GitLab, Gitea en Gerrit in OpenChamber kunnen
 - [Worktree-sessies](/nl/worktrees/) waarin issuesessies kunnen starten

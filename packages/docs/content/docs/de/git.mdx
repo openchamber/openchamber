@@ -1,9 +1,9 @@
 ---
-title: Git- & GitHub-Workflows
+title: Git-Workflows
 description: Änderungen vormerken, committen und Branches verwalten, ohne OpenChamber zu verlassen.
 ---
 
-# Git- & GitHub-Workflows
+# Git-Workflows
 
 OpenChamber hat eine integrierte Git-Ansicht, damit du Änderungen prüfen, committen und Branches verwalten kannst, ohne in ein Terminal zu wechseln. Öffne sie über den **Git**-Tab in der rechten Seitenleiste.
 
@@ -28,7 +28,15 @@ Die Git-Ansicht deckt auch den üblichen Rest von Git ab:
 
 ## Pull Requests
 
-Verbinde GitHub (siehe [GitHub Issues & PRs](/github/)) und der **PR**-Tab lässt dich einen Pull Request öffnen, aktualisieren, als bereit markieren oder mergen — und seinen Titel und seine Beschreibung auf dieselbe Weise wie Commit-Nachrichten generieren.
+Mit einem verbundenen Konto beim Host des Projekts lässt dich der **PR**-Tab einen Pull Request öffnen, aktualisieren, als bereit markieren oder mergen. OpenChamber kann Titel und Beschreibung auf dieselbe Weise schreiben wie Commit-Nachrichten. Das funktioniert auf GitHub, Gitea und GitLab, wo der Tab Merge Requests öffnet. Gerrit hat ein eigenes Formular, **Zum Review pushen**. Wie du einen Host verbindest, steht unter [Git-Hosts](/github/).
+
+## Zum Review pushen bei Gerrit
+
+In einem Gerrit-Projekt wird aus dem Pull-Request-Formular **Zum Review pushen**. Es pusht deine Commits nach `refs/for/<branch>`. Das erstellt eine Änderung oder ein neues Patchset einer Änderung, die du schon gepusht hast. Die Commit-Nachricht ist die Beschreibung der Änderung, deshalb zeigt das Formular statt Titel und Text den Betreff des neuesten Commits. Wähle den Ziel-Branch und, wenn du willst, ein Topic, Hashtags, **In Arbeit** und **Privat**. Es funktioniert auch direkt auf dem Ziel-Branch, wie man bei Gerrit üblicherweise arbeitet.
+
+Gerrit ordnet Commits über die Zeile `Change-Id` Änderungen zu, die sein commit-msg-Hook in jede Nachricht schreibt. Fehlt sie nur im neuesten Commit, ergänzt **Change-Id hinzufügen** diesen Commit nach einer Rückfrage per Amend; gepusht wird erst, wenn du pushst. Fehlt sie in älteren Commits, wartet der Push, bis du den Hook installierst und jedem davon eine Change-Id gibst.
+
+Nach dem ersten Push bietet das Panel **Neues Patchset hochladen** an, sobald deine lokalen Commits noch nicht darin sind. Eine Änderung in einer Kette von Änderungen zeigt neben ihrem Badge ihre Position in der Kette, etwa **2 von 3**.
 
 ## Konflikte übernehmen
 
@@ -36,6 +44,6 @@ Wenn ein Merge, Rebase oder Integrate auf einen Konflikt stößt, zeigt OpenCham
 
 ## Verwandt
 
-- [GitHub Issues & PRs](/github/) — GitHub verbinden und mit Issues mit der Arbeit beginnen
+- [Git-Hosts](/github/) — einen Host verbinden und mit Issues mit der Arbeit beginnen
 - [Worktree-Sitzungen](/worktrees/) — einen Branch in seinem eigenen Ordner isolieren
 - [Git-Identitäten](/git-identities/) — als die richtige Person pro Repo committen

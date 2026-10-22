@@ -1,38 +1,59 @@
 ---
-title: GitHub Issue 与 PR
-description: 连接 GitHub 并从 issue 和拉取请求开始会话。
+title: "Git 托管服务：Issue 与拉取请求"
+description: 连接 GitHub、GitLab、Gitea 或 Gerrit，在 OpenChamber 中处理 issue 和拉取请求。
 ---
 
-# GitHub Issue 与 PR
+# Git 托管服务：Issue 与拉取请求
 
-连接你的 GitHub 账号，OpenChamber 就可以拉取 issue 和拉取请求、直接从其中一个开始会话，并为你打开或更新 PR。
+连接项目所在托管服务上的账号，OpenChamber 就可以列出它的 issue 和拉取请求、从其中一个开始会话，并为你创建、评审和合并拉取请求。内置四个托管服务：GitHub（包括 GitHub Enterprise）、GitLab（包括自托管 GitLab）、Gitea 和 Gerrit。[扩展](/zh-cn/extensions/#作为-git-托管服务的扩展) 还可以再添加一个。
 
-## 连接 GitHub
+OpenChamber 与哪个托管服务通信，由项目的远程仓库决定。`origin` 在 gitlab.com 上的项目，看板、分支上的拉取请求徽标和 Git 面板都会使用你的 GitLab 账号。位于 `~/.ssh/config` 主机别名（例如 `github.com-work`）上的远程仓库不会匹配任何托管服务。
 
-1. 打开 **Settings → Integrations**，展开 **GitHub** 卡片。
-2. 选择 **Connect GitHub**。OpenChamber 会显示一个链接和一个短码。
-3. 打开链接，输入短码并批准。
+用词跟随托管服务：GitLab 上叫合并请求，Gerrit 上叫变更。
 
-连接后，你的账号会显示在卡片上。你可以连接多个账号并在它们之间切换，或随时断开连接。如果同一台机器上已登录 `gh` CLI，OpenChamber 可以将其作为备用方式。
+## 连接托管服务
 
-## 从 issue 或 PR 开始工作
+1. 打开 **Settings → Integrations**。每个托管服务都有自己的卡片。
+2. 展开项目所在托管服务的卡片并登录：
+   - **GitHub**：选择 **Connect GitHub**，打开它显示的链接，输入短码并批准。对于 GitHub Enterprise，在 **其他实例** 下选择 **添加实例**，输入服务器地址并粘贴个人访问令牌。
+   - **GitLab**：在 gitlab.com 上，用短码、个人访问令牌或 `glab` 登录。对于自托管 GitLab，添加它的地址并粘贴个人访问令牌。
+   - **Gitea**：添加服务器地址并粘贴个人访问令牌。
+   - **Gerrit**：添加服务器地址，然后填写你的 Gerrit 用户名和 HTTP 密码。
 
-当你在连接了 GitHub 的情况下创建 [worktree 会话](/zh-cn/worktrees/) 时，可以从一个 issue 或 pull request 开始：
+连接后，你的账号会显示在卡片上。你可以在一个托管服务上连接多个账号并在它们之间切换，或随时断开连接。如果同一台机器上已登录 `gh` CLI，OpenChamber 也可以把它用于 GitHub。每种令牌需要的权限范围和每个托管服务需要的版本见 [集成](/zh-cn/integrations/#gitlabgitea-和-gerrit)。
+
+已连接的账号也可以作为项目的 [Git 身份](/zh-cn/git-identities/)，这样提交会带上它的名字，通过 HTTPS 推送时使用它的令牌。
+
+## 从 issue 或拉取请求开始工作
+
+创建 [worktree 会话](/zh-cn/worktrees/) 时，可以从项目托管服务上的一个 issue 或拉取请求开始：
 
 - 选择一个 **issue**，OpenChamber 会以它命名分支
-- 选择一个 **pull request**，它会检出该 PR 的分支；你可以包含 PR 的 diff，以便智能体掌握完整的变更
+- 选择一个 **pull request**，它会检出该拉取请求的分支；你可以包含它的 diff，以便智能体掌握完整的变更
+- 选择一个 **Gerrit 变更**，它会把最新补丁集检出到名为 `change-<number>` 的分支
 
-新会话打开时，issue 或 PR 已经附加在消息框中。不会替你自动发送：选择模型和智能体，说明你想做什么，然后发送。
+新会话打开时，该条目已经附加在消息框中。不会替你自动发送：选择模型和智能体，说明你想做什么，然后发送。
+
+[Issue 与 PR](/zh-cn/issues-and-prs/) 看板列出同样的条目，带筛选、预览、评论和评审，也可以从那里开始会话。
 
 ## 打开并管理拉取请求
 
-在 [git 视图](/zh-cn/git/) 的 **PR** 标签页中，你可以创建拉取请求、更新它、将草稿标记为就绪或合并它。OpenChamber 可以从你的变更生成 PR 标题和描述。
+在 [Git 面板](/zh-cn/git/) 的 **PR** 标签页中，你可以创建拉取请求、更新它、将草稿标记为就绪或合并它。OpenChamber 可以根据你的变更撰写标题和描述。
 
-## 将 issue 或 PR 关联到消息
+- **GitLab**：同一个标签页用来打开合并请求。合并时可以选择 merge 或 squash。
+- **Gitea**：与 GitHub 相同。
+- **Gerrit**：推送评审会创建一个变更，之后每次推送都会上传一个新的补丁集。参阅 [在 Gerrit 上推送评审](/zh-cn/git/#在-gerrit-上推送评审)。合并即 **合入**，要等变更满足它的合入要求。评审就是在项目的标签上投票，例如 Code-Review 和 Verified。
 
-在聊天输入框中打开 **+** 菜单并选择 **GitHub**。选择一个或多个 issue 或 pull request：每一个都会作为上下文随你的下一条消息一起发送（PR 可以带上它的 diff），会话的工作状态面板会保留指向它的链接。附加只是提供上下文；要做什么由你的消息来说明。
+## 将 issue 或拉取请求关联到消息
+
+在聊天输入框中打开 **+** 菜单，选择对应托管服务的关联项，例如 **关联 GitHub Issue 或 PR**、**关联 GitLab 议题或 MR** 或 **关联 Gerrit 变更**。选择一个或多个条目：每一个都会作为上下文随你的下一条消息一起发送，拉取请求可以带上它的 diff，会话的工作状态面板会保留指向它的链接。附加只是提供上下文；要做什么由你的消息来说明。
+
+Gerrit 没有 issue，所以那里只显示变更。
 
 ## 相关内容
 
-- [Git 与 GitHub 工作流](/zh-cn/git/) — 提交和管理分支
-- [Worktree 会话](/zh-cn/worktrees/) — issue 和 PR 会话从这里开始
+- [Issue 与 PR](/zh-cn/issues-and-prs/)：浏览、筛选、评论和评审条目
+- [Git 工作流](/zh-cn/git/)：提交、管理分支和推送评审
+- [Worktree 会话](/zh-cn/worktrees/)：issue 和拉取请求会话从这里开始
+- [Git 身份](/zh-cn/git-identities/)：以已连接的账号提交和推送
+- [集成](/zh-cn/integrations/)：每张托管服务卡片的详细说明

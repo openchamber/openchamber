@@ -21,7 +21,7 @@ Jeder Stop benennt sein Thema, erklärt es in ein bis zwei Sätzen und zeigt dan
 | **Kontext** | Eine unterstützende Änderung, damit der Rest verständlich bleibt. Kann überflogen werden. |
 | *(ohne Markierung)* | Ein gewöhnlicher Schritt in der Lesereihenfolge. |
 
-Die Markierung sagt, **wo Sie Ihre Aufmerksamkeit investieren sollten**, und nichts über die Qualität des Codes. Ein Stop wird nie markiert, weil darin etwas Falsches gefunden wurde — das Walkthrough meldet keine Funde, keine Schweregrade und keine Urteile. Wenn Code bewertet werden soll, ist das die Aktion **Review** in [Git & GitHub](/git/).
+Die Markierung sagt, **wo Sie Ihre Aufmerksamkeit investieren sollten**, und nichts über die Qualität des Codes. Ein Stop wird nie markiert, weil darin etwas Falsches gefunden wurde — das Walkthrough meldet keine Funde, keine Schweregrade und keine Urteile. Wenn Code bewertet werden soll, ist das die Aktion **Review** in [Git-Workflows](/git/).
 
 Die einzigen Markierungen, die tatsächlich auf ein Problem hinweisen, sind **Veraltet** und **Nicht abgedeckt** — und beide betreffen das Veralten des Walkthroughs selbst, nicht Ihren Code. Siehe unten.
 
@@ -33,7 +33,7 @@ Die einzigen Markierungen, die tatsächlich auf ein Problem hinweisen, sind **Ve
 | Gestaged | Nur das, was jetzt in einen Commit gehen würde |
 | Ungestaged | Arbeitsbaum und neue Dateien |
 | Dieser Branch | Jeder Commit auf diesem Branch, der nicht auf seinem Basis-Stand ist |
-| Pull Request | Die Änderung so, wie sie auf GitHub existiert |
+| Pull Request | Die Änderung so, wie sie auf ihrem Host existiert (GitHub, GitLab, Gitea oder das neueste Patchset auf Gerrit) |
 
 **Dieser Branch** bedeutet nicht „nicht gepushte Commits“ — es ist alles, was der Branch gegenüber seiner Basis hinzufügt, egal ob gepusht oder nicht. Nach einem Commit, aber vor dem Push, unterscheiden sich also Branch und Pull Request absichtlich: Der eine zeigt, was Sie getan haben, der andere, was Reviewer gerade sehen.
 
@@ -76,10 +76,10 @@ Neu generieren bedeutet neu schreiben statt patchen: Das vorherige Walkthrough g
 
 - Kommentieren Sie im Walkthrough jede Zeile genau wie in der Diff-Ansicht; Kommentare werden an den Chat-Composer angehängt.
 - Verfügbar auf Desktop- und Tablet-Breiten. In der VS-Code-Erweiterung oder der mobilen App nicht angeboten.
-- Eine Pull-Request-Review benötigt ein verbundenes GitHub-Konto — siehe [GitHub Issues & PRs](/github/).
+- Eine Pull-Request-Review benötigt ein verbundenes Konto beim Host des Repositorys. Siehe [Git-Hosts](/github/).
 
 ## Verwandt
 
-- [Git & GitHub](/git/) — das Changes-Panel, aus dem dies liest, und die Review-Aktion, die tatsächlich Code bewertet
-- [GitHub Issues & PRs](/github/) — GitHub verbinden, um Pull Requests zu prüfen
+- [Git-Workflows](/git/) — das Changes-Panel, aus dem dies liest, und die Review-Aktion, die tatsächlich Code bewertet
+- [Git-Hosts](/github/) — einen Host verbinden, um Pull Requests zu prüfen
 - [Anbieter, Modelle & Agents](/providers/) — woher das kleine Modell kommt

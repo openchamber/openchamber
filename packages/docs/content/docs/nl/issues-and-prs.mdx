@@ -5,7 +5,7 @@ description: Blader door de issues en pull requests van een project, of uw Linea
 
 # Issues en PR's
 
-Het bord **Issues and PRs** is een volledige pagina met de GitHub- of GitLab-issues en pull requests van een project (op GitLab merge requests), of uw Linear-issues. Kies een item en de voorvertoning opent naast de lijst. Als u hier een ander project bekijkt, verandert het project van de rest van de app niet mee.
+Het bord **Issues and PRs** is een volledige pagina met de GitHub-, GitLab-, Gitea- of Gerrit-issues en pull requests van een project (merge requests op GitLab, wijzigingen op Gerrit, dat geen issues heeft), of uw Linear-issues. Kies een item en de voorvertoning opent naast de lijst. Als u hier een ander project bekijkt, verandert het project van de rest van de app niet mee.
 
 ## Het bord openen
 
@@ -19,13 +19,17 @@ Het bord opent weer op het project, het tabblad en het team waar u het achterlie
 
 ## Items vinden
 
-Alles staat in één rij van de werkbalk. Links staat de projectkiezer, met projectpictogrammen en een zoekveld. Daarnaast wisselt u tussen **Issues**, **Pull requests** en **Linear**. Issues en pull requests komen van de eigen host van het project, GitHub of GitLab. Een project zonder zo'n remote toont alleen **Linear**.
+Alles staat in één rij van de werkbalk. Links staat de projectkiezer, met projectpictogrammen en een zoekveld. Daarnaast wisselt u tussen **Issues**, **Pull requests** en **Linear**. Issues en pull requests komen van de eigen host van het project: GitHub, GitLab, Gitea, Gerrit, of een host die een [extensie](/nl/extensions/#een-extensie-als-git-host) toevoegt. Het tabblad **Linear** verschijnt pas als Linear verbonden is. Een project op geen van deze hosts toont alleen dat tabblad, of meldt dat er niets te tonen is. Een remote op een hostalias uit `~/.ssh/config`, zoals `github.com-work`, telt als geen van deze hosts.
+
+Is de map van een project zelf geen Git-repository maar bevat ze wel repositories, dan kiest een tweede kiezer naast de projectkiezer wat het bord toont. **All repositories** staat bovenaan en is de standaard: het bord toont dan de issues en pull requests van alle GitHub-repositories in de map samen, en elke rij noemt haar repository. Zoeken werkt in alle repositories, ook met een geplakte link of een nummer. Een melding boven de lijst zegt hoeveel repositories niet zijn meegenomen, bijvoorbeeld een op GitLab, Gitea of Gerrit, of een die geen verbonden account kan lezen. Het menu van de melding toont welke en waarom. Kies één repository om alleen die te tonen. Het bord onthoudt de keuze per project, los van de repository die in de Git-weergave is gekozen.
+
+Reacties, labels, reviewers en mergen werken op de repository waar een item bij hoort. **New session** start nog steeds in de map van het project. **Changes** en **Walkthrough** openen de pull request in haar eigen repository en laten de repository die in de Git-weergave is gekozen ongemoeid. Werken in een worktree wordt voor deze items nog niet aangeboden. Een link naar een issue of pull request van een van deze repositories opent in de Tracker en wordt via die repository gelezen. Op de telefoon opent hij op het bord, dat naar **All repositories** wisselt om hem te vinden. De VS Code-extensie heeft geen bord, dus daar verandert niets.
 
 Op **Linear** wordt de projectkiezer een teamkiezer: kies **All teams** of één team. Hebt u meer dan één Linear-werkruimte verbonden, dan wisselt u van werkruimte in hetzelfde menu. Hoe u Linear verbindt, staat bij [Integraties](/nl/integrations/).
 
 Zoeken werkt met een titel, een nummer of een geplakte link. Het filtermenu blijft open terwijl u kiest, zodat u filters kunt combineren.
 
-Voor GitHub en GitLab:
+Voor GitHub, GitLab, Gitea en Gerrit:
 
 - Status: **Open**, **Closed**, **All**, en **Merged** voor pull requests
 - Personen: **Anyone**, **Assigned to me**, **Created by me**, en **Review requested** voor pull requests
@@ -44,9 +48,11 @@ De rij **Labels** heeft een potloodknop die een doorzoekbare lijst met de labels
 
 ## Reageren en reviewen
 
-Onder de activiteit van een issue of pull request staat een reactieveld. **Comment** plaatst uw tekst op GitHub of GitLab, net als <kbd>⌘</kbd>+<kbd>Enter</kbd> (<kbd>Ctrl</kbd>+<kbd>Enter</kbd> op Windows en Linux). De tekst blijft in het veld tot hij geplaatst is, dus bij een mislukte poging raakt u niets kwijt. Wisselt u naar een ander item, dan wordt het veld leeggemaakt. Linear-issues hebben geen reactieveld.
+Onder de activiteit van een issue of pull request staat een reactieveld. **Comment** plaatst uw tekst bij de host van de repository, net als <kbd>⌘</kbd>+<kbd>Enter</kbd> (<kbd>Ctrl</kbd>+<kbd>Enter</kbd> op Windows en Linux). De tekst blijft in het veld tot hij geplaatst is, dus bij een mislukte poging raakt u niets kwijt. Wisselt u naar een ander item, dan wordt het veld leeggemaakt. Linear-issues hebben geen reactieveld.
 
 Een open pull request (op GitLab een merge request) heeft ook **Approve** en **Request changes**, en de tekst in het veld gaat mee met de review. **Request changes** vraagt om tekst die zegt wat er moet veranderen. De review geldt voor de commits die de voorvertoning toont. Heeft iemand sindsdien gepusht, dan wordt de review geweigerd en ververst de voorvertoning, zodat u opnieuw kunt kijken. Op GitLab werkt **Request changes** als u reviewer van de merge request bent, en de reviewtekst wordt als aparte reactie geplaatst. Mislukt alleen die reactie, dan telt de review toch en blijft uw tekst in het veld.
+
+Een Gerrit-wijziging heeft een rij voor elk label van het project, zoals Code-Review en Verified, met de scores die u mag geven. Kies ze en kies **Vote**. Uw tekst gaat als bericht mee met de stemmen. Stemmen gelden voor de nieuwste patchset, dus ze worden niet aangeboden terwijl u een eerdere leest.
 
 ## Aan het werk
 
@@ -65,10 +71,12 @@ Naast de omvang staan twee knoppen. **Changes** opent de diff van de pull reques
 
 Onderaan vraagt **Merge** eerst om bevestiging en gebruikt het uw gebruikelijke mergemethode. Een concept krijgt ook **Ready for review**.
 
+Op Gerrit toont de voorvertoning ook het topic van de wijziging, en of ze privé of in uitvoering is. Heeft een wijziging meer dan één patchset, dan kiest een kiezer naast **Changes** uit welke patchset de bestanden en de diff komen; hij begint bij de nieuwste. **Merge** heet hier **Submit**, en die knop blijft uit tot aan de indieningsvereisten van de wijziging is voldaan. De ontbrekende vereisten staan ernaast. **Close** en **Reopen** heten **Abandon change** en **Restore change**.
+
 Een open issue of pull request heeft onderaan ook **Close issue** of **Close pull request** (op GitLab **Close merge request**), en een gesloten item **Reopen issue** of **Reopen pull request** (**Reopen merge request**). Daar wordt niet om bevestiging gevraagd, want u kunt het terugdraaien. Een gemergde pull request kunt u niet sluiten of heropenen. Op GitHub wordt een issue gesloten als voltooid.
 
 ## Zie ook
 
-- [GitHub-issues en PR's](/nl/github/) om GitHub te verbinden en issues aan berichten toe te voegen
+- [Git-hosts](/nl/github/) om GitHub, GitLab, Gitea of Gerrit te verbinden en items aan berichten toe te voegen
 - [Worktree-sessies](/nl/worktrees/) voor waar worktree-sessies starten
 - [Integraties](/nl/integrations/) om Linear te verbinden en teams aan projecten te koppelen

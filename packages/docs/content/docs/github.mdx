@@ -1,38 +1,59 @@
 ---
-title: GitHub Issues & PRs
-description: Connect GitHub and start sessions from issues and pull requests.
+title: "Git hosts: issues and pull requests"
+description: Connect GitHub, GitLab, Gitea or Gerrit and work with issues and pull requests from OpenChamber.
 ---
 
-# GitHub Issues & PRs
+# Git hosts: issues and pull requests
 
-Connect your GitHub account and OpenChamber can pull in issues and pull requests, start a session straight from one, and open or update PRs for you.
+Connect an account on the host your project lives on and OpenChamber can list its issues and pull requests, start a session from one, and open, review and merge pull requests for you. Four hosts are built in: GitHub, including GitHub Enterprise; GitLab, including self-managed GitLab; Gitea; and Gerrit. An [extension](/extensions/#an-extension-as-a-git-host) can add another.
 
-## Connect GitHub
+The project's remote decides which host OpenChamber talks to. A project whose `origin` is on gitlab.com uses your GitLab account for the board, the pull request badge on its branches, and the Git panel. A remote on a host alias from `~/.ssh/config`, such as `github.com-work`, isn't matched to any host.
 
-1. Open **Settings → Integrations** and expand the **GitHub** card.
-2. Choose **Connect GitHub**. OpenChamber shows a link and a short code.
-3. Open the link, enter the code, and approve.
+The words follow the host. GitLab says merge request, and Gerrit says change.
 
-When it's connected, your account shows on the card. You can connect more than one account and switch between them, or disconnect at any time. If the `gh` CLI is signed in on the same machine, OpenChamber can use it as a fallback.
+## Connect a host
 
-## Start work from an issue or PR
+1. Open **Settings → Integrations**. Each host has its own card.
+2. Expand the card of your project's host and sign in:
+   - **GitHub**: choose **Connect GitHub**, open the link it shows, enter the short code and approve. For GitHub Enterprise, choose **Add instance** under **Other instances**, enter your server's address and paste a personal access token.
+   - **GitLab**: on gitlab.com, sign in with a short code, a personal access token, or the `glab` login. For a self-managed GitLab, add its address and paste a personal access token.
+   - **Gitea**: add your server's address and paste a personal access token.
+   - **Gerrit**: add your server's address, then your Gerrit username and an HTTP password.
 
-When you create a [worktree session](/worktrees/) with GitHub connected, you can start it from an issue or a pull request:
+When it's connected, your account shows on the card. You can connect more than one account on a host and switch between them, or disconnect at any time. If the `gh` CLI is signed in on the same machine, OpenChamber can use it for GitHub too. The scopes each token needs and the versions each host needs are in [Integrations](/integrations/#gitlab-gitea-and-gerrit).
+
+A connected account can also be the project's [Git identity](/git-identities/), so commits carry its name and pushes over HTTPS use its token.
+
+## Start work from an issue or pull request
+
+When you create a [worktree session](/worktrees/), you can start it from an issue or a pull request of the project's host:
 
 - pick an **issue** and OpenChamber names the branch after it
-- pick a **pull request** and it checks out the PR's branch; you can include the PR's diff so the agent has the full change
+- pick a **pull request** and it checks out the pull request's branch; you can include its diff so the agent has the whole change
+- pick a **Gerrit change** and it checks out the latest patchset on a branch named `change-<number>`
 
-The new session opens with the issue or PR already attached to the message box. Nothing is sent for you: choose the model and agent, say what you want done, and send.
+The new session opens with the item already attached to the message box. Nothing is sent for you: choose the model and agent, say what you want done, and send.
+
+The [Issues and PRs](/issues-and-prs/) board lists the same items, with filters, a preview, comments and reviews, and starts sessions from there too.
 
 ## Open and manage pull requests
 
-From the **PR** tab in the [git view](/git/), you can create a pull request, update it, mark a draft as ready, or merge it. OpenChamber can generate the PR title and description from your changes.
+From the **PR** tab in the [Git panel](/git/), you can create a pull request, update it, mark a draft as ready, or merge it. OpenChamber can write the title and description from your changes.
 
-## Link an issue or PR to a message
+- **GitLab**: the same tab opens merge requests. Merging offers merge and squash.
+- **Gitea**: the same as on GitHub.
+- **Gerrit**: you create a change by pushing for review, and each later push uploads a new patchset. See [Push for review on Gerrit](/git/#push-for-review-on-gerrit). Merging is **Submit**, and it waits until the change meets its submit requirements. Reviews are votes on the project's labels, such as Code-Review and Verified.
 
-In the chat composer, open the **+** menu and choose **GitHub**. Pick one or more issues or pull requests: each rides along with your next message as context (a PR can bring its diff), and the session's work status panel keeps a link to it. Attaching only adds context; your message says what to do with it.
+## Link an issue or pull request to a message
+
+In the chat composer, open the **+** menu and choose the link entry for your host, such as **Link GitHub Issue or PR**, **Link GitLab Issue or MR**, or **Link Gerrit change**. Pick one or more items. Each one goes with your next message as context, a pull request can bring its diff, and the session's work status panel keeps a link to it. Attaching only adds context; your message says what to do with it.
+
+Gerrit has no issues, so only changes show there.
 
 ## Related
 
-- [Git & GitHub Workflows](/git/) — commit and manage branches
-- [Worktree Sessions](/worktrees/) — where issue and PR sessions start
+- [Issues and PRs](/issues-and-prs/): browse, filter, comment on and review items
+- [Git Workflows](/git/): commit, manage branches and push for review
+- [Worktree Sessions](/worktrees/): where issue and pull request sessions start
+- [Git Identities](/git-identities/): commit and push as a connected account
+- [Integrations](/integrations/): every host card in detail

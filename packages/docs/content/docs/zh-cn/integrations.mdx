@@ -33,7 +33,19 @@ description: 连接 OpenChamber 所使用的服务和订阅。
 
 ## GitHub
 
-展开 **GitHub** 卡片并选择 **Connect GitHub**，用一个简短的设备码登录。连接后，OpenChamber 可以从 issue 和拉取请求开始会话、将它们附加到消息，以及创建或更新 PR。GitHub 能做的一切见 [GitHub Issue 与 PR](/zh-cn/github/)。
+展开 **GitHub** 卡片并选择 **Connect GitHub**，用一个简短的设备码登录。连接后，OpenChamber 可以从 issue 和拉取请求开始会话、将它们附加到消息，以及创建或更新 PR。各个 Git 托管服务能做的一切见 [Git 托管服务](/zh-cn/github/)。
+
+## GitLab、Gitea 和 Gerrit
+
+GitLab、Gitea 和 Gerrit 各自在 GitHub 旁边有一张卡片。连接后，它们的 issue 和拉取请求（GitLab 上叫合并请求，Gerrit 上叫变更）会像 GitHub 的一样，显示在 [Issue 与 PR](/zh-cn/issues-and-prs/) 看板和聊天的 **+** 菜单中。
+
+- **GitLab**：在 gitlab.com 上，用一个简短的设备码、个人访问令牌或服务器上的 `glab` 登录状态登录。对于自托管 GitLab，添加它的地址并粘贴一个带 `api` 权限范围的个人访问令牌。只有当服务器把 `OPENCHAMBER_GITLAB_CLIENT_ID` 设为在该实例上注册的应用时，那里才能使用设备码登录。
+- **Gitea**：添加你的实例地址，例如 `https://gitea.example.com`，并粘贴一个带 `write:repository`、`write:issue` 和 `read:user` 权限范围的个人访问令牌。卡片会链接到你实例上创建令牌的页面。Gitea 没有设备码或 CLI 登录。需要 Gitea 1.21 或更新版本，并且部署在地址的根路径上。Forgejo 使用相同的 API，应该也能用，但尚未测试。
+- **Gerrit**：添加你的实例地址，例如 `https://gerrit.example.com`，然后填写你的 Gerrit 用户名和 HTTP 密码。在 Gerrit 的 **Settings → HTTP Credentials** 中生成这个密码，卡片会链接到那里。你的登录密码不能用，没有用户名的账号也无法连接。需要 Gerrit 3.8 或更新版本，并且部署在地址的根路径上。评审地址与 Git 地址不同的站点，例如使用 `.gitcookies` 的 googlesource.com，不受支持。
+
+在 Gerrit 上你评审的是变更。变更的每次上传都是一个补丁集，在变更的预览中可以选择较早的补丁集来阅读。评审方式是在项目的标签上投票，例如 Code-Review 和 Verified；变更满足合入要求后，用 **合入** 让它落地。Gerrit 没有 issue，所以只显示变更。要创建变更，或为变更上传新的补丁集，请使用 Git 面板中的 **推送评审**；参阅 [Git](/zh-cn/git/#在-gerrit-上推送评审)。
+
+OpenChamber 使用哪张卡片上的账号，由项目的远程仓库决定；这些卡片上的任何账号都可以作为项目的 [Git 身份](/zh-cn/git-identities/)。[扩展](/zh-cn/extensions/#作为-git-托管服务的扩展) 可以再添加一个带自己卡片的托管服务。
 
 ## Linear
 
@@ -117,5 +129,5 @@ Resource Monitor 显示本机使用了多少 CPU 和内存，以及其中有多�
 
 ## 相关内容
 
-- [GitHub Issue 与 PR](/zh-cn/github/) — GitHub 在 OpenChamber 中能做的一切
+- [Git 托管服务](/zh-cn/github/) — GitHub、GitLab、Gitea 和 Gerrit 在 OpenChamber 中能做的一切
 - [工作树会话](/zh-cn/worktrees/) — issue 会话可以从哪里开始

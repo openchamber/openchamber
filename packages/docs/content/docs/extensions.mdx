@@ -60,6 +60,18 @@ Besides its panel on the rail, an extension can add entries to menus you already
 
 Some extensions show a live picture instead of a panel of their own: what an agent is working in on the server, such as a browser or a simulator. Click into the picture or type to take control, and the status line says **You have control**; the agent's own browser actions are refused until you press **Hand back to agent**. Copy and paste work as usual. Another device connected at the same time sees who is in control and cannot take it over. Such an extension can add its own controls beside the picture, an address bar above it or a tool column next to it for example.
 
+## An extension as a git host
+
+An extension can add a git host next to GitHub, GitLab, Gitea and Gerrit. Its permission dialog then has a line that starts with **Acts as the Git host** and names the host. The line also says what OpenChamber sends it: repository names, branches, and the issue and pull request text you write.
+
+Once you allow it, the host gets its own card in **Settings → Integrations**, next to the built-in hosts. Connect your account there with a token, and the host's address if the card asks for one. After that, a project whose remote is on that host works like any other: its issues and pull requests are on the [Issues and PRs](/issues-and-prs/) board and in the chat's **+** menu, its branches show pull request badges, and you can start a worktree from one of its pull requests. See [Git hosts](/github/) for what each of these does.
+
+Your token stays in OpenChamber. The extension asks OpenChamber to call the host for it, and OpenChamber adds the token to each call, only for the address you connected. The extension never receives it.
+
+Pausing the extension takes the host away until you turn it back on, and your account stays. Removing the extension forgets the account. VS Code doesn't show git hosts from extensions.
+
+The OpenChamber SDK has a working example, `examples/source-control-provider`, to start from when building one. See [Build an extension](/sdk/).
+
 ## Connect its account
 
 An extension that talks to a service gets a card at **Settings → Integrations** under **Extension accounts**. Depending on the service, the card asks for an API token, a username and token, or a client id for a sign-in flow. Choose **Connect**; **Disconnect** forgets the stored token. Extra fields the extension declares save on their own as you leave them.

@@ -13,11 +13,11 @@ worktree 세션은 자체 브랜치 위에서 체크아웃된 저장소 사본�
 2. **Start from**에서 하나를 고릅니다.
    - **new branch** — 브랜치 이름을 지정합니다
    - **existing branch** — 이미 가지고 있는 브랜치를 체크아웃합니다
-   - **PR or issue** — GitHub, Linear 또는 확장 기능에서 하나를 고릅니다. 브랜치 이름은 그 항목을 따라 정해지고(PR은 자체 브랜치를 체크아웃합니다), 항목은 첫 메시지에 첨부됩니다
+   - **PR or issue** — GitHub, GitLab, Gitea, Gerrit, Linear 또는 확장 기능에서 하나를 고릅니다. 브랜치 이름은 그 항목을 따라 정해지고(PR은 자체 브랜치를, Gerrit 변경은 최신 패치셋을 `change-<number>`에 체크아웃합니다), 항목은 첫 메시지에 첨부됩니다
 3. **Based on**(새 브랜치가 시작될 브랜치, 기본값은 원격 저장소의 기본 브랜치, 예: `origin/main`)과 **Folder name**을 확인하고, 필요할 때만 바꿉니다.
 4. 만듭니다. 프로젝트에 설정 명령이 있으면 생성 직후 실행됩니다.
 
-OpenChamber가 브랜치를 만들고 폴더를 설정한 뒤 그곳에서 새 세션을 엽니다. 바로 첫 메시지를 쓸 수 있습니다. [할 일](/ko/notes-todos-plans/)이나 [GitHub 이슈 또는 PR](/ko/github/)에서 바로 시작할 수도 있습니다.
+OpenChamber가 브랜치를 만들고 폴더를 설정한 뒤 그곳에서 새 세션을 엽니다. 바로 첫 메시지를 쓸 수 있습니다. [할 일](/ko/notes-todos-plans/)이나 [이슈 또는 풀 리퀘스트](/ko/github/)에서 바로 시작할 수도 있습니다.
 
 질문 없이 만들려면 같은 브랜치 메뉴에서 **빠른 worktree** 를 고르세요. OpenChamber가 브랜치 이름을 정하고 새 세션을 그곳으로 연결합니다.
 
@@ -40,4 +40,4 @@ worktree는 폴더가 사라졌거나, 브랜치가 detached 상태이거나, �
 ## 관련 항목
 
 - [Multi-run](/ko/multi-run/) — 여러 worktree 세션을 한 번에 시작하세요
-- [Git & GitHub Workflows](/ko/git/) — OpenChamber 안에서 커밋하고 통합하세요
+- [Git 워크플로](/ko/git/) — OpenChamber 안에서 커밋하고 통합하세요

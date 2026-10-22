@@ -60,6 +60,18 @@ Poza panelem na pasku bocznym rozszerzenie może dodawać pozycje do menu, z kt�
 
 Niektóre rozszerzenia pokazują obraz na żywo zamiast własnego panelu: to, w czym agent pracuje na serwerze, na przykład przeglądarkę albo symulator. Kliknij w obraz lub wpisz coś, aby przejąć kontrolę; wiersz stanu pokaże **Masz kontrolę**, a działania agenta w przeglądarce będą odrzucane, dopóki nie naciśniesz **Oddaj agentowi**. Kopiowanie i wklejanie działają jak zwykle. Inne urządzenie połączone w tym samym czasie widzi, kto ma kontrolę, i nie może jej przejąć. Takie rozszerzenie może dodać własne kontrolki obok obrazu, na przykład pasek adresu nad nim albo kolumnę narzędzi z boku.
 
+## Rozszerzenie jako host Git
+
+Rozszerzenie może dodać host Git obok GitHub, GitLab, Gitea i Gerrit. Jego okno uprawnień ma wtedy wiersz, który zaczyna się od **Działa jako host Git** i podaje nazwę hosta. Ten wiersz mówi też, co OpenChamber mu wysyła: nazwy repozytoriów, gałęzie oraz tekst issues i pull requestów, który piszesz.
+
+Gdy na to pozwolisz, host dostaje własną kartę w **Ustawienia → Integracje**, obok wbudowanych hostów. Połącz tam swoje konto tokenem, a także adresem hosta, jeśli karta o niego prosi. Od tej chwili projekt, którego remote jest na tym hoście, działa jak każdy inny: jego issues i pull requesty są na tablicy [Issues i PR-y](/pl/issues-and-prs/) i w menu **+** czatu, jego gałęzie pokazują znaczniki pull requestów, a z jego pull requesta możesz zacząć worktree. Co robi każda z tych rzeczy, opisuje strona [Hosty Git](/pl/github/).
+
+Twój token zostaje w OpenChamber. Rozszerzenie prosi OpenChamber, by wywołał host w jego imieniu, a OpenChamber dodaje token do każdego wywołania, tylko dla adresu, który połączyłeś. Rozszerzenie nigdy go nie dostaje.
+
+Wstrzymanie rozszerzenia zabiera host, dopóki go z powrotem nie włączysz, a Twoje konto zostaje. Usunięcie rozszerzenia zapomina konto. VS Code nie pokazuje hostów Git z rozszerzeń.
+
+SDK OpenChamber ma działający przykład, `examples/source-control-provider`, od którego można zacząć własny. Zobacz [Zbuduj rozszerzenie](/pl/sdk/).
+
 ## Połącz jego konto
 
 Rozszerzenie, które rozmawia z usługą, dostaje kartę w **Ustawienia → Integracje** w sekcji **Konta rozszerzeń**. Zależnie od usługi karta prosi o token API, nazwę użytkownika i token albo client id do logowania. Wybierz **Połącz**; **Rozłącz** zapomina zapisany token. Dodatkowe pola zadeklarowane przez rozszerzenie zapisują się same, gdy je opuszczasz.

@@ -1,30 +1,34 @@
 ---
 title: Tożsamości Git
-description: Commituj z właściwym imieniem i adresem e-mail dla każdego repozytorium.
+description: Commituj i wypychaj jako właściwa osoba w każdym repozytorium.
 ---
 
 # Tożsamości Git
 
-Tożsamość git to imię i adres e-mail, którymi podpisywane są Twoje commity. Jeśli pracujesz z repozytoriami osobistymi i służbowymi, możesz zapisać tożsamości i zastosować właściwą dla każdego repozytorium, zamiast polegać na jednym globalnym ustawieniu. Zarządzaj nimi w **Settings → Git**.
+Tożsamość git to imię i adres e-mail, które noszą Twoje commity, oraz sposób, w jaki repozytorium loguje się do swojego remote'a. Jeśli pracujesz z repozytoriami osobistymi i służbowymi, możesz zapisać tożsamości i zastosować właściwą dla każdego repozytorium. Zarządzaj nimi w **Settings → Git**.
 
 ## Dodaj tożsamość
 
 1. Otwórz **Settings → Git** i wybierz **New**.
-2. Wprowadź **name** i **email**, którymi chcesz commitować.
-3. Wybierz, jak uwierzytelnia się ze zdalnym repozytorium:
-   - **SSH** — wskaż klucz SSH
-   - **token** — użyj zapisanego poświadczenia dla hosta
+2. Wypełnij pola **Nazwa użytkownika** i **Adres e-mail**, którymi chcesz commitować.
+3. W polu **Uwierzytelnianie** wybierz, jak tożsamość wypycha i pobiera:
+   - **Ten komputer**: to, czego Git na tym komputerze już używa, na przykład klucze SSH, menedżer poświadczeń albo CLI `gh`
+   - **Konto**: wybrane przez Ciebie **Konto kontroli źródeł**, dowolne konto połączone na karcie hosta w [Integracjach](/pl/integrations/), na przykład GitHub, GitLab, Gitea albo Gerrit; wypychanie idzie przez HTTPS z tokenem tego konta
+   - **SSH**: klucz, który OpenChamber przechowuje dla tej tożsamości
+   - **Anonimowo**: czyta publiczne repozytoria przez HTTPS bez logowania i nie może wypychać
 4. Opcjonalnie nadaj jej kolor i ikonę, by łatwo było ją rozpoznać.
 
 Globalna tożsamość Twojego systemu również jest pokazana, tylko do odczytu.
 
+Na Gerrit tożsamość z kontem loguje się do Git Twoją nazwą użytkownika Gerrit i hasłem HTTP, które połączyłeś. Konto GitHub Enterprise obsługuje issues i pull requesty, ale klonowanie i wypychanie idą tam przez **Ten komputer** albo **SSH**.
+
 ## Zastosuj tożsamość do repozytorium
 
-Zastosowanie tożsamości zapisuje ją do **lokalnej** konfiguracji git tego repozytorium — wpływa tylko na to repozytorium, a nie na Twoje ustawienie globalne. Tożsamości SSH ustawiają też polecenie SSH, aby używać Twojego klucza; tożsamości tokenowe konfigurują przechowywanie poświadczeń dla hosta.
+Kliknij przycisk tożsamości u góry [panelu Git](/pl/git/) i wybierz jedną. Ekrany dodawania i klonowania oferują ten sam wybór. Tożsamość, która nie może dotrzeć do repozytorium, zostaje na liście jako wyłączona, z podanym powodem: konto na innym hoście, konto albo **Anonimowo** przy remote SSH, albo klucz SSH przy remote HTTPS.
 
-Możesz zaimportować tożsamości, które OpenChamber wykryje w Twoich istniejących poświadczeniach git, i zapisać je jako tożsamości tokenowe.
+Zastosowanie tożsamości zapisuje ją do **lokalnej** konfiguracji git tego repozytorium, więc wpływa tylko na to repozytorium, a Twoje ustawienie globalne zostaje bez zmian. Git w terminalu i powłoka agenta też jej używają. **Tożsamość systemowa** usuwa to, co zapisał OpenChamber, więc znów obowiązuje Twoja własna konfiguracja Git.
 
 ## Powiązane
 
-- [Przepływy Git i GitHub](/pl/git/) — commituj, używając ustawionej tożsamości
-- [Issues i PR na GitHub](/pl/github/) — połącz konto GitHub na potrzeby PR-ów
+- [Przepływy Git](/pl/git/): commituj, używając ustawionej tożsamości
+- [Hosty Git](/pl/github/): połącz konto na GitHub, GitLab, Gitea albo Gerrit

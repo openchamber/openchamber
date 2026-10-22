@@ -60,6 +60,18 @@ Neben ihrem Panel in der Leiste kann eine Erweiterung Einträge in Menüs ergän
 
 Manche Erweiterungen zeigen statt eines eigenen Panels ein Live-Bild: das, worin ein Agent auf dem Server gerade arbeitet, etwa einen Browser oder einen Simulator. Klicke in das Bild oder tippe, um die Steuerung zu übernehmen; die Statuszeile zeigt dann **Du steuerst**, und die Browser-Aktionen des Agenten werden abgelehnt, bis du **An Agent zurückgeben** drückst. Kopieren und Einfügen funktionieren wie gewohnt. Ein gleichzeitig verbundenes anderes Gerät sieht, wer steuert, und kann die Steuerung nicht übernehmen. Eine solche Erweiterung kann neben dem Bild eigene Bedienelemente zeigen, zum Beispiel eine Adressleiste darüber oder eine Werkzeugspalte daneben.
 
+## Eine Erweiterung als Git-Host
+
+Eine Erweiterung kann neben GitHub, GitLab, Gitea und Gerrit einen weiteren Git-Host hinzufügen. Ihr Berechtigungsdialog hat dann eine Zeile, die mit **Dient als Git-Host** beginnt und den Host nennt. Die Zeile sagt auch, was OpenChamber an ihn sendet: Repository-Namen, Branches und den Text deiner Issues und Pull Requests.
+
+Sobald du sie erlaubst, bekommt der Host eine eigene Karte unter **Einstellungen → Integrationen**, neben den eingebauten Hosts. Verbinde dort dein Konto mit einem Token und, falls die Karte danach fragt, der Adresse des Hosts. Danach funktioniert ein Projekt, dessen Remote auf diesem Host liegt, wie jedes andere: Seine Issues und Pull Requests stehen auf dem Board [Issues und PRs](/issues-and-prs/) und im Menü **+** des Chats, seine Branches zeigen Pull-Request-Badges, und du kannst einen Worktree aus einem seiner Pull Requests starten. Was jede dieser Funktionen tut, steht unter [Git-Hosts](/github/).
+
+Dein Token bleibt in OpenChamber. Die Erweiterung bittet OpenChamber, den Host für sie aufzurufen, und OpenChamber fügt das Token jedem Aufruf hinzu, nur für die Adresse, die du verbunden hast. Die Erweiterung bekommt es nie.
+
+Pausierst du die Erweiterung, verschwindet der Host, bis du sie wieder einschaltest, und dein Konto bleibt. Entfernst du die Erweiterung, wird das Konto vergessen. VS Code zeigt keine Git-Hosts aus Erweiterungen.
+
+Das OpenChamber SDK hat ein funktionierendes Beispiel, `examples/source-control-provider`, als Ausgangspunkt für einen eigenen Host. Siehe [Eine Erweiterung bauen](/sdk/).
+
 ## Ihr Konto verbinden
 
 Eine Erweiterung, die mit einem Dienst spricht, bekommt eine Karte unter **Einstellungen → Integrationen** im Abschnitt **Erweiterungskonten**. Je nach Dienst fragt die Karte nach einem API-Token, nach Benutzername und Token oder nach einer Client-ID für einen Anmeldeablauf. Wähle **Verbinden**; **Trennen** vergisst den gespeicherten Token. Zusätzliche Felder, die die Erweiterung deklariert, speichern sich von selbst, sobald du sie verlässt.

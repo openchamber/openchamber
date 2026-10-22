@@ -13,11 +13,11 @@ Bir worktree oturumu, repo'nuzun kendi checkout edilmiş kopyasında ve kendi br
 2. **Start from** altında birini seçin:
    - **new branch** — branch'e ad verin
    - **existing branch** — zaten sahip olduğunuz bir branch'i checkout edin
-   - **PR or issue** — GitHub, Linear veya bir eklentiden birini seçin; branch adı ondan gelir (bir PR kendi branch'ini checkout eder) ve öğe ilk mesajınıza eklenir
+   - **PR or issue** — GitHub, GitLab, Gitea, Gerrit, Linear veya bir eklentiden birini seçin; branch adı ondan gelir (bir PR kendi branch'ini, bir Gerrit değişikliği ise son yama setini `change-<number>` üzerinde checkout eder) ve öğe ilk mesajınıza eklenir
 3. **Based on** (yeni branch'in başlayacağı branch; varsayılan olarak uzak deponun varsayılan branch'i, örneğin `origin/main`) ve **Folder name** alanlarını kontrol edin; yalnızca gerekirse değiştirin.
 4. Oluşturun. Projede kurulum komutları varsa hemen ardından çalışırlar.
 
-OpenChamber branch'i oluşturur, klasörü hazırlar ve orada ilk mesajınızı bekleyen yeni bir oturum açar. Bunu bir [todo](/notes-todos-plans/) ya da [GitHub issue veya PR](/github/) üzerinden de başlatabilirsiniz.
+OpenChamber branch'i oluşturur, klasörü hazırlar ve orada ilk mesajınızı bekleyen yeni bir oturum açar. Bunu bir [todo](/notes-todos-plans/) ya da bir [issue veya pull request](/github/) üzerinden de başlatabilirsiniz.
 
 Soruları atlamak için aynı dal menüsünden **Hızlı worktree** seçin: OpenChamber dala bir ad verir ve yeni oturumu ona yönlendirir.
 
@@ -40,4 +40,4 @@ Klasörü kaybolduysa, branch'i detached durumdaysa ya da bir merge veya rebase 
 ## İlgili
 
 - [Multi-run](/multi-run/) — birçok worktree oturumunu aynı anda başlatın
-- [Git & GitHub Workflows](/git/) — OpenChamber içinden commit edin ve integrate edin
+- [Git İş Akışları](/git/) — OpenChamber içinden commit edin ve integrate edin

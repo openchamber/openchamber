@@ -19,7 +19,7 @@ Abra pelo ícone **Percurso** na barra direita ou pelo botão **Percurso com IA*
 | No stage | Só o que iria para um commit agora |
 | Fora do stage | Árvore de trabalho e arquivos novos |
 | Este branch | Todos os commits do branch que não estão na base |
-| Pull request | A mudança como ela existe no GitHub |
+| Pull request | A mudança como ela existe no host (GitHub, GitLab, Gitea ou o último patchset do Gerrit) |
 
 **Este branch** não quer dizer "commits sem push": é tudo o que o branch acrescenta à sua base, com push ou sem. Por isso, depois do commit e antes do push, ele e o pull request divergem de propósito: um mostra o que você fez, o outro o que os revisores veem agora.
 
@@ -62,10 +62,10 @@ Regenerar não remenda, reescreve: o percurso anterior vai ao modelo como contex
 
 - Você pode comentar qualquer linha como na visão de diff; os comentários se anexam ao campo do chat.
 - Disponível em desktop e larguras de tablet. Não é oferecido na extensão do VS Code nem no app móvel.
-- Percorrer um pull request exige uma conta do GitHub conectada — veja [Issues e PRs do GitHub](/github/).
+- Percorrer um pull request exige uma conta conectada no host do repositório. Veja [Hosts Git](/github/).
 
 ## Relacionado
 
-- [Git e GitHub](/git/) — o painel de mudanças de onde isso lê, e a ação Review, que de fato julga o código
-- [Issues e PRs do GitHub](/github/) — conecte o GitHub para percorrer pull requests
+- [Fluxos de Git](/git/) — o painel de mudanças de onde isso lê, e a ação Review, que de fato julga o código
+- [Hosts Git](/github/) — conecte um host para percorrer pull requests
 - [Provedores, modelos e agentes](/providers/) — de onde vem o modelo pequeno

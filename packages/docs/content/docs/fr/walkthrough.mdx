@@ -19,7 +19,7 @@ Ouvrez-le par l’icône **Parcours** dans la barre de droite, ou par le bouton 
 | Indexées | Uniquement ce qui partirait dans un commit maintenant |
 | Non indexées | Copie de travail et nouveaux fichiers |
 | Cette branche | Tous les commits de la branche absents de sa base |
-| Pull request | La modification telle qu’elle existe sur GitHub |
+| Pull request | La modification telle qu’elle existe sur son hébergeur (GitHub, GitLab, Gitea, ou le dernier patchset sur Gerrit) |
 
 **Cette branche** ne veut pas dire « commits non poussés » : c’est tout ce que la branche ajoute à sa base, poussé ou non. Après un commit mais avant un push, elle et la pull request diffèrent donc volontairement : l’une montre ce que vous avez fait, l’autre ce que voient les relecteurs.
 
@@ -62,10 +62,10 @@ Régénérer ne rapièce pas, cela réécrit : le parcours précédent est fourn
 
 - Vous pouvez commenter n’importe quelle ligne comme dans la vue diff ; les commentaires se rattachent au champ du chat.
 - Disponible sur ordinateur et sur les largeurs de tablette. Non proposé dans l’extension VS Code ni dans l’application mobile.
-- Parcourir une pull request exige un compte GitHub connecté — voir [Issues et PR GitHub](/github/).
+- Parcourir une pull request exige un compte connecté sur l’hébergeur du dépôt. Voir [Hôtes Git](/github/).
 
 ## Voir aussi
 
-- [Git et GitHub](/git/) — le panneau des modifications qu’il lit, et l’action Review qui, elle, juge le code
-- [Issues et PR GitHub](/github/) — connectez GitHub pour parcourir les pull requests
+- [Workflows Git](/git/) — le panneau des modifications qu’il lit, et l’action Review qui, elle, juge le code
+- [Hôtes Git](/github/) — connectez un hébergeur pour parcourir les pull requests
 - [Fournisseurs, modèles et agents](/providers/) — d’où vient le petit modèle

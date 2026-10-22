@@ -60,6 +60,18 @@ Raydaki panelinin yanı sıra bir uzantı, zaten kullandığınız menülere gir
 
 Bazı uzantılar kendi paneli yerine canlı bir görüntü gösterir: bir ajanın sunucuda içinde çalıştığı şey, örneğin bir tarayıcı veya bir simülatör. Kontrolü almak için görüntüye tıklayın ya da yazın; durum satırı **Kontrol sizde** der ve **Ajana geri ver** düğmesine basana kadar ajanın tarayıcı eylemleri reddedilir. Kopyalama ve yapıştırma her zamanki gibi çalışır. Aynı anda bağlı başka bir cihaz kontrolün kimde olduğunu görür ve onu devralamaz. Böyle bir uzantı, görüntünün yanına kendi kontrollerini ekleyebilir, örneğin üstüne bir adres çubuğu veya yanına bir araç sütunu.
 
+## Git sunucusu olarak bir uzantı
+
+Bir uzantı GitHub, GitLab, Gitea ve Gerrit'in yanına bir Git sunucusu ekleyebilir. O zaman izin iletişim kutusunda sunucunun adını veren ve **Git sunucusu olarak çalışır** diyen bir satır bulunur. Aynı satır OpenChamber'ın ona ne gönderdiğini de söyler: depo adları, branch'ler ve yazdığınız issue ile pull request metinleri.
+
+İzin verdiğinizde sunucu, **Ayarlar → Entegrasyonlar** içinde yerleşik sunucuların yanında kendi kartını alır. Hesabınızı orada bir jetonla, kart isterse sunucunun adresiyle de bağlayın. Bundan sonra remote'u o sunucuda olan bir proje diğerleri gibi çalışır: issue'ları ve pull request'leri [Issue'lar ve PR'lar](/tr/issues-and-prs/) panosunda ve sohbetin **+** menüsünde görünür, branch'leri pull request rozetleri gösterir ve pull request'lerinden birinden worktree başlatabilirsiniz. Bunların her birinin ne yaptığı için bkz. [Git sunucuları](/tr/github/).
+
+Jetonunuz OpenChamber'da kalır. Uzantı, sunucuyu kendisi adına çağırmasını OpenChamber'dan ister; OpenChamber jetonu her çağrıya yalnızca bağladığınız adres için ekler. Uzantı jetonu hiçbir zaman almaz.
+
+Uzantıyı duraklatmak, siz yeniden açana kadar sunucuyu kaldırır; hesabınız kalır. Uzantıyı kaldırmak hesabı unutur. VS Code, uzantılardan gelen Git sunucularını göstermez.
+
+OpenChamber SDK'sinde başlangıç için çalışan bir örnek var: `examples/source-control-provider`. Bkz. [Uzantı geliştirme](/tr/sdk/).
+
 ## Hesabını bağlama
 
 Bir hizmetle konuşan uzantı, **Ayarlar → Entegrasyonlar** altında **Uzantı hesapları** bölümünde bir kart alır. Hizmete göre kart bir API jetonu, kullanıcı adı ve jeton ya da oturum açma akışı için bir client id ister. **Bağlan** seçeneğini seçin; **Bağlantıyı kes** kayıtlı jetonu unutur. Uzantının bildirdiği ek alanlar siz alandan çıkınca kendiliğinden kaydedilir.

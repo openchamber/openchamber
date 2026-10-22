@@ -369,14 +369,15 @@
           }
         },
         {
-          "label": "Git & GitHub",
+          "label": "Git",
           "link": "/git/",
           "translations": {
-            "nl": "Git en GitHub",
-            "fr": "Git et GitHub",
-            "ja": "Git と GitHub",
-            "de": "Git und GitHub",
-            "tr": "Git ve GitHub"
+            "nl": "Git",
+            "fr": "Git",
+            "es": "Git",
+            "ja": "Git",
+            "de": "Git",
+            "tr": "Git"
           }
         },
         {
@@ -397,20 +398,20 @@
           }
         },
         {
-          "label": "GitHub Issues & PRs",
+          "label": "Git Hosts",
           "link": "/github/",
           "translations": {
-            "nl": "GitHub-issues en PR's",
-            "uk": "Завдання та PR GitHub",
-            "zh-CN": "GitHub 工单与 PR",
-            "es": "Issues y PRs de GitHub",
-            "pt-BR": "Issues e PRs do GitHub",
-            "ko": "GitHub 이슈 및 PR",
-            "pl": "Zgłoszenia i PR-y GitHub",
-            "fr": "Issues et PR GitHub",
-            "ja": "GitHub Issues と PR",
-            "de": "GitHub-Issues und PRs",
-            "tr": "GitHub issue'ları ve PR'lar"
+            "nl": "Git-hosts",
+            "uk": "Git-хости",
+            "zh-CN": "Git 托管服务",
+            "es": "Hosts Git",
+            "pt-BR": "Hosts Git",
+            "ko": "Git 호스트",
+            "pl": "Hosty Git",
+            "fr": "Hôtes Git",
+            "ja": "Git ホスト",
+            "de": "Git-Hosts",
+            "tr": "Git sunucuları"
           }
         },
         {

@@ -13,11 +13,11 @@ Uma sessão de worktree roda em sua própria cópia do seu repositório, em seu 
 2. Em **Start from**, escolha uma opção:
    - **novo branch** — nomeie o branch
    - **branch existente** — faça checkout de um branch que você já tem
-   - **PR or issue** — escolha um do GitHub, do Linear ou de uma extensão; o branch recebe o nome dele (um PR faz checkout do próprio branch) e o item é anexado à sua primeira mensagem
+   - **PR or issue** — escolha um do GitHub, GitLab, Gitea, Gerrit, Linear ou de uma extensão; o branch recebe o nome dele (um PR faz checkout do próprio branch, e uma alteração do Gerrit, do seu último patchset em `change-<number>`) e o item é anexado à sua primeira mensagem
 3. Confira **Based on** (o branch de onde um novo parte; por padrão, o branch padrão do remoto, como `origin/main`) e **Folder name**; mude só se precisar.
 4. Crie-a. Se o projeto tiver comandos de setup, eles rodam logo em seguida.
 
-O OpenChamber cria o branch, configura a pasta e abre uma nova sessão ali, pronta para sua primeira mensagem. Você também pode iniciar uma direto de uma [tarefa](/pt-br/notes-todos-plans/) ou de uma [issue ou PR do GitHub](/pt-br/github/).
+O OpenChamber cria o branch, configura a pasta e abre uma nova sessão ali, pronta para sua primeira mensagem. Você também pode iniciar uma direto de uma [tarefa](/pt-br/notes-todos-plans/) ou de uma [issue ou pull request](/pt-br/github/).
 
 Para pular as perguntas, escolha **Worktree rápido** no mesmo menu de branches: o OpenChamber dá nome ao branch e aponta a nova sessão para ele.
 
@@ -40,4 +40,4 @@ Um worktree pode precisar de atenção se sua pasta sumiu, se seu branch está e
 ## Relacionado
 
 - [Multi-run](/pt-br/multi-run/) — lance muitas sessões de worktree de uma vez
-- [Fluxos de Git e GitHub](/pt-br/git/) — faça commit e integre de dentro do OpenChamber
+- [Fluxos de Git](/pt-br/git/) — faça commit e integre de dentro do OpenChamber
