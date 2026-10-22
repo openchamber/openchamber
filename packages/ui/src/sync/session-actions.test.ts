@@ -55,6 +55,8 @@ const deletedCleanupIdentities: Array<{ runtimeKey: string; directory: string; s
 const movedSessionDirectories: Array<{ sessionID: string; directory: string }> = []
 const globalArchivedSessions: Session[] = []
 let runtimeKey = "default-runtime"
+const permissionPolicy = new Map<string, boolean>()
+let permissionPolicyRevision = 0
 const AMBIGUOUS_TRANSPORT_FAILURE = Symbol("ambiguous-transport-failure")
 
 const notFound = (kind: string) => Object.assign(new Error(`${kind}NotFoundError`), { status: 404 })
@@ -281,6 +283,14 @@ mock.module("@/lib/runtime-fetch", () => ({
     const payload = JSON.parse(String(init?.body ?? "{}"))
     openchamberRouteRequests.push({ path, body: payload })
     beforeArchiveRouteResolve?.(path)
+    if (path.startsWith("/api/permission-auto-accept")) {
+      const sessionId = path.split("/sessions/")[1]
+      if (sessionId) {
+        permissionPolicy.set(decodeURIComponent(sessionId), payload.enabled)
+        permissionPolicyRevision += 1
+      }
+      return Response.json({ sessions: Object.fromEntries(permissionPolicy), revision: permissionPolicyRevision })
+    }
     const answer = path.endsWith("/unarchive")
       ? unarchiveBatchResponse
       : path.endsWith("/links")
@@ -378,6 +388,8 @@ mock.module("./session-deletion-cleanup", () => ({
 }))
 
 mock.module("./sync-refs", () => ({
+  getAllSyncSessionMap: () => sessionRecords,
+  getDirectoryState: () => undefined,
   getSyncSessionDirectory: () => null,
   registerSessionDirectory: (sessionID: string, directory: string) => {
     registeredSessionDirectories.push({ sessionID, directory })
@@ -2375,6 +2387,70 @@ describe("forkAfterMessage", () => {
     expect(replyCalls).toEqual([])
     expect(selectedSessions).toEqual([])
   })
+
+  for (const enabled of [false, true]) {
+    for (const forkPoint of ["answer", "prompt"] as const) {
+      test(`persists the source permission choice in VS Code (${enabled}, ${forkPoint})`, async () => {
+        const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window")
+        const { usePermissionStore } = await import("@/stores/permissionStore")
+        usePermissionStore.getState().reset()
+        Object.defineProperty(globalThis, "window", { configurable: true, value: { __VSCODE_CONFIG__: {} } })
+        permissionPolicy.clear()
+        permissionPolicy.set(sourceSession.id, enabled)
+        permissionPolicyRevision = 0
+        sessionRecords.set(sourceSession.id, sourceSession)
+        const source = createStore({}, { session: [sourceSession], message: { [sourceSession.id]: transcript } })
+        try {
+          const { forkAfterMessage, forkFromMessage, setActionRefs } = await import("./session-actions")
+          setActionRefs(createChildStores([[sourceSession.directory, source]]), () => sourceSession.directory)
+          if (forkPoint === "answer") await forkAfterMessage(sourceSession.id, "msg-answer-2")
+          else await forkFromMessage(sourceSession.id, "msg-user-2")
+          expect(permissionPolicy.get(forkedSession.id)).toBe(enabled)
+          expect(usePermissionStore.getState().getSessionMode(forkedSession.id)).toBe(enabled ? "auto" : "ask")
+        } finally {
+          if (originalWindow) Object.defineProperty(globalThis, "window", originalWindow)
+          else Reflect.deleteProperty(globalThis, "window")
+          usePermissionStore.getState().reset()
+          sessionRecords.delete(sourceSession.id)
+        }
+      })
+    }
+  }
+
+  for (const outcome of ["runtime-switch", "read-failure", "write-failure"] as const) {
+    test(`retains the created VS Code fork without a copied mode after ${outcome}`, async () => {
+      const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window")
+      const { usePermissionStore } = await import("@/stores/permissionStore")
+      usePermissionStore.getState().reset()
+      Object.defineProperty(globalThis, "window", { configurable: true, value: { __VSCODE_CONFIG__: {} } })
+      permissionPolicy.clear()
+      permissionPolicy.set(sourceSession.id, true)
+      permissionPolicyRevision = 0
+      sessionRecords.set(sourceSession.id, sourceSession)
+      beforeArchiveRouteResolve = (path) => {
+        if (!path.startsWith("/api/permission-auto-accept")) return
+        if (outcome === "runtime-switch") runtimeKey = "another-runtime"
+        else if (outcome === "read-failure" || path.includes("/sessions/")) throw new Error("policy unavailable")
+      }
+      const source = createStore({}, { session: [sourceSession], message: { [sourceSession.id]: transcript } })
+      try {
+        const { forkAfterMessage, setActionRefs } = await import("./session-actions")
+        setActionRefs(createChildStores([[sourceSession.directory, source]]), () => sourceSession.directory)
+        const fork = forkAfterMessage(sourceSession.id, "msg-answer-2")
+        if (outcome === "runtime-switch") await fork
+        else await expect(fork).rejects.toThrow("policy unavailable")
+        expect(permissionPolicy.get(forkedSession.id)).toBeUndefined()
+        expect(source.getState().session).toEqual([sourceSession, forkedSession])
+      } finally {
+        if (originalWindow) Object.defineProperty(globalThis, "window", originalWindow)
+        else Reflect.deleteProperty(globalThis, "window")
+        beforeArchiveRouteResolve = null
+        runtimeKey = "fork-runtime"
+        usePermissionStore.getState().reset()
+        sessionRecords.delete(sourceSession.id)
+      }
+    })
+  }
 })
 
 describe("forkFromLastCompletedTurn", () => {

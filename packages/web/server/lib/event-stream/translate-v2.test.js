@@ -56,6 +56,16 @@ describe('translateWireEvent', () => {
     expect(translateWireEvent(wire('session.compaction.started', { sessionID: 's1', reason: 'auto' }))).toEqual([]);
   });
 
+  test('session.forked preserves the source and fork ids for server policy inheritance', () => {
+    expect(translateWireEvent(wire('session.forked', { sessionID: 'fork', parentID: 'source' })))
+      .toEqual([{
+        type: 'session.forked', id: 'evt_1', created: 1000,
+        properties: { sessionID: 'fork', parentID: 'source', directory: '/repo' },
+      }]);
+    expect(translateWireEvent(wire('session.forked', { sessionID: 'fork' }))).toEqual([]);
+    expect(translateWireEvent(wire('session.forked', { parentID: 'source' }))).toEqual([]);
+  });
+
   test('rename, move and usage all read as session.updated', () => {
     expect(translateWireEvent(wire('session.renamed', { sessionID: 's1', title: 'New' }))[0])
       .toMatchObject({ type: 'session.updated', properties: { info: { id: 's1', title: 'New' } } });
