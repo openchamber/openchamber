@@ -274,3 +274,18 @@ The rejected alternative was a second collector in the UI that loaded the
 descendants itself. It had the same wave size as the pipeline's, so the
 bounded work existed in two places and could drift apart — and the
 descendant count the dialog showed came from a third place again.
+
+### Why a field that holds no text costs no error
+
+A tool call's arguments are whatever the model and the tool produced, and the
+export reads a handful of fields of every call to find the file it touched or
+the command it ran. Most of the fields it probes are not there: a shell call
+names a command and no file, a read call names a path and no command.
+
+The schema the export reads a text field with ends in `catch`, so a field that
+holds no text comes back as no field rather than as a failure. The rejected
+alternative was a schema that fails, and it built an error object for every
+field that was not there, only to throw it away. Building those errors was
+most of what the projection spent: at 3000 tool calls the projection took
+about 200 ms, and the errors for the fields that were not there were the bulk
+of it.

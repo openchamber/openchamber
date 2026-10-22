@@ -6,9 +6,9 @@
  * of them — a path, a command, a description — and it has to know whether a
  * field really holds the text it looks like.
  *
- * These schemas are the boundary: a value is parsed once, and what comes
- * back is a domain value or nothing. A field that does not parse is treated
- * as absent, because a malformed field must not blank the whole call.
+ * This module is the boundary: a value is read once, and what comes back is
+ * a domain value or nothing. A field that does not hold text is treated as
+ * absent, because a malformed field must not blank the whole call.
  */
 
 import { z } from 'zod';
@@ -27,8 +27,16 @@ const jsonValueSchema: z.ZodType<JsonValue> = z.lazy(() => z.union([
 /** An object of JSON values, as a call's arguments and metadata are. */
 const jsonRecordSchema: z.ZodType<Record<string, JsonValue>> = z.record(z.string(), jsonValueSchema);
 
-/** A text field, trimmed, when the field holds text at all. */
-const textFieldSchema = z.string().trim().min(1);
+/**
+ * A text field, trimmed, when the field holds text at all.
+ *
+ * The schema ends in `catch` because a field that holds no text is an absent
+ * field, not a broken one: the export reads a handful of fields of every
+ * tool call, and most of the fields it probes are not there at all. A parse
+ * that fails would build an error object for every one of them, and nobody
+ * reads it.
+ */
+const textFieldSchema = z.string().trim().min(1).optional().catch(undefined);
 
 /**
  * The text of a field, when the field holds text.
@@ -38,7 +46,7 @@ const textFieldSchema = z.string().trim().min(1);
  */
 export const readTextField = (value: JsonValue | undefined): string | undefined => {
   const parsed = textFieldSchema.safeParse(value);
-  return parsed.success ? parsed.data : undefined;
+  return parsed.data;
 };
 
 /**

@@ -227,13 +227,16 @@ const commandOf = (call: ExportToolCall): string | undefined => {
   return command ? command.split('\n')[0].trim() : undefined;
 };
 /** A one-line description of what a call did. */
-const describeCall = (call: ExportToolCall): string | undefined => {
+const describeCall = (
+  call: ExportToolCall,
+  target: string | undefined,
+  command: string | undefined,
+): string | undefined => {
   const name = normalizeToolName(call.name);
   if (name === 'subagent') {
     return call.description ?? call.agent ?? 'sub-agent';
   }
-  if (name === 'shell') return commandOf(call);
-  const target = targetOf(call);
+  if (name === 'shell') return command;
   if (target) return target;
   return textField(call.input.description)
     ?? textField(call.input.query)
@@ -244,10 +247,15 @@ const describeCall = (call: ExportToolCall): string | undefined => {
 /** Projects one tool call. */
 const projectTool = (call: ExportToolCall, mode: ProjectionMode): ProjectedTool => {
   const descriptionText = call.description;
+  // The call's own target and command are read once. The description and the
+  // rows below show the same two fields, and a call names its file in one of
+  // four.
+  const target = targetOf(call);
+  const command = commandOf(call);
   const projected: ProjectedTool = {
     name: call.name,
     status: call.status,
-    description: describeCall(call),
+    description: describeCall(call, target, command),
     error: call.error,
     startedAt: call.startedAt,
     endedAt: call.endedAt,
@@ -261,9 +269,7 @@ const projectTool = (call: ExportToolCall, mode: ProjectionMode): ProjectedTool 
     outputTruncated: false,
   };
 
-  const target = targetOf(call);
   if (target) projected.target = target;
-  const command = commandOf(call);
   if (command) projected.command = command;
 
   if (call.output) {
