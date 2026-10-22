@@ -238,7 +238,12 @@ const buildData = (nodes: ProjectedNode[], mode: ProjectionMode, rootAgent?: str
           id,
           kind: 'message',
           role: entry.role,
-          agent: owner.name ?? entry.agent,
+          // The same name the entry shows: the agent that wrote the message,
+          // and the session's own agent as the fallback. Inside a sub-agent's
+          // block the block's name is the agent.
+          agent: owner.nested
+            ? (owner.name ?? entry.agent)
+            : (entry.agent ?? owner.name),
           model: entry.model,
           search: searchTextOf(entry, mode).toLowerCase(),
           depth: entry.depth,
@@ -329,10 +334,10 @@ const buildData = (nodes: ProjectedNode[], mode: ProjectionMode, rootAgent?: str
  * sub-agent's session, or a record the runtime added, keeps the role it was
  * recorded with: it was not the agent speaking.
  */
-const ownerLabel = (owner: EntryOwner): string => (
+const ownerLabel = (owner: EntryOwner, agent?: string): string => (
   owner.nested
     ? `↳ ${owner.name ?? exportText('export.dialog.subagentLabel')}`
-    : agentLabel(owner.name)
+    : agentLabel(agent ?? owner.name)
 );
 
 /**
@@ -349,9 +354,14 @@ const renderEntryHtml = (
   switch (entry.kind) {
     case 'message': {
       const label = entry.role === 'assistant'
-        ? ownerLabel(owner)
+        ? ownerLabel(owner, entry.agent)
         : roleLabel(entry.role);
-      const agent = owner.name ?? entry.agent ?? '';
+      // The entry's agent: the message names the agent that wrote it, and
+      // the session's own agent is the fallback. Inside a sub-agent's block
+      // the block's name is the agent.
+      const agent = owner.nested
+        ? (owner.name ?? entry.agent ?? '')
+        : (entry.agent ?? owner.name ?? '');
       const time = formatTime(entry.timestamp);
       const model = entry.model;
       const meta = [time, model]
@@ -381,6 +391,11 @@ const renderEntryHtml = (
       const duration = formatDuration(entry.tool.startedAt, entry.tool.endedAt);
       const meta = [status, duration].filter(Boolean).map((value) => `<span>${escapeHtml(value)}</span>`).join('');
       const description = entry.tool.description ?? entry.tool.target ?? entry.tool.command ?? '';
+      // The agent the call asked for, when the description does not name it.
+      // The block that would name it is not in the document, so the row is
+      // what the reader has.
+      const agent = entry.tool.agent && entry.tool.agent !== description ? entry.tool.agent : '';
+      const desc = [description, agent].filter(Boolean).join(' · ');
       const details: string[] = [];
       if (entry.tool.prompt) {
         const prompt = mode === 'readable' ? readablePrompt(entry.tool.prompt) : entry.tool.prompt;
@@ -415,7 +430,7 @@ const renderEntryHtml = (
       }
       return `<article class="entry tool" data-id="${escapeHtml(entry.event.id)}" data-kind="tool" data-tool="${escapeHtml(entry.tool.name)}" data-status="${escapeHtml(entry.tool.status)}" data-agent="${escapeHtml(owner.name ?? entry.tool.agent ?? '')}">
   <header><span class="tool-name">${escapeHtml(entry.tool.name)}</span>${meta ? `<span class="meta">${meta}</span>` : ''}</header>
-  ${description ? `<div class="desc">${escapeHtml(description)}</div>` : ''}
+  ${desc ? `<div class="desc">${escapeHtml(desc)}</div>` : ''}
   ${details.join('\n  ')}
 </article>`;
     }
@@ -468,6 +483,12 @@ const renderSubagentHtml = (subagent: ProjectedSubagent, mode: ProjectionMode, d
   const dispatchResult = mode === 'detailed' && dispatched?.output
     ? `<details><summary>${escapeHtml(exportText('export.dispatch.result'))}</summary><pre>${escapeHtml(dispatched.output)}</pre></details>`
     : '';
+  // The runtime cut the call's result short. The same fact an ordinary tool
+  // call carries, on the call that started this sub-agent.
+  const dispatchTruncation = dispatched?.call ? runtimeTruncationNote(dispatched.call) : '';
+  const dispatchTruncationNote = dispatchTruncation
+    ? `<p class="note">${escapeHtml(dispatchTruncation)}</p>`
+    : '';
   const dispatchDetails = renderDispatchCallDetails(subagent, mode);
 
   // The agent the call named, when it differs from the agent that ran: the
@@ -509,11 +530,16 @@ const renderSubagentHtml = (subagent: ProjectedSubagent, mode: ProjectionMode, d
   // A native details element does that without any script, so the page
   // works offline, and the entries inside stay in the document, so the
   // search and the filters still reach them.
+  //
+  // The label, the title and the time are three elements of their own, so
+  // the summary's own gap keeps them apart: the time does not run into the
+  // title. An entry's header separates its metadata the same way.
   return `<section class="subagent depth-${depth}" data-id="${escapeHtml(subagent.childSessionID)}" data-agent="${escapeHtml(subagent.agent ?? '')}">
-  <details open><summary><span class="subagent-summary">${escapeHtml(label)} ${title}${meta ? `<span class="meta">${meta}</span>` : ''}</span></summary>
+  <details open><summary><span class="subagent-label">${escapeHtml(label)}</span>${title}${meta ? `<span class="meta">${meta}</span>` : ''}</summary>
   ${concurrent}
   ${dispatchNote}
   ${dispatchResult}
+  ${dispatchTruncationNote}
   ${dispatchDetails}
   ${invoked}
   ${task}
@@ -743,8 +769,11 @@ export const renderExportHtml = (
     ? exportText('export.header.sessionSingle')
     : exportText('export.header.sessionsPlural', { count: options.sessionCount });
 
+  // The page speaks the reader's language, so it declares that language: a
+  // screen reader reads the text in the voice of the language the page names,
+  // and the browser's spell checker and hyphenation follow it too.
   return `<!DOCTYPE html>
-<html lang="en">
+<html lang="${escapeHtml(getCurrentIntlLocale())}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">

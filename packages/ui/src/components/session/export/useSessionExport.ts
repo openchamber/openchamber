@@ -27,7 +27,7 @@ import {
   type ExportFormat,
   type SessionMessageRecord,
 } from '@/lib/exportSession';
-import { readExportSessions, type ExportSession } from '@/lib/export/collect';
+import { countSubagentTasks, readExportSessions, type ExportSession } from '@/lib/export/collect';
 import { buildExport } from '@/lib/export/pipeline';
 import { useSessionExportDialog, type ExportChoice, type UseSessionExportDialog } from './useSessionExportDialog';
 
@@ -63,6 +63,33 @@ type UseSessionExport = UseSessionExportDialog & {
 export const useSessionExport = (): UseSessionExport => {
   const { t } = useI18n();
   const loadRecords = useSessionMessageRecordsForExport();
+
+  /**
+   * Counts the sub-agent tasks a session has, with the walk the export
+   * itself makes.
+   *
+   * The count and the document come from one walk, so the number the dialog
+   * shows is the number the document carries: the sessions the list names
+   * below the root, and the children the records name. A child the list does
+   * not name is a child the export covers, so it belongs in the count too.
+   */
+  const countSubagents = React.useCallback(async (target: SessionExportTarget): Promise<number> => {
+    const { activeSessions, archivedSessions } = useGlobalSessionsStore.getState();
+    const allSessions = readExportSessions([...activeSessions, ...archivedSessions]);
+    const root = allSessions.find((session) => session.id === target.sessionID);
+
+    return countSubagentTasks({
+      root: {
+        id: target.sessionID,
+        title: target.title ?? 'Session',
+        parentID: root?.parentID,
+        agent: root?.agent,
+        createdAt: root?.createdAt,
+      },
+      sessions: allSessions,
+      load: async (sessionID) => loadRecords({ sessionID, directory: target.directory }).catch(() => null),
+    });
+  }, [loadRecords]);
 
   const writeExport = React.useCallback(async (
     target: SessionExportTarget,
@@ -153,7 +180,7 @@ export const useSessionExport = (): UseSessionExport => {
 
   const dialog = useSessionExportDialog((target, choice) => {
     void writeExport(target, choice);
-  });
+  }, countSubagents);
 
   return { ...dialog, openExport: dialog.openDialog };
 };

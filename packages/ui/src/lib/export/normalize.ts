@@ -390,6 +390,15 @@ export const normalizeExportTimeline = (options: {
 
   /** The child session a call started, and the call that started it. */
   const invocationByChildID = new Map<string, { sessionID: string; partID: string; description?: string; agent?: string; timestamp?: number }>();
+  /**
+   * The child sessions a report named.
+   *
+   * A report is a recorded identity, like a call: it says which session the
+   * work happened in. A child the parent names only by a report is still a
+   * child the export read and shows, so the relationship is established even
+   * though no call is there to establish it.
+   */
+  const childIDsByReport = new Set<string>();
 
   for (const collected of sessions) {
     const info: ExportSessionInfo = {
@@ -616,6 +625,7 @@ export const normalizeExportTimeline = (options: {
         // is the time the event is placed by.
         const reportedAt = readTimestamp(run.reportedAt);
         reportMissingTimestamp(reportedAt);
+        childIDsByReport.add(run.childSessionID);
         events.push({
           ...base,
           id: `${collected.sessionID}:${message.id}:run`,
@@ -633,6 +643,7 @@ export const normalizeExportTimeline = (options: {
       if (dispatched) {
         const reportedAt = readTimestamp(dispatched.reportedAt);
         reportMissingTimestamp(reportedAt);
+        childIDsByReport.add(dispatched.sessionID);
         events.push({
           ...base,
           id: `${collected.sessionID}:${message.id}:dispatched`,
@@ -756,6 +767,9 @@ export const normalizeExportTimeline = (options: {
   for (const collected of sessions) {
     if (collected.depth === 0) continue;
     if (invocationByChildID.has(collected.sessionID)) continue;
+    // The parent's own report named this child, so the history does establish
+    // the relationship: the child is shown, and there is nothing to report.
+    if (childIDsByReport.has(collected.sessionID)) continue;
     localFindings.push({
       kind: 'unresolved-invocation',
       sessionID: collected.sessionID,

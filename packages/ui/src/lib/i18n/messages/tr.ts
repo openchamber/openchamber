@@ -665,7 +665,7 @@ export const dict = {
   'sessions.sidebar.session.export.dialog.includeSubtasks': 'Alt agent görevlerini dahil et',
   'sessions.sidebar.session.export.dialog.confirm': 'Dışa aktar',
   'sessions.sidebar.session.export.dialog.descriptionNoSubtasks': 'Dışa aktarma, konuşmanın okunabilir bir kaydıdır; alt ajanların çalışması yerinde görünür.',
-  'sessions.sidebar.session.export.dialog.descriptionIncomplete': 'Oturum listesi hâlâ yükleniyor, bu yüzden alt ajan görevlerinin sayısı henüz bilinmiyor. Dışa aktarma, bulduğu alt ajan işini yine de içerir.',
+  'sessions.sidebar.session.export.dialog.descriptionIncomplete': 'Alt ajan görevlerinin sayısı henüz bilinmiyor, çünkü veriler okunuyor. Dışa aktarma, bulduğu alt ajan işini yine de içerir.',
   'sessions.sidebar.session.export.dialog.retryCount': 'Yeniden denetle',
   'sessions.sidebar.session.export.dialog.format': 'Biçim',
   'sessions.sidebar.session.export.dialog.detail': 'Ayrıntı',

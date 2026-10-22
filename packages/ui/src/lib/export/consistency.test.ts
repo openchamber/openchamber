@@ -2,17 +2,32 @@
  * The Header export and the Sidebar export must mean the same thing.
  *
  * Both read the same pipeline and the same sessions, so the document they
- * produce for the same session is the same document. The test builds the
- * export the way each caller builds it and compares the result.
+ * produce for the same session is the same document. The test reads the
+ * wiring that makes it so, and the document the pipeline builds.
  */
 
 import { describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { Session } from '@/lib/opencode/model';
-import { buildExportDocument, formatSessionAsMarkdown } from '@/lib/exportSession';
+import { renderExportDocument } from '@/lib/exportSession';
 import { buildExport, buildExportFromRecords } from '@/lib/export/pipeline';
-import { listDescendantSessions } from '@/lib/export/collect';
+import { countSubagentTasks, listDescendantSessions } from '@/lib/export/collect';
 import { renderExportMarkdown } from '@/lib/export/markdown';
 import { assistantMessage, subagentCall, textPart, userMessage, type Record_ } from './fixtures';
+
+const here = dirname(fileURLToPath(import.meta.url));
+
+/**
+ * The two places that open the export dialog, and the hook they both use.
+ *
+ * The files are read, not run: the invariant is about the wiring, and the
+ * wiring is what the two files say.
+ */
+const headerSource = readFileSync(join(here, '..', '..', 'components', 'layout', 'Header.tsx'), 'utf-8');
+const sidebarSource = readFileSync(join(here, '..', '..', 'components', 'session', 'sidebar', 'sessions', 'SessionNodeItem.tsx'), 'utf-8');
+const exportHookSource = readFileSync(join(here, '..', '..', 'components', 'session', 'export', 'useSessionExport.ts'), 'utf-8');
 
 const session = (id: string, overrides: Partial<Session> = {}): Session => ({
   id,
@@ -47,30 +62,40 @@ const sessions: Session[] = [
 ];
 
 describe('export consistency', () => {
-  test('the Header path and the Sidebar path produce the same document', () => {
-    // The Header builds the export from the session list and the records it
-    // loaded.
-    const header = buildExportDocument({
-      root: { id: 'ses_root', title: 'Root', createdAt: 0 },
+  test('the document does not depend on where the export started', () => {
+    // The Header and the Sidebar open the same dialog and hand the pipeline
+    // the same session, so the document they write is the same document.
+    // The target session names it; the rest of it is the history and
+    // nothing else.
+    const build = (title: string) => buildExportFromRecords({
+      root: { id: 'ses_root', title },
       sessions: [
-        { id: 'ses_root', title: 'Root', createdAt: 0 },
-        { id: 'ses_child', parentID: 'ses_root', title: 'Child', agent: 'reviewer', createdAt: 0 },
+        { id: 'ses_root', title },
+        { id: 'ses_child', parentID: 'ses_root', title: 'Child', agent: 'reviewer' },
       ],
       records: new Map([['ses_root', rootRecords], ['ses_child', childRecords]]),
-    }, 'markdown', 'readable');
+    }, 'readable');
 
-    // The Sidebar holds the child tree already and hands it over.
-    const sidebar = formatSessionAsMarkdown(rootRecords, 'Root', [{
-      id: 'ses_child',
-      title: 'Child',
-      agent: 'reviewer',
-      records: childRecords,
-      children: [],
-    }], { rootSessionID: 'ses_root' });
+    const first = renderExportDocument(build('Root'), 'markdown', 'readable', 'Root');
+    const second = renderExportDocument(build('Renamed'), 'markdown', 'readable', 'Renamed');
 
-    // The two documents differ only in the line that names the export time.
-    const withoutHeader = (text: string) => text.split('\n').slice(2).join('\n');
-    expect(withoutHeader(header)).toBe(withoutHeader(sidebar));
+    // The heading names the session. Everything below it is the same
+    // document, so the title of the target changes nothing else.
+    expect(first).toContain('# Root');
+    expect(second).toContain('# Renamed');
+    const content = (text: string) => text.split('\n').slice(3).join('\n');
+    expect(content(second)).toBe(content(first));
+  });
+
+  test('the Header and the Sidebar write the export through one path', () => {
+    // Both places call the same hook, so the format, the detail level and
+    // the coverage are chosen in one place, and the two documents are the
+    // same document. The hook builds the document with the one pipeline and
+    // writes it with the one renderer.
+    expect(headerSource).toContain('useSessionExport()');
+    expect(sidebarSource).toContain('useSessionExport()');
+    expect(exportHookSource).toContain('buildExport(');
+    expect(exportHookSource).toContain('renderExportDocument(');
   });
 
   test('the same session produces the same document twice', () => {
@@ -150,6 +175,28 @@ describe('export consistency', () => {
 
     expect(result.timeline.sessions.size).toBe(1);
     expect(result.timeline.events.some((event) => event.sessionID === 'ses_child')).toBe(false);
+  });
+
+  test('the number the dialog shows is the number the document carries', async () => {
+    // The dialog counts with the export's own walk: the session list and the
+    // children the records name. A child the list does not name is a child
+    // the export covers, so it belongs in the count too.
+    const list = [{ id: 'ses_root', title: 'Root' }];
+    const load = async (sessionID: string) => {
+      if (sessionID === 'ses_root') return rootRecords;
+      if (sessionID === 'ses_child') return childRecords;
+      return null;
+    };
+
+    const count = await countSubagentTasks({ root: { id: 'ses_root', title: 'Root' }, sessions: list, load });
+    const result = await buildExport({ root: { id: 'ses_root', title: 'Root' }, sessions: list, load }, 'readable');
+
+    // The session list names no child, the root's records name one, and the
+    // export covers it: the count says one, and the document carries the
+    // root and that child.
+    expect(count).toBe(1);
+    expect(result.timeline.sessions.size).toBe(2);
+    expect(count).toBe(result.timeline.sessions.size - 1);
   });
 
   test('the Header export and the Sidebar export carry the same sub-agent transcript', async () => {

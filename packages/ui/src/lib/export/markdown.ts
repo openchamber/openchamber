@@ -77,7 +77,12 @@ const messageHeading = (
   model?: string,
   rootAgent?: string,
 ): string => {
-  const label = entry.role === 'assistant' ? agentLabel(rootAgent) : roleLabel(entry.role);
+  // The agent that wrote the message, and the session's own agent as the
+  // fallback: a session that switched agents has messages of more than one,
+  // and the name on a message is the name of the agent that wrote it.
+  const label = entry.role === 'assistant'
+    ? agentLabel(entry.agent ?? rootAgent)
+    : roleLabel(entry.role);
   const time = timeLabel(entry.timestamp);
   const head = time ? `${time} · ${label}` : label;
   return model ? `### ${head} — ${model}` : `### ${head}`;
@@ -125,6 +130,10 @@ const toolLine = (tool: ProjectedNode & { kind: 'tool' }): string => {
   if (duration) parts.push(duration);
   const description = tool.tool.description ?? tool.tool.target ?? tool.tool.command;
   if (description) parts.push(description);
+  // The agent the call asked for, when the description does not name it. The
+  // block that would name it is not in the document, so the row is what the
+  // reader has.
+  if (tool.tool.agent && tool.tool.agent !== description) parts.push(tool.tool.agent);
   return `*${parts.join(' · ')}*`;
 };
 
@@ -314,6 +323,10 @@ const renderSubagent = (subagent: ProjectedSubagent, mode: ProjectionMode): stri
   if (mode === 'detailed' && dispatched?.output) {
     parts.push(`**${exportText('export.dispatch.result')}**\n\n${asQuote(dispatched.output)}`);
   }
+  // The runtime cut the call's result short. The same fact an ordinary tool
+  // call carries, on the call that started this sub-agent.
+  const dispatchTruncation = dispatched?.call ? runtimeTruncationNote(dispatched.call) : '';
+  if (dispatchTruncation) parts.push(`*${dispatchTruncation}*`);
   if (mode === 'detailed' && dispatched) {
     parts.push(...renderDispatchCall(dispatched));
   }

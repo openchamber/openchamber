@@ -756,7 +756,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.export.dialog.includeSubtasks': 'サブエージェントタスクを含める',
   'sessions.sidebar.session.export.dialog.confirm': 'エクスポート',
   'sessions.sidebar.session.export.dialog.descriptionNoSubtasks': 'エクスポートは会話の読みやすい記録で、サブエージェントの作業が該当箇所に配置されます。',
-  'sessions.sidebar.session.export.dialog.descriptionIncomplete': 'セッション一覧はまだ読み込み中のため、サブエージェントのタスク数はまだわかりません。エクスポートは見つかったサブエージェントの作業を含めます。',
+  'sessions.sidebar.session.export.dialog.descriptionIncomplete': 'データがまだ読み込まれているため、サブエージェントのタスク数はまだわかりません。エクスポートは見つかったサブエージェントの作業を含めます。',
   'sessions.sidebar.session.export.dialog.retryCount': 'もう一度確認',
   'sessions.sidebar.session.export.dialog.format': '形式',
   'sessions.sidebar.session.export.dialog.detail': '詳細',

@@ -757,7 +757,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.session.export.dialog.includeSubtasks": "Додати завдання під-агентів",
   "sessions.sidebar.session.export.dialog.confirm": "Експортувати",
   'sessions.sidebar.session.export.dialog.descriptionNoSubtasks': 'Експорт — це читабельний запис розмови, де робота під-агентів стоїть на своєму місці.',
-  'sessions.sidebar.session.export.dialog.descriptionIncomplete': 'Список сесій ще завантажується, тож кількість завдань субагентів поки невідома. Експорт усе одно включає знайдену роботу субагентів.',
+  'sessions.sidebar.session.export.dialog.descriptionIncomplete': 'Кількість завдань під-агентів поки невідома, бо дані ще читаються. Експорт усе одно включає знайдену роботу під-агентів.',
   'sessions.sidebar.session.export.dialog.retryCount': 'Перевірити ще раз',
   'sessions.sidebar.session.export.dialog.format': 'Формат',
   'sessions.sidebar.session.export.dialog.detail': 'Детальність',

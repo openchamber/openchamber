@@ -54,8 +54,6 @@ type ExportSessionDialogProps = {
    * Asking again reads the list as it is now.
    */
   onRetryCount?: () => void;
-  /** Whether the export is running. */
-  busy?: boolean;
 };
 
 const FORMAT_LABELS = new Map<ExportFormat, string>([
@@ -85,7 +83,6 @@ export const ExportSessionDialog: React.FC<ExportSessionDialogProps> = ({
   onIncludeSubagentsChange,
   onConfirm,
   onRetryCount,
-  busy = false,
 }) => {
   const { t } = useI18n();
 
@@ -187,7 +184,7 @@ export const ExportSessionDialog: React.FC<ExportSessionDialogProps> = ({
           <Button type="button" onClick={() => onOpenChange(false)} variant="outline" size="sm">
             {t('sessions.sidebar.dialogs.cancel')}
           </Button>
-          <Button type="button" onClick={handleConfirm} size="sm" disabled={busy}>
+          <Button type="button" onClick={handleConfirm} size="sm">
             {t('sessions.sidebar.session.export.dialog.confirm')}
           </Button>
         </DialogFooter>

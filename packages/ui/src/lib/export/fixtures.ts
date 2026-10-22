@@ -105,6 +105,8 @@ export const subagentCall = (
     endedAt?: number;
     output?: string;
     error?: string;
+    /** The metadata the runtime reported for the call. */
+    metadata?: Metadata;
   } = {},
 ): Part => {
   const status = options.status ?? 'completed';
@@ -122,6 +124,9 @@ export const subagentCall = (
     prompt: options.prompt ?? 'Review the whole change',
     agent: options.agent ?? 'reviewer',
   };
+  const reported: Metadata = options.metadata ? { ...options.metadata } : {};
+  if (childID) reported.sessionID = childID;
+  const metadata = Object.keys(reported).length > 0 ? reported : undefined;
 
   if (status === 'running') {
     return {
@@ -129,7 +134,7 @@ export const subagentCall = (
       state: {
         status: 'running',
         input,
-        metadata: childID ? { sessionID: childID } : undefined,
+        metadata,
         time: { start: options.startedAt ?? 1000 },
       },
     };
@@ -141,7 +146,7 @@ export const subagentCall = (
         status: 'error',
         input,
         error: options.error ?? 'The subagent failed',
-        metadata: childID ? { sessionID: childID } : undefined,
+        metadata,
         time: { start: options.startedAt ?? 1000, end: options.endedAt ?? 2000 },
       },
     };
@@ -152,7 +157,7 @@ export const subagentCall = (
       status: 'completed',
       input,
       output: options.output ?? 'The review found blocking defects.',
-      metadata: childID ? { sessionID: childID } : undefined,
+      metadata,
       time: { start: options.startedAt ?? 1000, end: options.endedAt ?? 2000 },
     },
   };
@@ -173,6 +178,46 @@ export const shellCall = (messageID: string, command: string, startedAt = 1000, 
     time: { start: startedAt, end: endedAt },
   },
 });
+
+/**
+ * The report the runtime appends to the parent when a dispatched session
+ * finishes.
+ *
+ * A dispatch is not a sub-agent call: the parent asked for a session to be
+ * created, and the runtime appends this report when that session is done.
+ * The report names the session, so it is a line of relationship like a call.
+ */
+export const dispatchedSessionReport = (
+  sessionID: string,
+  id: string,
+  created: number,
+  options: {
+    childSessionID: string;
+    state?: 'completed' | 'error' | 'cancelled';
+    title?: string;
+    output?: string;
+  },
+): Record_ => {
+  const metadata: Metadata = {
+    source: 'openchamber-session',
+    sessionID: options.childSessionID,
+    state: options.state ?? 'completed',
+  };
+  if (options.title) metadata.title = options.title;
+
+  return {
+    info: {
+      id,
+      sessionID,
+      role: 'synthetic',
+      time: { created },
+      text: `<openchamber-session>\n${options.output ?? 'The result.'}\n</openchamber-session>`,
+      description: options.title,
+      metadata,
+    },
+    parts: [],
+  };
+};
 
 /**
  * The report the runtime appends to the parent when a background subagent

@@ -20,32 +20,13 @@ import { isVSCodeRuntime, openDesktopPath, revealDesktopPath, saveDesktopMarkdow
 import { getRevealLabelKey } from '@/lib/utils';
 import { formatMessageText } from '@/lib/messages/messageMarkdown';
 import { readTextField } from '@/lib/export/values';
-import { readInvocationChildSessionID } from '@/lib/export/childSession';
-import { buildExportFromRecords, type ExportPipelineResult } from '@/lib/export/pipeline';
-import type { ExportSession } from '@/lib/export/collect';
+import type { ExportPipelineResult } from '@/lib/export/pipeline';
 import { renderExportHtml } from '@/lib/export/html';
 import { renderExportJson } from '@/lib/export/json';
 import { renderExportMarkdown } from '@/lib/export/markdown';
 import type { ProjectionMode } from '@/lib/export/project';
 
 export type SessionMessageRecord = { info: Message; parts: Part[] };
-
-/**
- * A child session as the export takes it.
- *
- * The session's id is what joins the child to the call that started it, so a
- * caller that knows it should pass it. A caller that does not still gets a
- * readable export: the child is matched to its call by the description the
- * call recorded.
- */
-type ChildSessionExport = {
-  /** The child's session id, when the caller knows it. */
-  id?: string;
-  title: string;
-  agent?: string;
-  records: SessionMessageRecord[];
-  children: ChildSessionExport[];
-};
 
 /** The formats an export can be written in. */
 export type ExportFormat = 'markdown' | 'html' | 'json';
@@ -58,32 +39,6 @@ export type ExportFormat = 'markdown' | 'html' | 'json';
 export function formatMessageRecordText(record: SessionMessageRecord): string {
   return formatMessageText(record.parts, { user: record.info.role === 'user' });
 }
-
-type ExportSessionSource = {
-  /** The session the user asked to export. */
-  root: ExportSession;
-  /** Every session the client knows, active and archived. */
-  sessions: readonly ExportSession[];
-  /** The records of the sessions the export covers, keyed by session id. */
-  records: ReadonlyMap<string, SessionMessageRecord[]>;
-};
-
-/**
- * Builds the export and renders it in the requested format.
- */
-export const buildExportDocument = (
-  source: ExportSessionSource,
-  format: ExportFormat,
-  mode: ProjectionMode,
-): string => {
-  const result = buildExportFromRecords({
-    root: source.root,
-    sessions: source.sessions,
-    records: source.records,
-  }, mode);
-
-  return renderExportDocument(result, format, mode, source.root.title);
-};
 
 /**
  * Renders the export the pipeline produced, in the requested format.
@@ -108,98 +63,6 @@ export const renderExportDocument = (
     return renderExportHtml(projection, { title, mode, findings: timeline.findings, sessionCount, rootAgent });
   }
   return renderExportMarkdown(projection, { title, mode, findings: timeline.findings, sessionCount, rootAgent });
-};
-
-/**
- * The Markdown export of one session and its subagents.
- *
- * The caller passes the root's records and the child sessions below it. The
- * child sessions are joined to the root's calls by their session id, or by
- * the description the call recorded when the id is not known.
- */
-export const formatSessionAsMarkdown = (
-  messages: SessionMessageRecord[],
-  sessionTitle?: string | null,
-  childSessions?: ChildSessionExport[],
-  options: {
-    /** The root session's id, used to order the subagents against the parent. */
-    rootSessionID?: string;
-    /** The mode the document is written in. */
-    mode?: ProjectionMode;
-  } = {},
-): string => {
-  const rootID = options.rootSessionID ?? 'root';
-  const children = childSessions ?? [];
-
-  const records = new Map<string, SessionMessageRecord[]>();
-  const sessions: ExportSession[] = [{
-    id: rootID,
-    title: sessionTitle?.trim() || 'Session',
-  }];
-
-  // A child without a session id is joined to the call that recorded its
-  // description. The call names the child session it started, so the child
-  // takes that id and the pipeline ties the two together by it. A call that
-  // named no session at all leaves the child its own id, and the call's id
-  // is what ties the two together.
-  const usedCallIDs = new Set<string>();
-  let counter = 0;
-  const visit = (nodes: ChildSessionExport[], parentID: string): void => {
-    for (const child of nodes) {
-      counter += 1;
-      const call = child.id ? undefined : matchCallByDescription(messages, child, usedCallIDs);
-      const invocationKey = call && !call.childSessionID ? call.callID : undefined;
-      const id = child.id ?? call?.childSessionID ?? invocationKey ?? `child-${counter}`;
-      records.set(id, child.records);
-      sessions.push({
-        id,
-        parentID,
-        title: child.title,
-        agent: child.agent,
-        invocationKey,
-      });
-      visit(child.children, id);
-    }
-  };
-  visit(children, rootID);
-  records.set(rootID, messages);
-
-  return buildExportDocument({
-    root: sessions[0],
-    sessions,
-    records,
-  }, 'markdown', options.mode ?? 'readable');
-};
-
-/**
- * The call that recorded the child's description, and the child session it
- * names.
- *
- * The description is the only identity a child without a session id has, so
- * the call that wrote the same description is the one that started it. A
- * call that was already taken by another child is not a candidate.
- */
-const matchCallByDescription = (
-  messages: SessionMessageRecord[],
-  child: ChildSessionExport,
-  usedCallIDs: Set<string>,
-): { callID: string; childSessionID?: string } | undefined => {
-  const description = child.title.trim();
-  if (!description) return undefined;
-  for (const record of messages) {
-    for (const part of record.parts) {
-      if (part.type !== 'tool') continue;
-      if (usedCallIDs.has(part.callID)) continue;
-      const callDescription = readTextField(part.state.input.description);
-      if (callDescription !== description) continue;
-      usedCallIDs.add(part.callID);
-      return {
-        callID: part.callID,
-        childSessionID: readInvocationChildSessionID(part),
-      };
-    }
-  }
-  return undefined;
 };
 
 /** Downloads any exported text under the name the caller chose. */

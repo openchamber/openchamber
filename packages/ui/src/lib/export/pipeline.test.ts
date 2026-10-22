@@ -545,6 +545,106 @@ describe('export pipeline', () => {
     expect(readable).toContain('the rest of this result is in the JSON export');
   });
 
+  test('the call that started a sub-agent says when the runtime cut its result short', () => {
+    // The same fact an ordinary tool call carries, on the call that started
+    // the sub-agent.
+    const input = fixture({
+      root: session('ses_root', { title: 'Root' }),
+      sessions: [
+        session('ses_root', { title: 'Root' }),
+        session('ses_child', { title: 'Child', parentID: 'ses_root', agent: 'reviewer' }),
+      ],
+      records: {
+        ses_root: [
+          {
+            info: {
+              id: 'a1', sessionID: 'ses_root', role: 'assistant', agent: 'build',
+              providerID: 'anthropic', modelID: 'claude-opus-4-1', time: { created: 2000 },
+            },
+            parts: [subagentCall('a1', {
+              childSessionID: 'ses_child',
+              metadata: { truncated: true, outputPath: '/tmp/oc-full-output.txt' },
+            })],
+          },
+        ],
+        ses_child: [assistantMessage('ses_child', 'ca1', 2500, 'Child work')],
+      },
+    });
+
+    for (const mode of ['readable', 'detailed'] as const) {
+      const output = markdown(input, mode);
+
+      expect(output).toContain('The runtime cut this output short');
+      expect(output).toContain('/tmp/oc-full-output.txt');
+    }
+
+    const { projection, timeline } = build(input, 'detailed');
+    const html = renderExportHtml(projection, {
+      title: 'Root',
+      mode: 'detailed',
+      findings: timeline.findings,
+      sessionCount: timeline.sessions.size,
+    });
+
+    expect(html).toContain('The runtime cut this output short');
+    expect(html).toContain('/tmp/oc-full-output.txt');
+  });
+
+  test('a sub-agent call that named no task says what kind of call it was', () => {
+    // The document's own words, in the reader's language. The export used to
+    // write a literal that no locale could translate.
+    const input = fixture({
+      root: session('ses_root', { title: 'Root' }),
+      records: {
+        ses_root: [
+          {
+            info: {
+              id: 'a1', sessionID: 'ses_root', role: 'assistant', agent: 'build',
+              providerID: 'anthropic', modelID: 'claude-opus-4-1', time: { created: 2000 },
+            },
+            parts: [{
+              id: 'a1-subagent', sessionID: 'ses_root', messageID: 'a1', type: 'tool',
+              callID: 'a1-call', tool: 'subagent',
+              state: {
+                status: 'completed',
+                input: { prompt: 'Do the work' },
+                output: 'The result',
+                time: { start: 1000, end: 2000 },
+              },
+            }],
+          },
+        ],
+      },
+    });
+
+    const output = markdown(input);
+
+    expect(output).toContain('Sub-agent');
+  });
+
+  test('the readable view names the agent a call asked for', () => {
+    // The child is not in the document, so the row is what the reader has:
+    // it has to name the agent the call asked for.
+    const input = fixture({
+      root: session('ses_root', { title: 'Root' }),
+      records: {
+        ses_root: [
+          {
+            info: {
+              id: 'a1', sessionID: 'ses_root', role: 'assistant', agent: 'build',
+              providerID: 'anthropic', modelID: 'claude-opus-4-1', time: { created: 2000 },
+            },
+            parts: [subagentCall('a1', { childSessionID: 'ses_missing', agent: 'writer' })],
+          },
+        ],
+      },
+    });
+
+    const output = markdown(input);
+
+    expect(output).toContain('writer');
+  });
+
   test('the detailed view carries the tool input and metadata', () => {
     const input = fixture({
       root: session('ses_root', { title: 'Root' }),

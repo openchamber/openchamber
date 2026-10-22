@@ -776,7 +776,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.export.dialog.includeSubtasks': '包含子 Agent 任務',
   'sessions.sidebar.session.export.dialog.confirm': '匯出',
   'sessions.sidebar.session.export.dialog.descriptionNoSubtasks': '匯出是對話的可讀記錄，子代理的工作會放在對應的位置。',
-  'sessions.sidebar.session.export.dialog.descriptionIncomplete': '工作階段清單仍在載入，因此還不知道子代理程式任務的數量。匯出仍會包含它找到的子代理程式工作。',
+  'sessions.sidebar.session.export.dialog.descriptionIncomplete': '資料仍在讀取，因此還不知道子代理程式任務的數量。匯出仍會包含它找到的子代理程式工作。',
   'sessions.sidebar.session.export.dialog.retryCount': '重新檢查',
   'sessions.sidebar.session.export.dialog.format': '格式',
   'sessions.sidebar.session.export.dialog.detail': '詳細程度',

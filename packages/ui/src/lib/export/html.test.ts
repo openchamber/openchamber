@@ -12,6 +12,7 @@
 import { describe, expect, test } from 'bun:test';
 import { Window, type Element } from 'happy-dom';
 import type { Session } from '@/lib/opencode/model';
+import { useI18nStore } from '@/lib/i18n';
 import { buildExportFromRecords } from './pipeline';
 import { renderExportHtml } from './html';
 import { assistantMessage, subagentCall, type Record_ } from './fixtures';
@@ -40,8 +41,8 @@ const rootRecords: Record_[] = [delegation('a1', 'ses_child', 'ses_root')];
 const childRecords: Record_[] = [delegation('ca1', 'ses_grand', 'ses_child')];
 const grandRecords: Record_[] = [assistantMessage('ses_grand', 'ga1', 2500, 'The needle is here')];
 
-/** The page the export writes, with its own script running in it. */
-const openPage = (): Window => {
+/** The page the export writes, as text. */
+const pageHtml = (): string => {
   const result = buildExportFromRecords({
     root: session('ses_root', { title: 'Root' }),
     sessions: [
@@ -56,12 +57,17 @@ const openPage = (): Window => {
     ]),
   }, 'readable');
 
-  const html = renderExportHtml(result.projection, {
+  return renderExportHtml(result.projection, {
     title: 'Root',
     mode: 'readable',
     findings: result.timeline.findings,
     sessionCount: result.timeline.sessions.size,
   });
+};
+
+/** The page the export writes, with its own script running in it. */
+const openPage = (): Window => {
+  const html = pageHtml();
 
   const dom = new Window({ url: 'https://localhost/' });
   dom.document.write(html);
@@ -156,5 +162,23 @@ describe('the HTML page keeps the match on the page', () => {
     }
     const count = dom.document.getElementById('count')?.textContent ?? '';
     expect(count).toContain('0');
+  });
+});
+
+describe('the HTML page names the language it is written in', () => {
+  test('the page declares the language of the document', () => {
+    // The document's text is the reader's language, and the page says so:
+    // a screen reader reads the text in the voice of the language the page
+    // names, and the browser's spell checker follows it too.
+    const previous = useI18nStore.getState().locale;
+    try {
+      useI18nStore.setState({ locale: 'de' });
+      expect(pageHtml()).toContain('<html lang="de-DE">');
+
+      useI18nStore.setState({ locale: 'ja' });
+      expect(pageHtml()).toContain('<html lang="ja-JP">');
+    } finally {
+      useI18nStore.setState({ locale: previous });
+    }
   });
 });

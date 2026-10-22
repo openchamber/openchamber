@@ -17,8 +17,10 @@ import { renderExportJson } from './json';
 import type { ExportTimeline } from './events';
 import {
   assistantMessage,
+  dispatchedSessionReport,
   shellCall,
   subagentCall,
+  subagentReport,
   textPart,
   timedTextPart,
   userMessage,
@@ -371,6 +373,126 @@ describe('the text of a message keeps the place of its own part', () => {
 });
 
 describe('the coverage of the sub-agent transcripts', () => {
+  test('a child the report named is not reported as unreadable', async () => {
+    // The report the runtime appended names the child, and the export read
+    // its transcript and shows it. The relationship is established, so a
+    // complete export does not claim that something could not be read.
+    const root = session('ses_root', { title: 'Root' });
+    const result = await buildExport({
+      root,
+      sessions: [root],
+      load: async (sessionID) => {
+        if (sessionID === 'ses_root') {
+          return [dispatchedSessionReport('ses_root', 'r1', 2100, {
+            childSessionID: 'ses_dispatched',
+            title: 'Peer session',
+            output: 'The dispatched answer',
+          })];
+        }
+        if (sessionID === 'ses_dispatched') {
+          return [assistantMessage('ses_dispatched', 'd1', 2200, 'The dispatched transcript')];
+        }
+        return null;
+      },
+    }, 'readable');
+
+    const document = renderExportMarkdown(result.projection, {
+      title: 'Root',
+      mode: 'readable',
+      findings: result.timeline.findings,
+      sessionCount: result.timeline.sessions.size,
+    });
+
+    expect(document).toContain('The dispatched transcript');
+    expect(result.timeline.findings.some((finding) => finding.kind === 'unresolved-invocation')).toBe(false);
+    expect(document).not.toContain('Incomplete export');
+  });
+
+  test('a child the background report named is not reported as unreadable', async () => {
+    // The parent session was resumed from an earlier point, so the call that
+    // started the child is not among the records the export read. The report
+    // is there, and a report is a line of relationship like a call.
+    const root = session('ses_root', { title: 'Root' });
+    const result = await buildExport({
+      root,
+      sessions: [root],
+      load: async (sessionID) => {
+        if (sessionID === 'ses_root') {
+          return [subagentReport('ses_root', 'r1', 2100, {
+            childSessionID: 'ses_bg',
+            output: 'The background answer',
+          })];
+        }
+        if (sessionID === 'ses_bg') {
+          return [assistantMessage('ses_bg', 'b1', 2200, 'The background transcript')];
+        }
+        return null;
+      },
+    }, 'readable');
+
+    const document = renderExportMarkdown(result.projection, {
+      title: 'Root',
+      mode: 'readable',
+      findings: result.timeline.findings,
+      sessionCount: result.timeline.sessions.size,
+    });
+
+    expect(document).toContain('The background transcript');
+    expect(result.timeline.findings.some((finding) => finding.kind === 'unresolved-invocation')).toBe(false);
+    expect(document).not.toContain('Incomplete export');
+  });
+
+  test('a child the records name keeps the title and the agent the list knows', async () => {
+    // The child came in through the recorded id, so the list is the only
+    // place its title and its agent are written down.
+    const root = session('ses_root', { title: 'Root' });
+    const result = await buildExport({
+      root,
+      sessions: [
+        root,
+        session('ses_dispatched', { title: 'Peer session', agent: 'writer' }),
+      ],
+      load: async (sessionID) => {
+        if (sessionID === 'ses_root') {
+          return [dispatchedSessionReport('ses_root', 'r1', 2100, { childSessionID: 'ses_dispatched' })];
+        }
+        if (sessionID === 'ses_dispatched') {
+          return [assistantMessage('ses_dispatched', 'd1', 2200, 'The dispatched work')];
+        }
+        return null;
+      },
+    }, 'readable');
+
+    const document = renderExportMarkdown(result.projection, {
+      title: 'Root',
+      mode: 'readable',
+      findings: result.timeline.findings,
+      sessionCount: result.timeline.sessions.size,
+    });
+    const parsed = JSON.parse(renderExportJson(result.timeline));
+
+    expect(document).toContain('Peer session');
+    expect(document).toContain('writer');
+    expect(parsed.sessions.ses_dispatched.title).toBe('Peer session');
+    expect(parsed.sessions.ses_dispatched.agent).toBe('writer');
+  });
+
+  test('a child no call and no report names stays reported', async () => {
+    // The one case the finding is for: the export cannot say which child the
+    // session belongs to.
+    const root = session('ses_root', { title: 'Root' });
+    const result = await buildExport({
+      root,
+      sessions: [root, session('ses_child', { title: 'Child', parentID: 'ses_root', agent: 'reviewer' })],
+      load: async (sessionID) => {
+        if (sessionID === 'ses_root') return [userMessage('ses_root', 'u1', 1000, 'Do the work')];
+        return [assistantMessage('ses_child', 'ca1', 2000, 'Child work')];
+      },
+    }, 'readable');
+
+    expect(result.timeline.findings.some((finding) => finding.kind === 'unresolved-invocation')).toBe(true);
+  });
+
   test('a background call does not give the child its own short span', () => {
     // A background call settles at once while its child keeps running. The
     // call's own span says nothing about when the work was done, so the
@@ -730,7 +852,11 @@ describe('the HTML export', () => {
 
     // The block folds away with a native details element, so the page works
     // without any script.
-    expect(html).toContain('<details open><summary><span class="subagent-summary">');
+    expect(html).toContain('<details open><summary><span class="subagent-label">');
+
+    // The title and the time are elements of their own, so the summary's
+    // gap keeps the time from running into the title.
+    expect(html).toContain('</span><span class="subagent-title">Child</span><span class="meta">');
   });
 
   test('the search index holds the arguments a tool call shows', () => {

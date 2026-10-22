@@ -756,7 +756,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.export.dialog.includeSubtasks': 'Dołącz pod-agentów',
   'sessions.sidebar.session.export.dialog.confirm': 'Eksportuj',
   'sessions.sidebar.session.export.dialog.descriptionNoSubtasks': 'Eksport to czytelny zapis rozmowy, z pracą pod-agentów na właściwym miejscu.',
-  'sessions.sidebar.session.export.dialog.descriptionIncomplete': 'Lista sesji wciąż się ładuje, więc liczba zadań pod-agentów nie jest jeszcze znana. Eksport i tak obejmie znalezioną pracę pod-agentów.',
+  'sessions.sidebar.session.export.dialog.descriptionIncomplete': 'Liczba zadań pod-agentów nie jest jeszcze znana, bo dane są jeszcze wczytywane. Eksport i tak obejmie znalezioną pracę pod-agentów.',
   'sessions.sidebar.session.export.dialog.retryCount': 'Sprawdź ponownie',
   'sessions.sidebar.session.export.dialog.format': 'Format',
   'sessions.sidebar.session.export.dialog.detail': 'Szczegółowość',

@@ -14,7 +14,7 @@
 import { executeOutputTruncation, normalizeToolName } from '@/lib/opencode/tools';
 import type { JsonValue } from '@/lib/opencode/model';
 import { readTextField } from './values';
-import { findingText } from './i18n';
+import { exportText, findingText } from './i18n';
 import type { ExportEvent, ExportShellResult, ExportToolCall, ExportTimeline } from './events';
 import type { ConcurrentWork, ExportNode, ExportTree } from './order';
 
@@ -234,7 +234,9 @@ const describeCall = (
 ): string | undefined => {
   const name = normalizeToolName(call.name);
   if (name === 'subagent') {
-    return call.description ?? call.agent ?? 'sub-agent';
+    // The call named no task and no agent: the document says what kind of
+    // call it was, in the reader's language.
+    return call.description ?? call.agent ?? exportText('export.dialog.subagentLabel');
   }
   if (name === 'shell') return command;
   if (target) return target;

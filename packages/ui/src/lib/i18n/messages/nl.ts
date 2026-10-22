@@ -747,7 +747,7 @@ export const dict = {
   'sessions.sidebar.session.export.dialog.includeSubtasks': 'Sub-agenttaken opnemen',
   'sessions.sidebar.session.export.dialog.confirm': 'Exporteren',
   'sessions.sidebar.session.export.dialog.descriptionNoSubtasks': 'De export is een leesbaar verslag van het gesprek, met het werk van de sub-agents op de juiste plek.',
-  'sessions.sidebar.session.export.dialog.descriptionIncomplete': 'De sessielijst laadt nog, dus het aantal sub-agenttaken is nog niet bekend. De export neemt de gevonden sub-agentwerk wel mee.',
+  'sessions.sidebar.session.export.dialog.descriptionIncomplete': 'Het aantal sub-agenttaken is nog niet bekend, omdat de gegevens nog worden gelezen. De export neemt de gevonden sub-agentwerk wel mee.',
   'sessions.sidebar.session.export.dialog.retryCount': 'Opnieuw controleren',
   'sessions.sidebar.session.export.dialog.format': 'Formaat',
   'sessions.sidebar.session.export.dialog.detail': 'Detailniveau',

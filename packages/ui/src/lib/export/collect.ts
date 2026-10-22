@@ -262,6 +262,29 @@ export const collectLoadedSessions = (options: {
 };
 
 /**
+ * The sub-agent tasks a session has, counted the way the export counts them.
+ *
+ * The count comes from the export's own walk: the sessions the list names
+ * below the root, and the children the records name. A child the session
+ * list does not name is a child the export covers, so it belongs in the
+ * count too — otherwise the dialog would promise a smaller document than
+ * the export writes.
+ *
+ * A child whose history would not load is a child the export covers as a
+ * gap, so it is counted as well.
+ */
+export const countSubagentTasks = async (options: {
+  root: ExportSession;
+  /** Every session the client knows, active and archived. */
+  sessions: readonly ExportSession[];
+  load: ExportRecordLoader;
+}): Promise<number> => {
+  const collection = await collectExportSessions(options);
+  // The root is one of the sessions.
+  return collection.sessions.length + collection.missing.length - 1;
+};
+
+/**
  * Loads the exported session and every descendant, with a bounded number of
  * concurrent loads.
  *
@@ -333,6 +356,8 @@ export const collectExportSessions = async (options: {
   const queue = [...descendants];
   const queued = new Set(queue.map((entry) => entry.session.id));
   const loaded = new Set<string>([root.id]);
+  /** The sessions the client knows, by id. */
+  const sessionsByID = new Map(sessions.map((session) => [session.id, session]));
 
   /**
    * The children a session's own records name, that the export has not
@@ -349,10 +374,16 @@ export const collectExportSessions = async (options: {
       for (const childSessionID of readRecordedChildSessionIDs(record)) {
         if (loaded.has(childSessionID) || queued.has(childSessionID)) continue;
         queued.add(childSessionID);
+        // The session list knows what this child is called and which agent
+        // ran it. A child the list does not know keeps the id the history
+        // recorded, and the neutral label the document gives it.
+        const known = sessionsByID.get(childSessionID);
         queue.push({
           session: {
             id: childSessionID,
-            title: childSessionID,
+            title: known?.title ?? childSessionID,
+            agent: known?.agent,
+            createdAt: known?.createdAt,
             parentID,
           },
           depth,

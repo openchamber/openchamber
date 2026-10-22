@@ -82,7 +82,7 @@ const setSessions = (sessions: Session[], hasLoaded = true) => {
  * Renders the dialog hook and hands back the element it produced, so the
  * test can open it and read what it shows.
  */
-const renderHook = async (): Promise<{
+const renderHook = async (countSubagents: () => Promise<number> = async () => 0): Promise<{
   open: (sessionID: string) => Promise<void>;
   text: () => string;
   click: (label: string) => Promise<void>;
@@ -97,7 +97,10 @@ const renderHook = async (): Promise<{
   let open: (sessionID: string) => void = () => {};
 
   const Harness = () => {
-    const dialog = useSessionExportDialog((_target, choice) => { chosen.push(choice); });
+    const dialog = useSessionExportDialog(
+      (_target, choice) => { chosen.push(choice); },
+      async () => countSubagents(),
+    );
     open = (sessionID: string) => dialog.openDialog({
       sessionID,
       title: 'Session',
@@ -144,13 +147,13 @@ const renderHook = async (): Promise<{
 };
 
 describe('useSessionExportDialog', () => {
-  test('a session with sub-agent tasks offers them, counted from the session list', async () => {
+  test('a session with sub-agent tasks offers them, counted by the export\'s own walk', async () => {
     setSessions([
       session('ses_root', { title: 'Root' }),
       session('ses_child', { title: 'Child', parentID: 'ses_root' }),
     ]);
 
-    const dialog = await renderHook();
+    const dialog = await renderHook(async () => 1);
     await dialog.open('ses_root');
 
     expect(dialog.text()).toContain('Include sub-agent tasks');
@@ -160,7 +163,7 @@ describe('useSessionExportDialog', () => {
   test('a session without sub-agent tasks does not offer them', async () => {
     setSessions([session('ses_root', { title: 'Root' })]);
 
-    const dialog = await renderHook();
+    const dialog = await renderHook(async () => 0);
     await dialog.open('ses_root');
 
     expect(dialog.text()).not.toContain('Include sub-agent tasks');
@@ -172,7 +175,7 @@ describe('useSessionExportDialog', () => {
     // list has not named yet still reaches the export.
     setSessions([session('ses_root', { title: 'Root' })]);
 
-    const dialog = await renderHook();
+    const dialog = await renderHook(async () => 0);
     await dialog.open('ses_root');
     await dialog.confirm();
 
@@ -186,13 +189,46 @@ describe('useSessionExportDialog', () => {
       session('ses_child', { title: 'Child', parentID: 'ses_root' }),
     ]);
 
-    const dialog = await renderHook();
+    const dialog = await renderHook(async () => 1);
     await dialog.open('ses_root');
     await dialog.uncheck();
     await dialog.confirm();
 
     expect(dialog.chosen).toHaveLength(1);
     expect(dialog.chosen[0].includeSubagents).toBe(false);
+  });
+
+  test('the coverage the reader chose stays with its session', async () => {
+    // The format and the detail level survive a closing, and so does the
+    // coverage: the choice belongs to the session the reader made it for.
+    setSessions([
+      session('ses_root', { title: 'Root' }),
+      session('ses_child', { title: 'Child', parentID: 'ses_root' }),
+      session('ses_other', { title: 'Other' }),
+    ]);
+
+    const dialog = await renderHook(async () => 1);
+    await dialog.open('ses_root');
+    await dialog.uncheck();
+    await dialog.confirm();
+
+    expect(dialog.chosen).toHaveLength(1);
+    expect(dialog.chosen[0].includeSubagents).toBe(false);
+
+    // The same session keeps the choice when the dialog opens again.
+    await dialog.open('ses_root');
+    await dialog.confirm();
+
+    expect(dialog.chosen).toHaveLength(2);
+    expect(dialog.chosen[1].includeSubagents).toBe(false);
+
+    // Another session's sub-agent tasks are its own, so the choice does not
+    // reach it.
+    await dialog.open('ses_other');
+    await dialog.confirm();
+
+    expect(dialog.chosen).toHaveLength(3);
+    expect(dialog.chosen[2].includeSubagents).toBe(true);
   });
 
   test('a session list that is still loading says the coverage is unknown', async () => {
@@ -204,10 +240,10 @@ describe('useSessionExportDialog', () => {
       session('ses_child', { title: 'Child', parentID: 'ses_root' }),
     ], false);
 
-    const dialog = await renderHook();
+    const dialog = await renderHook(async () => 1);
     await dialog.open('ses_root');
 
-    expect(dialog.text()).toContain('The session list is still loading');
+    expect(dialog.text()).toContain('The number of sub-agent tasks is not known yet');
     expect(dialog.text()).not.toContain('1 sub-agent task');
     expect(dialog.text()).toContain('Check again');
   });
@@ -218,7 +254,7 @@ describe('useSessionExportDialog', () => {
       session('ses_child', { title: 'Child', parentID: 'ses_root' }),
     ], false);
 
-    const dialog = await renderHook();
+    const dialog = await renderHook(async () => 1);
     await dialog.open('ses_root');
 
     // The list finished loading between the two looks at it.

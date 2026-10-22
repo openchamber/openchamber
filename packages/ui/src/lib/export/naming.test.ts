@@ -89,7 +89,7 @@ const domAgents = (document: string): Map<string, string> => {
 };
 
 /** The data the page's own script filters over. */
-const pageData = (document: string): { entries: Array<{ id: string; agent?: string }>; agents: string[] } => {
+const pageData = (document: string): { entries: Array<{ id: string; agent?: string; search: string }>; agents: string[] } => {
   const match = document.match(/<script type="application\/json" id="export-data">([\s\S]*?)<\/script>/);
   expect(match).toBeTruthy();
   // SAFETY: the export writes the data block itself, so the match holds the
@@ -222,6 +222,45 @@ describe('the HTML agent filter offers the name the document shows', () => {
     }
     expect(data.agents).toContain('code-orchestrator');
     expect(data.agents).toContain('build');
+  });
+
+  test('a message is signed with the agent that wrote it', () => {
+    // The session ran one agent and then switched to another. Each message
+    // carries the name of the agent that wrote it, so the second message is
+    // not signed with the session's own agent.
+    const input = fixture({
+      root: session('ses_root', { title: 'Root', agent: 'planner' }),
+      sessions: [session('ses_root', { title: 'Root', agent: 'planner' })],
+      records: {
+        ses_root: [
+          assistantMessage('ses_root', 'a1', 1000, 'Planned by planner', { agent: 'planner' }),
+          {
+            info: {
+              id: 'sw1', sessionID: 'ses_root', role: 'agent-switched', agent: 'builder',
+              time: { created: 1500 },
+            },
+            parts: [],
+          },
+          assistantMessage('ses_root', 'a2', 2000, 'Built by builder', { agent: 'builder' }),
+        ],
+      },
+    });
+
+    const headings = markdown(input).split('\n').filter((line) => line.startsWith('### '));
+
+    expect(headings[0]).toContain('planner');
+    expect(headings[2]).toContain('builder');
+    expect(headings[2]).not.toContain('planner');
+
+    // The page names the same agent, and its filter carries the same name.
+    const document = html(input);
+    const data = pageData(document);
+    const agents = domAgents(document);
+    const built = data.entries.find((entry) => entry.search.includes('built by builder'));
+
+    expect(built?.agent).toBe('builder');
+    expect(agents.get(built?.id ?? '') ?? '').toBe('builder');
+    expect(data.agents).toContain('builder');
   });
 
   test('a sub-agent that recorded no agent does not borrow the root\'s name', () => {

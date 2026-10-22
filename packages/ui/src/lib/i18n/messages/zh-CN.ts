@@ -756,7 +756,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.export.dialog.includeSubtasks': '包含子智能体任务',
   'sessions.sidebar.session.export.dialog.confirm': '导出',
   'sessions.sidebar.session.export.dialog.descriptionNoSubtasks': '导出是会话的可读记录，子代理的工作位于其对应的位置。',
-  'sessions.sidebar.session.export.dialog.descriptionIncomplete': '会话列表仍在加载，因此还不知道子智能体任务的数量。导出仍会包含它能找到的子智能体工作。',
+  'sessions.sidebar.session.export.dialog.descriptionIncomplete': '数据还在读取，因此还不知道子智能体任务的数量。导出仍会包含它能找到的子智能体工作。',
   'sessions.sidebar.session.export.dialog.retryCount': '重新检查',
   'sessions.sidebar.session.export.dialog.format': '格式',
   'sessions.sidebar.session.export.dialog.detail': '详细程度',
