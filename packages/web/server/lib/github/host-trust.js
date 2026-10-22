@@ -26,13 +26,11 @@ const dataDir = () => process.env.OPENCHAMBER_DATA_DIR
 
 const normalizeHost = (value) => String(value ?? '').trim().toLowerCase();
 
-// hosts.yml lives in the gh config dir: $GH_CONFIG_DIR when set, otherwise
-// ~/.config/gh — exactly the one directory gh itself reads (gh never falls
-// back to the default when GH_CONFIG_DIR is set, so neither do we: an
-// explicitly set config dir without a login is "not trusted", not a reason to
-// consult the default).
+// Read only gh's selected config directory; a missing login must not fall back
+// to a different directory.
 const hostsYamlPath = () => {
-  const configDir = process.env.GH_CONFIG_DIR?.trim() || join(homedir(), '.config', 'gh');
+  const configDir = process.env.GH_CONFIG_DIR?.trim()
+    || join(process.env.XDG_CONFIG_HOME?.trim() || join(homedir(), '.config'), 'gh');
   return join(configDir, 'hosts.yml');
 };
 
