@@ -17,7 +17,7 @@
 import { getCurrentIntlLocale } from '@/lib/i18n';
 import { readTimestamp } from './values';
 import type { ExportExcludedSession, ExportFinding } from './events';
-import { orderingGuarantee } from './order';
+import { orderingStatement } from './order';
 import { exportText, findingText } from './i18n';
 import { agentLabel, concurrentLabel, excludedArchivedNote, messageAgent, readablePrompt, roleLabel, runtimeTruncationNote, statusLabel } from './labels';
 import type { ProjectedEntry, ProjectedNode, ProjectedSubagent, ProjectionMode } from './project';
@@ -455,7 +455,7 @@ export const renderExportMarkdown = (
   const notice = renderIntegrityNotice(findings);
   if (notice) sections.push('---', notice);
 
-  sections.push('---', `*${orderingGuarantee()}*`);
+  sections.push('---', `*${orderingStatement()}*`);
 
   return sections.join('\n\n');
 };

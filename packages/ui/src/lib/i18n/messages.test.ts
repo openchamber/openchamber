@@ -69,6 +69,30 @@ describe('i18n dictionaries', () => {
     }
   });
 
+  test('the export document\'s order statement is translated in every locale', () => {
+    const key = 'export.ordering';
+    for (const [locale, dictionary] of Object.entries(localeDictionaries)) {
+      expect(dictionary[key]).toBeTruthy();
+      if (locale !== 'en') expect(dictionary[key]).not.toBe(enDict[key]);
+    }
+  });
+
+  test('the export document\'s cut marker is translated in every locale', () => {
+    const key = 'export.moreCharacters';
+    expect(enDict[key]).toBe('{count} more characters');
+    for (const [locale, dictionary] of Object.entries(localeDictionaries)) {
+      expect(dictionary[key]).toBeTruthy();
+      expect(dictionary[key]).toContain('{count}');
+      if (locale !== 'en') expect(dictionary[key]).not.toBe(enDict[key]);
+    }
+  });
+
+  test('the export document names the removed block finding in no locale', () => {
+    for (const dictionary of Object.values(localeDictionaries)) {
+      expect(Object.keys(dictionary)).not.toContain('export.finding.resumedSessionBlock');
+    }
+  });
+
   test('all locales expose language label keys', () => {
     for (const [, dictionary] of Object.entries(localeDictionaries)) {
       expect(dictionary['common.language.german']).toBeTruthy();

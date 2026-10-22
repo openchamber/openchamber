@@ -15,7 +15,7 @@ import type { Session } from '@/lib/opencode/model';
 import { useI18nStore } from '@/lib/i18n';
 import { buildExportFromRecords } from './pipeline';
 import { renderExportHtml } from './html';
-import { assistantMessage, subagentCall, subagentReport, type Record_ } from './fixtures';
+import { assistantMessage, reasoningPart, subagentCall, subagentReport, type Record_ } from './fixtures';
 
 const session = (id: string, overrides: Partial<Session> = {}): Session => ({
   id,
@@ -107,12 +107,18 @@ const isOnPage = (entry: Element | null): boolean => {
 };
 
 /** The data the page's own script works with. */
-const pageData = (dom: Window): { countLabel: string } => {
+const pageData = (dom: Window): {
+  countLabel: string;
+  entries: Array<{ id: string; kind: string; search: string }>;
+} => {
   const block = dom.document.getElementById('export-data')?.textContent;
   if (!block) throw new Error('The page has no data block');
   // SAFETY: the export writes the data block itself, so the text holds the
   // page's own data.
-  return JSON.parse(block) as { countLabel: string };
+  return JSON.parse(block) as {
+    countLabel: string;
+    entries: Array<{ id: string; kind: string; search: string }>;
+  };
 };
 
 describe('the HTML page keeps the match on the page', () => {
@@ -375,5 +381,81 @@ describe('the HTML page searches what it shows of a sub-agent result', () => {
     search(dom, RESULT_TAIL);
 
     expect(visibleEntries(dom)).toHaveLength(0);
+  });
+});
+
+/** A word the model wrote down while it thought, and nowhere else. */
+const REASONING_WORD = 'reasoningmarker';
+
+/**
+ * The page with a reasoning part in it.
+ *
+ * The readable view does not draw the reasoning, and the detailed view does.
+ * The two pages are the same history, so the search has to tell them apart.
+ */
+const reasoningPage = (mode: 'readable' | 'detailed'): string => {
+  const result = buildExportFromRecords({
+    root: session('ses_root', { title: 'Root' }),
+    sessions: [session('ses_root', { title: 'Root' })],
+    records: new Map([
+      ['ses_root', [
+        {
+          info: {
+            id: 'a1', sessionID: 'ses_root', role: 'assistant', agent: 'build',
+            providerID: 'anthropic', modelID: 'claude-opus-4-1', time: { created: 2000 },
+          },
+          parts: [reasoningPart('a1', REASONING_WORD)],
+        },
+      ]],
+    ]),
+  }, mode);
+
+  return renderExportHtml(result.projection, {
+    title: 'Root',
+    mode,
+    findings: result.timeline.findings, excluded: result.timeline.excluded,
+    sessionCount: result.timeline.sessions.size,
+  });
+};
+
+/** The page with a reasoning part in it, with its own script running. */
+const openReasoningPage = (mode: 'readable' | 'detailed'): Window => {
+  const html = reasoningPage(mode);
+  const dom = new Window({ url: 'https://localhost/' });
+  dom.document.write(html);
+  const script = html.match(/<script>([\s\S]*?)<\/script>/);
+  if (!script) throw new Error('The export wrote no page script');
+  new Function('document', script[1])(dom.document);
+  return dom;
+};
+
+describe('the HTML page searches what it shows of the reasoning', () => {
+  test('the readable view keeps the reasoning out of the search index', () => {
+    const dom = openReasoningPage('readable');
+
+    // The index holds the text the page shows, and the readable view draws
+    // no reasoning, so the index holds no reasoning either.
+    const reasoning = pageData(dom).entries.filter((entry) => entry.kind === 'reasoning');
+    expect(reasoning).toHaveLength(1);
+    expect(reasoning[0].search).not.toContain(REASONING_WORD);
+
+    // The search finds nothing either, because there is nothing to find.
+    search(dom, REASONING_WORD);
+    expect(visibleEntries(dom)).toHaveLength(0);
+  });
+
+  test('the detailed view holds the reasoning in the search index', () => {
+    const dom = openReasoningPage('detailed');
+
+    // The detailed view draws the reasoning, so the index holds it and the
+    // search finds it.
+    const reasoning = pageData(dom).entries.filter((entry) => entry.kind === 'reasoning');
+    expect(reasoning).toHaveLength(1);
+    expect(reasoning[0].search).toContain(REASONING_WORD);
+
+    search(dom, REASONING_WORD);
+    const onPage = dom.document.querySelector('.entry.reasoning');
+    expect(onPage).toBeTruthy();
+    expect(isOnPage(onPage)).toBe(true);
   });
 });

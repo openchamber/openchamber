@@ -9,6 +9,8 @@
 
 import { describe, expect, test } from 'bun:test';
 import type { Session } from '@/lib/opencode/model';
+import { useI18nStore } from '@/lib/i18n';
+import { dict as deDict } from '@/lib/i18n/messages/de';
 import { buildExport, buildExportFromRecords } from './pipeline';
 import { renderExportMarkdown } from './markdown';
 import { renderExportHtml } from './html';
@@ -191,6 +193,46 @@ describe('export pipeline', () => {
     expect(output).toContain('B result');
   });
 
+  test('two calls that only touch are not marked as running at the same time', () => {
+    const input = fixture({
+      root: session('ses_root', { title: 'Root' }),
+      sessions: [
+        session('ses_root', { title: 'Root' }),
+        session('ses_a', { title: 'A', parentID: 'ses_root', agent: 'reviewer' }),
+        session('ses_b', { title: 'B', parentID: 'ses_root', agent: 'tester' }),
+      ],
+      records: {
+        ses_root: [
+          {
+            info: {
+              id: 'a1', sessionID: 'ses_root', role: 'assistant', agent: 'build',
+              providerID: 'anthropic', modelID: 'claude-opus-4-1', time: { created: 2000 },
+            },
+            parts: [subagentCall('a1', { childSessionID: 'ses_a', startedAt: 2000, endedAt: 3000 })],
+          },
+          {
+            info: {
+              id: 'a2', sessionID: 'ses_root', role: 'assistant', agent: 'build',
+              providerID: 'anthropic', modelID: 'claude-opus-4-1', time: { created: 3000 },
+            },
+            parts: [subagentCall('a2', { childSessionID: 'ses_b', startedAt: 3000, endedAt: 4000 })],
+          },
+        ],
+        ses_a: [assistantMessage('ses_a', 'aa1', 2500, 'First result')],
+        ses_b: [assistantMessage('ses_b', 'ab1', 3500, 'Second result')],
+      },
+    });
+
+    const output = markdown(input);
+
+    // The first call ended at the moment the second one started, so the
+    // runtime ran them one after the other. The document must not call that
+    // an overlap the runtime never recorded.
+    expect(output).not.toContain('Ran at the same time as');
+    expect(output).toContain('First result');
+    expect(output).toContain('Second result');
+  });
+
   test('a background dispatch and its later completion both reach the export', () => {
     const input = fixture({
       root: session('ses_root', { title: 'Root' }),
@@ -257,6 +299,8 @@ describe('export pipeline', () => {
     expect(output.match(/The one transcript/g)).toHaveLength(1);
     expect(output).toContain('Incomplete export');
     expect(output).toContain('More than one call names the sub-agent session');
+    // The reuse is reported once, not once per call that named the session.
+    expect(timelineOf(input).findings.filter((finding) => finding.kind === 'resumed-session')).toHaveLength(1);
   });
 
   test('a child with no recorded call is reported instead of being dropped', () => {
@@ -1342,6 +1386,87 @@ describe('export pipeline', () => {
     const parts = parsed.source.ses_root.records[0].parts;
 
     expect(parts.map((part: { type: string }) => part.type)).toEqual(['text', 'future']);
+  });
+});
+
+describe('the document promises only what it keeps', () => {
+  test('the readable and the detailed document do not promise a chronology', () => {
+    const input = fixture({
+      root: session('ses_root', { title: 'Root' }),
+      sessions: [
+        session('ses_root', { title: 'Root' }),
+        session('ses_child', { title: 'Child', parentID: 'ses_root', agent: 'reviewer' }),
+      ],
+      records: {
+        ses_root: [
+          userMessage('ses_root', 'u1', 1000, 'Go'),
+          {
+            info: {
+              id: 'a1', sessionID: 'ses_root', role: 'assistant', agent: 'build',
+              providerID: 'anthropic', modelID: 'claude-opus-4-1', time: { created: 2000 },
+            },
+            parts: [subagentCall('a1', { childSessionID: 'ses_child', startedAt: 2000, endedAt: 9000 })],
+          },
+          assistantMessage('ses_root', 'a2', 3000, 'The answer that came after the call'),
+        ],
+        // The child worked on until after the parent answered, so the
+        // document holds a later moment in front of an earlier one.
+        ses_child: [assistantMessage('ses_child', 'ca1', 9000, 'The work inside the block')],
+      },
+    });
+
+    for (const mode of ['readable', 'detailed'] as const) {
+      const output = markdown(input, mode);
+
+      // The document is not one timeline: the block's own event is later
+      // than the message the block stands in front of.
+      expect(output.indexOf('The work inside the block')).toBeLessThan(output.indexOf('The answer that came after the call'));
+
+      // So it must not promise a chronology it does not have.
+      expect(output).not.toContain('Events are ordered by their recorded timestamp');
+
+      // It says what its order is instead.
+      expect(output).toContain('A sub-agent block sits where the call that started it sits in the conversation.');
+    }
+  });
+
+  test('the cut of a long result is marked in the reader\'s language', () => {
+    const input = fixture({
+      root: session('ses_root', { title: 'Root' }),
+      records: {
+        ses_root: [
+          {
+            info: {
+              id: 'a1', sessionID: 'ses_root', role: 'assistant', agent: 'build',
+              providerID: 'anthropic', modelID: 'claude-opus-4-1', time: { created: 2000 },
+            },
+            parts: [{
+              id: 'a1-shell', sessionID: 'ses_root', messageID: 'a1', type: 'tool',
+              callID: 'a1-call', tool: 'shell',
+              state: {
+                status: 'completed',
+                input: { command: 'bun test' },
+                output: 'x'.repeat(900),
+                time: { start: 2000, end: 2500 },
+              },
+            }],
+          },
+        ],
+      },
+    });
+
+    const previous = useI18nStore.getState();
+    try {
+      useI18nStore.setState({ locale: 'de', dictionary: deDict });
+      const output = markdown(input);
+
+      // The mark of the cut is part of the document, so it is in the
+      // reader's language like the rest of it.
+      expect(output).toContain('weitere Zeichen');
+      expect(output).not.toContain('more characters');
+    } finally {
+      useI18nStore.setState({ locale: previous.locale, dictionary: previous.dictionary });
+    }
   });
 });
 

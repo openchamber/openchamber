@@ -163,6 +163,21 @@ export const subagentCall = (
   };
 };
 
+/**
+ * A reasoning part, which the export carries as an event of its own.
+ *
+ * The readable view does not draw the reasoning, and the detailed view does,
+ * so the fixture is the one that tells the two views apart.
+ */
+export const reasoningPart = (messageID: string, text: string, start = 2000): Part => ({
+  id: `${messageID}-reasoning`,
+  sessionID: 'ses_root',
+  messageID,
+  type: 'reasoning',
+  text,
+  time: { start },
+});
+
 /** An ordinary tool call, for the compact tool presentation. */
 export const shellCall = (messageID: string, command: string, startedAt = 1000, endedAt = 1500): Part => ({
   id: `${messageID}-shell`,

@@ -8,11 +8,14 @@
  *
  * The order itself comes from recorded timestamps, with the source order of
  * the records as the tiebreaker. Nothing is invented: an event without a
- * timestamp keeps the place its source gave it, and the export says so once
- * at the end rather than on every line.
+ * timestamp keeps the place its source gave it.
+ *
+ * The document as a whole is not one timeline. A sub-agent's block holds
+ * events that are later than the messages around it, so the document states
+ * the order it has instead of promising a chronology it does not have.
  */
 
-import type { ExportEvent, ExportFinding, ExportSessionInfo, ExportTimeline } from './events';
+import type { ExportEvent, ExportSessionInfo, ExportTimeline } from './events';
 import { readTimestamp } from './values';
 import { orderByRecordedTime } from './ordering';
 import { exportText } from './i18n';
@@ -96,7 +99,6 @@ export type ExportTree = {
   rootSessionID: string;
   nodes: ExportNode[];
   sessions: Map<string, ExportSessionInfo>;
-  findings: ExportFinding[];
 };
 
 type Sortable = {
@@ -123,13 +125,17 @@ const orderedEvents = (events: readonly ExportEvent[]): ExportEvent[] => orderBy
 
 
 /**
- * The order the export reports events in, stated for the reader: timestamps
- * first, source order where a timestamp is missing.
+ * The order the document has, stated for the reader.
+ *
+ * The document is a conversation, not a timeline: a sub-agent's work sits
+ * where the call that started it sits, and the events inside the block are
+ * the ones the source recorded. The statement says that, and promises no
+ * chronology the document does not have.
  *
  * The wording is the reader's language, so it is resolved when the document
  * is written rather than when this module is loaded.
  */
-export const orderingGuarantee = (): string => exportText('export.ordering');
+export const orderingStatement = (): string => exportText('export.ordering');
 
 /**
  * Builds the export's spine.
@@ -139,7 +145,6 @@ export const orderingGuarantee = (): string => exportText('export.ordering');
  * an ordinary tool event, so the reader still sees the call.
  */
 export const buildExportTree = (timeline: ExportTimeline): ExportTree => {
-  const findings = [...timeline.findings];
   const events = [...timeline.events];
 
   // The child session each call named, and the call itself. A second call
@@ -153,17 +158,8 @@ export const buildExportTree = (timeline: ExportTimeline): ExportTree => {
     if (!childSessionID) continue;
     if (dispatchByChildID.has(childSessionID)) {
       // The transcript appears once, and the block says that it was
-      // resumed. A child the export does not carry has no block and no
-      // transcript, so there is nothing to say about it.
-      if (timeline.sessions.has(childSessionID)) {
-        findings.push({
-          kind: 'resumed-session',
-          sessionID: event.sessionID,
-          childSessionID,
-          messageKey: 'export.finding.resumedSessionBlock',
-          messageParams: { id: childSessionID },
-        });
-      }
+      // resumed. The reuse is reported once, in the findings; the block
+      // carries the calls that named the session.
       const resumed = resumedByChildID.get(childSessionID) ?? [];
       resumed.push({
         sessionID: event.sessionID,
@@ -373,13 +369,16 @@ export const buildExportTree = (timeline: ExportTimeline): ExportTree => {
     rootSessionID: timeline.rootSessionID,
     nodes: markConcurrency([...spine, ...anchorless]),
     sessions: timeline.sessions,
-    findings,
   };
 };
 
 /**
  * Marks the blocks whose work overlapped, so concurrent subagents are not
  * read as one after the other.
+ *
+ * The spans are half-open: a call that ends at the moment the next one
+ * starts ran after it, not beside it. Two calls that only touch are
+ * sequential, and the runtime never recorded them as running together.
  */
 const markConcurrency = (nodes: ExportNode[]): ExportNode[] => {
   const blocks = nodes.filter((node): node is Extract<ExportNode, { kind: 'subagent' }> => node.kind === 'subagent');
@@ -389,7 +388,7 @@ const markConcurrency = (nodes: ExportNode[]): ExportNode[] => {
       if (block.startedAt === undefined || other.startedAt === undefined) return false;
       const blockEnd = block.endedAt ?? Number.MAX_SAFE_INTEGER;
       const otherEnd = other.endedAt ?? Number.MAX_SAFE_INTEGER;
-      return block.startedAt <= otherEnd && other.startedAt <= blockEnd;
+      return block.startedAt < otherEnd && other.startedAt < blockEnd;
     });
     if (overlapping.length > 0) {
       block.concurrentWith = overlapping.map((other) => ({

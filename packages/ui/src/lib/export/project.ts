@@ -211,7 +211,11 @@ type TrimmedOutput = {
 
 const trimOutput = (text: string, limit: number): TrimmedOutput => {
   if (text.length <= limit) return { text, truncated: false };
-  return { text: `${text.slice(0, limit)}\n\n… [${text.length - limit} more characters]`, truncated: true };
+  // The mark says how much the cut took away, in the reader's language: the
+  // document speaks the app's language, and a word of the export's own would
+  // be the one place in it that does not.
+  const hidden = exportText('export.moreCharacters', { count: text.length - limit });
+  return { text: `${text.slice(0, limit)}\n\n… [${hidden}]`, truncated: true };
 };
 
 /** A text field of a call's input, when the call wrote one. */

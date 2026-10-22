@@ -55,9 +55,10 @@ cannot name them differently.
   session too: the dialog keeps it per session, so a second export of the
   same session keeps it, and the choice made for one session does not reach
   another one.
-- **No invented chronology.** Events are ordered by their recorded timestamp.
-  An event without one keeps the place the source gave it, and the source
-  order breaks ties. The export never guesses an order.
+- **No invented chronology.** Inside a session's own sequence, events are
+  ordered by their recorded timestamp. An event without one keeps the place
+  the source gave it, and the source order breaks ties. The export never
+  guesses an order.
 - **One order for every event.** Every event carries its place on one scale:
   the record's own place, and the part's place inside it. A record's place is
   as wide as the record needs, so the number of parts a record holds never
@@ -100,7 +101,8 @@ cannot name them differently.
   reports counts matches the reader can see. The search index holds the text
   the page shows: a long prompt and a long sub-agent result are cut in the
   readable view, and the index holds those cuts, so a search does not find a
-  word the reader cannot read.
+  word the reader cannot read. The reasoning the readable view does not draw
+  is not in the index at all.
 - **Compact never means lost.** The readable view cuts a long tool result
   down and marks the cut. The mark says where the whole result is: the
   export of this session with full details, which carries the recorded
@@ -359,6 +361,12 @@ block says which other work overlapped it, and the two blocks keep their own
 times. The rejected alternative was picking one order and hiding the overlap,
 which would tell the reader a sequence the runtime never recorded.
 
+The spans are half-open: a call that ends at the moment the next one starts
+ran after it, not beside it. Two calls that only touch are sequential, and
+the runtime never recorded them as running together. The rejected
+alternative was the closed interval, which marked such a pair as parallel
+and invented an overlap the runtime did not record.
+
 The caption names the other work by its agent and by its session title. The
 title alone does not tell two sub-agents apart: the runtime names a child
 after the call that started it, so two children of one call carry the same
@@ -423,6 +431,12 @@ transcript is a block placed where its call sat, not a row among the
 orchestrator's messages. Sorting it by time would turn it into a log. The
 two views answer different questions, and the JSON export's ordering
 guarantee is the one a downstream tool can check.
+
+The readable document says the same about itself, in its own words: a
+sub-agent's block sits where the call that started it sits, and inside a
+block the events are the ones the source recorded. It promises no
+chronology, because the document has none: a block's own events can be
+later than the messages the block stands in front of.
 
 ### Why the export is one pipeline the UI drives, not a library the UI copies
 

@@ -15,7 +15,7 @@
 import { getCurrentIntlLocale } from '@/lib/i18n';
 import { readTimestamp } from './values';
 import type { ExportExcludedSession, ExportFinding } from './events';
-import { orderingGuarantee, type ConcurrentWork } from './order';
+import { orderingStatement, type ConcurrentWork } from './order';
 import { exportText, findingText } from './i18n';
 import { agentLabel, concurrentLabel, excludedArchivedNote, messageAgent, readablePrompt, roleLabel, runtimeTruncationNote, statusLabel } from './labels';
 import type { ProjectedEntry, ProjectedNode, ProjectedSubagent, ProjectedTool, ProjectionMode } from './project';
@@ -154,7 +154,10 @@ const searchTextOf = (entry: ProjectedEntry, mode: ProjectionMode): string => {
     case 'tool':
       return toolSearchText(entry.tool, mode);
     case 'reasoning':
-      return entry.text;
+      // The readable view does not draw the reasoning, so the index must not
+      // hold its text either: a search must not find a word the reader
+      // cannot read. The detailed view draws it, and the index holds it.
+      return mode === 'detailed' ? entry.text : '';
     case 'subagent-result':
       return `${entry.state} ${entry.description ?? ''} ${entry.output}`;
     case 'gap':
@@ -664,7 +667,7 @@ summary { cursor: pointer; font-size: .85rem; color: var(--accent); }
 .integrity { border: 1px solid var(--border); border-left: 3px solid #d08700; border-radius: .5rem; padding: .7rem .85rem; margin-top: 1.5rem; background: var(--card); }
 .integrity ul { margin: .4rem 0 0; padding-left: 1.1rem; }
 .integrity li { margin-bottom: .2rem; }
-.guarantee { color: var(--muted); font-size: .8rem; margin-top: 1.5rem; }
+.order-note { color: var(--muted); font-size: .8rem; margin-top: 1.5rem; }
 .hidden { display: none !important; }
 .count { color: var(--muted); font-size: .8rem; }
 `;
@@ -830,7 +833,7 @@ ${excludedLine}  <div class="bar">
   </div>
   ${body}
   ${integrity}
-  <p class="guarantee">${escapeHtml(orderingGuarantee())}</p>
+  <p class="order-note">${escapeHtml(orderingStatement())}</p>
 </main>
 <script type="application/json" id="export-data">${jsonForScript(data)}</script>
 <script>${SCRIPT}</script>
