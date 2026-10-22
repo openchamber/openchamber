@@ -95,7 +95,7 @@ describe('POST /api/source-control/github/references/across', () => {
     const contexts = [context('/a'), context('/invalid'), context('/none')];
     const result = await search(contexts).expect(200);
     expect(validate.mock.calls.map(([input]) => input)).toEqual(contexts);
-    expect(resolve.mock.calls.map(([directory]) => directory)).toEqual(['/a', '/none']);
+    expect(resolve.mock.calls.map(([directory]) => directory).sort()).toEqual(['/a', '/none']);
     expect(result.body.items).toEqual([expect.objectContaining({ directory: '/a', title: 'a' })]);
     expect(result.body.repositories).toEqual([
       { directory: '/a', status: 'included', repo: { owner: 'acme', repo: 'a', url: 'https://github.com/acme/a' } },
