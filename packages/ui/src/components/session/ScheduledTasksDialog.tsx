@@ -11,16 +11,13 @@ import { formatTimeForPreference } from '@/lib/timeFormat';
 import type { TimeFormatPreference } from '@/stores/useUIStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useProjectsInSidebarOrder } from '@/components/session/sidebar/list/useProjectsInSidebarOrder';
+import { ProjectLabel, ProjectRailPage } from '@/components/layout/ProjectRailPage';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { refreshGlobalSessions, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
 import { openSessionFromRoute } from '@/lib/router/openSessionFromRoute';
-import { PROJECT_ICON_MAP, resolveProjectColor, ProjectIconImage } from '@/lib/projectMeta';
-import { useThemeSystem } from '@/contexts/useThemeSystem';
-import { cn, formatDirectoryName } from '@/lib/utils';
+import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
-import type { ProjectEntry } from '@/lib/api/types';
 import {
   deleteScheduledTask,
   deleteScheduledTaskLoopFile,
@@ -251,8 +248,6 @@ export function ScheduledTasksView({ layout, onLeave }: {
   const storedProjects = useProjectsStore((state) => state.projects);
   const projects = useProjectsInSidebarOrder(storedProjects);
   const activeProject = useProjectsStore((state) => state.getActiveProject());
-  const homeDirectory = useDirectoryStore((state) => state.homeDirectory);
-  const { currentTheme } = useThemeSystem();
 
   const [selectedProjectID, setSelectedProjectID] = React.useState<string>('');
   const [tasks, setTasks] = React.useState<ScheduledTask[]>([]);
@@ -270,39 +265,6 @@ export function ScheduledTasksView({ layout, onLeave }: {
     () => projects.find((project) => project.id === selectedProjectID) || null,
     [projects, selectedProjectID],
   );
-
-  const renderProjectLabel = React.useCallback((project: ProjectEntry) => {
-    const displayLabel = project.label?.trim() || formatDirectoryName(project.path, homeDirectory || undefined);
-    const projectIconName = project.icon ? PROJECT_ICON_MAP[project.icon] : null;
-    const iconColor = resolveProjectColor(project.color) ?? undefined;
-    const fallbackIcon = projectIconName ? (
-      <Icon name={projectIconName} className="h-3.5 w-3.5 shrink-0" style={iconColor ? { color: iconColor } : undefined} />
-    ) : (
-      <Icon name="folder" className="h-3.5 w-3.5 shrink-0 text-muted-foreground/80"  style={iconColor ? { color: iconColor } : undefined}/>
-    );
-
-    return (
-      <span className="inline-flex min-w-0 items-center gap-1.5">
-        {project.iconImage ? (
-          <span
-            className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center overflow-hidden rounded-[3px]"
-            style={project.iconBackground ? { backgroundColor: project.iconBackground } : undefined}
-          >
-            <ProjectIconImage
-              project={{ id: project.id, iconImage: project.iconImage ?? null }}
-              options={{
-                themeVariant: currentTheme.metadata.variant,
-                iconColor: currentTheme.colors.surface.foreground,
-              }}
-              className="h-full w-full object-contain"
-              fallback={fallbackIcon}
-            />
-          </span>
-        ) : fallbackIcon}
-        <span className="truncate">{displayLabel}</span>
-      </span>
-    );
-  }, [homeDirectory, currentTheme.metadata.variant, currentTheme.colors.surface.foreground]);
 
   const reloadTasks = React.useCallback(async (projectID: string, options?: { silent?: boolean }) => {
     if (!projectID) {
@@ -529,7 +491,7 @@ export function ScheduledTasksView({ layout, onLeave }: {
           {selectedProjectID === CHAT_DRAFT_PROJECT_ID ? (
             <SelectValue>{chatsLabel}</SelectValue>
           ) : selectedProject ? (
-            <SelectValue>{renderProjectLabel(selectedProject)}</SelectValue>
+            <SelectValue><ProjectLabel project={selectedProject} /></SelectValue>
           ) : (
             <SelectValue placeholder={t('sessions.scheduledTasks.dialog.project.placeholder')} />
           )}
@@ -539,7 +501,7 @@ export function ScheduledTasksView({ layout, onLeave }: {
           {chatsAvailable ? <SelectItem value={CHAT_DRAFT_PROJECT_ID}>{chatsLabel}</SelectItem> : null}
           {projects.map((project) => (
             <SelectItem key={project.id} value={project.id}>
-              {renderProjectLabel(project)}
+              <ProjectLabel project={project} />
             </SelectItem>
           ))}
         </SelectContent>
@@ -560,22 +522,6 @@ export function ScheduledTasksView({ layout, onLeave }: {
       setTasks([]);
     }
   };
-
-  const renderScopeButton = (scopeID: string, label: React.ReactNode) => (
-    <button
-      key={scopeID}
-      type="button"
-      onClick={() => selectProject(scopeID)}
-      className={cn(
-        'flex w-full min-w-0 items-center rounded-md px-2 py-1.5 text-start typography-ui-label focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-        selectedProjectID === scopeID
-          ? 'bg-interactive-selection text-foreground'
-          : 'text-muted-foreground hover:bg-interactive-hover/50 hover:text-foreground',
-      )}
-    >
-      {label}
-    </button>
-  );
 
   const tasksList = (
       <div className="min-h-[280px]">
@@ -783,37 +729,20 @@ export function ScheduledTasksView({ layout, onLeave }: {
           </div>
         </div>
       ) : (
-        // Full-page surface replacing the chat area (mounted inside <main>).
-        // Master-detail: a scrollable scope list at the left, the selected
-        // scope's tasks at the right. The app Header shows the surface title,
-        // so the page itself only carries the close affordance.
-        <div className="absolute inset-0 z-10 flex flex-col bg-background">
-          <div className="flex min-h-0 flex-1">
-            <div className="flex w-60 flex-shrink-0 flex-col border-e border-border/50">
-              <div className="flex-1 space-y-0.5 overflow-y-auto p-2">
-                {!hasScopes ? (
-                  <div className="px-2 py-2 typography-meta text-muted-foreground">
-                    {t('sessions.scheduledTasks.dialog.project.empty')}
-                  </div>
-                ) : null}
-                {chatsAvailable ? renderScopeButton(CHAT_DRAFT_PROJECT_ID, chatsLabel) : null}
-                {projects.map((project) => renderScopeButton(project.id, renderProjectLabel(project)))}
-              </div>
-            </div>
-            <div className="flex min-w-0 flex-1 flex-col">
-              {/* Pages have no close button: you leave by picking a session,
-                  a draft, or another surface in the sidebar. */}
-              <div className="flex items-center px-6 pt-3">
-                {newTaskButton()}
-              </div>
-              <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
-                <div className="mx-auto w-full max-w-3xl">
-                  {tasksList}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
+        // Full-page surface replacing the chat area (mounted inside <main>),
+        // with the scopes at the start and the selected scope's tasks beside
+        // them. The app Header shows the surface title.
+        <ProjectRailPage
+          label={t('sessions.scheduledTasks.dialog.project.label')}
+          projects={projects}
+          selectedId={selectedProjectID}
+          onSelect={selectProject}
+          leadingScope={chatsAvailable ? { id: CHAT_DRAFT_PROJECT_ID, label: chatsLabel } : undefined}
+          emptyText={t('sessions.scheduledTasks.dialog.project.empty')}
+          toolbar={newTaskButton()}
+        >
+          {tasksList}
+        </ProjectRailPage>
       )}
 
       <ScheduledTaskEditorDialog
