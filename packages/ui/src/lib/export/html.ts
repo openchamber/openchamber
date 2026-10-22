@@ -413,9 +413,11 @@ const renderEntryHtml = (
         details.push(`<details><summary>${escapeHtml(exportText('export.section.error'))}</summary><pre>${escapeHtml(entry.tool.error)}</pre></details>`);
       }
       if (entry.tool.output) {
-        // The readable view's own cut is marked here; the detailed view cuts
-        // nothing, so it has nothing to mark. The runtime's own cut is
-        // marked in both: it belongs where the reader sees the output.
+        // The readable view's own cut is marked here, and the mark says where
+        // the whole result is: the export of this session with full details.
+        // The detailed view cuts nothing, so it has nothing to mark. The
+        // runtime's own cut is marked in both: it belongs where the reader
+        // sees the output.
         const truncationNote = runtimeTruncationNote(entry.tool);
         const notes = [
           entry.tool.outputTruncated

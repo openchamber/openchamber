@@ -511,7 +511,7 @@ describe('export pipeline', () => {
     const detailed = markdown(input, 'detailed');
 
     expect(detailed).toContain(long);
-    expect(detailed).not.toContain('the rest of this result is in the JSON export');
+    expect(detailed).not.toContain('the rest of this result is in the export of this session with full details');
   });
 
   test('the readable view keeps its own cut of a long result', () => {
@@ -542,7 +542,46 @@ describe('export pipeline', () => {
     expect(readable).toContain('x'.repeat(600));
     expect(readable).not.toContain(long);
     expect(readable).toContain('excerpt');
-    expect(readable).toContain('the rest of this result is in the JSON export');
+    expect(readable).toContain('the rest of this result is in the export of this session with full details');
+  });
+
+  test('the mark of a cut names no export the reader does not have', () => {
+    // The app writes one file, in the format the reader chose. A mark that
+    // pointed at a JSON export would name a file that was never written, so
+    // both marks name the export of the same session with full details.
+    const long = 'x'.repeat(2000);
+    const input = fixture({
+      root: session('ses_root', { title: 'Root' }),
+      records: {
+        ses_root: [
+          {
+            info: {
+              id: 'a1', sessionID: 'ses_root', role: 'assistant', agent: 'build',
+              providerID: 'anthropic', modelID: 'claude-opus-4-1', time: { created: 2000 },
+            },
+            parts: [{
+              id: 'a1-shell', sessionID: 'ses_root', messageID: 'a1', type: 'tool',
+              callID: 'a1-call', tool: 'shell',
+              state: { status: 'completed', input: { command: 'bun test' }, output: long, time: { start: 1, end: 2 } },
+            }],
+          },
+        ],
+      },
+    });
+
+    const readable = markdown(input, 'readable');
+    const { projection, timeline } = build(input, 'readable');
+    const html = renderExportHtml(projection, {
+      title: 'Root',
+      mode: 'readable',
+      findings: timeline.findings,
+      sessionCount: timeline.sessions.size,
+    });
+
+    expect(readable).toContain('the rest of this result is in the export of this session with full details');
+    expect(html).toContain('The full result is in the export of this session with full details.');
+    expect(readable).not.toContain('JSON export');
+    expect(html).not.toContain('JSON export');
   });
 
   test('the call that started a sub-agent says when the runtime cut its result short', () => {
@@ -1222,6 +1261,35 @@ describe('export pipeline', () => {
     const partFindings = timeline.findings.filter((finding) => finding.kind === 'unsupported-part');
 
     expect(partFindings).toHaveLength(1);
+  });
+
+  test('a part the model does not know reaches neither view of the document', () => {
+    // The part is neither text nor a file, so neither the readable view nor
+    // the full details shows it. The finding says so, and it names the one
+    // place the part survives: the source records of the JSON export.
+    const input = fixture({
+      root: session('ses_root', { title: 'Root' }),
+      records: {
+        ses_root: [
+          {
+            info: { id: 'u1', sessionID: 'ses_root', role: 'user', time: { created: 1000 } },
+            parts: [textPart('u1', 'First'), futurePart('u1')],
+          },
+        ],
+      },
+    });
+
+    const readable = markdown(input, 'readable');
+    const detailed = markdown(input, 'detailed');
+
+    expect(readable).toContain('is not shown in the readable view or in the full details');
+    expect(readable).toContain('The JSON export keeps it in its source records');
+    expect(detailed).toContain('is not shown in the readable view or in the full details');
+
+    const parsed = JSON.parse(renderExportJson(timelineOf(input)));
+    const parts = parsed.source.ses_root.records[0].parts;
+
+    expect(parts.map((part: { type: string }) => part.type)).toEqual(['text', 'future']);
   });
 });
 

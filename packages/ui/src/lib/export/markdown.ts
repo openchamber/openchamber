@@ -232,8 +232,13 @@ const renderEntry = (
         }
         if (entry.tool.error) details.push(`**${exportText('export.section.error')}**\n\n${asQuote(entry.tool.error)}`);
         if (entry.tool.output) {
+          // The readable view's own cut of the result. The note says where
+          // the whole result is: the export of this session with full
+          // details, which carries the recorded result as it is. The app
+          // writes one file, in the format the reader chose, so a pointer to
+          // a JSON export would name a file the reader does not have.
           const output = entry.tool.outputTruncated
-            ? `${entry.tool.output}\n\n*[${exportText('export.excerpt')} — ${exportText('export.restInJson')}]*`
+            ? `${entry.tool.output}\n\n*[${exportText('export.excerpt')} — ${exportText('export.restInFullDetails')}]*`
             : entry.tool.output;
           details.push(`**${exportText('export.section.result')}**\n\n${asQuote(output)}`);
           if (truncationLine) details.push(truncationLine);

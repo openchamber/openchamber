@@ -39,11 +39,13 @@ type Choice = { format: string; mode: string; includeSubagents: boolean };
 const render = async (options: {
   includeSubagents?: boolean;
   descendantCount?: number;
+  sessionListComplete?: boolean;
   onConfirm?: (choice: Choice) => void;
 }): Promise<{
   container: HTMLElement;
   text: () => string;
   click: (label: string) => void;
+  toggle: () => void;
   chosen: Choice[];
 }> => {
   const container = document.createElement('div');
@@ -66,6 +68,7 @@ const render = async (options: {
           mode={mode}
           onModeChange={setMode}
           descendantCount={options.descendantCount ?? 0}
+          sessionListComplete={options.sessionListComplete ?? true}
           includeSubagents={includeSubagents}
           onIncludeSubagentsChange={setIncludeSubagents}
           onConfirm={(nextFormat, nextMode, include) => {
@@ -94,7 +97,17 @@ const render = async (options: {
     });
   };
 
-  return { container, text: () => container.textContent ?? '', click, chosen };
+  // The sub-agent switch is a checkbox, and the reader turns it by clicking
+  // it.
+  const toggle = async () => {
+    const box = container.querySelector<HTMLInputElement>('input[type="checkbox"]');
+    expect(box).toBeTruthy();
+    await act(async () => {
+      box?.click();
+    });
+  };
+
+  return { container, text: () => container.textContent ?? '', click, toggle, chosen };
 };
 
 describe('ExportSessionDialog', () => {
@@ -157,5 +170,33 @@ describe('ExportSessionDialog', () => {
     const dialog = await render({ descendantCount: 2 });
     expect(dialog.text()).toContain('Include sub-agent tasks');
     expect(dialog.text()).toContain('2 sub-agent sessions');
+  });
+
+  test('a session whose list is still being read keeps the sub-agent switch', async () => {
+    // The number of sub-agent sessions is not known yet, but the reader may
+    // still have a choice to make about them, so the switch stays.
+    const dialog = await render({ sessionListComplete: false });
+    expect(dialog.text()).toContain('The number of sub-agent sessions is not known yet');
+    expect(dialog.text()).toContain('Include sub-agent tasks');
+  });
+
+  test('the text of an unknown count says what the choice will do', async () => {
+    // The export follows the switch, so the text has to follow it too.
+    const included = await render({ sessionListComplete: false });
+    expect(included.text()).toContain('The export will include the sub-agent work it finds');
+
+    const excluded = await render({ sessionListComplete: false, includeSubagents: false });
+    expect(excluded.text()).toContain('The export will leave the sub-agent work out');
+    expect(excluded.text()).not.toContain('The export will include the sub-agent work it finds');
+  });
+
+  test('the sub-agent switch works while the count is unknown', async () => {
+    let choice: Choice | undefined;
+    const dialog = await render({ sessionListComplete: false, onConfirm: (value) => { choice = value; } });
+
+    await dialog.toggle();
+    await dialog.click('Export');
+
+    expect(choice?.includeSubagents).toBe(false);
   });
 });

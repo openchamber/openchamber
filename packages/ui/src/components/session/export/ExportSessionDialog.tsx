@@ -40,7 +40,9 @@ type ExportSessionDialogProps = {
    *
    * The list arrives in pages, and it is the only place the lineage lives.
    * A count taken from a list that is still loading is not the number of
-   * sub-agent tasks the session has, so the dialog says so instead.
+   * sub-agent tasks the session has, so the dialog says so instead. The
+   * switch stays: the reader's choice is what the export follows, and it
+   * has to stay reachable when the number is not known yet.
    */
   sessionListComplete?: boolean;
   /** Whether the sub-agent tasks are part of the export. */
@@ -87,6 +89,11 @@ export const ExportSessionDialog: React.FC<ExportSessionDialogProps> = ({
   const { t } = useI18n();
 
   const hasSubagents = descendantCount > 0;
+  // The switch belongs to the choice, not to the count. While the list is
+  // still being read the count is unknown, and the reader may still have
+  // made a choice for this session before, so the switch stays and the
+  // description says what that choice will do.
+  const offersSubagents = hasSubagents || !sessionListComplete;
 
   const handleConfirm = React.useCallback(() => {
     onConfirm(format, mode, includeSubagents);
@@ -99,7 +106,9 @@ export const ExportSessionDialog: React.FC<ExportSessionDialogProps> = ({
           <DialogTitle>{t('sessions.sidebar.session.export.dialog.title')}</DialogTitle>
           <DialogDescription>
             {!sessionListComplete
-              ? t('sessions.sidebar.session.export.dialog.descriptionIncomplete')
+              ? (includeSubagents
+                ? t('sessions.sidebar.session.export.dialog.descriptionIncompleteIncluding')
+                : t('sessions.sidebar.session.export.dialog.descriptionIncompleteExcluding'))
               : hasSubagents
                 ? (descendantCount === 1
                   ? t('sessions.sidebar.session.export.dialog.descriptionSingle', { count: descendantCount })
@@ -162,7 +171,7 @@ export const ExportSessionDialog: React.FC<ExportSessionDialogProps> = ({
           </fieldset>
         )}
 
-        {hasSubagents ? (
+        {offersSubagents ? (
           <label className="flex items-center gap-2 typography-ui-label cursor-pointer">
             <input
               type="checkbox"

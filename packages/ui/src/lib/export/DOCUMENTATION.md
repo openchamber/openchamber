@@ -38,6 +38,10 @@ cannot name them differently.
   pages, and a count taken from a partial one would name a number the
   document does not carry. The walk is read at one moment, so a session the
   app attaches after the count is in the document and not in the number.
+  While the list is still being read the count is unknown, and the dialog
+  says so. The switch stays: the choice is the reader's, and it has to stay
+  reachable when the number is not known. The text says what the choice will
+  do, so the promise and the export agree.
 - **The document carries what the user asked for.** The coverage choice
   reaches the collector, not a filter over a loaded history: a user who left
   the sub-agent transcripts out gets a document without them, and without a
@@ -92,9 +96,11 @@ cannot name them differently.
   the page shows: a long prompt is cut in the readable view, and the index
   holds that cut, so a search does not find a word the reader cannot read.
 - **Compact never means lost.** The readable view cuts a long tool result
-  down and marks the cut. The JSON export carries every source record, so
-  nothing is gone. The cut is the same in every format: a long prompt reads
-  the same in the Markdown and in the HTML.
+  down and marks the cut. The mark says where the whole result is: the
+  export of this session with full details, which carries the recorded
+  result as it is. The JSON export carries every source record, so nothing
+  is gone. The cut is the same in every format: a long prompt reads the
+  same in the Markdown and in the HTML.
 - **The detailed view carries what was recorded.** It cuts nothing of its
   own: a tool result is written as the history recorded it. The runtime cuts
   a long result itself and keeps the prefix, so the document says so where
@@ -213,6 +219,17 @@ runtime never lets a result grow that long, so the cut never happened: the
 promise was about a case that could not arrive, and it hid the case that
 does — the runtime's own cut. The detailed view now carries the recorded
 result, and the document says where the runtime put the rest.
+
+### Why the readable view's cut points at the full-details export
+
+The readable view cuts a long tool result down, and the mark under the cut
+says where the whole result is: the export of this session with full
+details. That is the same document in the other view, and it carries the
+recorded result as it is.
+
+The rejected alternative was to point at the JSON export. The app writes one
+file, in the format the reader chose, so a reader of the Markdown file has
+no JSON file next to it, and the pointer led nowhere.
 
 ### Why a report is a line of relationship like a call
 
@@ -335,10 +352,13 @@ under the reader's feet would say that two sessions were one.
 the pipeline derived from them. A reader can rebuild the conversation from
 the export, or check the readable view against the original.
 
-A part the pipeline does not know is still in `source`. The rejected
-alternative was projecting every part into the event model, which would have
-meant guessing at parts the model does not cover and would have made the
-event model a lossy copy of the source.
+A part the pipeline does not know is still in `source`. It reaches neither
+view of the document: a message is rendered from its text and its files, and
+a part of an unknown type is neither. The finding says so, and it names
+`source` as the place the part survives. The rejected alternative was
+projecting every part into the event model, which would have meant guessing
+at parts the model does not cover and would have made the event model a
+lossy copy of the source.
 
 ### Why the JSON export sorts its events and the readable view does not
 

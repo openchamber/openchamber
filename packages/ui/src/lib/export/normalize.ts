@@ -685,7 +685,8 @@ export const normalizeExportTimeline = (options: {
 
         // A part the model does not cover is carried in the event model as an
         // unknown part, and reported once per part type. The part itself is
-        // in `source`.
+        // in `source`. It reaches neither view: a message is rendered from
+        // its text and its files, and a part of an unknown type is neither.
         for (const part of record.parts) {
           if (isKnownPart(part)) continue;
           const partType = readPartType(part);
