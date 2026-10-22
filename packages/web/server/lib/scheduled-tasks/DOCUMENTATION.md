@@ -109,7 +109,10 @@ like any task, but `runTaskWithWatchdog` hands it to the injected
 that had nothing to do (quiet hours, no changes, no lenses) returns `skipped`
 and the run is recorded with `lastStatus: 'skipped'`. Only the suggested-tasks
 module writes these tasks: the service refuses to save or delete them (409),
-and loop reconciliation never adopts one by name.
+and loop reconciliation never adopts one by name. The Scheduled tasks page
+lists the scan under its translated name with Run now and Edit, and Edit opens
+the Suggested tasks Configure dialog; it offers no pause, delete or open
+session for it, since a scan's sessions are its lenses.
 
 ## Existing-session tasks
 

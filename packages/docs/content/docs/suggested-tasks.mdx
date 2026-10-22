@@ -11,7 +11,7 @@ A scan only reads files. It cannot edit them, run commands, or use your MCP tool
 
 ## Turn it on for a project
 
-1. Open the inbox from the lightbulb, pick the project, and click **Configure**. The same settings are in the project's **Suggested tasks** tab under **Settings → Projects**.
+1. Open the inbox from the lightbulb, pick the project, and click **Configure**.
 2. Check **Scan this project for suggested tasks**.
 3. Under **Lenses**, click **Add a lens** and pick a starting point, for example **Security** or **Forgotten TODOs and FIXMEs**. Add a second one if you like.
 4. Choose **When to scan**. **Manual** runs a scan only when you start one.
@@ -52,7 +52,7 @@ The last three start sessions without asking, and those sessions spend tokens.
 - **Daily** or **Weekly**: at a time you pick, in a time zone you pick
 - **Cron**: any cron expression, such as `0 9 * * 1-5` for 9:00 on weekdays
 
-**Quiet hours** skip scheduled scans that fall in a window, such as 22:00 to 07:00. A scan you start yourself always runs. Scans are timed by the same scheduler as [Scheduled Tasks](/scheduled-tasks/), so they run while OpenChamber's server runs, even with the window closed.
+**Quiet hours** skip scheduled scans that fall in a window, such as 22:00 to 07:00. A scan you start yourself always runs. Scans are timed by the same scheduler as [Scheduled Tasks](/scheduled-tasks/), so they run while OpenChamber's server runs, even with the window closed. The scan is listed on the Scheduled tasks page too, where **Edit** opens **Configure**.
 
 ## What a scan looks at
 
@@ -114,4 +114,4 @@ When a scan adds suggestions, OpenChamber [notifies](/notifications/) you, unles
 
 ## Where it is available
 
-The inbox and scans work in the web app, the desktop app and on a phone, where **Configure** opens the same settings. The VS Code extension does not offer suggested tasks.
+The inbox, scans and **Configure** work in the web app, the desktop app and on a phone. The VS Code extension does not offer suggested tasks.
