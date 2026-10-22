@@ -207,6 +207,20 @@ const declaredSettings = (guest) => {
   return new Map(fields.map((field) => [field.id, field]));
 };
 
+/**
+ * One `onGuestDeactivated` listener from several: every listener runs, and
+ * one that fails is logged under its name and never skips the others.
+ * @param {Array<{ name: string, listener: (event: { guestId: string, guestName: string, removed?: boolean }) => unknown }>} listeners
+ */
+export const settleGuestDeactivationListeners = (listeners) => async (event) => {
+  const results = await Promise.allSettled(listeners.map(async ({ listener }) => listener(event)));
+  results.forEach((result, index) => {
+    if (result.status === 'rejected') {
+      console.warn(`Failed to ${listeners[index].name}:`, result.reason?.message ?? result.reason);
+    }
+  });
+};
+
 export const registerGuestRoutes = (app, {
   openchamberDataDir,
   openchamberVersion,
@@ -214,6 +228,9 @@ export const registerGuestRoutes = (app, {
   resolveOptionalProjectDirectory,
   getSmallModelService,
   onGuestDeactivated = async () => false,
+  // After a package may have gained a role: approval, enable, install or
+  // replace, update. The listener reads the catalog itself.
+  onGuestActivated = async () => undefined,
   surfaceViewerHeaders = () => null,
   // The tracker registry: a host-auth guest borrows its tracker's sign-in.
   trackers = null,
@@ -223,6 +240,22 @@ export const registerGuestRoutes = (app, {
   const frameGrants = createGuestFrameGrants();
   const versionOptions = { openchamberVersion };
   const installOptions = () => ({ openchamberVersion, gitBinary: resolveGitBinaryForSpawn() });
+
+  // The change already happened; a listener that fails must not turn it into an error answer.
+  const activated = async (guestId) => {
+    try {
+      await onGuestActivated({ guestId });
+    } catch (error) {
+      console.warn('Failed to apply an extension activation:', error?.message ?? error);
+    }
+  };
+  const deactivated = async (event) => {
+    try {
+      await onGuestDeactivated(event);
+    } catch (error) {
+      console.warn('Failed to apply an extension deactivation:', error?.message ?? error);
+    }
+  };
 
   const loadGuest = async (id) => {
     if (!isGuestPanelId(id)) {
@@ -251,6 +284,7 @@ export const registerGuestRoutes = (app, {
         return res.status(400).json({ error: hasUrl ? 'invalid-url' : 'invalid-path' });
       }
       const result = await installGuest(request, persistPath, installOptions());
+      if (result.ok) await activated(result.guest.id);
       sendInstallResult(res, result);
     } catch (error) {
       console.error('Failed to install guest:', error);
@@ -270,6 +304,7 @@ export const registerGuestRoutes = (app, {
       }
       const replace = req.query?.replace === 'true';
       const result = await installGuestFromZipBuffer(body.buffer, persistPath, { openchamberVersion, replace });
+      if (result.ok) await activated(result.guest.id);
       sendInstallResult(res, result);
     } catch (error) {
       console.error('Failed to install uploaded guest:', error);
@@ -315,6 +350,7 @@ export const registerGuestRoutes = (app, {
         }
         return res.status(400).json(body);
       }
+      await activated(guest.id);
       const next = await loadGuest(guest.id);
       if (!next) {
         return res.status(404).json({ error: 'not-found' });
@@ -342,7 +378,7 @@ export const registerGuestRoutes = (app, {
       await forgetGuestAuth(id, authPath);
       // A role this package stood in for (the agent's browser) goes back to
       // the host's own, and the user is told rather than finding out mid-task.
-      await onGuestDeactivated({ guestId: id, guestName: removed?.name ?? id });
+      await deactivated({ guestId: id, guestName: removed?.name ?? id, removed: true });
       res.status(204).end();
     } catch (error) {
       console.error('Failed to uninstall guest:', error);
@@ -756,7 +792,9 @@ export const registerGuestRoutes = (app, {
       await setCapabilityGrants(guest.id, persistPath, granted, granted.length > 0 ? scope : null);
       if (granted.length === 0) {
         await stopGuestService(guest.id);
-        await onGuestDeactivated({ guestId: guest.id, guestName: guest.name });
+        await deactivated({ guestId: guest.id, guestName: guest.name });
+      } else {
+        await activated(guest.id);
       }
       // Credentials were stored for one API origin and one pair of OAuth
       // endpoints. When a newer version points the integration somewhere
@@ -786,8 +824,10 @@ export const registerGuestRoutes = (app, {
         return res.status(400).json({ error: 'invalid-request' });
       }
       await setGuestEnabled(guest.id, persistPath, parsed.data.enabled);
-      if (!parsed.data.enabled) {
-        await onGuestDeactivated({ guestId: guest.id, guestName: guest.name });
+      if (parsed.data.enabled) {
+        await activated(guest.id);
+      } else {
+        await deactivated({ guestId: guest.id, guestName: guest.name });
       }
       const next = await loadGuest(guest.id);
       if (!next) {

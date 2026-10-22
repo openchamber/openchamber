@@ -59,6 +59,14 @@ const publicServiceSchema = z.object({
   surface: z.literal(true).optional().catch(undefined),
 });
 
+// The Git host a source-control provider extension adds, as the approval
+// dialog shows it. A malformed slice drops the field, never the row.
+const publicSourceControlSchema = z.object({
+  label: z.string().trim().min(1).max(64),
+  defaultInstances: z.array(z.string().trim().min(1)).max(4),
+  custom: z.boolean(),
+});
+
 const guestActionSchema = z.object({
   id: z.string().regex(PANEL_ID),
   label: z.string().trim().min(1),
@@ -121,6 +129,7 @@ const installedGuestSchema = z.object({
   filesystem: z.array(z.string().trim().min(1)).optional(),
   origins: z.array(z.string().trim().min(1)).optional(),
   service: publicServiceSchema.optional(),
+  sourceControl: publicSourceControlSchema.optional().catch(undefined),
   actions: z.array(guestActionSchema).max(GUEST_ACTIONS_MAX).optional(),
   commands: z.array(guestCommandSchema).max(GUEST_COMMANDS_MAX).optional(),
   tools: z.array(guestToolSchema).max(GUEST_TOOLS_MAX).optional(),

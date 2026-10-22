@@ -1,6 +1,6 @@
 # Extension gallery
 
-Eight examples to use, explore, and adapt. The five panel extensions also have full-screen pages. Their layouts respond to the iframe width, use the host's light/dark theme, and keep your input when the host updates its context.
+Nine examples to use, explore, and adapt. The five panel extensions also have full-screen pages. Their layouts respond to the iframe width, use the host's light/dark theme, and keep your input when the host updates its context.
 
 | Folder | In the app | Try this |
 | --- | --- | --- |
@@ -12,6 +12,7 @@ Eight examples to use, explore, and adapt. The five panel extensions also have f
 | `git-graph-status` | **Git Graph** | Open a chat in a git project and expand **Recent commits** in Work Status. It draws the project's history with the same lanes and curves as the Git view, branch, remote and tag badges, and a row for uncommitted changes. Switch between Auto (your branch and its upstream), All, and Manual (tick the branches you want). A supporting host places the range select and Refresh button in the section header; older hosts keep them in the body. Click a commit to see its details, copy its hash, open it on GitHub, or open its diff. It has no rail icon and no panel, only that section. Approve its local service at install; the service only reads git. See [its README](./git-graph-status/README.md). |
 | `checklist-editor` | **Checklist** | Create a file named `todo.checklist.md` in a project and open it in Files: its `- [ ]` lines become a checklist you tick, edit, add to, and remove from, while every other line stays as written. Save with Cmd/Ctrl+S or let autosave do it, switch to the source view and back, or open it fullscreen. It has no rail icon and no panel, only the editor. OpenChamber keeps the file; the editor never reads or writes it. |
 | `tools-only` | **Tool Gallery** | Render review findings and project checks as tables inside chat. This extension has no panel. Its optional read-only MCP fixture makes the results reproducible; see [its README](./tools-only/README.md). |
+| `source-control-provider` | **Teahouse** (a Git host) | Adds a Git host next to GitHub, GitLab and Gitea, written against a subset of Gitea's REST API. Point it at a Gitea 1.21+ server: on the **Teahouse** card in Settings → Integrations, add the server's address and a token, then open a project whose remote is on that server and browse its pull requests and issues, comment, close, or merge. It has no panel, and the token stays in OpenChamber; see [its README](./source-control-provider/README.md). |
 
 ## Install and explore
 
@@ -56,6 +57,9 @@ bun packages/sdk/scripts/bundle-guest.ts --node packages/sdk/examples/tools-only
 bun packages/sdk/scripts/bundle-guest.ts packages/sdk/examples/git-graph-status/status/main.ts packages/sdk/examples/git-graph-status/status/main.js
 bun packages/sdk/scripts/bundle-guest.ts --node packages/sdk/examples/git-graph-status/service/main.ts packages/sdk/examples/git-graph-status/service/main.js
 bun packages/sdk/scripts/bundle-guest.ts packages/sdk/examples/checklist-editor/editor/main.ts packages/sdk/examples/checklist-editor/editor/main.js
+bun packages/sdk/scripts/bundle-guest.ts --node packages/sdk/examples/browser-provider-stub/service/main.ts packages/sdk/examples/browser-provider-stub/service/main.js
+bun packages/sdk/scripts/bundle-guest.ts packages/sdk/examples/browser-provider-stub/panel/main.ts packages/sdk/examples/browser-provider-stub/panel/main.js
+bun packages/sdk/scripts/bundle-guest.ts --node packages/sdk/examples/source-control-provider/service/main.ts packages/sdk/examples/source-control-provider/service/main.js
 ```
 
 Rebuild all panels after editing `shared.ts` or the SDK. Commit built files with the extension; installation never builds source or installs dependencies. Bump the extension's own version when publishing an update through Git.
@@ -69,4 +73,4 @@ bun run --cwd packages/sdk test
 bun test packages/ui/src/lib/guests/sdk-examples.test.ts
 ```
 
-SDK checks cover example TypeScript, manifests, persistence failures, the optional MCP fixture, and freshness of every bundle. UI-owned DOM tests exercise those bundles with a simulated host. These tests never read your real config or use a provider credential.
+SDK checks cover example TypeScript, manifests, persistence failures, the optional MCP fixture, the Git host service against its fake forge, and freshness of every bundle. UI-owned DOM tests exercise those bundles with a simulated host. These tests never read your real config or use a provider credential.

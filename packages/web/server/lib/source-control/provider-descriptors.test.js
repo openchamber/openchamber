@@ -1,10 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import {
   createProviderDescriptors,
   publicProviderDescriptor,
   sourceControlProviderDescriptors,
 } from './provider-descriptors.js';
-import { isProviderId, isReservedProviderId } from './provider-id.js';
+import { extensionProviderId, isExtensionProviderId, isProviderId, isReservedProviderId } from './provider-id.js';
+import { detachExtensionDescriptors } from './provider-descriptors.test-support.js';
 import { BUILT_IN_SOURCE_CONTROL_PROVIDERS } from '../../../src/api/source-control-providers';
 
 const github = sourceControlProviderDescriptors.get('github');
@@ -124,6 +125,55 @@ describe('source control provider descriptors', () => {
     expect(() => createProviderDescriptors([{ id: 'link' }])).toThrow();
     expect(() => createProviderDescriptors([{ id: 'binding' }])).toThrow();
     expect(() => createProviderDescriptors([github, github])).toThrow();
+    expect(() => createProviderDescriptors([{ ...gitea, id: 'ext-gitea' }])).toThrow();
+    expect(() => createProviderDescriptors([{ ...gitea, id: 'ext-' }])).toThrow();
+  });
+});
+
+describe('extension provider descriptors', () => {
+  afterEach(() => detachExtensionDescriptors());
+
+  const extension = (id) => Object.freeze({ ...gitea, id });
+
+  it('lists the built-ins first, then attached extensions sorted by id', () => {
+    const before = sourceControlProviderDescriptors.list();
+    sourceControlProviderDescriptors.attachExtension(extension('ext-zeta'));
+    sourceControlProviderDescriptors.attachExtension(extension('ext-alpha'));
+
+    const listed = sourceControlProviderDescriptors.list();
+    expect(listed.map((descriptor) => descriptor.id)).toEqual(['github', 'gitlab', 'gitea', 'ext-alpha', 'ext-zeta']);
+    expect(Object.isFrozen(listed)).toBe(true);
+    expect(before.map((descriptor) => descriptor.id)).toEqual(['github', 'gitlab', 'gitea']);
+    expect(sourceControlProviderDescriptors.has('ext-alpha')).toBe(true);
+    expect(sourceControlProviderDescriptors.get('ext-zeta').id).toBe('ext-zeta');
+  });
+
+  it('replaces an attached extension with the same id and detaches it again', () => {
+    const descriptors = createProviderDescriptors([gitea]);
+    const first = extension('ext-forge');
+    const second = extension('ext-forge');
+    descriptors.attachExtension(first);
+    descriptors.attachExtension(second);
+    expect(descriptors.list()).toEqual([gitea, second]);
+
+    expect(descriptors.detachExtension('ext-forge')).toBe(true);
+    expect(descriptors.detachExtension('ext-forge')).toBe(false);
+    expect(descriptors.detachExtension('gitea')).toBe(false);
+    expect(descriptors.get('ext-forge')).toBeNull();
+    expect(descriptors.list()).toEqual([gitea]);
+  });
+
+  it('attaches only extension ids', () => {
+    const descriptors = createProviderDescriptors([gitea]);
+    for (const id of ['gitea', 'forgejo', 'ext-', 'ext-Bad', undefined]) {
+      expect(() => descriptors.attachExtension({ ...gitea, id })).toThrow();
+    }
+  });
+
+  it('publishes the extension marker only when given', () => {
+    expect(publicProviderDescriptor(gitea, 2)).not.toHaveProperty('extension');
+    const marker = { guestId: 'forge', name: 'Forge', version: '1.0.0', token: { header: 'authorization' } };
+    expect(publicProviderDescriptor(extension('ext-forge'), 3, marker).extension).toEqual({ guestId: 'forge', name: 'Forge', version: '1.0.0' });
   });
 });
 
@@ -133,5 +183,13 @@ describe('provider ids', () => {
     for (const id of ['', 'GitHub', '1abc', '-x', 'a'.repeat(33), 'git_hub', null, 7]) expect(isProviderId(id)).toBe(false);
     expect(isReservedProviderId('repository')).toBe(true);
     expect(isReservedProviderId('github')).toBe(false);
+  });
+
+  it('derives extension provider ids from guest ids that fit', () => {
+    expect(extensionProviderId('forge')).toBe('ext-forge');
+    expect(extensionProviderId('a'.repeat(28))).toBe(`ext-${'a'.repeat(28)}`);
+    for (const guestId of ['a'.repeat(29), 'Forge', '1forge', '', null]) expect(extensionProviderId(guestId)).toBeNull();
+    expect(isExtensionProviderId('ext-forge')).toBe(true);
+    for (const id of ['gitea', 'ext-', 'ext-Forge', `ext-${'a'.repeat(29)}`, 7]) expect(isExtensionProviderId(id)).toBe(false);
   });
 });

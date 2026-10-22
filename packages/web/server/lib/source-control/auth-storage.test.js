@@ -188,6 +188,38 @@ describe('source-control auth storage', () => {
     expect(() => store.section('Not An Id')).toThrow();
   });
 
+  it('drops an extension provider section in one write and refuses built-in sections', async () => {
+    const { filePath, store } = await makeStore();
+    const origin = 'https://forge.example.com';
+    const forge = store.section('ext-forge');
+    await forge.setAccount(origin, { token: 'forge-pat', user: { id: 5, login: 'five' }, source: 'pat' });
+    await forge.setAccount('https://other.example.com', { token: 'other-pat', user: { id: 6, login: 'six' }, source: 'pat' });
+    const gitea = await store.section('gitea').setAccount(origin, { token: 'gitea-pat', user: { id: 5, login: 'five' }, source: 'pat' });
+
+    await expect(store.dropSection('ext-forge')).resolves.toBe(true);
+    const written = JSON.parse(await fs.readFile(filePath, 'utf8'));
+    expect(Object.keys(written.providers)).toEqual(['gitlab', 'github', 'gitea']);
+    await expect(forge.listInstances()).resolves.toEqual([]);
+    await expect(store.section('gitea').readAccount(origin, gitea.id)).resolves.toMatchObject({ token: 'gitea-pat' });
+    await expect(store.dropSection('ext-forge')).resolves.toBe(false);
+
+    for (const id of ['gitlab', 'github', 'gitea', 'ext-', 'Not An Id']) {
+      await expect(store.dropSection(id)).rejects.toThrow(/cannot be dropped/);
+    }
+    expect(JSON.parse(await fs.readFile(filePath, 'utf8'))).toEqual(written);
+  });
+
+  it('drops an extension section this build cannot parse', async () => {
+    const { filePath, store } = await makeStore();
+    await fs.writeFile(filePath, JSON.stringify({
+      version: 4,
+      providers: { gitlab: { instances: {} }, github: { instances: {} }, 'ext-forge': { instances: { 'not an origin': {} } } },
+    }), 'utf8');
+
+    await expect(store.dropSection('ext-forge')).resolves.toBe(true);
+    expect(JSON.parse(await fs.readFile(filePath, 'utf8'))).toEqual({ version: 2, providers: { gitlab: { instances: {} } } });
+  });
+
   it('round trips a section of a provider this build does not know, byte for byte', async () => {
     const { filePath, store } = await makeStore();
     const forgeOrigin = 'https://forge.example.com';

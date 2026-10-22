@@ -40,6 +40,12 @@ import {
   GUEST_STATUS_SECTION_HEIGHT_MAX,
   GUEST_STATUS_SECTION_HEIGHT_MIN,
   GUEST_STATUS_SECTION_TITLE_MAX,
+  SOURCE_CONTROL_DEFAULT_INSTANCES_MAX,
+  SOURCE_CONTROL_GUEST_ID_MAX,
+  SOURCE_CONTROL_URL_TEMPLATES_MAX,
+  SOURCE_CONTROL_URL_TEMPLATE_MAX,
+  SOURCE_CONTROL_URL_TOKENS,
+  type SourceControlContribution,
 } from './manifest.ts';
 import {
   GUEST_FILE_EDITORS_MAX,
@@ -227,6 +233,148 @@ const serviceSchema = z.object({
   surface: z.literal(true).optional(),
 });
 
+// SVG path data only, the same rule the UI applies to a provider's icon path:
+// commands, numbers and separators, nothing that could close the attribute.
+const SVG_PATH_DATA = /^[MmLlHhVvCcSsQqTtAaZz0-9eE.,\s+-]+$/;
+// A literal URL template segment: no placeholder braces, no regex syntax.
+const URL_TEMPLATE_LITERAL = /^[A-Za-z0-9._~-]+$/;
+const URL_TEMPLATE_TOKENS: ReadonlySet<string> = new Set(SOURCE_CONTROL_URL_TOKENS);
+
+/**
+ * A web path template of a change request or issue: `/`, then segments that
+ * are each a literal or one of the known placeholders. `{repo}` and
+ * `{number}` appear exactly once, and the repository's owner exactly once as
+ * `{owner}` (`owner/name` paths) or `{namespace+}` (`namespace/name` paths).
+ */
+const isUrlTemplate = (value: string, repositoryPath: SourceControlContribution['repositoryPath']): boolean => {
+  if (!value.startsWith('/') || value.length > SOURCE_CONTROL_URL_TEMPLATE_MAX) return false;
+  const segments = value.slice(1).split('/');
+  // A normalized URL never has a `.` or `..` segment, so a template with one matches nothing.
+  if (segments.some((segment) => segment === '.' || segment === '..')) return false;
+  if (segments.some((segment) => !URL_TEMPLATE_TOKENS.has(segment) && !URL_TEMPLATE_LITERAL.test(segment))) return false;
+  const count = (token: string) => segments.filter((segment) => segment === token).length;
+  const owner = repositoryPath === 'owner/name' ? '{owner}' : '{namespace+}';
+  const other = repositoryPath === 'owner/name' ? '{namespace+}' : '{owner}';
+  return count('{repo}') === 1 && count('{number}') === 1 && count(owner) === 1 && count(other) === 0;
+};
+
+// A file inside the repository, as a change request template names it:
+// relative, no `.` or `..` segment, dot-folders like `.gitea/` allowed.
+const REPOSITORY_FILE_SEGMENT = /^[A-Za-z0-9._-]+$/;
+const isRepositoryFilePath = (value: string): boolean => value.length > 0 && value.split('/')
+  .every((segment) => REPOSITORY_FILE_SEGMENT.test(segment) && segment !== '.' && segment !== '..');
+
+const prefixSchema = z.string().min(1).max(4).regex(/^\S+$/);
+const literalSchema = z.string().trim().min(1).max(64);
+
+const sourceControlCapabilitiesSchema = z.object({
+  projects: z.boolean().default(false),
+  issues: z.boolean().default(false),
+  changeRequests: z.boolean().default(false),
+  draftChangeRequests: z.boolean().default(false),
+  merge: z.union([
+    z.literal(false),
+    z.object({
+      methods: z.array(z.enum(['merge', 'squash', 'rebase'])).min(1).max(3)
+        .refine((methods) => new Set(methods).size === methods.length, { message: 'merge methods must be unique' }),
+    }).strict(),
+  ]).default(false),
+  ci: z.boolean().default(false),
+  comments: z.boolean().default(false),
+  reviews: z.boolean().default(false),
+  state: z.boolean().default(false),
+  labels: z.boolean().default(false),
+  reviewers: z.boolean().default(false),
+  changeRequestPatch: z.boolean().default(false),
+  liveSummaries: z.boolean().default(false),
+}).strict();
+
+// A Git username OpenChamber puts before the token in an HTTPS credential.
+const FIXED_USERNAME = /^[A-Za-z0-9._-]{1,64}$/;
+
+const urlTemplatesSchema = z.array(z.string().trim().min(1)).max(SOURCE_CONTROL_URL_TEMPLATES_MAX);
+
+const sourceControlSchema = z.object({
+  wire: z.literal(1),
+  label: literalSchema,
+  terminology: z.object({
+    changeRequest: z.enum(['pullRequest', 'mergeRequest']),
+    ci: z.enum(['checks', 'pipeline']),
+  }).strict(),
+  referencePrefix: z.object({ changeRequest: prefixSchema, issue: prefixSchema }).strict(),
+  repositoryPath: z.enum(['owner/name', 'namespace/name']),
+  instances: z.object({
+    defaultInstances: z.array(z.string().trim().refine(isHttpsOrigin, { message: 'must be an https origin with no path, like https://git.example.com' }))
+      .max(SOURCE_CONTROL_DEFAULT_INSTANCES_MAX)
+      .refine((origins) => new Set(origins).size === origins.length, { message: 'default instances must be unique' }),
+    custom: z.boolean(),
+    allowLoopbackHttp: z.boolean(),
+    allowPort: z.boolean(),
+    placeholder: z.string().trim().max(256),
+  }).strict().refine(
+    (instances) => instances.custom || instances.defaultInstances.length > 0,
+    { message: 'without custom instances, defaultInstances names at least one' },
+  ),
+  capabilities: sourceControlCapabilitiesSchema,
+  token: z.object({
+    header: z.enum(['authorization', 'private-token']),
+    scheme: z.enum(['bearer', 'token', 'none']),
+    scopes: z.array(z.string().trim().min(1).max(64)).max(32),
+    createPath: z.string().trim().max(256).refine(isSafeApiPath, { message: 'must be a path on the instance starting with "/", with no "." or ".." segment' }).optional(),
+  }).strict().refine(
+    (token) => (token.header === 'private-token') === (token.scheme === 'none'),
+    { message: 'private-token takes the bare token; authorization takes a bearer or token scheme' },
+  ),
+  transport: z.object({
+    httpsUsername: z.union([
+      z.object({ kind: z.literal('login') }).strict(),
+      z.object({ kind: z.literal('fixed'), value: z.string().regex(FIXED_USERNAME) }).strict(),
+    ]),
+    appendDotGitToHttpsClone: z.boolean(),
+  }).strict(),
+  limits: z.object({
+    commentMaxLength: z.number().int().min(1).max(1_000_000),
+    reviewerId: z.enum(['numeric', 'login']),
+    labelsMax: z.number().int().min(0).max(100),
+    reviewersMax: z.number().int().min(0).max(50),
+  }).strict(),
+  trackedItems: z.object({ batchLimit: z.number().int().min(1).max(50) }).strict(),
+  presentation: z.object({
+    abbreviation: z.string().trim().min(1).max(8),
+    promptNoun: literalSchema,
+    sharedNumberSpace: z.boolean(),
+    iconPath: z.string().max(8192).regex(SVG_PATH_DATA).optional(),
+    urls: z.object({ changeRequest: urlTemplatesSchema, issue: urlTemplatesSchema }).strict(),
+    features: z.object({
+      authorCanReview: z.boolean().default(false),
+      issueCloseReason: z.boolean().default(false),
+    }).strict(),
+    changeRequestTemplates: z.array(z.string().trim().max(256).refine(isRepositoryFilePath, {
+      message: 'must be a file path inside the repository, like .gitea/pull_request_template.md, with no "." or ".." segment',
+    })).max(8),
+  }).strict(),
+}).strict().superRefine((value, ctx) => {
+  for (const kind of ['changeRequest', 'issue'] as const) {
+    value.presentation.urls[kind].forEach((template, index) => {
+      if (isUrlTemplate(template, value.repositoryPath)) return;
+      ctx.addIssue({
+        code: 'custom', path: ['presentation', 'urls', kind, index],
+        message: `templates start with "/" and use literal segments and ${SOURCE_CONTROL_URL_TOKENS.join(', ')}: {repo} and {number} once, and ${value.repositoryPath === 'owner/name' ? '{owner}' : '{namespace+}'} once for ${value.repositoryPath} paths.`,
+      });
+    });
+  }
+  // Change request patterns are matched first, so an issue template that is
+  // also a change request template would read every issue link as one.
+  const changeRequestTemplates = new Set(value.presentation.urls.changeRequest);
+  value.presentation.urls.issue.forEach((template, index) => {
+    if (!changeRequestTemplates.has(template)) return;
+    ctx.addIssue({
+      code: 'custom', path: ['presentation', 'urls', 'issue', index],
+      message: 'is also a changeRequest template; a link names either a change request or an issue.',
+    });
+  });
+});
+
 const uniqueBy = <T,>(items: T[], key: (item: T) => string): boolean => (
   new Set(items.map(key)).size === items.length
 );
@@ -313,6 +461,7 @@ const contributesSchema = z.object({
   commands: commandsSchema.optional(),
   tools: toolsSchema.optional(),
   fileEditors: fileEditorsSchema.optional(),
+  sourceControl: sourceControlSchema.optional(),
 });
 
 /**
@@ -341,6 +490,23 @@ export const openChamberManifestSchema = z.object({
     openchamber: z.string().trim().regex(OPENCHAMBER_ENGINE_PATTERN),
   }).strict().optional(),
   contributes: contributesSchema.superRefine((contributes, ctx) => {
+    // The Git host and the role that serves it come together, and the host
+    // names it `ext-<panel.id>` within the 32-character provider id.
+    const providesSourceControl = contributes.service?.provides?.includes('source-control') === true;
+    if (providesSourceControl !== (contributes.sourceControl !== undefined)) {
+      ctx.addIssue({
+        code: 'custom', path: ['service', 'provides'],
+        message: 'service.provides "source-control" and contributes.sourceControl come together: declare both or neither.',
+      });
+      return;
+    }
+    if (providesSourceControl && contributes.panel.id.length > SOURCE_CONTROL_GUEST_ID_MAX) {
+      ctx.addIssue({
+        code: 'custom', path: ['service', 'provides'],
+        message: `A source-control extension's panel.id is at most ${SOURCE_CONTROL_GUEST_ID_MAX} characters: OpenChamber names its Git host "ext-<panel.id>".`,
+      });
+      return;
+    }
     // Docking only means something for a page beside a shared surface.
     const docked = contributes.panel.dock !== undefined || contributes.panel.size !== undefined;
     if (docked && !(contributes.service?.surface && hasGuestPage(contributes))) {
@@ -416,6 +582,10 @@ const fail = (code: ParseManifestErrorCode, message: string): ParseManifestFailu
   code,
   message,
 });
+
+/** `contributes.sourceControl.instances.defaultInstances[0]`, relative to the `openchamber` block. */
+const fieldPath = (issuePath: ReadonlyArray<PropertyKey>): string => (issuePath[0] === 'openchamber' ? issuePath.slice(1) : issuePath)
+  .reduce<string>((field, segment) => (Number.isInteger(segment) ? `${field}[${String(segment)}]` : `${field ? `${field}.` : ''}${String(segment)}`), '');
 
 const failureFromIssue = (issue: { path: ReadonlyArray<PropertyKey>; code: string; message: string }): ParseManifestFailure => {
   // Paths are reported relative to the `openchamber` block whether the
@@ -528,8 +698,17 @@ const failureFromIssue = (issue: { path: ReadonlyArray<PropertyKey>; code: strin
       'contributes.integration needs a name, description, and oauth, token, or host.',
     );
   }
+  if (path.startsWith('contributes.sourceControl')) {
+    // The field is named either way: a refine's message alone does not say which entry failed.
+    const field = fieldPath(issue.path);
+    return fail('invalid-service', issue.code === 'custom'
+      ? `${field}: ${issue.message}`
+      : `${field} is invalid: see "contributes.sourceControl" in GUEST_SERVICES.md for every field.`);
+  }
   if (path.startsWith('contributes.service')) {
-    return fail('invalid-service', 'contributes.service needs entry, runtime "host", optional permissions, optional provides ("browser"), and optional surface (true).');
+    return fail('invalid-service', issue.code === 'custom'
+      ? issue.message
+      : 'contributes.service needs entry, runtime "host", optional permissions, optional provides ("browser", "source-control"), and optional surface (true).');
   }
   return fail('missing-panel', 'contributes.panel is required.');
 };

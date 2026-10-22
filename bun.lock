@@ -185,6 +185,13 @@
         "@openchamber/sdk": "workspace:*",
       },
     },
+    "packages/sdk/examples/source-control-provider": {
+      "name": "@openchamber/example-source-control-provider",
+      "version": "1.0.0",
+      "dependencies": {
+        "@openchamber/sdk": "workspace:*",
+      },
+    },
     "packages/sdk/examples/tasks-demo": {
       "name": "@openchamber/example-tasks-demo",
       "version": "1.1.0",
@@ -1082,6 +1089,8 @@
     "@openchamber/example-hello-kit": ["@openchamber/example-hello-kit@workspace:packages/sdk/examples/hello-kit"],
 
     "@openchamber/example-service-echo": ["@openchamber/example-service-echo@workspace:packages/sdk/examples/service-echo"],
+
+    "@openchamber/example-source-control-provider": ["@openchamber/example-source-control-provider@workspace:packages/sdk/examples/source-control-provider"],
 
     "@openchamber/example-tasks-demo": ["@openchamber/example-tasks-demo@workspace:packages/sdk/examples/tasks-demo"],
 

@@ -343,6 +343,25 @@ Invariants:
   when it differs from the held key: the store is created at import, before
   the runtime endpoint is initialized. A transient key (`isTransientRuntimeKey`:
   `url:default`, `mobile-disconnected`) is never a snapshot slot.
+- The served set can change while the app runs: an extension whose service
+  provides `source-control` adds a provider (`ext-<guestId>`, marked with
+  `extension: { guestId, name, version }`) when it is approved, enabled or
+  updated, and drops it when paused, removed or updated without the role. The
+  server announces this as `openchamber:source-control-providers-changed`, a
+  payload-free event; `hooks/useSourceControlProviderSync.ts` (mounted in
+  `App.tsx` and `MobileApp.tsx`) answers it, and every `event-stream-ready`,
+  with `refresh` and a forced auth-store `refreshAll`, because a change during
+  a stream gap is never announced to this client. The auth store's instance
+  list names only registered providers, so without that re-read a provider
+  added mid-session would match no links and show no account status until a
+  reload. The event never carries the list: the registry re-reads it, so
+  the failure rules above hold. A `refresh` made while a read is out gets one
+  more read after that read settles (shared by every such call), never the
+  read on the wire: the server may have answered it before the change the
+  caller refreshes for. The tracker registry follows the same rule. A malformed `extension` marker is dropped
+  without dropping the provider, and nothing renders the marker yet. VS Code
+  has no OpenChamber event stream and an empty provider list, so it never
+  shows extension providers.
 - A refresh that answers the list already held keeps the held `ordered` and
   `byId` objects (and the auth store keeps an unchanged `identities` array), so
   a reconnect or resume does not rebuild every sidebar row's link matcher.

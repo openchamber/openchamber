@@ -43,10 +43,15 @@ const capabilityScopeSchema = z.object({
   service: z.object({
     exec: z.array(z.string().min(1)),
     sockets: z.array(z.string().min(1)),
+    // The instances a Git host role reaches (`grant-scope.js`); absent for other services.
+    sourceControl: z.object({
+      defaultInstances: z.array(z.string().min(1)),
+      custom: z.boolean(),
+    }).optional(),
   }).optional(),
 });
 
-/** @returns {Record<string, { filesystem?: string[], apiOrigin?: string, service?: { exec: string[], sockets: string[] } }>} */
+/** @returns {Record<string, { filesystem?: string[], apiOrigin?: string, service?: { exec: string[], sockets: string[], sourceControl?: { defaultInstances: string[], custom: boolean } } }>} */
 const knownScopesOnly = (scopes) => {
   const cleaned = {};
   for (const [guestId, raw] of Object.entries(scopes)) {

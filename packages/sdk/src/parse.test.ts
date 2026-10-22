@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { OPENCHAMBER_SDK_API_VERSION } from './api-version.ts';
-import { clampStatusSectionHeight, hasGuestPage, requestedGuestCapabilities, resolveAttachEntry, resolveStatusSectionEntry, resolveAttachMode, resolveIntegrationApi, toPublicIntegration, type OpenChamberContributes } from './manifest.ts';
+import { clampStatusSectionHeight, hasGuestPage, requestedGuestCapabilities, toPublicSourceControl, resolveAttachEntry, resolveStatusSectionEntry, resolveAttachMode, resolveIntegrationApi, toPublicIntegration, type OpenChamberContributes } from './manifest.ts';
 import { parseManifest, parseManifestJson } from './parse.ts';
 
 const validBlock = {
@@ -1119,5 +1119,162 @@ describe('contributes.statusSection', () => {
     expect(clampStatusSectionHeight(200.4)).toBe(200);
     expect(clampStatusSectionHeight(5000)).toBe(320);
     expect(clampStatusSectionHeight(Number.NaN)).toBe(120);
+  });
+});
+
+describe('contributes.sourceControl', () => {
+  const sourceControl = {
+    wire: 1,
+    label: 'Teahouse',
+    terminology: { changeRequest: 'pullRequest', ci: 'checks' },
+    referencePrefix: { changeRequest: '#', issue: '#' },
+    repositoryPath: 'owner/name',
+    instances: {
+      defaultInstances: ['https://tea.example.com'],
+      custom: true,
+      allowLoopbackHttp: true,
+      allowPort: true,
+      placeholder: 'https://tea.example.com',
+    },
+    capabilities: { projects: true, issues: true, changeRequests: true, merge: { methods: ['merge'] }, liveSummaries: true },
+    token: { header: 'authorization', scheme: 'token', scopes: ['write:repository'], createPath: '/user/settings/applications' },
+    transport: { httpsUsername: { kind: 'login' }, appendDotGitToHttpsClone: false },
+    limits: { commentMaxLength: 65_536, reviewerId: 'numeric', labelsMax: 100, reviewersMax: 50 },
+    trackedItems: { batchLimit: 50 },
+    presentation: {
+      abbreviation: 'PR',
+      promptNoun: 'pull request',
+      sharedNumberSpace: true,
+      iconPath: 'M2 6h15v5.5z',
+      urls: { changeRequest: ['/{owner}/{repo}/pulls/{number}'], issue: ['/{owner}/{repo}/issues/{number}'] },
+      features: {},
+      changeRequestTemplates: ['.gitea/pull_request_template.md'],
+    },
+  };
+  const manifest = <T,>(contributes: T, id = 'teahouse') => parseManifestJson(JSON.stringify({
+    apiVersion: 1,
+    contributes: {
+      panel: { id, name: 'Teahouse', icon: 'git-branch-line' },
+      service: { entry: 'service/main.js', runtime: 'host', provides: ['source-control'] },
+      sourceControl,
+      ...contributes,
+    },
+  }));
+  const withSourceControl = <T,>(patch: T) => manifest({ sourceControl: { ...sourceControl, ...patch } });
+
+  test('a source-control service needs no panel entry, and capabilities left out are off', () => {
+    const result = manifest({});
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const parsed = result.manifest.contributes.sourceControl;
+    expect(parsed?.capabilities).toEqual({
+      projects: true, issues: true, changeRequests: true, draftChangeRequests: false, merge: { methods: ['merge'] },
+      ci: false, comments: false, reviews: false, state: false, labels: false, reviewers: false,
+      changeRequestPatch: false, liveSummaries: true,
+    });
+    expect(parsed?.presentation.features).toEqual({ authorCanReview: false, issueCloseReason: false });
+    expect(parsed && toPublicSourceControl(parsed)).toEqual({ label: 'Teahouse', defaultInstances: ['https://tea.example.com'], custom: true });
+  });
+
+  test('the role and the contribution come together', () => {
+    const withoutContribution = parseManifestJson(JSON.stringify({
+      apiVersion: 1,
+      contributes: {
+        panel: { id: 'teahouse', name: 'Teahouse', icon: 'window' },
+        service: { entry: 'service/main.js', runtime: 'host', provides: ['source-control'] },
+      },
+    }));
+    expect(withoutContribution).toMatchObject({ ok: false, code: 'invalid-service' });
+    if (!withoutContribution.ok) expect(withoutContribution.message).toContain('come together');
+    expect(manifest({ service: { entry: 'service/main.js', runtime: 'host', provides: ['browser'] } }))
+      .toMatchObject({ ok: false, code: 'invalid-service' });
+  });
+
+  test('the guest id leaves room for the ext- prefix in a 32-character provider id', () => {
+    expect(manifest({}, 'a'.repeat(28)).ok).toBe(true);
+    const long = manifest({}, 'a'.repeat(29));
+    expect(long).toMatchObject({ ok: false, code: 'invalid-service' });
+    if (!long.ok) expect(long.message).toContain('ext-<panel.id>');
+  });
+
+  test('refuses unknown keys, bad origins and a token header that contradicts its scheme', () => {
+    expect(withSourceControl({ id: 'gitea' })).toMatchObject({ ok: false, code: 'invalid-service' });
+    expect(withSourceControl({ wire: 2 })).toMatchObject({ ok: false, code: 'invalid-service' });
+    const instances = <T,>(patch: T) => withSourceControl({ instances: { ...sourceControl.instances, ...patch } });
+    expect(instances({ defaultInstances: ['http://tea.example.com'] })).toMatchObject({ ok: false, code: 'invalid-service' });
+    expect(instances({ defaultInstances: ['https://tea.example.com/sub'] })).toMatchObject({ ok: false, code: 'invalid-service' });
+    expect(instances({ defaultInstances: ['https://a.example', 'https://b.example', 'https://c.example', 'https://d.example', 'https://e.example'] }))
+      .toMatchObject({ ok: false, code: 'invalid-service' });
+    expect(instances({ custom: false, defaultInstances: [] })).toMatchObject({ ok: false, code: 'invalid-service' });
+    expect(instances({ custom: false }).ok).toBe(true);
+    const token = <T,>(patch: T) => withSourceControl({ token: { ...sourceControl.token, ...patch } });
+    expect(token({ header: 'private-token', scheme: 'none' }).ok).toBe(true);
+    expect(token({ header: 'private-token', scheme: 'bearer' })).toMatchObject({ ok: false, code: 'invalid-service' });
+    expect(token({ header: 'authorization', scheme: 'none' })).toMatchObject({ ok: false, code: 'invalid-service' });
+    expect(withSourceControl({ capabilities: { ...sourceControl.capabilities, uploads: true } })).toMatchObject({ ok: false, code: 'invalid-service' });
+    expect(withSourceControl({ trackedItems: { batchLimit: 51 } })).toMatchObject({ ok: false, code: 'invalid-service' });
+    // Review threads stay off for an extension's Git host, so the flag is not declarable.
+    expect(withSourceControl({ presentation: { ...sourceControl.presentation, features: { startThread: true } } }))
+      .toMatchObject({ ok: false, code: 'invalid-service' });
+    expect(withSourceControl({ presentation: { ...sourceControl.presentation, iconPath: '"/><script>' } }))
+      .toMatchObject({ ok: false, code: 'invalid-service' });
+    for (const template of ['../secrets.md', '/etc/passwd', '.github/./x.md']) {
+      expect(withSourceControl({ presentation: { ...sourceControl.presentation, changeRequestTemplates: [template] } }))
+        .toMatchObject({ ok: false, code: 'invalid-service' });
+    }
+  });
+
+  test('URL templates take only the known placeholders as whole segments, never a pattern', () => {
+    const urls = (changeRequest: string[], repositoryPath = 'owner/name') => withSourceControl({
+      repositoryPath,
+      presentation: { ...sourceControl.presentation, urls: { changeRequest, issue: [] } },
+    });
+    expect(urls(['/{owner}/{repo}/pulls/{number}']).ok).toBe(true);
+    expect(urls(['/{namespace+}/{repo}/-/merge_requests/{number}'], 'namespace/name').ok).toBe(true);
+    for (const bad of [
+      '{owner}/{repo}/pulls/{number}',
+      '/{owner}/{repo}/pulls/(\\d+)',
+      '/{owner}/{repo}/pulls/{id}',
+      '/{owner}/{repo}/pulls/n{number}',
+      '/{owner}/{repo}/pulls',
+      '/{owner}/{repo}/{repo}/{number}',
+      '/{namespace+}/{repo}/pulls/{number}',
+      '/{owner}//{repo}/{number}',
+    ]) {
+      const result = urls([bad]);
+      expect(result).toMatchObject({ ok: false, code: 'invalid-service' });
+      if (!result.ok) expect(result.message).toContain('contributes.sourceControl');
+    }
+    expect(urls(['/{owner}/{repo}/pulls/{number}'], 'namespace/name')).toMatchObject({ ok: false, code: 'invalid-service' });
+    // A normalized URL never has these segments, so such a template could never match.
+    for (const dotted of ['/{owner}/{repo}/./pulls/{number}', '/{owner}/{repo}/../pulls/{number}']) {
+      expect(urls([dotted])).toMatchObject({ ok: false, code: 'invalid-service' });
+    }
+  });
+
+  test('refuses a template that is both a change request and an issue template', () => {
+    const result = withSourceControl({
+      presentation: {
+        ...sourceControl.presentation,
+        urls: { changeRequest: ['/{owner}/{repo}/items/{number}'], issue: ['/{owner}/{repo}/issues/{number}', '/{owner}/{repo}/items/{number}'] },
+      },
+    });
+    expect(result).toMatchObject({ ok: false, code: 'invalid-service' });
+    if (!result.ok) expect(result.message).toContain('contributes.sourceControl.presentation.urls.issue[1]');
+  });
+
+  test('names the field a refined value failed at', () => {
+    const cases: Array<[object, string]> = [
+      [{ instances: { ...sourceControl.instances, defaultInstances: ['https://git.example.com/'] } }, 'contributes.sourceControl.instances.defaultInstances[0]'],
+      [{ token: { ...sourceControl.token, createPath: '/a/../b' } }, 'contributes.sourceControl.token.createPath'],
+      [{ presentation: { ...sourceControl.presentation, changeRequestTemplates: ['ok.md', '../x.md'] } }, 'contributes.sourceControl.presentation.changeRequestTemplates[1]'],
+      [{ presentation: { ...sourceControl.presentation, urls: { changeRequest: ['/{owner}/{repo}'], issue: [] } } }, 'contributes.sourceControl.presentation.urls.changeRequest[0]'],
+      [{ wire: 2 }, 'contributes.sourceControl.wire'],
+    ];
+    for (const [patch, field] of cases) {
+      const result = withSourceControl(patch);
+      expect(result).toMatchObject({ ok: false, code: 'invalid-service' });
+      if (!result.ok) expect(result.message.startsWith(field)).toBe(true);
+    }
   });
 });

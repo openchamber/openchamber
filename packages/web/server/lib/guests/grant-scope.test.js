@@ -82,3 +82,29 @@ describe('oauth endpoints', () => {
     expect(sameCredentialTarget(approved, guestGrantScope(oauthGuest))).toBe(true);
   });
 });
+
+describe('the Git host role in the service grant', () => {
+  const sourceControl = (defaultInstances, custom) => ({ instances: { defaultInstances, custom } });
+  const provider = (contribution) => ({
+    service: { ...guest.service, provides: ['source-control'] },
+    sourceControl: contribution,
+  });
+
+  test('covers the instances the role reaches, and nothing for a service without it', () => {
+    expect(guestGrantScope(provider(sourceControl(['https://b.example', 'https://a.example'], false))).service).toEqual({
+      exec: ['docker'], sockets: ['docker'], sourceControl: { defaultInstances: ['https://a.example', 'https://b.example'], custom: false },
+    });
+    expect(guestGrantScope(guest).service).not.toHaveProperty('sourceControl');
+  });
+
+  test('asks again when a version adds the role or changes where it reaches', () => {
+    const plain = guestGrantScope(guest);
+    const narrow = guestGrantScope(provider(sourceControl(['https://a.example'], false)));
+    expect(effectiveGrants(['service'], plain, narrow)).toEqual([]);
+    expect(effectiveGrants(['service'], narrow, guestGrantScope(provider(sourceControl(['https://a.example'], true))))).toEqual([]);
+    expect(effectiveGrants(['service'], narrow, guestGrantScope(provider(sourceControl(['https://c.example'], false))))).toEqual([]);
+    expect(effectiveGrants(['service'], narrow, narrow)).toEqual(['service']);
+    // Dropping the role is a narrower package: it was approved for more.
+    expect(effectiveGrants(['service'], narrow, plain)).toEqual([]);
+  });
+});

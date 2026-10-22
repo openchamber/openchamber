@@ -10,8 +10,12 @@ import { setWarmingDuration, setWarmingEnabled } from './websearch-config.js';
 import { registerSourceControlRoutes } from '../source-control/routes.js';
 import { registerLinearRoutes } from '../linear/routes.js';
 import { registerTrackerRoutes } from '../trackers/routes.js';
-import { registerGuestRoutes } from '../guests/routes.js';
-import { registerBuiltInGuests } from '../guests/catalog.js';
+import { registerGuestRoutes, settleGuestDeactivationListeners } from '../guests/routes.js';
+import { listInstalledGuests, registerBuiltInGuests } from '../guests/catalog.js';
+import { setHostCallbackRoute } from '../guests/host-callback.js';
+import { createOutboundHandles } from '../source-control/outbound-handles.js';
+import { createExtensionProviders } from '../source-control/extension-providers.js';
+import { SOURCE_CONTROL_OUTBOUND_PATH } from '@openchamber/sdk';
 import { extensionsPersistPath } from '../guests/persist.js';
 import { registerGitRoutes } from '../git/routes.js';
 import { registerDevServerRoutes } from '../dev-servers/routes.js';
@@ -405,9 +409,25 @@ export const createFeatureRoutesRuntime = (dependencies) => {
         return impl.auth.refreshOAuthToken({ instance: origin, refreshToken });
       },
     });
+    // An extension's Git host reaches its forge only through these handles,
+    // served on the callback listener its service is told about.
+    const sourceControlOutboundHandles = createOutboundHandles();
+    setHostCallbackRoute(SOURCE_CONTROL_OUTBOUND_PATH, {
+      refusal: sourceControlOutboundHandles.refusal,
+      serve: sourceControlOutboundHandles.serve,
+    });
     // The provider registry: descriptors now, implementations on first use.
     const sourceControlProviders = createSourceControlProviders({
       authStore: sourceControlAuthStore,
+      extensionServices: {
+        handles: sourceControlOutboundHandles,
+        persistPath: extensionsPersistPath(openchamberDataDir),
+        // The row as it is now: the catalog applies enterprise policy on every read.
+        currentGuest: async (guestId) => (await listInstalledGuests({ persistPath: extensionsPersistPath(openchamberDataDir) }))
+          .find((guest) => guest.id === guestId) ?? null,
+        // Only called while serving a request, after the reconciler below exists.
+        reconcile: () => extensionSourceControlProviders.reconcile(),
+      },
       readSettings: readSettingsFromDisk,
       configRoot: openchamberDataDir,
       hostServices: {
@@ -654,7 +674,39 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       trustedDirectoriesConfig: createTrustedDirectoriesConfig({ gitBinary }),
     });
     await registerBuiltInGuests({ persistPath: extensionsPersistPath(openchamberDataDir), root: routeDependencies.builtInExtensionsDir });
-    registerGuestRoutes(app, { openchamberDataDir, openchamberVersion, resolveGitBinaryForSpawn, resolveOptionalProjectDirectory, getSmallModelService, onGuestDeactivated, surfaceViewerHeaders, trackers });
+    // Extensions that act as a Git host, kept in step with the catalog; every
+    // client re-reads the provider list when the set changes.
+    const extensionSourceControlProviders = createExtensionProviders({
+      listGuests: () => listInstalledGuests({ persistPath: extensionsPersistPath(openchamberDataDir) }),
+      register: walkthroughBindingService.registerExtensionProvider,
+      unregister: walkthroughBindingService.unregisterExtensionProvider,
+      dropSection: (id) => sourceControlAuthStore.dropSection(id),
+      emitChanged: () => {
+        const clients = getOpenChamberEventClients();
+        for (const client of clients) {
+          try {
+            writeSseEvent(client, { type: 'openchamber:source-control-providers-changed', properties: {} });
+          } catch {
+            clients.delete(client);
+          }
+        }
+      },
+    });
+    registerGuestRoutes(app, {
+      openchamberDataDir, openchamberVersion, resolveGitBinaryForSpawn, resolveOptionalProjectDirectory, getSmallModelService,
+      // One failing listener never skips the other: a browser role that
+      // fails to hand back still lets the Git host be withdrawn.
+      onGuestDeactivated: settleGuestDeactivationListeners([
+        { name: 'hand back an extension role', listener: onGuestDeactivated },
+        { name: 'withdraw an extension Git host', listener: (event) => extensionSourceControlProviders.deactivated(event) },
+      ]),
+      onGuestActivated: () => extensionSourceControlProviders.reconcile(),
+      surfaceViewerHeaders, trackers,
+    });
+    // The providers extensions served before the restart, before any request reads the list.
+    await extensionSourceControlProviders.reconcile().catch((error) => {
+      console.warn('Failed to load extension Git hosts:', error?.message ?? error);
+    });
     gitWorktreeCreation = registerGitRoutes(app, {
       // Identities for accounts connected before identities carried one are
       // made the first time identities are listed: a moment someone asked for,

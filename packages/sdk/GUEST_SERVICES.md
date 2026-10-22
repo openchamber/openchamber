@@ -88,7 +88,7 @@ Parse rules:
 - `contributes.service` is optional. A guest without `service` is HTML-only.
 - `service.entry` is a relative path inside the package. Ship compiled JS; the host never compiles TypeScript.
 - `service.runtime` phase 1 accepts only `"host"`.
-- `service.provides` is optional: roles the service stands in for on the host. Only `"browser"` exists today (below). A service that provides a role needs no `panel.entry` or `background.entry`; the host starts it itself.
+- `service.provides` is optional: roles the service stands in for on the host, `"browser"` and `"source-control"` (below). A service that provides a role needs no `panel.entry` or `background.entry`; the host starts it itself.
 - `service.surface` is optional (`true`): the service shows a live picture the host draws in the extension's rail panel and takes the user's input back (below). With `panel.entry` too, that page is docked to one edge of the picture (`panel.dock`: `top`, `bottom`, `left`, or `right`, default `top`; `panel.size` in CSS px across that edge, 24 to 480, default 40); without it, the picture is the whole panel.
 - `service.permissions.sockets` and `service.permissions.exec` are shown to the user in the approval dialog. They describe intent and do not confine the process: a service runs with the user's full access. Declaring `contributes.service` adds the `service` capability to the package's request list; the user approves the whole list once when the package is installed (Settings → Extensions), and the first `serviceRequest` is refused with `NO_SERVICE` until then.
 - The catalog adds `service.socketBindings`: `{ id, candidates, resolved, override }` for this host. The user can override a path in Extensions. Override empty clears it and the next spawn re-resolves.
@@ -132,6 +132,7 @@ Env the host sets:
 - `OPENCHAMBER_SERVICE_PORT` — port to bind on `127.0.0.1`
 - `OPENCHAMBER_SERVICE_TOKEN` — shared secret
 - `OPENCHAMBER_SERVICE_SOCKETS` — JSON map `{ [socketId]: absolutePath }` for every binding that resolved (override or first existing candidate)
+- `OPENCHAMBER_HOST_CALLBACK_URL` — only for a service that provides `source-control`: OpenChamber's callback listener for forge requests (see below)
 
 Inbound auth: every request, including ready, must send:
 
@@ -229,6 +230,109 @@ Every action may carry `tabId` (`BrowserTabTarget`): an id from the `tabs` your 
 `browser.select` uses exact string matching. It targets native single-value HTML `<select>` elements, rejects custom controls and multiple selects, and refuses disabled selects or matching options. A missing or ambiguous label/value is an error, so the service must leave the page unchanged.
 
 `examples/browser-provider-stub` is a checked-in provider with no browser: one in-memory page that answers every action. Install it to see the dropdown, the routing, and the idle stop before writing a real one.
+
+## Source-control provider (`provides: ["source-control"]`)
+
+A service with this role is a Git host next to GitHub, GitLab and Gitea: its own card in Settings → Integrations, its pull requests and issues on the board, its badges on branches, worktrees from its pull requests. The role needs `contributes.sourceControl` in the same manifest, and the manifest needs it only with the role; either alone fails as `invalid-service`. Hosts older than the role refuse the manifest the same way, so declare an `engines.openchamber` floor.
+
+OpenChamber names the host `ext-<panel.id>` (provider ids are at most 32 characters, so `panel.id` is at most `SOURCE_CONTROL_GUEST_ID_MAX`, 28). The id stays the same across versions; accounts, bindings and mutation records are stored under it. `sourceControlProviderIdOf(guestId)` spells it.
+
+### `contributes.sourceControl`
+
+Declared in the manifest, not answered by the service: OpenChamber reads it to draw the card, route Git transport and recognise remotes without starting a process, and the approval dialog shows it. Every object is strict; an unknown key fails.
+
+| Field | Contents |
+|---|---|
+| `wire` | `1` |
+| `label` | Product name, 1–64 characters, shown untranslated |
+| `terminology` | `{ changeRequest: "pullRequest" \| "mergeRequest", ci: "checks" \| "pipeline" }` |
+| `referencePrefix` | `{ changeRequest, issue }`, 1–4 characters each (`#`, `!`) |
+| `repositoryPath` | `"owner/name"` or `"namespace/name"` (nested groups) |
+| `instances` | `{ defaultInstances: up to 4 https origins, custom, allowLoopbackHttp, allowPort, placeholder }`. With `custom: false` the user can add only the default instances, and there must be at least one |
+| `capabilities` | `projects`, `issues`, `changeRequests`, `draftChangeRequests`, `merge` (`false` or `{ methods: ["merge" \| "squash" \| "rebase"] }`), `ci`, `comments`, `reviews`, `state`, `labels`, `reviewers`, `changeRequestPatch`, `liveSummaries`. One left out is off. Review threads, uploads, stacks, the reference picker and multiple accounts are fixed by OpenChamber |
+| `token` | `{ header: "authorization" \| "private-token", scheme: "bearer" \| "token" \| "none", scopes, createPath? }`. `private-token` takes the bare token (`none`); `authorization` takes `Bearer` or `token` |
+| `transport` | `{ httpsUsername: { kind: "login" } \| { kind: "fixed", value }, appendDotGitToHttpsClone }`: how Git over HTTPS signs in with the stored token |
+| `limits` | `{ commentMaxLength (≤ 1 000 000), reviewerId: "numeric" \| "login", labelsMax (≤ 100), reviewersMax (≤ 50) }` |
+| `trackedItems` | `{ batchLimit }`, 1–50 items per `liveSummaries` call |
+| `presentation` | `{ abbreviation (1–8), promptNoun, sharedNumberSpace, iconPath? (24×24 SVG path data), urls: { changeRequest[], issue[] }, features: { authorCanReview, issueCloseReason }, changeRequestTemplates[] }` |
+
+`presentation.urls` are web path templates such as `/{owner}/{repo}/pulls/{number}`: `/`, then segments that are each a literal (`[A-Za-z0-9._~-]`) or one placeholder (`SOURCE_CONTROL_URL_TOKENS`). `{repo}` and `{number}` appear once, and the owner once as `{owner}` for `owner/name` paths or `{namespace+}` (one or more segments) for `namespace/name` paths. OpenChamber compiles them into the pattern that recognises a pasted link; an extension never supplies a regular expression. `changeRequestTemplates` are repository file paths (`.gitea/pull_request_template.md`), first match wins.
+
+The catalog row carries `toPublicSourceControl(contribution)`: `{ label, defaultInstances, custom }`, what the approval dialog shows.
+
+### Lifecycle
+
+OpenChamber registers the host when the extension is installed, enabled, approved for `service`, and declares the role; pausing, withdrawing approval, or an update without the role unregisters it, and its routes answer 404 until it comes back. Tokens stay through a pause; uninstalling forgets them. The service starts on the first call, not at registration, and stops after `SOURCE_CONTROL_PROVIDER_IDLE_MS` (ten minutes) without one. Every read starts a cold service at worst, so do not cache across calls: OpenChamber keeps its own status cache and drops it after each write.
+
+### Calls
+
+`POST /source-control` on the service loopback (`SOURCE_CONTROL_PROVIDER_PATH`), same bearer as every request:
+
+```json
+{
+  "v": 1,
+  "requestId": "scm-…",
+  "method": "listIssues",
+  "provider": "ext-teahouse",
+  "session": { "instance": "https://git.example.com", "handle": "…", "user": { "id": 7, "login": "mona" } },
+  "input": { "context": { … }, "directory": "/Users/me/app", "remote": "origin", "page": 1, "state": "open", "people": "any" }
+}
+```
+
+`readSourceControlProviderRequest(body)` parses it (`null` → answer HTTP 400). `provider` is the id OpenChamber gave the host: put it in every DTO's `provider` field. `session.user` is `null` in `auth.verify` and `auth.probe`, before an account exists. `input` per method is `SourceControlProviderInputs`; the reads take the route shell's own input, with `directory` and `remote` as OpenChamber resolved them and `context` the binding it validated.
+
+Answer HTTP 200 with `{ "ok": true, "data": … }` or `{ "ok": false, "error": { "message", "status"?, "code"? } }` (`message` ≤ 2000 characters, `status` 400–599, `code` `[A-Z_]{1,64}`). Any other status or shape is a malformed answer, never an empty one.
+
+| Method | Answer OpenChamber checks |
+|---|---|
+| `auth.verify` | `{ user: { id, login, name?, email?, avatarUrl? } }`: who the candidate token belongs to; OpenChamber stores the account |
+| `auth.probe` | `{ supported, version?, message? }`: whether the instance is this forge; the handle carries no token |
+| `changeRequestStatus` | The branch's status as the badge shows it (`ChangeRequestStatus` in the UI): its open pull request, else its most recent closed or merged one, so a merged branch is not offered a new pull request |
+| `listChangeRequests`, `changeRequestContext`, `listIssues`, `getIssue`, `issueComments`, `projectUpstream`, `projectBranches`, `listLabels`, `listReviewerCandidates` | A JSON object or array within `SOURCE_CONTROL_PROVIDER_RESPONSE_MAX`; the UI parses these DTOs itself |
+| `readChangeRequestPatch` | `{ patch, meta: { owner, repo, number } }`: the change request's whole unified diff (`diff --git` per file) and the repository it was read from. Served to the Changes view and walkthroughs only when `capabilities.changeRequestPatch` is on. `sourceRepo`, when given, names the repository the change request lives in; read only within the bound repository's network |
+| `readChangeRequestFile` | `{ original, modified }`: one file at the diff's base (the merge base) and at the head, for `path` (`previousPath` for the old side of a rename). `status` `A` has an empty `original`, `D` an empty `modified`. Same capability and network rule as the patch |
+| `liveSummaries` | `{ summaries, issueSummaries }` for the refs asked; an item the forge cannot answer is left out, a 401 fails the batch |
+| `readChangeRequestHead` | `{ project: { id, owner, name }, headSha (40 hex), headBranch, headOwner }` |
+| `resolveChangeRequestSource` | `{ sourceProject, targetProject, classification, headSha, headRef, endpoint }`; OpenChamber checks the endpoint is on the instance and names `sourceProject`, and that the sha is the one it expected |
+| `mutation.resolveTarget` | `{ providerTarget (≤ 4 KB JSON), target }`; `target` has exactly the keys OpenChamber stores and must match the context's target. On a replay, return `replayOf.target` unchanged |
+| `mutation.perform` | Only the stored result keys (`number`, `merged`, `state`, `ready`, …) |
+| `mutation.reconcile` | `{ state: "succeeded" \| "failed" \| "outcome-unknown", result? }`: after a restart, whether the write recorded as running landed |
+
+A capability opens the mutation routes below; one that is off answers 501 there and never reaches the service. `mutation.*` calls carry the route's `kind`, and its normalized `input` (without the digest). A service that cannot perform a kind its capabilities open should answer `UNSUPPORTED` (501), but the user then sees an action fail that the board offered, so implement every kind of every capability you turn on.
+
+| Capability | Route | `kind` | Normalized `input` |
+|---|---|---|---|
+| `changeRequests` | `/pr/create` | `change-request-create` | `{ title, draft, body?, remote?, headRemote? }`. `remote` is where the pull request opens and `headRemote` where its head branch lives; either left out means the context's `primaryRemote`. A head on another remote is usually a fork: name its branch the way the forge expects (Gitea and GitHub take `owner:branch`) and refuse a remote that is not in the target's network |
+| `changeRequests` | `/pr/update` | `change-request-update` | `{ title, body? }`: a new title, and a new body when given |
+| `merge` | `/pr/merge` | `change-request-merge` | `{ method }`, one of the declared `merge.methods` |
+| `draftChangeRequests` | `/pr/ready` | `change-request-ready` | `{}` |
+| `comments` | `/pr/comment`, `/issues/comment` | `change-request-comment`, `issue-comment` | `{ body }` |
+| `state` | `/pr/state`, `/issues/state` | `change-request-state`, `issue-state` | `{ state }`: `open` or `closed` |
+| `labels` | `/pr/labels`, `/issues/labels` | `change-request-labels`, `issue-labels` | `{ names }`: the whole set |
+| `reviewers` | `/pr/reviewers` | `change-request-reviewers` | `{ names }`: the whole set, as `limits.reviewerId` spells them |
+| `reviews` | `/pr/review` | `change-request-review` | `{ verdict: "approve" \| "request-changes", body? }`, for the `headSha` in the target |
+
+Review threads have routes too, but they stay off for an extension's Git host.
+
+Deadlines: `changeRequestStatus` 12 s (past it the last known status shows), other reads 20 s, mutation steps 30 s, `auth.*` 15 s (`sourceControlProviderTimeoutMs`).
+
+OpenChamber decides, not the service, what a failure means. A mutation counts as definitely failed only when the service was never reached or every write the proxy saw got a 4xx; anything else is an unknown outcome to reconcile. A `status: 401` writes off the account only when OpenChamber's proxy saw the forge answer 401 on that call; a 401 the service reports on its own is a malformed answer.
+
+### Reaching the forge
+
+The service never holds a token. `createSourceControlForge({ env: process.env })` returns `{ request(handle, req) }`, which posts to `${OPENCHAMBER_HOST_CALLBACK_URL}/source-control/outbound` with `Authorization: Bearer <handle>`. `OPENCHAMBER_HOST_CALLBACK_URL` is a separate loopback listener, set only for services with this role.
+
+- Request (`SourceControlOutboundRequest`): `{ method: GET|POST|PUT|PATCH|DELETE, path, query?, headers?, body? }`. `path` starts with one `/` and stays on the call's instance origin. `headers` (lower-case names) may be `accept`, `content-type`, `if-none-match` and `range`; OpenChamber sets the rest, the token included, per `token.header` and `token.scheme`. `body` is text up to `SOURCE_CONTROL_OUTBOUND_BODY_MAX` (1 MB).
+- Answer: HTTP 200 with `{ status, headers, body }`, the forge's status (any, 401 included), the headers in `SOURCE_CONTROL_OUTBOUND_RESPONSE_HEADERS` plus `x-ratelimit-*`, and the body as text up to `SOURCE_CONTROL_OUTBOUND_RESPONSE_MAX` (8 MB). Redirects are not followed. `request` resolves with it.
+- Refusal: any other status with `{ error: { message, code } }` (an expired or unknown handle, a path off the instance, a body too large). `request` throws `SourceControlForgeError` with that `code` and `status`; `HOST_UNAVAILABLE` when there was no usable answer.
+
+A handle is minted for one call, carries `auth.verify`'s candidate token or the bound account's token (none for `auth.probe`), and is revoked when the call ends. Never store it.
+
+This is least exposure, not a sandbox. OpenChamber keeps tokens because Git transport needs them anyway and the proxy is the one place origin pinning, enterprise policy and audit can act. An approved service still runs as the user and could read OpenChamber's files itself.
+
+VS Code lists no Git hosts from extensions: the guest catalog is unsupported there.
+
+`examples/source-control-provider` is a checked-in provider for a subset of Gitea's REST v1, with a fake forge its tests run against.
 
 ## Shared surface (`surface: true`)
 

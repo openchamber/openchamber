@@ -32,6 +32,17 @@ const loadRegistry = async () => {
   return module;
 };
 
+/** Lets a read the registry started itself (a scheduled retry) settle; a refresh would add a follow-up read. */
+const settle = async () => {
+  for (let tick = 0; tick < 10; tick += 1) await Promise.resolve();
+};
+
+const deferred = <T,>() => {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => { resolve = done; });
+  return { promise, resolve };
+};
+
 const ids = (list: readonly TrackerDescriptor[]) => list.map((descriptor) => descriptor.id);
 
 beforeEach(() => {
@@ -140,7 +151,7 @@ describe('tracker registry', () => {
     expect(useTrackerRegistry.getState()).toMatchObject({ status: 'error', holdsList: false });
     answer = [linearLikeTrackerDescriptor()];
     jest.advanceTimersByTime(2_000);
-    await useTrackerRegistry.getState().refresh(trackers);
+    await settle();
     expect(calls).toBe(2);
     expect(useTrackerRegistry.getState()).toMatchObject({ status: 'ready', holdsList: true });
 
@@ -148,6 +159,37 @@ describe('tracker registry', () => {
     await useTrackerRegistry.getState().refresh({ providers: async () => [linearLikeTrackerDescriptor()] });
     expect(useTrackerRegistry.getState().ordered).toBe(ordered);
     expect(useTrackerRegistry.getState().byId).toBe(byId);
+  });
+
+  test('answers refreshes made during a read with one more read after it', async () => {
+    const { useTrackerRegistry } = await loadRegistry();
+    useTrackerRegistry.getState().resetForRuntimeSwitch(connectTo('runtime-a'));
+    const answers = [deferred<TrackerDescriptor[]>(), deferred<TrackerDescriptor[]>()];
+    let calls = 0;
+    const trackers = { providers: () => { calls += 1; return answers[calls - 1]?.promise ?? Promise.resolve([]); } };
+    const first = useTrackerRegistry.getState().refresh(trackers);
+    // A change announced after the first read went out: its answer may predate it.
+    const second = useTrackerRegistry.getState().refresh(trackers);
+    const third = useTrackerRegistry.getState().refresh(trackers);
+    expect(calls).toBe(1);
+    answers[0].resolve([linearLikeTrackerDescriptor()]);
+    await first;
+    await Promise.resolve();
+    expect(calls).toBe(2);
+    answers[1].resolve([linearLikeTrackerDescriptor(), acmeTrackerDescriptor()]);
+    await Promise.all([second, third]);
+    expect(calls).toBe(2);
+    expect(ids(useTrackerRegistry.getState().ordered)).toEqual(['linear', 'acme-tickets']);
+
+    // A runtime without trackers drops a pending follow-up read.
+    const late = deferred<TrackerDescriptor[]>();
+    void useTrackerRegistry.getState().refresh({ providers: () => { calls += 1; return late.promise; } });
+    const followUp = useTrackerRegistry.getState().refresh(trackers);
+    await useTrackerRegistry.getState().refresh(undefined);
+    late.resolve([acmeTrackerDescriptor()]);
+    await followUp;
+    expect(calls).toBe(3);
+    expect(useTrackerRegistry.getState()).toMatchObject({ status: 'ready', ordered: [] });
   });
 
   test('whenTrackerListHeld waits for a list, and gives up after its timeout', async () => {

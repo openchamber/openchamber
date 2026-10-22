@@ -121,6 +121,14 @@ const browserProviderResetSchema = z.object({
 type BrowserProviderResetEvent = { type: 'browser-provider-reset' } & z.infer<typeof browserProviderResetSchema>;
 
 /**
+ * The set of source-control providers the server serves changed: an extension
+ * that acts as a Git host was approved, enabled, updated, paused or removed.
+ * Carries nothing; listeners re-read the provider list from the server, so the
+ * event cannot go stale between being sent and being handled.
+ */
+type SourceControlProvidersChangedEvent = { type: 'source-control-providers-changed' };
+
+/**
  * A usage limit stopped a session and the server moved on: the provider to
  * its next account (for every session), or this session to the fallback model.
  */
@@ -240,6 +248,7 @@ type OpenChamberEvent =
   | FileOpenRequestEvent
   | PlanOpenRequestEvent
   | BrowserProviderResetEvent
+  | SourceControlProvidersChangedEvent
   | LimitFailoverEvent
   | ProjectContextChangedEvent
   | SessionFoldersChangedEvent
@@ -513,6 +522,11 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
   if (envelope.type === 'openchamber:browser-provider-reset') {
     const parsed = browserProviderResetSchema.safeParse(envelope.properties);
     if (parsed.success) for (const listener of listeners) listener({ type: 'browser-provider-reset', ...parsed.data });
+    return;
+  }
+
+  if (envelope.type === 'openchamber:source-control-providers-changed') {
+    for (const listener of listeners) listener({ type: 'source-control-providers-changed' });
     return;
   }
 

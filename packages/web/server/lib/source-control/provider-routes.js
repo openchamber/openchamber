@@ -1,4 +1,5 @@
 import { Readable } from 'node:stream';
+import express from 'express';
 import { pipeline } from 'node:stream/promises';
 
 import { isString } from '../shared/guards.js';
@@ -241,7 +242,35 @@ export function registerProviderRoutes(app, {
 
   for (const descriptor of providers.list()) registerProvider(descriptor);
 
-  function registerProvider(descriptor) {
+  /*
+   * Extension providers appear and go while the server runs, so their routes
+   * cannot be registered once like the built-ins'. Each gets its own router
+   * with the same literal paths, kept here by id; one dispatcher, mounted by
+   * the caller after the built-ins and before the module's catch-all, hands a
+   * request under `/api/source-control/ext-<id>/` to that router. Without a
+   * router the request falls through to the catch-all's 404.
+   */
+  const extensionRouters = new Map();
+  const EXTENSION_PATH = /^\/api\/source-control\/(ext-[a-z0-9-]+)(?:\/|$)/;
+  const mountExtension = (descriptor) => {
+    const router = express.Router();
+    // A remount (a newer version) starts without the old descriptor's answers.
+    statusCaches.delete(descriptor.id);
+    registerProvider(descriptor, router);
+    extensionRouters.set(descriptor.id, router);
+  };
+  const unmountExtension = (id) => {
+    extensionRouters.delete(id);
+    statusCaches.delete(id);
+  };
+  const extensionDispatcher = (req, res, next) => {
+    const match = EXTENSION_PATH.exec(req.path);
+    const router = match ? extensionRouters.get(match[1]) : null;
+    if (!router) return next();
+    return router(req, res, next);
+  };
+
+  function registerProvider(descriptor, target = app) {
     const { id, label } = descriptor;
     const base = `/api/source-control/${id}`;
     const statusCache = statusCacheFor(id);
@@ -268,17 +297,17 @@ export function registerProviderRoutes(app, {
         error: `Legacy ${label} repository API is retired`,
         code: 'SOURCE_CONTROL_CONTEXT_REQUIRED',
       });
-      for (const suffix of aliases.retiredGet) app.get(`${aliases.authAliasPrefix}${suffix}`, retired);
-      for (const suffix of aliases.retiredPost) app.post(`${aliases.authAliasPrefix}${suffix}`, retired);
+      for (const suffix of aliases.retiredGet) target.get(`${aliases.authAliasPrefix}${suffix}`, retired);
+      for (const suffix of aliases.retiredPost) target.post(`${aliases.authAliasPrefix}${suffix}`, retired);
     }
 
     /** A capability-gated route; off in the descriptor, it answers 501 and never reaches the proxy. */
     const route = (method, suffix, capability, handler, path = `${base}${suffix}`) => {
       if (capability && !enabled(descriptor.capabilities, capability)) {
-        app[method](path, (_req, res) => unsupportedCapability(res));
+        target[method](path, (_req, res) => unsupportedCapability(res));
         return;
       }
-      app[method](path, handler);
+      target[method](path, handler);
     };
 
     const invalidateAccount = async (impl, identity, persisted) => {
@@ -365,7 +394,7 @@ export function registerProviderRoutes(app, {
 
     // Capabilities: the static ones from the descriptor, the authentication
     // methods probed on the instance.
-    app.get(`${base}/capabilities`, async (req, res) => {
+    target.get(`${base}/capabilities`, async (req, res) => {
       let impl;
       try {
         impl = await loadImplementation(id);
@@ -390,7 +419,7 @@ export function registerProviderRoutes(app, {
       }
     });
 
-    app.get(authPaths('/auth/status'), async (req, res) => {
+    target.get(authPaths('/auth/status'), async (req, res) => {
       try {
         const impl = await loadImplementation(id);
         return res.json(await impl.auth.status({ instance: requestInstance(req) }));
@@ -410,7 +439,7 @@ export function registerProviderRoutes(app, {
       }
     });
 
-    app.get(authPaths('/auth/accounts'), async (req, res) => {
+    target.get(authPaths('/auth/accounts'), async (req, res) => {
       try {
         const impl = await loadImplementation(id);
         const instance = requestInstance(req);
@@ -484,7 +513,7 @@ export function registerProviderRoutes(app, {
       }
     }, authPaths('/auth/complete'));
 
-    app.post(authPaths('/auth/token'), async (req, res) => {
+    target.post(authPaths('/auth/token'), async (req, res) => {
       let impl;
       try {
         impl = await loadImplementation(id);
@@ -514,7 +543,7 @@ export function registerProviderRoutes(app, {
       }
     });
 
-    app.post(authPaths('/auth/activate'), async (req, res) => {
+    target.post(authPaths('/auth/activate'), async (req, res) => {
       try {
         const impl = await loadImplementation(id);
         const instance = requestInstance(req);
@@ -527,7 +556,7 @@ export function registerProviderRoutes(app, {
       }
     });
 
-    app.post(authPaths('/auth/cli'), async (req, res) => {
+    target.post(authPaths('/auth/cli'), async (req, res) => {
       try {
         const impl = await loadImplementation(id);
         if (!descriptor.authMethods.cli || !(impl.auth.setCliDisabled instanceof Function)) return unsupportedCapability(res);
@@ -542,7 +571,7 @@ export function registerProviderRoutes(app, {
     });
 
     // Removal names the exact account; it never falls back to the current one.
-    app.delete(authPaths('/auth'), async (req, res) => {
+    target.delete(authPaths('/auth'), async (req, res) => {
       try {
         const impl = await loadImplementation(id);
         const instance = requestInstance(req);
@@ -910,7 +939,7 @@ export function registerProviderRoutes(app, {
 
     // The ambient account route is retired: account presentation comes from
     // auth status and account inventory, never from an implicit current user.
-    app.get(authPaths('/me'), (_req, res) => res.status(410).json({
+    target.get(authPaths('/me'), (_req, res) => res.status(410).json({
       error: `${label} account user route is retired`,
       code: 'SOURCE_CONTROL_ACCOUNT_CONTEXT_REQUIRED',
     }));
@@ -960,6 +989,9 @@ export function registerProviderRoutes(app, {
   };
 
   return Object.freeze({
+    mountExtension,
+    unmountExtension,
+    extensionDispatcher,
     /**
      * Live state of known change requests and issues, read with the
      * instance's current or named account. A provider may answer with the

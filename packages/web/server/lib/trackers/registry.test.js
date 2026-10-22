@@ -36,6 +36,12 @@ describe('createTrackerRegistry', () => {
     expect(() => createTrackerRegistry([{ descriptor: descriptorFor('jira') }], { foreignIds: [] })).toThrow(/loader/);
   });
 
+  it('refuses every extension source-control id, attached or not', () => {
+    for (const id of ['ext-forge', 'ext-']) {
+      expect(() => createTrackerRegistry([entryFor(id)], { foreignIds: [] })).toThrow(/source-control/);
+    }
+  });
+
   it('refuses the built-in source-control ids by default', () => {
     expect(() => createTrackerRegistry([entryFor('github')])).toThrow(/source-control/);
     expect(() => createTrackerRegistry([entryFor('gitlab')])).toThrow(/source-control/);

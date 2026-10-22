@@ -9,6 +9,7 @@ import type {
   PublicService,
   PublicGuestCapabilities,
   PublicIntegration,
+  PublicSourceControl,
 } from '@openchamber/sdk';
 
 export type GuestSource = 'bundled' | 'path' | 'zip' | 'git';
@@ -49,6 +50,8 @@ export type InstalledGuest = {
   /** Declared `contributes.origins`: the frame may exchange data with them once approved. */
   origins?: string[];
   service?: PublicService;
+  /** The Git host from `contributes.sourceControl`, when the service provides `source-control`. */
+  sourceControl?: PublicSourceControl;
   /** Declared `contributes.actions`; the UI shows them only for an active guest. */
   actions?: GuestActionContribution[];
   /** Declared `contributes.commands`; the composer routes them only for an active guest. */

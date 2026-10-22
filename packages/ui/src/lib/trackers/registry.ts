@@ -33,8 +33,9 @@ interface TrackerRegistryState {
   /** A list is held: remembered for this runtime or answered by its server (an empty answer too). */
   holdsList: boolean;
   /**
-   * Asks the server of the current runtime again; concurrent calls share one
-   * request. A runtime other than the held one first shows that runtime's
+   * Asks the server of the current runtime again. A call made while a read is
+   * out is answered by one more read after it settles, shared by every such
+   * call. A runtime other than the held one first shows that runtime's
    * remembered list. No API means no trackers.
    */
   refresh: (trackers: Pick<TrackerAPI, 'providers'> | undefined) => Promise<void>;
@@ -68,6 +69,10 @@ const rememberedState = (runtimeKey: string) => {
 
 let generation = 0;
 let inFlight: Promise<void> | null = null;
+// One more read, after the one on the wire settles, for every refresh asked
+// while it was out: the server may have answered that read before the change
+// the later caller is refreshing for.
+let followUp: Promise<void> | null = null;
 let failures = 0;
 let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -80,6 +85,7 @@ export const useTrackerRegistry = create<TrackerRegistryState>((set, get) => {
   const showRuntime = (runtimeKey: string): void => {
     generation += 1;
     inFlight = null;
+    followUp = null;
     failures = 0;
     cancelRetry();
     set(rememberedState(runtimeKey));
@@ -96,11 +102,23 @@ export const useTrackerRegistry = create<TrackerRegistryState>((set, get) => {
         // Authoritative: this runtime has no trackers. A request still out loses.
         generation += 1;
         inFlight = null;
+        followUp = null;
         cancelRetry();
         set({ ...EMPTY_LIST, status: 'ready', holdsList: true });
         return Promise.resolve();
       }
-      if (inFlight) return inFlight;
+      if (inFlight) {
+        if (!followUp) {
+          const followUpGeneration = generation;
+          const next: Promise<void> = inFlight.then(() => {
+            if (followUp === next) followUp = null;
+            if (followUpGeneration !== generation) return undefined;
+            return get().refresh(trackers);
+          });
+          followUp = next;
+        }
+        return followUp;
+      }
       cancelRetry();
       const requestGeneration = generation;
       // A remembered or answered list (even an empty answer) survives a failed refresh.

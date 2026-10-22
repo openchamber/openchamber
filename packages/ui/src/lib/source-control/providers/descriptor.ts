@@ -120,6 +120,15 @@ const descriptorSchema = z.object({
     // than this field served the diff of every provider it listed.
     changeRequestPatch: z.boolean().default(true),
   }),
+  /**
+   * The installed extension that serves this provider; absent for a built-in.
+   * A malformed marker is dropped and never costs the provider itself.
+   */
+  extension: z.object({
+    guestId: z.string().min(1).max(128),
+    name: z.string().min(1).max(200),
+    version: z.string().min(1).max(64),
+  }).optional().catch(undefined),
 });
 
 export type SourceControlProviderDescriptor = z.output<typeof descriptorSchema>;
