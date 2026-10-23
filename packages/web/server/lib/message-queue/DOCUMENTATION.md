@@ -112,6 +112,27 @@ Every `pr-fix-loop` item requires `assertFixLoopHostDispatch` before any model s
 
 Automatic loops also need the owning runtime's persisted `feedbackTrustVersion: 1` admission marker. Old queued automatic prompts without that evidence stay queued with an error, including when this queue starts before the fix-loop runtime. Removing such an item lets the loop perform a fresh permission-checked feedback read.
 
+Bot feedback uses `origin: { kind: 'bot', id: itemId }` and the distinct notice
+`{ source: 'openchamber-notice', kind: 'bot', projectId, itemId, eventId }`.
+`bot-notice.js` derives both queue and message IDs from that identity. Bot enqueue
+waits for the atomic queue-file write and deduplicates pending events across all
+session queues. Delivery repeats the same synthetic message ID after restart,
+including after the queue entry was removed but the bot receipt was lost.
+
+`assertBotDispatch({ sessionId, directory, origin, notice, isolated })` is required
+at admission and before sending. It resolves current item/session authority and
+returns `{ includeMemorySaveRule }` for knowledge sync. The queue rechecks after
+that asynchronous sync and sends one resuming steer synthetic message without
+selection changes or command expansion. `botDispatchIsolated` defaults to false;
+only a dedicated queue with a space-owned transport and persistence sets it true.
+See [the adapter contract](../bots/notices-contract.md) for wiring.
+
+Bot notices cannot be taken for editing or manual send, including bulk take.
+Queue capacity refuses new traffic that would evict one; explicit Remove and
+Clear retain their existing meaning. A failed bot persistence write propagates
+to its caller and prevents dispatch until a later write succeeds. Ordinary,
+scheduled, PR-stack and fix-loop dispatch retain their prior policies.
+
 ## Queue file
 
 `<data-dir>/message-queue.json` (`OPENCHAMBER_DATA_DIR` or
