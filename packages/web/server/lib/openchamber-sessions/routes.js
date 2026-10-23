@@ -265,11 +265,11 @@ const applySessionSelection = async ({ client, sessionID, model, agent, variant 
   if (agent) await client.session.switchAgent({ sessionID, agent });
 };
 
-const createSession = async ({ client, directory, title }) => {
-  const session = await client.session.create({
-    location: { directory },
-    ...(title ? { title } : {}),
-  });
+const createSession = async ({ client, directory, title, metadata }) => {
+  const input = { location: { directory } };
+  if (title) input.title = title;
+  if (metadata !== undefined) input.metadata = metadata;
+  const session = await client.session.create(input);
   const sessionID = asNonEmptyString(session?.id);
   if (!sessionID) throw new Error('failed to create session');
   return sessionID;
@@ -949,7 +949,7 @@ export const createOpenChamberSessionService = (dependencies) => {
     return { restored, failedIds };
   };
 
-  const create = async (payload = {}, { onSessionCreated } = {}) => {
+  const create = async (payload = {}, { onSessionCreated, metadata } = {}) => {
     const title = asNonEmptyString(payload.title);
     const prompt = asNonEmptyString(payload.prompt);
     const goalInput = resolveGoalInput(payload, prompt);
@@ -1046,6 +1046,7 @@ export const createOpenChamberSessionService = (dependencies) => {
     const sessionID = await createSession({
       client,
       directory: sessionDirectory,
+      metadata,
       ...(title ? { title } : {}),
     });
 

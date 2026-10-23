@@ -35,7 +35,7 @@ export const sourceOwnedLinksPatch = (metadata) => {
   const namespace = openChamberNamespace(metadata);
   if (!namespace) return null;
   const patch = {};
-  for (const key of ['btwSessionID', 'reviewSessionID']) {
+  for (const key of ['btwSessionID', 'reviewSessionID', 'automation']) {
     if (key in namespace) patch[key] = null;
   }
   if (namespace.kind === 'btw') {

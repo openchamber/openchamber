@@ -36,6 +36,7 @@ export function withoutSourceOwnedLinks(metadata: Metadata): Metadata {
   const next: Metadata = { ...namespace };
   delete next.btwSessionID;
   delete next.reviewSessionID;
+  delete next.automation;
   if (next.kind === 'btw') {
     delete next.kind;
     delete next.originalSessionID;

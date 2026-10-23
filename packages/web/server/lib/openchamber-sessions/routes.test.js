@@ -669,6 +669,14 @@ describe('openchamber session routes', () => {
     expect(response.body.directory).toBe('/repo/app');
   });
 
+  it('ignores internal metadata and options supplied in an HTTP body', async () => {
+    const { app } = createApp();
+    const metadata = { openchamber: { kind: 'scheduled', automation: { notify: 'attention' } } };
+    await request(app).post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', metadata, options: { metadata } }).expect(200);
+    expect(sessionCreateMock).toHaveBeenCalledWith({ location: { directory: '/repo/app' } });
+  });
+
   it('emits a session-created event after creating a session', async () => {
     const emitSessionCreatedEvent = vi.fn();
     const { app } = createApp({ emitSessionCreatedEvent });
@@ -1689,6 +1697,19 @@ describe('openchamber session service directory resolution', () => {
   it('resolves a registered project to its directory', async () => {
     const service = await createService();
     await expect(service.resolveDirectory({ projectId: 'proj_1' })).resolves.toBe('/repo/app');
+  });
+
+  it('passes only internal option metadata to OpenCode before the created callback', async () => {
+    const metadata = { openchamber: { kind: 'scheduled', automation: { source: 'suggested-tasks', projectId: 'proj_1', suggestionId: 's1', lensId: 'l1', notify: 'attention' } } };
+    const create = vi.fn(async () => ({ id: 'ses_automation' }));
+    const service = await createService({ createOpenCodeClient: () => ({ session: { create } }) });
+    await service.create({ projectId: 'proj_1', metadata: { injected: true } }, {
+      metadata,
+      onSessionCreated: async () => {
+        expect(create).toHaveBeenCalledWith({ location: { directory: '/repo/app' }, metadata });
+      },
+    });
+    expect(create).toHaveBeenCalledTimes(1);
   });
 
   it('records a created session before dispatch, and exposes its identity if that recording fails', async () => {
