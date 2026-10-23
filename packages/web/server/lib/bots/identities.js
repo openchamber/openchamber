@@ -15,6 +15,8 @@ const definitions = z.discriminatedUnion('kind', [
     installationId: z.string().regex(/^[1-9][0-9]*$/), privateKey: z.string().min(1).max(32_768) }).strict(),
   z.object({ ...common, kind: z.enum(['jira-account', 'jira-service']), site: text,
     email: z.string().email().max(320), apiToken: secret }).strict(),
+  z.object({ ...common, kind: z.literal('jira-oauth'), site: text, cloudId: z.string().uuid().toLowerCase(),
+    clientId: z.string().trim().min(1).max(1_024), clientSecret: secret }).strict(),
   z.object({ ...common, kind: z.literal('discord-app'), applicationId: snowflake, botToken: secret }).strict(),
 ]);
 const storedIdentity = z.object({ id: opaqueId, revision, definition: definitions }).strict();
@@ -23,7 +25,7 @@ const stateSchema = z.object({ version: z.literal(1), identities: z.array(stored
 const unavailable = () => new BotServiceError('BOT_IDENTITY_UNAVAILABLE', 'Reconnect or select the exact bot identity.');
 const publicIdentity = ({ id, revision: identityRevision, definition }) => {
   const result = { id, revision: identityRevision, label: definition.label, kind: definition.kind, configured: true };
-  for (const key of ['accountId', 'credentialRevision', 'appId', 'installationId', 'site', 'email', 'applicationId']) {
+  for (const key of ['accountId', 'credentialRevision', 'appId', 'installationId', 'site', 'email', 'cloudId', 'clientId', 'applicationId']) {
     if (definition[key] !== undefined) result[key] = definition[key];
   }
   return result;

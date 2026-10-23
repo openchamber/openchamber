@@ -44,6 +44,35 @@ it('resolves only the explicitly selected persisted GitHub credential and revisi
   expect(calls).toEqual([['chosen', 1], ['missing', 1]]);
 });
 
+it('keeps OAuth client secrets private across reload, replacement and revision refusal', async () => {
+  // Given a service-account OAuth credential supplied through identity management.
+  const { store, dataDir } = await create();
+  const definition = { kind: 'jira-oauth', label: 'PiggyOps', site: 'https://acme.atlassian.net',
+    cloudId: 'd313a597-a578-4b2e-bf98-93308087542e', clientId: 'client-id', clientSecret: 'disposable-original' };
+  // When it is stored and later replaced with a new secret.
+  const identity = await store.create(definition);
+  const replacement = await store.update(identity.id, 1, { ...definition, clientSecret: 'disposable-replacement' });
+  const reloaded = createBotIdentityStore({ dataDir });
+  // Then only public metadata is returned and the old revision grants no authority.
+  expect(identity).toEqual({ id: identity.id, revision: 1, configured: true, kind: definition.kind,
+    label: definition.label, site: definition.site, cloudId: definition.cloudId, clientId: definition.clientId });
+  expect(replacement.revision).toBe(2);
+  expect(JSON.stringify(await reloaded.list())).not.toMatch(/clientSecret|disposable-/);
+  expect((await reloaded.resolve(identity.id, 2)).definition.clientSecret).toBe('disposable-replacement');
+  await expect(reloaded.resolve(identity.id, 1)).rejects.toMatchObject({ code: 'BOT_IDENTITY_UNAVAILABLE' });
+  expect((await fs.stat(path.join(dataDir, 'bot-identities.json'))).mode & 0o777).toBe(0o600);
+});
+
+it.each(['../other', 'cloud-id', 'd313a597-a578-4b2e-bf98-93308087542e/other'])('refuses an invalid OAuth cloud ID %s before storing it', async (cloudId) => {
+  // Given a cloud ID that cannot identify a single Atlassian tenant.
+  const { store } = await create();
+  // When identity creation crosses the storage boundary.
+  await expect(store.create({ kind: 'jira-oauth', label: 'Invalid', site: 'https://acme.atlassian.net',
+    cloudId, clientId: 'client-id', clientSecret: 'disposable' })).rejects.toThrow();
+  // Then no identity was stored.
+  expect(await store.list()).toEqual([]);
+});
+
 it('keeps the GitHub App key private and rejects malformed keys and unsafe sites', async () => {
   const { store, dataDir } = await create();
   const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048, privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
