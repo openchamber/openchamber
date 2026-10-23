@@ -1,4 +1,5 @@
 import { settingsDict } from './de.settings';
+import { botsI18n } from './bots.i18n';
 import { prStacksI18n } from './pr-stacks.i18n';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
@@ -86,6 +87,7 @@ export const dict = {
   'chat.liveActivity.usedSubagents': '{count} Unteragenten eingesetzt',
   'sessions.sidebar.projectAction.active': 'Projektaktion aktiv',
   ...settingsDict,
+  ...botsI18n.de,
   ...prStacksI18n.de,
   'gitView.operation.title': 'Git-Vorgang',
   'gitView.operation.recovery.storage': 'OpenChamber kann den Stand von Git-Übertragungen hier nicht speichern. Erlaube den Websitespeicher und lade neu; bis dahin sind Push und Pull pausiert.',

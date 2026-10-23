@@ -3,54 +3,60 @@ import { runtimeFetch } from './runtime-fetch';
 
 export type ScheduledTaskStatus = 'idle' | 'running' | 'success' | 'error' | 'queued' | 'sent' | 'skipped' | 'failed' | 'cancelled';
 
-export type ScheduledTask = {
-  id: string;
-  name: string;
-  enabled: boolean;
-  targetSessionId?: string;
+const scheduledTaskSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  enabled: z.boolean(),
+  targetSessionId: z.string().optional(),
   /** Absolute path of the `.agents/loops/*.md` file driving this task, when
    *  any. Present only for loop-sourced tasks; unknown to older clients. */
-  loopFile?: string;
+  loopFile: z.string().optional(),
   /** Why a repository loop whose file says `enabled: true` is paused here:
    *  never enabled on this machine (`required`), or changed since it was
    *  (`outdated`). Absent when nothing holds the loop back. */
-  loopApproval?: 'required' | 'outdated';
+  loopApproval: z.enum(['required', 'outdated']).optional(),
   /** The project's Suggested tasks scan. Its schedule comes from Suggested
    *  tasks' Configure; the server refuses to save, pause or delete it here. */
-  suggestedScan?: boolean;
-  schedule: {
-    kind: 'daily' | 'weekly' | 'once' | 'cron';
-    times?: string[];
-    time?: string;
-    date?: string;
-    weekdays?: number[];
-    cron?: string;
-    timezone?: string;
-  };
-  execution: {
-    prompt: string;
+  suggestedScan: z.boolean().optional(),
+  /** Bot-owned rows are edited through the exact bot definition. */
+  botManaged: z.boolean().optional(),
+  botId: z.string().min(1).optional(),
+  schedule: z.object({
+    kind: z.enum(['daily', 'weekly', 'once', 'cron']),
+    times: z.array(z.string()).optional(),
+    time: z.string().optional(),
+    date: z.string().optional(),
+    weekdays: z.array(z.number()).optional(),
+    cron: z.string().optional(),
+    timezone: z.string().optional(),
+  }),
+  execution: z.object({
+    prompt: z.string(),
     /** Absent on a task that follows the session defaults and was never pinned. */
-    providerID?: string;
-    modelID?: string;
+    providerID: z.string().optional(),
+    modelID: z.string().optional(),
     /** Model, thinking level and agent come from the session defaults at run time. */
-    useDefaults?: boolean;
-    variant?: string;
-    agent?: string;
-    goalEnabled?: boolean;
-    goalTokenBudget?: number;
-    permissionAutoAccept?: boolean;
-  };
-  state: {
-    createdAt: number;
-    updatedAt: number;
-    lastRunAt?: number;
-    lastStatus?: ScheduledTaskStatus;
-    lastError?: string;
-    lastDurationMs?: number;
-    lastSessionId?: string;
-    nextRunAt?: number;
-  };
-};
+    useDefaults: z.boolean().optional(),
+    variant: z.string().optional(),
+    agent: z.string().optional(),
+    goalEnabled: z.boolean().optional(),
+    goalTokenBudget: z.number().optional(),
+    permissionAutoAccept: z.boolean().optional(),
+    notify: z.enum(['finish', 'attention']).default('finish'),
+  }),
+  state: z.object({
+    createdAt: z.number(),
+    updatedAt: z.number(),
+    lastRunAt: z.number().optional(),
+    lastStatus: z.enum(['idle', 'running', 'success', 'error', 'queued', 'sent', 'skipped', 'failed', 'cancelled']).optional(),
+    lastError: z.string().optional(),
+    lastDurationMs: z.number().optional(),
+    lastSessionId: z.string().optional(),
+    nextRunAt: z.number().optional(),
+  }),
+}).refine((task) => !task.botManaged || Boolean(task.botId), { message: 'A bot-managed task requires botId' });
+export type ScheduledTask = z.infer<typeof scheduledTaskSchema>;
+const taskListSchema = z.object({ tasks: z.array(scheduledTaskSchema) });
 
 const parseErrorMessage = async (response: Response, fallback: string) => {
   try {
@@ -79,10 +85,7 @@ export const fetchScheduledTasks = async (projectID: string): Promise<ScheduledT
     throw new Error(await parseErrorMessage(response, 'Failed to load scheduled tasks'));
   }
   const parsed = await response.json().catch(() => null);
-  if (!parsed || !Array.isArray(parsed.tasks)) {
-    return [];
-  }
-  return parsed.tasks as ScheduledTask[];
+  return taskListSchema.parse(parsed).tasks;
 };
 
 export const upsertScheduledTask = async (projectID: string, task: Partial<ScheduledTask>): Promise<ScheduledTask[]> => {
@@ -99,10 +102,7 @@ export const upsertScheduledTask = async (projectID: string, task: Partial<Sched
     throw new Error(await parseErrorMessage(response, 'Failed to save scheduled task'));
   }
   const parsed = await response.json().catch(() => null);
-  if (!parsed || !Array.isArray(parsed.tasks)) {
-    return [];
-  }
-  return parsed.tasks as ScheduledTask[];
+  return taskListSchema.parse(parsed).tasks;
 };
 
 const ELIGIBLE_TARGETS_BATCH = 500;
@@ -154,10 +154,7 @@ export const deleteScheduledTask = async (projectID: string, taskID: string): Pr
     throw new Error(await parseErrorMessage(response, 'Failed to delete scheduled task'));
   }
   const parsed = await response.json().catch(() => null);
-  if (!parsed || !Array.isArray(parsed.tasks)) {
-    return [];
-  }
-  return parsed.tasks as ScheduledTask[];
+  return taskListSchema.parse(parsed).tasks;
 };
 
 const getLoopFileEndpoint = (projectID: string, taskID: string): string => {

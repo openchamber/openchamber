@@ -1,6 +1,9 @@
 import { z } from 'zod';
 import { runtimeFetch } from './runtime-fetch';
 import { getSuggestedTasksRuntime } from './suggestedTasksRuntime';
+import { isVSCodeRuntime } from './desktop';
+import { BotsApiError } from './botsApi';
+import { botConversionSchema, suggestionSchema, suggestionFileSchema, suggestionLevels as levels, suggestionSeverities as severities } from './suggestionSchema';
 
 /**
  * Suggested tasks: per-project scans that propose work, and the inbox of what
@@ -9,8 +12,6 @@ import { getSuggestedTasksRuntime } from './suggestedTasksRuntime';
  * shows "no suggestions" for an inbox it could not read.
  */
 
-const levels = ['low', 'medium', 'high'] as const;
-const severities = ['low', 'medium', 'high', 'critical'] as const;
 export const LENS_ACTIONS = ['suggest', 'todo', 'session', 'worktree', 'draft-pr'] as const;
 export type LensAction = (typeof LENS_ACTIONS)[number];
 export type SuggestionSeverity = (typeof severities)[number];
@@ -25,6 +26,16 @@ const lensModelSchema = z.object({
   agent: z.string().optional(),
 });
 
+export const MCP_TOOL_EFFECTS = ['allow', 'ask', 'deny'] as const;
+const mcpSchema = z.array(z.object({ server: z.string().min(1), tools: z.record(z.string().min(1), z.enum(MCP_TOOL_EFFECTS)) })).max(10);
+export type McpToolPermissions = z.infer<typeof mcpSchema>;
+const mcpCatalogSchema = z.object({
+  status: z.enum(['loading', 'ready', 'external']),
+  servers: z.array(z.object({ name: z.string(), status: z.string(), tools: z.array(z.object({ name: z.string(), description: z.string() })) })),
+});
+export type ProjectMcpToolCatalog = z.infer<typeof mcpCatalogSchema>;
+
+const permissionModeSchema = z.enum(['default', 'ask', 'safety', 'auto']).default('default');
 const lensSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -34,6 +45,8 @@ const lensSchema = z.object({
   model: lensModelSchema,
   web: z.boolean(),
   action: z.enum(LENS_ACTIONS),
+  mcp: mcpSchema.default([]),
+  permissionMode: permissionModeSchema,
 });
 export type SuggestedTaskLens = z.infer<typeof lensSchema>;
 
@@ -76,6 +89,8 @@ const repoLensSchema = z.object({
   model: lensModelSchema.optional(),
   web: z.boolean().optional(),
   action: z.enum(LENS_ACTIONS).optional(),
+  mcp: mcpSchema.optional(),
+  permissionMode: permissionModeSchema.optional(),
 });
 export type RepositoryLens = z.infer<typeof repoLensSchema>;
 
@@ -90,39 +105,7 @@ const settingsSchema = z.object({
 });
 export type SuggestedTasksSettings = z.infer<typeof settingsSchema>;
 
-const fileSchema = z.object({ path: z.string(), startLine: z.number().optional(), endLine: z.number().optional() });
-export type SuggestionFile = z.infer<typeof fileSchema>;
-
-const conversionSchema = z.object({
-  kind: z.enum(['session', 'worktree', 'draft-pr', 'todo', 'issue', 'draft']),
-  auto: z.boolean().optional(),
-  sessionId: z.string().optional(),
-  directory: z.string().optional(),
-  todoId: z.string().optional(),
-  url: z.string().optional(),
-});
-
-const suggestionSchema = z.object({
-  id: z.string(),
-  runId: z.string(),
-  lensId: z.string(),
-  lensName: z.string(),
-  title: z.string(),
-  body: z.string(),
-  files: z.array(fileSchema),
-  confidence: z.enum(levels),
-  severity: z.enum(severities),
-  createdAt: z.number(),
-  status: z.enum(['open', 'snoozed', 'dismissed', 'approved']),
-  snoozedUntil: z.number().optional(),
-  dismissedAt: z.number().optional(),
-  dismissReason: z.string().optional(),
-  approvedAt: z.number().optional(),
-  conversion: conversionSchema.optional(),
-  conversionPending: z.boolean().optional(),
-  conversionRecoverable: z.boolean().optional(),
-  conversionError: z.string().optional(),
-});
+export type SuggestionFile = z.infer<typeof suggestionFileSchema>;
 export type Suggestion = z.infer<typeof suggestionSchema>;
 
 const lensRunSchema = z.object({
@@ -183,8 +166,9 @@ export type ApproveAction = 'session' | 'worktree' | 'draft-pr' | 'todo' | 'issu
 
 const basePath = (projectId: string) => `/api/projects/${encodeURIComponent(projectId)}/suggested-tasks`;
 
-const request = async <T>(schema: z.ZodType<T>, path: string, init?: { method: string; body?: string }): Promise<T> => {
-  const { signal } = getSuggestedTasksRuntime();
+const request = async <T>(schema: z.ZodType<T>, path: string, init?: { method?: string; body?: string; signal?: AbortSignal }): Promise<T> => {
+  const runtime = getSuggestedTasksRuntime();
+  const signal = init?.signal ? AbortSignal.any([runtime.signal, init.signal]) : runtime.signal;
   signal.throwIfAborted();
   const response = await runtimeFetch(path, {
     ...init,
@@ -211,7 +195,7 @@ type PostBody = Partial<{
   lensIds: string[];
 }>;
 
-const post = <T>(schema: z.ZodType<T>, path: string, body: PostBody = {}) => request(schema, path, { method: 'POST', body: JSON.stringify(body) });
+const post = <T>(schema: z.ZodType<T>, path: string, body: PostBody | { readonly action: 'bot'; readonly botId: string } = {}) => request(schema, path, { method: 'POST', body: JSON.stringify(body) });
 
 export const fetchSuggestionInbox = (projectId: string) => request(inboxSchema, basePath(projectId));
 
@@ -220,6 +204,10 @@ export const fetchSuggestionSummary = async (): Promise<SuggestionSummary> => (
 ).projects;
 
 export const fetchSuggestedTasksSettings = (projectId: string) => request(settingsSchema, `${basePath(projectId)}/settings`);
+
+export const fetchProjectMcpTools = (projectId: string, signal?: AbortSignal) => request(
+  mcpCatalogSchema, `/api/projects/${encodeURIComponent(projectId)}/mcp-tools`, { signal },
+);
 
 export const saveSuggestedTasksConfig = (projectId: string, config: SuggestedTasksConfig) => request(
   settingsSchema,
@@ -244,6 +232,15 @@ const itemPath = (projectId: string, suggestionId: string, action: string) => `$
 export const approveSuggestion = async (projectId: string, suggestionId: string, action: ApproveAction, provider?: IssueProvider) => (
   await post(suggestionResponseSchema, itemPath(projectId, suggestionId, 'approve'), provider ? { action, provider } : { action })
 ).suggestion;
+
+/** The source owner converts the suggestion and admits its evidence-bearing item atomically. */
+export const handSuggestionToBot = async (projectId: string, suggestionId: string, botId: string) => {
+  if (isVSCodeRuntime()) throw new BotsApiError(501, 'bots_unsupported');
+  const responseSchema = z.object({ suggestion: suggestionSchema.extend({
+    status: z.literal('approved'), conversion: botConversionSchema,
+  }) }).refine(({ suggestion }) => suggestion.id === suggestionId && suggestion.conversion.botId === botId);
+  return (await post(responseSchema, itemPath(projectId, suggestionId, 'approve'), { action: 'bot', botId })).suggestion;
+};
 
 export const dismissSuggestion = async (projectId: string, suggestionId: string, reason: string) => (
   await post(suggestionResponseSchema, itemPath(projectId, suggestionId, 'dismiss'), { reason })

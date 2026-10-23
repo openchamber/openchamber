@@ -1,5 +1,6 @@
 import type { I18nKey } from './en';
 import { settingsDict } from './es.settings';
+import { botsI18n } from './bots.i18n';
 import { prStacksI18n } from './pr-stacks.i18n';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
@@ -87,6 +88,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.liveActivity.usedSubagents': '{count} subagentes utilizados',
   'sessions.sidebar.projectAction.active': 'Acción del proyecto en curso',
   ...settingsDict,
+  ...botsI18n.es,
   ...prStacksI18n.es,
   'gitView.context.configure': 'Configurar repositorio',
   'gitView.context.description': 'Remotos que la identidad del repositorio no alcanza y acceso para submódulos y Git LFS. Las identidades están en los ajustes de Git.',

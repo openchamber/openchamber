@@ -1,5 +1,6 @@
 import type { I18nKey } from './en';
 import { settingsDict } from './zh-TW.settings';
+import { botsI18n } from './bots.i18n';
 import { prStacksI18n } from './pr-stacks.i18n';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
@@ -87,6 +88,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.liveActivity.usedSubagents': '使用了 {count} 個子代理',
   'sessions.sidebar.projectAction.active': '專案操作正在執行',
   ...settingsDict,
+  ...botsI18n['zh-TW'],
   ...prStacksI18n['zh-TW'],
   'gitView.operation.title': 'Git 操作',
   'gitView.operation.recovery.storage': 'OpenChamber 無法在這裡儲存 Git 傳輸的狀態。請允許網站儲存空間並重新載入；在那之前 push 和 pull 會暫停。',

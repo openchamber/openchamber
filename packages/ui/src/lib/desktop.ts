@@ -5,6 +5,7 @@ import { getRuntimeBearerTokenSync } from '@/lib/runtime-auth';
 import { getRuntimeApiBaseUrl, getRuntimeKey } from '@/lib/runtime-switch';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { isVSCodeBootstrapPresent } from '@/lib/vscodeBootstrap';
+import type { BotsRouteTarget } from '@/lib/router/types';
 
 export type UpdateInfo = {
   available: boolean;
@@ -511,15 +512,15 @@ export const focusDesktopWindow = async (): Promise<boolean> => {
 };
 
 /**
- * Opens a session owned by another instance ('local' or 'host:<id>') in a
+ * Opens a session or Bots item owned by another instance in a
  * window for that instance. Valid from any app window, including one that
  * currently shows a remote instance — the main process gates the command
  * by sender. Returns false when the desktop bridge is not available, so the
- * caller can fall back to opening it on the current one.
+ * caller can leave the foreign target unapplied.
  */
-export const openHostSession = (runtimeKey: string, sessionId: string): boolean => {
+export const openHostSession = (runtimeKey: string, sessionId: string | null, botTarget?: BotsRouteTarget): boolean => {
   if (!canUseElectronDesktopIPC()) return false;
-  void invokeDesktop<{ opened: boolean }>('desktop_open_host_session', { runtimeKey, sessionId })
+  void invokeDesktop<{ opened: boolean }>('desktop_open_host_session', botTarget ? { runtimeKey, sessionId, botTarget } : { runtimeKey, sessionId })
     .catch((error) => {
       console.warn('[desktop] failed to open host session', error);
     });

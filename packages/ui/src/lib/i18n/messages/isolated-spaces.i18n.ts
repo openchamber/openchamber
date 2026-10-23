@@ -2854,7 +2854,7 @@ export const isolatedSpacesI18n = {
     'spaces.create.access.label': '모델',
     'spaces.create.access.fromEnv': '환경 변수',
     'spaces.create.access.envNameAria': '{provider} 키가 담긴 환경 변수',
-    'spaces.create.access.envComesBack': 'OpenChamber는 변수 이름만 저장하고, 재시작할 때마다 그 변수에서 키를 다시 읽습니다.',
+    'spaces.create.access.envComesBack': '변수명만 저장하며 재시작 시 키를 다시 읽습니다.',
     'spaces.create.access.typed': '키 붙여넣기',
     'spaces.create.access.login': '내 {name} 로그인',
     'spaces.create.access.keyAria': '{provider} 키',

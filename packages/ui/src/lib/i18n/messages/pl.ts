@@ -1,5 +1,6 @@
 import type { I18nKey } from './en';
 import { settingsDict } from './pl.settings';
+import { botsI18n } from './bots.i18n';
 import { prStacksI18n } from './pr-stacks.i18n';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
@@ -87,6 +88,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.liveActivity.usedSubagents': 'Użyci subagenci: {count}',
   'sessions.sidebar.projectAction.active': 'Trwa wykonywanie akcji projektu',
   ...settingsDict,
+  ...botsI18n.pl,
   ...prStacksI18n.pl,
   'gitView.operation.title': 'Operacja Git',
   'gitView.operation.recovery.storage': 'OpenChamber nie może tu zapisać stanu przesyłów Git. Zezwól na pamięć witryny i odśwież; do tego czasu push i pull są wstrzymane.',

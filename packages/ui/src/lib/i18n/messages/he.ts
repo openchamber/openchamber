@@ -1,4 +1,5 @@
 import { settingsDict } from './he.settings';
+import { botsI18n } from './bots.i18n';
 import { prStacksI18n } from './pr-stacks.i18n';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
@@ -3869,6 +3870,7 @@ export const dict = {
   'settings.extensions.capability.loopback.routes': 'שיטות ונתיבים מותרים',
   'settings.extensions.capability.loopback.invalid': 'היציאה שהוגדרה בשרת אינה תקינה. הגדר מספר שלם בין 1024 ל-65535, או נקה את המשתנה כדי להשתמש בברירת המחדל. האישור אינו זמין עד לתיקון.',
   ...settingsDict,
+  ...botsI18n.he,
   ...prStacksI18n.he,
   ...linearIssuePickerI18n.he,
   ...referencePickerI18n.he,

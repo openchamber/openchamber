@@ -1,4 +1,5 @@
 import type { WorktreeMetadata } from '@/types/worktree';
+import type { BotsRouteTarget } from '@/lib/router/types';
 import type { DesktopSettings } from '@/lib/settings/registry';
 import type { GitIdentityProfile, GitIdentitySummary } from './git-identity';
 import type { PullStackResult, PullStackRegistration, PullStackMerge, RestackInput, RestackRun, StackMembershipResult, StackParentResult } from './pull-stacks';
@@ -1416,7 +1417,9 @@ export interface NotificationPayload {
   kind?: string;
   sessionId?: string;
   directory?: string;
-  // Runtime key of the instance that owns the session ('local' or 'host:<id>').
+  /** Exact Bots item to open, including when there is no stage session. */
+  readonly botTarget?: BotsRouteTarget;
+  // Runtime key of the instance that owns the target ('local' or 'host:<id>').
   // The desktop shell uses it to route a notification click to the owning
   // instance instead of the currently active one.
   runtimeKey?: string;
