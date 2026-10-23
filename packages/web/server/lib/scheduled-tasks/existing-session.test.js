@@ -45,9 +45,11 @@ const setup = (overrides = {}) => {
 };
 
 describe('existing session scheduling', () => {
-  it('the scheduler reuses a target without creating a chat or reading new-session defaults', async () => {
+  it.each(['finish', 'attention'])('the scheduler reuses a target with notify %s without changing its metadata', async (notify) => {
     const { projectConfigRuntime, messageQueueRuntime } = setup();
-    const fetchImpl = vi.fn(async () => Response.json({ location: { directory: '/repo' }, data: { id: 'ses_target', location: { directory: '/repo' } } }));
+    await projectConfigRuntime.upsertScheduledTask('project-1', { ...task, execution: { ...task.execution, notify } });
+    const metadata = { openchamber: { automation: { source: 'scheduled-task', taskId: 'original', notify: 'attention' } }, custom: 'keep' };
+    const fetchImpl = vi.fn(async () => Response.json({ location: { directory: '/repo' }, data: { id: 'ses_target', location: { directory: '/repo' }, metadata } }));
     vi.stubGlobal('fetch', fetchImpl);
     const readSessionDefaults = vi.fn();
     const createChatDirectory = vi.fn();
@@ -64,6 +66,11 @@ describe('existing session scheduling', () => {
     expect(readSessionDefaults).not.toHaveBeenCalled();
     expect(fetchImpl).toHaveBeenCalledOnce();
     expect(new URL(fetchImpl.mock.calls[0][0]).pathname).toBe('/api/session/ses_target');
+    expect(fetchImpl.mock.calls[0][1].method).toBe('GET');
+    await scheduler.beforeScheduledTaskSend('ses_target', '/repo', messageQueueRuntime.enqueue.mock.calls[0][2]);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(fetchImpl.mock.calls.every(([, init]) => init.method === 'GET')).toBe(true);
+    expect(messageQueueRuntime.enqueue.mock.calls[0][2]).not.toHaveProperty('metadata');
   });
   it('admits to the ordinary queue, records the target, then finishes at send', async () => {
     const { runtime, messageQueueRuntime, stored } = setup();

@@ -76,7 +76,7 @@ describe('project-config runtime', () => {
     });
     try {
       const result = await runtime.upsertScheduledTask('project-test', task({ useDefaults: true }));
-      expect(result.task.execution).toEqual({ prompt: 'Summarize', useDefaults: true });
+      expect(result.task.execution).toEqual({ prompt: 'Summarize', notify: 'finish', useDefaults: true });
       await expect(runtime.upsertScheduledTask('project-test', task({}))).rejects.toThrow('execution.providerID is required');
     } finally {
       await cleanup();

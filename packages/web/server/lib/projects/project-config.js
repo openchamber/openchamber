@@ -252,6 +252,7 @@ const normalizeExecution = (value, targetSessionId) => {
 
   return {
     prompt,
+    notify: value.notify === 'attention' ? 'attention' : 'finish',
     ...(providerID && modelID ? { providerID, modelID } : {}),
     ...(useDefaults ? { useDefaults: true } : {}),
     ...(variant ? { variant } : {}),
@@ -368,6 +369,12 @@ const normalizeTaskForStorage = (value, options) => {
   // The project's Suggested tasks scan: the scheduler times it, the
   // suggested-tasks module runs it, and only that module writes it.
   if (value.suggestedScan === true) storedTask.suggestedScan = true;
+  const botId = asNonEmptyString(value.botId);
+  if (value.botManaged === true && !botId) throw new Error('botId is required for a managed bot task');
+  if (botId) {
+    storedTask.botId = botId;
+    storedTask.botManaged = true;
+  }
   return storedTask;
 };
 
@@ -906,6 +913,10 @@ export const createProjectConfigRuntime = (deps) => {
       const nextTasks = [];
       const replacedIDs = new Set();
       for (const task of tasks) {
+        if (task.botId) {
+          nextTasks.push(task);
+          continue;
+        }
         if (task.loopFile && !activeLoopFilePaths.has(task.loopFile)) {
           // The driving loop file was removed (or renamed) — unschedule.
           continue;
@@ -1008,6 +1019,14 @@ export const createProjectConfigRuntime = (deps) => {
   // The `suggestedTasks` key, owned by `suggested-tasks/runtime.js`, which
   // validates it; this only reads and writes it under the project lock.
   const readSuggestedTasksSection = async (projectID) => (await readRawProjectConfigFromDisk(projectID)).suggestedTasks;
+
+  const readBotsSection = async (projectID) => (await readRawProjectConfigFromDisk(projectID)).bots;
+  const updateBotsSection = async (projectID, change) => withProjectWriteLock(projectID, async () => {
+    const existing = await readRawProjectConfigFromDisk(projectID);
+    const next = await change(existing.bots);
+    await writeRawProjectConfigToDisk(projectID, { ...existing, version: PROJECT_CONFIG_VERSION, bots: next });
+    return next;
+  });
 
   /** `change(current)` returns the new value of the key, under the lock. */
   const updateSuggestedTasksSection = async (projectID, change) => withProjectWriteLock(projectID, async () => {
@@ -1141,6 +1160,8 @@ export const createProjectConfigRuntime = (deps) => {
     setLoopApproval,
     readSuggestedTasksSection,
     updateSuggestedTasksSection,
+    readBotsSection,
+    updateBotsSection,
     resolveProjectConfigPath,
   };
 };

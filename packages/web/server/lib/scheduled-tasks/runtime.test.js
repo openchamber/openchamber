@@ -305,7 +305,7 @@ describe('scheduled-tasks runtime prompt dispatch', () => {
     vi.unstubAllGlobals();
   });
 
-  it('parks the briefing with resume: false so execution starts on the task prompt', async () => {
+  it.each([undefined, 'finish', 'attention'])('stamps automation notify %s and parks the briefing until the task prompt', async (notify) => {
     const posts = [];
     vi.stubGlobal('fetch', vi.fn(async (input, init = {}) => {
       const { pathname } = new URL(String(input));
@@ -318,7 +318,7 @@ describe('scheduled-tasks runtime prompt dispatch', () => {
       name: 'Nightly',
       enabled: true,
       schedule: { kind: 'daily', times: ['03:00'], timezone: 'UTC' },
-      execution: { prompt: 'Review open issues', providerID: 'openai', modelID: 'gpt-5', goalEnabled: true, goalTokenBudget: 50_000 },
+      execution: { prompt: 'Review open issues', providerID: 'openai', modelID: 'gpt-5', goalEnabled: true, goalTokenBudget: 50_000, notify },
       state: { createdAt: 1, updatedAt: 1 },
     };
     const runtime = createScheduledTasksRuntime({
@@ -343,7 +343,12 @@ describe('scheduled-tasks runtime prompt dispatch', () => {
     runtime.stop();
 
     // The run is marked, so it stays out of In work.
-    expect(posts.find((post) => post.pathname === '/api/session')?.body.metadata).toEqual({ openchamber: { kind: 'scheduled' } });
+    expect(posts.find((post) => post.pathname === '/api/session')?.body.metadata).toEqual({
+      openchamber: {
+        kind: 'scheduled',
+        automation: { source: 'scheduled-task', taskId: 'task-1', notify: notify ?? 'finish' },
+      },
+    });
     // The project knowledge is written into the session before anything is sent to it.
     const dispatch = posts.filter((post) => post.pathname.startsWith('/api/session/ses_run/') || post.pathname.startsWith('knowledge:'));
     expect(dispatch.map((post) => post.pathname.split('/').at(-1))).toEqual(['knowledge:ses_run', 'synthetic', 'prompt']);

@@ -114,6 +114,39 @@ lists the scan under its translated name with Run now and Edit, and Edit opens
 the Suggested tasks Configure dialog; it offers no pause, delete or open
 session for it, since a scan's sessions are its lenses.
 
+## Bot-managed tasks
+
+`botTaskFor` in `../bots/events.js` projects each bot into a row with
+`id: bot-<botId>`, `botId` and `botManaged: true`. Project config normalization
+returns both ownership fields on reads and writes. A bot ID establishes managed
+ownership even when an older stored row omitted the marker. Ordinary task service
+edits, pause/resume, delete and loop-file mutations refuse these rows with 409.
+The ordinary service also rejects injected bot ownership fields.
+
+`../bots/scheduler.js` owns config projection and stale-row removal. Loop discovery
+cannot adopt a bot row, including a loop with the same name. Manual schedules keep
+a disabled daily placeholder so Run now remains available. The bot runtime still
+checks whether the bot definition itself is enabled.
+
+The runtime injects `runBot(projectId, botId, occurrence)` and dispatches through
+the existing queue, concurrency slots, occurrence claim and completion state.
+Bot runs never create an ordinary scheduled session or enter the existing-session
+queue. Scheduled occurrence keys are
+`scheduled:<projectId>:<taskId>:<claimed timestamp in milliseconds>`. They derive
+from the armed slot passed through the claim, and stay independent of execution
+time and jitter. Each admitted manual run gets `manual:<uuid>`. Concurrent manual
+bot runs refuse admission when a scheduler concurrency limit is reached.
+
+The hook returns `{ items, skipped }` from `botsRuntime.runScheduled`. Missing
+hooks, thrown discovery errors and invalid results record an error without a
+fallback session. Suggested scans retain their existing `runSuggestedScan` hook.
+
+### Why bot dispatch uses the existing occurrence claim
+
+The project config lock already coordinates servers sharing one data directory.
+Passing its claimed slot into the bot coordinator preserves source-discovery
+identity across delayed execution without a separate bot timer or clock-based key.
+
 ## Existing-session tasks
 
 `targetSessionId` sends to an existing session instead of creating one.
@@ -162,6 +195,23 @@ by the reuse runtime. Transient queue send failures use the ordinary retry
 policy. Only definitive before-send target or task 404 or 409 refusals are
 terminal, including removed or retargeted tasks and moved targets. Model or
 prompt send errors use the ordinary retry path.
+
+## Notification policy
+
+`execution.notify` accepts `finish` or `attention` and defaults to `finish`.
+Project config normalization maps missing or unrecognized values to `finish`;
+no stored-data migration is needed. The scheduled-task PUT accepts this field
+inside `execution`, and list/save responses return the normalized value.
+New sessions carry `metadata.openchamber.kind: 'scheduled'` and
+`metadata.openchamber.automation: { source: 'scheduled-task', taskId, notify }`.
+The notification runtime consumes that metadata separately. Existing-session
+tasks preserve the target's metadata and ignore the task's notification choice.
+
+### Why notification policy stays in project config
+
+Notification policy is a per-machine execution preference, like goal mode.
+Loop files cannot set it, and adoption and later reconciliation preserve the
+stored choice while applying the file's execution fields.
 
 ## New-session selection
 
@@ -222,7 +272,7 @@ Field mapping (model: `packages/ui/src/lib/scheduledTasksApi.ts`):
 | `timezone` | `schedule.timezone` (optional, IANA; defaults to the server zone) |
 | body | `execution.prompt` (required) |
 
-`thinking_level` and `goalEnabled`/`goalTokenBudget` are not part of the portable
+`thinking_level`, `notify`, and `goalEnabled`/`goalTokenBudget` are not part of the portable
 format (UI/JSON-only today); `daily`/`weekly`/`once` schedules remain UI/JSON-only.
 Runtime state (`lastRunAt`, `nextRunAt`, `lastStatus`, `lastError`, `lastSessionId`,
 `lastDurationMs`) is never written to the markdown file — it continues to live in
@@ -241,7 +291,7 @@ project write lock on every `syncProject` when the project path is known:
   schedule/execution/enabled are overwritten from the file while the task's
   `id` and runtime `state` are preserved (markdown wins on conflict).
 - **UI-only fields survive adoption.** Execution fields the file format does
-  not define (`goalEnabled`, `goalTokenBudget`, `permissionAutoAccept`,
+   not define (`notify`, `goalEnabled`, `goalTokenBudget`, `permissionAutoAccept`,
   `variant`) are preserved from the task when a loop adopts it; only fields the
   file defines are re-applied.
 - **Deletion.** A task carrying the `loopFile` marker whose loop file is no

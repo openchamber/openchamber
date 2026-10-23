@@ -1,4 +1,5 @@
 import { OpenCode } from '@opencode/client';
+import { randomUUID } from 'node:crypto';
 import { DateTime } from 'luxon';
 import { CronExpressionParser } from 'cron-parser';
 import { expandSnippets } from '../opencode/snippets.js';
@@ -272,6 +273,8 @@ export const createScheduledTasksRuntime = (deps) => {
     // Runs a project's Suggested tasks scan (a task with `suggestedScan`):
     // `(projectID, reason) => { sessionID, directory, skipped }`.
     runSuggestedScan = null,
+    // `(projectID, botId, occurrence) => { items, skipped }` from the bot runtime.
+    runBot = null,
     logger = console,
     maxGlobalConcurrency = DEFAULT_GLOBAL_CONCURRENCY,
     maxProjectConcurrency = DEFAULT_PROJECT_CONCURRENCY,
@@ -594,12 +597,22 @@ export const createScheduledTasksRuntime = (deps) => {
     });
   };
 
-  const runTaskWithWatchdog = async (projectID, task, reason, onSessionCreated) => {
+  const runTaskWithWatchdog = async (projectID, task, reason, onSessionCreated, occurrence) => {
     const startedAt = Date.now();
     const title = formatScheduledSessionTitle(task, startedAt);
     const projectPath = projectPathByID.get(projectID);
     if (!projectPath) {
       throw new Error('project path is unavailable');
+    }
+
+    if (task.botId) {
+      if (!runBot) throw new Error('Bots are not available on this server');
+      const result = await runBot(projectID, task.botId, occurrence);
+      if (!result || !Array.isArray(result.items) || (result.skipped !== true && result.skipped !== false)) {
+        throw new Error('Bot dispatch returned an invalid result');
+      }
+      const finishedAt = Date.now();
+      return { directory: projectPath, skipped: result.skipped, durationMs: Math.max(0, finishedAt - startedAt) };
     }
 
     if (typeof waitForOpenCodeReady === 'function') {
@@ -641,7 +654,12 @@ export const createScheduledTasksRuntime = (deps) => {
         title,
         location: { directory },
         // Marks a run of a task, so it stays out of In work: nobody sent it.
-        metadata: { openchamber: { kind: 'scheduled' } },
+        metadata: {
+          openchamber: {
+            kind: 'scheduled',
+            automation: { source: 'scheduled-task', taskId: task.id, notify: task.execution.notify ?? 'finish' },
+          },
+        },
         // No model or agent at all: OpenCode picks its own default.
         ...(selection.providerID && selection.modelID ? {
           model: {
@@ -777,7 +795,7 @@ export const createScheduledTasksRuntime = (deps) => {
       return { ok: false, skipped: true };
     }
 
-    if (task.targetSessionId) {
+    if (task.targetSessionId && !task.botId) {
       if (!existingSessionTasks) return { ok: false, error: 'Existing-session scheduling is unavailable', statusCode: 503 };
       const nextRunAt = computeNextRunAt(task, Math.max(Date.now(), (scheduledFor ?? 0) + 1));
       const result = await existingSessionTasks.run(projectID, task, reason, scheduledFor, nextRunAt);
@@ -991,7 +1009,10 @@ export const createScheduledTasksRuntime = (deps) => {
       };
 
       try {
-        const runPromise = runTaskWithWatchdog(projectID, task, reason, recordCreatedSession);
+        const occurrence = reason === 'scheduled'
+          ? `scheduled:${projectID}:${taskID}:${Math.round(scheduledFor)}`
+          : `manual:${randomUUID()}`;
+        const runPromise = runTaskWithWatchdog(projectID, task, reason, recordCreatedSession, occurrence);
         let timeoutID;
         const timeoutPromise = new Promise((_, reject) => {
           timeoutID = setTimeout(() => {
@@ -1213,6 +1234,10 @@ export const createScheduledTasksRuntime = (deps) => {
         queued: true,
         error: 'task is already queued',
       };
+    }
+
+    if (tasksByProject.get(projectID)?.get(taskID)?.botId && !canRunTask(projectID)) {
+      return { ok: false, queued: true, error: 'Scheduled task concurrency limit reached' };
     }
 
     return runTask(projectID, taskID, 'manual');
