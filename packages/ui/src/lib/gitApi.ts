@@ -771,6 +771,19 @@ async function deleteGitWorktree(
   return gitHttp.deleteGitWorktree(directory, payload);
 }
 
+/** Renames the task of the worktree at `directory`; the user's name stays over the agent's. */
+export async function setGitWorktreeTitle(
+  directory: string,
+  title: string,
+): Promise<import('./api/types').GitWorktreeTitleResult> {
+  const runtime = getRuntimeGit();
+  if (runtime?.worktree?.setTitle) {
+    return runtime.worktree.setTitle(directory, title);
+  }
+  if (runtime) throw new Error('Renaming a worktree task is not available here');
+  return gitHttp.setGitWorktreeTitle(directory, title);
+}
+
 export async function snapshotGitWorktree(
   directory: string,
   payload: import('./api/types').GitWorktreeSnapshotPayload

@@ -99,6 +99,7 @@ export const createWebGitAPI = (): GitAPI => ({
     preview: gitApiHttp.previewGitWorktree,
     create: gitApiHttp.createGitWorktree,
     remove: gitApiHttp.deleteGitWorktree,
+    setTitle: gitApiHttp.setGitWorktreeTitle,
     snapshot: gitApiHttp.snapshotGitWorktree,
   },
 });

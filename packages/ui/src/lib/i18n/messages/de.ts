@@ -16,6 +16,7 @@ import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
+import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
 import { sourceBoardI18n } from './source-board.i18n';
@@ -157,6 +158,7 @@ export const dict = {
   ...webSearchI18n.de,
   ...sessionWarmingI18n.de,
   ...heapSnapshotI18n.de,
+  ...sidebarWorkI18n.de,
   ...overviewI18n.de,
   ...isolatedSpacesI18n.de,
   ...sourceBoardI18n.de,
@@ -571,9 +573,6 @@ export const dict = {
   'sessions.sidebar.empty.noMatches.description': 'Versuchen Sie einen anderen Titel, Branch, Ordner oder Pfad.',
   'sessions.sidebar.empty.noMatches.searchArchive': 'Im Archiv suchen',
   'sessions.sidebar.activity.chatsTitle': 'Chats',
-  'sessions.sidebar.header.viewMode.label': 'Ansicht',
-  'sessions.sidebar.header.viewMode.projects': 'Baum',
-  'sessions.sidebar.header.viewMode.timeline': 'Liste',
   'sessions.sidebar.activity.chatsEmpty': 'Noch keine Chats.',
   'chat.chatInput.chooseProject': 'Projekt auswählen',
   'sessions.switcher.openAria': 'Sitzungswechsler öffnen',
@@ -760,10 +759,8 @@ export const dict = {
   'sessions.sidebar.group.collapseAria': '{label} einklappen',
   'sessions.sidebar.group.actions.deleteArchivedInGroupAria': 'Archivierte Sitzungen in {label} löschen',
   'sessions.sidebar.group.actions.deleteArchivedSessions': 'Archivierte Sitzungen löschen',
-  'sessions.sidebar.group.actions.deleteGroupAria': '{label} löschen',
   'sessions.sidebar.group.actions.deleteWorktree': 'Worktree löschen',
   'sessions.sidebar.group.actions.deleteWorktreeAndBranch': 'Worktree und lokalen Branch löschen',
-  'sessions.sidebar.group.actions.deleteGroupAndBranchAria': '{label} und den lokalen Branch löschen',
   'sessions.sidebar.group.actions.newDraftInGroupAria': 'Neue Entwurfs-Sitzung in {label}',
   'sessions.sidebar.grouping.projectRoot': 'Projektstamm',
   'sessions.sidebar.grouping.projectRootWithBranch': 'Projektstamm: {branch}',

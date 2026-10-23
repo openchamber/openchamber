@@ -35,7 +35,10 @@ import { SessionSidebarRows } from '../SessionSidebarRows';
 import { sessionTreeTextInset } from '../sessions/sessionTreeGeometry';
 import { SessionSidebarActivityHeader } from '../sessionSidebarHeaderPresentation';
 import { resolveSessionSidebarStickyHeader, type SessionSidebarRow, type SessionSidebarRowModel } from '../sessionSidebarRowModel';
-import { SortableGroupItem, SortableProjectItem } from './sortableItems';
+import { SortableGroupItem, SortableProjectItem, type SortableDragHandleProps } from './sortableItems';
+import { WorktreeWorkRow } from '../works/WorktreeWorkRow';
+import { SessionDraftRow } from '../works/SessionDraftRow';
+import { isWorktreeWorkGroup } from '../works/sidebarWorks';
 import { SessionGroupSection, type SessionGroupSectionProps } from './SessionGroupSection';
 import type { ProjectSection } from './sessionProjectRender';
 import { formatProjectLabel } from '../utils';
@@ -379,15 +382,33 @@ function SessionProjectScrollerComponent({ model, view, actions }: Props): React
       />;
     }
     if (row.kind === 'group-header') {
-      return <SortableGroupItem id={row.groupKey} disabled={row.forceExpanded || model.state.editingId !== null || view.worktreeSortOrder !== 'manual'}>
-        {(dragHandleProps) => <SessionGroupSection
+      // A worktree is a work of its own and reads like a session row; spaces
+      // and the archive keep their group header.
+      const renderHeader = (dragHandleProps: SortableDragHandleProps | null) => isWorktreeWorkGroup(row.group)
+        ? <WorktreeWorkRow
+          group={row.group} groupKey={row.groupKey} projectId={row.projectId} depth={row.depth}
+          collapsed={row.collapsed} forceExpanded={row.forceExpanded} empty={row.empty}
+          normalizedSessionSearchQuery={model.groupProps.normalizedSessionSearchQuery}
+          alwaysShowActions={view.alwaysShowActions} mobileVariant={view.mobileVariant}
+          dragHandleProps={dragHandleProps}
+          onToggle={actions.group.onToggleCollapsedGroup}
+          openNewSessionDraft={actions.openNewSessionDraft}
+          setActiveProjectIdOnly={actions.setActiveProjectIdOnly}
+          setSessionSwitcherOpen={actions.setSessionSwitcherOpen}
+          activeProjectId={model.groupProps.activeProjectId}
+        />
+        : <SessionGroupSection
           {...model.groupProps} {...actions.group}
           group={row.group} groupKey={row.groupKey} projectId={row.projectId} isEmpty={row.empty}
           visibleSessionCount={model.state.visibleSessionCountByGroup.get(row.groupKey)}
           editingId={model.state.editingId} openSidebarMenuKey={model.state.openSidebarMenuKey}
           setOpenSidebarMenuKey={model.state.setOpenSidebarMenuKey}
           dragHandleProps={dragHandleProps} renderBody={false}
-        />}
+        />;
+      // Only under its project does a worktree take part in the manual sort.
+      if (!row.sortable) return renderHeader(null);
+      return <SortableGroupItem id={row.groupKey} disabled={row.forceExpanded || model.state.editingId !== null || view.worktreeSortOrder !== 'manual'}>
+        {renderHeader}
       </SortableGroupItem>;
     }
     if (row.kind === 'folder-header') {
@@ -450,6 +471,13 @@ function SessionProjectScrollerComponent({ model, view, actions }: Props): React
         />
       </div>;
     }
+    if (row.kind === 'draft') {
+      return <SessionDraftRow
+        draft={row.draft} depth={row.depth}
+        alwaysShowActions={view.alwaysShowActions} mobileVariant={view.mobileVariant}
+        setSessionSwitcherOpen={actions.setSessionSwitcherOpen}
+      />;
+    }
     if (row.kind === 'run') {
       return <RunSidebarRow
         run={row.run} depth={row.depth} laneNodes={row.laneNodes} blockingSessionIds={row.blockingSessionIds} renderContext={row.renderContext}
@@ -486,7 +514,7 @@ function SessionProjectScrollerComponent({ model, view, actions }: Props): React
 
   const structuralIds = React.useMemo(() => model.rowModel.rows.flatMap((row) => {
     if (row.kind === 'project-header') return activeDrag?.kind === 'group' ? [] : [row.section.project.id];
-    if (row.kind !== 'group-header') return [];
+    if (row.kind !== 'group-header' || !row.sortable) return [];
     if (activeDrag?.kind === 'project') return [];
     if (activeDrag?.kind === 'group' && row.projectId !== activeDrag.projectId) return [];
     return [row.groupKey];

@@ -17,6 +17,7 @@ import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
+import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
 import { sourceBoardI18n } from './source-board.i18n';
@@ -158,6 +159,7 @@ export const dict: Record<I18nKey, string> = {
   ...webSearchI18n.ko,
   ...sessionWarmingI18n.ko,
   ...heapSnapshotI18n.ko,
+  ...sidebarWorkI18n.ko,
   ...overviewI18n.ko,
   ...isolatedSpacesI18n.ko,
   ...sourceBoardI18n.ko,
@@ -623,9 +625,6 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.empty.noMatches.description': '다른 제목, 브랜치, 폴더 또는 경로로 검색해 보세요.',
   'sessions.sidebar.empty.noMatches.searchArchive': '보관함에서 검색',
   'sessions.sidebar.activity.chatsTitle': '채팅',
-  'sessions.sidebar.header.viewMode.label': '보기',
-  'sessions.sidebar.header.viewMode.projects': '트리',
-  'sessions.sidebar.header.viewMode.timeline': '목록',
   'sessions.sidebar.activity.chatsEmpty': '아직 채팅이 없습니다.',
   'chat.chatInput.chooseProject': '프로젝트 선택',
   'sessions.archivePage.allDirectories': '모든 디렉터리',
@@ -860,10 +859,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.group.collapseAria': '접기 {label}',
   'sessions.sidebar.group.actions.deleteArchivedInGroupAria': '{label}의 보관된 세션 삭제',
   'sessions.sidebar.group.actions.deleteArchivedSessions': '보관된 세션 삭제',
-  'sessions.sidebar.group.actions.deleteGroupAria': '{label} 삭제',
   'sessions.sidebar.group.actions.deleteWorktree': '워크트리 삭제',
   'sessions.sidebar.group.actions.deleteWorktreeAndBranch': '워크트리와 로컬 브랜치 삭제',
-  'sessions.sidebar.group.actions.deleteGroupAndBranchAria': '{label} 및 로컬 브랜치 삭제',
   'sessions.sidebar.group.actions.newDraftInGroupAria': '{label}에 새 드래프트 세션 만들기',
   'sessions.sidebar.grouping.projectRoot': '프로젝트 루트',
   'sessions.sidebar.grouping.projectRootWithBranch': '프로젝트 루트: {branch}',

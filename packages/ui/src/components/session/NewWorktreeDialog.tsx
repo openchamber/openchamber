@@ -466,6 +466,7 @@ export function NewWorktreeDialog({
             returnAfterDirectoryCreated: true,
             expectedRevision: prConfig.expectedRevision,
             changeRequestSource: prConfig.changeRequestSource,
+            taskTitle: linkedPr.title,
           };
         }
 
@@ -478,6 +479,8 @@ export function NewWorktreeDialog({
           existingBranch: mode === 'existing-branch' ? normalizedBranch : undefined,
           setupCommands: resolvedSetupCommands,
           returnAfterDirectoryCreated: true,
+          // A worktree for an issue is named by it until the agent names the task.
+          taskTitle: item?.kind === 'issue' || item?.kind === 'tracker' ? item.title : item?.kind === 'guest' ? item.guest.title : undefined,
         };
         if (sourceBranch && startsNewBranch) baseArgs.startRef = sourceBranch;
         return baseArgs;

@@ -9,7 +9,6 @@ import { useUIStore } from '@/stores/useUIStore';
 import type { MultiRunSummary } from '@/lib/multirun/runs';
 import type { SessionNode } from '../types';
 import { isMultiLineTimelineContext, type SessionSidebarRenderContext } from '../sessionSidebarRowModel';
-import { formatSessionCompactDateLabel } from '../utils';
 import { CollapsedSessionActivityIndicator } from './collapsedActivityIndicator';
 import { SessionTimelineRowBody } from './SessionTimelineRowBody';
 import { sessionTreeRowPaddingLeft } from './sessionTreeGeometry';
@@ -61,16 +60,14 @@ function RunSidebarRowComponent({
 }: Props): React.ReactNode {
   const { t } = useI18n();
   const isActive = useUIStore((state) => state.runOverviewKey === run.key);
-  // The Tree view's Pinned and In work rows are flat too, on one line.
+  // Rows of zones that mix projects are flat too, on one line.
   const isOneLineRow = renderContext === 'mixed-compact';
   const isTimelineRow = isMultiLineTimelineContext(renderContext) || isOneLineRow;
-  // The list by time names the project on a first line of its own.
-  const hasProjectLine = renderContext === 'timeline-by-time';
-  // Only Pinned, In work and the list by time mix projects; under a project
-  // header the row needs no icon.
+  // Detailed zone rows name the project on their second line; one-line rows
+  // leave the room to the title.
   const timelineProject = useProjectsStore(React.useCallback((state) => (
-    (renderContext === 'timeline-mixed' || hasProjectLine) && projectId ? state.projects.find((entry) => entry.id === projectId) ?? null : null
-  ), [hasProjectLine, renderContext, projectId]));
+    !isOneLineRow && isTimelineRow && projectId ? state.projects.find((entry) => entry.id === projectId) ?? null : null
+  ), [isOneLineRow, isTimelineRow, projectId]));
   const laneCount = run.lanes.length;
   const laneCountLabel = laneCount === 1
     ? t('sessions.sidebar.run.laneCountSingle', { count: laneCount })
@@ -91,12 +88,12 @@ function RunSidebarRowComponent({
         aria-current={isActive ? 'page' : undefined}
         aria-label={t('sessions.sidebar.run.openOverviewAria', { title: run.title })}
         onClick={openOverview}
-        // The Tree view's one-line rows keep the tree slot for their state,
-        // like the session rows beside them; List rows stay flat.
+        // One-line zone rows keep the tree slot for their state, like the
+        // session rows beside them; detailed zone rows stay flat.
         style={{ paddingInlineStart: isOneLineRow ? sessionTreeRowPaddingLeft(depth) : TIMELINE_ROW_LEFT_PX }}
         className={cn(
           'group relative my-0.5 flex w-full cursor-pointer items-center rounded-md pe-2.5 text-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-          isOneLineRow ? 'gap-1.5 py-1' : 'py-1.5',
+          'py-1.5', isOneLineRow && 'gap-1.5',
           isActive ? 'bg-interactive-selection/70 text-interactive-selection-foreground' : 'hover:bg-interactive-hover/60',
         )}
       >
@@ -105,7 +102,6 @@ function RunSidebarRowComponent({
           compact={isOneLineRow}
           project={timelineProject}
           projectLabel={projectLabel}
-          projectLine={hasProjectLine}
           title={run.title}
           titleClassName={titleClassName}
           branchLabel={null}
@@ -117,7 +113,7 @@ function RunSidebarRowComponent({
           )}
           statusDot={isOneLineRow ? null : activity}
           pinnedMarker={null}
-          timeSlot={formatSessionCompactDateLabel(run.lastActivity)}
+          timeSlot={null}
           directoryIndicator={null}
           prBadge={null}
           zombieIndicator={null}
@@ -140,7 +136,7 @@ function RunSidebarRowComponent({
       onClick={openOverview}
       style={{ paddingInlineStart: sessionTreeRowPaddingLeft(depth) }}
       className={cn(
-        'group relative my-0.5 flex cursor-pointer items-center gap-1.5 rounded-md py-[3px] pe-2.5',
+        'group relative my-0.5 flex cursor-pointer items-center gap-1.5 rounded-md py-1.5 pe-2.5',
         isActive ? 'bg-interactive-selection/70 text-interactive-selection-foreground' : 'hover:bg-interactive-hover/60',
       )}
     >

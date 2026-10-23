@@ -293,6 +293,14 @@
       "scope": "profile",
       "perSurface": true
     },
+    "sidebarGrouping": {
+      "scope": "profile",
+      "perSurface": true
+    },
+    "sidebarKeepWorkInPlace": {
+      "scope": "profile",
+      "perSurface": true
+    },
     "sidebarProjectSortOrder": {
       "scope": "profile"
     },
@@ -494,9 +502,6 @@
       "scope": "profile"
     },
     "mobileReturnKeySends": {
-      "scope": "profile"
-    },
-    "persistChatDraft": {
       "scope": "profile"
     },
     "largeTextPasteBehavior": {

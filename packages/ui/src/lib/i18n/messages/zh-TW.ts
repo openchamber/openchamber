@@ -17,6 +17,7 @@ import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
+import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
 import { sourceBoardI18n } from './source-board.i18n';
@@ -158,6 +159,7 @@ export const dict: Record<I18nKey, string> = {
   ...webSearchI18n['zh-TW'],
   ...sessionWarmingI18n['zh-TW'],
   ...heapSnapshotI18n['zh-TW'],
+  ...sidebarWorkI18n['zh-TW'],
   ...overviewI18n['zh-TW'],
   ...isolatedSpacesI18n['zh-TW'],
   ...sourceBoardI18n['zh-TW'],
@@ -648,9 +650,6 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.empty.noMatches.description': '請嘗試其他標題、分支、資料夾或路徑。',
   'sessions.sidebar.empty.noMatches.searchArchive': '在封存中搜尋',
   'sessions.sidebar.activity.chatsTitle': '聊天',
-  'sessions.sidebar.header.viewMode.label': '檢視',
-  'sessions.sidebar.header.viewMode.projects': '樹狀',
-  'sessions.sidebar.header.viewMode.timeline': '清單',
   'sessions.sidebar.activity.chatsEmpty': '尚無聊天。',
   'chat.chatInput.chooseProject': '選擇專案',
   'sessions.archivePage.allDirectories': '所有目錄',
@@ -880,10 +879,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.group.collapseAria': '摺疊 {label}',
   'sessions.sidebar.group.actions.deleteArchivedInGroupAria': '刪除 {label} 中已封存會話',
   'sessions.sidebar.group.actions.deleteArchivedSessions': '刪除已封存會話',
-  'sessions.sidebar.group.actions.deleteGroupAria': '刪除 {label}',
   'sessions.sidebar.group.actions.deleteWorktree': '刪除 worktree',
   'sessions.sidebar.group.actions.deleteWorktreeAndBranch': '刪除 worktree 和本機分支',
-  'sessions.sidebar.group.actions.deleteGroupAndBranchAria': '刪除 {label} 及其本機分支',
   'sessions.sidebar.group.actions.newDraftInGroupAria': '在 {label} 中新增草稿會話',
   'sessions.sidebar.grouping.projectRoot': '專案根目錄',
   'sessions.sidebar.grouping.projectRootWithBranch': '專案根目錄：{branch}',

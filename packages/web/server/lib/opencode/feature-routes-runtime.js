@@ -21,6 +21,7 @@ import { registerGitRoutes } from '../git/routes.js';
 import { registerDevServerRoutes } from '../dev-servers/routes.js';
 import { registerMagicPromptRoutes } from '../magic-prompts/routes.js';
 import { registerSessionFoldersRoutes } from '../session-folders/routes.js';
+import { registerSessionDraftRoutes } from '../session-drafts/routes.js';
 import { registerProjectContextRoutes } from '../project-context/routes.js';
 import { registerProjectDirectoryRoutes, registerProjectSetupRoutes } from '../projects/routes.js';
 import { registerAgentMemoryRoutes } from '../agent-memory/routes.js';
@@ -783,6 +784,22 @@ export const createFeatureRoutesRuntime = (dependencies) => {
         for (const client of clients) {
           try {
             writeSseEvent(client, { type: 'openchamber:session-folders-changed', properties: { updatedAt } });
+          } catch {
+            clients.delete(client);
+          }
+        }
+      },
+    });
+    registerSessionDraftRoutes(app, {
+      fsPromises,
+      path,
+      openchamberDataDir,
+      // Drafts are shared by every client of this server, like folders.
+      onChanged: (updatedAt) => {
+        const clients = getOpenChamberEventClients();
+        for (const client of clients) {
+          try {
+            writeSseEvent(client, { type: 'openchamber:session-drafts-changed', properties: { updatedAt } });
           } catch {
             clients.delete(client);
           }

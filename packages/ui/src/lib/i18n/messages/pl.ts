@@ -17,6 +17,7 @@ import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
+import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
 import { sourceBoardI18n } from './source-board.i18n';
@@ -158,6 +159,7 @@ export const dict: Record<I18nKey, string> = {
   ...webSearchI18n.pl,
   ...sessionWarmingI18n.pl,
   ...heapSnapshotI18n.pl,
+  ...sidebarWorkI18n.pl,
   ...overviewI18n.pl,
   ...isolatedSpacesI18n.pl,
   ...sourceBoardI18n.pl,
@@ -464,9 +466,6 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.empty.noMatches.description': 'Spróbuj innego tytułu, gałęzi, folderu lub ścieżki.',
   'sessions.sidebar.empty.noMatches.searchArchive': 'Szukaj w archiwum',
   'sessions.sidebar.activity.chatsTitle': 'Czaty',
-  'sessions.sidebar.header.viewMode.label': 'Widok',
-  'sessions.sidebar.header.viewMode.projects': 'Drzewo',
-  'sessions.sidebar.header.viewMode.timeline': 'Lista',
   'sessions.sidebar.activity.chatsEmpty': 'Nie ma jeszcze czatów.',
   'chat.chatInput.chooseProject': 'Wybierz projekt',
   'sessions.archivePage.allDirectories': 'Wszystkie katalogi',
@@ -860,10 +859,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.group.collapseAria': 'Zwiń {label}',
   'sessions.sidebar.group.actions.deleteArchivedInGroupAria': 'Usuń zarchiwizowane sesje w {label}',
   'sessions.sidebar.group.actions.deleteArchivedSessions': 'Usuń zarchiwizowane sesje',
-  'sessions.sidebar.group.actions.deleteGroupAria': 'Usuń {label}',
   'sessions.sidebar.group.actions.deleteWorktree': 'Usuń drzewo pracy',
   'sessions.sidebar.group.actions.deleteWorktreeAndBranch': 'Usuń drzewo pracy i gałąź lokalną',
-  'sessions.sidebar.group.actions.deleteGroupAndBranchAria': 'Usuń {label} i jego gałąź lokalną',
   'sessions.sidebar.group.actions.newDraftInGroupAria': 'Nowa sesja robocza w {label}',
   'sessions.sidebar.grouping.projectRoot': 'główny katalog projektu',
   'sessions.sidebar.grouping.projectRootWithBranch': 'główny katalog projektu: {branch}',

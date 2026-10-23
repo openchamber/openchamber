@@ -2302,8 +2302,6 @@ export const settingsDict = {
   'settings.openchamber.visual.field.queueMessagesByDefaultAria': 'Nachrichten standardmäßig in die Warteschlange stellen',
   'settings.openchamber.visual.field.queueMessagesByDefault': 'Nachrichten standardmäßig in die Warteschlange stellen',
   'settings.openchamber.visual.field.queueMessagesByDefaultTooltip': 'Wenn aktiviert, stellt Enter Nachrichten in die Warteschlange. Verwenden Sie {modifier}+Enter zum Senden.',
-  'settings.openchamber.visual.field.persistDraftMessagesAria': 'Entwurfsnachrichten speichern',
-  'settings.openchamber.visual.field.persistDraftMessages': 'Entwurfsnachrichten speichern',
   'settings.openchamber.visual.field.enableSpellcheckInTextInputsAria': 'Rechtschreibprüfung in Texteingaben aktivieren',
   'settings.openchamber.visual.field.enableSpellcheckInTextInputs': 'Rechtschreibprüfung in Texteingaben aktivieren',
   'settings.openchamber.visual.field.largeTextPaste': 'Großes Texteinfügen',

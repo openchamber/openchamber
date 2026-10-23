@@ -17,6 +17,7 @@ import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
+import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
 import { sourceBoardI18n } from './source-board.i18n';
@@ -168,6 +169,7 @@ export const dict: Record<I18nKey, string> = {
   ...webSearchI18n.es,
   ...sessionWarmingI18n.es,
   ...heapSnapshotI18n.es,
+  ...sidebarWorkI18n.es,
   ...overviewI18n.es,
   ...isolatedSpacesI18n.es,
   ...sourceBoardI18n.es,
@@ -632,9 +634,6 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.empty.noMatches.description": "Inténtalo con un título, rama, carpeta o ruta diferente.",
   "sessions.sidebar.empty.noMatches.searchArchive": "Buscar en el archivo",
   "sessions.sidebar.activity.chatsTitle": "Chats",
-  "sessions.sidebar.header.viewMode.label": "Vista",
-  "sessions.sidebar.header.viewMode.projects": "Árbol",
-  "sessions.sidebar.header.viewMode.timeline": "Lista",
   "sessions.sidebar.activity.chatsEmpty": "Aún no hay chats.",
   "chat.chatInput.chooseProject": "Elegir proyecto",
   "sessions.archivePage.allDirectories": "Todos los directorios",
@@ -864,10 +863,8 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.group.collapseAria": "Colapsar {label}",
   "sessions.sidebar.group.actions.deleteArchivedInGroupAria": "Eliminar sesiones archivadas en {label}",
   "sessions.sidebar.group.actions.deleteArchivedSessions": "Eliminar sesiones archivadas",
-  "sessions.sidebar.group.actions.deleteGroupAria": "Eliminar {label}",
   "sessions.sidebar.group.actions.deleteWorktree": "Eliminar worktree",
   "sessions.sidebar.group.actions.deleteWorktreeAndBranch": "Eliminar worktree y rama local",
-  "sessions.sidebar.group.actions.deleteGroupAndBranchAria": "Eliminar {label} y su rama local",
   "sessions.sidebar.group.actions.newDraftInGroupAria": "Nueva sesión de borrador en {label}",
   "sessions.sidebar.grouping.projectRoot": "raíz del proyecto",
   "sessions.sidebar.grouping.projectRootWithBranch": "raíz del proyecto: {branch}",

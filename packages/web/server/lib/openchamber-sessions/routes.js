@@ -1090,6 +1090,17 @@ export const createOpenChamberSessionService = (dependencies) => {
       directory: sessionDirectory,
       ...(title ? { title } : {}),
     });
+    // Written before the prompt goes out, so the session appears under the
+    // work it was started from at once. A failed write leaves it a root of
+    // its own, which is no reason to fail the session that now exists.
+    const originSessionID = asNonEmptyString(payload?.originSessionId);
+    if (originSessionID && originSessionID !== sessionID) {
+      try {
+        await writeMetadata(sessionID, { openchamber: { originSessionID } }, sessionDirectory);
+      } catch (error) {
+        console.warn('[OpenChamberSessions] failed to record the session origin:', error?.message ?? error);
+      }
+    }
 
     let dispatch = { model, agent, variant, promptDispatched: false, dispatchedAsCommand: false };
     if (prompt) {

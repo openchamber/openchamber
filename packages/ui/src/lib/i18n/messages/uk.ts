@@ -17,6 +17,7 @@ import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
+import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
 import { sourceBoardI18n } from './source-board.i18n';
@@ -168,6 +169,7 @@ export const dict: Record<I18nKey, string> = {
   ...webSearchI18n.uk,
   ...sessionWarmingI18n.uk,
   ...heapSnapshotI18n.uk,
+  ...sidebarWorkI18n.uk,
   ...overviewI18n.uk,
   ...isolatedSpacesI18n.uk,
   ...sourceBoardI18n.uk,
@@ -632,9 +634,6 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.empty.noMatches.description": "Спробуйте інший заголовок, гілку, папку або шлях.",
   "sessions.sidebar.empty.noMatches.searchArchive": "Пошукати в архіві",
   "sessions.sidebar.activity.chatsTitle": "Чати",
-  "sessions.sidebar.header.viewMode.label": "Вигляд",
-  "sessions.sidebar.header.viewMode.projects": "Деревом",
-  "sessions.sidebar.header.viewMode.timeline": "Списком",
   "sessions.sidebar.activity.chatsEmpty": "Чатів ще немає.",
   "chat.chatInput.chooseProject": "Вибрати проєкт",
   "sessions.archivePage.allDirectories": "Всі директорії",
@@ -864,10 +863,8 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.group.collapseAria": "Згорнути {label}",
   "sessions.sidebar.group.actions.deleteArchivedInGroupAria": "Видалити заархівовані сесії в {label}",
   "sessions.sidebar.group.actions.deleteArchivedSessions": "Видалити заархівовані сесії",
-  "sessions.sidebar.group.actions.deleteGroupAria": "Видалити {label}",
   "sessions.sidebar.group.actions.deleteWorktree": "Видалити worktree",
   "sessions.sidebar.group.actions.deleteWorktreeAndBranch": "Видалити worktree і локальну гілку",
-  "sessions.sidebar.group.actions.deleteGroupAndBranchAria": "Видалити {label} і його локальну гілку",
   "sessions.sidebar.group.actions.newDraftInGroupAria": "Нова чернетка сесії в {label}",
   "sessions.sidebar.grouping.projectRoot": "корінь проєкту",
   "sessions.sidebar.grouping.projectRootWithBranch": "корінь проєкту: {branch}",

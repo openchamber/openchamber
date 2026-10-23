@@ -16,6 +16,7 @@ import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
+import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
 import { sourceBoardI18n } from './source-board.i18n';
@@ -96,6 +97,7 @@ export const dict = {
   ...webSearchI18n.tr,
   ...sessionWarmingI18n.tr,
   ...heapSnapshotI18n.tr,
+  ...sidebarWorkI18n.tr,
   ...overviewI18n.tr,
   ...isolatedSpacesI18n.tr,
   ...sourceBoardI18n.tr,
@@ -545,9 +547,6 @@ export const dict = {
   'sessions.sidebar.empty.noMatches.description': 'Farklı bir başlık, branch, klasör veya yol deneyin.',
   'sessions.sidebar.empty.noMatches.searchArchive': 'Arşivde ara',
   'sessions.sidebar.activity.chatsTitle': 'Sohbetler',
-  'sessions.sidebar.header.viewMode.label': 'Görünüm',
-  'sessions.sidebar.header.viewMode.projects': 'Ağaç',
-  'sessions.sidebar.header.viewMode.timeline': 'Liste',
   'chat.chatInput.chooseProject': 'Proje seç',
   'sessions.archivePage.allDirectories': 'Tüm dizinler',
   'sessions.sidebar.header.projectDisplay.label': 'Projeleri göster',
@@ -772,10 +771,8 @@ export const dict = {
   'sessions.sidebar.group.collapseAria': '{label} öğesini daralt',
   'sessions.sidebar.group.actions.deleteArchivedInGroupAria': '{label} içindeki arşivlenmiş session\'ları sil',
   'sessions.sidebar.group.actions.deleteArchivedSessions': 'Arşivlenmiş session\'ları sil',
-  'sessions.sidebar.group.actions.deleteGroupAria': '{label} öğesini sil',
   'sessions.sidebar.group.actions.deleteWorktree': 'Worktree\'yi sil',
   'sessions.sidebar.group.actions.deleteWorktreeAndBranch': 'Worktree\'yi ve yerel branch\'i sil',
-  'sessions.sidebar.group.actions.deleteGroupAndBranchAria': '{label} öğesini ve yerel branch\'ini sil',
   'sessions.sidebar.group.actions.newDraftInGroupAria': '{label} içinde yeni taslak session',
   'sessions.sidebar.grouping.projectRoot': 'proje kökü',
   'sessions.sidebar.grouping.projectRootWithBranch': 'proje kökü: {branch}',

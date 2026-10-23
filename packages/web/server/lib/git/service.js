@@ -4905,15 +4905,21 @@ export async function getWorktrees(directory) {
       ['worktree', 'list', '--porcelain'],
       'Failed to list git worktrees'
     );
+    const titles = await readBranchTitles(listingDirectory);
     return parseWorktreePorcelain(result.stdout)
       .filter((entry) => entry.bare !== true)
-      .map((entry) => ({
-        head: entry.head || '',
-        name: path.basename(entry.worktree || ''),
-        branch: entry.branch || '',
-        path: entry.worktree,
-        prunable: entry.prunable === true,
-      }));
+      .map((entry) => {
+        const title = entry.branch ? titles.get(entry.branch) : undefined;
+        return {
+          head: entry.head || '',
+          name: path.basename(entry.worktree || ''),
+          branch: entry.branch || '',
+          path: entry.worktree,
+          prunable: entry.prunable === true,
+          // Absent until the task is named; JSON leaves an undefined key out.
+          title: title || undefined,
+        };
+      });
   } catch (error) {
     // Worktrees are an optional feature. When the caller passes a directory
     // that is not inside any git repository (for example, the managed
@@ -4926,6 +4932,137 @@ export async function getWorktrees(directory) {
     if (isNotGitRepositoryError(error)) return [];
     throw error;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Task titles
+//
+// A worktree's task title is its branch's description (`branch.<name>.description`,
+// what `git branch --edit-description` writes): it lives in the repository's own
+// config, so every client of this server reads the same title, `git branch -m`
+// carries it along, and deleting the branch takes it away. The title the agent
+// set last is kept beside it (`branch.<name>.openchamberAgentTitle`), which is how
+// a title the user gave, here or with git, is told apart and never overwritten.
+// ---------------------------------------------------------------------------
+
+const TASK_TITLE_MAX_LENGTH = 120;
+const BRANCH_TITLE_KEY_PATTERN = '^branch\\..*\\.description$';
+
+/** The first line of a description, trimmed and capped: what a sidebar row shows. */
+const toTaskTitle = (description) => {
+  const firstLine = String(description || '').split(/\r?\n/).find((line) => line.trim()) || '';
+  return firstLine.trim().slice(0, TASK_TITLE_MAX_LENGTH);
+};
+
+/**
+ * Every branch's title in one read. `-z` separates entries with NUL and the key
+ * from its value with a newline, so a description spanning lines parses whole.
+ * No description anywhere exits with status 1, which is an empty answer; any
+ * other failure leaves the listing without titles rather than failing it.
+ */
+const readBranchTitles = async (repositoryDirectory) => {
+  const titles = new Map();
+  const result = await runGitCommand(repositoryDirectory, ['config', '-z', '--get-regexp', BRANCH_TITLE_KEY_PATTERN]);
+  if (!result.success) return titles;
+  for (const record of String(result.stdout || '').split('\0')) {
+    const newline = record.indexOf('\n');
+    if (newline <= 0) continue;
+    // The key matched BRANCH_TITLE_KEY_PATTERN: `branch.<name>.description`.
+    const branch = record.slice('branch.'.length, newline - '.description'.length);
+    const title = toTaskTitle(record.slice(newline + 1));
+    if (branch && title) titles.set(branch, title);
+  }
+  return titles;
+};
+
+const readGitConfigValue = async (directory, key) => {
+  const result = await runGitCommand(directory, ['config', '--get', key]);
+  return result.success ? String(result.stdout || '').replace(/\r?\n$/, '') : '';
+};
+
+const writeGitConfigValue = async (directory, key, value) => {
+  if (value) {
+    await runGitCommandOrThrow(directory, ['config', key, value], `Failed to write ${key}`);
+    return;
+  }
+  const result = await runGitCommand(directory, ['config', '--unset', key]);
+  // Status 5: the key was not set, which is what unsetting asks for.
+  if (!result.success && result.exitCode !== 5) throw new Error(`Failed to clear ${key}`);
+};
+
+/**
+ * Set the task title of the worktree at `directory`. `by: 'user'` always
+ * writes (an empty title clears it) and forgets the agent's copy, so the title
+ * is the user's from then on. `by: 'agent'` writes only while the branch has no
+ * description or still has the one the agent set; otherwise the current title
+ * is returned with `applied: false`. Clients re-list the worktrees on the
+ * topology event published after a write.
+ */
+export async function setWorktreeTaskTitle(directory, input = {}) {
+  const directoryPath = normalizeDirectoryPath(directory);
+  if (!directoryPath || !fs.existsSync(directoryPath)) {
+    const error = new Error('The worktree folder does not exist');
+    error.status = 404;
+    throw error;
+  }
+  const by = input?.by === 'agent' ? 'agent' : 'user';
+  const title = toTaskTitle(input?.title);
+  if (by === 'agent' && !title) {
+    const error = new Error('title is required');
+    error.status = 400;
+    throw error;
+  }
+  const head = await runGitCommandOrThrow(directoryPath, ['symbolic-ref', '--quiet', '--short', 'HEAD'], 'The worktree is not on a branch')
+    .catch((cause) => {
+      const error = new Error('The worktree is not on a branch, so it has no task title');
+      error.status = 409;
+      error.cause = cause;
+      throw error;
+    });
+  const branch = String(head.stdout || '').trim();
+  return applyBranchTaskTitle(directoryPath, branch, by, title);
+}
+
+/**
+ * Writes `title` as `branch`'s task title by the rules of
+ * `setWorktreeTaskTitle`. Branch config is shared by every checkout of the
+ * repository, so `directory` may be any of them, and the branch need not be
+ * checked out yet.
+ */
+const applyBranchTaskTitle = async (directory, branch, by, title) => {
+  const descriptionKey = `branch.${branch}.description`;
+  const agentTitleKey = `branch.${branch}.openchamberAgentTitle`;
+  const current = toTaskTitle(await readGitConfigValue(directory, descriptionKey));
+  if (by === 'agent') {
+    const agentTitle = toTaskTitle(await readGitConfigValue(directory, agentTitleKey));
+    if (current && current !== agentTitle) return { applied: false, title: current, branch, by: 'user' };
+    if (current === title) return { applied: true, title, branch, by: 'agent' };
+    await writeGitConfigValue(directory, descriptionKey, title);
+    await writeGitConfigValue(directory, agentTitleKey, title);
+  } else {
+    if (current === title && !(await readGitConfigValue(directory, agentTitleKey))) {
+      return { applied: true, title, branch, by: 'user' };
+    }
+    await writeGitConfigValue(directory, descriptionKey, title);
+    await writeGitConfigValue(directory, agentTitleKey, '');
+  }
+  void publishWorktreeTopologyChange(directory);
+  return { applied: true, title, branch, by };
+};
+
+/**
+ * A new worktree's first task title, from the pull request or issue it was
+ * made for. It is written as the agent's: a stand-in the agent replaces with a
+ * short name once it knows the task, and the user's own name still wins.
+ * Best effort: a failure leaves the worktree without a title.
+ */
+export async function seedBranchTaskTitle(directory, branch, rawTitle) {
+  const title = toTaskTitle(rawTitle);
+  const branchName = String(branch || '').trim();
+  if (!title || !branchName) return;
+  await applyBranchTaskTitle(normalizeDirectoryPath(directory), branchName, 'agent', title).catch((error) => {
+    console.warn('Failed to seed the worktree task title:', error instanceof Error ? error.message : String(error));
+  });
 }
 
 // ---------------------------------------------------------------------------

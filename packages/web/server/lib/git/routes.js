@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { isPlainObject, isString } from '../shared/guards.js';
 import { OpenCode } from '@opencode/client';
 import { createGitRedactor, redactGitText } from './redaction.js';
@@ -67,6 +68,8 @@ const createWorktreeInstanceDisposer = ({ buildOpenCodeUrl, getOpenCodeAuthHeade
 // Actions the user starts here may run a project's environment command, so
 // hooks find the project's tools; reads the UI repeats on its own may not
 // (lib/environment/refresh-scope.js).
+const worktreeTitleBodySchema = z.object({ title: z.string() });
+
 const userAction = (handler) => (req, res, next) => runAsUserAction(() => handler(req, res, next));
 
 export function registerGitRoutes(app, {
@@ -1659,6 +1662,26 @@ export function registerGitRoutes(app, {
       res.status(500).json({ error: error.message || 'Failed to get worktrees' });
     }
   });
+
+  // The user renaming a worktree's task: always written, and from then on the
+  // agent keeps it (see `setWorktreeTaskTitle`). An empty title clears it.
+  app.put('/api/git/worktrees/title', userAction(async (req, res) => {
+    const { setWorktreeTaskTitle } = await getGitLibraries();
+    try {
+      const directory = resolveDirectoryQuery(req.query.directory);
+      if (!directory) {
+        return res.status(400).json({ error: 'directory parameter is required' });
+      }
+      const body = worktreeTitleBodySchema.safeParse(req.body);
+      if (!body.success) {
+        return res.status(400).json({ error: 'title must be a string' });
+      }
+      res.json(await setWorktreeTaskTitle(directory, { title: body.data.title, by: 'user' }));
+    } catch (error) {
+      console.error('Failed to set the worktree task title:', error);
+      res.status(Number.isInteger(error?.status) ? error.status : 500).json({ error: error.message || 'Failed to set the task title' });
+    }
+  }));
 
   app.post('/api/git/worktrees/validate', async (req, res) => {
     const { validateWorktreeCreate } = await getGitLibraries();

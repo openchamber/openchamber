@@ -2376,8 +2376,6 @@ export const settingsDict = {
   'settings.openchamber.visual.field.queueMessagesByDefaultAria': 'وضع الرسائل في قائمة الانتظار افتراضيًا',
   'settings.openchamber.visual.field.queueMessagesByDefault': 'وضع الرسائل في قائمة الانتظار افتراضيًا',
   'settings.openchamber.visual.field.queueMessagesByDefaultTooltip': 'عند التفعيل، يضع Enter الرسائل في قائمة الانتظار. استخدم {modifier}+Enter للإرسال.',
-  'settings.openchamber.visual.field.persistDraftMessagesAria': 'الاحتفاظ بمسودات الرسائل',
-  'settings.openchamber.visual.field.persistDraftMessages': 'الاحتفاظ بمسودات الرسائل',
   'settings.openchamber.visual.field.enableSpellcheckInTextInputsAria': 'تفعيل التدقيق الإملائي في حقول النص',
   'settings.openchamber.visual.field.enableSpellcheckInTextInputs': 'تفعيل التدقيق الإملائي في حقول النص',
   'settings.openchamber.visual.field.largeTextPaste': 'لصق نص كبير',

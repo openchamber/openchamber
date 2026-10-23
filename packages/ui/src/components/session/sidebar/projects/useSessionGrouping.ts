@@ -17,6 +17,7 @@ import { resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
 import { getWorktreeFirstSeenAt } from './worktreeFirstSeen';
 import { buildProjectWorktreeIndex, findPrefixWorktreeEntry } from '../worktreeIndex';
 import type { SpaceMark } from '@/lib/spaces/spaces-store';
+import { resolveSessionNestingParentId } from '@/lib/sessionWorkLineage';
 
 type Args = {
   homeDirectory: string | null;
@@ -125,9 +126,15 @@ export const useSessionGrouping = (args: Args) => {
       const sortedProjectSessions = dedupeSessionsById(projectSessions);
 
       const sessionMap = new Map(sortedProjectSessions.map((session) => [session.id, session]));
+      // Subagents nest under their run, and a session that grew out of
+      // another one in the same folder under that one (`lib/sessionWorkLineage`).
+      const nestingParentById = new Map(sortedProjectSessions.map((session) => [
+        session.id,
+        resolveSessionNestingParentId(session, (id) => sessionMap.get(id)),
+      ]));
       const childrenMap = new Map<string, Session[]>();
       sortedProjectSessions.forEach((session) => {
-        const parentID = (session as Session & { parentID?: string | null }).parentID;
+        const parentID = nestingParentById.get(session.id);
         if (!parentID) return;
         const parentSession = sessionMap.get(parentID);
         // Only active subsessions nest; the archive shows top-level sessions.
@@ -186,7 +193,7 @@ export const useSessionGrouping = (args: Args) => {
       };
 
       const rootCandidates = sortedProjectSessions.filter((session) => {
-        const parentID = session.parentID;
+        const parentID = nestingParentById.get(session.id);
         if (!parentID) return true;
         return !sessionMap.has(parentID) && !isHiddenSubsession(session);
       });

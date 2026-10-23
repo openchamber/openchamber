@@ -2297,8 +2297,6 @@ export const settingsDict = {
   'settings.openchamber.visual.field.queueMessagesByDefaultAria': 'Mesajları varsayılan olarak kuyruğa ekle',
   'settings.openchamber.visual.field.queueMessagesByDefault': 'Mesajları varsayılan olarak kuyruğa ekle',
   'settings.openchamber.visual.field.queueMessagesByDefaultTooltip': 'Etkinleştirildiğinde Enter mesajları kuyruğa ekler. Göndermek için {modifier}+Enter kullanın.',
-  'settings.openchamber.visual.field.persistDraftMessagesAria': 'Taslak mesajları kalıcı olarak sakla',
-  'settings.openchamber.visual.field.persistDraftMessages': 'Taslak mesajları kalıcı olarak sakla',
   'settings.openchamber.visual.field.largeTextPaste': 'Büyük metin yapıştırma',
   'settings.openchamber.visual.field.largeTextPasteHint': 'Yaklaşık 2.000 karakterden veya 25 satırdan fazlasını yapıştırırken metnin dosya olarak eklenmesini mi, satır içi yapıştırılmasını mı yoksa her seferinde sorulmasını mı istediğinizi seçin. Çift yapıştırma modunda aynı metni bir saniye içinde yeniden yapıştırmak onu dosyaya dönüştürür.',
   'settings.openchamber.visual.field.largeTextPasteAria': 'Büyük metin yapıştırma davranışı',

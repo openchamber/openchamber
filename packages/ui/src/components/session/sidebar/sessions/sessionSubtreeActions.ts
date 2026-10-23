@@ -51,7 +51,7 @@ export const collectSessionSubtreeIds = (
 /**
  * A session's active subtree from the global cache, built the way the project
  * tree builds it: it stops at an archived session and everything below it.
- * In work, Pinned and the List view render a root with no children, so an
+ * Detailed zone rows render a root with no children, so an
  * action that needs the subagents of such a row resolves them here when the
  * user acts.
  */

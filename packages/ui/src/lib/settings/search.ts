@@ -524,12 +524,6 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
-    id: 'chat.persist-drafts',
-    page: 'chat',
-    titleKey: 'settings.openchamber.visual.field.persistDraftMessages',
-    keywords: ['draft', 'message'],
-  },
-  {
     id: 'chat.composer',
     page: 'chat',
     titleKey: 'settings.layout.chat.section.sending',

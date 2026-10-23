@@ -1,6 +1,4 @@
 import { DirectoryActionIndicator } from '../sessions/DirectoryActionIndicator';
-import { useTrackedIssueStates, useTrackedWorkItemStates } from '@/stores/useTrackedItemsStore';
-import { repositoryThread, workItem } from '@/lib/trackedItems/fromLinks';
 import React from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import type { Session } from '@/lib/opencode/model';
@@ -9,7 +7,6 @@ import type { Session } from '@/lib/opencode/model';
 // when we cross this row count so the DOM stays bounded.
 const EMPTY_FOLDERS: readonly never[] = [];
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { getPrStatusLabel } from '../prStatusLabel';
 import { Button } from '@/components/ui/button';
 import { Icon } from "@/components/icon/Icon";
 import { Spinner } from "@/components/ui/spinner";
@@ -36,13 +33,11 @@ import {
   selectFolderRootNodes,
 } from '../sessions/sessionNodeItemUtils';
 import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
-import { useFreshestSourceControlVisualSummaryForBranch } from '@/stores/useGitHubPrStatusStore';
 
 type FolderScope = { scopeKey: string; directory: string | null };
-import { getLinkedSidebarIssues, type LinkedSidebarIssue } from '@/lib/linkedIssues';
-import { buildSessionIssueItems } from '../sessions/sessionPrSummaries';
 import { useOpenTrackerItem } from '@/components/sourceBoard/openTrackerItem';
-import { SIDEBAR_REF_TOOLTIP_CLOSE_DELAY_MS, SidebarRefLinks, type SidebarRefLink } from '../sessions/SidebarRefLinks';
+import { SIDEBAR_REF_TOOLTIP_CLOSE_DELAY_MS, SidebarRefLinks } from '../sessions/SidebarRefLinks';
+import { useGroupRefs } from './useGroupRefs';
 import { useI18n } from '@/lib/i18n';
 import { useChildStoreManager } from '@/sync/sync-context';
 import { canRequestNativeDirectoryAccess, requestDirectoryAccess } from '@/lib/desktop';
@@ -55,11 +50,6 @@ import { SpaceActionsMenu } from '@/components/session/spaces/SpaceActions';
 import { SpaceGroupStatus } from '@/components/session/spaces/SpaceGroupStatus';
 import { spaceLineSaysState } from '@/lib/spaces/space-repair';
 import { useSpaceTakesNoNewSession, useSpacesStore } from '@/lib/spaces/spaces-store';
-import { useShiftKeyHeld } from '@/hooks/useShiftKeyHeld';
-import type { WorktreeMetadata } from '@/types/worktree';
-import { useWorktreeRemoving } from '@/lib/worktrees/worktreeRemovalState';
-import { formatChangeRequestReference } from '@/lib/source-control/providers/terminology';
-import { useRepositoryUrlMatcher } from '@/lib/source-control/repositoryUrlMatcher';
 import { refTintStyle } from '@/lib/source-control/prVisualState';
 
 type DeleteFolderConfirm = {
@@ -265,56 +255,6 @@ const areGroupPropsEqual = (prev: SessionGroupSectionProps, next: SessionGroupSe
   );
 };
 
-type WorktreeDeleteActionProps = {
-  label: string;
-  sessions: Session[];
-  worktree: WorktreeMetadata;
-};
-
-// Extracted so only this button re-renders when Shift is pressed/released,
-// instead of every mounted group section.
-const WorktreeDeleteAction = React.memo(function WorktreeDeleteAction({
-  label,
-  sessions,
-  worktree,
-}: WorktreeDeleteActionProps): React.ReactNode {
-  const { t } = useI18n();
-  const shiftHeld = useShiftKeyHeld();
-
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <button
-          type="button"
-          onClick={(event) => {
-            event.stopPropagation();
-            sessionEvents.requestDelete({
-              sessions,
-              mode: 'worktree',
-              worktree,
-              skipDialogIfSafe: shiftHeld || event.shiftKey,
-            });
-          }}
-          className={cn(
-            'inline-flex h-6 w-6 items-center justify-center rounded-md hover:text-destructive hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-            shiftHeld ? 'text-destructive' : 'text-muted-foreground',
-          )}
-          aria-label={shiftHeld
-            ? t('sessions.sidebar.group.actions.deleteGroupAndBranchAria', { label })
-            : t('sessions.sidebar.group.actions.deleteGroupAria', { label })}
-        >
-          <Icon name="delete-bin" className="h-3.5 w-3.5" />
-        </button>
-      </TooltipTrigger>
-      <TooltipContent side="bottom" sideOffset={4}>
-        <p>{shiftHeld ? t('sessions.sidebar.group.actions.deleteWorktreeAndBranch') : t('sessions.sidebar.group.actions.deleteWorktree')}</p>
-      </TooltipContent>
-    </Tooltip>
-  );
-});
-
-const EMPTY_GROUP_ISSUES: readonly LinkedSidebarIssue[] = [];
-
 function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNode {
   const { t } = useI18n();
   const openTrackerItem = useOpenTrackerItem();
@@ -385,23 +325,6 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
 
   const searchData = hasSessionSearchQuery ? groupSearchDataByGroup.get(group) : null;
   const isCollapsed = hasSessionSearchQuery ? false : collapsedGroups.has(groupKey);
-  const worktreeRemoving = useWorktreeRemoving(!group.isMain && group.worktree ? group.worktree.path : null);
-  // PR state for the worktree sub-header (grouped display mode).
-  const groupPrDirectory = group.isMain || group.isArchivedBucket || hideGroupLabel
-    ? null
-    : normalizePath(group.directory ?? null);
-  const groupPrBranch = group.isMain || group.isArchivedBucket || hideGroupLabel
-    ? null
-    : group.branch?.trim() || null;
-  const groupPrSummary = useFreshestSourceControlVisualSummaryForBranch(groupPrDirectory, groupPrBranch);
-  const groupPrColor = groupPrSummary ? `var(--pr-${groupPrSummary.visualState})` : undefined;
-  const urlMatcher = useRepositoryUrlMatcher();
-  const groupPrDescriptor = urlMatcher.descriptorOf(groupPrSummary?.provider ?? '');
-  const groupPrStatusLabel = getPrStatusLabel(groupPrSummary, groupPrDescriptor.terminology.changeRequest, t);
-  const groupPrReference = groupPrSummary ? formatChangeRequestReference(groupPrDescriptor, groupPrSummary.number) : '';
-  const groupPrLabel = groupPrSummary
-    ? (groupPrStatusLabel ? `${groupPrReference} · ${groupPrStatusLabel}` : groupPrReference)
-    : undefined;
   const childStores = useChildStoreManager();
   const bootstrapDirectories = React.useMemo(() => {
     const directories = group.folderScopes?.map((scope) => normalizePath(scope.directory))
@@ -660,45 +583,25 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
   }, []);
 
   // Flat list of all sessions in this group (including nested children).
-  // Used by both the "delete all archived" button and the "delete worktree"
-  // button. Memoize so the recursive flatten only runs when the underlying
-  // source group nodes change, not on every render.
+  // Used by the "delete all archived" button and the sub-header's issues.
+  // Memoize so the recursive flatten only runs when the underlying source
+  // group nodes change, not on every render.
   const allGroupSessions = React.useMemo(
     () => collectGroupSessions(sourceGroupNodes),
     [collectGroupSessions, sourceGroupNodes],
   );
 
-  // A worktree without a branch PR shows the issues its sessions work on: a
-  // worktree started from an issue links it to its session, not to itself.
-  // A branch PR, once there, is what the header follows.
-  const groupIssues = React.useMemo(() => {
-    if (groupPrSummary || group.isMain || group.isArchivedBucket || hideGroupLabel) return EMPTY_GROUP_ISSUES;
-    const byKey = new Map<string, LinkedSidebarIssue>();
-    for (const session of allGroupSessions) {
-      for (const issue of getLinkedSidebarIssues(session, urlMatcher)) {
-        if (!byKey.has(issue.key)) byKey.set(issue.key, issue);
-      }
-    }
-    return byKey.size > 0 ? [...byKey.values()] : EMPTY_GROUP_ISSUES;
-  }, [allGroupSessions, group.isArchivedBucket, group.isMain, groupPrSummary, hideGroupLabel, urlMatcher]);
-  const groupRepositoryIssueItems = React.useMemo(
-    () => groupIssues.flatMap((issue) => (issue.source === 'repository' ? [repositoryThread('issue', issue.ref)] : [])),
-    [groupIssues],
-  );
-  const groupIssueStates = useTrackedIssueStates(groupRepositoryIssueItems);
-  const groupWorkItems = React.useMemo(
-    () => groupIssues.flatMap((issue) => (issue.source === 'tracker' ? [workItem(issue.provider, issue.identifier)] : [])),
-    [groupIssues],
-  );
-  const groupWorkItemStates = useTrackedWorkItemStates(groupWorkItems);
-  const groupIssueItems = React.useMemo(
-    () => buildSessionIssueItems(groupIssues, groupIssueStates, groupWorkItemStates).map((item) => ({
-      ...item,
-      text: item.statusKey ? `${item.label} · ${t(item.statusKey)}` : item.statusText ? `${item.label} · ${item.statusText}` : item.label,
-    })),
-    [groupIssueStates, groupIssues, groupWorkItemStates, t],
-  );
-  const primaryGroupIssue = groupIssueItems[0] ?? null;
+  // PR state, or the issues its sessions work on, for the group's sub-header.
+  const {
+    prSummary: groupPrSummary,
+    prColor: groupPrColor,
+    prStatusLabel: groupPrStatusLabel,
+    prReference: groupPrReference,
+    prLabel: groupPrLabel,
+    prLinks: groupPrLinks,
+    issueItems: groupIssueItems,
+    primaryIssue: primaryGroupIssue,
+  } = useGroupRefs(group, allGroupSessions, !hideGroupLabel);
 
   // Precompute the per-folder "delete all sessions in folder" list once
   // per render. The previous design ran a recursive `collectFolderSessions`
@@ -890,22 +793,6 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
     rootFolders.forEach((entry) => visit(entry, ''));
     return out;
   };
-  // Reserve room for the hover-revealed header actions (new draft + delete
-  // worktree) so they never overlap the label / PR badge.
-  // The delete action leaves the header while git removes the worktree.
-  const hasWorktreeDeleteAction = Boolean(!group.isMain && group.worktree && !worktreeRemoving);
-  // git still registers this worktree but its directory is gone. The group
-  // stays so its sessions remain reachable (opening one relocates it); the
-  // icon tells the user why the folder is not there.
-  const worktreeMissingIndicator = group.worktree?.worktreeStatus === 'missing' ? (
-    <span
-      className="inline-flex flex-shrink-0 items-center text-status-warning"
-      title={t('sessions.sidebar.group.worktreeMissing')}
-      aria-label={t('sessions.sidebar.group.worktreeMissing')}
-    >
-      <Icon name="alert" className="h-3 w-3" />
-    </span>
-  ) : null;
   // The space did not answer the host's last read in full: its last known sessions stand in, and
   // the user should know they may be old. Only while the line under the group says nothing, so a
   // stopped or unreachable space does not get a second warning that reads like a fault.
@@ -919,19 +806,14 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
     </span>
   ) : null;
   // A space's group carries the grant dialog's key and its actions menu beside its new-draft button.
-  const hasSecondHeaderAction = hasWorktreeDeleteAction || Boolean(group.space);
-  const hasThirdHeaderAction = Boolean(group.space);
+  const hasSpaceActions = Boolean(group.space);
   // Permanent actions take room; hover-revealed ones cross-fade over the
   // header's right end (`oc-actions-mask`), so nothing moves. The reserve is
   // how far they reach in past the 8px right padding: one 24px button 2px
   // from the edge, the next ones 26px apart.
   const groupHeaderRightPadding = alwaysShowActions
-    ? (hasThirdHeaderAction ? 'pe-20' : hasSecondHeaderAction ? 'pe-14' : 'pe-7')
-    : cn('pe-2', hasThirdHeaderAction
-        ? '[--oc-actions-reserve:4.25rem]'
-        : hasSecondHeaderAction
-        ? '[--oc-actions-reserve:2.75rem]'
-        : '[--oc-actions-reserve:1.125rem]');
+    ? (hasSpaceActions ? 'pe-20' : 'pe-7')
+    : cn('pe-2', hasSpaceActions ? '[--oc-actions-reserve:4.25rem]' : '[--oc-actions-reserve:1.125rem]');
   const headerActionsMaskClass = alwaysShowActions ? undefined : 'group-hover/gh:oc-actions-mask group-has-[:focus-visible]/gh:oc-actions-mask';
   const headerCoveredFadeClass = alwaysShowActions ? undefined : 'transition-opacity group-hover/gh:opacity-0 group-has-[:focus-visible]/gh:opacity-0';
   // An empty group keeps the chevron's place, so its label stays in line.
@@ -955,15 +837,6 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
       </>}
     </span>
   );
-  const groupPrLinks: SidebarRefLink[] = groupPrSummary && groupPrStatusLabel ? [{
-    key: `pr:${groupPrSummary.number}`,
-    icon: 'git-pull-request',
-    text: `${groupPrReference} · ${groupPrStatusLabel}`,
-    title: groupPrSummary.title,
-    color: groupPrColor,
-    url: groupPrSummary.url,
-  }] : [];
-
   const bootstrapFailureNotice = failedBootstrapDirectory ? (
     <span className="inline-flex flex-wrap items-center gap-1.5">
       {bootstrapFailure === 'os-permission'
@@ -1120,7 +993,7 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
   }
 
   return (
-    <><div className={cn('oc-group', worktreeRemoving && 'opacity-60')} aria-busy={worktreeRemoving || undefined}>
+    <><div className="oc-group">
       {/* No hover fill: only session rows take one, so a pointer moving
           down the sidebar tells sessions from their containers. */}
       <div className={cn('oc-ref-tint-scope group/gh relative flex items-start justify-between gap-1 py-1 min-w-0 rounded-md', 'cursor-pointer')}>
@@ -1161,31 +1034,26 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
                 <span className="inline-flex min-w-0 max-w-full items-center gap-0.5">
                   {headerSlot(<Icon name="archive" className="h-3 w-3 shrink-0 text-muted-foreground" />)}
                   <span className="min-w-0 flex-1 truncate">{renderHighlightedText(group.label, normalizedSessionSearchQuery)}</span>
-                  {worktreeMissingIndicator}
                   {groupActivityIndicator}
                 </span>
-              ) : (!group.isMain || group.worktree) ? (
-                // Worktree header: a file tree folder row with a PR-tinted
-                // branch icon in the slot and the PR badge on the right. Its
-                // sessions sit one level in, under the label.
+              ) : !group.isMain ? (
+                // Space header (a worktree's header is its work row): a file
+                // tree folder row with a PR-tinted icon in the slot and the PR
+                // badge on the right. Its sessions sit one level in, under the
+                // label.
                 <span className="flex w-full min-w-0 items-center gap-0.5">
-                  {headerSlot(worktreeRemoving ? (
-                    <span className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center text-muted-foreground" title={t('sessions.sidebar.group.worktreeRemoving')} role="status" aria-label={t('sessions.sidebar.group.worktreeRemoving')}>
-                      <Spinner className="h-3.5 w-3.5" />
-                    </span>
-                  ) : (
+                  {headerSlot(
                     <Icon name={group.space ? 'box-3' : 'git-branch'}
                       className={cn('h-3 w-3 shrink-0', groupPrColor ? 'oc-ref-tint' : 'text-muted-foreground')}
                       style={groupPrColor ? refTintStyle(groupPrColor) : undefined}
                       aria-label={group.space ? t('sessions.sidebar.group.space') : undefined}
-                    />
-                  ))}
+                    />,
+                  )}
                   {/* Medium weight a step down from full strength: above the
                       muted session titles at rest, below the project header. */}
                   <span className="min-w-0 truncate typography-ui-label font-medium text-foreground/85">
                     {renderHighlightedText(group.label, normalizedSessionSearchQuery)}
                   </span>
-                  {worktreeMissingIndicator}
                   {spaceStaleIndicator}
                   {groupActivityIndicator}
                   {groupPrSummary ? (
@@ -1293,11 +1161,6 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
               </TooltipTrigger>
               <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.group.actions.deleteArchivedSessions')}</p></TooltipContent>
             </Tooltip>
-          </div>
-        ) : null}
-        {group.directory && !group.isMain && group.worktree && !worktreeRemoving ? (
-          <div className={cn('absolute inset-e-7 top-1/2 -translate-y-1/2 z-10 transition-opacity', alwaysShowActions ? 'opacity-100' : 'opacity-0 group-hover/gh:opacity-100 group-has-[:focus-visible]/gh:opacity-100')}>
-            <WorktreeDeleteAction label={group.label} sessions={allGroupSessions} worktree={group.worktree} />
           </div>
         ) : null}
         {group.space ? (

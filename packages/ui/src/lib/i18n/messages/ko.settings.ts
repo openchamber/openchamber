@@ -2369,8 +2369,6 @@ export const settingsDict = {
   'settings.openchamber.visual.field.queueMessagesByDefaultAria': '기본으로 메시지 대기열 사용',
   'settings.openchamber.visual.field.queueMessagesByDefault': '기본으로 메시지 대기열 사용',
   'settings.openchamber.visual.field.queueMessagesByDefaultTooltip': '활성화하면 Enter가 메시지를 대기열에 넣습니다. 보내려면 {modifier}+Enter를 사용하세요.',
-  'settings.openchamber.visual.field.persistDraftMessagesAria': '초안 메시지 유지',
-  'settings.openchamber.visual.field.persistDraftMessages': '초안 메시지 유지',
   'settings.openchamber.visual.field.enableSpellcheckInTextInputsAria': '텍스트 입력에서 맞춤법 검사 활성화',
   'settings.openchamber.visual.field.enableSpellcheckInTextInputs': '텍스트 입력에서 맞춤법 검사 활성화',
   'settings.openchamber.visual.field.largeTextPaste': '긴 텍스트 붙여넣기',

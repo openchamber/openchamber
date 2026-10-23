@@ -2369,8 +2369,6 @@ export const settingsDict = {
   'settings.openchamber.visual.field.queueMessagesByDefaultAria': '默认排队消息',
   'settings.openchamber.visual.field.queueMessagesByDefault': '默认排队消息',
   'settings.openchamber.visual.field.queueMessagesByDefaultTooltip': '启用后，按 Enter 会将消息加入队列。使用 {modifier}+Enter 直接发送。',
-  'settings.openchamber.visual.field.persistDraftMessagesAria': '保留草稿消息',
-  'settings.openchamber.visual.field.persistDraftMessages': '保留草稿消息',
   'settings.openchamber.visual.field.enableSpellcheckInTextInputsAria': '在文本输入框启用拼写检查',
   'settings.openchamber.visual.field.enableSpellcheckInTextInputs': '在文本输入框启用拼写检查',
   'settings.openchamber.visual.field.largeTextPaste': '粘贴大段文本',

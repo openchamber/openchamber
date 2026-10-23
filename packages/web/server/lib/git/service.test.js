@@ -38,6 +38,8 @@ import {
   stashApply,
   listStashes,
   getWorktrees,
+  setWorktreeTaskTitle,
+  seedBranchTaskTitle,
   isGitRepository,
   isPatchEquivalentOfHead,
   observeWorktreeTopology,
@@ -6262,5 +6264,76 @@ describe('git environment inside an AppImage', () => {
         else process.env[key] = value;
       }
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Worktree task titles
+// ---------------------------------------------------------------------------
+
+describe('worktree task titles', () => {
+  if (!canRunGit()) {
+    it.skip('git binary not available', () => {});
+    return;
+  }
+
+  const createLinkedWorktree = () => {
+    const repo = createTempDir();
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    runGit(repo, ['commit', '--allow-empty', '-m', 'init']);
+    const linked = path.join(createTempDir(), 'linked');
+    runGit(repo, ['worktree', 'add', '-b', 'feature/task', linked]);
+    return { repo, linked };
+  };
+
+  it('lists the first line of the branch description as the title', async () => {
+    const { repo, linked } = createLinkedWorktree();
+    runGit(repo, ['config', 'branch.feature/task.description', 'Login timeout fix\nsecond line']);
+
+    const entries = await getWorktrees(repo);
+    const entry = entries.find((worktree) => fs.realpathSync(worktree.path) === fs.realpathSync(linked));
+    expect(entry?.title).toBe('Login timeout fix');
+    expect(entries.find((worktree) => worktree !== entry)?.title).toBeUndefined();
+  });
+
+  it('lets the agent name the task until the user does, and never after', async () => {
+    const { repo, linked } = createLinkedWorktree();
+
+    expect(await setWorktreeTaskTitle(linked, { title: 'First name', by: 'agent' })).toMatchObject({ applied: true, title: 'First name' });
+    expect(await setWorktreeTaskTitle(linked, { title: 'Better name', by: 'agent' })).toMatchObject({ applied: true, title: 'Better name' });
+
+    expect(await setWorktreeTaskTitle(linked, { title: 'Mine', by: 'user' })).toMatchObject({ applied: true, title: 'Mine', by: 'user' });
+    expect(await setWorktreeTaskTitle(linked, { title: 'Agent again', by: 'agent' })).toMatchObject({ applied: false, title: 'Mine' });
+
+    // A description written with git itself is the user's too.
+    runGit(repo, ['config', 'branch.feature/task.description', 'From git']);
+    expect(await setWorktreeTaskTitle(linked, { title: 'Agent', by: 'agent' })).toMatchObject({ applied: false, title: 'From git' });
+
+    // The user clearing it gives the naming back to the agent.
+    expect(await setWorktreeTaskTitle(linked, { title: '', by: 'user' })).toMatchObject({ applied: true, title: '' });
+    expect(await setWorktreeTaskTitle(linked, { title: 'Agent', by: 'agent' })).toMatchObject({ applied: true, title: 'Agent' });
+  });
+
+  it('seeds a new worktree with its pull request or issue title, which the agent may replace and the user keeps', async () => {
+    const { repo, linked } = createLinkedWorktree();
+    // Written through the project's own checkout, before anyone opens the worktree.
+    await seedBranchTaskTitle(repo, 'feature/task', 'Fix session timeout when reconnecting after sleep');
+    const entry = (await getWorktrees(repo)).find((worktree) => fs.realpathSync(worktree.path) === fs.realpathSync(linked));
+    expect(entry?.title).toBe('Fix session timeout when reconnecting after sleep');
+
+    expect(await setWorktreeTaskTitle(linked, { title: 'Sleep reconnect timeout', by: 'agent' })).toMatchObject({ applied: true });
+
+    await setWorktreeTaskTitle(linked, { title: 'Mine', by: 'user' });
+    await seedBranchTaskTitle(repo, 'feature/task', 'Another issue title');
+    expect(await setWorktreeTaskTitle(linked, { title: 'Agent', by: 'agent' })).toMatchObject({ applied: false, title: 'Mine' });
+  });
+
+  it('refuses a detached worktree, which has no branch to hold a title', async () => {
+    const { repo } = createLinkedWorktree();
+    const detached = path.join(createTempDir(), 'detached');
+    runGit(repo, ['worktree', 'add', '--detach', detached]);
+    await expect(setWorktreeTaskTitle(detached, { title: 'Name', by: 'user' })).rejects.toMatchObject({ status: 409 });
   });
 });

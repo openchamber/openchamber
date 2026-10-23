@@ -17,6 +17,7 @@ import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
+import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
 import { sourceBoardI18n } from './source-board.i18n';
@@ -168,6 +169,7 @@ export const dict: Record<I18nKey, string> = {
   ...webSearchI18n['pt-BR'],
   ...sessionWarmingI18n['pt-BR'],
   ...heapSnapshotI18n['pt-BR'],
+  ...sidebarWorkI18n['pt-BR'],
   ...overviewI18n['pt-BR'],
   ...isolatedSpacesI18n['pt-BR'],
   ...sourceBoardI18n['pt-BR'],
@@ -632,9 +634,6 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.empty.noMatches.description": "Tente com outro título, branch, pasta ou caminho.",
   "sessions.sidebar.empty.noMatches.searchArchive": "Pesquisar no arquivo",
   "sessions.sidebar.activity.chatsTitle": "Conversas",
-  "sessions.sidebar.header.viewMode.label": "Visualização",
-  "sessions.sidebar.header.viewMode.projects": "Árvore",
-  "sessions.sidebar.header.viewMode.timeline": "Lista",
   "sessions.sidebar.activity.chatsEmpty": "Ainda não há conversas.",
   "chat.chatInput.chooseProject": "Escolher projeto",
   "sessions.archivePage.allDirectories": "Todos os diretórios",
@@ -864,10 +863,8 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.group.collapseAria": "Recolher {label}",
   "sessions.sidebar.group.actions.deleteArchivedInGroupAria": "Excluir sessões archivadas em {label}",
   "sessions.sidebar.group.actions.deleteArchivedSessions": "Excluir sessões archivadas",
-  "sessions.sidebar.group.actions.deleteGroupAria": "Excluir {label}",
   "sessions.sidebar.group.actions.deleteWorktree": "Excluir worktree",
   "sessions.sidebar.group.actions.deleteWorktreeAndBranch": "Excluir worktree e branch local",
-  "sessions.sidebar.group.actions.deleteGroupAndBranchAria": "Excluir {label} e seu branch local",
   "sessions.sidebar.group.actions.newDraftInGroupAria": "Nova sessão de rascunho em {label}",
   "sessions.sidebar.grouping.projectRoot": "raiz do projeto",
   "sessions.sidebar.grouping.projectRootWithBranch": "raiz do projeto: {branch}",

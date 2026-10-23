@@ -80,6 +80,16 @@ export const SESSION_LINK_GUIDANCE = "Link to this session with the openchamber 
   + " resolves. One merely mentioned in passing stays unlinked. The reply need not say you linked it.";
 
 /**
+ * When to name the task, stated with the linking guidance for the same reason:
+ * an action only its description mentions is never called. The sidebar lists
+ * a task under this name, so it is set early and changed only with the task.
+ */
+export const WORK_NAME_GUIDANCE = "Name the task with the openchamber tool's work.name as soon as it is clear what"
+  + " the task is: at most 4 words naming the task itself, such as \"Login timeout fix\" or \"Sidebar task rows\","
+  + " never a step of it. Rename it only when the work becomes a different task; finishing a step, fixing"
+  + " something on the way or a follow-up within the same task is no reason. A name the user gave stays.";
+
+/**
  * When to draw a page, stated in every session that has the
  * `openchamber_render` tool, and only here. Stated only in the tool
  * description, it went unread: asked for a breakdown of lines of code per
@@ -155,6 +165,7 @@ const buildPinnedBlock = ({ notes, plans }) => {
 
 const buildGuidance = ({ linking, rendering }) => [
   linking ? SESSION_LINK_GUIDANCE : '',
+  linking ? WORK_NAME_GUIDANCE : '',
   rendering ? RENDER_PAGE_GUIDANCE : '',
 ].filter(Boolean).join('\n\n');
 

@@ -16,6 +16,7 @@ import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
+import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
 import { sourceBoardI18n } from './source-board.i18n';
@@ -589,9 +590,6 @@ export const dict = {
   'sessions.sidebar.activity.chatsEmpty': 'لا توجد محادثات بعد.',
   'chat.chatInput.chooseProject': 'اختر مشروعًا',
   'sessions.archivePage.allDirectories': 'كل المجلدات',
-  'sessions.sidebar.header.viewMode.label': 'العرض',
-  'sessions.sidebar.header.viewMode.projects': 'مجمّعة',
-  'sessions.sidebar.header.viewMode.timeline': 'خط زمني',
   'sessions.sidebar.header.projectDisplay.label': 'إظهار المشاريع',
   'sessions.sidebar.header.projectDisplay.all': 'كل المشاريع',
   'sessions.sidebar.header.listGrouping.label': 'الجلسات',
@@ -822,10 +820,8 @@ export const dict = {
   'sessions.sidebar.group.collapseAria': 'طي {label}',
   'sessions.sidebar.group.actions.deleteArchivedInGroupAria': 'حذف الجلسات المؤرشفة في {label}',
   'sessions.sidebar.group.actions.deleteArchivedSessions': 'حذف الجلسات المؤرشفة',
-  'sessions.sidebar.group.actions.deleteGroupAria': 'حذف {label}',
   'sessions.sidebar.group.actions.deleteWorktree': 'حذف شجرة العمل',
   'sessions.sidebar.group.actions.deleteWorktreeAndBranch': 'حذف شجرة العمل والفرع المحلي',
-  'sessions.sidebar.group.actions.deleteGroupAndBranchAria': 'حذف {label} وفرعه المحلي',
   'sessions.sidebar.group.actions.newDraftInGroupAria': 'مسودة جلسة جديدة في {label}',
   'sessions.sidebar.grouping.projectRoot': 'جذر المشروع',
   'sessions.sidebar.grouping.projectRootWithBranch': 'جذر المشروع: {branch}',
@@ -3819,6 +3815,7 @@ export const dict = {
   ...webSearchI18n.ar,
   ...sessionWarmingI18n.ar,
   ...heapSnapshotI18n.ar,
+  ...sidebarWorkI18n.ar,
   ...overviewI18n.ar,
   ...isolatedSpacesI18n.ar,
   ...sourceBoardI18n.ar,

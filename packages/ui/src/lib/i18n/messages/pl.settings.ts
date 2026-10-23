@@ -1237,8 +1237,6 @@ export const settingsDict = {
   'settings.openchamber.visual.field.mermaidRenderingAria': 'Renderowanie Mermaid: {option}',
   'settings.openchamber.visual.field.mobileKeyboardMode': 'Tryb klawiatury mobilnej',
   'settings.openchamber.visual.field.mobileKeyboardModeHint': 'Wybierz sposób zachowania widoku podczas otwartej klawiatury.',
-  'settings.openchamber.visual.field.persistDraftMessages': 'Zachowuj szkice wiadomości',
-  'settings.openchamber.visual.field.persistDraftMessagesAria': 'Zachowuj szkice wiadomości',
   'settings.openchamber.visual.field.pwaInstallAppNameAria': 'Nazwa aplikacji instalacyjnej PWA',
   'settings.openchamber.visual.field.pwaInstallOrientationAria': 'Orientacja instalacji PWA',
   'settings.openchamber.visual.field.queueMessagesByDefault': 'Domyślnie kolejkuj wiadomości',

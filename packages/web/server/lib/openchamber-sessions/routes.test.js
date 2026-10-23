@@ -681,6 +681,17 @@ describe('openchamber session routes', () => {
     });
   });
 
+  it('records the session an agent dispatched it from, so the sidebar lists it under that work', async () => {
+    const { app, sessionMetadataStore } = createApp();
+    await request(app)
+      .post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', originSessionId: 'ses_origin' })
+      .expect(200);
+
+    expect(await sessionMetadataStore.get('ses_123', { directory: '/repo/app' }))
+      .toMatchObject({ openchamber: { originSessionID: 'ses_origin' } });
+  });
+
   it('percent-encodes the directory header for non-ASCII checkout paths', async () => {
     const { app } = createApp();
     await request(app)

@@ -21,6 +21,10 @@ OpenChamber legt den Branch an, richtet den Ordner ein und öffnet dort eine neu
 
 Ohne Rückfragen geht es mit **Schneller Worktree** im selben Branch-Menü: OpenChamber benennt den Branch selbst und richtet die neue Sitzung darauf aus.
 
+## In der Seitenleiste
+
+Ein Worktree ist eine Zeile in der Seitenleiste, darunter alle Sitzungen darin. Die Zeile zeigt den Namen der Aufgabe, sobald der Agent sie benannt hat (bis dahin den Titel der Sitzung, in der du dort zuletzt gearbeitet hast), den Pull Request oder das Issue, dem er folgt, als farbige Markierung, und ob dort eine Sitzung läuft oder Neuigkeiten für dich hat. Ein Worktree, der für einen Pull Request oder ein Issue angelegt wurde, trägt zuerst dessen Titel, bis der Agent einen kürzeren Namen wählt. Fahre mit der Maus darüber, um den Branch zu sehen. Klicke darauf, um die Sitzung zu öffnen, in der du dort zuletzt gearbeitet hast; um die Liste aufzuklappen, fahre über das Branch-Symbol links davon und klicke auf den Pfeil, der an seiner Stelle erscheint. Sein Menü benennt die Aufgabe um, legt den Worktree in einen Ordner des Projekts oder löscht ihn. Wie Arbeiten in den Bereich In Arbeit kommen und ihn verlassen, steht unter [Sitzungen in Arbeit](/de/sessions-in-work/).
+
 ## Projekte, die auf einem Ordner des Repositorys geöffnet sind
 
 Öffnest du ein Projekt auf einem Ordner innerhalb eines Repositorys, etwa `repo/ai`, öffnen sich neue Worktrees ebenfalls dort. Eine Sitzung in einem neuen Worktree startet im selben Ordner des Checkouts, sodass OpenCode die Konfiguration findet, die dort liegt. Ein Projekt, das auf dem Repository-Stammverzeichnis geöffnet ist, startet wie bisher im Worktree-Stammverzeichnis. Hat ein Branch diesen Ordner nicht, startet die Sitzung im Worktree-Stammverzeichnis, und OpenChamber weist darauf hin.
@@ -31,7 +35,7 @@ Wenn die Arbeit gut ist, verwende **Integrate** in der Git-Ansicht, um die Commi
 
 ## Aufräumen
 
-Das Löschen oder Archivieren der Sitzung kann den Worktree entfernen. Du entscheidest, ob auch der Branch gelöscht werden soll — lokal und, falls vorhanden, remote. Nichts wird gelöscht, ohne dass du es anforderst.
+Markiere die Zeile des Worktrees als erledigt, wenn die Aufgabe fertig ist: Geht nichts verloren, werden seine Sitzungen archiviert und der Worktree und sein lokaler Branch entfernt; andernfalls zeigt OpenChamber, was verloren ginge, und lässt dich entscheiden. Du kannst den Worktree auch über sein Menü löschen oder seine Sitzung löschen oder archivieren. Du entscheidest, ob auch der Branch gelöscht werden soll — lokal und, falls vorhanden, remote.
 
 ## Wenn etwas seltsam aussieht
 

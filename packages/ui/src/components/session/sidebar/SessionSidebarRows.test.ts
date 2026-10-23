@@ -48,7 +48,7 @@ describe('SessionSidebarRows section spacing', () => {
       : null;
     return {
       mode: 'normal', sections, authoritativeSections: sections, chatGroup,
-      workItems: [item('working')], zoneSessionIds: new Set(['working']),
+      workEntries: [{ kind: 'session', item: item('working') }], zoneSessionIds: new Set(['working']),
       foldersMap: {}, groupSearchDataByGroup: new WeakMap(), normalizedQuery: '',
       collapsedProjects: new Set(), collapsedGroups: new Set(), collapsedFolders: new Set(), collapsedActivities: new Set(),
       expandedParents: new Set(), visibleCountByContainer: new Map(), pinnedSessionIds: new Set(), sessionOrderIndex: new Map(),

@@ -2407,8 +2407,6 @@ export const settingsDict = {
   'settings.openchamber.visual.field.queueMessagesByDefaultAria': 'Queue messages by default',
   'settings.openchamber.visual.field.queueMessagesByDefault': 'Queue messages by default',
   'settings.openchamber.visual.field.queueMessagesByDefaultTooltip': 'When enabled, Enter queues messages. Use {modifier}+Enter to send.',
-  'settings.openchamber.visual.field.persistDraftMessagesAria': 'Persist draft messages',
-  'settings.openchamber.visual.field.persistDraftMessages': 'Persist draft messages',
   'settings.openchamber.visual.field.enableSpellcheckInTextInputsAria': 'Enable spellcheck in text inputs',
   'settings.openchamber.visual.field.enableSpellcheckInTextInputs': 'Enable spellcheck in text inputs',
   'settings.openchamber.visual.field.largeTextPaste': 'Large text paste',

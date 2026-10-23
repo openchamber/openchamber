@@ -21,6 +21,10 @@ OpenChamber crea la rama, configura la carpeta y abre ahí una nueva sesión, li
 
 Para saltarte las preguntas, elige **Worktree rápido** en el mismo menú de ramas: OpenChamber le pone nombre a la rama y apunta la nueva sesión a ella.
 
+## En la barra lateral
+
+Un worktree es una fila en la barra lateral, con todas sus sesiones debajo. La fila muestra el nombre de la tarea en cuanto el agente se lo pone (hasta entonces, el título de la última sesión en la que trabajaste ahí), el pull request o issue que sigue como una marca de color, y si alguna sesión ahí está en marcha o tiene novedades para ti. Un worktree creado para un pull request o una issue empieza con el título de ese elemento hasta que el agente elige un nombre más corto. Pasa el cursor por encima para ver la rama. Haz clic para abrir la última sesión en la que trabajaste ahí; para desplegar la lista, pasa el cursor por el icono de rama de su izquierda y haz clic en la flecha que aparece en su lugar. Su menú cambia el nombre de la tarea, mueve el worktree a una carpeta del proyecto o lo elimina. Consulta [Sesiones en curso](/es/sessions-in-work/) para ver cómo entran y salen los trabajos del bloque En curso.
+
 ## Proyectos abiertos en una carpeta del repositorio
 
 Si abres un proyecto en una carpeta dentro de un repositorio, como `repo/ai`, los nuevos worktrees se abren también allí. Una sesión en un worktree nuevo empieza en la misma carpeta del checkout, así OpenCode encuentra la configuración que está en ella. Un proyecto abierto en la raíz del repositorio empieza en la raíz del worktree, como antes. Si una rama no tiene esa carpeta, la sesión empieza en la raíz del worktree y OpenChamber te lo indica.
@@ -31,7 +35,7 @@ Cuando el trabajo esté listo, usa **Integrate** en la vista de Git para traer l
 
 ## Limpieza
 
-Eliminar o archivar la sesión puede quitar el worktree. Tú eliges si también eliminar la rama: local, y remota si la hay. No se elimina nada sin que lo pidas.
+Marca como hecha la fila del worktree cuando termines la tarea: si no se pierde nada, sus sesiones se archivan y se eliminan el worktree y su rama local; si no, OpenChamber te muestra lo que se perdería y te deja decidir. También puedes eliminar el worktree desde su menú, o eliminar o archivar su sesión. Tú eliges si también eliminar la rama: local, y remota si la hay.
 
 ## Si algo no encaja
 

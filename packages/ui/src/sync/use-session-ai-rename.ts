@@ -52,7 +52,7 @@ export function useSessionAiRename(sessionID: string, directory: string | null |
         prepare,
         generate: (session, turns, requestSignal) => generateSessionTitle({ turns, currentTitle: session.title, directory, signal: requestSignal }),
         readSession: () => opencodeClient.getSession(sessionID, directory),
-        saveTitle: (title, requestSignal) => updateSessionTitle(sessionID, title, { directory, expectedRuntimeKey: runtimeKey, signal: requestSignal }),
+        saveTitle: (title, requestSignal) => updateSessionTitle(sessionID, title, { directory, expectedRuntimeKey: runtimeKey, signal: requestSignal, byUser: true }),
       });
     });
   }, [directory, prepare, runtimeKey, sessionID]);

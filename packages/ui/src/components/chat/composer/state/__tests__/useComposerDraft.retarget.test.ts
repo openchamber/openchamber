@@ -35,7 +35,7 @@ function renderComposer(initialText: string) {
         const confirmedMentionsRef = React.useRef(new Set(initialText.includes('@a.ts') ? ['a.ts'] : []));
         React.useEffect(() => { messageRef.current = message; }, [message]);
         useComposerDraft({
-            message, messageRef, setMessage, confirmedMentionsRef, identity, persistEnabled: true,
+            message, messageRef, setMessage, confirmedMentionsRef, identity,
             initialDraft: { text: '', identity: projectDraft },
             newSessionDraftId: draftId,
             onDraftRestored: (reason) => { result.restored.push(reason); },

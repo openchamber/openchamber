@@ -192,6 +192,20 @@ other.
   directory and does not erase other session results.
 - Destructive session/worktree deletion and project-path registration are not
   part of the action contract.
+- `session.create` called from a session passes that session as
+  `originSessionId`; the session service writes it to the new session as
+  `metadata.openchamber.originSessionID` before the prompt goes out, so the
+  sidebar lists it under the caller's work (a fork records its source itself).
+  A failed write leaves the session a root of its own and fails nothing.
+- `work.name` names the task the session (default: the calling one) works on
+  (`../openchamber-sessions/work-naming.js`, wired through the `workNaming`
+  dependency; without it the action answers 503). In a linked worktree it sets
+  the branch description (`setWorktreeTaskTitle` in `../git`); in the main
+  checkout it renames the task's root session, found through the same lineage
+  the sidebar nests by, and records `metadata.openchamber.workTitle`. A name
+  the user gave stays: the call changes nothing and answers `named: false`
+  with the current name. When to call it is in the session context, next to
+  the linking guidance (`WORK_NAME_GUIDANCE`).
 - `session.link` records a code change under review or an issue on a session
   (`../openchamber-sessions/session-link.js`), defaulting to the calling
   session. When to link is not in the action's description but at the head of

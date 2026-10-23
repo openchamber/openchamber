@@ -2392,8 +2392,6 @@ export const settingsDict = {
   'settings.openchamber.visual.field.queueMessagesByDefaultAria': 'Berichten standaard in de wachtrij plaatsen',
   'settings.openchamber.visual.field.queueMessagesByDefault': 'Berichten standaard in de wachtrij plaatsen',
   'settings.openchamber.visual.field.queueMessagesByDefaultTooltip': 'Als dit aanstaat, plaatst Enter berichten in de wachtrij. Gebruik {modifier}+Enter om te verzenden.',
-  'settings.openchamber.visual.field.persistDraftMessagesAria': 'Conceptberichten bewaren',
-  'settings.openchamber.visual.field.persistDraftMessages': 'Conceptberichten bewaren',
   'settings.openchamber.visual.field.enableSpellcheckInTextInputsAria': 'Spelcontrole in tekstvelden aanzetten',
   'settings.openchamber.visual.field.enableSpellcheckInTextInputs': 'Spelcontrole in tekstvelden aanzetten',
   'settings.openchamber.visual.field.largeTextPaste': 'Plakken van grote tekst',

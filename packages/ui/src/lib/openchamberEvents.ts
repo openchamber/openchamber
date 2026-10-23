@@ -109,6 +109,10 @@ type ProjectContextChangedEvent = { type: 'project-context-changed' } & z.infer<
 const sessionFoldersChangedSchema = z.object({ updatedAt: z.number().finite() });
 type SessionFoldersChangedEvent = { type: 'session-folders-changed' } & z.infer<typeof sessionFoldersChangedSchema>;
 
+/** A client saved, sent or discarded a session draft; every client reads the drafts again. */
+const sessionDraftsChangedSchema = z.object({ updatedAt: z.number().finite() });
+type SessionDraftsChangedEvent = { type: 'session-drafts-changed' } & z.infer<typeof sessionDraftsChangedSchema>;
+
 /**
  * The extension chosen as browser provider can no longer serve (paused,
  * removed, or approval withdrawn), so the server put the in-app browser back.
@@ -252,6 +256,7 @@ type OpenChamberEvent =
   | LimitFailoverEvent
   | ProjectContextChangedEvent
   | SessionFoldersChangedEvent
+  | SessionDraftsChangedEvent
   | AgentMemoryChangedEvent;
 type Listener = (event: OpenChamberEvent) => void;
 
@@ -539,6 +544,12 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
   if (envelope.type === 'openchamber:project-context-changed') {
     const parsed = projectContextChangedSchema.safeParse(envelope.properties);
     if (parsed.success) for (const listener of listeners) listener({ type: 'project-context-changed', ...parsed.data });
+    return;
+  }
+
+  if (envelope.type === 'openchamber:session-drafts-changed') {
+    const parsed = sessionDraftsChangedSchema.safeParse(envelope.properties);
+    if (parsed.success) for (const listener of listeners) listener({ type: 'session-drafts-changed', ...parsed.data });
     return;
   }
 

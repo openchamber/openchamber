@@ -21,6 +21,10 @@ OpenChamber makes the branch, sets up the folder, and opens a new session there,
 
 To skip the questions, pick **Quick worktree** in the same branch menu: OpenChamber names the branch for you and points the new session at it.
 
+## In the sidebar
+
+A worktree is one row in the sidebar, with every session in it underneath. The row shows the task's name once the agent has named it (until then, the title of the session you last worked in there), the pull request or issue it follows as a coloured mark, and whether a session there is running or has news for you. A worktree made for a pull request or an issue starts with that item's title until the agent picks a shorter name. Hover it to see the branch. Click it to open the session you last worked in there; hover the branch icon on its left and click the arrow that takes its place to open the list. Its menu renames the task, files the worktree into a folder of the project, or deletes it. See [Sessions in Work](/sessions-in-work/) for how works move in and out of the In work block.
+
 ## Projects opened on a folder of the repository
 
 If you open a project on a folder inside a repository, such as `repo/ai`, new worktrees open there too. A session in a new worktree starts in the same folder of the checkout, so OpenCode finds the config that lives in it. A project opened on the repository root starts at the worktree root, as before. When a branch has no such folder, the session starts in the worktree root and OpenChamber tells you.
@@ -31,7 +35,7 @@ When the work is good, use **Integrate** in the Git view to bring the worktree's
 
 ## Clean up
 
-Deleting or archiving the session can remove the worktree. You choose whether to also delete the branch — local, and remote if there is one. Nothing is deleted without you asking.
+Mark the worktree's row done when the task is finished: if nothing would be lost, its sessions are archived and the worktree and its local branch are removed; otherwise OpenChamber shows what would be lost and lets you decide. Deleting the worktree from its menu, or deleting or archiving its session, works too. You choose whether to also delete the branch — local, and remote if there is one.
 
 ## If something looks off
 

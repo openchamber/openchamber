@@ -2376,8 +2376,6 @@ export const settingsDict = {
   'settings.openchamber.visual.field.queueMessagesByDefaultAria': 'הוספת הודעות לתור המתנה כברירת מחדל',
   'settings.openchamber.visual.field.queueMessagesByDefault': 'הוספת הודעות לתור המתנה כברירת מחדל',
   'settings.openchamber.visual.field.queueMessagesByDefaultTooltip': 'כשהאפשרות מופעלת, Enter מוסיף הודעות לתור המתנה. לשליחה יש להשתמש ב-{modifier}+Enter.',
-  'settings.openchamber.visual.field.persistDraftMessagesAria': 'שמירת טיוטות של הודעות',
-  'settings.openchamber.visual.field.persistDraftMessages': 'שמירת טיוטות של הודעות',
   'settings.openchamber.visual.field.enableSpellcheckInTextInputsAria': 'הפעלת בדיקת איות בשדות טקסט',
   'settings.openchamber.visual.field.enableSpellcheckInTextInputs': 'הפעלת בדיקת איות בשדות טקסט',
   'settings.openchamber.visual.field.largeTextPaste': 'הדבקת טקסט ארוך',

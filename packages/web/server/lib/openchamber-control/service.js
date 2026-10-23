@@ -6,6 +6,7 @@ import { OPENCHAMBER_ALL_ACTIONS, OPENCHAMBER_KNOWLEDGE_ACTIONS } from './action
 import { writeScreenshot } from './screenshots.js';
 import { createProjectKnowledgeActions } from './project-knowledge.js';
 import { createPageAnswers, createRenderPageAction } from './render-page.js';
+import { createWorkNamer } from '../openchamber-sessions/work-naming.js';
 
 const DEFAULT_WAIT_TIMEOUT_SECONDS = 600;
 const MAX_WAIT_TIMEOUT_SECONDS = 86_400;
@@ -222,6 +223,8 @@ export const createOpenChamberControlService = (dependencies) => {
     notifyUser = null,
     agentMemoryActions = null,
     sessionLinks = null,
+    // Git and metadata access for `work.name`; absent means the server cannot name tasks.
+    workNaming = null,
     projectContextRuntime = null,
     resolveProjectContextId = null,
     isKnowledgeToolEnabled = async () => true,
@@ -274,6 +277,19 @@ export const createOpenChamberControlService = (dependencies) => {
       fetch,
     });
   };
+
+  const workNamer = workNaming ? createWorkNamer({
+    ...workNaming,
+    getSession: async (sessionID) => {
+      const client = await getClient();
+      return client.session.get({ sessionID }).catch(() => null);
+    },
+    renameSession: async (sessionID, title, directory) => {
+      const client = await getClient(directory);
+      await client.session.update({ sessionID, title });
+    },
+    createError: (message, status) => new OpenChamberControlError(message, status),
+  }) : null;
 
   // OpenCode holds archive state; the archive file holds it for sessions whose
   // directory is gone, and its entry wins: a timestamp archives, null restores.
@@ -606,7 +622,9 @@ export const createOpenChamberControlService = (dependencies) => {
     const startedAt = now();
     let result;
     if (action === 'session.create') {
-      result = await sessionService.create(payload);
+      // The calling session is where this one grew from: the sidebar lists it
+      // under the caller's work (a fork records its source on its own).
+      result = await sessionService.create(parentSessionID ? { ...payload, originSessionId: parentSessionID } : payload);
     } else {
       if (!sessionID) throw new OpenChamberControlError('sessionId is required', 400);
       if (action === 'session.send') {
@@ -917,6 +935,11 @@ export const createOpenChamberControlService = (dependencies) => {
         // `link`; session.link has no other use for them, so both are read.
         const link = input.link ?? { url: input.url, title: input.title, kind: input.kind, identifier: input.identifier };
         return sessionLinks.link({ sessionId: sessionID, directory, link });
+      }
+      if (action === 'work.name') {
+        if (!workNamer) throw new OpenChamberControlError('Naming tasks is not available on this server', 503);
+        const sessionID = asNonEmptyString(input.sessionId) || asNonEmptyString(options.contextSessionId);
+        return workNamer.name({ sessionId: sessionID, title: input.title });
       }
       if (action === 'session.moveToWorktree') {
         assertSingleScope(input);

@@ -13,7 +13,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { Icon } from "@/components/icon/Icon";
-import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
+import { resolveSidebarGrouping, useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { updateDesktopSettings } from '@/lib/persistence';
@@ -174,14 +174,14 @@ export function SidebarHeader(props: Props): React.ReactNode {
   const setProjectSortOrder = useSessionDisplayStore((state) => state.setProjectSortOrder);
   const worktreeSortOrder = useSessionDisplayStore((state) => state.worktreeSortOrder);
   const setWorktreeSortOrder = useSessionDisplayStore((state) => state.setWorktreeSortOrder);
-  const sidebarViewMode = useSessionDisplayStore((state) => state.sidebarViewMode);
-  const setSidebarViewMode = useSessionDisplayStore((state) => state.setSidebarViewMode);
-  const listSessionGrouping = useSessionDisplayStore((state) => state.listSessionGrouping);
-  const setListSessionGrouping = useSessionDisplayStore((state) => state.setListSessionGrouping);
+  const sidebarGrouping = useSessionDisplayStore(resolveSidebarGrouping);
+  const setSidebarGrouping = useSessionDisplayStore((state) => state.setSidebarGrouping);
+  const keepWorkInPlace = useSessionDisplayStore((state) => state.keepWorkInPlace);
+  const setKeepWorkInPlace = useSessionDisplayStore((state) => state.setKeepWorkInPlace);
   const projectDisplayMode = useSessionDisplayStore((state) => state.projectDisplayMode);
   const setProjectDisplayMode = useSessionDisplayStore((state) => state.setProjectDisplayMode);
-  // VS Code has no mode switch and always renders the projects view.
-  const timelineView = showProjectDisplayControls && sidebarViewMode === 'timeline';
+  // VS Code always groups under its workspace.
+  const timeGrouping = showProjectDisplayControls && sidebarGrouping === 'time';
   const isSingleProjectMode = showProjectDisplayControls && projectDisplayMode === 'single';
 
   // One choice per line, rarely touched orders behind submenus that name the
@@ -226,39 +226,19 @@ export function SidebarHeader(props: Props): React.ReactNode {
         : t('sessions.sidebar.header.actions.selectSessions')}</span>
     </DropdownMenuItem>,
   ];
+  // One view: works under their projects, or every project's works in one
+  // list by time, which has no project headers to sort.
   if (showProjectDisplayControls) {
-    displayMenuSections.push(<>
-      <DropdownMenuLabel>{t('sessions.sidebar.header.viewMode.label')}</DropdownMenuLabel>
-      {([
-        ['projects', 'sessions.sidebar.header.viewMode.projects'],
-        ['timeline', 'sessions.sidebar.header.viewMode.timeline'],
-      ] as const).map(([mode, labelKey]) => (
-        <DropdownMenuItem
-          key={mode}
-          onClick={() => {
-            setSidebarViewMode(mode);
-            void updateDesktopSettings({ sidebarViewMode: mode });
-          }}
-          className="flex items-center justify-between"
-        >
-          <span>{t(labelKey)}</span>
-          {sidebarViewMode === mode ? checkMark : null}
-        </DropdownMenuItem>
-      ))}
-    </>);
-  }
-  // Project scope applies to both views; List keeps manual project order.
-  if (timelineView) {
     displayMenuSections.push(choiceSubmenu('sessions.sidebar.header.listGrouping.label', [
       ['project', 'sessions.sidebar.header.listGrouping.project'],
       ['time', 'sessions.sidebar.header.listGrouping.time'],
-    ] as const, listSessionGrouping, (grouping) => {
-      setListSessionGrouping(grouping);
-      void updateDesktopSettings({ sidebarListSessionGrouping: grouping });
+    ] as const, sidebarGrouping, (grouping) => {
+      setSidebarGrouping(grouping);
+      void updateDesktopSettings({ sidebarGrouping: grouping });
     }));
   }
   displayMenuSections.push(<>
-    {!timelineView ? choiceSubmenu('sessions.sidebar.header.actions.sortProjects', [
+    {!timeGrouping ? choiceSubmenu('sessions.sidebar.header.actions.sortProjects', [
       ['manual', 'sessions.sidebar.header.projectSort.manual'],
       ['a-z', 'sessions.sidebar.header.projectSort.aToZ'],
       ['z-a', 'sessions.sidebar.header.projectSort.zToA'],
@@ -268,7 +248,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
       setProjectSortOrder(order);
       void updateDesktopSettings({ sidebarProjectSortOrder: order });
     }) : null}
-    {showProjectDisplayControls && !timelineView ? choiceSubmenu('sessions.sidebar.header.actions.sortWorktrees', [
+    {showProjectDisplayControls && !timeGrouping ? choiceSubmenu('sessions.sidebar.header.actions.sortWorktrees', [
       ['recent', 'sessions.sidebar.header.worktreeSort.recent'],
       ['manual', 'sessions.sidebar.header.projectSort.manual'],
       ['a-z', 'sessions.sidebar.header.projectSort.aToZ'],
@@ -298,11 +278,16 @@ export function SidebarHeader(props: Props): React.ReactNode {
         setShowWorkSection(!showWorkSection);
         void updateDesktopSettings({ sidebarShowWorkSection: !showWorkSection });
       }) : null}
-      {/* List rows always carry two lines; Tree keeps Pinned and In work on one unless asked. */}
-      {!timelineView ? toggleItem('sessions.sidebar.header.displayMode.detailedZoneRows', detailedZoneRows, () => {
+      {/* A work in In work leaves its project unless asked; VS Code always keeps it there. */}
+      {sessionWorkEnabled && showWorkSection && showProjectDisplayControls ? toggleItem('sessions.sidebar.header.displayMode.keepWorkInPlace', keepWorkInPlace, () => {
+        setKeepWorkInPlace(!keepWorkInPlace);
+        void updateDesktopSettings({ sidebarKeepWorkInPlace: !keepWorkInPlace });
+      }) : null}
+      {/* Rows that mix projects keep one line unless asked. */}
+      {toggleItem('sessions.sidebar.header.displayMode.detailedZoneRows', detailedZoneRows, () => {
         setDetailedZoneRows(!detailedZoneRows);
         void updateDesktopSettings({ sidebarDetailedZoneRows: !detailedZoneRows });
-      }) : null}
+      })}
     </>);
   }
   if (!isSingleProjectMode) {

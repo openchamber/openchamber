@@ -357,6 +357,12 @@ export const createSettingsHelpers = (dependencies) => {
     if (SIDEBAR_LIST_SESSION_GROUPING_VALUES.has(candidate.sidebarListSessionGrouping)) {
       result.sidebarListSessionGrouping = candidate.sidebarListSessionGrouping;
     }
+    if (SIDEBAR_LIST_SESSION_GROUPING_VALUES.has(candidate.sidebarGrouping)) {
+      result.sidebarGrouping = candidate.sidebarGrouping;
+    }
+    if (typeof candidate.sidebarKeepWorkInPlace === 'boolean') {
+      result.sidebarKeepWorkInPlace = candidate.sidebarKeepWorkInPlace;
+    }
     if (SIDEBAR_PROJECT_SORT_ORDER_VALUES.has(candidate.sidebarProjectSortOrder)) {
       result.sidebarProjectSortOrder = candidate.sidebarProjectSortOrder;
     }
@@ -487,9 +493,6 @@ export const createSettingsHelpers = (dependencies) => {
     }
     if (typeof candidate.diffHideWhitespace === 'boolean') {
       result.diffHideWhitespace = candidate.diffHideWhitespace;
-    }
-    if (typeof candidate.persistChatDraft === 'boolean') {
-      result.persistChatDraft = candidate.persistChatDraft;
     }
     if (typeof candidate.allowPromptingSubagentSessions === 'boolean') {
       result.allowPromptingSubagentSessions = candidate.allowPromptingSubagentSessions;

@@ -2369,8 +2369,6 @@ export const settingsDict = {
   "settings.openchamber.visual.field.queueMessagesByDefaultAria": "Ставити повідомлення в чергу за замовчуванням",
   "settings.openchamber.visual.field.queueMessagesByDefault": "Ставити повідомлення в чергу за замовчуванням",
   "settings.openchamber.visual.field.queueMessagesByDefaultTooltip": "Якщо ввімкнено, Enter ставить повідомлення в чергу. Використовуйте {modifier}+Enter для надсилання.",
-  "settings.openchamber.visual.field.persistDraftMessagesAria": "Зберігати чернетки повідомлень",
-  "settings.openchamber.visual.field.persistDraftMessages": "Зберігати чернетки повідомлень",
   "settings.openchamber.visual.field.enableSpellcheckInTextInputsAria": "Увімкнути перевірку орфографії під час введення тексту",
   "settings.openchamber.visual.field.enableSpellcheckInTextInputs": "Увімкнути перевірку орфографії в текстових полях",
   "settings.openchamber.visual.field.largeTextPaste": "Вставлення великого тексту",

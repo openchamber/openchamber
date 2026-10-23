@@ -1,4 +1,5 @@
 import type { SessionSidebarRow } from './sessionSidebarRowModel';
+import { isWorktreeWorkGroup } from './works/sidebarWorks';
 
 const INITIAL_ROW_LIMIT = 24;
 
@@ -66,10 +67,11 @@ export const estimateSessionSidebarRowSize = (
 };
 
 export const sectionSpacingAfter = (row: SessionSidebarRow, nextRow: SessionSidebarRow | undefined): SectionSpacing | undefined => {
-  // Zones (Chats, In work, Recent) and projects are sections of equal weight,
-  // so each opens with the same gap. A worktree header opens a smaller one
-  // inside its project, so its sessions read as a group of their own.
+  // Zones (Chats, Pinned, In work, the list by time) and projects are sections
+  // of equal weight, so each opens with the same gap. A space or archive
+  // header opens a smaller one inside its project, so its sessions read as a
+  // group of their own. A worktree is a work row among session rows and opens none.
   const startsSection = nextRow?.kind === 'activity-header' || nextRow?.kind === 'project-header';
   if (startsSection) return 'pb-2';
-  return nextRow?.kind === 'group-header' && row.kind !== 'project-header' ? 'pb-1.5' : undefined;
+  return nextRow?.kind === 'group-header' && !isWorktreeWorkGroup(nextRow.group) && row.kind !== 'project-header' ? 'pb-1.5' : undefined;
 };

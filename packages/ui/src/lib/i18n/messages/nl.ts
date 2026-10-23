@@ -16,6 +16,7 @@ import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
+import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
 import { sourceBoardI18n } from './source-board.i18n';
@@ -157,6 +158,7 @@ export const dict = {
   ...webSearchI18n.nl,
   ...sessionWarmingI18n.nl,
   ...heapSnapshotI18n.nl,
+  ...sidebarWorkI18n.nl,
   ...overviewI18n.nl,
   ...isolatedSpacesI18n.nl,
   ...sourceBoardI18n.nl,
@@ -625,9 +627,6 @@ export const dict = {
   'sessions.sidebar.activity.chatsEmpty': 'Nog geen gesprekken.',
   'chat.chatInput.chooseProject': 'Kies project',
   'sessions.archivePage.allDirectories': 'Alle mappen',
-  'sessions.sidebar.header.viewMode.label': 'Weergave',
-  'sessions.sidebar.header.viewMode.projects': 'Boom',
-  'sessions.sidebar.header.viewMode.timeline': 'Lijst',
   'sessions.sidebar.header.projectDisplay.label': 'Projecten tonen',
   'sessions.sidebar.header.projectDisplay.all': 'Alle projecten',
   'sessions.sidebar.header.listGrouping.label': 'Sessies',
@@ -854,10 +853,8 @@ export const dict = {
   'sessions.sidebar.group.collapseAria': '{label} inklappen',
   'sessions.sidebar.group.actions.deleteArchivedInGroupAria': 'Gearchiveerde sessies in {label} verwijderen',
   'sessions.sidebar.group.actions.deleteArchivedSessions': 'Gearchiveerde sessies verwijderen',
-  'sessions.sidebar.group.actions.deleteGroupAria': '{label} verwijderen',
   'sessions.sidebar.group.actions.deleteWorktree': 'Worktree verwijderen',
   'sessions.sidebar.group.actions.deleteWorktreeAndBranch': 'Worktree en lokale branch verwijderen',
-  'sessions.sidebar.group.actions.deleteGroupAndBranchAria': '{label} en de lokale branch verwijderen',
   'sessions.sidebar.group.actions.newDraftInGroupAria': 'Nieuwe concept-sessie in {label}',
   'sessions.sidebar.grouping.projectRoot': 'projecthoofdmap',
   'sessions.sidebar.grouping.projectRootWithBranch': 'projecthoofdmap: {branch}',

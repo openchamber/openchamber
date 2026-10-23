@@ -221,6 +221,31 @@ describe('OpenChamber control service', () => {
     expect(sessionService.create).toHaveBeenCalledWith({ directory: '/repo', title: 'From tool' });
   });
 
+  it('records the calling session as the origin of a session it creates', async () => {
+    const { service, sessionService } = createService();
+    await service.execute('session.create', { title: 'Side task' }, '/repo', { contextSessionId: 'ses_caller' });
+    expect(sessionService.create).toHaveBeenCalledWith({ directory: '/repo', title: 'Side task', originSessionId: 'ses_caller' });
+  });
+
+  it('names the calling session\'s task, and says so when the server cannot', async () => {
+    const setWorktreeTaskTitle = vi.fn(async (_directory, { title }) => ({ applied: true, title }));
+    const { service, client } = createService({
+      workNaming: {
+        listWorktrees: async () => [{ path: '/repo' }, { path: '/wt/a' }],
+        setWorktreeTaskTitle,
+        updateMetadata: vi.fn(),
+      },
+    });
+    client.session.get = vi.fn(async () => ({ id: 'ses_caller', title: 'x', location: { directory: '/wt/a' } }));
+    await expect(service.execute('work.name', { title: 'Login fix' }, '/wt/a', { contextSessionId: 'ses_caller' }))
+      .resolves.toEqual({ task: 'worktree', title: 'Login fix', named: true });
+    expect(setWorktreeTaskTitle).toHaveBeenCalledWith('/wt/a', { title: 'Login fix', by: 'agent' });
+
+    const { service: without } = createService();
+    await expect(without.execute('work.name', { title: 'Login fix' }, '/repo', { contextSessionId: 'ses_caller' }))
+      .rejects.toMatchObject({ statusCode: 503 });
+  });
+
   it('hands a pull request number to session creation with the folder and branch names it may carry', async () => {
     const { service, sessionService } = createService();
     await service.execute('session.create', { pullRequest: 42 }, '/repo');

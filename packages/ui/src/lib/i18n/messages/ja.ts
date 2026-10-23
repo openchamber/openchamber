@@ -17,6 +17,7 @@ import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
+import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
 import { sourceBoardI18n } from './source-board.i18n';
@@ -158,6 +159,7 @@ export const dict: Record<I18nKey, string> = {
   ...webSearchI18n.ja,
   ...sessionWarmingI18n.ja,
   ...heapSnapshotI18n.ja,
+  ...sidebarWorkI18n.ja,
   ...overviewI18n.ja,
   ...isolatedSpacesI18n.ja,
   ...sourceBoardI18n.ja,
@@ -623,9 +625,6 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.empty.noMatches.description': '別のタイトル、ブランチ、フォルダ、パスをお試しください。',
   'sessions.sidebar.empty.noMatches.searchArchive': 'アーカイブを検索',
   'sessions.sidebar.activity.chatsTitle': 'チャット',
-  'sessions.sidebar.header.viewMode.label': '表示',
-  'sessions.sidebar.header.viewMode.projects': 'ツリー',
-  'sessions.sidebar.header.viewMode.timeline': 'リスト',
   'sessions.sidebar.activity.chatsEmpty': 'まだチャットはありません。',
   'chat.chatInput.chooseProject': 'プロジェクトを選択',
   'sessions.archivePage.allDirectories': 'すべてのディレクトリ',
@@ -860,10 +859,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.group.collapseAria': '{label}を折りたたむ',
   'sessions.sidebar.group.actions.deleteArchivedInGroupAria': '{label}のアーカイブ済みセッションを削除',
   'sessions.sidebar.group.actions.deleteArchivedSessions': 'アーカイブ済みセッションを削除',
-  'sessions.sidebar.group.actions.deleteGroupAria': '{label}を削除',
   'sessions.sidebar.group.actions.deleteWorktree': 'ワークツリーを削除',
   'sessions.sidebar.group.actions.deleteWorktreeAndBranch': 'ワークツリーとローカルブランチを削除',
-  'sessions.sidebar.group.actions.deleteGroupAndBranchAria': '{label}とそのローカルブランチを削除',
   'sessions.sidebar.group.actions.newDraftInGroupAria': '{label}で新しい下書きセッション',
   'sessions.sidebar.grouping.projectRoot': 'プロジェクトルート',
   'sessions.sidebar.grouping.projectRootWithBranch': 'プロジェクトルート: {branch}',

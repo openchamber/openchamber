@@ -24,7 +24,7 @@ export const SessionSidebarActivityHeader: React.FC<{
 }> = ({ activityKey, collapsed, forceExpanded, alwaysShowActions, onToggle, onNewChat }) => {
   const { t } = useI18n();
   const chats = activityKey === 'chats';
-  // One header in both views, so zones line up with the project headers.
+  // One header for every zone, so zones line up with the project headers.
   return <div className="relative group/chats -ms-2.5 -me-2">
     <button
       type="button"

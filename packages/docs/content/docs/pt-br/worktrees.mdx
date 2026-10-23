@@ -21,6 +21,10 @@ O OpenChamber cria o branch, configura a pasta e abre uma nova sessão ali, pron
 
 Para pular as perguntas, escolha **Worktree rápido** no mesmo menu de branches: o OpenChamber dá nome ao branch e aponta a nova sessão para ele.
 
+## Na barra lateral
+
+Um worktree é uma linha na barra lateral, com todas as sessões dele embaixo. A linha mostra o nome da tarefa assim que o agente o define (até lá, o título da sessão em que você trabalhou por último ali), o pull request ou issue que ele acompanha como uma marca colorida, e se alguma sessão ali está rodando ou tem novidades para você. Um worktree criado para um pull request ou uma issue começa com o título desse item até o agente escolher um nome mais curto. Passe o cursor sobre ela para ver o branch. Clique para abrir a sessão em que você trabalhou por último ali; para abrir a lista, passe o cursor sobre o ícone de branch à esquerda e clique na seta que aparece no lugar dele. O menu dele renomeia a tarefa, move o worktree para uma pasta do projeto ou o exclui. Veja [Sessões em andamento](/pt-br/sessions-in-work/) para saber como os trabalhos entram e saem do bloco Em andamento.
+
 ## Projetos abertos em uma pasta do repositório
 
 Se você abre um projeto em uma pasta dentro de um repositório, como `repo/ai`, os novos worktrees também abrem ali. Uma sessão em um novo worktree começa na mesma pasta do checkout, e assim o OpenCode encontra a configuração que está nela. Um projeto aberto na raiz do repositório começa na raiz do worktree, como antes. Se uma branch não tiver essa pasta, a sessão começa na raiz do worktree e o OpenChamber avisa você.
@@ -31,7 +35,7 @@ Quando o trabalho estiver bom, use **Integrate** na visão de Git para trazer os
 
 ## Limpeza
 
-Excluir ou arquivar a sessão pode remover o worktree. Você escolhe se também deve excluir o branch — local, e remoto se houver um. Nada é excluído sem você pedir.
+Marque a linha do worktree como concluída quando a tarefa terminar: se nada se perder, as sessões dele são arquivadas e o worktree e o branch local são removidos; caso contrário, o OpenChamber mostra o que seria perdido e deixa você decidir. Excluir o worktree pelo menu dele, ou excluir ou arquivar a sessão, também funciona. Você escolhe se também deve excluir o branch — local, e remoto se houver um.
 
 ## Se algo parecer errado
 

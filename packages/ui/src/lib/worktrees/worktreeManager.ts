@@ -32,6 +32,7 @@ type WorktreeListEntry = {
   head?: string;
   name?: string;
   prunable?: boolean;
+  title?: string;
   provenance?: WorktreeMetadata['provenance'];
 };
 
@@ -236,6 +237,8 @@ const toCreatePayload = (args: {
   expectedRevision?: string;
   changeRequestSource?: GitChangeRequestSourceRequest;
   returnAfterDirectoryCreated?: boolean;
+  /** The pull request's or issue's title, the worktree's task title until the agent names it. */
+  taskTitle?: string;
 }, projectDirectory: string): CreateGitWorktreePayload => {
   const mode = args.mode === 'existing' ? 'existing' : 'new';
 
@@ -268,6 +271,7 @@ const toCreatePayload = (args: {
   if (args.expectedRevision) payload.expectedRevision = args.expectedRevision;
   if (args.changeRequestSource) payload.changeRequestSource = args.changeRequestSource;
   if (args.returnAfterDirectoryCreated) payload.returnAfterDirectoryCreated = true;
+  if (args.taskTitle?.trim()) payload.taskTitle = args.taskTitle.trim();
   return payload;
 };
 
@@ -545,6 +549,7 @@ const readProjectWorktrees = async (projectDirectory: string): Promise<WorktreeM
         worktreeStatus: canonical.worktreeStatus,
         headState: canonical.headState,
         worktreeSource: canonical.worktreeSource,
+        title: entry.title?.trim() || undefined,
         ...(entry.provenance ? { provenance: entry.provenance } : {}),
       };
     })
@@ -634,6 +639,8 @@ export type CreateWorktreeArgs = {
   expectedRevision?: string;
   changeRequestSource?: GitChangeRequestSourceRequest;
   returnAfterDirectoryCreated?: boolean;
+  /** The pull request's or issue's title, the worktree's task title until the agent names it. */
+  taskTitle?: string;
 };
 
 export async function createWorktree(project: ProjectRef, args: CreateWorktreeArgs): Promise<WorktreeMetadata> {

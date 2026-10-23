@@ -24,6 +24,7 @@ import type {
   RemoveGitWorktreePayload,
   GitWorktreeSnapshotPayload,
   GitWorktreeSnapshotResult,
+  GitWorktreeTitleResult,
   GitWorktreeValidationResult,
   CreateGitCommitOptions,
   GitCommitResult,
@@ -1676,6 +1677,24 @@ export async function deleteGitWorktree(directory: string, payload: RemoveGitWor
   }
 
   return response.json();
+}
+
+const worktreeTitleResultSchema = z.object({ title: z.string(), branch: z.string() });
+
+export async function setGitWorktreeTitle(directory: string, title: string): Promise<GitWorktreeTitleResult> {
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/worktrees/title`, directory), {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title }),
+  });
+  const body = await response.json().catch(() => null);
+  if (!response.ok) {
+    const message = z.object({ error: z.string() }).safeParse(body).data?.error;
+    throw new Error(message || 'Failed to rename the task');
+  }
+  const parsed = worktreeTitleResultSchema.safeParse(body);
+  if (!parsed.success) throw new Error('Malformed task title response');
+  return parsed.data;
 }
 
 const worktreeSnapshotResultSchema = z.object({

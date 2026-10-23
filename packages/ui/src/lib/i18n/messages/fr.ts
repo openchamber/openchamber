@@ -16,6 +16,7 @@ import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
+import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
 import { sourceBoardI18n } from './source-board.i18n';
@@ -157,6 +158,7 @@ export const dict = {
   ...webSearchI18n.fr,
   ...sessionWarmingI18n.fr,
   ...heapSnapshotI18n.fr,
+  ...sidebarWorkI18n.fr,
   ...overviewI18n.fr,
   ...isolatedSpacesI18n.fr,
   ...sourceBoardI18n.fr,
@@ -444,9 +446,6 @@ export const dict = {
   'sessions.sidebar.empty.noMatches.description': 'Essayez un autre titre, branche, dossier ou chemin.',
   'sessions.sidebar.empty.noMatches.searchArchive': 'Rechercher dans les archives',
   'sessions.sidebar.activity.chatsTitle': 'Discussions',
-  'sessions.sidebar.header.viewMode.label': 'Affichage',
-  'sessions.sidebar.header.viewMode.projects': 'Arborescence',
-  'sessions.sidebar.header.viewMode.timeline': 'Liste',
   'sessions.sidebar.activity.chatsEmpty': 'Aucune discussion pour le moment.',
   'chat.chatInput.chooseProject': 'Choisir un projet',
   'sessions.archivePage.allDirectories': 'Tous les répertoires',
@@ -680,10 +679,8 @@ export const dict = {
   'sessions.sidebar.group.collapseAria': 'Réduire {label}',
   'sessions.sidebar.group.actions.deleteArchivedInGroupAria': 'Supprimer les sessions archivées dans {label}',
   'sessions.sidebar.group.actions.deleteArchivedSessions': 'Supprimer les sessions archivées',
-  'sessions.sidebar.group.actions.deleteGroupAria': 'Supprimer {label}',
   'sessions.sidebar.group.actions.deleteWorktree': 'Supprimer ce worktree',
   'sessions.sidebar.group.actions.deleteWorktreeAndBranch': 'Supprimer ce worktree et la branche locale',
-  'sessions.sidebar.group.actions.deleteGroupAndBranchAria': 'Supprimer {label} et sa branche locale',
   'sessions.sidebar.group.actions.newDraftInGroupAria': 'Nouvelle session de brouillon dans {label}',
   'sessions.sidebar.grouping.projectRoot': 'racine du projet',
   'sessions.sidebar.grouping.projectRootWithBranch': 'racine du projet : {branch}',

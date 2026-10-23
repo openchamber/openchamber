@@ -16,6 +16,7 @@ import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
+import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
 import { sourceBoardI18n } from './source-board.i18n';
@@ -589,9 +590,6 @@ export const dict = {
   'sessions.sidebar.activity.chatsEmpty': 'אין עדיין צ\'אטים.',
   'chat.chatInput.chooseProject': 'בחר פרויקט',
   'sessions.archivePage.allDirectories': 'כל התיקיות',
-  'sessions.sidebar.header.viewMode.label': 'תצוגה',
-  'sessions.sidebar.header.viewMode.projects': 'מקובץ',
-  'sessions.sidebar.header.viewMode.timeline': 'ציר זמן',
   'sessions.sidebar.header.projectDisplay.label': 'הצג פרויקטים',
   'sessions.sidebar.header.projectDisplay.all': 'כל הפרויקטים',
   'sessions.sidebar.header.listGrouping.label': 'הפעלות',
@@ -822,10 +820,8 @@ export const dict = {
   'sessions.sidebar.group.collapseAria': 'כווץ את {label}',
   'sessions.sidebar.group.actions.deleteArchivedInGroupAria': 'מחק את ההפעלות בארכיון של {label}',
   'sessions.sidebar.group.actions.deleteArchivedSessions': 'מחק הפעלות בארכיון',
-  'sessions.sidebar.group.actions.deleteGroupAria': 'מחק את {label}',
   'sessions.sidebar.group.actions.deleteWorktree': 'מחק עץ עבודה',
   'sessions.sidebar.group.actions.deleteWorktreeAndBranch': 'מחק עץ עבודה וענף מקומי',
-  'sessions.sidebar.group.actions.deleteGroupAndBranchAria': 'מחק את {label} ואת הענף המקומי שלו',
   'sessions.sidebar.group.actions.newDraftInGroupAria': 'טיוטת הפעלה חדשה ב-{label}',
   'sessions.sidebar.grouping.projectRoot': 'שורש הפרויקט',
   'sessions.sidebar.grouping.projectRootWithBranch': 'שורש הפרויקט: {branch}',
@@ -3819,6 +3815,7 @@ export const dict = {
   ...webSearchI18n.he,
   ...sessionWarmingI18n.he,
   ...heapSnapshotI18n.he,
+  ...sidebarWorkI18n.he,
   ...overviewI18n.he,
   ...isolatedSpacesI18n.he,
   ...sourceBoardI18n.he,

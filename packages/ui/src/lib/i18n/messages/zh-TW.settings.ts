@@ -2256,8 +2256,6 @@ export const settingsDict = {
   'settings.openchamber.visual.field.queueMessagesByDefaultAria': '預設排隊訊息',
   'settings.openchamber.visual.field.queueMessagesByDefault': '預設排隊訊息',
   'settings.openchamber.visual.field.queueMessagesByDefaultTooltip': '啟用後，按 Enter 會將訊息加入佇列。使用 {modifier}+Enter 直接送出。',
-  'settings.openchamber.visual.field.persistDraftMessagesAria': '保留草稿訊息',
-  'settings.openchamber.visual.field.persistDraftMessages': '保留草稿訊息',
   'settings.openchamber.visual.field.enableSpellcheckInTextInputsAria': '在文字輸入方塊啟用拼寫檢查',
   'settings.openchamber.visual.field.enableSpellcheckInTextInputs': '在文字輸入方塊啟用拼寫檢查',
   'settings.openchamber.visual.field.largeTextPaste': '貼上大段文字',

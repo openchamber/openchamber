@@ -21,6 +21,10 @@ OpenChamber crée la branche, prépare le dossier et y ouvre une nouvelle sessio
 
 Pour éviter les questions, choisissez **Worktree rapide** dans le même menu : OpenChamber nomme la branche pour vous et y place la nouvelle session.
 
+## Dans la barre latérale
+
+Un worktree occupe une ligne dans la barre latérale, avec toutes ses sessions dessous. La ligne affiche le nom de la tâche dès que l’agent l’a nommée (avant cela, le titre de la dernière session où vous y avez travaillé), la pull request ou l’issue qu’il suit sous forme de marque colorée, et si une session y tourne ou a du nouveau pour vous. Un worktree créé pour une pull request ou une issue porte d’abord le titre de cet élément, jusqu’à ce que l’agent choisisse un nom plus court. Survolez-la pour voir la branche. Cliquez dessus pour ouvrir la dernière session où vous y avez travaillé ; pour déplier la liste, survolez l’icône de branche à sa gauche et cliquez sur la flèche qui prend sa place. Son menu renomme la tâche, range le worktree dans un dossier du projet ou le supprime. Voir [Sessions en cours](/fr/sessions-in-work/) pour savoir comment les travaux entrent dans le bloc En cours et en sortent.
+
 ## Projets ouverts sur un dossier du dépôt
 
 Si vous ouvrez un projet sur un dossier à l'intérieur d'un dépôt, comme `repo/ai`, les nouveaux worktrees s'ouvrent aussi à cet endroit. Une session dans un nouveau worktree démarre dans le même dossier du checkout, et OpenCode trouve ainsi la configuration qui s'y trouve. Un projet ouvert à la racine du dépôt démarre à la racine du worktree, comme avant. Si une branche n'a pas ce dossier, la session démarre à la racine du worktree et OpenChamber vous le signale.
@@ -31,7 +35,7 @@ Quand le travail est bon, utilisez **Integrate** dans la vue Git pour ramener le
 
 ## Nettoyer
 
-Supprimer ou archiver la session peut retirer le worktree. Vous choisissez aussi si la branche doit être supprimée — locale, et distante s’il y en a une. Rien n’est supprimé sans votre demande.
+Marquez la ligne du worktree comme terminée quand la tâche est finie : si rien ne serait perdu, ses sessions sont archivées, et le worktree et sa branche locale sont supprimés ; sinon, OpenChamber montre ce qui serait perdu et vous laisse décider. Supprimer le worktree depuis son menu, ou supprimer ou archiver sa session, fonctionne aussi. Vous choisissez aussi si la branche doit être supprimée — locale, et distante s’il y en a une.
 
 ## Si quelque chose semble étrange
 

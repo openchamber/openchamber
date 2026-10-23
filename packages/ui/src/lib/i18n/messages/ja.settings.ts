@@ -2402,8 +2402,6 @@ export const settingsDict = {
   'settings.openchamber.visual.field.queueMessagesByDefaultAria': 'デフォルトでメッセージをキューイング',
   'settings.openchamber.visual.field.queueMessagesByDefault': 'デフォルトでメッセージをキューイング',
   'settings.openchamber.visual.field.queueMessagesByDefaultTooltip': '有効にすると Enter でメッセージをキューイングします。{modifier}+Enter で送信します。',
-  'settings.openchamber.visual.field.persistDraftMessagesAria': '下書きメッセージを保持',
-  'settings.openchamber.visual.field.persistDraftMessages': '下書きメッセージを保持',
   'settings.openchamber.visual.field.enableSpellcheckInTextInputsAria': 'テキスト入力のスペルチェックを有効化',
   'settings.openchamber.visual.field.enableSpellcheckInTextInputs': 'テキスト入力のスペルチェックを有効化',
   'settings.openchamber.visual.field.largeTextPaste': '大きなテキストの貼り付け',

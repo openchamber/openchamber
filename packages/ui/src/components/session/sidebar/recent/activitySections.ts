@@ -10,7 +10,7 @@ type SidebarActivityItem = {
   getSecondaryMeta?: (sessionId: string) => SidebarActivityItem['secondaryMeta'];
 };
 
-// The timeline and In work filter their own lists with the sidebar's rule:
+// The zones filter their own lists with the sidebar's rule:
 // an exact `ses_` id, otherwise a case-insensitive title match.
 const matchesSidebarSessionQuery = (session: Session, query: string): boolean => {
   const normalizedQuery = query.trim().toLowerCase();
@@ -42,11 +42,9 @@ export const countSessionTreeQueryMatches = (node: SessionNode, query: string): 
 
 /**
  * The Pinned or In work sessions a search lists, with the matches each one
- * counts. Tree (`'tree'`) looks through the whole session tree, since its
- * one-line rows open to the match and search lists these sessions nowhere
- * else. List (`'session'`) matches the session
- * itself, as its project lists do, since its flat rows cannot show the
- * subsession that matched.
+ * counts. `'tree'` looks through the whole session tree, since one-line zone
+ * rows open to the match and search lists these sessions nowhere else.
+ * `'session'` matches the session itself only.
  */
 export const matchZoneSessionsForSidebarQuery = (
   zone: readonly Session[],
@@ -66,9 +64,9 @@ export const matchZoneSessionsForSidebarQuery = (
   return { sessions, matchCountById };
 };
 
-// Timeline lists every non-archived root project session as one flat zone.
-// Ordering, membership, and branch/project metadata are resolved by the
-// caller; this projection only applies the search filter and shapes rows.
+// The rows of a zone's sessions. Ordering, membership, and branch/project
+// metadata are resolved by the caller; this projection only applies the
+// search filter and shapes rows.
 export const deriveTimelineActivityItems = ({
   sessions,
   getSessionLocation,

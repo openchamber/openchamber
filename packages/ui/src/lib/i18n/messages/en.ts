@@ -16,6 +16,7 @@ import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
+import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
 import { sourceBoardI18n } from './source-board.i18n';
@@ -157,6 +158,7 @@ export const dict = {
   ...webSearchI18n.en,
   ...sessionWarmingI18n.en,
   ...heapSnapshotI18n.en,
+  ...sidebarWorkI18n.en,
   ...overviewI18n.en,
   ...isolatedSpacesI18n.en,
   ...sourceBoardI18n.en,
@@ -625,9 +627,6 @@ export const dict = {
   'sessions.sidebar.activity.chatsEmpty': 'No chats yet.',
   'chat.chatInput.chooseProject': 'Choose project',
   'sessions.archivePage.allDirectories': 'All directories',
-  'sessions.sidebar.header.viewMode.label': 'View',
-  'sessions.sidebar.header.viewMode.projects': 'Tree',
-  'sessions.sidebar.header.viewMode.timeline': 'List',
   'sessions.sidebar.header.projectDisplay.label': 'Show projects',
   'sessions.sidebar.header.projectDisplay.all': 'All projects',
   'sessions.sidebar.header.listGrouping.label': 'Sessions',
@@ -859,10 +858,8 @@ export const dict = {
   'sessions.sidebar.group.collapseAria': 'Collapse {label}',
   'sessions.sidebar.group.actions.deleteArchivedInGroupAria': 'Delete archived sessions in {label}',
   'sessions.sidebar.group.actions.deleteArchivedSessions': 'Delete archived sessions',
-  'sessions.sidebar.group.actions.deleteGroupAria': 'Delete {label}',
   'sessions.sidebar.group.actions.deleteWorktree': 'Delete worktree',
   'sessions.sidebar.group.actions.deleteWorktreeAndBranch': 'Delete worktree and local branch',
-  'sessions.sidebar.group.actions.deleteGroupAndBranchAria': 'Delete {label} and its local branch',
   'sessions.sidebar.group.actions.newDraftInGroupAria': 'New draft session in {label}',
   'sessions.sidebar.grouping.projectRoot': 'project root',
   'sessions.sidebar.grouping.projectRootWithBranch': 'project root: {branch}',

@@ -21,6 +21,10 @@ OpenChamber tworzy gałąź, konfiguruje folder i otwiera w nim nową sesję, go
 
 Bez pytań: wybierz **Szybki worktree** w tym samym menu gałęzi. OpenChamber sam nazwie gałąź i skieruje na nią nową sesję.
 
+## Na pasku bocznym
+
+Worktree to jeden wiersz na pasku bocznym, a pod nim wszystkie jego sesje. Wiersz pokazuje nazwę zadania, gdy tylko agent ją nada (do tego czasu tytuł sesji, w której pracowałeś tam ostatnio), pull request lub issue, za którym podąża, w postaci kolorowego znacznika, i to, czy któraś sesja w nim działa albo ma dla Ciebie nowości. Worktree utworzony dla pull requesta lub issue zaczyna od tytułu tego elementu, dopóki agent nie wybierze krótszej nazwy. Najedź na niego kursorem, żeby zobaczyć gałąź. Kliknij go, żeby otworzyć sesję, w której pracowałeś tam ostatnio; żeby rozwinąć listę, najedź kursorem na ikonę gałęzi po lewej i kliknij strzałkę, która pojawi się w jej miejscu. Jego menu zmienia nazwę zadania, przenosi worktree do folderu projektu albo go usuwa. Jak prace trafiają do bloku W toku i z niego wychodzą, opisuje strona [Sesje w toku](/pl/sessions-in-work/).
+
 ## Projekty otwarte na folderze repozytorium
 
 Jeśli otwierasz projekt na folderze wewnątrz repozytorium, na przykład `repo/ai`, nowe worktree otwierają się w tym samym miejscu. Sesja w nowym worktree startuje w tym samym folderze checkoutu, więc OpenCode znajduje konfigurację, która w nim leży. Projekt otwarty na katalogu głównym repozytorium startuje w katalogu głównym worktree, jak dotąd. Jeśli gałąź nie ma takiego folderu, sesja startuje w katalogu głównym worktree, a OpenChamber o tym informuje.
@@ -31,7 +35,7 @@ Gdy praca jest gotowa, użyj **Integrate** w widoku Git, aby przenieść commity
 
 ## Posprzątaj
 
-Usunięcie lub zarchiwizowanie sesji może usunąć worktree. Sam decydujesz, czy usunąć również gałąź — lokalną, a zdalną, jeśli istnieje. Nic nie jest usuwane bez Twojej zgody.
+Gdy zadanie jest skończone, oznacz wiersz worktree jako gotowy: jeśli nic nie przepadnie, jego sesje trafiają do archiwum, a worktree i jego lokalna gałąź zostają usunięte; w przeciwnym razie OpenChamber pokazuje, co by przepadło, i zostawia decyzję Tobie. Możesz też usunąć worktree z jego menu albo usunąć lub zarchiwizować jego sesję. Sam decydujesz, czy usunąć również gałąź — lokalną, a zdalną, jeśli istnieje.
 
 ## Jeśli coś wygląda nie tak
 

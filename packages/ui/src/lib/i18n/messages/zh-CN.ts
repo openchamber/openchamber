@@ -17,6 +17,7 @@ import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
+import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
 import { sourceBoardI18n } from './source-board.i18n';
@@ -158,6 +159,7 @@ export const dict: Record<I18nKey, string> = {
   ...webSearchI18n['zh-CN'],
   ...sessionWarmingI18n['zh-CN'],
   ...heapSnapshotI18n['zh-CN'],
+  ...sidebarWorkI18n['zh-CN'],
   ...overviewI18n['zh-CN'],
   ...isolatedSpacesI18n['zh-CN'],
   ...sourceBoardI18n['zh-CN'],
@@ -623,9 +625,6 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.empty.noMatches.description': '请尝试其他标题、分支、文件夹或路径。',
   'sessions.sidebar.empty.noMatches.searchArchive': '在归档中搜索',
   'sessions.sidebar.activity.chatsTitle': '聊天',
-  'sessions.sidebar.header.viewMode.label': '视图',
-  'sessions.sidebar.header.viewMode.projects': '树形',
-  'sessions.sidebar.header.viewMode.timeline': '列表',
   'sessions.sidebar.activity.chatsEmpty': '暂无聊天。',
   'chat.chatInput.chooseProject': '选择项目',
   'sessions.archivePage.allDirectories': '所有目录',
@@ -860,10 +859,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.group.collapseAria': '折叠 {label}',
   'sessions.sidebar.group.actions.deleteArchivedInGroupAria': '删除 {label} 中已归档会话',
   'sessions.sidebar.group.actions.deleteArchivedSessions': '删除已归档会话',
-  'sessions.sidebar.group.actions.deleteGroupAria': '删除 {label}',
   'sessions.sidebar.group.actions.deleteWorktree': '删除工作树',
   'sessions.sidebar.group.actions.deleteWorktreeAndBranch': '删除工作树和本地分支',
-  'sessions.sidebar.group.actions.deleteGroupAndBranchAria': '删除 {label} 及其本地分支',
   'sessions.sidebar.group.actions.newDraftInGroupAria': '在 {label} 中新建草稿会话',
   'sessions.sidebar.grouping.projectRoot': '项目根目录',
   'sessions.sidebar.grouping.projectRootWithBranch': '项目根目录：{branch}',

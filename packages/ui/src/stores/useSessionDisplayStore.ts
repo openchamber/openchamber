@@ -7,11 +7,13 @@ type ProjectSortOrder = 'manual' | 'a-z' | 'z-a' | 'date-added' | 'recent';
 // and 'a-z' keep positions stable.
 type WorktreeSortOrder = 'recent' | 'manual' | 'a-z';
 
-// 'projects' is the grouped sidebar, labelled Tree: project zones with
-// worktree sub-headers. 'timeline', labelled List, lists root sessions
-// without worktree groups or folders, laid out by `listSessionGrouping`.
-export type SidebarViewMode = 'projects' | 'timeline';
-// List only: 'project' puts each project's sessions under its header;
+// The phone's view, and what the desktop and web sidebar's grouping follows
+// until chosen there (`resolveSidebarGrouping`). 'projects' is the grouped
+// view, labelled Tree: project zones with worktree sub-headers. 'timeline',
+// labelled List, lists root sessions without worktree groups or folders,
+// laid out by `listSessionGrouping`.
+type SidebarViewMode = 'projects' | 'timeline';
+// The phone's List and `sidebarGrouping`: 'project' puts each project's sessions under its header;
 // 'time' lists every project's sessions together, newest activity first.
 type ListSessionGrouping = 'project' | 'time';
 type ProjectDisplayMode = 'all' | 'single';
@@ -25,6 +27,16 @@ type SessionDisplayStore = {
   setSidebarViewMode: (mode: SidebarViewMode) => void;
   listSessionGrouping: ListSessionGrouping;
   setListSessionGrouping: (grouping: ListSessionGrouping) => void;
+  /**
+   * The desktop and web sidebar's one view: under each project, or one list
+   * by time. Null until chosen there, when it follows the List/Tree pair it
+   * replaced (`resolveSidebarGrouping`). The phone still reads the pair.
+   */
+  sidebarGrouping: ListSessionGrouping | null;
+  setSidebarGrouping: (grouping: ListSessionGrouping) => void;
+  /** A work in the In work block also stays in its project or folder; off by default. */
+  keepWorkInPlace: boolean;
+  setKeepWorkInPlace: (keep: boolean) => void;
   /** Local display preference; motion remains opt-in. */
   animatedActivityIndicators: boolean;
   setAnimatedActivityIndicators: (enabled: boolean) => void;
@@ -96,6 +108,16 @@ export const migrateSessionDisplayState = (
   return state;
 };
 
+/**
+ * How the desktop and web sidebar groups works. Before the choice is made in
+ * the one view, a List sorted by time keeps its list by time; Tree and List by
+ * project both group under projects.
+ */
+export const resolveSidebarGrouping = (
+  state: Pick<SessionDisplayStore, 'sidebarGrouping' | 'sidebarViewMode' | 'listSessionGrouping'>,
+): ListSessionGrouping => state.sidebarGrouping
+  ?? (state.sidebarViewMode === 'timeline' && state.listSessionGrouping === 'time' ? 'time' : 'project');
+
 export const useSessionDisplayStore = create<SessionDisplayStore>()(
   persist(
     (set) => ({
@@ -111,6 +133,10 @@ export const useSessionDisplayStore = create<SessionDisplayStore>()(
       setSidebarViewMode: (mode) => set({ sidebarViewMode: mode }),
       listSessionGrouping: 'project',
       setListSessionGrouping: (grouping) => set({ listSessionGrouping: grouping }),
+      sidebarGrouping: null,
+      setSidebarGrouping: (grouping) => set({ sidebarGrouping: grouping }),
+      keepWorkInPlace: false,
+      setKeepWorkInPlace: (keep) => set({ keepWorkInPlace: keep }),
       showChatsSection: true,
       showWorkSection: true,
       showPinnedSection: false,

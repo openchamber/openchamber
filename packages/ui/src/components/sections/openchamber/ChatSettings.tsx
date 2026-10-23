@@ -348,8 +348,6 @@ const ComposerTab: React.FC = () => {
   const setAllowPromptingSubagentSessions = useUIStore((state) => state.setAllowPromptingSubagentSessions);
   const savePastedImagesAsFiles = useUIStore((state) => state.savePastedImagesAsFiles);
   const setSavePastedImagesAsFiles = useUIStore((state) => state.setSavePastedImagesAsFiles);
-  const persistChatDraft = useUIStore((state) => state.persistChatDraft);
-  const setPersistChatDraft = useUIStore((state) => state.setPersistChatDraft);
   const inputSpellcheckEnabled = useUIStore((state) => state.inputSpellcheckEnabled);
   const setInputSpellcheckEnabled = useUIStore((state) => state.setInputSpellcheckEnabled);
   const inputHistoryScope = useInputHistoryStore((state) => state.scope);
@@ -462,13 +460,6 @@ const ComposerTab: React.FC = () => {
 
       <SettingsSection title={t('settings.layout.chat.section.draftsAndHistory')} contentClassName="space-y-3">
         <div className={SETTINGS_OPTION_STACK_CLASS}>
-          <SettingsCheckboxRow
-            checked={persistChatDraft}
-            onChange={setPersistChatDraft}
-            label={t('settings.openchamber.visual.field.persistDraftMessages')}
-            ariaLabel={t('settings.openchamber.visual.field.persistDraftMessagesAria')}
-            settingsItem="chat.persist-drafts"
-          />
           {isMobile ? null : (
             <SettingsCheckboxRow
               checked={inputSpellcheckEnabled}

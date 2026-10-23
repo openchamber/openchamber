@@ -2256,8 +2256,6 @@ export const settingsDict = {
   'settings.openchamber.visual.field.queueMessagesByDefaultAria': 'Mettre les messages en file d\'attente par défaut',
   'settings.openchamber.visual.field.queueMessagesByDefault': 'Messages en file d\'attente par défaut',
   'settings.openchamber.visual.field.queueMessagesByDefaultTooltip': 'Lorsqu\'il est activé, Enter met les messages en file d\'attente. Utilisez {modifier}+Entrée pour envoyer.',
-  'settings.openchamber.visual.field.persistDraftMessagesAria': 'Conserver les brouillons de messages',
-  'settings.openchamber.visual.field.persistDraftMessages': 'Conserver les brouillons de messages',
   'settings.openchamber.visual.field.enableSpellcheckInTextInputsAria': 'Activer la vérification orthographique dans les saisies de texte',
   'settings.openchamber.visual.field.enableSpellcheckInTextInputs': 'Activer la vérification orthographique dans les entrées de texte',
   'settings.openchamber.visual.field.largeTextPaste': 'Collage de texte volumineux',

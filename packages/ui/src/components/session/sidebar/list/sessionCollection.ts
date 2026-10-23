@@ -12,6 +12,7 @@ import { resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
 import { normalizePath } from '../utils';
 import { isChatDirectoryPath } from '@/lib/chatDirectories';
 import { isBtwSession } from '@/lib/sessionBtwMetadata';
+import { resolveSessionNestingParentId } from '@/lib/sessionWorkLineage';
 import type { GlobalSessionStructure } from '@/stores/globalSessionStructure';
 import { countSyncPerformance } from '@/sync/performance-diagnostics';
 import type { SessionNode } from '../types';
@@ -28,10 +29,11 @@ type SidebarSessionPartitions = {
   chatSessions: Session[];
 };
 
-const parentIdOf = (session: Session): string | null => {
-  // SAFETY: OpenCode session payloads expose parentID although the SDK base Session omits it.
-  return (session as Session & { parentID?: string | null }).parentID ?? null;
-};
+// A row nests under its subagent parent or under the session it grew out of
+// (an auto-review, a fork, a dispatched session), see `lib/sessionWorkLineage`.
+const nestingParentResolver = (sessionById: ReadonlyMap<string, Session>) => (
+  (session: Session): string | null => resolveSessionNestingParentId(session, (id) => sessionById.get(id))
+);
 
 // This boundary owns session visibility before Recent or projects take
 // ownership. Temporary /btw forks never leak into any sidebar projection.
@@ -179,16 +181,17 @@ const buildSidebarSessionStructure = ({
   const sessions = [...projectSessions, ...partition.chatSessions];
   const sessionById = new Map(sessions.map((session) => [session.id, session]));
   const projectSessionIds = new Set(projectSessions.map((session) => session.id));
+  const nestingParentOf = nestingParentResolver(sessionById);
   const indexedRootIds = globalStructure?.activeRootIds ?? [];
   const indexedRootIdSet = new Set(indexedRootIds);
   const rootSessions = [
     ...indexedRootIds.flatMap((sessionId) => {
       if (!projectSessionIds.has(sessionId)) return [];
       const session = sessionById.get(sessionId);
-      return session ? [session] : [];
+      return session && !nestingParentOf(session) ? [session] : [];
     }),
     ...projectSessions.filter((session) => (
-      !indexedRootIdSet.has(session.id) && !parentIdOf(session)
+      !indexedRootIdSet.has(session.id) && !nestingParentOf(session)
     )),
   ];
   return {
@@ -216,8 +219,9 @@ const orderSidebarSessionStructure = (
     structure.hierarchy,
   );
   const childrenMap = new Map<string, Session[]>();
+  const nestingParentOf = nestingParentResolver(structure.sessionById);
   for (const session of orderedSessions) {
-    const parentID = parentIdOf(session);
+    const parentID = nestingParentOf(session);
     if (!parentID) continue;
     const siblings = childrenMap.get(parentID) ?? [];
     siblings.push(session);
@@ -295,6 +299,11 @@ export const useSessionProjectCollection = ({
     [pinnedSessionIds, sessionOrderRanks, structure],
   );
   const { chatSessions, orderedSessions } = ordering;
+  // Sessions a row nests under another one: they are never roots of their own.
+  const nestedSessionIds = React.useMemo(
+    () => new Set([...ordering.childrenMap.values()].flat().map((session) => session.id)),
+    [ordering.childrenMap],
+  );
   const sessions = structure.projectSessions;
   const sessionById = React.useMemo(() => new Map(
     [...structure.sessions, ...archivedSessions].map((session) => [session.id, session]),
@@ -324,10 +333,12 @@ export const useSessionProjectCollection = ({
     chatSessions,
     getDescendantIds: getDescendantIdsForAction,
     hasAuthoritativeGlobalSessions,
+    nestedSessionIds,
     orderedSessions,
     pinnedSessionIds,
     sessionOrderRanks,
     sessions,
     rootSessions: structure.rootSessions,
+    sessionById,
   };
 };

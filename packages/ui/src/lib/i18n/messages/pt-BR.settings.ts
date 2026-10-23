@@ -2369,8 +2369,6 @@ export const settingsDict = {
   "settings.openchamber.visual.field.queueMessagesByDefaultAria": "Colocar mensagens na fila por padrão",
   "settings.openchamber.visual.field.queueMessagesByDefault": "Colocar mensagens na fila por padrão",
   "settings.openchamber.visual.field.queueMessagesByDefaultTooltip": "Quando estiver habilitado, Enter coloca mensagens na fila. Use {modifier}+Enter para enviar.",
-  "settings.openchamber.visual.field.persistDraftMessagesAria": "Manter rascunhos de mensagens",
-  "settings.openchamber.visual.field.persistDraftMessages": "Manter rascunhos de mensagens",
   "settings.openchamber.visual.field.enableSpellcheckInTextInputsAria": "Ativar ortografia em campos de texto",
   "settings.openchamber.visual.field.enableSpellcheckInTextInputs": "Ativar ortografia em campos de texto",
   "settings.openchamber.visual.field.largeTextPaste": "Colagem de texto grande",
