@@ -24,6 +24,7 @@ import { isRunningSubagentRunMessage, readSubagentRun, type SubagentRun } from '
 import { readDispatchedSessionResult, type DispatchedSessionResult } from '@/lib/opencode/dispatched-session';
 import { readOpenChamberResume, type OpenChamberResume } from '@/lib/opencode/openchamber-resume';
 import { fixLoopTitle } from './fixLoopNoticeTitle';
+import { BotNotice } from './BotNotice';
 import { formatTimeForPreference } from '@/lib/timeFormat';
 import { readSessionNotice } from '@/lib/opencode/session-notices';
 import { SessionNoticeBlock } from './SessionNoticeBlock';
@@ -317,7 +318,7 @@ const RESTART_CAUSE_KEYS = {
 } as const satisfies Record<Extract<OpenChamberResume, { kind: 'restart-resume' }>['cause'], I18nKey | null>;
 
 const openChamberResumeTitle = (
-    resume: Exclude<OpenChamberResume, { kind: 'fix-loop' }>,
+    resume: Exclude<OpenChamberResume, { kind: 'fix-loop' | 'bot' }>,
     t: ReturnType<typeof useI18n>['t'],
     formatTime: (timestamp: number) => string,
 ): string => {
@@ -353,7 +354,7 @@ const openChamberResumeBody = (resume: OpenChamberResume): string => {
  * style, so it never reads as something the user typed; it opens to what the
  * agent received.
  */
-const OpenChamberResumeNotice: React.FC<{ message: SyntheticMessage; resume: OpenChamberResume }> = ({ message, resume }) => {
+const OpenChamberResumeNotice: React.FC<{ message: SyntheticMessage; resume: Exclude<OpenChamberResume, { kind: 'bot' }> }> = ({ message, resume }) => {
     const { t } = useI18n();
     const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
     const formatTime = React.useCallback(
@@ -385,6 +386,7 @@ const SubagentNotice: React.FC<{ message: SyntheticMessage }> = ({ message }) =>
     const resume = React.useMemo(() => (run || dispatched ? undefined : readOpenChamberResume(message)), [message, run, dispatched]);
     if (run) return <SubagentRunNotice message={message} run={run} />;
     if (dispatched) return <DispatchedSessionNotice message={message} result={dispatched} />;
+    if (resume?.kind === 'bot') return <NoticeRow><BotNotice notice={resume} blockId={message.id} /></NoticeRow>;
     return resume ? <OpenChamberResumeNotice message={message} resume={resume} /> : null;
 };
 

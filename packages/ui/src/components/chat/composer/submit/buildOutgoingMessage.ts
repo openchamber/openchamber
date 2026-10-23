@@ -58,7 +58,7 @@ export interface QueuedInput {
 }
 
 const isServerOwned = (message: QueuedMessage): boolean =>
-    Boolean(message.scheduledTask) || message.origin?.kind === 'pr-fix-loop';
+    Boolean(message.scheduledTask) || message.origin?.kind === 'pr-fix-loop' || message.origin?.kind === 'bot';
 
 export const selectComposerQueue = (messages: readonly QueuedMessage[]): readonly QueuedMessage[] =>
     messages.some(isServerOwned)

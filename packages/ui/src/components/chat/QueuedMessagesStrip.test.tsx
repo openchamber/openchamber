@@ -94,4 +94,16 @@ describe('QueuedMessagesStrip', () => {
     expect(button('send')).toBeUndefined();
     expect(button('Remove from queue')).toBeDefined();
   });
+
+  test('a bot item can be removed but not edited or sent by the client', async () => {
+    // Given a projected server-owned bot event.
+    const message: QueuedMessage = { ...queued('bot-event', 'Review feedback'), origin: { kind: 'bot', id: 'item-1' } };
+    // When it appears in the queue strip.
+    await setQueue(message);
+    // Then only removal is available to the client.
+    expect(host.textContent).toContain('Review feedback');
+    expect(button('Edit')).toBeUndefined();
+    expect(button('send')).toBeUndefined();
+    expect(button('Remove from queue')).toBeDefined();
+  });
 });

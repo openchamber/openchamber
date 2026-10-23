@@ -123,7 +123,7 @@ export interface QueuedMessage {
     sendConfig?: QueuedMessageSendConfig;
     goal?: QueuedMessageGoal;
     scheduledTask?: z.infer<typeof scheduledTaskSchema>;
-    /** A server feature queued it (the PR fix loop, a restack); only the server sends it. */
+    /** A server feature queued it (a bot, the PR fix loop, a restack). */
     origin?: z.infer<typeof serverOriginSchema>;
 }
 
@@ -220,7 +220,7 @@ const serverItemBaseSchema = z.object({
 const scheduledTaskSchema = z.object({
     projectId: z.string().min(1), taskId: z.string().min(1),
 });
-const serverOriginSchema = z.object({ kind: z.enum(['pr-fix-loop', 'pr-stack']), id: z.string().min(1) });
+const serverOriginSchema = z.object({ kind: z.enum(['pr-fix-loop', 'pr-stack', 'bot']), id: z.string().min(1) });
 const serverItemSchema = z.union([
     serverItemBaseSchema.extend({ scheduledTask: scheduledTaskSchema, sendConfig: serverSendConfigSchema.partial() }),
     serverItemBaseSchema.extend({ origin: serverOriginSchema, sendConfig: serverSendConfigSchema.partial() }),

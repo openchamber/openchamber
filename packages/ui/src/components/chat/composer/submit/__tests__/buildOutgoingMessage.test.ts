@@ -118,6 +118,16 @@ describe('manual queue projection', () => {
         expect(buildOutgoingMessage(input({ queued: selectComposerQueue([fixLoop]) }), deps()).isEmpty).toBe(true);
     });
 
+    test('bot feedback never joins a manual composer send even with a captured selection', () => {
+        // Given bot feedback ahead of an ordinary queued message.
+        const bot: QueuedMessage = { ...ordinary, id: 'bot-event', text: 'Provider feedback', origin: { kind: 'bot', id: 'item' } };
+        // When manual send-all assembles the queue.
+        const outgoing = buildOutgoingMessage(input({ queued: selectComposerQueue([bot, ordinary]) }), deps());
+        // Then the resulting user prompt contains only the ordinary message.
+        expect(outgoing.primaryText).toBe(ordinary.text);
+        expect(outgoing.additionalParts).toEqual([]);
+    });
+
     test('ordinary queues keep their original items, order and identity', () => {
         const queue = [ordinary, { ...ordinary, id: 'second' }];
         expect(selectComposerQueue(queue)).toBe(queue);

@@ -15,6 +15,7 @@
  *   feedback (`web/server/lib/pr-fix-loop/runtime.js`, delivered by the
  *   server message queue). The metadata indexes what it found; the message
  *   text holds the full details the agent read.
+ * - `bot`: a bot answer or provider event, keyed by project, item and event.
  */
 
 import { z } from "zod"
@@ -64,7 +65,15 @@ const fixLoopSchema = z.object({
   feedback: z.array(fixLoopFeedbackSchema).catch([]),
 })
 
-const resumeSchema = z.discriminatedUnion("kind", [restartResumeSchema, questionAnswerSchema, fixLoopSchema])
+const botSchema = z.object({
+  source: z.literal(OPENCHAMBER_RESUME_SOURCE),
+  kind: z.literal("bot"),
+  projectId: z.string().trim().min(1),
+  itemId: z.string().trim().min(1),
+  eventId: z.string().trim().min(1),
+})
+
+const resumeSchema = z.discriminatedUnion("kind", [restartResumeSchema, questionAnswerSchema, fixLoopSchema, botSchema])
 
 export type OpenChamberResume = z.infer<typeof resumeSchema> & { text: string; sentAt: number }
 

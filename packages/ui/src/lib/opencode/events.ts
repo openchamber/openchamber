@@ -14,6 +14,7 @@
  */
 
 import type { OpenCodeEvent } from "@opencode/client"
+import type { BotsRouteTarget } from "@/lib/router/types"
 import {
   compact,
   partIds,
@@ -164,6 +165,7 @@ export type SyncEvent =
 
 /** Agent-completion / restart notices the OpenChamber server publishes for non-web runtimes. */
 export type OpenchamberNotification = {
+  readonly botTarget?: BotsRouteTarget
   kind?: string
   sessionId?: string
   directory?: string
