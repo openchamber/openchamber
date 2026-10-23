@@ -29,7 +29,7 @@ export function BotIdentities({ projectId }: { readonly projectId: string }) {
         <div className="flex gap-2"><Button size="sm" variant="outline" disabled={action.busy} onClick={() => setEditor({ identity })}>{t('bots.edit')}</Button><Button size="sm" variant="ghost" disabled={action.busy} onClick={() => setRemoving(identity.id)}>{t('settings.common.actions.delete')}</Button></div>
       </div>
       <p className="typography-meta text-muted-foreground" dir="ltr">{identity.kind} · {identity.revision}</p>
-      <p className="break-all typography-meta" dir="auto">{[identity.accountId, identity.site, identity.email, identity.appId, identity.installationId, identity.applicationId].filter(Boolean).join(' · ')}</p>
+      <p className="break-all typography-meta" dir="ltr">{[identity.accountId, identity.site, identity.cloudId, identity.clientId, identity.email, identity.appId, identity.installationId, identity.applicationId].filter(Boolean).join(' · ')}</p>
       {removing === identity.id ? <div className="space-y-2">
         <p className="typography-meta text-[var(--status-warning-text)]">{t('bots.removeIdentity')}</p>
         <div className="flex gap-2"><Button size="sm" variant="destructive" disabled={action.busy} onClick={() => void action.run(async () => {

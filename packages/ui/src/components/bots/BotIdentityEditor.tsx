@@ -12,7 +12,7 @@ import { useBotAction } from './useBotRequest';
 
 const identityKinds = {
   'github-account': 'bots.githubAccount', 'github-app': 'bots.githubApp', 'jira-account': 'bots.jiraAccount',
-  'jira-service': 'bots.jiraService', 'discord-app': 'bots.discordApp',
+  'jira-service': 'bots.jiraService', 'jira-oauth': 'bots.jiraOAuth', 'discord-app': 'bots.discordApp',
 } satisfies Record<BotIdentity['kind'], I18nKey>;
 
 export function BotIdentityEditor({ projectId, initial, onSaved, onClose }: {
@@ -27,7 +27,10 @@ export function BotIdentityEditor({ projectId, initial, onSaved, onClose }: {
   const [applicationId, setApplicationId] = React.useState(initial?.applicationId ?? '');
   const [site, setSite] = React.useState(initial?.site ?? '');
   const [email, setEmail] = React.useState(initial?.email ?? '');
+  const [cloudId, setCloudId] = React.useState(initial?.cloudId ?? '');
+  const [clientId, setClientId] = React.useState(initial?.clientId ?? '');
   const [secret, setSecret] = React.useState('');
+  const secretLabel = t(kind === 'jira-oauth' ? 'bots.clientSecret' : 'bots.secret');
   const github = useBotGitHubAccounts();
   const action = useBotAction();
   const selectedAccount = github.accounts.find((account) => account.credentialId === accountId);
@@ -39,6 +42,7 @@ export function BotIdentityEditor({ projectId, initial, onSaved, onClose }: {
         input = { kind, label, accountId: selectedAccount.credentialId, credentialRevision: selectedAccount.credentialRevision }; break;
       case 'github-app': input = { kind, label, appId, installationId, privateKey: secret }; break;
       case 'jira-account': case 'jira-service': input = { kind, label, site, email, apiToken: secret }; break;
+      case 'jira-oauth': input = { kind, label, site, cloudId, clientId, clientSecret: secret }; break;
       case 'discord-app': input = { kind, label, applicationId, botToken: secret }; break;
       default: { const exhaustive: never = kind; return exhaustive; }
     }
@@ -55,7 +59,7 @@ export function BotIdentityEditor({ projectId, initial, onSaved, onClose }: {
     <p className="typography-meta text-[var(--status-warning-text)]">{t('bots.redacted')}</p>
     <div className="min-h-5 typography-meta text-[var(--status-error-text)]" role="alert">{action.error}</div>
     <SettingsSection title={t('bots.identities')} divider={false} contentClassName="space-y-4">
-      <BotSelectField<BotIdentity['kind']> label={t('bots.identities')} value={kind} onChange={(value) => { setKind(value); setSecret(''); }} options={(['github-account', 'github-app', 'jira-account', 'jira-service', 'discord-app'] as const).map((value) => ({ value, label: t(identityKinds[value]) }))} disabled={initial !== null} />
+      <BotSelectField<BotIdentity['kind']> label={t('bots.identities')} value={kind} onChange={(value) => { setKind(value); setSecret(''); }} options={(['github-account', 'github-app', 'jira-account', 'jira-service', 'jira-oauth', 'discord-app'] as const).map((value) => ({ value, label: t(identityKinds[value]) }))} disabled={initial !== null} />
       <SettingsStackedField label={t('bots.name')}><Input required aria-label={t('bots.name')} value={label} onChange={(event) => setLabel(event.target.value)} /></SettingsStackedField>
       {kind === 'github-account' ? <>
         <BotSelectField label={t('bots.githubAccount')} value={accountId} onChange={setAccountId} options={[{ value: '', label: t('bots.none') }, ...github.accounts.map((account) => ({ value: account.credentialId, label: `${account.user.username} · ${account.source}` }))]} />
@@ -65,13 +69,15 @@ export function BotIdentityEditor({ projectId, initial, onSaved, onClose }: {
         <SettingsStackedField label={t('bots.appId')}><Input required dir="ltr" aria-label={t('bots.appId')} value={appId} onChange={(event) => setAppId(event.target.value)} /></SettingsStackedField>
         <SettingsStackedField label={t('bots.installationId')}><Input required dir="ltr" aria-label={t('bots.installationId')} value={installationId} onChange={(event) => setInstallationId(event.target.value)} /></SettingsStackedField>
       </> : null}
-      {kind === 'jira-account' || kind === 'jira-service' ? <>
-        <SettingsStackedField label={t('bots.site')}><Input required type="url" dir="ltr" aria-label={t('bots.site')} value={site} onChange={(event) => setSite(event.target.value)} /></SettingsStackedField>
-        <SettingsStackedField label={t('bots.email')}><Input required type="email" dir="ltr" aria-label={t('bots.email')} value={email} onChange={(event) => setEmail(event.target.value)} /></SettingsStackedField>
+      {kind.startsWith('jira-') ? <SettingsStackedField label={t('bots.site')}><Input required type="url" dir="ltr" aria-label={t('bots.site')} pattern={kind === 'jira-oauth' ? 'https://[a-z0-9\\-]+\\.atlassian\\.net/?' : undefined} value={site} onChange={(event) => setSite(event.target.value)} /></SettingsStackedField> : null}
+      {kind === 'jira-oauth' ? <>
+        <SettingsStackedField label={t('bots.cloudId')}><Input required dir="ltr" aria-label={t('bots.cloudId')} pattern="[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}" value={cloudId} onChange={(event) => setCloudId(event.target.value)} /></SettingsStackedField>
+        <SettingsStackedField label={t('bots.clientId')}><Input required dir="ltr" aria-label={t('bots.clientId')} value={clientId} onChange={(event) => setClientId(event.target.value)} /></SettingsStackedField>
       </> : null}
+      {kind === 'jira-account' || kind === 'jira-service' ? <SettingsStackedField label={t('bots.email')}><Input required type="email" dir="ltr" aria-label={t('bots.email')} value={email} onChange={(event) => setEmail(event.target.value)} /></SettingsStackedField> : null}
       {kind === 'discord-app' ? <SettingsStackedField label={t('bots.applicationId')}><Input required dir="ltr" aria-label={t('bots.applicationId')} value={applicationId} onChange={(event) => setApplicationId(event.target.value)} /></SettingsStackedField> : null}
-      {kind !== 'github-account' ? <SettingsStackedField label={t('bots.secret')} controlClassName={kind === 'github-app' ? 'max-w-none w-full' : undefined}>
-        {kind === 'github-app' ? <Textarea required dir="ltr" aria-label={t('bots.secret')} autoComplete="off" value={secret} onChange={(event) => setSecret(event.target.value)} /> : <Input required dir="ltr" type="password" autoComplete="new-password" aria-label={t('bots.secret')} value={secret} onChange={(event) => setSecret(event.target.value)} />}
+      {kind !== 'github-account' ? <SettingsStackedField label={secretLabel} controlClassName={kind === 'github-app' ? 'max-w-none w-full' : undefined}>
+        {kind === 'github-app' ? <Textarea required dir="ltr" aria-label={secretLabel} autoComplete="off" value={secret} onChange={(event) => setSecret(event.target.value)} /> : <Input required dir="ltr" type="password" autoComplete="new-password" aria-label={secretLabel} value={secret} onChange={(event) => setSecret(event.target.value)} />}
       </SettingsStackedField> : null}
     </SettingsSection>
   </form>;

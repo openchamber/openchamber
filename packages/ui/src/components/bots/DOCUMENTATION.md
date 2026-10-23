@@ -38,6 +38,8 @@ Bots server: its entry is absent, and direct view/API use reports unsupported.
 - Identity forms keep secret inputs only in mounted React state, clear them
   after a submission, and never hydrate them from a response. Managing identities
   preserves the bot draft; closing that dialog refreshes identity choices.
+  Jira OAuth forms edit public site/cloud/client IDs and require a fresh client
+  secret for replacement. Switching kinds clears the mounted secret too.
 - Proof absence, failed/inconclusive proof, judge reasons, retained waits,
   transitions, stage sessions, diff and recorded operations remain inspectable.
   Archive detail reads the item-detail route for retained evidence, stage reports
