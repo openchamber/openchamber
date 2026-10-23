@@ -1005,7 +1005,8 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tab
             ref={attachWebview}
             src={initialSrc}
             partition={browserPartitionOf(directory)}
-            allowpopups
+            // @ts-expect-error React's webview types say boolean, but React drops boolean values for this attribute.
+            allowpopups="true"
             style={layout
               ? {
                 // Laid out at the chosen size and scaled visually: the page must
