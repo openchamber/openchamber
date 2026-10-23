@@ -204,6 +204,16 @@ Ajanın web aramaları ve sayfa getirmeleri de OpenCode üzerinden arama hizmeti
 { "action": "permission", "resource": "webfetch:*", "effect": "deny" }
 ```
 
+### Botların yazma işlemleri
+
+Enterprise modu, yönetici `allowedBotDestinations` içinde tam hedefe izin vermedikçe Git üzerinden yayımlama dahil botların GitHub, Jira ve Discord'a otonom yazma işlemlerini reddeder. Her kayıt `service`, HTTPS `origin` ve `resource` belirtir: GitHub için `sahip/depo`, Jira proje anahtarı veya Discord için `sunucu/kanal`. Joker karakterler ve yalnızca köken için verilen izinler reddedilir.
+
+```json
+{"allowedBotDestinations":[{"service":"github","origin":"https://github.com","resource":"acme/api"}]}
+```
+
+Modu ortam etkinleştirdiğinde `OPENCHAMBER_ALLOWED_BOT_DESTINATIONS` aynı listeyi JSON olarak kabul eder. Modu politika dosyası etkinleştirirse yalnızca dosyadaki liste geçerlidir. Geçersiz kayıtlar izin vermez. Kimlik bilgileri sunucuda kalır; oturum belirteci almaz. Sunucu, çalışan botlar dahil her yazma işlemini denetler.
+
 ## İlgili
 
 - [Cihaz bağlama](/tr/connect-devices/) — tek seferlik eşleştirme ve cihaza özel belirteçler

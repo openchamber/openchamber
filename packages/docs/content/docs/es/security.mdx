@@ -204,6 +204,16 @@ Las búsquedas web y las descargas de páginas del agente también pasan por Ope
 { "action": "permission", "resource": "webfetch:*", "effect": "deny" }
 ```
 
+### Escrituras de los bots
+
+El modo enterprise rechaza las escrituras autónomas de bots en GitHub, Jira y Discord, incluida la publicación por Git, salvo que el administrador autorice el destino exacto en `allowedBotDestinations`. Cada entrada indica `service`, un `origin` HTTPS y `resource`: `propietario/repositorio` en GitHub, la clave del proyecto Jira o `servidor/canal` en Discord. No se admiten comodines ni permisos solo por origen.
+
+```json
+{"allowedBotDestinations":[{"service":"github","origin":"https://github.com","resource":"acme/api"}]}
+```
+
+Cuando el entorno activa el modo, `OPENCHAMBER_ALLOWED_BOT_DESTINATIONS` acepta la misma lista en JSON. Si lo activa el archivo de política, solo se aplica su lista. Las entradas inválidas no autorizan nada. Las credenciales permanecen en el servidor; la sesión no recibe el token. El servidor comprueba cada escritura, también para los bots en ejecución.
+
 ## Relacionado
 
 - [Conectar un dispositivo](/es/connect-devices/) — vinculación de un solo uso y tokens por dispositivo

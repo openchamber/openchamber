@@ -73,6 +73,9 @@ import { z } from 'zod';
  *   listed (`allowedExtensions` / `OPENCHAMBER_ALLOWED_EXTENSIONS`), or from a
  *   local folder where `allowLocalExtensions` /
  *   `OPENCHAMBER_ALLOW_LOCAL_EXTENSIONS` allows it; see `guests/enterprise.js`.
+ * - Autonomous bot writes require an exact service, origin and resource in
+ *   `allowedBotDestinations` / `OPENCHAMBER_ALLOWED_BOT_DESTINATIONS`. The
+ *   bot's server adapter checks this immediately before sending a write.
  *
  * The file can also pin the OpenCode CLI (`opencodeBinary`), with or without
  * enterprise mode: managed OpenCode then starts only from that path, never
@@ -113,6 +116,12 @@ export const policyFilePaths = ({ platform = process.platform, env = process.env
 // A blank string counts as unset, so a template with empty fields pins nothing.
 const optionalText = z.string().trim().transform((value) => value || undefined).optional();
 
+const botDestinationsSchema = z.array(z.object({
+  service: z.enum(['github', 'jira', 'discord']),
+  origin: z.string().trim().min(1).max(2_048),
+  resource: z.string().trim().min(1).max(512),
+})).max(200);
+
 const policyFileSchema = z.object({
   enterpriseMode: z.boolean().optional(),
   organization: optionalText,
@@ -122,6 +131,7 @@ const policyFileSchema = z.object({
   // user could ship any code under an allowed one.
   allowedExtensions: z.array(z.string().trim().min(1)).max(200).optional(),
   allowLocalExtensions: z.boolean().optional(),
+  allowedBotDestinations: botDestinationsSchema.optional(),
   jev: z.object({ url: optionalText, model: optionalText, apiKey: optionalText }).optional(),
   opencodeBinary: optionalText,
   hideBuiltinSkillCatalogs: z.boolean().optional(),
@@ -145,7 +155,7 @@ const parsePolicyFile = (text) => {
     const field = issue.path.length > 0 ? `"${issue.path.join('.')}": ` : '';
     throw new Error(`${field}${issue.message}`);
   }
-  const { enterpriseMode, organization, relayUrl, allowNetworkAccess, allowedExtensions, allowLocalExtensions, jev, opencodeBinary, hideBuiltinSkillCatalogs } = parsed.data;
+  const { enterpriseMode, organization, relayUrl, allowNetworkAccess, allowedExtensions, allowLocalExtensions, allowedBotDestinations, jev, opencodeBinary, hideBuiltinSkillCatalogs } = parsed.data;
   return {
     enterpriseMode: enterpriseMode === true,
     organization: organization ?? null,
@@ -153,6 +163,7 @@ const parsePolicyFile = (text) => {
     allowNetworkAccess,
     allowedExtensions,
     allowLocalExtensions,
+    allowedBotDestinations,
     jev: jev?.url ? { url: jev.url, model: jev.model ?? null, apiKey: jev.apiKey ?? null } : undefined,
     opencodeBinary: opencodeBinary ?? null,
     hideBuiltinSkillCatalogs: hideBuiltinSkillCatalogs === true,
@@ -204,6 +215,16 @@ const envString = (env, name) => (env[name] ?? '').trim() || null;
 
 const envList = (env, name) => (env[name] ?? '').split(',').map((entry) => entry.trim()).filter(Boolean);
 
+const envBotDestinations = (env) => {
+  const text = envString(env, 'OPENCHAMBER_ALLOWED_BOT_DESTINATIONS');
+  if (!text) return [];
+  try {
+    return botDestinationsSchema.safeParse(JSON.parse(text)).data ?? [];
+  } catch {
+    return [];
+  }
+};
+
 /**
  * The policy in effect, from the file and the environment together.
  * `relayUrl` and `jev` are the raw pinned values; their consumers validate
@@ -225,6 +246,7 @@ export const readEnterprisePolicy = (options = {}) => {
       allowNetworkAccess: false,
       allowedExtensions: [],
       allowLocalExtensions: false,
+      allowedBotDestinations: [],
       opencodeBinary: null,
       // Fails closed like the rest: a broken policy offers no catalog it might have hidden.
       hideBuiltinSkillCatalogs: true,
@@ -248,6 +270,8 @@ export const readEnterprisePolicy = (options = {}) => {
     ?? (fileGoverns ? [] : envList(env, 'OPENCHAMBER_ALLOWED_EXTENSIONS'));
   const allowLocalExtensions = fromFile?.allowLocalExtensions
     ?? (fileGoverns ? false : envFlag(env, 'OPENCHAMBER_ALLOW_LOCAL_EXTENSIONS'));
+  const allowedBotDestinations = fromFile?.allowedBotDestinations
+    ?? (fileGoverns ? [] : envBotDestinations(env));
 
   return {
     enterpriseMode,
@@ -259,6 +283,7 @@ export const readEnterprisePolicy = (options = {}) => {
     allowNetworkAccess,
     allowedExtensions,
     allowLocalExtensions,
+    allowedBotDestinations,
     // File only, in or out of enterprise mode: OPENCODE_BINARY already lets a
     // user pick a binary, and a pin they could override would not be one.
     opencodeBinary: fromFile?.opencodeBinary ?? null,
@@ -268,6 +293,45 @@ export const readEnterprisePolicy = (options = {}) => {
 };
 
 export const isEnterpriseMode = (options) => readEnterprisePolicy(options).enterpriseMode;
+
+const canonicalBotDestination = (destination) => {
+  const parsed = botDestinationsSchema.element.safeParse(destination);
+  if (!parsed.success) return null;
+  const { service, origin, resource } = parsed.data;
+  let url;
+  try {
+    url = new URL(origin);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== 'https:' || url.username || url.password
+    || url.pathname !== '/' || url.search || url.hash) return null;
+  if (!/^[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)*$/.test(resource)
+    || resource.split('/').some((part) => part === '.' || part === '..')) return null;
+  return {
+    service,
+    origin: url.origin,
+    resource: service === 'github' ? resource.toLowerCase() : resource,
+  };
+};
+
+/** The adapter checks its fixed upstream and concrete resource before every
+ * write, including publication. No wildcard or origin-only grant is accepted. */
+export const assertBotWriteAllowed = (destination, options) => {
+  const policy = readEnterprisePolicy(options);
+  if (!policy.enterpriseMode) return;
+  const target = canonicalBotDestination(destination);
+  const allowed = target && policy.allowedBotDestinations.some((entry) => {
+    const candidate = canonicalBotDestination(entry);
+    return candidate && candidate.service === target.service
+      && candidate.origin === target.origin && candidate.resource === target.resource;
+  });
+  if (!allowed) {
+    throw Object.assign(new Error('Enterprise mode refuses this bot write. An administrator must allow its service, origin and resource in allowedBotDestinations.'), {
+      code: 'enterprise_mode', status: 403, statusCode: 403,
+    });
+  }
+};
 
 /** Whether enterprise mode keeps this server off the network (loopback only). */
 export const isNetworkAccessBlocked = (options) => {

@@ -204,6 +204,16 @@ Zoekopdrachten op het web en het ophalen van pagina's door de agent lopen ook vi
 { "action": "permission", "resource": "webfetch:*", "effect": "deny" }
 ```
 
+### Schrijfacties van bots
+
+De enterprise-modus weigert autonome schrijfacties van bots naar GitHub, Jira en Discord, inclusief publicatie via Git, tenzij de beheerder het exacte doel toestaat in `allowedBotDestinations`. Elk item bevat `service`, een HTTPS-`origin` en `resource`: `eigenaar/repository` voor GitHub, een Jira-projectsleutel of `server/kanaal` voor Discord. Jokertekens en toestemming voor alleen een oorsprong worden geweigerd.
+
+```json
+{"allowedBotDestinations":[{"service":"github","origin":"https://github.com","resource":"acme/api"}]}
+```
+
+Wanneer de omgeving de modus inschakelt, accepteert `OPENCHAMBER_ALLOWED_BOT_DESTINATIONS` dezelfde lijst als JSON. Schakelt het beleidsbestand de modus in, dan geldt alleen de lijst uit dat bestand. Ongeldige items staan niets toe. Inloggegevens blijven op de server; de sessie krijgt geen token. De server controleert elke schrijfactie, ook voor bots die al draaien.
+
 ## Zie ook
 
 - [Een apparaat verbinden](/nl/connect-devices/) voor eenmalige koppelingen en tokens per apparaat

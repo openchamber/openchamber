@@ -204,6 +204,16 @@ Wyszukiwania w sieci i pobieranie stron przez agenta też idą przez OpenCode, d
 { "action": "permission", "resource": "webfetch:*", "effect": "deny" }
 ```
 
+### Operacje zapisu botów
+
+Tryb enterprise odmawia autonomicznych zapisów botów do GitHub, Jira i Discord, w tym publikacji przez Git, chyba że administrator dopuści dokładny cel w `allowedBotDestinations`. Każdy wpis podaje `service`, `origin` HTTPS i `resource`: `właściciel/repozytorium` w GitHub, klucz projektu Jira lub `serwer/kanał` w Discord. Symbole wieloznaczne i zgody obejmujące tylko pochodzenie są odrzucane.
+
+```json
+{"allowedBotDestinations":[{"service":"github","origin":"https://github.com","resource":"acme/api"}]}
+```
+
+Gdy środowisko włącza tryb, `OPENCHAMBER_ALLOWED_BOT_DESTINATIONS` przyjmuje tę samą listę w JSON. Gdy włącza go plik polityki, obowiązuje tylko jego lista. Błędne wpisy niczego nie dopuszczają. Dane uwierzytelniające pozostają na serwerze; sesja nie otrzymuje tokenu. Serwer sprawdza każdy zapis, także dla działających już botów.
+
 ## Powiązane
 
 - [Połącz urządzenie](/pl/connect-devices/) — jednorazowe parowanie i tokeny per urządzenie

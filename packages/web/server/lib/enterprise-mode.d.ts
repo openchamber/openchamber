@@ -1,5 +1,11 @@
 export type EnterprisePolicySource = 'policy-file' | 'environment';
 
+export type BotDestination = {
+  readonly service: 'github' | 'jira' | 'discord';
+  readonly origin: string;
+  readonly resource: string;
+};
+
 export interface EnterprisePolicyOptions {
   platform?: NodeJS.Platform;
   env?: NodeJS.ProcessEnv;
@@ -16,6 +22,7 @@ export interface EnterprisePolicy {
   allowNetworkAccess: boolean;
   allowedExtensions: string[];
   allowLocalExtensions: boolean;
+  allowedBotDestinations: BotDestination[];
   /** OpenCode CLI path pinned by the policy file; null when nothing is pinned. */
   opencodeBinary: string | null;
   hideBuiltinSkillCatalogs: boolean;
@@ -26,6 +33,7 @@ export type PublicEnterprisePolicy = Pick<EnterprisePolicy, 'enterpriseMode' | '
 export function policyFilePaths(options?: Pick<EnterprisePolicyOptions, 'platform' | 'env'>): string[];
 export function readEnterprisePolicy(options?: EnterprisePolicyOptions): EnterprisePolicy;
 export function isEnterpriseMode(options?: EnterprisePolicyOptions): boolean;
+export function assertBotWriteAllowed(destination: BotDestination, options?: EnterprisePolicyOptions): void;
 export function isNetworkAccessBlocked(options?: EnterprisePolicyOptions): boolean;
 export const NETWORK_ACCESS_BLOCKED_ERROR: string;
 export function publicEnterprisePolicy(options?: EnterprisePolicyOptions): PublicEnterprisePolicy;

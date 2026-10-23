@@ -204,6 +204,22 @@ The agent's web searches and page fetches also go through OpenCode, to the searc
 { "action": "permission", "resource": "webfetch:*", "effect": "deny" }
 ```
 
+### Bot writes
+
+Enterprise mode refuses autonomous bot writes to GitHub, Jira and Discord, including Git publication, unless the administrator allows the exact destination in `allowedBotDestinations`. Each entry names a `service`, an HTTPS `origin` and a `resource`: a GitHub `owner/repository`, a Jira project key, or a Discord `guild/channel`. Wildcards and origin-only grants are refused.
+
+```json
+{
+  "enterpriseMode": true,
+  "allowedBotDestinations": [
+    { "service": "github", "origin": "https://github.com", "resource": "acme/api" },
+    { "service": "jira", "origin": "https://acme.atlassian.net", "resource": "API" }
+  ]
+}
+```
+
+When the environment turns the mode on, `OPENCHAMBER_ALLOWED_BOT_DESTINATIONS` accepts the same array as JSON. When the policy file turns it on, only the file's list applies. Invalid entries grant nothing. Credentials stay on the server; authorizing a destination does not give the session its token. The server checks each write, so a policy change applies to running bots too.
+
 ## Related
 
 - [Connect a Device](/connect-devices/) — one-time pairing and per-device tokens

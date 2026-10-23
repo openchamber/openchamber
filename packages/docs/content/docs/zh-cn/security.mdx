@@ -204,6 +204,16 @@ environment:
 { "action": "permission", "resource": "webfetch:*", "effect": "deny" }
 ```
 
+### 机器人的写入操作
+
+Enterprise 模式会拒绝机器人向 GitHub、Jira 和 Discord 自主写入，包括通过 Git 发布，除非管理员在 `allowedBotDestinations` 中授权了确切目标。每项包含 `service`、HTTPS `origin` 和 `resource`。资源分别是 GitHub 的 `所有者/仓库`、Jira 项目键或 Discord 的 `服务器/频道`。不接受通配符或仅授权来源的规则。
+
+```json
+{"allowedBotDestinations":[{"service":"github","origin":"https://github.com","resource":"acme/api"}]}
+```
+
+由环境变量启用模式时，`OPENCHAMBER_ALLOWED_BOT_DESTINATIONS` 接受相同的 JSON 数组。由策略文件启用模式时，只采用文件中的列表。无效项不授予任何权限。凭据保留在服务器上，不会把令牌交给会话。服务器会检查每次写入，包括已在运行的机器人。
+
 ## 相关内容
 
 - [连接设备](/zh-cn/connect-devices/) — 一次性配对与设备级令牌

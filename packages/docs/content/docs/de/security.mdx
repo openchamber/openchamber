@@ -204,6 +204,16 @@ Die Websuchen und Seitenabrufe des Agenten laufen ebenfalls über OpenCode, zum 
 { "action": "permission", "resource": "webfetch:*", "effect": "deny" }
 ```
 
+### Schreibzugriffe von Bots
+
+Der Enterprise-Modus verweigert autonome Schreibzugriffe von Bots auf GitHub, Jira und Discord, einschließlich Git-Veröffentlichungen, sofern der Administrator das genaue Ziel nicht in `allowedBotDestinations` freigibt. Jeder Eintrag enthält `service`, einen HTTPS-`origin` und `resource`: `Eigentümer/Repository` für GitHub, einen Jira-Projektschlüssel oder `Server/Kanal` für Discord. Platzhalter und Freigaben nur für einen Ursprung werden verweigert.
+
+```json
+{"allowedBotDestinations":[{"service":"github","origin":"https://github.com","resource":"acme/api"}]}
+```
+
+Wenn die Umgebung den Modus aktiviert, akzeptiert `OPENCHAMBER_ALLOWED_BOT_DESTINATIONS` dieselbe Liste als JSON. Aktiviert die Richtliniendatei den Modus, gilt nur ihre Liste. Ungültige Einträge erlauben nichts. Zugangsdaten bleiben auf dem Server; die Sitzung erhält kein Token. Der Server prüft jeden Schreibzugriff, auch bei bereits laufenden Bots.
+
 ## Verwandt
 
 - [Ein Gerät verbinden](/de/connect-devices/) — einmaliges Pairing und gerätespezifische Tokens

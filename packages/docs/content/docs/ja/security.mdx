@@ -204,6 +204,16 @@ environment:
 { "action": "permission", "resource": "webfetch:*", "effect": "deny" }
 ```
 
+### ボットの書き込み
+
+Enterprise モードでは、管理者が `allowedBotDestinations` で正確な宛先を許可しない限り、Git による公開を含む GitHub、Jira、Discord へのボットの自律的な書き込みを拒否します。各項目には `service`、HTTPS の `origin`、`resource` を指定します。リソースは GitHub の `所有者/リポジトリ`、Jira のプロジェクトキー、Discord の `サーバー/チャンネル` です。ワイルドカードやオリジンだけの許可は使えません。
+
+```json
+{"allowedBotDestinations":[{"service":"github","origin":"https://github.com","resource":"acme/api"}]}
+```
+
+環境変数でモードを有効にする場合、`OPENCHAMBER_ALLOWED_BOT_DESTINATIONS` に同じ配列を JSON で指定できます。ポリシーファイルで有効にする場合は、ファイルの一覧だけが適用されます。無効な項目は何も許可しません。認証情報はサーバーに残り、セッションにトークンは渡りません。実行中のボットも、書き込みごとにサーバーが確認します。
+
 ## 関連
 
 - [デバイスを接続する](/ja/connect-devices/) — 1 回限りのペアリングとデバイスごとのトークン

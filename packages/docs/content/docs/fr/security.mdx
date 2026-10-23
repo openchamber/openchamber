@@ -204,6 +204,16 @@ Les recherches web et les récupérations de pages de l’agent passent aussi pa
 { "action": "permission", "resource": "webfetch:*", "effect": "deny" }
 ```
 
+### Écritures des bots
+
+Le mode enterprise refuse les écritures autonomes des bots vers GitHub, Jira et Discord, y compris la publication Git, sauf si l'administrateur autorise la destination exacte dans `allowedBotDestinations`. Chaque entrée indique `service`, un `origin` HTTPS et `resource` : `propriétaire/dépôt` pour GitHub, une clé de projet Jira ou `serveur/canal` pour Discord. Les jokers et les autorisations limitées à une origine sont refusés.
+
+```json
+{"allowedBotDestinations":[{"service":"github","origin":"https://github.com","resource":"acme/api"}]}
+```
+
+Lorsque l'environnement active le mode, `OPENCHAMBER_ALLOWED_BOT_DESTINATIONS` accepte la même liste en JSON. Si le fichier de politique active le mode, seule sa liste s'applique. Une entrée invalide n'autorise rien. Les identifiants restent sur le serveur ; la session ne reçoit aucun jeton. Le serveur vérifie chaque écriture, même pour les bots déjà en cours.
+
 ## Pages liées
 
 - [Connecter un appareil](/fr/connect-devices/) — association à usage unique et tokens par appareil

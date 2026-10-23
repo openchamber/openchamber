@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  assertBotWriteAllowed,
   isCredentialListRequest,
   isEnterpriseMode,
   isNetworkAccessBlocked,
@@ -29,6 +30,78 @@ const machine = (files, { platform = 'linux', env = {} } = {}) => ({
 const LINUX_POLICY = '/etc/openchamber/policy.json';
 
 describe('enterprise policy', () => {
+  describe('bot write destinations', () => {
+    const destination = { service: 'github', origin: 'https://github.com', resource: 'acme/api' };
+    const env = { OPENCHAMBER_ENTERPRISE_MODE: '1', OPENCHAMBER_ALLOWED_BOT_DESTINATIONS: JSON.stringify([destination]) };
+    const withPolicy = (policy) => machine({ [LINUX_POLICY]: JSON.stringify(policy) }, { env });
+
+    it('allows normal writes outside enterprise mode and requires an exact grant inside it', () => {
+      // Given a concrete repository and a machine with no destination grants.
+      const off = machine({});
+      const on = withPolicy({ enterpriseMode: true });
+      // When the adapter checks the write, only the unrestricted machine permits it.
+      expect(() => assertBotWriteAllowed(destination, off)).not.toThrow();
+      expect(() => assertBotWriteAllowed(destination, on)).toThrow(expect.objectContaining({ code: 'enterprise_mode', status: 403 }));
+    });
+
+    it('takes grants from the environment only while the policy file does not govern', () => {
+      // Given an environment grant and a file which enables the mode without a grant.
+      const fromEnv = machine({}, { env });
+      const fromFile = withPolicy({ enterpriseMode: true });
+      // When the write is checked, the authoritative file keeps it refused.
+      expect(() => assertBotWriteAllowed(destination, fromEnv)).not.toThrow();
+      expect(() => assertBotWriteAllowed(destination, fromFile)).toThrow();
+    });
+
+    it('uses file grants instead of adding environment grants', () => {
+      // Given a file authorizing a different repository.
+      const options = withPolicy({ enterpriseMode: false, allowedBotDestinations: [{ ...destination, resource: 'acme/other' }] });
+      // When checked under the environment-enabled mode, only the file's repository is allowed.
+      expect(() => assertBotWriteAllowed(destination, options)).toThrow();
+      expect(() => assertBotWriteAllowed({ ...destination, resource: 'acme/other' }, options)).not.toThrow();
+    });
+
+    it('normalizes HTTPS origin and GitHub repository case without widening the resource', () => {
+      // Given one exact repository grant in the authoritative file.
+      const options = withPolicy({ enterpriseMode: true, allowedBotDestinations: [destination] });
+      // When an equivalent target or a different target is checked, only the equivalent one passes.
+      expect(() => assertBotWriteAllowed({ ...destination, origin: 'https://GITHUB.COM:443/', resource: 'Acme/API' }, options)).not.toThrow();
+      for (const target of [
+        { ...destination, resource: 'acme/api-other' },
+        { ...destination, resource: 'acme/api/sub' },
+        { ...destination, origin: 'https://github.com.attacker.test' },
+        { ...destination, origin: 'https://github.com:444' },
+        { ...destination, service: 'jira' },
+      ]) expect(() => assertBotWriteAllowed(target, options)).toThrow();
+    });
+
+    it('rejects malformed, wildcard, credential-bearing and path grants', () => {
+      // Given invalid grants which must not authorize even an identical request.
+      for (const target of [
+        { ...destination, resource: '*' },
+        { ...destination, resource: 'acme/../api' },
+        { ...destination, resource: 'acme/%61pi' },
+        { ...destination, origin: 'http://github.com' },
+        { ...destination, origin: 'https://user@github.com' },
+        { ...destination, origin: 'https://github.com/acme' },
+        { ...destination, origin: 'https://github.com?grant=1' },
+      ]) {
+        const options = withPolicy({ enterpriseMode: true, allowedBotDestinations: [target] });
+        // When checked by the adapter, the malformed grant remains unusable.
+        expect(() => assertBotWriteAllowed(target, options)).toThrow();
+      }
+    });
+
+    it('fails closed for a broken file and an invalid environment list', () => {
+      // Given an unreadable policy or a malformed environment grant.
+      const brokenFile = machine({ [LINUX_POLICY]: '{' }, { env });
+      const brokenEnv = machine({}, { env: { ...env, OPENCHAMBER_ALLOWED_BOT_DESTINATIONS: '{' } });
+      // When the write is checked, neither source supplies authority.
+      expect(() => assertBotWriteAllowed(destination, brokenFile)).toThrow();
+      expect(() => assertBotWriteAllowed(destination, brokenEnv)).toThrow();
+    });
+  });
+
   it('is off with no policy file and no environment variable', () => {
     expect(readEnterprisePolicy(machine({}))).toEqual({
       enterpriseMode: false,
@@ -40,6 +113,7 @@ describe('enterprise policy', () => {
       allowNetworkAccess: false,
       allowedExtensions: [],
       allowLocalExtensions: false,
+      allowedBotDestinations: [],
       opencodeBinary: null,
       hideBuiltinSkillCatalogs: false,
     });
@@ -70,6 +144,7 @@ describe('enterprise policy', () => {
       allowNetworkAccess: false,
       allowedExtensions: [],
       allowLocalExtensions: false,
+      allowedBotDestinations: [],
       opencodeBinary: null,
       hideBuiltinSkillCatalogs: false,
     });
