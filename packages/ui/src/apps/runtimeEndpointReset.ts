@@ -134,6 +134,7 @@ export const resetAppForRuntimeEndpointChange = (detail: RuntimeEndpointChangedD
   useSessionUIStore.getState().restoreForRuntimeSwitch(detail.runtimeKey, detail.previousRuntimeKey);
   useSessionUIStore.setState({ worktreeDiscoveryByProject: new Map() });
   useUIStore.getState().setOpenGuestPage(null);
+  useUIStore.getState().setBotsPageTarget(null);
   resetStreamingState();
   queueMicrotask(() => void syncDesktopSettings());
 };

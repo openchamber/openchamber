@@ -1,4 +1,4 @@
-import { ROUTE_PARAMS } from './types';
+import { ROUTE_PARAMS, type BotsRouteTarget } from './types';
 
 /**
  * Application state relevant for URL serialization.
@@ -7,6 +7,8 @@ export interface AppRouteState {
   sessionId: string | null;
   isSettingsOpen: boolean;
   settingsPath: string;
+  /** Explicit link construction only. Ordinary UI state consumes the target once. */
+  readonly botsTarget?: BotsRouteTarget | null;
 }
 
 /**
@@ -15,6 +17,12 @@ export interface AppRouteState {
  */
 function serializeRoute(state: AppRouteState): URLSearchParams {
   const params = new URLSearchParams();
+
+  if (!state.isSettingsOpen && state.botsTarget) {
+    params.set(ROUTE_PARAMS.BOTS_PROJECT, state.botsTarget.projectId);
+    params.set(ROUTE_PARAMS.BOT_ITEM, state.botsTarget.itemId);
+    return params;
+  }
 
   // Session ID - always include if present
   if (state.sessionId && state.sessionId.trim().length > 0) {

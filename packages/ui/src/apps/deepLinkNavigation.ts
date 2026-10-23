@@ -7,6 +7,8 @@ import { useInputStore } from '@/sync/input-store';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { requestMessageFocus } from '@/lib/router/messageFocus';
 import { openSessionLink } from '@/lib/router/openSessionFromRoute';
+import { openBotsFromRoute } from '@/lib/router/openBotsFromRoute';
+import { isTransientRuntimeKey, subscribeRuntimeEndpointWillChange } from '@/lib/runtime-switch';
 
 import { parseDeepLink, type DeepLinkIntent, type SessionsFilter, type ViewTarget } from './deepLinks';
 
@@ -32,6 +34,8 @@ interface DeepLinkHandlers {
   openChanges?: (options?: { path?: string; staged?: boolean }) => void;
   /** Open Settings, optionally at a specific section. */
   openSettings?: (section?: string) => void;
+  /** Open the mobile Bots surface after the item target is installed. */
+  openBots?: () => void;
 }
 
 /**
@@ -70,6 +74,11 @@ const openShortcutSession = (intent: ShortcutNewSessionIntent): void => {
 
 const execute = (intent: NavigationIntent): boolean => {
   switch (intent.type) {
+    case 'bots':
+      if (!handlers.openBots) return false;
+      openBotsFromRoute({ projectId: intent.projectId, itemId: intent.itemId }, handlers.openBots);
+      return true;
+
     case 'shortcut-new-session':
       openShortcutSession(intent);
       return true;
@@ -144,7 +153,7 @@ const applyDeepLinkIntent = (intent: NavigationIntent): void => {
 };
 
 /** Convenience: parse a raw `openchamber://…` URL and apply it. No-op for unrecognised URLs. */
-const applyDeepLinkUrl = (raw: string | null | undefined): void => {
+export const applyDeepLinkUrl = (raw: string | null | undefined): void => {
   const intent = parseDeepLink(raw);
   if (intent) {
     applyDeepLinkIntent(intent);
@@ -186,6 +195,11 @@ export const useDeepLinkSource = (options: { ready: boolean }): void => {
   React.useEffect(() => {
     setReady(isReady);
   }, [isReady]);
+
+  React.useEffect(() => subscribeRuntimeEndpointWillChange(({ runtimeKey, previousRuntimeKey }) => {
+    // A cold-launch link may wait for the first connection, never another server.
+    if (runtimeKey !== previousRuntimeKey && !isTransientRuntimeKey(previousRuntimeKey) && pending?.type === 'bots') pending = null;
+  }), []);
 
   React.useEffect(() => {
     if (!isCapacitorApp()) return;

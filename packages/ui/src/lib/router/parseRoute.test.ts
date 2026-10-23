@@ -45,3 +45,32 @@ describe('parseRoute message', () => {
     expect(parseRoute(new URLSearchParams('session=ses_abc&message=msg"]')).messageId).toBeNull();
   });
 });
+
+describe('parseRoute bots', () => {
+  test('reads an item target when no session is supplied', () => {
+    // Given a session-independent notification URL.
+    const params = new URLSearchParams('botsProject=project-1&botItem=item_2');
+
+    // When the route is parsed.
+    const route = parseRoute(params);
+
+    // Then it names both the owning project and exact item.
+    expect(route.botsTarget).toEqual({ projectId: 'project-1', itemId: 'item_2' });
+    expect(route.sessionId).toBeNull();
+  });
+
+  for (const query of [
+    'botItem=item-1', 'botsProject=project-1', 'botsProject=&botItem=item-1',
+    'botsProject=project-1&botItem=..%2Fitem', 'botsProject=project%2F1&botItem=item-1',
+    'botsProject=project-1&botItem=%22%5D',
+  ]) test(`ignores an incomplete or malformed item target ${query}`, () => {
+    // Given a target without two valid identifiers.
+    const params = new URLSearchParams(query);
+
+    // When the route is parsed.
+    const route = parseRoute(params);
+
+    // Then no partial destination can open a different project or item.
+    expect(route.botsTarget).toBeNull();
+  });
+});

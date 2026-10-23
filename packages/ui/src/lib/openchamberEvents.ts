@@ -12,6 +12,7 @@ import { z } from 'zod';
 import { trackedItemRecordsSchema } from './trackedItems/model';
 import { notificationCenterChangeSchema, type NotificationCenterChange } from './notificationCenter';
 import { prFixLoopUpdatedEventSchema, type PrFixLoopUpdatedEvent } from './prFixLoop';
+import { botsRouteTargetSchema } from './router/types';
 
 type ScheduledTaskRanEvent = {
   type: 'scheduled-task-ran';
@@ -109,6 +110,7 @@ type ProjectContextChangedEvent = { type: 'project-context-changed' } & z.infer<
 /** A project's Suggested tasks inbox, settings or scans changed. */
 const suggestedTasksChangedSchema = z.object({ projectId: z.string().min(1) });
 type SuggestedTasksChangedEvent = { type: 'suggested-tasks-changed' } & z.infer<typeof suggestedTasksChangedSchema>;
+type BotsChangedEvent = { type: 'bots-changed'; projectId: string };
 /** A client changed the chat folders; `updatedAt` is the stored revision, so a client already showing it skips the read. */
 const sessionFoldersChangedSchema = z.object({ updatedAt: z.number().finite() });
 type SessionFoldersChangedEvent = { type: 'session-folders-changed' } & z.infer<typeof sessionFoldersChangedSchema>;
@@ -184,9 +186,11 @@ const notificationPropertiesSchema = z.object({
   directory: z.string().optional(),
   requireHidden: z.boolean().optional(),
   showWhenFocused: z.boolean().optional(),
+  botTarget: botsRouteTargetSchema.optional(),
 });
 
 type OpenChamberEvent =
+  | BotsChangedEvent
   | { type: 'notification'; payload: z.infer<typeof notificationPropertiesSchema> }
   /** The server's notification center changed: an entry added, some read, or all cleared. */
   | { type: 'notification-center-changed'; change: NotificationCenterChange }
@@ -509,6 +513,12 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
   if (envelope.type === 'openchamber:suggested-tasks-changed') {
     const parsed = suggestedTasksChangedSchema.safeParse(envelope.properties);
     if (parsed.success) for (const listener of listeners) listener({ type: 'suggested-tasks-changed', ...parsed.data });
+    return;
+  }
+
+  if (envelope.type === 'openchamber:bots-changed' || envelope.type === 'openchamber:bot.item.changed') {
+    const parsed = suggestedTasksChangedSchema.safeParse(envelope.properties);
+    if (parsed.success) for (const listener of listeners) listener({ type: 'bots-changed', ...parsed.data });
     return;
   }
 

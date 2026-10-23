@@ -4,6 +4,9 @@ import { useUIStore, type ContextPanelMode } from '@/stores/useUIStore';
 import { parseRoute, updateBrowserURL, hasRouteParams } from '@/lib/router';
 import { openSessionLink } from '@/lib/router/openSessionFromRoute';
 import { openGuestPanelFromRoute } from '@/lib/router/openGuestPanelFromRoute';
+import { openBotsFromRoute } from '@/lib/router/openBotsFromRoute';
+import { getBotsRuntime } from '@/lib/botsRuntime';
+import { subscribeRuntimeEndpointWillChange } from '@/lib/runtime-switch';
 import type { RouteState, AppRouteState } from '@/lib/router';
 import { resolveSettingsSlug } from '@/lib/settings/metadata';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
@@ -32,34 +35,47 @@ function isVSCodeContext(): boolean {
  * - Desktop: Full bidirectional sync
  * - VS Code: State-only (no URL updates, reads initial params)
  */
-export function useRouter(): void {
+export function useRouter(openMobileBots?: () => void): void {
   const isVSCode = React.useMemo(() => isVSCodeContext(), []);
 
   // Track initialization to avoid duplicate applies
   const initializedRef = React.useRef(false);
   const isApplyingRouteRef = React.useRef(false);
+  const routeGenerationRef = React.useRef(0);
 
   // Get store actions (stable references)
   const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
   const setSettingsPage = useUIStore((state) => state.setSettingsPage);
   const navigateToDiff = useUIStore((state) => state.navigateToDiff);
 
+  React.useEffect(() => subscribeRuntimeEndpointWillChange(({ runtimeKey, previousRuntimeKey }) => {
+    if (runtimeKey === previousRuntimeKey) return;
+    routeGenerationRef.current += 1;
+    isApplyingRouteRef.current = false;
+    useUIStore.getState().setBotsPageOpen(false);
+  }), []);
+
   /**
    * Apply a parsed route state to the application stores.
    */
   const applyRoute = React.useCallback(
     async (route: RouteState) => {
-      if (isApplyingRouteRef.current) {
-        return;
-      }
-
+      const generation = ++routeGenerationRef.current;
+      const runtime = getBotsRuntime();
       isApplyingRouteRef.current = true;
 
       try {
+        // Item links do not depend on a stage session or its async bootstrap.
+        if (route.botsTarget) {
+          if (!isVSCode) openBotsFromRoute(route.botsTarget, openMobileBots);
+          return true;
+        }
+
         // 1. Apply session first (may trigger async operations); a message
         // link also asks the session's timeline to show that message.
         if (route.sessionId) {
           await openSessionLink(route.sessionId, route.messageId);
+          if (runtime.signal.aborted || generation !== routeGenerationRef.current) return false;
         }
 
         // 2. Handle settings first because it is a full-screen overlay.
@@ -67,7 +83,7 @@ export function useRouter(): void {
           setSettingsPage(resolveSettingsSlug(route.settingsPath));
           setSettingsDialogOpen(true);
           // Do not process a route view while settings is open.
-          return;
+          return true;
         }
 
         // Close settings if URL has no settings section
@@ -102,11 +118,12 @@ export function useRouter(): void {
             await openGuestPanelFromRoute(directory, route.guestPanelId);
           }
         }
+        return !runtime.signal.aborted && generation === routeGenerationRef.current;
       } finally {
-        isApplyingRouteRef.current = false;
+        if (generation === routeGenerationRef.current) isApplyingRouteRef.current = false;
       }
     },
-    [setSettingsDialogOpen, setSettingsPage, navigateToDiff]
+    [setSettingsDialogOpen, setSettingsPage, navigateToDiff, isVSCode, openMobileBots]
   );
 
   /**
@@ -159,7 +176,9 @@ export function useRouter(): void {
 
     // Apply the initial route
     const initializeRoute = async () => {
-      await applyRoute(route);
+      const runtime = getBotsRuntime();
+      const applied = await applyRoute(route);
+      if (!applied || runtime.signal.aborted) return;
 
       // After applying, update URL to normalized form (use replaceState).
       // Use the parsed route values instead of an immediate store snapshot so
@@ -168,7 +187,7 @@ export function useRouter(): void {
       if (!isVSCode) {
         updateBrowserURL({
           ...getCurrentAppState(),
-          sessionId: route.sessionId ?? useSessionUIStore.getState().currentSessionId,
+          sessionId: route.botsTarget ? useSessionUIStore.getState().currentSessionId : route.sessionId ?? useSessionUIStore.getState().currentSessionId,
           settingsPath: route.settingsPath ?? useUIStore.getState().settingsPage,
         }, { replace: true, force: true });
       }
