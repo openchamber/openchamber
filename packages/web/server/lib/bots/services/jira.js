@@ -40,10 +40,10 @@ export function createJiraAdapter(credential, target, { beforeQuestionWrite } = 
         if (operation === 'jira.question') {
           if (!(beforeQuestionWrite instanceof Function)) throw new BotServiceError('BOT_QUESTION_AUTHORITY_REQUIRED', 'Question mentions require service authorization.');
           document.content.unshift({ type: 'paragraph', content: input.recipients.map((person) => ({ type: 'mention', attrs: { id: person.serviceId } })) });
-          await beforeQuestionWrite();
         }
         const result = providerResult(z.object({ id: text }), await credential.request({
           path: `${path}/comment`, method: 'POST', body: { body: document },
+          beforeWrite: operation === 'jira.question' ? beforeQuestionWrite : undefined,
         }), true);
         return { commentId: result.id, issueKey: target.issueKey };
       }

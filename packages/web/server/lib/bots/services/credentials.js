@@ -1,13 +1,14 @@
 import { createPrivateKey, sign } from 'node:crypto';
 import { z } from 'zod';
 import { BotServiceError, jiraOrigin, providerResult as parse, revision, snowflake, text } from './contracts.js';
+import { createJiraOAuthRequest } from './jira-oauth.js';
 
 const githubUser = z.object({ id: revision, login: text });
 const tokenSchema = z.object({ token: text, expires_at: z.string().datetime(),
   repositories: z.array(z.object({ full_name: text })).optional() });
 const unavailable = () => new BotServiceError('BOT_IDENTITY_UNAVAILABLE', 'Reconnect or select the exact bot identity.');
 
-export function createCredentialResolver({ identities, http, now = Date.now }) {
+export function createCredentialResolver({ identities, http, jiraOAuthHttp, now = Date.now }) {
   return async ({ identityId, identityRevision, service, target }) => {
     const identity = await identities.resolve(identityId, identityRevision);
     const definition = identity.definition;
@@ -27,6 +28,7 @@ export function createCredentialResolver({ identities, http, now = Date.now }) {
     let credentialRevision = identityRevision;
     let username;
     let gitToken;
+    let request;
     const resource = service === 'github' ? `${target.owner}/${target.repo}`
       : service === 'jira' ? target.projectKey ?? 'jira.search' : `${target.guildId}/${target.channelId}`;
     if (definition.kind === 'github-account') {
@@ -76,9 +78,10 @@ export function createCredentialResolver({ identities, http, now = Date.now }) {
       username = bot.login;
     } else if (service === 'jira') {
       origin = jiraOrigin(definition.site);
-      authorization = `Basic ${Buffer.from(`${definition.email}:${definition.apiToken}`).toString('base64')}`;
+      if (definition.kind === 'jira-oauth') request = await createJiraOAuthRequest({ definition, http: jiraOAuthHttp, resource, assertCurrent: beforeWrite, now });
+      else authorization = `Basic ${Buffer.from(`${definition.email}:${definition.apiToken}`).toString('base64')}`;
       const user = parse(z.object({ accountId: text, active: z.literal(true) }),
-        await http({ service, origin, resource, path: '/rest/api/3/myself', authorization }));
+        await (request ? request({ path: '/rest/api/3/myself' }) : http({ service, origin, resource, path: '/rest/api/3/myself', authorization })));
       providerAccountId = user.accountId;
       if (providerAccountId === 'unknown') throw unavailable();
     } else {
@@ -92,7 +95,8 @@ export function createCredentialResolver({ identities, http, now = Date.now }) {
     const authority = { identityId, identityRevision, service, origin, credentialId, credentialRevision, providerAccountId };
     return {
       authority, definition, username, gitToken, assertCurrent: beforeWrite,
-      request: (input) => http({ ...input, service, origin, resource, authorization, beforeWrite }),
+      request: request ?? ((input) => http({ ...input, service, origin, resource, authorization,
+        beforeWrite: async () => { await input.beforeWrite?.(); await beforeWrite(); } })),
     };
   };
 }

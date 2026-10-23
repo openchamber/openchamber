@@ -9,7 +9,7 @@ import { createSourceControlAuditStore } from '../source-control/audit-storage.j
 import { createBotIdentityStore } from './identities.js';
 import { BotServiceError, effectSchema, githubTarget, jiraTarget, discordTarget, opaqueId,
   operations, parse, requestSchema, questionAuthoritySchema, revision, branch, sha } from './services/contracts.js';
-import { createProviderHttp } from './services/http.js';
+import { createJiraOAuthHttp, createProviderHttp } from './services/http.js';
 import { createCredentialResolver } from './services/credentials.js';
 import { createGitHubAdapter } from './services/github.js';
 import { createJiraAdapter, searchJiraIssues } from './services/jira.js';
@@ -43,7 +43,8 @@ export function createBotServices({
   auditStore = createSourceControlAuditStore({ filePath: path.join(dataDir, 'source-control-audit.json') }),
   git = {}, approvedDiscordPeople = async () => [], resolveQuestionAuthority = async () => null,
 } = {}) {
-  const resolve = createCredentialResolver({ identities, http: createProviderHttp({ fetchImpl, policyOptions }) });
+  const resolve = createCredentialResolver({ identities, http: createProviderHttp({ fetchImpl, policyOptions }),
+    jiraOAuthHttp: createJiraOAuthHttp({ fetchImpl, policyOptions }) });
   const mutations = createMutationExecutor({ store: mutationStore, auditStore, runtimeIdentity });
   const adapter = (credential, target, beforeAdmission, beforeQuestionWrite) => {
     if (credential.authority.service === 'github') return createGitHubAdapter(credential, target, {

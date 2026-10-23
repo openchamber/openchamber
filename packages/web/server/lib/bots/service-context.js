@@ -10,7 +10,7 @@ import { z } from 'zod';
 import { resolvePrivateRepositoryIdentity } from '../source-control/repository-identity.js';
 import { parseGitHubRemoteUrl } from '../github/repo/index.js';
 import { createCredentialResolver } from './services/credentials.js';
-import { createProviderHttp } from './services/http.js';
+import { createJiraOAuthHttp, createProviderHttp } from './services/http.js';
 import { BotServiceError, discordTarget, githubTarget, jiraTarget, operations, providerResult, text } from './services/contracts.js';
 
 const refuse = (code) => { throw new BotServiceError(code, 'Repair the exact bot identity or service destination.'); };
@@ -19,7 +19,8 @@ const scopeSchema = z.object({ service: z.enum(['github', 'jira', 'discord']), o
 
 export function createBotServiceContext({ identities, services, fetchImpl, policyOptions, resolveDiscordTarget }) {
   if (!identities?.resolve || !identities?.list || !services?.read) throw new TypeError('Bot context requires identities and services');
-  const resolve = createCredentialResolver({ identities, http: createProviderHttp({ fetchImpl, policyOptions }) });
+  const resolve = createCredentialResolver({ identities, http: createProviderHttp({ fetchImpl, policyOptions }),
+    jiraOAuthHttp: createJiraOAuthHttp({ fetchImpl, policyOptions }) });
   const identityFor = async (bot, service) => {
     const selection = bot.identity?.[service];
     if (!selection) return null;
