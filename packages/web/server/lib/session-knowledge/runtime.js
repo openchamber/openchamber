@@ -120,12 +120,13 @@ export const TABLE_SPEECH_GUIDANCE = "The user may listen to your replies read a
  * Titles only for memory, never bodies: an index carrying full text grows
  * without bound until it crowds out the conversation it was meant to inform.
  */
-const buildMemoryBlock = ({ global, project, enabled = false, complete = false }) => {
+const buildMemoryBlock = ({ global, project, enabled = false, complete = false }, includeMemorySaveRule) => {
   const sections = [];
   if (global.length > 0) sections.push(`### About the user\n\n${renderMemorySection(global)}`);
   if (project.length > 0) sections.push(`### About this project\n\n${renderMemorySection(project)}`);
   if (sections.length === 0) {
     if (!enabled) return '';
+    if (!includeMemorySaveRule) return complete ? 'Nothing is stored yet.' : '';
     // "Empty" only when both scopes loaded: a failed read is not an empty store.
     return complete
       ? `${MEMORY_SAVE_GUIDANCE}\n\nNothing is stored yet.`
@@ -133,7 +134,7 @@ const buildMemoryBlock = ({ global, project, enabled = false, complete = false }
   }
 
   return [
-    ...(enabled ? [MEMORY_SAVE_GUIDANCE] : []),
+    ...(enabled && includeMemorySaveRule ? [MEMORY_SAVE_GUIDANCE] : []),
     'Stored memory from earlier sessions, titles only. A title leaves out the'
       + ' conditions and reasons that decide how a memory applies, a self-explanatory'
       + ' one most of all: read each entry that bears on the task with openchamber_memory'
@@ -180,10 +181,10 @@ const buildGuidance = ({ linking, rendering, readAloud }) => [
  * away; a key left out keeps what the session holds, which is what a branch
  * that could not be read means.
  */
-export const buildKnowledgeEntries = ({ notes, plans, memory, linking = false, rendering = false, readAloud = false, checkout = null, pullStacks = [] }) => {
+export const buildKnowledgeEntries = ({ notes, plans, memory, linking = false, rendering = false, readAloud = false, checkout = null, pullStacks = [] }, { includeMemorySaveRule = true } = {}) => {
   const entries = {
     [KNOWLEDGE_ENTRY_KEYS.pinned]: truncate(buildPinnedBlock({ notes, plans })),
-    [KNOWLEDGE_ENTRY_KEYS.memory]: truncate(buildMemoryBlock(memory)),
+    [KNOWLEDGE_ENTRY_KEYS.memory]: truncate(buildMemoryBlock(memory, includeMemorySaveRule)),
     [KNOWLEDGE_ENTRY_KEYS.guidance]: buildGuidance({ linking, rendering, readAloud }),
     // Keep the JSON whole, independently of the pinned and memory budgets.
     [KNOWLEDGE_ENTRY_KEYS.pullStacks]: buildPullStackText(pullStacks),
@@ -367,12 +368,12 @@ export const createSessionKnowledgeRuntime = (dependencies) => {
    * some context, a failed send costs the user their message. One entry that
    * will not write does not hold back the others.
    */
-  const sync = async (sessionId, directory) => {
+  const sync = async (sessionId, directory, options = {}) => {
     if (!instructionEntries || !sessionId) return false;
     try {
       // A failed metadata read cannot authoritatively remove linked stacks or pins.
       const session = await readStoredSession(sessionId);
-      const entries = buildKnowledgeEntries(await collect(directory, readPins(session)));
+      const entries = buildKnowledgeEntries(await collect(directory, readPins(session)), options);
       try {
         entries[KNOWLEDGE_ENTRY_KEYS.pullStacks] = buildPullStackText(await collectFollowedPullStacks(directory, session));
       } catch (error) {

@@ -45,6 +45,33 @@ const entriesFor = async (runtime, pins = PINS, directory = DIRECTORY) => (
   buildKnowledgeEntries(await runtime.collect(directory, pins))
 );
 
+test('lens sync retains pinned context and memory index while omitting only the save rule', async () => {
+  const writes = [];
+  const runtime = createRuntime({
+    readSessionMetadata: async () => ({ openchamber: { project_context_pins: PINS } }),
+    instructionEntries: {
+      put: async (_session, _directory, key, text) => { writes.push([key, text]); },
+      remove: async () => {},
+    },
+  });
+  expect(await runtime.sync('ses_lens', DIRECTORY, { includeMemorySaveRule: false })).toBe(true);
+  expect(writes.find(([key]) => key === PINNED)[1]).toContain('Pinned note body.');
+  const index = writes.find(([key]) => key === MEMORY)[1];
+  expect(index).toContain('Uses bun');
+  expect(index).not.toContain('Save to it');
+  expect(index).not.toContain('Save before your final reply');
+  writes.length = 0;
+  expect(await runtime.sync('ses_normal', DIRECTORY)).toBe(true);
+  expect(writes.find(([key]) => key === MEMORY)[1]).toContain('Save to it');
+});
+
+test('omitting memory save guidance preserves empty and failed memory semantics', () => {
+  const base = { notes: [], plans: [], memory: { global: [], project: [], enabled: true, complete: true } };
+  expect(buildKnowledgeEntries(base, { includeMemorySaveRule: false })[MEMORY]).toBe('Nothing is stored yet.');
+  expect(buildKnowledgeEntries({ ...base, memory: { ...base.memory, complete: false } }, { includeMemorySaveRule: false })[MEMORY]).toBe('');
+  expect(buildKnowledgeEntries(base)[MEMORY]).toContain('Save to it');
+});
+
 /** An in-memory stand-in for `session-metadata-store.js`. */
 const createMetadataStub = (initial = {}) => {
   const state = { ...initial };

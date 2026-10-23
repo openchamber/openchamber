@@ -109,6 +109,15 @@ The save rule also says to save before the final reply. The chat shows only the
 last step's text as the answer, so an agent that answered, then saved, then
 wrote one closing line had its whole answer folded into Activity.
 
+### Why lens sync omits the memory save rule
+
+`sync(sessionId, directory, { includeMemorySaveRule: false })` and
+`buildKnowledgeEntries(context, { includeMemorySaveRule: false })` retain the
+memory index and omit instructions to save. Suggested-task lenses consume
+external content with memory writes denied; encouraging a save would contradict
+their permission contract. Ordinary callers omit the option and keep the save
+rule, including when memory is empty. Pins and other entries are unchanged.
+
 A source that will not load never blanks the rest: an unreadable memory store
 still writes the pinned notes. A memory scope that failed to load is left out
 rather than indexed as empty, which would teach the agent to store again what it
