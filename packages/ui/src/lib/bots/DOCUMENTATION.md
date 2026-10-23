@@ -21,6 +21,12 @@ and execution authority.
 - Config writes contain editable fields only. Identity POST sends the raw
   definition; PUT sends `{ definition, expectedRevision }`; DELETE sends
   `{ expectedRevision }`. Secret-bearing resolution is server-only.
+- Jira OAuth service identities use `kind: 'jira-oauth'` and write exactly
+  `{ kind, label, site, cloudId, clientId, clientSecret }`. The site is the canonical
+  `https://<tenant>.atlassian.net` origin, `cloudId` is a UUID string and `clientId`
+  is nonempty. Public responses retain the kind, site, cloud ID and client ID;
+  client secrets and tokens are discarded. Existing Jira account/service kinds
+  retain their email and API-token write contracts.
 - Optional `space` options contain exact network and explicit provider references.
   Strict nested parsing rejects typed secrets and URL credentials. Missing options
   grant nothing; disabling isolation retains the configured references.
@@ -53,3 +59,9 @@ unmarked descendants without treating every scheduled session as a bot.
 The UI needs immutable IDs and revision references, never credential values.
 Separate public schemas keep accidental extra response fields out of component
 state while the server remains responsible for never returning those values.
+
+### Why a separate Jira OAuth kind
+
+OAuth service accounts require a cloud ID and client credentials. A separate
+kind preserves existing email/API-token identities and lets the shared Jira
+picker accept both through its `jira-` kind prefix.
