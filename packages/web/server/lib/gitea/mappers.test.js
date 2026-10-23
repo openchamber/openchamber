@@ -79,6 +79,16 @@ describe('Gitea mappers', () => {
     }
   });
 
+  it('resolves a relative Actions target_url against the instance, keeping only an http(s) one', () => {
+    const status = { ...fixtures.combinedStatus.statuses[0], target_url: '/alice/app/actions/runs/1' };
+    const run = (target_url) => mapGiteaCI({ statuses: [{ ...status, target_url }] }, identity).runs[0];
+    // Gitea Actions reports its run links relative to the instance.
+    expect(run('/alice/app/actions/runs/1').detailsUrl).toBe(`${ORIGIN}/alice/app/actions/runs/1`);
+    expect(run(`${ORIGIN}/alice/app/actions/runs/1`).detailsUrl).toBe(`${ORIGIN}/alice/app/actions/runs/1`);
+    expect(run('javascript:alert(1)').detailsUrl).toBeUndefined();
+    expect(run('').detailsUrl).toBeUndefined();
+  });
+
   it('splits a pull request diff per file, a rename by its new path', () => {
     const parts = splitUnifiedDiff(fixtures.mixedDiff);
     expect([...parts.keys()]).toEqual(['README.md', 'old.txt', 'src/main.js']);
