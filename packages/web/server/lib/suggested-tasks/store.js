@@ -12,6 +12,7 @@ import { z } from 'zod';
 import { projectConfigFileStemOf } from '../projects/project-id.js';
 import { withSourceControlFileLock } from '../source-control/file-lock.js';
 import { LENS_ACTIONS, LEVELS, SEVERITIES } from './config.js';
+import { evidenceSchema } from './scan-prompt.js';
 
 const FILE_NAME = 'suggested-tasks.json';
 const FILE_VERSION = 1;
@@ -29,11 +30,13 @@ const fileSchema = z.object({
 });
 
 const conversionSchema = z.object({
-  kind: z.enum(['session', 'worktree', 'draft-pr', 'todo', 'issue', 'draft']),
+  kind: z.enum(['session', 'worktree', 'draft-pr', 'todo', 'issue', 'draft', 'bot']),
   auto: z.boolean().optional(),
   sessionId: z.string().min(1).optional(),
   directory: z.string().min(1).optional(),
   todoId: z.string().min(1).optional(),
+  botId: z.string().min(1).optional(),
+  itemId: z.string().min(1).optional(),
   url: z.string().min(1).optional(),
 });
 
@@ -44,6 +47,7 @@ const suggestionSchema = z.object({
   lensName: z.string().min(1),
   title: z.string().min(1),
   body: z.string(),
+  evidence: evidenceSchema.optional(),
   files: z.array(fileSchema),
   confidence: z.enum(LEVELS),
   severity: z.enum(SEVERITIES),

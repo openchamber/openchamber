@@ -32,7 +32,7 @@ const answer = (suggestions) => `Done.\n\`\`\`json\n${JSON.stringify({ suggestio
 
 const lens = (id, overrides = {}) => ({ id, name: id, enabled: true, prompt: `Look for ${id}.`, model: { useDefaults: true }, web: false, action: 'suggest', ...overrides });
 
-const setup = async ({ config = {}, git: gitOverrides = {}, beforePrompt = async () => {}, sweepIntervalMs } = {}) => {
+const setup = async ({ config = {}, git: gitOverrides = {}, beforePrompt = async () => {}, sweepIntervalMs, dependencyOverrides = {} } = {}) => {
   const projectsDir = await fs.mkdtemp(path.join(os.tmpdir(), 'openchamber-suggested-'));
   temporaryDirectories.push(projectsDir);
   const projectPath = path.join(projectsDir, 'repo');
@@ -129,7 +129,11 @@ const setup = async ({ config = {}, git: gitOverrides = {}, beforePrompt = async
     createTodo: vi.fn(async (_id, { text }) => ({ todo: { id: 'todo_new', text } })),
   };
   const sessionService = {
-    create: vi.fn(async (payload) => ({ sessionId: 'ses_work', directory: payload.worktree ? `${projectPath}-wt` : projectPath })),
+    create: vi.fn(async (payload, options) => {
+      const created = { sessionId: 'ses_work', directory: payload.worktree ? `${projectPath}-wt` : projectPath };
+      await options?.onSessionCreated?.(created);
+      return created;
+    }),
     archive: vi.fn(async () => ({ archived: [] })),
   };
   const notify = vi.fn();
@@ -161,6 +165,8 @@ const setup = async ({ config = {}, git: gitOverrides = {}, beforePrompt = async
     listProjects: async () => [{ id: 'p1', path: projectPath, label: 'Demo' }],
     projectContextRuntime,
     sessionService,
+    sessionKnowledgeRuntime: { sync: vi.fn(async () => true) },
+    permissionAutoAcceptRuntime: { setSessionPolicy: vi.fn(async () => {}) },
     readSessionDefaults: async () => ({ providerID: 'acme', modelID: 'fast', variant: null, agent: 'plan' }),
     globalEventHub,
     git,
@@ -176,6 +182,7 @@ const setup = async ({ config = {}, git: gitOverrides = {}, beforePrompt = async
     settleRecheckMs: 5,
     sweepIntervalMs,
     logger: { warn: () => {}, info: () => {} },
+    ...dependencyOverrides,
   };
   runtime = createSuggestedTasksRuntime(dependencies);
   runtimes.push(runtime);
@@ -187,8 +194,111 @@ const setup = async ({ config = {}, git: gitOverrides = {}, beforePrompt = async
     runtimes.push(runtime);
     runtime.start();
   };
-  return { get runtime() { return runtime; }, restart, store, createdSessions, sessions, finish, emit, interrupted, projectContextRuntime, sessionService, notify, git, projectPath, readProjectOpenIssues, getSection: () => section, getTasks: () => tasks };
+  return { get runtime() { return runtime; }, restart, store, createdSessions, sessions, finish, emit, interrupted, projectContextRuntime, sessionService, notify, git, projectPath, readProjectOpenIssues, dependencies, getSection: () => section, getTasks: () => tasks };
 };
+
+describe('lens context and permission contracts', () => {
+  const mcp = [{ server: 'issue.server', tools: { 'find/ticket': 'allow', 'write.ticket': 'ask', delete: 'deny' } }];
+
+  it('appends exact sanitized rules while denying unlisted tools, shell, edits and memory', () => {
+    const rules = scanPermissions(false, [...mcp, { server: 'openchamber', tools: { memory: 'allow' } }, { server: 'apply', tools: { patch: 'allow' } }]);
+    expect(rules.slice(0, scanPermissions(false).length)).toEqual(scanPermissions(false));
+    expect(rules.slice(-6)).toEqual([
+      { action: 'issue_server_find_ticket', resource: '*', effect: 'allow' },
+      { action: 'openchamber_mcp_issue_server_find_ticket', resource: '*', effect: 'allow' },
+      { action: 'issue_server_write_ticket', resource: '*', effect: 'ask' },
+      { action: 'openchamber_mcp_issue_server_write_ticket', resource: '*', effect: 'ask' },
+      { action: 'issue_server_delete', resource: '*', effect: 'deny' },
+      { action: 'openchamber_mcp_issue_server_delete', resource: '*', effect: 'deny' },
+    ]);
+    const effect = (action) => rules.filter((rule) => rule.action === '*' || rule.action === action).at(-1).effect;
+    for (const action of ['issue_server_new', 'openchamber_mcp_issue_server_new', 'execute', 'webfetch', 'shell', 'edit', 'write', 'apply_patch', 'external_directory', 'openchamber_memory', 'subagent']) expect(effect(action)).toBe('deny');
+  });
+
+  it('sets ask and syncs knowledge without memory save guidance before the lens prompt', async () => {
+    const calls = [];
+    const env = await setup({
+      config: { lenses: [lens('a', { mcp })] },
+      beforePrompt: async () => { calls.push('prompt'); },
+      dependencyOverrides: {
+        readMcpServers: vi.fn(async () => [{ name: 'issue.server', status: { status: 'connected' } }]),
+        permissionAutoAcceptRuntime: { setSessionPolicy: vi.fn(async (...args) => { calls.push(['policy', ...args]); }) },
+        sessionKnowledgeRuntime: { sync: vi.fn(async (...args) => { calls.push(['knowledge', ...args]); return true; }) },
+      },
+    });
+    await env.runtime.runScan('p1', 'manual');
+    expect(calls).toEqual([
+      ['policy', 'ses_lens1', 'ask', env.projectPath],
+      ['knowledge', 'ses_lens1', env.projectPath, { includeMemorySaveRule: false }],
+      'prompt',
+    ]);
+    expect(env.dependencies.readMcpServers).toHaveBeenCalledExactlyOnceWith(env.projectPath);
+    expect(env.createdSessions[0].permissions).toEqual(scanPermissions(false, mcp));
+    expect(env.createdSessions[0].metadata.openchamber).toMatchObject({ kind: 'scheduled', automation: { source: 'suggested-tasks', lensId: 'a', notify: 'attention', runId: expect.any(String) } });
+    expect(env.sessions.get('ses_lens1').prompt).toContain('MCP issue.server: write.ticket (ask)');
+  });
+
+  it.each(['disconnected', 'no reader', 'read failure', 'malformed'])('warns and omits unavailable MCP rules for %s', async (availability) => {
+    const overrides = {};
+    if (availability === 'disconnected') overrides.readMcpServers = async () => [{ name: 'issue.server', status: { status: 'disabled' } }];
+    if (availability === 'read failure') overrides.readMcpServers = async () => { throw new Error('offline'); };
+    if (availability === 'malformed') overrides.readMcpServers = async () => null;
+    const env = await setup({ config: { lenses: [lens('a', { mcp })] }, dependencyOverrides: overrides });
+    await env.runtime.runScan('p1', 'manual');
+    expect(env.createdSessions[0].permissions).toEqual(scanPermissions(false));
+    expect((await env.store.read('p1')).runs[0].warnings.join('\n')).toContain('issue.server');
+    expect(env.sessions.get('ses_lens1').prompt).not.toContain('MCP issue.server:');
+  });
+
+  it('continues after failed knowledge sync but never prompts after a policy failure', async () => {
+    const env = await setup({ config: { lenses: [lens('a')] }, dependencyOverrides: { sessionKnowledgeRuntime: { sync: async () => { throw new Error('knowledge unavailable'); } } } });
+    await env.runtime.runScan('p1', 'manual');
+    expect(env.sessions.get('ses_lens1').prompt).toBeTruthy();
+    const failed = await setup({ config: { lenses: [lens('a')] }, dependencyOverrides: { permissionAutoAcceptRuntime: { setSessionPolicy: async () => { throw new Error('policy unavailable'); } } } });
+    await failed.runtime.runScan('p1', 'manual');
+    expect(failed.sessions.get('ses_lens1').prompt).toBeUndefined();
+    expect((await failed.store.read('p1')).runs[0].lenses[0]).toMatchObject({ status: 'failed', sessionId: 'ses_lens1' });
+  });
+
+  it.each(['default', 'ask', 'safety', 'auto'])('persists evidence and installs automatic %s policy before dispatch', async (permissionMode) => {
+    const evidence = [{ source: 'Jira', summary: 'The ticket reproduces this defect.', url: 'https://example.com/BUG-1' }];
+    const env = await setup({ config: { lenses: [lens('a', { action: 'worktree', permissionMode })] } });
+    const order = [];
+    env.dependencies.permissionAutoAcceptRuntime.setSessionPolicy.mockImplementation(async (...args) => { order.push(['policy', ...args]); });
+    // Minimal session-service driver exercises the internal pre-prompt contract.
+    env.sessionService.create.mockImplementation(async (payload, options) => {
+      order.push(['create', options.metadata]);
+      await options.onSessionCreated({ sessionId: 'ses_work', directory: `${env.projectPath}-wt` });
+      const stored = (await env.store.read('p1')).suggestions[0];
+      expect(stored.conversion.sessionId).toBe('ses_work');
+      order.push(['dispatch', payload.prompt]);
+      return { sessionId: 'ses_work', directory: `${env.projectPath}-wt` };
+    });
+    await env.runtime.runScan('p1', 'manual');
+    order.length = 0;
+    env.finish('ses_lens1', answer([{ title: 'Fix the stale response', explanation: 'A response replaces newer data.', evidence }]));
+    await waitFor(async () => (await env.store.read('p1')).suggestions[0]?.status === 'approved');
+    const suggestion = (await env.store.read('p1')).suggestions[0];
+    expect(suggestion.evidence).toEqual(evidence);
+    expect(order[0]).toEqual(['create', { openchamber: { kind: 'scheduled', automation: { source: 'suggested-tasks', projectId: 'p1', suggestionId: suggestion.id, lensId: 'a', notify: 'attention' } } }]);
+    if (permissionMode !== 'default') expect(order[1]).toEqual(['policy', 'ses_work', permissionMode, `${env.projectPath}-wt`]);
+    else expect(order).toHaveLength(2);
+    expect(order.at(-1)[0]).toBe('dispatch');
+    expect(order.at(-1)[1]).toContain('Jira: The ticket reproduces this defect. (https://example.com/BUG-1)');
+    expect((await env.runtime.getInbox('p1')).suggestions[0].evidence).toEqual(evidence);
+  });
+
+  it('leaves manual approval metadata and permission mode unchanged', async () => {
+    const env = await setup({ config: { lenses: [lens('a', { permissionMode: 'auto' })] } });
+    await env.runtime.runScan('p1', 'manual');
+    env.finish('ses_lens1', answer([{ title: 'Fix stale response' }]));
+    await waitFor(async () => (await env.store.read('p1')).suggestions.length === 1);
+    env.dependencies.permissionAutoAcceptRuntime.setSessionPolicy.mockClear();
+    await env.runtime.approve('p1', (await env.store.read('p1')).suggestions[0].id, { action: 'session' });
+    expect(env.sessionService.create.mock.calls[0][1].metadata).toBeUndefined();
+    expect(env.dependencies.permissionAutoAcceptRuntime.setSessionPolicy).not.toHaveBeenCalled();
+  });
+});
 
 describe('scan lifecycle', () => {
   it('reconciles an owner that dies after startup inspection, then stops recovery reads while idle', async () => {
@@ -508,8 +618,8 @@ describe('scan lifecycle', () => {
 });
 
 describe('approving and snoozing', () => {
-  const seeded = async () => {
-    const env = await setup({ config: { lenses: [lens('docs')] } });
+  const seeded = async (dependencyOverrides = {}) => {
+    const env = await setup({ config: { lenses: [lens('docs')] }, dependencyOverrides });
     await env.runtime.runNow('p1');
     env.finish('ses_lens1', answer([{ title: 'Split the router', explanation: 'It is 2,000 lines.', files: [{ path: 'src/router.ts', startLine: 1, endLine: 40 }], confidence: 'high', severity: 'medium' }]));
     const suggestion = await waitFor(async () => (await env.store.read('p1')).suggestions[0]);
@@ -525,6 +635,36 @@ describe('approving and snoozing', () => {
     expect(payload.prompt).toContain('- src/router.ts:1-40');
     expect(approved).toMatchObject({ status: 'approved', conversion: { kind: 'worktree', sessionId: 'ses_work' } });
     await expect(env.runtime.approve('p1', suggestion.id, { action: 'session' })).rejects.toMatchObject({ statusCode: 409 });
+  });
+
+  it('reconciles an uncertain bot delivery to the same item without losing evidence or changing bots', async () => {
+    // Given a bot admission whose first response is lost after the item exists.
+    const admitted = new Map();
+    const deliveries = [];
+    let lost = true;
+    const { env, suggestion } = await seeded({ deliverSuggestionToBot: async (request) => {
+      const persisted = (await env.store.read('p1')).suggestions.find((entry) => entry.id === request.suggestion.id);
+      expect(persisted.conversion).toMatchObject({ kind: 'bot', botId: request.botId });
+      expect(persisted.conversionPending).toBe(true);
+      deliveries.push(request);
+      admitted.set(request.suggestion.id, admitted.get(request.suggestion.id) ?? 'item-one');
+      if (lost) { lost = false; throw new Error('Admission response lost'); }
+      return { itemId: admitted.get(request.suggestion.id) };
+    } });
+    const evidence = [{ source: 'Jira', summary: 'Verified defect', url: 'https://example.test/BUG-1' }];
+    await env.store.update('p1', (inbox) => ({ inbox: { ...inbox, suggestions: inbox.suggestions.map((entry) => ({ ...entry, evidence })) } }));
+    // When the same delivery is retried, another target and Restore remain refused.
+    await expect(env.runtime.approve('p1', suggestion.id, { action: 'bot', botId: 'bugs' })).rejects.toThrow('Admission response lost');
+    await expect(env.runtime.approve('p1', suggestion.id, { action: 'bot', botId: 'other' })).rejects.toMatchObject({ statusCode: 409 });
+    await expect(env.runtime.restore('p1', suggestion.id)).rejects.toMatchObject({ statusCode: 409 });
+    const result = await env.runtime.approve('p1', suggestion.id, { action: 'bot', botId: 'bugs' });
+    // Then the completed response can itself be replayed without another admission.
+    expect(result).toMatchObject({ status: 'approved', conversion: { kind: 'bot', botId: 'bugs', itemId: 'item-one' } });
+    expect(deliveries.at(-1).suggestion.evidence).toEqual(evidence);
+    expect(deliveries.at(-1).suggestion.files).toEqual(suggestion.files);
+    expect(admitted.size).toBe(1);
+    expect(await env.runtime.approve('p1', suggestion.id, { action: 'bot', botId: 'bugs' })).toEqual(result);
+    expect(deliveries).toHaveLength(2);
   });
 
   it('keeps draft-PR work behind explicit approval and dispatches it as a goal in a worktree', async () => {

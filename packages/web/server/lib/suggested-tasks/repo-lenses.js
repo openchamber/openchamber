@@ -21,7 +21,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
 import { parseMdFileAsync } from '../opencode/shared.js';
-import { LENS_ACTIONS, MAX_LENS_NAME_LENGTH, MAX_LENS_PROMPT_LENGTH } from './config.js';
+import { LENS_ACTIONS, MAX_LENS_NAME_LENGTH, MAX_LENS_PROMPT_LENGTH, lensMcpSchema, lensPermissionModeSchema } from './config.js';
 
 const REPO_LENS_DIRECTORY = path.join('.agents', 'lenses');
 
@@ -32,6 +32,8 @@ const frontmatterSchema = z.object({
   agent: z.string().trim().min(1).max(200).optional(),
   web: z.boolean().default(false),
   action: z.enum(LENS_ACTIONS).default('suggest'),
+  mcp: lensMcpSchema,
+  permissionMode: lensPermissionModeSchema,
 });
 
 const bodySchema = z.string().trim().min(1).max(MAX_LENS_PROMPT_LENGTH);
@@ -39,9 +41,12 @@ const bodySchema = z.string().trim().min(1).max(MAX_LENS_PROMPT_LENGTH);
 const errorCodeSchema = z.object({ code: z.string() });
 
 /** What an approval covers: the whole definition, so any change needs a new one. */
-const fingerprintOf = (lens) => createHash('sha256')
-  .update(JSON.stringify({ name: lens.name, prompt: lens.prompt, model: lens.model, web: lens.web, action: lens.action }))
-  .digest('hex');
+const fingerprintOf = (lens) => {
+  const definition = { name: lens.name, prompt: lens.prompt, model: lens.model, web: lens.web, action: lens.action };
+  if (lens.mcp.length) definition.mcp = lens.mcp;
+  if (lens.permissionMode !== 'default') definition.permissionMode = lens.permissionMode;
+  return createHash('sha256').update(JSON.stringify(definition)).digest('hex');
+};
 
 const lensFromFile = async (filePath) => {
   let parsed;
@@ -57,14 +62,14 @@ const lensFromFile = async (filePath) => {
   }
   const prompt = bodySchema.safeParse(parsed.body);
   if (!prompt.success) return { ok: false, error: 'the file needs the lens prompt as its body' };
-  const { name, model, variant, agent, web, action } = frontmatter.data;
+  const { name, model, variant, agent, web, action, mcp, permissionMode } = frontmatter.data;
   const separator = model ? model.indexOf('/') : -1;
   const lensModel = model
     ? { useDefaults: false, providerID: model.slice(0, separator), modelID: model.slice(separator + 1) }
     : { useDefaults: true };
   if (variant) lensModel.variant = variant;
   if (agent) lensModel.agent = agent;
-  return { ok: true, lens: { name, prompt: prompt.data, model: lensModel, web, action } };
+  return { ok: true, lens: { name, prompt: prompt.data, model: lensModel, web, action, mcp, permissionMode } };
 };
 
 /**

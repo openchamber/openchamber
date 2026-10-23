@@ -61,7 +61,7 @@ const bulletList = (lines) => lines.map((line) => `- ${line}`).join('\n');
  */
 export const buildScanPrompt = ({ lens, scope, maxSuggestions, changedFiles, known }) => {
   const sections = [
-    'You are running a read-only scan for Suggested tasks in OpenChamber. Your job is to find work worth doing in this repository and report it. Nobody reads this conversation live; only the JSON block at the end is used.',
+    'You are running a scan for Suggested tasks in OpenChamber. Your job is to find work worth doing in this repository and report it. Only the JSON block at the end is used.',
     `## Lens: ${lens.name}\n\n${lens.prompt}`,
   ];
 
@@ -74,6 +74,15 @@ export const buildScanPrompt = ({ lens, scope, maxSuggestions, changedFiles, kno
     if (changedFiles.length > listed.length) scopeLines.push(`${changedFiles.length - listed.length} more changed files are not listed.`);
   }
   sections.push(`## Scope\n\n${bulletList(scopeLines)}`);
+
+  const sources = ['Repository files through read, glob, grep and skill.'];
+  if (lens.web) sources.push('Web pages and search through webfetch and websearch.');
+  for (const { server, tools } of lens.mcp ?? []) {
+    for (const [tool, effect] of Object.entries(tools)) {
+      if (effect !== 'deny') sources.push(`MCP ${server}: ${tool} (${effect}).`);
+    }
+  }
+  sections.push(`## Data sources\n\n${bulletList(sources)}\n\nUse MCP tools only as permitted, including tools that write to external services. Unlisted tools are denied. Do not save memory.`);
 
   sections.push([
     '## Rules',
@@ -104,11 +113,12 @@ export const buildScanPrompt = ({ lens, scope, maxSuggestions, changedFiles, kno
     'End your answer with exactly one fenced JSON block in this form:',
     '',
     '```json',
-    '{"suggestions":[{"title":"Short imperative title","explanation":"Why it matters and what to change. Markdown allowed.","files":[{"path":"src/example.ts","startLine":10,"endLine":24}],"confidence":"high","severity":"medium"}]}',
+    '{"suggestions":[{"title":"Short imperative title","explanation":"Why it matters and what to change. Markdown allowed.","files":[{"path":"src/example.ts","startLine":10,"endLine":24}],"confidence":"high","severity":"medium","evidence":[{"source":"Issue tracker","summary":"What the source confirms","url":"https://example.com/issue/1"}]}]}',
     '```',
     '',
     `\`confidence\` is one of ${LEVELS.join(', ')}: how sure you are the problem is real. \`severity\` is one of ${SEVERITIES.join(', ')}: how much it matters. Line numbers are optional.`,
     'When nothing is worth suggesting, answer with {"suggestions":[]}.',
+    'Evidence is optional, with at most 10 entries containing source, summary and an optional http or https URL. Cite only sources you inspected.',
   ].join('\n'));
 
   return sections.join('\n\n');
@@ -120,12 +130,19 @@ const fileSchema = z.object({
   endLine: z.number().int().min(1).optional().catch(undefined),
 });
 
+export const evidenceSchema = z.array(z.object({
+  source: z.string().trim().min(1).max(200),
+  summary: z.string().trim().min(1).max(2_000),
+  url: z.url({ protocol: /^https?$/ }).max(2_000).optional(),
+})).max(10);
+
 const reportedSuggestionSchema = z.object({
   title: z.string().trim().min(1),
   explanation: z.string().trim().default(''),
   files: z.array(z.unknown()).default([]),
   confidence: z.enum(LEVELS).catch('medium'),
   severity: z.enum(SEVERITIES).catch('medium'),
+  evidence: evidenceSchema.optional(),
 });
 
 const reportSchema = z.object({ suggestions: z.array(z.unknown()) });
@@ -195,14 +212,16 @@ export const parseScanOutput = (text, root) => {
       invalid += 1;
       continue;
     }
-    const { title, explanation, files, confidence, severity } = parsed.data;
-    suggestions.push({
+    const { title, explanation, files, confidence, severity, evidence } = parsed.data;
+    const suggestion = {
       title: title.slice(0, MAX_TITLE_LENGTH),
       body: explanation.slice(0, MAX_BODY_LENGTH),
       files: files.map((file) => toFile(file, root)).filter(Boolean).slice(0, MAX_FILES_PER_SUGGESTION),
       confidence,
       severity,
-    });
+    };
+    if (evidence) suggestion.evidence = evidence;
+    suggestions.push(suggestion);
   }
   return { suggestions, invalid };
 };

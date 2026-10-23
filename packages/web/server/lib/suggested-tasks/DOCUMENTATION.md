@@ -6,6 +6,12 @@ user approves, snoozes or dismisses what they propose. Product page:
 
 ## Pieces it reuses
 
+Managed scans grant both the original MCP action and its direct
+`openchamber_mcp_<effective tool id>` alias. The alias preserves the original
+executor and permission assertion; `execute` stays denied so Code Mode cannot
+bypass the web switch with ambient HTTP. External OpenCode must configure the
+selected MCP servers with `codemode: false`, as the editor explains.
+
 - **Timing.** A project with Suggested tasks on has one scheduled task,
   `suggested-tasks-scan`, marked `suggestedScan: true`. The scheduled-tasks
   runtime arms its timer, claims each occurrence across server processes and
@@ -86,11 +92,22 @@ session is failed on recovery without waiting for execution records.
   `grep` and `skill`, deny `.env` reads as OpenCode's default policy does,
   and allow `webfetch`/`websearch` only for a lens with web access. OpenCode
   applies the last matching rule and puts session rules after the agent's, so
-  no edit, shell, MCP tool, subagent or question can run whatever the agent
-  allows. The scan is read-only by construction, not by instruction.
+  edits, shell, unlisted MCP tools, subagents and questions remain denied.
+  A lens has up to 10 MCP server entries, each with explicit tool effects
+  `allow`, `ask` or `deny`. Rules follow the filesystem rules, with server
+  and tool names sanitized to `[A-Za-z0-9_-]`. Managed OpenChamber actions,
+  `apply_patch` and `external_directory` cannot be reopened through MCP names.
+  Filesystem access stays read-only; selected MCP tools may write externally.
+  The session's permission policy is set to `ask` before dispatch, so an MCP
+  `ask` rule waits for the user even when Settings defaults to auto.
 - model, variant and agent from the lens, or the project's session defaults.
 - metadata `openchamber.kind: 'scheduled'` (stays out of In work) and
-  `openchamber.suggestedScan: { runId, lensId }`.
+  `openchamber.suggestedScan: { runId, lensId }` and
+  `openchamber.automation: { source: 'suggested-tasks', runId, lensId, notify: 'attention' }`.
+- project knowledge through `sessionKnowledgeRuntime.sync(sessionId, directory,
+  { includeMemorySaveRule: false })` before the prompt. Knowledge failure does
+  not block dispatch. The memory index remains available while the memory-save
+  instruction is omitted and the memory tool stays denied.
 - the prompt: the lens prompt, the scope, the changed files of an incremental
   scan, the rules, everything already known (open, snoozed and approved
   titles; dismissed titles with their reasons; open todos and issue titles), and the answer
@@ -98,6 +115,15 @@ session is failed on recovery without waiting for execution records.
 
 A lens that cannot start is recorded as failed; the others still start. The
 scan returns as soon as the prompts are out.
+
+The runtime requires `sessionKnowledgeRuntime` and `permissionAutoAcceptRuntime`,
+whose `setSessionPolicy(sessionId, mode, directory)` must succeed before a lens
+prompt. Optional `readMcpServers(directory)` returns the unwrapped OpenCode
+`mcp.list` array of `{ name, status: { status } }`. It reads only the scan
+directory, once per run with configured MCP tools. Only `connected` grants
+rules. Disconnected, missing, malformed or failed availability produces run
+warnings and omits those tools from both permissions and prompt. An absent
+reader also warns and grants no MCP tools.
 
 ## A lens finishing
 
@@ -189,6 +215,21 @@ conversion. In-flight conversions cannot be dismissed or snoozed. An automatic
 action rechecks that the project and lens policy are still enabled before it
 creates work.
 
+Automatic session, worktree and draft-PR approval passes internal `metadata`
+to `sessionService.create(payload, { metadata, onSessionCreated })`, with
+`openchamber.kind: 'scheduled'` and automation fields `source: 'suggested-tasks'`,
+`projectId`, `suggestionId`, `lensId`, `notify: 'attention'`. The creation callback
+records the session identity, then installs the lens `permissionMode` before
+the service dispatches its prompt. `default` writes no policy. Manual approval
+passes no automation metadata and writes no policy. A failed callback leaves
+the created session linked and the conversion error visible, preventing a
+duplicate retry.
+
+Suggestions optionally carry up to 10 evidence entries with bounded `source`,
+`summary` and optional HTTP(S) `url`. Invalid evidence invalidates only its
+suggestion. Evidence survives inbox persistence and is included in the approval
+prompt. Existing suggestions without evidence load unchanged.
+
 `conversionRecoverable` grants that explicit recovery only after an operation
 has failed or its owner has died. A new reservation clears old errors and
 recovery authority. Dismissal accepts only open or snoozed suggestions under
@@ -236,6 +277,24 @@ on the OpenChamber event stream.
 | VS Code | Not offered: no OpenChamber server in the extension. The sidebar entry and the page are absent, and the summary is never requested. |
 
 ## Compatibility
+
+Old lens configs default to `mcp: []` and `permissionMode: 'default'`. Repository
+lenses accept the same fields. Existing fingerprints remain valid with these
+defaults; adding MCP rules or a non-default execution policy changes the
+fingerprint and requires renewed local approval.
+
+### Why availability fails closed
+
+An MCP connection is authoritative only after a successful status read. Assuming
+connectivity when the reader is absent would grant tools that were never checked
+and misrepresent the sources available to the lens.
+
+### Why execution policy is installed in the creation callback
+
+The session service owns prompt dispatch and awaits `onSessionCreated` first.
+Installing policy after `create` returns would let the first permission request
+use the Settings default. The callback also persists identity first, so a policy
+write failure leaves enough information to inspect the created session safely.
 
 An older OpenChamber sharing the same projects dir does not know
 `suggestedScan`. When it fires the scan task it sends the task's fallback

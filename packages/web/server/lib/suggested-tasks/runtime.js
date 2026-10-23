@@ -4,7 +4,7 @@
 // A scan is one scheduled task of the project (`suggestedScan`), so the
 // scheduler times it, claims each occurrence across server processes and
 // limits concurrency. When it fires, `runScan` starts one OpenCode session per
-// lens, each with permission rules that allow reading and nothing else, and
+// lens, each with filesystem reads and explicitly selected MCP tools, and
 // returns. The sessions run on their own; this runtime watches them on the
 // shared event hub, reads each final answer when its turn ends, and turns it
 // into suggestions. A lens that fails or is stopped never touches what the
@@ -23,6 +23,7 @@ import { assertOpenCodeApiResponse } from '../opencode/prompt-response.js';
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
 import { createSessionActivityProbe } from '../opencode/session-activity.js';
 import { withSourceControlFileLock } from '../source-control/file-lock.js';
+import { mcpToolAliasName } from '../agent-tool/mcp-alias.js';
 import { parseConfigEdit, readSuggestedTasksConfig } from './config.js';
 import { buildIssueUrl, resolveIssueTargets } from './issue-links.js';
 import { LENS_PRESETS } from './presets.js';
@@ -54,11 +55,11 @@ const httpError = (message, statusCode) => Object.assign(new Error(message), { s
 /**
  * The session rules of a lens session. OpenCode applies the last rule that
  * matches and puts a session's rules after the agent's, so these decide:
- * reading and searching are allowed, everything else (edits, shell, MCP
+ * reading and searching are allowed, everything else (edits, shell, unlisted MCP
  * tools, subagents, questions, paths outside the checkout) is denied. `.env`
  * files stay unreadable, as in OpenCode's own default policy.
  */
-export const scanPermissions = (web) => {
+export const scanPermissions = (web, mcp = []) => {
   const rules = [
     { action: '*', resource: '*', effect: 'deny' },
     { action: 'read', resource: '*', effect: 'allow' },
@@ -71,6 +72,18 @@ export const scanPermissions = (web) => {
   ];
   if (web) {
     rules.push({ action: 'webfetch', resource: '*', effect: 'allow' }, { action: 'websearch', resource: '*', effect: 'allow' });
+  }
+  const sanitize = (name) => name.replace(/[^A-Za-z0-9_-]/g, '_');
+  for (const { server, tools } of mcp) {
+    for (const [tool, effect] of Object.entries(tools)) {
+      const action = `${sanitize(server)}_${sanitize(tool)}`;
+      // MCP names must not reopen filesystem writes or managed memory.
+      if (action === 'apply_patch' || action === 'external_directory' || action.startsWith('openchamber_')) continue;
+      rules.push({ action, resource: '*', effect });
+      // Managed OpenCode exposes a direct alias while the original executor
+      // still enforces the MCP rule. External direct MCPs use the rule above.
+      rules.push({ action: mcpToolAliasName(action), resource: '*', effect });
+    }
   }
   return rules;
 };
@@ -120,6 +133,7 @@ const buildApprovalPrompt = (suggestion, action) => {
   ];
   if (suggestion.body) parts.push(suggestion.body);
   if (suggestion.files.length > 0) parts.push(`Files:\n${suggestion.files.map((file) => `- ${fileLabel(file)}`).join('\n')}`);
+  if (suggestion.evidence?.length) parts.push(`Evidence:\n${suggestion.evidence.map(({ source, summary, url }) => `- ${source}: ${summary}${url ? ` (${url})` : ''}`).join('\n')}`);
   if (action === 'draft-pr') {
     parts.push('When the change is done and verified, commit it on this worktree\'s branch, push the branch, and open a draft pull request that describes the change. Stop once the draft pull request exists.');
   }
@@ -176,6 +190,7 @@ const messagePageSchema = z.object({ data: z.array(z.unknown()) });
 const sessionIdSchema = z.object({ id: z.string().min(1) });
 const sessionUsageSchema = z.object({ tokens: z.object({ input: z.number(), output: z.number(), reasoning: z.number() }) });
 const inboxItemsSchema = z.array(z.object({ id: z.string().min(1) }));
+const mcpServersSchema = z.array(z.object({ name: z.string(), status: z.object({ status: z.string() }) }));
 
 const STOP_MESSAGES = {
   budget: 'Stopped: the run used up its token budget.',
@@ -191,6 +206,12 @@ export const createSuggestedTasksRuntime = (deps) => {
     listProjects,
     projectContextRuntime,
     sessionService,
+    deliverSuggestionToBot,
+    sessionKnowledgeRuntime,
+    permissionAutoAcceptRuntime,
+    // Returns OpenCode mcp.list's unwrapped array of { name, status: { status } }.
+    // No reader means availability is unknown, so configured rules are omitted.
+    readMcpServers,
     readSessionDefaults,
     globalEventHub,
     git,
@@ -349,10 +370,10 @@ export const createSuggestedTasksRuntime = (deps) => {
   const lensesToRun = (config, repoLenses, selection) => {
     const personal = config.lenses
       .filter((lens) => lens.enabled)
-      .map((lens) => ({ id: lens.id, name: lens.name, prompt: lens.prompt, model: lens.model, web: lens.web, action: lens.action }));
+      .map((lens) => ({ ...lens }));
     const repository = repoLenses
       .filter((lens) => lens.status === 'enabled')
-      .map((lens) => ({ id: lens.id, name: lens.name, prompt: lens.prompt, model: lens.model, web: lens.web, action: lens.action }));
+      .map((lens) => ({ ...lens }));
     const all = [...personal, ...repository];
     return selection ? all.filter((lens) => selection.includes(lens.id)) : all;
   };
@@ -391,8 +412,11 @@ export const createSuggestedTasksRuntime = (deps) => {
       title: `${lens.name} · Suggested tasks`,
       location: { directory: scanDirectory },
       // Kept out of In work like a scheduled run: nobody sent it.
-      metadata: { openchamber: { kind: 'scheduled', suggestedScan: { runId: run.id, lensId: lens.id } } },
-      permissions: scanPermissions(lens.web),
+      metadata: { openchamber: {
+        kind: 'scheduled', suggestedScan: { runId: run.id, lensId: lens.id },
+        automation: { source: 'suggested-tasks', runId: run.id, lensId: lens.id, notify: 'attention' },
+      } },
+      permissions: scanPermissions(lens.web, lens.mcp),
     };
     if (selection?.providerID && selection?.modelID) {
       input.model = { providerID: selection.providerID, id: selection.modelID };
@@ -408,6 +432,14 @@ export const createSuggestedTasksRuntime = (deps) => {
       } : entry) },
     }));
     try {
+      // Fail closed if the policy cannot be installed. Settings must not
+      // auto-answer a lens's explicit ask rules.
+      await permissionAutoAcceptRuntime.setSessionPolicy(session.id, 'ask', scanDirectory);
+      try {
+        await sessionKnowledgeRuntime.sync(session.id, scanDirectory, { includeMemorySaveRule: false });
+      } catch (error) {
+        logger.warn?.('[suggested-tasks] could not sync lens knowledge:', error?.message ?? error);
+      }
       const currentRun = (await store.read(projectId)).runs.find((entry) => entry.id === run.id);
       if (currentRun?.stopRequested || !(await readConfig(projectId)).enabled) throw httpError('The scan was stopped before this lens was dispatched', 409);
       await store.update(projectId, (inbox) => ({ inbox: { ...inbox, runs: inbox.runs.map((entry) => entry.id === run.id ? {
@@ -540,12 +572,26 @@ export const createSuggestedTasksRuntime = (deps) => {
     const openIssues = await readProjectOpenIssues(project.path);
     run.openIssues = openIssues.titles;
     run.warnings = openIssues.warnings.map((warning) => warning.message);
+    let availableServers = [];
+    if (lenses.some((lens) => lens.mcp.length > 0)) {
+      try {
+        if (!readMcpServers) throw new Error('MCP availability reader is unavailable');
+        availableServers = mcpServersSchema.parse(await readMcpServers(scanDirectory));
+      } catch (error) {
+        run.warnings.push(`Could not read MCP availability: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    const runnableLenses = lenses.map((lens) => ({ ...lens, mcp: lens.mcp.filter(({ server }) => {
+      if (availableServers.some((entry) => entry.name === server && entry.status.status === 'connected')) return true;
+      run.warnings.push(`MCP server "${server}" is unavailable for lens "${lens.name}"; its tools were omitted.`);
+      return false;
+    }) }));
     const known = await knownFor(projectId, inbox, config, openIssues.titles);
     await store.update(projectId, (current) => ({ inbox: { ...current, runs: current.runs.map((entry) => entry.id === run.id ? { ...run, stopRequested: entry.stopRequested } : entry) } }));
     changed(projectId);
 
     let firstSessionId = null;
-    for (const lens of lenses) {
+    for (const lens of runnableLenses) {
       const lensRun = { lensId: lens.id, lensName: lens.name, action: lens.action, status: 'running', startedAt: now(), reported: 0, added: 0, tokens: 0 };
       try {
         const latestRun = (await store.read(projectId)).runs.find((entry) => entry.id === run.id);
@@ -987,7 +1033,7 @@ export const createSuggestedTasksRuntime = (deps) => {
             if (!suggestion.conversionPending || suggestion.conversionRecoverable || suggestion.conversionOwnerHost !== os.hostname()) return suggestion;
             try { process.kill(suggestion.conversionOwnerPid, 0); return suggestion; } catch (error) { if (error?.code === 'EPERM') return suggestion; }
             changedRun = true;
-            if (suggestion.conversion?.sessionId || suggestion.conversion?.todoId) return { ...suggestion, status: 'approved', approvedAt: now(), conversionPending: false, conversionError: 'Server stopped after creating this work. Check its outcome before continuing.' };
+            if (suggestion.conversion?.sessionId || suggestion.conversion?.todoId || suggestion.conversion?.itemId) return { ...suggestion, status: 'approved', approvedAt: now(), conversionPending: false, conversionError: 'Server stopped after creating this work. Check its outcome before continuing.' };
             return { ...suggestion, conversionRecoverable: true, conversionError: 'Server stopped during conversion. Check the session and todo lists before restoring this suggestion to retry.' };
           });
           return changedRun ? { inbox: { ...inbox, runs, suggestions } } : {};
@@ -1102,6 +1148,7 @@ export const createSuggestedTasksRuntime = (deps) => {
   };
 
   const restore = (projectId, suggestionId) => changeSuggestion(projectId, suggestionId, (current) => {
+    if (current.conversionPending && current.conversion?.kind === 'bot') throw httpError('Retry delivery to the same bot to reconcile this suggestion.', 409);
     if (current.conversionPending && (!current.conversionRecoverable || converting.has(`${projectId}:${suggestionId}`))) throw httpError('A conversion is still running.', 409);
     return { ...withoutDecision(current), status: 'open', conversionPending: false, conversionRecoverable: false };
   });
@@ -1115,7 +1162,7 @@ export const createSuggestedTasksRuntime = (deps) => {
    * reserved before work is created; partial creation records the session
    * identity and ambiguous failures require explicit reconciliation.
    */
-  async function approve(projectId, suggestionId, { action, provider, auto = false }) {
+  async function approve(projectId, suggestionId, { action, provider, botId, auto = false }) {
     const key = `${projectId}:${suggestionId}`;
     if (converting.has(key)) throw httpError('This suggestion is already being converted', 409);
     converting.add(key);
@@ -1123,28 +1170,55 @@ export const createSuggestedTasksRuntime = (deps) => {
     let reserved = false;
     try {
       const project = await findProject(projectId);
-      if (!['todo', 'session', 'worktree', 'draft-pr', 'issue', 'draft'].includes(action)) throw httpError('Unknown action', 400);
+      if (!['todo', 'session', 'worktree', 'draft-pr', 'issue', 'draft', 'bot'].includes(action)) throw httpError('Unknown action', 400);
+      if (action === 'bot' && (!botId || auto || !deliverSuggestionToBot)) throw httpError('Select an enabled bot for this suggestion.', 400);
       const suggestion = await changeSuggestion(projectId, suggestionId, (current) => {
-        if (current.conversionPending || !isPending(current) || (auto && current.status !== 'open')) throw httpError('This suggestion was already handled or is being converted', 409);
-        return { ...current, conversionPending: true, conversionRecoverable: false, conversionError: undefined, conversionOwnerPid: process.pid, conversionOwnerHost: os.hostname() };
+        const sameBot = action === 'bot' && current.conversion?.kind === 'bot' && current.conversion.botId === botId;
+        if (sameBot && current.status === 'approved' && current.conversion.itemId) return current;
+        if ((current.conversionPending && !(sameBot && current.conversionRecoverable)) || !isPending(current) || (auto && current.status !== 'open')) throw httpError('This suggestion was already handled or is being converted', 409);
+        const pending = { ...current, conversionPending: true, conversionRecoverable: false, conversionError: undefined, conversionOwnerPid: process.pid, conversionOwnerHost: os.hostname() };
+        if (action === 'bot') pending.conversion = { kind: 'bot', botId };
+        return pending;
       });
+      if (action === 'bot' && suggestion.status === 'approved') return suggestion;
       reserved = true;
       conversion = { kind: action };
       if (auto) conversion.auto = true;
-      if (action === 'todo') {
+      if (action === 'bot') {
+        conversion.botId = botId;
+        const result = await deliverSuggestionToBot({ projectId, botId, suggestion });
+        conversion.itemId = z.string().min(1).parse(result.itemId);
+        await changeSuggestion(projectId, suggestionId, (current) => ({ ...current, conversion }));
+      } else if (action === 'todo') {
         const { todo } = await projectContextRuntime.createTodo(projectId, { text: todoTextFor(suggestion) });
         conversion.todoId = todo.id;
       } else if (action === 'session' || action === 'worktree' || action === 'draft-pr') {
+        let permissionMode = 'default';
+        if (auto) {
+          const config = await readConfig(projectId);
+          const repository = await listRepositoryLenses(project.path, config.lensApprovals);
+          const lens = lensesToRun(config, repository, null).find((entry) => entry.id === suggestion.lensId && entry.action === action);
+          if (!config.enabled || !lens) throw httpError('The automatic lens action is no longer enabled', 409);
+          permissionMode = lens.permissionMode;
+        }
         const payload = { projectId, title: suggestion.title, prompt: buildApprovalPrompt(suggestion, action) };
         if (action !== 'session') payload.worktree = { name: worktreeNameFor(suggestion) };
         if (action === 'draft-pr') payload.goal = true;
-        const created = await sessionService.create(payload, {
+        const options = {
           onSessionCreated: async (createdSession) => {
             conversion.sessionId = createdSession.sessionId;
             conversion.directory = createdSession.directory;
             await changeSuggestion(projectId, suggestionId, (current) => ({ ...current, conversion }));
+            if (auto && permissionMode !== 'default') {
+              await permissionAutoAcceptRuntime.setSessionPolicy(createdSession.sessionId, permissionMode, createdSession.directory);
+            }
           },
-        });
+        };
+        if (auto) options.metadata = { openchamber: {
+          kind: 'scheduled',
+          automation: { source: 'suggested-tasks', projectId, suggestionId, lensId: suggestion.lensId, notify: 'attention' },
+        } };
+        const created = await sessionService.create(payload, options);
         conversion.sessionId = created.sessionId;
         conversion.directory = created.directory;
       } else if (action === 'issue') {
@@ -1168,7 +1242,7 @@ export const createSuggestedTasksRuntime = (deps) => {
           conversion.sessionId = error.sessionId;
           conversion.directory = error.directory;
         }
-        const created = Boolean(conversion?.sessionId || conversion?.todoId);
+        const created = Boolean(conversion?.sessionId || conversion?.todoId || conversion?.itemId);
         await changeSuggestion(projectId, suggestionId, (current) => ({
           ...current,
           status: created ? 'approved' : current.status,

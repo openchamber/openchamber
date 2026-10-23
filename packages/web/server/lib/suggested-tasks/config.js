@@ -36,6 +36,13 @@ const lensModelSchema = z.object({
   message: 'a lens that does not follow the session defaults needs a model',
 });
 
+export const lensMcpSchema = z.array(z.object({
+  server: z.string().trim().min(1).max(200),
+  tools: z.record(z.string().trim().min(1).max(200), z.enum(['allow', 'ask', 'deny'])),
+})).max(10).default([]);
+
+export const lensPermissionModeSchema = z.enum(['default', 'ask', 'safety', 'auto']).default('default');
+
 const lensSchema = z.object({
   id: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/),
   name: z.string().trim().min(1).max(MAX_LENS_NAME_LENGTH),
@@ -44,6 +51,8 @@ const lensSchema = z.object({
   prompt: z.string().trim().min(1).max(MAX_LENS_PROMPT_LENGTH),
   model: lensModelSchema.default({ useDefaults: true }),
   web: z.boolean().default(false),
+  mcp: lensMcpSchema,
+  permissionMode: lensPermissionModeSchema,
   action: z.enum(LENS_ACTIONS).default('suggest'),
 });
 
