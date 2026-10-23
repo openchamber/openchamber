@@ -129,16 +129,17 @@ export function createMutationExecutor({ store, auditStore, runtimeIdentity }) {
     }
     const existing = await auditStore.read(auditId(record));
     const target = {
-      kind: record.kind.startsWith('issue-') ? 'issue' : 'change-request',
+      kind: record.kind === 'bot-git-push' ? 'git-ref'
+        : (record.kind.startsWith('issue-') ? 'issue' : 'change-request'),
       operation: record.kind,
       projectId: record.target.project.id,
     };
     for (const key of ['number', 'head', 'base', 'headSha']) {
       if (record.target[key] !== undefined) target[key] = record.target[key];
     }
-    return auditStore.plan({
+    const plan = {
       id: auditId(record),
-      initiator: 'user',
+      initiator: record.target.botAuthority ? 'bot' : 'user',
       executorKind: 'provider-api',
       // A restart resumes the original audit identity, not the new server's identity.
       runtime: existing?.runtime ?? runtimeIdentity,
@@ -146,7 +147,9 @@ export function createMutationExecutor({ store, auditStore, runtimeIdentity }) {
       providerAccountId,
       transportReference: null,
       target,
-    });
+    };
+    if (record.target.botAuthority) plan.botAuthority = record.target.botAuthority;
+    return auditStore.plan(plan);
   };
   const finishAudit = async (record, step) => {
     if (!auditStore) return;
@@ -253,6 +256,31 @@ export function createMutationExecutor({ store, auditStore, runtimeIdentity }) {
   return {
     read(key) {
       return store.read(key);
+    },
+    // Explicit read-only recovery. Ordinary execute keeps unknown outcomes sticky.
+    reconcile({ record, providerAccountId, reconcile }) {
+      return store.withExecutionLock(record.key, async () => {
+        const existing = await store.read(record.key);
+        if (!existing || existing.inputDigest !== record.inputDigest) throw conflictError();
+        await planAudit(existing, providerAccountId);
+        if (existing.state !== 'outcome-unknown') {
+          if (existing.state === 'running') return recover(existing, reconcile);
+          if (existing.state === 'failed') throw failedReplayError(existing);
+          const audit = await auditStore?.read(auditId(existing));
+          if (audit?.state === 'outcome-unknown') await auditStore.reconcileUnknown(auditId(existing), {
+            state: 'succeeded', errorCode: null, steps: ['provider-reconciliation'],
+          });
+          else if (audit && ['planned', 'running'].includes(audit.state)) await finishAudit(existing, 'provider-reconciliation');
+          return { record: existing, replayed: true };
+        }
+        const result = await reconcile(existing);
+        if (result?.state !== 'succeeded') throw outcomeUnknownError();
+        const completed = await store.reconcileUnknown(existing.key, existing.inputDigest, result.result);
+        if (auditStore) await auditStore.reconcileUnknown(auditId(existing), {
+          state: 'succeeded', errorCode: null, steps: ['provider-reconciliation'],
+        });
+        return { record: completed, replayed: true };
+      });
     },
     execute(input) {
       if (auditStore && (valueTag(input.providerAccountId) !== '[object String]'
