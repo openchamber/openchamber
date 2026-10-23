@@ -375,6 +375,16 @@ The server (`packages/web/server/lib/fs/ripgrep.js`) looks for ripgrep in this o
   open) removes that session's delivered notifications from Notification
   Center through `desktop_clear_session_notifications`. Main removes only
   notifications it delivered in the current run.
+  Bot clicks carry a validated `botTarget: { projectId, itemId }` through
+  `openchamber:open-session`, with or without stage session metadata. The target
+  takes precedence over the session. Foreign runtimes use saved-host resolution
+  through `desktop_open_host_session`; an unknown owner never falls back to the
+  active runtime. New or loading host windows receive `botsProject`/`botItem`
+  query parameters; ready windows receive the structured event with their owning
+  runtime key. A same-tagged window that switched runtimes is not reused for its
+  own redirected item, avoiding a redirect loop. No notification supplies a
+  navigation URL. Shared target application is documented in
+  `packages/ui/src/lib/router/DOCUMENTATION.md`.
 - User-confirmed local folder selection. The shared UI supplies the requested directory as the picker `defaultPath`; confirmation is required before filesystem access is retried.
 - Theme-file selection uses the local `~/.vscode/extensions` directory when present.
   The local-page-gated `desktop_pick_theme_file` command returns only the selected

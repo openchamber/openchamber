@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { resolveForwardedNotificationRuntimeKey, resolveHostEntryForRuntimeKey, stampForwardedNotification } from './notification-host-routing.mjs';
+import { parseNotificationOpenTarget, resolveForwardedNotificationRuntimeKey, resolveHostEntryForRuntimeKey, stampForwardedNotification } from './notification-host-routing.mjs';
 
 test('local runtime key resolves to a local host entry', () => {
   assert.deepEqual(resolveHostEntryForRuntimeKey('local', {
@@ -113,4 +113,44 @@ test('a forwarded payload from an untagged window keeps the renderer key', () =>
 test('a flat forwarded payload is stamped the same way', () => {
   const stamped = stampForwardedNotification({ title: 't', runtimeKey: 'host:x' }, null);
   assert.equal(stamped.runtimeKey, 'host:x');
+});
+
+test('a sessionless Bots target keeps its owner and drops unrelated navigation fields', () => {
+  const botTarget = { projectId: 'project-one', itemId: 'item_one' };
+
+  const target = parseNotificationOpenTarget({ botTarget, runtimeKey: 'host:owner', url: 'https://untrusted.example' });
+
+  assert.deepEqual(target, { botTarget, runtimeKey: 'host:owner' });
+});
+
+test('a sessionful Bots target preserves both item and session metadata', () => {
+  const input = { botTarget: { projectId: 'project-one', itemId: 'item-one' }, sessionId: 'ses_stage', directory: '/repo', guestId: 'browser', runtimeKey: 'local' };
+
+  const target = parseNotificationOpenTarget(input);
+
+  assert.deepEqual(target, input);
+});
+
+for (const botTarget of [null, {}, { projectId: 'p' }, { projectId: 'p', itemId: '../item' }, { projectId: 'p', itemId: 'i', url: 'https://other.example' }, { projectId: 'p'.repeat(129), itemId: 'i' }]) {
+  test(`a malformed Bots target cannot fall back to a session: ${JSON.stringify(botTarget)}`, () => {
+    const input = { botTarget, sessionId: 'ses_fallback' };
+
+    const target = parseNotificationOpenTarget(input);
+
+    assert.equal(target, null);
+  });
+}
+
+test('ordinary session notifications retain their navigation metadata', () => {
+  const input = { sessionId: ' ses_one ', directory: ' /repo ', guestId: ' browser ', runtimeKey: ' local ' };
+
+  const target = parseNotificationOpenTarget(input);
+
+  assert.deepEqual(target, { sessionId: 'ses_one', directory: '/repo', guestId: 'browser', runtimeKey: 'local' });
+});
+
+test('a notification without a structured target has no navigation', () => {
+  const target = parseNotificationOpenTarget({ title: 'Informational', url: 'https://other.example' });
+
+  assert.equal(target, null);
 });

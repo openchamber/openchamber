@@ -26,7 +26,7 @@ const notificationInput = z.union([z.looseObject({}), z.array(z.unknown())]);
 // Mirrors the renderer's runtime key normalization (runtime-switch.ts) so a
 // URL-bound window's key can be matched back to the host entry its API URL
 // came from: hash and search stripped, trailing slash removed, 'url:' prefix.
-const runtimeKeyForHostUrl = (raw) => {
+export const runtimeKeyForHostUrl = (raw) => {
   const trimmed = readTrimmedString(raw);
   if (!trimmed) return '';
   try {
@@ -80,6 +80,25 @@ export const normalizeNotificationInput = (raw) => {
   const input = notificationInput.catch({}).parse(raw);
   const payload = notificationInput.safeParse(input.payload);
   return payload.success ? { ...input, ...payload.data } : input;
+};
+
+const linkId = z.string().regex(/^[A-Za-z0-9_-]{1,128}$/);
+const notificationOpenTargetSchema = z.object({
+  sessionId: optionalString, directory: optionalString, guestId: optionalString, runtimeKey: optionalString,
+  botTarget: z.object({ projectId: linkId, itemId: linkId }).strict().optional(),
+});
+
+/** Only structured navigation fields cross to a renderer or saved-host window. */
+export const parseNotificationOpenTarget = (raw) => {
+  const result = notificationOpenTargetSchema.safeParse(raw);
+  if (!result.success) return null;
+  const { sessionId, directory, guestId, runtimeKey, botTarget } = result.data;
+  if (!sessionId && !botTarget) return null;
+  const target = {};
+  if (sessionId) Object.assign(target, { sessionId, directory: directory || null, guestId: guestId || null });
+  if (runtimeKey) target.runtimeKey = runtimeKey;
+  if (botTarget) target.botTarget = botTarget;
+  return target;
 };
 
 // Builds the notification input for a renderer-forwarded desktop_notify:

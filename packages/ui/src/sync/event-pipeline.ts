@@ -26,6 +26,7 @@ import { type RelayTunnelWebSocket } from "@/lib/relay/tunnel-client"
 import { openRuntimeWebSocket } from "@/lib/relay/runtime-socket"
 import { isVSCodeRuntime } from "@/lib/desktop"
 import { spaceCreationStepSchema } from "@/lib/spaces/spaces-api"
+import { botsRouteTargetSchema } from "@/lib/router/types"
 import { syncDebug } from "./debug"
 import { countSyncPerformance } from "./performance-diagnostics"
 
@@ -151,6 +152,7 @@ const openchamberNotificationSchema = z.object({
       desktopNotificationDelivered: z.boolean(),
       desktopStdoutActive: z.boolean(),
       guestId: z.string(),
+      botTarget: botsRouteTargetSchema,
       sessions: z.array(z.object({
         sessionId: z.string().min(1),
         directory: z.string().optional(),

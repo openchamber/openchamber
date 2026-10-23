@@ -62,7 +62,7 @@ import {
 import { sanitizeRuntimeRequestHeaders } from './runtime-request-headers.mjs';
 import { isSplashColor, redactHostsConfigForRemote } from './remote-page-policy.mjs';
 import { connectDefaultSshInstanceAtStartup, resolveDefaultSshInstanceId } from './startup-ssh.mjs';
-import { normalizeNotificationInput, readTrimmedString, resolveHostEntryForRuntimeKey, stampForwardedNotification } from './notification-host-routing.mjs';
+import { normalizeNotificationInput, parseNotificationOpenTarget, readTrimmedString, resolveHostEntryForRuntimeKey, runtimeKeyForHostUrl, stampForwardedNotification } from './notification-host-routing.mjs';
 import { isPackagedUiRuntimeRequest } from './packaged-ui-routing.mjs';
 import { RUNTIME_CONFIG_SCRIPT_PATHNAME, claimRuntimeConfigScriptRequest, createRuntimeConfigGate, injectRuntimeConfig } from './packaged-runtime-config.mjs';
 import { settleMainProcessCompileCache } from './compile-cache.mjs';
@@ -1470,15 +1470,7 @@ const maybeShowNativeNotification = (rawInput) => {
   const sessionId = typeof payload.sessionId === 'string' && payload.sessionId.trim()
     ? payload.sessionId.trim()
     : null;
-  const directory = typeof payload.directory === 'string' && payload.directory.trim()
-    ? payload.directory.trim()
-    : null;
-  const runtimeKey = readTrimmedString(payload.runtimeKey) || null;
-  // Set only for a browser.requestHelp notification; the renderer opens this
-  // guest's panel alongside the session (openGuestPanelFromRoute) on click.
-  const guestId = String(payload.guestId) === payload.guestId && payload.guestId.trim()
-    ? payload.guestId.trim()
-    : null;
+  const openTarget = parseNotificationOpenTarget(payload);
 
   const notificationId = globalThis.crypto.randomUUID();
   const notification = new Notification({
@@ -1499,14 +1491,7 @@ const maybeShowNativeNotification = (rawInput) => {
 
   notification.on('click', () => {
     focusForegroundWindow();
-    if (sessionId) {
-      // Name the runtime that owns the session so the receiving window can
-      // tell a session of its own instance from one of another, and route
-      // cross-instance clicks to the owning instance's window.
-      const openSessionPayload = { sessionId, directory, guestId };
-      if (runtimeKey) openSessionPayload.runtimeKey = runtimeKey;
-      emitToPrimaryWindow('openchamber:open-session', openSessionPayload);
-    }
+    if (openTarget) emitToPrimaryWindow('openchamber:open-session', openTarget);
     release();
   });
   notification.on('close', release);
@@ -3017,18 +3002,29 @@ const parseSessionRoute = (rawSessionId, rawMessageId) => {
 const sessionRouteFromUrl = (raw) => {
   try {
     const url = new URL(raw);
+    const botRoute = parseNotificationOpenTarget({ botTarget: { projectId: url.searchParams.get('botsProject'), itemId: url.searchParams.get('botItem') } });
+    if (botRoute) return botRoute;
     return parseSessionRoute(url.searchParams.get('session'), url.searchParams.get('message'));
   } catch {
     return null;
   }
 };
 
-// The window URL carries the route like the web does (`?session=&message=`);
+// Window URLs carry session/message or Bots project/item parameters;
 // the renderer's router opens it once the instance answers.
 const withSessionRoute = (windowUrl, route) => {
   if (!route) return windowUrl;
   try {
     const url = new URL(windowUrl);
+    if (route.botTarget) {
+      url.searchParams.delete('session');
+      url.searchParams.delete('message');
+      url.searchParams.set('botsProject', route.botTarget.projectId);
+      url.searchParams.set('botItem', route.botTarget.itemId);
+      return url.toString();
+    }
+    url.searchParams.delete('botsProject');
+    url.searchParams.delete('botItem');
     url.searchParams.set('session', route.sessionId);
     if (route.messageId) url.searchParams.set('message', route.messageId);
     return url.toString();
@@ -3081,7 +3077,8 @@ const openHostWindow = async (host, route = null, { reuseOpenWindow = false } = 
       await navigateWindow(existing, withSessionRoute(existing.__ocHostWindowBaseUrl, route), { allowAbort: true });
       return;
     }
-    emitToWindow(existing, 'openchamber:open-session', route);
+    const runtimeKey = host.id === 'local' ? 'local' : host.relay ? `host:${host.id}` : runtimeKeyForHostUrl(host.apiUrl || host.url);
+    emitToWindow(existing, 'openchamber:open-session', route.botTarget ? { ...route, runtimeKey } : route);
     return;
   }
 
@@ -5512,8 +5509,8 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
 
     case 'desktop_open_host_session': {
       const runtimeKey = readTrimmedString(args.runtimeKey);
-      const sessionId = readTrimmedString(args.sessionId);
-      if (!runtimeKey || !sessionId) throw new Error('runtimeKey and sessionId are required');
+      const target = parseNotificationOpenTarget(args);
+      if (!runtimeKey || !target) throw new Error('runtimeKey and a session or bot target are required');
       // The session belongs to another instance than the one the calling
       // window shows: open it in a window for that instance instead.
       const host = resolveHostEntryForRuntimeKey(runtimeKey, {
@@ -5525,7 +5522,11 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
         log.warn('[electron] open-host-session: no host for runtime key', { runtimeKey });
         return { opened: false };
       }
-      await openHostWindow(host, parseSessionRoute(sessionId, null), { reuseOpenWindow: true });
+      const route = target.botTarget ? { botTarget: target.botTarget } : parseSessionRoute(target.sessionId, null);
+      // A tagged window may have switched instances in place since it opened.
+      // Do not send a mismatched item back to that same window indefinitely.
+      const reuseOpenWindow = !target.botTarget || browserWindow?.__ocHostWindowId !== host.id;
+      await openHostWindow(host, route, { reuseOpenWindow });
       return { opened: true };
     }
 
