@@ -10,12 +10,9 @@
 # Usage:
 #   nix run .#update-hashes
 #       Re-bake both hashes at the currently locked state (bun.lock, and the
-#       opencode input revision recorded in flake.lock).
-#   nix run .#update-hashes -- --opencode-tag <tag>
-#       Additionally move the opencode flake input to <tag>, re-lock, and
-#       bake its node_modules hash. Keep the tag in sync with
-#       packages/electron/package.json (opencodeCli.version), which the
-#       build-time assertion enforces.
+#       opencode input revision recorded in flake.lock). The opencode
+#       input first moves to the tag packages/electron pins
+#       (opencodeCli.version), which the flake's eval-time assertion enforces.
 #
 # Mechanism: a build-produced fixed-output derivation can only be hashed by
 # building it. Each hash is swapped for a sentinel (fakeSha256), the build
@@ -100,12 +97,7 @@ bun_file="nix/hashes.json"
 
 # ─── 1. opencode CLI node_modules (upstream flake at the pin) ──
 #
-# This side runs first. It moves the opencode tag (re-locking the flake)
-# before any other bake build runs, so every bake build evaluates a synced
-# pin pair. The bun-deps FOD does not force the opencode-cli binding today
-# (it is a separate fixed-output derivation; Nix never instantiates the
-# parent for it), and this ordering keeps the bake true even if that
-# relationship ever changes.
+# Runs first so every later bake build evaluates a synced pin pair.
 
 # The version source of truth is packages/electron's opencodeCli pin:
 # this script follows it, it does not bump it. Bumping the pin (together
@@ -113,13 +105,8 @@ bun_file="nix/hashes.json"
 cli_version=$(grep -A1 '"opencodeCli"' packages/electron/package.json | grep -oP '"version":\s*"\K[^"]+' | head -1)
 [[ -n "$cli_version" ]] || { echo "error: cannot read opencodeCli.version from packages/electron/package.json" >&2; exit 1; }
 
-if [[ "${1:-}" == "--opencode-tag" ]]; then
-  tag="${2:?--opencode-tag needs a value}"
-  log "opencode: explicit tag override $tag (packages/electron pins $cli_version)"
-else
-  # Upstream tags are v-prefixed; the pin in packages/electron is not.
-  tag="v$cli_version"
-fi
+# Upstream tags are v-prefixed; the pin in packages/electron is not.
+tag="v$cli_version"
 
 current_tag=$(grep -oP 'github:anomalyco/opencode/\K[v0-9.]+' flake.nix | head -1)
 if [[ "$current_tag" != "$tag" ]]; then

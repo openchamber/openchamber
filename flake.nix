@@ -22,10 +22,6 @@
         "x86_64-linux"
       ];
       version = (builtins.fromJSON (builtins.readFile ./package.json)).version;
-      # The two sides of the OpenCode pin invariant, compared at the
-      # opencode-cli binding below: the tag the opencode input was locked
-      # from (upstream's tags carry the v; packages/electron does not), and
-      # the CLI version packages/electron pins.
       opencodeCliVersion =
         (builtins.fromJSON (builtins.readFile ./packages/electron/package.json)).opencodeCli.version;
       opencodeTag =
@@ -66,16 +62,12 @@
           # NativeArch from the monorepo root, which their src filter
           # doesn't ship (copy the root script/ dir in before the build).
           opencode-cli =
-            # Pin invariant: the opencode input's tag must match the CLI
-            # version packages/electron asks for ("Bump all together", above).
-            # Eval-time failure named with the remedy, so the drift fails
-            # nix-eval before merge; nix/gui.nix keeps its build-time check
-            # for the staged binary. Scoped to this binding so
-            # apps.update-hashes and the bun-deps bake stay evaluable while
-            # the pair is out of sync: update-hashes moves the tag itself
-            # before it builds the CLI.
+            # The opencode input's locked tag must be "v" + the CLI version
+            # packages/electron pins, so drift fails nix-eval before merge.
+            # Scoped to this binding so apps.update-hashes, which repairs the
+            # drift, stays evaluable while the pair is out of sync.
             nixpkgs.lib.throwIf (opencodeTag != "v${opencodeCliVersion}")
-              "flake pins opencode ${opencodeTag}, but packages/electron pins opencode CLI ${opencodeCliVersion}; the pair must match. Re-bake with: nix run .#update-hashes -- --opencode-tag v${opencodeCliVersion}"
+              "flake pins opencode ${opencodeTag}, but packages/electron pins opencode CLI ${opencodeCliVersion}; the pair must match. Re-bake with: nix run .#update-hashes"
               (
                 (pkgs.callPackage "${opencode}/nix/opencode.nix" {
                   node_modules = pkgs.callPackage "${opencode}/nix/node_modules.nix" {
