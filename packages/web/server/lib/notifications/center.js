@@ -20,7 +20,7 @@ const BODY_MAX = 500;
 const V1_NOTIFICATION_KINDS = ['ready', 'error', 'question', 'permission', 'goal', 'browser-help', 'plugin'];
 const NOTIFICATION_KINDS = [
   ...V1_NOTIFICATION_KINDS,
-  'restart', 'fix-loop', 'restack', 'update', 'opencode-update', 'scheduled-task',
+  'restart', 'fix-loop', 'restack', 'update', 'opencode-update', 'scheduled-task', 'bot',
 ];
 const NOTIFICATION_PRIORITIES = ['high', 'normal', 'low'];
 /**
@@ -51,6 +51,7 @@ const actionSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('openchamber-update'), version: optionalText }),
   z.object({ type: z.literal('opencode-update'), version: optionalText }),
   z.object({ type: z.literal('scheduled-tasks'), projectId: z.string().min(1) }),
+  z.object({ type: z.literal('bots'), projectId: z.string().min(1), itemId: z.string().min(1) }),
 ]);
 
 const entrySchema = z.object({
@@ -75,6 +76,7 @@ const entrySchema = z.object({
   readAt: z.number().finite().nullable().catch(null),
   /** When nothing was left to do about it; resolved entries leave the list for the history. */
   resolvedAt: z.number().finite().nullable().catch(null),
+  botState: z.enum(['needs-you', 'waiting-answer']).optional(),
 });
 
 /**
@@ -82,6 +84,7 @@ const entrySchema = z.object({
  * every other kind stay until what they wait on is settled (`resolve`).
  */
 const RESOLVED_ON_READ = new Set(['ready']);
+const isPendingBot = (entry) => entry.kind === 'bot' && entry.resolvedAt === null;
 
 const fileSchema = z.object({ version: z.literal(VERSION), entries: z.array(z.unknown()) });
 
@@ -113,7 +116,7 @@ export function createNotificationCenterPersistence({ dataDir, fs = fsPromises }
         throw error;
       }
       const file = fileSchema.safeParse(JSON.parse(raw));
-      if (!file.success) return [];
+      if (!file.success) throw new Error('Invalid notification center snapshot');
       return file.data.entries.flatMap((candidate) => {
         const entry = entrySchema.safeParse(candidate);
         return entry.success ? [entry.data] : [];
@@ -144,11 +147,20 @@ export function createNotificationCenterRuntime({
   let entries = [];
   let saveTimer = null;
   let stopped = false;
+  let loadError = null;
+  let writes = Promise.resolve();
+  let botChanges = Promise.resolve();
+  const serializeBot = (change) => {
+    const result = botChanges.catch(() => {}).then(change);
+    botChanges = result;
+    return result;
+  };
 
   const prune = (list) => {
     const cutoff = now() - NOTIFICATION_CENTER_TTL_MS;
-    const kept = list.filter((entry) => entry.createdAt >= cutoff);
-    return kept.length > NOTIFICATION_CENTER_LIMIT ? kept.slice(kept.length - NOTIFICATION_CENTER_LIMIT) : kept;
+    const history = list.filter((entry) => !isPendingBot(entry) && entry.createdAt >= cutoff);
+    const kept = new Set(history.slice(-NOTIFICATION_CENTER_LIMIT));
+    return list.filter((entry) => isPendingBot(entry) || kept.has(entry));
   };
 
   const loaded = (async () => {
@@ -160,15 +172,24 @@ export function createNotificationCenterRuntime({
           : entry))
         .sort((a, b) => a.createdAt - b.createdAt));
     } catch (error) {
+      loadError = error;
       console.warn('[notification-center] could not read saved notifications:', error?.message ?? error);
       entries = [];
     }
   })();
 
+  const persist = () => {
+    if (loadError) return Promise.reject(loadError);
+    const snapshot = entries;
+    const write = writes.catch(() => {}).then(() => persistence.save(snapshot));
+    writes = write;
+    return write;
+  };
+
   const save = async () => {
     saveTimer = null;
     try {
-      await persistence.save(entries);
+      await persist();
     } catch (error) {
       console.warn('[notification-center] could not save notifications:', error?.message ?? error);
     }
@@ -283,9 +304,9 @@ export function createNotificationCenterRuntime({
   const remove = async (ids) => {
     await loaded;
     const wanted = new Set(ids);
-    const removed = entries.filter((entry) => wanted.has(entry.id)).map((entry) => entry.id);
+    const removed = entries.filter((entry) => wanted.has(entry.id) && !isPendingBot(entry)).map((entry) => entry.id);
     if (removed.length === 0) return [];
-    entries = entries.filter((entry) => !wanted.has(entry.id));
+    entries = entries.filter((entry) => !wanted.has(entry.id) || isPendingBot(entry));
     scheduleSave();
     emit({ change: 'removed', ids: removed });
     return removed;
@@ -293,9 +314,10 @@ export function createNotificationCenterRuntime({
 
   const clear = async () => {
     await loaded;
-    entries = [];
+    const removed = entries.filter((entry) => !isPendingBot(entry)).map((entry) => entry.id);
+    entries = entries.filter(isPendingBot);
     scheduleSave();
-    emit({ change: 'cleared' });
+    emit(entries.length ? { change: 'removed', ids: removed } : { change: 'cleared' });
   };
 
   /**
@@ -311,16 +333,72 @@ export function createNotificationCenterRuntime({
     return record(entry);
   };
 
+  // Bot requests are item-owned and acknowledged only after their snapshot is saved.
+  const upsertBot = ({ projectId, itemId, title, body, botState = 'needs-you', sessionId = null, directory = null }) => serializeBot(async () => {
+    await loaded;
+    if (loadError) throw loadError;
+    const action = actionSchema.parse({ type: 'bots', projectId, itemId });
+    const existing = entries.find((entry) => isPendingBot(entry) && entry.requestId === itemId && entry.action?.projectId === projectId);
+    const fields = { title: clip(title, TITLE_MAX), body: clip(body, BODY_MAX), botState, sessionId: textOrNull(sessionId), directory: textOrNull(directory) };
+    const changed = !existing || Object.entries(fields).some(([key, value]) => existing[key] !== value);
+    const entry = entrySchema.parse({
+      ...existing, ...fields, id: existing?.id ?? createId(), createdAt: existing?.createdAt ?? now(),
+      kind: 'bot', priority: 'high', delivery: 'quiet', verdict: null, sessionName: null,
+      requestId: itemId, action, readAt: changed ? null : existing.readAt, resolvedAt: null,
+    });
+    if (changed) entries = existing ? entries.map((candidate) => candidate === existing ? entry : candidate) : [...entries, entry];
+    try {
+      await persist();
+    } catch (error) {
+      if (changed) entries = entries.flatMap((candidate) => candidate === entry ? existing ? [existing] : [] : [candidate]);
+      throw error;
+    }
+    if (changed) {
+      if (existing) emit({ change: 'removed', ids: [existing.id] });
+      emit({ change: 'added', entry });
+    }
+    return { entry, changed };
+  });
+
+  const resolveBot = ({ projectId, itemId }) => serializeBot(async () => {
+    await loaded;
+    if (loadError) throw loadError;
+    actionSchema.parse({ type: 'bots', projectId, itemId });
+    const ids = [];
+    const previous = [];
+    const at = now();
+    entries = prune(entries.map((entry) => {
+      if (!isPendingBot(entry) || entry.requestId !== itemId || entry.action?.projectId !== projectId) return entry;
+      ids.push(entry.id);
+      previous.push(entry);
+      return { ...entry, readAt: entry.readAt ?? at, resolvedAt: at };
+    }));
+    try {
+      await persist();
+    } catch (error) {
+      entries = [...entries.filter((entry) => !ids.includes(entry.id)), ...previous].sort((a, b) => a.createdAt - b.createdAt);
+      throw error;
+    }
+    if (ids.length) {
+      emit({ change: 'read', ids, readAt: at });
+      emit({ change: 'resolved', ids, resolvedAt: at });
+    }
+    return ids;
+  });
+
   /** Writes what is pending now; later changes are not saved. */
   const stop = async () => {
+    await loaded;
+    await botChanges.catch(() => {});
     stopped = true;
     if (saveTimer) {
       clearTimeout(saveTimer);
       await save();
     }
+    await writes;
   };
 
-  return { ready: () => loaded, list, record, recordOnce, markRead, resolve, remove, clear, stop };
+  return { ready: () => loaded, list, record, recordOnce, upsertBot, resolveBot, markRead, resolve, remove, clear, stop };
 }
 
 /**

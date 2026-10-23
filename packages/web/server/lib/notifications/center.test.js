@@ -200,7 +200,7 @@ describe('notification center runtime', () => {
 });
 
 describe('notification center persistence', () => {
-  it('round-trips entries, drops broken ones and reads a missing or foreign file as empty', async () => {
+  it('round-trips entries, drops broken ones and distinguishes missing from unsupported files', async () => {
     const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-center-'));
     tempDirs.push(dataDir);
     const persistence = createNotificationCenterPersistence({ dataDir });
@@ -213,7 +213,7 @@ describe('notification center persistence', () => {
     expect((await fs.stat(path.join(dataDir, 'notification-center.json'))).mode & 0o777).toBe(0o600);
 
     await fs.writeFile(path.join(dataDir, 'notification-center.json'), JSON.stringify({ version: 99, entries: [entry] }));
-    expect(await persistence.load()).toEqual([]);
+    await expect(persistence.load()).rejects.toThrow('Invalid notification center snapshot');
   });
 });
 

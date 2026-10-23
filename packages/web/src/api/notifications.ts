@@ -1,4 +1,6 @@
 import type { NotificationPayload, NotificationsAPI } from '@openchamber/ui/lib/api/types';
+import { botsRouteTargetSchema, ROUTE_PARAMS, type BotsRouteTarget } from '@openchamber/ui/lib/router/types';
+import { getRuntimeKey } from '@openchamber/ui/lib/runtime-switch';
 
 const SW_READY_TIMEOUT_MS = 1500;
 const NOTIFICATION_DEDUPE_TTL_MS = 5000;
@@ -11,24 +13,26 @@ const isClientFocused = (): boolean => {
   return document.visibilityState === 'visible' && document.hasFocus();
 };
 
-const buildSessionTargetUrl = (sessionId?: string): string | null => {
-  if (typeof sessionId !== 'string') return null;
-  const trimmed = sessionId.trim();
-  if (!trimmed) return null;
-  return `/?session=${encodeURIComponent(trimmed)}`;
-};
-
 type NotificationTarget = {
   url: string;
-  sessionId: string;
+  sessionId?: string;
+  readonly botTarget?: BotsRouteTarget;
 };
 
-const getNotificationTarget = (payload?: NotificationPayload): NotificationTarget | undefined => {
+const getNotificationTarget = (payload: NotificationPayload | undefined, runtimeKey: string): NotificationTarget | undefined => {
+  if (runtimeKey !== getRuntimeKey()) return undefined;
+  if (payload?.botTarget !== undefined) {
+    const parsed = botsRouteTargetSchema.safeParse(payload.botTarget);
+    if (!parsed.success) return undefined;
+    const params = new URLSearchParams({
+      [ROUTE_PARAMS.BOTS_PROJECT]: parsed.data.projectId,
+      [ROUTE_PARAMS.BOT_ITEM]: parsed.data.itemId,
+    });
+    return { url: `/?${params}`, botTarget: parsed.data };
+  }
   const sessionId = typeof payload?.sessionId === 'string' ? payload.sessionId.trim() : '';
   if (!sessionId) return undefined;
-  const url = buildSessionTargetUrl(sessionId);
-  if (!url) return undefined;
-  return { url, sessionId };
+  return { url: `/?session=${encodeURIComponent(sessionId)}`, sessionId };
 };
 
 type NotificationOptionsWithTarget = NotificationOptions & {
@@ -43,19 +47,18 @@ const withNotificationTarget = (
     body: payload?.body,
     tag: payload?.tag,
   };
-  if (target) {
-    options.data = target;
-  }
+  if (target) options.data = target;
   return options;
 };
 
-const focusOrOpenNotificationTarget = (target?: NotificationTarget): void => {
+const focusOrOpenNotificationTarget = (target: NotificationTarget | undefined, runtimeKey: string): void => {
   try {
     if (typeof window === 'undefined') return;
     if (typeof window.focus === 'function') {
       window.focus();
     }
     if (!target) return;
+    if (runtimeKey !== getRuntimeKey()) return;
     const current = `${window.location.pathname}${window.location.search}`;
     if (current === target.url) return;
     window.location.assign(target.url);
@@ -149,14 +152,14 @@ const getNotificationRegistration = async (): Promise<ServiceWorkerRegistration 
   }
 };
 
-const notifyWithServiceWorker = async (payload?: NotificationPayload): Promise<boolean> => {
+const notifyWithServiceWorker = async (payload: NotificationPayload | undefined, runtimeKey: string): Promise<boolean> => {
   const registration = await getNotificationRegistration();
   if (!registration || typeof registration.showNotification !== 'function') {
     return false;
   }
 
   try {
-    const target = getNotificationTarget(payload);
+    const target = getNotificationTarget(payload, runtimeKey);
     await registration.showNotification(
       payload?.title ?? 'OpenChamber',
       withNotificationTarget(payload, target),
@@ -182,6 +185,7 @@ const hasActivePushSubscription = async (): Promise<boolean> => {
 };
 
 const notifyWithWebAPI = async (payload?: NotificationPayload): Promise<boolean> => {
+  const runtimeKey = payload?.runtimeKey ?? getRuntimeKey();
   if (payload?.requireHidden && typeof document !== 'undefined' && document.hasFocus()) {
     return true;
   }
@@ -218,18 +222,18 @@ const notifyWithWebAPI = async (payload?: NotificationPayload): Promise<boolean>
   try {
     // Some installed PWAs expose Notification.permission but only allow
     // notifications through an active service worker registration.
-    if (await notifyWithServiceWorker(payload)) {
+    if (await notifyWithServiceWorker(payload, runtimeKey)) {
       return true;
     }
 
-    const target = getNotificationTarget(payload);
+    const target = getNotificationTarget(payload, runtimeKey);
     const notification = new Notification(
       payload?.title ?? 'OpenChamber',
       withNotificationTarget(payload, target),
     );
     notification.onclick = (event) => {
       event.preventDefault();
-      focusOrOpenNotificationTarget(target);
+      focusOrOpenNotificationTarget(target, runtimeKey);
       notification.close();
     };
     return true;
@@ -262,6 +266,7 @@ const notifyWithDesktop = async (payload?: NotificationPayload): Promise<boolean
         requireHidden: payload?.requireHidden,
         showWhenFocused: payload?.showWhenFocused,
         guestId: payload?.guestId,
+        botTarget: payload?.botTarget,
       },
     });
     return true;

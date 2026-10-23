@@ -16,6 +16,7 @@ const notificationCenterActionSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('openchamber-update'), version: z.string().nullable() }),
   z.object({ type: z.literal('opencode-update'), version: z.string().nullable() }),
   z.object({ type: z.literal('scheduled-tasks'), projectId: z.string() }),
+  z.object({ type: z.literal('bots'), projectId: z.string().min(1), itemId: z.string().min(1) }),
 ]);
 
 const notificationCenterEntrySchema = z.object({
@@ -23,7 +24,7 @@ const notificationCenterEntrySchema = z.object({
   createdAt: z.number(),
   kind: z.enum([
     'ready', 'error', 'question', 'permission', 'goal', 'browser-help', 'plugin',
-    'restart', 'fix-loop', 'restack', 'update', 'opencode-update', 'scheduled-task',
+    'restart', 'fix-loop', 'restack', 'update', 'opencode-update', 'scheduled-task', 'bot',
   ]),
   priority: z.enum(['high', 'normal', 'low']),
   delivery: z.enum(['delivered', 'focused', 'quiet']),

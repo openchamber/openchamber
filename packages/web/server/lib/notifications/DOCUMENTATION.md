@@ -50,6 +50,9 @@ This module provides notification message preparation utilities for the web serv
 - Returned API:
   - `maybeSendPushForTrigger(payload)`
   - `sendGoalSettlePush({ sessionId, directory, status, title, body })`
+  - `notifyGoalSettle({ sessionId, directory, status, title, body })`: owns the
+    center entry, desktop/UI alert and push for goal settlement. Goal callers
+    use this operation without recording or alerting beforehand.
   - `sendBrowserHelpPush({ sessionId, guestId, title, body })` — the browser-help
     fanout (see "browser.requestHelp notification" below); `data.url` adds
     `&panel=<guestId>` to the session deep link so the client opens that
@@ -161,6 +164,50 @@ The `settings` parameter for `prepareNotificationLastMessage` supports `maxLastM
 
 ## Notification center
 
+Bot attention uses `upsertBot({ projectId, itemId, title, body, botState,
+sessionId?, directory? })` and `resolveBot({ projectId, itemId })`. Upsert returns
+`{ entry, changed }`; resolution returns changed center IDs. Both await an atomic
+snapshot write and throw on failure. Pending `bot` entries are high priority,
+keyed by project and item, and pinned independently of the 200-entry, 7-day
+history. Reading, removing and clearing do not resolve or delete a pending bot.
+Resolved bots return to ordinary retention. `requestId` is the item ID and
+`action` is `{ type: 'bots', projectId, itemId }`, including before a session exists.
+Changes preserve the center ID and publish `removed` then `added`; clients replace
+that entry. `botState` distinguishes a question from a needs-you transition with
+unchanged wording. A failed center load prevents writes from replacing unread data.
+
+### Why pending bot requests are pinned
+
+The item runtime owns their resolution and can wait longer than center history.
+Keeping pending records in the same atomic snapshot preserves requests across
+restart without a second file's ordering protocol. History retains its existing
+limit and TTL independently of pinned requests.
+
+### Bot alert destinations
+
+`notifyBotAttention` delivers the already-recorded item without inserting another
+center entry. Desktop and UI alerts carry `botTarget: { projectId, itemId }`;
+`sessionId` and `directory` remain optional stage context, not the click destination.
+Both UI stream parsers preserve this target and reject malformed or extra target
+properties. Web notification data uses the local
+`/?botsProject=<projectId>&botItem=<itemId>` route, including with a stage session.
+Browser delivery omits navigation data for a foreign runtime or a runtime changed
+while awaiting registration. Foreground clicks also retire navigation when their
+captured runtime no longer matches. Service-worker notifications retain the existing
+same-origin click path.
+Electron routes foreign targets through saved-host resolution, never an arbitrary URL.
+
+Native delivery still obeys `nativeNotificationsEnabled`, question/error toggles,
+and hidden-only focus suppression. Web push and native-mobile push retain their
+existing link encoding and redaction. The router owns target application; see
+`packages/ui/src/lib/router/DOCUMENTATION.md`.
+
+### Why native item targets instead of stage session links
+
+An item can need attention before a stage session exists, and a later stage session
+is not the item page. Structured project/item IDs preserve the same destination
+in both cases without accepting a navigation URL across the desktop bridge.
+
 Every notification this server raises is also kept as an entry, so a client
 can list what it missed. Advertised as the `api.notification-center.v1`
 server capability.
@@ -207,9 +254,11 @@ server capability.
   never leave this machine.
 - Storage: `notification-center.json` in the data directory, mode `0600`,
   written through a temp file and rename, one second after a change. At most
-  200 entries and 7 days, resolved ones included; a start trims a larger
+  200 history entries and 7 days, resolved ones included; pending bot requests
+  remain pinned separately. A start trims a larger
   file. A missing file is an empty center; an unreadable
-  or malformed one is logged and starts empty; single entries that do not
+   or malformed one is logged and displays empty without permitting writes to
+   replace the unread snapshot; single entries that do not
   parse are dropped.
 - Resolution: the center lists what is still open; an entry with
   `resolvedAt` is in the history. A finished turn resolves when it is read
@@ -253,6 +302,32 @@ server capability.
   shows no center.
 
 ### Jev ranking of finished turns
+
+Automation records may set `openchamber.automation.notify` to `attention`.
+Their finished turns and completed goals record `low` and `quiet`, including
+while focused, and emit no desktop alert, UI alert, web push or APNs. Missing,
+invalid or `finish` policies retain existing delivery. Questions, permissions,
+errors, blocked goals and exhausted budgets retain high priority and their
+existing settings, focus and auto-accept gates.
+
+The trigger caches the policy beside `parentID` for the same session,
+directory and isolated-space identity, with the existing 60-second TTL.
+Successful session reads populate both fields. Partial session updates preserve
+the policy; an explicit metadata replacement updates or clears it. A failed
+read remains unknown and is retried on a later notification, never cached as
+an authoritative `finish`. There is no background refresh or directory fan-out.
+
+`sendGoalSettlePush` also suppresses attention-only completed-goal pushes, but
+cannot undo alerts a caller already emitted. Server composition must delegate
+the whole goal settlement to `notifyGoalSettle` for quiet center delivery.
+
+### Why automation policy shares the parent cache
+
+The subtask check already reads the session record. Keeping the policy with
+that result avoids a second metadata lookup and preserves directory and space
+isolation. Failed reads leave both decisions unknown.
+
+### Jev verdicts
 
 Before a `ready` notification goes out, the trigger runtime asks
 `awaitTurnVerdict` (session-work) for Jev's reading of the turn and waits up

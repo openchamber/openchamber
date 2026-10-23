@@ -27,8 +27,7 @@ export const createNotificationTriggerRuntime = (deps) => {
     isAnyInteractiveClientVisible,
     buildOpenCodeUrl,
     getOpenCodeAuthHeaders,
-    // OpenChamber's own session metadata (the goal lives there, not on the
-    // OpenCode record). Optional: without it no goal can suppress a push.
+    // Optional metadata reader for the active-goal suppression check.
     readSessionMetadata = null,
     recordNotification = () => {},
     // Jev's reading of a finished turn (session-work `awaitTurnVerdict`), or
@@ -106,6 +105,7 @@ export const createNotificationTriggerRuntime = (deps) => {
     goal_blocked: 'Goal blocked',
     goal_budget: 'Goal reached its token budget',
     'browser-help': 'Agent needs you in the browser',
+    bot: 'Bot needs your attention',
   };
 
   const genericTitleOf = (payload) => APNS_TITLE_BY_TYPE[payload?.data?.type] || 'Agent update';
@@ -226,7 +226,7 @@ export const createNotificationTriggerRuntime = (deps) => {
 
   const getSessionParentCacheKey = (sessionId, directory, spaceId) => `${spaceId || ''}\0${directory || ''}\0${sessionId}`;
 
-  const getCachedSessionParentId = (sessionId, directory, spaceId) => {
+  const getCachedSessionInfo = (sessionId, directory, spaceId) => {
     const cacheKey = getSessionParentCacheKey(sessionId, directory, spaceId);
     const entry = sessionParentIdCache.get(cacheKey);
     if (!entry) return undefined;
@@ -234,12 +234,20 @@ export const createNotificationTriggerRuntime = (deps) => {
       sessionParentIdCache.delete(cacheKey);
       return undefined;
     }
-    return entry.parentID;
+    return entry;
   };
 
-  const setCachedSessionParentId = (sessionId, directory, spaceId, parentID) => {
-    sessionParentIdCache.set(getSessionParentCacheKey(sessionId, directory, spaceId), { parentID: parentID ?? null, at: Date.now() });
+  const setCachedSessionParentId = (sessionId, directory, spaceId, parentID, notify) => {
+    const key = getSessionParentCacheKey(sessionId, directory, spaceId);
+    const previous = sessionParentIdCache.get(key);
+    sessionParentIdCache.set(key, {
+      parentID: parentID === undefined ? previous?.parentID : parentID,
+      notify: notify ?? previous?.notify,
+      at: Date.now(),
+    });
   };
+
+  const notificationPolicyOf = (metadata) => metadata?.openchamber?.automation?.notify === 'attention' ? 'attention' : 'finish';
 
   const getParentIdFromPayload = (payload) => {
     if (!payload || typeof payload !== 'object') return undefined;
@@ -320,8 +328,12 @@ export const createNotificationTriggerRuntime = (deps) => {
       rememberSessionDirectory(sessionId, payload.properties?.info?.directory);
     }
     const parentID = getParentIdFromPayload(payload);
-    if (parentID === undefined) return;
-    setCachedSessionParentId(sessionId, directory, spaceId, parentID);
+    const info = payload.properties?.info;
+    const hasMetadata = (payload.type === 'session.created' || payload.type === 'session.updated')
+      && Object.hasOwn(info ?? {}, 'metadata');
+    if (parentID === undefined && !hasMetadata) return;
+    setCachedSessionParentId(sessionId, directory, spaceId, parentID,
+      hasMetadata ? notificationPolicyOf(info.metadata) : undefined);
   };
 
   /** The session's own record, or null when it could not be read. */
@@ -343,6 +355,8 @@ export const createNotificationTriggerRuntime = (deps) => {
       const session = unwrapOpenCodeResponse(await response.json().catch(() => null));
       if (!session || typeof session !== 'object') return null;
       if (!spaceId) rememberSessionDirectory(sessionId, session.location?.directory ?? session.directory);
+      setCachedSessionParentId(sessionId, directory, spaceId,
+        textOrNull(session.parentID), notificationPolicyOf(session.metadata));
       return session;
     } catch {
       return null;
@@ -367,7 +381,7 @@ export const createNotificationTriggerRuntime = (deps) => {
   const fetchSessionParentId = async (sessionId, directory, spaceId = null) => {
     if (!sessionId) return undefined;
 
-    const cached = getCachedSessionParentId(sessionId, directory, spaceId);
+    const cached = getCachedSessionInfo(sessionId, directory, spaceId)?.parentID;
     if (cached !== undefined) return cached;
 
     const session = await fetchSessionRecord(sessionId, directory, spaceId);
@@ -375,8 +389,15 @@ export const createNotificationTriggerRuntime = (deps) => {
     const parentID = typeof session.parentID === 'string' && session.parentID.length > 0
       ? session.parentID
       : null;
-    setCachedSessionParentId(sessionId, directory, spaceId, parentID);
     return parentID;
+  };
+
+  // Undefined means the record could not be read. Never cache that as finish.
+  const fetchSessionNotificationPolicy = async (sessionId, directory, spaceId = null) => {
+    const cached = getCachedSessionInfo(sessionId, directory, spaceId)?.notify;
+    if (cached !== undefined) return cached;
+    const session = await fetchSessionRecord(sessionId, directory, spaceId);
+    return session ? notificationPolicyOf(session.metadata) : undefined;
   };
 
   // Mirrors client-side autoRespondsPermission: a session auto-accepts if it
@@ -611,8 +632,9 @@ export const createNotificationTriggerRuntime = (deps) => {
         // to the notification center only, with no alert and no push.
         // The host's turn classifier has no authority over a space's sessions.
         const verdict = spaceId ? null : await Promise.resolve(awaitTurnVerdict(sessionId)).catch(() => null);
-        const quiet = verdict === 'looks-done' || verdict === 'trivial';
-        const delivery = focused ? 'focused' : (quiet ? 'quiet' : 'delivered');
+        const attentionOnly = await fetchSessionNotificationPolicy(sessionId, notificationDirectory, spaceId) === 'attention';
+        const quiet = attentionOnly || verdict === 'looks-done' || verdict === 'trivial';
+        const delivery = attentionOnly ? 'quiet' : (focused ? 'focused' : (quiet ? 'quiet' : 'delivered'));
         const entryDirectory = await resolveSessionDirectory(sessionId, notificationDirectory, spaceId);
         recordNotification({
           kind: 'ready',
@@ -1007,22 +1029,9 @@ export const createNotificationTriggerRuntime = (deps) => {
   // full text; APNs with the generic per-type title and the session name as
   // body, so the relay never sees content).
   const sendGoalSettlePush = async ({ sessionId, directory, status, title, body }) => {
-    let sessionName = '';
-    try {
-      const base = buildOpenCodeUrl(`/api/session/${encodeURIComponent(sessionId)}`, '');
-      const url = directory ? `${base}?directory=${encodeURIComponent(directory)}` : base;
-      const response = await fetch(url, {
-        method: 'GET',
-        headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
-        signal: AbortSignal.timeout(2000),
-      });
-      if (response.ok) {
-        const session = unwrapOpenCodeResponse(await response.json().catch(() => null));
-        if (typeof session?.title === 'string') sessionName = session.title.trim();
-      }
-    } catch {
-      // Session name is presentation sugar for the mobile push — never block on it.
-    }
+    const session = await fetchSessionRecord(sessionId, directory, null);
+    if (status === 'complete' && notificationPolicyOf(session?.metadata) === 'attention') return;
+    const sessionName = textOrNull(session?.title) ?? '';
     const type = status === 'complete' ? 'goal_complete' : (status === 'budgetLimited' ? 'goal_budget' : 'goal_blocked');
     await fanoutPush(
       {
@@ -1039,6 +1048,45 @@ export const createNotificationTriggerRuntime = (deps) => {
       },
       { requireNoSse: true },
     );
+  };
+
+  // Own the whole settle delivery so callers cannot alert before policy is read.
+  const notifyGoalSettle = async ({ sessionId, directory, status, title, body }) => {
+    const settings = await readSettingsFromDisk();
+    if (settings.notifyOnCompletion === false) return;
+    const quiet = status === 'complete'
+      && await fetchSessionNotificationPolicy(sessionId, directory) === 'attention';
+    recordNotification({
+      kind: 'goal',
+      priority: quiet ? 'low' : (status === 'complete' ? 'normal' : 'high'),
+      delivery: quiet ? 'quiet' : 'delivered',
+      title, body, sessionId, directory,
+    });
+    if (quiet) return;
+    const payload = { title, body, tag: `goal-${sessionId}`, kind: 'goal', sessionId, directory };
+    const desktopNotificationDelivered = emitDesktopNotification(payload);
+    broadcastUiNotification(payload, { desktopNotificationDelivered });
+    await sendGoalSettlePush({ sessionId, directory, status, title, body });
+  };
+
+  // The bot attention owner already persisted the request. Delivery must not
+  // create another center entry, and it must also work before a session exists.
+  const notifyBotAttention = async ({ action, requestId, sessionId, directory, title, body, critical }) => {
+    const settings = await readSettingsFromDisk();
+    if ((critical ? settings.notifyOnError : settings.notifyOnQuestion) === false) return;
+    const focused = settings.notificationMode !== 'always' && getIsWindowFocused?.() === true;
+    if (focused) return;
+    const tag = `bot-${requestId}`;
+    if (settings.nativeNotificationsEnabled) {
+      const botTarget = { projectId: action.projectId, itemId: action.itemId };
+      const payload = { kind: 'bot', title, body, tag, sessionId, directory, botTarget, requireHidden: settings.notificationMode !== 'always' };
+      const desktopNotificationDelivered = emitDesktopNotification(payload);
+      broadcastUiNotification(payload, { desktopNotificationDelivered });
+    }
+    const params = new URLSearchParams({ botsProject: action.projectId, botItem: action.itemId });
+    const data = { url: `/?${params}`, type: 'bot' };
+    if (sessionId) data.sessionId = sessionId;
+    await fanoutPush({ title, body, phoneBody: body, tag, data }, { requireNoSse: true });
   };
 
   // browser.requestHelp push: same fanout every other trigger uses, so it
@@ -1068,6 +1116,8 @@ export const createNotificationTriggerRuntime = (deps) => {
     setGetIsSessionAutoAccepting,
     clearPendingPushBadge,
     sendGoalSettlePush,
+    notifyGoalSettle,
+    notifyBotAttention,
     sendBrowserHelpPush,
   };
 };
