@@ -143,10 +143,30 @@ configuration and packaged Windows process behavior require authorized live QA.
 - App keys, Jira tokens and Discord bot tokens live only in
   `<dataDir>/bot-identities.json`, atomically replaced with mode `0600`.
   Public lists use an explicit allowlist. Rotation increments identity revision.
+  Jira OAuth service accounts use the additive `jira-oauth` definition with site,
+  cloudId, clientId and clientSecret. Client secrets follow the same private-file
+  contract; access tokens exist only in the resolved credential's memory.
 - GitHub App JWTs and installation tokens exist only for one operation in memory.
 - Every content write checks `assertBotWriteAllowed` immediately before dispatch.
-  All HTTPS requests reject redirects and use fixed provider origins. Jira uses
-  configured Jira Cloud sites under `atlassian.net`.
+  All HTTPS requests reject redirects and use fixed provider origins. Basic Jira
+  identities use configured Jira Cloud sites under `atlassian.net`. OAuth first
+  reads that site's public `/_edge/tenant_info` without authorization and checks
+  its cloudId before sending credentials or content. Only then may it exchange
+  client credentials at `https://auth.atlassian.com/oauth/token` and call the
+  fixed `https://api.atlassian.com/ex/jira/<cloudId>/rest/api/3/` gateway.
+  The configured site remains the captured authority and exact enterprise
+  site/project destination. A shared gateway grant authorizes no tenant.
+- OAuth uses the service-account `client_credentials` form exchange, not an
+  authorization-code, JWT-bearer or refresh-token flow. Each resolved credential
+  owns an in-memory token and a single in-flight renewal. It renews before expiry
+  on demand; it has no global token cache, persisted access token or timer. Token
+  expiry is measured from exchange start with a bounded safety margin. Failed
+  renewal cannot reuse the expired token. Every call checks the captured identity
+  revision, including after exchange; replacement or removal invalidates it.
+- Token acquisition is credential-only traffic to a fixed endpoint, not a content
+  mutation. The final content boundary awaits renewal, rechecks identity and any
+  question authority, then checks current enterprise policy immediately before
+  fetch. API401/403 and uncertain writes never trigger token renewal and replay.
 - Ordinary Git publication uses an operation-private bare repository and the
   existing loopback credential broker. Git receives no token in argv or its
   environment. It has no shared config, hooks, SSH or credential fallback, and
@@ -203,6 +223,20 @@ and protocol frames; all conversation sends use the gated HTTPS adapter. Its que
 holds at most 128 frames and reconnects with backoff on overload.
 
 ## Decisions
+
+### Why the Jira site's identity stays authoritative behind the gateway
+
+All OAuth tenants share api.atlassian.com, so granting that origin alone would
+broaden a site's project permission to other tenants. The public tenant lookup
+binds the immutable identity's cloudId to its selected site before authentication,
+preserving existing exact site/project grants while deriving the wire URL.
+
+### Why access tokens live inside a resolved credential
+
+Jira service-account tokens are renewable with the stored client credentials.
+Operation-local state supports expiry between calls without a persistent token
+store or a global cache retaining deleted identities. Renewal does not authorize
+replaying a comment or transition whose outcome is uncertain.
 
 ### Why bot authority and not a replacement repository binding
 
