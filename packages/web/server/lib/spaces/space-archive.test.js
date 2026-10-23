@@ -88,6 +88,18 @@ describe('saving the chats of a space', () => {
     expect(host.get(PARENT).info.permissions).toEqual([{ action: '*', resource: '*', effect: 'deny' }]);
   });
 
+  it('resolves a retained session address only within its own archived space', async () => {
+    // Given the actual archive has saved one chat from a specific space.
+    const { archive, save, dataDir } = archiveWith({ chats: [{ info: infoOf(PARENT) }] });
+    await save();
+
+    // When a caller resolves that space/session pair and mismatched neighbours.
+    const addresses = [archive.sessionDirectory(SPACE, PARENT), archive.sessionDirectory('abcdef123456', PARENT), archive.sessionDirectory(SPACE, OTHER)];
+
+    // Then only the recorded pair points to the host's read-only chat archive.
+    expect(addresses).toEqual([path.join(dataDir, 'spaces/archive', SPACE), null, null]);
+  });
+
   it('keeps the chats an earlier delete saved when the same space is saved again, and counts them as saved', async () => {
     const chats = [{ info: infoOf(PARENT) }, { info: infoOf(CHILD, { parentID: PARENT }) }];
     const first = archiveWith({ chats });

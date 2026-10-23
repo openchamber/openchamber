@@ -370,7 +370,7 @@ export function createSpaceJourney({
       });
   };
 
-  const prepare = async (entry, { placeId, projectDirectory, name, start, network, setupCommands, purpose, approvalModel, grants }) => {
+  const prepare = async (entry, { placeId, projectDirectory, sourceDirectory = projectDirectory, name, start, network, setupCommands, purpose, approvalModel, grants }) => {
     let created = false;
     try {
       progress(entry, 'checking_place');
@@ -387,11 +387,11 @@ export function createSpaceJourney({
       await manager.createSpace({ id: entry.id, placeId, projectDirectory, name, purpose, onStep: (step) => progress(entry, step), startConfig });
       created = true;
       // With the place, the name and the time, so the space is still listed while its place cannot be asked.
-      records.write(entry.id, { placeId, name: entry.name, created: entry.created, purpose, approvalModel, network, repository: projectDirectory });
+      records.write(entry.id, { placeId, name: entry.name, created: entry.created, purpose, approvalModel, network, repository: sourceDirectory });
       progress(entry, 'setting_network');
       await gatekeeper.setNetwork(entry.id, network);
       progress(entry, 'bringing_code');
-      const arrived = await codeIn.bringCodeIn({ repository: projectDirectory, spaceId: entry.id, mode: start });
+      const arrived = await codeIn.bringCodeIn({ repository: sourceDirectory, spaceId: entry.id, mode: start });
       records.update(entry.id, { spacePath: arrived.spacePath, base: arrived.base });
       entry.identityCopied = arrived.identityCopied;
       await deliverSettings(entry.id);
@@ -415,11 +415,11 @@ export function createSpaceJourney({
       onSpacesChanged();
       // In the background, while the agent can already start (journey step 2).
       if (setupCommands.length > 0) setup.start(entry.id, { projectPath: arrived.spacePath, commands: setupCommands });
-      sendHistoryInBackground({ repository: projectDirectory, spaceId: entry.id, spacePath: arrived.spacePath, base: arrived.base });
+      sendHistoryInBackground({ repository: sourceDirectory, spaceId: entry.id, spacePath: arrived.spacePath, base: arrived.base });
     } catch (error) {
       const failure = failureOf(error);
       if (created) {
-        const cleanup = await removeEverything(entry.id, projectDirectory);
+        const cleanup = await removeEverything(entry.id, sourceDirectory);
         if (cleanup.failures.length > 0) failure.cleanup = cleanup.failures;
       }
       logger.warn?.(`[spaces] creating space ${entry.id} failed at ${entry.step}: ${failure.code}`);
@@ -433,7 +433,7 @@ export function createSpaceJourney({
    * network. The place is checked inside, as decision 19 asks: nothing probes a runtime before
    * the user acts.
    */
-  const createSpace = async (request) => {
+  const createSpace = async (request, { sourceDirectory, onAllocated, waitUntilReady = false } = {}) => {
     if (closing) throw new SpaceError('isolated_spaces_off', 'Isolated spaces are being turned off.');
     const parsed = createRequestSchema.safeParse(request ?? {});
     if (!parsed.success) {
@@ -452,7 +452,7 @@ export function createSpaceJourney({
       name,
       placeId,
       projectDirectory,
-      directory: spaceProjectPath(id, projectDirectory),
+      directory: spaceProjectPath(id, sourceDirectory ?? projectDirectory),
       created: now().toISOString(),
       state: 'preparing',
       step: 'checking_place',
@@ -462,8 +462,17 @@ export function createSpaceJourney({
       approvalModel,
       setupTotal: setupCommands.length,
     };
+    // Internal worker owners persist the allocation before any container can run.
+    // HTTP callers supply only `request` and cannot override the code source.
+    if (onAllocated) await onAllocated({ id, directory: entry.directory });
     pending.set(entry.id, entry);
-    void prepare(entry, { placeId, projectDirectory, name, start, network, setupCommands, purpose, approvalModel, grants });
+    const preparing = prepare(entry, { placeId, projectDirectory, sourceDirectory, name, start, network, setupCommands, purpose, approvalModel, grants });
+    if (waitUntilReady) {
+      await preparing;
+      if (entry.failure) throw new SpaceError(entry.failure.code, entry.failure.message);
+      return requireListed(id);
+    }
+    void preparing;
     return describePending(entry);
   };
 
@@ -822,7 +831,7 @@ export function createSpaceJourney({
         // The machine of a Docker over SSH place, for the screens; null locally and for a place that is gone.
         machine: places.get(space.placeId)?.machine ?? null,
         projectDirectory,
-        directory: projectDirectory === null ? null : spaceProjectPath(space.id, projectDirectory),
+        directory: projectDirectory === null ? null : (record?.spacePath ?? spaceProjectPath(space.id, projectDirectory)),
         projectFolder: { path: projectPath, found: projectPath === null ? null : await folderExists(projectPath) },
         created: space.created,
         state: codeNeverArrived ? 'failed' : space.state,
@@ -1349,5 +1358,7 @@ export function createSpaceJourney({
     return { brought, applied, removal, kept };
   });
 
-  return { createSpace, listSpaces, startSpace, stopSpace, restartSpace, restartOpenCode, removeSpace, stopAllSpaces, reopen, isIdle, grantAccess, sayLogin, readHostLogins, readHostCustomProviders, openDomain, restoreLostGrants, readJournal, previewApply, applySpace, readIdleStopSetting, changeIdleStop, changePermissionDefault, runSetup, readSetup, readDisk, cleanUpDisk, pullImage };
+  // Server-only. The caller owns and verifies sourceDirectory as its item worktree.
+  const createBotSpace = (request, { sourceDirectory, onAllocated }) => createSpace(request, { sourceDirectory, onAllocated, waitUntilReady: true });
+  return { createSpace, createBotSpace, listSpaces, startSpace, stopSpace, restartSpace, restartOpenCode, removeSpace, stopAllSpaces, reopen, isIdle, grantAccess, sayLogin, readHostLogins, readHostCustomProviders, openDomain, restoreLostGrants, readJournal, previewApply, applySpace, readIdleStopSetting, changeIdleStop, changePermissionDefault, runSetup, readSetup, readDisk, cleanUpDisk, pullImage };
 }

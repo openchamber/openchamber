@@ -139,6 +139,30 @@ const journeyWith = ({ readHostLogin = null, hostProviders = undefined, failAt =
 const REQUEST = { projectDirectory: PROJECT, name: ' Fix login ', start: 'uncommitted', network: NETWORK };
 const steps = (events, spaceId) => events.filter((event) => event.spaceId === spaceId).map((event) => event.step);
 
+describe('bot worker allocation', () => {
+  it('persists allocation before creation and transfers the owned checkout under its registered project', async () => {
+    const { journey, records, calls, place } = journeyWith();
+    let allocated = false;
+    const sourceDirectory = '/home/me/worktrees/bot-item';
+    const made = await journey.createBotSpace(REQUEST, { sourceDirectory, onAllocated: async () => {
+      expect(await place.list()).toEqual([]);
+      allocated = true;
+    } });
+    expect(allocated).toBe(true);
+    expect(made.state).toBe('running');
+    expect(records.read(made.id).record.repository).toBe(sourceDirectory);
+    expect(calls.find(([name]) => name === 'bringCodeIn')[1]).toMatchObject({ repository: sourceDirectory, spaceId: made.id });
+    expect(calls.find(([name]) => name === 'sendHistory')[1].repository).toBe(sourceDirectory);
+    await journey.removeSpace(made.id);
+  });
+
+  it('creates nothing when the allocation cannot be persisted', async () => {
+    const { journey, place } = journeyWith();
+    await expect(journey.createBotSpace(REQUEST, { sourceDirectory: '/home/me/worktrees/bot-item', onAllocated: async () => { throw new Error('disk full'); } })).rejects.toThrow('disk full');
+    expect(await place.list()).toEqual([]);
+  });
+});
+
 describe('approval worker journey', () => {
   const purpose = 'pr-fix-loop-approval';
   const request = { ...REQUEST, purpose, approvalModel: { providerID: 'openai', modelID: 'gpt-5.4' }, network: { mode: 'allowlist', domains: [] } };
