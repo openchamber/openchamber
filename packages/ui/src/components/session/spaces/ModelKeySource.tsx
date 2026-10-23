@@ -14,7 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useI18n } from '@/lib/i18n';
 import type { HostLoginOffer, KeySourceChoice, SpaceModelProviderOption } from './spaceModelKeys';
 
-export const ModelKeySource: React.FC<{ provider: SpaceModelProviderOption; login: HostLoginOffer | null; choice: KeySourceChoice; onChange: (change: Partial<KeySourceChoice>) => void; machine?: string | null }> = ({ provider, login, choice, onChange, machine = null }) => {
+export const ModelKeySource: React.FC<{ provider: SpaceModelProviderOption; login: HostLoginOffer | null; choice: KeySourceChoice; onChange: (change: Partial<KeySourceChoice>) => void; machine?: string | null; allowTyped?: boolean }> = ({ provider, login, choice, onChange, machine = null, allowTyped = true }) => {
   const { t } = useI18n();
   // A provider of the user's own asks for nothing: the host gives the key it has, or none.
   if (provider.custom) {
@@ -52,17 +52,17 @@ export const ModelKeySource: React.FC<{ provider: SpaceModelProviderOption; logi
         <SelectContent portalToBody>
           {login ? <SelectItem value="login">{labelOf('login')}</SelectItem> : null}
           <SelectItem value="env">{labelOf('env')}</SelectItem>
-          <SelectItem value="typed">{labelOf('typed')}</SelectItem>
+          {allowTyped ? <SelectItem value="typed">{labelOf('typed')}</SelectItem> : null}
         </SelectContent>
       </Select>
       {/* The field gets the whole row, so a variable name is read in full. */}
       {choice.source === 'env' ? (
-        <Input value={choice.envName} onChange={(event) => onChange({ envName: event.target.value })} className="w-full font-mono" spellCheck={false} aria-label={t('spaces.create.access.envNameAria', { provider: provider.name })} />
-      ) : choice.source === 'typed' ? (
+        <Input dir="ltr" value={choice.envName} onChange={(event) => onChange({ envName: event.target.value })} className="w-full font-mono" spellCheck={false} aria-label={t('spaces.create.access.envNameAria', { provider: provider.name })} />
+      ) : allowTyped && choice.source === 'typed' ? (
         <Input type="password" autoComplete="off" value={choice.value} onChange={(event) => onChange({ value: event.target.value })} className="w-full" aria-label={t('spaces.create.access.keyAria', { provider: provider.name })} />
       ) : null}
       {choice.source === 'env' ? <p className="typography-meta text-muted-foreground">{t('spaces.create.access.envComesBack')}</p> : null}
-      {choice.source === 'typed' ? <p className="typography-meta text-muted-foreground">{t('spaces.create.access.typedNotKept')}</p> : null}
+      {allowTyped && choice.source === 'typed' ? <p className="typography-meta text-muted-foreground">{t('spaces.create.access.typedNotKept')}</p> : null}
       {loginNoEnd}
     </div>
   );

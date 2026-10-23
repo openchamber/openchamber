@@ -18,7 +18,7 @@ import { useSessionStatusBootstrap } from '@/hooks/useSessionStatusBootstrap';
 import { useTraySync } from '@/hooks/useTraySync';
 import { useGlobalSessionsPolling } from '@/hooks/useGlobalSessionsPolling';
 import { useRouter } from '@/hooks/useRouter';
-import { openGuestPanelFromRoute } from '@/lib/router/openGuestPanelFromRoute';
+import { openNativeSessionLink } from '@/lib/router/openNativeSessionLink';
 import { usePushVisibilityBeacon } from '@/hooks/usePushVisibilityBeacon';
 import { useWebNotificationStream } from '@/hooks/useWebNotificationStream';
 import { useAgentMemorySync } from '@/hooks/useAgentMemorySync';
@@ -32,7 +32,7 @@ import { usePwaInstallPrompt } from '@/hooks/usePwaInstallPrompt';
 import { useWindowTitle } from '@/hooks/useWindowTitle';
 import { useRootScrollLock } from '@/hooks/useRootScrollLock';
 import { useConfigStore } from '@/stores/useConfigStore';
-import { isDesktopLocalOriginActive, isDesktopShell, restartDesktopApp, invokeDesktop, getMiniChatRuntimeArgs, openHostSession, takePendingDesktopSessionLinks } from '@/lib/desktop';
+import { isDesktopLocalOriginActive, isDesktopShell, restartDesktopApp, invokeDesktop, getMiniChatRuntimeArgs, takePendingDesktopSessionLinks } from '@/lib/desktop';
 import { isDesktopSafeStart } from '@/lib/desktopSafeStart';
 import { runPendingDesktopHostActions } from '@/lib/desktopHostActions';
 import {
@@ -520,33 +520,7 @@ function App({ apis }: AppProps) {
     if (typeof window === 'undefined') return;
 
     const handler = (event: Event) => {
-      const detail = (event as CustomEvent<{ sessionId?: string; directory?: string; guestId?: string; messageId?: string; runtimeKey?: string }>).detail;
-      const sessionId = typeof detail?.sessionId === 'string' ? detail.sessionId.trim() : '';
-      if (!sessionId) return;
-      const directory = typeof detail?.directory === 'string' && detail.directory.trim().length > 0
-        ? detail.directory.trim()
-        : null;
-      // A notification click names the runtime that owns the session. When
-      // this window is on another instance, the desktop shell opens the
-      // session in a window for the owning one.
-      const runtimeKey = String(detail?.runtimeKey ?? '').trim();
-      if (runtimeKey && runtimeKey !== getRuntimeKey() && openHostSession(runtimeKey, sessionId)) {
-        return;
-      }
-      // A link (a desktop deep link, a link to this window's instance) carries
-      // no directory; the route opener resolves it from the global session
-      // list, as for a web link.
-      if (!directory) {
-        void openSessionLink(sessionId, typeof detail?.messageId === 'string' ? detail.messageId.trim() : null);
-        return;
-      }
-      void useSessionUIStore.getState().setCurrentSession(sessionId, directory);
-      // A browser.requestHelp notification click: reveal the extension's
-      // panel alongside the session, same as the ?panel= deep link.
-      const guestId = String(detail?.guestId) === detail?.guestId ? detail.guestId.trim() : '';
-      if (guestId && directory) {
-        void openGuestPanelFromRoute(directory, guestId);
-      }
+      if (event instanceof CustomEvent) void openNativeSessionLink(event);
     };
 
     window.addEventListener('openchamber:open-session', handler as EventListener);

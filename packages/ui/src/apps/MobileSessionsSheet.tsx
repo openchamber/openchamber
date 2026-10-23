@@ -108,6 +108,8 @@ import {
   type MobileSessionWorkAction,
 } from './MobileSessionSwipe';
 import { isDoneSuggested, isSessionInWork } from '@/lib/sessionWorkMetadata';
+import { botSessionIds } from '@/lib/bots/sessionMetadata';
+import { BotsSidebarZone } from '@/components/bots/BotsSidebarZone';
 import { setSessionPriority, setSessionWorkState } from '@/sync/session-actions';
 import { isSessionPriority } from '@/lib/sessionPriority';
 import { useUIStore } from '@/stores/useUIStore';
@@ -154,7 +156,8 @@ type MobileSessionsSheetProps = {
     onOpenInstances?: () => void;
     onOpenSettings: () => void;
     onOpenScheduled: () => void;
-    onOpenSuggested: () => void;
+  onOpenSuggested: () => void;
+  onOpenBots: () => void;
     onOpenArchive: () => void;
     onOpenUsage: () => void;
     /** The issues and PRs board. */
@@ -1083,27 +1086,28 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   // Chats are plain conversations and never in work. Ownership and search
   // still see every session.
   const sessionWorkEnabled = useUIStore((state) => state.sessionWorkEnabled);
+  const botOwnedSessionIds = React.useMemo(() => botSessionIds(sessions), [sessions]);
   const workSessionIds = React.useMemo(() => {
     const ids = new Set<string>();
     if (!sessionWorkEnabled || !showWorkSection) return ids;
     for (const session of sessions) {
-      if (getParentId(session) || isChatDirectoryPath(getSessionDirectory(session)) || !isSessionInWork(session)) continue;
+      if (botOwnedSessionIds.has(session.id) || getParentId(session) || isChatDirectoryPath(getSessionDirectory(session)) || !isSessionInWork(session)) continue;
       ids.add(session.id);
       for (const id of getDescendantIds(childrenBySessionId, session.id)) ids.add(id);
     }
     return ids;
-  }, [childrenBySessionId, sessionWorkEnabled, sessions, showWorkSection]);
+  }, [botOwnedSessionIds, childrenBySessionId, sessionWorkEnabled, sessions, showWorkSection]);
   // Priority project sessions, with their subsessions, come first, above
   // Chats, whatever the display panel shows, and only there.
   const priorityZoneSessionIds = React.useMemo(() => {
     const ids = new Set<string>();
     for (const session of sessions) {
-      if (getParentId(session) || isChatDirectoryPath(getSessionDirectory(session)) || !isSessionPriority(session)) continue;
+      if (botOwnedSessionIds.has(session.id) || getParentId(session) || isChatDirectoryPath(getSessionDirectory(session)) || !isSessionPriority(session)) continue;
       ids.add(session.id);
       for (const id of getDescendantIds(childrenBySessionId, session.id)) ids.add(id);
     }
     return ids;
-  }, [childrenBySessionId, sessions]);
+  }, [botOwnedSessionIds, childrenBySessionId, sessions]);
   // Pinned project sessions, with their subsessions, get their own section
   // above In work while the display panel shows it; a pinned session in work
   // is listed there only. Pinned chats stay at the top of Chats.
@@ -1112,13 +1116,13 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     if (!showPinnedSection) return ids;
     for (const session of sessions) {
       const directory = getSessionDirectory(session);
-      if (getParentId(session) || isChatDirectoryPath(directory) || priorityZoneSessionIds.has(session.id)
+      if (botOwnedSessionIds.has(session.id) || getParentId(session) || isChatDirectoryPath(directory) || priorityZoneSessionIds.has(session.id)
         || !isSessionPinned(pinnedSessionIds, directory || null, session.id)) continue;
       ids.add(session.id);
       for (const id of getDescendantIds(childrenBySessionId, session.id)) ids.add(id);
     }
     return ids;
-  }, [childrenBySessionId, pinnedSessionIds, priorityZoneSessionIds, sessions, showPinnedSection]);
+  }, [botOwnedSessionIds, childrenBySessionId, pinnedSessionIds, priorityZoneSessionIds, sessions, showPinnedSection]);
   const sectionChatSessions = React.useMemo(
     () => (workSessionIds.size > 0 ? chatSessions.filter((session) => !workSessionIds.has(session.id)) : chatSessions),
     [chatSessions, workSessionIds],
@@ -1837,7 +1841,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
       sessions.filter((session) => {
         // Subsessions are implementation noise in a flat search list — only
         // top-level sessions are searchable.
-        if (getParentId(session)) return false;
+        if (botOwnedSessionIds.has(session.id) || getParentId(session)) return false;
         const owner = sessionOwnership.bySessionId.get(session.id);
         const project = owner ? projectsMeta.find((candidate) => candidate.id === owner.projectId) ?? null : null;
         return sessionMatchesQuery(session, project?.label ?? '', normalizedQuery);
@@ -1845,7 +1849,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
       pinnedSessionIds,
       sessionOrderRanks,
     );
-  }, [normalizedQuery, pinnedSessionIds, projectsMeta, sessionOrderRanks, sessionOwnership, sessions]);
+  }, [botOwnedSessionIds, normalizedQuery, pinnedSessionIds, projectsMeta, sessionOrderRanks, sessionOwnership, sessions]);
 
   const searchProjectMatches = React.useMemo<ProjectMeta[]>(() => {
     if (!normalizedQuery) return [];
@@ -2556,6 +2560,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
                 );
               })()}
               {renderZoneSection(PINNED_SECTION_ID, 'pushpin', t('sessions.sidebar.activity.pinnedTitle'), pinnedBucket, pinnedTimelineEntries)}
+              <BotsSidebarZone query={normalizedQuery} onLeave={() => onOpenChange(false)} />
               {renderZoneSection(WORK_SECTION_ID, 'eye', t('sessions.sidebar.work.title'), workBucket, workTimelineEntries)}
               {timeListActive ? renderTimeListSection() : orderedNodes.map((node) => {
                 const projectExpanded = isProjectExpanded(node);
@@ -2798,6 +2803,9 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
                       <Icon name="lightbulb" className="size-4" />
                       {t('suggestedTasks.sidebar.open')}
                     </span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={footer.onOpenBots} className={MOBILE_MENU_ITEM_CLASS}>
+                    <span className="flex items-center gap-2"><Icon name="robot-2" className="size-4" />{t('bots.title')}</span>
                   </DropdownMenuItem>
                   <DropdownMenuItem onClick={footer.onOpenArchive} className={MOBILE_MENU_ITEM_CLASS}>
                     <span className="flex items-center gap-2">

@@ -24,7 +24,7 @@ import { ProjectActionsProvider } from './ProjectActionsProvider';
 import { RunAutoFusion } from '@/lib/multirun/autoFusion';
 
 import { useUIStore } from '@/stores/useUIStore';
-import { useSessionUIStore } from '@/sync/session-ui-store';
+import { subscribeMainSurfaceNavigation } from '@/lib/router/subscribeMainSurfaceNavigation';
 import { useSpacesStore } from '@/lib/spaces/spaces-store';
 import { useUpdatePolling } from '@/hooks/useUpdatePolling';
 import { useTerminalSessionKeepalive } from '@/hooks/useTerminalSessionKeepalive';
@@ -49,6 +49,7 @@ const loadOpenCodeStatusDialog = () => import('../ui/OpenCodeStatusDialog').then
 const loadRunOverview = () => import('@/components/multirun/RunOverview').then((m) => m.RunOverview);
 const loadScheduledTasksDialog = () => import('@/components/session/ScheduledTasksDialog').then((m) => m.ScheduledTasksDialog);
 const loadSuggestedTasksPage = () => import('@/components/suggested-tasks/SuggestedTasksPage').then((m) => m.SuggestedTasksPage);
+const loadBotsPage = () => import('@/components/bots/BotsPage').then((m) => m.BotsPage);
 const loadArchiveView = () => import('@/components/views/ArchiveView').then((m) => m.ArchiveView);
 const loadIntegrationsCatalogView = () => import('@/components/views/IntegrationsCatalogView').then((m) => m.IntegrationsCatalogView);
 const loadUsageStatsView = () => import('@/components/views/usage/UsageStatsView').then((m) => m.UsageStatsView);
@@ -116,6 +117,7 @@ export const MainLayout: React.FC = () => {
     const isRunOverviewOpen = useUIStore((state) => state.runOverviewKey !== null);
     const isScheduledTasksPageOpen = useUIStore((state) => state.isScheduledTasksDialogOpen);
     const isSuggestedTasksPageOpen = useUIStore((state) => state.isSuggestedTasksPageOpen);
+    const isBotsPageOpen = useUIStore((state) => state.isBotsPageOpen);
     const isArchivePageOpen = useUIStore((state) => state.isArchivePageOpen);
     const isIntegrationsCatalogOpen = useUIStore((state) => state.isIntegrationsCatalogOpen);
     const isUsageStatsPageOpen = useUIStore((state) => state.isUsageStatsPageOpen);
@@ -141,7 +143,7 @@ export const MainLayout: React.FC = () => {
     // Any full-page surface replacing the chat area. While open, the chat is
     // fully hidden (not just covered) so none of its floating chrome bleeds
     // through, and selecting a session or draft anywhere closes the surface.
-    const isSurfacePageOpen = isScheduledTasksPageOpen || isSuggestedTasksPageOpen || isArchivePageOpen || isIntegrationsCatalogOpen || isUsageStatsPageOpen || isSourceBoardOpen || Boolean(worktreesPageProjectId) || isSpacesPageOpen || isRunOverviewOpen || Boolean(guestPage);
+    const isSurfacePageOpen = isBotsPageOpen || isScheduledTasksPageOpen || isSuggestedTasksPageOpen || isArchivePageOpen || isIntegrationsCatalogOpen || isUsageStatsPageOpen || isSourceBoardOpen || Boolean(worktreesPageProjectId) || isSpacesPageOpen || isRunOverviewOpen || Boolean(guestPage);
     // The work-status card sits in the right slot, outside the hidden chat,
     // so the slot is told to hide it with the chat.
     React.useLayoutEffect(() => {
@@ -149,19 +151,7 @@ export const MainLayout: React.FC = () => {
     }, [isSurfacePageOpen]);
     React.useEffect(() => () => setChatCovered(false), []);
 
-    React.useEffect(() => {
-        const closeSurfacePages = () => useUIStore.getState().closeMainSurfaces();
-        const unsubscribeSession = useSessionUIStore.subscribe((state, prev) => {
-            const sessionSelected = Boolean(state.currentSessionId) && state.currentSessionId !== prev.currentSessionId;
-            // Draft identity change covers re-opening a draft while one is
-            // already open (the boolean alone never transitions then).
-            const draftOpened = Boolean(state.newSessionDraft?.open) && state.newSessionDraft !== prev.newSessionDraft;
-            if (sessionSelected || draftOpened) closeSurfacePages();
-        });
-        return () => {
-            unsubscribeSession();
-        };
-    }, []);
+    React.useEffect(subscribeMainSurfaceNavigation, []);
     const { isMobile } = useDeviceInfo();
 
     useUpdatePolling();
@@ -224,7 +214,8 @@ export const MainLayout: React.FC = () => {
                                             </div>
                                             <ErrorBoundary><OnDemand needed={isRunOverviewOpen} load={loadRunOverview} onFailure={closeMainSurfaces} /></ErrorBoundary>
                                             <ErrorBoundary><OnDemand needed={isScheduledTasksPageOpen} load={loadScheduledTasksDialog} onFailure={closeMainSurfaces} /></ErrorBoundary>
-                                            <ErrorBoundary><OnDemand needed={isSuggestedTasksPageOpen} load={loadSuggestedTasksPage} onFailure={closeMainSurfaces} /></ErrorBoundary>
+        <ErrorBoundary><OnDemand needed={isSuggestedTasksPageOpen} load={loadSuggestedTasksPage} onFailure={closeMainSurfaces} /></ErrorBoundary>
+        <ErrorBoundary><OnDemand needed={isBotsPageOpen} load={loadBotsPage} onFailure={closeMainSurfaces} /></ErrorBoundary>
                                             <ErrorBoundary><OnDemand needed={isArchivePageOpen} load={loadArchiveView} onFailure={closeMainSurfaces} /></ErrorBoundary>
                                             <ErrorBoundary><OnDemand needed={isIntegrationsCatalogOpen} load={loadIntegrationsCatalogView} onFailure={closeMainSurfaces} /></ErrorBoundary>
                                             {isUsageStatsPageOpen && (
