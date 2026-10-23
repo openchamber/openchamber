@@ -12,6 +12,7 @@ import { resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
 import { normalizePath } from '../utils';
 import { isChatDirectoryPath } from '@/lib/chatDirectories';
 import { isBtwSession } from '@/lib/sessionBtwMetadata';
+import { botSessionIds } from '@/lib/bots/sessionMetadata';
 import type { GlobalSessionStructure } from '@/stores/globalSessionStructure';
 import { countSyncPerformance } from '@/sync/performance-diagnostics';
 import type { SessionNode } from '../types';
@@ -41,7 +42,9 @@ export const partitionSidebarSessions = (
 ): SidebarSessionPartitions => {
   const projectSessions: Session[] = [];
   const chatSessions: Session[] = [];
+  const bots = botSessionIds(sessions);
   for (const session of sessions) {
+    if (bots.has(session.id)) continue;
     if (isBtwSession(session)) continue;
     if (isChatDirectoryPath(session.directory)) {
       if (isVSCode) continue;
@@ -268,7 +271,11 @@ export const useSessionProjectCollection = ({
 }: UseSessionProjectCollectionArgs) => {
   const globalActiveSessions = useGlobalSessionsStore((state) => state.activeSessions);
   const globalStructure = useGlobalSessionsStore((state) => state.structure);
-  const archivedSessions = useGlobalSessionsStore((state) => state.archivedSessions);
+  const allArchivedSessions = useGlobalSessionsStore((state) => state.archivedSessions);
+  const archivedSessions = React.useMemo(() => {
+    const hidden = botSessionIds([...globalActiveSessions, ...allArchivedSessions]);
+    return allArchivedSessions.filter((session) => !hidden.has(session.id));
+  }, [allArchivedSessions, globalActiveSessions]);
   const hasAuthoritativeGlobalSessions = useGlobalSessionsStore((state) => state.status === 'ready');
   const pinnedSessionIds = useSessionPinnedStore((state) => state.ids);
   const sessionOrderRanks = useSessionOrderingStore(React.useCallback(

@@ -81,6 +81,7 @@ export type SessionSidebarOwnerAuthority = {
 type RowBase = { key: string; estimateSize: number; treeGuides?: readonly SessionTreeGuide[] };
 
 export type SessionSidebarRow =
+  | (RowBase & { kind: 'bots-zone'; count: number })
   | (RowBase & { kind: 'activity-header'; activityKey: SessionSidebarActivityKey; collapsed: boolean; forceExpanded: boolean })
   | (RowBase & { kind: 'project-header'; section: ProjectSection; collapsed: boolean; forceExpanded: boolean })
   // `empty`: nothing to list under the header, so it offers no chevron.
@@ -150,6 +151,7 @@ export type SessionSidebarRowModelArgs = {
    */
   pinnedItems?: readonly SessionSidebarActivityItem[];
   workItems?: readonly SessionSidebarActivityItem[];
+  botsAttentionCount?: number;
   /** Priority sessions: the first zone, above Chats. */
   priorityItems?: readonly SessionSidebarActivityItem[];
   /** Every session listed in the Priority, Pinned or In work zone. */
@@ -809,6 +811,7 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
   };
 
   appendZone('pinned', args.pinnedItems ?? []);
+  if ((args.botsAttentionCount ?? 0) > 0) push({ kind: 'bots-zone', key: `bots:${args.botsAttentionCount}`, count: args.botsAttentionCount ?? 0, estimateSize: HEADER_ESTIMATE + (args.botsAttentionCount ?? 0) * 32 });
   appendZone('work', args.workItems ?? []);
 
   if (timeList) {

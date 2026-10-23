@@ -1,5 +1,6 @@
 import { SidebarTerminalActivity } from './SidebarTerminalActivity';
 import React from 'react';
+import { useBotsAttentionCount } from '@/components/bots/useBotsAttentionCount';
 import type { Session } from '@/lib/opencode/model';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { usePrefetchSessionMessages } from '@/sync/use-sync';
@@ -902,7 +903,9 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     ...visibleSessionCountByGroup,
     ...visibleActivityCountByKey,
   ]), [visibleActivityCountByKey, visibleSessionCountByGroup]);
+  const botsAttentionCount = useBotsAttentionCount(view.isVisible && !topology.isVSCode);
   const sidebarRowModel = React.useMemo(() => buildSessionSidebarRowModel({
+    botsAttentionCount,
     mode: view.hasSessionSearchQuery ? 'search' : 'normal',
     viewMode: timelineMode ? 'timeline' : 'projects',
     listGrouping: listSessionGrouping,
@@ -936,7 +939,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     hideDirectoryControls: view.hideDirectoryControls,
     sessionBatchSize: singleProjectMode && !view.useGroupedSections ? 20 : undefined,
     runIndex,
-  }), [runIndex, chatGroup, showChatsSection, projectView.collapsedActivities, timelineItems, timelineMode, listSessionGrouping, priorityItems, pinnedItems, workItems, zoneSessionIds, detailedZoneRows, collapsedFolderIds, collection.pinnedSessionIds, expandedParents, folderAuthorityByOwner, foldersMap, groupSearchDataByGroup, groupStatusByKey, orderedSectionsForRender, projectSections, projectView.collapsedGroups, projectView.collapsedProjects, selectedSingleProjectId, sessionOrderIndex, singleProjectMode, view.activeProjectId, view.hasSessionSearchQuery, view.hideDirectoryControls, view.normalizedSessionSearchQuery, view.showOnlyMainWorkspace, view.useGroupedSections, visibleCountByContainer]);
+  }), [botsAttentionCount, runIndex, chatGroup, showChatsSection, projectView.collapsedActivities, timelineItems, timelineMode, listSessionGrouping, priorityItems, pinnedItems, workItems, zoneSessionIds, detailedZoneRows, collapsedFolderIds, collection.pinnedSessionIds, expandedParents, folderAuthorityByOwner, foldersMap, groupSearchDataByGroup, groupStatusByKey, orderedSectionsForRender, projectSections, projectView.collapsedGroups, projectView.collapsedProjects, selectedSingleProjectId, sessionOrderIndex, singleProjectMode, view.activeProjectId, view.hasSessionSearchQuery, view.hideDirectoryControls, view.normalizedSessionSearchQuery, view.showOnlyMainWorkspace, view.useGroupedSections, visibleCountByContainer]);
   React.useEffect(() => {
     onSearchMatchCountChange(sidebarRowModel.searchMatchCount);
   }, [onSearchMatchCountChange, sidebarRowModel.searchMatchCount]);

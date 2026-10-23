@@ -1,4 +1,5 @@
 import React from 'react';
+import { BotsSidebarZone } from '@/components/bots/BotsSidebarZone';
 import {
   DndContext,
   KeyboardSensor,
@@ -290,6 +291,7 @@ function SessionProjectScrollerComponent({ model, view, actions }: Props): React
   }, [childStores, t]);
 
   const renderRow = React.useCallback((row: SessionSidebarRow): React.ReactNode => {
+    if (row.kind === 'bots-zone') return <BotsSidebarZone onLeave={view.mobileVariant ? () => actions.setSessionSwitcherOpen(false) : undefined} />;
     if (row.kind === 'activity-header') {
       return <CrossfadeZoneHeader
         className="sticky top-0 z-20 bg-sidebar"

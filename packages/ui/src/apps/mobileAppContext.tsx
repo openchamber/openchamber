@@ -16,6 +16,7 @@ export type MobileAppActions = {
   openUpdate: () => void;
   /** Open the scheduled tasks surface of the active project. */
   openScheduledTasks: () => void;
+  openBots: () => void;
 };
 
 const DedicatedMobileAppContext = React.createContext<MobileAppActions | null>(null);

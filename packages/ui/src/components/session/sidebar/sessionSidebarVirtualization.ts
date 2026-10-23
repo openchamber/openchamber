@@ -36,7 +36,7 @@ type SectionSpacing = keyof typeof SECTION_SPACING_ESTIMATE;
  * user's scroll gesture.
  */
 export const sessionSidebarRowSizeKey = (row: SessionSidebarRow): string => (
-  `${row.kind}:${'renderContext' in row ? row.renderContext : ''}`
+  `${row.kind}:${row.kind === 'bots-zone' ? row.count : 'renderContext' in row ? row.renderContext : ''}`
 );
 
 /**
@@ -69,7 +69,7 @@ export const sectionSpacingAfter = (row: SessionSidebarRow, nextRow: SessionSide
   // Zones (Chats, In work, Recent) and projects are sections of equal weight,
   // so each opens with the same gap. A worktree header opens a smaller one
   // inside its project, so its sessions read as a group of their own.
-  const startsSection = nextRow?.kind === 'activity-header' || nextRow?.kind === 'project-header';
+  const startsSection = nextRow?.kind === 'bots-zone' || nextRow?.kind === 'activity-header' || nextRow?.kind === 'project-header';
   if (startsSection) return 'pb-2';
   return nextRow?.kind === 'group-header' && row.kind !== 'project-header' ? 'pb-1.5' : undefined;
 };

@@ -86,8 +86,15 @@ In work, and Timeline use this same ownership resolver; rows keep the session's
 own directory while taking display ownership (project id, labels) from the
 index.
 
-Web and desktop show managed Chats, then In work, then the projects. There is
-no Recent zone any more (removed 2026-10): In work holds the sessions being
+Web and desktop show managed Chats, then In work, then the projects. An
+attention-only Bots zone sits immediately before In work. It renders live
+blocking bot sessions or unresolved server bot notifications and disappears
+when both are empty. Bot sessions and their descendants are excluded from the
+ordinary project, chat, pinned and In work projections on desktop and mobile;
+membership and attention contracts are in
+`packages/ui/src/components/bots/DOCUMENTATION.md`.
+
+There is no Recent zone any more (removed 2026-10): In work holds the sessions being
 worked on, and the List view sorted by time answers "what was I doing" across
 projects. Chats use
 their shared managed root for folders and never expose worktree actions. Project

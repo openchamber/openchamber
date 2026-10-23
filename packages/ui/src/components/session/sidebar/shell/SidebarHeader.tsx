@@ -154,6 +154,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
   const isSourceBoardOpen = useUIStore((state) => state.isSourceBoardOpen);
   const isScheduledOpen = useUIStore((state) => state.isScheduledTasksDialogOpen);
   const isSuggestedOpen = useUIStore((state) => state.isSuggestedTasksPageOpen);
+  const isBotsOpen = useUIStore((state) => state.isBotsPageOpen);
   const openSuggestions = useOpenSuggestionCount();
   const isArchiveOpen = useUIStore((state) => state.isArchivePageOpen);
   const isIntegrationsCatalogOpen = useUIStore((state) => state.isIntegrationsCatalogOpen);
@@ -396,6 +397,13 @@ export function SidebarHeader(props: Props): React.ReactNode {
                   {openSuggestions > 0 ? <span className="absolute -top-0.5 -end-0.5 size-1.5 rounded-full bg-primary" aria-hidden /> : null}
                 </span>
               </SidebarPageButton>
+
+              {showProjectDisplayControls ? <SidebarPageButton
+                label={t('bots.title')}
+                pressed={isBotsOpen}
+                onClick={() => useUIStore.getState().setBotsPageOpen(!isBotsOpen)}
+                className={headerActionButtonClass}
+              ><Icon name="robot-2" className={headerActionIconClass} /></SidebarPageButton> : null}
 
               <SidebarPageButton
                 label={t('sessions.sidebar.nav.archive')}
