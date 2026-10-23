@@ -2183,6 +2183,11 @@ const dispatchDeepLink = (link) => {
   }
 
   if (link.type === 'session' && link.value) {
+    // The session opens in the main window, so raise it: on macOS the link
+    // brings the app forward with whichever window was used last. A session of
+    // another host then opens in that host's window, which comes up on top,
+    // as for a notification click.
+    focusForegroundWindow();
     emitToPrimaryWindow('openchamber:open-session', sessionDeepLinkTarget(link));
     return;
   }
