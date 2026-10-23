@@ -6161,7 +6161,7 @@ const removeGitWorktreeWhenFree = async (primaryWorktree, worktreePath, targetCa
   }
 };
 
-export async function removeWorktree(directory, input = {}, { bootstrapStore } = {}) {
+export async function removeWorktree(directory, input = {}, { bootstrapStore, verifyRemoval } = {}) {
   const targetDirectory = normalizeDirectoryPath(input?.directory);
   if (!targetDirectory) {
     throw new Error('Worktree directory is required');
@@ -6232,6 +6232,10 @@ export async function removeWorktree(directory, input = {}, { bootstrapStore } =
   const releaseInstance = () => disposeWorktreeInstanceBestEffort(input?.disposeInstance, matchedEntry.worktree);
   try {
     await releaseInstance();
+
+    // Internal owners can revalidate their narrower deletion authority after
+    // disposal. Unlike best-effort disposal, a refusal must stop removal.
+    await verifyRemoval?.(matchedEntry.worktree);
 
     const restoreGitDirectoryLink = await replaceWorktreeGitDirectoryLink(context.primaryWorktree, matchedEntry.worktree);
     try {

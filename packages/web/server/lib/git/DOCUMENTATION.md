@@ -135,6 +135,8 @@ before.
 
 ### Worktree removal with .git directory symlinks
 
+Internal destructive-operation owners may supply `removeWorktree(directory, input, { verifyRemoval })`. This awaited check runs after best-effort instance disposal and before `.git` replacement or Git removal. A refusal propagates and leaves the checkout intact. Bot cleanup uses it to recheck its exact owned checkout, head and dirty state after disposal. HTTP payloads cannot provide this callback.
+
 Server removal supports the `.git` directory symlinks used by git-annex. Only a
 registered, non-primary worktree qualifies. The resolved target must be a direct
 child of this repository's common Git directory's `worktrees` directory. Its
