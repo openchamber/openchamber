@@ -201,6 +201,8 @@ const SuggestedTasksSettings: React.FC<{ projectRef: ProjectRef }> = ({ projectR
         model: { useDefaults: true },
         web: preset?.web ?? false,
         action: 'suggest',
+        mcp: [],
+        permissionMode: 'default',
       },
     });
   };
@@ -532,6 +534,7 @@ const SuggestedTasksSettings: React.FC<{ projectRef: ProjectRef }> = ({ projectR
         <SuggestedLensEditorDialog
           key={editing.lens.id}
           lens={editing.lens}
+          projectId={projectId}
           directory={projectRef.path}
           canCreateWorktree={git.canCreateWorktree}
           isNew={editing.isNew}

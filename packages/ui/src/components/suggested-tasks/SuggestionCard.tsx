@@ -1,14 +1,11 @@
 import React from 'react';
 
 import { Icon } from '@/components/icon/Icon';
-import type { IconName } from '@/components/icon/icons';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { useI18n, type I18nKey } from '@/lib/i18n';
@@ -16,6 +13,7 @@ import type { ApproveAction, IssueProvider, Suggestion, SuggestionFile, Suggesti
 import { formatDateTimeForPreference } from '@/lib/timeFormat';
 import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
+import { SuggestionApprovalMenu } from './SuggestionApprovalMenu';
 
 export type SuggestionDecision =
   | { kind: 'approve'; action: ApproveAction; provider?: IssueProvider }
@@ -23,7 +21,9 @@ export type SuggestionDecision =
   | { kind: 'snooze'; until: number }
   | { kind: 'restore' }
   | { kind: 'open-session' }
-  | { kind: 'open-issue' };
+  | { kind: 'open-issue' }
+  | { kind: 'handoff-bot' }
+  | { kind: 'open-bot' };
 
 const SEVERITY_TONE = {
   critical: 'error',
@@ -45,12 +45,6 @@ const CONFIDENCE_LABEL = {
   low: 'suggestedTasks.confidence.low',
 } satisfies Record<Suggestion['confidence'], I18nKey>;
 
-const ISSUE_LABEL = {
-  github: 'suggestedTasks.action.issueGitHub',
-  gitlab: 'suggestedTasks.action.issueGitLab',
-  linear: 'suggestedTasks.action.issueLinear',
-} satisfies Record<IssueProvider, I18nKey>;
-
 const CONVERSION_LABEL = {
   session: 'suggestedTasks.conversion.session',
   worktree: 'suggestedTasks.conversion.worktree',
@@ -58,6 +52,7 @@ const CONVERSION_LABEL = {
   todo: 'suggestedTasks.conversion.todo',
   issue: 'suggestedTasks.conversion.issue',
   draft: 'suggestedTasks.conversion.draft',
+  bot: 'suggestedTasks.conversion.bot',
 } satisfies Record<NonNullable<Suggestion['conversion']>['kind'], I18nKey>;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -82,9 +77,11 @@ export const SuggestionCard: React.FC<{
   projectPath: string;
   issueProviders: IssueProvider[];
   canCreateWorktree: boolean;
+  botsAvailable: boolean;
+  handoffBotId?: string;
   busy: boolean;
   onDecide: (decision: SuggestionDecision) => void;
-}> = ({ suggestion, projectPath, issueProviders, canCreateWorktree, busy, onDecide }) => {
+}> = ({ suggestion, projectPath, issueProviders, canCreateWorktree, botsAvailable, handoffBotId, busy, onDecide }) => {
   const { t } = useI18n();
   const timeFormat = useUIStore((state) => state.timeFormatPreference);
   const formatTime = (value: number) => formatDateTimeForPreference(value, timeFormat, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
@@ -95,23 +92,16 @@ export const SuggestionCard: React.FC<{
     else useUIStore.getState().openContextFile(projectPath, absolute);
   };
 
-  const approveItems: Array<{ action: ApproveAction; icon: IconName; label: I18nKey; hidden?: boolean }> = [
-    { action: 'session', icon: 'chat-new', label: 'suggestedTasks.action.session' },
-    { action: 'worktree', icon: 'git-branch', label: 'suggestedTasks.action.worktree', hidden: !canCreateWorktree },
-    { action: 'draft-pr', icon: 'git-pull-request', label: 'suggestedTasks.action.draftPr', hidden: !canCreateWorktree },
-    { action: 'draft', icon: 'edit-2', label: 'suggestedTasks.action.draft' },
-    { action: 'todo', icon: 'todo', label: 'suggestedTasks.action.todo' },
-  ];
-
   const pending = suggestion.status === 'open' || suggestion.status === 'snoozed';
-  const controlsDisabled = busy || Boolean(suggestion.conversionPending);
-  const canRestore = suggestion.conversionPending ? Boolean(suggestion.conversionRecoverable) : suggestion.status === 'dismissed';
+  const controlsDisabled = busy || Boolean(suggestion.conversionPending) || Boolean(handoffBotId);
+  const canRestore = !handoffBotId && (suggestion.conversionPending ? Boolean(suggestion.conversionRecoverable) : suggestion.status === 'dismissed');
   const conversion = suggestion.conversion;
+  const sessionConversion = conversion?.kind === 'bot' ? undefined : conversion;
 
   return (
-    <article className="rounded-lg border border-border p-4" aria-busy={busy}>
+    <article className="oc-tile rounded-lg p-4" aria-busy={busy}>
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 typography-micro text-muted-foreground">
-        <span className="inline-flex items-center gap-1 rounded border px-1.5 py-px font-medium" style={toneStyle(SEVERITY_TONE[suggestion.severity])}>
+        <span className="inline-flex items-center gap-1 rounded px-1.5 py-px font-medium" style={toneStyle(SEVERITY_TONE[suggestion.severity])}>
           {t(SEVERITY_LABEL[suggestion.severity])}
         </span>
         <span>{t(CONFIDENCE_LABEL[suggestion.confidence])}</span>
@@ -148,6 +138,21 @@ export const SuggestionCard: React.FC<{
         </ul>
       ) : null}
 
+      {suggestion.evidence?.length ? (
+        <section className="mt-3 space-y-1.5 typography-meta" aria-label={t('suggestedTasks.card.evidence')}>
+          <h4 className="font-medium text-foreground">{t('suggestedTasks.card.evidence')}</h4>
+          <ul className="space-y-2">
+            {suggestion.evidence.map((item, index) => (
+              <li key={index} className="min-w-0 break-words">
+                {item.url ? <a href={item.url} target="_blank" rel="noopener noreferrer" className="text-foreground underline underline-offset-2" dir="auto">{item.source}</a>
+                  : <span className="text-foreground" dir="auto">{item.source}</span>}
+                <p className="text-muted-foreground oc-ui-start-align" dir="auto">{item.summary}</p>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
       {suggestion.status === 'dismissed' ? (
         <p className="mt-3 typography-meta text-muted-foreground" dir="auto">
           {suggestion.dismissReason
@@ -180,34 +185,7 @@ export const SuggestionCard: React.FC<{
             <Button size="sm" disabled={controlsDisabled} onClick={() => onDecide({ kind: 'approve', action: 'session' })}>
               <Icon name="play" className="size-4" /> {t('suggestedTasks.action.session')}
             </Button>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button size="sm" variant="outline" disabled={controlsDisabled}>
-                  {t('suggestedTasks.action.approveAs')}
-                  <Icon name="arrow-down-s" className="size-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" className="min-w-56">
-                {approveItems.filter((item) => !item.hidden).map((item) => (
-                  <DropdownMenuItem key={item.action} disabled={controlsDisabled} onClick={() => onDecide({ kind: 'approve', action: item.action })}>
-                    <Icon name={item.icon} className="size-4" />
-                    {t(item.label)}
-                  </DropdownMenuItem>
-                ))}
-                {issueProviders.length > 0 ? (
-                  <>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuLabel>{t('suggestedTasks.action.issueGroup')}</DropdownMenuLabel>
-                    {issueProviders.map((provider) => (
-                      <DropdownMenuItem key={provider} disabled={controlsDisabled} onClick={() => onDecide({ kind: 'approve', action: 'issue', provider })}>
-                        <Icon name="external-link" className="size-4" />
-                        {t(ISSUE_LABEL[provider])}
-                      </DropdownMenuItem>
-                    ))}
-                  </>
-                ) : null}
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <SuggestionApprovalMenu issueProviders={issueProviders} canCreateWorktree={canCreateWorktree} botsAvailable={botsAvailable} disabled={controlsDisabled} onDecide={onDecide} />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button size="sm" variant="ghost" disabled={controlsDisabled}>
@@ -230,12 +208,18 @@ export const SuggestionCard: React.FC<{
             ) : null}
           </>
         ) : null}
-        {conversion?.sessionId ? (
+        {botsAvailable && handoffBotId && pending ? <Button size="sm" variant="outline" disabled={busy} onClick={() => onDecide({ kind: 'handoff-bot' })}>
+          {t('suggestedTasks.action.bot')}
+        </Button> : null}
+        {botsAvailable && conversion?.kind === 'bot' ? <Button size="sm" variant="outline" onClick={() => onDecide({ kind: 'open-bot' })}>
+          <Icon name="ai-agent" className="size-4" />{t('suggestedTasks.action.openBotItem')}
+        </Button> : null}
+        {sessionConversion?.sessionId ? (
           <Button size="sm" variant="outline" onClick={() => onDecide({ kind: 'open-session' })}>
             <Icon name="chat-1" className="size-4" /> {t('suggestedTasks.action.openSession')}
           </Button>
         ) : null}
-        {conversion?.url ? (
+        {sessionConversion?.url ? (
           <Button size="sm" variant="outline" onClick={() => onDecide({ kind: 'open-issue' })}>
             <Icon name="external-link" className="size-4" /> {t('suggestedTasks.action.openIssueForm')}
           </Button>

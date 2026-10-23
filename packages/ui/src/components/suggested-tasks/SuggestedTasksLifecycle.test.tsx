@@ -24,7 +24,7 @@ const Harness = () => {
   const actions = useSuggestionActions({ id: 'app', path: '/repo' }, () => undefined);
   capturedActions = actions;
   const item = entry && entry.status !== 'loading' ? entry.inbox?.suggestions[0] : null;
-  return item ? <SuggestionCard suggestion={item} projectPath="/repo" issueProviders={['github']} canCreateWorktree busy={actions.busyIds.has(item.id)} onDecide={(decision) => void actions.decide(item, decision)} /> : null;
+  return item ? <SuggestionCard suggestion={item} projectPath="/repo" issueProviders={['github']} canCreateWorktree botsAvailable={false} busy={actions.busyIds.has(item.id)} onDecide={(decision) => void actions.decide(item, decision)} /> : null;
 };
 beforeEach(async () => {
   root = createRoot(document.body.appendChild(document.createElement('div')));

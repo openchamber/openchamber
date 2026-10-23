@@ -109,7 +109,7 @@ describe('Suggested tasks Git availability', () => {
     if (!lens) throw new Error('Missing fixture lens');
 
     // When its editor opens without a confirmed repository.
-    await act(async () => root.render(<I18nProvider><SuggestedLensEditorDialog lens={lens} directory={project.path} canCreateWorktree={false} isNew={false}
+    await act(async () => root.render(<I18nProvider><SuggestedLensEditorDialog lens={lens} projectId={project.id} directory={project.path} canCreateWorktree={false} isNew={false}
       onOpenChange={() => undefined} onSave={async () => true} onDelete={async () => true} /></I18nProvider>));
 
     // Then both Git-only options are disabled, while a session action remains selectable.

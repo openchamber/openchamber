@@ -471,6 +471,7 @@ type ScheduledTaskDraft = {
     goalEnabled: boolean;
     goalTokenBudget: number | null;
     permissionAutoAccept: boolean;
+    notify: ScheduledTask['execution']['notify'];
   };
   state?: ScheduledTask['state'];
 };
@@ -526,6 +527,7 @@ const toDraft = (
         goalEnabled: false,
         goalTokenBudget: null,
         permissionAutoAccept: false,
+        notify: 'finish',
       },
     };
   }
@@ -569,6 +571,7 @@ const toDraft = (
         ? task.execution.goalTokenBudget
         : null,
       permissionAutoAccept: task.execution.permissionAutoAccept === true,
+      notify: task.execution.notify ?? 'finish',
     },
     state: task.state,
   };
@@ -1223,6 +1226,7 @@ export function ScheduledTaskEditorDialog(props: {
       },
       execution: {
         prompt: draft.execution.prompt,
+        notify: draft.execution.notify,
         ...(draft.execution.useDefaults ? { useDefaults: true } : {}),
         providerID: draft.execution.providerID,
         modelID: draft.execution.modelID,
@@ -1294,6 +1298,21 @@ export function ScheduledTaskEditorDialog(props: {
               </Button>
             </div>
           ) : null}
+        </SettingsStackedField>
+      ) : null}
+      {draft.sessionMode === 'new' ? (
+        <SettingsStackedField label={t('sessions.scheduledTasks.editor.notify.label')}>
+          <Select<ScheduledTask['execution']['notify']> value={draft.execution.notify} onValueChange={(notify) => setDraft((prev) => ({
+            ...prev, execution: { ...prev.execution, notify },
+          }))}>
+            <SelectTrigger aria-label={t('sessions.scheduledTasks.editor.notify.label')}>
+              <SelectValue>{draft.execution.notify === 'attention' ? t('sessions.scheduledTasks.editor.notify.attention') : t('sessions.scheduledTasks.editor.notify.finish')}</SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="finish">{t('sessions.scheduledTasks.editor.notify.finish')}</SelectItem>
+              <SelectItem value="attention">{t('sessions.scheduledTasks.editor.notify.attention')}</SelectItem>
+            </SelectContent>
+          </Select>
         </SettingsStackedField>
       ) : null}
                 <div className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2">

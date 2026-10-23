@@ -1,9 +1,10 @@
 import { afterAll, afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import React, { act } from 'react';
+import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { DesktopSettings } from '@/lib/desktop';
 import { createProjectIdFromPath } from '@/lib/projectId';
 import { installSuggestedTasksDom, serveSuggestedTasks, settings } from '@/lib/test-utils/suggestedTasks.fixture';
+import type { MobileAppActions } from '@/apps/mobileAppContext';
 
 // Base UI captures browser availability on import, so install the DOM before loading the real controls.
 const dom = installSuggestedTasksDom();
@@ -19,6 +20,8 @@ const { useProjectsStore } = await import('@/stores/useProjectsStore');
 const { SyncProvider } = await import('@/sync/sync-context');
 const { OpenCode } = await import('@opencode/client');
 const { ScheduledTasksView } = await import('./ScheduledTasksDialog');
+const { DedicatedMobileAppProvider } = await import('@/apps/mobileAppContext');
+const { useUIStore } = await import('@/stores/useUIStore');
 
 // The page mounts the scheduled task editor, which reads live sessions.
 const sdk = OpenCode.make({
@@ -43,21 +46,31 @@ const plainTask = {
   execution: { prompt: 'Summarize yesterday.', useDefaults: true },
   state: { createdAt: 1, updatedAt: 1, lastSessionId: 'ses_digest', lastRunAt: 1, lastStatus: 'success' },
 };
+const botTask = { ...plainTask, id: 'bot-scheduler-row', name: 'Parser maintenance', botManaged: true, botId: 'bot-parser' };
 
 let server: Awaited<ReturnType<typeof serveSuggestedTasks>>;
 let root: Root;
 const requests: string[] = [];
 const initialProjects = useProjectsStore.getState();
+let mobileBotOpens = 0;
+const mobileActions: MobileAppActions = {
+  openBots: () => { mobileBotOpens += 1; }, openChanges: () => {}, openFiles: () => {}, openSettings: () => {},
+  openSourceBoard: () => {}, openSettingsPage: () => {}, openUpdate: () => {}, openScheduledTasks: () => {},
+};
 
 beforeEach(async () => {
   root = createRoot(document.body.appendChild(document.createElement('div')));
   requests.length = 0;
+  mobileBotOpens = 0;
+  useUIStore.getState().closeMainSurfaces();
+  useUIStore.getState().setScheduledTasksDialogOpen(true);
   useProjectsStore.getState().synchronizeFromSettings(settingsDocument, { adoptActiveProject: true });
   server = await serveSuggestedTasks((request) => {
     const path = new URL(request.url).pathname;
     requests.push(`${request.method} ${path}`);
-    if (path.endsWith('/scheduled-tasks') && request.method === 'GET') return Response.json({ tasks: [plainTask, scanTask] });
+    if (path.endsWith('/scheduled-tasks') && request.method === 'GET') return Response.json({ tasks: [plainTask, scanTask, botTask] });
     if (path.endsWith('/scheduled-tasks/suggested-tasks-scan/run')) return Response.json({ ok: true, sessionId: 'ses_lens', directory: project.path });
+    if (path.endsWith('/scheduled-tasks/bot-scheduler-row/run')) return Response.json({ ok: true, sessionId: 'ses_bot', directory: project.path });
     if (path.endsWith('/suggested-tasks/settings')) return Response.json(settings());
     if (path === '/api/git/projects') return Response.json({ projects: [{ directory: project.path, isGitRepository: true }] });
     return Response.json({});
@@ -67,6 +80,7 @@ afterEach(async () => {
   await act(async () => root.unmount());
   await server.stop(true);
   useProjectsStore.setState({ projects: initialProjects.projects, activeProjectId: initialProjects.activeProjectId });
+  useUIStore.getState().closeMainSurfaces();
   document.body.replaceChildren();
 });
 afterAll(async () => { await bootstrapServer.stop(true); await dom.restore(); });
@@ -83,10 +97,11 @@ const button = (scope: ParentNode, label: string) => {
   if (!found) throw new Error(`Missing button: ${label}`);
   return found;
 };
-const renderPage = async (onLeave: (reason: string) => void = () => undefined) => {
+const renderPage = async (onLeave: (reason: string) => void = () => undefined, layout: 'page' | 'mobile' = 'page') => {
+  const content = <ScheduledTasksView layout={layout} onLeave={onLeave} />;
   await act(async () => root.render(
     <SyncProvider sdk={sdk} directory="">
-      <ThemeSystemProvider><I18nProvider><ScheduledTasksView layout="page" onLeave={onLeave} /></I18nProvider></ThemeSystemProvider>
+      <ThemeSystemProvider><I18nProvider>{layout === 'mobile' ? <DedicatedMobileAppProvider actions={mobileActions}>{content}</DedicatedMobileAppProvider> : content}</I18nProvider></ThemeSystemProvider>
     </SyncProvider>,
   ));
   for (let attempt = 0; attempt < 50 && !document.body.textContent?.includes('Daily digest'); attempt += 1) {
@@ -141,4 +156,51 @@ describe('Scheduled tasks page: the Suggested tasks scan', () => {
     expect(requests).toContain(`POST ${projectRoute}/scheduled-tasks/suggested-tasks-scan/run`);
     expect(left).toEqual([]);
   });
+});
+
+describe('bot-managed scheduled tasks', () => {
+  for (const layout of ['page', 'mobile'] as const) {
+    test(`opens the exact bot definition from ${layout} without admitting a scheduled-task edit`, async () => {
+      // Given the server names a bot-owned row with a last session.
+      const left: string[] = [];
+      await renderPage((reason) => left.push(reason), layout);
+      const managed = card(botTask.name);
+      expect(buttonsOf(managed)).toEqual(['Run now', 'Edit']);
+      expect(managed.querySelector('[role="checkbox"], input[type="checkbox"]')).toBeNull();
+      expect(managed.textContent).toContain('Managed by bot');
+
+      // When Edit is pressed.
+      await act(async () => button(managed, 'Edit').click());
+
+      // Then the shell opens that definition and never opens the task editor or a session.
+      expect(useUIStore.getState().botsPageTarget).toEqual({ projectId: project.id, botId: botTask.botId });
+      expect(useUIStore.getState().isBotsPageOpen).toBe(layout === 'page');
+      expect(mobileBotOpens).toBe(layout === 'mobile' ? 1 : 0);
+      expect(document.querySelector('[role="dialog"]')).toBeNull();
+      expect(requests.some((request) => request.startsWith('PUT ') || request.startsWith('DELETE '))).toBe(false);
+      expect(left).toEqual([]);
+    });
+
+    test(`keeps Run now on ${layout} without navigating its bot session`, async () => {
+      // Given a bot row whose run endpoint returns a stage session.
+      const left: string[] = [];
+      await renderPage((reason) => left.push(reason), layout);
+      const run = button(card(botTask.name), 'Run now');
+
+      // When the scheduled bot runs and the action settles.
+      await act(async () => run.click());
+      await new Promise<void>((resolve, reject) => {
+        const observer = new MutationObserver(() => { if (!run.disabled) { clearTimeout(deadline); observer.disconnect(); resolve(); } });
+        const deadline = setTimeout(() => { observer.disconnect(); reject(new Error('Run now did not settle')); }, 3000);
+        observer.observe(run, { attributes: true });
+        if (!run.disabled) { clearTimeout(deadline); observer.disconnect(); resolve(); }
+      });
+
+      // Then the real scheduler route was used and stage-session navigation stays with Bots.
+      expect(requests).toContain(`POST ${projectRoute}/scheduled-tasks/${botTask.id}/run`);
+      expect(left).toEqual([]);
+      expect(useUIStore.getState().isBotsPageOpen).toBe(false);
+      expect(mobileBotOpens).toBe(0);
+    });
+  }
 });
