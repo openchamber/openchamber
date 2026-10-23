@@ -5,6 +5,9 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { useSessionDraftsStore, type SessionDraft } from '@/stores/useSessionDraftsStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
+import { clearChatDraft, createChatDraftIdentity, workDraftComposerKey } from '@/lib/chatDraftPersistence';
+import { getRuntimeKey } from '@/lib/runtime-switch';
 import { sessionTreeRowPaddingLeft } from '../sessions/sessionTreeGeometry';
 import { openSessionDraft } from './openSessionDraft';
 
@@ -17,18 +20,24 @@ type Props = {
 };
 
 /**
- * A new session's draft the user left before sending: a pen in the slot, the
- * start of what they typed, and a cross that throws it away. A click opens it
- * in the composer, where it goes on as the same draft.
+ * A new session's draft not sent yet: a pen in the slot, the start of what
+ * was typed, and a cross that throws it away. A click opens it in the
+ * composer, where it goes on as the same draft; while it is there its row is
+ * the selected one. Sending turns it into the session's row.
  */
 export function SessionDraftRow({ draft, depth, alwaysShowActions, mobileVariant, setSessionSwitcherOpen }: Props): React.ReactNode {
   const { t } = useI18n();
+  // The draft in the composer right now: its row is the selected one.
+  const isOpen = useSessionUIStore((state) => (
+    !state.currentSessionId && state.newSessionDraft.open && state.newSessionDraft.workDraftId === draft.id
+  ));
   const firstLine = draft.text.split(/\r?\n/).find((line) => line.trim())?.trim() ?? '';
   const attachmentCount = draft.attachments.length;
   const label = firstLine || (attachmentCount === 1
     ? t('sessions.sidebar.draft.attachmentsSingle', { count: attachmentCount })
     : t('sessions.sidebar.draft.attachmentsPlural', { count: attachmentCount }));
   const open = (): void => {
+    if (isOpen) return;
     if (mobileVariant) setSessionSwitcherOpen(false);
     void openSessionDraft(draft).then((complete) => {
       if (!complete) toast.error(t('sessions.sidebar.draft.attachmentsMissing'));
@@ -37,12 +46,21 @@ export function SessionDraftRow({ draft, depth, alwaysShowActions, mobileVariant
   const discard = (event: React.MouseEvent): void => {
     event.stopPropagation();
     void useSessionDraftsStore.getState().discard(draft.id, { final: true }).catch(() => toast.error(t('sessions.sidebar.draft.discardFailed')));
+    if (!isOpen) return;
+    // Thrown away while in the composer: its text goes too, and the composer
+    // starts a fresh draft in the same place.
+    const identity = createChatDraftIdentity(getRuntimeKey(), draft.directory, workDraftComposerKey(draft.id));
+    if (identity) clearChatDraft(identity);
+    useSessionUIStore.getState().openNewSessionDraft({ selectedProjectId: draft.projectId ?? undefined, directoryOverride: draft.directory });
   };
 
   return (
     <div
       style={{ paddingInlineStart: sessionTreeRowPaddingLeft(depth) }}
-      className="group/draft relative my-0.5 flex cursor-pointer items-center gap-1.5 rounded-md py-1.5 pe-2.5 hover:bg-interactive-hover/60"
+      className={cn(
+        'group/draft relative my-0.5 flex cursor-pointer items-center gap-1.5 rounded-md py-1.5 pe-2.5',
+        isOpen ? 'bg-interactive-selection/70 text-interactive-selection-foreground' : 'hover:bg-interactive-hover/60',
+      )}
     >
       <span className="inline-flex size-3.5 flex-shrink-0 items-center justify-center text-muted-foreground/70">
         <Icon name="edit" className="h-3 w-3" />
@@ -65,7 +83,8 @@ export function SessionDraftRow({ draft, depth, alwaysShowActions, mobileVariant
         <span
           dir="auto"
           className={cn(
-            'oc-ui-start-align min-w-0 flex-1 truncate typography-ui-label italic text-muted-foreground',
+            'oc-ui-start-align min-w-0 flex-1 truncate typography-ui-label italic',
+            isOpen ? 'text-interactive-selection-foreground' : 'text-muted-foreground',
             !alwaysShowActions && 'group-hover/draft:oc-actions-mask group-has-[:focus-visible]/draft:oc-actions-mask',
           )}
         >

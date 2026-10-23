@@ -2,6 +2,7 @@ import { DirectoryActionIndicator } from './DirectoryActionIndicator';
 import { useSessionTurnActivity } from '@/sync/global-session-status';
 import { getSessionActivityTime } from '@/sync/session-ordering';
 import React from 'react';
+import { leaveFinishedSessions } from '@/lib/sessionTabs';
 import { SessionActivityIndicator } from '@/components/session/SessionActivityIndicator';
 import type { Session } from '@/lib/opencode/model';
 import { ContextMenu } from '@base-ui/react/context-menu';
@@ -639,6 +640,8 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
       for (const entry of workSessionsInWork) {
         await setSessionWorkState(entry.id, normalizePath(entry.directory ?? null) ?? sessionDirectory, 'done');
       }
+      // Done work leaves the working set, as Mark done in the composer does.
+      leaveFinishedSessions(workSessionsInWork.map((entry) => entry.id));
     } catch (error) {
       toastSessionWorkFailure(
         error instanceof SessionDirectoryMissingError,

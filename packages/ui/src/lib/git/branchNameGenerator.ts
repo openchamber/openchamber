@@ -39,3 +39,14 @@ export function generateBranchName(prefix?: string): string {
   }
   return slug;
 }
+
+const GENERATED_NAME = new RegExp(`^(?:${ADJECTIVES.join('|')})-(?:${NOUNS.join('|')})(?:-[a-z0-9]{4})?$`);
+
+/**
+ * Whether `name` is one this generator makes (`cosmic-dolphin`, with the
+ * dialog's `-x1y2` suffix when the plain pair was taken), so the server can
+ * record that nobody chose it and the agent may rename it after the task.
+ */
+export function isGeneratedBranchName(name: string): boolean {
+  return GENERATED_NAME.test(name.trim());
+}

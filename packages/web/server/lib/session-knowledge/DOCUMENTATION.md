@@ -102,6 +102,18 @@ session's own `location.directory` through `client.session.get` before syncing;
 an unavailable location skips sync and preserves its entries. Without the tool
 the checkout entry is removed.
 
+While that branch still has the placeholder name OpenChamber generated (Quick
+worktree's `agile-chipmunk`) and was never pushed (`readPlaceholderBranch`,
+which is `readRenameableGeneratedBranch` in `../git`), the entry adds an
+instruction: when the agent names the task with `work.name`, it renames the
+branch after it with `git branch -m`, in the repository's own naming or else
+`<type>/<short-kebab-case>`, with no tool prefix. Said only in the `work.name`
+answer, the first agent to hear it read it and went on. A rename changes the
+entry, so OpenCode tells the agent about the new branch and the instruction
+leaves with it. A failed placeholder check tells only the branch. The server
+does not rename the branch itself: the agent picks a name that fits the
+repository, which a slug of the task title would not.
+
 What the agent can do about a busy checkout, moving into a worktree, is
 introduced in the tool's own description (`../agent-tool/DOCUMENTATION.md`),
 never stated here as a rule. Whether a busy checkout calls for a worktree

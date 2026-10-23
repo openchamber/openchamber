@@ -1022,6 +1022,8 @@ export interface CreateGitWorktreePayload {
    * as the agent's, so the agent can replace it with a short name.
    */
   taskTitle?: string;
+  /** Set to the branch name when OpenChamber generated it, so the agent may later rename it after the task. */
+  generatedBranchName?: string;
 }
 
 export interface GitChangeRequestSourceRequest {

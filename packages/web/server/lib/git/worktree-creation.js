@@ -168,7 +168,7 @@ export const createWorktreeCreation = ({
 
   /** Creates a worktree; with `input.changeRequestSource`, from that change request's head. */
   const create = async (directory, requestInput) => {
-    const { createWorktree, seedBranchTaskTitle, validateWorktreeCreate } = await getGitLibraries();
+    const { createWorktree, markGeneratedBranchName, seedBranchTaskTitle, validateWorktreeCreate } = await getGitLibraries();
     if (!(createWorktree instanceof Function) || !(validateWorktreeCreate instanceof Function)) {
       throw new WorktreeCreationError('Worktree creation is not available', 501);
     }
@@ -213,6 +213,12 @@ export const createWorktreeCreation = ({
       const taskTitle = asNonEmptyString(requestInput?.taskTitle);
       if (taskTitle && seedBranchTaskTitle instanceof Function) {
         await seedBranchTaskTitle(directory, result?.branch, taskTitle);
+      }
+      // The client says when it generated the branch's name; the agent may
+      // then rename it after the task (`readRenameableGeneratedBranch`).
+      const generatedName = asNonEmptyString(requestInput?.generatedBranchName);
+      if (generatedName && generatedName === result?.branch && markGeneratedBranchName instanceof Function) {
+        await markGeneratedBranchName(directory, generatedName);
       }
       return result;
     } catch (error) {

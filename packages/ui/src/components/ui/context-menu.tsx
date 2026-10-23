@@ -6,7 +6,9 @@ import {
   dropdownMenuItemClass,
   dropdownMenuPopupClass,
   dropdownMenuSeparatorClass,
+  dropdownMenuSubTriggerClass,
 } from "./dropdown-menu.styles";
+import { Icon } from "@/components/icon/Icon";
 import { GlassRedrawGuard } from "./glass-redraw-guard"
 import { handleDropdownNavigationKey } from "./dropdown-navigation";
 import { useMenuWindowDismiss } from "./menu-window-dismiss";
@@ -83,8 +85,43 @@ function ContextMenuSeparator({ className, ...props }: React.ComponentProps<type
   return <BaseContextMenu.Separator className={cn(dropdownMenuSeparatorClass, className)} {...props} />;
 }
 
+const ContextMenuSub = BaseContextMenu.SubmenuRoot;
+
+function ContextMenuSubTrigger({ className, children, ...props }: React.ComponentProps<typeof BaseContextMenu.SubmenuTrigger>) {
+  return (
+    <BaseContextMenu.SubmenuTrigger className={cn(dropdownMenuSubTriggerClass, className)} {...props}>
+      {children}
+      <Icon name="arrow-right-s" className="ms-auto size-3.5" />
+    </BaseContextMenu.SubmenuTrigger>
+  );
+}
+
+function ContextMenuSubContent({ className, children, style, ...props }: React.ComponentProps<typeof BaseContextMenu.Popup>) {
+  return (
+    <BaseContextMenu.Portal>
+      <BaseContextMenu.Positioner className="app-region-no-drag z-50">
+        <BaseContextMenu.Popup
+          data-slot="dropdown-menu-sub-content"
+          style={{
+            color: "var(--surface-elevated-foreground)",
+            ...style,
+          }}
+          className={cn(dropdownMenuPopupClass, className)}
+          {...props}
+        >
+          {children}
+          <GlassRedrawGuard />
+        </BaseContextMenu.Popup>
+      </BaseContextMenu.Positioner>
+    </BaseContextMenu.Portal>
+  );
+}
+
 export {
   ContextMenu,
+  ContextMenuSub,
+  ContextMenuSubTrigger,
+  ContextMenuSubContent,
   ContextMenuTrigger,
   ContextMenuContent,
   ContextMenuItem,

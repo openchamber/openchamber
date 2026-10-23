@@ -262,16 +262,20 @@ nested session as a root of its own.
 
 A worktree's group header is its work row (`works/WorktreeWorkRow.tsx`); spaces,
 the project root and archived buckets keep `SessionGroupSection`. The row
-reads like a session row, its title where session titles start: the
-worktree mark in the slot, tinted by the branch's PR (the chevron replaces it
-while the row is hovered or focused, when there is something to open; touch
-layouts keep the chevron), then the task title (the branch description,
+reads like a session row, its title where session titles start: the live
+state of its sessions in the slot (running, news, a waiting request), or
+while there is none the worktree mark tinted by the branch's PR; the chevron
+replaces either while the row is hovered or focused, when there is something
+to open (touch layouts keep the chevron and show the state at the end). The
+title carries the state as a session's does (semibold for news or a waiting
+request, full strength while running, muted otherwise), and the end shows the
+running turn's duration, or the last turn's until it is read. The title is
+the task title (the branch description,
 `WorktreeMetadata.title`; a worktree made for a pull request or an issue
 starts with that item's title, the agent's until replaced), until it has one
 the title of the session a click
 opens, and only for a worktree without sessions the branch; the tooltip
-always names the branch. The live state of its sessions sits at the end,
-with the PR or the issue its sessions follow as a tinted mark without its
+always names the branch. At the end sits the PR or the issue its sessions follow as a tinted mark without its
 number (one line has no room for it; the mark's tooltip names it and a click
 opens it). It shows no date and no session
 count, like the rows around it: the room goes to the title. Every icon before a one-line title
@@ -281,11 +285,24 @@ session that is not a review or a fork, else the latest of any kind, else a
 draft in the worktree (`works/workActions.ts`). Its hover actions are Track /
 Done, New chat and a menu with Rename task, Move to folder and Delete
 worktree. The row is highlighted while folded if the open session or draft is
-inside it. A root session row is in work when it or any nested non-subagent
+inside it, and also unfolded while the open draft there has no row yet (a
+worktree just made), so the selection always shows. A worktree work starts folded, unlike a group: its open state is
+`workExpansion` in `useSessionProjectViewState` (stored as
+`oc.sessions.workExpand`: what Expand all / Collapse all last set, plus the
+works toggled since), which the collection folds into the row model's
+collapsed groups. A root session row is in work when it or any nested non-subagent
 session is, and Done marks all of those done.
 
-Done on a worktree work marks every session in it done, then runs the
-Overview's clean up (`removeOverviewWorktree`): with nothing to lose it
+Work that is done or removed leaves the working set on every path (Done on a
+session row or a worktree row, Mark done in the composer, removing a
+worktree): `leaveFinishedSessions` in `lib/sessionTabs.ts` closes those
+sessions' header tabs and, when the open session is one of them, moves to the
+neighbouring tab still at work, or with none to a new draft in the project;
+without tabs only that move applies.
+
+Done on a worktree work marks every session in it done, leaves it (its tabs
+close and the app moves off it, a draft in its folder included, so the work
+on screen does not keep the worktree), then runs the Overview's clean up (`removeOverviewWorktree`): with nothing to lose it
 archives the sessions and removes the worktree and its local branch; with a
 session still running it keeps the worktree and says so; otherwise it opens
 the worktree delete dialog, which shows what removing it would lose. The work
@@ -357,8 +374,12 @@ display menu's In work toggle (`showWorkSection`, `sidebarShowWorkSection`,
 per surface, on by default) shows it. A session work is in work when its root
 or a nested non-subagent session is (`metadata.openchamber.work.state ===
 'open'`, see `packages/web/server/lib/session-work/DOCUMENTATION.md`); a
-worktree work when any root session in it is. A subagent's own state never
-counts. `list/SessionProjectCollection.tsx` orders the works by the first of
+worktree work when any root session in it is, or, while it has no session
+yet, when a draft is begun in it (open in the composer or kept as a row): the
+user just made it for a task, so it opens the block. A worktree this client
+is removing keeps its place in the block until git is done
+(`useRemovingWorktreePaths`), though its sessions are archived first. A subagent's own state
+never counts. `list/SessionProjectCollection.tsx` orders the works by the first of
 their sessions in the shared lifecycle order (`works/sidebarWorks.ts`) and
 passes `workEntries` to the row model. A work In work lists leaves its project
 or folder (`movedSessionIds`, `movedGroupKeys`) unless "Also show in work
@@ -400,8 +421,9 @@ re-render the row.
 
 ## Drafts
 
-A new session's draft the user left before sending is a row where its session
-would go: at the top of the project root's list (and of the list by time), or
+A new session's draft not sent yet is a row where its session would go,
+from its first save (a draft with nothing typed is not stored and has no
+row): at the top of the project root's list (and of the list by time), or
 at the end of its worktree's list. The server keeps the drafts for every
 client (`web/server/lib/session-drafts/DOCUMENTATION.md`); `useSessionDraftsStore`
 reads them and reads again on `session-drafts-changed`. Every opened project
@@ -409,10 +431,12 @@ draft has its own `workDraftId`, and the composer keys its text by
 `draft:<id>` (`workDraftComposerKey`), so two drafts in one folder never share
 text; `useSessionDraftPublishing` mirrors the open draft, attachments
 included, a moment after typing stops and at once when the composer leaves
-it. The draft on screen is not a row. A draft the user empties is discarded
+it. The draft in the composer keeps its row, selected, until it is sent (the
+session's row takes its place) or thrown away. A draft the user empties is discarded
 (a reopened draft showing empty before its text is restored is not), sending
 discards it for good (`sendMessage`, `discard` with `final`, which also drops
-a save still on its way), and the row's cross discards it without asking. A
+a save still on its way), and the row's cross discards it without asking; on the open draft it also
+clears the composer, which starts a fresh draft in the same place. A
 project draft switched to a new Chat takes its text along, and its row goes.
 Opening a row (`works/openSessionDraft.ts`) opens the draft at once with its
 text and server files through `pendingComposerRestore`; attachments stored on
@@ -432,7 +456,8 @@ A folder of the project root can hold whole worktrees: the member id is
 the folder store and the server file it with the same assign and unassign
 changes as a session. A filed worktree renders inside its folder, one level
 deeper, and nowhere else under the project; filed into a folder that is gone,
-it stays under the project. The work row's menu files it (Move to folder);
+it stays under the project. The work row's menu (the "⋯" button and a right-click on the row show the
+same items) files it (Move to folder);
 dragging a worktree onto a folder is not offered.
 
 ## Locations and detailed rows

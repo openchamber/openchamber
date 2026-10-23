@@ -40,6 +40,8 @@ import {
   getWorktrees,
   setWorktreeTaskTitle,
   seedBranchTaskTitle,
+  markGeneratedBranchName,
+  readRenameableGeneratedBranch,
   isGitRepository,
   isPatchEquivalentOfHead,
   observeWorktreeTopology,
@@ -1673,9 +1675,15 @@ describe('getWorktrees', () => {
       await observeWorktreeTopology(repo);
       expect(events).toHaveLength(1);
 
-      runGit(repo, ['worktree', 'remove', worktreePath]);
+      // Renaming the checked-out branch from a terminal (as an agent does
+      // for a generated name) shows up too.
+      runGit(worktreePath, ['branch', '-m', 'feature', 'fix/login-timeout']);
       await observeWorktreeTopology(repo);
       expect(events).toHaveLength(2);
+
+      runGit(repo, ['worktree', 'remove', worktreePath]);
+      await observeWorktreeTopology(repo);
+      expect(events).toHaveLength(3);
     } finally {
       unsubscribe();
     }
@@ -6328,6 +6336,25 @@ describe('worktree task titles', () => {
     await setWorktreeTaskTitle(linked, { title: 'Mine', by: 'user' });
     await seedBranchTaskTitle(repo, 'feature/task', 'Another issue title');
     expect(await setWorktreeTaskTitle(linked, { title: 'Agent', by: 'agent' })).toMatchObject({ applied: false, title: 'Mine' });
+  });
+
+  it('offers a generated, unpushed branch for renaming, and stops once it is renamed or pushed', async () => {
+    const { repo, linked } = createLinkedWorktree();
+    expect(await readRenameableGeneratedBranch(linked)).toBeNull();
+
+    await markGeneratedBranchName(repo, 'feature/task');
+    expect(await readRenameableGeneratedBranch(linked)).toBe('feature/task');
+    expect(await readRenameableGeneratedBranch(linked, 'feature/task')).toBe('feature/task');
+
+    // The record travels with the branch but names the old name.
+    runGit(linked, ['branch', '-m', 'feature/task', 'fix/login-timeout']);
+    expect(await readRenameableGeneratedBranch(linked)).toBeNull();
+
+    // A branch with an upstream is followed by a remote: not offered.
+    runGit(linked, ['branch', '-m', 'fix/login-timeout', 'feature/task']);
+    expect(await readRenameableGeneratedBranch(linked)).toBe('feature/task');
+    runGit(repo, ['config', 'branch.feature/task.remote', 'origin']);
+    expect(await readRenameableGeneratedBranch(linked)).toBeNull();
   });
 
   it('refuses a detached worktree, which has no branch to hold a title', async () => {

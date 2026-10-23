@@ -43,11 +43,24 @@ const truncate = (value) => (
  * and the agent would go on editing that session's work. The directory is
  * named too, so a session moved to another worktree reads as a move.
  */
-const describeCheckout = ({ directory, branch }) => (
-  branch
-    ? `This session works in \`${directory}\`, on branch \`${branch}\`.`
-    : `This session works in \`${directory}\`, with no branch checked out.`
-);
+const describeCheckout = ({ directory, branch, placeholder = false }) => {
+  if (!branch) return `This session works in \`${directory}\`, with no branch checked out.`;
+  const where = `This session works in \`${directory}\`, on branch \`${branch}\`.`;
+  return placeholder ? `${where} ${placeholderBranchGuidance(branch)}` : where;
+};
+
+/**
+ * A branch OpenChamber named with a placeholder (Quick worktree's
+ * `agile-chipmunk`) and never pushed is renamed after the task by the agent,
+ * at the moment it names the task. Said here, with the branch, and only while
+ * it holds: once renamed, the entry changes and OpenCode tells the agent so.
+ * Left to the `work.name` answer alone, the agent read it and went on.
+ */
+const placeholderBranchGuidance = (branch) => `Its name is a placeholder OpenChamber generated, not one the user chose,`
+  + ` and it is not pushed yet. When you name the task with work.name, rename the branch after the task in the same step:`
+  + ` \`git branch -m ${branch} <new-name>\`, following the naming the repository's other branches use (\`git branch -a\`);`
+  + ' with none, `<type>/<short-kebab-case>` with the conventional commit types, such as `fix/login-timeout`.'
+  + ' No tool or app prefix.';
 
 const renderMemorySection = (entries) => entries
   .slice()
@@ -198,6 +211,9 @@ export const createSessionKnowledgeRuntime = (dependencies) => {
     // The checked-out branch, or '' when none is checked out. Failures throw;
     // read only while the agent has the tool.
     readCheckoutBranch = null,
+    // `(directory, branch)`: that checked-out branch while its name is
+    // OpenChamber's placeholder and it was never pushed, else null.
+    readPlaceholderBranch = null,
     // Whether this session's agent has the `openchamber_render` tool.
     isPageRenderingAvailable = async () => false,
     // Pins live in OpenChamber's own session metadata store.
@@ -291,7 +307,10 @@ export const createSessionKnowledgeRuntime = (dependencies) => {
     const branch = linking && directory && readCheckoutBranch
       ? await Promise.resolve(readCheckoutBranch(directory)).catch(() => null)
       : null;
-    const checkout = branch !== null ? { directory, branch } : null;
+    const placeholder = Boolean(branch) && readPlaceholderBranch
+      ? await Promise.resolve(readPlaceholderBranch(directory, branch)).then((name) => name === branch, () => false)
+      : false;
+    const checkout = branch !== null ? { directory, branch, placeholder } : null;
 
     const rendering = await Promise.resolve(isPageRenderingAvailable()).catch(() => false);
 

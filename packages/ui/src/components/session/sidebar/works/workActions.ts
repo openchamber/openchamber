@@ -4,8 +4,24 @@ import { isSessionInWork } from '@/lib/sessionWorkMetadata';
 import { markOverviewSessionsDone, removeOverviewWorktree } from '@/components/overview/overviewActions';
 import { resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
 import { setSessionWorkState } from '@/sync/session-actions';
+import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { leaveFinishedSessions } from '@/lib/sessionTabs';
+import { isPathWithinProject } from '../utils';
 import type { WorktreeMetadata } from '@/types/worktree';
 import type { SessionNode } from '../types';
+
+/**
+ * Leave a worktree's work: close its sessions' tabs, and move off it when it
+ * is on screen, as a session or as a draft in its folder.
+ */
+const leaveWorktree = (sessions: readonly Session[], worktreePath: string, projectId: string): void => {
+  leaveFinishedSessions(sessions.map((session) => session.id), { projectId });
+  const state = useSessionUIStore.getState();
+  if (state.currentSessionId) return;
+  const directory = state.newSessionDraft.open ? state.newSessionDraft.directoryOverride : useDirectoryStore.getState().currentDirectory;
+  if (isPathWithinProject(directory, worktreePath)) state.openNewSessionDraft({ selectedProjectId: projectId });
+};
 
 /** Every session of a work's trees, parents before their children. */
 export const collectWorkSessions = (nodes: readonly SessionNode[]): Session[] => {
@@ -68,6 +84,10 @@ export async function finishWorktreeWork(input: {
   if (failed.length > 0) {
     return { kind: 'failed', error: new Error(`Could not mark ${failed.length} session(s) done`), doneFailed: failed.length };
   }
+  // Done work leaves the working set, as Mark done in the composer does: its
+  // tabs close and the app moves off it, which also frees the worktree for
+  // the clean-up below (it never removes one that is on screen).
+  leaveWorktree(input.sessions, input.worktree.path, input.project.id);
   const outcome = await removeOverviewWorktree({
     target: { worktree: input.worktree, project: input.project, mergedHeadSha: null },
     agreed: { uncommittedFiles: 0, unpushed: false },

@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { collectSessionSubtreeIds, runSessionSubtreeAction } from '@/components/session/sidebar/sessions/sessionSubtreeActions';
 import { toastSessionWorkFailure } from '@/components/session/sidebar/sessions/sessionWorkFailure';
 import { useI18n } from '@/lib/i18n';
-import { closeSessionTabAndActivateNeighbour } from '@/lib/sessionTabs';
+import { leaveFinishedSessions } from '@/lib/sessionTabs';
 import { isDoneSuggested } from '@/lib/sessionWorkMetadata';
 import { SessionDirectoryMissingError, setSessionWorkState } from '@/sync/session-actions';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -39,8 +39,8 @@ export const SessionDoneHintRow: React.FC<SessionDoneHintRowProps> = React.memo(
     try {
       await setSessionWorkState(sessionId, directory, 'done');
       // Done work leaves the working set: its header tab closes and the
-      // neighbouring tab takes over. No tab (mobile, VS Code), no change.
-      closeSessionTabAndActivateNeighbour(sessionId);
+      // neighbouring tab, or a new draft, takes over.
+      leaveFinishedSessions([sessionId]);
     } catch (error) {
       // Archive the way the sidebar does: the session and its subagents.
       const archive = () => {

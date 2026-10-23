@@ -18,6 +18,7 @@ import type { Session } from '@/lib/opencode/model';
 import type { WorktreeMetadata } from '@/types/worktree';
 import { canDeleteWorktreeWithoutConfirm, getWorktreeStatus } from '@/lib/worktrees/worktreeStatus';
 import { getWorktreeDisplayName, removeProjectWorktree } from '@/lib/worktrees/worktreeManager';
+import { leaveFinishedSessions } from '@/lib/sessionTabs';
 import { checkoutHoldsDirectory } from '@/lib/worktrees/worktreePaths';
 import { archiveSessionsThenRemoveWorktree } from '@/lib/worktrees/worktreeRemovalFlow';
 import { clearWorktreeRemoval, markWorktreeRemoving } from '@/lib/worktrees/worktreeRemovalState';
@@ -400,6 +401,9 @@ export const SessionDialogs: React.FC = () => {
                     },
                 });
                 if (!result.removed) return;
+                // The removed work leaves the working set: its sessions' tabs
+                // close and the app moves off them, as Done does.
+                leaveFinishedSessions(sessionIds, { projectId: getProjectRefForWorktree(worktree).id });
 
                 const removalNote = shouldRemoveRemote
                     ? t('sessions.sidebar.sessionDialogs.worktree.removedWithRemote')
@@ -426,7 +430,7 @@ export const SessionDialogs: React.FC = () => {
                 clearWorktreeRemoval(worktree.path);
             }
         })();
-    }, [archiveSession, archiveSessions, canRemoveRemoteBranches, deleteDialogShouldRemoveRemote, removeSelectedWorktree, t, unarchiveSessions]);
+    }, [archiveSession, archiveSessions, canRemoveRemoteBranches, deleteDialogShouldRemoveRemote, getProjectRefForWorktree, removeSelectedWorktree, t, unarchiveSessions]);
 
     // Paths whose quick delete is being checked or removed, so a repeated
     // Shift+click cannot remove the same worktree twice.

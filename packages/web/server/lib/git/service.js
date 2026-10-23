@@ -5056,6 +5056,46 @@ const applyBranchTaskTitle = async (directory, branch, by, title) => {
  * short name once it knows the task, and the user's own name still wins.
  * Best effort: a failure leaves the worktree without a title.
  */
+/**
+ * Records that `branch` got a name OpenChamber generated (Quick worktree's
+ * `agile-chipmunk`), not one the user chose: `branch.<name>.openchamberGeneratedName`
+ * holds the generated name itself, so once the branch is renamed the record,
+ * which `git branch -m` carries along, no longer matches and stops applying.
+ * Best effort.
+ */
+export async function markGeneratedBranchName(directory, branch) {
+  const branchName = String(branch || '').trim();
+  const directoryPath = normalizeDirectoryPath(directory);
+  if (!branchName || !directoryPath) return;
+  await writeGitConfigValue(directoryPath, `branch.${branchName}.openchamberGeneratedName`, branchName).catch((error) => {
+    console.warn('Failed to mark a generated branch name:', error instanceof Error ? error.message : String(error));
+  });
+}
+
+/**
+ * The branch of the worktree at `directory` when renaming it is safe and
+ * wanted: OpenChamber generated its name, and it was never pushed (no
+ * upstream, no branch of that name on a remote), so no pull request or remote
+ * follows it. Null otherwise, or when that cannot be read.
+ */
+export async function readRenameableGeneratedBranch(directory, checkedOutBranch = null) {
+  const directoryPath = normalizeDirectoryPath(directory);
+  if (!directoryPath) return null;
+  // A caller that already read the branch saves a git run: most callers ask
+  // on every message, and most branches carry no record, so one read ends it.
+  let branch = String(checkedOutBranch || '').trim();
+  if (!branch) {
+    const head = await runGitCommand(directoryPath, ['symbolic-ref', '--quiet', '--short', 'HEAD']);
+    branch = head.success ? String(head.stdout || '').trim() : '';
+  }
+  if (!branch) return null;
+  if ((await readGitConfigValue(directoryPath, `branch.${branch}.openchamberGeneratedName`)).trim() !== branch) return null;
+  if ((await readGitConfigValue(directoryPath, `branch.${branch}.remote`)).trim()) return null;
+  const remote = await runGitCommand(directoryPath, ['for-each-ref', '--format=%(refname)', `refs/remotes/*/${branch}`]);
+  if (!remote.success || String(remote.stdout || '').trim()) return null;
+  return branch;
+}
+
 export async function seedBranchTaskTitle(directory, branch, rawTitle) {
   const title = toTaskTitle(rawTitle);
   const branchName = String(branch || '').trim();
@@ -5129,8 +5169,9 @@ const resolveWorktreeRepositoryKey = async (directoryPath) => {
 
 /**
  * Cheap identity of the registered linked-worktree set: the `worktrees`
- * directory's mtime plus its entry names. Adding, removing, or pruning a
- * worktree changes at least one of them; `git worktree move` rewrites files
+ * directory's mtime, its entry names and each entry's HEAD. Adding, removing,
+ * or pruning a worktree changes at least one of them, and so does renaming or
+ * switching a checkout's branch; `git worktree move` rewrites other files
  * inside an entry and is not detected.
  */
 const readWorktreeTopologyFingerprint = (repositoryKey) => {
@@ -5138,7 +5179,17 @@ const readWorktreeTopologyFingerprint = (repositoryKey) => {
   try {
     const stat = fs.statSync(worktreesDir);
     const names = fs.readdirSync(worktreesDir).sort();
-    return `${stat.mtimeMs}:${names.join('\0')}`;
+    // Each checkout's HEAD names its branch, so renaming a checked-out branch
+    // (`git branch -m`, as an agent does for a generated name) changes the
+    // fingerprint too and the sidebar shows the new name.
+    const heads = names.map((name) => {
+      try {
+        return fs.readFileSync(path.join(worktreesDir, name, 'HEAD'), 'utf8').trim();
+      } catch {
+        return '';
+      }
+    });
+    return `${stat.mtimeMs}:${names.join('\0')}:${heads.join('\0')}`;
   } catch {
     return 'none';
   }

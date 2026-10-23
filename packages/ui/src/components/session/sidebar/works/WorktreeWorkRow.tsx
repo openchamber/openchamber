@@ -11,6 +11,16 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu';
 import { Spinner } from '@/components/ui/spinner';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { FileTreeChevron } from '@/components/views/files/FileTreeRowParts';
@@ -25,10 +35,16 @@ import { cn } from '@/lib/utils';
 import { useWorktreeRemoving } from '@/lib/worktrees/worktreeRemovalState';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
+import { useSessionDraftsStore } from '@/stores/useSessionDraftsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { DirectoryActionIndicator } from '../sessions/DirectoryActionIndicator';
-import { CollapsedSessionActivityIndicator } from '../sessions/collapsedActivityIndicator';
+import { CollapsedActivityIndicator } from '../sessions/collapsedActivityIndicator';
+import { useCollapsedSessionActivityState } from '../sessions/collapsedActivityState';
+import { SessionActivityDuration } from '@/components/session/SessionActivityDuration';
+import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
+import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
+import { isSessionUnread } from '@/sync/session-unread';
 import { SIDEBAR_REF_TOOLTIP_CLOSE_DELAY_MS, SidebarRefLinks } from '../sessions/SidebarRefLinks';
 import { RowMarkTooltip } from '../sessions/RowMarkTooltip';
 import { sessionTreeRowPaddingLeft } from '../sessions/sessionTreeGeometry';
@@ -40,6 +56,31 @@ import { collectWorkSessions, finishWorktreeWork, isWorkInWork, pickWorkSessionT
 import { worktreeFolderMemberId } from './sidebarWorks';
 
 const NO_FOLDERS: never[] = [];
+
+type WorkMenuSlots = {
+  Item: React.ComponentType<{ className?: string; onClick?: (event: React.MouseEvent) => void; children?: React.ReactNode }>;
+  Separator: React.ComponentType;
+  Sub: React.ComponentType<{ children?: React.ReactNode }>;
+  SubTrigger: React.ComponentType<{ children?: React.ReactNode }>;
+  SubContent: React.ComponentType<{ className?: string; children?: React.ReactNode }>;
+};
+
+const DROPDOWN_SLOTS: WorkMenuSlots = {
+  Item: DropdownMenuItem,
+  Separator: DropdownMenuSeparator,
+  Sub: DropdownMenuSub,
+  SubTrigger: DropdownMenuSubTrigger,
+  SubContent: DropdownMenuSubContent,
+};
+
+const CONTEXT_MENU_SLOTS: WorkMenuSlots = {
+  Item: ContextMenuItem,
+  Separator: ContextMenuSeparator,
+  Sub: ContextMenuSub,
+  SubTrigger: ContextMenuSubTrigger,
+  SubContent: ContextMenuSubContent,
+};
+const CURRENT_SESSION = '\u0000session';
 
 type Props = {
   group: SessionGroup;
@@ -101,12 +142,21 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
   const refs = useGroupRefs(group, sessions, true);
   const sessionWorkEnabled = useUIStore((state) => state.sessionWorkEnabled);
   const inWork = sessionWorkEnabled && isWorkInWork(sessions);
-  // The open session or draft is in this worktree: with the work folded,
-  // its row is where the user is.
-  const isCurrent = useSessionUIStore((state) => {
-    if (state.currentSessionId) return sessions.some((session) => session.id === state.currentSessionId);
-    return state.newSessionDraft.open && isPathWithinProject(state.newSessionDraft.directoryOverride, directory);
+  // Where the user is: the open session (`CURRENT_SESSION`) or the open
+  // draft (its id, '' before it has one) in this worktree; null elsewhere.
+  const current = useSessionUIStore((state): string | null => {
+    if (state.currentSessionId) return sessions.some((session) => session.id === state.currentSessionId) ? CURRENT_SESSION : null;
+    if (!state.newSessionDraft.open || !isPathWithinProject(state.newSessionDraft.directoryOverride, directory)) return null;
+    return state.newSessionDraft.workDraftId ?? '';
   });
+  // A draft with nothing in it yet has no row of its own.
+  const openDraftHasRow = useSessionDraftsStore((state) => (
+    Boolean(current) && current !== CURRENT_SESSION && state.drafts.some((draft) => draft.id === current)
+  ));
+  const isCurrent = current !== null;
+  // The work's row is selected while nothing under it shows the selection:
+  // folded, or on a draft that has no row yet (a worktree just made).
+  const selected = isCurrent && (collapsed || (current !== CURRENT_SESSION && !openDraftHasRow));
   // Folders of the project root can hold whole worktrees, filed by member id.
   const folderScopeKey = normalizePath(project?.path ?? null);
   const folderMemberId = worktreeFolderMemberId(directory);
@@ -216,15 +266,29 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
     sessionEvents.requestDelete({ sessions, mode: 'worktree', worktree, skipDialogIfSafe: shiftHeld || event.shiftKey === true });
   };
 
+  // Its sessions' live state, as a session row shows its own: in the slot,
+  // in place of the worktree mark, with the turn's duration at the end.
+  const activityState = useCollapsedSessionActivityState({ nodes: group.sessions });
+  const workSessionIds = React.useMemo(() => sessions.flatMap((session) => (session.parentID ? [] : [session.id])), [sessions]);
+  const runningSessionId = useGlobalSessionStatusStore(React.useCallback((state) => (
+    workSessionIds.find((id) => {
+      const status = state.statusById.get(id)?.status.type;
+      return status === 'busy' || status === 'retry';
+    }) ?? null
+  ), [workSessionIds]));
+  const unreadSessionId = useGlobalSessionsStore(React.useCallback((state) => (
+    workSessionIds.find((id) => isSessionUnread(state.entityById.get(id))) ?? null
+  ), [workSessionIds]));
+  const durationSessionId = runningSessionId ?? unreadSessionId;
   const stateMark = worktreeRemoving || finishing
     ? <Spinner className="h-3.5 w-3.5" />
-    : <CollapsedSessionActivityIndicator nodes={group.sessions} />;
-  // The slot holds the worktree mark, tinted by the branch's PR, so the title
-  // starts where session titles do; the chevron takes its place while the
-  // row is hovered or focused, when there is something to open. Touch
-  // layouts have no hover and keep the chevron. The live state sits at the
-  // end of the row.
-  const branchMark = (
+    : activityState ? <CollapsedActivityIndicator state={activityState} /> : null;
+  // The slot holds the live state while there is one, otherwise the worktree
+  // mark tinted by the branch's PR, so the title starts where session titles
+  // do; the chevron takes its place while the row is hovered or focused, when
+  // there is something to open. Touch layouts have no hover and keep the
+  // chevron.
+  const slotMark = stateMark ?? (
     <Icon
       name="git-branch"
       className={cn('h-3.5 w-3.5 flex-shrink-0', refs.prColor ? 'oc-ref-tint' : 'text-muted-foreground/70')}
@@ -260,8 +324,8 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
   ) : null;
   const slot = (
     <span className="relative inline-flex size-3.5 flex-shrink-0 items-center justify-center">
-      {alwaysShowActions ? chevron ?? branchMark : <>
-        <span className={cn('inline-flex items-center justify-center', expandable && 'transition-opacity group-hover/work:opacity-0 group-has-[:focus-visible]/work:opacity-0')}>{branchMark}</span>
+      {alwaysShowActions ? chevron ?? slotMark : <>
+        <span className={cn('inline-flex items-center justify-center', expandable && 'transition-opacity group-hover/work:opacity-0 group-has-[:focus-visible]/work:opacity-0')}>{slotMark}</span>
         {chevron}
       </>}
     </span>
@@ -305,6 +369,47 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
   );
   const actionIconClass = alwaysShowActions ? 'h-3.5 w-3.5' : 'h-2.5 w-2.5';
 
+  // One set of items for the "⋯" menu and the right-click menu.
+  const renderMenuItems = (Slots: WorkMenuSlots): React.ReactNode => (
+    <>
+      <Slots.Item onClick={startRename}>
+        <Icon name="edit" className="h-4 w-4" />
+        <span>{t('sessions.sidebar.work.menu.rename')}</span>
+      </Slots.Item>
+      {projectFolders.length > 0 ? (
+        <Slots.Sub>
+          <Slots.SubTrigger>
+            <Icon name="folder" className="h-4 w-4" />
+            <span>{t('sessions.sidebar.folders.moveToFolder')}</span>
+          </Slots.SubTrigger>
+          <Slots.SubContent className="min-w-[160px]">
+            {projectFolders.map((folder) => (
+              <Slots.Item key={folder.id} onClick={() => moveToFolder(folder.id)} className="flex items-center justify-between">
+                <span className="min-w-0 truncate">{folder.name}</span>
+                {folder.id === currentFolderId ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
+              </Slots.Item>
+            ))}
+            {currentFolderId ? <>
+              <Slots.Separator />
+              <Slots.Item onClick={() => moveToFolder(null)}>
+                <span>{t('sessions.sidebar.folders.removeFromFolder')}</span>
+              </Slots.Item>
+            </> : null}
+          </Slots.SubContent>
+        </Slots.Sub>
+      ) : null}
+      {worktree && !worktreeRemoving ? <>
+        <Slots.Separator />
+        <Slots.Item
+          className={cn(shiftHeld && 'text-destructive')}
+          onClick={(event) => deleteWorktree(event)}
+        >
+          <Icon name="delete-bin" className="h-4 w-4" />
+          <span>{shiftHeld ? t('sessions.sidebar.group.actions.deleteWorktreeAndBranch') : t('sessions.sidebar.group.actions.deleteWorktree')}</span>
+        </Slots.Item>
+      </> : null}
+    </>
+  );
   const titleNode = renaming ? (
     <form
       className="flex min-w-0 flex-1 items-center gap-1"
@@ -349,7 +454,13 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
       className={cn(
         'oc-ui-start-align min-w-0 flex-1 truncate',
         'typography-ui-label',
-        isCurrent && collapsed ? 'text-interactive-selection-foreground' : 'text-foreground/85',
+        // The title carries the state as a session's does: news or a request
+        // waiting on the user in semibold, a running turn at full strength.
+        selected
+          ? 'text-interactive-selection-foreground'
+          : activityState === 'unread' || activityState === 'permission' || activityState === 'form'
+            ? 'font-semibold text-foreground'
+            : activityState === 'active' ? 'text-foreground' : 'text-muted-foreground',
         maskOnHover,
       )}
     >
@@ -358,7 +469,8 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
   );
 
   return (
-    <div className={cn(worktreeRemoving && 'opacity-60')} aria-busy={worktreeRemoving || undefined}>
+    <ContextMenu disabled={renaming}>
+    <ContextMenuTrigger render={<div className={cn(worktreeRemoving && 'opacity-60')} aria-busy={worktreeRemoving || undefined} />}>
       <div
         ref={dragHandleProps?.setActivatorNodeRef}
         {...(dragHandleProps?.listeners ?? {})}
@@ -368,7 +480,7 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
           // little taller than tree rows.
           'oc-ref-tint-scope group/work relative my-0.5 flex cursor-pointer items-center gap-1.5 rounded-md pe-2.5',
           'py-1.5',
-          isCurrent && collapsed ? 'bg-interactive-selection/70' : 'hover:bg-interactive-hover/60',
+          selected ? 'bg-interactive-selection/70' : 'hover:bg-interactive-hover/60',
         )}
       >
         {slot}
@@ -391,7 +503,7 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
               }}
             >
               {titleNode}
-              <span className={cn('ms-auto flex flex-shrink-0 items-center gap-1', alwaysShowActions ? (hasWorkAction ? 'pe-20' : 'pe-14') : hideOnHover)}>
+              <span className={cn('ms-auto flex flex-shrink-0 items-center gap-1', renaming && 'hidden', alwaysShowActions ? (hasWorkAction ? 'pe-20' : 'pe-14') : hideOnHover)}>
                 {group.worktree?.worktreeStatus === 'missing' ? (
                   <span className="inline-flex items-center text-status-warning" title={t('sessions.sidebar.group.worktreeMissing')} aria-label={t('sessions.sidebar.group.worktreeMissing')}>
                     <Icon name="alert" className="h-3 w-3" />
@@ -399,7 +511,11 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
                 ) : null}
                 {ref}
                 {group.directory ? <DirectoryActionIndicator directory={group.directory} /> : null}
-                <span className="inline-flex">{stateMark}</span>
+                {/* Touch layouts keep the chevron in the slot, so the state moves here. */}
+                {alwaysShowActions && expandable && stateMark ? <span className="inline-flex">{stateMark}</span> : null}
+                {durationSessionId ? (
+                  <SessionActivityDuration sessionId={durationSessionId} running={Boolean(runningSessionId)} className="typography-micro" />
+                ) : null}
               </span>
             </div>
           </TooltipTrigger>
@@ -422,8 +538,10 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
             </div>
           </TooltipContent>
         </Tooltip>
+        {/* Renaming has its own save and cancel at the row's end. */}
         <div className={cn(
           'absolute inset-e-1 top-1/2 z-10 flex -translate-y-1/2 items-center gap-0.5 transition-opacity',
+          renaming && 'hidden',
           alwaysShowActions ? 'opacity-100' : 'opacity-0 group-hover/work:opacity-100 group-has-[:focus-visible]/work:opacity-100 has-[[data-popup-open]]:opacity-100',
         )}>
           <TooltipProvider delayDuration={400}>
@@ -476,47 +594,16 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="min-w-[180px]">
-                <DropdownMenuItem onClick={startRename}>
-                  <Icon name="edit" className="h-4 w-4" />
-                  <span>{t('sessions.sidebar.work.menu.rename')}</span>
-                </DropdownMenuItem>
-                {projectFolders.length > 0 ? (
-                  <DropdownMenuSub>
-                    <DropdownMenuSubTrigger>
-                      <Icon name="folder" className="h-4 w-4" />
-                      <span>{t('sessions.sidebar.folders.moveToFolder')}</span>
-                    </DropdownMenuSubTrigger>
-                    <DropdownMenuSubContent className="min-w-[160px]">
-                      {projectFolders.map((folder) => (
-                        <DropdownMenuItem key={folder.id} onClick={() => moveToFolder(folder.id)} className="flex items-center justify-between">
-                          <span className="min-w-0 truncate">{folder.name}</span>
-                          {folder.id === currentFolderId ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
-                        </DropdownMenuItem>
-                      ))}
-                      {currentFolderId ? <>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem onClick={() => moveToFolder(null)}>
-                          <span>{t('sessions.sidebar.folders.removeFromFolder')}</span>
-                        </DropdownMenuItem>
-                      </> : null}
-                    </DropdownMenuSubContent>
-                  </DropdownMenuSub>
-                ) : null}
-                {worktree && !worktreeRemoving ? <>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem
-                    className={cn(shiftHeld && 'text-destructive')}
-                    onClick={(event) => deleteWorktree(event)}
-                  >
-                    <Icon name="delete-bin" className="h-4 w-4" />
-                    <span>{shiftHeld ? t('sessions.sidebar.group.actions.deleteWorktreeAndBranch') : t('sessions.sidebar.group.actions.deleteWorktree')}</span>
-                  </DropdownMenuItem>
-                </> : null}
+                {renderMenuItems(DROPDOWN_SLOTS)}
               </DropdownMenuContent>
             </DropdownMenu>
           </TooltipProvider>
         </div>
       </div>
-    </div>
+    </ContextMenuTrigger>
+    <ContextMenuContent className="min-w-[180px]">
+      {renderMenuItems(CONTEXT_MENU_SLOTS)}
+    </ContextMenuContent>
+    </ContextMenu>
   );
 }

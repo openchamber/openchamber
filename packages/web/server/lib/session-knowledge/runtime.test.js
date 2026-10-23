@@ -33,7 +33,7 @@ const createRuntime = (overrides = {}) => {
   };
   for (const key of [
     'readSessionMetadata', 'persistSessionMetadata', 'isAgentMemoryEnabled', 'isSessionLinkingAvailable',
-    'isPageRenderingAvailable', 'readCheckoutBranch', 'instructionEntries',
+    'isPageRenderingAvailable', 'readCheckoutBranch', 'readPlaceholderBranch', 'instructionEntries',
   ]) {
     if (key in overrides) dependencies[key] = overrides[key];
   }
@@ -259,6 +259,32 @@ describe('which branch the session works on', () => {
     branch = new Error('git failed');
     await runtime.sync('ses_a', '/work/unreadable');
     expect(instructionEntries.held.get(CHECKOUT)).toBe(noBranch);
+  });
+
+  test('a placeholder branch asks for a rename with work.name, until it is renamed', async () => {
+    const instructionEntries = createEntriesStub();
+    let branch = 'agile-chipmunk';
+    const runtime = runtimeOn(null, {
+      ...pinnedStore(),
+      instructionEntries,
+      readCheckoutBranch: async () => branch,
+      readPlaceholderBranch: async () => (branch === 'agile-chipmunk' ? branch : null),
+    });
+    await runtime.sync('ses_a', DIRECTORY);
+    const told = instructionEntries.held.get(CHECKOUT);
+    expect(told).toContain('git branch -m agile-chipmunk <new-name>');
+    expect(told).toContain('work.name');
+
+    branch = 'fix/login-timeout';
+    await runtime.sync('ses_a', DIRECTORY);
+    expect(instructionEntries.held.get(CHECKOUT)).toBe('This session works in `/work/project`, on branch `fix/login-timeout`.');
+  });
+
+  test('a placeholder check that fails tells only the branch', async () => {
+    const entries = await entriesFor(runtimeOn('agile-chipmunk', {
+      readPlaceholderBranch: async () => { throw new Error('git failed'); },
+    }));
+    expect(entries[CHECKOUT]).toBe('This session works in `/work/project`, on branch `agile-chipmunk`.');
   });
 
   test('is not read without the tool, and the entry is cleared', async () => {
