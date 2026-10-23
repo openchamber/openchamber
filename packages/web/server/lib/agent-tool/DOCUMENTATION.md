@@ -2,6 +2,15 @@
 
 ## Purpose
 
+The managed plugin also registers `openchamber_bot` when the host supplies a bot
+runtime. Every agent denies it by default; only an item's fixing session receives
+the explicit session grant. It stays direct even when ordinary tools use Code
+Mode. The authenticated callback takes its session ID from the plugin context,
+never a model-supplied context override, and `bots/runtime.js` verifies the current
+item and fixing session before each operation. Public control actions cannot
+substitute for that authority. Disabling optional session-control tools does not
+disable an active bot's item-only tool.
+
 This module exposes OpenChamber to agents as typed OpenCode custom tools. There
 are two, because controlling sessions and driving a page are separate intents
 the user can want independently:
@@ -321,6 +330,98 @@ an `error` object. OpenCode-level cancellation can still produce a native tool
 error state.
 
 ## Runtime parity
+
+### Direct MCP aliases
+
+The generated plugin owns direct aliases for the namespaced tool definitions
+already in its location's registry. OpenCode owns MCP discovery, schemas,
+execution and permission enforcement. `../suggested-tasks/runtime.js` owns the
+lens session rules; it must grant both the original action and its alias.
+
+- An original effective ID `qa_read_data` gets the direct tool and permission
+  action `openchamber_mcp_qa_read_data`. `mcpToolAliasName(effectiveId)`, exported
+  from `./mcp-alias.js`, is the naming contract for session-rule consumers.
+  The input is OpenCode's normalized effective ID. For manual MCP names,
+  normalize each server and tool name with `/[^A-Za-z0-9_-]/g` to `_`, join them
+  with `_`, then pass that ID to the helper.
+- Each agent gets a final
+  `{ action: 'openchamber_mcp_*', resource: '*', effect: 'deny' }` rule before
+  the plugin registers any alias. OpenCode merges session rules after agent
+  rules, so an explicit lens alias rule can override this default. Ordinary
+  sessions keep their original MCP tools and Code Mode configuration.
+- An alias has no namespace or pinning and always uses `codemode: false`,
+  including when `agentToolsCodeMode` is on. Its permission action is its alias
+  name. The original input, output, description and executor are preserved;
+  the original registry entry is unchanged.
+- The original MCP executor still asserts its original permission action with
+  the calling session, agent, message and call IDs. An alias grant alone cannot
+  authorize that MCP operation. Original `ask` and `deny` rules and administrator
+  policy hooks still apply. The plugin adds no permission or policy allow rules,
+  no network capability and no listener.
+- Registry rebuilds recreate aliases from the current original definitions.
+  Unnamespaced tools and IDs beginning with `openchamber_mcp_` are skipped, so
+  aliases never generate aliases. Each replay reads the registry once and makes
+  at most one alias per namespaced original, without another MCP read or timer.
+  Previously captured executors retain their snapshot's original definition.
+- Catalog reports contain only original namespaced definitions. Direct aliases
+  have no namespace and are excluded by the existing report filter.
+- These aliases exist only where the managed plugin is injected. External
+  OpenCode keeps its own tool configuration and requires `codemode: false` on
+  MCP servers used by lenses. VS Code receives no plugin injection. Web,
+  Electron, hosted mobile and Capacitor use the server's managed plugin.
+
+#### Why aliases use agent defaults and not administrator policies
+
+Session rules can override the appended agent deny for one lens. An
+administrator policy deny would also block that explicitly authorized lens.
+The original MCP permission assertion keeps administrator restrictions in force.
+
+#### Why lenses use direct aliases and not an execute grant
+
+OpenCode's default MCP Code Mode requires the `execute` tool, whose ambient
+`fetch` can bypass a lens's disabled web access. A direct alias exposes one MCP
+operation while `execute` remains denied; changing the original registration
+would also change ordinary sessions' MCP behavior.
+
+The v2.0.32 source confirms the mechanism in
+[`promise/agent.ts`](https://github.com/anomalyco/opencode/blob/v2.0.32/packages/plugin/src/promise/agent.ts),
+[`promise/tool.ts`](https://github.com/anomalyco/opencode/blob/v2.0.32/packages/plugin/src/promise/tool.ts)
+and [`promise/adapter.ts`](https://github.com/anomalyco/opencode/blob/v2.0.32/packages/plugin/src/promise/adapter.ts#L477-L515).
+[`core/tool.ts`](https://github.com/anomalyco/opencode/blob/v2.0.32/packages/core/src/tool.ts#L225-L295)
+filters by `options.permission` before separating direct and Code Mode tools.
+[`session/context.ts`](https://github.com/anomalyco/opencode/blob/v2.0.32/packages/core/src/session/context.ts#L127-L134)
+and [`permission.ts`](https://github.com/anomalyco/opencode/blob/v2.0.32/packages/core/src/permission.ts#L158-L188)
+merge agent rules before session rules. The original assertion is inside
+[`tool/mcp.ts`](https://github.com/anomalyco/opencode/blob/v2.0.32/packages/core/src/tool/mcp.ts#L58-L83).
+
+### MCP catalog reports
+
+The generated plugin also reports its location's namespaced tools through
+`POST /api/openchamber/agent-tool/mcp-tools`. The callback uses the same
+same-machine check and current child token as managed tool actions. The
+`mcpToolsRuntime` dependency parses and stores reports; its absence returns 503.
+Token rotation clears that runtime's reports.
+
+The plugin reads `ctx.tool.list()` once during setup and every 30 seconds. It
+sends only `options.namespace`, `name` and `description` for namespaced tools,
+sorted for order-independent comparison, alongside `ctx.location.directory`.
+Only acknowledged changed snapshots replace the comparison baseline. Registry
+or callback failures preserve it and retry on the next interval. Cleanup clears
+the timer and aborts an in-flight callback; callbacks time out after 10 seconds.
+The existing plugin-injection settings still apply, so disabling every managed
+tool leaves a managed catalog in `loading` until the plugin is injected again.
+
+The pinned OpenCode v2.0.32 supports `ctx.tool.list()` through the plugin's
+promise facade and exposes synchronous `ctx.location.directory`. The registry
+supplies required descriptions and optional `options.namespace`; the generated
+plugin uses plain promises and has no Effect dependency. The tagged definitions
+are in [plugin tool.ts](https://github.com/anomalyco/opencode/blob/v2.0.32/packages/plugin/src/effect/tool.ts#L59)
+and [schema tool.ts](https://github.com/anomalyco/opencode/blob/v2.0.32/packages/schema/src/tool.ts#L93-L107).
+The installed 2.0.22 promise declarations also confirm the setup cleanup contract.
+`../mcp-tools/DOCUMENTATION.md` owns the report limits, response contract and
+coordinator wiring. No OpenCode version bump is needed.
+
+### Tool injection
 
 - Web and Desktop managed OpenCode: injected automatically.
 - External OpenCode selected with `OPENCODE_HOST` or skip-start: not injected,

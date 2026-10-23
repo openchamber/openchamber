@@ -55,6 +55,7 @@ export const createManagedConfigRuntime = ({
   agentToolRuntime = null,
   readSettings,
   isAgentMemoryAvailable,
+  isBotToolAvailable = () => false,
 }) => {
   // Fail at construction: a missing directory otherwise only surfaces when the
   // managed OpenCode child is about to spawn, leaving the server up without it.
@@ -97,11 +98,12 @@ export const createManagedConfigRuntime = ({
     const includeKnowledge = settings?.agentKnowledgeToolEnabled !== false;
     const includeNotify = settings?.agentNotifyToolEnabled === true;
     const includeRender = settings?.agentRenderToolEnabled !== false;
+    const includeBot = isBotToolAvailable();
     const codeMode = settings?.agentToolsCodeMode === true;
 
     const directories = [await materializeLocalMcpPlugin({ dataDir })];
-    if (agentToolRuntime && (includeControl || includeSchedule || includeWeb || includeMemory || includeKnowledge || includeNotify || includeRender)) {
-      directories.push(await agentToolRuntime.materializePlugin({ includeControl, includeSchedule, includeWeb, includeMemory, includeKnowledge, includeNotify, includeRender, codeMode }));
+    if (agentToolRuntime && (includeControl || includeSchedule || includeWeb || includeMemory || includeKnowledge || includeNotify || includeRender || includeBot)) {
+      directories.push(await agentToolRuntime.materializePlugin({ includeControl, includeSchedule, includeWeb, includeMemory, includeKnowledge, includeNotify, includeRender, includeBot, codeMode }));
     }
     return directories;
   };

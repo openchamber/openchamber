@@ -27,6 +27,8 @@ import {
   RENDER_PAGE_MAX_TITLE_LENGTH,
 } from '../openchamber-control/render-page.js';
 import { createCallbackAddress } from './callback-address.js';
+import { mcpToolAliasName } from './mcp-alias.js';
+import { BOT_TOOL_ACTIONS, BOT_TOOL_PARAMETERS } from '../bots/tool.js';
 
 const TOOL_SCHEMA_VERSION = 1;
 const PLUGIN_ID = 'openchamber-agent-tool';
@@ -546,8 +548,15 @@ ${answers ? ANSWER_WAIT_SETUP : ''}
  */
 const OPENCODE_TOOLS_REPLACED_BY_CONTROL = ['opencode_worktree_create', 'opencode_models'];
 
-const createPluginSource = ({ includeControl, includeSchedule, includeWeb, includeMemory, includeKnowledge, includeNotify, includeRender, codeMode }) => {
+const createPluginSource = ({ includeControl, includeSchedule, includeWeb, includeMemory, includeKnowledge, includeNotify, includeRender, includeBot, codeMode }) => {
   const entries = [];
+  if (includeBot) entries.push(createToolEntry({
+    name: 'openchamber_bot',
+    description: 'Act on this bot item through its server-owned identity. Only the current item correction session can use this tool. Never substitute shell or another account for a refused operation.',
+    definitions: BOT_TOOL_ACTIONS,
+    parameters: BOT_TOOL_PARAMETERS,
+    codeMode: false,
+  }));
   if (includeControl) {
     entries.push(`    for (const id of ${JSON.stringify(OPENCODE_TOOLS_REPLACED_BY_CONTROL)}) tools.remove(id)
 `);
@@ -638,16 +647,67 @@ const createPluginSource = ({ includeControl, includeSchedule, includeWeb, inclu
 
 // Session id -> abort controllers of the calls whose page waits for an answer.
 const pagesWaitingForChat = new Map()
+const mcpToolAliasName = ${mcpToolAliasName.toString()}
 
 export default {
   id: ${JSON.stringify(PLUGIN_ID)},
   setup: async (ctx) => {
     exemptCallbackFromProxy()
+    // Session rules follow agent rules, so a lens can explicitly allow an alias.
+    // Install the deny before publishing aliases; ordinary sessions keep their MCP tools.
+    await ctx.agent.transform((agents) => {
+      for (const { id } of agents.list()) {
+        agents.update(id, (agent) => {
+          agent.permissions.push({ action: ${JSON.stringify(mcpToolAliasName('*'))}, resource: "*", effect: "deny" })
+          ${includeBot ? 'agent.permissions.push({ action: "openchamber_bot", resource: "*", effect: "deny" })' : ''}
+        })
+      }
+    })
     await ctx.tool.transform((tools) => {
+      for (const tool of tools.list()) {
+        if (!tool.options?.namespace || tool.id.startsWith(${JSON.stringify(mcpToolAliasName(''))})) continue
+        const { id, ...original } = tool
+        const name = mcpToolAliasName(id)
+        // Keep the original schemas and executor, including its MCP permission assertion.
+        // A direct alias needs no execute grant and must not inherit namespace or pinning.
+        tools.add({ ...original, name, options: { permission: name, codemode: false } })
+      }
 ${entries.join('')}    })${includeRender ? `
     await ctx.session.hook("prompt", (event) => {
       for (const controller of pagesWaitingForChat.get(event.sessionID) ?? []) controller.abort()
     })` : ''}
+    const endpoint = process.env.OPENCHAMBER_AGENT_TOOL_URL
+    const token = process.env.OPENCHAMBER_AGENT_TOOL_TOKEN
+    const controller = new AbortController()
+    let previous = null
+    let pending = false
+    const report = async () => {
+      if (pending || controller.signal.aborted) return
+      pending = true
+      try {
+        const tools = (await ctx.tool.list())
+          .filter((tool) => tool.options?.namespace)
+          .map((tool) => ({ namespace: tool.options.namespace.replace(/[^A-Za-z0-9_-]/g, "_"), name: tool.name, description: tool.description }))
+          .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)))
+        const snapshot = JSON.stringify(tools)
+        if (snapshot === previous || controller.signal.aborted) return
+        const response = await fetch(endpoint + "/mcp-tools", {
+          method: "POST",
+          headers: { authorization: "Bearer " + token, "content-type": "application/json" },
+          body: JSON.stringify({ directory: ctx.location.directory, tools }),
+          signal: AbortSignal.any([controller.signal, AbortSignal.timeout(10_000)]),
+        })
+        if (response.ok) previous = snapshot
+        await response.body?.cancel()
+      } catch {
+        // A failed read/report preserves the last acknowledged catalog and retries next tick.
+      } finally { pending = false }
+    }
+    if (!endpoint || !token) return
+    void report()
+    const timer = setInterval(report, 30_000)
+    timer.unref?.()
+    return () => { clearInterval(timer); controller.abort() }
   },
 }
 `;
@@ -672,7 +732,9 @@ export const createAgentToolRuntime = (dependencies) => {
     getActivePort,
     getActiveHost = () => null,
     executeAction,
+    executeBotAction,
     resolveSessionDirectory,
+    mcpToolsRuntime,
   } = dependencies;
   // The plugin embeds this server's tool declarations, so it lives in this
   // server's own directory (see ../opencode/instance-dir.js).
@@ -691,13 +753,13 @@ export const createAgentToolRuntime = (dependencies) => {
    * change while it runs, so the source on disk always matches the settings —
    * the running OpenCode reloads the directory it already has configured.
    */
-  const materializePlugin = async ({ includeControl = true, includeSchedule = false, includeWeb = true, includeMemory = true, includeKnowledge = false, includeNotify = false, includeRender = false, codeMode = false } = {}) => {
-    if (!includeControl && !includeSchedule && !includeWeb && !includeMemory && !includeKnowledge && !includeNotify && !includeRender) {
+  const materializePlugin = async ({ includeControl = true, includeSchedule = false, includeWeb = true, includeMemory = true, includeKnowledge = false, includeNotify = false, includeRender = false, includeBot = false, codeMode = false } = {}) => {
+    if (!includeControl && !includeSchedule && !includeWeb && !includeMemory && !includeKnowledge && !includeNotify && !includeRender && !includeBot) {
       throw new Error('At least one OpenChamber managed tool must be enabled to inject the plugin');
     }
     await fsPromises.mkdir(pluginDirectory, { recursive: true });
     await fsPromises.writeFile(pluginManifestPath, PLUGIN_PACKAGE_JSON, { mode: 0o600 });
-    await fsPromises.writeFile(pluginPath, createPluginSource({ includeControl, includeSchedule, includeWeb, includeMemory, includeKnowledge, includeNotify, includeRender, codeMode }), { mode: 0o600 });
+    await fsPromises.writeFile(pluginPath, createPluginSource({ includeControl, includeSchedule, includeWeb, includeMemory, includeKnowledge, includeNotify, includeRender, includeBot, codeMode }), { mode: 0o600 });
     return pluginDirectory;
   };
 
@@ -714,6 +776,7 @@ export const createAgentToolRuntime = (dependencies) => {
       throw new Error('OpenChamber listener port is unavailable for managed tool injection');
     }
     activeToken = crypto.randomBytes(32).toString('base64url');
+    mcpToolsRuntime?.clear();
     return {
       OPENCHAMBER_AGENT_TOOL_URL: `http://${callbackHost()}:${port}/api/openchamber/agent-tool`,
       OPENCHAMBER_AGENT_TOOL_TOKEN: activeToken,
@@ -730,6 +793,20 @@ export const createAgentToolRuntime = (dependencies) => {
   };
 
   const execute = async (payload = {}, options = {}) => {
+    if (payload.tool === 'openchamber_bot') {
+      const { action, ...input } = payload.input ?? {};
+      const sessionId = asNonEmptyString(payload.sessionID);
+      if (!sessionId || !BOT_TOOL_ACTIONS.some((entry) => entry.action === action)) return createResult({ ok: false, action, error: { message: 'An authenticated bot session and supported action are required', kind: 'usage' } });
+      try {
+        if (!(executeBotAction instanceof Function)) throw new Error('Bot runtime is unavailable');
+        const callId = asNonEmptyString(payload.callID);
+        const request = { sessionId, action, input };
+        if (callId) request.callId = callId;
+        return createResult({ ok: true, action, data: await executeBotAction(request, options) });
+      } catch (error) {
+        return createResult({ ok: false, action, error: { message: error instanceof Error ? error.message : 'Bot operation failed', kind: 'runtime' } });
+      }
+    }
     const requested = asNonEmptyString(payload.input?.action);
     // Resolved against the calling tool's own actions: models drop the
     // namespace that the tool's name already implies, and answering "read" with
@@ -815,6 +892,16 @@ export const createAgentToolRuntime = (dependencies) => {
   };
 
   const registerRoutes = (app, express) => {
+    app.post('/api/openchamber/agent-tool/mcp-tools', express.json({ limit: '1mb' }), (req, res) => {
+      if (!authorize(req)) return res.status(401).json({ error: 'Unauthorized' });
+      if (!mcpToolsRuntime) return res.status(503).json({ error: 'MCP tool catalog is unavailable' });
+      try {
+        mcpToolsRuntime.report(req.body);
+        return res.json({ ok: true });
+      } catch (error) {
+        return res.status(error?.statusCode ?? 500).json({ error: 'Invalid MCP tool catalog report' });
+      }
+    });
     app.post('/api/openchamber/agent-tool', express.json({ limit: '1mb' }), async (req, res) => {
       if (!authorize(req)) return res.status(401).json({ error: 'Unauthorized' });
       const controller = new AbortController();

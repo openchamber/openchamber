@@ -8,14 +8,21 @@ import request from 'supertest';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createAgentToolRuntime } from './runtime.js';
+import { mcpToolAliasName } from './mcp-alias.js';
 import { createOpenChamberControlService } from '../openchamber-control/service.js';
 import { createProjectContextRuntime } from '../project-context/runtime.js';
 import { createProjectIdFromPath } from '../projects/project-id.js';
+import { createMcpToolsRuntime } from '../mcp-tools/runtime.js';
 import { OPENCHAMBER_AGENT_TOOL_ACTION_DEFINITIONS, OPENCHAMBER_CONTROL_ACTION_DEFINITIONS } from '../openchamber-control/actions.js';
 
 const temporaryDirectories = [];
+const pluginCleanups = [];
 
 afterEach(async () => {
+  for (const cleanup of pluginCleanups.splice(0)) cleanup?.();
+  vi.useRealTimers();
+  vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
   await Promise.all(temporaryDirectories.splice(0).map((directory) => fs.rm(directory, { recursive: true, force: true })));
 });
 
@@ -46,22 +53,226 @@ const prepareManagedEnv = async (runtime, options) => {
 /** Loads the generated plugin and returns the tools it registers, by name. */
 // `hooks` collects the session hooks the plugin registers, by name, and
 // `removed` the ids of OpenCode's own tools it takes away.
-const loadTools = async (dataDir, tag, hooks = {}, removed = []) => {
+const loadTools = async (dataDir, tag, hooks = {}, removed = [], list, { agents = [], initialTools = [], transforms = {} } = {}) => {
   const entrypoint = path.join(pluginDirectoryFor(dataDir), 'index.js');
   const pluginModule = await import(`${pathToFileURL(entrypoint).href}?${tag}=${Date.now()}`);
   const registered = {};
-  await pluginModule.default.setup({
-    tool: {
+  const registry = new Map(initialTools.map((tool) => [tool.id, tool]));
+  const cleanup = await pluginModule.default.setup({
+    location: { directory: '/work/project' },
+    agent: {
       transform: (edit) => {
-        edit({ add: (tool) => { registered[tool.name] = tool; }, remove: (id) => { removed.push(id); } });
+        edit({ list: () => agents, update: (id, update) => update(agents.find((agent) => agent.id === id)) });
+      },
+    },
+    tool: {
+      list: list ?? (async () => [...registry.values()]),
+      transform: (edit) => {
+        transforms.tool = edit;
+        edit({
+          list: () => [...registry.values()],
+          add: (tool) => { registered[tool.name] = tool; registry.set(tool.name, { ...tool, id: tool.name }); },
+          remove: (id) => { removed.push(id); registry.delete(id); },
+        });
       },
     },
     session: {
       hook: async (name, callback) => { hooks[name] = callback; },
     },
   });
+  pluginCleanups.push(cleanup);
   return registered;
 };
+
+// The fixtures use exact actions and trailing '*', with resource '*'. OpenCode
+// merges agent rules before session rules and selects the last matching action.
+const permissionEffect = (rules, action) => rules.findLast((rule) => (
+  rule.action === action || (rule.action.endsWith('*') && action.startsWith(rule.action.slice(0, -1)))
+))?.effect ?? 'ask';
+
+const modelToolNames = (tools, rules) => [
+  ...tools.filter((tool) => tool.options?.codemode === false
+    && permissionEffect(rules, tool.options?.permission ?? tool.id ?? tool.name) !== 'deny')
+    .map((tool) => tool.id ?? tool.name),
+  ...(permissionEffect(rules, 'execute') === 'deny' ? [] : ['execute']),
+].sort();
+
+describe('managed direct MCP aliases', () => {
+  it('keeps the bot tool hidden until the item session grants it and binds calls to the reported session', async () => {
+    // Given a managed plugin with only the bot tool enabled.
+    const executeBotAction = vi.fn(async () => ({ delivered: true }));
+    const { runtime, dataDir, executeAction } = await createRuntime({ executeBotAction });
+    const env = await prepareManagedEnv(runtime, { includeControl: false, includeWeb: false, includeMemory: false, includeBot: true, codeMode: true });
+    vi.stubEnv('OPENCHAMBER_AGENT_TOOL_URL', env.OPENCHAMBER_AGENT_TOOL_URL);
+    vi.stubEnv('OPENCHAMBER_AGENT_TOOL_TOKEN', env.OPENCHAMBER_AGENT_TOOL_TOKEN);
+    const agents = [{ id: 'build', permissions: [{ action: '*', resource: '*', effect: 'allow' }] }];
+    const tools = await loadTools(dataDir, 'bot-only', {}, [], undefined, { agents });
+    expect(tools.openchamber_bot.options.codemode).toBe(false);
+    expect(modelToolNames(Object.values(tools), agents[0].permissions)).not.toContain('openchamber_bot');
+    expect(modelToolNames(Object.values(tools), [...agents[0].permissions, { action: 'openchamber_bot', resource: '*', effect: 'allow' }])).toContain('openchamber_bot');
+    vi.stubGlobal('fetch', async (_url, init) => Response.json(await runtime.execute(JSON.parse(init.body))));
+    // When a model tries to substitute a different context session in its arguments.
+    const result = await tools.openchamber_bot.execute({ action: 'item.ask', parameters: { question: 'Which behavior is intended?' }, contextSessionId: 'other-session' }, { sessionID: 'item-session', id: 'call-bot', progress: async () => {} });
+    // Then the server keeps the plugin-reported session, and ordinary control dispatch is never used.
+    expect(JSON.parse(result.content).ok).toBe(true);
+    expect(executeBotAction).toHaveBeenCalledWith({ sessionId: 'item-session', callId: 'call-bot', action: 'item.ask', input: { question: 'Which behavior is intended?', contextSessionId: 'other-session' } }, {});
+    expect(executeAction).not.toHaveBeenCalled();
+  });
+
+  it('refuses bot calls without session identity and actions outside the bot surface', async () => {
+    const executeBotAction = vi.fn();
+    const { runtime } = await createRuntime({ executeBotAction });
+    expect((await runtime.execute({ tool: 'openchamber_bot', input: { action: 'git.push' } })).ok).toBe(false);
+    expect((await runtime.execute({ tool: 'openchamber_bot', sessionID: 'session', input: { action: 'session.create' } })).ok).toBe(false);
+    expect(executeBotAction).not.toHaveBeenCalled();
+  });
+
+  it('exports the alias name for an already normalized effective ID', () => {
+    expect(mcpToolAliasName('qa_read_data')).toBe('openchamber_mcp_qa_read_data');
+    expect(mcpToolAliasName('my_server_find_issue')).toBe('openchamber_mcp_my_server_find_issue');
+    expect(mcpToolAliasName('my-server_read-data')).toBe('openchamber_mcp_my-server_read-data');
+  });
+
+  it.each([true, false])('preserves the original tool when its codemode is %s and publishes a direct alias', async (codeMode) => {
+    const { runtime, dataDir } = await createRuntime();
+    await runtime.materializePlugin({ includeControl: false, includeWeb: true, includeMemory: false, codeMode: true });
+    const original = Object.freeze({
+      id: 'qa_read_data', name: 'read.data', description: 'Read data',
+      input: { type: 'object', properties: { key: { type: 'string' } } },
+      output: { type: 'object', properties: { value: { type: 'string' } } },
+      options: Object.freeze(codeMode
+        ? { namespace: 'qa', codemode: codeMode, pinned: true, permission: 'qa_read_data' }
+        : { namespace: 'qa', codemode: codeMode, permission: 'qa_read_data' }),
+      execute: vi.fn(async () => ({ output: { value: 'data' } })),
+    });
+    const removed = [];
+    const registered = await loadTools(dataDir, `mcp-alias-${codeMode}`, {}, removed, undefined, { initialTools: [original] });
+    const alias = registered.openchamber_mcp_qa_read_data;
+    expect(alias.name).toBe(mcpToolAliasName(original.id));
+    expect(alias.description).toBe(original.description);
+    expect(alias.input).toBe(original.input);
+    expect(alias.output).toBe(original.output);
+    expect(alias.execute).toBe(original.execute);
+    expect(alias.options).toEqual({ permission: alias.name, codemode: false });
+    expect(alias).not.toHaveProperty('id');
+    expect(original.options.codemode).toBe(codeMode);
+    expect(original.options.namespace).toBe('qa');
+    expect(removed).toEqual([]);
+  });
+
+  it('denies aliases for every agent and exposes only explicitly allowed lens aliases without execute or web grants', async () => {
+    const { runtime, dataDir } = await createRuntime();
+    await runtime.materializePlugin();
+    const aliasName = mcpToolAliasName('qa_read_data');
+    const agents = [
+      { id: 'build', permissions: [{ action: '*', resource: '*', effect: 'allow' }] },
+      { id: 'review', permissions: [{ action: '*', resource: '*', effect: 'ask' }, { action: aliasName, resource: '*', effect: 'allow' }] },
+    ];
+    const before = structuredClone(agents);
+    const originals = [
+      { id: 'qa_read_data', name: 'read_data', options: { namespace: 'qa', codemode: true } },
+      { id: 'qa_write_data', name: 'write_data', options: { namespace: 'qa', codemode: true } },
+      { id: 'direct_status', name: 'status', options: { namespace: 'direct', codemode: false } },
+      { id: 'read', name: 'read', options: { codemode: false } },
+    ];
+    const tools = await loadTools(dataDir, 'alias-permissions', {}, [], undefined, { agents, initialTools: originals });
+    const aliases = Object.values(tools).filter((tool) => tool.name.startsWith('openchamber_mcp_'));
+    for (let index = 0; index < agents.length; index += 1) {
+      expect(agents[index].permissions).toEqual([...before[index].permissions, { action: 'openchamber_mcp_*', resource: '*', effect: 'deny' }]);
+      expect(modelToolNames([...originals, ...aliases], agents[index].permissions))
+        .toEqual(modelToolNames(originals, before[index].permissions));
+    }
+    const lens = [
+      { action: '*', resource: '*', effect: 'deny' },
+      { action: 'read', resource: '*', effect: 'allow' },
+      { action: 'qa_read_data', resource: '*', effect: 'allow' },
+    ];
+    const snapshot = (sessionRules) => modelToolNames([...originals, ...aliases], [...agents[0].permissions, ...sessionRules]);
+    expect(snapshot(lens)).toEqual(['read']);
+    expect(snapshot([...lens, { action: aliasName, resource: '*', effect: 'allow' }])).toEqual([aliasName, 'read']);
+    expect(snapshot([...lens, { action: aliasName, resource: '*', effect: 'ask' }])).toEqual([aliasName, 'read']);
+    expect(snapshot([...lens, { action: aliasName, resource: '*', effect: 'deny' }])).toEqual(['read']);
+    for (const action of ['execute', 'webfetch', 'websearch', 'shell', 'qa_write_data', mcpToolAliasName('qa_write_data')]) {
+      expect(permissionEffect([...agents[0].permissions, ...lens, { action: aliasName, resource: '*', effect: 'allow' }], action)).toBe('deny');
+    }
+  });
+
+  it('keeps the original MCP permission assertion, caller context, results and failures', async () => {
+    const { runtime, dataDir } = await createRuntime();
+    await runtime.materializePlugin();
+    const aliasName = mcpToolAliasName('qa_read_data');
+    const agents = [{ id: 'build', permissions: [{ action: '*', resource: '*', effect: 'allow' }] }];
+    const rules = new Map();
+    const ask = vi.fn(async () => {});
+    let policyDenied = false;
+    const assertPermission = vi.fn(async (request) => {
+      const effect = permissionEffect([...agents[0].permissions, ...rules.get(request.sessionID)], request.action);
+      if (effect === 'deny' || policyDenied) throw new Error('MCP permission denied');
+      if (effect === 'ask') await ask(request);
+    });
+    const result = { output: { value: 42 }, content: [{ type: 'text', text: 'data' }], metadata: { source: 'qa' } };
+    const callTool = vi.fn(async () => result);
+    const original = {
+      id: 'qa_read_data', name: 'read_data', options: { namespace: 'qa' },
+      execute: vi.fn(async (input, context) => {
+        await assertPermission({
+          action: 'qa_read_data', resources: ['*'], save: ['*'], metadata: { input },
+          sessionID: context.sessionID, agent: context.agent,
+          source: { type: 'tool', messageID: context.messageID, id: context.id },
+        });
+        return callTool(input, context);
+      }),
+    };
+    const tools = await loadTools(dataDir, 'alias-execute', {}, [], undefined, { agents, initialTools: [original] });
+    const alias = tools[aliasName];
+    const context = { sessionID: 'ses_lens', agent: 'build', messageID: 'msg_lens', id: 'call_lens', signal: new AbortController().signal, progress: vi.fn() };
+    const input = { key: 'example' };
+    const aliasOnly = [{ action: '*', resource: '*', effect: 'deny' }, { action: aliasName, resource: '*', effect: 'allow' }];
+    rules.set(context.sessionID, aliasOnly);
+    await expect(alias.execute(input, context)).rejects.toThrow('MCP permission denied');
+    expect(callTool).not.toHaveBeenCalled();
+    rules.set(context.sessionID, [...aliasOnly, { action: 'qa_read_data', resource: '*', effect: 'ask' }]);
+    await expect(alias.execute(input, context)).resolves.toBe(result);
+    expect(ask).toHaveBeenCalledWith({
+      action: 'qa_read_data', resources: ['*'], save: ['*'], metadata: { input },
+      sessionID: 'ses_lens', agent: 'build', source: { type: 'tool', messageID: 'msg_lens', id: 'call_lens' },
+    });
+    expect(original.execute.mock.lastCall[0]).toBe(input);
+    expect(original.execute.mock.lastCall[1]).toBe(context);
+    expect(callTool.mock.lastCall[1].signal).toBe(context.signal);
+    rules.set(context.sessionID, [...aliasOnly, { action: 'qa_read_data', resource: '*', effect: 'allow' }]);
+    await expect(alias.execute(input, context)).resolves.toBe(result);
+    expect(ask).toHaveBeenCalledTimes(1);
+    policyDenied = true;
+    await expect(alias.execute(input, context)).rejects.toThrow('MCP permission denied');
+    expect(callTool).toHaveBeenCalledTimes(2);
+    policyDenied = false;
+    const failure = new Error('MCP server unavailable');
+    callTool.mockRejectedValueOnce(failure);
+    await expect(alias.execute(input, context)).rejects.toBe(failure);
+  });
+
+  it('rebuilds aliases from current originals without recursion or stale executors', async () => {
+    const { runtime, dataDir } = await createRuntime();
+    await runtime.materializePlugin({ includeControl: false, includeWeb: true, includeMemory: false });
+    const original = { id: 'qa_read_data', name: 'read_data', options: { namespace: 'qa' }, execute: vi.fn(async () => ({ content: 'old' })) };
+    const transforms = {};
+    const registered = await loadTools(dataDir, 'alias-reload', {}, [], undefined, { initialTools: [original], transforms });
+    const oldAlias = registered[mcpToolAliasName(original.id)];
+    const updated = { ...original, execute: vi.fn(async () => ({ content: 'new' })) };
+    const replay = (initialTools) => {
+      const added = [];
+      transforms.tool({ list: () => initialTools, add: (tool) => added.push(tool), remove: () => {} });
+      return added.filter((tool) => tool.name.startsWith('openchamber_mcp_'));
+    };
+    const [alias] = replay([updated, { ...oldAlias, id: oldAlias.name }, { ...oldAlias, id: oldAlias.name, options: { namespace: 'reserved' } }]);
+    expect(alias.execute).toBe(updated.execute);
+    expect(replay([updated])).toHaveLength(1);
+    expect(replay([])).toEqual([]);
+    await expect(oldAlias.execute()).resolves.toEqual({ content: 'old' });
+    await expect(alias.execute()).resolves.toEqual({ content: 'new' });
+  });
+});
 
 describe('agent tool action allowlist', () => {
   it('defines a short title and agent description for every action', () => {
@@ -105,6 +316,72 @@ describe('agent tool action allowlist', () => {
 });
 
 describe('managed agent tool runtime', () => {
+  it('reports the location MCP catalog initially and only changes every 30s, then cleans up', async () => {
+    const { runtime, dataDir } = await createRuntime();
+    const env = await prepareManagedEnv(runtime);
+    vi.stubEnv('OPENCHAMBER_AGENT_TOOL_URL', env.OPENCHAMBER_AGENT_TOOL_URL);
+    vi.stubEnv('OPENCHAMBER_AGENT_TOOL_TOKEN', env.OPENCHAMBER_AGENT_TOOL_TOKEN);
+    const fetch = vi.fn(async () => new Response('{}'));
+    vi.stubGlobal('fetch', fetch);
+    vi.useFakeTimers();
+    const first = { id: 'my_server_find_issue', name: 'find.issue', description: 'Find issues', options: { namespace: 'my.server' } };
+    let registered = {};
+    const list = vi.fn(async () => [first, { name: 'read', description: 'Built in' }, ...Object.values(registered)]);
+    registered = await loadTools(dataDir, 'mcp-catalog', {}, [], list, { initialTools: [first] });
+    expect(registered).toHaveProperty('openchamber_mcp_my_server_find_issue');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls[0][0]).toBe(`${env.OPENCHAMBER_AGENT_TOOL_URL}/mcp-tools`);
+    expect(fetch.mock.calls[0][1].headers.authorization).toBe(`Bearer ${env.OPENCHAMBER_AGENT_TOOL_TOKEN}`);
+    expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({ directory: '/work/project', tools: [{ namespace: 'my_server', name: 'find.issue', description: 'Find issues' }] });
+    await vi.advanceTimersByTimeAsync(29_999);
+    expect(list).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(list).toHaveBeenCalledTimes(2);
+    expect(await list.mock.results[1].value).toContain(registered.openchamber_mcp_my_server_find_issue);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    list.mockRejectedValueOnce(new Error('Registry unavailable'));
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    list.mockResolvedValue([{ ...first, description: 'Updated' }]);
+    fetch.mockResolvedValueOnce(new Response('{}', { status: 503 }));
+    await vi.advanceTimersByTimeAsync(30_000);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(fetch).toHaveBeenCalledTimes(3);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(fetch).toHaveBeenCalledTimes(3);
+    const signal = fetch.mock.calls[2][1].signal;
+    pluginCleanups.pop()();
+    expect(signal.aborted).toBe(true);
+    const calls = list.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(list).toHaveBeenCalledTimes(calls);
+  });
+
+  it('authenticates MCP reports, rejects malformed replacements and clears reports on child rotation', async () => {
+    const catalog = createMcpToolsRuntime({
+      resolveProjectDirectory: async () => '/repo',
+      createClient: () => ({ mcp: { list: async () => ({ location: { directory: '/repo' }, data: [] }) } }),
+      isExternalOpenCode: () => false,
+    });
+    const { runtime } = await createRuntime({ mcpToolsRuntime: catalog });
+    const env = runtime.createChildEnv();
+    const app = express();
+    runtime.registerRoutes(app, express);
+    const endpoint = '/api/openchamber/agent-tool/mcp-tools';
+    const payload = { directory: '/repo', tools: [] };
+    await request(app).post(endpoint).send(payload).expect(401);
+    await request(app).post(endpoint).set('Authorization', 'Bearer wrong').send(payload).expect(401);
+    await request(app).post(endpoint).set('Authorization', `Bearer ${env.OPENCHAMBER_AGENT_TOOL_TOKEN}`).send(payload).expect(200);
+    expect((await catalog.getProjectTools('p')).status).toBe('ready');
+    await request(app).post(endpoint).set('Authorization', `Bearer ${env.OPENCHAMBER_AGENT_TOOL_TOKEN}`).send({ directory: '/repo', tools: [{}] }).expect(400);
+    expect((await catalog.getProjectTools('p')).status).toBe('ready');
+    expect(runtime.authorizeRequest({ socket: { remoteAddress: '203.0.113.2' }, headers: { authorization: `Bearer ${env.OPENCHAMBER_AGENT_TOOL_TOKEN}` } })).toBe(false);
+    runtime.createChildEnv();
+    expect((await catalog.getProjectTools('p')).status).toBe('loading');
+    await request(app).post(endpoint).set('Authorization', `Bearer ${env.OPENCHAMBER_AGENT_TOOL_TOKEN}`).send(payload).expect(401);
+  });
+
   it('rejects a stale note replacement from a second session without a write or event', async () => {
     const owner = createProjectIdFromPath('/repo');
     const onChanged = vi.fn();
