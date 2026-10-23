@@ -23,7 +23,8 @@ export async function controlledUpstream(handler) {
     for await (const chunk of request) chunks.push(chunk);
     const raw = Buffer.concat(chunks).toString('utf8');
     const entry = { path: request.url, method: request.method, headers: request.headers,
-      body: raw ? JSON.parse(raw) : null };
+      body: raw ? request.headers['content-type']?.startsWith('application/x-www-form-urlencoded')
+        ? Object.fromEntries(new URLSearchParams(raw)) : JSON.parse(raw) : null };
     requests.push(entry);
     try {
       const result = await handler(entry);

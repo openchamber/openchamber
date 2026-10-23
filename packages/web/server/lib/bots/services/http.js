@@ -1,32 +1,35 @@
 import { assertBotWriteAllowed } from '../../enterprise-mode.js';
-import { BotServiceError } from './contracts.js';
+import { z } from 'zod';
+import { BotServiceError, jiraOrigin, parse } from './contracts.js';
 
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 
-/** Fixed-origin, bounded requests. Provider bodies never enter errors or logs. */
-export function createProviderHttp({ fetchImpl = fetch, policyOptions, timeoutMs = 15_000 } = {}) {
-  return async ({ service, origin, resource, path, authorization, method = 'GET', body, beforeWrite, readOnly = false }) => {
-    const url = new URL(path, origin);
-    if (url.origin !== origin || !path.startsWith('/') || path.startsWith('//') || url.hash
-      || url.username || url.password || url.protocol !== 'https:') {
-      throw new BotServiceError('BOT_SERVICE_ORIGIN_INVALID', 'The provider destination is invalid.', 'failed', 400);
-    }
-    const write = method !== 'GET' && !readOnly;
-    if (write) {
-      await beforeWrite?.();
-      try { assertBotWriteAllowed({ service, origin, resource }, policyOptions); }
-      catch { throw new BotServiceError('enterprise_mode', 'Enterprise mode refuses this bot destination.', 'needs-you', 403); }
-    }
+const providerUrl = (origin, path) => {
+  const url = new URL(path, origin);
+  if (url.origin !== origin || !path.startsWith('/') || path.startsWith('//') || url.hash
+    || url.username || url.password || url.protocol !== 'https:') {
+    throw new BotServiceError('BOT_SERVICE_ORIGIN_INVALID', 'The provider destination is invalid.', 'failed', 400);
+  }
+  return url;
+};
+const allowWrite = (destination, policyOptions) => {
+  try { assertBotWriteAllowed(destination, policyOptions); }
+  catch { throw new BotServiceError('enterprise_mode', 'Enterprise mode refuses this bot destination.', 'needs-you', 403); }
+};
+
+/** Private bounded transport. Callers own fixed URLs and content-write admission. */
+const createBoundedRequest = ({ fetchImpl = fetch, timeoutMs = 15_000 } = {}) => {
+  return async ({ url, service, authorization, method = 'GET', body, write = false, form = false }) => {
     let response;
     try {
       const options = {
         method, redirect: 'error', signal: AbortSignal.timeout(timeoutMs),
-        headers: { Authorization: authorization, Accept: 'application/json',
-          'Content-Type': 'application/json', 'User-Agent': 'OpenChamber-Bots',
+        headers: { ...(authorization ? { Authorization: authorization } : {}), Accept: 'application/json',
+          'Content-Type': form ? 'application/x-www-form-urlencoded' : 'application/json', 'User-Agent': 'OpenChamber-Bots',
         },
       };
       if (service === 'github') options.headers['X-GitHub-Api-Version'] = '2026-03-10';
-      if (body !== undefined) options.body = JSON.stringify(body);
+      if (body !== undefined) options.body = form ? body : JSON.stringify(body);
       response = await fetchImpl(url.href, options);
       if (response.redirected || response.status >= 300 && response.status < 400) {
         await response.body?.cancel();
@@ -58,5 +61,45 @@ export function createProviderHttp({ fetchImpl = fetch, policyOptions, timeoutMs
       if (error instanceof BotServiceError) throw error;
       throw new BotServiceError('BOT_SERVICE_UNAVAILABLE', 'The provider response is unavailable.', write ? 'outcome-unknown' : 'needs-you', 502);
     }
+  };
+};
+
+/** Fixed-origin, bounded requests. Provider bodies never enter errors or logs. */
+export function createProviderHttp(options = {}) {
+  const request = createBoundedRequest(options);
+  return async ({ service, origin, resource, path, authorization, method = 'GET', body, beforeWrite, readOnly = false }) => {
+    const url = providerUrl(origin, path);
+    const write = method !== 'GET' && !readOnly;
+    if (write) {
+      await beforeWrite?.();
+      allowWrite({ service, origin, resource }, options.policyOptions);
+    }
+    return request({ url, service, authorization, method, body, write });
+  };
+}
+
+/** The shared gateway retains the verified Jira site's policy authority. */
+export function createJiraOAuthHttp(options = {}) {
+  const request = createBoundedRequest(options);
+  return {
+    readTenant: ({ site }) => request({ url: providerUrl(jiraOrigin(site), '/_edge/tenant_info') }),
+    exchangeToken: ({ clientId, clientSecret }) => request({
+      url: new URL('https://auth.atlassian.com/oauth/token'), method: 'POST', form: true,
+      body: new URLSearchParams({ client_id: clientId, client_secret: clientSecret, grant_type: 'client_credentials' }).toString(),
+    }),
+    async request({ site, cloudId, resource, path, authorization, method = 'GET', body, beforeWrite }) {
+      const origin = jiraOrigin(site);
+      const tenant = parse(z.uuid(), cloudId).toLowerCase();
+      const url = providerUrl('https://api.atlassian.com', `/ex/jira/${tenant}${path}`);
+      if (!path.startsWith('/rest/api/3/') || path.includes('\\') || !url.pathname.startsWith(`/ex/jira/${tenant}/rest/api/3/`)) {
+        throw new BotServiceError('BOT_SERVICE_ORIGIN_INVALID', 'The Jira gateway destination is invalid.', 'failed', 400);
+      }
+      const write = method !== 'GET';
+      if (write) {
+        await beforeWrite?.();
+        allowWrite({ service: 'jira', origin, resource }, options.policyOptions);
+      }
+      return request({ url, service: 'jira', authorization, method, body, write });
+    },
   };
 }
