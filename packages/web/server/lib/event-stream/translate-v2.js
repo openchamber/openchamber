@@ -107,6 +107,13 @@ export function translateWireEvent(payload) {
       })];
     }
 
+    case 'session.metadata.updated':
+      if (!sessionID || !isRecord(data.metadata)) return [];
+      return [event('session.updated', {
+        sessionID,
+        info: compact({ id: sessionID, directory: directory || undefined, metadata: data.metadata, time: { updated: created } }),
+      })];
+
     case 'session.renamed':
       if (!sessionID) return [];
       return [event('session.updated', {

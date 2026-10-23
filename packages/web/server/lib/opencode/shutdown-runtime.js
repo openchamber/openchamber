@@ -47,6 +47,7 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     getRelayService,
     getRelayReconcileTimer,
     getSpacesHost = () => null,
+    getBotsHost = () => null,
   } = dependencies;
 
   let shutdownPromise = null;
@@ -84,6 +85,10 @@ export const createGracefulShutdownRuntime = (dependencies) => {
       () => clearInterval(getRelayReconcileTimer()),
       () => getGuestSurfaceRuntime()?.stop(),
       () => getRealtimeProxyRuntime()?.stop(),
+      // Drain bot effects and dedicated space queues before their transports close.
+      () => scheduledTasksRuntime?.stop?.(),
+      () => prFixLoopRuntime?.stop?.(),
+      () => getBotsHost()?.stop(),
       // The isolated-spaces host, when the switch is on: its connections into spaces end here.
       () => getSpacesHost()?.close(),
       () => getRelayService()?.stop(),
@@ -97,11 +102,9 @@ export const createGracefulShutdownRuntime = (dependencies) => {
       () => contextObligatoryRuntime?.stop?.(),
       () => sessionWarmingRuntime?.stop?.(),
       () => messageQueueRuntime?.stop?.(),
-      () => prFixLoopRuntime?.stop?.(),
       () => dispatchResultsRuntime?.stop?.(),
       () => suggestedTasksRuntime?.stop?.(),
       () => messageSearchRuntime?.stop?.(),
-      () => scheduledTasksRuntime?.stop?.(),
       stopAllGuestServices,
     ];
     for (const cleanup of cleanupOperations) {
