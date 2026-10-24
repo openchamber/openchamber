@@ -945,7 +945,7 @@ const OpenSubtaskButton: React.FC<{
             onPointerDown={(event) => event.stopPropagation()}
             onClick={handleOpen}
             className={cn(
-                'flex-shrink-0 inline-flex h-4 w-4 items-center justify-center rounded transition-opacity hover:bg-interactive-hover',
+                                'oc-row-icon-button flex-shrink-0 inline-flex h-4 w-4 items-center justify-center rounded transition-opacity hover:bg-interactive-hover',
                 'opacity-60 hover:opacity-100 focus-visible:opacity-100',
             )}
             style={{ color: 'var(--tools-icon)' }}
@@ -2018,7 +2018,7 @@ const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader; subage
                                         type="button"
                                         onClick={handleQuickOpen}
                                         className={cn(
-                                            'flex-shrink-0 inline-flex h-4 w-4 items-center justify-center rounded transition-opacity hover:bg-interactive-hover',
+                                            'oc-row-icon-button flex-shrink-0 inline-flex h-4 w-4 items-center justify-center rounded transition-opacity hover:bg-interactive-hover',
                                             'opacity-60 hover:opacity-100 focus-visible:opacity-100',
                                         )}
                                         style={{ color: 'var(--tools-icon)' }}

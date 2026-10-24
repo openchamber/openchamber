@@ -45,8 +45,13 @@
     font-size: inherit !important;
   }
 
-  /* Improve touch targets for mobile */
-  :root.mobile-pointer:not(.desktop-runtime) button:not([role="radio"]):not([role="checkbox"]):not([role="switch"]),
+  /* Improve touch targets for mobile. Icon buttons inside a chat tool row are
+     excluded: the row itself is the touch target, and giving them the floor
+     stretches every row that carries one from 36 to 48px, out of rhythm with
+     the rows around it. The expansion below restores their hit area without
+     touching the layout, because a button in a static row (a Read row with an
+     image) has no row-level tap to fall back on. */
+  :root.mobile-pointer:not(.desktop-runtime) button:not([role="radio"]):not([role="checkbox"]):not([role="switch"]):not(.oc-row-icon-button),
   :root.mobile-pointer:not(.desktop-runtime) .btn,
   :root.mobile-pointer:not(.desktop-runtime) [role="button"],
   /* Static chat tool rows: not interactive as a whole, but they must share
@@ -54,6 +59,17 @@
   :root.mobile-pointer:not(.desktop-runtime) .oc-static-tool-row {
     min-height: 36px;
     min-width: 36px;
+  }
+
+  /* 16px of visual plus 10px on every side: a 36px tap target that does not
+     grow the row or move anything around it. */
+  :root.mobile-pointer:not(.desktop-runtime) .oc-row-icon-button {
+    position: relative;
+  }
+  :root.mobile-pointer:not(.desktop-runtime) .oc-row-icon-button::after {
+    content: '';
+    position: absolute;
+    inset: -10px;
   }
 
   /* Toast titles and icons line up with their buttons, which the rule above

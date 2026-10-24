@@ -408,7 +408,7 @@ const StaticToolRowInner: React.FC<{
                                     handleOpenImageExpanded(entry.path);
                                 }}
                                 className={cn(
-                                    'flex-shrink-0 inline-flex h-4 w-4 items-center justify-center rounded transition-opacity hover:bg-interactive-hover',
+                                    'oc-row-icon-button flex-shrink-0 inline-flex h-4 w-4 items-center justify-center rounded transition-opacity hover:bg-interactive-hover',
                                     'opacity-60 hover:opacity-100 focus-visible:opacity-100',
                                 )}
                                 style={{ color: 'var(--tools-icon)' }}
