@@ -21,8 +21,8 @@ export { isConfigured } from './auth.js';
 export const providerId = 'antigravity';
 export const providerName = 'Antigravity';
 
-export const fetchQuota = async () => {
-  const auth = resolveAntigravityAuth();
+export const fetchQuota = async ({ resolveAuth = resolveAntigravityAuth, refreshToken = refreshAntigravityToken, fetchSummary = fetchAntigravityQuotaSummary, fetchModels = fetchAntigravityModels } = {}) => {
+  const auth = resolveAuth();
   if (!auth) {
     return buildResult({
       providerId,
@@ -33,7 +33,7 @@ export const fetchQuota = async () => {
     });
   }
 
-  const accessToken = await refreshAntigravityToken(auth.refreshToken);
+  const accessToken = await refreshToken(auth.refreshToken);
   if (!accessToken) {
     return buildResult({
       providerId,
@@ -44,11 +44,12 @@ export const fetchQuota = async () => {
     });
   }
 
-  const projectId = auth.projectId ?? DEFAULT_PROJECT_ID;
+  // Personal CLI quota is account-scoped. The proxy's legacy project is unrelated.
+  const projectId = auth.projectId ?? (auth.sourceId === 'antigravity-cli' ? undefined : DEFAULT_PROJECT_ID);
 
   const [summaryPayload, modelsPayload] = await Promise.all([
-    fetchAntigravityQuotaSummary(accessToken, projectId),
-    fetchAntigravityModels(accessToken, projectId)
+    fetchSummary(accessToken, projectId),
+    fetchModels(accessToken, projectId)
   ]);
 
   warnIfGeminiGroupMissing(summaryPayload);

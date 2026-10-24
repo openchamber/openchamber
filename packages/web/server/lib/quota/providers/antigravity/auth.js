@@ -12,12 +12,13 @@ import {
   toNumber
 } from '../../utils/index.js';
 import { parseGoogleRefreshToken } from '../google/transforms.js';
+import { resolveCliAuth } from './cli-credentials.js';
 
 export const DEFAULT_PROJECT_ID = 'rising-fact-p41fc';
 
-export const resolveAntigravityAuth = () => {
-  for (const filePath of ANTIGRAVITY_ACCOUNTS_PATHS) {
-    const data = readJsonFile(filePath);
+export const resolveAntigravityAuth = ({ accountPaths = ANTIGRAVITY_ACCOUNTS_PATHS, readAccounts = readJsonFile, readCliAuth = resolveCliAuth } = {}) => {
+  for (const filePath of accountPaths) {
+    const data = readAccounts(filePath);
     const accounts = data?.accounts;
     if (Array.isArray(accounts) && accounts.length > 0) {
       const parsedIndex = toNumber(data.activeIndex);
@@ -39,7 +40,7 @@ export const resolveAntigravityAuth = () => {
     }
   }
 
-  return null;
+  return readCliAuth();
 };
 
 export const isConfigured = () => resolveAntigravityAuth() !== null;

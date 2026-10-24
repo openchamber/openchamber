@@ -31,7 +31,7 @@ asked, `/api/quota/providers` answers 500 instead of an empty list.
 
 | Provider ID | Display name | Module | Auth aliases/keys |
 | --- | --- | --- | --- |
-| `antigravity` | Antigravity | `providers/antigravity/index.js` | Antigravity accounts file (`~/.config/opencode/antigravity-accounts.json` or the `$OPENCODE_CONFIG_DIR` equivalent) |
+| `antigravity` | Antigravity | `providers/antigravity/index.js` | Antigravity accounts file (`~/.config/opencode/antigravity-accounts.json` or the `$OPENCODE_CONFIG_DIR` equivalent), then the official agy CLI personal login in the web backend |
 | `claude` | Claude | `providers/claude/` | Claude Code Keychain entry, Claude Code credentials file, OpenCode `auth.json` (`anthropic`, `claude`), `CLAUDE_CODE_OAUTH_TOKEN` |
 | `cline-pass` | ClinePass | `providers/cline-pass.js` | `cline-pass` (API key under `key` or `token`) |
 | `codex` | Codex | `providers/codex.js` | `openai`, `codex`, `chatgpt` |
@@ -162,6 +162,11 @@ to quota endpoint semantics are outside this compatibility fix.
 ## Antigravity quota and limit semantics
 
 Antigravity reports dual-layer quota for Google Cloud Code / Antigravity IDE accounts, querying Google's `retrieveUserQuotaSummary` endpoint (falling back to `daily-cloudcode-pa.googleapis.com` and `fetchAvailableModels` flat quotaInfo).
+
+- **Local CLI fallback in the web backend**: existing accounts-file credentials keep priority. Without a usable accounts-file login, read the official agy CLI's personal `token.refresh_token` from `${GEMINI_HOME:-${HOME:-~}/.gemini}/antigravity-cli/antigravity-oauth-token`. Absent, `consumer`, and `oauth-personal` auth methods are accepted; other methods and malformed credentials are unconfigured. On native Windows, the `gemini:antigravity` generic credential is checked first as UTF-8 JSON. HOME or GEMINI_HOME overrides disable native credential lookup. Only confirmed native credential absence permits file fallback. Empty, oversized, malformed, or non-personal native credentials and native reader failures leave the CLI unconfigured.
+- **Credential safety**: CLI storage is read-only. Token exchanges stay in memory and use the existing Google OAuth client. No login, ACP process, credential writes, conversation content, or inference-provider configuration is involved. This is authentication and quota metadata for an existing CLI login, so enterprise provider-entry restrictions are unchanged. New credential-reader errors never log raw parser or native error details.
+- **CLI project scope**: personal CLI requests omit `project`, which the quota endpoints accept for the authenticated account. Existing accounts keep their explicit project or legacy default project. Missing credentials, failed refresh, and failed quota reads retain distinct configured/error results.
+- **Runtime scope of the local fallback**: the shared server covers web, desktop, and hosted/native mobile connections. The standalone VS Code extension's separate credential resolver remains accounts-file-only. Its quota transforms and endpoint fallback behavior are unchanged.
 
 - **Windows**: each model row carries its group's rolling 5-hour (`5h`) and 7-day weekly (`weekly`) limits across Gemini and 3P (Claude/GPT) model groups. The provider card itself exposes no top-level windows (`windows: {}`), matching the Google provider: one overview row could only reflect a single group and would mislead a user whose tighter limit lives in the other group.
 - **Bottleneck prioritization**: when a group's weekly limit is exhausted or more constrained than its 5-hour limit, the weekly window is prioritized first in the model's window map.
