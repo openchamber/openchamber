@@ -311,7 +311,7 @@
     "@types/vscode": "^1.85.0",
     "@vitejs/plugin-react": "^5.0.0",
     "@vscode/vsce": "^4.0.0",
-    "concurrently": "^9.2.1",
+    "concurrently": "^10.0.0",
     "esbuild": "^0.28.0",
     "typescript": "~7.0.2",
     "vite": "^7.1.2"

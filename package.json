@@ -190,7 +190,7 @@
     "@vitejs/plugin-react": "^5.0.0",
     "autoprefixer": "^10.4.21",
     "babel-plugin-react-compiler": "^1.0.0",
-    "concurrently": "^9.2.1",
+    "concurrently": "^10.0.0",
     "cors": "^2.8.5",
     "cross-env": "^7.0.3",
     "node-addon-api": "7.1.1",
