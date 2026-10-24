@@ -378,7 +378,7 @@ describe("error normalisation", () => {
 
 describe("sendMessage", () => {
   test("switches model and agent, admits context as synthetic messages, then prompts", async () => {
-    responses.push(noContent(), noContent(), json({ id: "syn_1" }), json({ id: "msg_1" }))
+    responses.push(noContent(), json({ data: [{ id: "build" }, { id: "plan" }] }), noContent(), json({ id: "syn_1" }), json({ id: "msg_1" }))
     const id = await opencodeClient.sendMessage({
       id: "ses_1",
       providerID: "openai",
@@ -393,18 +393,71 @@ describe("sendMessage", () => {
     expect(id).toBe("msg_1")
     expect(requests.map((r) => `${r.method} ${r.url.pathname}`)).toEqual([
       "POST /api/session/ses_1/model",
+      "GET /api/agent",
       "POST /api/session/ses_1/agent",
       "POST /api/session/ses_1/synthetic",
       "POST /api/session/ses_1/prompt",
     ])
     expect(requests[0].body).toEqual({ model: { id: "gpt-5.6-luna", providerID: "openai" } })
-    expect(requests[2].body).toMatchObject({ text: "selected code", resume: false, metadata: { openchamberContext: { kind: "file-quote" } } })
-    expect(requests[3].body).toEqual({
+    expect(requests[1].headers.get("x-opencode-directory")).toBe(encodeURIComponent("/repo/app"))
+    expect(requests[3].body).toMatchObject({ text: "selected code", resume: false, metadata: { openchamberContext: { kind: "file-quote" } } })
+    expect(requests[4].body).toEqual({
       id: "msg_1",
       text: "hello",
       agents: [{ name: "explore", mention: { start: 0, end: 8, text: "@explore" } }],
     })
     expect(requests.every((r) => r.headers.get("x-opencode-directory") === encodeURIComponent("/repo/app"))).toBe(true)
+  })
+
+  test("skips an agent the session directory does not have and still sends the prompt", async () => {
+    responses.push(json({ data: [{ id: "build" }, { id: "plan" }] }), json({ id: "msg_9" }))
+    const id = await opencodeClient.sendMessage({
+      id: "ses_1",
+      providerID: "openai",
+      agent: "stock",
+      text: "hello",
+      messageId: "msg_9",
+      directory: "/repo/app",
+    })
+    expect(id).toBe("msg_9")
+    expect(requests.map((r) => `${r.method} ${r.url.pathname}`)).toEqual([
+      "GET /api/agent",
+      "POST /api/session/ses_1/prompt",
+    ])
+  })
+
+  test("an empty agent lookup still writes the selection rather than blocking the send", async () => {
+    responses.push(json({ data: [] }), noContent(), json({ id: "msg_10" }))
+    await opencodeClient.sendMessage({
+      id: "ses_1",
+      providerID: "openai",
+      agent: "build",
+      text: "hello",
+      messageId: "msg_10",
+      directory: "/repo/app",
+    })
+    expect(requests.map((r) => `${r.method} ${r.url.pathname}`)).toEqual([
+      "GET /api/agent",
+      "POST /api/session/ses_1/agent",
+      "POST /api/session/ses_1/prompt",
+    ])
+  })
+
+  test("a failed agent lookup writes the selection instead of failing the send", async () => {
+    responses.push(new Error("agent list unreachable"), noContent(), json({ id: "msg_11" }))
+    await opencodeClient.sendMessage({
+      id: "ses_1",
+      providerID: "openai",
+      agent: "build",
+      text: "hello",
+      messageId: "msg_11",
+      directory: "/repo/app",
+    })
+    expect(requests.map((r) => `${r.method} ${r.url.pathname}`)).toEqual([
+      "GET /api/agent",
+      "POST /api/session/ses_1/agent",
+      "POST /api/session/ses_1/prompt",
+    ])
   })
 
   test("context ids travel with the synthetic messages and sort below the prompt id", async () => {
@@ -498,7 +551,7 @@ describe("sendMessage", () => {
   })
 
   test("stops before the prompt when the runtime changes after the agent switch", async () => {
-    responses.push(noContent(), () => {
+    responses.push(noContent(), json({ data: [{ id: "build" }] }), () => {
       runtimeKey = "other"
       return noContent()
     })
@@ -512,7 +565,7 @@ describe("sendMessage", () => {
         text: "hello",
       }),
     ).rejects.toThrow("runtime changed")
-    expect(requests.map((r) => r.url.pathname)).toEqual(["/api/session/ses_1/model", "/api/session/ses_1/agent"])
+    expect(requests.map((r) => r.url.pathname)).toEqual(["/api/session/ses_1/model", "/api/agent", "/api/session/ses_1/agent"])
   })
 
   test("stops between context messages when the runtime changes", async () => {
@@ -623,7 +676,7 @@ describe("sendMessage with inline skills", () => {
 
 describe("sendCommand", () => {
   test("switches model and agent, then runs the command", async () => {
-    responses.push(noContent(), noContent(), noContent())
+    responses.push(noContent(), json({ data: [{ id: "build" }] }), noContent(), noContent())
     await opencodeClient.sendCommand({
       runtimeKey: "test-runtime",
       id: "ses_1",
@@ -634,10 +687,11 @@ describe("sendCommand", () => {
     })
     expect(requests.map((r) => r.url.pathname)).toEqual([
       "/api/session/ses_1/model",
+      "/api/agent",
       "/api/session/ses_1/agent",
       "/api/session/ses_1/command",
     ])
-    expect(requests[2].body).toMatchObject({ name: "review", text: "src" })
+    expect(requests[3].body).toMatchObject({ name: "review", text: "src" })
   })
 
   test("stops after the model switch when the runtime changes mid-command", async () => {
@@ -658,14 +712,14 @@ describe("sendCommand", () => {
   })
 
   test("stops before the command when the runtime changes after the agent switch", async () => {
-    responses.push(() => {
+    responses.push(json({ data: [{ id: "build" }] }), () => {
       runtimeKey = "other"
       return noContent()
     })
     await expect(
       opencodeClient.sendCommand({ runtimeKey: "test-runtime", id: "ses_1", agent: "build", command: "review" }),
     ).rejects.toThrow("runtime changed")
-    expect(requests.map((r) => r.url.pathname)).toEqual(["/api/session/ses_1/agent"])
+    expect(requests.map((r) => r.url.pathname)).toEqual(["/api/agent", "/api/session/ses_1/agent"])
   })
 })
 
@@ -971,6 +1025,7 @@ describe("read timeouts (#2470)", () => {
 describe("sendCommand context", () => {
   test("delivers attached context as non-resuming synthetic messages before the command", async () => {
     responses.push(new Response(null, { status: 204 })) // model switch
+    responses.push(json({ data: [{ id: "build" }] })) // agent availability lookup
     responses.push(new Response(null, { status: 204 })) // agent switch
     responses.push(json({ data: { id: "msg_ctx" } })) // synthetic
     responses.push(new Response(null, { status: 204 })) // command

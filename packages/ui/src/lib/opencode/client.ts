@@ -1331,7 +1331,24 @@ class OpencodeService {
     }
     if (selection.agent) {
       this.assertRuntimeUnchanged(runtimeKey)
-      await this.switchSessionAgent(sessionID, selection.agent, directory)
+      const requestedAgent = selection.agent
+      // A failed lookup reads as empty: the write proceeds on today's behavior
+      // instead of failing the send because availability could not be checked.
+      const agents = await this.listAgents(directory).catch(() => [])
+      // The same availability rule the server's prompt dispatch enforces,
+      // applied to the interactive switch: OpenCode stores an agent the
+      // session's directory does not have and only fails the turn at its next
+      // drain with AgentNotFoundError. Skipping the write keeps the session on
+      // its current agent, so the prompt still goes out. An empty list is a
+      // failed or unauthoritative lookup and must not turn a valid selection
+      // into a skipped write.
+      const unavailable = agents.length > 0 && !agents.some((agent) => agent.id === requestedAgent)
+      if (unavailable) {
+        console.warn(`[opencode] skipped agent '${requestedAgent}': not available in ${this.resolveDirectory(directory) ?? "the session's directory"}`)
+        return
+      }
+      this.assertRuntimeUnchanged(runtimeKey)
+      await this.switchSessionAgent(sessionID, requestedAgent, directory)
     }
   }
 
