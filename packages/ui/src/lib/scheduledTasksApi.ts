@@ -31,7 +31,8 @@ export type ScheduledTask = {
     modelID?: string;
     /** Model, thinking level and agent come from the session defaults at run time. */
     useDefaults?: boolean;
-    variant?: string;
+    /** `null` is an explicit Default; absent means no choice and may use the model's remembered level. */
+    variant?: string | null;
     agent?: string;
     goalEnabled?: boolean;
     goalTokenBudget?: number;

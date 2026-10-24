@@ -49,6 +49,7 @@ import {
   parseGuarded,
   parseIntegerAtLeast,
   parseIntegerInRange,
+  parseLastUsedEfforts,
   parseManagedRemoteTunnelPresetTokens,
   parseManagedRemoteTunnelPresets,
   parseModelRefs,
@@ -538,7 +539,7 @@ export const SETTINGS_REGISTRY = {
   fallbackVariant: field({ scope: 'profile', parse: parseNonEmptyString }),
   accountSwitchProviders: field({ scope: 'profile', parse: parseStringSet }),
   zenModel: field({ scope: 'profile', parse: parseNonEmptyTrimmedString }),
-  // The model-prefs auto-save owns these six with its own debounce.
+  // The model-prefs auto-save owns these with its own debounce.
   favoriteModels: field<ModelRef[]>({ scope: 'profile', parse: parseModelRefs(64), ui: uiStore('favoriteModels', setUi('favoriteModels'), { autoSave: false }) }),
   hiddenModels: field<ModelRef[]>({ scope: 'profile', parse: parseModelRefs(1024), ui: uiStore('hiddenModels', setUi('hiddenModels'), { autoSave: false }) }),
   collapsedModelProviders: field({ scope: 'profile', parse: parseStringSet, ui: uiStore('collapsedModelProviders', setUi('collapsedModelProviders'), { autoSave: false }) }),
@@ -548,6 +549,7 @@ export const SETTINGS_REGISTRY = {
   recentAgents: field({ scope: 'profile', parse: parseStringSet, ui: uiStore('recentAgents', setUi('recentAgents'), { autoSave: false }) }),
   favoriteAgents: field({ scope: 'profile', parse: parseStringSet, ui: uiStore('favoriteAgents', setUi('favoriteAgents'), { autoSave: false }) }),
   recentEfforts: field({ scope: 'profile', parse: parseRecentEfforts, ui: uiStore('recentEfforts', setUi('recentEfforts'), { autoSave: false }) }),
+  lastUsedEfforts: field({ scope: 'profile', parse: parseLastUsedEfforts, ui: uiStore('lastUsedEfforts', setUi('lastUsedEfforts'), { autoSave: false }) }),
   providerOrder: field({ scope: 'profile', parse: parseStringSet, ui: uiStore('providerOrder', (v) => useUIStore.getState().setProviderOrder(v)) }),
 
   // ── Sessions and summaries (profile) ──

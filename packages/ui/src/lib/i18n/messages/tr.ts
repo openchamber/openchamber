@@ -2613,6 +2613,7 @@ export const dict = {
   'chat.modelControls.current': 'Mevcut',
   'chat.modelControls.thinking': 'Düşünme',
   'chat.modelControls.inheritedVariantTooltip': 'Düşünme: {variant}, bu modelin varsayılanı',
+  'chat.modelControls.rememberedVariantTooltip': 'Düşünme: {variant}, bu modelle son kullanılan',
   'chat.modelControls.default': 'Varsayılan',
   'chat.modelControls.selectAgent': 'Agent seç',
   'chat.modelControls.costPerMillion': 'Maliyet ($/1M token)',

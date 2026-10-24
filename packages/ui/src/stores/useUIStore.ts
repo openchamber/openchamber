@@ -197,6 +197,10 @@ const CONTEXT_PANEL_MAX_PERSISTED_WIDTH = 10000;
 /** Per surface, not per panel: see clampContextPanelTabs. */
 const CONTEXT_PANEL_MAX_TABS = 12;
 const CONTEXT_PANEL_MAX_LABEL_LENGTH = 120;
+// One entry per model the person has sent with. The oldest go first when a
+// catalog with thousands of models would otherwise grow the profile without
+// bound.
+const MAX_LAST_USED_EFFORTS = 512;
 const LEFT_SIDEBAR_DEFAULT_WIDTH = 280;
 /** Separates browser tabs opened in the same millisecond. */
 let browserTabSequence = 0;
@@ -1054,6 +1058,11 @@ interface UIStore {
   /** Agents starred in the agent menu. While any of them is available, agent cycling (Tab) goes through those only. */
   favoriteAgents: string[];
   recentEfforts: Record<string, string[]>;
+  /**
+   * The thinking level each `provider/model` was last sent with. `null` is an
+   * explicit Default, distinct from a model that has never been sent.
+   */
+  lastUsedEfforts: Record<string, string | null>;
 
   diffLayoutPreference: 'dynamic' | 'inline' | 'side-by-side';
   diffFileLayout: Record<string, 'inline' | 'side-by-side'>;
@@ -1354,6 +1363,7 @@ interface UIStore {
   addRecentAgent: (agentName: string) => void;
   toggleFavoriteAgent: (agentName: string) => void;
   addRecentEffort: (providerID: string, modelID: string, variant: string | undefined) => void;
+  rememberLastUsedEffort: (providerID: string, modelID: string, variant: string | null) => void;
   setDiffLayoutPreference: (mode: 'dynamic' | 'inline' | 'side-by-side') => void;
   /** The layout setting for every diff, dropping the per-file choices (the Changes header toggle). */
   setDiffLayoutForAllFiles: (mode: 'inline' | 'side-by-side') => void;
@@ -1585,6 +1595,7 @@ export const useUIStore = create<UIStore>()(
         recentAgents: [],
         favoriteAgents: [],
         recentEfforts: {},
+        lastUsedEfforts: {},
         diffLayoutPreference: 'inline',
         diffFileLayout: {},
         diffWrapLines: false,
@@ -3123,6 +3134,28 @@ export const useUIStore = create<UIStore>()(
           });
         },
 
+        rememberLastUsedEffort: (providerID, modelID, variant) => {
+          const provider = typeof providerID === 'string' ? providerID.trim() : '';
+          const model = typeof modelID === 'string' ? modelID.trim() : '';
+          if (!provider || !model) {
+            return;
+          }
+          const key = `${provider}/${model}`;
+          const normalizedVariant = typeof variant === 'string' && variant.trim().length > 0
+            ? variant.trim()
+            : null;
+          set((state) => {
+            if (state.lastUsedEfforts[key] === normalizedVariant) {
+              return state;
+            }
+            const entries = Object.entries(state.lastUsedEfforts).filter(([entryKey]) => entryKey !== key);
+            entries.push([key, normalizedVariant]);
+            return {
+              lastUsedEfforts: Object.fromEntries(entries.slice(-MAX_LAST_USED_EFFORTS)),
+            };
+          });
+        },
+
         applyTheme: () => {
           const { theme } = get();
           const root = document.documentElement;
@@ -3750,6 +3783,7 @@ export const useUIStore = create<UIStore>()(
           recentAgents: state.recentAgents,
           favoriteAgents: state.favoriteAgents,
           recentEfforts: state.recentEfforts,
+          lastUsedEfforts: state.lastUsedEfforts,
           diffLayoutPreference: state.diffLayoutPreference,
           diffWrapLines: state.diffWrapLines,
           diffHideWhitespace: state.diffHideWhitespace,

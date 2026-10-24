@@ -228,7 +228,9 @@ const normalizeExecution = (value, targetSessionId) => {
   const prompt = clampLength(asNonEmptyString(value.prompt) || '', MAX_TASK_PROMPT_LENGTH);
   const providerID = asNonEmptyString(value.providerID);
   const modelID = asNonEmptyString(value.modelID);
-  const variant = asNonEmptyString(value.variant);
+  // `null` is an explicit Default; a missing `variant` is no choice and may be
+  // filled from the model's remembered level at run time.
+  const variant = value.variant === null ? null : (asNonEmptyString(value.variant) ?? undefined);
   const agent = asNonEmptyString(value.agent);
   const goalEnabled = value.goalEnabled === true;
   const permissionAutoAccept = value.permissionAutoAccept === true;
@@ -256,7 +258,7 @@ const normalizeExecution = (value, targetSessionId) => {
     prompt,
     ...(providerID && modelID ? { providerID, modelID } : {}),
     ...(useDefaults ? { useDefaults: true } : {}),
-    ...(variant ? { variant } : {}),
+    ...(variant !== undefined ? { variant } : {}),
     ...(agent ? { agent } : {}),
     ...(goalEnabled ? { goalEnabled: true } : {}),
     ...(goalEnabled && goalTokenBudget ? { goalTokenBudget } : {}),

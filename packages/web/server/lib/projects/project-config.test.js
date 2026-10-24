@@ -66,6 +66,40 @@ describe('project-config runtime', () => {
     }
   });
 
+  it('stores an explicit Default apart from no choice', async () => {
+    const { runtime, cleanup } = await createRuntime();
+    const base = {
+      name: 'Levels',
+      enabled: true,
+      schedule: { kind: 'daily', time: '09:30', timezone: 'UTC' },
+      execution: { prompt: 'Summarize', providerID: 'openai', modelID: 'gpt-5' },
+    };
+    try {
+      const created = await runtime.upsertScheduledTask('project-test', {
+        ...base,
+        execution: { ...base.execution, variant: null },
+      });
+      expect(created.task.execution.variant).toBeNull();
+
+      const withoutChoice = await runtime.upsertScheduledTask('project-test', {
+        ...created.task,
+        execution: { ...created.task.execution, variant: undefined },
+      });
+      expect(Object.hasOwn(withoutChoice.task.execution, 'variant')).toBe(false);
+
+      const named = await runtime.upsertScheduledTask('project-test', {
+        ...withoutChoice.task,
+        execution: { ...withoutChoice.task.execution, variant: 'high' },
+      });
+      expect(named.task.execution.variant).toBe('high');
+
+      const reloaded = await runtime.listScheduledTasks('project-test');
+      expect(reloaded[0].execution.variant).toBe('high');
+    } finally {
+      await cleanup();
+    }
+  });
+
   it('accepts a task that follows the session defaults without a model, and still needs one when pinned', async () => {
     const { runtime, cleanup } = await createRuntime();
     const task = (execution) => ({

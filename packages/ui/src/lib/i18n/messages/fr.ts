@@ -2462,6 +2462,7 @@ export const dict = {
   'chat.modelControls.current': 'Actuel',
   'chat.modelControls.thinking': 'Pensée',
   'chat.modelControls.inheritedVariantTooltip': 'Pensée : {variant}, valeur par défaut de ce modèle',
+  'chat.modelControls.rememberedVariantTooltip': 'Pensée : {variant}, dernière valeur utilisée avec ce modèle',
   'chat.modelControls.default': 'Défaut',
   'chat.modelControls.selectAgent': 'Sélectionner un agent',
   'chat.modelControls.costPerMillion': 'Coût ($/1 million de jetons)',

@@ -2743,6 +2743,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.modelControls.current": "поточний",
   "chat.modelControls.thinking": "Мислення",
   "chat.modelControls.inheritedVariantTooltip": "Мислення: {variant}, типовий рівень цієї моделі",
+  "chat.modelControls.rememberedVariantTooltip": "Мислення: {variant}, останнє використане з цією моделлю",
   "chat.modelControls.default": "За замовчуванням",
   "chat.modelControls.selectAgent": "Вибрати агента",
   "chat.modelControls.costPerMillion": "Вартість ($/1 млн токенів)",

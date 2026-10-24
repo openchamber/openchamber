@@ -266,6 +266,9 @@ export const createScheduledTasksRuntime = (deps) => {
     // The session defaults a task with `useDefaults` runs on:
     // `(projectID) => { providerID, modelID, variant, agent }`, any of them null.
     readSessionDefaults = null,
+    // `(providerID, modelID) => string | null | undefined`: the level that model
+    // was last sent with. Used only when the task has no level of its own.
+    readRememberedEffort = null,
     messageQueueRuntime,
     resolvePrimaryWorktreeRoot,
     isSessionArchived,
@@ -304,7 +307,9 @@ export const createScheduledTasksRuntime = (deps) => {
       return {
         providerID: execution.providerID ?? null,
         modelID: execution.modelID ?? null,
-        variant: execution.variant ?? null,
+        // `undefined` is no choice, which lets the remembered level fill in;
+        // `null` is an explicit Default and must stay that way.
+        variant: execution.variant,
         agent: execution.agent ?? null,
       };
     }
@@ -319,6 +324,37 @@ export const createScheduledTasksRuntime = (deps) => {
     } catch (error) {
       logger.warn?.('[scheduled-tasks] session defaults unavailable, using OpenCode defaults:', error?.message ?? error);
       return { providerID: null, modelID: null, variant: null, agent: null };
+    }
+  };
+
+  // A task with no level of its own starts on the model's remembered level,
+  // but only when the model still lists it. Explicit Default (`null`) and a
+  // named level are used as stored.
+  const applyRememberedVariant = async ({ client, selection, enabled }) => {
+    if (!enabled || !selection.providerID || !selection.modelID || typeof readRememberedEffort !== 'function') {
+      return;
+    }
+    let remembered;
+    try {
+      remembered = await readRememberedEffort(selection.providerID, selection.modelID);
+    } catch {
+      return;
+    }
+    if (remembered === undefined) return;
+    if (remembered === null) {
+      selection.variant = null;
+      return;
+    }
+    try {
+      const response = await client.model.list();
+      const models = Array.isArray(response?.data) ? response.data : [];
+      const model = models.find((entry) => entry?.providerID === selection.providerID
+        && (entry?.modelID === selection.modelID || entry?.id === selection.modelID));
+      const offered = Array.isArray(model?.variants)
+        && model.variants.some((entry) => entry?.id === remembered);
+      if (offered) selection.variant = remembered;
+    } catch {
+      // A catalog read that fails leaves the task on no level, as before.
     }
   };
 
@@ -613,6 +649,13 @@ export const createScheduledTasksRuntime = (deps) => {
     const authHeaders = getOpenCodeAuthHeaders();
     const client = createScopedClient(directory);
     const selection = await resolveRunSelection(projectID, task);
+    await applyRememberedVariant({
+      client,
+      selection,
+      // A pinned task fills in only when it stored no level. A task following
+      // the defaults fills in when no configured default level exists.
+      enabled: task.execution.useDefaults ? !selection.variant : task.execution.variant === undefined,
+    });
 
     // Agent, model and variant belong to the session in v2: a scheduled run
     // fixes them here instead of repeating them on every prompt.

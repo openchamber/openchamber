@@ -295,6 +295,17 @@ persists, per session, the session-record agent and model the composer last
 followed; a different record value is a newer switch and replaces the pick
 (Auto excepted), while an unchanged one keeps an unsent pick
 (`packages/ui/src/stores/DOCUMENTATION.md`).
+
+A picker change records the chosen level for that model in the profile
+(`lastUsedEfforts`, `lib/modelEfforts.ts`) immediately, including an explicit
+Default and the left/right keys inside the model picker. A successful user
+composer send also records the level it carried. A session's own saved pick
+stays above the remembered value; without one, a level configured for the
+model, then the remembered level, then Default applies. A BTW fork reads the
+map but never writes it; queued delivery, scheduled tasks and other background
+sends never write it either. A level is only ever read back for the same
+`provider/model`. The server's tool-facing session routes and the new-session
+send dialogs read the same profile map; they never write it.
 Agent and model switch events stamp the session's `time.updated`, as OpenCode's
 own record does.
 

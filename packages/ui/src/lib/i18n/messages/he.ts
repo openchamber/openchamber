@@ -2725,6 +2725,7 @@ export const dict = {
   'chat.modelControls.current': 'נוכחי',
   'chat.modelControls.thinking': 'חשיבה',
   'chat.modelControls.inheritedVariantTooltip': 'חשיבה: {variant}, ברירת המחדל של המודל הזה',
+  'chat.modelControls.rememberedVariantTooltip': 'חשיבה: {variant}, האחרון שנעשה בו שימוש עם המודל הזה',
   'chat.modelControls.default': 'ברירת מחדל',
   'chat.modelControls.selectAgent': 'בחר סוכן',
   'chat.modelControls.costPerMillion': 'עלות ($ ל-1M טוקנים)',

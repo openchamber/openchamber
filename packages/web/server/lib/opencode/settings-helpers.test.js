@@ -695,6 +695,29 @@ describe('settings helpers', () => {
       });
     });
 
+    it('round-trips lastUsedEfforts with a named level and an explicit Default', () => {
+      const helpers = createTestHelpersWithRealSanitizers();
+      const input = {
+        'anthropic/claude-opus-4': 'high',
+        'openai/gpt-5': null,
+      };
+
+      expect(helpers.sanitizeSettingsUpdate({ lastUsedEfforts: input })).toEqual({
+        lastUsedEfforts: input,
+      });
+    });
+
+    it('rejects garbage lastUsedEfforts input', () => {
+      const helpers = createTestHelpersWithRealSanitizers();
+
+      expect(helpers.sanitizeSettingsUpdate({ lastUsedEfforts: 'not-an-object' })).toEqual({});
+      expect(helpers.sanitizeSettingsUpdate({ lastUsedEfforts: [] })).toEqual({});
+      expect(helpers.sanitizeSettingsUpdate({ lastUsedEfforts: null })).toEqual({});
+      expect(helpers.sanitizeSettingsUpdate({ lastUsedEfforts: { 'anthropic/claude-opus-4': 42 } })).toEqual({});
+      expect(helpers.sanitizeSettingsUpdate({ lastUsedEfforts: { '': 'high' } })).toEqual({});
+      expect(helpers.sanitizeSettingsUpdate({ lastUsedEfforts: { 'anthropic/claude-opus-4': '' } })).toEqual({});
+    });
+
     it('rejects garbage hiddenModels input the same way sanitizeModelRefs rejects bad refs', () => {
       const helpers = createTestHelpersWithRealSanitizers();
 
@@ -755,6 +778,10 @@ describe('settings helpers', () => {
           'anthropic/claude-opus-4': ['high', 'default'],
           'openai/gpt-5': ['low'],
         },
+        lastUsedEfforts: {
+          'anthropic/claude-opus-4': 'high',
+          'openai/gpt-5': null,
+        },
         favoriteModels: [{ providerID: 'anthropic', modelID: 'claude-haiku-4' }],
         recentModels: [{ providerID: 'openai', modelID: 'gpt-5' }],
       };
@@ -765,6 +792,7 @@ describe('settings helpers', () => {
       expect(sanitized.collapsedModelProviders).toEqual(payload.collapsedModelProviders);
       expect(sanitized.recentAgents).toEqual(payload.recentAgents);
       expect(sanitized.recentEfforts).toEqual(payload.recentEfforts);
+      expect(sanitized.lastUsedEfforts).toEqual(payload.lastUsedEfforts);
       expect(sanitized.favoriteModels).toEqual(payload.favoriteModels);
       expect(sanitized.recentModels).toEqual(payload.recentModels);
     });
@@ -859,7 +887,7 @@ describe('settings registry gate', () => {
     defaultModel: 'anthropic/claude', defaultVariant: 'high', defaultAgent: 'build', smallModelUseDefault: false, smallModelOverride: 'anthropic/haiku', smallModelVariant: 'high',
     walkthroughModelOverride: 'anthropic/claude', walkthroughModelVariant: 'high', zenModel: 'zen/model', fallbackModel: 'openai/gpt', fallbackVariant: 'high', accountSwitchProviders: ['anthropic'],
     favoriteModels: [{ providerID: 'anthropic', modelID: 'claude' }], hiddenModels: [{ providerID: 'openai', modelID: 'gpt' }], collapsedModelProviders: ['openai'],
-    recentModels: [{ providerID: 'anthropic', modelID: 'claude' }], lastSelectedModel: 'anthropic/claude', recentAgents: ['build'], favoriteAgents: ['build'], recentEfforts: { 'anthropic/claude': ['high'] }, providerOrder: ['anthropic'],
+    recentModels: [{ providerID: 'anthropic', modelID: 'claude' }], lastSelectedModel: 'anthropic/claude', recentAgents: ['build'], favoriteAgents: ['build'], recentEfforts: { 'anthropic/claude': ['high'] }, lastUsedEfforts: { 'anthropic/claude': 'high', 'openai/gpt-5': null }, providerOrder: ['anthropic'],
     sessionRecapEnabled: true, sessionSuggestionEnabled: true, sessionWorkEnabled: true, sessionReviewOfferEnabled: true, sessionGoalEnabled: true, sessionGoalChecker: 'small-model', sessionGoalMaxAutoTurns: 50, sessionGoalDefaultBudgetEnabled: true, sessionGoalDefaultBudget: 5,
     summarizeLastMessage: true, summaryThreshold: 100, summaryLength: 50, maxLastMessageLength: 200, showDeletionDialog: true,
     nativeNotificationsEnabled: true, notificationMode: 'always', notifyOnSubtasks: true, notifyOnCompletion: true, notifyOnError: true, notifyOnQuestion: true,

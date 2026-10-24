@@ -775,7 +775,10 @@ one app-wide composer state is split per column:
   agent. Its picker is `ModelControls` in controlled mode with
   `agentSelectable`, so the agent pick is saved for the session and never
   changes the main chat's agent. "Run in parallel" is offered only in the main
-  chat.
+  chat. Picker changes record the chosen level for that model in the profile
+  immediately, and a successful send records the level it carried; a later
+  composer on the same model starts there when neither the session nor the
+  model's configuration names a level.
 - **Attachments.** Each draft's files live under its draft identity in the
   input store, and `useDraftAttachedFiles(identity)` shows a composer its own
   files. The selected slot (`attachedFiles`) belongs to the composer the user

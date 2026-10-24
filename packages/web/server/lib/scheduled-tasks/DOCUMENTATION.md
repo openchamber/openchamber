@@ -164,6 +164,12 @@ reaches it on its next run without editing it. With nothing set, the session is
 created without a model or agent and OpenCode applies its own. A pinned value
 stored next to `useDefaults` is kept only for when the task is pinned again.
 
+`execution.variant` has three states: a level string, `null` for an explicit
+Default, and no key for no choice. A pinned task with no choice, or a
+`useDefaults` task whose configured defaults name no level, takes the model's
+last used level at run time when the model still lists it. An explicit Default
+is never replaced by that lookup.
+
 ## Files
 
 - `packages/web/server/lib/scheduled-tasks/runtime.js`

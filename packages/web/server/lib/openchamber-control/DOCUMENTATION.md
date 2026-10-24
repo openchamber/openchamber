@@ -124,6 +124,11 @@ other.
 - Send and fork dispatches without an explicit model/agent/variant reuse the
   target session's last user-message selection before falling back to the
   configured defaults; only session creation resolves defaults directly.
+- A dispatch that names a model but omits `variant` resolves its level in the
+  same order as the composer: the agent pin and the project or Settings default
+  for that model, then the profile's `lastUsedEfforts` entry, then Default. A
+  send that names no model keeps the session's own selection, and a remembered
+  level the model no longer lists is ignored.
 - `session.create` with `pullRequest` passes the number, and `worktree` and
   `branch` as folder and local-branch names, to the session service, which
   creates the worktree through the injected `createChangeRequestWorktree`

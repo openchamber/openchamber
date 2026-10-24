@@ -61,6 +61,7 @@ import {
 } from '@/lib/messages/userModelChoice';
 import type { BtwSelection } from '@/stores/useBtwStore';
 import { listModelVariantIds, type ModelVariantSource } from '@/lib/modelVariants';
+import { effortMemoryKey, rememberEffort, resolveEffortChoice } from '@/lib/modelEfforts';
 
 type IconComponent = IconName;
 
@@ -358,6 +359,11 @@ type ModelControlsProps = {
     onMobilePanelChange?: (panel: MobileControlsPanel) => void;
     /** Offers "Run on several models" at the top of the desktop model picker. */
     onRunInParallel?: () => void;
+    /**
+     * Picker effort changes become the model's remembered level. Off for a
+     * BTW fork, whose own effort must not change the main chat's default.
+     */
+    rememberVariantPicks?: boolean;
 } & (
     | { selection?: never; sessionId?: never; agentSelectable?: never }
     | {
@@ -381,6 +387,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     selection,
     sessionId: controlledSessionId,
     agentSelectable = false,
+    rememberVariantPicks = true,
 }) => {
     const { t } = useI18n();
     const { focusInput: focusColumnInput } = useChatColumnActions();
@@ -494,6 +501,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const setLastSelectedModel = useUIStore((state) => state.setLastSelectedModel);
     const addRecentAgent = useUIStore((state) => state.addRecentAgent);
     const addRecentEffort = useUIStore((state) => state.addRecentEffort);
+    const lastUsedEfforts = useUIStore((state) => state.lastUsedEfforts);
     const globalModelSelectorOpen = useUIStore((state) => !selection && state.isModelSelectorOpen);
     const [localModelSelectorOpen, setLocalModelSelectorOpen] = React.useState(false);
     const isModelSelectorOpen = selection ? localModelSelectorOpen : globalModelSelectorOpen;
@@ -869,10 +877,13 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         const variantOptions = getModelVariantOptions(providerId, modelId);
         if (variantOptions.length === 0) return undefined;
 
-        let currentInherited: string | undefined;
+        // Keep a `null` inherited choice: it is an explicit Default the model
+        // remembers, not "nothing chosen".
+        let currentInherited: string | null | undefined;
         if (currentProviderId === providerId && currentModelId === modelId) {
-            currentInherited = currentVariantSelection.inherited
-                ?? (currentVariantSelection.override === null || currentVariantSelection.override === undefined
+            currentInherited = currentVariantSelection.inherited !== undefined
+                ? currentVariantSelection.inherited
+                : (currentVariantSelection.override === null || currentVariantSelection.override === undefined
                     ? effectiveCurrentVariant
                     : undefined);
         }
@@ -884,11 +895,12 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             && agent.model.id === modelId
         ) ? agent.model?.variant : undefined;
         const configuredVariant = getDefaultVariantForModel(providerId, modelId);
-        const candidates = currentSessionId
-            ? [agentVariant, configuredVariant, currentInherited]
-            : [currentInherited, agentVariant, configuredVariant];
-        return candidates.find((candidate) => candidate !== undefined && variantOptions.includes(candidate));
-    }, [agents, currentAgentName, currentModelId, currentProviderId, currentSessionId, currentVariantSelection, effectiveCurrentVariant, getDefaultVariantForModel, getModelVariantOptions, uiAgentName]);
+        const rememberedVariant = lastUsedEfforts?.[effortMemoryKey(providerId, modelId)];
+        return resolveEffortChoice(
+            [agentVariant, configuredVariant, rememberedVariant, currentInherited],
+            variantOptions,
+        );
+    }, [agents, currentAgentName, currentModelId, currentProviderId, currentVariantSelection, effectiveCurrentVariant, getDefaultVariantForModel, getModelVariantOptions, lastUsedEfforts, uiAgentName]);
 
     /**
      * The session's recorded choice for this model, in the selection store's
@@ -897,7 +909,11 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
      * would hand a real "Default" back to the callers as "nothing chosen", and
      * they would re-record it as a choice on the next write.
      */
-    const resolveModelVariantSelection = React.useCallback((providerId: string, modelId: string): string | null | undefined => {
+    const resolveModelVariantSelection = React.useCallback((
+        providerId: string,
+        modelId: string,
+        options?: { includeInherited?: boolean },
+    ): string | null | undefined => {
         const variantOptions = getModelVariantOptions(providerId, modelId);
         if (variantOptions.length === 0) {
             return undefined;
@@ -916,19 +932,40 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             }
         }
 
+        // Restoring a session must not record an inherited level as the
+        // session's own pick; the effort effect resolves it afterwards.
+        if (options?.includeInherited === false) {
+            return undefined;
+        }
+
         if (currentProviderId === providerId && currentModelId === modelId && currentVariant && variantOptions.includes(currentVariant)) {
             return currentVariant;
         }
 
-        return undefined;
+        const agent = effectiveAgentName ? agents.find((candidate) => candidate.name === effectiveAgentName) : undefined;
+        const agentVariant = (
+            agent?.model?.providerID === providerId
+            && agent.model.id === modelId
+        ) ? agent.model?.variant : undefined;
+        return resolveEffortChoice(
+            [
+                agentVariant,
+                getDefaultVariantForModel(providerId, modelId),
+                lastUsedEfforts?.[effortMemoryKey(providerId, modelId)],
+            ],
+            variantOptions,
+        );
     }, [
+        agents,
         currentAgentName,
         currentModelId,
         currentProviderId,
         currentSessionId,
         currentVariant,
         getAgentModelVariantForSession,
+        getDefaultVariantForModel,
         getModelVariantOptions,
+        lastUsedEfforts,
         uiAgentName,
         controlledSessionId,
         selection,
@@ -955,6 +992,16 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
      * they found nothing, because "the history carries no effort" is not the
      * user having chosen "Default".
      */
+    /**
+     * A picker change is a choice for that model even before anything is sent:
+     * it becomes the model's default for the next conversation. `null` is an
+     * explicit Default and is kept as a choice.
+     */
+    const rememberVariantForModel = React.useCallback((providerId: string, modelId: string, variant: string | null | undefined) => {
+        if (!rememberVariantPicks) return;
+        rememberEffort(providerId, modelId, variant ?? null);
+    }, [rememberVariantPicks]);
+
     const commitVariantSelectionForModel = React.useCallback((providerId: string, modelId: string, variant: string | null | undefined, agentNameOverride?: string | null) => {
         if (selection) {
             if (controlledSessionId && selection.agent) {
@@ -1092,7 +1139,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                 applyModelSelectionWithVariant(
                     savedSessionModel.providerId,
                     savedSessionModel.modelId,
-                    resolveModelVariantSelection(savedSessionModel.providerId, savedSessionModel.modelId),
+                    resolveModelVariantSelection(savedSessionModel.providerId, savedSessionModel.modelId, { includeInherited: false }),
                     restoreAgentName,
                 );
             }
@@ -1423,7 +1470,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         // The chosen effort does not exist on this model: drop the choice and
         // inherit, rather than pin an explicit "Default" the user never picked.
         if (currentVariant && !availableVariants.includes(currentVariant)) {
-            setCurrentVariant(resolveInheritedVariantForModel(currentProviderId, currentModelId));
+            setCurrentVariantOverride(undefined, resolveInheritedVariantForModel(currentProviderId, currentModelId));
             return;
         }
 
@@ -1451,7 +1498,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             // "Default" was picked for this session, or is picked right now.
             setCurrentVariantOverride(null, inheritedVariant);
         } else {
-            setCurrentVariant(inheritedVariant);
+            setCurrentVariantOverride(undefined, inheritedVariant);
         }
         manualVariantSelectionRef.current = false;
     }, [
@@ -1482,8 +1529,9 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             // Picked in the effort menu, so no effort means the user picked
             // "Default" — a choice, recorded as `null`.
             commitVariantSelectionForModel(currentProviderId, currentModelId, variant ?? null);
+            rememberVariantForModel(currentProviderId, currentModelId, variant ?? null);
         }
-    }, [commitVariantSelectionForModel, currentModelId, currentProviderId]);
+    }, [commitVariantSelectionForModel, currentModelId, currentProviderId, rememberVariantForModel]);
 
     const handleAgentChange = React.useCallback((agentName: string, options?: { closeModelSelector?: boolean }) => {
         if (selection) {
@@ -1573,6 +1621,9 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                     console.error('[ModelControls] Model not available for selection:', { providerId, modelId });
                 }
                 return;
+            }
+            if (options?.applyVariant) {
+                rememberVariantForModel(providerId, modelId, options.variant ?? null);
             }
             if (!selection && !options?.applyVariant && !isAutoModel(providerId, modelId)) {
                 // Add to recent models on successful selection. Auto is pinned, not recent.
@@ -1924,10 +1975,18 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             }
         }
 
-        const handleMobileModelApply = (providerId: string, modelId: string, variant: string | null | undefined) => {
-            // Chosen in the mobile model sheet, and the row already showed this
-            // effort: no effort there means the user is applying "Default".
-            const result = applyModelSelectionWithVariant(providerId, modelId, variant ?? null);
+        const handleMobileModelApply = (
+            providerId: string,
+            modelId: string,
+            variant: string | null | undefined,
+            explicitVariant = true,
+        ) => {
+            // A row tap only picks the model; the effort effect then resolves
+            // its configured or remembered level. A variant chip is an explicit
+            // pick, where no effort means "Default".
+            const result = explicitVariant
+                ? applyModelSelectionWithVariant(providerId, modelId, variant ?? null)
+                : tryApplyModelSelection(providerId, modelId);
             if (result !== 'applied') {
                 if (result === 'provider-missing') {
                     console.error('[ModelControls] Provider not available for selection:', providerId);
@@ -1935,6 +1994,9 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                     console.error('[ModelControls] Model not available for selection:', { providerId, modelId });
                 }
                 return;
+            }
+            if (explicitVariant) {
+                rememberVariantForModel(providerId, modelId, variant ?? null);
             }
             if (!selection) setLastSelectedModel(providerId, modelId);
 
@@ -1994,7 +2056,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                     <div className="flex items-center gap-2 px-2 py-1.5">
                         <button
                             type="button"
-                            onClick={() => handleMobileModelApply(providerId, modelId, resolvedVariant)}
+                            onClick={() => handleMobileModelApply(providerId, modelId, resolvedVariant, false)}
                             className={cn(
                                 'flex flex-1 min-w-0 items-start gap-2 text-start',
                                 'focus:outline-none focus-visible:ring-1 focus-visible:ring-ring rounded-lg'
@@ -2295,6 +2357,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                 return;
             }
 
+            rememberVariantForModel(targetProviderId, targetModelId, variant ?? null);
             closeMobilePanel();
             requestAnimationFrame(focusColumnInput);
         };
@@ -2525,7 +2588,9 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             const mapKey = buildModelRefKey(providerID, modelID);
             const hasPendingVariant = pendingThinkingVariants.has(mapKey);
             const currentPending = pendingThinkingVariants.get(mapKey);
-            const activeModelVariant = hasPendingVariant ? currentPending : (currentProviderId === providerID && currentModelId === modelID ? currentVariant : undefined);
+            const activeModelVariant = hasPendingVariant
+                ? currentPending
+                : resolveModelVariantSelection(providerID, modelID) ?? undefined;
 
             const variantsWithDefault: Array<string | undefined> = [undefined, ...variantKeys];
             const currentVariantIndex = variantsWithDefault.indexOf(activeModelVariant);
@@ -2546,6 +2611,9 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                 next.add(mapKey);
                 return next;
             });
+            // Arrow keys change the level on the row itself, before a model is
+            // chosen: remember it for that model now.
+            rememberVariantForModel(providerID, modelID, nextVariant ?? null);
             setModelPickerRenderVersion((version) => version + 1);
             return true;
         };
@@ -2614,7 +2682,9 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
 
             const hasPendingVariant = pendingThinkingVariants.has(mapKey);
             const pendingVariant = pendingThinkingVariants.get(mapKey);
-            const effectiveVariant = hasPendingVariant ? pendingVariant : (isSelected ? currentVariant : undefined);
+            const effectiveVariant = hasPendingVariant
+                ? pendingVariant
+                : resolveModelVariantSelection(entry.providerID, entry.modelID) ?? undefined;
             const displayLabel = effectiveVariant
                 ? effectiveVariant.charAt(0).toUpperCase() + effectiveVariant.slice(1)
                 : 'Default';
@@ -2954,12 +3024,25 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         const displayVariant = currentVariant ? formatEffortLabel(currentVariant) : t('chat.modelControls.default');
         const isDefault = !currentVariant;
         const colorClass = isDefault ? 'text-muted-foreground' : 'text-[color:var(--status-info)]';
-        // An effort nobody picked in this composer is this model's configured
-        // default; the tooltip says so.
+        // An effort nobody picked in this composer is either configured for
+        // this model or the level it was last sent with. The tooltip says
+        // which, so a remembered value is not read as the model's default.
         const isInherited = !selection && !isDefault && currentVariantSelection.override === undefined;
-        const tooltipText = isInherited
-            ? t('chat.modelControls.inheritedVariantTooltip', { variant: displayVariant })
-            : `${t('chat.modelControls.thinking')}: ${displayVariant}`;
+        const agentVariant = currentAgent?.model?.providerID === currentProviderId
+            && currentAgent.model.id === currentModelId
+            ? currentAgent.model.variant
+            : undefined;
+        const hasConfiguredInherited = [agentVariant, getDefaultVariantForModel(currentProviderId, currentModelId)]
+            .some((candidate) => candidate !== undefined && displayVariants.includes(candidate));
+        const rememberedVariant = lastUsedEfforts?.[effortMemoryKey(currentProviderId, currentModelId)];
+        const isRemembered = isInherited
+            && currentVariant === rememberedVariant
+            && !hasConfiguredInherited;
+        const tooltipText = isRemembered
+            ? t('chat.modelControls.rememberedVariantTooltip', { variant: displayVariant })
+            : isInherited
+                ? t('chat.modelControls.inheritedVariantTooltip', { variant: displayVariant })
+                : `${t('chat.modelControls.thinking')}: ${displayVariant}`;
 
         if (isCompact) {
             return (

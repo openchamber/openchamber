@@ -1885,6 +1885,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             delivery?: 'steer';
             skills?: SkillMentions;
             queuedGoal?: QueuedMessageGoal | null;
+            recordEffort?: boolean;
         } | undefined;
         if (isBtwActive && btwSessionId && btwDirectory) {
             sendMessageOptions = {
@@ -1897,7 +1898,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             if (capturedDraftSnapshot) sendMessageOptions.draftSnapshot = capturedDraftSnapshot;
         }
         if (delivery && sendMessageOptions) sendMessageOptions.delivery = delivery;
-        sendMessageOptions = { ...sendMessageOptions, userInitiated: true };
+        // BTW sends run on the fork's own model and effort; they must not
+        // overwrite what this person last sent with the main composer.
+        sendMessageOptions = { ...sendMessageOptions, userInitiated: true, recordEffort: !isBtwActive };
 
         // Queued messages resolved their mentions when they were queued; only
         // the composer's own text can still name a file to read.

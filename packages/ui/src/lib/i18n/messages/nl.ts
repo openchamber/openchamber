@@ -2786,6 +2786,7 @@ export const dict = {
   'chat.modelControls.current': 'Huidig',
   'chat.modelControls.thinking': 'Denken',
   'chat.modelControls.inheritedVariantTooltip': 'Denken: {variant}, standaard voor dit model',
+  'chat.modelControls.rememberedVariantTooltip': 'Denken: {variant}, laatst gebruikt met dit model',
   'chat.modelControls.default': 'Standaard',
   'chat.modelControls.selectAgent': 'Agent kiezen',
   'chat.modelControls.costPerMillion': 'Kosten ($/1M tokens)',

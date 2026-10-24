@@ -353,6 +353,57 @@ describe('scheduled-tasks runtime prompt dispatch', () => {
     expect(dispatch[2].body.resume).toBeUndefined();
   });
 
+  it('starts a pinned model on its remembered level, while explicit Default stays Default', async () => {
+    const sessionBodies = [];
+    vi.stubGlobal('fetch', vi.fn(async (input, init = {}) => {
+      const { pathname } = new URL(String(input));
+      if (init.method === 'POST' && pathname === '/api/session') {
+        sessionBodies.push(JSON.parse(init.body));
+      }
+      const data = pathname === '/api/model'
+        ? [{ providerID: 'openai', modelID: 'gpt-5', variants: [{ id: 'high' }] }]
+        : pathname === '/api/session'
+          ? { id: `ses_${sessionBodies.length}` }
+          : [];
+      return new Response(JSON.stringify({ location: { directory: '/repo' }, data }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }));
+    const makeTask = (variant) => ({
+      id: 'task-1',
+      name: 'Nightly',
+      enabled: true,
+      schedule: { kind: 'daily', times: ['03:00'], timezone: 'UTC' },
+      execution: { prompt: 'Review open issues', providerID: 'openai', modelID: 'gpt-5', ...(variant === undefined ? {} : { variant }) },
+      state: { createdAt: 1, updatedAt: 1 },
+    });
+    const createRuntime = (task) => createScheduledTasksRuntime({
+      projectConfigRuntime: {
+        listScheduledTasks: async () => [task],
+        reconcileLoopTasks: async () => [task],
+        updateScheduledTaskState: async () => ({ task, updated: true }),
+        updateScheduledTaskStateIf: async () => ({ task, updated: true }),
+      },
+      listProjects: async () => [{ id: 'proj', path: '/repo' }],
+      buildOpenCodeUrl: () => 'http://127.0.0.1:1/',
+      getOpenCodeAuthHeaders: () => ({}),
+      waitForOpenCodeReady: async () => {},
+      readRememberedEffort: async () => 'high',
+      logger: { info: () => {}, warn: () => {}, error: () => {} },
+    });
+
+    for (const [variant, expected] of [[undefined, 'high'], [null, undefined]]) {
+      sessionBodies.length = 0;
+      const runtime = createRuntime(makeTask(variant));
+      await runtime.start();
+      await runtime.runNow('proj', 'task-1');
+      runtime.stop();
+      expect(sessionBodies[0]?.model).toEqual({
+        providerID: 'openai',
+        id: 'gpt-5',
+        ...(expected ? { variant: expected } : {}),
+      });
+    }
+  });
+
   it('points a run that fails after creating its session at that session', async () => {
     vi.stubGlobal('fetch', vi.fn(async (input, init = {}) => {
       const { pathname } = new URL(String(input));

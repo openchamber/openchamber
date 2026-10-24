@@ -174,6 +174,23 @@ export const parseRecentEfforts = fromSchema(
   }).refine((record) => Object.keys(record).length > 0),
 );
 
+export const parseLastUsedEfforts = fromSchema(
+  looseObject.transform((record) => {
+    const result: Record<string, string | null> = {};
+    for (const [key, effort] of Object.entries(record)) {
+      const normalizedKey = key.trim();
+      if (!normalizedKey) continue;
+      if (effort === null) {
+        result[normalizedKey] = null;
+        continue;
+      }
+      const parsed = nonEmptyTrimmed.safeParse(effort);
+      if (parsed.success) result[normalizedKey] = parsed.data;
+    }
+    return result;
+  }).refine((record) => Object.keys(record).length > 0),
+);
+
 export const parseShortcutOverrides = fromSchema(
   looseObject.transform((record) => {
     const result: Record<string, string> = {};

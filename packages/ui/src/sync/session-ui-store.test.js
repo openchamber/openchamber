@@ -19,6 +19,7 @@ import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
 import { CHAT_DRAFT_PROJECT_ID } from '@/lib/chatDirectories';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
+import { useUIStore } from '@/stores/useUIStore';
 import { createContextPart } from '@/lib/messages/contextParts';
 
 /**
@@ -429,6 +430,46 @@ describe('sendMessage captured target', () => {
     expect(error).toBeInstanceOf(Error);
     expect(error.message).toContain('runtime changed');
     expect(calls).toHaveLength(0);
+  });
+
+  const sendWithEffort = (variant, recordEffort) => useSessionUIStore.getState().sendMessage(
+    'message',
+    'provider-a',
+    'model-a',
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    variant,
+    'normal',
+    {
+      target: { runtimeKey: getRuntimeKey(), sessionId: 'session-captured', directory: '/captured/project' },
+      recordEffort,
+    },
+  );
+
+  test('records the level a composer send carried', async () => {
+    useUIStore.setState({ lastUsedEfforts: {} });
+
+    await sendWithEffort('high', true);
+
+    expect(useUIStore.getState().lastUsedEfforts).toEqual({ 'provider-a/model-a': 'high' });
+  });
+
+  test('records an explicit Default as a real choice', async () => {
+    useUIStore.setState({ lastUsedEfforts: {} });
+
+    await sendWithEffort(null, true);
+
+    expect(useUIStore.getState().lastUsedEfforts).toEqual({ 'provider-a/model-a': null });
+  });
+
+  test('background and queued sends leave the remembered level alone', async () => {
+    useUIStore.setState({ lastUsedEfforts: { 'provider-a/model-a': 'low' } });
+
+    await sendWithEffort('high', false);
+
+    expect(useUIStore.getState().lastUsedEfforts).toEqual({ 'provider-a/model-a': 'low' });
   });
 });
 

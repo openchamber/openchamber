@@ -23,6 +23,7 @@ import { useProjectsStore } from "@/stores/useProjectsStore";
 import { resolveProjectForSessionDirectory } from "@/lib/projectResolution";
 import { streamDebugEnabled } from "@/stores/utils/streamDebug";
 import { parseModelIdentifier, parseModelSelection } from "@/lib/modelIdentifier";
+import { readRememberedEffort, rememberEffort, resolveEffortChoice, type EffortChoice } from "@/lib/modelEfforts";
 import type { ModelRef } from "@/lib/settings/parsers";
 import { configModelIdentifier } from "@/lib/opencode/projection";
 import { runtimeFetch } from "@/lib/runtime-fetch";
@@ -194,7 +195,7 @@ type ProviderModel = Model;
 type ProviderWithModelList = Provider & { models: Model[] };
 
 type GitModelSelection = { providerId: string; modelId: string };
-type ProviderModelSelection = { providerId: string; modelId: string; variant?: string } | null;
+type ProviderModelSelection = { providerId: string; modelId: string; variant?: string | null } | null;
 
 const sanitizePersistedSelectedProviderId = (providerId: string | undefined): string => (
     providerId === ADD_PROVIDER_SENTINEL ? "" : (providerId ?? "")
@@ -220,6 +221,25 @@ const findProviderModel = (
 const modelHasVariant = (model: Model | undefined, variant: string | null | undefined): boolean => (
     typeof variant === "string" && listModelVariantIds(model?.variants).includes(variant)
 );
+
+/**
+ * The level this model was last sent with, when the model still offers it.
+ * `null` is an explicit Default. A remembered name the model no longer offers
+ * is ignored instead of becoming a choice, and a model the catalog does not
+ * list is left alone rather than guessed at.
+ */
+const resolveRememberedVariantForModel = (
+    providers: ProviderWithModelList[],
+    providerId: string | undefined,
+    modelId: string | undefined,
+): EffortChoice => {
+    if (!providerId || !modelId) return undefined;
+    const model = findProviderModel(providers, providerId, modelId);
+    if (!model) return undefined;
+    const variants = modelVariantNames(model);
+    if (variants.length === 0) return undefined;
+    return resolveEffortChoice([readRememberedEffort(providerId, modelId)], variants);
+};
 
 const hasProviderModel = (
     providers: ProviderWithModelList[],
@@ -282,13 +302,23 @@ const resolveProviderModelSelection = ({
 
         return modelHasVariant(findProviderModel(providers, providerId, modelId), variant) ? variant : undefined;
     };
+    const resolveVariantOrRemembered = (
+        providerId: string,
+        modelId: string,
+        variant?: string,
+    ): string | null | undefined => (
+        resolveVariant(providerId, modelId, variant)
+        ?? resolveRememberedVariantForModel(providers, providerId, modelId)
+    );
 
     const preserveManual = preserveCurrent && !isStaleAutoSelection(currentProviderId, currentModelId);
     if (currentProviderId && currentModelId && (preserveManual || hasProviderModel(providers, currentProviderId, currentModelId))) {
         return {
             providerId: currentProviderId,
             modelId: currentModelId,
-            variant: preserveCurrent ? currentVariant : resolveVariant(currentProviderId, currentModelId, currentVariant),
+            variant: preserveCurrent
+                ? currentVariant
+                : resolveVariantOrRemembered(currentProviderId, currentModelId, currentVariant),
         };
     }
 
@@ -299,14 +329,19 @@ const resolveProviderModelSelection = ({
                 providerId: parsed.providerId,
                 modelId: parsed.modelId,
                 variant: hasProviderModel(providers, parsed.providerId, parsed.modelId)
-                    ? resolveVariant(parsed.providerId, parsed.modelId, settingsDefaultVariant)
+                    ? resolveVariantOrRemembered(parsed.providerId, parsed.modelId, settingsDefaultVariant)
                     : settingsDefaultVariant,
             };
         }
     }
 
     if (!allowFallback) return null;
-    return resolveLastSelectedModel(fallbackPrefs) ?? resolveFallbackModel(providers, fallbackPrefs.hiddenModels);
+    const fallback = resolveLastSelectedModel(fallbackPrefs) ?? resolveFallbackModel(providers, fallbackPrefs.hiddenModels);
+    if (!fallback) return null;
+    return {
+        ...fallback,
+        variant: resolveRememberedVariantForModel(providers, fallback.providerId, fallback.modelId),
+    };
 };
 
 /** What the automatic pick reads from the user's model preferences. */
@@ -374,7 +409,8 @@ type DefaultAgentModelSelection = {
     agentName: string | undefined;
     providerId?: string;
     modelId?: string;
-    variant?: string;
+    /** `null` is an explicit Default remembered for that model. */
+    variant?: string | null;
 };
 
 // Shared default-selection cascade used both at startup (loadAgents) and when opening a
@@ -424,7 +460,6 @@ const resolveDefaultAgentModelSelection = ({
         }
         return modelHasVariant(findProviderModel(providers, providerId, modelId), variant) ? variant : undefined;
     };
-
     // --- Agent cascade ---
     const primaryAgents = agents.filter((agent) => isPrimaryMode(agent.mode) && !isAgentHidden(agent));
 
@@ -445,10 +480,25 @@ const resolveDefaultAgentModelSelection = ({
     if (!resolvedAgent) {
         resolvedAgent = primaryAgents.find((agent) => agent.name === "build") || primaryAgents[0] || agents[0];
     }
+
+    // With nothing configured for the model: the resolved agent's own pin (if
+    // it pins this model), then the level the model was last sent with.
+    const resolveAgentOrRememberedVariant = (): string | null | undefined => {
+        if (!providerId || !modelId) return undefined;
+        const model = findProviderModel(providers, providerId, modelId);
+        if (!model) return undefined;
+        const variants = modelVariantNames(model);
+        if (variants.length === 0) return undefined;
+        const agentVariant = resolvedAgent?.model?.providerID === providerId && resolvedAgent.model.id === modelId
+            ? resolvedAgent.model.variant
+            : undefined;
+        return resolveEffortChoice([agentVariant, readRememberedEffort(providerId, modelId)], variants);
+    };
+
     // --- Model cascade ---
     let providerId: string | undefined;
     let modelId: string | undefined;
-    let variant: string | undefined;
+    let variant: string | null | undefined;
 
     const effectiveDefaultModel = projectDefaultModel || settingsDefaultModel;
 
@@ -467,6 +517,9 @@ const resolveDefaultAgentModelSelection = ({
     }
 
     if (providerId || !allowFallback) {
+        if (variant === undefined) {
+            variant = resolveAgentOrRememberedVariant();
+        }
         return { agentName: resolvedAgent?.name ?? projectDefaultAgent ?? settingsDefaultAgent, providerId, modelId, variant };
     }
 
@@ -496,6 +549,12 @@ const resolveDefaultAgentModelSelection = ({
         const fallback = resolveLastSelectedModel(fallbackPrefs) ?? resolveFallbackModel(providers, fallbackPrefs.hiddenModels);
         providerId = fallback?.providerId;
         modelId = fallback?.modelId;
+    }
+
+    // Nothing configured names a level for this model: its last sent level,
+    // if the model still offers it, is what a new session starts on.
+    if (variant === undefined) {
+        variant = resolveAgentOrRememberedVariant();
     }
 
     return { agentName: resolvedAgent?.name, providerId, modelId, variant };
@@ -1267,15 +1326,21 @@ interface DirectoryScopedConfig {
  * "Default" entry unpickable, because the settings default silently takes
  * effect again and the next assistant reply echoes it back as an explicit
  * choice.
+ *
+ * `inherited: null` means the inherited choice is a remembered explicit
+ * Default. Like the override, it sends no effort but must not be mistaken for
+ * "nothing inherited" when a lower-priority source is resolved.
  */
 type CurrentVariantSelection = {
     override: string | null | undefined;
-    inherited: string | undefined;
+    inherited: string | null | undefined;
 };
 
-const resolveVariantFromSelection = (selection: CurrentVariantSelection): string | undefined => (
-    selection.override === null ? undefined : selection.override ?? selection.inherited
-);
+const resolveVariantFromSelection = (selection: CurrentVariantSelection): string | undefined => {
+    if (selection.override === null) return undefined;
+    const variant = selection.override ?? selection.inherited;
+    return variant ?? undefined;
+};
 
 const hasCompatibleCachedVariants = (providers: ProviderWithModelList[] | undefined): boolean => (
     Array.isArray(providers) && providers.every((provider) => (
@@ -1295,8 +1360,8 @@ const hasCompatibleCachedVariants = (providers: ProviderWithModelList[] | undefi
  * `currentVariantSelection` but wrote the resolved default to `currentVariant`
  * showed one effort in the picker and sent another.
  */
-const variantAfterResolve = (selection: CurrentVariantSelection | undefined, resolved: string | undefined): string | undefined => (
-    selection?.override === undefined ? resolved : resolveVariantFromSelection(selection)
+const variantAfterResolve = (selection: CurrentVariantSelection | undefined, resolved: string | null | undefined): string | undefined => (
+    selection?.override === undefined ? resolved ?? undefined : resolveVariantFromSelection(selection)
 );
 
 /**
@@ -1428,7 +1493,7 @@ const resolveSelectionWithManualGuard = ({
     resolvedAgentName: string | undefined;
     resolvedProviderId: string | undefined;
     resolvedModelId: string | undefined;
-    resolvedVariant: string | undefined;
+    resolvedVariant: string | null | undefined;
 }) => {
     const manualAgentName = currentAgentName;
     const manualModelValid = !!currentProviderId
@@ -1575,7 +1640,7 @@ interface ConfigStore {
     setProvider: (providerId: string) => void;
     setModel: (modelId: string) => void;
     setCurrentVariant: (variant: string | undefined) => void;
-    setCurrentVariantOverride: (override: string | null | undefined, inherited: string | undefined) => void;
+    setCurrentVariantOverride: (override: string | null | undefined, inherited: string | null | undefined) => void;
     cycleCurrentVariant: () => string | undefined;
     getCurrentModelVariants: () => string[];
     /** The effort the active project or Settings configures for this model; `undefined` for any model that is not a configured default. */
@@ -2049,7 +2114,9 @@ export const useConfigStore = create<ConfigStore>()(
                             currentVariant: carriedOverride ?? undefined,
                             currentVariantSelection: {
                                 override: carriedOverride,
-                                inherited: snapshot?.currentVariantSelection?.inherited ?? snapshot?.currentVariant,
+                                inherited: snapshot?.currentVariantSelection?.inherited !== undefined
+                                    ? snapshot.currentVariantSelection.inherited
+                                    : snapshot?.currentVariant,
                             },
                         };
                         const carried = manualModel ?? carriedVariant;
@@ -2681,7 +2748,9 @@ export const useConfigStore = create<ConfigStore>()(
 
                     const state = get();
                     const currentOverride = state.currentVariantSelection.override;
-                    const inheritedVariant = state.currentVariantSelection.inherited ?? state.currentVariant;
+                    const inheritedVariant = state.currentVariantSelection.inherited !== undefined
+                        ? state.currentVariantSelection.inherited
+                        : state.currentVariant;
                     const currentVariant = currentOverride === undefined
                         ? state.currentVariant
                         : currentOverride;
@@ -2695,6 +2764,9 @@ export const useConfigStore = create<ConfigStore>()(
                     }
 
                     get().setCurrentVariantOverride(nextOverride, inheritedVariant);
+                    // Cycling is a picker choice too: it becomes the model's
+                    // remembered level without waiting for a send.
+                    rememberEffort(state.currentProviderId, state.currentModelId, nextOverride ?? null);
                     return nextOverride ?? undefined;
                 },
  
@@ -3388,7 +3460,8 @@ export const useConfigStore = create<ConfigStore>()(
                             modelId: string,
                         ): CurrentVariantSelection => {
                             const model = findProviderModel(providers, providerId, modelId);
-                            if (model && modelVariantNames(model).length === 0) return { override: undefined, inherited: undefined };
+                            const variantOptions = model ? modelVariantNames(model) : undefined;
+                            if (variantOptions && variantOptions.length === 0) return { override: undefined, inherited: undefined };
 
                             // A model the catalog does not list (Auto, or a stale
                             // selection) cannot rule a variant out, so inherited
@@ -3400,11 +3473,18 @@ export const useConfigStore = create<ConfigStore>()(
                             );
 
                             // Like a configured default, the agent's effort belongs to
-                            // the model it is configured with.
+                            // the model it is configured with. A level this model was
+                            // last sent with fills in when neither names one.
                             const agentVariant = agent?.model?.providerID === providerId && agent.model.id === modelId
                                 ? agent.model.variant
                                 : undefined;
-                            const inherited = [agentVariant, get().getDefaultVariantForModel(providerId, modelId)].find(isAvailable);
+                            const configuredVariant = get().getDefaultVariantForModel(providerId, modelId);
+                            const inherited = variantOptions
+                                ? resolveEffortChoice(
+                                    [agentVariant, configuredVariant, readRememberedEffort(providerId, modelId)],
+                                    variantOptions,
+                                )
+                                : [agentVariant, configuredVariant].find(isAvailable);
 
                             const savedVariant = currentSessionId
                                 ? useSelectionStore.getState().getAgentModelVariantForSession(
@@ -3554,14 +3634,14 @@ export const useConfigStore = create<ConfigStore>()(
                             ...baseSnapshot,
                             currentProviderId: resolved.providerId,
                             currentModelId: resolved.modelId,
-                            currentVariant: resolved.variant,
+                            currentVariant: resolved.variant ?? undefined,
                             currentVariantSelection: { override: undefined, inherited: resolved.variant },
                             selectionSource: "auto",
                         };
                         return {
                             currentProviderId: resolved.providerId,
                             currentModelId: resolved.modelId,
-                            currentVariant: resolved.variant,
+                            currentVariant: resolved.variant ?? undefined,
                             currentVariantSelection: { override: undefined, inherited: resolved.variant },
                             selectionSource: "auto",
                             directoryScoped: { ...state.directoryScoped, [directoryKey]: nextSnapshot },
@@ -3626,7 +3706,7 @@ export const useConfigStore = create<ConfigStore>()(
                             currentAgentName: resolvedAgentName,
                             currentProviderId: resolvedProviderId ?? '',
                             currentModelId: resolvedModelId ?? '',
-                            currentVariant: resolvedVariant,
+                            currentVariant: resolvedVariant ?? undefined,
                             currentVariantSelection: { override: undefined, inherited: resolvedVariant },
                             selectionSource: "auto",
                             agentSelectionSource: "auto",
@@ -3636,7 +3716,7 @@ export const useConfigStore = create<ConfigStore>()(
                             currentAgentName: resolvedAgentName,
                             currentProviderId: nextSnapshot.currentProviderId,
                             currentModelId: nextSnapshot.currentModelId,
-                            currentVariant: resolvedVariant,
+                            currentVariant: resolvedVariant ?? undefined,
                             currentVariantSelection: { override: undefined, inherited: resolvedVariant },
                             selectionSource: "auto",
                             agentSelectionSource: "auto",

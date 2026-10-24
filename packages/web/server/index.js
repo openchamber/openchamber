@@ -1687,6 +1687,12 @@ const scheduledTasksRuntime = createScheduledTasksRuntime({
     const project = sanitizeProjects(settings?.projects || []).find((entry) => entry.id === projectID) ?? null;
     return resolveSessionDefaults({ settings, project });
   },
+  readRememberedEffort: async (providerID, modelID) => {
+    const settings = await readSettingsFromDiskMigrated();
+    const efforts = settings?.lastUsedEfforts;
+    if (!efforts || typeof efforts !== 'object') return undefined;
+    return efforts[`${providerID}/${modelID}`];
+  },
   listProjects: async () => {
     const settings = await readSettingsFromDiskMigrated();
     return sanitizeProjects(settings?.projects || []);

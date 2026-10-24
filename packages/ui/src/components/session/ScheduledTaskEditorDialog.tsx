@@ -27,6 +27,7 @@ import { useI18n } from '@/lib/i18n';
 import { isValidCronExpression, getNextRuns, CRON_EXAMPLES } from '@/lib/cron';
 import { canonicalizeTimezone } from '@/lib/timezones';
 import { listModelVariantIds, type ModelVariantSource } from '@/lib/modelVariants';
+import { resolveEffortForModelSelection } from '@/lib/modelEfforts';
 import { useGlobalSessionsStore, refreshGlobalSessions } from '@/stores/useGlobalSessionsStore';
 import { useAllLiveSessions } from '@/sync/sync-context';
 import { SettingsStackedField } from '@/components/sections/shared/SettingsSection';
@@ -479,7 +480,8 @@ type ScheduledTaskDraft = {
     prompt: string;
     providerID: string;
     modelID: string;
-    variant: string;
+    /** A level, `null` for explicit Default, or `undefined` for no choice. */
+    variant: string | null | undefined;
     agent: string;
     /** Model, thinking level and agent follow the session defaults at run time. */
     useDefaults: boolean;
@@ -511,7 +513,7 @@ const toDraft = (
   defaults: {
     providerID: string;
     modelID: string;
-    variant: string;
+    variant: string | null | undefined;
     agent: string;
   },
 ): ScheduledTaskDraft => {
@@ -576,7 +578,7 @@ const toDraft = (
       // starts from the current defaults if it is pinned again.
       providerID: task.execution.providerID || defaults.providerID,
       modelID: task.execution.modelID || defaults.modelID,
-      variant: task.execution.variant || '',
+      variant: task.execution.variant,
       agent: task.execution.agent || '',
       useDefaults: task.execution.useDefaults === true,
       goalEnabled: task.execution.goalEnabled === true,
@@ -806,6 +808,7 @@ export function ScheduledTaskEditorDialog(props: {
   const currentProviderID = useConfigStore((state) => state.currentProviderId);
   const currentModelID = useConfigStore((state) => state.currentModelId);
   const currentVariant = useConfigStore((state) => state.currentVariant || '');
+  const currentVariantOverride = useConfigStore((state) => state.currentVariantSelection.override);
   const currentAgentName = useConfigStore((state) => state.currentAgentName || '');
   const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
   const weekStartPreference = useUIStore((state) => state.weekStartPreference);
@@ -815,7 +818,7 @@ export function ScheduledTaskEditorDialog(props: {
     toDraft(task, {
       providerID: currentProviderID,
       modelID: currentModelID,
-      variant: currentVariant,
+      variant: currentVariantOverride === null ? null : currentVariant || undefined,
       agent: currentAgentName,
     })
   );
@@ -880,7 +883,7 @@ export function ScheduledTaskEditorDialog(props: {
       toDraft(task, {
         providerID: currentProviderID,
         modelID: currentModelID,
-        variant: currentVariant,
+        variant: currentVariantOverride === null ? null : currentVariant || undefined,
         agent: currentAgentName,
       })
     );
@@ -891,7 +894,7 @@ export function ScheduledTaskEditorDialog(props: {
     setShowFileMention(false);
     setCommandQuery('');
     setMentionQuery('');
-  }, [open, task, currentProviderID, currentModelID, currentVariant, currentAgentName]);
+  }, [open, task, currentProviderID, currentModelID, currentVariant, currentVariantOverride, currentAgentName]);
 
   React.useEffect(() => {
     if (!isDatePickerOpen) {
@@ -910,6 +913,20 @@ export function ScheduledTaskEditorDialog(props: {
     };
   }, [isDatePickerOpen]);
 
+  const resolveVariantForModel = React.useCallback((providerID: string, modelID: string, agentName: string) => {
+    const provider = providers.find((item) => item.id === providerID);
+    const model = provider?.models?.find((item) => item.id === modelID) as { variants?: ModelVariantSource } | undefined;
+    const configState = useConfigStore.getState();
+    return resolveEffortForModelSelection({
+      providerID,
+      modelID,
+      variants: listModelVariantIds(model?.variants),
+      agents: configState.agents,
+      agentName,
+      configuredVariant: configState.getDefaultVariantForModel(providerID, modelID),
+    });
+  }, [providers]);
+
   const variantOptions = React.useMemo(() => {
     const provider = providers.find((item) => item.id === draft.execution.providerID);
     const model = provider?.models?.find((item) => item.id === draft.execution.modelID) as { variants?: ModelVariantSource } | undefined;
@@ -917,24 +934,23 @@ export function ScheduledTaskEditorDialog(props: {
   }, [providers, draft.execution.providerID, draft.execution.modelID]);
   const hasVariantOptions = variantOptions.length > 0;
   const selectedVariantValue = React.useMemo(() => {
-    if (!hasVariantOptions) {
-      return '__default';
-    }
-    if (!draft.execution.variant) {
+    if (!hasVariantOptions || typeof draft.execution.variant !== 'string' || !draft.execution.variant) {
       return '__default';
     }
     return variantOptions.includes(draft.execution.variant) ? draft.execution.variant : '__default';
   }, [draft.execution.variant, hasVariantOptions, variantOptions]);
 
   React.useEffect(() => {
-    if (hasVariantOptions || !draft.execution.variant) {
+    if (hasVariantOptions || typeof draft.execution.variant !== 'string' || !draft.execution.variant) {
       return;
     }
+    // A stored level this model no longer offers is dropped to no choice, not
+    // pinned as an explicit Default.
     setDraft((prev) => ({
       ...prev,
       execution: {
         ...prev.execution,
-        variant: '',
+        variant: undefined,
       },
     }));
   }, [hasVariantOptions, draft.execution.variant]);
@@ -1241,7 +1257,11 @@ export function ScheduledTaskEditorDialog(props: {
         ...(draft.execution.useDefaults ? { useDefaults: true } : {}),
         providerID: draft.execution.providerID,
         modelID: draft.execution.modelID,
-        ...(draft.execution.variant.trim() ? { variant: draft.execution.variant.trim() } : {}),
+        ...(draft.execution.variant === null
+          ? { variant: null }
+          : typeof draft.execution.variant === 'string' && draft.execution.variant.trim()
+            ? { variant: draft.execution.variant.trim() }
+            : {}),
         ...(draft.execution.agent.trim() ? { agent: draft.execution.agent.trim() } : {}),
         ...(draft.execution.permissionAutoAccept ? { permissionAutoAccept: true } : {}),
         ...(draft.execution.goalEnabled ? { goalEnabled: true } : {}),
@@ -1629,7 +1649,7 @@ export function ScheduledTaskEditorDialog(props: {
                       ...prev.execution,
                       providerID,
                       modelID,
-                      variant: '',
+                      variant: resolveVariantForModel(providerID, modelID, prev.execution.agent),
                     },
                   }));
                 }}
@@ -1646,7 +1666,7 @@ export function ScheduledTaskEditorDialog(props: {
                     ...prev,
                     execution: {
                       ...prev.execution,
-                      variant: value === '__default' ? '' : value,
+                      variant: value === '__default' ? null : value,
                     },
                   }));
                 }}

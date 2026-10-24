@@ -13,6 +13,7 @@
  */
 
 import type { ContextPartMetadata } from "@/lib/messages/contextParts"
+import { rememberEffort } from "@/lib/modelEfforts"
 import { create } from "zustand"
 import { isSameModelRef, toModelRef, type Metadata, type ModelRef, type Part, type Session, type TextPart } from "@/lib/opencode/model"
 import type { AttachedFile, SessionWorktreeAttachment } from "@/stores/types/sessionTypes"
@@ -360,6 +361,12 @@ type SendMessageOptions = {
    * replaces the composer's armed goal, which belongs to the composer text.
    */
   queuedGoal?: QueuedMessageGoal | null
+  /**
+   * A person sent this from a composer: after a successful prompt, remember
+   * the level it actually carried for that model. Background, BTW and queued
+   * delivery leave this unset and never overwrite the remembered level.
+   */
+  recordEffort?: boolean
 }
 
 type AssistantMessageSessionExecution = {
@@ -1925,7 +1932,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         }))
 
         await applyArmedGoal(createdDraftSession.sessionId, createdDraftSession.directory)
-        await routeMessage({
+        const draftRoute = await routeMessage({
           sessionId: createdDraftSession.sessionId,
           directory: createdDraftSession.directory,
           content,
@@ -1952,6 +1959,9 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
             })),
           })),
         })
+        if (draftRoute !== "shell" && options?.recordEffort) {
+          rememberEffort(providerID, modelID, variant ?? null)
+        }
         return
       }
 
@@ -2038,7 +2048,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         ? () => useInputHistoryStore.getState().appendSubmissions(historyIdentity, historySubmissions)
         : undefined
 
-      await routeMessage({
+      const routed = await routeMessage({
         runtimeKey: capturedTarget?.runtimeKey,
         sessionId: targetSessionId || "",
         directory: currentSessionDirectory,
@@ -2066,6 +2076,9 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
           })),
         })),
       })
+      if (routed !== "shell" && options?.recordEffort) {
+        rememberEffort(providerID, modelID, variant ?? null)
+      }
       // Keep restore failures outside the send promise and its retry path.
       void resumeAfterSend?.().catch(console.warn)
     })

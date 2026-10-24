@@ -1571,6 +1571,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.modelControls.temperature': 'Temperatura',
   'chat.modelControls.thinking': 'Myślenie',
   'chat.modelControls.inheritedVariantTooltip': 'Myślenie: {variant}, domyślne dla tego modelu',
+  'chat.modelControls.rememberedVariantTooltip': 'Myślenie: {variant}, ostatnio używane z tym modelem',
   'chat.modelControls.topP': 'Top P',
   'chat.modelControls.unfavoriteAria': 'Usuń z ulubionych',
   'chat.modelControls.webFetch': 'WebFetch',
