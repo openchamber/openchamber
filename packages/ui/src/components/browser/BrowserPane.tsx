@@ -1000,26 +1000,27 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tab
           layout && 'flex items-center justify-center overflow-hidden bg-[var(--surface-muted)]',
         )}
       >
-        {initialSrc !== null && sessionReady ? (
-          <webview
-            ref={attachWebview}
-            src={initialSrc}
-            partition={browserPartitionOf(directory)}
-            allowpopups
-            style={layout
-              ? {
-                // Laid out at the chosen size and scaled visually: the page must
-                // measure itself at the width being tested, not at the panel's.
-                width: `${layout.width}px`,
-                height: `${layout.height}px`,
-                transform: `scale(${layout.scale})`,
-                border: 'none',
-                flex: 'none',
-                boxShadow: '0 2px 18px rgba(0,0,0,.28)',
-              }
-              : { width: '100%', height: '100%', border: 'none' }}
-          />
-        ) : null}
+        {initialSrc !== null && sessionReady ? React.createElement('webview', {
+          ref: attachWebview,
+          src: initialSrc,
+          partition: browserPartitionOf(directory),
+          // React's JSX webview typing only accepts boolean here, which React
+          // drops for this nonstandard attribute; createElement preserves the
+          // empty string Electron needs for the presence attribute.
+          allowpopups: '',
+          style: layout
+            ? {
+              // Laid out at the chosen size and scaled visually: the page must
+              // measure itself at the width being tested, not at the panel's.
+              width: `${layout.width}px`,
+              height: `${layout.height}px`,
+              transform: `scale(${layout.scale})`,
+              border: 'none',
+              flex: 'none',
+              boxShadow: '0 2px 18px rgba(0,0,0,.28)',
+            }
+            : { width: '100%', height: '100%', border: 'none' },
+        }) : null}
         {initialSrc !== null && !startUrl && !navigation.url && !isLoading ? (
           <BrowserEmptyState onOpen={loadUrlFromUser} directory={directory} visible={visible} />
         ) : null}
