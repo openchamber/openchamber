@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 
 import { claimReplyForAutoRead } from '@/lib/messages/autoReadClaims';
-import type { LatestReply } from '@/lib/messages/latestReply';
+import { findCompletedReplyIds, type LatestReply, type LatestReplyRecord } from '@/lib/messages/latestReply';
 
 export interface AutoReadAloudOptions {
     /** Identity of the session on screen; a switch starts a new baseline. */
@@ -12,6 +12,8 @@ export interface AutoReadAloudOptions {
     sessionIsActive: boolean;
     /** Newest completed answer in the session, or null when there is none. */
     reply: LatestReply | null;
+    /** Loaded session history; every finished answer in it belongs to the baseline. */
+    history: readonly LatestReplyRecord[];
     enabled: boolean;
     play: (text: string) => Promise<void>;
     /** Claims a reply across windows so only one of them reads it. */
@@ -20,14 +22,16 @@ export interface AutoReadAloudOptions {
 
 /**
  * Reads the newest completed answer after a turn that this surface watched
- * run. History present when a session opens is recorded as the baseline so
- * opening a conversation never starts playback.
+ * run. Every finished answer present when a session opens is recorded as the
+ * baseline, so opening a conversation never starts playback and trimming back
+ * to an older answer does not read it for the first time.
  */
 export const useAutoReadAloud = ({
     sessionKey,
     ready,
     sessionIsActive,
     reply,
+    history,
     enabled,
     play,
     claim = claimReplyForAutoRead,
@@ -36,9 +40,9 @@ export const useAutoReadAloud = ({
     const observedActiveRef = useRef(false);
     const initializedRef = useRef(false);
     const latestReplyIdRef = useRef<string | null>(null);
-    // Every id this surface has already read, plus the baseline. Reverting a
-    // turn makes an older answer the latest reply again, and that answer must
-    // not be read a second time.
+    // Every id this surface has already read, plus every answer present at
+    // the baseline. Reverting or trimming a turn makes an older answer the
+    // latest reply again, and it must not be read as if it just finished.
     const heardReplyIdsRef = useRef<Set<string>>(new Set());
 
     useEffect(() => {
@@ -57,6 +61,7 @@ export const useAutoReadAloud = ({
         if (!initializedRef.current) {
             initializedRef.current = true;
             latestReplyIdRef.current = reply?.messageId ?? null;
+            heardReplyIdsRef.current = new Set(findCompletedReplyIds(history));
             if (reply) heardReplyIdsRef.current.add(reply.messageId);
             return;
         }
@@ -73,5 +78,5 @@ export const useAutoReadAloud = ({
         void claim(messageId).then((claimed) => {
             if (claimed) void play(text);
         });
-    }, [claim, enabled, play, ready, reply, sessionIsActive, sessionKey]);
+    }, [claim, enabled, history, play, ready, reply, sessionIsActive, sessionKey]);
 };

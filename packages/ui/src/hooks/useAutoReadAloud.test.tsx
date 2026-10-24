@@ -3,7 +3,7 @@ import { Window } from 'happy-dom';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 
-import type { LatestReply } from '@/lib/messages/latestReply';
+import type { LatestReply, LatestReplyRecord } from '@/lib/messages/latestReply';
 import { useAutoReadAloud, type AutoReadAloudOptions } from './useAutoReadAloud';
 
 let root: Root | null = null;
@@ -16,6 +16,20 @@ const Probe: React.FC<AutoReadAloudOptions> = (props) => {
 
 const reply = (messageId: string, text = `Text of ${messageId}`): LatestReply => ({ messageId, text });
 
+const completedRecord = (id: string, text: string): LatestReplyRecord => ({
+    info: {
+        id,
+        role: 'assistant',
+        sessionID: 'ses_1',
+        time: { created: 1, completed: 2 },
+        agent: 'build',
+        providerID: 'anthropic',
+        modelID: 'claude-opus-4-1',
+        finish: 'stop',
+    },
+    parts: [{ id: `${id}-part`, sessionID: 'ses_1', messageID: id, type: 'text', text }],
+});
+
 const recorder = () => {
     const calls: string[] = [];
     return {
@@ -26,7 +40,9 @@ const recorder = () => {
     };
 };
 
-const mount = (props: AutoReadAloudOptions) => act(async () => root?.render(<Probe {...props} />));
+type MountOptions = Omit<AutoReadAloudOptions, 'history'> & { history?: AutoReadAloudOptions['history'] };
+
+const mount = (props: MountOptions) => act(async () => root?.render(<Probe history={[]} {...props} />));
 
 beforeEach(() => {
     const dom = new Window({ url: 'http://localhost' });
@@ -89,6 +105,37 @@ describe('useAutoReadAloud', () => {
         // again, with no new turn behind it.
         await mount({ sessionKey: 'ses_1', ready: true, sessionIsActive: false, reply: reply('a1', 'First answer'), enabled: true, play });
         expect(calls).toEqual(['First answer', 'Second answer']);
+    });
+
+    test('trimming back to an older answer in history does not read it', async () => {
+        const { calls, play } = recorder();
+        const history = [completedRecord('a1', 'First answer'), completedRecord('a2', 'Second answer')];
+
+        await mount({ sessionKey: 'ses_1', ready: true, sessionIsActive: true, reply: reply('a2', 'Second answer'), history, enabled: true, play });
+        // Trimming the second turn leaves the first answer as the newest one,
+        // though this surface never watched or read it.
+        await mount({ sessionKey: 'ses_1', ready: true, sessionIsActive: false, reply: reply('a1', 'First answer'), history: history.slice(0, 1), enabled: true, play });
+
+        expect(calls).toEqual([]);
+    });
+
+    test('history in the baseline does not block the next answer', async () => {
+        const { calls, play } = recorder();
+        const first = [completedRecord('a1', 'First answer')];
+
+        await mount({ sessionKey: 'ses_1', ready: true, sessionIsActive: false, reply: reply('a1', 'First answer'), history: first, enabled: true, play });
+        await mount({ sessionKey: 'ses_1', ready: true, sessionIsActive: true, reply: reply('a1', 'First answer'), history: first, enabled: true, play });
+        await mount({
+            sessionKey: 'ses_1',
+            ready: true,
+            sessionIsActive: false,
+            reply: reply('a2', 'Second answer'),
+            history: [...first, completedRecord('a2', 'Second answer')],
+            enabled: true,
+            play,
+        });
+
+        expect(calls).toEqual(['Second answer']);
     });
 
     test('a reply that arrives while auto-read is off is not spoken when it is turned on', async () => {
