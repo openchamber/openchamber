@@ -164,6 +164,57 @@ reaches it on its next run without editing it. With nothing set, the session is
 created without a model or agent and OpenCode applies its own. A pinned value
 stored next to `useDefaults` is kept only for when the task is pinned again.
 
+## Worktree isolation (project scope)
+
+A project-scope task may run in a fresh worktree of the project instead of the
+checkout itself:
+
+- **Fields.** `runInWorktree: true` asks every run to isolate; `baseBranch`
+  names the ref the worktree starts from. An empty/absent base branch starts
+  from the current `HEAD`. The pair is a project scope property: chats-scope
+  tasks never carry the fields, and the editor's save omits them for an
+  existing-session target. The fields are inert on an existing-session task
+  anyway: reuse dispatches through the target-session path, which returns
+  before isolation is ever consulted.
+- **Storage.** These live on the task in the project config like every other
+  user-set field, and are written only when they differ from the default: the
+  switch is stored as `runInWorktree: true` and dropped when off (which reads as
+  off), the branch is dropped when empty, and `cleanupWorktree: false` is stored
+  only for a task that keeps its worktree. A write that omits any of them keeps
+  the stored choice. The editor sends the branch even while the switch is off,
+  so turning isolation back on restores it without re-picking.
+- **Gate.** Storing a `baseBranch` containing whitespace is rejected outright
+  (`baseBranch must be a branch name without spaces`); a stored value that is
+  not a string is dropped silently when the run reads it. `runInWorktree` is
+  honored only when the project path is a git repository — a non-git project
+  falls back to in-directory execution and reports `isolated: false`, the same
+  as passing `false`.
+- **Execution.** The runtime creates the worktree through the same creation
+  path the editor and multi-run use (the `scheduledWorktreeBridge` filled in by
+  `lib/git` registration) and opens the run's session inside it. What it records
+  is the branch the run actually used — the `openchamber/<name>` branch made for
+  this run, not the picked start ref. Isolation failure is a run error, never a
+  silent in-directory fallback: a git project asking for isolation either runs
+  isolated or fails. Before the git routes register, the bridge answers with a
+  failure, so a run in that window fails as well.
+- **Teardown.** Whether the worktree outlives the run is the user's choice.
+  `cleanupWorktree` defaults to on: when the run's prompt/command finishes, the
+  worktree and the branch made for it are removed (branch delete included), and
+  the run's session record outlives the worktree and stays readable — continuing
+  that finished session answers 404 (OpenCode 2.x behavior for a deleted
+  directory). With it off, both are kept so the result can be opened and
+  reviewed afterwards, and only then does `state.lastRunBranch` name the branch
+  the run used; the task card shows the branch only for a kept worktree and says
+  just "own worktree" otherwise. A teardown failure is logged and never
+  overrides the run's own result.
+- **State.** `state.lastRunIsolated` and `state.lastRunBranch` mirror what the
+  last run actually did; the `openchamber:scheduled-task-ran` event payload
+  carries the same `isolated` / `branch` pair. The pair is written when the
+  run's session is created, not only when it finishes, so a run that fails or
+  times out after its prompt went out still reports that it ran isolated — as
+  does the event, which the watchdog timeout path emits without a result
+  object.
+
 ## Files
 
 - `packages/web/server/lib/scheduled-tasks/runtime.js`
@@ -216,8 +267,8 @@ Field mapping (model: `packages/ui/src/lib/scheduledTasksApi.ts`):
 `thinking_level` and `goalEnabled`/`goalTokenBudget` are not part of the portable
 format (UI/JSON-only today); `daily`/`weekly`/`once` schedules remain UI/JSON-only.
 Runtime state (`lastRunAt`, `nextRunAt`, `lastStatus`, `lastError`, `lastSessionId`,
-`lastDurationMs`) is never written to the markdown file — it continues to live in
-the project config state store.
+`lastDurationMs`, `lastRunIsolated`, `lastRunBranch`) is never written to the markdown file —
+it continues to live in the project config state store.
 
 ## Loop reconciliation rules
 

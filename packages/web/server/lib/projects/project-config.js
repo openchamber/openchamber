@@ -22,6 +22,9 @@ const PROJECT_CONFIG_VERSION = 1;
 export const MAX_TASK_NAME_LENGTH = 80;
 const MAX_TASK_PROMPT_LENGTH = 20_000;
 const MAX_CRON_LENGTH = 200;
+// Long enough for any real ref (`feature/some-branch`, `release/2.5`), short
+// enough that a pasted log line is not stored as a branch name.
+const MAX_BRANCH_LENGTH = 200;
 const MAX_LAST_ERROR_LENGTH = 2_000;
 
 const asNonEmptyString = (value) => {
@@ -284,6 +287,12 @@ const normalizeState = (value, fallback) => {
   const lastSessionId = asNonEmptyString(source.lastSessionId);
   const lastErrorRaw = asNonEmptyString(source.lastError);
   const lastError = lastErrorRaw ? clampLength(lastErrorRaw, MAX_LAST_ERROR_LENGTH) : undefined;
+  // The branch and isolation a completed run actually executed with (#1959),
+  // so the run history can tell "this ran in a worktree on release/2.5"
+  // apart from "this ran over the checkout".
+  const lastRunIsolated = source.lastRunIsolated === true;
+  const lastRunBranchRaw = asNonEmptyString(source.lastRunBranch);
+  const lastRunBranch = lastRunBranchRaw ? clampLength(lastRunBranchRaw, MAX_BRANCH_LENGTH) : undefined;
 
   return {
     createdAt: typeof source.createdAt === 'number' && Number.isFinite(source.createdAt)
@@ -299,6 +308,8 @@ const normalizeState = (value, fallback) => {
     ...(typeof lastScheduledFor === 'number' ? { lastScheduledFor } : {}),
     ...(lastSessionId ? { lastSessionId } : {}),
     ...(lastError ? { lastError } : {}),
+    ...(lastRunIsolated ? { lastRunIsolated: true } : {}),
+    ...(lastRunBranch ? { lastRunBranch } : {}),
   };
 };
 
@@ -344,6 +355,33 @@ const normalizeTaskForStorage = (value, options) => {
   if (targetSessionId && !/^[A-Za-z0-9_-]{4,128}$/.test(targetSessionId)) throw new Error('targetSessionId is invalid');
   const execution = normalizeExecution(value.execution, targetSessionId);
 
+  // Where a run happens. Unset means the project checkout on whatever it is
+  // currently on, which is what every task did before this field existed.
+  // `baseBranch` is the ref a fresh worktree starts from when isolation is on;
+  // it is kept while isolation is off so turning isolation back on does not
+  // lose the pick, and ignored by the runtime in that case (#1959).
+  // A write that omits either keeps what the task stored, so an update from a
+  // client that predates these fields cannot silently turn isolation off.
+  const runInWorktree = typeof value.runInWorktree === 'boolean'
+    ? value.runInWorktree
+    : existingTask?.runInWorktree === true;
+  const branchValue = value.baseBranch;
+  const branchCleared = branchValue === null || branchValue === '';
+  const branchSource = branchCleared
+    ? null
+    : (asNonEmptyString(branchValue) ?? asNonEmptyString(existingTask?.baseBranch));
+  const baseBranchRaw = clampLength(branchSource || '', MAX_BRANCH_LENGTH);
+  if (baseBranchRaw && /[\s\u0000-\u001f]/.test(baseBranchRaw)) {
+    throw new Error('baseBranch must be a branch name without spaces');
+  }
+  // Whether the run's worktree and branch are removed when it ends. Absent
+  // means cleanup, which is what isolation did before this field existed; a
+  // write that omits it keeps what the task stored, so an older client cannot
+  // silently start or stop keeping worktrees (#1959).
+  const cleanupWorktree = typeof value.cleanupWorktree === 'boolean'
+    ? value.cleanupWorktree
+    : existingTask?.cleanupWorktree !== false;
+
   // Loop provenance: absolute path of the `.agents/loops/*.md` file driving
   // this task, when any. Preserved on every write so the scheduler can detect
   // removed loop files across restarts. Unknown to the UI model.
@@ -364,6 +402,11 @@ const normalizeTaskForStorage = (value, options) => {
     schedule,
     execution,
     state,
+    ...(runInWorktree ? { runInWorktree: true } : {}),
+    ...(baseBranchRaw ? { baseBranch: baseBranchRaw } : {}),
+    // Written with the isolation fields: a task that keeps its worktree has to
+    // say so, and a task that cleans up carries nothing (the default).
+    ...(runInWorktree && cleanupWorktree === false ? { cleanupWorktree: false } : {}),
     ...(loopFile ? { loopFile } : {}),
   };
   if (targetSessionId) storedTask.targetSessionId = targetSessionId;

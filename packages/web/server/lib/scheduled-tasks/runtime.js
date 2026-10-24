@@ -266,6 +266,11 @@ export const createScheduledTasksRuntime = (deps) => {
     // The session defaults a task with `useDefaults` runs on:
     // `(projectID) => { providerID, modelID, variant, agent }`, any of them null.
     readSessionDefaults = null,
+    // Isolated runs (#1959). Unset means a task set to run in a worktree
+    // reports the failure instead of dirtying the checkout silently.
+    createTaskWorktree = null,
+    removeTaskWorktree = null,
+    isGitRepository = null,
     messageQueueRuntime,
     resolvePrimaryWorktreeRoot,
     isSessionArchived,
@@ -604,14 +609,61 @@ export const createScheduledTasksRuntime = (deps) => {
     }
 
     // A chats-scope run is a new chat, so it gets its own directory the way a
-    // chat started from the UI does; a project run works in the project.
-    const directory = isChatsScope(projectID)
+    // chat started from the UI does; a project run works in the project —
+    // unless the task asks for isolation (#1959), when it gets a fresh
+    // worktree of the project so the checkout keeps its own state.
+    const chatsRun = isChatsScope(projectID);
+    const directory = chatsRun
       ? await chatsScope.createChatDirectory(new Date(startedAt))
       : projectPath;
 
+    let isolation = null;
+    if (!chatsRun && task.runInWorktree === true) {
+      const create = typeof createTaskWorktree === 'function' ? createTaskWorktree : null;
+      // A probe that throws is not a "not a git repository" answer: the run was
+      // asked to isolate, so an unknown answer fails it instead of quietly
+      // running over the checkout (#1959).
+      let gitLike = null;
+      if (typeof isGitRepository === 'function') {
+        try {
+          gitLike = await isGitRepository(projectPath);
+        } catch (error) {
+          throw new Error(`failed to check whether the project is a git repository: ${error?.message || error}`);
+        }
+      }
+      if (!create) {
+        throw new Error('failed to create isolated worktree: worktree creation is unavailable');
+      }
+      if (gitLike !== false) {
+        try {
+          isolation = await create({
+            projectDirectory: projectPath,
+            baseBranch: typeof task.baseBranch === 'string' && task.baseBranch ? task.baseBranch : undefined,
+          });
+        } catch (error) {
+          // Isolation that fails is a failed run, not a silent downgrade to
+          // running over whatever the checkout happens to be on (#1959).
+          throw new Error(`failed to create isolated worktree: ${error?.message || error}`);
+        }
+      }
+      if (!isolation) {
+        // The only way to get here is a project that is not a git repository,
+        // or a creation call that answered with nothing at all.
+        logger.warn?.('[ScheduledTasks] isolated run fell back to the project directory', {
+          projectID,
+          taskID: task.id,
+          reason: gitLike === false
+            ? 'project is not a git repository'
+            : 'worktree creation returned no worktree',
+        });
+      }
+    }
+
+    const runDirectory = isolation?.directory ?? directory;
+
     const baseUrl = openCodeOrigin();
     const authHeaders = getOpenCodeAuthHeaders();
-    const client = createScopedClient(directory);
+    const client = createScopedClient(runDirectory);
     const selection = await resolveRunSelection(projectID, task);
 
     // Agent, model and variant belong to the session in v2: a scheduled run
@@ -620,7 +672,7 @@ export const createScheduledTasksRuntime = (deps) => {
     try {
       const session = await client.session.create({
         title,
-        location: { directory },
+        location: { directory: runDirectory },
         // Marks a run of a task, so it stays out of In work: nobody sent it.
         metadata: { openchamber: { kind: 'scheduled' } },
         // No model or agent at all: OpenCode picks its own default.
@@ -638,72 +690,119 @@ export const createScheduledTasksRuntime = (deps) => {
         throw new Error('failed to create session');
       }
     } catch (error) {
-      if (directory !== projectPath) {
+      if (chatsRun) {
         await chatsScope.discardChatDirectory(directory);
+      }
+      if (isolation) {
+        // The branch exists only because this run asked for it, so it goes
+        // with the worktree here the same way the finished run's teardown
+        // removes it.
+        await removeTaskWorktree?.({ projectDirectory: projectPath, worktreeDirectory: isolation.directory, deleteLocalBranch: true })
+          .catch((removeError) => {
+            // A stranded worktree nobody owns is exactly what cleanup exists
+            // to avoid, so a removal failure here gets the same log line the
+            // finished run's teardown writes, not a silent swallow.
+            logger.warn?.("[ScheduledTasks] failed to clean up the failed run's worktree", {
+              projectID,
+              taskID: task.id,
+              worktree: isolation.directory,
+              error: removeError?.message ?? removeError,
+            });
+          });
       }
       throw error;
     }
 
-    // Before the event, so a UI refreshing on it already sees the session.
-    await onSessionCreated?.(sessionID);
-
     try {
-      emitTaskRunEvent?.({
-        projectID,
-        taskID: task.id,
-        ranAt: startedAt,
-        status: 'running',
-        sessionID,
-      });
-    } catch {
-    }
+      // Before the event, so a UI refreshing on it already sees the session.
+      // The isolation context travels with it: creation is the earliest place
+      // where "this run got a worktree" is known, so even a run that times out
+      // long after its prompt was sent still records that it ran isolated.
+      await onSessionCreated?.(sessionID, isolation ?? null);
 
-    if (task.execution.permissionAutoAccept && typeof setSessionAutoAccept === 'function') {
-      // Enroll before the prompt goes out so the very first permission request
-      // is already auto-approved. Enrollment failure must not kill the run —
-      // the task still executes, permissions just wait for the user.
       try {
-        await setSessionAutoAccept(sessionID, true, directory);
-      } catch (error) {
-        logger.warn?.('[scheduled-tasks] failed to enable permission auto-accept for session', sessionID, error?.message ?? error);
+        emitTaskRunEvent?.({
+          projectID,
+          taskID: task.id,
+          ranAt: startedAt,
+          status: 'running',
+          sessionID,
+        });
+      } catch {
+      }
+
+      if (task.execution.permissionAutoAccept && typeof setSessionAutoAccept === 'function') {
+        // Enroll before the prompt goes out so the very first permission request
+        // is already auto-approved. Enrollment failure must not kill the run —
+        // the task still executes, permissions just wait for the user.
+        try {
+          await setSessionAutoAccept(sessionID, true, runDirectory);
+        } catch (error) {
+          logger.warn?.('[scheduled-tasks] failed to enable permission auto-accept for session', sessionID, error?.message ?? error);
+        }
+      }
+
+      const scheduledCommand = await resolveScheduledCommand({ client, projectPath: runDirectory, task });
+
+      if (task.execution.goalEnabled) {
+        const commandObjective = scheduledCommand
+          ? expandCommandGoalObjective(scheduledCommand.template, scheduledCommand.arguments)
+          : null;
+        await createSessionGoal({
+          baseUrl,
+          authHeaders,
+          persistSessionGoal,
+          sessionID,
+          directory: runDirectory,
+          objective: commandObjective ?? expandSnippets(task.execution.prompt, runDirectory),
+          tokenBudget: task.execution.goalTokenBudget,
+          providerID: selection.providerID ?? undefined,
+          modelID: selection.modelID ?? undefined,
+          onWarning: (message, error) => console.warn(`[scheduled-tasks] ${message}:`, error?.message || error),
+        });
+      }
+
+      if (scheduledCommand) {
+        await runScheduledCommand({ client, sessionID, projectPath: runDirectory, command: scheduledCommand });
+      } else {
+        await runPrompt({ client, sessionID, projectPath: runDirectory, task });
+      }
+
+      const finishedAt = Date.now();
+      return {
+        sessionID,
+        directory: runDirectory,
+        ...(isolation ? { isolation: { directory: isolation.directory, branch: isolation.branch ?? null } } : {}),
+        durationMs: Math.max(0, finishedAt - startedAt),
+        reason,
+        startedAt,
+        finishedAt,
+      };
+    } finally {
+      // The run is over. By default the worktree made for it goes away, with
+      // its branch, so recurring isolated tasks do not accumulate worktrees
+      // (#1959). A task can ask to keep both instead, so the result can be
+      // opened and reviewed afterwards; then nothing is removed and the state
+      // records the branch the run used. A removal failure is logged, never
+      // thrown over the run's own outcome.
+      const cleanupWorktree = task.cleanupWorktree !== false;
+      if (isolation && cleanupWorktree && typeof removeTaskWorktree === 'function') {
+        try {
+          await removeTaskWorktree({
+            projectDirectory: projectPath,
+            worktreeDirectory: isolation.directory,
+            deleteLocalBranch: true,
+          });
+        } catch (error) {
+          logger.warn?.('[ScheduledTasks] failed to clean up the isolated worktree', {
+            projectID,
+            taskID: task.id,
+            worktree: isolation.directory,
+            error: error?.message ?? error,
+          });
+        }
       }
     }
-
-    const scheduledCommand = await resolveScheduledCommand({ client, projectPath: directory, task });
-
-    if (task.execution.goalEnabled) {
-      const commandObjective = scheduledCommand
-        ? expandCommandGoalObjective(scheduledCommand.template, scheduledCommand.arguments)
-        : null;
-      await createSessionGoal({
-        baseUrl,
-        authHeaders,
-        persistSessionGoal,
-        sessionID,
-        directory,
-        objective: commandObjective ?? expandSnippets(task.execution.prompt, directory),
-        tokenBudget: task.execution.goalTokenBudget,
-        providerID: selection.providerID ?? undefined,
-        modelID: selection.modelID ?? undefined,
-        onWarning: (message, error) => console.warn(`[scheduled-tasks] ${message}:`, error?.message || error),
-      });
-    }
-
-    if (scheduledCommand) {
-      await runScheduledCommand({ client, sessionID, projectPath: directory, command: scheduledCommand });
-    } else {
-      await runPrompt({ client, sessionID, projectPath: directory, task });
-    }
-
-    const finishedAt = Date.now();
-    return {
-      sessionID,
-      directory,
-      durationMs: Math.max(0, finishedAt - startedAt),
-      reason,
-      startedAt,
-      finishedAt,
-    };
   };
 
   const releaseRunningSlot = (projectID, taskKey) => {
@@ -952,13 +1051,27 @@ export const createScheduledTasksRuntime = (deps) => {
       let sessionDirectory;
       let durationMs = 0;
       let errorMessage;
+      // Set when the run executed in a worktree it got for itself (#1959).
+      // Known from session creation on, so a run that fails or times out
+      // afterwards still records how it ran.
+      let runIsolation = null;
       // Known as soon as the run creates its session, so a run that fails or
       // times out afterwards still points at the session it left behind.
       let createdSessionID;
-      const recordCreatedSession = async (id) => {
+      const recordCreatedSession = async (id, isolation = null) => {
         createdSessionID = id;
+        runIsolation = isolation;
         try {
-          const recorded = await projectConfigRuntime.updateScheduledTaskState(projectID, taskID, { lastSessionId: id });
+          const recorded = await projectConfigRuntime.updateScheduledTaskState(projectID, taskID, {
+            lastSessionId: id,
+            lastRunIsolated: isolation ? true : undefined,
+            // Same rule as the completion write: only a task that keeps its
+            // worktree records the branch, because only then is the branch
+            // still there for the card to name.
+            lastRunBranch: isolation && task.cleanupWorktree === false && isolation.branch
+              ? String(isolation.branch)
+              : undefined,
+          });
           if (recorded.task) {
             updateInMemoryTask(projectID, recorded.task);
           }
@@ -988,6 +1101,7 @@ export const createScheduledTasksRuntime = (deps) => {
         sessionID = result.sessionID;
         sessionDirectory = result.directory;
         durationMs = result.durationMs;
+        runIsolation = result.isolation ?? null;
         status = 'success';
         logger.info?.(
           '[ScheduledTasks] run completed',
@@ -1035,6 +1149,13 @@ export const createScheduledTasksRuntime = (deps) => {
         lastDurationMs: durationMs,
         lastError: status === 'error' ? errorMessage : undefined,
         lastSessionId: sessionID ?? createdSessionID,
+        lastRunIsolated: runIsolation ? true : undefined,
+        // Only a run that kept its worktree has a branch worth naming: a
+        // cleaned-up run's branch is gone, and the card says just "own
+        // worktree" for it.
+        lastRunBranch: runIsolation && task.cleanupWorktree === false && runIsolation.branch
+          ? String(runIsolation.branch)
+          : undefined,
         nextRunAt: Number.isFinite(nextRunAt) ? nextRunAt : undefined,
         updatedAt: finishedAt,
       };
@@ -1120,6 +1241,7 @@ export const createScheduledTasksRuntime = (deps) => {
           ranAt: finishedAt,
           status,
           ...(sessionID ? { sessionID } : {}),
+          ...(runIsolation ? { isolated: true, branch: runIsolation.branch ?? null } : {}),
         });
       } catch {
       }
@@ -1129,6 +1251,7 @@ export const createScheduledTasksRuntime = (deps) => {
         status,
         sessionID,
         directory: sessionDirectory,
+        ...(runIsolation ? { isolation: runIsolation } : {}),
         task: stateResult.task || null,
         error: errorMessage,
       };

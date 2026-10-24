@@ -400,6 +400,550 @@ describe('scheduled-tasks runtime prompt dispatch', () => {
     expect(patches[startIndex + 1]).toEqual({ lastSessionId: 'ses_failed' });
     expect(patches.at(-1)).toMatchObject({ lastStatus: 'error', lastSessionId: 'ses_failed' });
   });
+
+  it('runs an isolated task in a fresh worktree and tears it down with its branch (#1959)', async () => {
+    const sessionDirectories = [];
+    vi.stubGlobal('fetch', vi.fn(async (input, init = {}) => {
+      const { pathname } = new URL(String(input));
+      if (init.method === 'POST' && pathname === '/api/session') {
+        sessionDirectories.push(JSON.parse(init.body).location?.directory);
+      }
+      const data = pathname === '/api/session' ? { id: 'ses_iso' } : pathname === '/api/command' ? [] : {};
+      return new Response(JSON.stringify({ location: { directory: '/repo/.worktrees/scheduled-run-1' }, data }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }));
+    const task = {
+      id: 'task-1',
+      name: 'Nightly review',
+      enabled: true,
+      runInWorktree: true,
+      baseBranch: 'release/2.5',
+      schedule: { kind: 'daily', times: ['03:00'], timezone: 'UTC' },
+      execution: { prompt: 'Review open issues', providerID: 'openai', modelID: 'gpt-5' },
+      state: { createdAt: 1, updatedAt: 1 },
+    };
+    const removals = [];
+    const patches = [];
+    const runtime = createScheduledTasksRuntime({
+      projectConfigRuntime: {
+        listScheduledTasks: async () => [task],
+        reconcileLoopTasks: async () => [task],
+        updateScheduledTaskState: async (_projectID, _taskID, patch) => {
+          patches.push(patch);
+          return { task, updated: true };
+        },
+        updateScheduledTaskStateIf: async () => ({ task, updated: true }),
+      },
+      listProjects: async () => [{ id: 'proj', path: '/repo' }],
+      buildOpenCodeUrl: () => 'http://127.0.0.1:1/',
+      getOpenCodeAuthHeaders: () => ({}),
+      waitForOpenCodeReady: async () => {},
+      createTaskWorktree: async ({ projectDirectory, baseBranch }) => {
+        expect(projectDirectory).toBe('/repo');
+        expect(baseBranch).toBe('release/2.5');
+        return { directory: '/repo/.worktrees/scheduled-run-1', branch: 'release/2.5', name: 'scheduled-run-1' };
+      },
+      removeTaskWorktree: async ({ projectDirectory, worktreeDirectory, deleteLocalBranch }) => {
+        removals.push({ projectDirectory, worktreeDirectory, deleteLocalBranch });
+      },
+      isGitRepository: async () => true,
+      logger: { info: () => {}, warn: () => {}, error: () => {} },
+    });
+    await runtime.start();
+    const result = await runtime.runNow('proj', 'task-1');
+    runtime.stop();
+
+    expect(result.ok).toBe(true);
+    // The session lives in the worktree, not the checkout.
+    expect(sessionDirectories[0]).toBe('/repo/.worktrees/scheduled-run-1');
+    expect(result.directory).toBe('/repo/.worktrees/scheduled-run-1');
+    expect(result.isolation).toEqual({ directory: '/repo/.worktrees/scheduled-run-1', branch: 'release/2.5' });
+    // The run is done: worktree and the branch made for it go away.
+    expect(removals).toEqual([{
+      projectDirectory: '/repo',
+      worktreeDirectory: '/repo/.worktrees/scheduled-run-1',
+      deleteLocalBranch: true,
+    }]);
+    // The record remembers that the run isolated, but not the branch: the
+    // cleanup removed it, and the card shows the branch only when it stayed.
+    expect(patches.at(-1)).toMatchObject({
+      lastStatus: 'success',
+      lastRunIsolated: true,
+      lastRunBranch: undefined,
+    });
+    // The checkout was never used as the run directory.
+    expect(result.directory).not.toBe('/repo');
+  });
+
+  it('keeps the worktree and branch when the task asks not to clean up (#1959)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input, init = {}) => {
+      const { pathname } = new URL(String(input));
+      const data = pathname === '/api/session' ? { id: 'ses_keep' } : pathname === '/api/command' ? [] : {};
+      return new Response(JSON.stringify({ location: { directory: '/repo/.worktrees/scheduled-run-1' }, data }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }));
+    const task = {
+      id: 'task-1',
+      name: 'Nightly review',
+      enabled: true,
+      runInWorktree: true,
+      baseBranch: 'release/2.5',
+      cleanupWorktree: false,
+      schedule: { kind: 'daily', times: ['03:00'], timezone: 'UTC' },
+      execution: { prompt: 'Review open issues', providerID: 'openai', modelID: 'gpt-5' },
+      state: { createdAt: 1, updatedAt: 1 },
+    };
+    const removals = [];
+    const patches = [];
+    const runtime = createScheduledTasksRuntime({
+      projectConfigRuntime: {
+        listScheduledTasks: async () => [task],
+        reconcileLoopTasks: async () => [task],
+        updateScheduledTaskState: async (_projectID, _taskID, patch) => {
+          patches.push(patch);
+          return { task, updated: true };
+        },
+        updateScheduledTaskStateIf: async () => ({ task, updated: true }),
+      },
+      listProjects: async () => [{ id: 'proj', path: '/repo' }],
+      buildOpenCodeUrl: () => 'http://127.0.0.1:1/',
+      getOpenCodeAuthHeaders: () => ({}),
+      waitForOpenCodeReady: async () => {},
+      createTaskWorktree: async () => ({ directory: '/repo/.worktrees/scheduled-run-1', branch: 'openchamber/keep-me' }),
+      removeTaskWorktree: async (input) => { removals.push(input); },
+      isGitRepository: async () => true,
+      logger: { info: () => {}, warn: () => {}, error: () => {} },
+    });
+    await runtime.start();
+    const result = await runtime.runNow('proj', 'task-1');
+    runtime.stop();
+
+    expect(result.ok).toBe(true);
+    // Nothing removed: the result stays openable, so the branch is recorded and
+    // the card can name it.
+    expect(removals).toEqual([]);
+    expect(patches.at(-1)).toMatchObject({
+      lastStatus: 'success',
+      lastRunIsolated: true,
+      lastRunBranch: 'openchamber/keep-me',
+    });
+  });
+
+  it('fails an isolated run whose worktree cannot be created instead of dirtying the checkout (#1959)', async () => {
+    const posts = [];
+    vi.stubGlobal('fetch', vi.fn(async (input, init = {}) => {
+      const { pathname } = new URL(String(input));
+      if (init.method === 'POST') posts.push({ pathname, body: JSON.parse(init.body) });
+      return new Response(JSON.stringify({ data: {} }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }));
+    const task = {
+      id: 'task-1',
+      name: 'Nightly review',
+      enabled: true,
+      runInWorktree: true,
+      baseBranch: 'gone-branch',
+      schedule: { kind: 'daily', times: ['03:00'], timezone: 'UTC' },
+      execution: { prompt: 'Review open issues', providerID: 'openai', modelID: 'gpt-5' },
+      state: { createdAt: 1, updatedAt: 1 },
+    };
+    const patches = [];
+    const runtime = createScheduledTasksRuntime({
+      projectConfigRuntime: {
+        listScheduledTasks: async () => [task],
+        reconcileLoopTasks: async () => [task],
+        updateScheduledTaskState: async (_projectID, _taskID, patch) => {
+          patches.push(patch);
+          return { task, updated: true };
+        },
+        updateScheduledTaskStateIf: async () => ({ task, updated: true }),
+      },
+      listProjects: async () => [{ id: 'proj', path: '/repo' }],
+      buildOpenCodeUrl: () => 'http://127.0.0.1:1/',
+      getOpenCodeAuthHeaders: () => ({}),
+      waitForOpenCodeReady: async () => {},
+      createTaskWorktree: async () => {
+        throw new Error("Start ref not found: gone-branch");
+      },
+      removeTaskWorktree: async () => {},
+      isGitRepository: async () => true,
+      logger: { info: () => {}, warn: () => {}, error: () => {} },
+    });
+    await runtime.start();
+    const result = await runtime.runNow('proj', 'task-1');
+    runtime.stop();
+
+    // A failed isolation is a failed run, not a silent downgrade.
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/failed to create isolated worktree: Start ref not found/);
+    // No session was created anywhere, least of all the checkout.
+    expect(posts.filter((post) => post.pathname === '/api/session')).toHaveLength(0);
+    expect(patches.at(-1)).toMatchObject({ lastStatus: 'error', lastRunIsolated: undefined });
+  });
+
+  it('fails an isolated run when the repository probe itself fails (#1959)', async () => {
+    const posts = [];
+    vi.stubGlobal('fetch', vi.fn(async (input, init = {}) => {
+      if (init.method === 'POST') posts.push(new URL(String(input)).pathname);
+      return new Response(JSON.stringify({ data: {} }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }));
+    const task = {
+      id: 'task-1',
+      name: 'Nightly review',
+      enabled: true,
+      runInWorktree: true,
+      schedule: { kind: 'daily', times: ['03:00'], timezone: 'UTC' },
+      execution: { prompt: 'Review open issues', providerID: 'openai', modelID: 'gpt-5' },
+      state: { createdAt: 1, updatedAt: 1 },
+    };
+    const createTaskWorktree = vi.fn(async () => ({ directory: '/repo/.worktrees/should-not-exist' }));
+    const patches = [];
+    const runtime = createScheduledTasksRuntime({
+      projectConfigRuntime: {
+        listScheduledTasks: async () => [task],
+        reconcileLoopTasks: async () => [task],
+        updateScheduledTaskState: async (_projectID, _taskID, patch) => {
+          patches.push(patch);
+          return { task, updated: true };
+        },
+        updateScheduledTaskStateIf: async () => ({ task, updated: true }),
+      },
+      listProjects: async () => [{ id: 'proj', path: '/repo' }],
+      buildOpenCodeUrl: () => 'http://127.0.0.1:1/',
+      getOpenCodeAuthHeaders: () => ({}),
+      waitForOpenCodeReady: async () => {},
+      createTaskWorktree,
+      removeTaskWorktree: async () => {},
+      isGitRepository: async () => {
+        throw new Error('git is unavailable');
+      },
+      logger: { info: () => {}, warn: () => {}, error: () => {} },
+    });
+    await runtime.start();
+    const result = await runtime.runNow('proj', 'task-1');
+    runtime.stop();
+
+    // An unknown answer is not a "not a git repository" answer: the run fails
+    // rather than quietly using the checkout.
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/failed to check whether the project is a git repository: git is unavailable/);
+    expect(createTaskWorktree).not.toHaveBeenCalled();
+    expect(posts).toHaveLength(0);
+    expect(patches.at(-1)).toMatchObject({ lastStatus: 'error' });
+  });
+
+  it('fails an isolated run when no worktree creation is wired (#1959)', async () => {
+    const posts = [];
+    vi.stubGlobal('fetch', vi.fn(async (input, init = {}) => {
+      if (init.method === 'POST') posts.push(new URL(String(input)).pathname);
+      return new Response(JSON.stringify({ data: {} }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }));
+    const task = {
+      id: 'task-1',
+      name: 'Nightly review',
+      enabled: true,
+      runInWorktree: true,
+      schedule: { kind: 'daily', times: ['03:00'], timezone: 'UTC' },
+      execution: { prompt: 'Review open issues', providerID: 'openai', modelID: 'gpt-5' },
+      state: { createdAt: 1, updatedAt: 1 },
+    };
+    const patches = [];
+    const runtime = createScheduledTasksRuntime({
+      projectConfigRuntime: {
+        listScheduledTasks: async () => [task],
+        reconcileLoopTasks: async () => [task],
+        updateScheduledTaskState: async (_projectID, _taskID, patch) => {
+          patches.push(patch);
+          return { task, updated: true };
+        },
+        updateScheduledTaskStateIf: async () => ({ task, updated: true }),
+      },
+      listProjects: async () => [{ id: 'proj', path: '/repo' }],
+      buildOpenCodeUrl: () => 'http://127.0.0.1:1/',
+      getOpenCodeAuthHeaders: () => ({}),
+      waitForOpenCodeReady: async () => {},
+      removeTaskWorktree: async () => {},
+      isGitRepository: async () => true,
+      logger: { info: () => {}, warn: () => {}, error: () => {} },
+    });
+    await runtime.start();
+    const result = await runtime.runNow('proj', 'task-1');
+    runtime.stop();
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/worktree creation is unavailable/);
+    expect(posts).toHaveLength(0);
+    expect(patches.at(-1)).toMatchObject({ lastStatus: 'error' });
+  });
+
+  it('removes a just-created worktree when the run session cannot start (#1959)', async () => {
+    const posts = [];
+    vi.stubGlobal('fetch', vi.fn(async (input, init = {}) => {
+      const { pathname } = new URL(String(input));
+      if (init.method === 'POST') posts.push({ pathname });
+      if (init.method === 'POST' && pathname === '/api/session') {
+        return new Response(JSON.stringify({ data: { message: 'nope' } }), { status: 500, headers: { 'content-type': 'application/json' } });
+      }
+      const data = pathname === '/api/session' ? { id: 'unused' } : pathname === '/api/command' ? [] : {};
+      return new Response(JSON.stringify({ data }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }));
+    const task = {
+      id: 'task-1',
+      name: 'Nightly review',
+      enabled: true,
+      runInWorktree: true,
+      baseBranch: 'release/2.5',
+      schedule: { kind: 'daily', times: ['03:00'], timezone: 'UTC' },
+      execution: { prompt: 'Review open issues', providerID: 'openai', modelID: 'gpt-5' },
+      state: { createdAt: 1, updatedAt: 1 },
+    };
+    const removals = [];
+    const patches = [];
+    const runtime = createScheduledTasksRuntime({
+      projectConfigRuntime: {
+        listScheduledTasks: async () => [task],
+        reconcileLoopTasks: async () => [task],
+        updateScheduledTaskState: async (_projectID, _taskID, patch) => {
+          patches.push(patch);
+          return { task, updated: true };
+        },
+        updateScheduledTaskStateIf: async () => ({ task, updated: true }),
+      },
+      listProjects: async () => [{ id: 'proj', path: '/repo' }],
+      buildOpenCodeUrl: () => 'http://127.0.0.1:1/',
+      getOpenCodeAuthHeaders: () => ({}),
+      waitForOpenCodeReady: async () => {},
+      createTaskWorktree: async () => ({ directory: '/repo/.worktrees/scheduled-run-1', branch: 'release/2.5' }),
+      removeTaskWorktree: async ({ projectDirectory, worktreeDirectory, deleteLocalBranch }) => {
+        removals.push({ projectDirectory, worktreeDirectory, deleteLocalBranch });
+      },
+      isGitRepository: async () => true,
+      logger: { info: () => {}, warn: () => {}, error: () => {} },
+    });
+    await runtime.start();
+    const result = await runtime.runNow('proj', 'task-1');
+    runtime.stop();
+
+    // The run fails, but nothing is left behind: the worktree made for the run
+    // is removed before the error is surfaced.
+    expect(result.ok).toBe(false);
+    expect(removals).toEqual([{
+      projectDirectory: '/repo',
+      worktreeDirectory: '/repo/.worktrees/scheduled-run-1',
+      deleteLocalBranch: true,
+    }]);
+    expect(patches.at(-1)).toMatchObject({ lastStatus: 'error' });
+  });
+
+  it("logs instead of swallowing a rollback removal failure on a failed session start (#1959)", async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input, init = {}) => {
+      const { pathname } = new URL(String(input));
+      if (init.method === 'POST' && pathname === '/api/session') {
+        return new Response(JSON.stringify({ data: { message: 'nope' } }), { status: 500, headers: { 'content-type': 'application/json' } });
+      }
+      const data = pathname === '/api/session' ? { id: 'unused' } : pathname === '/api/command' ? [] : {};
+      return new Response(JSON.stringify({ data }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }));
+    const task = {
+      id: 'task-1',
+      name: 'Nightly review',
+      enabled: true,
+      runInWorktree: true,
+      baseBranch: 'release/2.5',
+      schedule: { kind: 'daily', times: ['03:00'], timezone: 'UTC' },
+      execution: { prompt: 'Review open issues', providerID: 'openai', modelID: 'gpt-5' },
+      state: { createdAt: 1, updatedAt: 1 },
+    };
+    const warnEntries = [];
+    const runtime = createScheduledTasksRuntime({
+      projectConfigRuntime: {
+        listScheduledTasks: async () => [task],
+        reconcileLoopTasks: async () => [task],
+        updateScheduledTaskState: async () => ({ task, updated: true }),
+        updateScheduledTaskStateIf: async () => ({ task, updated: true }),
+      },
+      listProjects: async () => [{ id: 'proj', path: '/repo' }],
+      buildOpenCodeUrl: () => 'http://127.0.0.1:1/',
+      getOpenCodeAuthHeaders: () => ({}),
+      waitForOpenCodeReady: async () => {},
+      createTaskWorktree: async () => ({ directory: '/repo/.worktrees/scheduled-run-1', branch: 'release/2.5' }),
+      removeTaskWorktree: async () => {
+        throw new Error('git worktree remove failed: directory is not empty');
+      },
+      isGitRepository: async () => true,
+      logger: { info: () => {}, warn: (message, entry) => warnEntries.push({ message, entry }), error: () => {} },
+    });
+    await runtime.start();
+    const result = await runtime.runNow('proj', 'task-1');
+    runtime.stop();
+
+    expect(result.ok).toBe(false);
+    // The rollback failure is named, not swallowed: a stranded worktree nobody
+    // owns is what cleanup exists to avoid, so it is worth a log line.
+    const rollbackWarning = warnEntries.find((entry) => entry.message.includes("failed to clean up the failed run's worktree"));
+    expect(rollbackWarning).toBeTruthy();
+    expect(rollbackWarning.entry).toMatchObject({ worktree: '/repo/.worktrees/scheduled-run-1', error: expect.stringContaining('git worktree remove failed') });
+  });
+
+  it('a run that times out still records that it ran isolated (#1959)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input, init = {}) => {
+      const { pathname } = new URL(String(input));
+      if (init.method === 'POST' && pathname.endsWith('/prompt') && !pathname.includes('synthetic')) {
+        return new Promise(() => {});
+      }
+      const data = pathname === '/api/session' ? { id: 'ses_to' } : pathname === '/api/command' ? [] : {};
+      return new Response(JSON.stringify({ location: { directory: '/repo/.worktrees/scheduled-run-1' }, data }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }));
+    const task = {
+      id: 'task-1',
+      name: 'Nightly review',
+      enabled: true,
+      runInWorktree: true,
+      baseBranch: 'release/2.5',
+      cleanupWorktree: false,
+      schedule: { kind: 'daily', times: ['03:00'], timezone: 'UTC' },
+      execution: { prompt: 'Review open issues', providerID: 'openai', modelID: 'gpt-5' },
+      state: { createdAt: 1, updatedAt: 1 },
+    };
+    const removals = [];
+    const patches = [];
+    const runtime = createScheduledTasksRuntime({
+      projectConfigRuntime: {
+        listScheduledTasks: async () => [task],
+        reconcileLoopTasks: async () => [task],
+        updateScheduledTaskState: async (_projectID, _taskID, patch) => {
+          patches.push(patch);
+          return { task, updated: true };
+        },
+        updateScheduledTaskStateIf: async () => ({ task, updated: true }),
+      },
+      listProjects: async () => [{ id: 'proj', path: '/repo' }],
+      buildOpenCodeUrl: () => 'http://127.0.0.1:1/',
+      getOpenCodeAuthHeaders: () => ({}),
+      waitForOpenCodeReady: async () => {},
+      maxRunDurationMs: 40,
+      createTaskWorktree: async () => ({ directory: '/repo/.worktrees/scheduled-run-1', branch: 'openchamber/time-lane' }),
+      removeTaskWorktree: async (input) => { removals.push(input); },
+      isGitRepository: async () => true,
+      logger: { info: () => {}, warn: () => {}, error: () => {} },
+    });
+    await runtime.start();
+    const result = await runtime.runNow('proj', 'task-1');
+    runtime.stop();
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('timed out');
+    // Creation already knew the run happens in a worktree it got for itself,
+    // and with cleanup off the branch is still there to name. Nothing was
+    // removed, because the task asked to keep both.
+    expect(removals).toEqual([]);
+    expect(patches.at(-1)).toMatchObject({
+      lastStatus: 'error',
+      lastSessionId: 'ses_to',
+      lastRunIsolated: true,
+      lastRunBranch: 'openchamber/time-lane',
+    });
+  });
+
+  it('keeps the run result when the teardown of the worktree fails (#1959)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input, init = {}) => {
+      const { pathname } = new URL(String(input));
+      const data = pathname === '/api/session' ? { id: 'ses_iso' } : pathname === '/api/command' ? [] : {};
+      return new Response(JSON.stringify({ location: { directory: '/repo/.worktrees/scheduled-run-1' }, data }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }));
+    const task = {
+      id: 'task-1',
+      name: 'Nightly review',
+      enabled: true,
+      runInWorktree: true,
+      baseBranch: 'release/2.5',
+      schedule: { kind: 'daily', times: ['03:00'], timezone: 'UTC' },
+      execution: { prompt: 'Review open issues', providerID: 'openai', modelID: 'gpt-5' },
+      state: { createdAt: 1, updatedAt: 1 },
+    };
+    const warnEntries = [];
+    const patches = [];
+    const runtime = createScheduledTasksRuntime({
+      projectConfigRuntime: {
+        listScheduledTasks: async () => [task],
+        reconcileLoopTasks: async () => [task],
+        updateScheduledTaskState: async (_projectID, _taskID, patch) => {
+          patches.push(patch);
+          return { task, updated: true };
+        },
+        updateScheduledTaskStateIf: async () => ({ task, updated: true }),
+      },
+      listProjects: async () => [{ id: 'proj', path: '/repo' }],
+      buildOpenCodeUrl: () => 'http://127.0.0.1:1/',
+      getOpenCodeAuthHeaders: () => ({}),
+      waitForOpenCodeReady: async () => {},
+      createTaskWorktree: async () => ({ directory: '/repo/.worktrees/scheduled-run-1', branch: 'release/2.5' }),
+      removeTaskWorktree: async () => {
+        throw new Error('worktree remove failed');
+      },
+      isGitRepository: async () => true,
+      logger: { info: () => {}, warn: (message, entry) => warnEntries.push(message), error: () => {} },
+    });
+    await runtime.start();
+    const result = await runtime.runNow('proj', 'task-1');
+    runtime.stop();
+
+    // A failed teardown is logged, never overriding the run's own result.
+    expect(result.ok).toBe(true);
+    expect(result.isolation).toEqual({ directory: '/repo/.worktrees/scheduled-run-1', branch: 'release/2.5' });
+    expect(warnEntries.some((message) => message.includes('failed to clean up the isolated worktree'))).toBe(true);
+    expect(patches.at(-1)).toMatchObject({ lastStatus: 'success', lastRunIsolated: true, lastRunBranch: undefined });
+  });
+
+  it('falls back to the in-directory run for a non-git project and keeps the pick when isolation is off (#1959)', async () => {
+    const isoTasks = [];
+    vi.stubGlobal('fetch', vi.fn(async (input, init = {}) => {
+      const { pathname } = new URL(String(input));
+      if (init.method === 'POST' && pathname === '/api/session') {
+        isoTasks.push(JSON.parse(init.body).location?.directory);
+      }
+      const data = pathname === '/api/session' ? { id: 'ses_plain' } : pathname === '/api/command' ? [] : {};
+      return new Response(JSON.stringify({ location: { directory: '/plain-folder' }, data }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }));
+    const task = {
+      id: 'task-1',
+      name: 'Nightly digest',
+      enabled: true,
+      runInWorktree: true,
+      baseBranch: 'main',
+      schedule: { kind: 'daily', times: ['03:00'], timezone: 'UTC' },
+      execution: { prompt: 'Summarize', providerID: 'openai', modelID: 'gpt-5' },
+      state: { createdAt: 1, updatedAt: 1 },
+    };
+    const patches = [];
+    const worktreeCreate = vi.fn(async () => ({ directory: '/plain-folder/.worktrees/x', branch: 'auto' }));
+    const runtime = createScheduledTasksRuntime({
+      projectConfigRuntime: {
+        listScheduledTasks: async () => [task],
+        reconcileLoopTasks: async () => [task],
+        updateScheduledTaskState: async (_projectID, _taskID, patch) => {
+          patches.push(patch);
+          return { task, updated: true };
+        },
+        updateScheduledTaskStateIf: async () => ({ task, updated: true }),
+      },
+      listProjects: async () => [{ id: 'proj', path: '/plain-folder' }],
+      buildOpenCodeUrl: () => 'http://127.0.0.1:1/',
+      getOpenCodeAuthHeaders: () => ({}),
+      waitForOpenCodeReady: async () => {},
+      createTaskWorktree: worktreeCreate,
+      removeTaskWorktree: async () => {},
+      isGitRepository: async () => false,
+      logger: { info: () => {}, warn: () => {}, error: () => {} },
+    });
+    await runtime.start();
+    const result = await runtime.runNow('proj', 'task-1');
+    runtime.stop();
+
+    // Not a git repository: the run happens in the directory, with no error.
+    expect(result.ok).toBe(true);
+    expect(result.directory).toBe('/plain-folder');
+    expect(worktreeCreate).not.toHaveBeenCalled();
+    expect(isoTasks[0]).toBe('/plain-folder');
+    expect(patches.at(-1)).toMatchObject({ lastStatus: 'success', lastRunIsolated: undefined, lastRunBranch: undefined });
+  });
 });
 
 describe('scheduled-tasks runtime chats scope', () => {

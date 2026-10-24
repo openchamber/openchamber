@@ -83,6 +83,72 @@ describe('project-config runtime', () => {
     }
   });
 
+  it('round-trips the branch and isolation a task runs with (#1959)', async () => {
+    const { runtime, cleanup } = await createRuntime();
+    const base = {
+      name: 'Nightly review',
+      enabled: true,
+      schedule: { kind: 'daily', time: '09:30', timezone: 'UTC' },
+      execution: { prompt: 'Review the diff', providerID: 'openai', modelID: 'gpt-4.1' },
+    };
+    try {
+      // Absent by default: an existing task keeps running in the checkout.
+      const plain = await runtime.upsertScheduledTask('project-test', base);
+      expect(plain.task.runInWorktree).toBeUndefined();
+      expect(plain.task.baseBranch).toBeUndefined();
+
+      const isolated = await runtime.upsertScheduledTask('project-test', {
+        ...base,
+        id: plain.task.id,
+        runInWorktree: true,
+        baseBranch: 'release/2.5',
+      });
+      expect(isolated.task).toMatchObject({ runInWorktree: true, baseBranch: 'release/2.5' });
+
+      // Persisted, not just echoed back.
+      const reloaded = await runtime.listScheduledTasks('project-test');
+      expect(reloaded.find((task) => task.id === plain.task.id)).toMatchObject({
+        runInWorktree: true,
+        baseBranch: 'release/2.5',
+      });
+
+      // A branch with a space is not a ref, and says so instead of failing at 3am.
+      await expect(runtime.upsertScheduledTask('project-test', { ...base, baseBranch: 'feature/with space' }))
+        .rejects.toThrow('baseBranch must be a branch name without spaces');
+
+      // Turning isolation off keeps the pick for the next time it is on.
+      const off = await runtime.upsertScheduledTask('project-test', {
+        ...base,
+        id: plain.task.id,
+        runInWorktree: false,
+      });
+      expect(off.task.runInWorktree).toBeUndefined();
+      expect(off.task.baseBranch).toBe('release/2.5');
+
+      // Cleanup is on unless the task says otherwise, and the choice survives a
+      // reload; switching it back on drops the flag instead of storing true.
+      const keeping = await runtime.upsertScheduledTask('project-test', {
+        ...base,
+        id: plain.task.id,
+        runInWorktree: true,
+        cleanupWorktree: false,
+      });
+      expect(keeping.task.cleanupWorktree).toBe(false);
+      const keepingReloaded = await runtime.listScheduledTasks('project-test');
+      expect(keepingReloaded.find((task) => task.id === plain.task.id)?.cleanupWorktree).toBe(false);
+
+      const cleaned = await runtime.upsertScheduledTask('project-test', {
+        ...base,
+        id: plain.task.id,
+        runInWorktree: true,
+        cleanupWorktree: true,
+      });
+      expect(cleaned.task.cleanupWorktree).toBeUndefined();
+    } finally {
+      await cleanup();
+    }
+  });
+
   it('rejects invalid cron expressions', async () => {
     const { runtime, cleanup } = await createRuntime();
     try {

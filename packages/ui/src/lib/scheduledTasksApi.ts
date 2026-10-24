@@ -37,6 +37,15 @@ export type ScheduledTask = {
     goalTokenBudget?: number;
     permissionAutoAccept?: boolean;
   };
+  /** Run in a fresh worktree of the project instead of the checkout itself.
+   *  Absent means the checkout, on whatever branch it is on (#1959). */
+  runInWorktree?: boolean;
+  /** Absent means the run's worktree and branch are removed when it ends. */
+  cleanupWorktree?: boolean;
+  /** Ref the isolated worktree starts from. Kept while isolation is off, so
+   *  turning it back on keeps the choice; ignored by a run that is not
+   *  isolated. */
+  baseBranch?: string;
   state: {
     createdAt: number;
     updatedAt: number;
@@ -45,6 +54,10 @@ export type ScheduledTask = {
     lastError?: string;
     lastDurationMs?: number;
     lastSessionId?: string;
+    /** Whether the latest run opened its own worktree instead of the checkout (#1959). */
+    lastRunIsolated?: boolean;
+    /** Ref the isolated run branched from; absent when isolation was off. */
+    lastRunBranch?: string;
     nextRunAt?: number;
   };
 };

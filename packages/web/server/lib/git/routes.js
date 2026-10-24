@@ -1947,5 +1947,5 @@ export function registerGitRoutes(app, {
 
   // The session service creates worktrees from change requests through the
   // same checks the route uses.
-  return { createWorktree: worktreeCreation.create };
+  return { createWorktree: worktreeCreation.create, createWorktreeInstanceDisposer };
 }
