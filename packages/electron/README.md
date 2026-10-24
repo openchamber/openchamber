@@ -277,9 +277,10 @@ That runs, in order:
 1. `build:web-assets` to build the web UI and copy it into `packages/electron/resources/web-dist`.
 2. `prepare:opencode-cli` to download/cache the pinned OpenCode CLI and copy it into `packages/electron/resources/opencode-cli`.
 3. `prepare:ripgrep` to download/cache the target architecture's ripgrep and copy it into `packages/electron/resources/ripgrep`.
-4. `bundle:main` to create `packages/electron/dist-bundle/{entry,main,early-startup}.mjs`.
-5. `rebuild:native` to rebuild native modules for Electron.
-6. `package.mjs` to run `electron-builder`; its `afterPack` hook stages the compiled macOS icon asset catalog.
+4. `prepare:disclaim` to build `native/disclaim.c` into `packages/electron/resources/disclaim` (macOS only, see *Responsibility helper*).
+5. `bundle:main` to create `packages/electron/dist-bundle/{entry,main,early-startup}.mjs`.
+6. `rebuild:native` to rebuild native modules for Electron.
+7. `package.mjs` to run `electron-builder`; its `afterPack` hook stages the compiled macOS icon asset catalog.
 
 Build output goes to `packages/electron/dist`.
 
@@ -346,6 +347,14 @@ Use an explicit override when testing a different OpenCode CLI build or when a u
 Find in files (the contents mode of the sidebar's file search) runs ripgrep, which `@openchamber/web` gets from `@vscode/ripgrep`. That package installs one platform package (`@vscode/ripgrep-<os>-<arch>`) for the machine running `bun install`, so a desktop build for the other architecture would ship the wrong binary. `prepare:ripgrep` downloads the target architecture's platform package tarball from npm at the version the lockfile pins, checks the tarball, downloaded or cached, against the sha512 that `bun.lock` records for that package, caches it under `packages/electron/.cache/ripgrep`, stages `rg` or `rg.exe` into `resources/ripgrep`, and runs `rg --version` on it. A Windows arm64 build runs on an x64 runner, so its workflow step passes `OPENCHAMBER_TARGET_ARCH` and the version run is skipped there. `extraResources` ships that directory as `Resources/ripgrep`, and `build.files` keeps every `@vscode/ripgrep-*` platform package out of the asar. The `afterPack` check fails the build when the staged binary is missing or a platform package was packed; the Linux AppImage verifier also checks the binary's ELF architecture.
 
 The server (`packages/web/server/lib/fs/ripgrep.js`) looks for ripgrep in this order: `Resources/ripgrep` in a packaged build, the installed `@vscode/ripgrep` platform package (desktop development, web installs, Docker), then `rg` on the PATH. Without any of them the search route answers 501 and the file tree says the server cannot search contents.
+
+## Responsibility helper
+
+macOS attributes privacy decisions, Local Network among them, to the responsible process, and for everything the app starts that is OpenChamber. macOS never shows OpenChamber the Local Network prompt, so it never appears in Privacy & Security, and its terminals and managed OpenCode server get `EHOSTUNREACH` for every address on the local network (#4191). `prepare:disclaim` builds `native/disclaim.c` with `xcrun clang` as one universal binary, and the mac `extraResources` ship it as `Resources/disclaim/disclaim`, signed with the app. It execs its arguments with `responsibility_spawnattrs_setdisclaim`, so the command is its own responsible process and keeps its pid, process group and terminal. The server starts the managed OpenCode server and every terminal through it when it is present (`packages/web/server/lib/macos-responsibility.js`); development builds and other platforms start them directly.
+
+### Why disclaim responsibility and not trigger the prompt
+
+The prompt would grant the app once and cover every child, but nothing the app or its children do brings it up: connecting from the terminal, a Bonjour browse, a minute of retried connections and loading a LAN URL in the app all leave the app's entry undecided and denied. A process that is its own responsible process is not gated by the app's entry, the same way a command started by launchd or Terminal is not. The cost is that a later privacy prompt raised by such a command (Documents, Desktop) names the command instead of OpenChamber.
 
 ## Common Env Vars
 

@@ -4,6 +4,7 @@ import { accessSync, constants as fsConstants, statSync } from 'node:fs';
 import net from 'node:net';
 import { stripAppImageArgv0Leak, stripAppImageLauncherEnv } from '../inherited-env.js';
 import { assignInjectedEnv } from '../injected-env.js';
+import { resolveResponsibleLaunch } from '../macos-responsibility.js';
 import { registerManagedProcess, unregisterManagedProcess, reapOrphanedProcesses } from './managed-process-registry.js';
 import { hasChildProcessExited, stopOpenCodeByClosingStdin, waitForChildProcessClose } from './managed-process-stop.js';
 import { applyProviderEnvAliases } from './provider-env-aliases.js';
@@ -406,6 +407,9 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         args = [...(Array.isArray(launchSpec.args) ? launchSpec.args : []), ...args];
       }
     }
+
+    // On macOS the server answers for its own local network access, not the app.
+    ({ executable: binary, args } = resolveResponsibleLaunch(binary, args));
 
     const pathValue = typeof processEnv?.PATH === 'string' ? processEnv.PATH : '';
     const pathEntryCount = pathValue ? pathValue.split(process.platform === 'win32' ? ';' : ':').filter(Boolean).length : 0;

@@ -371,6 +371,14 @@ OpenChamber tool injection. Managed launch env strips AppImage `ARGV0` before
 spawn so zsh-backed OpenCode tools do not rewrite child argv[0] to the AppImage
 path (#2588).
 
+On macOS a packaged desktop build starts the managed server through
+`Resources/disclaim/disclaim` (`../macos-responsibility.js`), so OpenCode and
+the shell commands its agents run are their own responsible process. Otherwise
+macOS judges their local network access by the app's Local Network entry, which
+is never decided, and every LAN address fails with `No route to host` (#4191;
+see *Responsibility helper* in `packages/electron/README.md`). The launch
+diagnostics record the helper as `binary` and the server as its first argument.
+
 Everything the lifecycle and `auth-state-runtime.js` set for OpenCode goes
 through `assignInjectedEnv` (`../injected-env.js`), which records the names of
 the variables it changed in `OPENCHAMBER_INJECTED_ENV`. The agent's shell

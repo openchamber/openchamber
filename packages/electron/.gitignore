@@ -17,3 +17,5 @@ resources/ripgrep/*
 
 # OS-specific
 .DS_Store
+resources/disclaim/*
+!resources/disclaim/.gitkeep

@@ -11,6 +11,7 @@ import { sanitizeTerminalHistoryChunk } from './history.js';
 import { consumeTerminalThemeQueries, terminalThemeModeReport } from './theme-response.js';
 import { buildTerminalShellLaunch, createTerminalShellResolver, normalizeTerminalShell } from './shells.js';
 import { stripAppImageArgv0Leak, stripAppImageLauncherEnv, resolvePosixPtyLaunch } from '../inherited-env.js';
+import { resolveResponsibleLaunch } from '../macos-responsibility.js';
 import { shutdownTerminalProcesses } from './shutdown.js';
 import { isOpaqueOriginRequest, isPasswordlessSocketOriginAllowed } from '../security/request-security.js';
 
@@ -240,7 +241,9 @@ export function createTerminalRuntime({
         // bun-pty 0.5 gives the child exactly `env`; the POSIX launch is still
         // wrapped with `env -u` for the variables deleted above, so a backend
         // that merges the native OS environ cannot bring them back.
-        const launch = resolvePosixPtyLaunch(shellLaunch.executable, shellLaunch.args);
+        const posixLaunch = resolvePosixPtyLaunch(shellLaunch.executable, shellLaunch.args);
+        // On macOS the shell answers for its own local network access, not the app.
+        const launch = resolveResponsibleLaunch(posixLaunch.executable, posixLaunch.args);
         const options = { name: 'xterm-256color', cwd, cols, rows, env };
         if (process.platform === 'win32') options.useConpty = true;
         return { process: await provider.spawn(launch.executable, launch.args, options), backend: provider.backend, shell: resolvedShell.id, shellExecutable: executable, loginShell };
