@@ -201,6 +201,9 @@
     "openCodeUpdateToastDismissedVersion": {
       "scope": "instance"
     },
+    "openCodeProjectImportCompleted": {
+      "scope": "instance"
+    },
     "autoDeleteEnabled": {
       "scope": "instance"
     },

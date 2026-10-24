@@ -17,6 +17,12 @@ Do not put high-frequency local component state here just because it is convenie
 
 ## Architecture
 
+The OpenCode import option of `addProjects` saves new entries and the instance's
+completion flag together before publishing projects. Settings synchronization
+supplies the validated result; failure leaves the existing projects intact.
+Ordinary folder addition keeps its existing optimistic behavior. The import
+suggestion's lifecycle belongs to `components/session/project-import`.
+
 There are multiple store categories in this directory.
 
 ### Catalog refresh

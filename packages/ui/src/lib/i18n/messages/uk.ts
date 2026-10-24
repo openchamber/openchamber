@@ -33,6 +33,10 @@ import { diffFindI18n } from './diff-find.i18n';
 import { guestStatusViewI18n } from './guest-status-view.i18n';
 
 export const dict: Record<I18nKey, string> = {
+  'directoryExplorerDialog.import.title': 'Додати проєкти з OpenCode',
+  'directoryExplorerDialog.import.count': 'Доступні проєкти: {count}',
+  'directoryExplorerDialog.import.dismiss': 'Більше не пропонувати',
+  'directoryExplorerDialog.import.failed': 'Не вдалося зберегти зміни. Спробуйте ще раз.',
   "opencodeCompatibility.bundled": "OpenCode входить до складу OpenChamber. Оновіть OpenChamber, щоб отримати OpenCode v2.",
   "opencodeCompatibility.title": "Потрібен OpenCode v2",
   "opencodeCompatibility.outdatedTitle": "Оновіть OpenCode",

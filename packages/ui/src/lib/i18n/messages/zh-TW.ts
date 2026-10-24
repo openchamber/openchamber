@@ -33,6 +33,10 @@ import { diffFindI18n } from './diff-find.i18n';
 import { guestStatusViewI18n } from './guest-status-view.i18n';
 
 export const dict: Record<I18nKey, string> = {
+  'directoryExplorerDialog.import.title': '從 OpenCode 新增專案',
+  'directoryExplorerDialog.import.count': '可新增的專案：{count}',
+  'directoryExplorerDialog.import.dismiss': '不再提示',
+  'directoryExplorerDialog.import.failed': '無法儲存變更，請重試。',
   "opencodeCompatibility.bundled": "OpenCode 隨 OpenChamber 一起提供。請更新 OpenChamber 以取得 OpenCode v2。",
   "opencodeCompatibility.title": "需要 OpenCode v2",
   "opencodeCompatibility.outdatedTitle": "請更新 OpenCode",

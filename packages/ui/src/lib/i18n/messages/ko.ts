@@ -33,6 +33,10 @@ import { diffFindI18n } from './diff-find.i18n';
 import { guestStatusViewI18n } from './guest-status-view.i18n';
 
 export const dict: Record<I18nKey, string> = {
+  'directoryExplorerDialog.import.title': 'OpenCode에서 프로젝트 추가',
+  'directoryExplorerDialog.import.count': '추가 가능한 프로젝트: {count}',
+  'directoryExplorerDialog.import.dismiss': '다시 제안하지 않기',
+  'directoryExplorerDialog.import.failed': '변경 사항을 저장할 수 없습니다. 다시 시도하세요.',
   "opencodeCompatibility.bundled": "OpenCode는 OpenChamber에 포함되어 있습니다. OpenCode v2를 사용하려면 OpenChamber를 업데이트하세요.",
   "opencodeCompatibility.title": "OpenCode v2가 필요합니다",
   "opencodeCompatibility.outdatedTitle": "OpenCode를 업데이트하세요",

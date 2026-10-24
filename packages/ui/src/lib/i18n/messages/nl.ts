@@ -32,6 +32,10 @@ import { diffFindI18n } from './diff-find.i18n';
 import { guestStatusViewI18n } from './guest-status-view.i18n';
 
 export const dict = {
+  'directoryExplorerDialog.import.title': 'Projecten uit OpenCode toevoegen',
+  'directoryExplorerDialog.import.count': 'Beschikbare projecten: {count}',
+  'directoryExplorerDialog.import.dismiss': 'Niet opnieuw voorstellen',
+  'directoryExplorerDialog.import.failed': 'Wijzigingen konden niet worden opgeslagen. Probeer het opnieuw.',
   "opencodeCompatibility.bundled": "OpenCode is inbegrepen bij OpenChamber. Werk OpenChamber bij om OpenCode v2 te krijgen.",
   "opencodeCompatibility.title": "OpenCode v2 vereist",
   "opencodeCompatibility.outdatedTitle": "OpenCode bijwerken",

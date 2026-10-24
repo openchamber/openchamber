@@ -32,6 +32,10 @@ import { diffFindI18n } from './diff-find.i18n';
 import { guestStatusViewI18n } from './guest-status-view.i18n';
 
 export const dict = {
+  'directoryExplorerDialog.import.title': 'إضافة مشاريع من OpenCode',
+  'directoryExplorerDialog.import.count': 'المشاريع المتاحة: {count}',
+  'directoryExplorerDialog.import.dismiss': 'عدم الاقتراح مرة أخرى',
+  'directoryExplorerDialog.import.failed': 'تعذر حفظ التغييرات. حاول مرة أخرى.',
   'opencodeCompatibility.bundled': 'يأتي OpenCode مضمّنًا مع OpenChamber. حدّث OpenChamber للحصول على OpenCode v2.',
   'opencodeCompatibility.title': 'يلزم OpenCode v2',
   'opencodeCompatibility.outdatedTitle': 'تحديث OpenCode',

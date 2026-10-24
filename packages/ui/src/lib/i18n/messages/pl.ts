@@ -33,6 +33,10 @@ import { diffFindI18n } from './diff-find.i18n';
 import { guestStatusViewI18n } from './guest-status-view.i18n';
 
 export const dict: Record<I18nKey, string> = {
+  'directoryExplorerDialog.import.title': 'Dodaj projekty z OpenCode',
+  'directoryExplorerDialog.import.count': 'Dostępne projekty: {count}',
+  'directoryExplorerDialog.import.dismiss': 'Nie proponuj ponownie',
+  'directoryExplorerDialog.import.failed': 'Nie udało się zapisać zmian. Spróbuj ponownie.',
   "opencodeCompatibility.bundled": "OpenCode jest dołączony do OpenChamber. Zaktualizuj OpenChamber, aby uzyskać OpenCode v2.",
   "opencodeCompatibility.title": "Wymagany OpenCode v2",
   "opencodeCompatibility.outdatedTitle": "Zaktualizuj OpenCode",

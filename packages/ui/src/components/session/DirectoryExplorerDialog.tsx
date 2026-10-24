@@ -36,6 +36,7 @@ import { Input } from '@/components/ui/input';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { initialBrowseQuery } from './directoryExplorerStart';
+import { OpenCodeProjectImport } from './project-import/OpenCodeProjectImport';
 import { formatShortcutForDisplay } from '@/lib/shortcuts';
 import { useUIStore } from '@/stores/useUIStore';
 import { useGitIdentitiesStore } from '@/stores/useGitIdentitiesStore';
@@ -881,6 +882,9 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
   const resultsSection = (
     <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border/60 bg-[var(--surface-elevated)] shadow-sm">
       <ScrollableOverlay outerClassName="max-h-[min(28rem,58vh)]" className="p-2">
+        {open && !runtime.isVSCode && !isCloneMode ? (
+          <OpenCodeProjectImport key={runtimeKey} busy={isConfirming} onBusyChange={setIsConfirming} />
+        ) : null}
         <div className="px-2 pb-1 pt-0.5 typography-meta font-medium uppercase tracking-wide text-muted-foreground/80">
           {t('directoryExplorerDialog.browse.directories')}
         </div>
