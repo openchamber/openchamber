@@ -42,6 +42,7 @@ import { ComposerEditorView } from './ComposerEditorView';
 import { composerEditorTheme, composerSelectionExtension } from './theme';
 import { handleComposerHostMouseDown } from './hostMouseDown';
 import { getComposerHeightLimit, isComposerContentCapped } from './heightLimit';
+import { imeNewlineCleanup } from './imeNewline';
 import { restoreDeferredEnterModifiers } from '../keyboardPolicy';
 import { timerCaretBlink } from '@/lib/codemirror/caretBlink';
 
@@ -336,6 +337,7 @@ export const ComposerEditor = React.memo(React.forwardRef<ComposerEditorHandle, 
                         ]),
                         composerLanguage(handlersRef.current.languageContext),
                         composerBidi,
+                        imeNewlineCleanup(),
                         editableCompartment.of(
                             EditorView.editable.of(handlersRef.current.editable ?? true),
                         ),

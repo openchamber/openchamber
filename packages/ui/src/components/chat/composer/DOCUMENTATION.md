@@ -1079,6 +1079,25 @@ Shift only while a hardware keyboard is attached: iOS autocapitalization reports
 a phantom Shift at sentence starts, so a soft-keyboard Send always submits, while
 a hardware Shift+Enter still inserts a newline. Ctrl/Cmd+Enter is unchanged.
 
+With the Send keycap there is no Return key left, so a newline comes from the
+keyboard's own long press. That commits a line break plus a padding space and
+deletes the space again a few milliseconds later with its own Backspace. How the
+space reaches the document decides whether the break survives:
+
+- When the split and the space arrive as one `insertText "\n "`, CodeMirror
+  reads both, the Backspace removes the space, and the break stays.
+- When they arrive as `insertParagraph` followed by a separate
+  `insertText " "`, the space does not reach the document. The host then holds
+  one character fewer than the DOM, so the cleanup Backspace deletes the line
+  break it just created and the composer looks like it swallowed the key.
+
+`editor/imeNewline.ts` answers that cleanup in document terms: a Backspace
+that follows a keyboard newline commit and lands directly after a line break is
+swallowed, because the only thing it can be deleting is padding this document
+never received. When the padding space is present the ordinary deletion removes
+it. A real Return also arrives as a paragraph split, so the extension clears its
+mark on `Enter` and never swallows a user's own Backspace.
+
 The expanded desktop composer always inserts a newline with Enter, including
 Shift+Enter, and sends with Ctrl/Cmd+Enter; it ignores the Enter-to-send preference.
 
