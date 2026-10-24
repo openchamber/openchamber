@@ -460,6 +460,11 @@ export const createNotificationTriggerRuntime = (deps) => {
     }
 
     if ((payload.type === 'session.idle' || payload.type === 'session.error') && sessionId) {
+      // An execution that failed with an abort type (restarted out of retries)
+      // was interrupted, not failed: nothing to announce.
+      if (payload.type === 'session.error' && payload.properties?.error?.type === 'aborted') {
+        return;
+      }
       if (payload.type === 'session.idle' && await isPausedForSubagents(sessionId, spaceId)) {
         return;
       }
@@ -604,6 +609,17 @@ export const createNotificationTriggerRuntime = (deps) => {
       }
 
       if (info?.role === 'assistant' && info?.finish === 'error' && sessionId) {
+        // An interruption is not a failure: OpenCode publishes it as
+        // `{ type: 'aborted', message: 'Step interrupted' }` (core
+        // `session/runner/step.ts`, STEP_INTERRUPTED) and also uses the type for
+        // "Execution was interrupted repeatedly" (`execution/restart.ts`). Its
+        // `session.idle { aborted: true }` already announces nothing. The
+        // `MessageAbortedError` name belongs to the v1 message vocabulary, not
+        // to this v2 error struct.
+        if (info?.error?.type === 'aborted') {
+          return;
+        }
+
         const settings = await readSettingsFromDisk();
         if (settings.notifyOnError === false) return;
 
