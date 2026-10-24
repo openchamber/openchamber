@@ -1183,6 +1183,14 @@ the end first, and the reader is moved only if the message arrives and they
 have neither scrolled nor sent in the meantime. Mobile skips that search because it
 loads history only on an explicit tap.
 
+A session target that carries no message — a web route, a notification
+click, a toast's "Open session", the desktop `openchamber:open-session` event in
+either the main window or the mini-chat window — opens through `openSession`
+(`lib/router/openSessionFromRoute.ts`), which resolves its directory and, for
+a `/btw` fork, opens the parent with its btw panel showing. That module also
+registers the opener a toast uses, so the session store keeps no dependency on
+the router. A message link keeps its named session (below).
+
 A message link opens the session on one message instead. Links are built and
 parsed in `lib/sessionLinks.ts`: the web copies `?session=<id>&message=<id>` on
 its own origin, desktop and the Capacitor app copy
@@ -1292,6 +1300,22 @@ Markdown has no detached DOM transfer cache. This shared cleanup runs
 independently of animation frames across all chat runtimes.
 
 `bun run profile:switch` measures both moments; see `scripts/perf/DOCUMENTATION.md`.
+
+### Why a `/btw` fork opens its parent and not itself
+
+Every producer that opens a session by id — a route, a desktop session event
+(the main window and the mini-chat window both), a notification click, a toast,
+a native deep link — goes through `openSession`. A
+fork's id is real, but the fork is a side transcript rendered inside its
+parent's btw panel and no list shows it, so selecting it directly would leave
+the reader in a session with no panel and no way back. The parent's panel is
+derived from its own `openchamber.btwSessionID` metadata, so resolving the id
+to the parent and expanding that panel is all the navigation has to do. The
+fork is selected alone only when its parent is gone, since then there is
+nothing to return to. A message link is the one exception: the message lives in
+the fork's transcript, and selecting the parent would not find it. The web
+route's URL is normalized to the session that ends up selected, so a reload or
+a shared link names the parent too.
 
 ### Pinned chat columns
 

@@ -150,13 +150,15 @@ export function useRouter(): void {
       await applyRoute(route);
 
       // After applying, update URL to normalized form (use replaceState).
-      // Use the parsed route values instead of an immediate store snapshot so
-      // deep links do not briefly normalize `?session=...` back to `/` while
-      // the session's directory/message bootstrap is still catching up.
+      // Prefer the session that is actually selected, because a target can
+      // resolve elsewhere (a `/btw` fork opens its parent), and fall back to
+      // the parsed route so a deep link does not briefly normalize
+      // `?session=...` back to `/` while the directory/message bootstrap is
+      // still catching up.
       if (!isVSCode) {
         updateBrowserURL({
           ...getCurrentAppState(),
-          sessionId: route.sessionId ?? useSessionUIStore.getState().currentSessionId,
+          sessionId: useSessionUIStore.getState().currentSessionId ?? route.sessionId,
           settingsPath: route.settingsPath ?? useUIStore.getState().settingsPage,
         }, { replace: true, force: true });
       }
