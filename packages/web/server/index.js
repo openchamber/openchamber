@@ -139,7 +139,7 @@ import { permissionDefaultOf, readSpacePermissionDefault } from './lib/spaces/sp
 import { dockerHostOf } from './lib/spaces/places/ssh-host.js';
 import { SPACE_IDLE_EXIT_CODE } from './lib/spaces/layout.js';
 import { createSwitchController, registerSpaceRoutes } from './lib/spaces/routes.js';
-import { configureGitEnvironment, getCheckedOutBranch, getWorktrees, readRenameableGeneratedBranch, resolvePrimaryWorktreeRoot, setWorktreeTaskTitle } from './lib/git/service.js';
+import { configureGitEnvironment, getCheckedOutBranch, getWorktrees, readRenameableGeneratedBranch, renameGeneratedWorktreeBranch, resolvePrimaryWorktreeRoot, setWorktreeTaskTitle } from './lib/git/service.js';
 import { createEnvironmentStore } from './lib/environment/store.js';
 import { createEnvironmentRuntime } from './lib/environment/runtime.js';
 import { readOpenCodeServiceEnv } from './lib/environment/opencode-service-env.js';
@@ -1100,6 +1100,10 @@ const sessionKnowledgeRuntime = createSessionKnowledgeRuntime({
     const settings = await readSettingsFromDiskMigrated().catch(() => null);
     return settings?.agentRenderToolEnabled !== false;
   },
+  areAgentToolsInCodeMode: async () => {
+    const settings = await readSettingsFromDiskMigrated().catch(() => null);
+    return settings?.agentToolsCodeMode === true;
+  },
   readSessionMetadata: readStoredSessionMetadata,
   // Pins are read from and written to OpenChamber's own store.
   persistSessionMetadata: (sessionID, directory, patch) => persistSessionMetadataPatch(sessionID, patch, { directory }),
@@ -1973,6 +1977,8 @@ const openChamberControlService = createOpenChamberControlService({
   workNaming: {
     listWorktrees: getWorktrees,
     setWorktreeTaskTitle,
+    readPlaceholderBranch: (directory) => readRenameableGeneratedBranch(directory),
+    renamePlaceholderBranch: renameGeneratedWorktreeBranch,
     updateMetadata: updateSessionMetadataWith,
   },
   dispatchResults: dispatchResultsRuntime,

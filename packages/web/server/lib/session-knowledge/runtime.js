@@ -54,13 +54,14 @@ const describeCheckout = ({ directory, branch, placeholder = false }) => {
  * `agile-chipmunk`) and never pushed is renamed after the task by the agent,
  * at the moment it names the task. Said here, with the branch, and only while
  * it holds: once renamed, the entry changes and OpenCode tells the agent so.
- * Left to the `work.name` answer alone, the agent read it and went on.
+ * `work.name` does the rename (its `branch`) and refuses to name the task
+ * without it, so the two cannot drift apart; a separate `git branch -m` step
+ * was the one weaker models dropped.
  */
-const placeholderBranchGuidance = (branch) => `Its name is a placeholder OpenChamber generated, not one the user chose,`
-  + ` and it is not pushed yet. When you name the task with work.name, rename the branch after the task in the same step:`
-  + ` \`git branch -m ${branch} <new-name>\`, following the naming the repository's other branches use (\`git branch -a\`);`
-  + ' with none, `<type>/<short-kebab-case>` with the conventional commit types, such as `fix/login-timeout`.'
-  + ' No tool or app prefix.';
+const placeholderBranchGuidance = (branch) => `Its name \`${branch}\` is a placeholder OpenChamber generated, not one the user chose,`
+  + ' and it is not pushed yet. Name the task with work.name, passing branch too: work.name renames the branch to it.'
+  + " Follow the naming the repository's other branches use (`git branch -a`); with none, `<type>/<short-kebab-case>`"
+  + ' with the conventional commit types, such as `fix/login-timeout`. No tool or app prefix.';
 
 const renderMemorySection = (entries) => entries
   .slice()
@@ -101,6 +102,16 @@ export const WORK_NAME_GUIDANCE = "Name the task with the openchamber tool's wor
   + " the task is: at most 4 words naming the task itself, such as \"Login timeout fix\" or \"Sidebar task rows\","
   + " never a step of it. Rename it only when the work becomes a different task; finishing a step, fixing"
   + " something on the way or a follow-up within the same task is no reason. A name the user gave stays.";
+
+/**
+ * Where the managed tools are called, stated while they are direct tools (the
+ * default; `agentToolsCodeMode` puts them in Code Mode's catalog instead).
+ * OpenCode's Code Mode teaches the model that tools live in `execute`'s
+ * catalog, and a model that called `tools.openchamber(...)` from a script got
+ * "Unknown tool", concluded the tool did not exist and never named its task.
+ */
+export const DIRECT_TOOLS_GUIDANCE = "The openchamber tools (openchamber, openchamber_render and the others) are direct tool calls:"
+  + " never call them from inside a Code Mode execute script, where they do not exist.";
 
 /**
  * When to draw a page, stated in every session that has the
@@ -176,10 +187,11 @@ const buildPinnedBlock = ({ notes, plans }) => {
   ].join('\n\n');
 };
 
-const buildGuidance = ({ linking, rendering }) => [
+const buildGuidance = ({ linking, rendering, directTools }) => [
   linking ? SESSION_LINK_GUIDANCE : '',
   linking ? WORK_NAME_GUIDANCE : '',
   rendering ? RENDER_PAGE_GUIDANCE : '',
+  (linking || rendering) && directTools ? DIRECT_TOOLS_GUIDANCE : '',
 ].filter(Boolean).join('\n\n');
 
 /**
@@ -187,11 +199,11 @@ const buildGuidance = ({ linking, rendering }) => [
  * away; a key left out keeps what the session holds, which is what a branch
  * that could not be read means.
  */
-export const buildKnowledgeEntries = ({ notes, plans, memory, linking = false, rendering = false, checkout = null }) => {
+export const buildKnowledgeEntries = ({ notes, plans, memory, linking = false, rendering = false, directTools = true, checkout = null }) => {
   const entries = {
     [KNOWLEDGE_ENTRY_KEYS.pinned]: truncate(buildPinnedBlock({ notes, plans })),
     [KNOWLEDGE_ENTRY_KEYS.memory]: truncate(buildMemoryBlock(memory)),
-    [KNOWLEDGE_ENTRY_KEYS.guidance]: buildGuidance({ linking, rendering }),
+    [KNOWLEDGE_ENTRY_KEYS.guidance]: buildGuidance({ linking, rendering, directTools }),
   };
   // The branch is told while the agent has the tool, whose worktree move is
   // the one thing it can do about a busy branch.
@@ -216,6 +228,9 @@ export const createSessionKnowledgeRuntime = (dependencies) => {
     readPlaceholderBranch = null,
     // Whether this session's agent has the `openchamber_render` tool.
     isPageRenderingAvailable = async () => false,
+    // Whether the managed tools run through Code Mode's catalog rather than
+    // as direct tools.
+    areAgentToolsInCodeMode = async () => false,
     // Pins live in OpenChamber's own session metadata store.
     readSessionMetadata = null,
     persistSessionMetadata = null,
@@ -313,8 +328,9 @@ export const createSessionKnowledgeRuntime = (dependencies) => {
     const checkout = branch !== null ? { directory, branch, placeholder } : null;
 
     const rendering = await Promise.resolve(isPageRenderingAvailable()).catch(() => false);
+    const directTools = !(await Promise.resolve(areAgentToolsInCodeMode()).catch(() => false));
 
-    return { notes, plans, memory, linking, rendering, checkout };
+    return { notes, plans, memory, linking, rendering, directTools, checkout };
   };
 
   /**

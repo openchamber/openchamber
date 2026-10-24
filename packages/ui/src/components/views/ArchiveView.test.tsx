@@ -161,7 +161,8 @@ test('a subsession archived while its parent stays active is listed under the pa
     'ready',
   );
   await act(async () => root.render(<I18nProvider><ArchiveView /></I18nProvider>));
-  const list = document.querySelector('.max-w-3xl');
+  // The search sits in a column of the same width, so match the list itself.
+  const list = document.querySelector('.max-w-3xl.space-y-0\\.5');
   if (!list) throw new Error('Archive list missing');
   const lines = [...list.children].map((element) => (element.tagName === 'P'
     ? `# ${element.textContent}`

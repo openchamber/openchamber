@@ -8,7 +8,11 @@ import { useSessions } from '@/sync/sync-context';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useDeviceInfo } from '@/lib/device';
-import { checkIsGitRepository } from '@/lib/gitApi';
+import { canArchiveWorktrees, checkIsGitRepository } from '@/lib/gitApi';
+import { archivedWorktreeLabel, useProjectWorktreeArchives } from '@/lib/worktrees/worktreeArchive';
+import { useWorktreeArchiveActions } from '@/components/views/archive/useWorktreeArchiveActions';
+import { Button } from '@/components/ui/button';
+import { Spinner } from '@/components/ui/spinner';
 import { listProjectWorktrees } from '@/lib/worktrees/worktreeManager';
 import { checkoutHoldsDirectory } from '@/lib/worktrees/worktreePaths';
 import { sessionEvents } from '@/lib/sessionEvents';
@@ -23,8 +27,9 @@ interface WorktreeSectionContentProps {
 }
 
 /**
- * The project's worktrees with a delete button each, for the Worktrees page.
- * Setup commands are edited on the project's Settings page.
+ * The project's worktrees with a delete button each, for the Worktrees page,
+ * and below them its archived worktrees, restored or deleted the way the
+ * Archive page does. Setup commands are edited on the project's Settings page.
  */
 export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ projectRef: projectRefProp = null }) => {
   const { t } = useI18n();
@@ -134,6 +139,9 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
     });
   }, [sessions, getWorktreeMetadata]);
 
+  const archives = useProjectWorktreeArchives(canArchiveWorktrees() && isGitRepoLocal ? projectPath : null).archives;
+  const archiveActions = useWorktreeArchiveActions();
+
   const listTooltip = (
     <SettingsInfoHint>
       {t('settings.openchamber.worktrees.list.tooltip')}
@@ -207,6 +215,50 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
             ))}
           </div>
         )}
+        {projectRef && archives.length > 0 ? (
+          <div className="mt-4 space-y-1">
+            <p className="typography-ui-label font-medium text-foreground">{t('settings.openchamber.worktrees.archived.title')}</p>
+            {archives.map((archive) => {
+              const label = archivedWorktreeLabel(archive);
+              const busy = archiveActions.busyIds.has(archive.id);
+              return (
+                <div key={archive.id} className="group flex w-full items-center gap-2 py-1.5">
+                  <div className="min-w-0 flex-1">
+                    <p dir="auto" className="typography-meta min-w-0 truncate oc-ui-start-align text-foreground">{label}</p>
+                    <p className="typography-micro truncate text-muted-foreground/60">
+                      {archive.branch && archive.branch !== label ? `${archive.branch} · ` : ''}{formatPathForDisplay(archive.path, homeDirectory)}
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    size="xs"
+                    variant="outline"
+                    className="shrink-0"
+                    disabled={busy}
+                    onClick={() => { void archiveActions.restore(projectRef, archive); }}
+                    aria-label={t('sessions.archive.worktree.restoreAria', { label })}
+                  >
+                    {busy ? <Spinner className="size-3" /> : <Icon name="inbox-unarchive" className="size-3.5" />}
+                    {t('sessions.archive.worktree.restore')}
+                  </Button>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => { void archiveActions.remove(projectRef, archive); }}
+                    className={cn(
+                      'flex h-7 w-7 shrink-0 items-center justify-center rounded text-muted-foreground/50 transition-opacity hover:bg-destructive/10 hover:text-destructive focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                      alwaysShowActions ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                    )}
+                    aria-label={t('sessions.archive.worktree.deleteAria', { label })}
+                  >
+                    <Icon name="delete-bin" className="h-4 w-4" />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        ) : null}
+        {archiveActions.dialog}
       </SettingsSection>
   );
 };

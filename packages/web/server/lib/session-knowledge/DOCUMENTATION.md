@@ -31,7 +31,7 @@ source:
 |---|---|
 | `openchamber.pinned` | pinned notes and plan bodies |
 | `openchamber.memory` | the memory index and when to save |
-| `openchamber.guidance` | when to link, when to draw a page |
+| `openchamber.guidance` | when to link, when to draw a page, where the tools are called |
 | `openchamber.checkout` | the directory and branch the session works on |
 
 `sync` writes all of them right before a message goes out: the UI awaits it
@@ -105,14 +105,17 @@ the checkout entry is removed.
 While that branch still has the placeholder name OpenChamber generated (Quick
 worktree's `agile-chipmunk`) and was never pushed (`readPlaceholderBranch`,
 which is `readRenameableGeneratedBranch` in `../git`), the entry adds an
-instruction: when the agent names the task with `work.name`, it renames the
-branch after it with `git branch -m`, in the repository's own naming or else
-`<type>/<short-kebab-case>`, with no tool prefix. Said only in the `work.name`
-answer, the first agent to hear it read it and went on. A rename changes the
-entry, so OpenCode tells the agent about the new branch and the instruction
-leaves with it. A failed placeholder check tells only the branch. The server
-does not rename the branch itself: the agent picks a name that fits the
-repository, which a slug of the task title would not.
+instruction: name the task with `work.name` and pass `branch`, the branch
+named after the task in the repository's own naming or else
+`<type>/<short-kebab-case>`, with no tool prefix; `work.name` renames it.
+Said only in the `work.name` answer, the first agent to hear it read it and
+went on; told to run `git branch -m` beside `work.name`, weaker models named
+the task and dropped the rename, so `work.name` now refuses a placeholder
+worktree without `branch` (`../openchamber-sessions/work-naming.js`). A
+rename changes the entry, so OpenCode tells the agent about the new branch
+and the instruction leaves with it. A failed placeholder check tells only the
+branch. The agent picks the name, since it fits the repository where a slug
+of the task title would not.
 
 What the agent can do about a busy checkout, moving into a worktree, is
 introduced in the tool's own description (`../agent-tool/DOCUMENTATION.md`),
@@ -132,6 +135,17 @@ a few numbers, at most one per answer), the mockup exception, and asking with a
 page (`awaitAnswer`) when the user has to choose between visual options; the
 tool description repeats none of it. It goes into `openchamber.guidance`, so a
 change to the text reaches running sessions on their next message.
+
+## Where the tools are called
+
+While the managed tools are direct tools (the default; `agentToolsCodeMode`
+puts them in Code Mode's catalog), a session that has any of them is told
+they are called directly, never from inside a Code Mode `execute` script
+(`DIRECT_TOOLS_GUIDANCE`). OpenCode's Code Mode teaches the model that tools
+live in `execute`'s catalog: a model that called `tools.openchamber(...)` from
+a script was answered "Unknown tool", concluded the tool did not exist, and
+never named its task. With Code Mode on for our tools the sentence would be
+wrong, so it is left out.
 
 ## Entries that read as instructions
 

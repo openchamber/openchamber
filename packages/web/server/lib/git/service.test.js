@@ -42,6 +42,7 @@ import {
   seedBranchTaskTitle,
   markGeneratedBranchName,
   readRenameableGeneratedBranch,
+  renameGeneratedWorktreeBranch,
   isGitRepository,
   isPatchEquivalentOfHead,
   observeWorktreeTopology,
@@ -50,6 +51,10 @@ import {
   removeWorktree,
   waitForWorktreeRemoval,
   snapshotWorktree,
+  archiveWorktree,
+  listWorktreeArchives,
+  restoreWorktreeArchive,
+  deleteWorktreeArchive,
   resolvePrimaryWorktreeRoot,
   resolveWorktreeTopLevel,
   resetToCommit,
@@ -4749,6 +4754,133 @@ describe('snapshotWorktree', () => {
 });
 
 // ---------------------------------------------------------------------------
+// worktree archives
+// ---------------------------------------------------------------------------
+
+describe('worktree archives', () => {
+  const createArchivableWorktree = () => {
+    const repo = createTempDir();
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
+    fs.writeFileSync(path.join(repo, 'gone.txt'), 'gone\n');
+    fs.writeFileSync(path.join(repo, '.gitignore'), 'secret.env\n');
+    runGit(repo, ['add', '.']);
+    runGit(repo, ['commit', '-m', 'Initial commit']);
+    const linked = path.join(createTempDir(), 'linked');
+    runGit(repo, ['worktree', 'add', '-b', 'feature/task', linked]);
+    runGit(repo, ['config', 'branch.feature/task.description', 'Login timeout fix']);
+    fs.writeFileSync(path.join(linked, 'README.md'), '# Changed\n');
+    fs.rmSync(path.join(linked, 'gone.txt'));
+    fs.writeFileSync(path.join(linked, 'new.txt'), 'untracked\n');
+    fs.writeFileSync(path.join(linked, 'secret.env'), 'TOKEN=1\n');
+    return { repo, linked };
+  };
+
+  it('archives a worktree with its changes and restores them into a new checkout of the branch', async () => {
+    if (!canRunGit()) return;
+    const { repo, linked } = createArchivableWorktree();
+
+    const archived = await archiveWorktree(repo, { directory: linked, id: 'a1', sessionIds: ['ses_1', 'ses_2'] });
+    expect(archived).toMatchObject({ id: 'a1', branch: 'feature/task', title: 'Login timeout fix', sessionIds: ['ses_1', 'ses_2'] });
+    expect(fs.existsSync(linked)).toBe(false);
+    expect(runGit(repo, ['branch', '--list', 'feature/task']).trim()).toBe('feature/task');
+
+    const [listed] = await listWorktreeArchives(repo);
+    expect(listed).toMatchObject({ id: 'a1', branch: 'feature/task', branchExists: true, title: 'Login timeout fix', sessionIds: ['ses_1', 'ses_2'] });
+    expect(fs.realpathSync(path.dirname(listed.path))).toBe(fs.realpathSync(path.dirname(linked)));
+
+    runGit(repo, ['worktree', 'add', linked, 'feature/task']);
+    await expect(restoreWorktreeArchive(linked, { id: 'a1' })).resolves.toEqual({ id: 'a1', conflicts: false });
+    expect(fs.readFileSync(path.join(linked, 'README.md'), 'utf8')).toBe('# Changed\n');
+    expect(fs.readFileSync(path.join(linked, 'new.txt'), 'utf8')).toBe('untracked\n');
+    expect(fs.existsSync(path.join(linked, 'gone.txt'))).toBe(false);
+    // Ignored files are not kept; the project's setup commands bring them back.
+    expect(fs.existsSync(path.join(linked, 'secret.env'))).toBe(false);
+    expect(runGit(linked, ['status', '--porcelain']).split('\n').filter(Boolean).sort()).toEqual([' D gone.txt', ' M README.md', '?? new.txt']);
+    expect(await listWorktreeArchives(repo)).toEqual([]);
+    // No cherry-pick is left in progress.
+    expect(() => runGit(linked, ['rev-parse', '--verify', '--quiet', 'CHERRY_PICK_HEAD'])).toThrow();
+  });
+
+  it('applies the changes over commits the branch got after archiving', async () => {
+    if (!canRunGit()) return;
+    const { repo, linked } = createArchivableWorktree();
+    await archiveWorktree(repo, { directory: linked, id: 'a2' });
+
+    runGit(repo, ['worktree', 'add', linked, 'feature/task']);
+    fs.writeFileSync(path.join(linked, 'later.txt'), 'later\n');
+    runGit(linked, ['add', 'later.txt']);
+    runGit(linked, ['commit', '-m', 'later']);
+
+    await expect(restoreWorktreeArchive(linked, { id: 'a2' })).resolves.toEqual({ id: 'a2', conflicts: false });
+    expect(fs.readFileSync(path.join(linked, 'later.txt'), 'utf8')).toBe('later\n');
+    expect(fs.readFileSync(path.join(linked, 'README.md'), 'utf8')).toBe('# Changed\n');
+  });
+
+  it('leaves conflicts in the checkout, which then holds the changes, and drops the archive', async () => {
+    if (!canRunGit()) return;
+    const { repo, linked } = createArchivableWorktree();
+    await archiveWorktree(repo, { directory: linked, id: 'a3', sessionIds: ['ses_1'] });
+
+    runGit(repo, ['worktree', 'add', linked, 'feature/task']);
+    fs.writeFileSync(path.join(linked, 'README.md'), '# Other\n');
+    runGit(linked, ['commit', '-am', 'other']);
+
+    await expect(restoreWorktreeArchive(linked, { id: 'a3' })).resolves.toEqual({ id: 'a3', conflicts: true });
+    expect(fs.readFileSync(path.join(linked, 'README.md'), 'utf8')).toContain('# Changed');
+    expect(runGit(linked, ['ls-files', '--unmerged']).trim()).not.toBe('');
+    // Kept, it would still claim sessions that are back at work.
+    expect(await listWorktreeArchives(repo)).toEqual([]);
+  });
+
+  it('keeps the archive and fails when git refuses to apply its changes', async () => {
+    if (!canRunGit()) return;
+    const { repo, linked } = createArchivableWorktree();
+    await archiveWorktree(repo, { directory: linked, id: 'a4' });
+
+    runGit(repo, ['worktree', 'add', linked, 'feature/task']);
+    // Something the setup commands wrote where the archive has its own file.
+    fs.writeFileSync(path.join(linked, 'new.txt'), 'written by setup\n');
+
+    await expect(restoreWorktreeArchive(linked, { id: 'a4' })).rejects.toMatchObject({ code: 'WORKTREE_ARCHIVE_NOT_APPLIED' });
+    expect(fs.readFileSync(path.join(linked, 'new.txt'), 'utf8')).toBe('written by setup\n');
+    expect((await listWorktreeArchives(repo)).map((entry) => entry.id)).toEqual(['a4']);
+  });
+
+  it('refuses the primary checkout, a folder git does not register, and a taken id', async () => {
+    if (!canRunGit()) return;
+    const { repo, linked } = createArchivableWorktree();
+    await expect(archiveWorktree(repo, { directory: repo, id: 'p1' })).rejects.toThrow('primary');
+    const stray = createTempDir();
+    await expect(archiveWorktree(repo, { directory: stray, id: 'p2' })).rejects.toThrow();
+    expect(fs.existsSync(stray)).toBe(true);
+    await expect(archiveWorktree(repo, { directory: linked, id: '../x' })).rejects.toThrow('Invalid worktree archive id');
+
+    await archiveWorktree(repo, { directory: linked, id: 'p3' });
+    runGit(repo, ['worktree', 'add', linked, 'feature/task']);
+    await expect(archiveWorktree(repo, { directory: linked, id: 'p3' })).rejects.toThrow();
+    expect(fs.existsSync(linked)).toBe(true);
+  });
+
+  it('deletes an archive with its branch, but never a branch a checkout uses', async () => {
+    if (!canRunGit()) return;
+    const { repo, linked } = createArchivableWorktree();
+    await archiveWorktree(repo, { directory: linked, id: 'd1' });
+    await expect(deleteWorktreeArchive(repo, { id: 'd1', deleteBranch: true })).resolves.toEqual({ id: 'd1', branchDeleted: true });
+    expect(runGit(repo, ['branch', '--list', 'feature/task']).trim()).toBe('');
+    expect(await listWorktreeArchives(repo)).toEqual([]);
+
+    const second = createArchivableWorktree();
+    await archiveWorktree(second.repo, { directory: second.linked, id: 'd2' });
+    runGit(second.repo, ['worktree', 'add', second.linked, 'feature/task']);
+    await expect(deleteWorktreeArchive(second.repo, { id: 'd2', deleteBranch: true })).resolves.toEqual({ id: 'd2', branchDeleted: false });
+    await expect(deleteWorktreeArchive(second.repo, { id: 'd2' })).rejects.toThrow('not found');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // checkoutCommit
 // ---------------------------------------------------------------------------
 
@@ -6355,6 +6487,22 @@ describe('worktree task titles', () => {
     expect(await readRenameableGeneratedBranch(linked)).toBe('feature/task');
     runGit(repo, ['config', 'branch.feature/task.remote', 'origin']);
     expect(await readRenameableGeneratedBranch(linked)).toBeNull();
+  });
+
+  it('renames only a generated, unpushed branch, to a name git accepts', async () => {
+    const { repo, linked } = createLinkedWorktree();
+    expect(await renameGeneratedWorktreeBranch(linked, 'fix/login-timeout')).toBeNull();
+    expect(runGit(linked, ['branch', '--show-current']).trim()).toBe('feature/task');
+
+    await markGeneratedBranchName(repo, 'feature/task');
+    await expect(renameGeneratedWorktreeBranch(linked, 'bad..name')).rejects.toMatchObject({ status: 400 });
+    await expect(renameGeneratedWorktreeBranch(linked, 'feature/task')).rejects.toMatchObject({ status: 400 });
+    await expect(renameGeneratedWorktreeBranch(linked, 'main')).rejects.toMatchObject({ status: 409 });
+
+    expect(await renameGeneratedWorktreeBranch(linked, 'fix/login-timeout')).toEqual({ from: 'feature/task', to: 'fix/login-timeout' });
+    expect(runGit(linked, ['branch', '--show-current']).trim()).toBe('fix/login-timeout');
+    // Renamed, it is the agent's own name now and is not renamed again.
+    expect(await renameGeneratedWorktreeBranch(linked, 'fix/other')).toBeNull();
   });
 
   it('refuses a detached worktree, which has no branch to hold a title', async () => {

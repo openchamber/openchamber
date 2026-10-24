@@ -18,6 +18,7 @@ import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
+import { worktreeArchiveI18n } from './worktree-archive.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
 import { sourceBoardI18n } from './source-board.i18n';
@@ -160,6 +161,7 @@ export const dict: Record<I18nKey, string> = {
   ...sessionWarmingI18n.ja,
   ...heapSnapshotI18n.ja,
   ...sidebarWorkI18n.ja,
+  ...worktreeArchiveI18n.ja,
   ...overviewI18n.ja,
   ...isolatedSpacesI18n.ja,
   ...sourceBoardI18n.ja,
@@ -627,7 +629,6 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.activity.chatsTitle': 'チャット',
   'sessions.sidebar.activity.chatsEmpty': 'まだチャットはありません。',
   'chat.chatInput.chooseProject': 'プロジェクトを選択',
-  'sessions.archivePage.allDirectories': 'すべてのディレクトリ',
   'sessions.sidebar.header.projectDisplay.label': 'プロジェクト表示',
   'sessions.sidebar.header.projectDisplay.all': 'すべてのプロジェクト',
   'sessions.sidebar.header.listGrouping.label': 'セッション',
@@ -885,22 +886,14 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.sessionDialogs.directory.errorOpenDescription': 'デスクトップがファイルアクセスを許可しませんでした。',
   'sessions.sidebar.sessionDialogs.directory.errorAddProjectTitle': 'プロジェクトの追加に失敗しました',
   'sessions.sidebar.sessionDialogs.directory.errorAddProjectDescription': '有効なディレクトリパスを選択してください。',
-  'sessions.sidebar.sessionDialogs.worktree.errorRemoveTitle': 'ワークツリー「{name}」の削除に失敗しました',
+  'sessions.sidebar.sessionDialogs.worktree.errorRemoveTitle': 'ワークツリーを削除できませんでした',
   'sessions.sidebar.sessionDialogs.worktree.removingTitle': 'ワークツリー「{name}」を削除しています…',
-  'sessions.sidebar.sessionDialogs.worktree.removedTitle': 'ワークツリー「{name}」を削除しました',
-  'sessions.sidebar.sessionDialogs.worktree.removed': 'ワークツリーを削除しました。',
-  'sessions.sidebar.sessionDialogs.worktree.removedWithRemote': 'ワークツリーとリモートブランチを削除しました。',
+  'sessions.sidebar.sessionDialogs.worktree.removed': 'ワークツリーを削除しました',
+  'sessions.sidebar.sessionDialogs.worktree.removedWithRemote': 'ワークツリーとリモートブランチを削除しました',
   'sessions.sidebar.sessionDialogs.worktree.attachedArchived': '添付のワークツリーをアーカイブしました。',
   'sessions.sidebar.sessionDialogs.worktree.attachedArchivedPlural': '添付のワークツリーをアーカイブしました。',
   'sessions.sidebar.sessionDialogs.worktree.archivedAndRemoteRemoved': 'ワークツリーをアーカイブし、リモートブランチを削除しました。',
   'sessions.sidebar.group.worktreeMissing': 'ワークツリーのフォルダーがありません',
-  'sessions.mergedCleanup.toast.removedTitle': '{name} を整理しました: PR #{number} がマージされました',
-  'sessions.mergedCleanup.toast.mr.removedTitle': '{name} を整理しました: MR !{number} がマージされました',
-  'sessions.mergedCleanup.toast.removedDescription': 'セッションをアーカイブし、ワークツリーとローカルブランチを削除しました。',
-  'sessions.mergedCleanup.toast.archivedTitle': '{name} のセッションをアーカイブしました: PR #{number} がマージされました',
-  'sessions.mergedCleanup.toast.mr.archivedTitle': '{name} のセッションをアーカイブしました: MR !{number} がマージされました',
-  'sessions.mergedCleanup.toast.archivedDescription': 'マージ済みの PR にない変更やコミットがあるため、ワークツリーは残しています。',
-  'sessions.mergedCleanup.toast.mr.archivedDescription': 'マージ済みの MR にない変更やコミットがあるため、ワークツリーは残しています。',
   'sessions.mergedCleanup.toast.failedTitle': 'PR #{number} のマージ後に {name} を整理できませんでした',
   'sessions.mergedCleanup.toast.mr.failedTitle': 'MR !{number} のマージ後に {name} を整理できませんでした',
   'sessions.sidebar.session.restore.relocatedTitle': 'セッションをプロジェクトフォルダーに移動しました',

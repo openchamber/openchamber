@@ -17,6 +17,7 @@ import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
+import { worktreeArchiveI18n } from './worktree-archive.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
 import { sourceBoardI18n } from './source-board.i18n';
@@ -98,6 +99,7 @@ export const dict = {
   ...sessionWarmingI18n.tr,
   ...heapSnapshotI18n.tr,
   ...sidebarWorkI18n.tr,
+  ...worktreeArchiveI18n.tr,
   ...overviewI18n.tr,
   ...isolatedSpacesI18n.tr,
   ...sourceBoardI18n.tr,
@@ -548,7 +550,6 @@ export const dict = {
   'sessions.sidebar.empty.noMatches.searchArchive': 'Arşivde ara',
   'sessions.sidebar.activity.chatsTitle': 'Sohbetler',
   'chat.chatInput.chooseProject': 'Proje seç',
-  'sessions.archivePage.allDirectories': 'Tüm dizinler',
   'sessions.sidebar.header.projectDisplay.label': 'Projeleri göster',
   'sessions.sidebar.header.projectDisplay.all': 'Tüm projeler',
   'sessions.sidebar.header.listGrouping.label': 'Session\'lar',
@@ -797,22 +798,14 @@ export const dict = {
   'sessions.sidebar.sessionDialogs.directory.errorOpenDescription': 'Masaüstü uygulaması dosya erişimi izni veremedi.',
   'sessions.sidebar.sessionDialogs.directory.errorAddProjectTitle': 'Proje eklenemedi',
   'sessions.sidebar.sessionDialogs.directory.errorAddProjectDescription': 'Geçerli bir dizin yolu seçin.',
-  'sessions.sidebar.sessionDialogs.worktree.errorRemoveTitle': '“{name}” worktree kaldırılamadı',
+  'sessions.sidebar.sessionDialogs.worktree.errorRemoveTitle': 'Worktree kaldırılamadı',
   'sessions.sidebar.sessionDialogs.worktree.removingTitle': '“{name}” worktree kaldırılıyor…',
-  'sessions.sidebar.sessionDialogs.worktree.removedTitle': '“{name}” worktree kaldırıldı',
-  'sessions.sidebar.sessionDialogs.worktree.removed': 'Worktree kaldırıldı.',
-  'sessions.sidebar.sessionDialogs.worktree.removedWithRemote': 'Worktree ve uzak branch kaldırıldı.',
+  'sessions.sidebar.sessionDialogs.worktree.removed': 'Worktree kaldırıldı',
+  'sessions.sidebar.sessionDialogs.worktree.removedWithRemote': 'Worktree ve uzak branch kaldırıldı',
   'sessions.sidebar.sessionDialogs.worktree.attachedArchived': 'Bağlı worktree arşivlendi.',
   'sessions.sidebar.sessionDialogs.worktree.attachedArchivedPlural': 'Bağlı worktree\'ler arşivlendi.',
   'sessions.sidebar.sessionDialogs.worktree.archivedAndRemoteRemoved': 'Worktree\'ler arşivlendi ve uzak branch\'ler kaldırıldı.',
   'sessions.sidebar.group.worktreeMissing': 'Worktree klasörü eksik',
-  'sessions.mergedCleanup.toast.removedTitle': '{name} temizlendi: PR #{number} birleştirildi',
-  'sessions.mergedCleanup.toast.mr.removedTitle': '{name} temizlendi: MR !{number} birleştirildi',
-  'sessions.mergedCleanup.toast.removedDescription': 'Oturumları arşivlendi, worktree ve yerel dalı kaldırıldı.',
-  'sessions.mergedCleanup.toast.archivedTitle': '{name} içindeki oturumlar arşivlendi: PR #{number} birleştirildi',
-  'sessions.mergedCleanup.toast.mr.archivedTitle': '{name} içindeki oturumlar arşivlendi: MR !{number} birleştirildi',
-  'sessions.mergedCleanup.toast.archivedDescription': 'Worktree kaldı: birleştirilen PR’da olmayan değişiklikler veya commit’ler içeriyor.',
-  'sessions.mergedCleanup.toast.mr.archivedDescription': 'Worktree kaldı: birleştirilen MR’da olmayan değişiklikler veya commit’ler içeriyor.',
   'sessions.mergedCleanup.toast.failedTitle': 'PR #{number} birleştirildikten sonra {name} temizlenemedi',
   'sessions.mergedCleanup.toast.mr.failedTitle': 'MR !{number} birleştirildikten sonra {name} temizlenemedi',
   'sessions.sidebar.session.restore.relocatedTitle': 'Oturum proje klasörüne taşındı',

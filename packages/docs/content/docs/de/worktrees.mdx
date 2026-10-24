@@ -23,7 +23,7 @@ Ohne Rückfragen geht es mit **Schneller Worktree** im selben Branch-Menü: Open
 
 ## In der Seitenleiste
 
-Ein Worktree ist eine Zeile in der Seitenleiste, darunter alle Sitzungen darin. Die Zeile zeigt den Namen der Aufgabe, sobald der Agent sie benannt hat (bis dahin den Titel der Sitzung, in der du dort zuletzt gearbeitet hast), den Pull Request oder das Issue, dem er folgt, als farbige Markierung, und ob dort eine Sitzung läuft oder Neuigkeiten für dich hat. Ein Worktree, der für einen Pull Request oder ein Issue angelegt wurde, trägt zuerst dessen Titel, bis der Agent einen kürzeren Namen wählt. Fahre mit der Maus darüber, um den Branch zu sehen. Klicke darauf, um die Sitzung zu öffnen, in der du dort zuletzt gearbeitet hast; um die Liste aufzuklappen, fahre über das Branch-Symbol links davon und klicke auf den Pfeil, der an seiner Stelle erscheint. Sein Menü benennt die Aufgabe um, legt den Worktree in einen Ordner des Projekts oder löscht ihn. Wie Arbeiten in den Bereich In Arbeit kommen und ihn verlassen, steht unter [Sitzungen in Arbeit](/de/sessions-in-work/).
+Ein Worktree ist eine Zeile in der Seitenleiste, darunter alle Sitzungen darin. Die Zeile zeigt den Namen der Aufgabe, sobald der Agent sie benannt hat (bis dahin den Titel der Sitzung, in der du dort zuletzt gearbeitet hast), den Pull Request oder das Issue, dem er folgt, als farbige Markierung, und ob dort eine Sitzung läuft oder Neuigkeiten für dich hat. Ein Worktree, der für einen Pull Request oder ein Issue angelegt wurde, trägt zuerst dessen Titel, bis der Agent einen kürzeren Namen wählt. Fahre mit der Maus darüber, um den Branch zu sehen. Klicke darauf, um die Sitzung zu öffnen, in der du dort zuletzt gearbeitet hast; um die Liste aufzuklappen, fahre über das Branch-Symbol links davon und klicke auf den Pfeil, der an seiner Stelle erscheint. Sein Menü benennt die Aufgabe um, legt den Worktree in einen Ordner des Projekts, archiviert ihn oder löscht ihn. Wie Arbeiten in den Bereich In Arbeit kommen und ihn verlassen, steht unter [Sitzungen in Arbeit](/de/sessions-in-work/).
 
 ## Projekte, die auf einem Ordner des Repositorys geöffnet sind
 
@@ -35,7 +35,11 @@ Wenn die Arbeit gut ist, verwende **Integrate** in der Git-Ansicht, um die Commi
 
 ## Aufräumen
 
-Markiere die Zeile des Worktrees als erledigt, wenn die Aufgabe fertig ist: Geht nichts verloren, werden seine Sitzungen archiviert und der Worktree und sein lokaler Branch entfernt; andernfalls zeigt OpenChamber, was verloren ginge, und lässt dich entscheiden. Du kannst den Worktree auch über sein Menü löschen oder seine Sitzung löschen oder archivieren. Du entscheidest, ob auch der Branch gelöscht werden soll — lokal und, falls vorhanden, remote.
+Markiere die Zeile des Worktrees als erledigt, wenn die Aufgabe fertig ist, oder wähle **Worktree archivieren** in seinem Menü. OpenChamber archiviert ihn: Der Ordner verschwindet, und seine Sitzungen, seine nicht committeten Änderungen und sein Branch warten auf der Seite Archiv. Läuft dort noch eine Sitzung, bleibt der Worktree.
+
+Auf der Seite Archiv stehen archivierte Worktrees unter ihrem Projekt. **Wiederherstellen** holt einen mit seinem Branch zurück, führt die Setup-Befehle des Projekts aus und bringt seine Änderungen und Sitzungen zurück; das Wiederherstellen einer seiner Sitzungen macht dasselbe. Dateien, die git ignoriert, etwa `node_modules` oder `.env`, werden nicht aufbewahrt, also bringen die Setup-Befehle sie zurück. Auch die Seite Worktrees des Projekts listet archivierte Worktrees.
+
+Um einen Worktree endgültig loszuwerden, lösche ihn über sein Menü oder lösche einen archivierten auf der Seite Archiv. Beim Löschen über das Menü entscheidest du, ob auch der Branch gelöscht werden soll — lokal und, falls vorhanden, remote.
 
 ## Wenn etwas seltsam aussieht
 

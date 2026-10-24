@@ -1116,8 +1116,6 @@ export const settingsDict = {
   'settings.openchamber.sessionRetention.title': 'שמירת הפעלות',
   'settings.openchamber.mergedWorktreeCleanup.title': 'אחרי מיזוג PR',
   'settings.openchamber.mergedWorktreeCleanup.info': 'מתבסס על סטטוס ה-PR שכבר מוצג בסרגל הצד. לא קורה כלום כל עוד סוכן עובד בעץ העבודה או שאחת מההפעלות שלו פתוחה.',
-  'settings.openchamber.mergedWorktreeCleanup.field.enable': 'העבר את ההפעלות לארכיון והסר את עץ העבודה',
-  'settings.openchamber.mergedWorktreeCleanup.field.enableDescription': 'עץ העבודה והענף המקומי שלו מוסרים רק אם כל מה שבו נכלל ב-PR שמוזג. אחרת ההפעלות עוברות לארכיון ועץ העבודה נשאר.',
   'settings.openchamber.messageSearch.title': 'חיפוש הודעות',
   'settings.openchamber.messageSearch.field.enabled': 'חיפוש הודעות בכל השיחות',
   'settings.openchamber.messageSearch.field.enabledInfo': 'שומר אינדקס קטן של ההודעות שלך ושל תגובות הסוכן ליד ההגדרות, כך שהחיפוש מוצא אותן מיד. האינדקס נשאר במחשב שבו OpenChamber רץ ולא נשלח לשום מקום.',

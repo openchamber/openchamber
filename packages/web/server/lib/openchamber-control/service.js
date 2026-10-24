@@ -939,7 +939,7 @@ export const createOpenChamberControlService = (dependencies) => {
       if (action === 'work.name') {
         if (!workNamer) throw new OpenChamberControlError('Naming tasks is not available on this server', 503);
         const sessionID = asNonEmptyString(input.sessionId) || asNonEmptyString(options.contextSessionId);
-        return workNamer.name({ sessionId: sessionID, title: input.title });
+        return workNamer.name({ sessionId: sessionID, title: input.title, branch: input.branch });
       }
       if (action === 'session.moveToWorktree') {
         assertSingleScope(input);

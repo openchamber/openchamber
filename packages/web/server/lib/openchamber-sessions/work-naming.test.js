@@ -74,4 +74,52 @@ describe('work.name', () => {
     expect(renameSession).toHaveBeenCalledWith('fork', 'Own task', '/repo');
     await expect(namer.name({ sessionId: 'fork', title: '  ' })).rejects.toMatchObject({ status: 400 });
   });
+
+  describe('a placeholder branch', () => {
+    const placeholderSetup = ({ placeholder }) => {
+      const base = setup({
+        sessions: [
+          { id: 'wt', title: 'Untitled', location: { directory: '/wt/kinetic-zebra' } },
+          { id: 'main', title: 'Untitled', location: { directory: '/repo' } },
+        ],
+        worktrees: [{ path: '/repo' }, { path: '/wt/kinetic-zebra' }],
+      });
+      const renamePlaceholderBranch = vi.fn(async (_directory, to) => ({ from: 'kinetic-zebra', to }));
+      const namer = createWorkNamer({
+        getSession: async (sessionID) => base.records.get(sessionID) ?? null,
+        listWorktrees: async () => [{ path: '/repo' }, { path: '/wt/kinetic-zebra' }],
+        setWorktreeTaskTitle: base.setWorktreeTaskTitle,
+        readPlaceholderBranch: async () => (placeholder ? 'kinetic-zebra' : null),
+        renamePlaceholderBranch,
+        renameSession: base.renameSession,
+        updateMetadata: base.updateMetadata,
+        createError,
+      });
+      return { ...base, namer, renamePlaceholderBranch };
+    };
+
+    it('requires the branch, saying how, and names nothing without it', async () => {
+      const { namer, setWorktreeTaskTitle } = placeholderSetup({ placeholder: true });
+      await expect(namer.name({ sessionId: 'wt', title: 'pnpm detection' })).rejects.toMatchObject({
+        status: 400,
+        message: expect.stringContaining('Call work.name again with both title and branch'),
+      });
+      expect(setWorktreeTaskTitle).not.toHaveBeenCalled();
+    });
+
+    it('renames it with the task and says so', async () => {
+      const { namer, renamePlaceholderBranch } = placeholderSetup({ placeholder: true });
+      expect(await namer.name({ sessionId: 'wt', title: 'pnpm detection', branch: 'fix/pnpm-detection' }))
+        .toEqual({ task: 'worktree', title: 'pnpm detection', named: true, branch: 'fix/pnpm-detection', branchRenamed: true });
+      expect(renamePlaceholderBranch).toHaveBeenCalledWith('/wt/kinetic-zebra', 'fix/pnpm-detection');
+    });
+
+    it('leaves any other branch alone, and says it did when one was passed', async () => {
+      const { namer, renamePlaceholderBranch } = placeholderSetup({ placeholder: false });
+      expect(await namer.name({ sessionId: 'wt', title: 'Task' })).toEqual({ task: 'worktree', title: 'Task', named: true });
+      expect(await namer.name({ sessionId: 'wt', title: 'Task', branch: 'fix/x' })).toMatchObject({ named: true, branchRenamed: false });
+      expect(await namer.name({ sessionId: 'main', title: 'Task', branch: 'fix/x' })).toMatchObject({ task: 'session', branchRenamed: false });
+      expect(renamePlaceholderBranch).not.toHaveBeenCalled();
+    });
+  });
 });

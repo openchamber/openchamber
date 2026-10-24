@@ -1,7 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { Session } from '@/lib/opencode/model';
 import {
-  decideMergedWorktreeCleanup,
   hasUnmergedCommits,
   runMergedWorktreeCleanup,
   type MergedWorktreeCandidate,
@@ -33,16 +32,16 @@ const setup = (options: {
   busy?: string[];
   open?: string[];
   worktreeOpen?: boolean;
-  isDirty?: boolean | null;
-  hasUnmergedCommits?: boolean | null;
-  gitFails?: boolean;
   handled?: boolean;
   archiveFails?: boolean;
+  removing?: boolean;
+  restored?: boolean;
 }) => {
+  let restored = options.restored ?? false;
   const handled = new Set<string>(options.handled ? [WORKTREE] : []);
   const archived: string[][] = [];
   const reports: MergedWorktreeOutcome[] = [];
-  const calls = { archived, removed: 0, reports };
+  const calls = { archived, reports };
   const deps = {
     listCandidates: () => [candidate],
     isHandled: (entry: MergedWorktreeCandidate) => handled.has(entry.worktree.path),
@@ -51,36 +50,20 @@ const setup = (options: {
     isSessionIdle: (id: string) => !(options.busy ?? []).includes(id),
     isSessionOpen: (id: string) => (options.open ?? []).includes(id),
     isWorktreeOpen: () => options.worktreeOpen ?? false,
-    readWorktreeState: async () => {
-      if (options.gitFails) throw new Error('git unavailable');
-      return { isDirty: options.isDirty ?? false, hasUnmergedCommits: options.hasUnmergedCommits === undefined ? false : options.hasUnmergedCommits };
+    isWorktreeRemoving: () => options.removing ?? false,
+    takeRestored: () => {
+      const answer = restored;
+      restored = false;
+      return answer;
     },
-    archiveSessions: async (ids: string[]) => {
-      calls.archived.push(ids);
-      return { failedIds: options.archiveFails ? ids : [] };
+    archiveWorktree: async (_entry: MergedWorktreeCandidate, sessions: readonly Session[]) => {
+      if (options.archiveFails) throw new Error('archive failed');
+      calls.archived.push(sessions.map((entry) => entry.id));
     },
-    removeWorktree: async () => { calls.removed += 1; },
     report: (outcome: MergedWorktreeOutcome) => { calls.reports.push(outcome); },
   };
   return { deps, calls, handled };
 };
-
-describe('decideMergedWorktreeCleanup', () => {
-  const base = { sessionsBusyOrUnknown: false, sessionOpen: false, isDirty: false, hasUnmergedCommits: false };
-
-  test('removes only when the checkout is clean and holds no commit the merged PR lacks', () => {
-    expect(decideMergedWorktreeCleanup(base)).toEqual({ action: 'remove' });
-    expect(decideMergedWorktreeCleanup({ ...base, isDirty: true })).toEqual({ action: 'archive-only' });
-    expect(decideMergedWorktreeCleanup({ ...base, isDirty: null })).toEqual({ action: 'archive-only' });
-    expect(decideMergedWorktreeCleanup({ ...base, hasUnmergedCommits: true })).toEqual({ action: 'archive-only' });
-    expect(decideMergedWorktreeCleanup({ ...base, hasUnmergedCommits: null })).toEqual({ action: 'archive-only' });
-  });
-
-  test('waits while an agent runs or a session is open', () => {
-    expect(decideMergedWorktreeCleanup({ ...base, sessionsBusyOrUnknown: true })).toEqual({ action: 'wait' });
-    expect(decideMergedWorktreeCleanup({ ...base, sessionOpen: true })).toEqual({ action: 'wait' });
-  });
-});
 
 describe('hasUnmergedCommits', () => {
   const pushed = { tracking: 'origin/feature', ahead: 0 };
@@ -100,20 +83,11 @@ describe('hasUnmergedCommits', () => {
 });
 
 describe('runMergedWorktreeCleanup', () => {
-  test('archives the worktree sessions, then removes the worktree', async () => {
+  test('archives the worktree with its own sessions, once', async () => {
     const { deps, calls } = setup({});
     await runMergedWorktreeCleanup(deps);
-    expect(calls.archived).toEqual([['a']]);
-    expect(calls.removed).toBe(1);
-    expect(calls.reports.map((entry) => entry.kind)).toEqual(['removed']);
-  });
-
-  test('keeps a worktree with commits after the merge, archives its sessions once', async () => {
-    const { deps, calls } = setup({ hasUnmergedCommits: true });
-    await runMergedWorktreeCleanup(deps);
     await runMergedWorktreeCleanup(deps);
     expect(calls.archived).toEqual([['a']]);
-    expect(calls.removed).toBe(0);
     expect(calls.reports.map((entry) => entry.kind)).toEqual(['archived']);
   });
 
@@ -126,46 +100,31 @@ describe('runMergedWorktreeCleanup', () => {
     }
   });
 
-  test('git that cannot answer decides nothing', async () => {
-    const { deps, calls, handled } = setup({ gitFails: true });
+  test('a worktree without sessions is archived too', async () => {
+    const { deps, calls } = setup({ sessions: [] });
+    await runMergedWorktreeCleanup(deps);
+    expect(calls.archived).toEqual([[]]);
+  });
+
+  test('leaves alone a worktree something else is archiving or removing', async () => {
+    const { deps, calls, handled } = setup({ removing: true });
     await runMergedWorktreeCleanup(deps);
     expect(calls.archived).toEqual([]);
     expect(handled.size).toBe(0);
   });
 
-  test('a failed archive keeps the worktree and is reported', async () => {
+  test('a worktree restored after its PR merged is the user taking it back: never archived for that PR', async () => {
+    const { deps, calls, handled } = setup({ restored: true });
+    await runMergedWorktreeCleanup(deps);
+    await runMergedWorktreeCleanup(deps);
+    expect(calls.archived).toEqual([]);
+    expect(handled.size).toBe(1);
+  });
+
+  test('a failed archive is reported and not tried again on every pass', async () => {
     const { deps, calls } = setup({ archiveFails: true });
     await runMergedWorktreeCleanup(deps);
-    expect(calls.removed).toBe(0);
+    await runMergedWorktreeCleanup(deps);
     expect(calls.reports.map((entry) => entry.kind)).toEqual(['failed']);
-  });
-
-  test('a kept worktree without sessions stays quiet', async () => {
-    const { deps, calls } = setup({ sessions: [], isDirty: true });
-    await runMergedWorktreeCleanup(deps);
-    expect(calls.reports).toEqual([]);
-  });
-
-  test('a kept worktree nobody works in goes once nothing there can be lost', async () => {
-    const state = { isDirty: true };
-    const { deps, calls } = setup({ sessions: [] });
-    deps.readWorktreeState = async () => ({ isDirty: state.isDirty, hasUnmergedCommits: false });
-    await runMergedWorktreeCleanup(deps);
-    expect(calls.removed).toBe(0);
-    state.isDirty = false;
-    // Only the periodic pass rechecks a kept worktree.
-    await runMergedWorktreeCleanup(deps, { recheckKept: false });
-    expect(calls.removed).toBe(0);
-    await runMergedWorktreeCleanup(deps);
-    expect(calls.removed).toBe(1);
-    expect(calls.archived).toEqual([]);
-    expect(calls.reports.map((entry) => entry.kind)).toEqual(['removed']);
-  });
-
-  test('sessions in a kept worktree mean the work went on there: nothing is archived or removed', async () => {
-    const { deps, calls } = setup({ handled: true });
-    await runMergedWorktreeCleanup(deps);
-    expect(calls.archived).toEqual([]);
-    expect(calls.removed).toBe(0);
   });
 });

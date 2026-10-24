@@ -17,6 +17,7 @@ import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
+import { worktreeArchiveI18n } from './worktree-archive.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
 import { sourceBoardI18n } from './source-board.i18n';
@@ -159,6 +160,7 @@ export const dict = {
   ...sessionWarmingI18n.fr,
   ...heapSnapshotI18n.fr,
   ...sidebarWorkI18n.fr,
+  ...worktreeArchiveI18n.fr,
   ...overviewI18n.fr,
   ...isolatedSpacesI18n.fr,
   ...sourceBoardI18n.fr,
@@ -448,7 +450,6 @@ export const dict = {
   'sessions.sidebar.activity.chatsTitle': 'Discussions',
   'sessions.sidebar.activity.chatsEmpty': 'Aucune discussion pour le moment.',
   'chat.chatInput.chooseProject': 'Choisir un projet',
-  'sessions.archivePage.allDirectories': 'Tous les répertoires',
   'sessions.sidebar.header.projectDisplay.label': 'Afficher les projets',
   'sessions.sidebar.header.projectDisplay.all': 'Tous les projets',
   'sessions.sidebar.header.listGrouping.label': 'Sessions',
@@ -705,22 +706,14 @@ export const dict = {
   'sessions.sidebar.sessionDialogs.directory.errorOpenDescription': 'Desktop n\'a pas pu accorder l\'accès aux fichiers.',
   'sessions.sidebar.sessionDialogs.directory.errorAddProjectTitle': 'Échec de l\'ajout du projet',
   'sessions.sidebar.sessionDialogs.directory.errorAddProjectDescription': 'Veuillez sélectionner un chemin de répertoire valide.',
-  'sessions.sidebar.sessionDialogs.worktree.errorRemoveTitle': 'Échec de la suppression du worktree « {name} »',
+  'sessions.sidebar.sessionDialogs.worktree.errorRemoveTitle': 'Impossible de supprimer le worktree',
   'sessions.sidebar.sessionDialogs.worktree.removingTitle': 'Suppression du worktree « {name} »…',
-  'sessions.sidebar.sessionDialogs.worktree.removedTitle': 'Worktree « {name} » supprimé',
-  'sessions.sidebar.sessionDialogs.worktree.removed': 'Worktree supprimé.',
-  'sessions.sidebar.sessionDialogs.worktree.removedWithRemote': 'Worktree et branche du dépôt distant supprimés.',
+  'sessions.sidebar.sessionDialogs.worktree.removed': 'Worktree supprimé',
+  'sessions.sidebar.sessionDialogs.worktree.removedWithRemote': 'Worktree et branche du dépôt distant supprimés',
   'sessions.sidebar.sessionDialogs.worktree.attachedArchived': 'Worktree associé archivé.',
   'sessions.sidebar.sessionDialogs.worktree.attachedArchivedPlural': 'Worktrees associés archivés.',
   'sessions.sidebar.sessionDialogs.worktree.archivedAndRemoteRemoved': 'Worktrees archivés et branches du dépôt distant supprimées.',
   'sessions.sidebar.group.worktreeMissing': 'Le dossier du worktree est introuvable',
-  'sessions.mergedCleanup.toast.removedTitle': '{name} nettoyé : PR #{number} fusionnée',
-  'sessions.mergedCleanup.toast.mr.removedTitle': '{name} nettoyé : MR !{number} fusionnée',
-  'sessions.mergedCleanup.toast.removedDescription': 'Ses sessions sont archivées, le worktree et sa branche locale sont supprimés.',
-  'sessions.mergedCleanup.toast.archivedTitle': 'Sessions de {name} archivées : PR #{number} fusionnée',
-  'sessions.mergedCleanup.toast.mr.archivedTitle': 'Sessions de {name} archivées : MR !{number} fusionnée',
-  'sessions.mergedCleanup.toast.archivedDescription': 'Le worktree est conservé : il contient des modifications ou des commits absents de la PR fusionnée.',
-  'sessions.mergedCleanup.toast.mr.archivedDescription': 'Le worktree est conservé : il contient des modifications ou des commits absents de la MR fusionnée.',
   'sessions.mergedCleanup.toast.failedTitle': 'Impossible de nettoyer {name} après la fusion de la PR #{number}',
   'sessions.mergedCleanup.toast.mr.failedTitle': 'Impossible de nettoyer {name} après la fusion de la MR !{number}',
   'sessions.sidebar.session.restore.relocatedTitle': 'Session déplacée dans le dossier du projet',

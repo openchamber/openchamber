@@ -18,6 +18,7 @@ import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
+import { worktreeArchiveI18n } from './worktree-archive.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
 import { sourceBoardI18n } from './source-board.i18n';
@@ -160,6 +161,7 @@ export const dict: Record<I18nKey, string> = {
   ...sessionWarmingI18n.ko,
   ...heapSnapshotI18n.ko,
   ...sidebarWorkI18n.ko,
+  ...worktreeArchiveI18n.ko,
   ...overviewI18n.ko,
   ...isolatedSpacesI18n.ko,
   ...sourceBoardI18n.ko,
@@ -627,7 +629,6 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.activity.chatsTitle': '채팅',
   'sessions.sidebar.activity.chatsEmpty': '아직 채팅이 없습니다.',
   'chat.chatInput.chooseProject': '프로젝트 선택',
-  'sessions.archivePage.allDirectories': '모든 디렉터리',
   'sessions.sidebar.header.projectDisplay.label': '프로젝트 표시',
   'sessions.sidebar.header.projectDisplay.all': '모든 프로젝트',
   'sessions.sidebar.header.listGrouping.label': '세션',
@@ -885,22 +886,14 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.sessionDialogs.directory.errorOpenDescription': '데스크톱에서 파일 접근 권한을 부여하지 못했습니다.',
   'sessions.sidebar.sessionDialogs.directory.errorAddProjectTitle': '프로젝트 추가 실패',
   'sessions.sidebar.sessionDialogs.directory.errorAddProjectDescription': '유효한 디렉터리 경로를 선택하세요.',
-  'sessions.sidebar.sessionDialogs.worktree.errorRemoveTitle': '워크트리 “{name}” 제거 실패',
+  'sessions.sidebar.sessionDialogs.worktree.errorRemoveTitle': '워크트리를 제거하지 못했습니다',
   'sessions.sidebar.sessionDialogs.worktree.removingTitle': '워크트리 “{name}” 제거 중…',
-  'sessions.sidebar.sessionDialogs.worktree.removedTitle': '워크트리 “{name}” 제거됨',
-  'sessions.sidebar.sessionDialogs.worktree.removed': '워크트리가 제거되었습니다.',
-  'sessions.sidebar.sessionDialogs.worktree.removedWithRemote': '워크트리와 리모트 브랜치가 제거되었습니다.',
+  'sessions.sidebar.sessionDialogs.worktree.removed': '워크트리가 제거되었습니다',
+  'sessions.sidebar.sessionDialogs.worktree.removedWithRemote': '워크트리와 리모트 브랜치가 제거되었습니다',
   'sessions.sidebar.sessionDialogs.worktree.attachedArchived': '첨부됨 워크트리 보관됨.',
   'sessions.sidebar.sessionDialogs.worktree.attachedArchivedPlural': '첨부됨 워크트리 보관됨.',
   'sessions.sidebar.sessionDialogs.worktree.archivedAndRemoteRemoved': '워크트리가 보관되고 리모트 브랜치가 제거되었습니다.',
   'sessions.sidebar.group.worktreeMissing': '워크트리 폴더가 없습니다',
-  'sessions.mergedCleanup.toast.removedTitle': '{name} 정리됨: PR #{number} 병합됨',
-  'sessions.mergedCleanup.toast.mr.removedTitle': '{name} 정리됨: MR !{number} 병합됨',
-  'sessions.mergedCleanup.toast.removedDescription': '세션을 보관하고 워크트리와 로컬 브랜치를 제거했습니다.',
-  'sessions.mergedCleanup.toast.archivedTitle': '{name}의 세션 보관됨: PR #{number} 병합됨',
-  'sessions.mergedCleanup.toast.mr.archivedTitle': '{name}의 세션 보관됨: MR !{number} 병합됨',
-  'sessions.mergedCleanup.toast.archivedDescription': '병합된 PR에 없는 변경 사항이나 커밋이 있어 워크트리는 남겨 두었습니다.',
-  'sessions.mergedCleanup.toast.mr.archivedDescription': '병합된 MR에 없는 변경 사항이나 커밋이 있어 워크트리는 남겨 두었습니다.',
   'sessions.mergedCleanup.toast.failedTitle': 'PR #{number} 병합 후 {name}을(를) 정리하지 못했습니다',
   'sessions.mergedCleanup.toast.mr.failedTitle': 'MR !{number} 병합 후 {name}을(를) 정리하지 못했습니다',
   'sessions.sidebar.session.restore.relocatedTitle': '세션을 프로젝트 폴더로 옮겼습니다',

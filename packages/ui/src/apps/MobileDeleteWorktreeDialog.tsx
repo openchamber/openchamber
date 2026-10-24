@@ -146,13 +146,9 @@ export const MobileDeleteWorktreeDialog: React.FC<MobileDeleteWorktreeDialogProp
           return;
         }
 
-        toast.success(t('sessions.sidebar.sessionDialogs.worktree.removedTitle', { name }), {
-          id: toastId,
-          description:
-            hasBranch && deleteRemoteBranch
-              ? t('sessions.sidebar.sessionDialogs.worktree.removedWithRemote')
-              : t('sessions.sidebar.sessionDialogs.worktree.removed'),
-        });
+        toast.success(hasBranch && deleteRemoteBranch
+          ? t('sessions.sidebar.sessionDialogs.worktree.removedWithRemote')
+          : t('sessions.sidebar.sessionDialogs.worktree.removed'), { id: toastId, description: name });
         onDeleted?.();
       } catch (error) {
         // The remote branch could not be deleted, so the worktree was kept: say
@@ -162,7 +158,7 @@ export const MobileDeleteWorktreeDialog: React.FC<MobileDeleteWorktreeDialogProp
           : error instanceof PendingGitOperationError || (error instanceof BoundGitNetworkOperationError && !error.message.includes(' '))
             ? t('gitView.publish.remoteNotGranted')
             : error instanceof Error ? error.message : t('sessions.sidebar.dialogs.deleteResult.tryAgain');
-        toast.error(t('sessions.sidebar.sessionDialogs.worktree.errorRemoveTitle', { name }), { id: toastId, description });
+        toast.error(t('sessions.sidebar.sessionDialogs.worktree.errorRemoveTitle'), { id: toastId, description });
       } finally {
         clearWorktreeRemoval(target.path);
       }

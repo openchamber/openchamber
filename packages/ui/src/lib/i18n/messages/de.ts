@@ -17,6 +17,7 @@ import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
+import { worktreeArchiveI18n } from './worktree-archive.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
 import { sourceBoardI18n } from './source-board.i18n';
@@ -159,6 +160,7 @@ export const dict = {
   ...sessionWarmingI18n.de,
   ...heapSnapshotI18n.de,
   ...sidebarWorkI18n.de,
+  ...worktreeArchiveI18n.de,
   ...overviewI18n.de,
   ...isolatedSpacesI18n.de,
   ...sourceBoardI18n.de,
@@ -785,22 +787,14 @@ export const dict = {
   'sessions.sidebar.sessionDialogs.directory.errorOpenDescription': 'Desktop konnte keinen Dateizugriff gewähren.',
   'sessions.sidebar.sessionDialogs.directory.errorAddProjectTitle': 'Fehler beim Hinzufügen des Projekts',
   'sessions.sidebar.sessionDialogs.directory.errorAddProjectDescription': 'Bitte wählen Sie einen gültigen Verzeichnispfad aus.',
-  'sessions.sidebar.sessionDialogs.worktree.errorRemoveTitle': 'Fehler beim Entfernen des Worktrees „{name}“',
+  'sessions.sidebar.sessionDialogs.worktree.errorRemoveTitle': 'Worktree konnte nicht entfernt werden',
   'sessions.sidebar.sessionDialogs.worktree.removingTitle': 'Worktree „{name}“ wird entfernt…',
-  'sessions.sidebar.sessionDialogs.worktree.removedTitle': 'Worktree „{name}“ entfernt',
-  'sessions.sidebar.sessionDialogs.worktree.removed': 'Worktree entfernt.',
-  'sessions.sidebar.sessionDialogs.worktree.removedWithRemote': 'Worktree und Remote-Branch entfernt.',
+  'sessions.sidebar.sessionDialogs.worktree.removed': 'Worktree entfernt',
+  'sessions.sidebar.sessionDialogs.worktree.removedWithRemote': 'Worktree und Remote-Branch entfernt',
   'sessions.sidebar.sessionDialogs.worktree.attachedArchived': 'Angefügter Worktree archiviert.',
   'sessions.sidebar.sessionDialogs.worktree.attachedArchivedPlural': 'Angefügte Worktrees archiviert.',
   'sessions.sidebar.sessionDialogs.worktree.archivedAndRemoteRemoved': 'Archivierte Worktrees und entfernte Remote-Branches.',
   'sessions.sidebar.group.worktreeMissing': 'Worktree-Ordner fehlt',
-  'sessions.mergedCleanup.toast.removedTitle': '{name} aufgeräumt: PR #{number} gemergt',
-  'sessions.mergedCleanup.toast.mr.removedTitle': '{name} aufgeräumt: MR !{number} gemergt',
-  'sessions.mergedCleanup.toast.removedDescription': 'Die Sitzungen sind archiviert, Worktree und lokaler Branch entfernt.',
-  'sessions.mergedCleanup.toast.archivedTitle': 'Sitzungen in {name} archiviert: PR #{number} gemergt',
-  'sessions.mergedCleanup.toast.mr.archivedTitle': 'Sitzungen in {name} archiviert: MR !{number} gemergt',
-  'sessions.mergedCleanup.toast.archivedDescription': 'Der Worktree bleibt: Er enthält Änderungen oder Commits, die nicht im gemergten PR sind.',
-  'sessions.mergedCleanup.toast.mr.archivedDescription': 'Der Worktree bleibt: Er enthält Änderungen oder Commits, die nicht im gemergten MR sind.',
   'sessions.mergedCleanup.toast.failedTitle': '{name} konnte nach dem Mergen von PR #{number} nicht aufgeräumt werden',
   'sessions.mergedCleanup.toast.mr.failedTitle': '{name} konnte nach dem Mergen von MR !{number} nicht aufgeräumt werden',
   'sessions.sidebar.session.restore.relocatedTitle': 'Sitzung in den Projektordner verschoben',
@@ -3271,7 +3265,6 @@ export const dict = {
   'mobile.files.doneEditingAria': 'Bearbeitung abschließen',
   'sessions.scheduledTasks.editor.permissionAutoAccept.label': 'Berechtigungen automatisch akzeptieren',
   'sessions.scheduledTasks.editor.permissionAutoAccept.aria': 'Die Sitzung der Aufgabe mit aktivierter automatischer Berechtigungsannahme starten',
-  'sessions.archivePage.allDirectories': 'Alle Verzeichnisse',
   'sessions.sidebar.header.projectDisplay.label': 'Projekte anzeigen',
   'sessions.sidebar.header.projectDisplay.all': 'Alle Projekte',
   'sessions.sidebar.header.listGrouping.label': 'Sitzungen',

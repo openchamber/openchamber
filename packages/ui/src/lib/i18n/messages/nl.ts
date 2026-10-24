@@ -17,6 +17,7 @@ import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
+import { worktreeArchiveI18n } from './worktree-archive.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
 import { sourceBoardI18n } from './source-board.i18n';
@@ -159,6 +160,7 @@ export const dict = {
   ...sessionWarmingI18n.nl,
   ...heapSnapshotI18n.nl,
   ...sidebarWorkI18n.nl,
+  ...worktreeArchiveI18n.nl,
   ...overviewI18n.nl,
   ...isolatedSpacesI18n.nl,
   ...sourceBoardI18n.nl,
@@ -626,7 +628,6 @@ export const dict = {
   'sessions.sidebar.activity.chatsTitle': 'Gesprekken',
   'sessions.sidebar.activity.chatsEmpty': 'Nog geen gesprekken.',
   'chat.chatInput.chooseProject': 'Kies project',
-  'sessions.archivePage.allDirectories': 'Alle mappen',
   'sessions.sidebar.header.projectDisplay.label': 'Projecten tonen',
   'sessions.sidebar.header.projectDisplay.all': 'Alle projecten',
   'sessions.sidebar.header.listGrouping.label': 'Sessies',
@@ -879,22 +880,14 @@ export const dict = {
   'sessions.sidebar.sessionDialogs.directory.errorOpenDescription': 'Desktop kon geen bestandstoegang verlenen.',
   'sessions.sidebar.sessionDialogs.directory.errorAddProjectTitle': 'Kan project niet toevoegen',
   'sessions.sidebar.sessionDialogs.directory.errorAddProjectDescription': 'Selecteer een geldig mappad.',
-  'sessions.sidebar.sessionDialogs.worktree.errorRemoveTitle': 'Kan worktree "{name}" niet verwijderen',
+  'sessions.sidebar.sessionDialogs.worktree.errorRemoveTitle': 'Kan worktree niet verwijderen',
   'sessions.sidebar.sessionDialogs.worktree.removingTitle': 'Worktree “{name}” wordt verwijderd…',
-  'sessions.sidebar.sessionDialogs.worktree.removedTitle': 'Worktree “{name}” verwijderd',
-  'sessions.sidebar.sessionDialogs.worktree.removed': 'Worktree verwijderd.',
-  'sessions.sidebar.sessionDialogs.worktree.removedWithRemote': 'Worktree en remote branch verwijderd.',
+  'sessions.sidebar.sessionDialogs.worktree.removed': 'Worktree verwijderd',
+  'sessions.sidebar.sessionDialogs.worktree.removedWithRemote': 'Worktree en remote branch verwijderd',
   'sessions.sidebar.sessionDialogs.worktree.attachedArchived': 'Gekoppelde worktree gearchiveerd.',
   'sessions.sidebar.sessionDialogs.worktree.attachedArchivedPlural': 'Gekoppelde worktrees gearchiveerd.',
   'sessions.sidebar.sessionDialogs.worktree.archivedAndRemoteRemoved': 'Worktrees gearchiveerd en remote branches verwijderd.',
   'sessions.sidebar.group.worktreeMissing': 'Worktree-map ontbreekt',
-  'sessions.mergedCleanup.toast.removedTitle': '{name} opgeruimd: PR #{number} gemerged',
-  'sessions.mergedCleanup.toast.mr.removedTitle': '{name} opgeruimd: MR !{number} gemerged',
-  'sessions.mergedCleanup.toast.removedDescription': 'De sessies zijn gearchiveerd en de worktree en lokale branch verwijderd.',
-  'sessions.mergedCleanup.toast.archivedTitle': 'Sessies in {name} gearchiveerd: PR #{number} gemerged',
-  'sessions.mergedCleanup.toast.mr.archivedTitle': 'Sessies in {name} gearchiveerd: MR !{number} gemerged',
-  'sessions.mergedCleanup.toast.archivedDescription': 'De worktree blijft staan: er zitten wijzigingen of commits in die niet in de gemergde PR staan.',
-  'sessions.mergedCleanup.toast.mr.archivedDescription': 'De worktree blijft staan: er zitten wijzigingen of commits in die niet in de gemergde MR staan.',
   'sessions.mergedCleanup.toast.failedTitle': 'Kon {name} niet opruimen nadat PR #{number} is gemerged',
   'sessions.mergedCleanup.toast.mr.failedTitle': 'Kon {name} niet opruimen nadat MR !{number} is gemerged',
   'sessions.sidebar.session.restore.relocatedTitle': 'Sessie verplaatst naar de projectmap',

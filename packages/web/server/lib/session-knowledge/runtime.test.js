@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { KNOWLEDGE_ENTRY_KEYS, RENDER_PAGE_GUIDANCE, SESSION_LINK_GUIDANCE, WORK_NAME_GUIDANCE, buildKnowledgeEntries, createSessionKnowledgeRuntime } from './runtime.js';
+import { DIRECT_TOOLS_GUIDANCE, KNOWLEDGE_ENTRY_KEYS, RENDER_PAGE_GUIDANCE, SESSION_LINK_GUIDANCE, WORK_NAME_GUIDANCE, buildKnowledgeEntries, createSessionKnowledgeRuntime } from './runtime.js';
 
 const DIRECTORY = '/work/project';
 const PROJECT_ID = 'path_project';
@@ -33,7 +33,7 @@ const createRuntime = (overrides = {}) => {
   };
   for (const key of [
     'readSessionMetadata', 'persistSessionMetadata', 'isAgentMemoryEnabled', 'isSessionLinkingAvailable',
-    'isPageRenderingAvailable', 'readCheckoutBranch', 'readPlaceholderBranch', 'instructionEntries',
+    'isPageRenderingAvailable', 'areAgentToolsInCodeMode', 'readCheckoutBranch', 'readPlaceholderBranch', 'instructionEntries',
   ]) {
     if (key in overrides) dependencies[key] = overrides[key];
   }
@@ -150,7 +150,7 @@ describe('when to link', () => {
     });
     const entries = await entriesFor(runtime, NO_PINS);
 
-    expect(entries[GUIDANCE]).toBe(`${SESSION_LINK_GUIDANCE}\n\n${WORK_NAME_GUIDANCE}`);
+    expect(entries[GUIDANCE]).toBe(`${SESSION_LINK_GUIDANCE}\n\n${WORK_NAME_GUIDANCE}\n\n${DIRECT_TOOLS_GUIDANCE}`);
     expect(entries[PINNED]).toBe('');
     expect(entries[MEMORY]).toBe('');
   });
@@ -172,7 +172,7 @@ describe('when to draw a page', () => {
   test('is told in a session whose agent has the render tool', async () => {
     const entries = await entriesFor(createRuntime({ ...bare, isPageRenderingAvailable: async () => true }), NO_PINS);
 
-    expect(entries[GUIDANCE]).toBe(RENDER_PAGE_GUIDANCE);
+    expect(entries[GUIDANCE]).toBe(`${RENDER_PAGE_GUIDANCE}\n\n${DIRECT_TOOLS_GUIDANCE}`);
     expect(entries[GUIDANCE]).toContain('Skip it for a few numbers');
   });
 
@@ -181,6 +181,15 @@ describe('when to draw a page', () => {
       const entries = await entriesFor(createRuntime({ ...bare, isPageRenderingAvailable }), NO_PINS);
       expect(entries[GUIDANCE]).toBe('');
     }
+  });
+});
+
+describe('where the managed tools are called', () => {
+  test('says they are direct tools, and not when they run through Code Mode', async () => {
+    const direct = await entriesFor(createRuntime({ isSessionLinkingAvailable: async () => true }));
+    expect(direct[GUIDANCE]).toContain('never call them from inside a Code Mode execute script');
+    const codeMode = await entriesFor(createRuntime({ isSessionLinkingAvailable: async () => true, areAgentToolsInCodeMode: async () => true }));
+    expect(codeMode[GUIDANCE]).not.toContain(DIRECT_TOOLS_GUIDANCE);
   });
 });
 
@@ -272,7 +281,8 @@ describe('which branch the session works on', () => {
     });
     await runtime.sync('ses_a', DIRECTORY);
     const told = instructionEntries.held.get(CHECKOUT);
-    expect(told).toContain('git branch -m agile-chipmunk <new-name>');
+    expect(told).toContain('`agile-chipmunk` is a placeholder');
+    expect(told).toContain('passing branch too');
     expect(told).toContain('work.name');
 
     branch = 'fix/login-timeout';

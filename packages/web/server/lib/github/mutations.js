@@ -289,6 +289,9 @@ export function createGitHubMutations({ descriptor, octokitOf, resolveRepo, reso
   // while: most land within seconds, and one still running is reported as
   // such, its outcome arriving with the PR's live state. A host without the
   // endpoint (an older GitHub Enterprise Server) merges the classic way.
+  // The classic endpoint lets a ruleset's bypass actor merge past the rules
+  // without asking; the asynchronous one does so only with `bypass_rules`,
+  // which is sent so both merge the same way. It never widens who may bypass.
   const MERGE_ASYNC_POLL_MS = 1000;
   const MERGE_ASYNC_WAIT_MS = 20_000;
   const MERGE_ASYNC_STATUSES = new Set(['pending', 'merged', 'enqueued', 'failed']);
@@ -318,7 +321,7 @@ export function createGitHubMutations({ descriptor, octokitOf, resolveRepo, reso
     let answer;
     try {
       const response = await octokit.request('PUT /repos/{owner}/{repo}/pulls/{pull_number}/merge-async', {
-        ...route, merge_method: method, sha: target.headSha,
+        ...route, merge_method: method, sha: target.headSha, bypass_rules: true,
       });
       answer = mergeAsyncAnswer(response?.data);
     } catch (error) {

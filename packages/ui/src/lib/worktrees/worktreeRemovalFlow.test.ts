@@ -11,8 +11,8 @@ describe('archiveSessionsThenRemoveWorktree', () => {
         calls.push(`archive:${sessionIds.join(',')}`);
         return { archivedIds: ['session-one'], failedIds: ['session-two'] };
       },
-      removeWorktree: async () => {
-        calls.push('remove');
+      removeWorktree: async (archivedIds) => {
+        calls.push(`remove:${archivedIds.join(',')}`);
         return true;
       },
       restoreSessions: async (sessionIds) => {
@@ -21,7 +21,8 @@ describe('archiveSessionsThenRemoveWorktree', () => {
       },
     });
 
-    expect(calls).toEqual(['archive:session-one,session-two', 'remove']);
+    // An archive of the worktree records exactly the sessions that went.
+    expect(calls).toEqual(['archive:session-one,session-two', 'remove:session-one']);
     expect(result).toEqual({ removed: true, archive: { archivedIds: ['session-one'], failedIds: ['session-two'] } });
   });
 

@@ -205,7 +205,14 @@ other.
   the sidebar nests by, and records `metadata.openchamber.workTitle`. A name
   the user gave stays: the call changes nothing and answers `named: false`
   with the current name. When to call it is in the session context, next to
-  the linking guidance (`WORK_NAME_GUIDANCE`).
+  the linking guidance (`WORK_NAME_GUIDANCE`). While the worktree's branch is
+  OpenChamber's unpushed placeholder (`readRenameableGeneratedBranch`), the
+  call also requires `branch` and renames it (`renameGeneratedWorktreeBranch`),
+  answering `branch` and `branchRenamed: true`; without `branch` it fails with
+  400, says how to call it, and names nothing. Any other branch, and the main
+  checkout, is not renamed: a `branch` passed there answers
+  `branchRenamed: false` with a note, so the agent does not take the call for
+  a rename.
 - `session.link` records a code change under review or an issue on a session
   (`../openchamber-sessions/session-link.js`), defaulting to the calling
   session. When to link is not in the action's description but at the head of

@@ -27,7 +27,7 @@ import { FileTreeChevron } from '@/components/views/files/FileTreeRowParts';
 import { handleSessionRenameKeyDown } from '@/components/session/sessionRenameKeyboard';
 import { useOpenTrackerItem } from '@/components/sourceBoard/openTrackerItem';
 import { useShiftKeyHeld } from '@/hooks/useShiftKeyHeld';
-import { setGitWorktreeTitle } from '@/lib/gitApi';
+import { canArchiveWorktrees, setGitWorktreeTitle } from '@/lib/gitApi';
 import { useI18n } from '@/lib/i18n';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { refTintStyle } from '@/lib/source-control/prVisualState';
@@ -224,25 +224,26 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
       toast.error(t('sessions.sidebar.work.rename.failed'), { description: error instanceof Error ? error.message : undefined });
     }
   };
+  // Archive and Done both end the work: in-work sessions are marked done and
+  // the worktree is archived. VS Code keeps its own list, without archives.
+  const canArchive = canArchiveWorktrees();
   const finish = async (): Promise<void> => {
     if (!worktree || !project || finishing) return;
     setFinishing(true);
     try {
-      const outcome = await finishWorktreeWork({ sessions, worktree, project: { id: project.id, path: project.path } });
+      const outcome = await finishWorktreeWork({ sessions, worktree, project: { id: project.id, path: project.path }, title: label });
       switch (outcome.kind) {
-        case 'removed':
-          toast.success(t('sessions.sidebar.work.done.removed', { label }));
+        case 'archived':
+          toast.success(t('sessions.sidebar.work.archive.done'), { description: label });
           break;
         case 'busy':
-          toast.info(t('sessions.sidebar.work.done.keptRunning', { label }));
+          toast.info(t('sessions.sidebar.work.archive.kept'), { description: t('sessions.sidebar.work.archive.keptRunning') });
           break;
-        case 'ask':
-          // Done already; whether the worktree goes is the user's call, in
-          // the dialog that shows what removing it would lose.
-          sessionEvents.requestDelete({ sessions, mode: 'worktree', worktree });
+        case 'unknown':
+          toast.info(t('sessions.sidebar.work.archive.kept'), { description: t('sessions.sidebar.work.archive.keptUnknown') });
           break;
         case 'failed':
-          toast.error(outcome.doneFailed > 0 ? t('sessions.sidebar.work.done.failed') : t('sessions.sidebar.work.done.removeFailed'), {
+          toast.error(outcome.doneFailed > 0 ? t('sessions.sidebar.work.done.failed') : t('sessions.sidebar.work.archive.failed'), {
             description: outcome.error.message,
           });
           break;
@@ -400,6 +401,12 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
       ) : null}
       {worktree && !worktreeRemoving ? <>
         <Slots.Separator />
+        {canArchive ? (
+          <Slots.Item onClick={() => { void finish(); }}>
+            <Icon name="archive" className="h-4 w-4" />
+            <span>{t('sessions.sidebar.work.menu.archive')}</span>
+          </Slots.Item>
+        ) : null}
         <Slots.Item
           className={cn(shiftHeld && 'text-destructive')}
           onClick={(event) => deleteWorktree(event)}

@@ -18,6 +18,7 @@ import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
+import { worktreeArchiveI18n } from './worktree-archive.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
 import { sourceBoardI18n } from './source-board.i18n';
@@ -160,6 +161,7 @@ export const dict: Record<I18nKey, string> = {
   ...sessionWarmingI18n['zh-CN'],
   ...heapSnapshotI18n['zh-CN'],
   ...sidebarWorkI18n['zh-CN'],
+  ...worktreeArchiveI18n['zh-CN'],
   ...overviewI18n['zh-CN'],
   ...isolatedSpacesI18n['zh-CN'],
   ...sourceBoardI18n['zh-CN'],
@@ -627,7 +629,6 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.activity.chatsTitle': '聊天',
   'sessions.sidebar.activity.chatsEmpty': '暂无聊天。',
   'chat.chatInput.chooseProject': '选择项目',
-  'sessions.archivePage.allDirectories': '所有目录',
   'sessions.sidebar.header.projectDisplay.label': '显示项目',
   'sessions.sidebar.header.projectDisplay.all': '所有项目',
   'sessions.sidebar.header.listGrouping.label': '会话',
@@ -885,22 +886,14 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.sessionDialogs.directory.errorOpenDescription': '桌面端无法授予文件访问权限。',
   'sessions.sidebar.sessionDialogs.directory.errorAddProjectTitle': '添加项目失败',
   'sessions.sidebar.sessionDialogs.directory.errorAddProjectDescription': '请选择有效的目录路径。',
-  'sessions.sidebar.sessionDialogs.worktree.errorRemoveTitle': '移除工作树“{name}”失败',
+  'sessions.sidebar.sessionDialogs.worktree.errorRemoveTitle': '移除工作树失败',
   'sessions.sidebar.sessionDialogs.worktree.removingTitle': '正在移除工作树“{name}”…',
-  'sessions.sidebar.sessionDialogs.worktree.removedTitle': '工作树“{name}”已移除',
-  'sessions.sidebar.sessionDialogs.worktree.removed': '工作树已移除。',
-  'sessions.sidebar.sessionDialogs.worktree.removedWithRemote': '工作树和远程分支已移除。',
+  'sessions.sidebar.sessionDialogs.worktree.removed': '工作树已移除',
+  'sessions.sidebar.sessionDialogs.worktree.removedWithRemote': '工作树和远程分支已移除',
   'sessions.sidebar.sessionDialogs.worktree.attachedArchived': '关联工作树已归档。',
   'sessions.sidebar.sessionDialogs.worktree.attachedArchivedPlural': '关联工作树已归档。',
   'sessions.sidebar.sessionDialogs.worktree.archivedAndRemoteRemoved': '工作树已归档且远程分支已移除。',
   'sessions.sidebar.group.worktreeMissing': '工作树文件夹缺失',
-  'sessions.mergedCleanup.toast.removedTitle': '已清理 {name}：PR #{number} 已合并',
-  'sessions.mergedCleanup.toast.mr.removedTitle': '已清理 {name}：MR !{number} 已合并',
-  'sessions.mergedCleanup.toast.removedDescription': '其会话已归档，工作树及其本地分支已移除。',
-  'sessions.mergedCleanup.toast.archivedTitle': '已归档 {name} 中的会话：PR #{number} 已合并',
-  'sessions.mergedCleanup.toast.mr.archivedTitle': '已归档 {name} 中的会话：MR !{number} 已合并',
-  'sessions.mergedCleanup.toast.archivedDescription': '工作树已保留：其中有未包含在合并 PR 中的更改或提交。',
-  'sessions.mergedCleanup.toast.mr.archivedDescription': '工作树已保留：其中有未包含在合并 MR 中的更改或提交。',
   'sessions.mergedCleanup.toast.failedTitle': 'PR #{number} 合并后无法清理 {name}',
   'sessions.mergedCleanup.toast.mr.failedTitle': 'MR !{number} 合并后无法清理 {name}',
   'sessions.sidebar.session.restore.relocatedTitle': '会话已移至项目文件夹',

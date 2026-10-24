@@ -23,7 +23,7 @@ Para pular as perguntas, escolha **Worktree rápido** no mesmo menu de branches:
 
 ## Na barra lateral
 
-Um worktree é uma linha na barra lateral, com todas as sessões dele embaixo. A linha mostra o nome da tarefa assim que o agente o define (até lá, o título da sessão em que você trabalhou por último ali), o pull request ou issue que ele acompanha como uma marca colorida, e se alguma sessão ali está rodando ou tem novidades para você. Um worktree criado para um pull request ou uma issue começa com o título desse item até o agente escolher um nome mais curto. Passe o cursor sobre ela para ver o branch. Clique para abrir a sessão em que você trabalhou por último ali; para abrir a lista, passe o cursor sobre o ícone de branch à esquerda e clique na seta que aparece no lugar dele. O menu dele renomeia a tarefa, move o worktree para uma pasta do projeto ou o exclui. Veja [Sessões em andamento](/pt-br/sessions-in-work/) para saber como os trabalhos entram e saem do bloco Em andamento.
+Um worktree é uma linha na barra lateral, com todas as sessões dele embaixo. A linha mostra o nome da tarefa assim que o agente o define (até lá, o título da sessão em que você trabalhou por último ali), o pull request ou issue que ele acompanha como uma marca colorida, e se alguma sessão ali está rodando ou tem novidades para você. Um worktree criado para um pull request ou uma issue começa com o título desse item até o agente escolher um nome mais curto. Passe o cursor sobre ela para ver o branch. Clique para abrir a sessão em que você trabalhou por último ali; para abrir a lista, passe o cursor sobre o ícone de branch à esquerda e clique na seta que aparece no lugar dele. O menu dele renomeia a tarefa, move o worktree para uma pasta do projeto, o arquiva ou o exclui. Veja [Sessões em andamento](/pt-br/sessions-in-work/) para saber como os trabalhos entram e saem do bloco Em andamento.
 
 ## Projetos abertos em uma pasta do repositório
 
@@ -35,7 +35,11 @@ Quando o trabalho estiver bom, use **Integrate** na visão de Git para trazer os
 
 ## Limpeza
 
-Marque a linha do worktree como concluída quando a tarefa terminar: se nada se perder, as sessões dele são arquivadas e o worktree e o branch local são removidos; caso contrário, o OpenChamber mostra o que seria perdido e deixa você decidir. Excluir o worktree pelo menu dele, ou excluir ou arquivar a sessão, também funciona. Você escolhe se também deve excluir o branch — local, e remoto se houver um.
+Marque a linha do worktree como concluída quando a tarefa terminar, ou escolha **Arquivar o worktree** no menu dele. O OpenChamber arquiva o worktree: a pasta some, e as sessões, as mudanças sem commit e o branch dele ficam esperando na página Arquivo. Se uma sessão ainda estiver rodando ali, o worktree fica.
+
+Na página Arquivo, os worktrees arquivados aparecem sob o projeto deles. **Restaurar** traz um de volta com o branch, roda os comandos de setup do projeto e devolve as mudanças e as sessões dele; restaurar uma das sessões dele faz o mesmo. Arquivos que o git ignora, como `node_modules` ou `.env`, não são guardados, então são os comandos de setup que os trazem de volta. A página Worktrees do projeto também lista os worktrees arquivados.
+
+Para se livrar de um worktree de vez, exclua-o pelo menu dele, ou exclua um arquivado na página Arquivo. Ao excluir pelo menu, você escolhe se também deve excluir o branch — local, e remoto se houver um.
 
 ## Se algo parecer errado
 

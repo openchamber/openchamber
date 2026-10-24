@@ -18,6 +18,7 @@ import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
+import { worktreeArchiveI18n } from './worktree-archive.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
 import { sourceBoardI18n } from './source-board.i18n';
@@ -160,6 +161,7 @@ export const dict: Record<I18nKey, string> = {
   ...sessionWarmingI18n.pl,
   ...heapSnapshotI18n.pl,
   ...sidebarWorkI18n.pl,
+  ...worktreeArchiveI18n.pl,
   ...overviewI18n.pl,
   ...isolatedSpacesI18n.pl,
   ...sourceBoardI18n.pl,
@@ -468,7 +470,6 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.activity.chatsTitle': 'Czaty',
   'sessions.sidebar.activity.chatsEmpty': 'Nie ma jeszcze czatów.',
   'chat.chatInput.chooseProject': 'Wybierz projekt',
-  'sessions.archivePage.allDirectories': 'Wszystkie katalogi',
   'sessions.sidebar.header.projectDisplay.label': 'Wyświetlanie projektów',
   'sessions.sidebar.header.projectDisplay.all': 'Wszystkie projekty',
   'sessions.sidebar.header.listGrouping.label': 'Sesje',
@@ -885,22 +886,14 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.sessionDialogs.directory.errorOpenDescription': 'Aplikacja desktopowa nie mogła nadać dostępu do plików.',
   'sessions.sidebar.sessionDialogs.directory.errorAddProjectTitle': 'Nie udało się dodać projektu',
   'sessions.sidebar.sessionDialogs.directory.errorAddProjectDescription': 'Wybierz prawidłową ścieżkę katalogu.',
-  'sessions.sidebar.sessionDialogs.worktree.errorRemoveTitle': 'Nie udało się usunąć drzewa pracy „{name}”',
+  'sessions.sidebar.sessionDialogs.worktree.errorRemoveTitle': 'Nie udało się usunąć drzewa pracy',
   'sessions.sidebar.sessionDialogs.worktree.removingTitle': 'Usuwanie drzewa pracy „{name}”…',
-  'sessions.sidebar.sessionDialogs.worktree.removedTitle': 'Drzewo pracy „{name}” usunięte',
-  'sessions.sidebar.sessionDialogs.worktree.removed': 'Drzewo pracy usunięte.',
-  'sessions.sidebar.sessionDialogs.worktree.removedWithRemote': 'Drzewo pracy i zdalna gałąź usunięte.',
+  'sessions.sidebar.sessionDialogs.worktree.removed': 'Drzewo pracy usunięte',
+  'sessions.sidebar.sessionDialogs.worktree.removedWithRemote': 'Drzewo pracy i zdalna gałąź usunięte',
   'sessions.sidebar.sessionDialogs.worktree.attachedArchived': 'Dołączone drzewo pracy zarchiwizowane.',
   'sessions.sidebar.sessionDialogs.worktree.attachedArchivedPlural': 'Dołączone drzewa pracy zarchiwizowane.',
   'sessions.sidebar.sessionDialogs.worktree.archivedAndRemoteRemoved': 'Zarchiwizowane drzewa pracy i usunięte zdalne gałęzie.',
   'sessions.sidebar.group.worktreeMissing': 'Brak folderu worktree',
-  'sessions.mergedCleanup.toast.removedTitle': 'Posprzątano {name}: PR #{number} scalony',
-  'sessions.mergedCleanup.toast.mr.removedTitle': 'Posprzątano {name}: MR !{number} scalony',
-  'sessions.mergedCleanup.toast.removedDescription': 'Sesje zarchiwizowano, a worktree i lokalną gałąź usunięto.',
-  'sessions.mergedCleanup.toast.archivedTitle': 'Zarchiwizowano sesje w {name}: PR #{number} scalony',
-  'sessions.mergedCleanup.toast.mr.archivedTitle': 'Zarchiwizowano sesje w {name}: MR !{number} scalony',
-  'sessions.mergedCleanup.toast.archivedDescription': 'Worktree zostaje: ma zmiany lub commity, których nie ma w scalonym PR.',
-  'sessions.mergedCleanup.toast.mr.archivedDescription': 'Worktree zostaje: ma zmiany lub commity, których nie ma w scalonym MR.',
   'sessions.mergedCleanup.toast.failedTitle': 'Nie udało się posprzątać {name} po scaleniu PR #{number}',
   'sessions.mergedCleanup.toast.mr.failedTitle': 'Nie udało się posprzątać {name} po scaleniu MR !{number}',
   'sessions.sidebar.session.restore.relocatedTitle': 'Sesję przeniesiono do folderu projektu',

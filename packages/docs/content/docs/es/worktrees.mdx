@@ -23,7 +23,7 @@ Para saltarte las preguntas, elige **Worktree rápido** en el mismo menú de ram
 
 ## En la barra lateral
 
-Un worktree es una fila en la barra lateral, con todas sus sesiones debajo. La fila muestra el nombre de la tarea en cuanto el agente se lo pone (hasta entonces, el título de la última sesión en la que trabajaste ahí), el pull request o issue que sigue como una marca de color, y si alguna sesión ahí está en marcha o tiene novedades para ti. Un worktree creado para un pull request o una issue empieza con el título de ese elemento hasta que el agente elige un nombre más corto. Pasa el cursor por encima para ver la rama. Haz clic para abrir la última sesión en la que trabajaste ahí; para desplegar la lista, pasa el cursor por el icono de rama de su izquierda y haz clic en la flecha que aparece en su lugar. Su menú cambia el nombre de la tarea, mueve el worktree a una carpeta del proyecto o lo elimina. Consulta [Sesiones en curso](/es/sessions-in-work/) para ver cómo entran y salen los trabajos del bloque En curso.
+Un worktree es una fila en la barra lateral, con todas sus sesiones debajo. La fila muestra el nombre de la tarea en cuanto el agente se lo pone (hasta entonces, el título de la última sesión en la que trabajaste ahí), el pull request o issue que sigue como una marca de color, y si alguna sesión ahí está en marcha o tiene novedades para ti. Un worktree creado para un pull request o una issue empieza con el título de ese elemento hasta que el agente elige un nombre más corto. Pasa el cursor por encima para ver la rama. Haz clic para abrir la última sesión en la que trabajaste ahí; para desplegar la lista, pasa el cursor por el icono de rama de su izquierda y haz clic en la flecha que aparece en su lugar. Su menú cambia el nombre de la tarea, mueve el worktree a una carpeta del proyecto, lo archiva o lo elimina. Consulta [Sesiones en curso](/es/sessions-in-work/) para ver cómo entran y salen los trabajos del bloque En curso.
 
 ## Proyectos abiertos en una carpeta del repositorio
 
@@ -35,7 +35,11 @@ Cuando el trabajo esté listo, usa **Integrate** en la vista de Git para traer l
 
 ## Limpieza
 
-Marca como hecha la fila del worktree cuando termines la tarea: si no se pierde nada, sus sesiones se archivan y se eliminan el worktree y su rama local; si no, OpenChamber te muestra lo que se perdería y te deja decidir. También puedes eliminar el worktree desde su menú, o eliminar o archivar su sesión. Tú eliges si también eliminar la rama: local, y remota si la hay.
+Marca como hecha la fila del worktree cuando termines la tarea, o elige **Archivar el worktree** en su menú. OpenChamber lo archiva: la carpeta desaparece, y sus sesiones, sus cambios sin commit y su rama esperan en la página Archivo. Si una sesión sigue en marcha allí, el worktree se queda.
+
+En la página Archivo, los worktrees archivados aparecen bajo su proyecto. **Restaurar** recupera uno con su rama, ejecuta los comandos de configuración del proyecto y devuelve sus cambios y sesiones; restaurar una de sus sesiones hace lo mismo. Los archivos que git ignora, como `node_modules` o `.env`, no se guardan, así que son los comandos de configuración los que los traen de vuelta. La página Worktrees del proyecto también muestra los worktrees archivados.
+
+Para deshacerte de un worktree para siempre, elimínalo desde su menú, o elimina uno archivado desde la página Archivo. Al eliminarlo desde el menú, eliges si también eliminar la rama: local, y remota si la hay.
 
 ## Si algo no encaja
 

@@ -24,6 +24,10 @@ import type {
   RemoveGitWorktreePayload,
   GitWorktreeSnapshotPayload,
   GitWorktreeSnapshotResult,
+  ArchiveGitWorktreePayload,
+  DeleteGitWorktreeArchivePayload,
+  GitWorktreeArchive,
+  GitWorktreeArchiveRestoreResult,
   GitWorktreeTitleResult,
   GitWorktreeValidationResult,
   CreateGitCommitOptions,
@@ -1696,6 +1700,50 @@ export async function setGitWorktreeTitle(directory: string, title: string): Pro
   if (!parsed.success) throw new Error('Malformed task title response');
   return parsed.data;
 }
+
+const worktreeArchiveSchema = z.object({
+  id: z.string().min(1),
+  ref: z.string().min(1),
+  commit: z.string().min(1),
+  head: z.string(),
+  path: z.string().min(1),
+  branch: z.string(),
+  branchExists: z.boolean(),
+  title: z.string(),
+  archivedAt: z.number(),
+  sessionIds: z.array(z.string()),
+});
+
+const worktreeArchiveRequest = async <T>(path: string, directory: string, init: RequestInit, schema: z.ZodType<T>, fallback: string): Promise<T> => {
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/worktrees/archives${path}`, directory), {
+    ...init,
+    headers: init.body ? { 'Content-Type': 'application/json' } : undefined,
+  });
+  if (!response.ok) {
+    const body = z.object({ error: z.string().optional(), code: z.string().optional() }).catch({})
+      .parse(await response.json().catch(() => null));
+    const message = body.error || response.statusText || fallback;
+    // The server's code tells a kept archive or a partial removal apart.
+    throw body.code ? new GitWorktreeRequestError(body.code, message, response.status) : new Error(message);
+  }
+  return schema.parse(await response.json());
+};
+
+export const archiveGitWorktree = (directory: string, payload: ArchiveGitWorktreePayload): Promise<GitWorktreeArchive> => (
+  worktreeArchiveRequest('', directory, { method: 'POST', body: JSON.stringify(payload) }, worktreeArchiveSchema, 'Failed to archive worktree')
+);
+
+export const listGitWorktreeArchives = async (directory: string): Promise<GitWorktreeArchive[]> => (
+  (await worktreeArchiveRequest('', directory, { method: 'GET' }, z.object({ archives: z.array(worktreeArchiveSchema) }), 'Failed to list worktree archives')).archives
+);
+
+export const restoreGitWorktreeArchive = (directory: string, id: string): Promise<GitWorktreeArchiveRestoreResult> => (
+  worktreeArchiveRequest('/restore', directory, { method: 'POST', body: JSON.stringify({ id }) }, z.object({ id: z.string(), conflicts: z.boolean() }), 'Failed to restore worktree archive')
+);
+
+export const deleteGitWorktreeArchive = (directory: string, payload: DeleteGitWorktreeArchivePayload): Promise<{ id: string; branchDeleted: boolean }> => (
+  worktreeArchiveRequest('', directory, { method: 'DELETE', body: JSON.stringify(payload) }, z.object({ id: z.string(), branchDeleted: z.boolean() }), 'Failed to delete worktree archive')
+);
 
 const worktreeSnapshotResultSchema = z.object({
   ref: z.string(),

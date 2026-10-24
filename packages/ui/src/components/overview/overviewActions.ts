@@ -70,7 +70,7 @@ export async function markOverviewSessionsDone(sessions: readonly Session[]): Pr
   return failed;
 }
 
-type WorktreeUse = 'free' | 'busy' | 'inUse' | 'unknown';
+export type WorktreeUse = 'free' | 'busy' | 'inUse' | 'unknown';
 
 /**
  * Whether anything works in the worktree right now, read at the moment of the
@@ -78,7 +78,7 @@ type WorktreeUse = 'free' | 'busy' | 'inUse' | 'unknown';
  * background command runs there, or the host reports a session there running;
  * a failed read is unknown, never free.
  */
-async function readWorktreeUse(path: string): Promise<WorktreeUse> {
+export async function readWorktreeUse(path: string): Promise<WorktreeUse> {
   const root = normalizePath(path) ?? path;
   const sessions = sessionsInWorktree(useGlobalSessionsStore.getState().activeSessions, root);
   const currentSessionId = useSessionUIStore.getState().currentSessionId;

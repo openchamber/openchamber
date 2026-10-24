@@ -23,7 +23,7 @@ To skip the questions, pick **Quick worktree** in the same branch menu: OpenCham
 
 ## In the sidebar
 
-A worktree is one row in the sidebar, with every session in it underneath. The row shows the task's name once the agent has named it (until then, the title of the session you last worked in there), the pull request or issue it follows as a coloured mark, and whether a session there is running or has news for you. A worktree made for a pull request or an issue starts with that item's title until the agent picks a shorter name. Hover it to see the branch. Click it to open the session you last worked in there; hover the branch icon on its left and click the arrow that takes its place to open the list. Its menu renames the task, files the worktree into a folder of the project, or deletes it. See [Sessions in Work](/sessions-in-work/) for how works move in and out of the In work block.
+A worktree is one row in the sidebar, with every session in it underneath. The row shows the task's name once the agent has named it (until then, the title of the session you last worked in there), the pull request or issue it follows as a coloured mark, and whether a session there is running or has news for you. A worktree made for a pull request or an issue starts with that item's title until the agent picks a shorter name. Hover it to see the branch. Click it to open the session you last worked in there; hover the branch icon on its left and click the arrow that takes its place to open the list. Its menu renames the task, files the worktree into a folder of the project, archives it, or deletes it. See [Sessions in Work](/sessions-in-work/) for how works move in and out of the In work block.
 
 ## Projects opened on a folder of the repository
 
@@ -35,7 +35,11 @@ When the work is good, use **Integrate** in the Git view to bring the worktree's
 
 ## Clean up
 
-Mark the worktree's row done when the task is finished: if nothing would be lost, its sessions are archived and the worktree and its local branch are removed; otherwise OpenChamber shows what would be lost and lets you decide. Deleting the worktree from its menu, or deleting or archiving its session, works too. You choose whether to also delete the branch — local, and remote if there is one.
+Mark the worktree's row done when the task is finished, or pick **Archive worktree** in its menu. OpenChamber archives it: the folder goes, and its sessions, its uncommitted changes and its branch wait on the Archive page. If a session there is still running, the worktree stays.
+
+On the Archive page, archived worktrees sit under their project. **Restore** brings one back with its branch, runs the project's setup commands, and puts its changes and sessions back; restoring one of its sessions does the same. Files git ignores, such as `node_modules` or `.env`, aren't kept, so the setup commands are what bring them back. The project's Worktrees page lists archived worktrees too.
+
+To get rid of a worktree for good, delete it from its menu, or delete an archived one from the Archive page. Deleting from the menu lets you choose whether to also delete the branch — local, and remote if there is one.
 
 ## If something looks off
 

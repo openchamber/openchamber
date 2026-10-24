@@ -17,6 +17,7 @@ import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
+import { worktreeArchiveI18n } from './worktree-archive.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
 import { sourceBoardI18n } from './source-board.i18n';
@@ -589,7 +590,6 @@ export const dict = {
   'sessions.sidebar.activity.chatsTitle': 'צ\'אטים',
   'sessions.sidebar.activity.chatsEmpty': 'אין עדיין צ\'אטים.',
   'chat.chatInput.chooseProject': 'בחר פרויקט',
-  'sessions.archivePage.allDirectories': 'כל התיקיות',
   'sessions.sidebar.header.projectDisplay.label': 'הצג פרויקטים',
   'sessions.sidebar.header.projectDisplay.all': 'כל הפרויקטים',
   'sessions.sidebar.header.listGrouping.label': 'הפעלות',
@@ -846,22 +846,14 @@ export const dict = {
   'sessions.sidebar.sessionDialogs.directory.errorOpenDescription': 'אפליקציית שולחן העבודה לא הצליחה לקבל גישה לקבצים.',
   'sessions.sidebar.sessionDialogs.directory.errorAddProjectTitle': 'לא ניתן היה להוסיף את הפרויקט',
   'sessions.sidebar.sessionDialogs.directory.errorAddProjectDescription': 'יש לבחור נתיב תיקייה תקין.',
-  'sessions.sidebar.sessionDialogs.worktree.errorRemoveTitle': 'לא ניתן היה להסיר את עץ העבודה “{name}”',
+  'sessions.sidebar.sessionDialogs.worktree.errorRemoveTitle': 'לא ניתן היה להסיר את עץ העבודה',
   'sessions.sidebar.sessionDialogs.worktree.removingTitle': 'מסיר את עץ העבודה “{name}”…',
-  'sessions.sidebar.sessionDialogs.worktree.removedTitle': 'עץ העבודה “{name}” הוסר',
-  'sessions.sidebar.sessionDialogs.worktree.removed': 'עץ העבודה הוסר.',
-  'sessions.sidebar.sessionDialogs.worktree.removedWithRemote': 'עץ העבודה והענף המרוחק הוסרו.',
+  'sessions.sidebar.sessionDialogs.worktree.removed': 'עץ העבודה הוסר',
+  'sessions.sidebar.sessionDialogs.worktree.removedWithRemote': 'עץ העבודה והענף המרוחק הוסרו',
   'sessions.sidebar.sessionDialogs.worktree.attachedArchived': 'עץ העבודה המצורף הועבר לארכיון.',
   'sessions.sidebar.sessionDialogs.worktree.attachedArchivedPlural': 'עצי העבודה המצורפים הועברו לארכיון.',
   'sessions.sidebar.sessionDialogs.worktree.archivedAndRemoteRemoved': 'עצי העבודה הועברו לארכיון והענפים המרוחקים הוסרו.',
   'sessions.sidebar.group.worktreeMissing': 'תיקיית עץ העבודה חסרה',
-  'sessions.mergedCleanup.toast.removedTitle': '{name} נוקה: PR #{number} מוזג',
-  'sessions.mergedCleanup.toast.mr.removedTitle': '{name} נוקה: MR !{number} מוזג',
-  'sessions.mergedCleanup.toast.removedDescription': 'ההפעלות שלו הועברו לארכיון, ועץ העבודה והענף המקומי שלו הוסרו.',
-  'sessions.mergedCleanup.toast.archivedTitle': 'ההפעלות ב-{name} הועברו לארכיון: PR #{number} מוזג',
-  'sessions.mergedCleanup.toast.mr.archivedTitle': 'ההפעלות ב-{name} הועברו לארכיון: MR !{number} מוזג',
-  'sessions.mergedCleanup.toast.archivedDescription': 'עץ העבודה נשאר: יש בו שינויים או קומיטים שאינם ב-PR שמוזג.',
-  'sessions.mergedCleanup.toast.mr.archivedDescription': 'עץ העבודה נשאר: יש בו שינויים או קומיטים שאינם ב-MR שמוזג.',
   'sessions.mergedCleanup.toast.failedTitle': 'לא ניתן היה לנקות את {name} אחרי מיזוג PR #{number}',
   'sessions.mergedCleanup.toast.mr.failedTitle': 'לא ניתן היה לנקות את {name} אחרי מיזוג MR !{number}',
   'sessions.sidebar.session.restore.relocatedTitle': 'ההפעלה הועברה לתיקיית הפרויקט',
@@ -3816,6 +3808,7 @@ export const dict = {
   ...sessionWarmingI18n.he,
   ...heapSnapshotI18n.he,
   ...sidebarWorkI18n.he,
+  ...worktreeArchiveI18n.he,
   ...overviewI18n.he,
   ...isolatedSpacesI18n.he,
   ...sourceBoardI18n.he,

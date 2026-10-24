@@ -25,6 +25,9 @@ const gitLibraries = {
   observeWorktreeTopology: vi.fn(),
   subscribeWorktreeTopologyChanges: vi.fn(),
   removeWorktree: vi.fn(),
+  archiveWorktree: vi.fn(),
+  listWorktreeArchives: vi.fn(),
+  deleteWorktreeArchive: vi.fn(),
 };
 
 vi.mock('./index.js', () => ({
@@ -52,6 +55,9 @@ vi.mock('./index.js', () => ({
   observeWorktreeTopology: gitLibraries.observeWorktreeTopology,
   subscribeWorktreeTopologyChanges: gitLibraries.subscribeWorktreeTopologyChanges,
   removeWorktree: gitLibraries.removeWorktree,
+  archiveWorktree: gitLibraries.archiveWorktree,
+  listWorktreeArchives: gitLibraries.listWorktreeArchives,
+  deleteWorktreeArchive: gitLibraries.deleteWorktreeArchive,
 }));
 
 const { registerGitRoutes } = await import('./routes.js');
@@ -676,6 +682,50 @@ describe('git worktree topology routes', () => {
 
     listener({ directories: ['/repo'], at: 123 });
     expect(emitWorktreeChanged).toHaveBeenCalledWith({ directories: ['/repo'], at: 123 });
+  });
+});
+
+describe('git worktree archive routes', () => {
+  const worktreeBootstrapStore = { remove: vi.fn() };
+
+  it('archives with the sessions, the bootstrap store and a disposal hook, like a removal', async () => {
+    gitLibraries.archiveWorktree.mockResolvedValue({ id: 'a1' });
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app, {
+      worktreeBootstrapStore,
+      buildOpenCodeUrl: (routePath) => `http://opencode.test${routePath}`,
+      getOpenCodeAuthHeaders: () => ({}),
+    });
+    const response = createMockResponse();
+    await getRoute('POST', '/api/git/worktrees/archives')(
+      { query: { directory: '/repo' }, body: { directory: '/repo/wt', id: 'a1', sessionIds: ['ses_1'] } },
+      response,
+    );
+    expect(response.statusCode).toBe(200);
+    expect(gitLibraries.archiveWorktree).toHaveBeenCalledWith('/repo', expect.objectContaining({
+      directory: '/repo/wt',
+      id: 'a1',
+      sessionIds: ['ses_1'],
+      disposeInstance: expect.any(Function),
+    }), { bootstrapStore: worktreeBootstrapStore });
+  });
+
+  it('answers 404 for an archive that is gone', async () => {
+    gitLibraries.deleteWorktreeArchive.mockRejectedValue(Object.assign(new Error('Worktree archive not found'), { code: 'WORKTREE_ARCHIVE_NOT_FOUND' }));
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app, { worktreeBootstrapStore });
+    const response = createMockResponse();
+    await getRoute('DELETE', '/api/git/worktrees/archives')({ query: { directory: '/repo' }, body: { id: 'gone' } }, response);
+    expect(response.statusCode).toBe(404);
+  });
+
+  it('lists the archives of the project', async () => {
+    gitLibraries.listWorktreeArchives.mockResolvedValue([{ id: 'a1' }]);
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app, { worktreeBootstrapStore });
+    const response = createMockResponse();
+    await getRoute('GET', '/api/git/worktrees/archives')({ query: { directory: '/repo' } }, response);
+    expect(response.body).toEqual({ archives: [{ id: 'a1' }] });
   });
 });
 

@@ -4,7 +4,7 @@ export type SessionArchiveResult = {
 };
 
 /**
- * Archives a worktree's sessions, then removes the worktree. The sessions go
+ * Archives a worktree's sessions, then removes (or archives) the worktree. The sessions go
  * first because OpenCode can change a session only while its directory exists:
  * archived after the removal, each one would have to move to the project's
  * main folder first and carry a "moved" note in its transcript. A removal that
@@ -13,7 +13,8 @@ export type SessionArchiveResult = {
  */
 export async function archiveSessionsThenRemoveWorktree(options: {
   sessionIds: string[];
-  removeWorktree: () => Promise<boolean>;
+  /** Gets the sessions it archived: an archive of the worktree records them. */
+  removeWorktree: (archivedIds: string[]) => Promise<boolean>;
   archiveSessions: (sessionIds: string[]) => Promise<SessionArchiveResult>;
   restoreSessions: (sessionIds: string[]) => Promise<{ failedIds: string[] }>;
 }): Promise<{ removed: boolean; archive: SessionArchiveResult }> {
@@ -31,7 +32,7 @@ export async function archiveSessionsThenRemoveWorktree(options: {
 
   let removed: boolean;
   try {
-    removed = await options.removeWorktree();
+    removed = await options.removeWorktree(archive.archivedIds);
   } catch (error) {
     await restore();
     throw error;

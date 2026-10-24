@@ -113,7 +113,7 @@ const ALL_PARAMETER_PROPERTIES = {
   agent: { type: 'string', description: 'Only when the user asks. Default: build for a new session, unchanged for an existing one' },
   variant: { type: 'string', description: 'Only when the user asks' },
   worktree: { type: 'string', description: 'Folder name of a new worktree, named after the task (fix-login-timeout). Required for session.moveToWorktree; on session.create only when the user asks, and uncommitted changes stay behind' },
-  branch: { type: 'string', description: 'Default: the worktree name' },
+  branch: { type: 'string', description: 'session.create: default the worktree name. work.name: the new name of a placeholder branch' },
   startRef: { type: 'string', description: "Ref the new branch starts from; default: the repository's default branch" },
   carry: { type: 'array', items: { type: 'string' }, description: 'Files you changed whose uncommitted changes move along; nothing else moves' },
   existingBranch: { type: 'string', description: 'Check out this existing local or remote branch (origin/feature) instead of a new one; not with branch or startRef' },

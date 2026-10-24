@@ -17,6 +17,7 @@ import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
+import { worktreeArchiveI18n } from './worktree-archive.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
 import { sourceBoardI18n } from './source-board.i18n';
@@ -589,7 +590,6 @@ export const dict = {
   'sessions.sidebar.activity.chatsTitle': 'المحادثات',
   'sessions.sidebar.activity.chatsEmpty': 'لا توجد محادثات بعد.',
   'chat.chatInput.chooseProject': 'اختر مشروعًا',
-  'sessions.archivePage.allDirectories': 'كل المجلدات',
   'sessions.sidebar.header.projectDisplay.label': 'إظهار المشاريع',
   'sessions.sidebar.header.projectDisplay.all': 'كل المشاريع',
   'sessions.sidebar.header.listGrouping.label': 'الجلسات',
@@ -846,22 +846,14 @@ export const dict = {
   'sessions.sidebar.sessionDialogs.directory.errorOpenDescription': 'تعذّر على تطبيق سطح المكتب منح الوصول إلى الملفات.',
   'sessions.sidebar.sessionDialogs.directory.errorAddProjectTitle': 'تعذّرت إضافة المشروع',
   'sessions.sidebar.sessionDialogs.directory.errorAddProjectDescription': 'يُرجى اختيار مسار مجلد صالح.',
-  'sessions.sidebar.sessionDialogs.worktree.errorRemoveTitle': 'تعذّرت إزالة شجرة العمل «{name}»',
+  'sessions.sidebar.sessionDialogs.worktree.errorRemoveTitle': 'تعذّرت إزالة شجرة العمل',
   'sessions.sidebar.sessionDialogs.worktree.removingTitle': 'جارٍ إزالة شجرة العمل «{name}»…',
-  'sessions.sidebar.sessionDialogs.worktree.removedTitle': 'تمت إزالة شجرة العمل «{name}»',
-  'sessions.sidebar.sessionDialogs.worktree.removed': 'تمت إزالة شجرة العمل.',
-  'sessions.sidebar.sessionDialogs.worktree.removedWithRemote': 'تمت إزالة شجرة العمل والفرع البعيد.',
+  'sessions.sidebar.sessionDialogs.worktree.removed': 'تمت إزالة شجرة العمل',
+  'sessions.sidebar.sessionDialogs.worktree.removedWithRemote': 'تمت إزالة شجرة العمل والفرع البعيد',
   'sessions.sidebar.sessionDialogs.worktree.attachedArchived': 'تمت أرشفة شجرة العمل المرتبطة.',
   'sessions.sidebar.sessionDialogs.worktree.attachedArchivedPlural': 'تمت أرشفة أشجار العمل المرتبطة.',
   'sessions.sidebar.sessionDialogs.worktree.archivedAndRemoteRemoved': 'تمت أرشفة أشجار العمل وإزالة الفروع البعيدة.',
   'sessions.sidebar.group.worktreeMissing': 'مجلد شجرة العمل مفقود',
-  'sessions.mergedCleanup.toast.removedTitle': 'تم تنظيف {name}: دُمج PR #{number}',
-  'sessions.mergedCleanup.toast.mr.removedTitle': 'تم تنظيف {name}: دُمج MR !{number}',
-  'sessions.mergedCleanup.toast.removedDescription': 'تمت أرشفة جلساتها، وإزالة شجرة العمل وفرعها المحلي.',
-  'sessions.mergedCleanup.toast.archivedTitle': 'تمت أرشفة الجلسات في {name}: دُمج PR #{number}',
-  'sessions.mergedCleanup.toast.mr.archivedTitle': 'تمت أرشفة الجلسات في {name}: دُمج MR !{number}',
-  'sessions.mergedCleanup.toast.archivedDescription': 'تبقى شجرة العمل: فيها تغييرات أو إيداعات غير موجودة في PR المدموج.',
-  'sessions.mergedCleanup.toast.mr.archivedDescription': 'تبقى شجرة العمل: فيها تغييرات أو إيداعات غير موجودة في MR المدموج.',
   'sessions.mergedCleanup.toast.failedTitle': 'تعذّر تنظيف {name} بعد دمج PR #{number}',
   'sessions.mergedCleanup.toast.mr.failedTitle': 'تعذّر تنظيف {name} بعد دمج MR !{number}',
   'sessions.sidebar.session.restore.relocatedTitle': 'تم نقل الجلسة إلى مجلد المشروع',
@@ -3816,6 +3808,7 @@ export const dict = {
   ...sessionWarmingI18n.ar,
   ...heapSnapshotI18n.ar,
   ...sidebarWorkI18n.ar,
+  ...worktreeArchiveI18n.ar,
   ...overviewI18n.ar,
   ...isolatedSpacesI18n.ar,
   ...sourceBoardI18n.ar,

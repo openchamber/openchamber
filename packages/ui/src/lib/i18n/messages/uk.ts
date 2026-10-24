@@ -18,6 +18,7 @@ import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
+import { worktreeArchiveI18n } from './worktree-archive.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
 import { sourceBoardI18n } from './source-board.i18n';
@@ -170,6 +171,7 @@ export const dict: Record<I18nKey, string> = {
   ...sessionWarmingI18n.uk,
   ...heapSnapshotI18n.uk,
   ...sidebarWorkI18n.uk,
+  ...worktreeArchiveI18n.uk,
   ...overviewI18n.uk,
   ...isolatedSpacesI18n.uk,
   ...sourceBoardI18n.uk,
@@ -636,7 +638,6 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.activity.chatsTitle": "Чати",
   "sessions.sidebar.activity.chatsEmpty": "Чатів ще немає.",
   "chat.chatInput.chooseProject": "Вибрати проєкт",
-  "sessions.archivePage.allDirectories": "Всі директорії",
   "sessions.sidebar.header.projectDisplay.label": "Показувати проєкти",
   "sessions.sidebar.header.projectDisplay.all": "Усі проєкти",
   "sessions.sidebar.header.listGrouping.label": "Сесії",
@@ -889,22 +890,14 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.sessionDialogs.directory.errorOpenDescription": "Десктопний застосунок не зміг надати доступ до файлу.",
   "sessions.sidebar.sessionDialogs.directory.errorAddProjectTitle": "Не вдалося додати проєкт",
   "sessions.sidebar.sessionDialogs.directory.errorAddProjectDescription": "Виберіть правильний шлях до каталогу.",
-  "sessions.sidebar.sessionDialogs.worktree.errorRemoveTitle": "Не вдалося видалити worktree «{name}»",
+  "sessions.sidebar.sessionDialogs.worktree.errorRemoveTitle": "Не вдалося видалити worktree",
   "sessions.sidebar.sessionDialogs.worktree.removingTitle": "Видаляємо worktree «{name}»…",
-  "sessions.sidebar.sessionDialogs.worktree.removedTitle": "Worktree «{name}» видалено",
-  "sessions.sidebar.sessionDialogs.worktree.removed": "Worktree видалено.",
-  "sessions.sidebar.sessionDialogs.worktree.removedWithRemote": "Worktree та віддалену гілку видалено.",
+  "sessions.sidebar.sessionDialogs.worktree.removed": "Worktree видалено",
+  "sessions.sidebar.sessionDialogs.worktree.removedWithRemote": "Worktree та віддалену гілку видалено",
   "sessions.sidebar.sessionDialogs.worktree.attachedArchived": "Прикріплене worktree заархівовано.",
   "sessions.sidebar.sessionDialogs.worktree.attachedArchivedPlural": "Прикріплені worktree заархівовано.",
   "sessions.sidebar.sessionDialogs.worktree.archivedAndRemoteRemoved": "Worktree заархівовано, віддалені гілки видалено.",
   "sessions.sidebar.group.worktreeMissing": "Теки worktree немає",
-  "sessions.mergedCleanup.toast.removedTitle": "{name} прибрано: PR #{number} злито",
-  "sessions.mergedCleanup.toast.mr.removedTitle": "{name} прибрано: MR !{number} злито",
-  "sessions.mergedCleanup.toast.removedDescription": "Сесії заархівовано, worktree і його локальну гілку видалено.",
-  "sessions.mergedCleanup.toast.archivedTitle": "Сесії в {name} заархівовано: PR #{number} злито",
-  "sessions.mergedCleanup.toast.mr.archivedTitle": "Сесії в {name} заархівовано: MR !{number} злито",
-  "sessions.mergedCleanup.toast.archivedDescription": "Worktree лишився: у ньому є зміни чи коміти, яких немає в злитому PR.",
-  "sessions.mergedCleanup.toast.mr.archivedDescription": "Worktree лишився: у ньому є зміни чи коміти, яких немає в злитому MR.",
   "sessions.mergedCleanup.toast.failedTitle": "Не вдалося прибрати {name} після злиття PR #{number}",
   "sessions.mergedCleanup.toast.mr.failedTitle": "Не вдалося прибрати {name} після злиття MR !{number}",
   "sessions.sidebar.session.restore.relocatedTitle": "Сесію перенесено в теку проєкту",

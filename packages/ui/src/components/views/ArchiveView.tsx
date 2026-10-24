@@ -17,14 +17,31 @@ import { useShallow } from 'zustand/react/shallow';
 import { SessionSearchInput } from '@/components/session/SessionSearchInput';
 import { refreshSpaceArchives, useSpaceArchivesStore } from '@/lib/spaces/space-archives';
 import { isRestorableOnItsOwn } from '@/sync/session-restore-rule';
+import { createSessionOwnershipIndex } from '@/components/session/sidebar/sessions/sessionOwnership';
+import { formatProjectLabel } from '@/components/session/sidebar/utils';
+import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useGlobalSyncStore } from '@/sync/global-sync-store';
+import { loadWorktreeArchives, useWorktreeArchivesByProject } from '@/lib/worktrees/worktreeArchive';
+import { ArchivedWorktreeRow } from './archive/ArchivedWorktreeRow';
+import { useWorktreeArchiveActions } from './archive/useWorktreeArchiveActions';
 
-type DirectoryBucket = {
-  directory: string;
+/**
+ * A group in the panel on the left: a project with its worktrees (archived
+ * ones included), the chats of a deleted isolated space (named after the
+ * space, with no way to restore them), or everything else.
+ */
+type ArchiveBucket = {
+  key: string;
+  kind: 'project' | 'space' | 'other';
   label: string;
+  /** The project's root or the space's directory; empty for everything else. */
+  directory: string;
+  /** The project's id, for a project bucket. */
+  projectId?: string;
   sessions: Session[];
-  // The chats of a deleted isolated space: named after the space, with no way to restore them.
-  fromDeletedSpace: boolean;
 };
+
+const OTHER_BUCKET_KEY = '\u0000other';
 
 // Bound the mounted DOM: archives grow into the hundreds; batch rendering
 // keeps the list responsive without a virtualizer.
@@ -80,7 +97,7 @@ export function ArchiveSessionsView({ layout, onLeave, initialQuery = '' }: {
   })));
   const sessionsStatus = useGlobalSessionsStore((state) => state.status);
   const [query, setQuery] = React.useState(initialQuery);
-  const [selectedDirectory, setSelectedDirectory] = React.useState<string | null>(null);
+  const [selectedKey, setSelectedKey] = React.useState<string | null>(null);
   const [visibleCount, setVisibleCount] = React.useState(PAGE_SIZE);
   const spaceArchives = useSpaceArchivesStore((state) => state.byDirectory);
 
@@ -119,24 +136,91 @@ export function ArchiveSessionsView({ layout, onLeave, initialQuery = '' }: {
     return parentTitles.get(parentID) || t('sessions.sidebar.session.untitled');
   };
 
-  const buckets = React.useMemo<DirectoryBucket[]>(() => {
-    const byDirectory = new Map<string, DirectoryBucket>();
+  const projects = useProjectsStore((state) => state.projects);
+  const worktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
+  const openCodeProjects = useGlobalSyncStore((state) => state.projects);
+  const archivesByProject = useWorktreeArchivesByProject();
+  const archiveActions = useWorktreeArchiveActions();
+
+  // Archived worktrees live in each project's repository; read them each time
+  // the page opens, like the spaces above.
+  React.useEffect(() => {
+    if (layout !== 'page') return;
+    for (const project of projects) void loadWorktreeArchives(project.path).catch(() => undefined);
+  }, [layout, projects]);
+
+  // Sessions belong to their project the way the sidebar groups them: by
+  // folder, then by OpenCode's project, which is what still places a session
+  // of a worktree that is gone.
+  const buckets = React.useMemo<ArchiveBucket[]>(() => {
+    const ownership = createSessionOwnershipIndex(
+      sortedSessions,
+      projects.flatMap((project) => {
+        const normalizedPath = normalizePath(project.path);
+        return normalizedPath ? [{ id: project.id, normalizedPath }] : [];
+      }),
+      worktreesByProject,
+      false,
+      [],
+      openCodeProjects,
+    );
+    const byKey = new Map<string, ArchiveBucket>();
+    const bucketFor = (key: string, create: () => Omit<ArchiveBucket, 'sessions'>): ArchiveBucket => {
+      const existing = byKey.get(key);
+      if (existing) return existing;
+      const bucket = { ...create(), sessions: [] };
+      byKey.set(key, bucket);
+      return bucket;
+    };
+    const projectBucket = (root: string) => {
+      const project = projects.find((entry) => normalizePath(entry.path) === root);
+      return bucketFor(root, () => ({
+        key: root,
+        kind: 'project',
+        label: formatProjectLabel(project?.label?.trim() || root.split('/').filter(Boolean).pop() || root),
+        directory: root,
+        projectId: project?.id,
+      }));
+    };
     for (const session of sortedSessions) {
       const directory = normalizePath(resolveGlobalSessionDirectory(session)) ?? '';
-      const existing = byDirectory.get(directory);
-      if (existing) {
-        existing.sessions.push(session);
+      if (directory && spaceArchives?.has(directory)) {
+        bucketFor(directory, () => ({ key: directory, kind: 'space', label: labelOf(directory), directory })).sessions.push(session);
         continue;
       }
-      byDirectory.set(directory, {
-        directory,
-        label: labelOf(directory),
-        sessions: [session],
-        fromDeletedSpace: spaceArchives?.has(directory) ?? false,
-      });
+      const projectRoot = normalizePath(ownership.bySessionId.get(session.id)?.projectRoot ?? null);
+      if (projectRoot) {
+        projectBucket(projectRoot).sessions.push(session);
+        continue;
+      }
+      bucketFor(OTHER_BUCKET_KEY, () => ({ key: OTHER_BUCKET_KEY, kind: 'other', label: t('sessions.archivePage.other'), directory: '' })).sessions.push(session);
     }
-    return [...byDirectory.values()].sort((a, b) => b.sessions.length - a.sessions.length);
-  }, [labelOf, sortedSessions, spaceArchives]);
+    // A project whose only archive is a worktree without sessions is listed too.
+    for (const [root, entry] of archivesByProject) {
+      if (entry.archives.length > 0) projectBucket(root);
+    }
+    const order = { project: 0, space: 1, other: 2 } as const;
+    return [...byKey.values()].sort((a, b) => order[a.kind] - order[b.kind] || a.label.localeCompare(b.label));
+  }, [archivesByProject, labelOf, openCodeProjects, projects, sortedSessions, spaceArchives, t, worktreesByProject]);
+
+  const selectedBucket = selectedKey === null ? null : buckets.find((bucket) => bucket.key === selectedKey) ?? null;
+  const selectedProject = selectedBucket?.projectId ? { id: selectedBucket.projectId, path: selectedBucket.directory } : null;
+  // The selected project's archived worktrees, each with its own sessions.
+  const worktreeGroups = React.useMemo(() => {
+    if (normalizedQuery || selectedBucket?.kind !== 'project') return [];
+    const listed = new Map(selectedBucket.sessions.map((session) => [session.id, session] as const));
+    return (archivesByProject.get(selectedBucket.directory)?.archives ?? []).map((archive) => ({
+      archive,
+      sessions: groupByParent(archive.sessionIds.flatMap((id) => {
+        const session = listed.get(id);
+        return session ? [session] : [];
+      }).sort((a, b) => (b.time?.archived ?? 0) - (a.time?.archived ?? 0))),
+    }));
+  }, [archivesByProject, normalizedQuery, selectedBucket]);
+  const inWorktreeGroup = React.useMemo(
+    () => new Set(worktreeGroups.flatMap((group) => group.sessions.map((session) => session.id))),
+    [worktreeGroups],
+  );
 
   // Search spans every archived session; the directory filter applies only
   // while not searching.
@@ -147,16 +231,16 @@ export function ArchiveSessionsView({ layout, onLeave, initialQuery = '' }: {
       }
       return groupByParent(rankByQuery(sortedSessions, normalizedQuery, (session) => [session.title]));
     }
-    if (selectedDirectory === null) return groupByParent(sortedSessions);
-    return groupByParent(buckets.find((bucket) => bucket.directory === selectedDirectory)?.sessions ?? []);
-  }, [buckets, normalizedQuery, selectedDirectory, sortedSessions]);
+    if (selectedBucket === null) return groupByParent(sortedSessions);
+    return groupByParent(selectedBucket.sessions.filter((session) => !inWorktreeGroup.has(session.id)));
+  }, [inWorktreeGroup, normalizedQuery, selectedBucket, sortedSessions]);
 
   const visibleSessions = filteredSessions.slice(0, visibleCount);
   const remainingCount = filteredSessions.length - visibleSessions.length;
   const totalCount = sortedSessions.length;
 
-  const selectDirectory = React.useCallback((directory: string | null) => {
-    setSelectedDirectory(directory);
+  const selectBucket = React.useCallback((directory: string | null) => {
+    setSelectedKey(directory);
     setVisibleCount(PAGE_SIZE);
   }, []);
 
@@ -337,6 +421,71 @@ export function ArchiveSessionsView({ layout, onLeave, initialQuery = '' }: {
     </div>
   );
 
+  const renderSessionRow = (session: Session, index: number, rows: Session[], indent = false) => {
+              const sessionDirectory = normalizePath(resolveGlobalSessionDirectory(session)) ?? '';
+              const directoryLabel = sessionDirectory ? labelOf(sessionDirectory) : null;
+              // A deleted space's chat has nowhere to be restored to.
+              const restorable = !(spaceArchives?.has(sessionDirectory) ?? false);
+              const parentTitle = parentTitleAbove(rows, index);
+              return (
+                <React.Fragment key={session.id}>
+                  {parentTitle ? (
+                    <p dir="auto" className={cn('truncate oc-ui-start-align pt-2 pe-2 typography-micro text-muted-foreground', indent ? 'ps-[1.875rem]' : 'ps-2')}>{parentTitle}</p>
+                  ) : null}
+                  <div
+                    className={cn(
+                      'group relative flex cursor-pointer items-center gap-3 rounded-md py-1 pe-2 transition-[padding] hover:bg-interactive-hover/40 hover:pe-14 focus-within:pe-14',
+                      // In a worktree's tile the titles line up with the worktree's name, past its icon.
+                      indent ? (session.parentID ? 'ps-[2.875rem]' : 'ps-[1.875rem]') : (session.parentID ? 'ps-6' : 'ps-2'),
+                    )}
+                    onClick={() => openSession(session)}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        openSession(session);
+                      }
+                    }}
+                  >
+                    <span dir="auto" className="min-w-0 flex-1 truncate oc-ui-start-align typography-ui-label text-foreground">
+                      {session.title || t('sessions.sidebar.session.untitled')}
+                    </span>
+                    {normalizedQuery && directoryLabel ? (
+                      <span className="max-w-40 flex-shrink-0 truncate text-[0.72rem] text-muted-foreground/70" title={sessionDirectory}>
+                        {directoryLabel}
+                      </span>
+                    ) : null}
+                    <span className="flex-shrink-0 text-[0.72rem] text-muted-foreground/75">
+                      {formatSessionDateLabel(session.time?.archived ?? session.time?.updated ?? session.time?.created ?? Date.now())}
+                    </span>
+                    {restorable ? <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        restoreSession(session);
+                      }}
+                      className="absolute inset-e-7 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity pointer-events-none hover:text-foreground group-hover:opacity-100 group-hover:pointer-events-auto focus-visible:opacity-100 focus-visible:pointer-events-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      aria-label={t('sessions.archivePage.restoreSessionAria', { title: session.title || t('sessions.sidebar.session.untitled') })}
+                    >
+                      <Icon name="inbox-unarchive" className="h-3.5 w-3.5" />
+                    </button> : null}
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        sessionEvents.requestDelete({ sessions: [session], mode: 'session' });
+                      }}
+                      className="absolute inset-e-1 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity pointer-events-none hover:text-destructive group-hover:opacity-100 group-hover:pointer-events-auto focus-visible:opacity-100 focus-visible:pointer-events-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      aria-label={t('sessions.archivePage.deleteSessionAria', { title: session.title || t('sessions.sidebar.session.untitled') })}
+                    >
+                      <Icon name="delete-bin" className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </React.Fragment>
+              );
+  };
+
   return (
     <div className="absolute inset-0 z-10 flex flex-col bg-background">
       <div className="flex min-h-0 flex-1">
@@ -345,106 +494,66 @@ export function ArchiveSessionsView({ layout, onLeave, initialQuery = '' }: {
           <div className="flex-1 space-y-0.5 overflow-y-auto p-2">
             {renderDirectoryItem(
               '__all__',
-              t('sessions.archivePage.allDirectories'),
+              t('sessions.archivePage.all'),
               totalCount,
-              selectedDirectory === null,
-              () => selectDirectory(null),
+              selectedKey === null,
+              () => selectBucket(null),
             )}
             {buckets.map((bucket) => renderDirectoryItem(
-              bucket.directory || '__none__',
+              bucket.key,
               bucket.label,
               bucket.sessions.length,
-              selectedDirectory === bucket.directory,
-              () => selectDirectory(bucket.directory),
+              selectedKey === bucket.key,
+              () => selectBucket(bucket.key),
               bucket.directory || undefined,
-              bucket.sessions,
-              bucket.fromDeletedSpace,
+              bucket.sessions.length > 0 ? bucket.sessions : undefined,
+              bucket.kind === 'space',
             ))}
           </div>
         </div>
 
         {/* Session list */}
         <div className="flex min-w-0 flex-1 flex-col">
-          <div className="flex items-center gap-3 px-6 pt-3">
-            <div className="min-w-0 flex-1">
-              {searchInput}
+          {/* The search shares the list's column, so the two line up. */}
+          <div className="px-6 pt-3">
+            <div className="mx-auto flex w-full max-w-3xl items-center gap-3">
+              <div className="min-w-0 flex-1">
+                {searchInput}
+              </div>
+              {/* Pages have no close button: you leave via the sidebar. */}
+              <span className="flex h-8 flex-shrink-0 items-center self-start typography-micro text-muted-foreground">
+                {countLabel}
+              </span>
             </div>
-            {/* Pages have no close button: you leave via the sidebar. */}
-            <span className="flex h-8 flex-shrink-0 items-center self-start typography-micro text-muted-foreground">
-              {countLabel}
-            </span>
           </div>
 
           <div className="min-h-0 flex-1 overflow-y-auto px-6 py-3">
             <div className="mx-auto w-full max-w-3xl space-y-0.5">
-              {visibleSessions.length === 0 ? emptyState : visibleSessions.map((session, index) => {
-                const sessionDirectory = normalizePath(resolveGlobalSessionDirectory(session)) ?? '';
-                const directoryLabel = sessionDirectory ? labelOf(sessionDirectory) : null;
-                // A deleted space's chat has nowhere to be restored to.
-                const restorable = !(spaceArchives?.has(sessionDirectory) ?? false);
-                const parentTitle = parentTitleAbove(visibleSessions, index);
-                return (
-                  <React.Fragment key={session.id}>
-                    {parentTitle ? (
-                      <p dir="auto" className="truncate oc-ui-start-align px-2 pt-2 typography-micro text-muted-foreground">{parentTitle}</p>
-                    ) : null}
-                    <div
-                      className={cn(
-                        'group relative flex cursor-pointer items-center gap-3 rounded-md py-1 pe-2 transition-[padding] hover:bg-interactive-hover/40 hover:pe-14 focus-within:pe-14',
-                        session.parentID ? 'ps-6' : 'ps-2',
-                      )}
-                      onClick={() => openSession(session)}
-                      role="button"
-                      tabIndex={0}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter' || event.key === ' ') {
-                          event.preventDefault();
-                          openSession(session);
-                        }
-                      }}
-                    >
-                      <span dir="auto" className="min-w-0 flex-1 truncate oc-ui-start-align typography-ui-label text-foreground">
-                        {session.title || t('sessions.sidebar.session.untitled')}
-                      </span>
-                      {normalizedQuery && directoryLabel ? (
-                        <span className="max-w-40 flex-shrink-0 truncate text-[0.72rem] text-muted-foreground/70" title={sessionDirectory}>
-                          {directoryLabel}
-                        </span>
-                      ) : null}
-                      <span className="flex-shrink-0 text-[0.72rem] text-muted-foreground/75">
-                        {formatSessionDateLabel(session.time?.archived ?? session.time?.updated ?? session.time?.created ?? Date.now())}
-                      </span>
-                      {restorable ? <button
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          restoreSession(session);
-                        }}
-                        className="absolute inset-e-7 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity pointer-events-none hover:text-foreground group-hover:opacity-100 group-hover:pointer-events-auto focus-visible:opacity-100 focus-visible:pointer-events-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                        aria-label={t('sessions.archivePage.restoreSessionAria', { title: session.title || t('sessions.sidebar.session.untitled') })}
-                      >
-                        <Icon name="inbox-unarchive" className="h-3.5 w-3.5" />
-                      </button> : null}
-                      <button
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          sessionEvents.requestDelete({ sessions: [session], mode: 'session' });
-                        }}
-                        className="absolute inset-e-1 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity pointer-events-none hover:text-destructive group-hover:opacity-100 group-hover:pointer-events-auto focus-visible:opacity-100 focus-visible:pointer-events-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                        aria-label={t('sessions.archivePage.deleteSessionAria', { title: session.title || t('sessions.sidebar.session.untitled') })}
-                      >
-                        <Icon name="delete-bin" className="h-3.5 w-3.5" />
-                      </button>
+              {/* Each archived worktree is a tile holding its sessions; the loose sessions follow. */}
+              {worktreeGroups.length > 0 ? (
+                <div className={cn('space-y-2', visibleSessions.length > 0 && 'pb-3')}>
+                  {worktreeGroups.map(({ archive, sessions: groupSessions }) => (
+                    <div key={archive.id} className="oc-tile rounded-lg p-1">
+                      <ArchivedWorktreeRow
+                        archive={archive}
+                        busy={archiveActions.busyIds.has(archive.id)}
+                        onRestore={() => { if (selectedProject) void archiveActions.restore(selectedProject, archive); }}
+                        onDelete={() => { if (selectedProject) void archiveActions.remove(selectedProject, archive); }}
+                      />
+                      {groupSessions.map((session, index) => renderSessionRow(session, index, groupSessions, true))}
                     </div>
-                  </React.Fragment>
-                );
-              })}
+                  ))}
+                </div>
+              ) : null}
+              {visibleSessions.length === 0 && worktreeGroups.length === 0
+                ? emptyState
+                : visibleSessions.map((session, index) => renderSessionRow(session, index, visibleSessions))}
               {showMoreButton}
             </div>
           </div>
         </div>
       </div>
+      {archiveActions.dialog}
     </div>
   );
 }

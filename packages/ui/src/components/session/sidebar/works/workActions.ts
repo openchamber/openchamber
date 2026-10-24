@@ -1,8 +1,9 @@
 import type { Session } from '@/lib/opencode/model';
 import { isReviewSession } from '@/lib/sessionReviewMetadata';
 import { isSessionInWork } from '@/lib/sessionWorkMetadata';
-import { markOverviewSessionsDone, removeOverviewWorktree } from '@/components/overview/overviewActions';
-import { resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
+import { markOverviewSessionsDone, readWorktreeUse, sessionsInWorktree } from '@/components/overview/overviewActions';
+import { archiveWorktreeWork } from '@/lib/worktrees/worktreeArchive';
+import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { setSessionWorkState } from '@/sync/session-actions';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
@@ -61,24 +62,26 @@ export const trackWork = async (session: Session): Promise<void> => {
 };
 
 export type FinishWorktreeWorkOutcome =
-  /** Done, and the worktree with its local branch is gone: nothing could be lost. */
-  | { kind: 'removed' }
+  /** Done, and the worktree is archived with its sessions and changes. */
+  | { kind: 'archived' }
   /** Done; a session there still runs, so the worktree stays. */
   | { kind: 'busy' }
-  /** Done; removing it could lose work or could not be checked, so the user decides. */
-  | { kind: 'ask' }
+  /** Done; whether a session still runs there could not be read, so the worktree stays. */
+  | { kind: 'unknown' }
   | { kind: 'failed'; error: Error; doneFailed: number };
 
 /**
  * Done on a worktree work: its sessions in work are marked done, then the
- * worktree is cleaned up by the Overview's rules (sessions archived, worktree
- * and local branch removed) when that loses nothing. Anything else leaves it
- * for the user to decide; the work has left In work either way.
+ * worktree is archived with its sessions. An archive keeps every change, so
+ * nothing needs the user's word; only a session still running there keeps
+ * the worktree. The work has left In work either way.
  */
 export async function finishWorktreeWork(input: {
   sessions: readonly Session[];
   worktree: WorktreeMetadata;
   project: { id: string; path: string };
+  /** The name the row shows, which the archive keeps. */
+  title?: string;
 }): Promise<FinishWorktreeWorkOutcome> {
   const failed = await markOverviewSessionsDone(input.sessions.filter(isSessionInWork));
   if (failed.length > 0) {
@@ -88,18 +91,14 @@ export async function finishWorktreeWork(input: {
   // tabs close and the app moves off it, which also frees the worktree for
   // the clean-up below (it never removes one that is on screen).
   leaveWorktree(input.sessions, input.worktree.path, input.project.id);
-  const outcome = await removeOverviewWorktree({
-    target: { worktree: input.worktree, project: input.project, mergedHeadSha: null },
-    agreed: { uncommittedFiles: 0, unpushed: false },
-  });
-  switch (outcome.kind) {
-    case 'removed':
-      return { kind: 'removed' };
-    case 'busy':
-      return { kind: 'busy' };
-    case 'failed':
-      return { kind: 'failed', error: outcome.error, doneFailed: 0 };
-    default:
-      return { kind: 'ask' };
+  const use = await readWorktreeUse(input.worktree.path);
+  if (use === 'unknown') return { kind: 'unknown' };
+  if (use !== 'free') return { kind: 'busy' };
+  try {
+    const sessions = sessionsInWorktree(useGlobalSessionsStore.getState().activeSessions, input.worktree.path);
+    await archiveWorktreeWork({ project: input.project, worktree: input.worktree, sessions, title: input.title });
+    return { kind: 'archived' };
+  } catch (error) {
+    return { kind: 'failed', error: error instanceof Error ? error : new Error(String(error)), doneFailed: 0 };
   }
 }

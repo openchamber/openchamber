@@ -17,6 +17,7 @@ import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
+import { worktreeArchiveI18n } from './worktree-archive.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
 import { sourceBoardI18n } from './source-board.i18n';
@@ -159,6 +160,7 @@ export const dict = {
   ...sessionWarmingI18n.en,
   ...heapSnapshotI18n.en,
   ...sidebarWorkI18n.en,
+  ...worktreeArchiveI18n.en,
   ...overviewI18n.en,
   ...isolatedSpacesI18n.en,
   ...sourceBoardI18n.en,
@@ -626,7 +628,6 @@ export const dict = {
   'sessions.sidebar.activity.chatsTitle': 'Chats',
   'sessions.sidebar.activity.chatsEmpty': 'No chats yet.',
   'chat.chatInput.chooseProject': 'Choose project',
-  'sessions.archivePage.allDirectories': 'All directories',
   'sessions.sidebar.header.projectDisplay.label': 'Show projects',
   'sessions.sidebar.header.projectDisplay.all': 'All projects',
   'sessions.sidebar.header.listGrouping.label': 'Sessions',
@@ -884,22 +885,14 @@ export const dict = {
   'sessions.sidebar.sessionDialogs.directory.errorOpenDescription': 'Desktop could not grant file access.',
   'sessions.sidebar.sessionDialogs.directory.errorAddProjectTitle': 'Failed to add project',
   'sessions.sidebar.sessionDialogs.directory.errorAddProjectDescription': 'Please select a valid directory path.',
-  'sessions.sidebar.sessionDialogs.worktree.errorRemoveTitle': 'Failed to remove worktree “{name}”',
+  'sessions.sidebar.sessionDialogs.worktree.errorRemoveTitle': 'Couldn\'t remove the worktree',
   'sessions.sidebar.sessionDialogs.worktree.removingTitle': 'Removing worktree “{name}”…',
-  'sessions.sidebar.sessionDialogs.worktree.removedTitle': 'Worktree “{name}” removed',
-  'sessions.sidebar.sessionDialogs.worktree.removed': 'Worktree removed.',
-  'sessions.sidebar.sessionDialogs.worktree.removedWithRemote': 'Worktree and remote branch removed.',
+  'sessions.sidebar.sessionDialogs.worktree.removed': 'Worktree removed',
+  'sessions.sidebar.sessionDialogs.worktree.removedWithRemote': 'Worktree and remote branch removed',
   'sessions.sidebar.sessionDialogs.worktree.attachedArchived': 'Attached worktree archived.',
   'sessions.sidebar.sessionDialogs.worktree.attachedArchivedPlural': 'Attached worktrees archived.',
   'sessions.sidebar.sessionDialogs.worktree.archivedAndRemoteRemoved': 'Archived worktrees and removed remote branches.',
   'sessions.sidebar.group.worktreeMissing': 'Worktree folder is missing',
-  'sessions.mergedCleanup.toast.removedTitle': '{name} cleaned up: PR #{number} merged',
-  'sessions.mergedCleanup.toast.mr.removedTitle': '{name} cleaned up: MR !{number} merged',
-  'sessions.mergedCleanup.toast.removedDescription': 'Its sessions are archived, and the worktree and its local branch are removed.',
-  'sessions.mergedCleanup.toast.archivedTitle': 'Sessions in {name} archived: PR #{number} merged',
-  'sessions.mergedCleanup.toast.mr.archivedTitle': 'Sessions in {name} archived: MR !{number} merged',
-  'sessions.mergedCleanup.toast.archivedDescription': 'The worktree stays: it has changes or commits that are not in the merged PR.',
-  'sessions.mergedCleanup.toast.mr.archivedDescription': 'The worktree stays: it has changes or commits that are not in the merged MR.',
   'sessions.mergedCleanup.toast.failedTitle': 'Couldn\'t clean up {name} after PR #{number} merged',
   'sessions.mergedCleanup.toast.mr.failedTitle': 'Couldn\'t clean up {name} after MR !{number} merged',
   'sessions.sidebar.session.restore.relocatedTitle': 'Session moved to the project folder',

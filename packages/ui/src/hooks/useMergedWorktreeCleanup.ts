@@ -2,26 +2,26 @@ import React from 'react';
 import { z } from 'zod';
 import { toast } from '@/components/ui';
 import { formatMessage, useI18nStore, type I18nKey } from '@/lib/i18n';
-import { getGitLog, getGitStatus } from '@/lib/gitApi';
 import { normalizePath } from '@/lib/pathNormalization';
 import { isCapacitorApp } from '@/lib/platform';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import {
-  hasUnmergedCommits,
   runMergedWorktreeCleanup,
   type MergedWorktreeCandidate,
   type MergedWorktreeCleanupDeps,
   type MergedWorktreeOutcome,
 } from '@/lib/worktrees/mergedWorktreeCleanup';
-import { getWorktreeDisplayName, removeProjectWorktree } from '@/lib/worktrees/worktreeManager';
+import { getWorktreeDisplayName } from '@/lib/worktrees/worktreeManager';
+import { archiveWorktreeWork, takeRestoredWorktree } from '@/lib/worktrees/worktreeArchive';
+import { isWorktreeRemoving } from '@/lib/worktrees/worktreeRemovalState';
 import { getSafeStorage } from '@/stores/utils/safeStorage';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { getFreshestPrStatusForBranch, useGitHubPrStatusStore } from '@/stores/useGitHubPrStatusStore';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useUIStore } from '@/stores/useUIStore';
-import { archiveSessions, getSessionLiveActivity } from '@/sync/session-actions';
+import { getSessionLiveActivity } from '@/sync/session-actions';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
 import { readSourceControlProvider } from '@/lib/source-control/providers/registry';
@@ -82,14 +82,8 @@ const report = (outcome: MergedWorktreeOutcome): void => {
   const params = { name, number: outcome.candidate.prNumber };
   const term = readSourceControlProvider(outcome.candidate.provider).terminology.changeRequest;
   const key = (base: I18nKey) => changeRequestCopy(base, term);
-  if (outcome.kind === 'removed') {
-    toast.success(formatMessage(dictionary, key('sessions.mergedCleanup.toast.removedTitle'), params), {
-      description: formatMessage(dictionary, 'sessions.mergedCleanup.toast.removedDescription', params),
-    });
-  } else if (outcome.kind === 'archived') {
-    toast.info(formatMessage(dictionary, key('sessions.mergedCleanup.toast.archivedTitle'), params), {
-      description: formatMessage(dictionary, key('sessions.mergedCleanup.toast.archivedDescription'), params),
-    });
+  if (outcome.kind === 'archived') {
+    toast.success(formatMessage(dictionary, key('sessions.mergedCleanup.toast.archivedTitle'), params), { description: name });
   } else {
     toast.error(formatMessage(dictionary, key('sessions.mergedCleanup.toast.failedTitle'), params), {
       description: outcome.error.message,
@@ -111,27 +105,18 @@ const createDeps = (): MergedWorktreeCleanupDeps => {
     isSessionIdle: (sessionId) => getSessionLiveActivity(sessionId) === 'idle',
     isWorktreeOpen: (path) => normalizePath(useDirectoryStore.getState().currentDirectory ?? null) === normalizePath(path),
     isSessionOpen: (sessionId) => useSessionUIStore.getState().currentSessionId === sessionId,
-    readWorktreeState: async (candidate) => {
-      const path = candidate.worktree.path;
-      const status = await getGitStatus(path, { fresh: true });
-      return {
-        isDirty: !status.isClean,
-        hasUnmergedCommits: await hasUnmergedCommits({
-          mergedHeadSha: candidate.mergedHeadSha,
-          status,
-          hasCommitsAfter: async (sha) => (await getGitLog(path, { from: sha, to: 'HEAD', maxCount: 1 })).all.length > 0,
-        }),
-      };
+    isWorktreeRemoving,
+    takeRestored: takeRestoredWorktree,
+    archiveWorktree: async (candidate, sessions) => {
+      await archiveWorktreeWork({ project: candidate.project, worktree: candidate.worktree, sessions });
     },
-    archiveSessions: (sessionIds) => archiveSessions(sessionIds),
-    removeWorktree: (candidate) => removeProjectWorktree(candidate.project, candidate.worktree, { deleteLocalBranch: true }),
     report,
   };
 };
 
 /**
- * Archives a worktree's sessions once its PR is merged, and removes the
- * worktree with its local branch when nothing there can be lost. Opt-in
+ * Archives a worktree with its sessions once its PR is merged, when nobody
+ * works there. Opt-in
  * (`mergedWorktreeCleanupEnabled`). Runs on desktop and web only: VS Code has
  * no worktrees, and a phone would race the desktop it drives for the same
  * worktree.
@@ -144,31 +129,31 @@ export const useMergedWorktreeCleanup = ({ enabled }: { enabled: boolean }): voi
     if (!active) return;
     let disposed = false;
     let running = false;
-    let rerun: { recheckKept: boolean } | null = null;
+    let rerun = false;
     let debounce: ReturnType<typeof setTimeout> | null = null;
 
-    const pass = async (options: { recheckKept: boolean }) => {
+    const pass = async () => {
       if (running) {
-        rerun = { recheckKept: options.recheckKept || Boolean(rerun?.recheckKept) };
+        rerun = true;
         return;
       }
       running = true;
       try {
-        await runMergedWorktreeCleanup(createDeps(), options);
+        await runMergedWorktreeCleanup(createDeps());
       } catch (error) {
         console.warn('[MergedWorktreeCleanup] pass failed', error);
       } finally {
         running = false;
       }
       const next = rerun;
-      rerun = null;
-      if (next && !disposed) void pass(next);
+      rerun = false;
+      if (next && !disposed) void pass();
     };
     const schedule = () => {
       if (debounce) clearTimeout(debounce);
       debounce = setTimeout(() => {
         debounce = null;
-        if (!disposed) void pass({ recheckKept: false });
+        if (!disposed) void pass();
       }, PASS_DEBOUNCE_MS);
     };
 
@@ -181,9 +166,9 @@ export const useMergedWorktreeCleanup = ({ enabled }: { enabled: boolean }): voi
       if (state.currentSessionId !== previous.currentSessionId
         || state.availableWorktreesByProject !== previous.availableWorktreesByProject) schedule();
     });
-    // Kept worktrees change by hand (a pull, a cleanup), which no event reports.
-    const interval = setInterval(() => void pass({ recheckKept: true }), PASS_INTERVAL_MS);
-    void pass({ recheckKept: true });
+    // An agent going idle is no event here; a periodic pass catches it.
+    const interval = setInterval(() => void pass(), PASS_INTERVAL_MS);
+    void pass();
 
     return () => {
       disposed = true;

@@ -581,7 +581,7 @@ describe('canonical GitHub mutations', () => {
     expect(response.body.result).toEqual({ merged: true });
     expect(requests).toEqual([
       { method: 'GET', path: '/repos/acme/app/pulls/7', body: null },
-      { method: 'PUT', path: '/repos/acme/app/pulls/7/merge-async', body: { merge_method: 'merge', sha: 'abc123' } },
+      { method: 'PUT', path: '/repos/acme/app/pulls/7/merge-async', body: { merge_method: 'merge', sha: 'abc123', bypass_rules: true } },
     ]);
   });
 

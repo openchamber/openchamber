@@ -1073,6 +1073,50 @@ export interface GitWorktreeSnapshotResult {
   head: string;
 }
 
+/**
+ * An archived worktree: its folder is gone, and `refs/openchamber/archive/<id>`
+ * holds what restoring it needs.
+ */
+export interface GitWorktreeArchive {
+  id: string;
+  ref: string;
+  /** Snapshot commit: the branch's commit plus every change git did not ignore. */
+  commit: string;
+  /** The commit the branch stood on when archived. */
+  head: string;
+  /** Where the worktree was. */
+  path: string;
+  /** Empty for a worktree that had no branch checked out. */
+  branch: string;
+  branchExists: boolean;
+  /** The task title it had; empty when it had none. */
+  title: string;
+  archivedAt: number;
+  /** The sessions archived with it. */
+  sessionIds: string[];
+}
+
+export interface ArchiveGitWorktreePayload {
+  /** The worktree to archive. */
+  directory: string;
+  id: string;
+  sessionIds: string[];
+  /** The name the sidebar showed for the work, kept when the worktree has no task title. */
+  title?: string;
+}
+
+export interface GitWorktreeArchiveRestoreResult {
+  id: string;
+  /** The changes clashed with the branch: git's conflict state is left and the archive is kept. */
+  conflicts: boolean;
+}
+
+export interface DeleteGitWorktreeArchivePayload {
+  id: string;
+  /** Also delete the archive's local branch, unless a checkout uses it. */
+  deleteBranch?: boolean;
+}
+
 export interface GitDeleteBranchPayload {
   branch: string;
   force?: boolean;
@@ -1118,6 +1162,12 @@ interface GitWorktreeAPI {
   setTitle?(directory: string, title: string): Promise<GitWorktreeTitleResult>;
   /** `directory` is the worktree to snapshot. */
   snapshot?(directory: string, payload: GitWorktreeSnapshotPayload): Promise<GitWorktreeSnapshotResult>;
+  /** `directory` is the project; the worktree is removed, its branch kept. */
+  archive?(directory: string, payload: ArchiveGitWorktreePayload): Promise<GitWorktreeArchive>;
+  listArchives?(directory: string): Promise<GitWorktreeArchive[]>;
+  /** `directory` is the new checkout of the archive's branch. */
+  restoreArchive?(directory: string, id: string): Promise<GitWorktreeArchiveRestoreResult>;
+  deleteArchive?(directory: string, payload: DeleteGitWorktreeArchivePayload): Promise<{ id: string; branchDeleted: boolean }>;
 }
 
 export interface GitAPI {

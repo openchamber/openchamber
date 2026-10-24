@@ -1117,8 +1117,6 @@ export const settingsDict = {
   'settings.openchamber.sessionRetention.title': 'Session 保持',
   'settings.openchamber.mergedWorktreeCleanup.title': 'PR のマージ後',
   'settings.openchamber.mergedWorktreeCleanup.info': 'サイドバーに表示済みの PR ステータスを使います。ワークツリーでエージェントが作業中、またはそのセッションが開いている間は何もしません。',
-  'settings.openchamber.mergedWorktreeCleanup.field.enable': 'セッションをアーカイブしてワークツリーを削除',
-  'settings.openchamber.mergedWorktreeCleanup.field.enableDescription': 'コミットされていない変更がなく、マージ済みの PR にないコミットもなくなった時点で、ワークツリーとローカルブランチは削除されます。それまではセッションのみアーカイブし、ワークツリーは残します。',
   'settings.openchamber.messageSearch.title': 'メッセージ検索',
   'settings.openchamber.messageSearch.field.enabled': 'すべての会話でメッセージを検索',
   'settings.openchamber.messageSearch.field.enabledInfo': '設定ファイルの隣に、あなたのメッセージとエージェントの返信の小さなインデックスを保持し、検索ですぐに見つけられるようにします。OpenChamber が動作しているマシンに保存され、外部に送信されることはありません。',

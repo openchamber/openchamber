@@ -18,6 +18,7 @@ import { webSearchI18n } from './websearch.i18n';
 import { sessionWarmingI18n } from './session-warming.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
+import { worktreeArchiveI18n } from './worktree-archive.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
 import { sourceBoardI18n } from './source-board.i18n';
@@ -170,6 +171,7 @@ export const dict: Record<I18nKey, string> = {
   ...sessionWarmingI18n['pt-BR'],
   ...heapSnapshotI18n['pt-BR'],
   ...sidebarWorkI18n['pt-BR'],
+  ...worktreeArchiveI18n['pt-BR'],
   ...overviewI18n['pt-BR'],
   ...isolatedSpacesI18n['pt-BR'],
   ...sourceBoardI18n['pt-BR'],
@@ -636,7 +638,6 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.activity.chatsTitle": "Conversas",
   "sessions.sidebar.activity.chatsEmpty": "Ainda não há conversas.",
   "chat.chatInput.chooseProject": "Escolher projeto",
-  "sessions.archivePage.allDirectories": "Todos os diretórios",
   "sessions.sidebar.header.projectDisplay.label": "Exibir projetos",
   "sessions.sidebar.header.projectDisplay.all": "Todos os projetos",
   "sessions.sidebar.header.listGrouping.label": "Sessões",
@@ -889,22 +890,14 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.sessionDialogs.directory.errorOpenDescription": "O desktop não pôde conceder acesso aos arquivos.",
   "sessions.sidebar.sessionDialogs.directory.errorAddProjectTitle": "Não foi possível adicionar projeto",
   "sessions.sidebar.sessionDialogs.directory.errorAddProjectDescription": "Selecione uma caminho de diretório válida.",
-  "sessions.sidebar.sessionDialogs.worktree.errorRemoveTitle": "Não foi possível excluir o worktree “{name}”",
+  "sessions.sidebar.sessionDialogs.worktree.errorRemoveTitle": "Não foi possível excluir o worktree",
   "sessions.sidebar.sessionDialogs.worktree.removingTitle": "Excluindo o worktree “{name}”…",
-  "sessions.sidebar.sessionDialogs.worktree.removedTitle": "Worktree “{name}” excluído",
-  "sessions.sidebar.sessionDialogs.worktree.removed": "Worktree excluído.",
-  "sessions.sidebar.sessionDialogs.worktree.removedWithRemote": "Worktree e branch remota excluídos.",
+  "sessions.sidebar.sessionDialogs.worktree.removed": "Worktree excluído",
+  "sessions.sidebar.sessionDialogs.worktree.removedWithRemote": "Worktree e branch remota excluídos",
   "sessions.sidebar.sessionDialogs.worktree.attachedArchived": "Worktree adjunto archivado.",
   "sessions.sidebar.sessionDialogs.worktree.attachedArchivedPlural": "Worktrees adjuntos archivados.",
   "sessions.sidebar.sessionDialogs.worktree.archivedAndRemoteRemoved": "Worktrees archivados e branches remotas excluídas.",
   "sessions.sidebar.group.worktreeMissing": "A pasta do worktree está ausente",
-  "sessions.mergedCleanup.toast.removedTitle": "{name} limpo: PR #{number} mesclado",
-  "sessions.mergedCleanup.toast.mr.removedTitle": "{name} limpo: MR !{number} mesclado",
-  "sessions.mergedCleanup.toast.removedDescription": "As sessões foram arquivadas, e o worktree e a branch local foram removidos.",
-  "sessions.mergedCleanup.toast.archivedTitle": "Sessões em {name} arquivadas: PR #{number} mesclado",
-  "sessions.mergedCleanup.toast.mr.archivedTitle": "Sessões em {name} arquivadas: MR !{number} mesclado",
-  "sessions.mergedCleanup.toast.archivedDescription": "O worktree continua: ele tem alterações ou commits que não estão no PR mesclado.",
-  "sessions.mergedCleanup.toast.mr.archivedDescription": "O worktree continua: ele tem alterações ou commits que não estão no MR mesclado.",
   "sessions.mergedCleanup.toast.failedTitle": "Não foi possível limpar {name} depois que o PR #{number} foi mesclado",
   "sessions.mergedCleanup.toast.mr.failedTitle": "Não foi possível limpar {name} depois que o MR !{number} foi mesclado",
   "sessions.sidebar.session.restore.relocatedTitle": "Sessão movida para a pasta do projeto",

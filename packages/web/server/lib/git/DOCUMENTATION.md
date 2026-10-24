@@ -82,7 +82,7 @@ An identity is one repository's complete answer: signature, provider account (`a
 ### Worktree Operations
 - `resolveWorktreeTopLevel(directory)`: `{ root, prefix }` from one `git rev-parse --show-toplevel --show-prefix`: the checkout root and where `directory` sits inside it (`''` at the root, `ai` for `<root>/ai`). When git fails the answer is `{ root: directory }` without `prefix`, so a failed read is never taken for "at the repository root"; `GET /api/git/toplevel` passes that through and callers of `prefix` treat its absence as unknown.
 - `getWorktrees(directory)`: List all git worktrees for a repository. A directory outside any repository (or one that does not exist) is an authoritative empty list; any other git failure throws so callers keep their last known topology instead of clearing it. `GET /api/git/worktrees` answers such a failure with 500. A bare repository has no `--show-toplevel` answer, so the listing runs from the directory itself; the bare entry git lists for the repository's own directory is not a checkout and is left out of the result.
-- Task titles: a worktree's task title is its branch's description (`branch.<name>.description`, the first line, at most 120 characters), so every client reads it, `git branch -m` carries it and deleting the branch drops it. `getWorktrees` returns it as `title` from one `git config --get-regexp` read; a failed read lists the worktrees without titles. `setWorktreeTaskTitle(directory, { title, by })` writes it: `by: 'user'` always (an empty title clears it) and forgets the agent's copy; `by: 'agent'` only while the description is empty or still the one the agent set (`branch.<name>.openchamberAgentTitle`), otherwise it answers `applied: false` with the user's title. A detached worktree has no branch and is refused with 409. A worktree made for a pull request or an issue starts with that item's title: `POST /api/git/worktrees` takes it as `taskTitle` and, once the worktree exists, `seedBranchTaskTitle` writes it as the agent's (so the agent may replace it with a short name, and a user's title is never overwritten). A branch whose name OpenChamber generated (Quick worktree's `agile-chipmunk`; the client sends it as `generatedBranchName`) is recorded with `markGeneratedBranchName` (`branch.<name>.openchamberGeneratedName` holds that very name, so a rename, which carries the record along, ends it). `readRenameableGeneratedBranch` returns the worktree's branch only while that record matches and the branch was never pushed (no upstream, no remote branch of that name): then the session context asks the agent to rename it after the task (`../session-knowledge`). A write publishes a topology change so clients list again. `PUT /api/git/worktrees/title` is the user's rename.
+- Task titles: a worktree's task title is its branch's description (`branch.<name>.description`, the first line, at most 120 characters), so every client reads it, `git branch -m` carries it and deleting the branch drops it. `getWorktrees` returns it as `title` from one `git config --get-regexp` read; a failed read lists the worktrees without titles. `setWorktreeTaskTitle(directory, { title, by })` writes it: `by: 'user'` always (an empty title clears it) and forgets the agent's copy; `by: 'agent'` only while the description is empty or still the one the agent set (`branch.<name>.openchamberAgentTitle`), otherwise it answers `applied: false` with the user's title. A detached worktree has no branch and is refused with 409. A worktree made for a pull request or an issue starts with that item's title: `POST /api/git/worktrees` takes it as `taskTitle` and, once the worktree exists, `seedBranchTaskTitle` writes it as the agent's (so the agent may replace it with a short name, and a user's title is never overwritten). A branch whose name OpenChamber generated (Quick worktree's `agile-chipmunk`; the client sends it as `generatedBranchName`) is recorded with `markGeneratedBranchName` (`branch.<name>.openchamberGeneratedName` holds that very name, so a rename, which carries the record along, ends it). `readRenameableGeneratedBranch` returns the worktree's branch only while that record matches and the branch was never pushed (no upstream, no remote branch of that name): then the session context asks the agent to rename it after the task (`../session-knowledge`), which `work.name` does through `renameGeneratedWorktreeBranch`: it renames only such a branch, to a name `git check-ref-format --branch` accepts and no other branch holds, and answers null for any other branch. A write publishes a topology change so clients list again. `PUT /api/git/worktrees/title` is the user's rename.
 - `observeWorktreeTopology(directory)`: Compare the repository's registered linked-worktree set with the last one seen for it and notify `subscribeWorktreeTopologyChanges` listeners when it changed. The set is fingerprinted from the `worktrees` directory under the common Git directory (mtime, entry names and each entry's HEAD, so renaming a checked-out branch from a terminal counts as a change), so the check is a stat and a readdir; the common directory is resolved with `git rev-parse --git-common-dir` once per requested directory and cached. The first observation only records a baseline. Never throws.
 - `subscribeWorktreeTopologyChanges(listener)`: Listener receives `{ directories, at }`, where `directories` are every directory of that repository the server has observed, so clients can map them onto registered projects. Returns an unsubscribe function.
 - `validateWorktreeCreate(directory, input)`: Validate worktree creation parameters (mode, branchName, startRef, upstream config).
@@ -181,6 +181,52 @@ the `.git` path; they are not a filesystem transaction. Writes through file
 descriptors opened before the claim, changes to private recovery entries after
 the final ownership check, and metadata deletion after the final directory check
 are outside this guarantee.
+
+### Worktree archives
+
+An archived worktree is gone from disk but restorable. `archiveWorktree` records
+the checkout under `refs/openchamber/archive/<id>`: a snapshot commit of every
+change git does not ignore (the run snapshot's throwaway index, so the real
+index is untouched), whose parent is the commit the branch stood on and whose
+message is `OpenChamber worktree archive` followed by a JSON record (old path,
+branch, task title, time, the session ids the client archived with it). It
+first waits for the checkout's background population, since a snapshot taken
+before the files land records them as deleted, and refuses a checkout whose
+setup failed. Then the worktree is removed as `removeWorktree` removes it,
+keeping the branch. A removal that fails deletes the ref again only when the
+worktree is provably whole (still registered, on disk, in the snapshot's very
+state): `git worktree remove --force` deletes files before it gives up on a
+busy one, so otherwise the archive is kept and the call fails with
+`WORKTREE_ARCHIVE_PARTIAL`, the snapshot being the only copy of what went.
+Only a linked worktree git registers for this repository is archived, never
+the primary checkout or a stray folder, and one worktree is archived once at a
+time (`WORKTREE_ARCHIVE_IN_PROGRESS` for a second call).
+
+`listWorktreeArchives` reads the refs (`GET /api/git/worktrees/archives`).
+`restoreWorktreeArchive` runs in a new checkout of the archive's branch (or of
+its head commit, when the branch is gone) that the client created through the
+normal worktree creation, so setup commands run. It first waits for that
+checkout's background population (`waitForActiveWorktreeBootstrap`) and refuses
+a failed one: changes applied while git still fills the folder raced the
+checkout. It then `cherry-pick --no-commit`s the snapshot, which applies it on
+top of whatever the branch gained since, and unstages it, and deletes the ref.
+A conflict leaves git's conflict state, which holds both sides, and deletes
+the ref too: kept, the archive would still claim sessions that are back at
+work. When git refuses to apply anything (files the setup commands wrote would
+be overwritten), the ref stays and the call fails with
+`WORKTREE_ARCHIVE_NOT_APPLIED`; the client then removes the checkout it made,
+so a retry finds the branch free. `deleteWorktreeArchive` deletes the ref and, with `deleteBranch`, the
+local branch unless a checkout uses it again.
+
+#### Why the ref is the record
+
+The repository is the only store: every client of it sees the same archives,
+nothing can drift from git when branches are cleaned up by hand, and the ref
+keeps the snapshot from `gc` until the archive is deleted. `git stash` was the
+obvious alternative and was rejected: the stash stack is shared by every
+worktree of the repository, so another session could pop or drop the entry.
+Files git ignores (`node_modules`, `.env`) are not kept; the project's setup
+commands bring them back on restore.
 
 ### Worktree topology change tracking
 There is no filesystem watcher and no polling. The server notices worktree changes in two ways, and both scale with what users are doing rather than with the number of registered projects:
