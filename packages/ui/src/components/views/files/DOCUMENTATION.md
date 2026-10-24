@@ -160,13 +160,617 @@ show the previous and next image of the same folder, see below),
 element, duration and dimensions once metadata loads, a stated failure when
 the runtime cannot decode the codec), `FontArtifact` (a specimen under a
 throwaway `FontFace` family removed when the tab closes), `TableArtifact`
-(CSV/TSV through `delimitedText.ts`, capped rows stated in the meta line),
-and `BinaryArtifact` (name, type, size, download; never a decode attempt).
-`FilesView.renderArtifactPreview` is the single switch both the docked and
-the fullscreen viewer use. SVG, Mermaid (`.mmd`) and delimited files are text
+(CSV/TSV through `delimitedText.ts`, parsed on the thread of the preview when
+the file is small enough and in a worker otherwise, with a loading state until
+the worker answers, capped rows stated in the meta line, the
+rows and columns in view mounted unless the grid of the file is small enough
+to be kept whole), and `BinaryArtifact` (name, type,
+size, download; never a decode attempt).
+`FilesView.renderArtifactPreview` is the single switch for artifact views.
+SVG, Mermaid (`.mmd`) and delimited files are text
 with an artifact view: each has a per-path preview/source toggle, and opens
 in preview regardless of the text-first setting because an agent-produced
 artifact is opened to be looked at.
+
+The CSV/TSV preview stays mounted when it enters fullscreen. Its existing
+viewer panel fills the Files surface and hides the tree and docked toolbars;
+the fullscreen controls stay over the same scroller. A fullscreen transition
+therefore does not start another parse, and the worker's single held parse is
+not competed for by a second table instance. Other preview kinds keep their
+existing fullscreen viewer.
+
+The table preview mounts only the rows and the columns in view, unless the
+grid of the file is small enough to be kept whole. A wide export holds far
+more cells than a screen can show, and mounting all of them froze the viewer
+for seconds: 2,000 rows with 50 columns ask for 100,000 cells. The rows
+outside the window are carried by spacer rows that take their height, and
+the columns beside the window by spacer cells that span them, so the table
+keeps its own layout, its column widths and its text selection.
+`tableLayout.ts` holds the model: the width of every column, the range of
+rows and columns a scroll position lands on, the size of the grid of a file
+and the cells that carry the columns beside the window. What has to stay
+true:
+
+- the preview is a real `<table>` with a sticky `<thead>`, because the table
+  semantics and the native text selection depend on it;
+- the row cap of the parser and the notice about it in the meta line stay as
+  they are;
+- a file whose grid is small enough is kept whole and a file whose grid is
+  large enough is windowed. The decision is a property of the file, so the
+  same file is kept whole in a narrow panel and in a wide one;
+- the mounted cells stay bounded by the viewport on both axes, so the cost of
+  drawing a file does not grow with the file. The files that are kept whole
+  are the exception, and the limit bounds what they cost. Two things grow
+  with the file anyway: the `<col>` the table holds for every column of the
+  file, because the parser does not bound the number of columns, and the rows
+  the cache of the cut rows holds, because a row of a file with many columns
+  holds many values. The parse of the file and the count of the widths again
+  with the measured characters, which only a file that holds a character
+  wider than the count pays for, run in a worker when the file is large
+  enough, so they cost the worker and not the thread the user is looking at;
+- the widths of the columns come from the data and from the font, and a resize
+  of the panel does not count them again;
+- the column widths stay the same while scrolling, and a column is as wide as
+  the text the browser lays out for its longest value, so nothing that fits
+  today is cut short;
+- only the rows and the columns in view are in the document, so the browser's
+  find-in-page, a selection of the whole file and a screen reader see the
+  window and not the file. A value outside the window is in the document only
+  while the window is over it. A file that is kept whole holds every row and
+  every column of it, so those three see the file;
+- the table states how many rows and how many columns it has, and every
+  mounted row and cell states where it sits in the file, so a screen reader
+  is told the size of the table and not the size of the window;
+- the cells of the window sit in the columns the model names, for a file of
+  any number of columns. HTML limits the `colspan` of a cell to 1000, and a
+  cell that claims more is laid out over fewer columns, so a range of
+  columns that is wider than the limit is carried by more than one cell. No
+  cell of the table claims a span above the limit, the cell of a row that
+  stands for the rows outside the window included;
+- a right-to-left table keeps its columns in the order the file has them,
+  with the first column on the right. Its scroll offset is read the way the
+  browser reports it: 0 at the right edge of the box, and negative from
+  there as the box is scrolled towards its left edge;
+- the columns in view are the ones the viewer can see, in the direction the
+  document is laid out in at the time;
+- a new file mounts its own rows and columns from the first commit, so the
+  window of the file before it is never in the document;
+- the rule under a row runs across the whole width of the table, and the
+  stripe of a row runs behind the columns beside the window, so the table
+  looks the way it did when every cell of the file was in the document;
+- the header row is as tall as a row of the body, so the header cells in view
+  cannot change its height and the content below the header does not jump
+  while the window moves over columns whose header is empty;
+- a file is measured when it opens, whatever file was open before it. A file
+  without columns has no table to measure, so the next file is measured from
+  scratch.
+
+How much each of them costs was measured on one machine, so the figures below
+describe that machine and say nothing about the code itself. The parse counts
+the width of every value as it reads it and finds the characters outside latin
+in the same walk, so the open of a file costs one walk over its text. A
+2,000-row file with 50 columns took 18 ms of parse on the machine the figures
+below were taken on, and a file with 5,000 columns in 2,000 rows, which is
+124 MB of text, took 504 ms. The parse is the largest single item on both,
+and a file that is large enough is parsed in a worker, so it costs the worker
+and not the thread the user is looking at.
+
+The walk over the cells the preview used to make is gone, and with it the
+measurement of the widths the preview did for every file. A file that holds a
+character the browser lays out wider than the count pays for the count of the
+widths again with the measured characters, and that count walks over the text
+of the kept rows: it took 15 ms for the 2,000-row file with 50 columns, 105 ms
+for one with 1,000 columns and 611 ms for the one with 5,000 columns. The
+walk over the cells it replaces took 11 ms, 93 ms and 457 ms, and the preview
+made that walk twice for every file, because the layout starts on guessed
+metrics and the measurement replaces them. The count of the widths is a
+little dearer than one of those walks, and it is paid once, by the files that
+hold a character the browser lays out wider than the count.
+
+The widths are written in the font's own character unit, so the browser
+resolves the characters against the font it has, and the padding and the
+border of a cell are written from the measurement of the document. The height
+of a row is measured from the document as well, and every row is given that
+height, the header row included, so the mapping from a scroll offset to a row
+stays exact and the last row can be reached.
+
+### Why a small file is kept whole and a large one is windowed
+
+The preview held every cell of the file before the windowing, and the
+browser's find-in-page, a selection of the whole file and a screen reader saw
+the file. The windowing took that away from every file, and it only had to
+take it away from the files that are large enough for the window to matter.
+So a file whose grid is small enough is held whole, and the size of the grid
+is the number of cells the table holds, the header row included. The limit is
+one number, `TABLE_WHOLE_GRID_CELL_LIMIT`, and the file decides: the same
+file is held whole in a narrow panel and in a wide one, because a decision
+that changed with the size of the panel would hold a file in one panel and
+window it in the next.
+
+The limit was measured in Chromium against the markup of the preview. The
+machine was busy with other work during the measurements and the figures
+moved by about a third between runs, so they are given as ranges: holding
+1,000 cells took 20 to 60 ms of layout, 2,000 cells 30 to 90 ms, 4,000 cells
+75 to 120 ms, 10,000 cells about 300 ms and 100,000 cells 3 to 4 s. The
+rendering of the cells is on top of the layout the browser does for them. A
+pause of a tenth of a second is where the viewer starts to notice one, so
+2,000 cells is the largest grid whose cost stays around it. The window itself
+holds about 800 cells and costs 15 to 25 ms, so holding a file of that size
+whole costs little more than opening any windowed file.
+
+### Why the file is read in one place
+
+The preview reads the file in one place, and everything else reads the table
+from there: the parse, the rows that are cut out of the source and the widths
+of the columns. The preview held the cells of the file before, and a file
+with millions of cells put millions of strings in the memory of the tab, and
+the walk over them to measure the columns cost more than the parse of the
+file itself.
+
+One place also means that the parse can be moved off the main thread without
+the rest of the preview knowing: the preview asks for the table and gets one,
+and where the parse ran is not its business. The parse of a file that is large
+enough runs in a worker for the reason below.
+
+### Why a large file is parsed in a worker
+
+The parse of a file walks its text once, and a wide export is tens of
+megabytes of text: 145 MB of it took about 900 ms of the main thread, and the
+viewer was frozen for all of it. The parse and the count of the widths of
+such a file are therefore done in a worker, and the main thread only renders
+what the worker sends back. The preview shows a loading state until the
+worker answers.
+
+A runtime without a worker, a worker that cannot be created, one that crashes,
+one that does not take the request and one that does not answer within its
+budget all end the same way: the file is parsed on the main thread, which is
+slower for the user and the last resort. The budget grows with the size of
+the file, because the parse walks the text once and a big file takes longer
+than a small one. It covers worker startup, including the VS Code fetch and
+response-body read, and the worker response. A worker that starts after the
+budget is retired and cannot replace a newer worker.
+
+The worker keeps the text of the parse it answers, so the count of the widths
+does not have to carry the text of the file again. Only the newest parse is
+kept: the preview has one file open at a time, and the text of a file the
+user has left is of no use to the file that is open now. When a preview closes
+or changes to source, it releases its parse; the worker clears it only if that
+parse is still the one held. A parse that finishes after its preview leaves is
+released when its response arrives. A count for a parse the worker does not
+hold any more is answered as a failure, and the preview counts the widths on
+the main thread instead.
+
+A count for a file the user has left is dropped instead of counted on the
+main thread: that walk is over the text of every row the preview holds, and
+it would hold the thread of the preview for as long as it takes, for a file
+nobody is looking at.
+
+### Why a small file is parsed on the thread of the preview
+
+A file of at most 200,000 characters is parsed on the thread the preview is
+on, in the first render, and the preview opens without a loading state. The
+parse of a file of n characters costs about 15 ms per megabyte in Chromium, so
+a file of that size is parsed in a few milliseconds, and a round trip through a
+worker costs more than that: the worker is made, the text is copied into it
+and it answers. The file used to open in the first frame, and a spinner and a
+meta line that change are a worse trade than a parse of a few milliseconds.
+
+The limit is the preview's own decision. The editor has a limit of its own for
+a different reason, and the two are not the same number by accident: the
+editor opens a large file in the view instead of the editor, and the preview
+pays for a parse it can afford to make.
+
+A file that is larger is parsed in the worker, and the preview shows its
+loading state until the worker answers.
+
+### Why the widths are counted as the rows are read
+
+A column is as wide as its longest value, and the count of a value decides
+the width of its column and nothing else. The parser counts the values as it
+reads them, so the preview never holds the cells of the file and never walks
+over them to measure them.
+
+The walk over the cells went over every column of every row, and a file with
+few fields per row and many columns paid for the whole width of the table on
+every row: 2,000 rows with one field each took 25 ms to measure with 5,000
+columns, 290 ms with 20,000 and 520 ms with 50,000 on a busy machine. The
+parser counts the fields a row has and not every column of the file, which
+took 1 ms, 1 ms and 2 ms for the same three files. The widths are the same,
+because a row that does not reach a column cannot narrow it.
+
+### Why a row is cut out of the source when it is mounted
+
+The values of a row are cut out of the text when the row is mounted, and a row
+that was cut is not cut again, so a scroll that comes back over a row does not
+pay for it twice. The rows that were cut are held in a cache.
+
+The rows that are on screen are held whatever they cost, and the rows beside
+them are held as long as the cache holds fewer cells than its budget. A bound
+by the cells alone held one row of a file with 5,000 columns, so every change
+of the window cut all the rows on screen again: about 34 rows, 0.8 ms each,
+roughly 28 ms on every scroll step. A file with 5,000 columns holds the 34
+rows of its window, which is 170,000 values, and a file with 50 columns holds
+the same 34 rows of 50 values, which the bound by the cells held as well. The
+memory the cache holds does not grow with the number of rows of the file: the
+rows on screen are as many as the panel is tall, and the rows beside them are
+bounded by the budget.
+
+A file whose whole grid is kept in the document holds all of its rows at once.
+
+The cache is dropped when the file changes, because the rows of the file
+before it are of no use to the file that is open now.
+
+### Why the widths are counted again only when a character is wider than the count
+
+The parser counts the columns with the counted rule, because it runs before
+the browser has measured a single character. A file whose characters are all
+counted right, which is every file without Greek, an emoji or another
+character the font does not cover, has the exact widths already, and nothing
+is counted again. A file that holds such a character would have its values cut
+short, so its widths are counted again with the measured table.
+
+The count again walks over the text of the rows the preview holds and stops
+at the end of the last of them, because the rows it holds are a prefix of the
+file and the rows after them are not counted. It runs when the measured table
+changes, and not when the panel is resized, scrolled or rendered again.
+
+A count belongs to one table and to one set of measurements. A file that is
+opened again is parsed again, and the table of the new parse starts from the
+widths the parser counted, so the widths that were counted for the file before
+it are not the widths of the new table and are counted again. A count that was
+asked for with other measurements does not publish its widths either: the
+measurements changed while it ran, and its widths belong to a font that is not
+the one on the screen.
+
+It costs a little more than the walk over the cells it replaces, because a
+walk over the text cannot use the early-out that walk had: the length of a
+value is only known after its characters have been read, so every value has to
+be counted.
+
+### Why the table states its size and the place of its rows and cells
+
+A table whose rows and columns are only partly in the document tells a
+screen reader the size of the window and not the size of the file: it said
+there were seven columns where the file had fifty. The table states how many
+rows and columns it has with `aria-rowcount` and `aria-colcount`, and every
+mounted row and cell states where it sits with `aria-rowindex` and
+`aria-colindex`, counted from one and with the header row counted with the
+rows. The places follow the file and not the document, so the row under the
+top-left corner of the viewport carries the number its place in the file gives
+it. The spacer rows and the spacer cells stand for the rows and the columns
+outside the window and are hidden from the accessibility tree, so they are
+counted nowhere.
+
+The count of the rows is the number of rows the table holds and not the
+number of rows the file has: the parser keeps the first rows of a large file
+and the meta line says so, and a row the file has and the table does not is
+no row of the table.
+
+### Why the window is written here and not taken from `@tanstack/react-virtual`
+
+The virtualizer in this repo positions rows in a list of its own height. A
+table has no such list: its height comes from the header, the rows and the
+spacer row that stands in for the rows above, and the height a row is
+planned with has to match the height the rows really take, or the mapping
+from a scroll offset to a row drifts and the last row cannot be reached. The
+window here is a pure function of the parsed table, the measurements and the
+scroll offset, which is what the tests check, and it covers both directions
+of the same table at once.
+
+### Why the model of the window is written after the commit and not during the render
+
+The window is computed from the model of the last commit: the plan of the
+columns, the measurements, the number of rows and the number of columns. A
+render React throws away must not leave a plan in that model, because a
+scroll event landing in that window would ask for the rows and the columns of
+a table that never reached the document. The model is therefore written in
+the layout effect that moves the window, and not in the body of the render.
+
+### Why every row is the measured height and not the height its own text takes
+
+A row whose cells are all empty has no line in it, so it is shorter than a
+row with text: the padding and the border are all that is left of it. Such a
+row is a real row, because a record that holds delimiters is not a blank
+line, and one height for all the rows is what keeps the mapping from a
+scroll offset to a row exact. A row without text is therefore as tall as a
+row with text, and it carries the stripe of its own index like every other
+row.
+
+The height is measured from a probe that holds the same box a cell holds, so
+the measurement does not depend on which row happens to be first in the
+window. A file whose first row is empty would otherwise be planned with the
+height of that row, the rows below it would sit higher than the plan says,
+and the last row could not be reached at all.
+
+The header row is given that height as well. Its height would otherwise be
+the height of the tallest header cell in view, and a header cell without text
+has no line in it, so the header would shrink to its padding and its border
+while the window moves over the columns whose header is empty, and the content
+below it would jump. A header cell holds the same box as a cell of the body,
+so the height of a row is the height to give the header row.
+
+### Why the widths of the columns are measured apart from the room of the panel
+
+A column asks for the width of its longest value, and the room the panel has
+left over is shared out over the columns afterwards. The two are counted in
+two steps, because only the second one has anything to do with the panel: the
+count of the widths of the file is the expensive part, and repeating it for
+every frame of a sidebar drag made the cost of a wide export grow with the
+file. The widths are counted once for every open of a file and once more for
+every change of the font, and a resize only shares the room out again.
+
+### Why the first file of a session is measured against guessed metrics
+
+The layout starts on guessed metrics, because the font is only measured from
+the document after the first commit, and the widths of the columns are needed
+for that first commit. The first commit therefore carries the counted widths,
+and the layout effect then replaces them with the measured ones. The counted
+widths of the first commit are the ones the parser counted, and they are
+exact unless a character is wider than the count, so a file is only counted
+again when it holds such a character. Every file after the first one is
+counted once, because the metrics do not change and the memo holds.
+Measuring the widths without the metrics would take the cap on a cell off the
+count and put it in a second pass, which changes the width model. Leaving the
+first commit without column widths would show the table with the wrong widths
+for a frame.
+
+The characters outside latin are counted at the counted width in that first
+commit as well, and the layout effect measures them with the font. The count
+of the widths is repeated only when one of them is wider than the count, and
+that count walks over the text of the kept rows.
+
+### Why the width of a value is counted on its own
+
+A value of plain latin characters takes one cell per character, and a value
+with characters outside latin takes the width they are measured at. The count
+decides the width of the column the value sits in and nothing else, so the
+preview counts every value on its own and never asks what the rest of the
+file holds.
+
+It used to ask. The preview read a flag over the kept cells that told it
+whether the file held nothing but latin characters, and the flag decided how
+a value was counted. The flag repeated, over every kept cell, a decision the
+counter makes on its own over the cells it reads, and it cost more than the
+measurement it was meant to make cheaper: the counter stops reading a column
+once that column cannot get any wider, and the flag read every cell of the
+file. A 2,000-row file with 5,000 columns paid 2.1 s for the flag and
+0.17 s for the measurement on the machine the figures above were taken on.
+The open of that file is 1.55 s shorter without the flag, and the widths it
+measures are the same to the pixel.
+
+A file of 50 columns paid 16 ms for the flag and 7 ms for the measurement,
+and pays for the walk for the characters and for the count of the widths now. The check it gave up grew with the number of cells and the counting
+does not, so a file with 5,000 columns gains what a file with 50 columns
+gives up.
+
+### Why the characters outside latin are found in the text of the file
+
+The preview has to know which characters outside latin the file uses, because
+the browser measures each of them in a hidden probe. The parser finds them in
+the walk it makes over the text of the file, because a cell is a string of its
+own and a file with millions of cells costs more to walk over than its text
+does: the same 2,000-row file with 5,000 columns spends 1.5 s on a walk over
+its cells and 0.13 s on a walk over its 75 MB of text.
+
+The text holds the characters of the cells in the order the cells have them,
+so the list is the one the cells would give. A character of a row the parser
+dropped is in the list as well, and such a character is in no value that is
+counted, so it changes no width. The preview draws those characters in the
+probe as well, which costs the measurement of a few more characters and
+nothing else.
+
+### Why the measurements keep the object they have
+
+The widths of the columns are counted from the data and from what one
+character and one cell cost, and the preview keeps them in a memo that runs
+again when one of those inputs changes. A resize of the panel changes none of
+them, but it does build a new layout, and a new object for the same numbers
+would look to the memo like a change of the font and ask for the count of the
+widths again, on every frame of a drag. The measurements therefore keep the
+object they have while their values stay the same, and only a new font, a new
+interface size or a new file counts the widths again. The measured widths of
+the characters outside latin are kept the same way: a resize measures them
+again in the browser, finds the same numbers and leaves the map the preview
+holds as it is.
+
+### Why the border of a cell is read on its inline end
+
+The border of a cell sits on its inline end, which is the left edge of the
+document in a right-to-left one. Reading the right edge instead counts no
+border there, and the error grows with the number of columns: 500 columns
+miss 500 px, which is ten columns of a wide table, and the columns the
+viewer can see are then not in the document. The computed style resolves the
+logical side, so the border is read as the inline end and the number of
+columns does not change the answer.
+
+A runtime that does not resolve the logical side counts no border at all,
+and the error grows by a pixel with every column. The physical side the
+direction of the document puts the border on is read as well, so the model
+holds on a runtime that knows only the physical sides.
+
+### Why the columns are measured in characters and not in pixels
+
+A column is as wide as the text the browser lays out for its longest value,
+and the browser's own automatic table layout can only measure that with every
+cell in the document, which is what the window avoids. The width is therefore
+a number of characters in the font's own unit (`ch`), which the browser
+resolves against the font it actually has. A character in plain latin takes
+one cell and a full-width character takes two, the way a monospace font lays
+them out, and a character outside latin takes the width the browser measured
+for it, or the counted width where the measurement found less room. A value
+in Japanese still fits its column, and so does a value in a script the
+monospace font does not cover.
+
+### Why the characters outside latin are measured in the browser
+
+A character the browser has no font for falls back to another one, and that
+font can lay the character out wider than the monospace font of the preview.
+Counting every such character as one cell made a column narrower than the
+text in it, and the cell cut the value short. Counting them as two cells
+would have fixed that and made every column in such a script twice as wide
+as it has to be.
+
+The characters the file uses are therefore measured in the browser: each of
+them is drawn on its own in a hidden probe, and the width it takes there is
+the width it is counted at. The model needs to know the width of a character
+only to count a value, and the count of a value only decides the width of
+its column, so a value in such a script is now as wide as the text the
+browser lays out for it. A character the browser lays out narrower than the
+monospace font keeps the counted width, so a column is never padded with room
+the text does not need, and a character the measurement did not reach keeps
+the counted width as well.
+
+The figures here were measured in Chromium with the fonts of the application
+on the machine the check ran on, where a latin character takes 7.5 px. Sixty
+greek characters took 460 px in the automatic layout of the browser and 450
+px in the counted width, so the tail of the value was lost. A greek letter
+takes 7.797 px on its own and 7.665 px in a run of sixty, and the column of
+sixty of them is 468 px wide, which covers the text and is 8 px more than it
+needs. A cyrillic letter takes 7.219 px, less than a latin character, so its
+column keeps the counted width of 450 px.
+
+A character in the wide list is measured like any other character, and it
+keeps at least the two cells of the counted width. A full-width character is
+1em against a monospace advance of about 0.6em, so two cells leave a column
+of Japanese a fifth of room to spare. A colour emoji is usually a little
+wider than two latin cells, so on a platform that has a font for it the
+column is a little wider than the text in it, and on a platform without one
+the character falls back to a box of the width of the monospace font and
+keeps the two cells of the counted width.
+
+What the model cannot know is the width of a character the measurement did
+not reach, and the width a font gives a character in the middle of a word,
+such as a letter of an Arabic word, which the browser shapes.
+
+The walk that finds the characters stops at 1,024 of them, because the list
+is only used to measure them in the browser and a file with more distinct
+characters than that costs more to measure than the width it gains. A
+character the walk did not reach keeps the counted width.
+
+### Why the padding and the border of a cell are written from the measurement
+
+The width of a column is written into the `<col>` of the table, and the model
+counts that width again to find out where the columns sit. The two have to
+be the same number, and a width that is written as a fixed number is not:
+the padding and the border of a cell come from the stylesheet, and the error
+is one column wide and it grows along the row. A table of 24 columns whose
+cells changed from `px-2` to `px-3` drifts by 184 px over the row, which is
+nearly three of its columns, and the columns the viewer could see are then
+not the ones in the document.
+
+Both are built from one measurement of a probe that carries the classes a
+cell carries, so the width the browser is given and the width the model
+counts are the same number. The last column has no border on its inline end,
+so its width is smaller than the others by exactly the border, and the model
+counts that as well.
+
+### Why the cap counts one layout step of room and not the exact room
+
+A cell is capped at 32 rem, and the cap is the number of characters that fit
+in the room the cell has left. The browser keeps its lengths in whole
+1/64 px and rounds a text box's width to the nearest one of those steps, so
+a value that needs a fraction more than the room still fits, and the text box
+the measuring probe reads is rounded up to the next step, so the advance the
+probe measures is a hair wider than the one the layout uses. Counting the
+characters against the exact room drops one character that fits, so one step
+of room is added before the count. The column then stays within a step of
+the cap, which no eye can see.
+
+### Why the direction is watched on the root element and not on the preview's size
+
+The window holds the columns the viewer can see, and a right-to-left document
+lays the table out from the other end, so a scroll offset means the opposite
+of what it means in a left-to-right document. The application sets the
+language's direction on the root element, and nothing about the preview's
+size changes with it, so the resize observer never fires and the preview
+would keep the direction it measured when it opened. The root element's
+direction attribute is watched for it, and the preview measures again and
+reads the scroll position with the rest of the layout, because the scroll
+position follows the direction too.
+
+### Why the probe's text is watched and it has to be a box of its own
+
+The preview watches the probe's text for a change of the font and of the
+interface size, because both decide the width of a character, the height of a
+row and the padding and the border of a cell. The root element's style is not
+watched instead: the app writes to it on every frame of a sidebar drag, and
+the measurement would then run on every one of them.
+
+The observer reports the content box of the element it watches, and an inline
+box has no content box of its own. The browser reports an empty one for it
+and never reports a resize for it, whatever the text inside it measures, so
+the probe's text is an inline block: a box of its own, whose width follows
+the font. The advance the preview measures is the same either way, because
+the width of the text does not change with the display.
+
+### Why the measurement runs for every file and not only when the preview opens
+
+The measuring probe is only in the document while the file has columns, so a
+file that opens without columns leaves the preview unmeasured: there is no
+probe to read the font from and no observer to watch. The measurement
+therefore runs again for every file, and the observers are made for the probe
+that is in the document at that moment, so a font or an interface-size
+change is still noticed after a file without columns.
+
+### Why the skipped rows and columns are spacers and not placed outside the flow
+
+A table row that is taken out of the flow lays out on its own and no longer
+shares the table's columns: the header cells keep their widths while the
+body cells collapse. The skipped rows stay in the flow as a spacer row that
+takes their height, and the skipped columns as a spacer cell that spans
+them, so the header and the body keep the same column widths.
+
+The height of a spacer row is written on the row itself. A cell's own padding
+would make the cell taller than the height it asks for, and the rows would
+sit lower than the model says.
+
+A spacer cell carries the border of a cell of the table, so the rule under a
+row runs across the whole width of the table and not only across the columns
+that are in view. The spacer that stands for the columns before the window is
+an interior boundary and keeps the border on its inline end, and the spacer
+at the end of the file is the table's own last column and keeps the missing
+border. A cell takes the height of its row, so the rule of a spacer sits on
+the same line as the rule of the cells beside it.
+
+The spacer rows carry no background of their own, so the region they cover is
+one flat colour where the preview stripes every row. They stand at least
+five rows beyond the edges of the viewport, so the region they cover is never
+on screen and the stripes of the mounted rows carry on unbroken.
+
+### Why a range of columns wider than a cell may span is carried by more than one cell
+
+HTML limits the `colspan` of a cell to 1000. The attribute keeps the value
+that was written, but the browser lays the cell out over 1000 columns at the
+most, and the cells of the window end up in the columns before the ones the
+model names. Measured in Chromium against the markup of the preview: a file
+with 2,000 columns, scrolled to its end, put the cells of the window 53,572
+px to the left of where the model named them, outside the visible part of the
+table, and a file with 5,000 columns put them 81,640 px off in the middle
+of the file. The table was wide enough and the scroll reached the end of it;
+the cells simply were not where the model said they were.
+
+A range of columns that is wider than the limit is therefore carried by more
+than one cell, and the spans add up to the number of columns the range
+holds. The cells of the window then land in the columns the model names, for
+a file of any number of columns, and a range that fits in one cell is still
+carried by one cell. The limit is a property of HTML and not of the preview,
+so it is a named constant of the model (`HTML_MAX_COLSPAN`) and the cells
+that carry a range are computed from it (`tableSpacerSpans`).
+
+The row that stands for the rows outside the window is carried by cells in the
+same way. Its cells hold no text, no padding and no border, so they add
+nothing to the height of the row, and the height of the row is written on the
+row itself. Splitting the cell of a row that stands for 144 rows of a file
+with 1,200 columns adds a cell to the document and nothing else: the row was
+3,888 px tall with a cell that was laid out over 1,000 of the 1,200 columns,
+and it is as tall with the two cells that cover the 1,200 columns between
+them.
+
+### Why the striping and the last column's border follow the index
+
+`odd:` and `last:` follow the position in the document, and a windowed table
+has a document position that no longer matches the logical one. The rows are
+striped and the last column keeps its missing border by their index.
 
 Stepping through a folder's images: `FilesView` reads the shown image's folder
 with the tree's hidden and gitignored settings for every image shown, so

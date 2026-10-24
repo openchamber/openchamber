@@ -3944,8 +3944,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     </Button>
   ) : null;
 
-  // Everything shown as an artifact rather than as editable text. One place
-  // for both the docked and the fullscreen viewer, so they cannot drift.
+  // Everything shown as an artifact rather than as editable text. Both viewer
+  // hosts read this result; CSV keeps the docked host mounted in fullscreen.
   const renderArtifactPreview = (file: FileNode): React.ReactNode => {
     if (isSelectedImage && !isSvgSource) {
       return <ImageArtifact src={imageSrc} name={file.name} sizeBytes={artifactSize} neighbors={imageNeighbors} />;
@@ -4000,6 +4000,15 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
   const artifactPreview = selectedFile && !fileLoading && !isPdfAssetAuthLoading && !fileError
     ? renderArtifactPreview(selectedFile)
     : null;
+  // Keep the table preview in its docked React position while its viewer
+  // panel fills the Files surface, so fullscreen transitions do not parse it
+  // a second time.
+  const tablePreviewFullscreen = mode === 'full'
+    && isFullscreen
+    && !isMobile
+    && isTable
+    && tableViewMode === 'table'
+    && artifactPreview !== null;
 
   React.useEffect(() => {
     let cancelled = false;
@@ -5008,7 +5017,11 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      <div className={cn('flex flex-col flex-shrink-0', showEditorTabsRow && 'border-b border-border/40')}>
+      <div className={cn(
+        'flex flex-col flex-shrink-0',
+        showEditorTabsRow && 'border-b border-border/40',
+        tablePreviewFullscreen && 'hidden',
+      )}>
         {/* Row 1: Tabs */}
         {showEditorTabsRow ? (
         <div className="flex min-w-0 items-center px-3 py-1.5">
@@ -5185,6 +5198,11 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
         </div>
       ) : null}
       <div className="flex-1 min-h-0 min-w-0 relative">
+        {tablePreviewFullscreen ? (
+          <div className="absolute inset-e-4 top-4 z-30">
+            {renderFloatingFileControls()}
+          </div>
+        ) : null}
         <ScrollableOverlay ref={setMainPreviewScroller} outerClassName="h-full min-w-0" className={cn('h-full min-w-0', isLargeFile && '[overflow-anchor:none]')}>
           {!selectedFile ? (
             <div className="p-3 typography-ui text-muted-foreground">{t('filesView.editor.pickFileFromTree')}</div>
@@ -5529,7 +5547,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
   ) : null;
 
   // Fullscreen file viewer overlay
-  const fullscreenViewer = mode === 'full' && isFullscreen && selectedFile && (
+  const fullscreenViewer = mode === 'full' && isFullscreen && selectedFile && !tablePreviewFullscreen && (
     <div className="absolute inset-0 z-50 flex flex-col bg-background">
       {/* Fullscreen content */}
       <div className="flex-1 min-h-0 min-w-0 relative">
@@ -5678,13 +5696,26 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
             </div>
           </div>
        ) : (
-         <div className="flex flex-1 min-h-0 min-w-0 gap-3 px-3 pb-3 pt-2">
-            {screenWidth >= 700 && (
-              <div className="w-72 flex-shrink-0 min-h-0 overflow-hidden">
-               {treePanel}
-             </div>
-           )}
-           <div className="flex-1 min-h-0 min-w-0 overflow-hidden rounded-xl border border-border/60 bg-background">
+          <div className={cn(
+            'flex flex-1 min-h-0 min-w-0',
+            tablePreviewFullscreen
+              ? 'absolute inset-0 z-50 bg-background'
+              : 'gap-3 px-3 pb-3 pt-2',
+          )}>
+             {screenWidth >= 700 && (
+               <div className={cn(
+                 'min-h-0 overflow-hidden',
+                 tablePreviewFullscreen
+                   ? 'absolute inset-s-0 top-0 h-full w-72 invisible pointer-events-none'
+                   : 'w-72 flex-shrink-0',
+               )}>
+                 {treePanel}
+               </div>
+             )}
+            <div className={cn(
+              'flex-1 min-h-0 min-w-0 overflow-hidden bg-background',
+              tablePreviewFullscreen ? 'rounded-none' : 'rounded-xl border border-border/60',
+            )}>
              {fileViewer}
            </div>
          </div>
