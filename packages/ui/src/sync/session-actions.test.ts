@@ -2472,10 +2472,24 @@ describe("forkFromLastCompletedTurn", () => {
     sessionID: sourceSession.id,
     time: { created: 1 },
   } as Message
+  const shellCompletion: Message = {
+    id: "msg-shell-completion",
+    role: "synthetic",
+    sessionID: sourceSession.id,
+    time: { created: 1 },
+    metadata: { source: "shell", shellID: "shell-1", state: "completed" },
+    text: "<shell>\ndone\n</shell>",
+  }
 
   test("finds the finished reply when the running turn resumed from a background subagent", async () => {
     const { findLastCompletedTurnMessageId } = await import("./session-actions")
     const transcript = [message("u1", "user"), message("a1", "assistant", 2), subagentReport, message("a-live", "assistant")]
+    expect(findLastCompletedTurnMessageId(transcript, true)).toBe("a1")
+  })
+
+  test("finds the finished reply when the running turn resumed from a background command", async () => {
+    const { findLastCompletedTurnMessageId } = await import("./session-actions")
+    const transcript = [message("u1", "user"), message("a1", "assistant", 2), shellCompletion, message("a-live", "assistant")]
     expect(findLastCompletedTurnMessageId(transcript, true)).toBe("a1")
   })
 

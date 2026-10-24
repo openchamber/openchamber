@@ -2,13 +2,14 @@ import { permissionModeForNewSession, type PermissionMode } from '@/stores/utils
 import { isSpaceDirectory } from '@/lib/spaces/space-route';
 import { useUIStore } from '@/stores/useUIStore';
 import type { Message, Part, Session } from '@/lib/opencode/model';
-import { opencodeClient, type SkillMentions } from '@/lib/opencode/client';
+import { isOpencodeNotFound, opencodeClient, type SkillMentions } from '@/lib/opencode/client';
 import * as sessionActions from '@/sync/session-actions';
 import { withBtwSessionLink, withBtwSessionMarker, withoutBtwSessionLink, withoutBtwSessionMarker } from '@/lib/sessionBtwMetadata';
 import { useBtwStore } from '@/stores/useBtwStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import { getSyncChildStores, getSyncMessages, registerSessionDirectory } from '@/sync/sync-refs';
+import { transcriptCutAfterMessage } from '@/sync/transcript-cut';
 import { Binary } from '@/sync/binary';
 import type { ContextPartMetadata } from '@/lib/messages/contextParts';
 import type { AttachedFile } from '@/stores/types/sessionTypes';
@@ -199,16 +200,22 @@ export async function startBtwSession(input: StartBtwInput): Promise<Session> {
   try {
     await sessionActions.waitForConnectionOrThrow();
     if (getRuntimeKey() !== expectedRuntimeKey) throw new Error('runtime changed');
-    // Fork at the parent's last completed assistant turn rather than at HEAD,
-    // so a `/btw` typed mid-turn does not inherit a half-finished one.
+    // Fork after the parent's last completed assistant turn rather than at
+    // HEAD, so a `/btw` typed mid-turn does not inherit a half-finished one.
     const parentMessages = getSyncMessages(input.parentSessionId, input.directory);
     const forkPointMessageID = findLastCompletedAssistantMessageID(parentMessages);
-    // No completed turn to fork at means take the whole parent transcript,
+    // No completed turn to fork after means take the whole parent transcript,
     // which is what an omitted `before` asks for.
-    const forked = await opencodeClient.forkSession(input.parentSessionId, {
-      before: forkPointMessageID ?? undefined,
-      directory: input.directory,
-    });
+    const before = forkPointMessageID ? transcriptCutAfterMessage(parentMessages, forkPointMessageID) : undefined;
+    const forked = await opencodeClient.forkSession(input.parentSessionId, { before, directory: input.directory })
+      .catch((error) => {
+        // OpenCode records a prompt only when it delivers it, so a prompt sent
+        // a moment ago can still be missing. The transcript then ends before
+        // the cut, and the whole transcript is the same fork.
+        if (!before || !isOpencodeNotFound(error)) throw error;
+        if (getRuntimeKey() !== expectedRuntimeKey) throw new Error('runtime changed');
+        return opencodeClient.forkSession(input.parentSessionId, { directory: input.directory });
+      });
 
     // The server may canonicalize the worktree path; the prompt must use the
     // same directory identity as the forked session.
