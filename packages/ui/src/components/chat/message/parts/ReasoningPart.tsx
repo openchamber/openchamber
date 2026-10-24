@@ -108,10 +108,18 @@ type ReasoningTimelineBlockProps = {
         icon: IconName;
         iconClassName?: string;
         title: string;
+        /** Colour of the title, for a row reporting a failure. */
+        titleStyle?: React.CSSProperties;
         expandLabel: string;
         collapseLabel: string;
         markdownVariant: MarkdownVariant;
         maxHeightClassName: string;
+        /** What the block is about. Replaces the derived preview and stays while the body is open. */
+        summary?: string;
+        /** Trailing header detail that stays visible when the header truncates, such as a duration. */
+        meta?: React.ReactNode;
+        /** Actions inside the header row, next to it rather than in the opened body. */
+        headerActions?: React.ReactNode;
     };
 };
 
@@ -221,7 +229,10 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
         return () => observer.disconnect();
     }, [isStreaming, shouldRenderExpandedContent]);
 
-    const summary = React.useMemo(() => getReasoningSummary(text), [text]);
+    const summary = presentation?.summary ?? getReasoningSummary(text);
+    // An explicit summary is part of the header; the derived preview only
+    // stands in for the body while it is folded.
+    const showSummary = !isStreaming && summary !== '' && (presentation?.summary !== undefined || !isExpanded);
     const toggleAriaLabel = isExpanded
         ? presentation?.collapseLabel ?? t('chat.reasoningTrace.collapseAria')
         : presentation?.expandLabel ?? t('chat.reasoningTrace.expandAria');
@@ -235,6 +246,8 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
     }, [isExpanded]);
 
     const handleKeyDown = React.useCallback((event: React.KeyboardEvent) => {
+        // Keys belong to an action inside the header: it handles its own.
+        if (event.target !== event.currentTarget) return;
         if (event.key === 'Enter' || event.key === ' ') {
             event.preventDefault();
             handleToggle();
@@ -438,15 +451,23 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
                     ) : (
                         <span
                             className={TOOL_ROW_TITLE_CLASS}
-                            style={{ color: 'var(--tools-title)' }}
+                            style={{ color: 'var(--tools-title)', ...presentation?.titleStyle }}
                         >
                             {title}
                         </span>
                     )}
+                    {/* A header detail belongs with the title, not with the summary line,
+                        and reads muted like a tool row's duration: in the title's own
+                        colour it looks heavier than the word it follows. */}
+                    {presentation?.meta ? (
+                        <span className={cn('shrink-0 tabular-nums text-muted-foreground/80', TOOL_ROW_DESCRIPTION_CLASS)}>
+                            {presentation.meta}
+                        </span>
+                    ) : null}
                 </div>
 
                 <div className={cn('flex items-center gap-1 flex-1 min-w-0', TOOL_ROW_DESCRIPTION_CLASS)} style={{ color: 'var(--tools-description)' }}>
-                    {!isStreaming && !isExpanded && summary ? (
+                    {showSummary ? (
                         <span
                             className={cn('min-w-0 truncate', TOOL_ROW_DESCRIPTION_CLASS)}
                             style={{ color: 'var(--tools-description)' }}
@@ -455,9 +476,19 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
                             {summary}
                         </span>
                     ) : (
+                        // Keeps the header's height when there is nothing to show.
                         <span className="min-w-0 flex-1" />
                     )}
                 </div>
+
+                {presentation?.headerActions ? (
+                    <div
+                        className="flex flex-shrink-0 items-center gap-1"
+                        onClick={(event) => event.stopPropagation()}
+                    >
+                        {presentation.headerActions}
+                    </div>
+                ) : null}
             </div>
 
             {shouldRenderExpandedContent ? (

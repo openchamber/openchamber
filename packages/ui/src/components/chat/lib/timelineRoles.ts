@@ -41,9 +41,10 @@ export const isSkippedTimelineRole = (role: Message['role']): boolean => SKIPPED
  * the background outside the loaded history), or the result of a session the
  * agent dispatched with `returnResult`. It opens a turn of its own, like the
  * prompt a command used to be, so the agent's reaction to the result renders
- * below it. The report of a subagent call the transcript shows is dropped
- * before this point (`keepCommandSubagentReports` in `ChatContainer`) and
- * finishes that call's row instead.
+ * below it. The report of a subagent call the transcript shows opens a turn the
+ * same way — the agent's reaction to it renders below — while the report itself
+ * draws as a one-line completion notice at that place in the timeline
+ * (`classifySubagentReports` in `ChatContainer`), not as a full result row.
  */
 export const isBackgroundReportEntry = (message: Message): boolean =>
     readSubagentRun(message) !== undefined || readDispatchedSessionResult(message) !== undefined;

@@ -5,6 +5,7 @@ import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import { cn } from '@/lib/utils';
 import { SimpleMarkdownRenderer } from '../../MarkdownRenderer';
 import { BlockLine } from './BlockLine';
+import { formatRunDuration, formatToolDuration } from './toolDuration';
 import { FormMarkdown } from '../../FormMarkdown';
 import { MessageFilesDisplay } from '../../FileAttachment';
 import { getToolMetadata } from '@/lib/toolHelpers';
@@ -106,9 +107,11 @@ import { ApplyPatchFileButtons } from './ApplyPatchFileButtons';
 import { openApplyPatchFileInEditor } from './applyPatchEditorAction';
 import { WebSearchResults } from './WebSearchResults';
 import { toBackgroundShellPart, type BackgroundShellPhase } from './backgroundShellPart';
-import { toBackgroundSubagentPart, toStoppedSubagentPart, type BackgroundSubagentPhase } from './backgroundSubagentPart';
+import { toSubagentCallPart, toStoppedSubagentPart, resolveSubagentCallPhase, type SubagentCallPhase } from './subagentCallRow';
 import { findSubagentCancellation, findSubagentRun, readBackgroundSubagentChildID } from '@/lib/opencode/subagent-run';
 import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
+import { useSessionActivityStartedAt } from '@/sync/session-activity-timing';
+import { useSessionFinishedTurnDurationMs } from '@/sync/session-turn-duration';
 import { useBackgroundShellOutput } from './useBackgroundShellOutput';
 import { useToolContentCompletion } from './useToolContentCompletion';
 
@@ -132,21 +135,13 @@ interface ToolPartProps {
     failureReason?: string;
 }
 
-// A finished run shows tenths; a running one counts whole seconds on the
-// shared 1 s tick, so a live row redraws once a second, in step with the
-// session list's counter.
-const formatDuration = (start: number, end?: number, now: number = Date.now()) => {
-    if (end === undefined) {
-        return `${Math.floor(Math.max(0, now - start) / 1000)}s`;
-    }
-    const seconds = Math.max(0, end - start) / 1000;
-    return `${Math.max(0.1, seconds).toFixed(1)}s`;
-};
-
-const LiveDuration: React.FC<{ start: number; end?: number; active: boolean }> = ({ start, end, active }) => {
+const LiveDuration: React.FC<{ start: number; end?: number; active: boolean; scale?: 'run' }> = ({ start, end, active, scale }) => {
     const now = useDurationTickerNow(active);
+    // A tool call lasts seconds; a subagent run lasts minutes, so its length
+    // reads as one (`29m 44s`) instead of counting to four digits.
+    const format = scale === 'run' ? formatRunDuration : formatToolDuration;
 
-    return <>{formatDuration(start, end, now)}</>;
+    return <>{format(start, end, now)}</>;
 };
 
 const deferredToolBodyMounts: Array<{ active: boolean; fn: () => void }> = [];
@@ -901,7 +896,7 @@ const useSubagentChildSessionId = (part: ToolPartType, directory: string): strin
 };
 
 /** Header action of a subagent row: opens the child session, whose own chat shows its work. */
-const OpenSubtaskButton: React.FC<{
+export const OpenSubtaskButton: React.FC<{
     sessionId: string;
     agent: string | undefined;
     isMobile: boolean;
@@ -1579,6 +1574,8 @@ type ToolRowHeader = {
     label?: 'background' | 'stopped';
     /** The end of the call is not known yet, so the row shows no duration. */
     durationUnknown?: boolean;
+    /** A subagent run is minutes long, so its length reads as one rather than in seconds. */
+    durationScale?: 'run';
     stop?: { onStop: () => void; ariaLabel: string };
 };
 
@@ -2038,6 +2035,7 @@ const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader; subage
                                         start={effectiveTimeStart}
                                         end={typeof effectiveTimeEnd === 'number' ? effectiveTimeEnd : undefined}
                                         active={Boolean(isActive && typeof effectiveTimeEnd !== 'number')}
+                                        scale={header?.durationScale}
                                     />
                                 </span>
                             ) : null}
@@ -2267,10 +2265,11 @@ const BackgroundShellToolPartContent: React.FC<ToolPartProps & { shellID: string
 };
 
 /**
- * A subagent call. The row follows the child: a background call is rebuilt
- * from the child's status and report (see `backgroundSubagentPart.ts`), and a
- * call the user stopped reads as stopped instead of failed. While the child
- * runs the row offers the same stop the background shell rows do.
+ * A subagent call. The row follows the child: a background call, and a
+ * foreground one that failed, are rebuilt from the child's live status and the
+ * latest report of it (see `subagentCallRow.ts`), and a call the user stopped
+ * reads as stopped instead of failed. While the child runs the row offers the
+ * same stop the background shell rows do.
  */
 const SubagentToolPartContent: React.FC<ToolPartProps> = (props) => {
     const { t } = useI18n();
@@ -2278,33 +2277,49 @@ const SubagentToolPartContent: React.FC<ToolPartProps> = (props) => {
     const childSessionID = useSubagentChildSessionId(props.part, directory ?? '');
     const backgroundChildID = readBackgroundSubagentChildID(props.part);
     const status = props.part.state.status;
-    // The parent's messages carry the background report and the stop note;
-    // a foreground call that runs or succeeded needs neither.
-    const needsMessages = backgroundChildID !== undefined || status === 'error';
-    const messages = useSessionMessages(needsMessages ? props.part.sessionID : '', directory);
+    // A background call follows its child from the start. A foreground call does
+    // not until it fails: a failure is the only way its child can be continued
+    // by hand afterwards, and OpenCode never revises the failed call itself.
+    const followedChildID = backgroundChildID ?? (status === 'error' ? childSessionID : undefined);
+    // The parent's messages carry the report of that child and the stop note.
+    const messages = useSessionMessages(followedChildID !== undefined ? props.part.sessionID : '', directory);
     const run = React.useMemo(
-        () => (backgroundChildID ? findSubagentRun(messages, backgroundChildID) : undefined),
-        [backgroundChildID, messages],
+        () => (followedChildID ? findSubagentRun(messages, followedChildID) : undefined),
+        [followedChildID, messages],
     );
     const stoppedByUser = React.useMemo(
         () => childSessionID !== undefined && findSubagentCancellation(messages, childSessionID),
         [childSessionID, messages],
     );
-    const backgroundRunning = useGlobalSessionStatusStore((state) => backgroundChildID !== undefined && state.activeSessionIds.has(backgroundChildID));
+    const childRunning = useGlobalSessionStatusStore((state) => followedChildID !== undefined && state.activeSessionIds.has(followedChildID));
+    const childStartedAt = useSessionActivityStartedAt(followedChildID ?? '');
+    const childDurationMs = useSessionFinishedTurnDurationMs(followedChildID ?? '');
     const [stopping, setStopping] = React.useState(false);
 
-    const backgroundPhase = React.useMemo((): BackgroundSubagentPhase | undefined => {
-        if (!backgroundChildID) return undefined;
-        if (run) return { kind: 'finished', run };
-        return backgroundRunning ? { kind: 'running' } : { kind: 'unknown' };
-    }, [backgroundChildID, backgroundRunning, run]);
+    const phase = React.useMemo((): SubagentCallPhase | undefined => {
+        if (!followedChildID) return undefined;
+        // A background call's own part already settled, so any report of its
+        // child is news. A failed foreground call keeps the report only when it
+        // arrived after the failure: before that it is the run the call made.
+        const state = props.part.state;
+        const reportIsNewer = state.status !== 'error' || (run !== undefined && run.reportedAt > state.time.end);
+        const resolved = resolveSubagentCallPhase({
+            run: reportIsNewer ? run : undefined,
+            childRunning,
+            childStartedAt,
+            childDurationMs,
+        });
+        // "Nothing to say" is worth showing on a background call (its duration
+        // is then unknown); a failed foreground call keeps its own failure.
+        return backgroundChildID !== undefined || resolved.kind !== 'unknown' ? resolved : undefined;
+    }, [backgroundChildID, childDurationMs, childRunning, childStartedAt, followedChildID, props.part.state, run]);
 
     const part = React.useMemo(() => {
-        if (backgroundPhase) return toBackgroundSubagentPart(props.part, backgroundPhase);
+        if (phase) return toSubagentCallPart(props.part, phase);
         return stoppedByUser ? toStoppedSubagentPart(props.part, t('chat.toolPart.background.stoppedNotice')) : props.part;
-    }, [backgroundPhase, props.part, stoppedByUser, t]);
+    }, [phase, props.part, stoppedByUser, t]);
 
-    const isRunning = backgroundPhase ? backgroundPhase.kind === 'running' : status === 'running';
+    const isRunning = phase ? phase.kind === 'running' : status === 'running';
     const description = subagentDescription(props.part.state.input);
     const stop = React.useCallback(() => {
         if (!childSessionID) return;
@@ -2320,13 +2335,15 @@ const SubagentToolPartContent: React.FC<ToolPartProps> = (props) => {
         });
     }, [childSessionID, description, directory, props.part.sessionID, t]);
 
-    const stopped = backgroundPhase
-        ? backgroundPhase.kind === 'finished' && backgroundPhase.run.state === 'cancelled'
+    const stopped = phase
+        ? phase.kind === 'finished' && phase.run.state === 'cancelled'
         : stoppedByUser;
     const header: ToolRowHeader = {
-        // "in background" describes a call still running; a finished one is just finished.
-        label: stopped ? 'stopped' : backgroundPhase?.kind === 'running' ? 'background' : undefined,
-        durationUnknown: backgroundPhase?.kind === 'unknown',
+        // "in background" describes a background call still running; a finished
+        // one, and a foreground call revived in place, are just running.
+        label: stopped ? 'stopped' : backgroundChildID !== undefined && phase?.kind === 'running' ? 'background' : undefined,
+        durationScale: 'run',
+        durationUnknown: phase?.kind === 'unknown',
         stop: isRunning && childSessionID && !stopping
             ? { onStop: stop, ariaLabel: t('chat.toolPart.subagent.stop') }
             : undefined,

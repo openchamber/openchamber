@@ -18,19 +18,22 @@ import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { ReasoningTimelineBlock } from './parts/ReasoningPart';
-import ToolPart from './parts/ToolPart';
+import ToolPart, { OpenSubtaskButton } from './parts/ToolPart';
+import { formatRunDuration } from './parts/toolDuration';
 import { getLastOutputLine } from './parts/toolOutput';
 import { OPENCODE_TOOLS } from '@/lib/opencode/tools';
-import { isRunningSubagentRunMessage, readSubagentRun, type SubagentRun } from '@/lib/opencode/subagent-run';
+import { isRunningSubagentRunMessage, readSubagentRun, type SubagentRun, type SubagentRunState, type SubagentCallInfo } from '@/lib/opencode/subagent-run';
 import { readDispatchedSessionResult, type DispatchedSessionResult } from '@/lib/opencode/dispatched-session';
 import { readSessionNotice } from '@/lib/opencode/session-notices';
 import { SessionNoticeBlock } from './SessionNoticeBlock';
+import { useSubagentReportNotice } from './subagentReportNotices';
 import { openSessionLink } from '@/lib/router/openSessionFromRoute';
 import type { IconName } from '@/components/icon/icons';
 import { useUIStore } from '@/stores/useUIStore';
 import { useChatSurfaceMode } from '@/components/chat/useChatSurfaceMode';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSession } from '@/sync/sync-context';
+import { isInvisibleText } from '@/lib/invisibleText';
 import { useI18n } from '@/lib/i18n';
 import type { Message, ToolPart as ToolPartType } from '@/lib/opencode/model';
 import { cn } from '@/lib/utils';
@@ -263,6 +266,122 @@ const SubagentRunNotice: React.FC<{ message: SyntheticMessage; run: SubagentRun 
     );
 };
 
+const SUBAGENT_NOTICE_ICONS = {
+    running: 'checkbox-blank-circle',
+    completed: 'checkbox-circle',
+    error: 'error-warning',
+    cancelled: 'close-circle',
+} satisfies Record<SubagentRunState, IconName>;
+
+/** A failed line names its failure in the error colour, as a failed tool row does. */
+const FAILED_TITLE_STYLE: React.CSSProperties = { color: 'var(--status-error)' };
+
+/**
+ * How the run ended, in the word the TUI uses. Only a settled report becomes a
+ * notice (`classifySubagentReports`), so `running` never reaches the header.
+ */
+const subagentNoticeTitle = (state: SubagentRunState, t: ReturnType<typeof useI18n>['t']): string => {
+    if (state === 'error') return t('chat.subagentNotice.failed');
+    if (state === 'cancelled') return t('chat.subagentNotice.cancelled');
+    return t('chat.subagentNotice.finished');
+};
+
+/**
+ * The end of a run this transcript already called: one line saying how it ended
+ * and how long it took, opening to the result. Its call's row carries the same
+ * result, so the report does not repeat the run as a second tool row.
+ */
+const SubagentCompletionNotice: React.FC<{
+    message: SyntheticMessage;
+    run: SubagentRun;
+    call: SubagentCallInfo;
+}> = ({ message, run, call }) => {
+    const { t } = useI18n();
+    const isMobile = useUIStore((state) => state.isMobile);
+    const chatSurfaceMode = useChatSurfaceMode();
+    const child = useSession(run.childSessionID);
+    const icon = SUBAGENT_NOTICE_ICONS[run.state];
+    const failed = run.state === 'error';
+    const title = subagentNoticeTitle(run.state, t);
+    // Each report measures its own run: the child's start against that report.
+    // The session's recorded turn length is deliberately not used — it describes
+    // the child's *last* turn, a different run than a failure this line reports.
+    const length = child ? formatRunDuration(child.time.created, run.reportedAt) : undefined;
+    const open = (
+        <OpenSubtaskButton
+            sessionId={run.childSessionID}
+            agent={run.agent ?? child?.agent}
+            isMobile={isMobile}
+        />
+    );
+    // A call with no description leaves the line unnamed: the empty string keeps
+    // the block from falling back to previewing the result in that slot.
+    const description = call.description?.trim() ?? '';
+    const hasResult = !isInvisibleText(run.output);
+    // Same rule as the prompt's own actions: none in peek.
+    const canCut = chatSurfaceMode !== 'peek';
+
+    return (
+        // No padding of its own: the block joins the rows around it on the same
+        // rhythm instead of opening a gap the way a notice that starts a turn
+        // does.
+        <NoticeRow spacingClassName="">
+            <div className="group/subagent-run">
+                {hasResult ? (
+                    <ReasoningTimelineBlock
+                        text={run.output}
+                        blockId={message.id}
+                        presentation={{
+                            icon,
+                            iconClassName: failed ? 'text-[var(--status-error)]' : undefined,
+                            title,
+                            titleStyle: failed ? FAILED_TITLE_STYLE : undefined,
+                            summary: description,
+                            meta: length,
+                            headerActions: open,
+                            expandLabel: t('chat.subagentNotice.showResult'),
+                            collapseLabel: t('chat.subagentNotice.hideResult'),
+                            markdownVariant: 'assistant',
+                            maxHeightClassName: 'max-h-[60vh]',
+                        }}
+                        actions={canCut
+                            ? <SubagentRunActions message={message} canFork={chatSurfaceMode !== 'mini-chat'} alwaysVisible={isMobile} />
+                            : undefined}
+                    />
+                ) : (
+                    // A run that ended without text still finished: keep its
+                    // block, with nothing to open.
+                    <div
+                        className="flex items-center gap-1.5 pe-2 ps-px py-1.5 typography-meta !leading-5 sm:!leading-6"
+                        style={{ color: 'var(--tools-title)' }}
+                    >
+                        <Icon
+                            name={icon}
+                            className={cn('h-3.5 w-3.5 shrink-0', failed && 'text-[var(--status-error)]')}
+                            style={failed ? undefined : { color: 'var(--tools-icon)' }}
+                        />
+                        <span className={cn('shrink-0 font-medium', failed && 'text-[var(--status-error)]')}>{title}</span>
+                        {length ? (
+                            // The same muted duration as the block with a result.
+                            <span className="shrink-0 tabular-nums text-muted-foreground/80">{length}</span>
+                        ) : null}
+                        {description ? (
+                            <span
+                                className="min-w-0 flex-1 truncate font-normal"
+                                style={{ color: 'var(--tools-description)' }}
+                                title={description}
+                            >
+                                {description}
+                            </span>
+                        ) : null}
+                        {open}
+                    </div>
+                )}
+            </div>
+        </NoticeRow>
+    );
+};
+
 const dispatchedSessionTitle = (
     result: DispatchedSessionResult,
     t: ReturnType<typeof useI18n>['t'],
@@ -323,7 +442,12 @@ const DispatchedSessionNotice: React.FC<{ message: SyntheticMessage; result: Dis
 const SubagentNotice: React.FC<{ message: SyntheticMessage }> = ({ message }) => {
     const run = React.useMemo(() => readSubagentRun(message), [message]);
     const dispatched = React.useMemo(() => (run ? undefined : readDispatchedSessionResult(message)), [message, run]);
-    if (run) return <SubagentRunNotice message={message} run={run} />;
+    const call = useSubagentReportNotice(message.id);
+    if (run) {
+        return call
+            ? <SubagentCompletionNotice message={message} run={run} call={call} />
+            : <SubagentRunNotice message={message} run={run} />;
+    }
     return dispatched ? <DispatchedSessionNotice message={message} result={dispatched} /> : null;
 };
 

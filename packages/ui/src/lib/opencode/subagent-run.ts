@@ -11,12 +11,15 @@
  * While the job runs the only record of it is the child session itself, so a
  * running entry is built here from that record, in the same shape as the
  * completion, and the timeline renders both through one path.
+ *
+ * A run that a tool continued by hand gets no completion message from OpenCode:
+ * the tool reports that run in a record of its own (`readTaskRecord`).
  */
 
 import { z } from "zod"
 
 import type { Message, Metadata, Part, Session, SyntheticMessage, ToolPart } from "./model"
-import { isSubagentTool, subagentSessionId } from "./tools"
+import { isSubagentTool, subagentDescription, subagentSessionId } from "./tools"
 
 export type SubagentRunState = "running" | "completed" | "error" | "cancelled"
 
@@ -38,22 +41,56 @@ const runMetadataSchema = z.object({
   state: z.enum(["running", "completed", "error", "cancelled"]),
 })
 
-const ENVELOPE = /^\s*<subagent\b[^>]*>\n?([\s\S]*?)\n?<\/subagent>\s*$/
+const REPORT_ENVELOPE = /^\s*<subagent\b[^>]*>\n?([\s\S]*?)\n?<\/subagent>\s*$/
 
-/** The subagent run a message reports, or undefined for any other message. */
-export function readSubagentRun(message: Message): SubagentRun | undefined {
-  if (message.role !== "synthetic") return undefined
-  const parsed = runMetadataSchema.safeParse(message.metadata ?? {})
-  if (!parsed.success) return undefined
-  const envelope = message.text.match(ENVELOPE)
+/**
+ * The report OpenCode appends when a job it ran settles: the child and the state
+ * are in the message's metadata, and the text wraps the result in an envelope.
+ */
+const readCompletionReport = (message: SyntheticMessage): SubagentRun | undefined => {
+  const metadata = runMetadataSchema.safeParse(message.metadata ?? {})
+  if (!metadata.success) return undefined
+  const envelope = message.text.match(REPORT_ENVELOPE)
   return {
-    childSessionID: parsed.data.childID,
-    agent: parsed.data.agent,
-    state: parsed.data.state,
+    childSessionID: metadata.data.childID,
+    agent: metadata.data.agent,
+    state: metadata.data.state,
     description: message.description,
     output: envelope ? envelope[1] : message.text,
     reportedAt: message.time.created,
   }
+}
+
+// A tool that took a run over reports it in its own record instead: the envelope
+// OpenCode's `task` tool used for its result, then sometimes a comment that marks
+// the message as the tool's own (`…</task>` then
+// `<!-- SLIM_INTERNAL_INITIATOR -->`). oh-my-opencode-slim writes one when its
+// `task revive` finishes a run it continued, and OpenCode has nothing to say
+// about that run, so the record is the only news of it.
+const TASK_RECORD = /^\s*<task\s+id="([^"]+)"\s+state="(completed|error)">([\s\S]*?)<\/task>\s*(?:<!--[\s\S]*?-->\s*)?$/
+const TASK_RECORD_BODY = /<task_(?:result|error)>\s*([\s\S]*?)\s*<\/task_(?:result|error)>/
+
+const readTaskRecord = (message: SyntheticMessage): SubagentRun | undefined => {
+  const record = message.text.match(TASK_RECORD)
+  if (!record) return undefined
+  const [, childSessionID, state, rest] = record
+  return {
+    childSessionID,
+    state: state === "completed" ? "completed" : "error",
+    description: message.description,
+    output: rest.match(TASK_RECORD_BODY)?.[1] ?? "",
+    reportedAt: message.time.created,
+  }
+}
+
+/**
+ * The subagent run a message reports, or undefined for any other message. The
+ * two ways a run gets reported are equal: OpenCode's own report, or the record
+ * of a tool that continued it.
+ */
+export function readSubagentRun(message: Message): SubagentRun | undefined {
+  if (message.role !== "synthetic") return undefined
+  return readCompletionReport(message) ?? readTaskRecord(message)
 }
 
 const RUNNING_ID_PREFIX = "subagent-run:"
@@ -157,38 +194,79 @@ export function findSubagentCancellation(messages: readonly Message[], childSess
   return false
 }
 
+/** What the call that started a run gives its completion notice: the name the user reads. */
+export type SubagentCallInfo = {
+  /** The call's own description, which names the run better than a report's envelope does. */
+  description?: string
+}
+
+export type SubagentReportClassification<T> = {
+  records: T[]
+  /**
+   * Reports of a run this transcript already shows as a call, by message id.
+   * Their call's row carries the run, so the report renders as a compact
+   * completion notice instead of a second row.
+   */
+  completionNotices: ReadonlyMap<string, SubagentCallInfo>
+}
+
+const NO_COMPLETION_NOTICES: ReadonlyMap<string, SubagentCallInfo> = new Map()
+
 /**
- * The records with only the subagent reports of `subagent: true` commands
- * that started inside them. A report never opens a row of its own at the end
- * of the chat for a subagent the transcript already shows, or started before
- * the loaded history: the first finishes its call's row, the second is
- * reachable from the session's subagent list. A command run leaves no call,
- * so its report is its only trace; it is recognised as a child that started
- * within the loaded records while no call in them names it. A child whose
- * start is unknown is treated as outside. Returns the input unchanged when
- * nothing is dropped.
+ * Splits the loaded records into the timeline and the reports that read as a
+ * completion notice.
+ *
+ * Every settled report is kept: each one is the end of a run, and a child can run
+ * more than once — a revived child reports its failure and then its continuation.
+ * For a child this transcript called, the report becomes a completion notice on
+ * top of the call's own row, so a run reads where it started and again where it
+ * ended. A `subagent: true` command leaves no call, so its report is its only
+ * trace and stays a row; it is recognised as a child that started within the
+ * loaded records while no call in them names it. A child whose start is unknown,
+ * and that no call names, is treated as outside. A report that has not settled is
+ * not the end of anything, and the call's row already shows the run, so it stays
+ * out. Returns the input unchanged when nothing is dropped or noticed.
  */
-export function keepCommandSubagentReports<T extends { info: Message; parts: Part[] }>(
+export function classifySubagentReports<T extends { info: Message; parts: Part[] }>(
   records: T[],
   childStartedAt: (childSessionID: string) => number | undefined,
-): T[] {
-  if (!records.some((record) => readSubagentRun(record.info) !== undefined)) return records
-  const called = new Set<string>()
+): SubagentReportClassification<T> {
+  if (!records.some((record) => readSubagentRun(record.info) !== undefined)) {
+    return { records, completionNotices: NO_COMPLETION_NOTICES }
+  }
+
+  const called = new Map<string, SubagentCallInfo>()
   for (const record of records) {
     if (record.info.role !== "assistant") continue
     for (const part of record.parts) {
       if (part.type !== "tool" || !isSubagentTool(part.tool) || part.state.status === "pending") continue
       const childID = subagentSessionId(part.state.metadata)
-      if (childID) called.add(childID)
+      if (childID) called.set(childID, { description: subagentDescription(part.state.input) })
     }
   }
+
   const loadedSince = records[0]?.info.time.created ?? 0
-  const kept = records.filter((record) => {
+  const kept: T[] = []
+  const completionNotices = new Map<string, SubagentCallInfo>()
+  for (const record of records) {
     const run = readSubagentRun(record.info)
-    if (!run) return true
-    if (called.has(run.childSessionID)) return false
+    if (!run) {
+      kept.push(record)
+      continue
+    }
+    const call = called.get(run.childSessionID)
+    if (call) {
+      if (run.state === "running") continue
+      completionNotices.set(record.info.id, call)
+      kept.push(record)
+      continue
+    }
     const startedAt = childStartedAt(run.childSessionID)
-    return startedAt !== undefined && startedAt >= loadedSince
-  })
-  return kept.length === records.length ? records : kept
+    if (startedAt !== undefined && startedAt >= loadedSince) kept.push(record)
+  }
+
+  return {
+    records: kept.length === records.length ? records : kept,
+    completionNotices: completionNotices.size === 0 ? NO_COMPLETION_NOTICES : completionNotices,
+  }
 }
