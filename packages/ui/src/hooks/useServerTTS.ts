@@ -88,6 +88,7 @@ export interface UseServerTTSReturn {
 }
 
 interface SpeakOptions {
+  beforePlayback?: () => Promise<void>;
   /** Voice to use (defaults to coral) */
   voice?: string;
   /** Model to use (defaults to gpt-4o-mini-tts) */
@@ -314,6 +315,7 @@ export async function runChunkedTTSPlayback<TBuffer, TSource>(
     onScheduled: (source: TSource) => void;
     onFirstScheduled: () => void;
     onAllEnded: () => void;
+    beforePlayback?: () => Promise<void>;
   },
 ): Promise<ChunkedPlaybackResult> {
   let scheduled = 0;
@@ -362,6 +364,8 @@ export async function runChunkedTTSPlayback<TBuffer, TSource>(
       break;
     }
 
+    await deps.beforePlayback?.();
+    if (deps.signal.aborted) break;
     const { source, endsAt } = deps.scheduleChunk(
       audioBuffer,
       Math.max(deps.currentTime(), nextStartTime),
@@ -564,6 +568,8 @@ export function useServerTTS(
             config,
             controller.signal,
           );
+          await options?.beforePlayback?.();
+          if (controller.signal.aborted) return;
           const { source } = scheduleAudioChunk(ctx, audioBuffer, options, 0);
 
           audioSourcesRef.current = [source];
@@ -599,6 +605,7 @@ export function useServerTTS(
         };
 
         const result = await runChunkedTTSPlayback(chunks, {
+          beforePlayback: options?.beforePlayback,
           signal: controller.signal,
           fetchChunk: (chunk) =>
             fetchTTSAudioChunk(ctx, chunk, options, config, controller.signal),
