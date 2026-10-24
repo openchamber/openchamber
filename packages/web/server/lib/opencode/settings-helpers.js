@@ -1106,6 +1106,8 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.dictationEnabled === 'boolean') {
       result.dictationEnabled = candidate.dictationEnabled;
     }
+    const dictationAutoSend = z.boolean().safeParse(candidate.dictationAutoSend);
+    if (dictationAutoSend.success) result.dictationAutoSend = dictationAutoSend.data;
     if (typeof candidate.sttProvider === 'string') {
       const provider = candidate.sttProvider.trim();
       if (provider === 'local' || provider === 'openai-compatible') {

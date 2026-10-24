@@ -682,6 +682,8 @@ export const VoiceSettings: React.FC = () => {
     const voicePlaybackEnabled = showMessageTTSButtons || autoReadAloudEnabled;
     const dictationEnabled = useConfigStore((state) => state.dictationEnabled);
     const setDictationEnabled = useConfigStore((state) => state.setDictationEnabled);
+    const dictationAutoSend = useConfigStore((state) => state.dictationAutoSend);
+    const setDictationAutoSend = useConfigStore((state) => state.setDictationAutoSend);
 
     const [isSayAvailable, setIsSayAvailable] = useState(false);
     const [sayVoices, setSayVoices] = useState<Array<{ name: string; locale: string }>>([]);
@@ -1328,6 +1330,14 @@ export const VoiceSettings: React.FC = () => {
                     onChange={setDictationEnabled}
                     label={t('settings.voice.page.field.enableVoiceInput')}
                     ariaLabel={t('settings.voice.page.field.enableVoiceInputAria')}
+                />
+                <SettingsCheckboxRow
+                    checked={dictationAutoSend}
+                    onChange={setDictationAutoSend}
+                    label={t('settings.voice.page.field.dictationAutoSend')}
+                    ariaLabel={t('settings.voice.page.field.dictationAutoSendAria')}
+                    info={t('settings.voice.page.field.dictationAutoSendInfo')}
+                    settingsItem="voice.dictation-auto-send"
                 />
 
                 {dictationEnabled && (

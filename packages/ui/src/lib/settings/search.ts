@@ -1422,6 +1422,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['stt', 'dictation', 'voice input', 'transcribe', 'whisper', 'parakeet', 'microphone'],
   },
   {
+    id: 'voice.dictation-auto-send',
+    page: 'voice',
+    titleKey: 'settings.voice.page.field.dictationAutoSend',
+    descriptionKey: 'settings.voice.page.field.dictationAutoSendInfo',
+    keywords: ['dictation', 'voice input', 'send', 'submit', 'automatic'],
+  },
+  {
     id: 'tunnel.provider',
     page: 'tunnel',
     titleKey: 'settings.openchamber.tunnel.field.provider',

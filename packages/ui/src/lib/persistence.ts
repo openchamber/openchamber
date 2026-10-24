@@ -182,6 +182,11 @@ const persistToLocalStorage = (settings: DesktopSettings) => {
   } else {
     localStorage.removeItem('dictationEnabled');
   }
+  if (settings.dictationAutoSend !== undefined) {
+    localStorage.setItem('dictationAutoSend', String(settings.dictationAutoSend));
+  } else {
+    localStorage.removeItem('dictationAutoSend');
+  }
   if (settings.sttProvider === 'local' || settings.sttProvider === 'openai-compatible') {
     localStorage.setItem('sttProvider', settings.sttProvider);
   } else {

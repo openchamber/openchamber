@@ -11,7 +11,7 @@ import { opencodeClient, type OpencodeHealthProbe } from "@/lib/opencode/client"
 import { isSameProjectConfigError, readProjectConfigError, type ProjectConfigError } from "@/lib/opencode/configError";
 import { scopeMatches, subscribeToConfigChanges } from "@/lib/configSync";
 import type { ModelMetadata } from "@/types";
-import { createDeferredSafeJSONStorage } from "./utils/safeStorage";
+import { createDeferredSafeJSONStorage, getSafeStorage } from "./utils/safeStorage";
 import { filterVisibleAgents, isAgentHidden } from "./useAgentsStore";
 import { isPrimaryMode } from "@/components/chat/mobileControlsUtils";
 import { useSessionUIStore } from "@/sync/session-ui-store";
@@ -58,6 +58,7 @@ interface OpenChamberDefaults {
     zenModel?: string;
     messageStreamTransport?: 'auto' | 'ws' | 'sse';
     dictationEnabled?: boolean;
+    dictationAutoSend?: boolean;
     sttProvider?: 'local' | 'openai-compatible';
     sttServerUrl?: string;
     sttModel?: string;
@@ -142,6 +143,7 @@ const toOpenChamberDefaults = (data: DesktopSettings): OpenChamberDefaults => {
         zenModel: zenModel.length > 0 ? zenModel : undefined,
         messageStreamTransport: data.messageStreamTransport,
         dictationEnabled: data.dictationEnabled,
+        dictationAutoSend: data.dictationAutoSend,
         sttProvider: data.sttProvider,
         sttServerUrl: data.sttServerUrl,
         sttModel: data.sttModel,
@@ -1515,6 +1517,7 @@ interface ConfigStore {
     openaiCompatibleTtsModel: string;
     // STT (dictation) settings
     dictationEnabled: boolean;
+    dictationAutoSend: boolean;
     sttProvider: 'local' | 'openai-compatible';
     sttServerUrl: string;
     sttModel: string;
@@ -1549,6 +1552,7 @@ interface ConfigStore {
     setOpenaiCompatibleVoice: (voice: string) => void;
     setOpenaiCompatibleTtsModel: (model: string) => void;
     setDictationEnabled: (enabled: boolean) => void;
+    setDictationAutoSend: (enabled: boolean) => void;
     setSttProvider: (provider: 'local' | 'openai-compatible') => void;
     setSttServerUrl: (url: string) => void;
     setSttModel: (model: string) => void;
@@ -1911,6 +1915,9 @@ export const useConfigStore = create<ConfigStore>()(
                         if (saved === 'false') return false;
                     }
                     return true;
+                })(),
+                dictationAutoSend: (() => {
+                    return getSafeStorage().getItem('dictationAutoSend') === 'true';
                 })(),
                 // STT provider: 'local' (server-side sherpa-onnx) or 'openai-compatible'
                 sttProvider: (() => {
@@ -2790,6 +2797,7 @@ export const useConfigStore = create<ConfigStore>()(
                             settingsZenModel: defaults.zenModel,
                             settingsMessageStreamTransport: defaults.messageStreamTransport ?? state.settingsMessageStreamTransport,
                             dictationEnabled: typeof defaults.dictationEnabled === 'boolean' ? defaults.dictationEnabled : state.dictationEnabled,
+                            dictationAutoSend: defaults.dictationAutoSend ?? state.dictationAutoSend,
                             sttProvider: defaults.sttProvider ?? state.sttProvider,
                             sttServerUrl: defaults.sttServerUrl ?? state.sttServerUrl,
                             sttModel: defaults.sttModel ?? state.sttModel,
@@ -3989,6 +3997,12 @@ export const useConfigStore = create<ConfigStore>()(
                     updateDesktopSettings({ dictationEnabled: enabled }).catch(() => {});
                 },
 
+                setDictationAutoSend: (enabled: boolean) => {
+                    set({ dictationAutoSend: enabled });
+                    getSafeStorage().setItem('dictationAutoSend', String(enabled));
+                    updateDesktopSettings({ dictationAutoSend: enabled }).catch(() => {});
+                },
+
                 setSttProvider: (provider: 'local' | 'openai-compatible') => {
                     set({ sttProvider: provider });
                     if (typeof window !== 'undefined') {
@@ -4427,6 +4441,7 @@ export const useConfigStore = create<ConfigStore>()(
                     settingsZenModel: state.settingsZenModel,
                     settingsMessageStreamTransport: state.settingsMessageStreamTransport,
                     dictationEnabled: state.dictationEnabled,
+                    dictationAutoSend: state.dictationAutoSend,
                     speechRate: state.speechRate,
                     speechPitch: state.speechPitch,
                     speechVolume: state.speechVolume,

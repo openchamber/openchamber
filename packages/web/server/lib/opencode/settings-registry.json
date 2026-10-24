@@ -228,6 +228,9 @@
     "dictationEnabled": {
       "scope": "profile"
     },
+    "dictationAutoSend": {
+      "scope": "profile"
+    },
     "sttProvider": {
       "scope": "instance"
     },

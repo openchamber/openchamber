@@ -344,6 +344,7 @@ export const SETTINGS_REGISTRY = {
   terminalLoginShells: field({ scope: 'instance', parse: parseTerminalShells(isTerminalShell), ui: uiStore('terminalLoginShells', (v) => useUIStore.getState().setTerminalLoginShells(v)) }),
   openInAppId: field({ scope: 'instance', parse: parseNonEmptyTrimmedString }),
   dictationEnabled: field({ scope: 'profile', parse: parseBoolean, ui: configField('dictationEnabled') }),
+  dictationAutoSend: field({ scope: 'profile', parse: parseBoolean, ui: configField('dictationAutoSend') }),
   sttProvider: field({ scope: 'instance', parse: parseSttProvider, ui: configField('sttProvider') }),
   sttServerUrl: field({ scope: 'instance', parse: parseTrimmedStringUpTo(2048), ui: configField('sttServerUrl') }),
   sttModel: field({ scope: 'instance', parse: parseTrimmedStringUpTo(256), ui: configField('sttModel') }),

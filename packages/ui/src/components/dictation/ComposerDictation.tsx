@@ -129,6 +129,7 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
     const { t } = useI18n();
     const { currentTheme } = useThemeSystem();
     const dictationEnabled = useConfigStore((state) => state.dictationEnabled);
+    const dictationAutoSend = useConfigStore((state) => state.dictationAutoSend);
     const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
     const dictationShortcut = formatShortcutForDisplay(getEffectiveShortcutCombo('toggle_dictation', shortcutOverrides));
     // The dictation server (WebSocket + STT worker) lives in the OpenChamber
@@ -213,13 +214,16 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
             if (statusRef.current === 'idle') {
                 void startDictation();
             } else if (statusRef.current === 'recording') {
-                pendingActionRef.current = 'insert';
+                pendingActionRef.current = dictationAutoSend ? 'send' : 'insert';
+                if (dictationAutoSend) {
+                    onSendStartRef.current?.();
+                }
                 void confirmDictation();
             }
         };
         window.addEventListener('openchamber:dictation-toggle', onToggle);
         return () => window.removeEventListener('openchamber:dictation-toggle', onToggle);
-    }, [startDictation, confirmDictation]);
+    }, [startDictation, confirmDictation, dictationAutoSend]);
 
     // While recording: Enter confirms (insert), Escape cancels. Capture-phase
     // so the composer's own Enter-to-send never fires underneath the overlay.
@@ -234,7 +238,10 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
             if (event.key === 'Enter' && !event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey) {
                 event.preventDefault();
                 event.stopPropagation();
-                pendingActionRef.current = 'insert';
+                pendingActionRef.current = dictationAutoSend ? 'send' : 'insert';
+                if (dictationAutoSend) {
+                    onSendStartRef.current?.();
+                }
                 void confirmDictation();
                 return;
             }
@@ -246,7 +253,7 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
         };
         window.addEventListener('keydown', onKeyDown, { capture: true });
         return () => window.removeEventListener('keydown', onKeyDown, { capture: true });
-    }, [status, confirmDictation, cancelDictation]);
+    }, [status, confirmDictation, cancelDictation, dictationAutoSend]);
 
     // Pixel-parity with the composer: the real footer row is taller than our
     // buttons (its height comes from the tallest control, e.g. the model
