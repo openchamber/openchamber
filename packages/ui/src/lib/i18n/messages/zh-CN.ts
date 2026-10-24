@@ -3606,6 +3606,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.breakdown.mcpCountSingle': '{count} 个 MCP',
   'chat.workStatus.breakdown.mcpCountPlural': '{count} 个 MCP',
   'chat.workStatus.sections.open': '选择板块',
+  'chat.workStatus.panelPin.pin': '侧边面板打开时保持显示',
   'chat.workStatus.sections.dialogTitle': '面板板块',
   'chat.workStatus.sections.reorder': '拖动 {label} 以重新排序',
   'chat.workStatus.sections.dragInstructions': '按空格键选取板块，使用方向键移动，再按空格键放下。按 Escape 键取消。',

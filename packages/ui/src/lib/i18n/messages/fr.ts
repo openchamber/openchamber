@@ -3604,6 +3604,7 @@ export const dict = {
   'chat.workStatus.breakdown.mcpCountSingle': '{count} MCP',
   'chat.workStatus.breakdown.mcpCountPlural': '{count} MCP',
   'chat.workStatus.sections.open': 'Choisir les sections',
+  'chat.workStatus.panelPin.pin': 'Rester affiché quand un panneau latéral est ouvert',
   'chat.workStatus.sections.dialogTitle': 'Sections du panneau',
   'chat.workStatus.sections.reorder': 'Faites glisser {label} pour réordonner',
   'chat.workStatus.sections.dragInstructions': 'Appuyez sur Espace pour saisir une section, déplacez-la avec les flèches et appuyez sur Espace pour la déposer. Appuyez sur Échap pour annuler.',

@@ -893,6 +893,15 @@ interface UIStore {
   /** Whether the in-chat work-status panel may render at all. */
   workStatusPanelEnabled: boolean;
   /**
+   * Keep the panel on screen when a right-zone surface opens. The right slot
+   * belongs to the context panel, so instead of giving the card's column back
+   * it floats over the chat until the pin is released. This is what keeps a
+   * session monitorable while files, diffs or a browser page are open. One
+   * preference for every project and session: it is how the user reads the
+   * status, not a layout choice that belongs to one checkout.
+   */
+  workStatusPanelPinned: boolean;
+  /**
    * Whether it is actually on screen right now — the switch can be on while
    * layout still refuses it (narrow chat, open context panel). Transient, never
    * persisted: it describes the current frame, not a preference. The header
@@ -1233,6 +1242,7 @@ interface UIStore {
   setMessageQueueExpanded: (expanded: boolean) => void;
   setWorkStatusScrollTop: (scrollTop: number) => void;
   setWorkStatusPanelEnabled: (enabled: boolean) => void;
+  setWorkStatusPanelPinned: (pinned: boolean) => void;
   setWorkStatusPanelVisible: (visible: boolean) => void;
   setWorkStatusPanelFits: (fits: boolean) => void;
   setWorkStatusOverlayOpen: (open: boolean) => void;
@@ -1486,6 +1496,7 @@ export const useUIStore = create<UIStore>()(
         messageQueueExpanded: false,
         workStatusScrollTop: 0,
         workStatusPanelEnabled: true,
+        workStatusPanelPinned: false,
         workStatusPanelVisible: false,
         workStatusPanelFits: false,
         workStatusOverlayOpen: false,
@@ -2303,6 +2314,18 @@ export const useUIStore = create<UIStore>()(
 
         setWorkStatusPanelEnabled: (enabled) => {
           set({ workStatusPanelEnabled: enabled });
+        },
+
+        setWorkStatusPanelPinned: (pinned) => {
+          set((state) => {
+            if (state.workStatusPanelPinned === pinned) return state;
+            // Letting the pin go is how the user dismisses the floating card.
+            // Clearing the overlay flag here keeps every unpin path the same:
+            // the card's own button and the header button both release it.
+            return pinned
+              ? { workStatusPanelPinned: true }
+              : { workStatusPanelPinned: false, workStatusOverlayOpen: false };
+          });
         },
 
         setWorkStatusPanelVisible: (visible) => {
@@ -3689,6 +3712,7 @@ export const useUIStore = create<UIStore>()(
           messageQueueExpanded: state.messageQueueExpanded,
           workStatusScrollTop: state.workStatusScrollTop,
           workStatusPanelEnabled: state.workStatusPanelEnabled,
+          workStatusPanelPinned: state.workStatusPanelPinned,
           workStatusHiddenSections: state.workStatusHiddenSections,
           workStatusSectionOrder: state.workStatusSectionOrder,
           workStatusHiddenSectionsExplicit: state.workStatusHiddenSectionsExplicit,

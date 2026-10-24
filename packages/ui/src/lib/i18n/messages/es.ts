@@ -3597,6 +3597,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.breakdown.mcpCountSingle': '{count} MCP',
   'chat.workStatus.breakdown.mcpCountPlural': '{count} MCP',
   'chat.workStatus.sections.open': 'Elegir secciones',
+  'chat.workStatus.panelPin.pin': 'Mantener abierto al abrir un panel lateral',
   'chat.workStatus.sections.dialogTitle': 'Secciones del panel',
   'chat.workStatus.sections.reorder': 'Arrastra {label} para reordenar',
   'chat.workStatus.sections.dragInstructions': 'Pulsa Espacio para seleccionar una sección, muévela con las flechas y pulsa Espacio para soltarla. Pulsa Escape para cancelar.',

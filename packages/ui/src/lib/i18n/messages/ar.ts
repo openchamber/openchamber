@@ -3547,6 +3547,7 @@ export const dict = {
   'chat.workStatus.breakdown.mcpCountSingle': '{count} MCP',
   'chat.workStatus.breakdown.mcpCountPlural': '{count} MCP',
   'chat.workStatus.sections.open': 'اختيار الأقسام',
+  'chat.workStatus.panelPin.pin': 'أبقِ هذه اللوحة مفتوحة عند فتح لوحة جانبية',
   'chat.workStatus.sections.dialogTitle': 'أقسام اللوحة',
   'chat.workStatus.sections.reorder': 'اسحب {label} لإعادة الترتيب',
   'chat.workStatus.sections.dragInstructions': 'اضغط Space لالتقاط قسم، واستخدم مفاتيح الأسهم لتحريكه، ثم اضغط Space لإفلاته. اضغط Esc للإلغاء.',

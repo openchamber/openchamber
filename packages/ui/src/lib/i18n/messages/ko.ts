@@ -3605,6 +3605,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.breakdown.mcpCountSingle': 'MCP {count}개',
   'chat.workStatus.breakdown.mcpCountPlural': 'MCP {count}개',
   'chat.workStatus.sections.open': '섹션 선택',
+  'chat.workStatus.panelPin.pin': '사이드 패널이 열려도 계속 표시',
   'chat.workStatus.sections.dialogTitle': '패널 섹션',
   'chat.workStatus.sections.reorder': '{label} 드래그하여 순서 변경',
   'chat.workStatus.sections.dragInstructions': '스페이스 키로 섹션을 선택하고 화살표 키로 이동한 다음 스페이스 키로 놓으세요. Escape 키로 취소합니다.',

@@ -3603,6 +3603,7 @@ export const dict = {
   'chat.workStatus.breakdown.mcpCountSingle': '{count} MCP',
   'chat.workStatus.breakdown.mcpCountPlural': '{count} MCP',
   'chat.workStatus.sections.open': 'Abschnitte wählen',
+  'chat.workStatus.panelPin.pin': 'Offen lassen, wenn eine Seitenleiste geöffnet wird',
   'chat.workStatus.sections.dialogTitle': 'Panel-Abschnitte',
   'chat.workStatus.sections.reorder': '{label} ziehen, um neu anzuordnen',
   'chat.workStatus.sections.dragInstructions': 'Drücke die Leertaste, um einen Abschnitt aufzunehmen, verschiebe ihn mit den Pfeiltasten und drücke die Leertaste zum Ablegen. Escape bricht ab.',

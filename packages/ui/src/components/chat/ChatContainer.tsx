@@ -109,6 +109,7 @@ import { eventMatchesShortcut, getEffectiveShortcutCombo } from '@/lib/shortcuts
 import { ChatSearchBar } from './search/ChatSearchBar';
 import { WorkStatusPanel } from './work-status/WorkStatusPanel';
 import { useWorkStatusVisibility } from './work-status/useWorkStatusVisibility';
+import { resolveWorkStatusPresentation } from './work-status/presentation';
 import { useShownSessionSelection } from './useShownSessionSelection';
 import { usePinnedSessionDirectory } from './usePinnedSessionDirectory';
 import { useRightSlotStore } from '@/components/layout/rightSlot';
@@ -1141,7 +1142,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     // It yields to the context panel and to a narrow chat; `rowRef` goes on the
     // row that holds both columns, so its width never depends on the panel's
     // own visibility.
-    const { rowRef: workStatusRowRef, visible: workStatusVisible, fits: workStatusFits, roomy: workStatusRoomy } = useWorkStatusVisibility({
+    const { rowRef: workStatusRowRef, fits: workStatusFits, measured: workStatusMeasured, roomy: workStatusRoomy } = useWorkStatusVisibility({
         isMobile,
         isVSCode,
     });
@@ -1157,7 +1158,6 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         && !isVSCode
         && !pinned
         && chatSurfaceMode !== 'mini-chat';
-    const showWorkStatusPanel = workStatusPanelMountable && workStatusVisible;
     // The inline card renders in the right slot beside the chat, which owns
     // the one width animation for the card and the context panel together
     // (components/layout/rightSlot.ts).
@@ -1166,6 +1166,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     // Offered over the chat when there is no room beside it. The panel is still
     // switched on; only the layout refuses it.
     const workStatusPanelEnabled = useUIStore((state) => state.workStatusPanelEnabled);
+    const workStatusPanelPinned = useUIStore((state) => state.workStatusPanelPinned);
     const workStatusOverlayOpen = useUIStore((state) => state.workStatusOverlayOpen);
     const setWorkStatusPanelFits = useUIStore((state) => state.setWorkStatusPanelFits);
     // Mounted whenever it could be shown, not only while it is: an element
@@ -1175,7 +1176,17 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         && !workStatusFits;
     // The slot keeps the card's column while the context panel covers it.
     const workStatusReserved = workStatusPanelMountable && workStatusPanelEnabled && workStatusRoomy;
-    const showWorkStatusOverlay = workStatusOverlayMountable && workStatusOverlayOpen;
+    // Docked while the layout gives it a column, floating when the slot is
+    // taken. The pin chooses the floating form rather than letting a right-zone
+    // surface make the card disappear.
+    const { inline: showWorkStatusPanel, overlay: showWorkStatusOverlay } = resolveWorkStatusPresentation({
+        mountable: workStatusPanelMountable,
+        enabled: workStatusPanelEnabled,
+        fits: workStatusFits,
+        measured: workStatusMeasured,
+        pinned: workStatusPanelPinned,
+        overlayOpen: workStatusOverlayOpen,
+    });
 
     React.useEffect(() => {
         if (pinned) return;
@@ -1188,9 +1199,11 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     const setWorkStatusPanelVisible = useUIStore((state) => state.setWorkStatusPanelVisible);
     React.useEffect(() => {
         if (pinned) return;
-        setWorkStatusPanelVisible(showWorkStatusPanel);
+        // The floating form is on screen too, so the header keeps yielding its
+        // project and branch row to it.
+        setWorkStatusPanelVisible(showWorkStatusPanel || showWorkStatusOverlay);
         return () => setWorkStatusPanelVisible(false);
-    }, [pinned, setWorkStatusPanelVisible, showWorkStatusPanel]);
+    }, [pinned, setWorkStatusPanelVisible, showWorkStatusOverlay, showWorkStatusPanel]);
     const messageListRef = React.useRef<MessageListHandle | null>(null);
 
     const currentSession = useSession(currentSessionId, effectiveSessionDirectory);

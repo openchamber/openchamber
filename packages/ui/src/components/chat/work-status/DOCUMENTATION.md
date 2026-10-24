@@ -2,7 +2,16 @@
 
 A card rendered to the right of the transcript, in the right slot it shares
 with the context panel. It reports the state of the current session, its branch, its quotas and its
-subagents.
+subagents. It has two forms: docked in the slot, and floating over the chat
+when the slot is taken by a context surface and the user pinned it.
+
+The pin exists to keep a session monitorable while the work moves into a side
+panel. Files, diffs, the browser and the terminal are where a reader spends
+their time during a session, and that is exactly when the status of that
+session matters: whether it is still running, what its subagents are doing,
+how much quota is left, what the branch looks like. Before the pin the card
+handed the slot to the surface and unmounted its content, so the readout
+stopped at the moment it was most useful. Pinned, it stays on screen.
 
 ## Structure
 
@@ -32,6 +41,11 @@ full edge, lit top and tight shadows included (`data-edge-floating`).
 When it overlays the transcript, it uses the shared `oc-glass-panel` surface;
 the inline card keeps its lighter, non-blurred fill instead.
 
+The overlay form is also how the pin keeps the card on screen while a
+right-zone surface is open. The card never becomes a third column: the right
+slot belongs to the context panel, so the pin swaps the card's form instead of
+splitting the slot.
+
 ## Placement
 
 `ChatContainer` owns the card's state, but the inline card renders through a
@@ -49,6 +63,27 @@ panel goes straight back to the card's column instead of to nothing first.
 
 The overlay form stays inside the chat column in `ChatContainer`.
 
+The pin (`chat.workStatus.panelPin.*`, state `workStatusPanelPinned`) is one
+profile preference for every project and session. While it is on and the
+layout refuses the card its column, the card floats over the chat instead of
+disappearing. It keeps the docked form whenever a column exists. The floating
+card does not dismiss on an outside click or Escape: the user asked it to
+stay, and the pin button in the card is how they let it go. Releasing the pin
+also clears the transient overlay flag, so the card actually leaves. The
+header's work-status button releases the pin while the card is floating,
+since its overlay toggle would otherwise flip a flag the pin overrides.
+
+### Why the pin floats the card instead of widening the right slot
+
+The motivation is monitoring: the session status has to stay readable while
+the user works in a side surface. The card and the context panel share one
+animated width in `rightSlot.ts`. A second column would mean the slot
+reserving the card's column beside the panel's, a new clamp for the chat's
+minimum width, and a card that changes place whenever the pin or the panel
+toggles. Floating reuses the overlay the card already has for narrow windows,
+keeps the slot's single-width rule intact, and replaces only the case that
+used to hide the card.
+
 ## Visibility
 
 `useWorkStatusVisibility` hides the panel when any of these hold:
@@ -64,6 +99,14 @@ The overlay form stays inside the chat column in `ChatContainer`.
   `WORK_STATUS_PANEL_WIDTH` of panel. Only that threshold decision is state
   (`roomy`); the width itself is not, because it changes on every frame of a
   sidebar animation and storing it re-rendered the whole chat each frame.
+
+An open context panel still makes the hook report `fits: false`; the pin does
+not change that width decision. It changes the presentation: `presentation.ts`
+turns a card with no column into the overlay form when `workStatusPanelPinned`
+is on, so the card floats over the chat instead of disappearing. The docked
+form still requires a free column. `measured` is separate from `fits`: before
+the first width read, the card shows neither form, so a pinned card cannot
+paint floating for the frame before it docks.
 
 `ChatContainer` additionally suppresses it in mini-chat and in expanded-input
 mode. It remains available on a new-session draft: when the draft targets a
@@ -470,7 +513,9 @@ state would also hide the only recovery path. A panel with enabled sections but
 no data still follows the presence reports and collapses as before.
 
 The scroll offset resets on session change: restoring one session's offset into
-another's shorter panel lands somewhere arbitrary.
+another's shorter panel lands somewhere arbitrary. The docked and the floating
+form share the one stored offset and restore from it on mount; only a session
+change resets it, never a form swapping in.
 
 The Subagents section opens itself when subagents appear where there were none,
 on that edge only: re-expanding on every count change would fight a user who
@@ -534,8 +579,8 @@ Rows that name something the app can already show are buttons:
 
 Auto-discovery reuses a personal action when its name identifies a dev server or its command runs a conventional dev script. A shared action needs a matching script command as well as the same trust confirmation as choosing it from the menu: renaming an already trusted shared action does not change its trust hash. Arbitrary `start` substrings and unrelated `start:*` scripts must not launch through discovery.
 
-The panel hides whenever a rail panel opens, so the actions cannot depend on
-it. `components/layout/ProjectActionsProvider` mounts one runner
+The panel hides whenever a rail panel opens unless the card is pinned, when it
+floats over the chat, so the actions cannot depend on it. `components/layout/ProjectActionsProvider` mounts one runner
 (`useProjectActionsRunner`) in `MainLayout` for the project
 `useProjectActionsContext` resolves, which is the panel's own context. A managed
 Chat resolves to none. A draft waiting for a new space has no actions until the
@@ -697,6 +742,12 @@ Expanded sections (`workStatusExpandedSections`, keyed by a stable section id)
 and the scroll offset (`workStatusScrollTop`) live in the persisted
 `useUIStore`. Component state would not do: the content unmounts every time the
 context panel opens, which would silently discard the user's arrangement.
+
+`workStatusPanelPinned` is persisted with them and deliberately has no
+project or session key: it describes how the user reads the status, and the
+panel returns pinned in the next project too. While it is on, the card keeps
+its content mounted as it floats, so the unmount above only happens for an
+unpinned card.
 
 The scroll offset is restored in the scroller's callback ref, at the moment it
 attaches, and read through `useUIStore.getState()` rather than a subscription —

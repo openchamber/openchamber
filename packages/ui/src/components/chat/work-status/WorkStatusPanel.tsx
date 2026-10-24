@@ -80,6 +80,8 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
   const panelTransitionMs = useLayoutAnimationMs();
   const setScrollTop = useUIStore((state) => state.setWorkStatusScrollTop);
   const setOverlayOpen = useUIStore((state) => state.setWorkStatusOverlayOpen);
+  const panelPinned = useUIStore((state) => state.workStatusPanelPinned);
+  const setPanelPinned = useUIStore((state) => state.setWorkStatusPanelPinned);
   const hiddenSections = useUIStore((state) => state.workStatusHiddenSections);
   const storedOrder = useUIStore((state) => state.workStatusSectionOrder);
   const extensionSections = useWorkStatusExtensionSections();
@@ -142,7 +144,9 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
     return () => setWorkStatusReserved(false);
   }, [overlay, wantsColumn]);
 
+  const scrollerRef = React.useRef<HTMLElement | null>(null);
   const restore = React.useCallback((node: HTMLElement | null) => {
+    scrollerRef.current = node;
     if (!node) return;
     const stored = useUIStore.getState().workStatusScrollTop;
     if (stored > 0) node.scrollTop = stored;
@@ -165,8 +169,15 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
 
   // The offset belongs to the panel a session produced, not to the panel in
   // general: restoring one session's scroll into another's shorter panel lands
-  // somewhere arbitrary.
+  // somewhere arbitrary. Keyed on an actual session change, never on mount: the
+  // docked and the floating form are two instances over one stored offset, and
+  // a mount-time reset in the floating one erased the docked card's position
+  // every time a surface opened.
+  const lastSessionIdRef = React.useRef(sessionId);
   React.useEffect(() => {
+    if (lastSessionIdRef.current === sessionId) return;
+    lastSessionIdRef.current = sessionId;
+    if (scrollerRef.current) scrollerRef.current.scrollTop = 0;
     setScrollTop(0);
   }, [sessionId, setScrollTop]);
 
@@ -175,8 +186,10 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
   const overlayRef = React.useRef<HTMLElement | null>(null);
   React.useEffect(() => {
     // Only while it is actually up: a hidden overlay listening for clicks would
-    // swallow the very press that opens it.
-    if (!overlay || !visible || sectionsDialogOpen) return undefined;
+    // swallow the very press that opens it. A pinned card is not a transient
+    // surface: the user asked it to stay, so a click in the transcript or
+    // Escape must not take it away.
+    if (!overlay || !visible || sectionsDialogOpen || panelPinned) return undefined;
     const onPointerDown = (event: PointerEvent) => {
       const target = event.target instanceof Element ? event.target : null;
       if (overlayRef.current?.contains(target)) return;
@@ -197,7 +210,7 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
       document.removeEventListener('pointerdown', onPointerDown, true);
       document.removeEventListener('keydown', onKeyDown);
     };
-  }, [overlay, setOverlayOpen, visible, sectionsDialogOpen]);
+  }, [overlay, panelPinned, setOverlayOpen, visible, sectionsDialogOpen]);
 
   // Keep these elements owned by the panel so primary readout updates do not
   // rerender unrelated sections through the composition callback.
@@ -286,7 +299,23 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
         } : undefined}
       >
       {/* Overlaid rather than placed in flow: the panel has no header of its
-          own, and giving it one would cost a row of height on every session. */}
+          own, and giving it one would cost a row of height on every session.
+          The pin keeps the card when a right-zone surface takes the slot; it
+          reads the same in both forms, since the floating card is also where
+          the user lets it go. */}
+      <button
+        type="button"
+        data-work-status-pin="true"
+        aria-pressed={panelPinned}
+        aria-label={t('chat.workStatus.panelPin.pin')}
+        onClick={() => setPanelPinned(!panelPinned)}
+        className={cn(
+          'absolute inset-e-8 top-1.5 z-10 rounded p-0.5 transition-colors hover:text-foreground',
+          panelPinned ? 'text-foreground' : 'text-muted-foreground',
+        )}
+      >
+        <Icon name={panelPinned ? 'pushpin-2-fill' : 'pushpin-2'} className="size-4" />
+      </button>
       <button
         type="button"
         aria-label={t('chat.workStatus.sections.open')}
@@ -304,7 +333,7 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
         size={24}
         // Sections returning null leave no DOM node, so this reserves room for
         // settings in the first rendered heading, regardless of saved order.
-        className="oc-hide-scrollbar min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-2 [&>section:first-child>[data-work-status-heading]]:pe-7"
+        className="oc-hide-scrollbar min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-2 [&>section:first-child>[data-work-status-heading]]:pe-14"
       >
         <WorkStatusPrimaryGroup
           sessionId={sessionId}

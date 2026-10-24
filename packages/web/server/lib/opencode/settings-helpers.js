@@ -4,7 +4,7 @@ import { createRequire } from 'node:module';
 import { isAgentMemoryFeatureAvailable } from '../agent-memory/feature-flag.js';
 import { isOverviewFeatureAvailable } from '../overview/feature-flag.js';
 import { isPermissionMode } from '../permission-auto-accept/modes.js';
-import { asNonEmptyString } from '../shared/guards.js';
+import { asNonEmptyString, isBoolean } from '../shared/guards.js';
 import { idleStopSchema } from '../spaces/idle-stop.js';
 import { sshHostSchema } from '../spaces/places/ssh-host.js';
 
@@ -263,6 +263,9 @@ export const createSettingsHelpers = (dependencies) => {
     }
     if (typeof candidate.workStatusPanelEnabled === 'boolean') {
       result.workStatusPanelEnabled = candidate.workStatusPanelEnabled;
+    }
+    if (isBoolean(candidate.workStatusPanelPinned)) {
+      result.workStatusPanelPinned = candidate.workStatusPanelPinned;
     }
     if (Array.isArray(candidate.workStatusHiddenSections)) {
       // Ids are validated on the client, which owns the section list; here we
