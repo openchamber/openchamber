@@ -185,6 +185,21 @@ describe("translateWireEvent", () => {
     ])
   })
 
+  test("completed compaction events retain the model that wrote the summary", () => {
+    const model = { providerID: "summary-provider", id: "summary-model" }
+    const events = translateWireEvent({
+      ...base, type: "session.compaction.ended", durable,
+      data: { sessionID: "ses_1", reason: "auto", text: "Summary", model },
+    })
+    expect(events[0]).toMatchObject({ properties: { info: { role: "compaction", status: "completed", model } } })
+    const legacy = translateWireEvent({
+      ...base, type: "session.compaction.ended", durable,
+      data: { sessionID: "ses_1", reason: "auto", text: "Summary" },
+    })
+    expect(legacy[0]).toMatchObject({ properties: { info: { role: "compaction", status: "completed", summary: "Summary" } } })
+    expect(legacy[0]).not.toHaveProperty("properties.info.model")
+  })
+
   test("text streams as a part, deltas, then a final snapshot", () => {
     const started = translateWireEvent({
       ...base,

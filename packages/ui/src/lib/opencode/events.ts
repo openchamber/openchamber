@@ -763,6 +763,7 @@ export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
               status: "completed",
               reason: event.data.reason,
               summary: event.data.text,
+              model: event.data.model,
               cost: event.data.cost,
               tokens: event.data.tokens,
             }),

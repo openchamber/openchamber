@@ -220,6 +220,21 @@ describe("projectUserParts", () => {
 })
 
 describe("projectMessage (other roles)", () => {
+  test("completed compactions retain the summarizing model, independently of the session model", () => {
+    const model = { providerID: "summary-provider", id: "summary-model" }
+    const entry = projectMessage({
+      id: "compact", type: "compaction", time: { created: 1 }, status: "completed",
+      reason: "auto", summary: "Summary", model,
+    }, "ses_1")
+    expect(entry.message).toMatchObject({ role: "compaction", model })
+    const legacy = projectMessage({
+      id: "old", type: "compaction", time: { created: 1 }, status: "completed",
+      reason: "auto", summary: "Summary",
+    }, "ses_1")
+    expect(legacy.message).toMatchObject({ role: "compaction", summary: "Summary" })
+    expect(legacy.message).not.toHaveProperty("model")
+  })
+
   test("every non-conversation message projects with its role and no parts", () => {
     const items: SessionMessageInfo[] = [
       { id: "1", type: "synthetic", time: { created: 1 }, text: "ctx" },
