@@ -811,7 +811,14 @@ one app-wide composer state is split per column:
   stays where it is when its target takes text or is a button, link, tab,
   list or menu item, while a dialog, menu, open select, settings or the BTW
   composer is on screen, during IME composition, and while text is selected, because typing
-  over a selection starts a comment on it. The window-focus refocus skips a
+  over a selection starts a comment on it. A paste additionally stays put when
+  the focused element is a field that takes text itself, even if the event
+  targets elsewhere: on Linux Chromium dispatches a middle-click
+  primary-selection paste at the element under the pointer — a terminal's
+  canvas — rather than the focused textarea, so the terminal's paste would
+  otherwise land in the chat. A focused button or link consumes no paste, so
+  it does not hold one back. The
+  window-focus refocus skips a
   focused field, terminal, editor or embedded page and keeps a selection.
   `useKeyboardShortcuts` calls it after the shortcut dispatcher, so a
   bare-key binding or sequence still wins.
