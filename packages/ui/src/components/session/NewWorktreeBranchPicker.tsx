@@ -17,6 +17,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
+import { shouldDismissDropdown } from '@/components/ui/dropdown-navigation';
 import { Input } from '@/components/ui/input';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { useI18n } from '@/lib/i18n';
@@ -180,11 +181,19 @@ export function NewWorktreeBranchPicker({
       >
         <Command shouldFilter={false}>
           <CommandInput
+            // The portal root is `display: contents`, which Chromium's
+            // checkVisibility() calls hidden, so Base UI's focus manager finds
+            // no tabbable candidate in the popup: the field asks for it itself.
+            autoFocus
             placeholder={t('session.newWorktree.searchBranches')}
             value={query}
             onValueChange={setQuery}
             // Typing must reach the search field, not the menu's typeahead.
-            onKeyDown={(event) => event.stopPropagation()}
+            // Escape is the exception: Base UI closes the menu on Escape from
+            // a document-level listener, so the key has to travel past here —
+            // but only when it means "dismiss". During IME composition the same
+            // key cancels the composition, so it stops here like any other key.
+            onKeyDown={(event) => { if (!shouldDismissDropdown(event)) event.stopPropagation(); }}
           />
           <CommandList disableHorizontal>
             {status ? (
