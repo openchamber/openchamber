@@ -213,6 +213,11 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
     isMenuVisibleRef.current = false;
   }, []);
 
+  // Switching sessions keeps the old one in a hidden Activity (KeepAlive),
+  // which drops every listener and the Escape registration that could close
+  // this menu while its open state survives. Close it whenever the effects go.
+  React.useEffect(() => hideMenu, [hideMenu]);
+
   // Listener-facing mirror of the composer's comment state: the document
   // listeners below must not clear the quote highlight for taps inside the
   // comment shell, which lives outside this menu's DOM.
