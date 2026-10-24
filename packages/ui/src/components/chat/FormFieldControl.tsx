@@ -28,9 +28,8 @@ interface AutoGrowTextareaProps {
 }
 
 /**
- * Free-text answer box. It keeps its own value while the user types so a
- * keystroke does not re-render the whole form, and grows with the content up
- * to the cap in `formTextareaSizing`.
+ * Free-text answer box, sized to its content up to the cap in
+ * `formTextareaSizing`.
  */
 const AutoGrowTextarea = React.memo(function AutoGrowTextarea({
     value,
@@ -42,8 +41,6 @@ const AutoGrowTextarea = React.memo(function AutoGrowTextarea({
 }: AutoGrowTextareaProps) {
     const textareaRef = React.useRef<HTMLTextAreaElement | null>(null);
     const [localValue, setLocalValue] = React.useState(value);
-    const [height, setHeight] = React.useState(FORM_CUSTOM_TEXTAREA_MIN_HEIGHT);
-    const [isScrollable, setIsScrollable] = React.useState(false);
 
     React.useEffect(() => {
         setLocalValue(value);
@@ -51,15 +48,26 @@ const AutoGrowTextarea = React.memo(function AutoGrowTextarea({
 
     React.useLayoutEffect(() => {
         const textarea = textareaRef.current;
-        if (!textarea) return;
-        const nextHeight = getFormCustomTextareaHeight({
-            scrollHeight: textarea.scrollHeight,
-            currentHeight: height,
-        });
-        const nextScrollable = textarea.scrollHeight > (nextHeight ?? height);
-        if (isScrollable !== nextScrollable) setIsScrollable(nextScrollable);
-        if (nextHeight !== null && nextHeight !== height) setHeight(nextHeight);
-    }, [height, isScrollable, localValue]);
+        const wrapper = textarea?.parentElement;
+        if (!textarea || !wrapper) return;
+        // Measure intrinsic content after deletion too. scrollHeight excludes
+        // borders; feeding it back through height state shrinks a border-box
+        // textarea by its border height on every layout effect until React throws.
+        // Hold the wrapper's space so a scrolling form body cannot clamp its
+        // scrollTop while the textarea is temporarily collapsed for measurement.
+        const minHeight = wrapper.style.minHeight;
+        wrapper.style.minHeight = `${wrapper.offsetHeight}px`;
+        try {
+            textarea.style.height = '0px';
+            textarea.style.overflowY = 'hidden';
+            const contentHeight = textarea.scrollHeight + textarea.offsetHeight - textarea.clientHeight;
+            const nextHeight = getFormCustomTextareaHeight(contentHeight);
+            textarea.style.height = `${nextHeight}px`;
+            textarea.style.overflowY = contentHeight > nextHeight ? 'auto' : 'hidden';
+        } finally {
+            wrapper.style.minHeight = minHeight;
+        }
+    }, [localValue]);
 
     return (
         <textarea
@@ -68,7 +76,7 @@ const AutoGrowTextarea = React.memo(function AutoGrowTextarea({
             placeholder={placeholder}
             disabled={disabled}
             autoFocus={autoFocus}
-            style={{ height }}
+            style={{ height: FORM_CUSTOM_TEXTAREA_MIN_HEIGHT }}
             onChange={(event) => {
                 setLocalValue(event.target.value);
                 onValueChange(event.target.value);
@@ -78,7 +86,6 @@ const AutoGrowTextarea = React.memo(function AutoGrowTextarea({
                 'w-full resize-none rounded border border-border/30 bg-background/50 px-2 py-1',
                 'typography-meta text-foreground placeholder:text-muted-foreground/60',
                 'focus:outline-none focus:border-border/60',
-                isScrollable ? 'overflow-y-auto' : 'overflow-y-hidden',
                 disabled ? 'opacity-60' : null,
             )}
         />

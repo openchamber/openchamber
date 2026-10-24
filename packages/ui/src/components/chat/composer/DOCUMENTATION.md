@@ -50,6 +50,19 @@ oldest pending form and counts the rest in its header. The BTW sheet keeps
 the inline `FormCard` for its child session's forms; both render a field
 through `FormFieldControl`.
 
+### Why answer textareas measure content in one layout pass
+
+`FormFieldControl` resets the textarea height before measuring its content,
+adds the border height and applies the capped height directly. A height-driven
+React effect feeds the border-excluding `scrollHeight` back into a border-box
+height; deleting a long answer then causes repeated shrinking updates and a
+maximum-update-depth crash. Text changes trigger measurement; the measured
+height and overflow never trigger another React update.
+The field wrapper keeps its current minimum height during that measurement,
+then restores its original minimum. This prevents a scrolling form body from
+clamping its offset during the temporary collapse, while allowing genuine
+shrinking after deletion.
+
 `formCardState.ts` decides what both surfaces show and send, mirroring
 OpenCode's `Form.validateAnswer`: fields are evaluated in declaration order,
 a `when` clause reads only the answers of active earlier fields (an
