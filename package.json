@@ -107,7 +107,7 @@
   },
   "dependencies": {
     "@base-ui/react": "^1.4.0",
-    "@codemirror/autocomplete": "6.20.3",
+    "@codemirror/autocomplete": "6.20.4",
     "@codemirror/commands": "6.11.1",
     "@codemirror/lang-cpp": "^6.0.3",
     "@codemirror/lang-css": "^6.3.1",
@@ -125,7 +125,7 @@
     "@codemirror/lint": "6.9.7",
     "@codemirror/search": "6.7.2",
     "@codemirror/state": "6.7.6",
-    "@codemirror/view": "6.43.14",
+    "@codemirror/view": "6.43.15",
     "@heroui/scroll-shadow": "^2.3.18",
     "@heroui/system": "^2.4.23",
     "@heroui/theme": "^2.4.23",
@@ -165,7 +165,7 @@
   },
   "overrides": {
     "katex": "0.19.0",
-    "@codemirror/autocomplete": "6.20.3",
+    "@codemirror/autocomplete": "6.20.4",
     "@codemirror/commands": "6.11.1",
     "@codemirror/lang-html": "6.4.12",
     "@codemirror/lang-javascript": "6.2.5",
@@ -176,7 +176,7 @@
     "@codemirror/lint": "6.9.7",
     "@codemirror/search": "6.7.2",
     "@codemirror/state": "6.7.6",
-    "@codemirror/view": "6.43.14"
+    "@codemirror/view": "6.43.15"
   },
   "devDependencies": {
     "@clack/prompts": "^1.1.0",
