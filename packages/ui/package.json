@@ -100,7 +100,7 @@
     "autoprefixer": "^10.4.21",
     "concurrently": "^9.2.1",
     "cors": "^2.8.5",
-    "cross-env": "^7.0.3",
+    "cross-env": "^10.0.0",
     "happy-dom": "18.0.1",
     "mdast-util-from-markdown": "2.0.3",
     "mdast-util-math": "3.0.0",
