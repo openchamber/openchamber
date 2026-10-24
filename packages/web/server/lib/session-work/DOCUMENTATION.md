@@ -78,7 +78,14 @@ from the composer (`session.shell.started`; OpenCode records it as a shell
 message and a synthetic result, never as a user message, and only the user
 starts one). Each message id is handled once; a session
 already in work reads nothing from OpenCode. No Jev: until 2026-10, Jev judged
-whether a message started work, and every session now counts instead.
+whether a message started work, and every session now counts instead. A message
+id is consumed only by a terminal outcome: the open transition happened, or the
+session can never open (a subsession, a chat directory, a review / `/btw` /
+scheduled run, a record the server does not return). A transient failure
+(metadata read, session read, or the open write) and a session that is merely
+archived release the id again, so a redelivery of the same message can still
+open the session once the failure clears or the session is restored. The id is
+reserved up front, so a duplicate delivery in flight is still deduplicated.
 
 ## When Jev is asked
 
