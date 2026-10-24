@@ -79,10 +79,12 @@ import { useSessionDisplayStore, type ProjectSortOrder } from '@/stores/useSessi
 import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
 import { useSessionFoldersStore, type SessionFolder } from '@/stores/useSessionFoldersStore';
 import { isSessionPinned } from '@/lib/sessionPins';
+import { isBtwSession } from '@/lib/sessionBtwMetadata';
 import { toggleSessionPin } from '@/sync/session-pins';
 import { orderWorktrees, useWorktreeOrderStore } from '@/stores/useWorktreeOrderStore';
 import {
   EMPTY_SESSION_ORDER_RANKS,
+  compareSessionsByLifecycleOrder,
   orderSessionsByLifecycleScopes,
   useSessionOrderingStore,
 } from '@/sync/session-ordering';
@@ -807,6 +809,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   const ensureGitStatus = useGitStore((state) => state.ensureStatus);
   const liveSessions = useAllLiveSessions();
   const globalActiveSessions = useGlobalSessionsStore((state) => state.activeSessions);
+  const globalSessionEntities = useGlobalSessionsStore((state) => state.entityById);
   const hasLoadedGlobalSessions = useGlobalSessionsStore((state) => state.hasLoaded);
   // Store reads the closed drawer does not need. They hold the last value seen
   // while presented rather than dropping to empty: the drawer stays mounted
@@ -1047,9 +1050,14 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     return merged.filter((session) => !session.time?.archived);
   }, [globalActiveSessions, liveSessions]);
 
-  // Archive and delete take a session's subagents with it. Lineage is resolved
-  // over the whole active list rather than the rendered bucket: a subagent can
-  // sit in another worktree and still belongs to its parent.
+  const sessionById = React.useMemo(() => new Map(sessions.map((session) => [session.id, session])), [sessions]);
+  const isTreeRoot = React.useCallback((session: Session) => {
+    const parentId = getParentId(session);
+    return !parentId || (!sessionById.has(parentId) && !globalSessionEntities.has(parentId));
+  }, [globalSessionEntities, sessionById]);
+
+  // Rendering and subtree actions share global lineage: a subagent can sit in
+  // another worktree and still belongs to its parent.
   const childrenBySessionId = React.useMemo(() => {
     const children = new Map<string, Session[]>();
     for (const session of sessions) {
@@ -1059,8 +1067,11 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
       siblings.push(session);
       children.set(parentId, siblings);
     }
+    for (const siblings of children.values()) {
+      siblings.sort((left, right) => compareSessionsByLifecycleOrder(left, right, pinnedSessionIds, sessionOrderRanks));
+    }
     return children;
-  }, [sessions]);
+  }, [pinnedSessionIds, sessionOrderRanks, sessions]);
   const descendantIdsOf = React.useCallback(
     (sessionId: string) => getDescendantIds(childrenBySessionId, sessionId),
     [childrenBySessionId],
@@ -1134,7 +1145,6 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   // Each run's members with their subsessions: a run row's activity dot is
   // the combined state of everything the run holds, as on the sidebar.
   const runLaneNodesByKey = React.useMemo(() => {
-    const sessionById = new Map(sessions.map((session) => [session.id, session]));
     const toNode = (session: Session): SessionNode => ({
       session,
       children: (childrenBySessionId.get(session.id) ?? []).map(toNode),
@@ -1148,7 +1158,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
       }));
     }
     return nodes;
-  }, [childrenBySessionId, runIndex, sessions]);
+  }, [childrenBySessionId, runIndex, sessionById]);
   const chatsBucket = React.useMemo<WorktreeBucket>(() => ({
     key: CHAT_DRAFT_PROJECT_ID,
     label: '',
@@ -1253,6 +1263,8 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     }
 
     for (const session of projectSessions) {
+      // Children render under their parent's bucket, even across worktrees.
+      if (!isTreeRoot(session)) continue;
       const owner = sessionOwnership.bySessionId.get(session.id);
       if (!owner) continue;
       const node = nodes.find((entry) => entry.project.id === owner.projectId);
@@ -1275,7 +1287,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     }
 
     return nodes;
-  }, [activeProjectId, pinnedSessionIds, projectSortOrder, projectsMeta, runIndex, projectSessions, sessionOrderRanks, sessionOwnership, spaceList, spaces, t]);
+  }, [activeProjectId, isTreeRoot, pinnedSessionIds, projectSortOrder, projectsMeta, runIndex, projectSessions, sessionOrderRanks, sessionOwnership, spaceList, spaces, t]);
 
   const normalizedDirectory = normalizePath(currentDirectory);
 
@@ -1364,22 +1376,8 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     const alwaysVisibleIds = options?.alwaysVisibleIds;
     const folders = options?.folders ?? EMPTY_FOLDERS;
 
-    // Group children by parent within this bucket, and treat sessions whose parent
-    // is not in this bucket as top-level so nothing is hidden.
-    const idsInBucket = new Set(bucket.sessions.map((entry) => entry.id));
-    const childrenByParent = new Map<string, Session[]>();
-    for (const candidate of bucket.sessions) {
-      const parentId = getParentId(candidate);
-      if (parentId && idsInBucket.has(parentId)) {
-        const list = childrenByParent.get(parentId) ?? [];
-        list.push(candidate);
-        childrenByParent.set(parentId, list);
-      }
-    }
-    const bucketRoots = bucket.sessions.filter((entry) => {
-      const parentId = getParentId(entry);
-      return !parentId || !idsInBucket.has(parentId);
-    });
+    // Archived parents also keep their children out of the active roots.
+    const bucketRoots = bucket.sessions.filter(isTreeRoot);
     // A top-level session filed in a folder shows under that folder, with its
     // subsessions, and not again below; a folder's sessions do not use the page.
     const folderIdBySession = new Map<string, string>();
@@ -1436,7 +1434,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
 
     // Flat Chats rows have no chevron, so their subsessions never expand.
     const renderNode = (session: Session, rowDepth: number | null, lineage: readonly boolean[], isLast: boolean): React.ReactNode => {
-      const children = childrenByParent.get(session.id) ?? [];
+      const children = (childrenBySessionId.get(session.id) ?? []).filter((child) => !isBtwSession(child));
       const hasChildren = children.length > 0;
       const expanded = rowDepth !== null && Boolean(expandedParents[session.id]);
       const childLineage = [...lineage];

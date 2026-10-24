@@ -177,6 +177,12 @@ command palette lists projects only for a query, so it does not use it.
 Hosted mobile and Capacitor use their separate `MobileSessionsSheet` renderer.
 The shared directory-cache rules apply there, but this sidebar virtualizer does not.
 
+### Why mobile Tree resolves lineage globally
+
+Mobile Tree checks parent presence against the global active and archived cache plus the merged active session list. Child expansion uses the merged active graph. A child whose parent is known renders only beneath that parent, even when its own directory belongs to another worktree. An archived parent never allows its child to become an independent active root. Project buckets contain roots only, so children do not consume root pagination or make a child-only worktree expandable. Children retain the shared sibling lifecycle order. Temporary `/btw` forks and archived sessions remain hidden. Selection still uses each session's own directory.
+
+Bucket-local lineage promoted cross-worktree subagents to independent rows and left their parent without an expansion control. The missing-parent fallback applies only while both sources lack the parent, and clears when an active or archived parent arrives.
+
 Both project display modes use `projects/CrossfadeZoneHeaders.tsx` for sticky
 zone headers. The live header keeps one portal host as it moves between its
 virtual row placeholder and a stationary layer inside the native scroller,
