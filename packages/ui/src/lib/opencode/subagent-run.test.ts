@@ -44,6 +44,49 @@ describe("readSubagentRun", () => {
   test("keeps text without the envelope as is", () => {
     expect(readSubagentRun(report({ text: "plain" }))?.output).toBe("plain")
   })
+
+  // oh-my-opencode-slim's `task revive` reports the run it continued in the
+  // envelope OpenCode uses for a `task` tool result.
+  const revived = (state: "completed" | "error"): SyntheticMessage => ({
+    id: "msg_revived",
+    sessionID: "ses_parent",
+    role: "synthetic",
+    time: { created: 90 },
+    text: [
+      `<task id="ses_child" state="${state}">`,
+      `<summary>Background task ${state === "completed" ? "completed" : "failed"}: review changes</summary>`,
+      `<${state === "completed" ? "task_result" : "task_error"}>`,
+      state === "completed" ? "## Findings\n\nNone." : "Provider error",
+      `</${state === "completed" ? "task_result" : "task_error"}>`,
+      "</task>",
+    ].join("\n"),
+    metadata: { "oh-my-opencode-slim.internalInitiator": true },
+  })
+
+  test("reads a run another tool reported in a task envelope", () => {
+    expect(readSubagentRun(revived("completed"))).toMatchObject({
+      childSessionID: "ses_child", state: "completed", output: "## Findings\n\nNone.", reportedAt: 90,
+    })
+    expect(readSubagentRun(revived("error"))).toMatchObject({ state: "error", output: "Provider error" })
+  })
+
+  test("reads the envelope followed by the comment that marks it internal", () => {
+    // The shape oh-my-opencode-slim writes: the envelope, then its own marker.
+    const message = revived("completed")
+    expect(readSubagentRun({ ...message, text: `${message.text}\n<!-- SLIM_INTERNAL_INITIATOR -->\n` })?.output)
+      .toBe("## Findings\n\nNone.")
+  })
+
+  test("ignores a task envelope that only says the run is going on", () => {
+    const notice = revived("completed")
+    expect(readSubagentRun({ ...notice, text: '<task id="ses_child" state="running">\n<summary>Background task continues on a fallback model</summary>\n<task_fallback>\nboom\n</task_fallback>\n</task>' })).toBeUndefined()
+  })
+
+  test("takes the newest record of a child a revive continued", () => {
+    expect(findSubagentRun([report(), revived("completed")], "ses_child")).toMatchObject({
+      state: "completed", output: "## Findings\n\nNone.", reportedAt: 90,
+    })
+  })
 })
 
 describe("runningSubagentRunMessage", () => {

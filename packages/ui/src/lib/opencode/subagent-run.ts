@@ -11,6 +11,9 @@
  * While the job runs the only record of it is the child session itself, so a
  * running entry is built here from that record, in the same shape as the
  * completion, and the timeline renders both through one path.
+ *
+ * A run that a tool continued by hand gets no completion message from OpenCode:
+ * the tool reports that run in a record of its own (`readTaskRecord`).
  */
 
 import { z } from "zod"
@@ -38,22 +41,56 @@ const runMetadataSchema = z.object({
   state: z.enum(["running", "completed", "error", "cancelled"]),
 })
 
-const ENVELOPE = /^\s*<subagent\b[^>]*>\n?([\s\S]*?)\n?<\/subagent>\s*$/
+const REPORT_ENVELOPE = /^\s*<subagent\b[^>]*>\n?([\s\S]*?)\n?<\/subagent>\s*$/
 
-/** The subagent run a message reports, or undefined for any other message. */
-export function readSubagentRun(message: Message): SubagentRun | undefined {
-  if (message.role !== "synthetic") return undefined
-  const parsed = runMetadataSchema.safeParse(message.metadata ?? {})
-  if (!parsed.success) return undefined
-  const envelope = message.text.match(ENVELOPE)
+/**
+ * The report OpenCode appends when a job it ran settles: the child and the state
+ * are in the message's metadata, and the text wraps the result in an envelope.
+ */
+const readCompletionReport = (message: SyntheticMessage): SubagentRun | undefined => {
+  const metadata = runMetadataSchema.safeParse(message.metadata ?? {})
+  if (!metadata.success) return undefined
+  const envelope = message.text.match(REPORT_ENVELOPE)
   return {
-    childSessionID: parsed.data.childID,
-    agent: parsed.data.agent,
-    state: parsed.data.state,
+    childSessionID: metadata.data.childID,
+    agent: metadata.data.agent,
+    state: metadata.data.state,
     description: message.description,
     output: envelope ? envelope[1] : message.text,
     reportedAt: message.time.created,
   }
+}
+
+// A tool that took a run over reports it in its own record instead: the envelope
+// OpenCode's `task` tool used for its result, then sometimes a comment that marks
+// the message as the tool's own (`…</task>` then
+// `<!-- SLIM_INTERNAL_INITIATOR -->`). oh-my-opencode-slim writes one when its
+// `task revive` finishes a run it continued, and OpenCode has nothing to say
+// about that run, so the record is the only news of it.
+const TASK_RECORD = /^\s*<task\s+id="([^"]+)"\s+state="(completed|error)">([\s\S]*?)<\/task>\s*(?:<!--[\s\S]*?-->\s*)?$/
+const TASK_RECORD_BODY = /<task_(?:result|error)>\s*([\s\S]*?)\s*<\/task_(?:result|error)>/
+
+const readTaskRecord = (message: SyntheticMessage): SubagentRun | undefined => {
+  const record = message.text.match(TASK_RECORD)
+  if (!record) return undefined
+  const [, childSessionID, state, rest] = record
+  return {
+    childSessionID,
+    state: state === "completed" ? "completed" : "error",
+    description: message.description,
+    output: rest.match(TASK_RECORD_BODY)?.[1] ?? "",
+    reportedAt: message.time.created,
+  }
+}
+
+/**
+ * The subagent run a message reports, or undefined for any other message. The
+ * two ways a run gets reported are equal: OpenCode's own report, or the record
+ * of a tool that continued it.
+ */
+export function readSubagentRun(message: Message): SubagentRun | undefined {
+  if (message.role !== "synthetic") return undefined
+  return readCompletionReport(message) ?? readTaskRecord(message)
 }
 
 const RUNNING_ID_PREFIX = "subagent-run:"

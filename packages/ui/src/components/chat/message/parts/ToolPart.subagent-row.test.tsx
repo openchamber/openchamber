@@ -1,5 +1,5 @@
 import { act } from 'react';
-import { expect, spyOn, test } from 'bun:test';
+import { describe, expect, spyOn, test } from 'bun:test';
 import { plugin } from 'bun';
 import { pathToFileURL } from 'node:url';
 import { createRoot } from 'react-dom/client';
@@ -12,6 +12,8 @@ import { ThemeSystemContext, type ThemeContextValue } from '@/contexts/theme-sys
 import { getDefaultTheme } from '@/lib/theme/themes';
 import { useGuestsStore } from '@/lib/guests/store';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
+import { useSessionActivityTimingStore } from '@/sync/session-activity-timing';
 import { opencodeClient } from '@/lib/opencode/client';
 import { subagentCancellationNote } from '@/lib/opencode/subagent-run';
 
@@ -256,5 +258,151 @@ test('a background subagent drops the background label once its report arrives',
     expect(container.textContent).toContain('Look around');
     expect(container.textContent).not.toContain('in background');
     expect(container.querySelector('button[aria-label="Stop subagent"]')).toBeNull();
+  });
+});
+
+// oh-my-opencode-slim's `task revive` prompts the same child session again, so
+// the report already in the parent describes a run that is over while the child
+// works on the next one.
+test('a background subagent running again after a failed report reads as running', async () => {
+  const backgrounded: ToolPartData = {
+    ...parent,
+    id: 'revived-call',
+    state: {
+      status: 'completed', input: { description: 'Look around', agent: 'explore' },
+      output: 'The subagent is working in the background.', metadata: { status: 'running', sessionID: 'bg-child' }, time: { start: 100, end: 110 },
+    },
+  };
+  const report = {
+    id: 'report', sessionID: 'parent', role: 'synthetic' as const, time: { created: 900 },
+    text: '<subagent sessionID="bg-child" state="error" description="Look around">\nProvider error\n</subagent>',
+    description: 'Look around', metadata: { source: 'subagent', childID: 'bg-child', agent: 'explore', state: 'error' as const },
+  };
+  const previousStatus = useGlobalSessionStatusStore.getState();
+  const previousTiming = useSessionActivityTimingStore.getState();
+  try {
+    await withHarness(backgrounded, true, async (store, container) => {
+      await act(async () => store.setState({ message: { parent: [report] } }));
+      // The report alone reads as the failure it was, timed by the call that started it.
+      expect(container.textContent).toContain('Provider error');
+      expect(container.textContent).toContain('0.8s');
+
+      await act(async () => {
+        useGlobalSessionStatusStore.setState({ activeSessionIds: new Set(['bg-child']) });
+        useSessionActivityTimingStore.setState({ startedAt: new Map([['bg-child', Date.now() - 60_000]]) });
+      });
+      expect(container.textContent).not.toContain('Provider error');
+      expect(container.textContent).toContain('in background');
+      expect(container.querySelector('button[aria-label="Stop subagent"]')).not.toBeNull();
+      // Counted from the revived turn, not from the call the report belongs to.
+      expect(container.textContent).not.toContain('0.8s');
+
+      await act(async () => useGlobalSessionStatusStore.setState({ activeSessionIds: new Set() }));
+      expect(container.textContent).toContain('Provider error');
+    });
+  } finally {
+    useGlobalSessionStatusStore.setState(previousStatus, true);
+    useSessionActivityTimingStore.setState(previousTiming, true);
+  }
+});
+
+// The tool that revived the child reports the end of that run itself, in the
+// envelope OpenCode uses for a `task` result. The row follows it: the failure of
+// the run before is history, and the new result appears where the run is.
+test('a revived background subagent ends on the record of the run that continued it', async () => {
+  const backgrounded: ToolPartData = {
+    ...parent,
+    id: 'revived-call',
+    state: {
+      status: 'completed', input: { description: 'Look around', agent: 'explore' },
+      output: 'The subagent is working in the background.', metadata: { status: 'running', sessionID: 'bg-child' }, time: { start: 100, end: 110 },
+    },
+  };
+  const report = {
+    id: 'report', sessionID: 'parent', role: 'synthetic' as const, time: { created: 900 },
+    text: '<subagent sessionID="bg-child" state="error" description="Look around">\nProvider error\n</subagent>',
+    description: 'Look around', metadata: { source: 'subagent', childID: 'bg-child', agent: 'explore', state: 'error' as const },
+  };
+  const continued = {
+    id: 'continued', sessionID: 'parent', role: 'synthetic' as const, time: { created: 9_000 },
+    text: [
+      '<task id="bg-child" state="completed">',
+      '<summary>Background task completed: Look around</summary>',
+      '<task_result>',
+      'All three items are implemented.',
+      '</task_result>',
+      '</task>',
+    ].join('\n'),
+    metadata: { 'oh-my-opencode-slim.internalInitiator': true },
+  };
+  await withHarness(backgrounded, true, async (store, container) => {
+    await act(async () => store.setState({ message: { parent: [report] } }));
+    expect(container.textContent).toContain('Provider error');
+
+    await act(async () => store.setState({ message: { parent: [report, continued] } }));
+    expect(container.textContent).toContain('All three items are implemented.');
+    expect(container.textContent).not.toContain('Provider error');
+  });
+});
+
+// A foreground call fails into its own part and OpenCode never revises it, so a
+// child continued by hand after that failure is the only thing that can tell the
+// row the work went on.
+describe('a failed foreground subagent', () => {
+  const failed: ToolPartData = {
+    ...parent,
+    id: 'foreground-call',
+    state: {
+      status: 'error', input: { description: 'Look around', agent: 'explore' },
+      error: 'Provider error', metadata: { sessionID: 'fg-child' }, time: { start: 1000, end: 10_000 },
+    },
+  };
+  const record = (created: number) => ({
+    id: 'record', sessionID: 'parent', role: 'synthetic' as const, time: { created },
+    text: [
+      '<task id="fg-child" state="completed">',
+      '<summary>Background task completed: Look around</summary>',
+      '<task_result>',
+      'Fixed it up.',
+      '</task_result>',
+      '</task>',
+    ].join('\n'),
+    metadata: { 'oh-my-opencode-slim.internalInitiator': true },
+  });
+
+  test('reads as running while its child works again, without claiming the background', async () => {
+    const previousStatus = useGlobalSessionStatusStore.getState();
+    try {
+      await withHarness(failed, false, async (_store, container) => {
+        expect(container.textContent).toContain('Look around');
+        expect(container.querySelector('button[aria-label="Stop subagent"]')).toBeNull();
+
+        await act(async () => useGlobalSessionStatusStore.setState({ activeSessionIds: new Set(['fg-child']) }));
+        expect(container.querySelector('button[aria-label="Stop subagent"]')).not.toBeNull();
+        expect(container.textContent).not.toContain('in background');
+
+        await act(async () => useGlobalSessionStatusStore.setState({ activeSessionIds: new Set() }));
+        expect(container.querySelector('button[aria-label="Stop subagent"]')).toBeNull();
+      });
+    } finally {
+      useGlobalSessionStatusStore.setState(previousStatus, true);
+    }
+  });
+
+  test('follows a record of the run that continued it after the failure', async () => {
+    await withHarness(failed, true, async (store, container) => {
+      expect(container.textContent).toContain('Provider error');
+      await act(async () => store.setState({ message: { parent: [record(60_000)] } }));
+      expect(container.textContent).toContain('Fixed it up.');
+      expect(container.textContent).not.toContain('Provider error');
+    });
+  });
+
+  test('keeps the failure a report from before it describes', async () => {
+    await withHarness(failed, true, async (store, container) => {
+      await act(async () => store.setState({ message: { parent: [record(900)] } }));
+      expect(container.textContent).toContain('Provider error');
+      expect(container.textContent).not.toContain('Fixed it up.');
+    });
   });
 });
