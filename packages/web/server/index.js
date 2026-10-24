@@ -56,6 +56,7 @@ import {
 } from './lib/event-stream/index.js';
 import { createFsSearchRuntime as createFsSearchRuntimeFactory } from './lib/fs/search.js';
 import { createOpenCodeLifecycleRuntime } from './lib/opencode/lifecycle.js';
+import { createDatabaseMaintenance } from './lib/maintenance/database.js';
 import { createOpenCodeEnvRuntime } from './lib/opencode/env-runtime.js';
 import { providedLoginShellEnvSnapshot } from './lib/opencode/login-shell-env.js';
 import { resolveOpenCodeEnvConfig } from './lib/opencode/env-config.js';
@@ -1539,6 +1540,11 @@ Object.defineProperties(openCodeLifecycleState, {
   resolvedWslDistro: { get: () => resolvedWslDistro, set: (value) => { resolvedWslDistro = value; } },
 });
 
+// Created right after the lifecycle: compaction stops and starts that runtime.
+// The lifecycle reaches back through this closure when it is about to spawn the
+// child, by which time the value is assigned.
+let databaseMaintenanceRuntime = null;
+
 const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
   state: openCodeLifecycleState,
   env: {
@@ -1628,6 +1634,14 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
   },
   getManagedOpenCodeEnv: async () => (managedConfigRuntime ? managedConfigRuntime.buildManagedChildEnv() : {}),
   getUserEnvironment: () => environmentRuntime.forOpenCode(),
+  runQueuedDatabaseCompactionAtStartup: () => (databaseMaintenanceRuntime
+    ? databaseMaintenanceRuntime.runQueuedDatabaseCompactionAtStartup()
+    : Promise.resolve(null)),
+});
+
+databaseMaintenanceRuntime = createDatabaseMaintenance({
+  dataDir: OPENCHAMBER_DATA_DIR,
+  getLifecycle: () => openCodeLifecycleRuntime,
 });
 
 // Quota lookups, voice keys and routing read provider credentials from the
@@ -2638,6 +2652,7 @@ async function main(options = {}) {
     listConfiguredProjects,
     messageSearchRuntime,
     sessionWarmingRuntime,
+    databaseMaintenance: databaseMaintenanceRuntime,
     crypto,
     fs,
     os,

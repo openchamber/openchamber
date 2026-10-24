@@ -34,6 +34,7 @@ const journalActions = new Set([
   'managed restart started', 'managed restart ready', 'managed restart failed',
   'external connected', 'external unavailable', 'health failed', 'health recovered',
   'bootstrap failed', 'bootstrap ready', 'http response completed',
+  'database compact started', 'database compact done', 'database compact failed',
 ]);
 // Same vocabulary as packages/web/server/lib/diagnostics/vocabulary.js.
 const proxyRoutes = new Set([

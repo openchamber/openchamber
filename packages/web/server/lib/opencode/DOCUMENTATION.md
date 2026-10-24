@@ -14,6 +14,7 @@ Diagnostic logging for the timeline export (`proxy.js` error lines, the lifecycl
 - `packages/web/server/lib/opencode/cli-entry-runtime.js`: CLI entrypoint runtime that detects direct execution, parses CLI options, and starts server bootstrap.
 - `packages/web/server/lib/opencode/routes.js`: OpenCode/provider settings and auth-related route registration.
 - `packages/web/server/lib/opencode/v1-migration-topup.js`: re-arms OpenCode's own V1 -> V2 session import for V1 sessions changed by 1.x after the last completed import; runs only before a managed spawn. See "v1-migration-topup.js" below.
+- `packages/web/server/lib/opencode/opencode-db.js`: OpenCode's database location and a built-in SQLite opener, shared by the V1 top-up and database maintenance. `resolveOpenCodeDataDir` reads `XDG_DATA_HOME` like OpenCode does, then `../opencode`; `resolveOpenCodeDbPath` resolves `OPENCODE_DB` against that directory unless it is absolute or `:memory:`. `loadSqlite()` returns a minimal `{ all, run, exec, close }` wrapper over `node:sqlite` or `bun:sqlite`, memoized, or null when neither exists.
 - `packages/web/server/lib/opencode/lifecycle.js`: OpenCode process lifecycle runtime (startup, restart, readiness, health monitoring). It records each lifecycle transition (launch, ready, exit, restart, health failure and recovery, external connect) as a fixed action in the process-local diagnostic journal (`../diagnostics/server-journal.js`), which the diagnostic timeline exports; the journal never holds stderr, paths or error text. After readiness it warms the last-used directory only (first entry of the `getWarmupDirectories` dep, best-effort) because OpenCode initializes each directory lazily on first request and that cost would otherwise be paid by the user's first interactive session open. It warms no other projects: on OpenCode 2 the first directory-scoped read boots that location's whole MCP fleet. The warmed directory is also `getDefaultOpenCodeDirectory()`, the scope for server-side reads that have no directory of their own (integrations in `auth.js`, the small model's model and provider lists, the agent check after a restart): v2 answers a location read without one for its own working directory, the user's home for a managed OpenCode, and would start an MCP fleet there. While no warmed directory is usable (no project open), the getter answers the `noProjectDirectory` dep instead, the managed chats root, which the UI also works in then. Once the UI saves the directory it moved to (`lastDirectory`, reported by the settings runtime's `onLastDirectoryChanged`), `noteCurrentDirectory` makes that directory the default: the UI runs it anyway, and the one used last at startup may be a chat the user left, whose location the UI stops; a read there, such as the quota's integration list every 3 minutes, started it again. The getter revalidates that directory on every read: once it is no longer a readable directory (deleted, moved, replaced by a file, or stripped of read/execute permission) it is never sent, and the lifecycle advances to another directory the warm pass validated or re-reads `getWarmupDirectories` (coalesced, with a short cooldown) so a currently-valid `lastDirectory` replaces the stale one. A stale cached path would otherwise make every directory-scoped read answer `500 FileSystem.realPath ... ENOENT` — the failure that took the quota credential read down with it.
 - The managed OpenCode's environment also carries the user's variables from Settings and from `opencode service set env` (`getUserEnvironment`, see `../environment`), over the inherited environment and under everything OpenChamber sets for OpenCode itself; enterprise mode passes none. `getManagedOpenCodeProcessEnv()` therefore includes them, so a provider key given this way is visible to the credential reader like any other variable OpenCode reports.
 - `packages/web/server/lib/opencode/provider-env-aliases.js`: mirrors known provider credential env aliases into the managed OpenCode process environment (for example `GEMINI_API_KEY` → `GOOGLE_GENERATIVE_AI_API_KEY`) so OpenCode connection detection and the upstream AI SDK agree on the same key names. Canonical implementation shared by web lifecycle and the VS Code managed spawn path (`packages/vscode/src/provider-env-aliases.ts` re-exports this module).
@@ -171,8 +172,10 @@ It runs from `lifecycle.js` immediately before the MANAGED OpenCode is spawned:
 never for an external, user-started OpenCode, and never while a managed one is
 running, because the write would race OpenCode's own loop. Failure is never
 fatal to startup. It opens `<data>/opencode.db` (or `OPENCODE_DB`) read-write
-through `node:sqlite` on Node or `bun:sqlite` on Bun, and skips silently on
-neither. It returns
+through `opencode-db.js`, which resolves the data directory from
+`XDG_DATA_HOME` (falling back to `~/.local/share/opencode`, as OpenCode does)
+and returns `node:sqlite` on Node or `bun:sqlite` on Bun; it skips silently
+when neither exists. It returns
 `{ status: 'skipped' | 'scheduled' | 'unsafe' | 'unavailable', missing, revisited, reason? }`
 and logs one line; there is no HTTP route and no UI.
 
@@ -212,6 +215,34 @@ Hard rules, verified against v2.0.8 (the completion stamp against v2.0.16)
   was used again, OpenCode's loop still walks every legacy row under the
   cursor, so a deleted session sorting below a fresh one comes back with it;
   avoiding that needs an upstream import route that takes explicit ids.
+
+### Database compaction hold (runWithManagedOpenCodeStopped)
+
+SQLite returns the space of deleted rows to the file system only through
+`VACUUM`, which needs an exclusive lock and free disk for a full copy. The
+managed child holds the database, so the rewrite has to happen while it is
+stopped. `lifecycle.js` exposes `runWithManagedOpenCodeStopped(job, {
+reason, onRestarting })` for exactly that window. `lib/maintenance/database.js`
+uses it; nothing else should.
+
+What the hold guarantees: it refuses for an external OpenCode
+(`isExternalServer`) and during shutdown, waits for an in-flight
+`currentRestartPromise`, sets `isRestartingOpenCode` so the health monitor does
+not race it, closes and kills the managed child, waits for the port to be
+released, runs the job, then starts the child again with the same prefix and
+`onOpenCodeRestarted` wiring as `restartOpenCode`. The job sees
+`state.openCodeProcess === null`. If the job throws, the child is still
+restarted and the job's error is rethrown afterwards; when the restart also
+fails, the error carries both messages. The startup hook
+`runQueuedDatabaseCompactionAtStartup` runs inside `startOpenCodeOnce`, right
+after the V1 top-up and before the child spawns, so the database is closed there
+without stopping anything. It only honors a queued "next restart" request;
+a plain startup never compacts. It is best-effort: a failure logs and startup
+continues.
+
+`isManagedOpenCodeRunning()` and `getActiveTurnCount()` (from
+`getActiveSessionCount`) are the read-only answers the maintenance routes need;
+both report false or zero for an external OpenCode.
 
 ## Public exports (providers.js)
 - `getProviderSources(providerId, workingDirectory)`: Resolves which OpenCode config layers define a provider.

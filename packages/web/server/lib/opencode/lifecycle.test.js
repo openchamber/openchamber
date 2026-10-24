@@ -168,6 +168,99 @@ describe('OpenCode lifecycle', () => {
     }
   });
 
+  it('runs a queued database compaction before the managed child spawns', async () => {
+    const runQueuedDatabaseCompactionAtStartup = vi.fn(async () => null);
+    spawnMock.mockImplementation(() => {
+      const child = createMockChild();
+      queueMicrotask(() => child.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n'));
+      return child;
+    });
+    globalThis.fetch = vi.fn(async () => ({ ok: false }));
+    const runtime = createRuntime({ runQueuedDatabaseCompactionAtStartup });
+    const server = await runtime.startOpenCode();
+    runtime.testState.openCodeProcess = server;
+    try {
+      expect(runQueuedDatabaseCompactionAtStartup).toHaveBeenCalledTimes(1);
+    } finally {
+      await runtime.testState.openCodeProcess.close();
+    }
+  });
+
+  it('stops the managed child for maintenance and starts it again', async () => {
+    spawnMock.mockImplementation(() => {
+      const child = createMockChild();
+      queueMicrotask(() => child.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n'));
+      return child;
+    });
+    globalThis.fetch = vi.fn(async () => ({ ok: false }));
+    const setupProxyMock = vi.fn();
+    const ensureOpenCodeApiPrefixMock = vi.fn();
+    const runtime = createRuntime({
+      setupProxy: setupProxyMock,
+      ensureOpenCodeApiPrefix: ensureOpenCodeApiPrefixMock,
+    });
+    const firstServer = await runtime.startOpenCode();
+    runtime.testState.openCodeProcess = firstServer;
+
+    let jobSawStoppedChild = false;
+    const result = await runtime.runWithManagedOpenCodeStopped(async () => {
+      jobSawStoppedChild = runtime.testState.openCodeProcess === null;
+      expect(runtime.testState.isRestartingOpenCode).toBe(true);
+      return 'rewritten';
+    });
+
+    expect(jobSawStoppedChild).toBe(true);
+    expect(result).toBe('rewritten');
+    expect(spawnMock).toHaveBeenCalledTimes(2);
+    expect(runtime.testState.isRestartingOpenCode).toBe(false);
+    expect(runtime.testState.openCodeProcess).not.toBe(firstServer);
+    // The proxy is registered once at startup and reads the port from the
+    // lifecycle state. Registering it again needs the Express app, which the
+    // lifecycle does not hold.
+    expect(setupProxyMock).not.toHaveBeenCalled();
+    expect(ensureOpenCodeApiPrefixMock).toHaveBeenCalledTimes(1);
+    await runtime.testState.openCodeProcess.close();
+  });
+
+  it('restarts the child when the maintenance job fails', async () => {
+    spawnMock.mockImplementation(() => {
+      const child = createMockChild();
+      queueMicrotask(() => child.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n'));
+      return child;
+    });
+    globalThis.fetch = vi.fn(async () => ({ ok: false }));
+    const runtime = createRuntime();
+    const firstServer = await runtime.startOpenCode();
+    runtime.testState.openCodeProcess = firstServer;
+
+    await expect(runtime.runWithManagedOpenCodeStopped(async () => {
+      throw new Error('the rewrite failed');
+    })).rejects.toThrow('the rewrite failed');
+
+    expect(spawnMock).toHaveBeenCalledTimes(2);
+    expect(runtime.testState.openCodeProcess).toBeTruthy();
+    await runtime.testState.openCodeProcess.close();
+  });
+
+  it('runs maintenance without a managed child and starts nothing', async () => {
+    const runtime = createRuntime();
+    const result = await runtime.runWithManagedOpenCodeStopped(async () => {
+      expect(runtime.testState.isRestartingOpenCode).toBe(true);
+      return 'rewritten';
+    });
+
+    expect(result).toBe('rewritten');
+    expect(spawnMock).not.toHaveBeenCalled();
+    expect(runtime.testState.isRestartingOpenCode).toBe(false);
+  });
+
+  it('refuses maintenance on an external OpenCode', async () => {
+    const runtime = createRuntime({}, { isExternalOpenCode: true });
+    await expect(runtime.runWithManagedOpenCodeStopped(async () => {})).rejects.toThrow('does not manage');
+    expect(spawnMock).not.toHaveBeenCalled();
+  });
+
+
   it('journals managed launch, readiness, exit and restart as fixed actions only', async () => {
     const journal = createServerDiagnosticJournal();
     spawnMock.mockImplementation(() => {

@@ -42,22 +42,8 @@
  */
 
 import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
-import { createRequire } from 'node:module';
 import { z } from 'zod';
-
-const OPENCODE_DATA_DIR = path.join(os.homedir(), '.local', 'share', 'opencode');
-
-/**
- * Where OpenCode keeps its database: `OPENCODE_DB` when set (absolute or
- * relative to the data dir), else `opencode.db` in the data dir.
- */
-const resolveOpenCodeDbPath = (env = process.env) => {
-  const configured = (env.OPENCODE_DB ?? '').trim();
-  if (configured && configured !== ':memory:') return path.resolve(OPENCODE_DATA_DIR, configured);
-  return path.join(OPENCODE_DATA_DIR, 'opencode.db');
-};
+import { loadSqlite, resolveOpenCodeDbPath } from './opencode-db.js';
 
 /** OpenCode's key for the migration state row in `kv`. */
 const MIGRATION_STATE_KEY = 'migration.v1-v2';
@@ -90,55 +76,6 @@ const nameRowSchema = z.object({ name: z.string() });
 const countRowSchema = z.object({ value: z.number() });
 const nullableIdRowSchema = z.object({ id: z.string().nullable() });
 const migrationStateSchema = z.object({ phase: z.string() });
-
-/**
- * A minimal read-write connection: `all(sql, params)`, `run(sql, params)` and
- * `close()`. Node provides it through `node:sqlite`, Bun through `bun:sqlite`;
- * both are built in and no dependency is added. Neither being available
- * yields null and the top-up is skipped.
- */
-let openConnection;
-const loadSqlite = () => {
-  if (openConnection !== undefined) return openConnection;
-  const require = createRequire(import.meta.url);
-  openConnection = null;
-  try {
-    const { DatabaseSync } = process.getBuiltinModule?.('node:sqlite') ?? require('node:sqlite');
-    // Opening an in-memory database proves the builtin is usable before we
-    // commit to it; a Node without `node:sqlite` throws here and Bun is tried.
-    new DatabaseSync(':memory:').close();
-    openConnection = (dbPath) => {
-      const db = new DatabaseSync(dbPath);
-      return {
-        all: (sql, params = []) => db.prepare(sql).all(...params),
-        run: (sql, params = []) => {
-          db.prepare(sql).run(...params);
-        },
-        close: () => db.close(),
-      };
-    };
-    return openConnection;
-  } catch {
-    // Not Node, or a Node without node:sqlite; try Bun next.
-  }
-  try {
-    const { Database } = require('bun:sqlite');
-    new Database(':memory:').close();
-    openConnection = (dbPath) => {
-      const db = new Database(dbPath);
-      return {
-        all: (sql, params = []) => db.query(sql).all(...params),
-        run: (sql, params = []) => {
-          db.query(sql).run(...params);
-        },
-        close: () => db.close(),
-      };
-    };
-  } catch {
-    // No sqlite runtime at all.
-  }
-  return openConnection;
-};
 
 const outcome = (status, reason, missing = 0, revisited = 0) =>
   reason === undefined ? { status, missing, revisited } : { status, missing, revisited, reason };

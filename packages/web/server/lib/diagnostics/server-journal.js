@@ -9,6 +9,7 @@ const ACTIONS = new Set([
   'managed restart started', 'managed restart ready', 'managed restart failed',
   'external connected', 'external unavailable', 'health failed', 'health recovered',
   'bootstrap failed', 'bootstrap ready',
+  'database compact started', 'database compact done', 'database compact failed',
 ]);
 const FAILURE_CLASSES = new Set(['timeout', 'connection_refused', 'connection_reset', 'invalid_response', 'error']);
 

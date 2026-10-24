@@ -14,10 +14,12 @@ describe('formatFileSize', () => {
     expect(formatFileSize(1023)).toBe('1023 B');
   });
 
-  test('prints kibibytes and mebibytes with one fraction digit', () => {
+  test('prints kibibytes, mebibytes and gibibytes with one fraction digit', () => {
     expect(formatFileSize(1024)).toBe('1.0 KB');
     expect(formatFileSize(1536)).toBe('1.5 KB');
     expect(formatFileSize(1024 * 1024)).toBe('1.0 MB');
     expect(formatFileSize(1024 * 1024 * 2.5)).toBe('2.5 MB');
+    expect(formatFileSize(1024 * 1024 * 1024)).toBe('1.0 GB');
+    expect(formatFileSize(1024 * 1024 * 1024 * 3.6)).toBe('3.6 GB');
   });
 });

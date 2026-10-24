@@ -154,6 +154,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     managedStartupTimeoutMs = 30_000,
     now = Date.now,
     topUpV1SessionMigration = topUpV1Migration,
+    runQueuedDatabaseCompactionAtStartup = async () => null,
     checkOpenCodeBinary = requireOpenCodeV2,
     diagnosticJournal = serverDiagnosticJournal,
   } = deps;
@@ -764,6 +765,19 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       console.warn('[OpenCode] V1 session migration top-up failed:', error instanceof Error ? error.message : error);
     }
 
+    // Honor a queued "next restart" request while the database is naturally
+    // closed: the child has not spawned yet, so VACUUM has the file to itself.
+    // Startup never compacts on its own, and is never blocked on maintenance
+    // succeeding.
+    try {
+      const compaction = await runQueuedDatabaseCompactionAtStartup();
+      if (compaction) {
+        console.log('[OpenCode] Queued database compaction finished before startup:', compaction);
+      }
+    } catch (error) {
+      console.warn('[OpenCode] Queued database compaction before startup failed:', error instanceof Error ? error.message : error);
+    }
+
     // The user's variables go over the inherited environment (a PATH entry
     // in front of the managed PATH) and under everything OpenChamber itself
     // sets for OpenCode.
@@ -996,6 +1010,94 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     } finally {
       state.currentRestartPromise = null;
       state.isRestartingOpenCode = false;
+    }
+  };
+
+  /**
+   * Stops the managed child, runs `job` while the database is closed, then
+   * starts the child again. The health monitor skips its cycle while
+   * `isRestartingOpenCode` is set, so it cannot spawn a replacement underneath
+   * the job and re-open the database.
+   *
+   * The child always comes back: a failing job is rethrown only after the
+   * restart attempt, with the restart failure taking precedence when both fail.
+   */
+  const runWithManagedOpenCodeStopped = async (job, { onRestarting } = {}) => {
+    if (state.isShuttingDown) throw new Error('OpenChamber is shutting down');
+    if (state.isExternalOpenCode) throw new Error('OpenChamber does not manage this OpenCode server');
+    if (state.currentRestartPromise) await state.currentRestartPromise;
+
+    const run = async () => {
+      if (!state.openCodeProcess) {
+        // Nothing holds the database. Keep the health monitor out while the
+        // rewrite runs, and start nothing afterwards.
+        state.isRestartingOpenCode = true;
+        try {
+          return await job();
+        } finally {
+          state.isRestartingOpenCode = false;
+        }
+      }
+      state.isRestartingOpenCode = true;
+      state.isOpenCodeReady = false;
+      const portToKill = state.openCodePort;
+      let jobResult;
+      let jobError = null;
+      let restartError = null;
+
+      try {
+        const processToStop = state.openCodeProcess;
+        await processToStop.close();
+        if (state.openCodeProcess === processToStop) state.openCodeProcess = null;
+        syncToHmrState();
+        if (portToKill) {
+          killProcessOnPort(portToKill);
+          await waitForPortRelease(portToKill, 5000);
+        }
+        state.openCodeApiPrefixDetected = true;
+        state.openCodeApiPrefix = '';
+
+        try {
+          jobResult = await job();
+        } catch (error) {
+          jobError = error;
+        }
+
+        onRestarting?.();
+        try {
+          state.openCodeProcess = await startOpenCode();
+          // The OpenCode proxy is registered once at startup and reads the port
+          // from the lifecycle state, so a maintenance restart only needs the
+          // API prefix re-detected. setupProxy() needs the Express app, which
+          // the lifecycle does not hold.
+          ensureOpenCodeApiPrefix();
+          try {
+            await onOpenCodeRestarted?.();
+          } catch (error) {
+            console.warn('[OpenCode] Restart hook after maintenance failed:', error instanceof Error ? error.message : error);
+          }
+        } catch (error) {
+          restartError = error;
+          state.lastOpenCodeError = error.message;
+          diagnosticJournal.record('managed restart failed');
+        }
+      } finally {
+        state.isRestartingOpenCode = false;
+      }
+
+      if (jobError && restartError) {
+        throw new Error(`${jobError.message}; OpenCode did not restart: ${restartError.message}`);
+      }
+      if (restartError) throw restartError;
+      if (jobError) throw jobError;
+      return jobResult;
+    };
+
+    state.currentRestartPromise = run();
+    try {
+      return await state.currentRestartPromise;
+    } finally {
+      state.currentRestartPromise = null;
     }
   };
 
@@ -1559,6 +1661,12 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     killProcessOnPort,
     startOpenCode,
     restartOpenCode,
+    runWithManagedOpenCodeStopped,
+    /** Whether the managed child is running. False for an external OpenCode. */
+    isManagedOpenCodeRunning: () => !state.isExternalOpenCode && Boolean(state.openCodeProcess),
+    isExternalServer: () => state.isExternalOpenCode === true,
+    /** Turns currently streaming, from the same source the health monitor uses. */
+    getActiveTurnCount: () => getActiveSessionCount(),
     waitForOpenCodeReady,
     waitForAgentPresence,
     refreshOpenCodeAfterConfigChange,

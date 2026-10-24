@@ -675,6 +675,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['archive', 'delete', 'expire'],
   },
   {
+    id: 'sessions.database',
+    page: 'sessions',
+    titleKey: 'settings.openchamber.database.title',
+    descriptionKey: 'settings.openchamber.database.info',
+    keywords: ['database', 'storage', 'sqlite', 'compact', 'vacuum', 'disk', 'freelist', 'reclaim'],
+  },
+  {
     id: 'sessions.desktop-launch-at-login',
     page: 'general',
     titleKey: 'settings.openchamber.desktopNetwork.field.launchAtLogin',

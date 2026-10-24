@@ -1,6 +1,7 @@
 import React from 'react';
 import { OpenChamberVisualSettings } from './OpenChamberVisualSettings';
 import { SessionRetentionSettings } from './SessionRetentionSettings';
+import { DatabaseStorageSettings } from './DatabaseStorageSettings';
 import { MergedWorktreeCleanupSettings } from './MergedWorktreeCleanupSettings';
 import { SessionWorkSettings } from './SessionWorkSettings';
 import { PasskeySettings } from './PasskeySettings';
@@ -173,6 +174,7 @@ const SessionsSectionContent: React.FC<{ runtimeEndpointEpoch: number }> = ({ ru
             <DefaultsSettings key={runtimeEndpointEpoch} />
             <SessionWorkSettings />
             <SessionRetentionSettings />
+            <DatabaseStorageSettings />
             {!isVSCodeRuntime() && <MergedWorktreeCleanupSettings />}
         </>
     );
