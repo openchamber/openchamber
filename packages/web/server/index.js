@@ -58,7 +58,7 @@ import { createFsSearchRuntime as createFsSearchRuntimeFactory } from './lib/fs/
 import { createOpenCodeLifecycleRuntime } from './lib/opencode/lifecycle.js';
 import { createOpenCodeEnvRuntime } from './lib/opencode/env-runtime.js';
 import { providedLoginShellEnvSnapshot } from './lib/opencode/login-shell-env.js';
-import { resolveOpenCodeEnvConfig } from './lib/opencode/env-config.js';
+import { resolveOpenCodeEnvConfig, resolveProxyRequestTimeoutMs } from './lib/opencode/env-config.js';
 import { createHmrStateRuntime } from './lib/opencode/hmr-state-runtime.js';
 import { createOpenCodeNetworkRuntime } from './lib/opencode/network-runtime.js';
 import { createOpenCodeAuthStateRuntime } from './lib/opencode/auth-state-runtime.js';
@@ -193,7 +193,11 @@ const MODELS_DEV_API_URL = 'https://models.dev/api.json';
 const MODELS_METADATA_CACHE_TTL = 5 * 60 * 1000;
 const CLIENT_RELOAD_DELAY_MS = 800;
 const OPEN_CODE_READY_GRACE_MS = 12000;
-const LONG_REQUEST_TIMEOUT_MS = 4 * 60 * 1000;
+// `OPENCHAMBER_PROXY_TIMEOUT_MS` overrides the OpenCode proxy response
+// deadline in milliseconds and `0` removes it; anything else keeps the
+// 4-minute default (resolveProxyRequestTimeoutMs). A value that is set but
+// not a non-negative number is warned once here at startup.
+const LONG_REQUEST_TIMEOUT_MS = resolveProxyRequestTimeoutMs(process.env, console);
 const TUNNEL_BOOTSTRAP_TTL_DEFAULT_MS = 30 * 60 * 1000;
 const TUNNEL_BOOTSTRAP_TTL_MIN_MS = 60 * 1000;
 const TUNNEL_BOOTSTRAP_TTL_MAX_MS = 24 * 60 * 60 * 1000;

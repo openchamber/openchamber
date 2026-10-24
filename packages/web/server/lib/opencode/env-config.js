@@ -21,6 +21,29 @@ export const isValidOpenCodeHostname = (value) => {
   return trimmed.split('.').every((label) => HOSTNAME_LABEL_RE.test(label));
 };
 
+// Response deadline for OpenCode upstream proxy calls, in milliseconds. The
+// proxy cuts an OpenCode response whose first byte takes longer than this, so
+// an interrupted turn also fails its in-flight tool calls, pending permission
+// approvals included. Cold self-hosted gateways can legitimately exceed the
+// 4-minute default, so `OPENCHAMBER_PROXY_TIMEOUT_MS` overrides it and `0`
+// removes the deadline; anything else keeps the default. When a logger is
+// provided, a value that is set but not a non-negative number is reported
+// before falling back (mirrors the OPENCODE_HOST handling).
+export const resolveProxyRequestTimeoutMs = (env = {}, logger = null) => {
+  const raw = typeof env.OPENCHAMBER_PROXY_TIMEOUT_MS === 'string' ? env.OPENCHAMBER_PROXY_TIMEOUT_MS.trim() : '';
+  if (!raw) return 4 * 60 * 1000;
+  const parsed = Number(raw);
+  if (Number.isFinite(parsed) && parsed >= 0) return parsed;
+  if (logger) {
+    logger.warn(
+      `[config] Ignoring OPENCHAMBER_PROXY_TIMEOUT_MS=${JSON.stringify(raw)}: `
+      + 'must be a non-negative number of milliseconds (0 removes the deadline); '
+      + 'keeping the 4-minute default',
+    );
+  }
+  return 4 * 60 * 1000;
+};
+
 export const resolveOpenCodeEnvConfig = (options = {}) => {
   const env = options.env && typeof options.env === 'object' ? options.env : {};
   const logger = options.logger ?? console;

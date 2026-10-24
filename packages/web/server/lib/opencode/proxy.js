@@ -32,7 +32,9 @@ import { withUnreadBaseline } from '../openchamber-sessions/unread-baseline.js';
  * upstream read.
  */
 export const createUpstreamReadSignal = ({ res = null, timeoutMs }) => {
-  const timeout = AbortSignal.timeout(timeoutMs);
+  // A timeoutMs of 0 or less removes the deadline; only the client-signal
+  // half stays. AbortSignal.timeout(0) would fire immediately.
+  const timeout = timeoutMs > 0 ? AbortSignal.timeout(timeoutMs) : null;
   const client = new AbortController();
   const abort = () => {
     // A finished response closes too, and its read is already done. Only a
@@ -46,7 +48,7 @@ export const createUpstreamReadSignal = ({ res = null, timeoutMs }) => {
   } else {
     res?.once?.('close', abort);
   }
-  const signal = AbortSignal.any([timeout, client.signal]);
+  const signal = timeout ? AbortSignal.any([timeout, client.signal]) : client.signal;
   signal.addEventListener('abort', () => res?.off?.('close', abort), { once: true });
   return signal;
 };
@@ -643,7 +645,9 @@ export const registerOpenCodeProxy = (app, deps) => {
   };
 
   const normalizeProxyTimeout = (value) => {
-    return Number.isFinite(value) && value > 0 ? value : 4 * 60 * 1000;
+    // 0 removes the deadline (http-proxy skips both socket timers on a falsy
+    // value; every use below gates on a positive timeout itself).
+    return Number.isFinite(value) && value >= 0 ? value : 4 * 60 * 1000;
   };
 
   const PROXY_REQUEST_TIMEOUT_MS = normalizeProxyTimeout(LONG_REQUEST_TIMEOUT_MS);
@@ -675,6 +679,10 @@ export const registerOpenCodeProxy = (app, deps) => {
   };
 
   const applyProxyResponseDeadline = (req, res, next) => {
+    if (PROXY_REQUEST_TIMEOUT_MS <= 0) {
+      next();
+      return;
+    }
     const timeout = setTimeout(() => {
       req[PROXY_TIMEOUT_MARKER] = true;
       if (sendProxyErrorResponse(res, 504)) {
@@ -1205,6 +1213,8 @@ export const registerOpenCodeProxy = (app, deps) => {
   const resolveOpenCodeProxyAgent = createOpenCodeProxyAgentResolver(resolveProxyTarget);
 
   const createApiProxy = (timeoutMs) => createProxyMiddleware({
+    // A timeoutMs of 0 disables both timers: node-http-proxy only applies
+    // them when the option is truthy.
     target: resolveProxyTarget(),
     get agent() {
       return resolveOpenCodeProxyAgent();
