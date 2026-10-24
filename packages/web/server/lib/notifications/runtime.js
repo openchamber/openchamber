@@ -3,6 +3,11 @@ import { createSessionActivityProbe } from '../opencode/session-activity.js';
 import { isEnterpriseMode } from '../enterprise-mode.js';
 import { truncateNotificationText } from './message.js';
 import {
+  decideVerdictEvent,
+  readRunningTools,
+  TURN_END_CONTEXT_MESSAGE_LIMIT,
+} from './turn-end-verdict.js';
+import {
   defaultNotificationTemplates,
   notificationTexts,
   renderNotificationText,
@@ -28,6 +33,11 @@ export const createNotificationTriggerRuntime = (deps) => {
     isAnyInteractiveClientVisible,
     buildOpenCodeUrl,
     getOpenCodeAuthHeaders,
+    // `(sessionId) => Promise<scores | null>`: the session-work battery's
+    // shared turn-end answer (one Jev call feeds the composer hints and these
+    // notifications). Null when no check ran — the verdict events then fall
+    // back to the generic completion notification.
+    turnEndVerdictFor = null,
     // OpenChamber's own session metadata (the goal lives there, not on the
     // OpenCode record). Optional: without it no goal can suppress a push.
     readSessionMetadata = null,
@@ -101,6 +111,9 @@ export const createNotificationTriggerRuntime = (deps) => {
     goal_complete: 'Goal complete',
     goal_blocked: 'Goal blocked',
     goal_budget: 'Goal reached its token budget',
+    work_done: 'Work looks done',
+    review_ready: 'Changes ready for review',
+    waiting_on_you: 'Waiting on you',
   };
 
   const genericTitleOf = (payload) => APNS_TITLE_BY_TYPE[payload?.data?.type] || 'Agent update';
@@ -175,6 +188,53 @@ export const createNotificationTriggerRuntime = (deps) => {
   let getIsWindowFocused = typeof deps.getIsWindowFocused === 'function'
     ? deps.getIsWindowFocused
     : null;
+
+  // ── Turn-end verdicts ──
+
+  // The push `data.type` names the APNs title; the tag stays the ready tag so
+  // a verdict replaces an earlier generic banner rather than stacking on it.
+  const VERDICT_TYPE_BY_EVENT = {
+    workDone: 'work_done',
+    reviewReady: 'review_ready',
+    waitingOnYou: 'waiting_on_you',
+  };
+
+  /** Whether any of the session's own background tasks is still running. */
+  const fetchRunningTools = async (sessionId, source) => {
+    try {
+      const base = source.buildOpenCodeUrl(`/api/session/${encodeURIComponent(sessionId)}/message`, '');
+      const response = await source.fetchImpl(`${base}?limit=${TURN_END_CONTEXT_MESSAGE_LIMIT}`, {
+        method: 'GET',
+        headers: { Accept: 'application/json', ...source.getOpenCodeAuthHeaders() },
+        signal: AbortSignal.timeout(2000),
+      });
+      if (!response.ok) return false;
+      const page = await response.json().catch(() => null);
+      return readRunningTools(page?.data);
+    } catch {
+      return false;
+    }
+  };
+
+  /**
+   * The battery's shared verdict for the turn that just ended. The battery
+   * runs at the same turn end, so the promise is in flight; the ready push
+   * never sits on a slow classifier for long — past `VERDICT_WAIT_MS` it
+   * announces the generic copy instead.
+   */
+  const VERDICT_WAIT_MS = 2500;
+  const awaitTurnEndVerdict = async (sessionId) => {
+    const pending = turnEndVerdictFor?.(sessionId) ?? null;
+    if (!pending) return null;
+    try {
+      return await Promise.race([
+        pending,
+        new Promise((resolve) => setTimeout(() => resolve(null), VERDICT_WAIT_MS)),
+      ]);
+    } catch {
+      return null;
+    }
+  };
 
   const setGetIsWindowFocused = (cb) => {
     getIsWindowFocused = typeof cb === 'function' ? cb : null;
@@ -507,7 +567,18 @@ export const createNotificationTriggerRuntime = (deps) => {
           }
         }
 
-        if (settings.notifyOnCompletion === false) {
+        // Verdict events may replace the generic completion notification, so
+        // the turn is still judged with Agent Completion off: the checkbox
+        // combination is the degradation strategy (both on = the verdict
+        // upgrades the copy; only verdicts on = only confident verdicts are
+        // announced).
+        const verdictSettingOn = {
+          workDone: settings.notifyOnWorkDone === true,
+          reviewReady: settings.notifyOnReviewReady === true,
+          waitingOnYou: settings.notifyOnWaitingOnYou === true,
+        };
+        const verdictEventsOn = verdictSettingOn.workDone || verdictSettingOn.reviewReady || verdictSettingOn.waitingOnYou;
+        if (settings.notifyOnCompletion === false && !verdictEventsOn) {
           return;
         }
 
@@ -529,25 +600,65 @@ export const createNotificationTriggerRuntime = (deps) => {
         }
         lastReadyNotificationAt.set(sessionId, now);
 
+        const isSubtask = Boolean(await fetchSessionParentId(sessionId, notificationDirectory, spaceId));
+
+        // A turn that handed work to the session's own background tasks — a
+        // shell, a browser task — is a pause, not a turn end: OpenCode wakes
+        // the session when the task lands, and that turn's end is the one to
+        // announce. Only verdict events defer: a user who opted into none keeps
+        // the ready notification at the idle, and the message read it costs.
+        // A page that cannot be read answers "nothing running": a missed ready
+        // is worse than an early one.
+        const pausedForBackgroundWork = verdictEventsOn && await fetchRunningTools(sessionId, source);
+        if (pausedForBackgroundWork) {
+          return;
+        }
+
+        // The battery's shared verdict, asked once for the hints and this
+        // notification alike. Verdicts describe the user's own session: a
+        // subagent's turn ending hands its result to the parent, which is a
+        // pause for it, not a verdict moment either.
+        let verdictEvent = null;
+        if (verdictEventsOn && !isSubtask) {
+          const scores = await awaitTurnEndVerdict(sessionId);
+          verdictEvent = decideVerdictEvent(scores, verdictSettingOn);
+        }
+
+        // No verdict announced and no generic to fall back to: silence is
+        // what "only verdicts on" means.
+        if (!verdictEvent && settings.notifyOnCompletion === false) {
+          return;
+        }
+
         const texts = notificationTexts(settings.locale);
-        let title = renderNotificationText(texts.readyTitle, {
-          agent_name: formatMode(info?.mode),
-        });
-        let body = renderNotificationText(texts.readyMessage, {
-          model_name: formatModelId(info?.modelID),
-        });
+        const verdictTitleByEvent = {
+          workDone: texts.workDoneTitle,
+          reviewReady: texts.reviewReadyTitle,
+          waitingOnYou: texts.waitingOnYouTitle,
+        };
+        let title = verdictEvent
+          ? verdictTitleByEvent[verdictEvent]
+          : renderNotificationText(texts.readyTitle, {
+            agent_name: formatMode(info?.mode),
+          });
+        let body = verdictEvent
+          ? ''
+          : renderNotificationText(texts.readyMessage, {
+            model_name: formatModelId(info?.modelID),
+          });
         let sessionName = '';
         let reply = '';
 
         try {
           const templates = settings.notificationTemplates || {};
           const defaults = defaultNotificationTemplates(settings.locale);
-          const isSubtask = await fetchSessionParentId(sessionId, notificationDirectory, spaceId);
-          const usesSubtaskTemplate = Boolean(isSubtask) && settings.notifyOnSubtasks !== false;
-          const completionTemplate = withTemplateDefaults(
-            usesSubtaskTemplate ? (templates.subtask ?? templates.completion) : templates.completion,
-            usesSubtaskTemplate ? defaults.subtask : defaults.completion,
-          );
+          const usesSubtaskTemplate = isSubtask && settings.notifyOnSubtasks !== false;
+          const resolvedTemplate = verdictEvent
+            ? withTemplateDefaults(templates[verdictEvent], defaults[verdictEvent])
+            : withTemplateDefaults(
+              usesSubtaskTemplate ? (templates.subtask ?? templates.completion) : templates.completion,
+              usesSubtaskTemplate ? defaults.subtask : defaults.completion,
+            );
 
           const variables = await buildTemplateVariables(payload, sessionId, source);
           sessionName = typeof variables.session_name === 'string' ? variables.session_name : sessionName;
@@ -564,13 +675,21 @@ export const createNotificationTriggerRuntime = (deps) => {
           });
           reply = variables.last_message;
 
-          const resolvedTitle = resolveNotificationTemplate(completionTemplate.title, variables);
-          const resolvedBody = resolveNotificationTemplate(completionTemplate.message, variables);
+          const resolvedTitle = resolveNotificationTemplate(resolvedTemplate.title, variables);
+          const resolvedBody = resolveNotificationTemplate(resolvedTemplate.message, variables);
           if (resolvedTitle) title = resolvedTitle;
-          if (shouldApplyResolvedTemplateMessage(completionTemplate.message, resolvedBody, variables)) body = resolvedBody;
+          if (shouldApplyResolvedTemplateMessage(resolvedTemplate.message, resolvedBody, variables)) body = resolvedBody;
         } catch (error) {
           console.warn('[Notification] Template resolution failed, using defaults:', error?.message || error);
         }
+
+        // A verdict says what happened; the reply is still the best body when
+        // no template produced one.
+        if (verdictEvent && !body) {
+          body = reply;
+        }
+
+        const notificationType = verdictEvent ? VERDICT_TYPE_BY_EVENT[verdictEvent] : 'ready';
 
         if (settings.nativeNotificationsEnabled) {
           const notificationPayload = {
@@ -596,7 +715,7 @@ export const createNotificationTriggerRuntime = (deps) => {
               url: buildSessionDeepLinkUrl(sessionId),
               sessionId,
               sessionName,
-              type: 'ready',
+              type: notificationType,
             },
           },
           { requireNoSse: true },

@@ -16,6 +16,9 @@ const en = {
   permissionBody: 'Agent is waiting for your approval',
   planModeTitle: 'Switch to plan mode',
   buildModeTitle: 'Switch to build mode',
+  workDoneTitle: 'Work looks done',
+  reviewReadyTitle: 'Changes ready for review',
+  waitingOnYouTitle: 'Waiting on you',
 };
 
 const de = {
@@ -29,6 +32,9 @@ const de = {
   permissionBody: 'Der Agent wartet auf deine Freigabe',
   planModeTitle: 'Zum Planmodus wechseln',
   buildModeTitle: 'Zum Build-Modus wechseln',
+  workDoneTitle: 'Arbeit scheint abgeschlossen',
+  reviewReadyTitle: 'Änderungen bereit zur Durchsicht',
+  waitingOnYouTitle: 'Wartet auf dich',
 };
 
 const fr = {
@@ -42,6 +48,9 @@ const fr = {
   permissionBody: "L'agent attend votre autorisation",
   planModeTitle: 'Passer en mode plan',
   buildModeTitle: 'Passer en mode build',
+  workDoneTitle: 'Le travail semble terminé',
+  reviewReadyTitle: 'Modifications prêtes pour relecture',
+  waitingOnYouTitle: 'À vous de jouer',
 };
 
 const nl = {
@@ -55,6 +64,9 @@ const nl = {
   permissionBody: 'De agent wacht op je goedkeuring',
   planModeTitle: 'Naar planmodus schakelen',
   buildModeTitle: 'Naar buildmodus schakelen',
+  workDoneTitle: 'Werk lijkt afgerond',
+  reviewReadyTitle: 'Wijzigingen klaar voor review',
+  waitingOnYouTitle: 'Wacht op jou',
 };
 
 const zhCN = {
@@ -68,6 +80,9 @@ const zhCN = {
   permissionBody: '智能体正在等待你的批准',
   planModeTitle: '切换到 Plan 模式',
   buildModeTitle: '切换到 Build 模式',
+  workDoneTitle: '工作看起来已完成',
+  reviewReadyTitle: '有改动可查看',
+  waitingOnYouTitle: '等你处理',
 };
 
 const zhTW = {
@@ -81,6 +96,9 @@ const zhTW = {
   permissionBody: '智慧體正在等待你的核准',
   planModeTitle: '切換到 Plan 模式',
   buildModeTitle: '切換到 Build 模式',
+  workDoneTitle: '工作看起來已完成',
+  reviewReadyTitle: '有變更可檢視',
+  waitingOnYouTitle: '等你處理',
 };
 
 const uk = {
@@ -94,6 +112,9 @@ const uk = {
   permissionBody: 'Агент чекає на ваше схвалення',
   planModeTitle: 'Перейти в режим планування',
   buildModeTitle: 'Перейти в режим збирання',
+  workDoneTitle: 'Роботу виглядає завершеною',
+  reviewReadyTitle: 'Зміни готові до перегляду',
+  waitingOnYouTitle: 'Чекаємо на вас',
 };
 
 const es = {
@@ -107,6 +128,9 @@ const es = {
   permissionBody: 'El agente espera tu aprobación',
   planModeTitle: 'Cambiar al modo plan',
   buildModeTitle: 'Cambiar al modo build',
+  workDoneTitle: 'El trabajo parece terminado',
+  reviewReadyTitle: 'Cambios listos para revisar',
+  waitingOnYouTitle: 'Te toca a ti',
 };
 
 const ptBR = {
@@ -120,6 +144,9 @@ const ptBR = {
   permissionBody: 'O agente está aguardando sua aprovação',
   planModeTitle: 'Mudar para o modo plano',
   buildModeTitle: 'Mudar para o modo build',
+  workDoneTitle: 'O trabalho parece concluído',
+  reviewReadyTitle: 'Alterações prontas para revisão',
+  waitingOnYouTitle: 'Esperando você',
 };
 
 const ko = {
@@ -133,6 +160,9 @@ const ko = {
   permissionBody: '에이전트가 승인을 기다리고 있습니다',
   planModeTitle: 'Plan 모드로 전환',
   buildModeTitle: 'Build 모드로 전환',
+  workDoneTitle: '작업이 완료된 것 같습니다',
+  reviewReadyTitle: '검토할 변경 사항이 있습니다',
+  waitingOnYouTitle: '사용자의 확인이 필요합니다',
 };
 
 const pl = {
@@ -146,6 +176,9 @@ const pl = {
   permissionBody: 'Agent czeka na Twoją zgodę',
   planModeTitle: 'Przełącz na tryb planowania',
   buildModeTitle: 'Przełącz na tryb budowania',
+  workDoneTitle: 'Praca wygląda na ukończoną',
+  reviewReadyTitle: 'Zmiany gotowe do przeglądu',
+  waitingOnYouTitle: 'Czekamy na ciebie',
 };
 
 const ja = {
@@ -159,6 +192,9 @@ const ja = {
   permissionBody: 'エージェントが承認を待っています',
   planModeTitle: 'Plan モードに切り替え',
   buildModeTitle: 'Build モードに切り替え',
+  workDoneTitle: '作業は完了したようです',
+  reviewReadyTitle: 'レビューできる変更があります',
+  waitingOnYouTitle: 'あなたの確認待ちです',
 };
 
 const tr = {
@@ -172,6 +208,9 @@ const tr = {
   permissionBody: 'Ajan onayınızı bekliyor',
   planModeTitle: 'Plan moduna geç',
   buildModeTitle: 'Build moduna geç',
+  workDoneTitle: 'İş bitti görünüyor',
+  reviewReadyTitle: 'İncelemeye hazır değişiklikler',
+  waitingOnYouTitle: 'Seni bekliyor',
 };
 
 const ar = {
@@ -185,6 +224,9 @@ const ar = {
   permissionBody: 'الوكيل بانتظار موافقتك',
   planModeTitle: 'التبديل إلى وضع التخطيط',
   buildModeTitle: 'التبديل إلى وضع البناء',
+  workDoneTitle: 'يبدو العمل منجزًا',
+  reviewReadyTitle: 'تغييرات جاهزة للمراجعة',
+  waitingOnYouTitle: 'بانتظارك',
 };
 
 const he = {
@@ -198,6 +240,9 @@ const he = {
   permissionBody: 'הסוכן ממתין לאישורך',
   planModeTitle: 'מעבר למצב תכנון',
   buildModeTitle: 'מעבר למצב בנייה',
+  workDoneTitle: 'העבודה נראית גמורה',
+  reviewReadyTitle: 'שינויים מוכנים לבדיקה',
+  waitingOnYouTitle: 'מחכים לך',
 };
 
 export const NOTIFICATION_TEXT_BY_LOCALE = {
@@ -258,6 +303,11 @@ export function defaultNotificationTemplates(locale) {
     error: { title: texts.errorTitle, message: '{last_message}' },
     question: { title: texts.questionTitle, message: '{last_message}' },
     subtask: { title: texts.readyTitle, message: texts.readyMessage },
+    // A verdict exists to say what happened, so its body is the reply, like
+    // the error and question bodies; the title carries the state.
+    workDone: { title: texts.workDoneTitle, message: '{last_message}' },
+    reviewReady: { title: texts.reviewReadyTitle, message: '{last_message}' },
+    waitingOnYou: { title: texts.waitingOnYouTitle, message: '{last_message}' },
   };
 }
 

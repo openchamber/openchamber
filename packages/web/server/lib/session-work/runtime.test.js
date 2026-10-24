@@ -307,3 +307,60 @@ describe('session work runtime: a turn ended', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
+
+describe('session work runtime: verdict sharing with the notifications', () => {
+  it('widens the ask with the notify events without widening the hint writes', async () => {
+    stubOpenCode();
+    const solo = makeRuntime({
+      settings: { enabled: false, reviewOffer: false, notifyWorkDone: true, notifyReviewReady: true },
+      answers: { wrap_up: { noul: 0.9 }, review_ready: { noul: 0.8 } },
+    });
+
+    const gate = await solo.runtime.evaluateTurnEnd({ sessionId: 'ses_1', directory: '/repo', assist: { recap: false, suggestion: false } });
+
+    expect(Object.keys(solo.jev.ask.mock.calls[0][0].questions)).toEqual(['wrap_up', 'review_ready']);
+    // The hints stay gated by their own settings: nothing was written even
+    // though both scores fired.
+    expect(gate).toBeNull();
+    expect(solo.records.get('ses_1')).toEqual({});
+    // The notification reads the shared scores.
+    await expect(solo.runtime.turnEndVerdictFor('ses_1')).resolves.toEqual({ wrapUp: 0.9, review: 0.8, needsYou: null });
+  });
+
+  it('asks needs_you only for the waiting notification', async () => {
+    stubOpenCode();
+    const waiting = makeRuntime({
+      settings: { enabled: false, reviewOffer: false, notifyWaitingOnYou: true },
+      answers: { needs_you: { noul: 0.97 } },
+    });
+
+    await waiting.runtime.evaluateTurnEnd({ sessionId: 'ses_1', directory: '/repo', assist: { recap: false, suggestion: false } });
+
+    expect(Object.keys(waiting.jev.ask.mock.calls[0][0].questions)).toEqual(['needs_you']);
+    await expect(waiting.runtime.turnEndVerdictFor('ses_1')).resolves.toEqual({ wrapUp: null, review: null, needsYou: 0.97 });
+  });
+
+  it('leaves no pending verdict when nothing was asked', async () => {
+    stubOpenCode();
+    const { runtime } = makeRuntime({ settings: { enabled: false, reviewOffer: false } });
+
+    await runtime.evaluateTurnEnd({ sessionId: 'ses_1', directory: '/repo', assist: { recap: false, suggestion: false } });
+
+    expect(runtime.turnEndVerdictFor('ses_1')).toBeNull();
+  });
+
+  it('settles a failed check to null, and a late consumer still reads the settled answer', async () => {
+    stubOpenCode();
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { runtime } = makeRuntime({ askError: new Error('endpoint down'), settings: { enabled: true, reviewOffer: false } });
+
+    const check = runtime.evaluateTurnEnd({ sessionId: 'ses_1', directory: '/repo', assist: { recap: false, suggestion: false } });
+    // The promise is in flight from the start: a consumer awaiting at the
+    // idle event already finds it.
+    const pending = runtime.turnEndVerdictFor('ses_1');
+    expect(pending).toBeInstanceOf(Promise);
+    await check;
+    await expect(pending).resolves.toBeNull();
+    expect(runtime.turnEndVerdictFor('ses_1')).toBe(pending);
+  });
+});

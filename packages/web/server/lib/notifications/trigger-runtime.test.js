@@ -10,9 +10,9 @@ import { createNotificationTemplateRuntime } from './template-runtime.js';
  * agent and model from the start, a user abort announces nothing, and an
  * active goal (which lives in OpenChamber's own metadata) silences the push.
  */
-const makeRuntime = ({ metadata = {}, settings = {} } = {}) => {
+const makeRuntime = ({ metadata = {}, settings = {}, verdict = null } = {}) => {
   const emitDesktopNotification = vi.fn(() => true);
-  const runtime = createNotificationTriggerRuntime({
+  const deps = {
     readSettingsFromDisk: async () => ({ nativeNotificationsEnabled: true, notificationMode: 'always', notifyOnCompletion: true, ...settings }),
     prepareNotificationLastMessage: async ({ message }) => message,
     buildTemplateVariables: async () => ({}),
@@ -28,7 +28,9 @@ const makeRuntime = ({ metadata = {}, settings = {} } = {}) => {
     buildOpenCodeUrl: (path) => `http://opencode.test${path}`,
     getOpenCodeAuthHeaders: () => ({}),
     readSessionMetadata: async () => metadata,
-  });
+  };
+  if (verdict) deps.turnEndVerdictFor = verdict.turnEndVerdictFor ?? (async () => verdict.scores ?? null);
+  const runtime = createNotificationTriggerRuntime(deps);
   return { runtime, emitDesktopNotification };
 };
 
@@ -560,5 +562,183 @@ describe('notifications for a chat of an isolated space', () => {
     expect(emitDesktopNotification).toHaveBeenCalledTimes(1);
     expect(sendApnsToAllUiSessions.mock.calls[0][0]).toMatchObject({ body: 'Session', sealed: undefined });
     expect(hostFetch).not.toHaveBeenCalled();
+  });
+});
+
+describe('turn-end verdict notifications', () => {
+  // The pause check reads the session's message page (newest first); the
+  // session record answers `data: {}` (no parentID → a main session).
+  const stubSessionReads = (page = null) => {
+    vi.stubGlobal('fetch', vi.fn(async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith('/message')) return Response.json({ data: page ?? [] });
+      return Response.json({ data: {} });
+    }));
+  };
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('announces the shared verdict instead of the generic copy', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    stubSessionReads();
+    const seen = [];
+    const sendPushToAllUiSessions = vi.fn(async () => undefined);
+    const runtime = createNotificationTriggerRuntime({
+      readSettingsFromDisk: async () => ({ nativeNotificationsEnabled: true, notificationMode: 'always', notifyOnWorkDone: true }),
+      prepareNotificationLastMessage: async ({ message }) => message,
+      buildTemplateVariables: async () => ({}),
+      extractLastMessageText: () => 'Pushed to main.',
+      fetchLastAssistantMessageText: async () => 'Pushed to main.',
+      resolveNotificationTemplate: () => '',
+      shouldApplyResolvedTemplateMessage: () => false,
+      emitDesktopNotification: () => true,
+      broadcastUiNotification: vi.fn(),
+      sendPushToAllUiSessions,
+      sendApnsToAllUiSessions: vi.fn(async () => undefined),
+      isAnyInteractiveClientVisible: () => true,
+      buildOpenCodeUrl: (path) => `http://opencode.test${path}`,
+      getOpenCodeAuthHeaders: () => ({}),
+      readSessionMetadata: async () => ({}),
+      turnEndVerdictFor: (sessionId) => { seen.push(sessionId); return Promise.resolve({ wrapUp: 0.99, review: null, needsYou: null }); },
+    });
+
+    await runtime.maybeSendPushForTrigger(stepStarted('ses_v', 'msg_v'));
+    await runtime.maybeSendPushForTrigger(turnEnded('ses_v'));
+
+    const [pushPayload] = sendPushToAllUiSessions.mock.calls[0];
+    expect(pushPayload.title).toBe('Work looks done');
+    // Same banner identity as the generic ready push: a verdict replaces an
+    // earlier banner instead of stacking on it.
+    expect(pushPayload.tag).toBe('ready-ses_v');
+    expect(pushPayload.data.type).toBe('work_done');
+    // The battery's verdict was asked for exactly this session.
+    expect(seen).toEqual(['ses_v']);
+  });
+
+  it('announces waiting on you', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    stubSessionReads();
+    const { runtime, emitDesktopNotification } = makeRuntime({
+      settings: { notifyOnWaitingOnYou: true },
+      verdict: { scores: { wrapUp: null, review: null, needsYou: 0.98 } },
+    });
+
+    await runtime.maybeSendPushForTrigger(turnEnded('ses_v'));
+
+    expect(emitDesktopNotification.mock.calls[0][0].title).toBe('Waiting on you');
+  });
+
+  it('announces changes ready for review from the orthogonal score', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    stubSessionReads();
+    const { runtime, emitDesktopNotification } = makeRuntime({
+      settings: { notifyOnReviewReady: true },
+      verdict: { scores: { wrapUp: null, review: 0.8, needsYou: null } },
+    });
+
+    await runtime.maybeSendPushForTrigger(turnEnded('ses_v'));
+
+    expect(emitDesktopNotification.mock.calls[0][0].title).toBe('Changes ready for review');
+  });
+
+  it('keeps one verdict per turn: done outranks waiting, waiting outranks a review', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    stubSessionReads();
+    const all = makeRuntime({
+      settings: { notifyOnWorkDone: true, notifyOnWaitingOnYou: true, notifyOnReviewReady: true },
+      verdict: { scores: { wrapUp: 0.9, review: 0.9, needsYou: 0.9 } },
+    });
+    await all.runtime.maybeSendPushForTrigger(turnEnded('ses_v'));
+    expect(all.emitDesktopNotification).toHaveBeenCalledTimes(1);
+    expect(all.emitDesktopNotification.mock.calls[0][0].title).toBe('Work looks done');
+
+    const waiting = makeRuntime({
+      settings: { notifyOnWorkDone: true, notifyOnWaitingOnYou: true, notifyOnReviewReady: true },
+      verdict: { scores: { wrapUp: 0.2, review: 0.9, needsYou: 0.9 } },
+    });
+    await waiting.runtime.maybeSendPushForTrigger(turnEnded('ses_v'));
+    expect(waiting.emitDesktopNotification.mock.calls[0][0].title).toBe('Waiting on you');
+  });
+
+  it('falls back to the generic copy when no score crosses its measured threshold', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    stubSessionReads();
+    const { runtime, emitDesktopNotification } = makeRuntime({
+      settings: { notifyOnWorkDone: true },
+      verdict: { scores: { wrapUp: 0.7, review: null, needsYou: null } },
+    });
+
+    await runtime.maybeSendPushForTrigger(stepStarted('ses_v', 'msg_v'));
+    await runtime.maybeSendPushForTrigger(turnEnded('ses_v'));
+
+    expect(emitDesktopNotification).toHaveBeenCalledTimes(1);
+    expect(emitDesktopNotification.mock.calls[0][0].title).toBe('Build is ready');
+  });
+
+  it('stays silent when only verdict events are on and none fired', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    stubSessionReads();
+    const { runtime, emitDesktopNotification } = makeRuntime({
+      settings: { notifyOnCompletion: false, notifyOnWorkDone: true },
+      verdict: { scores: { wrapUp: 0.7, review: null, needsYou: null } },
+    });
+
+    await runtime.maybeSendPushForTrigger(turnEnded('ses_v'));
+
+    expect(emitDesktopNotification).not.toHaveBeenCalled();
+  });
+
+  it('stays silent while the session\'s own background task runs, without awaiting a verdict', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    stubSessionReads([
+      { type: 'assistant', finish: 'stop', content: [{ type: 'text', text: 'Migration is running in the background.' }] },
+      { type: 'assistant', content: [{ type: 'tool', state: { status: 'running' } }] },
+    ]);
+    const consulted = [];
+    const { runtime, emitDesktopNotification } = makeRuntime({
+      settings: { notifyOnWorkDone: true },
+      verdict: {
+        turnEndVerdictFor: (sessionId) => { consulted.push(sessionId); return Promise.resolve({ wrapUp: 0.99, review: null, needsYou: null }); },
+      },
+    });
+
+    await runtime.maybeSendPushForTrigger(turnEnded('ses_v'));
+
+    // The pause never consults the verdict and never announces.
+    expect(emitDesktopNotification).not.toHaveBeenCalled();
+    expect(consulted).toEqual([]);
+  });
+
+  it('announces a ready for a user who opted into no verdict while a background task runs', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    stubSessionReads([
+      { type: 'assistant', finish: 'stop', content: [{ type: 'text', text: 'Migration is running in the background.' }] },
+      { type: 'assistant', content: [{ type: 'tool', state: { status: 'running' } }] },
+    ]);
+    const { runtime, emitDesktopNotification } = makeRuntime();
+
+    await runtime.maybeSendPushForTrigger(turnEnded('ses_v'));
+
+    // The pause only defers a verdict: with no verdict events on, the idle
+    // announces at once, as it did before the verdict events existed.
+    expect(emitDesktopNotification).toHaveBeenCalledTimes(1);
+    expect(emitDesktopNotification.mock.calls[0][0].kind).toBe('ready');
+  });
+
+  it('falls back to the generic copy when no verdict was asked (no battery, no settings)', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    stubSessionReads();
+    const { runtime, emitDesktopNotification } = makeRuntime({
+      settings: { notifyOnWorkDone: true },
+      verdict: { turnEndVerdictFor: async () => null },
+    });
+
+    await runtime.maybeSendPushForTrigger(stepStarted('ses_v', 'msg_v'));
+    await runtime.maybeSendPushForTrigger(turnEnded('ses_v'));
+
+    expect(emitDesktopNotification).toHaveBeenCalledTimes(1);
+    expect(emitDesktopNotification.mock.calls[0][0].title).toBe('Build is ready');
   });
 });

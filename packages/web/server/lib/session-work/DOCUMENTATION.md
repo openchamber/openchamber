@@ -17,7 +17,9 @@ Small Model is worth waking.
 - `state.js` — `metadata.openchamber.work` and the merge patches that change
   it. Every patch is decided against the record at write time.
 - `runtime.js` — `createSessionWorkRuntime`: `processPayload` (a sent message,
-  a turn start), `evaluateTurnEnd` (called by session assist), `stop`.
+  a turn start), `evaluateTurnEnd` (called by session assist),
+  `turnEndVerdictFor` (the shared verdict promise for the notifications),
+  `stop`.
 
 ## State
 
@@ -82,10 +84,15 @@ whether a message started work, and every session now counts instead.
 
 ## When Jev is asked
 
-- A turn ended: session assist calls `evaluateTurnEnd` before it arms its quiet
-  window. One call carries only the questions that apply: `wrap_up` while in
-  work, `review_ready` while the review offer is on, `recap` / `next_step` for
-  the assist fields the user has on. No applicable question, no call.
+- A turn ended: session assist calls `evaluateTurnEnd` before it arms its
+  quiet window. One call carries only the questions that apply: `wrap_up` while
+  in work (or the done notification is on), `review_ready` while the review
+  offer is on (or the review notification is on), `needs_you` while the
+  waiting notification is on, `recap` / `next_step` for the assist fields the
+  user has on. No applicable question, no call. The notify settings widen
+  which questions are asked; what the hints write stays gated by their own
+  settings, and the same answers settle `turnEndVerdictFor` — the
+  notifications read the shared scores instead of asking again.
 - Jev reads the request's first 1500 characters, the answer's first and last
   500, and three earlier turns cut as routing cuts them.
 

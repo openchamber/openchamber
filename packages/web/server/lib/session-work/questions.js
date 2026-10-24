@@ -60,11 +60,32 @@ const NEXT_STEP = {
   },
 };
 
+/**
+ * The goal audit's `needs_user` criteria, moved from goal to turn scope, for
+ * the "Waiting on you" notification event. A stopped-part-way turn is
+ * deliberately NOT a yes — that state is `next_step`'s true face, and
+ * scoring it here too made the two fire together in testing; the
+ * notification stays quiet on it.
+ */
+const NEEDS_YOU = {
+  question: 'After `answer`, is the agent waiting for the user before the work can go on?',
+  criteria: {
+    true: '`answer` asks the user to decide, choose, answer, test, or approve something, or says the work cannot go on without something only the user can provide: credentials, login, keys, access, a decision only the user can make, a device it cannot reach, or an external failure it cannot work around.',
+    false: 'The agent stopped part-way and would continue if told, delivered an answer or analysis, or the work is done; nothing waits on the user.',
+  },
+};
+
 const WRAP_UP_THRESHOLD = 0.8;
 const REVIEW_READY_THRESHOLD = 0.7;
 /** The recap is skipped only when Jev is nearly sure there is nothing to remind. */
 const RECAP_SKIP_BELOW = 0.3;
 const NEXT_STEP_THRESHOLD = 0.5;
+/** The needs-you verdict fires as rarely as wrap-up: an interruption-grade
+ * signal trades recall for precision. Same floor as WRAP_UP so the two
+ * interruption-grade verdicts sit on one line. */
+export const NEEDS_YOU_THRESHOLD = 0.8;
+
+export { WRAP_UP_THRESHOLD, REVIEW_READY_THRESHOLD };
 
 const noul = (context, { question, criteria }) => {
   const asked = { type: 'noul', instructions: [context, question] };
@@ -74,14 +95,16 @@ const noul = (context, { question, criteria }) => {
 
 /**
  * The request Jev reads when a turn ended, or null when nothing is asked.
- * `ask` names the groups: `wrapUp` (the session is in work), `reviewReady`
- * (the review offer is on), `recap` and `nextStep` (the assist fields the
- * user has on).
+ * `ask` names the groups: `wrapUp` (the session is in work or the done
+ * notification is on), `reviewReady` (the review offer or the review
+ * notification is on), `needsYou` (the waiting notification is on), `recap`
+ * and `nextStep` (the assist fields the user has on).
  */
 export const buildTurnEndRequest = ({ history, request, answer, ask }) => {
   const questions = {};
   if (ask.wrapUp) questions.wrap_up = noul(TURN_END_CONTEXT, { question: WRAP_UP });
   if (ask.reviewReady) questions.review_ready = noul(TURN_END_CONTEXT, REVIEW_READY);
+  if (ask.needsYou) questions.needs_you = noul(TURN_END_CONTEXT, NEEDS_YOU);
   if (ask.recap) questions.recap = noul(TURN_END_CONTEXT, RECAP);
   if (ask.nextStep) questions.next_step = noul(TURN_END_CONTEXT, NEXT_STEP);
   if (Object.keys(questions).length === 0) return null;
@@ -100,6 +123,19 @@ export const decideReviewReady = (answers) => {
   const score = answerOf(answers, 'review_ready');
   return score !== null && score >= REVIEW_READY_THRESHOLD;
 };
+
+/**
+ * The verdict scores a turn-end notification maps onto its events, or nulls
+ * for the questions this turn did not ask. The thresholds live with the
+ * callers: the hint path decides through `decideWrapUp`/`decideReviewReady`,
+ * the notification path through its own priority over the same measured
+ * numbers.
+ */
+export const turnEndScores = (answers) => ({
+  wrapUp: answerOf(answers, 'wrap_up'),
+  review: answerOf(answers, 'review_ready'),
+  needsYou: answerOf(answers, 'needs_you'),
+});
 
 /**
  * Which assist fields are worth the Small Model. A field Jev did not answer

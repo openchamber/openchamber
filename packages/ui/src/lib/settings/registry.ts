@@ -585,6 +585,11 @@ export const SETTINGS_REGISTRY = {
   notifyOnCompletion: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('notifyOnCompletion', (v) => useUIStore.getState().setNotifyOnCompletion(v)) }),
   notifyOnError: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('notifyOnError', (v) => useUIStore.getState().setNotifyOnError(v)) }),
   notifyOnQuestion: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('notifyOnQuestion', (v) => useUIStore.getState().setNotifyOnQuestion(v)) }),
+  // Turn-end verdict events (classifier-judged): opt-in, unlike the
+  // protocol-level events above.
+  notifyOnWorkDone: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('notifyOnWorkDone', (v) => useUIStore.getState().setNotifyOnWorkDone(v)) }),
+  notifyOnReviewReady: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('notifyOnReviewReady', (v) => useUIStore.getState().setNotifyOnReviewReady(v)) }),
+  notifyOnWaitingOnYou: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('notifyOnWaitingOnYou', (v) => useUIStore.getState().setNotifyOnWaitingOnYou(v)) }),
   notificationTemplates: field<NotificationTemplates>({
     scope: 'profile',
     parse: parseNotificationTemplates,

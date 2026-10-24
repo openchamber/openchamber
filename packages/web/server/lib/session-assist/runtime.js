@@ -22,6 +22,11 @@ const getSessionAssistTargets = () => {
   return {
     recap: settings.sessionRecapEnabled !== false,
     suggestion: settings.sessionSuggestionEnabled !== false,
+    // A verdict notification reads the turn-end check even with both assist
+    // fields off: session-work answers it from the same call.
+    turnEndVerdicts: settings.notifyOnWorkDone === true
+      || settings.notifyOnReviewReady === true
+      || settings.notifyOnWaitingOnYou === true,
   };
 };
 
@@ -334,9 +339,16 @@ export const createSessionAssistRuntime = ({
   const onTurnEnd = (sessionId, directory) => {
     clearTimer(sessionId);
     const armedAt = Date.now();
-    // Both fields off: nothing to generate, so nothing waits.
+    // Both fields off: nothing to generate, so nothing waits. The turn-end
+    // check still runs when a verdict notification reads it, and that call
+    // arms no timer and announces no wait.
     const enabled = getTargets();
     if (!enabled.recap && !enabled.suggestion) {
+      if (enabled.turnEndVerdicts) {
+        Promise.resolve()
+          .then(() => evaluateTurn?.({ sessionId, directory, assist: enabled }))
+          .catch(() => null);
+      }
       gates.delete(sessionId);
       announce(sessionId);
       return;

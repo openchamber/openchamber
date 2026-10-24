@@ -768,6 +768,9 @@ describe('settings runtime: notification templates', () => {
     error: { title: '', message: '' },
     question: { title: '', message: '' },
     subtask: { title: '', message: '' },
+    workDone: { title: '', message: '' },
+    reviewReady: { title: '', message: '' },
+    waitingOnYou: { title: '', message: '' },
   };
   const legacySeed = {
     completion: { title: '{agent_name} is ready', message: '{model_name} completed the task' },
@@ -798,7 +801,14 @@ describe('settings runtime: notification templates', () => {
     try {
       await fsPromises.writeFile(settingsFilePath, JSON.stringify({ notificationTemplates: custom }));
       const settings = await runtime.readSettingsFromDiskMigrated();
-      expect(settings.notificationTemplates).toEqual(custom);
+      // The verdict events the user never wrote arrive empty, like a missing
+      // event: empty means "follow the language".
+      expect(settings.notificationTemplates).toEqual({
+        ...custom,
+        workDone: { title: '', message: '' },
+        reviewReady: { title: '', message: '' },
+        waitingOnYou: { title: '', message: '' },
+      });
     } finally {
       await cleanup();
     }
