@@ -12,6 +12,9 @@ import {
   isTerminalPasteShortcut,
   isTerminalMacAppShortcut,
   isTerminalZoomShortcut,
+  encodeMacLineShortcut,
+  encodeMacOptionShortcut,
+  terminalViewportScrollShortcut,
   resolveTerminalMouseData,
   shouldBlinkTerminalCursor,
   terminalContentOriginY,
@@ -152,6 +155,56 @@ describe('shortcuts and gestures', () => {
     expect(isTerminalZoomShortcut(chord('Equal', '=', { ctrlKey: true, altKey: true }), 'Linux x86_64')).toBe(false);
     expect(isTerminalZoomShortcut(chord('Equal', '='), 'MacIntel')).toBe(false);
     expect(isTerminalZoomShortcut(chord('KeyV', 'v', { ctrlKey: true }), 'Win32')).toBe(false);
+  });
+
+  const macChord = (
+    key: string,
+    mods: Partial<Pick<KeyboardEvent, 'altKey' | 'ctrlKey' | 'metaKey' | 'shiftKey'>> = {},
+    isComposing = false,
+  ) => ({
+    key, altKey: false, ctrlKey: false, metaKey: false, shiftKey: false, isComposing, ...mods,
+  });
+
+  test('macOS natural text editing chords carry line edits to the pty', () => {
+    // Ghostty's defaults: Cmd+Backspace deletes to the line start (Ctrl+U),
+    // Cmd+Left/Right jump to the line start and end (Ctrl+A/E).
+    expect(encodeMacLineShortcut(macChord('Backspace', { metaKey: true }), 'MacIntel')).toBe('\x15');
+    expect(encodeMacLineShortcut(macChord('ArrowLeft', { metaKey: true }), 'MacIntel')).toBe('\x01');
+    expect(encodeMacLineShortcut(macChord('ArrowRight', { metaKey: true }), 'MacIntel')).toBe('\x05');
+    // Every other Super chord still stands down for the app.
+    expect(encodeMacLineShortcut(macChord('Backspace', { metaKey: true, shiftKey: true }), 'MacIntel')).toBeNull();
+    expect(encodeMacLineShortcut(macChord('Backspace', { metaKey: true, ctrlKey: true }), 'MacIntel')).toBeNull();
+    expect(encodeMacLineShortcut(macChord('Backspace', { metaKey: true, altKey: true }), 'MacIntel')).toBeNull();
+    expect(encodeMacLineShortcut(macChord('b', { metaKey: true }), 'MacIntel')).toBeNull();
+    // A press inside an IME composition, and every other platform, keep the old path.
+    expect(encodeMacLineShortcut(macChord('Backspace', { metaKey: true }, true), 'MacIntel')).toBeNull();
+    expect(encodeMacLineShortcut(macChord('Backspace', { metaKey: true }), 'Win32')).toBeNull();
+  });
+
+  test('macOS Option word editing stays on every screen and leaves Backspace alone', () => {
+    expect(encodeMacOptionShortcut(macChord('ArrowLeft', { altKey: true }), 'MacIntel')).toBe('\x1bb');
+    expect(encodeMacOptionShortcut(macChord('ArrowRight', { altKey: true }), 'MacIntel')).toBe('\x1bf');
+    // Ghostty binds no Option+Backspace: the encoder's own ESC+DEL is the reference.
+    expect(encodeMacOptionShortcut(macChord('Backspace', { altKey: true }), 'MacIntel')).toBeNull();
+    expect(encodeMacOptionShortcut(macChord('ArrowLeft', { altKey: true, shiftKey: true }), 'MacIntel')).toBeNull();
+    expect(encodeMacOptionShortcut(macChord('ArrowLeft', { altKey: true, ctrlKey: true }), 'MacIntel')).toBeNull();
+    expect(encodeMacOptionShortcut(macChord('ArrowLeft', { altKey: true }, true), 'MacIntel')).toBeNull();
+    expect(encodeMacOptionShortcut(macChord('ArrowLeft', { altKey: true }), 'Linux x86_64')).toBeNull();
+  });
+
+  test('viewport scroll chords are Super on macOS and Shift elsewhere', () => {
+    // Ghostty's non-performable defaults scroll the terminal's own viewport.
+    expect(terminalViewportScrollShortcut(macChord('Home', { metaKey: true }), 'MacIntel')).toBe('top');
+    expect(terminalViewportScrollShortcut(macChord('End', { metaKey: true }), 'MacIntel')).toBe('bottom');
+    expect(terminalViewportScrollShortcut(macChord('PageUp', { metaKey: true }), 'MacIntel')).toBe('page-up');
+    expect(terminalViewportScrollShortcut(macChord('PageDown', { metaKey: true }), 'MacIntel')).toBe('page-down');
+    // Shift variants are not bound on macOS and plain keys belong to the pty.
+    expect(terminalViewportScrollShortcut(macChord('PageUp', { shiftKey: true }), 'MacIntel')).toBeNull();
+    expect(terminalViewportScrollShortcut(macChord('Home'), 'MacIntel')).toBeNull();
+    // Other platforms scroll with Shift only; Super stays with the encoder.
+    expect(terminalViewportScrollShortcut(macChord('End', { shiftKey: true }), 'Win32')).toBe('bottom');
+    expect(terminalViewportScrollShortcut(macChord('Home', { shiftKey: true, ctrlKey: true }), 'Linux x86_64')).toBeNull();
+    expect(terminalViewportScrollShortcut(macChord('PageDown', { metaKey: true }), 'Linux x86_64')).toBeNull();
   });
 
   test('a paste shortcut delivers once whichever path arrives first', () => {

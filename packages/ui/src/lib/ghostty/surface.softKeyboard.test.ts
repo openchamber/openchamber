@@ -19,10 +19,11 @@ afterEach(() => {
 });
 
 /** A real surface with the real WebAssembly encoder; painting is stubbed out. */
-async function createSurface(userAgent: string) {
+async function createSurface(userAgent: string, platform?: string) {
   const happyWindow = new Window({ url: 'http://localhost/' });
   dom = happyWindow;
   Object.defineProperty(happyWindow.navigator, 'userAgent', { value: userAgent });
+  if (platform) Object.defineProperty(happyWindow.navigator, 'platform', { value: platform });
   Object.defineProperty(happyWindow.HTMLCanvasElement.prototype, 'getContext', {
     value: () => ({
       fillRect() {},
@@ -54,7 +55,10 @@ async function createSurface(userAgent: string) {
     onResize() {},
   });
   const field = surface.input;
-  const key = (type: 'keydown' | 'keyup', init: { key: string; code: string; keyCode: number }) => {
+  const key = (
+    type: 'keydown' | 'keyup',
+    init: { key: string; code: string; keyCode: number } & Partial<Pick<KeyboardEventInit, 'altKey' | 'ctrlKey' | 'metaKey' | 'shiftKey'>>,
+  ) => {
     const event = new KeyboardEvent(type, { ...init, cancelable: true });
     field.dispatchEvent(event);
     return event;
@@ -214,5 +218,83 @@ describe('Backspace elsewhere', () => {
     expect(field.value).toBe('');
     edited('a', { inputType: 'insertText', data: 'a' });
     expect(sent).toEqual(['a']);
+  });
+});
+
+describe('macOS natural text editing chords', () => {
+  test('Cmd+Backspace and Cmd+arrows send line bytes; other Super chords stand down', async () => {
+    const { sent, key, write } = await createSurface(MAC_UA, 'MacIntel');
+    const del = key('keydown', { key: 'Backspace', code: 'Backspace', keyCode: 8, metaKey: true });
+    key('keyup', { key: 'Backspace', code: 'Backspace', keyCode: 8, metaKey: true });
+    expect(del.defaultPrevented).toBe(true);
+    key('keydown', { key: 'ArrowLeft', code: 'ArrowLeft', keyCode: 37, metaKey: true });
+    key('keyup', { key: 'ArrowLeft', code: 'ArrowLeft', keyCode: 37, metaKey: true });
+    expect(sent).toEqual(['\x15', '\x01']);
+    // A Kitty report-events session sees no release for the translated press.
+    write('\x1b[>11u');
+    key('keydown', { key: 'Backspace', code: 'Backspace', keyCode: 8, metaKey: true });
+    key('keyup', { key: 'Backspace', code: 'Backspace', keyCode: 8, metaKey: true });
+    expect(sent).toEqual(['\x15', '\x01', '\x15']);
+    // Every other Super chord keeps standing down for the app.
+    const untouched = key('keydown', { key: 'b', code: 'KeyB', keyCode: 66, metaKey: true });
+    key('keyup', { key: 'b', code: 'KeyB', keyCode: 66, metaKey: true });
+    expect(untouched.defaultPrevented).toBe(false);
+    expect(sent).toEqual(['\x15', '\x01', '\x15']);
+  });
+});
+
+describe('macOS Option word editing', () => {
+  test('word bytes survive cursor modes, alternate screens and Kitty flags; Backspace stays native', async () => {
+    const { sent, key, write } = await createSurface(MAC_UA, 'MacIntel');
+    // zsh enables application cursor keys at the prompt without being a TUI;
+    // Ghostty's word translation is not performable, so it still applies.
+    write('\x1b[?1h');
+    key('keydown', { key: 'ArrowLeft', code: 'ArrowLeft', keyCode: 37, altKey: true });
+    key('keyup', { key: 'ArrowLeft', code: 'ArrowLeft', keyCode: 37, altKey: true });
+    // Full-screen programs on the alternate screen get the word bytes too.
+    write('\x1b[?1049h');
+    key('keydown', { key: 'ArrowRight', code: 'ArrowRight', keyCode: 39, altKey: true });
+    key('keyup', { key: 'ArrowRight', code: 'ArrowRight', keyCode: 39, altKey: true });
+    write('\x1b[?1049l');
+    // Kitty keyboard programs get them too, with no release event.
+    write('\x1b[>11u');
+    key('keydown', { key: 'ArrowLeft', code: 'ArrowLeft', keyCode: 37, altKey: true });
+    key('keyup', { key: 'ArrowLeft', code: 'ArrowLeft', keyCode: 37, altKey: true });
+    expect(sent).toEqual(['\x1bb', '\x1bf', '\x1bb']);
+    // Option+Backspace is unbound in Ghostty: the encoder's native ESC+DEL.
+    write('\x1b[<u');
+    key('keydown', { key: 'Backspace', code: 'Backspace', keyCode: 8, altKey: true });
+    key('keyup', { key: 'Backspace', code: 'Backspace', keyCode: 8, altKey: true });
+    expect(sent).toEqual(['\x1bb', '\x1bf', '\x1bb', '\x1b\x7f']);
+  });
+});
+
+describe('viewport scroll chords', () => {
+  test('Shift+PageUp scrolls the viewport and never reaches the pty', async () => {
+    const { sent, key, write } = await createSurface(MAC_UA, 'Linux x86_64');
+    write(`${'line\r\n'.repeat(60)}`);
+    // A Kitty report-events session sees neither press nor release.
+    write('\x1b[>11u');
+    const press = key('keydown', { key: 'PageUp', code: 'PageUp', keyCode: 33, shiftKey: true });
+    key('keyup', { key: 'PageUp', code: 'PageUp', keyCode: 33, shiftKey: true });
+    expect(press.defaultPrevented).toBe(true);
+    expect(sent).toEqual([]);
+    // Unmodified PageUp still encodes for the pty, like in Ghostty.
+    write('\x1b[<u');
+    key('keydown', { key: 'PageUp', code: 'PageUp', keyCode: 33 });
+    key('keyup', { key: 'PageUp', code: 'PageUp', keyCode: 33 });
+    expect(sent).toEqual(['\x1b[5~']);
+  });
+
+  test('Cmd+Home and Cmd+PageDown claim the macOS stand-down to scroll', async () => {
+    const { sent, key, write } = await createSurface(MAC_UA, 'MacIntel');
+    write(`${'line\r\n'.repeat(60)}`);
+    const home = key('keydown', { key: 'Home', code: 'Home', keyCode: 36, metaKey: true });
+    key('keyup', { key: 'Home', code: 'Home', keyCode: 36, metaKey: true });
+    const pageDown = key('keydown', { key: 'PageDown', code: 'PageDown', keyCode: 34, metaKey: true });
+    key('keyup', { key: 'PageDown', code: 'PageDown', keyCode: 34, metaKey: true });
+    expect(home.defaultPrevented).toBe(true);
+    expect(pageDown.defaultPrevented).toBe(true);
+    expect(sent).toEqual([]);
   });
 });
