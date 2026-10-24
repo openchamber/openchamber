@@ -135,6 +135,23 @@ describe('settings normalization runtime - symlink resolution', () => {
       expect(result[0].defaultAgent).toBe('plan');
     });
 
+    it('keeps the label source next to the label it describes', () => {
+      const runtime = createTestRuntime({
+        realpathSync: (p) => p,
+        path: { resolve: (p) => p, sep: '/', dirname: (p) => p.split('/').slice(0, -1).join('/') || '/' },
+      });
+
+      const result = runtime.sanitizeProjects([
+        { id: 'proj1', path: '/a', label: 'Example', labelSource: 'manual' },
+        { id: 'proj2', path: '/b', label: 'Billing', labelSource: 'nonsense' },
+        { id: 'proj3', path: '/c', labelSource: 'manual' },
+      ]);
+
+      expect(result[0].labelSource).toBe('manual');
+      expect(result[1].labelSource).toBe(undefined);
+      expect(result[2].labelSource).toBe(undefined);
+    });
+
     it('deduplicates projects that resolve to the same realpath', () => {
       const runtime = createTestRuntime({
         realpathSync: (p) => p.startsWith('/symlink') ? '/real/project' : p,

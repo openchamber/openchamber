@@ -242,6 +242,8 @@ Membership, fork handling, fusion and legacy compatibility are owned by
 
 `useProjectsStore.hasServerSnapshot` distinguishes a server-confirmed project list from persisted startup hints; `serverSnapshotFailed` records a failed settings sync without clearing the last confirmed list. Successful settings adoption clears that failure even for an unchanged list. Runtime switching clears both flags. Extension project subscriptions consume these flags and project records without changing active selection.
 
+`ProjectEntry.labelSource` records where a project's label came from: `auto` for one derived from the folder name, `manual` for one the user typed. The legacy migration that lowers an old title-cased auto label runs only for records that do not say `manual`, because text alone cannot tell a rename to `Example` from the old auto label `Example`. Without that distinction the settings round-trip reverts the rename on every save and reload.
+
 Project parsing, project selection, directory navigation, mobile session paths, and the SDK adapter share `lib/pathNormalization.ts` for request paths. Tilde expansion happens before normalization. Windows drive roots retain their slash, and parent navigation stops at drive and UNC share roots. Selecting a spelling variant of the current directory preserves history and its forward entries. Bare drive-relative paths such as `C:` stay distinct from `C:/`; normalization does not guess their filesystem target.
 
 Examples:

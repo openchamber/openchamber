@@ -234,3 +234,71 @@ describe("useProjectsStore.addProjects", () => {
     expect(added.map((p) => p.path)).toEqual(["/repo", "C:/repo", home ? `${home}/project` : "~/project"])
   })
 })
+
+describe("useProjectsStore project labels", () => {
+  const resetProjects = () => {
+    useProjectsStore.setState({
+      projects: [],
+      activeProjectId: null,
+      manualProjectOrder: [],
+    })
+  }
+
+  test("keeps a label typed by the user across a settings round-trip", () => {
+    const previous = useProjectsStore.getState()
+    try {
+      resetProjects()
+      // SAFETY: the store reads only `projects`; the cast fills in the rest of
+      // the settings document this test does not exercise.
+      useProjectsStore.getState().synchronizeFromSettings({
+        projects: [{ path: "/home/me/code/example" }],
+      } as DesktopSettings)
+      const project = useProjectsStore.getState().projects[0]
+      expect(project).toBeDefined()
+
+      useProjectsStore.getState().renameProject(project.id, "Example")
+
+      // SAFETY: same as above; these are the records the store itself persisted.
+      useProjectsStore.getState().synchronizeFromSettings({
+        projects: useProjectsStore.getState().projects,
+      } as DesktopSettings)
+
+      expect(useProjectsStore.getState().projects[0]?.label).toBe("Example")
+    } finally {
+      useProjectsStore.setState(previous, true)
+    }
+  })
+
+  test("lowers a legacy auto-derived label that carries no provenance", () => {
+    const previous = useProjectsStore.getState()
+    try {
+      resetProjects()
+      // SAFETY: the store reads only `projects`; the cast fills in the rest of
+      // the settings document this test does not exercise.
+      useProjectsStore.getState().synchronizeFromSettings({
+        projects: [{ path: "/home/me/code/example", label: "Example" }],
+      } as DesktopSettings)
+
+      expect(useProjectsStore.getState().projects[0]?.label).toBe("example")
+    } finally {
+      useProjectsStore.setState(previous, true)
+    }
+  })
+
+  test("marks a derived label as auto and a rename as manual", async () => {
+    const previous = useProjectsStore.getState()
+    try {
+      resetProjects()
+      const [added] = await useProjectsStore.getState().addProjects(["/home/me/code/example"])
+      expect(added?.labelSource).toBe("auto")
+
+      useProjectsStore.getState().renameProject(added.id, "Example")
+
+      const project = useProjectsStore.getState().projects[0]
+      expect(project?.label).toBe("Example")
+      expect(project?.labelSource).toBe("manual")
+    } finally {
+      useProjectsStore.setState(previous, true)
+    }
+  })
+})

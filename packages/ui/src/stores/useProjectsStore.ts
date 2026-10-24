@@ -184,7 +184,9 @@ const deriveProjectLabel = (path: string): string => {
 };
 
 // Labels auto-derived by older versions were title-cased and persisted. Drop
-// them back to the folder name; labels the user typed themselves are kept.
+// them back to the folder name. `labelSource` decides: a label the user typed
+// survives even when it happens to equal the old auto-derived form, which is
+// indistinguishable from it by text alone.
 const legacyAutoProjectLabel = (path: string): string => {
   const derived = deriveProjectLabel(path);
   return derived.replace(/[-_]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
@@ -276,9 +278,13 @@ const sanitizeProjects = (value: unknown): ProjectEntry[] => {
 
     if (typeof candidate.label === 'string' && candidate.label.trim().length > 0) {
       const storedLabel = candidate.label.trim();
-      project.label = storedLabel === legacyAutoProjectLabel(normalizedPath)
-        ? deriveProjectLabel(normalizedPath)
-        : storedLabel;
+      const provenance = candidate.labelSource === 'manual' || candidate.labelSource === 'auto'
+        ? candidate.labelSource
+        : null;
+      const legacyAuto = provenance !== 'manual' && storedLabel === legacyAutoProjectLabel(normalizedPath);
+      project.label = legacyAuto ? deriveProjectLabel(normalizedPath) : storedLabel;
+      const labelSource = legacyAuto ? 'auto' : provenance;
+      if (labelSource) project.labelSource = labelSource;
     }
     if (typeof candidate.icon === 'string' && candidate.icon.trim().length > 0) {
       project.icon = candidate.icon.trim();
@@ -439,6 +445,7 @@ const createVSCodeWorkspaceProject = (
     id,
     path: normalizedPath,
     label: deriveProjectLabel(normalizedPath),
+    labelSource: 'auto',
     addedAt: existing?.addedAt ?? now,
     lastOpenedAt: isActive ? now : existing?.lastOpenedAt ?? now,
   };
@@ -534,6 +541,7 @@ const vscodeWorkspaceProjectsEqual = (left: ProjectEntry[], right: ProjectEntry[
     return leftProject.id === rightProject.id
       && leftProject.path === rightProject.path
       && leftProject.label === rightProject.label
+      && leftProject.labelSource === rightProject.labelSource
       && leftProject.icon === rightProject.icon
       && leftProject.color === rightProject.color
       && leftProject.iconBackground === rightProject.iconBackground
@@ -635,12 +643,14 @@ export const useProjectsStore = create<ProjectsStore>()(
       }
 
       const now = Date.now();
-      const label = options?.label?.trim() || deriveProjectLabel(normalizedPath);
+      const requestedLabel = options?.label?.trim();
+      const label = requestedLabel || deriveProjectLabel(normalizedPath);
       const id = createProjectIdFromPath(normalizedPath);
       const entry: ProjectEntry = {
         id,
         path: normalizedPath,
         label,
+        labelSource: requestedLabel ? 'manual' : 'auto',
         color: pickAutoColor(get().projects),
         addedAt: now,
         lastOpenedAt: now,
@@ -696,6 +706,7 @@ export const useProjectsStore = create<ProjectsStore>()(
           id: createProjectIdFromPath(normalizedPath),
           path: normalizedPath,
           label: deriveProjectLabel(normalizedPath),
+          labelSource: 'auto',
           color: pickAutoColor([...current.projects, ...entries]),
           addedAt: now,
           lastOpenedAt: now,
@@ -823,8 +834,8 @@ export const useProjectsStore = create<ProjectsStore>()(
       }
 
       const { projects, activeProjectId } = get();
-      const nextProjects = projects.map((project) =>
-        project.id === id ? { ...project, label: trimmed } : project
+      const nextProjects = projects.map((project): ProjectEntry =>
+        project.id === id ? { ...project, label: trimmed, labelSource: 'manual' } : project
       );
       set({ projects: nextProjects });
       persistProjects(nextProjects, activeProjectId, get().manualProjectOrder);
@@ -848,7 +859,10 @@ export const useProjectsStore = create<ProjectsStore>()(
         const updated = { ...project };
         if (meta.label !== undefined) {
           const trimmed = meta.label.trim();
-          if (trimmed) updated.label = trimmed;
+          if (trimmed) {
+            updated.label = trimmed;
+            updated.labelSource = 'manual';
+          }
         }
         if (meta.icon !== undefined) updated.icon = meta.icon;
         if (meta.color !== undefined) updated.color = meta.color;
