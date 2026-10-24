@@ -174,6 +174,21 @@ Provider authentication, capabilities, issues, change requests, contributor dest
 
 ## Shared webview message ordering
 
+### Chats in empty windows
+
+With no workspace folder, sidebar and editor drafts use the shared managed Chats
+creation flow. The filesystem home bridge creates and names the host's
+`~/.config/openchamber/chats` root and its canonical path. A failed root lookup
+remains an error. The draft owner allocates a separate directory per Chat.
+The workspace folder list stays empty; the Chats root is never a workspace project.
+
+### Why Chats is limited to empty windows
+
+The approved no-folder flow needs a session directory without asking the user to
+open a project. Windows with workspace folders keep their project-only behavior.
+Shared draft and visibility rules read the host's workspace list, so a previous
+session's directory cannot select the wrong mode.
+
 The editor-panel host owns a singleton Settings tab separately from its session panels. `openchamber.showSettings` reveals that tab, including when the sidebar has never resolved or no folder is open. Settings receives theme, connection, settings-save and permission-policy broadcasts through the same panel bridge, but is excluded from chat attention, attachment routing and active-editor selection broadcasts. Closing or reloading its webview aborts only its own SSE streams.
 
 A settings-save broadcast invalidates the recipient's cached server document before its existing settings synchronization runs. Reusing the short-lived GET cache hid a peer's save from an already-open tab. Synchronization keeps its normal mutation reconciliation and preserves the webview's editor-derived theme. Pending bridge replies post only while their original panel owner remains current; disposal cleanup uses the webview reference captured while the panel was alive, because VS Code's panel getter throws after disposal.

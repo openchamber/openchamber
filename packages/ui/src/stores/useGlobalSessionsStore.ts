@@ -14,6 +14,7 @@ import {
   readManagedChatSessions,
 } from '@/sync/persist-cache';
 import { isVSCodeRuntime } from '@/lib/desktop';
+import { isVSCodeWithoutWorkspace } from '@/lib/vscodeBootstrap';
 import { spaceIdOfDirectory } from '@/lib/spaces/space-route';
 import { useSpacesStore, type SpaceMark } from '@/lib/spaces/spaces-store';
 import { ensureChatsRootDirectory, getChatsRoot } from '@/lib/chatDirectories';
@@ -384,7 +385,7 @@ const applySnapshot = (
       they must not claim the authority `hasLoaded` grants. */
   markLoaded = status === 'ready',
 ): Partial<GlobalSessionsState> | GlobalSessionsState => {
-  if (isVSCodeRuntime()) {
+  if (isVSCodeRuntime() && !isVSCodeWithoutWorkspace()) {
     activeSessions = filterManagedChatsForRuntime(activeSessions, true);
     archivedSessions = filterManagedChatsForRuntime(archivedSessions, true);
   }
@@ -555,7 +556,7 @@ const applySessionMutations = (
   requestedMutations: readonly GlobalSessionMutation[],
 ): Partial<GlobalSessionsState> => {
   let mutations = requestedMutations;
-  if (isVSCodeRuntime()) {
+  if (isVSCodeRuntime() && !isVSCodeWithoutWorkspace()) {
     mutations = requestedMutations.filter((mutation) => (
       mutation.type === 'remove'
       || filterManagedChatsForRuntime([mutation.session], true).length > 0

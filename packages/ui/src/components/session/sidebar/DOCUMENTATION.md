@@ -149,9 +149,9 @@ everywhere. A search lists its matches without folders, and List has none,
 as on the desktop. Its display menu offers the Pinned and In work toggles and, in Tree,
 Detailed rows; pinned sessions and sessions in work stay under their project
 in both views. VS Code excludes
-worktrees and managed
-Chats, while retaining its workspace-scoped grouped list and inline archived
-buckets.
+worktrees and, when a workspace folder is open, managed Chats. Empty VS Code
+windows show Chats. Folder windows retain their workspace-scoped grouped list
+and inline archived buckets.
 
 Worktree groups inside a project follow `worktreeSortOrder` (profile setting
 `sidebarWorktreeSortOrder`, default `manual`). `recent` floats worktrees by session activity, so
