@@ -479,7 +479,10 @@ export function DesktopHostSwitcherDialog({
     const sshForwarded = host.sshForwarded === true || (
       sshStatusesById[host.id]?.phase === 'ready' && sshStatusesById[host.id]?.localUrl === apiOrigin
     );
-    const relayOnly = Boolean(host.relay) && !host.apiUrl && host.id !== LOCAL_HOST_ID;
+    // A relay host stays on the relay activation path even after it learns a
+    // direct apiUrl: its display url is still the relay:// pseudo-URL, so
+    // relay-only is derived from the display URL, not from apiUrl absence.
+    const relayOnly = Boolean(host.relay) && !origin && host.id !== LOCAL_HOST_ID;
     if (!origin && !relayOnly) {
       setSwitchingHostId(null);
       return;

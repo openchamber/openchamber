@@ -44,7 +44,7 @@ export type DesktopHost = {
   label: string;
   /** Legacy/UI URL. During migration this may equal apiUrl. For relay hosts this is a display-only `relay://<serverId>` pseudo-URL. */
   url: string;
-  /** API endpoint used by packaged Electron UI for this instance. Absent for relay-only hosts. */
+  /** API endpoint used by packaged Electron UI for this instance. For relay-only hosts, present once a direct address has been learned. */
   apiUrl?: string;
   /** Remote client bearer token for packaged-client API access. */
   clientToken?: string;

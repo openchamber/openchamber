@@ -14,6 +14,27 @@ const DIRECT_PROBE_HEADSTART_MS = 1_500;
 let candidateRefreshInFlight = false;
 
 /**
+ * One canonical form for comparing server addresses across the three
+ * canonicalizations in play: the candidates endpoint strips trailing slashes,
+ * storage canonicalizes through `URL.toString()` (a trailing slash on a bare
+ * origin), and `normalizeHostUrl` keeps the raw string. Comparing raw strings
+ * across those shapes never agrees on a bare-origin deployment, which would
+ * rewrite storage on every refresh and never hot-switch to direct.
+ */
+const canonicalEndpoint = (value: string | null | undefined): string | null => {
+  const trimmed = String(value ?? '').trim();
+  if (!trimmed) return null;
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+    parsed.hash = '';
+    return parsed.toString();
+  } catch {
+    return null;
+  }
+};
+
+/**
  * Background candidate refresh for a relay-connected desktop host: ask the
  * server (over the live authenticated transport) for its CURRENT LAN addresses,
  * update the stored host's direct `apiUrl` if it moved (pairing-time addresses
@@ -62,13 +83,24 @@ const refreshDesktopHostCandidates = async (hostId: string): Promise<void> => {
     if (lanUrls.length === 0) return;
 
     const nextApiUrl = currentApiUrl && lanUrls.includes(currentApiUrl) ? currentApiUrl : lanUrls[0];
-    if (nextApiUrl !== currentApiUrl) {
+    const nextEndpoint = canonicalEndpoint(nextApiUrl);
+    if (nextEndpoint && nextEndpoint !== canonicalEndpoint(currentApiUrl)) {
       await desktopHostsSet({
         hosts: config.hosts.map((entry) => (entry.id === hostId ? { ...entry, apiUrl: nextApiUrl } : entry)),
         defaultHostId: config.defaultHostId,
         initialHostChoiceCompleted: config.initialHostChoiceCompleted,
       }).catch(() => undefined);
     }
+
+    // Persistence gate: select the direct endpoint only when the native
+    // configuration actually kept it. The write above is best-effort and
+    // storage normalization owns the final shape — switching to an address the
+    // trusted-origin list does not hold strands guest frames on a refused
+    // origin, so a dropped value leaves the relay in charge.
+    const storedConfig = await desktopHostsGet().catch(() => null);
+    const storedHost = storedConfig?.hosts.find((entry) => entry.id === hostId) ?? null;
+    if (!storedHost) return;
+    if (!nextEndpoint || canonicalEndpoint(storedHost.apiUrl) !== nextEndpoint) return;
 
     // We are on the relay for this host (the refresh call itself proves the
     // tunnel works) — if the fresh direct address answers AND proves the same

@@ -867,7 +867,14 @@ export const RemoteInstancesPage: React.FC = () => {
       if (!url) {
         return [host.id, host.relay ? await relayProbe() : ({ status: 'unreachable', latencyMs: 0 } as HostProbeResult)] as const;
       }
-      const direct = await desktopHostProbe(url, { clientToken: host.clientToken || null, requestHeaders: host.requestHeaders || null })
+      // The bearer must not reach a server that is not the pinned one: a
+      // leased LAN address may have moved to another machine since it was
+      // learned.
+      const direct = await desktopHostProbe(url, {
+        clientToken: host.clientToken || null,
+        requestHeaders: host.requestHeaders || null,
+        expectedServerId: host.relay?.serverId ?? null,
+      })
         .catch((): HostProbeResult => ({ status: 'unreachable', latencyMs: 0 }));
       if (direct.status === 'unreachable' && host.relay) {
         const relayResult = await relayProbe();
@@ -1736,11 +1743,13 @@ export const RemoteInstancesPage: React.FC = () => {
                         <Button type="button" variant="ghost" size="xs" className="!font-normal" onClick={() => void setDefaultDirectHost(host.id)} disabled={directSaving || directDefaultHostId === host.id} aria-label={t('desktopHostSwitcher.actions.setAsDefaultAria')}>
                           {directDefaultHostId === host.id ? <Icon name="star-fill" className="h-3.5 w-3.5" /> : <Icon name="star" className="h-3.5 w-3.5" />}
                         </Button>
-                        {/* The edit form is URL/token-centric; relay-ONLY hosts have
-                            nothing it can edit and are re-imported via a fresh pairing
-                            link instead. Multi-transport hosts keep their relay leg
-                            through the edit (object spread preserves it). */}
-                        {host.relay && !host.apiUrl ? null : (
+                        {/* The edit form is URL/token-centric; hosts whose display
+                            url is the relay:// pseudo-URL have nothing it can edit
+                            and are re-imported via a fresh pairing link instead,
+                            even when they carry a learned direct apiUrl. Direct and
+                            multi-transport hosts keep their relay leg through the
+                            edit (object spread preserves it). */}
+                        {host.relay && !normalizeHostUrl(host.url) ? null : (
                           <Button type="button" variant="ghost" size="xs" className="!font-normal" onClick={() => beginEditDirectHost(host)} disabled={directSaving}>
                             <Icon name="pencil" className="h-3.5 w-3.5" />
                             {t('desktopHostSwitcher.actions.edit')}

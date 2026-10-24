@@ -60,6 +60,14 @@ import {
   wasEarlyWindowClosed,
 } from './early-startup.mjs';
 import { sanitizeRuntimeRequestHeaders } from './runtime-request-headers.mjs';
+import {
+  LOCAL_HOST_ID,
+  buildStoredHostEntry,
+  normalizeHostUrl,
+  sanitizeClientTokenForStorage,
+  sanitizeHostUrlForStorage,
+  sanitizeHostRelayForStorage,
+} from './desktop-hosts-storage.mjs';
 import { isSplashColor, redactHostsConfigForRemote } from './remote-page-policy.mjs';
 import { connectDefaultSshInstanceAtStartup, resolveDefaultSshInstanceId } from './startup-ssh.mjs';
 import { normalizeNotificationInput, readTrimmedString, resolveHostEntryForRuntimeKey, runtimeKeyForDeepLinkHost, stampForwardedNotification } from './notification-host-routing.mjs';
@@ -257,7 +265,6 @@ const MINI_CHAT_WINDOW_HEIGHT = 760;
 const MINI_CHAT_MIN_WINDOW_WIDTH = 360;
 const MINI_CHAT_MIN_WINDOW_HEIGHT = 480;
 const MAX_CAPTURE_PAGE_RECT_AREA = 4_000_000;
-const LOCAL_HOST_ID = 'local';
 const LOCAL_DESKTOP_CLIENT_KIND = 'desktop-local';
 const LOCAL_DESKTOP_CLIENT_DEDUPE_KEY = 'desktop-local';
 // Remote hosts get a regular 'desktop' client (NOT 'desktop-local' — that kind
@@ -721,25 +728,6 @@ const getOrCreateDesktopInstallId = async () => {
   return typeof after === 'string' && after.trim() ? after.trim() : generated;
 };
 
-const normalizeHostUrl = (raw) => {
-  const trimmed = typeof raw === 'string' ? raw.trim() : '';
-  if (!trimmed) return null;
-  try {
-    const parsed = new URL(trimmed);
-    if (!['http:', 'https:'].includes(parsed.protocol)) return null;
-    parsed.hash = '';
-    return parsed.toString();
-  } catch {
-    return null;
-  }
-};
-
-const sanitizeHostUrlForStorage = (raw) => normalizeHostUrl(raw);
-const sanitizeClientTokenForStorage = (raw) => {
-  const token = typeof raw === 'string' ? raw.trim() : '';
-  return token.length > 0 ? token : null;
-};
-
 const sameOrigin = (left, right) => {
   if (!left || !right) return false;
   try {
@@ -808,56 +796,11 @@ const isLocalRuntimeUrl = (targetUrl) => {
   }
 };
 
-// A relay host is reached over the E2EE tunnel: it has no http(s) apiUrl, only a
-// { relayUrl (ws/wss), serverId, hostEncPubJwk } descriptor. The relay grant is a
-// one-time pairing artifact and is never persisted.
-const sanitizeHostRelayForStorage = (value) => {
-  if (!value || typeof value !== 'object') return null;
-  const relayUrl = typeof value.relayUrl === 'string' ? value.relayUrl.trim() : '';
-  const serverId = typeof value.serverId === 'string' ? value.serverId.trim() : '';
-  const jwk = value.hostEncPubJwk;
-  if (!relayUrl || !serverId || !jwk || typeof jwk !== 'object' || Array.isArray(jwk)) return null;
-  // Minimal EC public JWK shape check so a malformed descriptor is rejected at
-  // storage time instead of surfacing later as a tunnel handshake failure.
-  if (typeof jwk.kty !== 'string' || typeof jwk.crv !== 'string' || typeof jwk.x !== 'string') return null;
-  try {
-    const parsed = new URL(relayUrl);
-    if (parsed.protocol !== 'ws:' && parsed.protocol !== 'wss:') return null;
-  } catch {
-    return null;
-  }
-  return { relayUrl, serverId, hostEncPubJwk: jwk };
-};
-
 // Shared storage shape for a persisted host. A host may carry a direct HTTP
 // transport, a relay transport, or BOTH (a multi-transport device: direct on
 // the home network, relay away — mirrors the mobile connection model). Returns
 // null for entries that can't be stored (missing id, reserved 'local', or no
-// usable transport at all).
-const buildStoredHostEntry = (entry) => {
-  const id = typeof entry?.id === 'string' ? entry.id.trim() : '';
-  if (!id || id === LOCAL_HOST_ID) return null;
-  const clientToken = sanitizeClientTokenForStorage(entry?.clientToken);
-  const requestHeaders = sanitizeRuntimeRequestHeaders(entry?.requestHeaders);
-  const headerFields = Object.keys(requestHeaders).length > 0 ? { requestHeaders } : {};
-  const tokenField = clientToken ? { clientToken } : {};
-  const labelRaw = typeof entry?.label === 'string' && entry.label.trim() ? entry.label.trim() : '';
-
-  const relay = sanitizeHostRelayForStorage(entry?.relay);
-  const relayField = relay ? { relay } : {};
-  const directUrl = sanitizeHostUrlForStorage(entry?.url);
-  const apiUrl = directUrl ? (sanitizeHostUrlForStorage(entry?.apiUrl) || directUrl) : null;
-
-  if (directUrl) {
-    return { id, label: labelRaw || directUrl, url: directUrl, apiUrl, ...tokenField, ...headerFields, ...relayField };
-  }
-  if (relay) {
-    const url = `relay://${relay.serverId}`;
-    return { id, label: labelRaw || url, url, ...tokenField, ...headerFields, relay };
-  }
-  return null;
-};
-
+// usable transport at all); the storage rules live in desktop-hosts-storage.mjs.
 const readDesktopHostsConfig = () => {
   const root = readSettingsRoot();
   const hostsRaw = Array.isArray(root.desktopHosts) ? root.desktopHosts : [];
