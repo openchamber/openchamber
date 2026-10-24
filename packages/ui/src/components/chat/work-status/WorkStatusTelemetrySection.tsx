@@ -72,9 +72,16 @@ export const WorkStatusTelemetrySection: React.FC<Props> = ({ sessionId, directo
     }
   }, [scope, status, eligibleForStats, computed]);
   const stats = eligibleForStats ? computed : status !== 'unknown' && retained?.scope === scope ? retained.stats : null;
-  const summary = stats && stats.responseTokensPerSecond !== null
+  // Kept numbers shown while the session works belong to the turn before it.
+  const previousTurn = stats !== null && (stats.previousTurn || !eligibleForStats);
+  const rate = stats && stats.responseTokensPerSecond !== null
     ? formatThroughputRate(stats.responseTokensPerSecond)
     : undefined;
+  const summary = previousTurn
+    ? rate !== undefined
+      ? t('chat.workStatus.telemetry.previousTurnRate', { rate })
+      : t('chat.workStatus.telemetry.previousTurn')
+    : rate;
 
   useReportWorkStatusPresence('telemetry', Boolean(sessionId));
 

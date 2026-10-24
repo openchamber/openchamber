@@ -3559,6 +3559,8 @@ export const dict = {
   'chat.workStatus.action.openSubagent': 'Open {name}',
   'chat.workStatus.section.usage': 'Usage',
   'chat.workStatus.section.telemetry': 'Turn stats',
+  'chat.workStatus.telemetry.previousTurn': 'Previous turn',
+  'chat.workStatus.telemetry.previousTurnRate': 'Previous turn · {rate}',
   'chat.workStatus.telemetry.responseSpeed': 'Response',
   'chat.workStatus.telemetry.responseSpeedDescription': 'How fast the final text arrived. Excludes the initial wait, reasoning, and earlier tool calls. An estimate from text timestamps, not a provider speed measurement.',
   'chat.workStatus.telemetry.speed': 'Whole turn',

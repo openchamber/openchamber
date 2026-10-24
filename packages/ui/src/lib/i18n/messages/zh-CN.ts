@@ -3560,6 +3560,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.action.openSubagent': '打开 {name}',
   'chat.workStatus.section.usage': '用量',
   'chat.workStatus.section.telemetry': '轮次统计',
+  'chat.workStatus.telemetry.previousTurn': '上一轮',
+  'chat.workStatus.telemetry.previousTurnRate': '上一轮 · {rate}',
   'chat.workStatus.telemetry.responseSpeed': '回答速度',
   'chat.workStatus.telemetry.responseSpeedDescription': '最终文本到达的速度。不含开始前的等待、推理和之前的工具调用。这是根据文本时间戳估算的速度，不是提供商测得的生成速度。',
   'chat.workStatus.telemetry.speed': '整个请求',

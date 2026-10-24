@@ -3361,6 +3361,8 @@ export const dict = {
   'chat.workStatus.action.openSubagent': '{name} öğesini aç',
   'chat.workStatus.section.usage': 'Kullanım',
   'chat.workStatus.section.telemetry': 'Tur istatistikleri',
+  'chat.workStatus.telemetry.previousTurn': 'Önceki tur',
+  'chat.workStatus.telemetry.previousTurnRate': 'Önceki tur · {rate}',
   'chat.workStatus.telemetry.responseSpeed': 'Yanıt',
   'chat.workStatus.telemetry.responseSpeedDescription': 'Son metnin ne hızla geldiği. İlk bekleme, akıl yürütme ve önceki araç çağrıları dahil değildir. Metin zamanlarından hesaplanan bir tahmindir, sağlayıcı tarafındaki hız ölçümü değildir.',
   'chat.workStatus.telemetry.speed': 'Tüm istek',

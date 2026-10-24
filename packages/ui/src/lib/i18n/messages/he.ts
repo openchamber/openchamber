@@ -3501,6 +3501,8 @@ export const dict = {
   'chat.workStatus.action.openSubagent': 'פתח את {name}',
   'chat.workStatus.section.usage': 'שימוש',
   'chat.workStatus.section.telemetry': 'נתוני התור',
+  'chat.workStatus.telemetry.previousTurn': 'התור הקודם',
+  'chat.workStatus.telemetry.previousTurnRate': 'התור הקודם · {rate}',
   'chat.workStatus.telemetry.responseSpeed': 'תגובה',
   'chat.workStatus.telemetry.responseSpeedDescription': 'באיזו מהירות הגיע הטקסט הסופי. לא כולל את ההמתנה הראשונית, החשיבה וקריאות קודמות לכלים. הערכה לפי חותמות הזמן של הטקסט, לא מדידת מהירות של הספק.',
   'chat.workStatus.telemetry.speed': 'התור כולו',

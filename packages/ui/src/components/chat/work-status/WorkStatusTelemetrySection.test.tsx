@@ -202,10 +202,33 @@ describe('mounted turn telemetry with live sync stores', () => {
         }
         expect(tokenReads).toBe(0);
         expect(getSyncPerformanceDiagnostics()?.sessionMessageChangeCallbacks).toBe(0);
-        if (!expanded) expect(dom.container.textContent).toBe('Turn stats');
+        if (!expanded) expect(dom.container.textContent).toBe('Turn statsPrevious turn');
         else expect(dom.container.textContent).toContain('~6 tok/s');
       }
     }
+  });
+
+  test('a new prompt keeps the finished turn on screen, labelled as the previous turn, until its reply completes', async () => {
+    const reply = { id: 'text', type: 'text', sessionID: sessionId, messageID: assistant.id, text: 'Final reply', time: { start: 3000, end: 5000 } } as const;
+    await act(async () => store().setState({ session_status: { [sessionId]: { type: 'idle' } }, part: { [assistant.id]: [reply] } }));
+    const heading = () => dom.container.querySelector('button')?.textContent;
+    expect(heading()).toBe('Turn stats~10 tok/s');
+    // The prompt lands while the session still reports idle.
+    const prompt: UserMessage = { id: 'user-2', sessionID: sessionId, role: 'user', time: { created: 8000 } };
+    await act(async () => store().setState({ message: { [sessionId]: [user, assistant, prompt] } }));
+    expect(heading()).toBe('Turn statsPrevious turn · ~10 tok/s');
+    expect(dom.container.textContent).toContain('Elapsed6.0s');
+    await act(async () => store().setState({ session_status: { [sessionId]: { type: 'busy' } } }));
+    expect(heading()).toBe('Turn statsPrevious turn · ~10 tok/s');
+    expect(dom.container.textContent).toContain('Elapsed6.0s');
+    const next: AssistantMessage = { ...assistant, id: 'assistant-next', time: { created: 9000, completed: 11000 } };
+    await act(async () => store().setState({
+      message: { [sessionId]: [user, assistant, prompt, next] },
+      part: { [assistant.id]: [reply], [next.id]: [] },
+      session_status: { [sessionId]: { type: 'idle' } },
+    }));
+    expect(heading()).toBe('Turn stats');
+    expect(dom.container.textContent).toContain('Elapsed3.0s');
   });
 
   test('collapsed headlines follow corrections and clear on revert, empty history and scope changes', async () => {

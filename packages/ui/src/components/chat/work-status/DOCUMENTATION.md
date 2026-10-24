@@ -167,7 +167,11 @@ The section follows Usage by default and reuses the panel's existing rows. Only 
 has an icon; metric rows use labels and values without leading icons. It
 reads already-loaded records without fetching history. The newest turn needs a
 preceding user message and completed assistant steps. A truncated or unfinished
-turn has no whole-turn result; later materialization can supply it.
+turn has no whole-turn result; later materialization can supply it. A newest
+user message with no reply yet arrives while the session still reports idle, so
+the section computes the turn before it instead and flags it as the previous
+turn. Computing nothing there would commit an empty result just before the
+session turns busy and blank the section for the whole run.
 
 Two rates answer different questions. Response speed uses the final assistant
 message's output tokens divided by the union of its nonempty text intervals.
@@ -213,7 +217,11 @@ status authority. Explicit idle events or a successful directory status snapshot
 allow computation even when collapsed: the response-speed headline remains visible
 and updates when a turn completes, after a remount, or when idle records change.
 The collapsed body stays unmounted. One component-owned committed result keeps the
-headline and rows stable during the next active turn. Its identity includes
+headline and rows stable during the next active turn. Whenever the shown numbers
+belong to an earlier turn (a pending prompt, or a busy or retrying session), the
+header says "Previous turn", followed by the response speed when there is one.
+Opening the session mid-run still shows no numbers, because records are not
+read while busy. Its identity includes
 runtime, normalized directory and session. Scope changes discard it; fresh empty
 or reverted records clear it. There is no global message-ID cache. Corrections
 to existing message/part identities invalidate the current result.

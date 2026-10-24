@@ -3559,6 +3559,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.action.openSubagent': '{name} 열기',
   'chat.workStatus.section.usage': '사용량',
   'chat.workStatus.section.telemetry': '턴 통계',
+  'chat.workStatus.telemetry.previousTurn': '이전 턴',
+  'chat.workStatus.telemetry.previousTurnRate': '이전 턴 · {rate}',
   'chat.workStatus.telemetry.responseSpeed': '응답',
   'chat.workStatus.telemetry.responseSpeedDescription': '최종 텍스트가 도착한 속도입니다. 시작 전 대기, 추론, 이전 도구 호출은 제외합니다. 텍스트 시간 기록으로 계산한 추정치이며 제공자 측 속도 측정값은 아닙니다.',
   'chat.workStatus.telemetry.speed': '전체 요청',

@@ -3551,6 +3551,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.action.openSubagent': 'Відкрити {name}',
   'chat.workStatus.section.usage': 'Використання',
   'chat.workStatus.section.telemetry': 'Статистика ходу',
+  'chat.workStatus.telemetry.previousTurn': 'Попередній хід',
+  'chat.workStatus.telemetry.previousTurnRate': 'Попередній хід · {rate}',
   'chat.workStatus.telemetry.responseSpeed': 'Відповідь',
   'chat.workStatus.telemetry.responseSpeedDescription': 'Як швидко надходив фінальний текст. Без очікування на початок, міркувань і попередніх викликів інструментів. Це оцінка за часовими мітками тексту, а не вимір швидкості на сервері провайдера.',
   'chat.workStatus.telemetry.speed': 'Увесь запит',
