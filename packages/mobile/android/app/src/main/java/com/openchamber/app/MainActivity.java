@@ -12,6 +12,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(FileSharePlugin.class);
         registerPlugin(ImagePastePlugin.class);
         registerPlugin(PushKeyPlugin.class);
+        registerPlugin(ReadingAudioFocusPlugin.class);
         registerPlugin(WindowLayoutPlugin.class);
         super.onCreate(savedInstanceState);
     }

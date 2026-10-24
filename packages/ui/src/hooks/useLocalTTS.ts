@@ -14,6 +14,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 
 export interface LocalTTSSpeakOptions {
+    beforePlayback?: () => Promise<void>;
     /** Catalog id of the local model to use; defaults to the server's default model. */
     model?: string;
     /** Speaker id within the model (Kokoro voices; Piper models have one) */
@@ -212,6 +213,8 @@ export function useLocalTTS(): UseLocalTTSReturn {
             if (session.cancelled) {
                 return;
             }
+            await options?.beforePlayback?.();
+            if (session.cancelled) return;
             await new Promise<void>((resolve) => {
                 const source = ctx.createBufferSource();
                 source.buffer = audioBuffer;

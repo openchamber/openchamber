@@ -49,3 +49,24 @@ export const finishReading = (token: symbol): void => {
         useActiveReadingStore.setState({ active: null });
     }
 };
+
+/** Providers call this after preparation, immediately before scheduling audio. */
+export const createReadingPlaybackGuard = (
+    token: symbol,
+    canStart?: () => boolean,
+    prepare?: () => Promise<void>,
+): (() => Promise<void>) => {
+    let started = false;
+    const check = () => {
+        if (!isCurrentReading(token) || (!started && canStart?.() === false)) {
+            if (isCurrentReading(token)) stopActiveReading();
+            throw new DOMException('Reading cancelled before playback', 'AbortError');
+        }
+    };
+    return async () => {
+        check();
+        if (!started) await prepare?.();
+        check();
+        started = true;
+    };
+};
