@@ -395,11 +395,13 @@ process created wait for the window to be seen. On desktop that includes a
 window closed to the tray.
 The sidebar and tray consume the same store and must not start their own
 full-list timers. The tray renders only the sessions the sidebar can place — a
-configured project or worktree, a managed chat, or an isolated space — because
-its twenty rows are the recent-work shortcut, and a session from an
-unconfigured or deleted directory has no row in the sidebar's project or chat
-lists (Pinned and In work can still list one). Pending approvals from a hidden
-session still appear. Surface-specific refreshes, such
+configured project or worktree, a managed chat, an isolated space, or a pinned
+or in-work session — because its twenty rows are the recent-work shortcut, and
+a session from an unconfigured or deleted directory has no row in the
+sidebar's project or chat lists. The dock badge counts unread sessions by the
+same rule: a session the app never lists cannot be opened, so its unread mark
+would never clear and the badge could never go down. Pending approvals from a
+hidden session still appear. Surface-specific refreshes, such
 as opening the mobile session sheet or returning from suspension, may still
 request freshness at their explicit lifecycle edge; the store coalesces an
 overlapping in-flight load.
@@ -645,7 +647,7 @@ Live activity/status indicators must not depend on this cache. They must use the
 
 ### Unread sessions
 
-`session-unread.ts` owns the unread mark, and OpenCode owns the state behind it. A session record carries `time.idle` (when its last turn ended, whatever the outcome) and `time.viewed` (a watermark of the last turn end a viewer saw, which OpenCode keeps monotone). A top-level, unarchived session whose `idle` is past its `viewed` is unread. Rows, tabs, switchers, collapsed aggregates, run overviews, the tray, the dock badge and the iOS widget all read that one rule from the global sessions store.
+`session-unread.ts` owns the unread mark, and OpenCode owns the state behind it. A session record carries `time.idle` (when its last turn ended, whatever the outcome) and `time.viewed` (a watermark of the last turn end a viewer saw, which OpenCode keeps monotone). A top-level, unarchived session whose `idle` is past its `viewed` is unread. Rows, tabs, switchers, collapsed aggregates, run overviews, the tray, the dock badge and the iOS widget all read that one rule from the global sessions store. The dock badge then keeps only the sessions with a sidebar row, so it cannot point at a session nothing lists and nothing can open to clear.
 
 Marking a session seen (`markSessionViewed` in `notification-store.ts`, which also clears its native notifications) writes the watermark locally at once and sends `POST /api/session/:id/view` with the `idle` it saw; a failed write restores the previous watermark unless a newer record replaced it. OpenCode announces the view as `session.viewed` to every client, so a session seen on one device stops being unread on the others. The global store's change signatures include `idle` and `viewed`, so these updates publish immediately instead of waiting with recency-only updates.
 

@@ -66,6 +66,7 @@ describe('Dock badge with the macOS menu bar disabled', () => {
       IS_REACT_ACT_ENVIRONMENT: true,
     });
     useGlobalSessionsStore.setState({ activeSessions: [session('root'), session('child', 'root')] });
+    useProjectsStore.setState({ projects: [{ id: 'project', path: '/project' }] });
     useUIStore.setState({ dockBadgeEnabled: true, notifyOnSubtasks: false });
     counts.length = 0;
     listenerCount = 0;
@@ -75,6 +76,7 @@ describe('Dock badge with the macOS menu bar disabled', () => {
 
   afterEach(async () => {
     await act(async () => root.unmount());
+    useProjectsStore.setState({ projects: [] });
     await dom.happyDOM.close();
   });
 
@@ -134,6 +136,24 @@ describe('Dock badge with the macOS menu bar disabled', () => {
     for (const item of sessions) finishTurn(item.id);
     await act(async () => root.render(<Harness />));
     expect(counts).toEqual([25]);
+  });
+
+  test('recounts when a project appears or disappears without a session event', async () => {
+    // With no project configured, the unread session has no row and the badge
+    // is clear. Adding the project makes it reachable; removing it again must
+    // clear the number, with no session record changing in between.
+    useProjectsStore.setState({ projects: [] });
+    finishTurn('root');
+    await act(async () => root.render(<Harness />));
+    expect(counts).toEqual([0]);
+    useProjectsStore.setState({ projects: [{ id: 'project', path: '/project' }] });
+    await flush();
+    expect(counts).toEqual([0, 1]);
+    useProjectsStore.setState({ projects: [] });
+    await flush();
+    expect(counts).toEqual([0, 1, 0]);
+    expect(intervalCount).toBe(0);
+    expect(listenerCount).toBe(0);
   });
 
   test('starts with a cleared badge when both controls are disabled', async () => {
@@ -253,8 +273,9 @@ type TraySnapshotForTest = {
 
 // The tray is a short recent-work list, so it names the sessions the sidebar
 // can show. A session whose directory belongs to no configured project (an
-// eval run in /tmp, say) has no row there; it must not take a tray slot, while
-// it still counts toward the dock badge.
+// eval run in /tmp, say) has no row there: it must not take a tray slot, and
+// the dock badge must not count it either, because nothing can open it to
+// clear its unread mark.
 describe('Tray sessions follow the configured projects', () => {
   let dom: Window;
   let root: Root;
@@ -302,14 +323,15 @@ describe('Tray sessions follow the configured projects', () => {
   });
 
   test('lists a project session but not one from an unconfigured directory', async () => {
-    // Both finished a turn nobody has viewed yet, so both count on the dock.
+    // Both finished a turn nobody has viewed yet; only the one with a sidebar
+    // row counts on the dock, since the other has no way to be opened.
     useGlobalSessionsStore.setState((state) => ({
       activeSessions: state.activeSessions.map((item) => ({ ...item, time: { ...item.time, idle: 2 } })),
     }));
     await act(async () => root.render(<Harness />));
     await flush();
     expect(lastSnapshot()?.sessions?.map((entry) => entry.id)).toEqual(['in-project']);
-    expect(lastSnapshot()?.dockBadgeCount).toBe(2);
+    expect(lastSnapshot()?.dockBadgeCount).toBe(1);
   });
 
   test('keeps a managed chat and an isolated space session', async () => {
@@ -353,11 +375,17 @@ describe('Tray sessions follow the configured projects', () => {
         session('elsewhere', undefined, '/tmp/eval-run'),
       ],
     });
+    // They keep their sidebar rows, so the dock badge counts them too;
+    // `elsewhere` has no row and must stay out of the number.
+    useGlobalSessionsStore.setState((state) => ({
+      activeSessions: state.activeSessions.map((item) => ({ ...item, time: { ...item.time, idle: 2 } })),
+    }));
     const pinKey = getPinnedSessionKey(getRuntimeKey(), '/tmp/removed-too', 'pinned');
     useSessionPinnedStore.setState({ ids: new Set(pinKey ? [pinKey] : []) });
     await act(async () => root.render(<Harness />));
     await flush();
     expect(lastSnapshot()?.sessions?.map((entry) => entry.id).sort()).toEqual(['in-work', 'pinned']);
+    expect(lastSnapshot()?.dockBadgeCount).toBe(2);
     useSessionPinnedStore.setState({ ids: new Set() });
   });
 
@@ -368,9 +396,13 @@ describe('Tray sessions follow the configured projects', () => {
         { ...session('btw-fork'), metadata: { openchamber: { kind: 'btw', originalSessionID: 'in-project' } } },
       ],
     });
+    useGlobalSessionsStore.setState((state) => ({
+      activeSessions: state.activeSessions.map((item) => ({ ...item, time: { ...item.time, idle: 2 } })),
+    }));
     await act(async () => root.render(<Harness />));
     await flush();
     expect(lastSnapshot()?.sessions?.map((entry) => entry.id)).toEqual(['in-project']);
+    expect(lastSnapshot()?.dockBadgeCount).toBe(1);
   });
 
   test('still lists a pending approval from a session it hides', async () => {
