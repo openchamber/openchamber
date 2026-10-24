@@ -21,7 +21,29 @@ const child = (key: string): SessionSidebarRow => ({
   increment: 7,
 });
 
+// SAFETY: the disclosure reads only a row's kind, key and expansion fields.
+const sessionRow = (key: string, expanded?: boolean): SessionSidebarRow => ({
+  kind: 'session',
+  key,
+  estimateSize: 34,
+  expanded,
+  forceExpanded: expanded === undefined ? undefined : false,
+} as SessionSidebarRow);
+
 describe('findSessionSidebarDisclosure', () => {
+  test('finds the subsessions a session row opened, so they animate as a header\'s rows do', () => {
+    const previous = [sessionRow('s1', false), sessionRow('s2')];
+    const next = [sessionRow('s1', true), child('s1-a'), child('s1-b'), sessionRow('s2')];
+
+    expect(findSessionSidebarDisclosure(previous, next)).toEqual({
+      opened: true,
+      previousHeaderIndex: 0,
+      nextHeaderIndex: 0,
+      blockStart: 1,
+      blockEnd: 3,
+    });
+  });
+
   test('finds the rows a header opened', () => {
     const previous = [header('chats', true), header('work', false), child('w1')];
     const next = [header('chats', false), child('c1'), child('c2'), header('work', false), child('w1')];

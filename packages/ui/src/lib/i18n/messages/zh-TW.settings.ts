@@ -1079,8 +1079,6 @@ export const settingsDict = {
   'settings.openchamber.passkeys.toast.renameFailed': '無法重新命名通行金鑰。',
   'settings.openchamber.passkeys.toast.clearAuthFailed': '無法清除已儲存的驗證資訊。',
   'settings.openchamber.sessionRetention.title': '工作階段保留',
-  'settings.openchamber.mergedWorktreeCleanup.title': 'PR 合併後',
-  'settings.openchamber.mergedWorktreeCleanup.info': '使用側邊欄已顯示的 PR 狀態。當代理正在該工作樹中工作或其工作階段處於開啟狀態時，不會執行任何動作。',
   'settings.openchamber.messageSearch.title': '訊息搜尋',
   'settings.openchamber.messageSearch.field.enabled': '在所有對話中搜尋訊息',
   'settings.openchamber.messageSearch.field.enabledInfo': '在設定檔旁為你的訊息與代理回覆保存一個小型索引，讓搜尋能立即找到它們。索引保存在執行 OpenChamber 的機器上，不會傳送到任何地方。',

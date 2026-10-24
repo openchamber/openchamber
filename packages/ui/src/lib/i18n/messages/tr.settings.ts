@@ -1090,8 +1090,6 @@ export const settingsDict = {
   'settings.openchamber.passkeys.toast.renameFailed': 'Passkey yeniden adlandırılamadı.',
   'settings.openchamber.passkeys.toast.clearAuthFailed': 'Kaydedilmiş kimlik doğrulama bilgileri temizlenemedi.',
   'settings.openchamber.sessionRetention.title': 'Session Saklama',
-  'settings.openchamber.mergedWorktreeCleanup.title': 'PR birleştirildikten sonra',
-  'settings.openchamber.mergedWorktreeCleanup.info': 'Kenar çubuğunun zaten gösterdiği PR durumunu kullanır. Worktree içinde bir ajan çalışırken veya oturumlarından biri açıkken hiçbir şey yapılmaz.',
   'settings.openchamber.messageSearch.title': 'Mesaj arama',
   'settings.openchamber.messageSearch.field.enabled': 'Tüm konuşmalarda mesaj ara',
   'settings.openchamber.messageSearch.field.enabledInfo': 'Ayarların yanında mesajlarınızın ve ajan yanıtlarının küçük bir dizinini tutar; böylece arama onları anında bulur. OpenChamber’ın çalıştığı makinede kalır ve hiçbir yere gönderilmez.',

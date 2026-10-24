@@ -37,7 +37,7 @@ type SectionSpacing = keyof typeof SECTION_SPACING_ESTIMATE;
  * user's scroll gesture.
  */
 export const sessionSidebarRowSizeKey = (row: SessionSidebarRow): string => (
-  `${row.kind}:${'renderContext' in row ? row.renderContext : ''}`
+  `${row.kind}:${'renderContext' in row ? row.renderContext : ''}${'detailed' in row && row.detailed ? ':detailed' : ''}`
 );
 
 /**

@@ -172,8 +172,6 @@ export function SidebarHeader(props: Props): React.ReactNode {
   const sessionWorkEnabled = useUIStore((state) => state.sessionWorkEnabled);
   const projectSortOrder = useSessionDisplayStore((state) => state.projectSortOrder);
   const setProjectSortOrder = useSessionDisplayStore((state) => state.setProjectSortOrder);
-  const worktreeSortOrder = useSessionDisplayStore((state) => state.worktreeSortOrder);
-  const setWorktreeSortOrder = useSessionDisplayStore((state) => state.setWorktreeSortOrder);
   const sidebarGrouping = useSessionDisplayStore(resolveSidebarGrouping);
   const setSidebarGrouping = useSessionDisplayStore((state) => state.setSidebarGrouping);
   const keepWorkInPlace = useSessionDisplayStore((state) => state.keepWorkInPlace);
@@ -247,14 +245,6 @@ export function SidebarHeader(props: Props): React.ReactNode {
     ] as const, projectSortOrder, (order) => {
       setProjectSortOrder(order);
       void updateDesktopSettings({ sidebarProjectSortOrder: order });
-    }) : null}
-    {showProjectDisplayControls && !timeGrouping ? choiceSubmenu('sessions.sidebar.header.actions.sortWorktrees', [
-      ['recent', 'sessions.sidebar.header.worktreeSort.recent'],
-      ['manual', 'sessions.sidebar.header.projectSort.manual'],
-      ['a-z', 'sessions.sidebar.header.projectSort.aToZ'],
-    ] as const, worktreeSortOrder, (order) => {
-      setWorktreeSortOrder(order);
-      void updateDesktopSettings({ sidebarWorktreeSortOrder: order });
     }) : null}
     {showProjectDisplayControls ? choiceSubmenu('sessions.sidebar.header.projectDisplay.label', [
       ['all', 'sessions.sidebar.header.projectDisplay.all'],

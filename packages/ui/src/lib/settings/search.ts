@@ -643,11 +643,22 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['retention', 'archive', 'delete'],
   },
   {
+    id: 'sessions.worktree-archive-on-done',
+    page: 'sessions',
+    titleKey: 'settings.openchamber.finishedWorktrees.field.archiveOnDone',
+    descriptionKey: 'settings.openchamber.finishedWorktrees.info',
+    keywords: ['done', 'finish', 'in work', 'worktree', 'archive', 'cleanup', 'remove'],
+    // The section renders everywhere but VS Code, which has no archives.
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
     id: 'sessions.merged-worktree-cleanup',
     page: 'sessions',
     titleKey: 'settings.openchamber.mergedWorktreeCleanup.field.enable',
-    descriptionKey: 'settings.openchamber.mergedWorktreeCleanup.field.enableDescription',
+    descriptionKey: 'settings.openchamber.finishedWorktrees.info',
     keywords: ['pr', 'pull request', 'merged', 'worktree', 'branch', 'archive', 'cleanup', 'remove'],
+    // The section renders everywhere but VS Code, which has no archives.
+    isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
     id: 'sessions.retention-only-archived',

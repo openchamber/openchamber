@@ -23,7 +23,7 @@ Wil je geen vragen, kies dan **Snelle worktree** in hetzelfde branchmenu: OpenCh
 
 ## In de zijbalk
 
-Een worktree is één rij in de zijbalk, met alle sessies erin daaronder. De rij toont de naam van de taak zodra de agent die heeft gegeven (tot dan de titel van de sessie waarin u daar het laatst werkte), de pull request of issue die erbij hoort als gekleurde markering, en of een sessie daar bezig is of nieuws voor u heeft. Een worktree die voor een pull request of issue is gemaakt, begint met de titel daarvan tot de agent een kortere naam kiest. Beweeg de muis erover om de branch te zien. Klik erop om de sessie te openen waarin u daar het laatst werkte; om de lijst uit te klappen, beweegt u de muis over het branch-pictogram links ervan en klikt u op de pijl die ervoor in de plaats komt. Het menu hernoemt de taak, zet de worktree in een map van het project, archiveert hem of verwijdert hem. Hoe werk in en uit het blok In bewerking gaat, leest u in [Sessies in uitvoering](/nl/sessions-in-work/).
+Een worktree is één rij in de zijbalk, met alle sessies erin daaronder. Onder het project staat hij tussen de andere sessies van het project op volgorde van de laatste activiteit, dus een worktree waarin u net werkte, staat vrij bovenaan. De rij toont de naam van de taak zodra de agent die heeft gegeven (tot dan de titel van de sessie waarin u daar het laatst werkte), de pull request of issue die erbij hoort als gekleurde markering, en of een sessie daar bezig is of nieuws voor u heeft. Een worktree die voor een pull request of issue is gemaakt, begint met de titel daarvan tot de agent een kortere naam kiest. Beweeg de muis erover om de branch te zien. Klik erop om de sessie te openen waarin u daar het laatst werkte; om de lijst uit te klappen, beweegt u de muis over het branch-pictogram links ervan en klikt u op de pijl die ervoor in de plaats komt. Het menu hernoemt de taak, zet de worktree in een map van het project, archiveert hem of verwijdert hem. Hoe werk in en uit het blok In bewerking gaat, leest u in [Sessies in uitvoering](/nl/sessions-in-work/).
 
 ## Projecten geopend op een map van de repository
 
@@ -35,7 +35,9 @@ Is het werk klaar voor gebruik, kies dan **Integreren** in de Git-weergave om de
 
 ## Opruimen
 
-Markeer de rij van de worktree als afgerond wanneer de taak klaar is, of kies **Worktree archiveren** in zijn menu. OpenChamber archiveert hem: de map verdwijnt, en de sessies, de niet-gecommitte wijzigingen en de branch wachten op de pagina Archief. Loopt daar nog een sessie, dan blijft de worktree staan.
+Is de taak klaar, kies dan **Worktree archiveren** in het menu van de rij, of houd Shift ingedrukt en klik op de archiveerknop die op de rij in de plaats komt van de knop voor een nieuwe sessie. OpenChamber archiveert hem: de map verdwijnt, en de sessies, de niet-gecommitte wijzigingen en de branch wachten op de pagina Archief. Loopt daar nog een sessie, dan blijft de worktree staan.
+
+Markeert u de rij als afgerond, dan haalt dat hem alleen uit In bewerking. Wilt u een worktree archiveren telkens als u hem als afgerond markeert, of zodra zijn PR is gemerged, zet dat dan aan bij **Instellingen → Sessies → Afgeronde worktrees**.
 
 Op de pagina Archief staan gearchiveerde worktrees onder hun project. **Herstellen** haalt er een terug met zijn branch, voert de setupcommando's van het project uit en zet de wijzigingen en sessies terug; een van zijn sessies herstellen doet hetzelfde. Bestanden die git negeert, zoals `node_modules` of `.env`, worden niet bewaard, dus de setupcommando's brengen ze terug. Ook de pagina Worktrees van het project toont gearchiveerde worktrees.
 

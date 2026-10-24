@@ -1082,8 +1082,6 @@ export const settingsDict = {
   'settings.openchamber.passkeys.toast.renameFailed': '无法重命名通行密钥。',
   'settings.openchamber.passkeys.toast.clearAuthFailed': '无法清除已保存的认证信息。',
   'settings.openchamber.sessionRetention.title': '会话保留',
-  'settings.openchamber.mergedWorktreeCleanup.title': 'PR 合并后',
-  'settings.openchamber.mergedWorktreeCleanup.info': '使用侧边栏已显示的 PR 状态。当智能体正在该工作树中工作或其会话处于打开状态时，不会执行任何操作。',
   'settings.openchamber.messageSearch.title': '消息搜索',
   'settings.openchamber.messageSearch.field.enabled': '在所有对话中搜索消息',
   'settings.openchamber.messageSearch.field.enabledInfo': '在设置文件旁边为你的消息和智能体回复保存一个小型索引，让搜索能立即找到它们。索引保存在运行 OpenChamber 的机器上，不会发送到任何地方。',

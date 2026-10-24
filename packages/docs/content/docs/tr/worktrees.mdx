@@ -23,7 +23,7 @@ Soruları atlamak için aynı dal menüsünden **Hızlı worktree** seçin: Open
 
 ## Kenar çubuğunda
 
-Bir worktree kenar çubuğunda tek bir satırdır; içindeki tüm oturumlar altında durur. Satır, ajan adlandırdıktan sonra görevin adını (o zamana kadar orada en son çalıştığınız oturumun başlığını), takip ettiği pull request ya da issue'yu renkli bir işaretle ve oradaki bir oturumun çalışıp çalışmadığını ya da sizin için yeniliği olup olmadığını gösterir. Bir pull request ya da issue için oluşturulan worktree, ajan daha kısa bir ad seçene kadar o öğenin başlığıyla başlar. Dalı görmek için imleci üzerine getirin. Orada en son çalıştığınız oturumu açmak için tıklayın; listeyi açmak için imleci solundaki dal simgesinin üzerine getirin ve onun yerine çıkan oka tıklayın. Menüsü görevi yeniden adlandırır, worktree'yi projenin bir klasörüne taşır, arşivler ya da siler. İşlerin Devam eden bölümüne nasıl girip çıktığı için bkz. [Devam eden oturumlar](/tr/sessions-in-work/).
+Bir worktree kenar çubuğunda tek bir satırdır; içindeki tüm oturumlar altında durur. Projesinin altında, projenin diğer oturumları arasında son etkinliğine göre sıralanır; yani az önce çalıştığınız bir worktree üst sıralarda yer alır. Satır, ajan adlandırdıktan sonra görevin adını (o zamana kadar orada en son çalıştığınız oturumun başlığını), takip ettiği pull request ya da issue'yu renkli bir işaretle ve oradaki bir oturumun çalışıp çalışmadığını ya da sizin için yeniliği olup olmadığını gösterir. Bir pull request ya da issue için oluşturulan worktree, ajan daha kısa bir ad seçene kadar o öğenin başlığıyla başlar. Dalı görmek için imleci üzerine getirin. Orada en son çalıştığınız oturumu açmak için tıklayın; listeyi açmak için imleci solundaki dal simgesinin üzerine getirin ve onun yerine çıkan oka tıklayın. Menüsü görevi yeniden adlandırır, worktree'yi projenin bir klasörüne taşır, arşivler ya da siler. İşlerin Devam eden bölümüne nasıl girip çıktığı için bkz. [Devam eden oturumlar](/tr/sessions-in-work/).
 
 ## Deponun bir klasöründe açılan projeler
 
@@ -35,7 +35,9 @@ Bir projeyi `repo/ai` gibi deponun içindeki bir klasörde açtıysanız, yeni w
 
 ## Temizleme
 
-Görev bittiğinde worktree'nin satırını tamamlandı olarak işaretleyin ya da menüsünden **Worktree’yi arşivle** seçin. OpenChamber worktree'yi arşivler: Klasör kaldırılır; oturumları, commit edilmemiş değişiklikleri ve branch'i Arşiv sayfasında bekler. Orada hâlâ çalışan bir oturum varsa worktree kalır.
+Görev bittiğinde satırın menüsünden **Worktree’yi arşivle** seçin ya da Shift tuşunu basılı tutup satırda yeni oturum düğmesinin yerine çıkan arşiv düğmesine tıklayın. OpenChamber worktree'yi arşivler: Klasör kaldırılır; oturumları, commit edilmemiş değişiklikleri ve branch'i Arşiv sayfasında bekler. Orada hâlâ çalışan bir oturum varsa worktree kalır.
+
+Satırı tamamlandı olarak işaretlemek onu yalnızca Devam eden bölümünden çıkarır. Bir worktree'yi her tamamlandı olarak işaretlediğinizde ya da PR'ı birleştirildiğinde arşivlemek için bunu **Ayarlar → Session'lar → Biten worktree’ler** bölümünden açın.
 
 Arşiv sayfasında arşivlenen worktree'ler kendi projelerinin altında durur. **Geri yükle**, worktree'yi branch'iyle birlikte geri getirir, projenin kurulum komutlarını çalıştırır ve değişikliklerini ve oturumlarını yerine koyar; oturumlarından birini geri yüklemek de aynı şeyi yapar. `node_modules` ya da `.env` gibi git'in yok saydığı dosyalar saklanmaz, onları kurulum komutları yeniden oluşturur. Projenin Worktree'ler sayfası da arşivlenen worktree'leri listeler.
 

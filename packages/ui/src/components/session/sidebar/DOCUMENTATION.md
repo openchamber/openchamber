@@ -151,12 +151,16 @@ worktrees and managed
 Chats, while retaining its workspace-scoped grouped list and inline archived
 buckets.
 
-Worktree groups inside a project follow `worktreeSortOrder` (profile setting
-`sidebarWorktreeSortOrder`, default `manual`). `recent` floats worktrees by session activity, so
-they move while sessions run. `manual` and `a-z` never read activity: both start
-alphabetical, and only `manual` applies the saved drag order
-(`oc.sessions.groupOrder`) and enables worktree dragging. The mobile sheet keeps
-its own manual worktree order (`useWorktreeOrderStore`).
+A project lists its worktree works among the works of its root, not in a
+block after them: the row model (`mergeWorktreeEntries` in
+`sessionSidebarRowModel.ts`) puts each at the place of its most recent
+session in the shared lifecycle order (`sessionOrderIndex`), so a worktree
+someone just worked in leads the list as a session there would. A worktree
+spends one slot of the root's Show more limit, like a run; one with no session
+yet closes the list, the newest first (`useSessionGrouping`). Worktrees filed
+in a folder stay in the folder; spaces and the archive bucket follow the
+list. There is no worktree sort and no worktree dragging. The mobile sheet
+keeps its own manual worktree order (`useWorktreeOrderStore`).
 
 Every other list of projects shows them in the sidebar's order through
 `list/useProjectsInSidebarOrder.ts`: Settings > Projects, the project
@@ -185,10 +189,9 @@ refresh cached boundaries; scrolling only compares those offsets
 and changes the DOM at a zone handoff. An inert, accessibility-hidden snapshot of
 the outgoing header fades over the incoming header for 150 ms. Reduced motion
 skips the fade. Project dragging temporarily returns headers to their sections
-without remounting controls. Only headers of the dragged kind take part in the
-sort: a project moves among project headers, a worktree among the worktree
-headers of its own project, so nothing else shifts under the pointer and a drop
-always lands on a header of the same kind. Reordering refreshes boundaries using layout offsets
+without remounting controls. Only project headers take part in the sort, so
+nothing else shifts under the pointer and a drop always lands on a project.
+Reordering refreshes boundaries using layout offsets
 that include virtual positioning but exclude sortable transforms, so settling
 animations cannot leave stale header positions. The sidebar has no separate
 desktop-only top gradient or identity overlay.
@@ -199,7 +202,7 @@ bootstrap work. Selection and activity subscriptions stay session-scoped so a
 structural list update does not make every row observe unrelated streaming
 updates.
 
-Session-row permission and form badges read the relevant directory-store buckets and show only whether something waits, without a count: one form can hold many questions, and a number that does not drop as the user answers them reads as wrong. A collapsed row covers its own pending requests and those of the descendants it hides; an expanded row covers only its own. Flat Timeline rows carry badge-only scopes from their full session tree while keeping their rendered node childless, so selection, search, and row nesting do not change. The lookup never bootstraps a directory, so an unbootstrapped directory's store holds only live requests; until that store completes a bootstrap, the row lookup also reads forms from the cross-directory index, which the host seed fills at load, so a question already waiting in a project this client never opened still shows after a reload. Mobile rows show the same icon-only badges from the cross-directory index (`apps/usePendingRequests.ts`). A page an agent shows that waits for the user's answer has no directory-store bucket, so the row lookup also reads it from the cross-directory index and shows it as a form.
+Session-row permission and form badges read the relevant directory-store buckets and show only whether something waits, without a count: one form can hold many questions, and a number that does not drop as the user answers them reads as wrong. A collapsed row covers its own pending requests and those of the descendants it hides; an expanded row covers only its own. The lookup never bootstraps a directory, so an unbootstrapped directory's store holds only live requests; until that store completes a bootstrap, the row lookup also reads forms from the cross-directory index, which the host seed fills at load, so a question already waiting in a project this client never opened still shows after a reload. Mobile rows show the same icon-only badges from the cross-directory index (`apps/usePendingRequests.ts`). A page an agent shows that waits for the user's answer has no directory-store bucket, so the row lookup also reads it from the cross-directory index and shows it as a form.
 
 Session menus share `SessionAiRenameMenuItem` with header tabs and the
 single-session header. AI renaming uses the same leading spinner as a worktree
@@ -226,16 +229,38 @@ unchanged so ordinary session updates do not invalidate project sections.
 - The row model collapses members into one entry at the first member's
   position (`collapseRunEntries`) in every container: project groups, folders,
   Pinned, In work and the list by time. A run spends one slot of a reveal
-  limit.
-- The run row is not a session: it never enters selection or the selection
-  pool. Expanded (`runExpansionKey`, same `expandedParents` store) it lists its
-  lanes as session rows one level deeper; search forces it open. In a zone
-  it never expands and renders through `SessionTimelineRowBody` like the
-  session rows around it (title and status, then the lane count and model
-  logos); the overview lists the lanes.
-- Its activity indicator aggregates the lanes through
-  `CollapsedSessionActivityIndicator`. Clicking it opens the run overview
-  (`useUIStore.runOverviewKey`); a lane's context menu offers the same.
+  limit. In a zone, consecutive session works collapse in one batch and a
+  worktree work ends the batch, so the zone first gathers a run's members at
+  the first one's place (`gatherRunMembers`): a fusion that moved up past a
+  worktree row otherwise showed the same run twice.
+- The run row is a work like a session or a worktree (`RunSidebarRow`), not a
+  session: it never enters selection or the selection pool. It reads like
+  their rows: the lanes' state in the slot (aggregated by
+  `useCollapsedSessionActivityState`), else the run's mark; the title; the
+  lanes' model logos. It opens to its lanes everywhere, zones included
+  (`runExpansionKey`, same `expandedParents` store), as one-line session rows
+  one level deeper; search forces it open. With Detailed rows it follows the
+  two-line rows (`detailed`): no slot, the state on the right, the run's mark
+  and lane count on the second line, the chevron over its first icon on hover.
+  Its hover actions are Done (every lane and what the lanes started, past
+  subagents, marked done) and a menu, also on right-click, with Open
+  overview, Rename run (in the row) and Archive run (`runActions.ts`); keeping
+  one lane stays in the overview, where the lanes are compared. A click opens
+  the run's newest fusion when it has one, as a worktree's row opens its
+  session, and otherwise the overview (`useUIStore.runOverviewKey`); Open
+  overview in the menu always reaches it. A fusion that starts while the
+  overview is shown opens at once (`RunOverview`). The run's row is selected
+  while its overview is open or, with no overview, while one of its members is
+  the current session. While an overview is open, session and worktree rows do
+  not show the session it covers as selected, and clicking a worktree or draft
+  row closes it (`closeMainSurfaces`), as a session row does.
+- A row in rename keeps its height: the virtual list's 1px margins target
+  `data-session-row-box`, which the session row and both rename containers
+  carry (`data-session-row` stays on the normal row only, for Shift range
+  selection). The run row's rename takes the whole line: no actions reserve
+  and no fade while renaming. The maintainer chose this on 2026-10-24: a row
+  that only opened the overview, with no actions and no lanes, read as foreign
+  in the list of works and could not be finished from In work.
 
 The mobile sheet does not use the row model: `MobileSessionsSheet` builds the
 same index, moves members to the project root bucket and renders one
@@ -300,14 +325,19 @@ sessions' header tabs and, when the open session is one of them, moves to the
 neighbouring tab still at work, or with none to a new draft in the project;
 without tabs only that move applies.
 
-Done on a worktree work, and Archive worktree in its menu, mark every session
-in it done, leave it (its tabs close and the app moves off it, a draft in its
-folder included, so the work on screen does not keep the worktree), then
-archive the worktree with its sessions (`archiveWorktreeWork` in
-`lib/worktrees/worktreeArchive.ts`; the server side is in `web/server/lib/git`).
-An archive keeps every change and the branch, so nothing has to be confirmed;
-a session still running there, or one whose state cannot be read, keeps the
-worktree and says so. Delete in the menu stays the way to remove a worktree
+Done on a worktree work marks every session in it done and leaves it (its
+tabs close and the app moves off it, a draft in its folder included). That is
+all by default: the worktree stays where it is, out of In work. With "Archive
+a worktree when you mark it done" on (`worktreeArchiveOnDoneEnabled`,
+Settings → Sessions → Finished worktrees, off by default; maintainer decision
+2026-10-24, as archiving on every Done removed folders people expected to keep)
+Done then archives it too. Archive worktree in the menu, and the row's
+new-chat button, which turns into Archive while Shift is held (as a session
+row's archive turns into delete), always archive. Archiving goes through
+`archiveWorktreeWork` in `lib/worktrees/worktreeArchive.ts` (the server side
+is in `web/server/lib/git`). An archive keeps every change and the branch, so
+nothing has to be confirmed; a session still running there, or one whose
+state cannot be read, keeps the worktree and says so. Delete in the menu stays the way to remove a worktree
 for good. The work has left In work in every case. Archives exist where the
 runtime's git offers them (web, desktop); VS Code keeps its own list without
 them.
@@ -330,7 +360,7 @@ it replaced (`resolveSidebarGrouping`: List sorted by time keeps the list by
 time, everything else groups by project). The phone still reads
 `sidebarViewMode` and `listSessionGrouping`, and VS Code always groups by
 project. The display menu opens with Select sessions, then Grouping, then
-(grouped by project) the project sort, worktree sort and project display,
+(grouped by project) the project sort and project display,
 then the section toggles (Chats, Pinned, In work), "Also show in work under
 projects" (`keepWorkInPlace`, `sidebarKeepWorkInPlace`, off by default, shown
 while In work is), Detailed rows, then Collapse all / Expand all.
@@ -351,11 +381,26 @@ while In work is), Detailed rows, then Collapse all / Expand all.
   title; the whole-row tooltip names the project, branch and model), the PR
   or issue as a coloured mark;
   they open to what nests under them like the project tree. Detailed rows
-  (`detailedZoneRows`, `sidebarDetailedZoneRows`, off by default) gives them
-  the two-line `'timeline-mixed'` row, which never expands and carries the
-  requests under it as badges. A worktree work in a zone is its work row
-  naming its project (`mixed`), with its sessions under it, out of the drag
-  sort (`sortable: false`). Row keys carry the placement, so a worktree kept in
+  (`detailedZoneRows`, `sidebarDetailedZoneRows`, off by default; under a
+  project it gives the works two lines as well, see "Locations and detailed
+  rows") gives them
+  the two-line `'timeline-mixed'` row. It opens to what nests under it like
+  the one-line row does, which stays one-line zone rows (`'mixed-compact'`)
+  under it. It reserves no slot for that: its state sits at the end of the
+  first line, and its chevron takes the place of the second line's first icon
+  (the project's, else the branch's or the space's) while the row is hovered
+  or focused, always on touch layouts (`leadToggle` in
+  `SessionTimelineRowBody`). A row used to stay flat, carrying the requests
+  under it as badges; next to a worktree row that opens, that read as a
+  missing chevron, and the maintainer chose the hover swap over a column
+  reserved for it (2026-10-24).
+  A worktree work in a zone is its work row
+  naming its project (`mixed`), with its sessions under it; with Detailed
+  rows it takes their two lines too (`detailed`): the second names the
+  project, the branch (left out where it is the title) and the reference with
+  its number, as a detailed session row's does. Its sessions stay one-line tree rows under it: they
+  share the work's project, branch and reference, so a second line would only
+  repeat them. Row keys carry the placement, so a worktree kept in
   its project too never collides; collapse and Show more state stay keyed by
   the group and are shared.
 - Grouped by time, all-projects mode replaces the project headers with one
@@ -482,11 +527,27 @@ dragging a worktree onto a folder is not offered.
   with the project's icon and holds the branch (or the space's name) and the
   state cluster: goal glyph, PR (or the zombie warning), permission/question
   badges, provider logo.
+- Detailed rows reach past the zones (`detailedZoneRows` keeps its name):
+  under a project, every work takes the two lines too. That is the project
+  root's sessions and drafts, in its folders as well (a session row's
+  `detailed`, `detailedRoots` in the row model), and its worktree works (the
+  group row's `detailed`). What nests inside a work stays one line: subagents,
+  reviews and forks under a session, and a worktree's own sessions and drafts,
+  since they share the work's branch and reference. Every detailed row,
+  under a project or in a zone, is laid out the same way: no slot, its text
+  10px in at the first level (`sessionDetailedRowPaddingLeft`), the state at
+  the end of the first line, and the chevron over the second line's first
+  icon on hover. Under a project that line names the branch (the project
+  root's, passed as `secondaryMeta`) but not the project, which its header
+  already does; in a zone it opens with the project's icon. A worktree's
+  first icon there is the worktree mark tinted by its PR; a draft's line
+  opens with a pen and names the branch its session will go to once that
+  directory's git status is known.
 
 ## Pinned
 
 The display menu's Show pinned section toggle (`showPinnedSection`,
-`sidebarShowPinnedSection`, per surface, off by default) adds a `pinned`
+`sidebarShowPinnedSection`, per surface, on by default for new installs) adds a `pinned`
 activity zone between Chats and In work. It lists pinned top-level,
 unarchived project sessions in the shared lifecycle order; pinned chats stay
 pinned at the top of Chats. A work whose root session is pinned is listed in
@@ -628,8 +689,8 @@ matching and ordering. Search does not fetch sessions or broaden list membership
   one-line Chats, Pinned, In work and list-by-time rows (`'tree-chat'`,
   `'mixed-compact'`, session and run rows) take the same geometry at level 0
   with the state in the slot, so it reads down one edge from the zones into
-  the projects. Detailed zone rows are flat and keep the live state on the
-  right. Session and run titles are muted at rest. Session, run, worktree work
+  the projects. Detailed rows have no slot: their state is on the right and
+  their chevron swaps in for the second line's first icon. Session and run titles are muted at rest. Session, run, worktree work
   and draft rows take the same faint hover fill; space, archive and folder
   headers take none, so a pointer moving down the
   sidebar tells sessions from their containers. Show more, empty and
@@ -663,15 +724,19 @@ matching and ordering. Search does not fetch sessions or broaden list membership
   the list back to that header and the sidebar would not scroll until focus
   left it; `moveHost` keeps the scroll position across a move that carries
   focus.
-- Opening and closing a zone, project, worktree, folder or multi-run animates
-  like a reasoning block in the chat (200ms ease-out,
-  `sessionSidebarDisclosure.ts`). The rows are flat virtual rows, so no
+- Opening and closing a zone, project, worktree, folder, multi-run or a
+  session's subsessions animates like a reasoning block in the chat (200ms
+  ease-out, `sessionSidebarDisclosure.ts`; a session row with subsessions
+  carries `expanded` for it). The rows are flat virtual rows, so no
   container changes height: `SessionSidebarRows` compares each new row list
   with the one last drawn, and when exactly one header changed state with one
   block of rows right under it, those rows are clipped above a moving boundary
   and every row after them slides with it. A closed block is drawn as inert
   ghost rows at its old place until the motion ends; rows sliding in from past
-  the virtual range stay mounted meanwhile. Collapse all, search, Show more and
+  the virtual range stay mounted meanwhile. The block also fades: closing rows
+  are gone by 60% of the motion and opening rows come up after its first 20%.
+  Clipped at full strength, a closing row stayed legible until the rows
+  sliding up cut through it, which read as old content lingering over the new. Collapse all, search, Show more and
   live list changes do not animate, nor does anything under reduced motion.
   The phone's sessions sheet does the same with a height animation per body
   (`apps/MobileDisclosure.tsx`).
@@ -717,7 +782,7 @@ matching and ordering. Search does not fetch sessions or broaden list membership
 - A worktree this client is removing shows it on its row, from the user's confirmation until git answers: a spinner replaces the branch icon, the row dims and its delete action hides. The desktop group header, the mobile sheet's worktree bucket and the mobile project-edit worktree list all read `lib/worktrees/worktreeRemovalState.ts`. The row leaves with the topology once git confirms. It does not fade out: the server's `worktree-changed` refresh drops it as soon as the removal finishes, which would cut any exit animation short. A failed removal clears the state and the row returns to normal beside the error toast. Removing the files of a large worktree takes tens of seconds, so the spinner stays for as long as the deletion runs, never shorter. Another window removing the same worktree shows nothing until the topology refresh drops the row.
 - Opening the root-session `Move to worktree` submenu force-refreshes the owning project's worktree topology so externally created worktrees appear without a full reload. While that refresh runs, the menu keeps the last known primary/linked topology visible; if the refresh fails, the stale topology remains and the load failure state stays explicit. Failure cleanup never removes or manages an existing destination worktree. The owning project resolves from the row's project id, then from the session's directory, then from the session's worktree metadata `projectDirectory` — the last step keeps sibling destinations listed for a restored session whose own worktree directory was deleted.
 - Unarchiving a session whose directory the server confirms missing (its worktree was removed while it sat in the archive, by this app, by hand or by git) moves it, with its subsessions in that directory, to its project root (`lib/worktrees/relocateRestoredSession.ts`, maintainer decision 2026-10-02). OpenCode cannot run a prompt in a missing directory (it answers 500), while `session.move` works from one and appends a `location-switched` record that tells the model its working directory changed. The project root comes from the same ownership index as grouping (directory first, then OpenCode project metadata), so it survives a restart. A toast names the cause, the missing folder, not an action of this app. An unknown availability answer, an unresolved project or a missing project root leaves the session where it is; a rejected move shows an error toast.
-- Cleanup after a PR merge is opt-in (`mergedWorktreeCleanupEnabled`, Settings → Sessions, off by default; maintainer decision 2026-10-02). `hooks/useMergedWorktreeCleanup.ts` reads the branch PR status the sidebar already keeps fresh for each discovered linked worktree, asking GitHub nothing itself, and `lib/worktrees/mergedWorktreeCleanup.ts` decides: wait while any session there is not confirmed idle, is the open session, or the worktree is the directory on screen; otherwise archive the worktree with its sessions. An archive keeps uncommitted work and commits outside the merged PR, so the earlier rule (remove only a checkout with nothing to lose, keep the rest) is gone with the checks it needed. Each worktree and PR pair is tried once (remembered in local storage), so a failed archive is not retried on every pass. A worktree being archived or removed right now is skipped, so Done and a pass never archive it twice; a worktree the user restored from the archive is marked handled for its PR on the next pass (`takeRestoredWorktree`), since restoring a merged worktree is taking it back. It runs on desktop and web only; VS Code has no worktrees and a phone would race the desktop it drives. Only worktrees of projects whose worktrees the sidebar has discovered are covered.
+- Cleanup after a PR merge is opt-in (`mergedWorktreeCleanupEnabled`, Settings → Sessions → Finished worktrees, beside archiving on Done, off by default; maintainer decision 2026-10-02). `hooks/useMergedWorktreeCleanup.ts` reads the branch PR status the sidebar already keeps fresh for each discovered linked worktree, asking GitHub nothing itself, and `lib/worktrees/mergedWorktreeCleanup.ts` decides: wait while any session there is not confirmed idle, is the open session, or the worktree is the directory on screen; otherwise archive the worktree with its sessions. An archive keeps uncommitted work and commits outside the merged PR, so the earlier rule (remove only a checkout with nothing to lose, keep the rest) is gone with the checks it needed. Each worktree and PR pair is tried once (remembered in local storage), so a failed archive is not retried on every pass. A worktree being archived or removed right now is skipped, so Done and a pass never archive it twice; a worktree the user restored from the archive is marked handled for its PR on the next pass (`takeRestoredWorktree`), since restoring a merged worktree is taking it back. It runs on desktop and web only; VS Code has no worktrees and a phone would race the desktop it drives. Only worktrees of projects whose worktrees the sidebar has discovered are covered.
 - CLI/server-created sessions use the low-frequency OpenChamber control event stream to refresh only the created session directory. The same event re-lists the worktrees of the session's project, or of every project when the session's directory is not a project root or a known worktree, so a newly created external worktree gains ownership without a view reload; it does not re-enable broad session or streaming subscriptions.
 - A successful restore on the current runtime promotes only the session's ephemeral list-order rank. It does not change timestamps or live status, and it resets on a runtime switch.
 - `useProjectRepoStatus` reads Git status once per project path while the sidebar is visible. A change to the project list that adds no path (collapse, rename, color, last opened) reads nothing; an added project reads only its own status; a failed read is retried on the next list change. New paths are first read together through `GitAPI.prefetchProjectStatuses`, one batched request that warms the status cache, so the per-project reads after it are cache hits; VS Code has no batched read and reads one by one. Hiding the sidebar or switching runtime starts over.
@@ -774,6 +839,17 @@ or a session in the project root with what grew out of it), named for its task,
 with the grouping as its only choice (2026-10). Rows are one line with no
 project icon and no date: the order already says how recent a work is, the
 tooltip names its project and time, and the room goes to the title.
+
+### Why a worktree is listed among the project's sessions
+
+A worktree was a block of its own under the project, after every session of
+the project root, with its own sort (recent, manual with dragging, A to Z).
+Once a worktree became a work like a root session, that block hid it: a
+worktree with the newest session sat under Show more, below sessions days
+old. The maintainer decided (2026-10-24) that a worktree is a task like any
+other of the project, with a collapsible group of its own, so it is listed
+among them by its latest activity, and the worktree sort, the saved drag
+order (`oc.sessions.groupOrder`) and worktree dragging went with the block.
 
 ### Why the phone's List search skips subsessions and does not reveal them
 

@@ -15,8 +15,8 @@ view, In work, Drafts, Folders with worktrees) describes how they are laid out.
   `worktreeFolderMemberId` is a worktree's member id in a root folder.
 - `workActions.ts`: the session a click opens (`pickWorkSessionToOpen`: past
   reviews and forks, newest first), Track, and Done on a worktree work
-  (`finishWorktreeWork`: sessions done, then the Overview's clean up, which
-  removes the worktree only when nothing is lost).
+  (`finishWorktreeWork`: sessions done, the work left, and with `archive` the
+  worktree archived with its sessions).
 - `WorktreeWorkRow.tsx`: a worktree's work row, in its project, in a folder or
   in a zone (`mixed`).
 - `SessionDraftRow.tsx`, `openSessionDraft.ts`: a left draft's row and

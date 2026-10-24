@@ -317,7 +317,11 @@ export const worktreeMapsEqual = (
         || next.headState !== current.headState
         || next.worktreeStatus !== current.worktreeStatus
         || next.worktreeSource !== current.worktreeSource
-        || next.source !== current.source) return false;
+        || next.source !== current.source
+        // The task title changes while the worktree stays: the agent names
+        // the task, the user renames it. Left out, a renamed list read as
+        // unchanged and the sidebar kept the old name.
+        || next.title !== current.title) return false;
     }
   }
   return true;

@@ -1114,8 +1114,6 @@ export const settingsDict = {
   'settings.openchamber.passkeys.toast.renameFailed': 'تعذّرت إعادة تسمية مفتاح المرور.',
   'settings.openchamber.passkeys.toast.clearAuthFailed': 'تعذّر مسح بيانات المصادقة المحفوظة.',
   'settings.openchamber.sessionRetention.title': 'الاحتفاظ بالجلسات',
-  'settings.openchamber.mergedWorktreeCleanup.title': 'بعد دمج طلب السحب (PR)',
-  'settings.openchamber.mergedWorktreeCleanup.info': 'يستخدم حالة PR التي يعرضها الشريط الجانبي بالفعل. لا يحدث شيء ما دام وكيل يعمل في شجرة العمل أو كانت إحدى جلساتها مفتوحة.',
   'settings.openchamber.messageSearch.title': 'البحث في الرسائل',
   'settings.openchamber.messageSearch.field.enabled': 'البحث في الرسائل عبر المحادثات',
   'settings.openchamber.messageSearch.field.enabledInfo': 'يحتفظ بفهرس صغير لرسائلك وردود الوكيل بجوار الإعدادات، فيجدها البحث فورًا. يبقى على الجهاز الذي يشغّل OpenChamber ولا يُرسل إلى أي مكان.',

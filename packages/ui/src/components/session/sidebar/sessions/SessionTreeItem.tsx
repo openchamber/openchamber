@@ -20,6 +20,8 @@ type Context = {
   archivedBucket?: boolean;
   secondaryMeta?: { projectLabel?: string | null; branchLabel?: string | null; inSpace?: boolean } | null;
   renderContext?: SessionSidebarRenderContext;
+  /** Two lines under the project: a work of its own with Detailed rows on. */
+  detailed?: boolean;
   rowKey?: string;
   dragKey?: string;
 };
@@ -72,6 +74,7 @@ function SessionTreeItemComponent({
   archivedBucket = false,
   secondaryMeta,
   renderContext = 'project',
+  detailed = false,
   rowKey,
   dragKey,
   renderExtras,
@@ -188,6 +191,7 @@ function SessionTreeItemComponent({
       archivedBucket={archivedBucket}
       secondaryMeta={secondaryMeta}
       renderContext={renderContext}
+      detailed={detailed}
       rowKey={effectiveRowKey}
       dragKey={dragKey ?? rowKey ?? node.session.id}
       subtreeContainsEditing={renderExtras?.subtreeContainsEditing ?? EMPTY_SUBTREE_CONTAINS_EDITING}
@@ -271,7 +275,7 @@ const areSessionTreeItemPropsEqual = (prev: SessionTreeItemProps, next: SessionT
   if ((prev.secondaryMeta?.inSpace ?? false) !== (next.secondaryMeta?.inSpace ?? false)) return false;
   const scalarKeys = [
     'depth', 'groupDirectory', 'projectId', 'folderOwnerKey', 'selectionScopeKey', 'archivedBucket',
-    'renderContext', 'rowKey', 'dragKey', 'renderChildren',
+    'renderContext', 'detailed', 'rowKey', 'dragKey', 'renderChildren',
     'hasSessionSearchQuery', 'normalizedSessionSearchQuery',
     'editingId', 'editingRowKey', 'editTitle', 'openSidebarMenuKey',
     'mobileVariant', 'alwaysShowActions', 'allowReselect',

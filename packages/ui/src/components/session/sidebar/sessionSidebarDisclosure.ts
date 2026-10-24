@@ -1,7 +1,8 @@
 import type { SessionSidebarRow } from './sessionSidebarRowModel';
 
 /**
- * Opening and closing a section, project, worktree, folder or multi-run in the
+ * Opening and closing a section, project, worktree, folder, multi-run or a
+ * session's subsessions in the
  * sidebar. The rows are a flat virtual list, so there is no container to
  * animate: the rows the header shows or hides are revealed above a moving
  * boundary, and the rows after them slide with that boundary, as one block
@@ -22,6 +23,8 @@ const disclosureOpen = (row: SessionSidebarRow): boolean | null => {
       return row.forceExpanded ? null : !row.collapsed;
     case 'run':
       return row.forceExpanded ? null : row.expanded;
+    case 'session':
+      return row.expanded === undefined || row.forceExpanded ? null : row.expanded;
     default:
       return null;
   }

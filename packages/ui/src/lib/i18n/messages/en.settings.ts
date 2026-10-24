@@ -1114,8 +1114,6 @@ export const settingsDict = {
   'settings.openchamber.passkeys.toast.renameFailed': 'Could not rename passkey.',
   'settings.openchamber.passkeys.toast.clearAuthFailed': 'Could not clear saved authentication.',
   'settings.openchamber.sessionRetention.title': 'Session retention',
-  'settings.openchamber.mergedWorktreeCleanup.title': 'After a PR is merged',
-  'settings.openchamber.mergedWorktreeCleanup.info': 'Uses the PR status the sidebar already shows. Nothing happens while an agent works in the worktree or one of its sessions is open.',
   'settings.openchamber.messageSearch.title': 'Message search',
   'settings.openchamber.messageSearch.field.enabled': 'Search messages across conversations',
   'settings.openchamber.messageSearch.field.enabledInfo': 'Keeps a small index of your messages and agent replies next to the settings, so search finds them instantly. It stays on the machine running OpenChamber and is never sent anywhere.',

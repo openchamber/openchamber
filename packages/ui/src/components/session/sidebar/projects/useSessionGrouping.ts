@@ -2,7 +2,6 @@ import { matchesRankQuery } from '@/lib/search/fuzzySearch';
 import React from 'react';
 import type { Session } from '@/lib/opencode/model';
 import type { WorktreeMetadata } from '@/types/worktree';
-import type { WorktreeSortOrder } from '@/stores/useSessionDisplayStore';
 import type { SessionGroup, SessionNode } from '../types';
 import {
   dedupeSessionsById,
@@ -26,7 +25,6 @@ type Args = {
   sessionOrderRanks: ReadonlyMap<string, number>;
   gitBranches: Map<string, string | null>;
   isVSCode: boolean;
-  worktreeSortOrder: WorktreeSortOrder;
   sessionOwners?: ReadonlyMap<string, { scopeDirectory: string }>;
   /** The isolated spaces of each project, by the project's normalized root. */
   spacesByProject?: ReadonlyMap<string, readonly SpaceMark[]>;
@@ -287,10 +285,10 @@ export const useSessionGrouping = (args: Args) => {
         const bLabel = (b.label || b.branch || b.name || b.path || '').toLowerCase();
         return aLabel.localeCompare(bLabel);
       };
-      // Stable orders never look at session activity, so running a session
-      // cannot move its worktree. Manual starts alphabetical; the saved drag
-      // order is applied on top by useGroupOrdering.
-      const sortedWorktrees = args.worktreeSortOrder !== 'recent' ? [...availableWorktrees].sort(compareWorktreeLabels) : [...availableWorktrees].sort((a, b) => {
+      // A worktree is a work like the project root's: by its latest activity.
+      // The row model lists them among the root's works by the same measure;
+      // this order settles the ones with no session yet, newest first.
+      const sortedWorktrees = [...availableWorktrees].sort((a, b) => {
         const aDir = normalizePath(a.path) ?? a.path;
         const bDir = normalizePath(b.path) ?? b.path;
         const aInfo = worktreeActivityInfo.get(aDir) ?? { hasActiveSession: false, lastUpdatedAt: 0 };
@@ -377,7 +375,7 @@ export const useSessionGrouping = (args: Args) => {
 
       return groups;
     },
-    [args.homeDirectory, args.worktreeMetadata, args.isVSCode, args.worktreeSortOrder, sessionOwners, args.spacesByProject, args.runKeyBySessionId, t],
+    [args.homeDirectory, args.worktreeMetadata, args.isVSCode, sessionOwners, args.spacesByProject, args.runKeyBySessionId, t],
   );
 
   return {

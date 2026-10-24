@@ -1082,8 +1082,6 @@ export const settingsDict = {
   'settings.openchamber.passkeys.toast.renameFailed': 'Passkey 이름을 변경하지 못했습니다.',
   'settings.openchamber.passkeys.toast.clearAuthFailed': '저장된 인증을 지울 수 없습니다.',
   'settings.openchamber.sessionRetention.title': '세션 보존',
-  'settings.openchamber.mergedWorktreeCleanup.title': 'PR 병합 후',
-  'settings.openchamber.mergedWorktreeCleanup.info': '사이드바에 이미 표시된 PR 상태를 사용합니다. 워크트리에서 에이전트가 작업 중이거나 세션이 열려 있으면 아무것도 하지 않습니다.',
   'settings.openchamber.messageSearch.title': '메시지 검색',
   'settings.openchamber.messageSearch.field.enabled': '모든 대화에서 메시지 검색',
   'settings.openchamber.messageSearch.field.enabledInfo': '설정 옆에 내 메시지와 에이전트 답변의 작은 인덱스를 보관해 검색이 즉시 찾을 수 있게 합니다. OpenChamber가 실행되는 컴퓨터에만 저장되며 어디로도 전송되지 않습니다.',

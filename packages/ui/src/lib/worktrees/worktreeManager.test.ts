@@ -625,6 +625,12 @@ describe('worktreeMapsEqual', () => {
     expect(worktreeMapsEqual(a, b)).toBe(false);
   });
 
+  test('returns false when the task title changes, so a named or renamed task reaches the sidebar', () => {
+    const a = new Map([['/repo', [wt('/r/feat', 'feat')]]]);
+    const b = new Map([['/repo', [wt('/r/feat', 'feat', { title: 'Sidebar works view' })]]]);
+    expect(worktreeMapsEqual(a, b)).toBe(false);
+  });
+
   test('returns false when paths differ', () => {
     const a = new Map([['/repo', [wt('/r/main', 'main')]]]);
     const b = new Map([['/repo', [wt('/r/other', 'main')]]]);

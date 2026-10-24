@@ -157,6 +157,23 @@ function RunOverviewContent({ runKey }: { runKey: string }): React.ReactNode {
     if (providerID && modelID) setJudge([{ providerID, modelID, variant: auto?.variant, instanceId: generateInstanceId() }]);
   }, [currentModelId, currentProviderId, judge.length, run?.autoFusion]);
 
+  // A fusion that starts while the overview is shown opens at once, manual or
+  // automatic: the fused answer is what the user waits for. Fusions that were
+  // there when the overview opened stay put.
+  const seenFusionsRef = React.useRef<{ runKey: string; ids: ReadonlySet<string> } | null>(null);
+  const fusionIds = run?.fusions.map((fusion) => fusion.sessionId).join('\n') ?? null;
+  React.useEffect(() => {
+    if (fusionIds === null) return;
+    const ids = new Set(fusionIds ? fusionIds.split('\n') : []);
+    const seen = seenFusionsRef.current;
+    seenFusionsRef.current = { runKey, ids };
+    if (!seen || seen.runKey !== runKey) return;
+    const started = [...ids].find((id) => !seen.ids.has(id));
+    if (!started || useUIStore.getState().runOverviewKey !== runKey) return;
+    useUIStore.getState().closeMainSurfaces();
+    useSessionUIStore.getState().setCurrentSession(started, useGlobalSessionsStore.getState().entityById.get(started)?.directory ?? null);
+  }, [fusionIds, runKey]);
+
   if (!run) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center typography-meta text-muted-foreground">

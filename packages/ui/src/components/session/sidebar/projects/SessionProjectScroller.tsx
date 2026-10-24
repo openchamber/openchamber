@@ -8,7 +8,7 @@ import {
   useSensor,
   useSensors,
 } from '@dnd-kit/core';
-import { SortableContext, arrayMove, sortableKeyboardCoordinates, verticalListSortingStrategy } from '@dnd-kit/sortable';
+import { SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Button } from '@/components/ui/button';
 import { formatDirectoryName, formatPathForDisplay } from '@/lib/utils';
@@ -21,7 +21,7 @@ import { refreshGlobalSessions } from '@/stores/useGlobalSessionsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useChildStoreManager } from '@/sync/sync-context';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
-import type { ProjectSortOrder, WorktreeSortOrder } from '@/stores/useSessionDisplayStore';
+import type { ProjectSortOrder } from '@/stores/useSessionDisplayStore';
 import { streamPerfCount } from '@/stores/utils/streamDebug';
 import { Spinner } from '@/components/ui/spinner';
 import { SessionSidebarFolderItem } from '../folders/SessionSidebarFolderItem';
@@ -35,7 +35,7 @@ import { SessionSidebarRows } from '../SessionSidebarRows';
 import { sessionTreeTextInset } from '../sessions/sessionTreeGeometry';
 import { SessionSidebarActivityHeader } from '../sessionSidebarHeaderPresentation';
 import { resolveSessionSidebarStickyHeader, type SessionSidebarRow, type SessionSidebarRowModel } from '../sessionSidebarRowModel';
-import { SortableGroupItem, SortableProjectItem, type SortableDragHandleProps } from './sortableItems';
+import { SortableProjectItem } from './sortableItems';
 import { WorktreeWorkRow } from '../works/WorktreeWorkRow';
 import { SessionDraftRow } from '../works/SessionDraftRow';
 import { isWorktreeWorkGroup } from '../works/sidebarWorks';
@@ -104,7 +104,6 @@ type View = {
   mobileVariant: boolean;
   alwaysShowActions: boolean;
   projectSortOrder: ProjectSortOrder;
-  worktreeSortOrder: WorktreeSortOrder;
 };
 
 type Actions = {
@@ -118,7 +117,6 @@ type Actions = {
   openProjectEditDialog: (id: string) => void;
   removeProject: (id: string) => void;
   reorderProjects: (fromIndex: number, toIndex: number) => void;
-  setGroupOrderByProject: React.Dispatch<React.SetStateAction<Map<string, string[]>>>;
   renderProjectStatusIndicator?: (projectId: string, groups: SessionGroup[]) => React.ReactNode;
   setSingleProjectId: (id: string) => void;
 };
@@ -148,12 +146,9 @@ function SessionProjectScrollerComponent({ model, view, actions }: Props): React
   const [stickyIdentity, setStickyIdentity] = React.useState<string | null>(null);
   const [focusedRowKey, setFocusedRowKey] = React.useState<string | null>(null);
   const [scrollElement, setScrollElement] = React.useState<HTMLElement | null>(null);
-  // What is being dragged decides which headers take part in the sort: a
-  // project moves among projects, a worktree among its own project's
-  // worktrees. Mixing them shifted worktree headers under a dragged project
-  // and let it drop on a worktree, which moved nothing.
-  const [activeDrag, setActiveDrag] = React.useState<{ kind: 'project' } | { kind: 'group'; projectId: string | null } | null>(null);
-  const isProjectDragging = activeDrag?.kind === 'project';
+  // Only project headers sort; a worktree is a work among the project's
+  // works, ordered by activity like the rest.
+  const [isProjectDragging, setProjectDragging] = React.useState(false);
   const scrollContainerRef = React.useRef<HTMLElement | null>(null);
   const sensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 8 } }),
@@ -384,13 +379,12 @@ function SessionProjectScrollerComponent({ model, view, actions }: Props): React
     if (row.kind === 'group-header') {
       // A worktree is a work of its own and reads like a session row; spaces
       // and the archive keep their group header.
-      const renderHeader = (dragHandleProps: SortableDragHandleProps | null) => isWorktreeWorkGroup(row.group)
+      return isWorktreeWorkGroup(row.group)
         ? <WorktreeWorkRow
-          group={row.group} groupKey={row.groupKey} projectId={row.projectId} depth={row.depth}
+          group={row.group} groupKey={row.groupKey} projectId={row.projectId} depth={row.depth} detailed={row.detailed} mixed={row.mixed}
           collapsed={row.collapsed} forceExpanded={row.forceExpanded} empty={row.empty}
           normalizedSessionSearchQuery={model.groupProps.normalizedSessionSearchQuery}
           alwaysShowActions={view.alwaysShowActions} mobileVariant={view.mobileVariant}
-          dragHandleProps={dragHandleProps}
           onToggle={actions.group.onToggleCollapsedGroup}
           openNewSessionDraft={actions.openNewSessionDraft}
           setActiveProjectIdOnly={actions.setActiveProjectIdOnly}
@@ -403,13 +397,8 @@ function SessionProjectScrollerComponent({ model, view, actions }: Props): React
           visibleSessionCount={model.state.visibleSessionCountByGroup.get(row.groupKey)}
           editingId={model.state.editingId} openSidebarMenuKey={model.state.openSidebarMenuKey}
           setOpenSidebarMenuKey={model.state.setOpenSidebarMenuKey}
-          dragHandleProps={dragHandleProps} renderBody={false}
+          renderBody={false}
         />;
-      // Only under its project does a worktree take part in the manual sort.
-      if (!row.sortable) return renderHeader(null);
-      return <SortableGroupItem id={row.groupKey} disabled={row.forceExpanded || model.state.editingId !== null || view.worktreeSortOrder !== 'manual'}>
-        {renderHeader}
-      </SortableGroupItem>;
     }
     if (row.kind === 'folder-header') {
       const renaming = model.groupProps.folderRename?.folderId === row.folder.id && model.groupProps.folderRename.scopeKey === row.scopeKey;
@@ -456,7 +445,7 @@ function SessionProjectScrollerComponent({ model, view, actions }: Props): React
           {...model.groupProps}
           node={row.node} depth={row.depth} groupDirectory={row.groupDirectory} projectId={row.projectId}
           folderOwnerKey={row.ownerKey} selectionScopeKey={row.selectionScopeKey}
-          archivedBucket={row.archived} renderContext={row.renderContext} rowKey={row.key} dragKey={row.key}
+          archivedBucket={row.archived} renderContext={row.renderContext} detailed={row.detailed} rowKey={row.key} dragKey={row.key}
           secondaryMeta={row.secondaryMeta} renderChildren={false}
           editingId={model.state.editingId} openSidebarMenuKey={model.state.openSidebarMenuKey}
           setOpenSidebarMenuKey={model.state.setOpenSidebarMenuKey}
@@ -473,16 +462,18 @@ function SessionProjectScrollerComponent({ model, view, actions }: Props): React
     }
     if (row.kind === 'draft') {
       return <SessionDraftRow
-        draft={row.draft} depth={row.depth}
+        draft={row.draft} depth={row.depth} detailed={row.detailed} mixed={row.mixed}
         alwaysShowActions={view.alwaysShowActions} mobileVariant={view.mobileVariant}
         setSessionSwitcherOpen={actions.setSessionSwitcherOpen}
       />;
     }
     if (row.kind === 'run') {
       return <RunSidebarRow
-        run={row.run} depth={row.depth} laneNodes={row.laneNodes} blockingSessionIds={row.blockingSessionIds} renderContext={row.renderContext}
+        run={row.run} depth={row.depth} laneNodes={row.laneNodes} blockingSessionIds={row.blockingSessionIds}
+        detailed={row.detailed} mixed={row.renderContext === 'timeline-mixed' || row.renderContext === 'mixed-compact'}
         projectId={row.projectId} projectLabel={row.projectLabel}
         expansionKey={row.expansionKey} expanded={row.expanded} forceExpanded={row.forceExpanded}
+        alwaysShowActions={view.alwaysShowActions}
         toggleParent={model.groupProps.toggleParent}
       />;
     }
@@ -512,13 +503,9 @@ function SessionProjectScrollerComponent({ model, view, actions }: Props): React
     </div>;
   }, [actions, deleteFolder, files, model, openProjectFolder, openProjectOnBoard, projectPickerOptions, renameFolder, renderStatus, requestArchiveAll, showDeletionDialog, spacesPageAvailable, t, toggleFolderCollapse, view]);
 
-  const structuralIds = React.useMemo(() => model.rowModel.rows.flatMap((row) => {
-    if (row.kind === 'project-header') return activeDrag?.kind === 'group' ? [] : [row.section.project.id];
-    if (row.kind !== 'group-header' || !row.sortable) return [];
-    if (activeDrag?.kind === 'project') return [];
-    if (activeDrag?.kind === 'group' && row.projectId !== activeDrag.projectId) return [];
-    return [row.groupKey];
-  }), [activeDrag, model.rowModel.rows]);
+  const structuralIds = React.useMemo(() => model.rowModel.rows.flatMap((row) => (
+    row.kind === 'project-header' ? [row.section.project.id] : []
+  )), [model.rowModel.rows]);
   const projectDragIds = React.useMemo(() => new Set(model.sectionsForRender.map((section) => section.project.id)), [model.sectionsForRender]);
   const zoneLayoutKey = React.useMemo(() => model.rowModel.stickyHeaders
     .map(({ kind, id, rowIndex }) => `${kind}:${id}:${rowIndex}`)
@@ -536,16 +523,10 @@ function SessionProjectScrollerComponent({ model, view, actions }: Props): React
         outerClassName="flex-1 min-h-0" className="oc-sidebar-scroller pb-1 ps-2.5 pe-2 [overflow-anchor:none]"
       >
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={(event) => {
-          const activeId = String(event.active.id);
-          if (projectDragIds.has(activeId)) {
-            setActiveDrag({ kind: 'project' });
-            return;
-          }
-          const groupRow = model.rowModel.rows.find((row): row is Extract<SessionSidebarRow, { kind: 'group-header' }> => row.kind === 'group-header' && row.groupKey === activeId);
           // Session rows drag into folders and take no part in the header sort.
-          setActiveDrag(groupRow ? { kind: 'group', projectId: groupRow.projectId } : null);
-        }} onDragCancel={() => setActiveDrag(null)} onDragEnd={(event) => {
-          setActiveDrag(null);
+          setProjectDragging(projectDragIds.has(String(event.active.id)));
+        }} onDragCancel={() => setProjectDragging(false)} onDragEnd={(event) => {
+          setProjectDragging(false);
           if (!event.over) return;
           // SAFETY: session and folder payloads are created by the sidebar's draggable and droppable row components.
           const activeData = event.active.data.current as { type?: string; sessionId?: string; ownerKey?: string | null; archivedBucket?: boolean } | undefined;
@@ -570,18 +551,7 @@ function SessionProjectScrollerComponent({ model, view, actions }: Props): React
           const projectTo = projectIds.indexOf(overId);
           if (projectFrom >= 0 && projectTo >= 0 && view.projectSortOrder === 'manual') {
             actions.reorderProjects(projectFrom, projectTo);
-            return;
           }
-          const activeRow = model.rowModel.rows.find((row): row is Extract<SessionSidebarRow, { kind: 'group-header' }> => row.kind === 'group-header' && row.groupKey === activeId);
-          const overRow = model.rowModel.rows.find((row): row is Extract<SessionSidebarRow, { kind: 'group-header' }> => row.kind === 'group-header' && row.groupKey === overId);
-          if (!activeRow || !overRow || activeRow.projectId !== overRow.projectId || !activeRow.projectId) return;
-          const projectId = activeRow.projectId;
-          const section = model.sectionsForRender.find((entry) => entry.project.id === projectId);
-          if (!section) return;
-          const from = section.groups.findIndex((group) => group.id === activeRow.group.id);
-          const to = section.groups.findIndex((group) => group.id === overRow.group.id);
-          if (from < 0 || to < 0) return;
-          actions.setGroupOrderByProject((current) => new Map(current).set(projectId, arrayMove(section.groups, from, to).map((group) => group.id)));
         }}>
           <SortableContext items={structuralIds} strategy={verticalListSortingStrategy}>
             <SessionSidebarRows model={model.rowModel} scrollElement={scrollElement} pinnedRowIndexes={pinnedRowIndexes} renderRow={renderRow} onFirstVisibleIndexChange={handleFirstVisibleIndexChange} />

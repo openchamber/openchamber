@@ -17,7 +17,6 @@ import { sessionEvents } from '@/lib/sessionEvents';
 import { useUIStore } from '@/stores/useUIStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { SessionFolderItem } from '../../SessionFolderItem';
-import type { SortableDragHandleProps } from './sortableItems';
 import { DroppableFolderWrapper, SessionFolderDndScope } from '../folders/sessionFolderDnd';
 import type { GroupSearchData, SessionGroup, SessionNode } from '../types';
 import { isBranchDifferentFromLabel, normalizePath, renderHighlightedText } from '../utils';
@@ -91,7 +90,6 @@ export type SessionGroupSectionProps = {
   editTitle: string;
   openSidebarMenuKey: string | null;
   onToggleCollapsedGroup: (groupKey: string) => void;
-  dragHandleProps?: SortableDragHandleProps | null;
   compactBodyPadding?: boolean;
   /**
    * Optional scroll container ref threaded from the outer ScrollableOverlay.
@@ -236,7 +234,6 @@ const areGroupPropsEqual = (prev: SessionGroupSectionProps, next: SessionGroupSe
     && prev.setSessionSwitcherOpen === next.setSessionSwitcherOpen
     && prev.openNewSessionDraft === next.openNewSessionDraft
     && prev.onToggleCollapsedGroup === next.onToggleCollapsedGroup
-    && prev.dragHandleProps === next.dragHandleProps
     && prev.renderBody === next.renderBody
     && prev.setEditingId === next.setEditingId
     && prev.setEditingRowKey === next.setEditingRowKey
@@ -288,7 +285,6 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
     pinnedSessionIds,
     sessionOrderIndex,
     onToggleCollapsedGroup,
-    dragHandleProps,
     compactBodyPadding = false,
     expandedParents,
     editingId,
@@ -1018,7 +1014,6 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
         })}
       >
         <div
-          ref={dragHandleProps?.setActivatorNodeRef}
           // A file tree folder row at the first level under the project: the
           // chevron, then the branch (or space, or archive) icon and label.
           style={{ paddingInlineStart: sessionTreeRowPaddingLeft(0) }}
@@ -1026,7 +1021,6 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
             '@container min-w-0 flex flex-1 items-start gap-1 overflow-hidden',
             groupHeaderRightPadding,
           )}
-          {...(dragHandleProps?.listeners ?? {})}
         >
           <div className={cn('min-w-0 flex flex-1 flex-col justify-center gap-0.5 overflow-hidden', headerActionsMaskClass)}>
             <p className="typography-ui-label font-normal truncate text-foreground/92">

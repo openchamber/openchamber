@@ -48,9 +48,9 @@ import { canShowSessionWorktreeMenu, getSessionWorktreeMenuDisabled, nodeContain
 import { useSessionRowMenuState } from './useSessionRowMenuState';
 import { buildActiveSessionTreeFromCache, collectSessionMoveDescendants } from './sessionSubtreeActions';
 import type { SessionNode } from '../types';
-import { hasTreeSlotContext, isMultiLineTimelineContext, type SessionSidebarRenderContext } from '../sessionSidebarRowModel';
+import { isMultiLineTimelineContext, type SessionSidebarRenderContext } from '../sessionSidebarRowModel';
 import { SessionTimelineRowBody } from './SessionTimelineRowBody';
-import { sessionTreeRowPaddingLeft } from './sessionTreeGeometry';
+import { sessionDetailedRowPaddingLeft, sessionTreeRowPaddingLeft } from './sessionTreeGeometry';
 import { FileTreeChevron } from '@/components/views/files/FileTreeRowParts';
 import { formatProjectLabel, formatSessionCompactDateLabel, formatSessionDateLabel, normalizePath, renderHighlightedText } from '../utils';
 import { useProjectsStore } from '@/stores/useProjectsStore';
@@ -148,6 +148,8 @@ export type SessionNodeItemProps = {
   alwaysShowActions: boolean;
   secondaryMeta?: SecondaryMeta | null;
   renderContext?: SessionSidebarRenderContext;
+  /** A work's row under its project with Detailed rows on: two lines, keeping the tree slot. */
+  detailed?: boolean;
   blockingBadgeSessionScopes?: readonly BlockingBadgeSessionScope[];
   rowKey?: string;
   dragKey?: string;
@@ -195,7 +197,6 @@ type SessionRefLine = SidebarRefLink & {
   /** The badge's short form: `#12` or the tracker identifier. */
   label: string;
 };
-const TIMELINE_ROW_LEFT_PX = 10;
 
 const cancelScrollAnchorByContainer = new WeakMap<HTMLElement, () => void>();
 
@@ -341,6 +342,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
     alwaysShowActions,
     secondaryMeta,
     renderContext = 'project',
+    detailed = false,
     blockingBadgeSessionScopes: timelineBadgeSessionScopes,
     rowKey,
     dragKey,
@@ -407,13 +409,16 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
       return project.label?.trim() || formatDirectoryName(normalizePath(project.path) ?? project.path, null) || project.path;
     }, [projectId, secondaryMeta?.projectLabel]),
   );
-  // Chats and the rows of zones that mix projects are one line; detailed zone
-  // rows are two lines with no tree gutter and the live state on the right.
+  // Chats and the rows of zones that mix projects are one line, with the
+  // tree's slot left of the title for the state and the chevron. Detailed rows
+  // are two lines with no slot: the state sits on the right and the chevron
+  // takes the place of the second line's first icon on hover.
   const isOneLineTimelineRow = renderContext === 'tree-chat' || renderContext === 'mixed-compact';
-  const isTimelineRow = isMultiLineTimelineContext(renderContext) || isOneLineTimelineRow;
-  // One-line zone rows keep the tree's slot and geometry, so their state
-  // reads down the same left edge as the tree under them.
-  const hasTreeSlot = hasTreeSlotContext(renderContext);
+  // A work under its project with Detailed rows on takes the detailed row's
+  // two lines too.
+  const isDetailedTreeRow = detailed && renderContext === 'project';
+  const isTwoLineRow = isMultiLineTimelineContext(renderContext) || isDetailedTreeRow;
+  const isTimelineRow = isTwoLineRow || isOneLineTimelineRow;
   // While the Pinned section is shown it holds every pinned zone session, and
   // its header already says they are pinned; In work and the list by time,
   // whose rows share the zones' context, then have none of them.
@@ -530,7 +535,11 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
   const moreRefCount = Math.max(0, refLines.length - 1);
   const openTrackerItem = useOpenTrackerItem();
   const refBadgeLabel = refLines.map((line) => line.text).join(', ');
-  const isActive = useSessionUIStore((state) => state.currentSessionId === session.id);
+  // The row is selected while its session is what the screen shows: a run's
+  // overview covers it, and then the run's row is the selected one.
+  const isCurrentSession = useSessionUIStore((state) => state.currentSessionId === session.id);
+  const runOverviewOpen = useUIStore((state) => state.runOverviewKey !== null);
+  const isActive = isCurrentSession && !runOverviewOpen;
 
   const sessionDirectory = normalizePath(session.directory ?? null) ?? normalizePath(groupDirectory ?? null);
   // Ref chips open their item in the Tracker through the row's project. The
@@ -674,11 +683,9 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
     </RowMarkTooltip>
   ) : null;
   const sessionTitle = resolvedSession.title || t('sessions.sidebar.session.untitled');
-  // Rows with the tree slot open to their subsessions, Chats, Pinned and In
-  // work rows included. Detailed zone rows are flat: a node that still
-  // carries children renders as a leaf, without a chevron and without an
-  // expansion state.
-  const hasChildren = hasTreeSlot && node.children.length > 0;
+  // Every row opens to its subsessions, Chats, Pinned and In work rows
+  // included, detailed or not.
+  const hasChildren = node.children.length > 0;
   const isPinnedSession = isSessionPinned(pinnedSessionIds, sessionDirectory, session.id);
   // Per-render-context expansion key: the same session can appear in both
   // the project's root and the "Recent" list, and expanding one should not
@@ -942,13 +949,15 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
         </button>
       </form>
     );
-    if (!hasTreeSlot) {
+    if (isTwoLineRow) {
       // Renaming keeps the whole card in place: the title line becomes the
-      // input, project and branch stay where they were.
+      // input, project and branch stay where they were, the slot stays empty.
       return (
         <div
           key={session.id}
-          style={{ paddingInlineStart: TIMELINE_ROW_LEFT_PX }}
+          // The virtual list's 1px margins apply to the row box, rename included.
+          data-session-row-box=""
+          style={{ paddingInlineStart: sessionDetailedRowPaddingLeft(depth) }}
           className={cn(
             'oc-ref-tint-scope group relative my-0.5 flex items-center rounded-md pe-2.5',
             'py-1.5',
@@ -990,6 +999,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
     return (
       <div
         key={session.id}
+        data-session-row-box=""
         style={{ paddingInlineStart: sessionTreeRowPaddingLeft(depth) }}
         // my-0.5 matches the normal row box so entering rename mode does not
         // shift the row vertically; the empty slot keeps the title in place.
@@ -1052,9 +1062,9 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
   // down the titles; a session with subsessions trades it for its chevron
   // while the row is hovered or focused. Touch layouts have no hover, so there
   // a parent keeps its chevron and its state stays on the right, where
-  // detailed zone rows, flat by design, always show it.
-  const stateInSlot = hasTreeSlot && liveStateMark !== null && !(hasChildren && alwaysShowActions);
-  const treeChevron = hasChildren ? (
+  // two-line rows, which have no slot, always show it.
+  const stateInSlot = !isTwoLineRow && liveStateMark !== null && !(hasChildren && alwaysShowActions);
+  const treeChevron = hasChildren && !isTwoLineRow ? (
     <span
       role="button"
       tabIndex={0}
@@ -1082,7 +1092,38 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
       <FileTreeChevron expanded={isExpanded} />
     </span>
   ) : null;
-  const treeSlot = !hasTreeSlot ? null : stateInSlot ? (
+  // A two-line row's chevron sits over the second line's first icon, shown
+  // while the row is hovered or focused (always on touch layouts).
+  const leadToggle = isTwoLineRow && hasChildren ? (
+    <span
+      role="button"
+      tabIndex={0}
+      onClick={(event) => {
+        event.stopPropagation();
+        event.currentTarget.blur();
+        toggleParent(expansionKey);
+      }}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          event.stopPropagation();
+          toggleParent(expansionKey);
+        }
+      }}
+      className={cn(
+        'absolute inset-0 inline-flex items-center justify-center rounded-sm text-muted-foreground hover:text-foreground focus-visible:outline-none',
+        !alwaysShowActions && 'opacity-0 transition-opacity group-hover:opacity-100 group-has-[:focus-visible]:opacity-100',
+      )}
+      aria-label={isExpanded
+        ? t('sessions.sidebar.session.subsessions.collapse')
+        : t('sessions.sidebar.session.subsessions.expand')}
+      aria-expanded={isExpanded}
+    >
+      <FileTreeChevron expanded={isExpanded} />
+    </span>
+  ) : null;
+  const leadIconClassName = alwaysShowActions ? 'opacity-0' : 'group-hover:opacity-0 group-has-[:focus-visible]:opacity-0';
+  const treeSlot = isTwoLineRow ? null : stateInSlot ? (
     <span className="relative inline-flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center">
       {treeChevron}
       {treeChevron ? (
@@ -1697,7 +1738,9 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
   // one-line form, with the session's live state and time on the right.
   const rowBody = (
     <SessionTimelineRowBody
-      compact={!isMultiLineTimelineContext(renderContext)}
+      compact={!isTwoLineRow}
+      leadToggle={leadToggle}
+      leadIconClassName={leadToggle ? leadIconClassName : undefined}
       project={timelineProject}
       projectLabel={tooltipProjectLabel}
       title={renderHighlightedText(sessionTitle, normalizedSessionSearchQuery)}
@@ -1816,17 +1859,17 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
             render={
               <div
                 data-session-row={session.id}
+                data-session-row-box=""
                 data-session-scope={selectionScopeKey ?? ''}
                 data-session-archived={archivedBucket ? '1' : '0'}
                 aria-current={isActive ? 'page' : undefined}
                 onClick={handleRowBackgroundClick}
-                // List rows have no gutter: their content sits 10px in.
-                // Rows with the tree slot use the file tree geometry: 12px per
-                // level from an 8px edge, then the slot and a 6px gap.
-                style={{ paddingInlineStart: hasTreeSlot ? sessionTreeRowPaddingLeft(depth) : TIMELINE_ROW_LEFT_PX }}
+                // The file tree geometry: 12px per level from an 8px edge,
+                // then the slot and a 6px gap; a two-line row has no slot.
+                style={{ paddingInlineStart: isTwoLineRow ? sessionDetailedRowPaddingLeft(depth) : sessionTreeRowPaddingLeft(depth) }}
                 className={cn(
                   'oc-ref-tint-scope group relative my-0.5 flex cursor-pointer items-center rounded-md pe-2.5',
-                  hasTreeSlot && 'gap-1.5',
+                  !isTwoLineRow && 'gap-1.5',
                   'py-1.5',
                   !(isActive || isRowSelected) && 'hover:bg-interactive-hover/60',
                   (isActive || isRowSelected) && 'bg-interactive-selection/70 text-interactive-selection-foreground',
@@ -2179,6 +2222,7 @@ const sessionNodeItemPropsChange = (prev: SessionNodeItemProps, next: SessionNod
   if (prev.projectId !== next.projectId) return 'projectId';
   if (prev.archivedBucket !== next.archivedBucket) return 'archivedBucket';
   if ((prev.renderContext ?? 'project') !== (next.renderContext ?? 'project')) return 'renderContext';
+  if ((prev.detailed ?? false) !== (next.detailed ?? false)) return 'detailed';
   if (prev.mobileVariant !== next.mobileVariant) return 'mobileVariant';
   if (prev.alwaysShowActions !== next.alwaysShowActions) return 'alwaysShowActions';
   if (prev.hasSessionSearchQuery !== next.hasSessionSearchQuery) return 'hasSessionSearchQuery';

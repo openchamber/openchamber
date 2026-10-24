@@ -1114,8 +1114,6 @@ export const settingsDict = {
   'settings.openchamber.passkeys.toast.renameFailed': 'לא ניתן היה לשנות את שם מפתח הגישה.',
   'settings.openchamber.passkeys.toast.clearAuthFailed': 'לא ניתן היה לנקות את פרטי האימות השמורים.',
   'settings.openchamber.sessionRetention.title': 'שמירת הפעלות',
-  'settings.openchamber.mergedWorktreeCleanup.title': 'אחרי מיזוג PR',
-  'settings.openchamber.mergedWorktreeCleanup.info': 'מתבסס על סטטוס ה-PR שכבר מוצג בסרגל הצד. לא קורה כלום כל עוד סוכן עובד בעץ העבודה או שאחת מההפעלות שלו פתוחה.',
   'settings.openchamber.messageSearch.title': 'חיפוש הודעות',
   'settings.openchamber.messageSearch.field.enabled': 'חיפוש הודעות בכל השיחות',
   'settings.openchamber.messageSearch.field.enabledInfo': 'שומר אינדקס קטן של ההודעות שלך ושל תגובות הסוכן ליד ההגדרות, כך שהחיפוש מוצא אותן מיד. האינדקס נשאר במחשב שבו OpenChamber רץ ולא נשלח לשום מקום.',

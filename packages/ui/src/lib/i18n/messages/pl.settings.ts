@@ -1047,8 +1047,6 @@ export const settingsDict = {
   'settings.openchamber.sessionRetention.manualCleanup.eligibleDeleteNow': 'Kwalifikuje się do usunięcia teraz: {count}',
   'settings.openchamber.sessionRetention.manualCleanup.title': 'Ręczne czyszczenie',
   'settings.openchamber.sessionRetention.title': 'Przechowywanie sesji',
-  'settings.openchamber.mergedWorktreeCleanup.title': 'Po scaleniu PR',
-  'settings.openchamber.mergedWorktreeCleanup.info': 'Korzysta ze statusu PR, który pasek boczny już pokazuje. Nic się nie dzieje, gdy agent pracuje w worktree lub jedna z jego sesji jest otwarta.',
   'settings.openchamber.messageSearch.title': 'Wyszukiwanie wiadomości',
   'settings.openchamber.messageSearch.field.enabled': 'Szukaj wiadomości we wszystkich rozmowach',
   'settings.openchamber.messageSearch.field.enabledInfo': 'Przechowuje obok ustawień mały indeks Twoich wiadomości i odpowiedzi agenta, aby wyszukiwanie znajdowało je od razu. Zostaje na komputerze, na którym działa OpenChamber, i nigdzie nie jest wysyłany.',

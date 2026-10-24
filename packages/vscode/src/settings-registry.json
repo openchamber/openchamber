@@ -216,6 +216,9 @@
     "mergedWorktreeCleanupEnabled": {
       "scope": "instance"
     },
+    "worktreeArchiveOnDoneEnabled": {
+      "scope": "instance"
+    },
     "terminalShell": {
       "scope": "instance"
     },
@@ -302,9 +305,6 @@
       "perSurface": true
     },
     "sidebarProjectSortOrder": {
-      "scope": "profile"
-    },
-    "sidebarWorktreeSortOrder": {
       "scope": "profile"
     },
     "sidebarShowChatsSection": {

@@ -1082,8 +1082,6 @@ export const settingsDict = {
   "settings.openchamber.passkeys.toast.renameFailed": "Не вдалося перейменувати ключ доступу.",
   "settings.openchamber.passkeys.toast.clearAuthFailed": "Не вдалося очистити збережену автентифікацію.",
   "settings.openchamber.sessionRetention.title": "Зберігання сесій",
-  "settings.openchamber.mergedWorktreeCleanup.title": "Після злиття PR",
-  "settings.openchamber.mergedWorktreeCleanup.info": "Використовує статус PR, який уже показує бічна панель. Нічого не відбувається, поки в worktree працює агент або відкрита одна з його сесій.",
   "settings.openchamber.messageSearch.title": "Пошук по повідомленнях",
   "settings.openchamber.messageSearch.field.enabled": "Шукати повідомлення в усіх розмовах",
   "settings.openchamber.messageSearch.field.enabledInfo": "Поруч із налаштуваннями зберігається невеликий індекс ваших повідомлень і відповідей агента, тож пошук знаходить їх миттєво. Він лишається на машині, де працює OpenChamber, і нікуди не надсилається.",

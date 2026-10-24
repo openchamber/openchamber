@@ -985,8 +985,6 @@ export const settingsDict = {
   'settings.openchamber.passkeys.toast.renameFailed': 'Impossible de renommer la clé d’accès.',
   'settings.openchamber.passkeys.toast.clearAuthFailed': 'Impossible d\'effacer l\'authentification enregistrée.',
   'settings.openchamber.sessionRetention.title': 'Conservation des sessions',
-  'settings.openchamber.mergedWorktreeCleanup.title': 'Après la fusion d\'une PR',
-  'settings.openchamber.mergedWorktreeCleanup.info': 'Utilise le statut de PR déjà affiché dans la barre latérale. Rien ne se passe tant qu\'un agent travaille dans le worktree ou qu\'une de ses sessions est ouverte.',
   'settings.openchamber.messageSearch.title': 'Recherche dans les messages',
   'settings.openchamber.messageSearch.field.enabled': 'Rechercher les messages dans toutes les conversations',
   'settings.openchamber.messageSearch.field.enabledInfo': 'Conserve à côté des réglages un petit index de vos messages et des réponses de l’agent, pour que la recherche les trouve instantanément. Il reste sur la machine qui exécute OpenChamber et n’est jamais envoyé ailleurs.',

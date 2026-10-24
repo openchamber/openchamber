@@ -97,7 +97,6 @@ export const createSettingsHelpers = (dependencies) => {
   // settings-helpers.test.js fails when the two lists drift apart.
   const UI_LOCALE_VALUES = new Set(['en', 'de', 'fr', 'nl', 'zh-CN', 'zh-TW', 'uk', 'es', 'pt-BR', 'ko', 'pl', 'ja', 'tr', 'ar', 'he']);
   const SIDEBAR_PROJECT_SORT_ORDER_VALUES = new Set(['manual', 'a-z', 'z-a', 'date-added', 'recent']);
-  const SIDEBAR_WORKTREE_SORT_ORDER_VALUES = new Set(['recent', 'manual', 'a-z']);
   const HIDDEN_MODELS_MAX = 1024;
   const RECENT_EFFORTS_MAX_KEYS = 128;
   const RECENT_EFFORTS_MAX_VARIANTS_PER_KEY = 5;
@@ -366,9 +365,6 @@ export const createSettingsHelpers = (dependencies) => {
     if (SIDEBAR_PROJECT_SORT_ORDER_VALUES.has(candidate.sidebarProjectSortOrder)) {
       result.sidebarProjectSortOrder = candidate.sidebarProjectSortOrder;
     }
-    if (SIDEBAR_WORKTREE_SORT_ORDER_VALUES.has(candidate.sidebarWorktreeSortOrder)) {
-      result.sidebarWorktreeSortOrder = candidate.sidebarWorktreeSortOrder;
-    }
     if (typeof candidate.sidebarShowChatsSection === 'boolean') {
       result.sidebarShowChatsSection = candidate.sidebarShowChatsSection;
     }
@@ -617,6 +613,9 @@ export const createSettingsHelpers = (dependencies) => {
     }
     if (typeof candidate.mergedWorktreeCleanupEnabled === 'boolean') {
       result.mergedWorktreeCleanupEnabled = candidate.mergedWorktreeCleanupEnabled;
+    }
+    if (candidate.worktreeArchiveOnDoneEnabled === true || candidate.worktreeArchiveOnDoneEnabled === false) {
+      result.worktreeArchiveOnDoneEnabled = candidate.worktreeArchiveOnDoneEnabled;
     }
     if (candidate.tunnelBootstrapTtlMs === null) {
       result.tunnelBootstrapTtlMs = null;

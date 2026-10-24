@@ -35,6 +35,16 @@ type Props = {
   /** Replaces the branch on the second line (a run row puts its mark and
       lane count there). */
   metaLineLead?: React.ReactNode;
+  /** The chevron of a row with something nested under it: it takes the place
+      of the second line's first icon (the project's, else the branch's or the
+      space's) while the row is hovered, so a two-line row needs no column of
+      its own for it. It positions itself over that icon (`absolute inset-0`)
+      and fades in; `leadIconClassName` fades the icon out in step. */
+  leadToggle?: React.ReactNode;
+  leadIconClassName?: string;
+  /** The second line's first icon where no project opens it, in place of the
+      branch's: a run's mark, which has no branch. */
+  leadIcon?: React.ReactNode;
   statusDot: React.ReactNode;
   /** Pin glyph shown in the meta cluster while the row is pinned. */
   pinnedMarker: React.ReactNode;
@@ -77,7 +87,7 @@ const ProjectImageIcon: React.FC<{ project: TimelineRowProject; fallback: React.
 
 // `label` makes the icon speak and explain itself on hover, for rows where it
 // is the only word for the project; a row that prints the name passes null.
-const TimelineProjectIcon: React.FC<{ project: TimelineRowProject; label: string | null }> = ({ project, label }) => {
+export const TimelineProjectIcon: React.FC<{ project: TimelineRowProject; label: string | null }> = ({ project, label }) => {
   const iconName = project.icon ? PROJECT_ICON_MAP[project.icon] : null;
   const iconColor = resolveProjectColor(project.color);
   const glyph = iconName
@@ -109,6 +119,9 @@ export const SessionTimelineRowBody: React.FC<Props> = ({
   branchLabel,
   spaceMark = null,
   metaLineLead = null,
+  leadToggle = null,
+  leadIconClassName,
+  leadIcon: leadIconOverride = null,
   statusDot,
   pinnedMarker,
   timeSlot,
@@ -137,6 +150,17 @@ export const SessionTimelineRowBody: React.FC<Props> = ({
     {statusDot}
     {timeSlot ? <span className="typography-micro leading-none text-muted-foreground/50 tabular-nums">{timeSlot}</span> : null}
   </span>;
+  // The second line's first icon: the project's where projects mix, else the
+  // branch's (or the space's) in front of its name.
+  const branchIcon = spaceMark
+    // `Icon` hides itself from assistive tech; the space's mark is the row's only word for "space", so it speaks.
+    ? <Icon name="box-3" className="h-3 w-3 flex-shrink-0 text-muted-foreground/40" aria-hidden={false} role="img" aria-label={spaceMark} />
+    : <Icon name="git-branch" className="h-3 w-3 flex-shrink-0 text-muted-foreground/40" />;
+  const branchText = <span className="min-w-0 truncate typography-micro text-muted-foreground/50">{branchLabel}</span>;
+  const branchLine = metaLineLead ?? (branchLabel ? <>{branchIcon}{branchText}</> : null);
+  const leadIcon = project
+    ? <TimelineProjectIcon project={project} label={projectLabel} />
+    : leadIconOverride ?? (!metaLineLead && branchLabel ? branchIcon : null);
   const titleLine = (
     <div dir="auto" className={cn('oc-ui-start-align min-w-0 flex-1 truncate typography-ui-label font-normal', actionsMaskClass, titleClassName)}>{title}</div>
   );
@@ -158,16 +182,13 @@ export const SessionTimelineRowBody: React.FC<Props> = ({
         does not shift when a branch or a badge arrives and the virtualizer's
         per-kind size estimate stays exact. */}
     <div className="flex h-4 w-full min-w-0 items-center gap-1">
-      {project ? <TimelineProjectIcon project={project} label={projectLabel} /> : null}
-      {metaLineLead ?? (branchLabel ? (
-        <>
-          {spaceMark
-            // `Icon` hides itself from assistive tech; the space's mark is the row's only word for "space", so it speaks.
-            ? <Icon name="box-3" className="h-3 w-3 flex-shrink-0 text-muted-foreground/40" aria-hidden={false} role="img" aria-label={spaceMark} />
-            : <Icon name="git-branch" className="h-3 w-3 flex-shrink-0 text-muted-foreground/40" />}
-          <span className="min-w-0 truncate typography-micro text-muted-foreground/50">{branchLabel}</span>
-        </>
-      ) : null)}
+      {leadToggle ? (
+        <span className="relative inline-flex size-3 flex-shrink-0 items-center justify-center">
+          {leadIcon ? <span className={cn('inline-flex transition-opacity', leadIconClassName)}>{leadIcon}</span> : null}
+          {leadToggle}
+        </span>
+      ) : leadIcon}
+      {project ? branchLine : metaLineLead ?? (branchLabel ? branchText : null)}
       <span className="ms-auto flex flex-shrink-0 items-center gap-1">
         {goal}
         {zombieIndicator ?? prBadge}

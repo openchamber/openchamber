@@ -62,6 +62,8 @@ export const trackWork = async (session: Session): Promise<void> => {
 };
 
 export type FinishWorktreeWorkOutcome =
+  /** Done; the worktree stays where it is, out of In work. */
+  | { kind: 'done' }
   /** Done, and the worktree is archived with its sessions and changes. */
   | { kind: 'archived' }
   /** Done; a session there still runs, so the worktree stays. */
@@ -71,13 +73,17 @@ export type FinishWorktreeWorkOutcome =
   | { kind: 'failed'; error: Error; doneFailed: number };
 
 /**
- * Done on a worktree work: its sessions in work are marked done, then the
- * worktree is archived with its sessions. An archive keeps every change, so
- * nothing needs the user's word; only a session still running there keeps
- * the worktree. The work has left In work either way.
+ * Done on a worktree work: its sessions in work are marked done, and with
+ * `archive` the worktree is then archived with its sessions. Done alone only
+ * takes it out of In work, unless the user turned archiving on Done on
+ * (`worktreeArchiveOnDoneEnabled`); Archive in its menu and the row's
+ * Shift action always archive. An archive keeps every change, so nothing
+ * needs the user's word; only a session still running there keeps the
+ * worktree. The work has left In work either way.
  */
 export async function finishWorktreeWork(input: {
   sessions: readonly Session[];
+  archive: boolean;
   worktree: WorktreeMetadata;
   project: { id: string; path: string };
   /** The name the row shows, which the archive keeps. */
@@ -91,6 +97,7 @@ export async function finishWorktreeWork(input: {
   // tabs close and the app moves off it, which also frees the worktree for
   // the clean-up below (it never removes one that is on screen).
   leaveWorktree(input.sessions, input.worktree.path, input.project.id);
+  if (!input.archive) return { kind: 'done' };
   const use = await readWorktreeUse(input.worktree.path);
   if (use === 'unknown') return { kind: 'unknown' };
   if (use !== 'free') return { kind: 'busy' };

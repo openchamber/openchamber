@@ -3,11 +3,9 @@ import { updateDesktopSettings } from '@/lib/persistence';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
 import { z } from 'zod';
-import { useGroupOrdering } from './useGroupOrdering';
 import { SIDEBAR_ACTIVITY_KEYS } from '../sessionSidebarRowModel';
 
 const PROJECT_COLLAPSE_STORAGE_KEY = 'oc.sessions.projectCollapse';
-const GROUP_ORDER_STORAGE_KEY = 'oc.sessions.groupOrder';
 const GROUP_COLLAPSE_STORAGE_KEY = 'oc.sessions.groupCollapse';
 const ACTIVITY_COLLAPSE_STORAGE_KEY = 'oc.sessions.activityCollapse';
 const WORK_EXPAND_STORAGE_KEY = 'oc.sessions.workExpand';
@@ -53,21 +51,6 @@ const parseStringSet = (raw: string | null): Set<string> => {
   }
 };
 
-const parseGroupOrder = (raw: string | null): Map<string, string[]> => {
-  if (!raw) return new Map();
-  try {
-    const parsed = z.record(z.string(), z.array(z.string())).safeParse(JSON.parse(raw));
-    if (!parsed.success) return new Map();
-    const next = new Map<string, string[]>();
-    for (const [projectId, order] of Object.entries(parsed.data)) {
-      next.set(projectId, order);
-    }
-    return next;
-  } catch {
-    return new Map();
-  }
-};
-
 export const useSessionProjectViewState = ({
   isVSCode,
   projects,
@@ -86,13 +69,9 @@ export const useSessionProjectViewState = ({
     parseWorkExpansion(safeStorage.getItem(WORK_EXPAND_STORAGE_KEY))
   ));
   const workExpansionDirty = React.useRef(false);
-  const [groupOrderByProject, setGroupOrderByProject] = React.useState<Map<string, string[]>>(() => (
-    parseGroupOrder(safeStorage.getItem(GROUP_ORDER_STORAGE_KEY))
-  ));
   const ignoreIntersectionUntil = React.useRef<number>(0);
   const groupCollapseDirty = React.useRef(false);
   const activityCollapseDirty = React.useRef(false);
-  const groupOrderDirty = React.useRef(false);
   const persistCollapsedProjectsTimer = React.useRef<number | null>(null);
   const pendingCollapsedProjects = React.useRef<Set<string> | null>(null);
 
@@ -131,15 +110,6 @@ export const useSessionProjectViewState = ({
       pendingCollapsedProjects.current = null;
     };
   }, []);
-
-  React.useEffect(() => {
-    if (!groupOrderDirty.current) return;
-    try {
-      safeStorage.setItem(GROUP_ORDER_STORAGE_KEY, JSON.stringify(Object.fromEntries(groupOrderByProject.entries())));
-    } catch {
-      // ignored
-    }
-  }, [groupOrderByProject, safeStorage]);
 
   React.useEffect(() => {
     if (!groupCollapseDirty.current) return;
@@ -251,19 +221,12 @@ export const useSessionProjectViewState = ({
       return { expandedByDefault: previous.expandedByDefault, toggled };
     });
   }, []);
-  const updateGroupOrderByProject = React.useCallback<React.Dispatch<React.SetStateAction<Map<string, string[]>>>>((update) => {
-    groupOrderDirty.current = true;
-    setGroupOrderByProject(update);
-  }, []);
-
-  const { getOrderedGroups } = useGroupOrdering(groupOrderByProject);
   const state = React.useMemo(() => ({
     collapsedProjects,
     collapsedGroups,
     collapsedActivities,
     workExpansion,
-    groupOrderByProject,
-  }), [collapsedActivities, collapsedGroups, collapsedProjects, groupOrderByProject, workExpansion]);
+  }), [collapsedActivities, collapsedGroups, collapsedProjects, workExpansion]);
   const actions = React.useMemo(() => ({
     setCollapsedProjects,
     toggleProject,
@@ -274,9 +237,7 @@ export const useSessionProjectViewState = ({
     setCollapsedActivities: updateCollapsedActivities,
     toggleGroup,
     toggleWork,
-    setGroupOrderByProject: updateGroupOrderByProject,
-    getOrderedGroups,
-  }), [collapseAll, expandAll, getOrderedGroups, scheduleCollapsedProjectsPersist, toggleGroup, toggleProject, toggleWork, updateCollapsedActivities, updateGroupOrderByProject]);
+  }), [collapseAll, expandAll, scheduleCollapsedProjectsPersist, toggleGroup, toggleProject, toggleWork, updateCollapsedActivities]);
 
   return { state, actions };
 };
