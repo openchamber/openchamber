@@ -272,7 +272,7 @@ const INSTALLED_APPS_CACHE_TTL_SECS = 60 * 60 * 24;
 const INSTALLED_APPS_CACHE_FILE = 'discovered-apps.json';
 // Bump when discovery results change shape or matching semantics change, so cached
 // entries written by an older build are treated as stale and refresh immediately.
-const INSTALLED_APPS_CACHE_VERSION = 2;
+const INSTALLED_APPS_CACHE_VERSION = 3;
 const LINUX_DESKTOP_ENTRIES_CACHE_TTL_MS = 30_000;
 const OPENCODE_SHUTDOWN_GRACE_MS = 100;
 const { autoUpdater } = updaterPkg;

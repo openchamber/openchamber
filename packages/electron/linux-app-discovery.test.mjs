@@ -1,10 +1,14 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 
 import {
   buildLinuxOpenSpecs,
   filterLinuxInstalledApps,
   parseDesktopEntry,
+  readLinuxDesktopEntries,
 } from './linux-app-discovery.mjs';
 
 const NON_ASCII_ONLY_ENTRY = `[Desktop Entry]
@@ -67,6 +71,74 @@ Icon=code`, 'code');
   assert.equal(specs.length, 1);
   assert.equal(specs[0].program, '/usr/bin/code');
   assert.deepEqual(specs[0].args, ['/tmp/project']);
+});
+
+const withUserAndSystemDirs = async (files, run) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'openchamber-desktop-shadow-'));
+  try {
+    const dirs = [];
+    for (const [dir, name, content] of files) {
+      const directory = path.join(root, dir);
+      if (!dirs.includes(directory)) dirs.push(directory);
+      await fs.mkdir(directory, { recursive: true });
+      await fs.writeFile(path.join(directory, name), content);
+    }
+    await run(dirs);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+};
+
+test('a system entry is returned when no user-level override shadows it', async () => {
+  await withUserAndSystemDirs([
+    ['system', 'nsight.desktop', '[Desktop Entry]\nType=Application\nName=Nsight Eclipse Edition\nExec=/usr/local/cuda/bin/nsight\n'],
+  ], async (applicationDirs) => {
+    const entries = await readLinuxDesktopEntries({ applicationDirs });
+    assert.deepEqual(entries.map((entry) => entry.id), ['nsight']);
+    assert.equal(entries[0].filePath, path.join(applicationDirs[0], 'nsight.desktop'));
+  });
+});
+
+test('a user-level Hidden entry shadows the same desktop id from a system dir', async () => {
+  await withUserAndSystemDirs([
+    ['user', 'nsight.desktop', '[Desktop Entry]\nType=Application\nName=Nsight Eclipse Edition\nHidden=true\n'],
+    ['system', 'nsight.desktop', '[Desktop Entry]\nType=Application\nName=Nsight Eclipse Edition\nExec=/usr/local/cuda/bin/nsight\n'],
+  ], async (applicationDirs) => {
+    const entries = await readLinuxDesktopEntries({ applicationDirs });
+    assert.deepEqual(entries.filter((entry) => entry.id === 'nsight'), []);
+  });
+});
+
+test('a user-level NoDisplay entry shadows the same desktop id from a system dir', async () => {
+  await withUserAndSystemDirs([
+    ['user', 'code.desktop', '[Desktop Entry]\nType=Application\nName=Visual Studio Code\nNoDisplay=true\n'],
+    ['system', 'code.desktop', '[Desktop Entry]\nType=Application\nName=Visual Studio Code\nExec=/usr/bin/code %F\n'],
+  ], async (applicationDirs) => {
+    const entries = await readLinuxDesktopEntries({ applicationDirs });
+    assert.deepEqual(entries.filter((entry) => entry.id === 'code'), []);
+  });
+});
+
+test('a visible user-level entry wins over a hidden system entry with the same id', async () => {
+  await withUserAndSystemDirs([
+    ['user', 'code.desktop', '[Desktop Entry]\nType=Application\nName=Visual Studio Code\nExec=/usr/bin/code %F\n'],
+    ['system', 'code.desktop', '[Desktop Entry]\nType=Application\nName=Visual Studio Code\nHidden=true\n'],
+  ], async (applicationDirs) => {
+    const entries = await readLinuxDesktopEntries({ applicationDirs });
+    assert.deepEqual(entries.map((entry) => entry.id), ['code']);
+    assert.equal(entries[0].filePath, path.join(applicationDirs[0], 'code.desktop'));
+  });
+});
+
+test('a malformed user-level entry does not shadow a valid system entry', async () => {
+  await withUserAndSystemDirs([
+    ['user', 'code.desktop', '[Desktop Entry]\nType=Application\nName=Visual Studio Code\n'],
+    ['system', 'code.desktop', '[Desktop Entry]\nType=Application\nName=Visual Studio Code\nExec=/usr/bin/code %F\n'],
+  ], async (applicationDirs) => {
+    const entries = await readLinuxDesktopEntries({ applicationDirs });
+    assert.deepEqual(entries.map((entry) => entry.id), ['code']);
+    assert.equal(entries[0].filePath, path.join(applicationDirs[1], 'code.desktop'));
+  });
 });
 
 test('entries mixing ASCII and non-ASCII still match through their ASCII part', () => {

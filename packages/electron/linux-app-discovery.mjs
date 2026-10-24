@@ -86,16 +86,19 @@ const parseDesktopValues = (content) => {
   return values;
 };
 
-export const parseDesktopEntry = (content, filePath = '') => {
-  const values = parseDesktopValues(content);
+const desktopIdFromPath = (filePath) => path.basename(filePath || '').replace(/\.desktop$/i, '');
+
+const hidesDesktopEntry = (values) => desktopBoolean(values.get('NoDisplay')) || desktopBoolean(values.get('Hidden'));
+
+const desktopEntryFromValues = (values, filePath = '') => {
   if ((values.get('Type') || 'Application') !== 'Application') return null;
-  if (desktopBoolean(values.get('NoDisplay')) || desktopBoolean(values.get('Hidden'))) return null;
+  if (hidesDesktopEntry(values)) return null;
   const name = String(values.get('Name') || '').trim();
   const rawExec = String(values.get('Exec') || '').trim();
   const exec = stripDesktopExecFieldCodes(rawExec);
   if (!name || !rawExec || !exec) return null;
   return {
-    id: path.basename(filePath || '').replace(/\.desktop$/i, '') || name,
+    id: desktopIdFromPath(filePath) || name,
     name,
     exec,
     rawExec,
@@ -104,6 +107,8 @@ export const parseDesktopEntry = (content, filePath = '') => {
     filePath,
   };
 };
+
+export const parseDesktopEntry = (content, filePath = '') => desktopEntryFromValues(parseDesktopValues(content), filePath);
 
 const collectDesktopFiles = async (dir) => {
   let entries;
@@ -132,8 +137,17 @@ export const readLinuxDesktopEntries = async (options = {}) => {
   const entries = [];
   for (const filePath of files) {
     try {
-      const parsed = parseDesktopEntry(await fsp.readFile(filePath, 'utf8'), filePath);
-      if (!parsed || seen.has(parsed.id)) continue;
+      const values = parseDesktopValues(await fsp.readFile(filePath, 'utf8'));
+      const parsed = desktopEntryFromValues(values, filePath);
+      if (!parsed) {
+        // A user-level file that hides an app also removes the system entry with
+        // the same id: Hidden means "strictly equivalent to the .desktop file not
+        // existing at all" (Desktop Entry Spec), and NoDisplay shadows it the same
+        // way any other same-id file does.
+        if (hidesDesktopEntry(values)) seen.add(desktopIdFromPath(filePath));
+        continue;
+      }
+      if (seen.has(parsed.id)) continue;
       seen.add(parsed.id);
       entries.push(parsed);
     } catch {
