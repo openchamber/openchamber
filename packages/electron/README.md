@@ -323,6 +323,8 @@ The package supports macOS, Windows, and Linux desktop features. Linux builds in
 
 On Windows and Linux, the General setting persisted as `desktopMinimizeToTrayEnabled` keeps the app running in the tray when the main window is **closed**. Minimize — the in-app control, the native title-bar button, and the taskbar — always performs a normal window minimize, so the taskbar entry stays available.
 
+Every path that hides a window instead of closing it goes through `hideWindow` (`window-hide.mjs`): closing the last visible window on macOS, closing to the tray, Quake Mode, the menu bar item's hide actions, and the Mini Chat shortcut. On macOS a window in native full screen has a Space of its own, and hiding the window in place leaves that Space on screen, black. So the window leaves full screen first and hides once the transition ends; it comes back as a normal window.
+
 The macOS menu bar item is enabled by default and can be disabled in General settings. The setting applies after restart. While disabled, Desktop skips the native tray controller, tray-specific subscriptions, polling, and quota refresh. Dock badges remain independent: unread activity, session membership, and badge preferences still update the Dock through the shared IPC command. Turning off the Dock badge clears its count without enabling the menu bar item.
 
 ## Bundled OpenCode CLI
