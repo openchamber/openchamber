@@ -117,9 +117,11 @@ describe('useSessionListSync', () => {
 
     expect(state.globalRefreshes).toBe(0);
     expect(state.demands).toHaveLength(1);
-    // The known worktree is topology, not demand: it is never bootstrapped by being known.
+    // The known worktree is topology, not demand: it is never bootstrapped by being known,
+    // but the first full-app pass fetches its session list since the root poller only
+    // covers project roots.
     expect(state.demands[0]?.directories).toEqual(['/project']);
-    expect(state.directoryRefreshes).toEqual([]);
+    expect(state.directoryRefreshes).toEqual([['/worktree']]);
     expect(state.subscriptions).toBe(1);
     expect(state.cleanupInputs.at(-1)).toEqual({ enabled: true, hasAuthoritativeGlobalSessions: true, sessionCount: 0, sessions: [] });
   });

@@ -1,5 +1,6 @@
 import React from 'react';
 import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
+import { getRuntimeKey } from '@/lib/runtime-switch';
 import { refreshGlobalSessions, refreshGlobalSessionsForDirectories, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useChildStoreManager } from '@/sync/sync-context';
 import { getAllSyncSessions } from '@/sync/sync-refs';
@@ -7,8 +8,9 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { buildSessionBootstrapDemands } from './sessionBootstrapDemands';
-import { buildKnownSessionDirectories } from './sessionListDirectories';
+import { buildKnownSessionDirectories, getSessionDirectoriesToSync } from './sessionListDirectories';
 import { useAuthoritativeSessionCleanup } from './useAuthoritativeSessionCleanup';
+import { normalizePath } from '../utils';
 
 const EMPTY_WORKTREES_BY_PROJECT = new Map();
 
@@ -46,14 +48,25 @@ export const useSessionListSync = ({
     return () => childStores.clearBootstrapDemand(bootstrapDemandOwner);
   }, [bootstrapDemandOwner, childStores, currentDirectory, currentSessionDirectory]);
 
+  const runtimeKey = getRuntimeKey();
   const knownProjectSessionDirectoriesRef = React.useRef<Set<string> | null>(null);
+  const knownRuntimeKeyRef = React.useRef(runtimeKey);
   React.useEffect(() => {
     const directories = new Set(knownDirectories);
-    const previous = knownProjectSessionDirectoriesRef.current;
+    // Each runtime owns its own session lists, so a runtime switch restarts
+    // syncing from scratch instead of trusting directories seen before.
+    const runtimeChanged = knownRuntimeKeyRef.current !== runtimeKey;
+    knownRuntimeKeyRef.current = runtimeKey;
+    const previous = runtimeChanged ? null : knownProjectSessionDirectoriesRef.current;
     knownProjectSessionDirectoriesRef.current = directories;
-    const added = previous ? [...directories].filter((directory) => !previous.has(directory)) : isVSCode ? [...directories] : [];
+    const projectRoots = new Set(
+      projects
+        .map((project) => normalizePath(project.path))
+        .filter((path): path is string => Boolean(path)),
+    );
+    const added = getSessionDirectoriesToSync(directories, previous, { isVSCode, projectRoots });
     if (added.length) void refreshGlobalSessionsForDirectories(added, getAllSyncSessions());
-  }, [isVSCode, knownDirectories]);
+  }, [isVSCode, knownDirectories, projects, runtimeKey]);
 
   React.useEffect(() => {
     let timeout: ReturnType<typeof setTimeout> | null = null;
