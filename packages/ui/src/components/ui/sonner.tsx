@@ -3,7 +3,7 @@
 import * as React from "react"
 import { Toaster as Sonner } from "sonner"
 import type { ToasterProps } from "sonner"
-import { getLocaleDirection, useI18nStore } from "@/lib/i18n"
+import { formatMessage, getLocaleDirection, useI18nStore } from "@/lib/i18n"
 import { buttonVariants } from "@/components/ui/button-variants"
 import { Spinner } from "@/components/ui/spinner"
 
@@ -84,9 +84,25 @@ function usePinnedToastStyles(container: HTMLElement | null, shadow: string) {
   }, [container, shadow])
 }
 
+// The close cross, on a disc of its own over the toast's corner. A toast that
+// closes by itself fills the ring around it (`.oc-toast-timed`), which runs down
+// to the moment it goes and holds while the pointer rests on the toasts, as
+// sonner's timer does.
+const ToastCloseMark = () => (
+  // `oc-raised` draws only the edge and shadow; the disc is opaque, as a
+  // raised control is (canvas tone in light themes, elevated in dark).
+  <span className="oc-raised flex size-5 items-center justify-center rounded-full bg-[var(--surface-background)] dark:bg-surface-elevated">
+    <svg viewBox="0 0 24 24" className="size-5" aria-hidden="true">
+      <circle className="oc-toast-ring" cx="12" cy="12" r="10.5" pathLength="100" fill="none" stroke="currentColor" strokeWidth="1.5" transform="rotate(-90 12 12)" />
+      <path d="M8.5 8.5l7 7m0-7l-7 7" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  </span>
+)
+
 const Toaster = ({ position = "bottom-right", ...props }: ToasterProps) => {
   // Read from the store, so a Toaster rendered outside the provider still works.
   const direction = getLocaleDirection(useI18nStore((state) => state.locale))
+  const closeLabel = formatMessage(useI18nStore((state) => state.dictionary), "dialog.common.actions.close")
   const isDark = useIsDarkTheme()
   const shadow = isDark ? SHADOW_DARK : SHADOW_LIGHT
   // State, not a ref: the observer attaches once sonner's section mounts.
@@ -100,17 +116,22 @@ const Toaster = ({ position = "bottom-right", ...props }: ToasterProps) => {
       dir={direction}
       position={direction === "rtl" ? MIRRORED_POSITION[position] : position}
       className="toaster group font-sans"
-      closeButton={false}
+      closeButton
       // Sonner's own spinner is a fixed 16px box pinned to the icon slot's
       // corner; the app's spinner is centered in the slot and scales with it.
-      icons={{ loading: <Spinner className="size-5" /> }}
+      icons={{ loading: <Spinner className="size-5" />, close: <ToastCloseMark /> }}
       toastOptions={{
         // Sonner's built-in look is written in px (width, text, button height)
         // and its own font stack, so it ignores the interface font and size.
         // Unstyled drops that look; the classes below draw the whole toast in
         // rem and give its buttons the shared Button's look.
         unstyled: true,
+        closeButtonAriaLabel: closeLabel,
         classNames: {
+          // Centered on the toast's leading top corner, whatever size touch
+          // gives the button; the disc inside keeps its size.
+          closeButton:
+            "absolute top-1 start-1 z-[1] flex -translate-x-1/2 -translate-y-1/2 rtl:translate-x-1/2 items-center justify-center rounded-full p-0 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none",
           toast:
             "oc-surface-elevated group/toast toast flex w-[var(--width)] flex-wrap items-start gap-2 rounded-[var(--radius-xl)] px-3.5 py-3 text-foreground data-[expanded=false]:data-[front=false]:[&>*]:opacity-0 [&_[data-button]]:self-center [&_[data-button]]:ms-auto [&_[data-cancel]+[data-button]]:ms-0",
           // Capped to the row beside the icon (its 1.25rem, its 0.125rem margin

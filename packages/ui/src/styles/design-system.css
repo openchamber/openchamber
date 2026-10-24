@@ -1059,3 +1059,35 @@ html[data-glass-redraw-guard] body::before {
     border-color: rgb(from var(--agent-color) r g b / 0.2);
   }
 }
+
+/* Toast countdown (components/ui/sonner.tsx): the ring around the close cross
+   is drawn only on a toast that closes by itself, full when it appears and
+   empty when it goes. It holds while the toasts are spread out under the
+   pointer, which is when sonner holds its timer. */
+.oc-toast-ring {
+  display: none;
+  opacity: 0.55;
+  stroke-dasharray: 100;
+  stroke-dashoffset: 0;
+}
+
+[data-sonner-toast].oc-toast-timed .oc-toast-ring {
+  display: inline;
+  animation: oc-toast-countdown var(--oc-toast-duration, 4000ms) linear forwards;
+}
+
+[data-sonner-toast][data-expanded='true'].oc-toast-timed .oc-toast-ring {
+  animation-play-state: paused;
+}
+
+@keyframes oc-toast-countdown {
+  to {
+    stroke-dashoffset: 100;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-sonner-toast].oc-toast-timed .oc-toast-ring {
+    display: none;
+  }
+}
