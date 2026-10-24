@@ -6,6 +6,7 @@ import { OPENCHAMBER_ALL_ACTIONS, OPENCHAMBER_KNOWLEDGE_ACTIONS } from './action
 import { writeScreenshot } from './screenshots.js';
 import { createProjectKnowledgeActions } from './project-knowledge.js';
 import { createPageAnswers, createRenderPageAction } from './render-page.js';
+import { CHATS_SCOPE_PUBLIC_ID } from '../scheduled-tasks/chats-scope.js';
 
 const DEFAULT_WAIT_TIMEOUT_SECONDS = 600;
 const MAX_WAIT_TIMEOUT_SECONDS = 86_400;
@@ -216,6 +217,7 @@ export const createOpenChamberControlService = (dependencies) => {
     getOpenCodeAuthHeaders,
     waitForOpenCodeReady,
     sessionService,
+    chatsScope = null,
     scheduledTaskService,
     browserControl = null,
     fileOpen = null,
@@ -288,11 +290,14 @@ export const createOpenChamberControlService = (dependencies) => {
 
   const projects = async () => {
     const settings = await readSettingsFromDiskMigrated();
-    return sanitizeProjects(settings?.projects || []).map((project) => ({
+    const configured = sanitizeProjects(settings?.projects || []).map((project) => ({
       id: project.id,
       path: path.resolve(project.path),
       label: asNonEmptyString(project.label) || path.basename(project.path) || project.path,
     }));
+    return chatsScope
+      ? [...configured, { id: CHATS_SCOPE_PUBLIC_ID, path: chatsScope.root, label: 'Chats' }]
+      : configured;
   };
 
   // projectId and directory are two names for one scope. Accepting both let

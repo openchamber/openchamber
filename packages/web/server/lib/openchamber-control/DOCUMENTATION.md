@@ -91,6 +91,17 @@ other.
 
 ## Invariants
 
+- `projects.list` offers registered projects and the server's Chats destination.
+  `session.create` accepts its `openchamber:chats` id to create a separate managed
+  chat directory. With no explicit scope, creation still uses the caller's directory.
+  Later session actions use the returned directory, or their existing resolution
+  by session id. The Chats id is a creation destination, not a registered project.
+  Explicit Chats creation does not infer a project or its defaults from Git,
+  including when the configured Chats root is inside a registered checkout.
+- Chats creation belongs to the session service. It reuses the directory allocator
+  in `../scheduled-tasks/chats-scope.js`, including the configured Chats root.
+  Failed creation removes only an empty directory. Once OpenCode creates the
+  session, a failed prompt keeps its directory. Chats cannot request a worktree.
 - Session status and messages come from official directory-scoped OpenCode
   APIs. Message output includes only ordered `text` parts.
 - Wait (CLI only; the agent tool refuses it) never treats an initial idle
@@ -238,3 +249,9 @@ other.
   Closing is panel state, so the client that owns the tab performs it through a
   registered closer, not the page view; the server only validates `tabId` and
   forwards the action like the rest.
+
+### Why Chats uses an explicit destination id
+
+The existing `openchamber:chats` id lets agents choose from `projects.list`
+without changing the current-directory default or treating a reserved word as
+a filesystem path. Chats remains outside the registered project list on disk.

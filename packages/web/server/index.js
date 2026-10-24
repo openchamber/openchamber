@@ -1781,6 +1781,7 @@ const scheduledTaskService = createScheduledTaskService({
   resolvePrimaryWorktreeRoot,
 });
 const openChamberSessionService = createOpenChamberSessionService({
+  chatsScope: scheduledChatsScope,
   readSettingsFromDiskMigrated,
   sanitizeProjects,
   validateDirectoryPath,
@@ -1891,6 +1892,7 @@ const pluginNotificationEmitter = createPluginNotificationEmitter({
 });
 
 const openChamberControlService = createOpenChamberControlService({
+  chatsScope: scheduledChatsScope,
   readSettingsFromDiskMigrated,
   sanitizeProjects,
   buildOpenCodeUrl,
