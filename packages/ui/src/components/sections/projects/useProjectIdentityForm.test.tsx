@@ -99,3 +99,35 @@ describe('useProjectIdentityAutoSave', () => {
     }
   });
 });
+
+describe('useProjectIdentityAutoSave unmount', () => {
+  test('flushes a pending change when unmounted before the debounce fires', async () => {
+    const dom = installHookTestDom();
+    const root = createRoot(dom.container);
+    const saves: ProjectIdentitySaveData[] = [];
+    type Capture = { form?: ReturnType<typeof useProjectIdentityForm>; setEntry?: (entry: ProjectEntry) => void };
+    const capture: Capture = {};
+    const Harness = () => {
+      const [entry, setEntry] = React.useState(() => project('app', 'App'));
+      capture.form = useProjectIdentityForm(entry);
+      capture.setEntry = setEntry;
+      const onSave = React.useCallback(async (data: ProjectIdentitySaveData) => {
+        saves.push(data);
+        setEntry((current) => ({ ...current, label: data.label }));
+      }, []);
+      useProjectIdentityAutoSave(capture.form, onSave);
+      return null;
+    };
+    try {
+      await act(async () => root.render(React.createElement(I18nProvider, null, React.createElement(Harness))));
+      await act(async () => {
+        capture.form?.setName('App renamed');
+      });
+      await act(async () => root.unmount());
+      await act(async () => { await wait(100); });
+      expect(saves.map((save) => save.label)).toEqual(['App renamed']);
+    } finally {
+      dom.restore();
+    }
+  });
+});
