@@ -3292,7 +3292,61 @@ describe("dismissOpenFormsForSession", () => {
     expect(worktreeStore.getState().form["session-child"]).toEqual([childForm])
     expect(worktreeStore.getState().form["session-a"]).toBe(undefined)
   })
+
+  test("leaves a form open when its tool call has already finished (#5391)", async () => {
+    // A plugin's deferred question: the tool part completed, nothing waits on the form.
+    const deferredForm = toolForm("q-deferred", "msg-1", "call-done")
+    const store = createStore({}, {
+      session: [sessionFixture("session-a")],
+      form: { "session-a": [deferredForm] },
+      part: { "msg-1": [toolPart("call-done", "msg-1", "completed")] },
+    })
+    const childStores = createChildStores([["/test/project", store]])
+
+    const { setActionRefs, dismissOpenFormsForSession } = await import("./session-actions")
+    setActionRefs(childStores, () => "/test/project")
+
+    const dismissed = await dismissOpenFormsForSession("session-a")
+
+    expect(dismissed).toBe(false)
+    expect(replyCalls.filter((call) => call.method === "form.cancel")).toHaveLength(0)
+    expect(store.getState().form["session-a"]).toEqual([deferredForm])
+  })
+
+  test("still cancels forms whose tool call is running or not loaded", async () => {
+    const deferredForm = toolForm("q-deferred", "msg-1", "call-done")
+    const waitingForm = toolForm("q-waiting", "msg-1", "call-running")
+    const unknownForm = toolForm("q-unknown", "msg-unloaded", "call-unloaded")
+    const store = createStore({}, {
+      session: [sessionFixture("session-a")],
+      form: { "session-a": [deferredForm, waitingForm, unknownForm] },
+      part: {
+        "msg-1": [toolPart("call-done", "msg-1", "completed"), toolPart("call-running", "msg-1", "running")],
+      },
+    })
+    const childStores = createChildStores([["/test/project", store]])
+
+    const { setActionRefs, dismissOpenFormsForSession } = await import("./session-actions")
+    setActionRefs(childStores, () => "/test/project")
+
+    const dismissed = await dismissOpenFormsForSession("session-a")
+
+    expect(dismissed).toBe(true)
+    const cancelledIds = replyCalls.filter((call) => call.method === "form.cancel").map((call) => call.params.formID)
+    expect(cancelledIds.sort()).toEqual(["q-unknown", "q-waiting"])
+    expect(store.getState().form["session-a"]).toEqual([deferredForm])
+  })
 })
+
+function toolForm(id: string, messageID: string, callID: string): FormRequest {
+  return { ...buildForm(id, "session-a"), metadata: { kind: "question", tool: { messageID, id: callID } } }
+}
+
+function toolPart(callID: string, messageID: string, status: "running" | "completed"): Part {
+  // SAFETY: the code under test reads only id, type and state.status of a tool part; the
+  // rest of the tool state (input, output, timing) is irrelevant to form dismissal.
+  return { id: callID, callID, messageID, sessionID: "session-a", type: "tool", tool: "question", state: { status } } as Part
+}
 
 describe("dismissPermission not-found handling", () => {
   beforeEach(() => {

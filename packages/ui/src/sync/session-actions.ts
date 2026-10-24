@@ -4,7 +4,8 @@
  */
 
 import type { FilePart, FormRequest, JsonValue, Message, Metadata, ModelSelection, Part, PermissionRequest, Session, SyntheticMessage, TextPart, UserMessage } from "@/lib/opencode/model"
-import { compact, partIds } from "@/lib/opencode/model"
+import { compact, isFinalToolStatus, partIds } from "@/lib/opencode/model"
+import { z } from "zod"
 import { readSubagentRun } from "@/lib/opencode/subagent-run"
 import { readDispatchedSessionResult } from "@/lib/opencode/dispatched-session"
 import { Binary } from "./binary"
@@ -2488,6 +2489,9 @@ export async function cancelForm(sessionId: string, formId: string): Promise<voi
  * The chat caller preserves explicit Steer as a direct send (the inbox takes
  * it while the turn is still active) and queues other follow-ups after
  * dismissal. This helper does not abort the session.
+ *
+ * A form whose tool call has already finished is left open: nothing is waiting
+ * on it, so the send does not supersede it (see {@link isFormOfFinishedToolCall}).
  */
 export async function dismissOpenFormsForSession(sessionId: string): Promise<boolean> {
   if (!sessionId) return false
@@ -2504,6 +2508,7 @@ export async function dismissOpenFormsForSession(sessionId: string): Promise<boo
       const requests = formsBySession[scopedId]
       if (!requests) continue
       for (const request of requests) {
+        if (isFormOfFinishedToolCall(state, request)) continue
         toDismiss.push({ store, sessionId: scopedId, form: request })
       }
     }
@@ -2532,6 +2537,24 @@ export async function dismissOpenFormsForSession(sessionId: string): Promise<boo
   )
   return true
 }
+
+/**
+ * True when the form's `metadata.tool` (`{ messageID, id }`, set by OpenCode's
+ * question tool and by plugins) points at a tool part that has already
+ * finished. Such a form no longer holds the turn: a plugin can ask a deferred
+ * question and end its tool call, and the user answers whenever they like
+ * (#5391). A native question part stays `running` while it waits, and a form
+ * whose part is not loaded is treated as blocking, as before.
+ */
+function isFormOfFinishedToolCall(state: ReturnType<DirectoryStoreApi["getState"]>, form: FormRequest): boolean {
+  const tool = formToolCallSchema.safeParse(form.metadata?.tool)
+  if (!tool.success) return false
+  const { messageID, id } = tool.data
+  const part = state.part[messageID]?.find((candidate) => candidate.id === id)
+  return part?.type === "tool" && isFinalToolStatus(part.state.status)
+}
+
+const formToolCallSchema = z.object({ messageID: z.string(), id: z.string() })
 
 // ---------------------------------------------------------------------------
 // Message history
