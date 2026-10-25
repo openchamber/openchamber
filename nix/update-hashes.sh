@@ -119,15 +119,18 @@ FAKE_SENTINEL="sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 # The version source of truth is packages/electron's opencodeCli pin:
 # this script follows it, it does not bump it. Bumping the pin (together
 # with @opencode/client) is an OpenChamber-side compatibility decision.
-cli_version=$(grep -A1 '"opencodeCli"' packages/electron/package.json | grep -oP '"version":\s*"\K[^"]+' | head -1)
+cli_version=$(grep -A1 '"opencodeCli"' packages/electron/package.json | sed -n 's/.*"version":[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
 [[ -n "$cli_version" ]] || { echo "error: cannot read opencodeCli.version from packages/electron/package.json" >&2; exit 1; }
 
 # Upstream tags are v-prefixed; the pin in packages/electron is not.
 tag="v$cli_version"
 
-current_tag=$(grep -oP 'github:anomalyco/opencode/\K[v0-9.]+' flake.nix | head -1)
+current_tag=$(sed -n 's|.*github:anomalyco/opencode/\([v0-9.]*\).*|\1|p' flake.nix | head -1)
 if [[ "$current_tag" != "$tag" ]]; then
-  sed -i "s|github:anomalyco/opencode/[^\"]*|github:anomalyco/opencode/$tag|" flake.nix
+  # -i.bak rather than plain -i: BSD sed (macOS) requires a backup suffix
+  # argument where GNU sed treats it as part of the command.
+  sed -i.bak "s|github:anomalyco/opencode/[^\"]*|github:anomalyco/opencode/$tag|" flake.nix
+  rm flake.nix.bak
   nix --option eval-cache false flake update opencode >/dev/null
   log "opencode: input moved to $tag (packages/electron pins $cli_version)"
 else
