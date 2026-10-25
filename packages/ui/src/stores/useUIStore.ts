@@ -1698,7 +1698,7 @@ export const useUIStore = create<UIStore>()(
         savePastedImagesAsFiles: false,
         draftStartersVisible: true,
         isExpandedInput: false,
-        reportUsage: true,
+        reportUsage: false,
         shortcutOverrides: {},
         fileEditorKeymap: 'default',
         fileEditorVimMappings: '',
