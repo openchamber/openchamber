@@ -6,8 +6,6 @@ export type MobileAppActions = {
   openChanges: (options?: { diffPath?: string | null; staged?: boolean }) => void;
   /** Open the Files surface as a modal. */
   openFiles: () => void;
-  /** Open the Settings surface as a modal. */
-  openSettings: () => void;
   /** Open the issues and PRs board page; what it shows is set in its store first. */
   openSourceBoard: () => void;
 };

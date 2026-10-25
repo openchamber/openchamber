@@ -67,6 +67,7 @@ import { MobileHeader } from './MobileHeader';
 import { MobileInstancesSurface } from './MobileInstancesSurface';
 import { MobileSessionsSheet } from './MobileSessionsSheet';
 import { MobileFullscreenSurface } from './MobileFullscreenSurface';
+import { connectMobileSettingsNavigation } from './mobileSettingsNavigation';
 import { UsageStatsView } from '@/components/views/usage/UsageStatsView';
 import { ArchiveSessionsView } from '@/components/views/ArchiveView';
 import { MobileSourceBoard } from '@/components/sourceBoard/SourceBoardView';
@@ -196,6 +197,11 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
     openSurface('settings');
   }, [openSurface]);
 
+  React.useEffect(
+    () => connectMobileSettingsNavigation(MOBILE_SETTINGS_PAGES, openSettingsSurface),
+    [openSettingsSurface],
+  );
+
   // Tablet: sessions live in a persistent full-height left sidebar instead of
   // the phone's drawer. Everything else — the workspace drawer, the header, the
   // app-level surfaces — is shared with phones.
@@ -309,10 +315,9 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
         openChangesSurface(diffPath ? { path: diffPath, staged: staged === true } : null);
       },
       openFiles: () => openFilesSurface(),
-      openSettings: () => openSettingsSurface('nav'),
       openSourceBoard: () => openSurface('board'),
     }),
-    [openChangesSurface, openFilesSurface, openSettingsSurface, openSurface],
+    [openChangesSurface, openFilesSurface, openSurface],
   );
 
   // Expose the shell's panel-opening actions to the deep-link layer so openchamber:// URLs
