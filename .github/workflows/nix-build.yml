@@ -1,16 +1,20 @@
-# Real builds for bake PRs and flake-structure PRs: a bake PR proves its
-# freshly baked bunCache hash reproduces from bun.lock on clean runners on
-# every platform the flake targets. bun.lock alone is deliberately not in
-# the paths: a dependency bump merges on eval checks and gets its hash in
-# the bake PR that follows (nix-hashes.yml), which this matrix then proves.
-# Standard hosted runners are free for this public repo; no cache daemon,
-# no secrets, so the proof needs nothing but the lockfile.
+# Builds the flake's server package on every platform it targets, and
+# verifies that the committed dependency hashes are current: a PR changing
+# bun.lock or the opencode pin runs the bake in check mode on all three
+# runners, and a stale hash fails the check with a ready-to-apply diff in
+# the job summary. The check is what makes dependency bumps carry their own
+# hashes; there is no post-merge bake. Standard hosted runners are free for
+# this public repo; no cache daemon, no secrets, so the proof needs nothing
+# but the lockfile.
 name: nix-build
 
 on:
   pull_request:
     paths:
+      - bun.lock
+      - packages/electron/package.json
       - flake.lock
+      - flake.nix
       - nix/**
   workflow_dispatch:
 
@@ -22,7 +26,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-15]
+        include:
+          - os: ubuntu-24.04
+            system: x86_64-linux
+          - os: ubuntu-24.04-arm
+            system: aarch64-linux
+          - os: macos-15
+            system: aarch64-darwin
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     steps:
@@ -34,5 +44,11 @@ jobs:
           extra_nix_config: |
             experimental-features = nix-command flakes
 
-      - name: Build the server with the baked dependency cache
+      - name: Verify this platform's dependency hashes are current
+        uses: ./.github/actions/nix-bake
+        with:
+          mode: check
+          system: ${{ matrix.system }}
+
+      - name: Build the server with the verified dependency cache
         run: nix build --no-link .#openchamber -L

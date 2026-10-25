@@ -20,8 +20,8 @@ or installed changes both places or explains why not.
 - The `bunCache` and `opencodeNodeModules` values are keyed per system in
   `nix/hashes.json`, and each equals what a fresh warm install produces from
   the committed `bun.lock` on that system. The `nix-build.yml` build matrix
-  proves this on clean linux/arm64/macos runners for every bake PR before it
-  merges.
+  proves this on clean linux/arm64/macos runners for every PR touching the
+  dependency inputs.
 - The `bunDeps` install never touches the network: the Nix sandbox has none.
   The warmed cache must contain every platform variant the flake targets;
   `bun install --offline` silently skips uncached optionals, so the warm
@@ -98,6 +98,26 @@ that platform (the script bakes only the running system's entries) and is
 proven on that platform's CI runner by the build matrix — the same
 per-system pattern upstream's own nix/hashes.json uses for their
 node_modules.
+
+### Why hash currency is enforced at PR time instead of baked after merge
+
+An earlier iteration baked all three platforms sequentially after merge and
+opened one bake PR per dependency bump. The treadmill worked, but it merged
+dependency bumps with stale hashes first and fixed them after: main was
+briefly broken for anyone building between the two merges, and every bump
+cost an extra PR to review. Enforcing at PR time moves the cost to where
+the change happens. A PR touching bun.lock or the opencode pin runs the
+bake in check mode on all three runners; a stale hash fails the check with
+a ready-to-apply diff in the job summary, and applying it is one command
+(`nix run .#update-hashes`) for anyone with nix installed.
+
+The trade-off: drift that arrives without a PR — a nixpkgs bump changing
+bun, or an admin merge bypassing the check — surfaces on the next PR or a
+local build instead of being auto-fixed. A scheduled check can be added
+later if that bites. For the check to be meaningful at all, the dependency
+layer underneath must be deterministic per platform; on the earlier
+machine-relative hashes a PR-time check would compute a different value per
+runner and be pure noise.
 
 ### Why the flake targets x86_64-linux, aarch64-linux, and aarch64-darwin
 

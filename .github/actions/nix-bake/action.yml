@@ -1,14 +1,18 @@
 name: nix-bake
-description: Bakes this system's dependency hashes onto the nix/hash-bake branch.
+description: Bakes this system's dependency hashes, or verifies the committed ones in check mode.
 inputs:
   app-token:
-    description: GitHub App token used to push the branch and open the PR.
-    required: true
+    description: GitHub App token used to push the branch and open the PR. Not needed in check mode.
+    required: false
   system:
-    description: The system this runner bakes hashes for (e.g. x86_64-linux).
+    description: The system this runner bakes or verifies hashes for (e.g. x86_64-linux).
     required: true
+  mode:
+    description: 'bake: commit and push updated hashes onto the bake branch. check: verify the committed hashes are current; fail with a ready-to-apply diff otherwise.'
+    required: false
+    default: 'bake'
   create-pr:
-    description: 'true for the first leg: starts fresh from the trigger commit and force-pushes, replacing any stale bake branch.'
+    description: 'true for the first bake leg: starts fresh from the trigger commit and force-pushes, replacing any stale bake branch.'
     required: false
     default: 'false'
   base-ref:
@@ -17,7 +21,7 @@ inputs:
     default: ''
 outputs:
   pushed:
-    description: 'true when new hashes were committed and pushed'
+    description: 'true when new hashes were committed and pushed (bake mode)'
     value: ${{ steps.push.outputs.pushed }}
 runs:
   using: composite
@@ -31,6 +35,7 @@ runs:
           experimental-features = nix-command flakes
     - uses: DeterminateSystems/magic-nix-cache-action@6221693898146dc97e38ad0e013488a16477a4c4
     - name: Configure git as the bake bot
+      if: inputs.mode == 'bake'
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.app-token }}
@@ -39,6 +44,7 @@ runs:
         git config user.name "openchamber-bake-bot"
         git config user.email "openchamber-bake-bot@users.noreply.github.com"
     - name: Check out the bake branch
+      if: inputs.mode == 'bake'
       shell: bash
       run: |
         if [ "${{ inputs.create-pr }}" = "true" ]; then
@@ -57,7 +63,27 @@ runs:
     - name: Bake this system's hashes
       shell: bash
       run: nix run .#update-hashes
+    - name: Verify the committed hashes are current
+      if: inputs.mode == 'check'
+      shell: bash
+      run: |
+        if git diff --quiet nix/hashes.json; then
+          echo "dependency hashes current for ${{ inputs.system }}"
+          exit 0
+        fi
+        {
+          echo "### Dependency hashes for \`${{ inputs.system }}\` are stale"
+          echo
+          echo "Run \`nix run .#update-hashes\` on your machine and commit the result, or apply this diff to \`nix/hashes.json\`:"
+          echo
+          echo '```diff'
+          git diff nix/hashes.json
+          echo '```'
+        } >> "$GITHUB_STEP_SUMMARY"
+        echo "hashes stale for ${{ inputs.system }} — the job summary has the ready-to-apply diff"
+        exit 1
     - name: Commit and push
+      if: inputs.mode == 'bake'
       id: push
       shell: bash
       run: |
@@ -75,11 +101,10 @@ runs:
         fi
         echo "pushed=true" >> "$GITHUB_OUTPUT"
     - name: Open or update the bake PR
-      if: inputs.create-pr == 'true' && steps.push.outputs.pushed == 'true'
+      if: inputs.mode == 'bake' && inputs.create-pr == 'true' && steps.push.outputs.pushed == 'true'
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.app-token }}
-        SYSTEM: ${{ inputs.system }}
       run: |
         if [ "$(gh pr list --head nix/hash-bake --state open --json number --jq 'length')" = "1" ]; then
           echo "an open PR for nix/hash-bake already exists, the force-push updated it"
