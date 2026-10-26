@@ -1,4 +1,5 @@
 import { isPlainObject, isString } from '../shared/guards.js';
+import { mapLimited } from '../shared/map-limited.js';
 import { joinProjectPath } from '../source-control/project-path.js';
 import { readLocalRevision as readLocalRevisionDefault, readUpstreamBranch as readUpstreamBranchDefault } from './local-revision.js';
 import {
@@ -46,20 +47,6 @@ const enc = (value) => encodeURIComponent(value);
 function requireMapped(value, message) {
   if (!value) throw malformed(message);
   return value;
-}
-
-async function mapLimited(items, limit, task) {
-  const results = new Array(items.length);
-  let next = 0;
-  const worker = async () => {
-    while (next < items.length) {
-      const index = next;
-      next += 1;
-      results[index] = await task(items[index]);
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
-  return results;
 }
 
 /** Free text as one quoted search term; a bare number is the change itself. */
@@ -494,4 +481,3 @@ export function createGerritResourceService({
     },
   };
 }
-

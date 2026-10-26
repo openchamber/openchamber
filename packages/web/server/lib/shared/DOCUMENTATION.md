@@ -1,4 +1,4 @@
-# Shared Guards Documentation
+# Shared server helpers
 
 ## Purpose
 
@@ -92,3 +92,14 @@ the shared functions, so existing importers are unaffected:
   dependencies so every runtime can safely depend on it.
 - When a guard's answer changes, update the behavior matrix test beside this
   file; the test is the contract.
+
+## Bounded mapping
+
+`map-limited.js` owns the identical worker loop used by Gitea and Gerrit resource
+reads. `mapLimited(items, limit, task)` runs at most `limit` tasks at once and
+returns results in input order. Callers supply a positive integer limit. A task
+receives only its item. A rejection stops that worker and rejects the returned
+promise; other workers continue taking items. It adds no retries or cancellation.
+
+Provider-specific limits and error handling stay in the resource modules.
+`map-limited.test.js` covers ordering, concurrency, empty inputs and failures.

@@ -1,4 +1,5 @@
 import { isPlainObject, isString } from '../shared/guards.js';
+import { mapLimited } from '../shared/map-limited.js';
 import { changeRequestNetworkTarget } from '../source-control/repository-network.js';
 import {
   asDraftTitle, asReadyTitle, branchRepoId, liveChangeRequestSummary, liveIssueSummary,
@@ -34,20 +35,6 @@ const repoPath = (repo) => `/repos/${seg(repo.owner)}/${seg(repo.name)}`;
 function requireMapped(value, message) {
   if (!value) throw malformed(message);
   return value;
-}
-
-async function mapLimited(items, limit, task) {
-  const results = new Array(items.length);
-  let next = 0;
-  const worker = async () => {
-    while (next < items.length) {
-      const index = next;
-      next += 1;
-      results[index] = await task(items[index]);
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
-  return results;
 }
 
 /**
