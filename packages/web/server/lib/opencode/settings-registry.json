@@ -849,6 +849,10 @@
       "scope": "device",
       "local": true
     },
+    "contextZoneSizes": {
+      "scope": "device",
+      "local": true
+    },
     "workStatusExpandedSections": {
       "scope": "device",
       "local": true
