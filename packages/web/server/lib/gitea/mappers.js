@@ -225,6 +225,31 @@ const SUCCESS = new Set(['success', 'skipped']);
 const FAILURE = new Set(['failure', 'error', 'warning']);
 
 /**
+ * A status target_url as the client boundary requires it: an absolute http(s)
+ * URL. Forgejo Actions emits relative paths (e.g. `/owner/repo/actions/runs/1`);
+ * those are resolved against the instance origin. Anything that does not
+ * resolve to an absolute http(s) URL is dropped.
+ */
+const ciDetailsUrl = (raw, instance) => {
+  const value = text(raw);
+  if (!value) return undefined;
+  try {
+    const url = new URL(value);
+    if (url.protocol === 'http:' || url.protocol === 'https:') return value;
+  } catch {
+    // Not an absolute URL.
+  }
+  // Relative: only resolve absolute paths (starting with `/`) against the instance.
+  if (!value.startsWith('/') || !text(instance)) return undefined;
+  try {
+    const url = new URL(value, instance);
+    if (url.protocol === 'http:' || url.protocol === 'https:') return url.href;
+  } catch {
+    return undefined;
+  }
+};
+
+/**
  * A commit's combined status as CI: Gitea Actions and external CI both
  * report as commit statuses. `warning` fails the summary, as Gitea's own
  * combined state never reads success with one (1.21 answers `warning`, 1.27
@@ -250,7 +275,8 @@ export function mapGiteaCI(combined, identity) {
       status: status.status === 'pending' ? 'in_progress' : 'completed',
       conclusion: SUCCESS.has(status.status) ? 'success' : FAILURE.has(status.status) ? 'failure' : null,
     };
-    if (text(status.target_url)) run.detailsUrl = status.target_url;
+    const detailsUrl = ciDetailsUrl(status.target_url, identity.instance);
+    if (detailsUrl) run.detailsUrl = detailsUrl;
     if (text(status.description)) run.output = { title: status.description };
     if (text(status.created_at)) run.startedAt = status.created_at;
     if (status.status !== 'pending' && text(status.updated_at)) run.completedAt = status.updated_at;

@@ -79,6 +79,50 @@ describe('Gitea mappers', () => {
     }
   });
 
+  it('resolves a relative target_url against the instance origin', () => {
+    const combined = {
+      state: 'success',
+      sha: HEAD,
+      total_count: 1,
+      statuses: [{ id: 1, status: 'success', target_url: '/alice/app/actions/runs/3668/jobs/0', context: 'ci / test' }],
+    };
+    const ci = mapGiteaCI(combined, identity);
+    expect(ci.runs[0].detailsUrl).toBe(`${ORIGIN}/alice/app/actions/runs/3668/jobs/0`);
+  });
+
+  it('passes an absolute http(s) target_url through unchanged', () => {
+    const combined = {
+      state: 'success',
+      sha: HEAD,
+      total_count: 1,
+      statuses: [{ id: 1, status: 'success', target_url: 'https://forge.example.com/alice/app/actions/runs/1', context: 'ci / test' }],
+    };
+    const ci = mapGiteaCI(combined, identity);
+    expect(ci.runs[0].detailsUrl).toBe('https://forge.example.com/alice/app/actions/runs/1');
+  });
+
+  it('drops a non-URL target_url without throwing', () => {
+    const combined = {
+      state: 'success',
+      sha: HEAD,
+      total_count: 1,
+      statuses: [{ id: 1, status: 'success', target_url: 'run-42', context: 'ci / test' }],
+    };
+    const ci = mapGiteaCI(combined, identity);
+    expect(ci.runs[0].detailsUrl).toBeUndefined();
+  });
+
+  it('drops a relative target_url when the identity has no instance', () => {
+    const combined = {
+      state: 'success',
+      sha: HEAD,
+      total_count: 1,
+      statuses: [{ id: 1, status: 'success', target_url: '/alice/app/actions/runs/1', context: 'ci / test' }],
+    };
+    const ci = mapGiteaCI(combined, { provider: 'gitea' });
+    expect(ci.runs[0].detailsUrl).toBeUndefined();
+  });
+
   it('splits a pull request diff per file, a rename by its new path', () => {
     const parts = splitUnifiedDiff(fixtures.mixedDiff);
     expect([...parts.keys()]).toEqual(['README.md', 'old.txt', 'src/main.js']);
