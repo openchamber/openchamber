@@ -2119,8 +2119,6 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     if (!runtime.isDesktop && selectedIsImage && !isSvg) {
       setFileContent('');
       setDraftContent('');
-      setLoadedFilePath(node.path);
-      setFileLoading(false);
       return;
     }
 
@@ -3813,7 +3811,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
   // Everything shown as an artifact rather than as editable text. One place
   // for both the docked and the fullscreen viewer, so they cannot drift.
   const renderArtifactPreview = (file: FileNode): React.ReactNode => {
-    if (isSelectedImage && !isSvgSource) {
+    if (isSelectedImage && !isSvgSource && imageSrc) {
       return <ImageArtifact src={imageSrc} name={file.name} sizeBytes={artifactSize} neighbors={imageNeighbors} />;
     }
     if (isSelectedPdf) return renderPdfPreview(file);
