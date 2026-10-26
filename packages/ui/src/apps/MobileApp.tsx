@@ -114,6 +114,7 @@ const MOBILE_SETTINGS_PAGES = [
   'usage',
   'voice',
   'integrations',
+  'backup',
   'about',
 ] as const;
 

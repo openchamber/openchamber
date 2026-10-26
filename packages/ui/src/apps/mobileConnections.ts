@@ -21,6 +21,7 @@ import React from 'react';
 
 import { useI18n } from '@/lib/i18n';
 import type { PairingConnectionPayload, PairingEndpointCandidate } from '@/lib/connectionPayload';
+import { MobileBackupError } from '@/lib/mobileBackup';
 import { isCapacitorApp } from '@/lib/platform';
 import { adoptRelayTunnel, getActiveRelayDescriptor, getActiveRelayTunnel, isRelayModeActive } from '@/lib/relay/runtime-tunnel';
 import { createRelayTunnelClient, isRelayLimitReached } from '@/lib/relay/tunnel-client';
@@ -854,6 +855,137 @@ const deleteMobileConnection = async (id: string): Promise<MobileSavedConnection
   writeConnections(next);
   if (removed && isCapacitorApp()) await deleteSecureToken(secureTokenKeyOf(removed));
   return next;
+};
+
+// ---------------------------------------------------------------------------
+// Encrypted backup: the saved devices (with their tokens) as portable data.
+// The envelope that carries this payload is lib/mobileBackup.ts; this module
+// only owns what a saved device is, so the payload stays in step with storage.
+// ---------------------------------------------------------------------------
+
+export type MobileConnectionBackupEntry = {
+  label: string;
+  candidates: MobileTransportCandidate[];
+  serverId?: string;
+  lastUsedAt: number;
+  clientToken?: string;
+};
+
+export type MobileConnectionRestoreResult = {
+  added: number;
+  updated: number;
+  skipped: number;
+};
+
+// Read every saved device with the token that actually authenticates it: the
+// inline one on web, the secure-store one on native. A device whose secure
+// store read fails is still exported, just without a token — restoring it asks
+// for the password again instead of failing the whole backup.
+export const readMobileConnectionBackup = async (): Promise<MobileConnectionBackupEntry[]> => {
+  await migrateLegacyInlineTokens();
+  const connections = readConnections();
+  const entries: MobileConnectionBackupEntry[] = [];
+  for (const connection of connections) {
+    let clientToken = connection.clientToken;
+    if (!clientToken && isCapacitorApp() && connection.hasToken) {
+      const key = secureTokenKeyOf(connection);
+      if (key) clientToken = await readSecureToken(key);
+    }
+    entries.push({
+      label: connection.label,
+      candidates: connection.candidates,
+      serverId: connection.serverId,
+      lastUsedAt: connection.lastUsedAt,
+      ...(clientToken ? { clientToken } : {}),
+    });
+  }
+  return entries;
+};
+
+const parseBackupEntry = (value: unknown): MobileConnectionBackupEntry | null => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const candidates = Array.isArray(record.candidates)
+    ? record.candidates.map(parseCandidate).filter((candidate): candidate is MobileTransportCandidate => Boolean(candidate))
+    : [];
+  // A device with no reachable transport is not restorable, so it is skipped
+  // rather than saved as a row that can never connect.
+  if (candidates.length === 0) return null;
+  const label = typeof record.label === 'string' && record.label.trim()
+    ? record.label.trim()
+    : getConnectionLabel(connectionDisplayUrl({ candidates }));
+  const token = typeof record.clientToken === 'string' && record.clientToken.trim() ? record.clientToken.trim() : undefined;
+  return {
+    label,
+    candidates,
+    serverId: typeof record.serverId === 'string' && record.serverId.trim() ? record.serverId : undefined,
+    lastUsedAt: typeof record.lastUsedAt === 'number' && Number.isFinite(record.lastUsedAt) && record.lastUsedAt > 0
+      ? record.lastUsedAt
+      : 0,
+    ...(token ? { clientToken: token } : {}),
+  };
+};
+
+/**
+ * Merge a decrypted backup payload into this device's saved servers. Devices
+ * already present are updated in place (matched by server identity or shared
+ * transports), so importing twice does not duplicate rows. Nothing is deleted.
+ */
+export const restoreMobileConnectionBackup = async (payload: unknown): Promise<MobileConnectionRestoreResult> => {
+  const entries = payload && typeof payload === 'object' && !Array.isArray(payload)
+    ? (payload as { connections?: unknown }).connections
+    : null;
+  if (!Array.isArray(entries)) throw new MobileBackupError('invalid-payload');
+
+  await migrateLegacyInlineTokens();
+  const native = isCapacitorApp();
+  let connections = readConnections();
+  let added = 0;
+  let updated = 0;
+  let skipped = 0;
+
+  for (const raw of entries) {
+    const entry = parseBackupEntry(raw);
+    if (!entry) {
+      skipped += 1;
+      continue;
+    }
+    const existing = connections.find((connection) => isSameDevice(connection, entry));
+    if (!existing && connections.length >= MOBILE_CONNECTIONS_LIMIT) {
+      skipped += 1;
+      continue;
+    }
+
+    const saved: MobileSavedConnection = {
+      id: existing?.id ?? crypto.randomUUID(),
+      label: entry.label,
+      candidates: entry.candidates,
+      serverId: entry.serverId ?? existing?.serverId,
+      lastUsedAt: entry.lastUsedAt || existing?.lastUsedAt || 0,
+    };
+    if (native) {
+      // A backup without a token must not erase one this device already holds.
+      let hasToken = Boolean(existing?.hasToken);
+      if (entry.clientToken) {
+        const key = secureTokenKeyOf(saved);
+        hasToken = key ? await writeSecureToken(key, entry.clientToken) : false;
+      }
+      saved.hasToken = hasToken;
+    } else {
+      saved.clientToken = entry.clientToken ?? existing?.clientToken;
+      saved.hasToken = Boolean(saved.clientToken);
+    }
+
+    connections = [
+      saved,
+      ...connections.filter((connection) => connection.id !== existing?.id && !isSameDevice(connection, saved)),
+    ];
+    if (existing) updated += 1;
+    else added += 1;
+  }
+
+  writeConnections(connections.slice().sort((a, b) => b.lastUsedAt - a.lastUsedAt));
+  return { added, updated, skipped };
 };
 
 // The transport a connect/reconnect settled on. A relay transport MAY carry

@@ -47,6 +47,7 @@ import { ExtensionsPage } from '@/components/sections/extensions/ExtensionsPage'
 import type { OpenChamberSection } from '@/components/sections/openchamber/types';
 import { OpenChamberPage } from '@/components/sections/openchamber/OpenChamberPage';
 import { AboutSettings } from '@/components/sections/openchamber/AboutSettings';
+import { MobileBackupSettings } from '@/components/sections/openchamber/MobileBackupSettings';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
 import { SettingsScrollbarTopClearanceContext } from '@/components/sections/shared/settingsScrollbarClearance';
 import {
@@ -127,6 +128,7 @@ const pageOrder: SettingsPageSlug[] = [
   'integrations',
   'extensions',
   'usage',
+  'backup',
   'about',
   // 'projects' group — Workspace
   'projects',
@@ -649,6 +651,16 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return <WebSearchPage />;
       case 'usage':
         return <UsagePage />;
+      case 'backup':
+        return (
+          <SettingsPageLayout
+            title={t('settings.page.backup.title')}
+            description={t('settings.page.backup.description')}
+            showSaveStatus={false}
+          >
+            <MobileBackupSettings />
+          </SettingsPageLayout>
+        );
       case 'about':
         return (
           <SettingsPageLayout title={t('settings.page.about.title')} showSaveStatus={false}>

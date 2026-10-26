@@ -4,7 +4,9 @@ import { adoptRelayTunnel, getActiveRelayTunnel } from '@/lib/relay/runtime-tunn
 import type { RelayTunnelClient } from '@/lib/relay/tunnel-client';
 import { switchRuntimeEndpoint } from '@/lib/runtime-switch';
 
-import { autoConnectLastInstance, createMobilePasswordOperationTracker, isActiveRuntimeConnection, loadMobileConnections, migrateLegacyInlineTokenRecords, upsertMobileConnection, validateMobileConnectionSession, type MobileRelayConfig } from './mobileConnections';
+import { MobileBackupError } from '@/lib/mobileBackup';
+
+import { autoConnectLastInstance, createMobilePasswordOperationTracker, isActiveRuntimeConnection, loadMobileConnections, migrateLegacyInlineTokenRecords, readMobileConnectionBackup, restoreMobileConnectionBackup, upsertMobileConnection, validateMobileConnectionSession, type MobileRelayConfig } from './mobileConnections';
 
 const originalFetch = globalThis.fetch;
 const originalWindow = globalThis.window;
@@ -369,6 +371,150 @@ describe('mobile connection storage', () => {
       const relayEntries = connections.filter((c) => c.candidates.some((x) => x.kind === 'relay'));
       expect(relayEntries).toHaveLength(1);
       expect(relayEntries[0]?.label).toBe('Relay renamed');
+    } finally {
+      restoreGlobals();
+    }
+  });
+});
+
+describe('mobile connection backup', () => {
+  const restorePayload = (connections: unknown[]) => ({ connections });
+
+  test('exports every saved device with its token and restores it on a fresh device', async () => {
+    try {
+      installTestWindow();
+      await upsertMobileConnection({
+        label: 'Home server',
+        candidates: [{ kind: 'direct', url: 'http://192.168.1.10:2606' }],
+        clientToken: 'token-home',
+      });
+      await upsertMobileConnection({
+        label: 'Desktop relay',
+        candidates: [{ kind: 'relay', relay: testRelay }],
+        clientToken: 'token-relay',
+      });
+
+      const backup = await readMobileConnectionBackup();
+      expect(backup).toHaveLength(2);
+      expect(backup.find((entry) => entry.label === 'Home server')).toMatchObject({
+        candidates: [{ kind: 'direct', url: 'http://192.168.1.10:2606' }],
+        clientToken: 'token-home',
+      });
+      expect(backup.find((entry) => entry.label === 'Desktop relay')).toMatchObject({
+        candidates: [{ kind: 'relay', relay: testRelay }],
+        clientToken: 'token-relay',
+      });
+      // Identifiers belong to the device, so they never travel in the file.
+      expect(backup.every((entry) => !('id' in entry) && !('hasToken' in entry))).toBe(true);
+
+      window.localStorage.removeItem(STORAGE_KEY);
+      expect(await restoreMobileConnectionBackup(restorePayload(backup))).toEqual({ added: 2, updated: 0, skipped: 0 });
+
+      const restored = await loadMobileConnections();
+      expect(restored).toHaveLength(2);
+      expect(restored.find((connection) => connection.label === 'Home server')).toMatchObject({
+        candidates: [{ kind: 'direct', url: 'http://192.168.1.10:2606' }],
+        clientToken: 'token-home',
+      });
+      expect(restored.every((connection) => connection.id.length > 0)).toBe(true);
+
+      // Importing the same file again updates the two rows instead of adding more.
+      expect(await restoreMobileConnectionBackup(restorePayload(backup))).toEqual({ added: 0, updated: 2, skipped: 0 });
+      expect(await loadMobileConnections()).toHaveLength(2);
+    } finally {
+      restoreGlobals();
+    }
+  });
+
+  test('a device matches by server identity, so a moved LAN address updates in place', async () => {
+    try {
+      installTestWindow();
+      await upsertMobileConnection({
+        label: 'Server A',
+        candidates: [{ kind: 'direct', url: 'http://192.168.1.10:2606' }],
+        serverId: 'srv-a',
+        clientToken: 'token-a',
+      });
+
+      const result = await restoreMobileConnectionBackup(restorePayload([
+        {
+          label: 'Server A at home',
+          serverId: 'srv-a',
+          candidates: [{ kind: 'direct', url: 'http://192.168.1.30:2606' }],
+          lastUsedAt: 20,
+        },
+      ]));
+
+      expect(result).toEqual({ added: 0, updated: 1, skipped: 0 });
+      const connections = await loadMobileConnections();
+      expect(connections).toHaveLength(1);
+      expect(connections[0]).toMatchObject({
+        label: 'Server A at home',
+        serverId: 'srv-a',
+        candidates: [{ kind: 'direct', url: 'http://192.168.1.30:2606' }],
+        lastUsedAt: 20,
+        // The backup carried no token, so the working one stays.
+        clientToken: 'token-a',
+      });
+    } finally {
+      restoreGlobals();
+    }
+  });
+
+  test('skips entries that cannot connect and counts them', async () => {
+    try {
+      installTestWindow();
+      const result = await restoreMobileConnectionBackup(restorePayload([
+        null,
+        'not a device',
+        { label: 'No transport', candidates: [] },
+        { label: 'Bad transport', candidates: [{ kind: 'direct' }] },
+        { label: 'Good', candidates: [{ kind: 'direct', url: 'http://192.168.1.40:2606' }] },
+      ]));
+
+      expect(result).toEqual({ added: 1, updated: 0, skipped: 4 });
+      const connections = await loadMobileConnections();
+      expect(connections.map((connection) => connection.label)).toEqual(['Good']);
+    } finally {
+      restoreGlobals();
+    }
+  });
+
+  test('stops at the saved-device limit instead of growing without bound', async () => {
+    try {
+      installTestWindow();
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(
+        Array.from({ length: 12 }, (_, index) => ({
+          id: `existing-${index}`,
+          label: `Server ${index}`,
+          lastUsedAt: index,
+          candidates: [{ kind: 'direct', url: `http://192.168.1.${index + 10}:2606` }],
+        })),
+      ));
+
+      const result = await restoreMobileConnectionBackup(restorePayload([
+        { label: 'One too many', candidates: [{ kind: 'direct', url: 'http://192.168.1.99:2606' }] },
+      ]));
+
+      expect(result).toEqual({ added: 0, updated: 0, skipped: 1 });
+      expect(await loadMobileConnections()).toHaveLength(12);
+    } finally {
+      restoreGlobals();
+    }
+  });
+
+  test('refuses a payload that is not a list of devices', async () => {
+    try {
+      installTestWindow();
+      for (const payload of [{}, { connections: 'nope' }, [], null]) {
+        try {
+          await restoreMobileConnectionBackup(payload);
+          throw new Error('expected the payload to be rejected');
+        } catch (error) {
+          expect(error).toBeInstanceOf(MobileBackupError);
+          expect((error as MobileBackupError).code).toBe('invalid-payload');
+        }
+      }
     } finally {
       restoreGlobals();
     }

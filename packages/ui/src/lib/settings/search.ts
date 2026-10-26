@@ -1579,6 +1579,22 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['update', 'upgrade', 'version', 'git', 'extension', 'guest', 'refresh'],
     isAvailable: (ctx) => !ctx.isVSCode && !ctx.isMobile,
   },
+  {
+    id: 'backup.export',
+    page: 'backup',
+    titleKey: 'settings.backup.export.title',
+    descriptionKey: 'settings.backup.export.description',
+    keywords: ['backup', 'export', 'save', 'file', 'password', 'encrypt', 'token', 'servers', 'transfer', 'migrate'],
+    isAvailable: (ctx) => ctx.isMobile && !ctx.isVSCode,
+  },
+  {
+    id: 'backup.restore',
+    page: 'backup',
+    titleKey: 'settings.backup.restore.title',
+    descriptionKey: 'settings.backup.restore.description',
+    keywords: ['restore', 'import', 'open', 'file', 'password', 'decrypt', 'servers', 'move', 'migrate'],
+    isAvailable: (ctx) => ctx.isMobile && !ctx.isVSCode,
+  },
 ] as const;
 
 interface BuildSettingsSearchResultsOptions {
