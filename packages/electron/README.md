@@ -27,6 +27,8 @@ once startup has resolved. The frame colour, window state, splash markup and
 window options live in `early-startup.mjs` so the early window and any later
 main window are built from one definition; both bundles import that module at
 runtime rather than inlining it, or the handoff would see two copies.
+Window state is saved only while the main window is not minimized, so transient
+minimized bounds cannot replace the last normal size or maximized state.
 
 Login-shell environment discovery starts as soon as `main.mjs` runs and
 proceeds asynchronously, so shell startup files run while the window comes up.

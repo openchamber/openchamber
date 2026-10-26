@@ -15,6 +15,7 @@ import updaterPkg from 'electron-updater';
 import { ElectronSshManager } from './ssh-manager.mjs';
 import { collectLocalFileDiagnostics, collectSshBufferDiagnostics } from '@openchamber/web/server/lib/diagnostics/local-files.js';
 import { replaceFileWithRetry } from './windows-file-replace.mjs';
+import { persistMainWindowState } from './window-state.mjs';
 import { createTrayController } from './tray.mjs';
 import { applyDevDockIdentity, applyDockBadge } from './dev-dock-identity.mjs';
 import { attachDevWindowTape } from './dev-window-tape.mjs';
@@ -899,23 +900,15 @@ const writeDesktopHostsConfig = async (config) => {
 };
 
 const writeWindowState = async (browserWindow) => {
-  if (!browserWindow || browserWindow.isDestroyed()) return;
-  if (!state.mainWindow || browserWindow.id !== state.mainWindow.id) return;
   // Quake geometry is transient: persisting it would overwrite the user's
   // normal window bounds with the dropdown size.
-  if (state.quakeActive) return;
-
-  const bounds = browserWindow.getBounds();
-  await mutateSettingsRoot((root) => {
-    if (!browserWindow || browserWindow.isDestroyed()) return root;
-    root.desktopWindowState = {
-      x: bounds.x,
-      y: bounds.y,
-      width: Math.max(bounds.width, MIN_WINDOW_WIDTH),
-      height: Math.max(bounds.height, MIN_WINDOW_HEIGHT),
-      maximized: browserWindow.isMaximized(),
-      fullscreen: browserWindow.isFullScreen(),
-    };
+  await persistMainWindowState({
+    browserWindow,
+    mainWindowId: state.mainWindow?.id,
+    quakeActive: state.quakeActive,
+    minWidth: MIN_WINDOW_WIDTH,
+    minHeight: MIN_WINDOW_HEIGHT,
+    mutateSettingsRoot,
   });
 };
 
