@@ -52,8 +52,11 @@ the user can want independently:
   mockup, keeps clear of them (a color on all its text and a background of its
   own, since the injected base stylesheet colors unset text and the frame is
   transparent), image files by path from anywhere on the machine as
-  the image grant route allows, and the temporary directory to save a
-  screenshot in (`os.tmpdir()/opencode`) so it stays out of the project. How
+  the image grant route allows. Only complete local paths written literally
+  in the HTML are found and inlined before the page runs; the sandbox cannot
+  read paths assembled at runtime. The description gives the authoring pattern.
+  It also names the temporary directory to save a screenshot in
+  (`os.tmpdir()/opencode`) so it stays out of the project. How
   to ask on a page is the `awaitAnswer` input's description.
   With `awaitAnswer` the call waits for the user's answer on the page. The
   plugin sends the call id (`context.id`) with the callback so the server can

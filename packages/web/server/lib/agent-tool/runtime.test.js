@@ -663,6 +663,10 @@ describe('managed agent tool runtime', () => {
     expect(Object.keys(tool.openchamber.input.properties.parameters.properties)).not.toContain('html');
     // How to write the page rides on its input, which no client cuts short.
     expect(tool.openchamber_render.input.properties.parameters.properties.html.description).toContain('--chart-1');
+    expect(tool.openchamber_render.input.properties.parameters.properties.html.description)
+      .toContain('do not build paths from directory and filename fragments');
+    expect(tool.openchamber_render.input.properties.parameters.properties.html.description)
+      .toContain("image.src = images[key]");
     expect(tool.openchamber_render.description).toContain('add no outer card, border or banner title');
   });
 
