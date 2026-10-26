@@ -1160,6 +1160,15 @@ apart from OpenCode's inside the hook means comparing prompt text. The agent
 transform takes OpenCode's own plugin order and leaves the user's choice on top
 with no check at all.
 
+#### Why the prompt pins the title language and carries a non-English example
+
+The title runs on a small model, which follows the example language more
+reliably than an abstract instruction. With English-only examples, a Chinese
+first message still produced English titles (drift varied per request on the
+same input). The prompt now states that only the user's message decides the
+language and includes a Chinese example, the same pinning idiom
+`packages/ui/src/lib/smallModel.ts` uses for its notes.
+
 The embedded server controller exposes `getManagedOpenCodePreflight()` for
 desktop bootstrap. It shares the lifecycle's current CLI validation promise,
 including while validation is in flight. It returns false before validation

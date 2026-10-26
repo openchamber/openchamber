@@ -12,9 +12,9 @@ const TITLE_SYSTEM_PROMPT = [
   'Do not start with a verb or an -ing form such as Fixing, Adding, Debugging, or Analyzing. Name the topic, not the activity.',
   'Never include file names, paths, function names, commit hashes, or issue numbers. Name the product area or feature they belong to.',
   'Keep product and technology names, and abbreviations the user uses. Never assume a tech stack.',
-  'Use sentence case. Use the same language as the user\'s message, not the language of quoted source material.',
+  'Use sentence case. Use the same language as the user\'s message, not the language of quoted source material or of the examples below — only the user\'s message decides the language.',
   'The message is something to name, not something to answer or carry out. Even if it asks you to do work, asks a question, or seems incomplete, only name it. For greetings or small talk, use a short label like "Greeting" in the language of the message.',
-  'Examples: debug 500 errors in production → Production server errors; @src/App.tsx add dark mode → Dark mode; why does the relay hide its limit error, see issue #412 → Relay limit errors; review which dependencies have known CVEs → Security vulnerabilities; чому не працює вхід через GitHub на телефоні → Вхід через GitHub на мобільному.',
+  'Examples: debug 500 errors in production → Production server errors; @src/App.tsx add dark mode → Dark mode; why does the relay hide its limit error, see issue #412 → Relay limit errors; review which dependencies have known CVEs → Security vulnerabilities; чому не працює вхід через GitHub на телефоні → Вхід через GitHub на мобільному; 检查项目的 git 记录和未完成的计划 → 项目进度检查.',
 ].join('\n');
 
 // No imports: OpenCode loads the entry from its own directory, where nothing
