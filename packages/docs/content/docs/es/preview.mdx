@@ -1,0 +1,35 @@
+---
+title: Vista previa y servidores de desarrollo
+description: Abre un servidor de desarrollo en marcha dentro de OpenChamber.
+---
+
+# Vista previa y servidores de desarrollo
+
+Cuando arrancas un servidor de desarrollo, OpenChamber puede abrirlo dentro de la propia aplicación en lugar de en una pestaña aparte — así ves tu sitio junto al chat y puedes señalar elementos para preguntar por ellos.
+
+## Abrir un servidor de desarrollo
+
+Abre el panel del navegador con el botón del globo de la cabecera. Si ya hay un servidor en marcha, aparece en la lista y se abre con un clic: OpenChamber lo encuentra mirando qué está escuchando de verdad en tu máquina, así que funciona sin importar cómo lo hayas arrancado.
+
+Un servidor de desarrollo también se abre solo cuando:
+
+- pulsas **Abrir vista previa** sobre una dirección local en la terminal
+- una [acción de proyecto](/project-actions/) con apertura automática arranca uno
+- sigues un enlace local en un mensaje del chat
+
+Siempre puedes escribir la dirección a mano. Un simple `localhost:5173` se entiende como `http://`, así que no hace falta escribir el esquema.
+
+## Trabajar con un OpenChamber remoto
+
+Cuando OpenChamber corre en otra máquina, su servidor de desarrollo está en *esa* máquina — `localhost` en tu portátil apunta a otro sitio completamente distinto. La aplicación de escritorio se encarga: abre un puerto local que lleva la conexión hasta el servidor remoto, de modo que la página carga con normalidad, con recarga en caliente y herramientas de desarrollo funcionando. Tú sigues escribiendo la dirección que esperas; la fontanería no te estorba.
+
+Esto requiere la aplicación de escritorio. En una pestaña del navegador solo se pueden abrir servidores de tu propia máquina.
+
+## Anotar la página
+
+Consulta [Panel del navegador](/desktop-browser/) para señalar elementos, dibujar sobre la página y enviarlo todo al chat.
+
+## Relacionado
+
+- [Acciones de proyecto](/project-actions/) — abrir un servidor automáticamente al arrancarlo
+- [Panel del navegador](/desktop-browser/) — anotar páginas y dejar que el agente las maneje

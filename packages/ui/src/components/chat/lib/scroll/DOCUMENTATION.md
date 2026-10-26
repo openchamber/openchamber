@@ -1,0 +1,94 @@
+# Chat scroll
+
+The transcript is a LegendList (`@legendapp/list`) owned by `useChatTimelineScroll`. These files hold the scroll logic that list does not do on its own: anchoring, end-keeping, restore and the mobile keyboard glide.
+
+## Keeping the end
+
+- **A row that shrinks as the chat widens is measured in the same frame.** LegendList on the web applies a smaller row height a frame late, to ride out transient shrinks; for text re-wrapping at a new width that left the rows below and the pinned end a frame behind on every frame of a resize, and a pinned reader's text jumped up and back by 70 to 200 px each frame while the chat widened. Our patch (`bun-patches/@legendapp%2Flist@3.6.0.patch`, `processContainerLayout`) applies a shrink at once when the row's width changed; carry it over when bumping the library. The end is still taken from the measured bottom of the last real row (`resolveRealContentEndOffset` in `timelineScrollAnchoring.ts`), not from `scrollHeight`, which can trail the rows.
+- **The list footer counts.** `list.getState()` does not expose `footerSize`; the footer ends with a spacer (10vh on desktop, 40px on mobile), and its size arrives through the list's `onMetricsChange`. Ignoring it leaves the viewport about 80px short of the end.
+- **End-keeping is ours, not the list's.** `MessageList` passes `maintainScrollAtEnd={false}`: the library's option did not keep the viewport pinned while one tail row grew during streaming. At rest the hook's pin is a same-frame `scrollTop` write, and it holds the measured end through a width resize. While a reply streams, `followEnd` glides instead (the reply lands a block at a time, at most every 400 ms, see `lib/streamTextCommit.ts`, so each landing is one short glide): once per frame it issues a native smooth scroll to the end (it lets one already moving toward the same end finish), and jumps to one screen above the end first when the viewport is further behind. Readers with `prefers-reduced-motion` get an instant scroll instead of the glide. Scroll the node directly: `list.scrollToEnd()` per chunk goes through the library's programmatic-scroll bookkeeping and roughly doubles frame production.
+- **The list's state says whether to act; the scroll node says where the end is.** In the follow frame, a glide still moving toward an end the list's state has not moved is left to finish, decided from `getState()` alone, so those frames read no layout (`isFollowGlideUnderWay`). Whenever a glide is issued or the end is checked, the target comes from `scrollHeight`: the list's `contentLength` lags the DOM (a row is placed at its estimated height before it is measured, and the footer, whose tail spacer shrinks with the composer after a send, is measured a beat later without a size event), and a glide aimed by it stopped short of the end. While a glide runs, growth re-aims it from where it is, as one motion. Where it lands is checked only as a last resort: a gap of up to 4 px (`FOLLOW_LANDING_SNAP_MAX_PX`) closes with an instant write, too small to see, and anything larger goes through the follow rules again instead of a visible second glide. A native `scroll` listener that needs the current offset reads the node too: the list updates its `scroll` a frame after the event.
+- **The follow stops at the start of what outgrew the screen.** A live turn grows past the screen, and following its end would scroll away what the reader wants to read from the top. `findFollowStops` names where the follow may stop, top first: with Activity Default set to Collapsed, the end of the reader's message (the start of the live turn's work, the element after its user message in `[data-turn-id]`, so the compact work and the answer land right under the top edge); in both modes, the start of the reply being written (`data-streaming-reply` on `AssistantTextPart`, with a 16 px gap). With the sticky user header setting on, both starts land under the turn's `data-turn-sticky-header` instead of the top edge, so the message stays on top, and "taller than the viewport" below counts the header against the viewport. Once gliding to the end would carry such a start above the viewport and the turn or reply itself is taller than the viewport minus the list footer (the band the composer covers), `followEnd` glides only that far and drops live follow as a gesture would (`resolveFollowStop` in `followScroll.ts`). The rest lands below, the pill offers the end, and reaching the end follows again. Each place stops the follow at most once, and only one whose start was on screen when the follow first saw it; a reader who returns to the end themselves has passed the current ones (`retireFollowStops`). Expanded keeps following the work until a long answer, since that is what a reader who picks it wants to watch.
+  - The latest turn is the `[data-turn-id]` lowest in the content, measured. The list places rows in pooled containers, so document order is not timeline order, and the last match in the document was often an older turn.
+  - A send retires the stops it finds, before the sent row commits, so they are the previous turn's. A previous turn that never outgrew the screen kept its stop eligible, and the sent row pushing it up stopped the follow a few pixels into the send.
+  - A reply's last block lands in the same render that ends its streaming and drops `data-streaming-reply`. The follow frame after that still checks that reply once (`lastStreamingReplyRef`), so a reply whose closing table, code block or held paragraph carries it past the screen stops at its start too.
+  - That last block can land in the same commit that reports the session idle, or a beat after it, and growth at rest snaps to the end without the stops. For `TURN_END_GLIDE_WINDOW_MS` (1 s) after a turn ends, growth still follows with its stops. Entering another session clears the window, so the entry pin stays one instant write. The same window also sees the turn footer and the banners docked on the composer arrive. They also carry a start off the top on the way to the end, and before the height rule they stopped the follow and left the pill up under a reader who was on the end.
+  - After a stop, the list reporting the end does not bring the follow back while the turn runs (`isTurnRunning`, without the turn-end window). Once it ends, reaching the end does: the work folding away after the turn often carries a stopped reader there. The list reports reaching the end once, so a report held while the turn ran is checked again when it ends. Before this, the pill stayed up under a reader on the end.
+- **Folded work above the reader closes without moving them.** When a turn settles in the Collapsed activity mode, its work folds away above the answer. A fold entirely above the visible area (under the sticky header, when it sticks) closes at once, and `holdAnchor` (`holdAnchor.ts`) keeps the content after it where it was; a fold in view animates as before. Without this the answer jumped up by the fold's height under a reader held at its start, since the scroller has `overflow-anchor: none` and the list compensates only rows above the viewport.
+- **Sending glides to the true end.** `scrollToBottomOnSend` asks for a follow glide at once (a snap with reduced motion), and for the send window (`SEND_GLIDE_WINDOW_MS`) every growth glides to the true end, so the sent row and the start of the reply end up whole above the composer. A reader who scrolled away is brought back with a jump, as before.
+- **"At the end" for chrome holds only for the follow's own movement.** `viewportAtEnd` (the recap hint above the composer reads it) stays true while a follow glide is passing through the viewport's position (`isPositionHeldByFollow` in `followScroll.ts`): text arrives ahead of the glide, and measuring then flipped it several times a second, fading the hint in and out. Any other scroll (a gesture, the scrollbar thumb, find in page, `scrollIntoView`) is measured. The measurement runs only on scroll events, so it is also false while the scroll-to-bottom pill is offered: a follow stop leaves the viewport within the 40 px band, and the turn footer that lands below it afterwards fires no scroll, which left the hint shown on top of the pill.
+- **A gesture over a page frame releases the follow too.** The follow lets go only on gesture events the scroll node hears: a wheel up, a vertical swipe, a middle-button pan, an upward key. A wheel or swipe over an `openchamber_render` page scrolls the transcript around the frame, but its events stay inside the frame, so while a reply streamed the follow pulled the reader back to the end on every landing. The page reports each such gesture's direction, and its frame raises it as an `openchamber:frame-scroll` event (`dispatchFrameScroll` / `onFrameScroll` in `timelineScrollIntent.ts`) that the hook reads like touch: up releases, down releases only away from the end.
+- **Opening a row lets go of the end.** A tool, an agent task, a reasoning block or the folded work opens below its header. Held on the end, the reader saw the viewport slide down by the whole row as it grew, and the header they clicked went off the top. The row raises `openchamber:row-expand` (`dispatchRowExpand` / `onRowExpand` in `timelineScrollIntent.ts`) from its element as it opens, before its state changes, and the hook takes it as a gesture: the follow is released, the header stays where it was, and the content opens below it. That also holds while a turn runs, as a scroll up would. Two more pieces belong to it:
+  - The list keeps its own hold on the end it opened the session at (`initialScrollAtEnd`) until the reader scrolls, and re-asserted that end as the row grew. Any scroll command ends the hold, so the release issues one to where the viewport already is.
+  - Growth below a released reader fires no scroll event, so the list never reports them leaving the end. `onTimelineDataChange` measures it instead and offers the pill once the last row passes the visible bottom, as it does with auto-follow off. Closing the row brings the end back to them just as silently, and the follow resumes once the content ends exactly at the viewport's bottom: a closing row animates, and within the usual 40 px band the follow came back mid-animation and pulled the closing header up for a few frames. A row that grew by less than the band never left the reader off the end, so no at-end change fires for it: the hook remembers that a row opening released the follow (`rowExpandReleaseRef`) and resumes it once that row has grown and the content ends at the viewport's bottom again. Without this, the next reply that did not start from this composer went by unfollowed and with no pill.
+  - Closing a row raises nothing: the content below its header shrinks, and only a reader on the end moves, by what the browser clamps.
+
+- **The list header never changes height.** The "Load older" header in `ChatContainer.tsx` is a fixed 48 px slot that is always there; only the button inside it toggles (shown while older history exists and the viewport is within two viewport heights of the top, `nearContentStart` from the hook). LegendList compensates a header size change only while `maintainVisibleContentPosition.size` is on, which is off for a reader on the end, so a header that came and went moved the whole transcript by its height mid-glide (after a revert, the send hid it). Anything else rendered above the rows has to keep its height for the same reason.
+
+- **A side column's width animation holds the end on every frame and defers the rest to its end.** While the session sidebar or the right slot animates its width (`lib/layoutAnimation.ts`, 240 ms), the transcript re-wraps on every frame. The pinned-end write runs on each of them, through the same measured end as a window resize, offset by where the reader sat relative to that end when the animation began (a reader on the document's end sits a few px below it, and the text hopped by that much at every toggle): deferred to the end of the animation, as it once was, the end slid down out of view (over 1000 px as a 640 px panel opened beside a long reply) and jumped back when the animation ended. The active-turn spy, markdown table relayout and the scroll-shadow check each forced a transcript layout per frame; they queue with `runWhenLayoutSettled` and run once, at the final width, one frame after the animation ends, and the end is asserted once more then. Markdown tables are the exception among those: they refit on every frame from column widths measured once (`stabilizeMarkdownTableWidths` with `cachedOnly`), so they move with the prose; only a table that needs measuring waits for the end.
+
+## Connected scroll work
+
+Effect cleanup cancels follow frames and clears their scheduling sentinel, and
+clears the return-to-end reassert timers. Retained hook state can schedule a new
+frame after setup without changing the reader's follow intent. A cancelled
+follow callback cannot consume a later connection's pending frame.
+
+History navigation belongs to the controller's current connected lifetime as
+well as its session identity. Cleanup retires that lifetime, releases local
+render waiters and stops the mobile prepend watchdog. An authoritative loader
+request already sent may still publish its page, but its obsolete local search
+cannot request another batch or finish navigation after reconnect. MessageList
+owns one pending navigation alignment loop; replacement navigation, input,
+session change and layout cleanup cancel its frame and listeners.
+
+### Why cleanup retires navigation without cancelling the loader
+
+The loader owns shared history coverage and request reconciliation. A viewport
+owns only its navigation continuation, so ending that viewport's effects stops
+local movement and subsequent demand without discarding a valid shared read.
+
+## Session list retention
+
+`ChatViewport` keeps up to four `MessageList` subtrees, including the visible
+one, through `KeepAlive`; the mobile surface keeps only the visible one, because
+a phone's web view is killed under memory pressure. Entries are keyed by
+session ID: the composite session key also carries the directory, which settles
+after a session opens, and keying the pool by it retained a hidden second copy
+of the open session. Inside an entry the list still remounts on a session key
+change. The shown selection drives the LRU; loading, error,
+empty and draft placeholders hide the pool without replacing its host. Leaving
+the chat column releases the pool. Each stored JSX entry supplies its own
+`ChatColumnSessionContext`, so hidden messages retain their session identity.
+
+The scroll hook and timeline controller remain shared by the column. List
+registration names the composite session key; a late detach from a hidden list
+cannot clear the selected list. MessageList's imperative ref cleanup clears
+only its own handle, and DOM navigation resolves only its own scroller.
+Scroll-shadow cleanup clears the outgoing node's attributes because hidden
+scrollers remain siblings of the shared fade and still match its CSS selector.
+Restoration and reveal continue through the existing column logic.
+
+The UI pool does not pin histories or change loader retention. Returning to an
+entry supplies current authoritative messages through its existing props.
+Loader request generations do not control UI identity: a tail refresh can
+advance them without replacing history. Runtime changes replace the pool. Hidden JSX
+can retain old message references until LRU eviction or column teardown, so
+the entry limit is a count bound, not a byte budget.
+
+### Why the pool sits at MessageList
+
+This is the existing session-keyed replacement point. Retaining it preserves
+the list, turn state and mounted Markdown without duplicating the composer or
+the column's scroll controller. KeepAlive renders entries in stable key order;
+LRU promotion changes visibility without moving retained iframe DOM.
+
+## Row identity
+
+- **A row keeps its React tree when it becomes or stops being the live tail.** Every row renders through `TimelineRowContent` in `MessageList.tsx`; only the tail subscribes to streaming parts. The tail moves on every send and on a revert. When the tail had its own component type, the moving row remounted, its state reset for one commit (a long user message lost its "Show more" link, 28 px), and LegendList measured that commit in its layout effect. The `ResizeObserver` never corrects such a size, because the short height was never painted, so the row below sat that much too high until a later re-measure: 40-80 ms after a send, and from the revert until 200 ms into the next send. Anything that remounts or resets state inside a mounted row has the same effect.
+
+## Measuring
+
+Scroll measurements from a background or occluded tab lie: such a tab runs about one frame per 500 ms. Measure with a headless CDP probe that logs `scrollTop`, the maximum and the last row's bottom per frame (see `scripts/perf/DOCUMENTATION.md`, "Running An Isolated Copy"); a resize fix holds when `scrollTop` equals the maximum on every logged frame. For streaming cost, `profile:session` compares builds; also sample the distance from the end, because a build that stopped following looks faster.
+
+The mobile keyboard side (`keyboardFollowGlide.ts`) is documented with the composer: `components/chat/composer/DOCUMENTATION.md`, "Mobile".

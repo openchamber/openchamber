@@ -1,0 +1,99 @@
+import React from 'react';
+import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useSessions } from '@/sync/sync-context';
+import { isWebRuntime } from '@/lib/desktop';
+import { PWA_RECENT_SESSIONS_STORAGE_KEY } from '@/lib/pwa';
+
+type RecentSessionShortcut = {
+  sessionId: string;
+  title: string;
+};
+
+type ManifestSyncWindow = Window & {
+  __OPENCHAMBER_UPDATE_PWA_MANIFEST__?: () => void;
+};
+
+const MAX_RECENT_SHORTCUTS = 3;
+const MANIFEST_UPDATE_DELAY_MS = 2_000;
+
+const normalizeRecentTitle = (value: string | undefined, fallback: string): string => {
+  if (typeof value !== 'string') {
+    return fallback;
+  }
+  const normalized = value.trim().replace(/\s+/g, ' ');
+  if (!normalized) {
+    return fallback;
+  }
+  return normalized.slice(0, 48);
+};
+
+const buildRecentShortcuts = (
+  sessions: Array<{ id: string; title?: string }>,
+  currentSessionId: string | null,
+): RecentSessionShortcut[] => {
+  const ordered = currentSessionId
+    ? [
+        ...sessions.filter((session) => session.id === currentSessionId),
+        ...sessions.filter((session) => session.id !== currentSessionId),
+      ]
+    : sessions;
+
+  const shortcuts: RecentSessionShortcut[] = [];
+  const seen = new Set<string>();
+
+  for (const session of ordered) {
+    const sessionId = typeof session.id === 'string' ? session.id.trim() : '';
+    if (!sessionId || seen.has(sessionId)) {
+      continue;
+    }
+
+    seen.add(sessionId);
+    shortcuts.push({
+      sessionId,
+      title: normalizeRecentTitle(session.title, `Session ${shortcuts.length + 1}`),
+    });
+
+    if (shortcuts.length >= MAX_RECENT_SHORTCUTS) {
+      break;
+    }
+  }
+
+  return shortcuts;
+};
+
+export const usePwaManifestSync = () => {
+  const sessions = useSessions();
+  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+
+  const recentShortcuts = React.useMemo(() => {
+    return buildRecentShortcuts(sessions, currentSessionId);
+  }, [currentSessionId, sessions]);
+
+  const signature = React.useMemo(() => JSON.stringify(recentShortcuts), [recentShortcuts]);
+  const hasRecentShortcuts = recentShortcuts.length > 0;
+
+  React.useEffect(() => {
+    if (typeof window === 'undefined' || !isWebRuntime()) {
+      return;
+    }
+
+    try {
+      if (!hasRecentShortcuts) {
+        localStorage.removeItem(PWA_RECENT_SESSIONS_STORAGE_KEY);
+      } else {
+        localStorage.setItem(PWA_RECENT_SESSIONS_STORAGE_KEY, signature);
+      }
+    } catch {
+      return;
+    }
+
+    // Rebuilding the manifest fetches it from the server. Shortcuts only
+    // matter to the installed-app menu, so the rebuild waits until the switch
+    // that changed them has settled instead of adding a request to it.
+    const timer = window.setTimeout(() => {
+      const win = window as ManifestSyncWindow;
+      win.__OPENCHAMBER_UPDATE_PWA_MANIFEST__?.();
+    }, MANIFEST_UPDATE_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, [hasRecentShortcuts, signature]);
+};

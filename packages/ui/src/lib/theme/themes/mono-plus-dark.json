@@ -1,0 +1,118 @@
+{
+  "metadata": {
+    "id": "mono-plus-dark",
+    "name": "Mono Plus",
+    "variant": "dark",
+    "description": "A pure monochromatic theme - dark variant with slight colors added",
+    "version": "1.0.0",
+    "tags": [
+      "dark",
+      "monochrome",
+      "minimal"
+    ]
+  },
+  "colors": {
+    "primary": {
+      "base": "#a2bee8",
+      "hover": "#E5E5E5",
+      "active": "#CCCCCC",
+      "muted": "#FFFFFF80"
+    },
+    "surface": {
+      "background": "#000000",
+      "foreground": "#cecece",
+      "muted": "#0A0A0A",
+      "mutedForeground": "#898989",
+      "elevated": "#141414",
+      "overlay": "#00000080",
+      "subtle": "#1A1A1A"
+    },
+    "interactive": {
+      "border": "#232323c6",
+      "selection": "#ffffff1f",
+      "borderHover": "#333333",
+      "borderFocus": "#FFFFFF",
+      "focus": "#FFFFFF",
+      "focusRing": "#FFFFFF50",
+      "cursor": "#E5E5E5",
+      "hover": "#ffffff0f",
+      "active": "#ffffff1a"
+    },
+    "status": {
+      "error": "#a47373",
+      "errorForeground": "#0a0a0a",
+      "warning": "#9e8a6a",
+      "warningForeground": "#0a0a0a",
+      "success": "#6a8e6a",
+      "successForeground": "#0a0a0a",
+      "info": "#6d80a0",
+      "infoForeground": "#0a0a0a"
+    },
+    "syntax": {
+      "base": {
+        "background": "#050505",
+        "comment": "#8c8c8c",
+        "keyword": "#dccdbeff",
+        "string": "#b6d8e6ff",
+        "number": "#e3bdadff",
+        "function": "#a2bee8",
+        "variable": "#cecece",
+        "type": "#edcbb8ff",
+        "operator": "#dccdbeff"
+      },
+      "tokens": {
+        "stringEscape": "#b6d8e6ff",
+        "variableProperty": "#c0dcc0ff",
+        "boolean": "#e3bdadff",
+        "tag": "#a2bee8"
+      },
+      "highlights": {
+        "diffAdded": "#6a8e6a",
+        "diffRemoved": "#9e6a6a",
+        "diffModified": "#6a7e9e"
+      }
+    },
+    "pr": {
+      "merged": "#bda2e8"
+    },
+    "chat": {
+      "userMessageBackground": "#0e1219",
+      "divider": "#242424",
+      "background": "#000000"
+    },
+    "markdown": {
+      "link": "#CCCCCC",
+      "linkHover": "#a2bee8",
+      "inlineCode": "#a2bee8",
+      "inlineCodeBackground": "#050505",
+      "blockquote": "#898989",
+      "blockquoteBorder": "#242424",
+      "listMarker": "#99999999",
+      "bold": "#d4d4d4",
+      "italic": "#cecece"
+    },
+    "tools": {
+      "border": "#30303080",
+      "icon": "#898989",
+      "title": "#cecece",
+      "description": "#898989",
+      "edit": {
+        "addedBackground": "#6a8e6a20",
+        "removedBackground": "#9e6a6a20",
+        "lineNumber": "#898989"
+      }
+    }
+  },
+  "config": {
+    "fonts": {
+      "sans": "ui-monospace, \"SFMono-Regular\", \"Menlo\", \"Cascadia Mono\", \"Segoe UI Mono\", monospace",
+      "mono": "ui-monospace, \"SFMono-Regular\", \"Menlo\", \"Cascadia Mono\", \"Segoe UI Mono\", monospace",
+      "heading": "ui-monospace, \"SFMono-Regular\", \"Menlo\", \"Cascadia Mono\", \"Segoe UI Mono\", monospace"
+    },
+    "transitions": {
+      "fast": "150ms ease",
+      "normal": "250ms ease",
+      "slow": "350ms ease"
+    }
+  }
+}

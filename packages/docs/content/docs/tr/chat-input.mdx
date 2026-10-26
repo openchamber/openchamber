@@ -1,0 +1,88 @@
+---
+title: Sohbet girişi
+description: "Sohbet kutusuna yazabilecekleriniz: komutlar, skill'ler, snippet'ler, bahsetmeler ve ekler."
+---
+
+# Sohbet girişi
+
+Sohbet kutusu birkaç simge anlar. Birini yazınca bir seçici açılır; bir öğe seçin ya da yazmaya devam ederek süzün. Bir simge yalnızca sözcük başında sayılır ve bir komut mesajı başlatmalıdır.
+
+| Yazın | Seçer | Geçerli olduğu yer |
+| --- | --- | --- |
+| `/` | bir komutu | mesajın en başı |
+| `$` | bir skill'i | her yerde |
+| `#` | bir snippet'i | her yerde |
+| `@` | bir dosyayı ya da agent'ı | her yerde |
+
+Sizde olmayan bir şeyi gösteren simge düz metin olarak kalır: `$5` sadece para, `a/b` ise sadece bir yoldur.
+
+## Komutlar
+
+Komut, `/review` gibi eğik çizgiyle çalıştırdığınız kayıtlı bir istemdir. Bunları **Settings → Commands** altında yönetirsiniz.
+
+1. **Settings → Commands** bölümünü açın ve bir komut oluşturun.
+2. Ona bir ad, açıklama ve göndermesi gereken istem metnini verin.
+3. İsterseniz belirli bir agent'a ya da modele sabitleyin.
+4. Kişisel ya da proje kapsamını seçin.
+
+Sohbette, komutları açmak için mesajın **ilk** karakteri olarak `/` yazın ve ardından birini seçin. Metniniz şu yer tutucuları kullanabilir:
+
+- `$ARGUMENTS`: komuttan sonra yazdığınız her şey
+- `@filename`: bir dosyanın içeriğini ekler
+- `` !`command` ``: bir shell komutunun çıktısını ekler
+
+Yerleşik `init` ve `review` komutları sıfırlanabilir, ama silinemez. OpenChamber'da `/explore` ve `/summary` gibi komutlar da bulunur; tam liste için [Magic Prompts](/magic-prompts/) sayfasına bakın.
+
+## Skill'ler
+
+Bir mesajın herhangi bir yerinde `$` yazınca skill seçici açılır, ardından birini seçin. Agent, yanıt için o skill'in yönergelerini yükler. Kendi skill'inizi yazmak için [Skills](/skills/) sayfasına bakın.
+
+Komutlar ve skill'ler ayrı seçicilere sahiptir; bu yüzden baştaki `/` hiçbir zaman skill'leri, `$` ise hiçbir zaman komutları listelemez.
+
+## Snippets
+
+Snippet, `#signoff` gibi bir etiketle satır içinde çağırdığınız yeniden kullanılabilir metindir. Bunları **Settings → Snippets** altında yönetirsiniz.
+
+1. **Settings → Snippets** bölümünü açın ve bir snippet oluşturun.
+2. Ona bir ad ve temsil ettiği metni verin. Birden fazla tetikleyici istiyorsanız takma adlar ekleyin.
+3. Kişisel ya da proje kapsamını seçin.
+
+Sohbette `#` yazın ve bir snippet seçin. OpenChamber gönderimden önce tam metni yerine yerleştirir.
+
+## Dosyalar ve agent'lar
+
+Bir dosya eklemek ya da mesajı başka bir agent'la çalıştırmak için `@` yazın.
+
+- `@src/index.ts` gibi bir dosya, **+** menüsünden seçilmiş gibi mesaja eklenir. Görseller ve belgeler okunur ve onunla birlikte gönderilir.
+- `@build` gibi bir agent, bu mesajı o agent'la çalıştırır. Bahsetme yoksa composer'da seçili agent çalıştırır.
+
+## Dosya ve bağlam ekleme
+
+Sohbet kutusunun yanındaki **+** menüsü bir dosyadan fazlasını ekler:
+
+- bilgisayarınızdaki dosyalar
+- deponuzdaki issue'lar ve pull request'ler (proje hangisinde barınıyorsa GitHub, GitLab, Gitea, Forgejo ya da Gerrit)
+- Linear bağlıysa Linear issue'ları
+- ekleme sunan kurulu [eklentilerin](/extensions/) görevleri
+
+Her biri bir sonraki mesajınızla bağlam olarak gelir; ne yapılacağını mesajınız belirler. Bir görseli yapıştırabilir ya da bir dosyayı doğrudan sohbet kutusuna bırakabilirsiniz.
+
+## Bir shell komutu çalıştırma
+
+Mesajı `!` ile başlatın; OpenChamber onu bir shell komutu olarak çalıştırır ve agent'a hiçbir şey göndermez. Shell modundan çıkmak için **Esc**'e basın ya da kutu boşalana kadar silin.
+
+## Klavye
+
+- **Enter** gönderir, **Shift+Enter** yeni satır başlatır. **Settings → Chat** bölümünde bunları değiştirebilirsiniz; o zaman Enter satırı böler ve **Ctrl/Cmd+Enter** gönderir. Ctrl/Cmd+Enter her zaman gönderir.
+- **ArrowUp** ve **ArrowDown** önceki mesajlarınızı geri getirir.
+- Bir seçici açıkken **Ctrl+N** ve **Ctrl+P** içinde gezinir, **Enter** ya da **Tab** seçer, **Esc** kapatır.
+
+Genişletilmiş composer'da Enter her zaman yeni satır başlatır ve **Ctrl/Cmd+Enter** gönderir.
+
+Telefonda Enter her zaman yeni satır başlatır. Gönder düğmesi veya **Ctrl/Cmd+Enter** gönderir.
+
+## İlgili
+
+- [Skills](/skills/): daha büyük yönerge kümelerini gerektiğinde yükler
+- [Magic Prompts](/magic-prompts/): yerleşik komutlar ve her birinin çalıştığı yer
+- [Git sunucuları](/github/): issue ve pull request ekleyin

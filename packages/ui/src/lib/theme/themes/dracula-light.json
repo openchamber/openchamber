@@ -1,0 +1,121 @@
+{
+  "metadata": {
+    "id": "dracula-light",
+    "name": "Dracula",
+    "variant": "light",
+    "description": "Dracula",
+    "version": "1.0.0",
+    "tags": [
+      "light",
+      "palette"
+    ]
+  },
+  "colors": {
+    "primary": {
+      "base": "#6957d7",
+      "hover": "#6150c6",
+      "active": "#5849b5",
+      "muted": "#6957d780"
+    },
+    "surface": {
+      "background": "#f9f9f4",
+      "foreground": "#45454f",
+      "muted": "#f3f4ee",
+      "mutedForeground": "#5f5f6a",
+      "elevated": "#eeefe9",
+      "overlay": "#00000066",
+      "subtle": "#f3f3ee"
+    },
+    "interactive": {
+      "border": "#00000013",
+      "selection": "#dee1db",
+      "borderHover": "#0000002e",
+      "borderFocus": "#c2c2fd",
+      "focus": "#c2c2fd",
+      "focusRing": "#c2c2fd",
+      "cursor": "#1b1b2b",
+      "hover": "#0000000a",
+      "active": "#00000014"
+    },
+    "status": {
+      "error": "#ad1446",
+      "errorBackground": "#ad14461f",
+      "errorBorder": "#ad144659",
+      "warning": "#9e5a04",
+      "warningBackground": "#9e5a041f",
+      "warningBorder": "#9e5a0459",
+      "success": "#167a46",
+      "successBackground": "#167a461f",
+      "successBorder": "#167a4659",
+      "info": "#366da9",
+      "infoBackground": "#366da91f",
+      "infoBorder": "#366da959"
+    },
+    "syntax": {
+      "base": {
+        "background": "#fcfcf7",
+        "comment": "#7d7f97",
+        "keyword": "#d16090",
+        "string": "#596600",
+        "number": "#7c6bf5",
+        "function": "#2f8f57",
+        "variable": "#0c0b1a",
+        "type": "#824a05",
+        "operator": "#1b1b2b"
+      },
+      "tokens": {
+        "variableProperty": "#1d7fc5",
+        "parameter": "#0c0b1a",
+        "boolean": "#7c6bf5",
+        "punctuation": "#1b1b2b",
+        "stringEscape": "#7c6bf5",
+        "keywordImport": "#d16090",
+        "tag": "#596600",
+        "regex": "#1b1b2b"
+      },
+      "highlights": {
+        "diffAdded": "#1b7241",
+        "diffAddedBackground": "#ddfce5",
+        "diffRemoved": "#983c5a",
+        "diffRemovedBackground": "#feedf1",
+        "diffModified": "#824a05",
+        "diffModifiedBackground": "#824a051f",
+        "lineNumber": "#363646",
+        "lineNumberActive": "#0c0b1a"
+      }
+    },
+    "pr": {
+      "blocked": "#a15824",
+      "merged": "#8255b0"
+    },
+    "chat": {
+      "background": "#f9f9f4",
+      "userMessageBackground": "#ebebf0",
+      "divider": "#0000001a"
+    },
+    "markdown": {
+      "link": "#6755d4",
+      "linkHover": "#6150c6",
+      "inlineCode": "#136b3c",
+      "inlineCodeBackground": "#f3f3ee",
+      "blockquote": "#5f5f6a",
+      "blockquoteBorder": "#0000001a",
+      "listMarker": "#6957d799",
+      "bold": "#3d3d46",
+      "italic": "#45454f",
+      "hr": "#00000013"
+    },
+    "tools": {
+      "border": "#00000013",
+      "icon": "#5f5f6a",
+      "title": "#45454f",
+      "description": "#5f5f6a",
+      "edit": {
+        "addedBackground": "#ddfce5",
+        "removedBackground": "#feedf1",
+        "modifiedBackground": "#824a051f",
+        "lineNumber": "#363646"
+      }
+    }
+  }
+}

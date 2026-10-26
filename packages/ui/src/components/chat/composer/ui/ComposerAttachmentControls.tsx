@@ -1,0 +1,188 @@
+/**
+ * Attachment and settings controls in the composer footer.
+ *
+ * Rendered twice on mobile — once in the collapsed pill, once in the expanded
+ * footer — so it stays a memoized component with an explicit comparator: a
+ * re-render of the whole composer must not tear down the dropdown while it is
+ * open.
+ */
+
+import React from 'react';
+
+import { Icon } from '@/components/icon/Icon';
+import { ProviderIcon } from '@/components/sourceControl/ProviderIcon';
+import { useSourceControlProvider } from '@/lib/source-control/providers/registry';
+import { GuestIcon } from '@/components/layout/GuestRailIcon';
+import type { IconName } from '@/components/icon/icons';
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import type { GuestAttachItem } from '@/hooks/useGuestSurfaces';
+import { useI18n } from '@/lib/i18n';
+import { cn } from '@/lib/utils';
+
+/** A tracker the attach menu offers: its mark, the translated action, and what opens its picker. */
+export type ComposerTrackerPicker = { provider: string; icon: IconName; label: string; open: () => void };
+
+type ComposerAttachmentControlsProps = {
+    isVSCode: boolean;
+    footerIconButtonClass: string;
+    iconSizeClass: string;
+    handlePickLocalFiles: () => void;
+    openGitHubPicker: () => void;
+    /** The host the project's issues and change requests come from. */
+    /** The project's source-control provider id; its mark and wording label the link action. */
+    repositoryProvider?: string | null;
+    /** One entry per signed-in tracker, in the server's order. */
+    trackerPickers?: readonly ComposerTrackerPicker[];
+    onOpenSettings?: () => void;
+    onMenuOpenChange?: (open: boolean) => void;
+    /** Mobile: open the attachment bottom sheet instead of the dropdown menu. */
+    onOpenMobileSheet?: () => void;
+    attachGuests?: readonly GuestAttachItem[];
+    onOpenGuestAttach?: (guestId: string) => void;
+    /**
+     * Only offer local files. The `/btw` composer takes files but none of the
+     * linked context (issues, PRs, guests), which stays with the main draft.
+     */
+    filesOnly?: boolean;
+};
+
+export const ComposerAttachmentControls = React.memo(function ComposerAttachmentControls(props: ComposerAttachmentControlsProps) {
+    const { t } = useI18n();
+    const {
+        isVSCode,
+        footerIconButtonClass,
+        iconSizeClass,
+        handlePickLocalFiles,
+        openGitHubPicker,
+        repositoryProvider = null,
+        trackerPickers,
+        onOpenSettings,
+        attachGuests,
+        onOpenGuestAttach,
+        filesOnly = false,
+    } = props;
+    const repositoryDescriptor = useSourceControlProvider(repositoryProvider);
+
+    return (
+        <div className="flex items-center gap-x-1.5">
+            <div className="relative inline-flex">
+                {props.onOpenMobileSheet && !filesOnly ? (
+                    <button
+                        type="button"
+                        className={footerIconButtonClass}
+                        onClick={props.onOpenMobileSheet}
+                        // Same guard as PermissionAutoAcceptButton: keep the tap
+                        // from dismissing the keyboard. On Android's
+                        // resizes-content viewport the keyboard-close relayout
+                        // moves this button mid-tap and the click never lands.
+                        onMouseDown={(event) => event.preventDefault()}
+                        onPointerDownCapture={(event) => {
+                            if (event.pointerType === 'touch') {
+                                event.preventDefault();
+                            }
+                        }}
+                        title={t('chat.chatInput.actions.addAttachment')}
+                        aria-label={t('chat.chatInput.actions.addAttachment')}
+                    >
+                        <Icon name="add-circle" className={cn(iconSizeClass, 'text-current')} />
+                    </button>
+                ) : isVSCode || filesOnly ? (
+                    <button
+                        type="button"
+                        className={footerIconButtonClass}
+                        onClick={handlePickLocalFiles}
+                        title={t('chat.chatInput.actions.attachFiles')}
+                        aria-label={t('chat.chatInput.actions.attachFiles')}
+                    >
+                        <Icon name="attachment-2" className={cn(iconSizeClass, 'text-current')} />
+                    </button>
+                ) : (
+                    <DropdownMenu onOpenChange={props.onMenuOpenChange}>
+                        <DropdownMenuTrigger asChild>
+                            <button
+                                type="button"
+                                className={footerIconButtonClass}
+                                title={t('chat.chatInput.actions.addAttachment')}
+                                aria-label={t('chat.chatInput.actions.addAttachment')}
+                            >
+                                <Icon name="add-circle" className={cn(iconSizeClass, 'text-current')} />
+                            </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent side="top" align="start">
+                            <DropdownMenuItem
+                                onSelect={() => {
+                                    requestAnimationFrame(handlePickLocalFiles);
+                                }}
+                            >
+                                <Icon name="attachment-2"/>
+                                {t('chat.chatInput.actions.attachFiles')}
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                                onSelect={() => {
+                                    requestAnimationFrame(openGitHubPicker);
+                                }}
+                            >
+                                <ProviderIcon descriptor={repositoryDescriptor}/>
+                                {t(`chat.chatInput.actions.linkRepositoryItem.${repositoryDescriptor.terminology.changeRequest}`, { provider: repositoryDescriptor.label })}
+                            </DropdownMenuItem>
+                            {trackerPickers?.map((picker) => (
+                                <DropdownMenuItem
+                                    key={picker.provider}
+                                    onSelect={() => {
+                                        requestAnimationFrame(picker.open);
+                                    }}
+                                >
+                                    <Icon name={picker.icon}/>
+                                    {picker.label}
+                                </DropdownMenuItem>
+                            ))}
+                            {attachGuests?.map((guest) => (
+                                <DropdownMenuItem
+                                    key={guest.id}
+                                    onSelect={() => {
+                                        requestAnimationFrame(() => onOpenGuestAttach?.(guest.id));
+                                    }}
+                                >
+                                    <GuestIcon icon={guest.icon} iconSrc={guest.iconSrc} className="size-4" />
+                                    {guest.name}
+                                </DropdownMenuItem>
+                            ))}
+                        </DropdownMenuContent>
+                    </DropdownMenu>
+                )}
+            </div>
+
+            {onOpenSettings ? (
+                <button
+                    type="button"
+                    onClick={onOpenSettings}
+                    className={footerIconButtonClass}
+                    title={t('chat.chatInput.actions.modelAgentSettings')}
+                    aria-label={t('chat.chatInput.actions.modelAgentSettings')}
+                >
+                    <Icon name="ai-agent" className={cn(iconSizeClass, 'text-current')} />
+                </button>
+            ) : null}
+        </div>
+    );
+}, (prev, next) => (
+    prev.isVSCode === next.isVSCode
+    && prev.footerIconButtonClass === next.footerIconButtonClass
+    && prev.iconSizeClass === next.iconSizeClass
+    && prev.trackerPickers === next.trackerPickers
+    && prev.onOpenSettings === next.onOpenSettings
+    && prev.onMenuOpenChange === next.onMenuOpenChange
+    && prev.onOpenMobileSheet === next.onOpenMobileSheet
+    && prev.onOpenGuestAttach === next.onOpenGuestAttach
+    && prev.filesOnly === next.filesOnly
+    // The project's host is known only once its binding loads, so the link
+    // item must follow it rather than keep the GitHub default it first drew.
+    && prev.repositoryProvider === next.repositoryProvider
+    && (prev.attachGuests ?? []).map((guest) => `${guest.id}:${guest.name}:${guest.mode}`).join()
+        === (next.attachGuests ?? []).map((guest) => `${guest.id}:${guest.name}:${guest.mode}`).join()
+));

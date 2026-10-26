@@ -1,0 +1,104 @@
+import { readOpenCodeCredentials } from '../../../opencode/auth.js';
+import { buildResult } from '../../utils/index.js';
+import {
+  resolveGoogleAuthSources,
+  DEFAULT_PROJECT_ID
+} from './auth.js';
+import { transformQuotaBucket, transformModelData } from './transforms.js';
+import {
+  fetchGoogleQuotaBuckets,
+  fetchGoogleModels
+} from './api.js';
+import { refreshGoogleAccessToken } from './oauth.js';
+
+export { resolveGoogleAuthSources } from './auth.js';
+
+export const providerId = 'google';
+export const providerName = 'Google';
+const aliases = ['google', 'google.oauth'];
+
+export const isConfigured = (auth) => resolveGoogleAuthSources(auth).length > 0;
+
+export const fetchGoogleQuota = async () => {
+  const authSources = resolveGoogleAuthSources(await readOpenCodeCredentials());
+  if (!authSources.length) {
+    return buildResult({
+      providerId,
+      providerName,
+      ok: false,
+      configured: false,
+      error: 'Not configured'
+    });
+  }
+
+  const models = {};
+  const sourceErrors = [];
+
+  for (const source of authSources) {
+    const now = Date.now();
+    let accessToken = source.accessToken;
+
+    if (!accessToken || (typeof source.expires === 'number' && source.expires <= now)) {
+      if (!source.refreshToken) {
+        sourceErrors.push(`${source.sourceLabel}: Missing refresh token`);
+        continue;
+      }
+      const refreshed = await refreshGoogleAccessToken(source.refreshToken, 'gemini', { fallbackToAntigravity: true });
+      if (!refreshed.ok) {
+        sourceErrors.push(`${source.sourceLabel}: Failed to refresh OAuth token`);
+        continue;
+      }
+      accessToken = refreshed.accessToken;
+    }
+
+    const projectId = source.projectId ?? DEFAULT_PROJECT_ID;
+    let mergedAnyModel = false;
+
+    if (source.sourceId === 'gemini') {
+      const quotaPayload = await fetchGoogleQuotaBuckets(accessToken, projectId);
+      const buckets = Array.isArray(quotaPayload?.buckets) ? quotaPayload.buckets : [];
+
+      for (const bucket of buckets) {
+        const transformed = transformQuotaBucket(bucket, source.sourceId);
+        if (transformed) {
+          Object.assign(models, transformed);
+          mergedAnyModel = true;
+        }
+      }
+    }
+
+    const payload = await fetchGoogleModels(accessToken, projectId);
+    if (payload) {
+      for (const [modelName, modelData] of Object.entries(payload.models ?? {})) {
+        const transformed = transformModelData(modelName, modelData, source.sourceId);
+        Object.assign(models, transformed);
+        mergedAnyModel = true;
+      }
+    }
+
+    if (!mergedAnyModel) {
+      sourceErrors.push(`${source.sourceLabel}: Failed to fetch models`);
+    }
+  }
+
+  if (!Object.keys(models).length) {
+    return buildResult({
+      providerId,
+      providerName,
+      ok: false,
+      configured: true,
+      error: sourceErrors[0] ?? 'Failed to fetch models'
+    });
+  }
+
+  return buildResult({
+    providerId,
+    providerName,
+    ok: true,
+    configured: true,
+    usage: {
+      windows: {},
+      models: Object.keys(models).length ? models : undefined
+    }
+  });
+};

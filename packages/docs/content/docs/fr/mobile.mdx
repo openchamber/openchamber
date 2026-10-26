@@ -1,0 +1,43 @@
+---
+title: Applications mobiles et PWA
+description: Installez l’application OpenChamber sur iOS ou Android et connectez-la à votre serveur.
+---
+
+# Applications mobiles et PWA
+
+OpenChamber a des applications natives pour iPhone et Android : suivez les sessions, répondez aux agents et gérez votre travail depuis votre téléphone — à la maison en Wi-Fi ou depuis n’importe où via le [Relais privé](/private-relay/).
+
+## Installer l’application
+
+- **iPhone/iPad** — rejoignez la [bêta TestFlight](https://testflight.apple.com/join/5ek6GU1E)
+- **Android** — téléchargez l’APK depuis la [dernière release](https://github.com/openchamber/openchamber/releases/latest)
+
+## La connecter à votre serveur
+
+1. Sur l’ordinateur qui exécute OpenChamber, ouvrez **Paramètres → Instances distantes → Se connecter à ce serveur** et pressez **Ajouter un appareil**.
+2. Choisissez **Partout** (ou **Réseau domestique uniquement** si vous n’utiliserez le téléphone qu’à la maison) et pressez **Créer le code QR**.
+3. Dans l’application mobile, touchez **Scanner le code QR** et pointez la caméra dessus.
+
+L’application se connecte et mémorise le serveur. Le QR code est à usage unique et chaque appareil reçoit son propre token révocable — voir [Connecter un appareil](/connect-devices/) pour comprendre pourquoi l’association reste sûre.
+
+Vous pouvez associer l’application à plusieurs serveurs et basculer entre eux depuis la liste des instances ; l’application indique pour chacun s’il est joignable et si vous êtes connecté via le réseau local ou le relais.
+
+## PWA (installation depuis le navigateur)
+
+Vous préférez éviter les app stores ? L’application web s’installe directement depuis le navigateur :
+
+- **navigateur desktop** — utilisez l’option **Installer** dans la barre d’adresse
+- **iPhone/iPad (Safari)** — Partager → **Sur l’écran d’accueil**
+- **Android (Chrome)** — menu → **Installer l’application** / **Ajouter à l’écran d’accueil**
+
+Pour joindre la PWA depuis l’extérieur de votre réseau, il vous faudra un [tunnel](/tunnels/) et un [mot de passe UI](/security/) solide — les applications natives s’en occupent pour vous via le relais.
+
+## Paramètres mobiles
+
+Dans **Paramètres → OpenChamber**, quelques options ajustent l’expérience mobile et installée — le nom de l’application installée, l’orientation de l’écran et le comportement du clavier à l’écran.
+
+## Pages liées
+
+- [Connecter un appareil](/connect-devices/) — association, QR codes à usage unique et gestion des appareils
+- [Relais privé](/private-relay/) — comment fonctionne l’accès « Partout »
+- [Sécurité](/security/) — protéger l’UI avant de l’exposer

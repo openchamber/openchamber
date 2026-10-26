@@ -1,0 +1,1018 @@
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+
+import {
+  ChildStoreManager,
+  type DirectoryBootstrapContext,
+  markDirectorySessionPartChanged,
+  subscribeDirectoryPermission,
+  subscribeDirectoryPermissions,
+  subscribeDirectoryForm,
+  subscribeDirectoryForms,
+  subscribeDirectorySessionMessages,
+} from './child-store';
+import {
+  getSyncPerformanceDiagnostics,
+  setSyncPerformanceDiagnosticsEnabled,
+} from './performance-diagnostics';
+import { DIR_IDLE_TTL_MS, EVICTION_GRACE_MS, MAX_DIR_STORES, type State } from './types';
+import { FilesystemError } from '@/lib/api/files-errors';
+import type { PermissionRequest, Session } from '@/lib/opencode/model';
+import { flushPendingSessionWrites, persistSessions, readDirCache } from './persist-cache';
+
+const deferred = () => {
+  let resolve!: () => void;
+  const promise = new Promise<void>((next) => {
+    resolve = next;
+  });
+  return { promise, resolve };
+};
+
+const settle = async () => {
+  await Promise.resolve();
+  await Promise.resolve();
+};
+
+describe('ChildStoreManager.subscribeAllSelected', () => {
+  test('ignores unrelated child-store updates', () => {
+    const manager = new ChildStoreManager();
+    const child = manager.ensureChild('/workspace', { bootstrap: false });
+    let notifications = 0;
+    const unsubscribe = manager.subscribeAllSelected((state) => state.session, () => {
+      notifications += 1;
+    });
+
+    child.setState({ session_status: { session: { type: 'busy' } } });
+    expect(notifications).toBe(0);
+
+    child.setState({ session: [...child.getState().session] });
+    expect(notifications).toBe(1);
+
+    unsubscribe();
+    manager.disposeAll();
+  });
+
+  test('notifies when the child-store registry changes', () => {
+    const manager = new ChildStoreManager();
+    let notifications = 0;
+    const unsubscribe = manager.subscribeAllSelected((state) => state.session, () => {
+      notifications += 1;
+    });
+
+    manager.ensureChild('/workspace', { bootstrap: false });
+    expect(notifications).toBe(1);
+
+    unsubscribe();
+    manager.disposeAll();
+  });
+
+});
+
+describe('ChildStoreManager directory lifecycle', () => {
+  test('keeps an idle directory alive until its final consumer releases it', () => {
+    const manager = new ChildStoreManager();
+    const now = 10_000;
+    const originalDateNow = Date.now;
+    let currentTime = now;
+    Date.now = () => currentTime;
+
+    try {
+      const child = manager.ensureChild('/workspace', { bootstrap: false });
+      manager.pin('/workspace/');
+      manager.pin('/workspace');
+      manager.unpin('/workspace');
+      currentTime = now + DIR_IDLE_TTL_MS + 1;
+
+      manager.runEviction();
+
+      expect(manager.pinned('/workspace')).toBe(true);
+      expect(manager.getChild('/workspace')).toBe(child);
+
+      manager.unpin('/workspace/');
+
+      expect(manager.pinned('/workspace')).toBe(false);
+      expect(manager.getChild('/workspace')).toBe(undefined);
+    } finally {
+      Date.now = originalDateNow;
+      manager.disposeAll();
+    }
+  });
+
+  test('keeps expanded off-screen directories alive while foreground demand exists', () => {
+    const manager = new ChildStoreManager();
+    const originalDateNow = Date.now;
+    let currentTime = 10_000;
+    Date.now = () => currentTime;
+    const directories = Array.from({ length: MAX_DIR_STORES + 5 }, (_, index) => `/workspace-${index}`);
+
+    try {
+      for (const directory of directories) {
+        manager.ensureChild(directory, { bootstrap: false }).setState({ status: 'complete' });
+      }
+      manager.setBootstrapDemand('expanded-sidebar', directories.map((directory) => ({
+        directory,
+        priority: 'expanded',
+        reason: 'project-expanded',
+      })));
+      currentTime += EVICTION_GRACE_MS + 1;
+
+      manager.runEviction();
+
+      expect(directories.every((directory) => manager.getChild(directory) !== undefined)).toBe(true);
+    } finally {
+      Date.now = originalDateNow;
+      manager.disposeAll();
+    }
+  });
+});
+
+describe('ChildStoreManager permission subscriptions', () => {
+  test('does not notify session permission listeners for unrelated high-frequency updates', () => {
+    const manager = new ChildStoreManager();
+    const child = manager.ensureChild('/workspace', { bootstrap: false });
+    let notifications = 0;
+    const unsubscribers = Array.from({ length: 50 }, (_, index) => (
+      subscribeDirectoryPermission(child, `session-${index}`, () => {
+        notifications += 1;
+      })
+    ));
+    setSyncPerformanceDiagnosticsEnabled(true);
+
+    for (let index = 0; index < 10_000; index += 1) {
+      child.setState({ part: { [`message-${index}`]: [] } });
+    }
+
+    expect(notifications).toBe(0);
+    expect(getSyncPerformanceDiagnostics()?.permissionChangeCallbacks).toBe(0);
+
+    child.setState({ permission: { 'session-17': [{ id: 'permission-1' }] as never[] } });
+
+    expect(notifications).toBe(1);
+    expect(getSyncPerformanceDiagnostics()?.permissionChangeCallbacks).toBe(1);
+    for (const unsubscribe of unsubscribers) unsubscribe();
+    setSyncPerformanceDiagnosticsEnabled(false);
+    manager.disposeAll();
+  });
+
+  test('notifies only selected permission buckets across directory stores', () => {
+    const manager = new ChildStoreManager();
+    const parentStore = manager.ensureChild('/repo', { bootstrap: false });
+    const childStore = manager.ensureChild('/worktrees/feature', { bootstrap: false });
+    const request = (id: string, sessionID: string): PermissionRequest => ({ id, sessionID, action: 'bash', resources: [] });
+    let notifications = 0;
+    const notify = () => {
+      notifications += 1;
+    };
+    const unsubscribers = [
+      subscribeDirectoryPermissions(parentStore, ['parent'], notify),
+      subscribeDirectoryPermissions(childStore, ['child'], notify),
+    ];
+    childStore.setState({ permission: { child: [request('child-permission', 'child')] } });
+    expect(notifications).toBe(1);
+
+    childStore.setState({
+      permission: {
+        ...childStore.getState().permission,
+        unrelated: [request('unrelated-permission', 'unrelated')],
+      },
+    });
+    expect(notifications).toBe(1);
+
+    parentStore.setState({ permission: { parent: [request('parent-permission', 'parent')] } });
+    expect(notifications).toBe(2);
+
+    for (const unsubscribe of unsubscribers) unsubscribe();
+    manager.disposeAll();
+  });
+});
+
+describe('ChildStoreManager form subscriptions', () => {
+  test('notifies only the owning session and ignores unrelated high-frequency updates', () => {
+    const manager = new ChildStoreManager();
+    const child = manager.ensureChild('/workspace', { bootstrap: false });
+    const notifications = new Map<string, number>();
+    const unsubscribers = Array.from({ length: 50 }, (_, index) => {
+      const sessionID = `session-${index}`;
+      return subscribeDirectoryForm(child, sessionID, () => {
+        notifications.set(sessionID, (notifications.get(sessionID) ?? 0) + 1);
+      });
+    });
+    setSyncPerformanceDiagnosticsEnabled(true);
+
+    for (let index = 0; index < 10_000; index += 1) {
+      child.setState({ part: { [`message-${index}`]: [] } });
+    }
+
+    expect(notifications.size).toBe(0);
+    expect(getSyncPerformanceDiagnostics()?.formChangeCallbacks).toBe(0);
+
+    child.setState({ form: { 'session-17': [{ id: 'form-1' }] as never[] } });
+
+    expect(notifications.get('session-17')).toBe(1);
+    expect(notifications.size).toBe(1);
+    expect(getSyncPerformanceDiagnostics()?.formChangeCallbacks).toBe(1);
+
+    // A new map that preserves session-17's bucket must not notify it again.
+    child.setState({ form: { ...child.getState().form, 'session-18': [{ id: 'form-2' }] as never[] } });
+
+    expect(notifications.get('session-17')).toBe(1);
+    expect(notifications.get('session-18')).toBe(1);
+    expect(getSyncPerformanceDiagnostics()?.formChangeCallbacks).toBe(2);
+
+    child.setState({ form: {} });
+
+    expect(notifications.get('session-17')).toBe(2);
+    expect(notifications.get('session-18')).toBe(2);
+    expect(getSyncPerformanceDiagnostics()?.formChangeCallbacks).toBe(4);
+
+    for (const unsubscribe of unsubscribers) unsubscribe();
+    setSyncPerformanceDiagnosticsEnabled(false);
+    manager.disposeAll();
+  });
+
+  test('notifies subtree and exact-session rows once for each relevant replacement', () => {
+    const manager = new ChildStoreManager();
+    const child = manager.ensureChild('/workspace', { bootstrap: false });
+    let parentNotifications = 0;
+    let childNotifications = 0;
+    const unsubscribeParent = subscribeDirectoryForms(child, ['parent', 'child'], () => {
+      parentNotifications += 1;
+    });
+    const unsubscribeChild = subscribeDirectoryForm(child, 'child', () => {
+      childNotifications += 1;
+    });
+    const parentForms = [{ id: 'form-parent' }] as never[];
+    const childForms = [{ id: 'form-child' }] as never[];
+
+    child.setState({ form: { parent: parentForms, child: childForms } });
+
+    expect(parentNotifications).toBe(1);
+    expect(childNotifications).toBe(1);
+
+    child.setState({ part: { message: [] } });
+    expect(parentNotifications).toBe(1);
+    expect(childNotifications).toBe(1);
+
+    child.setState({
+      form: {
+        parent: parentForms,
+        child: [{ id: 'form-child-replacement' }] as never[],
+      },
+    });
+
+    expect(parentNotifications).toBe(2);
+    expect(childNotifications).toBe(2);
+
+    child.setState({ form: {} });
+
+    expect(parentNotifications).toBe(3);
+    expect(childNotifications).toBe(3);
+
+    unsubscribeParent();
+    unsubscribeChild();
+    manager.disposeAll();
+  });
+
+  test('aggregates exact form buckets across directory stores', () => {
+    const manager = new ChildStoreManager();
+    const parentStore = manager.ensureChild('/repo', { bootstrap: false });
+    const childStore = manager.ensureChild('/worktrees/feature', { bootstrap: false });
+    let notifications = 0;
+    const notify = () => {
+      notifications += 1;
+    };
+    const unsubscribers = [
+      subscribeDirectoryForms(parentStore, ['parent'], notify),
+      subscribeDirectoryForms(childStore, ['child'], notify),
+    ];
+    const formCount = () => (
+      (parentStore.getState().form.parent?.length ?? 0)
+      + (childStore.getState().form.child?.length ?? 0)
+    );
+
+    childStore.setState({ form: { child: [{ id: 'child-form' }] as never[] } });
+    expect(formCount()).toBe(1);
+    expect(notifications).toBe(1);
+
+    childStore.setState({
+      form: {
+        ...childStore.getState().form,
+        unrelated: [{ id: 'unrelated-form' }] as never[],
+      },
+    });
+    expect(formCount()).toBe(1);
+    expect(notifications).toBe(1);
+
+    parentStore.setState({ form: { parent: [{ id: 'parent-form' }] as never[] } });
+    expect(formCount()).toBe(2);
+    expect(notifications).toBe(2);
+
+    for (const unsubscribe of unsubscribers) unsubscribe();
+    manager.disposeAll();
+  });
+});
+
+describe('ChildStoreManager session message subscriptions', () => {
+  test('routes annotated part changes only to the owning session', () => {
+    const manager = new ChildStoreManager();
+    const child = manager.ensureChild('/workspace', { bootstrap: false });
+    const notifications = new Map<string, number>();
+    const unsubscribers = Array.from({ length: 50 }, (_, index) => {
+      const sessionID = `session-${index}`;
+      return subscribeDirectorySessionMessages(child, sessionID, () => {
+        notifications.set(sessionID, (notifications.get(sessionID) ?? 0) + 1);
+      });
+    });
+    setSyncPerformanceDiagnosticsEnabled(true);
+
+    for (let index = 0; index < 1_000; index += 1) {
+      const sessionID = `session-${index % 50}`;
+      const messageID = `message-${index}`;
+      markDirectorySessionPartChanged(child, sessionID, messageID);
+      child.setState({ part: { ...child.getState().part, [messageID]: [] } });
+    }
+
+    expect([...notifications.values()].reduce((sum, count) => sum + count, 0)).toBe(1_000);
+    expect(notifications.get('session-0')).toBe(20);
+    expect(getSyncPerformanceDiagnostics()?.sessionMessageChangeCallbacks).toBe(1_000);
+    for (const unsubscribe of unsubscribers) unsubscribe();
+    setSyncPerformanceDiagnosticsEnabled(false);
+    manager.disposeAll();
+  });
+
+  test('conservatively resets active subscribers for unannotated bulk part replacement', () => {
+    const manager = new ChildStoreManager();
+    const child = manager.ensureChild('/workspace', { bootstrap: false });
+    let reset = false;
+    const unsubscribe = subscribeDirectorySessionMessages(child, 'session-1', (change) => {
+      reset = change.reset;
+    });
+
+    child.setState({ part: { message: [] } });
+
+    expect(reset).toBe(true);
+    unsubscribe();
+    manager.disposeAll();
+  });
+});
+
+describe('ChildStoreManager directory bootstrap scheduler', () => {
+  test('finishes all directory lists while environment initialization is still blocked', async () => {
+    const manager = new ChildStoreManager();
+    const environment = deferred();
+    const directories = Array.from({ length: 24 }, (_, index) => `/workspace-${index}`);
+    const listed = new Promise<void>((resolve) => {
+      const unsubscribe = manager.subscribeBootstrap(() => {
+        if (!directories.every((directory) => manager.getBootstrapState(directory) === 'complete')) return;
+        unsubscribe();
+        resolve();
+      });
+    });
+    manager.configure({ onBootstrap: (context) => { context.trackInitialization(environment.promise); } });
+    try {
+      manager.setBootstrapDemand('sidebar', directories.map((directory) => ({
+        directory, priority: 'expanded', reason: 'worktree-expanded',
+      })));
+      await listed;
+      expect(directories.every((directory) => manager.getInitializationState(directory) === 'running')).toBe(true);
+      environment.resolve();
+      await settle();
+      expect(directories.every((directory) => manager.getInitializationState(directory) === 'complete')).toBe(true);
+    } finally {
+      environment.resolve();
+      manager.disposeAll();
+    }
+  });
+
+  test('reports initialization permission failures without invalidating a complete session list', async () => {
+    const manager = new ChildStoreManager();
+    manager.configure({ onBootstrap: (context) => {
+      context.trackInitialization(Promise.reject(new FilesystemError('Access denied', { reason: 'os-permission' })));
+    } });
+    manager.requestBootstrap({ directory: '/protected', priority: 'selected', reason: 'selected-session' });
+    await settle();
+    expect(manager.getBootstrapState('/protected')).toBe('complete');
+    expect(manager.getInitializationState('/protected')).toBe('failed');
+    expect(manager.getInitializationFailure('/protected')).toBe('os-permission');
+    manager.disposeAll();
+  });
+
+  test('a superseded initialization cannot replace the result of a forced retry', async () => {
+    const manager = new ChildStoreManager();
+    const old = deferred();
+    let calls = 0;
+    manager.configure({ onBootstrap: (context) => {
+      calls += 1;
+      context.trackInitialization(calls === 1 ? old.promise : Promise.reject(new Error('new initialization failed')));
+    } });
+    const demand = { directory: '/workspace', priority: 'selected', reason: 'selected-session' } as const;
+    manager.requestBootstrap(demand);
+    await settle();
+    manager.requestBootstrap({ ...demand, force: true });
+    await settle();
+    old.resolve();
+    await settle();
+    expect(calls).toBe(2);
+    expect(manager.getBootstrapState('/workspace')).toBe('complete');
+    expect(manager.getInitializationState('/workspace')).toBe('failed');
+    manager.disposeAll();
+  });
+
+  test('disposal rejects initialization completion from the old store', async () => {
+    const manager = new ChildStoreManager();
+    const environment = deferred();
+    manager.configure({ onBootstrap: (context) => { context.trackInitialization(environment.promise); } });
+    manager.requestBootstrap({ directory: '/workspace', priority: 'selected', reason: 'selected-session' });
+    await settle();
+    manager.disposeAll();
+    environment.resolve();
+    await settle();
+    expect(manager.getInitializationState('/workspace')).toBeUndefined();
+  });
+
+  test('reconfiguration restarts initialization whose list slot has already finished', async () => {
+    const manager = new ChildStoreManager();
+    const old = deferred();
+    let runs = 0;
+    const cleanup = manager.configure({ onBootstrap: (context) => {
+      runs += 1;
+      context.trackInitialization(old.promise);
+    } });
+    manager.requestBootstrap({ directory: '/workspace', priority: 'selected', reason: 'selected-session' });
+    await settle();
+    expect(manager.getBootstrapState('/workspace')).toBe('complete');
+    cleanup();
+    manager.configure({ onBootstrap: (context) => {
+      runs += 1;
+      context.trackInitialization(Promise.resolve());
+    } });
+    await settle();
+    old.resolve();
+    await settle();
+    expect(runs).toBe(2);
+    expect(manager.getInitializationState('/workspace')).toBe('complete');
+    manager.disposeAll();
+  });
+
+  test('an invalid runtime scope queues recovery without starting reads against the superseded endpoint', async () => {
+    const manager = new ChildStoreManager();
+    const oldList = deferred();
+    let current = true;
+    let runs = 0;
+    manager.configure({
+      isCurrentScope: () => current,
+      onBootstrap: () => { runs += 1; return oldList.promise; },
+    });
+    manager.requestBootstrap({ directory: '/workspace', priority: 'selected', reason: 'selected-session' });
+    current = false;
+    oldList.resolve();
+    await settle();
+    await settle();
+    expect(runs).toBe(1);
+    expect(manager.getBootstrapState('/workspace')).toBe('queued');
+    current = true;
+    manager.configure({ isCurrentScope: () => current, onBootstrap: () => { runs += 1; } });
+    await settle();
+    expect(runs).toBe(2);
+    expect(manager.getBootstrapState('/workspace')).toBe('complete');
+    manager.disposeAll();
+  });
+
+  test('bounds concurrency and eventually refreshes every queued directory', async () => {
+    const manager = new ChildStoreManager();
+    const running = new Map<string, ReturnType<typeof deferred>>();
+    const started: string[] = [];
+    let maxRunning = 0;
+    manager.setBootstrapDemand('sidebar', Array.from({ length: 10 }, (_, index) => ({
+      directory: `/workspace-${index}`,
+      priority: 'expanded' as const,
+      reason: 'project-expanded' as const,
+    })));
+    const cleanup = manager.configure({
+      bootstrapConcurrency: 2,
+      onBootstrap: ({ directory }) => {
+        const task = deferred();
+        running.set(directory, task);
+        started.push(directory);
+        maxRunning = Math.max(maxRunning, running.size);
+        return task.promise.finally(() => running.delete(directory));
+      },
+    });
+
+    while (started.length < 10) {
+      expect(running.size <= 2).toBe(true);
+      const task = running.values().next().value;
+      expect(task).toBeDefined();
+      task?.resolve();
+      await settle();
+    }
+    for (const task of running.values()) task.resolve();
+    await settle();
+
+    expect(new Set(started).size).toBe(10);
+    expect(maxRunning).toBe(2);
+    cleanup();
+    manager.disposeAll();
+  });
+
+  test('reserves capacity for foreground work while background refresh drains', async () => {
+    const manager = new ChildStoreManager();
+    const tasks = new Map<string, ReturnType<typeof deferred>>();
+    const started: string[] = [];
+    manager.setBootstrapDemand('sidebar', [
+      { directory: '/background-a', priority: 'background', reason: 'known-worktree' },
+      { directory: '/background-b', priority: 'background', reason: 'known-worktree' },
+    ]);
+    const cleanup = manager.configure({
+      bootstrapConcurrency: 2,
+      onBootstrap: ({ directory }) => {
+        const task = deferred();
+        tasks.set(directory, task);
+        started.push(directory);
+        return task.promise;
+      },
+    });
+
+    expect(started).toEqual(['/background-a']);
+    manager.requestBootstrap({ directory: '/selected', priority: 'selected', reason: 'selected-session' });
+    expect(started).toEqual(['/background-a', '/selected']);
+
+    tasks.get('/selected')?.resolve();
+    tasks.get('/background-a')?.resolve();
+    await settle();
+    tasks.get('/background-b')?.resolve();
+    await settle();
+    cleanup();
+    manager.disposeAll();
+  });
+
+  test('promotes a queued worktree without duplicating its execution', async () => {
+    const manager = new ChildStoreManager();
+    const blocker = deferred();
+    const started: string[] = [];
+    manager.setBootstrapDemand('sidebar', [
+      { directory: '/blocker', priority: 'expanded', reason: 'project-expanded' },
+      { directory: '/worktree', priority: 'background', reason: 'known-worktree' },
+    ]);
+    const cleanup = manager.configure({
+      bootstrapConcurrency: 1,
+      onBootstrap: ({ directory }) => {
+        started.push(directory);
+        return directory === '/blocker' ? blocker.promise : Promise.resolve();
+      },
+    });
+
+    manager.setBootstrapDemand('sidebar', [
+      { directory: '/blocker', priority: 'expanded', reason: 'project-expanded' },
+      { directory: '/worktree', priority: 'expanded', reason: 'worktree-expanded' },
+    ]);
+    blocker.resolve();
+    await settle();
+    await settle();
+
+    expect(started).toEqual(['/blocker', '/worktree']);
+    cleanup();
+    manager.disposeAll();
+  });
+
+  test('failed work does not block unrelated queued directories', async () => {
+    const manager = new ChildStoreManager();
+    const started: string[] = [];
+    manager.setBootstrapDemand('sidebar', [
+      { directory: '/failed', priority: 'expanded', reason: 'project-expanded' },
+      { directory: '/healthy', priority: 'expanded', reason: 'project-expanded' },
+    ]);
+    const cleanup = manager.configure({
+      bootstrapConcurrency: 1,
+      onBootstrap: async ({ directory }) => {
+        started.push(directory);
+        if (directory === '/failed') throw new Error('failed');
+      },
+    });
+    await settle();
+    await settle();
+
+    expect(started).toEqual(['/failed', '/healthy']);
+    expect(manager.getBootstrapState('/failed')).toBe('failed');
+    expect(manager.getBootstrapState('/healthy')).toBe('complete');
+    cleanup();
+    manager.disposeAll();
+  });
+
+  test('records os-permission failures and clears them on forced retry', async () => {
+    const manager = new ChildStoreManager();
+    let denied = true;
+    const cleanup = manager.configure({
+      onBootstrap: () => {
+        if (denied) {
+          throw new FilesystemError('Access denied', { reason: 'os-permission', status: 403 });
+        }
+      },
+    });
+
+    manager.requestBootstrap({ directory: '/protected', priority: 'selected', reason: 'current-directory' });
+    await settle();
+    await settle();
+
+    expect(manager.getBootstrapState('/protected')).toBe('failed');
+    expect(manager.getBootstrapFailure('/protected')).toBe('os-permission');
+
+    denied = false;
+    manager.requestBootstrap({
+      directory: '/protected',
+      priority: 'selected',
+      reason: 'action-demand',
+      force: true,
+    });
+    await settle();
+    await settle();
+
+    expect(manager.getBootstrapState('/protected')).toBe('complete');
+    expect(manager.getBootstrapFailure('/protected')).toBe(undefined);
+    cleanup();
+    manager.disposeAll();
+  });
+
+  test('continues after a synchronous bootstrap failure', async () => {
+    const manager = new ChildStoreManager();
+    const started: string[] = [];
+    manager.setBootstrapDemand('sidebar', [
+      { directory: '/failed', priority: 'expanded', reason: 'project-expanded' },
+      { directory: '/healthy', priority: 'expanded', reason: 'project-expanded' },
+    ]);
+    const cleanup = manager.configure({
+      bootstrapConcurrency: 1,
+      onBootstrap: ({ directory }) => {
+        started.push(directory);
+        if (directory === '/failed') throw new Error('failed');
+      },
+    });
+
+    await settle();
+    await settle();
+
+    expect(started).toEqual(['/failed', '/healthy']);
+    expect(manager.getBootstrapState('/failed')).toBe('failed');
+    expect(manager.getBootstrapState('/healthy')).toBe('complete');
+    cleanup();
+    manager.disposeAll();
+  });
+
+  test('reruns a forced manual demand that arrives while the directory is running', async () => {
+    const manager = new ChildStoreManager();
+    const firstRun = deferred();
+    const started: string[] = [];
+    const cleanup = manager.configure({
+      bootstrapConcurrency: 1,
+      onBootstrap: ({ directory }) => {
+        started.push(directory);
+        return started.length === 1 ? firstRun.promise : Promise.resolve();
+      },
+    });
+
+    manager.requestBootstrap({ directory: '/workspace', priority: 'selected', reason: 'current-directory' });
+    manager.requestBootstrap({
+      directory: '/workspace',
+      priority: 'selected',
+      reason: 'server-connected',
+      force: true,
+    });
+    firstRun.resolve();
+    await settle();
+    await settle();
+
+    expect(started).toEqual(['/workspace', '/workspace']);
+    expect(manager.getBootstrapState('/workspace')).toBe('complete');
+    cleanup();
+    manager.disposeAll();
+  });
+
+  test('coalesces repeated non-forced manual demands while a directory is running', async () => {
+    const manager = new ChildStoreManager();
+    const firstRun = deferred();
+    let starts = 0;
+    const cleanup = manager.configure({
+      bootstrapConcurrency: 1,
+      onBootstrap: () => {
+        starts += 1;
+        return firstRun.promise;
+      },
+    });
+
+    const demand = { directory: '/workspace', priority: 'selected' as const, reason: 'current-directory' as const };
+    manager.requestBootstrap(demand);
+    manager.requestBootstrap(demand);
+    firstRun.resolve();
+    await settle();
+    await settle();
+
+    expect(starts).toBe(1);
+    expect(manager.getBootstrapState('/workspace')).toBe('complete');
+    cleanup();
+    manager.disposeAll();
+  });
+
+  test('reruns a manual demand after its bootstrap generation becomes stale', async () => {
+    const manager = new ChildStoreManager();
+    const staleRun = deferred();
+    const started: string[] = [];
+    const cleanupStale = manager.configure({
+      bootstrapConcurrency: 1,
+      onBootstrap: () => {
+        started.push('stale');
+        return staleRun.promise;
+      },
+    });
+
+    manager.requestBootstrap({ directory: '/workspace', priority: 'selected', reason: 'current-directory' });
+    cleanupStale();
+    const cleanupCurrent = manager.configure({
+      bootstrapConcurrency: 1,
+      onBootstrap: () => {
+        started.push('current');
+      },
+    });
+    staleRun.resolve();
+    await settle();
+    await settle();
+
+    expect(started).toEqual(['stale', 'current']);
+    expect(manager.getBootstrapState('/workspace')).toBe('complete');
+    cleanupCurrent();
+    manager.disposeAll();
+  });
+});
+
+describe('ChildStoreManager bootstrap context liveness', () => {
+  test('isCurrent stays true after the run settles so deferred recovery work can commit', async () => {
+    const manager = new ChildStoreManager();
+    let captured: DirectoryBootstrapContext | undefined;
+    const cleanup = manager.configure({
+      onBootstrap: (context) => {
+        captured = context;
+      },
+    });
+    manager.requestBootstrap({ directory: '/workspace', priority: 'selected', reason: 'current-directory' });
+    await settle();
+    expect(manager.getBootstrapState('/workspace')).toBe('complete');
+
+    // bootstrapDirectory schedules deferred recovery pulls (permission.list
+    // and friends) from a setTimeout(0), which always runs after the pump's
+    // .finally() has cleaned up the run entry. isCurrent must remain true
+    // there, or those pulls and every commit they make get skipped.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(captured?.isCurrent()).toBe(true);
+
+    cleanup();
+    expect(captured?.isCurrent()).toBe(false);
+    manager.disposeAll();
+  });
+
+  test('a newer same-directory run invalidates the previous context', async () => {
+    const manager = new ChildStoreManager();
+    const contexts: DirectoryBootstrapContext[] = [];
+    const cleanup = manager.configure({
+      onBootstrap: (context) => {
+        contexts.push(context);
+      },
+    });
+    manager.requestBootstrap({ directory: '/workspace', priority: 'selected', reason: 'current-directory' });
+    await settle();
+    expect(contexts[0]?.isCurrent()).toBe(true);
+
+    // A forced rerun for the same directory must retire the previous
+    // context: its in-flight deferred responses may no longer commit over
+    // whatever the newer run synchronizes.
+    manager.requestBootstrap({ directory: '/workspace', priority: 'selected', reason: 'server-connected', force: true });
+    await settle();
+    expect(contexts).toHaveLength(2);
+    expect(contexts[0]?.isCurrent()).toBe(false);
+    expect(contexts[1]?.isCurrent()).toBe(true);
+
+    cleanup();
+    manager.disposeAll();
+  });
+});
+
+describe('ChildStoreManager after an OpenCode stream restart', () => {
+  const bootstrapped = (manager: ChildStoreManager, directory: string, patch: Partial<State> = {}) => {
+    manager.ensureChild(directory, { bootstrap: false }).setState({ status: 'complete', ...patch });
+  };
+
+  // Before: every bootstrapped store re-read at once (six bootstraps here, each
+  // about eight requests and a location start on v2).
+  test('re-reads only stores in use or showing live state, the rest on their next demand', async () => {
+    const manager = new ChildStoreManager();
+    const started: string[] = [];
+    bootstrapped(manager, '/current');
+    bootstrapped(manager, '/pinned-column');
+    bootstrapped(manager, '/waiting', {
+      permission: { ses_waiting: [{ id: 'per_1', sessionID: 'ses_waiting' } as PermissionRequest] },
+    });
+    bootstrapped(manager, '/busy', { session_status: { ses_busy: { type: 'busy' } } });
+    bootstrapped(manager, '/idle-a', { session_status: { ses_idle: { type: 'idle' } } });
+    bootstrapped(manager, '/idle-b');
+    manager.ensureChild('/never-bootstrapped', { bootstrap: false });
+    manager.setBootstrapDemand('column', [{ directory: '/pinned-column', priority: 'selected', reason: 'selected-session' }]);
+    const cleanup = manager.configure({
+      bootstrapConcurrency: 2,
+      onBootstrap: async ({ directory }) => { started.push(directory); },
+    });
+    expect(started).toEqual([]);
+
+    const refreshing = manager.refreshAfterStreamRestart('/current');
+    for (let index = 0; index < 20; index += 1) await settle();
+
+    expect([...refreshing].sort()).toEqual(['/busy', '/current', '/pinned-column', '/waiting']);
+    expect([...started].sort()).toEqual(['/busy', '/current', '/pinned-column', '/waiting']);
+    // Foreground first; live-state stores drain behind them in the background.
+    expect(started.slice(0, 2).sort()).toEqual(['/current', '/pinned-column']);
+
+    // A deferred store re-reads as soon as something uses it, once.
+    manager.setBootstrapDemand('sidebar', [{ directory: '/idle-a', priority: 'selected', reason: 'selected-session' }]);
+    await settle();
+    expect(started.filter((directory) => directory === '/idle-a')).toEqual(['/idle-a']);
+    manager.setBootstrapDemand('sidebar', [
+      { directory: '/idle-a', priority: 'selected', reason: 'selected-session' },
+      { directory: '/current', priority: 'selected', reason: 'current-directory' },
+    ]);
+    await settle();
+    expect(started.filter((directory) => directory === '/idle-a' || directory === '/current')).toEqual(['/current', '/idle-a']);
+    expect(started.includes('/idle-b')).toBe(false);
+    expect(started.includes('/never-bootstrapped')).toBe(false);
+    cleanup();
+    manager.disposeAll();
+  });
+
+  test('a store idle before the gap re-reads when OpenCode lists one of its sessions active', async () => {
+    const manager = new ChildStoreManager();
+    const started: string[] = [];
+    const session = (id: string) => ({ id } as State['session'][number]);
+    bootstrapped(manager, '/current');
+    // Idle before the gap; its session asked a permission while events were lost.
+    bootstrapped(manager, '/asked-during-gap', { session: [session('ses_asked')], session_status: { ses_asked: { type: 'idle' } } });
+    bootstrapped(manager, '/still-idle', { session: [session('ses_quiet')] });
+    const cleanup = manager.configure({
+      bootstrapConcurrency: 2,
+      onBootstrap: async ({ directory }) => { started.push(directory); },
+    });
+
+    manager.refreshAfterStreamRestart('/current');
+    await settle();
+    expect(started).toEqual(['/current']);
+
+    // Before: nothing re-read it until it was selected, so it showed idle
+    // with no permission. The current store is not stale anymore and is skipped.
+    const queued = manager.refreshStaleDirectoriesWithActiveSessions(new Set(['ses_asked', 'ses_elsewhere']));
+    for (let index = 0; index < 5; index += 1) await settle();
+    expect([...queued]).toEqual(['/asked-during-gap']);
+    expect(started).toEqual(['/current', '/asked-during-gap']);
+
+    // A store that re-read is no longer stale; a second answer queues nothing.
+    expect([...manager.refreshStaleDirectoriesWithActiveSessions(new Set(['ses_asked']))]).toEqual([]);
+    cleanup();
+    manager.disposeAll();
+  });
+
+  test('bootstraps that failed while OpenCode started re-run on its first connection; complete ones do not', async () => {
+    const manager = new ChildStoreManager();
+    const started: string[] = [];
+    let openCodeReady = false;
+    const cleanup = manager.configure({
+      bootstrapConcurrency: 2,
+      onBootstrap: async ({ directory }) => {
+        started.push(directory);
+        if (!openCodeReady && directory !== '/complete') throw new Error('502 OpenCode is starting');
+      },
+    });
+    manager.setBootstrapDemand('sidebar', [
+      { directory: '/current', priority: 'selected', reason: 'current-directory' },
+      { directory: '/complete', priority: 'active-project', reason: 'known-project' },
+    ]);
+    manager.requestBootstrap({ directory: '/background', priority: 'background', reason: 'action-demand' });
+    for (let index = 0; index < 10; index += 1) await settle();
+    expect(manager.getBootstrapState('/current')).toBe('failed');
+    expect(manager.getBootstrapState('/background')).toBe('failed');
+    expect(manager.getBootstrapState('/complete')).toBe('complete');
+    // A failed bootstrap stays failed: demand without force does not retry it.
+    manager.setBootstrapDemand('sidebar', [
+      { directory: '/current', priority: 'selected', reason: 'current-directory' },
+      { directory: '/complete', priority: 'active-project', reason: 'known-project' },
+    ]);
+    await settle();
+    expect(started.filter((directory) => directory === '/current')).toEqual(['/current']);
+
+    openCodeReady = true;
+    started.length = 0;
+    const queued = manager.retryFailedBootstraps();
+    for (let index = 0; index < 10; index += 1) await settle();
+    expect([...queued]).toEqual(['/current']);
+    expect(started).toEqual(['/current']);
+    expect(manager.getBootstrapState('/current')).toBe('complete');
+
+    // The background store re-reads when something uses it again.
+    manager.setBootstrapDemand('column', [{ directory: '/background', priority: 'visible', reason: 'known-project' }]);
+    for (let index = 0; index < 10; index += 1) await settle();
+    expect(started).toEqual(['/current', '/background']);
+    expect(manager.getBootstrapState('/background')).toBe('complete');
+    cleanup();
+    manager.disposeAll();
+  });
+
+  test('a bootstrap running across the restart reruns when its store is in use', async () => {
+    const manager = new ChildStoreManager();
+    const tasks: Array<ReturnType<typeof deferred>> = [];
+    const started: string[] = [];
+    const cleanup = manager.configure({
+      bootstrapConcurrency: 2,
+      onBootstrap: ({ directory }) => {
+        started.push(directory);
+        const task = deferred();
+        tasks.push(task);
+        return task.promise;
+      },
+    });
+    manager.ensureChild('/current', { bootstrap: false }).setState({ status: 'partial' });
+    manager.setBootstrapDemand('sidebar', [{ directory: '/current', priority: 'selected', reason: 'current-directory', force: true }]);
+    expect(started).toEqual(['/current']);
+
+    manager.refreshAfterStreamRestart('/current');
+    tasks[0]?.resolve();
+    await settle();
+    await settle();
+    expect(started).toEqual(['/current', '/current']);
+    tasks[1]?.resolve();
+    await settle();
+    cleanup();
+    manager.disposeAll();
+  });
+});
+
+describe('ChildStoreManager persisted session seed', () => {
+  const originalLocalStorage = globalThis.localStorage;
+  const values = new Map<string, string>();
+  const storage: Storage = {
+    get length() { return values.size; },
+    clear: () => values.clear(),
+    getItem: (key) => values.get(key) ?? null,
+    key: (index) => [...values.keys()][index] ?? null,
+    removeItem: (key) => { values.delete(key); },
+    setItem: (key, value) => { values.set(key, value); },
+  };
+  const spaceDirectory = '/spaces/a1b2c3d4e5f6/app';
+  const session = (directory: string): Session => ({
+    id: `ses_${directory.length}`,
+    projectID: 'project',
+    directory,
+    title: 'Cached',
+    cost: 0,
+    tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+    time: { created: 1, updated: 2 },
+  });
+  const seedCache = (directory: string) => {
+    persistSessions(directory, [session(directory)]);
+    flushPendingSessionWrites();
+    expect(readDirCache(directory).sessions?.length).toBe(1);
+  };
+  const cachedKeys = () => [...values.keys()].filter((key) => key.startsWith('oc.dir.'));
+
+  beforeEach(() => {
+    values.clear();
+    Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: storage });
+  });
+  afterEach(() => {
+    Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: originalLocalStorage });
+  });
+
+  test('a new store seeds from the cache only where the owner allows it', () => {
+    seedCache('/workspace');
+    seedCache(spaceDirectory);
+    const manager = new ChildStoreManager({ seedsSessions: (directory) => !directory.startsWith('/spaces/') });
+    // Before `configure` as well: a consumer's store made during the first render is gated too.
+    expect(manager.ensureChild('/workspace', { bootstrap: false }).getState().session.map((entry) => entry.id)).toEqual(['ses_10']);
+    const space = manager.ensureChild(spaceDirectory, { bootstrap: false }).getState();
+    expect(space.session).toEqual([]);
+    expect(space.sessionListSource).toBe('empty');
+    // The cache itself stays: the owner may know the space at the next start.
+    expect(readDirCache(spaceDirectory).sessions?.length).toBe(1);
+    manager.disposeAll();
+  });
+
+  test('forgetting a directory empties its store, drops its cache and disposes it once nothing holds it', () => {
+    seedCache(spaceDirectory);
+    const manager = new ChildStoreManager();
+    const store = manager.ensureChild(spaceDirectory, { bootstrap: false });
+    expect(store.getState().session.length).toBe(1);
+    manager.pin(spaceDirectory);
+    manager.forgetDirectory(spaceDirectory);
+    // Held by a consumer: the store stays, listing nothing, and its cache is gone.
+    expect(manager.getChild(spaceDirectory)).toBe(store);
+    expect(store.getState().session).toEqual([]);
+    expect(store.getState().sessionListSource).toBe('empty');
+    expect(cachedKeys()).toEqual([]);
+    manager.unpin(spaceDirectory);
+    manager.forgetDirectory(spaceDirectory);
+    expect(manager.getChild(spaceDirectory)).toBe(undefined);
+    expect(cachedKeys()).toEqual([]);
+    manager.disposeAll();
+  });
+});

@@ -1,0 +1,31 @@
+---
+title: Actualizaciones
+description: Mantén OpenChamber actualizado en escritorio, web y VS Code.
+---
+
+# Actualizaciones
+
+Cómo actualizas OpenChamber depende de cómo lo instalaste. En todos los casos puedes comprobar tu versión actual en **Settings → OpenChamber → About**.
+
+## App de escritorio
+
+La app de escritorio busca actualizaciones contra las releases de GitHub. Cuando hay una disponible, OpenChamber te avisa, la descarga cuando lo eliges y la instala en el siguiente reinicio. Siempre tienes el control: nada se instala sin tu aprobación.
+
+## Web / CLI
+
+Si instalaste la CLI, actualízala desde **About** con los botones de comprobar y actualizar, o desde la terminal:
+
+```bash
+openchamber update
+```
+
+OpenChamber detecta cómo se instaló (npm, pnpm, yarn o bun) y ejecuta la actualización correcta por ti.
+
+## El servidor de OpenCode
+
+OpenChamber y OpenCode se actualizan por separado. Cuando hay una nueva versión de OpenCode disponible, OpenChamber se ofrece a actualizarla y reinicia el servidor después. Consulta [OpenCode Server](/es/opencode-server/) para saber cómo se gestiona ese servidor.
+
+## Relacionado
+
+- [Instalación](/es/install/) — cómo se instala cada app en primer lugar
+- [OpenCode Server](/es/opencode-server/) — actualizar el servidor subyacente

@@ -1,0 +1,48 @@
+---
+title: Remote Instances
+description: Connect the desktop app to OpenChamber on another machine over SSH.
+---
+
+# Remote Instances
+
+The desktop app can connect to OpenChamber running on another machine over SSH — a work server, a cloud box, a homelab — and bring its UI to your screen as if it were local. Set this up at **Settings → Remote Instances**.
+
+> Remote instances are a **desktop-only** feature. On the web or in VS Code, connect to a remote server with the environment variables in [OpenCode Server](/opencode-server/) instead.
+
+## Add a remote instance
+
+1. Open **Settings → Remote Instances** and add one.
+2. Give it the SSH command you'd normally use to reach the machine, plus a nickname.
+3. Choose how OpenChamber runs there:
+   - **managed** — OpenChamber installs and starts itself on the remote machine
+   - **external** — connect to one that's already running
+4. Connect.
+
+OpenChamber walks through the steps — checking the connection, setting up the remote, starting the server, and forwarding the port — and shows where it is at each stage. When it reaches **ready**, the remote UI loads locally.
+
+## Credentials
+
+You decide whether to save the SSH and UI passwords or enter them each time. If the connection drops, OpenChamber reports which step failed so you can fix it — see [Remote access](/troubleshooting/remote-access/).
+
+## Connection links
+
+If a remote machine already runs OpenChamber, the easiest way to connect the desktop app is a pairing link. On the remote server's UI, open **Settings → Remote Instances → Connect to this server → Add a device**, create a link, and import it on your desktop at **Settings → Remote Instances → Other OpenChamber servers → Import Link**. See [Connect a Device](/connect-devices/) for the full flow.
+
+A link created with **Anywhere** carries both a direct address and a [Private Relay](/private-relay/) route: the desktop connects directly when it can reach the server (same network), and falls back to the end-to-end encrypted relay when you're away. The status next to each saved server shows which route is in use.
+
+You can also create a link from a terminal on the remote machine:
+
+```bash
+openchamber connect-url --port 3000 --server http://your-host:3000 --qr
+```
+
+`connect-url` starts the server first if nothing is running on that port. Add `--api-only` for a headless server, `--lan` to bind to the LAN when starting, `--ui-password` to protect browser access, and `--name` to label the saved connection. Add `--relay` for a link that also works away from the local network: the device prefers the direct connection when reachable and falls back to the [Private Relay](/private-relay/) — the instance brings the relay up on its own.
+
+The generated link contains a single-use pairing secret. Once imported, the device holds its own client token — separate from the browser UI password — which survives server restarts until you revoke it on the issuing server.
+
+## Related
+
+- [Connect a Device](/connect-devices/) — pairing links, QR codes, and managing devices
+- [Private Relay](/private-relay/) — how "Anywhere" connections work
+- [OpenCode Server](/opencode-server/) — connect to a remote server on web or VS Code
+- [Remote access](/troubleshooting/remote-access/) — when a connection won't complete

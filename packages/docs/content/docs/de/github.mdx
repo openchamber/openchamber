@@ -1,0 +1,60 @@
+---
+title: "Git-Hosts: Issues und Pull Requests"
+description: Verbinde GitHub, GitLab, Gitea, Forgejo oder Gerrit und arbeite in OpenChamber mit Issues und Pull Requests.
+---
+
+# Git-Hosts: Issues und Pull Requests
+
+Verbinde ein Konto bei dem Host, auf dem dein Projekt liegt, und OpenChamber kann seine Issues und Pull Requests auflisten, aus einem davon eine Sitzung starten und Pull Requests für dich öffnen, prüfen und mergen. Fünf Hosts sind eingebaut: GitHub, auch GitHub Enterprise; GitLab, auch selbst gehostetes GitLab; Gitea; Forgejo, auch Codeberg; und Gerrit. Eine [Erweiterung](/extensions/#an-extension-as-a-git-host) kann einen weiteren hinzufügen.
+
+Das Remote des Projekts entscheidet, mit welchem Host OpenChamber spricht. Ein Projekt, dessen `origin` auf gitlab.com liegt, nutzt dein GitLab-Konto für das Board, das Pull-Request-Badge an seinen Branches und das Git-Panel. Ein Remote auf einem Host-Alias aus `~/.ssh/config`, etwa `github.com-work`, wird keinem Host zugeordnet.
+
+Die Begriffe folgen dem Host. GitLab sagt Merge Request, Gerrit sagt Änderung.
+
+## Einen Host verbinden
+
+1. Öffne **Einstellungen → Integrationen**. Jeder Host hat seine eigene Karte.
+2. Klappe die Karte des Hosts deines Projekts auf und melde dich an:
+   - **GitHub**: Wähle **Connect GitHub**, öffne den angezeigten Link, gib den kurzen Code ein und bestätige. Für GitHub Enterprise wählst du **Instanz hinzufügen** unter **Weitere Instanzen**, gibst die Adresse deines Servers ein und fügst ein Personal Access Token ein.
+   - **GitLab**: Auf gitlab.com meldest du dich mit einem kurzen Code, einem Personal Access Token oder dem `glab`-Login an. Für ein selbst gehostetes GitLab fügst du seine Adresse hinzu und ein Personal Access Token ein.
+   - **Gitea**: Füge die Adresse deines Servers hinzu und ein Personal Access Token ein.
+   - **Forgejo**: Für Codeberg fügst du ein Personal Access Token ein; für einen anderen Server fügst du zuerst seine Adresse hinzu.
+   - **Gerrit**: Füge die Adresse deines Servers hinzu, dann deinen Gerrit-Benutzernamen und ein HTTP-Passwort.
+
+Wenn die Verbindung steht, erscheint dein Konto auf der Karte. Du kannst mehr als ein Konto pro Host verbinden und zwischen ihnen wechseln oder dich jederzeit trennen. Ist die `gh`-CLI auf demselben Rechner angemeldet, kann OpenChamber sie auch für GitHub nutzen. Welche Scopes jedes Token braucht und welche Versionen jeder Host braucht, steht unter [Integrationen](/integrations/#gitlab-gitea-forgejo-and-gerrit).
+
+Ein verbundenes Konto kann auch die [Git-Identität](/git-identities/) des Projekts sein. Dann tragen Commits seinen Namen, und Pushes über HTTPS nutzen sein Token.
+
+## Arbeit aus einem Issue oder Pull Request starten
+
+Wenn du eine [Worktree-Sitzung](/worktrees/) erstellst, kannst du sie aus einem Issue oder einem Pull Request vom Host des Projekts starten:
+
+- wähle ein **Issue** und OpenChamber benennt den Branch danach
+- wähle einen **Pull Request** und OpenChamber checkt dessen Branch aus; du kannst seinen Diff einbeziehen, damit der Agent die komplette Änderung hat
+- wähle eine **Gerrit-Änderung** und OpenChamber checkt das neueste Patchset auf einem Branch namens `change-<number>` aus
+
+Die neue Sitzung öffnet sich mit dem Eintrag bereits im Nachrichtenfeld angehängt. Gesendet wird nichts automatisch: Wähle Modell und Agent, schreib, was getan werden soll, und schick es ab.
+
+Das Board [Issues und PRs](/issues-and-prs/) listet dieselben Einträge, mit Filtern, Vorschau, Kommentaren und Reviews, und startet von dort ebenfalls Sitzungen.
+
+## Pull Requests öffnen und verwalten
+
+Im **PR**-Tab des [Git-Panels](/git/) kannst du einen Pull Request erstellen, aktualisieren, einen Entwurf als bereit markieren oder mergen. OpenChamber kann Titel und Beschreibung aus deinen Änderungen schreiben.
+
+- **GitLab**: Derselbe Tab öffnet Merge Requests. Beim Mergen stehen Merge und Squash zur Wahl.
+- **Gitea** und **Forgejo**: Wie bei GitHub.
+- **Gerrit**: Du erstellst eine Änderung, indem du zum Review pushst, und jeder weitere Push lädt ein neues Patchset hoch. Siehe [Zum Review pushen bei Gerrit](/git/#push-for-review-on-gerrit). Mergen heißt hier **Einreichen** und wartet, bis die Änderung ihre Submit-Anforderungen erfüllt. Reviews sind Stimmen auf die Labels des Projekts, etwa Code-Review und Verified.
+
+## Ein Issue oder einen Pull Request an eine Nachricht hängen
+
+Öffne im Chat-Composer das Menü **+** und wähle den Verknüpfungseintrag für deinen Host, etwa **GitHub-Issue oder PR verknüpfen**, **GitLab-Issue oder MR verknüpfen** oder **Gerrit-Änderung verknüpfen**. Wähle einen oder mehrere Einträge. Jeder geht als Kontext mit deiner nächsten Nachricht mit, ein Pull Request kann seinen Diff mitbringen, und das Arbeitsstatus-Panel der Sitzung behält einen Link darauf. Das Anhängen liefert nur Kontext; was damit passieren soll, sagt deine Nachricht.
+
+Gerrit hat keine Issues, deshalb erscheinen dort nur Änderungen.
+
+## Verwandt
+
+- [Issues und PRs](/issues-and-prs/): Einträge durchsuchen, filtern, kommentieren und reviewen
+- [Git-Workflows](/git/): committen, Branches verwalten und zum Review pushen
+- [Worktree-Sitzungen](/worktrees/): dort starten Sitzungen aus Issues und Pull Requests
+- [Git-Identitäten](/git-identities/): als verbundenes Konto committen und pushen
+- [Integrationen](/integrations/): jede Host-Karte im Detail

@@ -1,0 +1,86 @@
+---
+title: Devam eden oturumlar
+description: Üzerinde çalıştığınız işi, tamamlandı olarak işaretleyene kadar kenar çubuğunun en üstünde tutun.
+---
+
+# Devam eden oturumlar
+
+İçinde mesaj gönderdiğiniz her oturum, işini kenar çubuğunun üstündeki **Devam eden** bölümüne taşır ve iş siz tamamlandı olarak işaretleyene kadar orada kalır; ne kadar zaman önce açmış olursanız olun. Projelerinizde şimdiye kadar yaptığınız her şey durur; Devam eden yalnızca henüz bitirmediklerinizi toplar.
+
+## İş nedir
+
+Kenar çubuğu tek tek oturumları değil, işleri listeler. Bir iş şunlardan biridir:
+
+- tüm oturumlarıyla birlikte **bir worktree**; görev adını taşıyan tek bir satır olarak gösterilir (bkz. [Worktree Oturumları](/tr/worktrees/)) ya da
+- **projenin kendi klasöründeki bir oturum**; ondan çıkanlar altında iç içe durur: alt ajanları, incelemesi, sakladığınız fork'lar ve yan sorular, ajanının sizin için başlattığı oturumlar.
+
+Açmak için satıra tıklayın; solundaki ok altındaki oturumları açar.
+
+## Nerede bulunur
+
+**Devam eden** bölümü kenar çubuğunda, sohbetlerin altında ve projelerinizin ya da zaman çizelgesinin üstündedir. Buradaki bir iş projesinden çıkar, böylece her iş yalnızca bir kez görünür. Projesinin altında da kalmasını istiyorsanız kenar çubuğunun görünüm menüsünde **Devam eden işleri projelerin altında da göster** seçeneğini açın. Arama onu yalnızca bir kez, Devam eden bölümünde gösterir.
+
+Her iş tek satır kaplar: başlık ve durumu; bir pull request ya da issue varsa renkli bir işaret de görünür. Satırlar son etkinliğe göre sıralanır, bu yüzden tarih göstermez. Projesini, dalını, zamanını ve bağlantılarını görmek için satırın üzerine gelin ya da bunları başlığın altında göstermek için görünüm menüsünde **Ayrıntılı satırlar** seçeneğini açın. Ayrıntılı satırlar projelerinizin altında da geçerlidir; bir işin içindeki oturumlar tek satırda kalır.
+
+Sabitlenmiş oturumlar Devam eden'in üstünde ayrı bir **Sabitlenenler** bölümünde durur; yalnızca kendi projelerinin altında kalmalarını istiyorsanız aynı menüde **Sabitlenenler bölümünü göster** seçeneğini kapatın. Devam eden bir oturumu sabitlerseniz yalnızca Sabitlenenler'de listelenir.
+
+Telefondaki oturum listesi de aynıdır ve aynı görünüm menüsüne sahiptir. **Ayrıntılı satırlar** seçeneğini kapatmadığınız sürece satırlar iki satır kaplar; üzerine gelinecek bir imleç olmadığı için bir işi açan ok her zaman görünür.
+
+## Oturumlar nasıl girer
+
+Bir oturumda mesaj gönderin, oturum devam edenlere girer. Bu, worktree'lerdeki oturumlar dahil her proje oturumu için geçerlidir. Yeni bir worktree, siz onu oluşturur oluşturmaz devam edenlere girer; içinde açılan taslak o sırada henüz gönderilmemiştir.
+
+Tamamlandı olarak işaretlediğiniz bir oturum, içinde yeni bir mesaj gönderdiğinizde geri gelir.
+
+Sohbetler, arşivlenmiş oturumlar, inceleme oturumları ve [zamanlanmış görevlerin](/tr/scheduled-tasks/) çalıştırmaları asla girmez; bir çalıştırmayı üzerinde çalışmaya devam etmek için fork ederseniz fork girer. Bir alt ajan üst oturumunu asla devam edenlere almaz.
+
+## Görev adları
+
+Görev netleşir netleşmez ajan her işe görevine göre "Giriş zaman aşımı düzeltmesi" gibi birkaç kelimelik bir ad verir. Bir worktree adı dalının açıklamasında saklar, böylece depoyu nerede açarsanız açın görürsünüz; proje klasöründeki bir oturum adı başlık olarak alır. Adı kendiniz değiştirirseniz sizin adınız kalır: Ajan sizin adlandırdığınız bir görevi asla yeniden adlandırmaz.
+
+## Oturumları elle izleyin ve bitirin
+
+- **İzlemek için:** Fareyle bir satırın üzerine gelip göze tıklayın ya da oturum menüsünden **Devam eden iş olarak izle**'yi seçin.
+- **Bitirmek için:** Bölümdeki bir satırın üzerine gelip onay işaretine tıklayın ya da menüden **Tamamlandı olarak işaretle**'yi seçin. Bu, işin tamamını bitirir: İçinde hâlâ devam eden her oturumu.
+
+Bir worktree'yi tamamlandı olarak işaretlemek onu Devam eden bölümünden çıkarır ve yerinde bırakır. Tamamlandı olarak işaretlediğinizde arşivlenmesi için de **Ayarlar → Session'lar** bölümünde **Tamamlandı olarak işaretlediğinde worktree’yi arşivle** seçeneğini açın: Klasör kaldırılır; oturumları, değişiklikleri ve dalı Arşiv sayfasında geri yüklenmeye hazır bekler. Orada hâlâ çalışan bir oturum varsa worktree kalır.
+
+Telefonda aynı işleme ulaşmak için bir satırı yana kaydırın.
+
+Sohbetler göz simgesi almaz: Onlar sade konuşmalardır.
+
+### "Bu iş tamamlanmış görünüyor."
+
+Bir [sınıflandırma sağlayıcısı](/tr/classification-providers/) kuruluysa Jev, devam eden bir oturumun her turuna bakar. Bir tur işin sonu gibi göründüğünde (teşekkür ettiniz, commit istediniz, çalıştığını onayladınız) Jev hiçbir şeyi kapatmaz, bir ipucu bırakır:
+
+- kenar çubuğunda oturum satırında gri bir onay işareti
+- mesaj alanının üstünde bir şerit: **Bu iş tamamlanmış görünüyor.** ve **Tamamlandı olarak işaretle** düğmesi
+
+Jev haklıysa **Tamamlandı olarak işaretle**'ye basın. Değilse devam edin: İpucu bir sonraki mesajınızla kaybolur. Sınıflandırma sağlayıcısı yoksa ipucu da yoktur; oturumları kendiniz tamamlandı olarak işaretlersiniz.
+
+## Özet ve sonraki mesaj önerisi
+
+Ajan işini bitirip oturum bir dakika sessiz kaldığında OpenChamber küçük modelinizle iki şey yazabilir ([Sağlayıcılar, modeller ve agentlar](/tr/providers/) sayfasına bakın):
+
+- **Özet:** Neyin yapıldığını ve işlerin nerede durduğunu hatırlatan kısa bir not; son yanıtın altında ve kenar çubuğunda oturumun ipucu balonunda görünür
+- **Öneri:** Büyük olasılıkla göndereceğiniz sonraki mesaj; mesaj alanının üstünde bir satır olarak görünür, tıklayınca metin alana yerleşir, kendiliğinden asla gönderilmez
+
+Jev kullanılabiliyorsa OpenChamber önce ona turun bunlara ihtiyacı olup olmadığını sorar. Gerçek bir işten sonra basit bir "teşekkürler, bu kadar" yine de özet alır; ama yapılacak bir şey kalmadığında öneri atlanır, ikisi de işe yaramayacaksa küçük model hiç çağrılmaz. Jev yoksa ikisi de eskisi gibi her turdan sonra üretilir.
+
+Bunları **Ayarlar → Sohbet → Session Yardımı** bölümünden açıp kapatabilirsiniz.
+
+## Ayarlar
+
+**Ayarlar → Session'lar → Devam eden oturumlar** bölümünü açın. Burada tek bir ayar vardır: **Devam eden oturumları göster**, varsayılan olarak açık. Kapatırsanız özelliğin tamamı kapanır: Bölüm görünmez ve mesaj göndermek oturumu artık devam edenlere almaz.
+
+Yalnızca bölümü gizlemek için kenar çubuğunun görünüm menüsündeki **Devam eden bölümünü göster** seçeneğini kullanın.
+
+## Nerede çalışır
+
+Bölüm ve elle izleme ile bitirme, VS Code dahil her yerde çalışır. Mesaj gönderdiğinizde oturumu devam edenlere alma, "tamamlanmış görünüyor" ipucu ve özetler için Jev filtresi OpenChamber sunucusuna ihtiyaç duyar; bu yüzden masaüstü uygulamasında, web uygulamasında ve telefonda çalışır, VS Code'da çalışmaz. VS Code'da oturumları elle izlersiniz.
+
+## İlgili
+
+- [Sınıflandırma sağlayıcıları (Jev)](/tr/classification-providers/): "tamamlanmış görünüyor" ipucunu kurun
+- [Sohbetler](/tr/chats/): devam eden işlere girmeyen konuşmalar
+- [Oturum hedefleri](/tr/session-goals/): ajanı bitiş çizgisine kadar çalıştırın

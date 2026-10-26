@@ -1,0 +1,1123 @@
+{
+  "sections": [
+    {
+      "label": "Start here",
+      "translations": {
+        "nl": "Begin hier",
+        "uk": "Почніть тут",
+        "zh-CN": "从这里开始",
+        "es": "Empieza aquí",
+        "pt-BR": "Comece aqui",
+        "ko": "여기서 시작",
+        "pl": "Zacznij tutaj",
+        "fr": "Commencer ici",
+        "ja": "ここから開始",
+        "de": "Hier starten",
+        "tr": "Buradan başlayın"
+      },
+      "items": [
+        {
+          "label": "Overview",
+          "link": "/",
+          "translations": {
+            "nl": "Overzicht",
+            "uk": "Огляд",
+            "zh-CN": "概览",
+            "es": "Visión general",
+            "pt-BR": "Visão geral",
+            "ko": "개요",
+            "pl": "Przegląd",
+            "fr": "Vue d’ensemble",
+            "ja": "概要",
+            "de": "Übersicht",
+            "tr": "Genel bakış"
+          }
+        },
+        {
+          "label": "Install",
+          "link": "/install/",
+          "translations": {
+            "nl": "Installeren",
+            "uk": "Встановлення",
+            "zh-CN": "安装",
+            "es": "Instalación",
+            "pt-BR": "Instalação",
+            "ko": "설치",
+            "pl": "Instalacja",
+            "fr": "Installation",
+            "ja": "インストール",
+            "de": "Installation",
+            "tr": "Kurulum"
+          }
+        },
+        {
+          "label": "Quickstart",
+          "link": "/quickstart/",
+          "translations": {
+            "nl": "Snel aan de slag",
+            "uk": "Швидкий старт",
+            "zh-CN": "快速开始",
+            "es": "Inicio rápido",
+            "pt-BR": "Início rápido",
+            "ko": "빠른 시작",
+            "pl": "Szybki start",
+            "fr": "Démarrage rapide",
+            "ja": "クイックスタート",
+            "de": "Schnellstart",
+            "tr": "Hızlı başlangıç"
+          }
+        },
+        {
+          "label": "OpenCode Server",
+          "link": "/opencode-server/",
+          "translations": {
+            "nl": "OpenCode-server",
+            "uk": "Сервер OpenCode",
+            "zh-CN": "OpenCode 服务器",
+            "es": "Servidor OpenCode",
+            "pt-BR": "Servidor OpenCode",
+            "ko": "OpenCode 서버",
+            "pl": "Serwer OpenCode",
+            "fr": "Serveur OpenCode",
+            "ja": "OpenCode サーバー",
+            "de": "OpenCode-Server",
+            "tr": "OpenCode Sunucusu"
+          }
+        },
+        {
+          "label": "Environment Variables",
+          "link": "/environment/",
+          "translations": {
+            "nl": "Omgevingsvariabelen",
+            "uk": "Змінні середовища",
+            "zh-CN": "环境变量",
+            "es": "Variables de entorno",
+            "pt-BR": "Variáveis de ambiente",
+            "ko": "환경 변수",
+            "pl": "Zmienne środowiskowe",
+            "fr": "Variables d’environnement",
+            "ja": "環境変数",
+            "de": "Umgebungsvariablen",
+            "tr": "Ortam değişkenleri"
+          }
+        }
+      ]
+    },
+    {
+      "label": "Workflows",
+      "translations": {
+        "nl": "Werkwijzen",
+        "uk": "Робочі процеси",
+        "zh-CN": "工作流",
+        "es": "Flujos de trabajo",
+        "pt-BR": "Fluxos de trabalho",
+        "ko": "워크플로",
+        "pl": "Przepływy pracy",
+        "fr": "Workflows",
+        "ja": "ワークフロー",
+        "de": "Abläufe",
+        "tr": "İş akışları"
+      },
+      "items": [
+        {
+          "label": "Projects",
+          "link": "/projects/",
+          "translations": {
+            "nl": "Projecten",
+            "uk": "Проєкти",
+            "zh-CN": "项目",
+            "es": "Proyectos",
+            "pt-BR": "Projetos",
+            "ko": "프로젝트",
+            "pl": "Projekty",
+            "fr": "Projets",
+            "ja": "プロジェクト",
+            "de": "Projekte",
+            "tr": "Projeler"
+          }
+        },
+        {
+          "label": "Chats",
+          "link": "/chats/",
+          "translations": {
+            "nl": "Chats",
+            "uk": "Чати",
+            "zh-CN": "聊天",
+            "es": "Chats",
+            "pt-BR": "Conversas",
+            "ko": "채팅",
+            "pl": "Czaty",
+            "fr": "Discussions",
+            "ja": "チャット",
+            "de": "Chats",
+            "tr": "Sohbetler"
+          }
+        },
+        {
+          "label": "Context",
+          "link": "/context/",
+          "translations": {
+            "nl": "Context",
+            "uk": "Контекст",
+            "zh-CN": "上下文",
+            "es": "Contexto",
+            "pt-BR": "Contexto",
+            "ko": "컨텍스트",
+            "pl": "Kontekst",
+            "fr": "Contexte",
+            "ja": "コンテキスト",
+            "de": "Kontext",
+            "tr": "Bağlam"
+          }
+        },
+        {
+          "label": "Notes, Todos & Plans",
+          "link": "/notes-todos-plans/",
+          "translations": {
+            "nl": "Notities, taken en plannen",
+            "uk": "Нотатки, справи та плани",
+            "zh-CN": "笔记、待办与计划",
+            "es": "Notas, tareas y planes",
+            "pt-BR": "Notas, tarefas e planos",
+            "ko": "메모, 할 일, 계획",
+            "pl": "Notatki, zadania i plany",
+            "fr": "Notes, todos et plans",
+            "ja": "メモ、Todo、計画",
+            "de": "Notizen, Aufgaben und Pläne",
+            "tr": "Notlar, yapılacaklar ve planlar"
+          }
+        },
+        {
+          "label": "Scheduled Tasks",
+          "link": "/scheduled-tasks/",
+          "translations": {
+            "nl": "Geplande taken",
+            "uk": "Заплановані задачі",
+            "zh-CN": "计划任务",
+            "es": "Tareas programadas",
+            "pt-BR": "Tarefas agendadas",
+            "ko": "예약 작업",
+            "pl": "Zaplanowane zadania",
+            "fr": "Tâches planifiées",
+            "ja": "スケジュールタスク",
+            "de": "Geplante Aufgaben",
+            "tr": "Zamanlanmış görevler"
+          }
+        },
+        {
+          "label": "Agent Control Tool",
+          "link": "/agent-control-tool/",
+          "translations": {
+            "nl": "Besturingstool voor agents",
+            "uk": "Інструмент керування для агентів",
+            "zh-CN": "智能体控制工具",
+            "es": "Herramienta de control para agentes",
+            "pt-BR": "Ferramenta de controle para agentes",
+            "ko": "에이전트 제어 도구",
+            "pl": "Narzędzie sterowania dla agentów",
+            "fr": "Outil de contrôle pour les agents",
+            "ja": "エージェント制御ツール",
+            "de": "Agenten-Steuerungstool",
+            "tr": "Agent kontrol aracı"
+          }
+        },
+        {
+          "label": "Session Goals",
+          "link": "/session-goals/",
+          "translations": {
+            "nl": "Sessiedoelen",
+            "uk": "Цілі сесії",
+            "zh-CN": "会话目标",
+            "es": "Objetivos de sesión",
+            "pt-BR": "Objetivos de sessão",
+            "ko": "세션 목표",
+            "pl": "Cele sesji",
+            "fr": "Objectifs de session",
+            "ja": "セッションゴール",
+            "de": "Sitzungsziele",
+            "tr": "Oturum hedefleri"
+          }
+        },
+        {
+          "label": "Sessions in Work",
+          "link": "/sessions-in-work/",
+          "translations": {
+            "nl": "Sessies in uitvoering",
+            "uk": "Сесії в роботі",
+            "zh-CN": "进行中的会话",
+            "es": "Sesiones en curso",
+            "pt-BR": "Sessões em andamento",
+            "ko": "작업 중인 세션",
+            "pl": "Sesje w toku",
+            "fr": "Sessions en cours",
+            "ja": "作業中のセッション",
+            "de": "Sitzungen in Arbeit",
+            "tr": "Devam eden oturumlar"
+          }
+        },
+        {
+          "label": "Permissions & Safety Net",
+          "link": "/permissions/",
+          "translations": {
+            "nl": "Toestemmingen en vangnet",
+            "uk": "Дозволи та запобіжник",
+            "zh-CN": "权限与安全网",
+            "es": "Permisos y red de seguridad",
+            "pt-BR": "Permissões e rede de segurança",
+            "ko": "권한과 안전망",
+            "pl": "Uprawnienia i siatka bezpieczeństwa",
+            "fr": "Permissions et filet de sécurité",
+            "ja": "権限とセーフティネット",
+            "de": "Berechtigungen und Sicherheitsnetz",
+            "tr": "İzinler ve güvenlik ağı"
+          }
+        },
+        {
+          "label": "Auto Model Routing",
+          "link": "/auto-model-routing/",
+          "translations": {
+            "nl": "Automatische modelkeuze",
+            "uk": "Автоматичний вибір моделі",
+            "zh-CN": "自动模型路由",
+            "es": "Enrutamiento automático de modelos",
+            "pt-BR": "Roteamento automático de modelos",
+            "ko": "자동 모델 라우팅",
+            "pl": "Automatyczny wybór modelu",
+            "fr": "Routage automatique des modèles",
+            "ja": "自動モデルルーティング",
+            "de": "Automatische Modellwahl",
+            "tr": "Otomatik model yönlendirme"
+          }
+        },
+        {
+          "label": "Project Actions",
+          "link": "/project-actions/",
+          "translations": {
+            "nl": "Projectacties",
+            "uk": "Дії проєкту",
+            "zh-CN": "项目操作",
+            "es": "Acciones del proyecto",
+            "pt-BR": "Ações do projeto",
+            "ko": "프로젝트 작업",
+            "pl": "Akcje projektu",
+            "fr": "Actions de projet",
+            "ja": "プロジェクトアクション",
+            "de": "Projektaktionen",
+            "tr": "Proje işlemleri"
+          }
+        },
+        {
+          "label": "Repository config",
+          "link": "/repository-config/",
+          "translations": {
+            "nl": "Repositoryconfiguratie",
+            "uk": "Конфіг у репозиторії",
+            "zh-CN": "仓库配置",
+            "es": "Configuración en el repositorio",
+            "pt-BR": "Configuração no repositório",
+            "ko": "저장소 설정",
+            "pl": "Konfiguracja w repozytorium",
+            "fr": "Configuration du dépôt",
+            "ja": "リポジトリ設定",
+            "de": "Repository-Konfiguration",
+            "tr": "Depo yapılandırması"
+          }
+        },
+        {
+          "label": "Preview & Dev Servers",
+          "link": "/preview/",
+          "translations": {
+            "nl": "Voorbeeldweergave en ontwikkelservers",
+            "uk": "Перегляд і dev-сервери",
+            "zh-CN": "预览与开发服务器",
+            "es": "Vista previa y servidores de desarrollo",
+            "pt-BR": "Pré-visualização e servidores de desenvolvimento",
+            "ko": "미리보기 및 개발 서버",
+            "pl": "Podgląd i serwery deweloperskie",
+            "fr": "Aperçu et serveurs de dev",
+            "ja": "プレビューと開発サーバー",
+            "de": "Vorschau und Entwicklungsserver",
+            "tr": "Önizleme ve geliştirme sunucuları"
+          }
+        },
+        {
+          "label": "Worktree Sessions",
+          "link": "/worktrees/",
+          "translations": {
+            "nl": "Worktree-sessies",
+            "uk": "Сесії worktree",
+            "zh-CN": "Worktree 会话",
+            "es": "Sesiones de worktree",
+            "pt-BR": "Sessões de worktree",
+            "ko": "Worktree 세션",
+            "pl": "Sesje worktree",
+            "fr": "Sessions worktree",
+            "ja": "Worktree セッション",
+            "de": "Worktree-Sitzungen",
+            "tr": "Worktree oturumları"
+          }
+        },
+        {
+          "label": "Multi-run",
+          "link": "/multi-run/",
+          "translations": {
+            "nl": "Parallelle runs",
+            "fr": "Multi-run",
+            "ja": "Multi-run",
+            "de": "Mehrfachausführung",
+            "tr": "Çoklu çalıştırma"
+          }
+        },
+        {
+          "label": "Git",
+          "link": "/git/",
+          "translations": {
+            "nl": "Git",
+            "fr": "Git",
+            "es": "Git",
+            "ja": "Git",
+            "de": "Git",
+            "tr": "Git"
+          }
+        },
+        {
+          "label": "Changes Walkthrough",
+          "link": "/walkthrough/",
+          "translations": {
+            "nl": "Rondleiding door wijzigingen",
+            "uk": "Розбір змін",
+            "zh-CN": "改动导读",
+            "es": "Recorrido por los cambios",
+            "pt-BR": "Percurso pelas mudanças",
+            "ko": "변경 워크스루",
+            "pl": "Przewodnik po zmianach",
+            "fr": "Parcours des modifications",
+            "ja": "変更のウォークスルー",
+            "de": "Änderungsrundgang",
+            "tr": "Değişiklik incelemesi"
+          }
+        },
+        {
+          "label": "Git Hosts",
+          "link": "/github/",
+          "translations": {
+            "nl": "Git-hosts",
+            "uk": "Git-хости",
+            "zh-CN": "Git 托管服务",
+            "es": "Hosts Git",
+            "pt-BR": "Hosts Git",
+            "ko": "Git 호스트",
+            "pl": "Hosty Git",
+            "fr": "Hôtes Git",
+            "ja": "Git ホスト",
+            "de": "Git-Hosts",
+            "tr": "Git sunucuları"
+          }
+        },
+        {
+          "label": "Issues and PRs",
+          "link": "/issues-and-prs/",
+          "translations": {
+            "nl": "Issues en PR's",
+            "uk": "Issues і PR",
+            "zh-CN": "Issue 与 PR",
+            "es": "Issues y PRs",
+            "pt-BR": "Issues e PRs",
+            "ko": "이슈 및 PR",
+            "pl": "Issues i PR-y",
+            "fr": "Issues et PR",
+            "ja": "Issues と PR",
+            "de": "Issues und PRs",
+            "tr": "Issue'lar ve PR'lar"
+          }
+        },
+        {
+          "label": "Magic Prompts",
+          "link": "/magic-prompts/",
+          "translations": {
+            "nl": "Magische prompts",
+            "uk": "Магічні підказки",
+            "zh-CN": "魔法提示词",
+            "es": "Prompts mágicos",
+            "pt-BR": "Prompts mágicos",
+            "ko": "매직 프롬프트",
+            "pl": "Magiczne prompty",
+            "fr": "Magic Prompts",
+            "ja": "マジックプロンプト",
+            "de": "Magische Prompts",
+            "tr": "Sihirli istemler"
+          }
+        },
+        {
+          "label": "Git Identities",
+          "link": "/git-identities/",
+          "translations": {
+            "nl": "Git-identiteiten",
+            "uk": "Git-ідентичності",
+            "zh-CN": "Git 身份",
+            "es": "Identidades de Git",
+            "pt-BR": "Identidades do Git",
+            "ko": "Git 아이덴티티",
+            "pl": "Tożsamości Git",
+            "fr": "Identités Git",
+            "ja": "Git ID",
+            "de": "Git-Identitäten",
+            "tr": "Git kimlikleri"
+          }
+        }
+      ]
+    },
+    {
+      "label": "OpenCode setup",
+      "translations": {
+        "nl": "OpenCode instellen",
+        "uk": "Налаштування OpenCode",
+        "zh-CN": "OpenCode 设置",
+        "es": "Configuración de OpenCode",
+        "pt-BR": "Configuração do OpenCode",
+        "ko": "OpenCode 설정",
+        "pl": "Konfiguracja OpenCode",
+        "fr": "Configuration OpenCode",
+        "ja": "OpenCode 設定",
+        "de": "OpenCode-Einrichtung",
+        "tr": "OpenCode kurulumu"
+      },
+      "items": [
+        {
+          "label": "Providers, Models & Agents",
+          "link": "/providers/",
+          "translations": {
+            "nl": "Providers, modellen en agents",
+            "uk": "Провайдери, моделі та агенти",
+            "zh-CN": "提供商、模型与智能体",
+            "es": "Proveedores, modelos y agentes",
+            "pt-BR": "Provedores, modelos e agentes",
+            "ko": "공급자, 모델, 에이전트",
+            "pl": "Dostawcy, modele i agenci",
+            "fr": "Fournisseurs, modèles et agents",
+            "ja": "プロバイダー、モデル、エージェント",
+            "de": "Anbieter, Modelle und Agenten",
+            "tr": "Sağlayıcılar, modeller ve agentlar"
+          }
+        },
+        {
+          "label": "Classification Providers (Jev)",
+          "link": "/classification-providers/",
+          "translations": {
+            "nl": "Classificatieproviders en Jev",
+            "uk": "Постачальники класифікації (Jev)",
+            "zh-CN": "分类提供方（Jev）",
+            "es": "Proveedores de clasificación (Jev)",
+            "pt-BR": "Provedores de classificação (Jev)",
+            "ko": "분류 제공자 (Jev)",
+            "pl": "Dostawcy klasyfikacji (Jev)",
+            "fr": "Fournisseurs de classification (Jev)",
+            "ja": "分類プロバイダー（Jev）",
+            "de": "Klassifizierungsanbieter (Jev)",
+            "tr": "Sınıflandırma sağlayıcıları (Jev)"
+          }
+        },
+        {
+          "label": "Integrations",
+          "link": "/integrations/",
+          "translations": {
+            "nl": "Integraties",
+            "uk": "Інтеграції",
+            "zh-CN": "集成",
+            "es": "Integraciones",
+            "pt-BR": "Integrações",
+            "ko": "통합 기능",
+            "pl": "Integracje",
+            "fr": "Intégrations",
+            "ja": "統合機能",
+            "de": "Integrationen",
+            "tr": "Entegrasyonlar"
+          }
+        },
+        {
+          "label": "MCP Servers",
+          "link": "/mcp/",
+          "translations": {
+            "nl": "MCP-servers",
+            "uk": "Сервери MCP",
+            "zh-CN": "MCP 服务器",
+            "es": "Servidores MCP",
+            "pt-BR": "Servidores MCP",
+            "ko": "MCP 서버",
+            "pl": "Serwery MCP",
+            "fr": "Serveurs MCP",
+            "ja": "MCP サーバー",
+            "de": "MCP-Server",
+            "tr": "MCP sunucuları"
+          }
+        },
+        {
+          "label": "Skills",
+          "link": "/skills/",
+          "translations": {
+            "nl": "Skills",
+            "uk": "Навички",
+            "zh-CN": "技能",
+            "es": "Habilidades",
+            "pt-BR": "Habilidades",
+            "ko": "스킬",
+            "pl": "Umiejętności",
+            "fr": "Skills",
+            "ja": "スキル",
+            "de": "Fähigkeiten",
+            "tr": "Beceriler"
+          }
+        },
+        {
+          "label": "Skills Catalog",
+          "link": "/skills-catalog/",
+          "translations": {
+            "nl": "Skillcatalogus",
+            "uk": "Каталог навичок",
+            "zh-CN": "技能目录",
+            "es": "Catálogo de habilidades",
+            "pt-BR": "Catálogo de habilidades",
+            "ko": "스킬 카탈로그",
+            "pl": "Katalog umiejętności",
+            "fr": "Catalogue de skills",
+            "ja": "スキルカタログ",
+            "de": "Fähigkeitenkatalog",
+            "tr": "Beceri kataloğu"
+          }
+        },
+        {
+          "label": "Chat Input",
+          "link": "/chat-input/",
+          "translations": {
+            "nl": "Chatinvoer",
+            "uk": "Введення в чаті",
+            "zh-CN": "聊天输入",
+            "es": "Entrada del chat",
+            "pt-BR": "Entrada do chat",
+            "ko": "채팅 입력",
+            "pl": "Wprowadzanie w czacie",
+            "fr": "Saisie dans le chat",
+            "ja": "チャット入力",
+            "de": "Chat-Eingabe",
+            "tr": "Sohbet girişi"
+          }
+        },
+        {
+          "label": "Usage & Quotas",
+          "link": "/usage/",
+          "translations": {
+            "nl": "Gebruik en limieten",
+            "uk": "Використання та квоти",
+            "zh-CN": "用量与配额",
+            "es": "Uso y cuotas",
+            "pt-BR": "Uso e cotas",
+            "ko": "사용량 및 할당량",
+            "pl": "Zużycie i limity",
+            "fr": "Utilisation et quotas",
+            "ja": "使用量とクォータ",
+            "de": "Nutzung und Kontingente",
+            "tr": "Kullanım ve kotalar"
+          }
+        }
+      ]
+    },
+    {
+      "label": "Remote access",
+      "translations": {
+        "nl": "Toegang op afstand",
+        "uk": "Віддалений доступ",
+        "zh-CN": "远程访问",
+        "es": "Acceso remoto",
+        "pt-BR": "Acesso remoto",
+        "ko": "원격 접속",
+        "pl": "Dostęp zdalny",
+        "fr": "Accès distant",
+        "ja": "リモートアクセス",
+        "de": "Zugriff von außen",
+        "tr": "Uzaktan erişim"
+      },
+      "items": [
+        {
+          "label": "Connect a Device",
+          "link": "/connect-devices/",
+          "translations": {
+            "nl": "Een apparaat verbinden",
+            "uk": "Підключення пристрою",
+            "zh-CN": "连接设备",
+            "es": "Conectar un dispositivo",
+            "pt-BR": "Conectar um dispositivo",
+            "ko": "기기 연결",
+            "pl": "Podłączanie urządzenia",
+            "fr": "Connecter un appareil",
+            "ja": "デバイスを接続",
+            "de": "Gerät verbinden",
+            "tr": "Cihaz bağlama"
+          }
+        },
+        {
+          "label": "Private Relay",
+          "link": "/private-relay/",
+          "translations": {
+            "nl": "Privérelay",
+            "uk": "Приватний Relay",
+            "zh-CN": "私密中继",
+            "es": "Relay privado",
+            "pt-BR": "Relay privado",
+            "ko": "프라이빗 릴레이",
+            "pl": "Prywatny relay",
+            "fr": "Relay privé",
+            "ja": "プライベートリレー",
+            "de": "Privates Relay",
+            "tr": "Özel relay"
+          }
+        },
+        {
+          "label": "Tunnels",
+          "link": "/tunnels/",
+          "translations": {
+            "nl": "Tunnels",
+            "uk": "Тунелі",
+            "zh-CN": "隧道",
+            "es": "Túneles",
+            "pt-BR": "Túneis",
+            "ko": "터널",
+            "pl": "Tunele",
+            "fr": "Tunnels",
+            "ja": "トンネル",
+            "de": "Tunnel",
+            "tr": "Tüneller"
+          }
+        },
+        {
+          "label": "Reverse Proxy",
+          "link": "/reverse-proxy/",
+          "translations": {
+            "nl": "Reverse proxy",
+            "uk": "Зворотний проксі",
+            "zh-CN": "反向代理",
+            "es": "Proxy inverso",
+            "pt-BR": "Proxy reverso",
+            "ko": "리버스 프록시",
+            "pl": "Reverse proxy",
+            "fr": "Reverse proxy",
+            "ja": "リバースプロキシ",
+            "de": "Reverse Proxy",
+            "tr": "Ters proxy"
+          }
+        },
+        {
+          "label": "Mobile Apps & PWA",
+          "link": "/mobile/",
+          "translations": {
+            "nl": "Mobiele apps en PWA",
+            "uk": "Мобільні застосунки та PWA",
+            "zh-CN": "移动应用与 PWA",
+            "es": "Apps móviles y PWA",
+            "pt-BR": "Apps móveis e PWA",
+            "ko": "모바일 앱 및 PWA",
+            "pl": "Aplikacje mobilne i PWA",
+            "fr": "Apps mobiles et PWA",
+            "ja": "モバイルアプリと PWA",
+            "de": "Mobile Apps und PWA",
+            "tr": "Mobil uygulamalar ve PWA"
+          }
+        },
+        {
+          "label": "Security",
+          "link": "/security/",
+          "translations": {
+            "nl": "Beveiliging",
+            "uk": "Безпека",
+            "zh-CN": "安全",
+            "es": "Seguridad",
+            "pt-BR": "Segurança",
+            "ko": "보안",
+            "pl": "Bezpieczeństwo",
+            "fr": "Sécurité",
+            "ja": "セキュリティ",
+            "de": "Sicherheit",
+            "tr": "Güvenlik"
+          }
+        }
+      ]
+    },
+    {
+      "label": "Customize",
+      "translations": {
+        "nl": "Aanpassen",
+        "uk": "Налаштування",
+        "zh-CN": "自定义",
+        "es": "Personalizar",
+        "pt-BR": "Personalizar",
+        "ko": "맞춤 설정",
+        "pl": "Dostosuj",
+        "fr": "Personnaliser",
+        "ja": "カスタマイズ",
+        "de": "Anpassen",
+        "tr": "Özelleştirme"
+      },
+      "items": [
+        {
+          "label": "Themes",
+          "link": "/themes/",
+          "translations": {
+            "nl": "Thema's",
+            "uk": "Теми",
+            "zh-CN": "主题",
+            "es": "Temas",
+            "pt-BR": "Temas",
+            "ko": "테마",
+            "pl": "Motywy",
+            "fr": "Thèmes",
+            "ja": "テーマ",
+            "de": "Designs",
+            "tr": "Temalar"
+          }
+        },
+        {
+          "label": "Notifications",
+          "link": "/notifications/",
+          "translations": {
+            "nl": "Meldingen",
+            "uk": "Сповіщення",
+            "zh-CN": "通知",
+            "es": "Notificaciones",
+            "pt-BR": "Notificações",
+            "ko": "알림",
+            "pl": "Powiadomienia",
+            "fr": "Notifications",
+            "ja": "通知",
+            "de": "Benachrichtigungen",
+            "tr": "Bildirimler"
+          }
+        },
+        {
+          "label": "Voice Mode",
+          "link": "/voice/",
+          "translations": {
+            "nl": "Spraakmodus",
+            "uk": "Голосовий режим",
+            "zh-CN": "语音模式",
+            "es": "Modo de voz",
+            "pt-BR": "Modo de voz",
+            "ko": "음성 모드",
+            "pl": "Tryb głosowy",
+            "fr": "Mode vocal",
+            "ja": "音声モード",
+            "de": "Sprachmodus",
+            "tr": "Ses modu"
+          }
+        },
+        {
+          "label": "Project Icons",
+          "link": "/project-icons/",
+          "translations": {
+            "nl": "Projectpictogrammen",
+            "uk": "Іконки проєктів",
+            "zh-CN": "项目图标",
+            "es": "Iconos de proyecto",
+            "pt-BR": "Ícones de projeto",
+            "ko": "프로젝트 아이콘",
+            "pl": "Ikony projektów",
+            "fr": "Icônes de projet",
+            "ja": "プロジェクトアイコン",
+            "de": "Projektsymbole",
+            "tr": "Proje simgeleri"
+          }
+        }
+      ]
+    },
+    {
+      "label": "Extensions",
+      "translations": {
+        "nl": "Extensies",
+        "uk": "Розширення",
+        "zh-CN": "扩展",
+        "es": "Extensiones",
+        "pt-BR": "Extensões",
+        "ko": "확장",
+        "pl": "Rozszerzenia",
+        "fr": "Extensions",
+        "ja": "拡張機能",
+        "de": "Erweiterungen",
+        "tr": "Eklentiler"
+      },
+      "items": [
+        {
+          "label": "Use extensions",
+          "link": "/extensions/",
+          "translations": {
+            "nl": "Extensies gebruiken",
+            "uk": "Користування розширеннями",
+            "zh-CN": "使用扩展",
+            "es": "Usar extensiones",
+            "pt-BR": "Usar extensões",
+            "ko": "확장 사용하기",
+            "pl": "Korzystanie z rozszerzeń",
+            "fr": "Utiliser les extensions",
+            "ja": "拡張機能を使う",
+            "de": "Erweiterungen verwenden",
+            "tr": "Eklentileri kullanma"
+          }
+        },
+        {
+          "label": "Build an extension",
+          "link": "/sdk/",
+          "translations": {
+            "nl": "Een extensie bouwen",
+            "uk": "Зробити розширення",
+            "zh-CN": "构建扩展",
+            "es": "Crear una extensión",
+            "pt-BR": "Criar uma extensão",
+            "ko": "확장 만들기",
+            "pl": "Zbuduj rozszerzenie",
+            "fr": "Créer une extension",
+            "ja": "拡張機能を作る",
+            "de": "Eine Erweiterung bauen",
+            "tr": "Eklenti oluştur"
+          }
+        },
+        {
+          "label": "Host API",
+          "link": "/sdk/host/",
+          "translations": {
+            "nl": "Host-API",
+            "uk": "API хоста",
+            "zh-CN": "宿主 API",
+            "es": "API del host",
+            "pt-BR": "API do host",
+            "ko": "호스트 API",
+            "pl": "API hosta",
+            "fr": "API host",
+            "ja": "ホスト API",
+            "de": "Host-API",
+            "tr": "Host API"
+          }
+        },
+        {
+          "label": "UI kit",
+          "link": "/sdk/ui/",
+          "translations": {
+            "nl": "UI-kit",
+            "uk": "UI-набір",
+            "zh-CN": "UI 套件",
+            "es": "Kit de UI",
+            "pt-BR": "Kit de UI",
+            "ko": "UI 키트",
+            "pl": "Zestaw UI",
+            "fr": "Kit UI",
+            "ja": "UI キット",
+            "de": "UI-Kit",
+            "tr": "UI kiti"
+          }
+        },
+        {
+          "label": "Example",
+          "link": "/sdk/example/",
+          "translations": {
+            "nl": "Voorbeeld",
+            "uk": "Приклад",
+            "zh-CN": "示例",
+            "es": "Ejemplo",
+            "pt-BR": "Exemplo",
+            "ko": "예제",
+            "pl": "Przykład",
+            "fr": "Exemple",
+            "ja": "サンプル",
+            "de": "Beispiel",
+            "tr": "Örnek"
+          }
+        }
+      ]
+    },
+    {
+      "label": "Desktop",
+      "translations": {
+        "nl": "Desktop",
+        "uk": "Десктоп",
+        "zh-CN": "桌面端",
+        "es": "Escritorio",
+        "pt-BR": "Desktop",
+        "ko": "데스크톱",
+        "pl": "Pulpit",
+        "fr": "Desktop",
+        "ja": "デスクトップ",
+        "de": "Desktop",
+        "tr": "Masaüstü"
+      },
+      "items": [
+        {
+          "label": "Remote Instances",
+          "link": "/remote-instances/",
+          "translations": {
+            "nl": "Remote-instanties",
+            "uk": "Віддалені інстанси",
+            "zh-CN": "远程实例",
+            "es": "Instancias remotas",
+            "pt-BR": "Instâncias remotas",
+            "ko": "원격 인스턴스",
+            "pl": "Zdalne instancje",
+            "fr": "Instances distantes",
+            "ja": "リモートインスタンス",
+            "de": "Entfernte Instanzen",
+            "tr": "Uzak örnekler"
+          }
+        },
+        {
+          "label": "Browser Panel",
+          "link": "/desktop-browser/",
+          "translations": {
+            "nl": "Browserpaneel",
+            "uk": "Панель браузера",
+            "zh-CN": "浏览器面板",
+            "es": "Panel del navegador",
+            "pt-BR": "Painel do navegador",
+            "ko": "브라우저 패널",
+            "pl": "Panel przeglądarki",
+            "fr": "Panneau navigateur",
+            "ja": "ブラウザパネル",
+            "de": "Browser-Panel",
+            "tr": "Tarayıcı paneli"
+          }
+        },
+        {
+          "label": "Desktop Tunnels",
+          "link": "/desktop-tunnels/",
+          "translations": {
+            "nl": "Desktoptunnels",
+            "uk": "Десктопні тунелі",
+            "zh-CN": "桌面端隧道",
+            "es": "Túneles de escritorio",
+            "pt-BR": "Túneis no desktop",
+            "ko": "데스크톱 터널",
+            "pl": "Tunele w aplikacji desktopowej",
+            "fr": "Tunnels desktop",
+            "ja": "デスクトップトンネル",
+            "de": "Desktop-Tunnel",
+            "tr": "Masaüstü tünelleri"
+          }
+        },
+        {
+          "label": "SSH Hosts & Proxying",
+          "link": "/ssh-hosts-proxying/",
+          "translations": {
+            "nl": "SSH-hosts en poortdoorsturing",
+            "uk": "SSH-хости та проксі",
+            "zh-CN": "SSH 主机与代理",
+            "es": "Hosts SSH y proxy",
+            "pt-BR": "Hosts SSH e proxy",
+            "ko": "SSH 호스트 및 프록시",
+            "pl": "Hosty SSH i proxy",
+            "fr": "Hosts SSH et proxy",
+            "ja": "SSH ホストとプロキシ",
+            "de": "SSH-Hosts und Proxying",
+            "tr": "SSH hostları ve proxy"
+          }
+        },
+        {
+          "label": "Updates",
+          "link": "/updates/",
+          "translations": {
+            "nl": "Updates",
+            "uk": "Оновлення",
+            "zh-CN": "更新",
+            "es": "Actualizaciones",
+            "pt-BR": "Atualizações",
+            "ko": "업데이트",
+            "pl": "Aktualizacje",
+            "fr": "Mises à jour",
+            "ja": "更新",
+            "de": "Aktualisierungen",
+            "tr": "Güncellemeler"
+          }
+        }
+      ]
+    },
+    {
+      "label": "Help",
+      "translations": {
+        "nl": "Hulp",
+        "uk": "Допомога",
+        "zh-CN": "帮助",
+        "es": "Ayuda",
+        "pt-BR": "Ajuda",
+        "ko": "도움말",
+        "pl": "Pomoc",
+        "fr": "Aide",
+        "ja": "ヘルプ",
+        "de": "Hilfe",
+        "tr": "Yardım"
+      },
+      "items": [
+        {
+          "label": "Troubleshooting",
+          "link": "/troubleshooting/",
+          "translations": {
+            "nl": "Problemen oplossen",
+            "uk": "Усунення несправностей",
+            "zh-CN": "问题排查",
+            "es": "Resolución de problemas",
+            "pt-BR": "Solução de problemas",
+            "ko": "문제 해결",
+            "pl": "Rozwiązywanie problemów",
+            "fr": "Dépannage",
+            "ja": "トラブルシューティング",
+            "de": "Fehlerbehebung",
+            "tr": "Sorun giderme"
+          }
+        },
+        {
+          "label": "OpenCode Connection",
+          "link": "/troubleshooting/opencode-connection/",
+          "translations": {
+            "nl": "Verbinding met OpenCode",
+            "uk": "Підключення до OpenCode",
+            "zh-CN": "OpenCode 连接",
+            "es": "Conexión con OpenCode",
+            "pt-BR": "Conexão com o OpenCode",
+            "ko": "OpenCode 연결",
+            "pl": "Połączenie z OpenCode",
+            "fr": "Connexion à OpenCode",
+            "ja": "OpenCode 接続",
+            "de": "OpenCode-Verbindung",
+            "tr": "OpenCode bağlantısı"
+          }
+        },
+        {
+          "label": "Worktrees & Git",
+          "link": "/troubleshooting/worktrees-git/",
+          "translations": {
+            "nl": "Worktrees en Git",
+            "uk": "Worktree та Git",
+            "zh-CN": "Worktree 与 Git",
+            "es": "Worktrees y Git",
+            "pt-BR": "Worktrees e Git",
+            "ko": "Worktree 및 Git",
+            "pl": "Worktree i Git",
+            "fr": "Worktrees et Git",
+            "ja": "Worktrees と Git",
+            "de": "Worktrees und Git",
+            "tr": "Worktree'ler ve Git"
+          }
+        },
+        {
+          "label": "Remote Access",
+          "link": "/troubleshooting/remote-access/",
+          "translations": {
+            "nl": "Toegang op afstand",
+            "uk": "Віддалений доступ",
+            "zh-CN": "远程访问",
+            "es": "Acceso remoto",
+            "pt-BR": "Acesso remoto",
+            "ko": "원격 접속",
+            "pl": "Dostęp zdalny",
+            "fr": "Accès distant",
+            "ja": "リモートアクセス",
+            "de": "Externer Zugriff",
+            "tr": "Uzaktan erişim"
+          }
+        }
+      ]
+    }
+  ]
+}

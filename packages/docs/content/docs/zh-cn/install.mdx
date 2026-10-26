@@ -1,0 +1,38 @@
+---
+title: 安装
+description: 在桌面、Web、VS Code 或手机上安装 OpenChamber。
+---
+
+# 安装
+
+选择适合你工作方式的应用：
+
+- 面向 macOS、Windows 和 Linux 的桌面应用
+- 由 CLI 运行的 Web 应用，可以像手机应用一样安装（即 PWA）
+- VS Code 扩展，也适用于 Cursor、Windsurf 和 Trae
+- 面向 iPhone 和 Android 的移动应用，处于公开测试阶段
+
+## 桌面
+
+从[下载页面](https://openchamber.dev/download/)或 [GitHub Releases](https://github.com/openchamber/openchamber/releases/latest) 下载最新版本并打开。Linux 版本提供 `.deb`、`.rpm` 和 AppImage。
+
+桌面应用自带一份 [OpenCode](https://opencode.ai)（OpenChamber 所基于的 AI 编程智能体），无需另外安装。
+
+## Web + PWA
+
+Web 应用需要在运行它的机器上安装 [OpenCode](https://opencode.ai) 和 Node.js 24.14 或更高版本。
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/openchamber/openchamber/main/scripts/install.sh | bash
+openchamber --ui-password be-creative-here
+```
+
+打开 CLI 输出的 URL（通常是 `http://localhost:3000`），你应该能看到 OpenChamber 的会话列表。想随时打开的话，可以用浏览器地址栏里的“安装”选项把它添加为应用。
+
+## VS Code
+
+从 [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=fedaykindev.openchamber) 安装 OpenChamber。Cursor、Windsurf 和 Trae 从 [Open VSX](https://open-vsx.org/extension/FedaykinDev/openchamber) 安装。扩展需要已安装 [OpenCode](https://opencode.ai)，之后 OpenChamber 视图会出现在侧边栏中。
+
+## 移动应用
+
+通过 TestFlight 安装 iPhone 应用，或从最新版本下载 Android 应用，然后将它与你的电脑配对。[移动应用与 PWA](/zh-cn/mobile/) 介绍了这两个步骤。

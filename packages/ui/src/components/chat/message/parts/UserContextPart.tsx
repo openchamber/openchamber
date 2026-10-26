@@ -1,0 +1,254 @@
+import React from 'react';
+
+import { Icon } from '@/components/icon/Icon';
+import type { IconName } from '@/components/icon/icons';
+import { useI18n } from '@/lib/i18n';
+import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
+import { useChangeRequestTerm } from '@/lib/source-control/providers/registry';
+import type { ContextPartPayload } from '@/lib/messages/contextParts';
+import { cn } from '@/lib/utils';
+import { withAttachmentChips } from './attachmentCitationChips';
+import { legacyChatQuoteAnchor } from '@/lib/chatQuoteAnchor';
+import { useChatQuoteHighlightApi } from '../../hooks/chatQuoteHighlightStore';
+import { fileWithDiffCommentOrigin } from '@/lib/diffCommentOrigin';
+import { isWholeFileComment } from '@/components/comments/wholeFileComment';
+
+/**
+ * A context item attached to a user message: an inline code comment, a
+ * terminal selection, a browser annotation, or GitHub PR context.
+ *
+ * The quoted material renders as a messenger-style reply: a source caption and
+ * the quote behind a plain left bar, in muted text, clamped to a few lines
+ * (click toggles the full quote). The user's comment follows below as regular
+ * message text, so the pair reads as "a reply to this quote" instead of a
+ * boxed widget inside the bubble.
+ */
+
+const ContextCard: React.FC<{
+    icon: IconName;
+    summary: string;
+    /** Full untruncated context, shown on hover. */
+    title?: string;
+    body: string;
+    text: string;
+    /** Render the quote in the code font (code, terminal output, CI logs). */
+    mono?: boolean;
+    /**
+     * Message-level collapse: with collapsible messages on, the whole user
+     * message (text parts and cards alike) shares one expanded state, so a
+     * collapsed card is a two-line preview and a click asks the message to
+     * expand instead of toggling anything of its own.
+     */
+    collapsed?: boolean;
+    onExpand?: () => void;
+    /** Scroll to where the quote came from, with the button's label. */
+    reveal?: { label: string; onReveal: () => void };
+    /** The message's file names: `[name]` in the user's comment renders as a file chip. */
+    attachmentFilenames: readonly string[];
+}> = ({ icon, summary, title, body, text, mono, collapsed, onExpand, reveal, attachmentFilenames }) => {
+    const [expanded, setExpanded] = React.useState(false);
+    const hasBody = body.trim().length > 0;
+    const hasText = text.trim().length > 0;
+
+    if (collapsed) {
+        // One line per attachment: the source caption, and the user's comment
+        // after it when there is one ("Quoted from an earlier message: thanks,
+        // that settles it"). Attachments without a comment (terminal output
+        // and the like) collapse to the caption alone.
+        const comment = text.trim();
+        const handleKeyDown = (event: React.KeyboardEvent): void => {
+            if (event.key !== 'Enter' && event.key !== ' ') return;
+            event.preventDefault();
+            onExpand?.();
+        };
+        return (
+            <div
+                className="my-1 flex min-w-0 max-w-full cursor-pointer items-center gap-1.5 border-s-2 border-[var(--interactive-border)] ps-3 text-xs text-muted-foreground"
+                role="button"
+                tabIndex={0}
+                onClick={onExpand}
+                onKeyDown={handleKeyDown}
+                title={title}
+            >
+                <Icon name={icon} className="h-3.5 w-3.5 shrink-0" />
+                <span className="truncate">
+                    {comment.length > 0 ? `${summary}: ` : summary}
+                    {comment.length > 0 ? (
+                        <span className="text-sm text-[var(--surface-foreground)]">{withAttachmentChips(comment, attachmentFilenames, 'comment')}</span>
+                    ) : null}
+                </span>
+                <Icon name="arrow-down-s" className="ms-auto h-3.5 w-3.5 shrink-0 text-muted-foreground/70" />
+            </div>
+        );
+    }
+
+    return (
+        <div className="my-1.5 min-w-0 max-w-full">
+            <div
+                className={cn('min-w-0 border-s-2 border-[var(--interactive-border)] ps-3', hasBody && 'cursor-pointer')}
+                onClick={hasBody ? () => setExpanded((value) => !value) : undefined}
+                title={title}
+            >
+                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <Icon name={icon} className="h-3.5 w-3.5 shrink-0" />
+                    <span className="truncate">{summary}</span>
+                    {reveal ? (
+                        <button
+                            type="button"
+                            className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full hover:bg-interactive-hover hover:text-foreground"
+                            style={{ minHeight: 0, minWidth: 0 }}
+                            onClick={(event) => {
+                                event.stopPropagation();
+                                reveal.onReveal();
+                            }}
+                            aria-label={reveal.label}
+                            title={reveal.label}
+                        >
+                            <Icon name="arrow-up" className="h-3.5 w-3.5" />
+                        </button>
+                    ) : null}
+                </div>
+                {hasBody ? (
+                    <div
+                        className={cn(
+                            'mt-1 whitespace-pre-wrap break-words text-muted-foreground',
+                            mono ? 'font-mono text-xs leading-5' : 'text-sm',
+                            !expanded && 'line-clamp-4'
+                        )}
+                    >
+                        {body}
+                    </div>
+                ) : null}
+            </div>
+            {hasText ? (
+                <div className="mt-1.5 whitespace-pre-wrap break-words font-sans text-sm text-[var(--surface-foreground)]">
+                    {withAttachmentChips(text, attachmentFilenames, 'comment')}
+                </div>
+            ) : null}
+        </div>
+    );
+};
+
+const basename = (path: string): string => {
+    const segments = path.split('/').filter(Boolean);
+    return segments[segments.length - 1] ?? path;
+};
+
+const UserContextPart: React.FC<{
+    payload: ContextPartPayload;
+    /** Message-level collapse state, shared with the text parts. */
+    collapsed?: boolean;
+    onExpand?: () => void;
+    attachmentFilenames: readonly string[];
+}> = ({ payload, collapsed, onExpand, attachmentFilenames }) => {
+    const { t } = useI18n();
+    const quoteHighlights = useChatQuoteHighlightApi();
+    // A part without a provider was written before providers other than GitHub existed: a pull request.
+    const changeRequestTerm = useChangeRequestTerm(payload.kind === 'pr-comment' || payload.kind === 'pr-check' ? payload.provider : null);
+    const shared = { collapsed, onExpand, attachmentFilenames };
+
+    switch (payload.kind) {
+        case 'code-comment': {
+            const file = fileWithDiffCommentOrigin(basename(payload.fileLabel), payload.origin);
+            const fullFile = fileWithDiffCommentOrigin(payload.fileLabel, payload.origin);
+            const wholeFile = isWholeFileComment(payload);
+            const summary = wholeFile
+                ? t('chat.message.context.codeCommentFile', { file })
+                : payload.startLine === payload.endLine
+                ? t('chat.message.context.codeCommentLine', { file, line: payload.startLine })
+                : t('chat.message.context.codeComment', { file, start: payload.startLine, end: payload.endLine });
+            const fullTitle = wholeFile
+                ? t('chat.message.context.codeCommentFile', { file: fullFile })
+                : payload.startLine === payload.endLine
+                ? t('chat.message.context.codeCommentLine', { file: fullFile, line: payload.startLine })
+                : t('chat.message.context.codeComment', { file: fullFile, start: payload.startLine, end: payload.endLine });
+            return <ContextCard icon="chat-1" summary={summary} title={fullTitle} body={payload.code} text={payload.text} mono {...shared} />;
+        }
+        case 'terminal':
+            return (
+                <ContextCard
+                    icon="terminal"
+                    summary={t('chat.message.terminalContext', {
+                        terminal: payload.terminalLabel,
+                        start: payload.startLine,
+                        end: payload.endLine,
+                    })}
+                    body={payload.output}
+                    text=""
+                    mono
+                    {...shared}
+                />
+            );
+        case 'browser-annotation':
+            return (
+                <ContextCard
+                    icon="global"
+                    summary={t('chat.message.context.browserAnnotation', { page: payload.pageUrl })}
+                    title={payload.pageUrl}
+                    body={payload.prompt}
+                    text={payload.text}
+                    {...shared}
+                />
+            );
+        case 'pr-comment':
+            return (
+                <ContextCard
+                    icon="git-pull-request"
+                    summary={t(changeRequestCopy('chat.message.context.prComment', changeRequestTerm), { label: payload.label })}
+                    body={payload.body}
+                    text={payload.text}
+                    {...shared}
+                />
+            );
+        case 'pr-check':
+            return (
+                <ContextCard
+                    icon="close-circle"
+                    summary={t(changeRequestCopy('chat.message.context.prCheck', changeRequestTerm), { label: payload.label })}
+                    body={payload.output}
+                    text={payload.text}
+                    mono
+                    {...shared}
+                />
+            );
+        case 'file-quote': {
+            const file = basename(payload.fileLabel);
+            const summary = payload.startLine != null && payload.endLine != null
+                ? (payload.startLine === payload.endLine
+                    ? t('chat.message.context.codeCommentLine', { file, line: payload.startLine })
+                    : t('chat.message.context.codeComment', { file, start: payload.startLine, end: payload.endLine }))
+                : t('chat.message.context.fileQuote', { file });
+            return <ContextCard icon="chat-1" summary={summary} title={payload.fileLabel} body={payload.quote} text={payload.text} {...shared} />;
+        }
+        case 'chat-quote': {
+            const sourceMessageId = payload.messageId;
+            return (
+                <ContextCard
+                    icon="chat-1"
+                    summary={t('chat.message.context.chatQuote')}
+                    body={payload.quote}
+                    text={payload.text}
+                    reveal={quoteHighlights && sourceMessageId
+                        ? {
+                            label: t('chat.message.context.showQuoteSource'),
+                            onReveal: () => quoteHighlights.reveal(sourceMessageId, payload.anchor ?? legacyChatQuoteAnchor(payload.quote)),
+                        }
+                        : undefined}
+                    {...shared}
+                />
+            );
+        }
+        case 'repository-issue':
+        case 'repository-discussion':
+        case 'change-request':
+        case 'tracker-item':
+        case 'guest-issue':
+        case 'guest-pr':
+        case 'session':
+        case 'session-message':
+            // Rendered as link attachments by normalizeUserDisplayParts.
+            return null;
+    }
+};
+
+export default React.memo(UserContextPart);

@@ -1,0 +1,117 @@
+{
+  "metadata": {
+    "id": "vitesse-light-light",
+    "name": "Vitesse Light",
+    "variant": "light",
+    "description": "Converted from VS Code theme",
+    "version": "1.0.0",
+    "tags": [
+      "light",
+      "converted",
+      "vscode"
+    ]
+  },
+  "colors": {
+    "primary": {
+      "base": "#1c6b48",
+      "hover": "#1c6b48",
+      "active": "#228056",
+      "muted": "#1c6b4880"
+    },
+    "surface": {
+      "background": "#ffffff",
+      "foreground": "#484843",
+      "muted": "#f9f9f9",
+      "mutedForeground": "#6b6b64",
+      "elevated": "#f5f5f5",
+      "overlay": "#ffffff80",
+      "subtle": "#f6f3f3"
+    },
+    "interactive": {
+      "border": "#e6e2e2f1",
+      "selection": "#22222218",
+      "borderHover": "#cbc7c7f5",
+      "borderFocus": "#635454b8",
+      "focus": "#00000000",
+      "focusRing": "#00000050",
+      "cursor": "#CECDC3",
+      "hover": "#0000000a",
+      "active": "#00000014"
+    },
+    "status": {
+      "error": "#a85757",
+      "warning": "#a45d2b",
+      "success": "#1e754f",
+      "info": "#296aa3"
+    },
+    "syntax": {
+      "base": {
+        "background": "#fcfcfc",
+        "comment": "#a0ada0",
+        "keyword": "#1e754f",
+        "string": "#b56959",
+        "number": "#2f798a",
+        "function": "#59873a",
+        "variable": "#b07d48",
+        "type": "#2e808f",
+        "operator": "#ab5959"
+      },
+      "tokens": {
+        "commentDoc": "#575653",
+        "keywordImport": "#D14D41",
+        "storageModifier": "#4385BE",
+        "method": "#879A39",
+        "variableProperty": "#998418",
+        "variableOther": "#879A39",
+        "className": "#5a6aa6"
+      },
+      "highlights": {
+        "diffAdded": "#1e754f",
+        "diffRemoved": "#ab5959",
+        "diffModified": "#296aa3"
+      }
+    },
+    "pr": {
+      "merged": "#5843be"
+    },
+    "chat": {
+      "userMessageBackground": "#e9efec",
+      "divider": "#00000015",
+      "background": "#ffffff"
+    },
+    "markdown": {
+      "link": "#1e754f",
+      "linkHover": "#1c6b48",
+      "inlineCode": "#3A631E",
+      "inlineCodeBackground": "#fcfcfc",
+      "blockquote": "#2c2c2850",
+      "blockquoteBorder": "#00000015",
+      "listMarker": "#1c6b4899",
+      "bold": "#41413c",
+      "italic": "#484843"
+    },
+    "tools": {
+      "border": "#dbd7d799",
+      "icon": "#6b6b64",
+      "title": "#484843",
+      "description": "#6b6b64",
+      "edit": {
+        "addedBackground": "#1e754f20",
+        "removedBackground": "#ab595920",
+        "lineNumber": "#6b6b64"
+      }
+    }
+  },
+  "config": {
+    "fonts": {
+      "sans": "ui-monospace, \"SFMono-Regular\", \"Menlo\", \"Cascadia Mono\", \"Segoe UI Mono\", monospace",
+      "mono": "ui-monospace, \"SFMono-Regular\", \"Menlo\", \"Cascadia Mono\", \"Segoe UI Mono\", monospace",
+      "heading": "ui-monospace, \"SFMono-Regular\", \"Menlo\", \"Cascadia Mono\", \"Segoe UI Mono\", monospace"
+    },
+    "transitions": {
+      "fast": "150ms ease",
+      "normal": "250ms ease",
+      "slow": "350ms ease"
+    }
+  }
+}

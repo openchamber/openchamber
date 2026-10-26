@@ -1,0 +1,52 @@
+import type { DesktopBootOutcome } from '@/lib/desktopBoot';
+
+declare global {
+  interface Window {
+    __OPENCHAMBER_HOME__?: string;
+    __OPENCHAMBER_MACOS_MAJOR__?: number;
+    __OPENCHAMBER_LOCAL_ORIGIN__?: string;
+    __OPENCHAMBER_SSH_FORWARD_API_URL__?: string;
+    __OPENCHAMBER_ELECTRON__?: { runtime?: string; arch?: string; trayEnabled?: boolean; nativeFrame?: boolean };
+    __OPENCHAMBER_PLATFORM__?: string;
+    __OPENCHAMBER_DESKTOP_BOOT_OUTCOME__?: DesktopBootOutcome;
+  }
+
+  interface WebviewElement extends HTMLElement {
+    loadURL(url: string): void;
+    goBack(): void;
+    goForward(): void;
+    canGoBack(): boolean;
+    canGoForward(): boolean;
+    reload(): void;
+    reloadIgnoringCache(): void;
+    getZoomLevel(): number;
+    setZoomLevel(level: number): void;
+    stop(): void;
+    getURL(): string;
+    getTitle(): string;
+    isLoading(): boolean;
+    getWebContentsId(): number;
+    openDevTools(): void;
+    closeDevTools(): void;
+    isDevToolsOpened(): boolean;
+    executeJavaScript(code: string, userGesture?: boolean): Promise<unknown>;
+  }
+
+  namespace JSX {
+    interface IntrinsicElements {
+      webview: React.DetailedHTMLProps<
+        React.HTMLAttributes<WebviewElement> & {
+          src?: string;
+          partition?: string;
+          preload?: string;
+          nodeintegration?: string;
+          allowpopups?: string;
+          ref?: React.Ref<WebviewElement>;
+        },
+        WebviewElement
+      >;
+    }
+  }
+}
+
+export {};

@@ -1,0 +1,47 @@
+---
+title: Acesso Remoto
+description: Resolva túneis, instâncias remotas e o acesso ao OpenChamber de outro dispositivo.
+---
+
+# Acesso Remoto
+
+Quando você não consegue alcançar o OpenChamber pelo seu celular ou outra máquina, a solução depende de como você está conectando.
+
+## Confira o básico primeiro
+
+- abra `http://localhost:3000` no mesmo computador primeiro — se isso falhar, não é um problema remoto; veja [Conexão com o OpenCode](/pt-br/troubleshooting/opencode-connection/)
+- confirme que o servidor está em execução com `openchamber status`
+
+## O dispositivo pareado não conecta
+
+- o código QR / link de pareamento é de **uso único** — se já foi escaneado (ou expirou), crie um novo em **Adicionar um dispositivo**
+- se o dispositivo foi pareado com **Somente rede doméstica**, ele não consegue conectar de fora dessa rede — pareie-o de novo com **Em qualquer lugar**
+- para pareamentos **Em qualquer lugar**, verifique **Settings → Remote Instances → OpenChamber Relay** no servidor: deve dizer **Conectado**; se não, desative e reative o relay
+- se um dispositivo foi **revogado**, o token dele se perdeu de vez — pareie-o de novo com um novo código QR
+
+Veja [Conectar um Dispositivo](/pt-br/connect-devices/) e [Private Relay](/pt-br/private-relay/) para entender como essas conexões funcionam.
+
+## O link do túnel não funciona
+
+- execute `openchamber tunnel status --all`
+- reinicie o túnel a partir da mesma instância e porta
+- regere o link de conexão se o anterior já foi usado
+
+Veja [Túneis](/pt-br/tunnels/) para a configuração completa.
+
+## A instância remota não conecta (desktop)
+
+Quando uma [instância remota](/pt-br/remote-instances/) trava, o OpenChamber nomeia a etapa que falhou:
+
+- **auth** — sua senha SSH ou de UI foi rejeitada; insira-a novamente
+- **install / start** — o OpenChamber não conseguiu configurar ou iniciar o servidor na máquina remota; verifique os requisitos daquela máquina
+- **forwarding** — a conexão está de pé, mas a porta não está chegando até você; tente uma porta local diferente
+
+## Atrás do seu próprio servidor
+
+Se você colocou o OpenChamber atrás de um reverse proxy e ele carrega de forma estranha ou não conecta, veja [Reverse Proxy](/pt-br/reverse-proxy/).
+
+## Relacionado
+
+- [Conectar um Dispositivo](/pt-br/connect-devices/) · [Private Relay](/pt-br/private-relay/) · [Túneis](/pt-br/tunnels/) · [Instâncias Remotas](/pt-br/remote-instances/) · [Reverse Proxy](/pt-br/reverse-proxy/)
+- [Segurança](/pt-br/security/) — proteja a UI antes de expô-la

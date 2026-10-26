@@ -1,0 +1,38 @@
+---
+title: Projektaktionen
+description: Speichere Befehle, die du oft ausführst, und starte sie mit einem Klick.
+---
+
+# Projektaktionen
+
+Eine Projektaktion ist ein Shell-Befehl, den du einmal speicherst und dann mit einem Klick ausführst — dein Entwicklungsserver, ein Build, ein Testlauf. Jedes Projekt hat seine eigene Liste. Richte sie unter **Einstellungen → Projekte → Projektaktionen** ein.
+
+## Eine Aktion hinzufügen
+
+1. Öffne **Einstellungen → Projekte** und suche den Bereich **Projektaktionen**.
+2. Füge eine Aktion hinzu, gib ihr einen Namen, wähle ein Symbol und gib den auszuführenden Befehl ein.
+3. Speichern.
+
+Du kannst eine Aktion auf bestimmte Betriebssysteme beschränken, wenn ein Befehl nur auf einem davon sinnvoll ist.
+
+## Eine Aktion ausführen
+
+Der Abschnitt **Projekt** im Work-Status-Panel, der Karte rechts neben dem Chat, hat eine Aktionszeile. Drücke die Aktion, um sie auszuführen, und drücke sie noch einmal, um sie zu stoppen. Der Pfeil daneben wählt eine andere Aktion, und sein Eintrag **Neue Aktion hinzufügen** öffnet **Einstellungen → Projekte**. Die Zeile zeigt die Aktion, die du zuletzt gewählt hast, und solange eine Aktion läuft, zeigt sie diese. Hat ein Lauf eine Vorschauadresse, öffnet ein Globus-Button neben der Zeile sie.
+
+Mit der Tastatur öffnest du den Dialog für Projektaktionen mit **⌘⌥R** auf macOS oder **Ctrl+Alt+R** auf Windows und Linux. Er listet die Aktionen des aktuellen Projekts mit ihrem Zustand. Die Pfeiltasten bewegen die Markierung, Enter startet eine ruhende Aktion oder stoppt eine laufende, und Esc schließt den Dialog. Ein Suchfeld filtert die Liste, und **Aktionen einrichten** am Ende öffnet die Aktionseinstellungen des Projekts. Der Dialog öffnet sich mit der Aktion aus der Work-Status-Zeile markiert, also wiederholt das Kürzel gefolgt von Enter deinen letzten Lauf. Das Kürzel änderst du unter **Einstellungen → Tastenkombinationen** bei **Projektaktionen öffnen**.
+
+In der Befehlspalette, die du mit ⌘P oder Ctrl+P öffnest, tippe "ausführen" oder den Namen einer Aktion, um Einträge wie **Ausführen: dev** und **Stoppen: dev** zu finden. **Projektaktionen** in der Palette öffnet den Dialog.
+
+Jede Aktion läuft in einem Terminal im Ordner der Sitzung, also im Worktree, wenn die Sitzung in einem liegt, oder im Haupt-Checkout bei Aktionen, die dort laufen sollen. Das Terminal öffnet sich, damit du die Ausgabe verfolgen kannst. Projektaktionen gibt es auf dem Desktop und in der Web-App. In VS Code, auf Smartphones und in Sitzungen unter Chats gibt es keine.
+
+## Einen Entwicklungsserver automatisch öffnen
+
+Aktiviere **auto-open URL** für eine Aktion, die einen Server startet. OpenChamber überwacht die Ausgabe auf eine lokale Adresse und bietet an, sie zu öffnen — siehe [Vorschau & Entwicklungsserver](/preview/). Auf dem Desktop kannst du sie außerdem über einen SSH-Port-Forward leiten.
+
+Hat der Server eine feste Adresse, trag sie im URL-Feld der Aktion ein. `{worktree}` und `{branch}` setzen den Checkout ein, in dem die Aktion läuft, also funktioniert eine Aktion in jedem Worktree. Mit [portless](https://github.com/vercel-labs/portless) öffnet `https://{worktree}.myapp.localhost` in einem Worktree auf `feature/auth` die Adresse `https://auth.myapp.localhost` und im Haupt-Checkout `https://myapp.localhost`. Oft brauchst du das Feld gar nicht: Wenn portless seine Adresse ausgibt, öffnet OpenChamber diese statt des Ports dahinter. Auf einem Desktop, der mit einer entfernten Instanz verbunden ist, öffnet es stattdessen den Port, weil nur Loopback-Ports durch den Tunnel zur entfernten Maschine gelangen.
+
+## Verwandt
+
+- [Repository-Konfiguration](/repository-config/) — Aktionen und Setup-Befehle im Repository für das ganze Team ablegen
+
+- [Vorschau & Entwicklungsserver](/preview/) — einen laufenden Entwicklungsserver in OpenChamber öffnen

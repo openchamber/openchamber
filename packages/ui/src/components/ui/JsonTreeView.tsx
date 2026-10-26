@@ -1,0 +1,108 @@
+import React from 'react';
+import stripJsonComments from 'strip-json-comments';
+
+import { Button } from '@/components/ui/button';
+import { Icon } from "@/components/icon/Icon";
+import { JsonTreeViewer } from './JsonTreeViewer';
+import { useI18n } from '@/lib/i18n';
+import { cn } from '@/lib/utils';
+
+interface JsonTreeViewProps {
+  jsonString: string;
+  format?: 'json' | 'jsonc';
+  className?: string;
+  maxHeight?: string;
+  initiallyExpandedDepth?: number;
+}
+
+const JsonTreeView = React.memo(function JsonTreeView({
+  jsonString,
+  format = 'json',
+  className,
+  maxHeight = '100%',
+  initiallyExpandedDepth = 2,
+}: JsonTreeViewProps) {
+  const { t } = useI18n();
+  const viewerRef = React.useRef<{ expandAll: () => void; collapseAll: () => void }>(null);
+  const [parseError, setParseError] = React.useState<string | null>(null);
+
+  const parsedData = React.useMemo(() => {
+    try {
+      const trimmed = jsonString.trim();
+      if (!trimmed) {
+        setParseError(t('jsonTreeView.error.emptyJson'));
+        return null;
+      }
+      const source = format === 'jsonc'
+        ? stripJsonComments(trimmed, { trailingCommas: true })
+        : trimmed;
+      const parsed = JSON.parse(source);
+      setParseError(null);
+      return parsed;
+    } catch (err) {
+      setParseError(err instanceof Error ? err.message : t('jsonTreeView.error.invalidJson'));
+      return null;
+    }
+  }, [jsonString, format, t]);
+
+  const handleExpandAll = React.useCallback(() => {
+    viewerRef.current?.expandAll();
+  }, []);
+
+  const handleCollapseAll = React.useCallback(() => {
+    viewerRef.current?.collapseAll();
+  }, []);
+
+  if (parseError) {
+    return (
+      <div className={className}>
+        <div className="oc-surface-code rounded-md border border-[var(--interactive-border)] bg-[var(--syntax-background)] p-4">
+          <div className="mb-1 font-medium text-foreground">{t('jsonTreeView.error.invalidJsonTitle')}</div>
+          <div className="font-mono text-xs text-muted-foreground">{parseError}</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (parsedData === null) {
+    return null;
+  }
+
+  return (
+    <div className={cn('flex min-h-0 flex-col', className)}>
+      <div className="flex shrink-0 items-center gap-1 border-b border-[var(--interactive-border)] px-2 py-1">
+        <Button
+          variant="ghost"
+          size="xs"
+          onClick={handleExpandAll}
+          className="gap-1 text-xs text-muted-foreground"
+        >
+          <Icon name="arrow-down-s" className="h-3 w-3" />
+          {t('jsonTreeView.actions.expandAll')}
+        </Button>
+        <Button
+          variant="ghost"
+          size="xs"
+          onClick={handleCollapseAll}
+          className="gap-1 text-xs text-muted-foreground"
+        >
+          <Icon name="arrow-up-s" className="h-3 w-3" />
+          {t('jsonTreeView.actions.collapseAll')}
+        </Button>
+      </div>
+      <div
+        className="oc-surface-code min-h-0 flex-1 bg-[var(--syntax-background)] py-1"
+        style={{ maxHeight, overflow: 'auto' }}
+      >
+        <JsonTreeViewer
+          ref={viewerRef}
+          data={parsedData}
+          maxHeight={maxHeight}
+          initiallyExpandedDepth={initiallyExpandedDepth}
+        />
+      </div>
+    </div>
+  );
+});
+
+export { JsonTreeView };

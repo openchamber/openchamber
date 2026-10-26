@@ -1,0 +1,134 @@
+---
+title: Entegrasyonlar
+description: OpenChamber’ın birlikte çalıştığı hizmetleri ve abonelikleri bağlayın.
+---
+
+# Entegrasyonlar
+
+**Settings → Integrations**, OpenChamber’ın birlikte çalıştığı servislere giriş yaptığınız yerdir. Giriş OpenChamber sunucusunda saklanır; böylece web, masaüstü ve eşleştirilmiş telefon aynı girişi paylaşır.
+
+## Entegrasyon kataloğu
+
+Entegrasyon kataloğu, ajana tek tıkla verebileceğiniz 150'den fazla servisi listeler: Linear, Notion, Sentry, Supabase, Figma, gözlemlenebilirlik araçları, CRM'ler, toplantı notları ve daha fazlası. Bir servisi kurmak genellikle o servisin MCP sunucusunu ekler, yani ajanın orada bir şeyleri okumak ve değiştirmek için kullandığı bağlantıyı. Bazen yanında gelen skill'ler ya da bir eklenti de eklenir. Kurulum kullanıcı düzeyinde yapılır, bu yüzden her projede kullanılabilir.
+
+1. Kenar çubuğu başlığındaki mağaza simgesini seçin.
+2. Bir servis bulun: adıyla arayın ya da listeyi **Kod** veya **Kalite ve operasyon** gibi bir kategoriyle daraltın. **OpenChamber** kendi uzantılarımızı ve eklentilerimizi listeler.
+3. Satırındaki **+** düğmesini seçin ya da servisi açıp **Kur** seçin.
+4. Servisin istediği şekilde giriş yapın:
+   - **OAuth**: servisin giriş sayfası tarayıcınızda açılır. Erişimi orada onaylayın.
+   - **Token**: bir API token'ını **API token** alanına yapıştırın. **Token alın**, servisin token verdiği sayfayı açar.
+   - **Oturumsuz**: yapmanız gereken bir şey yok.
+
+İşlem bittiğinde servis bir onay işareti gösterir ve soldaki **Kurulu** altında görünür. Araçları bir sonraki mesajınızda kullanılabilir. Sarı bir nokta ya da **Oturum açma gerekli**, girişin tamamlanmadığı anlamına gelir. Servisi açın ve yeniden giriş yapın.
+
+Bazı girdiler girişten fazlasını ister:
+
+- **Yerel sunucular**, OpenCode'un çalıştığı makinede çalışır ve Node.js, uv ile Python ya da Docker gerektirebilir. İlk başlatma biraz sürebilir.
+- **Eklentiler** OpenCode içinde çalışan kodlardır. Bu yüzden katalog önce onay ister ve eklentinin lisansını gösterir.
+- Bir servisle gelen **skill'ler** onunla birlikte kurulur. Biri eksikse servisin sayfasında kendi **Kur** düğmesi görünür.
+
+Bir servisi kaldırmak için onu açın, **Diğer işlemler** (**⋯**) ve ardından **Kaldır** seçin. Bu yalnızca kataloğun eklediklerini kaldırır. Servisteki hesabınız olduğu gibi kalır. MCP sunucularını, eklentileri ve skill'leri her zamanki gibi Settings'ten de yönetebilirsiniz.
+
+Katalog web uygulamasında ve masaüstü uygulamasında bulunur. [Kurumsal modda](/tr/security/#kurumsal-mod) gizlidir.
+
+## GitHub
+
+**GitHub** kartını genişletin ve kısa bir cihaz koduyla giriş yapmak için **Connect GitHub** seçin. Bağlandıktan sonra OpenChamber issue’lardan ve pull request’lerden oturum başlatabilir, onları mesajlara ekleyebilir ve PR açıp güncelleyebilir. Git sunucularının yapabildiği her şey [Git sunucuları](/tr/github/) sayfasında.
+
+## GitLab, Gitea, Forgejo ve Gerrit
+
+GitLab, Gitea, Forgejo ve Gerrit'in her birinin GitHub'ın yanında kendi kartı vardır. Bağlandıktan sonra issue'ları ve pull request'leri (GitLab'de merge request'ler, Gerrit'te değişiklikler) GitHub'ınkiler gibi [Issue'lar ve PR'lar](/tr/issues-and-prs/) panosunda ve sohbetin **+** menüsünde görünür.
+
+- **GitLab**: gitlab.com'da kısa bir cihaz koduyla, bir personal access token ile ya da sunucudaki `glab` oturumuyla giriş yapın. Self-managed bir GitLab için adresini ekleyin ve `api` kapsamlı bir personal access token yapıştırın. Orada cihaz koduyla giriş yalnızca sunucu `OPENCHAMBER_GITLAB_CLIENT_ID` değerini o instance'ta kayıtlı bir uygulamaya ayarladığında çalışır.
+- **Gitea**: instance'ınızın adresini ekleyin, örneğin `https://gitea.example.com`, ve `write:repository`, `write:issue` ve `read:user` kapsamlı bir personal access token yapıştırın. Kart, instance'ınızda bu jetonu oluşturan sayfaya bağlantı verir. Gitea'da cihaz koduyla ya da CLI ile giriş yoktur. Adresinin kökünden sunulan Gitea 1.21 veya daha yenisi gerekir.
+- **Forgejo**: Codeberg kartta zaten var, bu yüzden bağlamak için yalnızca `write:repository`, `write:issue` ve `read:user` kapsamlı bir personal access token gerekir; kart, Codeberg'de bu jetonu oluşturan sayfaya bağlantı verir. Başka bir Forgejo sunucusu için adresini ekleyin, örneğin `https://forgejo.example.com`, ve aynı kapsamlara sahip bir jeton yapıştırın. Adresinin kökünden sunulan Forgejo 7.0 veya daha yenisi gerekir. Forgejo sunucusu bu kartta, Gitea sunucusu Gitea kartında bağlanır.
+- **Gerrit**: instance'ınızın adresini ekleyin, örneğin `https://gerrit.example.com`, ardından Gerrit kullanıcı adınızı ve bir HTTP parolası girin. Parolayı Gerrit'te **Settings → HTTP Credentials** altında oluşturun; kart oraya bağlantı verir. Giriş parolanız çalışmaz ve kullanıcı adı olmayan bir hesap bağlanamaz. Adresinin kökünden sunulan Gerrit 3.8 veya daha yenisi gerekir. İnceleme adresi Git adresinden farklı olan siteler, örneğin `.gitcookies` ile googlesource.com, desteklenmez.
+
+Gerrit'te değişiklikleri incelersiniz. Bir değişikliğin her yüklemesi bir yama setidir ve değişikliğin önizlemesinde okumak için daha eski birini seçebilirsiniz. Projenin Code-Review ve Verified gibi etiketlerinde oy vererek incelersiniz ve gönderim gereksinimleri karşılandığında değişikliği **Gönder** ile alırsınız. Gerrit'te issue yoktur, bu yüzden yalnızca değişiklikler görünür. Bir değişiklik oluşturmak ya da ona yeni bir yama seti yüklemek için Git panelindeki **İncelemeye push et** seçeneğini kullanın; bkz. [Git](/tr/git/#gerritte-incelemeye-push-etme).
+
+OpenChamber'ın hangi kartın hesabını kullanacağına projenin remote'u karar verir ve bu kartlardan herhangi birindeki hesap bir projenin [Git kimliği](/tr/git-identities/) olabilir. Bir [uzantı](/tr/extensions/#git-sunucusu-olarak-bir-uzantı) kendi kartıyla başka bir sunucu ekleyebilir.
+
+## Linear
+
+### Çalışma alanı bağlayın
+
+1. **Linear** kartını genişletin ve **Connect** seçin.
+2. Açılan tarayıcı sekmesinde erişimi onaylayın. O zamana kadar kart **Waiting for Linear** gösterir.
+
+Başka bir Linear organizasyonunu **Add workspace** ile bağlayın. Aynı anda tek bir çalışma alanı geçerlidir: **Switch to** ile geçiş yapın; **Disconnect** yalnızca geçerli olanı kaldırır. Proje eşlemeniz korunur.
+
+### Issue’lara göz atın
+
+Linear issue’ları **Issues and PRs** panosunda bulunur. Panoyu kenar çubuğu başlığındaki pull request simgesiyle açın ya da <kbd>⌘K</kbd> ve ardından <kbd>B</kbd> tuşlarına basın (Windows ve Linux’ta <kbd>Ctrl+K</kbd> ve ardından <kbd>B</kbd>), sonra üstten **Linear** seçin. Pano geçerli çalışma alanının issue’larını listeler ve şunları yapmanızı sağlar:
+
+- tek bir takımı ya da **All teams** gösterme
+- birden fazla çalışma alanı bağlıysa geçerli olanı değiştirme
+- durum, kime ait olduğu (**Assigned to me** ya da **Created by me**) ve öncelik ile birlikte filtreleme, başlık ya da tanımlayıcıyla arama
+- bir issue’nun açıklamasını, yorumlarını, etiketlerini ve önceliğini listenin yanında okuma
+- **Status** değiştirme
+
+### Bir issue’dan oturum başlatın
+
+- Panoda bir issue seçin; yeni bir dal için **Start in worktree…**, projede olduğu gibi çalışmak için **New session** seçin.
+- **New Worktree** iletişim kutusunda bir Linear issue’su seçin.
+
+Her iki durumda da oturum, issue mesaj kutusuna eklenmiş halde açılır ve ilk mesajı kendiniz yazarsınız. Pano oturumu issue’nun takımına eşlenen projede başlatır; bu proje **Start in** yanında görünür ve gerekirse orada başka bir proje seçebilirsiniz. Takımları Linear kartında eşleyin: **Default project** tüm takımları kapsar, **Team projects** takım bazında bunu geçersiz kılar. Eşleme yoksa pano en son gösterdiği projeyi kullanır.
+
+### Bir issue’yu mesaja bağlayın
+
+Sohbet yazma alanında **+** menüsünü açın ve **Linear** seçin. Issue, bir sonraki mesajınıza bağlam olarak eklenir ve oturumun çalışma durumu paneli ona bir bağlantı tutar.
+
+### Oturum yorumları
+
+Linear kartında **Session comments** açın; bir issue’dan başlatılan ya da ilk mesajında issue ekli olan oturum, başladığında, bittiğinde ya da başarısız olduğunda o issue’ya oturumu açan bir bağlantıyla yorum bırakır. Yorumlar yalnızca bu OpenChamber sunucusunun herkese açık bir adresi olduğunda gönderilir; böylece bağlantı issue’daki herkes için çalışır. Yerel ya da özel bir adreste hiçbir şey gönderilmez.
+
+## Bir entegrasyon kurun
+
+1. **Settings → Integrations** bölümünü açın.
+2. Integration'ı bulun ve **Install** seçin.
+3. İstenince OpenCode'u yeniden başlatın. Provider yeniden başlatmadan sonra görünür.
+4. **Set up** seçin ve giriş yapın. Modeller sonra sohbet model seçicisinde görünür.
+
+Integration'lar kullanıcı düzeyinde kurulur, bu yüzden her projede çalışır. Aynı karttan istediğiniz zaman güncelleyebilir ya da kaldırabilirsiniz.
+
+## Claude Code
+
+Claude Code, Claude Pro ya da Max planınızı bilgisayarınızdaki Claude Code CLI üzerinden kullanır. API anahtarı gerekmez.
+
+1. Integration'ı kurun. Yukarıya bakın.
+2. **Set up** seçin ve giriş yapın. Henüz Claude Code CLI'nız yoksa kurulum önce onu yüklemeyi önerir, sonra giriş yaptırır.
+
+**Claude hesabınız nasıl güvende kalır:** Bu integration, Anthropic'in resmi Claude Agent SDK'sını ve kurulu Claude Code CLI'nızı kullanır. OAuth'u kaçırmaz, tarayıcı token'larını çıkarmaz ya da yeniden oynatmaz, desteklenmeyen bir istemciyi taklit etmez ve Anthropic'in kimlik doğrulama akışını atlamaz. Anthropic'in desteklediği erişim yolunda kalır. Bu yüzden token kaçırma ya da yetkisiz kimlik doğrulama kestirmelerinin hesap banı riskini taşımaz.
+
+## Güncelleme ya da kaldırma
+
+- **Update** eklentinin en son yayımlanmış sürümünü kurar.
+- **Remove** eklentiyi OpenCode config'inizden siler. OpenCode yenilendikten sonra provider yüklenmeyi bırakır.
+
+Bir kartta girdilerin elle yönetilmesi gerektiği yazıyorsa, **Manage plugins** seçin ve kopyaları orada temizleyin.
+
+## Excalidraw
+
+Excalidraw, `.excalidraw` dosyalarında ve Obsidian `.excalidraw.md` çizimlerinde doğrudan Files içinde çizim yapmanızı sağlar. Bir OpenChamber uzantısıdır ve aynı sayfada **OpenChamber extensions** altında listelenir.
+
+1. **Settings → Integrations** bölümünü açın ve Excalidraw kartında **Install** seçin. Ayrıca Files'ta bir çizim açıp üstündeki bildirimde **Install** seçebilirsiniz.
+2. Çizimi yeniden açın. Tuval dosyanın metninin yerini alır; Cmd/Ctrl+S, otomatik kaydetme, kaynak görünümü geçişi ve tam ekran her dosyada olduğu gibi çalışır.
+
+Kart, yeni bir sürüm çıktığında uzantıyı günceller, duraklattıysanız yeniden açar ve kaldırır. Kaldırdığınızda çizimleriniz olduğu gibi kalır; yalnızca metin olarak açılır. Yalnızca web ve masaüstü.
+
+## Resource Monitor
+
+Resource Monitor, bilgisayarınızın ne kadar CPU ve bellek kullandığını ve bunun ne kadarının OpenChamber'a, OpenCode'a, onların başlattığı her şeye ve altlarında çalışan geliştirme sunucularına gittiğini gösterir. Bir OpenChamber uzantısıdır ve aynı sayfada **OpenChamber extensions** altında listelenir.
+
+1. **Settings → Integrations** sayfasını açın ve Resource Monitor kartında **Install** seçeneğini seçin.
+2. Yerel hizmetini **Settings → Extensions** içinde onaylayın. Sayılar, OpenChamber'ın panelin yanında başlattığı küçük bir süreçten gelir. Bu süreç yalnızca panel veya **Resources** bölümü ekrandayken ölçer.
+3. Sağdaki çubuktan **Resource Monitor**'ı açın. Work Status panelinde **Resources** altında kısa bir özet de görünür.
+
+Bir geliştirme sunucusunda veya işte Stop, o komutu başlattığı her şeyle birlikte sonlandırır; böylece bir watcher sunucuyu yeniden başlatamaz. Terminal grubundaki **Stop all**, terminalde ve project actions içinde çalışan her şeyi sonlandırır ve terminal sekmelerini açık bırakır. OpenChamber'ın kendisinde ve OpenCode sunucusunda Stop yoktur.
+
+Geliştirme sunucuları OpenChamber altında çalıştıklarında görünür: yerleşik terminalde başlatılanlar ya da OpenCode'u OpenChamber'ın kendisi başlattıysa bir ajanın başlattıkları. Üst sürecinden ayrılan bir sunucu veya `docker compose up -d` ile başlatılan bir kapsayıcı listede yer almaz. Uzak bir OpenChamber'a bağlıysanız monitör o makineyi gösterir. Yalnızca web ve masaüstü.
+
+## İlgili
+
+- [Git sunucuları](/tr/github/) — GitHub, GitLab, Gitea, Forgejo ve Gerrit'in OpenChamber'da yapabildiği her şey
+- [Worktree oturumları](/tr/worktrees/) — issue oturumlarının başlayabileceği yer

@@ -1,0 +1,43 @@
+---
+title: Apps Móveis e PWA
+description: Instale o app do OpenChamber no iOS ou Android e conecte-o ao seu servidor.
+---
+
+# Apps Móveis e PWA
+
+O OpenChamber tem apps nativos para iPhone e Android, então você pode acompanhar sessões, responder aos agentes e gerenciar o trabalho pelo celular — em casa pelo Wi-Fi ou de qualquer lugar pelo [Private Relay](/pt-br/private-relay/).
+
+## Instalar o app
+
+- **iPhone/iPad** — participe do [beta no TestFlight](https://testflight.apple.com/join/5ek6GU1E)
+- **Android** — baixe o APK da [versão mais recente](https://github.com/openchamber/openchamber/releases/latest)
+
+## Conectar ao seu servidor
+
+1. No computador que executa o OpenChamber, abra **Settings → Remote Instances → Conectar a este servidor** e pressione **Adicionar um dispositivo**.
+2. Escolha **Em qualquer lugar** (ou **Somente rede doméstica** se você só vai usar o celular em casa) e pressione **Criar código QR**.
+3. No app móvel, toque em **Ler código QR** e aponte a câmera para ele.
+
+O app conecta e memoriza o servidor. O código QR é de uso único e cada dispositivo recebe o próprio token revogável — veja [Conectar um Dispositivo](/pt-br/connect-devices/) para saber como o pareamento se mantém seguro.
+
+Você pode parear o app com vários servidores e alternar entre eles pela lista de instâncias; para cada um, o app mostra se ele está alcançável e se você está conectado pela rede local ou pelo relay.
+
+## PWA (instalação pelo navegador)
+
+Prefere dispensar loja de apps? O app web instala direto do navegador:
+
+- **navegador no desktop** — use a opção **Install** na barra de endereço
+- **iPhone/iPad (Safari)** — Compartilhar → **Adicionar à Tela de Início**
+- **Android (Chrome)** — menu → **Instalar app** / **Adicionar à tela inicial**
+
+Para alcançar o PWA de fora da sua rede você vai precisar de um [túnel](/pt-br/tunnels/) e de uma [senha de UI](/pt-br/security/) forte — os apps nativos cuidam disso por você via relay.
+
+## Configurações de celular
+
+Em **Settings → OpenChamber**, algumas opções ajustam a experiência móvel e instalada — o nome instalado do app, a orientação da tela e como o teclado na tela se comporta.
+
+## Relacionado
+
+- [Conectar um Dispositivo](/pt-br/connect-devices/) — pareamento, códigos QR de uso único e gerenciamento de dispositivos
+- [Private Relay](/pt-br/private-relay/) — como funciona o acesso "Em qualquer lugar"
+- [Segurança](/pt-br/security/) — proteja a UI antes de expô-la

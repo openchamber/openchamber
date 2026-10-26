@@ -1,0 +1,63 @@
+---
+title: Browserpaneel
+description: Open webpagina's in de app, maak aantekeningen en laat de agent ze bedienen.
+---
+
+# Browserpaneel
+
+Het browserpaneel opent een pagina direct naast uw chat. Gebruik de wereldbol bovenaan de app.
+
+In de desktopapp is het een volwaardige browser: aanmeldingen blijven bewaard, automatisch herladen werkt en ontwikkeltools zijn met één klik beschikbaar. In een webtabblad kan het paneel wel een pagina tonen, maar niet de inhoud ervan inspecteren. De annotatietools hieronder werken daarom alleen op de desktop. De VS Code-extensie heeft geen browserpaneel: VS Code is al een editor met een browser ernaast en de onderscheidende functies van dit paneel vereisen de desktopapp.
+
+Pagina's in dit paneel hebben geen toegang tot uw camera, microfoon of locatie. Zulke verzoeken worden geweigerd.
+
+## De werkbalk
+
+De adresbalk onthoudt pagina's die u in dit project hebt geopend. Tijdens het typen verschijnen suggesties op basis van een deel van het adres of de paginatitel. Met de pijltjestoetsen kiest u een resultaat, met Enter opent u het en met de knop op een rij verwijdert u het.
+
+Naast de adresbalk staan **Herladen**, **Volledig herladen** om de cache te negeren als een wijziging niet verschijnt, en zoomknoppen die alleen de pagina vergroten of verkleinen.
+
+**Cookies wissen** en **Cachegegevens wissen** gelden alleen voor dit paneel. Uw OpenChamber-sessie en andere vensters blijven intact.
+
+## Een pagina annoteren
+
+Klik op **Annoteren**. Boven de pagina verschijnt een werkbalk met drie tools:
+
+- **Element:** klik op een element. Klik op een ander om de selectie te verplaatsen of nogmaals op hetzelfde om haar te wissen.
+- **Gebied:** sleep een kader om een gebied als u meer dan één element bedoelt.
+- **Tekenen:** teken uit de vrije hand over de pagina.
+
+Schrijf uw verzoek in het vak naast uw markering en klik op **Bijvoegen**, of druk op Enter. Uw chatbericht krijgt een kaart met de markeringen, uw notitie en een schermafbeelding van de zichtbare pagina inclusief markeringen. Zo kunt u 'deze knop iets ronder' zeggen zonder uit te leggen waar de knop staat.
+
+De pagina zelf wordt niet gewijzigd. De annotaties markeren alleen wat er al staat. Met `Esc` annuleert u en sluit u de werkbalk.
+
+## De agent laten bedienen
+
+De agent kan het browserpaneel zelf gebruiken: een pagina openen, de inhoud lezen, klikken, typen, scrollen en wisselen tussen mobiele, tablet- en desktopafmetingen. Zo kan hij zijn eigen werk controleren in plaats van u daarom te vragen. U ziet de handelingen in het paneel.
+
+De agent kan geen willekeurige code in de pagina uitvoeren. Omdat de browser uw echte aanmeldingen bewaart, blijft de bediening beperkt tot de genoemde handelingen.
+
+De agent kan ook een schermafbeelding in `.openchamber/screenshots/` in uw project bewaren en in zijn antwoord tonen. Daarmee zijn voor-en-na-vergelijkingen mogelijk. Het bestand blijft beschikbaar om aan een pull request toe te voegen.
+
+Deze browseracties horen bij de **OpenChamber Web-tool**, die afzonderlijk aan en uit kan via **Instellingen → Algemeen → OpenChamber-tools**.
+
+Dit vereist de desktopapp. Een pagina in een webtabblad kan niet op deze manier worden bediend.
+
+### Browserprovider
+
+Een extensie kan hier de desktopapp vervangen. Een extensie die een browserprovider opgeeft, draait een eigen browser op de OpenChamber-server en beantwoordt dezelfde acties. Zo kan een agent ook browsen als er geen desktopapp openstaat, bijvoorbeeld op een remote-server. Kies de provider bij **Instellingen → Algemeen → OpenChamber-tools → Browserprovider**. Zonder zo'n extensie toont de uitgeschakelde keuzelijst alleen 'OpenChamber Web'. De keuze geldt vanaf de volgende browseractie. Als de extensie wordt gepauzeerd of verwijderd, keert OpenChamber Web terug en verschijnt een melding. Voor extensiemakers staat meer in `GUEST_SERVICES.md` in het SDK-pakket.
+
+## Afmetingen en uiterlijk
+
+Klik op de telefoonknop om de apparaatbalk te openen. Kies een voorinstelling of voer een breedte en hoogte in. De pagina gebruikt die afmetingen. Is ze groter dan het paneel, dan wordt ze verkleind weergegeven, maar voor de pagina zelf blijven de opgegeven afmetingen gelden.
+
+Via dezelfde balk dwingt u lichte of donkere weergave af om een thema te controleren zonder systeeminstellingen te wijzigen. DevTools blijft apart. Een pagina kan maar één debugger tegelijk gebruiken, dus sluit DevTools eerst als het openstaat.
+
+## Ontwikkeltools
+
+Klik op de terminalknop in de werkbalk om de eigen ontwikkeltools van Chromium te openen: console, netwerk, elementen en de overige gebruikelijke functies.
+
+## Zie ook
+
+- [Voorbeeldweergave en ontwikkelservers](/nl/preview/) om uw draaiende app te openen, ook op een andere computer
+- [Besturingstool voor agents](/nl/agent-control-tool/) voor sessies, worktrees en geplande taken vanuit de chat

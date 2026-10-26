@@ -1,0 +1,365 @@
+import React from 'react';
+import { toast } from '@/components/ui';
+import { useSessionUIStore } from '@/sync/session-ui-store';
+import { readOrderedActiveSessions, stepSession } from '@/lib/sessionListOrder';
+import { resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
+import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { useProjectsStore } from '@/stores/useProjectsStore';
+import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUIStore';
+import { getZoneView, resolveZoneActiveTabId, shownContextModes, zoneOfMode } from '@/lib/workspace/zones';
+import { useUpdateStore } from '@/stores/useUpdateStore';
+import { useThemeSystem } from '@/contexts/useThemeSystem';
+import { sessionEvents } from '@/lib/sessionEvents';
+import { createWorktreeSession } from '@/lib/worktreeSessionCreator';
+import { showOpenCodeStatus } from '@/lib/openCodeStatus';
+import { useI18n } from '@/lib/i18n';
+import { addSelectionToChat } from '@/lib/addSelectionToChat';
+import { navigateSessionHistory } from '@/lib/sessionNavigationHistory';
+
+const getActiveElementSelectedText = (): string => {
+  if (typeof document === 'undefined') {
+    return '';
+  }
+
+  const activeElement = document.activeElement;
+  if (activeElement instanceof HTMLTextAreaElement) {
+    return activeElement.value.slice(activeElement.selectionStart ?? 0, activeElement.selectionEnd ?? 0);
+  }
+
+  if (activeElement instanceof HTMLInputElement) {
+    const type = activeElement.type?.toLowerCase() ?? 'text';
+    if (['text', 'search', 'url', 'tel', 'password'].includes(type)) {
+      return activeElement.value.slice(activeElement.selectionStart ?? 0, activeElement.selectionEnd ?? 0);
+    }
+  }
+
+  if (activeElement instanceof HTMLElement && activeElement.isContentEditable) {
+    return activeElement.ownerDocument.defaultView?.getSelection?.()?.toString() ?? '';
+  }
+
+  return '';
+};
+
+const copyCurrentSelectionFallback = async (): Promise<boolean> => {
+  const selectionText = getActiveElementSelectedText() || window.getSelection()?.toString() || '';
+  if (!selectionText.trim()) {
+    return false;
+  }
+
+  try {
+    if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(selectionText);
+      return true;
+    }
+  } catch {
+    // Fall through to execCommand fallback when Clipboard API is unavailable.
+  }
+
+  return document.execCommand('copy');
+};
+
+const MENU_ACTION_EVENT = 'openchamber:menu-action';
+const CHECK_FOR_UPDATES_EVENT = 'openchamber:check-for-updates';
+
+type MenuAction =
+  | 'about'
+  | 'settings'
+  | 'command-palette'
+  | 'quick-open'
+  | 'new-session'
+  | 'new-worktree-session'
+  | 'change-workspace'
+  | 'toggle-right-sidebar'
+  | 'open-right-sidebar-git'
+  | 'open-right-sidebar-files'
+  | 'toggle-terminal'
+  | 'toggle-terminal-expanded'
+  | 'copy'
+  | 'add-selection-to-chat'
+  | 'theme-light'
+  | 'theme-dark'
+  | 'theme-system'
+  | 'toggle-sidebar'
+  | 'toggle-memory-debug'
+  | 'go-back'
+  | 'go-forward'
+  | 'previous-session'
+  | 'next-session'
+  | 'previous-project'
+  | 'next-project'
+  | 'help-dialog'
+  | 'download-logs';
+
+export const useMenuActions = (
+  onToggleMemoryDebug?: () => void
+) => {
+  const { t } = useI18n();
+  const openNewSessionDraft = useSessionUIStore((s) => s.openNewSessionDraft);
+  const toggleCommandPalette = useUIStore((s) => s.toggleCommandPalette);
+  const setCommandPaletteOpen = useUIStore((s) => s.setCommandPaletteOpen);
+  const toggleHelpDialog = useUIStore((s) => s.toggleHelpDialog);
+  const toggleSidebar = useUIStore((s) => s.toggleSidebar);
+  const setSessionSwitcherOpen = useUIStore((s) => s.setSessionSwitcherOpen);
+  const setSettingsDialogOpen = useUIStore((s) => s.setSettingsDialogOpen);
+  const setAboutDialogOpen = useUIStore((s) => s.setAboutDialogOpen);
+  const checkForUpdates = useUpdateStore((state) => state.checkForUpdates);
+  const { setThemeMode } = useThemeSystem();
+  const checkUpdatesInFlightRef = React.useRef(false);
+
+  const handleCheckForUpdates = React.useCallback(() => {
+    if (checkUpdatesInFlightRef.current) {
+      return;
+    }
+    checkUpdatesInFlightRef.current = true;
+
+    void checkForUpdates()
+      .then(() => {
+        const { available, error } = useUpdateStore.getState();
+        if (error) {
+          toast.error('Failed to check for updates', {
+            description: error,
+          });
+          return;
+        }
+
+        if (!available) {
+          toast.success('You are on the latest version');
+        }
+      })
+      .finally(() => {
+        checkUpdatesInFlightRef.current = false;
+      });
+  }, [checkForUpdates]);
+
+  const handleChangeWorkspace = React.useCallback(() => {
+    sessionEvents.requestDirectoryDialog();
+  }, []);
+
+  const navigateSession = React.useCallback((direction: -1 | 1) => {
+    const currentSessionId = useSessionUIStore.getState().currentSessionId;
+    const nextSession = stepSession(readOrderedActiveSessions(), currentSessionId, direction);
+    if (!nextSession) return;
+
+    setSessionSwitcherOpen(false);
+    useSessionUIStore.getState().setCurrentSession(nextSession.id, resolveGlobalSessionDirectory(nextSession));
+  }, [setSessionSwitcherOpen]);
+
+  const navigateProject = React.useCallback((direction: -1 | 1) => {
+    const { activeProjectId, projects, setActiveProject } = useProjectsStore.getState();
+    if (projects.length === 0) return;
+
+    const currentIndex = projects.findIndex((project) => project.id === activeProjectId);
+    let nextIndex = direction > 0 ? 0 : projects.length - 1;
+    if (currentIndex >= 0) {
+      nextIndex = (currentIndex + direction + projects.length) % projects.length;
+    }
+    const nextProject = projects[nextIndex];
+    if (!nextProject) return;
+
+    setActiveProject(nextProject.id);
+  }, []);
+
+  const handleAction = React.useCallback(
+    (action: MenuAction) => {
+      switch (action) {
+        case 'about':
+          setAboutDialogOpen(true);
+          break;
+
+        case 'settings':
+          setSettingsDialogOpen(true);
+          break;
+
+        case 'command-palette':
+          toggleCommandPalette();
+          break;
+
+        case 'quick-open':
+          setCommandPaletteOpen(true);
+          break;
+
+        case 'new-session':
+                setSessionSwitcherOpen(false);
+          {
+            const sessionState = useSessionUIStore.getState();
+            const directory = useDirectoryStore.getState().currentDirectory;
+            openNewSessionDraft(sessionState.currentSessionId && directory
+              ? { directoryOverride: directory }
+              : undefined);
+          }
+          break;
+
+        case 'new-worktree-session':
+                setSessionSwitcherOpen(false);
+          createWorktreeSession();
+          break;
+
+        case 'change-workspace':
+          handleChangeWorkspace();
+          break;
+
+        // Legacy right-sidebar menu items now target the context surfaces
+        // that replaced the sidebar's tabs.
+        case 'toggle-right-sidebar': {
+          const directory = useDirectoryStore.getState().currentDirectory;
+          if (!directory) break;
+          const uiState = useUIStore.getState();
+          const directoryKey = normalizeContextPanelDirectoryKey(directory);
+          // The right zone only: it is the panel this menu item always meant.
+          const panelState = uiState.contextPanelByDirectory[directoryKey];
+          const rightTabId = panelState
+            ? resolveZoneActiveTabId(panelState.tabs, uiState.contextSurfaceZones, 'right', getZoneView(panelState, 'right').activeTabId)
+            : null;
+          if (panelState?.isOpen) {
+            uiState.closeContextPanel(directoryKey);
+          } else if (rightTabId) {
+            uiState.setActiveContextPanelTab(directoryKey, rightTabId);
+          } else {
+            uiState.openContextSurface(directoryKey, 'git');
+          }
+          break;
+        }
+
+        case 'open-right-sidebar-git': {
+          const directory = useDirectoryStore.getState().currentDirectory;
+          if (!directory) break;
+          useUIStore.getState().openContextSurface(normalizeContextPanelDirectoryKey(directory), 'git');
+          break;
+        }
+
+        case 'open-right-sidebar-files': {
+          const directory = useDirectoryStore.getState().currentDirectory;
+          if (!directory) break;
+          useUIStore.getState().openContextSurface(normalizeContextPanelDirectoryKey(directory), 'file');
+          break;
+        }
+
+        case 'toggle-terminal': {
+          const directory = useDirectoryStore.getState().currentDirectory;
+          if (!directory) break;
+          useUIStore.getState().openContextSurface(normalizeContextPanelDirectoryKey(directory), 'terminal');
+          break;
+        }
+
+        case 'toggle-terminal-expanded': {
+          const directory = useDirectoryStore.getState().currentDirectory;
+          if (!directory) break;
+          const key = normalizeContextPanelDirectoryKey(directory);
+          const uiState = useUIStore.getState();
+          const panel = uiState.contextPanelByDirectory[key];
+          if (!shownContextModes(panel, uiState.contextSurfaceZones).has('terminal')) {
+            uiState.openContextSurface(key, 'terminal');
+          }
+          uiState.toggleContextPanelExpanded(key, zoneOfMode(uiState.contextSurfaceZones, 'terminal'));
+          break;
+        }
+
+        case 'copy': {
+          const copyEvent = new Event('openchamber:copy', { cancelable: true });
+          const wasHandled = !window.dispatchEvent(copyEvent);
+          if (!wasHandled) {
+            void copyCurrentSelectionFallback();
+          }
+          break;
+        }
+
+        case 'theme-light':
+          setThemeMode('light');
+          break;
+
+        case 'theme-dark':
+          setThemeMode('dark');
+          break;
+
+        case 'theme-system':
+          setThemeMode('system');
+          break;
+
+        case 'add-selection-to-chat':
+          addSelectionToChat();
+          break;
+
+        case 'toggle-sidebar':
+          toggleSidebar();
+          break;
+
+        case 'toggle-memory-debug':
+          onToggleMemoryDebug?.();
+          break;
+
+        // Same history as the Back/Forward shortcuts, which this menu's
+        // accelerators shadow on Windows and Linux.
+        case 'go-back':
+          navigateSessionHistory(-1);
+          break;
+
+        case 'go-forward':
+          navigateSessionHistory(1);
+          break;
+
+        case 'previous-session':
+          navigateSession(-1);
+          break;
+
+        case 'next-session':
+          navigateSession(1);
+          break;
+
+        case 'previous-project':
+          navigateProject(-1);
+          break;
+
+        case 'next-project':
+          navigateProject(1);
+          break;
+
+        case 'help-dialog':
+          toggleHelpDialog();
+          break;
+
+        case 'download-logs': {
+          void showOpenCodeStatus().catch(() => {
+            toast.error(t('openCodeStatusDialog.toast.collectFailed'));
+          });
+          break;
+        }
+      }
+    },
+    [
+      handleChangeWorkspace,
+      navigateProject,
+      navigateSession,
+      onToggleMemoryDebug,
+      openNewSessionDraft,
+      setAboutDialogOpen,
+      setSessionSwitcherOpen,
+      setCommandPaletteOpen,
+      setSettingsDialogOpen,
+      setThemeMode,
+      t,
+      toggleCommandPalette,
+      toggleHelpDialog,
+      toggleSidebar,
+    ]
+  );
+
+  React.useEffect(() => {
+    const handleMenuAction = (event: Event) => {
+      const action = (event as CustomEvent<MenuAction>).detail;
+      if (!action) return;
+      handleAction(action);
+    };
+
+    const handleCheckForUpdatesEvent = () => {
+      handleCheckForUpdates();
+    };
+
+    window.addEventListener(MENU_ACTION_EVENT, handleMenuAction);
+    window.addEventListener(CHECK_FOR_UPDATES_EVENT, handleCheckForUpdatesEvent);
+    return () => {
+      window.removeEventListener(MENU_ACTION_EVENT, handleMenuAction);
+      window.removeEventListener(CHECK_FOR_UPDATES_EVENT, handleCheckForUpdatesEvent);
+    };
+  }, [handleAction, handleCheckForUpdates]);
+
+};

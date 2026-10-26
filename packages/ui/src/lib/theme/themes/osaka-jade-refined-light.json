@@ -1,0 +1,122 @@
+{
+  "metadata": {
+    "id": "osaka-jade-refined-light",
+    "name": "Osaka Jade Light",
+    "variant": "light",
+    "description": "Light companion to Osaka Jade Dark",
+    "version": "1.0.0",
+    "author": "tbcode-org",
+    "tags": [
+      "vscode",
+      "jade",
+      "light"
+    ]
+  },
+  "colors": {
+    "primary": {
+      "base": "#197160",
+      "hover": "#176858",
+      "active": "#155f51",
+      "muted": "#19716080"
+    },
+    "surface": {
+      "background": "#f1eee8",
+      "foreground": "#40463e",
+      "muted": "#ebe9e3",
+      "mutedForeground": "#53685B",
+      "elevated": "#e7e4de",
+      "overlay": "#00000066",
+      "subtle": "#ebe8e3"
+    },
+    "interactive": {
+      "border": "#00000013",
+      "selection": "#d8d5d0",
+      "borderHover": "#0000002e",
+      "borderFocus": "#5ce4c6",
+      "focus": "#5ce4c6",
+      "focusRing": "#5ce4c6",
+      "cursor": "#0f1a16",
+      "hover": "#0000000a",
+      "active": "#00000014"
+    },
+    "status": {
+      "error": "#8f110b",
+      "errorBackground": "#8f110b1f",
+      "errorBorder": "#8f110b59",
+      "warning": "#73650e",
+      "warningBackground": "#73650e1f",
+      "warningBorder": "#73650e59",
+      "success": "#02532a",
+      "successBackground": "#02532a1f",
+      "successBorder": "#02532a59",
+      "info": "#33679f",
+      "infoBackground": "#33679f1f",
+      "infoBorder": "#33679f59"
+    },
+    "syntax": {
+      "base": {
+        "background": "#ebe8e3",
+        "comment": "#53685B",
+        "keyword": "#1faa90",
+        "string": "#3d7a52",
+        "number": "#a8527a",
+        "function": "#3d7560",
+        "variable": "#111c18",
+        "type": "#3d7a52",
+        "operator": "#b5a020"
+      },
+      "tokens": {
+        "variableProperty": "#3d7a52",
+        "parameter": "#111c18",
+        "boolean": "#a8527a",
+        "punctuation": "#111c18",
+        "stringEscape": "#a8527a",
+        "keywordImport": "#1faa90",
+        "tag": "#3d7a52",
+        "regex": "#0f1a16"
+      },
+      "highlights": {
+        "diffAdded": "#466a50",
+        "diffAddedBackground": "#e8f7eb",
+        "diffRemoved": "#a4342a",
+        "diffRemovedBackground": "#ffeeeb",
+        "diffModified": "#675a0c",
+        "diffModifiedBackground": "#675a0c1f",
+        "lineNumberActive": "#020b07"
+      }
+    },
+    "pr": {
+      "blocked": "#9e5723",
+      "merged": "#8155af"
+    },
+    "chat": {
+      "background": "#f1eee8",
+      "userMessageBackground": "#e1e2dc",
+      "divider": "#0000001a"
+    },
+    "markdown": {
+      "link": "#1a7261",
+      "linkHover": "#186d5c",
+      "inlineCode": "#38714c",
+      "inlineCodeBackground": "#ebe8e3",
+      "blockquote": "#53685B",
+      "blockquoteBorder": "#0000001a",
+      "listMarker": "#19716099",
+      "bold": "#383e37",
+      "italic": "#40463e",
+      "hr": "#00000013"
+    },
+    "tools": {
+      "border": "#00000013",
+      "icon": "#53685B",
+      "title": "#40463e",
+      "description": "#53685B",
+      "edit": {
+        "addedBackground": "#e8f7eb",
+        "removedBackground": "#ffeeeb",
+        "modifiedBackground": "#675a0c1f",
+        "lineNumber": "#53685B"
+      }
+    }
+  }
+}

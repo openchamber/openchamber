@@ -1,0 +1,904 @@
+import React from 'react';
+
+import type { ChatMessageEntry } from '../lib/turns/types';
+import type { MessageListHandle } from '../MessageList';
+import {
+    buildTurnWindowModel,
+    updateTurnWindowModelIncremental,
+    type TurnWindowModel,
+} from '../lib/turns/windowTurns';
+import type { TurnHistorySignals } from '../lib/turns/historySignals';
+import { getMemoryLimits, type SessionHistoryMeta } from '@/stores/types/sessionTypes';
+import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
+
+type ViewportAnchor = { messageId: string; offsetTop: number };
+type TimelineIdentityToken = { key: string | null; connected: boolean };
+
+type PendingScrollRequest = {
+    identity: TimelineIdentityToken;
+    kind: 'turn' | 'message';
+    id: string;
+    behavior: ScrollBehavior;
+    turnId: string | null;
+    resolve: (value: boolean) => void;
+};
+
+interface UseChatTimelineControllerOptions {
+    sessionId: string | null;
+    sessionKey: string | null;
+    messages: ChatMessageEntry[];
+    historyMeta: SessionHistoryMeta | null;
+    scrollRef: React.RefObject<HTMLDivElement | null>;
+    messageListRef: React.RefObject<MessageListHandle | null>;
+    loadMoreMessages: (sessionId: string, direction: 'up' | 'down') => Promise<void>;
+    goToBottom: (mode?: 'instant' | 'smooth') => void;
+    releaseAutoFollow: () => void;
+    isPinned: boolean;
+    showScrollButton: boolean;
+}
+
+export interface UseChatTimelineControllerResult {
+    turnIds: string[];
+    turnStart: number;
+    renderedMessages: ChatMessageEntry[];
+    historySignals: TurnHistorySignals;
+    isLoadingOlder: boolean;
+    pendingRevealWork: boolean;
+    activeTurnId: string | null;
+    showScrollToBottom: boolean;
+    turnWindowModel: TurnWindowModel;
+    loadEarlier: (options?: { userInitiated?: boolean }) => Promise<void>;
+    loadHistoryUntilMessage: (messageId: string, options: { maxBatches: number }) => Promise<boolean>;
+    revealBufferedTurns: () => Promise<boolean>;
+    resumeToBottom: () => void;
+    resumeToBottomInstant: () => Promise<void>;
+    scrollToTurn: (turnId: string, options?: { behavior?: ScrollBehavior }) => Promise<boolean>;
+    scrollToMessage: (messageId: string, options?: { behavior?: ScrollBehavior }) => Promise<boolean>;
+    handleHistoryScroll: () => void;
+    captureViewportAnchor: () => ViewportAnchor | null;
+    restoreViewportAnchor: (anchor: ViewportAnchor) => boolean;
+    handleActiveTurnChange: (turnId: string | null) => void;
+}
+
+// Desktop load-older lead distance. Trigger well before the top: the fetch
+// then completes and the prepend lands ABOVE the viewport, where key-anchored
+// compensation is exact and invisible. A short lead (the old 200px) let the
+// user reach the estimated-height region near the absolute top mid-fetch,
+// where the post-insert restore is least precise and reads as a small jump.
+const HISTORY_SCROLL_THRESHOLD_MIN_PX = 1200
+const HISTORY_SCROLL_VIEWPORT_FACTOR = 1.5
+const resolveHistoryScrollThreshold = (clientHeight: number): number => Math.max(
+    HISTORY_SCROLL_THRESHOLD_MIN_PX,
+    clientHeight * HISTORY_SCROLL_VIEWPORT_FACTOR,
+)
+const HISTORY_RENDER_WAIT_TIMEOUT_MS = 250
+// Render commits (or 250ms timeouts) to wait for a concurrent history load.
+const HISTORY_LOAD_WAIT_LIMIT = 40
+const HISTORY_INTERACTION_GUARD_MS = 2000
+// Long smooth scrolls across a big session can take a couple of seconds;
+// the pin releases early as soon as the spy reports the target turn.
+const SCROLL_PIN_TIMEOUT_MS = 2500
+// Derived models must not keep transcripts alive after sync trims or evicts them.
+const turnModelCache = new WeakMap<ChatMessageEntry[], TurnWindowModel>()
+
+export const isOlderHistoryPrependCommit = (input: {
+    previousOldestId: string | null;
+    previousNewestId: string | null;
+    currentOldestId: string | null;
+    currentNewestId: string | null;
+}): boolean => Boolean(
+    input.previousOldestId
+    && input.currentOldestId
+    && input.currentOldestId !== input.previousOldestId
+    && input.previousNewestId
+    && input.currentNewestId
+    && input.currentNewestId === input.previousNewestId,
+);
+
+// iOS WKWebView ignores programmatic scrollTop writes while a touch drag or
+// momentum (fling) scroll is active: the native scroll animation keeps running
+// and overwrites the value on the next frame. The mobile history threshold is
+// large enough that the prepend commit almost always lands mid-fling, so a
+// plain `container.scrollTop = target` never sticks. Toggling overflow kills
+// the native scroll synchronously (pre-paint, invisible inside a layout
+// effect); a short post-paint watchdog re-asserts the target if residual
+// momentum still drags the viewport upward.
+const MOMENTUM_WATCHDOG_FRAMES = 20;
+const MOMENTUM_WATCHDOG_TOLERANCE_PX = 4;
+
+const setScrollTopDefeatingMomentum = (container: HTMLElement, target: number) => {
+    const previousOverflow = container.style.overflow;
+    container.style.overflow = 'hidden';
+    container.scrollTop = target;
+    void container.scrollHeight;
+    container.style.overflow = previousOverflow;
+    container.scrollTop = target;
+
+    if (typeof window === 'undefined') return () => {};
+    let cancelled = false;
+    let frame: number;
+    let frames = 0;
+    const cancel = () => {
+        cancelled = true;
+        window.cancelAnimationFrame(frame);
+        container.removeEventListener('touchstart', cancel);
+    };
+    container.addEventListener('touchstart', cancel, { passive: true, once: true });
+    const watch = () => {
+        if (cancelled) return;
+        // Only correct upward drift (residual momentum). Downward movement or
+        // content growth above the viewport must not be fought here.
+        if (container.scrollTop < target - MOMENTUM_WATCHDOG_TOLERANCE_PX) {
+            container.scrollTop = target;
+        }
+        frames += 1;
+        if (frames < MOMENTUM_WATCHDOG_FRAMES) {
+            frame = window.requestAnimationFrame(watch);
+        } else {
+            cancel();
+        }
+    };
+    frame = window.requestAnimationFrame(watch);
+    return cancel;
+};
+
+const hasInsertedBeforeKnownOldest = (
+    previousOldestId: string | null,
+    currentOldestId: string | null,
+    messages: ChatMessageEntry[],
+): boolean => {
+    if (!previousOldestId || !currentOldestId || currentOldestId === previousOldestId) {
+        return false;
+    }
+
+    return messages.some((message) => message.info.id === previousOldestId);
+};
+
+export const useChatTimelineController = ({
+    sessionId,
+    sessionKey,
+    messages,
+    historyMeta,
+    scrollRef,
+    messageListRef,
+    loadMoreMessages,
+    goToBottom,
+    releaseAutoFollow,
+    isPinned,
+    showScrollButton,
+}: UseChatTimelineControllerOptions): UseChatTimelineControllerResult => {
+    const previousTurnWindowModelRef = React.useRef<TurnWindowModel | null>(null);
+    const previousMessagesRef = React.useRef<ChatMessageEntry[] | null>(null);
+    const previousTurnWindowKeyRef = React.useRef<string | null>(null);
+    const turnWindowModel = React.useMemo(() => {
+        if (previousTurnWindowKeyRef.current !== sessionKey) {
+            previousTurnWindowKeyRef.current = sessionKey;
+            previousTurnWindowModelRef.current = null;
+            previousMessagesRef.current = null;
+        }
+        const cached = turnModelCache.get(messages)
+        if (cached) {
+            previousTurnWindowModelRef.current = cached
+            previousMessagesRef.current = messages
+            return cached
+        }
+
+        const incrementalModel = updateTurnWindowModelIncremental(
+            previousTurnWindowModelRef.current,
+            previousMessagesRef.current,
+            messages,
+        );
+        const nextModel = incrementalModel ?? buildTurnWindowModel(messages);
+        previousTurnWindowModelRef.current = nextModel;
+        previousMessagesRef.current = messages;
+
+        if (messages.length > 0) turnModelCache.set(messages, nextModel)
+
+        return nextModel;
+    }, [messages, sessionKey]);
+
+    const [isLoadingOlder, setIsLoadingOlder] = React.useState(false);
+    const [pendingRevealWork, setPendingRevealWork] = React.useState(false);
+    const [activeTurnId, setActiveTurnId] = React.useState<string | null>(null);
+
+    const turnModelRef = React.useRef(turnWindowModel);
+    const isPinnedRef = React.useRef(isPinned);
+    const isLoadingOlderRef = React.useRef(isLoadingOlder);
+    const pendingRevealWorkRef = React.useRef(pendingRevealWork);
+    const sessionIdRef = React.useRef<string | null>(sessionId);
+    const timelineIdentityRef = React.useRef<TimelineIdentityToken>({ key: sessionKey, connected: true });
+    if (timelineIdentityRef.current.key !== sessionKey) {
+        timelineIdentityRef.current = { key: sessionKey, connected: true };
+    }
+    const messagesRef = React.useRef(messages);
+    const initializedSessionKeyRef = React.useRef<string | null>(null);
+    const pendingRenderResolversRef = React.useRef<Array<() => void>>([]);
+    const pendingScrollRequestRef = React.useRef<PendingScrollRequest | null>(null);
+    const scrollPinRef = React.useRef<{ turnId: string; expiresAt: number } | null>(null);
+    const historyInteractionRef = React.useRef(false);
+    const historyInteractionTimerRef = React.useRef<number | null>(null);
+    const lastHistoryScrollTopRef = React.useRef<number | null>(null);
+    const cancelMomentumWatchRef = React.useRef<(() => void) | null>(null);
+
+    const historySignals = React.useMemo(() => {
+        const defaultLimit = getMemoryLimits().HISTORICAL_MESSAGES;
+        const hasBufferedTurns = false;
+        const hasMoreAboveTurns = historyMeta
+            ? !historyMeta.complete
+            : messages.length >= defaultLimit;
+        const historyLoading = Boolean(historyMeta?.loading);
+        return {
+            hasBufferedTurns,
+            hasMoreAboveTurns,
+            historyLoading,
+            canLoadEarlier: hasMoreAboveTurns,
+        };
+    }, [historyMeta, messages.length]);
+
+    const historySignalsRef = React.useRef(historySignals);
+
+    turnModelRef.current = turnWindowModel;
+    isPinnedRef.current = isPinned;
+    isLoadingOlderRef.current = isLoadingOlder;
+    pendingRevealWorkRef.current = pendingRevealWork;
+    historySignalsRef.current = historySignals;
+    sessionIdRef.current = sessionId;
+    messagesRef.current = messages;
+
+    const beginHistoryInteraction = React.useCallback(() => {
+        historyInteractionRef.current = true;
+        if (historyInteractionTimerRef.current !== null && typeof window !== 'undefined') {
+            window.clearTimeout(historyInteractionTimerRef.current);
+            historyInteractionTimerRef.current = null;
+        }
+    }, []);
+
+    const settleHistoryInteraction = React.useCallback(() => {
+        if (typeof window === 'undefined') {
+            historyInteractionRef.current = false;
+            return;
+        }
+
+        if (historyInteractionTimerRef.current !== null) {
+            window.clearTimeout(historyInteractionTimerRef.current);
+        }
+        historyInteractionTimerRef.current = window.setTimeout(() => {
+            historyInteractionTimerRef.current = null;
+            historyInteractionRef.current = false;
+        }, HISTORY_INTERACTION_GUARD_MS);
+    }, []);
+
+    React.useLayoutEffect(() => {
+        if (initializedSessionKeyRef.current === sessionKey) {
+            return;
+        }
+        if (historyInteractionTimerRef.current !== null && typeof window !== 'undefined') {
+            window.clearTimeout(historyInteractionTimerRef.current);
+            historyInteractionTimerRef.current = null;
+        }
+        historyInteractionRef.current = false;
+        lastHistoryScrollTopRef.current = null;
+        initializedSessionKeyRef.current = sessionKey;
+        const pendingScroll = pendingScrollRequestRef.current;
+        if (pendingScroll && pendingScroll.identity !== timelineIdentityRef.current) {
+            pendingScrollRequestRef.current = null;
+            pendingScroll.resolve(false);
+        }
+        setIsLoadingOlder(false);
+        isLoadingOlderRef.current = false;
+        setPendingRevealWork(false);
+        scrollPinRef.current = null;
+        setActiveTurnId(null);
+    }, [sessionKey]);
+
+    React.useLayoutEffect(() => {
+        if (!isPinned) {
+            return;
+        }
+        const latestTurnId = turnWindowModel.turnIds[turnWindowModel.turnIds.length - 1];
+        if (!latestTurnId) {
+            return;
+        }
+        // A sent prompt updates the timeline model before its new DOM node is
+        // measurable by the scroll spy. While pinned, the latest turn is
+        // authoritative and keeps the rail in sync for that interval.
+        setActiveTurnId((current) => current === latestTurnId ? current : latestTurnId);
+    }, [isPinned, turnWindowModel.turnIds]);
+
+    const resolvePendingRenderWaiters = React.useCallback(() => {
+        const resolvers = pendingRenderResolversRef.current;
+        if (resolvers.length === 0) {
+            return;
+        }
+        pendingRenderResolversRef.current = [];
+        resolvers.forEach((resolve) => resolve());
+    }, []);
+
+    const waitForNextRenderCommitOrTimeout = React.useCallback((): Promise<void> => {
+        return new Promise<void>((resolve) => {
+            if (typeof window === 'undefined') {
+                resolve();
+                return;
+            }
+
+            let settled = false;
+            const finish = () => {
+                if (settled) return;
+                settled = true;
+                window.clearTimeout(timer);
+                resolve();
+            };
+            pendingRenderResolversRef.current.push(finish);
+            const timer = window.setTimeout(finish, HISTORY_RENDER_WAIT_TIMEOUT_MS);
+        });
+    }, []);
+
+    const resolvePendingScrollRequest = React.useCallback((value: boolean) => {
+        const pending = pendingScrollRequestRef.current;
+        if (!pending) {
+            return;
+        }
+        pendingScrollRequestRef.current = null;
+        pending.resolve(value);
+    }, []);
+
+    const attemptPendingScrollRequest = React.useCallback(() => {
+        const pending = pendingScrollRequestRef.current;
+        if (!pending) {
+            return;
+        }
+
+        if (pending.identity !== timelineIdentityRef.current) {
+            resolvePendingScrollRequest(false);
+            return;
+        }
+
+        const didScroll = pending.kind === 'turn'
+            ? (messageListRef.current?.scrollToTurnId(pending.id, { behavior: pending.behavior }) ?? false)
+            : (messageListRef.current?.scrollToMessageId(pending.id, { behavior: pending.behavior }) ?? false);
+
+        if (didScroll) {
+            if (pending.turnId) {
+                // Pin the indicator to the target so the scroll spy's
+                // intermediate reports during the smooth scroll don't drag
+                // it backwards before the animation lands.
+                scrollPinRef.current = {
+                    turnId: pending.turnId,
+                    expiresAt: Date.now() + SCROLL_PIN_TIMEOUT_MS,
+                };
+                setActiveTurnId(pending.turnId);
+            }
+            resolvePendingScrollRequest(true);
+            return;
+        }
+
+        const targetIndex = pending.kind === 'turn'
+            ? turnModelRef.current.turnIndexById.get(pending.id)
+            : turnModelRef.current.messageToTurnIndex.get(pending.id);
+
+        if (typeof targetIndex === 'number') {
+            resolvePendingScrollRequest(false);
+        }
+    }, [messageListRef, resolvePendingScrollRequest]);
+
+    React.useLayoutEffect(() => {
+        if (!timelineIdentityRef.current.connected) {
+            timelineIdentityRef.current = { key: sessionKey, connected: true };
+        }
+        isLoadingOlderRef.current = false;
+        setIsLoadingOlder(false);
+        setPendingRevealWork(false);
+        return () => {
+            timelineIdentityRef.current = { key: sessionKey, connected: false };
+            cancelMomentumWatchRef.current?.();
+            cancelMomentumWatchRef.current = null;
+            historyInteractionRef.current = false;
+            lastHistoryScrollTopRef.current = null;
+            scrollPinRef.current = null;
+            prePrependScrollRef.current = null;
+            if (historyInteractionTimerRef.current !== null && typeof window !== 'undefined') {
+                window.clearTimeout(historyInteractionTimerRef.current);
+                historyInteractionTimerRef.current = null;
+            }
+            resolvePendingRenderWaiters();
+            resolvePendingScrollRequest(false);
+        };
+    }, [resolvePendingRenderWaiters, resolvePendingScrollRequest, sessionKey]);
+
+    const renderedMessages = messages;
+
+    React.useLayoutEffect(() => {
+        resolvePendingRenderWaiters();
+        attemptPendingScrollRequest();
+    }, [attemptPendingScrollRequest, renderedMessages, resolvePendingRenderWaiters]);
+
+    // --- Synchronous scroll compensation for load-more / reveal ---
+    // fetchOlderHistory and revealBufferedTurns store a snapshot here
+    // before triggering the state change. useLayoutEffect consumes it
+    // after React commits new DOM — before the browser paints.
+    const prePrependScrollRef = React.useRef<{
+        identity: TimelineIdentityToken;
+        height: number;
+        top: number;
+        anchor: ViewportAnchor | null;
+        historyVirtualized: boolean;
+        oldestId: string | null;
+        newestId: string | null;
+    } | null>(null);
+
+    const captureViewportAnchor = React.useCallback((): ViewportAnchor | null => {
+        return messageListRef.current?.captureViewportAnchor() ?? null;
+    }, [messageListRef]);
+
+    const restoreViewportAnchor = React.useCallback((anchor: ViewportAnchor): boolean => {
+        return messageListRef.current?.restoreViewportAnchor(anchor) ?? false;
+    }, [messageListRef]);
+
+    // Tracks the timeline edges + height of the previous commit so a prepend
+    // that did NOT go through fetchOlderHistory (e.g. the background history
+    // prepend dispatched from useSync) can be compensated too. With
+    // overflow-anchor:none the browser leaves scrollTop unchanged when content
+    // is inserted above, so without this the viewport visibly jumps and
+    // auto-follow yanks it back on the next frame — a one-shot up/down judder.
+    const prependTrackingRef = React.useRef<{
+        oldestId: string | null;
+        newestId: string | null;
+        scrollHeight: number;
+    } | null>(null);
+
+    React.useLayoutEffect(() => {
+        prePrependScrollRef.current = null;
+        prependTrackingRef.current = null;
+    }, [sessionKey]);
+
+    React.useLayoutEffect(() => {
+        const container = scrollRef.current;
+        if (!container) return;
+
+        let snap = prePrependScrollRef.current;
+        const prev = prependTrackingRef.current;
+        const currentOldestId = renderedMessages[0]?.info?.id ?? null;
+        const currentNewestId = renderedMessages[renderedMessages.length - 1]?.info?.id ?? null;
+        // A prepend = content inserted ABOVE the viewport: either the newest
+        // stayed fixed, or the old first message still exists below a new first
+        // message. The latter keeps preservation alive if a tail append lands in
+        // the same commit as the history page.
+        const isPrepend = prev
+            ? isOlderHistoryPrependCommit({
+                previousOldestId: prev.oldestId,
+                previousNewestId: prev.newestId,
+                currentOldestId,
+                currentNewestId,
+            }) || hasInsertedBeforeKnownOldest(prev.oldestId, currentOldestId, renderedMessages)
+            : false;
+
+        if (snap && snap.identity !== timelineIdentityRef.current) {
+            prePrependScrollRef.current = null;
+            snap = null;
+        }
+
+        const isSnapshotPrepend = snap
+            ? isOlderHistoryPrependCommit({
+                previousOldestId: snap.oldestId,
+                previousNewestId: snap.newestId,
+                currentOldestId,
+                currentNewestId,
+            }) || hasInsertedBeforeKnownOldest(snap.oldestId, currentOldestId, renderedMessages)
+            : false;
+        const didPrepend = isPrepend || isSnapshotPrepend;
+        const shouldConsumeSnapshot = Boolean(snap && (isPrepend || isSnapshotPrepend));
+
+        const updateTracking = () => {
+            prependTrackingRef.current = {
+                oldestId: currentOldestId,
+                newestId: currentNewestId,
+                scrollHeight: container.scrollHeight,
+            };
+        };
+
+        const refreshPendingSnapshot = () => {
+            const pending = prePrependScrollRef.current;
+            if (!pending) {
+                return;
+            }
+
+            prePrependScrollRef.current = {
+                ...pending,
+                height: container.scrollHeight,
+                top: container.scrollTop,
+                anchor: captureViewportAnchor(),
+                oldestId: currentOldestId,
+                newestId: currentNewestId,
+            };
+        };
+
+        if (isPinnedRef.current) {
+            // Bottom-pinned. Only content inserted ABOVE (a prepend / history load)
+            // needs an explicit re-pin: with overflow-anchor:none the browser leaves
+            // scrollTop unchanged, so the viewport would visibly jump. Route that
+            // through goToBottom — the single programmatic writer.
+            //
+            // A normal bottom APPEND (a sent message, a streaming part) must NOT
+            // re-pin here. Auto-follow already owns the bottom: its content
+            // ResizeObserver re-pins instantly (scrollTop = scrollHeight, before
+            // paint) on every append. Re-pinning again from here would just be a
+            // second writer chasing the same target a frame later — redundant at
+            // best, and the source of the old up/down jiggle on send / from the
+            // queue / while streaming. So for an append we do nothing and let
+            // auto-follow own it.
+            if (didPrepend) {
+                prePrependScrollRef.current = null;
+                goToBottom('instant');
+            } else if (snap) {
+                refreshPendingSnapshot();
+            }
+            updateTracking();
+            return;
+        }
+
+        // TanStack owns every scroll adjustment for virtualized history. It
+        // preserves stable keyed items across prepends and reconciles later row
+        // measurements. Restoring the DOM anchor here as well creates a second
+        // writer: depending on whether measurement has landed, it can apply the
+        // same prepend delta twice or fall back to scrollToIndex against the new
+        // indexes, throwing the viewport far downward.
+        const historyVirtualized = messageListRef.current?.isHistoryVirtualized() ?? false;
+
+        if (snap && shouldConsumeSnapshot) {
+            prePrependScrollRef.current = null;
+            if (historyVirtualized) {
+                // The newly enabled virtualizer has no prior keyed state for the
+                // threshold-crossing commit, so allow one anchor restore. Once
+                // already virtualized, TanStack is the sole scroll owner.
+                if (!snap.historyVirtualized && snap.anchor) {
+                    restoreViewportAnchor(snap.anchor);
+                }
+                updateTracking();
+                return;
+            }
+
+            const heightDelta = container.scrollHeight - snap.height;
+            const applyHeightDelta = (): boolean => {
+                if (heightDelta <= 0) {
+                    return false;
+                }
+                container.scrollTop = snap.top + heightDelta;
+                return true;
+            };
+
+            // Non-virtualized mobile list only: fight iOS momentum manually.
+            if (isMobileSurfaceRuntime() && heightDelta > 0) {
+                cancelMomentumWatchRef.current?.();
+                cancelMomentumWatchRef.current = setScrollTopDefeatingMomentum(container, snap.top + heightDelta);
+                updateTracking();
+                return;
+            }
+
+            // The unvirtualized list has no internal prepend compensation.
+            if (!(snap.anchor && restoreViewportAnchor(snap.anchor))) {
+                applyHeightDelta();
+            }
+        } else if (isPrepend && prev && !historyVirtualized) {
+            // Released viewport: preserve the read position by compensating for the
+            // exact height the prepend added above, with no intermediate frame for
+            // auto-follow to fight. Virtualized lists skip this because TanStack
+            // already owns keyed prepend preservation.
+            const delta = container.scrollHeight - prev.scrollHeight;
+            if (delta > 0) {
+                const target = container.scrollTop + delta;
+                if (isMobileSurfaceRuntime()) {
+                    cancelMomentumWatchRef.current?.();
+                    cancelMomentumWatchRef.current = setScrollTopDefeatingMomentum(container, target);
+                } else {
+                    container.scrollTop = target;
+                }
+            }
+        } else if (snap) {
+            // setIsLoadingOlder/historyMeta can commit before the server page
+            // arrives. Keep the snapshot armed, but refresh it so later fallback
+            // compensation only accounts for rows actually prepended above.
+            refreshPendingSnapshot();
+        }
+
+        updateTracking();
+    }, [captureViewportAnchor, messageListRef, renderedMessages, scrollRef, restoreViewportAnchor, goToBottom]);
+
+    const revealBufferedTurns = React.useCallback(async (): Promise<boolean> => false, []);
+
+    const fetchOlderHistory = React.useCallback(async (input: {
+        preserveViewport: boolean;
+    }): Promise<boolean> => {
+        if (!sessionIdRef.current || !timelineIdentityRef.current.key || !timelineIdentityRef.current.connected || isLoadingOlderRef.current) {
+            return false;
+        }
+        if (!historySignalsRef.current.hasMoreAboveTurns) {
+            return false;
+        }
+
+        const targetSessionId = sessionIdRef.current;
+        const targetIdentity = timelineIdentityRef.current;
+        if (!targetSessionId || !targetIdentity.key) {
+            return false;
+        }
+        const clearOwnedPrependSnapshot = () => {
+            if (prePrependScrollRef.current?.identity === targetIdentity) {
+                prePrependScrollRef.current = null;
+            }
+        };
+
+        const container = scrollRef.current;
+        const beforeMessages = messagesRef.current;
+        const beforeOldestMessageId = beforeMessages[0]?.info?.id ?? null;
+
+        // Store scroll snapshot BEFORE the fetch so useLayoutEffect can
+        // compensate synchronously when React commits the new messages.
+        if (input.preserveViewport && container) {
+            prePrependScrollRef.current = {
+                identity: targetIdentity,
+                height: container.scrollHeight,
+                top: container.scrollTop,
+                anchor: captureViewportAnchor(),
+                historyVirtualized: messageListRef.current?.isHistoryVirtualized() ?? false,
+                oldestId: beforeOldestMessageId,
+                newestId: beforeMessages[beforeMessages.length - 1]?.info?.id ?? null,
+            };
+        }
+
+        beginHistoryInteraction();
+        isLoadingOlderRef.current = true;
+        setIsLoadingOlder(true);
+
+        try {
+            await loadMoreMessages(targetSessionId, 'up');
+            if (timelineIdentityRef.current !== targetIdentity) {
+                clearOwnedPrependSnapshot();
+                return false;
+            }
+            await waitForNextRenderCommitOrTimeout();
+            if (timelineIdentityRef.current !== targetIdentity) {
+                clearOwnedPrependSnapshot();
+                return false;
+            }
+            const grew = messagesRef.current.length > beforeMessages.length
+                || messagesRef.current[0]?.info?.id !== beforeOldestMessageId;
+            if (!grew) clearOwnedPrependSnapshot();
+            return grew;
+        } catch (error) {
+            clearOwnedPrependSnapshot();
+            throw error;
+        } finally {
+            if (timelineIdentityRef.current === targetIdentity) {
+                isLoadingOlderRef.current = false;
+                setIsLoadingOlder(false);
+                settleHistoryInteraction();
+            }
+        }
+    }, [beginHistoryInteraction, captureViewportAnchor, loadMoreMessages, messageListRef, scrollRef, settleHistoryInteraction, waitForNextRenderCommitOrTimeout]);
+
+    const loadEarlier = React.useCallback(async (options?: { userInitiated?: boolean }) => {
+        const targetIdentity = timelineIdentityRef.current;
+        if (!targetIdentity.connected) return;
+        beginHistoryInteraction();
+        if (options?.userInitiated) {
+            releaseAutoFollow();
+        }
+
+        try {
+            void (await fetchOlderHistory({ preserveViewport: true }));
+        } finally {
+            if (timelineIdentityRef.current === targetIdentity) {
+                settleHistoryInteraction();
+            }
+        }
+    }, [beginHistoryInteraction, fetchOlderHistory, releaseAutoFollow, settleHistoryInteraction]);
+
+    // Loads older history batch by batch until the message is in the
+    // timeline, for targets that lie before the loaded window. Bounded by
+    // `maxBatches` because a message that was reverted or deleted never
+    // arrives. Resolves false on failure, exhaustion, or a session switch.
+    const loadHistoryUntilMessage = React.useCallback(async (
+        messageId: string,
+        options: { maxBatches: number },
+    ): Promise<boolean> => {
+        const targetIdentity = timelineIdentityRef.current;
+        const isLoaded = () => messagesRef.current.some((message) => message.info.id === messageId);
+        let batches = 0;
+        // Another history load (the underfilled-viewport fill) can hold the
+        // single loading slot; wait it out rather than give up.
+        let waits = 0;
+        while (targetIdentity.connected && timelineIdentityRef.current === targetIdentity) {
+            if (isLoaded()) return true;
+            if (batches >= options.maxBatches || !historySignalsRef.current.hasMoreAboveTurns) return false;
+            if (isLoadingOlderRef.current) {
+                waits += 1;
+                if (waits > HISTORY_LOAD_WAIT_LIMIT) return false;
+                await waitForNextRenderCommitOrTimeout();
+                continue;
+            }
+            batches += 1;
+            const grew = await fetchOlderHistory({ preserveViewport: true }).catch(() => false);
+            if (!grew) return timelineIdentityRef.current === targetIdentity && isLoaded();
+        }
+        return false;
+    }, [fetchOlderHistory, waitForNextRenderCommitOrTimeout]);
+
+    const handleHistoryScroll = React.useCallback(() => {
+        // Mobile never loads history from scroll position: any prepend racing
+        // an active touch gesture can be hijacked by the native scroll
+        // animation. The user scrolls to the natural top and taps an explicit
+        // "load older" button instead — the insert then happens from a resting
+        // state, which is fully deterministic.
+        if (isMobileSurfaceRuntime()) return;
+        const container = scrollRef.current;
+        if (!container) return;
+        const previousTop = lastHistoryScrollTopRef.current;
+        lastHistoryScrollTopRef.current = container.scrollTop;
+        // Prepend compensation moves the viewport down. It is not another
+        // request for history; neither is a burst of scroll events while settling.
+        if (previousTop === null || container.scrollTop >= previousTop || historyInteractionRef.current) return;
+        if (isPinnedRef.current) return;
+        if (container.scrollTop >= resolveHistoryScrollThreshold(container.clientHeight)) return;
+        if (!historySignalsRef.current.canLoadEarlier) return;
+        if (isLoadingOlderRef.current || pendingRevealWorkRef.current) return;
+
+        void loadEarlier({ userInitiated: true });
+    }, [loadEarlier, scrollRef]);
+
+    // A cold window shorter than the viewport cannot be scrolled to request
+    // history. Fill it with one batch per opened session; the load-older
+    // button covers anything beyond that.
+    const autoFilledSessionKeyRef = React.useRef<string | null>(null);
+    React.useEffect(() => {
+        if (isMobileSurfaceRuntime()) return;
+        if (!sessionKey || autoFilledSessionKeyRef.current === sessionKey) return;
+        if (!historySignals.canLoadEarlier || isLoadingOlder || pendingRevealWork || !isPinned) return;
+        const frame = window.requestAnimationFrame(() => {
+            const container = scrollRef.current;
+            if (!container || container.scrollHeight > container.clientHeight + 1) return;
+            if (autoFilledSessionKeyRef.current === sessionKey) return;
+            autoFilledSessionKeyRef.current = sessionKey;
+            void loadEarlier();
+        });
+        return () => window.cancelAnimationFrame(frame);
+    }, [historySignals.canLoadEarlier, isLoadingOlder, isPinned, loadEarlier, pendingRevealWork, renderedMessages.length, scrollRef, sessionKey]);
+
+    const scrollToTurn = React.useCallback(async (
+        turnId: string,
+        options?: { behavior?: ScrollBehavior },
+    ): Promise<boolean> => {
+        if (!turnId || !sessionIdRef.current || !timelineIdentityRef.current.key || !timelineIdentityRef.current.connected) {
+            return false;
+        }
+
+        const targetIdentity = timelineIdentityRef.current;
+        releaseAutoFollow();
+        setPendingRevealWork(true);
+
+        try {
+            if (timelineIdentityRef.current !== targetIdentity) {
+                return false;
+            }
+
+            const turnIndex = turnModelRef.current.turnIndexById.get(turnId);
+            if (typeof turnIndex !== 'number') {
+                return false;
+            }
+
+            const result = await new Promise<boolean>((resolve) => {
+                pendingScrollRequestRef.current = {
+                    identity: targetIdentity,
+                    kind: 'turn',
+                    id: turnId,
+                    behavior: options?.behavior ?? 'auto',
+                    turnId,
+                    resolve,
+                };
+                attemptPendingScrollRequest();
+            });
+
+            if (result) {
+                return true;
+            }
+
+            return false;
+        } finally {
+            if (timelineIdentityRef.current === targetIdentity) {
+                setPendingRevealWork(false);
+            }
+        }
+    }, [attemptPendingScrollRequest, releaseAutoFollow]);
+
+    const scrollToMessage = React.useCallback(async (
+        messageId: string,
+        options?: { behavior?: ScrollBehavior },
+    ): Promise<boolean> => {
+        if (!messageId || !sessionIdRef.current || !timelineIdentityRef.current.key || !timelineIdentityRef.current.connected) {
+            return false;
+        }
+
+        const targetIdentity = timelineIdentityRef.current;
+        releaseAutoFollow();
+        setPendingRevealWork(true);
+
+        try {
+            if (timelineIdentityRef.current !== targetIdentity) {
+                return false;
+            }
+
+            const turnId = turnModelRef.current.messageToTurnId.get(messageId);
+            const turnIndex = turnModelRef.current.messageToTurnIndex.get(messageId);
+
+            if (typeof turnIndex !== 'number') {
+                return false;
+            }
+
+            const result = await new Promise<boolean>((resolve) => {
+                pendingScrollRequestRef.current = {
+                    identity: targetIdentity,
+                    kind: 'message',
+                    id: messageId,
+                    behavior: options?.behavior ?? 'auto',
+                    turnId: turnId ?? null,
+                    resolve,
+                };
+                attemptPendingScrollRequest();
+            });
+
+            if (result) {
+                return true;
+            }
+
+            return false;
+        } finally {
+            if (timelineIdentityRef.current === targetIdentity) {
+                setPendingRevealWork(false);
+            }
+        }
+    }, [attemptPendingScrollRequest, releaseAutoFollow]);
+
+    const resumeToBottom = React.useCallback(async () => {
+        setPendingRevealWork(false);
+        setIsLoadingOlder(false);
+        goToBottom('smooth');
+    }, [goToBottom]);
+
+    const resumeToBottomInstant = React.useCallback(async () => {
+        setPendingRevealWork(false);
+        setIsLoadingOlder(false);
+        goToBottom('instant');
+    }, [goToBottom]);
+
+    const handleActiveTurnChange = React.useCallback((turnId: string | null) => {
+        const pin = scrollPinRef.current;
+        if (pin) {
+            if (turnId !== pin.turnId && Date.now() < pin.expiresAt) {
+                return;
+            }
+            scrollPinRef.current = null;
+        }
+        setActiveTurnId(turnId);
+    }, []);
+
+    return {
+        turnIds: turnWindowModel.turnIds,
+        turnStart: 0,
+        renderedMessages,
+        historySignals,
+        isLoadingOlder,
+        pendingRevealWork,
+        activeTurnId,
+        showScrollToBottom: showScrollButton && !pendingRevealWork,
+        turnWindowModel,
+        loadEarlier,
+        loadHistoryUntilMessage,
+        revealBufferedTurns,
+        resumeToBottom,
+        resumeToBottomInstant,
+        scrollToTurn,
+        scrollToMessage,
+        handleHistoryScroll,
+        captureViewportAnchor,
+        restoreViewportAnchor,
+        handleActiveTurnChange,
+    };
+};

@@ -1,0 +1,418 @@
+import type { Message, Part } from "@/lib/opencode/model"
+import { mergeMessages } from "./optimistic"
+import type { SessionMaterializationReason } from "./event-reducer"
+import { sortMessagesChronologically } from "./message-ordering"
+import { toolContentShellChars } from "@/lib/opencode/toolContentShells"
+
+const STREAMING_PART_FIELDS = ["text", "output"] as const
+const ACTIVE_TOOL_STATUSES = new Set(["pending", "running"])
+const FINAL_TOOL_STATUSES = new Set(["completed", "error", "aborted", "failed", "timeout", "cancelled"])
+
+export type MaterializedMessageRecord = {
+  info: Message
+  parts: Part[]
+}
+
+export type MaterializedState = {
+  message: Record<string, Message[]>
+  part: Record<string, Part[]>
+}
+
+export type MaterializeSessionSnapshotsOptions = {
+  skipPartTypes?: ReadonlySet<string>
+  mode?: "merge" | "prepend"
+}
+
+export type MaterializeSessionSnapshotsResult = {
+  message: Record<string, Message[]>
+  part: Record<string, Part[]>
+  messages: Message[]
+  messagesChanged: boolean
+  partsChanged: boolean
+}
+
+export type SessionMaterializationStatus = {
+  hasMessages: boolean
+  renderable: boolean
+  missingPartMessageIDs: string[]
+}
+
+export type SessionMaterializationRequest = {
+  reason: SessionMaterializationReason
+  messageID?: string
+  partID?: string
+}
+
+export const getSessionMaterializationRequestKey = (
+  runtimeKey: string,
+  directory: string,
+  sessionID: string,
+): string => JSON.stringify([runtimeKey, directory, sessionID])
+
+export function isSessionMaterializationStillNeeded(
+  state: MaterializedState,
+  sessionID: string,
+  request: SessionMaterializationRequest,
+): boolean {
+  if (request.reason === "empty-assistant-message") {
+    return !request.messageID || !Object.prototype.hasOwnProperty.call(state.part, request.messageID)
+  }
+
+  if (request.reason === "missing-owning-message") {
+    if (!request.messageID) return true
+    return !(state.message[sessionID] ?? []).some((message) => message.id === request.messageID)
+  }
+
+  if (request.reason === "orphan-delta" || request.reason === "missing-delta-part") {
+    if (!request.messageID || !request.partID) return true
+    return !(state.part[request.messageID] ?? []).some((part) => part.id === request.partID)
+  }
+
+  if (request.reason === "settled-running-tool") {
+    return getStaleRunningToolMessageID(state, sessionID) === request.messageID
+  }
+
+  return true
+}
+
+export function getStaleRunningToolMessageID(
+  state: MaterializedState,
+  sessionID: string,
+): string | undefined {
+  const messages = state.message[sessionID] ?? []
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]
+    if (message.role === "user") return undefined
+    if (message.role !== "assistant") continue
+    const hasActiveTool = (state.part[message.id] ?? []).some((part) => {
+      if (part.type !== "tool") return false
+      const status = (part as { state?: { status?: unknown } }).state?.status
+      return typeof status === "string" && ACTIVE_TOOL_STATUSES.has(status)
+    })
+    return hasActiveTool ? message.id : undefined
+  }
+  return undefined
+}
+
+function filterMaterializedParts(parts: Part[], skipPartTypes: ReadonlySet<string>): Part[] {
+  return parts
+    .filter((part) => !!part?.id && !skipPartTypes.has(part.type))
+}
+
+function finalizeActiveToolsInCompletedMessage(message: Message, parts: Part[]): Part[] {
+  if (message.role !== "assistant" || message.time.completed === undefined) return parts
+
+  const completedAt = message.time.completed
+  let reconciledParts = parts
+  for (let index = 0; index < parts.length; index += 1) {
+    const part = parts[index]
+    if (part.type !== "tool" || !ACTIVE_TOOL_STATUSES.has(part.state.status)) continue
+
+    const start = getPartStateTime(part)?.start ?? completedAt
+    if (reconciledParts === parts) reconciledParts = [...parts]
+    reconciledParts[index] = {
+      ...part,
+      state: {
+        ...part.state,
+        status: "error" as const,
+        error: "Interrupted",
+        time: { start, end: completedAt },
+      },
+    }
+  }
+
+  return reconciledParts
+}
+
+function haveEquivalentPartSnapshots(left: Part[] | undefined, right: Part[]): boolean {
+  // `undefined` means "parts never fetched", which is NOT equivalent to a
+  // fetched-empty snapshot — the empty array must be committed so
+  // getSessionMaterializationStatus can tell the two apart.
+  if (!left) return false
+  if (left.length !== right.length) return false
+
+  for (let index = 0; index < left.length; index += 1) {
+    const leftPart = left[index]
+    const rightPart = right[index]
+    if (!leftPart || !rightPart) return false
+    if (leftPart === rightPart) continue
+    if (leftPart.id !== rightPart.id) return false
+    if (JSON.stringify(leftPart) !== JSON.stringify(rightPart)) return false
+  }
+
+  return true
+}
+
+function getPartEndTime(part: Part): number | undefined {
+  const stateEnd = (part as { state?: { time?: { end?: unknown } } }).state?.time?.end
+  if (typeof stateEnd === "number") {
+    return stateEnd
+  }
+
+  const timeEnd = (part as { time?: { end?: unknown } }).time?.end
+  return typeof timeEnd === "number" ? timeEnd : undefined
+}
+
+function getStringField(part: Part, field: "text" | "output"): string | undefined {
+  const value = (part as Record<string, unknown>)[field]
+  return typeof value === "string" ? value : undefined
+}
+
+function getPartStateAttachments(part: Part): Array<unknown> | undefined {
+  const state = (part as Record<string, unknown>).state as Record<string, unknown> | undefined
+  if (!state) return undefined
+  const attachments = state.attachments
+  return Array.isArray(attachments) ? attachments : undefined
+}
+
+function hasLiveStreamingField(part: Part): boolean {
+  if (getPartEndTime(part) !== undefined) return false
+  return STREAMING_PART_FIELDS.some((field) => {
+    const value = getStringField(part, field)
+    return typeof value === "string" && value.length > 0
+  })
+}
+
+function getPartStateTime(part: Part): { start?: number; end?: number } | undefined {
+  const stateTime = (part as { state?: { time?: { start?: unknown; end?: unknown } } }).state?.time
+  if (!stateTime || typeof stateTime !== "object") return undefined
+  const start = typeof stateTime.start === "number" ? stateTime.start : undefined
+  const end = typeof stateTime.end === "number" ? stateTime.end : undefined
+  if (start === undefined && end === undefined) return undefined
+  return { start, end }
+}
+
+function mergeMaterializedPart(existing: Part | undefined, next: Part): Part {
+  if (!existing) return next
+
+  if (existing.type === "tool" && next.type === "tool") {
+    // A page carries finished results as shells. The whole call this client
+    // already holds (from the event stream, or a completed message) stays.
+    if (
+      existing.state.status === next.state.status
+      && toolContentShellChars(next) !== null
+      && toolContentShellChars(existing) === null
+    ) {
+      return existing
+    }
+    const existingStatus = (existing as { state?: { status?: unknown } }).state?.status
+    const nextStatus = (next as { state?: { status?: unknown } }).state?.status
+    if (
+      typeof existingStatus === "string"
+      && FINAL_TOOL_STATUSES.has(existingStatus)
+      && typeof nextStatus === "string"
+      && ACTIVE_TOOL_STATUSES.has(nextStatus)
+    ) {
+      return existing
+    }
+    // A snapshot fetched just before a call started can land after the live
+    // `called`/`progress` events. OpenCode publishes progress metadata only
+    // on change (a subagent's child `sessionID` exactly once), so letting the
+    // stale copy win would lose it until the call settles.
+    if (existing.state.status === "running" && next.state.status === "pending") {
+      return existing
+    }
+    if (
+      existing.state.status === "running"
+      && next.state.status === "running"
+      && existing.state.metadata !== undefined
+      && next.state.metadata === undefined
+    ) {
+      next = { ...next, state: { ...next.state, metadata: existing.state.metadata } }
+    }
+  }
+
+  if (getPartEndTime(next) !== undefined) {
+    const existingAttachments = getPartStateAttachments(existing)
+    if (existingAttachments?.length && getPartStateAttachments(next) === undefined) {
+      const nextRecord = { ...next }
+      const nextState = { ...((next as Record<string, unknown>).state as Record<string, unknown> ?? {}), attachments: existingAttachments }
+      ;(nextRecord as Record<string, unknown>).state = nextState
+      return nextRecord
+    }
+    return next
+  }
+
+  let merged: Part = next
+  for (const field of STREAMING_PART_FIELDS) {
+    const existingValue = getStringField(existing, field)
+    if (!existingValue) continue
+
+    const nextValue = getStringField(next, field)
+    if (typeof nextValue === "string" && nextValue.length >= existingValue.length) continue
+    if (typeof nextValue === "string" && nextValue.length > 0 && !existingValue.startsWith(nextValue)) continue
+
+    if (merged === next) merged = { ...next }
+    const mergedRecord = merged as Record<string, unknown>
+    mergedRecord[field] = existingValue
+  }
+
+  const existingAttachments = getPartStateAttachments(existing)
+  if (existingAttachments?.length && getPartStateAttachments(next) === undefined) {
+    if (merged === next) merged = { ...next }
+    const mergedRecord = merged as Record<string, unknown>
+    const nextState = (next as Record<string, unknown>).state as Record<string, unknown> | undefined
+    const newState = { ...(nextState ?? {}), attachments: existingAttachments }
+    mergedRecord.state = newState
+  }
+
+  const existingTime = getPartStateTime(existing)
+  if (existingTime) {
+    const nextTime = getPartStateTime(next)
+    const preservedStart = nextTime?.start ?? existingTime.start
+    const preservedEnd = nextTime?.end ?? existingTime.end
+    if (preservedStart !== nextTime?.start || preservedEnd !== nextTime?.end) {
+      if (merged === next) merged = { ...next }
+      const mergedRecord = merged as Record<string, unknown>
+      const currentState = (mergedRecord.state as Record<string, unknown> | undefined) ?? (next as Record<string, unknown>).state as Record<string, unknown> | undefined
+      const newState = { ...(currentState ?? {}), time: { start: preservedStart, end: preservedEnd } }
+      mergedRecord.state = newState
+    }
+  }
+
+  return merged
+}
+
+function mergeMaterializedParts(
+  existing: Part[] | undefined,
+  nextParts: Part[],
+  skipPartTypes: ReadonlySet<string>,
+  preserveLiveStreamingParts: boolean,
+): Part[] {
+  if (!existing || existing.length === 0) return nextParts
+  if (!preserveLiveStreamingParts) return nextParts
+
+  const existingByID = new Map(existing.map((part) => [part.id, part]))
+  let mergedParts = nextParts
+  let changed = false
+
+  for (let index = 0; index < nextParts.length; index += 1) {
+    const nextPart = nextParts[index]
+    const mergedPart = mergeMaterializedPart(existingByID.get(nextPart.id), nextPart)
+    if (mergedPart === nextPart) continue
+    if (!changed) mergedParts = [...nextParts]
+    mergedParts[index] = mergedPart
+    changed = true
+  }
+
+  const snapshotIDs = new Set(nextParts.map((part) => part.id))
+  const missingLiveParts = existing.filter(
+    (part) => !!part?.id && !snapshotIDs.has(part.id) && !skipPartTypes.has(part.type) && hasLiveStreamingField(part),
+  )
+  if (missingLiveParts.length === 0) return mergedParts
+
+  return [...mergedParts, ...missingLiveParts]
+}
+
+export function materializeSessionSnapshots(
+  state: MaterializedState,
+  sessionID: string,
+  records: MaterializedMessageRecord[],
+  options: MaterializeSessionSnapshotsOptions = {},
+): MaterializeSessionSnapshotsResult {
+  const skipPartTypes = options.skipPartTypes ?? new Set<string>()
+  const recordsByMessageID = new Map(
+    records
+      .filter((record) => !!record?.info?.id)
+      .map((record) => [record.info.id, record] as const),
+  )
+  const nextMessages = sortMessagesChronologically([...recordsByMessageID.values()].map((record) => record.info))
+  const snapshots = nextMessages.map((message) => recordsByMessageID.get(message.id)!)
+  const existingMessages = state.message[sessionID]
+  const currentMessages = existingMessages ?? []
+  const incomingByID = new Map(nextMessages.map((message) => [message.id, message] as const))
+  let reconciledCurrentMessages = currentMessages
+  for (let index = 0; index < currentMessages.length; index += 1) {
+    const existing = currentMessages[index]
+    const incoming = incomingByID.get(existing.id)
+    // A completion the server reports supersedes a turn this client still
+    // holds open, and the local interruption mark (`interruptedTurnToolParts`)
+    // it may have put on it. Any other existing record wins over the snapshot.
+    if (
+      existing.role !== "assistant"
+      || incoming?.role !== "assistant"
+      || incoming.time.completed === undefined
+      || (existing.time.completed !== undefined && !existing.closedLocally)
+    ) continue
+    if (reconciledCurrentMessages === currentMessages) reconciledCurrentMessages = [...currentMessages]
+    reconciledCurrentMessages[index] = incoming
+  }
+  const messages = mergeMessages(reconciledCurrentMessages, nextMessages)
+  const messagesChanged = messages !== currentMessages || (existingMessages === undefined && snapshots.length === 0)
+
+  let partsChanged = false
+  let nextPartState = state.part
+  const isPrepend = options.mode === "prepend"
+
+  for (const record of snapshots) {
+    const messageID = record.info.id
+    if (isPrepend && nextPartState[messageID]) continue
+
+    const isAssistant = record.info.role === "assistant"
+    const existing = nextPartState[messageID]
+    const mergedParts = mergeMaterializedParts(
+      existing,
+      filterMaterializedParts(record.parts ?? [], skipPartTypes),
+      skipPartTypes,
+      isAssistant,
+    )
+    const nextParts = finalizeActiveToolsInCompletedMessage(record.info, mergedParts)
+    // For non-assistant messages an empty snapshot keeps the old "absent"
+    // representation; only assistant messages need the explicit [] marker
+    // (getSessionMaterializationStatus checks only assistant messages).
+    const equivalent = existing
+      ? haveEquivalentPartSnapshots(existing, nextParts)
+      : nextParts.length === 0 && !isAssistant
+    if (equivalent) continue
+
+    if (nextPartState === state.part) nextPartState = { ...state.part }
+
+    if (nextParts.length === 0 && !isAssistant) {
+      delete nextPartState[messageID]
+    } else {
+      // Store fetched-empty as an explicit [] (not absence): an assistant
+      // message the server returned with zero parts (e.g. aborted before any
+      // output) is authoritatively empty and must count as renderable, or
+      // the ensure-renderable effects retry syncSession forever.
+      nextPartState[messageID] = nextParts
+    }
+    partsChanged = true
+  }
+
+  return {
+    message: messagesChanged ? { ...state.message, [sessionID]: messages } : state.message,
+    part: partsChanged ? nextPartState : state.part,
+    messages,
+    messagesChanged,
+    partsChanged,
+  }
+}
+
+export function getSessionMaterializationStatus(
+  state: MaterializedState,
+  sessionID: string,
+): SessionMaterializationStatus {
+  const messages = state.message[sessionID]
+  if (!messages) {
+    return { hasMessages: false, renderable: false, missingPartMessageIDs: [] }
+  }
+
+  const missingPartMessageIDs: string[] = []
+  for (const message of messages) {
+    if (message.role !== "assistant") continue
+    // `undefined` = parts never fetched (not renderable yet). An explicit []
+    // is a fetched-empty snapshot (e.g. aborted assistant turn) and counts
+    // as renderable — otherwise sessions containing such a message can never
+    // reach renderable state and ensure-renderable callers loop forever.
+    const parts = state.part[message.id]
+    if (!parts) {
+      missingPartMessageIDs.push(message.id)
+    }
+  }
+
+  return {
+    hasMessages: true,
+    renderable: missingPartMessageIDs.length === 0,
+    missingPartMessageIDs,
+  }
+}

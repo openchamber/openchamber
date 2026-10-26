@@ -1,0 +1,330 @@
+---
+title: Een extensie bouwen
+description: Voeg met @openchamber/sdk een eigen paneel toe, installeer het vanuit een map of Git-URL en communiceer met de app via connectHost.
+---
+
+# Een extensie bouwen
+
+Gebruik `@openchamber/sdk` om een eigen paneel aan OpenChamber toe te voegen. Een extensie is een kleine webpagina in de rechterbalk. Via `connectHost()` kan ze het huidige project en de sessie lezen, meldingen tonen, tekst in het invoerveld plaatsen en een taak aan een sessie koppelen. Met toestemming van de gebruiker kan ze ook sessies starten en prompts versturen.
+
+Extensies draaien op OpenChamber web en desktop. VS Code en mobiel laden ze nog niet.
+
+## Waaruit bestaat een extensie?
+
+Een map met drie bestanden:
+
+- `package.json` met een `openchamber`-blok: het manifest
+- `panel/index.html`: de pagina die OpenChamber toont
+- `panel/main.js`: uw script, gebundeld als één klassiek scriptbestand, een IIFE en geen ES-module, omdat de pagina in een afgeschermd iframe draait
+
+OpenChamber compileert uw code niet. Lever het gebouwde `.js`-bestand mee. De SDK bevat een bundelopdracht; elke andere bundler die een IIFE maakt, werkt ook.
+
+```bash
+npm install @openchamber/sdk
+bunx openchamber-guest-bundle panel/main.ts panel/main.js
+```
+
+De bundelopdracht draait op Bun. Gebruik zonder Bun esbuild of een andere bundler met `--format=iife --platform=browser`.
+
+Op de pagina [Voorbeeld](/nl/sdk/example/) staan alle drie de bestanden van een werkende extensie. Kopieer ze en pas de API en lijst aan.
+
+Verwijs in `index.html` naar `main.js` met een gewone `<script src="main.js"></script>`.
+
+## Installeren tijdens het ontwikkelen
+
+1. Start OpenChamber op web of desktop.
+2. Open Instellingen → Extensies.
+3. Plak het absolute pad naar uw map en klik op Toevoegen.
+
+OpenChamber leest het manifest en toont de gevraagde rechten. Zie [Rechten](#rechten). Na goedkeuring verschijnt uw pictogram in de balk. Klik erop om de pagina te laden.
+
+U kunt ook een lokale `.zip` of een https-link naar een Git-repository of ZIP-bestand toevoegen. Alleen een Git-installatie ondersteunt updates: verhoog `version` in `package.json` en push. OpenChamber biedt de update aan wanneer de gebruiker opnieuw Instellingen → Extensies opent. Met `#tag` of `#branch` in de URL bepaalt u welke versie wordt gevolgd. Deze installaties worden naar de gegevensmap van OpenChamber gekopieerd en draaien daaruit. Lever dus gebouwde bestanden mee, geen `node_modules` of TypeScript-bronbestanden. Verwijderen wist de kopie. Een mapinstallatie draait rechtstreeks uit uw map, zodat u kunt bewerken, opnieuw bouwen en herladen.
+
+## Manifest
+
+```json
+{
+  "name": "@acme/hello",
+  "version": "1.0.0",
+  "openchamber": {
+    "apiVersion": 1,
+    "engines": { "openchamber": ">=1.24.0" },
+    "contributes": {
+      "panel": {
+        "id": "acme-hello",
+        "name": "Hello",
+        "icon": "window",
+        "entry": "panel/index.html"
+      },
+      "attach": "dialog",
+      "page": true,
+      "capabilities": ["prompt", "sessions"],
+      "integration": {
+        "name": "Acme",
+        "description": "Tasks from Acme",
+        "token": {
+          "apiOrigin": "https://api.acme.example",
+          "account": { "path": "/me", "name": "login" },
+          "scheme": "bearer"
+        },
+        "settings": [{ "id": "list-id", "label": "List ID" }]
+      }
+    }
+  }
+}
+```
+
+`version` is verplicht en moet semver volgen. De extensiekaart toont deze versie.
+
+`apiVersion` moet `1` zijn. OpenChamber weigert andere waarden.
+
+`engines.openchamber` is optioneel. Geef de oudste ondersteunde OpenChamber-versie op als `1.24.0` of `>=1.24.0`. Oudere builds weigeren de installatie dan meteen, in plaats van later vast te lopen.
+
+`contributes.panel` beschrijft de vermelding in de balk. `id` gebruikt kebab-case en moet uniek zijn onder de geïnstalleerde extensies. `icon` is een Remixicon-naam: `RiWindowLine` wordt `window`. Een SVG-bestand in uw map, zoals `icon.svg`, mag ook. `entry` verwijst naar het HTML-bestand in de map. Laat het weg voor een extensie die alleen `tools` opgeeft. Zie [Uw tools in de chat](#uw-tools-in-de-chat).
+
+`contributes.attach` is optioneel. Hiermee verschijnt de extensie in het +-menu naast het chatveld, zodat de gebruiker een taak kan kiezen en aan een sessie koppelen.
+
+- `"dialog"` opent uw pagina in een venster
+- `true` of `"panel"` opent het paneel in de balk
+- `{ "mode": "dialog", "entry": "panel/attach.html" }` opent een aparte pagina in het venster, zodat de kiezer geen code met het zijpaneel hoeft te delen
+- zonder dit veld verschijnt de extensie niet in dat menu
+
+Uw pagina leest via `ctx.surface` waar ze staat: `panel`, `dialog`, `page` of `status`. Klikt de gebruiker op een gekoppeld item, dan krijgt u de bijbehorende `data` terug in `ctx.item`. Openen vanuit de balk, het +-menu of het menu voor schermvullende pagina's begint zonder item.
+
+`contributes.page: true` maakt het paneel schermvullend beschikbaar via Extensiepagina's boven de sessielijst. Gebruik `{ "entry": "panel/page.html", "title": "Board" }` voor aparte HTML en een optionele titel. Lever die HTML en de gebouwde scripts mee. Een pagina vereist `panel.entry`, gebruikt dezelfde afscherming en rechten en opent alleen op keuze van de gebruiker. Herladen, pauzeren, verwijderen of wisselen van server sluit de pagina.
+
+Gebruik voor een bord `host.storage` voor blijvende JSON-gegevens en de project-, worktree- en sessiemethoden voor gedeelde appgegevens. `startSession` kan een ander project of een andere worktree gebruiken zonder het bord te sluiten. Zie [Host-API](/nl/sdk/host/) voor abonnementen op wijzigingen, livestatussen en gedeeltelijk geslaagde aanmaakresultaten.
+
+`contributes.integration` is optioneel. Het voegt een kaart bij Instellingen → Integraties toe waar de gebruiker een account verbindt. Zie [Accounts en netwerk](#accounts-en-netwerk).
+
+`contributes.service` is optioneel. Hiermee geeft u een lokaal proces op dat OpenChamber naast de extensie start voor zaken die een webpagina niet kan bereiken, zoals een Docker-socket. Het proces heeft de volledige gebruikerstoegang en draait zonder sandbox. Het toestemmingsvenster waarschuwt hiervoor. Gebruik een service alleen als de pagina het werk niet zelf kan doen. Zie `GUEST_SERVICES.md` in het pakket. Een service met `provides: ["browser"]` kan ook de browser van de agent leveren. Ze beantwoordt `browser.*`-acties op de server, zodat agents zonder geopende desktopapp kunnen browsen. De gebruiker kiest haar bij Instellingen → OpenChamber-tools. Zo'n service heeft geen paneel nodig.
+
+## Rechten
+
+Een paneel tonen en de huidige sessie lezen vereist geen toestemming. Voor handelingen namens de gebruiker is die wel nodig. Geef die op in `contributes.capabilities`:
+
+| Recht | Wat het toestaat |
+| --- | --- |
+| `prompt` | berichten naar de gebruikerssessie versturen via `prompt({ send: true })` of `startSession` met `text` |
+| `sessions` | projecten, worktrees en sessiestatussen opvragen; sessies aanmaken en openen in geregistreerde projecten |
+| `files` | bestanden in het geopende project lezen en schrijven via `readFile`, `writeFile`, `listDir` en `stat` met een relatief pad |
+| `model` | eenmalig tekst genereren met het Small Model via `generate`, buiten een sessie |
+
+Vijf rechten worden automatisch toegevoegd: `network` bij een `integration`, `service` bij een `service`, `filesystem` bij `filesystem`-patronen, `origins` bij `origins` en `conversation` als een sessieactie berichten opvraagt. Zie [Acties, opdrachten en de badge](#acties-opdrachten-en-de-badge).
+
+Bij installatie ziet de gebruiker de volledige lijst en kan die goedkeuren of de extensie verwijderen. Vraagt een nieuwe versie meer, dan verschijnt het venster opnieuw. Een aanroep waarvoor een nog niet goedgekeurd recht nodig is, faalt met `NOT_GRANTED`.
+
+## Tekst genereren
+
+Met het recht `model` vraagt `host.generate` het Small Model van de gebruiker om een eenmalig antwoord, zoals een samenvatting, titel of concepttekst. Niets komt in een sessie terecht, er wordt geen geschiedenis bewaard en de extensie kiest nooit zelf een provider. OpenChamber gebruikt hetzelfde model als voor eigen achtergrondtaken: het model uit Instellingen → Sessies → Small Model, het kleine model van de provider waarmee de gebruiker werkt, of het standaardmodel uit de OpenCode-configuratie.
+
+```ts
+const { text } = await host.generate({
+  prompt: task.description,
+  system: "Write a one-line summary. Return only the summary.",
+  maxOutputTokens: 200,
+});
+```
+
+Zonder beschikbaar model faalt de aanroep met `NO_MODEL`; een modelfout geeft `MODEL_FAILED`. Prompts zijn maximaal 64.000 tekens en de aanroep wacht maximaal 90 seconden. De gebruiker ziet dit recht als 'Uw Small Model gebruiken'. Het kost tokens, dus houd prompts kort en roep het aan bij een klik, niet bij elke toetsaanslag.
+
+## Accounts en netwerk
+
+Uw pagina draait in een sandbox en heeft zelf geen netwerktoegang. Scripts, stijlen, afbeeldingen, lettertypen en media worden alleen uit uw pakket geladen, en `fetch` kan alleen de bestanden van uw pakket bereiken. Lever lettertypen en afbeeldingen mee in het pakket in plaats van ze van een CDN te laden.
+
+Geef een `integration` op om met een externe dienst te communiceren. OpenChamber doet de verzoeken via `host.request` met het gebruikerstoken. Het token bereikt uw pagina nooit.
+
+Voor andere bronnen die uw pagina rechtstreeks nodig heeft, zoals lettertypen of afbeeldingen van een CDN of een openbare API, kunt u maximaal 8 https-origins opgeven:
+
+```json
+"origins": ["https://fonts.example.com"]
+```
+
+In het toestemmingsvenster ziet de gebruiker deze als adressen waarmee de extensie gegevens kan uitwisselen. Als een update een adres toevoegt, is opnieuw toestemming nodig. Goedgekeurde origins zijn toegankelijk voor `fetch`, afbeeldingen, lettertypen, stijlen en media, maar nooit voor scripts. Code moet in uw pakket zitten. De origin van de pagina is `null`, dus om een `fetch`-antwoord te kunnen lezen moet de server CORS voor die origin toestaan.
+
+In de [enterprise-modus](/nl/security/) wordt een extensie met `origins`, een `integration` of een `service` alleen geïnstalleerd vanuit een Git-repository die de beheerder heeft opgegeven. Kan uw extensie zonder, dan blijft ze voor die teams installeerbaar. Wilt u op zo'n computer een extensie bouwen, vraag de beheerder dan om `allowLocalExtensions`; daarmee installeert u de extensie vanuit haar map.
+
+- `token`: de gebruiker plakt een API-token op de integratiekaart. `apiOrigin` is de enige origin die `request` mag bereiken. `account` is optioneel en bevat een GET-pad en een veldnaam om het verbonden account te tonen. `scheme` bepaalt hoe het token wordt verstuurd; zie de tabel. Controleer in de provider-API-documentatie welke header vereist is.
+- `oauth`: de gebruiker plakt een client-ID en OpenChamber voert de autorisatieprocedure uit. Vereist `authorizeUrl`, `tokenUrl` en `apiOrigin`.
+- `host: { "provider": "linear" }`: hergebruikt het Linear-account dat al in OpenChamber verbonden is. Geen client-ID nodig.
+
+Wat elke `scheme` verstuurt:
+
+| `scheme` | Header van OpenChamber | Wanneer gebruiken? |
+| --- | --- | --- |
+| niet opgegeven | `Authorization: <token>` | de API verwacht het token zonder voorvoegsel |
+| `"bearer"` | `Authorization: Bearer <token>` | de API verwacht een bearer- of persoonlijk toegangstoken |
+| `"basic"` | `Authorization: Basic base64(username:token)` | de API verwacht HTTP Basic met gebruikersnaam, vaak een e-mailadres, en API-token; de kaart vraagt om beide en `usernameLabel` benoemt het eerste veld |
+
+`settings` voegt gewone tekstvelden aan de kaart toe. Hun waarden staan in `ctx.settings`.
+
+## Bestanden
+
+Uw pagina heeft zelf geen schijftoegang. OpenChamber leest en schrijft namens haar binnen de goedgekeurde grenzen.
+
+- Een relatief pad, zoals `README.md`, `src/index.ts` of `.`, verwijst naar het geopende project en vereist `files`. Zonder geopend project krijgt u `NO_DIRECTORY`.
+- Een pad dat met `/` of `~/` begint, verwijst naar een andere locatie. Het moet passen bij een patroon in `contributes.filesystem`. De gebruiker ziet precies die patronen in het toestemmingsvenster:
+
+```json
+"filesystem": ["~/.config/opencode/opencode.json", "~/notes/**"]
+```
+
+`*` staat voor één padsegment en `**` voor willekeurige diepte. Een pad daarbuiten geeft `BAD_PATH`, ook na goedkeuring. `..` is nooit toegestaan.
+
+```ts
+const config = await host.readFile("~/.config/opencode/opencode.json");
+await host.writeFile("~/.config/opencode/opencode.json", nextJson);
+const { entries } = await host.listDir(".");
+```
+
+Schrijven is atomair: OpenChamber schrijft een tijdelijk bestand en hernoemt dat. Een lezer ziet daardoor nooit een halfgeschreven bestand. Bestanden worden als UTF-8-tekst gelezen en geschreven, tot 2 MB.
+
+## Een onderdeel in Werkstatus
+
+`contributes.statusSection` voegt een eigen onderdeel toe aan het paneel Werkstatus naast de chat. Gebruikers kunnen het net als ingebouwde onderdelen in- en uitschakelen en in de onderdelenlijst verplaatsen.
+
+```json
+"statusSection": { "entry": "status/index.html", "title": "Recent commits", "height": 160 }
+```
+
+- `true` hergebruikt `panel.entry`.
+- `entry` wijst naar een aparte HTML-pagina in uw map. Daarmee is `panel.entry` niet nodig en kan de extensie alleen dit onderdeel aanbieden, zonder balkpictogram.
+- `title` vervangt de paneelnaam in de kop, maximaal 60 tekens.
+- `height` is de beginhoogte in pixels, van 24 tot 320, standaard 120. Roep [`host.setHeight()`](/nl/sdk/host/) aan wanneer de inhoud van grootte verandert.
+
+De pagina ziet `ctx.surface` als `status`. OpenChamber laadt haar alleen als Werkstatus zichtbaar is en uw onderdeel is uitgeklapt. Bij inklappen wordt ze verwijderd. Bewaar er dus niets dat u niet opnieuw kunt opbouwen. Een extensie met alleen zo'n onderdeel mag rechten, een service, integratie en bestandstoegang gebruiken, maar geen `page`, `attach`, `actions` of `commands`. Alleen web en desktop. Het voorbeeld `git-graph-status` bevat een volledig onderdeel.
+
+## Een editor voor uw bestandstype
+
+`contributes.fileEditors` opent bestanden in uw pagina in plaats van in de teksteditor. Bij een passend bestand in Bestanden toont OpenChamber uw editor, met dezelfde bronweergave, volledig-schermknop en opslagknop als de ingebouwde viewers.
+
+```json
+"fileEditors": [
+  { "id": "canvas", "title": "Excalidraw", "match": ["*.excalidraw", "*.excalidraw.md"], "entry": "editor/index.html" }
+]
+```
+
+- `match` vergelijkt alleen bestandsnamen, zonder onderscheid tussen hoofd- en kleine letters. `*` staat voor een reeks tekens en `?` voor één teken. Een patroon mag geen `/` bevatten en niet alleen uit jokertekens bestaan.
+- `entry` verwijst naar een HTML-pagina in uw map. `panel.entry` is niet nodig, dus een extensie kan alleen een editor zijn, zonder balkpictogram.
+- `content` is `"text"`, de standaard, of `"binary"`. Zie hieronder.
+- Maximaal 8 editors per extensie en 16 patronen per editor.
+
+OpenChamber beheert het bestand. Uw pagina leest of schrijft het niet zelf en heeft er geen recht voor nodig. OpenChamber geeft de tekst door, vraagt bij het opslaan om de bewerkte tekst en regelt Cmd/Ctrl+S, automatisch opslaan, waarschuwingen voor niet-opgeslagen wijzigingen, regeleinden en wijzigingen op schijf:
+
+```ts
+import { connectHost, createFileSaveTracker } from "@openchamber/sdk";
+
+const host = connectHost();
+let tracker = createFileSaveTracker(null);
+
+host.onFileOpen((file) => {
+  if (file.encoding !== "text") return; // a text editor always gets text
+  load(file.content); // file.path, file.name, file.readOnly too
+  tracker = createFileSaveTracker(versionOf(currentText()));
+});
+
+// Call this after every edit. `edited` holds autosave back until the user stops.
+const changed = () => host.reportFileChange(tracker.observe(versionOf(currentText())));
+
+host.onFileSnapshot(() => ({ content: currentText(), version: versionOf(currentText()) }));
+
+// Edits made while OpenChamber was writing keep the file unsaved.
+host.onFileSaved((version) => host.reportFileChange({ dirty: tracker.markSaved(version), edited: false }));
+```
+
+`version` is een korte tekenreeks die bij elke documentwijziging verandert, bijvoorbeeld een hash. Kan uw editor een bestand niet openen, roep dan `host.reportFileUnsupported()` aan. OpenChamber toont de bron met een melding. Bestanden groter dan 20 MB blijven in de bronweergave.
+
+### Binaire bestanden
+
+Stel `"content": "binary"` in voor bestanden die geen tekst zijn, zoals spreadsheets, documenten of afbeeldingen. Uw editor ontvangt bytes en geeft bytes terug. De overige werking blijft gelijk.
+
+```ts
+host.onFileOpen((file) => {
+  if (file.encoding !== "binary") return;
+  open(file.bytes); // a Uint8Array, exactly as on disk
+});
+
+host.onFileSnapshot(() => ({ bytes: currentBytes(), version: versionOf(currentBytes()) }));
+```
+
+Een binaire editor kan elk bestand claimen dat bij zijn patronen past, ook bestanden waarvoor OpenChamber zelf een voorbeeld toont, zoals afbeeldingen en PDF's. De editor heeft geen bronweergave. Bij wisselen naar of vanuit volledig scherm slaat OpenChamber niet-opgeslagen wijzigingen eerst op. Uw editor bepaalt hoe het bestandsformaat wordt gelezen en geschreven. OpenChamber schrijft precies de teruggegeven bytes weg.
+
+Uw pagina ziet `ctx.surface` als `file`. OpenChamber herlaadt haar en geeft het bestand opnieuw door bij wijzigingen op schijf, het weggooien van wijzigingen of wisselen naar of vanuit volledig scherm. De eerste ingeschakelde extensie met een passend patroon krijgt voorrang, ook boven ingebouwde voorbeelden. Een extensie met alleen een editor mag rechten, een service, integratie en bestandstoegang gebruiken, maar geen `page`, `attach`, `actions` of `commands`. Alleen web en desktop. Het voorbeeld `checklist-editor` bevat een volledige editor.
+
+## Acties, opdrachten en de badge
+
+Naast de balk en het +-menu kan een extensie op nog drie plekken verschijnen. Ze geven allemaal een `item` door, zoals bij het aanklikken van een gekoppeld item.
+
+**Acties bij berichten en sessies.** Geef menuopties op en OpenChamber toont ze naast de ingebouwde opties:
+
+```json
+"actions": [
+  { "id": "create-task", "label": "Create task", "icon": "add-line", "where": "message", "roles": ["assistant"] },
+  { "id": "summarize", "label": "Summarize session", "where": "session", "payload": ["messages"] }
+]
+```
+
+Een berichtactie opent de extensie met `ctx.item` van `kind: "message"`: sessie-ID en -titel, projectmap, bericht-ID, rol en tekst. Een sessieactie gebruikt `kind: "session"` met sessie-ID, titel en map. Voeg `"payload": ["messages"]` toe om het hele gesprek mee te krijgen, oudste eerst, met dezelfde tekst als de Markdown-export. Dit vereist `conversation`, apart getoond in het toestemmingsvenster. `item.action` geeft aan welke menuoptie is gekozen.
+
+**Slash-opdrachten die iets koppelen.** Geef een opdracht op en handel deze in de pagina af:
+
+```json
+"commands": [{ "name": "task", "description": "Attach a task by id" }]
+```
+
+```ts
+host.onResolve(async ({ command, args }) => {
+  const task = await findTask(args.trim());
+  return task ? { providerId: "acme-tasks", id: task.id, title: task.title, url: task.url } : null;
+});
+```
+
+Typt de gebruiker `/task ABC-12`, dan vraagt OpenChamber uw extensie om het item op te zoeken en koppelt het teruggegeven resultaat aan het invoerveld, zonder een venster te openen. Geef `null` terug als niets is gevonden. Is het paneel gesloten, dan laadt OpenChamber het op de achtergrond voor de aanroep. Namen die OpenChamber of OpenCode al gebruikt, worden genegeerd.
+
+**Badge op het balkpictogram.** `host.setBadge(3)` toont een getal, bijvoorbeeld het aantal open taken. `host.setBadge(null)` wist de badge. Het openen van het paneel wist haar ook.
+
+## Uw tools in de chat
+
+Tools uit een OpenCode-plugin of MCP-server verschijnen standaard met een algemeen pictogram en onbewerkte uitvoer. Geef zonder extra code een eigen weergave op:
+
+```json
+"tools": [
+  {
+    "match": "mcp.jira.*",
+    "name": "Jira",
+    "icon": "task-line",
+    "title": "{input.key}",
+    "subtitle": "{output.status}",
+    "output": "table",
+    "columns": ["key", "summary", "status"]
+  }
+]
+```
+
+`match` is de toolnaam zoals OpenCode die meldt. Een afsluitende `*` vergelijkt op voorvoegsel. `icon` is een Remixicon-naam of `.svg`-bestand in uw pakket, net als `panel.icon`. `title` en `subtitle` zijn sjablonen op basis van `input`, `output` en `metadata`. `output` bepaalt de weergave: `text`, `json` als boom, `markdown`, `code` met `language`, `table` met `columns`, of `auto` voor de standaard. Tabelrijen komen uit de uitvoerarray of `output.items`. Een exacte overeenkomst gaat boven een jokerteken; bij gelijke matches wint de eerst geïnstalleerde extensie. Er is geen toestemming nodig, omdat alleen de weergave van bestaande chatgegevens verandert.
+
+Een extensie die alleen tools opmaakt, heeft geen pagina nodig. Zonder `panel.entry` verschijnt geen balkpictogram, alleen een kaart bij Instellingen → Extensies. Zonder pagina mag ze uitsluitend `tools` opgeven. Een Werkstatus-onderdeel of bestandseditor met een eigen `entry` is de andere uitzondering, zoals hierboven beschreven.
+
+## De eerste regels van het paneel
+
+```ts
+import { connectHost } from "@openchamber/sdk";
+
+const host = connectHost();
+
+host.onReady((ctx) => {
+  document.body.dataset.theme = ctx.theme.mode;
+  document.body.dataset.surface = ctx.surface;
+});
+```
+
+`connectHost` werkt alleen binnen OpenChamber. Als u de pagina als los bestand opent, wordt elke aanroep geweigerd met `HOST_UNAVAILABLE`.
+
+Bouw uw paneel eerst met de onderdelen van `@openchamber/sdk/ui`: knoppen, velden, keuzelijsten, tabbladen en lijsten in de kleuren en lettertypen van de app. Zo voelt het paneel als onderdeel van OpenChamber. Schrijf alleen eigen HTML en CSS voor wat de kit niet biedt. Zie [UI-kit](/nl/sdk/ui/).
+
+## Zie ook
+
+- [Extensies](/nl/extensions/) voor SSH-installaties en de Git-identiteit van de server
+- [Host-API](/nl/sdk/host/) voor alle methoden, limieten en foutcodes
+- [UI-kit](/nl/sdk/ui/) voor de beschikbare onderdelen
+- [Voorbeeld](/nl/sdk/example/) voor een volledige extensie met drie bestanden

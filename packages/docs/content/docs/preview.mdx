@@ -1,0 +1,35 @@
+---
+title: Preview & Dev Servers
+description: Open a running dev server inside OpenChamber.
+---
+
+# Preview & Dev Servers
+
+When you start a dev server, OpenChamber can open it right inside the app instead of a separate browser tab — so you can see your site next to the chat and point at elements to ask about them.
+
+## Open a dev server
+
+Open the browser panel from the globe button in the app header. If a dev server is already running, it is listed there and one click opens it — OpenChamber finds it by looking at what is actually listening on your machine, so it works no matter how you started it.
+
+A dev server also opens automatically when:
+
+- you press **Open preview** on a local address in the terminal
+- a [project action](/project-actions/) with auto-open turned on starts one
+- you follow a local link in a chat message
+
+You can always type an address yourself. A bare `localhost:5173` is treated as `http://`, so you do not have to type the scheme.
+
+## Working with a remote OpenChamber
+
+When OpenChamber runs on another machine, its dev server is on *that* machine — `localhost` on your laptop is somewhere else entirely. The desktop app handles this for you: it opens a local port that carries the connection through to the remote dev server, so the page loads normally, with working hot reload and developer tools. You keep typing the address you expect; the plumbing stays out of your way.
+
+This needs the desktop app. In a web browser tab, only dev servers on your own machine can be opened.
+
+## Annotate the page
+
+See [Browser Panel](/desktop-browser/) for pointing at elements, drawing on the page, and sending it all to chat.
+
+## Related
+
+- [Project Actions](/project-actions/) — auto-open a server when you start it
+- [Browser Panel](/desktop-browser/) — annotating pages and letting the agent drive

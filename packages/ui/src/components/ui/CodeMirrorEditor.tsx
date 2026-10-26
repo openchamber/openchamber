@@ -1,0 +1,618 @@
+import React from 'react';
+
+import type { Extension } from '@codemirror/state';
+import { Compartment, EditorState, RangeSetBuilder, StateField, type StateEffect } from '@codemirror/state';
+import { Decoration, type DecorationSet, EditorView, type KeyBinding, ViewPlugin, WidgetType, gutters, keymap, lineNumbers } from '@codemirror/view';
+import { defaultKeymap, indentWithTab, history, historyKeymap } from '@codemirror/commands';
+import { forceParsing, indentUnit } from '@codemirror/language';
+import { search, searchKeymap, openSearchPanel, closeSearchPanel, searchPanelOpen, getSearchQuery } from '@codemirror/search';
+import { createPortal } from 'react-dom';
+
+import { searchPanelSpace } from '@/lib/codemirror/searchPanelSpace';
+import { createVimModeExtensions } from '@/lib/codemirror/vimModeExtension';
+import { cn } from '@/lib/utils';
+
+/** Patches `title` attributes onto CodeMirror search-panel controls for icon-only tooltips. */
+const buttonTooltips: Record<string, string> = {
+  next: 'Next match',
+  prev: 'Previous match',
+  select: 'Select all matches',
+  replace: 'Replace',
+  replaceAll: 'Replace all',
+  close: 'Close',
+};
+const checkboxTooltips: Record<string, string> = {
+  case: 'Match case',
+  re: 'Regular expression',
+  word: 'Match whole word',
+};
+
+function patchSearchTooltips(root: HTMLElement) {
+  const panel = root.querySelector('.cm-search');
+  if (!panel) return;
+  for (const [name, title] of Object.entries(buttonTooltips)) {
+    const btn = panel.querySelector(`button[name="${name}"]`) as HTMLElement | null;
+    if (btn && !btn.title) btn.title = title;
+  }
+  for (const [name, title] of Object.entries(checkboxTooltips)) {
+    const input = panel.querySelector(`input[name="${name}"]`) as HTMLElement | null;
+    const label = input?.parentElement;
+    if (label && !label.title) label.title = title;
+  }
+}
+
+type SearchQuery = ReturnType<typeof getSearchQuery>;
+type SearchMatchCountCache = {
+  query: SearchQuery;
+  doc: EditorState['doc'];
+  total: number;
+};
+
+const searchMatchCountCache = new WeakMap<EditorView, SearchMatchCountCache>();
+
+function getSearchMatchTotal(view: EditorView, refresh: boolean): number {
+  const query = getSearchQuery(view.state);
+  if (!query.valid) {
+    searchMatchCountCache.delete(view);
+    return 0;
+  }
+
+  const cached = searchMatchCountCache.get(view);
+  if (!refresh && cached?.doc === view.state.doc && cached.query.eq(query)) {
+    return cached.total;
+  }
+
+  const cursor = query.getCursor(view.state);
+  let total = 0;
+  for (let result = cursor.next(); !result.done; result = cursor.next()) {
+    total += 1;
+  }
+
+  searchMatchCountCache.set(view, { query, doc: view.state.doc, total });
+  return total;
+}
+
+function getSearchMatchCurrent(view: EditorView): number {
+  const query = getSearchQuery(view.state);
+  if (!query.valid) {
+    return 0;
+  }
+
+  const selection = view.state.selection.main;
+  const cursor = query.getCursor(view.state);
+  let index = 0;
+  let firstMatch = 0;
+
+  for (let result = cursor.next(); !result.done; result = cursor.next()) {
+    const match = result.value;
+    index += 1;
+    if (firstMatch === 0) {
+      firstMatch = index;
+    }
+    if (selection.from === match.from && selection.to === match.to) {
+      return index;
+    }
+    if (selection.from < match.to && selection.to > match.from) {
+      return index;
+    }
+    if (match.from >= selection.head) {
+      return index;
+    }
+  }
+
+  return firstMatch;
+}
+
+function syncSearchPanelStatus(root: HTMLElement, view: EditorView, refreshTotal = false) {
+  const panel = root.querySelector('.cm-search');
+  if (!panel) return;
+
+  let status = panel.querySelector<HTMLElement>('.cm-search-message');
+  if (!status) {
+    status = document.createElement('span');
+    status.className = 'cm-search-message';
+    status.setAttribute('aria-live', 'polite');
+
+    const nextButton = panel.querySelector('button[name="next"]');
+    const referenceNode = nextButton?.parentNode === panel ? nextButton : panel.firstChild;
+    panel.insertBefore(status, referenceNode);
+  }
+
+  const total = getSearchMatchTotal(view, refreshTotal);
+  const current = total === 0 ? 0 : getSearchMatchCurrent(view);
+  status.textContent = total === 0 ? '' : `${current}/${total}`;
+}
+
+export type BlockWidgetDef = {
+  afterLine: number;
+  id: string;
+  content: React.ReactNode;
+};
+
+type CodeMirrorEditorProps = {
+  value: string;
+  onChange: (value: string) => void;
+  extensions?: Extension[];
+  className?: string;
+  readOnly?: boolean;
+  lineNumbersConfig?: Parameters<typeof lineNumbers>[0];
+  highlightLines?: { start: number; end: number };
+  blockWidgets?: BlockWidgetDef[];
+  onViewReady?: (view: EditorView) => void;
+  onViewDestroy?: () => void;
+  enableSearch?: boolean;
+  searchOpen?: boolean;
+  onSearchOpenChange?: (open: boolean) => void;
+  vimMode?: boolean;
+  /**
+   * Takes the editor's DOM out of the document while true, keeping its state,
+   * and puts it back, at the same scroll position, when false. For a host
+   * that hides the editor: hiding it in place (aria-hidden, inert,
+   * display: none) costs Chrome a 200 to 300 ms frame whenever an
+   * accessibility client is on, while removing the DOM costs a few ms.
+   */
+  detached?: boolean;
+};
+
+const gutterWidthMeasureKey = {};
+const lineNumbersCompartment = new Compartment();
+const editableCompartment = new Compartment();
+const externalExtensionsCompartment = new Compartment();
+const highlightLinesCompartment = new Compartment();
+const blockWidgetsCompartment = new Compartment();
+const searchCompartment = new Compartment();
+const vimCompartment = new Compartment();
+
+const toViewKeyBindings = (bindings: readonly unknown[]): readonly KeyBinding[] => {
+  return bindings as readonly KeyBinding[];
+};
+
+const forceParsingCompat = forceParsing as unknown as (view: EditorView, upto?: number, timeout?: number) => boolean;
+const openSearchPanelCompat = openSearchPanel as unknown as (view: EditorView) => void;
+const closeSearchPanelCompat = closeSearchPanel as unknown as (view: EditorView) => void;
+
+// BlockWidget class definition moved inside helper or adapted to take map
+class BlockWidget extends WidgetType {
+  constructor(readonly id: string, readonly containerMap: Map<string, HTMLElement>) {
+    super();
+  }
+
+  toDOM() {
+    let div = this.containerMap.get(this.id);
+    if (!div) {
+      div = document.createElement('div');
+      div.className = 'oc-block-widget';
+      div.dataset.widgetId = this.id;
+      this.containerMap.set(this.id, div);
+    }
+    return div;
+  }
+
+  eq(other: BlockWidget) {
+    return other.id === this.id;
+  }
+  
+  destroy() {
+    // We do NOT remove from map here because CM might destroy the widget
+    // when it scrolls out of view, but we want to reuse the same container (and Portal)
+    // when it scrolls back in.
+  }
+}
+
+const createBlockWidgetsExtension = (widgets: BlockWidgetDef[] | undefined, containerMap: Map<string, HTMLElement>) => {
+  if (!widgets || widgets.length === 0) return [];
+
+  return StateField.define<DecorationSet>({
+    create(state) {
+      const builder = new RangeSetBuilder<Decoration>();
+      // Sort widgets by line number to add them in order
+      const sorted = [...widgets].sort((a, b) => a.afterLine - b.afterLine);
+      
+      for (const w of sorted) {
+        const lineCount = state.doc.lines;
+        if (w.afterLine > lineCount) continue;
+        
+        const line = state.doc.line(w.afterLine);
+        // Add widget decoration
+        builder.add(line.to, line.to, Decoration.widget({
+          widget: new BlockWidget(w.id, containerMap),
+          block: true,
+          side: 1, 
+        }));
+      }
+      return builder.finish();
+    },
+    update(deco, tr) {
+      // If the doc changed, map the decorations.
+      // If the widgets prop changed, the compartment reconfigure will handle it (create() will run).
+      return deco.map(tr.changes);
+    },
+    provide: f => EditorView.decorations.from(f)
+  });
+};
+
+
+const createHighlightLinesExtension = (range?: { start: number; end: number }): Extension => {
+  if (!range) {
+    return [];
+  }
+
+  const start = Math.max(1, range.start);
+  const end = Math.max(start, range.end);
+
+  return ViewPlugin.fromClass(class {
+    decorations;
+
+    constructor(view: EditorView) {
+      this.decorations = this.build(view);
+    }
+
+    update(update: import('@codemirror/view').ViewUpdate) {
+      if (update.docChanged || update.viewportChanged) {
+        this.decorations = this.build(update.view);
+      }
+    }
+
+    build(view: EditorView) {
+      const builder = new RangeSetBuilder<Decoration>();
+      for (let lineNo = start; lineNo <= end && lineNo <= view.state.doc.lines; lineNo += 1) {
+        const line = view.state.doc.line(lineNo);
+        builder.add(line.from, line.from, Decoration.line({ class: 'oc-cm-selected-line' }));
+      }
+      return builder.finish();
+    }
+  }, { decorations: (v) => v.decorations });
+};
+
+export function CodeMirrorEditor({
+  value,
+  onChange,
+  extensions,
+  className,
+  readOnly,
+  lineNumbersConfig,
+  highlightLines,
+  onViewReady,
+  onViewDestroy,
+  blockWidgets,
+  enableSearch,
+  searchOpen,
+  onSearchOpenChange,
+  vimMode,
+  detached = false,
+}: CodeMirrorEditorProps) {
+  const hostRef = React.useRef<HTMLDivElement | null>(null);
+  const viewRef = React.useRef<EditorView | null>(null);
+  const detachedRef = React.useRef(detached);
+  // Taken on scroll, so it is current when the DOM leaves: a detached
+  // scroller loses its offsets, and by the time the host hides the editor
+  // (display: none) they already read zero.
+  const scrollSnapshotRef = React.useRef<ReturnType<EditorView['scrollSnapshot']> | null>(null);
+  const valueRef = React.useRef(value);
+  const onChangeRef = React.useRef(onChange);
+  const onViewReadyRef = React.useRef(onViewReady);
+  const onViewDestroyRef = React.useRef(onViewDestroy);
+  const onSearchOpenChangeRef = React.useRef(onSearchOpenChange);
+  const blockWidgetsRef = React.useRef(blockWidgets);
+  const vimModeRef = React.useRef(vimMode);
+  
+  // Scoped map for widget containers to avoid global collisions and memory leaks
+  const widgetContainersRef = React.useRef(new Map<string, HTMLElement>());
+  const [portalWidgets, setPortalWidgets] = React.useState<Array<{ id: string; content: React.ReactNode; container: HTMLElement }>>([]);
+
+  const syncPortalWidgets = React.useCallback((widgets?: BlockWidgetDef[]) => {
+    const next = (widgets ?? [])
+      .map((widget) => {
+        const container = widgetContainersRef.current.get(widget.id);
+        if (!container) {
+          return null;
+        }
+        return {
+          id: widget.id,
+          content: widget.content,
+          container,
+        };
+      })
+      .filter((widget): widget is { id: string; content: React.ReactNode; container: HTMLElement } => widget !== null);
+
+    setPortalWidgets((prev) => {
+      if (
+        prev.length === next.length &&
+        prev.every((widget, index) => {
+          const candidate = next[index];
+          return (
+            widget.id === candidate.id &&
+            widget.content === candidate.content &&
+            widget.container === candidate.container
+          );
+        })
+      ) {
+        return prev;
+      }
+      return next;
+    });
+  }, []);
+
+  // The gutter width for inline comment widgets. Read in CodeMirror's own
+  // measure phase: read on every update, it forced a layout of the page on
+  // each keystroke and each reconfigure.
+  const gutterWidthRef = React.useRef<string | null>(null);
+  const syncEditorCssVars = React.useCallback((view?: EditorView | null) => {
+    const resolvedView = view ?? viewRef.current;
+    if (!hostRef.current || !resolvedView) {
+      return;
+    }
+
+    resolvedView.requestMeasure({
+      key: gutterWidthMeasureKey,
+      read: (measuredView) => {
+        const gutters = measuredView.dom.querySelector('.cm-gutters');
+        if (!(gutters instanceof HTMLElement)) return 0;
+        // Hidden or detached, it measures zero: keep the last real width.
+        return gutters.isConnected && gutters.offsetParent !== null ? gutters.getBoundingClientRect().width : null;
+      },
+      write: (gutterWidth) => {
+        const host = hostRef.current;
+        if (!host || gutterWidth === null) return;
+        const next = `${gutterWidth}px`;
+        if (gutterWidthRef.current === next) return;
+        gutterWidthRef.current = next;
+        host.style.setProperty('--oc-editor-gutter-width', next);
+      },
+    });
+  }, []);
+
+  React.useEffect(() => {
+    valueRef.current = value;
+  }, [value]);
+
+  React.useEffect(() => {
+    onChangeRef.current = onChange;
+  }, [onChange]);
+
+  React.useEffect(() => {
+    onViewReadyRef.current = onViewReady;
+    onViewDestroyRef.current = onViewDestroy;
+  }, [onViewReady, onViewDestroy]);
+
+  React.useEffect(() => {
+    onSearchOpenChangeRef.current = onSearchOpenChange;
+  }, [onSearchOpenChange]);
+
+  React.useEffect(() => {
+    blockWidgetsRef.current = blockWidgets;
+    syncPortalWidgets(blockWidgets);
+  }, [blockWidgets, syncPortalWidgets]);
+
+  React.useEffect(() => {
+    if (!hostRef.current) {
+      return;
+    }
+
+    const cspNonce = (() => {
+      if (typeof document === 'undefined') return null;
+      const metaNonce = document.querySelector('meta[name="csp-nonce"]')?.getAttribute('content');
+      if (metaNonce) return metaNonce;
+      const windowNonce = (window as Window & { __OPENCHAMBER_CSP_NONCE__?: string }).__OPENCHAMBER_CSP_NONCE__;
+      return typeof windowNonce === 'string' && windowNonce.length > 0 ? windowNonce : null;
+    })();
+
+    const state = EditorState.create({
+      doc: valueRef.current,
+      extensions: [
+        ...(cspNonce ? [EditorView.cspNonce.of(cspNonce)] : []),
+        gutters({ fixed: true }),
+        lineNumbersCompartment.of(lineNumbers(lineNumbersConfig)),
+        history(),
+        indentUnit.of('  '),
+        vimCompartment.of(createVimModeExtensions(vimMode)),
+        keymap.of([indentWithTab, ...defaultKeymap, ...historyKeymap]),
+        EditorView.updateListener.of((update) => {
+          // Edits while detached (a reload, an agent's write) move the text
+          // under the remembered scroll position.
+          if (update.docChanged && scrollSnapshotRef.current) {
+            scrollSnapshotRef.current = scrollSnapshotRef.current.map(update.changes) ?? null;
+          }
+          if (update.docChanged || update.geometryChanged || update.viewportChanged || update.transactions.some((tr) => tr.reconfigured)) {
+            syncEditorCssVars(update.view);
+          }
+          if (update.viewportChanged || update.geometryChanged) {
+            syncPortalWidgets(blockWidgetsRef.current);
+          }
+          // Detect search panel open/close and sync back to React state
+          const wasOpen = searchPanelOpen(update.startState);
+          const isOpen = searchPanelOpen(update.state);
+          if (wasOpen !== isOpen) {
+            onSearchOpenChangeRef.current?.(isOpen);
+          }
+          const queryChanged = !getSearchQuery(update.startState).eq(getSearchQuery(update.state));
+          if (isOpen && (wasOpen !== isOpen || queryChanged || update.docChanged || update.selectionSet)) {
+            syncSearchPanelStatus(update.view.dom, update.view, wasOpen !== isOpen || queryChanged || update.docChanged);
+          }
+          if (!update.docChanged) {
+            return;
+          }
+          const next = update.state.doc.toString();
+          valueRef.current = next;
+          onChangeRef.current(next);
+          syncPortalWidgets(blockWidgetsRef.current);
+        }),
+        editableCompartment.of(EditorView.editable.of(!readOnly)),
+        externalExtensionsCompartment.of(extensions ?? []),
+        highlightLinesCompartment.of(createHighlightLinesExtension(highlightLines)),
+        blockWidgetsCompartment.of(createBlockWidgetsExtension(blockWidgets, widgetContainersRef.current)),
+        searchCompartment.of(enableSearch ? [search({ top: true }), searchPanelSpace(), keymap.of(toViewKeyBindings(searchKeymap))] : []),
+      ],
+    });
+
+    viewRef.current = new EditorView({
+      state,
+      parent: hostRef.current,
+    });
+    if (detachedRef.current) {
+      viewRef.current.dom.remove();
+    }
+    const scrolledView = viewRef.current;
+    const recordScroll = () => {
+      scrollSnapshotRef.current = scrolledView.scrollSnapshot();
+    };
+    scrolledView.scrollDOM.addEventListener('scroll', recordScroll, { passive: true });
+
+    forceParsingCompat(viewRef.current, viewRef.current.state.doc.length, 200);
+    viewRef.current.requestMeasure();
+    requestAnimationFrame(() => {
+      syncEditorCssVars(viewRef.current);
+      syncPortalWidgets(blockWidgetsRef.current);
+    });
+
+    if (viewRef.current) {
+      onViewReadyRef.current?.(viewRef.current);
+    }
+
+    return () => {
+      scrolledView.scrollDOM.removeEventListener('scroll', recordScroll);
+      onViewDestroyRef.current?.();
+      viewRef.current?.destroy();
+      viewRef.current = null;
+      setPortalWidgets([]);
+    };
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
+  }, [blockWidgetsRef, syncEditorCssVars, syncPortalWidgets]);
+
+  // Only the compartments whose input changed are reconfigured: a reconfigure
+  // rebuilds the gutters and re-measures the editor, and hosts may pass fresh
+  // objects on every render. The creation effect applied the first values.
+  const appliedConfigRef = React.useRef({ lineNumbersConfig, readOnly, extensions, highlightLines, blockWidgets, enableSearch });
+  React.useEffect(() => {
+    const view = viewRef.current;
+    if (!view) {
+      return;
+    }
+    const applied = appliedConfigRef.current;
+    appliedConfigRef.current = { lineNumbersConfig, readOnly, extensions, highlightLines, blockWidgets, enableSearch };
+    const effects: StateEffect<unknown>[] = [];
+    if (applied.lineNumbersConfig !== lineNumbersConfig) {
+      effects.push(lineNumbersCompartment.reconfigure(lineNumbers(lineNumbersConfig)));
+    }
+    if (applied.readOnly !== readOnly) {
+      effects.push(editableCompartment.reconfigure(EditorView.editable.of(!readOnly)));
+    }
+    if (applied.extensions !== extensions) {
+      effects.push(externalExtensionsCompartment.reconfigure(extensions ?? []));
+    }
+    if (applied.highlightLines?.start !== highlightLines?.start || applied.highlightLines?.end !== highlightLines?.end) {
+      effects.push(highlightLinesCompartment.reconfigure(createHighlightLinesExtension(highlightLines)));
+    }
+    if (applied.blockWidgets !== blockWidgets) {
+      effects.push(blockWidgetsCompartment.reconfigure(createBlockWidgetsExtension(blockWidgets, widgetContainersRef.current)));
+    }
+    if (applied.enableSearch !== enableSearch) {
+      effects.push(searchCompartment.reconfigure(enableSearch ? [search({ top: true }), searchPanelSpace(), keymap.of(toViewKeyBindings(searchKeymap))] : []));
+    }
+    if (effects.length === 0) {
+      return;
+    }
+
+    view.dispatch({ effects });
+
+    forceParsingCompat(view, view.state.doc.length, 200);
+    view.requestMeasure();
+    requestAnimationFrame(() => {
+      syncEditorCssVars(view);
+      syncPortalWidgets(blockWidgetsRef.current);
+    });
+  }, [extensions, highlightLines, lineNumbersConfig, readOnly, blockWidgets, enableSearch, syncEditorCssVars, syncPortalWidgets]);
+
+  // A layout effect, so the DOM leaves in the same commit that hides the host
+  // and the browser never lays out or exposes the editor hidden in place.
+  React.useLayoutEffect(() => {
+    detachedRef.current = detached;
+    const host = hostRef.current;
+    const view = viewRef.current;
+    if (!host || !view) {
+      return;
+    }
+    if (detached) {
+      if (view.dom.parentNode === host) view.dom.remove();
+      return;
+    }
+    if (view.dom.parentNode === host) return;
+    host.appendChild(view.dom);
+    const scroll = scrollSnapshotRef.current;
+    if (scroll) {
+      view.dispatch({ effects: scroll });
+    } else {
+      view.requestMeasure();
+    }
+  }, [detached]);
+
+  React.useEffect(() => {
+    const view = viewRef.current;
+    if (!view) {
+      vimModeRef.current = vimMode;
+      return;
+    }
+
+    if (vimModeRef.current === vimMode) {
+      return;
+    }
+
+    vimModeRef.current = vimMode;
+    view.dispatch({
+      effects: vimCompartment.reconfigure(createVimModeExtensions(vimMode)),
+    });
+  }, [vimMode]);
+
+  React.useEffect(() => {
+    const view = viewRef.current;
+    if (!view || enableSearch === false) {
+      return;
+    }
+    if (searchOpen) {
+      openSearchPanelCompat(view);
+      // Patch tooltips after panel DOM is mounted
+      requestAnimationFrame(() => {
+        patchSearchTooltips(view.dom);
+        syncSearchPanelStatus(view.dom, view, true);
+      });
+    } else {
+      closeSearchPanelCompat(view);
+    }
+  }, [searchOpen, enableSearch]);
+
+  React.useEffect(() => {
+    const view = viewRef.current;
+    if (!view) {
+      return;
+    }
+
+    const current = view.state.doc.toString();
+    if (current !== value) {
+      view.dispatch({
+        changes: { from: 0, to: current.length, insert: value },
+      });
+      forceParsingCompat(view, view.state.doc.length, 300);
+      view.requestMeasure();
+      requestAnimationFrame(() => syncEditorCssVars(view));
+    }
+  }, [value, syncEditorCssVars]);
+
+  return (
+    <>
+      <div
+        ref={hostRef}
+        // Code reads left to right in every UI language; gutters stay on the left.
+        dir="ltr"
+        className={cn(
+          'oc-surface-code h-full w-full',
+          '[&_.cm-editor]:h-full [&_.cm-editor]:w-full',
+          '[&_.cm-scroller]:font-mono [&_.cm-scroller]:text-[var(--text-code)] [&_.cm-scroller]:leading-6',
+          className,
+        )}
+      />
+      {portalWidgets.map((widget) => {
+        return createPortal(widget.content, widget.container, widget.id);
+      })}
+    </>
+  );
+}

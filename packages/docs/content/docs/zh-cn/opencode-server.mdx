@@ -1,0 +1,97 @@
+---
+title: OpenCode Server
+description: 将 OpenChamber 连接到本地或远程的 OpenCode 服务器。
+---
+
+# OpenCode Server
+
+OpenChamber 运行在 OpenCode 服务器之上。默认情况下，它会为你启动一个，所以你无需做任何事。只有当你想让 OpenChamber 指向一个你已经运行的服务器，或者管理它所启动的服务器时，才需要本页内容。
+
+## OpenChamber 如何查找服务器
+
+OpenChamber 启动时，会按以下顺序查找服务器：
+
+1. 复用它已经启动的服务器
+2. 如果你指定了外部服务器，则连接到它（见下文）
+3. 在默认端口（`4096`）上自动检测服务器
+4. 否则，启动并管理它自己的服务器
+
+如果没有进行任何配置，第 4 步会自动发生，你就可以开始运行了。
+
+## 连接到你已经运行的服务器
+
+在启动 OpenChamber 之前设置这些变量：
+
+```bash
+OPENCODE_HOST=http://localhost:4096 OPENCODE_SKIP_START=true openchamber
+```
+
+- `OPENCODE_HOST` — 你的 OpenCode 服务器的完整地址，包括端口（类似 `http://localhost:4096` 这样的值）。末尾不能带路径。
+- `OPENCODE_SKIP_START=true` — 告诉 OpenChamber 不要启动它自己的服务器。
+
+如果你只需要更改端口，请设置 `OPENCODE_PORT` 而不是 `OPENCODE_HOST`。
+
+如果 `OPENCODE_HOST` 缺少端口或带有路径，OpenChamber 会忽略它并回退到启动自己的服务器。如果你期望的连接没有发生，请留意启动日志中的 `[config]` 警告。
+
+## 从 CLI 管理服务器
+
+```bash
+openchamber status
+openchamber logs
+openchamber restart
+openchamber stop
+```
+
+单独运行 `openchamber` 会在后台启动服务器。添加 `--foreground` 可以让它保持附加在你的终端上。
+
+## 登录时启动 OpenChamber
+
+使用 `startup enable` 安装原生用户服务。OpenChamber 在 macOS 上使用 `launchd`，在 Linux 上使用 `systemd --user`，在 Windows 上使用 Task Scheduler。
+
+```bash
+openchamber startup enable
+openchamber startup status
+openchamber startup disable
+```
+
+要保护 UI，请在启用服务时设置密码：
+
+```bash
+OPENCHAMBER_UI_PASSWORD='secret' openchamber startup enable
+```
+
+如果要在登录时启动一个供桌面或移动应用使用的 headless 服务器，请加上 `--api-only` 和可访问的 host：
+
+```bash
+openchamber startup enable --port 3000 --api-only --host 0.0.0.0 --ui-password secret
+```
+
+`startup enable` 会把当前环境快照保存到服务中，让启动行为更接近你在同一个 shell 中手动运行 `openchamber`。这会保留提供商 token、`PATH`、SSH agent 设置以及其他 CLI auth/config 环境变量。如果你想要最小化的服务环境，请使用 `--no-env-snapshot`。
+
+启动服务会记住 `--port`、`--host`、`--ui-password` 和 `--api-only`。CLI restart 和更新期间的 restart 会复用这些已保存设置。
+
+要为另一个 OpenChamber 应用创建连接链接，请使用：
+
+```bash
+openchamber connect-url --port 3000 --server http://your-host:3000 --qr
+```
+
+运行 `openchamber connect-url --help` 可查看所有链接选项，包括 `--name`、`--lan`、`--server`、`--api-only`、`--ui-password` 和 `--qr`。
+
+你仍然可以独立管理这个运行中服务的隧道：
+
+```bash
+openchamber tunnel start --port 3000
+openchamber tunnel stop --port 3000
+```
+
+停止隧道不会重启服务或应用。
+
+## “OpenCode is restarting”
+
+当服务器正在启动或重启时，OpenChamber 会显示 “OpenCode is restarting” 状态，并暂停请求直到服务器就绪。这在启动或重启后立即出现是正常的。如果它一直无法消失，请参阅 [OpenCode 连接](/zh-cn/troubleshooting/opencode-connection/)。
+
+## 相关内容
+
+- [提供商、模型与智能体](/zh-cn/providers/) — 设置服务器要与之通信的对象
+- [OpenCode 连接](/zh-cn/troubleshooting/opencode-connection/) — 如果无法连接

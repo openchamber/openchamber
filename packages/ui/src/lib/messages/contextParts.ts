@@ -1,0 +1,679 @@
+/**
+ * Structured context attached to an outgoing message.
+ *
+ * Every user-attached context item — an inline code comment, a terminal
+ * selection, a browser annotation, a change request comment or failed check, a
+ * linked issue or PR — is sent as its own synthetic text part. The part's
+ * `text` is what the model reads; the part's `metadata[CONTEXT_METADATA_KEY]`
+ * carries the same information structured, so the timeline can render the
+ * context as a dedicated block after the message round-trips through the
+ * OpenCode server (which persists part metadata verbatim).
+ *
+ * This module owns both directions: building the part at send time and
+ * parsing the metadata back at render time. Keeping them together is what
+ * guarantees they cannot drift apart.
+ */
+
+import { z } from 'zod';
+import { sourceControlProviderIdSchema } from '@/lib/source-control/providers/descriptor';
+import { readSourceControlProvider } from '@/lib/source-control/providers/registry';
+import type { SourceControlProvider } from '@/lib/api/types';
+import type { JsonValue } from '@openchamber/sdk';
+import type { Metadata } from '@/lib/opencode/model';
+import type { InlineCommentDraft } from '@/stores/useInlineCommentDraftStore';
+import { chatQuoteAnchorSchema, type ChatQuoteAnchor } from '@/lib/chatQuoteAnchor';
+import { appendTerminalContexts } from './terminalContext';
+import { describeDiffCommentOrigin, diffCommentOriginSchema, type DiffCommentOrigin } from '@/lib/diffCommentOrigin';
+
+export const CONTEXT_METADATA_KEY = 'openchamberContext';
+const OPENCODE_COMMENT_METADATA_KEY = 'opencodeComment';
+
+export type CodeCommentContext = {
+    kind: 'code-comment';
+    source: 'diff' | 'file' | 'plan';
+    fileLabel: string;
+    startLine: number;
+    endLine: number;
+    side?: 'original' | 'modified';
+    language: string;
+    code: string;
+    text: string;
+    /** The diff a `diff` comment was written on; absent for uncommitted changes and older messages. */
+    origin?: DiffCommentOrigin;
+};
+
+type TerminalContextPayload = {
+    kind: 'terminal';
+    terminalId: string;
+    terminalLabel: string;
+    startLine: number;
+    endLine: number;
+    output: string;
+};
+
+type BrowserAnnotationContext = {
+    kind: 'browser-annotation';
+    pageUrl: string;
+    /** The full annotation prompt shown to the model. */
+    prompt: string;
+    text: string;
+};
+
+type PrCommentContext = {
+    kind: 'pr-comment';
+    label: string;
+    body: string;
+    text: string;
+    /** Absent on messages from before GitLab: those are GitHub. */
+    provider?: SourceControlProvider;
+};
+
+type PrCheckContext = {
+    kind: 'pr-check';
+    label: string;
+    output: string;
+    text: string;
+    /** Absent on messages from before GitLab: those are GitHub. */
+    provider?: SourceControlProvider;
+};
+
+type RepositoryIssueContext = {
+    kind: 'repository-issue';
+    /** Absent on messages from before GitLab: those are GitHub. */
+    provider?: SourceControlProvider;
+    number: number;
+    title: string;
+    url: string;
+};
+
+/** A repository discussion; only providers that keep discussions have one. */
+type RepositoryDiscussionContext = {
+    kind: 'repository-discussion';
+    provider: SourceControlProvider;
+    number: number;
+    title: string;
+    url: string;
+};
+
+type FileQuoteContext = {
+    kind: 'file-quote';
+    fileLabel: string;
+    /** Present when the fragment could be located in the file source. */
+    startLine?: number;
+    endLine?: number;
+    quote: string;
+    text: string;
+};
+
+type ChatQuoteContext = {
+    kind: 'chat-quote';
+    /** The message the quote came from, when known. */
+    messageId?: string;
+    /** Where the quote sits in that message's rendered text, when captured. */
+    anchor?: ChatQuoteAnchor;
+    quote: string;
+    text: string;
+};
+
+type ChangeRequestContext = {
+    kind: 'change-request';
+    /** Absent on messages written before providers other than GitHub existed. */
+    provider?: SourceControlProvider;
+    number: number;
+    title: string;
+    url: string;
+};
+
+/** A tracker's work item. Messages from before trackers carry `linear-issue`, read as Linear's. */
+type TrackerItemContext = {
+    kind: 'tracker-item';
+    provider: string;
+    identifier: string;
+    title: string;
+    url: string;
+};
+
+type GuestIssueContext = {
+    kind: 'guest-issue';
+    providerId: string;
+    id: string;
+    title: string;
+    url: string;
+    /** Opaque guest payload; stored for the round trip back to the guest, never rendered. */
+    data?: JsonValue;
+};
+
+type GuestPrContext = {
+    kind: 'guest-pr';
+    providerId: string;
+    id: string;
+    title: string;
+    url: string;
+    data?: JsonValue;
+};
+
+/**
+ * Another session the user mentioned; the model reads it with the openchamber
+ * tool. `messageId` is set when the mention was a link to one of its messages
+ * that had no text of its own, so the link still finds its chip.
+ */
+type SessionContext = {
+    kind: 'session';
+    sessionId: string;
+    title: string;
+    messageId?: string;
+};
+
+/** One message of another session, sent whole; `excerpt` is what its chip shows. */
+type SessionMessageContext = {
+    kind: 'session-message';
+    sessionId: string;
+    messageId: string;
+    sessionTitle: string;
+    excerpt: string;
+};
+
+export type ContextPartPayload =
+    | CodeCommentContext
+    | TerminalContextPayload
+    | BrowserAnnotationContext
+    | PrCommentContext
+    | PrCheckContext
+    | FileQuoteContext
+    | ChatQuoteContext
+    | RepositoryIssueContext
+    | RepositoryDiscussionContext
+    | ChangeRequestContext
+    | TrackerItemContext
+    | GuestIssueContext
+    | GuestPrContext
+    | SessionContext
+    | SessionMessageContext;
+
+type OpenCodeCommentMetadata = {
+    path: string;
+    selection?: { startLine: number; endLine: number; startChar?: number; endChar?: number };
+    comment: string;
+    preview?: string;
+    origin?: 'file' | 'review';
+};
+
+export type ContextPartMetadata = {
+    [CONTEXT_METADATA_KEY]: ContextPartPayload;
+    [OPENCODE_COMMENT_METADATA_KEY]?: OpenCodeCommentMetadata;
+};
+
+/**
+ * One context item as it goes on the wire: a synthetic message whose `text` is
+ * what the model reads and whose metadata carries the same information
+ * structured, so the timeline can render it as a dedicated block.
+ */
+export type ContextPart = {
+    text: string;
+    metadata: ContextPartMetadata;
+};
+
+/**
+ * English for the model naming a change request where it lives ("GitLab merge
+ * request"), from the provider's descriptor. A part written before parts named
+ * their provider reads as a plain pull request.
+ */
+function changeRequestNoun(provider: SourceControlProvider | undefined): string {
+    if (!provider) return 'pull request';
+    const { label, terminology } = readSourceControlProvider(provider);
+    return `${label} ${terminology.promptNoun}`;
+}
+
+/** The model-facing name of a review comment's source. */
+export function changeRequestCommentSource(provider: SourceControlProvider | undefined): string {
+    return `${changeRequestNoun(provider)} comment`;
+}
+
+/** The model-facing name of a failed check's source: a pipeline job or a check, by the provider's CI term. */
+export function changeRequestCheckSource(provider: SourceControlProvider | undefined): string {
+    const ci = provider ? readSourceControlProvider(provider).terminology.ci : 'checks';
+    return `${changeRequestNoun(provider)} ${ci === 'pipeline' ? 'pipeline job' : 'check'}`;
+}
+
+/**
+ * The model-facing text for a context payload. The wording intentionally
+ * matches what OpenChamber sent before parts carried metadata, so model
+ * behavior does not change with the transport format.
+ */
+export function formatContextText(payload: ContextPartPayload): string {
+    switch (payload.kind) {
+        case 'code-comment': {
+            const originNote = payload.origin ? ` ${describeDiffCommentOrigin(payload.origin)}` : '';
+            // A whole-file comment has no lines to quote: the model reads the file itself.
+            if (payload.startLine === 0 && payload.endLine === 0) {
+                return `Comment on \`${payload.fileLabel}\` (the whole file)${originNote}:\n\n${payload.text}`;
+            }
+            const range = `lines ${payload.startLine}-${payload.endLine}`;
+            const sideNote = payload.source === 'diff' && payload.side ? ` (${payload.side})` : '';
+            return `Comment on \`${payload.fileLabel}\` ${range}${sideNote}${originNote}:\n\`\`\`${payload.language}\n${payload.code}\n\`\`\`\n\n${payload.text}`;
+        }
+        case 'terminal':
+            return appendTerminalContexts('', [{
+                terminalId: payload.terminalId,
+                terminalLabel: payload.terminalLabel,
+                startLine: payload.startLine,
+                endLine: payload.endLine,
+                text: payload.output,
+            }]);
+        case 'browser-annotation':
+            return payload.text ? `${payload.prompt}\n\n${payload.text}` : payload.prompt;
+        case 'pr-comment':
+            return `Attached ${changeRequestCommentSource(payload.provider)} (${payload.label}):\n\n${payload.body}${payload.text ? `\n\n${payload.text}` : ''}`;
+        case 'file-quote': {
+            const location = payload.startLine != null && payload.endLine != null
+                ? ` lines ${payload.startLine}-${payload.endLine}`
+                : '';
+            const quoted = payload.quote.split('\n').map((line) => `> ${line}`).join('\n');
+            return `Comment on this fragment of \`${payload.fileLabel}\`${location}:\n${quoted}${payload.text ? `\n\n${payload.text}` : ''}`;
+        }
+        case 'chat-quote': {
+            const quoted = payload.quote.split('\n').map((line) => `> ${line}`).join('\n');
+            return `Comment on this fragment of an earlier message in this conversation:\n${quoted}${payload.text ? `\n\n${payload.text}` : ''}`;
+        }
+        case 'pr-check':
+            return `Attached failed ${changeRequestCheckSource(payload.provider)} (${payload.label}):\n\`\`\`\n${payload.output}\n\`\`\`${payload.text ? `\n\n${payload.text}` : ''}`;
+        case 'repository-issue':
+        case 'repository-discussion':
+        case 'change-request':
+        case 'tracker-item':
+        case 'guest-issue':
+        case 'guest-pr':
+        case 'session':
+        case 'session-message':
+            // Linked items carry context text built when they were attached;
+            // there is no default text to derive here.
+            return '';
+    }
+}
+
+/**
+ * Build the synthetic part for one context payload. `text` overrides the
+ * derived text; repository-issue/change-request payloads require it because their
+ * model-facing context is fetched by the picker, not derived from metadata.
+ */
+export function createContextPart(payload: ContextPartPayload, text?: string): ContextPart {
+    const resolvedText = text ?? formatContextText(payload);
+    const metadata: ContextPartMetadata = { [CONTEXT_METADATA_KEY]: payload };
+    if (payload.kind === 'code-comment') {
+        const comment: OpenCodeCommentMetadata = {
+            path: payload.fileLabel,
+            comment: payload.text,
+            preview: payload.code,
+            origin: payload.source === 'diff' ? 'review' : 'file',
+        };
+        // A whole-file comment has no selection to mirror.
+        if (payload.startLine !== 0 || payload.endLine !== 0) {
+            comment.selection = { startLine: payload.startLine, endLine: payload.endLine, startChar: 0, endChar: 0 };
+        }
+        metadata[OPENCODE_COMMENT_METADATA_KEY] = comment;
+    }
+    return {
+        text: resolvedText,
+        metadata,
+    };
+}
+
+/** Map a composer context draft to its structured payload. */
+export function contextPayloadFromDraft(draft: InlineCommentDraft): ContextPartPayload {
+    switch (draft.source) {
+        case 'terminal':
+            return {
+                kind: 'terminal',
+                terminalId: draft.terminalId ?? '',
+                terminalLabel: draft.fileLabel,
+                startLine: draft.startLine,
+                endLine: draft.endLine,
+                output: draft.code,
+            };
+        case 'preview-annotation':
+            return {
+                kind: 'browser-annotation',
+                pageUrl: draft.fileLabel,
+                prompt: draft.code,
+                text: draft.text,
+            };
+        case 'pr-comment':
+            return { kind: 'pr-comment', label: draft.fileLabel, body: draft.code, text: draft.text, ...(draft.provider ? { provider: draft.provider } : {}) };
+        case 'pr-check':
+            return { kind: 'pr-check', label: draft.fileLabel, output: draft.code, text: draft.text, ...(draft.provider ? { provider: draft.provider } : {}) };
+        case 'file-quote': {
+            const payload: FileQuoteContext = { kind: 'file-quote', fileLabel: draft.fileLabel, quote: draft.code, text: draft.text };
+            if (draft.startLine > 0 && draft.endLine > 0) {
+                payload.startLine = draft.startLine;
+                payload.endLine = draft.endLine;
+            }
+            return payload;
+        }
+        case 'chat-quote': {
+            const payload: ChatQuoteContext = { kind: 'chat-quote', quote: draft.code, text: draft.text };
+            if (draft.fileLabel) payload.messageId = draft.fileLabel;
+            if (draft.anchor) payload.anchor = draft.anchor;
+            return payload;
+        }
+        case 'diff':
+        case 'file':
+        case 'plan': {
+            const payload: CodeCommentContext = {
+                kind: 'code-comment',
+                source: draft.source,
+                fileLabel: draft.fileLabel,
+                startLine: draft.startLine,
+                endLine: draft.endLine,
+                language: draft.language,
+                code: draft.code,
+                text: draft.text,
+            };
+            if (draft.source === 'diff' && draft.side) payload.side = draft.side;
+            if (draft.source === 'diff' && draft.origin) payload.origin = draft.origin;
+            return payload;
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Read-back: parsing part metadata at the display boundary
+// ---------------------------------------------------------------------------
+
+const canonicalContextPayloadSchema = z.discriminatedUnion('kind', [
+    z.object({
+        kind: z.literal('code-comment'),
+        source: z.enum(['diff', 'file', 'plan']),
+        fileLabel: z.string(),
+        startLine: z.number(),
+        endLine: z.number(),
+        side: z.enum(['original', 'modified']).optional(),
+        language: z.string(),
+        code: z.string(),
+        text: z.string(),
+        origin: diffCommentOriginSchema.optional(),
+    }),
+    z.object({
+        kind: z.literal('terminal'),
+        terminalId: z.string(),
+        terminalLabel: z.string(),
+        startLine: z.number(),
+        endLine: z.number(),
+        output: z.string(),
+    }),
+    z.object({
+        kind: z.literal('browser-annotation'),
+        pageUrl: z.string(),
+        prompt: z.string(),
+        text: z.string(),
+    }),
+    z.object({
+        kind: z.literal('pr-comment'),
+        label: z.string(),
+        body: z.string(),
+        text: z.string(),
+        provider: sourceControlProviderIdSchema.optional(),
+    }),
+    z.object({
+        kind: z.literal('pr-check'),
+        label: z.string(),
+        output: z.string(),
+        text: z.string(),
+        provider: sourceControlProviderIdSchema.optional(),
+    }),
+    z.object({
+        kind: z.literal('file-quote'),
+        fileLabel: z.string(),
+        startLine: z.number().optional(),
+        endLine: z.number().optional(),
+        quote: z.string(),
+        text: z.string(),
+    }),
+    z.object({
+        kind: z.literal('chat-quote'),
+        messageId: z.string().optional(),
+        anchor: chatQuoteAnchorSchema.optional(),
+        quote: z.string(),
+        text: z.string(),
+    }),
+    z.object({
+        kind: z.literal('repository-issue'),
+        provider: sourceControlProviderIdSchema.optional(),
+        number: z.number().int().positive(),
+        title: z.string(),
+        url: z.string(),
+    }),
+    z.object({
+        kind: z.literal('repository-discussion'),
+        provider: sourceControlProviderIdSchema,
+        number: z.number().int().positive(),
+        title: z.string(),
+        url: z.string(),
+    }),
+    z.object({
+        kind: z.literal('change-request'),
+        provider: sourceControlProviderIdSchema.optional(),
+        number: z.number().int().positive(),
+        title: z.string(),
+        url: z.string(),
+    }),
+    z.object({
+        kind: z.literal('tracker-item'),
+        provider: z.string().regex(/^[a-z][a-z0-9-]{0,31}$/),
+        identifier: z.string().min(1),
+        title: z.string(),
+        url: z.string(),
+    }),
+    z.object({
+        kind: z.literal('guest-issue'),
+        providerId: z.string().min(1),
+        id: z.string().min(1),
+        title: z.string(),
+        url: z.string(),
+        data: z.json().optional(),
+    }),
+    z.object({
+        kind: z.literal('guest-pr'),
+        providerId: z.string().min(1),
+        id: z.string().min(1),
+        title: z.string(),
+        url: z.string(),
+        data: z.json().optional(),
+    }),
+    z.object({
+        kind: z.literal('session'),
+        sessionId: z.string().min(1),
+        title: z.string(),
+        messageId: z.string().min(1).optional(),
+    }),
+    z.object({
+        kind: z.literal('session-message'),
+        sessionId: z.string().min(1),
+        messageId: z.string().min(1),
+        sessionTitle: z.string(),
+        excerpt: z.string(),
+    }),
+]);
+const contextPayloadSchema = z.union([
+    canonicalContextPayloadSchema,
+    z.object({
+        kind: z.literal('github-issue'),
+        number: z.number().int().positive(),
+        title: z.string(),
+        url: z.string(),
+    }).transform(({ number, title, url }): RepositoryIssueContext => ({ kind: 'repository-issue', number, title, url })),
+    z.object({
+        kind: z.literal('github-pr'),
+        number: z.number().int().positive(),
+        title: z.string(),
+        url: z.string(),
+    }).transform(({ number, title, url }): ChangeRequestContext => ({ kind: 'change-request', provider: 'github', number, title, url })),
+    z.object({
+        kind: z.literal('linear-issue'),
+        identifier: z.string().min(1),
+        title: z.string(),
+        url: z.string(),
+    }).transform(({ identifier, title, url }): TrackerItemContext => ({ kind: 'tracker-item', provider: 'linear', identifier, title, url })),
+]);
+
+/**
+ * Part metadata carrying a context payload, for parsing at a trust boundary
+ * (a queued message coming back from the server, for instance).
+ */
+const openCodeCommentSchema = z.object({
+    path: z.string(),
+    selection: z.object({
+        startLine: z.number().finite(),
+        endLine: z.number().finite(),
+        startChar: z.number().finite().optional(),
+        endChar: z.number().finite().optional(),
+    }).optional(),
+    comment: z.string(),
+    preview: z.string().optional(),
+    origin: z.enum(['file', 'review']).optional(),
+});
+
+/**
+ * Part metadata carrying a context payload, for parsing at a trust boundary
+ * (a queued message coming back from the server, for instance). The OpenCode
+ * Desktop mirror rides along so a queued comment keeps it too.
+ */
+export const contextPartMetadataSchema = z.object({
+    [CONTEXT_METADATA_KEY]: contextPayloadSchema,
+    [OPENCODE_COMMENT_METADATA_KEY]: openCodeCommentSchema.optional(),
+});
+
+/**
+ * The subset of a record that context read-back inspects. Context now travels
+ * as synthetic messages, which carry no `type`; the optional field keeps the
+ * reader usable for anything else that carries the same metadata.
+ */
+export type ContextCarrierPart = { type?: string; metadata?: Metadata };
+
+/**
+ * Read the structured context payload from a message part, if it carries one.
+ * The part comes from the server or an optimistic insert, so the payload is
+ * schema-validated before it is trusted.
+ */
+export function readContextPart(part: ContextCarrierPart): ContextPartPayload | null {
+    if (part.type !== undefined && part.type !== 'text') return null;
+    const contextValue = part.metadata?.[CONTEXT_METADATA_KEY];
+    const commentValue = part.metadata?.[OPENCODE_COMMENT_METADATA_KEY];
+    // Most parts carry neither key; neither schema accepts undefined, and a
+    // failed safeParse allocates a ZodError, so skip parsing for them.
+    if (contextValue === undefined && commentValue === undefined) return null;
+
+    const parsed = contextPayloadSchema.safeParse(contextValue);
+    if (parsed.success) return parsed.data;
+
+    const compatible = openCodeCommentSchema.safeParse(commentValue);
+    if (compatible.success) {
+        const comment = compatible.data;
+        if (!comment.selection) {
+            return {
+                kind: 'file-quote',
+                fileLabel: comment.path,
+                quote: comment.preview ?? '',
+                text: comment.comment,
+            };
+        }
+        return {
+            kind: 'code-comment',
+            source: comment.origin === 'review' ? 'diff' : 'file',
+            fileLabel: comment.path,
+            startLine: comment.selection.startLine,
+            endLine: comment.selection.endLine,
+            language: '',
+            code: comment.preview ?? '',
+            text: comment.comment,
+        };
+    }
+
+    return null;
+}
+
+/** Whether a message carries any user-attached context part. */
+export function hasContextParts(parts: ContextCarrierPart[]): boolean {
+    return parts.some((part) => readContextPart(part) !== null);
+}
+
+/**
+ * The composer draft a context payload came from, so reverting or forking a
+ * message can put its attached context back on the chips instead of dropping
+ * it. Linked issues/PRs have no draft form — they are owned by their own
+ * pickers — so they map to null.
+ */
+export function draftFromContextPayload(
+    payload: ContextPartPayload,
+): Omit<InlineCommentDraft, 'id' | 'createdAt' | 'sessionKey'> | null {
+    switch (payload.kind) {
+        case 'code-comment': {
+            const draft: Omit<InlineCommentDraft, 'id' | 'createdAt' | 'sessionKey'> = {
+                source: payload.source,
+                fileLabel: payload.fileLabel,
+                startLine: payload.startLine,
+                endLine: payload.endLine,
+                code: payload.code,
+                language: payload.language,
+                text: payload.text,
+            };
+            if (payload.side) draft.side = payload.side;
+            if (payload.origin) draft.origin = payload.origin;
+            return draft;
+        }
+        case 'terminal':
+            return {
+                source: 'terminal',
+                fileLabel: payload.terminalLabel,
+                startLine: payload.startLine,
+                endLine: payload.endLine,
+                code: payload.output,
+                language: '',
+                text: '',
+                terminalId: payload.terminalId,
+            };
+        case 'browser-annotation':
+            return {
+                source: 'preview-annotation',
+                fileLabel: payload.pageUrl,
+                startLine: 0,
+                endLine: 0,
+                code: payload.prompt,
+                language: '',
+                text: payload.text,
+            };
+        case 'pr-comment':
+            return { source: 'pr-comment', fileLabel: payload.label, startLine: 0, endLine: 0, code: payload.body, language: '', text: payload.text, ...(payload.provider ? { provider: payload.provider } : {}) };
+        case 'pr-check':
+            return { source: 'pr-check', fileLabel: payload.label, startLine: 0, endLine: 0, code: payload.output, language: '', text: payload.text, ...(payload.provider ? { provider: payload.provider } : {}) };
+        case 'file-quote':
+            return {
+                source: 'file-quote',
+                fileLabel: payload.fileLabel,
+                startLine: payload.startLine ?? 0,
+                endLine: payload.endLine ?? 0,
+                code: payload.quote,
+                language: '',
+                text: payload.text,
+            };
+        case 'chat-quote':
+            return {
+                source: 'chat-quote',
+                fileLabel: payload.messageId ?? '',
+                startLine: 0,
+                endLine: 0,
+                code: payload.quote,
+                language: '',
+                text: payload.text,
+                anchor: payload.anchor,
+            };
+        case 'repository-issue':
+        case 'repository-discussion':
+        case 'change-request':
+        case 'tracker-item':
+        case 'guest-issue':
+        case 'guest-pr':
+        case 'session':
+        case 'session-message':
+            return null;
+    }
+}

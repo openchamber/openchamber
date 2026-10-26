@@ -1,0 +1,317 @@
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+
+import type { InlineCommentDraft } from '@/stores/useInlineCommentDraftStore';
+import {
+    CONTEXT_METADATA_KEY,
+    contextPayloadFromDraft,
+    createContextPart,
+    draftFromContextPayload,
+    formatContextText,
+    hasContextParts,
+    readContextPart,
+    type ContextPartPayload,
+} from './contextParts';
+import { acmeDescriptor, githubLikeDescriptor, gitlabLikeDescriptor } from '@/lib/source-control/providers/descriptor.fixture';
+import { useSourceControlProviderRegistry } from '@/lib/source-control/providers/registry';
+
+const draft = (overrides: Partial<InlineCommentDraft> = {}): InlineCommentDraft => ({
+    id: 'icd-1',
+    sessionKey: 's1',
+    source: 'diff',
+    fileLabel: 'src/app.ts',
+    startLine: 3,
+    endLine: 5,
+    side: 'modified',
+    code: 'const x = 1;',
+    language: 'ts',
+    text: 'fix this',
+    createdAt: 1,
+    ...overrides,
+});
+
+describe('model-facing text', () => {
+    test('diff comments keep the pre-metadata wording, including the side', () => {
+        expect(formatContextText(contextPayloadFromDraft(draft())))
+            .toBe('Comment on `src/app.ts` lines 3-5 (modified):\n```ts\nconst x = 1;\n```\n\nfix this');
+    });
+
+    test('file and plan comments omit the side', () => {
+        expect(formatContextText(contextPayloadFromDraft(draft({ source: 'file', side: undefined }))))
+            .toBe('Comment on `src/app.ts` lines 3-5:\n```ts\nconst x = 1;\n```\n\nfix this');
+    });
+
+    test('terminal selections keep the terminal_context envelope', () => {
+        const payload = contextPayloadFromDraft(draft({
+            source: 'terminal',
+            fileLabel: 'Terminal 1',
+            terminalId: 'term-1',
+            language: '',
+            startLine: 12,
+            endLine: 13,
+            code: 'npm run build\nok',
+            text: '',
+        }));
+        expect(formatContextText(payload)).toBe([
+            '<terminal_context>',
+            '- Terminal 1 lines 12-13:',
+            '  12 | npm run build',
+            '  13 | ok',
+            '</terminal_context>',
+        ].join('\n'));
+    });
+
+    test('annotations send the prompt, with user text appended when present', () => {
+        const base = draft({ source: 'preview-annotation', fileLabel: 'https://app.dev', code: 'prompt body', text: '' });
+        expect(formatContextText(contextPayloadFromDraft(base))).toBe('prompt body');
+        expect(formatContextText(contextPayloadFromDraft({ ...base, text: 'also this' })))
+            .toBe('prompt body\n\nalso this');
+    });
+
+    test('chat quotes send the fragment as a blockquote with the comment below', () => {
+        expect(formatContextText(contextPayloadFromDraft(draft({ source: 'chat-quote', fileLabel: 'msg_1', code: 'first line\nsecond line', text: 'why so?' }))))
+            .toBe('Comment on this fragment of an earlier message in this conversation:\n> first line\n> second line\n\nwhy so?');
+    });
+
+    test('file quotes carry the fragment with an optional line range', () => {
+        expect(formatContextText(contextPayloadFromDraft(draft({ source: 'file-quote', fileLabel: 'docs/CHANGELOG.md', startLine: 12, endLine: 13, code: 'a\nb', text: 'why?' }))))
+            .toBe('Comment on this fragment of `docs/CHANGELOG.md` lines 12-13:\n> a\n> b\n\nwhy?');
+        expect(formatContextText(contextPayloadFromDraft(draft({ source: 'file-quote', fileLabel: 'docs/CHANGELOG.md', startLine: 0, endLine: 0, code: 'a', text: '' }))))
+            .toBe('Comment on this fragment of `docs/CHANGELOG.md`:\n> a');
+    });
+
+    describe('review comments and failed checks name the change request by the served provider', () => {
+        beforeEach(() => {
+            const providers = [githubLikeDescriptor(), gitlabLikeDescriptor(), acmeDescriptor()];
+            useSourceControlProviderRegistry.setState({ ordered: providers, byId: new Map(providers.map((entry) => [entry.id, entry])), status: 'ready', holdsList: true });
+        });
+        afterEach(() => {
+            useSourceControlProviderRegistry.setState({ ordered: [], byId: new Map(), status: 'idle', holdsList: false });
+        });
+
+        test('a GitHub pull request comment and check', () => {
+            expect(formatContextText(contextPayloadFromDraft(draft({ source: 'pr-comment', provider: 'github', fileLabel: 'octo/repo#7', code: 'the comment', text: '' }))))
+                .toBe('Attached GitHub pull request comment (octo/repo#7):\n\nthe comment');
+            expect(formatContextText(contextPayloadFromDraft(draft({ source: 'pr-check', provider: 'github', fileLabel: 'CI / build', code: 'boom', text: 'why?' }))))
+                .toBe('Attached failed GitHub pull request check (CI / build):\n```\nboom\n```\n\nwhy?');
+        });
+
+        test('a GitLab merge request comment and pipeline job', () => {
+            expect(formatContextText(contextPayloadFromDraft(draft({ source: 'pr-comment', provider: 'gitlab', fileLabel: '!7 @octo', code: 'the comment', text: '' }))))
+                .toBe('Attached GitLab merge request comment (!7 @octo):\n\nthe comment');
+            expect(formatContextText(contextPayloadFromDraft(draft({ source: 'pr-check', provider: 'gitlab', fileLabel: '!7 · build', code: 'boom', text: '' }))))
+                .toBe('Attached failed GitLab merge request pipeline job (!7 · build):\n```\nboom\n```');
+        });
+
+        test('a provider the UI has no code for reads from its descriptor', () => {
+            expect(formatContextText(contextPayloadFromDraft(draft({ source: 'pr-check', provider: 'acme', fileLabel: '#7 · build', code: 'boom', text: '' }))))
+                .toBe('Attached failed Acme Forge pull request check (#7 · build):\n```\nboom\n```');
+        });
+
+        test('a diff comment names the diff its lines come from', () => {
+            expect(formatContextText(contextPayloadFromDraft(draft({
+                origin: { kind: 'change-request', provider: 'gitlab', number: 7, repository: 'octo/repo', revision: '3993a59228fd79670f97' },
+            })))).toBe('Comment on `src/app.ts` lines 3-5 (modified) in GitLab merge request !7 in octo/repo at commit 3993a59228:\n```ts\nconst x = 1;\n```\n\nfix this');
+            expect(formatContextText(contextPayloadFromDraft(draft({ origin: { kind: 'commit', hash: 'e1d7e1022bb5a0' } }))))
+                .toBe('Comment on `src/app.ts` lines 3-5 (modified) in commit e1d7e1022b:\n```ts\nconst x = 1;\n```\n\nfix this');
+            expect(formatContextText(contextPayloadFromDraft(draft({ origin: { kind: 'branch', baseRef: 'origin/main', headRef: 'feature' } }))))
+                .toBe('Comment on `src/app.ts` lines 3-5 (modified) in the changes of branch `feature` compared with `origin/main`:\n```ts\nconst x = 1;\n```\n\nfix this');
+        });
+
+        test('a whole-file comment names the file and quotes no lines', () => {
+            expect(formatContextText(contextPayloadFromDraft(draft({
+                startLine: 0, endLine: 0, side: undefined, code: '',
+                origin: { kind: 'change-request', provider: 'github', number: 5543 },
+            })))).toBe('Comment on `src/app.ts` (the whole file) in GitHub pull request #5543:\n\nfix this');
+            const part = createContextPart(contextPayloadFromDraft(draft({ startLine: 0, endLine: 0, side: undefined, code: '' })));
+            expect(part.metadata.opencodeComment?.selection).toBeUndefined();
+        });
+
+        test('a part from before parts named their provider reads as a plain pull request', () => {
+            expect(formatContextText(contextPayloadFromDraft(draft({ source: 'pr-comment', fileLabel: 'octo/repo#7', code: 'the comment', text: '' }))))
+                .toBe('Attached pull request comment (octo/repo#7):\n\nthe comment');
+        });
+    });
+});
+
+describe('round-trip through part metadata', () => {
+    const asPart = (payload: ContextPartPayload, text?: string) => ({
+        type: 'text',
+        ...createContextPart(payload, text),
+    });
+
+    test('every draft-based kind survives create → read unchanged', () => {
+        const payloads = [
+            contextPayloadFromDraft(draft()),
+            contextPayloadFromDraft(draft({ source: 'plan', side: undefined })),
+            contextPayloadFromDraft(draft({ source: 'terminal', terminalId: 'term-1', language: '' })),
+            contextPayloadFromDraft(draft({ source: 'preview-annotation' })),
+            contextPayloadFromDraft(draft({ source: 'pr-comment' })),
+            contextPayloadFromDraft(draft({ source: 'pr-check' })),
+            contextPayloadFromDraft(draft({ source: 'chat-quote', fileLabel: 'msg_1' })),
+            contextPayloadFromDraft(draft({
+                source: 'chat-quote',
+                fileLabel: 'msg_1',
+                anchor: { text: 'quoted', prefix: 'before ', suffix: ' after', start: 7 },
+            })),
+            contextPayloadFromDraft(draft({ source: 'file-quote', startLine: 3, endLine: 5 })),
+            contextPayloadFromDraft(draft({ source: 'file-quote', startLine: 0, endLine: 0 })),
+            contextPayloadFromDraft(draft({ origin: { kind: 'change-request', provider: 'github', number: 5543, revision: 'abc' } })),
+            contextPayloadFromDraft(draft({ startLine: 0, endLine: 0, side: undefined, code: '' })),
+        ];
+        for (const payload of payloads) {
+            expect(readContextPart(asPart(payload))).toEqual(payload);
+        }
+    });
+
+    test('a reverted diff comment goes back to the composer with the diff it was written on', () => {
+        const origin = { kind: 'commit', hash: 'e1d7e1022bb5a0' } as const;
+        expect(draftFromContextPayload(contextPayloadFromDraft(draft({ origin })))).toMatchObject({ source: 'diff', origin });
+    });
+
+    test('repository references carry picker-built text and structured identity', () => {
+        const payload: ContextPartPayload = { kind: 'repository-issue', number: 3, title: 'Bug', url: 'https://x/issues/3' };
+        const part = asPart(payload, 'GitHub issue context (JSON)\n{}');
+        expect(part.text).toBe('GitHub issue context (JSON)\n{}');
+        expect(readContextPart(part)).toEqual(payload);
+    });
+
+    test('normalizes legacy GitHub reference kinds at the read boundary', () => {
+        expect(readContextPart({
+            type: 'text',
+            metadata: { [CONTEXT_METADATA_KEY]: { kind: 'github-issue', number: 3, title: 'Bug', url: 'https://x/issues/3' } },
+        })).toEqual({ kind: 'repository-issue', number: 3, title: 'Bug', url: 'https://x/issues/3' });
+        expect(readContextPart({
+            type: 'text',
+            metadata: { [CONTEXT_METADATA_KEY]: { kind: 'github-pr', number: 4, title: 'Fix', url: 'https://x/pull/4' } },
+        })).toEqual({ kind: 'change-request', provider: 'github', number: 4, title: 'Fix', url: 'https://x/pull/4' });
+    });
+
+    test('reads source-control provider ids as open strings, old and new alike', () => {
+        for (const provider of ['github', 'gitlab', 'acme']) {
+            const payload: ContextPartPayload = { kind: 'change-request', provider, number: 4, title: 'Fix', url: 'https://x/pull/4' };
+            expect(readContextPart(asPart(payload, 'context'))).toEqual(payload);
+            const check: ContextPartPayload = { kind: 'pr-check', provider, label: 'build', output: 'boom', text: '' };
+            expect(readContextPart(asPart(check))).toEqual(check);
+        }
+        expect(readContextPart({
+            type: 'text',
+            metadata: { [CONTEXT_METADATA_KEY]: { kind: 'change-request', provider: 'Bad Id', number: 4, title: 'Fix', url: 'u' } },
+        })).toBeNull();
+    });
+
+    test('tracker references carry picker-built text, the tracker and the identifier', () => {
+        const payload: ContextPartPayload = { kind: 'tracker-item', provider: 'linear', identifier: 'ENG-12', title: 'Login', url: 'https://linear.app/x/issue/ENG-12' };
+        const part = asPart(payload, 'Linear issue context (JSON)\n{}');
+        expect(part.text).toBe('Linear issue context (JSON)\n{}');
+        expect(readContextPart(part)).toEqual(payload);
+    });
+
+    test('reads a Linear reference from before trackers as a Linear tracker item', () => {
+        expect(readContextPart({
+            type: 'text',
+            metadata: { [CONTEXT_METADATA_KEY]: { kind: 'linear-issue', identifier: 'ENG-12', title: 'Login', url: 'https://linear.app/x/issue/ENG-12' } },
+        })).toEqual({ kind: 'tracker-item', provider: 'linear', identifier: 'ENG-12', title: 'Login', url: 'https://linear.app/x/issue/ENG-12' });
+        expect(readContextPart({
+            type: 'text',
+            metadata: { [CONTEXT_METADATA_KEY]: { kind: 'tracker-item', provider: 'Bad Id', identifier: 'ENG-12', title: 'Login', url: 'u' } },
+        })).toBeNull();
+    });
+
+    test('guest references carry picker-built text and no github number', () => {
+        const payload: ContextPartPayload = {
+            kind: 'guest-issue',
+            providerId: 'hello',
+            id: 'HELLO-1',
+            title: 'Sample ticket',
+            url: 'https://example.com/HELLO-1',
+        };
+        const part = asPart(payload, 'guest body');
+        expect(part.text).toBe('guest body');
+        expect(readContextPart(part)).toEqual(payload);
+    });
+
+    test('guest references keep opaque data in metadata, not in text', () => {
+        const payload: ContextPartPayload = {
+            kind: 'guest-issue',
+            providerId: 'hello',
+            id: 'HELLO-1',
+            title: 'Sample ticket',
+            url: 'https://example.com/HELLO-1',
+            data: { status: 'open', comments: [{ author: 'mara', text: 'hi' }] },
+        };
+        const part = asPart(payload, 'guest body');
+        expect(part.text).toBe('guest body');
+        expect(readContextPart(part)).toEqual(payload);
+    });
+
+    test('guest pull references carry picker-built text and no github number', () => {
+        const payload: ContextPartPayload = {
+            kind: 'guest-pr',
+            providerId: 'gitlab',
+            id: '!12',
+            title: 'Fix login',
+            url: 'https://gitlab.com/acme/app/-/merge_requests/12',
+        };
+        const part = asPart(payload, 'guest pr body');
+        expect(part.text).toBe('guest pr body');
+        expect(readContextPart(part)).toEqual(payload);
+    });
+
+    test('code comments also carry OpenCode Desktop metadata', () => {
+        const payload = contextPayloadFromDraft(draft());
+        const part = asPart(payload);
+        expect(part.metadata.opencodeComment).toEqual({
+            path: 'src/app.ts',
+            selection: { startLine: 3, endLine: 5, startChar: 0, endChar: 0 },
+            comment: 'fix this',
+            preview: 'const x = 1;',
+            origin: 'review',
+        });
+        expect(readContextPart(part)).toEqual(payload);
+    });
+
+    test('reads OpenCode Desktop metadata when canonical metadata is absent', () => {
+        expect(readContextPart({
+            type: 'text',
+            metadata: {
+                opencodeComment: {
+                    path: 'src/other.ts',
+                    selection: { startLine: 8, endLine: 9 },
+                    comment: 'check this',
+                    preview: 'value',
+                    origin: 'review',
+                },
+            },
+        })).toEqual({
+            kind: 'code-comment',
+            source: 'diff',
+            fileLabel: 'src/other.ts',
+            startLine: 8,
+            endLine: 9,
+            language: '',
+            code: 'value',
+            text: 'check this',
+        });
+    });
+
+    test('non-text parts, missing metadata, and malformed payloads read as null', () => {
+        expect(readContextPart({ type: 'file', metadata: {} })).toBeNull();
+        expect(readContextPart({ type: 'text' })).toBeNull();
+        expect(readContextPart({ type: 'text', metadata: { [CONTEXT_METADATA_KEY]: { kind: 'nope' } } })).toBeNull();
+        expect(readContextPart({
+            type: 'text',
+            metadata: { [CONTEXT_METADATA_KEY]: { kind: 'terminal', terminalId: 1, terminalLabel: 'x', startLine: 1, endLine: 1, output: '' } },
+        })).toBeNull();
+        expect(readContextPart({
+            type: 'text',
+            metadata: { [CONTEXT_METADATA_KEY]: { kind: 'github-issue', number: 0, title: 't', url: 'u' } },
+        })).toBeNull();
+    });
+
+    test('hasContextParts detects user-attached context in a message', () => {
+        const quote = asPart(contextPayloadFromDraft(draft({ source: 'chat-quote', fileLabel: 'msg_1' })));
+        expect(hasContextParts([quote])).toBe(true);
+        expect(hasContextParts([{ type: 'text' }])).toBe(false);
+        expect(hasContextParts([])).toBe(false);
+    });
+});

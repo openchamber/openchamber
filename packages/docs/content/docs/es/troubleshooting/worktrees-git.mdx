@@ -1,0 +1,35 @@
+---
+title: Worktrees y Git
+description: Soluciona problemas comunes de worktrees y git.
+---
+
+# Worktrees y Git
+
+Problemas que surgen con las [sesiones de worktree](/es/worktrees/) y la [vista de git](/es/git/), y cómo resolverlos.
+
+## Un worktree requiere atención
+
+OpenChamber señala un worktree cuando algo no encaja:
+
+- **carpeta ausente** — la carpeta del worktree se eliminó o se movió fuera de OpenChamber; elimina la sesión y crea un worktree nuevo
+- **rama desacoplada o sin nacer** — el worktree no está en una rama normal; haz checkout sobre una
+- **fusión, rebase o cherry-pick en curso** — una operación quedó a medias; termínala o abórtala desde la vista de git
+
+## No se puede crear un worktree
+
+- **la rama ya existe** — elige un nombre de rama distinto, o usa la opción de rama existente
+- **el nombre ya está en uso** — elige un nombre de worktree distinto
+
+## Falla la generación de commit o PR
+
+Generar un mensaje de commit o una descripción de PR se ejecuta en tu sesión activa, así que necesitas una sesión abierta con un modelo en funcionamiento seleccionado. Abre o elige una sesión e inténtalo de nuevo.
+
+## Problemas con SSH o rutas de Windows
+
+- asegúrate de que la clave SSH que usa el repo sea la que está configurada en tu [identidad de git](/es/git-identities/)
+- en Windows, git usa rutas al estilo Unix (como `/c/Users/...`); OpenChamber lo gestiona, pero las rutas de claves SSH personalizadas deben seguir el mismo formato
+
+## Relacionado
+
+- [Sesiones de worktree](/es/worktrees/) — cómo se crean y eliminan los worktrees
+- [Identidades de Git](/es/git-identities/) — define la clave e identidad correctas por repo

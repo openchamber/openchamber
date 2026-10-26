@@ -1,0 +1,1137 @@
+#!/usr/bin/env node
+/**
+ * Fully automated streaming capture for OpenChamber.
+ *
+ * Where `profile:idle` measures what the app does when nothing happens, this
+ * command measures the opposite: what it costs to receive and render a live
+ * assistant response. It creates a session, opens it in a real browser, sends a
+ * prompt through the supported `openchamber session` CLI, and records until the
+ * session reports itself idle again.
+ *
+ * The streaming path is judged by responsiveness rather than by totals: a
+ * response that renders in one 4-second block and one that renders in eighty
+ * 50 ms blocks move the same bytes, but only the second stays interactive. The
+ * report therefore leads with the long-task distribution, frame production, and
+ * per-token render cost, not with elapsed wall time.
+ *
+ * No input is synthesised. The only stimulus is the prompt, dispatched over the
+ * CLI, so everything recorded is the application reacting to its own event
+ * stream.
+ */
+
+import { spawn } from "node:child_process"
+import { createWriteStream } from "node:fs"
+import { mkdir, readFile, writeFile } from "node:fs/promises"
+import { finished } from "node:stream/promises"
+import { dirname, join, resolve } from "node:path"
+import { fileURLToPath } from "node:url"
+import process from "node:process"
+
+import { ACCESSIBILITY_CATEGORY, accessibilityInWindow, accessibilityState, describeAccessibility, FORCE_ACCESSIBILITY_ARGS } from "./perf/accessibility.mjs"
+import { CdpClient, createPageTarget, evaluateValue, findPageTarget, launchChrome, reservePort, resolveChrome, resolveProfileDir, wait } from "./perf/cdp.mjs"
+import { buildIdleProbeSource, IDLE_PROBE_GLOBAL } from "./perf/idle-probe.mjs"
+import { summarizeCpuProfile } from "./perf/cpu-profile.mjs"
+import { growthPerSecond, longestTaskInWindow, metricMap, round, summarizeFrameBudget, summarizeLongTasks, summarizeThreads, summarizeTraceEvents } from "./perf/metrics.mjs"
+import { createProcessCpuSampler, openBrowserClient, resolveServerProcesses } from "./perf/process-cpu.mjs"
+import { buildRenderProbeSource, printRenderProbe, readRenderProbe, RENDER_PROBE_GLOBAL, summarizeRenderProbe } from "./perf/render-probe.mjs"
+import { expandProjects, expandSessionLists } from "./perf/scenario.mjs"
+import { rendererMainThread, traceWindow } from "./perf/trace-analysis.mjs"
+
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..")
+const cliPath = join(repoRoot, "packages/web/bin/cli.js")
+
+const DEFAULT_PROMPT = "Write a technical explanation of how a bytecode virtual machine executes"
+  + " a function call, about 800 words. Include three fenced code blocks in different languages"
+  + " and a markdown table comparing stack and register machines. Do not use any tools."
+
+const HELP = `Usage: bun run profile:session -- [options]
+
+Records what OpenChamber costs while an assistant response streams in.
+
+Options:
+  --url <url>              OpenChamber URL (default: http://localhost:3000)
+  --port <port>            OpenChamber CLI port (default: from --url)
+  --dir <path>             Session directory (default: repository root)
+  --session <id>           Reuse this session instead of creating one
+  --quiet <seconds>        Send no prompt: record this long with the session
+                           open and every instrument on. The floor a streaming
+                           figure stands on (subtract it to get what the stream
+                           itself costs); pair it with --session.
+  --expand-projects        Expand every project in the sidebar before recording
+  --expand-sessions        Click every "Show more sessions" control before
+                           recording, so all session rows are mounted
+  --view-session <id>      Display this session while the prompt streams into
+                           another one. Measures what an idle session costs
+                           while a different session is active in the
+                           background.
+  --grow <turns>           Before recording, send this many turns into the
+                           session while the page shows it, so the history
+                           accumulates in memory the way it does for someone
+                           working in one chat. Opening a long session loads
+                           only its last turns, so without this a long session
+                           is measured with a short history in memory.
+  --grow-model <model>     Model for the grown turns
+                           (default: perf/agent-20tools-20000cps)
+  --cpu-throttle <rate>    Slow the page's CPU down this many times
+                           (Emulation.setCPUThrottlingRate), to approximate
+                           a slower machine than the one measuring
+  --prompt <text>          Prompt to send (default: a long markdown+code answer)
+  --model <provider/model> Model override (default: configured selection)
+  --agent <id>             Agent override (default: configured selection)
+  --settle <seconds>       Wait after load before recording (default: 12)
+  --timeout <seconds>      Give up waiting for idle (default: 600)
+  --tail <seconds>         Keep recording after idle (default: 5)
+  --output <directory>     Artifact directory
+  --label <text>           Human label stored in the summary
+  --chrome <path>          Chrome/Chromium executable
+  --profile-dir <path>     Chrome profile to reuse (default: a fresh temporary
+                           profile per run, removed afterwards)
+  --headed                 Show the browser (default: headless)
+  --attach <port>          Measure a browser that is already running and
+                           exposes CDP on this port, such as the desktop shell
+                           started with --remote-debugging-port, instead of
+                           launching Chrome. The session opens in its window.
+                           --url still names the OpenChamber server the CLI
+                           talks to; --headed, --chrome and --profile-dir do
+                           not apply.
+  --sampling-interval <us> CPU sampler interval (default: 200)
+  --thread-breakdown       Also trace scheduler, compositor and GPU categories,
+                           and report CPU per thread with the events that
+                           spent it. Names the work a main-thread profile
+                           cannot see. Adds trace overhead; leave it off when
+                           comparing long-task or busy figures between runs.
+  --save-trace             Also write the raw timeline to trace.json, which the
+                           DevTools Performance panel and Perfetto both open.
+  --extra-categories <list> Comma-separated trace categories to add, such as
+                           disabled-by-default-devtools.timeline.invalidationTracking
+                           (names what invalidated each style recalc). The
+                           accessibility category is always recorded
+  --force-accessibility    Launch Chrome with its accessibility tree on, as an
+                           accessibility client turns it on (a screen reader,
+                           or a macOS app that reads other windows), so every
+                           machine and headless runs measure that case
+  --render-probe           Count renders per component, renders that changed
+                           nothing in the DOM, store notifications and DOM
+                           mutations per region (scripts/perf/render-probe.mjs).
+                           Writes render-probe.json. Adds work on every
+                           commit: an attribution run, never a timing.
+  --render-probe-hook <Component:index>
+                           With --render-probe, record the call stacks that
+                           dispatch to this component's hook
+  --heap-sampling          Record a sampling heap profile (heap.heapprofile,
+                           opens in the DevTools Memory panel) and list the
+                           top allocation sites. Adds overhead: attribution only.
+  --process-cpu-only       Record per-process CPU with every in-page instrument
+                           off: no sampler, trace, probe or stream counters.
+                           The sampler and the trace run inside the renderer
+                           and inflate its CPU, so this is the figure to
+                           compare with what a process monitor shows a user.
+  --inject-css <css>       Add a stylesheet to the page before it loads. For
+                           attribution experiments only, such as switching an
+                           animation off to measure what it costs; the result
+                           describes a modified app and is labelled as such.
+  --inject-script <file>   Run a script in the page before it loads. Same
+                           purpose and the same labelling as --inject-css.
+                           When the script defines
+                           globalThis.__perfInjected.snapshot(), its result
+                           is saved to injected-probe.json after the tail.
+  --baseline <directory>   Compare against a previous run directory
+  --budget-long-tasks <n>  Fail when long tasks exceed this count
+  --budget-longest <ms>    Fail when the longest task exceeds this
+  --keep-session           Do not report the session as disposable
+  --json                   Print the summary as JSON instead of a table
+  --help                   Show this help
+
+Exit code is non-zero when any provided budget is exceeded.`
+
+const parseArgs = (argv) => {
+  const options = {
+    url: "http://localhost:3000",
+    port: null,
+    dir: repoRoot,
+    session: null,
+    viewSession: null,
+    expandProjects: false,
+    expandSessions: false,
+    prompt: DEFAULT_PROMPT,
+    grow: 0,
+    growModel: "perf/agent-20tools-20000cps",
+    cpuThrottle: 1,
+    model: null,
+    agent: null,
+    settle: 12,
+    timeout: 600,
+    tail: 5,
+    output: null,
+    label: null,
+    chrome: null,
+    profileDir: null,
+    headless: true,
+    attach: null,
+    samplingInterval: 200,
+    processCpuOnly: false,
+    threadBreakdown: false,
+    saveTrace: false,
+    injectCss: null,
+    injectScript: null,
+    quiet: 0,
+    extraCategories: [],
+    forceAccessibility: false,
+    renderProbe: false,
+    renderProbeHook: null,
+    heapSampling: false,
+    baseline: null,
+    budgetLongTasks: null,
+    budgetLongest: null,
+    keepSession: false,
+    json: false,
+  }
+  for (let index = 0; index < argv.length; index += 1) {
+    const value = argv[index]
+    if (value === "--help") return { ...options, help: true }
+    else if (value === "--headed") options.headless = false
+    else if (value === "--json") options.json = true
+    else if (value === "--keep-session") options.keepSession = true
+    else if (value === "--process-cpu-only") options.processCpuOnly = true
+    else if (value === "--thread-breakdown") options.threadBreakdown = true
+    else if (value === "--save-trace") options.saveTrace = true
+    else if (value === "--url") options.url = argv[++index]
+    else if (value === "--port") options.port = argv[++index]
+    else if (value === "--dir") options.dir = argv[++index]
+    else if (value === "--session") options.session = argv[++index]
+    else if (value === "--view-session") options.viewSession = argv[++index]
+    else if (value === "--expand-projects") options.expandProjects = true
+    else if (value === "--expand-sessions") options.expandSessions = true
+    else if (value === "--grow") options.grow = Number(argv[++index])
+    else if (value === "--grow-model") options.growModel = argv[++index]
+    else if (value === "--cpu-throttle") options.cpuThrottle = Number(argv[++index])
+    else if (value === "--prompt") options.prompt = argv[++index]
+    else if (value === "--model") options.model = argv[++index]
+    else if (value === "--agent") options.agent = argv[++index]
+    else if (value === "--label") options.label = argv[++index]
+    else if (value === "--settle") options.settle = Number(argv[++index])
+    else if (value === "--timeout") options.timeout = Number(argv[++index])
+    else if (value === "--tail") options.tail = Number(argv[++index])
+    else if (value === "--output") options.output = argv[++index]
+    else if (value === "--chrome") options.chrome = argv[++index]
+    else if (value === "--attach") options.attach = Number(argv[++index])
+    else if (value === "--profile-dir") options.profileDir = argv[++index]
+    else if (value === "--sampling-interval") options.samplingInterval = Number(argv[++index])
+    else if (value === "--inject-css") options.injectCss = argv[++index]
+    else if (value === "--inject-script") options.injectScript = argv[++index]
+    else if (value === "--quiet") options.quiet = Number(argv[++index])
+    else if (value === "--extra-categories") options.extraCategories = String(argv[++index]).split(",").map((category) => category.trim()).filter(Boolean)
+    else if (value === "--force-accessibility") options.forceAccessibility = true
+    else if (value === "--render-probe") options.renderProbe = true
+    else if (value === "--render-probe-hook") options.renderProbeHook = argv[++index]
+    else if (value === "--heap-sampling") options.heapSampling = true
+    else if (value === "--baseline") options.baseline = argv[++index]
+    else if (value === "--budget-long-tasks") options.budgetLongTasks = Number(argv[++index])
+    else if (value === "--budget-longest") options.budgetLongest = Number(argv[++index])
+    else throw new Error(`Unknown option: ${value}`)
+  }
+  if (!Number.isFinite(options.quiet) || options.quiet < 0) throw new Error("--quiet must be a number of seconds")
+  if (!Number.isInteger(options.grow) || options.grow < 0) throw new Error("--grow must be a number of turns")
+  if (!Number.isFinite(options.cpuThrottle) || options.cpuThrottle < 1) throw new Error("--cpu-throttle must be a rate of 1 or more")
+  if (options.grow > 0 && options.viewSession) throw new Error("--grow fills the displayed session; it cannot run with --view-session")
+  if (options.processCpuOnly && (options.renderProbe || options.heapSampling)) throw new Error("--process-cpu-only switches every in-page instrument off; it cannot run with --render-probe or --heap-sampling")
+  const parsed = new URL(options.url)
+  options.port = options.port ?? parsed.port ?? "3000"
+  options.dir = resolve(options.dir)
+  return options
+}
+
+/**
+ * Runs an `openchamber session` subcommand and returns its parsed JSON.
+ * The CLI is the supported automation entry point, so the harness drives the
+ * same path a scripted user would rather than reaching into internal APIs.
+ */
+const runSessionCli = (args, { timeoutMs = 900_000 } = {}) => new Promise((resolvePromise, reject) => {
+  const child = spawn(process.execPath, [cliPath, "session", ...args, "--json"], {
+    stdio: ["ignore", "pipe", "pipe"],
+  })
+  let stdout = ""
+  let stderr = ""
+  const timer = setTimeout(() => {
+    child.kill("SIGTERM")
+    reject(new Error(`session ${args[0]} timed out after ${Math.round(timeoutMs / 1000)}s`))
+  }, timeoutMs)
+  child.stdout.on("data", (chunk) => { stdout += chunk })
+  child.stderr.on("data", (chunk) => { stderr += chunk })
+  child.on("error", (error) => { clearTimeout(timer); reject(error) })
+  child.on("close", (code) => {
+    clearTimeout(timer)
+    if (code !== 0) {
+      reject(new Error(`session ${args[0]} exited with ${code}: ${stderr.trim() || stdout.trim()}`))
+      return
+    }
+    try {
+      resolvePromise(JSON.parse(stdout))
+    } catch {
+      reject(new Error(`session ${args[0]} returned unparseable output: ${stdout.slice(0, 400)}`))
+    }
+  })
+})
+
+/**
+ * Reads what the page actually rendered for the session under test.
+ *
+ * A streaming capture is only meaningful if the recorded page was showing the
+ * session that streamed. Opening a session that belongs to a directory the app
+ * is not currently viewing produces a perfectly quiet, perfectly useless
+ * profile, so the run verifies rendering rather than assuming it.
+ */
+const countRenderedMessages = async (client) => {
+  // Text per mounted message, not the page's text: a virtualised timeline
+  // unmounts the rows that scroll out above while the reply grows below, so in
+  // a long session the page's text shrinks while a whole reply streams in.
+  const raw = await evaluateValue(client, `JSON.stringify({
+    messages: document.querySelectorAll("[data-message-id]").length,
+    characters: document.body.innerText.length,
+    perMessage: Object.fromEntries([...document.querySelectorAll("[data-message-id]")]
+      .map((element) => [element.getAttribute("data-message-id"), element.innerText.length])),
+  })`)
+  try {
+    return JSON.parse(raw ?? "{}")
+  } catch {
+    return { messages: 0, characters: 0, perMessage: {} }
+  }
+}
+
+/**
+ * Message text that appeared during the capture: what new messages hold plus
+ * what messages present before gained. Rows that unmounted are skipped
+ * rather than counted as lost text.
+ */
+const messageTextGrowth = (before, after) => Object.entries(after.perMessage ?? {})
+  .reduce((total, [id, length]) => total + Math.max(0, length - (before.perMessage?.[id] ?? 0)), 0)
+
+/** Scrolls the chat to its end, as a reader clicking the scroll-to-bottom pill. */
+const scrollChatToEnd = async (client) => {
+  await evaluateValue(client, `(() => {
+    const scroller = document.querySelector('[data-scrollbar="chat"]')
+    if (scroller) scroller.scrollTop = scroller.scrollHeight
+  })()`)
+  await wait(500)
+}
+
+/**
+ * How many message records of the session the app holds in memory, or null
+ * when the debug hook is missing. What the timeline derives its rows from,
+ * which a virtualised DOM does not show.
+ */
+const readHistoryRecords = async (client, sessionId) => {
+  const count = await evaluateValue(client, `globalThis.__opencodeDebug?.getCachedMessageCount?.(${JSON.stringify(sessionId)}) ?? null`)
+  return Number.isInteger(count) && count >= 0 ? count : null
+}
+
+/**
+ * Reads which directory the app has active and which one owns the session.
+ *
+ * Streaming state is derived from the active directory's store. A session
+ * opened by URL from another directory still renders, but without it: the
+ * timeline then re-renders in full on every event flush instead of only its
+ * streaming tail. That is a different, more expensive code path from the one
+ * a user reaches by clicking a session, so a capture has to say which it took.
+ */
+const readDirectoryAlignment = async (client) => {
+  const raw = await evaluateValue(client, `JSON.stringify((() => {
+    const report = globalThis.__opencodeDebug?.diagnoseSessionDirectory?.()
+    return report ? { session: report.routedDirectory ?? null, active: report.details?.activeDirectory ?? null } : null
+  })())`)
+  try {
+    const parsed = JSON.parse(raw ?? "null")
+    return parsed ? { ...parsed, aligned: Boolean(parsed.session) && parsed.session === parsed.active } : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Confirms that a response actually streamed.
+ *
+ * A provider that rejects the request leaves the session idle within a second
+ * and the user message rendered, which satisfies every other check in this
+ * file while measuring an empty stream.
+ */
+const readAssistantResponse = async (cliBase, sessionId) => {
+  const result = await runSessionCli(["messages", ...cliBase, "--session", sessionId], { timeoutMs: 30_000 })
+    .catch(() => null)
+  const assistant = (result?.messages ?? []).filter((message) => message.role === "assistant")
+  return {
+    responded: assistant.length > 0,
+    messages: assistant.length,
+    // Summed over the page of messages the CLI returns, which in a reused
+    // session includes earlier replies; `replyCharacters` is this reply's own.
+    textCharacters: assistant.reduce((total, message) => total + (message.text?.length ?? 0), 0),
+    replyCharacters: assistant.at(-1)?.text?.length ?? 0,
+  }
+}
+
+/**
+ * Snapshots the animations the page is running right now.
+ *
+ * Compositing work shows up in a trace as `Layerize`/`Commit`/`PrePaint` with
+ * no indication of what caused it. `document.getAnimations()` names the
+ * culprits directly, which turns "the compositor is busy" into a specific list
+ * of elements and keyframes.
+ */
+const snapshotAnimations = async (client) => {
+  const raw = await evaluateValue(client, `JSON.stringify((() => {
+    if (typeof document.getAnimations !== "function") return []
+    const describe = (animation) => {
+      const target = animation.effect && animation.effect.target
+      const identity = target
+        ? \`\${target.tagName.toLowerCase()}\${target.className && typeof target.className === "string" ? "." + target.className.trim().split(/\\s+/).slice(0, 4).join(".") : ""}\`
+        : "(no target)"
+      const keyframe = animation.animationName
+        || (animation.effect && animation.effect.getKeyframes && animation.effect.getKeyframes().length ? "transition/keyframes" : "unknown")
+      return \`\${animation.playState} \${keyframe} on \${identity}\`
+    }
+    const counts = new Map()
+    for (const animation of document.getAnimations()) {
+      const key = describe(animation)
+      counts.set(key, (counts.get(key) ?? 0) + 1)
+    }
+    return [...counts.entries()]
+      .sort((left, right) => right[1] - left[1])
+      .slice(0, 20)
+      .map(([description, count]) => ({ description, count }))
+  })())`)
+  try {
+    return JSON.parse(raw ?? "[]")
+  } catch {
+    return []
+  }
+}
+
+/**
+ * Reads a session status out of one realtime WebSocket frame, or null.
+ *
+ * The frame wraps an event (`{ type: "event", payload: { type, properties } }`).
+ * OpenChamber's `openchamber:session-status` (status "busy"/"idle"), and
+ * OpenCode's `session.status` and `session.idle`, all mark the end of the
+ * reply; the frame's CDP timestamp is the moment the page received it,
+ * which is when the app starts finalising the turn.
+ */
+const readSessionStatus = (payload, sessionId) => {
+  let parsed
+  try {
+    parsed = JSON.parse(payload)
+  } catch {
+    return null
+  }
+  const event = parsed?.payload ?? parsed
+  const data = event?.properties ?? event?.data ?? {}
+  if ((data.sessionID ?? data.sessionId) !== sessionId) return null
+  // OpenChamber's server bridges status as its own event, which is what the
+  // UI's sync pipeline turns into `session.status`.
+  if (event?.type === "openchamber:session-status") return typeof data.status === "string" ? data.status : null
+  if (event?.type === "session.idle") return "idle"
+  if (event?.type === "session.status") return data.status?.type ?? data.type ?? null
+  return null
+}
+
+/**
+ * Places the end of the reply on the trace clock: the first idle frame after
+ * a busy one. CDP network timestamps and trace timestamps both read Chrome's
+ * monotonic clock (seconds and microseconds); the busy frame must land after
+ * the `perf:stream-start` mark and the idle frame inside the trace, or the
+ * result says so instead of measuring a window somewhere else.
+ */
+const locateSessionIdle = (statusFrames, traceEvents) => {
+  const firstBusy = statusFrames.findIndex((frame) => frame.status !== "idle")
+  const idle = firstBusy < 0 ? null : statusFrames.slice(firstBusy).find((frame) => frame.status === "idle") ?? null
+  const result = { source: "websocket", framesSeen: statusFrames.length, detected: idle !== null, inTrace: false, micros: null, msAfterStreamStart: null, clockCheck: null }
+  if (!idle) return result
+  let minTs = Infinity
+  let maxTs = -Infinity
+  let streamStart = null
+  for (const event of traceEvents) {
+    const ts = Number(event.ts)
+    if (!(ts > 0)) continue
+    if (ts < minTs) minTs = ts
+    const end = ts + Number(event.dur ?? 0)
+    if (end > maxTs) maxTs = end
+    if (event.name === "perf:stream-start" && streamStart === null) streamStart = ts
+  }
+  result.micros = idle.timestamp * 1_000_000
+  result.inTrace = result.micros >= minTs && result.micros <= maxTs
+  if (streamStart !== null) {
+    const busyMs = (statusFrames[firstBusy].timestamp * 1_000_000 - streamStart) / 1000
+    result.msAfterStreamStart = round((result.micros - streamStart) / 1000)
+    // The prompt is dispatched right after the mark; its busy status arrives
+    // within seconds, never before the mark.
+    result.clockCheck = busyMs >= 0 && busyMs < 30_000 ? "ok" : `busy frame ${round(busyMs)} ms after the stream-start mark; clocks disagree`
+    if (result.clockCheck !== "ok") result.inTrace = false
+  }
+  return result
+}
+
+const REPORTED_METRICS = [
+  { key: "longTaskCount", fromTrace: true, label: "Long tasks (>50ms)", unit: "", lowerIsBetter: true },
+  { key: "tasksOver16msCount", fromTrace: true, label: "Main tasks >16.7ms", unit: "", lowerIsBetter: true },
+  { key: "tasksOver8msCount", fromTrace: true, label: "Main tasks >8.33ms", unit: "", lowerIsBetter: true },
+  { key: "finalizeLongestTaskMs", fromTrace: true, label: "Longest task ≤1s after idle", unit: "ms", lowerIsBetter: true },
+  { key: "longestTaskMs", fromTrace: true, label: "Longest task", unit: "ms", lowerIsBetter: true },
+  { key: "taskP95Ms", fromTrace: true, label: "Task p95", unit: "ms", lowerIsBetter: true },
+  { key: "taskP99Ms", fromTrace: true, label: "Task p99", unit: "ms", lowerIsBetter: true },
+  { key: "accessibilityMs", fromTrace: true, label: "Accessibility", unit: "ms", lowerIsBetter: true },
+  { key: "accessibilityLongestPassMs", fromTrace: true, label: "Longest a11y pass", unit: "ms", lowerIsBetter: true },
+  { key: "blockedPercent", fromTrace: true, label: "Time in long tasks", unit: "%", lowerIsBetter: true },
+  { key: "mainThreadBusyPercent", label: "Main-thread busy", unit: "%", lowerIsBetter: true },
+  { key: "recalcStylePerSecond", label: "Style recalcs/sec", unit: "", lowerIsBetter: true },
+  { key: "layoutsPerSecond", label: "Layouts/sec", unit: "", lowerIsBetter: true },
+  { key: "framesPerSecond", fromTrace: true, label: "rAF callbacks/sec", unit: "", lowerIsBetter: false },
+  { key: "streamSeconds", label: "Stream duration", unit: "s", lowerIsBetter: true },
+  { key: "renderedCharacters", label: "Rendered characters", unit: "", lowerIsBetter: false },
+  { key: "busyMsPerKilochar", label: "Busy per 1k chars", unit: "ms", lowerIsBetter: true },
+  { key: "recalcStylePerKilochar", label: "Style recalcs per 1k", unit: "", lowerIsBetter: true },
+  { key: "nodeGrowth", label: "DOM node growth", unit: "", lowerIsBetter: true },
+  { key: "listenerGrowth", label: "Listener growth", unit: "", lowerIsBetter: true },
+  { key: "heapGrowthMbPerSecond", label: "Heap growth", unit: "MB/s", lowerIsBetter: true },
+  { key: "heapMaxMb", label: "Heap max", unit: "MB", lowerIsBetter: true },
+]
+
+const formatRow = (label, value, unit) => `${label.padEnd(22)} ${String(value).padStart(12)} ${unit}`
+
+const printReport = (summary, baseline) => {
+  const { metrics } = summary
+  console.log(`\nStreaming profile — ${summary.metrics.streamSeconds}s ${summary.quiet ? "quiet window" : "response"} at ${summary.url}`)
+  if (summary.label) console.log(`Label: ${summary.label}`)
+  if (summary.injectedCss) console.log(`MODIFIED APP — injected CSS: ${summary.injectedCss}`)
+  if (summary.injectedScript) console.log(`MODIFIED APP — injected script: ${summary.injectedScript}`)
+  if (summary.renderProbe || summary.heapSampling) console.log(`ATTRIBUTION RUN — ${[summary.renderProbe && "render probe", summary.heapSampling && "heap sampling"].filter(Boolean).join(" and ")} on; its timings are inflated`)
+  if (summary.quiet) console.log(`QUIET — no prompt was sent; ${summary.metrics.streamSeconds}s with the session open`)
+  if (summary.cpuThrottle > 1) console.log(`CPU THROTTLED ${summary.cpuThrottle}x — approximates a slower machine`)
+  if (summary.attachedPort) console.log(`ATTACHED — an already running browser on port ${summary.attachedPort} showing ${summary.pageUrl}`)
+  console.log(`Session: ${summary.sessionId}${summary.model ? `  Model: ${summary.model}` : ""}`)
+  console.log(`History in memory: ${summary.historyRecordsBefore ?? "unknown"} -> ${summary.historyRecordsAfter ?? "unknown"} records${summary.grownTurns ? ` (${summary.grownTurns} turns grown with the page open)` : ""}`)
+  console.log("")
+  if (summary.instrumented === false) {
+    console.log("Uninstrumented run: trace, sampler and probe were off, so their metrics are omitted rather than shown as zero.\n")
+  } else if (summary.accessibility) {
+    console.log(`${describeAccessibility(summary.accessibility)}\n`)
+  }
+  for (const metric of REPORTED_METRICS) {
+    if (metric.fromTrace && summary.instrumented === false) continue
+    const current = metrics[metric.key]
+    if (!baseline) {
+      console.log(formatRow(metric.label, current, metric.unit))
+      continue
+    }
+    const previous = baseline.metrics?.[metric.key]
+    const change = Number.isFinite(previous) && Number.isFinite(current) ? round(current - previous) : null
+    const marker = change === null || change === 0
+      ? ""
+      : (change < 0) === metric.lowerIsBetter ? "  improved" : "  WORSE"
+    const changeText = change === null ? "n/a" : `${change > 0 ? "+" : ""}${change}`
+    console.log(`${formatRow(metric.label, current, metric.unit).padEnd(42)} was ${String(previous ?? "n/a").padStart(10)}  ${changeText.padStart(9)}${marker}`)
+  }
+
+  const processCpu = summary.processCpu
+  if (processCpu?.processes?.length) {
+    console.log("\nCPU per process while streaming (% of one core, as a process monitor shows it):")
+    console.log(`  ${"avg".padStart(7)} ${"p90".padStart(7)} ${"max".padStart(7)}  process`)
+    for (const entry of processCpu.processes.filter((process) => process.cpuSeconds > 0).slice(0, 10)) {
+      console.log(`  ${String(entry.averagePercent).padStart(6)}% ${String(entry.p90Percent).padStart(6)}% ${String(entry.maxPercent).padStart(6)}%  ${entry.label}`)
+    }
+    console.log(`  ${String(processCpu.totalAveragePercent).padStart(6)}% ${String(processCpu.totalP90Percent).padStart(6)}% ${String(processCpu.totalMaxPercent).padStart(6)}%  all of the above`)
+    if (processCpu.serverProcessesResolved === 0) {
+      console.log("  The OpenChamber server process was not resolved, so server and OpenCode CPU is missing, not zero.")
+    }
+  }
+
+  console.log("\nTop self time while streaming:")
+  for (const entry of summary.cpuProfile?.topSelfTime?.slice(0, 15) ?? []) {
+    console.log(`  ${String(entry.selfMs).padStart(9)} ms  ${String(entry.percentOfBusy).padStart(5)}%  ${entry.function}`)
+  }
+
+  if (summary.runningAnimations?.length) {
+    console.log("\nAnimations running mid-stream:")
+    for (const entry of summary.runningAnimations.slice(0, 12)) {
+      console.log(`  ${String(entry.count).padStart(4)}x  ${entry.description}`)
+    }
+  } else {
+    console.log("\nAnimations running mid-stream: none")
+  }
+
+  console.log("\nWhere recorded time went (timeline trace):")
+  for (const entry of summary.traceBreakdown?.slice(0, 14) ?? []) {
+    console.log(`  ${String(entry.totalMs).padStart(9)} ms  ${String(entry.count).padStart(6)}x  max ${String(entry.maxMs).padStart(7)} ms  ${entry.name}`)
+  }
+
+  if (summary.threadBreakdown?.length) {
+    console.log("\nCPU per thread (exclusive thread time, all traced processes):")
+    for (const thread of summary.threadBreakdown) {
+      console.log(`  ${String(thread.cpuMs).padStart(9)} ms  ${thread.process} / ${thread.thread}`)
+      for (const event of thread.events.slice(0, 6)) {
+        console.log(`  ${" ".repeat(12)}${String(event.cpuMs).padStart(9)} ms  ${event.name}`)
+      }
+    }
+  }
+
+  const streamEntries = summary.streamPerformance?.entries ?? []
+  if (streamEntries.length > 0) {
+    console.log("\nApplication stream counters (total ms / count):")
+    for (const entry of [...streamEntries].sort((left, right) => right.total - left.total).slice(0, 12)) {
+      console.log(`  ${String(round(entry.total)).padStart(9)} ms  ${String(entry.count).padStart(6)}x  max ${String(round(entry.max)).padStart(7)} ms  ${entry.metric}`)
+    }
+  }
+
+  console.log("\nTop scheduled-work call sites while streaming:")
+  for (const entry of summary.scheduledWork?.sites?.slice(0, 10) ?? []) {
+    console.log(`  ${String(entry.totalMs).padStart(9)} ms  ${String(entry.calls).padStart(6)}x  ${entry.site}`)
+  }
+
+  if (summary.heapSampling) {
+    console.log("\nTop allocation sites (sampled, self size; heap.heapprofile has the tree):")
+    for (const entry of summary.heapSampling.topAllocations.slice(0, 12)) {
+      console.log(`  ${String(entry.selfMb).padStart(9)} MB  ${entry.function}`)
+    }
+  }
+  printRenderProbe(summary.renderProbe)
+}
+
+/** Self size per allocating function in a sampling heap profile. */
+const summarizeHeapProfile = (profile) => {
+  const sites = new Map()
+  const visit = (node) => {
+    const { functionName, url, lineNumber } = node.callFrame
+    const key = `${functionName || "(anonymous)"} ${url ? `${url.split("/").pop()}:${lineNumber + 1}` : ""}`.trim()
+    sites.set(key, (sites.get(key) ?? 0) + node.selfSize)
+    for (const child of node.children ?? []) visit(child)
+  }
+  visit(profile.head)
+  const totalBytes = [...sites.values()].reduce((total, bytes) => total + bytes, 0)
+  return {
+    sampledMb: round(totalBytes / 1048576),
+    topAllocations: [...sites].sort((left, right) => right[1] - left[1]).slice(0, 30)
+      .map(([name, bytes]) => ({ function: name, selfMb: round(bytes / 1048576) })),
+  }
+}
+
+const evaluateBudgets = (summary, options) => {
+  const failures = []
+  if (Number.isFinite(options.budgetLongTasks) && summary.metrics.longTaskCount > options.budgetLongTasks) {
+    failures.push(`Long tasks ${summary.metrics.longTaskCount} exceeds budget ${options.budgetLongTasks}`)
+  }
+  if (Number.isFinite(options.budgetLongest) && summary.metrics.longestTaskMs > options.budgetLongest) {
+    failures.push(`Longest task ${summary.metrics.longestTaskMs}ms exceeds budget ${options.budgetLongest}ms`)
+  }
+  return failures
+}
+
+const main = async () => {
+  const options = parseArgs(process.argv.slice(2))
+  if (options.help) {
+    console.log(HELP)
+    return
+  }
+
+  const attached = options.attach !== null
+  const chrome = attached ? null : resolveChrome(options.chrome)
+  const timestamp = new Date().toISOString().replaceAll(":", "-").replaceAll(".", "-")
+  const output = resolve(options.output ?? join("artifacts", `session-profile-${timestamp}`))
+  const profile = attached ? null : resolveProfileDir(options.profileDir, "session")
+  const profileDir = profile?.dir ?? null
+  await mkdir(output, { recursive: true })
+  if (profileDir) await mkdir(profileDir, { recursive: true })
+
+  const baseline = options.baseline
+    ? JSON.parse(await readFile(join(resolve(options.baseline), "session-summary.json"), "utf8"))
+    : null
+
+  const cliBase = ["--dir", options.dir, "--port", String(options.port)]
+
+  let sessionId = options.session
+  if (!sessionId) {
+    const created = await runSessionCli([
+      "create", ...cliBase,
+      "--title", `perf: ${options.label ?? "streaming capture"}`,
+    ])
+    sessionId = created.sessionId
+    console.log(`Created session ${sessionId}`)
+  } else {
+    console.log(`Reusing session ${sessionId}`)
+  }
+
+  const port = attached ? options.attach : await reservePort()
+  if (attached && options.forceAccessibility) throw new Error("--force-accessibility launches Chrome; it does not apply with --attach")
+  const chromeProcess = attached ? null : launchChrome({ chrome, profileDir, port, headless: options.headless, extraArgs: options.forceAccessibility ? FORCE_ACCESSIBILITY_ARGS : [] })
+  let client
+  let browserClient
+  try {
+    const pageTarget = attached ? await findPageTarget(port) : await createPageTarget(port)
+    // An attached window keeps its own document: the session is opened on the
+    // page's current URL, which for the packaged desktop shell is its own scheme.
+    const target = new URL(attached ? pageTarget.url : options.url)
+    // The displayed session and the streaming session are deliberately separable:
+    // a background session must not make the foreground one expensive.
+    target.searchParams.set("session", options.viewSession ?? sessionId)
+    client = new CdpClient(pageTarget.webSocketDebuggerUrl)
+    await client.connect()
+    browserClient = await openBrowserClient(port)
+    let serverProcesses = await resolveServerProcesses(options.port)
+    if (attached) {
+      // The desktop shell runs the server inside Electron's main process, which
+      // the browser-level process list already reports; counting it twice would
+      // inflate the total.
+      const browserPids = new Set(((await browserClient.send("SystemInfo.getProcessInfo")).processInfo ?? []).map((info) => Number(info.id)))
+      serverProcesses = serverProcesses.filter((entry) => !browserPids.has(entry.pid))
+    }
+    const processCpu = createProcessCpuSampler({ browserClient, serverProcesses })
+    await Promise.all([
+      client.send("Page.enable"),
+      client.send("Runtime.enable"),
+      client.send("Performance.enable"),
+      client.send("Profiler.enable"),
+      client.send("Network.enable", { maxTotalBufferSize: 0, maxResourceBufferSize: 0 }),
+    ])
+    await client.send("Network.setBypassServiceWorker", { bypass: true })
+    const instrumented = !options.processCpuOnly
+    if (instrumented) await client.send("Page.addScriptToEvaluateOnNewDocument", { source: buildIdleProbeSource() })
+    // React registers with the hook while its module initialises, so the probe
+    // has to exist before any application code runs.
+    if (options.renderProbe) await client.send("Page.addScriptToEvaluateOnNewDocument", { source: buildRenderProbeSource({ traceHook: options.renderProbeHook }) })
+    if (options.injectCss) {
+      await client.send("Page.addScriptToEvaluateOnNewDocument", {
+        source: `document.addEventListener("DOMContentLoaded", () => {
+          const style = document.createElement("style")
+          style.textContent = ${JSON.stringify(options.injectCss)}
+          document.head.appendChild(style)
+        })`,
+      })
+    }
+    if (options.injectScript) {
+      await client.send("Page.addScriptToEvaluateOnNewDocument", { source: await readFile(resolve(options.injectScript), "utf8") })
+    }
+    if (options.cpuThrottle > 1) await client.send("Emulation.setCPUThrottlingRate", { rate: options.cpuThrottle })
+    // An attached window is measured at the size the user gave it.
+    if (!attached) await client.send("Emulation.setDeviceMetricsOverride", {
+      width: 1600, height: 1000, deviceScaleFactor: 1, mobile: false,
+    })
+
+    const traceEvents = []
+    // A spread push overflows the call stack once a chunk carries hundreds of
+    // thousands of events, which a heavily populated sidebar easily produces.
+    const unsubscribeTrace = client.on("Tracing.dataCollected", ({ value }) => {
+      for (const event of value ?? []) traceEvents.push(event)
+    })
+
+    let loaded = client.once("Page.loadEventFired", 60_000)
+    await client.send("Page.navigate", { url: target.toString() })
+    await loaded
+    // The application's own stream counters are opt-in; enabling them before
+    // the recorded reload keeps their timeline aligned with the capture. The
+    // Chrome profile is reused between runs, so an uninstrumented run has to
+    // clear the flags an earlier instrumented run left behind.
+    await evaluateValue(client, instrumented
+      ? `
+      localStorage.setItem("openchamber_sync_perf", "1")
+      localStorage.setItem("openchamber_stream_perf", "1")
+    `
+      : `
+      localStorage.removeItem("openchamber_sync_perf")
+      localStorage.removeItem("openchamber_stream_perf")
+    `)
+    if (options.expandProjects) {
+      await expandProjects(client)
+      console.log("Expanded every project in the sidebar.")
+    }
+    loaded = client.once("Page.loadEventFired", 60_000)
+    await client.send("Page.reload", { ignoreCache: false })
+    await loaded
+
+    console.log(`Opened the session; settling for ${options.settle}s.`)
+    await wait(options.settle * 1000)
+
+    if (options.expandSessions) {
+      const expanded = await expandSessionLists(client)
+      console.log(`Expanded ${expanded} collapsed session lists; settling ${options.settle}s again.`)
+      await wait(options.settle * 1000)
+    }
+
+    if (options.grow > 0) {
+      // Sent with the page showing the session, so every turn reaches the
+      // app by event and stays in memory, as it does for a live chat.
+      for (let turn = 1; turn <= options.grow; turn += 1) {
+        await runSessionCli([
+          "send", ...cliBase,
+          "--session", sessionId,
+          "--prompt", `History turn ${turn}: explain the next part.`,
+          "--model", options.growModel,
+          "--wait", "--timeout", "300",
+        ])
+        // A turn that outgrows the screen stops the follow, and the next
+        // turns would land unmounted below it. Someone working in the chat
+        // reads at the end, so return there as they would.
+        await scrollChatToEnd(client)
+        if (turn % 10 === 0 || turn === options.grow) console.log(`Grew ${turn}/${options.grow} turns`)
+      }
+      console.log(`Settling ${options.settle}s after growing the history.`)
+      await wait(options.settle * 1000)
+    }
+    const historyRecordsBefore = await readHistoryRecords(client, sessionId)
+    console.log(`History in memory: ${historyRecordsBefore ?? "unknown"} records.`)
+
+    if (instrumented) {
+      await evaluateValue(client, `globalThis[${JSON.stringify(IDLE_PROBE_GLOBAL)}]?.start()`)
+      await evaluateValue(client, `window.__openchamberSyncPerformance?.reset()`)
+      await evaluateValue(client, `window.__openchamberStreamPerformance?.setEnabled(true)`)
+      await evaluateValue(client, `window.__openchamberStreamPerformance?.reset()`)
+      await client.send("Profiler.setSamplingInterval", { interval: options.samplingInterval })
+      await client.send("Profiler.start")
+    }
+    if (options.heapSampling) {
+      await client.send("HeapProfiler.enable")
+      await client.send("HeapProfiler.startSampling", { samplingInterval: 32768, includeObjectsCollectedByMajorGC: true, includeObjectsCollectedByMinorGC: true })
+    }
+    // `RunTask` is only emitted under the disabled-by-default timeline
+    // category. Without it the capture silently reports zero long tasks.
+    const categories = [...new Set([
+      "devtools.timeline",
+      "disabled-by-default-devtools.timeline",
+      "disabled-by-default-devtools.timeline.frame",
+      "blink.user_timing",
+      ACCESSIBILITY_CATEGORY,
+      // `toplevel` wraps every task on every thread of every process; the
+      // rest name what the compositor and the GPU process did inside them.
+      ...(options.threadBreakdown ? ["toplevel", "cc", "viz", "gpu", "v8.gc", "disabled-by-default-v8.gc"] : []),
+      ...options.extraCategories,
+    ])]
+    if (instrumented) await client.send("Tracing.start", { transferMode: "ReportEvents", categories: categories.join(",") })
+
+    const before = metricMap((await client.send("Performance.getMetrics")).metrics)
+    const renderedBefore = await countRenderedMessages(client)
+    const directoryAlignment = options.viewSession ? null : await readDirectoryAlignment(client)
+    await processCpu.sample()
+    // The idle edge comes from the realtime channel the page itself listens
+    // to, timestamped by the browser, so the finalize window starts when the
+    // page learned the reply ended. Polling the CLI would be a second late.
+    const statusFrames = []
+    const unsubscribeFrames = client.on("Network.webSocketFrameReceived", (params) => {
+      const payload = String(params.response?.payloadData ?? "")
+      if (!payload.includes(sessionId) || !payload.includes("status") && !payload.includes("session.idle")) return
+      const status = readSessionStatus(payload, sessionId)
+      if (status) statusFrames.push({ timestamp: params.timestamp, status })
+    })
+    if (instrumented) await evaluateValue(client, `performance.mark("perf:stream-start")`)
+    if (options.renderProbe) await evaluateValue(client, `globalThis[${JSON.stringify(RENDER_PROBE_GLOBAL)}]?.start()`)
+    const startedAt = Date.now()
+
+    const sendArgs = [
+      "send", ...cliBase,
+      "--session", sessionId,
+      "--prompt", options.prompt,
+      ...(options.model ? ["--model", options.model] : []),
+      ...(options.agent ? ["--agent", options.agent] : []),
+    ]
+    const quiet = options.quiet > 0
+    console.log(quiet
+      ? `Recording ${options.quiet}s with the session open; no prompt is sent.`
+      : "Dispatching the prompt and recording until the session reports idle.")
+    const dispatch = quiet ? Promise.resolve(null) : runSessionCli(sendArgs, { timeoutMs: options.timeout * 1000 })
+
+    const samples = []
+    let dispatchError = null
+    let animationSnapshot = null
+    let becameIdle = false
+    dispatch.catch((error) => { dispatchError = error })
+
+    const deadline = startedAt + options.timeout * 1000
+    let sawBusy = false
+    while (Date.now() < deadline) {
+      await wait(1_000)
+      const current = metricMap((await client.send("Performance.getMetrics")).metrics)
+      samples.push({
+        elapsedSeconds: round((Date.now() - startedAt) / 1000),
+        jsHeapUsedMb: round(Number(current.JSHeapUsedSize ?? 0) / (1024 * 1024)),
+        jsEventListeners: Number(current.JSEventListeners ?? 0),
+        nodes: Number(current.Nodes ?? 0),
+        taskDuration: round(Number(current.TaskDuration ?? 0), 3),
+      })
+      await processCpu.sample()
+      if (dispatchError) break
+
+      // One mid-stream snapshot is enough to name a continuously running
+      // animation, and avoids polling overhead inside the measured window.
+      if (animationSnapshot === null && Date.now() - startedAt > Math.min(15_000, (options.quiet * 1000) / 2 || Infinity)) {
+        animationSnapshot = await snapshotAnimations(client)
+      }
+      if (quiet) {
+        if (Date.now() - startedAt >= options.quiet * 1000) { becameIdle = true; break }
+        continue
+      }
+
+      // `session status` is the authoritative activity source; polling it
+      // avoids inferring completion from render or network quiet periods,
+      // which a slow provider would misreport as a finished response.
+      const status = await runSessionCli(["status", ...cliBase, "--session", sessionId], { timeoutMs: 30_000 })
+        .catch(() => null)
+      const type = status?.sessionStatus?.type ?? status?.status
+      if (type && type !== "idle") sawBusy = true
+      if (sawBusy && type === "idle") { becameIdle = true; break }
+    }
+
+    if (dispatchError) throw dispatchError
+    if (!becameIdle) console.warn(`WARNING: the session did not report idle within ${options.timeout}s; the capture is truncated.`)
+
+    const streamEndedAt = Date.now()
+    if (instrumented) await evaluateValue(client, `performance.mark("perf:stream-end")`)
+    // The probe covers the stream only, like the process CPU figures.
+    if (options.renderProbe) await evaluateValue(client, `globalThis[${JSON.stringify(RENDER_PROBE_GLOBAL)}]?.stop()`)
+    // Closed before the tail so the per-process figures describe the stream
+    // itself and are not diluted by the quiet seconds recorded after it.
+    await processCpu.sample()
+    const assistantResponse = quiet ? null : await readAssistantResponse(cliBase, sessionId)
+    if (options.tail > 0) await wait(options.tail * 1000)
+
+    const frameLiveness = await evaluateValue(client, `new Promise((resolveFrames) => {
+      let frames = 0
+      const startedAtFrames = performance.now()
+      const tick = () => {
+        frames += 1
+        if (performance.now() - startedAtFrames < 1000) requestAnimationFrame(tick)
+        else resolveFrames({ framesPerSecond: frames, visibilityState: document.visibilityState })
+      }
+      requestAnimationFrame(tick)
+      setTimeout(() => resolveFrames({ framesPerSecond: frames, visibilityState: document.visibilityState }), 2000)
+    })`)
+
+    const elapsedSeconds = (Date.now() - startedAt) / 1000
+    const renderedAfter = await countRenderedMessages(client)
+    const historyRecordsAfter = await readHistoryRecords(client, sessionId)
+    const after = metricMap((await client.send("Performance.getMetrics")).metrics)
+    const profile = instrumented ? (await client.send("Profiler.stop")).profile : null
+    const heapProfile = options.heapSampling ? (await client.send("HeapProfiler.stopSampling")).profile : null
+
+    let traceComplete = instrumented
+    if (instrumented) {
+      const tracingComplete = client.once("Tracing.tracingComplete", 120_000)
+      try {
+        await client.send("Tracing.end")
+        await tracingComplete
+      } catch (error) {
+        traceComplete = false
+        void tracingComplete.catch(() => undefined)
+        console.warn(`Chrome did not confirm trace completion; using the events collected so far: ${error.message}`)
+        await wait(2_000)
+      }
+    }
+    unsubscribeTrace()
+    unsubscribeFrames()
+    if (options.tail < 1) console.warn("WARNING: --tail is under 1 s, so the window after idle is cut short and the finalize task may be missing.")
+
+    await evaluateValue(client, `globalThis[${JSON.stringify(IDLE_PROBE_GLOBAL)}]?.stop()`)
+    const probe = await evaluateValue(client, `globalThis[${JSON.stringify(IDLE_PROBE_GLOBAL)}]?.snapshot() ?? null`)
+    const streamPerformance = await evaluateValue(client, `window.__openchamberStreamPerformance?.getSnapshot() ?? null`)
+    const syncCounters = await evaluateValue(client, `window.__openchamberSyncPerformance?.getSnapshot() ?? null`)
+    const renderProbeRaw = options.renderProbe ? await readRenderProbe((expression) => evaluateValue(client, expression)) : null
+    // An injected script may expose `globalThis.__perfInjected.snapshot()` to
+    // hand back what it recorded, such as per-frame scroll positions.
+    const injectedProbeRaw = options.injectScript
+      ? await evaluateValue(client, `JSON.stringify(globalThis.__perfInjected?.snapshot?.() ?? null)`)
+      : null
+    const dispatchResult = await dispatch.catch(() => null)
+
+    // Both signals must agree: new message elements in the DOM and the
+    // application's own message-list render counters firing.
+    const messageListRendered = (streamPerformance?.entries ?? [])
+      .some((entry) => entry.metric.startsWith("ui.message_list") && entry.count > 0)
+    const renderedCharacterGrowth = messageTextGrowth(renderedBefore, renderedAfter)
+    // A virtualised timeline keeps the mounted message count constant, so in a
+    // long session new message text is the DOM signal and a new element is not. An
+    // uninstrumented run has no render counters and relies on the DOM signal
+    // together with the assistant-response check.
+    const domGrew = renderedAfter.messages > renderedBefore.messages || renderedCharacterGrowth > 0
+    // A quiet window streams nothing, so there is no stream to have rendered.
+    const renderedStream = quiet
+      ? null
+      : options.viewSession
+        ? true
+        : domGrew && (messageListRendered || !instrumented)
+
+    const tasks = summarizeLongTasks(traceEvents)
+    const frameBudget = summarizeFrameBudget(traceEvents)
+    const sessionIdle = locateSessionIdle(statusFrames, traceEvents)
+    const finalize = !quiet && sessionIdle.inTrace
+      ? longestTaskInWindow(traceEvents, sessionIdle.micros, sessionIdle.micros + 1_000_000)
+      : null
+    const traceBreakdown = summarizeTraceEvents(traceEvents)
+    const recordedWindow = traceWindow(traceEvents)
+    const accessibility = instrumented
+      ? accessibilityInWindow(traceEvents, { main: rendererMainThread(traceEvents, recordedWindow).main, ...recordedWindow, recorded: true })
+      : null
+    const threadBreakdown = options.threadBreakdown ? summarizeThreads(traceEvents) : null
+    const delta = (name) => Number(after[name] ?? 0) - Number(before[name] ?? 0)
+    const perSecond = (name) => round(delta(name) / elapsedSeconds)
+    const heapSamples = samples.map((sample) => sample.jsHeapUsedMb)
+    const streamSeconds = round((streamEndedAt - startedAt) / 1000)
+
+    const summary = {
+      recordedAt: new Date(startedAt).toISOString(),
+      label: options.label,
+      url: options.url,
+      attachedPort: attached ? port : null,
+      pageUrl: attached ? pageTarget.url : null,
+      sessionId,
+      viewedSessionId: options.viewSession ?? sessionId,
+      directory: options.dir,
+      prompt: options.prompt,
+      model: dispatchResult?.model ? `${dispatchResult.model.providerID}/${dispatchResult.model.modelID}` : options.model,
+      agent: dispatchResult?.agent ?? options.agent,
+      reachedIdle: becameIdle,
+      quiet,
+      instrumented,
+      directoryAlignment,
+      injectedCss: options.injectCss,
+      injectedScript: options.injectScript,
+      renderProbe: renderProbeRaw ? summarizeRenderProbe(JSON.parse(renderProbeRaw)) : null,
+      heapSampling: heapProfile ? summarizeHeapProfile(heapProfile) : null,
+      assistantResponse,
+      renderedStream,
+      grownTurns: options.grow,
+      cpuThrottle: options.cpuThrottle,
+      historyRecordsBefore,
+      historyRecordsAfter,
+      renderedMessagesBefore: renderedBefore.messages,
+      renderedMessagesAfter: renderedAfter.messages,
+      renderedCharacterGrowth,
+      traceComplete,
+      disposableSession: !options.keepSession && !options.session,
+      sessionIdle,
+      accessibility: instrumented ? accessibilityState(traceEvents, { categories, forced: options.forceAccessibility }) : null,
+      metrics: {
+        ...tasks,
+        ...frameBudget,
+        // The end-of-reply spike: the turn is finalised (markdown settles,
+        // code highlights, the list re-measures) right after the session goes idle.
+        finalizeLongestTaskMs: finalize?.longestMs ?? null,
+        finalizeTasksOver16msCount: finalize?.tasksOver16msCount ?? null,
+        // Serializing the accessibility tree, paid only while an accessibility
+        // client is on (`accessibility` says whether it was).
+        accessibilityMs: accessibility?.ms ?? null,
+        accessibilityLongestPassMs: accessibility?.longestPassMs ?? null,
+        blockedPercent: round((tasks.longTaskTotalMs / (elapsedSeconds * 1000)) * 100),
+        mainThreadBusyPercent: round((delta("TaskDuration") / elapsedSeconds) * 100),
+        recalcStylePerSecond: perSecond("RecalcStyleCount"),
+        layoutsPerSecond: perSecond("LayoutCount"),
+        // requestAnimationFrame calls the page made, not frames drawn; frames
+        // are `framesSubmittedPerSecond` from the saved trace.
+        framesPerSecond: probe ? round(Number(probe.counters?.rafScheduled ?? 0) / elapsedSeconds) : null,
+        // Response length varies between runs even for an identical prompt, so
+        // per-second and total figures are not comparable across captures.
+        // Normalising by rendered output is what makes two runs contrastable.
+        renderedCharacters: renderedCharacterGrowth,
+        busyMsPerKilochar: renderedCharacterGrowth > 0
+          ? round((delta("TaskDuration") * 1000) / (renderedCharacterGrowth / 1000))
+          : quiet ? null : 0,
+        recalcStylePerKilochar: renderedCharacterGrowth > 0
+          ? round(delta("RecalcStyleCount") / (renderedCharacterGrowth / 1000))
+          : quiet ? null : 0,
+        streamSeconds,
+        recordedSeconds: round(elapsedSeconds),
+        nodeStart: Number(before.Nodes ?? 0),
+        nodeEnd: Number(after.Nodes ?? 0),
+        nodeGrowth: delta("Nodes"),
+        listenerStart: Number(before.JSEventListeners ?? 0),
+        listenerEnd: Number(after.JSEventListeners ?? 0),
+        listenerGrowth: delta("JSEventListeners"),
+        heapStartMb: round(heapSamples.at(0) ?? 0),
+        heapEndMb: round(heapSamples.at(-1) ?? 0),
+        heapMaxMb: round(heapSamples.reduce((max, value) => Math.max(max, value), 0)),
+        heapGrowthMbPerSecond: growthPerSecond(samples, "jsHeapUsedMb"),
+      },
+      frameLiveness,
+      processCpu: processCpu.summarize(),
+      runningAnimations: animationSnapshot ?? [],
+      cpuProfile: profile ? summarizeCpuProfile(profile) : null,
+      traceBreakdown,
+      threadBreakdown,
+      streamPerformance,
+      syncCounters,
+      scheduledWork: probe,
+      samples,
+    }
+
+    await writeFile(join(output, "session-summary.json"), JSON.stringify(summary, null, 2))
+    if (profile) await writeFile(join(output, "cpu-profile.cpuprofile"), JSON.stringify(profile))
+    if (heapProfile) await writeFile(join(output, "heap.heapprofile"), JSON.stringify(heapProfile))
+    if (renderProbeRaw) await writeFile(join(output, "render-probe.json"), renderProbeRaw)
+    if (injectedProbeRaw && injectedProbeRaw !== "null") await writeFile(join(output, "injected-probe.json"), injectedProbeRaw)
+    if (options.saveTrace && instrumented) {
+      // Streamed event by event: one JSON.stringify over a long capture exceeds
+      // the maximum string length.
+      const traceFile = createWriteStream(join(output, "trace.json"))
+      traceFile.write('{"traceEvents":[\n')
+      traceEvents.forEach((event, index) => traceFile.write(`${index === 0 ? "" : ",\n"}${JSON.stringify(event)}`))
+      traceFile.end("\n]}")
+      await finished(traceFile)
+    }
+
+    if (instrumented && tasks.taskCount === 0) {
+      console.warn(
+        "\nWARNING: the trace contained no RunTask events, so every long-task number below is a"
+        + " placeholder zero rather than a measurement. Check the tracing categories before trusting them.",
+      )
+    }
+
+    if (instrumented && !quiet && !sessionIdle.inTrace) {
+      console.warn(
+        `\nWARNING: the end of the reply was not placed on the trace (${sessionIdle.detected ? sessionIdle.clockCheck ?? "idle frame outside the trace" : `no idle status frame among ${sessionIdle.framesSeen} for this session`}),`
+        + " so the longest task after idle is missing, not zero.",
+      )
+    }
+    if (instrumented && !frameBudget.mainThreadIdentified) {
+      console.warn("\nWARNING: the trace named no CrRendererMain thread; the >8.33/16.7 ms counts include every thread's tasks.")
+    }
+
+    if (directoryAlignment && !directoryAlignment.aligned) {
+      console.warn(
+        `\nWARNING: the app's active directory (${directoryAlignment.active}) is not the session's`
+        + ` (${directoryAlignment.session}), so the timeline re-rendered in full on every flush.`
+        + " Open the session's directory as the active project to measure the path a user takes.",
+      )
+    }
+
+    if (assistantResponse && !assistantResponse.responded) {
+      console.warn(
+        "\nWARNING: the session went idle without an assistant message, so no response streamed."
+        + " The provider most likely rejected the request; check the OpenCode log and the --model value."
+        + " This capture measures nothing.",
+      )
+    }
+
+    if (renderedStream === false) {
+      console.warn(
+        "\nWARNING: the recorded page never rendered the streaming session"
+        + ` (message elements ${renderedBefore.messages} -> ${renderedAfter.messages},`
+        + ` message-list renders ${messageListRendered ? "fired" : "never fired"}).`
+        + "\nThe session most likely belongs to a directory the browser is not viewing."
+        + " Pass --dir for the directory the app has open. This capture measures nothing.",
+      )
+    }
+
+    if (options.json) console.log(JSON.stringify(summary, null, 2))
+    else printReport(summary, baseline)
+    console.log(`\nSaved to ${output}`)
+    if (summary.disposableSession) console.log(`Session ${sessionId} was created by this run and can be deleted.`)
+
+    const failures = evaluateBudgets(summary, options)
+    if (failures.length > 0) {
+      console.error(`\nBudget failures:\n${failures.map((failure) => `  - ${failure}`).join("\n")}`)
+      process.exitCode = 1
+    }
+  } finally {
+    client?.close()
+    browserClient?.close()
+    if (chromeProcess && !chromeProcess.killed) chromeProcess.kill("SIGTERM")
+    profile?.removeAfter(chromeProcess)
+  }
+}
+
+main().catch((error) => {
+  console.error(`Session profiling failed: ${error.message}`)
+  process.exitCode = 1
+})

@@ -1,0 +1,255 @@
+diff --git a/node_modules/@legendapp/list/.bun-tag-d9cee12e0ece25f7 b/.bun-tag-d9cee12e0ece25f7
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
+diff --git a/react-native.web.js b/react-native.web.js
+index a0f962c42b7b28a49e7480ed3e16056b9e154a4c..70282a5cd94eee201014d4f18c3c2f64c6f13057 100644
+--- a/react-native.web.js
++++ b/react-native.web.js
+@@ -1171,7 +1171,11 @@ function warnDevOnce(id, text) {
+   }
+ }
+ function roundSize(size) {
+-  return Math.floor(size * 8) / 8;
++  // Floor to the device pixel grid (LegendApp/legend-list#536). Eighth-pixel
++  // estimates gave rows fractional positions; the browser rounds scrollTop, so
++  // every prepend compensation lost the remainder and the anchor drifted.
++  const scale = typeof window !== "undefined" && window.devicePixelRatio || 1;
++  return Math.floor(size * scale) / scale;
+ }
+ function isNullOrUndefined(value) {
+   return value === null || value === void 0;
+@@ -4828,11 +4832,16 @@ function calculateItemsInView(ctx, params = {}) {
+           allocationEnd,
+           pendingRemoval,
+           protectedContainerKeys,
+-          // Initial end alignment has no scroll velocity yet. Keep its
+-          // target-side rows first until the initial scroll settles.
++          // The initial scroll, end-aligned included, hands out containers
++          // in item order. Containers render in index order, so the rows of
++          // a freshly opened list are in DOM order from the first paint and
++          // the DOM-order pass has nothing to move: reversed for an
++          // end-aligned start, it moved nearly every row a moment after the
++          // list showed, restyling each row and re-serializing it for
++          // assistive technology.
+           // After a pause velocity can be zero on the first movement;
+           // use its displacement without treating initial insets as motion.
+-          hasActiveInitialScroll(state) ? (initialScroll == null ? void 0 : initialScroll.viewPosition) === 1 : (speed || (state.hasScrolled ? state.scroll - state.scrollPrev : 0)) < 0
++          !hasActiveInitialScroll(state) && (speed || (state.hasScrolled ? state.scroll - state.scrollPrev : 0)) < 0
+         );
+         for (const allocation of availableContainerAllocations) {
+           const i = allocation.itemIndex;
+@@ -5768,7 +5777,11 @@ function processContainerLayout({ containerId, ctx, rectangle, ref, state }) {
+       size: layout
+     });
+   };
+-  const shouldDeferWebShrinkLayoutUpdate = !isInMVCPActiveMode(listState) && previousSize !== void 0 && size + 1 < previousSize;
++  // A row that shrank because its width changed (text re-wrapping as the
++  // list narrows or widens) shrank for real: deferred a frame, the rows below
++  // and an end-pinned scroll position lagged it on every frame of a resize.
++  const widthChanged = state.lastSize !== void 0 && roundSize(state.lastSize.width) !== roundSize(rectangle.width);
++  const shouldDeferWebShrinkLayoutUpdate = !widthChanged && !isInMVCPActiveMode(listState) && previousSize !== void 0 && size + 1 < previousSize;
+   if (shouldDeferWebShrinkLayoutUpdate) {
+     scheduleWebShrinkMeasurement(state, () => {
+       var _a4;
+@@ -6098,7 +6111,11 @@ function useDOMOrder(ref) {
+   const ctx = useStateContext();
+   React3.useEffect(() => {
+     let timeoutId;
+-    let lastUpdateTime = 0;
++    // A list that just mounted is still settling (initial scroll, measured
++    // heights). Count the mount as activity so the first DOM-order pass waits
++    // for the list to go quiet instead of landing in its opening frames:
++    // moving rows restyles their whole subtree.
++    let lastUpdateTime = Date.now();
+     let delay = 500;
+     const unsubscribe = listen$(ctx, "lastPositionUpdate", () => {
+       const container = ref.current;
+diff --git a/react-native.web.mjs b/react-native.web.mjs
+index 9338287159778f842fa05b5a0467336bf5f50fe8..8b8247bd2ec7eea7794b37f5dd7ac01b77da60d4 100644
+--- a/react-native.web.mjs
++++ b/react-native.web.mjs
+@@ -1150,7 +1150,11 @@ function warnDevOnce(id, text) {
+   }
+ }
+ function roundSize(size) {
+-  return Math.floor(size * 8) / 8;
++  // Floor to the device pixel grid (LegendApp/legend-list#536). Eighth-pixel
++  // estimates gave rows fractional positions; the browser rounds scrollTop, so
++  // every prepend compensation lost the remainder and the anchor drifted.
++  const scale = typeof window !== "undefined" && window.devicePixelRatio || 1;
++  return Math.floor(size * scale) / scale;
+ }
+ function isNullOrUndefined(value) {
+   return value === null || value === void 0;
+@@ -4807,11 +4811,16 @@ function calculateItemsInView(ctx, params = {}) {
+           allocationEnd,
+           pendingRemoval,
+           protectedContainerKeys,
+-          // Initial end alignment has no scroll velocity yet. Keep its
+-          // target-side rows first until the initial scroll settles.
++          // The initial scroll, end-aligned included, hands out containers
++          // in item order. Containers render in index order, so the rows of
++          // a freshly opened list are in DOM order from the first paint and
++          // the DOM-order pass has nothing to move: reversed for an
++          // end-aligned start, it moved nearly every row a moment after the
++          // list showed, restyling each row and re-serializing it for
++          // assistive technology.
+           // After a pause velocity can be zero on the first movement;
+           // use its displacement without treating initial insets as motion.
+-          hasActiveInitialScroll(state) ? (initialScroll == null ? void 0 : initialScroll.viewPosition) === 1 : (speed || (state.hasScrolled ? state.scroll - state.scrollPrev : 0)) < 0
++          !hasActiveInitialScroll(state) && (speed || (state.hasScrolled ? state.scroll - state.scrollPrev : 0)) < 0
+         );
+         for (const allocation of availableContainerAllocations) {
+           const i = allocation.itemIndex;
+@@ -5747,7 +5756,11 @@ function processContainerLayout({ containerId, ctx, rectangle, ref, state }) {
+       size: layout
+     });
+   };
+-  const shouldDeferWebShrinkLayoutUpdate = !isInMVCPActiveMode(listState) && previousSize !== void 0 && size + 1 < previousSize;
++  // A row that shrank because its width changed (text re-wrapping as the
++  // list narrows or widens) shrank for real: deferred a frame, the rows below
++  // and an end-pinned scroll position lagged it on every frame of a resize.
++  const widthChanged = state.lastSize !== void 0 && roundSize(state.lastSize.width) !== roundSize(rectangle.width);
++  const shouldDeferWebShrinkLayoutUpdate = !widthChanged && !isInMVCPActiveMode(listState) && previousSize !== void 0 && size + 1 < previousSize;
+   if (shouldDeferWebShrinkLayoutUpdate) {
+     scheduleWebShrinkMeasurement(state, () => {
+       var _a4;
+@@ -6077,7 +6090,11 @@ function useDOMOrder(ref) {
+   const ctx = useStateContext();
+   useEffect(() => {
+     let timeoutId;
+-    let lastUpdateTime = 0;
++    // A list that just mounted is still settling (initial scroll, measured
++    // heights). Count the mount as activity so the first DOM-order pass waits
++    // for the list to go quiet instead of landing in its opening frames:
++    // moving rows restyles their whole subtree.
++    let lastUpdateTime = Date.now();
+     let delay = 500;
+     const unsubscribe = listen$(ctx, "lastPositionUpdate", () => {
+       const container = ref.current;
+diff --git a/react.js b/react.js
+index a0f962c42b7b28a49e7480ed3e16056b9e154a4c..70282a5cd94eee201014d4f18c3c2f64c6f13057 100644
+--- a/react.js
++++ b/react.js
+@@ -1171,7 +1171,11 @@ function warnDevOnce(id, text) {
+   }
+ }
+ function roundSize(size) {
+-  return Math.floor(size * 8) / 8;
++  // Floor to the device pixel grid (LegendApp/legend-list#536). Eighth-pixel
++  // estimates gave rows fractional positions; the browser rounds scrollTop, so
++  // every prepend compensation lost the remainder and the anchor drifted.
++  const scale = typeof window !== "undefined" && window.devicePixelRatio || 1;
++  return Math.floor(size * scale) / scale;
+ }
+ function isNullOrUndefined(value) {
+   return value === null || value === void 0;
+@@ -4828,11 +4832,16 @@ function calculateItemsInView(ctx, params = {}) {
+           allocationEnd,
+           pendingRemoval,
+           protectedContainerKeys,
+-          // Initial end alignment has no scroll velocity yet. Keep its
+-          // target-side rows first until the initial scroll settles.
++          // The initial scroll, end-aligned included, hands out containers
++          // in item order. Containers render in index order, so the rows of
++          // a freshly opened list are in DOM order from the first paint and
++          // the DOM-order pass has nothing to move: reversed for an
++          // end-aligned start, it moved nearly every row a moment after the
++          // list showed, restyling each row and re-serializing it for
++          // assistive technology.
+           // After a pause velocity can be zero on the first movement;
+           // use its displacement without treating initial insets as motion.
+-          hasActiveInitialScroll(state) ? (initialScroll == null ? void 0 : initialScroll.viewPosition) === 1 : (speed || (state.hasScrolled ? state.scroll - state.scrollPrev : 0)) < 0
++          !hasActiveInitialScroll(state) && (speed || (state.hasScrolled ? state.scroll - state.scrollPrev : 0)) < 0
+         );
+         for (const allocation of availableContainerAllocations) {
+           const i = allocation.itemIndex;
+@@ -5768,7 +5777,11 @@ function processContainerLayout({ containerId, ctx, rectangle, ref, state }) {
+       size: layout
+     });
+   };
+-  const shouldDeferWebShrinkLayoutUpdate = !isInMVCPActiveMode(listState) && previousSize !== void 0 && size + 1 < previousSize;
++  // A row that shrank because its width changed (text re-wrapping as the
++  // list narrows or widens) shrank for real: deferred a frame, the rows below
++  // and an end-pinned scroll position lagged it on every frame of a resize.
++  const widthChanged = state.lastSize !== void 0 && roundSize(state.lastSize.width) !== roundSize(rectangle.width);
++  const shouldDeferWebShrinkLayoutUpdate = !widthChanged && !isInMVCPActiveMode(listState) && previousSize !== void 0 && size + 1 < previousSize;
+   if (shouldDeferWebShrinkLayoutUpdate) {
+     scheduleWebShrinkMeasurement(state, () => {
+       var _a4;
+@@ -6098,7 +6111,11 @@ function useDOMOrder(ref) {
+   const ctx = useStateContext();
+   React3.useEffect(() => {
+     let timeoutId;
+-    let lastUpdateTime = 0;
++    // A list that just mounted is still settling (initial scroll, measured
++    // heights). Count the mount as activity so the first DOM-order pass waits
++    // for the list to go quiet instead of landing in its opening frames:
++    // moving rows restyles their whole subtree.
++    let lastUpdateTime = Date.now();
+     let delay = 500;
+     const unsubscribe = listen$(ctx, "lastPositionUpdate", () => {
+       const container = ref.current;
+diff --git a/react.mjs b/react.mjs
+index 9338287159778f842fa05b5a0467336bf5f50fe8..8b8247bd2ec7eea7794b37f5dd7ac01b77da60d4 100644
+--- a/react.mjs
++++ b/react.mjs
+@@ -1150,7 +1150,11 @@ function warnDevOnce(id, text) {
+   }
+ }
+ function roundSize(size) {
+-  return Math.floor(size * 8) / 8;
++  // Floor to the device pixel grid (LegendApp/legend-list#536). Eighth-pixel
++  // estimates gave rows fractional positions; the browser rounds scrollTop, so
++  // every prepend compensation lost the remainder and the anchor drifted.
++  const scale = typeof window !== "undefined" && window.devicePixelRatio || 1;
++  return Math.floor(size * scale) / scale;
+ }
+ function isNullOrUndefined(value) {
+   return value === null || value === void 0;
+@@ -4807,11 +4811,16 @@ function calculateItemsInView(ctx, params = {}) {
+           allocationEnd,
+           pendingRemoval,
+           protectedContainerKeys,
+-          // Initial end alignment has no scroll velocity yet. Keep its
+-          // target-side rows first until the initial scroll settles.
++          // The initial scroll, end-aligned included, hands out containers
++          // in item order. Containers render in index order, so the rows of
++          // a freshly opened list are in DOM order from the first paint and
++          // the DOM-order pass has nothing to move: reversed for an
++          // end-aligned start, it moved nearly every row a moment after the
++          // list showed, restyling each row and re-serializing it for
++          // assistive technology.
+           // After a pause velocity can be zero on the first movement;
+           // use its displacement without treating initial insets as motion.
+-          hasActiveInitialScroll(state) ? (initialScroll == null ? void 0 : initialScroll.viewPosition) === 1 : (speed || (state.hasScrolled ? state.scroll - state.scrollPrev : 0)) < 0
++          !hasActiveInitialScroll(state) && (speed || (state.hasScrolled ? state.scroll - state.scrollPrev : 0)) < 0
+         );
+         for (const allocation of availableContainerAllocations) {
+           const i = allocation.itemIndex;
+@@ -5747,7 +5756,11 @@ function processContainerLayout({ containerId, ctx, rectangle, ref, state }) {
+       size: layout
+     });
+   };
+-  const shouldDeferWebShrinkLayoutUpdate = !isInMVCPActiveMode(listState) && previousSize !== void 0 && size + 1 < previousSize;
++  // A row that shrank because its width changed (text re-wrapping as the
++  // list narrows or widens) shrank for real: deferred a frame, the rows below
++  // and an end-pinned scroll position lagged it on every frame of a resize.
++  const widthChanged = state.lastSize !== void 0 && roundSize(state.lastSize.width) !== roundSize(rectangle.width);
++  const shouldDeferWebShrinkLayoutUpdate = !widthChanged && !isInMVCPActiveMode(listState) && previousSize !== void 0 && size + 1 < previousSize;
+   if (shouldDeferWebShrinkLayoutUpdate) {
+     scheduleWebShrinkMeasurement(state, () => {
+       var _a4;
+@@ -6077,7 +6090,11 @@ function useDOMOrder(ref) {
+   const ctx = useStateContext();
+   useEffect(() => {
+     let timeoutId;
+-    let lastUpdateTime = 0;
++    // A list that just mounted is still settling (initial scroll, measured
++    // heights). Count the mount as activity so the first DOM-order pass waits
++    // for the list to go quiet instead of landing in its opening frames:
++    // moving rows restyles their whole subtree.
++    let lastUpdateTime = Date.now();
+     let delay = 500;
+     const unsubscribe = listen$(ctx, "lastPositionUpdate", () => {
+       const container = ref.current;

@@ -1,0 +1,38 @@
+---
+title: Proje Eylemleri
+description: Sık çalıştırdığınız komutları kaydedin ve tek tıklamayla başlatın.
+---
+
+# Proje Eylemleri
+
+Proje eylemi, bir kez kaydedip tıklamayla çalıştırdığınız bir shell komutudur. Geliştirme sunucunuz, bir build, bir test çalıştırması olabilir. Her projenin kendi listesi vardır. Bunları **Settings → Projects → Project Actions** bölümünden ayarlayın.
+
+## Bir eylem ekleyin
+
+1. **Settings → Projects** bölümünü açın ve **Project Actions** kısmını bulun.
+2. Bir eylem ekleyin, ad verin, bir ikon seçin ve çalıştırılacak komutu yazın.
+3. Kaydedin.
+
+Komut yalnızca bir işletim sisteminde anlamlıysa eylemi belirli işletim sistemleriyle sınırlayabilirsiniz.
+
+## Bir eylemi çalıştırın
+
+Sohbetin sağındaki kart olan Work Status panelinin **Proje** bölümünde bir eylem satırı vardır. Çalıştırmak için eyleme basın, durdurmak için yeniden basın. Yanındaki ok başka bir eylem seçer, oradaki **Yeni eylem ekle** öğesi de **Ayarlar → Projeler** sayfasını açar. Satır en son seçtiğiniz eylemi gösterir, bir eylem çalışırken de o eylemi gösterir. Bir çalıştırmanın önizleme adresi olduğunda satırın yanındaki dünya düğmesi bu adresi açar.
+
+Klavyeden proje eylemleri penceresini açmak için macOS'ta **⌘⌥R**, Windows ve Linux'ta **Ctrl+Alt+R** tuşlarına basın. Pencere geçerli projenin eylemlerini durumlarıyla birlikte listeler. Ok tuşları seçimi taşır, Enter duran bir eylemi çalıştırır ya da çalışan bir eylemi durdurur, Esc pencereyi kapatır. Bir arama alanı listeyi süzer, sondaki **Eylemleri yapılandır** öğesi de projenin eylem ayarlarını açar. Pencere Work Status satırındaki eylem seçili olarak açılır, bu yüzden kısayol ve ardından Enter son çalıştırmayı tekrarlar. Kısayolu değiştirmek için **Ayarlar → Kısayollar** içinde **Proje eylemlerini aç** öğesini bulun.
+
+⌘P veya Ctrl+P ile açılan komut paletinde "çalıştır" ya da bir eylemin adını yazın, **Çalıştır: dev** ve **Durdur: dev** gibi öğeler çıkar. Paletteki **Proje eylemleri** öğesi pencereyi açar.
+
+Her eylem oturumun klasöründe bir terminalde çalışır. Oturum bir worktree'deyse bu o worktree'dir, ana checkout'ta çalışacak şekilde ayarlanan eylemler için ana checkout'tur. Çıkışı izleyebilmeniz için terminal açılır. Proje eylemleri masaüstünde ve web uygulamasında kullanılabilir. VS Code'da, telefonlarda ve Chats altındaki oturumlarda yoktur.
+
+## Bir geliştirme sunucusunu otomatik açın
+
+Sunucu başlatan bir eylem için **auto-open URL** seçeneğini açın. OpenChamber çıktıda yerel bir adres arar ve açmayı önerir. Ayrıntılar için [Preview & Dev Servers](/preview/) sayfasına bakın. Masaüstünde bunu bir SSH port yönlendirmesi üzerinden de geçirebilirsiniz.
+
+Sunucunun sabit bir adresi varsa onu eylemin URL alanına yazın. `{worktree}` ve `{branch}` eylemin çalıştığı çalışma kopyasını yerleştirir, böylece tek bir eylem her worktree'de çalışır. [portless](https://github.com/vercel-labs/portless) ile `https://{worktree}.myapp.localhost`, `feature/auth` üzerindeki bir worktree'de `https://auth.myapp.localhost`, ana çalışma kopyasında `https://myapp.localhost` açar. Alana hiç ihtiyacınız olmayabilir: portless adresini yazdırdığında OpenChamber arkasındaki port yerine o adresi açar. Uzak bir örneğe bağlı masaüstünde bunun yerine portu açar, çünkü tünelden uzak makineye yalnızca loopback portları geçer.
+
+## İlgili
+
+- [Depo yapılandırması](/repository-config/) — eylemleri ve kurulum komutlarını tüm ekip için depoda tutun
+
+- [Preview & Dev Servers](/preview/) — çalışan bir geliştirme sunucusunu OpenChamber içinde açın

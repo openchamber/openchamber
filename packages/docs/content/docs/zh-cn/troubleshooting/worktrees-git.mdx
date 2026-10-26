@@ -1,0 +1,35 @@
+---
+title: Worktree 与 Git
+description: 修复常见的 worktree 和 git 问题。
+---
+
+# Worktree 与 Git
+
+[worktree 会话](/zh-cn/worktrees/) 和 [git 视图](/zh-cn/git/) 中可能出现的问题，以及如何清除它们。
+
+## worktree 需要关注
+
+OpenChamber 会在出现异常时标记某个 worktree：
+
+- **folder missing** — worktree 的文件夹在 OpenChamber 之外被删除或移动了；移除该会话并创建一个新的 worktree
+- **detached or unborn branch** — worktree 不在正常的分支上；将它检出到一个分支上
+- **merge, rebase, or cherry-pick in progress** — 某个操作处于半完成状态；在 git 视图中完成或中止它
+
+## 无法创建 worktree
+
+- **branch already exists** — 选择一个不同的分支名，或使用现有分支选项
+- **name already in use** — 选择一个不同的 worktree 名称
+
+## 提交信息或 PR 生成失败
+
+生成提交信息或 PR 描述会在你的活动会话中运行，因此你需要打开一个会话，并选中一个可用的模型。打开或选择一个会话，然后重试。
+
+## SSH 或 Windows 路径问题
+
+- 确保仓库所使用的 SSH 密钥就是你在 [git 身份](/zh-cn/git-identities/) 中设置的那个
+- 在 Windows 上，git 使用 Unix 风格的路径（比如 `/c/Users/...`）— OpenChamber 会处理这一点，但自定义的 SSH 密钥路径应遵循相同的形式
+
+## 相关内容
+
+- [Worktree 会话](/zh-cn/worktrees/) — worktree 如何被创建和移除
+- [Git 身份](/zh-cn/git-identities/) — 为每个仓库设置正确的密钥和身份

@@ -1,0 +1,43 @@
+---
+title: Masaüstü Tünelleri
+description: Masaüstü uygulamasından Cloudflare, Ngrok veya Tailscale tünelleri oluşturun.
+---
+
+# Masaüstü Tünelleri
+
+Masaüstü uygulaması, **Settings → OpenChamber → Tunnel** bölümünden bir tünel oluşturabilir. Bu yol için OpenChamber'ı CLI'dan başlatmanız gerekmez.
+
+## Sağlayıcı kurun
+
+OpenChamber sağlayıcının CLI aracını makinenizde başlatır. Önce kullanmak istediğiniz sağlayıcıyı kurun:
+
+```bash
+brew install cloudflared
+brew install ngrok
+```
+
+Cloudflare `cloudflared` kullanır. Ngrok için bir ngrok hesabı ve ngrok panelinden alınmış bir authtoken gerekir:
+
+```bash
+ngrok config add-authtoken <your-ngrok-token>
+```
+
+Tailscale için [Tailscale uygulamasını](https://tailscale.com/download) kurun ve oturum açın.
+
+## Uygulamadan başlatma
+
+1. **Settings → OpenChamber → Tunnel** bölümünü açın.
+2. **Cloudflare**, **Ngrok** ya da **Tailscale** seçin.
+3. Tünel türünü seçin ve **Tunnel'ı başlat** düğmesine basın.
+4. Oluşturulan QR kodunu telefonunuzdan tarayın.
+
+Ngrok şu anda hızlı tünelleri destekler. Cloudflare ise hızlı tünelleri ve yönetilen Cloudflare modlarını destekler. Tailscale, yalnızca tailnet'inizdeki cihazların açabildiği **Serve** ve internetteki herkesin açabildiği **Funnel** sunar. Tailscale önce tailnet'iniz için HTTPS'i veya Funnel'ı açmanızı isterse hatanın yanında **Onay sayfasını aç** düğmesi görünür; orada onaylayıp yeniden başlatın.
+
+## Erişim koruması
+
+Sağlayıcı URL'si herkese açık olsa bile, OpenChamber erişimi kendi connect token'ı ile korur. Oluşturulan bağlantı bir kerelik token içerir, bir TTL'ye sahiptir ve eski kullanılmamış bağlantılar yeni bir bağlantı oluşturduğunuzda ya da tüneli durdurup yeniden başlattığınızda iptal edilir.
+
+## İlgili
+
+- [Tunnels](/tunnels/) — CLI tünel kullanımı ve yönetilen Cloudflare modları
+- [PWA & Mobile](/mobile/) — OpenChamber'a telefonunuzdan erişin

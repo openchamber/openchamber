@@ -1,0 +1,219 @@
+import {
+  GUEST_ACTIONS_MAX,
+  GUEST_CAPABILITIES,
+  GUEST_COMMANDS_MAX,
+  GUEST_COMMAND_NAME,
+  GUEST_FILE_EDITORS_MAX,
+  GUEST_FILE_EDITOR_PATTERNS_MAX,
+  GUEST_FILE_EDITOR_TITLE_MAX,
+  GUEST_SERVICE_PROVIDES,
+  GUEST_STATUS_SECTION_HEIGHT_MAX,
+  GUEST_STATUS_SECTION_HEIGHT_MIN,
+  GUEST_STATUS_SECTION_TITLE_MAX,
+  GUEST_STATUS_SOURCE_INTERVAL_MAX,
+  GUEST_STATUS_SOURCE_INTERVAL_MIN,
+  GUEST_SURFACE_DOCKS,
+  GUEST_TOOLS_MAX,
+  GUEST_TOOL_MATCH,
+  GUEST_TOOL_OUTPUTS,
+  isFileEditorPattern,
+  isGuestRequestPath,
+} from '@openchamber/sdk';
+import { z } from 'zod';
+
+import type { GuestCatalog, InstalledGuest } from './types.ts';
+
+const PANEL_ID = /^[a-z][a-z0-9-]*$/;
+const STORAGE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+const publicIntegrationSchema = z.object({
+  name: z.string().trim().min(1),
+  description: z.string().trim().min(1),
+  auth: z.enum(['oauth', 'token', 'host']).default('oauth'),
+  token: z.object({
+    scheme: z.enum(['raw', 'bearer', 'basic']),
+    usernameLabel: z.string().trim().min(1).optional(),
+  }).optional(),
+  apiOrigin: z.string().trim().min(1).optional(),
+  settings: z.array(z.object({
+    id: z.string().regex(PANEL_ID),
+    label: z.string().trim().min(1),
+  })).optional(),
+});
+
+const publicSocketBindingSchema = z.object({
+  id: z.string().trim().min(1),
+  candidates: z.array(z.string()),
+  resolved: z.string().nullable(),
+  override: z.string().nullable(),
+});
+
+const publicServiceSchema = z.object({
+  runtime: z.literal('host'),
+  granted: z.boolean(),
+  permissions: z.object({
+    sockets: z.array(z.string().trim().min(1)).optional(),
+    exec: z.array(z.string().trim().min(1)).optional(),
+  }).optional(),
+  socketBindings: z.array(publicSocketBindingSchema).optional(),
+  // A role this build does not know (a newer server) drops the field, not the
+  // catalog: every other extension must keep working.
+  provides: z.array(z.enum(GUEST_SERVICE_PROVIDES)).optional().catch(undefined),
+  surface: z.literal(true).optional().catch(undefined),
+});
+
+// The Git host a source-control provider extension adds, as the approval
+// dialog shows it. A malformed slice drops the field, never the row.
+const publicSourceControlSchema = z.object({
+  label: z.string().trim().min(1).max(64),
+  defaultInstances: z.array(z.string().trim().min(1)).max(4),
+  custom: z.boolean(),
+});
+
+const guestActionSchema = z.object({
+  id: z.string().regex(PANEL_ID),
+  label: z.string().trim().min(1),
+  icon: z.string().trim().min(1).optional(),
+  where: z.enum(['message', 'session']),
+  mode: z.enum(['open', 'background']).optional(),
+  roles: z.array(z.enum(['user', 'assistant'])).optional(),
+  payload: z.array(z.enum(['messages'])).optional(),
+});
+
+const guestCommandSchema = z.object({
+  name: z.string().regex(GUEST_COMMAND_NAME),
+  description: z.string().trim().min(1).optional(),
+});
+
+const guestToolSchema = z.object({
+  match: z.string().regex(GUEST_TOOL_MATCH),
+  name: z.string().trim().min(1).optional(),
+  icon: z.string().trim().min(1).optional(),
+  title: z.string().trim().min(1).optional(),
+  subtitle: z.string().trim().min(1).optional(),
+  output: z.enum(GUEST_TOOL_OUTPUTS).optional(),
+  language: z.string().trim().min(1).optional(),
+  columns: z.array(z.string().trim().min(1)).optional(),
+});
+
+const guestFileEditorSchema = z.object({
+  id: z.string().regex(PANEL_ID),
+  title: z.string().trim().min(1).max(GUEST_FILE_EDITOR_TITLE_MAX),
+  match: z.array(z.string().refine(isFileEditorPattern)).min(1).max(GUEST_FILE_EDITOR_PATTERNS_MAX),
+  entry: z.string().trim().min(1),
+  content: z.enum(['text', 'binary']).optional(),
+});
+
+export const guestUpdateSchema = z.object({
+  version: z.string().trim().min(1).max(64),
+});
+
+const installedGuestSchema = z.object({
+  id: z.string().regex(PANEL_ID),
+  storageId: z.string().min(1).max(128).regex(STORAGE_ID).optional(),
+  name: z.string().trim().min(1),
+  icon: z.string().trim().min(1),
+  entry: z.string().trim().min(1).optional(),
+  /** Edge and thickness beside a shared surface; see `PanelContribution.dock`. */
+  entryDock: z.enum(GUEST_SURFACE_DOCKS).optional(),
+  entrySize: z.number().int().positive().optional(),
+  backgroundEntry: z.string().trim().min(1).optional(),
+  version: z.string().trim().min(1).max(64).optional(),
+  attach: z.union([z.boolean(), z.enum(['panel', 'dialog'])]).optional(),
+  attachEntry: z.string().trim().min(1).optional(),
+  pageEntry: z.string().trim().min(1).optional(),
+  pageTitle: z.string().trim().min(1).max(200).optional(),
+  statusEntry: z.string().trim().min(1).optional(),
+  statusSource: z.object({
+    path: z.string().refine(isGuestRequestPath),
+    interval: z.number().int().min(GUEST_STATUS_SOURCE_INTERVAL_MIN).max(GUEST_STATUS_SOURCE_INTERVAL_MAX),
+  }).strict().optional(),
+  statusTitle: z.string().trim().min(1).max(GUEST_STATUS_SECTION_TITLE_MAX).optional(),
+  statusHeight: z.number().int().min(GUEST_STATUS_SECTION_HEIGHT_MIN).max(GUEST_STATUS_SECTION_HEIGHT_MAX).optional(),
+  statusDefaultExpanded: z.boolean().optional(),
+  statusRequiresProject: z.boolean().optional(),
+  integration: publicIntegrationSchema.optional(),
+  filesystem: z.array(z.string().trim().min(1)).optional(),
+  origins: z.array(z.string().trim().min(1)).optional(),
+  service: publicServiceSchema.optional(),
+  sourceControl: publicSourceControlSchema.optional().catch(undefined),
+  actions: z.array(guestActionSchema).max(GUEST_ACTIONS_MAX).optional(),
+  commands: z.array(guestCommandSchema).max(GUEST_COMMANDS_MAX).optional(),
+  tools: z.array(guestToolSchema).max(GUEST_TOOLS_MAX).optional(),
+  fileEditors: z.array(guestFileEditorSchema).max(GUEST_FILE_EDITORS_MAX).optional(),
+  capabilities: z.object({
+    requested: z.array(z.enum(GUEST_CAPABILITIES)),
+    granted: z.array(z.enum(GUEST_CAPABILITIES)),
+  }),
+  enterpriseBlocked: z.array(z.enum(GUEST_CAPABILITIES)).optional(),
+  source: z.enum(['bundled', 'path', 'zip', 'git']).optional(),
+  path: z.string().nullable().optional(),
+  enabled: z.boolean().optional(),
+  origin: z.object({
+    url: z.string().trim().min(1),
+    ref: z.string().trim().min(1).optional(),
+  }).optional(),
+  update: guestUpdateSchema.optional(),
+});
+
+const catalogSchema = z.object({
+  guests: z.array(z.unknown()),
+});
+
+// What Settings can still show of a row it cannot read, so the user can
+// remove it. Each field falls back on its own.
+const unreadableGuestSchema = z.object({
+  id: z.string().regex(PANEL_ID).nullable().catch(null),
+  name: z.string().trim().min(1).nullable().catch(null),
+  source: z.string().nullable().catch(null),
+}).catch({ id: null, name: null, source: null });
+
+/**
+ * Rows are read one by one: a row this build cannot read (a newer server, a
+ * broken package) is listed in `unreadable` and every other row still loads.
+ * Only a response without a guest list is a failure.
+ */
+export const parseGuestCatalogJson = (json: string): GuestCatalog | null => {
+  try {
+    const parsed = catalogSchema.safeParse(JSON.parse(json));
+    if (!parsed.success) return null;
+    const catalog: GuestCatalog = { guests: [], unreadable: [] };
+    for (const row of parsed.data.guests) {
+      const guest = installedGuestSchema.safeParse(row);
+      if (guest.success) {
+        catalog.guests.push(guest.data);
+        continue;
+      }
+      const { id, name, source } = unreadableGuestSchema.parse(row);
+      catalog.unreadable.push({ id, name, builtIn: source === 'bundled' });
+    }
+    return catalog;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * The answer to an install: the row, `'unreadable'` when the server installed
+ * a package and answered with a row this build cannot read, or null when the
+ * answer is not an install row at all.
+ */
+export const parseInstallAnswerJson = (json: string): InstalledGuest | 'unreadable' | null => {
+  try {
+    const raw: unknown = JSON.parse(json);
+    const guest = z.object({ guest: installedGuestSchema }).safeParse(raw);
+    if (guest.success) return guest.data.guest;
+    return z.object({ guest: z.object({ id: z.string() }) }).safeParse(raw).success ? 'unreadable' : null;
+  } catch {
+    return null;
+  }
+};
+
+export const parseInstalledGuestJson = (json: string): InstalledGuest | null => {
+  try {
+    const parsed = z.object({ guest: installedGuestSchema }).safeParse(JSON.parse(json));
+    return parsed.success ? parsed.data.guest : null;
+  } catch {
+    return null;
+  }
+};

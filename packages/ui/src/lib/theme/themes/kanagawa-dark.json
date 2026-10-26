@@ -1,0 +1,122 @@
+{
+  "metadata": {
+    "id": "kanagawa-dark",
+    "name": "Kanagawa",
+    "variant": "dark",
+    "description": "A color scheme inspired by Japanese art and ink painting - dark variant",
+    "version": "1.0.0",
+    "tags": [
+      "dark",
+      "japanese",
+      "ink",
+      "elegant"
+    ]
+  },
+  "colors": {
+    "primary": {
+      "base": "#7E9CD8",
+      "hover": "#88a4db",
+      "active": "#93acde",
+      "muted": "#7e9cd880"
+    },
+    "surface": {
+      "background": "#17161e",
+      "foreground": "#e0dfde",
+      "muted": "#111119",
+      "mutedForeground": "#8a8a83",
+      "elevated": "#221e28",
+      "subtle": "#1d1c24"
+    },
+    "interactive": {
+      "border": "#ffffff0c",
+      "selection": "#4f414ac7",
+      "borderHover": "#ffffff33",
+      "borderFocus": "#afc9fd",
+      "focus": "#afc9fd",
+      "focusRing": "#afc9fd",
+      "cursor": "#ddd8b9",
+      "hover": "#ffffff0e",
+      "active": "#ffffff13"
+    },
+    "status": {
+      "error": "#ed5252",
+      "errorBackground": "#ed525229",
+      "errorBorder": "#ed525273",
+      "warning": "#D7A657",
+      "warningBackground": "#d7a65729",
+      "warningBorder": "#d7a65773",
+      "success": "#98BB6C",
+      "successBackground": "#98bb6c29",
+      "successBorder": "#98bb6c73",
+      "info": "#83afe0",
+      "infoBackground": "#83afe029",
+      "infoBorder": "#83afe073"
+    },
+    "syntax": {
+      "base": {
+        "background": "#14131b",
+        "comment": "#727169",
+        "keyword": "#957FB8",
+        "string": "#98BB6C",
+        "number": "#D7A657",
+        "function": "#7E9CD8",
+        "variable": "#DCD7BA",
+        "type": "#C38D9D",
+        "operator": "#D27E99"
+      },
+      "tokens": {
+        "variableProperty": "#76946A",
+        "parameter": "#DCD7BA",
+        "boolean": "#D7A657",
+        "punctuation": "#DCD7BA",
+        "stringEscape": "#D7A657",
+        "keywordImport": "#957FB8",
+        "tag": "#98BB6C",
+        "regex": "#ddd8b9"
+      },
+      "highlights": {
+        "diffAdded": "#a1ef2d",
+        "diffAddedBackground": "#091201",
+        "diffRemoved": "#fec3bd",
+        "diffRemovedBackground": "#230202",
+        "diffModified": "#fed9a1",
+        "diffModifiedBackground": "#fed9a129",
+        "lineNumber": "#727169",
+        "lineNumberActive": "#fcfbf8"
+      }
+    },
+    "pr": {
+      "blocked": "#d99464",
+      "merged": "#b79bd9"
+    },
+    "chat": {
+      "background": "#17161e",
+      "userMessageBackground": "#1e212e",
+      "divider": "#ffffff17"
+    },
+    "markdown": {
+      "link": "#7E9CD8",
+      "linkHover": "#88a4db",
+      "inlineCode": "#98BB6C",
+      "inlineCodeBackground": "#1d1c24",
+      "blockquote": "#8a8a83",
+      "blockquoteBorder": "#ffffff17",
+      "listMarker": "#7e9cd899",
+      "bold": "#e4e3e2",
+      "italic": "#e0dfde",
+      "hr": "#ffffff0c"
+    },
+    "tools": {
+      "border": "#ffffff0d",
+      "icon": "#8a8a83",
+      "title": "#e0dfde",
+      "description": "#8a8a83",
+      "edit": {
+        "addedBackground": "#091201",
+        "removedBackground": "#230202",
+        "modifiedBackground": "#fed9a129",
+        "lineNumber": "#727169"
+      }
+    }
+  }
+}

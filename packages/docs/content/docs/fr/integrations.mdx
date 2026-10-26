@@ -1,0 +1,134 @@
+---
+title: Intégrations
+description: Connecte les services et abonnements avec lesquels OpenChamber travaille.
+---
+
+# Intégrations
+
+**Paramètres → Intégrations** est l'endroit où tu te connectes aux services avec lesquels OpenChamber travaille. La connexion est enregistrée sur le serveur OpenChamber, donc le web, le bureau et un téléphone appairé la partagent.
+
+## Catalogue d'intégrations
+
+Le catalogue d'intégrations liste plus de 150 services que tu peux donner à l'agent en un clic : Linear, Notion, Sentry, Supabase, Figma, des outils d'observabilité, des CRM, des notes de réunion et plus encore. En installer un ajoute en général le serveur MCP du service (la connexion que l'agent utilise pour y lire et y modifier des choses), et parfois des skills ou un plugin qui l'accompagnent. Il s'installe pour ton utilisateur, donc tous les projets en profitent.
+
+1. Choisis l'icône de boutique dans l'en-tête de la barre latérale.
+2. Trouve un service : cherche par nom, ou réduis la liste avec une catégorie comme **Code** ou **Qualité et opérations**. **OpenChamber** liste nos propres extensions et plugins.
+3. Choisis **+** sur sa ligne, ou ouvre-le et choisis **Installer**.
+4. Connecte-toi comme le service le demande :
+   - **OAuth** : la page de connexion du service s'ouvre dans ton navigateur. Approuve l'accès là-bas.
+   - **Jeton** : colle un jeton API dans **Jeton API**. **Obtenir un jeton** ouvre la page où le service en délivre un.
+   - **Sans connexion** : rien à faire.
+
+Une fois terminé, le service affiche une coche et apparaît sous **Installées** à gauche, et ses outils sont disponibles dès ton prochain message. Un point jaune ou **Connexion requise** signifie que la connexion n'a pas abouti ; ouvre le service et reconnecte-toi.
+
+Certaines entrées demandent plus qu'une connexion :
+
+- Les **serveurs locaux** tournent sur la machine où tourne OpenCode et peuvent nécessiter Node.js, Python avec uv, ou Docker. Le premier démarrage peut prendre un moment.
+- Les **plugins** sont du code qui s'exécute dans OpenCode, donc le catalogue te demande de confirmer et affiche d'abord la licence du plugin.
+- Les **skills** fournis avec un service s'installent avec lui. S'il en manque un, son propre bouton **Installer** apparaît sur la page du service.
+
+Pour retirer un service, ouvre-le, choisis **Autres actions** (**⋯**), puis **Désinstaller**. Seul ce que le catalogue a ajouté est retiré ; ton compte sur le service reste tel quel. Tu peux aussi gérer les serveurs MCP, les plugins et les skills dans les Paramètres comme d'habitude.
+
+Le catalogue est disponible dans l'app web et l'app de bureau. Il est masqué en [mode entreprise](/fr/security/#mode-entreprise).
+
+## GitHub
+
+Déplie la carte **GitHub** et choisis **Connect GitHub** pour te connecter avec un code d'appareil court. Une fois connecté, OpenChamber peut démarrer des sessions depuis des issues et des pull requests, les attacher à des messages, et ouvrir ou mettre à jour des PR. Tout ce que les hébergeurs Git savent faire est sur [Hôtes Git](/fr/github/).
+
+## GitLab, Gitea, Forgejo et Gerrit
+
+GitLab, Gitea, Forgejo et Gerrit ont chacun leur propre carte à côté de GitHub. Une fois connectés, leurs issues et pull requests (merge requests sur GitLab, changements sur Gerrit) apparaissent sur le tableau [Issues et PR](/fr/issues-and-prs/) et dans le menu **+** du chat, comme celles de GitHub.
+
+- **GitLab** : sur gitlab.com, connecte-toi avec un code d'appareil court, un jeton d'accès personnel ou la connexion `glab` du serveur. Pour un GitLab auto-hébergé, ajoute son adresse et colle un jeton d'accès personnel avec le scope `api`. La connexion par code d'appareil n'y fonctionne que si le serveur définit `OPENCHAMBER_GITLAB_CLIENT_ID` sur une application enregistrée sur cette instance.
+- **Gitea** : ajoute l'adresse de ton instance, comme `https://gitea.example.com`, et colle un jeton d'accès personnel avec les scopes `write:repository`, `write:issue` et `read:user`. La carte renvoie vers la page de ton instance qui en crée un. Gitea n'a pas de connexion par code d'appareil ni par CLI. Il faut Gitea 1.21 ou plus récent, servi à la racine de son adresse.
+- **Forgejo** : Codeberg est déjà sur la carte, donc pour le connecter il suffit d'un jeton d'accès personnel avec les scopes `write:repository`, `write:issue` et `read:user` ; la carte renvoie vers la page de Codeberg qui en crée un. Pour un autre serveur Forgejo, ajoute son adresse, comme `https://forgejo.example.com`, et colle un jeton avec les mêmes scopes. Il faut Forgejo 7.0 ou plus récent, servi à la racine de son adresse. Un serveur Forgejo se connecte sur cette carte et un serveur Gitea sur la carte Gitea.
+- **Gerrit** : ajoute l'adresse de ton instance, comme `https://gerrit.example.com`, puis ton nom d'utilisateur Gerrit et un mot de passe HTTP. Génère le mot de passe dans Gerrit sous **Settings → HTTP Credentials** ; la carte renvoie vers cette page. Ton mot de passe de connexion ne fonctionne pas, et un compte sans nom d'utilisateur ne peut pas se connecter. Il faut Gerrit 3.8 ou plus récent, servi à la racine de son adresse. Les sites dont l'adresse de review diffère de l'adresse Git, comme googlesource.com avec `.gitcookies`, ne sont pas pris en charge.
+
+Sur Gerrit, tu relis des changements. Chaque envoi d'un changement est un patchset, et l'aperçu du changement te permet d'en choisir un plus ancien à lire. Tu fais une review en votant sur les labels du projet, comme Code-Review et Verified, et tu intègres un changement avec **Soumettre** une fois ses conditions de soumission remplies. Gerrit n'a pas d'issues, donc seuls les changements apparaissent. Pour créer un changement, ou y envoyer un nouveau patchset, utilise **Pousser en revue** dans le panneau Git ; voir [Git](/fr/git/#pousser-en-revue-sur-gerrit).
+
+Le remote du projet décide du compte de quelle carte OpenChamber utilise, et un compte sur n'importe laquelle de ces cartes peut être l'[identité Git](/fr/git-identities/) d'un projet. Une [extension](/fr/extensions/#une-extension-comme-hébergeur-git) peut ajouter un autre hébergeur avec sa propre carte.
+
+## Linear
+
+### Connecter un espace de travail
+
+1. Déplie la carte **Linear** et choisis **Connect**.
+2. Approuve l'accès dans l'onglet de navigateur qui s'ouvre. La carte affiche **Waiting for Linear** en attendant.
+
+Connecte une autre organisation Linear avec **Add workspace**. Un seul espace de travail est courant à la fois : change avec **Switch to**, et **Disconnect** ne retire que le courant. Ton association de projets est conservée.
+
+### Parcourir les issues
+
+Les issues Linear se trouvent sur le tableau **Issues and PRs**. Ouvre-le avec l'icône de pull request dans l'en-tête de la barre latérale, ou appuie sur <kbd>⌘K</kbd> puis <kbd>B</kbd> (<kbd>Ctrl+K</kbd> puis <kbd>B</kbd> sous Windows et Linux), et choisis **Linear** en haut. Le tableau liste les issues de l'espace de travail courant et te permet de :
+
+- afficher une équipe ou **All teams**
+- changer l'espace de travail courant, si plusieurs sont connectés
+- filtrer à la fois par statut, par appartenance (**Assigned to me** ou **Created by me**) et par priorité, et chercher par titre ou identifiant
+- lire la description, les commentaires, les labels et la priorité d'une issue à côté de la liste
+- changer son **Status**
+
+### Démarrer une session depuis une issue
+
+- Sur le tableau, choisis une issue puis **Start in worktree…** pour une branche neuve, ou **New session** pour travailler dans le projet tel quel.
+- Dans la boîte de dialogue **New Worktree**, choisis une issue Linear.
+
+Dans les deux cas, la session s'ouvre avec l'issue jointe à la zone de message, et tu écris toi-même le premier message. Le tableau la démarre dans le projet associé à l'équipe de l'issue, affiché à côté de **Start in** ; choisis-y un autre projet si besoin. Associe les équipes dans la carte Linear : **Default project** couvre toutes les équipes, et **Team projects** le remplace équipe par équipe. Sans association, le tableau utilise le dernier projet qu'il a affiché.
+
+### Lier une issue à un message
+
+Dans le composer du chat, ouvre le menu **+** et choisis **Linear**. L'issue accompagne ton prochain message comme contexte, et le panneau d'état de la session garde un lien vers elle.
+
+### Commentaires de session
+
+Active **Session comments** dans la carte Linear : une session démarrée depuis une issue, ou dont le premier message a l'issue jointe, publie un commentaire sur cette issue au démarrage, à la fin ou en cas d'échec, chacun avec un lien qui ouvre la session. Les commentaires ne sont publiés que si ce serveur OpenChamber a une adresse publique, pour que le lien fonctionne pour tout le monde sur l'issue ; sur une adresse locale ou privée, rien n'est publié.
+
+## Installer une intégration
+
+1. Ouvre **Settings → Integrations**.
+2. Trouve l'intégration et choisis **Install**.
+3. Redémarre OpenCode quand c'est demandé — le fournisseur apparaît après le redémarrage.
+4. Choisis **Set up** et connecte-toi. Les modèles apparaissent ensuite dans le sélecteur de modèles du chat.
+
+Les intégrations s'installent pour ton utilisateur et fonctionnent donc dans tous les projets. Tu peux les mettre à jour ou les retirer à tout moment depuis la même carte.
+
+## Claude Code
+
+Claude Code utilise ton plan Claude Pro ou Max via la CLI Claude Code installée sur ta machine — sans clés API.
+
+1. Installe l'intégration (ci-dessus).
+2. Choisis **Set up** et connecte-toi. Si tu n'as pas encore la CLI Claude Code, la configuration propose de l'installer d'abord, puis de te connecter.
+
+**Comment ton compte Claude reste protégé :** cette intégration utilise le Claude Agent SDK officiel d'Anthropic et ta CLI Claude Code installée. Elle ne détourne pas l'OAuth, n'extrait ni rejoue de tokens de navigateur, ne se fait pas passer pour un client non pris en charge et ne contourne pas l'authentification d'Anthropic. Elle reste sur la voie d'accès prise en charge par Anthropic et ne porte donc pas le risque de bannissement associé au détournement de tokens ou aux contournements d'authentification non autorisés.
+
+## Mettre à jour ou retirer
+
+- **Update** installe la dernière version publiée du plugin.
+- **Remove** supprime le plugin de ta configuration OpenCode. Le fournisseur cesse d'être chargé au prochain rechargement d'OpenCode.
+
+Si une carte indique que les entrées nécessitent une gestion manuelle, choisis **Manage plugins** et nettoie les doublons à cet endroit.
+
+## Excalidraw
+
+Excalidraw te permet de dessiner dans les fichiers `.excalidraw` et les dessins Obsidian `.excalidraw.md` directement dans Files. C'est une extension OpenChamber, listée sous **OpenChamber extensions** sur la même page.
+
+1. Ouvre **Settings → Integrations** et choisis **Install** sur la carte Excalidraw. Tu peux aussi ouvrir un dessin dans Files et choisir **Install** dans l'avis affiché au-dessus.
+2. Rouvre le dessin. Le canevas remplace le texte du fichier, et Cmd/Ctrl+S, l'enregistrement automatique, le basculement vers la source et le plein écran fonctionnent comme pour n'importe quel fichier.
+
+La carte met à jour l'extension quand une nouvelle version sort, la réactive si tu l'as mise en pause, et la supprime. Tes dessins restent tels quels quand tu la supprimes ; ils s'ouvrent simplement en texte. Web et desktop uniquement.
+
+## Resource Monitor
+
+Resource Monitor indique combien de processeur et de mémoire votre machine utilise, et quelle part revient à OpenChamber, à OpenCode, à tout ce qu'ils ont lancé et aux serveurs de développement qui tournent sous eux. C'est une extension OpenChamber, listée sous **OpenChamber extensions** sur la même page.
+
+1. Ouvrez **Settings → Integrations** et choisissez **Install** sur la carte Resource Monitor.
+2. Approuvez son service local dans **Settings → Extensions**. Les chiffres viennent d'un petit processus qu'OpenChamber lance à côté du panneau. Il ne mesure que pendant que le panneau ou la section **Resources** est à l'écran.
+3. Ouvrez **Resource Monitor** depuis la barre de droite. Un court résumé apparaît aussi sous **Resources** dans le panneau Work Status.
+
+Stop sur un serveur de développement ou une tâche arrête cette commande avec tout ce qu'elle a lancé, pour qu'un watcher ne relance pas le serveur. **Stop all** dans le groupe Terminal arrête tout ce qui tourne dans le terminal et les project actions et laisse les onglets du terminal ouverts. OpenChamber lui-même et le serveur OpenCode n'ont pas de Stop.
+
+Les serveurs de développement apparaissent quand ils tournent sous OpenChamber : lancés dans le terminal intégré, ou par un agent quand OpenChamber a lui-même lancé OpenCode. Un serveur qui se détache de son processus parent, ou un conteneur lancé avec `docker compose up -d`, n'est pas listé. Si vous êtes connecté à un OpenChamber distant, le moniteur montre cette machine. Web et bureau uniquement.
+
+## À voir aussi
+
+- [Hôtes Git](/fr/github/) — tout ce que GitHub, GitLab, Gitea, Forgejo et Gerrit peuvent faire dans OpenChamber
+- [Sessions worktree](/fr/worktrees/) — où les sessions d'issue peuvent démarrer

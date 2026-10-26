@@ -1,0 +1,38 @@
+---
+title: Actions de projet
+description: Enregistrez les commandes que vous lancez souvent et démarrez-les en un clic.
+---
+
+# Actions de projet
+
+Une action de projet est une commande shell que vous enregistrez une fois et lancez d’un clic — votre serveur de dev, un build, une passe de tests. Chaque projet garde sa propre liste. Configurez-les dans **Paramètres → Projets → Actions de projet**.
+
+## Ajouter une action
+
+1. Ouvrez **Paramètres → Projets** et trouvez la section **Actions de projet**.
+2. Ajoutez une action, donnez-lui un nom, choisissez une icône et saisissez la commande à lancer.
+3. Enregistrez.
+
+Vous pouvez limiter une action à certains systèmes d’exploitation si une commande n’a de sens que sur l’un d’eux.
+
+## Lancer une action
+
+La section **Projet** du panneau Work Status, la carte à droite du chat, a une ligne d'action. Appuyez sur l'action pour la lancer et appuyez de nouveau pour l'arrêter. Le chevron à côté choisit une autre action, et son entrée **Ajouter une nouvelle action** ouvre **Paramètres → Projets**. La ligne affiche la dernière action choisie, et tant qu'une action tourne, la ligne affiche celle-ci. Quand une exécution a une adresse d'aperçu, un bouton globe à côté de la ligne l'ouvre.
+
+Au clavier, appuyez sur **⌘⌥R** sur macOS ou **Ctrl+Alt+R** sur Windows et Linux pour ouvrir la boîte de dialogue des actions du projet. Elle liste les actions du projet courant avec leur état. Les flèches déplacent la sélection, Entrée lance une action à l'arrêt ou arrête une action en cours, et Échap ferme la boîte de dialogue. Un champ de recherche filtre la liste, et **Configurer les actions** à la fin ouvre les réglages d'actions du projet. La boîte de dialogue s'ouvre avec l'action de la ligne Work Status déjà sélectionnée, donc le raccourci suivi d'Entrée relance votre dernière exécution. Pour changer le raccourci, cherchez **Ouvrir les actions du projet** dans **Paramètres → Raccourcis**.
+
+Dans la palette de commandes, ouverte avec ⌘P ou Ctrl+P, tapez "lancer" ou le nom d'une action pour trouver des entrées comme **Lancer : dev** et **Arrêter : dev**. **Actions du projet** dans la palette ouvre la boîte de dialogue.
+
+Chaque action tourne dans un terminal dans le dossier de la session, c'est-à-dire le worktree quand la session est dans un worktree, ou la copie principale pour les actions configurées pour s'y exécuter. Le terminal s'ouvre pour que vous puissiez suivre la sortie. Les actions de projet sont disponibles sur desktop et dans l'application web. VS Code, les téléphones et les sessions de Chats n'en ont pas.
+
+## Ouvrir automatiquement un serveur de dev
+
+Activez **auto-open URL** pour une action qui démarre un serveur. OpenChamber surveille la sortie pour détecter une adresse locale et propose de l’ouvrir — voir [Aperçu et serveurs de dev](/preview/). Sur desktop, vous pouvez aussi la faire passer par un transfert de port SSH.
+
+Si le serveur a une adresse fixe, indiquez-la dans le champ URL de l'action. `{worktree}` et `{branch}` insèrent la copie de travail où l'action s'exécute, donc une seule action fonctionne dans chaque worktree. Avec [portless](https://github.com/vercel-labs/portless), `https://{worktree}.myapp.localhost` ouvre `https://auth.myapp.localhost` dans un worktree sur `feature/auth` et `https://myapp.localhost` dans la copie principale. Le champ est souvent inutile : quand portless affiche son adresse, OpenChamber ouvre celle-ci plutôt que le port derrière. Sur un desktop connecté à une instance distante, il ouvre le port à la place, car seuls les ports loopback passent par le tunnel vers la machine distante.
+
+## Pages liées
+
+- [Configuration du dépôt](/repository-config/) — garder les actions et commandes de configuration dans le dépôt pour toute l'équipe
+
+- [Aperçu et serveurs de dev](/preview/) — ouvrir un serveur de dev en cours d’exécution dans OpenChamber

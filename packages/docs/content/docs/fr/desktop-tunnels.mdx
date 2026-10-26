@@ -1,0 +1,43 @@
+---
+title: Tunnels desktop
+description: Créez des tunnels Cloudflare, Ngrok ou Tailscale depuis l’application desktop.
+---
+
+# Tunnels desktop
+
+L’application desktop peut créer un tunnel depuis **Paramètres → OpenChamber → Tunnel**. Vous n’avez pas besoin de démarrer OpenChamber depuis la CLI pour ce chemin.
+
+## Installer un fournisseur
+
+OpenChamber démarre la CLI du fournisseur sur votre machine. Installez d’abord le fournisseur que vous voulez utiliser :
+
+```bash
+brew install cloudflared
+brew install ngrok
+```
+
+Cloudflare utilise `cloudflared`. Ngrok nécessite un compte ngrok et un authtoken depuis le dashboard ngrok :
+
+```bash
+ngrok config add-authtoken <your-ngrok-token>
+```
+
+Pour Tailscale, installez l’[app Tailscale](https://tailscale.com/download) et connectez-vous.
+
+## Démarrer depuis l’application
+
+1. Ouvrez **Paramètres → OpenChamber → Tunnel**.
+2. Choisissez **Cloudflare**, **Ngrok** ou **Tailscale**.
+3. Choisissez le type de tunnel et sélectionnez **Démarrer le tunnel**.
+4. Scannez le QR code généré depuis votre téléphone.
+
+Ngrok prend actuellement en charge les tunnels rapides. Cloudflare prend en charge les tunnels rapides et les modes Cloudflare gérés. Tailscale propose **Serve**, que seuls les appareils de votre tailnet peuvent ouvrir, et **Funnel**, que n’importe qui sur internet peut ouvrir. Si Tailscale doit d’abord activer HTTPS ou Funnel pour votre tailnet, un bouton **Ouvrir la page d’approbation** apparaît à côté de l’erreur ; approuvez-y puis redémarrez.
+
+## Protection de l’accès
+
+Même lorsque l’URL du fournisseur est publique, OpenChamber protège toujours l’accès avec son propre token de connexion. Le lien de connexion généré contient un token à usage unique, possède une TTL, et les anciens liens inutilisés sont révoqués lorsque vous en générez un nouveau ou que vous arrêtez/redémarrez le tunnel.
+
+## Pages liées
+
+- [Tunnels](/tunnels/) — utilisation des tunnels CLI et modes Cloudflare gérés
+- [PWA et mobile](/mobile/) — joindre OpenChamber depuis votre téléphone

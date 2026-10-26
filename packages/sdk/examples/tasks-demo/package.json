@@ -1,0 +1,69 @@
+{
+  "name": "@openchamber/example-tasks-demo",
+  "version": "1.1.0",
+  "private": true,
+  "openchamber": {
+    "apiVersion": 1,
+    "contributes": {
+      "panel": {
+        "id": "tasks-demo",
+        "name": "Task Board",
+        "icon": "task",
+        "entry": "panel/index.html"
+      },
+      "attach": {
+        "mode": "dialog",
+        "entry": "panel/attach.html"
+      },
+      "page": { "entry": "panel/page.html", "title": "Tasks board" },
+      "capabilities": [
+        "prompt",
+        "sessions",
+        "model"
+      ],
+      "actions": [
+        {
+          "id": "create-task",
+          "label": "Create task from message",
+          "icon": "add-circle",
+          "where": "message",
+          "roles": [
+            "assistant"
+          ]
+        },
+        {
+          "id": "summarize",
+          "label": "Summarize session",
+          "icon": "chat-history",
+          "where": "session",
+          "payload": [
+            "messages"
+          ]
+        }
+      ],
+      "commands": [
+        {
+          "name": "task",
+          "description": "Attach a task by id, e.g. /task DEMO-2"
+        }
+      ],
+      "tools": [
+        {
+          "match": "mcp.tasks.*",
+          "name": "Tasks",
+          "icon": "checkbox-circle",
+          "title": "{input.id}",
+          "output": "table",
+          "columns": [
+            "id",
+            "title",
+            "status"
+          ]
+        }
+      ]
+    }
+  },
+  "dependencies": {
+    "@openchamber/sdk": "workspace:*"
+  }
+}

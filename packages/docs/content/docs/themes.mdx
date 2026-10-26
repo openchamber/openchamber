@@ -1,0 +1,46 @@
+---
+title: Themes
+description: Customize OpenChamber with built-in and user-defined themes.
+---
+
+# Themes
+
+OpenChamber supports built-in themes and custom theme JSON files.
+
+## Import a VS Code theme
+
+Open **Settings → Appearance → Import VS Code theme** to search Open VSX. Results show the icon, name and author. Choose a package, compare its color previews, and import the variants you want. Batch import keeps your current theme active. Open VSX is a separate catalog; themes published only in Microsoft Marketplace may not appear.
+
+Use **Choose JSON file** for a local `.json` or `.jsonc` file up to 512 KiB. Desktop opens the local `~/.vscode/extensions` folder when it exists. OpenChamber converts UI, general syntax and diff colors, then selects the file's theme and light or dark mode. The trash icon beside an imported theme in the dropdown deletes it from the connected server. Deleting a selected theme restores the default for that mode.
+
+The theme is saved on the connected OpenChamber server, including when importing from desktop or mobile. Importing the same file again does not create a duplicate or overwrite a theme edited on the server. The VS Code extension follows VS Code's own theme instead.
+
+If the file uses `include` or references a separate token file, run **Developer: Generate Color Theme From Current Settings** in VS Code's command palette and import the generated JSON.
+
+## Add a custom theme
+
+1. Create the themes directory:
+
+```bash
+mkdir -p ~/.config/openchamber/themes
+```
+
+2. Copy a [built-in theme JSON](https://github.com/openchamber/openchamber/tree/main/packages/ui/src/lib/theme/themes) or the [starter example](https://github.com/openchamber/openchamber/blob/main/docs/CUSTOM_THEMES.md#create-your-own-theme) into that directory as `my-theme.json`. Give it a unique `metadata.id` and your own `metadata.name`, then edit the colors.
+3. Open OpenChamber, then go to **Settings → Appearance → Reload themes**.
+4. Pick your theme from the dropdown. It applies right away.
+
+Use **Reload themes** after saving further edits. For a light/dark pair, create two files with different IDs and set `metadata.variant` to `light` or `dark`. Select each in its matching dropdown.
+
+Start with the backgrounds, body text and accent. Keep borders and selected rows subtle, and give inline code a readable color of its own. Check your palette in chat, settings and diffs. Custom JSON keeps your explicit colors; the automatic adjustments used for VS Code imports do not run on these files.
+
+## Theme location
+
+- macOS/Linux: `~/.config/openchamber/themes/`
+
+This folder belongs to the machine running your OpenChamber server. If you connect to a remote server, save the files there. A custom OpenChamber data directory uses its own `themes` folder.
+
+## Full JSON format reference
+
+Use the full format guide in the main repo docs:
+
+- [`docs/CUSTOM_THEMES.md`](https://github.com/openchamber/openchamber/blob/main/docs/CUSTOM_THEMES.md)

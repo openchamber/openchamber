@@ -1,0 +1,57 @@
+---
+title: Permissões e rede de segurança
+description: Escolha, sessão por sessão, quanto o agente pode fazer sem perguntar.
+---
+
+# Permissões e rede de segurança
+
+Cada ação do agente (executar um comando, editar um arquivo, chamar uma ferramenta MCP, buscar uma página) passa primeiro pelas regras de permissão dele. Os modos de permissão do OpenChamber decidem o que acontece quando uma regra diz "ask".
+
+## Allow, ask e deny
+
+As regras de permissão ficam no OpenCode. Cada regra dá a uma ação um de três efeitos:
+
+- **allow:** o agente segue em frente
+- **deny:** a ação é bloqueada
+- **ask:** o agente para e espera uma resposta
+
+De fábrica, quase tudo é permitido. O OpenCode só pergunta antes de o agente mexer em pastas fora do projeto ou ler arquivos `.env`. Adicione suas próprias regras para, por exemplo, perguntar antes de qualquer comando de terminal. O formato das regras está na [documentação do OpenCode sobre permissões](https://opencode.ai/v2/docs/permissions/), e você pode ver as permissões de um agente no OpenChamber em **Configurações → Agentes**.
+
+Os modos de permissão só mudam quem responde ao "ask". Eles nunca liberam um "deny", e "allow" nem chega a perguntar.
+
+## Os três modos
+
+| Modo | Quem responde ao "ask" |
+| --- | --- |
+| **Perguntar sempre** | Você. Cada pedido espera a sua resposta. |
+| **Rede de segurança** | O Jev deixa passar as ações rotineiras e guarda as arriscadas para você. |
+| **Aceitar tudo** | O OpenChamber, sempre com sim. Cada pedido é permitido na hora, sem verificação. |
+
+**Aceitar tudo** não precisa de mais nada: esse modo simplesmente trata cada "ask" como permitido. Use quando você confia na tarefa e não quer interrupções.
+
+## Trocar de modo
+
+- **Para uma sessão:** clique no botão de escudo no campo de mensagem. Cada clique passa para o próximo modo.
+- **Para novas sessões:** escolha o padrão em **Configurações → Sessões → Permissões**. As sessões existentes mantêm o seu modo.
+
+Os subagentes seguem a sessão que os iniciou.
+
+## A rede de segurança
+
+Nesse modo, o OpenChamber pergunta ao [Jev](/pt-br/classification-providers/) sobre cada pedido: é rotina ou a decisão é sua? Ler, compilar, rodar testes, editar arquivos do projeto e fazer commits comuns passam. Reescrever o histórico do git, apagar dados, mudar o sistema, fazer deploy, publicar algo em outro lugar ou enviar arquivos para fora esperam por você, assim como tudo o que não estiver claro.
+
+Um pedido retido mostra o cartão de permissão de sempre com uma linha a mais, **A rede de segurança reteve esta ação para você decidir**, e o tipo de ação. Se o Jev não responder em quatro segundos, a ação também espera por você. A rede de segurança nunca permite algo só porque a verificação falhou.
+
+A rede de segurança precisa de um [provedor de classificação](/pt-br/classification-providers/). Sem ele, o botão de escudo pula esse modo e ele aparece desativado nas configurações.
+
+## Continua funcionando enquanto você está fora
+
+O modo fica no servidor do OpenChamber, então continua respondendo aos pedidos depois que você fecha a aba ou bloqueia o celular, e sobrevive a reinicializações.
+
+> O VS Code não tem rede de segurança. A extensão oferece "Perguntar sempre" e "Aceitar tudo", e só responde aos pedidos enquanto um painel do OpenChamber estiver aberto.
+
+## Relacionado
+
+- [Permissões na documentação do OpenCode](https://opencode.ai/v2/docs/permissions/): escreva suas próprias regras allow, ask e deny
+- [Provedores de classificação (Jev)](/pt-br/classification-providers/): configure o modelo por trás da rede de segurança
+- [Notificações](/pt-br/notifications/): saiba quando um pedido está esperando por você

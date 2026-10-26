@@ -1,0 +1,199 @@
+import React, { act } from 'react';
+import { expect, test } from 'bun:test';
+import { Window } from 'happy-dom';
+import type { PullRequestSource } from '@/lib/diff/pullRequestDiff';
+import type {
+  ChangeRequest, ChangeRequestStatus, PageResult, Project, SourceControlAuthStatus, SourceControlIdentity, SourceControlReadContext,
+  SourceControlUser,
+} from '@/lib/source-control/types';
+
+// The picker reads through the checkout's bound GitHub context, so the fixture
+// is a binding context plus an account that context names.
+const CONTEXT: SourceControlReadContext = {
+  provider: 'github', instance: 'github.com', accountId: 'github.com#7', repositoryId: 'repo-1',
+  bindingRevision: 4, directory: '/repo', primaryRemote: 'origin',
+};
+const USER: SourceControlUser = { provider: 'github', instance: 'github.com', id: '7', username: 'octocat' };
+const CONNECTED: SourceControlAuthStatus = {
+  provider: 'github', instance: 'github.com', status: 'connected', connected: true, user: USER,
+  accounts: [{
+    id: CONTEXT.accountId, credentialId: CONTEXT.accountId, credentialRevision: 1, providerUserId: 'github.com#7',
+    providerUserStatus: 'available', user: USER, current: true, source: 'oauth', status: 'valid',
+  }],
+};
+
+// The server emits neutral DTOs; a pull request's source repository is its project.
+const IDENTITY: SourceControlIdentity = { provider: 'github', instance: 'github.com' };
+const project = (owner: string): Project => ({
+  ...IDENTITY, id: `${owner}/project`, owner, name: 'project', url: `https://github.com/${owner}/project`,
+});
+const pullRequest = (owner: string, index: number): ChangeRequest => ({
+  ...IDENTITY, id: `${owner}/project#42`, number: 42, project: project(owner), title: `${owner} PR`,
+  url: `https://github.com/${owner}/project/pull/42`, state: 'open', draft: false, base: 'main', head: `feature-${index}`,
+});
+
+const checkPullRequestSelection = async (mobile: boolean, tablet = false) => {
+  const dom = new Window({ url: 'http://localhost' });
+  if (mobile && !tablet) dom.happyDOM.setWindowSize({ width: 390, height: 844 });
+  const originals = new Map<string, PropertyDescriptor | undefined>();
+  const globals = {
+    window: dom, document: dom.document, navigator: dom.navigator, location: dom.location, localStorage: dom.localStorage,
+    Element: dom.Element, HTMLElement: dom.HTMLElement, HTMLInputElement: dom.HTMLInputElement, Node: dom.Node,
+    customElements: dom.customElements, CSSStyleSheet: dom.CSSStyleSheet,
+    Event: dom.Event, CustomEvent: dom.CustomEvent, KeyboardEvent: dom.KeyboardEvent, MouseEvent: dom.MouseEvent,
+    MutationObserver: dom.MutationObserver, ResizeObserver: dom.ResizeObserver,
+    getComputedStyle: dom.getComputedStyle.bind(dom), requestAnimationFrame: dom.requestAnimationFrame.bind(dom),
+    cancelAnimationFrame: dom.cancelAnimationFrame.bind(dom), IS_REACT_ACT_ENVIRONMENT: true,
+  };
+  for (const [name, value] of Object.entries(globals)) {
+    originals.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
+    Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
+  }
+  const originalFetch = globalThis.fetch;
+  let requestCount = 0;
+  let failNextPage = true;
+  globalThis.fetch = Object.assign(async (input: RequestInfo | URL) => {
+    const url = new URL(input instanceof Request ? input.url : String(input), 'http://localhost');
+    if (url.pathname === '/api/fs/home' || url.pathname === '/api/session-folders') return new Promise<Response>(() => {});
+    // The bound status contract echoes the branch it answered for.
+    if (url.pathname === '/api/source-control/github/pr/status') {
+      const status: ChangeRequestStatus = { identity: IDENTITY, project: project('upstream'), branch: url.searchParams.get('branch') ?? '',
+        changeRequest: { ...pullRequest('upstream', 0), title: 'Resolved PR' } };
+      return Response.json(status);
+    }
+    if (url.pathname !== '/api/source-control/github/pulls/list') throw new Error(`Unexpected request ${url.pathname}`);
+    // Every list read carries the bound context, never an ambient account.
+    expect(url.searchParams.get('accountId')).toBe(CONTEXT.accountId);
+    requestCount += 1;
+    const page = Number(url.searchParams.get('page') ?? '1');
+    if (page === 2 && failNextPage) return Response.json({ error: 'Next page failed' }, { status: 503 });
+    if (url.searchParams.get('query') === 'missing') return Response.json({ items: [], page, hasMore: false } satisfies PageResult<ChangeRequest>);
+    return Response.json({ items: ['upstream', 'fork'].map((owner, index) => pullRequest(owner, index)), page,
+      hasMore: page !== 2 } satisfies PageResult<ChangeRequest>);
+  }, originalFetch);
+  const { createRoot } = await import('react-dom/client');
+  const { I18nProvider } = await import('@/lib/i18n');
+  const { RuntimeAPIContext } = await import('@/contexts/runtimeAPIContext');
+  const { createWebAPIs } = await import('../../../../../web/src/api/index');
+  const { forgetSharedPullRequestLists, usePullRequestComparison } = await import('@/hooks/usePullRequestComparison');
+  forgetSharedPullRequestLists();
+  const { usePullRequestSelectionStore } = await import('@/stores/usePullRequestSelectionStore');
+  usePullRequestSelectionStore.setState({ selections: new Map() });
+  const { getSourceControlAuthKey, useSourceControlAuthStore } = await import('@/stores/useSourceControlAuthStore');
+  useSourceControlAuthStore.setState({
+    entries: { [getSourceControlAuthKey(CONTEXT)]: { status: CONNECTED, isLoading: false, hasChecked: true } },
+  });
+  // Change-request diffs exist only for providers the server serves.
+  const { useSourceControlProviderRegistry } = await import('@/lib/source-control/providers/registry');
+  const { githubLikeDescriptor } = await import('@/lib/source-control/providers/descriptor.fixture');
+  const servedGitHub = githubLikeDescriptor();
+  useSourceControlProviderRegistry.setState({ ordered: [servedGitHub], byId: new Map([[servedGitHub.id, servedGitHub]]), status: 'ready', holdsList: true });
+  const { PullRequestComparisonSelector } = await import('./PullRequestComparisonSelector');
+  const apis = createWebAPIs();
+  let directory = '/repo';
+  let active = 'changes';
+  let walkthroughMount = 0;
+  let preferred: PullRequestSource | undefined;
+  function Harness({ name }: { name: string }) {
+    const comparison = usePullRequestComparison(directory, 'feature-0', { ...CONTEXT, directory }, active === name, name === 'walkthrough' ? preferred : undefined);
+    return <section data-picker={name}><PullRequestComparisonSelector comparison={comparison} mobile={mobile} />
+      <output>{comparison.selectedSource?.sourceRepo?.owner}</output></section>;
+  }
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  const render = () => act(async () => { root.render(<I18nProvider><RuntimeAPIContext.Provider value={apis}>
+    <Harness name="changes" /><Harness key={walkthroughMount} name="walkthrough" />
+  </RuntimeAPIContext.Provider></I18nProvider>); });
+  const trigger = (name: string) => {
+    const button = container.querySelector<HTMLButtonElement>(`[data-picker="${name}"] button`);
+    if (!button) throw new Error('Missing PR picker');
+    return button;
+  };
+  const press = async (key: string, ctrlKey = false) => {
+    const input = document.querySelector('input');
+    if (!input) throw new Error('Missing PR search');
+    await act(async () => { input.dispatchEvent(new KeyboardEvent('keydown', { key, ctrlKey, bubbles: true, cancelable: true })); });
+  };
+  try {
+    await render();
+    expect(requestCount).toBe(1);
+    expect(container.querySelector('[data-picker="changes"] output')?.textContent).toBe('upstream');
+    await act(async () => trigger('changes').click());
+    if (mobile && !tablet) expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+    else expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(document.querySelectorAll('[cmdk-item]')).toHaveLength(2);
+    const loadMore = [...document.querySelectorAll('button')].find((button) => button.textContent === 'Load more');
+    if (!loadMore) throw new Error('Missing pagination');
+    await act(async () => loadMore.click());
+    expect(document.querySelectorAll('[cmdk-item]')).toHaveLength(2);
+    expect(document.body.textContent).toContain('Next page failed');
+    failNextPage = false;
+    const retry = [...document.querySelectorAll('button')].find((button) => button.textContent === 'Retry');
+    if (!retry) throw new Error('Missing page retry');
+    await act(async () => retry.click());
+    // A PR repeated across pages must not create a duplicate choice.
+    expect(document.querySelectorAll('[cmdk-item]')).toHaveLength(2);
+    await press('ArrowDown');
+    expect(document.querySelector('[cmdk-item][data-selected="true"]')?.getAttribute('data-value')).toBe('fork/project#42');
+    await press('p', true);
+    await press('n', true);
+    await press('Enter');
+    expect(container.querySelector('[data-picker="walkthrough"] output')?.textContent).toBe('fork');
+
+    preferred = { kind: 'pr', number: 42, sourceRepo: { owner: 'upstream', repo: 'project' } };
+    active = 'walkthrough';
+    await render();
+    expect(container.querySelector('[data-picker="changes"] output')?.textContent).toBe('upstream');
+    await act(async () => trigger('walkthrough').click());
+    await press('n', true);
+    await press('Enter');
+    expect(container.querySelector('[data-picker="changes"] output')?.textContent).toBe('fork');
+    walkthroughMount += 1;
+    await render();
+    expect(container.querySelector('[data-picker="walkthrough"] output')?.textContent).toBe('fork');
+    active = 'changes';
+    await render();
+    active = 'walkthrough';
+    await render();
+    expect(container.querySelector('[data-picker="walkthrough"] output')?.textContent).toBe('fork');
+    await act(async () => trigger('walkthrough').click());
+    const searchInput = document.querySelector('input');
+    if (!searchInput) throw new Error('Missing PR search');
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(dom.HTMLInputElement.prototype, 'value')?.set?.call(searchInput, 'missing');
+      searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 400)); });
+    expect(document.querySelectorAll('[cmdk-item]')).toHaveLength(0);
+    expect(document.body.textContent).toContain('No pull requests found');
+    const beforeHide = requestCount;
+    active = '';
+    await render();
+    expect(requestCount).toBe(beforeHide);
+    expect(document.querySelector('[cmdk-item]')).toBeNull();
+
+    preferred = undefined;
+    directory = '/other';
+    await render();
+    expect(container.querySelector('[data-picker="changes"] output')?.textContent).toBe('');
+  } finally {
+    await act(async () => root.unmount());
+    globalThis.fetch = originalFetch;
+    await dom.happyDOM.abort();
+    for (const [name, descriptor] of originals) {
+      if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+      else Reflect.deleteProperty(globalThis, name);
+    }
+  }
+};
+
+// Each check renders the whole picker, and the first one also loads the web
+// runtime and UI modules cold. That alone is about 3 s on Windows, so Bun's 5 s
+// default fails it under a parallel run, and the unfinished check then runs
+// into the next one through the shared globals.
+const SELECTION_TIMEOUT_MS = 30_000;
+
+test('desktop PR selection shares handoffs, pages, searches, retries, and isolates directories', () => checkPullRequestSelection(false), SELECTION_TIMEOUT_MS);
+test('phone PR selection uses a sheet with shared selection and keyboard navigation', () => checkPullRequestSelection(true), SELECTION_TIMEOUT_MS);
+test('tablet PR selection stays in an anchored picker', () => checkPullRequestSelection(true, true), SELECTION_TIMEOUT_MS);

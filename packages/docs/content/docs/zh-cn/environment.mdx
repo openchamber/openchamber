@@ -1,0 +1,187 @@
+---
+title: 环境变量
+description: 使用环境变量配置 OpenChamber 和 OpenCode 集成。
+---
+
+# 环境变量
+
+OpenChamber 会在启动时读取这些变量。对于开机启动服务，`openchamber startup enable` 默认会保存当前环境的 snapshot，所以如果要让服务使用新的变量，请重新运行它。
+
+## 供 OpenCode、Git 和终端使用的变量
+
+要给 OpenCode、Git、终端和[项目操作](/zh-cn/project-actions/)提供你自己的变量，比如 API 令牌或数据库地址，请在 **设置 → 通用 → 环境变量** 中添加，而不是在启动 OpenChamber 之前导出。这些值只保存在运行 OpenChamber 的机器上，位于数据目录中的 `environment.json`，只有你的用户能读取。设置不会再显示已保存的值：你可以替换或删除它，但无法读回。
+
+- OpenCode 在启动时读取这些变量，所以修改后需要重启它。设置中提供了对应的按钮。
+- 用 `opencode service set env` 设置的变量也会传给 OpenCode。两者冲突时，以设置中的为准。
+- Git、终端和项目操作会在下一次运行时拿到这些变量。
+- OpenChamber 为 OpenCode 自身设置的变量（例如它的密码和配置）优先于你的变量。
+
+项目可以在 **设置 → 项目** 中添加自己的变量，或者添加一条输出这些变量的命令，例如 `direnv export json`。参阅[项目](/zh-cn/projects/#项目环境)。
+
+这些变量不会传给你自己启动的 OpenCode 服务器，VS Code 扩展也没有这项设置。下面的所有变量都由 OpenChamber 本身在启动时读取。
+
+## OpenChamber 服务器
+
+### `OPENCHAMBER_HOST`
+
+OpenChamber web 服务器监听的地址。使用 `0.0.0.0` 可允许其他机器访问。
+
+### `OPENCHAMBER_LAN_URL`
+
+网络中其他设备访问 OpenChamber 所用的地址，例如 `http://192.168.1.20:3000`。配对链接和二维码会使用它，而不是 OpenChamber 自己检测到的地址。当检测结果不对时设置它，例如在 Docker 中，OpenChamber 只能看到容器的内部地址。
+
+### `OPENCHAMBER_UI_PASSWORD`
+
+浏览器 UI 的密码。当你绑定到 localhost 之外、使用隧道或反向代理时，请设置它。
+
+### `OPENCHAMBER_UI_SESSION_TTL_HOURS`
+
+未勾选“信任此设备”时，浏览器登录的有效时长（小时）。默认值为 `12`。
+
+### `OPENCHAMBER_UI_TRUSTED_SESSION_TTL_DAYS`
+
+在你选择信任的设备上，登录的有效时长（天）。默认值为 `7`。
+
+### `OPENCHAMBER_API_ONLY`
+
+设置为 `true` 或 `1` 时，以 headless 模式启动 OpenChamber。桌面和移动客户端仍可使用 API 路由，但不会提供浏览器 UI。
+
+### `OPENCHAMBER_FRAME_ANCESTORS`
+
+允许在自己页面的框架中显示 OpenChamber 的源，用空格分隔，例如 `https://dash.example.com`。`*` 允许任何站点。默认只有 OpenChamber 本身及其桌面和移动应用可以嵌入它，其他站点无法在它的按钮上叠加内容。
+
+### `OPENCHAMBER_DATA_DIR`
+
+覆盖 OpenChamber 数据目录。默认是 `~/.config/openchamber`。
+
+OpenChamber 存储的所有内容都位于此目录下：设置、认证、项目配置、主题、计划和语音模型。在 1.23 之前使用自定义目录的实例会在首次启动时将 `projects`、`themes` 和 `speech-models` 文件夹从 `~/.config/openchamber` 复制到此目录；原文件夹保持不变，不会合并任何内容。
+
+### `OPENCHAMBER_CHATS_DIR`
+
+更改 OpenChamber 为无项目聊天创建的托管聊天目录的位置。默认是 `~/.config/openchamber/chats`。当 OpenChamber 和 OpenCode 以不同用户运行时，请设置为 OpenCode 服务器可读取的目录。现有聊天不会被移动。
+
+### `OPENCHAMBER_COMPRESS_API`
+
+控制 API 响应压缩。`true` 或 `1` 强制开启，`false` 或 `0` 强制关闭。
+
+### `OPENCHAMBER_SKIP_API_COMPRESSION`
+
+设置为 `true` 或 `1` 时关闭 API 响应压缩。它优先于 `OPENCHAMBER_COMPRESS_API`。
+
+### `OPENCHAMBER_VERBOSE_REQUEST_LOGS`
+
+设置为 `true` 或 `1` 时启用详细 HTTP request logs。
+
+### `OPENCHAMBER_UPDATE_API_URL`
+
+覆盖更新检查 API endpoint。大多数用户不需要设置它。
+
+### `OPENCHAMBER_PACKAGE_MANAGER`
+
+当自动检测错误时，强制指定更新操作使用的 package manager。
+
+## 代理
+
+### `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`
+
+OpenChamber 自身发出的请求（例如用量限额和技能目录）会通过代理发送。小写变量名同样有效。`NO_PROXY` 中的主机直接连接，`localhost`、`127.0.0.1` 和 `::1` 始终直接连接，因此登录回调和本地 OpenCode 服务器不受影响。
+
+## OpenCode 服务器
+
+### `OPENCODE_HOST`
+
+将 OpenChamber 连接到已有的 OpenCode server。值必须是带明确端口、没有 path、query 或 hash 的 `http` 或 `https` origin。`OPENCODE_HOST` 优先于 `OPENCODE_PORT`。
+
+### `OPENCODE_PORT`
+
+设置 OpenCode server 端口。对于 managed OpenCode，它请求使用该端口；配合 `OPENCODE_SKIP_START=true` 时，它连接到该端口上的外部服务器。
+
+### `OPENCODE_SKIP_START`
+
+设置为 `true` 时阻止 OpenChamber 启动自己的 OpenCode server。
+
+### `OPENCHAMBER_OPENCODE_HOSTNAME`
+
+OpenChamber 管理的 OpenCode server 绑定 hostname。默认是 `127.0.0.1`。
+
+### `OPENCHAMBER_OPENCODE_HEALTH_TIMEOUT_MS`
+
+OpenCode 单次健康检查的时间限制，单位为毫秒。默认值为 `5000`。
+
+### `OPENCHAMBER_OPENCODE_HEALTH_CONSECUTIVE_FAILURES`
+
+托管的 OpenCode 进程仍在运行时，OpenChamber 在重启前计入的连续健康检查失败次数。默认值为 `20`。忙碌的会话可能延迟重启。
+
+### `OPENCHAMBER_OPENCODE_HEALTH_INTERVAL_MS`
+
+覆盖托管 OpenCode 的健康检查间隔，单位为毫秒。也会设置计入失败次数的最短间隔。默认值为 `0`，保留服务器的 `15000` 毫秒间隔。
+
+### `OPENCHAMBER_OPENCODE_HEALTH_CACHE_MS`
+
+OpenChamber 重用托管 OpenCode 健康检查结果的时长，单位为毫秒，也包括失败的结果。默认值为 `750`。
+
+### `OPENCODE_BINARY`
+
+OpenChamber 应该运行的 `opencode` executable 路径。
+
+### `OPENCODE_CONFIG`
+
+指定 OpenCode config 文件路径。
+
+### `OPENCODE_CONFIG_DIR`
+
+指定 OpenCode config 目录，用于 agents、skills、snippets 和 config discovery。
+
+### `OPENCODE_DATA_DIR`
+
+managed OpenCode server 的自定义数据目录。
+
+### `OPENCODE_JWT_SECRET`
+
+用于签名 UI auth tokens 的 secret。持久服务部署应使用长的随机值。
+
+## Terminal 和 Git
+
+### `OPENCHAMBER_TERMINAL_SHELL`
+
+OpenChamber terminal sessions 使用的 shell executable。
+
+### `OPENCHAMBER_GIT_BINARY`
+
+OpenChamber Git 功能使用的 Git executable。
+
+### `GIT_BINARY`
+
+Git executable 的备用 override。OpenChamber 专用配置建议使用 `OPENCHAMBER_GIT_BINARY`。
+
+### `OPENCHAMBER_GIT_READ_CACHE_TTL_MS`
+
+Git-backed file reads cache 的 TTL，单位为毫秒。调试时可设置为 `0` 禁用 cache。
+
+## 语音和隧道
+
+### `OPENAI_API_KEY`
+
+OpenChamber 语音功能直接调用 OpenAI 时使用的 API key。它不会发送到自定义的 OpenAI 兼容服务器：请在设置中为该服务器单独配置密钥。
+
+### `OPENCHAMBER_ALLOW_REMOTE_OPENAI_COMPAT_URLS`
+
+设置为 `true` 或 `1` 时，允许语音功能使用远程 OpenAI-compatible base URLs。
+
+### `NGROK_AUTHTOKEN`
+
+OpenChamber tunnel commands 使用的 ngrok auth token。也可以用 `ngrok config add-authtoken <token>` 配置。
+
+## Runtime helpers
+
+### `BUN_BINARY`
+
+OpenChamber 启动 daemon processes 时使用的 Bun executable。
+
+### `BUN_INSTALL`
+
+Bun 安装根目录。OpenChamber 使用它查找 `bin/bun` 来启动 daemon 和执行更新。
+
+### `VITE_OPENCODE_URL`
+
+Vite-built web app 的 build-time API base URL。普通 CLI 或 desktop 使用通常不需要设置它。

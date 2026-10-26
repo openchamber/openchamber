@@ -1,0 +1,2176 @@
+import { z } from 'zod';
+import { createVSCodeAPIs } from './api';
+import { createRemovalTombstones } from './inlineCommentRemovals';
+import { resolveCommentTarget } from './inlineCommentTarget';
+import { fetchLastAssistantMessageText } from './notificationMessage';
+import { findMessagePageItem } from '@openchamber/ui/lib/opencode/messagePaging';
+import { BridgeRequestError, onCommand, onThemeChange, postBridgeNotification, proxyApiRequest, proxySessionMessageRequest, sendBridgeMessage, sendBridgeMessageWithOptions, startSseProxy, stopSseProxy } from './api/bridge';
+import { vscodeStreamPerfCount, vscodeStreamPerfMeasure, vscodeStreamPerfObserve } from './api/streamPerf';
+import { extractBodyBase64, extractBodyText, extractJsonBody, hasInitBody } from './requestBodyTransport';
+import type { RuntimeAPIs } from '@openchamber/ui/lib/api/types';
+import { opencodeClient } from '@openchamber/ui/lib/opencode/client';
+import { sanitizeHeadersForBrowser } from '@openchamber/ui/lib/runtime-fetch';
+import {
+  buildVSCodeThemeFromPalette,
+  readVSCodeThemePalette,
+  type VSCodeThemeKind,
+  type VSCodeThemePayload,
+} from '@openchamber/ui/lib/theme/vscode/adapter';
+import { formatMessage, getBootstrapMessages, readStoredLocaleForBootstrap, useI18nStore, type I18nKey } from '@openchamber/ui/lib/i18n';
+import type { VSCodeActiveEditorFile } from '@/sync/input-store';
+import { usePermissionStore } from '@openchamber/ui/stores/permissionStore';
+import { permissionPolicyWireSchema, policySnapshotFromWire } from '@openchamber/ui/stores/utils/permissionAutoAccept';
+import { processVSCodePermissionAutoAccept } from '@openchamber/ui/sync/vscode-permission-auto-accept';
+import type { AssistantMessage } from '@openchamber/ui/lib/opencode/model';
+import { syncEventSessionID, type SyncEvent } from '@openchamber/ui/lib/opencode/events';
+import { focusChatInput } from '@openchamber/ui/components/chat/composer/editor/dom';
+import { hostViewerStateSchema, reportHostViewerState } from '@openchamber/ui/lib/surfaceAttention';
+import { vscodeSettingsNavigationSchema } from '@openchamber/ui/lib/settings/vscodeNavigation';
+import { applyVSCodeSettingsNavigation } from '@openchamber/ui/apps/vscodeSettingsNavigation';
+
+type ConnectionStatus = 'connecting' | 'connected' | 'error' | 'disconnected';
+
+declare const __OPENCHAMBER_WEBVIEW_BUILD_TIME__: string;
+
+declare global {
+  interface Window {
+    __OPENCHAMBER_RUNTIME_APIS__?: RuntimeAPIs;
+    __VSCODE_CONFIG__?: {
+      apiUrl?: string;
+      workspaceFolder: string;
+      workspaceFolders?: Array<{ name: string; path: string }>;
+      theme: string;
+      connectionStatus: string;
+      cliAvailable?: boolean;
+      extensionVersion?: string;
+      platform?: string;
+      arch?: string;
+      viewMode?: 'sidebar' | 'editor';
+      panelType?: 'chat' | 'settings';
+      initialSessionId?: string | null;
+      initialComposer?: 'parallel' | null;
+    };
+    __OPENCHAMBER_VSCODE_THEME__?: VSCodeThemePayload['theme'];
+    __OPENCHAMBER_VSCODE_SHIKI_THEMES__?: { light?: Record<string, unknown>; dark?: Record<string, unknown> } | null;
+    __OPENCHAMBER_CONNECTION__?: { status: ConnectionStatus; error?: string; cliAvailable?: boolean };
+    __OPENCHAMBER_HOME__?: string;
+  }
+}
+
+console.log('[OpenChamber] VS Code webview starting...');
+console.log('[OpenChamber] VS Code webview build:', __OPENCHAMBER_WEBVIEW_BUILD_TIME__);
+console.log('[OpenChamber] Config:', window.__VSCODE_CONFIG__);
+try {
+  if (window.localStorage.getItem('openchamber_stream_debug') === '1') {
+    console.log('[OpenChamber] Debug: openchamber_stream_debug=1');
+  }
+} catch {
+  // ignore
+}
+
+window.__OPENCHAMBER_RUNTIME_APIS__ = createVSCodeAPIs();
+
+const reportSettingsShortcutFocus = () => {
+  postBridgeNotification('webview:settings-focus', { focused: document.hasFocus() });
+};
+window.addEventListener('focus', reportSettingsShortcutFocus);
+window.addEventListener('blur', reportSettingsShortcutFocus);
+document.addEventListener('focusin', reportSettingsShortcutFocus);
+reportSettingsShortcutFocus();
+
+const bootstrapLocale = readStoredLocaleForBootstrap();
+const bootstrapMessages = getBootstrapMessages(bootstrapLocale);
+
+const bootstrapConnectionStatus = () => {
+  const initialStatus = (window.__VSCODE_CONFIG__?.connectionStatus as ConnectionStatus | undefined) || 'connecting';
+  const cliAvailable = window.__VSCODE_CONFIG__?.cliAvailable ?? true;
+  window.__OPENCHAMBER_CONNECTION__ = { status: initialStatus, cliAvailable };
+};
+
+bootstrapConnectionStatus();
+
+const handleConnectionMessage = (event: MessageEvent) => {
+  const msg = event.data;
+  if (msg?.type === 'connectionStatus') {
+    const payload: ConnectionStatus = msg.status;
+    const error: string | undefined = msg.error;
+    const prevCliAvailable = window.__OPENCHAMBER_CONNECTION__?.cliAvailable ?? true;
+    window.__OPENCHAMBER_CONNECTION__ = { status: payload, error, cliAvailable: prevCliAvailable };
+    window.dispatchEvent(new CustomEvent('openchamber:connection-status', { detail: { status: payload, error } }));
+  }
+};
+
+window.addEventListener('message', handleConnectionMessage);
+window.addEventListener('openchamber:connection-status', () => {
+  maybeHideLoadingOverlay();
+});
+
+const fadeOutLoadingScreen = () => {
+  const loadingEl = document.getElementById('initial-loading');
+  if (!loadingEl) return;
+  loadingEl.classList.add('fade-out');
+  setTimeout(() => {
+    try {
+      loadingEl.remove();
+    } catch {
+      // ignore
+    }
+  }, 300);
+};
+
+const setLoadingStatusText = (text: string, variant: 'normal' | 'error' = 'normal') => {
+  const statusEl = document.getElementById('loading-status');
+  if (!statusEl) return;
+  statusEl.textContent = text;
+  if (variant === 'error') {
+    statusEl.classList.add('error-text');
+  } else {
+    statusEl.classList.remove('error-text');
+  }
+};
+
+const waitForUiMount = (timeoutMs = 8000): Promise<boolean> => {
+  if (typeof document === 'undefined') return Promise.resolve(false);
+  const root = document.getElementById('root');
+  if (!root) return Promise.resolve(false);
+
+  const hasContent = () => root.childNodes.length > 0;
+  if (hasContent()) return Promise.resolve(true);
+
+  return new Promise((resolve) => {
+    const observer = new MutationObserver(() => {
+      if (hasContent()) {
+        observer.disconnect();
+        clearTimeout(timeout);
+        resolve(true);
+      }
+    });
+
+    observer.observe(root, { childList: true, subtree: true });
+
+    const timeout = setTimeout(() => {
+      observer.disconnect();
+      resolve(false);
+    }, timeoutMs);
+  });
+};
+
+let uiMounted = false;
+
+const maybeHideLoadingOverlay = () => {
+  const connectionStatus = window.__OPENCHAMBER_CONNECTION__?.status ?? 'connecting';
+
+  if (!uiMounted) {
+    return;
+  }
+
+  if (connectionStatus === 'connected') {
+    // The UI hydrates pickers and the sidebar from cache and refreshes
+    // providers/agents in the background, so once it's mounted and OpenCode is
+    // connected there's real interactive content underneath the splash. Don't
+    // keep the overlay up waiting on the live provider/agent fetches — on a cold
+    // start those are the slowest tail, and gating on them makes the splash
+    // linger long after the app is usable. Per-widget loaders convey any
+    // remaining background work.
+    fadeOutLoadingScreen();
+    return;
+  }
+
+  if (connectionStatus === 'error') {
+    const error = window.__OPENCHAMBER_CONNECTION__?.error;
+    setLoadingStatusText(error || bootstrapMessages.connectionError, 'error');
+    fadeOutLoadingScreen();
+    return;
+  }
+
+  if (connectionStatus === 'disconnected') {
+    setLoadingStatusText(bootstrapMessages.disconnected, 'error');
+    fadeOutLoadingScreen();
+    return;
+  }
+
+  // Connecting — no jargon; the animated logo conveys progress.
+  setLoadingStatusText('');
+};
+
+const applyInitialTheme = (theme: { metadata?: { variant?: string }; colors?: { surface?: { background?: string; foreground?: string } } }) => {
+  if (typeof document === 'undefined' || !theme) return;
+  const variant = theme.metadata?.variant === 'dark' ? 'dark' : 'light';
+  const root = document.documentElement;
+  root.classList.remove('light', 'dark');
+  root.classList.add(variant);
+
+  const background = theme.colors?.surface?.background;
+  if (background) {
+    document.body.style.backgroundColor = background;
+    let meta = document.querySelector('meta[name="theme-color"]') as HTMLMetaElement | null;
+    if (!meta) {
+      meta = document.createElement('meta');
+      meta.setAttribute('name', 'theme-color');
+      document.head.appendChild(meta);
+    }
+    meta.setAttribute('content', background);
+  }
+};
+
+const emitVSCodeTheme = (preferredKind?: VSCodeThemeKind) => {
+  const palette = readVSCodeThemePalette(preferredKind);
+  if (!palette) {
+    return;
+  }
+  const theme = buildVSCodeThemeFromPalette(palette);
+  window.__OPENCHAMBER_VSCODE_THEME__ = theme;
+   applyInitialTheme(theme);
+  window.dispatchEvent(new CustomEvent<VSCodeThemePayload>('openchamber:vscode-theme', {
+    detail: { theme, palette },
+  }));
+};
+
+emitVSCodeTheme(window.__VSCODE_CONFIG__?.theme as VSCodeThemeKind | undefined);
+
+const scheduleThemeRecompute = (kind?: VSCodeThemeKind) => {
+  // VS Code updates webview CSS variables asynchronously around theme changes.
+  // Re-read on the next frames so we don't snapshot the old palette.
+  requestAnimationFrame(() => {
+    emitVSCodeTheme(kind);
+    requestAnimationFrame(() => emitVSCodeTheme(kind));
+  });
+};
+
+onThemeChange((payload) => {
+  const kind = (typeof payload === 'string'
+    ? payload
+    : typeof payload === 'object' && payload
+      ? payload.kind
+      : undefined) as VSCodeThemeKind | undefined;
+
+  if (typeof payload === 'object' && payload?.shikiThemes !== undefined) {
+    window.__OPENCHAMBER_VSCODE_SHIKI_THEMES__ = payload.shikiThemes;
+    window.dispatchEvent(
+      new CustomEvent('openchamber:vscode-shiki-themes', {
+        detail: { shikiThemes: payload.shikiThemes },
+      }),
+    );
+  }
+
+  scheduleThemeRecompute(kind);
+});
+
+const workspaceFolder = window.__VSCODE_CONFIG__?.workspaceFolder;
+if (workspaceFolder) {
+  const normalizeWorkspacePath = (value: string) => {
+    const normalized = value
+      .replace(/\\/g, '/')
+      .replace(/^([a-z]):\//, (_, letter: string) => `${letter.toUpperCase()}:/`)
+      .replace(/^\/([a-z]):\//, (_, letter: string) => `/${letter.toUpperCase()}:/`);
+    if (normalized === '/') {
+      return '/';
+    }
+    return normalized.length > 1 ? normalized.replace(/\/+$/, '') : normalized;
+  };
+
+  const normalizedWorkspaceFolder = normalizeWorkspacePath(workspaceFolder);
+  window.__OPENCHAMBER_HOME__ = normalizedWorkspaceFolder;
+  try {
+    window.localStorage.setItem('lastDirectory', normalizedWorkspaceFolder);
+    window.localStorage.setItem('homeDirectory', normalizedWorkspaceFolder);
+
+    // VS Code defaults: show dotfiles, hide gitignored
+    if (window.localStorage.getItem('directoryTreeShowHidden') === null) {
+      window.localStorage.setItem('directoryTreeShowHidden', 'true');
+    }
+    if (window.localStorage.getItem('filesViewShowGitignored') === null) {
+      window.localStorage.setItem('filesViewShowGitignored', 'false');
+    }
+  } catch (error) {
+    console.warn('Failed to persist workspace folder', error);
+  }
+}
+
+const normalizeUrl = (input: string | URL) => {
+  try {
+    return typeof input === 'string' ? new URL(input, window.location.href) : new URL(input.toString(), window.location.href);
+  } catch {
+    return null;
+  }
+};
+
+const headersToRecord = (headers: HeadersInit | undefined): Record<string, string> => {
+  if (!headers) return {};
+  const normalized = new Headers(sanitizeHeadersForBrowser(headers) ?? headers);
+  const result: Record<string, string> = {};
+  normalized.forEach((value, key) => {
+    result[key] = value;
+  });
+  return result;
+};
+
+const getRequestHeaders = (input?: RequestInfo | URL, init?: RequestInit): Record<string, string> => {
+  const headersFromRequest = input instanceof Request ? headersToRecord(input.headers) : {};
+  const headersFromInit = headersToRecord(init?.headers);
+  return { ...headersFromRequest, ...headersFromInit };
+};
+
+const getRequestDirectoryHint = (url: URL, input?: RequestInfo | URL, init?: RequestInit): string | undefined => {
+  const queryDirectory = url.searchParams.get('directory') || undefined;
+  if (queryDirectory) return queryDirectory;
+  const headers = getRequestHeaders(input, init);
+  const directoryEncoding = Object.entries(headers).find(([key]) => key.toLowerCase() === 'x-opencode-directory-encoding')?.[1];
+  for (const [key, value] of Object.entries(headers)) {
+    if (key.toLowerCase() === 'x-opencode-directory') {
+      // headersToRecord marks encoded directory hints so direct/raw percent
+      // sequences from other callers are not decoded accidentally.
+      if (directoryEncoding !== 'uri') return value;
+      try { return decodeURIComponent(value); } catch { return value; }
+    }
+  }
+  return undefined;
+};
+
+const decodeBase64 = (value: string): ArrayBuffer => {
+  const binary = atob(value);
+  const buffer = new ArrayBuffer(binary.length);
+  const bytes = new Uint8Array(buffer);
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return buffer;
+};
+
+const jsonResponse = (body: unknown, status = 200): Response => {
+  return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+};
+
+const unsupportedWebRouteResponse = (feature: string): Response => {
+  return jsonResponse({ error: `${feature} is not supported in VS Code` }, 501);
+};
+
+/**
+ * Answers a local API route from a bridge call; validation failures come back
+ * as 400, the rest as 500. A host failure whose code is in `answeredCodes`
+ * comes back as 409 with that code, the way the web server's route answers it.
+ */
+const bridgeJsonRoute = async (bridgeType: string, payload: unknown, answeredCodes: readonly string[] = []): Promise<Response> => {
+  try {
+    return jsonResponse(await sendBridgeMessage(bridgeType, payload), 200);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Request failed';
+    if (error instanceof BridgeRequestError && error.code && answeredCodes.includes(error.code)) {
+      return jsonResponse({ error: message, code: error.code }, 409);
+    }
+    return jsonResponse({ error: message }, /must be|is required|session id/.test(message) ? 400 : 500);
+  }
+};
+
+// The host could not write metadata because the session's folder is gone; the
+// UI then offers archive. Mirrors `SESSION_DIRECTORY_MISSING_CODE` in
+// packages/vscode/src/bridge-system-runtime.ts.
+const SESSION_DIRECTORY_MISSING_CODE = 'SESSION_DIRECTORY_MISSING';
+
+const pluginConfigErrorStatus = (message: string): number => {
+  const lower = message.toLowerCase();
+  if (lower.includes('already exists')) return 409;
+  if (lower.includes('not found')) return 404;
+  if (lower.includes('required') || lower.includes('invalid') || lower.includes('must ')) return 400;
+  return 500;
+};
+
+// Entry writes answer like the web server's plugin routes: a spec the
+// extension refused comes back as 400 with its code, so the dialog can say so
+// under the field.
+const pluginEntryErrorResponse = (message: string, code: string | undefined): Response => {
+  const status = code === 'UNLOADABLE_SPEC' ? 400 : pluginConfigErrorStatus(message);
+  return jsonResponse({ error: message, code }, status);
+};
+
+const isNullBodyStatus = (status: number): boolean => status === 204 || status === 205 || status === 304;
+
+const buildProxiedResponse = (
+  proxied: { status: number; headers: Record<string, string>; bodyBase64?: string; bodyText?: string }
+): Response => {
+  if (isNullBodyStatus(proxied.status)) {
+    return new Response(null, { status: proxied.status, headers: proxied.headers });
+  }
+
+  if (typeof proxied.bodyText === 'string') {
+    return new Response(proxied.bodyText, { status: proxied.status, headers: proxied.headers });
+  }
+
+  const body = proxied.bodyBase64 ? decodeBase64(proxied.bodyBase64) : new ArrayBuffer(0);
+  return new Response(body, { status: proxied.status, headers: proxied.headers });
+};
+
+/**
+ * Split `/api/config/<entity>/<name>[/<resource>]` into the entity name and the
+ * optional sub-resource (`config`, `permissions`). An entity name never
+ * contains a slash once decoded, so the last segment is the resource when it is
+ * one of the known ones.
+ */
+const CONFIG_ENTITY_RESOURCES = new Set(['config', 'permissions']);
+
+interface ConfigEntityPath {
+  name: string;
+  resource?: string;
+}
+
+const splitConfigEntityPath = (pathname: string, prefix: string): ConfigEntityPath => {
+  const segments = pathname.slice(prefix.length).split('/').filter(Boolean);
+  const last = segments[segments.length - 1];
+  if (segments.length > 1 && last && CONFIG_ENTITY_RESOURCES.has(last)) {
+    return { name: decodeURIComponent(segments.slice(0, -1).join('/')), resource: last };
+  }
+  return { name: decodeURIComponent(segments.join('/')) };
+};
+
+// OpenCode 2.x: one event stream, and a prompt goes to /api/session/:id/prompt.
+const isSseApiPath = (pathname: string) => pathname === '/api/event';
+const isSessionMessageApiPath = (pathname: string) => /^\/api\/session\/[^/]+\/prompt$/.test(pathname);
+const isApiPath = (pathname: string) => pathname === '/api' || pathname.startsWith('/api/');
+const isLocalRuntimePath = (pathname: string) => isApiPath(pathname) || pathname === '/auth/session';
+
+const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: RequestInit | undefined, method: string) => {
+  const pathname = url.pathname;
+  const normalizedPathname = pathname !== '/' ? pathname.replace(/\/+$/, '') : pathname;
+
+  if (normalizedPathname === '/api/system/info' && method === 'GET') {
+    const config = window.__VSCODE_CONFIG__;
+    return jsonResponse({
+      openchamberVersion: config?.extensionVersion || 'VS Code Extension',
+      runtime: 'vscode',
+      platform: config?.platform || '',
+      arch: config?.arch || '',
+    });
+  }
+
+  if (normalizedPathname === '/api/preview/targets') {
+    return unsupportedWebRouteResponse('Preview proxy');
+  }
+
+  if (normalizedPathname === '/api/config/themes' || normalizedPathname.startsWith('/api/config/themes/')) {
+    return unsupportedWebRouteResponse('Theme import and management');
+  }
+
+  if (normalizedPathname.startsWith('/api/openchamber/tunnel/')) {
+    return unsupportedWebRouteResponse('Remote tunnel settings');
+  }
+
+  // OpenChamber-owned session state (archive flags, metadata). OpenCode 2.x
+  // has no route for either, so the extension host keeps the same files the
+  // OpenChamber server does and folds them onto session reads.
+  if (normalizedPathname === '/api/openchamber/sessions/archive' && method === 'POST') {
+    return bridgeJsonRoute('api:sessions/archive', await extractJsonBody(input, init, method));
+  }
+  if (normalizedPathname === '/api/openchamber/sessions/unarchive' && method === 'POST') {
+    return bridgeJsonRoute('api:sessions/unarchive', await extractJsonBody(input, init, method));
+  }
+  const sessionMetadataMatch = normalizedPathname.match(/^\/api\/openchamber\/sessions\/([^/]+)\/metadata$/);
+  if (sessionMetadataMatch && (method === 'GET' || method === 'POST')) {
+    const sessionId = decodeURIComponent(sessionMetadataMatch[1]);
+    if (method === 'GET') return bridgeJsonRoute('api:sessions/metadata:get', { sessionId });
+    const body = await extractJsonBody(input, init, method);
+    const patch = body && typeof body === 'object' && !Array.isArray(body) ? (body as { patch?: unknown }).patch : undefined;
+    return bridgeJsonRoute('api:sessions/metadata:set', { sessionId, patch }, [SESSION_DIRECTORY_MISSING_CODE]);
+  }
+
+  if (/^\/api\/projects\/[^/]+\/scheduled-tasks(?:\/[^/]+)?$/.test(normalizedPathname)) {
+    return unsupportedWebRouteResponse('Scheduled tasks');
+  }
+
+  // Project setup (worktree setup commands, project actions, draft starters)
+  // lives in the user's OpenChamber config dir; the extension host owns the
+  // file the way the OpenChamber server does elsewhere.
+  const projectSetupMatch = normalizedPathname.match(/^\/api\/projects\/([^/]+)\/config(\/shared)?$/);
+  if (projectSetupMatch && (method === 'GET' || method === 'PUT') && !(method === 'GET' && projectSetupMatch[2])) {
+    const projectId = decodeURIComponent(projectSetupMatch[1]);
+    const payload = method === 'GET'
+      ? { projectId }
+      : { projectId, patch: await extractJsonBody(input, init, method) };
+    const bridgeType = method === 'GET'
+      ? 'api:project-setup:get'
+      : projectSetupMatch[2] ? 'api:project-setup:update-shared' : 'api:project-setup:update';
+    try {
+      const data = await sendBridgeMessage(bridgeType, payload);
+      return jsonResponse(data, 200);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Project config request failed';
+      return jsonResponse({ error: message }, /must be|is required|unsupported characters/.test(message) ? 400 : 500);
+    }
+  }
+
+  if (normalizedPathname === '/api/fs/git-dirs') {
+    return unsupportedWebRouteResponse('Nested git repository discovery');
+  }
+
+  if (normalizedPathname === '/api/sessions/snapshot' && method === 'GET') {
+    const activity = await sendBridgeMessage<Record<string, { type: 'idle' | 'busy' | 'cooldown' }>>('api:session-activity:get')
+      .catch(() => ({}));
+    return new Response(
+      JSON.stringify({
+        statusSessions: {},
+        activitySessions: activity || {},
+        serverTime: Date.now(),
+      }),
+      {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      },
+    );
+  }
+
+  if (/^\/api\/sessions\/[^/]+\/view$/.test(normalizedPathname) && method === 'POST') {
+    return new Response(JSON.stringify({ success: true }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  if (normalizedPathname === '/api/permission-auto-accept' && method === 'GET') {
+    const snapshot = await sendBridgeMessage('api:permission-auto-accept:get');
+    return new Response(JSON.stringify(snapshot), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  const permissionPolicyMatch = normalizedPathname.match(/^\/api\/permission-auto-accept\/sessions\/([^/]+)$/);
+  if (permissionPolicyMatch && method === 'PUT') {
+    const bodyText = await extractBodyText(url, init, method);
+    const body = bodyText ? JSON.parse(bodyText) as { enabled?: unknown } : {};
+    const snapshot = await sendBridgeMessage('api:permission-auto-accept:set', {
+      sessionId: decodeURIComponent(permissionPolicyMatch[1]),
+      enabled: body.enabled,
+    });
+    return new Response(JSON.stringify(snapshot), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  if (/^\/api\/sessions\/[^/]+\/message-sent$/.test(normalizedPathname) && method === 'POST') {
+    const sessionId = normalizedPathname.split('/')[3] || '';
+    return new Response(
+      JSON.stringify({
+        success: true,
+        sessionId,
+        messageSent: true,
+      }),
+      {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      },
+    );
+  }
+
+  if (normalizedPathname === '/api/session-activity' && method === 'GET') {
+    const activity = await sendBridgeMessage<Record<string, { type: 'idle' | 'busy' | 'cooldown' }>>('api:session-activity:get')
+      .catch(() => ({}));
+    return new Response(JSON.stringify(activity || {}), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  if (normalizedPathname === '/api/sessions/status' && method === 'GET') {
+    // Parity with the web server's cross-project status map, served from the
+    // extension host's activity watcher. Its phases collapse busy and retry
+    // into `busy` and it settles sessions itself through `cooldown`, so every
+    // busy entry is current as of now.
+    type ActivitySnapshot = Record<string, { type: 'idle' | 'busy' | 'cooldown'; startedAgoMs?: number }>;
+    const activity = await sendBridgeMessage<ActivitySnapshot>('api:session-activity:get')
+      .catch((): ActivitySnapshot => ({}));
+    const now = Date.now();
+    type StatusEntry = { status: 'busy'; lastUpdateAt: number; turnStartedAt?: number };
+    const sessions: Record<string, StatusEntry> = {};
+    for (const [sessionId, entry] of Object.entries(activity || {})) {
+      if (entry?.type !== 'busy') continue;
+      const status: StatusEntry = { status: 'busy', lastUpdateAt: now };
+      // The extension host reports the age, not a timestamp, because its clock
+      // and this webview's may differ on a remote window. Anchoring the age
+      // here keeps the count on this device's clock.
+      if (entry.startedAgoMs !== undefined) {
+        status.turnStartedAt = now - Math.max(0, entry.startedAgoMs);
+      }
+      sessions[sessionId] = status;
+    }
+    // The extension host keeps no pending-request map; directory stores and
+    // its own auto-accept path cover requests in VS Code.
+    return new Response(
+      JSON.stringify({
+        sessions,
+        pending: {},
+        serverTime: now,
+      }),
+      {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      },
+    );
+  }
+
+  if (/^\/api\/sessions\/[^/]+\/status$/.test(normalizedPathname) && method === 'GET') {
+    const sessionId = normalizedPathname.split('/')[3] || '';
+    return new Response(
+      JSON.stringify({
+        error: 'Session not found or no state available',
+        sessionId,
+      }),
+      {
+        status: 404,
+        headers: { 'Content-Type': 'application/json' },
+      },
+    );
+  }
+
+  // The web server answers this route; here the extension host reads the same
+  // provider and model lists from OpenCode (`bridge-small-model-runtime.ts`).
+  if (normalizedPathname === '/api/small-model' && method === 'GET') {
+    const directory = getRequestDirectoryHint(url, input, init);
+    try {
+      const data = await sendBridgeMessage('api:small-model:get', { directory });
+      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return new Response(JSON.stringify({ error: message }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+    }
+  }
+
+  if (normalizedPathname === '/api/tts/status' && method === 'GET') {
+    return new Response(JSON.stringify({ available: false }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  if (normalizedPathname === '/api/tts/say/status' && method === 'GET') {
+    return new Response(JSON.stringify({ available: false, voices: [] }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  if ((pathname === '/api/tts/speak' || pathname === '/api/tts/say/speak') && method === 'POST') {
+    return new Response(JSON.stringify({ error: 'TTS endpoints are not available in VS Code runtime' }), {
+      status: 501,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  // Dictation runs on the OpenChamber web server (WebSocket + worker); the VS
+  // Code bridge has no server process, so report it deterministically
+  // unavailable. The mic button hides itself when capture is unsupported.
+  if (normalizedPathname === '/api/dictation/status' && method === 'GET') {
+    return new Response(JSON.stringify({ provider: 'local', available: false, reasonCode: 'unsupported_runtime', models: [] }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  if (normalizedPathname.startsWith('/api/dictation/') ) {
+    return new Response(JSON.stringify({ error: 'Dictation is not available in VS Code runtime' }), {
+      status: 501,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  // OpenChamber's own health route reflects the extension's connection status.
+  // OpenCode 2.x has no health route of its own; its `/api/info` is forwarded
+  // to it like every other `/api/*` call.
+  if (pathname === '/health') {
+    const connectionStatus = window.__OPENCHAMBER_CONNECTION__?.status;
+    const isReady = connectionStatus === 'connected';
+    const cliAvailable = window.__OPENCHAMBER_CONNECTION__?.cliAvailable ?? true;
+    return new Response(JSON.stringify({ 
+      status: isReady ? 'ok' : 'connecting', 
+      isOpenCodeReady: isReady,
+      cliAvailable,
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  if (pathname.startsWith('/api/fs/list')) {
+    const targetPath = url.searchParams.get('path') || '';
+    const respectGitignore = url.searchParams.get('respectGitignore') === 'true';
+    const data = await sendBridgeMessage('api:fs:list', { path: targetPath, respectGitignore });
+    return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  }
+
+  if (pathname.startsWith('/api/fs/mkdir')) {
+    const body = await extractJsonBody(input, init, method);
+    const data = await sendBridgeMessage('api:fs:mkdir', { path: body.path });
+    return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  }
+
+  if (pathname.startsWith('/api/fs/home')) {
+    const data = await sendBridgeMessage('api:fs/home');
+    return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  }
+
+  if (pathname.startsWith('/api/vscode/pick-files')) {
+    const data = await sendBridgeMessage('api:files/pick');
+    return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  }
+
+  if (pathname.startsWith('/api/vscode/drop-files') && method === 'POST') {
+    const body = await extractJsonBody(input, init, method);
+    const uris = Array.isArray((body as { uris?: unknown[] }).uris)
+      ? (body as { uris: unknown[] }).uris.filter((value): value is string => typeof value === 'string')
+      : [];
+    const data = await sendBridgeMessage('api:files/drop', { uris });
+    return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  }
+
+  if (pathname.startsWith('/api/vscode/save-image') && method === 'POST') {
+    const body = await extractJsonBody(input, init, method);
+    const fileName = typeof (body as { fileName?: unknown }).fileName === 'string'
+      ? (body as { fileName: string }).fileName
+      : undefined;
+    const dataUrl = typeof (body as { dataUrl?: unknown }).dataUrl === 'string'
+      ? (body as { dataUrl: string }).dataUrl
+      : undefined;
+    const data = await sendBridgeMessage('api:files/save-image', { fileName, dataUrl });
+    return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  }
+
+  if (pathname.startsWith('/api/vscode/save-markdown') && method === 'POST') {
+    const body = await extractJsonBody(input, init, method);
+    const fileName = typeof (body as { fileName?: unknown }).fileName === 'string'
+      ? (body as { fileName: string }).fileName
+      : undefined;
+    const content = typeof (body as { content?: unknown }).content === 'string'
+      ? (body as { content: string }).content
+      : undefined;
+    const data = await sendBridgeMessage('api:files/save-markdown', { fileName, content });
+    return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  }
+
+  if (pathname === '/api/config/disabled-agents') {
+    const directory = getRequestDirectoryHint(url, input, init);
+    try {
+      const data = await sendBridgeMessage('api:config/disabled-agents', { directory });
+      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return new Response(JSON.stringify({ error: message }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+    }
+  }
+
+  if (pathname.startsWith('/api/config/agents/')) {
+    // The web routes hang `/config` and `/permissions` off the agent name; the
+    // bridge takes the sub-resource as its own field, so split it back out.
+    const { name, resource } = splitConfigEntityPath(pathname, '/api/config/agents/');
+    const verb = method;
+    const body = await extractJsonBody(input, init, method);
+    const directory = getRequestDirectoryHint(url, input, init);
+    try {
+      const data = await sendBridgeMessage('api:config/agents', { method: verb, name, resource, body, directory });
+      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return new Response(JSON.stringify({ error: message }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+    }
+  }
+
+  if (pathname.startsWith('/api/config/commands/')) {
+    const { name, resource } = splitConfigEntityPath(pathname, '/api/config/commands/');
+    const verb = method;
+    const body = await extractJsonBody(input, init, method);
+    const directory = getRequestDirectoryHint(url, input, init);
+    try {
+      const data = await sendBridgeMessage('api:config/commands', { method: verb, name, resource, body, directory });
+      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return new Response(JSON.stringify({ error: message }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+    }
+  }
+
+  if (pathname === '/api/config/websearch' && method === 'GET') {
+    const directory = getRequestDirectoryHint(url, input, init);
+    try {
+      const data = await sendBridgeMessage('api:config/websearch', { method: 'GET', directory });
+      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return new Response(JSON.stringify({ error: message }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+    }
+  }
+
+  if (pathname === '/api/config/websearch' && method === 'PUT') {
+    const body = await extractJsonBody(input, init, method);
+    try {
+      const data = await sendBridgeMessage('api:config/websearch', body);
+      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return new Response(JSON.stringify({ error: message }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+    }
+  }
+
+  if (pathname === '/api/config/skill-switch' && method === 'PUT') {
+    const body = await extractJsonBody(input, init, method);
+    const directory = getRequestDirectoryHint(url, input, init);
+    try {
+      const data = await sendBridgeMessage('api:config/skill-switch', { ...body, directory });
+      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return new Response(JSON.stringify({ error: message }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+    }
+  }
+
+  if (pathname === '/api/config/mcp') {
+    const verb = method;
+    const body = await extractJsonBody(input, init, method);
+    const directory = getRequestDirectoryHint(url, input, init);
+    try {
+      const data = await sendBridgeMessage('api:config/mcp', { method: verb, body, directory });
+      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return new Response(JSON.stringify({ error: message }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+    }
+  }
+
+  if (pathname.startsWith('/api/config/mcp/')) {
+    const encodedName = pathname.slice('/api/config/mcp/'.length);
+    const name = decodeURIComponent(encodedName);
+    const verb = method;
+    const body = await extractJsonBody(input, init, method);
+    const directory = getRequestDirectoryHint(url, input, init);
+    try {
+      const data = await sendBridgeMessage('api:config/mcp', { method: verb, name, body, directory });
+      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return new Response(JSON.stringify({ error: message }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+    }
+  }
+
+  if (pathname === '/api/config/snippets') {
+    const verb = method;
+    const directory = getRequestDirectoryHint(url, input, init);
+    try {
+      const data = await sendBridgeMessage('api:config/snippets', { method: verb, directory });
+      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return new Response(JSON.stringify({ error: message }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+    }
+  }
+
+  if (pathname === '/api/config/snippets/expand') {
+    const verb = method === 'GET' && !hasInitBody(init) && !(input instanceof Request) ? 'POST' : method;
+    const body = await extractJsonBody(input, init, method);
+    const directory = getRequestDirectoryHint(url, input, init);
+    try {
+      const data = await sendBridgeMessage('api:config/snippets', { method: verb, body, directory });
+      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return new Response(JSON.stringify({ error: message }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+    }
+  }
+
+  if (pathname.startsWith('/api/config/snippets/')) {
+    const encodedName = pathname.slice('/api/config/snippets/'.length);
+    const name = decodeURIComponent(encodedName);
+    const verb = method;
+    const body = await extractJsonBody(input, init, method);
+    const directory = getRequestDirectoryHint(url, input, init);
+    try {
+      const data = await sendBridgeMessage('api:config/snippets', { method: verb, name, body, directory });
+      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return new Response(JSON.stringify({ error: message }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+    }
+  }
+
+  // Skills file operations: /api/config/skills/:name/files/:filePath
+  const skillsFilesMatch = pathname.match(/^\/api\/config\/skills\/([^/]+)\/files\/(.+)$/);
+  if (skillsFilesMatch) {
+    const name = decodeURIComponent(skillsFilesMatch[1]);
+    const filePath = decodeURIComponent(skillsFilesMatch[2]);
+    const verb = method;
+    const body = await extractJsonBody(input, init, method);
+    try {
+      const data = await sendBridgeMessage('api:config/skills/files', { 
+        method: verb, 
+        name, 
+        filePath, 
+        content: body.content 
+      });
+      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return new Response(JSON.stringify({ error: message }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+    }
+  }
+
+  const skillsCatalogStatusFromPayload = (payload: unknown): number => {
+    if (!payload || typeof payload !== 'object') return 200;
+    const data = payload as { ok?: boolean; error?: { kind?: string } };
+    if (data.ok === false) {
+      const kind = data.error?.kind;
+      if (kind === 'conflicts') return 409;
+      if (kind === 'authRequired') return 401;
+      return 400;
+    }
+    return 200;
+  };
+
+  // Skills catalog: /api/config/skills/catalog lists the sources,
+  // /api/config/skills/catalog/source scans one of them.
+  if (pathname === '/api/config/skills/catalog') {
+    try {
+      const data = await sendBridgeMessage('api:config/skills:catalog');
+      return new Response(JSON.stringify(data), { status: skillsCatalogStatusFromPayload(data), headers: { 'Content-Type': 'application/json' } });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return new Response(JSON.stringify({ ok: false, error: { kind: 'unknown', message } }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+    }
+  }
+
+  if (pathname === '/api/config/skills/catalog/source') {
+    const sourceId = url.searchParams.get('sourceId') ?? '';
+    const refresh = url.searchParams.get('refresh') === 'true';
+    try {
+      const data = await sendBridgeMessage('api:config/skills:catalog/source', { sourceId, refresh });
+      return new Response(JSON.stringify(data), { status: skillsCatalogStatusFromPayload(data), headers: { 'Content-Type': 'application/json' } });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return new Response(JSON.stringify({ ok: false, error: { kind: 'unknown', message } }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+    }
+  }
+
+  // Skills scan: /api/config/skills/scan
+  if (pathname === '/api/config/skills/scan') {
+    const body = await extractJsonBody(input, init, method);
+    try {
+      const data = await sendBridgeMessage('api:config/skills:scan', body);
+      return new Response(JSON.stringify(data), { status: skillsCatalogStatusFromPayload(data), headers: { 'Content-Type': 'application/json' } });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return new Response(JSON.stringify({ ok: false, error: { kind: 'unknown', message } }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+    }
+  }
+
+  // Skills install: /api/config/skills/install
+  if (pathname === '/api/config/skills/install') {
+    const body = await extractJsonBody(input, init, method);
+    try {
+      const data = await sendBridgeMessage('api:config/skills:install', body);
+      return new Response(JSON.stringify(data), { status: skillsCatalogStatusFromPayload(data), headers: { 'Content-Type': 'application/json' } });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return new Response(JSON.stringify({ ok: false, error: { kind: 'unknown', message } }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+    }
+  }
+
+  // Skills CRUD: /api/config/skills/:name or /api/config/skills
+  if (pathname === '/api/config/skills') {
+    try {
+      const data = await sendBridgeMessage('api:config/skills', { method: 'GET' });
+      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return new Response(JSON.stringify({ error: message }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+    }
+  }
+
+  if (pathname.startsWith('/api/config/skills/')) {
+    const encodedName = pathname.slice('/api/config/skills/'.length);
+    const name = decodeURIComponent(encodedName);
+    const verb = method;
+    const body = await extractJsonBody(input, init, method);
+    try {
+      const data = await sendBridgeMessage('api:config/skills', { method: verb, name, body });
+      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return new Response(JSON.stringify({ error: message }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+    }
+  }
+
+  if (pathname.startsWith('/api/config/settings')) {
+    if (method === 'GET') {
+      const settings = await sendBridgeMessage('api:config/settings:get');
+      return new Response(JSON.stringify(settings), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+    const body = await extractJsonBody(input, init, method);
+    const updated = await sendBridgeMessage('api:config/settings:save', body);
+    return new Response(JSON.stringify(updated), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  }
+
+  if (normalizedPathname === '/api/behavior/agents-md') {
+    if (method === 'GET') {
+      const data = await sendBridgeMessage('api:behavior/agents-md:get');
+      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+    if (method === 'PUT') {
+      const body = await extractJsonBody(input, init, method);
+      const data = await sendBridgeMessage('api:behavior/agents-md:save', body);
+      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+  }
+
+  // Magic Prompts: the extension host answers with the server's statuses and
+  // bodies. Selectors stay in the query string, every value of a name is
+  // forwarded so a repeated one is refused there, and the routing directory
+  // plays no part in which file is read or written; a prompt read names its
+  // directory as `sessionDirectory`.
+  const isMagicPromptCollection = pathname === '/api/magic-prompts' && (method === 'GET' || method === 'DELETE');
+  const isMagicPromptItem = pathname.startsWith('/api/magic-prompts/') && (method === 'PUT' || method === 'DELETE');
+  if (isMagicPromptCollection || isMagicPromptItem) {
+    const readRequest = async () => ({
+      method,
+      id: isMagicPromptItem ? decodeURIComponent(pathname.slice('/api/magic-prompts/'.length)) : null,
+      query: {
+        projectId: url.searchParams.getAll('projectId'),
+        scope: url.searchParams.getAll('scope'),
+        sessionDirectory: url.searchParams.getAll('sessionDirectory'),
+      },
+      body: method === 'GET' ? undefined : await extractJsonBody(input, init, method),
+    });
+    // A malformed id encoding or JSON body is the client's error.
+    const request = await readRequest().catch(() => null);
+    if (!request) return jsonResponse({ error: 'Invalid magic prompt request' }, 400);
+    try {
+      const { status, body } = await sendBridgeMessage<{ status: number; body: unknown }>('api:magic-prompts', request);
+      return jsonResponse(body, status);
+    } catch (error) {
+      return jsonResponse({ error: error instanceof Error ? error.message : 'Magic prompt request failed' }, 500);
+    }
+  }
+
+  if (pathname === '/api/config/opencode-resolution' && method === 'GET') {
+    try {
+      const data = await sendBridgeMessage('api:config/opencode-resolution:get');
+      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return new Response(JSON.stringify({ error: message }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+    }
+  }
+
+  if (pathname.startsWith('/api/config/reload')) {
+    await sendBridgeMessage('api:config/reload');
+    return new Response(JSON.stringify({ restarted: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  }
+
+  if (pathname === '/api/config/plugins' && method === 'GET') {
+    try {
+      const directory = getRequestDirectoryHint(url, input, init);
+      const data = await sendBridgeMessage('api:config/plugins', { method, target: 'list', directory });
+      return jsonResponse(data);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return jsonResponse({ error: message }, pluginConfigErrorStatus(message));
+    }
+  }
+
+  if (pathname === '/api/config/plugins/registry' && method === 'GET') {
+    try {
+      const rawSpecs = url.searchParams.get('specs') || '';
+      const specs = rawSpecs ? rawSpecs.split(',').map((spec) => spec.trim()).filter(Boolean) : [];
+      const directory = getRequestDirectoryHint(url, input, init);
+      const data = await sendBridgeMessage('api:config/plugins', {
+        method,
+        target: 'registry',
+        specs,
+        refresh: url.searchParams.get('refresh') === 'true',
+        directory,
+      });
+      return jsonResponse(data);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return jsonResponse({ error: message }, pluginConfigErrorStatus(message));
+    }
+  }
+
+  if (pathname === '/api/config/plugins/entry' && method === 'POST') {
+    try {
+      const body = await extractJsonBody(input, init, method);
+      const directory = getRequestDirectoryHint(url, input, init);
+      const data = await sendBridgeMessage('api:config/plugins', { method, target: 'entry', body, directory });
+      return jsonResponse(data);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return pluginEntryErrorResponse(message, error instanceof BridgeRequestError ? error.code : undefined);
+    }
+  }
+
+  const pluginEntryMatch = pathname.match(/^\/api\/config\/plugins\/entry\/([^/]+)$/);
+  if (pluginEntryMatch) {
+    try {
+      const body = method === 'GET' || method === 'DELETE' ? undefined : await extractJsonBody(input, init, method);
+      const directory = getRequestDirectoryHint(url, input, init);
+      const data = await sendBridgeMessage('api:config/plugins', {
+        method,
+        target: 'entry',
+        pluginId: decodeURIComponent(pluginEntryMatch[1]),
+        body,
+        directory,
+      });
+      return jsonResponse(data);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return pluginEntryErrorResponse(message, error instanceof BridgeRequestError ? error.code : undefined);
+    }
+  }
+
+  if (pathname === '/api/config/plugins/file' && method === 'POST') {
+    try {
+      const body = await extractJsonBody(input, init, method);
+      const directory = getRequestDirectoryHint(url, input, init);
+      const data = await sendBridgeMessage('api:config/plugins', { method, target: 'file', body, directory });
+      return jsonResponse(data);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return jsonResponse({ error: message }, pluginConfigErrorStatus(message));
+    }
+  }
+
+  const pluginFileMatch = pathname.match(/^\/api\/config\/plugins\/file\/([^/]+)$/);
+  if (pluginFileMatch) {
+    try {
+      const body = method === 'GET' || method === 'DELETE' ? undefined : await extractJsonBody(input, init, method);
+      const directory = getRequestDirectoryHint(url, input, init);
+      const data = await sendBridgeMessage('api:config/plugins', {
+        method,
+        target: 'file',
+        pluginId: decodeURIComponent(pluginFileMatch[1]),
+        body,
+        directory,
+      });
+      return jsonResponse(data);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return jsonResponse({ error: message }, pluginConfigErrorStatus(message));
+    }
+  }
+
+  if (pathname.startsWith('/api/openchamber/models-metadata')) {
+    try {
+      const data = await sendBridgeMessage('api:models/metadata');
+      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    } catch (error) {
+      console.warn('[OpenChamber] Failed to fetch models metadata via bridge, returning empty set:', error);
+      return new Response(JSON.stringify({}), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+  }
+
+  if (pathname === '/api/opencode/version' && method === 'GET') {
+    try {
+      const data = await sendBridgeMessage('api:opencode/version');
+      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return new Response(JSON.stringify({ version: null, error: message }), { status: 502, headers: { 'Content-Type': 'application/json' } });
+    }
+  }
+
+  if (pathname === '/api/opencode/health' && method === 'GET') {
+    const connectionStatus = window.__OPENCHAMBER_CONNECTION__?.status;
+    return new Response(JSON.stringify({ healthy: connectionStatus === 'connected' }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  if (pathname === '/api/opencode/compatibility' && method === 'GET') {
+    return jsonResponse(await sendBridgeMessage('api:opencode/compatibility'));
+  }
+
+  if (pathname === '/api/opencode/install-v2' && method === 'POST') {
+    return jsonResponse(await sendBridgeMessageWithOptions('api:opencode/install-v2', undefined, { timeoutMs: 0 }));
+  }
+
+  if (pathname === '/api/opencode/upgrade-status' && method === 'GET') {
+    const data = await sendBridgeMessage('api:opencode/upgrade-status');
+    return jsonResponse(data);
+  }
+
+  if (pathname === '/api/opencode/upgrade' && method === 'POST') {
+    const body = await extractJsonBody(input, init, method);
+    const result = await sendBridgeMessageWithOptions<{ status: number; body: unknown }>('api:opencode/upgrade', body, { timeoutMs: 0 });
+    return jsonResponse(result.body, result.status);
+  }
+
+  if (pathname === '/api/zen/models' && method === 'GET') {
+    try {
+      const data = await sendBridgeMessage('api:zen:models');
+      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return new Response(JSON.stringify({ error: message, models: [] }), { status: 502, headers: { 'Content-Type': 'application/json' } });
+    }
+  }
+
+  if (pathname === '/api/openchamber/enterprise-policy' && method === 'GET') {
+    try {
+      const data = await sendBridgeMessage('api:openchamber:enterprise-policy');
+      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return new Response(JSON.stringify({ error: message }), { status: 502, headers: { 'Content-Type': 'application/json' } });
+    }
+  }
+
+  if (pathname.startsWith('/api/openchamber/update-check')) {
+    try {
+      const currentVersion = url.searchParams.get('currentVersion') || undefined;
+      const instanceMode = url.searchParams.get('instanceMode') || 'local';
+      const deviceClass = url.searchParams.get('deviceClass') || 'desktop';
+      const platform = url.searchParams.get('platform') || window.__VSCODE_CONFIG__?.platform || undefined;
+      const arch = url.searchParams.get('arch') || window.__VSCODE_CONFIG__?.arch || undefined;
+      const reportUsageRaw = (url.searchParams.get('reportUsage') || 'true').toLowerCase();
+      const reportUsage = !(reportUsageRaw === 'false' || reportUsageRaw === '0' || reportUsageRaw === 'no');
+      const data = await sendBridgeMessage('api:openchamber:update-check', {
+        currentVersion,
+        instanceMode,
+        deviceClass,
+        platform,
+        arch,
+        reportUsage,
+      });
+      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return new Response(JSON.stringify({ available: false, error: message }), { status: 502, headers: { 'Content-Type': 'application/json' } });
+    }
+  }
+
+  if (pathname === '/auth/session') {
+    // VS Code host is trusted; mirror web server shape to keep UI logic happy
+    const body = {
+      authenticated: true,
+      requireSetup: false,
+      authenticatedAt: Date.now(),
+    };
+    return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  }
+
+  if (pathname === '/api/openchamber/directory') {
+    const body = await extractJsonBody(input, init, method);
+    const result = await sendBridgeMessage('api:openchamber/directory', { path: body.path });
+    return new Response(JSON.stringify(result), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  }
+
+  if (pathname === '/api/quota/providers') {
+    try {
+      const data = await sendBridgeMessage('api:quota:providers');
+      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return new Response(JSON.stringify({ error: message }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+    }
+  }
+
+  const quotaCredentialMatch = pathname.match(/^\/api\/quota\/credentials\/(exe-dev|cursor|zenmux)(?:\/(validate|import))?$/);
+  if (quotaCredentialMatch) {
+    try {
+      const body = method === 'PUT' ? await extractJsonBody(input, init, method) : undefined;
+      const bridgeMethod = quotaCredentialMatch[2]?.toUpperCase() || method;
+      const data = await sendBridgeMessage('api:quota:credentials', { providerId: quotaCredentialMatch[1], method: bridgeMethod, credential: body });
+      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return new Response(JSON.stringify({ error: message }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+    }
+  }
+
+  const quotaGiftResetMatch = pathname.match(/^\/api\/quota\/([^/]+)\/gift-reset\/use$/);
+  if (quotaGiftResetMatch && method === 'POST') {
+    const providerId = decodeURIComponent(quotaGiftResetMatch[1]);
+    try {
+      const body = await extractJsonBody(input, init, method);
+      const data = await sendBridgeMessage('api:quota:giftReset:use', {
+        providerId,
+        recordId: body.recordId,
+        resetType: body.resetType,
+      });
+      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return new Response(JSON.stringify({ error: message }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+    }
+  }
+
+  const quotaMatch = pathname.match(/^\/api\/quota\/([^/]+)$/);
+  if (quotaMatch && method === 'GET') {
+    const providerId = decodeURIComponent(quotaMatch[1]);
+    try {
+      const data = await sendBridgeMessage('api:quota:get', { providerId });
+      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return new Response(JSON.stringify({ error: message }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+    }
+  }
+
+  // Handle provider source lookup: GET /api/provider/:providerId/source
+  const providerSourceMatch = pathname.match(/^\/api\/provider\/([^/]+)\/source$/);
+  if (providerSourceMatch && method === 'GET') {
+    const providerId = decodeURIComponent(providerSourceMatch[1]);
+    const queryDirectory = url.searchParams.get('directory') || undefined;
+    try {
+      const data = await sendBridgeMessage('api:provider/source:get', { providerId, directory: queryDirectory });
+      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return new Response(JSON.stringify({ error: message }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+    }
+  }
+
+  // Handle custom provider upsert: PUT /api/provider
+  if (pathname === '/api/provider' && method === 'PUT') {
+    try {
+      const body = await extractJsonBody(input, init, method);
+      const queryDirectory = url.searchParams.get('directory') || undefined;
+      const data = await sendBridgeMessage('api:provider:upsert', {
+        ...(body && typeof body === 'object' ? body : {}),
+        directory: queryDirectory
+          ?? (body && typeof body === 'object' && typeof body.directory === 'string' ? body.directory : undefined),
+      });
+      if (data && typeof data === 'object' && 'success' in data && (data as { success?: boolean }).success === false) {
+        const message = (data as { error?: string }).error || 'Failed to save provider config';
+        return new Response(JSON.stringify({ error: message }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+      }
+      return new Response(JSON.stringify((data as { data?: unknown })?.data ?? data), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return new Response(JSON.stringify({ error: message }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+    }
+  }
+
+  if (pathname === '/api/provider/discover-models' && method === 'POST') {
+    try {
+      const body = await extractJsonBody(input, init, method);
+      const data = await sendBridgeMessage('api:provider:discover-models', body);
+      if (data && typeof data === 'object' && 'success' in data && (data as { success?: boolean }).success === false) {
+        return jsonResponse({ error: (data as { error?: string }).error || 'Failed to discover provider models' }, 400);
+      }
+      return jsonResponse((data as { data?: unknown })?.data ?? data);
+    } catch (error) {
+      return jsonResponse({ error: error instanceof Error ? error.message : String(error) }, 500);
+    }
+  }
+
+  return null;
+};
+
+const originalFetch = window.fetch.bind(window);
+let sseStreamCounter = 0;
+window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+  const targetUrl = typeof input === 'string' || input instanceof URL ? normalizeUrl(input) : normalizeUrl((input as Request).url);
+  const method = (init?.method || (input instanceof Request ? input.method : 'GET')).toUpperCase();
+
+  const pathname = targetUrl?.pathname || '';
+  const normalizedPathname = pathname.replace(/\/{2,}/g, '/');
+  if (targetUrl && normalizedPathname === '/health') {
+    const connectionStatus = window.__OPENCHAMBER_CONNECTION__?.status;
+    const isReady = connectionStatus === 'connected';
+    const cliAvailable = window.__OPENCHAMBER_CONNECTION__?.cliAvailable ?? true;
+    return new Response(JSON.stringify({ 
+      status: isReady ? 'ok' : 'connecting', 
+      isOpenCodeReady: isReady,
+      cliAvailable,
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  if (targetUrl && isLocalRuntimePath(normalizedPathname)) {
+    const localResponse = await handleLocalApiRequest(input, targetUrl, init, method);
+    if (localResponse) {
+      maybeHideLoadingOverlay();
+      return localResponse;
+    }
+
+    if (!isApiPath(normalizedPathname)) {
+      return originalFetch(input as RequestInfo, init);
+    }
+
+    // OpenCode 2.x serves everything under /api itself, so the extension host
+    // forwards the request path unchanged instead of stripping the prefix.
+    const upstreamPath = `${targetUrl.pathname}${targetUrl.search}`;
+
+    const headersFromRequest = input instanceof Request ? headersToRecord(input.headers) : {};
+    const headersFromInit = headersToRecord(init?.headers);
+    const headers = { ...headersFromRequest, ...headersFromInit };
+
+    if (isSseApiPath(targetUrl.pathname)) {
+      // Install the listener before the extension opens the upstream stream. A
+      // reconnect can replay an event immediately, before the start response
+      // has crossed the VS Code bridge.
+      const streamId = `sse_webview_${Date.now()}_${++sseStreamCounter}`;
+      const signal = (input instanceof Request ? input.signal : init?.signal) as AbortSignal | undefined;
+      const encoder = new TextEncoder();
+      let unsubscribe: (() => void) | null = null;
+
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          const onMessage = (event: MessageEvent) => {
+            const msg = event.data as { type?: string; streamId?: string; chunk?: string; error?: string };
+            if (!msg || msg.streamId !== streamId) return;
+
+            if (msg.type === 'api:sse:chunk' && typeof msg.chunk === 'string') {
+              vscodeStreamPerfCount('vscode.webview.sse_chunk');
+              vscodeStreamPerfObserve('vscode.webview.sse_chunk_bytes', msg.chunk.length);
+              controller.enqueue(encoder.encode(msg.chunk));
+              return;
+            }
+
+            if (msg.type === 'api:sse:end') {
+              vscodeStreamPerfCount('vscode.webview.sse_end');
+              unsubscribe?.();
+              unsubscribe = null;
+              if (typeof msg.error === 'string' && msg.error.length > 0) {
+                controller.error(new Error(msg.error));
+              } else {
+                controller.close();
+              }
+              void stopSseProxy({ streamId }).catch(() => {});
+            }
+          };
+
+          window.addEventListener('message', onMessage);
+          unsubscribe = () => window.removeEventListener('message', onMessage);
+
+          if (signal) {
+            const onAbort = () => {
+              unsubscribe?.();
+              unsubscribe = null;
+              try {
+                controller.error(new DOMException('Aborted', 'AbortError'));
+              } catch {
+                controller.close();
+              }
+              void stopSseProxy({ streamId }).catch(() => {});
+            };
+            if (signal.aborted) {
+              onAbort();
+              return;
+            }
+            signal.addEventListener('abort', onAbort, { once: true });
+          }
+        },
+        cancel() {
+          unsubscribe?.();
+          unsubscribe = null;
+          void stopSseProxy({ streamId }).catch(() => {});
+        },
+      });
+
+      let start;
+      try {
+        start = await vscodeStreamPerfMeasure('vscode.webview.sse_start_ms', () => startSseProxy({ path: upstreamPath, headers, streamId }));
+      } catch (error) {
+        await stream.cancel();
+        throw error;
+      }
+      if (!start.streamId) {
+        void stream.cancel();
+        return new Response(null, { status: start.status || 503, headers: start.headers || {} });
+      }
+
+      return new Response(stream, { status: start.status || 200, headers: start.headers || { 'content-type': 'text/event-stream' } });
+    }
+
+    if (method === 'POST' && isSessionMessageApiPath(targetUrl.pathname)) {
+      const bodyText = await extractBodyText(input, init, method);
+      const signal = (input instanceof Request ? input.signal : init?.signal) as AbortSignal | undefined;
+      const proxied = await proxySessionMessageRequest({ path: upstreamPath, headers, bodyText, signal });
+      const response = buildProxiedResponse(proxied);
+      maybeHideLoadingOverlay();
+      return response;
+    }
+
+    const bodyBase64 = await extractBodyBase64(input, init, method);
+    const signal = (input instanceof Request ? input.signal : init?.signal) as AbortSignal | undefined;
+    const proxied = await proxyApiRequest({ method, path: upstreamPath, headers, bodyBase64, signal });
+    const response = buildProxiedResponse(proxied);
+    maybeHideLoadingOverlay();
+    return response;
+  }
+
+  if (targetUrl && targetUrl.hostname.includes('models.dev')) {
+    try {
+      const data = await sendBridgeMessage('api:models/metadata');
+      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    } catch (error) {
+      console.warn('[OpenChamber] models.dev request failed via bridge, returning empty metadata:', error);
+      return new Response(JSON.stringify({}), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+  }
+
+  return originalFetch(input as RequestInfo, init);
+};
+
+onCommand('focusChatInput', () => {
+  focusChatInput();
+});
+
+onCommand('addContextSelection', (payload) => {
+  const { filePath, filename, text } = payload as { filePath?: unknown; filename?: unknown; text?: unknown };
+  if (typeof filePath !== 'string' || typeof filename !== 'string' || typeof text !== 'string') {
+    return;
+  }
+
+  const trimmedPath = filePath.trim();
+  const trimmedFilename = filename.trim();
+  if (!trimmedPath || !trimmedFilename || !text.trim()) {
+    return;
+  }
+
+  import('@/sync/input-store').then(({ useInputStore }) => {
+    const file = new File([new Blob([text], { type: 'text/plain' })], trimmedFilename, { type: 'text/plain' });
+    void useInputStore.getState().addVSCodeSelectionAttachment(trimmedPath, file).finally(() => {
+      focusChatInput();
+    });
+  });
+});
+
+// Comments dropped from their editor thread before the draft reached this
+// store. See the module for why the window exists.
+const removedComments = createRemovalTombstones();
+
+onCommand('addLineComment', (payload) => {
+  // SAFETY: the payload crossed the extension boundary as JSON; every field is
+  // read as unknown here and trusted only after the checks below.
+  const record = payload as {
+    draftId?: unknown;
+    filePath?: unknown;
+    relativePath?: unknown;
+    source?: unknown;
+    side?: unknown;
+    startLine?: unknown;
+    endLine?: unknown;
+    code?: unknown;
+    language?: unknown;
+    comment?: unknown;
+    targetSessionId?: unknown;
+  };
+
+  // The editor thread mints the id so it can track its own draft without a
+  // round trip. Absent when the comment came from anywhere else.
+  const draftId = typeof record.draftId === 'string' && record.draftId ? record.draftId : undefined;
+  // A session panel is told which session the comment is for, so it can wait
+  // until it actually shows that session. The sidebar files wherever it is.
+  const targetSessionId = typeof record.targetSessionId === 'string' && record.targetSessionId ? record.targetSessionId : undefined;
+  const relativePath = typeof record.relativePath === 'string' ? record.relativePath : '';
+  const source = record.source === 'diff' ? 'diff' : 'file';
+  const side = record.side === 'original' || record.side === 'modified' ? record.side : undefined;
+  const startLine = typeof record.startLine === 'number' ? record.startLine : 1;
+  const endLine = typeof record.endLine === 'number' ? record.endLine : startLine;
+  const code = typeof record.code === 'string' ? record.code : '';
+  const language = typeof record.language === 'string' ? record.language : 'text';
+  const comment = typeof record.comment === 'string' ? record.comment.trim() : '';
+
+  if (!relativePath) {
+    console.warn('[openchamber] inline comment arrived without a path; dropping', record);
+    return;
+  }
+
+  void Promise.all([
+    import('@/sync/session-ui-store'),
+    import('@/stores/useDirectoryStore'),
+    import('@/stores/useInlineCommentDraftStore'),
+  ]).then(async ([{ useSessionUIStore }, { useDirectoryStore }, { useInlineCommentDraftStore }]) => {
+    // Inline drafts are owned by runtime + directory + session. Both halves are
+    // read together, from one store snapshot: read apart, a session that
+    // finished loading between them would pair its key with the previous
+    // session's directory, and the draft would land under a key ChatInput never
+    // reads. Directory precedence matches the composer's own.
+    const resolveTarget = () => {
+      const sessionState = useSessionUIStore.getState();
+      const currentSessionId = sessionState.currentSessionId ?? null;
+      const draft = sessionState.newSessionDraft;
+      return resolveCommentTarget({
+        currentSessionId,
+        sessionDirectory: currentSessionId ? sessionState.getDirectoryForSession(currentSessionId) ?? null : null,
+        draftOpen: Boolean(draft?.open),
+        draftDirectory: draft?.open ? draft.bootstrapPendingDirectory ?? draft.directoryOverride ?? null : null,
+        currentDirectory: useDirectoryStore.getState().currentDirectory ?? null,
+      }, targetSessionId);
+    };
+
+    // A comment can arrive before the chat surface shows its session: a panel
+    // opened for the comment knows its directory long before the session list
+    // has loaded and the session is selected. Filing before that put the draft
+    // under a key this composer never reads. Wait for the surface to land on
+    // the session (or an open draft) instead, within the extension's own
+    // confirmation deadline.
+    let target = resolveTarget();
+    for (let attempt = 0; !target && attempt < 80; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      target = resolveTarget();
+    }
+    if (!target) {
+      console.warn('[openchamber] chat surface never showed the session; dropping inline comment', { relativePath, startLine, targetSessionId });
+      return;
+    }
+
+    // Checked after the wait, which is the window the removal can land in.
+    if (removedComments.consume(draftId)) {
+      return;
+    }
+
+    useInlineCommentDraftStore.getState().addDraft(target, {
+      id: draftId,
+      source,
+      fileLabel: relativePath,
+      startLine,
+      endLine,
+      side,
+      code,
+      language,
+      text: comment,
+    });
+  });
+});
+
+// The editor's comment threads mirror the composer's drafts, so every change to
+// the draft store is reported as a whole snapshot. Sending the full list rather
+// than add/remove events means a dropped notification cannot leave a thread
+// anchored to a comment that is no longer attached; sending the message empties
+// the list, which clears the threads through the same path.
+void import('@/stores/useInlineCommentDraftStore').then(({ useInlineCommentDraftStore }) => {
+  let lastSignature = '';
+
+  const publish = (drafts: Record<string, Array<{ id: string; text: string }>>) => {
+    const flat = Object.values(drafts)
+      .flat()
+      .map((draft) => ({ id: draft.id, text: draft.text }));
+    const signature = JSON.stringify(flat);
+    if (signature === lastSignature) return;
+    lastSignature = signature;
+    postBridgeNotification('inlineComments:sync', { drafts: flat });
+  };
+
+  publish(useInlineCommentDraftStore.getState().drafts);
+  useInlineCommentDraftStore.subscribe((state) => publish(state.drafts));
+});
+
+onCommand('removeLineComment', (payload) => {
+  if (typeof payload !== 'object' || payload === null || !('draftId' in payload)) return;
+  const { draftId } = payload;
+  if (typeof draftId !== 'string' || !draftId) {
+    return;
+  }
+
+  // Recorded even when the draft is already here: the store removal below is
+  // the normal path, and this only matters when the draft has not landed yet.
+  removedComments.remember(draftId);
+
+  void Promise.all([
+    import('@/stores/useInlineCommentDraftStore'),
+    import('@/lib/runtime-switch'),
+  ]).then(([{ useInlineCommentDraftStore }, { getRuntimeKey }]) => {
+    const state = useInlineCommentDraftStore.getState();
+    const runtimeKey = getRuntimeKey();
+
+    // The thread knows its draft id but not which target holds it. Search for
+    // the owning key, and only within the current runtime: `removeDraft`
+    // recomputes the key from the live runtime, so a target rebuilt from
+    // another runtime's key would delete from the wrong place.
+    for (const [key, drafts] of Object.entries(state.drafts)) {
+      if (!drafts.some((draft) => draft.id === draftId)) continue;
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(key);
+      } catch {
+        continue;
+      }
+      if (!Array.isArray(parsed) || parsed.length !== 3 || !parsed.every((segment) => typeof segment === 'string')) continue;
+      const [keyRuntime, directory, sessionKey] = parsed;
+      if (keyRuntime !== runtimeKey) continue;
+      state.removeDraft({ directory, sessionKey }, draftId);
+      return;
+    }
+  });
+});
+
+onCommand('addFileMentions', (payload) => {
+  const rawPaths = Array.isArray((payload as { paths?: unknown[] })?.paths)
+    ? (payload as { paths: unknown[] }).paths
+    : [];
+  const paths = rawPaths
+    .filter((entry): entry is string => typeof entry === 'string')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+
+  if (paths.length === 0) {
+    return;
+  }
+
+  const mentionText = paths.map((relativePath) => `@${relativePath}`).join(' ');
+
+  import('@/sync/input-store').then(({ useInputStore }) => {
+    useInputStore.getState().setPendingInputText(mentionText, 'append-inline');
+  });
+});
+
+onCommand('addFileAttachments', (payload) => {
+  const rawFiles = Array.isArray((payload as { files?: unknown[] })?.files)
+    ? (payload as { files: unknown[] }).files
+    : [];
+
+  const files = rawFiles
+    .map((entry) => {
+      const record = entry as { filePath?: unknown; fileName?: unknown; fileSize?: unknown };
+      const filePath = typeof record.filePath === 'string' ? record.filePath.trim() : '';
+      const fileName = typeof record.fileName === 'string' ? record.fileName.trim() : '';
+      const fileSize = typeof record.fileSize === 'number' && Number.isFinite(record.fileSize) ? record.fileSize : null;
+      return filePath && fileName ? { filePath, fileName, fileSize } : null;
+    })
+    .filter((entry): entry is { filePath: string; fileName: string; fileSize: number | null } => entry !== null);
+
+  if (files.length === 0) {
+    return;
+  }
+
+  import('@/sync/input-store').then(({ useInputStore }) => {
+    const inputStore = useInputStore.getState();
+    for (const file of files) {
+      inputStore.addVSCodeFileAttachment(file.filePath, file.fileName, file.fileSize);
+    }
+  });
+});
+
+// Listen for createSessionWithPrompt command from extension (Explain, Improve Code)
+onCommand('createSessionWithPrompt', (payload) => {
+  const { prompt } = payload as { prompt: string };
+
+  Promise.all([
+    import('@/sync/session-ui-store'),
+    import('@/stores/useConfigStore'),
+    import('@/sync/input-store'),
+  ]).then(([{ useSessionUIStore }, { useConfigStore }, { useInputStore }]) => {
+    const sessionStore = useSessionUIStore.getState();
+    const configStore = useConfigStore.getState();
+
+    // Get current provider/model/agent configuration
+    const { currentProviderId, currentModelId, currentAgentName } = configStore;
+
+    if (currentProviderId && currentModelId) {
+      if (!sessionStore.currentSessionId) {
+        sessionStore.openNewSessionDraft();
+      }
+
+      // Send the message - this will create the session from the draft and send
+      sessionStore.sendMessage(
+        prompt,
+        currentProviderId,
+        currentModelId,
+        currentAgentName ?? undefined,
+        undefined, // attachments
+        undefined, // agentMentionName
+        undefined  // additionalParts
+      ).catch((error: unknown) => {
+        console.error('[OpenChamber] Failed to send prompt:', error);
+      });
+    } else {
+      // If no provider/model configured, just set the text and let user send manually
+      useInputStore.getState().setPendingInputText(prompt);
+    }
+  });
+});
+
+const normalizeWorkspaceFoldersPayload = (value: unknown): Array<{ name: string; path: string }> => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map((entry) => {
+      const candidate = entry as { name?: unknown; path?: unknown };
+      const name = typeof candidate.name === 'string' ? candidate.name.trim() : '';
+      const path = typeof candidate.path === 'string' ? candidate.path.trim() : '';
+      return path ? { name, path } : null;
+    })
+    .filter((entry): entry is { name: string; path: string } => entry !== null);
+};
+
+const syncVSCodeWorkspaceProjects = async (
+  workspaceFolders: Array<{ name: string; path: string }>,
+  activePath?: string,
+) => {
+  if (window.__VSCODE_CONFIG__) {
+    window.__VSCODE_CONFIG__.workspaceFolders = workspaceFolders;
+  }
+  const { useProjectsStore } = await import('@/stores/useProjectsStore');
+  return useProjectsStore.getState().syncVSCodeWorkspaceFolders(workspaceFolders, activePath);
+};
+
+onCommand('workspaceFoldersChanged', (payload) => {
+  const record = payload as { workspaceFolders?: unknown } | undefined;
+  const workspaceFolders = normalizeWorkspaceFoldersPayload(record?.workspaceFolders);
+  void syncVSCodeWorkspaceProjects(workspaceFolders);
+});
+
+// Listen for newSession command from extension title bar button
+onCommand('newSession', (payload) => {
+  const record = payload as { directory?: unknown; workspaceFolders?: unknown } | undefined;
+  const directory = record?.directory;
+  const directoryOverride = typeof directory === 'string' && directory.trim().length > 0 ? directory.trim() : undefined;
+  const workspaceFolders = normalizeWorkspaceFoldersPayload(record?.workspaceFolders);
+
+  Promise.all([
+    import('@/sync/session-ui-store'),
+    syncVSCodeWorkspaceProjects(workspaceFolders, directoryOverride),
+  ]).then(([{ useSessionUIStore }, selectedProject]) => {
+    useSessionUIStore.getState().openNewSessionDraft(
+      directoryOverride
+        ? { directoryOverride, selectedProjectId: selectedProject?.id ?? undefined }
+        : undefined
+    );
+  });
+
+  // Also dispatch event to navigate to chat view in VSCodeLayout
+  window.dispatchEvent(new CustomEvent('openchamber:navigate', { detail: { view: 'chat' } }));
+});
+
+onCommand('showSettings', (payload) => {
+  const navigation = vscodeSettingsNavigationSchema.safeParse(payload);
+  if (navigation.success) applyVSCodeSettingsNavigation(navigation.data);
+});
+
+// Run the same full OpenCode reload flow the app uses after an update: shows the
+// reload overlay, restarts the managed OpenCode (via the bridge's /api/config/reload),
+// and refreshes config/data. Triggered by the "Restart API Connection" command.
+onCommand('reloadOpenCode', () => {
+  void import('@openchamber/ui/stores/useAgentsStore').then(({ reloadOpenCodeConfiguration }) => {
+    void reloadOpenCodeConfiguration().catch(() => undefined);
+  });
+});
+
+// The extension host shows the notification and decides whether the chat is in
+// view: Chromium never displays a `new Notification()` from a webview frame.
+const showOpenChamberNotification = (payload: { title: string; body: string; sessionId: string; requireHidden: boolean }) => {
+  void sendBridgeMessage('api:notifications:show', payload).catch(() => undefined);
+};
+
+const openSessionPayloadSchema = z.object({ sessionId: z.string().min(1) });
+
+// "Open Session" on a notification.
+onCommand('openSession', (payload) => {
+  const sessionId = openSessionPayloadSchema.safeParse(payload).data?.sessionId;
+  if (!sessionId) return;
+  void import('@/sync/session-ui-store').then(({ useSessionUIStore }) => {
+    useSessionUIStore.getState().setCurrentSession(sessionId);
+  });
+  window.dispatchEvent(new CustomEvent('openchamber:navigate', { detail: { view: 'chat' } }));
+});
+
+onCommand('viewerStateChanged', (payload) => {
+  const parsed = hostViewerStateSchema.safeParse(payload);
+  if (!parsed.success) return;
+  // The webview document's own focus is not whether the user sees the chat.
+  reportHostViewerState(parsed.data);
+});
+
+const readyNotificationCooldowns = new Map<string, number>();
+const errorNotificationCooldowns = new Map<string, number>();
+const READY_NOTIFICATION_COOLDOWN_MS = 5000;
+const DEFAULT_NOTIFICATION_MESSAGE_MAX_LENGTH = 250;
+let notificationSettingsSyncPromise: Promise<void> | null = null;
+
+const normalizeNotificationPlainText = (text: string): string => text
+  .replace(/```[\s\S]*?```/g, ' ')
+  .replace(/`([^`]*)`/g, '$1')
+  .replace(/^[\t ]*[-*+]\s+/gm, '')
+  .replace(/^#{1,6}\s+/gm, '')
+  .replace(/\*\*(.*?)\*\*/g, '$1')
+  .replace(/__(.*?)__/g, '$1')
+  .replace(/\*(.*?)\*/g, '$1')
+  .replace(/_(.*?)_/g, '$1')
+  .replace(/\[(.*?)\]\((.*?)\)/g, '$1')
+  .replace(/\s*\n\s*/g, ' ')
+  .replace(/\s+/g, ' ')
+  .trim();
+
+const truncateNotificationText = (text: string, maxLength: number): string => (
+  text.length <= maxLength ? text : `${text.slice(0, maxLength)}...`
+);
+
+const resolvePositiveNotificationNumber = (value: unknown, fallback: number): number => (
+  typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : fallback
+);
+
+const ensureNotificationSettingsSynced = async () => {
+  if (!notificationSettingsSyncPromise) {
+    notificationSettingsSyncPromise = import('@/lib/persistence')
+      .then(({ syncDesktopSettings }) => syncDesktopSettings())
+      .catch((error) => {
+        notificationSettingsSyncPromise = null;
+        console.warn('[OpenChamber] Failed to sync notification settings:', error);
+      });
+  }
+  await notificationSettingsSyncPromise;
+};
+
+const prepareNotificationLastMessage = (
+  message: string,
+  settings: { maxLastMessageLength: number },
+): string => {
+  const maxLength = resolvePositiveNotificationNumber(settings.maxLastMessageLength, DEFAULT_NOTIFICATION_MESSAGE_MAX_LENGTH);
+  return truncateNotificationText(normalizeNotificationPlainText(message), maxLength);
+};
+
+const resolveTemplate = (template: string, variables: Record<string, string>): string => (
+  template.replace(/\{(\w+)\}/g, (_match, key: string) => variables[key] ?? '')
+);
+
+const shouldApplyTemplateMessage = (template: string, resolved: string, variables: Record<string, string>) => {
+  if (!resolved) return false;
+  if (template.includes('{last_message}')) {
+    return variables.last_message.trim().length > 0;
+  }
+  return true;
+};
+
+const formatNotificationLabel = (raw: string, fallback: string): string => {
+  if (!raw) return fallback;
+  return raw.split(/[-_\s]+/).filter(Boolean).map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(' ');
+};
+
+type NotificationTemplateKey = 'completion' | 'subtask' | 'error' | 'question';
+
+// The same defaults the settings page shows as placeholders. An empty field
+// means "no custom text", so the notification follows the interface language.
+const NOTIFICATION_TEMPLATE_DEFAULT_KEYS = {
+  completion: {
+    title: 'settings.notifications.page.template.defaults.completion.title',
+    message: 'settings.notifications.page.template.defaults.completion.message',
+  },
+  subtask: {
+    title: 'settings.notifications.page.template.defaults.subtask.title',
+    message: 'settings.notifications.page.template.defaults.subtask.message',
+  },
+  error: {
+    title: 'settings.notifications.page.template.defaults.error.title',
+    message: 'settings.notifications.page.template.defaults.error.message',
+  },
+  question: {
+    title: 'settings.notifications.page.template.defaults.question.title',
+    message: 'settings.notifications.page.template.defaults.question.message',
+  },
+} satisfies Record<NotificationTemplateKey, { title: I18nKey; message: I18nKey }>;
+
+const notificationText = (key: I18nKey): string => (
+  formatMessage(useI18nStore.getState().dictionary, key)
+);
+
+const notificationTemplateDefaults = (key: NotificationTemplateKey) => ({
+  title: notificationText(NOTIFICATION_TEMPLATE_DEFAULT_KEYS[key].title),
+  message: notificationText(NOTIFICATION_TEMPLATE_DEFAULT_KEYS[key].message),
+});
+
+const getNotificationTemplate = (
+  settings: { notificationTemplates?: Record<string, { title?: string; message?: string }> },
+  key: NotificationTemplateKey,
+  // A caller whose event has its own wording (a permission ask) passes those
+  // defaults, so an empty field falls back to it and not to the shared label.
+  overrides?: { title: string; message: string },
+) => {
+  const candidate = settings.notificationTemplates?.[key];
+  const title = candidate?.title ?? '';
+  const message = candidate?.message ?? '';
+  const defaults = overrides ?? notificationTemplateDefaults(key);
+  return {
+    title: title.trim().length > 0 ? title : defaults.title,
+    message: message.trim().length > 0 ? message : defaults.message,
+  };
+};
+
+/** The assistant message an event points at, when it carries one. */
+const notificationAssistantMessage = (event: SyncEvent): AssistantMessage | null => {
+  if (event.type !== 'message.updated') return null;
+  return event.properties.info.role === 'assistant' ? event.properties.info : null;
+};
+
+const buildNotificationVariables = (
+  event: SyncEvent,
+  directory: string | null,
+  sessionId: string,
+  lastMessage: string,
+): Record<string, string> => {
+  const assistant = notificationAssistantMessage(event);
+  const worktree = directory || '';
+  return {
+    project_name: worktree.split(/[\\/]/).filter(Boolean).pop() || '',
+    worktree,
+    branch: '',
+    session_name: '',
+    agent_name: formatNotificationLabel(assistant?.agent ?? '', 'Agent'),
+    model_name: formatNotificationLabel(assistant?.modelID ?? '', 'Assistant'),
+    last_message: lastMessage,
+    session_id: sessionId,
+  };
+};
+
+window.addEventListener('openchamber:vscode-notification-event', (event) => {
+  const detail = (event as CustomEvent<{ directory?: string; payload?: SyncEvent }>).detail;
+  const syncEvent = detail?.payload;
+  if (!syncEvent || typeof syncEvent !== 'object' || typeof syncEvent.type !== 'string') {
+    return;
+  }
+
+  const sessionId = syncEventSessionID(syncEvent) ?? '';
+  if (!sessionId) {
+    return;
+  }
+  const directory = detail?.directory && detail.directory !== 'global' ? detail.directory : null;
+
+  void (async () => {
+    const { useUIStore } = await import('@/stores/useUIStore');
+    await ensureNotificationSettingsSynced();
+    const settings = useUIStore.getState();
+    if (!settings.nativeNotificationsEnabled) {
+      return;
+    }
+    const requireHidden = settings.notificationMode !== 'always';
+    const assistant = notificationAssistantMessage(syncEvent);
+    const finish = assistant?.finish;
+    const isCompletion = syncEvent.type === 'session.idle' || finish === 'stop';
+    const isError = syncEvent.type === 'session.error' || finish === 'error';
+    // Every sync event reaches this listener, streaming deltas included. Only
+    // the completion and error notifications show `{last_message}`, so only
+    // they may walk message pages; any other event reads nothing.
+    const showsLastMessage = isCompletion || isError;
+    if (!showsLastMessage && syncEvent.type !== 'form.created' && syncEvent.type !== 'permission.asked') return;
+    const errorMessage = syncEvent.type === 'session.error'
+      ? syncEvent.properties.error.message
+      : assistant?.error?.message ?? '';
+    const rawLastMessage = showsLastMessage
+      ? errorMessage || await fetchLastAssistantMessageText(findMessagePageItem, sessionId, assistant?.id)
+      : '';
+    const lastMessage = prepareNotificationLastMessage(rawLastMessage, settings);
+    const variables = buildNotificationVariables(syncEvent, directory, sessionId, lastMessage);
+
+    if (isCompletion) {
+      const session = await opencodeClient.getSession(sessionId, directory).catch(() => undefined);
+      if (!session) return;
+      const isSubtask = Boolean(session.parentID);
+      if (isSubtask ? !settings.notifyOnSubtasks : !settings.notifyOnCompletion) return;
+      const now = Date.now();
+      const lastAt = readyNotificationCooldowns.get(sessionId) ?? 0;
+      if (now - lastAt < READY_NOTIFICATION_COOLDOWN_MS) return;
+      readyNotificationCooldowns.set(sessionId, now);
+      const templateKey: NotificationTemplateKey = isSubtask ? 'subtask' : 'completion';
+      const defaults = notificationTemplateDefaults(templateKey);
+      const template = getNotificationTemplate(settings, templateKey);
+      const title = resolveTemplate(template.title, variables) || resolveTemplate(defaults.title, variables);
+      const body = resolveTemplate(template.message, variables);
+      showOpenChamberNotification({
+        title,
+        body: shouldApplyTemplateMessage(template.message, body, variables) ? body : resolveTemplate(defaults.message, variables),
+        sessionId,
+        requireHidden,
+      });
+      return;
+    }
+
+    if (isError) {
+      if (!settings.notifyOnError) return;
+      const now = Date.now();
+      const lastAt = errorNotificationCooldowns.get(sessionId) ?? 0;
+      if (now - lastAt < READY_NOTIFICATION_COOLDOWN_MS) return;
+      errorNotificationCooldowns.set(sessionId, now);
+      const defaults = notificationTemplateDefaults('error');
+      const template = getNotificationTemplate(settings, 'error');
+      const title = resolveTemplate(template.title, variables) || resolveTemplate(defaults.title, variables);
+      const body = resolveTemplate(template.message, variables);
+      showOpenChamberNotification({
+        title,
+        body: shouldApplyTemplateMessage(template.message, body, variables) ? body : notificationText('notifications.error.bodyFallback'),
+        sessionId,
+        requireHidden,
+      });
+      return;
+    }
+
+    // Forms replaced questions in OpenCode 2.x: one titled request the user answers.
+    if (syncEvent.type === 'form.created') {
+      if (!settings.notifyOnQuestion) return;
+      const header = syncEvent.properties.form.title;
+      const questionVariables = { ...variables, last_message: header };
+      const defaults = notificationTemplateDefaults('question');
+      const template = getNotificationTemplate(settings, 'question');
+      const title = resolveTemplate(template.title, questionVariables) || header || resolveTemplate(defaults.title, questionVariables);
+      const body = resolveTemplate(template.message, questionVariables);
+      showOpenChamberNotification({
+        title,
+        body: shouldApplyTemplateMessage(template.message, body, questionVariables) ? body : notificationText('notifications.question.bodyFallback'),
+        sessionId,
+        requireHidden,
+      });
+      return;
+    }
+
+    if (syncEvent.type === 'permission.asked') {
+      if (!settings.notifyOnQuestion) return;
+      const request = syncEvent.properties;
+      const accepted = await processVSCodePermissionAutoAccept(request, directory ?? undefined);
+      if (accepted) return;
+      const fallbackMessage = request.message || request.action || notificationText('notifications.permission.bodyFallback');
+      const permissionVariables = { ...variables, last_message: fallbackMessage };
+      const defaults = {
+        ...notificationTemplateDefaults('question'),
+        title: notificationText('notifications.permission.title'),
+      };
+      const template = getNotificationTemplate(settings, 'question', defaults);
+      const title = resolveTemplate(template.title, permissionVariables) || resolveTemplate(defaults.title, permissionVariables);
+      const body = resolveTemplate(template.message, permissionVariables);
+      showOpenChamberNotification({
+        title,
+        body: shouldApplyTemplateMessage(template.message, body, permissionVariables) ? body : fallbackMessage,
+        sessionId,
+        requireHidden,
+      });
+    }
+  })();
+});
+
+// Listen for settings sync command from extension (broadcast to all VS Code webviews)
+onCommand('settingsSynced', () => {
+  import('@openchamber/ui/lib/persistence').then(({ invalidateSettingsCache, syncDesktopSettings }) => {
+    invalidateSettingsCache();
+    void syncDesktopSettings({ adoptTheme: false });
+  });
+});
+
+// The extension host keeps an on/off policy; on reads as `auto`.
+onCommand('permissionAutoAcceptSynced', (payload) => {
+  const snapshot = permissionPolicyWireSchema.safeParse(payload);
+  if (!snapshot.success) return;
+  usePermissionStore.getState().applySnapshot(policySnapshotFromWire(snapshot.data));
+});
+
+// Listen for active editor file changes from the extension
+onCommand('activeEditorFile', (payload) => {
+  import('@/sync/input-store').then(({ useInputStore }) => {
+    useInputStore.getState().setActiveEditorFile((payload as VSCodeActiveEditorFile | null) ?? null);
+  });
+});
+
+import('@openchamber/ui/apps/renderVSCodeApp')
+  .then(async ({ renderVSCodeApp }) => {
+    renderVSCodeApp(window.__OPENCHAMBER_RUNTIME_APIS__ ?? createVSCodeAPIs());
+    await waitForUiMount();
+    uiMounted = true;
+    maybeHideLoadingOverlay();
+  })
+  .catch((error) => {
+    console.error('[OpenChamber] Failed to bootstrap UI:', error);
+    // If the UI bundle fails to load, remove the overlay so the user at least sees errors in the root.
+    uiMounted = true;
+    fadeOutLoadingScreen();
+  });

@@ -1,0 +1,38 @@
+---
+title: Acciones de proyecto
+description: Guarda comandos que ejecutas a menudo y lánzalos con un solo clic.
+---
+
+# Acciones de proyecto
+
+Una acción de proyecto es un comando de shell que guardas una vez y ejecutas con un clic: tu servidor de desarrollo, una compilación, una ejecución de pruebas. Cada proyecto mantiene su propia lista. Configúralas en **Settings → Projects → Project Actions**.
+
+## Añade una acción
+
+1. Abre **Settings → Projects** y busca la sección **Project Actions**.
+2. Añade una acción, dale un nombre, elige un icono e introduce el comando a ejecutar.
+3. Guarda.
+
+Puedes limitar una acción a ciertos sistemas operativos si un comando solo tiene sentido en uno.
+
+## Ejecuta una acción
+
+La sección **Proyecto** del panel Work Status, la tarjeta a la derecha del chat, tiene una fila de acción. Pulsa la acción para ejecutarla y vuelve a pulsarla para detenerla. El chevron de al lado elige otra acción, y su opción **Añadir nueva acción** abre **Ajustes → Proyectos**. La fila muestra la última acción que elegiste, y mientras una acción está en marcha, la fila muestra esa. Cuando una ejecución tiene una dirección de vista previa, un botón con un globo junto a la fila la abre.
+
+Desde el teclado, pulsa **⌘⌥R** en macOS o **Ctrl+Alt+R** en Windows y Linux para abrir el diálogo de acciones del proyecto. Muestra las acciones del proyecto actual con su estado. Las flechas mueven la selección, Enter ejecuta una acción parada o detiene una en marcha, y Esc cierra el diálogo. Un campo de búsqueda filtra la lista, y **Configurar acciones** al final abre los ajustes de acciones del proyecto. El diálogo se abre con la acción de la fila de Work Status ya seleccionada, así que el atajo seguido de Enter repite tu última ejecución. Para cambiar el atajo, busca **Abrir acciones del proyecto** en **Ajustes → Atajos**.
+
+En la paleta de comandos, que se abre con ⌘P o Ctrl+P, escribe "ejecutar" o el nombre de una acción para encontrar entradas como **Ejecutar: dev** y **Detener: dev**. **Acciones del proyecto** en la paleta abre el diálogo.
+
+Cada acción se ejecuta en una terminal en la carpeta de la sesión, que es el worktree cuando la sesión está en uno, o la copia principal para las acciones configuradas para ejecutarse allí. La terminal se abre para que veas la salida. Las acciones de proyecto están disponibles en el escritorio y en la app web. VS Code, los móviles y las sesiones de Chats no las tienen.
+
+## Abre automáticamente un servidor de desarrollo
+
+Activa **auto-open URL** para una acción que inicia un servidor. OpenChamber observa la salida en busca de una dirección local y se ofrece a abrirla; consulta [Vista previa y servidores de desarrollo](/es/preview/). En el escritorio también puedes enrutarla a través de un reenvío de puertos SSH.
+
+Si el servidor tiene una dirección fija, ponla en el campo URL de la acción. `{worktree}` y `{branch}` insertan la copia de trabajo donde se ejecuta la acción, así una sola acción sirve en cada worktree. Con [portless](https://github.com/vercel-labs/portless), `https://{worktree}.myapp.localhost` abre `https://auth.myapp.localhost` en un worktree de `feature/auth` y `https://myapp.localhost` en la copia principal. Puede que no necesites el campo: cuando portless imprime su dirección, OpenChamber abre esa en lugar del puerto que hay detrás. En un escritorio conectado a una instancia remota abre el puerto, porque solo los puertos de loopback pasan por el túnel hasta la máquina remota.
+
+## Relacionado
+
+- [Configuración en el repositorio](/repository-config/) — guarda acciones y comandos de configuración en el repositorio para todo el equipo
+
+- [Vista previa y servidores de desarrollo](/es/preview/) — abre un servidor de desarrollo en marcha dentro de OpenChamber

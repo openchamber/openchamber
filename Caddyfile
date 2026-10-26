@@ -1,0 +1,22 @@
+{
+    auto_https off
+    
+}
+
+:3443 {
+    bind 0.0.0.0
+    tls /tmp/localhost.crt /tmp/localhost.key
+    reverse_proxy [::1]:3001 {
+        transport http {
+            read_timeout 120s
+            write_timeout 120s
+            compression off
+        }
+        header_up Host {host}
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+        header_down -Transfer-Encoding
+        flush_interval -1
+    }
+}

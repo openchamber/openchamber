@@ -1,0 +1,60 @@
+---
+title: "Hôtes Git : issues et pull requests"
+description: Connectez GitHub, GitLab, Gitea, Forgejo ou Gerrit et travaillez avec les issues et pull requests depuis OpenChamber.
+---
+
+# Hôtes Git : issues et pull requests
+
+Connectez un compte sur l’hébergeur de votre projet, et OpenChamber peut lister ses issues et pull requests, démarrer une session depuis l’une d’elles, et ouvrir, relire et merger des pull requests pour vous. Cinq hébergeurs sont intégrés : GitHub, y compris GitHub Enterprise ; GitLab, y compris GitLab auto-hébergé ; Gitea ; Forgejo, y compris Codeberg ; et Gerrit. Une [extension](/extensions/#an-extension-as-a-git-host) peut en ajouter un autre.
+
+Le remote du projet décide de l’hébergeur avec lequel OpenChamber communique. Un projet dont l’`origin` est sur gitlab.com utilise votre compte GitLab pour le tableau, le badge de pull request de ses branches et le panneau Git. Un remote sur un alias d’hôte de `~/.ssh/config`, comme `github.com-work`, ne correspond à aucun hébergeur.
+
+Les termes suivent l’hébergeur. GitLab parle de merge request, et Gerrit de changement.
+
+## Connecter un hébergeur
+
+1. Ouvrez **Paramètres → Intégrations**. Chaque hébergeur a sa propre carte.
+2. Dépliez la carte de l’hébergeur de votre projet et connectez-vous :
+   - **GitHub** : choisissez **Connecter GitHub**, ouvrez le lien affiché, saisissez le code court et approuvez. Pour GitHub Enterprise, choisissez **Ajouter une instance** sous **Autres instances**, saisissez l’adresse de votre serveur et collez un jeton d’accès personnel.
+   - **GitLab** : sur gitlab.com, connectez-vous avec un code court, un jeton d’accès personnel ou la connexion `glab`. Pour un GitLab auto-hébergé, ajoutez son adresse et collez un jeton d’accès personnel.
+   - **Gitea** : ajoutez l’adresse de votre serveur et collez un jeton d’accès personnel.
+   - **Forgejo** : pour Codeberg, collez un jeton d’accès personnel ; pour un autre serveur, ajoutez d’abord son adresse.
+   - **Gerrit** : ajoutez l’adresse de votre serveur, puis votre nom d’utilisateur Gerrit et un mot de passe HTTP.
+
+Une fois connecté, votre compte apparaît sur la carte. Vous pouvez connecter plusieurs comptes sur un hébergeur et passer de l’un à l’autre, ou vous déconnecter à tout moment. Si la CLI `gh` est connectée sur la même machine, OpenChamber peut aussi l’utiliser pour GitHub. Les scopes de chaque jeton et les versions requises par chaque hébergeur sont dans [Intégrations](/integrations/#gitlab-gitea-forgejo-and-gerrit).
+
+Un compte connecté peut aussi être l’[identité Git](/git-identities/) du projet : les commits portent alors son nom, et les push en HTTPS utilisent son jeton.
+
+## Démarrer le travail depuis une issue ou une pull request
+
+Lorsque vous créez une [session worktree](/worktrees/), vous pouvez la démarrer depuis une issue ou une pull request de l’hébergeur du projet :
+
+- choisissez une **issue** et OpenChamber nomme la branche d’après elle
+- choisissez une **pull request** et il récupère la branche de la pull request ; vous pouvez inclure son diff pour que l’agent ait tout le changement
+- choisissez un **changement Gerrit** et il récupère le dernier patchset sur une branche nommée `change-<number>`
+
+La nouvelle session s’ouvre avec l’élément déjà joint à la zone de message. Rien n’est envoyé à votre place : choisissez le modèle et l’agent, dites ce que vous voulez faire, puis envoyez.
+
+Le tableau [Issues et PR](/issues-and-prs/) liste les mêmes éléments, avec des filtres, un aperçu, des commentaires et des reviews, et démarre aussi des sessions.
+
+## Ouvrir et gérer des pull requests
+
+Depuis l’onglet **PR** du [panneau Git](/git/), vous pouvez créer une pull request, la mettre à jour, marquer un brouillon comme prêt ou la merger. OpenChamber peut rédiger le titre et la description à partir de vos changements.
+
+- **GitLab** : le même onglet ouvre des merge requests. Le merge propose merge et squash.
+- **Gitea** et **Forgejo** : comme sur GitHub.
+- **Gerrit** : vous créez un changement en poussant en revue, et chaque push suivant envoie un nouveau patchset. Voir [Pousser en revue sur Gerrit](/git/#push-for-review-on-gerrit). Le merge s’appelle **Soumettre**, et il attend que le changement remplisse ses conditions de soumission. Les reviews sont des votes sur les labels du projet, comme Code-Review et Verified.
+
+## Lier une issue ou une pull request à un message
+
+Dans le composer du chat, ouvrez le menu **+** et choisissez l’entrée de liaison de votre hébergeur, comme **Lier une issue ou une PR GitHub**, **Lier un ticket ou une MR GitLab** ou **Lier un changement Gerrit**. Choisissez un ou plusieurs éléments. Chacun accompagne votre prochain message comme contexte, une pull request peut apporter son diff, et le panneau d’état de la session en garde un lien. Joindre n’ajoute que du contexte ; c’est votre message qui dit quoi en faire.
+
+Gerrit n’a pas d’issues, donc seuls les changements y apparaissent.
+
+## Pages liées
+
+- [Issues et PR](/issues-and-prs/) : parcourir, filtrer, commenter et relire des éléments
+- [Workflows Git](/git/) : commiter, gérer les branches et pousser en revue
+- [Sessions worktree](/worktrees/) : là où démarrent les sessions d’issue et de pull request
+- [Identités Git](/git-identities/) : commiter et pousser avec un compte connecté
+- [Intégrations](/integrations/) : chaque carte d’hébergeur en détail

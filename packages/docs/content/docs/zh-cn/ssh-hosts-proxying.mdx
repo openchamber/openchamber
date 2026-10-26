@@ -1,0 +1,48 @@
+---
+title: SSH 主机与代理
+description: 在桌面应用中导入已保存的 SSH 主机并添加额外的 SSH 端口转发。
+---
+
+# SSH 主机与代理
+
+在桌面应用的 **Settings → Remote Instances** 中导入已保存的 SSH 主机，连接到远程机器，并通过同一个 SSH 连接开放额外端口。
+
+> SSH 主机和 SSH 代理是**仅限桌面端**的功能。它们使用你电脑上的 SSH 客户端。
+
+## 导入 SSH 主机
+
+OpenChamber 可以读取你本地 SSH config 中的主机，也就是 `ssh work-server` 这类命令使用的同一个地方。
+
+1. 打开 **Settings → Remote Instances**。
+2. 从 **Saved SSH hosts** 中选择一个主机。
+3. 如果主机是 pattern，输入真实目标，例如 `deploy@app.example.com`。
+4. 保存并连接。
+
+OpenChamber 会用这个 SSH 命令创建 remote instance。当状态到达 **ready** 时，远程 OpenChamber UI 会在桌面应用中打开。
+
+## 添加额外端口转发
+
+每个 remote instance 都有 **Port Forwards** 区域。当 SSH 连接一侧需要访问另一侧的端口时使用它。
+
+OpenChamber 支持三种转发类型：
+
+- **Local (-L)** — 在你的电脑上打开一个端口，连接到远程机器上的内容。
+- **Remote (-R)** — 在远程机器上打开一个端口，连接回你的电脑。
+- **Dynamic (-D)** — 通过 SSH 连接打开本地 SOCKS proxy。
+
+对于大多数运行在远程机器上的 app preview 和 dashboard，请使用 **Local (-L)**。
+
+## 使用 SOCKS proxy
+
+如果你希望电脑上的其他工具通过远程机器访问网络，请选择 **Dynamic (-D)**。OpenChamber 会为这个 SSH 连接打开一个本地 SOCKS proxy 端口。
+
+连接 ready 后，从转发行复制或使用本地 proxy 地址。把你的浏览器或工具配置为使用它作为 SOCKS5 proxy。
+
+## 保持私有
+
+本地 bind host 请使用 `127.0.0.1` 或 `localhost`，除非你明确希望网络中的其他设备访问这个转发端口。
+
+## 相关内容
+
+- [远程实例](/zh-cn/remote-instances/) — 将桌面应用连接到另一台机器上的 OpenChamber
+- [远程访问](/zh-cn/troubleshooting/remote-access/) — 当 SSH 或远程访问无法连接时

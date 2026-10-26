@@ -1,0 +1,81 @@
+import { StrictMode } from 'react'
+import { createRoot } from 'react-dom/client'
+import './styles/fonts'
+import './styles/katex-css'
+import './index.css'
+import App from './App.tsx'
+import { SessionAuthGate } from './components/auth/SessionAuthGate'
+import { ThemeSystemProvider } from './contexts/ThemeSystemContext'
+import { ThemeProvider } from './components/providers/ThemeProvider'
+import './lib/debug'
+import { initializeAppearancePreferences } from './lib/persistence'
+import { startAppearanceAutoSave } from './lib/appearanceAutoSave'
+import { applyPersistedDirectoryPreferences } from './lib/directoryPersistence'
+import { preloadMarkdownRenderer } from './components/chat/markdownRendererLoader'
+import { startTypographyWatcher } from './lib/typographyWatcher'
+import { startModelPrefsAutoSave } from './lib/modelPrefsAutoSave'
+import { initializeLocale, I18nProvider } from './lib/i18n'
+import type { RuntimeAPIs } from './lib/api/types'
+import { installRuntimeEndpointReset } from './apps/runtimeEndpointReset'
+import { forgetLayoutForSafeStart, isDesktopSafeStart } from './lib/desktopSafeStart'
+import { prefetchOpenCodeCompatibility } from './components/update/openCodeCompatibilityCheck'
+
+declare global {
+  interface Window {
+    __OPENCHAMBER_RUNTIME_APIS__?: RuntimeAPIs;
+  }
+}
+
+const runtimeAPIs = (typeof window !== 'undefined' && window.__OPENCHAMBER_RUNTIME_APIS__) || (() => {
+  throw new Error('Runtime APIs not provided for legacy UI entrypoint.');
+})();
+
+initializeLocale();
+if (isDesktopSafeStart()) forgetLayoutForSafeStart();
+installRuntimeEndpointReset();
+prefetchOpenCodeCompatibility();
+
+// Initialize settings asynchronously — the app renders with defaults first
+// and hydrates once persisted preferences are applied. Users with non-default
+// themes may briefly see default appearance on cold start; accepted trade-off
+// for faster time-to-first-paint.
+// Only local preferences load here. Server settings are fetched once, by
+// SessionAuthGate after authentication: a fetch from here duplicated that read
+// on every start, and failed on a password-protected server.
+void initializeAppearancePreferences().then(() => {
+  void applyPersistedDirectoryPreferences().catch((err) => {
+    console.error('[main] settings init failed:', err);
+  });
+
+  // Start watchers regardless of whether secondary settings succeed.
+  startAppearanceAutoSave();
+  startModelPrefsAutoSave();
+  startTypographyWatcher();
+}).catch((err) => {
+  console.error('[main] appearance init failed:', err);
+});
+
+
+const rootElement = document.getElementById('root');
+if (!rootElement) {
+  throw new Error('Root element not found');
+}
+
+// The first session opened after load renders its messages through the lazy
+// markdown chunk; fetching it now, while the app boots, means that open shows
+// text instead of empty message boxes until the chunk arrives.
+preloadMarkdownRenderer();
+
+createRoot(rootElement).render(
+  <StrictMode>
+    <I18nProvider>
+      <ThemeSystemProvider>
+        <ThemeProvider>
+          <SessionAuthGate>
+            <App apis={runtimeAPIs} />
+          </SessionAuthGate>
+        </ThemeProvider>
+      </ThemeSystemProvider>
+    </I18nProvider>
+  </StrictMode>,
+);

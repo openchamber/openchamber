@@ -1,0 +1,119 @@
+{
+  "metadata": {
+    "id": "vesper-dark",
+    "name": "Vesper",
+    "variant": "dark",
+    "description": "Vesper",
+    "version": "1.0.0",
+    "tags": [
+      "dark",
+      "palette"
+    ]
+  },
+  "colors": {
+    "primary": {
+      "base": "#FFC799",
+      "hover": "#ffcba1",
+      "active": "#ffd0a9",
+      "muted": "#ffc79980"
+    },
+    "surface": {
+      "background": "#0f0f0f",
+      "foreground": "#d9d9d9",
+      "muted": "#080808",
+      "mutedForeground": "#8f8f8f",
+      "elevated": "#191919",
+      "subtle": "#151515"
+    },
+    "interactive": {
+      "border": "#ffffff0c",
+      "selection": "#484848a8",
+      "borderHover": "#ffffff33",
+      "borderFocus": "#f4bc8d",
+      "focus": "#f4bc8d",
+      "focusRing": "#f4bc8d",
+      "cursor": "#ffffff",
+      "hover": "#ffffff0f",
+      "active": "#ffffff14"
+    },
+    "status": {
+      "error": "#FF8080",
+      "errorBackground": "#ff808029",
+      "errorBorder": "#ff808073",
+      "warning": "#FFC799",
+      "warningBackground": "#ffc79929",
+      "warningBorder": "#ffc79973",
+      "success": "#80b888",
+      "successBackground": "#80b88829",
+      "successBorder": "#80b88873",
+      "info": "#83afe0",
+      "infoBackground": "#83afe029",
+      "infoBorder": "#83afe073"
+    },
+    "syntax": {
+      "base": {
+        "background": "#0b0b0b",
+        "comment": "#8b8b8b",
+        "keyword": "#a0a0a0",
+        "string": "#99ffe4",
+        "number": "#ffc799",
+        "function": "#ffc799",
+        "variable": "#ffffff",
+        "type": "#ffc799",
+        "operator": "#dbdbdb"
+      },
+      "tokens": {
+        "parameter": "#ffffff",
+        "boolean": "#ffc799",
+        "punctuation": "#dbdbdb",
+        "stringEscape": "#ffc799",
+        "keywordImport": "#a0a0a0",
+        "tag": "#99ffe4",
+        "regex": "#ffffff"
+      },
+      "highlights": {
+        "diffAdded": "#b3fee9",
+        "diffAddedBackground": "#00130e",
+        "diffRemoved": "#fbc4c1",
+        "diffRemovedBackground": "#240103",
+        "diffModified": "#ffba92",
+        "diffModifiedBackground": "#ffba9229",
+        "lineNumber": "#dbdbdb",
+        "lineNumberActive": "#ffffff"
+      }
+    },
+    "pr": {
+      "blocked": "#d99464",
+      "merged": "#b79bd9"
+    },
+    "chat": {
+      "background": "#0f0f0f",
+      "userMessageBackground": "#211b16",
+      "divider": "#ffffff19"
+    },
+    "markdown": {
+      "link": "#FFC799",
+      "linkHover": "#ffcba1",
+      "inlineCode": "#d1fff1",
+      "inlineCodeBackground": "#151515",
+      "blockquote": "#8f8f8f",
+      "blockquoteBorder": "#ffffff19",
+      "listMarker": "#ffc79999",
+      "bold": "#dedede",
+      "italic": "#d9d9d9",
+      "hr": "#ffffff0c"
+    },
+    "tools": {
+      "border": "#ffffff0e",
+      "icon": "#8f8f8f",
+      "title": "#d9d9d9",
+      "description": "#8f8f8f",
+      "edit": {
+        "addedBackground": "#00130e",
+        "removedBackground": "#240103",
+        "modifiedBackground": "#ffba9229",
+        "lineNumber": "#dbdbdb"
+      }
+    }
+  }
+}

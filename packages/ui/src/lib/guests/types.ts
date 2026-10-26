@@ -1,0 +1,86 @@
+import type {
+  AttachContribution,
+  FileEditorContribution,
+  GuestActionContribution,
+  GuestCapability,
+  GuestCommandContribution,
+  GuestSurfaceDock,
+  GuestToolContribution,
+  PublicService,
+  PublicGuestCapabilities,
+  PublicIntegration,
+  PublicSourceControl,
+} from '@openchamber/sdk';
+
+export type GuestSource = 'bundled' | 'path' | 'zip' | 'git';
+
+export type InstalledGuest = {
+  id: string;
+  /** Opaque server-issued identity for device-local extension preferences. */
+  storageId?: string;
+  name: string;
+  icon: string;
+  /** Visible panel page. Absent for background-only and tools-only extensions. */
+  entry?: string;
+  /** Edge and thickness of `entry` docked beside a shared surface (`PanelContribution.dock`/`size`). */
+  entryDock?: GuestSurfaceDock;
+  entrySize?: number;
+  /** Sandboxed HTML loaded on demand for actions and commands, without a rail surface. */
+  backgroundEntry?: string;
+  /** npm package.json version when the package declared one. */
+  version?: string;
+  attach?: AttachContribution;
+  /** HTML the attach dialog loads instead of `entry`; only sent for dialog-mode guests that declared one. */
+  attachEntry?: string;
+  pageEntry?: string;
+  pageTitle?: string;
+  /** HTML of the extension's Work Status section (`contributes.statusSection`); may exist without `entry`. */
+  statusEntry?: string;
+  /** Service path the host reads and draws the section from, without a frame; wins over `statusEntry`. */
+  statusSource?: { path: string; interval: number };
+  /** Section header title; the extension name when absent. */
+  statusTitle?: string;
+  /** Starting frame height in CSS px before the guest reports its own. */
+  statusHeight?: number;
+  /** Initial expansion state when the user has not saved a preference. */
+  statusDefaultExpanded?: boolean;
+  /** Whether this status section needs the Work Status directory. */
+  statusRequiresProject?: boolean;
+  integration?: PublicIntegration;
+  /** Declared `contributes.filesystem` patterns, shown on the approval dialog. */
+  filesystem?: string[];
+  /** Declared `contributes.origins`: the frame may exchange data with them once approved. */
+  origins?: string[];
+  service?: PublicService;
+  /** The Git host from `contributes.sourceControl`, when the service provides `source-control`. */
+  sourceControl?: PublicSourceControl;
+  /** Declared `contributes.actions`; the UI shows them only for an active guest. */
+  actions?: GuestActionContribution[];
+  /** Declared `contributes.commands`; the composer routes them only for an active guest. */
+  commands?: GuestCommandContribution[];
+  /** Declared `contributes.tools`; the chat applies them only for an active guest. */
+  tools?: GuestToolContribution[];
+  /** Declared `contributes.fileEditors`; the Files view opens matching files in them only for an active guest. */
+  fileEditors?: FileEditorContribution[];
+  /** What the package asks for and what the user approved at install. */
+  capabilities: PublicGuestCapabilities;
+  /** Capabilities enterprise mode refuses this package: it is not from a repository the administrator allowed. */
+  enterpriseBlocked?: GuestCapability[];
+  source?: GuestSource;
+  path?: string | null;
+  /** False when the user disabled the extension. Omitted/true means enabled. */
+  enabled?: boolean;
+  /** Where a git install came from; the `ref` is the pinned branch or tag when the URL had `#ref`. */
+  origin?: GuestGitOrigin;
+  /** Set when the server's last update check found a newer `version` at `origin`. Git installs only. */
+  update?: GuestUpdate;
+};
+
+/** A catalog row this build could not read; `id` and `name` are null when they were unreadable too. */
+export type UnreadableGuest = { id: string | null; name: string | null; builtIn: boolean };
+
+export type GuestCatalog = { guests: InstalledGuest[]; unreadable: UnreadableGuest[] };
+
+export type GuestGitOrigin = { url: string; ref?: string };
+
+export type GuestUpdate = { version: string };

@@ -1,0 +1,102 @@
+{
+  "$schema": "https://unpkg.com/knip@latest/schema.json",
+  "ignore": [
+    "packages/mobile/android/app/src/main/assets/public/**",
+    "packages/mobile/ios/App/App/public/**",
+    "packages/sdk/examples/**",
+  ],
+  "workspaces": {
+    ".": {
+      "entry": [
+        "fix-deprecation.js",
+        "oxlint.config.ts",
+        "oxlint.anti-slop.config.ts",
+        "postcss.config.js",
+        "scripts/**/*.{js,cjs,mjs,ts}"
+      ],
+      "project": [
+        "*.{js,cjs,mjs,ts}",
+        "scripts/**/*.{js,cjs,mjs,ts}"
+      ]
+    },
+    "packages/ui": {
+      "entry": [
+        "src/apps/renderVSCodeApp.tsx",
+        "src/**/*.bench.{ts,tsx}",
+        "src/**/*.{test,spec}.{js,cjs,mjs,jsx,ts,tsx}",
+        "src/**/__tests__/**/*.{js,cjs,mjs,jsx,ts,tsx}"
+      ],
+      "project": [
+        "src/**/*.{ts,tsx}"
+      ]
+    },
+    "packages/web": {
+      "entry": [
+        "bin/cli.js",
+        "src/mobile-main.tsx",
+        "src/mini-chat-main.tsx",
+        "src/main.tsx",
+        "src/sw.ts",
+        "bin/**/*.{test,spec}.{js,cjs,mjs}",
+        "server/**/*.{test,spec}.{js,cjs,mjs}",
+        "src/**/*.{test,spec}.{ts,tsx}"
+      ],
+      "project": [
+        "bin/**/*.js",
+        "server/**/*.{js,mjs,cjs}",
+        "src/**/*.{ts,tsx}"
+      ]
+    },
+    "packages/electron": {
+      "entry": [
+        "entry.mjs",
+        "main.mjs",
+        "preload.mjs",
+        "browser-panel-preload.cjs",
+        "tray.mjs",
+        "ssh-manager.mjs",
+        "opencode-cwd.mjs",
+        "*.{test,spec}.{js,cjs,mjs}",
+        "scripts/**/*.{js,cjs,mjs}"
+      ],
+      "project": [
+        "*.{js,cjs,mjs}",
+        "scripts/**/*.{js,cjs,mjs}"
+      ]
+    },
+    "packages/vscode": {
+      "entry": [
+        "src/extension.ts",
+        "webview/main.tsx",
+        "src/**/*.{test,spec}.{js,cjs,mjs,ts,tsx}",
+        "webview/**/*.{test,spec}.{js,cjs,mjs,ts,tsx}"
+      ],
+      "project": [
+        "src/**/*.{ts,tsx}",
+        "webview/**/*.{ts,tsx}"
+      ]
+    },
+    "packages/sdk": {
+      "entry": [
+        "src/index.ts",
+        "src/ui/index.ts",
+        "src/schemas.ts",
+        "src/**/*.{test,spec}.ts",
+        "scripts/**/*.{test,spec}.ts"
+      ],
+      "project": [
+        "src/**/*.ts",
+        "scripts/**/*.ts"
+      ]
+    },
+    "packages/mobile": {
+      "entry": [
+        "scripts/**/*.{js,cjs,mjs,ts}"
+      ],
+      "project": [
+        "*.{js,cjs,mjs,ts}",
+        "scripts/**/*.{js,cjs,mjs,ts}"
+      ]
+    }
+  }
+}

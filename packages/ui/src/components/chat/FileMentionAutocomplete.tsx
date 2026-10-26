@@ -1,0 +1,726 @@
+import React from 'react';
+import { cn, truncatePathMiddle } from '@/lib/utils';
+import { useFileSearchStore } from '@/stores/useFileSearchStore';
+import { useConfigStore } from '@/stores/useConfigStore';
+import { filterVisibleAgents } from '@/stores/useAgentsStore';
+import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
+import { useDebouncedValue } from '@/hooks/useDebouncedValue';
+import { useChatSearchDirectory } from '@/hooks/useChatSearchDirectory';
+import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import type { ProjectFileSearchHit } from '@/lib/opencode/client';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
+import { Icon } from "@/components/icon/Icon";
+import { useDirectoryShowHidden } from '@/lib/directoryShowHidden';
+import { useFilesViewShowGitignored } from '@/lib/filesViewShowGitignored';
+import { useI18n } from '@/lib/i18n';
+import { useUIStore } from '@/stores/useUIStore';
+import { useMobileAutocompleteMaxHeight } from './useMobileAutocompleteMaxHeight';
+import { isFileMissingError } from '@/lib/api/files-errors';
+import {
+  filterStaleRecentFiles,
+  mentionServerQuery,
+  rankFileMentionResults,
+} from './fileMentionResults';
+import { matchesRankQuery, rankByQuery } from '@/lib/search/fuzzySearch';
+import { AutocompleteRowDetail } from './composer/ui/AutocompleteRowParts';
+import { rankSessionMentions } from './sessionMentionResults';
+import type { Session } from '@/lib/opencode/model';
+import { ensureGlobalSessionsLoaded, resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useAutocompleteSelectionScroll } from './composer/ui/useAutocompleteSelectionScroll';
+
+/** Subagents listed before the user types; the rest are a keystroke away. */
+const AGENTS_SHOWN_WITHOUT_QUERY = 6;
+
+type FileInfo = ProjectFileSearchHit;
+type AgentInfo = {
+  name: string;
+  displayName: string;
+  description?: string;
+  mode?: string | null;
+};
+
+export interface FileMentionHandle {
+  handleKeyDown: (key: string) => void;
+}
+
+interface FileMentionAutocompleteProps {
+  searchQuery: string;
+  onFileSelect: (file: FileInfo) => void;
+  onAgentSelect?: (agentName: string) => void;
+  /** Lists other sessions by title once the user types; without it, none. */
+  onSessionSelect?: (session: Session) => void;
+  onClose: () => void;
+  style?: React.CSSProperties;
+}
+
+export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileMentionAutocompleteProps>(({
+  searchQuery,
+  onFileSelect,
+  onAgentSelect,
+  onSessionSelect,
+  onClose,
+  style,
+}, ref) => {
+  const { t } = useI18n();
+  const currentDirectory = useChatSearchDirectory() ?? '';
+  const activeProjectId = useProjectsStore((state) => state.activeProjectId);
+  const activeProjectPath = useProjectsStore(
+    React.useCallback(
+      (state) => state.projects.find((project) => project.id === activeProjectId)?.path ?? null,
+      [activeProjectId],
+    ),
+  );
+  const projectRoot = React.useMemo(() => {
+    const candidate = activeProjectPath || currentDirectory;
+    return candidate ? candidate.replace(/\\/g, '/').replace(/\/+$/, '') : null;
+  }, [activeProjectPath, currentDirectory]);
+  const projectTabs = useFilesViewTabsStore(
+    React.useCallback(
+      (state) => (projectRoot ? state.byRoot[projectRoot] : undefined),
+      [projectRoot],
+    ),
+  );
+  const { files: filesApi } = useRuntimeAPIs();
+  const removeUnselectedOpenPath = useFilesViewTabsStore((state) => state.removeUnselectedOpenPath);
+  const [staleRecentPaths, setStaleRecentPaths] = React.useState<ReadonlySet<string>>(() => new Set());
+  const verifiedPathsRef = React.useRef<Set<string>>(new Set());
+  // Subscribed, not read once: the session's directory may still be loading its agents.
+  const configAgents = useConfigStore((state) => state.agents);
+  const searchFiles = useFileSearchStore((state) => state.searchFiles);
+  const debouncedQuery = useDebouncedValue(searchQuery, 180);
+  const showHidden = useDirectoryShowHidden();
+  const showGitignored = useFilesViewShowGitignored();
+  const [files, setFiles] = React.useState<FileInfo[]>([]);
+  const [directories, setDirectories] = React.useState<FileInfo[]>([]);
+  // Derived, not stored: the subagent list follows the registry, and only the
+  // ranking follows the query, in the same render as the keystroke.
+  const subagents = React.useMemo<AgentInfo[]>(() => filterVisibleAgents(configAgents)
+    .filter((agent) => agent.mode && agent.mode !== 'primary')
+    .map((agent) => ({
+      name: agent.name,
+      displayName: agent.displayName,
+      description: agent.description,
+      mode: agent.mode,
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name)), [configAgents]);
+  const agents = React.useMemo(
+    () => rankByQuery(subagents, searchQuery ?? '', (agent) => [agent.name, agent.displayName, agent.description]),
+    [searchQuery, subagents],
+  );
+  const [loading, setLoading] = React.useState(false);
+  const pendingSearchRef = React.useRef(0);
+  const [selectedIndex, setSelectedIndex] = React.useState(0);
+  const selectedIndexRef = React.useRef(0);
+  const [marqueeWidth, setMarqueeWidth] = React.useState(360);
+  // Only the selected row scrolls an overflowing path, so only it is measured.
+  const [selectedOverflow, setSelectedOverflow] = React.useState<{ index: number; duration: number } | null>(null);
+  const itemRefs = React.useRef<(HTMLDivElement | null)[]>([]);
+  const { listRef, onKeyboardNavigate } = useAutocompleteSelectionScroll(selectedIndex, itemRefs);
+  const labelRefs = React.useRef<(HTMLSpanElement | null)[]>([]);
+  const measureRefs = React.useRef<(HTMLSpanElement | null)[]>([]);
+  const containerRef = React.useRef<HTMLDivElement | null>(null);
+  const isMobile = useUIStore((state) => state.isMobile);
+  const mobileMaxHeight = useMobileAutocompleteMaxHeight(containerRef, true);
+  const normalizedSearchQuery = (searchQuery ?? '').trim();
+
+  React.useEffect(() => {
+    setStaleRecentPaths(new Set());
+    verifiedPathsRef.current.clear();
+  }, [projectRoot]);
+
+  React.useEffect(() => {
+    if (currentDirectory) {
+      useFileSearchStore.getState().invalidateDirectory(currentDirectory);
+    }
+  }, [currentDirectory]);
+
+  const recentFiles = React.useMemo(() => {
+    if (!projectRoot || !projectTabs) {
+      return [] as FileInfo[];
+    }
+
+    const ordered = [
+      projectTabs.selectedPath,
+      ...projectTabs.openPaths.slice().reverse(),
+    ].filter((value): value is string => typeof value === 'string' && value.length > 0);
+
+    const seen = new Set<string>();
+    const mapped = ordered
+      .filter((filePath) => {
+        if (seen.has(filePath)) return false;
+        seen.add(filePath);
+        const relative = filePath.startsWith(`${projectRoot}/`) ? filePath.slice(projectRoot.length + 1) : filePath;
+        return matchesRankQuery([relative], normalizedSearchQuery);
+      })
+      .slice(0, 6)
+      .map((filePath) => {
+        const normalizedPath = filePath.replace(/\\/g, '/');
+        const name = normalizedPath.split('/').filter(Boolean).pop() || normalizedPath;
+        const relativePath = normalizedPath.startsWith(`${projectRoot}/`)
+          ? normalizedPath.slice(projectRoot.length + 1)
+          : normalizedPath;
+        return {
+          name,
+          path: normalizedPath,
+          relativePath,
+          extension: name.includes('.') ? name.split('.').pop()?.toLowerCase() : undefined,
+        } satisfies FileInfo;
+      });
+
+    return mapped;
+  }, [normalizedSearchQuery, projectRoot, projectTabs]);
+
+  const recentCandidatePathsKey = React.useMemo(
+    () => recentFiles.map((file) => file.path).join('\n'),
+    [recentFiles],
+  );
+
+  React.useEffect(() => {
+    if (!projectRoot || !filesApi?.statFile || recentCandidatePathsKey.length === 0) {
+      return;
+    }
+
+    const candidatePaths = recentCandidatePathsKey.split('\n').filter(Boolean);
+    const unverifiedCandidates = candidatePaths.filter((path) => !verifiedPathsRef.current.has(path));
+    if (unverifiedCandidates.length === 0) {
+      return;
+    }
+
+    let cancelled = false;
+
+    void Promise.all(
+      unverifiedCandidates.map(async (filePath) => {
+        try {
+          const stat = await filesApi.statFile?.(filePath, { directory: projectRoot });
+          if (cancelled) return;
+          verifiedPathsRef.current.add(filePath);
+          if (stat && !stat.isFile) {
+            setStaleRecentPaths((prev) => {
+              if (prev.has(filePath)) return prev;
+              const next = new Set(prev);
+              next.add(filePath);
+              return next;
+            });
+            removeUnselectedOpenPath(projectRoot, filePath);
+          }
+        } catch (error) {
+          if (cancelled) return;
+          verifiedPathsRef.current.add(filePath);
+          if (isFileMissingError(error)) {
+            setStaleRecentPaths((prev) => {
+              if (prev.has(filePath)) return prev;
+              const next = new Set(prev);
+              next.add(filePath);
+              return next;
+            });
+            removeUnselectedOpenPath(projectRoot, filePath);
+          }
+        }
+      }),
+    );
+
+    return () => {
+      cancelled = true;
+    };
+  }, [filesApi, projectRoot, recentCandidatePathsKey, removeUnselectedOpenPath]);
+
+  const visibleAgents = React.useMemo(
+    () => normalizedSearchQuery.length > 0 ? agents : agents.slice(0, AGENTS_SHOWN_WITHOUT_QUERY),
+    [agents, normalizedSearchQuery.length],
+  );
+  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+  // Ranked from a snapshot per query (and once more when the list arrives),
+  // not the live list: other sessions update all the time, which must neither
+  // re-rank thousands of titles nor move the row under the keyboard.
+  const sessionsLoaded = useGlobalSessionsStore((state) => state.hasLoaded);
+  const listsSessions = onSessionSelect !== undefined;
+  React.useEffect(() => {
+    if (listsSessions) void ensureGlobalSessionsLoaded().catch(() => undefined);
+  }, [listsSessions]);
+  const visibleSessions = React.useMemo(() => {
+    if (!listsSessions || !sessionsLoaded) return [];
+    const { activeSessions, archivedSessions } = useGlobalSessionsStore.getState();
+    return rankSessionMentions([...activeSessions, ...archivedSessions], normalizedSearchQuery, { currentSessionId, projectRoot });
+  }, [currentSessionId, listsSessions, normalizedSearchQuery, projectRoot, sessionsLoaded]);
+  const visibleRecentFiles = React.useMemo(
+    () => filterStaleRecentFiles(recentFiles, staleRecentPaths),
+    [recentFiles, staleRecentPaths],
+  );
+  const visibleResults = React.useMemo(
+    () => rankFileMentionResults(files, directories, normalizedSearchQuery, 20),
+    [files, directories, normalizedSearchQuery],
+  );
+
+  React.useEffect(() => {
+    const handlePointerDown = (event: MouseEvent | TouchEvent) => {
+      const target = event.target as Node | null;
+      if (!target || !containerRef.current) {
+        return;
+      }
+      if (containerRef.current.contains(target)) {
+        return;
+      }
+      onClose();
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown, true);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown, true);
+    };
+  }, [onClose]);
+
+  React.useEffect(() => {
+    if (!currentDirectory) {
+      setFiles([]);
+      return;
+    }
+
+    const serverQuery = mentionServerQuery(debouncedQuery ?? '');
+
+    if (!serverQuery) {
+      setFiles([]);
+      return;
+    }
+
+    let cancelled = false;
+    pendingSearchRef.current++;
+    setLoading(true);
+
+    searchFiles(currentDirectory, serverQuery, 80, {
+      includeHidden: showHidden,
+      respectGitignore: !showGitignored,
+      type: 'file',
+    })
+      .then((hits) => {
+        if (cancelled) {
+          return;
+        }
+
+        const recentSet = new Set(visibleRecentFiles.map((file) => file.path));
+        setFiles(hits.filter((hit) => !recentSet.has(hit.path)));
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setFiles([]);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          pendingSearchRef.current--;
+          if (pendingSearchRef.current <= 0) {
+            pendingSearchRef.current = 0;
+            setLoading(false);
+          }
+        }
+      });
+
+    return () => {
+      cancelled = true;
+      pendingSearchRef.current = Math.max(0, pendingSearchRef.current - 1);
+      if (pendingSearchRef.current <= 0) {
+        setLoading(false);
+      }
+    };
+  }, [currentDirectory, debouncedQuery, visibleRecentFiles, searchFiles, showHidden, showGitignored]);
+
+  React.useEffect(() => {
+    if (!currentDirectory) {
+      setDirectories([]);
+      return;
+    }
+
+    const serverQuery = mentionServerQuery(debouncedQuery ?? '');
+
+    if (!serverQuery) {
+      setDirectories([]);
+      return;
+    }
+
+    let cancelled = false;
+    pendingSearchRef.current++;
+    setLoading(true);
+
+    searchFiles(currentDirectory, serverQuery, 20, {
+      includeHidden: showHidden,
+      respectGitignore: !showGitignored,
+      type: 'directory',
+    })
+      .then((hits) => {
+        if (!cancelled) {
+          setDirectories(hits);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setDirectories([]);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          pendingSearchRef.current--;
+          if (pendingSearchRef.current <= 0) {
+            pendingSearchRef.current = 0;
+            setLoading(false);
+          }
+        }
+      });
+
+    return () => {
+      cancelled = true;
+      pendingSearchRef.current = Math.max(0, pendingSearchRef.current - 1);
+      if (pendingSearchRef.current <= 0) {
+        setLoading(false);
+      }
+    };
+  }, [currentDirectory, debouncedQuery, searchFiles, showHidden, showGitignored]);
+
+  React.useEffect(() => {
+    setSelectedIndex(0);
+    setSelectedOverflow(null);
+  }, [visibleResults, visibleRecentFiles, visibleAgents.length, visibleSessions]);
+
+  React.useEffect(() => {
+    selectedIndexRef.current = selectedIndex;
+  }, [selectedIndex]);
+
+  React.useEffect(() => {
+    let frameId: number | null = null;
+
+    const updateOverflow = () => {
+      if (frameId !== null) {
+        cancelAnimationFrame(frameId);
+      }
+      frameId = requestAnimationFrame(() => {
+        const node = labelRefs.current[selectedIndex];
+        if (!node) {
+          setSelectedOverflow(null);
+          return;
+        }
+        const measureNode = measureRefs.current[selectedIndex];
+        const fullWidth = measureNode?.offsetWidth ?? node.scrollWidth;
+        const overflowPx = Math.max(0, fullWidth - node.clientWidth);
+        const duration = Math.max(0.6, overflowPx / 110);
+        setSelectedOverflow((current) => {
+          if (overflowPx <= 8) return null;
+          return current?.index === selectedIndex && current.duration === duration
+            ? current
+            : { index: selectedIndex, duration };
+        });
+      });
+    };
+
+    updateOverflow();
+    window.addEventListener('resize', updateOverflow);
+
+    return () => {
+      if (frameId !== null) {
+        cancelAnimationFrame(frameId);
+      }
+      window.removeEventListener('resize', updateOverflow);
+    };
+  }, [selectedIndex, visibleAgents, visibleRecentFiles, visibleResults]);
+
+  React.useEffect(() => {
+    const labelNode = labelRefs.current[selectedIndex];
+    if (!labelNode) {
+      return;
+    }
+
+    const updateWidth = () => {
+      const width = labelNode.clientWidth;
+      if (width > 0) {
+        setMarqueeWidth(width);
+      }
+    };
+
+    updateWidth();
+
+    if (typeof ResizeObserver === 'undefined') {
+      return;
+    }
+
+    const observer = new ResizeObserver(updateWidth);
+    observer.observe(labelNode);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [selectedIndex]);
+
+  const handleFileSelect = React.useCallback((file: FileInfo) => {
+    onFileSelect(file);
+  }, [onFileSelect]);
+
+  const handleAgentPick = React.useCallback((agentName: string) => {
+    onAgentSelect?.(agentName);
+  }, [onAgentSelect]);
+
+  React.useImperativeHandle(ref, () => ({
+    handleKeyDown: (key: string) => {
+      if (key === 'Escape') {
+        onClose();
+        return;
+      }
+
+      const total = visibleAgents.length + visibleSessions.length + visibleRecentFiles.length + visibleResults.length;
+      if (total === 0) {
+        return;
+      }
+
+      if (key === 'ArrowDown') {
+        onKeyboardNavigate();
+        setSelectedIndex((prev) => (prev + 1) % total);
+        return;
+      }
+
+      if (key === 'ArrowUp') {
+        onKeyboardNavigate();
+        setSelectedIndex((prev) => (prev - 1 + total) % total);
+        return;
+      }
+
+      if (key === 'Enter' || key === 'Tab') {
+        const safeIndex = ((selectedIndexRef.current % total) + total) % total;
+        if (safeIndex < visibleAgents.length) {
+          const agent = visibleAgents[safeIndex];
+          if (agent) {
+            handleAgentPick(agent.name);
+          }
+          return;
+        }
+        const recentIndex = safeIndex - visibleAgents.length;
+        const fileCount = visibleRecentFiles.length + visibleResults.length;
+        if (recentIndex >= fileCount) {
+          const session = visibleSessions[recentIndex - fileCount];
+          if (session) onSessionSelect?.(session);
+          return;
+        }
+        const selectedFile = recentIndex < visibleRecentFiles.length
+          ? visibleRecentFiles[recentIndex]
+          : visibleResults[recentIndex - visibleRecentFiles.length];
+        if (selectedFile) {
+          handleFileSelect(selectedFile);
+        }
+      }
+    }
+  }), [visibleResults, visibleRecentFiles, visibleSessions, visibleAgents, onClose, handleFileSelect, handleAgentPick, onSessionSelect, onKeyboardNavigate]);
+
+  const getFileIcon = (file: FileInfo) => {
+    const ext = file.extension?.toLowerCase();
+    switch (ext) {
+      case 'ts':
+      case 'tsx':
+      case 'js':
+      case 'jsx':
+        return <Icon name="code" className="h-3.5 w-3.5 text-[var(--status-info)]" />;
+      case 'json':
+        return <Icon name="code" className="h-3.5 w-3.5 text-[var(--status-warning)]" />;
+      case 'md':
+      case 'mdx':
+        return <Icon name="file" className="h-3.5 w-3.5 text-muted-foreground" />;
+      case 'png':
+      case 'jpg':
+      case 'jpeg':
+      case 'gif':
+      case 'svg':
+        return <Icon name="file-image" className="h-3.5 w-3.5 text-[var(--status-success)]" />;
+      default:
+        return <Icon name="file-pdf" className="h-3.5 w-3.5 text-muted-foreground" />;
+    }
+  };
+
+  return (
+      <div
+        ref={containerRef}
+        className="absolute z-[100] min-w-0 w-full max-w-[560px] max-h-64 oc-glass-popover oc-glass-floating rounded-xl bottom-full mb-2 inset-s-0 flex flex-col"
+        style={mobileMaxHeight !== undefined ? { ...style, maxHeight: mobileMaxHeight } : style}
+      >
+        <ScrollableOverlay ref={listRef} preventOverscroll outerClassName="flex-1 min-h-0" className="p-1">
+        {loading ? (
+          <div className="flex items-center justify-center py-4">
+            <Icon name="refresh" className="h-4 w-4 animate-spin text-muted-foreground" />
+          </div>
+        ) : (
+          <div>
+            {visibleAgents.map((agent, index) => {
+              const isSelected = selectedIndex === index;
+              return (
+                <div
+                  key={`agent-${agent.name}`}
+                  ref={(el) => { itemRefs.current[index] = el; }}
+                  className={cn(
+                    'flex items-center gap-2 px-2 py-1.5 cursor-pointer typography-ui-label rounded-lg',
+                    isSelected && 'bg-interactive-selection',
+                  )}
+                  onClick={() => handleAgentPick(agent.name)}
+                  onMouseMove={() => { setSelectedIndex(index); }}
+                >
+                  <span className="max-w-[60%] shrink-0 truncate font-semibold">@{agent.name}</span>
+                  <AutocompleteRowDetail description={agent.description} />
+                </div>
+              );
+            })}
+            {visibleAgents.length < agents.length && (
+              <div className="px-2 py-1 typography-meta text-muted-foreground">
+                {t('chat.fileMentionAutocomplete.searchMoreAgents')}
+              </div>
+            )}
+            {visibleAgents.length > 0 && (visibleRecentFiles.length > 0 || visibleResults.length > 0 || visibleSessions.length > 0) && (
+              <div className="my-1 border-t border-border/60" />
+            )}
+            {visibleRecentFiles.map((file, index) => {
+              const rowIndex = visibleAgents.length + index;
+              const relativePath = file.relativePath || file.name;
+              const displayPath = truncatePathMiddle(relativePath, { maxLength: 60 });
+              const isSelected = selectedIndex === rowIndex;
+              const isOverflowing = selectedOverflow?.index === rowIndex;
+              const marqueeDuration = selectedOverflow?.index === rowIndex ? selectedOverflow.duration : 2.6;
+
+              return (
+                <div
+                  key={`recent-${file.path}`}
+                  ref={(el) => { itemRefs.current[rowIndex] = el; }}
+                  className={cn(
+                    "flex items-center gap-2 px-2 py-1.5 cursor-pointer typography-ui-label rounded-lg",
+                    isSelected && "bg-interactive-selection"
+                  )}
+                  onClick={() => handleFileSelect(file)}
+                  onMouseMove={() => { setSelectedIndex(rowIndex); }}
+                >
+                  {getFileIcon(file)}
+                  <span
+                    ref={(el) => { labelRefs.current[rowIndex] = el; }}
+                    // Paths read left to right in every language; the marquee and its fade assume it.
+                    dir="ltr"
+                    className="relative flex-1 min-w-0 overflow-hidden file-mention-marquee-container"
+                    style={isSelected ? {
+                      ['--file-mention-marquee-width' as string]: `${marqueeWidth}px`,
+                      ['--file-mention-marquee-duration' as string]: `${marqueeDuration}s`
+                    } : undefined}
+                    aria-label={relativePath}
+                  >
+                    <span
+                      ref={(el) => { measureRefs.current[rowIndex] = el; }}
+                      className="absolute invisible whitespace-nowrap pointer-events-none"
+                      aria-hidden
+                    >
+                      {relativePath}
+                    </span>
+                    {isOverflowing && isSelected ? (
+                      <span className="inline-block whitespace-nowrap file-mention-marquee">
+                        {relativePath}
+                      </span>
+                    ) : (
+                      <span className="block truncate">
+                        {displayPath}
+                      </span>
+                    )}
+                  </span>
+                </div>
+              );
+            })}
+            {visibleRecentFiles.length > 0 && visibleResults.length > 0 && (
+              <div className="my-1 border-t border-border/60" />
+            )}
+            {visibleResults.map((file, index) => {
+              const rowIndex = visibleAgents.length + visibleRecentFiles.length + index;
+              const relativePath = file.relativePath || file.name;
+              const displayPath = truncatePathMiddle(relativePath, { maxLength: 60 });
+              const isSelected = selectedIndex === rowIndex;
+              const isOverflowing = selectedOverflow?.index === rowIndex;
+              const marqueeDuration = selectedOverflow?.index === rowIndex ? selectedOverflow.duration : 2.6;
+
+              const item = (
+                <div
+                  ref={(el) => { itemRefs.current[rowIndex] = el; }}
+                    className={cn(
+                      "flex items-center gap-2 px-2 py-1.5 cursor-pointer typography-ui-label rounded-lg",
+                      isSelected && "bg-interactive-selection"
+                  )}
+                  onClick={() => handleFileSelect(file)}
+                  onMouseMove={() => { setSelectedIndex(rowIndex); }}
+                >
+                  {file.kind === 'directory'
+                    ? <Icon name="folder-3-fill" className="h-3.5 w-3.5 text-primary/60" />
+                    : getFileIcon(file)}
+                  <span
+                    ref={(el) => { labelRefs.current[rowIndex] = el; }}
+                    // Paths read left to right in every language; the marquee and its fade assume it.
+                    dir="ltr"
+                    className="relative flex-1 min-w-0 overflow-hidden file-mention-marquee-container"
+                    style={isSelected ? {
+                      ['--file-mention-marquee-width' as string]: `${marqueeWidth}px`,
+                      ['--file-mention-marquee-duration' as string]: `${marqueeDuration}s`
+                    } : undefined}
+                    aria-label={relativePath}
+                  >
+                    <span
+                      ref={(el) => { measureRefs.current[rowIndex] = el; }}
+                      className="absolute invisible whitespace-nowrap pointer-events-none"
+                      aria-hidden
+                    >
+                      {relativePath}
+                    </span>
+                    {isOverflowing && isSelected ? (
+                      <span className="inline-block whitespace-nowrap file-mention-marquee">
+                        {relativePath}
+                      </span>
+                    ) : (
+                      <span className="block truncate">
+                        {displayPath}
+                      </span>
+                    )}
+                  </span>
+                </div>
+              );
+
+              return (
+                <React.Fragment key={`${file.kind}-${file.path}`}>
+                  {item}
+                </React.Fragment>
+              );
+            })}
+            {visibleSessions.length > 0 && (visibleRecentFiles.length > 0 || visibleResults.length > 0) && (
+              <div className="my-1 border-t border-border/60" />
+            )}
+            {/* After the files: Enter on `@pack` keeps choosing the file it always did. */}
+            {visibleSessions.map((session, index) => {
+              const rowIndex = visibleAgents.length + visibleRecentFiles.length + visibleResults.length + index;
+              const directory = resolveGlobalSessionDirectory(session);
+              const project = directory ? directory.split('/').filter(Boolean).pop() : null;
+              const detail = [project, session.time.archived ? t('chat.fileMentionAutocomplete.sessionArchived') : null].filter(Boolean).join(' · ');
+              return (
+                <div
+                  key={`session-${session.id}`}
+                  ref={(el) => { itemRefs.current[rowIndex] = el; }}
+                  className={cn(
+                    'flex items-center gap-2 px-2 py-1.5 cursor-pointer typography-ui-label rounded-lg',
+                    selectedIndex === rowIndex && 'bg-interactive-selection',
+                  )}
+                  onClick={() => onSessionSelect?.(session)}
+                  onMouseMove={() => { setSelectedIndex(rowIndex); }}
+                >
+                  <Icon name="chat-3" className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  <span className="max-w-[60%] shrink-0 truncate font-medium">{session.title}</span>
+                  <AutocompleteRowDetail description={detail} />
+                </div>
+              );
+            })}
+            {visibleResults.length === 0 && visibleRecentFiles.length === 0 && visibleAgents.length === 0 && visibleSessions.length === 0 && (
+              <div className="px-2 py-1.5 typography-ui-label text-muted-foreground">
+                {t('chat.fileMentionAutocomplete.empty')}
+              </div>
+            )}
+          </div>
+        )}
+        </ScrollableOverlay>
+        {!isMobile && (
+          <div className="px-3 py-1.5 border-t typography-meta text-muted-foreground">
+            {t('chat.autocomplete.keyboardHint')}
+          </div>
+        )}
+    </div>
+  );
+});

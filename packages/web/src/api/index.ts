@@ -1,0 +1,55 @@
+import type { RuntimeAPIs } from '@openchamber/ui/lib/api/types';
+import { createDesktopThemeFileAPI } from '@openchamber/ui/lib/desktop';
+import {
+  createRuntimeUrlResolver,
+  getRuntimeUrlResolver,
+  setRuntimeUrlResolver,
+  type RuntimeUrlResolver,
+} from '@openchamber/ui/lib/runtime-url';
+import { useDirectoryStore } from '@openchamber/ui/stores/useDirectoryStore';
+import { createWebTerminalAPI } from './terminal';
+import { createWebGitAPI } from './git';
+import { createWebFilesAPI } from './files';
+import { createWebSettingsAPI } from './settings';
+import { createWebPermissionsAPI } from './permissions';
+import { createWebNotificationsAPI } from './notifications';
+import { createWebPushAPI } from './push';
+import { createWebTrackerAPI } from './trackers';
+import { createWebClientAuthAPI } from './clientAuth';
+import { createWebSourceControlAPI } from './source-control';
+
+interface WebAPIsOptions {
+  urls?: RuntimeUrlResolver;
+}
+
+const createActiveRuntimeUrlResolver = (): RuntimeUrlResolver => ({
+  api: (...args) => getRuntimeUrlResolver().api(...args),
+  authenticatedAsset: (...args) => getRuntimeUrlResolver().authenticatedAsset(...args),
+  assetWithUrlToken: (...args) => getRuntimeUrlResolver().assetWithUrlToken(...args),
+  auth: (...args) => getRuntimeUrlResolver().auth(...args),
+  health: (...args) => getRuntimeUrlResolver().health(...args),
+  rawFile: (...args) => getRuntimeUrlResolver().rawFile(...args),
+  sse: (...args) => getRuntimeUrlResolver().sse(...args),
+  websocket: (...args) => getRuntimeUrlResolver().websocket(...args),
+});
+
+export const createWebAPIs = (options: WebAPIsOptions = {}): RuntimeAPIs => {
+  const urls = options.urls ?? createRuntimeUrlResolver();
+  setRuntimeUrlResolver(urls);
+  const activeUrls = createActiveRuntimeUrlResolver();
+
+  return {
+   themeFiles: createDesktopThemeFileAPI(),
+  runtime: { platform: 'web', isDesktop: false, isVSCode: false, label: 'web' },
+  terminal: createWebTerminalAPI(),
+  git: createWebGitAPI(),
+  files: createWebFilesAPI({ urls: activeUrls, getDirectory: () => useDirectoryStore.getState().currentDirectory }),
+  settings: createWebSettingsAPI(),
+  permissions: createWebPermissionsAPI(),
+  notifications: createWebNotificationsAPI(),
+  sourceControl: createWebSourceControlAPI(),
+  trackers: createWebTrackerAPI(),
+  push: createWebPushAPI(),
+  clientAuth: createWebClientAuthAPI(),
+  };
+};

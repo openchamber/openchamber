@@ -1,0 +1,344 @@
+import React from 'react';
+import { useSessionTurnActivity } from '@/sync/global-session-status';
+import { getSessionActivityTime } from '@/sync/session-ordering';
+import { Menu as BaseMenu } from '@base-ui/react/menu';
+import type { Session } from '@/lib/opencode/model';
+
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { Icon } from '@/components/icon/Icon';
+import { SessionActivityIndicator } from '@/components/session/SessionActivityIndicator';
+import { useWaitingBlink } from '@/hooks/useDurationTicker';
+import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useSessionUnread } from '@/sync/session-unread';
+import {
+  findSwitcherItemAncestorIds,
+  useSwitcherItems,
+  type SwitcherItem,
+} from '@/components/session/sidebar/shell/useSwitcherItems';
+import { useUIStore } from '@/stores/useUIStore';
+import { resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
+import { formatSessionCompactDateLabel } from './sidebar/utils';
+import type { SessionNode } from './sidebar/types';
+import { useI18n } from '@/lib/i18n';
+import { cn } from '@/lib/utils';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
+
+type SecondaryMeta = SwitcherItem['secondaryMeta'];
+
+type SwitcherVariant = 'default' | 'compact';
+const NEW_SESSION_SWITCHER_TARGET = 'new-session';
+
+type SessionSwitcherDropdownProps = {
+  children: React.ReactNode;
+  variant?: SwitcherVariant;
+  scopeProjectId?: string | null;
+  align?: 'start' | 'center' | 'end';
+};
+
+export function SessionSwitcherDropdown({
+  children,
+  variant = 'default',
+  scopeProjectId = null,
+  align = 'start',
+}: SessionSwitcherDropdownProps): React.ReactElement {
+  const isOpen = useUIStore((state) => state.isSessionDropdownOpen);
+  const setOpen = useUIStore((state) => state.setSessionDropdownOpen);
+
+  return (
+    <DropdownMenu open={isOpen} onOpenChange={setOpen} modal={false} disableGlobalShortcuts>
+      <DropdownMenuTrigger asChild>{children}</DropdownMenuTrigger>
+      <DropdownMenuContent
+        align={align}
+        sideOffset={6}
+        className={cn(
+          'overflow-hidden p-1 max-w-[calc(100vw-32px)]',
+          variant === 'compact' ? 'w-[280px]' : 'w-[360px]',
+        )}
+      >
+        {isOpen ? (
+          <SwitcherContent
+            onSelect={() => setOpen(false)}
+            variant={variant}
+            scopeProjectId={scopeProjectId}
+          />
+        ) : null}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+type SwitcherContentProps = {
+  onSelect: () => void;
+  variant: SwitcherVariant;
+  scopeProjectId: string | null;
+};
+
+function SwitcherContent({ onSelect, variant, scopeProjectId }: SwitcherContentProps): React.ReactElement {
+  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+  const isNewSessionDraftOpen = useSessionUIStore((state) => state.newSessionDraft.open === true);
+  const items = useSwitcherItems(true, { scopeProjectId, currentSessionId });
+  const openNewSessionDraft = useSessionUIStore((state) => state.openNewSessionDraft);
+  const { t } = useI18n();
+
+  const handleNewSession = React.useCallback(() => {
+    onSelect();
+    openNewSessionDraft();
+  }, [onSelect, openNewSessionDraft]);
+
+  const [expandedParents, setExpandedParents] = React.useState<Set<string>>(new Set());
+  const contentRef = React.useRef<HTMLElement>(null);
+  const initialFocusCompleteRef = React.useRef(false);
+  const initialTarget = isNewSessionDraftOpen ? NEW_SESSION_SWITCHER_TARGET : currentSessionId;
+  const toggleParent = React.useCallback((sessionId: string) => {
+    setExpandedParents((prev) => {
+      const next = new Set(prev);
+      if (next.has(sessionId)) {
+        next.delete(sessionId);
+      } else {
+        next.add(sessionId);
+      }
+      return next;
+    });
+  }, []);
+
+  React.useLayoutEffect(() => {
+    if (initialFocusCompleteRef.current || !initialTarget) return;
+
+    const ancestorIds = initialTarget === NEW_SESSION_SWITCHER_TARGET
+      ? []
+      : findSwitcherItemAncestorIds(items, initialTarget);
+    if (!ancestorIds) return;
+
+    if (ancestorIds.some((id) => !expandedParents.has(id))) {
+      setExpandedParents((previous) => new Set([...previous, ...ancestorIds]));
+      return;
+    }
+
+    const animationFrame = requestAnimationFrame(() => {
+      const item = Array.from(
+        contentRef.current?.querySelectorAll<HTMLElement>('[data-switcher-item-id]') ?? [],
+      ).find((element) => element.dataset.switcherItemId === initialTarget);
+      if (!item) return;
+      item.focus();
+      item.scrollIntoView({ block: 'nearest' });
+      initialFocusCompleteRef.current = true;
+    });
+    return () => cancelAnimationFrame(animationFrame);
+  }, [expandedParents, initialTarget, items]);
+
+  return (
+    <ScrollableOverlay
+      ref={contentRef}
+      outerClassName="max-h-[60vh]"
+      disableHorizontal
+    >
+      <div className="space-y-0.5">
+        <BaseMenu.Item
+          data-switcher-item-id={NEW_SESSION_SWITCHER_TARGET}
+          onClick={handleNewSession}
+          className={cn(
+            'group relative flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 outline-hidden select-none',
+            'data-[highlighted]:bg-interactive-hover hover:bg-interactive-hover',
+          )}
+        >
+          <Icon name="chat-new" className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
+          <span className="truncate typography-ui-label font-normal leading-tight text-foreground">
+            {t('sessions.sidebar.header.actions.newSession')}
+          </span>
+        </BaseMenu.Item>
+        {items.length === 0 ? (
+          <div className="px-3 py-4 text-center typography-meta text-muted-foreground">
+            {t('sessions.switcher.empty')}
+          </div>
+        ) : (
+          items.map((item) => (
+            <SwitcherNode
+              key={item.node.session.id}
+              item={item}
+              depth={0}
+              variant={variant}
+              expandedParents={expandedParents}
+              toggleParent={toggleParent}
+              closeDropdown={onSelect}
+            />
+          ))
+        )}
+      </div>
+    </ScrollableOverlay>
+  );
+}
+
+type SwitcherNodeProps = {
+  item: { node: SessionNode; projectId: string | null; groupDirectory: string | null; secondaryMeta: SecondaryMeta };
+  depth: number;
+  variant: SwitcherVariant;
+  expandedParents: Set<string>;
+  toggleParent: (sessionId: string) => void;
+  closeDropdown: () => void;
+};
+
+function SwitcherNode({ item, depth, variant, expandedParents, toggleParent, closeDropdown }: SwitcherNodeProps): React.ReactElement {
+  const { node, secondaryMeta } = item;
+  const session = node.session;
+  const hasChildren = node.children.length > 0;
+  const isExpanded = expandedParents.has(session.id);
+
+  return (
+    <>
+      <SwitcherRow
+        session={session}
+        depth={depth}
+        variant={variant}
+        secondaryMeta={secondaryMeta}
+        hasChildren={hasChildren}
+        isExpanded={isExpanded}
+        onToggleExpand={hasChildren ? () => toggleParent(session.id) : undefined}
+        closeDropdown={closeDropdown}
+      />
+      {hasChildren && isExpanded
+        ? node.children.map((childNode) => (
+            <SwitcherNode
+              key={childNode.session.id}
+              item={{ node: childNode, projectId: item.projectId, groupDirectory: item.groupDirectory, secondaryMeta }}
+              depth={depth + 1}
+              variant={variant}
+              expandedParents={expandedParents}
+              toggleParent={toggleParent}
+              closeDropdown={closeDropdown}
+            />
+          ))
+        : null}
+    </>
+  );
+}
+
+type SwitcherRowProps = {
+  session: Session;
+  depth: number;
+  variant: SwitcherVariant;
+  secondaryMeta: SecondaryMeta;
+  hasChildren: boolean;
+  isExpanded: boolean;
+  onToggleExpand?: () => void;
+  closeDropdown: () => void;
+};
+
+function SwitcherRow({ session, depth, variant, secondaryMeta, hasChildren, isExpanded, onToggleExpand, closeDropdown }: SwitcherRowProps): React.ReactElement {
+  const { t } = useI18n();
+  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+  const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
+
+  const isUnread = useSessionUnread(session.id);
+
+  const isActive = currentSessionId === session.id;
+  const sessionTitle = session.title?.trim() || t('sessions.sidebar.session.untitled');
+  const turnActivity = useSessionTurnActivity(session.id);
+  const isStreaming = turnActivity !== null;
+  const runningBlink = useWaitingBlink(isStreaming);
+  const showUnreadDot = !isStreaming && isUnread && !isActive;
+
+  const timestamp = getSessionActivityTime(session) || Date.now();
+  const timeLabel = formatSessionCompactDateLabel(timestamp);
+
+  const projectLabel = secondaryMeta?.projectLabel?.trim() || null;
+  const rawBranchLabel = secondaryMeta?.branchLabel?.trim() || null;
+  const branchLabel = rawBranchLabel && rawBranchLabel !== 'HEAD' ? rawBranchLabel : null;
+
+  const handleSelect = React.useCallback(() => {
+    if (isActive) {
+      closeDropdown();
+      return;
+    }
+    const directory = resolveGlobalSessionDirectory(session);
+    setCurrentSession(session.id, directory ?? null);
+    closeDropdown();
+  }, [closeDropdown, isActive, session, setCurrentSession]);
+
+  return (
+    <BaseMenu.Item
+      onClick={(event) => {
+        if ((event.target as HTMLElement | null)?.closest('[data-switcher-expand]')) {
+          event.preventDefault();
+          return;
+        }
+        handleSelect();
+      }}
+      data-slot="session-switcher-item"
+      data-switcher-item-id={session.id}
+      className={cn(
+        'group relative flex w-full cursor-pointer items-start gap-2 rounded-lg px-2 py-1.5 outline-hidden select-none',
+        'data-[highlighted]:bg-interactive-hover hover:bg-interactive-hover',
+        isActive && 'bg-interactive-selection text-interactive-selection-foreground hover:bg-interactive-selection data-[highlighted]:bg-interactive-selection',
+      )}
+      style={{ paddingInlineStart: 8 + depth * 12 }}
+    >
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <div className="flex min-w-0 items-center gap-1.5">
+          {variant === 'compact' && hasChildren ? (
+            <span
+              role="button"
+              tabIndex={-1}
+              data-switcher-expand
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                onToggleExpand?.();
+              }}
+              className="inline-flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center rounded text-muted-foreground/70 hover:text-foreground"
+              aria-label={isExpanded ? t('sessions.sidebar.session.subsessions.collapse') : t('sessions.sidebar.session.subsessions.expand')}
+            >
+              {isExpanded ? <Icon name="arrow-down-s" className="h-3.5 w-3.5" /> : <Icon name="arrow-right-s" className="h-3.5 w-3.5" />}
+            </span>
+          ) : null}
+          <span dir="auto" className="truncate oc-ui-start-align typography-ui-label font-normal leading-tight text-foreground">
+            {sessionTitle}
+          </span>
+        </div>
+        {variant === 'default' ? (
+          <div
+            className="flex min-w-0 items-center gap-1.5 truncate text-muted-foreground/70 leading-tight"
+            style={{ fontSize: 'calc(var(--text-ui-label) * 0.85)' }}
+          >
+            {hasChildren ? (
+              <span
+                role="button"
+                tabIndex={-1}
+                data-switcher-expand
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onToggleExpand?.();
+                }}
+                className="inline-flex h-3 w-3 flex-shrink-0 items-center justify-center rounded text-muted-foreground/70 hover:text-foreground"
+                aria-label={isExpanded ? t('sessions.sidebar.session.subsessions.collapse') : t('sessions.sidebar.session.subsessions.expand')}
+              >
+                {isExpanded ? <Icon name="arrow-down-s" className="h-3 w-3" /> : <Icon name="arrow-right-s" className="h-3 w-3" />}
+              </span>
+            ) : null}
+            <span className="flex-shrink-0">{timeLabel}</span>
+            {projectLabel ? <span className="truncate">{projectLabel}</span> : null}
+            {branchLabel ? (
+              <span className="inline-flex min-w-0 items-center gap-0.5">
+                <Icon name="git-branch" className="h-3 w-3 flex-shrink-0 text-muted-foreground/70" />
+                <span className="truncate">{branchLabel}</span>
+              </span>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+
+      {isStreaming || showUnreadDot ? (
+        <span className="flex h-3 w-3 flex-shrink-0 items-center justify-center self-center">
+          <SessionActivityIndicator
+            state={turnActivity ?? 'unread'}
+            runningClassName={cn('h-2 w-2', runningBlink)}
+          />
+        </span>
+      ) : null}
+    </BaseMenu.Item>
+  );
+}

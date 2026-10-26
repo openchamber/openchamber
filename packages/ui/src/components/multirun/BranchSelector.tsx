@@ -1,0 +1,206 @@
+import React from 'react';
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectSeparator,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { cn } from '@/lib/utils';
+import { useGitStore, useGitBranches, useGitLoadingBranches, useGitLoadingStatus, useIsGitRepo } from '@/stores/useGitStore';
+import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
+import { resolveDefaultSourceBranch } from '@/lib/worktrees/worktreeSourceBranchPreference';
+import { useI18n } from '@/lib/i18n';
+
+interface BranchSelectorProps {
+  /** Current directory to check for git repository */
+  directory: string | null;
+  /** Currently selected branch */
+  value: string;
+  /** Called when branch selection changes */
+  onChange: (branch: string) => void;
+  /** Optional className for the trigger */
+  className?: string;
+  /** Whether the selector is disabled */
+  disabled?: boolean;
+  /** ID for accessibility */
+  id?: string;
+}
+
+export interface BranchSelectorState {
+  localBranches: string[];
+  remoteBranches: string[];
+  isLoading: boolean;
+  isGitRepository: boolean | null;
+}
+
+/**
+ * Hook to load available git branches for a directory.
+ * Uses the shared useGitStore (same as NewWorktreeDialog).
+ */
+// oxlint-disable-next-line react/only-export-components -- Hook is tightly coupled with BranchSelector
+export function useBranchOptions(directory: string | null): BranchSelectorState {
+  const { git } = useRuntimeAPIs();
+  const branches = useGitBranches(directory);
+  const isGitRepo = useIsGitRepo(directory);
+  const isLoadingStatus = useGitLoadingStatus(directory);
+  const isLoadingBranches = useGitLoadingBranches(directory);
+  const fetchBranches = useGitStore((state) => state.fetchBranches);
+  const fetchStatus = useGitStore((state) => state.fetchStatus);
+
+  React.useEffect(() => {
+    if (!directory || !git || isGitRepo !== null || isLoadingStatus) return;
+    void fetchStatus(directory, git, { silent: true });
+  }, [directory, git, fetchStatus, isGitRepo, isLoadingStatus]);
+
+  // Fetch branches if not cached
+  React.useEffect(() => {
+    if (!directory || !git) return;
+    if (isGitRepo !== true) return;
+    if (branches?.all) return; // Already cached
+    void fetchBranches(directory, git);
+  }, [directory, git, isGitRepo, branches?.all, fetchBranches]);
+
+  const isLoading = isLoadingStatus || (isGitRepo === true && isLoadingBranches);
+
+  // Compute local and remote branch lists (same as NewWorktreeDialog)
+  const localBranches = React.useMemo(() => {
+    if (!branches?.all) return [];
+    return branches.all
+      .filter((branchName: string) => !branchName.startsWith('remotes/'))
+      .sort();
+  }, [branches]);
+
+  const remoteBranches = React.useMemo(() => {
+    if (!branches?.all) return [];
+    return branches.all
+      .filter((branchName: string) => branchName.startsWith('remotes/'))
+      .map((branchName: string) => branchName.replace(/^remotes\//, ''))
+      .sort();
+  }, [branches]);
+
+  // isGitRepository: true if we got branches, false if fetch returned empty, null if not yet loaded
+  const isGitRepository = React.useMemo<boolean | null>(() => {
+    if (!directory) return null;
+    if (isGitRepo !== null) return isGitRepo;
+    if (isLoading) return null;
+    return branches?.all ? true : null;
+  }, [directory, isLoading, branches, isGitRepo]);
+
+  return { localBranches, remoteBranches, isLoading, isGitRepository };
+}
+
+/**
+ * Branch selector dropdown for selecting a source branch for worktree creation.
+ * Matches the NewWorktreeDialog source branch selector exactly.
+ */
+export const BranchSelector: React.FC<BranchSelectorProps> = ({
+  directory,
+  value,
+  onChange,
+  className,
+  disabled,
+  id,
+}) => {
+  const { t } = useI18n();
+  const { localBranches, remoteBranches, isLoading, isGitRepository } = useBranchOptions(directory);
+  const allBranches = React.useMemo(
+    () => [...localBranches, ...remoteBranches.map(b => `remotes/${b}`)],
+    [localBranches, remoteBranches],
+  );
+
+  // Resolve default source branch (same priority as NewWorktreeDialog)
+  React.useEffect(() => {
+    if (disabled || isLoading || allBranches.length === 0) return;
+    if (value && allBranches.includes(value)) return;
+
+    const currentValue = value;
+    let cancelled = false;
+
+    const resolve = async () => {
+      try {
+        const rootBranch = directory ? await getRootBranch(directory).catch(() => null) : null;
+        if (cancelled) return;
+
+        const sourceBranch = resolveDefaultSourceBranch({ branches: allBranches, rootBranch });
+
+        if (cancelled || (currentValue && allBranches.includes(currentValue))) return;
+
+        if (sourceBranch) {
+          onChange(sourceBranch);
+        }
+      } catch {
+        // ignore
+      }
+    };
+
+    void resolve();
+    return () => {
+      cancelled = true;
+    };
+  }, [allBranches, directory, disabled, isLoading, onChange, value]);
+
+  const isDisabled = disabled || !isGitRepository || isLoading;
+
+  return (
+    <div>
+      <Select
+        value={value}
+        onValueChange={onChange}
+        disabled={isDisabled}
+      >
+        <SelectTrigger
+          id={id}
+          className={cn('min-w-0 max-w-full *:data-[slot=select-value]:truncate', className ?? 'w-fit')}
+        >
+          <SelectValue placeholder={isLoading ? t('multiRun.branchSelector.status.loadingBranches') : t('multiRun.branchSelector.placeholder.selectSourceBranch')} />
+        </SelectTrigger>
+        <SelectContent className="max-h-[280px] max-w-[320px]">
+          {isLoading ? (
+            <div className="px-2 py-4 text-center typography-meta text-muted-foreground">
+              {t('multiRun.branchSelector.status.loadingBranches')}
+            </div>
+          ) : localBranches.length === 0 && remoteBranches.length === 0 ? (
+            <div className="px-2 py-4 text-center typography-meta text-muted-foreground">
+              {t('multiRun.branchSelector.status.noBranchesFound')}
+            </div>
+          ) : (
+            <>
+              {localBranches.length > 0 && (
+                <SelectGroup>
+                  <SelectLabel className="font-semibold text-foreground">{t('multiRun.branchSelector.groups.localBranches')}</SelectLabel>
+                  {localBranches.map((branch) => (
+                    <SelectItem key={branch} value={branch} className="whitespace-normal break-all">
+                      {branch}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              )}
+              {localBranches.length > 0 && remoteBranches.length > 0 && (
+                <SelectSeparator />
+              )}
+              {remoteBranches.length > 0 && (
+                <SelectGroup>
+                  <SelectLabel className="font-semibold text-foreground">{t('multiRun.branchSelector.groups.remoteBranches')}</SelectLabel>
+                  {remoteBranches.map((branch) => (
+                    <SelectItem key={`remotes/${branch}`} value={`remotes/${branch}`} className="whitespace-normal break-all">
+                      {branch}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              )}
+            </>
+          )}
+        </SelectContent>
+      </Select>
+
+      {isGitRepository === false && (
+        <p className="typography-micro text-muted-foreground/70 mt-2">{t('multiRun.branchSelector.status.notInGitRepository')}</p>
+      )}
+    </div>
+  );
+};

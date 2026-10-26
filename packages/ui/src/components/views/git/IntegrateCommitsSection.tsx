@@ -1,0 +1,536 @@
+import * as React from 'react';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { Button } from '@/components/ui/button';
+import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from '@/components/ui/command';
+import { toast } from '@/components/ui';
+import { Icon } from "@/components/icon/Icon";
+import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useInputStore } from '@/sync/input-store';
+import { rankByQuery } from '@/lib/search/fuzzySearch';
+import { getGitCommitSummaries } from '@/lib/gitApi';
+import { loadMagicPrompts } from '@/lib/magicPrompts';
+import {
+  abortIntegrate,
+  computeIntegratePlan,
+  continueIntegrate,
+  integrateWorktreeCommits,
+  getIntegrateConflictDetails,
+  isCherryPickInProgress,
+  type IntegrateConflictDetails,
+  type IntegrateInProgress,
+  type IntegratePlan,
+} from '@/lib/git/integrateWorktreeCommits';
+import type { WorktreeMetadata } from '@/types/worktree';
+import { useI18n } from '@/lib/i18n';
+
+type IntegrateUiState =
+  | { kind: 'idle' }
+  | { kind: 'loading' }
+  | { kind: 'ready'; plan: IntegratePlan }
+  | { kind: 'running'; plan: IntegratePlan }
+  | { kind: 'conflict'; state: IntegrateInProgress; details: IntegrateConflictDetails };
+
+export const IntegrateCommitsSection: React.FC<{
+  repoRoot: string;
+  sourceBranch: string;
+  worktreeMetadata: WorktreeMetadata;
+  localBranches: string[];
+  defaultTargetBranch: string;
+  refreshKey?: number;
+  onRefresh?: () => void;
+  /** Hide the built-in section heading when a dialog already provides one. */
+  showHeader?: boolean;
+}> = ({
+  repoRoot,
+  sourceBranch,
+  worktreeMetadata,
+  localBranches,
+  defaultTargetBranch,
+  refreshKey,
+  onRefresh,
+  showHeader = true,
+}) => {
+  const { t } = useI18n();
+  const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
+  const [branchDropdownOpen, setBranchDropdownOpen] = React.useState(false);
+  const [branchSearch, setBranchSearch] = React.useState('');
+  const searchInputRef = React.useRef<HTMLInputElement>(null);
+
+  const filteredBranches = React.useMemo(
+    () => rankByQuery(localBranches, branchSearch, (branch) => [branch]),
+    [localBranches, branchSearch]
+  );
+
+  const [targetBranch, setTargetBranch] = React.useState<string>(defaultTargetBranch);
+  React.useEffect(() => {
+    setTargetBranch(defaultTargetBranch);
+  }, [defaultTargetBranch]);
+
+  // Focus search input when branch dropdown opens
+  React.useEffect(() => {
+    if (branchDropdownOpen) {
+      const timer = setTimeout(() => {
+        searchInputRef.current?.focus();
+      }, 0);
+      return () => clearTimeout(timer);
+    }
+  }, [branchDropdownOpen]);
+
+  const isEligible = Boolean(
+    repoRoot && sourceBranch && targetBranch && targetBranch !== 'HEAD' && sourceBranch !== targetBranch
+  );
+
+  const [ui, setUi] = React.useState<IntegrateUiState>({ kind: 'idle' });
+  const [showAllCommits, setShowAllCommits] = React.useState(false);
+  const [commitSummaries, setCommitSummaries] = React.useState<Array<{ sha: string; short: string; subject: string }>>([]);
+
+  const conflictStorageKey = React.useMemo(() => {
+    if (!currentSessionId) return null;
+    return `openchamber.integrate.conflict:${currentSessionId}`;
+  }, [currentSessionId]);
+
+  React.useEffect(() => {
+    if (!conflictStorageKey || typeof window === 'undefined') return;
+    const raw = window.localStorage.getItem(conflictStorageKey);
+    if (!raw) return;
+    let cancelled = false;
+    try {
+      const parsed = JSON.parse(raw) as IntegrateInProgress;
+      if (!parsed?.tempWorktreePath || parsed.repoRoot !== repoRoot) {
+        window.localStorage.removeItem(conflictStorageKey);
+        return;
+      }
+      void (async () => {
+        const ok = await isCherryPickInProgress(parsed.tempWorktreePath).catch(() => false);
+        if (cancelled) return;
+        if (!ok) {
+          window.localStorage.removeItem(conflictStorageKey);
+          return;
+        }
+        const details = await getIntegrateConflictDetails(parsed.tempWorktreePath).catch(() => null);
+        if (cancelled) return;
+        if (!details) {
+          return;
+        }
+        setUi({ kind: 'conflict', state: parsed, details });
+      })();
+    } catch {
+      window.localStorage.removeItem(conflictStorageKey);
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [conflictStorageKey, repoRoot]);
+
+  React.useEffect(() => {
+    if (!isEligible) {
+      setUi({ kind: 'idle' });
+      return;
+    }
+    let cancelled = false;
+    setUi({ kind: 'loading' });
+    void (async () => {
+      try {
+        const plan = await computeIntegratePlan({ repoRoot, sourceBranch, targetBranch });
+        if (cancelled) return;
+        setUi({ kind: 'ready', plan });
+
+        // Preload commit subjects for preview.
+        if (plan.commits.length > 0) {
+          const max = 50;
+          // Show newest -> oldest.
+          const subset = plan.commits.slice(-max).reverse();
+          const parsed = await getGitCommitSummaries(repoRoot, subset);
+          if (!cancelled) {
+            setCommitSummaries(parsed);
+            setShowAllCommits(false);
+          }
+        } else {
+          if (!cancelled) {
+            setCommitSummaries([]);
+            setShowAllCommits(false);
+          }
+        }
+      } catch {
+        if (!cancelled) setUi({ kind: 'idle' });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isEligible, repoRoot, sourceBranch, targetBranch, refreshKey]);
+
+  const persistTarget = React.useCallback(
+    (branch: string) => {
+      if (!currentSessionId) return;
+      useSessionUIStore.getState().setWorktreeMetadata(currentSessionId, {
+        ...worktreeMetadata,
+        createdFromBranch: branch,
+      });
+    },
+    [currentSessionId, worktreeMetadata]
+  );
+
+  const openNewSessionDraft = useSessionUIStore((s) => s.openNewSessionDraft);
+
+  const buildConflictContext = React.useCallback(async (payload: { state: IntegrateInProgress; details: IntegrateConflictDetails }) => {
+    // The temporary worktree belongs to the repository's project, so its prompts are the project's.
+    const prompts = await loadMagicPrompts(payload.state.repoRoot);
+    const visibleText = prompts.render('git.integrate.cherrypick.resolve.visible', {
+      current_commit: payload.state.currentCommit,
+      target_branch: payload.state.targetBranch,
+    });
+    const instructionsText = prompts.render('git.integrate.cherrypick.resolve.instructions', {
+      repo_root: payload.state.repoRoot,
+      temp_worktree_path: payload.state.tempWorktreePath,
+      source_branch: payload.state.sourceBranch,
+      target_branch: payload.state.targetBranch,
+      current_commit: payload.state.currentCommit,
+    });
+    const payloadText = `Cherry-pick conflict context (JSON)\n${JSON.stringify({
+      repoRoot: payload.state.repoRoot,
+      tempWorktreePath: payload.state.tempWorktreePath,
+      sourceBranch: payload.state.sourceBranch,
+      targetBranch: payload.state.targetBranch,
+      currentCommit: payload.state.currentCommit,
+      remainingCommits: payload.state.remainingCommits,
+      statusPorcelain: payload.details.statusPorcelain,
+      unmergedFiles: payload.details.unmergedFiles,
+      currentPatchMeta: payload.details.currentPatchMeta,
+      currentPatch: payload.details.currentPatch,
+      diff: payload.details.diff,
+    }, null, 2)}`;
+
+    return { visibleText, instructionsText, payloadText };
+  }, []);
+
+  const setPendingInputText = useInputStore((s) => s.setPendingInputText);
+  const setPendingSyntheticParts = useInputStore((s) => s.setPendingSyntheticParts);
+
+  const handleResolveWithAi = React.useCallback(async (
+    payload: { state: IntegrateInProgress; details: IntegrateConflictDetails },
+    useNewSession: boolean
+  ) => {
+    let context: Awaited<ReturnType<typeof buildConflictContext>>;
+    try {
+      context = await buildConflictContext(payload);
+    } catch (error) {
+      // The magic prompts could not be read; nothing is opened or filled in.
+      toast.error(t('magicPrompts.toast.loadFailed'), { description: error instanceof Error ? error.message : undefined });
+      return;
+    }
+
+    if (useNewSession) {
+      // Open new session with the conflict context as initial prompt + synthetic parts
+      openNewSessionDraft({
+        directoryOverride: payload.state.tempWorktreePath,
+        initialPrompt: context.visibleText,
+        syntheticParts: [
+          { text: context.instructionsText, synthetic: true },
+          { text: context.payloadText, synthetic: true },
+        ],
+      });
+      return;
+    }
+
+    // Use current session - set pending input text and synthetic parts
+    if (!currentSessionId) {
+      toast.error(t('gitView.integrate.noActiveSession'), { description: t('gitView.integrate.noActiveSessionDescription') });
+      return;
+    }
+
+    setPendingInputText(context.visibleText, 'replace');
+    setPendingSyntheticParts([
+      { text: context.instructionsText, synthetic: true },
+      { text: context.payloadText, synthetic: true },
+    ]);
+  }, [currentSessionId, buildConflictContext, openNewSessionDraft, setPendingInputText, setPendingSyntheticParts, t]);
+
+  const handleMove = React.useCallback(async () => {
+    if (ui.kind !== 'ready') return;
+    if (ui.plan.commits.length === 0) {
+      toast.message(t('gitView.integrate.noCommitsToMoveToast'));
+      return;
+    }
+    setUi({ kind: 'running', plan: ui.plan });
+    try {
+      const result = await integrateWorktreeCommits(ui.plan);
+      if (result.kind === 'success') {
+        toast.success(t('gitView.integrate.commitsMovedToast'), {
+          description: result.moved === 1
+            ? t('gitView.integrate.commitsMovedDescriptionSingle', { count: result.moved, branch: ui.plan.targetBranch })
+            : t('gitView.integrate.commitsMovedDescriptionPlural', { count: result.moved, branch: ui.plan.targetBranch }),
+        });
+        const next = await computeIntegratePlan(ui.plan);
+        setUi({ kind: 'ready', plan: next });
+        onRefresh?.();
+        return;
+      }
+      if (result.kind === 'conflict') {
+        toast.error(t('gitView.integrate.cherryPickConflictToast'), { description: t('gitView.integrate.cherryPickConflictDescription') });
+        setUi({ kind: 'conflict', state: result.state, details: result.details });
+        if (conflictStorageKey && typeof window !== 'undefined') {
+          window.localStorage.setItem(conflictStorageKey, JSON.stringify(result.state));
+        }
+      }
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      toast.error(t('gitView.integrate.failedToMoveToast'), { description: message });
+      const next = await computeIntegratePlan({ repoRoot, sourceBranch, targetBranch }).catch(() => null);
+      if (next) setUi({ kind: 'ready', plan: next });
+      else setUi({ kind: 'idle' });
+    }
+  }, [ui, onRefresh, repoRoot, sourceBranch, targetBranch, conflictStorageKey, t]);
+
+  const handleAbort = React.useCallback(async () => {
+    if (ui.kind !== 'conflict') return;
+    try {
+      await abortIntegrate(ui.state);
+      toast.message(t('gitView.integrate.cherryPickAbortedToast'));
+      if (conflictStorageKey && typeof window !== 'undefined') {
+        window.localStorage.removeItem(conflictStorageKey);
+      }
+    } finally {
+      const next = await computeIntegratePlan({ repoRoot, sourceBranch, targetBranch }).catch(() => null);
+      if (next) setUi({ kind: 'ready', plan: next });
+      else setUi({ kind: 'idle' });
+    }
+  }, [ui, repoRoot, sourceBranch, targetBranch, conflictStorageKey, t]);
+
+  const handleContinue = React.useCallback(async () => {
+    if (ui.kind !== 'conflict') return;
+    try {
+      const result = await continueIntegrate(ui.state);
+      if (result.kind === 'success') {
+        toast.success(t('gitView.integrate.cherryPickFinishedToast'));
+        const next = await computeIntegratePlan({ repoRoot, sourceBranch, targetBranch }).catch(() => null);
+        if (next) setUi({ kind: 'ready', plan: next });
+        else setUi({ kind: 'idle' });
+        if (conflictStorageKey && typeof window !== 'undefined') {
+          window.localStorage.removeItem(conflictStorageKey);
+        }
+        onRefresh?.();
+        return;
+      }
+      if (result.kind === 'conflict') {
+        setUi({ kind: 'conflict', state: result.state, details: result.details });
+        if (conflictStorageKey && typeof window !== 'undefined') {
+          window.localStorage.setItem(conflictStorageKey, JSON.stringify(result.state));
+        }
+      }
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      toast.error(t('gitView.integrate.cherryPickContinueFailedToast'), { description: message });
+    }
+  }, [ui, repoRoot, sourceBranch, targetBranch, onRefresh, conflictStorageKey, t]);
+
+  if (!repoRoot || !sourceBranch) {
+    return null;
+  }
+
+  const containerClassName = 'border-0 bg-transparent rounded-none';
+  const headerClassName = 'px-0 py-3 border-b border-border/40 flex items-center justify-between gap-2';
+  const bodyClassName = 'flex flex-col gap-3 py-3';
+
+  return (
+    <section className={containerClassName}>
+      {showHeader ? (
+        <div className={headerClassName}>
+          <div className="flex items-center gap-2 min-w-0">
+            <Icon name="split-cells-horizontal" className="size-4 text-muted-foreground" />
+            <h3 className="typography-ui-header font-semibold text-foreground truncate">{t('gitView.integrate.title')}</h3>
+            {ui.kind === 'ready' && ui.plan.commits.length > 0 ? (
+              <span className="typography-meta text-muted-foreground truncate">
+                {t('gitView.integrate.toMoveCount', { count: ui.plan.commits.length })}
+              </span>
+            ) : null}
+          </div>
+          <div className="flex items-center gap-2">
+            {ui.kind === 'loading' || ui.kind === 'running' ? (
+              <Icon name="loader-4" className="size-4 animate-spin text-muted-foreground" />
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+
+      <div className={bodyClassName}>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="min-w-0">
+            <div className="typography-ui-label text-foreground">{t('gitView.integrate.moveCommits')}</div>
+              <div className="typography-micro text-muted-foreground truncate">
+                {sourceBranch} → {targetBranch}
+              </div>
+            </div>
+
+            <div className="flex-1" />
+
+            <DropdownMenu open={branchDropdownOpen} onOpenChange={setBranchDropdownOpen}>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  className={dropdownTriggerVariants({ size: 'default' })}
+                >
+                  {t('gitView.integrate.target')}
+                  <span className="max-w-[160px] truncate font-mono text-xs text-muted-foreground">{targetBranch}</span>
+                  <Icon name="arrow-down-s" className="size-4 opacity-60" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                align="end"
+                className="w-72 p-0 max-h-[var(--available-height)] flex flex-col overflow-hidden"
+              >
+                {/* rankByQuery owns filtering/ordering; cmdk must not re-filter. */}
+                <Command className="h-full min-h-0" shouldFilter={false}>
+                  <CommandInput
+                    ref={searchInputRef}
+                    placeholder={t('gitView.branch.searchPlaceholder')}
+                    value={branchSearch}
+                    onValueChange={setBranchSearch}
+                    onKeyDown={(event) => event.stopPropagation()}
+                  />
+                  <CommandList
+                    className="h-full min-h-0"
+                    scrollbarClassName="overlay-scrollbar--flush overlay-scrollbar--dense overlay-scrollbar--zero"
+                    disableHorizontal
+                  >
+                    <CommandEmpty>{t('gitView.branch.empty')}</CommandEmpty>
+                    <CommandGroup heading={t('gitView.branch.localBranches')}>
+                      {filteredBranches.map((branch) => (
+                        <CommandItem
+                          key={branch}
+                          value={branch}
+                          onSelect={() => {
+                            setTargetBranch(branch);
+                            persistTarget(branch);
+                            setBranchDropdownOpen(false);
+                            setBranchSearch('');
+                          }}
+                        >
+                          {branch}
+                        </CommandItem>
+                      ))}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            {ui.kind === 'ready' ? (
+              <Button size="sm" onClick={() => void handleMove()} disabled={!isEligible || ui.plan.commits.length === 0}>
+                {t('gitView.integrate.move')}
+              </Button>
+            ) : ui.kind === 'loading' ? (
+              <Button size="sm" variant="outline" disabled>
+                {t('gitView.integrate.checking')}
+              </Button>
+            ) : ui.kind === 'running' ? (
+              <Button size="sm" variant="outline" disabled>
+                {t('gitView.integrate.moving')}
+              </Button>
+            ) : null}
+          </div>
+
+          {ui.kind === 'ready' && ui.plan.commits.length === 0 && (
+            <div className="typography-meta text-muted-foreground">{t('gitView.integrate.noCommitsToMove')}</div>
+          )}
+
+          {ui.kind === 'ready' && ui.plan.commits.length > 0 && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <div className="typography-meta text-foreground">
+                  {t('gitView.integrate.commitsToMove')}
+                  <span className="text-muted-foreground"> ({ui.plan.commits.length})</span>
+                </div>
+                {commitSummaries.length > 0 && ui.plan.commits.length > 5 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowAllCommits((v) => !v)}
+                    className="typography-micro text-muted-foreground hover:text-foreground"
+                  >
+                    {showAllCommits ? t('gitView.integrate.showLess') : t('gitView.integrate.showAll')}
+                  </button>
+                )}
+              </div>
+
+              <div className="space-y-1">
+                {(showAllCommits ? commitSummaries : commitSummaries.slice(0, 5)).map((c) => (
+                  <div key={c.sha} className="flex items-baseline gap-2 min-w-0">
+                    <span className="font-mono text-xs text-muted-foreground flex-shrink-0">{c.short}</span>
+                    <span className="typography-meta text-muted-foreground truncate">{c.subject || c.sha}</span>
+                  </div>
+                ))}
+                {commitSummaries.length === 0 && (
+                  <div className="typography-meta text-muted-foreground">{t('gitView.integrate.previewUnavailable')}</div>
+                )}
+                {ui.plan.commits.length > commitSummaries.length && (
+                  <div className="typography-micro text-muted-foreground/70">
+                    {t('gitView.integrate.showingFirstCommits', { count: commitSummaries.length })}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {ui.kind === 'conflict' && (
+            <div className="rounded-md oc-tile p-3 space-y-2">
+              <div className="typography-meta text-foreground">
+                {t('gitView.integrate.conflictsInFiles', { count: ui.details.unmergedFiles.length })}
+              </div>
+              <div className="typography-micro text-muted-foreground/80">
+                {t('gitView.integrate.currentCommit')}: <span className="font-mono">{ui.state.currentCommit.slice(0, 7)}</span>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {ui.details.unmergedFiles.slice(0, 6).map((file) => (
+                  <span key={file} className="font-mono text-xs px-2 py-0.5 rounded oc-tile-inset text-muted-foreground">
+                    {file}
+                  </span>
+                ))}
+                {ui.details.unmergedFiles.length > 6 && (
+                  <span className="text-xs text-muted-foreground">{t('gitView.integrate.moreFiles', { count: ui.details.unmergedFiles.length - 6 })}</span>
+                )}
+              </div>
+              <div className="flex items-center gap-2 pt-1">
+                <Button size="sm" variant="ghost" className="typography-meta" onClick={() => void handleAbort()}>
+                  {t('gitView.operation.abort')}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className="typography-meta gap-1"
+                  disabled={!currentSessionId}
+                  onClick={() => void handleResolveWithAi({ state: ui.state, details: ui.details }, false)}
+                >
+                  <Icon name="sparkling" className="size-3.5" />
+                  {t('gitView.integrate.currentSession')}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className="typography-meta gap-1"
+                  onClick={() => void handleResolveWithAi({ state: ui.state, details: ui.details }, true)}
+                >
+                  <Icon name="sparkling" className="size-3.5" />
+                  {t('gitView.integrate.newSession')}
+                </Button>
+                <Button size="sm" className="typography-meta" onClick={() => void handleContinue()}>
+                  {t('gitView.operation.continue')}
+                </Button>
+              </div>
+            </div>
+          )}
+      </div>
+    </section>
+  );
+};

@@ -1,0 +1,121 @@
+{
+  "metadata": {
+    "id": "nightowl-light",
+    "name": "Night Owl",
+    "variant": "light",
+    "description": "Night Owl",
+    "version": "1.0.0",
+    "tags": [
+      "light",
+      "palette"
+    ]
+  },
+  "colors": {
+    "primary": {
+      "base": "#2c60d4",
+      "hover": "#2858c3",
+      "active": "#2551b2",
+      "muted": "#2c60d480"
+    },
+    "surface": {
+      "background": "#f1f1f1",
+      "foreground": "#41404f",
+      "muted": "#ececeb",
+      "mutedForeground": "#5a5a6b",
+      "elevated": "#e9e9e8",
+      "overlay": "#00000066",
+      "subtle": "#ebebeb"
+    },
+    "interactive": {
+      "border": "#00000013",
+      "selection": "#dfdddb",
+      "borderHover": "#0000002f",
+      "borderFocus": "#aec9fe",
+      "focus": "#aec9fe",
+      "focusRing": "#aec9fe",
+      "cursor": "#343346",
+      "hover": "#0000000a",
+      "active": "#00000014"
+    },
+    "status": {
+      "error": "#a4151c",
+      "errorBackground": "#a4151c1f",
+      "errorBorder": "#a4151c59",
+      "warning": "#856215",
+      "warningBackground": "#8562151f",
+      "warningBorder": "#85621559",
+      "success": "#327443",
+      "successBackground": "#3274431f",
+      "successBorder": "#32744359",
+      "info": "#0941c4",
+      "infoBackground": "#0941c41f",
+      "infoBorder": "#0941c459"
+    },
+    "syntax": {
+      "base": {
+        "background": "#fbfbfb",
+        "comment": "#7a8181",
+        "keyword": "#994cc3",
+        "string": "#136761",
+        "number": "#c96765",
+        "function": "#4876d6",
+        "variable": "#232234",
+        "type": "#a61627",
+        "operator": "#343346"
+      },
+      "tokens": {
+        "variableProperty": "#0d48d0",
+        "parameter": "#232234",
+        "boolean": "#c96765",
+        "punctuation": "#343346",
+        "stringEscape": "#c96765",
+        "keywordImport": "#994cc3",
+        "tag": "#136761",
+        "regex": "#343346"
+      },
+      "highlights": {
+        "diffAdded": "#166f68",
+        "diffAddedBackground": "#d0fdf7",
+        "diffRemoved": "#b3131d",
+        "diffRemovedBackground": "#feeeed",
+        "diffModified": "#FF8C00",
+        "diffModifiedBackground": "#ff8c001f",
+        "lineNumber": "#515063",
+        "lineNumberActive": "#232234"
+      }
+    },
+    "pr": {
+      "blocked": "#9c5523",
+      "merged": "#7f53ad"
+    },
+    "chat": {
+      "background": "#f1f1f1",
+      "userMessageBackground": "#e0e4ec",
+      "divider": "#0000001a"
+    },
+    "markdown": {
+      "link": "#2b5dce",
+      "linkHover": "#2858c3",
+      "inlineCode": "#136761",
+      "inlineCodeBackground": "#ebebeb",
+      "blockquote": "#5a5a6b",
+      "blockquoteBorder": "#0000001a",
+      "listMarker": "#2c60d499",
+      "bold": "#393846",
+      "italic": "#41404f",
+      "hr": "#00000013"
+    },
+    "tools": {
+      "border": "#00000013",
+      "icon": "#5a5a6b",
+      "title": "#41404f",
+      "description": "#5a5a6b",
+      "edit": {
+        "addedBackground": "#d0fdf7",
+        "removedBackground": "#feeeed",
+        "modifiedBackground": "#ff8c001f",
+        "lineNumber": "#515063"
+      }
+    }
+  }
+}

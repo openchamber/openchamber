@@ -1,0 +1,88 @@
+---
+title: Wprowadzanie w czacie
+description: "Co można wpisać w polu czatu: polecenia, skille, fragmenty, wzmianki i załączniki."
+---
+
+# Wprowadzanie w czacie
+
+Pole czatu rozumie kilka symboli. Wpisz jeden, a otworzy się wybór; wybierz pozycję albo pisz dalej, aby ją przefiltrować. Symbol liczy się tylko na początku słowa, a polecenie musi rozpoczynać wiadomość.
+
+| Wpisz | Wybiera | Działa |
+| --- | --- | --- |
+| `/` | polecenie | na samym początku wiadomości |
+| `$` | skill | w dowolnym miejscu |
+| `#` | fragment | w dowolnym miejscu |
+| `@` | plik lub agenta | w dowolnym miejscu |
+
+Symbol, który nie wskazuje niczego, co masz, pozostaje zwykłym tekstem: `$5` to po prostu pieniądze, a `a/b` to po prostu ścieżka.
+
+## Polecenia
+
+Polecenie to zapisany prompt uruchamiany ukośnikiem, jak `/review`. Zarządzaj nimi w **Settings → Commands**.
+
+1. Otwórz **Settings → Commands** i utwórz polecenie.
+2. Nadaj mu nazwę, opis i tekst promptu, który ma wysłać.
+3. Opcjonalnie przypnij je do konkretnego agenta lub modelu.
+4. Wybierz zakres osobisty lub projektowy.
+
+W czacie wpisz `/` jako **pierwszy** znak wiadomości, aby otworzyć polecenia, a następnie wybierz jedno. Twój tekst może używać symboli zastępczych:
+
+- `$ARGUMENTS`: to, co wpiszesz po poleceniu
+- `@filename`: wstawia zawartość pliku
+- `` !`command` ``: wstawia wynik polecenia powłoki
+
+Wbudowane polecenia `init` i `review` można zresetować, ale nie usunąć. OpenChamber ma też polecenia takie jak `/explore` i `/summary`; pełną listę znajdziesz w [Magic Prompts](/pl/magic-prompts/).
+
+## Skille
+
+Wpisz `$` gdziekolwiek w wiadomości, aby otworzyć wybór skilli, i wybierz jeden. Agent wczyta instrukcje tego skilla na potrzeby odpowiedzi. Jak napisać własny, opisuje [Skille](/pl/skills/).
+
+Polecenia i skille mają osobne wybory, więc `/` na początku nigdy nie pokazuje skilli, a `$` nigdy nie pokazuje poleceń.
+
+## Fragmenty
+
+Fragment to wielokrotnego użytku tekst, do którego odwołujesz się w treści hasztagiem, jak `#signoff`. Zarządzaj nimi w **Settings → Snippets**.
+
+1. Otwórz **Settings → Snippets** i utwórz fragment.
+2. Nadaj mu nazwę i tekst, który reprezentuje. Dodaj aliasy, jeśli chcesz mieć więcej niż jeden wyzwalacz.
+3. Wybierz zakres osobisty lub projektowy.
+
+W czacie wpisz `#` i wybierz fragment. OpenChamber podstawi pełny tekst przed wysłaniem.
+
+## Pliki i agenci
+
+Wpisz `@`, aby załączyć plik albo uruchomić wiadomość innym agentem.
+
+- Plik, na przykład `@src/index.ts`, zostaje załączony do wiadomości tak samo, jak wybrany z menu **+**. Obrazy i dokumenty są odczytywane i wysyłane razem z nią.
+- Agent, na przykład `@build`, uruchamia tę wiadomość tym agentem. Bez wzmianki uruchamia ją agent wybrany w composerze.
+
+## Załączanie plików i kontekstu
+
+Menu **+** obok pola czatu załącza więcej niż plik:
+
+- pliki z Twojego komputera
+- issues i pull requesty z Twojego repozytorium (GitHub, GitLab, Gitea, Forgejo albo Gerrit, zależnie od tego, gdzie jest projekt)
+- issues Linear, gdy Linear jest podłączony
+- zadania z zainstalowanych [rozszerzeń](/pl/extensions/), które oferują załączanie
+
+Każda pozycja jedzie z Twoją następną wiadomością jako kontekst; to wiadomość mówi, co z nią zrobić. Możesz też wkleić obraz albo przeciągnąć plik wprost na pole czatu.
+
+## Uruchamianie polecenia powłoki
+
+Zacznij wiadomość od `!`, a OpenChamber uruchomi ją jako polecenie powłoki i nic nie wyśle do agenta. Naciśnij **Esc** albo usuwaj tekst do pustego pola, aby opuścić tryb powłoki.
+
+## Klawiatura
+
+- **Enter** wysyła, a **Shift+Enter** zaczyna nowy wiersz. W **Settings → Chat** możesz je zamienić, tak że Enter łamie wiersz, a **Ctrl/Cmd+Enter** wysyła. Ctrl/Cmd+Enter wysyła zawsze.
+- **ArrowUp** i **ArrowDown** przywołują wcześniejsze wiadomości.
+- Gdy wybór jest otwarty, **Ctrl+N** i **Ctrl+P** poruszają się po nim, **Enter** lub **Tab** wybiera, a **Esc** go zamyka.
+
+W rozwiniętym composerze Enter zawsze zaczyna nowy wiersz, a wysyła **Ctrl/Cmd+Enter**.
+
+Na telefonie Enter zawsze zaczyna nowy wiersz. Wysyła przycisk wysyłania albo **Ctrl/Cmd+Enter**.
+
+## Powiązane
+
+- [Skille](/pl/skills/): wczytuj większe zestawy instrukcji na żądanie
+- [Magic Prompts](/pl/magic-prompts/): wbudowane polecenia i miejsca ich uruchamiania
+- [Hosty Git](/pl/github/): załączaj issues i pull requesty

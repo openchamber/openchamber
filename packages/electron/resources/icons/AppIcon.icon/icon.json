@@ -1,0 +1,477 @@
+{
+  "fill-specializations": [
+    {
+      "value": {
+        "automatic-gradient": "srgb:0.95000,0.95000,0.96000,1.00000"
+      }
+    },
+    {
+      "appearance": "dark",
+      "value": {
+        "solid": "srgb:0.07500,0.07500,0.08500,1.00000"
+      }
+    }
+  ],
+  "groups": [
+    {
+      "layers": [
+        {
+          "image-name": "ttier2.png",
+          "name": "ttier2",
+          "glass-specializations": [
+            {
+              "value": false
+            },
+            {
+              "appearance": "dark",
+              "value": true
+            },
+            {
+              "appearance": "tinted",
+              "value": true
+            }
+          ],
+          "opacity-specializations": [
+            {
+              "value": 0
+            },
+            {
+              "appearance": "dark",
+              "value": 0.85
+            },
+            {
+              "appearance": "tinted",
+              "value": 0.85
+            }
+          ],
+          "position-specializations": [
+            {
+              "idiom": "square",
+              "value": {
+                "scale": 1.15,
+                "translation-in-points": [
+                  -0.65,
+                  -3.25
+                ]
+              }
+            }
+          ],
+          "fill-specializations": [
+            {
+              "value": {
+                "solid": "srgb:0.80392,0.76863,1.00000,1.00000"
+              }
+            },
+            {
+              "appearance": "dark",
+              "value": {
+                "solid": "srgb:0.80000,0.80000,0.81000,1.00000"
+              }
+            }
+          ]
+        },
+        {
+          "image-name": "ttier1.png",
+          "name": "ttier1",
+          "glass-specializations": [
+            {
+              "value": false
+            },
+            {
+              "appearance": "dark",
+              "value": true
+            },
+            {
+              "appearance": "tinted",
+              "value": true
+            }
+          ],
+          "opacity-specializations": [
+            {
+              "value": 0
+            },
+            {
+              "appearance": "dark",
+              "value": 0.85
+            },
+            {
+              "appearance": "tinted",
+              "value": 0.85
+            }
+          ],
+          "position-specializations": [
+            {
+              "idiom": "square",
+              "value": {
+                "scale": 1.15,
+                "translation-in-points": [
+                  -0.65,
+                  -3.25
+                ]
+              }
+            }
+          ],
+          "fill-specializations": [
+            {
+              "value": {
+                "solid": "srgb:0.62745,0.55686,0.96078,1.00000"
+              }
+            },
+            {
+              "appearance": "dark",
+              "value": {
+                "solid": "srgb:0.62000,0.62000,0.63000,1.00000"
+              }
+            }
+          ]
+        },
+        {
+          "image-name": "ttier0.png",
+          "name": "ttier0",
+          "glass-specializations": [
+            {
+              "value": false
+            },
+            {
+              "appearance": "dark",
+              "value": true
+            },
+            {
+              "appearance": "tinted",
+              "value": true
+            }
+          ],
+          "opacity-specializations": [
+            {
+              "value": 0
+            },
+            {
+              "appearance": "dark",
+              "value": 0.85
+            },
+            {
+              "appearance": "tinted",
+              "value": 0.85
+            }
+          ],
+          "position-specializations": [
+            {
+              "idiom": "square",
+              "value": {
+                "scale": 1.15,
+                "translation-in-points": [
+                  -0.65,
+                  -3.25
+                ]
+              }
+            }
+          ],
+          "fill-specializations": [
+            {
+              "value": {
+                "solid": "srgb:0.47059,0.38431,0.90196,1.00000"
+              }
+            },
+            {
+              "appearance": "dark",
+              "value": {
+                "solid": "srgb:0.47000,0.47000,0.48000,1.00000"
+              }
+            }
+          ]
+        },
+        {
+          "image-name": "tier2.png",
+          "name": "tier2",
+          "glass-specializations": [
+            {
+              "value": true
+            }
+          ],
+          "opacity-specializations": [
+            {
+              "value": 1
+            },
+            {
+              "appearance": "dark",
+              "value": 0
+            },
+            {
+              "appearance": "tinted",
+              "value": 0
+            }
+          ],
+          "position-specializations": [
+            {
+              "idiom": "square",
+              "value": {
+                "scale": 1.15,
+                "translation-in-points": [
+                  -0.65,
+                  -3.25
+                ]
+              }
+            }
+          ],
+          "fill-specializations": [
+            {
+              "value": {
+                "solid": "srgb:0.42000,0.42000,0.43000,1.00000"
+              }
+            },
+            {
+              "appearance": "dark",
+              "value": {
+                "solid": "srgb:0.96000,0.96000,0.97000,1.00000"
+              }
+            },
+            {
+              "appearance": "tinted",
+              "value": {
+                "solid": "srgb:0.96000,0.96000,0.97000,1.00000"
+              }
+            }
+          ]
+        },
+        {
+          "image-name": "tier1.png",
+          "name": "tier1",
+          "glass-specializations": [
+            {
+              "value": true
+            }
+          ],
+          "opacity-specializations": [
+            {
+              "value": 1
+            },
+            {
+              "appearance": "dark",
+              "value": 0
+            },
+            {
+              "appearance": "tinted",
+              "value": 0
+            }
+          ],
+          "position-specializations": [
+            {
+              "idiom": "square",
+              "value": {
+                "scale": 1.15,
+                "translation-in-points": [
+                  -0.65,
+                  -3.25
+                ]
+              }
+            }
+          ],
+          "fill-specializations": [
+            {
+              "value": {
+                "solid": "srgb:0.42000,0.42000,0.43000,1.00000"
+              }
+            },
+            {
+              "appearance": "dark",
+              "value": {
+                "solid": "srgb:0.96000,0.96000,0.97000,1.00000"
+              }
+            },
+            {
+              "appearance": "tinted",
+              "value": {
+                "solid": "srgb:0.96000,0.96000,0.97000,1.00000"
+              }
+            }
+          ]
+        },
+        {
+          "image-name": "tier0.png",
+          "name": "tier0",
+          "glass-specializations": [
+            {
+              "value": true
+            }
+          ],
+          "opacity-specializations": [
+            {
+              "value": 1
+            },
+            {
+              "appearance": "dark",
+              "value": 0
+            },
+            {
+              "appearance": "tinted",
+              "value": 0
+            }
+          ],
+          "position-specializations": [
+            {
+              "idiom": "square",
+              "value": {
+                "scale": 1.15,
+                "translation-in-points": [
+                  -0.65,
+                  -3.25
+                ]
+              }
+            }
+          ],
+          "fill-specializations": [
+            {
+              "value": {
+                "solid": "srgb:0.42000,0.42000,0.43000,1.00000"
+              }
+            },
+            {
+              "appearance": "dark",
+              "value": {
+                "solid": "srgb:0.96000,0.96000,0.97000,1.00000"
+              }
+            },
+            {
+              "appearance": "tinted",
+              "value": {
+                "solid": "srgb:0.96000,0.96000,0.97000,1.00000"
+              }
+            }
+          ]
+        }
+      ],
+      "shadow": {
+        "kind": "layer-color",
+        "opacity": 0.5
+      },
+      "translucency": {
+        "enabled": true,
+        "value": 0.35
+      }
+    },
+    {
+      "layers": [
+        {
+          "image-name": "shell.png",
+          "name": "shell",
+          "glass-specializations": [
+            {
+              "value": false
+            },
+            {
+              "appearance": "dark",
+              "value": true
+            },
+            {
+              "appearance": "tinted",
+              "value": true
+            }
+          ],
+          "opacity-specializations": [
+            {
+              "value": 1
+            }
+          ],
+          "position-specializations": [
+            {
+              "idiom": "square",
+              "value": {
+                "scale": 1.15,
+                "translation-in-points": [
+                  -0.65,
+                  -3.25
+                ]
+              }
+            }
+          ],
+          "fill-specializations": [
+            {
+              "value": {
+                "solid": "srgb:0.22000,0.22000,0.23000,1.00000"
+              }
+            },
+            {
+              "appearance": "dark",
+              "value": {
+                "solid": "srgb:0.96000,0.96000,0.97000,1.00000"
+              }
+            },
+            {
+              "appearance": "tinted",
+              "value": {
+                "solid": "srgb:0.96000,0.96000,0.97000,1.00000"
+              }
+            }
+          ]
+        },
+        {
+          "image-name": "roof.png",
+          "name": "roof",
+          "glass-specializations": [
+            {
+              "value": false
+            },
+            {
+              "appearance": "dark",
+              "value": true
+            },
+            {
+              "appearance": "tinted",
+              "value": true
+            }
+          ],
+          "opacity-specializations": [
+            {
+              "value": 1
+            }
+          ],
+          "position-specializations": [
+            {
+              "idiom": "square",
+              "value": {
+                "scale": 1.15,
+                "translation-in-points": [
+                  -0.65,
+                  -3.25
+                ]
+              }
+            }
+          ],
+          "fill-specializations": [
+            {
+              "value": {
+                "solid": "srgb:0.22000,0.22000,0.23000,1.00000"
+              }
+            },
+            {
+              "appearance": "dark",
+              "value": {
+                "solid": "srgb:0.96000,0.96000,0.97000,1.00000"
+              }
+            },
+            {
+              "appearance": "tinted",
+              "value": {
+                "solid": "srgb:0.96000,0.96000,0.97000,1.00000"
+              }
+            }
+          ]
+        }
+      ],
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.5
+      },
+      "translucency": {
+        "enabled": true,
+        "value": 0.5
+      }
+    }
+  ],
+  "supported-platforms": {
+    "circles": [
+      "watchOS"
+    ],
+    "squares": "shared"
+  }
+}

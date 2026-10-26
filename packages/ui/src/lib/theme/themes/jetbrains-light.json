@@ -1,0 +1,147 @@
+{
+  "metadata": {
+    "id": "jetbrains-light",
+    "name": "JetBrains",
+    "variant": "light",
+    "description": "JetBrains IDE-inspired colors for OpenChamber - light variant",
+    "version": "1.0.0",
+    "author": "Artem Evsevev, adapted for OpenChamber",
+    "tags": [
+      "light",
+      "jetbrains",
+      "ide",
+      "blue"
+    ]
+  },
+  "colors": {
+    "primary": {
+      "base": "#195ce3",
+      "hover": "#2D61F0",
+      "active": "#0055FF",
+      "muted": "#3573F080"
+    },
+    "surface": {
+      "background": "#FFF",
+      "foreground": "#45474b",
+      "muted": "#f9f9f9",
+      "mutedForeground": "#696a6f",
+      "elevated": "#f5f5f5",
+      "overlay": "#00000025",
+      "subtle": "#f5f8fd"
+    },
+    "interactive": {
+      "border": "#dde0eadc",
+      "selection": "#DFE1E5",
+      "borderHover": "#aeb3c2ad",
+      "borderFocus": "#0055FF",
+      "focus": "#0055FF",
+      "focusRing": "#0055FF40",
+      "cursor": "#000000",
+      "hover": "#0000000a",
+      "active": "#00000014"
+    },
+    "status": {
+      "error": "#CE0606",
+      "errorBackground": "#FFE8E8",
+      "errorBorder": "#CF5B56",
+      "warning": "#9d620a",
+      "warningBackground": "#FFF8DC",
+      "warningBorder": "#9d620a",
+      "success": "#077D18",
+      "successBackground": "#E9F5E6",
+      "successBorder": "#55A76A",
+      "info": "#29769f",
+      "infoBackground": "#E7F4FB",
+      "infoBorder": "#29769f"
+    },
+    "syntax": {
+      "base": {
+        "background": "#fcfcfc",
+        "comment": "#8C8C8C",
+        "keyword": "#0033B3",
+        "string": "#067D17",
+        "number": "#1750EB",
+        "function": "#00627A",
+        "variable": "#45474b",
+        "type": "#A04908",
+        "operator": "#45474b"
+      },
+      "tokens": {
+        "stringEscape": "#0037A6",
+        "keywordImport": "#0033B3",
+        "functionBuiltin": "#C27203",
+        "variableProperty": "#871094",
+        "variableGlobal": "#1C5DFE",
+        "parameter": "#007E8A",
+        "interface": "#835DDA",
+        "className": "#00627A",
+        "struct": "#A04908",
+        "enum": "#A04908",
+        "typeParameter": "#007E8A",
+        "constant": "#871094",
+        "punctuation": "#45474b",
+        "tagAttribute": "#9E880D",
+        "decorator": "#9E880D",
+        "namespace": "#45474b",
+        "module": "#835DDA",
+        "label": "#C27203",
+        "macro": "#C27203",
+        "preprocessor": "#C27203",
+        "url": "#00627A",
+        "exception": "#1C5DFE"
+      },
+      "highlights": {
+        "diffAdded": "#077D18",
+        "diffAddedBackground": "#BEE6BE",
+        "diffRemoved": "#FF0000",
+        "diffRemovedBackground": "#FFD5CC",
+        "diffModified": "#0133B3",
+        "diffModifiedBackground": "#DDE8FF"
+      }
+    },
+    "pr": {
+      "open": "#369650",
+      "merged": "#834DF0",
+      "closed": "#E55765"
+    },
+    "chat": {
+      "userMessageBackground": "#e7edfb",
+      "divider": "#E1E4EB",
+      "background": "#FFF"
+    },
+    "markdown": {
+      "link": "#006DCC",
+      "linkHover": "#3573F0",
+      "inlineCode": "#067D17",
+      "inlineCodeBackground": "#fcfcfc",
+      "blockquote": "#8C8C8C",
+      "blockquoteBorder": "#E1E4EB",
+      "listMarker": "#9E880D99",
+      "bold": "#3e4044",
+      "italic": "#45474b"
+    },
+    "tools": {
+      "border": "#aeb3c247",
+      "icon": "#696a6f",
+      "title": "#45474b",
+      "description": "#696a6f",
+      "edit": {
+        "addedBackground": "#BEE6BE50",
+        "removedBackground": "#FFD5CC50",
+        "lineNumber": "#696a6f"
+      }
+    }
+  },
+  "config": {
+    "fonts": {
+      "sans": "\"JetBrains Mono\", ui-monospace, \"SFMono-Regular\", \"Menlo\", \"Cascadia Mono\", \"Segoe UI Mono\", monospace",
+      "mono": "\"JetBrains Mono\", ui-monospace, \"SFMono-Regular\", \"Menlo\", \"Cascadia Mono\", \"Segoe UI Mono\", monospace",
+      "heading": "\"JetBrains Mono\", ui-monospace, \"SFMono-Regular\", \"Menlo\", \"Cascadia Mono\", \"Segoe UI Mono\", monospace"
+    },
+    "transitions": {
+      "fast": "150ms ease",
+      "normal": "250ms ease",
+      "slow": "350ms ease"
+    }
+  }
+}

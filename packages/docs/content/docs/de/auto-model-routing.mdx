@@ -1,0 +1,61 @@
+---
+title: Automatische Modellwahl
+description: Lass OpenChamber für jeden Prompt Modell, Denkstufe und Agent wählen.
+---
+
+# Automatische Modellwahl
+
+Wähle **Auto** in der Modellauswahl, und OpenChamber sucht für jeden Prompt, den du sendest, das Modell aus. Ein Tippfehler geht an ein günstiges, schnelles Modell, ein kniffliger Bug an dein stärkstes. Welches Modell welche Art von Aufgabe übernimmt, legst du einmal in den Einstellungen fest.
+
+## Einschalten
+
+1. Sorge dafür, dass ein [Klassifizierungsanbieter](/de/classification-providers/) eingerichtet ist. Auto braucht Jev, um Prompts einzuordnen.
+2. Öffne **Einstellungen → Routing** und aktiviere **Auto-Modus aktivieren**.
+3. Wähle ein **Fallback-Modell** (und seine Denkstufe). Bis dahin bleibt Auto ausgeblendet.
+4. Sieh dir die Kategorien unten an und gib denen, die dir wichtig sind, ein eigenes Modell.
+
+Ist alles bereit, zeigt die Seite **Bereit**. Wähle **Auto** oben in der Modellauswahl in einer beliebigen Sitzung.
+
+## Kategorien
+
+Jeder Prompt landet in einer Kategorie. Vier sind eingebaut:
+
+| Kategorie | Wofür |
+| --- | --- |
+| Trivial | mechanische Arbeit: Umbenennungen, Tippfehler, Formatierung, Kommentare, einfache Befehle |
+| Research | Code lesen und erklären, ohne ihn zu ändern |
+| Implement | eine klare Änderung: ein Feature mit bekanntem Umfang, Tests, ein Fix mit bekannter Ursache |
+| Hard | Bugs mit unbekannter Ursache, Entwurf und Planung, Sicherheit, Authentifizierung, Nebenläufigkeit, Migrationen, Geld |
+
+Für jede Kategorie kannst du festlegen:
+
+- **Modell:** leer heißt Fallback-Modell
+- **Denken:** die Denkstufe für dieses Modell
+- **Agent:** der Agent, der diese Aufgaben ausführt; leer behält den Agenten, den das Eingabefeld nutzen würde
+
+Jev ordnet Prompts anhand der Namen und Beschreibungen der Kategorien ein, die Beschreibungen wirken also wie Anweisungen. Schreib hinein, was in die Kategorie gehört und was nicht. Du kannst Kategorien bearbeiten, ausschalten, entfernen oder hinzufügen und eine eingebaute wiederherstellen, wenn du es dir anders überlegst. Auto braucht mindestens zwei eingeschaltete Kategorien.
+
+## Was beim Senden passiert
+
+1. OpenChamber schickt deine Nachricht und einen kurzen Auszug der letzten Züge an Jev.
+2. Jev wählt eine Kategorie und sagt, wie sicher es sich ist.
+3. Die Sitzung wechselt auf Modell, Denkstufe und Agent dieser Kategorie, und deine Nachricht geht raus.
+
+Jede Nachricht wird neu eingeordnet, eine Sitzung kann also für eine kurze Frage ein günstiges Modell nutzen und für die nächste Anfrage dein stärkstes. Das Eingabefeld zeigt weiter **Auto**, und die Auswahl für Agent und Denkstufe ist ausgeblendet, weil die Kategorie sie bestimmt.
+
+Das Fallback-Modell antwortet, wenn:
+
+- Jev nicht sicher genug ist (unter 60 %)
+- Jev fehlschlägt oder länger als vier Sekunden braucht
+- die Kategorie kein eigenes Modell hat
+
+Wählst du in der Auswahl ein konkretes Modell, verlässt die Sitzung Auto. Wähle wieder **Auto**, um zurückzukehren. Du kannst Auto auch unter **Einstellungen → Sitzungen** zum Standard für neue Sitzungen machen.
+
+## Wo es funktioniert
+
+Auto läuft im OpenChamber-Server: in der Desktop-App, in der Web-App und auf deinem Handy, wenn es mit einer der beiden verbunden ist. VS Code bietet Auto nicht an, weil die Erweiterung direkt mit OpenCode spricht.
+
+## Verwandt
+
+- [Klassifizierungsanbieter (Jev)](/de/classification-providers/): das Modell einrichten, das Prompts einordnet
+- [Anbieter, Modelle und Agenten](/de/providers/): die Modelle verbinden, aus denen Auto wählt

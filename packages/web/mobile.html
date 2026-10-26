@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en" class="h-full">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <title>OpenChamber Mobile</title>
+
+    <script>
+      // Blocking script: resolve the theme and paint the correct background BEFORE first
+      // paint. Without this the WebView shows its default (light) canvas until React mounts
+      // and the theme CSS variables are applied a frame later, which flashed
+      // white -> default-theme -> resolved-theme on every cold launch. Mirrors the same
+      // pre-paint logic in index.html, but the mobile shell has no `#initial-loading`
+      // overlay, so we paint the document background directly. Bundled-only: reads the
+      // theme the app itself persisted to localStorage; no server involved.
+      (function () {
+        try {
+          var themeMode = localStorage.getItem('themeMode');
+          var useSystem = localStorage.getItem('useSystemTheme');
+          var variant = localStorage.getItem('selectedThemeVariant');
+          var isDark;
+
+          if (themeMode === 'dark') {
+            isDark = true;
+          } else if (themeMode === 'light') {
+            isDark = false;
+          } else if (themeMode === 'system' || useSystem === null || useSystem === 'true') {
+            isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+          } else if (variant === 'light' || variant === 'dark') {
+            isDark = variant === 'dark';
+          } else {
+            isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+          }
+
+          var root = document.documentElement;
+          root.classList.add(isDark ? 'dark' : 'light');
+          // color-scheme also drives the WebView's default canvas color, so the gap before
+          // CSS/React loads matches instead of defaulting to light.
+          root.style.setProperty('color-scheme', isDark ? 'dark' : 'light');
+
+          // splashBg* are the resolved theme surface.background colors persisted by the app
+          // theme system (see ThemeSystemContext). When absent (e.g. a fresh install before
+          // the theme has been persisted once), fall back to the default theme's
+          // surface.background — flexoki-dark/light (see lib/theme/themes), which is what the
+          // app renders on first launch — so the pre-paint matches instead of flashing a
+          // different colour.
+          var bgDark = localStorage.getItem('splashBgDark') || '#171515';
+          var bgLight = localStorage.getItem('splashBgLight') || '#fffdf4';
+          var bg = isDark ? bgDark : bgLight;
+
+          // Set the actual --background CSS variable, not just the element background.
+          // `<body class="bg-background">` paints `var(--background)`, and design-system.css
+          // ships a baked default (.dark { --background: ... /* #151313 */ }) that otherwise
+          // overpaints our html background the moment the stylesheet loads — before React's
+          // theme system injects the real (flexoki/custom) vars with !important. Setting the
+          // var inline on the root wins over that non-!important default, so body paints the
+          // correct colour immediately; React's later !important vars still take over.
+          root.style.setProperty('--background', bg);
+          root.style.backgroundColor = bg;
+        } catch (error) {
+          /* no-op: a missing/unavailable localStorage just defers to React's theme init */
+        }
+      })();
+    </script>
+
+    <script type="module" src="/src/mobile-main.tsx"></script>
+  </head>
+  <body class="h-full bg-background text-foreground">
+    <div id="root" class="h-full"></div>
+  </body>
+</html>

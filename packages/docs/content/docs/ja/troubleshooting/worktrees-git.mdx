@@ -1,0 +1,35 @@
+---
+title: Worktrees と Git
+description: よくある worktree と Git の問題を修正します。
+---
+
+# Worktrees と Git
+
+[worktree セッション](/worktrees/) と [Git ビュー](/git/) で起きる問題と、その解消方法です。
+
+## worktree に注意が必要
+
+OpenChamber は、worktree に異常があるとフラグを立てます。
+
+- **folder missing** — worktree のフォルダが削除された、または OpenChamber 外で移動されました。セッションを削除し、新しい worktree を作成してください
+- **detached or unborn branch** — worktree が通常のブランチ上にありません。ブランチをチェックアウトしてください
+- **merge, rebase, or cherry-pick in progress** — 操作が途中で残っています。Git ビューから完了または中止してください
+
+## worktree を作成できない
+
+- **branch already exists** — 別のブランチ名を選ぶか、既存ブランチのオプションを使います
+- **name already in use** — 別の worktree 名を選びます
+
+## コミットまたは PR 生成に失敗する
+
+コミットメッセージや PR 説明の生成はアクティブなセッションで実行されるため、動作するモデルが選択されたセッションを開いておく必要があります。セッションを開くか選び直して、もう一度試してください。
+
+## SSH または Windows パスの問題
+
+- リポジトリが使う SSH キーが [Git ID](/git-identities/) に設定したものか確認します
+- Windows では Git が Unix 形式のパス（`/c/Users/...` など）を使います。OpenChamber はこれを扱えますが、カスタム SSH キーパスも同じ形式にしてください
+
+## 関連
+
+- [Worktree セッション](/worktrees/) — worktree の作成と削除の仕組み
+- [Git ID](/git-identities/) — リポジトリごとに正しいキーと ID を設定する

@@ -1,0 +1,73 @@
+---
+title: Session Goals
+description: Turn a prompt into a goal the agent keeps working toward automatically.
+---
+
+# Session Goals
+
+A goal turns one prompt into a finish line. Instead of nudging the agent with "continue" after every reply, you set a goal once — and OpenChamber keeps the session working toward it automatically, checking progress with an independent auditor after every turn. It keeps running even while you are away.
+
+## Start a goal
+
+1. Press the target button in the composer. It lights up — goal mode is armed.
+2. Type your prompt and send it. That message becomes the goal's objective.
+
+This works in an existing session and in a new session draft alike: arm the target, write the first message, send — the new session starts with the goal already active.
+
+### More ways to start a goal
+
+- **From an agent's reply**: in the "Start new session from this answer" dialog, check **Run as goal** — the reply is handed over as an assignment the new session executes to completion (combine with **Create worktree** for an isolated run).
+- **From a plan**: when implementing a saved plan in a new session or worktree, check **Run as goal** in the dialog. The goal carries the plan content as its objective, so the auditor judges progress against the actual plan.
+- **On a schedule**: check **Run as goal** on a [scheduled task](/scheduled-tasks/) to make recurring runs pursue their prompt to completion.
+
+## Write a self-contained objective
+
+The progress auditor sees only your objective and the agent's latest reply — not the chat history. So phrase the goal message so that someone without the conversation context would understand what the finished state looks like.
+
+- Good: "Add tests for the export module and make the whole test suite pass."
+- Not so good: "Fix it" or "Continue with that idea."
+
+For small contextual follow-ups you don't need a goal — just send a normal message.
+
+## How it works
+
+After the agent stops and the session stays quiet for a moment, OpenChamber:
+
+1. Asks a small, cheap model to audit the latest turn against the objective: keep going, done, or stuck?
+2. If the verdict is "keep going", it sends a continuation prompt and the agent picks the work back up.
+3. If the objective is verifiably achieved, the goal completes and you get a notification.
+4. If the agent is genuinely stuck (needs your input), the goal stops as blocked — but only after the auditor says so three times in a row, so a one-off snag never ends the goal.
+
+There are hard safety stops too: an optional token budget, a cap on automatic continuations, and a stop on turn errors. If the session's context gets compacted mid-work, the goal simply continues — running into the context window is proof the work wasn't finished.
+
+### Stopping and resuming
+
+- The **stop button** aborts the running turn and pauses the goal — your explicit "stop" always wins over the loop.
+- **Pause** on the goal strip does the same from the other direction: it pauses the goal and stops the running turn.
+- While paused, chat normally — the loop stays out of the way.
+- **Resume** re-arms the loop: on an idle session the continuation nudge goes out immediately; if the agent happens to be working, the loop silently re-attaches at its next pause.
+
+## Watch and manage
+
+- The strip above the composer shows the goal's latest progress note, status, and token usage, with an inline pause/resume button. When the agent has stopped and the goal is active, the strip shows a spinning **Evaluating…** — that's the quiet window and the audit running.
+- The target button stays lit while the goal runs (blue), turns green on completion, and red when blocked or out of budget. Press it to open the goal dialog: edit the objective or budget, or remove the goal. A completed goal is read-only — remove it, then arm a new one.
+- In the session sidebar, a small target appears next to the session date, colored by the goal's state.
+
+## Notifications
+
+While a goal is active, the per-turn "agent is ready" notifications are suppressed — they would just echo the goal loop's own continuations. When the goal settles (complete, blocked, or budget reached) you get one final notification instead, on desktop and as a mobile push. It obeys the same "notify on completion" setting; permission requests, questions, and error notifications keep working as usual throughout.
+
+## Token budget
+
+In **Settings → Chat → Goal** you can set a default token budget for new goals. When a goal reaches its budget it stops as "budget reached" instead of spending more — you can raise the budget and resume from the goal dialog.
+
+## Keep in mind
+
+- The goal loop runs in the OpenChamber server, not in your browser tab. Close the tab, lock the phone — the agent keeps working, and you get a notification when the goal settles. The server (desktop app or `openchamber` process) must stay running.
+- Goals use your session's own provider and model, including the auditor calls — nothing leaves the providers you already use.
+- One goal per session at a time.
+
+## Related
+
+- [Scheduled Tasks](/scheduled-tasks/) — run a prompt on a schedule; enable "Run as goal" there to make a scheduled run pursue its prompt to completion
+- [Notifications](/notifications/) — how you hear about a finished goal

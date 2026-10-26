@@ -1,0 +1,54 @@
+---
+title: Project Notes, Todos & Plans
+description: Keep notes, a todo list, and saved plans for each project.
+---
+
+# Project Notes, Todos & Plans
+
+Each project has its own scratch space for notes, a todo list, and saved plans. They belong to the project, not to any one session, so they stick around as you move between sessions. Find them in the **Project knowledge** panel on the right (in the workspace drawer on mobile), with tabs for Notes, Todo, Plans and, when agent memory is on, Memory.
+
+Each section has the same field at the top for adding an entry. Type and press **Enter**; in notes, **Shift+Enter** starts a new line. The search button next to the tabs opens a search bar that looks through all sections at once; each tab shows how many matches it has. **Esc** closes the search and clears it.
+
+When the panel is wide, for example after you expand it, notes, plans and memory show the list on the left and the open entry on the right, so the list stays in view while you read and edit.
+
+## Notes
+
+Each note is a card. Its first line is the title, and the lines under it show as a short preview with Markdown formatting. Click a card to open the note in the panel; the list stays where it was, and the back arrow at the start of the note's toolbar or **Esc** returns to it. An open note is formatted text you edit directly: Markdown symbols such as `#` and `**` appear only on the line you are editing, and it saves as you type. A note you saved from a chat says **From chat**, and clicking that opens the message it came from.
+
+The pin on a note adds it to the current session's context, so the agent gets it with your next message. A pinned note says **In session context**. Pins belong to one session; other sessions in the project do not get them.
+
+## Todos
+
+A simple checklist. Add items, check them off, reorder them by dragging, and clear the finished ones with **Clear completed** under the list.
+
+Each todo has a **send** menu so you can hand it to the agent:
+
+- send it to the current session
+- start a new session with it
+- start a new [worktree session](/worktrees/) with it (only when the project is a git repo)
+
+## Plans
+
+A place to keep longer plans as saved files. Type a title in the field and press **Enter** to create a plan; it opens right away so you can write it. You can also import a plan from a Markdown or text file with the upload button in the same field.
+
+Click a plan to read and edit it in the panel. Like notes, a plan can be pinned to the current session. The row menu moves a plan into the repository's plans folder, so everyone who pulls the repository sees it, or back into your own plans, and deletes it.
+
+## Deleting and undo
+
+Deleting a note, a plan, or a stored memory shows a toast with **Undo** for a few seconds. The entry is only removed for good when that time runs out.
+
+## Agents
+
+Agents read and update the same notes, todos and plans through the project knowledge tool. Ask an agent to note a decision, add a todo, tick one off, or keep a plan up to date, and the change shows up in the panel as it happens. Notes an agent creates are marked as coming from an agent. When an agent writes a plan for you, it can open the plan in front of you, where you read it, comment on lines, and send it to a session. Plans are plain markdown files, so agents read and edit them like any other file. They start a plan with a short checklist of its steps and tick each one as they implement it, and an open plan picks the changes up within a couple of seconds, so its preview shows how far the work got. That progress comes from a `## Steps` heading and the `- [ ]` items under it. Only that section counts, so checklists under other headings are detail, and a plan without the heading shows no progress.
+
+An agent can link a note or todo to a plan and make a todo depend on other todos in the same plan; a todo without a plan has no dependencies. It can ask for the ready todos, the unfinished ones whose dependencies are all complete. Deleting a todo removes it from the todos that depended on it, and deleting a plan unlinks its notes and todos. An agent can also set or clear the session linked to a plan.
+
+An agent works on the project its session belongs to, worktrees included. If an agent changes a note or plan while you are typing in it, what you type is saved over the agent's change. Agents are asked to send the text they read along with a note or plan they replace whole; if it changed since, the write is refused and the agent reads it again.
+
+The tool is on by default. Turn it off in **Settings → General → OpenChamber Tools** with **Project knowledge tool**. Like the other OpenChamber tools, it is only there when OpenChamber runs its own OpenCode server, so not with an external server or in the VS Code extension.
+
+## Related
+
+- [Worktree Sessions](/worktrees/) — run a todo in its own branch
+- [Projects](/projects/) — these belong to the active project
+- [Agent Control Tool](/agent-control-tool/) — the other OpenChamber tools agents get

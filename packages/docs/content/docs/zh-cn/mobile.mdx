@@ -1,0 +1,43 @@
+---
+title: 移动应用与 PWA
+description: 在 iOS 或 Android 上安装 OpenChamber 应用，并把它连接到你的服务器。
+---
+
+# 移动应用与 PWA
+
+OpenChamber 提供 iPhone 和 Android 原生应用，让你可以在手机上查看会话、回复代理并管理工作 — 在家通过 Wi-Fi，外出时通过 [Private Relay](/zh-cn/private-relay/)。
+
+## 安装应用
+
+- **iPhone/iPad** — 加入 [TestFlight 测试版](https://testflight.apple.com/join/5ek6GU1E)
+- **Android** — 从 [最新发布版本](https://github.com/openchamber/openchamber/releases/latest) 下载 APK
+
+## 连接到你的服务器
+
+1. 在运行 OpenChamber 的电脑上，打开 **Settings → Remote Instances → 连接到此服务器**，然后按 **添加设备**。
+2. 选择 **任何地方**（如果只在家里用手机，可选 **仅家庭网络**），然后按 **创建二维码**。
+3. 在移动应用中点击 **扫描二维码**，用相机对准它。
+
+应用会连接并记住这台服务器。二维码只能使用一次，每台设备都会获得自己的可撤销令牌 — 关于配对为何安全，参阅 [连接设备](/zh-cn/connect-devices/)。
+
+你可以把应用与多台服务器配对，并在实例列表中随意切换；应用会为每台服务器显示它是否可达，以及你是通过本地网络还是中继连接的。
+
+## PWA（浏览器安装）
+
+完全不想经过应用商店？网页应用可以直接从浏览器安装：
+
+- **桌面浏览器** — 使用地址栏中的 **Install** 选项
+- **iPhone/iPad（Safari）** — 分享 → **Add to Home Screen**
+- **Android（Chrome）** — 菜单 → **Install app** / **Add to Home Screen**
+
+要在你的网络之外访问 PWA，需要一个 [隧道](/zh-cn/tunnels/) 和一个强 [UI 密码](/zh-cn/security/) — 原生应用则通过中继替你处理好这一切。
+
+## 移动端设置
+
+在 **Settings → OpenChamber** 下，有几个选项可以调整移动端和已安装应用的体验 — 应用的安装名称、屏幕方向，以及屏幕键盘的行为方式。
+
+## 相关内容
+
+- [连接设备](/zh-cn/connect-devices/) — 配对、一次性二维码与设备管理
+- [Private Relay](/zh-cn/private-relay/) — “任何地方”访问的工作原理
+- [安全](/zh-cn/security/) — 在公开 UI 之前保护它

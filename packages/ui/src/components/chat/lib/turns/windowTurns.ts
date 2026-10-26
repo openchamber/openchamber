@@ -1,0 +1,226 @@
+import { createNoticeTurnSplitter, isSkippedTimelineMessage, isTurnOpeningNotice } from '../timelineRoles';
+import type { ChatMessageEntry } from './types';
+
+const resolveMessageRole = (message: ChatMessageEntry): string => {
+    const role = (message.info as { clientRole?: string | null; role?: string | null }).clientRole ?? message.info.role;
+    return typeof role === 'string' ? role : '';
+};
+
+/** A user prompt opens a turn, and so does a background report or a compaction (see `isTurnOpeningNotice`). */
+const opensTurn = (message: ChatMessageEntry): boolean =>
+    resolveMessageRole(message) === 'user' || isTurnOpeningNotice(message.info);
+
+const resolveParentMessageId = (message: ChatMessageEntry): string | undefined => {
+    const parentId = (message.info as { parentID?: unknown }).parentID;
+    if (typeof parentId !== 'string' || parentId.trim().length === 0) {
+        return undefined;
+    }
+    return parentId;
+};
+
+export interface TurnWindowModel {
+    turnIds: string[];
+    turnMessageStartIndexes: number[];
+    turnIndexById: Map<string, number>;
+    messageToTurnId: Map<string, string>;
+    messageToTurnIndex: Map<string, number>;
+    turnCount: number;
+}
+
+const getMessageSignature = (message: ChatMessageEntry | undefined): string | null => {
+    if (!message) return null;
+    const role = resolveMessageRole(message);
+    const messageId = typeof message.info?.id === 'string' ? message.info.id : '';
+    const parentId = resolveParentMessageId(message) ?? '';
+    return `${messageId}::${role}::${parentId}`;
+};
+
+const cloneTurnWindowModel = (model: TurnWindowModel): TurnWindowModel => ({
+    turnIds: [...model.turnIds],
+    turnMessageStartIndexes: [...model.turnMessageStartIndexes],
+    turnIndexById: new Map(model.turnIndexById),
+    messageToTurnId: new Map(model.messageToTurnId),
+    messageToTurnIndex: new Map(model.messageToTurnIndex),
+    turnCount: model.turnCount,
+});
+
+export const updateTurnWindowModelIncremental = (
+    previousModel: TurnWindowModel | null,
+    previousMessages: ChatMessageEntry[] | null,
+    nextMessages: ChatMessageEntry[],
+): TurnWindowModel | null => {
+    if (!previousModel || !previousMessages) {
+        return null;
+    }
+
+    if (previousMessages.length === nextMessages.length) {
+        let changedIndex = -1;
+        for (let index = 0; index < nextMessages.length; index += 1) {
+            if (previousMessages[index] === nextMessages[index]) {
+                continue;
+            }
+            if (changedIndex !== -1) {
+                return null;
+            }
+            changedIndex = index;
+        }
+
+        if (changedIndex === -1) {
+            return previousModel;
+        }
+
+        if (changedIndex !== nextMessages.length - 1) {
+            return null;
+        }
+
+        return getMessageSignature(previousMessages[changedIndex]) === getMessageSignature(nextMessages[changedIndex])
+            ? previousModel
+            : null;
+    }
+
+    if (nextMessages.length !== previousMessages.length + 1) {
+        return null;
+    }
+
+    for (let index = 0; index < previousMessages.length; index += 1) {
+        if (previousMessages[index] !== nextMessages[index]) {
+            return null;
+        }
+    }
+
+    const nextMessage = nextMessages[nextMessages.length - 1];
+    if (!nextMessage) {
+        return null;
+    }
+
+    const role = resolveMessageRole(nextMessage);
+    const messageId = nextMessage.info.id;
+    const nextModel = cloneTurnWindowModel(previousModel);
+
+    if (opensTurn(nextMessage)) {
+        const nextTurnIndex = nextModel.turnIds.length;
+        nextModel.turnIds.push(messageId);
+        nextModel.turnMessageStartIndexes.push(nextMessages.length - 1);
+        nextModel.turnIndexById.set(messageId, nextTurnIndex);
+        nextModel.messageToTurnId.set(messageId, messageId);
+        nextModel.messageToTurnIndex.set(messageId, nextTurnIndex);
+        nextModel.turnCount = nextModel.turnIds.length;
+        return nextModel;
+    }
+
+    // A reply after a skipped notice may open a turn at that notice, earlier
+    // in the list; the full pass places it.
+    const previousMessage = previousMessages[previousMessages.length - 1];
+    if (role === 'assistant' && previousMessage && isSkippedTimelineMessage(previousMessage.info)) {
+        return null;
+    }
+
+    if (role !== 'assistant') {
+        const currentTurnIndex = nextModel.turnIds.length - 1;
+        if (currentTurnIndex < 0) {
+            return null;
+        }
+        const turnId = nextModel.turnIds[currentTurnIndex];
+        if (!turnId) {
+            return null;
+        }
+        nextModel.messageToTurnId.set(messageId, turnId);
+        nextModel.messageToTurnIndex.set(messageId, currentTurnIndex);
+        return nextModel;
+    }
+
+    const parentId = resolveParentMessageId(nextMessage);
+    if (!parentId) {
+        return nextModel;
+    }
+    const targetTurnIndex = nextModel.turnIndexById.get(parentId);
+    if (typeof targetTurnIndex !== 'number' || targetTurnIndex < 0) {
+        return null;
+    }
+
+    const turnId = nextModel.turnIds[targetTurnIndex];
+    if (!turnId) {
+        return null;
+    }
+
+    nextModel.messageToTurnId.set(messageId, turnId);
+    nextModel.messageToTurnIndex.set(messageId, targetTurnIndex);
+    return nextModel;
+};
+
+export const buildTurnWindowModel = (messages: ChatMessageEntry[]): TurnWindowModel => {
+    const turnIds: string[] = [];
+    const turnMessageStartIndexes: number[] = [];
+    const turnIndexById = new Map<string, number>();
+    const messageToTurnId = new Map<string, string>();
+    const messageToTurnIndex = new Map<string, number>();
+    const userMessageToTurnIndex = new Map<string, number>();
+
+    let currentTurnIndex = -1;
+    const splitAtNotice = createNoticeTurnSplitter();
+
+    const openTurn = (messageId: string, index: number) => {
+        currentTurnIndex = turnIds.length;
+        turnIds.push(messageId);
+        turnMessageStartIndexes.push(index);
+        turnIndexById.set(messageId, currentTurnIndex);
+        userMessageToTurnIndex.set(messageId, currentTurnIndex);
+        messageToTurnId.set(messageId, messageId);
+        messageToTurnIndex.set(messageId, currentTurnIndex);
+    };
+
+    messages.forEach((message, index) => {
+        const role = resolveMessageRole(message);
+        const messageId = message.info.id;
+        // Same rule as `projectTurnRecords`, so turn ids match the rendered turns.
+        const noticeIndex = splitAtNotice(message.info, index);
+        if (noticeIndex >= 0 && currentTurnIndex >= 0) {
+            openTurn(messages[noticeIndex].info.id, noticeIndex);
+        }
+
+        if (opensTurn(message)) {
+            openTurn(messageId, index);
+            return;
+        }
+
+        if (role !== 'assistant') {
+            if (currentTurnIndex >= 0) {
+                const turnId = turnIds[currentTurnIndex];
+                if (turnId) {
+                    messageToTurnId.set(messageId, turnId);
+                    messageToTurnIndex.set(messageId, currentTurnIndex);
+                }
+            }
+            return;
+        }
+
+        const parentId = resolveParentMessageId(message);
+        if (!parentId) {
+            return;
+        }
+        const targetTurnIndex = userMessageToTurnIndex.get(parentId);
+        if (typeof targetTurnIndex !== 'number') {
+            return;
+        }
+        if (targetTurnIndex < 0) {
+            return;
+        }
+
+        const turnId = turnIds[targetTurnIndex];
+        if (!turnId) {
+            return;
+        }
+
+        messageToTurnId.set(messageId, turnId);
+        messageToTurnIndex.set(messageId, targetTurnIndex);
+    });
+
+    return {
+        turnIds,
+        turnMessageStartIndexes,
+        turnIndexById,
+        messageToTurnId,
+        messageToTurnIndex,
+        turnCount: turnIds.length,
+    };
+};

@@ -1,0 +1,97 @@
+---
+title: Serveur OpenCode
+description: Connectez OpenChamber à un serveur OpenCode local ou distant.
+---
+
+# Serveur OpenCode
+
+OpenChamber fonctionne par-dessus un serveur OpenCode. Par défaut, il en démarre un pour vous, donc vous n’avez rien à faire. Vous n’avez besoin de cette page que si vous voulez pointer OpenChamber vers un serveur que vous exécutez déjà, ou gérer celui qu’il démarre.
+
+## Comment OpenChamber trouve un serveur
+
+Au démarrage, OpenChamber cherche un serveur dans cet ordre :
+
+1. réutiliser un serveur qu’il a déjà démarré
+2. se connecter à un serveur externe si vous le lui avez indiqué (voir ci-dessous)
+3. détecter automatiquement un serveur sur le port par défaut (`4096`)
+4. sinon, démarrer et gérer son propre serveur
+
+Si rien n’est configuré, l’étape 4 se fait automatiquement et vous pouvez commencer.
+
+## Se connecter à un serveur que vous exécutez déjà
+
+Définissez ces variables avant de lancer OpenChamber :
+
+```bash
+OPENCODE_HOST=http://localhost:4096 OPENCODE_SKIP_START=true openchamber
+```
+
+- `OPENCODE_HOST` — l’adresse complète de votre serveur OpenCode, port inclus (par exemple `http://localhost:4096`). Elle ne doit pas se terminer par un chemin.
+- `OPENCODE_SKIP_START=true` — indique à OpenChamber de ne pas démarrer son propre serveur.
+
+Si vous voulez seulement changer le port, définissez `OPENCODE_PORT` au lieu de `OPENCODE_HOST`.
+
+Si `OPENCODE_HOST` n’a pas de port ou contient un chemin, OpenChamber l’ignore et revient au démarrage de son propre serveur. Surveillez les logs de démarrage pour un avertissement `[config]` si une connexion attendue ne se fait pas.
+
+## Gérer le serveur depuis la CLI
+
+```bash
+openchamber status
+openchamber logs
+openchamber restart
+openchamber stop
+```
+
+`openchamber` seul démarre le serveur en arrière-plan. Ajoutez `--foreground` pour le garder attaché à votre terminal.
+
+## Lancer OpenChamber à la connexion
+
+Utilisez `startup enable` pour installer un service utilisateur natif. OpenChamber utilise `launchd` sur macOS, `systemd --user` sur Linux et le Planificateur de tâches sur Windows.
+
+```bash
+openchamber startup enable
+openchamber startup status
+openchamber startup disable
+```
+
+Pour protéger l’UI, définissez le mot de passe lors de l’activation du service :
+
+```bash
+OPENCHAMBER_UI_PASSWORD='secret' openchamber startup enable
+```
+
+Pour un serveur headless qui démarre à la connexion et doit servir des clients desktop ou mobile, ajoutez `--api-only` et un host joignable :
+
+```bash
+openchamber startup enable --port 3000 --api-only --host 0.0.0.0 --ui-password secret
+```
+
+`startup enable` capture votre environnement actuel dans le service, pour qu’il se comporte davantage comme un lancement de `openchamber` depuis le même shell. Les tokens de fournisseurs, `PATH`, les réglages d’agent SSH et les autres variables d’auth/config CLI restent ainsi disponibles. Utilisez `--no-env-snapshot` si vous voulez un environnement de service minimal.
+
+Le service de démarrage mémorise `--port`, `--host`, `--ui-password` et `--api-only`. Les redémarrages CLI et les redémarrages après mise à jour réutilisent ces réglages enregistrés.
+
+Pour créer un lien de connexion pour une autre application OpenChamber, utilisez :
+
+```bash
+openchamber connect-url --port 3000 --server http://your-host:3000 --qr
+```
+
+Lancez `openchamber connect-url --help` pour voir toutes les options de lien, dont `--name`, `--lan`, `--server`, `--api-only`, `--ui-password` et `--qr`.
+
+Vous pouvez toujours gérer les tunnels séparément pour ce service en cours d’exécution :
+
+```bash
+openchamber tunnel start --port 3000
+openchamber tunnel stop --port 3000
+```
+
+Arrêter le tunnel ne redémarre ni le service ni l’application.
+
+## « OpenCode redémarre »
+
+Pendant que le serveur démarre ou redémarre, OpenChamber affiche l’état « OpenCode redémarre » et met les requêtes en pause jusqu’à ce qu’il soit prêt. C’est normal juste après un lancement ou un redémarrage. Si l’état ne disparaît jamais, consultez [Connexion à OpenCode](/troubleshooting/opencode-connection/).
+
+## Pages liées
+
+- [Fournisseurs, modèles et agents](/providers/) — configurer ce avec quoi le serveur communique
+- [Connexion à OpenCode](/troubleshooting/opencode-connection/) — si la connexion ne se fait pas

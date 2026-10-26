@@ -1,0 +1,82 @@
+---
+title: Issue 与 PR
+description: 浏览项目的 issue 和拉取请求，或你的 Linear issue，并从中开始工作。
+---
+
+# Issue 与 PR
+
+**Issues and PRs** 看板是一个完整页面，列出项目在 GitHub、GitLab、Gitea、Forgejo 或 Gerrit 上的 issue 和拉取请求（GitLab 上叫合并请求，Gerrit 上叫变更，Gerrit 没有 issue），或你的 Linear issue。选中一项，它的预览会在列表旁打开。在这里查看其他项目，不会改变应用其余部分所在的项目。
+
+## 打开看板
+
+- 点击侧边栏顶部的拉取请求图标，它在定时任务和归档旁边。
+- 在命令面板中选择 **Issues and PRs**。
+- 按 <kbd>⌘K</kbd> 再按 <kbd>B</kbd>（Windows 和 Linux 上为 <kbd>Ctrl+K</kbd> 再按 <kbd>B</kbd>）。同样的按键会关闭它。
+
+在手机上，点按会话菜单底部的拉取请求按钮。VS Code 扩展中没有这个看板。
+
+看板再次打开时，会回到你离开时的项目、标签页和团队。
+
+## 查找条目
+
+所有控件都在工具栏的一行里。左边是项目选择器，带项目图标和搜索。旁边可以在 **Issues**、**Pull requests** 和 **Linear** 之间切换。issue 和拉取请求来自项目自己的托管平台：GitHub、GitLab、Gitea、Forgejo、Gerrit，或某个 [扩展](/zh-cn/extensions/#作为-git-托管服务的扩展) 添加的托管服务。**Linear** 标签页只有在连接 Linear 后才会出现。不在这些托管服务上的项目只显示这个标签页，或者提示没有可列出的内容。位于 `~/.ssh/config` 主机别名（例如 `github.com-work`）上的远程仓库不算在其中任何一个。
+
+如果项目文件夹本身不是 Git 仓库，但里面包含仓库，项目选择器旁边会有第二个选择器，用来选择看板列出什么。排在第一位的 **所有仓库** 是默认选项：看板会把文件夹中每个 GitHub 仓库的 issue 和拉取请求放在一起列出，每一行注明所属仓库。搜索覆盖所有仓库，包括粘贴的链接或编号。列表上方的提示会说明有多少个仓库没有包含在内，例如位于 GitLab、Gitea、Forgejo 或 Gerrit 上的仓库，或者没有任何已连接账号能读取的仓库；它的菜单会列出是哪些仓库以及原因。选择单个仓库则只列出那一个。看板会为每个项目记住这个选择，它与 Git 视图中选中的仓库互不影响。
+
+评论、标签、评审者和合并都作用于条目所属的仓库。**New session** 仍然在项目文件夹中启动。**Changes** 和 **Walkthrough** 会在拉取请求自己的仓库中打开它，Git 视图中选中的仓库保持不变。这些条目暂不支持在 worktree 中开始工作。指向这些仓库中 issue 或拉取请求的链接会在 Tracker 中打开，通过该仓库读取。在手机上它会在看板中打开，看板会切换到 **所有仓库** 来找到它。VS Code 扩展没有看板，所以这些在那里都不起作用。
+
+在 **Linear** 下，项目选择器会变成团队选择器：选择 **All teams** 或某一个团队。对于只有 **Linear** 的项目，项目选择器会留在团队选择器旁边，方便你切换到其他项目。如果你连接了多个 Linear 工作区，在同一个菜单里切换工作区。连接 Linear 的方法见 [集成](/zh-cn/integrations/)。
+
+搜索支持标题、编号或粘贴的链接。筛选菜单在你选择时保持打开，所以可以组合多个筛选条件。
+
+GitHub、GitLab、Gitea、Forgejo 和 Gerrit：
+
+- 状态：**Open**、**Closed**、**All**，拉取请求还有 **Merged**
+- 人员：**Anyone**、**Assigned to me**、**Created by me**，拉取请求还有 **Review requested**
+
+Linear：
+
+- 状态：**Open**、**All**、**Backlog**、**To Do**、**In Progress**、**In Review**、**Done**、**Canceled**、**Duplicate**
+- 人员：**Anyone**、**Assigned to me**、**Created by me**
+- 优先级：**All priorities**、**Urgent**、**High**、**Medium**、**Low**、**No priority**
+
+## 查看条目
+
+预览显示描述、标签和评论。对于 Linear issue，点击状态标签可以把它改到团队的另一个状态。
+
+**Labels** 一行有一个铅笔按钮，点击会打开仓库标签列表，可以搜索。勾选或取消勾选即可。关闭列表时才会保存，所以多次点击只算一次修改。打开状态的拉取请求（GitLab 上为合并请求）还有一行 **Reviewers**，用法相同，列出的是在该仓库中可以评审的人。在 GitHub 上，拉取请求的作者不会出现在列表中。Linear issue 没有这两行。
+
+## 评论与评审
+
+issue 或拉取请求的动态下方有一个评论框。**Comment** 会把你写的内容发布到仓库的托管服务，按 <kbd>⌘</kbd>+<kbd>Enter</kbd>（Windows 和 Linux 上为 <kbd>Ctrl</kbd>+<kbd>Enter</kbd>）效果相同。文字在发布成功前一直留在框里，所以发布失败也不会丢失内容。切换到其他条目会清空评论框。Linear issue 没有评论框。
+
+打开状态的拉取请求（GitLab 上为合并请求）还有 **Approve** 和 **Request changes**，框里的内容会随评审一起提交。**Request changes** 需要填写文字，说明要改什么。评审针对的是预览中显示的提交。如果此后有人推送了新提交，评审会被拒绝，预览会刷新，方便你重新查看。在 GitLab 上，只有当你是该合并请求的评审者时，**Request changes** 才可用；评审文字会作为一条单独的评论发布。如果只是这条评论发布失败，评审仍然有效，你的文字也会留在框里。
+
+Gerrit 变更会为项目的每个标签显示一行，例如 Code-Review 和 Verified，并列出你可以给出的分数；选好后选择 **投票**。框里的文字会作为一条消息随投票一起发送。投票针对最新的补丁集，所以在阅读较早的补丁集时不提供投票。
+
+## 开始工作
+
+操作按钮在预览底部。
+
+- **New session** 在项目中打开一个新会话，并把该条目附加到消息框。第一条消息由你自己来写。
+- issue 上的 **Start in worktree…**，或拉取请求上的 **Check out in worktree…**，会打开 New Worktree 对话框，并已选好该条目。拉取请求会检出它自己的分支。参阅 [Worktree 会话](/zh-cn/worktrees/)。
+
+对于 Linear issue，**Start in** 显示会话将在哪个项目中启动。它是在 [集成](/zh-cn/integrations/) 的 Linear 卡片中映射到该 issue 所属团队的项目。没有团队映射时使用默认项目，再没有的话，就是看板上次显示的项目。你可以在那里为这个 issue 改选其他项目。
+
+## 拉取请求
+
+拉取请求的预览还会显示它的分支、大小（增加和删除的行数，以及改动的文件数）、检查和评审。**Activity** 动态按发生顺序排列评论、评审结论和最新的提交。连续的提交会合并成一组，这样你能看出某次评审回应的是哪些提交。
+
+大小旁边有两个按钮。**Changes** 在侧边面板中打开拉取请求的 diff，**Walkthrough** 打开它的 [改动导读](/zh-cn/walkthrough/)。如果应用当前在另一个项目上，会先切换到该 PR 的项目。在手机上，**Changes** 会在工作区面板的 **Git** 标签页中打开该 PR；**Walkthrough** 只在桌面端和网页端提供。
+
+底部的 **Merge** 会先确认再合并，并使用你平常的合并方式。草稿还会有 **Ready for review**。
+
+在 Gerrit 上，预览还会显示变更的主题，以及它是否为私有或进行中。当变更有多个补丁集时，**Changes** 旁边的选择器决定文件和 diff 来自哪一个补丁集，默认是最新的。**Merge** 变为 **合入**，在变更满足合入要求之前保持停用，并在旁边列出尚未满足的要求。**Close** 和 **Reopen** 变为 **放弃变更** 和 **恢复变更**。
+
+打开状态的 issue 或拉取请求底部还有 **Close issue** 或 **Close pull request**（GitLab 上为 **Close merge request**），已关闭的则有 **Reopen issue** 或 **Reopen pull request**（**Reopen merge request**）。这些操作可以撤回，所以不会先确认。已合并的拉取请求不能关闭，也不能重新打开。在 GitHub 上，issue 会以已完成的状态关闭。
+
+## 相关内容
+
+- [Git 托管服务](/zh-cn/github/) — 连接 GitHub、GitLab、Gitea、Forgejo 或 Gerrit，并把条目附加到消息
+- [Worktree 会话](/zh-cn/worktrees/) — worktree 会话从哪里开始
+- [集成](/zh-cn/integrations/) — 连接 Linear，并把团队映射到项目

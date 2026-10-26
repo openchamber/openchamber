@@ -1,0 +1,146 @@
+{
+  "metadata": {
+    "id": "mono-dark",
+    "name": "Mono",
+    "variant": "dark",
+    "description": "A pure monochromatic theme - dark variant with shades of grey",
+    "version": "1.0.0",
+    "tags": [
+      "dark",
+      "monochrome",
+      "minimal",
+      "grayscale"
+    ]
+  },
+  "colors": {
+    "primary": {
+      "base": "#FFFFFF",
+      "hover": "#E5E5E5",
+      "active": "#CCCCCC",
+      "muted": "#FFFFFF80"
+    },
+    "surface": {
+      "background": "#000000",
+      "foreground": "#d0d0d0",
+      "muted": "#0A0A0A",
+      "mutedForeground": "#898989",
+      "elevated": "#141414",
+      "overlay": "#00000080",
+      "subtle": "#1A1A1A"
+    },
+    "interactive": {
+      "border": "#232323c6",
+      "selection": "#ffffff1f",
+      "borderHover": "#333333",
+      "focusRing": "#FFFFFF50",
+      "cursor": "#E5E5E5",
+      "hover": "#ffffff0f",
+      "active": "#ffffff1a"
+    },
+    "status": {
+      "error": "#666666",
+      "errorForeground": "#000000",
+      "errorBackground": "#ffffff10",
+      "errorBorder": "#ffffff20",
+      "warning": "#999999",
+      "warningBackground": "#ffffff12",
+      "warningBorder": "#ffffff25",
+      "success": "#E5E5E5",
+      "successBackground": "#ffffff18",
+      "successBorder": "#ffffff30",
+      "info": "#A6A6A6",
+      "infoBackground": "#ffffff14",
+      "infoBorder": "#ffffff28"
+    },
+    "syntax": {
+      "base": {
+        "background": "#050505",
+        "comment": "#666666",
+        "keyword": "#FFFFFF",
+        "string": "#B3B3B3",
+        "number": "#999999",
+        "function": "#d0d0d0",
+        "variable": "#CCCCCC",
+        "type": "#D9D9D9",
+        "operator": "#808080"
+      },
+      "tokens": {
+        "commentDoc": "#595959",
+        "keywordImport": "#FFFFFF",
+        "storageModifier": "#d0d0d0",
+        "functionCall": "#D9D9D9",
+        "method": "#CCCCCC",
+        "variableProperty": "#B3B3B3",
+        "variableGlobal": "#999999",
+        "variableLocal": "#1A1A1A",
+        "parameter": "#CCCCCC",
+        "className": "#FFFFFF",
+        "struct": "#d0d0d0",
+        "enum": "#d0d0d0",
+        "boolean": "#CCCCCC",
+        "constant": "#d0d0d0",
+        "tag": "#d0d0d0",
+        "jsxTag": "#FFFFFF",
+        "tagAttributeValue": "#999999",
+        "decorator": "#999999",
+        "namespace": "#CCCCCC",
+        "module": "#B3B3B3",
+        "macro": "#D9D9D9",
+        "preprocessor": "#B3B3B3",
+        "regex": "#A6A6A6",
+        "url": "#CCCCCC",
+        "key": "#d0d0d0",
+        "exception": "#999999"
+      },
+      "highlights": {
+        "diffAdded": "#E5E5E5",
+        "diffRemoved": "#666666",
+        "diffRemovedBackground": "#ffffff0d",
+        "diffModified": "#B3B3B3",
+        "diffModifiedBackground": "#ffffff12"
+      }
+    },
+    "pr": {
+      "merged": "#CCCCCC"
+    },
+    "chat": {
+      "userMessageBackground": "#1A1A1A",
+      "divider": "#242424",
+      "background": "#000000"
+    },
+    "markdown": {
+      "link": "#CCCCCC",
+      "linkHover": "#FFFFFF",
+      "inlineCode": "#B3B3B3",
+      "inlineCodeBackground": "#050505",
+      "blockquote": "#808080",
+      "blockquoteBorder": "#242424",
+      "listMarker": "#99999999",
+      "bold": "#d6d6d6",
+      "italic": "#d0d0d0"
+    },
+    "tools": {
+      "border": "#30303080",
+      "icon": "#898989",
+      "title": "#d0d0d0",
+      "description": "#898989",
+      "edit": {
+        "addedBackground": "#ffffff20",
+        "removedBackground": "#ffffff10",
+        "lineNumber": "#898989"
+      }
+    }
+  },
+  "config": {
+    "fonts": {
+      "sans": "ui-monospace, \"SFMono-Regular\", \"Menlo\", \"Cascadia Mono\", \"Segoe UI Mono\", monospace",
+      "mono": "ui-monospace, \"SFMono-Regular\", \"Menlo\", \"Cascadia Mono\", \"Segoe UI Mono\", monospace",
+      "heading": "ui-monospace, \"SFMono-Regular\", \"Menlo\", \"Cascadia Mono\", \"Segoe UI Mono\", monospace"
+    },
+    "transitions": {
+      "fast": "150ms ease",
+      "normal": "250ms ease",
+      "slow": "350ms ease"
+    }
+  }
+}

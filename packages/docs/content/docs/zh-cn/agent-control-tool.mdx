@@ -1,0 +1,42 @@
+---
+title: 智能体控制工具
+description: 让智能体在聊天中管理 OpenChamber 的会话、worktree 和计划任务。
+---
+
+# 智能体控制工具
+
+`openchamber` 智能体工具让你直接在聊天中管理应用里的工作，`openchamber_schedule` 负责计划任务。OpenChamber 运行自己的本地 OpenCode 服务器时，这两个工具默认开启，无需安装任何东西，也无需运行 shell 命令。
+
+## 可以提出的请求
+
+用平常的话告诉智能体即可。例如：
+
+- “在这个项目中新建一个 OpenChamber 会话，使用 `openai/gpt-5.6-sol` 模型，并发送这条提示：审查认证流程。”
+- “为这个任务在单独的 worktree 中新建一个 OpenChamber 会话，让它为登录流程添加测试。”
+- “用 OpenChamber 列出我最近的 10 个会话及其当前状态。”
+- “创建一个名为工作日审查的 OpenChamber 计划任务，每个工作日 09:00 发送这条提示：审查自上次运行以来的改动。”
+- “立即运行名为工作日审查的 OpenChamber 计划任务。”
+- “查看名为认证审查的 OpenChamber 会话，并给我看助手的最新回复。”
+
+控制工具可以列出项目和模型偏好，搜索模型目录，创建并跟进会话，派生会话，以及创建隔离的 worktree 会话。计划工具可以创建、修改、运行、暂停和删除计划任务。这样启动的会话会像其他会话一样出现在 OpenChamber 中，你可以打开它们并亲自继续工作。
+
+## 注意事项
+
+- 发给新会话的提示默认会立即返回。在 OpenChamber 中跟进会话，或让智能体稍后再查看。
+- 只有在你要求时才会创建单独的 worktree。当前 worktree 中未提交的改动不会复制过去。
+- 当检出看起来正被占用时，例如另一个会话在同一分支上工作，智能体可能会提议把自己的会话移到新的 worktree。它在你同意后才移动，并且只带走自己改动过的文件。
+- 这些工具不能删除会话或 worktree，不能注册项目路径，不能运行任意 shell 命令，也不能调用任意 URL。
+
+## 开启或关闭工具
+
+打开 **设置 → 通用 → OpenChamber 工具**，修改 **智能体控制工具** 或 **智能体计划工具**，两者可分别开关。如果你在计划成为独立工具之前就关闭了控制工具，计划工具也会以关闭状态开始。改动会在运行中的会话下一轮生效，无需重启。如果你自己的环境已经设置了 `OPENCODE_CONFIG`，改动会在托管的 OpenCode 服务器重启后生效。
+
+当 OpenChamber 通过 `OPENCODE_HOST` 或 skip-start 连接外部 OpenCode 服务器时，以及在 VS Code 扩展中，这些工具不可用。使用 OpenChamber 托管 OpenCode 服务器的桌面版和网页版会自动支持它们。
+
+## 相关内容
+
+- [计划任务](/zh-cn/scheduled-tasks/)
+- [Worktree 会话](/zh-cn/worktrees/)
+- [会话目标](/zh-cn/session-goals/)
+- [浏览器面板](/zh-cn/desktop-browser/)：用来查看和操作页面的 OpenChamber Web 工具
+- [项目笔记、待办与计划](/zh-cn/notes-todos-plans/)：项目知识工具，用于 上下文标签页中的笔记、待办和计划

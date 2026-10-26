@@ -1,0 +1,185 @@
+---
+title: 환경 변수
+description: 환경 변수로 OpenChamber와 OpenCode 연동을 설정합니다.
+---
+
+# 환경 변수
+
+OpenChamber는 시작할 때 이 변수들을 읽습니다. 시작 서비스는 `openchamber startup enable` 실행 시 기본적으로 현재 환경의 snapshot을 저장하므로, 서비스에 적용할 변수를 바꾼 뒤에는 다시 실행하세요.
+
+## OpenCode, Git, 터미널용 변수
+
+OpenCode, Git, 터미널, [프로젝트 작업](/ko/project-actions/)에 API 토큰이나 데이터베이스 주소 같은 직접 정한 변수를 넘기려면, OpenChamber를 시작하기 전에 export하는 대신 **설정 → 일반 → 환경 변수**에 추가하세요. 값은 OpenChamber가 실행되는 컴퓨터의 데이터 디렉터리에 있는 `environment.json`에 저장되며, 내 사용자 계정만 읽을 수 있습니다. 설정은 저장된 값을 다시 보여 주지 않습니다. 값을 바꾸거나 지울 수는 있지만 다시 읽을 수는 없습니다.
+
+- OpenCode는 시작할 때 변수를 받으므로, 바꾼 뒤에는 다시 시작하세요. 설정에 그 버튼이 있습니다.
+- `opencode service set env`로 설정한 변수도 OpenCode에 전달됩니다. 겹치면 설정의 값이 우선합니다.
+- Git, 터미널, 프로젝트 작업은 다음에 실행될 때 변수를 받습니다.
+- OpenChamber가 OpenCode 자체를 위해 설정하는 변수(비밀번호, 설정 등)는 내 변수보다 우선합니다.
+
+프로젝트는 **설정 → 프로젝트**에서 자체 변수나, `direnv export json`처럼 변수를 출력하는 명령을 추가할 수 있습니다. [프로젝트](/ko/projects/#프로젝트-환경)를 참고하세요.
+
+이 변수는 직접 시작한 OpenCode 서버에는 전달되지 않으며, VS Code 확장에는 이 설정이 없습니다. 아래 변수는 모두 OpenChamber가 시작할 때 직접 읽습니다.
+
+## OpenChamber 서버
+
+### `OPENCHAMBER_HOST`
+
+OpenChamber 웹 서버가 바인딩할 주소입니다. 다른 컴퓨터에서 접속해야 하면 `0.0.0.0`을 사용하세요.
+
+### `OPENCHAMBER_LAN_URL`
+
+네트워크의 다른 기기가 OpenChamber에 접속할 주소입니다(예: `http://192.168.1.20:3000`). 페어링 링크와 QR 코드는 OpenChamber가 직접 감지한 주소 대신 이 주소를 사용합니다. 감지가 틀릴 때 설정하세요. 예를 들어 Docker에서는 OpenChamber가 컨테이너 내부 주소만 볼 수 있습니다.
+
+### `OPENCHAMBER_UI_PASSWORD`
+
+브라우저 UI 비밀번호입니다. localhost 밖으로 바인딩하거나 터널, 리버스 프록시를 사용할 때 설정하세요.
+
+### `OPENCHAMBER_UI_SESSION_TTL_HOURS`
+
+"이 기기 신뢰"가 꺼져 있을 때 브라우저 로그인이 유지되는 시간(시간 단위)입니다. 기본값은 `12`입니다.
+
+### `OPENCHAMBER_UI_TRUSTED_SESSION_TTL_DAYS`
+
+신뢰하기로 한 기기에서 로그인이 유지되는 기간(일 단위)입니다. 기본값은 `7`입니다.
+
+### `OPENCHAMBER_API_ONLY`
+
+`true` 또는 `1`이면 OpenChamber를 headless 모드로 시작합니다. 데스크톱과 모바일 클라이언트용 API route는 계속 사용할 수 있지만 브라우저 UI는 제공하지 않습니다.
+
+### `OPENCHAMBER_FRAME_ANCESTORS`
+
+자신의 페이지 안 프레임에 OpenChamber를 표시할 수 있는 origin을 공백으로 구분해 지정합니다. 예: `https://dash.example.com`. `*`는 모든 사이트를 허용합니다. 기본값에서는 OpenChamber 자신과 데스크톱·모바일 앱만 임베드할 수 있어, 다른 사이트가 버튼 위에 덮어씌울 수 없습니다.
+
+### `OPENCHAMBER_DATA_DIR`
+
+OpenChamber 데이터 디렉터리를 바꿉니다. 기본값은 `~/.config/openchamber`입니다.
+
+### `OPENCHAMBER_CHATS_DIR`
+
+프로젝트가 없는 채팅을 위해 OpenChamber가 만드는 관리형 채팅 디렉터리의 위치를 바꿉니다. 기본값은 `~/.config/openchamber/chats`입니다. OpenChamber와 OpenCode가 서로 다른 사용자로 실행될 때는 OpenCode 서버가 읽을 수 있는 디렉터리를 지정하세요. 기존 채팅은 이동되지 않습니다.
+
+### `OPENCHAMBER_COMPRESS_API`
+
+API 응답 압축을 제어합니다. `true` 또는 `1`은 켜고, `false` 또는 `0`은 끕니다.
+
+### `OPENCHAMBER_SKIP_API_COMPRESSION`
+
+`true` 또는 `1`이면 API 응답 압축을 끕니다. `OPENCHAMBER_COMPRESS_API`보다 우선합니다.
+
+### `OPENCHAMBER_VERBOSE_REQUEST_LOGS`
+
+`true` 또는 `1`이면 자세한 HTTP request logs를 켭니다.
+
+### `OPENCHAMBER_UPDATE_API_URL`
+
+업데이트 확인 API endpoint를 바꿉니다. 대부분의 사용자는 설정하지 않아도 됩니다.
+
+### `OPENCHAMBER_PACKAGE_MANAGER`
+
+자동 감지가 틀렸을 때 업데이트에 사용할 package manager를 강제로 지정합니다.
+
+## 프록시
+
+### `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`
+
+사용량 한도나 스킬 카탈로그처럼 OpenChamber가 직접 보내는 요청을 프록시로 보냅니다. 소문자 이름도 동작합니다. `NO_PROXY`에 있는 호스트는 직접 연결되며, `localhost`, `127.0.0.1`, `::1`은 항상 직접 연결되므로 로그인 콜백과 로컬 OpenCode 서버는 그대로 동작합니다.
+
+## OpenCode 서버
+
+### `OPENCODE_HOST`
+
+OpenChamber를 이미 실행 중인 OpenCode server에 연결합니다. 값은 명시적 포트가 있고 path, query, hash가 없는 `http` 또는 `https` origin이어야 합니다. `OPENCODE_HOST`는 `OPENCODE_PORT`보다 우선합니다.
+
+### `OPENCODE_PORT`
+
+OpenCode server 포트를 설정합니다. managed OpenCode에서는 이 포트를 요청하고, `OPENCODE_SKIP_START=true`와 함께 쓰면 해당 포트의 외부 서버에 연결합니다.
+
+### `OPENCODE_SKIP_START`
+
+`true`이면 OpenChamber가 자체 OpenCode server를 시작하지 않습니다.
+
+### `OPENCHAMBER_OPENCODE_HOSTNAME`
+
+OpenChamber가 관리하는 OpenCode server의 bind hostname입니다. 기본값은 `127.0.0.1`입니다.
+
+### `OPENCHAMBER_OPENCODE_HEALTH_TIMEOUT_MS`
+
+OpenCode 상태 확인의 제한 시간을 밀리초로 지정합니다. 기본값은 `5000`입니다.
+
+### `OPENCHAMBER_OPENCODE_HEALTH_CONSECUTIVE_FAILURES`
+
+아직 실행 중인 관리형 OpenCode 프로세스를 다시 시작하기 전까지 집계할 연속 상태 확인 실패 횟수입니다. 기본값은 `20`입니다. 작업 중인 세션이 있으면 다시 시작이 지연될 수 있습니다.
+
+### `OPENCHAMBER_OPENCODE_HEALTH_INTERVAL_MS`
+
+관리형 OpenCode의 상태 확인 간격을 밀리초로 덮어씁니다. 실패를 집계하는 최소 간격도 설정합니다. 기본값은 `0`이며 서버의 `15000`밀리초 간격을 유지합니다.
+
+### `OPENCHAMBER_OPENCODE_HEALTH_CACHE_MS`
+
+OpenChamber가 관리형 OpenCode의 상태 확인 결과를 재사용하는 시간입니다. 단위는 밀리초이며 실패한 결과도 재사용합니다. 기본값은 `750`입니다.
+
+### `OPENCODE_BINARY`
+
+OpenChamber가 실행할 `opencode` executable 경로입니다.
+
+### `OPENCODE_CONFIG`
+
+특정 OpenCode config 파일 경로입니다.
+
+### `OPENCODE_CONFIG_DIR`
+
+agents, skills, snippets, config discovery에 사용할 OpenCode config 디렉터리입니다.
+
+### `OPENCODE_DATA_DIR`
+
+managed OpenCode server의 사용자 지정 데이터 디렉터리입니다.
+
+### `OPENCODE_JWT_SECRET`
+
+UI auth tokens 서명에 사용하는 secret입니다. 지속 실행 서비스에서는 긴 무작위 값을 사용하세요.
+
+## Terminal 및 Git
+
+### `OPENCHAMBER_TERMINAL_SHELL`
+
+OpenChamber terminal sessions에서 사용할 shell executable입니다.
+
+### `OPENCHAMBER_GIT_BINARY`
+
+OpenChamber Git 기능에서 사용할 Git executable입니다.
+
+### `GIT_BINARY`
+
+Git executable의 대체 override입니다. OpenChamber 전용 설정에는 `OPENCHAMBER_GIT_BINARY`를 권장합니다.
+
+### `OPENCHAMBER_GIT_READ_CACHE_TTL_MS`
+
+Git-backed file reads cache의 TTL이며 단위는 밀리초입니다. 디버깅 중 cache를 끄려면 `0`으로 설정하세요.
+
+## 음성 및 터널
+
+### `OPENAI_API_KEY`
+
+OpenChamber 음성 기능이 OpenAI 자체를 호출할 때 사용하는 API key입니다. 사용자 지정 OpenAI 호환 서버로는 전송되지 않으니, 그 서버에는 설정에서 별도의 키를 지정하세요.
+
+### `OPENCHAMBER_ALLOW_REMOTE_OPENAI_COMPAT_URLS`
+
+`true` 또는 `1`이면 음성 기능에서 원격 OpenAI-compatible base URLs를 허용합니다.
+
+### `NGROK_AUTHTOKEN`
+
+OpenChamber tunnel commands에서 사용하는 ngrok auth token입니다. `ngrok config add-authtoken <token>`으로도 설정할 수 있습니다.
+
+## Runtime helpers
+
+### `BUN_BINARY`
+
+OpenChamber가 daemon processes를 시작할 때 사용할 Bun executable입니다.
+
+### `BUN_INSTALL`
+
+Bun 설치 루트입니다. OpenChamber는 daemon 시작과 업데이트를 위해 여기서 `bin/bun`을 찾습니다.
+
+### `VITE_OPENCODE_URL`
+
+Vite-built web app의 build-time API base URL입니다. 일반 CLI 또는 desktop 사용에서는 대부분 설정할 필요가 없습니다.

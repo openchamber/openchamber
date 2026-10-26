@@ -1,0 +1,34 @@
+---
+title: Git-identiteiten
+description: Commit en push voor elke repository als de juiste persoon.
+---
+
+# Git-identiteiten
+
+Een Git-identiteit bestaat uit de naam en het e-mailadres die bij uw commits worden vermeld, en de manier waarop een repository zich bij de remote aanmeldt. Werkt u aan zowel privé- als werkrepositories, dan kunt u identiteiten opslaan en per repository de juiste toepassen. U beheert ze bij **Instellingen → Git**.
+
+## Een identiteit toevoegen
+
+1. Open **Instellingen → Git** en kies **Nieuw**.
+2. Vul de **Gebruikersnaam** en het **E-mailadres** voor uw commits in.
+3. Kies een **Authenticatiemethode**, de manier waarop de identiteit pusht en pullt:
+   - **Deze computer:** wat Git op deze computer al gebruikt, zoals SSH-sleutels, een credential manager of de `gh` CLI
+   - **Account:** het **Source control-account** dat u kiest. Dat kan elk account zijn dat op een hostkaart bij [Integraties](/nl/integrations/) is verbonden, zoals GitHub, GitLab, Gitea, Forgejo of Gerrit. Pushes gaan via HTTPS met het token van dat account.
+   - **SSH:** een sleutel die OpenChamber voor deze identiteit bewaart
+   - **Anoniem:** leest openbare repositories via HTTPS zonder aanmelding en kan niet pushen
+4. Geef de identiteit eventueel een kleur en pictogram om haar makkelijk te herkennen.
+
+De algemene identiteit van uw systeem wordt ook getoond, maar is hier alleen-lezen.
+
+Op Gerrit meldt een accountidentiteit zich bij Git aan met uw Gerrit-gebruikersnaam en het HTTP-wachtwoord dat u hebt verbonden. Een GitHub Enterprise-account levert issues en pull requests, maar klonen en pushen gaan daar via **Deze computer** of **SSH**.
+
+## Een identiteit op een repository toepassen
+
+Kies de identiteitsknop bovenaan de [Git-weergave](/nl/git/) en kies een identiteit. De schermen voor toevoegen en klonen bieden dezelfde keuze. Een identiteit die de repository niet kan bereiken, blijft uitgeschakeld in de lijst staan, met de reden: een account op een andere host, een account of **Anoniem** bij een SSH-remote, of een SSH-sleutel bij een HTTPS-remote.
+
+Toepassen schrijft de identiteit naar de **lokale** Git-configuratie van de repository. Alleen die repository verandert, uw algemene instelling blijft gelijk. Git in de terminal en de shell van de agent gebruiken haar ook. **Systeemidentiteit** verwijdert wat OpenChamber heeft geschreven, zodat uw eigen Git-configuratie weer geldt.
+
+## Zie ook
+
+- [Git-workflows](/nl/git/) om met de ingestelde identiteit te committen
+- [Git-hosts](/nl/github/) om een account op GitHub, GitLab, Gitea, Forgejo of Gerrit te verbinden

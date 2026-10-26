@@ -1,0 +1,53 @@
+---
+title: Worktree-sessies
+description: Geef een sessie een eigen branch en map om het werk gescheiden te houden.
+---
+
+# Worktree-sessies
+
+Een worktree-sessie werkt in een eigen uitgecheckte kopie van uw repository, op een eigen branch: een Git-worktree. Zo zitten parallelle sessies elkaar niet in de weg. De ene kan herstructureren terwijl de andere een fout oplost, zonder dat u steeds tussen branches hoeft te wisselen.
+
+## Een worktree-sessie maken
+
+1. Open het venster voor een nieuwe worktree: kies **Nieuwe worktree…** in het branchmenu boven het invoerveld als je een nieuwe sessie start, of gebruik de worktree-knop op een projectrij in de zijbalk.
+2. Kies onder **Start from** een van deze opties:
+   - **nieuwe branch:** geef de branch een naam
+   - **bestaande branch:** check een branch uit die al bestaat
+   - **PR or issue:** kies er een uit GitHub, GitLab, Gitea, Forgejo, Gerrit, Linear of een extensie. De branch krijgt de naam ervan (een PR checkt zijn eigen branch uit, een Gerrit-wijziging haar nieuwste patchset op `change-<number>`) en het item wordt aan uw eerste bericht toegevoegd.
+3. Controleer **Based on** (de branch waarvan een nieuwe branch vertrekt, standaard de standaardbranch van de remote, zoals `origin/main`) en **Folder name**; wijzig ze alleen als dat nodig is.
+4. Maak de worktree aan. Heeft het project setupcommando's, dan worden ze direct daarna uitgevoerd.
+
+OpenChamber maakt de branch, richt de map in en opent daar een nieuwe sessie, klaar voor uw eerste bericht. U kunt ook direct vanuit een [taak](/nl/notes-todos-plans/) of een [issue of pull request](/nl/github/) beginnen.
+
+Wil je geen vragen, kies dan **Snelle worktree** in hetzelfde branchmenu: OpenChamber geeft de branch een tijdelijke naam en richt de nieuwe sessie erop. Zodra de agent de taak een naam geeft, hernoemt hij ook de branch ernaar, bijvoorbeeld `fix/login-timeout`, zolang de branch nog niet is gepusht.
+
+## In de zijbalk
+
+Een worktree is één rij in de zijbalk, met alle sessies erin daaronder. Onder het project staat hij tussen de andere sessies van het project op volgorde van de laatste activiteit, dus een worktree waarin u net werkte, staat vrij bovenaan. De rij toont de naam van de taak zodra de agent die heeft gegeven (tot dan de titel van de sessie waarin u daar het laatst werkte), de pull request of issue die erbij hoort als gekleurde markering, en of een sessie daar bezig is of nieuws voor u heeft. Een worktree die voor een pull request of issue is gemaakt, begint met de titel daarvan tot de agent een kortere naam kiest. Beweeg de muis erover om de branch te zien. Klik erop om de sessie te openen waarin u daar het laatst werkte; om de lijst uit te klappen, beweegt u de muis over het branch-pictogram links ervan en klikt u op de pijl die ervoor in de plaats komt. Het menu hernoemt de taak, zet de worktree in een map van het project, archiveert hem of verwijdert hem. Op uw telefoon tikt u op de pijl in de rij om de lijst uit te klappen, en veegt u de rij opzij om hem als afgerond te markeren, de taak te hernoemen, de worktree te archiveren of hem te verwijderen. Hoe werk in en uit het blok In bewerking gaat, leest u in [Sessies in uitvoering](/nl/sessions-in-work/).
+
+## Projecten geopend op een map van de repository
+
+Open je een project op een map binnen een repository, zoals `repo/ai`, dan openen nieuwe worktrees ook daar. Een sessie in een nieuwe worktree start in dezelfde map van de checkout, zodat OpenCode de configuratie vindt die daar staat. Een project dat op de hoofdmap van de repository is geopend, start zoals voorheen in de hoofdmap van de worktree. Heeft een branch die map niet, dan start de sessie in de hoofdmap van de worktree en meldt OpenChamber dat.
+
+## Het werk overnemen
+
+Is het werk klaar voor gebruik, kies dan **Integreren** in de Git-weergave om de commits uit de worktree naar een andere branch, zoals `main`, over te nemen. Bij een conflict kunt u de agent vragen het op te lossen.
+
+## Opruimen
+
+Is de taak klaar, kies dan **Worktree archiveren** in het menu van de rij, of houd Shift ingedrukt en klik op de archiveerknop die op de rij in de plaats komt van de knop voor een nieuwe sessie. OpenChamber archiveert hem: de map verdwijnt, en de sessies, de niet-gecommitte wijzigingen en de branch wachten op de pagina Archief. Loopt daar nog een sessie, dan blijft de worktree staan.
+
+Markeert u de rij als afgerond, dan haalt dat hem alleen uit In bewerking. Wilt u een worktree archiveren telkens als u hem als afgerond markeert, of zodra zijn PR is gemerged, zet dat dan aan bij **Instellingen → Sessies → Afgeronde worktrees**.
+
+Op de pagina Archief staan gearchiveerde worktrees onder hun project. **Herstellen** haalt er een terug met zijn branch, voert de setupcommando's van het project uit en zet de wijzigingen en sessies terug; een van zijn sessies herstellen doet hetzelfde. Bestanden die git negeert, zoals `node_modules` of `.env`, worden niet bewaard, dus de setupcommando's brengen ze terug. Ook de pagina Worktrees van het project toont gearchiveerde worktrees.
+
+Wilt u een worktree definitief kwijt, verwijder hem dan via zijn menu, of verwijder een gearchiveerde worktree op de pagina Archief. Verwijdert u via het menu, dan kiest u zelf of ook de branch wordt verwijderd, lokaal en eventueel op de remote.
+
+## Als er iets niet klopt
+
+Een worktree kan aandacht nodig hebben als de map is verdwenen, er geen actieve branch is of een merge of rebase niet is afgerond. OpenChamber signaleert dat zodat u het kunt herstellen. Zie [Worktrees en Git](/nl/troubleshooting/worktrees-git/).
+
+## Zie ook
+
+- [Parallelle runs](/nl/multi-run/) om meerdere worktree-sessies tegelijk te starten
+- [Git-workflows](/nl/git/) om vanuit OpenChamber te committen en integreren

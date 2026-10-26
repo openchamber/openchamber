@@ -1,0 +1,112 @@
+{
+  "metadata": {
+    "id": "openchamber-dark",
+    "name": "OpenChamber",
+    "variant": "dark",
+    "description": "The OpenChamber signature - Vitesse syntax over OpenCode-deep neutrals with Flexoki accents, harmonized in OKLCH (dark variant)",
+    "version": "1.0.0",
+    "author": "OpenChamber",
+    "tags": [
+      "dark",
+      "brand",
+      "hybrid",
+      "warm",
+      "ink"
+    ]
+  },
+  "colors": {
+    "primary": {
+      "base": "#da7c47",
+      "hover": "#eb8c57",
+      "active": "#fd9b66",
+      "muted": "#da7c4780"
+    },
+    "surface": {
+      "background": "#120f0e",
+      "foreground": "#dbd7cc",
+      "muted": "#0e0c0b",
+      "mutedForeground": "#949187",
+      "elevated": "#1b1918",
+      "subtle": "#171616"
+    },
+    "interactive": {
+      "border": "#242323bf",
+      "selection": "#c8c6c52b",
+      "borderHover": "#504e4c",
+      "focusRing": "#da7c4755",
+      "hover": "#ffffff0f",
+      "active": "#ffffff1a"
+    },
+    "status": {
+      "error": "#da5b4a",
+      "warning": "#c67f13",
+      "success": "#76ad4f",
+      "info": "#479fe6"
+    },
+    "syntax": {
+      "base": {
+        "background": "#100e0d",
+        "comment": "#728772",
+        "keyword": "#34983a",
+        "string": "#d58373",
+        "number": "#279e93",
+        "function": "#78a952",
+        "variable": "#c69457",
+        "type": "#479cb1",
+        "operator": "#da6b6d"
+      },
+      "tokens": {
+        "commentDoc": "#687b68",
+        "stringEscape": "#dcd7c6",
+        "variableProperty": "#bda94a",
+        "variableLocal": "#201e1c",
+        "className": "#646fba",
+        "punctuation": "#908b7e"
+      },
+      "highlights": {
+        "diffAdded": "#4d934e",
+        "diffRemoved": "#cb7676",
+        "diffModified": "#5d99a9"
+      }
+    },
+    "pr": {
+      "open": "#93a233",
+      "blocked": "#da7c47",
+      "merged": "#9988e5"
+    },
+    "chat": {
+      "userMessageBackground": "#2d1c12",
+      "divider": "#302e2b",
+      "background": "#120f0e"
+    },
+    "markdown": {
+      "link": "#5d99a9",
+      "linkHover": "#6ba7b8",
+      "inlineCode": "#76ad4f",
+      "inlineCodeBackground": "#100e0d",
+      "blockquote": "#949187",
+      "blockquoteBorder": "#302e2b",
+      "listMarker": "#4d934e99",
+      "bold": "#dfdcd2",
+      "italic": "#dbd7cc"
+    },
+    "tools": {
+      "border": "#302e2b73",
+      "icon": "#949187",
+      "title": "#dbd7cc",
+      "description": "#949187",
+      "edit": {
+        "addedBackground": "#4d934e25",
+        "removedBackground": "#cb767625",
+        "lineNumber": "#949187"
+      }
+    }
+  },
+  "config": {
+    "transitions": {
+      "fast": "150ms ease",
+      "normal": "250ms ease",
+      "slow": "350ms ease"
+    }
+  }
+}

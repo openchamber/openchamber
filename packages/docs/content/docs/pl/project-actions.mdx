@@ -1,0 +1,38 @@
+---
+title: Akcje projektu
+description: Zapisuj często uruchamiane polecenia i uruchamiaj je jednym kliknięciem.
+---
+
+# Akcje projektu
+
+Akcja projektu to polecenie powłoki, które zapisujesz raz i uruchamiasz kliknięciem — serwer deweloperski, build, uruchomienie testów. Każdy projekt ma własną listę. Skonfiguruj je w **Settings → Projects → Project Actions**.
+
+## Dodaj akcję
+
+1. Otwórz **Settings → Projects** i znajdź sekcję **Project Actions**.
+2. Dodaj akcję, nadaj jej nazwę, wybierz ikonę i wprowadź polecenie do uruchomienia.
+3. Zapisz.
+
+Akcję możesz ograniczyć do określonych systemów operacyjnych, jeśli polecenie ma sens tylko na jednym z nich.
+
+## Uruchom akcję
+
+Sekcja **Projekt** w panelu Work Status, karcie po prawej stronie czatu, ma wiersz akcji. Naciśnij akcję, aby ją uruchomić, i naciśnij ponownie, aby ją zatrzymać. Strzałka obok wybiera inną akcję, a jej pozycja **Dodaj nową akcję** otwiera **Ustawienia → Projekty**. Wiersz pokazuje akcję wybraną jako ostatnią, a gdy jakaś akcja działa, pokazuje właśnie ją. Gdy uruchomienie ma adres podglądu, przycisk z globusem obok wiersza go otwiera.
+
+Z klawiatury naciśnij **⌘⌥R** na macOS lub **Ctrl+Alt+R** na Windows i Linux, aby otworzyć okno akcji projektu. Pokazuje ono akcje bieżącego projektu wraz z ich stanem. Strzałki przesuwają zaznaczenie, Enter uruchamia zatrzymaną akcję albo zatrzymuje działającą, a Esc zamyka okno. Pole wyszukiwania filtruje listę, a **Skonfiguruj akcje** na końcu otwiera ustawienia akcji projektu. Okno otwiera się z zaznaczoną akcją z wiersza Work Status, więc skrót, a potem Enter powtarzają ostatnie uruchomienie. Skrót zmienisz w **Ustawienia → Skróty**, w pozycji **Otwórz akcje projektu**.
+
+W palecie poleceń, otwieranej przez ⌘P lub Ctrl+P, wpisz "uruchom" albo nazwę akcji, aby znaleźć pozycje takie jak **Uruchom: dev** i **Zatrzymaj: dev**. **Akcje projektu** w palecie otwiera okno.
+
+Każda akcja działa w terminalu w folderze sesji, czyli w worktree, gdy sesja jest w worktree, albo w głównym checkoucie dla akcji ustawionych do uruchamiania tam. Terminal się otwiera, żebyś widział wynik. Akcje projektu są dostępne na komputerze i w aplikacji webowej. VS Code, telefony i sesje w Czatach ich nie mają.
+
+## Automatyczne otwieranie serwera deweloperskiego
+
+Włącz **auto-open URL** dla akcji, która uruchamia serwer. OpenChamber obserwuje wynik pod kątem adresu lokalnego i proponuje jego otwarcie — zobacz [Podgląd i serwery deweloperskie](/pl/preview/). Na komputerze możesz też przekierować go przez przekazywanie portu SSH.
+
+Jeśli serwer ma stały adres, wpisz go w pole URL akcji. `{worktree}` i `{branch}` wstawiają checkout, w którym działa akcja, więc jedna akcja działa w każdym worktree. Z [portless](https://github.com/vercel-labs/portless) adres `https://{worktree}.myapp.localhost` otwiera `https://auth.myapp.localhost` w worktree na gałęzi `feature/auth` i `https://myapp.localhost` w głównym checkoucie. Często pole w ogóle nie jest potrzebne: gdy portless wypisze swój adres, OpenChamber otworzy właśnie go, a nie port za nim. Na komputerze połączonym ze zdalną instancją otworzy zamiast tego port, bo przez tunel do zdalnej maszyny przechodzą tylko porty loopback.
+
+## Powiązane
+
+- [Konfiguracja w repozytorium](/repository-config/) — trzymaj akcje i polecenia konfiguracji w repozytorium dla całego zespołu
+
+- [Podgląd i serwery deweloperskie](/pl/preview/) — otwórz działający serwer deweloperski wewnątrz OpenChamber

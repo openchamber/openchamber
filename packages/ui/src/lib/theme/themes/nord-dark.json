@@ -1,0 +1,120 @@
+{
+  "metadata": {
+    "id": "nord-dark",
+    "name": "Nord",
+    "variant": "dark",
+    "description": "Nord",
+    "version": "1.0.0",
+    "tags": [
+      "dark",
+      "palette"
+    ]
+  },
+  "colors": {
+    "primary": {
+      "base": "#88c0d0",
+      "hover": "#92c5d4",
+      "active": "#9bcad8",
+      "muted": "#88c0d080"
+    },
+    "surface": {
+      "background": "#1f2530",
+      "foreground": "#f0f1f2",
+      "muted": "#1c212c",
+      "mutedForeground": "#9ea1a9",
+      "elevated": "#262c37",
+      "subtle": "#252a35"
+    },
+    "interactive": {
+      "border": "#ffffff0b",
+      "selection": "#505661a3",
+      "borderHover": "#ffffff33",
+      "borderFocus": "#9ad4e4",
+      "focus": "#9ad4e4",
+      "focusRing": "#9ad4e4",
+      "cursor": "#e5e9f0",
+      "hover": "#ffffff0d",
+      "active": "#ffffff12"
+    },
+    "status": {
+      "error": "#cb7f86",
+      "errorBackground": "#cb7f8629",
+      "errorBorder": "#cb7f8673",
+      "warning": "#d08770",
+      "warningBackground": "#d0877029",
+      "warningBorder": "#d0877073",
+      "success": "#a3be8c",
+      "successBackground": "#a3be8c29",
+      "successBorder": "#a3be8c73",
+      "info": "#81a1c1",
+      "infoBackground": "#81a1c129",
+      "infoBorder": "#81a1c173"
+    },
+    "syntax": {
+      "base": {
+        "background": "#1b212c",
+        "comment": "#616e88",
+        "keyword": "#81a1c1",
+        "string": "#b9f481",
+        "number": "#b48ead",
+        "function": "#88c0d0",
+        "variable": "#fcfdfe",
+        "type": "#ffd4c6",
+        "operator": "#c2c5cb"
+      },
+      "tokens": {
+        "variableProperty": "#c7e2fe",
+        "parameter": "#fcfdfe",
+        "boolean": "#b48ead",
+        "punctuation": "#c2c5cb",
+        "stringEscape": "#b48ead",
+        "keywordImport": "#81a1c1",
+        "tag": "#b9f481",
+        "regex": "#e5e9f0"
+      },
+      "highlights": {
+        "diffAdded": "#b4d8fc",
+        "diffAddedBackground": "#011020",
+        "diffRemoved": "#fdc2c5",
+        "diffRemovedBackground": "#230106",
+        "diffModified": "#ffba92",
+        "diffModifiedBackground": "#ffba9229",
+        "lineNumber": "#c2c5cb",
+        "lineNumberActive": "#fcfdfe"
+      }
+    },
+    "pr": {
+      "blocked": "#d99464",
+      "merged": "#b79bd9"
+    },
+    "chat": {
+      "background": "#1f2530",
+      "userMessageBackground": "#232f3a",
+      "divider": "#ffffff16"
+    },
+    "markdown": {
+      "link": "#88c0d0",
+      "linkHover": "#92c5d4",
+      "inlineCode": "#b9f481",
+      "inlineCodeBackground": "#252a35",
+      "blockquote": "#9ea1a9",
+      "blockquoteBorder": "#ffffff16",
+      "listMarker": "#88c0d099",
+      "bold": "#f2f3f4",
+      "italic": "#f0f1f2",
+      "hr": "#ffffff0b"
+    },
+    "tools": {
+      "border": "#ffffff0c",
+      "icon": "#9ea1a9",
+      "title": "#f0f1f2",
+      "description": "#9ea1a9",
+      "edit": {
+        "addedBackground": "#011020",
+        "removedBackground": "#230106",
+        "modifiedBackground": "#ffba9229",
+        "lineNumber": "#c2c5cb"
+      }
+    }
+  }
+}

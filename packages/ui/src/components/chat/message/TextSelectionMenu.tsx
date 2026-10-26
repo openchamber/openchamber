@@ -1,0 +1,1043 @@
+import React from 'react';
+import { createPortal, flushSync } from 'react-dom';
+import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useChatColumnActions, useChatSessionSelection } from '../chatColumnSession';
+import { useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
+import { useSessionDirectory } from '@/sync/sync-context';
+import { useInputStore } from '@/sync/input-store';
+import { useUIStore } from '@/stores/useUIStore';
+import { useProjectsStore } from '@/stores/useProjectsStore';
+import { cn } from '@/lib/utils';
+import { toast } from '@/components/ui';
+import { Icon } from "@/components/icon/Icon";
+import { PROJECT_NOTE_BODY_MAX_LENGTH } from '@/lib/projectContextApi';
+import { useProjectContextStore } from '@/stores/useProjectContextStore';
+import { summarizeSelectionForNotes } from '@/lib/smallModel';
+import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
+import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+import { isVSCodeRuntime } from '@/lib/desktop';
+import { useI18n } from '@/lib/i18n';
+import { getTypeToCommentText } from '@/lib/typeToComment';
+import { useCommentImagePaste } from '@/components/comments/useCommentImagePaste';
+import { CommentTextEditor } from '@/components/comments/CommentTextEditor';
+import { useMessageTTS } from '@/hooks/useMessageTTS';
+import {
+    useMobileCommentComposerController,
+    useMobileCommentDraft,
+} from '../composer/comment/MobileCommentComposerContext';
+import { rangeToMarkdown, trimSelectionValue, wrapMarkdownSelectionForChat } from './selectionMarkdown';
+import { registerActiveSelectionToolbar } from '@/lib/addSelectionToChat';
+import { collectSelectionOverlayRects } from '@/lib/selectionOverlayRects';
+import { frameRectInApp, onFrameSelection } from './frameSelection';
+import { captureChatQuoteAnchor, type ChatQuoteAnchor } from '@/lib/chatQuoteAnchor';
+import {
+  DESKTOP_MENU_FALLBACK_HEIGHT_PX,
+  DESKTOP_MENU_FALLBACK_WIDTH_PX,
+  getDesktopClampedX,
+  getDesktopMenuY,
+  type DesktopMenuPlacement,
+} from './selectionMenuPosition';
+
+interface TextSelectionMenuProps {
+  containerRef: React.RefObject<HTMLElement | null>;
+  // The message's reading key: the menu shows and stops the same reading as
+  // the message's own read-aloud button.
+  readingKey: string;
+  canReadAloud: boolean;
+  // This menu answers to the selections made in the page frames inside its
+  // container (`openchamber_render`), not to the container's own text. Each
+  // page has its own such menu (HtmlRenderFrame), so a page works wherever it
+  // is drawn: in a message, in the live turn's hoisted pages, or full screen.
+  // `readingKey` is then the id of the message the page belongs to.
+  frameSelections?: boolean;
+}
+
+interface MenuPosition {
+  // Top-left corner in whole CSS pixels (desktop).
+  x: number;
+  y: number;
+  placement: DesktopMenuPlacement;
+  show: boolean;
+}
+
+interface SelectionPayload {
+  plainText: string;
+  markdownText: string;
+  rect: DOMRect;
+  messageId: string | null;
+  // A selection inside a page frame has no Range: the app cannot reach it, so
+  // `measureRect` re-reads its box from the frame's current position, `anchor`
+  // is the one the page measured, and `clear` drops the page's own highlight.
+  range?: Range;
+  measureRect?: () => DOMRect;
+  anchor?: ChatQuoteAnchor;
+  clear?: () => void;
+}
+
+const normalizeDistilledInsight = (insight: string): string => (
+  insight.trim().replace(/^[-*+]\s+/, '').slice(0, PROJECT_NOTE_BODY_MAX_LENGTH)
+);
+
+const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef, readingKey, canReadAloud, frameSelections = false }) => {
+  const { t } = useI18n();
+  const { isPlaying: isReading, play: playReading, stop: stopReading } = useMessageTTS(readingKey);
+  const [position, setPosition] = React.useState<MenuPosition>({ x: 0, y: 0, placement: 'above', show: false });
+  // False while the chat has scrolled the selection out of view; the menu
+  // waits hidden instead of pinning itself to an edge.
+  const [anchorVisible, setAnchorVisible] = React.useState(true);
+  const [selectedText, setSelectedText] = React.useState('');
+  const [selectedTextMarkdown, setSelectedTextMarkdown] = React.useState('');
+  const [selectedMessageId, setSelectedMessageId] = React.useState<string | null>(null);
+  const [selectedAnchor, setSelectedAnchor] = React.useState<ChatQuoteAnchor | null>(null);
+  const [commentMode, setCommentMode] = React.useState(false);
+  const commentModeRef = React.useRef(false);
+  const [commentText, setCommentText] = React.useState('');
+
+  // While the comment input owns focus the native selection is gone, so the
+  // quoted fragment is repainted with our own overlay rectangles. Raw
+  // Range.getClientRects() mixes block-container boxes with text boxes and
+  // the translucent overlaps paint double-dark bands, so the rects are taken
+  // from the text nodes only and merged into one strip per visual line.
+  const [commentRects, setCommentRects] = React.useState<DOMRect[] | null>(null);
+  const updateCommentRects = React.useCallback(() => {
+    const range = pendingSelectionRef.current?.range;
+    if (!range) {
+      setCommentRects(null);
+      return;
+    }
+
+    setCommentRects(collectSelectionOverlayRects(range));
+  }, []);
+
+  React.useEffect(() => {
+    if (!commentMode) return;
+    let frame: number | null = null;
+    const scheduleUpdate = () => {
+      if (frame !== null) return;
+      frame = window.requestAnimationFrame(() => {
+        frame = null;
+        updateCommentRects();
+      });
+    };
+    document.addEventListener('scroll', scheduleUpdate, { capture: true, passive: true });
+    window.addEventListener('resize', scheduleUpdate);
+    return () => {
+      if (frame !== null) window.cancelAnimationFrame(frame);
+      document.removeEventListener('scroll', scheduleUpdate, { capture: true });
+      window.removeEventListener('resize', scheduleUpdate);
+    };
+  }, [commentMode, updateCommentRects]);
+
+  // A pasted image becomes a citation in the comment, drawn as a file chip;
+  // keys and snippets live in CommentTextEditor.
+  const commentImagePaste = useCommentImagePaste();
+  const { attachCitedImages, discardPastedImages } = commentImagePaste;
+  const isDraggingRef = React.useRef(false);
+  const [isOpening, setIsOpening] = React.useState(false);
+  const [isAddingToNotes, setIsAddingToNotes] = React.useState(false);
+  const menuRef = React.useRef<HTMLDivElement>(null);
+  const menuWidthRef = React.useRef(DESKTOP_MENU_FALLBACK_WIDTH_PX);
+  const menuHeightRef = React.useRef(DESKTOP_MENU_FALLBACK_HEIGHT_PX);
+  const anchorRectRef = React.useRef<DOMRect | null>(null);
+  const pendingSelectionRef = React.useRef<SelectionPayload | null>(null);
+  const openRafRef = React.useRef<number | null>(null);
+  const mouseUpTimeoutRef = React.useRef<number | null>(null);
+  const isMenuVisibleRef = React.useRef(false);
+  const activeAddToChatCleanupRef = React.useRef<(() => void) | null>(null);
+  const currentSessionId = useChatSessionSelection().sessionId;
+  const { focusInput: focusColumnInput, pinned: columnPinned } = useChatColumnActions();
+  const newSessionDraftOpen = useSessionUIStore((state) => state.newSessionDraft?.open);
+  const addContextDraft = useInlineCommentDraftStore((state) => state.addDraft);
+  const setPendingInputText = useInputStore((state) => state.setPendingInputText);
+  const requestBtwComposer = useInputStore((state) => state.requestBtwComposer);
+  const isMobile = useUIStore((state) => state.isMobile);
+  const projects = useProjectsStore((state) => state.projects);
+  const availableWorktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
+  const effectiveDirectory = useEffectiveDirectory();
+  // A leaf read: the session list is replaced on every streamed step, while
+  // only this session's directory feeds the notes project fallback.
+  const currentSessionDirectory = useSessionDirectory(currentSessionId);
+  const mobileCommentController = useMobileCommentComposerController();
+  const mobileCommentDraft = useMobileCommentDraft(mobileCommentController);
+  const mobileCommentActive = mobileCommentDraft.status === 'open';
+
+  React.useEffect(() => {
+    isMenuVisibleRef.current = position.show;
+  }, [position.show]);
+
+  React.useEffect(() => {
+    return () => {
+      activeAddToChatCleanupRef.current?.();
+      activeAddToChatCleanupRef.current = null;
+      if (openRafRef.current !== null) {
+        window.cancelAnimationFrame(openRafRef.current);
+        openRafRef.current = null;
+      }
+      if (mouseUpTimeoutRef.current !== null) {
+        window.clearTimeout(mouseUpTimeoutRef.current);
+        mouseUpTimeoutRef.current = null;
+      }
+    };
+  }, []);
+
+  const hideMenu = React.useCallback(() => {
+    const ended = pendingSelectionRef.current;
+    pendingSelectionRef.current = null;
+    anchorRectRef.current = null;
+    activeAddToChatCleanupRef.current?.();
+    activeAddToChatCleanupRef.current = null;
+    setCommentRects(null);
+    // The menu stops tracking a page's selection: the page drops its highlight
+    // too. After the pending ref is null, so the report this triggers is a no-op.
+    ended?.clear?.();
+
+    if (!isMenuVisibleRef.current) {
+      return;
+    }
+
+    if (openRafRef.current !== null) {
+      window.cancelAnimationFrame(openRafRef.current);
+      openRafRef.current = null;
+    }
+    setIsOpening(false);
+
+    setPosition((prev) => ({ ...prev, show: false }));
+    setAnchorVisible(true);
+    setSelectedText('');
+    setSelectedTextMarkdown('');
+    setSelectedMessageId(null);
+    setSelectedAnchor(null);
+    setCommentMode(false);
+    commentModeRef.current = false;
+    setCommentText('');
+    isMenuVisibleRef.current = false;
+  }, []);
+
+  // The chat stays mounted behind a new-session draft and across session
+  // switches, and leaving it fires no selectionchange: its menu closes here.
+  React.useEffect(() => hideMenu, [currentSessionId, newSessionDraftOpen, hideMenu]);
+
+  // Listener-facing mirror of the composer's comment state: the document
+  // listeners below must not clear the quote highlight for taps inside the
+  // comment shell, which lives outside this menu's DOM.
+  const mobileCommentActiveRef = React.useRef(false);
+  React.useEffect(() => {
+    mobileCommentActiveRef.current = mobileCommentActive;
+    // The composer ended the comment (attach, cancel, or a scope change):
+    // drop the highlight overlay and the retained range with it.
+    if (!mobileCommentActive && isMobile && commentModeRef.current) {
+      hideMenu();
+    }
+  }, [hideMenu, isMobile, mobileCommentActive]);
+
+  // The boundary is the scroller holding the message (the chat, or the btw
+  // panel body), not the message itself: bounding by the message pushed the
+  // menu onto selections in its first lines (#3596).
+  const getDesktopPosition = React.useCallback((rect: DOMRect) => {
+    const boundary = containerRef.current?.closest('[data-scrollbar="chat"], [data-selection-menu-boundary]');
+    const { y, placement } = getDesktopMenuY({
+      selectionTop: rect.top,
+      selectionBottom: rect.bottom,
+      menuHeight: menuHeightRef.current,
+      viewportHeight: window.innerHeight,
+      boundaryTop: boundary ? boundary.getBoundingClientRect().top : 0,
+    });
+    const centerX = getDesktopClampedX(rect.left + rect.width / 2, window.innerWidth, menuWidthRef.current);
+    // Resolve the corner here in whole pixels instead of centering with
+    // `translate(-50%, -100%)`: a half-pixel offset puts the popup's layer
+    // between pixels and its text (the comment box above all) renders blurry
+    // on non-retina screens.
+    return {
+      x: Math.round(centerX - menuWidthRef.current / 2),
+      y: Math.round(placement === 'above' ? y - menuHeightRef.current : y),
+      placement,
+    };
+  }, [containerRef]);
+
+  const addMarkdownToChat = React.useCallback((markdownText: string) => {
+    const markdownBlock = wrapMarkdownSelectionForChat(markdownText);
+    // Quoted inside a chat pinned in the side panel, it goes to that chat's composer.
+    setPendingInputText(markdownBlock, 'append', columnPinned ? currentSessionId : null);
+
+    hideMenu();
+
+    window.getSelection()?.removeAllRanges();
+    queueMicrotask(() => {
+      focusColumnInput();
+    });
+  }, [columnPinned, currentSessionId, focusColumnInput, hideMenu, setPendingInputText]);
+
+  const showMenu = React.useCallback(() => {
+    if (!pendingSelectionRef.current) return;
+
+    const { plainText, markdownText, rect, messageId } = pendingSelectionRef.current;
+    const shouldAnimateIn = !position.show;
+
+    activeAddToChatCleanupRef.current?.();
+    activeAddToChatCleanupRef.current = registerActiveSelectionToolbar({
+      addToChat: () => addMarkdownToChat(markdownText),
+      dismiss: hideMenu,
+    });
+
+    anchorRectRef.current = rect;
+
+    setSelectedText(plainText);
+    setSelectedTextMarkdown(markdownText);
+    setSelectedMessageId(messageId);
+    // Mobile renders a bottom bar and ignores the coordinates.
+    setPosition(isMobile
+      ? { x: 0, y: 0, placement: 'above', show: true }
+      : { ...getDesktopPosition(rect), show: true });
+    isMenuVisibleRef.current = true;
+
+    if (shouldAnimateIn) {
+      setIsOpening(true);
+      if (openRafRef.current !== null) {
+        window.cancelAnimationFrame(openRafRef.current);
+      }
+      openRafRef.current = window.requestAnimationFrame(() => {
+        setIsOpening(false);
+        openRafRef.current = null;
+      });
+    }
+  }, [addMarkdownToChat, getDesktopPosition, hideMenu, isMobile, position.show]);
+
+  React.useLayoutEffect(() => {
+    if (!position.show || isMobile || !menuRef.current) {
+      return;
+    }
+
+    const measuredWidth = menuRef.current.offsetWidth;
+    const measuredHeight = menuRef.current.offsetHeight;
+    const widthChanged = Number.isFinite(measuredWidth) && measuredWidth > 0 && measuredWidth !== menuWidthRef.current;
+    const heightChanged = Number.isFinite(measuredHeight) && measuredHeight > 0 && measuredHeight !== menuHeightRef.current;
+    if (!widthChanged && !heightChanged) {
+      return;
+    }
+
+    if (widthChanged) {
+      menuWidthRef.current = measuredWidth;
+    }
+    if (heightChanged) {
+      menuHeightRef.current = measuredHeight;
+    }
+    const rect = anchorRectRef.current;
+    if (rect) {
+      setPosition((prev) => ({ ...prev, ...getDesktopPosition(rect) }));
+    }
+    // Entering comment mode and typing into the comment box both grow the
+    // popup, so remeasuring on those keeps the cached size (and the placement
+    // built from it) honest.
+  }, [commentMode, commentText, getDesktopPosition, isMobile, position.show]);
+
+  // Desktop: the menu (and the comment input) ride along with the selection
+  // while the chat scrolls. Only the one open menu listens.
+  React.useEffect(() => {
+    if (!position.show || isMobile) {
+      return;
+    }
+    let frame: number | null = null;
+    const follow = () => {
+      if (frame !== null) return;
+      frame = window.requestAnimationFrame(() => {
+        frame = null;
+        const pending = pendingSelectionRef.current;
+        const rect = pending?.range?.getBoundingClientRect() ?? pending?.measureRect?.();
+        if (!rect) return;
+        anchorRectRef.current = rect;
+        const boundary = containerRef.current
+          ?.closest('[data-scrollbar="chat"], [data-selection-menu-boundary]')
+          ?.getBoundingClientRect();
+        setAnchorVisible(!boundary || (rect.bottom > boundary.top && rect.top < boundary.bottom));
+        const next = getDesktopPosition(rect);
+        setPosition((prev) => (
+          prev.x === next.x && prev.y === next.y && prev.placement === next.placement
+            ? prev
+            : { ...prev, ...next }
+        ));
+      });
+    };
+    document.addEventListener('scroll', follow, { capture: true, passive: true });
+    return () => {
+      if (frame !== null) window.cancelAnimationFrame(frame);
+      document.removeEventListener('scroll', follow, { capture: true });
+    };
+  }, [containerRef, getDesktopPosition, isMobile, position.show]);
+
+  React.useEffect(() => {
+    if (!position.show || isMobile) {
+      return;
+    }
+
+    const handleViewportResize = () => {
+      const rect = anchorRectRef.current;
+      if (!rect) return;
+      setPosition((prev) => ({ ...prev, ...getDesktopPosition(rect) }));
+    };
+
+    window.addEventListener('resize', handleViewportResize);
+    return () => {
+      window.removeEventListener('resize', handleViewportResize);
+    };
+  }, [getDesktopPosition, isMobile, position.show]);
+
+  const handleSelectionChange = React.useCallback(() => {
+    // While the comment input is open, clicking or typing in it collapses the
+    // text selection; the captured quote must survive that.
+    if (commentModeRef.current) {
+      return;
+    }
+    const selection = window.getSelection();
+    const container = containerRef.current;
+
+    if (!selection || !container) {
+      if (!isDraggingRef.current) {
+        hideMenu();
+      }
+      return;
+    }
+
+    const text = trimSelectionValue(selection.toString());
+
+    // A selection inside a page frame is the one the menu shows; the app's
+    // own selection was cleared for it, and that is no reason to close it.
+    if (!text && pendingSelectionRef.current && !pendingSelectionRef.current.range) {
+      return;
+    }
+
+    // Only show if we have text and the selection is within our container
+    if (!text) {
+      if (!isDraggingRef.current) {
+        hideMenu();
+      }
+      return;
+    }
+
+    // Check if selection is within the container
+    const range = selection.getRangeAt(0);
+    
+    if (!container.contains(range.commonAncestorContainer)) {
+      if (!isDraggingRef.current) {
+        hideMenu();
+      }
+      return;
+    }
+
+    // Get selection coordinates
+    const rect = range.getBoundingClientRect();
+
+    // Store the selection but don't show menu yet if dragging
+    const anchorElement = range.commonAncestorContainer instanceof Element
+      ? range.commonAncestorContainer
+      : range.commonAncestorContainer.parentElement;
+    const replaced = pendingSelectionRef.current;
+    pendingSelectionRef.current = {
+      plainText: text,
+      markdownText: rangeToMarkdown(range, text),
+      rect,
+      messageId: anchorElement?.closest('[data-message-id]')?.getAttribute('data-message-id') ?? null,
+      range: range.cloneRange(),
+    };
+    // The app's selection takes over from one a page frame had.
+    replaced?.clear?.();
+
+    // Only show menu if we're not currently dragging
+    if (!isDraggingRef.current) {
+      showMenu();
+    }
+  }, [containerRef, hideMenu, showMenu]);
+
+  React.useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    // Track when dragging starts
+    const handleMouseDown = (event: MouseEvent) => {
+      // SAFETY: a MouseEvent target inside the document is always a Node;
+      // `contains` only needs that.
+      if (commentModeRef.current && menuRef.current?.contains(event.target as Node)) {
+        return;
+      }
+      // The composer's comment mode owns the selection: taps anywhere —
+      // including the transcript — keep the quote highlight until the
+      // comment ends.
+      if (mobileCommentActiveRef.current) {
+        return;
+      }
+      isDraggingRef.current = true;
+      hideMenu();
+    };
+
+    // Track when dragging stops
+    const handleMouseUp = () => {
+      isDraggingRef.current = false;
+      // Check if we have a pending selection to show; one from a page frame
+      // is shown as it arrives, and the app has no selection of its own to check.
+      if (pendingSelectionRef.current?.range) {
+        if (mouseUpTimeoutRef.current !== null) {
+          window.clearTimeout(mouseUpTimeoutRef.current);
+        }
+        // Small delay to ensure selection is finalized
+        mouseUpTimeoutRef.current = window.setTimeout(() => {
+          mouseUpTimeoutRef.current = null;
+          // The click that opened the comment input cleared the selection on
+          // purpose; the input must survive this deferred check.
+          if (commentModeRef.current) {
+            return;
+          }
+          const selection = window.getSelection();
+          if (selection && selection.toString().trim()) {
+            showMenu();
+          } else {
+            hideMenu();
+          }
+        }, 10);
+      }
+    };
+
+    // Listen for selection changes during drag
+    document.addEventListener('selectionchange', handleSelectionChange);
+    
+    container.addEventListener('mousedown', handleMouseDown);
+    document.addEventListener('mouseup', handleMouseUp);
+
+    // Hide menu when clicking outside
+    const handleClickOutside = (e: MouseEvent) => {
+      // The comment shell and its voice overlay sit outside this menu; taps
+      // there must not clear the quote highlight.
+      if (mobileCommentActiveRef.current) {
+        return;
+      }
+      if (
+        menuRef.current &&
+        !menuRef.current.contains(e.target as Node) &&
+        (commentModeRef.current || !window.getSelection()?.toString().trim())
+      ) {
+        hideMenu();
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+
+    return () => {
+      if (mouseUpTimeoutRef.current !== null) {
+        window.clearTimeout(mouseUpTimeoutRef.current);
+        mouseUpTimeoutRef.current = null;
+      }
+      document.removeEventListener('selectionchange', handleSelectionChange);
+      container.removeEventListener('mousedown', handleMouseDown);
+      document.removeEventListener('mouseup', handleMouseUp);
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [containerRef, handleSelectionChange, hideMenu, showMenu]);
+
+  // A selection made inside a page frame (`openchamber_render`) arrives as an
+  // event from the frame, never through window.getSelection().
+  React.useEffect(() => {
+    const container = containerRef.current;
+    if (!container || !frameSelections) return;
+    return onFrameSelection(container, (selection, frame) => {
+      const text = trimSelectionValue(selection.text);
+      const isFrameSelection = Boolean(pendingSelectionRef.current && !pendingSelectionRef.current.range);
+      // Another page took the selection over: this menu closes, a comment
+      // in progress included.
+      if (!text && selection.dismiss) {
+        if (isFrameSelection) hideMenu();
+        return;
+      }
+      // An open comment, or the composer's, keeps its quote.
+      if (commentModeRef.current || mobileCommentActiveRef.current) return;
+      if (!text) {
+        if (isFrameSelection) hideMenu();
+        return;
+      }
+      const measureRect = () => frameRectInApp(frame, selection.rect);
+      pendingSelectionRef.current = {
+        plainText: text,
+        markdownText: text,
+        rect: measureRect(),
+        measureRect,
+        messageId: readingKey,
+        anchor: selection.anchor,
+        clear: selection.clear,
+      };
+      showMenu();
+    });
+  }, [containerRef, frameSelections, hideMenu, readingKey, showMenu]);
+
+  const handleAddToChat = React.useCallback(() => {
+    if (!selectedTextMarkdown) return;
+    addMarkdownToChat(selectedTextMarkdown);
+  }, [addMarkdownToChat, selectedTextMarkdown]);
+
+  const handleAskOpenChamber = React.useCallback(() => {
+    if (!currentSessionId || !selectedTextMarkdown) return;
+    requestBtwComposer({
+      parentSessionId: currentSessionId,
+      text: wrapMarkdownSelectionForChat(selectedTextMarkdown),
+    });
+    hideMenu();
+    window.getSelection()?.removeAllRanges();
+    queueMicrotask(() => {
+      focusColumnInput();
+    });
+  }, [currentSessionId, focusColumnInput, hideMenu, requestBtwComposer, selectedTextMarkdown]);
+
+  // The selection is read word for word: the reader picked exactly what to
+  // hear. While a reading of this message plays the same button stops it, so
+  // stopping never needs a scroll down to the message's own button.
+  const handleReadAloud = React.useCallback(() => {
+    if (isReading) {
+      stopReading();
+      return;
+    }
+    if (!selectedText) return;
+    void playReading(selectedText, { summarize: false });
+    hideMenu();
+    window.getSelection()?.removeAllRanges();
+  }, [hideMenu, isReading, playReading, selectedText, stopReading]);
+
+  const readAloudLabel = isReading ? t('chat.messageBody.tts.stopSpeaking') : t('chat.messageBody.tts.readAloud');
+
+  // Taken once the user commits to commenting, not on every selectionchange:
+  // it reads the whole message text.
+  const captureCommentAnchor = React.useCallback((): ChatQuoteAnchor | null => {
+    const container = containerRef.current;
+    const pending = pendingSelectionRef.current;
+    // A page's selection was anchored by the page, in its own text.
+    if (pending && !pending.range) return pending.anchor ?? null;
+    return container && pending?.range ? captureChatQuoteAnchor(container, pending.range) : null;
+  }, [containerRef]);
+
+  const openComment = React.useCallback((initialText: string) => {
+    if (!selectedTextMarkdown) return;
+    // Images pasted into an abandoned comment never reach the composer.
+    discardPastedImages();
+    setSelectedAnchor(captureCommentAnchor());
+    setCommentText(initialText);
+    setCommentMode(true);
+    commentModeRef.current = true;
+    updateCommentRects();
+    // The field focuses itself on mount, caret after `initialText`.
+    window.getSelection()?.removeAllRanges();
+  }, [captureCommentAnchor, discardPastedImages, selectedTextMarkdown, updateCommentRects]);
+
+  const handleOpenComment = React.useCallback(() => openComment(''), [openComment]);
+
+  // Desktop: typing while the bubble is up starts the comment with that
+  // keystroke, so a quick note needs no click on Comment first.
+  React.useEffect(() => {
+    if (!position.show || !anchorVisible || commentMode || isMobile) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const text = getTypeToCommentText(event);
+      if (!text) return;
+      event.preventDefault();
+      openComment(text);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [anchorVisible, commentMode, isMobile, openComment, position.show]);
+
+  // Mobile: no floating input here. The quote is handed to this column's
+  // composer, which swaps its input for the comment shell. The scope is
+  // captured from the visible composer, including BTW. Switching its target
+  // closes the comment instead of re-targeting. The menu keeps the quoted range
+  // highlighted until the comment ends.
+  // flushSync mounts and focuses the comment editor while the tap's call
+  // stack is still live; that synchronous focus is the only one iOS raises
+  // the soft keyboard for.
+  const handleOpenMobileComment = React.useCallback(() => {
+    if (!selectedTextMarkdown) return;
+    if (!mobileCommentController) {
+      hideMenu();
+      return;
+    }
+    const quote = {
+      plainText: selectedText,
+      markdownText: selectedTextMarkdown,
+      messageId: selectedMessageId,
+      anchor: captureCommentAnchor(),
+    };
+    setCommentMode(true);
+    commentModeRef.current = true;
+    updateCommentRects();
+    window.getSelection()?.removeAllRanges();
+    const opened = flushSync(() => (
+      mobileCommentController.open(quote)
+    ));
+    if (!opened) {
+      hideMenu();
+    }
+  }, [captureCommentAnchor, hideMenu, mobileCommentController, selectedMessageId, selectedText, selectedTextMarkdown, updateCommentRects]);
+
+  const handleAttachComment = React.useCallback(() => {
+    const sessionKey = currentSessionId ?? (newSessionDraftOpen ? 'draft' : null);
+    if (!selectedTextMarkdown || !sessionKey || !effectiveDirectory) {
+      hideMenu();
+      return;
+    }
+    const draftId = addContextDraft({ directory: effectiveDirectory, sessionKey }, {
+      source: 'chat-quote',
+      fileLabel: selectedMessageId ?? '',
+      startLine: 1,
+      endLine: 1,
+      code: selectedTextMarkdown,
+      language: '',
+      text: commentText.trim(),
+      anchor: selectedAnchor ?? undefined,
+    });
+    if (!draftId) {
+      toast.error(t('chat.textSelection.comment.attachFailed'));
+      return;
+    }
+    hideMenu();
+    queueMicrotask(() => {
+      // Focus first: it hands the attachment slot to this column's composer,
+      // where the comment's images belong.
+      focusColumnInput();
+      void attachCitedImages(commentText);
+    });
+  }, [addContextDraft, attachCitedImages, commentText, currentSessionId, effectiveDirectory, focusColumnInput, hideMenu, newSessionDraftOpen, selectedAnchor, selectedMessageId, selectedTextMarkdown, t]);
+
+  const currentProjectRef = React.useMemo(() => {
+    const directory = effectiveDirectory ?? currentSessionDirectory ?? '';
+    const resolved = resolveProjectForSessionDirectory(projects, availableWorktreesByProject, directory);
+    return resolved ? { id: resolved.id, path: resolved.path } : null;
+  }, [availableWorktreesByProject, currentSessionDirectory, effectiveDirectory, projects]);
+
+  const handleAddToNotes = React.useCallback(async () => {
+    if (!selectedText || !currentProjectRef) {
+      if (!currentProjectRef) {
+        toast.error(t('chat.textSelection.toast.noProject'));
+      }
+      return;
+    }
+
+    try {
+      setIsAddingToNotes(true);
+      // Long selections are distilled into a compact note by the small model;
+      // short ones (and any generation failure) go in verbatim.
+      const noteText = await summarizeSelectionForNotes(selectedTextMarkdown || selectedText, currentSessionId);
+      const insight = normalizeDistilledInsight(noteText);
+      if (!insight) {
+        toast.error(t('chat.textSelection.toast.addToNotesFailed'));
+        return;
+      }
+      // Recorded as its own note with provenance, so the distilled insight can
+      // later be traced back to the conversation it came from.
+      const saved = await useProjectContextStore.getState().createNote(currentProjectRef, {
+        body: insight,
+        source: 'selection',
+        ...(currentSessionId ? { origin: { sessionId: currentSessionId } } : {}),
+      });
+      if (!saved) {
+        toast.error(t('chat.textSelection.toast.addToNotesFailed'));
+        return;
+      }
+      toast.success(t('chat.textSelection.toast.addToNotesSuccess'));
+      hideMenu();
+      window.getSelection()?.removeAllRanges();
+    } catch (error) {
+      const description = error instanceof Error ? error.message : undefined;
+      toast.error(t('chat.textSelection.toast.addToNotesFailed'), description ? { description } : undefined);
+    } finally {
+      setIsAddingToNotes(false);
+    }
+  }, [currentProjectRef, currentSessionId, hideMenu, selectedText, selectedTextMarkdown, t]);
+
+  if (!position.show) return null;
+
+  const commentHighlightOverlay = commentMode && commentRects && commentRects.length > 0
+    ? createPortal(
+      <div className="pointer-events-none fixed inset-0 z-[5]">
+        {commentRects.map((rect, index) => (
+          <div
+            key={index}
+            className="oc-chat-comment-rect absolute"
+            style={{ left: rect.left, top: rect.top, width: rect.width, height: rect.height }}
+          />
+        ))}
+      </div>,
+      document.body,
+    )
+    : null;
+
+  const commentInput = (
+    <div
+      className={cn(
+        'oc-glass-popover oc-glass-floating relative flex items-end gap-2 rounded-3xl',
+        'ps-4',
+        'py-1 pe-1',
+        'transition-[opacity,transform] duration-200 ease-out',
+        isOpening ? 'opacity-0 translate-y-[4px]' : 'opacity-100 translate-y-0'
+      )}
+    >
+      {/* Desktop: Enter attaches, Shift+Enter breaks the line. (Mobile has no
+          floating input anymore; its comment editor keeps Enter as a line
+          break and attaches through the button.) */}
+      <CommentTextEditor
+        value={commentText}
+        onChange={setCommentText}
+        onSubmit={handleAttachComment}
+        onCancel={hideMenu}
+        enterSubmits
+        imagePaste={commentImagePaste}
+        placeholder={t('chat.textSelection.comment.placeholder')}
+        className="w-64 max-w-[70vw] py-1.5 text-sm leading-5 text-foreground"
+      />
+      <button
+        type="button"
+        onClick={handleAttachComment}
+        className={cn(
+          'mb-0.5 flex shrink-0 items-center justify-center rounded-full bg-[var(--primary-base)] text-[var(--primary-foreground)] hover:opacity-90 transition-opacity duration-150',
+          'h-8 w-8'
+        )}
+        aria-label={t('chat.textSelection.comment.attach')}
+        title={t('chat.textSelection.comment.attach')}
+      >
+        <Icon name="attachment-2" className="h-4 w-4" />
+      </button>
+    </div>
+  );
+
+  // Mobile: while the composer's comment mode is active, only the quoted
+  // range's highlight overlay stays; the action sheet is gone and the comment
+  // UI lives in the composer. Otherwise the action sheet only — commenting
+  // hands off to the column's composer (see handleOpenMobileComment); no
+  // floating comment input, no overlay positioning on this path.
+  if (isMobile) {
+    if (commentMode) {
+      return commentHighlightOverlay;
+    }
+    return createPortal(
+      <div
+        ref={menuRef}
+        className={cn(
+          'fixed inset-s-3 inset-e-3 bottom-0 z-50 mx-auto max-w-[420px]',
+          'oc-glass-popover oc-glass-floating rounded-2xl',
+          'p-2',
+          'safe-area-bottom',
+          'transition-[opacity,transform] duration-200 ease-out will-change-[opacity,transform]',
+          isOpening ? 'opacity-0 translate-y-[4px]' : 'opacity-100 translate-y-0'
+        )}
+        style={{
+          bottom: 'calc(0.5rem + env(safe-area-inset-bottom, 0px))',
+        }}
+      >
+        {/* Without Read, both rows share equal-width columns. With Read, the
+            first row sizes tiles by their labels so three fit. Only Comment
+            shrinks, hyphenating a long word instead of clipping it. */}
+        <div className="flex flex-col gap-2">
+          <div className={cn('gap-2', canReadAloud ? 'flex' : 'grid grid-cols-2')}>
+            <button
+              onClick={handleOpenMobileComment}
+              className={cn(
+                'flex flex-auto items-center gap-2 rounded-xl px-3 py-2.5 text-start',
+                'text-sm font-medium leading-tight',
+                'bg-foreground/[0.04] text-foreground',
+                'active:opacity-80',
+                'transition-opacity duration-150'
+              )}
+              title={t('chat.textSelection.title.commentOnSelection')}
+              type="button"
+            >
+              <Icon name="chat-1" className="h-5 w-5 flex-shrink-0" />
+              <span className="whitespace-normal hyphens-auto">{t('chat.textSelection.actions.comment')}</span>
+            </button>
+
+            <button
+              onClick={handleAddToChat}
+              className={cn(
+                'flex flex-[1_0_auto] items-center gap-2 rounded-xl px-3 py-2.5 text-start',
+                'text-sm font-medium leading-tight',
+                'bg-[var(--primary-base)] text-[var(--primary-foreground)]',
+                'active:opacity-80',
+                'transition-opacity duration-150'
+              )}
+              title={t('chat.textSelection.title.addToCurrentChat')}
+              type="button"
+            >
+              <Icon name="add" className="h-5 w-5 flex-shrink-0" />
+              <span className="whitespace-normal hyphens-auto">{t('chat.textSelection.actions.addToInput')}</span>
+            </button>
+
+            {canReadAloud ? (
+              <button
+                onClick={handleReadAloud}
+                className={cn(
+                  'flex flex-[1_0_auto] items-center gap-2 rounded-xl px-3 py-2.5 text-start',
+                  'text-sm font-medium leading-tight',
+                  'bg-foreground/[0.04] text-foreground',
+                  'active:opacity-80',
+                  'transition-opacity duration-150'
+                )}
+                title={readAloudLabel}
+                type="button"
+              >
+                <Icon name="volume-up" className={cn('h-5 w-5 flex-shrink-0', isReading && 'text-[var(--primary-text)]')} />
+                <span className="whitespace-normal hyphens-auto">
+                  {isReading ? t('chat.textSelection.actions.stopReading') : t('chat.textSelection.actions.read')}
+                </span>
+              </button>
+            ) : null}
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            {currentSessionId ? (
+              <button
+                onClick={handleAskOpenChamber}
+                className={cn(
+                  'flex min-w-0 items-center gap-2 rounded-xl px-3 py-2.5 text-start',
+                  'text-sm font-medium leading-tight',
+                  'bg-foreground/[0.04] text-foreground',
+                  'active:opacity-80',
+                  'transition-opacity duration-150'
+                )}
+                title={t('chat.textSelection.title.askOpenChamber')}
+                type="button"
+              >
+                <Icon name="chat-ai-3" className="h-5 w-5 flex-shrink-0" />
+                <span className="min-w-0 whitespace-normal">{t('chat.textSelection.actions.askOpenChamber')}</span>
+              </button>
+            ) : null}
+
+            {!isVSCodeRuntime() ? (
+              <button
+                onClick={handleAddToNotes}
+                disabled={isAddingToNotes}
+                className={cn(
+                  'flex min-w-0 items-center gap-2 rounded-xl px-3 py-2.5 text-start',
+                  'text-sm font-medium leading-tight',
+                  'bg-foreground/[0.04] text-foreground',
+                  'active:opacity-80 disabled:opacity-60 disabled:cursor-not-allowed',
+                  'transition-opacity duration-150'
+                )}
+                title={t('chat.textSelection.title.saveInsightToNotes')}
+                type="button"
+              >
+                {isAddingToNotes ? <Icon name="loader-4" className="h-5 w-5 flex-shrink-0 animate-spin" /> : <Icon name="booklet" className="h-5 w-5 flex-shrink-0" />}
+                <span className="min-w-0 whitespace-normal">{t('chat.textSelection.actions.addToNotes')}</span>
+              </button>
+            ) : null}
+          </div>
+        </div>
+      </div>,
+      document.body
+    );
+  }
+
+  // Desktop: Show as a popup above the selection. A page shown full screen
+  // lives in a modal dialog, which keeps everything outside it inert and
+  // behind it: the menu then renders inside the dialog, where it can be used.
+  // The popup has no transform when open, so `fixed` still means the viewport.
+  const menuPortalTarget = (frameSelections
+    ? containerRef.current?.closest<HTMLElement>('[data-slot="dialog-content"]')
+    : null) ?? document.body;
+  return createPortal(
+    <div
+      ref={menuRef}
+      className="app-region-no-drag fixed z-50"
+      style={{
+        left: position.x,
+        top: position.y,
+        visibility: anchorVisible ? undefined : 'hidden',
+      }}
+    >
+      {commentMode ? (<>{commentHighlightOverlay}{commentInput}</>) : (
+        <div
+          className={cn(
+            'flex items-center whitespace-nowrap',
+            'oc-glass-popover oc-glass-floating rounded-full',
+            'p-1',
+            'transition-[opacity,transform] duration-200 ease-out',
+            isOpening ? 'opacity-0 translate-y-[4px]' : 'opacity-100 translate-y-0'
+          )}
+        >
+          <button
+            onClick={handleOpenComment}
+            className={cn(
+              'px-3.5 py-1.5 rounded-full',
+              'text-sm font-medium',
+              'text-foreground',
+              'hover:bg-[var(--interactive-hover)]',
+              'transition-colors duration-150'
+            )}
+            title={t('chat.textSelection.title.commentOnSelection')}
+            type="button"
+          >
+            {t('chat.textSelection.actions.comment')}
+          </button>
+
+          {currentSessionId ? (
+            <>
+              <div className="mx-0.5 h-5 w-px shrink-0 bg-[var(--interactive-border)]" />
+              <button
+                onClick={handleAskOpenChamber}
+                className={cn(
+                  'px-3.5 py-1.5 rounded-full',
+                  'text-sm font-medium',
+                  'text-foreground',
+                  'hover:bg-[var(--interactive-hover)]',
+                  'transition-colors duration-150'
+                )}
+                title={t('chat.textSelection.title.askOpenChamber')}
+                type="button"
+              >
+                {t('chat.textSelection.actions.askOpenChamber')}
+              </button>
+            </>
+          ) : null}
+
+
+          {!isVSCodeRuntime() ? (
+            <>
+              <div className="mx-0.5 h-5 w-px shrink-0 bg-[var(--interactive-border)]" />
+
+              <button
+                onClick={handleAddToNotes}
+                disabled={isAddingToNotes}
+                className={cn(
+                  'flex items-center gap-1.5 px-3.5 py-1.5 rounded-full',
+                  'text-sm font-medium',
+                  'text-foreground',
+                  'hover:bg-[var(--interactive-hover)] disabled:opacity-60 disabled:cursor-not-allowed',
+                  'transition-colors duration-150'
+                )}
+                title={t('chat.textSelection.title.saveInsightToNotes')}
+                type="button"
+              >
+                {isAddingToNotes ? <Icon name="loader-4" className="h-4 w-4 animate-spin" /> : null}
+                <span className="whitespace-nowrap">{t('chat.textSelection.actions.addToNotes')}</span>
+              </button>
+            </>
+          ) : null}
+
+          {canReadAloud ? (
+            <>
+              <div className="mx-0.5 h-5 w-px shrink-0 bg-[var(--interactive-border)]" />
+              <button
+                onClick={handleReadAloud}
+                className={cn(
+                  'flex h-8 w-8 items-center justify-center rounded-full',
+                  isReading ? 'text-[var(--primary-text)]' : 'text-foreground',
+                  'hover:bg-[var(--interactive-hover)]',
+                  'transition-colors duration-150'
+                )}
+                aria-label={readAloudLabel}
+                title={readAloudLabel}
+                type="button"
+              >
+                <Icon name="volume-up" className={cn('h-4 w-4', isReading && 'text-[var(--primary-text)]')} />
+              </button>
+            </>
+          ) : null}
+        </div>
+      )}
+    </div>,
+    menuPortalTarget
+  );
+};
+
+// Rendered by every assistant message, which re-renders on each streamed
+// chunk; its props (a ref, the message id, a flag) do not change then.
+export const TextSelectionMenu = React.memo(TextSelectionMenuImpl);

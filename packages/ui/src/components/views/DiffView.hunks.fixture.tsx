@@ -1,0 +1,541 @@
+import React, { act } from 'react';
+import { expect } from 'bun:test';
+import { Window } from 'happy-dom';
+import { Worker as NodeWorker } from 'node:worker_threads';
+import type { WorkerRequest, WorkerResponse } from '@pierre/diffs/worker';
+import type { GitStatus } from '@/lib/api/types';
+
+const WorkerEventTarget = globalThis.EventTarget;
+const WorkerMessageEvent = globalThis.MessageEvent;
+const workerThreads = new Set<NodeWorker>();
+const pendingHighlightRequests = new Set<string>();
+const workerFailures: Error[] = [];
+const workerEntry = import.meta.resolve('@pierre/diffs/worker/worker.js');
+
+// Run the installed Pierre worker unchanged. Only its browser message boundary
+// is adapted to Node, so inline slots use real rendered diff rows in this test.
+class FixtureHighlightWorker extends WorkerEventTarget {
+  private worker = new NodeWorker(new URL(`data:text/javascript,${encodeURIComponent(`
+    import { parentPort, workerData } from 'node:worker_threads';
+    globalThis.postMessage = (data) => parentPort.postMessage(data);
+    globalThis.self = { addEventListener(type, listener) {
+      if (type === 'message') parentPort.on('message', (data) => listener({ data }));
+    } };
+    await import(workerData);
+  `)}`), { workerData: workerEntry });
+
+  constructor() {
+    super();
+    workerThreads.add(this.worker);
+    this.worker.on('message', (data: WorkerResponse) => {
+      pendingHighlightRequests.delete(data.id);
+      this.dispatchEvent(new WorkerMessageEvent('message', { data }));
+    });
+    this.worker.on('error', (error) => workerFailures.push(error));
+  }
+
+  postMessage(request: WorkerRequest) {
+    pendingHighlightRequests.add(request.id);
+    this.worker.postMessage(request);
+  }
+
+  terminate() { return this.worker.terminate(); }
+}
+
+export const closeDiffHunkWorkers = async () => {
+  await Promise.all([...workerThreads].map((worker) => worker.terminate()));
+  workerThreads.clear();
+};
+
+// Installs happy-dom and the Node-backed highlight worker as globals. The
+// returned teardown waits for in-flight highlights, then restores the globals.
+const installFixtureDom = () => {
+  const dom = new Window({ url: 'http://localhost' });
+  const originals = new Map<string, PropertyDescriptor | undefined>();
+  for (const [name, value] of Object.entries({
+    window: dom, Window: dom.Window, document: dom.document, navigator: dom.navigator, location: dom.location, localStorage: dom.localStorage,
+    Element: dom.Element, HTMLElement: dom.HTMLElement, HTMLInputElement: dom.HTMLInputElement, HTMLButtonElement: dom.HTMLButtonElement, Node: dom.Node,
+    ShadowRoot: dom.ShadowRoot, Document: dom.Document, Worker: FixtureHighlightWorker,
+    SVGElement: dom.SVGElement, DocumentFragment: dom.DocumentFragment, Text: dom.Text, Range: dom.Range,
+    customElements: dom.customElements, CSSStyleSheet: dom.CSSStyleSheet,
+    Event: dom.Event, CustomEvent: dom.CustomEvent, KeyboardEvent: dom.KeyboardEvent, MouseEvent: dom.MouseEvent,
+    MutationObserver: dom.MutationObserver, ResizeObserver: dom.ResizeObserver, IntersectionObserver: dom.IntersectionObserver,
+    getComputedStyle: dom.getComputedStyle.bind(dom), requestAnimationFrame: dom.requestAnimationFrame.bind(dom),
+    cancelAnimationFrame: dom.cancelAnimationFrame.bind(dom), IS_REACT_ACT_ENVIRONMENT: true,
+  })) {
+    originals.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
+    Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
+  }
+  document.documentElement.style.fontSize = '16px';
+  const originalFetch = globalThis.fetch;
+  // Unrelated bootstrap I/O stays pending; each scenario's Git adapter owns
+  // its reads and mutations. No real account or filesystem is touched.
+  globalThis.fetch = Object.assign(async () => new Promise<Response>(() => {}), originalFetch);
+  const restore = async () => {
+    const deadline = Date.now() + 5000;
+    while (pendingHighlightRequests.size > 0 && workerFailures.length === 0 && Date.now() < deadline) {
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
+    }
+    await act(async () => { await new Promise((resolve) => requestAnimationFrame(resolve)); });
+    globalThis.fetch = originalFetch;
+    for (const [name, descriptor] of originals) {
+      if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+      else Reflect.deleteProperty(globalThis, name);
+    }
+    await dom.happyDOM.close();
+  };
+  return { dom, restore };
+};
+
+export async function exerciseDiffHunkActions(snapshotCase?: 'cold' | 'cached' | 'cold-single', layout: 'inline' | 'side-by-side' = 'inline', wrapLines = false) {
+  const { dom, restore } = installFixtureDom();
+  // happy-dom does no layout. Give the code column and every hunk marker the
+  // geometry Chromium reports: markers mid-column, and no box at all for a
+  // column Pierre lays out as `display: contents` (wrapped split view).
+  const measure = dom.Element.prototype.getBoundingClientRect;
+  dom.Element.prototype.getBoundingClientRect = function (this: Element) {
+    if (this.matches('[data-hunk-action-target]')) return new dom.DOMRect(0, 300, 600, 0);
+    if (this.matches('pre[data-diff-type="split"][data-overflow="wrap"] [data-code]')) return new dom.DOMRect();
+    if (this.matches('[data-code], [data-content]')) return new dom.DOMRect(0, 100, 600, 1800);
+    return measure.call(this);
+  };
+  const { createRoot } = await import('react-dom/client');
+  const { I18nProvider } = await import('@/lib/i18n');
+  const { RuntimeAPIContext } = await import('@/contexts/runtimeAPIContext');
+  const { createWebAPIs } = await import('../../../../web/src/api/index');
+  const { MultiFileDiffEntry } = await import('@/components/views/DiffView');
+  const { SyncProvider } = await import('@/sync/sync-context');
+  const { opencodeClient } = await import('@/lib/opencode/client');
+  const { useGitStore } = await import('@/stores/useGitStore');
+  const changes = snapshotCase === 'cold-single' ? [1] : [1, 25, 50];
+  let remaining = [...changes];
+  const cold = snapshotCase === 'cold' || snapshotCase === 'cold-single';
+  let fullContext = cold;
+  let currentVersion = cold ? 2 : 1;
+  let fullVersion = 1;
+  let deferVersions = cold;
+  let releaseFull: (() => void) | undefined;
+  let releaseCanonical: (() => void) | undefined;
+  let openedPatch: string | null = null;
+  let historical = false;
+  let failReads = false;
+  let normalReads = 0;
+  let mutations = 0;
+  const makePatch = (full: boolean, version = currentVersion) => {
+    const header = `diff --git a/file.txt b/file.txt\nindex ${'a'.repeat(40)}..${String(version).repeat(40)} 100644\n--- a/file.txt\n+++ b/file.txt\n`;
+    const ranges = full ? [[0, 60]] : remaining.map((line) => [Math.max(0, line - 3), line + 4]);
+    return header + ranges.map(([start, end]) => `@@ -${start + 1},${end - start} +${start + 1},${end - start} @@\n` +
+      Array.from({ length: end - start }, (_, offset) => {
+        const index = start + offset;
+        return remaining.includes(index) ? `-line${index}\n+v${version}-changed${index}\n` : ` line${index}\n`;
+      }).join('')).join('');
+  };
+  const file = { path: 'file.txt', index: 'M', working_dir: 'M', insertions: 3, deletions: 3, isNew: false };
+  const status: GitStatus = { current: 'feature', tracking: null, ahead: 0, behind: 0, files: [file], isClean: false, diffStats: { staged: {}, working: { 'file.txt': { insertions: 3, deletions: 3 } } } };
+  const base = createWebAPIs();
+  const apis = { ...base, git: { ...base.git,
+    checkIsGitRepository: async () => true,
+    getGitStatus: async () => status,
+    getGitDiff: async (_directory: string, options: { path?: string; staged?: boolean; contextLines?: number }) => {
+      if (failReads) throw new Error('Refresh unavailable');
+      if (options.contextLines === 3) normalReads += 1;
+      const full = (options.contextLines ?? 3) > 3;
+      const response = { diff: makePatch(full, full ? fullVersion : currentVersion), submodule: null };
+      if (deferVersions) return new Promise<{ diff: string; submodule: null }>((resolve) => {
+        if (full) releaseFull = () => resolve(response);
+        else releaseCanonical = () => resolve(response);
+      });
+      return response;
+    },
+    stageGitHunk: async (_directory: string, _path: string, patch: string) => {
+      expect(patch).toContain(`+v${currentVersion}-changed${remaining[0]}\n`);
+      mutations += 1;
+      remaining = remaining.slice(1);
+    },
+  } };
+  useGitStore.getState().setActiveDirectory('/repo');
+  const container = document.createElement('div');
+  container.dataset.diffVirtualRoot = '';
+  container.getBoundingClientRect = () => new dom.DOMRect(0, 0, 1280, 2000);
+  Object.defineProperty(container, 'clientHeight', { value: 2000 });
+  document.body.append(container);
+  const root = createRoot(container);
+  const render = () => act(async () => root.render(<I18nProvider><SyncProvider sdk={opencodeClient.getSdkClient()} directory=""><RuntimeAPIContext.Provider value={apis}>
+    <MultiFileDiffEntry directory="/repo" file={file} layout={layout} wrapLines={wrapLines} isSelected={false}
+      isExpanded isMounted onSelect={() => {}} onExpandedChange={() => {}} registerSectionRef={() => {}}
+      showOpenInEditorAction onOpenInEditor={(_path, diff) => { openedPatch = diff?.patch ?? null; }}
+      hunkActionsEnabled={!historical} loadFullFiles={fullContext}
+      initialDiffData={historical ? { original: '', modified: '', patch: makePatch(false), contextMode: 'patch' } : null} />
+  </RuntimeAPIContext.Provider></SyncProvider></I18nProvider>));
+  const click = async (selector: string) => {
+    const element = document.querySelector<HTMLElement>(selector);
+    if (!element) throw new Error(`Missing ${selector}`);
+    await act(async () => element.click());
+  };
+  const waitForActions = async (count: number) => {
+    const deadline = Date.now() + 5000;
+    while (Date.now() < deadline) {
+      if (workerFailures.length > 0) throw workerFailures[0];
+      if (container.querySelectorAll('[data-hunk-actions]').length === count) {
+        for (const [index, line] of remaining.entries()) {
+          const target = container.querySelector<HTMLElement>(`[data-hunk-action-target="${index}"]`);
+          const wrapper = target?.parentElement;
+          const slots = container.querySelector('diffs-container')?.shadowRoot?.querySelectorAll('slot') ?? [];
+          const slot = wrapper ? [...slots].find((candidate) => candidate.assignedElements().includes(wrapper)) : undefined;
+          expect(slot?.name).toBe(`annotation-additions-${line + 1}`);
+          expect(target?.style.height).toBe('0px');
+          expect(slot?.closest('[data-line-annotation]')).not.toBeNull();
+          if (layout === 'side-by-side') expect(slot?.closest('[data-additions]')).not.toBeNull();
+          // The control floats 4px below its marker, unclamped mid-file.
+          expect(target?.style.getPropertyValue('--oc-hunk-action-offset')).toBe('4px');
+        }
+        return;
+      }
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
+    }
+    const host = container.querySelector('diffs-container');
+    throw new Error(`Missing inline actions: ${JSON.stringify({
+      expected: count, targets: host?.querySelectorAll('[data-hunk-action-target]').length,
+      slots: [...(host?.shadowRoot?.querySelectorAll('slot') ?? [])].map((slot) => ({ name: slot.name, assigned: slot.assignedElements().length })),
+      shadow: host?.shadowRoot?.innerHTML.slice(-1500),
+    })}`);
+  };
+  try {
+    await render();
+    if (snapshotCase) {
+      if (cold) {
+        if (!releaseFull || !releaseCanonical) throw new Error('Both snapshot reads must start');
+        await act(async () => { releaseFull?.(); releaseCanonical?.(); });
+      } else {
+        currentVersion = 2;
+        fullVersion = 2;
+        fullContext = true;
+        await render();
+      }
+      expect(container.textContent).toContain('Refresh the diff and try again');
+      expect(container.querySelector('[data-hunk-actions]')).toBeNull();
+      expect(mutations).toBe(0);
+      deferVersions = false;
+      fullVersion = currentVersion;
+      const retry = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Retry');
+      if (!retry) throw new Error('Missing snapshot retry');
+      await act(async () => retry.click());
+      await waitForActions(changes.length);
+      expect(container.querySelectorAll('[data-hunk-actions]')).toHaveLength(changes.length);
+      expect(normalReads).toBe(2);
+      await click('button[title="Open this file in editor at change"]');
+      expect(openedPatch).toContain('+v2-changed1\n');
+      await click('button[aria-label="Stage hunk 1"]');
+      expect(mutations).toBe(1);
+      return;
+    }
+    await waitForActions(3);
+    expect(container.querySelectorAll('[data-hunk-actions]')).toHaveLength(3);
+    expect(normalReads).toBe(1);
+    fullContext = true;
+    await render();
+    await waitForActions(3);
+    expect(container.querySelectorAll('[data-hunk-actions]')).toHaveLength(3);
+    expect(normalReads).toBe(1);
+    await click('button[aria-label="Stage hunk 1"]');
+    expect(mutations).toBe(1);
+    await waitForActions(2);
+    expect(container.querySelectorAll('[data-hunk-actions]')).toHaveLength(2);
+    expect(normalReads).toBe(2);
+    failReads = true;
+    await click('button[aria-label="Stage hunk 1"]');
+    expect(mutations).toBe(2);
+    expect(container.textContent).toContain('Refresh unavailable');
+    expect(container.querySelector('[data-hunk-actions]')).toBeNull();
+    failReads = false;
+    const retry = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Retry');
+    if (!retry) throw new Error('Missing retry');
+    await act(async () => retry.click());
+    expect(container.textContent).not.toContain('Refresh unavailable');
+    await waitForActions(1);
+    expect(container.querySelectorAll('[data-hunk-actions]')).toHaveLength(1);
+    await click('button[aria-label="Stage hunk 1"]');
+    expect(mutations).toBe(3);
+    expect(container.querySelector('[data-hunk-actions]')).toBeNull();
+    remaining = [...changes];
+    historical = true;
+    await render();
+    expect(container.querySelector('[data-hunk-actions]')).toBeNull();
+    expect(mutations).toBe(3);
+  } finally {
+    await act(async () => root.unmount());
+    await restore();
+  }
+}
+
+/**
+ * A patch-only diff cannot tell how many lines follow its last hunk, so
+ * Pierre draws no separator there. The viewer's own row below the last hunk
+ * loads the full file and expands the region after it; a hunk that provably
+ * reaches the end of the file gets no row.
+ */
+export async function exerciseTrailingContextExpansion(layout: 'inline' | 'side-by-side' = 'inline') {
+  const { dom, restore } = installFixtureDom();
+  const { createRoot } = await import('react-dom/client');
+  const { I18nProvider } = await import('@/lib/i18n');
+  const { RuntimeAPIContext } = await import('@/contexts/runtimeAPIContext');
+  const { createWebAPIs } = await import('../../../../web/src/api/index');
+  const { MultiFileDiffEntry } = await import('@/components/views/DiffView');
+  const { SyncProvider } = await import('@/sync/sync-context');
+  const { opencodeClient } = await import('@/lib/opencode/client');
+  const { useGitStore } = await import('@/stores/useGitStore');
+  const lineCount = 150;
+  let changedIndex = 49;
+  let fullReads = 0;
+  const makePatch = (full: boolean) => {
+    const [start, end] = full ? [0, lineCount] : [Math.max(0, changedIndex - 3), Math.min(lineCount, changedIndex + 4)];
+    return `diff --git a/file.txt b/file.txt\nindex ${'a'.repeat(40)}..${'b'.repeat(40)} 100644\n--- a/file.txt\n+++ b/file.txt\n`
+      + `@@ -${start + 1},${end - start} +${start + 1},${end - start} @@\n`
+      + Array.from({ length: end - start }, (_, offset) => {
+        const index = start + offset;
+        return index === changedIndex ? `-line${index}\n+changed${index}\n` : ` line${index}\n`;
+      }).join('');
+  };
+  const file = { path: 'file.txt', index: 'M', working_dir: 'M', insertions: 1, deletions: 1, isNew: false };
+  const status: GitStatus = { current: 'feature', tracking: null, ahead: 0, behind: 0, files: [file], isClean: false, diffStats: { staged: {}, working: { 'file.txt': { insertions: 1, deletions: 1 } } } };
+  const base = createWebAPIs();
+  const apis = { ...base, git: { ...base.git,
+    checkIsGitRepository: async () => true,
+    getGitStatus: async () => status,
+    getGitDiff: async (_directory: string, options: { contextLines?: number }) => {
+      const full = (options.contextLines ?? 3) > 3;
+      if (full) fullReads += 1;
+      return { diff: makePatch(full), submodule: null };
+    },
+  } };
+  useGitStore.getState().setActiveDirectory('/repo');
+  const container = document.createElement('div');
+  container.dataset.diffVirtualRoot = '';
+  container.getBoundingClientRect = () => new dom.DOMRect(0, 0, 1280, 2000);
+  Object.defineProperty(container, 'clientHeight', { value: 2000 });
+  document.body.append(container);
+  const root = createRoot(container);
+  const render = (key: string) => act(async () => root.render(<I18nProvider><SyncProvider sdk={opencodeClient.getSdkClient()} directory=""><RuntimeAPIContext.Provider value={apis}>
+    <MultiFileDiffEntry key={key} directory="/repo" file={file} layout={layout} wrapLines={false} isSelected={false}
+      isExpanded isMounted onSelect={() => {}} onExpandedChange={() => {}} registerSectionRef={() => {}}
+      hunkActionsEnabled={false} />
+  </RuntimeAPIContext.Provider></SyncProvider></I18nProvider>));
+  const shadowText = () => container.querySelector('diffs-container')?.shadowRoot?.textContent ?? '';
+  const waitFor = async (label: string, condition: () => boolean) => {
+    const deadline = Date.now() + 5000;
+    while (Date.now() < deadline) {
+      if (workerFailures.length > 0) throw workerFailures[0];
+      if (condition()) return;
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
+    }
+    throw new Error(`Timed out waiting for ${label}: ${shadowText().slice(-400)}`);
+  };
+  try {
+    await render('middle');
+    await waitFor('the partial diff', () => shadowText().includes('changed49'));
+    await waitFor('the trailing row', () => container.querySelector('[data-oc-trailing-expand]') !== null);
+    const row = container.querySelector<HTMLElement>('[data-oc-trailing-expand]');
+    expect(row?.textContent).toBe('Show lines below');
+    const slots = container.querySelector('diffs-container')?.shadowRoot?.querySelectorAll('slot') ?? [];
+    const wrapper = row?.closest('[slot]');
+    const slot = [...slots].find((candidate) => wrapper != null && candidate.assignedElements().includes(wrapper));
+    expect(slot?.closest('[data-line-annotation]')).not.toBeNull();
+    if (layout === 'side-by-side') expect(slot?.closest('[data-deletions]')).not.toBeNull();
+    expect(shadowText()).not.toContain('line53');
+
+    await act(async () => row?.click());
+    await waitFor('the expanded tail', () => shadowText().includes('line72'));
+    expect(fullReads).toBe(1);
+    // Pierre's own separator now sizes what is left after the 20 expanded lines.
+    expect(shadowText()).not.toContain('line73');
+    expect(shadowText()).toContain('77 unmodified lines');
+    expect(container.querySelector('[data-oc-trailing-expand]')).toBeNull();
+
+    // Two trailing context lines: git reached the end of the file.
+    changedIndex = lineCount - 3;
+    await render('end');
+    await waitFor('the partial diff at the end', () => shadowText().includes(`changed${changedIndex}`));
+    expect(container.querySelector('[data-oc-trailing-expand]')).toBeNull();
+  } finally {
+    await act(async () => root.unmount());
+    await restore();
+  }
+}
+
+// Mobile Changes opens a commit file as a 3-line patch; expanding the tail reads
+// the whole file once, replays the expansion, and a failed read only toasts.
+export async function exerciseMobileComparisonContextExpansion() {
+  const { dom, restore } = installFixtureDom();
+  const { createRoot } = await import('react-dom/client');
+  const { I18nProvider } = await import('@/lib/i18n');
+  const { RuntimeAPIContext } = await import('@/contexts/runtimeAPIContext');
+  const { createWebAPIs } = await import('../../../../web/src/api/index');
+  const { useGitStore } = await import('@/stores/useGitStore');
+  const { MobileChangesPane } = await import('@/apps/MobileChangesSurface');
+  const { SyncProvider } = await import('@/sync/sync-context');
+  const { opencodeClient } = await import('@/lib/opencode/client');
+  const lineCount = 150;
+  const changedIndex = 49;
+  const makePatch = (full: boolean) => {
+    const [start, end] = full ? [0, lineCount] : [changedIndex - 3, changedIndex + 4];
+    return `diff --git a/file.txt b/file.txt\nindex ${'a'.repeat(40)}..${'b'.repeat(40)} 100644\n--- a/file.txt\n+++ b/file.txt\n`
+      + `@@ -${start + 1},${end - start} +${start + 1},${end - start} @@\n`
+      + Array.from({ length: end - start }, (_, offset) => {
+        const index = start + offset;
+        return index === changedIndex ? `-line${index}\n+changed${index}\n` : ` line${index}\n`;
+      }).join('');
+  };
+  const commits = [{
+    hash: 'c'.repeat(40), date: '2026-10-03T09:00:00Z', message: 'Change a line', refs: '', body: '',
+    author_name: 'Test Author', author_email: 'test@example.com', filesChanged: 1, insertions: 1, deletions: 1, parents: [],
+  }];
+  let fullReads = 0;
+  let failFullRead = true;
+  const pendingFetch = globalThis.fetch;
+  globalThis.fetch = Object.assign(async (input: RequestInfo | URL) => {
+    const url = new URL(input instanceof Request ? input.url : String(input), 'http://localhost');
+    switch (url.pathname) {
+      case '/api/git/remotes': return Response.json([]);
+      case '/api/git/remote-url': return Response.json({ url: null });
+      case '/api/git/branch-base': return Response.json({ base: null });
+      case '/api/git/log': return Response.json({ all: commits, latest: commits[0], total: commits.length });
+      case '/api/git/commit-files': return Response.json({ files: [{ path: 'file.txt', changeType: 'M', insertions: 1, deletions: 1, isBinary: false }] });
+      case '/api/git/commit-diff': {
+        const full = Number(url.searchParams.get('context') ?? 3) > 3;
+        if (!full) return Response.json({ diff: makePatch(false) });
+        fullReads += 1;
+        return failFullRead ? Response.json({ error: 'Full file read failed' }, { status: 500 }) : Response.json({ diff: makePatch(true) });
+      }
+      default: return pendingFetch(input);
+    }
+  }, pendingFetch);
+  const status: GitStatus = { current: 'feature', tracking: null, ahead: 0, behind: 0, files: [], isClean: true, diffStats: { staged: {}, working: {} } };
+  useGitStore.getState().setActiveDirectory('/repo');
+  const previous = useGitStore.getState().getDirectoryState('/repo');
+  if (!previous) throw new Error('Missing repository state');
+  const now = Date.now();
+  const directories = new Map(useGitStore.getState().directories);
+  directories.set('/repo', {
+    ...previous, status, isGitRepo: true,
+    branches: { all: ['feature', 'main'], current: 'feature', branches: {}, defaultBranches: { origin: 'main' } },
+    log: { all: commits, latest: commits[0], total: 1 }, identity: { userName: 'Test Author', userEmail: 'test@example.com' },
+    lastStatusFetch: now, lastBranchesFetch: now, lastLogFetch: now, lastIdentityFetch: now, lastRepoCheckAt: now,
+  });
+  useGitStore.setState({ directories });
+  const container = document.createElement('div');
+  container.getBoundingClientRect = () => new dom.DOMRect(0, 0, 390, 2000);
+  document.body.append(container);
+  const root = createRoot(container);
+  const shadowText = () => container.querySelector('diffs-container')?.shadowRoot?.textContent ?? '';
+  const waitFor = async (label: string, condition: () => boolean) => {
+    const deadline = Date.now() + 5000;
+    while (Date.now() < deadline) {
+      if (workerFailures.length > 0) throw workerFailures[0];
+      if (condition()) return;
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
+    }
+    throw new Error(`Timed out waiting for ${label}: ${shadowText().slice(-400)}`);
+  };
+  const click = async (selector: string) => {
+    const element = container.querySelector<HTMLElement>(selector) ?? document.querySelector<HTMLElement>(selector);
+    if (!element) throw new Error(`Missing ${selector}`);
+    await act(async () => { element.click(); });
+  };
+  try {
+    await act(async () => root.render(<I18nProvider><SyncProvider sdk={opencodeClient.getSdkClient()} directory=""><RuntimeAPIContext.Provider value={createWebAPIs()}>
+      <MobileChangesPane rootDirectory="/repo" visible initialDiff={null}
+        repository={{ rootIsGitRepo: true, gitDirectory: '/repo', nestedRepos: null, nestedRepoSelection: null, repositoryOptions: null }} />
+    </RuntimeAPIContext.Provider></SyncProvider></I18nProvider>));
+    await click('[aria-label="Select change mode"]');
+    const commitMode = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find((element) => element.textContent === 'Commit');
+    if (!commitMode) throw new Error('Missing Commit mode');
+    await act(async () => { commitMode.click(); });
+    await waitFor('the commit file row', () => container.querySelector('[title="file.txt"]') !== null);
+    const fileButton = container.querySelector('[title="file.txt"]')?.closest('button');
+    await act(async () => { fileButton?.click(); });
+    await waitFor('the partial diff', () => shadowText().includes('changed49'));
+    await waitFor('the trailing row', () => container.querySelector('[data-oc-trailing-expand]') !== null);
+    expect(shadowText()).not.toContain('line53');
+
+    // A failed read leaves the patch on screen and the row available again.
+    await act(async () => container.querySelector<HTMLElement>('[data-oc-trailing-expand]')?.click());
+    await waitFor('the failed full read', () => fullReads === 1 && container.querySelector('[data-oc-trailing-expand]') !== null);
+    expect(shadowText()).toContain('changed49');
+    expect(shadowText()).not.toContain('line53');
+
+    failFullRead = false;
+    await act(async () => container.querySelector<HTMLElement>('[data-oc-trailing-expand]')?.click());
+    await waitFor('the expanded tail', () => shadowText().includes('line72'));
+    expect(fullReads).toBe(2);
+    expect(shadowText()).not.toContain('line73');
+    expect(container.querySelector('[data-oc-trailing-expand]')).toBeNull();
+  } finally {
+    await act(async () => root.unmount());
+    await restore();
+  }
+}
+
+// Hidden whitespace drops a re-indented hunk, keeps the real edit, withholds
+// the hunk actions that would also apply the hidden whitespace, and turns a
+// whitespace-only file into a note.
+export async function exerciseHiddenWhitespace() {
+  const { dom, restore } = installFixtureDom();
+  const { createRoot } = await import('react-dom/client');
+  const { I18nProvider } = await import('@/lib/i18n');
+  const { RuntimeAPIContext } = await import('@/contexts/runtimeAPIContext');
+  const { createWebAPIs } = await import('../../../../web/src/api/index');
+  const { MultiFileDiffEntry } = await import('@/components/views/DiffView');
+  const { SyncProvider } = await import('@/sync/sync-context');
+  const { opencodeClient } = await import('@/lib/opencode/client');
+  const { useGitStore } = await import('@/stores/useGitStore');
+  const header = `diff --git a/file.txt b/file.txt\nindex ${'a'.repeat(40)}..${'b'.repeat(40)} 100644\n--- a/file.txt\n+++ b/file.txt\n`;
+  const reindented = '@@ -1,6 +1,6 @@\n-line0\n-line1\n-line2\n+  line0\n+  line1\n+  line2\n line3\n line4\n line5\n';
+  const edited = '@@ -28,7 +28,7 @@\n line27\n line28\n line29\n-line30\n+changed30\n line31\n line32\n line33\n';
+  let patch = header + reindented + edited;
+  const file = { path: 'file.txt', index: 'M', working_dir: 'M', insertions: 4, deletions: 4, isNew: false };
+  const status: GitStatus = { current: 'feature', tracking: null, ahead: 0, behind: 0, files: [file], isClean: false, diffStats: { staged: {}, working: { 'file.txt': { insertions: 4, deletions: 4 } } } };
+  const base = createWebAPIs();
+  const apis = { ...base, git: { ...base.git,
+    checkIsGitRepository: async () => true,
+    getGitStatus: async () => status,
+    getGitDiff: async () => ({ diff: patch, submodule: null }),
+  } };
+  useGitStore.getState().setActiveDirectory('/repo');
+  const container = document.createElement('div');
+  container.dataset.diffVirtualRoot = '';
+  container.getBoundingClientRect = () => new dom.DOMRect(0, 0, 1280, 2000);
+  Object.defineProperty(container, 'clientHeight', { value: 2000 });
+  document.body.append(container);
+  const root = createRoot(container);
+  const render = (key: string, hideWhitespace: boolean) => act(async () => root.render(<I18nProvider><SyncProvider sdk={opencodeClient.getSdkClient()} directory=""><RuntimeAPIContext.Provider value={apis}>
+    <MultiFileDiffEntry key={key} directory="/repo" file={file} layout="inline" wrapLines={false} hideWhitespace={hideWhitespace} isSelected={false}
+      isExpanded isMounted onSelect={() => {}} onExpandedChange={() => {}} registerSectionRef={() => {}} hunkActionsEnabled />
+  </RuntimeAPIContext.Provider></SyncProvider></I18nProvider>));
+  const shadowText = () => container.querySelector('diffs-container')?.shadowRoot?.textContent ?? '';
+  const waitFor = async (label: string, condition: () => boolean) => {
+    const deadline = Date.now() + 5000;
+    while (Date.now() < deadline) {
+      if (workerFailures.length > 0) throw workerFailures[0];
+      if (condition()) return;
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
+    }
+    throw new Error(`Timed out waiting for ${label}: ${shadowText().slice(-400)}`);
+  };
+  try {
+    await render('both', false);
+    await waitFor('both hunks with actions', () => container.querySelectorAll('[data-hunk-actions]').length === 2);
+    expect(shadowText()).toContain('line1');
+
+    await render('both', true);
+    await waitFor('the edit alone', () => shadowText().includes('changed30') && !shadowText().includes('line1'));
+    expect(container.querySelector('[data-hunk-actions]')).toBeNull();
+
+    patch = header + reindented;
+    await render('whitespace-only', true);
+    await waitFor('the whitespace note', () => container.textContent?.includes('Only whitespace changed in this file.') === true);
+    expect(container.querySelector('diffs-container')).toBeNull();
+  } finally {
+    await act(async () => root.unmount());
+    await restore();
+  }
+}

@@ -1,0 +1,48 @@
+---
+title: SSH-Hosts & Proxying
+description: Importiere gespeicherte SSH-Hosts und füge in der Desktop-App zusätzliche SSH-Portweiterleitungen hinzu.
+---
+
+# SSH-Hosts & Proxying
+
+Verwende in der Desktop-App **Settings → Remote Instances**, um gespeicherte SSH-Hosts zu importieren, dich mit einem entfernten Rechner zu verbinden und über dieselbe SSH-Verbindung zusätzliche Ports bereitzustellen.
+
+> SSH-Hosts und SSH-Proxying sind Funktionen **nur für den Desktop**. Sie verwenden den SSH-Client auf deinem Rechner.
+
+## SSH-Host importieren
+
+OpenChamber kann Hosts aus deiner lokalen SSH-Konfiguration lesen, also aus demselben Ort, den auch Befehle wie `ssh work-server` verwenden.
+
+1. Öffne **Settings → Remote Instances**.
+2. Wähle einen Host unter **Saved SSH hosts**.
+3. Wenn es sich um ein Muster handelt, gib das tatsächliche Ziel ein, zum Beispiel `deploy@app.example.com`.
+4. Speichern und verbinden.
+
+OpenChamber erstellt mit diesem SSH-Befehl eine Remote-Instanz. Wenn sie **ready** erreicht, öffnet sich die entfernte OpenChamber-UI in der Desktop-App.
+
+## Zusätzliche Portweiterleitungen hinzufügen
+
+Jede Remote-Instanz hat den Bereich **Port Forwards**. Verwende ihn, wenn etwas auf einer Seite der SSH-Verbindung einen Port auf der anderen Seite erreichen muss.
+
+OpenChamber unterstützt drei Weiterleitungstypen:
+
+- **Local (-L)** — öffne einen Port auf deinem Rechner, der mit etwas auf dem entfernten Rechner verbunden ist.
+- **Remote (-R)** — öffne einen Port auf dem entfernten Rechner, der zurück zu deinem Rechner verbindet.
+- **Dynamic (-D)** — öffne einen lokalen SOCKS-Proxy über die SSH-Verbindung.
+
+Für die meisten App-Vorschauen und Dashboards, die auf dem entfernten Rechner laufen, verwende **Local (-L)**.
+
+## Den SOCKS-Proxy verwenden
+
+Wähle **Dynamic (-D)**, wenn andere Tools auf deinem Rechner über den entfernten Rechner browsen sollen. OpenChamber öffnet dafür einen lokalen SOCKS-Proxy-Port für diese SSH-Verbindung.
+
+Sobald die Verbindung bereit ist, kopiere oder verwende die lokale Proxy-Adresse aus der Weiterleitungszeile. Konfiguriere deinen Browser oder dein Tool so, dass es sie als SOCKS5-Proxy verwendet.
+
+## Privat halten
+
+Verwende `127.0.0.1` oder `localhost` für den lokalen Bind-Host, es sei denn, du möchtest ausdrücklich, dass andere Geräte in deinem Netzwerk den weitergeleiteten Port erreichen.
+
+## Verwandt
+
+- [Remote Instances](/remote-instances/) — die Desktop-App mit OpenChamber auf einem anderen Rechner verbinden
+- [Remote access](/troubleshooting/remote-access/) — wenn SSH oder Remote-Zugriff keine Verbindung herstellen

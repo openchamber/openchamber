@@ -1,0 +1,42 @@
+---
+title: Agent kontrol aracı
+description: Bir agent'ın OpenChamber oturumlarını, worktree'leri ve zamanlanmış görevleri sohbet içinden yönetmesine izin verin.
+---
+
+# Agent kontrol aracı
+
+`openchamber` agent aracıyla uygulamadaki işleri doğrudan sohbetten yönetirsiniz; zamanlanmış görevler için `openchamber_schedule` vardır. OpenChamber kendi yerel OpenCode sunucusunu çalıştırdığında ikisi de varsayılan olarak açıktır; bir şey kurmanız ya da shell komutu çalıştırmanız gerekmez.
+
+## Neler isteyebilirsiniz
+
+Agent'a düz dille söyleyin. Örneğin:
+
+- "Bu projede yeni bir OpenChamber oturumu oluştur, `openai/gpt-5.6-sol` modelini kullan ve şu istemi gönder: kimlik doğrulama akışını gözden geçir."
+- "Bu görev için ayrı bir worktree içinde yeni bir OpenChamber oturumu oluştur ve giriş akışı için test eklemesini iste."
+- "OpenChamber ile en son 10 oturumumu mevcut durumlarıyla birlikte listele."
+- "Hafta içi inceleme adlı bir OpenChamber zamanlanmış görevi oluştur; her iş günü 09:00'da şu istemi göndersin: son çalıştırmadan beri yapılan değişiklikleri gözden geçir."
+- "Hafta içi inceleme adlı OpenChamber zamanlanmış görevini şimdi çalıştır."
+- "Kimlik doğrulama incelemesi adlı OpenChamber oturumunu kontrol et ve asistanın son yanıtını göster."
+
+Kontrol aracı projeleri ve model tercihlerini listeler, model kataloğunda arama yapar, oturum oluşturur ve takip eder, bir oturumu fork'lar ve izole worktree oturumları açar. Zamanlama aracı zamanlanmış görevleri oluşturur, değiştirir, çalıştırır, duraklatır ve siler. Bu şekilde başlatılan oturumlar OpenChamber'da diğer oturumlar gibi görünür; açıp işi kendiniz sürdürebilirsiniz.
+
+## Akılda tutun
+
+- Yeni oturum istemleri varsayılan olarak hemen döner. Oturumu OpenChamber'da takip edin ya da agent'tan sonra kontrol etmesini isteyin.
+- Ayrı bir worktree yalnızca siz istediğinizde oluşturulur. Mevcut worktree'nizdeki commit edilmemiş değişiklikler oraya kopyalanmaz.
+- Checkout meşgul göründüğünde, örneğin başka bir oturum aynı branch üzerinde çalışıyorsa, agent kendi oturumunu yeni bir worktree'ye taşımayı önerebilir. Onay verdikten sonra taşır ve yanına yalnızca kendi değiştirdiği dosyaları alır.
+- Araçlar oturumları ya da worktree'leri silemez, proje yolu kaydedemez, keyfi shell komutları çalıştıramaz ve keyfi URL'leri çağıramaz.
+
+## Araçları açma ve kapatma
+
+**Ayarlar → Genel → OpenChamber Araçları** bölümünü açın ve **Agent kontrol aracı** ya da **Agent zamanlama aracı** ayarını değiştirin; her biri ayrı açılıp kapanır. Zamanlama ayrı bir araç olmadan önce kontrol aracını kapatmışsanız zamanlama aracı da kapalı başlar. Değişiklik çalışan oturumlara bir sonraki turda, yeniden başlatmadan ulaşır. Kendi ortamınız zaten `OPENCODE_CONFIG` ayarlıyorsa, yönetilen OpenCode sunucusu yeniden başladığında geçerli olur.
+
+OpenChamber `OPENCODE_HOST` ya da skip-start ile harici bir OpenCode sunucusuna bağlandığında ve VS Code eklentisi içinde araçlar kullanılamaz. OpenChamber'ın yönetilen OpenCode sunucusunu kullanan masaüstü ve web kurulumları bunları otomatik olarak destekler.
+
+## İlgili
+
+- [Zamanlanmış görevler](/tr/scheduled-tasks/)
+- [Worktree Oturumları](/tr/worktrees/)
+- [Oturum hedefleri](/tr/session-goals/)
+- [Tarayıcı Paneli](/tr/desktop-browser/): OpenChamber Web aracı, bir sayfaya bakmak ve onu kontrol etmek için
+- [Proje Notları, Yapılacaklar ve Planlar](/tr/notes-todos-plans/): proje bilgisi aracı, Bağlam sekmesindeki notlar, yapılacaklar ve planlar için

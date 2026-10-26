@@ -1,0 +1,38 @@
+---
+title: Встановлення
+description: Встановіть OpenChamber на десктоп, у веб, у VS Code або на телефон.
+---
+
+# Встановлення
+
+Оберіть застосунок під свій спосіб роботи:
+
+- десктоп-застосунок для macOS, Windows і Linux
+- вебзастосунок на базі CLI, який можна встановити як застосунок на телефоні (PWA)
+- розширення для VS Code, а також для Cursor, Windsurf і Trae
+- мобільні застосунки для iPhone і Android, у публічній беті
+
+## Десктоп
+
+Завантажте найновішу збірку зі [сторінки завантаження](https://openchamber.dev/download/) або з [GitHub Releases](https://github.com/openchamber/openchamber/releases/latest) і відкрийте її. Для Linux є `.deb`, `.rpm` і AppImage.
+
+Десктоп-застосунок має власну копію [OpenCode](https://opencode.ai) (ШІ-агента для коду, на якому працює OpenChamber), тож більше нічого встановлювати не треба.
+
+## Веб + PWA
+
+Для вебзастосунку на машині, де він працює, потрібні [OpenCode](https://opencode.ai) і Node.js 24.14 або новіший.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/openchamber/openchamber/main/scripts/install.sh | bash
+openchamber --ui-password be-creative-here
+```
+
+Відкрийте URL, який вивів CLI (зазвичай `http://localhost:3000`). Ви маєте побачити список сесій OpenChamber. Щоб він був під рукою, скористайтеся опцією «Install» в адресному рядку браузера й додайте його як застосунок.
+
+## VS Code
+
+Встановіть OpenChamber з [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=fedaykindev.openchamber). Cursor, Windsurf і Trae ставлять його з [Open VSX](https://open-vsx.org/extension/FedaykinDev/openchamber). Розширенню потрібен встановлений [OpenCode](https://opencode.ai); після цього панель OpenChamber з’являється на бічній панелі.
+
+## Мобільні застосунки
+
+Встановіть застосунок для iPhone через TestFlight або застосунок для Android з останнього релізу, а потім з’єднайте його з комп’ютером. Сторінка [Мобільні застосунки та PWA](/uk/mobile/) описує обидва кроки.

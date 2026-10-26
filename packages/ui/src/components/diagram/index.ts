@@ -1,0 +1,3 @@
+export {
+  DiagramEditor
+} from './DiagramEditor';

@@ -1,0 +1,48 @@
+---
+title: Projets
+description: Organisez votre travail en projets et passez de l’un à l’autre.
+---
+
+# Projets
+
+Un projet est un dossier de votre ordinateur qu’OpenChamber suit — généralement un codebase. Changer de projet change le dossier dans lequel l’agent travaille, ainsi que les sessions et paramètres de ce projet.
+
+## Ajouter un projet
+
+Vous pouvez ajouter un projet depuis plusieurs endroits :
+
+- l’entrée **Ajouter un projet** dans la palette de commandes
+- le bouton **+** en haut de la barre latérale des sessions
+- le navigateur de dossiers lorsque vous choisissez un répertoire
+
+Pointez vers un dossier et OpenChamber s’en souvient. Le nom vient du dossier ; vous pouvez le modifier plus tard.
+
+## Changer de projet
+
+Choisissez un projet dans la barre latérale pour le rendre actif. Tout — sessions, git, notes — suit le projet ouvert.
+
+## Rendre un projet reconnaissable
+
+Ouvrez **Paramètres → Projets** pour donner à un projet un nom, une couleur ou une icône personnalisés. OpenChamber essaie de trouver une icône automatiquement — voir [Icônes de projet](/project-icons/).
+
+> Dans VS Code, OpenChamber utilise toujours le dossier ouvert comme seul projet ; il n’y a donc rien à ajouter ni à changer. La page de paramètres Projets y est masquée.
+
+## Environnement du projet
+
+Quand les outils d’un projet viennent de direnv, de devenv ou d’un shell Nix, les hooks Git, le terminal et les [actions de projet](/fr/project-actions/) ne les trouvent pas seuls. Ouvrez **Paramètres → Projets**, choisissez le projet et, sous **Environnement** :
+
+- ajoutez les variables dont seul ce projet a besoin
+- ou définissez une **commande d’environnement** qui les affiche, par exemple `direnv export json` ou `devenv print-dev-env --json`
+
+La commande s’exécute dans le dossier du projet, et pour un worktree dans le dossier propre à ce worktree. Elle se relance quand vous faites un commit, ouvrez un terminal ou lancez une action, dès que la dernière exécution date de quelques minutes, et **Relancer** la lance tout de suite. Le simple fait d’avoir le projet ouvert ne la lance pas. Sous le champ, vous voyez combien de variables la dernière exécution a ajoutées, ou pourquoi elle a échoué. Une exécution qui échoue n’ajoute rien, et Git et le terminal continuent de fonctionner sans elle.
+
+Ces variables vont à Git, au terminal et aux actions de projet, en plus de celles de **Paramètres → Général → Variables d’environnement** (voir [Variables d’environnement](/fr/environment/#variables-pour-opencode-git-et-le-terminal)). OpenCode sert tous les projets depuis un seul processus, il ne reçoit donc pas les variables de projet : mettez ce dont l’agent a besoin dans la liste générale.
+
+La commande n’appartient qu’à vous. Elle n’est pas lue depuis le dépôt, donc un dépôt cloné ne peut pas faire exécuter quoi que ce soit à OpenChamber.
+
+## Pages liées
+
+- [Discussions](/fr/chats/) — des sessions sans projet, pour les questions rapides
+- [Notes, todos et plans de projet](/notes-todos-plans/) — garder des notes de travail par projet
+- [Actions de projet](/project-actions/) — enregistrer les commandes que vous lancez souvent
+- [Contexte](/context/) — voir quelle part de la mémoire du modèle une session utilise

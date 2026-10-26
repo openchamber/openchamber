@@ -1,0 +1,669 @@
+import { OPENCODE_CONFIG_DIR } from './opencodeConfigPaths';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
+import yaml from 'yaml';
+
+import { readEnterprisePolicy } from '../../web/server/lib/enterprise-mode.js';
+import { isInstalledFromSource, readInstalledSources } from '../../web/server/lib/skills-catalog/installed-sources.js';
+import { removeDirectory, removeStaleCatalogFolders } from '../../web/server/lib/skills-catalog/remove-directory.js';
+import { getOutputChannel } from './outputChannel';
+
+const execFileAsync = promisify(execFile);
+
+// The extension host's console is not kept in any log, so a folder left
+// behind is named in the Output panel instead.
+const removeCatalogDirectory = (dir: string) =>
+  removeDirectory(dir, { warn: (message) => getOutputChannel().appendLine(message) });
+
+const DEFAULT_TIMEOUT_MS = 60_000;
+const DEFAULT_MAX_BUFFER = 4 * 1024 * 1024;
+
+const SKILL_NAME_PATTERN = /^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$/;
+
+type SkillScope = 'user' | 'project';
+type SkillInstallSource = 'opencode' | 'agents';
+
+export type SkillsCatalogSourceConfig = {
+  id: string;
+  label: string;
+  description?: string;
+  source: string;
+  defaultSubpath?: string;
+};
+
+type CuratedSource = SkillsCatalogSourceConfig;
+
+type SkillFrontmatter = {
+  name?: unknown;
+  description?: unknown;
+  [key: string]: unknown;
+};
+
+type SkillsCatalogItem = {
+  repoSource: string;
+  repoSubpath?: string;
+  skillDir: string;
+  skillName: string;
+  frontmatterName?: string;
+  description?: string;
+  installable: boolean;
+  warnings?: string[];
+};
+type SkillsCatalogItemWithBadge = SkillsCatalogItem & {
+  sourceId: string;
+  installed: { isInstalled: boolean; scope?: SkillScope; source?: SkillInstallSource };
+};
+
+type SkillsRepoError =
+  | { kind: 'authRequired'; message: string; sshOnly: boolean }
+  | { kind: 'invalidSource'; message: string }
+  | { kind: 'gitUnavailable'; message: string }
+  | { kind: 'networkError'; message: string }
+  | { kind: 'unknown'; message: string }
+  | { kind: 'conflicts'; message: string; conflicts: Array<{ skillName: string; scope: SkillScope; source?: SkillInstallSource }> };
+
+type SkillsRepoScanResult =
+  | { ok: true; items: SkillsCatalogItem[] }
+  | { ok: false; error: SkillsRepoError };
+
+type SkillsInstallResult =
+  | { ok: true; installed: Array<{ skillName: string; skillDir: string; scope: SkillScope; source?: SkillInstallSource }>; skipped: Array<{ skillName: string; reason: string }> }
+  | { ok: false; error: SkillsRepoError };
+
+const CURATED_SOURCES: CuratedSource[] = [
+  {
+    id: 'anthropic',
+    label: 'Anthropic',
+    description: "Anthropic's public skills repository",
+    source: 'anthropics/skills',
+    defaultSubpath: 'skills',
+  },
+  {
+    id: 'openai',
+    label: 'OpenAI',
+    description: "OpenAI's curated skills",
+    source: 'openai/skills',
+    defaultSubpath: 'skills/.curated',
+  },
+  {
+    id: 'cursor',
+    label: 'Cursor',
+    description: "Cursor's plugin skills",
+    source: 'cursor/plugins',
+    defaultSubpath: 'pstack/skills',
+  },
+  {
+    id: 'mattpocock',
+    label: 'Matt Pocock',
+    description: 'Matt Pocock skills collection',
+    source: 'mattpocock/skills',
+  },
+];
+
+function validateSkillName(skillName: string): boolean {
+  if (skillName.length < 1 || skillName.length > 64) return false;
+  return SKILL_NAME_PATTERN.test(skillName);
+}
+
+function looksLikeAuthError(message: string): boolean {
+  return (
+    /permission denied/i.test(message) ||
+    /publickey/i.test(message) ||
+    /could not read from remote repository/i.test(message) ||
+    /authentication failed/i.test(message)
+  );
+}
+
+async function runGit(args: string[], options?: { cwd?: string; timeoutMs?: number }) {
+  try {
+    const { stdout, stderr } = await execFileAsync('git', args, {
+      cwd: options?.cwd,
+      timeout: options?.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+      maxBuffer: DEFAULT_MAX_BUFFER,
+      env: {
+        ...process.env,
+        GIT_TERMINAL_PROMPT: '0',
+      },
+    });
+    return { ok: true as const, stdout: stdout || '', stderr: stderr || '' };
+  } catch (error) {
+    const err = error as { stdout?: string; stderr?: string; message?: string };
+    return {
+      ok: false as const,
+      stdout: typeof err.stdout === 'string' ? err.stdout : '',
+      stderr: typeof err.stderr === 'string' ? err.stderr : '',
+      message: typeof err.message === 'string' ? err.message : 'Git command failed',
+    };
+  }
+}
+
+async function assertGitAvailable() {
+  const result = await runGit(['--version'], { timeoutMs: 5_000 });
+  if (!result.ok) {
+    return { ok: false as const, error: { kind: 'gitUnavailable' as const, message: 'Git is not available in PATH' } };
+  }
+  return { ok: true as const };
+}
+
+// Same rules as the server (web/server/lib/skills-catalog/source.js): a branch
+// or tag after `#`, never starting with `-` and never holding `..`.
+const GIT_REF_PATTERN = /^(?!-)(?!.*\.\.)[A-Za-z0-9._/-]+$/;
+
+function parseSkillRepoSource(input: string, subpath?: string) {
+  const trimmed = (input || '').trim();
+  const hashIndex = trimmed.lastIndexOf('#');
+  const raw = hashIndex >= 0 ? trimmed.slice(0, hashIndex).trim() : trimmed;
+  const ref = hashIndex >= 0 ? trimmed.slice(hashIndex + 1).trim() || null : null;
+  if (ref !== null && !GIT_REF_PATTERN.test(ref)) {
+    return { ok: false as const, error: { kind: 'invalidSource' as const, message: `Invalid branch or tag "${ref}"` } };
+  }
+  if (!raw) {
+    return { ok: false as const, error: { kind: 'invalidSource' as const, message: 'Repository source is required' } };
+  }
+  const urlFormat = raw.startsWith('https://') ? 'https' : raw.startsWith('git@') ? 'ssh' : 'shorthand';
+  const gitHost = urlFormat === 'https' ? raw.split('/')[2] : urlFormat === 'ssh' ? raw.split('@')[1].split(':')[0] : null;
+
+  if (gitHost === null && urlFormat !== 'shorthand') {
+    return { ok: false as const, error: { kind: 'invalidSource' as const, message: 'Unsupported repository source format'} };
+  }
+
+  const pathSegments = urlFormat === 'https'
+    ? raw.split('/').slice(3).filter(Boolean)
+    : urlFormat === 'ssh'
+      ? (raw.split('@')[1].split(':')[1] ?? '').split('/').filter(Boolean)
+      : null;
+
+  const repoName = pathSegments && pathSegments.length > 0
+    ? pathSegments[pathSegments.length - 1].replace(/\.git$/i, '')
+    : null;
+
+  const gitOwner = pathSegments && pathSegments.length > 1
+    ? pathSegments.slice(0, -1).join('/')
+    : (pathSegments && pathSegments.length === 1 ? pathSegments[0] : null);
+
+  const explicitSubpath = subpath?.trim() ? subpath.trim() : null;
+
+  if (urlFormat === 'ssh' || urlFormat === 'https') {
+    const owner = (gitOwner || '').trim();
+    const repo = (repoName || '').trim();
+
+    if (!owner || !repo) {
+      return { ok: false as const, error: { kind: 'invalidSource' as const, message: `Invalid ${urlFormat} repository format.` } };
+    }
+
+    return {
+      ok: true as const,
+      normalizedRepo: `${owner}/${repo}`,
+      cloneUrlHttps: `https://${gitHost}/${owner}/${repo}.git`,
+      cloneUrlSsh: `git@${gitHost}:${owner}/${repo}.git`,
+      effectiveSubpath: explicitSubpath,
+      ref,
+    }
+  }
+
+  const shorthandMatch = raw.match(/^([^/\s]+)\/([^/\s]+)(?:\/(.+))?$/);
+  if (shorthandMatch) {
+    const owner = shorthandMatch[1];
+    const repo = shorthandMatch[2].replace(/\.git$/i, '');
+    const shorthandSubpath = shorthandMatch[3]?.trim() || null;
+    return {
+      ok: true as const,
+      normalizedRepo: `${owner}/${repo}`,
+      cloneUrlHttps: `https://github.com/${owner}/${repo}.git`,
+      cloneUrlSsh: `git@github.com:${owner}/${repo}.git`,
+      effectiveSubpath: explicitSubpath || shorthandSubpath,
+      ref,
+    };
+  }
+
+  return { ok: false as const, error: { kind: 'invalidSource' as const, message: 'Unsupported repository source format' } };
+}
+
+function parseSkillMd(content: string): { frontmatter: SkillFrontmatter; warnings: string[] } {
+  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/);
+  if (!match) {
+    return {
+      frontmatter: {},
+      warnings: ['Invalid SKILL.md: missing YAML frontmatter delimiter'],
+    };
+  }
+
+  try {
+    const parsed = yaml.parse(match[1]);
+    const frontmatter = parsed && typeof parsed === 'object' ? (parsed as SkillFrontmatter) : {};
+    return { frontmatter, warnings: [] };
+  } catch {
+    return {
+      frontmatter: {},
+      warnings: ['Invalid SKILL.md: failed to parse YAML frontmatter'],
+    };
+  }
+}
+
+async function cloneRepo(cloneUrl: string, targetDir: string, ref: string | null = null) {
+  const branch = ref ? ['--branch', ref] : [];
+  const preferred = ['clone', '--depth', '1', '--filter=blob:none', '--no-checkout', ...branch, cloneUrl, targetDir];
+  const fallback = ['clone', '--depth', '1', '--no-checkout', ...branch, cloneUrl, targetDir];
+
+  const result = await runGit(preferred, { timeoutMs: 60_000 });
+  if (result.ok) return { ok: true as const };
+
+  const fallbackResult = await runGit(fallback, { timeoutMs: 60_000 });
+  if (fallbackResult.ok) return { ok: true as const };
+
+  const combined = `${fallbackResult.stderr}\n${fallbackResult.message}`.trim();
+  if (looksLikeAuthError(combined)) {
+    return {
+      ok: false as const,
+      error: {
+        kind: 'authRequired' as const,
+        message: 'Private repositories are not supported in VS Code yet. Use Desktop/Web.',
+        sshOnly: true,
+      },
+    };
+  }
+
+  return { ok: false as const, error: { kind: 'networkError' as const, message: combined || 'Failed to clone repository' } };
+}
+
+export async function scanSkillsRepository(options: { source: string; subpath?: string; defaultSubpath?: string }): Promise<SkillsRepoScanResult> {
+  const gitCheck = await assertGitAvailable();
+  if (!gitCheck.ok) {
+    return { ok: false as const, error: gitCheck.error };
+  }
+
+  const parsed = parseSkillRepoSource(options.source, options.subpath);
+  if (!parsed.ok) {
+    return { ok: false as const, error: parsed.error };
+  }
+
+  const effectiveSubpath = parsed.effectiveSubpath || options.defaultSubpath || null;
+  void removeStaleCatalogFolders();
+  const tempBase = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'openchamber-vscode-skills-scan-'));
+
+  try {
+    const cloned = await cloneRepo(parsed.cloneUrlHttps, tempBase, parsed.ref);
+    if (!cloned.ok) {
+      return { ok: false as const, error: cloned.error };
+    }
+
+    const toFsPath = (posixPath: string) => path.join(tempBase, ...posixPath.split('/').filter(Boolean));
+
+    const patterns = effectiveSubpath
+      ? [`${effectiveSubpath}/SKILL.md`, `${effectiveSubpath}/**/SKILL.md`]
+      : ['SKILL.md', '**/SKILL.md'];
+
+    let skillMdPaths: string[] | null = null;
+
+    const sparseInit = await runGit(['-C', tempBase, 'sparse-checkout', 'init', '--no-cone'], { timeoutMs: 15_000 });
+    if (sparseInit.ok) {
+      const sparseSet = await runGit(['-C', tempBase, 'sparse-checkout', 'set', ...patterns], { timeoutMs: 30_000 });
+      if (sparseSet.ok) {
+        const checkout = await runGit(['-C', tempBase, 'checkout', '--force', 'HEAD'], { timeoutMs: 60_000 });
+        if (checkout.ok) {
+          // Same subpath limit as the server scan (web/server/lib/skills-catalog/scan.js).
+          const lsFilesArgs = ['-C', tempBase, 'ls-files'];
+          if (effectiveSubpath) {
+            lsFilesArgs.push('--', effectiveSubpath);
+          }
+          const lsFiles = await runGit(lsFilesArgs, { timeoutMs: 15_000 });
+          if (lsFiles.ok) {
+            skillMdPaths = lsFiles.stdout
+              .split(/\r?\n/)
+              .map((line) => line.trim())
+              .filter(Boolean)
+              .filter((p) => p.endsWith('/SKILL.md') || p === 'SKILL.md');
+          }
+        }
+      }
+    }
+
+    if (!Array.isArray(skillMdPaths)) {
+      const listArgs = ['-C', tempBase, 'ls-tree', '-r', '--name-only', 'HEAD'];
+      if (effectiveSubpath) {
+        listArgs.push('--', effectiveSubpath);
+      }
+
+      const list = await runGit(listArgs, { timeoutMs: 30_000 });
+      if (!list.ok) {
+        return { ok: true as const, items: [] as SkillsCatalogItem[] };
+      }
+
+      skillMdPaths = list.stdout
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .filter(Boolean)
+        .filter((p) => p.endsWith('/SKILL.md') || p === 'SKILL.md');
+    }
+
+    const skillDirs = Array.from(new Set(skillMdPaths.filter((p) => p !== 'SKILL.md').map((p) => path.posix.dirname(p))));
+
+    const items: SkillsCatalogItem[] = [];
+
+    for (const skillDir of skillDirs) {
+      const skillName = path.posix.basename(skillDir);
+      const skillMdPath = path.posix.join(skillDir, 'SKILL.md');
+
+      const warnings: string[] = [];
+      let content = '';
+
+      try {
+        content = await fs.promises.readFile(toFsPath(skillMdPath), 'utf8');
+      } catch {
+        const show = await runGit(['-C', tempBase, 'show', `HEAD:${skillMdPath}`], { timeoutMs: 15_000 });
+        if (!show.ok) {
+          warnings.push('Failed to read SKILL.md');
+        } else {
+          content = show.stdout;
+        }
+      }
+
+      const parsedMd = parseSkillMd(content);
+      warnings.push(...parsedMd.warnings);
+
+      const description = typeof parsedMd.frontmatter.description === 'string' ? parsedMd.frontmatter.description : undefined;
+      const frontmatterName = typeof parsedMd.frontmatter.name === 'string' ? parsedMd.frontmatter.name : undefined;
+
+      const installable = validateSkillName(skillName);
+      if (!installable) {
+        warnings.push('Skill directory name is not a valid OpenCode skill name');
+      }
+
+      items.push({
+        repoSource: options.source,
+        repoSubpath: effectiveSubpath || undefined,
+        skillDir,
+        skillName,
+        frontmatterName,
+        description,
+        installable,
+        warnings: warnings.length ? warnings : undefined,
+      });
+    }
+
+    items.sort((a, b) => String(a.skillName).localeCompare(String(b.skillName)));
+
+    return { ok: true as const, items };
+  } finally {
+    await removeCatalogDirectory(tempBase);
+  }
+}
+
+async function copyDirectoryNoSymlinks(srcDir: string, dstDir: string) {
+  const srcReal = await fs.promises.realpath(srcDir);
+
+  const ensureDir = async (dirPath: string) => {
+    await fs.promises.mkdir(dirPath, { recursive: true });
+  };
+
+  const walk = async (currentSrc: string, currentDst: string) => {
+    const entries = await fs.promises.readdir(currentSrc, { withFileTypes: true });
+    for (const entry of entries) {
+      const nextSrc = path.join(currentSrc, entry.name);
+      const nextDst = path.join(currentDst, entry.name);
+
+      const stat = await fs.promises.lstat(nextSrc);
+      if (stat.isSymbolicLink()) {
+        throw new Error('Symlinks are not supported in skills');
+      }
+
+      const nextRealParent = await fs.promises.realpath(path.dirname(nextSrc));
+      if (!nextRealParent.startsWith(srcReal)) {
+        throw new Error('Invalid source path traversal detected');
+      }
+
+      if (stat.isDirectory()) {
+        await ensureDir(nextDst);
+        await walk(nextSrc, nextDst);
+        continue;
+      }
+
+      if (stat.isFile()) {
+        await ensureDir(path.dirname(nextDst));
+        await fs.promises.copyFile(nextSrc, nextDst);
+        try {
+          await fs.promises.chmod(nextDst, stat.mode & 0o777);
+        } catch {
+          // best-effort
+        }
+      }
+    }
+  };
+
+  await ensureDir(dstDir);
+  await walk(srcDir, dstDir);
+}
+
+function getUserSkillBaseDir() {
+  const pluralPath = path.join(OPENCODE_CONFIG_DIR, 'skills');
+  const legacyPath = path.join(OPENCODE_CONFIG_DIR, 'skill');
+  if (fs.existsSync(legacyPath) && !fs.existsSync(pluralPath)) return legacyPath;
+  return pluralPath;
+}
+
+function toFsPath(repoDir: string, repoRelPosixPath: string) {
+  const parts = repoRelPosixPath.split('/').filter(Boolean);
+  return path.join(repoDir, ...parts);
+}
+
+export async function installSkillsFromRepository(options: {
+  source: string;
+  subpath?: string;
+  scope: SkillScope;
+  targetSource?: SkillInstallSource;
+  workingDirectory?: string;
+  selections: Array<{ skillDir: string }>;
+  conflictPolicy?: 'prompt' | 'skipAll' | 'overwriteAll';
+  conflictDecisions?: Record<string, 'skip' | 'overwrite'>;
+}): Promise<SkillsInstallResult> { 
+  const gitCheck = await assertGitAvailable();
+  if (!gitCheck.ok) {
+    return { ok: false as const, error: gitCheck.error };
+  }
+
+  if (options.scope === 'project' && !options.workingDirectory) {
+    return { ok: false as const, error: { kind: 'invalidSource' as const, message: 'Project installs require a directory parameter' } };
+  }
+
+  const parsed = parseSkillRepoSource(options.source, options.subpath);
+  if (!parsed.ok) {
+    return { ok: false as const, error: parsed.error };
+  }
+
+  const requestedDirs = options.selections.map((s) => String(s.skillDir || '').trim()).filter(Boolean);
+  if (requestedDirs.length === 0) {
+    return { ok: false as const, error: { kind: 'invalidSource' as const, message: 'No skills selected for installation' } };
+  }
+
+  const userSkillDir = getUserSkillBaseDir();
+  const targetSource: SkillInstallSource = options.targetSource === 'agents' ? 'agents' : 'opencode';
+
+  const skillPlans = requestedDirs.map((dir) => {
+    const skillName = path.posix.basename(dir);
+    return { skillDirPosix: dir, skillName, installable: validateSkillName(skillName) };
+  });
+
+  const conflicts: Array<{ skillName: string; scope: SkillScope; source?: SkillInstallSource }> = [];
+  for (const plan of skillPlans) {
+    if (!plan.installable) continue;
+    const targetDir = options.scope === 'user'
+      ? (targetSource === 'agents'
+        ? path.join(os.homedir(), '.agents', 'skills', plan.skillName)
+        : path.join(userSkillDir, plan.skillName))
+      : (targetSource === 'agents'
+        ? path.join(options.workingDirectory as string, '.agents', 'skills', plan.skillName)
+        : path.join(options.workingDirectory as string, '.opencode', 'skills', plan.skillName));
+
+    if (fs.existsSync(targetDir)) {
+      const decision = options.conflictDecisions?.[plan.skillName];
+      const hasAutoPolicy = options.conflictPolicy === 'skipAll' || options.conflictPolicy === 'overwriteAll';
+      if (!decision && !hasAutoPolicy) {
+        conflicts.push({ skillName: plan.skillName, scope: options.scope, source: targetSource });
+      }
+    }
+  }
+
+  if (conflicts.length > 0) {
+    return {
+      ok: false as const,
+      error: { kind: 'conflicts' as const, message: 'Some skills already exist in the selected scope', conflicts },
+    };
+  }
+
+  void removeStaleCatalogFolders();
+  const tempBase = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'openchamber-vscode-skills-install-'));
+
+  try {
+    const cloned = await cloneRepo(parsed.cloneUrlHttps, tempBase, parsed.ref);
+    if (!cloned.ok) {
+      return { ok: false as const, error: cloned.error };
+    }
+
+    await runGit(['-C', tempBase, 'sparse-checkout', 'init', '--cone'], { timeoutMs: 15_000 });
+    const setResult = await runGit(['-C', tempBase, 'sparse-checkout', 'set', ...requestedDirs], { timeoutMs: 30_000 });
+    if (!setResult.ok) {
+      return { ok: false as const, error: { kind: 'unknown' as const, message: setResult.stderr || setResult.message || 'Failed to configure sparse checkout' } };
+    }
+
+    const checkoutResult = await runGit(['-C', tempBase, 'checkout', '--force', 'HEAD'], { timeoutMs: 60_000 });
+    if (!checkoutResult.ok) {
+      return { ok: false as const, error: { kind: 'unknown' as const, message: checkoutResult.stderr || checkoutResult.message || 'Failed to checkout repository' } };
+    }
+
+    const installed: Array<{ skillName: string; skillDir: string; scope: SkillScope; source?: SkillInstallSource }> = [];
+    const skipped: Array<{ skillName: string; reason: string }> = [];
+
+    for (const plan of skillPlans) {
+      if (!plan.installable) {
+        skipped.push({ skillName: plan.skillName, reason: 'Invalid skill name (directory basename)' });
+        continue;
+      }
+
+      const srcDir = toFsPath(tempBase, plan.skillDirPosix);
+      const skillMdPath = path.join(srcDir, 'SKILL.md');
+      if (!fs.existsSync(skillMdPath)) {
+        skipped.push({ skillName: plan.skillName, reason: 'SKILL.md not found in selected directory' });
+        continue;
+      }
+
+      const targetDir = options.scope === 'user'
+        ? (targetSource === 'agents'
+          ? path.join(os.homedir(), '.agents', 'skills', plan.skillName)
+          : path.join(userSkillDir, plan.skillName))
+        : (targetSource === 'agents'
+          ? path.join(options.workingDirectory as string, '.agents', 'skills', plan.skillName)
+          : path.join(options.workingDirectory as string, '.opencode', 'skills', plan.skillName));
+
+      const exists = fs.existsSync(targetDir);
+      let decision = options.conflictDecisions?.[plan.skillName] || null;
+      if (!decision) {
+        if (exists && options.conflictPolicy === 'skipAll') decision = 'skip';
+        if (exists && options.conflictPolicy === 'overwriteAll') decision = 'overwrite';
+        if (!exists) decision = 'overwrite';
+      }
+
+      if (exists && decision === 'skip') {
+        skipped.push({ skillName: plan.skillName, reason: 'Already installed (skipped)' });
+        continue;
+      }
+
+      if (exists && decision === 'overwrite') {
+        await removeCatalogDirectory(targetDir);
+      }
+
+      await fs.promises.mkdir(path.dirname(targetDir), { recursive: true });
+
+      try {
+        await copyDirectoryNoSymlinks(srcDir, targetDir);
+        installed.push({ skillName: plan.skillName, skillDir: plan.skillDirPosix, scope: options.scope, source: targetSource });
+      } catch (error) {
+        await removeCatalogDirectory(targetDir);
+        skipped.push({
+          skillName: plan.skillName,
+          reason: error instanceof Error ? error.message : 'Failed to copy skill files',
+        });
+      }
+    }
+
+    return { ok: true as const, installed, skipped };
+  } finally {
+    await removeCatalogDirectory(tempBase);
+  }
+}
+
+const catalogCache = new Map<string, { expiresAt: number; items: SkillsCatalogItem[] }>();
+const catalogScansInFlight = new Map<string, Promise<SkillsRepoScanResult>>();
+const CATALOG_TTL_MS = 30 * 60 * 1000;
+
+// The source list answers without scanning, like the web route: the page asks
+// for it on every open and on every OpenCode skill or config event, and each
+// source's skills then load through `getSkillsCatalogSourceItems`.
+export function getSkillsCatalogSources(additionalSources: SkillsCatalogSourceConfig[] = []): SkillsCatalogSourceConfig[] {
+  // The machine policy can hide the built-in catalogs (see enterprise-mode.js).
+  const curated = readEnterprisePolicy().hideBuiltinSkillCatalogs ? [] : CURATED_SOURCES;
+  return [...curated, ...additionalSources];
+}
+
+// Requests for one catalog share a scan that is still running, refreshes
+// included, so a page that reopens or refreshes never starts a second clone
+// of the same repository.
+function scanCatalogSource(cacheKey: string, src: SkillsCatalogSourceConfig, refresh: boolean): Promise<SkillsRepoScanResult> {
+  const cached = catalogCache.get(cacheKey);
+  if (cached && !refresh && Date.now() < cached.expiresAt) {
+    return Promise.resolve({ ok: true, items: cached.items });
+  }
+
+  const running = catalogScansInFlight.get(cacheKey);
+  if (running) return running;
+
+  const scan = scanSkillsRepository({ source: src.source, defaultSubpath: src.defaultSubpath })
+    .then((result) => {
+      if (result.ok) {
+        catalogCache.set(cacheKey, { expiresAt: Date.now() + CATALOG_TTL_MS, items: result.items });
+      }
+      return result;
+    })
+    .finally(() => catalogScansInFlight.delete(cacheKey));
+  catalogScansInFlight.set(cacheKey, scan);
+  return scan;
+}
+
+export async function getSkillsCatalogSourceItems(options: {
+  sourceId: string;
+  refresh?: boolean;
+  additionalSources?: SkillsCatalogSourceConfig[];
+  installedSkills: Array<{ name: string; scope: SkillScope; source?: 'opencode' | 'agents' | 'claude' }>;
+}): Promise<{ ok: true; items: SkillsCatalogItemWithBadge[] } | { ok: false; error: SkillsRepoError }> {
+  const src = getSkillsCatalogSources(options.additionalSources).find((entry) => entry.id === options.sourceId);
+  if (!src) {
+    return { ok: false, error: { kind: 'invalidSource', message: 'Unknown source' } };
+  }
+
+  const parsed = parseSkillRepoSource(src.source);
+  if (!parsed.ok) {
+    return { ok: false, error: parsed.error };
+  }
+
+  const effectiveSubpath = src.defaultSubpath || parsed.effectiveSubpath || '';
+  const cacheKey = `${parsed.normalizedRepo}${parsed.ref ? `#${parsed.ref}` : ''}::${effectiveSubpath}`;
+  const scanned = await scanCatalogSource(cacheKey, src, options.refresh === true);
+  if (!scanned.ok) {
+    return { ok: false, error: scanned.error };
+  }
+
+  const installedByName = new Map(options.installedSkills.map((s) => [s.name, s]));
+  // Same source-aware rule as the web catalog route (#4756).
+  const provenanceByName = readInstalledSources();
+  const items = scanned.items.map((item): SkillsCatalogItemWithBadge => {
+    const installed = installedByName.get(item.skillName);
+    return {
+      sourceId: src.id,
+      ...item,
+      installed: installed && isInstalledFromSource(provenanceByName, item.skillName, src.id, item.skillDir) ? { isInstalled: true, scope: installed.scope, source: installed.source === 'agents' ? 'agents' : 'opencode' } : { isInstalled: false },
+    };
+  });
+  return { ok: true, items };
+}

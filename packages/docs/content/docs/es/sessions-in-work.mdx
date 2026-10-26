@@ -1,0 +1,86 @@
+---
+title: Sesiones en curso
+description: Mantén arriba en la barra lateral el trabajo que estás haciendo, hasta que lo marques como hecho.
+---
+
+# Sesiones en curso
+
+Cada sesión en la que envías un mensaje pasa su trabajo al bloque **En curso**, arriba en la barra lateral, y ese trabajo se queda ahí hasta que lo marques como hecho, sin importar cuánto hace que lo abriste. Tus proyectos guardan todo lo que has hecho; En curso solo reúne lo que aún no has terminado.
+
+## Qué es un trabajo
+
+La barra lateral muestra trabajos, no sesiones sueltas. Un trabajo es:
+
+- **un worktree** con todas sus sesiones, en una sola fila con el nombre de la tarea (consulta [Sesiones de worktree](/es/worktrees/)), o
+- **una sesión en la carpeta del propio proyecto**, con lo que salió de ella anidado debajo: sus subagentes, su revisión, las bifurcaciones y preguntas laterales que conservaste, y las sesiones que su agente inició por ti.
+
+Haz clic en la fila para abrirla; la flecha de su izquierda despliega las sesiones que contiene.
+
+## Dónde encontrarlo
+
+El bloque **En curso** está en la barra lateral, debajo de los chats y encima de tus proyectos o de la cronología. Un trabajo que está ahí sale de su proyecto, así que cada trabajo aparece una sola vez. Para que siga también bajo su proyecto, activa **Mostrar también lo que está en curso bajo los proyectos** en el menú de visualización de la barra lateral. La búsqueda lo muestra una sola vez, en el bloque En curso.
+
+Cada trabajo ocupa una línea: el título y su estado, con una marca de color cuando tiene un pull request o un issue. Las filas se ordenan por la actividad más reciente, así que no muestran fecha. Pasa el cursor por una fila para ver su proyecto, rama, hora y enlaces, o activa **Filas detalladas** en el menú de visualización para verlos bajo el título. Las filas detalladas también se aplican bajo tus proyectos; las sesiones dentro de un trabajo siguen ocupando una línea.
+
+Las sesiones ancladas tienen su propio bloque **Ancladas** encima de En curso; para dejarlas solo bajo sus proyectos, desactiva **Mostrar ancladas** en el mismo menú. Una sesión anclada que está en curso aparece solo en Ancladas.
+
+En el teléfono, la lista de sesiones es la misma, con el mismo menú de visualización. Sus filas ocupan dos líneas salvo que desactives **Filas detalladas**, y la flecha que despliega un trabajo siempre está visible, porque no hay cursor que pasar por encima.
+
+## Cómo entran las sesiones
+
+Envía un mensaje en una sesión y pasa a en curso. Vale para cualquier sesión de un proyecto, incluidas las sesiones en worktrees. Un worktree nuevo pasa a en curso en cuanto lo creas, mientras el borrador que se abre en él aún no se ha enviado.
+
+Una sesión que marcaste como hecha vuelve cuando envías un mensaje nuevo en ella.
+
+Los chats, las sesiones archivadas, las sesiones de revisión y las ejecuciones de [tareas programadas](/es/scheduled-tasks/) nunca entran; si bifurcas una ejecución para seguir trabajando en ella, la bifurcación sí entra. Un subagente nunca pasa a en curso a su sesión principal.
+
+## Nombres de tareas
+
+El agente le pone a cada trabajo el nombre de su tarea en cuanto la tarea está clara, en pocas palabras, como «Arreglo del timeout de inicio de sesión». Un worktree guarda el nombre en la descripción de su rama, así que lo ves en cualquier sitio donde abras el repositorio; una sesión en la carpeta del proyecto toma el nombre como título. Si le cambias el nombre tú, tu nombre se queda: el agente nunca renombra una tarea que nombraste tú.
+
+## Seguir y terminar una sesión a mano
+
+- **Seguir:** pasa el cursor por una fila y pulsa el ojo, o elige **Seguir como en curso** en el menú de la sesión.
+- **Terminar:** pasa el cursor por una fila del bloque y pulsa la marca de verificación, o elige **Marcar como hecho** en el menú. Esto termina todo el trabajo: cada sesión suya que seguía en curso.
+
+Marcar como hecho un worktree lo saca de En curso y lo deja donde está. Para archivarlo también al marcarlo como hecho, activa **Archivar un worktree al marcarlo como hecho** en **Configuración → Sesiones**: la carpeta desaparece, y sus sesiones, cambios y rama esperan en la página Archivo, listos para restaurarse. Si una sesión sigue en marcha allí, el worktree se queda.
+
+En el teléfono, desliza una fila hacia un lado para llegar a la misma acción.
+
+Los chats no tienen el ojo: son conversaciones sin más.
+
+### «Este trabajo parece terminado.»
+
+Con un [proveedor de clasificación](/es/classification-providers/) configurado, Jev revisa cada turno de una sesión en curso. Cuando un turno parece el final del trabajo (diste las gracias, pediste un commit, confirmaste que funciona), Jev no cierra nada y deja una pista:
+
+- una marca gris en la fila de la sesión en la barra lateral
+- una franja encima del campo de mensaje: **Este trabajo parece terminado.** con un botón **Marcar como hecho**
+
+Pulsa **Marcar como hecho** si Jev tiene razón. Si no, sigue sin más: la pista desaparece con tu próximo mensaje. Sin proveedor de clasificación no hay pista, y marcas las sesiones como hechas tú.
+
+## Resumen y sugerencia del próximo mensaje
+
+Cuando el agente termina y la sesión se queda quieta un minuto, OpenChamber puede escribir dos cosas con tu modelo pequeño (consulta [Proveedores, modelos y agentes](/es/providers/)):
+
+- **Resumen:** un recordatorio breve de lo que se hizo y de cómo quedó todo, debajo de la última respuesta y en la información emergente de la sesión en la barra lateral
+- **Sugerencia:** el mensaje que probablemente enviarías a continuación, como una fila en la parte superior del campo de mensaje; al hacer clic, el texto pasa al campo, y nunca se envía solo
+
+Si Jev está disponible, OpenChamber primero le pregunta si el turno los necesita. Un simple «gracias, eso es todo» después de un trabajo real sigue recibiendo un resumen, pero la sugerencia se omite cuando no queda nada por hacer, y el modelo pequeño ni siquiera se llama cuando ninguno de los dos sirve. Sin Jev, ambos se generan después de cada turno, como antes.
+
+Actívalos o desactívalos en **Configuración → Chat → Asistencia de sesión**.
+
+## Configuración
+
+Abre **Configuración → Sesiones → Sesiones en curso**. Hay un solo ajuste, **Mostrar sesiones en curso**, activado por defecto. Si lo desactivas, se apaga toda la función: no hay bloque y enviar un mensaje ya no pasa la sesión a en curso.
+
+Para ocultar solo el bloque, usa **Mostrar en curso** en el menú de visualización de la barra lateral.
+
+## Dónde funciona
+
+El bloque y el seguimiento manual funcionan en todas partes, VS Code incluido. Pasar la sesión a en curso al enviar un mensaje, la pista «parece terminado» y el filtro de Jev para los resúmenes necesitan el servidor de OpenChamber, así que funcionan en la app de escritorio, en la app web y en el teléfono, pero no en VS Code. En VS Code sigues las sesiones a mano.
+
+## Relacionado
+
+- [Proveedores de clasificación (Jev)](/es/classification-providers/): configura la pista «parece terminado»
+- [Chats](/es/chats/): conversaciones que se quedan fuera del trabajo en curso
+- [Objetivos de sesión](/es/session-goals/): que el agente trabaje hasta la meta

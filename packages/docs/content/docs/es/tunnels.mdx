@@ -1,0 +1,138 @@
+---
+title: Túneles
+description: Expón OpenChamber de forma segura para acceso remoto y móvil.
+---
+
+# Túneles
+
+Un túnel es un enlace a tu OpenChamber, para que puedas acceder a él desde un navegador corriente en otra red o, con Tailscale Serve, desde cualquier dispositivo de tu tailnet. Usa `openchamber tunnel` para crear uno para una instancia en marcha.
+
+> Conectar tus **propios dispositivos** (la app móvil, otro escritorio) normalmente no necesita un túnel: [vincúlalos](/es/connect-devices/) y deja que el [Private Relay](/es/private-relay/), cifrado de extremo a extremo, se encargue del acceso fuera de casa sin configuración.
+
+## Requisitos previos
+
+OpenChamber inicia el CLI del proveedor de túnel en tu máquina. Instala primero el proveedor que quieras usar:
+
+```bash
+brew install cloudflared
+brew install ngrok
+```
+
+Para Tailscale, instala la [app de Tailscale](https://tailscale.com/download) e inicia sesión. En un Mac basta con la app: OpenChamber encuentra su herramienta de línea de comandos dentro de la app.
+
+Los túneles rápidos de Cloudflare pueden funcionar con `cloudflared`. Ngrok requiere una cuenta de ngrok y un authtoken del panel de ngrok:
+
+```bash
+ngrok config add-authtoken <your-ngrok-token>
+```
+
+## Inicio rápido
+
+1. Inicia OpenChamber:
+
+```bash
+openchamber
+```
+
+Si omites este paso, `openchamber tunnel start` puede iniciar automáticamente un servidor CLI. Al hacerlo, puedes pasar opciones del servidor como `--port`, `--host`, `--lan`, `--ui-password` y `--api-only`.
+
+2. Inicia un túnel de Cloudflare:
+
+```bash
+openchamber tunnel start --provider cloudflare --mode quick
+```
+
+O inicia un túnel de Ngrok:
+
+```bash
+openchamber tunnel start --provider ngrok --mode quick
+```
+
+O compártelo con los dispositivos de tu tailnet mediante Tailscale Serve:
+
+```bash
+openchamber tunnel start --provider tailscale --mode serve
+```
+
+3. Comprueba el estado:
+
+```bash
+openchamber tunnel status
+```
+
+Cuando el túnel está activo, `status` muestra una URL pública. Ábrela, o escanea el código QR, para acceder a OpenChamber desde cualquier lugar.
+
+Por defecto, OpenChamber imprime un código QR en sesiones TTY interactivas. Usa `--qr` para forzar la salida del QR, o `--no-qr` para desactivarla.
+
+## Proveedores
+
+- `cloudflare`: modos quick, managed remote y managed local
+- `ngrok`: modo quick
+- `tailscale`: modo serve, accesible solo desde dispositivos de tu tailnet, y modo funnel, accesible desde todo internet
+
+## Tailscale
+
+Ambos modos usan la dirección de tailnet de tu equipo, como `https://laptop.example.ts.net`. Elige su puerto con `--https-port`: 443 (el predeterminado), 8443 o 10000. Cámbialo cuando Tailscale ya comparta otra cosa en el 443.
+
+La primera vez, Tailscale te pide activar HTTPS (para Serve) o Funnel en tu tailnet. OpenChamber se detiene y muestra el enlace de Tailscale: ábrelo, aprueba e inicia el túnel otra vez. En Linux, Tailscale solo deja compartir puertos a root o a su operador; hazte operador una vez con `sudo tailscale set --operator=$USER`.
+
+Al detener el túnel se quita lo que OpenChamber compartió por Tailscale y el resto de tu configuración de Tailscale queda igual.
+
+## Modos gestionados
+
+### Gestionado remoto
+
+Usa un token + nombre de host gestionados por Cloudflare:
+
+```bash
+openchamber tunnel start --provider cloudflare --mode managed-remote --token-file ~/.secrets/cf-token --hostname app.example.com
+```
+
+### Gestionado local
+
+Usa una configuración local de `cloudflared`:
+
+```bash
+openchamber tunnel start --provider cloudflare --mode managed-local --config ~/.cloudflared/config.yml
+```
+
+## Perfiles (managed-remote)
+
+Guarda un perfil reutilizable:
+
+```bash
+openchamber tunnel profile add --provider cloudflare --mode managed-remote --name prod-main --hostname app.example.com --token-file ~/.secrets/cf-token
+```
+
+Inicia usando el perfil guardado:
+
+```bash
+openchamber tunnel start --profile prod-main
+```
+
+## Comandos útiles
+
+```bash
+openchamber tunnel providers
+openchamber tunnel ready --provider cloudflare
+openchamber tunnel ready --provider ngrok
+openchamber tunnel doctor --provider cloudflare
+openchamber tunnel doctor --provider ngrok
+openchamber tunnel doctor --provider tailscale
+openchamber tunnel stop --port 3000
+```
+
+## Notas de comportamiento
+
+- un único túnel activo por instancia de OpenChamber (puerto)
+- iniciar un nuevo modo/proveedor en la misma instancia reemplaza el túnel anterior
+- generar un nuevo enlace de conexión revoca el anterior sin usar
+- el autoarranque del túnel conserva flags del servidor como `--ui-password` y `--api-only` en los ajustes de instancia usados por reinicios y actualizaciones
+
+## Relacionado
+
+- [Conectar un dispositivo](/es/connect-devices/) — vincula tus propios dispositivos sin una URL pública
+- [Seguridad](/es/security/) — protege la interfaz antes de exponerla
+- [Túneles de escritorio](/es/desktop-tunnels/) — configuración de túneles en la app de escritorio sin iniciar desde CLI
+- [PWA y acceso móvil](/es/mobile/) — accede a OpenChamber desde tu teléfono
+- [Resolución de problemas](/es/troubleshooting/) — si el enlace del túnel no funciona

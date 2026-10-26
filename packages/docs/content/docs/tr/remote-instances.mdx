@@ -1,0 +1,48 @@
+---
+title: Uzak örnekler
+description: Masaüstü uygulamasını SSH üzerinden başka bir makinedeki OpenChamber'a bağlayın.
+---
+
+# Uzak örnekler
+
+Masaüstü uygulaması, başka bir makinede çalışan OpenChamber'a SSH üzerinden bağlanabilir. Bu bir iş sunucusu, bulut kutusu ya da ev laboratuvarı olabilir. Arayüzünü yerelmiş gibi ekranınıza getirir. Bunu **Ayarlar → Uzak örnekler** bölümünden kurun.
+
+> Uzak örnekler yalnızca **masaüstü** özelliğidir. Web'de ya da VS Code'da, uzak bir sunucuya [OpenCode Server](/opencode-server/) içindeki ortam değişkenleriyle bağlanın.
+
+## Uzak örnek ekleme
+
+1. **Ayarlar → Uzak örnekler** bölümünü açın ve bir tane ekleyin.
+2. Makineye ulaşmak için normalde kullandığınız SSH komutunu ve bir takma ad girin.
+3. OpenChamber'ın orada nasıl çalışacağını seçin:
+   - **managed** — OpenChamber kendini uzak makineye kurar ve başlatır
+   - **external** — zaten çalışan bir örneğe bağlanır
+4. Bağlanın.
+
+OpenChamber adımları tek tek ilerletir. Bağlantıyı kontrol eder, uzak ortamı hazırlar, sunucuyu başlatır ve portu yönlendirir. Her aşamada nerede olduğunu gösterir. **ready** noktasına geldiğinde uzak arayüz yerelde açılır.
+
+## Kimlik bilgileri
+
+SSH ve arayüz parolalarını kaydetmeyi ya da her seferinde girmeyi siz seçersiniz. Bağlantı koparsa OpenChamber hangi adımın başarısız olduğunu bildirir, böylece düzeltebilirsiniz. Ayrıntı için [Uzak erişim](/troubleshooting/remote-access/) sayfasına bakın.
+
+## Bağlantı bağlantıları
+
+Uzak makinede OpenChamber zaten çalışıyorsa, masaüstü uygulamasını bağlamanın en kolay yolu eşleştirme bağlantısıdır. Uzak sunucunun arayüzünde **Ayarlar → Uzak örnekler → Bu sunucuya bağlan → Bir cihaz ekle** yolunu açın, bir bağlantı oluşturun ve masaüstünüzde **Ayarlar → Uzak örnekler → Diğer OpenChamber sunucuları → Bağlantıyı içe aktar** bölümünden içe alın. Tam akış için [Cihaz bağlama](/connect-devices/) sayfasına bakın.
+
+**Anywhere** ile oluşturulan bir bağlantı hem doğrudan adres hem de bir [Private Relay](/private-relay/) yolu taşır. Masaüstü, sunucuya erişebildiğinde doğrudan bağlanır. Siz uzaktayken uçtan uca şifrelenmiş relay'e düşer. Kaydedilen her sunucunun yanındaki durum, hangi yolun kullanıldığını gösterir.
+
+Bağlantıyı uzak makinedeki bir terminalden de oluşturabilirsiniz:
+
+```bash
+openchamber connect-url --port 3000 --server http://your-host:3000 --qr
+```
+
+`connect-url`, o portta hiçbir şey çalışmıyorsa önce sunucuyu başlatır. `--api-only` ile başsız bir sunucu, `--lan` ile başlatırken LAN'a bağlanma, `--ui-password` ile tarayıcı erişimini koruma ve `--name` ile kaydedilen bağlantıya ad verme ekleyebilirsiniz. Yerel ağın dışındayken de çalışan bir bağlantı için `--relay` ekleyin. Cihaz mümkün olduğunda doğrudan bağlantıyı kullanır, erişemezse [Private Relay](/private-relay/) ile devam eder. Örnek relay'i kendi başına ayağa kaldırır.
+
+Oluşturulan bağlantı tek kullanımlık bir eşleştirme sırrı içerir. İçe aktarıldıktan sonra cihaz, tarayıcı arayüz parolasından ayrı kendi istemci belirtecini tutar. Bu belirteç, veren sunucuda iptal edene kadar sunucu yeniden başlasa da kalır.
+
+## İlgili
+
+- [Cihaz bağlama](/connect-devices/) — eşleştirme bağlantıları, QR kodları ve cihaz yönetimi
+- [Private Relay](/private-relay/) — "Anywhere" bağlantılarının nasıl çalıştığı
+- [OpenCode Server](/opencode-server/) — web'de ya da VS Code'da uzak sunucuya bağlanma
+- [Uzak erişim](/troubleshooting/remote-access/) — bağlantı tamamlanmadığında

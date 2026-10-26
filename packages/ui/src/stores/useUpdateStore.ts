@@ -1,0 +1,395 @@
+import { create } from 'zustand';
+import { z } from 'zod';
+import type { UpdateInfo, UpdateProgress } from '@/lib/desktop';
+import { getDeviceInfo } from '@/lib/device';
+import { useUIStore } from './useUIStore';
+import {
+  checkForDesktopUpdates,
+  downloadDesktopUpdate,
+  restartToApplyUpdate,
+  isDesktopLocalOriginActive,
+  isElectronShell,
+  isVSCodeRuntime,
+  isWebRuntime,
+} from '@/lib/desktop';
+import { formatMessage, useI18nStore } from '@/lib/i18n/store';
+import { getUpdateInstallErrorMessage } from '@/lib/updateInstallError';
+import { runtimeFetch } from '@/lib/runtime-fetch';
+import { getClientPlatform, isCapacitorApp } from '@/lib/platform';
+
+declare const __APP_VERSION__: string | undefined;
+
+type UpdateState = {
+  checking: boolean;
+  available: boolean;
+  downloading: boolean;
+  downloaded: boolean;
+  installing: boolean;
+  info: UpdateInfo | null;
+  progress: UpdateProgress | null;
+  error: string | null;
+  runtimeType: 'desktop' | 'web' | 'vscode' | 'mobile' | null;
+  lastChecked: number | null;
+  nextCheckInSec: number | null;
+};
+
+interface UpdateStore extends UpdateState {
+  checkForUpdates: () => Promise<number | null>;
+  downloadUpdate: () => Promise<void>;
+  restartToUpdate: () => Promise<void>;
+  dismiss: () => void;
+  reset: () => void;
+}
+
+type ClientRuntime = 'desktop' | 'web' | 'vscode' | 'mobile';
+
+const CLIENT_INSTALL_ID_KEY = 'openchamber.update-install-id';
+
+function getClientInstallId(): string | undefined {
+  if (typeof window === 'undefined' || typeof crypto.randomUUID !== 'function') return undefined;
+
+  try {
+    const existing = window.localStorage.getItem(CLIENT_INSTALL_ID_KEY)?.trim();
+    if (existing) return existing;
+
+    const installId = crypto.randomUUID();
+    window.localStorage.setItem(CLIENT_INSTALL_ID_KEY, installId);
+    return installId;
+  } catch {
+    return undefined;
+  }
+}
+
+function detectDeviceClass(): 'mobile' | 'tablet' | 'desktop' | 'unknown' {
+  if (typeof window === 'undefined') return 'unknown';
+  try {
+    const { deviceType } = getDeviceInfo();
+    return deviceType;
+  } catch {
+    return 'unknown';
+  }
+}
+
+function detectArch(): 'arm64' | 'x64' | 'unknown' {
+  const electronArch = typeof window !== 'undefined'
+    ? window.__OPENCHAMBER_ELECTRON__?.arch?.toLowerCase?.()
+    : undefined;
+  if (electronArch === 'arm64' || electronArch === 'aarch64') return 'arm64';
+  if (electronArch === 'x64' || electronArch === 'amd64' || electronArch === 'x86_64') return 'x64';
+
+  const vscodeArch = typeof window !== 'undefined'
+    ? (window as { __VSCODE_CONFIG__?: { arch?: string } }).__VSCODE_CONFIG__?.arch?.toLowerCase?.()
+    : undefined;
+  if (vscodeArch === 'arm64' || vscodeArch === 'aarch64') return 'arm64';
+  if (vscodeArch === 'x64' || vscodeArch === 'amd64' || vscodeArch === 'x86_64') return 'x64';
+
+  const nav = typeof navigator !== 'undefined' ? (navigator as Navigator & { userAgentData?: { architecture?: string } }).userAgentData : undefined;
+  const fromUAData = nav?.architecture?.toLowerCase?.();
+  if (fromUAData === 'arm' || fromUAData === 'arm64' || fromUAData === 'aarch64') return 'arm64';
+  if (fromUAData === 'x86' || fromUAData === 'x64' || fromUAData === 'amd64') return 'x64';
+
+  const ua = typeof navigator !== 'undefined' ? navigator.userAgent.toLowerCase() : '';
+  if (ua.includes('aarch64') || ua.includes('arm64') || ua.includes('armv')) return 'arm64';
+  if (ua.includes('x86_64') || ua.includes('x64') || ua.includes('amd64') || ua.includes('win64')) return 'x64';
+  return 'unknown';
+}
+
+function detectPlatform(): 'macos' | 'windows' | 'linux' | 'web' | 'android' | 'ios' {
+  const clientPlatform = getClientPlatform();
+  if (clientPlatform === 'android' || clientPlatform === 'ios') return clientPlatform;
+  if (typeof navigator === 'undefined') return 'web';
+  const platform = (navigator.platform || '').toLowerCase();
+  if (platform.includes('mac')) return 'macos';
+  if (platform.includes('win')) return 'windows';
+  if (platform.includes('linux')) return 'linux';
+  return 'web';
+}
+
+function mapRuntimeParams(runtime: ClientRuntime): URLSearchParams {
+  // Check if user has opted out of usage reporting (default: true/enabled from UI store)
+  const shouldReportUsage = useUIStore.getState().reportUsage;
+  
+  const params = new URLSearchParams({ reportUsage: shouldReportUsage ? 'true' : 'false' });
+  params.set('deviceClass', detectDeviceClass());
+  params.set('arch', detectArch());
+  params.set('platform', detectPlatform());
+  if (shouldReportUsage && (runtime === 'desktop' || runtime === 'mobile')) {
+    const installId = getClientInstallId();
+    if (installId) params.set('installId', installId);
+  }
+  if (runtime === 'desktop') {
+    params.set('appType', 'desktop-electron');
+    params.set('instanceMode', isDesktopLocalOriginActive() ? 'local' : 'remote');
+    return params;
+  }
+
+  if (runtime === 'vscode') {
+    params.set('appType', 'vscode');
+    params.set('instanceMode', 'local');
+    return params;
+  }
+
+  if (runtime === 'mobile') {
+    params.set('appType', 'mobile-capacitor');
+    params.set('instanceMode', 'remote');
+    return params;
+  }
+
+  params.set('appType', 'web');
+  params.set('instanceMode', 'unknown');
+  return params;
+}
+
+export function parseUpdateCheckResponse(data: {
+  available?: boolean;
+  version?: string;
+  currentVersion?: string;
+  body?: string;
+  releaseUrl?: string;
+  downloadUrl?: string;
+  nextSuggestedCheckInSec?: number;
+  packageManager?: string;
+  updateCommand?: string;
+  installBlocked?: string;
+}): UpdateInfo {
+  return {
+    available: data.available ?? false,
+    version: data.version,
+    currentVersion: data.currentVersion ?? 'unknown',
+    body: data.body,
+    releaseUrl: data.releaseUrl,
+    downloadUrl: data.downloadUrl,
+    nextSuggestedCheckInSec:
+      typeof data.nextSuggestedCheckInSec === 'number' && Number.isFinite(data.nextSuggestedCheckInSec)
+        ? data.nextSuggestedCheckInSec
+        : undefined,
+    packageManager: data.packageManager,
+    updateCommand: data.updateCommand,
+    installBlocked: data.installBlocked === 'service-manager'
+      || data.installBlocked === 'manual-install'
+      || data.installBlocked === 'desktop-host'
+      ? data.installBlocked
+      : undefined,
+  };
+}
+
+async function checkForWebUpdates(runtime: ClientRuntime, currentVersion?: string): Promise<UpdateInfo | null> {
+  try {
+    const params = mapRuntimeParams(runtime);
+    const vscodeVersion = typeof window !== 'undefined'
+      ? (window as { __VSCODE_CONFIG__?: { extensionVersion?: string } }).__VSCODE_CONFIG__?.extensionVersion
+      : undefined;
+    if (currentVersion) params.set('currentVersion', currentVersion);
+    else if (runtime === 'vscode' && vscodeVersion) params.set('currentVersion', vscodeVersion);
+    const response = await runtimeFetch(`/api/openchamber/update-check?${params.toString()}`, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+      // Background check — keep sockets free for interactive traffic at startup.
+      priority: 'low',
+    });
+
+    if (!response.ok) {
+      throw new Error(`Server responded with ${response.status}`);
+    }
+
+    return parseUpdateCheckResponse(await response.json());
+  } catch (error) {
+    console.warn('Failed to check for updates:', error);
+    return null;
+  }
+}
+
+const updateCheckFailure = z.object({ error: z.string().trim().min(1) });
+
+/**
+ * Checks the OpenChamber server the native app is connected to, not the app
+ * itself. The shared store's `mobile` check is about the app build (store or
+ * APK updates); this asks the server about its own version, exactly like a
+ * browser on that server would, so the result can be installed through the
+ * server's own update route. Throws on failure so callers never read a failed
+ * check as "up to date".
+ */
+export async function checkConnectedServerForUpdates(): Promise<UpdateInfo> {
+  const params = mapRuntimeParams('web');
+  // The app's own check already reports usage for this install; asking about
+  // the server must not count the phone a second time as a web client.
+  params.set('reportUsage', 'false');
+  const response = await runtimeFetch(`/api/openchamber/update-check?${params.toString()}`, {
+    method: 'GET',
+    headers: { Accept: 'application/json' },
+  });
+  const payload = await response.json().catch(() => null);
+  if (!response.ok) {
+    // A desktop host that cannot update itself (for example a Linux build
+    // outside its AppImage) explains why in `error`; keep that reason.
+    const failure = updateCheckFailure.safeParse(payload);
+    throw new Error(failure.success ? failure.data.error : `Server responded with ${response.status}`);
+  }
+  return parseUpdateCheckResponse(payload ?? {});
+}
+
+function detectRuntimeType(): 'desktop' | 'web' | 'vscode' | 'mobile' | null {
+  if (isCapacitorApp()) {
+    return 'mobile';
+  }
+  if (isElectronShell()) {
+    return 'desktop';
+  }
+  if (isVSCodeRuntime()) return 'vscode';
+  if (isWebRuntime()) return 'web';
+  return null;
+}
+
+const initialState: UpdateState = {
+  checking: false,
+  available: false,
+  downloading: false,
+  downloaded: false,
+  installing: false,
+  info: null,
+  progress: null,
+  error: null,
+  runtimeType: null,
+  lastChecked: null,
+  nextCheckInSec: null,
+};
+
+export const useUpdateStore = create<UpdateStore>()((set, get) => ({
+  ...initialState,
+
+  checkForUpdates: async () => {
+    const runtime = detectRuntimeType();
+    if (!runtime) return null;
+
+    set({ checking: true, error: null, runtimeType: runtime });
+
+    try {
+      let info: UpdateInfo | null = null;
+      let suggestedSec: number | null = null;
+
+      if (runtime === 'desktop') {
+        const appVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : undefined;
+        const [desktopResult, apiResult] = await Promise.allSettled([
+          checkForDesktopUpdates(),
+          checkForWebUpdates('desktop', appVersion),
+        ]);
+        const desktopInfo = desktopResult.status === 'fulfilled' ? desktopResult.value : null;
+        suggestedSec = apiResult.status === 'fulfilled'
+          ? (apiResult.value?.nextSuggestedCheckInSec ?? null)
+          : null;
+        set({
+          checking: false,
+          available: desktopInfo?.available ?? false,
+          info: desktopInfo,
+          lastChecked: Date.now(),
+          nextCheckInSec: suggestedSec,
+        });
+
+        return suggestedSec;
+      } else if (runtime === 'web') {
+        info = await checkForWebUpdates('web');
+        suggestedSec = info?.nextSuggestedCheckInSec ?? null;
+      } else if (runtime === 'vscode') {
+        const vscodeInfo = await checkForWebUpdates('vscode');
+        suggestedSec = vscodeInfo?.nextSuggestedCheckInSec ?? null;
+      } else if (runtime === 'mobile') {
+        const appVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : undefined;
+        info = await checkForWebUpdates('mobile', appVersion);
+        suggestedSec = info?.nextSuggestedCheckInSec ?? null;
+      }
+
+      set({
+        checking: false,
+        available: runtime === 'vscode' ? false : (info?.available ?? false),
+        info: runtime === 'vscode' ? null : info,
+        lastChecked: Date.now(),
+        nextCheckInSec: suggestedSec,
+      });
+      return suggestedSec;
+    } catch (error) {
+      set({
+        checking: false,
+        error: error instanceof Error ? error.message : 'Failed to check for updates',
+      });
+      return null;
+    }
+  },
+
+  downloadUpdate: async () => {
+    const { available, runtimeType } = get();
+
+    // For web runtime, there's no download - user uses in-app update or CLI
+    if (runtimeType !== 'desktop' || !available) {
+      return;
+    }
+
+    set({ downloading: true, error: null, progress: null });
+
+    try {
+      const desktopInfo = await checkForDesktopUpdates();
+      if (!desktopInfo?.available) {
+        throw new Error('Update detected, but desktop package is not ready yet. Retry in a moment.');
+      }
+
+      set((state) => ({
+        info: state.info
+          ? {
+            ...state.info,
+            ...desktopInfo,
+            // Keep the richer sidecar-sourced changelog; desktopInfo.body is
+            // often the bare "See release notes at..." fallback from the
+            // updater and would otherwise clobber the nice changelog.
+            body: state.info.body || desktopInfo.body,
+            available: state.info.available,
+          }
+          : desktopInfo,
+      }));
+
+      const ok = await downloadDesktopUpdate((progress) => {
+        set({ progress });
+      });
+      if (!ok) {
+        throw new Error('Desktop update only works on Local instance');
+      }
+      set({ downloading: false, downloaded: true });
+    } catch (error) {
+      set({
+        downloading: false,
+        error: error instanceof Error ? error.message : 'Failed to download update',
+      });
+    }
+  },
+
+  restartToUpdate: async () => {
+    const { downloaded, installing, runtimeType } = get();
+
+    // A restart is already in flight: the app is shutting down, so a second
+    // click must not invoke the updater again. The main process guards the
+    // same race; this keeps the dialog in its restarting state.
+    if (runtimeType !== 'desktop' || !downloaded || installing) {
+      return;
+    }
+
+    set({ error: null, installing: true });
+
+    try {
+      const ok = await restartToApplyUpdate();
+      if (!ok) {
+        // No desktop bridge at all — the update was never installable here.
+        throw new Error(formatMessage(useI18nStore.getState().dictionary, 'updateDialog.error.restartUnavailable'));
+      }
+    } catch (error) {
+      // Keep the real installer failure; the dialog shows it and the button
+      // stays clickable for another attempt.
+      set({ installing: false, error: getUpdateInstallErrorMessage(error instanceof Error ? error : new Error(String(error))) });
+    }
+  },
+
+  dismiss: () => {
+    set({ available: false, downloaded: false, installing: false, info: null });
+  },
+
+  reset: () => {
+    set(initialState);
+  },
+}));

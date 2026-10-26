@@ -1,0 +1,716 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { afterEach, describe, expect, it } from 'vitest';
+import { createOpenCodeEnvRuntime } from './env-runtime.js';
+
+const originalOpencodeBinary = process.env.OPENCODE_BINARY;
+const originalComSpec = process.env.ComSpec;
+const originalPath = process.env.PATH;
+const originalLocalAppData = process.env.LOCALAPPDATA;
+const originalSystemRoot = process.env.SystemRoot;
+const originalBundledOpencodeCliDir = process.env.OPENCHAMBER_BUNDLED_OPENCODE_CLI_DIR;
+const originalResourcesPath = process.resourcesPath;
+const originalWslBinary = process.env.WSL_BINARY;
+const originalOpenChamberWslBinary = process.env.OPENCHAMBER_WSL_BINARY;
+const originalPlatform = process.platform;
+const originalRuntime = process.env.OPENCHAMBER_RUNTIME;
+const tempDirs = [];
+const itIf = (condition) => condition ? it : it.skip;
+
+const createTempDir = (prefix) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  tempDirs.push(dir);
+  return dir;
+};
+
+const setPlatform = (platform) => {
+  Object.defineProperty(process, 'platform', {
+    value: platform,
+  });
+};
+
+afterEach(() => {
+  if (originalRuntime === undefined) delete process.env.OPENCHAMBER_RUNTIME;
+  else process.env.OPENCHAMBER_RUNTIME = originalRuntime;
+  Object.defineProperty(process, 'platform', {
+    value: originalPlatform,
+  });
+
+  for (const dir of tempDirs.splice(0)) {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+
+  if (typeof originalOpencodeBinary === 'string') {
+    process.env.OPENCODE_BINARY = originalOpencodeBinary;
+  } else {
+    delete process.env.OPENCODE_BINARY;
+  }
+
+  if (typeof originalComSpec === 'string') {
+    process.env.ComSpec = originalComSpec;
+  } else {
+    delete process.env.ComSpec;
+  }
+
+  if (typeof originalPath === 'string') {
+    process.env.PATH = originalPath;
+  } else {
+    delete process.env.PATH;
+  }
+
+  if (typeof originalSystemRoot === 'string') {
+    process.env.SystemRoot = originalSystemRoot;
+  } else {
+    delete process.env.SystemRoot;
+  }
+
+  if (typeof originalLocalAppData === 'string') {
+    process.env.LOCALAPPDATA = originalLocalAppData;
+  } else {
+    delete process.env.LOCALAPPDATA;
+  }
+
+  if (typeof originalBundledOpencodeCliDir === 'string') {
+    process.env.OPENCHAMBER_BUNDLED_OPENCODE_CLI_DIR = originalBundledOpencodeCliDir;
+  } else {
+    delete process.env.OPENCHAMBER_BUNDLED_OPENCODE_CLI_DIR;
+  }
+
+  Object.defineProperty(process, 'resourcesPath', {
+    configurable: true,
+    value: originalResourcesPath,
+  });
+
+  if (typeof originalWslBinary === 'string') {
+    process.env.WSL_BINARY = originalWslBinary;
+  } else {
+    delete process.env.WSL_BINARY;
+  }
+
+  if (typeof originalOpenChamberWslBinary === 'string') {
+    process.env.OPENCHAMBER_WSL_BINARY = originalOpenChamberWslBinary;
+  } else {
+    delete process.env.OPENCHAMBER_WSL_BINARY;
+  }
+});
+
+const createRuntime = (settings, options = {}) => {
+  const state = {
+    cachedLoginShellEnvSnapshot: null,
+    resolvedOpencodeBinary: null,
+    resolvedOpencodeBinarySource: null,
+    useWslForOpencode: false,
+    resolvedWslBinary: null,
+    resolvedWslOpencodePath: null,
+    resolvedWslDistro: null,
+    resolvedNodeBinary: null,
+    resolvedBunBinary: null,
+    managedOpenCodeShellEnvSnapshot: null,
+  };
+
+  const runtime = createOpenCodeEnvRuntime({
+    state,
+    normalizeDirectoryPath: (value) => value,
+    readSettingsFromDiskMigrated: async () => settings,
+    spawnSync: options.spawnSync,
+    homedir: options.homedir,
+    isExecutable: options.isExecutable,
+    wellKnownOpencodePaths: options.wellKnownOpencodePaths,
+    providedLoginShellEnvSnapshot: options.providedLoginShellEnvSnapshot,
+    // Never the real machine policy: a developer's own file must not flip a suite.
+    readPinnedOpencodeBinary: options.readPinnedOpencodeBinary ?? (() => null),
+  });
+
+  return { runtime, state };
+};
+
+const createBundledCli = () => {
+  const resourcesPath = createTempDir('openchamber-resources-');
+  const directory = path.join(resourcesPath, 'opencode-cli');
+  fs.mkdirSync(directory);
+  const binary = path.join(directory, process.platform === 'win32' ? 'opencode.exe' : 'opencode');
+  fs.writeFileSync(binary, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  Object.defineProperty(process, 'resourcesPath', { configurable: true, value: resourcesPath });
+  return binary;
+};
+
+describe('OpenCode env runtime', () => {
+  it.each(['linux', 'darwin', 'win32'])('keeps automatic desktop bundled resolution local across relaunch on %s', (platform) => {
+    setPlatform(platform);
+    process.env.OPENCHAMBER_RUNTIME = 'desktop';
+    delete process.env.OPENCODE_BINARY;
+    delete process.env.OPENCHAMBER_BUNDLED_OPENCODE_CLI_DIR;
+
+    const oldBinary = createBundledCli();
+    const oldRuntime = createRuntime({});
+    expect(oldRuntime.runtime.ensureOpencodeCliEnv()).toBe(oldBinary);
+    expect(oldRuntime.runtime.ensureOpencodeCliEnv()).toBe(oldBinary);
+    expect(oldRuntime.state.resolvedOpencodeBinarySource).toBe('bundled');
+    expect(process.env.OPENCODE_BINARY).toBeUndefined();
+    expect(process.env.PATH.split(path.delimiter)[0]).toBe(path.dirname(oldBinary));
+
+    // The old binary remains executable and its directory is still in PATH.
+    const newBinary = createBundledCli();
+    const newRuntime = createRuntime({});
+    expect(newRuntime.runtime.ensureOpencodeCliEnv()).toBe(newBinary);
+    expect(newRuntime.state.resolvedOpencodeBinarySource).toBe('bundled');
+    expect(newRuntime.runtime.isBundledOpenCodeCliPath(newBinary)).toBe(true);
+    expect(process.env.OPENCODE_BINARY).toBeUndefined();
+  });
+
+  it.each(['web', 'ssh-remote'])('preserves automatic binary export outside desktop in %s', (runtimeName) => {
+    process.env.OPENCHAMBER_RUNTIME = runtimeName;
+    delete process.env.OPENCODE_BINARY;
+    delete process.env.OPENCHAMBER_BUNDLED_OPENCODE_CLI_DIR;
+    const binary = createBundledCli();
+    const { runtime } = createRuntime({});
+    expect(runtime.ensureOpencodeCliEnv()).toBe(binary);
+    expect(process.env.OPENCODE_BINARY).toBe(binary);
+  });
+
+  it.each(['env', 'settings'])('preserves explicit desktop %s selection even when it points at a bundled CLI', async (source) => {
+    process.env.OPENCHAMBER_RUNTIME = 'desktop';
+    delete process.env.OPENCODE_BINARY;
+    delete process.env.OPENCHAMBER_BUNDLED_OPENCODE_CLI_DIR;
+    const binary = createBundledCli();
+    if (source === 'env') process.env.OPENCODE_BINARY = binary;
+    const { runtime, state } = createRuntime(source === 'settings' ? { opencodeBinary: binary } : {});
+    await runtime.applyOpencodeBinaryFromSettings({ strict: true });
+    expect(runtime.ensureOpencodeCliEnv()).toBe(binary);
+    expect(state.resolvedOpencodeBinarySource).toBe(source);
+    expect(process.env.OPENCODE_BINARY).toBe(binary);
+  });
+
+  it('preserves automatic PATH binary export for desktop without a bundled CLI', () => {
+    process.env.OPENCHAMBER_RUNTIME = 'desktop';
+    delete process.env.OPENCODE_BINARY;
+    delete process.env.OPENCHAMBER_BUNDLED_OPENCODE_CLI_DIR;
+    const binary = createBundledCli();
+    Object.defineProperty(process, 'resourcesPath', { configurable: true, value: undefined });
+    process.env.PATH = path.dirname(binary);
+    const { runtime, state } = createRuntime({});
+    expect(runtime.ensureOpencodeCliEnv()).toBe(binary);
+    expect(state.resolvedOpencodeBinarySource).toBe('path');
+    expect(process.env.OPENCODE_BINARY).toBe(binary);
+  });
+
+  it('searches an explicit PATH without mutating the process environment', () => {
+    const defaultDir = createTempDir('openchamber-default-path-');
+    const explicitDir = createTempDir('openchamber-explicit-path-');
+    const binary = path.join(explicitDir, process.platform === 'win32' ? 'custom-shell.exe' : 'custom-shell');
+    fs.writeFileSync(binary, '#!/bin/sh\nexit 0\n');
+    if (process.platform !== 'win32') fs.chmodSync(binary, 0o755);
+    process.env.PATH = defaultDir;
+    const { runtime } = createRuntime({});
+
+    expect(runtime.searchPathFor('custom-shell', explicitDir)).toBe(binary);
+    expect(process.env.PATH).toBe(defaultDir);
+  });
+
+  it('clears AppImage ARGV0 when applying a login-shell env snapshot', () => {
+    const previousArgv0 = process.env.ARGV0;
+    process.env.ARGV0 = '/path/to/OpenChamber.AppImage';
+    delete process.env.OPENCHAMBER_ARGV0_TEST_MARKER;
+    const { runtime, state } = createRuntime({});
+    state.cachedLoginShellEnvSnapshot = {
+      PATH: '/usr/bin',
+      ARGV0: '/leaked/from/shell.AppImage',
+      OPENCHAMBER_ARGV0_TEST_MARKER: '1',
+    };
+
+    try {
+      runtime.applyLoginShellEnvSnapshot();
+      expect(process.env.ARGV0).toBeUndefined();
+      expect(process.env.OPENCHAMBER_ARGV0_TEST_MARKER).toBe('1');
+    } finally {
+      delete process.env.OPENCHAMBER_ARGV0_TEST_MARKER;
+      if (previousArgv0 === undefined) delete process.env.ARGV0;
+      else process.env.ARGV0 = previousArgv0;
+    }
+  });
+
+  it('uses a login-shell snapshot provided by the host instead of probing the shell', () => {
+    let probes = 0;
+    const spawnSyncSpy = () => { probes += 1; return { status: 0, stdout: 'PATH=/from/probe\0' }; };
+    const { runtime, state } = createRuntime({}, {
+      spawnSync: spawnSyncSpy,
+      providedLoginShellEnvSnapshot: () => ({ PATH: '/from/host' }),
+    });
+    state.cachedLoginShellEnvSnapshot = undefined;
+
+    expect(runtime.getLoginShellEnvSnapshot()).toEqual({ PATH: '/from/host' });
+    expect(state.cachedLoginShellEnvSnapshot).toEqual({ PATH: '/from/host' });
+    expect(probes).toBe(0);
+  });
+
+  it('keeps shell startup output out of the login-shell snapshot', () => {
+    setPlatform('darwin');
+    const previousShell = process.env.SHELL;
+    const shell = path.join(createTempDir('openchamber-shell-'), 'zsh');
+    fs.writeFileSync(shell, '#!/bin/sh\n', { mode: 0o755 });
+    process.env.SHELL = shell;
+    try {
+      const { runtime, state } = createRuntime({}, {
+        // Stands in for a shell whose interactive rc file prints a banner to
+        // stdout before it runs the probe command: only the `echo` part of the
+        // command and `env -0` are emulated.
+        spawnSync: (_command, args) => {
+          const echoed = args[1].match(/^echo (\S+); /);
+          const stdout = `Welcome to test-host\n${echoed ? `${echoed[1]}\n` : ''}HOME=/home/test-user\0PATH=/shell/bin\0`;
+          return { status: 0, stdout, stderr: '' };
+        },
+      });
+      state.cachedLoginShellEnvSnapshot = undefined;
+
+      expect(runtime.getLoginShellEnvSnapshot()).toEqual({ HOME: '/home/test-user', PATH: '/shell/bin' });
+    } finally {
+      if (previousShell === undefined) delete process.env.SHELL;
+      else process.env.SHELL = previousShell;
+    }
+  });
+
+  it('does not probe the shell when the host provided an empty snapshot', () => {
+    let probes = 0;
+    const spawnSyncSpy = () => { probes += 1; return { status: 0, stdout: 'PATH=/from/probe\0' }; };
+    const { runtime, state } = createRuntime({}, {
+      spawnSync: spawnSyncSpy,
+      providedLoginShellEnvSnapshot: () => null,
+    });
+    state.cachedLoginShellEnvSnapshot = undefined;
+
+    expect(runtime.getLoginShellEnvSnapshot()).toBeNull();
+    expect(probes).toBe(0);
+  });
+
+  it('clears AppImage ARGV0 even when no login-shell snapshot is available', () => {
+    const previousArgv0 = process.env.ARGV0;
+    process.env.ARGV0 = '/path/to/OpenChamber.AppImage';
+    const { runtime, state } = createRuntime({});
+    state.cachedLoginShellEnvSnapshot = null;
+
+    try {
+      runtime.applyLoginShellEnvSnapshot();
+      expect(process.env.ARGV0).toBeUndefined();
+    } finally {
+      if (previousArgv0 === undefined) delete process.env.ARGV0;
+      else process.env.ARGV0 = previousArgv0;
+    }
+  });
+
+  it('throws a specific error for a missing configured OpenCode binary in strict mode', async () => {
+    const { runtime } = createRuntime({ opencodeBinary: '/missing/opencode' });
+
+    await expect(runtime.applyOpencodeBinaryFromSettings({ strict: true })).rejects.toMatchObject({
+      code: 'OPENCODE_BINARY_INVALID',
+      message: expect.stringContaining('Configured OpenCode binary not found: /missing/opencode'),
+    });
+  });
+
+  it('throws a specific error for a configured directory without an executable CLI in strict mode', async () => {
+    const dir = createTempDir('openchamber-opencode-dir-');
+    const { runtime } = createRuntime({ opencodeBinary: dir });
+
+    await expect(runtime.applyOpencodeBinaryFromSettings({ strict: true })).rejects.toMatchObject({
+      code: 'OPENCODE_BINARY_INVALID',
+      message: expect.stringContaining('Configured OpenCode binary directory does not contain an executable'),
+    });
+  });
+
+  it('applies a valid configured executable OpenCode binary', async () => {
+    const dir = createTempDir('openchamber-opencode-bin-');
+    const binary = path.join(dir, 'opencode');
+    fs.writeFileSync(binary, '#!/bin/sh\nexit 0\n');
+    fs.chmodSync(binary, 0o755);
+    const { runtime, state } = createRuntime({ opencodeBinary: binary });
+
+    await expect(runtime.applyOpencodeBinaryFromSettings({ strict: true })).resolves.toBe(binary);
+    expect(process.env.OPENCODE_BINARY).toBe(binary);
+    expect(state.resolvedOpencodeBinary).toBe(binary);
+    expect(state.resolvedOpencodeBinarySource).toBe('settings');
+  });
+
+  it('keeps an env-provided OPENCODE_BINARY when the setting is an empty-string sentinel', async () => {
+    const dir = createTempDir('openchamber-env-opencode-');
+    const binary = path.join(dir, 'opencode');
+    fs.writeFileSync(binary, '#!/bin/sh\nexit 0\n');
+    if (process.platform !== 'win32') fs.chmodSync(binary, 0o755);
+    process.env.OPENCODE_BINARY = binary;
+    const { runtime, state } = createRuntime({ opencodeBinary: '' });
+
+    await expect(runtime.applyOpencodeBinaryFromSettings()).resolves.toBeNull();
+    expect(process.env.OPENCODE_BINARY).toBe(binary);
+    expect(state.resolvedOpencodeBinary).toBeNull();
+    expect(state.resolvedOpencodeBinarySource).toBeNull();
+  });
+
+  it('drops a previously applied settings override when the setting is cleared to an empty string', async () => {
+    const dir = createTempDir('openchamber-settings-opencode-');
+    const binary = path.join(dir, 'opencode');
+    fs.writeFileSync(binary, '#!/bin/sh\nexit 0\n');
+    if (process.platform !== 'win32') fs.chmodSync(binary, 0o755);
+    const settings = { opencodeBinary: binary };
+    const { runtime, state } = createRuntime(settings);
+
+    await expect(runtime.applyOpencodeBinaryFromSettings()).resolves.toBe(binary);
+    expect(process.env.OPENCODE_BINARY).toBe(binary);
+    expect(state.resolvedOpencodeBinarySource).toBe('settings');
+
+    settings.opencodeBinary = '';
+    await expect(runtime.applyOpencodeBinaryFromSettings()).resolves.toBeNull();
+    expect(process.env.OPENCODE_BINARY).toBeUndefined();
+    expect(state.resolvedOpencodeBinary).toBeNull();
+    expect(state.resolvedOpencodeBinarySource).toBeNull();
+  });
+
+  describe('binary pinned by the policy file', () => {
+    const createCli = (prefix) => {
+      const dir = createTempDir(prefix);
+      const binary = path.join(dir, process.platform === 'win32' ? 'opencode.exe' : 'opencode');
+      fs.writeFileSync(binary, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+      return binary;
+    };
+
+    it('wins over the user setting, the environment and the bundled CLI', async () => {
+      createBundledCli();
+      process.env.OPENCODE_BINARY = createCli('openchamber-env-opencode-');
+      const pinned = createCli('openchamber-pinned-opencode-');
+      const { runtime, state } = createRuntime(
+        { opencodeBinary: createCli('openchamber-settings-opencode-') },
+        { readPinnedOpencodeBinary: () => pinned },
+      );
+
+      await expect(runtime.applyOpencodeBinaryFromSettings({ strict: true })).resolves.toBe(pinned);
+      expect(runtime.ensureOpencodeCliEnv()).toBe(pinned);
+      expect(state.resolvedOpencodeBinarySource).toBe('policy');
+      expect(process.env.OPENCODE_BINARY).toBe(pinned);
+    });
+
+    it('accepts a directory that holds the CLI', async () => {
+      const pinned = createCli('openchamber-pinned-dir-');
+      const { runtime } = createRuntime({}, { readPinnedOpencodeBinary: () => path.dirname(pinned) });
+      await expect(runtime.applyOpencodeBinaryFromSettings({ strict: true })).resolves.toBe(pinned);
+    });
+
+    it('refuses to start and never falls back when the pinned path is unusable', async () => {
+      const bundled = createBundledCli();
+      const { runtime, state } = createRuntime({ opencodeBinary: bundled }, { readPinnedOpencodeBinary: () => '/missing/opencode' });
+
+      await expect(runtime.applyOpencodeBinaryFromSettings({ strict: true })).rejects.toMatchObject({
+        code: 'OPENCODE_BINARY_INVALID',
+        message: expect.stringContaining('pinned by your administrator'),
+      });
+      expect(runtime.ensureOpencodeCliEnv()).toBeNull();
+      expect(state.resolvedOpencodeBinary).toBeNull();
+    });
+
+    it('hands resolution back to the usual order once the pin is removed', async () => {
+      delete process.env.OPENCODE_BINARY;
+      const pinned = createCli('openchamber-pinned-opencode-');
+      const fromSettings = createCli('openchamber-settings-opencode-');
+      let pin = pinned;
+      const { runtime, state } = createRuntime({ opencodeBinary: fromSettings }, { readPinnedOpencodeBinary: () => pin });
+
+      await expect(runtime.applyOpencodeBinaryFromSettings({ strict: true })).resolves.toBe(pinned);
+      pin = null;
+      await expect(runtime.applyOpencodeBinaryFromSettings({ strict: true })).resolves.toBe(fromSettings);
+      expect(state.resolvedOpencodeBinarySource).toBe('settings');
+    });
+  });
+
+  it('prefers the bundled CLI over a user-installed OpenCode from PATH', () => {
+    const bundledDir = createTempDir('openchamber-bundled-opencode-');
+    const bundledBinary = path.join(bundledDir, process.platform === 'win32' ? 'opencode.exe' : 'opencode');
+    const pathDir = createTempDir('openchamber-path-opencode-');
+    const pathBinary = path.join(pathDir, process.platform === 'win32' ? 'opencode.exe' : 'opencode');
+    fs.writeFileSync(bundledBinary, '#!/bin/sh\nexit 0\n');
+    fs.writeFileSync(pathBinary, '#!/bin/sh\nexit 0\n');
+    if (process.platform !== 'win32') {
+      fs.chmodSync(bundledBinary, 0o755);
+      fs.chmodSync(pathBinary, 0o755);
+    }
+    process.env.OPENCHAMBER_BUNDLED_OPENCODE_CLI_DIR = bundledDir;
+    process.env.PATH = pathDir;
+    delete process.env.OPENCODE_BINARY;
+    const { runtime, state } = createRuntime({});
+
+    expect(runtime.resolveOpencodeCliPath()).toBe(bundledBinary);
+    expect(state.resolvedOpencodeBinarySource).toBe('bundled');
+  });
+
+  it('recognizes the bundled CLI by canonical path', () => {
+    const bundledDir = createTempDir('openchamber-bundled-opencode-');
+    const bundledBinary = path.join(bundledDir, process.platform === 'win32' ? 'opencode.exe' : 'opencode');
+    fs.writeFileSync(bundledBinary, '#!/bin/sh\nexit 0\n');
+    if (process.platform !== 'win32') fs.chmodSync(bundledBinary, 0o755);
+    process.env.OPENCHAMBER_BUNDLED_OPENCODE_CLI_DIR = bundledDir;
+    const { runtime } = createRuntime({});
+
+    expect(runtime.isBundledOpenCodeCliPath(bundledBinary)).toBe(true);
+    expect(runtime.isBundledOpenCodeCliPath(path.join(bundledDir, 'other'))).toBe(false);
+  });
+
+  it('keeps explicit OpenCode binary ahead of bundled CLI', () => {
+    const bundledDir = createTempDir('openchamber-bundled-opencode-');
+    const bundledBinary = path.join(bundledDir, process.platform === 'win32' ? 'opencode.exe' : 'opencode');
+    const explicitDir = createTempDir('openchamber-explicit-opencode-');
+    const explicitBinary = path.join(explicitDir, process.platform === 'win32' ? 'opencode.exe' : 'opencode');
+    fs.writeFileSync(bundledBinary, '#!/bin/sh\nexit 0\n');
+    fs.writeFileSync(explicitBinary, '#!/bin/sh\nexit 0\n');
+    if (process.platform !== 'win32') {
+      fs.chmodSync(bundledBinary, 0o755);
+      fs.chmodSync(explicitBinary, 0o755);
+    }
+    process.env.OPENCHAMBER_BUNDLED_OPENCODE_CLI_DIR = bundledDir;
+    process.env.OPENCODE_BINARY = explicitBinary;
+    const { runtime, state } = createRuntime({});
+
+    expect(runtime.resolveOpencodeCliPath()).toBe(explicitBinary);
+    expect(state.resolvedOpencodeBinarySource).toBe('env');
+  });
+
+  it('resolves the bundled OpenCode CLI from Electron resourcesPath', () => {
+    const resourcesPath = createTempDir('openchamber-resources-');
+    const bundledDir = path.join(resourcesPath, 'opencode-cli');
+    const bundledBinary = path.join(bundledDir, process.platform === 'win32' ? 'opencode.exe' : 'opencode');
+    fs.mkdirSync(bundledDir, { recursive: true });
+    fs.writeFileSync(bundledBinary, '#!/bin/sh\nexit 0\n');
+    if (process.platform !== 'win32') {
+      fs.chmodSync(bundledBinary, 0o755);
+    }
+    Object.defineProperty(process, 'resourcesPath', {
+      configurable: true,
+      value: resourcesPath,
+    });
+    process.env.PATH = createTempDir('openchamber-empty-path-');
+    delete process.env.OPENCHAMBER_BUNDLED_OPENCODE_CLI_DIR;
+    delete process.env.OPENCODE_BINARY;
+    const emptyHome = createTempDir('openchamber-empty-home-');
+    const { runtime, state } = createRuntime({}, {
+      spawnSync: () => ({ status: 1, stdout: '', stderr: '' }),
+      homedir: () => emptyHome,
+    });
+
+    expect(runtime.resolveOpencodeCliPath()).toBe(bundledBinary);
+    expect(state.resolvedOpencodeBinarySource).toBe('bundled');
+  });
+
+  itIf(process.platform === 'darwin')('rejects known macOS OpenCode app bundle executable paths', async () => {
+    const { runtime } = createRuntime({ opencodeBinary: '/Applications/OpenCode.app/Contents/MacOS/OpenCode' });
+
+    await expect(runtime.applyOpencodeBinaryFromSettings({ strict: true })).rejects.toMatchObject({
+      code: 'OPENCODE_BINARY_INVALID',
+      message: expect.stringContaining('macOS desktop app bundle'),
+    });
+  });
+
+  it('rejects known Windows OpenCode desktop app install paths', async () => {
+    setPlatform('win32');
+    const localAppData = createTempDir('openchamber-localappdata-');
+    const desktopBinary = path.join(localAppData, 'Programs', 'OpenCode', 'OpenCode.exe');
+    fs.mkdirSync(path.dirname(desktopBinary), { recursive: true });
+    fs.writeFileSync(desktopBinary, '');
+    process.env.LOCALAPPDATA = localAppData;
+    const { runtime } = createRuntime({ opencodeBinary: desktopBinary });
+
+    await expect(runtime.applyOpencodeBinaryFromSettings({ strict: true })).rejects.toMatchObject({
+      code: 'OPENCODE_BINARY_INVALID',
+      message: expect.stringContaining('Windows desktop app install'),
+    });
+  });
+
+  it('bounds every login-shell probe and falls through when one overruns', () => {
+    setPlatform('darwin');
+    process.env.PATH = createTempDir('openchamber-empty-path-');
+    process.env.SHELL = '/bin/zsh';
+    delete process.env.OPENCODE_BINARY;
+    const shellCalls = [];
+    const { runtime, state } = createRuntime({}, {
+      homedir: () => createTempDir('openchamber-empty-home-'),
+      // This machine has a brew-installed opencode at one of the well-known
+      // absolute fallbacks; an empty list keeps the fall-through assertion
+      // about the probes themselves, not about what the developer installed.
+      wellKnownOpencodePaths: [],
+      spawnSync: (command, args, options) => {
+        shellCalls.push({ command, args, options });
+        // What spawnSync reports when `timeout` fires: no status, an error.
+        return { status: null, signal: 'SIGTERM', error: new Error('spawnSync ETIMEDOUT'), stdout: '', stderr: '' };
+      },
+    });
+    // createRuntime seeds the cache to `null`, which skips probing. Clear it
+    // so this test actually runs the login-shell snapshot. CLI fallbacks such
+    // as /opt/homebrew/bin/opencode are a later, separate lookup.
+    state.cachedLoginShellEnvSnapshot = undefined;
+
+    expect(runtime.getLoginShellEnvSnapshot()).toBeNull();
+    expect(shellCalls.length).toBeGreaterThan(0);
+    for (const call of shellCalls) {
+      expect(call.args).toContain('-lic');
+      expect(call.options.timeout).toBe(5_000);
+    }
+  });
+
+  it('bounds every Windows startup probe and falls through when one overruns', () => {
+    setPlatform('win32');
+    process.env.LOCALAPPDATA = createTempDir('openchamber-localappdata-');
+    process.env.PATH = createTempDir('openchamber-empty-path-');
+    process.env.SystemRoot = createTempDir('openchamber-empty-systemroot-');
+    delete process.env.OPENCODE_BINARY;
+    const calls = [];
+    const { runtime, state } = createRuntime({}, {
+      homedir: () => createTempDir('openchamber-empty-home-'),
+      spawnSync: (command, args, options) => {
+        calls.push({ command, args, options });
+        return { status: null, signal: 'SIGTERM', error: new Error('spawnSync ETIMEDOUT'), stdout: '', stderr: '' };
+      },
+    });
+
+    // Not probed yet, so the PowerShell and cmd snapshot probes run too.
+    state.cachedLoginShellEnvSnapshot = undefined;
+    expect(runtime.getLoginShellEnvSnapshot()).toBeNull();
+    expect(runtime.resolveOpencodeCliPath()).toBeNull();
+    expect(calls.some((call) => call.command === 'where')).toBe(true);
+    for (const call of calls) {
+      expect(call.options.timeout).toBe(10_000);
+    }
+    const powershellCalls = calls.filter((call) => call.args.includes('-Command'));
+    expect(powershellCalls.length).toBeGreaterThan(0);
+    for (const call of powershellCalls) {
+      expect(call.args).toContain('-NoProfile');
+      expect(call.args).toContain('-NonInteractive');
+    }
+  });
+
+  it('does not auto-detect the Windows OpenCode desktop app as a CLI', () => {
+    setPlatform('win32');
+    const localAppData = createTempDir('openchamber-localappdata-');
+    const desktopBinary = path.join(localAppData, 'Programs', 'OpenCode', 'OpenCode.exe');
+    fs.mkdirSync(path.dirname(desktopBinary), { recursive: true });
+    fs.writeFileSync(desktopBinary, '');
+    process.env.LOCALAPPDATA = localAppData;
+    process.env.PATH = createTempDir('openchamber-empty-path-');
+    process.env.SystemRoot = createTempDir('openchamber-empty-systemroot-');
+    delete process.env.OPENCODE_BINARY;
+    const { runtime } = createRuntime({}, {
+      spawnSync: () => ({ status: 1, stdout: '', stderr: '' }),
+    });
+
+    expect(runtime.resolveOpencodeCliPath()).toBeNull();
+  });
+
+  it('skips Windows OpenCode desktop app entries returned by where.exe', () => {
+    setPlatform('win32');
+    const localAppData = createTempDir('openchamber-localappdata-');
+    const desktopBinary = path.join(localAppData, 'Programs', 'OpenCode', 'OpenCode.exe');
+    const cliBinary = path.join(createTempDir('openchamber-cli-'), 'opencode.exe');
+    fs.mkdirSync(path.dirname(desktopBinary), { recursive: true });
+    fs.writeFileSync(desktopBinary, '');
+    fs.writeFileSync(cliBinary, '');
+    process.env.LOCALAPPDATA = localAppData;
+    process.env.PATH = createTempDir('openchamber-empty-path-');
+    process.env.SystemRoot = createTempDir('openchamber-empty-systemroot-');
+    delete process.env.OPENCODE_BINARY;
+    const { runtime, state } = createRuntime({}, {
+      spawnSync: () => ({ status: 0, stdout: `${desktopBinary}\r\n${cliBinary}\r\n`, stderr: '' }),
+    });
+
+    expect(runtime.resolveOpencodeCliPath()).toBe(cliBinary);
+    expect(state.resolvedOpencodeBinarySource).toBe('where');
+  });
+
+  it('rejects WSL settings in strict mode', async () => {
+    setPlatform('win32');
+    const dir = createTempDir('openchamber-no-wsl-');
+    process.env.PATH = dir;
+    process.env.SystemRoot = dir;
+    process.env.WSL_BINARY = path.join(dir, 'missing-wsl.exe');
+    process.env.OPENCHAMBER_WSL_BINARY = path.join(dir, 'missing-openchamber-wsl.exe');
+    const { runtime } = createRuntime({ opencodeBinary: 'wsl:/usr/local/bin/opencode' });
+
+    await expect(runtime.applyOpencodeBinaryFromSettings({ strict: true })).rejects.toMatchObject({
+      message: expect.stringContaining('uses WSL'),
+    });
+  });
+
+  it('does not auto-detect OpenCode from WSL fallback paths', () => {
+    setPlatform('win32');
+    const dir = createTempDir('openchamber-wsl-opencode-');
+    const wslBinary = path.join(dir, 'wsl.exe');
+    fs.writeFileSync(wslBinary, '');
+    process.env.PATH = dir;
+    process.env.SystemRoot = dir;
+    process.env.WSL_BINARY = wslBinary;
+    delete process.env.OPENCODE_BINARY;
+
+    const calls = [];
+    const spawnSyncMock = (command, args) => {
+      calls.push({ command, args });
+      if (command === 'where') {
+        return { status: 1, stdout: '', stderr: '' };
+      }
+      if (command === wslBinary) {
+        return { status: 0, stdout: '/home/alice/.opencode/bin/opencode\n', stderr: '' };
+      }
+      return { status: 1, stdout: '', stderr: '' };
+    };
+    const { runtime, state } = createRuntime({}, { spawnSync: spawnSyncMock });
+
+    expect(runtime.resolveOpencodeCliPath()).toBeNull();
+    expect(state.useWslForOpencode).toBe(false);
+    expect(state.resolvedWslBinary).toBeNull();
+    expect(state.resolvedWslOpencodePath).toBeNull();
+    expect(state.resolvedOpencodeBinarySource).toBeNull();
+
+    const wslCall = calls.find((call) => call.command === wslBinary);
+    expect(wslCall).toBeUndefined();
+  });
+
+  it('launches Windows cmd shims through cmd call without embedded quotes', () => {
+    setPlatform('win32');
+    process.env.ComSpec = 'C:\\Windows\\System32\\cmd.exe';
+    const dir = createTempDir('openchamber-opencode-cmd-');
+    const shim = path.join(dir, 'opencode.cmd');
+    fs.writeFileSync(shim, '@echo off\r\nexit /b 0\r\n');
+    const { runtime } = createRuntime({});
+
+    expect(runtime.resolveManagedOpenCodeLaunchSpec(shim)).toEqual({
+      binary: 'C:\\Windows\\System32\\cmd.exe',
+      args: ['/d', '/s', '/c', 'call', shim],
+      wrapperType: 'cmd-wrapper',
+    });
+  });
+
+  it('resolves an npm-installed OpenCode 2.x cmd shim to its packaged Windows executable', () => {
+    setPlatform('win32');
+    const npmDir = createTempDir('openchamber-opencode-npm-v2-');
+    const shim = path.join(npmDir, 'opencode.cmd');
+    const nativeBinary = path.join(npmDir, 'node_modules', '@opencode', 'cli', 'bin', 'opencode.exe');
+    fs.mkdirSync(path.dirname(nativeBinary), { recursive: true });
+    fs.writeFileSync(nativeBinary, '');
+    fs.writeFileSync(shim, '@ECHO off\r\n"%dp0%\\node_modules\\@opencode\\cli\\bin\\opencode.exe" %*\r\n');
+    const { runtime } = createRuntime({});
+
+    expect(runtime.resolveManagedOpenCodeLaunchSpec(shim)).toEqual({
+      binary: nativeBinary,
+      args: [],
+      wrapperType: 'native-wrapper',
+    });
+  });
+
+  it('resolves npm OpenCode cmd shims to the packaged Windows executable', () => {
+    setPlatform('win32');
+    const npmDir = createTempDir('openchamber-opencode-npm-');
+    const shim = path.join(npmDir, 'opencode.cmd');
+    const nativeBinary = path.join(npmDir, 'node_modules', 'opencode-ai', 'bin', 'opencode.exe');
+    fs.mkdirSync(path.dirname(nativeBinary), { recursive: true });
+    fs.writeFileSync(nativeBinary, '');
+    fs.writeFileSync(shim, '@ECHO off\r\n"%dp0%\\node_modules\\opencode-ai\\bin\\opencode.exe" %*\r\n');
+    const { runtime } = createRuntime({});
+
+    expect(runtime.resolveManagedOpenCodeLaunchSpec(shim)).toEqual({
+      binary: nativeBinary,
+      args: [],
+      wrapperType: 'native-wrapper',
+    });
+  });
+});

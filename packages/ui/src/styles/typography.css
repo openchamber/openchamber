@@ -1,0 +1,293 @@
+@layer components {
+  /* Semantic typography classes - font-size only */
+  .typography-markdown {
+    font-size: var(--text-markdown);
+  }
+
+  .typography-code {
+    font-size: var(--text-code);
+  }
+
+  .typography-ui-header {
+    font-size: var(--text-ui-header);
+    line-height: round(1.45em, 1px);
+  }
+
+  .typography-ui-label {
+    font-size: var(--text-ui-label);
+    line-height: round(1.45em, 1px);
+  }
+
+  .typography-meta {
+    font-size: var(--text-meta);
+    line-height: round(1.45em, 1px);
+  }
+
+  .typography-micro {
+    font-size: var(--text-micro);
+    line-height: round(1.45em, 1px);
+  }
+
+  /*
+   * Settings heading scale (by context):
+   * L1 page title  → typography-settings-page-title (+ text-muted-foreground)
+   * L2 section     → typography-settings-section-title (+ text-foreground)
+   * L3 group       → typography-settings-group-title (+ text-foreground)
+   * L4 field label → typography-settings-field-label (+ text-foreground)
+   * typography-settings-title remains as L2 alias for older call sites.
+   */
+  .typography-settings-page-title {
+    font-size: var(--text-settings-page-title);
+    font-weight: 600;
+    line-height: 1.25;
+    letter-spacing: -0.01em;
+  }
+
+  .typography-settings-section-title,
+  .typography-settings-title {
+    font-size: var(--text-ui-header);
+    font-weight: 600;
+    line-height: 1.2;
+  }
+
+  .typography-settings-group-title {
+    font-size: var(--text-ui-label);
+    font-weight: 500;
+    line-height: 1.2;
+  }
+
+  .typography-settings-field-label {
+    font-size: var(--text-ui-label);
+    font-weight: 400;
+    line-height: 1.2;
+  }
+
+  .typography-settings-description {
+    font-size: var(--text-meta);
+    font-weight: 400;
+    line-height: 1.5;
+  }
+
+  .typography-settings-link {
+    font-size: 0.8125rem; /* 13px */
+    font-weight: 500;
+    line-height: 1.2;
+    color: var(--primary-base);
+    transition: color var(--transition-fast, 150ms ease-in-out);
+  }
+
+  .typography-settings-link:hover {
+    text-decoration: underline;
+  }
+
+  .chat-column {
+    width: min(100%, 48rem);
+    margin-inline: auto;
+    padding-inline: calc(clamp(0.75rem, 2.5vw, 1rem) * var(--padding-scale, 1));
+  }
+
+  .wide-chat-layout .chat-column {
+    width: min(100%, 64rem);
+  }
+
+  .chat-input-column {
+    width: min(100%, 48rem);
+    margin-inline: auto;
+    padding-inline: calc(clamp(0.75rem, 2.5vw, 1rem) * var(--padding-scale, 1));
+  }
+
+  .wide-chat-layout .chat-input-column {
+    width: min(100%, 64rem);
+  }
+
+  .chat-message-column {
+    width: min(100%, 48rem);
+    margin-inline: auto;
+    padding-inline: calc(clamp(0.75rem, 2.5vw, 1rem) * var(--padding-scale, 1));
+  }
+
+  /* Wide layout: the transcript uses the whole chat width; the composer and
+     the rows docked above it (.chat-input-column, .chat-column cards) keep a
+     readable column. */
+  .wide-chat-layout .chat-message-column {
+    width: 100%;
+  }
+
+  /* On a wide window the side padding follows the chat's own width (a
+     percentage padding resolves against the parent's width), so a chat
+     squeezed beside an expanded context panel takes 1rem instead of the
+     1.5rem a full-width chat gets. */
+  @media (min-width: 1024px) {
+    .chat-column {
+      padding-inline: calc(clamp(1rem, 3%, 1.5rem) * var(--padding-scale, 1));
+    }
+
+    .chat-input-column {
+      padding-inline: calc(clamp(1rem, 3%, 1.5rem) * var(--padding-scale, 1));
+    }
+
+    .chat-message-column {
+      padding-inline: calc(clamp(1rem, 3%, 1.5rem) * var(--padding-scale, 1));
+    }
+  }
+
+  /* Enhanced focus indicators for small interactive elements */
+  .model-favorite-button {
+    position: relative;
+    transition: transform 0.1s ease;
+  }
+
+  .model-favorite-button:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+    border-radius: 0.25rem;
+  }
+
+  .model-favorite-button:active {
+    transform: scale(0.95);
+  }
+
+   /* Heading typography - all use markdown size, differentiated by weight/color */
+
+  .typography-h1 {
+    font-size: var(--text-markdown);
+    line-height: var(--h1-line-height);
+    letter-spacing: var(--h1-letter-spacing);
+    font-weight: var(--h1-font-weight);
+  }
+
+  .typography-h2 {
+    font-size: var(--text-markdown);
+    line-height: var(--h2-line-height);
+    letter-spacing: var(--h2-letter-spacing);
+    font-weight: var(--h2-font-weight);
+  }
+
+  .typography-h3 {
+    font-size: var(--text-markdown);
+    line-height: var(--h3-line-height);
+    letter-spacing: var(--h3-letter-spacing);
+    font-weight: var(--h3-font-weight);
+  }
+
+  /* UI element typography - mapped to semantic variables */
+  .typography-ui-button {
+    font-size: var(--text-ui-label);
+    line-height: var(--ui-button-line-height);
+    letter-spacing: var(--ui-button-letter-spacing);
+    font-weight: var(--ui-button-font-weight);
+  }
+
+  .typography-ui-caption {
+    font-size: var(--text-micro);
+    line-height: var(--ui-caption-line-height);
+    letter-spacing: var(--ui-caption-letter-spacing);
+    font-weight: var(--ui-caption-font-weight);
+  }
+
+  /* Markdown typography - all use semantic markdown size */
+  .typography-markdown-body {
+    font-size: var(--text-markdown);
+    line-height: var(--markdown-body-line-height);
+    letter-spacing: var(--markdown-body-letter-spacing);
+    font-weight: var(--markdown-body-font-weight);
+  }
+
+  .typography-markdown-h1 {
+    font-size: var(--text-markdown);
+    line-height: var(--markdown-h1-line-height);
+    letter-spacing: var(--markdown-h1-letter-spacing);
+    font-weight: var(--markdown-h1-font-weight);
+  }
+
+  .typography-markdown-h2 {
+    font-size: var(--text-markdown);
+    line-height: var(--markdown-h2-line-height);
+    letter-spacing: var(--markdown-h2-letter-spacing);
+    font-weight: var(--markdown-h2-font-weight);
+  }
+
+  .typography-markdown-h3 {
+    font-size: var(--text-markdown);
+    line-height: var(--markdown-h3-line-height);
+    letter-spacing: var(--markdown-h3-letter-spacing);
+    font-weight: var(--markdown-h3-font-weight);
+  }
+
+  .typography-markdown-h4 {
+    font-size: var(--text-markdown);
+    line-height: var(--markdown-h4-line-height);
+    letter-spacing: var(--markdown-h4-letter-spacing);
+    font-weight: var(--markdown-h4-font-weight);
+  }
+}
+
+/* Chat message column width — intentionally UNLAYERED so it always wins the
+   cascade. The same rule inside `@layer components` above is correct in steady
+   state, but a layered rule can be momentarily out-ranked during a heavy style
+   recalc (e.g. a large session's virtualized list re-laying-out when the
+   background history prepend lands, or a late-loaded CSS chunk re-establishing
+   layer order). That dropped the clamp for a frame and flashed message text to
+   full width. An unlayered duplicate of just the width keeps it robust. */
+.chat-message-column {
+  width: min(100%, 48rem);
+}
+
+.wide-chat-layout .chat-message-column {
+  width: 100%;
+}
+
+/* A message reached through a message link shows a selection tint behind its
+   content for a moment, then fades out: the whole column for a reply, only
+   the bubble for a user message, which sits narrower at the side. The
+   attribute is set and removed by useChatTimelineScroll; only opacity
+   animates. */
+[data-message-link-target] > .chat-message-column,
+[data-message-link-target] [data-user-message-bubble] {
+  isolation: isolate;
+}
+
+[data-message-link-target]:not(:has([data-user-message-bubble])) > .chat-message-column::before,
+[data-message-link-target] [data-user-message-bubble]::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  background: var(--interactive-selection);
+  pointer-events: none;
+  opacity: 0;
+  animation: oc-message-link-target 1.2s ease-out;
+}
+
+[data-message-link-target]:not(:has([data-user-message-bubble])) > .chat-message-column::before {
+  inset: -0.5rem 0;
+  border-radius: 0.75rem;
+}
+
+[data-message-link-target] [data-user-message-bubble] {
+  position: relative;
+}
+
+/* Inside the bubble's own stacking context: above its background, below
+   its text. */
+[data-message-link-target] [data-user-message-bubble]::before {
+  inset: 0;
+  border-radius: inherit;
+}
+
+@keyframes oc-message-link-target {
+  0%,
+  25% {
+    opacity: 0.6;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-message-link-target]:not(:has([data-user-message-bubble])) > .chat-message-column::before,
+  [data-message-link-target] [data-user-message-bubble]::before {
+    animation: none;
+    opacity: 0.35;
+  }
+}

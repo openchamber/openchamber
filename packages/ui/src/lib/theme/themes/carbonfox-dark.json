@@ -1,0 +1,120 @@
+{
+  "metadata": {
+    "id": "carbonfox-dark",
+    "name": "Carbonfox",
+    "variant": "dark",
+    "description": "Carbonfox",
+    "version": "1.0.0",
+    "tags": [
+      "dark",
+      "palette"
+    ]
+  },
+  "colors": {
+    "primary": {
+      "base": "#33b1ff",
+      "hover": "#43b7ff",
+      "active": "#54bdff",
+      "muted": "#33b1ff80"
+    },
+    "surface": {
+      "background": "#292929",
+      "foreground": "#f7f7f7",
+      "muted": "#252525",
+      "mutedForeground": "#a5a6a9",
+      "elevated": "#2f2f2f",
+      "subtle": "#2e2e2e"
+    },
+    "interactive": {
+      "border": "#ffffff0b",
+      "selection": "#5b5c5b97",
+      "borderHover": "#ffffff33",
+      "borderFocus": "#adcafa",
+      "focus": "#adcafa",
+      "focusRing": "#adcafa",
+      "cursor": "#f2f4f8",
+      "hover": "#ffffff0d",
+      "active": "#ffffff12"
+    },
+    "status": {
+      "error": "#ff8389",
+      "errorBackground": "#ff838929",
+      "errorBorder": "#ff838973",
+      "warning": "#f1c21b",
+      "warningBackground": "#f1c21b29",
+      "warningBorder": "#f1c21b73",
+      "success": "#42be65",
+      "successBackground": "#42be6529",
+      "successBorder": "#42be6573",
+      "info": "#78a9ff",
+      "infoBackground": "#78a9ff29",
+      "infoBorder": "#78a9ff73"
+    },
+    "syntax": {
+      "base": {
+        "background": "#252525",
+        "comment": "#6f6f6f",
+        "keyword": "#be95ff",
+        "string": "#42be65",
+        "number": "#ff8389",
+        "function": "#33b1ff",
+        "variable": "#fefefe",
+        "type": "#f1c21b",
+        "operator": "#ced0d3"
+      },
+      "tokens": {
+        "variableProperty": "#78a9ff",
+        "parameter": "#fefefe",
+        "boolean": "#ff8389",
+        "punctuation": "#ced0d3",
+        "stringEscape": "#ff8389",
+        "keywordImport": "#be95ff",
+        "tag": "#42be65",
+        "regex": "#f2f4f8"
+      },
+      "highlights": {
+        "diffAdded": "#45fa7e",
+        "diffAddedBackground": "#001404",
+        "diffRemoved": "#fec2c2",
+        "diffRemovedBackground": "#230105",
+        "diffModified": "#fddb7b",
+        "diffModifiedBackground": "#fddb7b29",
+        "lineNumber": "#ced0d3",
+        "lineNumberActive": "#fefefe"
+      }
+    },
+    "pr": {
+      "blocked": "#d99464",
+      "merged": "#b79bd9"
+    },
+    "chat": {
+      "background": "#292929",
+      "userMessageBackground": "#27343e",
+      "divider": "#ffffff16"
+    },
+    "markdown": {
+      "link": "#33b1ff",
+      "linkHover": "#43b7ff",
+      "inlineCode": "#85fea0",
+      "inlineCodeBackground": "#2e2e2e",
+      "blockquote": "#a5a6a9",
+      "blockquoteBorder": "#ffffff16",
+      "listMarker": "#33b1ff99",
+      "bold": "#f8f8f8",
+      "italic": "#f7f7f7",
+      "hr": "#ffffff0b"
+    },
+    "tools": {
+      "border": "#ffffff0c",
+      "icon": "#a5a6a9",
+      "title": "#f7f7f7",
+      "description": "#a5a6a9",
+      "edit": {
+        "addedBackground": "#001404",
+        "removedBackground": "#230105",
+        "modifiedBackground": "#fddb7b29",
+        "lineNumber": "#ced0d3"
+      }
+    }
+  }
+}

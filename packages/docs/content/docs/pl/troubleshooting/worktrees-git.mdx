@@ -1,0 +1,35 @@
+---
+title: Worktree i Git
+description: Napraw częste problemy z worktree i git.
+---
+
+# Worktree i Git
+
+Problemy, które pojawiają się przy [sesjach worktree](/pl/worktrees/) i [widoku git](/pl/git/), oraz jak je usunąć.
+
+## Worktree wymaga uwagi
+
+OpenChamber oznacza worktree, gdy coś jest nie tak:
+
+- **folder missing** — folder worktree został usunięty lub przeniesiony poza OpenChamber; usuń sesję i utwórz świeży worktree
+- **detached or unborn branch** — worktree nie jest na zwykłej gałęzi; wyewidencjonuj go na jedną z nich
+- **merge, rebase, or cherry-pick in progress** — operacja została niedokończona; dokończ ją lub przerwij z poziomu widoku git
+
+## Nie można utworzyć worktree
+
+- **branch already exists** — wybierz inną nazwę gałęzi albo użyj opcji istniejącej gałęzi
+- **name already in use** — wybierz inną nazwę worktree
+
+## Generowanie commita lub PR zawodzi
+
+Generowanie komunikatu commita lub opisu PR działa w Twojej aktywnej sesji, więc potrzebujesz otwartej sesji z wybranym działającym modelem. Otwórz lub wybierz sesję i spróbuj ponownie.
+
+## Problemy ze ścieżkami SSH lub Windows
+
+- upewnij się, że klucz SSH używany przez repozytorium to ten ustawiony w Twojej [tożsamości git](/pl/git-identities/)
+- na Windows git używa ścieżek w stylu uniksowym (jak `/c/Users/...`) — OpenChamber to obsługuje, ale niestandardowe ścieżki kluczy SSH powinny mieć taką samą postać
+
+## Powiązane
+
+- [Sesje worktree](/pl/worktrees/) — jak tworzone i usuwane są worktree
+- [Tożsamości Git](/pl/git-identities/) — ustaw właściwy klucz i tożsamość dla każdego repozytorium

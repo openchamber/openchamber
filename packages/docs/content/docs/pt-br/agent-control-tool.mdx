@@ -1,0 +1,42 @@
+---
+title: Ferramenta de controle para agentes
+description: Permita que um agente gerencie sessões, worktrees e tarefas agendadas do OpenChamber pelo chat.
+---
+
+# Ferramenta de controle para agentes
+
+A ferramenta de agente `openchamber` gerencia o trabalho no app direto do chat, e `openchamber_schedule` cuida das tarefas agendadas. As duas vêm ativadas por padrão quando o OpenChamber roda seu próprio servidor OpenCode local; não há nada para instalar nem comando de shell para rodar.
+
+## O que você pode pedir
+
+Fale com o agente em linguagem natural. Por exemplo:
+
+- "Crie uma nova sessão do OpenChamber neste projeto, use o modelo `openai/gpt-5.6-sol` e envie este prompt: revise o fluxo de autenticação."
+- "Crie uma nova sessão do OpenChamber para esta tarefa em um worktree separado e peça para ela adicionar testes ao fluxo de login."
+- "Use o OpenChamber para listar minhas 10 sessões mais recentes com o status atual de cada uma."
+- "Crie uma tarefa agendada do OpenChamber chamada Revisão de dias úteis que envie este prompt às 09:00 em todo dia útil: revise as mudanças desde a última execução."
+- "Execute agora a tarefa agendada do OpenChamber chamada Revisão de dias úteis."
+- "Confira a sessão do OpenChamber chamada Revisão de autenticação e me mostre a resposta mais recente do assistente."
+
+A ferramenta de controle lista projetos e preferências de modelo, busca no catálogo de modelos, cria e acompanha sessões, faz fork de uma sessão e cria sessões isoladas em worktrees. A ferramenta de agendamento cria, altera, executa, pausa e exclui tarefas agendadas. Sessões iniciadas assim aparecem no OpenChamber como qualquer outra, então você pode abri-las e continuar o trabalho.
+
+## Tenha em mente
+
+- Prompts para sessões novas retornam na hora por padrão. Acompanhe a sessão no OpenChamber ou peça ao agente para conferir depois.
+- Um worktree separado só é criado quando você pede. Mudanças não commitadas do seu worktree atual não são copiadas para ele.
+- Quando o checkout parece ocupado, por exemplo outra sessão trabalhando no mesmo branch, o agente pode oferecer mover a própria sessão para um worktree novo. Ele move depois que você concorda e leva só os arquivos que alterou.
+- As ferramentas não podem excluir sessões nem worktrees, registrar caminhos de projeto, rodar comandos de shell arbitrários ou chamar URLs arbitrárias.
+
+## Ativar ou desativar as ferramentas
+
+Abra **Configurações → Geral → Ferramentas do OpenChamber** e altere **Ferramenta de controle para agentes** ou **Ferramenta de agendamento para agentes**; cada uma liga e desliga por conta própria. Se você tinha desativado a ferramenta de controle antes de o agendamento virar uma ferramenta própria, a ferramenta de agendamento também começa desativada. A mudança chega às sessões em andamento no próximo turno, sem reiniciar. Se o seu ambiente já define `OPENCODE_CONFIG`, ela vale quando o servidor OpenCode gerenciado reiniciar.
+
+As ferramentas não ficam disponíveis quando o OpenChamber se conecta a um servidor OpenCode externo via `OPENCODE_HOST` ou skip-start, nem dentro da extensão do VS Code. Instalações desktop e web que usam o servidor OpenCode gerenciado pelo OpenChamber as suportam automaticamente.
+
+## Relacionado
+
+- [Tarefas Agendadas](/pt-br/scheduled-tasks/)
+- [Sessões de Worktree](/pt-br/worktrees/)
+- [Objetivos de sessão](/pt-br/session-goals/)
+- [Painel do navegador](/pt-br/desktop-browser/): a ferramenta OpenChamber Web, para ver e controlar uma página
+- [Notas, Tarefas e Planos do Projeto](/pt-br/notes-todos-plans/): a ferramenta de conhecimento do projeto, para as notas, tarefas e planos da aba Contexto

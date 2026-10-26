@@ -1,0 +1,134 @@
+---
+title: Integrações
+description: Conecte os serviços e assinaturas com os quais o OpenChamber trabalha.
+---
+
+# Integrações
+
+Em **Configurações → Integrações** você entra nos serviços com os quais o OpenChamber trabalha. O login fica salvo no servidor do OpenChamber, então web, desktop e um telefone pareado o compartilham.
+
+## Catálogo de integrações
+
+O catálogo de integrações lista mais de 150 serviços que você pode dar ao agente com um clique: Linear, Notion, Sentry, Supabase, Figma, ferramentas de observabilidade, CRMs, notas de reunião e mais. Instalar um costuma adicionar o servidor MCP do serviço (a conexão que o agente usa para ler e alterar coisas lá) e, às vezes, skills ou um plugin que vêm com ele. A instalação é para o seu usuário, então todos os projetos a recebem.
+
+1. Escolha o ícone da loja no cabeçalho da barra lateral.
+2. Encontre um serviço: busque pelo nome ou restrinja a lista com uma categoria como **Código** ou **Qualidade e operações**. **OpenChamber** lista nossas próprias extensões e plugins.
+3. Escolha **+** na linha dele, ou abra-o e escolha **Instalar**.
+4. Entre do jeito que o serviço pede:
+   - **OAuth**: a página de login do serviço abre no navegador. Aprove o acesso lá.
+   - **Token**: cole um token de API em **Token de API**. **Obter um token** abre a página onde o serviço fornece um.
+   - **Sem login**: não há nada a fazer.
+
+Quando termina, o serviço mostra uma marca de verificação e aparece em **Instaladas** à esquerda, e as ferramentas dele ficam disponíveis na sua próxima mensagem. Um ponto amarelo ou **Login necessário** significa que o login não terminou; abra o serviço e entre de novo.
+
+Algumas entradas precisam de mais do que um login:
+
+- **Servidores locais** rodam na máquina onde o OpenCode roda e podem precisar de Node.js, Python com uv ou Docker. A primeira inicialização pode demorar.
+- **Plugins** são código que roda dentro do OpenCode, então o catálogo pede confirmação e mostra a licença do plugin antes.
+- **Skills** que vêm com um serviço são instaladas junto com ele. Se faltar alguma, o **Instalar** próprio dela aparece na página do serviço.
+
+Para remover um serviço, abra-o, escolha **Mais ações** (**⋯**) e depois **Desinstalar**. Isso remove só o que o catálogo adicionou; sua conta no serviço continua como está. Você também pode gerenciar servidores MCP, plugins e skills nas Configurações, como sempre.
+
+O catálogo está no app web e no app desktop. Ele fica oculto no [modo empresarial](/pt-br/security/#modo-empresarial).
+
+## GitHub
+
+Expanda o cartão **GitHub** e escolha **Connect GitHub** para entrar com um código curto de dispositivo. Conectado, o OpenChamber pode iniciar sessões a partir de issues e pull requests, anexá-los a mensagens e abrir ou atualizar PRs. Tudo o que os hosts Git podem fazer está em [Hosts Git](/pt-br/github/).
+
+## GitLab, Gitea, Forgejo e Gerrit
+
+GitLab, Gitea, Forgejo e Gerrit têm cada um seu próprio cartão ao lado do GitHub. Depois de conectados, as issues e pull requests deles (merge requests no GitLab, alterações no Gerrit) aparecem no quadro [Issues e PRs](/pt-br/issues-and-prs/) e no menu **+** do chat, como os do GitHub.
+
+- **GitLab**: no gitlab.com, entre com um código curto de dispositivo, um personal access token ou o login do `glab` no servidor. Para um GitLab self-managed, adicione o endereço dele e cole um personal access token com o escopo `api`. O login por código de dispositivo só funciona ali quando o servidor define `OPENCHAMBER_GITLAB_CLIENT_ID` com um aplicativo registrado naquela instância.
+- **Gitea**: adicione o endereço da sua instância, como `https://gitea.example.com`, e cole um personal access token com os escopos `write:repository`, `write:issue` e `read:user`. O cartão tem um link para a página da sua instância que cria um. O Gitea não tem login por código de dispositivo nem por CLI. Ele precisa do Gitea 1.21 ou mais novo, servido na raiz do próprio endereço.
+- **Forgejo**: o Codeberg já está no cartão, então para conectá-lo basta um personal access token com os escopos `write:repository`, `write:issue` e `read:user`; o cartão tem um link para a página do Codeberg que cria um. Para outro servidor Forgejo, adicione o endereço dele, como `https://forgejo.example.com`, e cole um token com os mesmos escopos. Ele precisa do Forgejo 7.0 ou mais novo, servido na raiz do próprio endereço. Um servidor Forgejo se conecta neste cartão, e um servidor Gitea no cartão do Gitea.
+- **Gerrit**: adicione o endereço da sua instância, como `https://gerrit.example.com`, e depois seu nome de usuário do Gerrit e uma senha HTTP. Gere a senha no Gerrit em **Settings → HTTP Credentials**; o cartão tem um link para lá. Sua senha de login não funciona, e uma conta sem nome de usuário não consegue conectar. Ele precisa do Gerrit 3.8 ou mais novo, servido na raiz do próprio endereço. Sites cujo endereço de revisão é diferente do endereço Git, como o googlesource.com com `.gitcookies`, não são suportados.
+
+No Gerrit você revisa alterações. Cada envio de uma alteração é um patchset, e a prévia da alteração permite escolher um anterior para ler. Você revisa votando nos labels do projeto, como Code-Review e Verified, e integra uma alteração com **Submeter** quando os requisitos de submissão dela são atendidos. O Gerrit não tem issues, então só aparecem alterações. Para criar uma alteração, ou enviar um novo patchset para ela, use **Enviar para revisão** no painel Git; veja [Git](/pt-br/git/#enviar-para-revisão-no-gerrit).
+
+O remoto do projeto decide de qual cartão vem a conta que o OpenChamber usa, e uma conta em qualquer um desses cartões pode ser a [identidade Git](/pt-br/git-identities/) de um projeto. Uma [extensão](/pt-br/extensions/#uma-extensão-como-host-git) pode adicionar outro host com um cartão próprio.
+
+## Linear
+
+### Conecte um workspace
+
+1. Expanda o cartão **Linear** e escolha **Connect**.
+2. Aprove o acesso na aba do navegador que se abre. Até lá, o cartão mostra **Waiting for Linear**.
+
+Conecte outra organização do Linear com **Add workspace**. Só um workspace é o atual por vez: troque com **Switch to**, e **Disconnect** remove apenas o atual. O mapeamento de projetos é mantido.
+
+### Navegue pelas issues
+
+As issues do Linear ficam no quadro **Issues and PRs**. Abra-o pelo ícone de pull request no cabeçalho da barra lateral, ou pressione <kbd>⌘K</kbd> e depois <kbd>B</kbd> (<kbd>Ctrl+K</kbd> e depois <kbd>B</kbd> no Windows e no Linux), e escolha **Linear** no topo. O quadro lista as issues do workspace atual e permite:
+
+- mostrar um time ou **All teams**
+- trocar o workspace atual, quando houver mais de um conectado
+- filtrar ao mesmo tempo por status, por de quem são (**Assigned to me** ou **Created by me**) e por prioridade, e buscar por título ou identificador
+- ler descrição, comentários, labels e prioridade de uma issue ao lado da lista
+- mudar o **Status**
+
+### Inicie uma sessão a partir de uma issue
+
+- No quadro, escolha uma issue e depois **Start in worktree…** para um branch novo, ou **New session** para trabalhar no projeto como ele está.
+- Na caixa de diálogo **New Worktree**, escolha uma issue do Linear.
+
+Nos dois casos, a sessão abre com a issue anexada à caixa de mensagem, e você mesmo escreve a primeira mensagem. O quadro a inicia no projeto mapeado para o time da issue, mostrado ao lado de **Start in**; escolha outro projeto ali se precisar. Mapeie os times no cartão do Linear: **Default project** cobre todos os times e **Team projects** o sobrescreve por time. Sem mapeamento, o quadro usa o último projeto que mostrou.
+
+### Vincule uma issue a uma mensagem
+
+No compositor do chat, abra o menu **+** e escolha **Linear**. A issue acompanha sua próxima mensagem como contexto, e o painel de status de trabalho da sessão mantém um link para ela.
+
+### Comentários de sessão
+
+Ative **Session comments** no cartão do Linear e uma sessão iniciada a partir de uma issue, ou cuja primeira mensagem tem a issue anexada, publica um comentário nela ao começar, terminar ou falhar, cada um com um link que abre a sessão. Os comentários só são publicados quando este servidor do OpenChamber tem um endereço público, para que o link funcione para todos na issue; em um endereço local ou privado nada é publicado.
+
+## Instalar uma integração
+
+1. Abra **Settings → Integrations**.
+2. Encontre a integração e escolha **Install**.
+3. Reinicie o OpenCode quando solicitado — o provedor aparece após a reinicialização.
+4. Escolha **Set up** e faça login. Os modelos aparecem então no seletor de modelos do chat.
+
+As integrações são instaladas para o seu usuário, então funcionam em todos os projetos. Você pode atualizá-las ou removê-las do mesmo cartão a qualquer momento.
+
+## Claude Code
+
+O Claude Code usa seu plano Claude Pro ou Max pela CLI do Claude Code no seu computador — sem chaves de API.
+
+1. Instale a integração (acima).
+2. Escolha **Set up** e faça login. Se você ainda não tem a CLI do Claude Code, a configuração oferece instalá-la primeiro e depois fazer login.
+
+**Como sua conta Claude fica protegida:** esta integração usa o Claude Agent SDK oficial da Anthropic e a CLI do Claude Code instalada em sua máquina. Ela não sequestra OAuth, não extrai nem reproduz tokens do navegador, não se passa por um cliente não suportado e não contorna a autenticação da Anthropic. Ela permanece no caminho de acesso suportado pela Anthropic, portanto não traz o risco de banimento de conta associado a sequestro de tokens ou a contornos de autenticação não autorizados.
+
+## Atualizar ou remover
+
+- **Update** instala a versão publicada mais recente do plugin.
+- **Remove** exclui o plugin da sua configuração do OpenCode. O provedor deixa de ser carregado quando o OpenCode é recarregado.
+
+Se um cartão indicar que as entradas precisam de gerenciamento manual, escolha **Manage plugins** e limpe as duplicatas lá.
+
+## Excalidraw
+
+O Excalidraw permite desenhar em arquivos `.excalidraw` e em desenhos `.excalidraw.md` do Obsidian direto no Files. É uma extensão do OpenChamber, listada em **OpenChamber extensions** na mesma página.
+
+1. Abra **Settings → Integrations** e escolha **Install** no cartão do Excalidraw. Você também pode abrir um desenho no Files e escolher **Install** no aviso acima dele.
+2. Abra o desenho de novo. A tela de desenho substitui o texto do arquivo, e Cmd/Ctrl+S, o salvamento automático, a alternância para o código-fonte e a tela cheia funcionam como em qualquer arquivo.
+
+O cartão atualiza a extensão quando sai uma nova versão, reativa a extensão se você a pausou e a remove. Seus desenhos continuam como estão quando você a remove; eles só passam a abrir como texto. Somente web e desktop.
+
+## Resource Monitor
+
+O Resource Monitor mostra quanto de CPU e memória seu computador usa e quanto disso vai para o OpenChamber, o OpenCode, tudo o que eles iniciaram e os servidores de desenvolvimento que rodam sob eles. É uma extensão do OpenChamber, listada em **OpenChamber extensions** na mesma página.
+
+1. Abra **Settings → Integrations** e escolha **Install** no cartão do Resource Monitor.
+2. Aprove o serviço local em **Settings → Extensions**. Os números vêm de um pequeno processo que o OpenChamber inicia ao lado do painel. Ele mede apenas enquanto o painel ou a seção **Resources** está na tela.
+3. Abra o **Resource Monitor** na barra lateral direita. Um resumo curto também aparece em **Resources** no painel Work Status.
+
+Stop em um servidor de desenvolvimento ou tarefa encerra esse comando com tudo o que ele iniciou, para que um watcher não suba o servidor de novo. **Stop all** no grupo Terminal encerra tudo o que roda no terminal e nas project actions e mantém as abas do terminal abertas. O próprio OpenChamber e o servidor do OpenCode não têm Stop.
+
+Os servidores de desenvolvimento aparecem quando rodam sob o OpenChamber: iniciados no terminal integrado, ou por um agente quando o próprio OpenChamber iniciou o OpenCode. Um servidor que se desliga do processo pai, ou um contêiner iniciado com `docker compose up -d`, não aparece na lista. Quando você está conectado a um OpenChamber remoto, o monitor mostra aquela máquina. Apenas web e desktop.
+
+## Relacionado
+
+- [Hosts Git](/pt-br/github/) — tudo o que GitHub, GitLab, Gitea, Forgejo e Gerrit podem fazer no OpenChamber
+- [Sessões em worktree](/pt-br/worktrees/) — onde as sessões a partir de issues podem começar

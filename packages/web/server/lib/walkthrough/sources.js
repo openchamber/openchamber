@@ -1,0 +1,171 @@
+import { getDiff, getRangeDiff, getCommitDiff, getUntrackedDiffs, listUntrackedPaths } from '../git/service.js';
+import assert from 'node:assert/strict';
+import { isString } from '../shared/guards.js';
+import { joinProjectPath } from '../source-control/project-path.js';
+
+// A walkthrough source resolves to one or more diff *sections*. A section is a
+// patch plus the scope its hunk ids live in; keeping staged and working-tree
+// changes in separate scopes means a stop written against staged code never
+// silently re-anchors onto an unstaged edit of the same lines.
+
+const WORKING_TREE_SCOPES = new Set(['all', 'staged', 'working']);
+
+export class WalkthroughSourceError extends Error {
+  constructor(message, statusCode = 400, code = undefined) {
+    super(message);
+    this.statusCode = statusCode;
+    if (code) this.code = code;
+  }
+}
+
+/**
+ * Normalize and validate an untrusted source descriptor from the client.
+ */
+export function parseSource(raw) {
+  if (!raw || typeof raw !== 'object') {
+    throw new WalkthroughSourceError('source is required');
+  }
+
+  if (raw.kind === 'working-tree') {
+    const scope = typeof raw.scope === 'string' ? raw.scope : 'all';
+    if (!WORKING_TREE_SCOPES.has(scope)) {
+      throw new WalkthroughSourceError(`Unknown working-tree scope "${scope}"`);
+    }
+    return { kind: 'working-tree', scope };
+  }
+
+  if (raw.kind === 'branch') {
+    const baseRef = typeof raw.baseRef === 'string' ? raw.baseRef.trim() : '';
+    const headRef = typeof raw.headRef === 'string' ? raw.headRef.trim() : '';
+    if (!baseRef || !headRef) {
+      throw new WalkthroughSourceError('branch sources require baseRef and headRef');
+    }
+    return { kind: 'branch', baseRef, headRef };
+  }
+
+  if (raw.kind === 'pr') {
+    const number = Number(raw.number);
+    if (!Number.isInteger(number) || number <= 0) {
+      throw new WalkthroughSourceError('pr sources require a positive number');
+    }
+    // A host that keeps revisions (Gerrit's patchsets) may name one by its
+    // full commit SHA; without it the change request's current one is read.
+    let revision;
+    if (raw.revision !== undefined) {
+      if (!isString(raw.revision) || !/^[0-9a-f]{40}$/i.test(raw.revision)) {
+        throw new WalkthroughSourceError('pr sources require a full revision SHA');
+      }
+      revision = raw.revision.toLowerCase();
+    }
+    const withRevision = (source) => (revision ? { ...source, revision } : source);
+    if (raw.sourceRepo !== undefined) {
+      const { owner, repo } = raw.sourceRepo ?? {};
+      try {
+        // Owners are a single segment on GitHub and a namespace path on GitLab
+        // (subgroups included). Each segment allows the same characters as a
+        // repo name with dots kept internal, so "." and ".." can never be a
+        // segment. Downstream the owner is only compared against the bound
+        // repository's network, never turned into a filesystem path.
+        // An empty owner is a path-style provider's top-level project (Gerrit's
+        // `demo`); the routes accept it only for such a provider.
+        if (owner !== '') assert.match(owner, /^[a-zA-Z0-9_-]+(?:\.[a-zA-Z0-9_-]+)*(?:\/[a-zA-Z0-9_-]+(?:\.[a-zA-Z0-9_-]+)*)*$/);
+        assert.match(repo, /^[a-zA-Z0-9_.-]+$/);
+      } catch {
+        throw new WalkthroughSourceError('pr sources require a valid repository');
+      }
+      return withRevision({ kind: 'pr', number, sourceRepo: { owner, repo } });
+    }
+    return withRevision({ kind: 'pr', number });
+  }
+
+  if (raw.kind === 'commit') {
+    // Sources are content-addressed: accept a full object id, never a moving ref.
+    if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i.test(raw.hash)) {
+      throw new WalkthroughSourceError('commit sources require a full commit hash');
+    }
+    try {
+      return { kind: 'commit', hash: raw.hash.toLowerCase() };
+    } catch {
+      throw new WalkthroughSourceError('commit sources require a full commit hash');
+    }
+  }
+
+  throw new WalkthroughSourceError(`Unknown source kind "${String(raw.kind)}"`);
+}
+
+/**
+ * Stable string form of a source, used as the pointer key and as part of the
+ * cache key. Must not change shape casually — it addresses persisted files.
+ */
+export function sourceKey(source) {
+  if (source.kind === 'working-tree') return `working-tree:${source.scope}`;
+  if (source.kind === 'branch') return `branch:${source.baseRef}...${source.headRef}`;
+  if (source.kind === 'commit') return `commit:${source.hash}`;
+  const pr = source.sourceRepo ? `pr:${joinProjectPath(source.sourceRepo.owner, source.sourceRepo.repo)}:${source.number}` : `pr:${source.number}`;
+  // A named revision is its own walkthrough; the current one keeps the key it always had.
+  return source.revision ? `${pr}@${source.revision}` : pr;
+}
+
+// `git diff` never reports untracked files, so a brand-new file would be
+// invisible in a walkthrough of local work. The batch helper resolves the
+// repository once and bounds how many diff processes run at a time.
+const untrackedSections = async (directory) => {
+  const untracked = await listUntrackedPaths(directory);
+  if (untracked.length === 0) return [];
+
+  const patches = await getUntrackedDiffs(directory, untracked);
+  return patches.filter((patch) => typeof patch === 'string' && patch.trim());
+};
+
+/**
+ * Resolve a source into diff sections.
+ *
+ * @returns {Promise<{sections: Array<{scope: string, patch: string}>, meta: object}>}
+ */
+export async function loadSourceSections(directory, source, { getPullRequestDiff, readContext } = {}) {
+  if (source.kind === 'working-tree') {
+    const sections = [];
+
+    if (source.scope === 'all' || source.scope === 'staged') {
+      const patch = await getDiff(directory, { staged: true });
+      if (patch && patch.trim()) sections.push({ scope: 'staged', patch });
+    }
+
+    if (source.scope === 'all' || source.scope === 'working') {
+      const patch = await getDiff(directory, { staged: false });
+      const untracked = await untrackedSections(directory);
+      const combined = [patch, ...untracked].filter((value) => value && value.trim()).join('\n');
+      if (combined.trim()) sections.push({ scope: 'working', patch: combined });
+    }
+
+    return { sections, meta: {} };
+  }
+
+  if (source.kind === 'branch') {
+    const patch = await getRangeDiff(directory, { base: source.baseRef, head: source.headRef, includeWorkingTree: true });
+    return {
+      sections: patch && patch.trim() ? [{ scope: 'branch', patch }] : [],
+      meta: { baseRef: source.baseRef, headRef: source.headRef },
+    };
+  }
+
+  if (source.kind === 'commit') {
+    const patch = await getCommitDiff(directory, { hash: source.hash });
+    return {
+      sections: patch.trim() ? [{ scope: 'commit', patch }] : [],
+      meta: { hash: source.hash },
+    };
+  }
+
+  if (typeof getPullRequestDiff !== 'function') {
+    throw new WalkthroughSourceError('Pull request diffs are unavailable', 500);
+  }
+
+  const options = { sourceRepo: source.sourceRepo ?? null };
+  if (source.revision) options.revision = source.revision;
+  const { patch, meta } = await getPullRequestDiff(directory, source.number, readContext, options);
+  return {
+    sections: patch && patch.trim() ? [{ scope: `pr:${source.number}`, patch }] : [],
+    meta: meta || {},
+  };
+}

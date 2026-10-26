@@ -1,0 +1,499 @@
+import React from 'react';
+import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+  CommandSeparator,
+} from '@/components/ui/command';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Icon } from "@/components/icon/Icon";
+import { Spinner } from "@/components/ui/spinner";
+import { cn } from '@/lib/utils';
+import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
+import { rankByQuery } from '@/lib/search/fuzzySearch';
+import { useI18n } from '@/lib/i18n';
+import type { BranchIntegrationRemoteBranch, BranchIntegrationTarget } from './branchIntegration';
+
+type OperationType = 'merge' | 'rebase';
+
+export interface OperationLogEntry {
+  message: string;
+  status: 'pending' | 'running' | 'done' | 'error';
+  timestamp: number;
+}
+
+interface BranchIntegrationSectionProps {
+  currentBranch: string | null | undefined;
+  localBranches: string[];
+  remoteBranches: BranchIntegrationRemoteBranch[];
+  onMerge: (target: BranchIntegrationTarget) => void;
+  onRebase: (target: BranchIntegrationTarget) => void;
+  disabled?: boolean;
+  isOperating?: boolean;
+  operationLogs?: OperationLogEntry[];
+  onOperationComplete?: () => void;
+  /**
+   * 'dialog' renders its own trigger button + dialog, 'inline' renders a
+   * titled section, 'bare' renders just the form body for embedding in an
+   * externally-owned dialog.
+   */
+  mode?: 'dialog' | 'inline' | 'bare';
+  defaultTargetBranch?: string;
+}
+
+export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> = ({
+  currentBranch,
+  localBranches,
+  remoteBranches,
+  onMerge,
+  onRebase,
+  disabled = false,
+  isOperating = false,
+  operationLogs = [],
+  onOperationComplete,
+  mode = 'dialog',
+  defaultTargetBranch,
+}) => {
+  const { t } = useI18n();
+  const [dialogOpen, setDialogOpen] = React.useState(false);
+  const [operation, setOperation] = React.useState<OperationType>('merge');
+  const [selectedBranch, setSelectedBranch] = React.useState<BranchIntegrationTarget | null>(null);
+  const [branchDropdownOpen, setBranchDropdownOpen] = React.useState(false);
+  const [branchSearch, setBranchSearch] = React.useState('');
+  const searchInputRef = React.useRef<HTMLInputElement>(null);
+  const logContainerRef = React.useRef<HTMLDivElement>(null);
+
+  const isDisabled = disabled || isOperating;
+  const targetBranchLabel = currentBranch || t('gitView.branch.currentBranchFallback');
+  
+  // Check if operation completed (all logs are done or error)
+  const operationCompleted = operationLogs.length > 0 && 
+    operationLogs.every(log => log.status === 'done' || log.status === 'error');
+  const hasError = operationLogs.some(log => log.status === 'error');
+
+  // Auto-scroll log container when new entries are added
+  React.useEffect(() => {
+    if (logContainerRef.current) {
+      logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
+    }
+  }, [operationLogs]);
+
+  // Filter branches based on search
+  const filteredLocal = React.useMemo(() => {
+    const candidates = localBranches.filter((branch) => branch !== currentBranch);
+    return rankByQuery(candidates, branchSearch, (branch) => [branch]);
+  }, [branchSearch, localBranches, currentBranch]);
+
+  const filteredRemote = React.useMemo(
+    () => rankByQuery(remoteBranches, branchSearch, (branch) => [branch.label, branch.branch, branch.remote]),
+    [branchSearch, remoteBranches]
+  );
+
+  const resolveDefaultBranch = React.useCallback(() => {
+    if (!defaultTargetBranch) return null;
+    const remote = remoteBranches.find((branch) => branch.label === defaultTargetBranch);
+    if (remote) return remote;
+    if (localBranches.includes(defaultTargetBranch)) {
+      return { kind: 'local', branch: defaultTargetBranch, label: defaultTargetBranch } as const;
+    }
+    return null;
+  }, [defaultTargetBranch, localBranches, remoteBranches]);
+
+  const handleOpenDialog = () => {
+    setDialogOpen(true);
+    setSelectedBranch(resolveDefaultBranch());
+    setOperation('merge');
+    setBranchSearch('');
+  };
+
+  const handleSelectBranch = (target: BranchIntegrationTarget) => {
+    setSelectedBranch(target);
+    setBranchDropdownOpen(false);
+    setBranchSearch('');
+  };
+
+  const handleConfirm = () => {
+    if (!selectedBranch) return;
+    
+    // Don't close dialog - keep it open to show progress
+    if (operation === 'merge') {
+      onMerge(selectedBranch);
+    } else {
+      onRebase(selectedBranch);
+    }
+  };
+
+  const handleCancel = () => {
+    // Don't allow cancel during operation
+    if (isOperating) return;
+    
+    setSelectedBranch(null);
+    setOperation('merge');
+    setBranchSearch('');
+    setDialogOpen(false);
+  };
+
+  const handleClose = () => {
+    // Only allow closing when operation is complete or not started
+    if (isOperating && !operationCompleted) return;
+    
+    if (operationCompleted) {
+      onOperationComplete?.();
+    }
+    setSelectedBranch(null);
+    setOperation('merge');
+    setBranchSearch('');
+    setDialogOpen(false);
+  };
+
+  React.useEffect(() => {
+    if (!branchDropdownOpen) {
+      setBranchSearch('');
+    }
+  }, [branchDropdownOpen]);
+
+  React.useEffect(() => {
+    if (mode === 'dialog' || selectedBranch) return;
+    setSelectedBranch(resolveDefaultBranch());
+  }, [mode, resolveDefaultBranch, selectedBranch]);
+
+  const renderOperating = () => (
+    <div className="space-y-3">
+      <div
+        ref={logContainerRef}
+        className="rounded-lg oc-tile p-3 max-h-48 overflow-y-auto"
+      >
+        <div className="space-y-2">
+          {operationLogs.map((log, index) => (
+            <div key={index} className="flex items-start gap-2">
+              <div className="mt-0.5 shrink-0">
+                {log.status === 'running' && (
+                  <Spinner className="size-3.5 text-primary" />
+                )}
+                {log.status === 'done' && (
+                  <Icon name="check" className="size-3.5 text-success" />
+                )}
+                {log.status === 'error' && (
+                  <Icon name="close" className="size-3.5 text-destructive" />
+                )}
+                {log.status === 'pending' && (
+                  <div className="size-3.5 rounded-full border border-muted-foreground/30" />
+                )}
+              </div>
+              <span
+                className={cn(
+                  'typography-micro',
+                  log.status === 'error' && 'text-destructive',
+                  log.status === 'done' && 'text-muted-foreground',
+                  log.status === 'running' && 'text-foreground',
+                  log.status === 'pending' && 'text-muted-foreground/60'
+                )}
+              >
+                {log.message}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {operationCompleted ? (
+        mode === 'dialog' ? (
+          <DialogFooter>
+            <Button variant="default" size="sm" onClick={handleClose}>
+              {hasError ? t('gitView.common.close') : t('gitView.common.done')}
+            </Button>
+          </DialogFooter>
+        ) : (
+          <div className="flex justify-end">
+            <Button variant="default" size="sm" onClick={handleClose}>
+              {hasError ? t('gitView.common.close') : t('gitView.common.done')}
+            </Button>
+          </div>
+        )
+      ) : null}
+    </div>
+  );
+
+  const renderForm = () => (
+    <div className="space-y-4">
+      {/* Operation Selection */}
+      <div className="space-y-3">
+        <p className="typography-meta text-muted-foreground">{t('gitView.branch.operation')}</p>
+        <div className="grid grid-cols-2 gap-3">
+          <button
+            type="button"
+            onClick={() => setOperation('merge')}
+            className={cn(
+              'flex flex-col items-start gap-1 rounded-lg p-3 text-start',
+              operation === 'merge'
+                ? 'bg-interactive-selection text-interactive-selection-foreground'
+                : 'oc-tile oc-tile-hover'
+            )}
+          >
+            <div className="flex items-center gap-2">
+              <Icon name="git-merge"
+                className={cn('size-4', operation === 'merge' ? 'text-inherit' : 'text-muted-foreground')}
+              />
+              <span
+                className={cn(
+                  'typography-ui-label',
+                  operation === 'merge' ? 'text-foreground' : 'text-muted-foreground'
+                )}
+              >
+                {t('gitView.operation.merge')}
+              </span>
+            </div>
+            <p className="typography-micro text-muted-foreground">
+              {t('gitView.branch.mergeDescription')}
+            </p>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setOperation('rebase')}
+            className={cn(
+              'flex flex-col items-start gap-1 rounded-lg p-3 text-start',
+              operation === 'rebase'
+                ? 'bg-interactive-selection text-interactive-selection-foreground'
+                : 'oc-tile oc-tile-hover'
+            )}
+          >
+            <div className="flex items-center gap-2">
+              <Icon name="git-branch"
+                className={cn('size-4', operation === 'rebase' ? 'text-inherit' : 'text-muted-foreground')}
+              />
+              <span
+                className={cn(
+                  'typography-ui-label',
+                  operation === 'rebase' ? 'text-foreground' : 'text-muted-foreground'
+                )}
+              >
+                {t('gitView.operation.rebase')}
+              </span>
+            </div>
+                    <p className="typography-micro text-muted-foreground">
+                      {t('gitView.branch.rebaseDescription')}
+                    </p>
+                  </button>
+        </div>
+      </div>
+
+      {/* Branch Selection */}
+      <div className="flex flex-col gap-3">
+        <p className="typography-meta text-muted-foreground">
+          {operation === 'merge'
+            ? t('gitView.branch.branchToMergeInto', { branch: targetBranchLabel })
+            : t('gitView.branch.branchToRebaseOnto')}
+        </p>
+        <DropdownMenu open={branchDropdownOpen} onOpenChange={setBranchDropdownOpen} modal={false}>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              className={cn(dropdownTriggerVariants({ size: 'default' }), 'w-full')}
+            >
+              <span className={cn('truncate', !selectedBranch && 'text-muted-foreground')}>
+                {selectedBranch?.label || t('gitView.branch.selectBranch')}
+              </span>
+              <Icon name="arrow-down-s" className="size-4 opacity-60 shrink-0" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            align="start"
+            sideOffset={6}
+            className="w-[var(--anchor-width)] p-0 max-h-[min(var(--available-height),24rem)] flex flex-col overflow-hidden"
+          >
+            {/* rankByQuery owns filtering/ordering; cmdk must not re-filter. */}
+            <Command className="h-full min-h-0" shouldFilter={false}>
+              <CommandInput
+                ref={searchInputRef}
+                placeholder={t('gitView.branch.searchPlaceholder')}
+                value={branchSearch}
+                onValueChange={setBranchSearch}
+                onKeyDown={(event) => event.stopPropagation()}
+              />
+              <CommandList className="h-full min-h-0" disableHorizontal>
+                <CommandEmpty>{t('gitView.branch.empty')}</CommandEmpty>
+
+                {filteredLocal.length > 0 && (
+                  <CommandGroup heading={t('gitView.branch.localBranches')}>
+                    {filteredLocal.map((branch) => (
+                      <CommandItem
+                        key={`local-${branch}`}
+                        onSelect={() => handleSelectBranch({ kind: 'local', branch, label: branch })}
+                      >
+                        <span className="typography-ui-label text-foreground truncate">{branch}</span>
+                      </CommandItem>
+                    ))}
+                  </CommandGroup>
+                )}
+
+                {filteredLocal.length > 0 && filteredRemote.length > 0 ? <CommandSeparator /> : null}
+
+                {filteredRemote.length > 0 && (
+                  <CommandGroup heading={t('gitView.branch.remoteBranches')}>
+                    {filteredRemote.map((branch) => (
+                      <CommandItem key={`remote-${branch.label}`} onSelect={() => handleSelectBranch(branch)}>
+                        <span className="typography-ui-label text-foreground truncate">{branch.label}</span>
+                      </CommandItem>
+                    ))}
+                  </CommandGroup>
+                )}
+              </CommandList>
+            </Command>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+
+      {/* Summary */}
+      {selectedBranch ? (
+        <div className="rounded-lg oc-tile p-3">
+          <p className="typography-meta text-muted-foreground">
+            {operation === 'merge' ? (
+              <>
+                {t('gitView.branch.summaryMergePrefix')} <span className="font-mono text-foreground">{selectedBranch.label}</span> {t('gitView.branch.summaryMergeInfix')} <span className="font-mono text-foreground">{targetBranchLabel}</span>
+              </>
+            ) : (
+              <>
+                {t('gitView.branch.summaryRebasePrefix')} <span className="font-mono text-foreground">{targetBranchLabel}</span> {t('gitView.branch.summaryRebaseInfix')} <span className="font-mono text-foreground">{selectedBranch.label}</span>
+              </>
+            )}
+          </p>
+        </div>
+      ) : null}
+
+      {mode === 'dialog' ? (
+        <DialogFooter className="gap-2 pt-1">
+          <Button variant="ghost" size="sm" onClick={handleCancel}>
+            {t('gitView.common.cancel')}
+          </Button>
+          <Button
+            variant="default"
+            size="sm"
+            onClick={handleConfirm}
+            disabled={!selectedBranch}
+            className="gap-1.5"
+          >
+            {operation === 'merge' ? (
+              <>
+                <Icon name="git-merge" className="size-4" />
+                {t('gitView.operation.merge')}
+              </>
+            ) : (
+              <>
+                <Icon name="git-branch" className="size-4" />
+                {t('gitView.operation.rebase')}
+              </>
+            )}
+          </Button>
+        </DialogFooter>
+      ) : (
+        <div className="flex items-center gap-2 pt-1">
+          <Button variant="destructive" size="sm" onClick={handleCancel} disabled={isDisabled}>
+            {t('gitView.common.reset')}
+          </Button>
+          <div className="flex-1" />
+          <Button variant="default" size="sm" onClick={handleConfirm} disabled={isDisabled || !selectedBranch}>
+            {operation === 'merge' ? t('gitView.operation.merge') : t('gitView.operation.rebase')}
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+
+  const body = isOperating ? renderOperating() : renderForm();
+
+  if (mode === 'bare') {
+    return body;
+  }
+
+  if (mode === 'inline') {
+    return (
+      <section className="border-0 bg-transparent rounded-none">
+        <header className="border-b border-border/40 px-0 py-3">
+          <div className="space-y-1">
+            <div className="typography-ui-header font-semibold text-foreground">{t('gitView.branch.updateTitle')}</div>
+            <div className="typography-micro text-muted-foreground">
+              {t('gitView.branch.updateDescriptionPrefix')}{' '}
+              <span className="font-mono text-foreground">{targetBranchLabel}</span>.
+            </div>
+          </div>
+        </header>
+        <div className="pt-3">{body}</div>
+      </section>
+    );
+  }
+
+  return (
+    <>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5"
+            onClick={handleOpenDialog}
+            disabled={isDisabled}
+          >
+            {isOperating ? (
+              <Spinner className="size-4" />
+            ) : (
+              <Icon name="git-merge" className="size-4" />
+            )}
+            <span>{t('gitView.branch.mergeRebase')}</span>
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent sideOffset={8}>
+          {t('gitView.branch.mergeRebaseTooltip')}
+        </TooltipContent>
+      </Tooltip>
+
+      <Dialog open={dialogOpen} onOpenChange={(open) => {
+        if (!open) {
+          handleClose();
+        } else {
+          setDialogOpen(true);
+        }
+      }}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>{t('gitView.branch.updateTitle')}</DialogTitle>
+              <DialogDescription>
+              {isOperating ? (
+                operationCompleted ? (
+                  hasError ? t('gitView.branch.operationFailed') : t('gitView.branch.operationCompleted')
+                ) : (
+                  operation === 'merge' ? t('gitView.branch.mergingInProgress') : t('gitView.branch.rebasingInProgress')
+                )
+              ) : (
+                <>
+                  {t('gitView.branch.dialogDescriptionPrefix')}{' '}
+                  <span className="font-mono text-foreground">{targetBranchLabel}</span>
+                  .
+                </>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+
+          {body}
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+};

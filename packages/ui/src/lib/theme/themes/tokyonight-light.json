@@ -1,0 +1,121 @@
+{
+  "metadata": {
+    "id": "tokyonight-light",
+    "name": "Tokyonight",
+    "variant": "light",
+    "description": "Tokyonight",
+    "version": "1.0.0",
+    "tags": [
+      "light",
+      "palette"
+    ]
+  },
+  "colors": {
+    "primary": {
+      "base": "#195fba",
+      "hover": "#1757ab",
+      "active": "#15509c",
+      "muted": "#195fba80"
+    },
+    "surface": {
+      "background": "#e5e6ea",
+      "foreground": "#343a56",
+      "muted": "#e0e2e6",
+      "mutedForeground": "#4b5472",
+      "elevated": "#dcdee3",
+      "overlay": "#00000066",
+      "subtle": "#dfe0e4"
+    },
+    "interactive": {
+      "border": "#00000013",
+      "selection": "#d0d2da",
+      "borderHover": "#0000002f",
+      "borderFocus": "#abcbfa",
+      "focus": "#abcbfa",
+      "focusRing": "#abcbfa",
+      "cursor": "#1f284a",
+      "hover": "#0000000a",
+      "active": "#00000014"
+    },
+    "status": {
+      "error": "#97073a",
+      "errorBackground": "#97073a1f",
+      "errorBorder": "#97073a59",
+      "warning": "#65440a",
+      "warningBackground": "#65440a1f",
+      "warningBorder": "#65440a59",
+      "success": "#314e04",
+      "successBackground": "#314e041f",
+      "successBorder": "#314e0459",
+      "info": "#0a54ae",
+      "infoBackground": "#0a54ae1f",
+      "infoBorder": "#0a54ae59"
+    },
+    "syntax": {
+      "base": {
+        "background": "#eff0f4",
+        "comment": "#6b6f7a",
+        "keyword": "#9854f1",
+        "string": "#436612",
+        "number": "#b15c00",
+        "function": "#1f6fd4",
+        "variable": "#0f1638",
+        "type": "#77510a",
+        "operator": "#1f284a"
+      },
+      "tokens": {
+        "variableProperty": "#007197",
+        "parameter": "#0f1638",
+        "boolean": "#b15c00",
+        "punctuation": "#1f284a",
+        "stringEscape": "#b15c00",
+        "keywordImport": "#9854f1",
+        "tag": "#436612",
+        "regex": "#1f284a"
+      },
+      "highlights": {
+        "diffAdded": "#1a705a",
+        "diffAddedBackground": "#ddfaf0",
+        "diffRemoved": "#a92351",
+        "diffRemovedBackground": "#ffeef0",
+        "diffModified": "#77510a",
+        "diffModifiedBackground": "#77510a1f",
+        "lineNumber": "#3b4566",
+        "lineNumberActive": "#0f1638"
+      }
+    },
+    "pr": {
+      "blocked": "#925020",
+      "merged": "#774ea1"
+    },
+    "chat": {
+      "background": "#e5e6ea",
+      "userMessageBackground": "#d5dae4",
+      "divider": "#0000001a"
+    },
+    "markdown": {
+      "link": "#195cb6",
+      "linkHover": "#1757ab",
+      "inlineCode": "#436612",
+      "inlineCodeBackground": "#dfe0e4",
+      "blockquote": "#4b5472",
+      "blockquoteBorder": "#0000001a",
+      "listMarker": "#195fba99",
+      "bold": "#2e334c",
+      "italic": "#343a56",
+      "hr": "#00000013"
+    },
+    "tools": {
+      "border": "#00000013",
+      "icon": "#4b5472",
+      "title": "#343a56",
+      "description": "#4b5472",
+      "edit": {
+        "addedBackground": "#ddfaf0",
+        "removedBackground": "#ffeef0",
+        "modifiedBackground": "#77510a1f",
+        "lineNumber": "#3b4566"
+      }
+    }
+  }
+}

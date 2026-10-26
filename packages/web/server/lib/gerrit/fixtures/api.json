@@ -1,0 +1,2027 @@
+{
+  "_comment": "Recorded from live Gerrit 3.10.9 and 3.8.9 dev sites on 2026-10-22 (see DOCUMENTATION.md, Verified against live instances). Unsuffixed entries are 3.10.9, `_3_8` entries 3.8.9. Scrubbed: the origin is https://gerrit.example.com, change numbers are renumbered to the scenario (30, 41, 42, 43, 57), account ids to 1000096 (alice), 1000097 (bob), 1000098 (carol), commit time zones to UTC. Scenario: project platform/app, change 42 on master (three patchsets, topic login, hashtag ui, bob Code-Review+1 with an inline comment, carol Verified+1) carries the Change-Id below; 57 is its cherry-pick to stable-1.0 and 30 an abandoned upload on release-0.9 (Gerrit refuses a new change for a Change-Id closed on the same branch); 41 <- 42 <- 43 is a relation chain. Bodies are stored as JSON; fake-fetch.js puts the )]}' line in front of every JSON answer, as Gerrit does. `patch` and `fileContent` are the base64 text Gerrit answers to Accept: text/plain. `errors` keep refusals with their status and body as sent (and the content type when it is JSON). `accountSelfWithoutUsername` is the one hand-made entry: accountSelf without its username.",
+  "version": "3.10.9",
+  "accountSelf": {
+    "_account_id": 1000096,
+    "name": "Alice Admin",
+    "email": "alice@example.invalid",
+    "username": "alice"
+  },
+  "accountSelfWithoutUsername": {
+    "_account_id": 1000099,
+    "name": "Alice Admin",
+    "email": "alice@example.invalid"
+  },
+  "projectHead": "refs/heads/master",
+  "changeId": "I6a48fc0d54441928fb4fcde0604d67ace22d10f0",
+  "shas": {
+    "ps1": "459142aa76766de544e329264fb6b4d510d461d1",
+    "ps2": "d8e27c021ec2e83a9af6968f850b652d79cdf0d9",
+    "ps3": "4a01eedbd43e1f34e44eb9c8e45c49c29c9d1fb1",
+    "pick": "1004d8e60e6af95500f83533fd19191cf5584def",
+    "old": "95143ab6f2224bcdab85688c54f0dc5a229fc6f5"
+  },
+  "statusQuery": [
+    {
+      "id": "platform%2Fapp~57",
+      "triplet_id": "platform%2Fapp~stable-1.0~I6a48fc0d54441928fb4fcde0604d67ace22d10f0",
+      "project": "platform/app",
+      "branch": "stable-1.0",
+      "topic": "login-stable-1.0",
+      "hashtags": [],
+      "change_id": "I6a48fc0d54441928fb4fcde0604d67ace22d10f0",
+      "subject": "Add login form",
+      "status": "NEW",
+      "created": "2026-10-22 17:52:14.000000000",
+      "updated": "2026-10-22 17:52:14.000000000",
+      "submit_type": "MERGE_IF_NECESSARY",
+      "submittable": false,
+      "insertions": 7,
+      "deletions": 3,
+      "total_comment_count": 0,
+      "unresolved_comment_count": 0,
+      "has_review_started": true,
+      "cherry_pick_of_change": 31,
+      "cherry_pick_of_patch_set": 3,
+      "meta_rev_id": "a2c67e7de8ffe50eda4f03d708fd74a1b8aa54dc",
+      "_number": 57,
+      "virtual_id_number": 57,
+      "owner": {
+        "_account_id": 1000096,
+        "name": "Alice Admin",
+        "email": "alice@example.invalid",
+        "username": "alice"
+      },
+      "labels": {
+        "Code-Review": {
+          "values": {
+            "-2": "This shall not be submitted",
+            "-1": "I would prefer this is not submitted as is",
+            " 0": "No score",
+            "+1": "Looks good to me, but someone else must approve",
+            "+2": "Looks good to me, approved"
+          },
+          "description": "",
+          "default_value": 0
+        },
+        "Verified": {
+          "values": {
+            "-1": "Fails",
+            " 0": "No score",
+            "+1": "Verified"
+          },
+          "description": "",
+          "default_value": 0,
+          "optional": true
+        }
+      },
+      "removable_reviewers": [],
+      "reviewers": {},
+      "pending_reviewers": {},
+      "current_revision_number": 1,
+      "current_revision": "1004d8e60e6af95500f83533fd19191cf5584def",
+      "revisions": {
+        "1004d8e60e6af95500f83533fd19191cf5584def": {
+          "kind": "REWORK",
+          "_number": 1,
+          "created": "2026-10-22 17:52:14.000000000",
+          "uploader": {
+            "_account_id": 1000096,
+            "name": "Alice Admin",
+            "email": "alice@example.invalid",
+            "username": "alice"
+          },
+          "ref": "refs/changes/57/57/1",
+          "fetch": {
+            "anonymous http": {
+              "url": "https://gerrit.example.com/platform/app",
+              "ref": "refs/changes/57/57/1"
+            },
+            "http": {
+              "url": "https://alice@gerrit.example.com/a/platform/app",
+              "ref": "refs/changes/57/57/1"
+            }
+          },
+          "branch": "refs/heads/stable-1.0"
+        }
+      },
+      "requirements": [],
+      "submit_records": [
+        {
+          "rule_name": "gerrit~DefaultSubmitRule",
+          "status": "NOT_READY",
+          "labels": [
+            {
+              "label": "Code-Review",
+              "status": "NEED"
+            },
+            {
+              "label": "Verified",
+              "status": "MAY"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "platform%2Fapp~42",
+      "triplet_id": "platform%2Fapp~master~I6a48fc0d54441928fb4fcde0604d67ace22d10f0",
+      "project": "platform/app",
+      "branch": "master",
+      "topic": "login",
+      "attention_set": {
+        "1000096": {
+          "account": {
+            "_account_id": 1000096,
+            "name": "Alice Admin",
+            "email": "alice@example.invalid",
+            "username": "alice"
+          },
+          "last_update": "2026-10-22 17:52:14.000000000",
+          "reason": "Someone else replied on the change"
+        }
+      },
+      "removed_from_attention_set": {},
+      "hashtags": [
+        "ui"
+      ],
+      "change_id": "I6a48fc0d54441928fb4fcde0604d67ace22d10f0",
+      "subject": "Add login form",
+      "status": "NEW",
+      "created": "2026-10-22 17:52:13.000000000",
+      "updated": "2026-10-22 17:52:14.000000000",
+      "submit_type": "MERGE_IF_NECESSARY",
+      "submittable": false,
+      "insertions": 7,
+      "deletions": 3,
+      "total_comment_count": 1,
+      "unresolved_comment_count": 0,
+      "has_review_started": true,
+      "meta_rev_id": "d66d2536079d493db59f99975cded3561c1e55da",
+      "_number": 42,
+      "virtual_id_number": 42,
+      "owner": {
+        "_account_id": 1000096,
+        "name": "Alice Admin",
+        "email": "alice@example.invalid",
+        "username": "alice"
+      },
+      "labels": {
+        "Code-Review": {
+          "recommended": {
+            "_account_id": 1000097,
+            "name": "Bob Builder",
+            "email": "bob@example.invalid",
+            "username": "bob"
+          },
+          "all": [
+            {
+              "_account_id": 1000098,
+              "name": "Carol Reviewer",
+              "email": "carol@example.invalid",
+              "username": "carol"
+            },
+            {
+              "value": 1,
+              "date": "2026-10-22 17:52:14.000000000",
+              "_account_id": 1000097,
+              "name": "Bob Builder",
+              "email": "bob@example.invalid",
+              "username": "bob"
+            }
+          ],
+          "values": {
+            "-2": "This shall not be submitted",
+            "-1": "I would prefer this is not submitted as is",
+            " 0": "No score",
+            "+1": "Looks good to me, but someone else must approve",
+            "+2": "Looks good to me, approved"
+          },
+          "description": "",
+          "value": 1,
+          "default_value": 0
+        },
+        "Verified": {
+          "approved": {
+            "_account_id": 1000098,
+            "name": "Carol Reviewer",
+            "email": "carol@example.invalid",
+            "username": "carol"
+          },
+          "all": [
+            {
+              "value": 1,
+              "date": "2026-10-22 17:52:14.000000000",
+              "_account_id": 1000098,
+              "name": "Carol Reviewer",
+              "email": "carol@example.invalid",
+              "username": "carol"
+            },
+            {
+              "_account_id": 1000097,
+              "name": "Bob Builder",
+              "email": "bob@example.invalid",
+              "username": "bob"
+            }
+          ],
+          "values": {
+            "-1": "Fails",
+            " 0": "No score",
+            "+1": "Verified"
+          },
+          "description": "",
+          "default_value": 0,
+          "optional": true
+        }
+      },
+      "removable_reviewers": [
+        {
+          "_account_id": 1000098,
+          "name": "Carol Reviewer",
+          "email": "carol@example.invalid",
+          "username": "carol"
+        },
+        {
+          "_account_id": 1000097,
+          "name": "Bob Builder",
+          "email": "bob@example.invalid",
+          "username": "bob"
+        }
+      ],
+      "reviewers": {
+        "REVIEWER": [
+          {
+            "_account_id": 1000097,
+            "name": "Bob Builder",
+            "email": "bob@example.invalid",
+            "username": "bob"
+          },
+          {
+            "_account_id": 1000098,
+            "name": "Carol Reviewer",
+            "email": "carol@example.invalid",
+            "username": "carol"
+          }
+        ]
+      },
+      "pending_reviewers": {},
+      "current_revision_number": 3,
+      "current_revision": "4a01eedbd43e1f34e44eb9c8e45c49c29c9d1fb1",
+      "revisions": {
+        "459142aa76766de544e329264fb6b4d510d461d1": {
+          "kind": "REWORK",
+          "_number": 1,
+          "created": "2026-10-22 17:52:13.000000000",
+          "uploader": {
+            "_account_id": 1000096,
+            "name": "Alice Admin",
+            "email": "alice@example.invalid",
+            "username": "alice"
+          },
+          "ref": "refs/changes/42/42/1",
+          "fetch": {
+            "anonymous http": {
+              "url": "https://gerrit.example.com/platform/app",
+              "ref": "refs/changes/42/42/1"
+            },
+            "http": {
+              "url": "https://alice@gerrit.example.com/a/platform/app",
+              "ref": "refs/changes/42/42/1"
+            }
+          },
+          "branch": "refs/heads/master"
+        },
+        "d8e27c021ec2e83a9af6968f850b652d79cdf0d9": {
+          "kind": "REWORK",
+          "_number": 2,
+          "created": "2026-10-22 17:52:13.000000000",
+          "uploader": {
+            "_account_id": 1000096,
+            "name": "Alice Admin",
+            "email": "alice@example.invalid",
+            "username": "alice"
+          },
+          "ref": "refs/changes/42/42/2",
+          "fetch": {
+            "anonymous http": {
+              "url": "https://gerrit.example.com/platform/app",
+              "ref": "refs/changes/42/42/2"
+            },
+            "http": {
+              "url": "https://alice@gerrit.example.com/a/platform/app",
+              "ref": "refs/changes/42/42/2"
+            }
+          },
+          "branch": "refs/heads/master"
+        },
+        "4a01eedbd43e1f34e44eb9c8e45c49c29c9d1fb1": {
+          "kind": "REWORK",
+          "_number": 3,
+          "created": "2026-10-22 17:52:13.000000000",
+          "uploader": {
+            "_account_id": 1000096,
+            "name": "Alice Admin",
+            "email": "alice@example.invalid",
+            "username": "alice"
+          },
+          "ref": "refs/changes/42/42/3",
+          "fetch": {
+            "anonymous http": {
+              "url": "https://gerrit.example.com/platform/app",
+              "ref": "refs/changes/42/42/3"
+            },
+            "http": {
+              "url": "https://alice@gerrit.example.com/a/platform/app",
+              "ref": "refs/changes/42/42/3"
+            }
+          },
+          "branch": "refs/heads/master"
+        }
+      },
+      "requirements": [],
+      "submit_records": [
+        {
+          "rule_name": "gerrit~DefaultSubmitRule",
+          "status": "NOT_READY",
+          "labels": [
+            {
+              "label": "Code-Review",
+              "status": "NEED"
+            },
+            {
+              "label": "Verified",
+              "status": "MAY",
+              "applied_by": {
+                "_account_id": 1000098,
+                "name": "Carol Reviewer",
+                "email": "carol@example.invalid",
+                "username": "carol"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "platform%2Fapp~30",
+      "triplet_id": "platform%2Fapp~release-0.9~I6a48fc0d54441928fb4fcde0604d67ace22d10f0",
+      "project": "platform/app",
+      "branch": "release-0.9",
+      "hashtags": [],
+      "change_id": "I6a48fc0d54441928fb4fcde0604d67ace22d10f0",
+      "subject": "Add login form",
+      "status": "ABANDONED",
+      "created": "2026-10-22 17:52:13.000000000",
+      "updated": "2026-10-22 17:52:13.000000000",
+      "insertions": 2,
+      "deletions": 2,
+      "total_comment_count": 0,
+      "unresolved_comment_count": 0,
+      "has_review_started": true,
+      "meta_rev_id": "ad0720e137805771150dfff0de24d29ee2b759d5",
+      "_number": 30,
+      "virtual_id_number": 30,
+      "owner": {
+        "_account_id": 1000096,
+        "name": "Alice Admin",
+        "email": "alice@example.invalid",
+        "username": "alice"
+      },
+      "labels": {
+        "Code-Review": {
+          "values": {
+            "-2": "This shall not be submitted",
+            "-1": "I would prefer this is not submitted as is",
+            " 0": "No score",
+            "+1": "Looks good to me, but someone else must approve",
+            "+2": "Looks good to me, approved"
+          },
+          "description": "",
+          "default_value": 0
+        },
+        "Verified": {
+          "values": {
+            "-1": "Fails",
+            " 0": "No score",
+            "+1": "Verified"
+          },
+          "description": "",
+          "default_value": 0,
+          "optional": true
+        }
+      },
+      "removable_reviewers": [],
+      "reviewers": {},
+      "pending_reviewers": {},
+      "current_revision_number": 1,
+      "current_revision": "95143ab6f2224bcdab85688c54f0dc5a229fc6f5",
+      "revisions": {
+        "95143ab6f2224bcdab85688c54f0dc5a229fc6f5": {
+          "kind": "REWORK",
+          "_number": 1,
+          "created": "2026-10-22 17:52:13.000000000",
+          "uploader": {
+            "_account_id": 1000096,
+            "name": "Alice Admin",
+            "email": "alice@example.invalid",
+            "username": "alice"
+          },
+          "ref": "refs/changes/30/30/1",
+          "fetch": {
+            "anonymous http": {
+              "url": "https://gerrit.example.com/platform/app",
+              "ref": "refs/changes/30/30/1"
+            },
+            "http": {
+              "url": "https://alice@gerrit.example.com/a/platform/app",
+              "ref": "refs/changes/30/30/1"
+            }
+          },
+          "branch": "refs/heads/release-0.9"
+        }
+      },
+      "requirements": [],
+      "submit_records": []
+    }
+  ],
+  "change": {
+    "id": "platform%2Fapp~42",
+    "triplet_id": "platform%2Fapp~master~I6a48fc0d54441928fb4fcde0604d67ace22d10f0",
+    "project": "platform/app",
+    "branch": "master",
+    "topic": "login",
+    "attention_set": {
+      "1000096": {
+        "account": {
+          "_account_id": 1000096,
+          "name": "Alice Admin",
+          "email": "alice@example.invalid",
+          "username": "alice"
+        },
+        "last_update": "2026-10-22 17:52:14.000000000",
+        "reason": "Someone else replied on the change"
+      }
+    },
+    "removed_from_attention_set": {},
+    "hashtags": [
+      "ui"
+    ],
+    "change_id": "I6a48fc0d54441928fb4fcde0604d67ace22d10f0",
+    "subject": "Add login form",
+    "status": "NEW",
+    "created": "2026-10-22 17:52:13.000000000",
+    "updated": "2026-10-22 17:52:14.000000000",
+    "submit_type": "MERGE_IF_NECESSARY",
+    "submittable": false,
+    "insertions": 7,
+    "deletions": 3,
+    "total_comment_count": 1,
+    "unresolved_comment_count": 0,
+    "has_review_started": true,
+    "meta_rev_id": "d66d2536079d493db59f99975cded3561c1e55da",
+    "_number": 42,
+    "virtual_id_number": 42,
+    "owner": {
+      "_account_id": 1000096,
+      "name": "Alice Admin",
+      "email": "alice@example.invalid",
+      "username": "alice"
+    },
+    "labels": {
+      "Code-Review": {
+        "recommended": {
+          "_account_id": 1000097,
+          "name": "Bob Builder",
+          "email": "bob@example.invalid",
+          "username": "bob"
+        },
+        "all": [
+          {
+            "value": 0,
+            "permitted_voting_range": {
+              "min": -1,
+              "max": 1
+            },
+            "_account_id": 1000098,
+            "name": "Carol Reviewer",
+            "email": "carol@example.invalid",
+            "username": "carol"
+          },
+          {
+            "value": 1,
+            "date": "2026-10-22 17:52:14.000000000",
+            "permitted_voting_range": {
+              "min": -1,
+              "max": 1
+            },
+            "_account_id": 1000097,
+            "name": "Bob Builder",
+            "email": "bob@example.invalid",
+            "username": "bob"
+          }
+        ],
+        "values": {
+          "-2": "This shall not be submitted",
+          "-1": "I would prefer this is not submitted as is",
+          " 0": "No score",
+          "+1": "Looks good to me, but someone else must approve",
+          "+2": "Looks good to me, approved"
+        },
+        "description": "",
+        "value": 1,
+        "default_value": 0
+      },
+      "Verified": {
+        "approved": {
+          "_account_id": 1000098,
+          "name": "Carol Reviewer",
+          "email": "carol@example.invalid",
+          "username": "carol"
+        },
+        "all": [
+          {
+            "value": 1,
+            "date": "2026-10-22 17:52:14.000000000",
+            "permitted_voting_range": {
+              "min": -1,
+              "max": 1
+            },
+            "_account_id": 1000098,
+            "name": "Carol Reviewer",
+            "email": "carol@example.invalid",
+            "username": "carol"
+          },
+          {
+            "value": 0,
+            "permitted_voting_range": {
+              "min": -1,
+              "max": 1
+            },
+            "_account_id": 1000097,
+            "name": "Bob Builder",
+            "email": "bob@example.invalid",
+            "username": "bob"
+          }
+        ],
+        "values": {
+          "-1": "Fails",
+          " 0": "No score",
+          "+1": "Verified"
+        },
+        "description": "",
+        "default_value": 0,
+        "optional": true
+      }
+    },
+    "permitted_labels": {
+      "Code-Review": [
+        "-2",
+        "-1",
+        " 0",
+        "+1",
+        "+2"
+      ],
+      "Verified": [
+        "-1",
+        " 0",
+        "+1"
+      ]
+    },
+    "removable_labels": {
+      "Verified": {
+        "+1": [
+          {
+            "_account_id": 1000098,
+            "name": "Carol Reviewer",
+            "email": "carol@example.invalid",
+            "username": "carol"
+          }
+        ]
+      },
+      "Code-Review": {
+        "+1": [
+          {
+            "_account_id": 1000097,
+            "name": "Bob Builder",
+            "email": "bob@example.invalid",
+            "username": "bob"
+          }
+        ]
+      }
+    },
+    "removable_reviewers": [
+      {
+        "_account_id": 1000098,
+        "name": "Carol Reviewer",
+        "email": "carol@example.invalid",
+        "username": "carol"
+      },
+      {
+        "_account_id": 1000097,
+        "name": "Bob Builder",
+        "email": "bob@example.invalid",
+        "username": "bob"
+      }
+    ],
+    "reviewers": {
+      "REVIEWER": [
+        {
+          "_account_id": 1000097,
+          "name": "Bob Builder",
+          "email": "bob@example.invalid",
+          "username": "bob"
+        },
+        {
+          "_account_id": 1000098,
+          "name": "Carol Reviewer",
+          "email": "carol@example.invalid",
+          "username": "carol"
+        }
+      ]
+    },
+    "pending_reviewers": {},
+    "messages": [
+      {
+        "id": "9e2c0fba80382bae6fc3e641166ecd51ca386299",
+        "tag": "autogenerated:gerrit:setHashtag",
+        "author": {
+          "_account_id": 1000096,
+          "name": "Alice Admin",
+          "email": "alice@example.invalid",
+          "username": "alice"
+        },
+        "date": "2026-10-22 17:52:13.000000000",
+        "message": "Hashtag added: ui",
+        "accounts_in_message": [],
+        "_revision_number": 1
+      },
+      {
+        "id": "4899447e0efdf574d3eaa7de7fc53d3ff2439f15",
+        "tag": "autogenerated:gerrit:newPatchSet",
+        "author": {
+          "_account_id": 1000096,
+          "name": "Alice Admin",
+          "email": "alice@example.invalid",
+          "username": "alice"
+        },
+        "date": "2026-10-22 17:52:13.000000000",
+        "message": "Uploaded patch set 2.",
+        "accounts_in_message": [],
+        "_revision_number": 2
+      },
+      {
+        "id": "5c49cea62732711f4a1b2a5f35e8446f698f796c",
+        "tag": "autogenerated:gerrit:newPatchSet",
+        "author": {
+          "_account_id": 1000096,
+          "name": "Alice Admin",
+          "email": "alice@example.invalid",
+          "username": "alice"
+        },
+        "date": "2026-10-22 17:52:13.000000000",
+        "message": "Uploaded patch set 3.",
+        "accounts_in_message": [],
+        "_revision_number": 3
+      },
+      {
+        "id": "1e3bd08cf896f8c1a9fbd6bb287c9d8b03fbbefe",
+        "author": {
+          "_account_id": 1000097,
+          "name": "Bob Builder",
+          "email": "bob@example.invalid",
+          "username": "bob"
+        },
+        "date": "2026-10-22 17:52:14.000000000",
+        "message": "Patch Set 3: Code-Review+1\n\n(1 comment)\n\nNice, one nit inline.",
+        "accounts_in_message": [],
+        "_revision_number": 3
+      },
+      {
+        "id": "d66d2536079d493db59f99975cded3561c1e55da",
+        "author": {
+          "_account_id": 1000098,
+          "name": "Carol Reviewer",
+          "email": "carol@example.invalid",
+          "username": "carol"
+        },
+        "date": "2026-10-22 17:52:14.000000000",
+        "message": "Patch Set 3: Verified+1",
+        "accounts_in_message": [],
+        "_revision_number": 3
+      }
+    ],
+    "current_revision_number": 3,
+    "current_revision": "4a01eedbd43e1f34e44eb9c8e45c49c29c9d1fb1",
+    "revisions": {
+      "459142aa76766de544e329264fb6b4d510d461d1": {
+        "kind": "REWORK",
+        "_number": 1,
+        "created": "2026-10-22 17:52:13.000000000",
+        "uploader": {
+          "_account_id": 1000096,
+          "name": "Alice Admin",
+          "email": "alice@example.invalid",
+          "username": "alice"
+        },
+        "ref": "refs/changes/42/42/1",
+        "fetch": {
+          "anonymous http": {
+            "url": "https://gerrit.example.com/platform/app",
+            "ref": "refs/changes/42/42/1"
+          },
+          "http": {
+            "url": "https://alice@gerrit.example.com/a/platform/app",
+            "ref": "refs/changes/42/42/1"
+          }
+        },
+        "branch": "refs/heads/master"
+      },
+      "d8e27c021ec2e83a9af6968f850b652d79cdf0d9": {
+        "kind": "REWORK",
+        "_number": 2,
+        "created": "2026-10-22 17:52:13.000000000",
+        "uploader": {
+          "_account_id": 1000096,
+          "name": "Alice Admin",
+          "email": "alice@example.invalid",
+          "username": "alice"
+        },
+        "ref": "refs/changes/42/42/2",
+        "fetch": {
+          "anonymous http": {
+            "url": "https://gerrit.example.com/platform/app",
+            "ref": "refs/changes/42/42/2"
+          },
+          "http": {
+            "url": "https://alice@gerrit.example.com/a/platform/app",
+            "ref": "refs/changes/42/42/2"
+          }
+        },
+        "branch": "refs/heads/master"
+      },
+      "4a01eedbd43e1f34e44eb9c8e45c49c29c9d1fb1": {
+        "kind": "REWORK",
+        "_number": 3,
+        "created": "2026-10-22 17:52:13.000000000",
+        "uploader": {
+          "_account_id": 1000096,
+          "name": "Alice Admin",
+          "email": "alice@example.invalid",
+          "username": "alice"
+        },
+        "ref": "refs/changes/42/42/3",
+        "fetch": {
+          "anonymous http": {
+            "url": "https://gerrit.example.com/platform/app",
+            "ref": "refs/changes/42/42/3"
+          },
+          "http": {
+            "url": "https://alice@gerrit.example.com/a/platform/app",
+            "ref": "refs/changes/42/42/3"
+          }
+        },
+        "commit": {
+          "parents": [
+            {
+              "commit": "a3ad0a49fa7abc1ce1497c81dadce072fd0f87b9",
+              "subject": "Extract session module"
+            }
+          ],
+          "author": {
+            "name": "alice",
+            "email": "alice@example.invalid",
+            "date": "2026-10-22 17:52:13.000000000",
+            "tz": 0
+          },
+          "committer": {
+            "name": "alice",
+            "email": "alice@example.invalid",
+            "date": "2026-10-22 17:52:13.000000000",
+            "tz": 0
+          },
+          "subject": "Add login form",
+          "message": "Add login form\n\nShow the login form before the session check.\n\nChange-Id: I6a48fc0d54441928fb4fcde0604d67ace22d10f0\n"
+        },
+        "branch": "refs/heads/master"
+      }
+    },
+    "requirements": [],
+    "submit_records": [
+      {
+        "rule_name": "gerrit~DefaultSubmitRule",
+        "status": "NOT_READY",
+        "labels": [
+          {
+            "label": "Code-Review",
+            "status": "NEED"
+          },
+          {
+            "label": "Verified",
+            "status": "MAY",
+            "applied_by": {
+              "_account_id": 1000098,
+              "name": "Carol Reviewer",
+              "email": "carol@example.invalid",
+              "username": "carol"
+            }
+          }
+        ]
+      }
+    ],
+    "submit_requirements": [
+      {
+        "name": "Code-Review",
+        "status": "UNSATISFIED",
+        "is_legacy": true,
+        "submittability_expression_result": {
+          "expression": "label:Code-Review=MAX -label:Code-Review=MIN",
+          "fulfilled": false,
+          "status": "FAIL",
+          "passing_atoms": [],
+          "failing_atoms": [
+            "label:Code-Review=MAX",
+            "-label:Code-Review=MIN"
+          ]
+        }
+      }
+    ]
+  },
+  "change_3_8": {
+    "id": "platform%2Fapp~master~I9e17d652f19f068f634406cf6043125e5b2023be",
+    "project": "platform/app",
+    "branch": "master",
+    "topic": "login",
+    "attention_set": {
+      "1000096": {
+        "account": {
+          "_account_id": 1000096,
+          "name": "Alice Admin",
+          "email": "alice@example.invalid",
+          "username": "alice"
+        },
+        "last_update": "2026-10-22 17:50:45.000000000",
+        "reason": "Someone else replied on the change"
+      }
+    },
+    "removed_from_attention_set": {},
+    "hashtags": [
+      "ui"
+    ],
+    "change_id": "I9e17d652f19f068f634406cf6043125e5b2023be",
+    "subject": "Add login form",
+    "status": "NEW",
+    "created": "2026-10-22 17:50:45.000000000",
+    "updated": "2026-10-22 17:50:45.000000000",
+    "submit_type": "MERGE_IF_NECESSARY",
+    "submittable": false,
+    "insertions": 7,
+    "deletions": 3,
+    "total_comment_count": 1,
+    "unresolved_comment_count": 0,
+    "has_review_started": true,
+    "meta_rev_id": "aa0d0d1782bad127636e6ae58583c3979579775f",
+    "_number": 42,
+    "virtual_id_number": 42,
+    "owner": {
+      "_account_id": 1000096,
+      "name": "Alice Admin",
+      "email": "alice@example.invalid",
+      "username": "alice"
+    },
+    "labels": {
+      "Code-Review": {
+        "recommended": {
+          "_account_id": 1000097,
+          "name": "Bob Builder",
+          "email": "bob@example.invalid",
+          "username": "bob"
+        },
+        "all": [
+          {
+            "value": 0,
+            "permitted_voting_range": {
+              "min": -1,
+              "max": 1
+            },
+            "_account_id": 1000098,
+            "name": "Carol Reviewer",
+            "email": "carol@example.invalid",
+            "username": "carol"
+          },
+          {
+            "value": 1,
+            "date": "2026-10-22 17:50:45.000000000",
+            "permitted_voting_range": {
+              "min": -1,
+              "max": 1
+            },
+            "_account_id": 1000097,
+            "name": "Bob Builder",
+            "email": "bob@example.invalid",
+            "username": "bob"
+          }
+        ],
+        "values": {
+          "-2": "This shall not be submitted",
+          "-1": "I would prefer this is not submitted as is",
+          " 0": "No score",
+          "+1": "Looks good to me, but someone else must approve",
+          "+2": "Looks good to me, approved"
+        },
+        "description": "",
+        "value": 1,
+        "default_value": 0
+      },
+      "Verified": {
+        "approved": {
+          "_account_id": 1000098,
+          "name": "Carol Reviewer",
+          "email": "carol@example.invalid",
+          "username": "carol"
+        },
+        "all": [
+          {
+            "value": 1,
+            "date": "2026-10-22 17:50:45.000000000",
+            "permitted_voting_range": {
+              "min": -1,
+              "max": 1
+            },
+            "_account_id": 1000098,
+            "name": "Carol Reviewer",
+            "email": "carol@example.invalid",
+            "username": "carol"
+          },
+          {
+            "value": 0,
+            "permitted_voting_range": {
+              "min": -1,
+              "max": 1
+            },
+            "_account_id": 1000097,
+            "name": "Bob Builder",
+            "email": "bob@example.invalid",
+            "username": "bob"
+          }
+        ],
+        "values": {
+          "-1": "Fails",
+          " 0": "No score",
+          "+1": "Verified"
+        },
+        "description": "",
+        "default_value": 0,
+        "optional": true
+      }
+    },
+    "permitted_labels": {
+      "Code-Review": [
+        "-2",
+        "-1",
+        " 0",
+        "+1",
+        "+2"
+      ],
+      "Verified": [
+        "-1",
+        " 0",
+        "+1"
+      ]
+    },
+    "removable_labels": {
+      "Verified": {
+        "+1": [
+          {
+            "_account_id": 1000098,
+            "name": "Carol Reviewer",
+            "email": "carol@example.invalid",
+            "username": "carol"
+          }
+        ]
+      },
+      "Code-Review": {
+        "+1": [
+          {
+            "_account_id": 1000097,
+            "name": "Bob Builder",
+            "email": "bob@example.invalid",
+            "username": "bob"
+          }
+        ]
+      }
+    },
+    "removable_reviewers": [
+      {
+        "_account_id": 1000098,
+        "name": "Carol Reviewer",
+        "email": "carol@example.invalid",
+        "username": "carol"
+      },
+      {
+        "_account_id": 1000097,
+        "name": "Bob Builder",
+        "email": "bob@example.invalid",
+        "username": "bob"
+      }
+    ],
+    "reviewers": {
+      "REVIEWER": [
+        {
+          "_account_id": 1000097,
+          "name": "Bob Builder",
+          "email": "bob@example.invalid",
+          "username": "bob"
+        },
+        {
+          "_account_id": 1000098,
+          "name": "Carol Reviewer",
+          "email": "carol@example.invalid",
+          "username": "carol"
+        }
+      ]
+    },
+    "pending_reviewers": {},
+    "messages": [
+      {
+        "id": "c4fc7985eee7b4a9807b5926a8921b7af7f7788e",
+        "tag": "autogenerated:gerrit:setHashtag",
+        "author": {
+          "_account_id": 1000096,
+          "name": "Alice Admin",
+          "email": "alice@example.invalid",
+          "username": "alice"
+        },
+        "date": "2026-10-22 17:50:45.000000000",
+        "message": "Hashtag added: ui",
+        "accounts_in_message": [],
+        "_revision_number": 1
+      },
+      {
+        "id": "7aac6f3ecb868f5d10024a9adda68577e90514d5",
+        "tag": "autogenerated:gerrit:newPatchSet",
+        "author": {
+          "_account_id": 1000096,
+          "name": "Alice Admin",
+          "email": "alice@example.invalid",
+          "username": "alice"
+        },
+        "date": "2026-10-22 17:50:45.000000000",
+        "message": "Uploaded patch set 2.",
+        "accounts_in_message": [],
+        "_revision_number": 2
+      },
+      {
+        "id": "c0e2823e356f86fd0632f306b22f9c25809e9197",
+        "tag": "autogenerated:gerrit:newPatchSet",
+        "author": {
+          "_account_id": 1000096,
+          "name": "Alice Admin",
+          "email": "alice@example.invalid",
+          "username": "alice"
+        },
+        "date": "2026-10-22 17:50:45.000000000",
+        "message": "Uploaded patch set 3.",
+        "accounts_in_message": [],
+        "_revision_number": 3
+      },
+      {
+        "id": "d7aa47975c6c0d17f0d96c0dc404b0ac0ce49963",
+        "author": {
+          "_account_id": 1000097,
+          "name": "Bob Builder",
+          "email": "bob@example.invalid",
+          "username": "bob"
+        },
+        "date": "2026-10-22 17:50:45.000000000",
+        "message": "Patch Set 3: Code-Review+1\n\n(1 comment)\n\nNice, one nit inline.",
+        "accounts_in_message": [],
+        "_revision_number": 3
+      },
+      {
+        "id": "aa0d0d1782bad127636e6ae58583c3979579775f",
+        "author": {
+          "_account_id": 1000098,
+          "name": "Carol Reviewer",
+          "email": "carol@example.invalid",
+          "username": "carol"
+        },
+        "date": "2026-10-22 17:50:45.000000000",
+        "message": "Patch Set 3: Verified+1",
+        "accounts_in_message": [],
+        "_revision_number": 3
+      }
+    ],
+    "current_revision": "42b3bc813f0ad855bc31303bed9de8f58f8f706c",
+    "revisions": {
+      "52172f7d82efe52e098bfba3eea3e6701896e0d4": {
+        "kind": "REWORK",
+        "_number": 1,
+        "created": "2026-10-22 17:50:45.000000000",
+        "uploader": {
+          "_account_id": 1000096,
+          "name": "Alice Admin",
+          "email": "alice@example.invalid",
+          "username": "alice"
+        },
+        "ref": "refs/changes/42/42/1",
+        "fetch": {
+          "anonymous http": {
+            "url": "https://gerrit.example.com/platform/app",
+            "ref": "refs/changes/42/42/1"
+          },
+          "http": {
+            "url": "https://alice@gerrit.example.com/a/platform/app",
+            "ref": "refs/changes/42/42/1"
+          }
+        }
+      },
+      "50933e5d7371e8daf3e4923b2e5822ceca2ee886": {
+        "kind": "REWORK",
+        "_number": 2,
+        "created": "2026-10-22 17:50:45.000000000",
+        "uploader": {
+          "_account_id": 1000096,
+          "name": "Alice Admin",
+          "email": "alice@example.invalid",
+          "username": "alice"
+        },
+        "ref": "refs/changes/42/42/2",
+        "fetch": {
+          "anonymous http": {
+            "url": "https://gerrit.example.com/platform/app",
+            "ref": "refs/changes/42/42/2"
+          },
+          "http": {
+            "url": "https://alice@gerrit.example.com/a/platform/app",
+            "ref": "refs/changes/42/42/2"
+          }
+        }
+      },
+      "42b3bc813f0ad855bc31303bed9de8f58f8f706c": {
+        "kind": "REWORK",
+        "_number": 3,
+        "created": "2026-10-22 17:50:45.000000000",
+        "uploader": {
+          "_account_id": 1000096,
+          "name": "Alice Admin",
+          "email": "alice@example.invalid",
+          "username": "alice"
+        },
+        "ref": "refs/changes/42/42/3",
+        "fetch": {
+          "anonymous http": {
+            "url": "https://gerrit.example.com/platform/app",
+            "ref": "refs/changes/42/42/3"
+          },
+          "http": {
+            "url": "https://alice@gerrit.example.com/a/platform/app",
+            "ref": "refs/changes/42/42/3"
+          }
+        },
+        "commit": {
+          "parents": [
+            {
+              "commit": "cb79efaee1308bc2aaf4af78c560d5158f3dd0c8",
+              "subject": "Extract session module"
+            }
+          ],
+          "author": {
+            "name": "alice",
+            "email": "alice@example.invalid",
+            "date": "2026-10-22 17:50:45.000000000",
+            "tz": 0
+          },
+          "committer": {
+            "name": "alice",
+            "email": "alice@example.invalid",
+            "date": "2026-10-22 17:50:45.000000000",
+            "tz": 0
+          },
+          "subject": "Add login form",
+          "message": "Add login form\n\nShow the login form before the session check.\n\nChange-Id: I9e17d652f19f068f634406cf6043125e5b2023be\n"
+        }
+      }
+    },
+    "requirements": [],
+    "submit_records": [
+      {
+        "rule_name": "gerrit~DefaultSubmitRule",
+        "status": "NOT_READY",
+        "labels": [
+          {
+            "label": "Code-Review",
+            "status": "NEED"
+          },
+          {
+            "label": "Verified",
+            "status": "MAY",
+            "applied_by": {
+              "_account_id": 1000098,
+              "name": "Carol Reviewer",
+              "email": "carol@example.invalid",
+              "username": "carol"
+            }
+          }
+        ]
+      }
+    ],
+    "submit_requirements": [
+      {
+        "name": "Code-Review",
+        "status": "UNSATISFIED",
+        "is_legacy": true,
+        "submittability_expression_result": {
+          "expression": "label:Code-Review=MAX -label:Code-Review=MIN",
+          "fulfilled": false,
+          "status": "FAIL",
+          "passing_atoms": [],
+          "failing_atoms": [
+            "label:Code-Review=MAX",
+            "-label:Code-Review=MIN"
+          ]
+        }
+      }
+    ]
+  },
+  "changeDetailedLabelsOnly_3_8": {
+    "id": "platform%2Fapp~master~I9e17d652f19f068f634406cf6043125e5b2023be",
+    "project": "platform/app",
+    "branch": "master",
+    "topic": "login",
+    "attention_set": {
+      "1000096": {
+        "account": {
+          "_account_id": 1000096,
+          "name": "Alice Admin",
+          "email": "alice@example.invalid",
+          "username": "alice"
+        },
+        "last_update": "2026-10-22 17:50:45.000000000",
+        "reason": "Someone else replied on the change"
+      }
+    },
+    "removed_from_attention_set": {},
+    "hashtags": [
+      "ui"
+    ],
+    "change_id": "I9e17d652f19f068f634406cf6043125e5b2023be",
+    "subject": "Add login form",
+    "status": "NEW",
+    "created": "2026-10-22 17:50:45.000000000",
+    "updated": "2026-10-22 17:50:45.000000000",
+    "submit_type": "MERGE_IF_NECESSARY",
+    "submittable": false,
+    "insertions": 7,
+    "deletions": 3,
+    "total_comment_count": 1,
+    "unresolved_comment_count": 0,
+    "has_review_started": true,
+    "meta_rev_id": "aa0d0d1782bad127636e6ae58583c3979579775f",
+    "_number": 42,
+    "virtual_id_number": 42,
+    "owner": {
+      "_account_id": 1000096,
+      "name": "Alice Admin",
+      "email": "alice@example.invalid",
+      "username": "alice"
+    },
+    "labels": {
+      "Code-Review": {
+        "all": [
+          {
+            "value": 0,
+            "permitted_voting_range": {
+              "min": -1,
+              "max": 1
+            },
+            "_account_id": 1000098,
+            "name": "Carol Reviewer",
+            "email": "carol@example.invalid",
+            "username": "carol"
+          },
+          {
+            "value": 1,
+            "date": "2026-10-22 17:50:45.000000000",
+            "permitted_voting_range": {
+              "min": -1,
+              "max": 1
+            },
+            "_account_id": 1000097,
+            "name": "Bob Builder",
+            "email": "bob@example.invalid",
+            "username": "bob"
+          }
+        ],
+        "values": {
+          "-2": "This shall not be submitted",
+          "-1": "I would prefer this is not submitted as is",
+          " 0": "No score",
+          "+1": "Looks good to me, but someone else must approve",
+          "+2": "Looks good to me, approved"
+        },
+        "description": "",
+        "default_value": 0
+      },
+      "Verified": {
+        "all": [
+          {
+            "value": 1,
+            "date": "2026-10-22 17:50:45.000000000",
+            "permitted_voting_range": {
+              "min": -1,
+              "max": 1
+            },
+            "_account_id": 1000098,
+            "name": "Carol Reviewer",
+            "email": "carol@example.invalid",
+            "username": "carol"
+          },
+          {
+            "value": 0,
+            "permitted_voting_range": {
+              "min": -1,
+              "max": 1
+            },
+            "_account_id": 1000097,
+            "name": "Bob Builder",
+            "email": "bob@example.invalid",
+            "username": "bob"
+          }
+        ],
+        "values": {
+          "-1": "Fails",
+          " 0": "No score",
+          "+1": "Verified"
+        },
+        "description": "",
+        "default_value": 0,
+        "optional": true
+      }
+    },
+    "permitted_labels": {
+      "Code-Review": [
+        "-2",
+        "-1",
+        " 0",
+        "+1",
+        "+2"
+      ],
+      "Verified": [
+        "-1",
+        " 0",
+        "+1"
+      ]
+    },
+    "removable_labels": {
+      "Verified": {
+        "+1": [
+          {
+            "_account_id": 1000098,
+            "name": "Carol Reviewer",
+            "email": "carol@example.invalid",
+            "username": "carol"
+          }
+        ]
+      },
+      "Code-Review": {
+        "+1": [
+          {
+            "_account_id": 1000097,
+            "name": "Bob Builder",
+            "email": "bob@example.invalid",
+            "username": "bob"
+          }
+        ]
+      }
+    },
+    "removable_reviewers": [
+      {
+        "_account_id": 1000098,
+        "name": "Carol Reviewer",
+        "email": "carol@example.invalid",
+        "username": "carol"
+      },
+      {
+        "_account_id": 1000097,
+        "name": "Bob Builder",
+        "email": "bob@example.invalid",
+        "username": "bob"
+      }
+    ],
+    "reviewers": {
+      "REVIEWER": [
+        {
+          "_account_id": 1000097,
+          "name": "Bob Builder",
+          "email": "bob@example.invalid",
+          "username": "bob"
+        },
+        {
+          "_account_id": 1000098,
+          "name": "Carol Reviewer",
+          "email": "carol@example.invalid",
+          "username": "carol"
+        }
+      ]
+    },
+    "pending_reviewers": {},
+    "messages": [
+      {
+        "id": "c4fc7985eee7b4a9807b5926a8921b7af7f7788e",
+        "tag": "autogenerated:gerrit:setHashtag",
+        "author": {
+          "_account_id": 1000096,
+          "name": "Alice Admin",
+          "email": "alice@example.invalid",
+          "username": "alice"
+        },
+        "date": "2026-10-22 17:50:45.000000000",
+        "message": "Hashtag added: ui",
+        "accounts_in_message": [],
+        "_revision_number": 1
+      },
+      {
+        "id": "7aac6f3ecb868f5d10024a9adda68577e90514d5",
+        "tag": "autogenerated:gerrit:newPatchSet",
+        "author": {
+          "_account_id": 1000096,
+          "name": "Alice Admin",
+          "email": "alice@example.invalid",
+          "username": "alice"
+        },
+        "date": "2026-10-22 17:50:45.000000000",
+        "message": "Uploaded patch set 2.",
+        "accounts_in_message": [],
+        "_revision_number": 2
+      },
+      {
+        "id": "c0e2823e356f86fd0632f306b22f9c25809e9197",
+        "tag": "autogenerated:gerrit:newPatchSet",
+        "author": {
+          "_account_id": 1000096,
+          "name": "Alice Admin",
+          "email": "alice@example.invalid",
+          "username": "alice"
+        },
+        "date": "2026-10-22 17:50:45.000000000",
+        "message": "Uploaded patch set 3.",
+        "accounts_in_message": [],
+        "_revision_number": 3
+      },
+      {
+        "id": "d7aa47975c6c0d17f0d96c0dc404b0ac0ce49963",
+        "author": {
+          "_account_id": 1000097,
+          "name": "Bob Builder",
+          "email": "bob@example.invalid",
+          "username": "bob"
+        },
+        "date": "2026-10-22 17:50:45.000000000",
+        "message": "Patch Set 3: Code-Review+1\n\n(1 comment)\n\nNice, one nit inline.",
+        "accounts_in_message": [],
+        "_revision_number": 3
+      },
+      {
+        "id": "aa0d0d1782bad127636e6ae58583c3979579775f",
+        "author": {
+          "_account_id": 1000098,
+          "name": "Carol Reviewer",
+          "email": "carol@example.invalid",
+          "username": "carol"
+        },
+        "date": "2026-10-22 17:50:45.000000000",
+        "message": "Patch Set 3: Verified+1",
+        "accounts_in_message": [],
+        "_revision_number": 3
+      }
+    ],
+    "current_revision": "42b3bc813f0ad855bc31303bed9de8f58f8f706c",
+    "revisions": {
+      "52172f7d82efe52e098bfba3eea3e6701896e0d4": {
+        "kind": "REWORK",
+        "_number": 1,
+        "created": "2026-10-22 17:50:45.000000000",
+        "uploader": {
+          "_account_id": 1000096,
+          "name": "Alice Admin",
+          "email": "alice@example.invalid",
+          "username": "alice"
+        },
+        "ref": "refs/changes/42/42/1",
+        "fetch": {
+          "anonymous http": {
+            "url": "https://gerrit.example.com/platform/app",
+            "ref": "refs/changes/42/42/1"
+          },
+          "http": {
+            "url": "https://alice@gerrit.example.com/a/platform/app",
+            "ref": "refs/changes/42/42/1"
+          }
+        }
+      },
+      "50933e5d7371e8daf3e4923b2e5822ceca2ee886": {
+        "kind": "REWORK",
+        "_number": 2,
+        "created": "2026-10-22 17:50:45.000000000",
+        "uploader": {
+          "_account_id": 1000096,
+          "name": "Alice Admin",
+          "email": "alice@example.invalid",
+          "username": "alice"
+        },
+        "ref": "refs/changes/42/42/2",
+        "fetch": {
+          "anonymous http": {
+            "url": "https://gerrit.example.com/platform/app",
+            "ref": "refs/changes/42/42/2"
+          },
+          "http": {
+            "url": "https://alice@gerrit.example.com/a/platform/app",
+            "ref": "refs/changes/42/42/2"
+          }
+        }
+      },
+      "42b3bc813f0ad855bc31303bed9de8f58f8f706c": {
+        "kind": "REWORK",
+        "_number": 3,
+        "created": "2026-10-22 17:50:45.000000000",
+        "uploader": {
+          "_account_id": 1000096,
+          "name": "Alice Admin",
+          "email": "alice@example.invalid",
+          "username": "alice"
+        },
+        "ref": "refs/changes/42/42/3",
+        "fetch": {
+          "anonymous http": {
+            "url": "https://gerrit.example.com/platform/app",
+            "ref": "refs/changes/42/42/3"
+          },
+          "http": {
+            "url": "https://alice@gerrit.example.com/a/platform/app",
+            "ref": "refs/changes/42/42/3"
+          }
+        },
+        "commit": {
+          "parents": [
+            {
+              "commit": "cb79efaee1308bc2aaf4af78c560d5158f3dd0c8",
+              "subject": "Extract session module"
+            }
+          ],
+          "author": {
+            "name": "alice",
+            "email": "alice@example.invalid",
+            "date": "2026-10-22 17:50:45.000000000",
+            "tz": 0
+          },
+          "committer": {
+            "name": "alice",
+            "email": "alice@example.invalid",
+            "date": "2026-10-22 17:50:45.000000000",
+            "tz": 0
+          },
+          "subject": "Add login form",
+          "message": "Add login form\n\nShow the login form before the session check.\n\nChange-Id: I9e17d652f19f068f634406cf6043125e5b2023be\n"
+        }
+      }
+    },
+    "requirements": [],
+    "submit_records": [
+      {
+        "rule_name": "gerrit~DefaultSubmitRule",
+        "status": "NOT_READY",
+        "labels": [
+          {
+            "label": "Code-Review",
+            "status": "NEED"
+          },
+          {
+            "label": "Verified",
+            "status": "MAY",
+            "applied_by": {
+              "_account_id": 1000098,
+              "name": "Carol Reviewer",
+              "email": "carol@example.invalid",
+              "username": "carol"
+            }
+          }
+        ]
+      }
+    ],
+    "submit_requirements": [
+      {
+        "name": "Code-Review",
+        "status": "UNSATISFIED",
+        "is_legacy": true,
+        "submittability_expression_result": {
+          "expression": "label:Code-Review=MAX -label:Code-Review=MIN",
+          "fulfilled": false,
+          "status": "FAIL",
+          "passing_atoms": [],
+          "failing_atoms": [
+            "label:Code-Review=MAX",
+            "-label:Code-Review=MIN"
+          ]
+        }
+      }
+    ]
+  },
+  "files": {
+    "src/old.js": {
+      "status": "D",
+      "old_mode": 33188,
+      "lines_deleted": 1,
+      "size_delta": -25,
+      "size": 0
+    },
+    "/COMMIT_MSG": {
+      "status": "A",
+      "lines_inserted": 11,
+      "size_delta": 323,
+      "size": 323
+    },
+    "docs/login.md": {
+      "status": "A",
+      "new_mode": 33188,
+      "lines_inserted": 3,
+      "size_delta": 19,
+      "size": 19
+    },
+    "src/login.js": {
+      "old_mode": 33188,
+      "new_mode": 33188,
+      "lines_inserted": 4,
+      "lines_deleted": 2,
+      "size_delta": 49,
+      "size": 92
+    },
+    "src/session.js": {
+      "status": "R",
+      "old_mode": 33188,
+      "new_mode": 33188,
+      "old_path": "src/auth.js",
+      "size_delta": 0,
+      "size": 42
+    }
+  },
+  "comments": {
+    "src/login.js": [
+      {
+        "author": {
+          "_account_id": 1000097,
+          "name": "Bob Builder",
+          "email": "bob@example.invalid",
+          "username": "bob"
+        },
+        "change_message_id": "1e3bd08cf896f8c1a9fbd6bb287c9d8b03fbbefe",
+        "unresolved": false,
+        "patch_set": 3,
+        "id": "edb7a6ec_543b4ed7",
+        "line": 2,
+        "updated": "2026-10-22 17:52:14.000000000",
+        "message": "Nit: name this field.",
+        "commit_id": "4a01eedbd43e1f34e44eb9c8e45c49c29c9d1fb1"
+      }
+    ]
+  },
+  "related": {
+    "changes": [
+      {
+        "project": "platform/app",
+        "change_id": "I8edf13664e7ca962a13a732bac9c574493ea9c40",
+        "commit": {
+          "commit": "72ba7d775897464c12b53c77a953130fb3e14c56",
+          "parents": [
+            {
+              "commit": "4a01eedbd43e1f34e44eb9c8e45c49c29c9d1fb1"
+            }
+          ],
+          "author": {
+            "name": "alice",
+            "email": "alice@example.invalid",
+            "date": "2026-10-22 17:52:13.000000000",
+            "tz": 0
+          },
+          "subject": "Remember the user"
+        },
+        "_change_number": 43,
+        "_revision_number": 1,
+        "_current_revision_number": 1,
+        "status": "NEW"
+      },
+      {
+        "project": "platform/app",
+        "change_id": "I6a48fc0d54441928fb4fcde0604d67ace22d10f0",
+        "commit": {
+          "commit": "4a01eedbd43e1f34e44eb9c8e45c49c29c9d1fb1",
+          "parents": [
+            {
+              "commit": "a3ad0a49fa7abc1ce1497c81dadce072fd0f87b9"
+            }
+          ],
+          "author": {
+            "name": "alice",
+            "email": "alice@example.invalid",
+            "date": "2026-10-22 17:52:13.000000000",
+            "tz": 0
+          },
+          "subject": "Add login form"
+        },
+        "_change_number": 42,
+        "_revision_number": 3,
+        "_current_revision_number": 3,
+        "status": "NEW"
+      },
+      {
+        "project": "platform/app",
+        "change_id": "Ie318881658aafe4a907cd7bb1d0ea957d845dd76",
+        "commit": {
+          "commit": "a3ad0a49fa7abc1ce1497c81dadce072fd0f87b9",
+          "parents": [
+            {
+              "commit": "e037fc7cf21b4f903773f0d972e0bd1aae3d3f73"
+            }
+          ],
+          "author": {
+            "name": "alice",
+            "email": "alice@example.invalid",
+            "date": "2026-10-22 17:52:13.000000000",
+            "tz": 0
+          },
+          "subject": "Extract session module"
+        },
+        "_change_number": 41,
+        "_revision_number": 1,
+        "_current_revision_number": 1,
+        "status": "NEW"
+      }
+    ]
+  },
+  "relatedNone": {
+    "changes": []
+  },
+  "branches": [
+    {
+      "ref": "HEAD",
+      "revision": "master"
+    },
+    {
+      "web_links": [
+        {
+          "name": "browse",
+          "url": "/plugins/gitiles/platform/app/+/refs/meta/config"
+        }
+      ],
+      "ref": "refs/meta/config",
+      "revision": "5e04863cae573a863e27e418e4040f93b8d123fc"
+    },
+    {
+      "web_links": [
+        {
+          "name": "browse",
+          "url": "/plugins/gitiles/platform/app/+/refs/heads/master"
+        }
+      ],
+      "ref": "refs/heads/master",
+      "revision": "0f7ed773727068995c2ca6148578998d976322c5"
+    },
+    {
+      "web_links": [
+        {
+          "name": "browse",
+          "url": "/plugins/gitiles/platform/app/+/refs/heads/release-0.9"
+        }
+      ],
+      "ref": "refs/heads/release-0.9",
+      "revision": "e037fc7cf21b4f903773f0d972e0bd1aae3d3f73",
+      "can_delete": true
+    },
+    {
+      "web_links": [
+        {
+          "name": "browse",
+          "url": "/plugins/gitiles/platform/app/+/refs/heads/stable-1.0"
+        }
+      ],
+      "ref": "refs/heads/stable-1.0",
+      "revision": "e037fc7cf21b4f903773f0d972e0bd1aae3d3f73",
+      "can_delete": true
+    }
+  ],
+  "reviewResult": {
+    "labels": {
+      "Code-Review": 1
+    }
+  },
+  "reviewResult_3_10": {
+    "labels": {
+      "Code-Review": 1
+    },
+    "change_info": {
+      "id": "platform%2Fapp~43",
+      "triplet_id": "platform%2Fapp~master~I8edf13664e7ca962a13a732bac9c574493ea9c40",
+      "project": "platform/app",
+      "branch": "master",
+      "attention_set": {
+        "1000096": {
+          "account": {
+            "_account_id": 1000096
+          },
+          "last_update": "2026-10-22 17:52:14.000000000",
+          "reason": "Someone else replied on the change"
+        }
+      },
+      "removed_from_attention_set": {
+        "1000097": {
+          "account": {
+            "_account_id": 1000097
+          },
+          "last_update": "2026-10-22 17:52:14.000000000",
+          "reason": "Reviewer/Cc was removed"
+        }
+      },
+      "hashtags": [],
+      "change_id": "I8edf13664e7ca962a13a732bac9c574493ea9c40",
+      "subject": "Remember the user",
+      "status": "NEW",
+      "created": "2026-10-22 17:52:14.000000000",
+      "updated": "2026-10-22 17:52:14.000000000",
+      "submit_type": "MERGE_IF_NECESSARY",
+      "insertions": 2,
+      "deletions": 1,
+      "total_comment_count": 0,
+      "unresolved_comment_count": 0,
+      "has_review_started": true,
+      "meta_rev_id": "2a409320b2d6b97f173003434fb8be3408a11992",
+      "_number": 43,
+      "virtual_id_number": 43,
+      "owner": {
+        "_account_id": 1000096
+      },
+      "current_revision_number": 1,
+      "requirements": [],
+      "submit_records": [
+        {
+          "rule_name": "gerrit~DefaultSubmitRule",
+          "status": "NOT_READY",
+          "labels": [
+            {
+              "label": "Code-Review",
+              "status": "NEED"
+            },
+            {
+              "label": "Verified",
+              "status": "MAY"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "reviewerAdded": {
+    "input": "1000097",
+    "reviewers": [
+      {
+        "approvals": {
+          "Code-Review": " 0",
+          "Verified": " 0"
+        },
+        "_account_id": 1000097,
+        "name": "Bob Builder",
+        "email": "bob@example.invalid",
+        "username": "bob"
+      }
+    ]
+  },
+  "reviewerRefused": {
+    "input": "999",
+    "error": "Account '999' not found\n999 does not identify a registered user or group"
+  },
+  "topLevelChange": {
+    "id": "demo~main~I4057e412701ef621a6f75e2b4300792fcdfea978",
+    "project": "demo",
+    "branch": "main",
+    "attention_set": {},
+    "removed_from_attention_set": {
+      "1000096": {
+        "account": {
+          "_account_id": 1000096
+        },
+        "last_update": "2026-10-22 17:10:06.000000000",
+        "reason": "removed on reply"
+      }
+    },
+    "hashtags": [],
+    "change_id": "I4057e412701ef621a6f75e2b4300792fcdfea978",
+    "subject": "Add feature one",
+    "status": "NEW",
+    "created": "2026-10-22 17:09:58.000000000",
+    "updated": "2026-10-22 17:47:29.000000000",
+    "submit_type": "MERGE_IF_NECESSARY",
+    "insertions": 1,
+    "deletions": 0,
+    "total_comment_count": 0,
+    "unresolved_comment_count": 0,
+    "has_review_started": true,
+    "meta_rev_id": "9bed06ee5ab28d3de2502385e034dad8f3cc1316",
+    "_number": 1,
+    "virtual_id_number": 1,
+    "owner": {
+      "_account_id": 1000096
+    },
+    "current_revision": "1b08d7a528e85409c08997e92e50c896cdc4ec26",
+    "revisions": {
+      "dab6c65071af07cda4ffc33fd29510bd5ca3185d": {
+        "kind": "REWORK",
+        "_number": 1,
+        "created": "2026-10-22 17:09:58.000000000",
+        "uploader": {
+          "_account_id": 1000096
+        },
+        "ref": "refs/changes/01/1/1",
+        "fetch": {
+          "anonymous http": {
+            "url": "https://gerrit.example.com/demo",
+            "ref": "refs/changes/01/1/1"
+          },
+          "http": {
+            "url": "https://alice@gerrit.example.com/a/demo",
+            "ref": "refs/changes/01/1/1"
+          }
+        }
+      },
+      "1b08d7a528e85409c08997e92e50c896cdc4ec26": {
+        "kind": "REWORK",
+        "_number": 2,
+        "created": "2026-10-22 17:09:58.000000000",
+        "uploader": {
+          "_account_id": 1000096
+        },
+        "ref": "refs/changes/01/1/2",
+        "fetch": {
+          "anonymous http": {
+            "url": "https://gerrit.example.com/demo",
+            "ref": "refs/changes/01/1/2"
+          },
+          "http": {
+            "url": "https://alice@gerrit.example.com/a/demo",
+            "ref": "refs/changes/01/1/2"
+          }
+        }
+      }
+    },
+    "requirements": [],
+    "submit_records": [
+      {
+        "rule_name": "gerrit~DefaultSubmitRule",
+        "status": "OK",
+        "labels": [
+          {
+            "label": "Code-Review",
+            "status": "OK",
+            "applied_by": {
+              "_account_id": 1000096
+            }
+          },
+          {
+            "label": "Verified",
+            "status": "MAY"
+          }
+        ]
+      }
+    ]
+  },
+  "errors": {
+    "submitBlocked": {
+      "status": 409,
+      "body": "Failed to submit 3 changes due to the following problems:\nChange 41: submit requirement 'Code-Review' is unsatisfied.\nChange 42: submit requirement 'Code-Review' is unsatisfied.\nChange 43: submit requirement 'Code-Review' is unsatisfied.\n"
+    },
+    "unauthorized": {
+      "status": 401,
+      "body": "Unauthorized"
+    },
+    "notFound": {
+      "status": 404,
+      "body": "Not found: platform/app~99999\n"
+    },
+    "notWorkInProgress": {
+      "status": 409,
+      "body": "change is not work in progress\n"
+    },
+    "reviewerRefused": {
+      "status": 400,
+      "contentType": "application/json;charset=utf-8",
+      "body": ")]}'\n{\"input\":\"999\",\"error\":\"Account \\u0027999\\u0027 not found\\n999 does not identify a registered user or group\"}\n"
+    },
+    "commentTooLong": {
+      "status": 400,
+      "body": "One or more comments were rejected in validation: Comment size exceeds limit (17408 > 16384)\n"
+    }
+  },
+  "patch": "RnJvbSA0YTAxZWVkYmQ0M2UxZjM0ZTQ0ZWI5YzhlNDVjNDljMjljOWQxZmIxIE1vbiBTZXAgMTcgMDA6MDA6MDAgMjAwMQpGcm9tOiBhbGljZSA8YWxpY2VAZXhhbXBsZS5pbnZhbGlkPgpEYXRlOiBUaHUsIDIyIE9jdCAyMDI2IDE3OjUyOjEzICswMDAwClN1YmplY3Q6IFtQQVRDSF0gQWRkIGxvZ2luIGZvcm0KClNob3cgdGhlIGxvZ2luIGZvcm0gYmVmb3JlIHRoZSBzZXNzaW9uIGNoZWNrLgoKQ2hhbmdlLUlkOiBJNmE0OGZjMGQ1NDQ0MTkyOGZiNGZjZGUwNjA0ZDY3YWNlMjJkMTBmMAotLS0KCmRpZmYgLS1naXQgYS9kb2NzL2xvZ2luLm1kIGIvZG9jcy9sb2dpbi5tZApuZXcgZmlsZSBtb2RlIDEwMDY0NAppbmRleCAwMDAwMDAwLi43ZDEyN2U3Ci0tLSAvZGV2L251bGwKKysrIGIvZG9jcy9sb2dpbi5tZApAQCAtMCwwICsxLDMgQEAKKyMgTG9naW4KKworVGhlIGZvcm0uCmRpZmYgLS1naXQgYS9zcmMvYXV0aC5qcyBiL3NyYy9hdXRoLmpzCmRlbGV0ZWQgZmlsZSBtb2RlIDEwMDY0NAppbmRleCA5NDRhZGFiLi4wMDAwMDAwCi0tLSBhL3NyYy9hdXRoLmpzCisrKyAvZGV2L251bGwKQEAgLTEsMyArMCwwIEBACi1leHBvcnQgZnVuY3Rpb24gYXV0aCgpIHsKLSAgcmV0dXJuIHRydWU7Ci19CmRpZmYgLS1naXQgYS9zcmMvbG9naW4uanMgYi9zcmMvbG9naW4uanMKaW5kZXggMzAxZjA5Mi4uYzQwYTFiZCAxMDA2NDQKLS0tIGEvc3JjL2xvZ2luLmpzCisrKyBiL3NyYy9sb2dpbi5qcwpAQCAtMSwzICsxLDUgQEAKLWV4cG9ydCBmdW5jdGlvbiBsb2dpbigpIHsKLSAgcmV0dXJuIG51bGw7CitleHBvcnQgZnVuY3Rpb24gbG9naW4oZm9ybSkgeworICB2YWxpZGF0ZShmb3JtKTsKKyAgcmV0dXJuIGZvcm07CiB9Citjb25zdCB2YWxpZGF0ZSA9ICgpID0+IHt9OwpkaWZmIC0tZ2l0IGEvc3JjL29sZC5qcyBiL3NyYy9vbGQuanMKZGVsZXRlZCBmaWxlIG1vZGUgMTAwNjQ0CmluZGV4IDYzYzM1NjQuLjAwMDAwMDAKLS0tIGEvc3JjL29sZC5qcworKysgL2Rldi9udWxsCkBAIC0xICswLDAgQEAKLWV4cG9ydCBjb25zdCBvbGQgPSB0cnVlOwpkaWZmIC0tZ2l0IGEvc3JjL3Nlc3Npb24uanMgYi9zcmMvc2Vzc2lvbi5qcwpuZXcgZmlsZSBtb2RlIDEwMDY0NAppbmRleCAwMDAwMDAwLi45NDRhZGFiCi0tLSAvZGV2L251bGwKKysrIGIvc3JjL3Nlc3Npb24uanMKQEAgLTAsMCArMSwzIEBACitleHBvcnQgZnVuY3Rpb24gYXV0aCgpIHsKKyAgcmV0dXJuIHRydWU7Cit9Cg==",
+  "fileContent": {
+    "head": "ZXhwb3J0IGZ1bmN0aW9uIGxvZ2luKGZvcm0pIHsKICB2YWxpZGF0ZShmb3JtKTsKICByZXR1cm4gZm9ybTsKfQpjb25zdCB2YWxpZGF0ZSA9ICgpID0+IHt9Owo=",
+    "parent": "ZXhwb3J0IGZ1bmN0aW9uIGxvZ2luKCkgewogIHJldHVybiBudWxsOwp9Cg=="
+  }
+}

@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="98" height="20" role="img" aria-label="Created with OpenCode">
+  <linearGradient id="s" x2="0" y2="100%">
+    <stop offset="0" stop-color="#bbb" stop-opacity=".1"/>
+    <stop offset="1" stop-opacity=".1"/>
+  </linearGradient>
+  <clipPath id="r">
+    <rect width="98" height="20" rx="3" fill="#fff"/>
+  </clipPath>
+  <g clip-path="url(#r)">
+    <rect width="86" height="20" fill="#100F0F"/>
+    <rect x="86" width="12" height="20" fill="#100F0F"/>
+    <rect width="98" height="20" fill="url(#s)"/>
+  </g>
+  <text x="4.5" y="14" fill="#FFFCF0" font-family="DejaVu Sans,Verdana,Geneva,sans-serif" font-size="11" text-anchor="start">Created with</text>
+  <g transform="translate(82 4) scale(0.3)">
+    <path d="M24 32H8V16H24V32Z" fill="#4B4646"/>
+    <path d="M24 8H8V32H24V8ZM32 40H0V0H32V40Z" fill="#F1ECEC"/>
+  </g>
+</svg>

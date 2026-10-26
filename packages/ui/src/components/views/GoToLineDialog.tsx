@@ -1,0 +1,277 @@
+import React from 'react';
+
+import { EditorSelection } from '@codemirror/state';
+import { EditorView } from '@codemirror/view';
+
+import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
+import { useI18n } from '@/lib/i18n';
+import { cn } from '@/lib/utils';
+
+type GoToLineDialogProps = {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  /**
+   * The editor arrives as a ref, never as the view itself: React's dev
+   * profiling walks changed props deep enough to reach the view's window and
+   * its frames, and a cross-origin extension frame there throws mid-commit,
+   * which leaves the whole app unable to render (react#34840).
+   */
+  viewRef: React.RefObject<EditorView | null>;
+  variant?: 'overlay' | 'inline';
+};
+
+type CursorSnapshot = {
+  character: number;
+  lineNumber: number;
+  selection: EditorSelection;
+};
+
+const resolveLineNumber = (rawValue: string, view: EditorView | null): number | null => {
+  if (!view) {
+    return null;
+  }
+
+  const parsed = Number.parseInt(rawValue.trim(), 10);
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    return null;
+  }
+
+  return Math.min(parsed, view.state.doc.lines);
+};
+
+const getCursorSnapshot = (view: EditorView, selection: EditorSelection): CursorSnapshot => {
+  const line = view.state.doc.lineAt(selection.main.head);
+  return {
+    lineNumber: line.number,
+    character: selection.main.head - line.from + 1,
+    selection,
+  };
+};
+
+const moveSelectionToLine = (view: EditorView, lineNumber: number, preferredCharacter: number) => {
+  const line = view.state.doc.line(lineNumber);
+  const nextCharacter = Math.max(1, Math.min(preferredCharacter, line.length + 1));
+  const position = line.from + nextCharacter - 1;
+
+  view.dispatch({
+    selection: EditorSelection.cursor(position),
+    effects: EditorView.scrollIntoView(position, { y: 'center' }),
+  });
+};
+
+export function GoToLineDialog({ open, onOpenChange, viewRef, variant = 'overlay' }: GoToLineDialogProps) {
+  const { t } = useI18n();
+  // The owner re-renders when its editor mounts or goes away.
+  const view = viewRef.current;
+  const [inputValue, setInputValue] = React.useState('');
+  const initialCursorRef = React.useRef<CursorSnapshot | null>(null);
+  const committedRef = React.useRef(false);
+  const panelRef = React.useRef<HTMLDivElement | null>(null);
+  const inputRef = React.useRef<HTMLInputElement | null>(null);
+
+  const lineNumber = React.useMemo(
+    () => resolveLineNumber(inputValue, view),
+    [inputValue, view],
+  );
+
+  React.useEffect(() => {
+    if (!open || !view) {
+      return;
+    }
+
+    committedRef.current = false;
+    initialCursorRef.current = getCursorSnapshot(view, view.state.selection);
+    setInputValue('');
+  }, [open, view]);
+
+  React.useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    window.requestAnimationFrame(() => {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    });
+  }, [open]);
+
+  React.useEffect(() => {
+    if (!open || !view || !initialCursorRef.current) {
+      return;
+    }
+
+    if (lineNumber === null) {
+      const { selection } = initialCursorRef.current;
+      view.dispatch({
+        selection,
+        effects: EditorView.scrollIntoView(selection.main.from, { y: 'center' }),
+      });
+      return;
+    }
+
+    moveSelectionToLine(view, lineNumber, initialCursorRef.current.character);
+  }, [lineNumber, open, view]);
+
+  const restoreInitialSelection = React.useCallback(() => {
+    if (!view || committedRef.current || !initialCursorRef.current) {
+      return;
+    }
+
+    const { selection } = initialCursorRef.current;
+    view.dispatch({
+      selection,
+      effects: EditorView.scrollIntoView(selection.main.from, { y: 'center' }),
+    });
+  }, [view]);
+
+  // Closed from outside (the toolbar button) without going to a line: put
+  // the cursor back, as Escape and an outside click do.
+  const wasOpenRef = React.useRef(open);
+  React.useEffect(() => {
+    if (wasOpenRef.current && !open) restoreInitialSelection();
+    wasOpenRef.current = open;
+  }, [open, restoreInitialSelection]);
+
+  const handleOpenChange = React.useCallback((nextOpen: boolean) => {
+    if (!nextOpen) {
+      restoreInitialSelection();
+    }
+    onOpenChange(nextOpen);
+  }, [onOpenChange, restoreInitialSelection]);
+
+  const handleSubmit = React.useCallback(() => {
+    if (!view || lineNumber === null || !initialCursorRef.current) {
+      return;
+    }
+
+    committedRef.current = true;
+    moveSelectionToLine(view, lineNumber, initialCursorRef.current.character);
+    onOpenChange(false);
+    view.focus();
+  }, [lineNumber, onOpenChange, view]);
+
+  React.useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const panel = panelRef.current;
+      const target = event.target;
+      if (!panel || !(target instanceof Element) || panel.contains(target)) {
+        return;
+      }
+      // The toolbar button closes the panel with its own click; closing here
+      // first would let that click open it again.
+      if (target.closest('[data-go-to-line-toggle]')) return;
+      handleOpenChange(false);
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') {
+        return;
+      }
+      event.preventDefault();
+      handleOpenChange(false);
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown, true);
+    document.addEventListener('keydown', handleKeyDown, true);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown, true);
+      document.removeEventListener('keydown', handleKeyDown, true);
+    };
+  }, [handleOpenChange, open, variant]);
+
+  const helperText = React.useMemo(() => {
+    if (!view) {
+      return t('goToLineDialog.helper.editorUnavailable');
+    }
+
+    if (lineNumber === null) {
+      const snapshot = initialCursorRef.current ?? getCursorSnapshot(view, view.state.selection);
+      return t('goToLineDialog.helper.currentLineRange', {
+        current: snapshot.lineNumber,
+        max: view.state.doc.lines,
+      });
+    }
+
+    return t('goToLineDialog.helper.goToLine', { line: lineNumber });
+  }, [lineNumber, t, view]);
+
+  if (variant === 'inline') {
+    if (!open) {
+      return null;
+    }
+
+    return (
+      <div
+        ref={panelRef}
+        data-editor-overlay
+        className="ms-1 flex h-6 items-center gap-1"
+      >
+        <Input
+          ref={inputRef}
+          type="number"
+          min={1}
+          step={1}
+          inputMode="numeric"
+          value={inputValue}
+          onChange={(event) => setInputValue(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              handleSubmit();
+            }
+          }}
+          placeholder={t('goToLineDialog.field.linePlaceholderShort')}
+          className="h-6 w-20 rounded-md border-border/70 bg-transparent px-2 typography-meta"
+        />
+        <Button
+          variant="outline"
+          size="xs"
+          onClick={handleSubmit}
+          disabled={!view || lineNumber === null}
+          className="h-6 px-2"
+        >
+          {t('goToLineDialog.actions.go')}
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      ref={panelRef}
+      data-editor-overlay
+      className={cn(
+        'absolute inset-s-3 top-3 z-40 w-[min(32rem,calc(100%-1.5rem))] rounded-xl border border-[var(--interactive-border)] bg-[color:color-mix(in_srgb,var(--surface-elevated)_94%,transparent)] p-2.5 shadow-lg backdrop-blur-sm transition-all',
+        open ? 'pointer-events-auto translate-y-0 opacity-100' : 'pointer-events-none -translate-y-1 opacity-0',
+      )}
+    >
+      <div className="min-w-0">
+        <Input
+          ref={inputRef}
+          type="number"
+          min={1}
+          step={1}
+          inputMode="numeric"
+          value={inputValue}
+          onChange={(event) => setInputValue(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              handleSubmit();
+            }
+          }}
+          placeholder={t('goToLineDialog.field.linePlaceholder')}
+          className="h-8 w-full rounded-md border-border/70 bg-surface-elevated/60 typography-ui-label"
+        />
+        <div className="mt-2 rounded-md bg-primary/15 px-3 py-1.5 typography-ui-label text-foreground/95">
+          {helperText}
+        </div>
+      </div>
+    </div>
+  );
+}

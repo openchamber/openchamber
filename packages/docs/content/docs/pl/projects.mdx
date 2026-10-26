@@ -1,0 +1,48 @@
+---
+title: Projekty
+description: Organizuj swoją pracę w projekty i przełączaj się między nimi.
+---
+
+# Projekty
+
+Projekt to folder na Twoim komputerze, który OpenChamber śledzi — zwykle jedna baza kodu. Przełączenie projektu zmienia folder, w którym pracuje agent, wraz z sesjami i ustawieniami tego projektu.
+
+## Dodaj projekt
+
+Projekt możesz dodać z kilku miejsc:
+
+- pozycja **Add project** w palecie poleceń
+- przycisk **+** u góry paska bocznego sesji
+- przeglądarka folderów, gdy wybierasz katalog
+
+Wskaż folder, a OpenChamber go zapamięta. Nazwa pochodzi od folderu; możesz ją później zmienić.
+
+## Przełączaj projekty
+
+Wybierz projekt z paska bocznego, aby go aktywować. Wszystko — sesje, git, notatki — podąża za otwartym projektem.
+
+## Spraw, by projekt był rozpoznawalny
+
+Otwórz **Settings → Projects**, aby nadać projektowi własną nazwę, kolor lub ikonę. OpenChamber próbuje znaleźć ikonę automatycznie — zobacz [Ikony projektów](/pl/project-icons/).
+
+> W VS Code OpenChamber zawsze używa otwartego folderu jako jedynego projektu, więc nie ma nic do dodawania ani przełączania. Strona ustawień Projects jest tam ukryta.
+
+## Środowisko projektu
+
+Gdy narzędzia projektu pochodzą z direnv, devenv albo powłoki Nix, hooki Gita, terminal i [akcje projektu](/pl/project-actions/) same ich nie znajdą. Otwórz **Ustawienia → Projekty**, wybierz projekt i w sekcji **Środowisko**:
+
+- dodaj zmienne potrzebne tylko temu projektowi
+- albo ustaw **polecenie środowiska**, które je wypisuje, na przykład `direnv export json` lub `devenv print-dev-env --json`
+
+Polecenie uruchamia się w folderze projektu, a dla worktree w jego własnym folderze. Uruchamia się ponownie, gdy robisz commit, otwierasz terminal albo uruchamiasz akcję, o ile ostatnie uruchomienie ma już kilka minut, a **Uruchom ponownie** uruchamia je od razu. Samo otwarcie projektu go nie uruchamia. Pod polem widać, ile zmiennych dodało ostatnie uruchomienie albo dlaczego się nie udało. Nieudane uruchomienie niczego nie dodaje, a Git i terminal działają dalej bez niego.
+
+Te zmienne trafiają do Gita, terminala i akcji projektu, obok tych z **Ustawienia → Ogólne → Zmienne środowiskowe** (zobacz [Zmienne środowiskowe](/pl/environment/#zmienne-dla-opencode-git-i-terminala)). OpenCode obsługuje wszystkie projekty jednym procesem, więc nie dostaje zmiennych projektu: to, czego potrzebuje agent, wpisz na ogólną listę.
+
+Polecenie ustawiasz tylko Ty. Nie jest odczytywane z repozytorium, więc sklonowane repozytorium nie może zmusić OpenChamber do uruchomienia czegokolwiek.
+
+## Powiązane
+
+- [Czaty](/pl/chats/) — sesje bez projektu, do szybkich pytań
+- [Notatki, listy zadań i plany projektu](/pl/notes-todos-plans/) — prowadź robocze notatki dla każdego projektu
+- [Akcje projektu](/pl/project-actions/) — zapisuj często uruchamiane polecenia
+- [Kontekst](/pl/context/) — zobacz, ile pamięci modelu zużywa sesja

@@ -1,0 +1,722 @@
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import * as vscode from 'vscode';
+import { randomUUID } from 'crypto';
+import { getProviderSources, getStoredProviderConfig, readConfig, upsertProviderConfig } from './opencodeConfig';
+import { getProviderAuth } from './opencodeAuth';
+import { OpenCode } from '@opencode/client';
+import { asSessionId, asSessionIdList, asSessionMetadata, asTimestamp, parseJson, type JsonValue, type SessionArchiveOnOpenCode, type SessionMetadataOnOpenCode, type SessionStateStore } from './openchamberSessionState';
+import type { OpenCodeManager } from './opencode';
+import { activateQuotaGiftReset, fetchQuotaForProvider, listConfiguredQuotaProviders, type QuotaGiftResetType } from './quotaProviders';
+import { credentialStatus, deleteCredential, importCursorCredential, normalizeCredential, readCredential, validateCredential, writeCredential, type ManagedProvider } from './quotaCredentials';
+import { getSessionActivitySnapshot } from './sessionActivityWatcher';
+import { sessionNotificationSchema } from './sessionNotifications';
+import { getOpenCodeUpgradeStatus, upgradeManagedOpenCode } from './opencode-upgrade-runtime';
+import { normalizeWindowsDriveLetter, pathsEqualWithNormalizedDriveLetter } from './pathUtils';
+import { resolveWorkspaceFolders } from './workspaceResolver';
+import { reconstructOriginalContentFromPatch } from './patchReconstruction';
+import type { BridgeContext, BridgeResponse } from './bridge';
+import { ENTERPRISE_MODE_ERROR, isEnterpriseMode, publicEnterprisePolicy } from '../../web/server/lib/enterprise-mode.js';
+import { discoverProviderModels } from './model-discovery';
+
+/** The base URL a custom provider was saved with; discovery sends its stored key only there. */
+const readStoredProviderBaseURL = (providerID: string): string | undefined => {
+  const provider = readConfig().provider;
+  if (!provider || typeof provider !== 'object') return undefined;
+  const entry = (provider as Record<string, { options?: { baseURL?: unknown } } | undefined>)[providerID];
+  const baseURL = entry?.options?.baseURL;
+  return typeof baseURL === 'string' ? baseURL : undefined;
+};
+
+const isSessionNotFound = (error: Error): boolean => error.name === 'SessionNotFoundError';
+
+// OpenCode answers LocationNotFoundError only when the session's folder does
+// not exist. Mirrors `SESSION_DIRECTORY_MISSING_CODE` in
+// packages/web/server/lib/openchamber-sessions/routes.js; webview/main.tsx
+// passes it on to packages/ui/src/sync/session-archive-batch.ts.
+const SESSION_DIRECTORY_MISSING_CODE = 'SESSION_DIRECTORY_MISSING';
+
+const openCodeClientFor = (manager: OpenCodeManager | undefined, directory?: string) => {
+  const apiUrl = manager?.getApiUrl();
+  if (!manager || !apiUrl) throw new Error('OpenCode is not available');
+  const auth = manager.getOpenCodeAuthHeaders();
+  const headers = directory ? { ...auth, 'x-opencode-directory': encodeURIComponent(directory) } : auth;
+  return OpenCode.make({ baseUrl: apiUrl.replace(/\/+$/, ''), headers });
+};
+
+/** OpenCode's project for sessions outside any repository; its folder is no home for a session. */
+const GLOBAL_PROJECT_ID = 'global';
+
+/**
+ * Archive state on the OpenCode instance this window manages. A session whose
+ * directory is gone moves to its project's main folder, read from the project
+ * list in the workspace folder OpenCode already runs (see
+ * `packages/web/server/lib/openchamber-sessions/session-archive.js`).
+ */
+const sessionArchiveOnOpenCode = (manager: OpenCodeManager | undefined): SessionArchiveOnOpenCode => {
+  const client = openCodeClientFor(manager);
+  let projectFolders: Promise<Map<string, string>> | null = null;
+  const readProjectFolders = () => {
+    projectFolders ??= openCodeClientFor(manager, manager?.getWorkingDirectory() || undefined).project.list({ archived: true })
+      .then((projects) => new Map(projects.map((project) => [project.id, project.canonical])));
+    return projectFolders;
+  };
+  return {
+    setArchived: (sessionID, archived) => client.session.update({ sessionID, archived }),
+    relocate: async (sessionID, archived) => {
+      const session = await client.session.get({ sessionID });
+      if (session.projectID === GLOBAL_PROJECT_ID) return false;
+      const folder = (await readProjectFolders()).get(session.projectID);
+      if (!folder || folder === session.location.directory) return false;
+      await client.session.move({ sessionID, directory: folder });
+      await client.session.update({ sessionID, archived });
+      return true;
+    },
+  };
+};
+
+/** Session metadata on the OpenCode instance this window manages. */
+const sessionMetadataOnOpenCode = (manager: OpenCodeManager | undefined): SessionMetadataOnOpenCode => {
+  const client = openCodeClientFor(manager);
+  return {
+    read: async (sessionID) => {
+      try {
+        const session = await client.session.get({ sessionID });
+        // Round-trip through JSON: the wire type is opaque JSON, the store's is `JsonValue`.
+        return asSessionMetadata(parseJson(JSON.stringify(session.metadata ?? {})) ?? undefined) ?? {};
+      } catch (error) {
+        if (error instanceof Error && isSessionNotFound(error)) return null;
+        throw error;
+      }
+    },
+    write: (sessionID, metadata) => client.session.update({ sessionID, metadata }),
+  };
+};
+
+type BridgeMessageInput = {
+  id: string;
+  type: string;
+  payload?: unknown;
+};
+
+type SystemRuntimeDeps = {
+  resolveUserPath: (value: string, baseDirectory: string) => string;
+  sessionState: SessionStateStore;
+  fetchModelsMetadata: () => Promise<unknown>;
+  updateCheckUrl: string;
+  clientReloadDelayMs: number;
+};
+
+const getOpenChamberConfigDir = (): string => {
+  if (process.platform === 'win32') {
+    const appData = process.env.APPDATA;
+    if (appData) return path.join(appData, 'openchamber');
+  }
+  return path.join(os.homedir(), '.config', 'openchamber');
+};
+
+const sanitizeInstallScope = (scope: string): 'vscode' | 'web' => {
+  if (scope === 'vscode' || scope === 'web') return scope;
+  return 'web';
+};
+
+const getOrCreateInstallId = (scope: string): string => {
+  const configDir = getOpenChamberConfigDir();
+  const normalizedScope = sanitizeInstallScope(scope);
+  const idPath = path.join(configDir, `install-id-${normalizedScope}`);
+
+  try {
+    const existing = fs.readFileSync(idPath, 'utf8').trim();
+    if (existing) return existing;
+  } catch {
+    // Generate new id.
+  }
+
+  const installId = randomUUID();
+  fs.mkdirSync(configDir, { recursive: true });
+  fs.writeFileSync(idPath, `${installId}\n`, { encoding: 'utf8', mode: 0o600 });
+  return installId;
+};
+
+const mapNodePlatformToApiPlatform = (value: string): 'macos' | 'windows' | 'linux' | 'android' | 'ios' | 'web' => {
+  // The webview already sends API-shaped values; Node's os.platform() is the fallback source.
+  if (value === 'macos' || value === 'windows' || value === 'linux' || value === 'android' || value === 'ios' || value === 'web') {
+    return value;
+  }
+  if (value === 'darwin') return 'macos';
+  if (value === 'win32') return 'windows';
+  return 'web';
+};
+
+const mapNodeArchToApiArch = (value: string): 'arm64' | 'x64' | 'unknown' => {
+  if (value === 'arm64' || value === 'aarch64') return 'arm64';
+  if (value === 'x64' || value === 'amd64') return 'x64';
+  return 'unknown';
+};
+
+const VIRTUAL_DIFF_SCHEME = 'openchamber-diff';
+const virtualDiffContents = new Map<string, string>();
+let virtualDiffCounter = 0;
+let virtualDiffProviderDisposable: vscode.Disposable | null = null;
+
+const ensureVirtualDiffProviderRegistered = (ctx?: BridgeContext): void => {
+  if (virtualDiffProviderDisposable) {
+    return;
+  }
+
+  virtualDiffProviderDisposable = vscode.workspace.registerTextDocumentContentProvider(
+    VIRTUAL_DIFF_SCHEME,
+    {
+      provideTextDocumentContent: (uri: vscode.Uri) => {
+        const key = new URLSearchParams(uri.query).get('key') || '';
+        return virtualDiffContents.get(key) ?? '';
+      },
+    },
+  );
+
+  if (ctx?.context) {
+    ctx.context.subscriptions.push(virtualDiffProviderDisposable);
+  }
+};
+
+const createVirtualOriginalDiffUri = (modifiedPath: string, content: string): vscode.Uri => {
+  const key = `${Date.now()}-${++virtualDiffCounter}`;
+  virtualDiffContents.set(key, content);
+
+  if (virtualDiffContents.size > 100) {
+    const firstKey = virtualDiffContents.keys().next().value;
+    if (firstKey) {
+      virtualDiffContents.delete(firstKey);
+    }
+  }
+
+  return vscode.Uri.from({
+    scheme: VIRTUAL_DIFF_SCHEME,
+    path: `/${path.basename(modifiedPath) || 'original'}`,
+    query: `key=${encodeURIComponent(key)}`,
+  });
+};
+
+const fetchFreeZenModels = async (): Promise<Array<{ id: string; owned_by?: string }>> => [];
+
+export async function handleSystemBridgeMessage(
+  message: BridgeMessageInput,
+  ctx: BridgeContext | undefined,
+  deps: SystemRuntimeDeps,
+): Promise<BridgeResponse | null> {
+  const { id, type, payload } = message;
+
+  switch (type) {
+    case 'api:openchamber/directory': {
+      const target = (payload as { path?: string })?.path;
+      if (!target) {
+        return { id, type, success: false, error: 'Path is required' };
+      }
+      const baseDirectory =
+        ctx?.manager?.getWorkingDirectory() || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || os.homedir();
+      const resolvedPath = deps.resolveUserPath(target, baseDirectory);
+      const result = await ctx?.manager?.setWorkingDirectory(resolvedPath);
+      if (!result) {
+        return { id, type, success: false, error: 'OpenCode manager unavailable' };
+      }
+      return { id, type, success: true, data: result };
+    }
+
+    case 'api:models/metadata': {
+      try {
+        const data = await deps.fetchModelsMetadata();
+        return { id, type, success: true, data };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        return { id, type, success: false, error: errorMessage };
+      }
+    }
+
+    case 'api:opencode/version': {
+      try {
+        const apiUrl = ctx?.manager?.getApiUrl();
+        if (!apiUrl) {
+          return { id, type, success: true, data: { version: null, error: 'OpenCode manager unavailable' } };
+        }
+        const base = `${apiUrl.replace(/\/+$/, '')}/`;
+        // OpenCode 2.0.8 replaced `/api/health` with `/api/info`.
+        const response = await fetch(new URL('api/info', base).toString(), {
+          method: 'GET',
+          headers: { Accept: 'application/json', ...ctx?.manager?.getOpenCodeAuthHeaders() },
+        });
+        const health = await response.json().catch(() => null) as { version?: unknown; error?: unknown } | null;
+        if (!response.ok) {
+          const message = typeof health?.error === 'string' ? health.error : response.statusText || 'Failed to read OpenCode version';
+          return { id, type, success: true, data: { version: null, error: message } };
+        }
+        const version = typeof health?.version === 'string' && health.version.trim().length > 0
+          ? health.version.trim().replace(/^v/, '')
+          : null;
+        return { id, type, success: true, data: { version } };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        return { id, type, success: true, data: { version: null, error: errorMessage } };
+      }
+    }
+
+    case 'api:opencode/compatibility': {
+      return { id, type, success: true, data: await ctx?.manager?.getCompatibility() };
+    }
+
+    case 'api:opencode/install-v2': {
+      if (!ctx?.manager) return { id, type, success: false, error: 'OpenCode manager is unavailable.' };
+      await ctx.manager.installV2();
+      return { id, type, success: true, data: { success: true } };
+    }
+
+    case 'api:opencode/upgrade-status': {
+      return { id, type, success: true, data: await getOpenCodeUpgradeStatus(ctx?.manager) };
+    }
+
+    case 'api:opencode/upgrade': {
+      return { id, type, success: true, data: await upgradeManagedOpenCode(ctx?.manager) };
+    }
+
+    case 'api:session-activity:get': {
+      return { id, type, success: true, data: getSessionActivitySnapshot() };
+    }
+
+    case 'api:notifications:show': {
+      const notification = sessionNotificationSchema.safeParse(payload);
+      if (!notification.success) {
+        return { id, type, success: false, error: 'Invalid notification' };
+      }
+      const shown = await vscode.commands.executeCommand<boolean>('openchamber.internal.showNotification', notification.data);
+      return { id, type, success: true, data: { shown: shown === true } };
+    }
+
+    case 'api:zen:models': {
+      const models = await fetchFreeZenModels();
+      return { id, type, success: true, data: { models } };
+    }
+
+    // The same machine policy the web server enforces (policy file or
+    // OPENCHAMBER_ENTERPRISE_MODE in the editor's environment).
+    case 'api:openchamber:enterprise-policy': {
+      return { id, type, success: true, data: publicEnterprisePolicy() };
+    }
+
+    case 'api:openchamber:update-check': {
+      try {
+        const body = (payload && typeof payload === 'object' ? payload : {}) as Record<string, unknown>;
+        const currentVersion = typeof body.currentVersion === 'string' && body.currentVersion.trim().length > 0
+          ? body.currentVersion.trim()
+          : String(ctx?.context?.extension?.packageJSON?.version || 'unknown');
+        const instanceMode = typeof body.instanceMode === 'string' && body.instanceMode.trim().length > 0
+          ? body.instanceMode.trim()
+          : 'local';
+        const deviceClass = typeof body.deviceClass === 'string' && body.deviceClass.trim().length > 0
+          ? body.deviceClass.trim()
+          : 'desktop';
+        const platformRaw = typeof body.platform === 'string' && body.platform.trim().length > 0
+          ? body.platform.trim()
+          : os.platform();
+        const archRaw = typeof body.arch === 'string' && body.arch.trim().length > 0
+          ? body.arch.trim()
+          : os.arch();
+        // Enterprise mode keeps the check (security fixes must reach the
+        // machine) but never reports usage.
+        const reportUsage = body.reportUsage !== false && !isEnterpriseMode();
+
+        const requestBody = {
+          appType: 'vscode',
+          deviceClass,
+          platform: mapNodePlatformToApiPlatform(platformRaw),
+          arch: mapNodeArchToApiArch(archRaw),
+          channel: 'stable',
+          currentVersion,
+          ...(reportUsage ? { installId: getOrCreateInstallId('vscode') } : {}),
+          instanceMode,
+          reportUsage,
+        };
+
+        const response = await fetch(deps.updateCheckUrl, {
+          method: 'POST',
+          headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(requestBody),
+          signal: AbortSignal.timeout(10_000),
+        });
+
+        if (!response.ok) {
+          const text = await response.text().catch(() => 'update check failed');
+          return { id, type, success: false, error: text || `Update check failed with ${response.status}` };
+        }
+
+        const data = await response.json();
+        return { id, type, success: true, data };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        return { id, type, success: false, error: errorMessage };
+      }
+    }
+
+    case 'editor:openFile': {
+      const { path: filePath, line, column } = payload as { path: string; line?: number; column?: number };
+      try {
+        const options: vscode.TextDocumentShowOptions = {};
+        if (typeof line === 'number') {
+          const pos = new vscode.Position(Math.max(0, line - 1), column || 0);
+          options.selection = new vscode.Range(pos, pos);
+        }
+        await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(filePath), options);
+        return { id, type, success: true };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        return { id, type, success: false, error: errorMessage };
+      }
+    }
+
+    case 'editor:openDiff': {
+      const { original, modified, label, line, patch } = payload as {
+        original: string;
+        modified: string;
+        label?: string;
+        line?: number;
+        patch?: string;
+      };
+      try {
+        const modifiedUri = vscode.Uri.file(modified);
+        const modifiedDoc = await vscode.workspace.openTextDocument(modifiedUri);
+        let originalUri = original ? vscode.Uri.file(original) : modifiedUri;
+
+        if (typeof patch === 'string' && patch.trim().length > 0) {
+          const originalContent = reconstructOriginalContentFromPatch(modifiedDoc.getText(), patch);
+          if (typeof originalContent === 'string') {
+            ensureVirtualDiffProviderRegistered(ctx);
+            originalUri = createVirtualOriginalDiffUri(modified, originalContent);
+          }
+        }
+
+        const leftLabel = original ? path.basename(original) : `${path.basename(modified)} (before)`;
+        const title = label || `${leftLabel} ↔ ${path.basename(modified)}`;
+
+        await vscode.commands.executeCommand('vscode.diff', originalUri, modifiedUri, title);
+
+        if (typeof line === 'number' && Number.isFinite(line)) {
+          const targetLine = Math.max(0, Math.trunc(line) - 1);
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          const targetEditor = vscode.window.visibleTextEditors.find(
+            (editor) => editor.document.uri.toString() === modifiedUri.toString(),
+          );
+          if (targetEditor) {
+            const target = new vscode.Position(targetLine, 0);
+            targetEditor.selection = new vscode.Selection(target, target);
+            targetEditor.revealRange(new vscode.Range(target, target), vscode.TextEditorRevealType.InCenter);
+          }
+        }
+
+        return { id, type, success: true };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        return { id, type, success: false, error: errorMessage };
+      }
+    }
+
+    // Archive state goes to OpenCode, with the archive file for sessions whose
+    // directory is gone; metadata is merge-patched onto OpenCode's record (see
+    // openchamberSessionState.ts). The proxy runtime folds the files back onto
+    // session reads.
+    case 'api:sessions/archive': {
+      const { ids, archivedAt } = (payload || {}) as { ids?: JsonValue; archivedAt?: JsonValue };
+      const targets = asSessionIdList(ids);
+      if (targets.length === 0) return { id, type, success: false, error: 'ids must be a non-empty array of session ids' };
+      try {
+        return { id, type, success: true, data: await deps.sessionState.archive(targets, asTimestamp(archivedAt), sessionArchiveOnOpenCode(ctx?.manager)) };
+      } catch (error) {
+        return { id, type, success: false, error: error instanceof Error ? error.message : String(error) };
+      }
+    }
+
+    case 'api:sessions/unarchive': {
+      const { ids } = (payload || {}) as { ids?: JsonValue };
+      const targets = asSessionIdList(ids);
+      if (targets.length === 0) return { id, type, success: false, error: 'ids must be a non-empty array of session ids' };
+      try {
+        return { id, type, success: true, data: await deps.sessionState.unarchive(targets, sessionArchiveOnOpenCode(ctx?.manager)) };
+      } catch (error) {
+        return { id, type, success: false, error: error instanceof Error ? error.message : String(error) };
+      }
+    }
+
+    case 'api:sessions/metadata:get': {
+      const sessionId = asSessionId(((payload || {}) as { sessionId?: JsonValue }).sessionId);
+      if (!sessionId) return { id, type, success: false, error: 'a session id is required' };
+      try {
+        return { id, type, success: true, data: { metadata: await deps.sessionState.getMetadata(sessionId, sessionMetadataOnOpenCode(ctx?.manager)) } };
+      } catch (error) {
+        return { id, type, success: false, error: error instanceof Error ? error.message : String(error) };
+      }
+    }
+
+    case 'api:sessions/metadata:set': {
+      const body = (payload || {}) as { sessionId?: JsonValue; patch?: JsonValue };
+      const sessionId = asSessionId(body.sessionId);
+      if (!sessionId) return { id, type, success: false, error: 'a session id is required' };
+      const patch = asSessionMetadata(body.patch);
+      if (!patch) return { id, type, success: false, error: 'patch must be an object' };
+      try {
+        return { id, type, success: true, data: { metadata: await deps.sessionState.setMetadata(sessionId, patch, sessionMetadataOnOpenCode(ctx?.manager)) } };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (error instanceof Error && error.name === 'LocationNotFoundError') {
+          return { id, type, success: false, error: message, code: SESSION_DIRECTORY_MISSING_CODE };
+        }
+        return { id, type, success: false, error: message };
+      }
+    }
+
+    case 'api:provider/source:get': {
+      const { providerId, directory } = (payload || {}) as { providerId?: string; directory?: string };
+      if (!providerId) {
+        return { id, type, success: false, error: 'Provider ID is required' };
+      }
+      try {
+        const workingDirectory = typeof directory === 'string' && directory.trim().length > 0
+          ? directory.trim()
+          : ctx?.manager?.getWorkingDirectory();
+        const sources = getProviderSources(providerId, workingDirectory);
+        sources.auth.exists = Boolean(await getProviderAuth(providerId));
+        const config = getStoredProviderConfig(providerId, workingDirectory);
+        return { id, type, success: true, data: { providerId, sources, config } };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        return { id, type, success: false, error: errorMessage };
+      }
+    }
+
+    case 'api:provider:upsert': {
+      const {
+        providerID,
+        providerId: providerIdAlias,
+        config,
+        scope,
+        directory,
+        hasCredential,
+      } = (payload || {}) as {
+        providerID?: string;
+        providerId?: string;
+        config?: unknown;
+        scope?: string;
+        directory?: string;
+        hasCredential?: boolean;
+      };
+      const providerId = (typeof providerID === 'string' && providerID.trim())
+        || (typeof providerIdAlias === 'string' && providerIdAlias.trim())
+        || '';
+      if (!providerId) {
+        return { id, type, success: false, error: 'Provider ID is required' };
+      }
+      // Enterprise mode: providers come only from the OpenCode config.
+      if (isEnterpriseMode()) {
+        return { id, type, success: false, error: ENTERPRISE_MODE_ERROR };
+      }
+      if (!config || typeof config !== 'object' || Array.isArray(config)) {
+        return { id, type, success: false, error: 'Provider config is required' };
+      }
+      const normalizedScope = typeof scope === 'string' ? scope : 'user';
+      if (normalizedScope !== 'user' && normalizedScope !== 'project' && normalizedScope !== 'custom') {
+        return { id, type, success: false, error: 'Invalid scope' };
+      }
+      try {
+        const workingDirectory = typeof directory === 'string' && directory.trim().length > 0
+          ? directory.trim()
+          : ctx?.manager?.getWorkingDirectory();
+        const result = upsertProviderConfig(
+          providerId,
+          config,
+          workingDirectory,
+          normalizedScope,
+          { hasStoredAuth: hasCredential === true || Boolean(await getProviderAuth(providerId)) },
+        );
+        await ctx?.manager?.restart();
+        return {
+          id,
+          type,
+          success: true,
+          data: {
+            success: true,
+            providerId: result.providerId,
+            path: result.path,
+            config: result.config,
+            requiresReload: true,
+            reloadDelayMs: deps.clientReloadDelayMs,
+          },
+        };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        return { id, type, success: false, error: errorMessage };
+      }
+    }
+
+    case 'api:provider:discover-models': {
+      if (isEnterpriseMode()) {
+        return { id, type, success: false, error: ENTERPRISE_MODE_ERROR };
+      }
+      try {
+        const providerID = payload && typeof payload === 'object' && typeof (payload as { providerID?: unknown }).providerID === 'string'
+          ? (payload as { providerID: string }).providerID.trim()
+          : '';
+        // A stored key that cannot be read leaves discovery to the key in the form.
+        const storedAuth = providerID ? await getProviderAuth(providerID).catch(() => null) : null;
+        const storedApiKey = storedAuth?.type === 'api' && typeof storedAuth.key === 'string'
+          ? storedAuth.key
+          : null;
+        const storedBaseURL = providerID ? readStoredProviderBaseURL(providerID) : undefined;
+        return { id, type, success: true, data: await discoverProviderModels(payload, { storedApiKey, storedBaseURL }) };
+      } catch (error) {
+        return { id, type, success: false, error: error instanceof Error ? error.message : String(error) };
+      }
+    }
+
+    case 'api:quota:providers': {
+      try {
+        const providers = await listConfiguredQuotaProviders();
+        return { id, type, success: true, data: { providers } };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        return { id, type, success: false, error: errorMessage };
+      }
+    }
+
+    case 'api:quota:credentials': {
+      const { providerId, method, credential: input } = (payload || {}) as { providerId?: ManagedProvider; method?: string; credential?: unknown };
+      try {
+        if (!providerId || !['exe-dev', 'cursor', 'zenmux'].includes(providerId)) return { id, type, success: false, error: 'Unsupported credential provider' };
+        if (method === 'GET') return { id, type, success: true, data: credentialStatus(providerId) };
+        if (method === 'DELETE') { deleteCredential(providerId); return { id, type, success: true, data: { configured: false } }; }
+        if (method === 'IMPORT') {
+          if (providerId !== 'cursor') return { id, type, success: false, error: 'Import unavailable' };
+          const credential = importCursorCredential();
+          await validateCredential(providerId, credential);
+          return { id, type, success: true, data: writeCredential(providerId, credential) };
+        }
+        if (method === 'PUT') {
+          const credential = normalizeCredential(providerId, input);
+          if (!credential) return { id, type, success: false, error: 'Invalid credential' };
+          await validateCredential(providerId, credential);
+          return { id, type, success: true, data: writeCredential(providerId, credential) };
+        }
+        if (method === 'VALIDATE') {
+          const credential = readCredential(providerId);
+          if (!credential) return { id, type, success: false, error: 'Not configured' };
+          await validateCredential(providerId, credential);
+          return { id, type, success: true, data: { valid: true } };
+        }
+        return { id, type, success: false, error: 'Unsupported method' };
+      } catch (error) {
+        return { id, type, success: false, error: error instanceof Error ? error.message : String(error) };
+      }
+    }
+
+    case 'api:quota:get': {
+      const { providerId } = (payload || {}) as { providerId?: string };
+      if (!providerId) {
+        return { id, type, success: false, error: 'Provider ID is required' };
+      }
+      try {
+        const result = await fetchQuotaForProvider(providerId);
+        return { id, type, success: true, data: result };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        return { id, type, success: false, error: errorMessage };
+      }
+    }
+
+    case 'api:quota:giftReset:use': {
+      // SAFETY: bridge payloads are untrusted JSON from the webview; the cast
+      // only reads the expected fields, and activateQuotaGiftReset re-validates
+      // every value before any request leaves the extension host.
+      const { providerId, recordId, resetType } = (payload || {}) as {
+        providerId?: string;
+        recordId?: number;
+        resetType?: QuotaGiftResetType;
+      };
+      if (!providerId || recordId === undefined || !Number.isFinite(recordId) || !resetType) {
+        return { id, type, success: false, error: 'Invalid gift reset request' };
+      }
+      try {
+        await activateQuotaGiftReset(providerId, { recordId, resetType });
+        return { id, type, success: true, data: { success: true } };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        return { id, type, success: false, error: errorMessage };
+      }
+    }
+
+    case 'api:workspace:addFolder': {
+      try {
+        // SAFETY: bridge payloads are untrusted JSON from the webview; the
+        // cast only reads the optional path field, and non-string values fail
+        // the emptiness check below (or throw inside the try, which the catch
+        // converts into a clean failure response).
+        const { path: targetPath } = (payload || {}) as { path?: string };
+        if (!targetPath || targetPath.trim().length === 0) {
+          return { id, type, success: false, error: 'Directory path is required' };
+        }
+        const folders = vscode.workspace.workspaceFolders ?? [];
+        const uri = vscode.Uri.file(normalizeWindowsDriveLetter(targetPath.trim()));
+        // `Uri.fsPath` lowercases the Windows drive letter again, so both sides
+        // have to go through the shared comparison (see pathUtils).
+        const alreadyAdded = folders.some(
+          (folder) => pathsEqualWithNormalizedDriveLetter(folder.uri.fsPath, uri.fsPath),
+        );
+        if (!alreadyAdded) {
+          const updated = await vscode.workspace.updateWorkspaceFolders(folders.length, null, { uri });
+          if (!updated) {
+            return { id, type, success: false, error: 'Failed to add workspace folder' };
+          }
+        }
+        return {
+          id,
+          type,
+          success: true,
+          data: { workspaceFolders: resolveWorkspaceFolders(vscode.workspace.workspaceFolders ?? []) },
+        };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        return { id, type, success: false, error: errorMessage };
+      }
+    }
+
+    case 'vscode:command': {
+      const { command, args } = (payload || {}) as { command?: string; args?: unknown[] };
+      if (!command) {
+        return { id, type, success: false, error: 'Command is required' };
+      }
+      try {
+        const result = await vscode.commands.executeCommand(command, ...(args || []));
+        return { id, type, success: true, data: { result } };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        return { id, type, success: false, error: errorMessage };
+      }
+    }
+
+    case 'vscode:openExternalUrl': {
+      const { url } = (payload || {}) as { url?: string };
+      const target = typeof url === 'string' ? url.trim() : '';
+      if (!target) {
+        return { id, type, success: false, error: 'URL is required' };
+      }
+      try {
+        await vscode.env.openExternal(vscode.Uri.parse(target));
+        return { id, type, success: true, data: { opened: true } };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        return { id, type, success: false, error: errorMessage };
+      }
+    }
+
+    default:
+      return null;
+  }
+}

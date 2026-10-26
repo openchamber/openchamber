@@ -1,0 +1,35 @@
+---
+title: Aperçu et serveurs de développement
+description: Ouvrez un serveur de développement en cours d'exécution dans OpenChamber.
+---
+
+# Aperçu et serveurs de développement
+
+Quand vous lancez un serveur de développement, OpenChamber peut l'ouvrir directement dans l'application plutôt que dans un onglet séparé — vous voyez ainsi votre site à côté de la discussion et pouvez désigner des éléments pour poser des questions à leur sujet.
+
+## Ouvrir un serveur de développement
+
+Ouvrez le panneau navigateur depuis le bouton globe de l'en-tête. Si un serveur tourne déjà, il apparaît dans la liste et un clic suffit à l'ouvrir : OpenChamber le repère à partir de ce qui écoute réellement sur votre machine, quelle que soit la façon dont vous l'avez lancé.
+
+Un serveur s'ouvre également tout seul quand :
+
+- vous appuyez sur **Ouvrir l'aperçu** sur une adresse locale dans le terminal
+- une [action de projet](/project-actions/) avec ouverture automatique en démarre un
+- vous suivez un lien local dans un message de la discussion
+
+Vous pouvez toujours saisir l'adresse vous-même. Un simple `localhost:5173` est compris comme `http://`, inutile donc d'écrire le schéma.
+
+## Travailler avec un OpenChamber distant
+
+Quand OpenChamber tourne sur une autre machine, son serveur de développement s'y trouve aussi — `localhost` sur votre portable désigne tout autre chose. L'application de bureau s'en charge : elle ouvre un port local qui achemine la connexion jusqu'au serveur distant, si bien que la page se charge normalement, avec rechargement à chaud et outils de développement fonctionnels. Vous continuez à saisir l'adresse attendue ; la tuyauterie reste hors de votre chemin.
+
+Cela nécessite l'application de bureau. Dans un onglet de navigateur, seuls les serveurs de votre propre machine peuvent être ouverts.
+
+## Annoter la page
+
+Voyez [Panneau navigateur](/desktop-browser/) pour désigner des éléments, dessiner sur la page et envoyer le tout dans la discussion.
+
+## Voir aussi
+
+- [Actions de projet](/project-actions/) — ouvrir automatiquement un serveur à son démarrage
+- [Panneau navigateur](/desktop-browser/) — annoter les pages et laisser l'agent les piloter

@@ -1,0 +1,360 @@
+import { describe, expect, test } from 'bun:test';
+
+import { browserProviderGuests } from './browser-providers.ts';
+import { parseGuestCatalogJson, parseInstalledGuestJson } from './parse.ts';
+import { enabledGuestSurfaces } from './surfaces.ts';
+
+/** The readable rows, or null when any row was not readable. */
+const readGuests = (json: string) => {
+  const catalog = parseGuestCatalogJson(json);
+  return catalog && catalog.unreadable.length === 0 ? catalog.guests : null;
+};
+
+describe('parseGuestCatalogJson', () => {
+  test('one row it cannot read keeps the others and is listed by name', () => {
+    const valid = {
+      id: 'hello',
+      name: 'Hello',
+      icon: 'window',
+      capabilities: { requested: [], granted: [] },
+      source: 'path',
+    };
+    // A newer server can send a capability this build does not know.
+    const newer = { ...valid, id: 'engram-memory', name: 'Engram', capabilities: { requested: ['telepathy'], granted: [] } };
+    expect(parseGuestCatalogJson(JSON.stringify({
+      guests: [valid, newer, { id: 'Not An Id', icon: 7, source: 'bundled' }, 'junk'],
+    }))).toEqual({
+      guests: [valid],
+      unreadable: [
+        { id: 'engram-memory', name: 'Engram', builtIn: false },
+        { id: null, name: null, builtIn: true },
+        { id: null, name: null, builtIn: false },
+      ],
+    });
+  });
+
+  test('a response without a guest list is still a failure', () => {
+    expect(parseGuestCatalogJson('<html>Fallback</html>')).toBeNull();
+    expect(parseGuestCatalogJson(JSON.stringify({ guests: {} }))).toBeNull();
+  });
+
+  test('reads a valid catalog', () => {
+    expect(readGuests(JSON.stringify({
+      guests: [{
+        id: 'hello',
+        name: 'Hello',
+        icon: 'window',
+        entry: 'panel/index.html',
+        capabilities: { requested: [], granted: [] },
+        version: '1.0.0',
+        source: 'path',
+        path: '/tmp/hello',
+      }, {
+        id: 'zip-hello',
+        name: 'Zip',
+        icon: 'window',
+        entry: 'panel/index.html',
+        capabilities: { requested: [], granted: [] },
+        source: 'zip',
+        path: '/data/guests/zip-hello',
+      }, {
+        id: 'git-hello',
+        name: 'Git',
+        icon: 'window',
+        entry: 'panel/index.html',
+        capabilities: { requested: [], granted: [] },
+        source: 'git',
+        path: '/data/guests/git-hello',
+      }],
+    }))).toEqual([
+      {
+        id: 'hello',
+        name: 'Hello',
+        icon: 'window',
+        entry: 'panel/index.html',
+        capabilities: { requested: [], granted: [] },
+        version: '1.0.0',
+        source: 'path',
+        path: '/tmp/hello',
+      },
+      {
+        id: 'zip-hello',
+        name: 'Zip',
+        icon: 'window',
+        entry: 'panel/index.html',
+        capabilities: { requested: [], granted: [] },
+        source: 'zip',
+        path: '/data/guests/zip-hello',
+      },
+      {
+        id: 'git-hello',
+        name: 'Git',
+        icon: 'window',
+        entry: 'panel/index.html',
+        capabilities: { requested: [], granted: [] },
+        source: 'git',
+        path: '/data/guests/git-hello',
+      },
+    ]);
+  });
+
+  test('keeps attach when the catalog sends it', () => {
+    expect(readGuests(JSON.stringify({
+      guests: [{
+        id: 'hello',
+        name: 'Hello',
+        icon: 'window',
+        entry: 'panel/index.html',
+        capabilities: { requested: [], granted: [] },
+        attach: 'dialog',
+      }],
+    }))).toEqual([
+      {
+        id: 'hello',
+        name: 'Hello',
+        icon: 'window',
+        entry: 'panel/index.html',
+        capabilities: { requested: [], granted: [] },
+        attach: 'dialog',
+      },
+    ]);
+  });
+
+  test('keeps a public integration slice and drops oauth URLs if sent', () => {
+    expect(readGuests(JSON.stringify({
+      guests: [{
+        id: 'clickup',
+        name: 'ClickUp',
+        icon: 'window',
+        entry: 'panel/index.html',
+        capabilities: { requested: [], granted: [] },
+        integration: {
+          name: 'ClickUp',
+          description: 'Tasks from a ClickUp list',
+          auth: 'token',
+          settings: [{ id: 'list-id', label: 'List ID' }],
+          oauth: {
+            tokenUrl: 'https://api.clickup.com/api/v2/oauth/token',
+          },
+        },
+      }],
+    }))).toEqual([
+      {
+        id: 'clickup',
+        name: 'ClickUp',
+        icon: 'window',
+        entry: 'panel/index.html',
+        capabilities: { requested: [], granted: [] },
+        integration: {
+          name: 'ClickUp',
+          description: 'Tasks from a ClickUp list',
+          auth: 'token',
+          settings: [{ id: 'list-id', label: 'List ID' }],
+        },
+      },
+    ]);
+  });
+
+  test('keeps a public service slice', () => {
+    expect(readGuests(JSON.stringify({
+      guests: [{
+        id: 'docker',
+        name: 'Docker',
+        icon: 'box-3',
+        entry: 'panel/index.html',
+        capabilities: { requested: [], granted: [] },
+        service: {
+          runtime: 'host',
+          granted: false,
+          permissions: {
+            sockets: ['docker'],
+            exec: ['docker'],
+          },
+          socketBindings: [{
+            id: 'docker',
+            candidates: ['/var/run/docker.sock'],
+            resolved: '/var/run/docker.sock',
+            override: null,
+          }],
+        },
+      }],
+    }))).toEqual([
+      {
+        id: 'docker',
+        name: 'Docker',
+        icon: 'box-3',
+        entry: 'panel/index.html',
+        capabilities: { requested: [], granted: [] },
+        service: {
+          runtime: 'host',
+          granted: false,
+          permissions: {
+            sockets: ['docker'],
+            exec: ['docker'],
+          },
+          socketBindings: [{
+            id: 'docker',
+            candidates: ['/var/run/docker.sock'],
+            resolved: '/var/run/docker.sock',
+            override: null,
+          }],
+        },
+      },
+    ]);
+  });
+
+  test('keeps a service\'s provider role and surface, so the dropdown and the rail see them', () => {
+    const [guest] = readGuests(JSON.stringify({
+      guests: [{
+        id: 'server-chrome',
+        name: 'Server Chrome',
+        icon: 'window',
+        capabilities: { requested: ['service'], granted: ['service'] },
+        service: { runtime: 'host', granted: true, provides: ['browser'], surface: true },
+      }],
+    })) ?? [];
+    expect(guest?.service).toEqual({ runtime: 'host', granted: true, provides: ['browser'], surface: true });
+    expect(browserProviderGuests(guest ? [guest] : [])).toHaveLength(1);
+    expect(enabledGuestSurfaces(guest ? [guest] : [], (path) => path)).toHaveLength(1);
+
+    // An unknown role is a newer server; the row still parses, minus that field.
+    const [newer] = readGuests(JSON.stringify({
+      guests: [{
+        id: 'x', name: 'X', icon: 'window', capabilities: { requested: [], granted: [] },
+        service: { runtime: 'host', granted: true, provides: ['printer'] },
+      }],
+    })) ?? [];
+    expect(newer?.service).toEqual({ runtime: 'host', granted: true });
+  });
+
+  test('keeps the Git host a source-control provider declares, and drops a malformed slice without the row', () => {
+    const slice = { label: 'Acme Forge', defaultInstances: ['https://forge.example.com'], custom: true };
+    const row = (sourceControl: typeof slice | { label: string; custom: string }) => ({
+      id: 'acme-forge', name: 'Acme Forge', icon: 'git-branch',
+      capabilities: { requested: ['service'], granted: [] },
+      service: { runtime: 'host', granted: false, provides: ['source-control'] },
+      sourceControl,
+    });
+    const [guest, malformed] = readGuests(JSON.stringify({
+      guests: [row(slice), { ...row({ label: '', custom: 'yes' }), id: 'other-forge' }],
+    })) ?? [];
+    expect(guest?.service?.provides).toEqual(['source-control']);
+    expect(guest?.sourceControl).toEqual(slice);
+    expect(malformed?.id).toBe('other-forge');
+    expect(malformed?.sourceControl).toBeUndefined();
+  });
+
+  test('keeps declared tool presentations and drops a malformed list', () => {
+    const tools = [
+      { match: 'mcp.tasks.*', name: 'Tasks', icon: 'checkbox-circle', title: '{input.id}', output: 'table', columns: ['id', 'title'] },
+      { match: 'jira_search', output: 'code', language: 'json' },
+    ];
+    const guest = (extra: Record<string, unknown>) => ({
+      id: 'hello',
+      name: 'Hello',
+      icon: 'window',
+      entry: 'panel/index.html',
+      capabilities: { requested: [], granted: [] },
+      ...extra,
+    });
+    expect(readGuests(JSON.stringify({ guests: [guest({ tools })] }))).toEqual([guest({ tools })]);
+    expect(readGuests(JSON.stringify({ guests: [guest({ tools: [{ match: 'mcp.*.search' }] })] }))).toBeNull();
+    expect(readGuests(JSON.stringify({ guests: [guest({ tools: [{ match: 'x', output: 'html' }] })] }))).toBeNull();
+  });
+
+  test('keeps a status section without a panel entry and drops an out-of-range height', () => {
+    const row = { id: 'git-graph', name: 'Git graph', icon: 'git-commit', capabilities: { requested: [], granted: [] } };
+    expect(readGuests(JSON.stringify({ guests: [{ ...row, statusEntry: 'status/index.html', statusTitle: 'Commits', statusHeight: 160 }] })))
+      .toEqual([{ ...row, statusEntry: 'status/index.html', statusTitle: 'Commits', statusHeight: 160 }]);
+    expect(readGuests(JSON.stringify({ guests: [{ ...row, statusEntry: 'status/index.html', statusHeight: 4000 }] }))).toBeNull();
+  });
+
+  test('keeps a source status section and refuses a path or interval the SDK would not', () => {
+    const row = { id: 'monitor', name: 'Monitor', icon: 'pulse', capabilities: { requested: [], granted: [] } };
+    const statusSource = { path: '/status', interval: 2000 };
+    expect(readGuests(JSON.stringify({ guests: [{ ...row, statusSource }] }))).toEqual([{ ...row, statusSource }]);
+    expect(readGuests(JSON.stringify({ guests: [{ ...row, statusSource: { path: 'status', interval: 2000 } }] }))).toBeNull();
+    expect(readGuests(JSON.stringify({ guests: [{ ...row, statusSource: { path: '/status', interval: 10 } }] }))).toBeNull();
+  });
+
+  test('keeps bounded storage and status metadata', () => {
+    const row = { id: 'git-graph', name: 'Git graph', icon: 'git-commit', capabilities: { requested: [], granted: [] } };
+    const storageId = '123e4567-e89b-12d3-a456-426614174000';
+    expect(readGuests(JSON.stringify({
+      guests: [{ ...row, storageId, statusDefaultExpanded: false, statusRequiresProject: true }],
+    }))).toEqual([{ ...row, storageId, statusDefaultExpanded: false, statusRequiresProject: true }]);
+    expect(readGuests(JSON.stringify({ guests: [{ ...row, storageId: 'not-an-installation-id' }] }))).toBeNull();
+  });
+
+  test('rejects junk instead of returning an empty catalog', () => {
+    expect(parseGuestCatalogJson('null')).toBeNull();
+    expect(parseGuestCatalogJson('{"guests":[{"id":"Nope"}]}')).toEqual({
+      guests: [],
+      unreadable: [{ id: null, name: null, builtIn: false }],
+    });
+  });
+});
+
+describe('parseInstalledGuestJson', () => {
+  test('reads the install wrapper', () => {
+    expect(parseInstalledGuestJson(JSON.stringify({
+      guest: {
+        id: 'clone-hello',
+        name: 'Clone',
+        icon: 'window',
+        entry: 'panel/index.html',
+        capabilities: { requested: [], granted: [] },
+        source: 'path',
+        path: '/tmp/clone',
+      },
+    }))).toEqual({
+      id: 'clone-hello',
+      name: 'Clone',
+      icon: 'window',
+      entry: 'panel/index.html',
+      capabilities: { requested: [], granted: [] },
+      source: 'path',
+      path: '/tmp/clone',
+    });
+  });
+
+  test('rejects a bare guest object', () => {
+    expect(parseInstalledGuestJson(JSON.stringify({
+      id: 'clone-hello',
+      name: 'Clone',
+      icon: 'window',
+      entry: 'panel/index.html',
+      capabilities: { requested: [], granted: [] },
+    }))).toBeNull();
+  });
+
+  test('keeps a git origin and a pending update', () => {
+    const guest = parseInstalledGuestJson(JSON.stringify({
+      guest: {
+        id: 'hello',
+        name: 'Hello',
+        icon: 'window',
+        entry: 'panel/index.html',
+        version: '1.0.0',
+        source: 'git',
+        capabilities: { requested: [], granted: [] },
+        origin: { url: 'https://github.com/acme/hello.git', ref: 'v1' },
+        update: { version: '1.1.0' },
+      },
+    }));
+    expect(guest?.origin).toEqual({ url: 'https://github.com/acme/hello.git', ref: 'v1' });
+    expect(guest?.update).toEqual({ version: '1.1.0' });
+
+    const junkUpdate = parseInstalledGuestJson(JSON.stringify({
+      guest: {
+        id: 'hello',
+        name: 'Hello',
+        icon: 'window',
+        entry: 'panel/index.html',
+        capabilities: { requested: [], granted: [] },
+        update: { version: '' },
+      },
+    }));
+    expect(junkUpdate).toBeNull();
+  });
+});

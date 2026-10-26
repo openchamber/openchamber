@@ -1,0 +1,666 @@
+import React from 'react';
+import { isVimEditorEventTarget } from '@/lib/editorFocus';
+import { isTerminalEventTarget } from '@/lib/terminalFocus';
+import { useSessionUIStore } from '@/sync/session-ui-store';
+import { activateAdjacentSessionTab, activateSessionTabByIndex, closeSessionTabAndActivateNeighbour } from '@/lib/sessionTabs';
+import { navigateSessionHistory } from '@/lib/sessionNavigationHistory';
+import { useSelectionStore } from '@/sync/selection-store';
+import * as sessionActions from '@/sync/session-actions';
+import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUIStore';
+import { shownContextModes, zoneOfMode } from '@/lib/workspace/zones';
+import { useThemeSystem } from '@/contexts/useThemeSystem';
+import { useCurrentSessionActivity } from '@/hooks/useSessionActivity';
+import { useKeybinds } from '@/hooks/useKeybind';
+import { handleSettingsShortcut } from './useSettingsKeyboardShortcuts';
+import { createWorktreeSession } from '@/lib/worktreeSessionCreator';
+import { useConfigStore } from '@/stores/useConfigStore';
+import { canUseElectronDesktopIPC, getMiniChatRuntimeArgs, invokeDesktop, isVSCodeRuntime } from '@/lib/desktop';
+import {
+  eventMatchesShortcut,
+  eventMatchesShortcutPrefix,
+  getEffectiveShortcutCombo,
+  getEffectiveShortcutPrefix,
+  normalizeCombo,
+  resolveShortcutEventDigit,
+  resolveShortcutEventKey,
+  ShortcutDispatcher,
+  shortcutRegistry,
+  type ShortcutActionId,
+} from '@/lib/shortcuts';
+import { ShortcutRegistry } from '@/lib/shortcuts/registry';
+import { enabledGuestSurfaces } from '@/lib/guests/surfaces';
+import { getRuntimeUrlResolver } from '@/lib/runtime-url';
+import { useGuestsStore } from '@/lib/guests/store';
+import { getVisibleContextRailSurfaces } from '@/lib/surfaces/registry';
+import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useSourceControlAuthStore } from '@/stores/useSourceControlAuthStore';
+import { isWorkflowsSurfaceShown } from '@/lib/workflows/panel';
+import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+import { getCycledPrimaryAgentName } from '@/components/chat/mobileControlsUtils';
+import { focusChatInput } from '@/components/chat/composer/editor/dom';
+import { createComposerInputRedirect, type ComposerInputRedirect } from '@/components/chat/composer/editor/inputRedirect';
+import {
+  addSelectionToChat,
+  dismissActiveSelectionToolbar,
+  getActiveSelectionToolbarVersion,
+  hasActiveSelectionToolbar,
+  invokeActiveSelectionAddToChat,
+} from '@/lib/addSelectionToChat';
+import { isIMECompositionEvent } from '@/lib/ime';
+import { canUseDigitShortcut, hasActiveBtwComposer, hasOpenDropdown, isEditableEventTarget, shouldStopDropdownImeEscape } from './keyboard-shortcut-dom';
+
+const dropdownTargetSelector = [
+  '[data-slot="dropdown-menu-content"]', '[data-slot="select-content"]', '[role="combobox"]',
+  '[role="listbox"]', '[role="menu"]', '[role="menuitem"]', '[role="option"]',
+  '[data-radix-popper-content-wrapper]',
+].join(',');
+
+function hasOverlayOpen(): boolean {
+  const state = useUIStore.getState();
+  return state.isCommandPaletteOpen
+    || state.isHelpDialogOpen
+    || state.isProjectActionsDialogOpen
+    || state.isSessionSwitcherOpen
+    || state.isAboutDialogOpen
+    || state.isSettingsDialogOpen
+    || state.runOverviewKey !== null
+    || state.isImagePreviewOpen;
+}
+
+export const useKeyboardShortcuts = () => {
+  const openNewSessionDraft = useSessionUIStore((s) => s.openNewSessionDraft);
+  const armAbortPrompt = useSessionUIStore((s) => s.armAbortPrompt);
+  const clearAbortPrompt = useSessionUIStore((s) => s.clearAbortPrompt);
+  const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
+  const currentDirectory = useDirectoryStore((s) => s.currentDirectory);
+  const effectiveDirectory = useEffectiveDirectory();
+  const activeProject = useProjectsStore((s) => s.getActiveProject());
+  const { themeMode, setThemeMode } = useThemeSystem();
+  const { phase: sessionPhase } = useCurrentSessionActivity();
+  const abortPrimedUntilRef = React.useRef<number | null>(null);
+  const abortPrimedSessionRef = React.useRef<string | null>(null);
+  const abortPrimedTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const themeModeRef = React.useRef(themeMode);
+  const dispatcherRef = React.useRef<ShortcutDispatcher | null>(null);
+  const selectionToolbarDispatcherRef = React.useRef<ShortcutDispatcher | null>(null);
+  const selectionToolbarVersionRef = React.useRef(-1);
+  const heldKeysRef = React.useRef<Set<string>>(new Set());
+  const inputRedirectRef = React.useRef<ComposerInputRedirect | null>(null);
+  if (!inputRedirectRef.current) inputRedirectRef.current = createComposerInputRedirect();
+  const inputRedirect = inputRedirectRef.current;
+
+  if (!dispatcherRef.current) {
+    dispatcherRef.current = new ShortcutDispatcher({
+      registry: shortcutRegistry,
+      getBinding: (actionId) => getEffectiveShortcutCombo(
+        actionId,
+        useUIStore.getState().shortcutOverrides,
+      ),
+    });
+  }
+  const dispatcher = dispatcherRef.current;
+  if (!selectionToolbarDispatcherRef.current) {
+    const registry = new ShortcutRegistry();
+    registry.register('add_selection_to_chat', invokeActiveSelectionAddToChat);
+    selectionToolbarDispatcherRef.current = new ShortcutDispatcher({
+      registry,
+      getBinding: () => getEffectiveShortcutCombo(
+        'add_selection_to_chat',
+        useUIStore.getState().shortcutOverrides,
+      ),
+    });
+  }
+  const selectionToolbarDispatcher = selectionToolbarDispatcherRef.current;
+
+  React.useEffect(() => { themeModeRef.current = themeMode; }, [themeMode]);
+
+  const resetAbortPriming = React.useCallback(() => {
+    if (abortPrimedTimeoutRef.current) {
+      clearTimeout(abortPrimedTimeoutRef.current);
+      abortPrimedTimeoutRef.current = null;
+    }
+    abortPrimedUntilRef.current = null;
+    abortPrimedSessionRef.current = null;
+    clearAbortPrompt();
+  }, [clearAbortPrompt]);
+
+  const toggleTerminalSurface = () => {
+    if (!currentDirectory) return;
+    useUIStore.getState().openContextSurface(normalizeContextPanelDirectoryKey(currentDirectory), 'terminal');
+  };
+
+  const toggleTerminalSurfaceExpanded = () => {
+    if (!currentDirectory) return;
+    const key = normalizeContextPanelDirectoryKey(currentDirectory);
+    const state = useUIStore.getState();
+    const panel = state.contextPanelByDirectory[key];
+    if (!shownContextModes(panel, state.contextSurfaceZones).has('terminal')) {
+      state.openContextSurface(key, 'terminal');
+    }
+    state.toggleContextPanelExpanded(key, zoneOfMode(state.contextSurfaceZones, 'terminal'));
+  };
+
+  useKeybinds({
+    open_command_palette: () => {
+      useUIStore.getState().toggleCommandPalette();
+    },
+    open_timeline_dialog: () => {
+      useUIStore.getState().setTimelineDialogOpen(true);
+    },
+    toggle_source_board: () => {
+      // A desktop and web page: the phone shell and VS Code have no board.
+      const state = useUIStore.getState();
+      if (state.isMobile || isVSCodeRuntime()) return false;
+      state.setSourceBoardOpen(!state.isSourceBoardOpen);
+    },
+    open_session_list: () => {
+      const state = useUIStore.getState();
+      if (state.isMobile) {
+        state.setSessionSwitcherOpen(true);
+        return;
+      }
+      // The switcher dropdown only mounts while the sidebar is collapsed;
+      // with the sidebar visible the list is already on screen, so the
+      // shortcut opens the sidebar's session search instead.
+      if (state.isSidebarOpen) {
+        window.dispatchEvent(new CustomEvent('openchamber:sidebar-session-search'));
+        return;
+      }
+      state.setSessionDropdownOpen(true);
+    },
+    toggle_prompt_navigator: () => {
+      const state = useUIStore.getState();
+      const hasOverlay = state.isSettingsDialogOpen
+        || state.isCommandPaletteOpen
+        || state.isHelpDialogOpen
+        || state.isSessionSwitcherOpen
+        || state.isAboutDialogOpen
+        || state.isTimelineDialogOpen
+        || state.runOverviewKey !== null
+        || state.isImagePreviewOpen;
+      if (
+        !state.promptNavigatorEnabled
+        || state.isMobile
+        || hasOverlay
+      ) {
+        return false;
+      }
+      state.togglePromptNavigatorPanel();
+    },
+    open_help: () => {
+      useUIStore.getState().toggleHelpDialog();
+    },
+    open_project_actions: () => {
+      // Desktop and web only: VS Code and the phone shell run no project actions.
+      const state = useUIStore.getState();
+      if (state.isMobile || isVSCodeRuntime()) return false;
+      state.setProjectActionsDialogOpen(!state.isProjectActionsDialogOpen);
+    },
+    new_mini_chat: () => {
+      if (!canUseElectronDesktopIPC()) return false;
+      void invokeDesktop('desktop_open_draft_mini_chat_window', {
+        directory: currentDirectory || activeProject?.path || '',
+        projectId: activeProject?.id ?? null,
+        ...getMiniChatRuntimeArgs(),
+      }).catch((error) => {
+        console.warn('[keyboard-shortcuts] failed to open draft mini chat window', error);
+      });
+    },
+    switch_session_previous: () => {
+      if (!isVSCodeRuntime() && useUIStore.getState().sessionTabsEnabled && activateAdjacentSessionTab(-1)) return;
+      return navigateSessionHistory(-1) ? undefined : false;
+    },
+    switch_session_next: () => {
+      if (!isVSCodeRuntime() && useUIStore.getState().sessionTabsEnabled && activateAdjacentSessionTab(1)) return;
+      return navigateSessionHistory(1) ? undefined : false;
+    },
+    session_history_back: (event) => navigateSessionHistoryByShortcut(event, -1),
+    session_history_forward: (event) => navigateSessionHistoryByShortcut(event, 1),
+    close_session_tab: () => {
+      if (isVSCodeRuntime() || !useUIStore.getState().sessionTabsEnabled) return false;
+      if (currentSessionId) {
+        closeSessionTabAndActivateNeighbour(currentSessionId);
+      }
+    },
+    new_chat: () => {
+      useUIStore.getState().setSessionSwitcherOpen(false);
+      openNewSessionDraft(currentSessionId && currentDirectory
+        ? { directoryOverride: currentDirectory }
+        : undefined);
+    },
+    new_chat_worktree: () => {
+      useUIStore.getState().setSessionSwitcherOpen(false);
+      if (!isVSCodeRuntime()) {
+        createWorktreeSession();
+        return;
+      }
+      openNewSessionDraft();
+    },
+    cycle_theme: () => {
+      const modes: Array<'light' | 'dark' | 'system'> = ['light', 'dark', 'system'];
+      const activeElement = document.activeElement as HTMLElement | null;
+      setThemeMode(modes[(modes.indexOf(themeModeRef.current) + 1) % modes.length]);
+      requestAnimationFrame(() => {
+        if (!document.hasFocus()) window.focus();
+        if (activeElement && document.contains(activeElement)) activeElement.focus({ preventScroll: true });
+      });
+    },
+    open_settings: handleSettingsShortcut,
+    add_selection_to_chat: () => addSelectionToChat({ focusWhenEmpty: false }),
+    toggle_sidebar: () => {
+      const state = useUIStore.getState();
+      if (state.isMobile) state.setSessionSwitcherOpen(!state.isSessionSwitcherOpen);
+      else state.toggleSidebar();
+    },
+    focus_input: () => {
+      focusChatInput();
+    },
+    cycle_agent: (event) => {
+      if (hasActiveBtwComposer()) return false;
+      const state = useUIStore.getState();
+      const hasOverlay = state.isSettingsDialogOpen
+        || state.isCommandPaletteOpen
+        || state.isHelpDialogOpen
+        || state.isSessionSwitcherOpen
+        || state.isAboutDialogOpen;
+      const isChatInputTarget = event.target instanceof Element
+        && Boolean(event.target.closest('[data-chat-input="true"]'));
+      if (hasOverlay || !isChatInputTarget) return false;
+      const combo = getEffectiveShortcutCombo('cycle_agent', state.shortcutOverrides);
+      const backward = combo && !combo.includes('shift') ? normalizeCombo(`shift+${combo}`) : '';
+      const direction = backward && eventMatchesShortcut(event, backward) ? -1 : 1;
+      const config = useConfigStore.getState();
+      const next = getCycledPrimaryAgentName(config.getVisibleAgents(), config.currentAgentName, direction, state.favoriteAgents);
+      if (!next) return false;
+      config.setAgent(next);
+      state.addRecentAgent(next);
+      const sessionId = useSessionUIStore.getState().currentSessionId;
+      if (sessionId) {
+        useSelectionStore.getState().saveSessionAgentSelection(sessionId, next);
+      }
+    },
+    toggle_terminal: () => {
+      if (useUIStore.getState().isMobile) return false;
+      return toggleTerminalSurface();
+    },
+    toggle_terminal_expanded: () => {
+      if (useUIStore.getState().isMobile) return false;
+      return toggleTerminalSurfaceExpanded();
+    },
+    open_model_selector: () => {
+      if (hasActiveBtwComposer()) return false;
+      const state = useUIStore.getState();
+      const hasOverlay = state.isCommandPaletteOpen
+        || state.isHelpDialogOpen
+        || state.isSessionSwitcherOpen
+        || state.isAboutDialogOpen;
+      if (state.isSettingsDialogOpen || hasOverlay) return false;
+      state.setModelSelectorOpen(!state.isModelSelectorOpen);
+    },
+    cycle_thinking_variant: () => {
+      if (hasActiveBtwComposer()) return false;
+      const state = useUIStore.getState();
+      const hasOverlay = state.isCommandPaletteOpen
+        || state.isHelpDialogOpen
+        || state.isSessionSwitcherOpen
+        || state.isAboutDialogOpen;
+      if (state.isSettingsDialogOpen || hasOverlay) return false;
+      const config = useConfigStore.getState();
+      if (config.getCurrentModelVariants().length === 0) return false;
+      const nextVariantOverride = config.cycleCurrentVariant();
+      const sessionId = useSessionUIStore.getState().currentSessionId;
+      const { currentAgentName, currentProviderId, currentModelId } = useConfigStore.getState();
+      if (sessionId && currentAgentName && currentProviderId && currentModelId) {
+        useSelectionStore.getState().saveAgentModelVariantForSession(
+          sessionId,
+          currentAgentName,
+          currentProviderId,
+          currentModelId,
+          nextVariantOverride,
+        );
+      }
+    },
+    cycle_favorite_model_forward: () => cycleFavoriteModel(1),
+    cycle_favorite_model_backward: () => cycleFavoriteModel(-1),
+    expand_input: () => {
+      if (hasActiveBtwComposer()) return false;
+      if (useUIStore.getState().isMobile) return false;
+      useUIStore.getState().toggleExpandedInput();
+    },
+    toggle_dictation: () => {
+      if (hasActiveBtwComposer()) return false;
+      const state = useUIStore.getState();
+      if (
+        state.isCommandPaletteOpen
+        || state.isHelpDialogOpen
+        || state.isSessionSwitcherOpen
+        || state.isSettingsDialogOpen
+      ) {
+        return false;
+      }
+      window.dispatchEvent(new CustomEvent('openchamber:dictation-toggle'));
+    },
+    abort_run: () => {
+      if (sessionPhase === 'idle' || !currentSessionId) return false;
+      void sessionActions.abortCurrentOperation(currentSessionId);
+    },
+  });
+
+  function navigateSessionHistoryByShortcut(event: KeyboardEvent, delta: -1 | 1): boolean | void {
+    // An editor that already handled the chord (CodeMirror outdent/indent)
+    // keeps it.
+    if (event.defaultPrevented) return false;
+    return navigateSessionHistory(delta) ? undefined : false;
+  }
+
+  function cycleFavoriteModel(delta: number): boolean | void {
+    if (hasActiveBtwComposer()) return false;
+    const state = useUIStore.getState();
+    const hasOverlay = state.isCommandPaletteOpen
+      || state.isHelpDialogOpen
+      || state.isSessionSwitcherOpen
+      || state.isAboutDialogOpen;
+    if (
+      state.isSettingsDialogOpen
+      || hasOverlay
+      || state.favoriteModels.length === 0
+    ) {
+      return false;
+    }
+    const config = useConfigStore.getState();
+    const index = state.favoriteModels.findIndex((model) => (
+      model.providerID === config.currentProviderId && model.modelID === config.currentModelId
+    ));
+    const next = state.favoriteModels[(index + delta + state.favoriteModels.length) % state.favoriteModels.length];
+    config.setProvider(next.providerID);
+    config.setModel(next.modelID);
+    state.addRecentModel(next.providerID, next.modelID);
+    state.setLastSelectedModel(next.providerID, next.modelID);
+  }
+
+  React.useEffect(() => {
+    const invokeRegistered = (actionId: ShortcutActionId, event: KeyboardEvent): boolean => {
+      const handler = shortcutRegistry.get(actionId);
+      return handler ? handler(event) !== false : false;
+    };
+    const handleTerminalShortcutCapture = (event: KeyboardEvent) => {
+      if (!isTerminalEventTarget(event.target)) return;
+      const getBinding = (actionId: ShortcutActionId) => getEffectiveShortcutCombo(
+        actionId,
+        useUIStore.getState().shortcutOverrides,
+      );
+      const actionId = eventMatchesShortcut(event, getBinding('toggle_terminal')) ? 'toggle_terminal'
+        : eventMatchesShortcut(event, getBinding('toggle_terminal_expanded')) ? 'toggle_terminal_expanded' : null;
+      if (actionId && invokeRegistered(actionId, event)) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    };
+    const handleSelectionToolbarKeyDownCapture = (event: KeyboardEvent) => {
+      const version = getActiveSelectionToolbarVersion();
+      if (selectionToolbarVersionRef.current !== version) {
+        selectionToolbarVersionRef.current = version;
+        selectionToolbarDispatcher.clear();
+      }
+      if (!hasActiveSelectionToolbar()) return;
+      if (isIMECompositionEvent(event)) {
+        selectionToolbarDispatcher.clear();
+        if (event.key === 'Escape') {
+          event.stopImmediatePropagation();
+        }
+        return;
+      }
+      if (event.key === 'Escape') {
+        selectionToolbarDispatcher.clear();
+        if (dismissActiveSelectionToolbar()) {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          resetAbortPriming();
+        }
+        return;
+      }
+      if (selectionToolbarDispatcher.dispatch(event)) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      }
+    };
+    const handleEscapeKeyDownCapture = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      if (dispatcher.handleEscape()) {
+        event.preventDefault();
+        return;
+      }
+      const target = event.target as Element | null;
+      const state = useUIStore.getState();
+      const isDropdownTarget = target instanceof Element
+        && target.closest(dropdownTargetSelector);
+      const dropdownOpen = Boolean(isDropdownTarget || hasOpenDropdown());
+      if (shouldStopDropdownImeEscape(event, dropdownOpen)) {
+        event.stopImmediatePropagation();
+        resetAbortPriming();
+        return;
+      }
+      if (
+        target?.closest('[role="dialog"]')
+        || target?.closest('[data-btw-composer="true"]')
+        || isTerminalEventTarget(target)
+        || isVimEditorEventTarget(target)
+        || dropdownOpen
+      ) {
+        return;
+      }
+      if (state.isPromptNavigatorPanelOpen) {
+        event.preventDefault();
+        state.setPromptNavigatorPanelOpen(false);
+        return;
+      }
+      if (state.isSettingsDialogOpen) {
+        event.preventDefault();
+        state.setSettingsDialogOpen(false);
+      }
+    };
+    // Double Escape stops a run only from a chat's own composer. Escape
+    // anywhere else belongs to what has focus (dialogs, panels, menus), and
+    // an Escape the composer spent on itself (a picker, shell mode, the
+    // expanded input, a selection) arrives here already prevented.
+    const handleAbortEscapeKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      const target = event.target instanceof Element ? event.target : null;
+      const fromComposer = Boolean(target?.closest('[data-chat-input="true"]'))
+        && !target?.closest('[data-btw-composer="true"]');
+      if (event.defaultPrevented || !fromComposer || isIMECompositionEvent(event)) {
+        resetAbortPriming();
+        return;
+      }
+      const hasOverlay = hasOverlayOpen() || hasOpenDropdown();
+      // The composer of a chat pinned in the side panel stops that chat's
+      // session, which the column names on its root; the main composer stops
+      // the main chat's.
+      const pinnedColumn = target?.closest<HTMLElement>('[data-chat-column="pinned"]') ?? null;
+      const abortSessionId = pinnedColumn ? pinnedColumn.dataset.chatSessionId ?? null : currentSessionId;
+      const abortable = pinnedColumn ? pinnedColumn.dataset.chatWorking === 'true' : sessionPhase !== 'idle';
+      if (
+        hasOverlay
+        || !abortable
+        || !abortSessionId
+      ) {
+        resetAbortPriming();
+        return;
+      }
+      const now = Date.now();
+      if (abortPrimedUntilRef.current && now < abortPrimedUntilRef.current && abortPrimedSessionRef.current === abortSessionId) {
+        resetAbortPriming();
+        if (pinnedColumn) {
+          event.preventDefault();
+          void sessionActions.abortCurrentOperation(abortSessionId);
+        } else if (invokeRegistered('abort_run', event)) {
+          event.preventDefault();
+        }
+        return;
+      }
+      event.preventDefault();
+      const expiresAt = armAbortPrompt(3000, abortSessionId) ?? now + 3000;
+      abortPrimedUntilRef.current = expiresAt;
+      abortPrimedSessionRef.current = abortSessionId;
+      if (abortPrimedTimeoutRef.current) clearTimeout(abortPrimedTimeoutRef.current);
+      abortPrimedTimeoutRef.current = setTimeout(() => {
+        if (abortPrimedUntilRef.current && Date.now() >= abortPrimedUntilRef.current) {
+          resetAbortPriming();
+        }
+      }, Math.max(expiresAt - now, 0));
+    };
+    const handleActivePrefixKeyDownCapture = (event: KeyboardEvent) => {
+      if (isTerminalEventTarget(event.target)) return;
+      if (!dispatcher.hasActivePrefix()) return;
+      // An unmodified completion key typed into an editable target is only a
+      // deliberate sequence when the prefix was armed from that same target;
+      // otherwise it is regular typing and must not be swallowed.
+      if (
+        !event.ctrlKey && !event.metaKey && !event.altKey
+        && isEditableEventTarget(event.target)
+        && dispatcher.getActivePrefixTarget() !== event.target
+      ) {
+        dispatcher.clear();
+        return;
+      }
+      if (dispatcher.dispatchActivePrefix(event)) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (dispatcher.consumeCapturedPrefixEvent(event)) return;
+      if (event.key === 'Escape' || isTerminalEventTarget(event.target)) return;
+      if (shortcutRegistry.isSuspended() || hasActiveSelectionToolbar()) return;
+      const combo = getEffectiveShortcutCombo('cycle_agent', useUIStore.getState().shortcutOverrides);
+      const backward = combo && !combo.includes('shift') ? normalizeCombo(`shift+${combo}`) : '';
+      if (backward && eventMatchesShortcut(event, backward)) {
+        if (invokeRegistered('cycle_agent', event)) event.preventDefault();
+        return;
+      }
+
+      const rawDigit = resolveShortcutEventDigit(event);
+      const switchSurfaceDigit = rawDigit !== null
+        ? (rawDigit === '0' ? 10 : Number(rawDigit))
+        : null;
+      const switchSurfacePrefix = getEffectiveShortcutPrefix(
+        'switch_context_surface',
+        useUIStore.getState().shortcutOverrides,
+      );
+      if (
+        switchSurfaceDigit !== null
+        && !event.repeat
+        && eventMatchesShortcutPrefix(event, switchSurfacePrefix, heldKeysRef.current)
+      ) {
+        if (!canUseDigitShortcut(event)) return;
+        const state = useUIStore.getState();
+        if (!state.isMobile && effectiveDirectory) {
+          const directory = normalizeContextPanelDirectoryKey(effectiveDirectory);
+          const panel = state.contextPanelByDirectory[directory];
+          const visibleSurfaces = getVisibleContextRailSurfaces({
+            railOrder: state.contextRailOrder,
+            hiddenSurfaces: state.contextRailHiddenSurfaces,
+            isVSCode: isVSCodeRuntime(),
+            screenWidth: window.innerWidth,
+            tabs: panel?.tabs ?? [],
+            sourceControlConnected: Object.values(useSourceControlAuthStore.getState().entries).some((entry) => entry.status?.status === 'connected'),
+            workflowsShown: isWorkflowsSurfaceShown(panel?.tabs ?? [], effectiveDirectory),
+            extras: enabledGuestSurfaces(useGuestsStore.getState().guests, getRuntimeUrlResolver().authenticatedAsset),
+          });
+          const target = visibleSurfaces[switchSurfaceDigit - 1];
+          if (target) {
+            event.preventDefault();
+            state.openContextSurface(directory, target.mode);
+            return;
+          }
+        }
+      }
+
+      const sessionTabDigit = rawDigit !== null && rawDigit !== '0' ? Number(rawDigit) : null;
+      if (
+        sessionTabDigit !== null
+        && !event.repeat
+        && !isVSCodeRuntime()
+        && canUseDigitShortcut(event)
+        && useUIStore.getState().sessionTabsEnabled
+        && eventMatchesShortcutPrefix(
+          event,
+          getEffectiveShortcutPrefix('switch_session_tab', useUIStore.getState().shortcutOverrides),
+          heldKeysRef.current,
+        )
+        && activateSessionTabByIndex(sessionTabDigit - 1)
+      ) {
+        event.preventDefault();
+        return;
+      }
+
+      if (dispatcher.dispatch(event)) {
+        event.preventDefault();
+        return;
+      }
+      if (!useUIStore.getState().isMobile && !hasOverlayOpen()) inputRedirect.redirectKey(event);
+    };
+    const handlePaste = (event: ClipboardEvent) => {
+      if (useUIStore.getState().isMobile || hasOverlayOpen() || hasActiveSelectionToolbar()) return;
+      inputRedirect.redirectPaste(event);
+    };
+    let windowFocusFrame: number | null = null;
+    const handleWindowFocus = () => {
+      if (useUIStore.getState().isMobile) return;
+      if (windowFocusFrame !== null) cancelAnimationFrame(windowFocusFrame);
+      // The element that held focus gets it back after the window's own
+      // event; check what holds it once that has happened.
+      windowFocusFrame = requestAnimationFrame(() => {
+        windowFocusFrame = requestAnimationFrame(() => {
+          windowFocusFrame = null;
+          if (!hasOverlayOpen()) inputRedirect.refocusAfterWindowFocus();
+        });
+      });
+    };
+    const handleKeyHoldDown = (event: KeyboardEvent) => {
+      heldKeysRef.current.add(event.key.toLowerCase());
+      heldKeysRef.current.add(resolveShortcutEventKey(event).toLowerCase());
+    };
+    const handleKeyUp = (event: KeyboardEvent) => {
+      heldKeysRef.current.delete(event.key.toLowerCase());
+      heldKeysRef.current.delete(resolveShortcutEventKey(event).toLowerCase());
+    };
+    const handleBlur = () => {
+      heldKeysRef.current.clear();
+      dispatcher.handleBlur();
+      selectionToolbarDispatcher.handleBlur();
+    };
+    window.addEventListener('keydown', handleKeyHoldDown, true);
+    window.addEventListener('keydown', handleSelectionToolbarKeyDownCapture, true);
+    window.addEventListener('keyup', handleKeyUp, true);
+    window.addEventListener('keydown', handleTerminalShortcutCapture, true);
+    window.addEventListener('keydown', handleEscapeKeyDownCapture, true);
+    window.addEventListener('keydown', handleActivePrefixKeyDownCapture, true);
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keydown', handleAbortEscapeKeyDown);
+    window.addEventListener('blur', handleBlur);
+    window.addEventListener('pointerdown', inputRedirect.rememberColumn, true);
+    window.addEventListener('focusin', inputRedirect.rememberColumn, true);
+    window.addEventListener('paste', handlePaste);
+    window.addEventListener('focus', handleWindowFocus);
+    return () => {
+      window.removeEventListener('pointerdown', inputRedirect.rememberColumn, true);
+      window.removeEventListener('focusin', inputRedirect.rememberColumn, true);
+      window.removeEventListener('paste', handlePaste);
+      window.removeEventListener('focus', handleWindowFocus);
+      if (windowFocusFrame !== null) cancelAnimationFrame(windowFocusFrame);
+      window.removeEventListener('keydown', handleKeyHoldDown, true);
+      window.removeEventListener('keydown', handleSelectionToolbarKeyDownCapture, true);
+      window.removeEventListener('keyup', handleKeyUp, true);
+      window.removeEventListener('keydown', handleTerminalShortcutCapture, true);
+      window.removeEventListener('keydown', handleEscapeKeyDownCapture, true);
+      window.removeEventListener('keydown', handleActivePrefixKeyDownCapture, true);
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keydown', handleAbortEscapeKeyDown);
+      window.removeEventListener('blur', handleBlur);
+    };
+  }, [armAbortPrompt, currentSessionId, dispatcher, effectiveDirectory, inputRedirect, resetAbortPriming, selectionToolbarDispatcher, sessionPhase]);
+
+  React.useEffect(() => () => resetAbortPriming(), [resetAbortPriming]);
+};

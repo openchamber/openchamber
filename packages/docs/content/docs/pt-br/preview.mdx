@@ -1,0 +1,35 @@
+---
+title: Pré-visualização e servidores de desenvolvimento
+description: Abra um servidor de desenvolvimento em execução dentro do OpenChamber.
+---
+
+# Pré-visualização e servidores de desenvolvimento
+
+Quando você sobe um servidor de desenvolvimento, o OpenChamber pode abri-lo dentro do próprio aplicativo em vez de uma aba separada — assim você vê seu site ao lado do chat e pode apontar para elementos para perguntar sobre eles.
+
+## Abrir um servidor de desenvolvimento
+
+Abra o painel do navegador pelo botão do globo no cabeçalho. Se já houver um servidor rodando, ele aparece na lista e um clique o abre: o OpenChamber o encontra olhando o que está de fato escutando na sua máquina, então funciona independentemente de como você o iniciou.
+
+Um servidor também abre sozinho quando:
+
+- você pressiona **Abrir pré-visualização** em um endereço local no terminal
+- uma [ação de projeto](/project-actions/) com abertura automática inicia um
+- você segue um link local em uma mensagem do chat
+
+Você sempre pode digitar o endereço à mão. Um simples `localhost:5173` é entendido como `http://`, então não precisa escrever o esquema.
+
+## Trabalhando com um OpenChamber remoto
+
+Quando o OpenChamber roda em outra máquina, o servidor de desenvolvimento está *nessa* máquina — `localhost` no seu notebook aponta para outro lugar completamente. O aplicativo desktop resolve isso: ele abre uma porta local que leva a conexão até o servidor remoto, de modo que a página carrega normalmente, com recarga a quente e ferramentas de desenvolvedor funcionando. Você continua digitando o endereço que espera; o encanamento não atrapalha.
+
+Isso exige o aplicativo desktop. Em uma aba do navegador, só é possível abrir servidores da sua própria máquina.
+
+## Anotar a página
+
+Veja [Painel do navegador](/desktop-browser/) para apontar elementos, desenhar sobre a página e mandar tudo para o chat.
+
+## Relacionado
+
+- [Ações de projeto](/project-actions/) — abrir um servidor automaticamente ao iniciá-lo
+- [Painel do navegador](/desktop-browser/) — anotar páginas e deixar o agente conduzir

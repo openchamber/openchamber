@@ -1,0 +1,185 @@
+---
+title: Variables d’environnement
+description: Configurez OpenChamber et l’intégration OpenCode avec des variables d’environnement.
+---
+
+# Variables d’environnement
+
+OpenChamber lit ces variables d’environnement au démarrage. Pour les services de démarrage, `openchamber startup enable` capture l’environnement actuel par défaut ; relancez donc la commande après avoir changé les variables que le service doit utiliser.
+
+## Variables pour OpenCode, Git et le terminal
+
+Pour donner vos propres variables à OpenCode, à Git, au terminal et aux [actions de projet](/fr/project-actions/), comme un jeton d’API ou l’adresse d’une base de données, ajoutez-les dans **Paramètres → Général → Variables d’environnement** plutôt que de les exporter avant de lancer OpenChamber. Les valeurs restent sur la machine qui fait tourner OpenChamber, dans `environment.json` dans le dossier de données, et seul votre utilisateur peut les lire. Les Paramètres n’affichent plus jamais une valeur : vous pouvez la remplacer ou la supprimer, pas la relire.
+
+- OpenCode les reçoit au démarrage, donc redémarrez-le après un changement. Les Paramètres proposent le bouton.
+- Les variables définies avec `opencode service set env` arrivent aussi jusqu’à OpenCode. Celles des Paramètres l’emportent.
+- Git, le terminal et les actions de projet les reçoivent à leur prochaine exécution.
+- Les variables qu’OpenChamber définit pour OpenCode lui-même, comme son mot de passe et sa configuration, l’emportent sur les vôtres.
+
+Un projet peut ajouter ses propres variables, ou une commande qui les affiche comme `direnv export json`, dans **Paramètres → Projets**. Voir [Projets](/fr/projects/#environnement-du-projet).
+
+Ces variables n’atteignent pas un serveur OpenCode que vous avez lancé vous-même, et l’extension VS Code n’a pas ce réglage. Tout ce qui suit est lu par OpenChamber lui-même au démarrage.
+
+## Serveur OpenChamber
+
+### `OPENCHAMBER_HOST`
+
+Adresse d’écoute du serveur web OpenChamber. Utilisez `0.0.0.0` pour autoriser l’accès depuis d’autres machines.
+
+### `OPENCHAMBER_LAN_URL`
+
+L’adresse à laquelle les autres appareils de votre réseau joignent OpenChamber, par exemple `http://192.168.1.20:3000`. Les liens et QR codes d’appairage la proposent à la place de l’adresse détectée par OpenChamber. Définissez-la quand cette détection se trompe, par exemple dans Docker, où OpenChamber ne voit que l’adresse interne du conteneur.
+
+### `OPENCHAMBER_UI_PASSWORD`
+
+Mot de passe pour l’UI navigateur. Utilisez-le lorsque vous écoutez hors de localhost, utilisez des tunnels ou passez derrière un reverse proxy.
+
+### `OPENCHAMBER_UI_SESSION_TTL_HOURS`
+
+Durée d’une connexion dans le navigateur, en heures, quand « faire confiance à cet appareil » est désactivé. La valeur par défaut est `12`.
+
+### `OPENCHAMBER_UI_TRUSTED_SESSION_TTL_DAYS`
+
+Durée d’une connexion, en jours, sur un appareil auquel vous faites confiance. La valeur par défaut est `7`.
+
+### `OPENCHAMBER_API_ONLY`
+
+Démarre OpenChamber en mode headless lorsqu’il vaut `true` ou `1`. Les routes API restent disponibles pour les clients desktop et mobile, mais l’UI navigateur n’est pas servie.
+
+### `OPENCHAMBER_FRAME_ANCESTORS`
+
+Origines autorisées à afficher OpenChamber dans un cadre sur leur propre page, séparées par des espaces, par exemple `https://dash.example.com`. `*` autorise n’importe quel site. Par défaut, seuls OpenChamber et ses apps desktop et mobile peuvent l’intégrer, ce qui empêche d’autres sites de superposer ses boutons.
+
+### `OPENCHAMBER_DATA_DIR`
+
+Remplace le dossier de données OpenChamber. La valeur par défaut est `~/.config/openchamber`.
+
+### `OPENCHAMBER_CHATS_DIR`
+
+Déplace les dossiers de chat gérés qu'OpenChamber crée pour les chats sans projet. La valeur par défaut est `~/.config/openchamber/chats`. Indiquez un dossier lisible par le serveur OpenCode lorsque OpenChamber et OpenCode tournent sous des utilisateurs différents. Les chats existants ne sont pas déplacés.
+
+### `OPENCHAMBER_COMPRESS_API`
+
+Contrôle la compression des réponses API. Utilisez `true` ou `1` pour la forcer, `false` ou `0` pour la désactiver.
+
+### `OPENCHAMBER_SKIP_API_COMPRESSION`
+
+Désactive la compression des réponses API lorsqu’il vaut `true` ou `1`. Cette variable a priorité sur `OPENCHAMBER_COMPRESS_API`.
+
+### `OPENCHAMBER_VERBOSE_REQUEST_LOGS`
+
+Active les logs HTTP détaillés lorsqu’il vaut `true` ou `1`.
+
+### `OPENCHAMBER_UPDATE_API_URL`
+
+Remplace l’endpoint API de vérification des mises à jour. La plupart des utilisateurs doivent laisser cette variable non définie.
+
+### `OPENCHAMBER_PACKAGE_MANAGER`
+
+Force le gestionnaire de paquets utilisé par les opérations de mise à jour lorsque l’auto-détection se trompe.
+
+## Proxy
+
+### `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`
+
+Fait passer par un proxy les requêtes sortantes propres à OpenChamber, comme les limites d’utilisation et les catalogues de skills. Les noms en minuscules fonctionnent aussi. Les hôtes de `NO_PROXY` se connectent directement, et `localhost`, `127.0.0.1` et `::1` toujours, donc les retours de connexion et le serveur OpenCode local continuent de fonctionner.
+
+## Serveur OpenCode
+
+### `OPENCODE_HOST`
+
+Connecte OpenChamber à un serveur OpenCode existant. La valeur doit être une origine `http` ou `https` avec un port explicite, sans chemin, query ni hash. `OPENCODE_HOST` a priorité sur `OPENCODE_PORT`.
+
+### `OPENCODE_PORT`
+
+Définit le port du serveur OpenCode. Avec OpenCode géré, cela demande le port géré ; avec `OPENCODE_SKIP_START=true`, OpenChamber se connecte à un serveur externe sur ce port.
+
+### `OPENCODE_SKIP_START`
+
+Empêche OpenChamber de démarrer son propre serveur OpenCode lorsqu’il vaut `true`.
+
+### `OPENCHAMBER_OPENCODE_HOSTNAME`
+
+Nom d’hôte d’écoute du serveur OpenCode géré par OpenChamber. La valeur par défaut est `127.0.0.1`.
+
+### `OPENCHAMBER_OPENCODE_HEALTH_TIMEOUT_MS`
+
+Délai maximal d'une vérification de l'état d'OpenCode, en millisecondes. La valeur par défaut est `5000`.
+
+### `OPENCHAMBER_OPENCODE_HEALTH_CONSECUTIVE_FAILURES`
+
+Nombre d'échecs consécutifs comptabilisés avant qu'OpenChamber redémarre un processus OpenCode géré encore en cours d'exécution. La valeur par défaut est `20`. Les sessions occupées peuvent retarder le redémarrage.
+
+### `OPENCHAMBER_OPENCODE_HEALTH_INTERVAL_MS`
+
+Remplace l'intervalle de vérification de l'état d'OpenCode géré, en millisecondes. Définit aussi le délai minimal entre les échecs comptabilisés. La valeur par défaut est `0`, qui conserve l'intervalle du serveur de `15000` millisecondes.
+
+### `OPENCHAMBER_OPENCODE_HEALTH_CACHE_MS`
+
+Durée en millisecondes pendant laquelle OpenChamber réutilise le résultat d'une vérification de l'état d'OpenCode géré, y compris un échec. La valeur par défaut est `750`.
+
+### `OPENCODE_BINARY`
+
+Chemin vers l’exécutable `opencode` qu’OpenChamber doit lancer.
+
+### `OPENCODE_CONFIG`
+
+Chemin vers un fichier de configuration OpenCode précis.
+
+### `OPENCODE_CONFIG_DIR`
+
+Chemin vers un dossier de configuration OpenCode précis pour la découverte des agents, skills, snippets et configurations.
+
+### `OPENCODE_DATA_DIR`
+
+Dossier de données personnalisé pour le serveur OpenCode géré.
+
+### `OPENCODE_JWT_SECRET`
+
+Secret utilisé pour signer les tokens d’authentification UI. Utilisez une longue valeur aléatoire pour les déploiements de service persistants.
+
+## Terminal et Git
+
+### `OPENCHAMBER_TERMINAL_SHELL`
+
+Exécutable shell utilisé pour les sessions de terminal OpenChamber.
+
+### `OPENCHAMBER_GIT_BINARY`
+
+Exécutable Git utilisé par les fonctionnalités Git d’OpenChamber.
+
+### `GIT_BINARY`
+
+Autre exécutable Git de remplacement. Préférez `OPENCHAMBER_GIT_BINARY` pour une configuration propre à OpenChamber.
+
+### `OPENCHAMBER_GIT_READ_CACHE_TTL_MS`
+
+Durée de vie, en millisecondes, du cache de lecture des fichiers adossés à Git. Définissez `0` pour désactiver ce cache pendant le débogage.
+
+## Voix et tunnels
+
+### `OPENAI_API_KEY`
+
+Clé API utilisée par les fonctionnalités vocales d’OpenChamber quand elles appellent OpenAI lui-même. Elle n’est jamais envoyée à un serveur compatible OpenAI personnalisé : donnez à ce serveur sa propre clé dans les Réglages.
+
+### `OPENCHAMBER_ALLOW_REMOTE_OPENAI_COMPAT_URLS`
+
+Autorise les URL de base compatibles OpenAI distantes pour les fonctionnalités vocales lorsqu’elle vaut `true` ou `1`.
+
+### `NGROK_AUTHTOKEN`
+
+Token d’authentification ngrok utilisé par les commandes de tunnel OpenChamber. Vous pouvez aussi configurer ngrok avec `ngrok config add-authtoken <token>`.
+
+## Helpers runtime
+
+### `BUN_BINARY`
+
+Exécutable Bun qu’OpenChamber doit utiliser lorsqu’il lance des processus daemon.
+
+### `BUN_INSTALL`
+
+Racine d’installation de Bun. OpenChamber l’utilise pour trouver `bin/bun` lors du démarrage des daemons et des mises à jour.
+
+### `VITE_OPENCODE_URL`
+
+URL de base API à la compilation pour l’application web construite par Vite. La plupart des utilisateurs ne doivent pas la définir pour un usage CLI ou desktop normal.

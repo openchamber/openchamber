@@ -1,0 +1,86 @@
+---
+title: Sessions en cours
+description: Gardez le travail en cours en haut de la barre latérale, jusqu’à ce que vous le marquiez comme terminé.
+---
+
+# Sessions en cours
+
+Chaque session dans laquelle vous envoyez un message fait passer son travail dans le bloc **En cours**, en haut de la barre latérale, et il y reste jusqu’à ce que vous le marquiez comme terminé, peu importe depuis quand vous ne l’avez pas ouvert. Vos projets gardent tout ce que vous avez fait ; En cours ne contient que ce que vous n’avez pas encore terminé.
+
+## Ce qu’est un travail
+
+La barre latérale liste des travaux, pas des sessions isolées. Un travail est soit :
+
+- **un worktree** avec toutes ses sessions, affiché sur une seule ligne au nom de la tâche (voir [Sessions worktree](/fr/worktrees/)), soit
+- **une session dans le dossier même du projet**, avec ce qui en est issu imbriqué dessous : ses sous-agents, sa revue, les forks et questions annexes que vous avez gardés, et les sessions que son agent a lancées pour vous.
+
+Cliquez sur la ligne pour l’ouvrir ; la flèche à sa gauche déplie les sessions qu’elle contient.
+
+## Où le trouver
+
+Le bloc **En cours** se trouve dans la barre latérale, sous les discussions et au-dessus de vos projets ou de la chronologie. Un travail qui y entre quitte son projet : chaque travail n’apparaît donc qu’une fois. Pour le garder aussi sous son projet, activez **Afficher aussi le travail en cours sous les projets** dans le menu d’affichage de la barre latérale. La recherche ne l’affiche qu’une fois, dans le bloc En cours.
+
+Chaque travail tient sur une ligne : titre et état, avec une marque colorée quand il a une pull request ou une issue. Les lignes sont triées par activité la plus récente, elles n’affichent donc pas de date. Survolez une ligne pour voir son projet, sa branche, son heure et ses liens, ou activez **Lignes détaillées** dans le menu d’affichage pour les afficher sous le titre. Les lignes détaillées s’appliquent aussi sous vos projets ; les sessions à l’intérieur d’un travail restent sur une ligne.
+
+Les sessions épinglées ont leur propre bloc **Épinglées** au-dessus d’En cours ; pour les garder uniquement sous leurs projets, désactivez **Afficher la section épinglées** dans le même menu. Une session épinglée en cours n’apparaît que dans Épinglées.
+
+Sur le téléphone, la liste des sessions est la même, avec le même menu d’affichage. Ses lignes tiennent sur deux lignes de texte, sauf si vous désactivez **Lignes détaillées**, et la flèche qui déplie un travail est toujours là, puisqu’il n’y a rien à survoler.
+
+## Comment les sessions y entrent
+
+Envoyez un message dans une session et elle passe en cours. Cela vaut pour toute session de projet, y compris les sessions dans un worktree. Un nouveau worktree passe en cours dès que vous le créez, alors que le brouillon qui s’y ouvre n’est pas encore envoyé.
+
+Une session marquée comme terminée revient dès que vous y envoyez un nouveau message.
+
+Les discussions, les sessions archivées, les sessions de revue et les exécutions de [tâches planifiées](/fr/scheduled-tasks/) n’y entrent jamais ; si vous forkez une exécution pour continuer à travailler dessus, le fork y entre. Un sous-agent ne fait jamais passer sa session parente en cours.
+
+## Noms des tâches
+
+L’agent donne à chaque travail le nom de sa tâche dès que la tâche est claire, en quelques mots, par exemple « Correction du délai de connexion ». Un worktree garde ce nom dans la description de sa branche, vous le voyez donc partout où vous ouvrez le dépôt ; une session dans le dossier du projet prend ce nom comme titre. Renommez-le vous-même et votre nom reste : l’agent ne renomme jamais une tâche que vous avez nommée.
+
+## Suivre et terminer une session à la main
+
+- **Suivre :** survolez une ligne et cliquez sur l’œil, ou choisissez **Suivre comme en cours** dans le menu de la session.
+- **Terminer :** survolez une ligne du bloc et cliquez sur la coche, ou choisissez **Marquer comme terminé** dans le menu. Cela termine tout le travail : chacune de ses sessions qui était encore en cours.
+
+Terminer un worktree le retire du bloc En cours et le laisse où il est. Pour l’archiver aussi quand vous le marquez comme terminé, activez **Archiver un worktree quand vous le marquez comme terminé** dans **Paramètres → Sessions** : le dossier disparaît, et ses sessions, ses changements et sa branche attendent sur la page Archives, prêts à être restaurés. Si une session y tourne encore, le worktree reste.
+
+Sur le téléphone, faites glisser une ligne sur le côté pour atteindre la même action.
+
+Les discussions n’ont pas d’œil : ce sont de simples conversations.
+
+### « Ce travail semble terminé. »
+
+Avec un [fournisseur de classification](/fr/classification-providers/) configuré, Jev examine chaque tour d’une session en cours. Quand un tour ressemble à la fin du travail (vous avez dit merci, demandé un commit, confirmé que ça marche), Jev ne ferme rien et laisse une indication :
+
+- une coche grise sur la ligne de la session dans la barre latérale
+- un bandeau au-dessus du champ de saisie : **Ce travail semble terminé.** avec un bouton **Marquer comme terminé**
+
+Cliquez sur **Marquer comme terminé** si Jev a raison. Sinon, continuez simplement : l’indication disparaît avec votre prochain message. Sans fournisseur de classification, il n’y a pas d’indication et vous marquez les sessions comme terminées vous-même.
+
+## Récapitulatif et suggestion du prochain message
+
+Quand l’agent a fini et que la session reste calme pendant une minute, OpenChamber peut écrire deux choses avec votre petit modèle (voir [Fournisseurs, modèles et agents](/fr/providers/)) :
+
+- **Récapitulatif :** un court rappel de ce qui a été fait et de l’état actuel, affiché sous la dernière réponse et dans l’infobulle de la session dans la barre latérale
+- **Suggestion :** le message que vous enverriez probablement ensuite, sous forme de ligne en haut du champ de saisie ; un clic place le texte dans le champ, il ne part jamais tout seul
+
+Quand Jev est disponible, OpenChamber lui demande d’abord si le tour en a besoin. Un simple « merci, c’est tout » après un vrai travail reçoit quand même un récapitulatif, mais la suggestion est sautée quand il ne reste rien à faire, et le petit modèle n’est pas appelé du tout quand aucun des deux n’est utile. Sans Jev, les deux sont générés après chaque tour, comme avant.
+
+Activez-les ou désactivez-les dans **Paramètres → Chat → Assistance de session**.
+
+## Paramètres
+
+Ouvrez **Paramètres → Sessions → Sessions en cours**. Il n’y a qu’un réglage, **Afficher les sessions en cours**, activé par défaut. Désactivé, il coupe toute la fonction : plus de bloc, et envoyer un message ne fait plus passer la session en cours.
+
+Pour masquer seulement le bloc, utilisez **Afficher la section en cours** dans le menu d’affichage de la barre latérale.
+
+## Où ça fonctionne
+
+Le bloc et le suivi manuel fonctionnent partout, VS Code compris. Le passage en cours à l’envoi d’un message, l’indication « semble terminé » et le filtre Jev pour les récapitulatifs ont besoin du serveur OpenChamber : ils fonctionnent donc dans l’application desktop, dans l’application web et sur le téléphone, mais pas dans VS Code. Dans VS Code, vous suivez les sessions à la main.
+
+## Voir aussi
+
+- [Fournisseurs de classification (Jev)](/fr/classification-providers/) : configurer l’indication « semble terminé »
+- [Discussions](/fr/chats/) : des conversations qui restent hors du travail en cours
+- [Objectifs de session](/fr/session-goals/) : faire travailler l’agent jusqu’à la ligne d’arrivée

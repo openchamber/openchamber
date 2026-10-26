@@ -1,0 +1,156 @@
+import { getGitStatus, resolveGitPrimaryRoot } from '@/lib/gitApi';
+import { normalizePath as normalizePathImpl } from '@/lib/pathNormalization';
+import type { WorktreeMetadata } from '@/types/worktree';
+
+const normalizePath = (value: string | null | undefined): string => normalizePathImpl(value) ?? '';
+
+export async function getWorktreeStatus(worktreePath: string): Promise<WorktreeMetadata['status']> {
+  const normalizedPath = normalizePath(worktreePath);
+  const status = await getGitStatus(normalizedPath);
+  return {
+    isDirty: !status.isClean,
+    ahead: status.ahead,
+    behind: status.behind,
+    upstream: status.tracking,
+    aheadBase: status.aheadBase ?? null,
+  };
+}
+
+// Deleting a worktree force-removes its files and force-deletes its branch, so
+// skipping the confirmation is allowed only when nothing would be lost: no
+// uncommitted changes, and every commit already on the branch's upstream or,
+// for a branch never pushed, on the base branch (`aheadBase`, e.g. origin/main).
+// A never-pushed branch whose base could not be compared opens the dialog.
+export function canDeleteWorktreeWithoutConfirm(status: WorktreeMetadata['status']): boolean {
+  return Boolean(status && !status.isDirty && (status.upstream || status.aheadBase) && status.ahead === 0);
+}
+
+// Resolving a project's root (primary worktree) requires shelling out to
+// `git rev-parse`, whose answer is effectively static for the lifetime of a
+// session — the location of a repo's git directory does not change while the
+// app is open. Caching it (with in-flight dedupe) collapses what used to be an
+// N² burst of `/api/fs/exec` calls into roughly one resolution per directory.
+const RESOLVED_ROOT_TTL_MS = 60_000;
+const RESOLVED_ROOT_CACHE_MAX_ENTRIES = 500;
+const RESOLVED_ROOT_CACHE_MAX_BYTES = 1024 * 1024;
+const resolvedRootCache = new Map<string, { root: string; resolvedAt: number }>();
+const inFlightRootResolves = new Map<string, Promise<string>>();
+// Bumped on every invalidation so a resolution that was already in flight when
+// the cache was invalidated does not write its now-stale result back.
+let resolveCacheEpoch = 0;
+
+const resolvedRootEntryBytes = (directory: string, root: string): number => directory.length + root.length;
+
+const setResolvedRootCacheEntry = (directory: string, root: string): void => {
+  resolvedRootCache.delete(directory);
+  resolvedRootCache.set(directory, { root, resolvedAt: Date.now() });
+
+  let totalBytes = 0;
+  for (const [key, entry] of resolvedRootCache) {
+    totalBytes += resolvedRootEntryBytes(key, entry.root);
+  }
+
+  while (
+    resolvedRootCache.size > RESOLVED_ROOT_CACHE_MAX_ENTRIES ||
+    (totalBytes > RESOLVED_ROOT_CACHE_MAX_BYTES && resolvedRootCache.size > 1)
+  ) {
+    const oldest = resolvedRootCache.entries().next().value;
+    if (!oldest) {
+      break;
+    }
+    totalBytes -= resolvedRootEntryBytes(oldest[0], oldest[1].root);
+    resolvedRootCache.delete(oldest[0]);
+  }
+};
+
+/**
+ * Invalidate cached project-root resolutions. Call this when the worktree
+ * topology changes (e.g. after creating or removing a worktree), since that can
+ * alter which primary root a directory resolves to. With no argument, the whole
+ * cache is cleared.
+ */
+export function invalidateResolvedProjectRootCache(directory?: string): void {
+  // Bumping the epoch prevents any in-flight resolution from re-seeding the
+  // cache with its pre-invalidation result once it settles.
+  resolveCacheEpoch += 1;
+  if (typeof directory === 'string' && directory) {
+    const normalized = normalizePath(directory);
+    resolvedRootCache.delete(normalized);
+    // Drop the in-flight entry too, so callers arriving during the window
+    // trigger a fresh resolution instead of receiving the stale in-flight one.
+    inFlightRootResolves.delete(normalized);
+    return;
+  }
+  resolvedRootCache.clear();
+  inFlightRootResolves.clear();
+}
+
+const computeProjectRoot = async (directory: string): Promise<string> => {
+  return resolveGitPrimaryRoot(directory).catch(() => directory);
+};
+
+export const resolveProjectRoot = async (directory: string): Promise<string> => {
+  const cached = resolvedRootCache.get(directory);
+  if (cached && Date.now() - cached.resolvedAt < RESOLVED_ROOT_TTL_MS) {
+    // Refresh recency without extending TTL.
+    resolvedRootCache.delete(directory);
+    resolvedRootCache.set(directory, cached);
+    return cached.root;
+  }
+  if (cached) {
+    resolvedRootCache.delete(directory);
+  }
+
+  const inflight = inFlightRootResolves.get(directory);
+  if (inflight) {
+    return inflight;
+  }
+
+  const startEpoch = resolveCacheEpoch;
+  const promise = computeProjectRoot(directory)
+    .then((root) => {
+      // Skip the write-back if the cache was invalidated while we resolved.
+      if (resolveCacheEpoch === startEpoch) {
+        setResolvedRootCacheEntry(directory, root);
+      }
+      return root;
+    })
+    .catch(() => directory)
+    .finally(() => {
+      if (inFlightRootResolves.get(directory) === promise) {
+        inFlightRootResolves.delete(directory);
+      }
+    });
+
+  inFlightRootResolves.set(directory, promise);
+  return promise;
+};
+
+export async function getRootBranch(
+  projectDirectory: string,
+  options?: { knownBranch?: string },
+): Promise<string> {
+  const normalizedPath = normalizePath(projectDirectory);
+  if (!normalizedPath) {
+    return 'HEAD';
+  }
+
+  try {
+    const projectRoot = await resolveProjectRoot(normalizedPath).catch(() => normalizedPath);
+
+    // Fast path: when a project directory *is* its own root (i.e. not a linked
+    // worktree), the caller's already-known branch refers to the root branch,
+    // so we can skip a redundant git status round-trip. For linked worktrees the
+    // root branch differs from the worktree's branch, so we must fetch it.
+    const knownBranch = options?.knownBranch?.trim();
+    if (knownBranch && projectRoot === normalizedPath) {
+      return knownBranch;
+    }
+
+    const status = await getGitStatus(projectRoot);
+    const branch = typeof status.current === 'string' ? status.current.trim() : '';
+    return branch || 'HEAD';
+  } catch {
+    return 'HEAD';
+  }
+}

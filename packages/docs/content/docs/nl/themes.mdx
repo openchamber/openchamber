@@ -1,0 +1,40 @@
+---
+title: Thema's
+description: Pas OpenChamber aan met ingebouwde en eigen thema's.
+---
+
+# Thema's
+
+OpenChamber ondersteunt ingebouwde thema's en eigen JSON-themabestanden.
+
+## Een VS Code-thema importeren
+
+Open **Instellingen → Uiterlijk → VS Code-thema importeren** om in Open VSX te zoeken. Resultaten tonen het pictogram, de naam en de maker. Kies een pakket, vergelijk de kleurvoorbeelden en importeer de gewenste varianten. Bij een batchimport blijft uw huidige thema actief. Open VSX is een aparte catalogus. Thema's die alleen op Microsoft Marketplace staan, verschijnen mogelijk niet.
+
+Gebruik **JSON-bestand kiezen** voor een lokaal `.json`- of `.jsonc`-bestand van maximaal 512 KiB. Op de desktop wordt de lokale map `~/.vscode/extensions` geopend als die bestaat. OpenChamber zet de interface-, algemene syntaxis- en diffkleuren om en selecteert daarna het thema en de lichte of donkere modus uit het bestand. Via de prullenbak naast een geïmporteerd thema in de keuzelijst verwijdert u het van de verbonden server. Verwijdert u het geselecteerde thema, dan wordt de standaard voor die modus hersteld.
+
+Het thema wordt op de verbonden OpenChamber-server opgeslagen, ook bij import vanaf desktop of mobiel. Hetzelfde bestand opnieuw importeren maakt geen duplicaat en overschrijft geen thema dat op de server is bewerkt. De VS Code-extensie volgt het thema van VS Code zelf.
+
+Als het bestand `include` gebruikt of naar een apart tokenbestand verwijst, voert u **Developer: Generate Color Theme From Current Settings** uit in het opdrachtenpalet van VS Code en importeert u de gegenereerde JSON.
+
+## Een eigen thema toevoegen
+
+1. Maak de themamap aan:
+
+```bash
+mkdir -p ~/.config/openchamber/themes
+```
+
+2. Plaats uw JSON-bestand in die map, bijvoorbeeld `my-theme.json`.
+3. Open OpenChamber en ga naar **Instellingen → Thema → Thema's opnieuw laden**.
+4. Kies uw thema in de keuzelijst. Het wordt meteen toegepast.
+
+## Themalocatie
+
+- macOS/Linux: `~/.config/openchamber/themes/`
+
+## Volledige beschrijving van het JSON-formaat
+
+Raadpleeg de formaatgids in de hoofdrepository:
+
+- [`docs/CUSTOM_THEMES.md`](https://github.com/openchamber/openchamber/blob/main/docs/CUSTOM_THEMES.md)

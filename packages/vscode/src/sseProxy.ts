@@ -1,0 +1,278 @@
+import type { OpenCodeManager } from './opencode';
+import { waitForApiUrl } from './opencode-ready';
+
+type OpenSseProxyOptions = {
+  manager: OpenCodeManager;
+  path: string;
+  headers?: Record<string, string>;
+  signal: AbortSignal;
+  onChunk: (chunk: string) => void;
+  stallTimeoutMs?: number;
+};
+
+type OpenSseProxyResult = {
+  headers: Record<string, string>;
+  run: Promise<void>;
+};
+
+const SSE_RESPONSE_HEADERS = {
+  'content-type': 'text/event-stream',
+  'cache-control': 'no-cache',
+} as const;
+
+// SSE reconnect configuration
+const MAX_RECONNECTS = 3;
+const BASE_RECONNECT_DELAY = 1000; // 1 second
+const DEFAULT_UPSTREAM_STALL_TIMEOUT_MS = 20000;
+
+const sleep = (ms: number, signal: AbortSignal) => new Promise<void>((resolve) => {
+  if (signal.aborted) {
+    resolve();
+    return;
+  }
+
+  const timeout = setTimeout(() => {
+    signal.removeEventListener('abort', handleAbort);
+    resolve();
+  }, ms);
+  const handleAbort = () => {
+    clearTimeout(timeout);
+    resolve();
+  };
+  signal.addEventListener('abort', handleAbort, { once: true });
+});
+
+const getAbortReason = (signal: AbortSignal) => signal.reason ?? new DOMException('Aborted', 'AbortError');
+
+// OpenCode 2.x serves one global stream at `GET /api/event`; every frame carries
+// its own `location.directory`, so there is nothing to scope the request with.
+const OPENCODE_EVENT_PATH = '/api/event';
+
+const normalizeSseSearchParams = (path: string): URLSearchParams => {
+  const parsed = new URL(path, 'https://openchamber.invalid');
+  return new URLSearchParams(parsed.searchParams);
+};
+
+const createSseUrl = (baseUrl: string, searchParams: URLSearchParams): URL => {
+  const base = `${baseUrl.replace(/\/+$/, '')}/`;
+  const url = new URL(OPENCODE_EVENT_PATH.replace(/^\/+/, ''), base);
+  for (const [key, value] of searchParams) {
+    url.searchParams.append(key, value);
+  }
+  return url;
+};
+
+const createSseHeaders = (manager: OpenCodeManager, headers?: Record<string, string>): Record<string, string> => ({
+  Accept: 'text/event-stream',
+  'Cache-Control': 'no-cache',
+  Connection: 'keep-alive',
+  ...(headers || {}),
+  ...manager.getOpenCodeAuthHeaders(),
+});
+
+const createSseResponseHeaders = (response: Response): Record<string, string> => ({
+  'content-type': response.headers.get('content-type') || SSE_RESPONSE_HEADERS['content-type'],
+  'cache-control': response.headers.get('cache-control') || SSE_RESPONSE_HEADERS['cache-control'],
+});
+
+const fetchSseResponse = async (
+  manager: OpenCodeManager,
+  path: string,
+  headers: Record<string, string> | undefined,
+  signal: AbortSignal,
+): Promise<Response> => {
+  const baseUrl = await waitForApiUrl(manager);
+  if (!baseUrl) {
+    throw new Error('OpenCode API URL not available');
+  }
+
+  const targetUrl = createSseUrl(baseUrl, normalizeSseSearchParams(path));
+
+  const response = await fetch(targetUrl.toString(), {
+    method: 'GET',
+    headers: createSseHeaders(manager, headers),
+    signal,
+  });
+
+  if (!response.ok) {
+    await response.body?.cancel().catch(() => {});
+    const error = new Error(`OpenCode SSE request failed (${response.status})`);
+    (error as Error & { status?: number }).status = response.status;
+    throw error;
+  }
+
+  if (!response.body) {
+    throw new Error('OpenCode SSE response missing body');
+  }
+
+  return response;
+};
+
+const resolveStallTimeoutMs = (value: number | undefined): number => (
+  Number.isFinite(value) && typeof value === 'number' ? value : DEFAULT_UPSTREAM_STALL_TIMEOUT_MS
+);
+
+const pipeSseResponse = async (
+  response: Response,
+  signal: AbortSignal,
+  onChunk: (chunk: string) => void,
+  stallTimeoutMs?: number,
+): Promise<void> => {
+  if (!response.body) {
+    throw new Error('OpenCode SSE response missing body');
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let stalled = false;
+  let stallTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const clearStallTimer = () => {
+    if (!stallTimer) {
+      return;
+    }
+    clearTimeout(stallTimer);
+    stallTimer = null;
+  };
+
+  const resetStallTimer = () => {
+    clearStallTimer();
+    const timeoutMs = resolveStallTimeoutMs(stallTimeoutMs);
+    if (timeoutMs <= 0) {
+      return;
+    }
+    stallTimer = setTimeout(() => {
+      stalled = true;
+      void reader.cancel().catch(() => {});
+    }, timeoutMs);
+  };
+
+  try {
+    resetStallTimer();
+    while (!signal.aborted) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      if (value && value.length > 0) {
+        resetStallTimer();
+        const chunk = decoder.decode(value, { stream: true });
+        if (chunk.length > 0) {
+          onChunk(chunk);
+        }
+      }
+    }
+
+    const remaining = decoder.decode();
+    if (!signal.aborted && remaining.length > 0) {
+      onChunk(remaining);
+    }
+  } catch (error) {
+    if (!stalled) {
+      throw error;
+    }
+  } finally {
+    clearStallTimer();
+    try {
+      await reader.cancel();
+    } catch {
+      // ignore cancel failures during stream shutdown
+    }
+    try {
+      reader.releaseLock();
+    } catch {
+      // ignore release failures after reader shutdown
+    }
+  }
+};
+
+export const openSseProxy = async ({
+  manager,
+  path,
+  headers,
+  signal,
+  onChunk,
+  stallTimeoutMs,
+}: OpenSseProxyOptions): Promise<OpenSseProxyResult> => {
+  // Reconnect logic with exponential backoff
+  let reconnectAttempts = 0;
+
+  const connect = async (): Promise<Response> => {
+    try {
+      console.log(`[SSE] Connecting to ${OPENCODE_EVENT_PATH} (attempt ${reconnectAttempts + 1}/${MAX_RECONNECTS + 1})`);
+
+      const result = await fetchSseResponse(manager, path, headers, signal);
+      reconnectAttempts = 0;
+      return result;
+    } catch (error) {
+      if ((error as Error)?.name === 'AbortError' || signal.aborted) {
+        throw error;
+      }
+
+      // Implement reconnect logic
+      if (!signal.aborted && reconnectAttempts < MAX_RECONNECTS) {
+        reconnectAttempts++;
+        const delay = BASE_RECONNECT_DELAY * Math.pow(2, reconnectAttempts - 1); // Exponential backoff
+
+        console.warn(
+          `[SSE] Connection failed (attempt ${reconnectAttempts}/${MAX_RECONNECTS}), ` +
+          `retrying in ${delay}ms...`,
+          error
+        );
+
+        await sleep(delay, signal);
+        if (signal.aborted) {
+          throw getAbortReason(signal);
+        }
+        return connect(); // Recursive retry
+      }
+
+      console.error(`[SSE] Connection failed after ${reconnectAttempts} attempts`, error);
+      throw error;
+    }
+  };
+
+  const response = await connect();
+
+  const run = (async () => {
+    let activeResponse = response;
+    try {
+      await pipeSseResponse(activeResponse, signal, onChunk, stallTimeoutMs);
+    } catch (error: unknown) {
+      const cause = (error as { cause?: { code?: string } } | null)?.cause;
+
+      // Attempt reconnect on socket errors
+      if (!signal.aborted) {
+        if (cause?.code === 'UND_ERR_SOCKET' || cause?.code === 'ECONNRESET') {
+          console.warn('[SSE] Socket error detected, attempting reconnect...');
+
+          if (reconnectAttempts < MAX_RECONNECTS) {
+            reconnectAttempts++;
+            const delay = BASE_RECONNECT_DELAY * Math.pow(2, reconnectAttempts - 1);
+            await sleep(delay, signal);
+            if (signal.aborted) {
+              return;
+            }
+
+            // Attempt to reconnect
+            try {
+              activeResponse = await connect();
+              await pipeSseResponse(activeResponse, signal, onChunk, stallTimeoutMs);
+              return; // Successfully reconnected
+            } catch (reconnectError) {
+              console.error('[SSE] Reconnect failed', reconnectError);
+            }
+          }
+        }
+
+        // Re-throw if we couldn't recover
+        throw error;
+      }
+    }
+  })();
+
+  return {
+    headers: createSseResponseHeaders(response),
+    run,
+  };
+};

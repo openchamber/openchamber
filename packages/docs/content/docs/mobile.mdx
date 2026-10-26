@@ -1,0 +1,43 @@
+---
+title: Mobile Apps & PWA
+description: Install the OpenChamber app on iOS or Android and connect it to your server.
+---
+
+# Mobile Apps & PWA
+
+OpenChamber has native apps for iPhone and Android, so you can watch sessions, reply to agents, and manage work from your phone — at home over Wi-Fi or from anywhere over the [Private Relay](/private-relay/).
+
+## Install the app
+
+- **iPhone/iPad** — join the [TestFlight beta](https://testflight.apple.com/join/5ek6GU1E)
+- **Android** — download the APK from the [latest release](https://github.com/openchamber/openchamber/releases/latest)
+
+## Connect it to your server
+
+1. On the computer running OpenChamber, open **Settings → Remote Instances → Connect to this server** and press **Add a device**.
+2. Pick **Anywhere** (or **Home network only** if you'll only use the phone at home) and press **Create QR code**.
+3. In the mobile app, tap **Scan QR code** and point the camera at it.
+
+The app connects and remembers the server. The QR code is single-use and each device gets its own revocable token — see [Connect a Device](/connect-devices/) for how pairing stays safe.
+
+You can pair the app with several servers and switch between them from the instances list; the app shows for each one whether it's reachable and whether you're connected over the local network or the relay.
+
+## PWA (browser install)
+
+Prefer no app store at all? The web app installs straight from the browser:
+
+- **desktop browser** — use the **Install** option in the address bar
+- **iPhone/iPad (Safari)** — Share → **Add to Home Screen**
+- **Android (Chrome)** — menu → **Install app** / **Add to Home Screen**
+
+To reach the PWA from outside your network you'll need a [tunnel](/tunnels/) and a strong [UI password](/security/) — the native apps handle this for you via the relay.
+
+## Mobile settings
+
+Under **Settings → OpenChamber**, a few options tune the mobile and installed experience — the app's installed name, screen orientation, and how the on-screen keyboard behaves.
+
+## Related
+
+- [Connect a Device](/connect-devices/) — pairing, one-time QR codes, and managing devices
+- [Private Relay](/private-relay/) — how "Anywhere" access works
+- [Security](/security/) — protect the UI before exposing it

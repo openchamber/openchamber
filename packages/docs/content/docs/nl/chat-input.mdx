@@ -1,0 +1,88 @@
+---
+title: Chatinvoer
+description: "Wat u in het chatvak kunt typen: opdrachten, skills, snippets, vermeldingen en bijlagen."
+---
+
+# Chatinvoer
+
+Het chatvak begrijpt een paar symbolen. Typ er een en er opent een kiezer; kies een item of blijf typen om te filteren. Een symbool telt alleen aan het begin van een woord, en een opdracht moet het bericht beginnen.
+
+| Typ | Kiest | Werkt aan |
+| --- | --- | --- |
+| `/` | een opdracht | het allereerste begin van het bericht |
+| `$` | een skill | overal |
+| `#` | een snippet | overal |
+| `@` | een bestand of een agent | overal |
+
+Een symbool dat niets aanwijst dat u hebt, blijft gewone tekst: `$5` is gewoon geld en `a/b` is gewoon een pad.
+
+## Opdrachten
+
+Een opdracht is een opgeslagen prompt die u met een slash uitvoert, zoals `/review`. U beheert ze bij **Instellingen → Opdrachten**.
+
+1. Open **Instellingen → Opdrachten** en maak een opdracht aan.
+2. Geef deze een naam, een beschrijving en de prompttekst die moet worden verstuurd.
+3. Koppel de opdracht eventueel aan een specifieke agent of een specifiek model.
+4. Kies of de opdracht persoonlijk is of bij het project hoort.
+
+Typ `/` als **eerste** teken van een chatbericht om de opdrachten te openen en kies er een. De tekst kan placeholders bevatten:
+
+- `$ARGUMENTS` voegt toe wat u na de opdracht typt
+- `@filename` voegt de inhoud van een bestand in
+- `` !`command` `` voegt de uitvoer van een shell-opdracht in
+
+De ingebouwde opdrachten `init` en `review` kunnen worden teruggezet naar hun standaard, maar niet worden verwijderd. OpenChamber levert ook opdrachten zoals `/explore` en `/summary`; zie [Magic Prompts](/nl/magic-prompts/) voor de volledige lijst.
+
+## Skills
+
+Typ `$` ergens in een bericht om de skillkiezer te openen en kies er een. De agent laadt de instructies van die skill voor het antwoord. Zie [Skills](/nl/skills/) om er zelf een te schrijven.
+
+Opdrachten en skills hebben aparte kiezers, dus een `/` aan het begin toont nooit skills en een `$` nooit opdrachten.
+
+## Snippets
+
+Een snippet is herbruikbare tekst waarnaar u in een bericht verwijst met een hashtag, bijvoorbeeld `#signoff`. U beheert ze bij **Instellingen → Snippets**.
+
+1. Open **Instellingen → Snippets** en maak een snippet aan.
+2. Geef deze een naam en de tekst waarvoor hij staat. Voeg aliassen toe als u meerdere namen wilt gebruiken om hem in te voegen.
+3. Kies of de snippet persoonlijk is of bij het project hoort.
+
+Typ `#` in de chat en kies een snippet. OpenChamber vervangt de verwijzing vóór het versturen door de volledige tekst.
+
+## Bestanden en agents
+
+Typ `@` om een bestand bij te voegen of het bericht met een andere agent uit te voeren.
+
+- Een bestand, zoals `@src/index.ts`, wordt aan het bericht gekoppeld, net als wanneer u het via het **+**-menu kiest. Afbeeldingen en documenten worden gelezen en meegestuurd.
+- Een agent, zoals `@build`, voert dit bericht uit met die agent. Zonder vermelding voert de agent die in de composer is gekozen het uit.
+
+## Bestanden en context toevoegen
+
+Het **+**-menu naast het chatvak voegt meer toe dan een bestand:
+
+- bestanden van uw computer
+- issues en pull requests uit uw repository (GitHub, GitLab, Gitea, Forgejo of Gerrit, afhankelijk van waar het project staat)
+- Linear-issues, wanneer Linear is verbonden
+- taken van geïnstalleerde [extensies](/nl/extensions/) die aanbieden om bij te voegen
+
+Elk item reist als context mee met uw volgende bericht; uw bericht bepaalt wat ermee gebeurt. U kunt ook een afbeelding plakken of een bestand rechtstreeks op het chatvak slepen.
+
+## Een shell-opdracht uitvoeren
+
+Begin het bericht met `!`; OpenChamber voert het uit als shell-opdracht en stuurt niets naar de agent. Druk op **Esc**, of verwijder terug tot een leeg vak, om de shellmodus te verlaten.
+
+## Toetsenbord
+
+- **Enter** verstuurt en **Shift+Enter** begint een nieuwe regel. In **Instellingen → Chat** kunt u ze omwisselen, zodat Enter een regel afbreekt en **Ctrl/Cmd+Enter** verstuurt. Ctrl/Cmd+Enter verstuurt altijd.
+- **ArrowUp** en **ArrowDown** halen eerdere berichten terug.
+- Met een kiezer open verplaatsen **Ctrl+N** en **Ctrl+P** u erdoorheen, kiest **Enter** of **Tab**, en sluit **Esc** hem.
+
+In de uitgebreide composer begint Enter altijd een nieuwe regel en verstuurt **Ctrl/Cmd+Enter**.
+
+Op een telefoon begint Enter altijd een nieuwe regel. Versturen doe je met de verzendknop of **Ctrl/Cmd+Enter**.
+
+## Zie ook
+
+- [Skills](/nl/skills/): grotere instructiesets op verzoek laden
+- [Magic Prompts](/nl/magic-prompts/): de ingebouwde opdrachten en waar ze elk worden uitgevoerd
+- [Git-hosts](/nl/github/): issues en pull requests toevoegen

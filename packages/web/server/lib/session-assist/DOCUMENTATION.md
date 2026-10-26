@@ -1,0 +1,178 @@
+# Session assist
+
+The server generates a short reminder of recent work and an optional next user
+message with Small Model. Results live in `metadata.openchamber.assist` with
+`recap`, `suggestion`, `forMessageID`, and `generatedAt`. The payload shape is
+unchanged; an empty suggestion is a successful outcome.
+
+## Ownership
+
+- `runtime.js` owns idle timers, cancellation, provider selection, SDK reads,
+  freshness checks, settings gates, and metadata writes.
+- `context.js` reads bounded history and constructs human turns. It removes
+  tool payloads and injected prompts before retaining message text.
+- `prompt.js` owns the generation instructions and total input budget.
+- `../small-model/DOCUMENTATION.md` owns provider/auth resolution, generation,
+  output limits, and overflow behavior.
+
+## What the model receives
+
+Read backward through the official SDK in pages of 50 messages until three
+human turns are covered, history ends, or eight pages have been read. A failed
+page or repeated cursor aborts generation; it is not treated as complete history.
+At the page limit, use fewer available human turns. If the latest answer's human
+request has not been found, skip generation rather than invent its context.
+
+Three turns retain the substance behind short commit confirmations without
+bringing an entire old task back into the prompt. This was compared against
+one, five, ten, and full-history contexts on long maintainer sessions. There
+is no full-history cache and no assumed provider prefix-cache behavior.
+
+The latest content record must be a completed, successful, non-summary
+assistant answer with visible text. OpenCode closes every turn with an `idle`
+record and appends agent/model/location switches as records of their own;
+`newestContentId` looks past those, both here and in the re-check before the
+write, so an ordinary v2 transcript still ends in its answer. An `idle` whose
+outcome is `failed` or `interrupted` is not skipped: it disqualifies the turn.
+Child, archived, and reverted sessions are skipped. A new prompt clears the
+revert boundary before its next idle event.
+
+Human turns follow chronological message intervals. OpenCode can insert
+synthetic continuation users during compaction, so a final answer's `parentID`
+need not point directly at the original human request. These continuations stay
+within their human turn; compaction summaries are excluded. An interrupted
+request remains context with its last visible progress explicitly labeled as
+unfinished, rather than being dropped or called a final answer.
+An answer must still reference that human user or one of its continuation
+users; a late answer for an older request cannot be assigned to a newer request.
+
+### Attached context and language
+
+The persisted attachment contract is owned by
+`packages/ui/src/lib/messages/contextParts.ts`. Its user-facing Markdown
+formatter is `packages/ui/src/lib/messages/messageMarkdown.ts`.
+
+The server projects those persisted parts into model context without importing
+the UI runtime: code comments, file/chat quotes, browser annotations, PR comments,
+checks, terminal selections, and linked repository and tracker items remain attached to
+the user turn even when their transport part is synthetic. The OpenCode
+`opencodeComment` mirror is also accepted. Unrecognized synthetic prompts and
+ignored parts are excluded. Malformed attached text fails the generation.
+
+Quoted material and the user's own comment are separate blocks. The user's
+authored text is also supplied separately for language selection. Quoted source,
+logs, assistant replies, and injected memory instructions do not choose the
+language. A language-neutral final acknowledgment can use recent authored text.
+The existing Cyrillic/CJK mismatch guard uses that authored sample per field;
+it is not a complete language detector, and it is skipped if no sample exists.
+
+### Input bounds
+
+User text is bounded to 8,000 characters and each assistant answer to 16,000.
+Attached quote bodies have their own 4,000-character limit so a large quote
+does not consume the user's comment. Excerpts preserve both ends with an
+explicit omission marker, including the conclusion of a long final report.
+
+The complete user prompt is limited to 32,000 characters and the resolved small
+model's input allowance, reserving space for the system prompt. Under pressure,
+drop older whole turns first. If the latest pair itself is too large, excerpt
+both its user request and answer rather than discarding either side. If even
+the minimum prompt cannot fit, skip generation. `onOverflow: 'error'` prevents
+the Small Model service from silently cutting off the instructions. Expected
+context/output-budget failures are quiet and do not write metadata.
+
+OpenCode message pages still contain complete tool payloads on the wire. A
+single long turn can therefore require substantial I/O even though its retained
+model context is small. Page/count bounds are not a network-byte quota.
+
+## Generation and lifecycle
+
+1. The server's existing global event fan-out calls `processPayload`. At an
+   idle event the runtime first asks the injected `evaluateTurn` (the
+   session-work runtime, `../session-work/DOCUMENTATION.md`): one Jev call says
+   which enabled fields are worth the Small Model. It then arms the 60-second
+   quiet window for those fields only, and arms nothing when Jev ruled both out.
+   An unknown answer (no Jev, a failure) keeps every enabled field, so without
+   Jev nothing changes. A newer event drops a pending answer. A session that
+   `../session-lineage.js` knows to be a subsession arms nothing at all: no
+   gate, no timer, no read. No history scan or
+   startup backfill runs.
+2. Busy/retry events and newly created user messages clear pending work and
+   abort in-flight reads/generation. Re-emitted old user updates do not cancel it.
+3. One generation runs per session. If a newer quiet window expires while an
+   old canceled request is still settling, retain that pending run and start it
+   after the old one finishes. Later activity cancels the pending run as well.
+4. Resolve the small model using the last answer's provider/model and the
+   existing explicit settings/config overrides. Naming that provider prevents
+   an implicit cross-provider fallback. Production does not pin the
+   experimental model. Generation accepts an abort signal and a 120-second limit.
+   When that resolves to the session's own model on a local endpoint
+   (`localEndpoint`), skip generation, whether it came from the fallback or
+   from an explicit Small Model naming the same model: llama.cpp-style
+   servers keep one prompt cache per slot, so a side request evicts the
+   session's cache and the next turn reprocesses the whole history (#3871).
+   A different model on the same machine, configured or found by the family
+   scan, is still used.
+5. Recap describes the substantive work and its current result, including the
+   work behind a closing commit or acknowledgment. Suggestion is independent:
+   only unfinished requested agent work should produce a sendable user message.
+   Completed work, optional offers, or a decision/action belonging to the user
+   should return an empty suggestion. This is model judgment, not authorization
+   enforcement or a guarantee that every generated field is factually correct.
+6. Re-read the latest message and fresh session before writing. A moved tail,
+   canceled run, changed endpoint/directory, archive, revert, or failed fresh
+   read discards the result. Never merge from the old pre-generation metadata.
+7. Re-check settings, clamp the enabled fields, and merge into fresh metadata.
+   The OpenCode update endpoint has no compare-and-set operation; another
+   writer after the final read is not guarded atomically.
+
+`onPendingChange` reports when a session starts waiting for its assist (the
+turn end, unless the recap and the suggestion are both off) and when the wait
+ends: written, ruled out by the turn-end check, failed, or dropped by a new
+turn. `index.js` broadcasts it as `openchamber:session-assist` with the
+session's directory, and clients keep a chat's OpenCode location until the
+wait ends, because these reads would start a stopped directory again.
+
+Stopping the runtime clears pending timers/runs and aborts in-flight operations.
+No failed session blocks another session. A generation failure is logged with
+its cause (status, code, bounded message) so a cold-start 503 can be told from
+a permanent provider rejection; the two are retried differently upstream, and a
+bare "generation failed" hid which one happened. 404 and the expected
+context/output-budget codes stay quiet, and no failure retries here: this layer
+makes one attempt, and the small-model service owns the bounded backoff it
+runs while a cold catalog has not published the model yet.
+
+## Settings and consumers
+
+`sessionRecapEnabled` and `sessionSuggestionEnabled` default on and are checked
+before work and before writing. The Jev gate is a cost filter under these same
+switches, not a setting of its own: it reads the same three turns as the recap,
+so a recap still follows a closing "thanks" after real work. With both off there are no reads, model calls,
+or writes. With one on, the shared recent context is still available, but only
+that field is requested. An empty suggestion does not erase a valid recap.
+
+Freshness has one rule, `getCurrentSessionAssist` in
+`packages/ui/src/lib/sessionAssistMetadata.ts`, computed from the session
+record alone so the chat and the sidebar row always agree: the payload is
+current while `generatedAt >= session.time.idle` and the session is not
+reverted. OpenCode moves `time.idle` at every turn end, succeeded or failed.
+Do not compare `forMessageID` with the last loaded message: in v2 the newest
+record is the turn's `idle` marker or a switch record, never the answer.
+When a session turns busy, the runtime also deletes the assist it wrote
+(`persistSessionAssist(id, dir, null)`), so stored state goes stale only for
+payloads written by an earlier process; the `time.idle` rule retires those.
+
+- `packages/ui/src/lib/sessionAssistMetadata.ts` parses the payload and owns freshness.
+- `packages/ui/src/hooks/useSessionAssist.ts` adds live-status and settings gating.
+- `SessionRecapSpacer` shows the reminder in the reserved gap under the reply.
+- `SessionSuggestionChip` fills the composer; it never sends automatically.
+- Sidebar rows (`SessionNodeItem`, Projects view) show the current recap in
+  the whole-row tooltip under the same freshness rule, hidden while a turn runs
+  and when `sessionRecapEnabled` is off. The sidebar no longer marks open
+  suggestions; the "In work" block is the sidebar's attention signal.
+
+Web, Electron, hosted mobile, and Capacitor use the server watcher. VS Code's
+extension-only runtime does not generate assists; shared UI can render payloads
+produced by a server. The background watcher cannot use the browser's message
+store when the UI is closed. Manual AI rename uses that store through
+`SessionMessageLoader`; these are intentionally different retrieval lifecycles.

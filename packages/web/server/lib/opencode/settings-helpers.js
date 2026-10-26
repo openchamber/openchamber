@@ -1,0 +1,1252 @@
+import { z } from 'zod';
+import { createRequire } from 'node:module';
+
+import { isAgentMemoryFeatureAvailable } from '../agent-memory/feature-flag.js';
+import { isWorkflowFeatureAvailable } from '../workflows/feature-flag.js';
+import { isOverviewFeatureAvailable } from '../overview/feature-flag.js';
+import { isPermissionMode } from '../permission-auto-accept/modes.js';
+import { asNonEmptyString } from '../shared/guards.js';
+import { idleStopSchema } from '../spaces/idle-stop.js';
+import { sshHostSchema } from '../spaces/places/ssh-host.js';
+
+// Generated from packages/ui/src/lib/settings/registry.ts by
+// `bun run settings-registry:generate`; `registry.test.ts` fails when stale.
+// The server is plain ESM without a bundler, so the snapshot is read with
+// `createRequire` (import attributes differ across the Node versions we run on).
+const settingsRegistry = createRequire(import.meta.url)('./settings-registry.json');
+
+/**
+ * Whether a client may persist this key through PUT /api/config/settings:
+ * it must be a registry key, not a server-computed flag, not a device field
+ * that only lives in the browser, and not one the desktop shell writes itself.
+ */
+const isPersistableSettingsKey = (key) => {
+  const field = settingsRegistry.fields[key];
+  if (!field) return false;
+  if (field.computed || field.local) return false;
+  if (field.owner === 'desktop-shell') return false;
+  return true;
+};
+
+/** Keys accepted on write but never returned by a read. */
+const SECRET_SETTINGS_KEYS = Object.freeze(
+  Object.entries(settingsRegistry.fields)
+    .filter(([, field]) => field.secret === true)
+    .map(([key]) => key),
+);
+import {
+  DEFAULT_INPUT_HISTORY_LIMIT,
+  DEFAULT_INPUT_HISTORY_SCOPE,
+  isInputHistoryLimit,
+  isInputHistoryScope,
+} from './input-history-scope.js';
+
+// Icons a custom provider may show instead of its logo; mirrors
+// CUSTOM_PROVIDER_ICONS in packages/ui/src/lib/customProviderIcons.ts.
+const customProviderIconsSchema = z.record(
+  z.string().trim().min(1).max(128),
+  z.enum(['server', 'cloud', 'database', 'terminal', 'code', 'ai']),
+);
+const CUSTOM_PROVIDER_ICONS_MAX = 256;
+// `provider/model` last picked in a chat composer.
+const lastSelectedModelSchema = z.string().trim().min(1).max(512);
+
+/** Provider id -> icon id; unknown icons and malformed entries are dropped one by one. */
+const sanitizeCustomProviderIcons = (value) => {
+  const record = z.record(z.string(), z.unknown()).safeParse(value);
+  if (!record.success) return undefined;
+  const result = {};
+  for (const [providerID, icon] of Object.entries(record.data).slice(0, CUSTOM_PROVIDER_ICONS_MAX)) {
+    const entry = customProviderIconsSchema.safeParse({ [providerID]: icon });
+    if (entry.success) Object.assign(result, entry.data);
+  }
+  return result;
+};
+
+export const createSettingsHelpers = (dependencies) => {
+  const {
+    normalizePathForPersistence,
+    normalizeDirectoryPath,
+    normalizeTunnelBootstrapTtlMs,
+    normalizeTunnelSessionTtlMs,
+    normalizeTunnelProvider,
+    normalizeTunnelMode,
+    normalizeOptionalPath,
+    normalizeManagedRemoteTunnelHostname,
+    normalizeManagedRemoteTunnelPresets,
+    normalizeManagedRemoteTunnelPresetTokens,
+    normalizeStringArray,
+    sanitizeModelRefs,
+    sanitizeSkillCatalogs,
+    sanitizeProjects,
+  } = dependencies;
+
+  const PWA_APP_NAME_MAX_LENGTH = 64;
+  const STT_SERVER_URL_MAX_LENGTH = 2048;
+  const STT_MODEL_MAX_LENGTH = 256;
+  const STT_LANGUAGE_MAX_LENGTH = 64;
+  const VERSION_STRING_MAX_LENGTH = 128;
+  const SHORTCUT_OVERRIDE_KEY_MAX_LENGTH = 128;
+  const SHORTCUT_OVERRIDE_VALUE_MAX_LENGTH = 128;
+  const PWA_ORIENTATION_VALUES = new Set(['system', 'portrait', 'landscape']);
+  const MOBILE_KEYBOARD_MODE_VALUES = new Set(['native', 'resize-content']);
+  const TERMINAL_SHELL_VALUES = new Set(['auto', 'bash', 'zsh', 'sh', 'fish', 'pwsh', 'powershell', 'cmd', 'dash', 'ksh', 'nu']);
+  const SIDEBAR_PROJECT_DISPLAY_MODE_VALUES = new Set(['all', 'single']);
+  const SIDEBAR_VIEW_MODE_VALUES = new Set(['projects', 'timeline']);
+  const SIDEBAR_LIST_SESSION_GROUPING_VALUES = new Set(['project', 'time']);
+  // The interface languages (`LOCALES` in packages/ui/src/lib/i18n/runtime.ts);
+  // settings-helpers.test.js fails when the two lists drift apart.
+  const UI_LOCALE_VALUES = new Set(['en', 'de', 'fr', 'nl', 'zh-CN', 'zh-TW', 'uk', 'es', 'pt-BR', 'ko', 'pl', 'ja', 'tr', 'ar', 'he']);
+  const SIDEBAR_PROJECT_SORT_ORDER_VALUES = new Set(['manual', 'a-z', 'z-a', 'date-added', 'recent']);
+  const HIDDEN_MODELS_MAX = 1024;
+  const RECENT_EFFORTS_MAX_KEYS = 128;
+  const RECENT_EFFORTS_MAX_VARIANTS_PER_KEY = 5;
+
+  const sanitizeShortcutOverrides = (value) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return null;
+    }
+    const result = {};
+    for (const [rawKey, rawValue] of Object.entries(value)) {
+      const key = typeof rawKey === 'string' ? rawKey.trim() : '';
+      const combo = typeof rawValue === 'string' ? rawValue.trim() : '';
+      if (!key || !combo) continue;
+      result[key.slice(0, SHORTCUT_OVERRIDE_KEY_MAX_LENGTH)] = combo.slice(0, SHORTCUT_OVERRIDE_VALUE_MAX_LENGTH);
+    }
+    return result;
+  };
+
+  const sanitizeRecentEfforts = (value) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return null;
+    }
+    const result = {};
+    const seenKeys = new Set();
+    let count = 0;
+    for (const [rawKey, rawVariants] of Object.entries(value)) {
+      const key = typeof rawKey === 'string' ? rawKey.trim() : '';
+      if (!key || seenKeys.has(key)) continue;
+      if (!Array.isArray(rawVariants)) continue;
+      const variants = [];
+      const seenVariants = new Set();
+      for (const rawVariant of rawVariants) {
+        const variant = typeof rawVariant === 'string' ? rawVariant.trim() : '';
+        if (!variant || seenVariants.has(variant)) continue;
+        seenVariants.add(variant);
+        variants.push(variant);
+        if (variants.length >= RECENT_EFFORTS_MAX_VARIANTS_PER_KEY) break;
+      }
+      if (variants.length === 0) continue;
+      seenKeys.add(key);
+      result[key] = variants;
+      count += 1;
+      if (count >= RECENT_EFFORTS_MAX_KEYS) break;
+    }
+    return count > 0 ? result : null;
+  };
+
+  const normalizePwaAppName = (value, fallback = '') => {
+    if (typeof value !== 'string') {
+      return fallback;
+    }
+    const normalized = value.trim().replace(/\s+/g, ' ');
+    if (!normalized) {
+      return fallback;
+    }
+    return normalized.slice(0, PWA_APP_NAME_MAX_LENGTH);
+  };
+
+  const normalizePwaOrientation = (value, fallback = 'system') => {
+    if (typeof value !== 'string') {
+      return fallback;
+    }
+    const normalized = value.trim();
+    if (PWA_ORIENTATION_VALUES.has(normalized)) {
+      return normalized;
+    }
+    return fallback;
+  };
+
+  const normalizeMobileKeyboardMode = (value, fallback = 'native') => {
+    if (typeof value !== 'string') {
+      return fallback;
+    }
+    const normalized = value.trim();
+    if (MOBILE_KEYBOARD_MODE_VALUES.has(normalized)) {
+      return normalized;
+    }
+    return fallback;
+  };
+
+  const normalizeFollowUpBehavior = (value, legacyQueueModeEnabled = null) => {
+    // "immediate" was removed (it was wire-identical to "steer"); collapse it.
+    if (value === 'immediate') {
+      return 'steer';
+    }
+    if (value === 'steer' || value === 'queue') {
+      return value;
+    }
+    if (legacyQueueModeEnabled === false) {
+      return 'steer';
+    }
+    return 'queue';
+  };
+
+  const sanitizeSettingsUpdate = (payload) => {
+    if (!payload || typeof payload !== 'object') {
+      return {};
+    }
+
+    const candidate = payload;
+    const result = {};
+
+    if (typeof candidate.themeId === 'string' && candidate.themeId.length > 0) {
+      result.themeId = candidate.themeId;
+    }
+    if (typeof candidate.themeVariant === 'string' && (candidate.themeVariant === 'light' || candidate.themeVariant === 'dark')) {
+      result.themeVariant = candidate.themeVariant;
+    }
+    if (typeof candidate.inputHistoryScope === 'string' && isInputHistoryScope(candidate.inputHistoryScope)) {
+      result.inputHistoryScope = candidate.inputHistoryScope;
+    }
+    if (isInputHistoryLimit(candidate.inputHistoryLimit)) {
+      result.inputHistoryLimit = candidate.inputHistoryLimit;
+    }
+    if (UI_LOCALE_VALUES.has(candidate.locale)) {
+      result.locale = candidate.locale;
+    }
+    if (typeof candidate.useSystemTheme === 'boolean') {
+      result.useSystemTheme = candidate.useSystemTheme;
+    }
+    if (typeof candidate.lightThemeId === 'string' && candidate.lightThemeId.length > 0) {
+      result.lightThemeId = candidate.lightThemeId;
+    }
+    if (typeof candidate.darkThemeId === 'string' && candidate.darkThemeId.length > 0) {
+      result.darkThemeId = candidate.darkThemeId;
+    }
+    if (typeof candidate.splashBgLight === 'string' && candidate.splashBgLight.trim().length > 0) {
+      result.splashBgLight = candidate.splashBgLight.trim();
+    }
+    if (typeof candidate.splashFgLight === 'string' && candidate.splashFgLight.trim().length > 0) {
+      result.splashFgLight = candidate.splashFgLight.trim();
+    }
+    if (typeof candidate.splashBgDark === 'string' && candidate.splashBgDark.trim().length > 0) {
+      result.splashBgDark = candidate.splashBgDark.trim();
+    }
+    if (typeof candidate.splashFgDark === 'string' && candidate.splashFgDark.trim().length > 0) {
+      result.splashFgDark = candidate.splashFgDark.trim();
+    }
+    // An empty string forgets the last directory (the last project was
+    // removed). Every reader treats it as unset, so nothing is warmed at start
+    // or turned back into a project.
+    if (candidate.lastDirectory === '') {
+      result.lastDirectory = '';
+    } else if (typeof candidate.lastDirectory === 'string') {
+      const normalized = normalizePathForPersistence(candidate.lastDirectory);
+      if (typeof normalized === 'string' && normalized.length > 0) {
+        result.lastDirectory = normalized;
+      }
+    }
+    if (typeof candidate.homeDirectory === 'string' && candidate.homeDirectory.length > 0) {
+      const normalized = normalizePathForPersistence(candidate.homeDirectory);
+      if (typeof normalized === 'string' && normalized.length > 0) {
+        result.homeDirectory = normalized;
+      }
+    }
+
+    // Absolute path to the opencode CLI binary (optional override).
+    // Accept empty-string to clear (we persist an empty string sentinel so the running
+    // process can reliably drop a previously applied OPENCODE_BINARY override).
+    if (typeof candidate.opencodeBinary === 'string') {
+      const normalized = normalizeDirectoryPath(candidate.opencodeBinary).trim();
+      result.opencodeBinary = normalized;
+    }
+    if (typeof candidate.workStatusPanelEnabled === 'boolean') {
+      result.workStatusPanelEnabled = candidate.workStatusPanelEnabled;
+    }
+    if (Array.isArray(candidate.workStatusHiddenSections)) {
+      // Ids are validated on the client, which owns the section list; here we
+      // only guarantee the shape, so a malformed payload cannot land on disk.
+      result.workStatusHiddenSections = [
+        ...new Set(candidate.workStatusHiddenSections.filter((entry) => typeof entry === 'string' && entry.length > 0)),
+      ];
+    }
+    if (typeof candidate.workStatusHiddenSectionsExplicit === 'boolean') {
+      result.workStatusHiddenSectionsExplicit = candidate.workStatusHiddenSectionsExplicit;
+    }
+    if (Array.isArray(candidate.workStatusSectionOrder)) {
+      result.workStatusSectionOrder = [
+        ...new Set(candidate.workStatusSectionOrder.filter((entry) => typeof entry === 'string' && entry.length > 0)),
+      ];
+    }
+    if (typeof candidate.desktopLanAccessEnabled === 'boolean') {
+      result.desktopLanAccessEnabled = candidate.desktopLanAccessEnabled;
+    }
+    if (typeof candidate.desktopKeepAwakeEnabled === 'boolean') {
+      result.desktopKeepAwakeEnabled = candidate.desktopKeepAwakeEnabled;
+    }
+    if (typeof candidate.desktopMinimizeToTrayEnabled === 'boolean') {
+      result.desktopMinimizeToTrayEnabled = candidate.desktopMinimizeToTrayEnabled;
+    }
+    if (typeof candidate.desktopMacMenuBarEnabled === 'boolean') {
+      result.desktopMacMenuBarEnabled = candidate.desktopMacMenuBarEnabled;
+    }
+    if (typeof candidate.desktopLinuxNativeFrame === 'boolean') {
+      result.desktopLinuxNativeFrame = candidate.desktopLinuxNativeFrame;
+    }
+    if (typeof candidate.desktopWindowControlsPosition === 'string') {
+      const mode = candidate.desktopWindowControlsPosition.trim();
+      // Legacy "auto" never read OS chrome config; persist as the right default.
+      if (mode === 'auto' || mode === 'right') {
+        result.desktopWindowControlsPosition = 'right';
+      } else if (mode === 'left') {
+        result.desktopWindowControlsPosition = 'left';
+      }
+    }
+    if (typeof candidate.desktopWindowControlsStyle === 'string') {
+      const style = candidate.desktopWindowControlsStyle.trim();
+      if (style === 'classic' || style === 'traffic-lights') {
+        result.desktopWindowControlsStyle = style;
+      }
+    }
+    if (candidate.permissionAutoAccept && typeof candidate.permissionAutoAccept === 'object' && !Array.isArray(candidate.permissionAutoAccept)) {
+      const sessions = {};
+      const sourceSessions = candidate.permissionAutoAccept.sessions;
+      if (sourceSessions && typeof sourceSessions === 'object' && !Array.isArray(sourceSessions)) {
+        // A mode, or a boolean from a policy written before the modes existed;
+        // the permission runtime converts those on its first read.
+        for (const [sessionId, mode] of Object.entries(sourceSessions)) {
+          if (sessionId && (typeof mode === 'boolean' || isPermissionMode(mode))) sessions[sessionId] = mode;
+        }
+      }
+      result.permissionAutoAccept = {
+        sessions,
+        revision: Number.isSafeInteger(candidate.permissionAutoAccept.revision)
+          && candidate.permissionAutoAccept.revision >= 0
+          ? candidate.permissionAutoAccept.revision
+          : 0,
+      };
+    }
+    if (isPermissionMode(candidate.permissionDefaultMode)) {
+      result.permissionDefaultMode = candidate.permissionDefaultMode;
+    }
+    if (typeof candidate.messageSearchEnabled === 'boolean') {
+      result.messageSearchEnabled = candidate.messageSearchEnabled;
+    }
+    if (typeof candidate.messageSearchReasoningEnabled === 'boolean') {
+      result.messageSearchReasoningEnabled = candidate.messageSearchReasoningEnabled;
+    }
+    if (typeof candidate.desktopUiPassword === 'string') {
+      result.desktopUiPassword = candidate.desktopUiPassword.trim();
+    }
+    if (Array.isArray(candidate.projects)) {
+      const projects = sanitizeProjects(candidate.projects);
+      if (projects) {
+        result.projects = projects;
+      }
+    }
+    if (typeof candidate.activeProjectId === 'string' && candidate.activeProjectId.length > 0) {
+      result.activeProjectId = candidate.activeProjectId;
+    }
+    if (SIDEBAR_PROJECT_DISPLAY_MODE_VALUES.has(candidate.sidebarProjectDisplayMode)) {
+      result.sidebarProjectDisplayMode = candidate.sidebarProjectDisplayMode;
+    }
+    if (SIDEBAR_VIEW_MODE_VALUES.has(candidate.sidebarViewMode)) {
+      result.sidebarViewMode = candidate.sidebarViewMode;
+    }
+    if (SIDEBAR_LIST_SESSION_GROUPING_VALUES.has(candidate.sidebarListSessionGrouping)) {
+      result.sidebarListSessionGrouping = candidate.sidebarListSessionGrouping;
+    }
+    if (SIDEBAR_LIST_SESSION_GROUPING_VALUES.has(candidate.sidebarGrouping)) {
+      result.sidebarGrouping = candidate.sidebarGrouping;
+    }
+    if (typeof candidate.sidebarKeepWorkInPlace === 'boolean') {
+      result.sidebarKeepWorkInPlace = candidate.sidebarKeepWorkInPlace;
+    }
+    if (SIDEBAR_PROJECT_SORT_ORDER_VALUES.has(candidate.sidebarProjectSortOrder)) {
+      result.sidebarProjectSortOrder = candidate.sidebarProjectSortOrder;
+    }
+    if (typeof candidate.sidebarShowChatsSection === 'boolean') {
+      result.sidebarShowChatsSection = candidate.sidebarShowChatsSection;
+    }
+    if (typeof candidate.sidebarShowWorkSection === 'boolean') {
+      result.sidebarShowWorkSection = candidate.sidebarShowWorkSection;
+    }
+    if (candidate.sidebarShowPinnedSection === true || candidate.sidebarShowPinnedSection === false) {
+      result.sidebarShowPinnedSection = candidate.sidebarShowPinnedSection;
+    }
+    if (candidate.sidebarDetailedZoneRows === true || candidate.sidebarDetailedZoneRows === false) {
+      result.sidebarDetailedZoneRows = candidate.sidebarDetailedZoneRows;
+    }
+
+    if (Array.isArray(candidate.securityScopedBookmarks)) {
+      result.securityScopedBookmarks = normalizeStringArray(candidate.securityScopedBookmarks);
+    }
+    if (Array.isArray(candidate.pinnedDirectories)) {
+      result.pinnedDirectories = normalizeStringArray(
+        candidate.pinnedDirectories
+          .map((entry) => (typeof entry === 'string' ? normalizePathForPersistence(entry) : entry))
+          .filter((entry) => typeof entry === 'string' && entry.length > 0)
+      );
+    }
+    if (Array.isArray(candidate.draftStarters)) {
+      const seenStarters = new Set();
+      const starters = [];
+      for (const entry of candidate.draftStarters) {
+        if (!entry || typeof entry !== 'object') continue;
+        const type = entry.type === 'command' || entry.type === 'skill' ? entry.type : null;
+        const name = typeof entry.name === 'string' ? entry.name.trim() : '';
+        if (!type || !name) continue;
+        const key = `${type}:${name}`;
+        if (seenStarters.has(key)) continue;
+        seenStarters.add(key);
+        starters.push({ type, name });
+      }
+      result.draftStarters = starters;
+    }
+    if (typeof candidate.draftStartersVisible === 'boolean') {
+      result.draftStartersVisible = candidate.draftStartersVisible;
+    }
+    if (typeof candidate.draftStartersCraftGoalAdded === 'boolean') {
+      result.draftStartersCraftGoalAdded = candidate.draftStartersCraftGoalAdded;
+    }
+    if (typeof candidate.draftStartersScheduleTaskAdded === 'boolean') {
+      result.draftStartersScheduleTaskAdded = candidate.draftStartersScheduleTaskAdded;
+    }
+
+
+    if (typeof candidate.uiFont === 'string' && candidate.uiFont.length > 0) {
+      result.uiFont = candidate.uiFont;
+    }
+    if (typeof candidate.monoFont === 'string' && candidate.monoFont.length > 0) {
+      result.monoFont = candidate.monoFont;
+    }
+    // Family names for the "custom" font choice; empty clears them.
+    if (typeof candidate.customUiFont === 'string') {
+      result.customUiFont = candidate.customUiFont.slice(0, 100);
+    }
+    if (typeof candidate.customMonoFont === 'string') {
+      result.customMonoFont = candidate.customMonoFont.slice(0, 100);
+    }
+    if (typeof candidate.githubClientId === 'string') {
+      const trimmed = candidate.githubClientId.trim();
+      if (trimmed.length > 0) {
+        result.githubClientId = trimmed;
+      }
+    }
+    if (typeof candidate.githubScopes === 'string') {
+      const trimmed = candidate.githubScopes.trim();
+      if (trimmed.length > 0) {
+        result.githubScopes = trimmed;
+      }
+    }
+    if (typeof candidate.gitlabClientId === 'string') {
+      const trimmed = candidate.gitlabClientId.trim();
+      if (trimmed.length > 0) {
+        result.gitlabClientId = trimmed;
+      }
+    }
+    if (typeof candidate.showReasoningTraces === 'boolean') {
+      result.showReasoningTraces = candidate.showReasoningTraces;
+    }
+    if (typeof candidate.streamingAutoFollowEnabled === 'boolean') {
+      result.streamingAutoFollowEnabled = candidate.streamingAutoFollowEnabled;
+    }
+    if (typeof candidate.expandReasoningWhileStreaming === 'boolean') {
+      result.expandReasoningWhileStreaming = candidate.expandReasoningWhileStreaming;
+    }
+    if (typeof candidate.codeBlockLineWrap === 'boolean') {
+      result.codeBlockLineWrap = candidate.codeBlockLineWrap;
+    }
+    if (typeof candidate.tableCellWrap === 'boolean') {
+      result.tableCellWrap = candidate.tableCellWrap;
+    }
+    if (typeof candidate.copyMessagesAsPlainText === 'boolean') {
+      result.copyMessagesAsPlainText = candidate.copyMessagesAsPlainText;
+    }
+    if (typeof candidate.autoSaveEnabled === 'boolean') {
+      result.autoSaveEnabled = candidate.autoSaveEnabled;
+    }
+    if (candidate.confirmFileTreeMove === true || candidate.confirmFileTreeMove === false) {
+      result.confirmFileTreeMove = candidate.confirmFileTreeMove;
+    }
+    if (candidate.layoutAnimations === true || candidate.layoutAnimations === false) {
+      result.layoutAnimations = candidate.layoutAnimations;
+    }
+    if (candidate.openLinksInBrowserPanel === true || candidate.openLinksInBrowserPanel === false) {
+      result.openLinksInBrowserPanel = candidate.openLinksInBrowserPanel;
+    }
+    if (Number.isInteger(candidate.liveBrowserTabLimit) && candidate.liveBrowserTabLimit >= 1 && candidate.liveBrowserTabLimit <= 20) {
+      result.liveBrowserTabLimit = candidate.liveBrowserTabLimit;
+    }
+    if (candidate.openTrackerLinksOnBoard === true || candidate.openTrackerLinksOnBoard === false) {
+      result.openTrackerLinksOnBoard = candidate.openTrackerLinksOnBoard;
+    }
+    if (candidate.fileTreeSide === 'left' || candidate.fileTreeSide === 'right') {
+      result.fileTreeSide = candidate.fileTreeSide;
+    }
+    if (typeof candidate.diffWrapLines === 'boolean') {
+      result.diffWrapLines = candidate.diffWrapLines;
+    }
+    if (typeof candidate.diffHideWhitespace === 'boolean') {
+      result.diffHideWhitespace = candidate.diffHideWhitespace;
+    }
+    if (typeof candidate.allowPromptingSubagentSessions === 'boolean') {
+      result.allowPromptingSubagentSessions = candidate.allowPromptingSubagentSessions;
+    }
+    if (candidate.savePastedImagesAsFiles === true || candidate.savePastedImagesAsFiles === false) {
+      result.savePastedImagesAsFiles = candidate.savePastedImagesAsFiles;
+    }
+    if (typeof candidate.showOpenCodeRestartConfirm === 'boolean') {
+      result.showOpenCodeRestartConfirm = candidate.showOpenCodeRestartConfirm;
+    }
+    if (typeof candidate.sessionTabsEnabled === 'boolean') {
+      result.sessionTabsEnabled = candidate.sessionTabsEnabled;
+    }
+    if (typeof candidate.largeTextPasteBehavior === 'string') {
+      const mode = candidate.largeTextPasteBehavior.trim();
+      if (mode === 'ask' || mode === 'attach' || mode === 'inline' || mode === 'inline-double-paste') {
+        result.largeTextPasteBehavior = mode;
+      }
+    }
+    if (typeof candidate.fileEditorKeymap === 'string') {
+      const mode = candidate.fileEditorKeymap.trim();
+      if (mode === 'default' || mode === 'vim') {
+        result.fileEditorKeymap = mode;
+      }
+    }
+    if (typeof candidate.fileEditorVimMappings === 'string') {
+      result.fileEditorVimMappings = candidate.fileEditorVimMappings.slice(0, 10_000);
+    }
+    if (Array.isArray(candidate.providerOrder)) {
+      result.providerOrder = normalizeStringArray(candidate.providerOrder);
+    }
+    if (typeof candidate.sessionRecapEnabled === 'boolean') {
+      result.sessionRecapEnabled = candidate.sessionRecapEnabled;
+    }
+    if (typeof candidate.sessionSuggestionEnabled === 'boolean') {
+      result.sessionSuggestionEnabled = candidate.sessionSuggestionEnabled;
+    }
+    if (typeof candidate.sessionWorkEnabled === 'boolean') {
+      result.sessionWorkEnabled = candidate.sessionWorkEnabled;
+    }
+    if (typeof candidate.sessionReviewOfferEnabled === 'boolean') {
+      result.sessionReviewOfferEnabled = candidate.sessionReviewOfferEnabled;
+    }
+    if (typeof candidate.sessionGoalEnabled === 'boolean') {
+      result.sessionGoalEnabled = candidate.sessionGoalEnabled;
+    }
+    if (candidate.sessionGoalChecker === 'classifier' || candidate.sessionGoalChecker === 'small-model') {
+      result.sessionGoalChecker = candidate.sessionGoalChecker;
+    }
+    if (Number.isInteger(candidate.sessionGoalMaxAutoTurns) && candidate.sessionGoalMaxAutoTurns >= 1 && candidate.sessionGoalMaxAutoTurns <= 200) {
+      result.sessionGoalMaxAutoTurns = candidate.sessionGoalMaxAutoTurns;
+    }
+    if (typeof candidate.sessionGoalDefaultBudgetEnabled === 'boolean') {
+      result.sessionGoalDefaultBudgetEnabled = candidate.sessionGoalDefaultBudgetEnabled;
+    }
+    if (typeof candidate.sessionGoalDefaultBudget === 'number' && Number.isFinite(candidate.sessionGoalDefaultBudget) && candidate.sessionGoalDefaultBudget > 0) {
+      result.sessionGoalDefaultBudget = Math.floor(candidate.sessionGoalDefaultBudget);
+    }
+    if (typeof candidate.collapsibleThinkingBlocks === 'boolean') {
+      result.collapsibleThinkingBlocks = candidate.collapsibleThinkingBlocks;
+    }
+    if (typeof candidate.showTextJustificationActivity === 'boolean') {
+      result.showTextJustificationActivity = candidate.showTextJustificationActivity;
+    }
+    if (typeof candidate.showDeletionDialog === 'boolean') {
+      result.showDeletionDialog = candidate.showDeletionDialog;
+    }
+    if (typeof candidate.nativeNotificationsEnabled === 'boolean') {
+      result.nativeNotificationsEnabled = candidate.nativeNotificationsEnabled;
+    }
+    if (typeof candidate.notificationMode === 'string') {
+      const mode = candidate.notificationMode.trim();
+      if (mode === 'always' || mode === 'hidden-only') {
+        result.notificationMode = mode;
+      }
+    }
+    if (typeof candidate.notifyOnSubtasks === 'boolean') {
+      result.notifyOnSubtasks = candidate.notifyOnSubtasks;
+    }
+    if (typeof candidate.notifyOnCompletion === 'boolean') {
+      result.notifyOnCompletion = candidate.notifyOnCompletion;
+    }
+    if (typeof candidate.notifyOnError === 'boolean') {
+      result.notifyOnError = candidate.notifyOnError;
+    }
+    if (typeof candidate.notifyOnQuestion === 'boolean') {
+      result.notifyOnQuestion = candidate.notifyOnQuestion;
+    }
+    if (candidate.notificationTemplates && typeof candidate.notificationTemplates === 'object') {
+      result.notificationTemplates = candidate.notificationTemplates;
+    }
+    if (typeof candidate.summarizeLastMessage === 'boolean') {
+      result.summarizeLastMessage = candidate.summarizeLastMessage;
+    }
+    if (typeof candidate.summaryThreshold === 'number' && Number.isFinite(candidate.summaryThreshold)) {
+      result.summaryThreshold = Math.max(0, Math.round(candidate.summaryThreshold));
+    }
+    if (typeof candidate.summaryLength === 'number' && Number.isFinite(candidate.summaryLength)) {
+      result.summaryLength = Math.max(10, Math.round(candidate.summaryLength));
+    }
+    if (typeof candidate.maxLastMessageLength === 'number' && Number.isFinite(candidate.maxLastMessageLength)) {
+      result.maxLastMessageLength = Math.max(10, Math.round(candidate.maxLastMessageLength));
+    }
+    if (candidate.usageDisplayMode === 'usage' || candidate.usageDisplayMode === 'remaining') {
+      result.usageDisplayMode = candidate.usageDisplayMode;
+    }
+    if (Array.isArray(candidate.usageDropdownProviders)) {
+      result.usageDropdownProviders = normalizeStringArray(candidate.usageDropdownProviders);
+    }
+    if (typeof candidate.autoDeleteEnabled === 'boolean') {
+      result.autoDeleteEnabled = candidate.autoDeleteEnabled;
+    }
+    if (typeof candidate.autoDeleteAfterDays === 'number' && Number.isFinite(candidate.autoDeleteAfterDays)) {
+      const normalizedDays = Math.max(1, Math.min(365, Math.round(candidate.autoDeleteAfterDays)));
+      result.autoDeleteAfterDays = normalizedDays;
+    }
+    if (candidate.sessionRetentionAction === 'archive' || candidate.sessionRetentionAction === 'delete') {
+      result.sessionRetentionAction = candidate.sessionRetentionAction;
+    }
+    if (typeof candidate.sessionRetentionOnlyArchived === 'boolean') {
+      result.sessionRetentionOnlyArchived = candidate.sessionRetentionOnlyArchived;
+    }
+    if (typeof candidate.mergedWorktreeCleanupEnabled === 'boolean') {
+      result.mergedWorktreeCleanupEnabled = candidate.mergedWorktreeCleanupEnabled;
+    }
+    if (candidate.worktreeArchiveOnDoneEnabled === true || candidate.worktreeArchiveOnDoneEnabled === false) {
+      result.worktreeArchiveOnDoneEnabled = candidate.worktreeArchiveOnDoneEnabled;
+    }
+    if (candidate.tunnelBootstrapTtlMs === null) {
+      result.tunnelBootstrapTtlMs = null;
+    } else if (typeof candidate.tunnelBootstrapTtlMs === 'number' && Number.isFinite(candidate.tunnelBootstrapTtlMs)) {
+      result.tunnelBootstrapTtlMs = normalizeTunnelBootstrapTtlMs(candidate.tunnelBootstrapTtlMs);
+    }
+    if (typeof candidate.tunnelSessionTtlMs === 'number' && Number.isFinite(candidate.tunnelSessionTtlMs)) {
+      result.tunnelSessionTtlMs = normalizeTunnelSessionTtlMs(candidate.tunnelSessionTtlMs);
+    }
+    if (typeof candidate.tunnelProvider === 'string') {
+      const provider = normalizeTunnelProvider(candidate.tunnelProvider);
+      if (provider) {
+        result.tunnelProvider = provider;
+      }
+    }
+    if (typeof candidate.tunnelMode === 'string') {
+      result.tunnelMode = normalizeTunnelMode(candidate.tunnelMode);
+    }
+    if (Number.isInteger(candidate.tunnelHttpsPort) && candidate.tunnelHttpsPort >= 1 && candidate.tunnelHttpsPort <= 65535) {
+      result.tunnelHttpsPort = candidate.tunnelHttpsPort;
+    }
+    if (candidate.managedLocalTunnelConfigPath === null) {
+      result.managedLocalTunnelConfigPath = null;
+    } else if (typeof candidate.managedLocalTunnelConfigPath === 'string') {
+      const trimmed = candidate.managedLocalTunnelConfigPath.trim();
+      result.managedLocalTunnelConfigPath = trimmed.length > 0 ? normalizeOptionalPath(trimmed) : null;
+    }
+    if (typeof candidate.managedRemoteTunnelHostname === 'string') {
+      const hostname = normalizeManagedRemoteTunnelHostname(candidate.managedRemoteTunnelHostname);
+      result.managedRemoteTunnelHostname = hostname;
+    }
+    if (candidate.managedRemoteTunnelToken === null) {
+      result.managedRemoteTunnelToken = null;
+    } else if (typeof candidate.managedRemoteTunnelToken === 'string') {
+      result.managedRemoteTunnelToken = candidate.managedRemoteTunnelToken.trim();
+    }
+    const managedRemoteTunnelPresets = normalizeManagedRemoteTunnelPresets(candidate.managedRemoteTunnelPresets);
+    if (managedRemoteTunnelPresets) {
+      result.managedRemoteTunnelPresets = managedRemoteTunnelPresets;
+    }
+    const managedRemoteTunnelPresetTokens = normalizeManagedRemoteTunnelPresetTokens(candidate.managedRemoteTunnelPresetTokens);
+    if (managedRemoteTunnelPresetTokens) {
+      result.managedRemoteTunnelPresetTokens = managedRemoteTunnelPresetTokens;
+    }
+    if (typeof candidate.managedRemoteTunnelSelectedPresetId === 'string') {
+      const id = candidate.managedRemoteTunnelSelectedPresetId.trim();
+      result.managedRemoteTunnelSelectedPresetId = id || undefined;
+    }
+
+    if (typeof candidate.defaultModel === 'string') {
+      const trimmed = candidate.defaultModel.trim();
+      result.defaultModel = trimmed.length > 0 ? trimmed : undefined;
+    }
+    const lastSelectedModel = lastSelectedModelSchema.safeParse(candidate.lastSelectedModel);
+    if (lastSelectedModel.success) {
+      result.lastSelectedModel = lastSelectedModel.data;
+    }
+    if (typeof candidate.defaultVariant === 'string') {
+      const trimmed = candidate.defaultVariant.trim();
+      result.defaultVariant = trimmed.length > 0 ? trimmed : undefined;
+    }
+    if (typeof candidate.defaultAgent === 'string') {
+      const trimmed = candidate.defaultAgent.trim();
+      result.defaultAgent = trimmed.length > 0 ? trimmed : undefined;
+    }
+    if (typeof candidate.smallModelUseDefault === 'boolean') {
+      result.smallModelUseDefault = candidate.smallModelUseDefault;
+    }
+    if (typeof candidate.smallModelOverride === 'string') {
+      const trimmed = candidate.smallModelOverride.trim();
+      result.smallModelOverride = trimmed.length > 0 ? trimmed : undefined;
+    }
+    if (candidate.smallModelVariant !== undefined) {
+      result.smallModelVariant = asNonEmptyString(candidate.smallModelVariant) ?? undefined;
+    }
+    if (typeof candidate.walkthroughModelOverride === 'string') {
+      const trimmed = candidate.walkthroughModelOverride.trim();
+      result.walkthroughModelOverride = trimmed.length > 0 ? trimmed : undefined;
+    }
+    if (candidate.walkthroughModelVariant !== undefined) {
+      result.walkthroughModelVariant = asNonEmptyString(candidate.walkthroughModelVariant) ?? undefined;
+    }
+    for (const key of ['fallbackModel', 'fallbackVariant']) {
+      const value = z.string().trim().safeParse(candidate[key]);
+      if (value.success) result[key] = value.data.length > 0 ? value.data : undefined;
+    }
+    if (Array.isArray(candidate.accountSwitchProviders)) {
+      result.accountSwitchProviders = normalizeStringArray(candidate.accountSwitchProviders);
+    }
+    if (typeof candidate.defaultGitIdentityId === 'string') {
+      const trimmed = candidate.defaultGitIdentityId.trim();
+      result.defaultGitIdentityId = trimmed.length > 0 ? trimmed : undefined;
+    }
+    if (typeof candidate.followUpBehavior === 'string') {
+      result.followUpBehavior = normalizeFollowUpBehavior(candidate.followUpBehavior);
+    } else if (typeof candidate.queueModeEnabled === 'boolean') {
+      result.followUpBehavior = normalizeFollowUpBehavior(undefined, candidate.queueModeEnabled);
+    }
+    if (typeof candidate.autoCreateWorktree === 'boolean') {
+      result.autoCreateWorktree = candidate.autoCreateWorktree;
+    }
+    if (typeof candidate.gitmojiEnabled === 'boolean') {
+      result.gitmojiEnabled = candidate.gitmojiEnabled;
+    }
+    if (typeof candidate.defaultFileViewerPreview === 'boolean') {
+      result.defaultFileViewerPreview = candidate.defaultFileViewerPreview;
+    }
+    if (typeof candidate.zenModel === 'string') {
+      const trimmed = candidate.zenModel.trim();
+      result.zenModel = trimmed.length > 0 ? trimmed : undefined;
+    }
+    if (typeof candidate.pwaAppName === 'string') {
+      result.pwaAppName = normalizePwaAppName(candidate.pwaAppName, undefined);
+    }
+    if (typeof candidate.pwaOrientation === 'string') {
+      result.pwaOrientation = normalizePwaOrientation(candidate.pwaOrientation, undefined);
+    }
+    if (typeof candidate.mobileKeyboardMode === 'string') {
+      const mode = normalizeMobileKeyboardMode(candidate.mobileKeyboardMode, null);
+      if (mode) {
+        result.mobileKeyboardMode = mode;
+      }
+    }
+    if (typeof candidate.inputSpellcheckEnabled === 'boolean') {
+      result.inputSpellcheckEnabled = candidate.inputSpellcheckEnabled;
+    }
+    if (candidate.enterToSend === true || candidate.enterToSend === false) {
+      result.enterToSend = candidate.enterToSend;
+    }
+    if (candidate.enterToSendConfigured === true || candidate.enterToSendConfigured === false) {
+      result.enterToSendConfigured = candidate.enterToSendConfigured;
+    }
+    if (candidate.mobileReturnKeySends === true || candidate.mobileReturnKeySends === false) {
+      result.mobileReturnKeySends = candidate.mobileReturnKeySends;
+    }
+    if (typeof candidate.showOpenCodeUpdateNotifications === 'boolean') {
+      result.showOpenCodeUpdateNotifications = candidate.showOpenCodeUpdateNotifications;
+    }
+    if (typeof candidate.agentWebToolEnabled === 'boolean') {
+      result.agentWebToolEnabled = candidate.agentWebToolEnabled;
+    }
+    if (typeof candidate.browserProvider === 'string' && candidate.browserProvider.trim()) {
+      result.browserProvider = candidate.browserProvider.trim();
+    }
+    if (typeof candidate.agentControlToolEnabled === 'boolean') {
+      result.agentControlToolEnabled = candidate.agentControlToolEnabled;
+    }
+    if (candidate.agentScheduleToolEnabled === true || candidate.agentScheduleToolEnabled === false) {
+      result.agentScheduleToolEnabled = candidate.agentScheduleToolEnabled;
+    }
+    if (typeof candidate.agentMemoryToolEnabled === 'boolean') {
+      result.agentMemoryToolEnabled = candidate.agentMemoryToolEnabled;
+    }
+    if (candidate.agentKnowledgeToolEnabled === true || candidate.agentKnowledgeToolEnabled === false) {
+      result.agentKnowledgeToolEnabled = candidate.agentKnowledgeToolEnabled;
+    }
+    if (candidate.agentWorkflowToolEnabled === true || candidate.agentWorkflowToolEnabled === false) {
+      result.agentWorkflowToolEnabled = candidate.agentWorkflowToolEnabled;
+    }
+    if (typeof candidate.agentNotifyToolEnabled === 'boolean') {
+      result.agentNotifyToolEnabled = candidate.agentNotifyToolEnabled;
+    }
+    if (candidate.agentRenderToolEnabled === true || candidate.agentRenderToolEnabled === false) {
+      result.agentRenderToolEnabled = candidate.agentRenderToolEnabled;
+    }
+    if (typeof candidate.agentToolsCodeMode === 'boolean') {
+      result.agentToolsCodeMode = candidate.agentToolsCodeMode;
+    }
+    if (typeof candidate.isolatedSpacesEnabled === 'boolean') {
+      result.isolatedSpacesEnabled = candidate.isolatedSpacesEnabled;
+    }
+    if (idleStopSchema.safeParse(candidate.isolatedSpacesIdleStop).success) {
+      result.isolatedSpacesIdleStop = { ...candidate.isolatedSpacesIdleStop };
+    }
+    // The machine of the Docker over SSH place; the empty string takes that place away.
+    const sshHost = sshHostSchema.safeParse(candidate.isolatedSpacesSshHost);
+    if (sshHost.success) result.isolatedSpacesSshHost = sshHost.data;
+    if (typeof candidate.openCodeUpdateToastDismissedVersion === 'string') {
+      const version = candidate.openCodeUpdateToastDismissedVersion.trim();
+      result.openCodeUpdateToastDismissedVersion = version.slice(0, VERSION_STRING_MAX_LENGTH);
+    }
+    if (typeof candidate.showToolFileIcons === 'boolean') {
+      result.showToolFileIcons = candidate.showToolFileIcons;
+    }
+    if (typeof candidate.showTurnChangedFiles === 'boolean') {
+      result.showTurnChangedFiles = candidate.showTurnChangedFiles;
+    }
+    if (typeof candidate.timeFormatPreference === 'string') {
+      const mode = candidate.timeFormatPreference.trim();
+      if (mode === 'auto' || mode === '12h' || mode === '24h') {
+        result.timeFormatPreference = mode;
+      }
+    }
+    if (typeof candidate.weekStartPreference === 'string') {
+      const mode = candidate.weekStartPreference.trim();
+      if (mode === 'auto' || mode === 'sunday' || mode === 'monday') {
+        result.weekStartPreference = mode;
+      }
+    }
+    if (typeof candidate.chatRenderMode === 'string') {
+      const mode = candidate.chatRenderMode.trim();
+      if (mode === 'sorted' || mode === 'live') {
+        result.chatRenderMode = mode;
+      }
+    }
+    if (typeof candidate.messageStreamTransport === 'string') {
+      const mode = candidate.messageStreamTransport.trim();
+      if (mode === 'auto' || mode === 'ws' || mode === 'sse') {
+        result.messageStreamTransport = mode;
+      }
+    }
+    if (typeof candidate.activityRenderMode === 'string') {
+      const mode = candidate.activityRenderMode.trim();
+      if (mode === 'collapsed' || mode === 'summary') {
+        result.activityRenderMode = mode;
+      }
+    }
+    if (typeof candidate.mermaidRenderingMode === 'string') {
+      const mode = candidate.mermaidRenderingMode.trim();
+      if (mode === 'svg' || mode === 'ascii') {
+        result.mermaidRenderingMode = mode;
+      }
+    }
+    if (typeof candidate.userMessageRenderingMode === 'string') {
+      const mode = candidate.userMessageRenderingMode.trim();
+      if (mode === 'markdown' || mode === 'plain') {
+        result.userMessageRenderingMode = mode;
+      }
+    }
+    if (typeof candidate.collapsibleUserMessages === 'boolean') {
+      result.collapsibleUserMessages = candidate.collapsibleUserMessages;
+    }
+    if (candidate.stickyUserHeader === true || candidate.stickyUserHeader === false) {
+      result.stickyUserHeader = candidate.stickyUserHeader;
+    }
+    if (typeof candidate.promptNavigatorEnabled === 'boolean') {
+      result.promptNavigatorEnabled = candidate.promptNavigatorEnabled;
+    }
+    if (typeof candidate.wideChatLayoutEnabled === 'boolean') {
+      result.wideChatLayoutEnabled = candidate.wideChatLayoutEnabled;
+    }
+    if (typeof candidate.showSplitAssistantMessageActions === 'boolean') {
+      result.showSplitAssistantMessageActions = candidate.showSplitAssistantMessageActions;
+    }
+    if (typeof candidate.fontSize === 'number' && Number.isFinite(candidate.fontSize)) {
+      result.fontSize = Math.max(50, Math.min(200, Math.round(candidate.fontSize)));
+    }
+    if (typeof candidate.terminalFontSize === 'number' && Number.isFinite(candidate.terminalFontSize)) {
+      result.terminalFontSize = Math.max(9, Math.min(52, Math.round(candidate.terminalFontSize)));
+    }
+    if (typeof candidate.editorFontSize === 'number' && Number.isFinite(candidate.editorFontSize)) {
+      result.editorFontSize = Math.max(9, Math.min(32, Math.round(candidate.editorFontSize)));
+    }
+    if (typeof candidate.terminalShell === 'string') {
+      const shell = candidate.terminalShell.trim().toLowerCase();
+      if (TERMINAL_SHELL_VALUES.has(shell)) result.terminalShell = shell;
+    }
+    if (Array.isArray(candidate.terminalLoginShells)) {
+      result.terminalLoginShells = [...new Set(candidate.terminalLoginShells
+        .filter((shell) => typeof shell === 'string')
+        .map((shell) => shell.trim().toLowerCase())
+        .filter((shell) => TERMINAL_SHELL_VALUES.has(shell)))];
+    }
+    if (typeof candidate.padding === 'number' && Number.isFinite(candidate.padding)) {
+      result.padding = Math.max(50, Math.min(200, Math.round(candidate.padding)));
+    }
+    if (typeof candidate.cornerRadius === 'number' && Number.isFinite(candidate.cornerRadius)) {
+      result.cornerRadius = Math.max(0, Math.min(32, Math.round(candidate.cornerRadius)));
+    }
+    if (typeof candidate.inputBarOffset === 'number' && Number.isFinite(candidate.inputBarOffset)) {
+      result.inputBarOffset = Math.max(0, Math.min(100, Math.round(candidate.inputBarOffset)));
+    }
+
+    const shortcutOverrides = sanitizeShortcutOverrides(candidate.shortcutOverrides);
+    if (shortcutOverrides) {
+      result.shortcutOverrides = shortcutOverrides;
+    }
+
+    const favoriteModels = sanitizeModelRefs(candidate.favoriteModels, 64);
+    if (favoriteModels) {
+      result.favoriteModels = favoriteModels;
+    }
+
+    const recentModels = sanitizeModelRefs(candidate.recentModels, 16);
+    if (recentModels) {
+      result.recentModels = recentModels;
+    }
+
+    // Cap at 1024: users with several providers (anthropic, openai, google,
+    // bedrock, azure, etc.) each exposing dozens-to-hundreds of models can
+    // exceed 256 hidden entries quickly. 1024 covers dense multi-provider
+    // setups while still bounding persistence/memory.
+    const hiddenModels = sanitizeModelRefs(candidate.hiddenModels, HIDDEN_MODELS_MAX);
+    if (hiddenModels) {
+      result.hiddenModels = hiddenModels;
+    }
+
+    if (Array.isArray(candidate.collapsedModelProviders)) {
+      result.collapsedModelProviders = normalizeStringArray(candidate.collapsedModelProviders);
+    }
+
+    const customProviderIcons = sanitizeCustomProviderIcons(candidate.customProviderIcons);
+    if (customProviderIcons) {
+      result.customProviderIcons = customProviderIcons;
+    }
+
+    if (Array.isArray(candidate.recentAgents)) {
+      result.recentAgents = normalizeStringArray(candidate.recentAgents);
+    }
+    if (Array.isArray(candidate.favoriteAgents)) {
+      result.favoriteAgents = normalizeStringArray(candidate.favoriteAgents);
+    }
+
+    const recentEfforts = sanitizeRecentEfforts(candidate.recentEfforts);
+    if (recentEfforts) {
+      result.recentEfforts = recentEfforts;
+    }
+    if (typeof candidate.diffLayoutPreference === 'string') {
+      const mode = candidate.diffLayoutPreference.trim();
+      if (mode === 'dynamic' || mode === 'inline' || mode === 'side-by-side') {
+        result.diffLayoutPreference = mode;
+      }
+    }
+    if (typeof candidate.gitChangesViewMode === 'string') {
+      const mode = candidate.gitChangesViewMode.trim();
+      if (mode === 'flat' || mode === 'tree') {
+        result.gitChangesViewMode = mode;
+      }
+    }
+    if (typeof candidate.toolJsonViewMode === 'string') {
+      const mode = candidate.toolJsonViewMode.trim();
+      if (mode === 'summary' || mode === 'formatted' || mode === 'raw') {
+        result.toolJsonViewMode = mode;
+      }
+    }
+    if (typeof candidate.directoryShowHidden === 'boolean') {
+      result.directoryShowHidden = candidate.directoryShowHidden;
+    }
+    if (typeof candidate.filesViewShowGitignored === 'boolean') {
+      result.filesViewShowGitignored = candidate.filesViewShowGitignored;
+    }
+    if (typeof candidate.openInAppId === 'string') {
+      const trimmed = candidate.openInAppId.trim();
+      if (trimmed.length > 0) {
+        result.openInAppId = trimmed;
+      }
+    }
+
+    const skillCatalogs = sanitizeSkillCatalogs(candidate.skillCatalogs);
+    if (skillCatalogs) {
+      result.skillCatalogs = skillCatalogs;
+    }
+
+    // Usage model selections - which models appear in dropdown
+    if (candidate.usageSelectedModels && typeof candidate.usageSelectedModels === 'object') {
+      const sanitized = {};
+      for (const [providerId, models] of Object.entries(candidate.usageSelectedModels)) {
+        if (typeof providerId === 'string' && Array.isArray(models)) {
+          const validModels = models.filter((m) => typeof m === 'string' && m.length > 0);
+          if (validModels.length > 0) {
+            sanitized[providerId] = validModels;
+          }
+        }
+      }
+      if (Object.keys(sanitized).length > 0) {
+        result.usageSelectedModels = sanitized;
+      }
+    }
+
+    // Usage page collapsed families - for "Other Models" section
+    if (candidate.usageCollapsedFamilies && typeof candidate.usageCollapsedFamilies === 'object') {
+      const sanitized = {};
+      for (const [providerId, families] of Object.entries(candidate.usageCollapsedFamilies)) {
+        if (typeof providerId === 'string' && Array.isArray(families)) {
+          const validFamilies = families.filter((f) => typeof f === 'string' && f.length > 0);
+          if (validFamilies.length > 0) {
+            sanitized[providerId] = validFamilies;
+          }
+        }
+      }
+      if (Object.keys(sanitized).length > 0) {
+        result.usageCollapsedFamilies = sanitized;
+      }
+    }
+
+    // Header dropdown expanded families (inverted - stores EXPANDED, default all collapsed)
+    if (candidate.usageExpandedFamilies && typeof candidate.usageExpandedFamilies === 'object') {
+      const sanitized = {};
+      for (const [providerId, families] of Object.entries(candidate.usageExpandedFamilies)) {
+        if (typeof providerId === 'string' && Array.isArray(families)) {
+          const validFamilies = families.filter((f) => typeof f === 'string' && f.length > 0);
+          if (validFamilies.length > 0) {
+            sanitized[providerId] = validFamilies;
+          }
+        }
+      }
+      if (Object.keys(sanitized).length > 0) {
+        result.usageExpandedFamilies = sanitized;
+      }
+    }
+
+    // Custom model groups configuration
+    if (candidate.usageModelGroups && typeof candidate.usageModelGroups === 'object') {
+      const sanitized = {};
+      for (const [providerId, config] of Object.entries(candidate.usageModelGroups)) {
+        if (typeof providerId !== 'string') continue;
+
+        const providerConfig = {};
+
+        // customGroups: array of {id, label, models, order}
+        if (Array.isArray(config.customGroups)) {
+          const validGroups = config.customGroups
+            .filter((g) => g && typeof g.id === 'string' && typeof g.label === 'string')
+            .map((g) => ({
+              id: g.id.slice(0, 64),
+              label: g.label.slice(0, 128),
+              models: Array.isArray(g.models)
+                ? g.models.filter((m) => typeof m === 'string').slice(0, 500)
+                : [],
+              order: typeof g.order === 'number' ? g.order : 0,
+            }));
+          if (validGroups.length > 0) {
+            providerConfig.customGroups = validGroups;
+          }
+        }
+
+        // modelAssignments: Record<modelName, groupId>
+        if (config.modelAssignments && typeof config.modelAssignments === 'object') {
+          const assignments = {};
+          for (const [model, groupId] of Object.entries(config.modelAssignments)) {
+            if (typeof model === 'string' && typeof groupId === 'string') {
+              assignments[model] = groupId;
+            }
+          }
+          if (Object.keys(assignments).length > 0) {
+            providerConfig.modelAssignments = assignments;
+          }
+        }
+
+        // renamedGroups: Record<groupId, label>
+        if (config.renamedGroups && typeof config.renamedGroups === 'object') {
+          const renamed = {};
+          for (const [groupId, label] of Object.entries(config.renamedGroups)) {
+            if (typeof groupId === 'string' && typeof label === 'string') {
+              renamed[groupId] = label.slice(0, 128);
+            }
+          }
+          if (Object.keys(renamed).length > 0) {
+            providerConfig.renamedGroups = renamed;
+          }
+        }
+
+        if (Object.keys(providerConfig).length > 0) {
+          sanitized[providerId] = providerConfig;
+        }
+      }
+      if (Object.keys(sanitized).length > 0) {
+        result.usageModelGroups = sanitized;
+      }
+    }
+
+    // Usage reporting opt-out (default: true/enabled)
+    if (typeof candidate.reportUsage === 'boolean') {
+      result.reportUsage = candidate.reportUsage;
+    }
+
+    // Global behavior prompt — synced to ~/.config/opencode/AGENTS.md
+    if (typeof candidate.globalBehaviorPrompt === 'string') {
+      const value = candidate.globalBehaviorPrompt;
+      if (value.length <= 1024 * 1024) {
+        result.globalBehaviorPrompt = value;
+      }
+    }
+
+    if (typeof candidate.responseStyleEnabled === 'boolean') {
+      result.responseStyleEnabled = candidate.responseStyleEnabled;
+    }
+
+    if (
+      typeof candidate.responseStylePreset === 'string' &&
+      ['concise', 'detailed', 'mentor', 'pushback', 'noFiller', 'matchEnergy', 'warmPeer', 'custom'].includes(candidate.responseStylePreset)
+    ) {
+      result.responseStylePreset = candidate.responseStylePreset;
+    }
+
+    if (typeof candidate.responseStyleCustomInstructions === 'string') {
+      const value = candidate.responseStyleCustomInstructions;
+      if (value.length <= 50_000) {
+        result.responseStyleCustomInstructions = value;
+      }
+    }
+
+    if (typeof candidate.dictationEnabled === 'boolean') {
+      result.dictationEnabled = candidate.dictationEnabled;
+    }
+    if (typeof candidate.sttProvider === 'string') {
+      const provider = candidate.sttProvider.trim();
+      if (provider === 'local' || provider === 'openai-compatible') {
+        result.sttProvider = provider;
+      } else if (provider === 'server') {
+        // Legacy provider migration: 'server' was the OpenAI-compatible endpoint.
+        result.sttProvider = 'openai-compatible';
+      } else if (provider === 'browser' || provider === 'wasm') {
+        result.sttProvider = 'local';
+      }
+    }
+    if (typeof candidate.sttServerUrl === 'string') {
+      const trimmed = candidate.sttServerUrl.trim();
+      if (trimmed.length <= STT_SERVER_URL_MAX_LENGTH) {
+        result.sttServerUrl = trimmed;
+      }
+    }
+    if (typeof candidate.sttModel === 'string') {
+      const trimmed = candidate.sttModel.trim();
+      if (trimmed.length <= STT_MODEL_MAX_LENGTH) {
+        result.sttModel = trimmed;
+      }
+    }
+    if (typeof candidate.sttLocalModel === 'string') {
+      const trimmed = candidate.sttLocalModel.trim();
+      if (trimmed.length <= STT_MODEL_MAX_LENGTH) {
+        result.sttLocalModel = trimmed;
+      }
+    }
+    if (typeof candidate.sttLanguage === 'string') {
+      const trimmed = candidate.sttLanguage.trim();
+      if (trimmed.length <= STT_LANGUAGE_MAX_LENGTH) {
+        result.sttLanguage = trimmed;
+      }
+    }
+
+    // The registry is the last word on what a client may persist: a key the
+    // code above still names but the registry no longer lists is dropped here,
+    // so the two cannot drift apart silently (settings-helpers.test.js checks
+    // the other direction).
+    for (const key of Object.keys(result)) {
+      if (!isPersistableSettingsKey(key)) {
+        delete result[key];
+      }
+    }
+
+    return result;
+  };
+
+  const mergePersistedSettings = (current, changes) => {
+    const baseBookmarks = Array.isArray(changes.securityScopedBookmarks)
+      ? changes.securityScopedBookmarks
+      : Array.isArray(current.securityScopedBookmarks)
+        ? current.securityScopedBookmarks
+        : [];
+
+    const next = {
+      ...current,
+      ...changes,
+      securityScopedBookmarks: Array.from(
+        new Set(
+          baseBookmarks.filter((entry) => typeof entry === 'string' && entry.length > 0)
+        )
+      ),
+    };
+
+    return next;
+  };
+
+  const formatSettingsResponse = (settings) => {
+    const sanitized = sanitizeSettingsUpdate(settings);
+    for (const key of SECRET_SETTINGS_KEYS) {
+      delete sanitized[key];
+    }
+    const bookmarks = normalizeStringArray(settings.securityScopedBookmarks);
+    const hasManagedRemoteTunnelToken = typeof settings?.managedRemoteTunnelToken === 'string' && settings.managedRemoteTunnelToken.trim().length > 0;
+    const hasDesktopUiPassword = typeof settings?.desktopUiPassword === 'string' && settings.desktopUiPassword.trim().length > 0;
+    const pwaAppName = normalizePwaAppName(settings?.pwaAppName, '');
+    const pwaOrientation = normalizePwaOrientation(settings?.pwaOrientation, 'system');
+    const mobileKeyboardMode = normalizeMobileKeyboardMode(settings?.mobileKeyboardMode, 'native');
+    const inputHistoryScope = sanitized.inputHistoryScope ?? DEFAULT_INPUT_HISTORY_SCOPE;
+    const inputHistoryLimit = sanitized.inputHistoryLimit ?? DEFAULT_INPUT_HISTORY_LIMIT;
+
+    return {
+      ...sanitized,
+      hasManagedRemoteTunnelToken,
+      hasDesktopUiPassword,
+      // Tells the client whether agent memory exists in this build at all, so
+      // its settings row and panel tab can be absent rather than merely off.
+      agentMemoryFeatureAvailable: isAgentMemoryFeatureAvailable(),
+      // The same for agent workflows (`OPENCHAMBER_WORKFLOWS_ENABLE`).
+      agentWorkflowFeatureAvailable: isWorkflowFeatureAvailable(),
+      // The overview page ships dark until `OPENCHAMBER_OVERVIEW_ENABLED` is set.
+      overviewFeatureAvailable: isOverviewFeatureAvailable(),
+      // Jev routing needs the OpenChamber server, so it is present here and
+      // absent wherever this payload does not come from one (VS Code).
+      routingFeatureAvailable: true,
+      ...(pwaAppName ? { pwaAppName } : {}),
+      pwaOrientation,
+      mobileKeyboardMode,
+      inputHistoryScope,
+      inputHistoryLimit,
+      securityScopedBookmarks: bookmarks,
+      pinnedDirectories: normalizeStringArray(settings.pinnedDirectories),
+      ...(process.env.OPENCHAMBER_RUNTIME === 'desktop'
+        ? {
+            desktopLanAccessActive: process.env.OPENCHAMBER_DESKTOP_LAN_ACCESS_ACTIVE === 'true',
+            desktopLanAccessBlockedReason:
+              process.env.OPENCHAMBER_DESKTOP_LAN_ACCESS_BLOCKED_REASON === 'missing-password'
+                || process.env.OPENCHAMBER_DESKTOP_LAN_ACCESS_BLOCKED_REASON === 'enterprise-mode'
+                ? process.env.OPENCHAMBER_DESKTOP_LAN_ACCESS_BLOCKED_REASON
+                : null,
+          }
+        : {}),
+      showReasoningTraces:
+        typeof settings.showReasoningTraces === 'boolean'
+          ? settings.showReasoningTraces
+          : typeof sanitized.showReasoningTraces === 'boolean'
+            ? sanitized.showReasoningTraces
+            : false,
+      collapsibleThinkingBlocks:
+        typeof settings.collapsibleThinkingBlocks === 'boolean'
+          ? settings.collapsibleThinkingBlocks
+          : typeof sanitized.collapsibleThinkingBlocks === 'boolean'
+            ? sanitized.collapsibleThinkingBlocks
+            : true,
+    };
+  };
+
+  return {
+    normalizePwaAppName,
+    normalizePwaOrientation,
+    normalizeMobileKeyboardMode,
+    sanitizeSettingsUpdate,
+    mergePersistedSettings,
+    formatSettingsResponse,
+  };
+};

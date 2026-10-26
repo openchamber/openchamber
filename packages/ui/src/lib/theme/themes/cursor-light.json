@@ -1,0 +1,118 @@
+{
+  "metadata": {
+    "id": "cursor-light",
+    "name": "Cursor Light",
+    "variant": "light",
+    "description": "Light companion to Cursor Dark.",
+    "version": "1.0.0",
+    "author": "cedricverlinden",
+    "tags": [
+      "cursor",
+      "light"
+    ]
+  },
+  "colors": {
+    "primary": {
+      "base": "#2567A8",
+      "hover": "#1D568E",
+      "active": "#194B7C",
+      "muted": "#2567A880"
+    },
+    "surface": {
+      "background": "#FCFCFC",
+      "foreground": "#454a50",
+      "muted": "#f6f6f6",
+      "mutedForeground": "#66696f",
+      "elevated": "#f2f2f2"
+    },
+    "interactive": {
+      "border": "#5058601e",
+      "selection": "#E1E1E1",
+      "borderHover": "#50586040",
+      "borderFocus": "#2567A8B3",
+      "focus": "#2567A8B3",
+      "focusRing": "#2567A8B3",
+      "cursor": "#2567A8",
+      "hover": "#0000000a",
+      "active": "#00000014"
+    },
+    "status": {
+      "error": "#A3424B",
+      "errorBackground": "#A3424B1C",
+      "errorBorder": "#A3424B59",
+      "warning": "#806015",
+      "warningBackground": "#8060151C",
+      "warningBorder": "#80601559",
+      "success": "#467037",
+      "successBackground": "#4670371C",
+      "successBorder": "#46703759",
+      "info": "#315D9B",
+      "infoBackground": "#315D9B1C",
+      "infoBorder": "#315D9B59"
+    },
+    "syntax": {
+      "base": {
+        "background": "#f9f9f9",
+        "comment": "#656B70",
+        "keyword": "#126B63",
+        "string": "#894487",
+        "number": "#815C22",
+        "function": "#815C22",
+        "variable": "#265F9E",
+        "type": "#965528",
+        "operator": "#4A4E55"
+      },
+      "tokens": {
+        "stringEscape": "#4A4E55",
+        "keywordImport": "#126B63",
+        "method": "#965528",
+        "variableProperty": "#684DA0",
+        "className": "#265F9E",
+        "enum": "#965528",
+        "boolean": "#815C22",
+        "constant": "#4A4E55",
+        "punctuation": "#4A4E55"
+      },
+      "highlights": {
+        "diffAdded": "#467037",
+        "diffAddedBackground": "#4670371C",
+        "diffRemoved": "#A3424B",
+        "diffRemovedBackground": "#A3424B1C",
+        "diffModified": "#806015",
+        "diffModifiedBackground": "#8060151C"
+      }
+    },
+    "pr": {
+      "blocked": "#A65E2B",
+      "merged": "#8054A3"
+    },
+    "chat": {
+      "background": "#FCFCFC",
+      "userMessageBackground": "#e6edf3",
+      "divider": "#50586026"
+    },
+    "markdown": {
+      "link": "#2567A8",
+      "linkHover": "#1D568E",
+      "inlineCode": "#126B63",
+      "inlineCodeBackground": "#f9f9f9",
+      "blockquote": "#60656B",
+      "blockquoteBorder": "#73879746",
+      "listMarker": "#2567A899",
+      "bold": "#3e4348",
+      "italic": "#454a50"
+    },
+    "tools": {
+      "border": "#5058601e",
+      "icon": "#66696f",
+      "title": "#454a50",
+      "description": "#66696f",
+      "edit": {
+        "addedBackground": "#4670371C",
+        "removedBackground": "#A3424B1C",
+        "modifiedBackground": "#8060151C",
+        "lineNumber": "#66696f"
+      }
+    }
+  }
+}

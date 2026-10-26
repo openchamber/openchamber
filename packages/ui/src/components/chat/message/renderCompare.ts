@@ -1,0 +1,262 @@
+import type { Message, Part } from '@/lib/opencode/model';
+import type { TurnActivityRecord, TurnChangedFile, TurnGroupingContext } from '../lib/turns/types';
+
+type MessageRecord = {
+  info: Message;
+  parts: Part[];
+};
+
+const readPartId = (part: Part | undefined): string | null => {
+  if (!part) return null;
+  const candidate = (part as { id?: unknown }).id;
+  return typeof candidate === 'string' && candidate.length > 0 ? candidate : null;
+};
+
+const readToolStatus = (part: Part | undefined): string | null => {
+  const status = (part as { state?: { status?: unknown } } | undefined)?.state?.status;
+  return typeof status === 'string' ? status : null;
+};
+
+const readToolStateRef = (part: Part | undefined): unknown => {
+  return (part as { state?: unknown } | undefined)?.state;
+};
+
+const readPartMetadataRef = (part: Part | undefined): unknown => {
+  return (part as { metadata?: unknown } | undefined)?.metadata;
+};
+
+const readPartTime = (part: Part | undefined) => {
+  const time = (part as { time?: { start?: unknown; end?: unknown } } | undefined)?.time;
+  return {
+    start: typeof time?.start === 'number' ? time.start : null,
+    end: typeof time?.end === 'number' ? time.end : null,
+  };
+};
+
+const readPartText = (part: Part | undefined): string => {
+  const candidate = part as { text?: unknown; content?: unknown; value?: unknown } | undefined;
+  if (!candidate) return '';
+  const text = typeof candidate.text === 'string' ? candidate.text : '';
+  const content = typeof candidate.content === 'string' ? candidate.content : '';
+  const value = typeof candidate.value === 'string' ? candidate.value : '';
+  return [text, content, value].reduce((best, next) => (next.length > best.length ? next : best), '');
+};
+
+export const areRenderRelevantPartsEqual = (left: Part[], right: Part[]): boolean => {
+  if (left === right) return true;
+  if (left.length !== right.length) return false;
+
+  for (let index = 0; index < left.length; index += 1) {
+    const leftPart = left[index];
+    const rightPart = right[index];
+
+    if (leftPart.type !== rightPart.type) {
+      return false;
+    }
+
+    const leftId = readPartId(leftPart);
+    const rightId = readPartId(rightPart);
+    if (leftId !== rightId) {
+      return false;
+    }
+
+    if (leftPart.type === 'tool') {
+      if (readToolStateRef(leftPart) !== readToolStateRef(rightPart)) {
+        return false;
+      }
+      if (readPartMetadataRef(leftPart) !== readPartMetadataRef(rightPart)) {
+        return false;
+      }
+      if (readToolStatus(leftPart) !== readToolStatus(rightPart)) {
+        return false;
+      }
+      const leftTime = readPartTime(leftPart);
+      const rightTime = readPartTime(rightPart);
+      if (leftTime.start !== rightTime.start || leftTime.end !== rightTime.end) {
+        return false;
+      }
+      const leftTool = (leftPart as { tool?: unknown }).tool;
+      const rightTool = (rightPart as { tool?: unknown }).tool;
+      if (leftTool !== rightTool) {
+        return false;
+      }
+      // Compare tool output so streaming updates (e.g., todo list progress)
+      // trigger re-renders when the output payload changes.
+      const leftOutput = (leftPart as { output?: unknown }).output;
+      const rightOutput = (rightPart as { output?: unknown }).output;
+      if (leftOutput !== rightOutput) {
+        return false;
+      }
+      continue;
+    }
+
+    const leftTime = readPartTime(leftPart);
+    const rightTime = readPartTime(rightPart);
+    if (leftTime.start !== rightTime.start || leftTime.end !== rightTime.end) {
+      return false;
+    }
+
+    if (leftPart.type === 'text' || leftPart.type === 'reasoning') {
+      if (readPartText(leftPart) !== readPartText(rightPart)) {
+        return false;
+      }
+      // Shell-mode user messages carry their live command state in an
+      // injected `shellAction` payload on a synthetic text part; without
+      // comparing it, a running→completed transition never re-renders.
+      const leftShell = (leftPart as { shellAction?: { command?: unknown; output?: unknown; status?: unknown } }).shellAction;
+      const rightShell = (rightPart as { shellAction?: { command?: unknown; output?: unknown; status?: unknown } }).shellAction;
+      if (leftShell || rightShell) {
+        if (leftShell?.command !== rightShell?.command
+          || leftShell?.output !== rightShell?.output
+          || leftShell?.status !== rightShell?.status) {
+          return false;
+        }
+      }
+    }
+  }
+
+  return true;
+};
+
+const areRenderRelevantMessageInfoEqual = (left: Message, right: Message): boolean => {
+  if (left === right) return true;
+
+  return left.id === right.id
+    && left.role === right.role
+    && left.sessionID === right.sessionID
+    && (left as { finish?: unknown }).finish === (right as { finish?: unknown }).finish
+    && (left as { status?: unknown }).status === (right as { status?: unknown }).status
+    // A running compaction streams its summary into the message itself.
+    && (left.role !== 'compaction' || right.role !== 'compaction' || left.summary === right.summary)
+    && (left as { mode?: unknown }).mode === (right as { mode?: unknown }).mode
+    && (left as { agent?: unknown }).agent === (right as { agent?: unknown }).agent
+    && (left as { providerID?: unknown }).providerID === (right as { providerID?: unknown }).providerID
+    && (left as { modelID?: unknown }).modelID === (right as { modelID?: unknown }).modelID
+    && (left as { variant?: unknown }).variant === (right as { variant?: unknown }).variant
+    && (left as { clientRole?: unknown }).clientRole === (right as { clientRole?: unknown }).clientRole
+    && (left as { userMessageMarker?: unknown }).userMessageMarker === (right as { userMessageMarker?: unknown }).userMessageMarker
+    && ((left as { time?: { created?: unknown; completed?: unknown } }).time?.created ?? null) === ((right as { time?: { created?: unknown; completed?: unknown } }).time?.created ?? null)
+    && ((left as { time?: { created?: unknown; completed?: unknown } }).time?.completed ?? null) === ((right as { time?: { created?: unknown; completed?: unknown } }).time?.completed ?? null);
+};
+
+export const areRenderRelevantMessagesEqual = (left: MessageRecord, right: MessageRecord): boolean => {
+  return areRenderRelevantMessageInfoEqual(left.info, right.info) && areRenderRelevantPartsEqual(left.parts, right.parts);
+};
+
+export const areOptionalRenderRelevantMessagesEqual = (left?: MessageRecord, right?: MessageRecord): boolean => {
+  if (!left || !right) {
+    return left === right;
+  }
+  return areRenderRelevantMessagesEqual(left, right);
+};
+
+const areTurnChangedFilesEqual = (left?: TurnChangedFile[], right?: TurnChangedFile[]): boolean => {
+  if (left === right) return true;
+  if (!left || !right) return !left && !right;
+  if (left.length !== right.length) return false;
+  for (let index = 0; index < left.length; index += 1) {
+    const leftFile = left[index];
+    const rightFile = right[index];
+    if (
+      leftFile.file !== rightFile.file
+      || leftFile.additions !== rightFile.additions
+      || leftFile.deletions !== rightFile.deletions
+      || leftFile.inTurnDiff !== rightFile.inTurnDiff
+    ) {
+      return false;
+    }
+  }
+  return true;
+};
+
+const areTurnActivityRecordsEqual = (left: TurnActivityRecord, right: TurnActivityRecord): boolean => {
+  return left.id === right.id
+    && left.messageId === right.messageId
+    && left.kind === right.kind
+    && left.partIndex === right.partIndex
+    && left.endedAt === right.endedAt
+    && areRenderRelevantPartsEqual([left.part], [right.part]);
+};
+
+const areRelevantActivityPartsEqual = (
+  left: TurnActivityRecord[] | undefined,
+  right: TurnActivityRecord[] | undefined,
+  messageId: string,
+): boolean => {
+  let leftIndex = 0;
+  let rightIndex = 0;
+
+  while (true) {
+    while (leftIndex < (left?.length ?? 0) && left?.[leftIndex]?.messageId !== messageId) {
+      leftIndex += 1;
+    }
+    while (rightIndex < (right?.length ?? 0) && right?.[rightIndex]?.messageId !== messageId) {
+      rightIndex += 1;
+    }
+
+    const leftRecord = left?.[leftIndex];
+    const rightRecord = right?.[rightIndex];
+
+    if (!leftRecord || !rightRecord) {
+      return leftRecord === rightRecord;
+    }
+
+    if (!areTurnActivityRecordsEqual(leftRecord, rightRecord)) {
+      return false;
+    }
+
+    leftIndex += 1;
+    rightIndex += 1;
+  }
+};
+
+const areStringListsEqual = (left: string[] | undefined, right: string[] | undefined): boolean => {
+  if (left === right) return true;
+  if (!left || !right || left.length !== right.length) return false;
+  return left.every((value, index) => value === right[index]);
+};
+
+export const areRelevantTurnGroupingContextsEqual = (
+  left: TurnGroupingContext | undefined,
+  right: TurnGroupingContext | undefined,
+  messageId: string,
+  isUserMessage: boolean,
+): boolean => {
+  if (left === right) {
+    return true;
+  }
+
+  if (!left || !right) {
+    return left === right;
+  }
+
+  if (isUserMessage) {
+    return true;
+  }
+
+  if (left.turnId !== right.turnId) return false;
+  if (left.isFirstAssistantInTurn !== right.isFirstAssistantInTurn) return false;
+  if (!areStringListsEqual(left.earlierAssistantText, right.earlierAssistantText)) return false;
+  if (left.isLastAssistantInTurn !== right.isLastAssistantInTurn) return false;
+  if (left.isLatestTurn !== right.isLatestTurn) return false;
+  if (left.isWorking !== right.isWorking) return false;
+  if (left.hasTools !== right.hasTools) return false;
+  if (left.hasReasoning !== right.hasReasoning) return false;
+  if (left.userMessageCreatedAt !== right.userMessageCreatedAt) return false;
+  if (left.assistantVariant !== right.assistantVariant) return false;
+
+  const headerRelevant = left.headerMessageId === messageId || right.headerMessageId === messageId;
+  if (headerRelevant && left.headerMessageId !== right.headerMessageId) {
+    return false;
+  }
+
+  if (!areRelevantActivityPartsEqual(left.activityParts, right.activityParts, messageId)) {
+    return false;
+  }
+
+  if ((left.isLastAssistantInTurn || right.isLastAssistantInTurn) && !areTurnChangedFilesEqual(left.changedFiles, right.changedFiles)) {
+    return false;
+  }
+
+  return true;
+};

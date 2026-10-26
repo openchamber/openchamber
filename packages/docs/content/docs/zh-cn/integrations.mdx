@@ -1,0 +1,134 @@
+---
+title: 集成
+description: 连接 OpenChamber 所使用的服务和订阅。
+---
+
+# 集成
+
+在 **设置 → 集成** 中登录 OpenChamber 所配合使用的服务。登录信息保存在 OpenChamber 服务器上，因此网页端、桌面端和已配对的手机共用同一份登录。
+
+## 集成目录
+
+集成目录列出了 150 多个服务，一键即可交给智能体使用：Linear、Notion、Sentry、Supabase、Figma，以及可观测性工具、CRM、会议记录等。安装一个服务通常会添加它的 MCP 服务器（智能体用来读取和修改该服务中内容的连接），有时还会附带技能或插件。它按用户安装，因此所有项目都能用。
+
+1. 选择侧边栏顶部的商店图标。
+2. 找到服务：按名称搜索，或用 **代码**、**质量与运维** 等分类缩小列表。**OpenChamber** 列出我们自己的扩展和插件。
+3. 在它所在的行上选择 **+**，或打开它并选择 **安装**。
+4. 按服务要求的方式登录：
+   - **OAuth**：服务的登录页面会在浏览器中打开，在那里批准访问。
+   - **令牌**：将 API 令牌粘贴到 **API 令牌** 中。**获取令牌** 会打开该服务发放令牌的页面。
+   - **无需登录**：无需任何操作。
+
+完成后，服务会显示一个勾号并出现在左侧的 **已安装** 下，它的工具在你的下一条消息中即可使用。黄点或 **需要登录** 表示登录没有完成；打开该服务并重新登录。
+
+有些条目需要的不只是登录：
+
+- **本地服务器** 运行在 OpenCode 所在的机器上，可能需要 Node.js、带 uv 的 Python 或 Docker。首次启动可能需要一些时间。
+- **插件** 是在 OpenCode 内部运行的代码，因此目录会先显示插件的许可证并请你确认。
+- 服务附带的 **技能** 会随它一起安装。如果缺少某个技能，服务页面上会出现它自己的 **安装**。
+
+要移除服务，打开它，选择 **更多操作**（**⋯**），然后选择 **卸载**。这只会移除目录添加的内容；你在该服务上的账户保持不变。你也可以像往常一样在设置中管理 MCP 服务器、插件和技能。
+
+目录在网页端和桌面端中提供。在[企业模式](/zh-cn/security/#企业模式)下它会被隐藏。
+
+## GitHub
+
+展开 **GitHub** 卡片并选择 **Connect GitHub**，用一个简短的设备码登录。连接后，OpenChamber 可以从 issue 和拉取请求开始会话、将它们附加到消息，以及创建或更新 PR。各个 Git 托管服务能做的一切见 [Git 托管服务](/zh-cn/github/)。
+
+## GitLab、Gitea、Forgejo 和 Gerrit
+
+GitLab、Gitea、Forgejo 和 Gerrit 各自在 GitHub 旁边有一张卡片。连接后，它们的 issue 和拉取请求（GitLab 上叫合并请求，Gerrit 上叫变更）会像 GitHub 的一样，显示在 [Issue 与 PR](/zh-cn/issues-and-prs/) 看板和聊天的 **+** 菜单中。
+
+- **GitLab**：在 gitlab.com 上，用一个简短的设备码、个人访问令牌或服务器上的 `glab` 登录状态登录。对于自托管 GitLab，添加它的地址并粘贴一个带 `api` 权限范围的个人访问令牌。只有当服务器把 `OPENCHAMBER_GITLAB_CLIENT_ID` 设为在该实例上注册的应用时，那里才能使用设备码登录。
+- **Gitea**：添加你的实例地址，例如 `https://gitea.example.com`，并粘贴一个带 `write:repository`、`write:issue` 和 `read:user` 权限范围的个人访问令牌。卡片会链接到你实例上创建令牌的页面。Gitea 没有设备码或 CLI 登录。需要 Gitea 1.21 或更新版本，并且部署在地址的根路径上。
+- **Forgejo**：Codeberg 已经在卡片上，所以连接它只需要一个带 `write:repository`、`write:issue` 和 `read:user` 权限范围的个人访问令牌；卡片会链接到 Codeberg 上创建令牌的页面。对于其他 Forgejo 服务器，添加它的地址，例如 `https://forgejo.example.com`，并粘贴一个带相同权限范围的令牌。需要 Forgejo 7.0 或更新版本，并且部署在地址的根路径上。Forgejo 服务器在这张卡片上连接，Gitea 服务器在 Gitea 卡片上连接。
+- **Gerrit**：添加你的实例地址，例如 `https://gerrit.example.com`，然后填写你的 Gerrit 用户名和 HTTP 密码。在 Gerrit 的 **Settings → HTTP Credentials** 中生成这个密码，卡片会链接到那里。你的登录密码不能用，没有用户名的账号也无法连接。需要 Gerrit 3.8 或更新版本，并且部署在地址的根路径上。评审地址与 Git 地址不同的站点，例如使用 `.gitcookies` 的 googlesource.com，不受支持。
+
+在 Gerrit 上你评审的是变更。变更的每次上传都是一个补丁集，在变更的预览中可以选择较早的补丁集来阅读。评审方式是在项目的标签上投票，例如 Code-Review 和 Verified；变更满足合入要求后，用 **合入** 让它落地。Gerrit 没有 issue，所以只显示变更。要创建变更，或为变更上传新的补丁集，请使用 Git 面板中的 **推送评审**；参阅 [Git](/zh-cn/git/#在-gerrit-上推送评审)。
+
+OpenChamber 使用哪张卡片上的账号，由项目的远程仓库决定；这些卡片上的任何账号都可以作为项目的 [Git 身份](/zh-cn/git-identities/)。[扩展](/zh-cn/extensions/#作为-git-托管服务的扩展) 可以再添加一个带自己卡片的托管服务。
+
+## Linear
+
+### 连接工作区
+
+1. 展开 **Linear** 卡片并选择 **Connect**。
+2. 在打开的浏览器标签页中批准访问。在此之前，卡片显示 **Waiting for Linear**。
+
+用 **Add workspace** 连接另一个 Linear 组织。同一时间只有一个当前工作区：用 **Switch to** 切换，**Disconnect** 只移除当前工作区。项目映射会保留。
+
+### 浏览 issue
+
+Linear issue 位于 **Issues and PRs** 看板。点击侧边栏顶部的拉取请求图标打开它，或按 <kbd>⌘K</kbd> 再按 <kbd>B</kbd>（Windows 和 Linux 上为 <kbd>Ctrl+K</kbd> 再按 <kbd>B</kbd>），然后在顶部选择 **Linear**。看板列出当前工作区的 issue，你可以：
+
+- 显示单个团队或 **All teams**
+- 连接了多个工作区时切换当前工作区
+- 同时按状态、归属（**Assigned to me** 或 **Created by me**）和优先级筛选，并按标题或标识符搜索
+- 在列表旁查看 issue 的描述、评论、标签和优先级
+- 修改其 **Status**
+
+### 从 issue 开始会话
+
+- 在看板上选中一个 issue，选择 **Start in worktree…** 在新分支中工作，或选择 **New session** 直接在项目当前状态下工作。
+- 在 **New Worktree** 对话框中选择一个 Linear issue。
+
+无论哪种方式，会话打开时该 issue 都已附加在消息框中，第一条消息由你自己来写。看板会在映射到该 issue 所属团队的项目中启动会话，该项目显示在 **Start in** 旁边；如有需要，可在那里改选其他项目。在 Linear 卡片中映射团队：**Default project** 适用于所有团队，**Team projects** 可按团队覆盖。没有映射时，看板使用它上次显示的项目。
+
+### 将 issue 关联到消息
+
+在聊天输入框中打开 **+** 菜单并选择 **Linear**。该 issue 会作为上下文随你的下一条消息一起发送，会话的工作状态面板会保留指向它的链接。
+
+### 会话评论
+
+在 Linear 卡片中开启 **Session comments**，从 issue 开始的会话，或第一条消息附加了该 issue 的会话，会在开始、完成或失败时在该 issue 下发布评论，每条评论都带有打开会话的链接。只有当此 OpenChamber 服务器拥有公网地址时才会发布评论，这样 issue 中的每个人都能打开链接；在本地或私有地址下不会发布任何内容。
+
+## 安装集成
+
+1. 打开 **Settings → Integrations**。
+2. 找到所需的集成并选择 **Install**。
+3. 在提示时重启 OpenCode — 重启后提供商就会出现。
+4. 选择 **Set up** 并登录。之后模型会出现在聊天室的模型选择器中。
+
+集成按用户安装，因此在所有项目中都可用。你可以随时在同一张卡片上更新或移除它们。
+
+## Claude Code
+
+Claude Code 通过你电脑上的 Claude Code CLI 使用你的 Claude Pro 或 Max 套餐 — 无需 API 密钥。
+
+1. 安装集成（见上文）。
+2. 选择 **Set up** 并登录。如果你还没有 Claude Code CLI，安装向导会先提供安装，然后再登录。
+
+**你的 Claude 账户如何受到保护：** 此集成使用 Anthropic 官方的 Claude Agent SDK 和你已安装的 Claude Code CLI。它不会劫持 OAuth，不会提取或重放浏览器令牌，不会冒充不受支持的客户端，也不会绕过 Anthropic 的身份验证。它始终运行在 Anthropic 支持的访问路径上，因此不会带来与令牌劫持或未授权身份验证变通手段相关的封号风险。
+
+## 更新或移除
+
+- **Update** 安装插件的最新发布版本。
+- **Remove** 从你的 OpenCode 配置中删除该插件。OpenCode 重新加载后，该提供商将不再加载。
+
+如果卡片提示条目需要手动管理，请选择 **Manage plugins** 并在那里清理重复项。
+
+## Excalidraw
+
+Excalidraw 让你直接在 Files 中绘制 `.excalidraw` 文件和 Obsidian 的 `.excalidraw.md` 绘图。它是一个 OpenChamber 扩展，列在同一页面的 **OpenChamber extensions** 下。
+
+1. 打开 **Settings → Integrations**，在 Excalidraw 卡片上选择 **Install**。你也可以在 Files 中打开一个绘图，然后在其上方的提示中选择 **Install**。
+2. 重新打开该绘图。画布会取代文件的文本，Cmd/Ctrl+S、自动保存、源码切换和全屏的用法与其他文件相同。
+
+在卡片上，你可以在有新版本时更新扩展、重新启用已暂停的扩展，或将其移除。移除后你的绘图保持不变，只是会以文本形式打开。仅支持 Web 和桌面端。
+
+## Resource Monitor
+
+Resource Monitor 显示本机使用了多少 CPU 和内存，以及其中有多少用在 OpenChamber、OpenCode、它们启动的所有进程，以及在它们下面运行的开发服务器上。它是一个 OpenChamber 扩展，列在同一页面的 **OpenChamber extensions** 下。
+
+1. 打开 **Settings → Integrations**，在 Resource Monitor 卡片上选择 **Install**。
+2. 在 **Settings → Extensions** 中批准它的本地服务。数据来自 OpenChamber 在面板旁启动的一个小进程。它只在面板或 **Resources** 部分显示在屏幕上时采样。
+3. 从右侧栏打开 **Resource Monitor**。Work Status 面板的 **Resources** 下也会显示简短摘要。
+
+开发服务器或任务上的 Stop 会结束该命令及其启动的所有进程，因此 watcher 无法重新拉起服务器。Terminal 组中的 **Stop all** 会结束终端和 project actions 中运行的所有内容，终端标签页保持打开。OpenChamber 本身和 OpenCode 服务器没有 Stop。
+
+开发服务器在 OpenChamber 下运行时才会显示，即在内置终端中启动的服务器，或在 OpenChamber 自己启动 OpenCode 时由智能体启动的服务器。脱离父进程的服务器，或用 `docker compose up -d` 启动的容器，不会列出。连接到远程 OpenChamber 时，监视器显示那台机器。仅支持网页版和桌面版。
+
+## 相关内容
+
+- [Git 托管服务](/zh-cn/github/) — GitHub、GitLab、Gitea、Forgejo 和 Gerrit 在 OpenChamber 中能做的一切
+- [工作树会话](/zh-cn/worktrees/) — issue 会话可以从哪里开始

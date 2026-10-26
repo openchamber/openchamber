@@ -1,0 +1,61 @@
+---
+title: Roteamento automático de modelos
+description: Deixe o OpenChamber escolher o modelo, o nível de raciocínio e o agente para cada prompt.
+---
+
+# Roteamento automático de modelos
+
+Escolha **Auto** no seletor de modelo e o OpenChamber escolhe o modelo para cada prompt que você envia. A correção de um erro de digitação vai para um modelo barato e rápido; um bug complicado vai para o seu modelo mais forte. Você decide uma vez, nas configurações, qual modelo cuida de cada tipo de tarefa.
+
+## Ativar
+
+1. Garanta que há um [provedor de classificação](/pt-br/classification-providers/) configurado. O Auto precisa do Jev para classificar os prompts.
+2. Abra **Configurações → Roteamento** e marque **Ativar o modo Auto**.
+3. Escolha um **Modelo de reserva** (e o nível de raciocínio dele). Enquanto você não fizer isso, o Auto fica oculto.
+4. Veja as categorias abaixo e dê um modelo próprio às que importam para você.
+
+Quando tudo estiver pronto, a página mostra **Pronto**. Escolha **Auto** no topo do seletor de modelo em qualquer sessão.
+
+## Categorias
+
+Cada prompt cai em uma categoria. Quatro já vêm prontas:
+
+| Categoria | Para |
+| --- | --- |
+| Trivial | trabalho mecânico: renomear, erros de digitação, formatação, comentários, comandos simples |
+| Research | ler e explicar código sem alterá-lo |
+| Implement | uma mudança clara: uma funcionalidade de escopo conhecido, testes, uma correção de causa conhecida |
+| Hard | bugs de causa desconhecida, design e planejamento, segurança, autenticação, concorrência, migrações, dinheiro |
+
+Para cada categoria, você pode definir:
+
+- **Modelo:** vazio significa o modelo de reserva
+- **Raciocínio:** o nível de raciocínio desse modelo
+- **Agente:** o agente que executa essas tarefas; vazio mantém o agente que o campo de mensagem usaria
+
+O Jev classifica os prompts lendo os nomes e as descrições das categorias, então as descrições funcionam como instruções. Escreva o que pertence à categoria e o que não pertence. Você pode editar, desativar, remover ou adicionar categorias, e restaurar uma das prontas se mudar de ideia. O Auto precisa de pelo menos duas categorias ativadas.
+
+## O que acontece ao enviar
+
+1. O OpenChamber envia ao Jev a sua mensagem e um trecho curto dos últimos turnos.
+2. O Jev escolhe uma categoria e diz o quanto tem certeza.
+3. A sessão troca para o modelo, o nível de raciocínio e o agente dessa categoria, e a sua mensagem é enviada.
+
+Cada mensagem é classificada de novo, então uma sessão pode passar de um modelo barato para uma pergunta rápida ao seu modelo mais forte no pedido seguinte. O campo de mensagem continua mostrando **Auto**, e os controles de agente e de raciocínio ficam ocultos, porque quem decide é a categoria.
+
+O modelo de reserva responde quando:
+
+- o Jev não tem certeza suficiente (menos de 60%)
+- o Jev falha ou demora mais de quatro segundos
+- a categoria não tem modelo próprio
+
+Escolher qualquer modelo específico no seletor tira a sessão do Auto. Escolha **Auto** de novo para voltar. Você também pode tornar o Auto o padrão das novas sessões em **Configurações → Sessões**.
+
+## Onde funciona
+
+O Auto roda no servidor do OpenChamber: no app desktop, no app web e no seu celular conectado a qualquer um dos dois. O VS Code não oferece o Auto, porque a extensão fala direto com o OpenCode.
+
+## Relacionado
+
+- [Provedores de classificação (Jev)](/pt-br/classification-providers/): configure o modelo que classifica os prompts
+- [Provedores, modelos e agentes](/pt-br/providers/): conecte os modelos entre os quais o Auto escolhe

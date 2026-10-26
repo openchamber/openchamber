@@ -1,0 +1,88 @@
+---
+title: Chat Input
+description: "What you can type in the chat box: commands, skills, snippets, mentions, and attachments."
+---
+
+# Chat Input
+
+The chat box understands a few symbols. Type one and a picker opens; choose an entry, or keep typing and filter it. A symbol only counts at the start of a word, and a command has to start the message.
+
+| Type | Picks | Works at |
+| --- | --- | --- |
+| `/` | a command | the very start of the message |
+| `$` | a skill | anywhere |
+| `#` | a snippet | anywhere |
+| `@` | a file or an agent | anywhere |
+
+A symbol that names nothing you have stays ordinary text: `$5` is just money, and `a/b` is just a path.
+
+## Commands
+
+A command is a saved prompt you run with a slash, like `/review`. Manage them at **Settings → Commands**.
+
+1. Open **Settings → Commands** and create a command.
+2. Give it a name, a description, and the prompt text it should send.
+3. Optionally pin it to a specific agent or model.
+4. Choose personal or project scope.
+
+In chat, type `/` as the **first** character of the message to bring up commands, then pick one. Your text can use placeholders:
+
+- `$ARGUMENTS`: whatever you type after the command
+- `@filename`: drops in the contents of a file
+- `` !`command` ``: drops in the output of a shell command
+
+The built-in `init` and `review` commands can be reset but not deleted. OpenChamber also ships commands such as `/explore` and `/summary`; see [Magic Prompts](/magic-prompts/) for the full list.
+
+## Skills
+
+Type `$` anywhere in a message to bring up the skill picker, then choose one. The agent loads that skill's instructions for the response. See [Skills](/skills/) to write your own.
+
+Commands and skills have separate pickers, so a `/` at the start never lists skills and a `$` never lists commands.
+
+## Snippets
+
+A snippet is reusable text you reference inline with a hashtag, like `#signoff`. Manage them at **Settings → Snippets**.
+
+1. Open **Settings → Snippets** and create a snippet.
+2. Give it a name and the text it stands for. Add aliases if you want more than one trigger.
+3. Choose personal or project scope.
+
+In chat, type `#` and pick a snippet. OpenChamber swaps in the full text before sending.
+
+## Files and agents
+
+Type `@` to attach a file or run the message with a different agent.
+
+- A file, like `@src/index.ts`, is attached to the message the same way as picking it from the **+** menu. Images and documents are read and sent with it.
+- An agent, like `@build`, runs this message with that agent. Without a mention, the composer's selected agent runs it.
+
+## Attach files and context
+
+The **+** menu next to the chat box attaches more than a file:
+
+- files from your computer
+- issues and pull requests from your repository (GitHub, GitLab, Gitea, Forgejo or Gerrit, whichever hosts the project)
+- Linear issues, when Linear is connected
+- tasks from installed [extensions](/extensions/) that offer to attach
+
+Each one rides along with your next message as context; your message says what to do with it. You can also paste an image or drop a file straight onto the chat box.
+
+## Run a shell command
+
+Start the message with `!` and OpenChamber runs it as a shell command, sending nothing to the agent. Press **Esc**, or delete back to an empty box, to leave shell mode.
+
+## Keyboard
+
+- **Enter** sends, and **Shift+Enter** starts a new line. In **Settings → Chat** you can swap them, so Enter breaks the line and **Ctrl/Cmd+Enter** sends. Ctrl/Cmd+Enter always sends.
+- **ArrowUp** and **ArrowDown** recall your earlier messages.
+- With a picker open, **Ctrl+N** and **Ctrl+P** move through it, **Enter** or **Tab** picks, and **Esc** closes it.
+
+In the expanded composer, Enter always starts a new line and **Ctrl/Cmd+Enter** sends.
+
+On a phone, Enter always starts a new line. The send button or **Ctrl/Cmd+Enter** sends.
+
+## Related
+
+- [Skills](/skills/): load larger instruction sets on demand
+- [Magic Prompts](/magic-prompts/): the built-in commands and where each one runs
+- [Git hosts](/github/): attach issues and pull requests

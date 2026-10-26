@@ -1,0 +1,328 @@
+import { beforeEach, describe, expect, mock, test } from 'bun:test';
+
+const executeCommand = mock(async () => undefined);
+const updateWorkspaceFolders = mock(async (start, deleteCount, ...foldersToAdd) => {
+  for (const folder of foldersToAdd) {
+    currentWorkspaceFolders = [...currentWorkspaceFolders, { name: folder.uri.fsPath.split('/').pop(), uri: folder.uri }];
+  }
+  return true;
+});
+let currentWorkspaceFolders = [];
+
+const activateQuotaGiftReset = mock(async () => undefined);
+
+class Position {
+  constructor(line, character) {
+    this.line = line;
+    this.character = character;
+  }
+}
+
+class Range {
+  constructor(start, end) {
+    this.start = start;
+    this.end = end;
+  }
+}
+
+mock.module('vscode', () => ({
+  commands: { executeCommand },
+  workspace: {
+    get workspaceFolders() {
+      return currentWorkspaceFolders;
+    },
+    updateWorkspaceFolders,
+  },
+  Uri: {
+    file: (fsPath) => ({ scheme: 'file', fsPath }),
+  },
+  Position,
+  Range,
+}));
+
+mock.module('./opencodeConfig', () => ({
+  readConfig: mock(() => ({})),
+  removeProviderConfig: mock(),
+  getProviderSources: mock(),
+  getStoredProviderConfig: mock(),
+  upsertProviderConfig: mock(),
+}));
+mock.module('./opencodeAuth', () => ({
+  getProviderAuth: mock(),
+  removeProviderAuth: mock(),
+}));
+mock.module('./quotaProviders', () => ({
+  activateQuotaGiftReset,
+  fetchQuotaForProvider: mock(),
+  listConfiguredQuotaProviders: mock(),
+}));
+mock.module('./opencodeGoQuota', () => ({ fetchOpenCodeGoUsage: mock() }));
+mock.module('./quotaCredentials', () => ({
+  credentialStatus: mock(),
+  deleteCredential: mock(),
+  importCursorCredential: mock(),
+  normalizeCredential: mock(),
+  readCredential: mock(() => null),
+  validateCredential: mock(),
+  writeCredential: mock(),
+}));
+mock.module('./sessionActivityWatcher', () => ({ getSessionActivitySnapshot: mock() }));
+
+const { handleSystemBridgeMessage } = await import('./bridge-system-runtime.ts');
+
+const deps = {
+  resolveUserPath: (value) => value,
+  fetchModelsMetadata: async () => ({}),
+  updateCheckUrl: 'https://example.com/update-check',
+  clientReloadDelayMs: 800,
+};
+
+describe('VS Code system bridge editor:openFile', () => {
+  beforeEach(() => {
+    executeCommand.mockClear();
+    updateWorkspaceFolders.mockClear();
+    currentWorkspaceFolders = [];
+  });
+
+  test('uses vscode.open so VS Code can select the notebook editor', async () => {
+    const response = await handleSystemBridgeMessage({
+      id: 'open-notebook',
+      type: 'editor:openFile',
+      payload: { path: '/workspace/notebook.ipynb' },
+    }, undefined, deps);
+
+    expect(response).toEqual({ id: 'open-notebook', type: 'editor:openFile', success: true });
+    expect(executeCommand).toHaveBeenCalledWith(
+      'vscode.open',
+      { scheme: 'file', fsPath: '/workspace/notebook.ipynb' },
+      {},
+    );
+  });
+
+  test('preserves line and column selection for regular files', async () => {
+    await handleSystemBridgeMessage({
+      id: 'open-text',
+      type: 'editor:openFile',
+      payload: { path: '/workspace/source.ts', line: 4, column: 7 },
+    }, undefined, deps);
+
+    const position = new Position(3, 7);
+    expect(executeCommand).toHaveBeenCalledWith(
+      'vscode.open',
+      { scheme: 'file', fsPath: '/workspace/source.ts' },
+      { selection: new Range(position, position) },
+    );
+  });
+});
+
+describe('VS Code system bridge api:workspace:addFolder', () => {
+  beforeEach(() => {
+    updateWorkspaceFolders.mockClear();
+    currentWorkspaceFolders = [];
+  });
+
+  test('adds a folder to the workspace and returns the folder list', async () => {
+    currentWorkspaceFolders = [{ name: 'project-one', uri: { fsPath: '/workspace/project-one' } }];
+
+    const response = await handleSystemBridgeMessage({
+      id: 'add-folder',
+      type: 'api:workspace:addFolder',
+      payload: { path: '/home/user/my-project' },
+    }, undefined, deps);
+
+    expect(response).toEqual({
+      id: 'add-folder',
+      type: 'api:workspace:addFolder',
+      success: true,
+      data: {
+        workspaceFolders: [
+          { name: 'my-project', path: '/home/user/my-project' },
+          { name: 'project-one', path: '/workspace/project-one' },
+        ],
+      },
+    });
+    expect(updateWorkspaceFolders).toHaveBeenCalledWith(
+      1,
+      null,
+      { uri: { scheme: 'file', fsPath: '/home/user/my-project' } },
+    );
+  });
+
+  test('does not duplicate an already-open workspace folder', async () => {
+    currentWorkspaceFolders = [{ name: 'project-one', uri: { fsPath: '/workspace/project-one' } }];
+
+    const response = await handleSystemBridgeMessage({
+      id: 'add-existing',
+      type: 'api:workspace:addFolder',
+      payload: { path: '/workspace/project-one' },
+    }, undefined, deps);
+
+    expect(response).toEqual({
+      id: 'add-existing',
+      type: 'api:workspace:addFolder',
+      success: true,
+      data: {
+        workspaceFolders: [{ name: 'project-one', path: '/workspace/project-one' }],
+      },
+    });
+    expect(updateWorkspaceFolders).not.toHaveBeenCalled();
+  });
+
+  test('returns an error when VS Code rejects the folder add', async () => {
+    updateWorkspaceFolders.mockResolvedValue(false);
+
+    const response = await handleSystemBridgeMessage({
+      id: 'add-rejected',
+      type: 'api:workspace:addFolder',
+      payload: { path: '/home/user/other' },
+    }, undefined, deps);
+
+    expect(response).toEqual({
+      id: 'add-rejected',
+      type: 'api:workspace:addFolder',
+      success: false,
+      error: 'Failed to add workspace folder',
+    });
+  });
+
+  test('dedupes an already-open folder with a lowercase Windows drive letter', async () => {
+    // VS Code reports workspace folder paths with lowercase drive letters
+    // (d:\...), while the bridge normalizes the incoming path to uppercase
+    // (D:\...). The comparison must normalize both sides.
+    currentWorkspaceFolders = [{ name: 'project-one', uri: { fsPath: 'd:\\work\\project-one' } }];
+
+    const response = await handleSystemBridgeMessage({
+      id: 'add-win-dedupe',
+      type: 'api:workspace:addFolder',
+      payload: { path: 'D:\\work\\project-one' },
+    }, undefined, deps);
+
+    expect(response).toEqual({
+      id: 'add-win-dedupe',
+      type: 'api:workspace:addFolder',
+      success: true,
+      data: {
+        workspaceFolders: [{ name: 'project-one', path: 'D:\\work\\project-one' }],
+      },
+    });
+    expect(updateWorkspaceFolders).not.toHaveBeenCalled();
+  });
+
+  test('rejects a missing path', async () => {
+    const response = await handleSystemBridgeMessage({
+      id: 'add-missing',
+      type: 'api:workspace:addFolder',
+      payload: {},
+    }, undefined, deps);
+
+    expect(response).toEqual({
+      id: 'add-missing',
+      type: 'api:workspace:addFolder',
+      success: false,
+      error: 'Directory path is required',
+    });
+    expect(updateWorkspaceFolders).not.toHaveBeenCalled();
+  });
+});
+
+describe('VS Code system bridge api:quota:giftReset:use', () => {
+  beforeEach(() => {
+    activateQuotaGiftReset.mockClear();
+    activateQuotaGiftReset.mockResolvedValue(undefined);
+  });
+
+  test('activates a gift reset through the quota provider', async () => {
+    const response = await handleSystemBridgeMessage({
+      id: 'gift-use',
+      type: 'api:quota:giftReset:use',
+      payload: { providerId: 'zai-coding-plan', recordId: 462029, resetType: 'FIVE_HOUR' },
+    }, undefined, deps);
+
+    expect(response).toEqual({
+      id: 'gift-use',
+      type: 'api:quota:giftReset:use',
+      success: true,
+      data: { success: true },
+    });
+    expect(activateQuotaGiftReset).toHaveBeenCalledWith('zai-coding-plan', {
+      recordId: 462029,
+      resetType: 'FIVE_HOUR',
+    });
+  });
+
+  test('rejects a payload without a recordId', async () => {
+    const response = await handleSystemBridgeMessage({
+      id: 'gift-missing',
+      type: 'api:quota:giftReset:use',
+      payload: { providerId: 'zai-coding-plan', resetType: 'FIVE_HOUR' },
+    }, undefined, deps);
+
+    expect(response).toEqual({
+      id: 'gift-missing',
+      type: 'api:quota:giftReset:use',
+      success: false,
+      error: 'Invalid gift reset request',
+    });
+    expect(activateQuotaGiftReset).not.toHaveBeenCalled();
+  });
+
+  test('returns the provider failure as a bridge error', async () => {
+    activateQuotaGiftReset.mockRejectedValue(new Error('API error: 429'));
+
+    const response = await handleSystemBridgeMessage({
+      id: 'gift-failed',
+      type: 'api:quota:giftReset:use',
+      payload: { providerId: 'zai-coding-plan', recordId: 1, resetType: 'WEEK' },
+    }, undefined, deps);
+
+    expect(response).toEqual({
+      id: 'gift-failed',
+      type: 'api:quota:giftReset:use',
+      success: false,
+      error: 'API error: 429',
+    });
+  });
+});
+
+describe('VS Code v2 migration bridge', () => {
+  test('waits for the manager to finish installing and restarting', async () => {
+    let completed = false;
+    const manager = { installV2: async () => { completed = true; } };
+    const response = await handleSystemBridgeMessage({ id: 'install', type: 'api:opencode/install-v2' }, { manager }, deps);
+    expect(completed).toBe(true);
+    expect(response).toEqual({ id: 'install', type: 'api:opencode/install-v2', success: true, data: { success: true } });
+  });
+
+  test('does not claim success without a manager or after installation failure', async () => {
+    const response = await handleSystemBridgeMessage({ id: 'missing', type: 'api:opencode/install-v2' }, undefined, deps);
+    expect(response.success).toBe(false);
+    const manager = { installV2: async () => { throw new Error('Installation failed'); } };
+    await expect(handleSystemBridgeMessage({ id: 'failed', type: 'api:opencode/install-v2' }, { manager }, deps)).rejects.toThrow('Installation failed');
+  });
+});
+
+describe('VS Code system bridge api:sessions/metadata:set', () => {
+  const manager = { getApiUrl: () => 'http://127.0.0.1:9', getOpenCodeAuthHeaders: () => ({}) };
+  const failingWith = (error) => ({ ...deps, sessionState: { setMetadata: async () => { throw error; } } });
+  const message = { id: 'meta', type: 'api:sessions/metadata:set', payload: { sessionId: 'ses_a', patch: { openchamber: { work: { state: 'done' } } } } };
+
+  test('codes a write OpenCode refused because the session folder is gone', async () => {
+    const locationNotFound = Object.assign(new Error('Location not found: /repo/wt-gone'), { name: 'LocationNotFoundError' });
+
+    const response = await handleSystemBridgeMessage(message, { manager }, failingWith(locationNotFound));
+
+    expect(response).toEqual({
+      id: 'meta',
+      type: 'api:sessions/metadata:set',
+      success: false,
+      error: 'Location not found: /repo/wt-gone',
+      code: 'SESSION_DIRECTORY_MISSING',
+    });
+  });
+
+  test('leaves any other failed write uncoded', async () => {
+    const response = await handleSystemBridgeMessage(message, { manager }, failingWith(new Error('OpenCode is down')));
+
+    expect(response).toEqual({ id: 'meta', type: 'api:sessions/metadata:set', success: false, error: 'OpenCode is down' });
+  });
+});

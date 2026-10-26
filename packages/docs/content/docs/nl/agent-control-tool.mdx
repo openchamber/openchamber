@@ -1,0 +1,42 @@
+---
+title: Besturingstool voor agents
+description: Laat een agent OpenChamber-sessies, worktrees en geplande taken vanuit de chat beheren.
+---
+
+# Besturingstool voor agents
+
+Met de agenttool `openchamber` beheert u het werk in de app rechtstreeks vanuit de chat, en `openchamber_schedule` regelt geplande taken. Beide staan standaard aan wanneer OpenChamber een eigen lokale OpenCode-server draait; u hoeft niets te installeren of een shellopdracht uit te voeren.
+
+## Wat u kunt vragen
+
+Vraag het de agent in gewone taal. Bijvoorbeeld:
+
+- "Maak een nieuwe OpenChamber-sessie in dit project, gebruik het model `openai/gpt-5.6-sol` en stuur deze prompt: controleer de authenticatieflow."
+- "Maak voor deze taak een nieuwe OpenChamber-sessie in een aparte worktree en vraag haar tests toe te voegen voor de loginflow."
+- "Gebruik OpenChamber om mijn 10 meest recente sessies met hun huidige status te tonen."
+- "Maak een geplande OpenChamber-taak met de naam Werkdagreview die elke werkdag om 09:00 deze prompt stuurt: bekijk de wijzigingen sinds de vorige run."
+- "Voer de geplande OpenChamber-taak Werkdagreview nu uit."
+- "Bekijk de OpenChamber-sessie met de naam Authenticatiereview en toon het laatste antwoord van de assistent."
+
+De besturingstool toont projecten en modelvoorkeuren, doorzoekt de modelcatalogus, maakt sessies en volgt ze op, forkt een sessie en maakt geïsoleerde worktree-sessies. De planningstool maakt, wijzigt, start, pauzeert en verwijdert geplande taken. Sessies die zo starten verschijnen in OpenChamber zoals elke andere sessie, dus u kunt ze openen en het werk zelf voortzetten.
+
+## Houd rekening met
+
+- Prompts naar nieuwe sessies keren standaard meteen terug. Volg de sessie in OpenChamber of vraag de agent later te kijken.
+- Een aparte worktree wordt alleen gemaakt als u erom vraagt. Niet-gecommitte wijzigingen uit uw huidige worktree worden er niet naartoe gekopieerd.
+- Als de checkout bezet lijkt, bijvoorbeeld omdat een andere sessie op dezelfde branch werkt, kan de agent aanbieden zijn eigen sessie naar een nieuwe worktree te verplaatsen. Hij verplaatst haar pas na uw akkoord en neemt alleen de bestanden mee die hij zelf heeft gewijzigd.
+- De tools kunnen geen sessies of worktrees verwijderen, geen projectpaden registreren, geen willekeurige shellopdrachten uitvoeren en geen willekeurige URL's aanroepen.
+
+## De tools aan- of uitzetten
+
+Open **Instellingen → Algemeen → OpenChamber-tools** en wijzig **Besturingstool voor agents** of **Planningstool voor agents**; elk gaat apart aan en uit. Had u de besturingstool uitgezet voordat plannen een eigen tool werd, dan start de planningstool ook uit. De wijziging bereikt lopende sessies bij hun volgende beurt, zonder herstart. Zet uw eigen omgeving al `OPENCODE_CONFIG`, dan geldt de wijziging zodra de beheerde OpenCode-server herstart.
+
+De tools zijn niet beschikbaar wanneer OpenChamber via `OPENCODE_HOST` of skip-start met een externe OpenCode-server verbindt, en niet in de VS Code-extensie. Desktop- en webinstallaties die de beheerde OpenCode-server van OpenChamber gebruiken, ondersteunen ze automatisch.
+
+## Gerelateerd
+
+- [Geplande taken](/nl/scheduled-tasks/)
+- [Worktree-sessies](/nl/worktrees/)
+- [Sessiedoelen](/nl/session-goals/)
+- [Browserpaneel](/nl/desktop-browser/): de OpenChamber Web-tool, om een pagina te bekijken en te bedienen
+- [Projectnotities, taken en plannen](/nl/notes-todos-plans/): de projectkennistool, voor de notities, taken en plannen op het tabblad Context

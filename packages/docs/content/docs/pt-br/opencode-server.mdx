@@ -1,0 +1,97 @@
+---
+title: OpenCode Server
+description: Conecte o OpenChamber a um servidor OpenCode local ou remoto.
+---
+
+# OpenCode Server
+
+O OpenChamber roda sobre um servidor OpenCode. Por padrão, ele inicia um para você, então não precisa fazer nada. Você só precisa desta página se quiser apontar o OpenChamber para um servidor que já executa, ou gerenciar o que ele inicia.
+
+## Como o OpenChamber encontra um servidor
+
+Quando o OpenChamber inicia, ele procura por um servidor nesta ordem:
+
+1. reutilizar um servidor que ele já iniciou
+2. conectar a um servidor externo, se você indicou (veja abaixo)
+3. detectar automaticamente um servidor na porta padrão (`4096`)
+4. caso contrário, iniciar e gerenciar o seu próprio
+
+Se nada estiver configurado, o passo 4 acontece automaticamente e você já está pronto para usar.
+
+## Conectar a um servidor que você já executa
+
+Defina estas variáveis antes de iniciar o OpenChamber:
+
+```bash
+OPENCODE_HOST=http://localhost:4096 OPENCODE_SKIP_START=true openchamber
+```
+
+- `OPENCODE_HOST` — o endereço completo do seu servidor OpenCode, incluindo a porta (um valor como `http://localhost:4096`). Ele não deve ter um caminho no final.
+- `OPENCODE_SKIP_START=true` — diz ao OpenChamber para não iniciar o próprio servidor.
+
+Se você só precisa mudar a porta, defina `OPENCODE_PORT` em vez de `OPENCODE_HOST`.
+
+Se faltar a porta em `OPENCODE_HOST` ou se ele tiver um caminho, o OpenChamber o ignora e volta a iniciar o próprio servidor. Fique de olho nos logs de inicialização para um aviso `[config]` caso uma conexão esperada não aconteça.
+
+## Gerenciar o servidor pela CLI
+
+```bash
+openchamber status
+openchamber logs
+openchamber restart
+openchamber stop
+```
+
+`openchamber` sozinho inicia o servidor em segundo plano. Adicione `--foreground` para mantê-lo anexado ao seu terminal.
+
+## Iniciar o OpenChamber no login
+
+Use `startup enable` para instalar um serviço nativo do usuário. O OpenChamber usa `launchd` no macOS, `systemd --user` no Linux e Task Scheduler no Windows.
+
+```bash
+openchamber startup enable
+openchamber startup status
+openchamber startup disable
+```
+
+Para proteger a UI, defina a senha ao habilitar o serviço:
+
+```bash
+OPENCHAMBER_UI_PASSWORD='secret' openchamber startup enable
+```
+
+Para um servidor headless que inicia no login e é usado por apps desktop ou mobile, inclua `--api-only` e um host acessível:
+
+```bash
+openchamber startup enable --port 3000 --api-only --host 0.0.0.0 --ui-password secret
+```
+
+`startup enable` salva um snapshot do ambiente atual no serviço para que a inicialização se pareça mais com executar `openchamber` na mesma shell. Isso preserva tokens de provedores, `PATH`, configurações do agente SSH e outras variáveis CLI de auth/config. Use `--no-env-snapshot` se quiser um ambiente de serviço mínimo.
+
+O serviço de inicialização lembra `--port`, `--host`, `--ui-password` e `--api-only`. Reinícios pela CLI e reinícios durante atualização reutilizam essas configurações salvas.
+
+Para criar um link de conexão para outro app OpenChamber, use:
+
+```bash
+openchamber connect-url --port 3000 --server http://your-host:3000 --qr
+```
+
+Execute `openchamber connect-url --help` para ver todas as opções de link, incluindo `--name`, `--lan`, `--server`, `--api-only`, `--ui-password` e `--qr`.
+
+Você ainda pode gerenciar túneis de forma independente para esse serviço em execução:
+
+```bash
+openchamber tunnel start --port 3000
+openchamber tunnel stop --port 3000
+```
+
+Parar o túnel não reinicia o serviço nem o app.
+
+## "OpenCode is restarting"
+
+Enquanto o servidor está iniciando ou reiniciando, o OpenChamber mostra um estado "OpenCode is restarting" e pausa as requisições até ele estar pronto. Isso é normal logo após a inicialização ou um reinício. Se nunca sair desse estado, veja [Conexão com o OpenCode](/pt-br/troubleshooting/opencode-connection/).
+
+## Relacionado
+
+- [Provedores, Modelos e Agentes](/pt-br/providers/) — configure com o que o servidor conversa
+- [Conexão com o OpenCode](/pt-br/troubleshooting/opencode-connection/) — se ele não conectar

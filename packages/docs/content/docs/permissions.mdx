@@ -1,0 +1,57 @@
+---
+title: Permissions & Safety Net
+description: Choose how much the agent may do without asking, per session.
+---
+
+# Permissions & Safety Net
+
+Every action the agent takes (running a command, editing a file, calling an MCP tool, fetching a page) goes through the agent's permission rules first. OpenChamber's permission modes decide what happens when a rule says "ask".
+
+## Allow, ask and deny
+
+Permission rules live in OpenCode. Each rule gives an action one of three effects:
+
+- **allow:** the agent goes ahead
+- **deny:** the action is blocked
+- **ask:** the agent stops and waits for an answer
+
+Out of the box most actions are allowed. OpenCode asks only before the agent touches folders outside the project or reads `.env` files. Add your own rules to ask before, say, any shell command. See [Permissions in the OpenCode docs](https://opencode.ai/v2/docs/permissions/) for the rule format, and **Settings → Agents** to see an agent's permissions in OpenChamber.
+
+Permission modes only change who answers the "ask". They never unblock a "deny", and "allow" never asks in the first place.
+
+## The three modes
+
+| Mode | Who answers "ask" |
+| --- | --- |
+| **Ask every time** | You. Every request waits for your answer. |
+| **Safety net** | Jev lets routine actions through and keeps risky ones for you. |
+| **Accept everything** | OpenChamber, always yes. Every request is allowed right away, no checks. |
+
+**Accept everything** needs nothing extra: it simply treats every "ask" as allowed. Use it when you trust the task and don't want interruptions.
+
+## Switch modes
+
+- **For one session:** press the shield button in the composer. Each press moves to the next mode.
+- **For new sessions:** pick the default in **Settings → Sessions → Permissions**. Existing sessions keep their mode.
+
+Subagents follow the session that started them.
+
+## The safety net
+
+In this mode OpenChamber asks [Jev](/classification-providers/) about each request: is this routine, or should you decide? Reading, building, running tests, editing project files and ordinary commits go through. Rewriting git history, deleting data, changing the system, deploying, posting somewhere or sending files outside wait for you, and so does anything unclear.
+
+A held request shows the usual permission card with one extra line, **The safety net held this action for you to decide**, and what kind of action it is. If Jev can't answer within four seconds, the action waits for you too. The safety net never allows something because the check failed.
+
+The safety net needs a [classification provider](/classification-providers/). Without one it's skipped by the shield button and disabled in Settings.
+
+## Keeps working while you're away
+
+The mode lives in the OpenChamber server, so it keeps answering requests after you close the tab or lock your phone, and it survives restarts.
+
+> VS Code has no safety net. The extension offers ask every time and accept everything, and answers requests only while an OpenChamber panel is open.
+
+## Related
+
+- [Permissions in the OpenCode docs](https://opencode.ai/v2/docs/permissions/): write your own allow, ask and deny rules
+- [Classification Providers (Jev)](/classification-providers/): set up the model behind the safety net
+- [Notifications](/notifications/): hear about a request waiting for you

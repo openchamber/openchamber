@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "setupWorktree": [
+    "bun install"
+  ],
+  "projectActions": [
+    {
+      "id": "5525a5ee-9c03-44d1-a401-1e4b9397765c",
+      "name": "DevHMR",
+      "command": "bun run dev:web:hmr",
+      "icon": "rocket"
+    },
+    {
+      "id": "acd3f2c9-eae2-4956-88e3-80633a9e38df",
+      "name": "Mobile",
+      "command": "bun run mobile:sim:dev",
+      "icon": "stack",
+      "autoOpenUrl": true,
+      "openUrl": "http://127.0.0.1:3100"
+    },
+    {
+      "id": "oc-deploy-testing",
+      "name": "Deploy testing",
+      "command": "bun run oc-dev build-deploy-web --deployment-mode testing",
+      "icon": "server"
+    },
+    {
+      "id": "oc-ios-device-debug",
+      "name": "iOS device debug",
+      "command": "bun run oc-dev mobile-tools --mobile-task ios-device-sync-debug",
+      "icon": "bug",
+      "platforms": [
+        "macos"
+      ]
+    },
+    {
+      "id": "oc-android-run",
+      "name": "Android run APK",
+      "command": "bun run oc-dev mobile-tools --mobile-task android-run",
+      "icon": "play"
+    },
+    {
+      "id": "oc-vscode-install",
+      "name": "Install VS Code ext",
+      "command": "bun run oc-dev install-vscode-extension-local --vsix-cleanup keep",
+      "icon": "code"
+    }
+  ],
+  "plansDir": ".opencode/plans"
+}

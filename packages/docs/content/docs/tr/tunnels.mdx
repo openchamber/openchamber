@@ -1,0 +1,138 @@
+---
+title: Tüneller
+description: Uzak ve mobil erişim için OpenChamber'ı güvenli biçimde açığa çıkarın.
+---
+
+# Tüneller
+
+Bir tünel, OpenChamber'ınıza giden bir bağlantıdır. Böylece başka bir ağdaki normal bir tarayıcıdan ya da Tailscale Serve ile tailnet'inizdeki herhangi bir cihazdan erişebilirsiniz. Çalışan bir örnek için bir tane oluşturmak üzere `openchamber tunnel` kullanın.
+
+> **Kendi cihazlarınızı** bağlamak, yani mobil uygulama ya da başka bir masaüstü, genelde tünel gerektirmez. Bunun yerine [eşleştirin](/connect-devices/) ve ev dışı erişimi sıfır kurulumla uçtan uca şifreli [Private Relay](/private-relay/) üzerinden bırakın.
+
+## Ön koşullar
+
+OpenChamber, tünel sağlayıcısının CLI'sını sizin makinenizde başlatır. Önce kullanmak istediğiniz sağlayıcıyı kurun:
+
+```bash
+brew install cloudflared
+brew install ngrok
+```
+
+Tailscale için [Tailscale uygulamasını](https://tailscale.com/download) kurun ve oturum açın. Mac'te uygulama yeterlidir: OpenChamber komut satırı aracını uygulamanın içinde bulur.
+
+Cloudflare quick tüneller `cloudflared` ile çalışabilir. Ngrok için bir ngrok hesabı ve ngrok panelinden alınmış bir authtoken gerekir:
+
+```bash
+ngrok config add-authtoken <your-ngrok-token>
+```
+
+## Hızlı başlangıç
+
+1. OpenChamber'ı başlatın:
+
+```bash
+openchamber
+```
+
+Bu adımı atlarsanız `openchamber tunnel start` bir CLI sunucusunu otomatik başlatabilir. Otomatik başlatırken `--port`, `--host`, `--lan`, `--ui-password` ve `--api-only` gibi sunucu seçeneklerini verebilirsiniz.
+
+2. Cloudflare tüneli başlatın:
+
+```bash
+openchamber tunnel start --provider cloudflare --mode quick
+```
+
+Ya da bir Ngrok tüneli başlatın:
+
+```bash
+openchamber tunnel start --provider ngrok --mode quick
+```
+
+Ya da Tailscale Serve ile tailnet'inizdeki cihazlarla paylaşın:
+
+```bash
+openchamber tunnel start --provider tailscale --mode serve
+```
+
+3. Durumu kontrol edin:
+
+```bash
+openchamber tunnel status
+```
+
+Tünel ayaktayken `status` bir genel URL gösterir. Onu açın ya da QR kodunu tarayın, OpenChamber'a her yerden ulaşın.
+
+Varsayılan olarak OpenChamber, etkileşimli TTY oturumlarında bir QR kodu basar. QR çıktısını zorlamak için `--qr`, kapatmak için `--no-qr` kullanın.
+
+## Sağlayıcılar
+
+- `cloudflare`: quick, managed remote ve managed local modları
+- `ngrok`: quick modu
+- `tailscale`: yalnızca tailnet'inizdeki cihazlardan açılabilen serve modu ve tüm internetten açılabilen funnel modu
+
+## Tailscale
+
+İki mod da makinenizin `https://laptop.example.ts.net` gibi tailnet adresini kullanır. Portu `--https-port` ile seçin: 443 (varsayılan), 8443 veya 10000. Tailscale 443'te zaten başka bir şey paylaşıyorsa değiştirin.
+
+İlk seferde Tailscale, tailnet'iniz için HTTPS'i (Serve için) veya Funnel'ı açmanızı ister. OpenChamber durur ve Tailscale'in bağlantısını gösterir: açın, onaylayın ve tüneli yeniden başlatın. Linux'ta portları yalnızca root veya Tailscale operatörü paylaşabilir; kendinizi bir kez `sudo tailscale set --operator=$USER` ile operatör yapın.
+
+Tüneli durdurmak OpenChamber'ın Tailscale üzerinden paylaştığını kaldırır, Tailscale ayarlarınızın geri kalanına dokunmaz.
+
+## Managed modlar
+
+### Managed remote
+
+Cloudflare tarafından yönetilen token + hostname kullanın:
+
+```bash
+openchamber tunnel start --provider cloudflare --mode managed-remote --token-file ~/.secrets/cf-token --hostname app.example.com
+```
+
+### Managed local
+
+Yerel bir `cloudflared` yapılandırması kullanın:
+
+```bash
+openchamber tunnel start --provider cloudflare --mode managed-local --config ~/.cloudflared/config.yml
+```
+
+## Profiller (managed-remote)
+
+Yeniden kullanılabilir bir profil kaydedin:
+
+```bash
+openchamber tunnel profile add --provider cloudflare --mode managed-remote --name prod-main --hostname app.example.com --token-file ~/.secrets/cf-token
+```
+
+Kaydedilmiş profili kullanarak başlatın:
+
+```bash
+openchamber tunnel start --profile prod-main
+```
+
+## Faydalı komutlar
+
+```bash
+openchamber tunnel providers
+openchamber tunnel ready --provider cloudflare
+openchamber tunnel ready --provider ngrok
+openchamber tunnel doctor --provider cloudflare
+openchamber tunnel doctor --provider ngrok
+openchamber tunnel doctor --provider tailscale
+openchamber tunnel stop --port 3000
+```
+
+## Davranış notları
+
+- OpenChamber örneği başına bir aktif tünel, yani port
+- Aynı örnekte yeni bir mod ya da sağlayıcı başlatmak önceki tüneli değiştirir
+- Yeni bir bağlantı bağlantısı oluşturmak, kullanılmamış önceki bağlantıyı iptal eder
+- Tünel otomatik başlatma, `--ui-password` ve `--api-only` gibi sunucu bayraklarını yeniden başlatma/güncelleme akışlarında kullanılan örnek ayarlarında korur
+
+## İlgili
+
+- [Cihaz bağlama](/connect-devices/) — kendi cihazlarınızı genel URL olmadan eşleştirin
+- [Güvenlik](/security/) — açığa çıkarmadan önce arayüzü koruyun
+- [Desktop Tunnels](/desktop-tunnels/) — CLI başlatmadan masaüstü uygulaması tünel kurulumu
+- [PWA & Mobile](/mobile/) — telefonunuzdan OpenChamber'a ulaşın
+- [Sorun giderme](/troubleshooting/) — tünel bağlantısı çalışmıyorsa

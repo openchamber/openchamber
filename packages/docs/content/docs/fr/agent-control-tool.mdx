@@ -1,0 +1,42 @@
+---
+title: Outil de contrôle pour les agents
+description: Permettez à un agent de gérer les sessions, worktrees et tâches planifiées d’OpenChamber depuis le chat.
+---
+
+# Outil de contrôle pour les agents
+
+L’outil d’agent `openchamber` gère le travail dans l’app directement depuis le chat, et `openchamber_schedule` s’occupe des tâches planifiées. Les deux sont activés par défaut quand OpenChamber exécute son propre serveur OpenCode local ; rien à installer, aucune commande shell à lancer.
+
+## Ce que vous pouvez demander
+
+Parlez à l’agent en langage naturel. Par exemple :
+
+- « Crée une nouvelle session OpenChamber dans ce projet, utilise le modèle `openai/gpt-5.6-sol` et envoie-lui ce prompt : revois le flux d’authentification. »
+- « Crée une nouvelle session OpenChamber pour cette tâche dans un worktree séparé et demande-lui d’ajouter des tests pour le flux de connexion. »
+- « Utilise OpenChamber pour lister mes 10 sessions les plus récentes avec leur état actuel. »
+- « Crée une tâche planifiée OpenChamber nommée Revue de semaine qui envoie ce prompt à 09:00 chaque jour ouvré : revois les changements depuis la dernière exécution. »
+- « Lance maintenant la tâche planifiée OpenChamber nommée Revue de semaine. »
+- « Vérifie la session OpenChamber nommée Revue d’authentification et montre-moi la dernière réponse de l’assistant. »
+
+L’outil de contrôle liste les projets et les préférences de modèles, cherche dans le catalogue de modèles, crée des sessions et les suit, forke une session et crée des sessions isolées dans des worktrees. L’outil de planification crée, modifie, lance, met en pause et supprime des tâches planifiées. Les sessions lancées ainsi apparaissent dans OpenChamber comme les autres : vous pouvez les ouvrir et poursuivre le travail vous-même.
+
+## À garder en tête
+
+- Par défaut, les prompts envoyés à de nouvelles sessions reviennent tout de suite. Suivez la session dans OpenChamber ou demandez à l’agent de la vérifier plus tard.
+- Un worktree séparé n’est créé que si vous le demandez. Les changements non commités de votre worktree actuel n’y sont pas copiés.
+- Quand le checkout semble occupé, par exemple parce qu’une autre session travaille sur la même branche, l’agent peut proposer de déplacer sa propre session dans un nouveau worktree. Il la déplace une fois que vous êtes d’accord et n’emporte que les fichiers qu’il a modifiés.
+- Les outils ne peuvent pas supprimer de sessions ni de worktrees, enregistrer des chemins de projet, lancer des commandes shell arbitraires ni appeler des URL arbitraires.
+
+## Activer ou désactiver les outils
+
+Ouvrez **Paramètres → Général → Outils OpenChamber** et changez **Outil de contrôle pour les agents** ou **Outil de planification pour les agents** ; chacun s’active séparément. Si vous aviez désactivé l’outil de contrôle avant que la planification devienne un outil à part, l’outil de planification démarre lui aussi désactivé. Le changement atteint les sessions en cours à leur prochain tour, sans redémarrage. Si votre propre environnement définit déjà `OPENCODE_CONFIG`, il s’applique au redémarrage du serveur OpenCode géré.
+
+Les outils ne sont pas disponibles quand OpenChamber se connecte à un serveur OpenCode externe via `OPENCODE_HOST` ou skip-start, ni dans l’extension VS Code. Les installations desktop et web qui utilisent le serveur OpenCode géré par OpenChamber les prennent en charge automatiquement.
+
+## Voir aussi
+
+- [Tâches planifiées](/fr/scheduled-tasks/)
+- [Sessions worktree](/fr/worktrees/)
+- [Objectifs de session](/fr/session-goals/)
+- [Panneau navigateur](/fr/desktop-browser/) : l’outil OpenChamber Web, pour regarder et piloter une page
+- [Notes, todos et plans de projet](/fr/notes-todos-plans/) : l’outil de connaissances du projet, pour les notes, todos et plans de l’onglet Contexte

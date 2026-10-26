@@ -1,0 +1,525 @@
+<!doctype html>
+<html lang="en" class="h-full">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content" />
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/png" href="/favicon-32.png" sizes="32x32" />
+    <link rel="icon" type="image/png" href="/favicon-16.png" sizes="16x16" />
+    <link rel="mask-icon" href="/favicon.svg" color="#edb449" />
+
+    <!-- Apple touch icon - PNG format required for iOS PWA support -->
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon-180x180.png" />
+    <link rel="apple-touch-icon" sizes="167x167" href="/apple-touch-icon-167x167.png" />
+    <link rel="apple-touch-icon" sizes="152x152" href="/apple-touch-icon-152x152.png" />
+
+    <!-- Web app manifest (endpoint-first with data URL fallback) -->
+    <script>
+      const baseUrl = location.origin;
+      const defaultAppName = 'OpenChamber';
+      const defaultShortName = 'OpenChamber';
+      const pwaNameStorageKey = 'openchamber.pwaName';
+      const pwaOrientationStorageKey = 'openchamber.pwaOrientation';
+      const mobileKeyboardModeStorageKey = 'openchamber.mobileKeyboardMode';
+      const pwaRecentSessionsStorageKey = 'openchamber.pwaRecentSessions';
+      const viewportBaseContent = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover';
+
+      const normalizePwaName = (value, fallback) => {
+        if (typeof value !== 'string') {
+          return fallback;
+        }
+        const normalized = value.trim().replace(/\s+/g, ' ');
+        if (!normalized) {
+          return fallback;
+        }
+        return normalized.slice(0, 64);
+      };
+
+      const truncate = (value, maxLength) => {
+        if (typeof value !== 'string') {
+          return '';
+        }
+        return value.length > maxLength ? value.slice(0, maxLength) : value;
+      };
+
+      const normalizePwaOrientation = (value, fallback = 'system') => {
+        if (value === 'portrait' || value === 'landscape' || value === 'system') {
+          return value;
+        }
+        return fallback;
+      };
+
+      const normalizeMobileKeyboardMode = (value, fallback = 'resize-content') => {
+        if (value === 'native' || value === 'resize-content') {
+          return value;
+        }
+        return fallback;
+      };
+
+      const getViewportContentForMobileKeyboardMode = (value) => {
+        const mode = normalizeMobileKeyboardMode(value, 'resize-content');
+        return mode === 'resize-content'
+          ? `${viewportBaseContent}, interactive-widget=resizes-content`
+          : viewportBaseContent;
+      };
+
+      const applyStoredMobileKeyboardMode = () => {
+        let mode = 'resize-content';
+        try {
+          mode = normalizeMobileKeyboardMode(localStorage.getItem(mobileKeyboardModeStorageKey), 'resize-content');
+          if (mode === 'resize-content') {
+            localStorage.removeItem(mobileKeyboardModeStorageKey);
+          }
+        } catch {
+          mode = 'resize-content';
+        }
+
+        document.documentElement.setAttribute('data-oc-mobile-keyboard-mode', mode);
+        const viewportMeta = document.querySelector('meta[name="viewport"]');
+        if (viewportMeta) {
+          viewportMeta.setAttribute('content', getViewportContentForMobileKeyboardMode(mode));
+        }
+      };
+
+      applyStoredMobileKeyboardMode();
+
+      const getStoredInstallName = () => {
+        try {
+          const storedName = localStorage.getItem(pwaNameStorageKey);
+          return normalizePwaName(storedName, defaultAppName);
+        } catch {
+          return defaultAppName;
+        }
+      };
+
+      const setStoredInstallName = (value) => {
+        const normalizedName = normalizePwaName(value, '');
+        try {
+          if (normalizedName) {
+            localStorage.setItem(pwaNameStorageKey, normalizedName);
+          } else {
+            localStorage.removeItem(pwaNameStorageKey);
+          }
+        } catch {
+          return defaultAppName;
+        }
+        return normalizedName || defaultAppName;
+      };
+
+      const getStoredOrientation = () => {
+        try {
+          const storedOrientation = localStorage.getItem(pwaOrientationStorageKey);
+          return normalizePwaOrientation(storedOrientation, 'system');
+        } catch {
+          return 'system';
+        }
+      };
+
+      const setStoredOrientation = (value) => {
+        const normalizedOrientation = normalizePwaOrientation(value, 'system');
+        try {
+          localStorage.setItem(pwaOrientationStorageKey, normalizedOrientation);
+        } catch {
+          return 'system';
+        }
+        return normalizedOrientation;
+      };
+
+      const getQueryInstallNameOverride = () => {
+        try {
+          const params = new URLSearchParams(location.search);
+          const queryName = params.get('pwa_name') ?? params.get('app_name') ?? params.get('appName');
+          if (queryName === null) {
+            return null;
+          }
+
+          const normalizedQueryName = normalizePwaName(queryName, '');
+          if (normalizedQueryName) {
+            localStorage.setItem(pwaNameStorageKey, normalizedQueryName);
+            return normalizedQueryName;
+          }
+
+          localStorage.removeItem(pwaNameStorageKey);
+          return defaultAppName;
+        } catch {
+          return null;
+        }
+      };
+
+      const parseRecentSessionShortcuts = () => {
+        try {
+          const raw = localStorage.getItem(pwaRecentSessionsStorageKey);
+          if (!raw) {
+            return [];
+          }
+
+          const parsed = JSON.parse(raw);
+          if (!Array.isArray(parsed)) {
+            return [];
+          }
+
+          const seen = new Set();
+          const recentSessions = [];
+
+          for (const item of parsed) {
+            if (!item || typeof item !== 'object') {
+              continue;
+            }
+
+            const sessionId = typeof item.sessionId === 'string' ? item.sessionId.trim().slice(0, 160) : '';
+            if (!sessionId || seen.has(sessionId)) {
+              continue;
+            }
+
+            const fallbackTitle = `Session ${recentSessions.length + 1}`;
+            const title = truncate(normalizePwaName(item.title, fallbackTitle), 48);
+
+            seen.add(sessionId);
+            recentSessions.push({ sessionId, title });
+
+            if (recentSessions.length >= 3) {
+              break;
+            }
+          }
+
+          return recentSessions;
+        } catch {
+          return [];
+        }
+      };
+
+      const buildShortcuts = (recentSessions) => {
+        const shortcuts = [
+          {
+            name: 'Appearance Settings',
+            short_name: 'Settings',
+            description: 'Open appearance settings',
+            url: `${baseUrl}/?settings=appearance`,
+            icons: [{ src: `${baseUrl}/pwa-192.png`, sizes: '192x192', type: 'image/png' }],
+          },
+        ];
+
+        for (const session of recentSessions) {
+          const sessionTitle = truncate(session.title, 32);
+          shortcuts.push({
+            name: sessionTitle,
+            short_name: sessionTitle,
+            description: 'Open recent session',
+            url: `${baseUrl}/?session=${encodeURIComponent(session.sessionId)}`,
+            icons: [{ src: `${baseUrl}/pwa-192.png`, sizes: '192x192', type: 'image/png' }],
+          });
+        }
+
+        return shortcuts;
+      };
+
+      const buildManifest = (appName, recentSessions, orientationPreference) => {
+        const shortName = appName === defaultAppName ? defaultShortName : truncate(appName, 30);
+        const manifestOrientation = orientationPreference === 'portrait'
+          ? 'portrait-primary'
+          : orientationPreference === 'landscape'
+            ? 'landscape-primary'
+            : null;
+        return {
+          name: appName,
+          short_name: shortName,
+          description: 'Web interface companion for OpenCode AI coding agent',
+          id: `${baseUrl}/`,
+          start_url: `${baseUrl}/`,
+          scope: `${baseUrl}/`,
+          display: 'standalone',
+          display_override: ['window-controls-overlay'],
+          ...(manifestOrientation ? { orientation: manifestOrientation } : {}),
+          background_color: '#151313',
+          theme_color: '#edb449',
+          icons: [
+            { src: `${baseUrl}/pwa-192.png`, sizes: '192x192', type: 'image/png', purpose: 'any' },
+            { src: `${baseUrl}/pwa-512.png`, sizes: '512x512', type: 'image/png', purpose: 'any' },
+            { src: `${baseUrl}/pwa-maskable-192.png`, sizes: '192x192', type: 'image/png', purpose: 'any maskable' },
+            { src: `${baseUrl}/pwa-maskable-512.png`, sizes: '512x512', type: 'image/png', purpose: 'any maskable' },
+            { src: `${baseUrl}/apple-touch-icon-180x180.png`, sizes: '180x180', type: 'image/png', purpose: 'any' },
+            { src: `${baseUrl}/apple-touch-icon-152x152.png`, sizes: '152x152', type: 'image/png', purpose: 'any' },
+            { src: `${baseUrl}/favicon-32.png`, sizes: '32x32', type: 'image/png' },
+            { src: `${baseUrl}/favicon-16.png`, sizes: '16x16', type: 'image/png' },
+          ],
+          shortcuts: buildShortcuts(recentSessions),
+          categories: ['developer', 'tools', 'productivity'],
+          lang: 'en',
+        };
+      };
+
+      const buildManifestEndpointUrl = (installNameOverride = null, orientationOverride = null) => {
+        const params = new URLSearchParams();
+        if (typeof installNameOverride === 'string') {
+          params.set('appName', installNameOverride);
+        }
+        if (typeof orientationOverride === 'string') {
+          params.set('orientation', normalizePwaOrientation(orientationOverride, 'system'));
+        }
+        const search = params.toString();
+        return `${baseUrl}/manifest.webmanifest${search ? `?${search}` : ''}`;
+      };
+
+      const manifestLink = document.createElement('link');
+      manifestLink.rel = 'manifest';
+      // Required so the browser sends auth cookies when fetching the manifest,
+      // enabling PWA installation behind authentication proxies (e.g. Cloudflare Access).
+      manifestLink.crossOrigin = 'use-credentials';
+      document.head.appendChild(manifestLink);
+
+      let activeManifestBlobUrl = null;
+      let manifestRequestVersion = 0;
+
+      const setManifestFromBlob = (manifest) => {
+        if (activeManifestBlobUrl) {
+          URL.revokeObjectURL(activeManifestBlobUrl);
+        }
+
+        const manifestBlob = new Blob([JSON.stringify(manifest)], { type: 'application/manifest+json' });
+        activeManifestBlobUrl = URL.createObjectURL(manifestBlob);
+        manifestLink.href = activeManifestBlobUrl;
+      };
+
+      const setManifestFromEndpoint = (manifestUrl) => {
+        if (activeManifestBlobUrl) {
+          URL.revokeObjectURL(activeManifestBlobUrl);
+          activeManifestBlobUrl = null;
+        }
+        manifestLink.href = manifestUrl;
+      };
+
+      const canUseManifestEndpoint = async (manifestUrl, requestVersion) => {
+        if (typeof fetch !== 'function') {
+          return false;
+        }
+
+        const controller = typeof AbortController === 'function' ? new AbortController() : null;
+        const timeoutId = setTimeout(() => {
+          controller?.abort();
+        }, 1500);
+
+        try {
+          const response = await fetch(manifestUrl, {
+            credentials: 'include',
+            cache: 'no-store',
+            headers: {
+              Accept: 'application/manifest+json, application/json;q=0.9, */*;q=0.1',
+            },
+            ...(controller ? { signal: controller.signal } : {}),
+          });
+
+          if (requestVersion !== manifestRequestVersion || !response.ok) {
+            return false;
+          }
+
+          const contentType = response.headers.get('content-type') || '';
+          return /manifest|json/i.test(contentType);
+        } catch {
+          return false;
+        } finally {
+          clearTimeout(timeoutId);
+        }
+      };
+
+      const updateManifest = async (installNameOverride = null, orientationOverride = null) => {
+        const resolvedFallbackName = typeof installNameOverride === 'string' ? installNameOverride : getStoredInstallName();
+        const resolvedOrientation = typeof orientationOverride === 'string'
+          ? normalizePwaOrientation(orientationOverride, 'system')
+          : getStoredOrientation();
+        const recentSessions = parseRecentSessionShortcuts();
+        const manifest = buildManifest(resolvedFallbackName, recentSessions, resolvedOrientation);
+        const manifestUrl = buildManifestEndpointUrl(installNameOverride, resolvedOrientation);
+        const requestVersion = ++manifestRequestVersion;
+
+        const useEndpoint = await canUseManifestEndpoint(manifestUrl, requestVersion);
+        if (requestVersion !== manifestRequestVersion) {
+          return;
+        }
+
+        if (useEndpoint) {
+          setManifestFromEndpoint(manifestUrl);
+          return;
+        }
+
+        setManifestFromBlob(manifest);
+      };
+
+      const refreshManifestFromStorage = () => {
+        void updateManifest();
+      };
+
+      const initialInstallNameOverride = getQueryInstallNameOverride();
+      void updateManifest(initialInstallNameOverride);
+
+      window.__OPENCHAMBER_GET_PWA_INSTALL_NAME__ = () => getStoredInstallName();
+      window.__OPENCHAMBER_SET_PWA_INSTALL_NAME__ = (value) => {
+        const resolvedName = setStoredInstallName(value);
+        void updateManifest(resolvedName);
+        return resolvedName;
+      };
+      window.__OPENCHAMBER_SET_PWA_ORIENTATION__ = (value) => {
+        const resolvedOrientation = setStoredOrientation(value);
+        void updateManifest(null, resolvedOrientation);
+        return resolvedOrientation;
+      };
+      window.__OPENCHAMBER_UPDATE_PWA_MANIFEST__ = () => {
+        refreshManifestFromStorage();
+      };
+    </script>
+
+    <script>
+      // Blocking script to detect and apply theme before first paint
+      (function() {
+        try {
+          var themeMode = localStorage.getItem('themeMode');
+          var variant = localStorage.getItem('selectedThemeVariant');
+          var useSystem = localStorage.getItem('useSystemTheme');
+          var isDark;
+
+          // Check themeMode first (new storage key)
+          if (themeMode === 'dark') {
+            isDark = true;
+          } else if (themeMode === 'light') {
+            isDark = false;
+          } else if (themeMode === 'system' || useSystem === null || useSystem === 'true') {
+            // System preference
+            isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+          } else if (variant === 'light' || variant === 'dark') {
+            // Legacy storage key fallback
+            isDark = variant === 'dark';
+          } else {
+            // Default to system
+            isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+          }
+
+          // Apply theme class and data attribute
+          document.documentElement.classList.add(isDark ? 'dark' : 'light');
+          document.documentElement.setAttribute('data-splash-variant', isDark ? 'dark' : 'light');
+          document.documentElement.style.setProperty('color-scheme', isDark ? 'dark' : 'light');
+
+          // Splash colors persisted by the app theme system
+          var splashBgLight = localStorage.getItem('splashBgLight');
+          var splashFgLight = localStorage.getItem('splashFgLight');
+          var splashBgDark = localStorage.getItem('splashBgDark');
+          var splashFgDark = localStorage.getItem('splashFgDark');
+
+          if (splashBgLight) document.documentElement.style.setProperty('--splash-background-light', splashBgLight);
+          if (splashFgLight) document.documentElement.style.setProperty('--splash-stroke-light', splashFgLight);
+          if (splashBgDark) document.documentElement.style.setProperty('--splash-background-dark', splashBgDark);
+          if (splashFgDark) document.documentElement.style.setProperty('--splash-stroke-dark', splashFgDark);
+        } catch (error) {
+          console.warn('Failed to apply theme:', error);
+        }
+      })();
+    </script>
+
+    <!-- Theme color - Safari iOS 26+ prioritizes CSS background-color over this, but keep as fallback -->
+    <meta name="theme-color" content="#151313" />
+    <meta name="theme-color" content="#151313" media="(prefers-color-scheme: dark)" />
+
+    <!-- iOS Safari PWA styling -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="OpenChamber" />
+
+    <title>OpenChamber - AI Coding Assistant</title>
+    <meta name="description" content="Web interface companion for OpenCode AI coding agent" />
+    <meta name="application-name" content="OpenChamber" />
+    <meta name="apple-mobile-web-app-title" content="OpenChamber" />
+
+    <!-- Inline CSS for the loading screen (before Tailwind loads). Terminal
+         prompt symbols come from the bundled Symbols Nerd Font (lib/ghostty),
+         never from a CDN. -->
+    <style>
+      :root {
+        --splash-background-dark: #151313;
+        --splash-stroke-dark: #CECDC3;
+        --splash-background-light: #FFFCF0;
+        --splash-stroke-light: #100F0F;
+
+        --splash-background: var(--splash-background-dark);
+        --splash-stroke: var(--splash-stroke-dark);
+      }
+
+      /* The logo is drawn in --splash-stroke, like the desktop splash in
+         packages/electron/early-startup.mjs: the desktop shell shows that
+         document first and this one replaces it on navigation, so any
+         difference reads as the logo changing. */
+      html[data-splash-variant='light'] {
+        --splash-background: var(--splash-background-light);
+        --splash-stroke: var(--splash-stroke-light);
+      }
+
+      html[data-splash-variant='dark'] {
+        --splash-background: var(--splash-background-dark);
+        --splash-stroke: var(--splash-stroke-dark);
+      }
+
+      #initial-loading {
+        background-color: var(--splash-background);
+        color: var(--splash-stroke);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 100vh;
+        font-family: system-ui, -apple-system, sans-serif;
+        transition: opacity 0.3s ease-out;
+        position: absolute;
+        width: 100%;
+        z-index: 9999;
+      }
+      #initial-loading.fade-out {
+        opacity: 0;
+        pointer-events: none;
+      }
+    </style>
+  </head>
+  <body class="h-full bg-background text-foreground">
+    <div id="root" class="h-full">
+      <!-- Loading fallback while React initializes -->
+      <div id="initial-loading">
+        <div style="display: flex; align-items: center; justify-content: center;">
+          <svg width="120" height="120" viewBox="-50 -50 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="OpenChamber loading icon">
+            <!-- brand:flat-logo:start --><defs><linearGradient id="oc-logo-l" gradientUnits="userSpaceOnUse" x1="-42" y1="-20" x2="-2" y2="12"><stop offset="0" stop-color="currentColor" stop-opacity="0.025"/><stop offset="0.72" stop-color="currentColor" stop-opacity="0.143"/><stop offset="1" stop-color="currentColor" stop-opacity="0.198"/></linearGradient><linearGradient id="oc-logo-r" gradientUnits="userSpaceOnUse" x1="40" y1="3" x2="3" y2="-16"><stop offset="0" stop-color="currentColor" stop-opacity="0.071"/><stop offset="0.68" stop-color="currentColor" stop-opacity="0.174"/><stop offset="1" stop-color="currentColor" stop-opacity="0.223"/></linearGradient></defs><path d="M-41.568 -24 L-41.568 24 L0 0 Z" fill="url(#oc-logo-l)"/><path d="M41.568 -24 L0 0 L41.568 24 Z" fill="url(#oc-logo-r)"/><path d="M0 -48 L41.568 -24 L0 0 L-41.568 -24 Z" fill="currentColor" fill-opacity="0.08"/><path data-tier="0" data-rest="0.12" data-lit="0.55" d="M0 -43.2 L33.254 -24 L0 -4.8 L-33.254 -24 Z" fill="currentColor" fill-opacity="0.22"/><path data-tier="1" data-rest="0.15" data-lit="0.48" d="M0 -37.92 L24.109 -24 L0 -10.08 L-24.109 -24 Z" fill="currentColor" fill-opacity="0.27"/><path data-tier="2" data-rest="0.38" data-lit="0.85" d="M0 -32.64 L14.964 -24 L0 -15.36 L-14.964 -24 Z" fill="currentColor" fill-opacity="0.85"/><g fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"><path d="M0 -48 L-41.568 -24 L0 0 L41.568 -24 Z"/><path d="M-41.568 -24 L-41.568 24 L0 48 L41.568 24 L41.568 -24"/><path d="M0 0 L0 48"/></g><!-- brand:flat-logo:end -->
+          </svg>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      // Fallback: hide loading screen after 10 seconds if React fails to load.
+      // Desktop shells manage their own splash via the injected boot outcome;
+      // do not force-remove for desktop windows. Electron's preload sets
+      // __OPENCHAMBER_ELECTRON__ before any page script; a packaged launch can
+      // hold the parser on /__runtime-config.js longer than 10s while the
+      // local server starts, and removing the splash then leaves a blank window.
+      setTimeout(function() {
+        if (window.__OPENCHAMBER_ELECTRON__) {
+          return;
+        }
+        if (typeof window.__OPENCHAMBER_LOCAL_ORIGIN__ === 'string' && window.__OPENCHAMBER_LOCAL_ORIGIN__.length > 0) {
+          return;
+        }
+        var loading = document.getElementById('initial-loading');
+        if (loading) {
+          console.warn('Loading screen timeout - forcing hide after 10s');
+          loading.classList.add('fade-out');
+          setTimeout(function() {
+            loading.remove();
+          }, 300);
+        }
+      }, 10000);
+    </script>
+
+    <!-- Polyfill for process before loading React -->
+    <script>
+      if (typeof process === 'undefined') {
+        window.process = { env: {} };
+      }
+    </script>
+
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

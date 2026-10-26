@@ -1,0 +1,89 @@
+---
+title: Magic Prompts
+description: Personaliza los prompts integrados detrás de los flujos automatizados de OpenChamber.
+---
+
+# Magic Prompts
+
+OpenChamber usa prompts integrados en segundo plano cada vez que hace algo automáticamente: escribir un mensaje de commit, redactar un PR, revisar una issue, resolver un conflicto, resumir una sesión. Magic Prompts es donde lees y reescribes esos prompts. Ábrelo en **Settings → Magic Prompts**.
+
+No necesitas esta página para el uso normal. Recurre a ella cuando quieras que un flujo se comporte de otra manera; por ejemplo, mensajes de commit con un estilo particular.
+
+## Edita un prompt
+
+1. Abre **Settings → Magic Prompts**.
+2. Elige un prompt de los grupos en la barra lateral: Git, Planning y Session.
+3. Edita el texto y guarda.
+
+Algunos prompts tienen una parte visible (el mensaje que verías) y una parte de instrucciones (guía oculta para el agente). Los prompts pueden incluir `{{placeholders}}` que OpenChamber rellena, como el diff o el título de la issue; mantenlos en su sitio.
+
+## Restablecer
+
+¿Cambiaste de opinión? Cada prompt tiene **reset to default**, y hay un **reset all** si quieres empezar de cero en todas partes.
+
+## Prompts de proyecto
+
+Un prompt también puede tener una sobrescritura para un solo proyecto. OpenChamber usa la sobrescritura del proyecto si la hay; si no, tu sobrescritura global; y si tampoco, el texto integrado. Una sobrescritura guardada cuenta aunque esté vacía.
+
+Para crear una, elige el proyecto en el selector de la parte superior de la barra lateral y luego **Proyecto** en **Ámbito**. Pulsa **Guardar** debajo de cada bloque que cambies. Los botones para restablecer cambian solo el ámbito que tienes abierto. En **Proyecto**, **Quitar sobrescritura del proyecto** y **Quitar todas las sobrescrituras del proyecto** devuelven tu sobrescritura global o el texto integrado. Si guardas el texto integrado en **Global**, se quita tu sobrescritura global. En **Proyecto**, ese texto queda guardado, así que el proyecto mantiene el texto integrado aunque tu sobrescritura global diga otra cosa.
+
+Las sobrescrituras del proyecto se guardan en la clave `magicPrompts` de `.openchamber/project.json`, en el checkout del proyecto. Es el mismo archivo que la [configuración en el repositorio](/es/repository-config/). Haz commit de él para compartir los prompts con tu equipo. Las sobrescrituras globales siguen en `magic-prompts.json`, en la carpeta de datos del servidor.
+
+Un worktree usa los prompts del proyecto de su checkout principal, salvo que hayas añadido el worktree como proyecto propio. Un chat sin proyecto, una carpeta que no pertenece a ningún proyecto y el trabajo en un espacio aislado usan solo prompts globales. La extensión de VS Code no tiene la página Magic Prompts. Allí editas los archivos a mano, y el archivo global siempre es `~/.config/openchamber/magic-prompts.json`.
+
+Si no se puede leer el archivo del proyecto, por ejemplo porque no es JSON válido, los flujos que lo necesitan se detienen con un error y no recurren al texto integrado. Settings muestra el motivo y un botón **Reintentar**. Que falte el archivo del proyecto no es un error. El proyecto hereda entonces todos los prompts.
+
+## Dónde se usa cada prompt
+
+Cada prompt de las tablas indica dónde se ejecuta y qué lo dispara. Revisa el disparador antes de editar, para saber qué flujo estás cambiando.
+
+### Git
+
+| Prompt | Dónde se ejecuta | Cuándo se dispara |
+| --- | --- | --- |
+| Generación de commit | El botón de generar en el cuadro de commit de la vista git, y la pantalla Changes en móvil | Generas un mensaje de commit. Se rellenan los archivos seleccionados y los asuntos de los commits recientes de la rama, para que el mensaje siga el estilo de tu repositorio. |
+| Generación de PR | El formulario de creación de pull request en la pestaña PR de la vista git | Generas el título y el cuerpo de un PR. Se rellenan las ramas base y head, los commits y archivos cambiados entre ambas, tu contexto adicional y la plantilla de PR del repositorio si existe. |
+| Recorrido por los cambios | El panel del recorrido por los cambios | Generas un recorrido. Vacío por defecto. Lo que escribas se añade al prompt del recorrido como tus preferencias de tono, énfasis y en qué detenerse; no cambia el formato del recorrido. |
+| Resolución de conflicto de merge/rebase | El diálogo de conflictos en la vista git, cuando un merge o rebase se detiene por conflictos | Eliges "Resolve in current session" o "Resolve in new session". El agente lee los archivos en conflicto, propone una estrategia por archivo y espera tu confirmación antes de editar, hacer stage o continuar la operación. |
+| Resolución de conflicto de cherry-pick | La sección "Re-integrate commits" de una sesión en worktree | Mover los commits de la sesión a la rama destino produce un conflicto y se lo pasas al agente. El agente resuelve dentro del worktree temporal, hace stage de los archivos y continúa el cherry-pick. |
+
+### Planning
+
+| Prompt | Dónde se ejecuta | Cuándo se dispara |
+| --- | --- | --- |
+| Planificación desde todo | El panel Todos en la barra lateral del proyecto | Envías un todo a una sesión o a una nueva sesión en worktree. El texto del todo se convierte en el mensaje visible; las instrucciones lo convierten en un diálogo de planificación con preguntas en vez de saltar a implementar. |
+| Mejorar plan | La acción "Improve" sobre un plan guardado en la vista Plans | Envías un plan guardado al flujo de mejora. El agente lee primero el archivo del plan, luego propone cambios basados en el estado actual del repositorio y se ofrece a editar ese mismo archivo. |
+| Implementar plan | La acción "Implement" sobre un plan guardado | Envías un plan guardado al flujo de implementación. El agente lee el archivo del plan y lo implementa de principio a fin sin ampliar el alcance, y guarda ajustes del plan en el archivo cuando el propio plan resulta estar mal. |
+
+### Session
+
+La mayoría alimentan comandos de barra que se escriben en el composer. La mayoría también aparecen como chips de inicio en el borrador de una sesión nueva.
+
+| Prompt | Dónde se ejecuta | Cuándo se dispara |
+| --- | --- | --- |
+| Tour del código | `/explore` | Pides una orientación general del código. |
+| Resumen de sesión | `/summary`, opcionalmente `/summary <tema>` | Resumes la conversación hasta ahora, útil para pasar a una sesión nueva. Requiere una sesión existente. |
+| Revisión del workspace | `/workspace-review` | Pides al agente revisar el diff actual del workspace en cuanto a intención, corrección y seguridad. |
+| Planificación de feature | `/plan-feature` | Conviertes una idea rough de feature en un plan de implementación mediante un diálogo guiado de preguntas y respuestas. |
+| Definir Goal | `/craft-goal`, opcionalmente `/craft-goal <idea>` | Conviertes una idea en un objetivo Goal verificable para el diálogo de Goal. |
+| Ponerse al día | `/catch-up` | Vuelves a un proyecto y preguntas en qué quedó y qué seguir. |
+| Depuración | `/debug` | Investigas un bug: el agente forma hipótesis, confirma la causa raíz desde el código y solo entonces propone un arreglo. |
+| Sopesar opciones | `/weigh` | Sabes qué construir pero no cómo. El agente compara dos o tres enfoques y recomienda uno. |
+| Fusion | La acción "Run fusion" sobre un grupo de multi-run | Combinas los resultados de varias ejecuciones en una respuesta. Los resultados se añaden después de las instrucciones. |
+
+### Prompts sin página en Settings
+
+Algunos prompts se disparan automáticamente y no tienen página editable en Settings:
+
+| Prompt | Cuándo se dispara |
+| --- | --- |
+| Tarea programada | `/schedule-task`, opcionalmente con una idea inicial. Guía el diálogo que define una tarea programada. |
+| Handoff de revisión | `/handoff-review`, o el botón Review en la vista de diff con el handoff activado. Genera el handoff en la sesión de trabajo. |
+| Mensaje inicial de la sesión de revisión | El primer mensaje de la sesión de revisión generada, con el handoff cuando se produjo, o sin él. |
+| Feedback de revisión / respuesta de implementación | Llevan mensajes entre las dos sesiones: el feedback del revisor vuelve a la sesión que implementa, y la respuesta del implementador regresa a la sesión de revisión. |
+
+## Relacionado
+
+- [Flujos de trabajo de Git](/es/git/) — muchos de estos prompts impulsan los flujos de git
+- [Notas, todos y planes](/es/notes-todos-plans/) — los todos y planes detrás de los prompts de Planning
+- [Multi-run](/es/multi-run/) — grupos de ejecución y fusion

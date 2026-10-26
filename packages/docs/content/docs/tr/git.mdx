@@ -1,0 +1,49 @@
+---
+title: Git İş Akışları
+description: OpenChamber'dan çıkmadan branch'leri hazırlayın, commit edin ve yönetin.
+---
+
+# Git İş Akışları
+
+OpenChamber'da yerleşik bir git görünümü vardır. Böylece terminale geçmeden değişiklikleri gözden geçirebilir, commit edebilir ve branch'leri yönetebilirsiniz. Sağ kenar çubuğundaki **Git** sekmesinden açın.
+
+## İnceleme ve commit
+
+Git görünümü değişikliklerinizi **staged** ve **unstaged** olarak ayırır:
+
+- bir dosyayı stage etmek için yanındaki **+** simgesine, stage'den çıkarmak için **−** simgesine tıklayın
+- bir gruptaki her şeyi tek seferde stage edin ya da stage'den çıkarın
+- diff'ini görmek için bir dosyaya tıklayın
+
+Sonra bir commit mesajı yazıp commit edin. OpenChamber'a staged değişikliklerinizden bir commit mesajı **generate** ettirebilirsiniz. Mevcut oturumun modelini kullanır, bu yüzden açık bir oturum gerekir.
+
+## Branch'ler ve geçmiş
+
+Git görünümü günlük git işlerinin geri kalanını da kapsar:
+
+- branch oluşturma, değiştirme, yeniden adlandırma ve silme
+- push, pull ve fetch
+- geçmişi ve commit başına diff'leri gezme
+- değişiklikleri stash etme ve geri yükleme
+
+## Pull request'ler
+
+Projenin sunucusunda bir hesap bağlıyken **PR** sekmesiyle pull request açabilir, güncelleyebilir, hazır diye işaretleyebilir ya da merge edebilirsiniz. OpenChamber başlığını ve açıklamasını commit mesajlarında olduğu gibi yazabilir. Bu GitHub, Gitea, Forgejo ve GitLab'de çalışır; GitLab'de sekme merge request açar. Gerrit'in kendi formu vardır: **İncelemeye push et**. Bir sunucuyu bağlamak [Git sunucuları](/github/) sayfasında anlatılıyor.
+
+## Gerrit'te incelemeye push etme
+
+Gerrit projesinde pull request formu **İncelemeye push et** olur. Commit'lerinizi `refs/for/<branch>` adresine push eder; bu bir değişiklik (change) oluşturur ya da daha önce push ettiğiniz bir değişikliğin yeni bir yama setini (patchset) yükler. Değişikliğin açıklaması commit mesajıdır, bu yüzden form başlık ve gövde yerine son commit'in konusunu gösterir. Hedef branch'i ve isterseniz bir topic, hashtag'ler, **Devam ediyor** ve **Özel** seçin. Form hedef branch'in kendisinde de çalışır; Gerrit ile genelde böyle çalışılır.
+
+Gerrit commit'leri değişikliklerle, commit-msg hook'unun her mesaja eklediği `Change-Id` satırıyla eşler. Bu satır yalnızca son commit'te eksikse **Change-Id ekle**, sorduktan sonra o commit'i amend eder; siz push edene kadar hiçbir şey push edilmez. Daha eski commit'lerde eksikse push, hook'u kurup her birine bir Change-Id verene kadar bekler.
+
+İlk push'tan sonra yerel commit'leriniz değişikliğe henüz yüklenmemişse panel **Yama seti yükle** seçeneğini sunar. Bir değişiklik zincirindeki değişiklik, rozetinin yanında zincirdeki yerini gösterir, örneğin **3 katmandan 2.**
+
+## Çakışmaları içeri alma
+
+Bir merge, rebase ya da integrate çakışmaya takılırsa, OpenChamber neyin sıkıştığını gösterir ve bunu çözmenize izin verir. Bunu agent'a devretmek de dahil.
+
+## İlgili
+
+- [Git sunucuları](/github/) — bir sunucu bağlayın ve işlere issue'lardan başlayın
+- [Worktree Sessions](/worktrees/) — bir branch'i kendi klasöründe izole edin
+- [Git Identities](/git-identities/) — her repo için doğru kişi olarak commit edin
