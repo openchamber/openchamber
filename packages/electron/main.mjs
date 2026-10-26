@@ -62,7 +62,7 @@ import {
 import { sanitizeRuntimeRequestHeaders } from './runtime-request-headers.mjs';
 import { isSplashColor, redactHostsConfigForRemote } from './remote-page-policy.mjs';
 import { connectDefaultSshInstanceAtStartup, resolveDefaultSshInstanceId } from './startup-ssh.mjs';
-import { normalizeNotificationInput, readTrimmedString, resolveHostEntryForRuntimeKey, runtimeKeyForDeepLinkHost, stampForwardedNotification } from './notification-host-routing.mjs';
+import { findReusableHostWindowIndex, normalizeNotificationInput, readTrimmedString, resolveHostEntryForRuntimeKey, runtimeKeyForDeepLinkHost, stampForwardedNotification } from './notification-host-routing.mjs';
 import { isPackagedUiRuntimeRequest } from './packaged-ui-routing.mjs';
 import { RUNTIME_CONFIG_SCRIPT_PATHNAME, claimRuntimeConfigScriptRequest, createRuntimeConfigGate, injectRuntimeConfig } from './packaged-runtime-config.mjs';
 import { settleMainProcessCompileCache } from './compile-cache.mjs';
@@ -1493,7 +1493,20 @@ const maybeShowNativeNotification = (rawInput) => {
   const release = () => { activeNotifications.delete(notification); };
 
   notification.on('click', () => {
-    focusForegroundWindow();
+    // The open-session route below hands a session owned by another runtime to
+    // the window that shows that runtime, and focuses it there. Pull the
+    // receiving window forward only when it is the window that will open the
+    // session: when the click names no runtime, when the window has not
+    // reported its runtime yet, or when both name the same instance. Otherwise
+    // focusing first raises the window the user did not click for, so activate
+    // the app instead: macOS needs that before the window the route raises can
+    // come forward, whether the route reuses a window or creates one.
+    const receivingKey = readTrimmedString(primaryEventWindow()?.__ocRuntimeKey);
+    if (!runtimeKey || !receivingKey || runtimeKey === receivingKey) {
+      focusForegroundWindow();
+    } else if (process.platform === 'darwin') {
+      app.focus({ steal: true });
+    }
     if (sessionId) {
       // Name the runtime that owns the session so the receiving window can
       // tell a session of its own instance from one of another, and route
@@ -1981,13 +1994,16 @@ const emitToAllWindows = (event, detail) => {
 // Session navigation must land in ONE window. Broadcasting it makes every
 // open window adopt the same session, hijacking whatever the other windows
 // were doing.
-const emitToPrimaryWindow = (event, detail) => {
+const primaryEventWindow = () => {
   const windows = BrowserWindow.getAllWindows().filter((window) => !window.isDestroyed());
-  if (windows.length === 0) return;
-  const target = (state.mainWindow && !state.mainWindow.isDestroyed())
+  if (windows.length === 0) return null;
+  return (state.mainWindow && !state.mainWindow.isDestroyed())
     ? state.mainWindow
     : windows.find((window) => window.isFocused()) || windows.find((window) => window.isVisible()) || windows[0];
-  emitToWindow(target, event, detail);
+};
+
+const emitToPrimaryWindow = (event, detail) => {
+  emitToWindow(primaryEventWindow(), event, detail);
 };
 
 const setTaskbarProgress = (value) => {
@@ -2592,6 +2608,28 @@ const canUseTitleBarOverlay = (browserWindow) => (
   !browserWindow.isDestroyed()
 );
 
+// Whether a main-frame navigation lands on this app's own UI. Pages served by
+// the app keep the runtime a window reported; any other page drops it.
+const isAppUiNavigationTarget = (raw) => {
+  if (!raw) return false;
+  let url;
+  try {
+    url = new URL(raw);
+  } catch {
+    return false;
+  }
+  if (url.protocol === `${UI_PROTOCOL}:`) return true;
+  for (const base of [state.localUiUrl, state.localOrigin, state.sidecarUrl]) {
+    if (!base) continue;
+    try {
+      if (new URL(base).origin === url.origin) return true;
+    } catch {
+      // A malformed configured base cannot match anything.
+    }
+  }
+  return false;
+};
+
 // `adopt` hands over the window the entry module created before this module
 // loaded; it is already on the splash and shows itself on ready-to-show.
 const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {}, adopt = null }) => {
@@ -2794,6 +2832,15 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {}, 
     if (isAllowedNavigationUrl(url)) return;
     event.preventDefault();
     void shell.openExternal(url).catch(() => {});
+  });
+
+  // The runtime key says which instance this window shows, and only a page of
+  // this app can keep saying it. A page loaded in its place reports nothing, so
+  // a kept key would make the reuse lookup raise this window for an instance it
+  // no longer shows. Dropping it lets the creation-time host tag answer, the
+  // same fallback a window that has not reported yet uses.
+  browserWindow.webContents.on('did-navigate', (_event, url) => {
+    if (!isAppUiNavigationTarget(url)) browserWindow.__ocRuntimeKey = null;
   });
 
   // An extension frame navigating itself would carry data out in the URL;
@@ -3069,10 +3116,32 @@ const openHostWindow = async (host, route = null, { reuseOpenWindow = false } = 
   // A link to a host already open in a window lands in that window: brought
   // to the front and moved to the session there, instead of one more window
   // per click. "New window" from the switcher always opens one.
-  const existing = reuseOpenWindow
-    ? BrowserWindow.getAllWindows().find((window) => !window.isDestroyed() && window.__ocHostWindowId === host.id)
-    : null;
+  //
+  // A window is identified by the instance its renderer reports (boot and every
+  // switch), which a window that was opened for another instance and switched
+  // since no longer claims through its creation-time tag. A window that has not
+  // reported yet (still booting) falls back to the tag it was created with.
+  const allWindows = reuseOpenWindow ? BrowserWindow.getAllWindows() : [];
+  const reusableIndex = reuseOpenWindow
+    ? findReusableHostWindowIndex(
+      allWindows.map((window) => (window.isDestroyed() ? null : {
+        runtimeKey: window.__ocRuntimeKey,
+        hostWindowId: window.__ocHostWindowId,
+      })),
+      host.id,
+      {
+        hosts: readDesktopHostsConfig()?.hosts || [],
+        localUrl: state.sidecarUrl || null,
+        localClientToken: readDesktopLocalClientToken(),
+      },
+    )
+    : -1;
+  const existing = reusableIndex >= 0 ? allWindows[reusableIndex] : null;
   if (existing) {
+    // macOS: raising a window does not activate a backgrounded app, so a click
+    // or a link that lands here can leave the window behind another app.
+    // Activate first, the same way focusForegroundWindow does.
+    if (process.platform === 'darwin') app.focus({ steal: true });
     if (existing.isMinimized()) existing.restore();
     existing.show();
     existing.focus();
@@ -4895,6 +4964,19 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       return null;
     }
 
+    case 'desktop_set_window_runtime_key': {
+      // The instance the sender window currently shows, reported by its renderer
+      // at boot and on every switch. openHostWindow's reuse lookup matches it
+      // before the creation-time tag, so a window switched in place to a saved
+      // host is reused by a notification click or session link for that host.
+      // Local pages only: this writes the identity the reuse lookup trusts, so
+      // it must stay out of COMMANDS_SAFE_FOR_REMOTE.
+      if (browserWindow && !browserWindow.isDestroyed()) {
+        browserWindow.__ocRuntimeKey = readTrimmedString(args.runtimeKey);
+      }
+      return null;
+    }
+
     case 'desktop_clear_session_notifications': {
       const sessionId = readTrimmedString(args?.sessionId);
       if (sessionId) clearSessionNotifications(sessionId);
@@ -5430,13 +5512,21 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       const config = readDesktopHostsConfig();
       const providedToken = typeof args.clientToken === 'string' ? args.clientToken : '';
       const clientToken = sanitizeClientTokenForStorage(providedToken) || resolveStoredClientTokenForUrl(targetUrl, config);
-      const requestHeaders = sanitizeRuntimeRequestHeaders(args.requestHeaders || config.hosts.find((host) => normalizeHostUrl(host.apiUrl || host.url) === targetUrl)?.requestHeaders || {});
+      // The saved host the request headers fall back to. A window opened for it
+      // is tagged with its id, so a notification click for that host reuses this
+      // window instead of opening another one.
+      const hostForUrl = config.hosts.find((host) => normalizeHostUrl(host.apiUrl || host.url) === targetUrl);
+      const requestHeaders = sanitizeRuntimeRequestHeaders(args.requestHeaders || hostForUrl?.requestHeaders || {});
       let windowUrl = targetUrl;
       const runtimeConfig = { apiBaseUrl: targetUrl, clientToken, requestHeaders };
       if (shouldUsePackagedUi()) {
         windowUrl = buildPackagedUiUrl('/index.html');
       }
-      await createAdditionalWindow(windowUrl, { ...runtimeConfig, explicitRuntime: true });
+      const browserWindow = await createAdditionalWindow(windowUrl, { ...runtimeConfig, explicitRuntime: true });
+      if (browserWindow && hostForUrl) {
+        browserWindow.__ocHostWindowId = hostForUrl.id;
+        browserWindow.__ocHostWindowBaseUrl = windowUrl;
+      }
       return null;
     }
 

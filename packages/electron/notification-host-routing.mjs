@@ -1,7 +1,7 @@
-// Host resolution for notification routing. A notification names the runtime
-// that owns its session; the desktop shell resolves that runtime to a host
-// entry so a click can open the session on the owning instance instead of the
-// currently active one.
+// Host and window identity for notification clicks and session links. A
+// notification or link names the runtime that owns its session; the desktop
+// shell resolves that runtime to a host entry so it can open the session on the
+// owning instance, and reuses the window that already shows it.
 
 import { z } from 'zod';
 
@@ -59,6 +59,30 @@ export const resolveHostEntryForRuntimeKey = (rawKey, { hosts, localUrl, localCl
     return (Array.isArray(hosts) ? hosts : []).find((entry) => runtimeKeyForHostUrl(entry?.apiUrl || entry?.url) === key) || null;
   }
   return null;
+};
+
+// Which open window already shows a host, as seen by openHostWindow's reuse
+// lookup. Windows are plain descriptors: { runtimeKey, hostWindowId } for what
+// each window reports now and what it was created for, or null once destroyed.
+// The reported key is authoritative because a window can switch instance in
+// place, which leaves its creation-time tag stale. A window that has not
+// reported yet is still booting, so its tag is the best identity it has. A
+// reported key that resolves to no host claims nothing: the stale tag must not
+// take over again. Reported matches are preferred over booting ones so a ready
+// window is reused before one that still has to load the route.
+export const findReusableHostWindowIndex = (windows, hostId, { hosts, localUrl, localClientToken }) => {
+  let tagMatch = -1;
+  for (let index = 0; index < windows.length; index += 1) {
+    const window = windows[index];
+    if (!window) continue;
+    const reported = readTrimmedString(window.runtimeKey);
+    if (reported) {
+      if (resolveHostEntryForRuntimeKey(reported, { hosts, localUrl, localClientToken })?.id === hostId) return index;
+      continue;
+    }
+    if (tagMatch < 0 && readTrimmedString(window.hostWindowId) === hostId) tagMatch = index;
+  }
+  return tagMatch;
 };
 
 // A session deep link names its owning host by id (`?host=<id>`, 'local' for

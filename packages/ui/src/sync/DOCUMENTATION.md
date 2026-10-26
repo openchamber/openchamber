@@ -1240,10 +1240,16 @@ way: a window on that instance opens the session in place, any other hands
 it to `openHostWindow` through `desktop_open_host_session`, together with
 the `?message=` it names. A mini-chat routes them the same way, since with
 the main window closed it is the window that receives them. The renderer
-decides because main cannot: the main window carries no host tag and can
-switch instance in place, so only its runtime key says what it shows. A main
-window switched in place to a direct instance holds a `url:` key, so a link
-that names that instance by id still opens a separate window for it.
+decides because main cannot: a window can switch instance in place, so
+only its runtime key says what it shows. On desktop a window reports that
+key to main at boot and on every switch (`desktop_set_window_runtime_key`),
+and `openHostWindow` looks for a window to reuse first by the live key,
+then by the creation-time tag: a link that names an instance lands in
+whichever open window shows it, including a main window switched in place
+and a switcher window opened for a direct instance, which main marks the
+same way it marks relay windows. A notification click brings the receiving
+window forward only when it already shows the instance that owns the
+session; otherwise the window it hands the session to is the one raised.
 
 On launch the app reopens the session that was open when it closed
 (`sync/last-session-restore.ts`, used by `App` for web and desktop and by the
