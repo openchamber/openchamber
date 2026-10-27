@@ -6,7 +6,7 @@ const json = z.json();
 const pageKey = (sessionId, callId) => `${sessionId}\0${callId}`;
 const noLongerWaiting = () => new OpenChamberControlError('This page is no longer waiting for an answer', 404);
 
-/** Nothing survives a settled prompt; late validation affects only its own entry. */
+/** Page answers resolve their pending session/call once, as in the HTML tool. */
 export const createOpenUIAnswers = ({ onWaitChange = () => {} } = {}) => {
   const waiting = new Map();
   const announce = (change) => {
@@ -17,7 +17,7 @@ export const createOpenUIAnswers = ({ onWaitChange = () => {} } = {}) => {
     }
   };
 
-  const wait = ({ sessionId, callId, directory, signal, sourceRevision, validate, title = 'OpenUI response', kind = 'openui' }) => new Promise((resolve, reject) => {
+  const wait = ({ sessionId, callId, directory, signal, title = 'OpenUI response' }) => new Promise((resolve, reject) => {
     const key = pageKey(sessionId, callId);
     if (waiting.has(key)) {
       reject(new OpenChamberControlError('This call already shows a page that waits for an answer', 409));
@@ -34,7 +34,6 @@ export const createOpenUIAnswers = ({ onWaitChange = () => {} } = {}) => {
       return true;
     };
     const entry = {
-      validate,
       reject: (error) => finish(() => reject(error)),
       settle: (answer) => {
         if (!finish(() => resolve(answer))) throw noLongerWaiting();
@@ -44,7 +43,7 @@ export const createOpenUIAnswers = ({ onWaitChange = () => {} } = {}) => {
     const onAbort = () => entry.reject(stopped());
     waiting.set(key, entry);
     signal?.addEventListener('abort', onAbort, { once: true });
-    announce({ type: 'waiting', sessionId, callId, title, directory: directory || null, ...(kind && { kind, sourceRevision }) });
+    announce({ type: 'waiting', sessionId, callId, title, directory: directory || null });
   });
 
   const answer = (input = {}) => {
@@ -65,10 +64,7 @@ export const createOpenUIAnswers = ({ onWaitChange = () => {} } = {}) => {
     const entry = waiting.get(pageKey(sessionId, callId));
     if (!entry) throw noLongerWaiting();
     const result = { answered: true, summary, data };
-    // The policy may refuse synchronously or read authoritative source before
-    // settling. Both paths finish only the entry that received this answer.
-    if (!entry.validate) return entry.settle(result);
-    return Promise.resolve(entry.validate(input, entry.reject)).then(() => entry.settle(result));
+    return entry.settle(result);
   };
 
   return {

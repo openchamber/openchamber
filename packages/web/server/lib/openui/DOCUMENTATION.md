@@ -2,7 +2,7 @@
 
 ## Ownership
 
-This module owns OpenUI prompt admission, saved-source verification,
+This module owns OpenUI prompt admission,
 instruction reads, and feature revocation through `runtime.js`.
 The control service creates the runtime for prompt and answer routes.
 `answers.js` owns live waits, JSON limits and exactly-once settlement. The official
@@ -21,8 +21,8 @@ selection, format checks and each HtmlView's page budget.
 - Instruction reads use fixed group names and module-relative assets. Missing,
   empty or oversized instruction assets return 503. The server requires the
   exported catalog at startup.
-- `openchamber_openui` with `openui.prompt` waits in the runtime's session/call map. Its source revision is
-  a SHA-256 digest of the complete UTF-8 program. The chat answers through
+- `openchamber_openui` with `openui.prompt` waits in the runtime's session/call map.
+  The chat answers through
   `POST /api/openchamber/openui/answer`, with a summary of at most 500 characters
   and data of at most 16,000 characters as JSON. Settled or unknown calls return 404.
 - Before announcing a wait, the runtime checks the calling session's inbox.
@@ -30,17 +30,14 @@ selection, format checks and each HtmlView's page budget.
   was written without seeing the page. Queued and synthetic messages do not
   prevent waiting; an inbox read failure also leaves the prompt waiting.
   Disable and request cancellation still apply while the inbox read is pending.
-- Answers must match the live revision and the saved prompt input. Unified calls
-  require `openui.prompt` or its bare `prompt` alias; nested parameters override
-  flat fields.
-  Source reads page newest-first with the prompt request's abort signal. A
-  complete read that finds a replaced or missing call returns 409 and retires
-  that wait. A failed read returns 503 and leaves the wait available for retry.
-  Feature disable returns 403 and cancels OpenUI waits, including requests still
+- Answers settle synchronously by session and call ID. Invalid answers leave the
+  wait available for retry. Request abort releases the wait; the managed plugin
+  also cancels it when the user replies in chat. Waiting notifications describe
+  status and are independent of answer admission.
+- Feature disable returns 403 and cancels OpenUI waits, including requests still
   reading the setting or resolving the calling session's directory before
   admission. Re-enabling permits new prompts without
-  reviving cancelled admissions. A late validation can
-  settle or retire only the wait that started it.
+  reviving cancelled admissions.
 - `bun run openui:generate` exports reference text and catalog schema/spec with
   one content-addressed revision. Catalog changes require regeneration and the
   live-schema parity test. Generation prepares all data before replacing files;
@@ -60,6 +57,12 @@ OpenCode delivers a steered message after the current tool call returns. Waiting
 for a page answer would hold that earlier message back and let the page answer
 reach the agent first. A queued message waits for the turn to end, so returning
 the tool call does not deliver it.
+
+### Why answers use the existing page wait
+
+OpenUI reuses the HTML tool's session/call answer lifecycle. The pending wait
+decides whether an answer can settle. Requiring a browser source digest, waiting
+notification or a fresh message read added failure conditions to a valid wait.
 
 ### Why media uses existing file routes
 

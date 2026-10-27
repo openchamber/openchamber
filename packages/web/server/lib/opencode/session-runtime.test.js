@@ -43,9 +43,9 @@ describe('session runtime', () => {
     });
     runtimes.push(runtime);
 
-    runtime.trackWaitingPage({ type: 'waiting', sessionId: 'session-1', callId: 'call-1', title: 'Pick a layout', directory: '/repo', kind: 'openui', sourceRevision: 'source-1' });
+    runtime.trackWaitingPage({ type: 'waiting', sessionId: 'session-1', callId: 'call-1', title: 'Pick a layout', directory: '/repo' });
     expect(runtime.getPendingBlockingRequestsSnapshot()).toEqual({
-      'session-1': { permissions: [], forms: [], pages: [{ id: 'call-1', sessionID: 'session-1', title: 'Pick a layout', kind: 'openui', sourceRevision: 'source-1' }] },
+      'session-1': { permissions: [], forms: [], pages: [{ id: 'call-1', sessionID: 'session-1', title: 'Pick a layout' }] },
     });
 
     runtime.trackWaitingPage({ type: 'settled', sessionId: 'session-1', callId: 'call-1' });

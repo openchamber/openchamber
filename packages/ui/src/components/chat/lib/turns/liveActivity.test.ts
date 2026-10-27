@@ -74,7 +74,7 @@ describe('live turn boundaries', () => {
     test('keeps completed generated images visible alongside a waiting prompt', () => {
         const image = tool('image', 'openchamber_image', { output: JSON.stringify({ schemaVersion: 1, ok: true, action: 'image.generate', data: { images: [{ path: '/tmp/my image.png' }] } }) });
         const failed = tool('failed', 'openchamber_image', { output: JSON.stringify({ schemaVersion: 1, ok: false, action: 'image.generate', data: { images: [{ path: '/tmp/failed.png' }] } }) });
-        const waiting = tool('waiting', 'prompt_openui', { status: 'running', input: { ui: 'root = Stack([])' } });
+        const waiting = tool('waiting', 'openchamber_openui', { status: 'running', input: { action: 'openui.prompt', ui: 'root = Stack([])' } });
         expect(getShownPages([assistant('tools', [image, failed, waiting])]).map((part) => part.callID)).toEqual(['image', 'waiting']);
     });
     test('hoists workflow proposals and waiting OpenUI prompts in call order, leaving answered prompts in Activity', () => {
@@ -85,7 +85,7 @@ describe('live turn boundaries', () => {
         ])];
         expect(getShownPages(messages).map((part) => part.callID)).toEqual(['workflow', 'waiting']);
     });
-    test('keeps direct OpenUI prompts visible while their tool call waits', () => {
+    test('keeps waiting OpenUI prompts outside Activity', () => {
         const messages = [assistant('prompt', [tool('prompt', 'openchamber_openui', {
             status: 'running', input: { action: 'openui.prompt', ui: 'root = Stack([])' },
         })])];

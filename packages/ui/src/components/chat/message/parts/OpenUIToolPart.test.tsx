@@ -77,11 +77,6 @@ function StoreProbe() {
   return null;
 }
 
-const digest = async (value: string) => {
-  const bytes = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
-  return [...new Uint8Array(bytes)].map((entry) => entry.toString(16).padStart(2, '0')).join('');
-};
-
 const part = (ui = source): ToolPart => ({
   id: 'part',
   callID: 'call',
@@ -173,22 +168,18 @@ test('announces a live waiting prompt and its subsequent size changes', async ()
     disconnect() {}
   };
   try {
-  const sourceRevision = await digest(source);
-  useGlobalBlockingRequestsStore.setState({ bySession: new Map([['session', {
-    directory: '/repo', permissions: [], forms: [], pages: [{ id: 'call', sessionID: 'session', title: 'Pick', kind: 'openui', sourceRevision }],
-  }]]) });
-  const events: string[] = [];
-  host.addEventListener('openchamber:page-waiting', (event) => {
-    events.push((event.target as HTMLElement).dataset.waitingPage ?? '');
-  });
-  await render();
-  expect(events).toContain('part');
-  const block = host.querySelector<HTMLElement>('[data-waiting-page="part"]');
-  expect(block).not.toBeNull();
-  await act(async () => { resize?.(); });
-  expect(events.length).toBeGreaterThanOrEqual(2);
-  await render(answeredPart());
-  expect(host.querySelector('[data-waiting-page]')).toBeNull();
+    const events: string[] = [];
+    host.addEventListener('openchamber:page-waiting', (event) => {
+      events.push((event.target as HTMLElement).dataset.waitingPage ?? '');
+    });
+    await render();
+    expect(events).toContain('part');
+    const block = host.querySelector<HTMLElement>('[data-waiting-page="part"]');
+    expect(block).not.toBeNull();
+    await act(async () => { resize?.(); });
+    expect(events.length).toBeGreaterThanOrEqual(2);
+    await render(answeredPart());
+    expect(host.querySelector('[data-waiting-page]')).toBeNull();
   } finally {
     globalThis.ResizeObserver = OriginalResizeObserver;
   }
@@ -454,13 +445,7 @@ test('unchanged Activity children reconnect with interactive OpenUI controls', a
   expect(host.querySelector('input')?.value).toBe('Restored');
 });
 
-test('submits one active direct prompt with the live source revision', async () => {
-  const sourceRevision = await digest(source);
-  await act(async () => {
-    useGlobalBlockingRequestsStore.setState({ bySession: new Map([['session', {
-      directory: '/repo', permissions: [], forms: [], pages: [{ id: 'call', sessionID: 'session', title: 'Pick', kind: 'openui', sourceRevision }],
-    }]]) });
-  });
+test('submits a running prompt without a page event or source digest', async () => {
   await render();
   await assertRendererMounted();
   await act(async () => {
@@ -470,7 +455,6 @@ test('submits one active direct prompt with the live source revision', async () 
   expect(answerRequests).toEqual([{
     sessionId: 'session',
     callId: 'call',
-    sourceRevision,
     summary: 'Use name',
     data: { params: {}, formName: 'prefs', formValues: { $name: 'Alice' } },
   }]);
@@ -482,10 +466,6 @@ test('submits one active direct prompt with the live source revision', async () 
 
 test('a real HtmlView bridge completes only its active tool call once', async () => {
   const ui = 'root = Stack([HtmlView("<button>Choose one</button>")])';
-  const sourceRevision = await digest(ui);
-  useGlobalBlockingRequestsStore.setState({ bySession: new Map([['session', {
-    directory: '/repo', permissions: [], forms: [], pages: [{ id: 'call', sessionID: 'session', title: 'Pick', kind: 'openui', sourceRevision }],
-  }]]) });
   await render(part(ui));
   await waitFor(() => host.querySelector('iframe') !== null);
   const frame = host.querySelector('iframe');
@@ -502,7 +482,7 @@ test('a real HtmlView bridge completes only its active tool call once', async ()
   await act(async () => { submit(); submit(); });
   await waitFor(() => answerRequests.length === 1);
   expect(answerRequests).toEqual([{
-    sessionId: 'session', callId: 'call', sourceRevision, summary: 'Use one', data: { choice: 1 },
+    sessionId: 'session', callId: 'call', summary: 'Use one', data: { choice: 1 },
   }]);
   await act(async () => { submit(); });
   expect(answerRequests).toHaveLength(1);
@@ -574,10 +554,6 @@ test('a streamed HtmlView diagram with a forward reference and automatic height 
 }, 15000);
 
 test('an unrelated directory part update preserves the mounted form lease', async () => {
-  const sourceRevision = await digest(source);
-  useGlobalBlockingRequestsStore.setState({ bySession: new Map([['session', {
-    directory: '/repo', permissions: [], forms: [], pages: [{ id: 'call', sessionID: 'session', title: 'Pick', kind: 'openui', sourceRevision }],
-  }]]) });
   await render();
   await assertRendererMounted();
   await act(async () => directoryStore.setState({ part: { message: [part()] } }));
@@ -593,10 +569,6 @@ test('an unrelated directory part update preserves the mounted form lease', asyn
 });
 
 test('a virtual row remount restores entered fields through the real Renderer', async () => {
-  const sourceRevision = await digest(source);
-  useGlobalBlockingRequestsStore.setState({ bySession: new Map([['session', {
-    directory: '/repo', permissions: [], forms: [], pages: [{ id: 'call', sessionID: 'session', title: 'Pick', kind: 'openui', sourceRevision }],
-  }]]) });
   await render();
   await assertRendererMounted();
   await act(async () => directoryStore.setState({ part: { message: [part()] } }));
@@ -617,49 +589,44 @@ test('a virtual row remount restores entered fields through the real Renderer', 
   expect(answerRequests[0]).toMatchObject({ data: { formValues: { $name: 'Kept through virtualization' } } });
 });
 
-test('a live wait arriving after the tool mount enables the existing controls', async () => {
+test('waiting notifications do not control form submission', async () => {
   await render();
   await assertRendererMounted();
-  expect(host.querySelector('input')?.disabled).toBe(true);
-  const sourceRevision = await digest(source);
+  expect(host.querySelector('input')?.disabled).toBe(false);
   await act(async () => useGlobalBlockingRequestsStore.setState({ bySession: new Map([['session', {
-    directory: '/repo', permissions: [], forms: [], pages: [{ id: 'call', sessionID: 'session', title: 'Pick', kind: 'openui', sourceRevision }],
+    directory: '/repo', permissions: [], forms: [], pages: [{ id: 'call', sessionID: 'session', title: 'Pick' }],
   }]]) }));
+  await act(async () => useGlobalBlockingRequestsStore.setState({ bySession: new Map() }));
   expect(host.querySelector('input')?.disabled).toBe(false);
   await act(async () => sendButton()?.click());
   await waitFor(() => answerRequests.length === 1);
 });
 
-test('does not submit when the live wait is cancelled before the event runs', async () => {
-  const sourceRevision = await digest(source);
-  useGlobalBlockingRequestsStore.setState({ bySession: new Map([['session', {
-    directory: '/repo', permissions: [], forms: [], pages: [{ id: 'call', sessionID: 'session', title: 'Pick', kind: 'openui', sourceRevision }],
-  }]]) });
+test('does not submit after the tool reports cancellation', async () => {
   await render();
   await assertRendererMounted();
-  await act(async () => {
-    useGlobalBlockingRequestsStore.setState({ bySession: new Map() });
-    sendButton()?.click();
+  await render({
+    ...part(),
+    state: { status: 'error', input: part().state.input, error: 'Stopped', time: { start: 1, end: 2 } },
   });
+  await act(async () => sendButton()?.click());
   await new Promise((resolve) => setTimeout(resolve, 20));
   expect(answerRequests).toEqual([]);
 });
 
-test('does not submit when the current live wait has another source revision', async () => {
-  const sourceRevision = await digest(source);
-  useGlobalBlockingRequestsStore.setState({ bySession: new Map([['session', {
-    directory: '/repo', permissions: [], forms: [], pages: [{ id: 'call', sessionID: 'session', title: 'Pick', kind: 'openui', sourceRevision }],
-  }]]) });
+test('keeps a rejected answer retryable without claiming it was sent', async () => {
   await render();
   await assertRendererMounted();
-  await act(async () => {
-    useGlobalBlockingRequestsStore.setState({ bySession: new Map([['session', {
-      directory: '/repo', permissions: [], forms: [], pages: [{ id: 'call', sessionID: 'session', title: 'Pick', kind: 'openui', sourceRevision: `${sourceRevision}stale` }],
-    }]]) });
-    sendButton()?.click();
-  });
-  await new Promise((resolve) => setTimeout(resolve, 20));
+  const fetchBefore = globalThis.fetch;
+  globalThis.fetch = async (input, init) => String(input).includes('/api/openchamber/openui/answer')
+    ? Response.json({ error: 'This page is no longer waiting for an answer' }, { status: 404 })
+    : fetchBefore(input, init);
+  await act(async () => sendButton()?.click());
   expect(answerRequests).toEqual([]);
+  expect(host.textContent).not.toContain('Answer sent');
+  globalThis.fetch = fetchBefore;
+  await act(async () => sendButton()?.click());
+  await waitFor(() => answerRequests.length === 1);
 });
 
 test('shows the stored answer summary while exporting only the original source', async () => {

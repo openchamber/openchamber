@@ -188,7 +188,7 @@ export type SyncEvent =
   /** The server did not answer this request on the user's behalf: it waits for the user. */
   | { type: "openchamber.permission-left-for-user"; properties: { permissionId: string; sessionId: string; directory: string | null; spaceId?: string } }
   /** An OpenUI prompt waits for the user's answer. */
-  | { type: "openchamber.page-waiting"; properties: { sessionID: string; directory: string | null; page: { id: string; title: string; kind?: "openui"; sourceRevision?: string } } }
+  | { type: "openchamber.page-waiting"; properties: { sessionID: string; directory: string | null; page: { id: string; title: string } } }
   /** That page stopped waiting: answered, answered in the chat, or its turn ended. */
   | { type: "openchamber.page-settled"; properties: { sessionID: string; pageID: string } }
   /** The server started or stopped waiting to write a session's recap and suggestion. */

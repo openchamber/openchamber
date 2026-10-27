@@ -69,12 +69,12 @@ Use this doc when you ask an agent to change tool/header/description behavior.
   - `lib/turns/liveActivitySummary.ts` derives the report from tool results.
 
 - `ShownToolCard.tsx`
-  - A call drawn in place of its row (`isShownInPlace` in `@/lib/opencode/tools`) shows a workflow proposal, generated images through `GeneratedImages.tsx`, or an OpenUI prompt. Image downloads save the full file through `loadMessageImageBlob` and `saveFile.ts`. Activity controls which calls are hoisted.
+  - A call drawn in place of its row (`isShownInPlace` in `@/lib/opencode/tools`) shows a workflow proposal, generated images through `GeneratedImages.tsx`, a secret request, or an OpenUI prompt. Image downloads save the full file through `loadMessageImageBlob` and `saveFile.ts`. Workflow proposals, generated images, secret requests and waiting OpenUI prompts are hoisted outside collapsed Activity; answered OpenUI prompts return to their Activity rows.
+  - The workflow card (`components/chat/workflows/WorkflowRunCard.tsx`) reads the run from the server's store, not from the call: the plan with its phases, the run's state, and Run and Don't run while it waits for approval, Stop while it runs, Resume after a failure or stop. The card is current after a reload and on every device; a run the server no longer has says so.
+  - The run's report arrives later as a synthetic message (`lib/workflows/report.ts`) and renders as one collapsed line in `TimelineNotice`, like a dispatched session's result, opening a turn of its own.
 
 - `SecretRequestCard.tsx`
   - The card an agent asks for a secret on: label, reason, a masked field that password managers are told to skip, Save securely and Decline. The value goes to the server through `answerSecretRequest` (`@/lib/secretRequestAnswer`) and never into the call, so the card's state comes from the call's status and the `status` the plugin copies into its metadata; what this client sent shows until the call completes. A refused answer (answered elsewhere, turn ended) shows a toast and keeps the card. Once answered it folds to one line. The answer names the session's directory, so a card in an isolated space reaches the space's server, where the call waits and the agent's commands run. A card that waits is brought into view the way a waiting page is (`data-waiting-page`, `dispatchPageWaiting`).
-  - The workflow card (`components/chat/workflows/WorkflowRunCard.tsx`) reads the run from the server's store, not from the call: the plan with its phases, the run's state, and Run and Don't run while it waits for approval, Stop while it runs, Resume after a failure or stop. The card is current after a reload and on every device; a run the server no longer has says so.
-  - The run's report arrives later as a synthetic message (`lib/workflows/report.ts`) and renders as one collapsed line in `TimelineNotice`, like a dispatched session's result, opening a turn of its own.
 
 - `HtmlRenderFrame.tsx` and `htmlRender.ts`
   - `OpenUIHtmlView.tsx` mounts `HtmlRenderDocument` for an evaluated `HtmlView`. Its identity comes from the trusted OpenUI owner, occurrence and render key. The OpenUI host owns submission admission and separates access from submission progress; the frame relays an explicit page submission. `openchamber_openui` prompt calls use their stored input and result through `openuiPrompt`; refused calls retain their ordinary tool row.
@@ -93,7 +93,7 @@ Use this doc when you ask an agent to change tool/header/description behavior.
   - Full screen opens the page in a dialog, inset from its edges and as tall as the page up to the window, past which the page scrolls. Download saves the page with the theme it was viewed in; on Capacitor it goes through the native share sheet, and VS Code shows no download because its bridge has no save route for HTML.
   - `renderPageImages.ts` prepares only the absolute local paths in the initial evaluated HtmlView through `/api/fs/stat`. It reads images through `/api/fs/raw` and retains the original format, signature and size checks before encoding. Each complete page applies its own 25 MiB budget to valid image bytes in source order. Shared files retain independent page budgets. Data URLs keep authenticated asset URLs out of page scripts. The frame waits for loading to finish so its script runs once. Failed images keep their paths. VS Code reads workspace images through its file bridge in source order under the same budget. Remembered HTML is scoped by runtime, directory, session, message, page and render key, with a 100 MiB character budget and oldest-first eviction.
   - VS Code's webview CSP allows inline scripts but no remote ones, and a `srcdoc` page inherits that policy, so the tool description tells agents to draw charts with inline SVG or their own script.
-  - `LiveTurnActivity` keeps workflow proposals, generated images and waiting OpenUI prompts outside the fold through `getShownPages`. `LiveTurnHoistedPagesContext` prevents duplicate mounts inside Activity. Subsequent work stays below the last hoisted card. Display-only OpenUI follows its Markdown message's placement.
+  - Activity keeps workflow proposals, generated images, secret requests and waiting OpenUI prompts outside the fold through `getShownPages`. `LiveTurnHoistedPagesContext` prevents duplicate mounts inside Activity. Subsequent work stays below the last hoisted card; answered OpenUI prompts fold with their tool rows. Display-only OpenUI follows its Markdown message's placement.
 
 - `BlockLine.tsx`
   - The vertical connector line left of a collapsible block's body. It is also a click target: clicking it folds/expands the block via its header toggle handler (`onToggle`), or toggles the nearest native `<details>` when no handler is passed (JSON summary sections). Geometry is inline-styled (12px hit strip centered on the 1px line) so it does not depend on compiled Tailwind classes.
@@ -119,18 +119,18 @@ preparation cache after files have grown. The prepared-image loader returns the
 data URL with its validated blob size; the page uses that size for loaded-byte
 accounting. Failed files keep their paths and consume neither budget.
 
-### Why completed ask-user interfaces return to Activity
+### Why waiting interfaces stay outside Activity
 
-An `openchamber_openui` prompt stays outside the Activity fold only while `openuiPrompt` classifies
-it as `waiting`, so the user can answer without opening Activity. Answered,
-answered-in-chat, completed and stopped prompts follow normal Activity folding.
-Expanding Activity mounts each prompt once at its tool position, including prompts
-in the final message. Subsequent work follows the same folding rules once no
-hoisted page remains. Keeping every recognized prompt outside the fold left
-answered forms and their subsequent steps permanently visible.
+An OpenUI prompt remains outside Activity while its tool state is waiting, so
+the user can answer with Activity folded. A submitted answer or chat reply returns
+the prompt to its tool row. Completed and stopped calls also follow normal
+Activity placement. Expanding mounts each prompt once at its tool position,
+including prompts in the final message. The active turn retains its normal
+recent-row preview.
 
-This placement rule uses the stored tool state. Live blocking-request authority
-and source-revision checks still govern whether a prompt can accept an answer.
+The tool state controls whether the UI allows submission. The server settles
+answers against its pending session/call map, so an already settled wait is
+refused even if the browser has not received the updated tool state.
 Reference reads remain ordinary tool rows. The classifier recognizes the unified
 tool's `openui.prompt` action and bare `prompt` alias, with nested parameters
 overriding flat fields.

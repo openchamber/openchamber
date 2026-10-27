@@ -22,8 +22,6 @@ const hostFormRequestSchema = z.object({
 })
 // A page an agent showed that waits for the user's answer: same projection.
 const hostPageRequestSchema = hostFormRequestSchema.extend({
-  kind: z.literal('openui').optional(),
-  sourceRevision: z.string().min(1).optional(),
 })
 
 // Cross-project status kept by the OpenChamber host (web server or VS Code

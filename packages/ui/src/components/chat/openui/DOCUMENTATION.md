@@ -30,7 +30,7 @@ This folder owns the fixed OpenUI catalog, its data producer, field/action adapt
 - Existing charts expose their supported layout, density, legend, grid and theme-palette options. Horizontal bars use BarChart. Axis captions remain visible when the legend is hidden; chart coordinates stay LTR inside an RTL interface. Icon renders official `@remixicon/react` components. Standard kebab-case names resolve to exports with their Line/Fill variant intact; no app sprite, aliases or category substitution are involved. Unknown names render nothing. Icon takes its name followed by optional size/tone options.
 - `OpenUIProgram` owns the root media provider and styling scope. Layout components only render their children and assign stable occurrences.
 - Host access (preview, interactive, readonly, revoked) is separate from submission progress. Submission transitions update one synchronous reference and its React view, so duplicate events cannot race React's next render. A successful receipt survives wait settlement or Activity hiding.
-- `renderKey` identifies the rendered program. Only the waiting-tool boundary uses `sourceRevision`, the SHA-256 digest checked by the server. Existing page identities retain their values.
+- `renderKey` identifies the rendered program. Tool prompts use the session draft key, which changes with the owner or source. Answer requests identify the pending wait by session and call ID.
 
 ## Decisions
 

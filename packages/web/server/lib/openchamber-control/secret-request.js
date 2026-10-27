@@ -107,7 +107,7 @@ export const createSecretRequests = ({ isEnabled, files, onWaitChange, hasUnread
     if (await hasUnreadChat(sessionId)) {
       return { answer: { answered: false, reason: 'chat-sent-earlier' }, note: CHAT_SENT_EARLIER_NOTE };
     }
-    const answer = await waits.wait({ sessionId, callId, title: label, directory, signal, kind: null });
+    const answer = await waits.wait({ sessionId, callId, title: label, directory, signal });
     const file = isString(answer.data?.file) ? answer.data.file : null;
     // The answer can settle the wait just as the call ends (Stop, a chat
     // message): nobody will read the path, so the file goes too.
