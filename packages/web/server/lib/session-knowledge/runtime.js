@@ -199,8 +199,8 @@ export const buildKnowledgeEntries = ({ notes, plans, memory, linking = false, r
     [KNOWLEDGE_ENTRY_KEYS.pinned]: truncate(buildPinnedBlock({ notes, plans })),
     [KNOWLEDGE_ENTRY_KEYS.memory]: truncate(buildMemoryBlock(memory)),
     [KNOWLEDGE_ENTRY_KEYS.guidance]: buildGuidance({ linking, rendering, workflows, directTools }),
-    ...(openui === undefined ? {} : { [KNOWLEDGE_ENTRY_KEYS.openui]: openui }),
   };
+  if (openui !== undefined) entries[KNOWLEDGE_ENTRY_KEYS.openui] = openui;
   // The branch is told while the agent has the tool, whose worktree move is
   // the one thing it can do about a busy branch.
   if (!linking) entries[KNOWLEDGE_ENTRY_KEYS.checkout] = '';

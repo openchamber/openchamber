@@ -17,7 +17,9 @@ describe('OpenUI catalog', () => {
     BarChart(["A"], [Series("Count", [2])], null, null, null, null, {orientation: "horizontal", layout: "scroll"})
     ], null, null, null, null, null, {maxWidth: 48, padding: "m"})`;
     expect(inspectOpenUIProgram(source, catalog.schema, catalog.componentSlots)).toMatchObject({ valid: true });
-    expect(catalog.componentSlots).toContainEqual({ component: 'Grid', prop: 'children', allowed: expect.arrayContaining(['GridItem', 'ImageGallery']) });
+    const allowed = catalog.componentSlots.find((slot) => slot.component === 'Grid' && slot.prop === 'children')?.allowed;
+    expect(allowed).toContain('GridItem');
+    expect(allowed).toContain('ImageGallery');
   });
   test('ships the same schema and signatures consumed by the live library', async () => {
     const { chamberLibrary } = await import('./openuiCatalog');
@@ -35,8 +37,10 @@ describe('OpenUI catalog', () => {
     const names = new Set<string>(OPENUI_COMPONENT_NAMES);
     expect(Object.keys(catalog.schema.$defs ?? {}).filter((name) => names.has(name)).sort())
       .toEqual([...OPENUI_COMPONENT_NAMES].sort());
-    expect(catalog.componentSlots).toContainEqual({ component: 'Card', prop: 'children', allowed: expect.arrayContaining(['HtmlView']) });
-    expect(catalog.componentSlots).toContainEqual({ component: 'Card', prop: 'children', allowed: expect.arrayContaining(['Card', 'Icon']) });
+    const allowed = catalog.componentSlots.find((slot) => slot.component === 'Card' && slot.prop === 'children')?.allowed;
+    expect(allowed).toContain('HtmlView');
+    expect(allowed).toContain('Card');
+    expect(allowed).toContain('Icon');
   });
 
   test('accepts a complete Stack and rejects incomplete or external programs', () => {

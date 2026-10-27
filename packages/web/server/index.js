@@ -2075,16 +2075,17 @@ const openChamberControlService = createOpenChamberControlService({
   onPageWaitChange: (change) => {
     sessionRuntime.trackWaitingPage(change);
     if (change.type === 'waiting') {
+      const page = { id: change.callId, title: change.title };
+      if (change.kind === 'openui') {
+        page.kind = 'openui';
+        page.sourceRevision = change.sourceRevision;
+      }
       const payload = {
         type: 'openchamber:page-waiting',
         properties: {
           sessionID: change.sessionId,
           directory: change.directory,
-          page: {
-            id: change.callId,
-            title: change.title,
-            ...(change.kind === 'openui' ? { kind: 'openui', sourceRevision: change.sourceRevision } : {}),
-          },
+          page,
         },
       };
       broadcastOpenChamberUiEvent(payload);

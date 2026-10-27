@@ -92,7 +92,9 @@ for (const { name, images, loaded, primeCache, responseHeader, read = loaded } o
       if (image.httpStatus) return new Response(null, { status: image.httpStatus });
       const bytes = new Uint8Array(image.rawSize ?? Math.max(png.length, image.size ?? 0));
       if (!image.invalid) bytes.set(png.subarray(0, bytes.length));
-      return new Response(bytes, { headers: { 'content-type': 'image/png', ...(responseHeader ? { 'content-length': String(bytes.length) } : {}) } });
+      const headers = new Headers({ 'content-type': 'image/png' });
+      if (responseHeader) headers.set('content-length', String(bytes.length));
+      return new Response(bytes, { headers });
     }
     throw new Error(`Unexpected request: ${url.pathname}`);
   };

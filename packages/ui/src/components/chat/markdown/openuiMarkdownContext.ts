@@ -54,7 +54,7 @@ function matchingPrefix(left: string, right: string): number {
 }
 
 /** Display receipts survive canonical updates that Streamdown's memo skips. */
-function createOpenUIDisplay(source: string, analyzed?: OpenUIAnalyzedSource): DisplaySource {
+export function createOpenUIDisplay(source: string, analyzed?: OpenUIAnalyzedSource): DisplaySource {
   const displayed = normalizeOpenUISource(source);
   const fences = analyzed?.source === displayed ? analyzed.fences : collectOpenUIFences(displayed);
   const display: DisplaySource = {
@@ -92,14 +92,14 @@ export function useOpenUIDisplay(source: string | null, analyzed?: OpenUIAnalyze
 }
 
 export function createOpenUIDocument(input: {
-  displayed: string | DisplaySource;
+  displayed: DisplaySource;
   canonical: string;
   owner: OpenUIOwner;
   currentSource: () => string | null;
   isStreaming?: boolean;
   finalized?: boolean;
 }) {
-  const display = typeof input.displayed === 'string' ? createOpenUIDisplay(input.displayed) : input.displayed;
+  const display = input.displayed;
   const canonical = normalizeOpenUISource(input.canonical);
   const document: DocumentSource = {
     ...input,

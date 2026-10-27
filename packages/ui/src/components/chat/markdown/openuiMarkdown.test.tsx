@@ -3,7 +3,7 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { Block, Streamdown, type BlockProps, type ExtraProps } from 'streamdown';
 import {
-  createOpenUIDocument,
+  createOpenUIDisplay, createOpenUIDocument,
   OpenUIDocumentContext,
   type OpenUIFenceMount,
   useOpenUIFence,
@@ -30,7 +30,7 @@ function SourceBlock(props: BlockProps) {
 }
 
 function authorized(displayed: string, canonical = displayed, mode: 'static' | 'streaming' = 'static') {
-  const source = createOpenUIDocument({ displayed, canonical, owner, currentSource: () => canonical });
+  const source = createOpenUIDocument({ displayed: createOpenUIDisplay(displayed), canonical, owner, currentSource: () => canonical });
   return renderToStaticMarkup(
     <OpenUIDocumentContext.Provider value={source.document}>
       <Streamdown
@@ -76,9 +76,9 @@ describe('Streamdown maps display nodes to canonical OpenUI fences', () => {
   });
 
   test('interleaved source receipts cannot authorize another render', () => {
-    const first = createOpenUIDocument({ displayed: block, canonical: block, owner, currentSource: () => block });
+    const first = createOpenUIDocument({ displayed: createOpenUIDisplay(block), canonical: block, owner, currentSource: () => block });
     const secondSource = `Changed prefix.\n\n${block}`;
-    const second = createOpenUIDocument({ displayed: secondSource, canonical: secondSource, owner, currentSource: () => secondSource });
+    const second = createOpenUIDocument({ displayed: createOpenUIDisplay(secondSource), canonical: secondSource, owner, currentSource: () => secondSource });
     const draw = (source: typeof first, text: string) => renderToStaticMarkup(
       <OpenUIDocumentContext.Provider value={source.document}>
         <Streamdown {...getMarkdownProcessingOptions(false, false)} mode="streaming" components={{ code: Code }}
@@ -118,7 +118,7 @@ describe('Streamdown maps display nodes to canonical OpenUI fences', () => {
       interact = useOpenUIFence(node, value)?.canInteract;
       return <code>{value}</code>;
     }
-    const source = createOpenUIDocument({ displayed: block, canonical: block, owner, currentSource: () => current });
+    const source = createOpenUIDocument({ displayed: createOpenUIDisplay(block), canonical: block, owner, currentSource: () => current });
     renderToStaticMarkup(
       <OpenUIDocumentContext.Provider value={source.document}>
         <Streamdown {...getMarkdownProcessingOptions(false, false)} mode="static" components={{ code: Capture }}>
@@ -144,7 +144,7 @@ describe('Streamdown maps display nodes to canonical OpenUI fences', () => {
         if (mount) captured.push(mount);
         return <code>{value}</code>;
       }
-      const source = createOpenUIDocument({ displayed, canonical, owner, isStreaming, finalized, currentSource: () => canonical });
+      const source = createOpenUIDocument({ displayed: createOpenUIDisplay(displayed), canonical, owner, isStreaming, finalized, currentSource: () => canonical });
       renderToStaticMarkup(
         <OpenUIDocumentContext.Provider value={source.document}>
           <Streamdown {...getMarkdownProcessingOptions(false, false)} mode="streaming" isAnimating={isStreaming}
