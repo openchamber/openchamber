@@ -142,7 +142,10 @@ export function createJsonRpcSubprocess({
     if (!alive || !child.stdin || child.stdin.destroyed) {
       throw new Error('Subprocess stdin not writable');
     }
-    child.stdin.write(JSON.stringify(obj) + '\n');
+    // ACP (and strict JSON-RPC peers) require the version tag; the codex app-server tolerated
+    // its absence, so it was never emitted here. Add it when the caller didn't set one.
+    const framed = obj && obj.jsonrpc === undefined ? { jsonrpc: '2.0', ...obj } : obj;
+    child.stdin.write(JSON.stringify(framed) + '\n');
   }
 
   // --- public API ---

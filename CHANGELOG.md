@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Harness: added a DeepSeek Harness (`dsh`) backend that drives `dsh` over ACP (JSON-RPC on stdio), with its own session persistence, model control surface, and tests.
+- Harness: `jsonrpc-subprocess` requests now include the required `jsonrpc: "2.0"` field.
+
 ## [1.10.3] - 2026-05-08
 
 - Desktop/Electron: added Mini Chat windows for focused conversations without the full workspace shell, including session/draft handoff back to the main window, always-on-top pinning, and quick access from the header, session list, command palette, and keyboard shortcuts.

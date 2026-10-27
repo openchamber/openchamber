@@ -274,7 +274,7 @@ export const registerOpenCodeProxy = (app, deps) => {
     const closeUpstream = () => abortController.abort();
     let upstream = null;
     let reader = null;
-    let removeCodexClient = null;
+    const removeEventClients = [];
 
     req.on('close', closeUpstream);
 
@@ -300,8 +300,13 @@ export const registerOpenCodeProxy = (app, deps) => {
         res.socket.setNoDelay(true);
       }
 
-      const codexRuntime = backendRegistry.getRuntime('codex');
-      removeCodexClient = codexRuntime?.addEventClient?.(res, parsed.pathname === '/api/event' ? directory : null) || null;
+      // Attach every child-CLI backend that streams its own events (codex, deepseek).
+      const streamDirectory = parsed.pathname === '/api/event' ? directory : null;
+      for (const backendId of ['codex', 'deepseek']) {
+        const runtime = backendRegistry.getRuntime(backendId);
+        const remove = runtime?.addEventClient?.(res, streamDirectory);
+        if (typeof remove === 'function') removeEventClients.push(remove);
+      }
 
       // Only connect to OpenCode upstream if it is available
       if (backendRegistry.isBackendAvailable('opencode')) {
@@ -347,9 +352,8 @@ export const registerOpenCodeProxy = (app, deps) => {
       }
     } finally {
       req.off('close', closeUpstream);
-      try {
-        removeCodexClient?.();
-      } catch {
+      for (const remove of removeEventClients) {
+        try { remove(); } catch { /* ignore */ }
       }
       try {
         if (reader) {

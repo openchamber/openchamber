@@ -482,7 +482,9 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
 
   app.get('/api/openchamber/harness/control-surface', async (req, res) => {
     try {
-      const sessionId = typeof req.query?.sessionId === 'string' ? req.query.sessionId.trim() : '';
+      const sessionId = typeof req.query?.sessionId === 'string' && req.query.sessionId.trim()
+        ? req.query.sessionId.trim()
+        : (typeof req.query?.sessionID === 'string' ? req.query.sessionID.trim() : '');
       const binding = sessionId ? await getBoundBackend(sessionId, req) : null;
       const backendId = binding?.backendId || await getRequestedBackendId(req);
 
@@ -497,6 +499,7 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
       const payload = await runtime.getControlSurface({
         directory: binding?.directory
           || (typeof req.query?.directory === 'string' ? req.query.directory : undefined),
+        sessionID: sessionId || undefined,
         providerId: typeof req.query?.providerId === 'string' ? req.query.providerId : undefined,
         modelId: typeof req.query?.modelId === 'string' ? req.query.modelId : undefined,
       });

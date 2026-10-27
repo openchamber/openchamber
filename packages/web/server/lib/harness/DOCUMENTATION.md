@@ -21,6 +21,8 @@ or route code.
   - OpenCode adapter built on `@opencode-ai/sdk/v2`.
 - `codex-backend.js`
   - Codex adapter built on `@openai/codex-sdk` plus the local Codex CLI/runtime.
+- `deepseek-backend.js`
+  - DeepSeek Harness (`dsh`) adapter over ACP (JSON-RPC on stdio) via `deepseek-appserver.js`.
 
 The actual HTTP route registration lives in:
 
@@ -306,3 +308,25 @@ Cause:
 Fix:
 
 - move the operation back behind the backend adapter and use the official SDK
+
+## DeepSeek backend
+
+`deepseek-backend.js` runs the DeepSeek Harness (`dsh`) as a harness backend. It spawns
+`dsh` and speaks ACP (JSON-RPC over stdio) through `deepseek-appserver.js`; sessions persist
+beside the other backends.
+
+The backend is pinned to whichever single provider the `dsh` profile defines, so a session
+cannot fall back to another vendor. It advertises that provider's models (`DEEPSEEK_MODELS`) in the
+model picker. Options (all optional):
+
+| Variable | Purpose | Default |
+| --- | --- | --- |
+| `DEEPSEEK_DSH_BIN` | `dsh` executable | `dsh` |
+| `DEEPSEEK_DSH_ARGS` | argv for `dsh`; **replaces** the default (so include `--profile <name>`) | `--profile acp` |
+| `DEEPSEEK_PROVIDER` | provider id used for the picker label / fallback | `deepseek-official` |
+| `DEEPSEEK_MODEL` | default model | `deepseek-v4-flash` |
+| `DEEPSEEK_MODELS` | comma-separated models to advertise | `DEEPSEEK_MODEL` |
+
+`DSH_HOME`, `DSH_PERMISSION_MODE` and other `DSH_*` variables are not read by this backend; they are
+inherited by the spawned `dsh` process and interpreted by `dsh`'s own profile.
+

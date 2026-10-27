@@ -617,6 +617,20 @@ const codexBackendRuntime = createCodexBackendRuntime({
 backendRegistry.registerRuntime('opencode', openCodeBackendRuntime);
 backendRegistry.registerRuntime('codex', codexBackendRuntime);
 
+// DeepSeek Harness backend (ACP). Import declarations are hoisted, so the runtime
+// is constructed here next to the other backends. Sessions persist beside Codex's.
+import { createDeepSeekBackendRuntime } from './lib/harness/deepseek-backend.js';
+
+const deepSeekBackendRuntime = createDeepSeekBackendRuntime({
+  crypto,
+  fsPromises,
+  sessionsFilePath: path.join(OPENCHAMBER_DATA_DIR, 'deepseek-sessions.json'),
+  publishEvent: (event) => publishCodexEventToGlobalStream?.(event),
+});
+
+backendRegistry.registerRuntime('deepseek', deepSeekBackendRuntime);
+backendRegistry.setBackendAvailability('deepseek', Boolean(deepSeekBackendRuntime.isAvailable?.()));
+
 const ENV_CONFIGURED_API_PREFIX = normalizeApiPrefix(
   process.env.OPENCODE_API_PREFIX || process.env.OPENCHAMBER_API_PREFIX || ''
 );
@@ -1076,7 +1090,19 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   scheduledTasksRuntime,
 });
 
-const gracefulShutdown = (...args) => gracefulShutdownRuntime.gracefulShutdown(...args);
+// Harness backends spawn child CLIs (dsh, codex). Stop them with the server so they
+// don't outlive it.
+const stopHarnessBackends = async () => {
+  await Promise.allSettled(['deepseek', 'codex'].map(async (id) => {
+    const runtime = backendRegistry.getRuntime?.(id);
+    await runtime?.shutdownAll?.();
+  }));
+};
+
+const gracefulShutdown = async (...args) => {
+  await stopHarnessBackends().catch(() => {});
+  return gracefulShutdownRuntime.gracefulShutdown(...args);
+};
 
 async function main(options = {}) {
   const port = Number.isFinite(options.port) && options.port >= 0 ? Math.trunc(options.port) : DEFAULT_PORT;
