@@ -11,7 +11,7 @@ describe('updateProgressPercent', () => {
     expect(updateProgressPercent({ downloaded: 42, total: undefined })).toBe(0);
   });
 
-  test('clamps differential downloads that transfer more than the zip size', () => {
+  test('clamps a differential download that reports more bytes than its total', () => {
     expect(updateProgressPercent({ downloaded: 15_368, total: 980 })).toBe(100);
   });
 
