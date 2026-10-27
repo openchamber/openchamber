@@ -427,7 +427,7 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
                 <div className="min-w-0 flex-1">
                   <div className="typography-ui-label truncate text-muted-foreground">{agent.name}</div>
                   {agent.description ? (
-                    <div className="typography-micro truncate leading-tight text-muted-foreground/60">{agent.description}</div>
+                    <div className="typography-micro truncate leading-tight text-muted-foreground">{agent.description}</div>
                   ) : null}
                 </div>
                 <Button
@@ -593,7 +593,7 @@ const AgentListItem: React.FC<AgentListItemProps> = ({
           </div>
 
           {agent.description && (
-            <div className="typography-micro text-muted-foreground/60 truncate leading-tight">
+            <div className="typography-micro text-muted-foreground truncate leading-tight">
               {agent.description}
             </div>
           )}

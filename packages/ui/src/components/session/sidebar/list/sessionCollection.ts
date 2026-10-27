@@ -30,7 +30,7 @@ type SidebarSessionPartitions = {
 };
 
 // A row nests under its subagent parent or under the session it grew out of
-// (an auto-review, a fork, a dispatched session), see `lib/sessionWorkLineage`.
+// (an auto-review, a `/btw` side conversation), see `lib/sessionWorkLineage`.
 const nestingParentResolver = (sessionById: ReadonlyMap<string, Session>) => (
   (session: Session): string | null => resolveSessionNestingParentId(session, (id) => sessionById.get(id))
 );

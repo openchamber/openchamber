@@ -180,7 +180,7 @@ export const BrowserEmptyState: React.FC<{
                       aria-label={spaceMark ?? t('contextPanel.browser.spaceAddress')}
                       title={spaceMark ?? t('contextPanel.browser.spaceAddress')}
                     >
-                      <Icon name="box-3" className="size-3.5" aria-hidden="true" />
+                      <Icon name="instance" className="size-3.5" aria-hidden="true" />
                     </span>
                   ) : (
                     <Icon name="global" className="size-3.5 shrink-0" aria-hidden="true" />

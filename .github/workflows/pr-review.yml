@@ -309,6 +309,12 @@ jobs:
           gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
             --json title,body,author,baseRefName,headRefName,headRefOid,labels,commits,files,reviewDecision,comments,reviews \
             > "$context/pr.json"
+          # JSON keeps each body on one line, and the agent's read tool cuts a
+          # line at 2,000 characters, so a long description arrived truncated.
+          jq -r '"# \(.title)\n\nBy @\(.author.login)\n\n\(.body // "")",
+            (.comments[] | "\n## Comment by @\(.author.login), \(.createdAt)\n\n\(.body)"),
+            (.reviews[] | select((.body // "") != "") | "\n## Review by @\(.author.login), \(.state), \(.submittedAt)\n\n\(.body)")' \
+            "$context/pr.json" > "$context/pr.md"
 
           # Review the HEAD this run was started for, never a moving target.
           head="$(jq -r '.headRefOid' "$context/pr.json")"

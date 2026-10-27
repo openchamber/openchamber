@@ -35,6 +35,7 @@ import { getVisibleContextRailSurfaces } from '@/lib/surfaces/registry';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSourceControlAuthStore } from '@/stores/useSourceControlAuthStore';
+import { isWorkflowsSurfaceShown } from '@/lib/workflows/panel';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { getCycledPrimaryAgentName } from '@/components/chat/mobileControlsUtils';
 import { focusChatInput } from '@/components/chat/composer/editor/dom';
@@ -47,6 +48,7 @@ import {
   invokeActiveSelectionAddToChat,
 } from '@/lib/addSelectionToChat';
 import { isIMECompositionEvent } from '@/lib/ime';
+import { getNextFavoriteModel } from '@/lib/modelRefs';
 import { canUseDigitShortcut, hasActiveBtwComposer, hasOpenDropdown, isEditableEventTarget, shouldStopDropdownImeEscape } from './keyboard-shortcut-dom';
 
 const dropdownTargetSelector = [
@@ -360,18 +362,16 @@ export const useKeyboardShortcuts = () => {
       || state.isHelpDialogOpen
       || state.isSessionSwitcherOpen
       || state.isAboutDialogOpen;
-    if (
-      state.isSettingsDialogOpen
-      || hasOverlay
-      || state.favoriteModels.length === 0
-    ) {
-      return false;
-    }
+    if (state.isSettingsDialogOpen || hasOverlay) return false;
     const config = useConfigStore.getState();
-    const index = state.favoriteModels.findIndex((model) => (
-      model.providerID === config.currentProviderId && model.modelID === config.currentModelId
-    ));
-    const next = state.favoriteModels[(index + delta + state.favoriteModels.length) % state.favoriteModels.length];
+    const next = getNextFavoriteModel(
+      state.favoriteModels,
+      config.providers,
+      state.hiddenModels,
+      { providerID: config.currentProviderId, modelID: config.currentModelId },
+      delta,
+    );
+    if (!next) return false;
     config.setProvider(next.providerID);
     config.setModel(next.modelID);
     state.addRecentModel(next.providerID, next.modelID);
@@ -564,6 +564,7 @@ export const useKeyboardShortcuts = () => {
             screenWidth: window.innerWidth,
             tabs: panel?.tabs ?? [],
             sourceControlConnected: Object.values(useSourceControlAuthStore.getState().entries).some((entry) => entry.status?.status === 'connected'),
+            workflowsShown: isWorkflowsSurfaceShown(panel?.tabs ?? [], effectiveDirectory),
             extras: enabledGuestSurfaces(useGuestsStore.getState().guests, getRuntimeUrlResolver().authenticatedAsset),
           });
           const target = visibleSurfaces[switchSurfaceDigit - 1];

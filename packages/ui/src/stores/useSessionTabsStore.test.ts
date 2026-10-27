@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 
-import { useSessionTabsStore } from './useSessionTabsStore';
+import { GLOBAL_SESSION_TAB_SCOPE, useSessionTabsStore } from './useSessionTabsStore';
 
 const state = () => useSessionTabsStore.getState();
 
 describe('useSessionTabsStore', () => {
   beforeEach(() => {
-    useSessionTabsStore.setState({ tabIds: [], previewTabId: null, pinOnOpenIds: [] });
+    useSessionTabsStore.setState({ tabIds: [], previewTabId: null, pinOnOpenIds: [], scope: GLOBAL_SESSION_TAB_SCOPE, sets: {} });
   });
 
   test('opening a session uses the preview tab, replacing the previous preview in place', () => {
@@ -109,5 +109,46 @@ describe('useSessionTabsStore', () => {
     expect(state().tabIds).toBe(before);
     state().removeTabs(['a']);
     expect(state().tabIds).toEqual(['b']);
+  });
+
+  test('each scope keeps its own working set, and a new scope opens with its seed pinned', () => {
+    useSessionTabsStore.setState({ tabIds: ['a', 'b'], previewTabId: 'b' });
+    state().enterScope('wt', () => ['w1', 'w2']);
+    expect(state().tabIds).toEqual(['w1', 'w2']);
+    expect(state().previewTabId).toBeNull();
+    state().ensureTab('w3');
+    expect(state().previewTabId).toBe('w3');
+
+    state().enterScope(GLOBAL_SESSION_TAB_SCOPE, () => ['never']);
+    expect(state().tabIds).toEqual(['a', 'b']);
+    expect(state().previewTabId).toBe('b');
+
+    // Back again: the set it left, not a fresh seed.
+    state().enterScope('wt', () => ['other']);
+    expect(state().tabIds).toEqual(['w1', 'w2', 'w3']);
+    expect(state().previewTabId).toBe('w3');
+  });
+
+  test('entering the shown scope changes nothing, and a seed is capped', () => {
+    useSessionTabsStore.setState({ tabIds: ['a'] });
+    const before = state().tabIds;
+    state().enterScope(GLOBAL_SESSION_TAB_SCOPE, () => ['x']);
+    expect(state().tabIds).toBe(before);
+    state().enterScope('big', () => Array.from({ length: 15 }, (_, i) => `s${i}`));
+    expect(state().tabIds).toHaveLength(10);
+  });
+
+  test('removeTabs drops a gone session from every scope', () => {
+    useSessionTabsStore.setState({ tabIds: ['a', 'gone'] });
+    state().enterScope('wt', () => ['gone', 'w1']);
+    state().removeTabs(['gone']);
+    expect(state().tabIds).toEqual(['w1']);
+    expect(state().sets[GLOBAL_SESSION_TAB_SCOPE]?.tabIds).toEqual(['a']);
+  });
+
+  test('stored tabs of the one global set carry over', async () => {
+    const options = useSessionTabsStore.persist.getOptions();
+    const migrated = await options.migrate?.({ tabIds: ['a', 'b'], previewTabId: 'b' }, 0);
+    expect(migrated).toEqual({ tabIds: ['a', 'b'], previewTabId: 'b', scope: GLOBAL_SESSION_TAB_SCOPE, sets: {} });
   });
 });

@@ -388,7 +388,7 @@ const MobileFileRow: React.FC<{
     )}
     <span className="block min-w-0 flex-1 truncate typography-ui-label text-foreground">{name}</span>
     {meta ? <span className="shrink-0 typography-micro text-muted-foreground">{meta}</span> : null}
-    {directory ? <RiArrowRightSLine className="size-4 shrink-0 text-muted-foreground/60" /> : null}
+    {directory ? <RiArrowRightSLine className="size-4 shrink-0 text-muted-foreground" /> : null}
   </button>
 );
 

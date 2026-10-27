@@ -348,7 +348,7 @@ export function getSettingsNavIcon(slug: SettingsPageSlug): IconName | null {
     case 'tunnel':
       return 'home-office';
     case 'isolated-spaces':
-      return 'box-3';
+      return 'instance';
     case 'about':
       return 'information';
     case 'home':

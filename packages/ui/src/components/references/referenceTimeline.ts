@@ -1,3 +1,5 @@
+import type { ReviewCommentExcerpt } from '@/lib/api/types';
+
 /** The preview's thread: comments and, for a PR, its commits, in the order they happened. */
 
 /** One comment in the preview's thread, from a source-control provider or a tracker. */
@@ -12,6 +14,8 @@ export type ReferenceCommentItem = {
     context: string | null;
     /** The `path:line` a review comment sits on, for what it is attached to in chat. */
     location: string | null;
+    /** The lines a review comment sits on, for a suggestion in it to be drawn against. */
+    excerpt?: ReviewCommentExcerpt;
     /** Set when the comment opens a review thread, or a discussion comment's replies; its replies are not entries of their own. */
     thread?: ReferenceCommentThread;
     /** A discussion comment in a category that takes answers: whether it is the answer, and whether this account may change that. */

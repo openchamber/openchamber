@@ -1828,7 +1828,12 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
       return null;
     }
     const clientToken = input.clientToken?.trim() || undefined;
-    const label = input.label?.trim() || getConnectionLabel(connectionDisplayUrl({ candidates }));
+    // A relay-only connection has no address to name it by; an emptied name
+    // keeps the one it had instead of becoming the relay:// pseudo-URL.
+    const fallbackLabel = directCandidates({ candidates }).length === 0 && existing
+      ? existing.label
+      : getConnectionLabel(connectionDisplayUrl({ candidates }));
+    const label = input.label?.trim() || fallbackLabel;
     // Awaited token writes so "Save" truly persisted the secret before returning.
     if (isCapacitorApp()) {
       const nextKey = secureTokenKeyOf({ candidates, serverId: existing?.serverId });

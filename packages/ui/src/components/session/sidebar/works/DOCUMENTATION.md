@@ -6,24 +6,30 @@ view, In work, Drafts, Folders with worktrees) describes how they are laid out.
 
 - `sidebarWorks.ts`: which work each listed session belongs to
   (`buildSidebarWorkIndex`, from the project sections) and works in order
-  (`orderSidebarWorks`, by the first of their sessions in the lifecycle order).
-  A work is a linked worktree's group (`isWorktreeWorkGroup`: not the root, not
-  a space, not an archive) with every session in it, or a root session of the
-  project root or a space with what nests under it. Work keys are
-  `<projectId>:<groupId>` for a worktree (the group key the row model already
-  uses, so collapse state is shared) and `session:<id>` for a session.
-  `worktreeFolderMemberId` is a worktree's member id in a root folder.
+  (`orderSidebarWorks`, by the first of their sessions in the lifecycle order),
+  and where a worktree's archived sessions hold it in that order
+  (`buildWorktreeArchiveAnchors`), so archiving does not move a worktree.
+  A work is a linked worktree's or an isolated space's group (`isGroupWork`:
+  not the root, not an archive) with every session in it, or a root session of
+  the project root with what nests under it. Work keys are
+  `<projectId>:<groupId>` for a worktree or a space (the group key the row
+  model already uses, so collapse state is shared) and `session:<id>` for a
+  session. `worktreeFolderMemberId` is a worktree's or a space's member id in
+  a root folder.
 - `workActions.ts`: the session a click opens (`pickWorkSessionToOpen`: past
   reviews and forks, newest first), Track, and Done on a worktree work
   (`finishWorktreeWork`: sessions done, the work left, and with `archive` the
-  worktree archived with its sessions).
-- `useWorktreeWork.ts`, `useSessionDraftRow.ts`: what a worktree work's row
-  and a draft's row know and do (the label, selection, open, Done, Archive,
-  rename; open and discard), shared by the desktop's rows and the phone's
-  (`apps/mobileSidebar/MobileWorkRows.tsx`), which differ only in how they are
-  drawn and used.
-- `WorktreeWorkRow.tsx`: the desktop's worktree work row, in its project, in a
-  folder or in a zone (`mixed`).
+  worktree archived with its sessions) or a space work (`finishSpaceWork`:
+  sessions done, the work left and the space stopped unless an agent still
+  works in it; the space stays).
+- `useWorktreeWork.ts`, `useSessionDraftRow.ts`: what a worktree's or a
+  space's work row and a draft's row know and do (the label, selection, open,
+  Done, Archive, rename; open and discard), shared by the desktop's rows and
+  the phone's (`apps/mobileSidebar/MobileWorkRows.tsx`), which differ only in
+  how they are drawn and used.
+- `WorktreeWorkRow.tsx`: the desktop's worktree or space work row, in its
+  project, in a folder or in a zone (`mixed`). A space's state and actions
+  come from `components/session/spaces` (`SpaceStatus.tsx`, `SpaceActions.tsx`).
 - `SessionDraftRow.tsx`, `openSessionDraft.ts`: the desktop's row of a left
   draft and reopening it in the composer.
 

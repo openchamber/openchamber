@@ -27,7 +27,9 @@ catalogs, so a small change with many locale files stays small.
      - what was wrong or missing, as the user saw it
      - what the user sees now instead
      - why this way, if there was a real choice
-     Link the issue or Ideas discussion.
+     Link the issue or Ideas discussion. Write `Fixes #N` if this PR fixes
+     all of the issue, so GitHub links it and closes it on merge; write
+     `Part of #N` if it fixes only part.
      If nearby behavior is deliberately left alone and a reader might expect it
      changed, say so in a line.
 

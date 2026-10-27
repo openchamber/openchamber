@@ -728,7 +728,7 @@ TimelineList.displayName = 'TimelineList';
 // row keeps its React tree when it moves between the two. The live tail
 // changes on every send and on a revert; with a different component per role
 // the row remounted, its state reset for a commit (a long user message lost
-// its "show full message" link), and the list measured that frame as the
+// its "show more" link), and the list measured that frame as the
 // row's height. The next row then sat that much too high until a later
 // re-measure.
 const TimelineRowContent: React.FC<{

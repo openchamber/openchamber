@@ -345,7 +345,7 @@ export const AgentPermissionsEditor: React.FC<AgentPermissionsEditorProps> = ({
               className={cn('h-3.5 w-3.5 shrink-0 text-muted-foreground', !supportsPatterns && 'opacity-0')}
             />
             <span className={SETTINGS_FIELD_LABEL_CLASS}>{label}</span>
-            <span className="typography-micro font-mono text-muted-foreground/70">{key}</span>
+            <span className="typography-micro font-mono text-muted-foreground">{key}</span>
             {statusLabel && (
               <span className="typography-micro rounded bg-muted px-1 text-muted-foreground">{statusLabel}</span>
             )}

@@ -2,6 +2,7 @@ export * from './InlineCommentCard';
 export * from './InlineCommentInput';
 export * from './useInlineCommentController';
 export * from './CodeMirrorCommentWidgets';
+export * from './useLineNumberDragSelection';
 export * from './PierreDiffCommentUtils';
 export * from './PierreDiffCommentOverlays';
 export * from './FilePreviewCommentMenu';

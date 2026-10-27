@@ -33,6 +33,10 @@ import { mcpGridI18n } from './mcp-grid.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { diffFindI18n } from './diff-find.i18n';
+import { markdownGithubI18n } from './markdown-github.i18n';
+import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
+import { workflowsI18n } from './workflows.i18n';
+import { sessionReferencesI18n } from './session-references.i18n';
 import { guestStatusViewI18n } from './guest-status-view.i18n';
 
 export const dict: Record<I18nKey, string> = {
@@ -177,6 +181,10 @@ export const dict: Record<I18nKey, string> = {
   ...pluginsGridI18n['zh-CN'],
   ...integrationsCatalogI18n['zh-CN'],
   ...diffFindI18n['zh-CN'],
+  ...markdownGithubI18n['zh-CN'],
+  ...autocompleteScopeI18n['zh-CN'],
+  ...workflowsI18n['zh-CN'],
+  ...sessionReferencesI18n['zh-CN'],
   ...guestStatusViewI18n['zh-CN'],
   'terminalView.actions.attachSelection': '附加所选输出',
   'terminalView.actions.copySelection': '复制所选输出',
@@ -316,7 +324,6 @@ export const dict: Record<I18nKey, string> = {
   'mobile.menu.files': '文件',
   'mobile.menu.git': 'Git',
   'mobile.menu.terminal': '终端',
-  'mobile.menu.mcp': 'MCP',
   'mobile.menu.instances': '实例',
   'mobile.menu.update': '更新',
   'mobile.menu.settings': '设置',
@@ -2288,6 +2295,7 @@ export const dict: Record<I18nKey, string> = {
   'session.githubIntegration.validation.branchAlreadyCheckedOut': '该分支已在某个工作树中检出',
   'session.githubIntegration.validation.failed': '校验失败',
   'chat.fileAttachment.toast.attachFailed': '附加文件失败',
+  'chat.fileAttachment.toast.tooLarge': '{name} 过大，无法附加（超过 {size}）。如果它在项目中，请用 @ 提及。',
   'chat.fileAttachment.toast.someFilesSkipped': '以下文件被跳过：\n{summary}',
   'chat.fileAttachment.toast.vscodePickFailed': '在 VS Code 中选择文件失败',
   'chat.fileAttachment.fileFallback': '文件',
@@ -2403,8 +2411,6 @@ export const dict: Record<I18nKey, string> = {
   'chat.commandAutocomplete.command.btwDescription': '在临时子会话中提问，不打断当前对话',
   'chat.commandAutocomplete.command.forkDescription': '从最后一个已完成的回复分叉此对话并在新会话中继续；/fork 后的文本会发送到分叉会话。',
   'chat.commandAutocomplete.command.exploreDescription': '快速熟悉这个代码库：对架构和主要部分的概览。',
-  'chat.commandAutocomplete.badge.command': '命令',
-  'chat.commandAutocomplete.badge.system': '系统',
   'chat.commandAutocomplete.empty': '未找到命令',
   'chat.agentMentionAutocomplete.badge.system': '系统',
   'chat.agentMentionAutocomplete.empty': '未找到智能体',
@@ -2548,8 +2554,6 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.actions.sendMessageAria': '发送消息',
   'chat.chatInput.actions.queueMessageAria': '将消息加入队列',
   'chat.chatInput.actions.stopGeneratingAria': '停止生成',
-  'chat.chatInput.focusMode.toggleAria': '切换专注模式',
-  'chat.chatInput.focusMode.label': '专注模式',
   'chat.chatInput.linked.byAuthor': '由 {author}',
   'chat.chatInput.linked.issue.openInBrowserAria': '在浏览器中打开 Issue',
   'chat.chatInput.linked.issue.removeAria': '移除已关联的 Issue',
@@ -2573,7 +2577,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.dictation.insertAndSend': '插入并发送',
   'chat.dictation.retry': '重试转写',
   'chat.dictation.discard': '放弃录音',
-  'chat.snippetAutocomplete.action.addNew': '+ 新建代码片段',
+  'chat.snippetAutocomplete.action.addNew': '新建代码片段',
   'chat.snippetAutocomplete.empty': '未找到代码片段',
   'chat.snippetAutocomplete.footer': '↑↓ 导航 • Enter 选择 • Esc 关闭',
   'snippets.source.global': '全局',
@@ -2964,6 +2968,20 @@ export const dict: Record<I18nKey, string> = {
   'projects.sharedTrust.actions': '操作',
   'projects.sharedTrust.skip': '这次不运行',
   'projects.sharedTrust.trust': '信任并运行',
+  'projects.opencodeTrust.title': '允许 OpenCode 运行此文件夹中的代码？',
+  'projects.opencodeTrust.description': 'OpenCode 一打开文件夹，就会运行 {path} 配置中的插件和命令。信任一次后，只有当它们变更时 OpenChamber 才会再次询问。',
+  'projects.opencodeTrust.plugins': '插件',
+  'projects.opencodeTrust.commands': '命令',
+  'projects.opencodeTrust.kind.package': '{name}（npm 包）',
+  'projects.opencodeTrust.kind.config': '{path}：OpenChamber 无法读取的配置文件',
+  'projects.opencodeTrust.kind.mcp': 'MCP 服务器 {name}',
+  'projects.opencodeTrust.kind.lsp': '语言服务器 {name}',
+  'projects.opencodeTrust.kind.formatter': '格式化工具 {name}',
+  'projects.opencodeTrust.kind.shell': 'Shell',
+  'projects.opencodeTrust.paused': '不信任时，智能体无法在此文件夹中工作，但仍可浏览其文件和 Git 更改。',
+  'projects.opencodeTrust.skip': '这次不用',
+  'projects.opencodeTrust.trust': '信任并打开',
+  'projects.opencodeTrust.saveFailed': '无法保存你的选择，请重试。',
   'projectActions.actions.autoDiscoverTooltip': '自动发现并运行开发服务器',
   'projectActions.actions.chooseActionAria': '选择项目操作',
   'projectActions.actions.openPreview': '打开 Preview',
@@ -3477,6 +3495,7 @@ export const dict: Record<I18nKey, string> = {
   'common.duration.minutesSecondsCompact': '{minutes}分{seconds}秒',
   'common.duration.hoursMinutesCompact': '{hours}小时{minutes}分',
   'contextFileOpen.failure.tooLarge': '文件过大无法打开（超过 {count} 行）',
+  'contextFileOpen.failure.tooLargeSize': '文件过大，无法打开（超过 {size}）',
   'contextFileOpen.failure.missing': '未找到文件',
   'contextFileOpen.failure.unreadable': '打开文件失败',
   'quota.window.5h': '5 小时',
@@ -3502,6 +3521,7 @@ export const dict: Record<I18nKey, string> = {
   'quota.window.completions': '补全',
   'quota.window.premiumInteractions': 'AI 点数',
   'chat.workStatus.ariaLabel': '工作状态',
+  'chat.workStatus.mobileEmpty': '此会话暂无可显示的内容',
   'chat.workStatus.context.label': '上下文',
   'chat.workStatus.cost.breakdown': '会话 {session} · 子智能体 {subagents}',
   'chat.workStatus.git.changedFileSingle': '已更改 {count} 个文件',

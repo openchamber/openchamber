@@ -77,6 +77,12 @@
         ],
         "discussion": [
           "/{owner}/{repo}/discussions/{number}"
+        ],
+        "commit": [
+          "/{owner}/{repo}/commit/{sha}"
+        ],
+        "user": [
+          "/{user}"
         ]
       },
       "features": {
@@ -157,6 +163,12 @@
         "issue": [
           "/{namespace+}/{repo}/-/issues/{number}",
           "/{namespace+}/{repo}/-/work_items/{number}"
+        ],
+        "commit": [
+          "/{namespace+}/{repo}/-/commit/{sha}"
+        ],
+        "user": [
+          "/{user}"
         ]
       },
       "features": {
@@ -236,6 +248,12 @@
         ],
         "issue": [
           "/{owner}/{repo}/issues/{number}"
+        ],
+        "commit": [
+          "/{owner}/{repo}/commit/{sha}"
+        ],
+        "user": [
+          "/{user}"
         ]
       },
       "features": {

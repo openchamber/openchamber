@@ -1,4 +1,5 @@
-import { appendManagedPlugin } from './managed-plugin-config.js';
+import { appendManagedPermissions, appendManagedPlugin } from './managed-plugin-config.js';
+import { managedPermissionRules } from '../agent-tool/runtime.js';
 import { isLimitFailoverConfigured } from '../limit-failover/policy.js';
 import { materializeSessionTitlePlugin } from './session-title-plugin.js';
 
@@ -25,8 +26,11 @@ const DISABLED_BUILTIN_PLUGINS = ['-opencode.browser'];
  * process — where `OPENCODE_CONFIG_CONTENT` (an environment variable) could
  * only ever change across a restart.
  *
- * The file is OpenChamber-owned and holds nothing but `plugins`: the built-in
- * plugins OpenChamber disables, then its own plugin directories. It sits above
+ * The file is OpenChamber-owned and holds `plugins`: the built-in plugins
+ * OpenChamber disables, then its own plugin directories; and `permissions`
+ * its tools need, such as the workflow answer tool denied everywhere but in
+ * the sessions that allow it. OpenCode appends every layer's permissions to
+ * each agent, so ours add to the user's rules and replace none. It sits above
  * the user's global `opencode.json` and below their project config, so it never
  * shadows a project-level choice.
  *
@@ -44,6 +48,7 @@ const DISABLED_BUILTIN_PLUGINS = ['-opencode.browser'];
  * @param {object|null} [dependencies.limitFailoverRuntime] `../limit-failover/runtime.js`; its plugin calls back through the agent tool's address
  * @param {() => Promise<object|null>} dependencies.readSettings
  * @param {() => boolean} dependencies.isAgentMemoryAvailable
+ * @param {() => boolean} [dependencies.isWorkflowAvailable] whether workflows ship in this build (`../workflows/feature-flag.js`)
  */
 export const createManagedConfigRuntime = ({
   fsPromises,
@@ -54,15 +59,18 @@ export const createManagedConfigRuntime = ({
   limitFailoverRuntime = null,
   readSettings,
   isAgentMemoryAvailable,
+  isWorkflowAvailable = () => false,
 }) => {
   const filePath = path.join(instanceDir, MANAGED_CONFIG_FILE_NAME);
 
   /** The user owns `OPENCODE_CONFIG` when their environment already set it. */
   const ownsConfigFile = () => (env.OPENCODE_CONFIG ?? '').trim().length === 0;
 
-  const writeConfigFile = async (pluginDirectories) => {
+  const writeConfigFile = async ({ directories, permissions }) => {
     await fsPromises.mkdir(instanceDir, { recursive: true });
-    const text = `${JSON.stringify({ plugins: [...DISABLED_BUILTIN_PLUGINS, ...pluginDirectories] }, null, 2)}\n`;
+    const config = { plugins: [...DISABLED_BUILTIN_PLUGINS, ...directories] };
+    if (permissions.length > 0) config.permissions = permissions;
+    const text = `${JSON.stringify(config, null, 2)}\n`;
     // Temp + rename: OpenCode reacts to the write immediately, and a partial
     // read would make it drop every managed plugin until the next change.
     const tmp = `${filePath}.tmp-${process.pid}-${Date.now()}`;
@@ -77,8 +85,8 @@ export const createManagedConfigRuntime = ({
 
   /**
    * Materialize the plugins the current settings ask for and return their
-   * directories in load order. Directories exist on disk before the config
-   * file names them.
+   * directories in load order, with the permission rules their tools need.
+   * Directories exist on disk before the config file names them.
    */
   const materializeEnabledPlugins = async () => {
     const settings = await Promise.resolve(readSettings()).catch(() => null);
@@ -89,11 +97,15 @@ export const createManagedConfigRuntime = ({
     const includeKnowledge = settings?.agentKnowledgeToolEnabled !== false;
     const includeNotify = settings?.agentNotifyToolEnabled === true;
     const includeRender = settings?.agentRenderToolEnabled !== false;
+    // On by default wherever the build has workflows: the build flag is the opt-in.
+    const includeWorkflow = isWorkflowAvailable() && settings?.agentWorkflowToolEnabled !== false;
     const codeMode = settings?.agentToolsCodeMode === true;
 
     const directories = [];
-    if (agentToolRuntime && (includeControl || includeSchedule || includeWeb || includeMemory || includeKnowledge || includeNotify || includeRender)) {
-      directories.push(await agentToolRuntime.materializePlugin({ includeControl, includeSchedule, includeWeb, includeMemory, includeKnowledge, includeNotify, includeRender, codeMode }));
+    let permissions = [];
+    if (agentToolRuntime && (includeControl || includeSchedule || includeWeb || includeMemory || includeKnowledge || includeNotify || includeRender || includeWorkflow)) {
+      directories.push(await agentToolRuntime.materializePlugin({ includeControl, includeSchedule, includeWeb, includeMemory, includeKnowledge, includeNotify, includeRender, includeWorkflow, codeMode }));
+      permissions = managedPermissionRules({ includeWorkflow });
     }
     // Only while an option is on: otherwise every limit error would cost the
     // plugin a round trip to hear "do nothing".
@@ -101,7 +113,7 @@ export const createManagedConfigRuntime = ({
       directories.push(await limitFailoverRuntime.materializePlugin());
     }
     directories.push(await materializeSessionTitlePlugin({ fsPromises, path, instanceDir }));
-    return directories;
+    return { directories, permissions };
   };
 
   /**
@@ -110,16 +122,17 @@ export const createManagedConfigRuntime = ({
    * call back without a restart.
    */
   const buildManagedChildEnv = async () => {
-    const directories = await materializeEnabledPlugins();
+    const enabled = await materializeEnabledPlugins();
     const childEnv = agentToolRuntime ? agentToolRuntime.createChildEnv() : {};
     if (ownsConfigFile()) {
-      await writeConfigFile(directories);
+      await writeConfigFile(enabled);
       return { ...childEnv, OPENCODE_CONFIG: filePath };
     }
     let content = env.OPENCODE_CONFIG_CONTENT;
-    for (const directory of [...DISABLED_BUILTIN_PLUGINS, ...directories]) {
+    for (const directory of [...DISABLED_BUILTIN_PLUGINS, ...enabled.directories]) {
       content = appendManagedPlugin(content, directory, 'managed plugin');
     }
+    if (enabled.permissions.length > 0) content = appendManagedPermissions(content, enabled.permissions);
     return { ...childEnv, OPENCODE_CONFIG_CONTENT: content };
   };
 

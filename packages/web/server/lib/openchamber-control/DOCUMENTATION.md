@@ -192,11 +192,14 @@ other.
   directory and does not erase other session results.
 - Destructive session/worktree deletion and project-path registration are not
   part of the action contract.
-- `session.create` called from a session passes that session as
-  `originSessionId`; the session service writes it to the new session as
-  `metadata.openchamber.originSessionID` before the prompt goes out, so the
-  sidebar lists it under the caller's work (a fork records its source itself).
-  A failed write leaves the session a root of its own and fails nothing.
+- `session.create`, `session.send` and `session.fork` called from a session
+  pass that session as `promptedBySessionId` (except a send to the caller
+  itself). The session service records it on the prompt's message as
+  `metadata.openchamber.promptedBy { sessionID, title }`, and the transcript
+  links back to the sender under that message. The title is read when the
+  prompt goes out; a failed read records the id alone. A slash-command
+  prompt goes through `session.command`, which takes no metadata, so it
+  carries no link.
 - `work.name` names the task the session (default: the calling one) works on
   (`../openchamber-sessions/work-naming.js`, wired through the `workNaming`
   dependency; without it the action answers 503). In a linked worktree it sets
@@ -263,3 +266,15 @@ other.
   Closing is panel state, so the client that owns the tab performs it through a
   registered closer, not the page view; the server only validates `tabId` and
   forwards the action like the rest.
+
+## Decisions
+
+### Why a dispatched session links back from its prompt and does not nest in the sidebar
+
+A dispatched session used to nest under the caller's work in the sidebar
+(`metadata.openchamber.originSessionID` on the session). These sessions are
+the user's own conversations, such as PRs a triage session splits off for a
+separate discussion: nesting hid them under one chevron, reshuffled them when
+the caller was archived, and made `work.name` in each of them rename the
+caller. They stay roots now, and the link sits on the prompt that started
+them, where it says who sent which message.

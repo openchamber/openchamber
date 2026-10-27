@@ -10,6 +10,7 @@ import { readMessageFocusInFlight, requestMessageFocus, subscribeMessageFocusSta
 import { getContextObligatoryMessages } from '@/lib/contextObligatoryMessages';
 import { setContextObligatoryMessage } from '@/sync/session-actions';
 import { WorkStatusRow, WorkStatusSection } from './WorkStatusPrimitives';
+import { useLeaveWorkStatus } from './leaveWorkStatus';
 import { useReportWorkStatusPresence } from './presenceContext';
 import type { State } from '@/sync/types';
 
@@ -115,9 +116,12 @@ export const WorkStatusPinnedSection: React.FC<Props> = ({ sessionId, directory 
   // The message-link request: the timeline loads older history until the
   // message is there, opens a collapsed turn around it and shows it where
   // links land. A repeated press is a new request.
+  const leaveWorkStatus = useLeaveWorkStatus();
   const handleReveal = React.useCallback((messageId: string) => {
-    if (sessionId) requestMessageFocus(sessionId, messageId);
-  }, [sessionId]);
+    if (!sessionId) return;
+    requestMessageFocus(sessionId, messageId);
+    leaveWorkStatus?.();
+  }, [leaveWorkStatus, sessionId]);
 
   // While the timeline loads older history to reach a pin, its row spins.
   const inFlightId = React.useSyncExternalStore(

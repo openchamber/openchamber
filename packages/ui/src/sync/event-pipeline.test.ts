@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import type { OpenCodeClient, OpenCodeEvent } from "@opencode/client"
 import type { SyncEvent } from "@/lib/opencode/events"
+import type { JsonValue } from "@/lib/opencode/model"
 import { adoptRelayTunnel, deactivateRelayTunnel } from "@/lib/relay/runtime-tunnel"
 import type { RelayTunnelClient, RelayTunnelWebSocket } from "@/lib/relay/tunnel-client"
 import { clearRuntimeUrlAuthToken, setRuntimeUrlAuthToken } from "@/lib/runtime-auth"
@@ -34,7 +35,7 @@ function statusEvent(type: "busy" | "retry"): OpenCodeEvent {
 }
 
 /** A raw stream payload: wire events, or OpenChamber's own bridge events. */
-type StreamPayload = OpenCodeEvent | { type: string; properties: Record<string, string | boolean | null> }
+type StreamPayload = OpenCodeEvent | { type: string; properties: Record<string, JsonValue> }
 
 /** `keepalives` counts SSE comments sent before the events. They are activity without an event. */
 function createSdk(events: StreamPayload[], streamFinished: () => void, keepalives = 0): OpenCodeClient {
@@ -225,6 +226,24 @@ describe("createEventPipeline", () => {
     )
     expect(events[0]).toEqual({ type: "openchamber.session-assist", properties: { sessionID: "ses_1", directory: "/chat", pending: true } })
     expect(events[1]).toEqual({ type: "openchamber.session-assist", properties: { sessionID: "ses_1", directory: null, pending: false } })
+  })
+
+  test("passes the server's workflow run changes through typed, and drops a malformed one", async () => {
+    const run = {
+      id: "wf_one", parentSessionId: "ses_1", directory: "/repo", name: "audit-routes", description: "Audit every route",
+      state: "running", attempt: 1, createdAt: 1, currentPhase: "Audit", phases: ["Audit"],
+      agents: [{ key: "k-1", label: "audit a", phase: "Audit", state: "running", sessionId: "ses_agent" }], logs: [],
+    }
+    const { events } = await collect(
+      [
+        { type: "openchamber:workflow-run", properties: { run: { ...run, state: "exploded" } } },
+        { type: "openchamber:workflow-run", properties: { run } },
+        { type: "openchamber:workflow-run-removed", properties: { runId: "wf_one", parentSessionId: "ses_1" } },
+      ],
+      2,
+    )
+    expect(events[0]).toEqual({ type: "openchamber.workflow-run", properties: { run } })
+    expect(events[1]).toEqual({ type: "openchamber.workflow-run-removed", properties: { runId: "wf_one", parentSessionId: "ses_1" } })
   })
 
   test("ignores payloads that are neither wire events nor bridge events", async () => {

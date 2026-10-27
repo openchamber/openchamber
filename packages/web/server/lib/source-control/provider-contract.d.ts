@@ -102,8 +102,12 @@ export interface ProviderDescriptor {
     instances: { multiple: boolean; allowLoopbackHttp: boolean; allowPort: boolean; reserved: string[]; placeholder: string };
     cliTransport: boolean;
     token?: { scopes: string[]; createPath?: string };
-    /** `discussion` only where `capabilities.discussions` is declared. */
-    urls: { changeRequest: string[]; issue: string[]; discussion?: string[] };
+    /**
+     * `discussion` only where `capabilities.discussions` is declared. `commit`
+     * (`{sha}`) and `user` (`{user}`) build links from commit ids and mentions
+     * in item text; a host without them gets no such links.
+     */
+    urls: { changeRequest: string[]; issue: string[]; discussion?: string[]; commit?: string[]; user?: string[] };
     features: {
       referenceSearch: boolean; referenceDetail: boolean; listStatuses: boolean; referencesAcross: boolean;
       startThread: boolean; authorCanReview: boolean; projectUploads: boolean; issueCloseReason: boolean;
@@ -168,7 +172,7 @@ export interface PublicProviderDescriptor {
     token?: { scopes: string[]; createPath?: string };
   };
   settings: { fields: Array<{ id: string; kind: SettingsFieldKind; secret: boolean }> };
-  urls: { changeRequest: string[]; issue: string[]; discussion?: string[] };
+  urls: { changeRequest: string[]; issue: string[]; discussion?: string[]; commit?: string[]; user?: string[] };
   /**
    * The presentation features, plus the capability-derived ones a host
    * declares (`reviewModel`, `revisions`, `createByPush`, `discussions`).

@@ -80,6 +80,8 @@ export const gitlabDescriptor = Object.freeze({
     urls: Object.freeze({
       changeRequest: Object.freeze(['/{namespace+}/{repo}/-/merge_requests/{number}']),
       issue: Object.freeze(['/{namespace+}/{repo}/-/issues/{number}', '/{namespace+}/{repo}/-/work_items/{number}']),
+      commit: Object.freeze(['/{namespace+}/{repo}/-/commit/{sha}']),
+      user: Object.freeze(['/{user}']),
     }),
     features: Object.freeze({
       referenceSearch: false, referenceDetail: false, listStatuses: false, referencesAcross: false,

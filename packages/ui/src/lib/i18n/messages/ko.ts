@@ -33,6 +33,10 @@ import { mcpGridI18n } from './mcp-grid.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { diffFindI18n } from './diff-find.i18n';
+import { markdownGithubI18n } from './markdown-github.i18n';
+import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
+import { workflowsI18n } from './workflows.i18n';
+import { sessionReferencesI18n } from './session-references.i18n';
 import { guestStatusViewI18n } from './guest-status-view.i18n';
 
 export const dict: Record<I18nKey, string> = {
@@ -177,6 +181,10 @@ export const dict: Record<I18nKey, string> = {
   ...pluginsGridI18n.ko,
   ...integrationsCatalogI18n['ko'],
   ...diffFindI18n['ko'],
+  ...markdownGithubI18n['ko'],
+  ...autocompleteScopeI18n['ko'],
+  ...workflowsI18n['ko'],
+  ...sessionReferencesI18n['ko'],
   ...guestStatusViewI18n['ko'],
   'terminalView.actions.attachSelection': '선택한 출력 첨부',
   'terminalView.actions.copySelection': '선택한 출력 복사',
@@ -316,7 +324,6 @@ export const dict: Record<I18nKey, string> = {
   'mobile.menu.files': '파일',
   'mobile.menu.git': 'Git',
   'mobile.menu.terminal': '터미널',
-  'mobile.menu.mcp': 'MCP',
   'mobile.menu.instances': '인스턴스',
   'mobile.menu.update': '업데이트',
   'mobile.menu.settings': '설정',
@@ -2322,6 +2329,7 @@ export const dict: Record<I18nKey, string> = {
   'session.githubIntegration.validation.branchAlreadyCheckedOut': '브랜치가 이미 워크트리에 체크아웃되어 있습니다',
   'session.githubIntegration.validation.failed': '유효성 검사에 실패했습니다',
   'chat.fileAttachment.toast.attachFailed': '첨부 파일 실패',
+  'chat.fileAttachment.toast.tooLarge': '{name}은(는) 너무 커서 첨부할 수 없습니다({size} 초과). 프로젝트에 있는 파일이면 @로 멘션하세요.',
   'chat.fileAttachment.toast.someFilesSkipped': '일부 파일을 건너뛰었습니다:\n{summary}',
   'chat.fileAttachment.toast.vscodePickFailed': 'VS Code에서 파일 선택에 실패했습니다',
   'chat.fileAttachment.fileFallback': '파일',
@@ -2437,8 +2445,6 @@ export const dict: Record<I18nKey, string> = {
   'chat.commandAutocomplete.command.btwDescription': '이 채팅을 방해하지 않고 임시 하위 세션에서 별도 질문하기',
   'chat.commandAutocomplete.command.forkDescription': '마지막으로 완료된 응답에서 이 채팅을 포크하여 이어갑니다. /fork 뒤의 텍스트는 포크된 세션으로 전송됩니다.',
   'chat.commandAutocomplete.command.exploreDescription': '코드베이스에 대한 방향을 잡습니다: 아키텍처와 주요 부분을 한눈에 살펴봅니다.',
-  'chat.commandAutocomplete.badge.command': '명령',
-  'chat.commandAutocomplete.badge.system': 'system',
   'chat.commandAutocomplete.empty': '명령 없음',
   'chat.agentMentionAutocomplete.badge.system': 'system',
   'chat.agentMentionAutocomplete.empty': '에이전트 없음',
@@ -2582,8 +2588,6 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.actions.sendMessageAria': '보내기 메시지',
   'chat.chatInput.actions.queueMessageAria': '메시지 대기열에 추가',
   'chat.chatInput.actions.stopGeneratingAria': '생성 중지',
-  'chat.chatInput.focusMode.toggleAria': '집중 모드 전환',
-  'chat.chatInput.focusMode.label': '집중 모드',
   'chat.chatInput.linked.byAuthor': '작성자: {author}',
   'chat.chatInput.linked.issue.openInBrowserAria': '브라우저에서 이슈 열기',
   'chat.chatInput.linked.issue.removeAria': '연결된 이슈 제거',
@@ -2607,7 +2611,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.dictation.insertAndSend': '삽입 후 전송',
   'chat.dictation.retry': '변환 다시 시도',
   'chat.dictation.discard': '녹음 삭제',
-  'chat.snippetAutocomplete.action.addNew': '+ 새 스니펫 추가',
+  'chat.snippetAutocomplete.action.addNew': '새 스니펫 추가',
   'chat.snippetAutocomplete.empty': '스니펫을 찾을 수 없음',
   'chat.snippetAutocomplete.footer': '↑↓ 이동 • Enter 선택 • Esc 닫기',
   'snippets.source.global': '전역',
@@ -2998,6 +3002,20 @@ export const dict: Record<I18nKey, string> = {
   'projects.sharedTrust.actions': '작업',
   'projects.sharedTrust.skip': '이번에는 건너뛰기',
   'projects.sharedTrust.trust': '신뢰하고 실행',
+  'projects.opencodeTrust.title': 'OpenCode가 이 폴더의 코드를 실행하도록 허용할까요?',
+  'projects.opencodeTrust.description': 'OpenCode는 폴더를 여는 즉시 {path} 설정에 있는 플러그인과 명령을 실행합니다. 한 번 신뢰하면 OpenChamber는 변경될 때만 다시 묻습니다.',
+  'projects.opencodeTrust.plugins': '플러그인',
+  'projects.opencodeTrust.commands': '명령',
+  'projects.opencodeTrust.kind.package': '{name} (npm 패키지)',
+  'projects.opencodeTrust.kind.config': '{path}: OpenChamber가 읽을 수 없는 설정 파일',
+  'projects.opencodeTrust.kind.mcp': 'MCP 서버 {name}',
+  'projects.opencodeTrust.kind.lsp': '언어 서버 {name}',
+  'projects.opencodeTrust.kind.formatter': '포매터 {name}',
+  'projects.opencodeTrust.kind.shell': '셸',
+  'projects.opencodeTrust.paused': '신뢰하지 않으면 이 폴더에서 에이전트가 작동하지 않지만, 파일과 Git 변경 사항은 계속 볼 수 있습니다.',
+  'projects.opencodeTrust.skip': '이번에는 안 함',
+  'projects.opencodeTrust.trust': '신뢰하고 열기',
+  'projects.opencodeTrust.saveFailed': '답변을 저장하지 못했습니다. 다시 시도하세요.',
   'projectActions.actions.autoDiscoverTooltip': '개발 서버를 자동으로 검색하고 실행합니다',
   'projectActions.actions.chooseActionAria': '프로젝트 작업 선택',
   'projectActions.actions.openPreview': '미리보기 열기',
@@ -3476,6 +3494,7 @@ export const dict: Record<I18nKey, string> = {
   'common.duration.minutesSecondsCompact': '{minutes}분 {seconds}초',
   'common.duration.hoursMinutesCompact': '{hours}시간 {minutes}분',
   'contextFileOpen.failure.tooLarge': 'File is too large to open (>{count} lines)',
+  'contextFileOpen.failure.tooLargeSize': '파일이 너무 커서 열 수 없습니다({size} 초과)',
   'contextFileOpen.failure.missing': 'File not found',
   'contextFileOpen.failure.unreadable': 'Failed to open file',
   'quota.window.5h': '5시간',
@@ -3501,6 +3520,7 @@ export const dict: Record<I18nKey, string> = {
   'quota.window.completions': '코드 완성',
   'quota.window.premiumInteractions': 'AI 크레딧',
   'chat.workStatus.ariaLabel': '작업 상태',
+  'chat.workStatus.mobileEmpty': '이 세션에 아직 표시할 내용이 없습니다',
   'chat.workStatus.context.label': '컨텍스트',
   'chat.workStatus.cost.breakdown': '세션 {session} · 서브 에이전트 {subagents}',
   'chat.workStatus.git.changedFileSingle': '파일 {count}개 변경됨',

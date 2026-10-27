@@ -26,7 +26,7 @@ import type {
 } from '@/lib/api/types';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessionWorktreeStore } from '@/sync/session-worktree-store';
-import { isGeneratedBranchName } from '@/lib/git/branchNameGenerator';
+import { generatedBranchPrefix } from '@/lib/git/branchNameGenerator';
 
 type WorktreeListEntry = {
   path?: string;
@@ -274,8 +274,13 @@ const toCreatePayload = (args: {
   if (args.changeRequestSource) payload.changeRequestSource = args.changeRequestSource;
   if (args.returnAfterDirectoryCreated) payload.returnAfterDirectoryCreated = true;
   if (args.taskTitle?.trim()) payload.taskTitle = args.taskTitle.trim();
-  // Quick worktree's `agile-chipmunk`, or the dialog's suggestion kept as is.
-  if (mode === 'new' && branchName && isGeneratedBranchName(branchName)) payload.generatedBranchName = branchName;
+  // Quick worktree's `agile-chipmunk`, or the dialog's suggestion kept as is
+  // (an issue's `issue-180-merry-salamander` keeps `issue-180-` on rename).
+  const generatedPrefix = mode === 'new' && branchName ? generatedBranchPrefix(branchName) : null;
+  if (generatedPrefix !== null) {
+    payload.generatedBranchName = branchName;
+    if (generatedPrefix) payload.generatedBranchPrefix = generatedPrefix;
+  }
   return payload;
 };
 
@@ -321,7 +326,9 @@ export const worktreeMapsEqual = (
         // The task title changes while the worktree stays: the agent names
         // the task, the user renames it. Left out, a renamed list read as
         // unchanged and the sidebar kept the old name.
-        || next.title !== current.title) return false;
+        || next.title !== current.title
+        // Pinning changes it the same way.
+        || next.pinnedAt !== current.pinnedAt) return false;
     }
   }
   return true;
@@ -558,6 +565,7 @@ const readProjectWorktrees = async (projectDirectory: string): Promise<WorktreeM
         headState: canonical.headState,
         worktreeSource: canonical.worktreeSource,
         title: entry.title?.trim() || undefined,
+        pinnedAt: (entry.pinnedAt ?? 0) > 0 ? entry.pinnedAt : undefined,
         ...(entry.provenance ? { provenance: entry.provenance } : {}),
       };
     })

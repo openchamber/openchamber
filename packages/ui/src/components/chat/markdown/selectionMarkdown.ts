@@ -212,7 +212,13 @@ const serializeBlockElement = (element: Element, format: RenderedCopyFormat): st
       if (plain) return [summaryText, body].filter(Boolean).join('\n\n');
       return `<details>\n<summary>${summaryText}</summary>\n\n${body}\n\n</details>`;
     }
-    case 'P': case 'SUMMARY':
+    case 'P': {
+      // An alert's drawn title goes back to the marker GitHub reads.
+      const alert = element.getAttribute('data-oc-alert-title');
+      if (alert && !plain) return `[!${alert}]`;
+      return serializeInlineChildren(element, format).trim();
+    }
+    case 'SUMMARY':
       return serializeInlineChildren(element, format).trim();
     default:
       return serializeChildren(element, '\n\n', format);
@@ -276,7 +282,8 @@ const serializeInlineElement = (element: Element, format: RenderedCopyFormat): s
 };
 
 const serializeNode = (node: Node, format: RenderedCopyFormat): Serialized | null => {
-  if (node.nodeType === TEXT_NODE) return { block: false, text: node.textContent ?? '' };
+  // Word joiners only keep a chip and its punctuation on one line; they are not text.
+  if (node.nodeType === TEXT_NODE) return { block: false, text: (node.textContent ?? '').replace(/\u2060/g, '') };
   if (!isElement(node) || node.matches(SKIP_SELECTOR)) return null;
   if (isBlockElement(node)) return { block: true, text: serializeBlockElement(node, format) };
   return { block: false, text: serializeInlineElement(node, format) };

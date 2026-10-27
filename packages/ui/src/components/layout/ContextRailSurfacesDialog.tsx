@@ -34,9 +34,11 @@ export const ContextRailSurfacesDialog: React.FC<{
   // The full registry in the user's rail order — including surfaces a runtime
   // filter currently drops, so a choice made on desktop is editable anywhere.
   const guestSurfaces = useGuestSurfaces();
+  // A build without workflows does not name the unreleased surface anywhere.
+  const workflowsAvailable = useUIStore((state) => state.agentWorkflowFeatureAvailable);
   const surfaces = React.useMemo(
-    () => sortContextSurfaces(contextRailOrder, guestSurfaces),
-    [contextRailOrder, guestSurfaces],
+    () => sortContextSurfaces(contextRailOrder, guestSurfaces).filter((surface) => workflowsAvailable || surface.id !== 'workflows'),
+    [contextRailOrder, guestSurfaces, workflowsAvailable],
   );
 
   const allVisible = hidden.length === 0;

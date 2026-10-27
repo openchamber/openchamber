@@ -150,6 +150,10 @@ export const registerPluginRoutes = (app, dependencies) => {
           continue;
         }
 
+        // A control entry (`-name`, `*`) names no package or path, so there
+        // is nothing to look up.
+        if (parsedKindForSpec(spec) === 'control') continue;
+
         if (parsedKindForSpec(spec) === 'path') {
           const { absolutePath } = parsePathSpec(spec, { homedir: os.homedir(), cwd: directory || os.homedir() });
           try {

@@ -65,6 +65,7 @@ describe('Dock badge with the macOS menu bar disabled', () => {
       window: dom, document: dom.document, navigator: dom.navigator,
       IS_REACT_ACT_ENVIRONMENT: true,
     });
+    useProjectsStore.setState({ projects: [{ id: 'project', path: '/project' }] });
     useGlobalSessionsStore.setState({ activeSessions: [session('root'), session('child', 'root')] });
     useUIStore.setState({ dockBadgeEnabled: true, notifyOnSubtasks: false });
     counts.length = 0;
@@ -75,7 +76,26 @@ describe('Dock badge with the macOS menu bar disabled', () => {
 
   afterEach(async () => {
     await act(async () => root.unmount());
+    useProjectsStore.setState({ projects: [] });
     await dom.happyDOM.close();
+  });
+
+  test('counts only chats the sidebar lists, so every count can be cleared', async () => {
+    useGlobalSessionsStore.setState({
+      activeSessions: [
+        session('root'),
+        session('elsewhere', undefined, '/tmp/eval-run'),
+        { ...session('btw-fork'), metadata: { openchamber: { kind: 'btw', originalSessionID: 'root' } } },
+        { ...session('archived'), time: { created: 1, updated: 1, archived: 5 } },
+      ],
+    });
+    for (const id of ['root', 'elsewhere', 'btw-fork', 'archived']) finishTurn(id);
+    await act(async () => root.render(<Harness />));
+    expect(counts).toEqual([1]);
+    // Removing the project takes its sessions out of the sidebar and the count.
+    useProjectsStore.setState({ projects: [] });
+    await flush();
+    expect(counts).toEqual([1, 0]);
   });
 
   test('publishes unread chats, clears viewed chats, and respects the badge toggle without tray timers or listeners', async () => {
@@ -253,8 +273,8 @@ type TraySnapshotForTest = {
 
 // The tray is a short recent-work list, so it names the sessions the sidebar
 // can show. A session whose directory belongs to no configured project (an
-// eval run in /tmp, say) has no row there; it must not take a tray slot, while
-// it still counts toward the dock badge.
+// eval run in /tmp, say) has no row there; it must not take a tray slot or a
+// place in the dock badge, which the user could never clear.
 describe('Tray sessions follow the configured projects', () => {
   let dom: Window;
   let root: Root;
@@ -302,14 +322,14 @@ describe('Tray sessions follow the configured projects', () => {
   });
 
   test('lists a project session but not one from an unconfigured directory', async () => {
-    // Both finished a turn nobody has viewed yet, so both count on the dock.
+    // Both finished a turn nobody has viewed yet; only the listed one counts.
     useGlobalSessionsStore.setState((state) => ({
       activeSessions: state.activeSessions.map((item) => ({ ...item, time: { ...item.time, idle: 2 } })),
     }));
     await act(async () => root.render(<Harness />));
     await flush();
     expect(lastSnapshot()?.sessions?.map((entry) => entry.id)).toEqual(['in-project']);
-    expect(lastSnapshot()?.dockBadgeCount).toBe(2);
+    expect(lastSnapshot()?.dockBadgeCount).toBe(1);
   });
 
   test('keeps a managed chat and an isolated space session', async () => {

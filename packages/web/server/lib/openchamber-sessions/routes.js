@@ -312,6 +312,20 @@ const forkSession = async ({ client, sessionID, messageID }) => {
   return session;
 };
 
+/**
+ * The session whose agent sent a prompt, as the prompt's message records it
+ * (`metadata.openchamber.promptedBy`). The title is a fallback for a reader
+ * that cannot see that session; a failed read records the id alone.
+ */
+const readPromptOrigin = async (client, sessionID) => {
+  try {
+    const title = asNonEmptyString((await client.session.get({ sessionID }))?.title);
+    return title ? { sessionID, title } : { sessionID };
+  } catch {
+    return { sessionID };
+  }
+};
+
 const listMessages = async ({ client, sessionID, limit }) => {
   const response = await client.message.list({ sessionID, limit, order: 'desc' });
   return asList(response?.data);
@@ -711,6 +725,7 @@ export const createOpenChamberSessionService = (dependencies) => {
     requestedAgent,
     requestedVariant,
     reuseSessionSelection = false,
+    promptedBySessionId = null,
   }) => {
     let model = requestedModel;
     let agent = requestedAgent;
@@ -847,7 +862,11 @@ export const createOpenChamberSessionService = (dependencies) => {
     } else {
       let landedMessageID = null;
       try {
-        const sent = await client.session.prompt({ sessionID, text: expandedPrompt });
+        const promptInput = { sessionID, text: expandedPrompt };
+        if (promptedBySessionId) {
+          promptInput.metadata = { openchamber: { promptedBy: await readPromptOrigin(client, promptedBySessionId) } };
+        }
+        const sent = await client.session.prompt(promptInput);
         landedMessageID = asNonEmptyString(sent?.id);
         if (goalInput.enabled) {
           // Goal mode's reminder refers to "the user message above", so it is
@@ -1090,18 +1109,6 @@ export const createOpenChamberSessionService = (dependencies) => {
       directory: sessionDirectory,
       ...(title ? { title } : {}),
     });
-    // Written before the prompt goes out, so the session appears under the
-    // work it was started from at once. A failed write leaves it a root of
-    // its own, which is no reason to fail the session that now exists.
-    const originSessionID = asNonEmptyString(payload?.originSessionId);
-    if (originSessionID && originSessionID !== sessionID) {
-      try {
-        await writeMetadata(sessionID, { openchamber: { originSessionID } }, sessionDirectory);
-      } catch (error) {
-        console.warn('[OpenChamberSessions] failed to record the session origin:', error?.message ?? error);
-      }
-    }
-
     let dispatch = { model, agent, variant, promptDispatched: false, dispatchedAsCommand: false };
     if (prompt) {
       dispatch = await dispatchPrompt({
@@ -1116,6 +1123,7 @@ export const createOpenChamberSessionService = (dependencies) => {
         requestedModel: model,
         requestedAgent: agent,
         requestedVariant: variant,
+        promptedBySessionId: asNonEmptyString(payload.promptedBySessionId),
       });
     }
 
@@ -1231,6 +1239,7 @@ export const createOpenChamberSessionService = (dependencies) => {
         requestedAgent: asNonEmptyString(payload.agent),
         requestedVariant: asNonEmptyString(payload.variant),
         reuseSessionSelection: true,
+        promptedBySessionId: asNonEmptyString(payload.promptedBySessionId),
       });
       const result = {
         action,

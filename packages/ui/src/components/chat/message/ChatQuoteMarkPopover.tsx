@@ -1,6 +1,7 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
 
+import { useEmojiPicker } from '@/components/emoji/useEmojiPicker';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
 import { isIMECompositionEvent } from '@/lib/ime';
@@ -44,6 +45,7 @@ export function ChatQuoteMarkPopover({
     const { t } = useI18n();
     const [draft, setDraft] = React.useState(comment);
     const inputRef = React.useRef<HTMLTextAreaElement>(null);
+    const emojiPicker = useEmojiPicker(inputRef, editing);
 
     const resizeInput = React.useCallback(() => {
         const element = inputRef.current;
@@ -72,10 +74,10 @@ export function ChatQuoteMarkPopover({
     };
 
     const placeBelow = anchorRect.top < PLACE_BELOW_THRESHOLD_PX;
-    const left = Math.min(
-        Math.max(anchorRect.left + anchorRect.width / 2, VIEWPORT_MARGIN_PX),
-        window.innerWidth - VIEWPORT_MARGIN_PX,
-    );
+    const left = anchorRect.left + anchorRect.width / 2;
+    // Percentages in translate use the popover's own width, so both the short
+    // preview and the wider editor stay inside the viewport without measuring.
+    const translateX = `clamp(${VIEWPORT_MARGIN_PX - left}px, -50%, calc(100vw - ${left + VIEWPORT_MARGIN_PX}px - 100%))`;
 
     return createPortal(
         <div
@@ -83,13 +85,13 @@ export function ChatQuoteMarkPopover({
             // The glass card's shadow lives here, off its backdrop-filter
             // element; this box hugs the card, so the radius matches it.
             className={cn(
-                'app-region-no-drag fixed z-50',
+                'app-region-no-drag fixed z-50 w-max max-w-[calc(100vw-24px)]',
                 editing ? 'rounded-3xl' : 'rounded-2xl',
             )}
             style={{
                 left,
                 top: placeBelow ? anchorRect.bottom + POPOVER_GAP_PX : anchorRect.top - POPOVER_GAP_PX,
-                transform: placeBelow ? 'translate(-50%, 0)' : 'translate(-50%, -100%)',
+                transform: `translate(${translateX}, ${placeBelow ? '0' : '-100%'})`,
             }}
         >
             {editing ? (
@@ -113,9 +115,10 @@ export function ChatQuoteMarkPopover({
                             }
                         }}
                         placeholder={t('chat.textSelection.comment.placeholder')}
-                        className="w-64 max-w-[70vw] flex-1 resize-none bg-transparent py-1.5 text-sm leading-5 text-foreground outline-none placeholder:text-muted-foreground placeholder:opacity-60"
+                        className="min-w-0 w-64 max-w-[70vw] flex-1 resize-none bg-transparent py-1.5 text-sm leading-5 text-foreground outline-none placeholder:text-muted-foreground placeholder:opacity-60"
                         style={{ minHeight: 0, height: 'auto' }}
                     />
+                    {emojiPicker}
                     <button
                         type="button"
                         onClick={save}

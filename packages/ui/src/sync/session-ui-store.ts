@@ -39,6 +39,7 @@ import { normalizePath } from "@/lib/pathNormalization"
 import { CHAT_DRAFT_PROJECT_ID, createChatDirectory, deleteChatDirectory, getChatsRootFromDirectory, isChatDirectoryPath, warmChatsRootDirectory } from "@/lib/chatDirectories"
 import { isSpaceArchiveDirectory } from "@/lib/spaces/space-archives"
 import { isSpaceDirectory } from "@/lib/spaces/space-route"
+import { isSpaceDirectoryClosedToNewSessions } from "@/lib/spaces/spaces-store"
 import { isVSCodeRuntime } from "@/lib/desktop"
 import { composeForkSessionMessage } from "@/lib/messages/executionMeta"
 import { findLatestUserModelChoice } from "@/lib/messages/userModelChoice"
@@ -853,7 +854,8 @@ const resolveProjectRefForWorktreeDirectory = (directory: string | null, project
 }
 
 const waitForWorktreeBootstrapIfConfigured = async (directory: string | null, projectId?: string | null): Promise<void> => {
-  if (!directory) return
+  // A space runs its setup commands itself, and its creation holds the first message for them.
+  if (!directory || isSpaceDirectory(directory)) return
   const project = resolveProjectRefForWorktreeDirectory(directory, projectId)
   if (project && await getWorktreeSetupWaitEnabled(project)) {
     await waitForWorktreeBootstrap(directory)
@@ -907,9 +909,12 @@ const resolveCreatableDraftDirectory = async (
   requestedDirectory: string | null | undefined,
 ): Promise<{ status: "ok"; directory: string | null | undefined } | { status: "aborted" }> => {
   const directory = requestedDirectory ?? opencodeClient.getDirectory() ?? null
+  // A space's directory exists inside the space only: the host's probe would
+  // call it missing and start the chat in the project.
   const isRecoverableDraftDirectory =
     draft.open
     && draft.preserveDirectoryOverride !== true
+    && !isSpaceDirectory(directory)
     && !draft.pendingWorktreeRequestId
     && !draft.bootstrapPendingDirectory
     && normalizePath(draft.directoryOverride) === normalizePath(directory)
@@ -1503,13 +1508,17 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       return persistedProject ?? fallbackProject
     })()
 
+    // A space that cannot take a new session (its making failed, its container
+    // is gone, its machine is out of reach) is no place to reopen a draft in:
+    // the draft goes to the project root instead.
+    const keepsDraft = (dir: string): boolean => !isScratchDirectory(dir) && !isSpaceDirectoryClosedToNewSessions(dir)
     const directory = target === "chat" ? null : (() => {
       if (explicitDirectory !== null) return explicitDirectory
       if (explicitProject) return normalizePath(explicitProject.path ?? null)
       // A chat session's directory is a managed scratch folder, never a
       // project: letting it through would open a project draft rooted in it.
-      if (currentDirectory && !isScratchDirectory(currentDirectory)) return currentDirectory
-      if (persistedTarget?.directory && !isScratchDirectory(persistedTarget.directory)) return persistedTarget.directory
+      if (currentDirectory && keepsDraft(currentDirectory)) return currentDirectory
+      if (persistedTarget?.directory && keepsDraft(persistedTarget.directory)) return persistedTarget.directory
       return normalizePath(selectedProject?.path ?? null)
     })()
 
@@ -1533,7 +1542,9 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       directoryOverride: directory,
       pendingWorktreeRequestId: options?.pendingWorktreeRequestId ?? null,
       bootstrapPendingDirectory: normalizePath(options?.bootstrapPendingDirectory ?? null),
-      preserveDirectoryOverride: options?.preserveDirectoryOverride === true,
+      // A draft in a space is pinned wherever it opens from (a saved draft's
+      // row, a restore): the space is not listed until its journey is read.
+      preserveDirectoryOverride: options?.preserveDirectoryOverride === true || isSpaceDirectory(directory),
       parentID: options?.parentID ?? null,
       title: options?.title,
       initialPrompt: options?.initialPrompt,
@@ -2250,6 +2261,10 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     let createdWorktreeProject: { id: string; path: string } | null = null
 
     if (execution.createWorktree) {
+      // A worktree of the host project would hold none of the space's changes.
+      if (isSpaceDirectory(sourceDirectory)) {
+        throw new Error("A fork of a session in an isolated space stays in the space")
+      }
       const projects = useProjectsStore.getState().projects
       const project = resolveProjectForSessionDirectory(
         projects,

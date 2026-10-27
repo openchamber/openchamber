@@ -109,14 +109,33 @@ export function isGitSpec(spec) {
 }
 
 /**
- * Classify a plugin spec by how it is loaded: a local path, a Git package, or
- * an npm package. Every caller that decides what to do with a spec (registry
- * lookup, status card, sidebar label) reads this one split.
+ * Check whether a plugin spec is an OpenCode 2 control entry that switches
+ * plugins already known to OpenCode on or off instead of naming one to load.
+ *
+ * Mirrors `parse` in OpenCode's `core/src/config/plugin/source.ts` and the
+ * selectors in `plugin/supervisor.ts`: `-name` disables the plugin with that
+ * id (`-*` and `-prefix.*` disable a group), and `*`, `prefix.*` and
+ * `opencode.<name>` re-enable plugins without installing anything. A lone `-`
+ * is not one: OpenCode rejects it.
  *
  * @param {string} spec
- * @returns {'path' | 'git' | 'npm'}
+ * @returns {boolean}
+ */
+export function isPluginControlSpec(spec) {
+  if (spec.startsWith('-')) return spec.length > 1;
+  return spec === '*' || spec.endsWith('.*') || spec.startsWith('opencode.');
+}
+
+/**
+ * Classify a plugin spec by how it is loaded: a control entry, a local path, a
+ * Git package, or an npm package. Every caller that decides what to do with a
+ * spec (registry lookup, status card, sidebar label) reads this one split.
+ *
+ * @param {string} spec
+ * @returns {'control' | 'path' | 'git' | 'npm'}
  */
 export function parsedKindForSpec(spec) {
+  if (isPluginControlSpec(spec)) return 'control';
   if (isPathSpec(spec)) return 'path';
   if (isGitSpec(spec)) return 'git';
   return 'npm';

@@ -190,6 +190,17 @@ describe('parsedKindForSpec', () => {
     expect(spec.parsedKindForSpec('git+ssh://git@github.com/acme/plugin.git#main')).toBe('git');
   });
 
+  test('classifies OpenCode 2 control entries, which name no package', () => {
+    expect(spec.parsedKindForSpec('-hooks')).toBe('control');
+    expect(spec.parsedKindForSpec('-opencode.browser')).toBe('control');
+    expect(spec.parsedKindForSpec('-*')).toBe('control');
+    expect(spec.parsedKindForSpec('*')).toBe('control');
+    expect(spec.parsedKindForSpec('acme.*')).toBe('control');
+    expect(spec.parsedKindForSpec('opencode.browser')).toBe('control');
+    // OpenCode rejects a lone `-`, so it stays an (invalid) package spec.
+    expect(spec.parsedKindForSpec('-')).toBe('npm');
+  });
+
   test('keeps paths and npm specs on their existing kinds', () => {
     expect(spec.parsedKindForSpec('/abs/plugin.js')).toBe('path');
     expect(spec.parsedKindForSpec('./local.js')).toBe('path');

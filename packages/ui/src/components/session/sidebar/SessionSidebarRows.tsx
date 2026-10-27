@@ -5,6 +5,7 @@ import { SessionTreeGuides } from './sessions/SessionTreeGuides';
 import { SESSION_TREE_BASE_PADDING_PX } from './sessions/sessionTreeGeometry';
 import {
   boundaryClipKeyframes,
+  boundaryFadeInKeyframes,
   findSessionSidebarDisclosure,
   SIDEBAR_DISCLOSURE_EASING,
   SIDEBAR_DISCLOSURE_MS,
@@ -15,6 +16,7 @@ import {
   getInitialSessionSidebarRowIndexes,
   mergeSessionSidebarVirtualIndexes,
   sectionSpacingAfter,
+  sectionWrapperClass,
   sessionSidebarRowSizeKey,
   sessionSidebarRowVirtualKey,
 } from './sessionSidebarVirtualization';
@@ -42,9 +44,8 @@ type DisclosureMotion = {
 };
 
 // Closing rows are gone well before the boundary reaches them; opening rows
-// come up as the boundary uncovers them.
+// come up as the boundary uncovers them (`boundaryFadeInKeyframes`).
 const DISCLOSURE_FADE_OUT: Keyframe[] = [{ opacity: 1 }, { opacity: 0, offset: 0.6 }, { opacity: 0 }];
-const DISCLOSURE_FADE_IN: Keyframe[] = [{ opacity: 0 }, { opacity: 0, offset: 0.2 }, { opacity: 1 }];
 
 const prefersReducedMotion = (): boolean =>
   globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true;
@@ -214,7 +215,7 @@ export function SessionSidebarRows({
         animations.push(element.animate(DISCLOSURE_FADE_OUT, { ...timing, fill: 'forwards' }));
       } else if (motion.revealKeys.has(key)) {
         animations.push(element.animate(boundaryClipKeyframes(start, element.offsetHeight, motion.from, motion.to), timing));
-        animations.push(element.animate(DISCLOSURE_FADE_IN, timing));
+        animations.push(element.animate(boundaryFadeInKeyframes(start, element.offsetHeight, motion.from, motion.to), timing));
       } else if (Number(element.dataset.index) >= motion.followingIndex && distance !== 0) {
         animations.push(element.animate([
           { transform: `translateY(${start + distance}px)` },
@@ -249,7 +250,7 @@ export function SessionSidebarRows({
     return <div data-sidebar-virtual-pending="true">
       {indexes.map((index) => {
         const row = rows[index];
-        return row ? <div key={row.key} className={sectionSpacingAfter(row, rows[index + 1])}>{renderRowWithGuides(row, index)}</div> : null;
+        return row ? <div key={row.key} className={sectionWrapperClass(row, rows[index + 1])}>{renderRowWithGuides(row, index)}</div> : null;
       })}
       {estimatedTotal > renderedHeight ? <div aria-hidden="true" style={{ height: estimatedTotal - renderedHeight }} /> : null}
     </div>;
@@ -261,7 +262,7 @@ export function SessionSidebarRows({
       key={ghost.row.key}
       aria-hidden="true"
       inert
-      className={`[&_[data-session-row-box]]:my-px ${sectionSpacingAfter(ghost.row, ghost.nextRow) ?? ''}`}
+      className={`[&_[data-session-row-box]]:my-px ${sectionWrapperClass(ghost.row, ghost.nextRow)}`}
       data-sidebar-ghost="true"
       data-sidebar-row-key={ghost.row.key}
       data-sidebar-virtual-start={ghost.start}
@@ -283,7 +284,7 @@ export function SessionSidebarRows({
         key={row.key}
         // Isolated virtual rows cannot collapse neighboring margins: 1px per side preserves the 2px gap.
         // The row box, not the row: a session row in rename keeps the same margins.
-        className={`[&_[data-session-row-box]]:my-px ${sectionSpacingAfter(row, rows[item.index + 1]) ?? ''}`}
+        className={`[&_[data-session-row-box]]:my-px ${sectionWrapperClass(row, rows[item.index + 1])}`}
         data-index={item.index}
         data-sidebar-row-key={row.key}
         data-sidebar-virtual-start={item.start}

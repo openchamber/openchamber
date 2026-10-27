@@ -7,6 +7,7 @@ import type { Session } from '@/lib/opencode/model';
 import { I18nProvider } from '@/lib/i18n';
 import { SyncProvider } from '@/sync/sync-context';
 import { getSyncChildStores } from '@/sync/sync-refs';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 import { ChatColumnSessionContext } from '../chatColumnSession';
 import { dispatchFrameSelection } from './frameSelection';
 
@@ -133,6 +134,29 @@ describe('TextSelectionMenu render subscriptions', () => {
     await report('');
     expect(document.body.textContent).not.toContain('Comment');
     containerRef.current = null;
+  });
+
+  test('opening a new-session draft over the chat closes the menu', async () => {
+    const host = document.createElement('div');
+    const frame = document.createElement('iframe');
+    host.appendChild(frame);
+    document.body.appendChild(host);
+    containerRef.current = host;
+    const draftBefore = useSessionUIStore.getState().newSessionDraft;
+    await render(true);
+    try {
+      await act(async () => {
+        dispatchFrameSelection(frame, { text: 'picked words', rect: { top: 10, left: 20, width: 80, height: 16 } });
+      });
+      expect(document.body.textContent).toContain('Comment');
+
+      // The chat stays mounted behind the draft, and nothing fires a selectionchange.
+      await act(async () => useSessionUIStore.setState({ newSessionDraft: { ...draftBefore, open: true } }));
+      expect(document.body.textContent).not.toContain('Comment');
+    } finally {
+      useSessionUIStore.setState({ newSessionDraft: draftBefore });
+      containerRef.current = null;
+    }
   });
 
   test('a frame outside the menu\'s message does not open it', async () => {

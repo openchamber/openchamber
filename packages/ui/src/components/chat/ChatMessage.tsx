@@ -1,6 +1,7 @@
 import React from 'react';
 import { modelVariantNames } from '@/lib/modelVariants';
 import { findCatalogModel, type Message, type Part } from '@/lib/opencode/model';
+import { readPromptOrigin } from '@/lib/opencode/prompt-origin';
 import { useShallow } from 'zustand/react/shallow';
 
 import { MessageFreshnessDetector } from '@/lib/messageFreshness';
@@ -316,6 +317,8 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
             }),
         [normalizedParts, showReasoningTraces]
     );
+
+    const promptOrigin = React.useMemo(() => readPromptOrigin(message.info), [message.info]);
 
     const agentMention = React.useMemo(() => {
         if (!isUser) {
@@ -670,6 +673,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                                 errorMessage={assistantErrorText}
                                                 errorResponseBody={assistantErrorResponseBody}
                                                 extraActions={guestMessageActions}
+                                                promptOrigin={promptOrigin}
                                             />
                                         </div>
                                     </div>

@@ -83,3 +83,35 @@ export const parseSessionLink = (href: string, ownOrigins: readonly string[]): S
 export const isSessionDeepLink = (href: string): boolean => (
     href.toLowerCase().startsWith(DEEP_LINK_PREFIX) && parseSessionLink(href, []) !== null
 );
+
+// A link as it sits in text: the native deep link, or any web address, kept
+// only when it carries `session=`. One linear pass: a pattern that looked for
+// `session=` inside the address backtracked over every long unbroken run.
+const LINK_CANDIDATE = /openchamber:\/\/session\/[^\s<>()"'`]+|https?:\/\/[^\s<>()"'`]+/gi;
+
+interface SessionLinkRange {
+    readonly start: number;
+    readonly end: number;
+    readonly link: string;
+    readonly target: SessionLinkTarget;
+}
+
+/** The key of a session link's target: one per session, and per message of it. */
+export const sessionLinkKey = (target: SessionLinkTarget): string => `${target.sessionId}:${target.messageId ?? ''}`;
+
+/**
+ * Every session and message link in text, where it sits. Punctuation that
+ * ends the sentence is not part of the link. A bare session id is not one
+ * here: in text the user wrote, it is more likely meant as text.
+ */
+export const findSessionLinks = (text: string, ownOrigins: readonly string[]): SessionLinkRange[] => {
+    if (!text.includes('session')) return [];
+    const found: SessionLinkRange[] = [];
+    for (const match of text.matchAll(LINK_CANDIDATE)) {
+        const link = match[0].replace(/[.,;:!?]+$/, '');
+        if (!link.includes('session')) continue;
+        const target = parseSessionLink(link, ownOrigins);
+        if (target) found.push({ start: match.index, end: match.index + link.length, link, target });
+    }
+    return found;
+};

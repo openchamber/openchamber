@@ -398,7 +398,7 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
             </span>
             {/* Like the group header's count; an expanded directory shows its files instead. */}
             {isExpanded ? null : (
-              <span className="shrink-0 typography-micro tabular-nums text-muted-foreground/70">{directory.files.length}</span>
+              <span className="shrink-0 typography-micro tabular-nums text-muted-foreground">{directory.files.length}</span>
             )}
           </button>
           {/* Revealed on hover so the tree reads as a tree; always shown on

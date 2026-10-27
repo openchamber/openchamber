@@ -24,8 +24,9 @@ import { useBoardRevalidation } from '@/components/sourceBoard/useBoardRevalidat
 import { Button } from '@/components/ui/button';
 import { useMinuteTickerNow } from '@/hooks/useDurationTicker';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
-import type { RepositoryReferenceKind } from '@/lib/api/types';
+import type { RepositoryReference, RepositoryReferenceKind } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
+import { repositoryItemLink, repositoryLinkContextOfUrl } from '@/lib/source-control/repositoryLinks';
 import { useRepositoryUrlMatcher } from '@/lib/source-control/repositoryUrlMatcher';
 import { useTrackedItems } from '@/lib/trackedItems/interest';
 import { isTrackedWorkItem, type TrackedItem } from '@/lib/trackedItems/model';
@@ -117,10 +118,28 @@ const RepositoryTrackerItem: React.FC<TrackerItemViewProps & { kind: RepositoryR
     const linkRepository = useLinkRepository(directory, url);
     const readDirectory = linkRepository.directory;
     // The link itself is the search: it finds that one item, whatever its state.
-    const lookup = useRepositoryReferenceList({ enabled: linkRepository.status === 'ready', directory: readDirectory, kind, filter: DEFAULT_REPOSITORY_FILTER, query: url });
+    const issueLookup = useRepositoryReferenceList({ enabled: linkRepository.status === 'ready', directory: readDirectory, kind, filter: DEFAULT_REPOSITORY_FILTER, query: url });
     // Only the item the link names: a lookup that fell back to a search lists others.
     const urls = useRepositoryUrlMatcher();
-    const reference = lookup.items.find((item) => isSameRepositoryItemLink(item.url, url, urls)) ?? null;
+    const named = (items: readonly RepositoryReference[]) => items.find((item) => isSameRepositoryItemLink(item.url, url, urls)) ?? null;
+    // Where issues and change requests share one number, an issue link may
+    // name a change request (`#12` in an item's text links its issue page,
+    // which the host forwards). A host whose issue lookup does not answer it
+    // (a list-backed one) reads the number as a change request, by that
+    // request's own link. Once the issue is known missing, it stays so for
+    // this link, so a background refresh does not swap the shown item out.
+    const pullUrl = React.useMemo(() => {
+        const context = kind === 'issue' ? repositoryLinkContextOfUrl(url, urls) : null;
+        const item = urls.match(url);
+        return context?.descriptor.terminology.sharedNumberSpace && item ? repositoryItemLink(context, 'pull', item.number) : null;
+    }, [kind, url, urls]);
+    const issueSettled = (issueLookup.status === 'ready' || issueLookup.status === 'unavailable') && !issueLookup.refreshing;
+    const [issueMissingFor, setIssueMissingFor] = React.useState<string | null>(null);
+    const issueMissing = issueMissingFor === url;
+    if (pullUrl && !issueMissing && issueSettled && !named(issueLookup.items)) setIssueMissingFor(url);
+    const pullLookup = useRepositoryReferenceList({ enabled: issueMissing && pullUrl !== null && linkRepository.status === 'ready', directory: readDirectory, kind: 'pull', filter: DEFAULT_REPOSITORY_FILTER, query: pullUrl ?? '' });
+    const lookup = issueMissing ? pullLookup : issueLookup;
+    const reference = named(lookup.items);
     // While the tab is on screen its item's state, checks included, follows the
     // host; the other rows of a lookup that fell back to a search do not.
     const followed = React.useMemo(

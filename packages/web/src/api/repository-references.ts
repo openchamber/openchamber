@@ -105,6 +105,11 @@ const referenceCommentFields = {
   path: z.string().nullable(),
   line: z.number().nullable(),
   review: z.enum(['approved', 'changes_requested', 'commented', 'dismissed']).nullable(),
+  // Absent from older servers and other hosts; a malformed one only costs the suggestion its base.
+  excerpt: z.object({
+    startLine: z.number().int().positive(),
+    lines: z.array(z.string()).max(200),
+  }).optional().catch(undefined),
 };
 
 const referenceDetailResultSchema = z.discriminatedUnion('connected', [

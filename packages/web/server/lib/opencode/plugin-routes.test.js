@@ -205,6 +205,20 @@ describe('opencode plugin routes', () => {
     expect(getNpmInfo).not.toHaveBeenCalled();
   });
 
+  test('GET /registry skips control entries without querying npm', async () => {
+    // `-hooks` disables a plugin; querying npm for it answered 404 and the card
+    // showed it as an invalid plugin.
+    const getNpmInfo = mock(async () => ({ ok: true, latest: '1.0.0', versions: ['1.0.0'], distTags: { latest: '1.0.0' } }));
+    createRegistryApp(getNpmInfo);
+
+    const response = await request(app)
+      .get(`/api/config/plugins/registry?specs=${['-hooks', '*', 'foo'].map(encodeURIComponent).join(',')}`)
+      .expect(200);
+
+    expect(response.body.results.map((result) => result.spec)).toEqual(['foo']);
+    expect(getNpmInfo).toHaveBeenCalledTimes(1);
+  });
+
   testUnlessRoot('GET /registry reports unreadable path plugin', async () => {
     createRegistryApp(mock(async () => ({ ok: true, latest: '1.0.0', versions: ['1.0.0'], distTags: { latest: '1.0.0' } })));
     const tmpFile = path.join(fs.mkdtempSync(path.join(rootDir, 'plugin-unreadable-')), 'plugin.js');

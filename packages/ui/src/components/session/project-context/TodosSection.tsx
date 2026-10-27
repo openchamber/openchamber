@@ -322,7 +322,7 @@ export const TodosSection: React.FC<{
           type="button"
           onClick={handleClearCompletedTodos}
           disabled={disabled}
-          className="px-1 typography-meta text-muted-foreground/80 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+          className="px-1 typography-meta text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
         >
           {t('rightSidebar.contextNotesTodo.todo.clearCompleted')}
         </button>

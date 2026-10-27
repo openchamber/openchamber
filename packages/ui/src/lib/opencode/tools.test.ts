@@ -18,8 +18,7 @@ import {
   subagentSessionId,
   toolDescription,
   toolFileDiffs,
-  toolInputPath,
-} from "./tools"
+  toolInputPath, isShownInPlace, proposedWorkflowRunId } from "./tools"
 import type { Metadata, ToolInput, ToolState } from "./model"
 
 describe("tool identity", () => {
@@ -297,3 +296,23 @@ describe("renderedPage", () => {
     expect(titled("<p>a</p>")).toBe("")
   })
 })
+
+describe("proposedWorkflowRunId", () => {
+  const completed = (output: string, tool = "openchamber_workflow"): [string, ToolState] => [tool, { status: "completed", input: { action: "workflow.run" }, output, time: { start: 1, end: 2 } }]
+  type Envelope = { ok: boolean; action: string; data?: { runId: string; state?: string }; error?: { message: string } }
+  const envelope = (body: Envelope) => JSON.stringify({ schemaVersion: 1, ...body })
+
+  test("reads the run a workflow.run call proposed, which the chat draws in place of the row", () => {
+    const call = completed(envelope({ ok: true, action: "workflow.run", data: { runId: "wf_one", state: "awaiting-approval" } }))
+    expect(proposedWorkflowRunId(...call)).toBe("wf_one")
+    expect(isShownInPlace(...call)).toBe(true)
+  })
+
+  test("leaves other actions, refusals and other tools to their rows", () => {
+    expect(proposedWorkflowRunId(...completed(envelope({ ok: true, action: "workflow.status", data: { runId: "wf_one" } })))).toBeNull()
+    expect(proposedWorkflowRunId(...completed(envelope({ ok: false, action: "workflow.run", error: { message: "bad script" } })))).toBeNull()
+    expect(proposedWorkflowRunId(...completed("not json"))).toBeNull()
+    expect(proposedWorkflowRunId(...completed(envelope({ ok: true, action: "workflow.run", data: { runId: "wf_one" } }), "openchamber"))).toBeNull()
+  })
+})
+

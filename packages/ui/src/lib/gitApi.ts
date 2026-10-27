@@ -784,6 +784,19 @@ export async function setGitWorktreeTitle(
   return gitHttp.setGitWorktreeTitle(directory, title);
 }
 
+/** Pins the task of the worktree at `directory` to the top of the sidebar, or unpins it. */
+export async function setGitWorktreePinned(
+  directory: string,
+  pinned: boolean,
+): Promise<import('./api/types').GitWorktreePinResult> {
+  const runtime = getRuntimeGit();
+  if (runtime?.worktree?.setPinned) {
+    return runtime.worktree.setPinned(directory, pinned);
+  }
+  if (runtime) throw new Error('Pinning a worktree task is not available here');
+  return gitHttp.setGitWorktreePinned(directory, pinned);
+}
+
 export async function snapshotGitWorktree(
   directory: string,
   payload: import('./api/types').GitWorktreeSnapshotPayload

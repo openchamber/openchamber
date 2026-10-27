@@ -105,6 +105,9 @@ export const getToolIcon = (toolName: string, presentation?: GuestToolRule | nul
     if (tool === 'openchamber_memory') {
         return <Icon name="brain-4" className={iconClass} />;
     }
+    if (tool === 'openchamber_workflow') {
+        return <Icon name="flow-chart" className={iconClass} />;
+    }
     if (tool === 'question') {
         return <Icon name="survey" className={iconClass} />;
     }

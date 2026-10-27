@@ -1082,6 +1082,28 @@ describe('createSession draft lifecycle', () => {
     expect(createSessionCalls).toEqual(['/private/deleted-worktree']);
   });
 
+  test('never moves a draft in an isolated space to the project, pinned or not', async () => {
+    const createSessionCalls = [];
+    const spaceDirectory = '/spaces/0123456789ab/main';
+    useProjectsStore.setState({
+      projects: [{ id: 'project-main', path: '/projects/main', label: 'Main' }],
+      activeProjectId: 'project-main',
+    });
+    // The host's probe cannot see inside a space and calls its directory missing.
+    opencodeClient.getDirectoryAvailability = async () => 'missing';
+    opencodeClient.createSession = async (_params, directory) => {
+      createSessionCalls.push(directory);
+      return { id: 'session-space', directory, time: { created: 1, updated: 1 } };
+    };
+    useSessionUIStore.getState().openNewSessionDraft({ selectedProjectId: 'project-main', directoryOverride: spaceDirectory });
+    expect(useSessionUIStore.getState().newSessionDraft.preserveDirectoryOverride).toBe(true);
+    useSessionUIStore.getState().setDraftPreserveDirectoryOverride(false);
+
+    await useSessionUIStore.getState().createSession('Draft title', spaceDirectory);
+
+    expect(createSessionCalls).toEqual([spaceDirectory]);
+  });
+
   test('keeps a ChatInput-style current-directory draft recoverable when that path is missing', async () => {
     const createSessionCalls = [];
     useProjectsStore.setState({

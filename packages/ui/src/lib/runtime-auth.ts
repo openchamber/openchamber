@@ -144,15 +144,8 @@ export const setRuntimeUrlAuthToken = (token: string | null | undefined, expires
     clearRuntimeUrlAuthToken();
     return;
   }
-  const previous = runtimeUrlAuthToken;
   runtimeUrlAuthToken = normalized;
   runtimeUrlAuthTokenExpiresAt = expiresAt;
-  // Notify only on a real replacement (existing token swapped for a fresh one),
-  // not on the initial mint, so consumers remount token-bearing assets only
-  // when the URL token actually changed underneath them.
-  if (previous && previous !== normalized) {
-    notifyRuntimeUrlAuthListeners();
-  }
 };
 
 export const setLocalRuntimeUrlAuthToken = (
@@ -374,18 +367,7 @@ export const refreshLocalRuntimeUrlAuthToken = async (localOrigin: string): Prom
 let urlAuthConsumerCount = 0;
 let urlAuthRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 let urlAuthApiBaseUrl: string | null = null;
-const urlAuthListeners = new Set<() => void>();
 const URL_AUTH_PROACTIVE_BUFFER_MS = 5_000;
-
-const notifyRuntimeUrlAuthListeners = (): void => {
-  for (const listener of urlAuthListeners) {
-    try {
-      listener();
-    } catch {
-      // A listener throwing must not break the refresh loop.
-    }
-  }
-};
 
 const clearUrlAuthRefreshTimer = (): void => {
   if (urlAuthRefreshTimer !== null) {
@@ -435,17 +417,6 @@ export const acquireRuntimeUrlAuthToken = (apiBaseUrl?: string | null): (() => v
     if (urlAuthConsumerCount === 0) {
       clearUrlAuthRefreshTimer();
     }
-  };
-};
-
-// Subscribe to url-token *replacements* (an existing token swapped for a fresh
-// one). Fires only on a real change — not the initial mint — so consumers can
-// remount token-bearing assets without churning on first load. Returns an
-// unsubscribe function.
-export const subscribeRuntimeUrlAuthToken = (listener: () => void): (() => void) => {
-  urlAuthListeners.add(listener);
-  return () => {
-    urlAuthListeners.delete(listener);
   };
 };
 

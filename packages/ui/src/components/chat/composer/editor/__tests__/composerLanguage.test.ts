@@ -217,4 +217,34 @@ describe('composerLanguage — attachment citations', () => {
         const next = base.update({ changes: { from: 0, insert: '[image-1.png] ' } }).state;
         expect(citationChips(next)).toEqual([['[image-1.png]', 'image-1.png']]);
     });
+
+    test('draws a mentioned session or message link as a chip once resolved; others stay text', () => {
+        const chips = new Map([
+            ['ses_a:', { label: 'Tweet writing', title: 'Tweet writing', iconHref: '#oc-chat-3' }],
+            ['ses_a:msg_1', { label: 'Draft three', title: 'Tweet writing: Draft three', iconHref: '#oc-double-quotes-l' }],
+        ]);
+        const state = stateWith(
+            'see openchamber://session/ses_a, then https://chamber.example/?session=ses_a&message=msg_1 and openchamber://session/ses_b',
+            context({ sessionLinkChips: chips, sessionLinkOrigins: ['https://chamber.example'] }),
+        );
+        expect(citationChips(state)).toEqual([
+            ['openchamber://session/ses_a', 'Tweet writing'],
+            ['https://chamber.example/?session=ses_a&message=msg_1', 'Draft three'],
+        ]);
+    });
+
+    test('keeps a chip and the punctuation typed after it on one line, outside the chip', () => {
+        const state = stateWith('ask @build, then @build now', context());
+        const glued: string[] = [];
+        for (const source of state.facet(EditorView.outerDecorations)) {
+            const set = source instanceof Function ? null : source;
+            const iterator = set?.iter();
+            while (iterator?.value) {
+                if (iterator.value.spec.attributes?.style === 'white-space: nowrap') glued.push(state.doc.sliceString(iterator.from, iterator.to));
+                iterator.next();
+            }
+        }
+        expect(glued).toEqual(['@build,']);
+        expect(citationChips(state).map(([text]) => text)).toEqual(['@build', '@build']);
+    });
 });

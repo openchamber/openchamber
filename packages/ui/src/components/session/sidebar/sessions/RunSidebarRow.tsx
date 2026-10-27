@@ -28,6 +28,7 @@ import { CollapsedActivityIndicator } from './collapsedActivityIndicator';
 import { useCollapsedSessionActivityState } from './collapsedActivityState';
 import { SessionTimelineRowBody } from './SessionTimelineRowBody';
 import { useRunWork } from './useRunWork';
+import { isRowBoxClick } from './rowBoxClick';
 import { sessionDetailedRowPaddingLeft, sessionTreeRowPaddingLeft } from './sessionTreeGeometry';
 
 const MAX_LOGOS = 4;
@@ -165,8 +166,8 @@ function RunSidebarRowComponent({
     </>
   );
 
-  const hoverOut = alwaysShowActions ? undefined : 'transition-opacity group-hover/run:opacity-0 group-has-[:focus-visible]/run:opacity-0';
-  const hoverIn = alwaysShowActions ? undefined : 'opacity-0 transition-opacity group-hover/run:opacity-100 group-has-[:focus-visible]/run:opacity-100';
+  const hoverOut = alwaysShowActions ? undefined : 'group-hover/run:opacity-0 group-has-[:focus-visible]/run:opacity-0';
+  const hoverIn = alwaysShowActions ? undefined : 'opacity-0 group-hover/run:opacity-100 group-has-[:focus-visible]/run:opacity-100';
   const chevron = expandable ? (
     <span
       role="button"
@@ -185,13 +186,13 @@ function RunSidebarRowComponent({
     </span>
   ) : null;
   // The run's mark, where a worktree shows its branch mark.
-  const runMark = <ArrowsMerge className={cn(detailed ? 'h-3 w-3' : 'h-3.5 w-3.5', 'shrink-0 text-muted-foreground/70')} aria-hidden="true" />;
-  // One line: the slot holds the lanes' state, else the run's mark; the
-  // chevron takes its place on hover. Two lines have no slot: the chevron
-  // swaps in for the second line's first icon instead.
+  const runMark = <ArrowsMerge className={cn(detailed ? 'h-3 w-3' : 'h-3.5 w-3.5', 'shrink-0 text-muted-foreground')} aria-hidden="true" />;
+  // One line: the slot holds the run's mark, which the chevron takes over on
+  // hover; the lanes' state sits on the right, as on every row. Two lines
+  // have no slot: the chevron swaps in for the second line's first icon.
   const slot = (
     <span className="relative inline-flex size-3.5 flex-shrink-0 items-center justify-center">
-      <span className={cn('inline-flex items-center justify-center', expandable && hoverOut)}>{activity ?? runMark}</span>
+      <span className={cn('inline-flex items-center justify-center', expandable && hoverOut)}>{runMark}</span>
       {chevron}
     </span>
   );
@@ -236,13 +237,13 @@ function RunSidebarRowComponent({
       project={project}
       projectLabel={projectLabel}
       title={title}
-      titleClassName={renaming ? 'text-foreground' : isActive ? 'text-interactive-selection-foreground' : 'text-muted-foreground'}
+      titleClassName={renaming ? 'text-foreground' : isActive ? 'text-interactive-selection-foreground' : 'oc-title-rest'}
       branchLabel={null}
       leadIcon={runMark}
       metaLineLead={(
         <>
           {project ? runMark : null}
-          <span className="min-w-0 truncate typography-micro text-muted-foreground/50">{laneCountLabel}</span>
+          <span className="min-w-0 truncate typography-micro text-muted-foreground">{laneCountLabel}</span>
         </>
       )}
       leadToggle={chevron}
@@ -261,10 +262,11 @@ function RunSidebarRowComponent({
   ) : (
     <div className={cn('@container relative flex min-w-0 flex-1 items-center gap-1', actionsReserve)}>
       {renaming ? title : (
-        <span dir="auto" className={cn('oc-ui-start-align block min-w-0 flex-1 truncate typography-ui-label font-normal', isActive ? 'text-interactive-selection-foreground' : 'text-muted-foreground', maskOnHover)}>{title}</span>
+        <span dir="auto" className={cn('oc-ui-start-align block min-w-0 flex-1 truncate typography-ui-label font-normal', isActive ? 'text-interactive-selection-foreground' : 'oc-title-rest', maskOnHover)}>{title}</span>
       )}
-      <span className={cn('ms-auto flex flex-shrink-0 items-center', renaming && 'hidden', alwaysShowActions ? (sessionWorkEnabled ? 'pe-14' : 'pe-7') : hoverOut)}>
+      <span className={cn('ms-auto flex flex-shrink-0 items-center gap-1', renaming && 'hidden', alwaysShowActions ? (sessionWorkEnabled ? 'pe-14' : 'pe-7') : hoverOut)}>
         <ProviderLogos providerIDs={run.providerIDs} ringClass="ring-sidebar" />
+        {activity}
       </span>
     </div>
   );
@@ -276,8 +278,12 @@ function RunSidebarRowComponent({
           data-run-row={run.key}
           aria-current={isActive ? 'page' : undefined}
           style={{ paddingInlineStart: detailed ? sessionDetailedRowPaddingLeft(depth) : sessionTreeRowPaddingLeft(depth) }}
+          // The whole box opens the run, its paddings too.
+          onClick={(event) => {
+            if (isRowBoxClick(event)) openRun();
+          }}
           className={cn(
-            'group/run relative my-0.5 flex cursor-pointer items-center rounded-md py-1.5 pe-2.5',
+            'group/run relative my-0.5 flex cursor-pointer select-none items-center rounded-md py-1.5 pe-2.5',
             !detailed && 'gap-1.5',
             isActive ? 'bg-interactive-selection/70 text-interactive-selection-foreground' : 'hover:bg-interactive-hover/60',
           )}
@@ -302,7 +308,7 @@ function RunSidebarRowComponent({
             {body}
           </div>
           <div className={cn(
-            'absolute inset-e-1 z-10 flex items-center gap-0.5 transition-opacity',
+            'absolute inset-e-1 z-10 flex items-center gap-0.5',
             // On the first line: a two-line row's second line has none.
             detailed ? 'top-1.5 h-5' : 'top-1/2 -translate-y-1/2',
             renaming && 'hidden',

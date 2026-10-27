@@ -108,6 +108,9 @@ which is `readRenameableGeneratedBranch` in `../git`), the entry adds an
 instruction: name the task with `work.name` and pass `branch`, the branch
 named after the task in the repository's own naming or else
 `<type>/<short-kebab-case>`, with no tool prefix; `work.name` renames it.
+An issue's placeholder (`issue-180-merry-salamander`) keeps its `issue-180-`,
+which `../git` puts back in front of the agent's name, and the instruction
+says so, so the agent does not fight it.
 Said only in the `work.name` answer, the first agent to hear it read it and
 went on; told to run `git branch -m` beside `work.name`, weaker models named
 the task and dropped the rename, so `work.name` now refuses a placeholder
@@ -135,6 +138,15 @@ a few numbers, at most one per answer), the mockup exception, and asking with a
 page (`awaitAnswer`) when the user has to choose between visual options; the
 tool description repeats none of it. It goes into `openchamber.guidance`, so a
 change to the text reaches running sessions on their next message.
+
+## When to offer a workflow
+
+A session whose agent has the `openchamber_workflow` tool (a build with
+workflows, the setting on, and OpenChamber launched OpenCode, read through
+`isWorkflowAvailable`) is told when a task is big enough for one
+(`WORKFLOW_GUIDANCE`). A run costs many agents, so the agent starts one only
+when the user asks; when it sees a task with many similar independent pieces
+it says so and offers one. Small tasks never get one.
 
 ## Where the tools are called
 

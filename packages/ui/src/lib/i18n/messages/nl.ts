@@ -32,6 +32,10 @@ import { mcpGridI18n } from './mcp-grid.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { diffFindI18n } from './diff-find.i18n';
+import { markdownGithubI18n } from './markdown-github.i18n';
+import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
+import { workflowsI18n } from './workflows.i18n';
+import { sessionReferencesI18n } from './session-references.i18n';
 import { guestStatusViewI18n } from './guest-status-view.i18n';
 
 export const dict = {
@@ -176,6 +180,10 @@ export const dict = {
   ...pluginsGridI18n.nl,
   ...integrationsCatalogI18n['nl'],
   ...diffFindI18n['nl'],
+  ...markdownGithubI18n['nl'],
+  ...autocompleteScopeI18n['nl'],
+  ...workflowsI18n['nl'],
+  ...sessionReferencesI18n['nl'],
   ...guestStatusViewI18n['nl'],
   'terminalView.actions.attachSelection': 'Geselecteerde uitvoer toevoegen',
   'terminalView.actions.copySelection': 'Geselecteerde uitvoer kopiëren',
@@ -315,7 +323,6 @@ export const dict = {
   'mobile.menu.files': 'Bestanden',
   'mobile.menu.git': 'Git',
   'mobile.menu.terminal': 'Terminal',
-  'mobile.menu.mcp': 'MCP',
   'mobile.menu.instances': 'Instanties',
   'mobile.menu.update': 'Bijwerken',
   'mobile.menu.settings': 'Instellingen',
@@ -2322,6 +2329,7 @@ export const dict = {
   'session.githubIntegration.validation.branchAlreadyCheckedOut': 'Branch is al uitgecheckt in een worktree',
   'session.githubIntegration.validation.failed': 'Kan niet valideren',
   'chat.fileAttachment.toast.attachFailed': 'Kan het bestand niet toevoegen',
+  'chat.fileAttachment.toast.tooLarge': '{name} is te groot om bij te voegen (meer dan {size}). Staat het bestand in het project, noem het dan met @.',
   'chat.fileAttachment.toast.someFilesSkipped': 'Sommige bestanden zijn overgeslagen:\n{summary}',
   'chat.fileAttachment.toast.vscodePickFailed': 'Kan geen bestanden kiezen in VS Code',
   'chat.fileAttachment.fileFallback': 'bestand',
@@ -2437,8 +2445,6 @@ export const dict = {
   'chat.commandAutocomplete.command.exploreDescription': 'Krijg greep op deze codebase: een rondleiding op hoog niveau door de architectuur en de belangrijkste onderdelen.',
   'chat.commandAutocomplete.command.btwDescription': 'Stel een bijvraag in een tijdelijke subsessie zonder deze chat uit de koers te halen.',
   'chat.commandAutocomplete.command.forkDescription': 'Fork deze chat vanaf het laatst afgeronde antwoord en ga daar verder; tekst na /fork wordt naar de fork gestuurd.',
-  'chat.commandAutocomplete.badge.command': 'opdracht',
-  'chat.commandAutocomplete.badge.system': 'systeem',
   'chat.commandAutocomplete.empty': 'Geen opdrachten gevonden',
   'chat.agentMentionAutocomplete.badge.system': 'systeem',
   'chat.agentMentionAutocomplete.empty': 'Geen agents gevonden',
@@ -2582,8 +2588,6 @@ export const dict = {
   'chat.chatInput.actions.sendMessageAria': 'Bericht verzenden',
   'chat.chatInput.actions.queueMessageAria': 'Bericht in wachtrij plaatsen',
   'chat.chatInput.actions.stopGeneratingAria': 'Genereren stoppen',
-  'chat.chatInput.focusMode.toggleAria': 'Focusmodus aan- of uitzetten',
-  'chat.chatInput.focusMode.label': 'Focusmodus',
   'chat.chatInput.linked.byAuthor': 'door {author}',
   'chat.chatInput.linked.issue.openInBrowserAria': 'Issue in de browser openen',
   'chat.chatInput.linked.issue.removeAria': 'Gekoppeld issue verwijderen',
@@ -2607,7 +2611,7 @@ export const dict = {
   'chat.dictation.insertAndSend': 'Invoegen en verzenden',
   'chat.dictation.retry': 'Transcriptie opnieuw proberen',
   'chat.dictation.discard': 'Opname weggooien',
-  'chat.snippetAutocomplete.action.addNew': '+ Nieuw fragment toevoegen',
+  'chat.snippetAutocomplete.action.addNew': 'Nieuw fragment toevoegen',
   'chat.snippetAutocomplete.empty': 'Geen fragmenten gevonden',
   'chat.snippetAutocomplete.footer': '↑↓ navigeren • Enter selecteren • Esc sluiten',
   'snippets.source.global': 'globaal',
@@ -2998,6 +3002,20 @@ export const dict = {
   'projects.sharedTrust.actions': 'Acties',
   'projects.sharedTrust.skip': 'Nu niet',
   'projects.sharedTrust.trust': 'Vertrouwen en uitvoeren',
+  'projects.opencodeTrust.title': 'OpenCode code uit deze map laten uitvoeren?',
+  'projects.opencodeTrust.description': 'OpenCode voert de plugins en opdrachten uit de configuratie van {path} uit zodra het de map opent. Vertrouw ze één keer, en OpenChamber vraagt het pas opnieuw als ze veranderen.',
+  'projects.opencodeTrust.plugins': 'Plugins',
+  'projects.opencodeTrust.commands': 'Opdrachten',
+  'projects.opencodeTrust.kind.package': '{name} (npm-pakket)',
+  'projects.opencodeTrust.kind.config': '{path}: een configuratiebestand dat OpenChamber niet kan lezen',
+  'projects.opencodeTrust.kind.mcp': 'MCP-server {name}',
+  'projects.opencodeTrust.kind.lsp': 'Taalserver {name}',
+  'projects.opencodeTrust.kind.formatter': 'Formatter {name}',
+  'projects.opencodeTrust.kind.shell': 'Shell',
+  'projects.opencodeTrust.paused': 'Zonder vertrouwen kunnen agents niet in deze map werken, maar je kunt de bestanden en Git-wijzigingen nog steeds bekijken.',
+  'projects.opencodeTrust.skip': 'Deze keer niet',
+  'projects.opencodeTrust.trust': 'Vertrouwen en openen',
+  'projects.opencodeTrust.saveFailed': 'Je antwoord kon niet worden opgeslagen. Probeer het opnieuw.',
   'projectActions.actions.autoDiscoverTooltip': 'De dev server automatisch detecteren en uitvoeren',
   'projectActions.actions.chooseActionAria': 'Kies projectactie',
   'projectActions.actions.openPreview': 'Preview openen',
@@ -3476,6 +3494,7 @@ export const dict = {
   'common.duration.minutesSecondsCompact': '{minutes}m {seconds}s',
   'common.duration.hoursMinutesCompact': '{hours}u {minutes}m',
   'contextFileOpen.failure.tooLarge': 'Bestand is te groot om te openen (>{count} regels)',
+  'contextFileOpen.failure.tooLargeSize': 'Bestand is te groot om te openen (meer dan {size})',
   'contextFileOpen.failure.missing': 'Bestand niet gevonden',
   'contextFileOpen.failure.unreadable': 'Kan bestand niet openen',
   'quota.window.5h': '5-uurslimiet',
@@ -3501,6 +3520,7 @@ export const dict = {
   'quota.window.completions': 'Completions',
   'quota.window.premiumInteractions': 'AI-credits',
   'chat.workStatus.ariaLabel': 'Werkstatus',
+  'chat.workStatus.mobileEmpty': 'Nog niets te tonen voor deze sessie',
   'chat.workStatus.context.label': 'Context',
   'chat.workStatus.cost.breakdown': 'Sessie {session} · Subagents {subagents}',
   'chat.workStatus.git.changedFileSingle': '{count} bestand gewijzigd',

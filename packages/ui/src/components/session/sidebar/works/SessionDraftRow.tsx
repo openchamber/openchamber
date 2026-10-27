@@ -8,6 +8,7 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useGitBranchLabel } from '@/stores/useGitStore';
 import { formatProjectLabel } from '../utils';
 import { TimelineProjectIcon } from '../sessions/SessionTimelineRowBody';
+import { isRowBoxClick } from '../sessions/rowBoxClick';
 import { sessionDetailedRowPaddingLeft, sessionTreeRowPaddingLeft } from '../sessions/sessionTreeGeometry';
 import { useSessionDraftRow } from './useSessionDraftRow';
 
@@ -50,8 +51,12 @@ export function SessionDraftRow({ draft, depth, detailed, mixed, alwaysShowActio
   return (
     <div
       style={{ paddingInlineStart: detailed ? sessionDetailedRowPaddingLeft(depth) : sessionTreeRowPaddingLeft(depth) }}
+      // The whole box opens the draft, its second line and paddings too.
+      onClick={(event) => {
+        if (isRowBoxClick(event)) open();
+      }}
       className={cn(
-        'group/draft relative my-0.5 flex cursor-pointer rounded-md py-1.5 pe-2.5',
+        'group/draft relative my-0.5 flex cursor-pointer select-none rounded-md py-1.5 pe-2.5',
         detailed ? 'flex-col gap-px' : 'items-center gap-1.5',
         isOpen ? 'bg-interactive-selection/70 text-interactive-selection-foreground' : 'hover:bg-interactive-hover/60',
       )}
@@ -59,7 +64,7 @@ export function SessionDraftRow({ draft, depth, detailed, mixed, alwaysShowActio
       <div className={cn('flex w-full min-w-0 flex-1 items-center gap-1.5', detailed && 'h-5')}>
       {/* Two lines have no slot: the pen opens the second line instead. */}
       {detailed ? null : (
-        <span className="inline-flex size-3.5 flex-shrink-0 items-center justify-center text-muted-foreground/70">
+        <span className="inline-flex size-3.5 flex-shrink-0 items-center justify-center text-muted-foreground">
           <Icon name="edit" className="h-3 w-3" />
         </span>
       )}
@@ -82,7 +87,7 @@ export function SessionDraftRow({ draft, depth, detailed, mixed, alwaysShowActio
           dir="auto"
           className={cn(
             'oc-ui-start-align min-w-0 flex-1 truncate typography-ui-label italic',
-            isOpen ? 'text-interactive-selection-foreground' : 'text-muted-foreground',
+            isOpen ? 'text-interactive-selection-foreground' : 'oc-title-rest',
             !alwaysShowActions && 'group-hover/draft:oc-actions-mask group-has-[:focus-visible]/draft:oc-actions-mask',
           )}
         >
@@ -90,9 +95,9 @@ export function SessionDraftRow({ draft, depth, detailed, mixed, alwaysShowActio
         </span>
         <span className={cn(
           'ms-auto flex flex-shrink-0 items-center gap-1',
-          alwaysShowActions ? 'pe-7' : 'transition-opacity group-hover/draft:opacity-0 group-has-[:focus-visible]/draft:opacity-0',
+          alwaysShowActions ? 'pe-7' : 'group-hover/draft:opacity-0 group-has-[:focus-visible]/draft:opacity-0',
         )}>
-          {!detailed && firstLine && attachmentCount > 0 ? <Icon name="attachment-2" className="h-3 w-3 text-muted-foreground/50" /> : null}
+          {!detailed && firstLine && attachmentCount > 0 ? <Icon name="attachment-2" className="h-3 w-3 text-muted-foreground" /> : null}
         </span>
       </div>
       </div>
@@ -101,13 +106,13 @@ export function SessionDraftRow({ draft, depth, detailed, mixed, alwaysShowActio
         // where projects mix, the pen, then the branch it will go to.
         <div className="flex h-4 w-full min-w-0 items-center gap-1">
           {project ? <TimelineProjectIcon project={project} label={formatProjectLabel(project.label?.trim() || project.path)} /> : null}
-          <Icon name="edit" className="h-3 w-3 flex-shrink-0 text-muted-foreground/40" />
-          {branch ? <span className="min-w-0 truncate typography-micro text-muted-foreground/50">{branch}</span> : null}
-          {firstLine && attachmentCount > 0 ? <Icon name="attachment-2" className="ms-auto h-3 w-3 flex-shrink-0 text-muted-foreground/50" /> : null}
+          <Icon name="edit" className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
+          {branch ? <span className="min-w-0 truncate typography-micro text-muted-foreground">{branch}</span> : null}
+          {firstLine && attachmentCount > 0 ? <Icon name="attachment-2" className="ms-auto h-3 w-3 flex-shrink-0 text-muted-foreground" /> : null}
         </div>
       ) : null}
       <div className={cn(
-        'absolute inset-e-1 z-10 flex items-center transition-opacity',
+        'absolute inset-e-1 z-10 flex items-center',
         // On the first line: a detailed row's second line has none.
         detailed ? 'top-1.5 h-5' : 'top-1/2 -translate-y-1/2',
         alwaysShowActions ? 'opacity-100' : 'opacity-0 group-hover/draft:opacity-100 group-has-[:focus-visible]/draft:opacity-100',

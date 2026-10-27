@@ -176,7 +176,7 @@ describe('the places', () => {
 });
 
 describe('the disk of a place', () => {
-  const disk = { imageBytes: 1_632_000_000, imagePulling: false, imageFailure: null, toolsBytes: 438_000_000, spacesBytes: 0, freeBytes: 1_632_000_000, freesImage: true };
+  const disk = { imageBytes: 1_632_000_000, imagePulling: false, imageFailure: null, toolsBytes: 438_000_000, spacesBytes: 0, bytesBySpace: {}, freeBytes: 1_632_000_000, freesImage: true };
 
   test('starts the image download with a POST and reads the disk it answers; a host that says nothing of a download is read as none', async () => {
     const pulling = { ...disk, imageBytes: null, freeBytes: 0, freesImage: false, imagePulling: true };

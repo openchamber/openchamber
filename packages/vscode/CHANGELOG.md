@@ -1,3 +1,29 @@
+## [2.5.2] - 2026-10-26
+
+### New
+
+- **Folder trust:** before OpenCode runs a folder's plugins, MCP servers or other commands from its configuration, the extension shows what would run and asks you to trust it. It asks again when that configuration changes.
+- Chat: a `diff` code block in a reply shows as a proposed change in the diff preview (thanks to @cemarta7).
+- Chat: emoji autocomplete on `:` in the message box.
+
+### Improvements
+
+- Chat: the prompt navigator is a small indicator in the chat's top corner. Hover, click or the shortcut open a list of every prompt in the session.
+- Composer: autocomplete lists open next to the text you are typing.
+- Chat: a failed `!` command shows why it failed on its collapsed row (thanks to @kemaladlig, @yulia-ivashko).
+- Interface size: toasts and fixed-size text follow the interface size and font (thanks to @mossgowild, @yulia-ivashko).
+- Composer: with messages queued, ArrowUp in an empty message box takes the newest one out of the queue to edit.
+
+### Fixes
+
+- Skills: the Skills catalog opens without timing out, and no longer starts thousands of git processes (thanks to @yulia-ivashko).
+- Skills: on Windows, catalog copies a virus scanner kept in the temp folder get cleaned up, and one that can't be deleted is named in the OpenChamber output (thanks to @yulia-ivashko).
+- Composer: a message goes out with the agent the picker shows. Returning to a session could send it as Plan or another agent.
+- Sessions: the turn timer keeps its start after the view reloads (thanks to @Naputt1, @yulia-ivashko).
+- Chat: permission and form card buttons have their tinted fill again (thanks to @mossgowild).
+- Chat: the effort button is capitalized the same as its menu (thanks to @mossgowild).
+- Chat: the model picker opened with its shortcut stays open while you type to search (thanks to @ChangeHow).
+
 ## [2.5.1] - 2026-10-23
 
 ### New

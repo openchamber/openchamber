@@ -125,6 +125,11 @@ jobs:
 
           gh issue view "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" \
             --json number,title,body,author,labels,comments,createdAt,state,url > "$context/issue.json"
+          # JSON keeps each body on one line, and the agent's read tool cuts a
+          # line at 2,000 characters, so a long issue arrived truncated.
+          jq -r '"# \(.title)\n\nBy @\(.author.login)\n\n\(.body // "")",
+            (.comments[] | "\n## Comment by @\(.author.login), \(.createdAt)\n\n\(.body)")' \
+            "$context/issue.json" > "$context/issue.md"
 
           gh api "repos/${GITHUB_REPOSITORY}/issues?state=all&per_page=100" --paginate \
             --jq '.[] | [.number, (if .pull_request then "pr" else "issue" end), .state, .title, ((.body // "") | gsub("\\s+"; " ") | .[0:500])] | @tsv' > "$context/issues.tsv"

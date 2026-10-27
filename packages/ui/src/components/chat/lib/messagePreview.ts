@@ -72,6 +72,10 @@ const contextSummary = (payload: ContextPartPayload, t: Translate, descriptorOf:
         case 'guest-issue':
         case 'guest-pr':
             return `${payload.id} ${payload.title}`;
+        case 'session':
+            return payload.title;
+        case 'session-message':
+            return payload.excerpt;
     }
 };
 
@@ -97,6 +101,8 @@ const contextBody = (payload: ContextPartPayload): string => {
         case 'tracker-item':
         case 'guest-issue':
         case 'guest-pr':
+        case 'session':
+        case 'session-message':
             return '';
     }
 };

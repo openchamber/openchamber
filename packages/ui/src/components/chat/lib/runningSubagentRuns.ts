@@ -7,6 +7,8 @@
  * is the child session's status: a busy child of this session is a running
  * job. Children a `subagent` tool call already shows as its own row are left to
  * that row, and a child whose report has arrived is shown by the report.
+ * Agents of a workflow run are children too; the run's card and the Workflows
+ * panel show them, so they are left out here (`excluded`).
  */
 
 import React from 'react';
@@ -14,12 +16,14 @@ import React from 'react';
 import { isFinalToolStatus, type Message, type Part, type Session, type SyntheticMessage } from '@/lib/opencode/model';
 import { readSubagentRun, runningSubagentRunMessage } from '@/lib/opencode/subagent-run';
 import { isSubagentTool, subagentSessionId } from '@/lib/opencode/tools';
+import { useSessionWorkflowRuns } from '@/lib/workflows/store';
 import { useDirectorySync } from '@/sync/sync-context';
 import type { State } from '@/sync/types';
 
 import type { ChatMessageEntry } from './turns/types';
 
 const EMPTY_RUNS: SyntheticMessage[] = [];
+const NO_EXCLUDED: ReadonlySet<string> = new Set();
 
 const isBusy = (state: Pick<State, 'session_status'>, sessionID: string): boolean => {
     const status = state.session_status[sessionID];
@@ -58,10 +62,11 @@ const accountedChildren = (state: Pick<State, 'part'>, messages: readonly Messag
 export const selectRunningSubagentRuns = (
     state: Pick<State, 'session' | 'session_status' | 'message' | 'part'>,
     parentSessionID: string,
+    excluded: ReadonlySet<string> = NO_EXCLUDED,
 ): SyntheticMessage[] => {
     const busyChildren: Session[] = [];
     for (const session of state.session) {
-        if (session.parentID === parentSessionID && isBusy(state, session.id)) busyChildren.push(session);
+        if (session.parentID === parentSessionID && !excluded.has(session.id) && isBusy(state, session.id)) busyChildren.push(session);
     }
     if (busyChildren.length === 0) return EMPTY_RUNS;
 
@@ -107,15 +112,20 @@ const sameRuns = (left: readonly SyntheticMessage[], right: readonly SyntheticMe
 
 /** The running subagent runs of a session, stable across unrelated store updates. */
 export const useRunningSubagentRuns = (sessionID: string, directory?: string): SyntheticMessage[] => {
+    const workflowRuns = useSessionWorkflowRuns(sessionID || null);
+    const workflowAgents = React.useMemo(() => {
+        const ids = workflowRuns.flatMap((run) => run.agents.flatMap((agent) => (agent.sessionId ? [agent.sessionId] : [])));
+        return ids.length === 0 ? NO_EXCLUDED : new Set(ids);
+    }, [workflowRuns]);
     const selector = React.useMemo(() => {
         let previous = EMPTY_RUNS;
         return (state: State): SyntheticMessage[] => {
             if (!sessionID) return EMPTY_RUNS;
-            const next = selectRunningSubagentRuns(state, sessionID);
+            const next = selectRunningSubagentRuns(state, sessionID, workflowAgents);
             if (sameRuns(previous, next)) return previous;
             previous = next;
             return next;
         };
-    }, [sessionID]);
+    }, [sessionID, workflowAgents]);
     return useDirectorySync(selector, directory);
 };

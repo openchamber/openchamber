@@ -54,7 +54,7 @@ export const PullStackRows: React.FC<{
                         {onOpen && !isCurrent ? (
                             <button
                                 type="button"
-                                className="flex w-full min-w-0 items-center gap-1.5 rounded-md text-start text-muted-foreground/80 hover:text-foreground"
+                                className="flex w-full min-w-0 items-center gap-1.5 rounded-md text-start text-muted-foreground hover:text-foreground"
                                 title={layer.title}
                                 onClick={() => onOpen(layer)}
                             >

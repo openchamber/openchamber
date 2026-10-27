@@ -67,7 +67,7 @@ even when the OS requests reduced motion; the unread icon stays. Permission/ques
 elapsed counters retain their existing precedence and behavior. A session
 row's title carries its state too: semibold at full strength while a finished
 turn is unseen or a permission or question waits on the user, full strength
-while it runs, muted otherwise; the active row keeps the selection colors. The display
+while it runs, a step below otherwise (`oc-title-rest`); the active row keeps the selection colors. The display
 store is at version 10 (v10 dropped the Recent toggle): missing preferences inherit the default during hydration,
 while an explicitly saved choice survives reload.
 
@@ -106,11 +106,16 @@ A project lists its worktree works among the works of its root, not in a
 block after them: the row model (`mergeWorktreeEntries` in
 `sessionSidebarRowModel.ts`) puts each at the place of its most recent
 session in the shared lifecycle order (`sessionOrderIndex`), so a worktree
-someone just worked in leads the list as a session there would. A worktree
-spends one slot of the root's Show more limit, like a run; one with no session
-yet closes the list, the newest first (`useSessionGrouping`). Worktrees filed
-in a folder stay in the folder; spaces and the archive bucket follow the
-list. There is no worktree sort and no worktree dragging, on the phone either:
+someone just worked in leads the list as a session there would. Its archived
+sessions count too (`buildWorktreeArchiveAnchors` in `works/sidebarWorks.ts`,
+`worktreeArchiveAnchors` on the row model, and the list by time through
+`orderSidebarWorks`): archiving the newest session in a worktree is not work,
+so the worktree keeps the place that session gave it instead of falling to
+the next one's, and a worktree whose sessions are all archived stays where it
+was. A worktree spends one slot of the root's Show more limit, like a run; one
+that never had a session closes the list, the newest first (`useSessionGrouping`). An isolated
+space is listed the same way: it is a work of its own (see Works). Worktrees and spaces filed
+in a folder stay in the folder; the archive bucket follows the list. There is no worktree sort and no worktree dragging, on the phone either:
 its project editor lists the worktrees in the topology's order, with Delete.
 
 Every other list of projects shows them in the sidebar's order through
@@ -158,15 +163,16 @@ no Shift.
   Track or Done (top-level rows), delete (two taps), rename and Copy ID; a
   worktree work Done or Track, Rename, Archive worktree and Delete (its
   dialog); a run Done or Track, Open overview, Rename and Archive run; a draft
-  Discard, without asking; a project Remove (two taps) and Edit; a space its
-  access dialog and actions sheet. There is no long press: the swipe already
+  Discard, without asking; a project Remove (two taps) and Edit; a space work
+  Done or Track and its actions sheet, which also says what its state mark
+  stands for. There is no long press: the swipe already
   holds every action. The rows share their behaviour with the desktop's
   through `useWorktreeWork`, `useRunWork` and `useSessionDraftRow`.
 - A tap opens what the row stands for and closes the drawer. The chevron is
   always shown, since there is no hover to reveal it: in the slot of a
   one-line row, over the second line's first icon of a two-line row, in a
-  thumb-sized target. A one-line row with nothing to open shows its live state
-  in the slot; a parent shows it on the right. No row shows a date, as on the
+  thumb-sized target. The live state sits on the right before the time on
+  every row, as on the desktop. No row shows a date, as on the
   desktop: the list is ordered by recency; a turn's duration shows while it
   runs and until it is read.
 - Detailed rows are on by default on the phone (store v12; a phone that was on
@@ -183,6 +189,10 @@ no Shift.
   desktop's selection fill and title colour, painted over the row's opaque
   background (`MOBILE_ACTIVE_ROW_CLASS`): the selection token is translucent,
   and as a background it let the swipe actions behind the row show through.
+  The actions are also hidden (`visibility`) whenever the row covers them:
+  while a header opens or closes, WebKit stops painting the sliding and fading
+  rows over their actions, and every row below the header showed its buttons
+  through its text.
 - The phone shows folders and folds them, but does not create, rename, delete
   or file them: folders are edited on the desktop or the web.
 - Search filters the list in place, as on the desktop.
@@ -257,9 +267,8 @@ unchanged so ordinary session updates do not invalidate project sections.
   worktree row otherwise showed the same run twice.
 - The run row is a work like a session or a worktree (`RunSidebarRow`), not a
   session: it never enters selection or the selection pool. It reads like
-  their rows: the lanes' state in the slot (aggregated by
-  `useCollapsedSessionActivityState`), else the run's mark; the title; the
-  lanes' model logos. It opens to its lanes everywhere, zones included
+  their rows: the run's mark in the slot; the title; the lanes' model logos,
+  then the lanes' state (aggregated by `useCollapsedSessionActivityState`). It opens to its lanes everywhere, zones included
   (`runExpansionKey`, same `expandedParents` store), as one-line session rows
   one level deeper; search forces it open. With Detailed rows it follows the
   two-line rows (`detailed`): no slot, the state on the right, the run's mark
@@ -292,37 +301,43 @@ changes update rows. See `lib/multirun/DOCUMENTATION.md`.
 ## Works
 
 The desktop and web sidebar lists works, not sessions (`works/DOCUMENTATION.md`
-owns the details). A work is either a linked worktree with every session in
-it, or a root session of the project root (or of a space) with what nests
-under it. Nesting is display lineage (`lib/sessionWorkLineage.ts`,
+owns the details). A work is either a linked worktree or an isolated space
+with every session in it, or a root session of the project root with what
+nests under it. Nesting is display lineage (`lib/sessionWorkLineage.ts`,
 `resolveSessionNestingParentId`): a subagent under its run (`parentID`), and
-under the session it grew out of an auto-review (`originalSessionID`), a fork
-or promoted `/btw` (`fork.sessionID`), and a session another session's agent
-started through the openchamber tool (`metadata.openchamber.originSessionID`,
-written by the server's create route). The folder decides first: a session in
+under the session it grew out of an auto-review (`originalSessionID`), and a
+`/btw` side conversation, promoted or not (`originalSessionID`, after
+promotion `fork.sessionID`). A plain fork stays a root: it usually takes the
+task another way, so it is a work of its own (maintainer decision 2026-10-26).
+A session another session's agent
+started through the openchamber tool stays a root: it is the user's own
+conversation, and its prompt links back to the sender in the transcript
+(`metadata.openchamber.promptedBy`). The `originSessionID` older builds wrote
+on such sessions is ignored. The folder decides first: a session in
 another folder stays a root there, and so does a multi-run lane. Archive,
 restore and the Archive page keep OpenCode's `parentID` only.
 `list/sessionCollection.ts` and `projects/useSessionGrouping.ts` both build
 their trees with it, so the collection's `nestedSessionIds` never lists a
 nested session as a root of its own.
 
-A worktree's group header is its work row (`works/WorktreeWorkRow.tsx`); spaces,
-the project root and archived buckets keep `SessionGroupSection`. The row
-reads like a session row, its title where session titles start: the live
-state of its sessions in the slot (running, news, a waiting request), or
-while there is none the worktree mark tinted by the branch's PR; the chevron
-replaces either while the row is hovered or focused, when there is something
-to open (touch layouts keep the chevron and show the state at the end). The
+A worktree's group header is its work row (`works/WorktreeWorkRow.tsx`), and
+so is a space's (see "Spaces" below); the project root and archived buckets
+keep `SessionGroupSection`. The row
+reads like a session row, its title where session titles start: the
+worktree mark tinted by the branch's PR in the slot, always, and the live
+state of its sessions (running, news, a waiting request) at the end before
+the time; the chevron replaces the mark while the row is hovered or focused,
+when there is something to open (touch layouts keep the chevron). The
 title carries the state as a session's does (semibold for news or a waiting
-request, full strength while running, muted otherwise), and the end shows the
+request, full strength while running, a step below otherwise), and the end shows the
 running turn's duration, or the last turn's until it is read. The title is
 the task title (the branch description,
 `WorktreeMetadata.title`; a worktree made for a pull request or an issue
 starts with that item's title, the agent's until replaced), until it has one
 the title of the session a click
 opens, and only for a worktree without sessions the branch; the tooltip
-always names the branch. At the end sits the PR or the issue its sessions follow as a tinted mark without its
-number (one line has no room for it; the mark's tooltip names it and a click
+always names the branch. At the end sits the PR or the issue its sessions follow as a mark in its state's
+colour without its number (one line has no room for it; the mark's tooltip names it and a click
 opens it). It shows no date and no session
 count, like the rows around it: the room goes to the title. Every icon before a one-line title
 moves the hover mask in by its width (`--oc-actions-inset`), or the title's
@@ -337,7 +352,17 @@ worktree just made), so the selection always shows. A worktree work starts folde
 `oc.sessions.workExpand`: what Expand all / Collapse all last set, plus the
 works toggled since), which the collection folds into the row model's
 collapsed groups. A root session row is in work when it or any nested non-subagent
-session is, and Done marks all of those done.
+session is, and Done marks all of those done (`collectSessionWorkInWork`).
+
+Only a row that is a work of its own offers Track / Done (`ownsWork` on the
+session row): a top-level session of the project root, a folder or a zone. A
+session nested under one, a lane of a run and every session of a worktree or
+a space work leave it to the work above them, on desktop, web and the phone.
+Btw sessions and auto-reviews carry their own work state, and with a
+Track / Done of their own one group mixed tracked and finished sessions that
+looked alike at rest (maintainer decision 2026-10-26). Their state still
+counts toward the work's, and the composer's Mark done still closes the open
+session alone.
 
 Work that is done or removed leaves the working set on every path (Done on a
 session row or a worktree row, Mark done in the composer, removing a
@@ -372,6 +397,61 @@ and records `metadata.openchamber.workTitle { title, by }`. A rename by the
 user (the row's Rename task, a session rename, AI rename) always wins: the
 agent's next call changes nothing and answers with the user's name.
 
+### Spaces
+
+An isolated space is a work like a worktree (`isGroupWork`, maintainer
+decision 2026-10-26): one row for the space and every session in it, with the
+same lineage under it, In work, Track / Done, folding (it starts folded) and
+the draft rows of its folder. The row is the worktree's (`WorktreeWorkRow`,
+`MobileWorktreeRow`), drawn for a space by `useWorktreeWork`:
+
+- The space's instance icon where the worktree mark goes. Its title is its
+  task's name, named as a main-checkout task is: the agent's `work.name` from
+  inside the space names the root session it works in, and the user's rename
+  of that session wins (`metadata.openchamber.workTitle`); the most recent
+  named session names the row. Until then the row reads as the session a
+  click opens, and with no session as the space's own name, which otherwise
+  stands where a worktree's branch does (the tooltip, a detailed row's second
+  line). Rename task renames that session. It has no branch, pin or archive.
+- Its state is one mark at the row's end (`spaces/SpaceStatus.tsx`): a
+  spinner while it is made, a setup command runs or an action is under way;
+  the word "Stopped" where a row's time goes while it is stopped (a square
+  there read as a Stop button); a warning or an error. The row is one line, so
+  the text is never on it. On the desktop the row's tooltip writes the state
+  out, each line with the action that moves it on (Start, Grant access,
+  Details, Remove); on the phone the actions sheet does, above the actions.
+- Its menu (and right-click menu) and the phone's actions sheet hold the
+  space's actions: Apply changes, Access and network, the repairs, Delete.
+  New chat is gone while a new session there would fail: the making failed,
+  the container is gone or the machine is out of reach.
+- Done marks its sessions done and leaves the work, as on a worktree, and
+  stops the space unless an agent still works in it: its files stay, its
+  memory and processor come back, and the next message starts it. The
+  space itself stays. Applying or discarding its changes is the apply
+  dialog's and Delete's, never a side effect of Done.
+- A space nobody has chatted in yet leads its project's list (and the list by
+  time) while it is being made or runs (`liveSpaceIds`), where a worktree
+  without sessions closes it: it was made to be used now, and at the end it
+  fell under Show more and looked missing. One whose making failed or whose
+  container is gone closes the list like that worktree. While it is
+  made, the draft that waits for it sits on the project root and names the
+  space by its creation request (`spaceOfCreationRequest`); the row counts
+  that draft as begun there, so it is listed in In work and selected.
+- A space's session belongs to the project the space was made from:
+  `resolveProjectForSessionDirectory` maps a `/spaces/<id>/...` directory
+  through the space's mark, so the header tab's project icon, the session
+  switcher, the tray and the other places that name a session's project see
+  it. The places that would carry host data into the space or apply the host
+  project's config keep no project for it, visibly in their code: project
+  knowledge and agent memory (`useProjectContextOwner`), workflows, the
+  config store's project defaults, and a fork into a new worktree, which
+  would hold none of the space's changes. A render that names the project
+  subscribes to the space (`useSpaceProjectDirectory`), and the open session
+  makes its project active once the space list names it
+  (`sync/space-session-project.ts`), since the list can arrive after a
+  reload has opened the session. A new session opened from inside a space
+  stays in it, as from a worktree, unless the space can take none.
+
 ## One view
 
 The desktop and web sidebar has one view. `sidebarGrouping`
@@ -395,7 +475,13 @@ while In work is), Detailed rows, then Collapse all / Expand all.
   display menu's Collapse all / Expand all set every project and the zones
   (`SIDEBAR_ACTIVITY_KEYS`: Chats, Pinned, In work and the list by time)
   together. Session folders keep their own collapse state. Zone and project
-  headers are sticky.
+  headers are sticky. Their labels are bold and a size up from rows
+  (`typography-ui-section`, 0.9375rem on desktop, 1rem on the phone): at
+  the row's size and semibold, a project read as one more row (maintainer,
+  2026-10-26). A hairline sits in the middle of the gap before every
+  project header that has rows above it (`sectionWrapperClass`), so projects
+  read apart from each other and from the zones; it is drawn inside the gap
+  and adds no height.
 - Rows of zones that mix projects (Pinned, In work, the list by time) are
   `'mixed-compact'`: one line with no project icon (the room goes to the
   title; the whole-row tooltip names the project, branch and model), the PR
@@ -431,9 +517,9 @@ while In work is), Detailed rows, then Collapse all / Expand all.
   projects it lists nothing for (one loading line, one line per failed
   directory). Single-project mode keeps its project header and groups by
   project.
-- An isolated space without chats has no session row, so its group header
-  sits under its project until its first chat; it hides nothing and is not
-  dragged. Search leaves it out.
+- An isolated space without chats still has its work row: it leads its
+  project's list while it is made or runs, and closes it otherwise (see
+  Spaces). Search leaves it out.
 
 ## In work
 
@@ -478,7 +564,7 @@ At rest a row in work shows a grey check only while Jev's done hint is
 current (`isDoneSuggested`); the composer shows the same hint as a top row
 (`components/chat/SessionDoneHintRow.tsx`). The phone's session swipe actions
 run left to right by how often they are used on a phone: archive, pin
-(top-level rows), Track / Done (top-level rows, feature on), delete, rename;
+(top-level rows), Track / Done (rows that are works, feature on), delete, rename;
 AI rename sits inside the rename editor. Phone rows also show the goal glyph and the permission/question badges
 (`apps/MobileSessionStateBadges.tsx`) from the cross-directory request index
 (`sync/global-blocking-requests.ts`). Row memoization compares `metadata` by
@@ -551,7 +637,7 @@ dragging a worktree onto a folder is not offered.
   root's sessions and drafts, in its folders as well (a session row's
   `detailed`, `detailedRoots` in the row model), and its worktree works (the
   group row's `detailed`). What nests inside a work stays one line: subagents,
-  reviews and forks under a session, and a worktree's own sessions and drafts,
+  reviews and btw sessions under a session, and a worktree's own sessions and drafts,
   since they share the work's branch and reference. Every detailed row,
   under a project or in a zone, is laid out the same way: no slot, its text
   10px in at the first level (`sessionDetailedRowPaddingLeft`), the state at
@@ -578,6 +664,20 @@ lists each of them once, in the zone (`zoneSessionIds` carries both zones' ids),
 and the rows follow the same render context. Its rows show no pin marker,
 because the header already says they are pinned; In work rows show it only
 while the zone is hidden, since otherwise no pinned session reaches In work.
+
+A worktree work is pinned too, from its row's menu (desktop, web) or its swipe
+actions (phone): Pinned lists it after the pinned sessions, the latest pin
+first (`pinnedWorktrees` on the row model), and it leaves its project, In work
+and the list by time (`movedGroupKeys`). With the zone hidden it stays in its
+project, leading the list as pinned sessions do, with the pin mark on its row.
+Manual worktree order is gone (see "Why a worktree is listed among the
+project's sessions"); pinning is how a worktree stays on top. The pin lives in
+the branch's config beside the task title (`branch.<name>.openchamberPinned`,
+`setWorktreePinned` in `web/server/lib/git`), so every client of the server
+sees it and a detached worktree, which has no branch, offers no pin. The row
+moves once the server's topology event lists the change, as a task rename
+does; there is no optimistic flip. VS Code has no worktree works, so no
+worktree pins.
 
 A pin lives in the session's metadata (`openchamber.pinned: { at }`,
 `lib/sessionPins.ts`), written through the metadata route like the work state,
@@ -675,8 +775,8 @@ matching and ordering. Search does not fetch sessions or broaden list membership
   the tree and break every line. The lines draw over the row, so they show on
   its hover and selection fills, inside a box that contains the row's margins
   so neighbouring rows' lines meet.
-  Worktree and folder labels are medium weight a step below full strength,
-  between the project header and the muted session titles at rest. Tree session rows are a little
+  Worktree and folder labels are medium weight a step below full strength
+  (`oc-group-label`), between the project header and the session titles at rest. Tree session rows are a little
   tighter than zone rows.
   An empty worktree group or folder (no sessions, no folders, nothing loading)
   shows no chevron, does not toggle, lists nothing under its header, and is
@@ -688,29 +788,33 @@ matching and ordering. Search does not fetch sessions or broaden list membership
   root's folders sit at level 0; worktree, space and archive headers sit at
   level 0 with their folders and sessions at level 1; a folder's sessions sit
   one level under the folder, and subsessions one level under their parent.
-  The slot holds the rotating chevron of a folder or a run. A space or
-  archive header holds its icon there (the space's box, the archive) and shows
-  its chevron in its place while the header is hovered or focused; touch
-  layouts keep the icon and toggle on a tap. A worktree's work row holds its
-  sessions' activity there instead, like a session row (see Works). Its
-  label therefore starts where root session titles start, and its sessions
-  sit one level in. On a session row it holds the live state (running kind, unread, or the
-  move/rename spinner), so the state reads down the left edge with the titles,
-  and stays empty otherwise so titles line up. A session with subsessions shows
-  its state there at rest and its chevron while the row is hovered or focused;
-  touch layouts (`alwaysShowActions`) have no hover, so a parent keeps its
-  chevron and its state goes to the right. Session rows use the one-line form
-  of `SessionTimelineRowBody`: pin, done hint and, while a turn runs or
-  until it is read, the turn's duration on the right. No row shows a date:
+  The slot holds the rotating chevron of a folder or a run. An archive
+  header holds its icon there and shows its chevron in its place while the
+  header is hovered or focused; touch layouts keep the icon and toggle on a
+  tap. A worktree's work row holds its branch mark there, a space's its instance
+  icon (see Works). Its label therefore starts where root session titles start,
+  and its sessions sit one level in. On a session row the slot holds the
+  chevron of a session with subsessions and stays empty otherwise, so titles
+  line up. The slot says what a row is and never its state: every row's live
+  state (running kind, unread, the move/rename spinner) sits on the right
+  before the time. With the state in the slot a running worktree read as a
+  chat, its branch mark gone (maintainer, 2026-10-26). Session rows use the
+  one-line form of `SessionTimelineRowBody`: pin, done hint, the live state
+  and, while a turn runs or until it is read, the turn's duration on the
+  right. No row shows a date:
   every list is ordered by recency and the whole-row tooltip has the time.
   One-line rows (sessions, runs, worktree works, drafts) are 34px: the 20px
   line, 6px above and below, a 1px margin each side (`SESSION_ESTIMATE`). The
   one-line Chats, Pinned, In work and list-by-time rows (`'tree-chat'`,
-  `'mixed-compact'`, session and run rows) take the same geometry at level 0
-  with the state in the slot, so it reads down one edge from the zones into
-  the projects. Detailed rows have no slot: their state is on the right and
-  their chevron swaps in for the second line's first icon. Session and run titles are muted at rest. Session, run, worktree work
-  and draft rows take the same faint hover fill; space, archive and folder
+  `'mixed-compact'`, session and run rows) take the same geometry at level 0,
+  so titles read down one edge from the zones into the projects. Detailed
+  rows have no slot: their state is on the right too and
+  their chevron swaps in for the second line's first icon. Session, run and draft titles rest a step below full strength
+  (`oc-title-rest`). Everything
+  else on a row (time, branch, counts, icons, a PR's number) is metadata in the
+  muted text colour at full strength, never a fraction of it. Only the mark of
+  a PR or an issue carries its state's colour; its number stays neutral. Session, run, worktree and space work
+  and draft rows take the same faint hover fill; archive and folder
   headers take none, so a pointer moving down the
   sidebar tells sessions from their containers. Show more, empty and
   status rows carry the level whose text they line up with.
@@ -753,9 +857,12 @@ matching and ordering. Search does not fetch sessions or broaden list membership
   and every row after them slides with it. A closed block is drawn as inert
   ghost rows at its old place until the motion ends; rows sliding in from past
   the virtual range stay mounted meanwhile. The block also fades: closing rows
-  are gone by 60% of the motion and opening rows come up after its first 20%.
-  Clipped at full strength, a closing row stayed legible until the rows
-  sliding up cut through it, which read as old content lingering over the new. Collapse all, search, Show more and
+  are gone by 60% of the motion, and an opening row comes up as the boundary
+  uncovers it, solid once half of it shows. Clipped at full strength, a
+  closing row stayed legible until the rows sliding up cut through it, which
+  read as old content lingering over the new. An opening fade on a clock of
+  its own (clear for the first 20%) left the first rows under the header
+  empty while the rows below already slid away. Collapse all, search, Show more and
   live list changes do not animate, nor does anything under reduced motion.
   The phone's list is drawn by the same renderer and animates the same way.
 - Shift selection and Ctrl/Cmd+A consume the model's logical row order. API
@@ -809,8 +916,8 @@ matching and ordering. Search does not fetch sessions or broaden list membership
 - List loading and workspace initialization have separate states. The spinner follows only the list queue; config, MCP, LSP, and live-state recovery cannot keep a successful empty list spinning. A core initialization failure has a separate localized notice and reuses the retry/native-access actions without clearing loaded sessions.
 - Directory permission failures remain visible even when stale sessions are retained. Flat groups inspect every represented root/worktree directory; local Desktop may open the native picker for the exact failed directory, while other runtimes keep the ordinary Retry action.
 - Pins and folder assignments are not pruned from the first startup snapshot or from optimistic mutations. Confirmed local deletion and routed external deletion clean immediately; a later authoritative omission after an established baseline covers missed external delete events.
-- Pending-permission/question row badges ride in the meta cluster at the row's end with the time and status, and fade with it on hover or while the row menu is open, except on non-VS Code always-visible-actions rows, which reserve permanent padding and keep the cluster shown. VS Code hover-reveals its actions over the row's right edge even under `alwaysShowActions`, so its cluster keeps fading.
-- Hover-revealed actions on session rows, worktree headers and project headers cross-fade over the row's end (the right, or the left in a right-to-left layout); they do not re-lay the row out. What they cover (date, branch, badges, indicators) fades with opacity, and the title or label's tail fades away under them through the `oc-actions-mask` utility (`index.css`): the row's text line is an `@container`, `--oc-actions-reserve` says how far the actions reach in from its end edge, `--oc-actions-inset` how far the masked text starts from its start edge. A title whose own direction differs from the interface (`dir="auto"`) starts under the actions, so it takes `padding-inline-start` of the reserve instead of the fade. Reserves, insets and the mask's own gradient stops are rem so they track the interface font size, and the mask multiplies reserves and insets by `--padding-scale` because the buttons and offsets they describe are spacing tokens that grow with the density setting; a pixel reserve would stop short of the buttons at larger sizes and let the title show through. Change a reserve whenever an action's size, count or offset changes. Only permanently shown actions (`alwaysShowActions`) take layout room.
+- Pending-permission/question row badges ride in the meta cluster at the row's end with the time and status, and hide with it on hover or while the row menu is open, except on non-VS Code always-visible-actions rows, which reserve permanent padding and keep the cluster shown. VS Code hover-reveals its actions over the row's right edge even under `alwaysShowActions`, so its cluster keeps hiding.
+- Hover-revealed actions on session rows, worktree headers and project headers swap in over the row's end (the right, or the left in a right-to-left layout) at once, without a fade; they do not re-lay the row out. What they cover (date, branch, badges, indicators) hides in the same step, and the title or label's tail fades away under them through the `oc-actions-mask` utility (`index.css`): the row's text line is an `@container`, `--oc-actions-reserve` says how far the actions reach in from its end edge, `--oc-actions-inset` how far the masked text starts from its start edge. A title whose own direction differs from the interface (`dir="auto"`) starts under the actions, so it takes `padding-inline-start` of the reserve instead of the fade. Reserves, insets and the mask's own gradient stops are rem so they track the interface font size, and the mask multiplies reserves and insets by `--padding-scale` because the buttons and offsets they describe are spacing tokens that grow with the density setting; a pixel reserve would stop short of the buttons at larger sizes and let the title show through. Change a reserve whenever an action's size, count or offset changes. Only permanently shown actions (`alwaysShowActions`) take layout room.
 - Tooltips that list PRs or issues (session rows, timeline PR badges, worktree headers) render them as links through `sessions/SidebarRefLinks.tsx`. The PR badge and header tooltips close 750 ms after the pointer leaves, so the pointer can travel in; the whole-row tooltip closes at once and relies on the popup staying open while the pointer heads into it. The row and header action buttons sit in their own `TooltipProvider`: the pointer crosses them on the way, and a same-group tooltip would replace the open one at once. Every row but VS Code's has the whole-row tooltip, opening to the right (title, time, project, branch, links, recap); every other tooltip on a row, a header's folder name included, opens above its element (`sessions/RowMarkTooltip.tsx` for status marks), so it never covers the neighbouring marks and actions. A session menu item that opens a submenu explains itself only while disabled: the hint would cover the open submenu.
 
 
@@ -836,6 +943,28 @@ indicators. Indicators stay inside the existing row/header action-padding bounda
 hover, keyboard focus, and always-visible action buttons move them left without hiding them.
 
 ## Decisions
+
+### Why row text has three levels and metadata is never faded
+
+A row's text takes three levels: a title that needs the user (full strength,
+semibold for news), a title at rest (`oc-title-rest`, halfway between body and
+muted text), and metadata (the theme's muted text colour). Metadata used to stack opacity on top of the muted
+colour (`/40` to `/80`, eight levels across the sidebar); at `/50` the time and
+branch measured 2.4:1 in OpenChamber Dark and 2:1 in Light, under the 4.5:1
+readable minimum. Themes already keep the muted colour readable on their
+canvas, so a fraction of it undoes that. Resting titles moved up a step so
+they stay above metadata that is now full muted. The step is a mix of the two
+colours, not body text at 80%: light themes keep body text soft, and at 80% it
+measured at most 0.11 above muted, and often below it, in every built-in
+light palette. Folder and archive labels take `oc-group-label`, three
+quarters of the way to body text, for the same reason: at 85% of body text
+they fell under the resting titles they contain in every light palette.
+
+### Why hover actions appear without a fade
+
+The actions and what they cover swap in one step. A fade on every pointer
+pass over a list reads as lag, and the mask under the title already keeps the
+swap from jumping.
 
 ### Why every project list follows the sidebar's sort and has no sort of its own
 

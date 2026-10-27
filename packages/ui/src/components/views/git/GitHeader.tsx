@@ -43,6 +43,7 @@ import { useSourceControlAuthStore } from '@/stores/useSourceControlAuthStore';
 import { openExternalUrl } from '@/lib/url';
 import { useToolbarFit } from '@/components/views/useDiffToolbarFit';
 import { GIT_PANEL_HEADER_FIT } from './gitPanelHeaderFit';
+import { SpaceApplyButton } from '@/components/session/spaces/SpaceApplyButton';
 
 type SyncAction = 'fetch' | 'pull' | 'sync' | 'publish' | null;
 
@@ -611,6 +612,7 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
         <ContextPanelHeaderToolbar>
           <div ref={panelToolbarRef} className="flex min-w-0 flex-1 items-center gap-2 pe-1">
             {branchControls}
+            <SpaceApplyButton directory={directory} />
             {managementButtons}
             <div className="shrink-0">{syncButtons}</div>
           </div>
@@ -642,6 +644,7 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
         {upstreamStatusPill ? (
           <div className="min-w-0 shrink">{upstreamStatusPill}</div>
         ) : null}
+        <SpaceApplyButton directory={directory} />
         {managementButtons}
         <div className="shrink-0">{syncButtons}</div>
       </div>

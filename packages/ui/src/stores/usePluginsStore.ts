@@ -15,7 +15,8 @@ import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 
 export type PluginScope = 'user' | 'project';
-export type PluginParsedKind = 'npm' | 'path' | 'git';
+/** `control` is an OpenCode 2 entry such as `-name` or `*` that turns known plugins off or on. */
+export type PluginParsedKind = 'control' | 'npm' | 'path' | 'git';
 
 export interface PluginEntry {
   id: string;

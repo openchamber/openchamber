@@ -111,7 +111,7 @@ export const sourceControlProviderDescriptors = createProviderDescriptors();
  * The change-host features (`reviewModel`, `revisions`, `createByPush`, and
  * the presentation's `branchHeads` and `submitRequirements`) and
  * `discussions` (with `urls.discussion`) appear only when the descriptor
- * declares them.
+ * declares them, and so do `urls.commit` and `urls.user`.
  */
 export function publicProviderDescriptor(descriptor, order, extension) {
   const { presentation } = descriptor;
@@ -177,6 +177,9 @@ export function publicProviderDescriptor(descriptor, order, extension) {
     published.features.discussions = capabilities.discussions;
     if (presentation.urls.discussion) published.urls.discussion = [...presentation.urls.discussion];
   }
+  // Where a host's commits and people live, for links in item text; left out where it has none.
+  if (presentation.urls.commit) published.urls.commit = [...presentation.urls.commit];
+  if (presentation.urls.user) published.urls.user = [...presentation.urls.user];
   if (extension) {
     published.extension = { guestId: extension.guestId, name: extension.name, version: extension.version };
   }

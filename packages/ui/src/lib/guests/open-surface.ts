@@ -28,6 +28,10 @@ const isShown = (directory: string, mode: ContextPanelMode): boolean => {
  */
 export const openGuestSurface = ({ mode, directory, supported }: OpenGuestSurfaceOptions): GuestOpenSurfaceResult => {
   if (!supported) return { ok: false, code: 'UNSUPPORTED', message: 'This OpenChamber surface has no side panel.' };
+  // A build without workflows answers as for any surface it does not have, so the name stays unknown.
+  if (mode === 'workflows' && !useUIStore.getState().agentWorkflowFeatureAvailable) {
+    return { ok: false, code: 'UNSUPPORTED', message: 'That surface cannot open here.' };
+  }
   const key = directory ? normalizeContextPanelDirectoryKey(directory) : '';
   if (!key) return { ok: false, code: 'NO_DIRECTORY', message: 'No chat or project is open.' };
   if (isShown(key, mode)) return { ok: true };

@@ -18,7 +18,7 @@ import {
 import { resolveNpmRegistryRequest } from '../../web/server/lib/opencode/npm-registry-config.js';
 import { writeFileAtomic } from '../../web/server/lib/opencode/atomic-write.js';
 import { toLoadablePluginSpec } from '../../web/server/lib/opencode/loadable-plugin-spec.js';
-import { isGitSpec } from '../../web/server/lib/opencode/plugin-spec.js';
+import { isGitSpec, isPluginControlSpec } from '../../web/server/lib/opencode/plugin-spec.js';
 import {
   toAgentEntity,
   fromAgentEntity,
@@ -107,7 +107,7 @@ export type Snippet = {
 };
 
 export type PluginScope = 'user' | 'project';
-type PluginParsedKind = 'npm' | 'path' | 'git';
+type PluginParsedKind = 'control' | 'npm' | 'path' | 'git';
 
 export type PluginEntry = {
   id: string;
@@ -1178,10 +1178,13 @@ const parsePluginRaw = (raw: unknown): { spec: string; options?: Record<string, 
 /** Always v2: a bare string, or `{package, options}`. Never a tuple. */
 const serializePluginEntry = (entry: { spec?: unknown; options?: unknown }): string | { package: string; options?: Record<string, unknown> } => {
   const spec = validatePluginSpec(entry.spec);
-  const serialized = fromPluginEntity({
-    package: spec,
-    options: isPlainObject(entry.options) && Object.keys(entry.options).length > 0 ? entry.options : undefined,
-  });
+  const options = isPlainObject(entry.options) && Object.keys(entry.options).length > 0 ? entry.options : undefined;
+  // OpenCode reads only a bare `-name` string as a control entry; written as
+  // `{package, options}` it becomes a package to install.
+  if (options && isPluginControlSpec(spec)) {
+    throw codedError(`Plugin control entry "${spec}" takes no options`, 'INVALID_SPEC');
+  }
+  const serialized = fromPluginEntity({ package: spec, options });
   if (serialized === null) {
     throw codedError('Plugin spec must be a non-empty string', 'INVALID_SPEC');
   }
@@ -1191,8 +1194,9 @@ const serializePluginEntry = (entry: { spec?: unknown; options?: unknown }): str
 const isPluginPathSpec = (spec: string): boolean =>
   spec.startsWith('/') || spec.startsWith('./') || spec.startsWith('../') || spec.startsWith('~') || path.win32.isAbsolute(spec);
 
-/** How a spec loads, by the server's rule (`plugin-spec.js`): a path, a Git package, or npm. */
+/** How a spec loads, by the server's rule (`plugin-spec.js`): a control entry, a path, a Git package, or npm. */
 const pluginParsedKind = (spec: string): PluginParsedKind => {
+  if (isPluginControlSpec(spec)) return 'control';
   if (isPluginPathSpec(spec)) return 'path';
   if (isGitSpec(spec)) return 'git';
   return 'npm';
@@ -1564,6 +1568,9 @@ export const queryPluginRegistry = async (
       results.push({ kind: 'npm-malformed', spec, error: 'Spec syntax is malformed' });
       continue;
     }
+
+    // A control entry (`-name`, `*`) names no package or path to look up.
+    if (pluginParsedKind(spec) === 'control') continue;
 
     // A Git package never reaches the npm registry; OpenCode resolves it itself.
     if (pluginParsedKind(spec) === 'git') {

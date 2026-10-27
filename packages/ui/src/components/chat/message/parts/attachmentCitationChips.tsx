@@ -1,7 +1,7 @@
 import React from 'react';
 
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
-import { INLINE_REFERENCE_CHIP_CLASS, INTERACTIVE_REFERENCE_CHIP_CLASS } from '@/lib/messages/inlineMessageLinks';
+import { CHIP_TRAILING_PUNCTUATION, INLINE_REFERENCE_CHIP_CLASS, INTERACTIVE_REFERENCE_CHIP_CLASS, REFERENCE_CHIP_LABEL_CLASS } from '@/lib/messages/inlineMessageLinks';
 import { findAttachmentCitationRanges } from '../../attachmentCitations';
 
 /** A run of text, or an inline element drawn inside it. */
@@ -14,8 +14,8 @@ const INLINE_BUTTON_STYLE = { minHeight: 0, minWidth: 0 };
 const AttachmentCitationChip: React.FC<{ filename: string; openable: boolean }> = ({ filename, openable }) => {
     const content = (
         <>
-            <FileTypeIcon filePath={filename} className="h-[1.1em] w-[1.1em]" />
-            {filename}
+            <FileTypeIcon filePath={filename} className="h-[1.1em] w-[1.1em] shrink-0" />
+            <span className={REFERENCE_CHIP_LABEL_CLASS}>{filename}</span>
         </>
     );
     if (!openable) {
@@ -68,4 +68,30 @@ export function withAttachmentChips(
     }
     if (cursor < text.length) nodes.push(text.slice(cursor));
     return nodes;
+}
+
+/**
+ * Keeps each chip and the punctuation typed right after it on one line, as a
+ * word and its comma are (`CHIP_TRAILING_PUNCTUATION`): the two go into one
+ * `nowrap` span, the punctuation still plain text.
+ */
+export function glueChipPunctuation(nodes: readonly InlineTextNode[], keyPrefix: string): InlineTextNode[] {
+    const glued: InlineTextNode[] = [];
+    for (let index = 0; index < nodes.length; index++) {
+        const node = nodes[index];
+        const next = nodes[index + 1];
+        if (!React.isValidElement<unknown>(node) || next === undefined || React.isValidElement<unknown>(next)) {
+            glued.push(node);
+            continue;
+        }
+        const trailing = CHIP_TRAILING_PUNCTUATION.exec(next)?.[0];
+        if (!trailing) {
+            glued.push(node);
+            continue;
+        }
+        glued.push(<span key={`${keyPrefix}-${index}`} className="whitespace-nowrap">{node}{trailing}</span>);
+        if (next.length > trailing.length) glued.push(next.slice(trailing.length));
+        index++;
+    }
+    return glued;
 }

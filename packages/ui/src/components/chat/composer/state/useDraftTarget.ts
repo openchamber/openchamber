@@ -34,8 +34,10 @@ import { normalizePath } from '../attachments/filePaths';
 import { CHAT_DRAFT_PROJECT_ID } from '@/lib/chatDirectories';
 import { useI18n } from '@/lib/i18n';
 import { getGitStatus } from '@/lib/gitApi';
-import { isSpaceCreationRequest, spaceOfCreationRequest } from '@/lib/spaces/space-creation-requests';
-import { useSpacesStore } from '@/lib/spaces/spaces-store';
+import { draftSpaceTarget, isSpaceCreationRequest, spaceOfCreationRequest } from '@/lib/spaces/space-creation-requests';
+import { isSpaceDirectory } from '@/lib/spaces/space-route';
+import { spacesOfProject, useSpacesStore } from '@/lib/spaces/spaces-store';
+import { useUIStore } from '@/stores/useUIStore';
 
 /** How long a cached branch list is served before it is refreshed. */
 const BRANCHES_SWR_TTL_MS = 30_000;
@@ -303,11 +305,29 @@ export function useDraftTarget(enabled: boolean) {
         }).filter((option) => option.kind === 'worktree');
     }, [availableWorktreesByProject, newSessionDraft?.bootstrapPendingDirectory, selectedDraftProject, selectedDraftProjectCurrentBranch, selectedDraftProjectPath]);
 
+    // The project's isolated spaces a new chat can start in: made, running or stopped (a send
+    // to a stopped one offers to start it). One being made is reached through its own draft.
+    const isolatedSpacesEnabled = useUIStore((state) => state.isolatedSpacesEnabled);
+    const spaceBranchOptions = React.useMemo(() => {
+        if (!isolatedSpacesEnabled || !spacesJourney || !selectedDraftProjectPath) return [];
+        return spacesOfProject(spacesJourney, selectedDraftProjectPath).flatMap((entry) => {
+            const value = normalizePath(entry.directory);
+            if (!value || (entry.state !== 'running' && entry.state !== 'exited')) return [];
+            return [{ value, label: entry.name || t('sessions.sidebar.grouping.spaceUnnamed') }];
+        });
+    }, [isolatedSpacesEnabled, selectedDraftProjectPath, spacesJourney, t]);
+
+    // A draft waiting for a new space stays on the project's folder until its message is sent
+    // (`space-creation.ts`), but it is the space's draft: once the space runs, the picker shows
+    // and checks the space, and the dirty check reads the space's tree.
+    const draftSpace = draftSpaceTarget(newSessionDraft?.pendingWorktreeRequestId, spacesJourney);
+    const draftSpaceDirectory = draftSpace?.kind === 'ready' ? normalizePath(draftSpace.directory) : null;
     const selectedDraftDirectory = React.useMemo(
-        () => normalizePath(newSessionDraft?.bootstrapPendingDirectory ?? null)
+        () => draftSpaceDirectory
+            ?? normalizePath(newSessionDraft?.bootstrapPendingDirectory ?? null)
             ?? normalizePath(newSessionDraft?.directoryOverride ?? null)
             ?? selectedDraftProjectPath,
-        [newSessionDraft?.bootstrapPendingDirectory, newSessionDraft?.directoryOverride, selectedDraftProjectPath],
+        [draftSpaceDirectory, newSessionDraft?.bootstrapPendingDirectory, newSessionDraft?.directoryOverride, selectedDraftProjectPath],
     );
 
     // The draft's own pending flags clear once the directory exists, which is
@@ -376,7 +396,7 @@ export function useDraftTarget(enabled: boolean) {
         if (projectRootBranchOption) {
             baseItems.push(projectRootBranchOption);
         }
-        baseItems.push(...worktreeBranchOptions);
+        baseItems.push(...worktreeBranchOptions, ...spaceBranchOptions);
 
         if (!selectedDraftDirectory) {
             return baseItems;
@@ -391,7 +411,7 @@ export function useDraftTarget(enabled: boolean) {
             ...baseItems,
             { value: selectedDraftDirectory, label: formatDirectoryName(selectedDraftDirectory) },
         ];
-    }, [projectRootBranchOption, selectedDraftDirectory, shouldKeepMissingSelectedDraftDirectory, worktreeBranchOptions]);
+    }, [projectRootBranchOption, selectedDraftDirectory, shouldKeepMissingSelectedDraftDirectory, spaceBranchOptions, worktreeBranchOptions]);
 
     const selectedDraftBranchLabel = React.useMemo(() => {
         if (newSessionDraft?.pendingWorktreeRequestId) {
@@ -415,14 +435,17 @@ export function useDraftTarget(enabled: boolean) {
         if (projectRootBranchOption?.value === selectedDraftDirectory) {
             return true;
         }
-        return worktreeBranchOptions.some((option) => option.value === selectedDraftDirectory);
-    }, [projectRootBranchOption?.value, selectedDraftDirectory, worktreeBranchOptions]);
+        return [...worktreeBranchOptions, ...spaceBranchOptions].some((option) => option.value === selectedDraftDirectory);
+    }, [projectRootBranchOption?.value, selectedDraftDirectory, spaceBranchOptions, worktreeBranchOptions]);
 
     React.useEffect(() => {
         if (!newSessionDraft?.open || !newSessionDraft?.preserveDirectoryOverride) {
             return;
         }
-        if (!selectedDraftDirectory || !selectedDraftBranchIsKnown) {
+        // A space's directory keeps its pin while listed: it exists inside the space only, so
+        // without the pin the host's probe at send would call it missing and start the chat in
+        // the project instead.
+        if (!selectedDraftDirectory || !selectedDraftBranchIsKnown || isSpaceDirectory(selectedDraftDirectory)) {
             return;
         }
         useSessionUIStore.getState().setDraftPreserveDirectoryOverride(false);
@@ -487,6 +510,8 @@ export function useDraftTarget(enabled: boolean) {
             projectId: selectedDraftProject.id,
             directoryOverride: directory,
         }, { force: true });
+        // Picked from the list, a space is pinned as the sidebar's new chat in it is (see above).
+        if (isSpaceDirectory(directory)) useSessionUIStore.getState().setDraftPreserveDirectoryOverride(true);
     }, [selectedDraftDirectory, selectedDraftProject, setNewSessionDraftTarget]);
     return {
         projects,
@@ -499,6 +524,7 @@ export function useDraftTarget(enabled: boolean) {
         selectedDraftDirectoryHasUncommittedChanges: dirtyDraftDirectory === selectedDraftDirectory,
         projectRootBranchOption,
         worktreeBranchOptions,
+        spaceBranchOptions,
         draftBranchItems,
         shouldShowDraftBranchSelector,
         handleDraftProjectChange,

@@ -15,6 +15,8 @@ import { getWorktreeBootstrapStatus, waitForWorktreeRemoval } from '../git/servi
 import { PART_SHELLS_HEADER, parsePartShellsHeader, shellMessagePage } from './message-shells.js';
 import { diagnosticApiRoute, diagnosticErrorMessage } from '../diagnostics/vocabulary.js';
 import { withUnreadBaseline } from '../openchamber-sessions/unread-baseline.js';
+import { OPENCODE_TRUST_ROUTE } from '../opencode-trust/index.js';
+import { createSessionDirectoryResolver } from '../opencode-trust/session-directory.js';
 
 /**
  * The abort signal for one upstream read.
@@ -407,6 +409,9 @@ export const registerOpenCodeProxy = (app, deps) => {
     // the host's own answers go out exactly as before spaces.
     mergeSpaceSessionList = null,
     spaceEventHub = null,
+    // The folder trust check (`../opencode-trust`): requests for a folder
+    // whose configuration runs code wait for the user's trust.
+    openCodeTrust = null,
   } = deps;
 
   /**
@@ -520,6 +525,21 @@ export const registerOpenCodeProxy = (app, deps) => {
     console.log('Setting up OpenCode API gate (OpenCode not started yet)');
   }
   app.set('opencodeProxyConfigured', true);
+
+  // Registered ahead of the readiness hold: the trust answer is OpenChamber's
+  // own and needs no running OpenCode.
+  if (openCodeTrust) {
+    app.all(OPENCODE_TRUST_ROUTE, async (req, res) => {
+      try {
+        const result = await openCodeTrust.handleRoute({ method: req.method, query: req.query, body: req.body });
+        res.setHeader('Cache-Control', 'no-store');
+        res.status(result.status).json(result.body);
+      } catch (error) {
+        console.error('[proxy] OpenCode trust check failed:', error?.message ?? error);
+        res.status(500).json({ error: 'Failed to check the folder configuration' });
+      }
+    });
+  }
 
   const isAbortError = (error) => error?.name === 'AbortError';
   // What a session route answers when its upstream read fails: 504 when the
@@ -1098,6 +1118,29 @@ export const registerOpenCodeProxy = (app, deps) => {
       next(error);
     }
   });
+
+  // OpenCode loads a folder's plugins and starts its MCP servers on the first
+  // request that names the folder. A folder whose configuration runs code
+  // stays closed to OpenCode until the user trusts that configuration.
+  if (openCodeTrust) {
+    // Routes that run in a session's own location are checked against the
+    // session's folder, whatever folder the request names.
+    const resolveSessionDirectory = createSessionDirectoryResolver({ fetchImpl: fetch, buildOpenCodeUrl, getOpenCodeAuthHeaders });
+    app.use('/api', async (req, res, next) => {
+      try {
+        const refusal = await openCodeTrust.refusalFor({
+          method: req.method,
+          path: req.originalUrl || req.url,
+          headers: req.headers,
+          resolveSessionDirectory,
+        });
+        if (!refusal) return next();
+        if (!res.headersSent) res.status(refusal.status).json(refusal.body);
+      } catch (error) {
+        next(error);
+      }
+    });
+  }
 
   // V2 lists sessions across directories on every platform and owns pagination.
   app.get('/api/session', (req, res, next) => {

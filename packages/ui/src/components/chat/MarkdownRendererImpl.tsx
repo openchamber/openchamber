@@ -9,6 +9,7 @@ import {
   type HighlightResult,
   type StreamdownProps,
 } from 'streamdown';
+import type { Pluggable } from 'unified';
 import type { Part } from '@/lib/opencode/model';
 import { cn } from '@/lib/utils';
 import { useOptionalThemeSystem } from '@/contexts/useThemeSystem';
@@ -25,6 +26,10 @@ import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-sw
 import { FadeInOnReveal } from './message/FadeInOnReveal';
 import type { ToolPopupContent } from './message/types';
 import { getMarkdownProcessingOptions, markdownCjk, markdownMath } from './markdown/streamdownPlugins';
+import { remarkEmojiShortcodes } from './markdown/remarkEmojiShortcodes';
+import { remarkRepositoryReferences } from './markdown/remarkRepositoryReferences';
+import type { EmojiShortcodes } from '@/lib/emoji/shortcodes';
+import type { RepositoryLinkContext } from '@/lib/source-control/repositoryLinks';
 import { MarkdownMediaProvider, type MarkdownDocumentAssets } from './markdown/MarkdownMediaContext';
 import {
   MarkdownImage,
@@ -42,6 +47,7 @@ import { MarkdownLink, MarkdownInlineCode } from './markdown/MarkdownLink';
 import { MarkdownCode } from './markdown/MarkdownCode';
 import { MarkdownTable, MarkdownTableCell } from './markdown/MarkdownTable';
 import { MarkdownMermaid } from './markdown/MarkdownMermaid';
+import { MarkdownBlockquote } from './markdown/MarkdownBlockquote';
 import { createMarkdownCodePlugin } from './markdown/streamdownCode';
 import { confirmCodePaths, confirmMarkdownFile, resolveMarkdownFile } from './markdown/markdownFileReferences';
 import { getMarkdownSyntaxVars } from './markdown/markdownSyntaxVars';
@@ -139,7 +145,7 @@ const components: Components = {
   p: MarkdownBodyParagraph,
   strong: ({ node: _node, ...props }) => <strong {...props} />,
   li: ({ node: _node, ...props }) => <li {...props} dir="auto" />,
-  blockquote: ({ node: _node, ...props }) => <blockquote {...props} dir="auto" />,
+  blockquote: MarkdownBlockquote,
   summary: ({ node: _node, children, ...props }) => (
     <summary {...props}>
       <span data-oc-disclosure-icon="" aria-hidden="true"><Icon name="arrow-right-s" className="size-3.5" /></span>
@@ -263,6 +269,10 @@ export interface MarkdownContentProps {
   purpose?: 'copy' | 'image';
   preparedHighlights?: ReadonlyMap<string, ReadonlyMap<string, HighlightResult>>;
   onExportCode?: (source: string, language: string) => void;
+  /** Item text of this repository: `#12`, `@someone` and commit ids link as its host links them. Keep the object stable. */
+  repositoryLinks?: RepositoryLinkContext | null;
+  /** `:tada:` reads as 🎉 with these names (`useEmojiShortcodes`); text keeps its shortcodes without them. */
+  emojiShortcodes?: EmojiShortcodes | null;
 }
 
 /** Shared screen/copy/image renderer. Streamdown owns the Markdown subtree. */
@@ -288,6 +298,8 @@ export function MarkdownContent({
   purpose,
   preparedHighlights,
   onExportCode,
+  repositoryLinks,
+  emojiShortcodes,
 }: MarkdownContentProps) {
   const themeSystem = useOptionalThemeSystem();
   const theme = themeSystem?.currentTheme ?? getDefaultTheme(
@@ -375,6 +387,14 @@ export function MarkdownContent({
     return createMarkdownCodePlugin({ isVSCode, purpose, prepared: preparedHighlights, resolvePaths });
   }, [isVSCode, purpose, preparedHighlights, fileReferences, directory, confirmFile]);
   const plugins = React.useMemo(() => ({ code, math: markdownMath, cjk: markdownCjk, renderers }), [code]);
+  const processing = React.useMemo(() => {
+    const base = getMarkdownProcessingOptions(allowRawHtml, isVSCode);
+    const extra: Pluggable[] = [];
+    if (emojiShortcodes) extra.push([remarkEmojiShortcodes, emojiShortcodes]);
+    if (repositoryLinks) extra.push([remarkRepositoryReferences, repositoryLinks]);
+    if (extra.length === 0) return base;
+    return { ...base, remarkPlugins: [...(base.remarkPlugins ?? []), ...extra] };
+  }, [allowRawHtml, emojiShortcodes, isVSCode, repositoryLinks]);
   const presentation = React.useMemo(() => ({
     directory,
     fileReferences,
@@ -397,7 +417,7 @@ export function MarkdownContent({
 
   let body = (
     <Streamdown
-      {...getMarkdownProcessingOptions(allowRawHtml, isVSCode)}
+      {...processing}
       data-oc-streamdown=""
       components={components}
       plugins={plugins}
@@ -527,14 +547,18 @@ export interface SimpleMarkdownRendererProps extends Omit<
   'directory' | 'mode' | 'mediaMode' | 'isStreaming' | 'settled' | 'purpose' | 'preparedHighlights' | 'onExportCode'
 > {
   frontmatter?: 'hide' | 'properties';
+  /** The folder links and media resolve against; the effective directory when absent. */
+  directory?: string | null;
 }
 
 export const SimpleMarkdownRenderer = React.memo(function SimpleMarkdownRenderer({
   content,
   frontmatter,
+  directory: ownDirectory,
   ...props
 }: SimpleMarkdownRendererProps) {
-  const directory = useEffectiveDirectory() ?? '';
+  const effectiveDirectory = useEffectiveDirectory();
+  const directory = ownDirectory || effectiveDirectory || '';
   const parsed = React.useMemo(
     () => frontmatter ? splitFrontmatter(content) : { frontmatter: null, body: content },
     [content, frontmatter],

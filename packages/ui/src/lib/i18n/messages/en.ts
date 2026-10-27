@@ -32,6 +32,10 @@ import { mcpGridI18n } from './mcp-grid.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { diffFindI18n } from './diff-find.i18n';
+import { markdownGithubI18n } from './markdown-github.i18n';
+import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
+import { workflowsI18n } from './workflows.i18n';
+import { sessionReferencesI18n } from './session-references.i18n';
 import { guestStatusViewI18n } from './guest-status-view.i18n';
 
 export const dict = {
@@ -176,6 +180,10 @@ export const dict = {
   ...pluginsGridI18n.en,
   ...integrationsCatalogI18n['en'],
   ...diffFindI18n['en'],
+  ...markdownGithubI18n['en'],
+  ...autocompleteScopeI18n['en'],
+  ...workflowsI18n['en'],
+  ...sessionReferencesI18n['en'],
   ...guestStatusViewI18n['en'],
   'terminalView.actions.attachSelection': 'Attach selected output',
   'terminalView.actions.copySelection': 'Copy selected output',
@@ -315,7 +323,6 @@ export const dict = {
   'mobile.menu.files': 'Files',
   'mobile.menu.git': 'Git',
   'mobile.menu.terminal': 'Terminal',
-  'mobile.menu.mcp': 'MCP',
   'mobile.menu.instances': 'Instances',
   'mobile.menu.update': 'Update',
   'mobile.menu.settings': 'Settings',
@@ -2322,6 +2329,7 @@ export const dict = {
   'session.githubIntegration.validation.branchAlreadyCheckedOut': 'Branch is already checked out in a worktree',
   'session.githubIntegration.validation.failed': 'Validation failed',
   'chat.fileAttachment.toast.attachFailed': 'Failed to attach file',
+  'chat.fileAttachment.toast.tooLarge': '{name} is too large to attach (over {size}). Mention it with @ if it is in the project.',
   'chat.fileAttachment.toast.someFilesSkipped': 'Some files were skipped:\n{summary}',
   'chat.fileAttachment.toast.vscodePickFailed': 'Failed to pick files in VS Code',
   'chat.fileAttachment.fileFallback': 'file',
@@ -2437,8 +2445,6 @@ export const dict = {
   'chat.commandAutocomplete.command.exploreDescription': 'Get oriented in this codebase: a high-level tour of the architecture and main parts.',
   'chat.commandAutocomplete.command.btwDescription': 'Ask a side question in a temporary child session without derailing this chat.',
   'chat.commandAutocomplete.command.forkDescription': 'Fork this chat from the last finished reply and continue there; text after /fork is sent to the fork.',
-  'chat.commandAutocomplete.badge.command': 'command',
-  'chat.commandAutocomplete.badge.system': 'system',
   'chat.commandAutocomplete.empty': 'No commands found',
   'chat.agentMentionAutocomplete.badge.system': 'system',
   'chat.agentMentionAutocomplete.empty': 'No agents found',
@@ -2582,8 +2588,6 @@ export const dict = {
   'chat.chatInput.actions.sendMessageAria': 'Send message',
   'chat.chatInput.actions.queueMessageAria': 'Queue message',
   'chat.chatInput.actions.stopGeneratingAria': 'Stop generating',
-  'chat.chatInput.focusMode.toggleAria': 'Toggle focus mode',
-  'chat.chatInput.focusMode.label': 'Focus mode',
   'chat.chatInput.linked.byAuthor': 'by {author}',
   'chat.chatInput.linked.issue.openInBrowserAria': 'Open issue in browser',
   'chat.chatInput.linked.issue.removeAria': 'Remove linked issue',
@@ -2607,7 +2611,7 @@ export const dict = {
   'chat.dictation.insertAndSend': 'Insert and send',
   'chat.dictation.retry': 'Retry transcription',
   'chat.dictation.discard': 'Discard recording',
-  'chat.snippetAutocomplete.action.addNew': '+ Add new snippet',
+  'chat.snippetAutocomplete.action.addNew': 'Add new snippet',
   'chat.snippetAutocomplete.empty': 'No snippets found',
   'chat.snippetAutocomplete.footer': '↑↓ navigate • Enter select • Esc close',
   'snippets.source.global': 'global',
@@ -2998,6 +3002,20 @@ export const dict = {
   'projects.sharedTrust.actions': 'Actions',
   'projects.sharedTrust.skip': 'Not this time',
   'projects.sharedTrust.trust': 'Trust and run',
+  'projects.opencodeTrust.title': 'Let OpenCode run code from this folder?',
+  'projects.opencodeTrust.description': 'OpenCode runs the plugins and commands in the configuration of {path} as soon as it opens the folder. Trust them once, and OpenChamber asks again only when they change.',
+  'projects.opencodeTrust.plugins': 'Plugins',
+  'projects.opencodeTrust.commands': 'Commands',
+  'projects.opencodeTrust.kind.package': '{name} (npm package)',
+  'projects.opencodeTrust.kind.config': '{path}: a configuration file OpenChamber can\'t read',
+  'projects.opencodeTrust.kind.mcp': 'MCP server {name}',
+  'projects.opencodeTrust.kind.lsp': 'Language server {name}',
+  'projects.opencodeTrust.kind.formatter': 'Formatter {name}',
+  'projects.opencodeTrust.kind.shell': 'Shell',
+  'projects.opencodeTrust.paused': 'Without trust, agents can\'t work in this folder, but you can still browse its files and Git changes.',
+  'projects.opencodeTrust.skip': 'Not this time',
+  'projects.opencodeTrust.trust': 'Trust and open',
+  'projects.opencodeTrust.saveFailed': 'Couldn\'t save your answer. Try again.',
   'projectActions.actions.autoDiscoverTooltip': 'Automatically discover and run the development server',
   'projectActions.actions.chooseActionAria': 'Choose project action',
   'projectActions.actions.openPreview': 'Open Preview',
@@ -3476,6 +3494,7 @@ export const dict = {
   'common.duration.minutesSecondsCompact': '{minutes}m {seconds}s',
   'common.duration.hoursMinutesCompact': '{hours}h {minutes}m',
   'contextFileOpen.failure.tooLarge': 'File is too large to open (>{count} lines)',
+  'contextFileOpen.failure.tooLargeSize': 'File is too large to open (over {size})',
   'contextFileOpen.failure.missing': 'File not found',
   'contextFileOpen.failure.unreadable': 'Failed to open file',
   'quota.window.5h': '5-Hour',
@@ -3501,6 +3520,7 @@ export const dict = {
   'quota.window.completions': 'Completions',
   'quota.window.premiumInteractions': 'AI Credits',
   'chat.workStatus.ariaLabel': 'Work status',
+  'chat.workStatus.mobileEmpty': 'Nothing to show for this session yet',
   'chat.workStatus.context.label': 'Context',
   'chat.workStatus.cost.breakdown': 'Session {session} · Subagents {subagents}',
   'chat.workStatus.git.changedFileSingle': '{count} file changed',

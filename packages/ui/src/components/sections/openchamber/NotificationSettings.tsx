@@ -513,7 +513,7 @@ export const NotificationSettings: React.FC = () => {
                 </p>
               )}
               {notificationPermission === 'granted' && !nativeNotificationsEnabled && (
-                <p className="typography-meta text-muted-foreground/70 mt-1">
+                <p className="typography-meta text-muted-foreground mt-1">
                   {t('settings.notifications.page.delivery.permissionGrantedButDisabled')}
                 </p>
               )}

@@ -33,6 +33,10 @@ import { mcpGridI18n } from './mcp-grid.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { diffFindI18n } from './diff-find.i18n';
+import { markdownGithubI18n } from './markdown-github.i18n';
+import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
+import { workflowsI18n } from './workflows.i18n';
+import { sessionReferencesI18n } from './session-references.i18n';
 import { guestStatusViewI18n } from './guest-status-view.i18n';
 
 export const dict: Record<I18nKey, string> = {
@@ -187,6 +191,10 @@ export const dict: Record<I18nKey, string> = {
   ...pluginsGridI18n.es,
   ...integrationsCatalogI18n['es'],
   ...diffFindI18n['es'],
+  ...markdownGithubI18n['es'],
+  ...autocompleteScopeI18n['es'],
+  ...workflowsI18n['es'],
+  ...sessionReferencesI18n['es'],
   ...guestStatusViewI18n['es'],
   'terminalView.actions.attachSelection': 'Adjuntar salida seleccionada',
   'terminalView.actions.copySelection': 'Copiar salida seleccionada',
@@ -326,7 +334,6 @@ export const dict: Record<I18nKey, string> = {
   "mobile.menu.files": "Archivos",
   "mobile.menu.git": "Git",
   "mobile.menu.terminal": "Terminal",
-  "mobile.menu.mcp": "MCP",
   "mobile.menu.instances": "Instancias",
   "mobile.menu.update": "Actualizar",
   "mobile.menu.settings": "Ajustes",
@@ -2291,6 +2298,7 @@ export const dict: Record<I18nKey, string> = {
   "session.githubIntegration.validation.branchAlreadyCheckedOut": "La rama ya está en uso en un worktree",
   "session.githubIntegration.validation.failed": "No se pudo validar",
   "chat.fileAttachment.toast.attachFailed": "No se pudo adjuntar el archivo",
+  "chat.fileAttachment.toast.tooLarge": "{name} es demasiado grande para adjuntarlo (más de {size}). Si está en el proyecto, menciónalo con @.",
   "chat.fileAttachment.toast.someFilesSkipped": "Algunos archivos se omitieron:\n{summary}",
   "chat.fileAttachment.toast.vscodePickFailed": "No se pudieron seleccionar archivos en VS Code",
   "chat.fileAttachment.fileFallback": "archivo",
@@ -2406,8 +2414,6 @@ export const dict: Record<I18nKey, string> = {
   'chat.commandAutocomplete.command.btwDescription': 'Haz una pregunta paralela en una sesión hija temporal sin desviar este chat.',
   'chat.commandAutocomplete.command.forkDescription': 'Bifurca este chat desde la última respuesta terminada y continúa allí; el texto tras /fork se envía a la bifurcación.',
   "chat.commandAutocomplete.command.exploreDescription": "Oriéntate en este código: un recorrido general de la arquitectura y las partes principales.",
-  "chat.commandAutocomplete.badge.command": "comando",
-  "chat.commandAutocomplete.badge.system": "sistema",
   "chat.commandAutocomplete.empty": "No se encontraron comandos",
   "chat.agentMentionAutocomplete.badge.system": "sistema",
   "chat.agentMentionAutocomplete.empty": "No se encontraron agentes",
@@ -2551,8 +2557,6 @@ export const dict: Record<I18nKey, string> = {
   "chat.chatInput.actions.sendMessageAria": "Enviar mensaje",
   "chat.chatInput.actions.queueMessageAria": "Poner mensaje en cola",
   "chat.chatInput.actions.stopGeneratingAria": "Detener generación",
-  "chat.chatInput.focusMode.toggleAria": "Activar o desactivar modo de enfoque",
-  "chat.chatInput.focusMode.label": "Modo de enfoque",
   "chat.chatInput.linked.byAuthor": "por {author}",
   "chat.chatInput.linked.issue.openInBrowserAria": "Abrir issue en el navegador",
   "chat.chatInput.linked.issue.removeAria": "Eliminar issue vinculado",
@@ -2564,7 +2568,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.chatInput.placeholder.chat": "Planifica, construye o pregunta. @ para mencionar, $ para habilidades, / para comandos",
   "chat.chatInput.placeholder.chatCompact": "Planifica, construye o pregunta",
   "chat.chatInput.placeholder.selectSession": "Selecciona o crea una sesión para comenzar a chatear",
-  "chat.snippetAutocomplete.action.addNew": "+ Agregar nuevo snippet",
+  "chat.snippetAutocomplete.action.addNew": "Agregar nuevo snippet",
   "chat.snippetAutocomplete.empty": "No se encontraron snippets",
   "chat.snippetAutocomplete.footer": "↑↓ navegar • Enter seleccionar • Esc cerrar",
   "snippets.source.global": "global",
@@ -2955,6 +2959,20 @@ export const dict: Record<I18nKey, string> = {
   "projects.sharedTrust.actions": "Acciones",
   "projects.sharedTrust.skip": "Esta vez no",
   "projects.sharedTrust.trust": "Confiar y ejecutar",
+  "projects.opencodeTrust.title": "¿Permitir que OpenCode ejecute código de esta carpeta?",
+  "projects.opencodeTrust.description": "OpenCode ejecuta los plugins y comandos de la configuración de {path} en cuanto abre la carpeta. Confía una vez y OpenChamber solo volverá a preguntar cuando cambien.",
+  "projects.opencodeTrust.plugins": "Plugins",
+  "projects.opencodeTrust.commands": "Comandos",
+  "projects.opencodeTrust.kind.package": "{name} (paquete npm)",
+  "projects.opencodeTrust.kind.config": "{path}: un archivo de configuración que OpenChamber no puede leer",
+  "projects.opencodeTrust.kind.mcp": "Servidor MCP {name}",
+  "projects.opencodeTrust.kind.lsp": "Servidor de lenguaje {name}",
+  "projects.opencodeTrust.kind.formatter": "Formateador {name}",
+  "projects.opencodeTrust.kind.shell": "Shell",
+  "projects.opencodeTrust.paused": "Sin confianza, los agentes no pueden trabajar en esta carpeta, pero puedes seguir viendo sus archivos y cambios de Git.",
+  "projects.opencodeTrust.skip": "Esta vez no",
+  "projects.opencodeTrust.trust": "Confiar y abrir",
+  "projects.opencodeTrust.saveFailed": "No se pudo guardar tu respuesta. Inténtalo de nuevo.",
   "projectActions.actions.autoDiscoverTooltip": "Detecta y ejecuta automáticamente el servidor de desarrollo",
   "projectActions.actions.chooseActionAria": "Elegir acción del proyecto",
   "projectActions.actions.openPreview": "Abrir Preview",
@@ -3468,6 +3486,7 @@ export const dict: Record<I18nKey, string> = {
   "common.duration.minutesSecondsCompact": "{minutes}m {seconds}s",
   "common.duration.hoursMinutesCompact": "{hours}h {minutes}m",
   "contextFileOpen.failure.tooLarge": "File is too large to open (>{count} lines)",
+  "contextFileOpen.failure.tooLargeSize": "El archivo es demasiado grande para abrirlo (más de {size})",
   "contextFileOpen.failure.missing": "File not found",
   "contextFileOpen.failure.unreadable": "Failed to open file",
   "quota.window.5h": "5 horas",
@@ -3493,6 +3512,7 @@ export const dict: Record<I18nKey, string> = {
   "quota.window.completions": "Finalizaciones de código",
   "quota.window.premiumInteractions": "Créditos de IA",
   'chat.workStatus.ariaLabel': 'Estado del trabajo',
+  'chat.workStatus.mobileEmpty': 'Aún no hay nada que mostrar para esta sesión',
   'chat.workStatus.context.label': 'Contexto',
   'chat.workStatus.cost.breakdown': "Sesión {session} · Subagentes {subagents}",
   'chat.workStatus.git.changedFileSingle': '{count} archivo modificado',

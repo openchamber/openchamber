@@ -1,6 +1,7 @@
 import { matchesRankQuery } from '@/lib/search/fuzzySearch';
 import React from 'react';
 
+import { useEmojiPicker } from '@/components/emoji/useEmojiPicker';
 import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
 import { KnowledgeCard } from './KnowledgeCard';
@@ -197,6 +198,8 @@ const MemoryView: React.FC<{
     }
   }, [bodyDraft, entry.body, entry.title, titleDraft]);
 
+  const bodyRef = React.useRef<HTMLTextAreaElement>(null);
+  const emojiPicker = useEmojiPicker(bodyRef);
   const commitRef = React.useRef<() => void>(() => {});
   commitRef.current = () => {
     const title = titleDraft.trim();
@@ -249,6 +252,7 @@ const MemoryView: React.FC<{
           className="w-full flex-shrink-0 bg-transparent typography-ui-header font-semibold text-foreground outline-none focus-visible:outline-none"
         />
         <textarea
+          ref={bodyRef}
           value={bodyDraft}
           onChange={(event) => setBodyDraft(event.target.value.slice(0, AGENT_MEMORY_BODY_MAX_LENGTH))}
           onBlur={() => commitRef.current()}
@@ -256,6 +260,7 @@ const MemoryView: React.FC<{
           dir="auto"
           className="min-h-0 w-full flex-1 resize-none overflow-y-auto bg-transparent typography-ui-label leading-relaxed text-foreground outline-none focus-visible:outline-none"
         />
+        {emojiPicker}
       </div>
     </KnowledgeEntryView>
   );

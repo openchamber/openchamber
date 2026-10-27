@@ -5,7 +5,8 @@
  * select; mobile uses bottom sheets, because a native select over a
  * keyboard-resized viewport is unusable. Both render the same options from
  * the same hook, and both offer creating a worktree inline so the user does
- * not have to leave the draft to make one.
+ * not have to leave the draft to make one. The project's isolated spaces are
+ * a section of their own, by name, with the way to make a new one under it.
  */
 
 import React from 'react';
@@ -44,6 +45,7 @@ import { createWorktreeDraft } from '@/lib/worktreeSessionCreator';
 import { shortcutRegistry } from '@/lib/shortcuts';
 import { useKeybind } from '@/hooks/useKeybind';
 import type { Theme } from '@/types/theme';
+import { isSpaceDirectory } from '@/lib/spaces/space-route';
 import { normalizePath } from '../attachments/filePaths';
 import { getProjectDisplayLabel, type DraftTargetProject } from '../state/useDraftTarget';
 import { useProjectsInSidebarOrder } from '@/components/session/sidebar/list/useProjectsInSidebarOrder';
@@ -64,6 +66,8 @@ export interface DraftTargetProps {
     hasUncommittedChanges: boolean;
     projectRootBranchOption: BranchOption | null;
     worktreeBranchOptions: readonly BranchOption[];
+    /** The project's isolated spaces a new chat can start in, by name. */
+    spaceBranchOptions: readonly BranchOption[];
     branchItems: readonly BranchOption[];
     showBranchSelector: boolean;
     onProjectChange: (projectId: string) => void;
@@ -111,11 +115,11 @@ export function ProjectLabel({ project, theme }: { project: DraftTargetProject; 
     const projectIconName = project.icon ? PROJECT_ICON_MAP[project.icon] : null;
     const iconColor = getProjectIconColor(project.color);
     const fallbackIcon = project.kind === 'chat' ? (
-        <Icon name="chat-4" className="h-3.5 w-3.5 shrink-0 text-muted-foreground/80" />
+        <Icon name="chat-4" className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
     ) : projectIconName ? (
         <Icon name={projectIconName} className="h-3.5 w-3.5 shrink-0" style={iconColor ? { color: iconColor } : undefined} />
     ) : (
-        <Icon name="folder" className="h-3.5 w-3.5 shrink-0 text-muted-foreground/80" style={iconColor ? { color: iconColor } : undefined} />
+        <Icon name="folder" className="h-3.5 w-3.5 shrink-0 text-muted-foreground" style={iconColor ? { color: iconColor } : undefined} />
     );
 
     return (
@@ -153,6 +157,7 @@ function DraftTargetSelectorsView(props: DraftTargetProps) {
         hasUncommittedChanges,
         projectRootBranchOption,
         worktreeBranchOptions,
+        spaceBranchOptions,
         branchItems,
         showBranchSelector,
         onProjectChange,
@@ -163,6 +168,7 @@ function DraftTargetSelectorsView(props: DraftTargetProps) {
         theme,
     } = props;
     const [openPicker, setOpenPicker] = React.useState<'project' | 'worktree' | null>(null);
+    const selectedIsSpace = isSpaceDirectory(selectedDirectory);
     const [projectQuery, setProjectQuery] = React.useState('');
     const [projectActiveId, setProjectActiveId] = React.useState<string | null>(null);
     const [projectFocusReturn, setProjectFocusReturn] = React.useState(false);
@@ -450,6 +456,7 @@ function DraftTargetSelectorsView(props: DraftTargetProps) {
                                         aria-label={t('chat.draftDirtyNotice.indicatorAria')}
                                     />
                                 ) : null}
+                                {selectedIsSpace ? <Icon name="instance" className="size-3.5 shrink-0 text-muted-foreground" aria-label={t('sessions.sidebar.group.space')} /> : null}
                                 <SelectValue>
                                     {selectedBranchLabel ?? t('chat.chatInput.branch')}
                                 </SelectValue>
@@ -491,20 +498,31 @@ function DraftTargetSelectorsView(props: DraftTargetProps) {
                                 {selectedBranchLabel}
                             </SelectItem>
                         ) : null}
+                        {spaceBranchOptions.length > 0 || onCreateSpace ? <SelectSeparator /> : null}
+                        {spaceBranchOptions.length > 0 ? (
+                            <SelectGroup>
+                                <SelectLabel>{t('spaces.picker.section')}</SelectLabel>
+                                {spaceBranchOptions.map((option) => (
+                                    <SelectItem key={option.value} value={option.value} className="max-w-[24rem] truncate">
+                                        <span className="inline-flex min-w-0 items-center gap-1.5">
+                                            <Icon name="instance" className="size-3.5 shrink-0 text-muted-foreground" />
+                                            <span className="truncate">{option.label}</span>
+                                        </span>
+                                    </SelectItem>
+                                ))}
+                            </SelectGroup>
+                        ) : null}
                         {onCreateSpace ? (
-                            <>
-                                <SelectSeparator />
-                                <div className="px-2 py-1.5">
-                                    <button
-                                        type="button"
-                                        className="text-muted-foreground typography-meta hover:text-foreground cursor-pointer"
-                                        onPointerDown={(e) => { e.stopPropagation(); }}
-                                        onClick={(e) => { e.preventDefault(); e.stopPropagation(); setOpenPicker(null); onCreateSpace(); }}
-                                    >
-                                        {t('spaces.picker.new')}
-                                    </button>
-                                </div>
-                            </>
+                            <div className="px-2 py-1.5">
+                                <button
+                                    type="button"
+                                    className="text-muted-foreground typography-meta hover:text-foreground cursor-pointer"
+                                    onPointerDown={(e) => { e.stopPropagation(); }}
+                                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); setOpenPicker(null); onCreateSpace(); }}
+                                >
+                                    {t('spaces.picker.new')}
+                                </button>
+                            </div>
                         ) : null}
                     </SelectContent>
                 </Select>
@@ -633,6 +651,7 @@ export function MobileDraftTargetSheets(
         selectedBranchIsKnown,
         projectRootBranchOption,
         worktreeBranchOptions,
+        spaceBranchOptions,
         branchItems,
         onProjectChange,
         onDirectoryChange,
@@ -723,6 +742,20 @@ export function MobileDraftTargetSheets(
                                     {selectedDirectory && !selectedBranchIsKnown && matches(selectedBranchLabel ?? '')
                                         ? renderRow(selectedDirectory, selectedBranchLabel, 'unknown-current')
                                         : null}
+                                    {spaceBranchOptions.length > 0 ? (
+                                        <>
+                                            <div className="my-1 h-px bg-border" />
+                                            <div className="px-2 pb-1 pt-2 text-muted-foreground typography-meta">
+                                                {t('spaces.picker.section')}
+                                            </div>
+                                            {rankByQuery(spaceBranchOptions, branchQuery, (option) => [option.label]).map((option) => renderRow(option.value, (
+                                                <span className="inline-flex min-w-0 items-center gap-1.5">
+                                                    <Icon name="instance" className="size-3.5 shrink-0 text-muted-foreground" />
+                                                    <span className="truncate">{option.label}</span>
+                                                </span>
+                                            )))}
+                                        </>
+                                    ) : null}
                                     {onCreateSpace ? (
                                         <div className="px-2 pb-1 pt-2">
                                             <button

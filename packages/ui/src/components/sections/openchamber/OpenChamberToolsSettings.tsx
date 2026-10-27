@@ -94,6 +94,10 @@ export const OpenChamberToolsSettings: React.FC = () => {
   const setAgentNotifyToolEnabled = useUIStore((state) => state.setAgentNotifyToolEnabled);
   const agentRenderToolEnabled = useUIStore((state) => state.agentRenderToolEnabled);
   const setAgentRenderToolEnabled = useUIStore((state) => state.setAgentRenderToolEnabled);
+  // Absent in builds without workflows, the way memory is.
+  const agentWorkflowAvailable = useUIStore((state) => state.agentWorkflowFeatureAvailable);
+  const agentWorkflowToolEnabled = useUIStore((state) => state.agentWorkflowToolEnabled);
+  const setAgentWorkflowToolEnabled = useUIStore((state) => state.setAgentWorkflowToolEnabled);
   const agentToolsCodeMode = useUIStore((state) => state.agentToolsCodeMode);
   const setAgentToolsCodeMode = useUIStore((state) => state.setAgentToolsCodeMode);
 
@@ -126,6 +130,11 @@ export const OpenChamberToolsSettings: React.FC = () => {
     setAgentKnowledgeToolEnabled(enabled);
     void updateDesktopSettings({ agentKnowledgeToolEnabled: enabled });
   }, [setAgentKnowledgeToolEnabled]);
+
+  const handleAgentWorkflowToolChange = React.useCallback((enabled: boolean) => {
+    setAgentWorkflowToolEnabled(enabled);
+    void updateDesktopSettings({ agentWorkflowToolEnabled: enabled });
+  }, [setAgentWorkflowToolEnabled]);
 
   const handleAgentToolsCodeModeChange = React.useCallback((enabled: boolean) => {
     setAgentToolsCodeMode(enabled);
@@ -287,6 +296,19 @@ export const OpenChamberToolsSettings: React.FC = () => {
             summary={t('settings.openchamber.tools.field.agentMemoryToolSummary')}
             info={t('settings.openchamber.tools.field.agentMemoryToolInfo')}
             ariaLabel={t('settings.openchamber.tools.field.agentMemoryToolAria')}
+          />
+        ) : null}
+
+        {agentWorkflowAvailable ? (
+          <ToolRow
+            icon="flow-chart"
+            settingsItem="sessions.agent-workflow-tool"
+            checked={agentWorkflowToolEnabled}
+            onChange={handleAgentWorkflowToolChange}
+            title={t('settings.openchamber.tools.field.agentWorkflowTool')}
+            summary={t('settings.openchamber.tools.field.agentWorkflowToolSummary')}
+            info={t('settings.openchamber.tools.field.agentWorkflowToolInfo')}
+            ariaLabel={t('settings.openchamber.tools.field.agentWorkflowToolAria')}
           />
         ) : null}
       </div>

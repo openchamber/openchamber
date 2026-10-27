@@ -30,6 +30,8 @@
     --text-markdown: 0.875rem;
     --text-code: 0.75rem;
     --text-ui-header: 0.875rem;
+    /* Sidebar section headers (projects, zones): a clear step above rows. */
+    --text-ui-section: 0.9375rem;
     --text-ui-label: 0.84375rem;
     --text-meta: 0.78125rem;
     --text-micro: 0.75rem;
@@ -806,6 +808,9 @@ html[data-glass-redraw-guard] body::before {
 }
 
 @theme inline {
+  /* `font-normal` means regular text, so it follows the text weight setting. */
+  --font-weight-normal: var(--ui-regular-font-weight, 400);
+
   --radius-none: 0;
   --radius-sm: 0.25rem; /* 4px */
   --radius-md: 0.4375rem; /* 7px */

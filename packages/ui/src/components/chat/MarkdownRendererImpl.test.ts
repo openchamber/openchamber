@@ -159,6 +159,30 @@ test('on the phone a file link also opens the files drawer (#5486)', async () =>
   }
 });
 
+test('a file:// folder link opens in the file manager in the desktop app only, as the Files tree reveal does (#5521)', async () => {
+  const { RuntimeAPIContext } = await import('@/contexts/runtimeAPIContext');
+  const { createWebAPIs } = await import('../../../../web/src/api/index');
+  const web = createWebAPIs();
+  const revealed: string[] = [];
+  const files = { ...web.files, revealPath: async (path: string) => { revealed.push(path); return { success: true }; } };
+  const content = React.createElement(Renderer.MarkdownContent, { content: '[Open the test folder](file:///Users/me/some_path/)', directory: '/project', enableFileReferences: true, settled: true });
+  // Electron reports the web platform and differs from a browser only by its shell.
+  const surfaces = [['browser', 'web', false], ['vscode', 'vscode', false], ['desktop', 'web', true]] as const;
+  try {
+    for (const [surface, platform, electron] of surfaces) {
+      Object.assign(window, { __OPENCHAMBER_ELECTRON__: electron ? { runtime: 'electron' } : undefined });
+      const apis = { ...web, files, runtime: { ...web.runtime, platform } };
+      await act(() => root.render(React.createElement(I18nProvider, null, React.createElement(RuntimeAPIContext.Provider, { value: apis }, content))));
+      const event = new window.MouseEvent('click', { bubbles: true, cancelable: true });
+      host.querySelector('a')?.dispatchEvent(event);
+      expect([surface, event.defaultPrevented]).toEqual([surface, electron]);
+    }
+    expect(revealed).toEqual(['/Users/me/some_path/']);
+  } finally {
+    Object.assign(window, { __OPENCHAMBER_ELECTRON__: undefined });
+  }
+});
+
 test('remote media labels use chat navigation and retain modified-click defaults', async () => {
   openedLinks.length = 0;
   await render('![remote](https://example.com/image.png)');
@@ -326,6 +350,112 @@ test('updates safe raw HTML with identical source and retains disclosure identit
   expect(host.querySelector('details') === details).toBe(true);
   expect(host.querySelector('details')?.open).toBe(true);
   // Documents explicitly permit remote images. Media readiness still owns mounting.
+});
+
+test('a heading tag in a disclosure summary renders as a heading with and without raw HTML', async () => {
+  for (const allowRawHtml of [false, true]) {
+    await render('<details><summary><h3>Findings `x`</h3></summary>\n\nBody\n</details>', false, allowRawHtml);
+    const heading = host.querySelector('details > summary h3');
+    expect(heading?.textContent).toBe('Findings x');
+    expect(heading?.querySelector('code')?.textContent).toBe('x');
+    expect(host.querySelector('details summary')?.textContent).not.toContain('<h3>');
+    expect(host.querySelector('details p')?.textContent).toBe('Body');
+  }
+  await render('<details><summary>Plain <b>bold</b></summary>Body</details>', false, true);
+  expect(host.querySelector('details summary h3, details summary h1')).toBeNull();
+  expect(host.querySelector('details summary b')?.textContent).toBe('bold');
+});
+
+test('summary heading attributes do not turn the heading into text', async () => {
+  for (const allowRawHtml of [false, true]) {
+    await render('<details><summary><h2 align="center">Report</h2></summary>\n\nBody\n</details>', false, allowRawHtml);
+    expect(host.querySelector('details > summary h2')?.textContent).toBe('Report');
+    expect(host.querySelector('details > summary h2')?.hasAttribute('align')).toBe(false);
+    expect(host.textContent).not.toContain('<');
+  }
+});
+
+test('GitHub alerts render as titled callouts in both HTML modes and leave other quotes alone', async () => {
+  for (const allowRawHtml of [false, true]) {
+    await render('> [!WARNING]\n> Careful **now**\n\n> [!tip]\n>\n> Second\n\n> [!NOTE] trailing text\n\n> Plain quote', false, allowRawHtml);
+    const quotes = Array.from(host.querySelectorAll('blockquote'));
+    expect(quotes.map((quote) => quote.getAttribute('data-oc-alert'))).toEqual(['warning', 'tip', null, null]);
+    expect(quotes[0].querySelector('[data-oc-alert-title]')?.textContent).toBe('Warning');
+    expect(quotes[0].querySelector('p:not([data-oc-alert-title])')?.textContent).toBe('Careful now');
+    expect(quotes[1].querySelector('[data-oc-alert-title]')?.textContent).toBe('Tip');
+    expect(quotes[1].textContent).not.toContain('[!');
+    expect(quotes[2].textContent).toContain('[!NOTE] trailing text');
+  }
+  await render('<blockquote data-oc-alert="warning">Forged</blockquote>', false, true);
+  expect(host.querySelector('blockquote')?.hasAttribute('data-oc-alert')).toBe(false);
+});
+
+test('item text links its repository references and leaves code, words and paths alone', async () => {
+  const { githubLikeDescriptor, gitlabLikeDescriptor } = await import('@/lib/source-control/providers/descriptor.fixture');
+  const github = { descriptor: githubLikeDescriptor(), origin: 'https://github.com', owner: 'acme', repo: 'app' };
+  const draw = (content: string, repositoryLinks: typeof github) => act(async () => root.render(
+    React.createElement(I18nProvider, null, React.createElement(Renderer.SimpleMarkdownRenderer, { content, allowRawHtml: true, enableFileReferences: false, repositoryLinks }))));
+  const links = () => Array.from(host.querySelectorAll('a')).map((link) => [link.textContent, link.getAttribute('href')]);
+
+  await draw('Fixes #12 and other/lib#3, thanks @octo-cat, see abc1234f.\n\nNot C#5, a@b.com, @scope/pkg, 1234567, defaced, `#9` or [#7](https://x.test/7).', github);
+  expect(links()).toEqual([
+    ['#12', 'https://github.com/acme/app/issues/12'],
+    ['other/lib#3', 'https://github.com/other/lib/issues/3'],
+    ['@octo-cat', 'https://github.com/octo-cat'],
+    ['abc1234', 'https://github.com/acme/app/commit/abc1234f'],
+    // GFM's own email link, never read as a mention.
+    ['a@b.com', 'mailto:a@b.com'],
+    ['#7', 'https://x.test/7'],
+  ]);
+  expect(host.querySelector('a[href$="/commit/abc1234f"] code')?.textContent).toBe('abc1234');
+  // A host's own references draw without the favicon a pasted link gets.
+  expect(host.querySelectorAll('a[data-oc-reference]')).toHaveLength(4);
+  expect(host.querySelectorAll('img')).toHaveLength(1);
+
+  // An author's own inline link or code keeps its text; their markup cannot pass as a reference.
+  await draw('Fixes <a href="https://x.test/12">#12</a>, <code>abc1234f</code> and <a data-oc-reference href="https://x.test/y">y</a> after #3', github);
+  expect(links()).toEqual([
+    ['#12', 'https://x.test/12'],
+    ['y', 'https://x.test/y'],
+    ['#3', 'https://github.com/acme/app/issues/3'],
+  ]);
+  expect(host.querySelector('a[href="https://x.test/y"]')?.hasAttribute('data-oc-reference')).toBe(false);
+
+  await draw('MR !7 closes #4', { descriptor: gitlabLikeDescriptor(), origin: 'https://gitlab.example.com', owner: 'group', repo: 'app' });
+  expect(links()).toEqual([
+    ['!7', 'https://gitlab.example.com/group/app/-/merge_requests/7'],
+    ['#4', 'https://gitlab.example.com/group/app/-/issues/4'],
+  ]);
+});
+
+test('a suggestion fence in a review comment draws as a suggested change; elsewhere it stays code', async () => {
+  const { MarkdownSuggestionContext } = await import('./markdown/markdownSuggestion');
+  const content = 'Try this:\n\n```suggestion:-0+0\n  const c = 5;\n```';
+  const draw = (excerpt: { startLine: number; lines: string[] } | null | undefined) => act(async () => root.render(
+    React.createElement(I18nProvider, null, React.createElement(MarkdownSuggestionContext.Provider, { value: excerpt === undefined ? null : { excerpt } },
+      React.createElement(Renderer.SimpleMarkdownRenderer, { content, allowRawHtml: true, enableFileReferences: false })))));
+
+  await draw({ startLine: 12, lines: ['  const c = 4;'] });
+  expect(host.querySelector('[data-streamdown="code-block-header"]')?.textContent).toBe('Suggested change');
+  expect(host.querySelector('[data-language="diff"]')?.textContent).toContain('const c = 4;');
+  // Copying takes the suggested code itself.
+  expect(host.querySelector('[data-oc-code-source]')?.getAttribute('data-oc-code-source')).toBe('  const c = 5;');
+
+  await draw(undefined);
+  expect(host.querySelector('[data-streamdown="code-block-header"]')?.textContent).toBe('suggestion:-0+0');
+  expect(host.querySelector('[data-language="diff"]')).toBeNull();
+});
+
+test('emoji shortcodes read as emoji in text, never in code, and unknown names stay', async () => {
+  const { loadEmojiShortcodes, mayHoldEmojiShortcode } = await import('@/lib/emoji/shortcodes');
+  const emojiShortcodes = await loadEmojiShortcodes();
+  const content = 'Shipped :tada: :rocket: at 12:30:45 :not_an_emoji:\n\n`:tada:`';
+  expect(mayHoldEmojiShortcode(content)).toBe(true);
+  expect(mayHoldEmojiShortcode('at 12:30')).toBe(false);
+  await act(async () => root.render(React.createElement(I18nProvider, null,
+    React.createElement(Renderer.SimpleMarkdownRenderer, { content, enableFileReferences: false, emojiShortcodes }))));
+  expect(host.querySelector('p')?.textContent).toBe('Shipped 🎉 🚀 at 12:30:45 :not_an_emoji:');
+  expect(host.querySelector('code')?.textContent).toBe(':tada:');
 });
 
 test('handles empty, shrink and same-length replacement without stale text', async () => {

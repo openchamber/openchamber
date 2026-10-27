@@ -226,7 +226,7 @@ const CommandTextarea: React.FC<CommandTextareaProps> = ({
       {/* Formatted preview of what will be saved */}
       {value.length > 0 && (
         <details className="group">
-          <summary className="typography-micro text-muted-foreground/60 cursor-pointer select-none hover:text-muted-foreground">
+          <summary className="typography-micro text-muted-foreground cursor-pointer select-none hover:text-foreground">
             {preview(value.length)}
           </summary>
           <div className="mt-1 rounded-md bg-[var(--surface-elevated)] px-3 py-2 overflow-x-auto">
@@ -419,7 +419,7 @@ const EnvEditor: React.FC<EnvEditorProps> = ({
               <button
                 type="button"
                 onClick={() => toggleReveal(idx)}
-                className="absolute inset-e-2 text-muted-foreground/60 hover:text-muted-foreground"
+                className="absolute inset-e-2 text-muted-foreground hover:text-foreground"
                 title={revealedKeys.has(idx) ? hideValueTitle : showValueTitle}
               >
                 {revealedKeys.has(idx)
@@ -452,7 +452,7 @@ const EnvEditor: React.FC<EnvEditorProps> = ({
       </Button>
 
       {hasSensitiveValues && (
-        <p className="typography-micro text-muted-foreground/60">
+        <p className="typography-micro text-muted-foreground">
           {plainTextWarning}
         </p>
       )}
@@ -1222,7 +1222,7 @@ export const McpPage: React.FC = () => {
                     <StatusBadge status={effectiveStatusName} enabled={enabled} getStatusLabel={getStatusLabel} />
                   </div>
                   <p className="typography-meta text-muted-foreground">{runtimeDescription}</p>
-                  <p className="typography-micro text-muted-foreground/80">
+                  <p className="typography-micro text-muted-foreground">
                     {draftScope === 'project'
                       ? t('settings.mcp.page.status.projectScopedTo', { directory: currentDirectory ?? t('settings.mcp.page.status.activeProject') })
                       : t('settings.mcp.page.status.userScoped')}

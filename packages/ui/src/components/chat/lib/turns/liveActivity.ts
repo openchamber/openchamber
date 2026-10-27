@@ -1,6 +1,6 @@
 import { isInvisibleText } from '@/lib/invisibleText';
 import { getLastConversationRecord, type ToolPart } from '@/lib/opencode/model';
-import { renderedPage } from '@/lib/opencode/tools';
+import { isShownInPlace } from '@/lib/opencode/tools';
 import { isSessionNoticePart } from '@/lib/opencode/session-notices';
 import { isStandaloneTool } from '../../message/parts/toolRenderUtils';
 import type { ChatMessageEntry, TurnRecord } from './types';
@@ -40,9 +40,13 @@ export function hasLiveActivity(turn: TurnRecord, showReasoning: boolean): boole
     ));
 }
 
-/** The pages a turn's `openchamber_render` calls showed, waiting ones included, in the order they ran. */
+/**
+ * What a turn's calls showed the user, in the order they ran: the pages of
+ * `openchamber_render` calls, waiting ones included, and the workflow runs
+ * `workflow.run` calls proposed.
+ */
 export function getShownPages(messages: readonly ChatMessageEntry[]): ToolPart[] {
     return messages.flatMap((message) => message.parts.filter((part): part is ToolPart => (
-        part.type === 'tool' && renderedPage(part.tool, part.state) !== null
+        part.type === 'tool' && isShownInPlace(part.tool, part.state)
     )));
 }

@@ -465,7 +465,7 @@ export const SkillsCatalogPage: React.FC<SkillsCatalogPageProps> = ({ mode, onMo
                 <span className="typography-ui-label text-muted-foreground block">
                   {t('settings.skills.catalog.page.source.addOwnTitle')}
                 </span>
-                <span className="typography-micro text-muted-foreground/70 block mt-0.5">
+                <span className="typography-micro text-muted-foreground block mt-0.5">
                   {t('settings.skills.catalog.page.source.addOwnDescription')}
                 </span>
               </span>
@@ -501,7 +501,7 @@ export const SkillsCatalogPage: React.FC<SkillsCatalogPageProps> = ({ mode, onMo
               <span className="typography-micro font-medium uppercase tracking-wide text-muted-foreground truncate">
                 {listTitle}
               </span>
-              <span className="typography-micro text-muted-foreground/70 shrink-0">
+              <span className="typography-micro text-muted-foreground shrink-0">
                 {t('settings.skills.catalog.page.foundCount', { count: filtered.length })}
               </span>
             </div>
@@ -631,10 +631,10 @@ export const SkillsCatalogPage: React.FC<SkillsCatalogPageProps> = ({ mode, onMo
                           {item.description ? (
                             <div className="typography-meta text-muted-foreground mt-0.5 line-clamp-2">{item.description}</div>
                           ) : (
-                            <div className="typography-meta text-muted-foreground/50 mt-0.5 italic">{t('settings.skills.catalog.shared.noDescription')}</div>
+                            <div className="typography-meta text-muted-foreground mt-0.5 italic">{t('settings.skills.catalog.shared.noDescription')}</div>
                           )}
 
-                          <div className="typography-micro text-muted-foreground/80 mt-1 flex items-center gap-2 min-w-0">
+                          <div className="typography-micro text-muted-foreground mt-1 flex items-center gap-2 min-w-0">
                             {skillUrl ? (
                               <a
                                 href={skillUrl}

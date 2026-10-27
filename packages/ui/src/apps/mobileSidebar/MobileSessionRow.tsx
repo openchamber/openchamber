@@ -11,7 +11,8 @@ import type { SessionNode } from '@/components/session/sidebar/types';
 import { isChatDirectoryPath } from '@/lib/chatDirectories';
 import { useI18n } from '@/lib/i18n';
 import { isSessionPinned } from '@/lib/sessionPins';
-import { isDoneSuggested, isSessionInWork } from '@/lib/sessionWorkMetadata';
+import { isDoneSuggested } from '@/lib/sessionWorkMetadata';
+import { collectSessionWorkInWork } from '@/components/session/sidebar/works/sidebarWorks';
 import { cn } from '@/lib/utils';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
@@ -39,8 +40,8 @@ const collectDescendantIds = (node: SessionNode): string[] => node.children.flat
 
 /**
  * A session in the phone's list: the desktop row's content for a thumb. One
- * line is a tree row, its live state in the slot left of the title, or its
- * subsession chevron there with the state on the right. Two lines put the
+ * line is a tree row, its subsession chevron in the slot left of the title
+ * and its live state on the right before the time. Two lines put the
  * branch on the second, with the chevron as its first icon. Swiping reveals
  * archive, pin, Track or Done, delete, rename and Copy ID.
  */
@@ -77,9 +78,12 @@ export const MobileSessionRow: React.FC<{
   const pendingRequests = usePendingRequests(familyIds);
   const topLevel = !session.parentID;
   const sessionWorkEnabled = useUIStore((state) => state.sessionWorkEnabled);
-  const inWork = isSessionInWork(session);
-  const work = sessionWorkEnabled && topLevel && !isChatDirectoryPath(directory)
-    ? { inWork, onToggle: () => { void toggleMobileSessionWork(session, inWork, t); } }
+  // Only a work's own row tracks it, for every session of it: what nests in
+  // a work is tracked and finished with it.
+  const ownsWork = sessionWorkEnabled && row.ownsWork && topLevel && !isChatDirectoryPath(directory);
+  const sessionsInWork = React.useMemo(() => (ownsWork ? collectSessionWorkInWork(node) : []), [node, ownsWork]);
+  const work = ownsWork
+    ? { inWork: sessionsInWork.length > 0, onToggle: () => { void toggleMobileSessionWork(session, sessionsInWork, t); } }
     : undefined;
   const pinned = useSessionPinnedStore((state) => isSessionPinned(state.ids, directory || null, session.id));
   const pin = topLevel && directory ? { pinned, onToggle: () => toggleMobileSessionPin(session, pinned, t) } : undefined;
@@ -104,10 +108,9 @@ export const MobileSessionRow: React.FC<{
     <span
       role="img"
       aria-label={refLines.map((line) => line.text).join(', ')}
-      className={cn('inline-flex shrink-0 items-center gap-0.5 typography-micro', primaryRef.color ? 'oc-ref-tint' : 'text-muted-foreground')}
-      style={primaryRef.color ? refTintStyle(primaryRef.color) : undefined}
+      className="inline-flex shrink-0 items-center gap-0.5 typography-micro text-muted-foreground"
     >
-      <Icon name={primaryRef.icon} className="size-3" />
+      <Icon name={primaryRef.icon} className={cn('size-3', primaryRef.color && 'oc-ref-tint')} style={primaryRef.color ? refTintStyle(primaryRef.color) : undefined} />
       {withLabel ? <span className="leading-none tabular-nums">{primaryRef.label}</span> : null}
       {withLabel && moreRefCount > 0 ? <span className="leading-none tabular-nums text-muted-foreground">+{moreRefCount}</span> : null}
     </span>
@@ -181,7 +184,7 @@ export const MobileSessionRow: React.FC<{
           {lead}
           {branch ? <>
             {inSpace
-              ? <Icon name="box-3" className="size-3.5 shrink-0" aria-hidden={false} role="img" aria-label={t('sessions.sidebar.group.space')} />
+              ? <Icon name="instance" className="size-3.5 shrink-0" aria-hidden={false} role="img" aria-label={t('sessions.sidebar.group.space')} />
               : <Icon name="git-branch" className="size-3.5 shrink-0" />}
             <span className="block min-w-0 truncate typography-micro">{branch}</span>
           </> : null}
@@ -194,15 +197,9 @@ export const MobileSessionRow: React.FC<{
       />
     );
   } else {
-    // The slot holds the live state, or the subsession chevron: a phone has no
-    // hover to trade one for the other, so a parent keeps its state on the right.
-    const stateInSlot = !toggle && liveState !== null;
+    // The slot holds the subsession chevron only; the live state sits on the
+    // right before the time, as on every row.
     content = <>
-      {stateInSlot ? (
-        <span className="pointer-events-none absolute z-10 flex w-3.5 items-center justify-center" style={{ insetInlineStart: geometry.slotLeft(depth), top: 0, bottom: 0 }}>
-          {liveState}
-        </span>
-      ) : null}
       {toggle ? (
         <MobileSlotChevron slotLeft={geometry.slotLeft(depth)}>
           <MobileRowChevron expanded={expanded} label={title} kind="session" onToggle={toggle} />
@@ -217,11 +214,11 @@ export const MobileSessionRow: React.FC<{
         >
           {titleText}
           {pinMarker}
-          {stateInSlot ? null : liveState}
           {doneHint}
           {refMark(false)}
           <MobileSessionGoalGlyph session={session} />
           <MobileSessionPendingBadges {...pendingRequests} />
+          {liveState}
           {timeSlot}
         </button>
       )}

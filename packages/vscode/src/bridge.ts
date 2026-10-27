@@ -11,6 +11,7 @@ import { waitForWorktreeRemoval } from './gitService';
 import { handlePermissionAutoAcceptBridgeMessage } from './bridge-permission-auto-accept-runtime';
 import { handleProjectSetupBridgeMessage } from './bridge-project-setup-runtime';
 import { createSessionStateStore, getOpenChamberDataDir } from './openchamberSessionState';
+import { openCodeTrust } from './opencodeTrust';
 import {
   fetchOpenCodeSkillsFromApi,
   persistSettings,
@@ -153,6 +154,7 @@ export async function handleBridgeMessage(message: BridgeRequest, ctx?: BridgeCo
         tryHandleLocalFsProxy,
         waitForWorktreeRemoval,
         sessionState: sessionStateStore,
+        openCodeTrust,
         buildUnavailableApiResponse,
         sanitizeForwardHeaders,
         collectHeaders,

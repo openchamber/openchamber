@@ -6,24 +6,21 @@ import { getExternalFaviconUrl, isAppLinkUrl, isExternalHttpUrl, isLoopbackHttpU
 import { parseSessionLink } from '@/lib/sessionLinks';
 import { openSessionLink } from '@/lib/router/openSessionFromRoute';
 import { isDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
-import { getRuntimeApiBaseUrl, getRuntimeKey } from '@/lib/runtime-switch';
+import { getRuntimeKey } from '@/lib/runtime-switch';
+import { appOwnOrigins } from '@/lib/router/appOrigins';
+import { sessionLinkKey } from '@/lib/sessionLinks';
+import { SessionMentionChipsContext } from '../message/parts/sessionMentionChips';
+import { SessionMentionChipButton } from '../message/parts/SessionMentionChipButton';
 import { useUIStore } from '@/stores/useUIStore';
 import { useI18n } from '@/lib/i18n';
-import { parseAgentHref, parseAttachmentHref, parseSkillHref, INLINE_REFERENCE_CHIP_CLASS, INTERACTIVE_REFERENCE_CHIP_CLASS, buildAgentMentionUrl } from '@/lib/messages/inlineMessageLinks';
+import { parseAgentHref, parseAttachmentHref, parseSkillHref, INLINE_REFERENCE_CHIP_CLASS, INTERACTIVE_REFERENCE_CHIP_CLASS, REFERENCE_CHIP_LABEL_CLASS, buildAgentMentionUrl } from '@/lib/messages/inlineMessageLinks';
 import { openAppLinkWithConfirmation } from '../appLinkConfirmation';
 import { useOpenChatLink } from '../useOpenChatLink';
 import { useMarkdownPresentation } from './MarkdownPresentationContext';
-import { activateMarkdownFile, resolveMarkdownFile, useOpenMarkdownFile } from './markdownFileReferences';
+import { activateMarkdownFile, resolveMarkdownFile, useOpenMarkdownFile, useRevealMarkdownPath } from './markdownFileReferences';
+import { localPathFromFileUrl } from '../fileReferenceParser';
 import { MarkdownMediaLinkContext, useMarkdownMedia } from './markdown-media-context';
 import { openMarkdownDocumentLink } from '@/components/views/files/previews/useMarkdownLocalAssets';
-
-function ownOrigins(): string[] {
-  try {
-    return [window.location.origin, new URL(getRuntimeApiBaseUrl() || window.location.href, window.location.href).origin];
-  } catch {
-    return [window.location.origin];
-  }
-}
 
 function useConfirmedInlineFile(raw: string): string | null {
   const { directory, fileReferences, confirmFile } = useMarkdownPresentation();
@@ -129,16 +126,23 @@ function ScreenMarkdownHref({ href, children: originalChildren, node, ...props }
   const attachment = parseAttachmentHref(href);
   // VS Code keeps session links inert: its sessions live on its own OpenCode,
   // so a link to a web session opens in the browser like any other.
-  const session = isVSCodeRuntime() ? null : parseSessionLink(href, ownOrigins());
+  const session = isVSCodeRuntime() ? null : parseSessionLink(href, appOwnOrigins());
+  // A session or message the user's message mentioned draws as its chip.
+  const mentionChips = React.useContext(SessionMentionChipsContext);
+  const mentionChip = session ? mentionChips.get(sessionLinkKey(session)) : undefined;
   const app = isAppLinkUrl(href);
   const file = presentation.fileNavigation && resolveMarkdownFile(href, directory, 'click');
+  const revealPath = useRevealMarkdownPath();
+  const folder = presentation.fileNavigation && !file && revealPath ? localPathFromFileUrl(href) : null;
   // A link whose URL is not a file but whose text is a path opens that file
   // once the file is confirmed, as the old annotation pass did.
-  const probe = file || app || session || skill || agent || attachment ? href : text;
+  const probe = file || folder || app || session || skill || agent || attachment ? href : text;
   const path = useConfirmedInlineFile(probe);
   const textFile = Boolean(path && probe !== href);
   const external = isExternalHttpUrl(href);
-  const favicon = external && !path ? getExternalFaviconUrl(href) : null;
+  // A host's own reference (`#12`, a commit) reads as part of the text, without the site's mark.
+  const reference = node?.properties.dataOcReference !== undefined;
+  const favicon = external && !path && !reference ? getExternalFaviconUrl(href) : null;
   const showPreview = presentation.loopbackPreview && isLoopbackHttpUrl(href) && directory
     && !(isDesktopShell() && openLinksInBrowserPanel);
   const handleClick = (event: React.MouseEvent<HTMLAnchorElement>) => {
@@ -163,6 +167,10 @@ function ScreenMarkdownHref({ href, children: originalChildren, node, ...props }
     if (skill) return;
     if (file) {
       activateMarkdownFile(event, (external) => { void openFile(href, path ?? undefined, external); });
+      return;
+    }
+    if (folder && revealPath) {
+      activateMarkdownFile(event, () => revealPath(folder));
       return;
     }
     if (href.startsWith('#') && !media?.documentAssets) {
@@ -191,9 +199,12 @@ function ScreenMarkdownHref({ href, children: originalChildren, node, ...props }
         title={attachment.filename}
       >
         <svg className="size-[1.1em] shrink-0" aria-hidden="true"><use href={`#${attachment.iconId}`} /></svg>
-        {attachment.filename}
+        <span className={REFERENCE_CHIP_LABEL_CLASS}>{attachment.filename}</span>
       </span>
     );
+  }
+  if (session && mentionChip) {
+    return <SessionMentionChipButton chip={mentionChip} target={session} />;
   }
   if (agent) {
     return (
@@ -225,8 +236,8 @@ function ScreenMarkdownHref({ href, children: originalChildren, node, ...props }
         }}
         onDragStart={app ? (event) => event.preventDefault() : undefined}
       >
-        {skill && <Icon name="book-open" className="size-[1.1em]" />}
-        {skill ?? children}
+        {skill && <Icon name="book-open" className="size-[1.1em] shrink-0" />}
+        {skill ? <span className={REFERENCE_CHIP_LABEL_CLASS}>{skill}</span> : children}
       </a>
       {showPreview && (
         <Button

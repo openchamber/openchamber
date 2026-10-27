@@ -288,7 +288,7 @@ function SwitcherRow({ session, depth, variant, secondaryMeta, hasChildren, isEx
                 event.stopPropagation();
                 onToggleExpand?.();
               }}
-              className="inline-flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center rounded text-muted-foreground/70 hover:text-foreground"
+              className="inline-flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground"
               aria-label={isExpanded ? t('sessions.sidebar.session.subsessions.collapse') : t('sessions.sidebar.session.subsessions.expand')}
             >
               {isExpanded ? <Icon name="arrow-down-s" className="h-3.5 w-3.5" /> : <Icon name="arrow-right-s" className="h-3.5 w-3.5" />}
@@ -300,7 +300,7 @@ function SwitcherRow({ session, depth, variant, secondaryMeta, hasChildren, isEx
         </div>
         {variant === 'default' ? (
           <div
-            className="flex min-w-0 items-center gap-1.5 truncate text-muted-foreground/70 leading-tight"
+            className="flex min-w-0 items-center gap-1.5 truncate text-muted-foreground leading-tight"
             style={{ fontSize: 'calc(var(--text-ui-label) * 0.85)' }}
           >
             {hasChildren ? (
@@ -313,7 +313,7 @@ function SwitcherRow({ session, depth, variant, secondaryMeta, hasChildren, isEx
                   event.stopPropagation();
                   onToggleExpand?.();
                 }}
-                className="inline-flex h-3 w-3 flex-shrink-0 items-center justify-center rounded text-muted-foreground/70 hover:text-foreground"
+                className="inline-flex h-3 w-3 flex-shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground"
                 aria-label={isExpanded ? t('sessions.sidebar.session.subsessions.collapse') : t('sessions.sidebar.session.subsessions.expand')}
               >
                 {isExpanded ? <Icon name="arrow-down-s" className="h-3 w-3" /> : <Icon name="arrow-right-s" className="h-3 w-3" />}
@@ -323,7 +323,7 @@ function SwitcherRow({ session, depth, variant, secondaryMeta, hasChildren, isEx
             {projectLabel ? <span className="truncate">{projectLabel}</span> : null}
             {branchLabel ? (
               <span className="inline-flex min-w-0 items-center gap-0.5">
-                <Icon name="git-branch" className="h-3 w-3 flex-shrink-0 text-muted-foreground/70" />
+                <Icon name="git-branch" className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
                 <span className="truncate">{branchLabel}</span>
               </span>
             ) : null}

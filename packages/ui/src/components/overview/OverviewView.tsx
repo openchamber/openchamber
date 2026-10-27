@@ -156,10 +156,10 @@ const OverviewRow: React.FC<{
           {title}
         </span>
         {note ? (
-          <span className="shrink-0 whitespace-nowrap typography-micro text-muted-foreground/80" style={noteColor ? { color: noteColor } : undefined}>{note}</span>
+          <span className="shrink-0 whitespace-nowrap typography-micro text-muted-foreground" style={noteColor ? { color: noteColor } : undefined}>{note}</span>
         ) : null}
       </span>
-      {sub ? <span dir="auto" title={sub} className="truncate oc-ui-start-align ps-6 typography-micro text-muted-foreground/80">{sub}</span> : null}
+      {sub ? <span dir="auto" title={sub} className="truncate oc-ui-start-align ps-6 typography-micro text-muted-foreground">{sub}</span> : null}
     </>
   );
   const bodyClass = 'flex min-w-0 flex-1 flex-col gap-0.5 text-start';

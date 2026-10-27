@@ -33,6 +33,10 @@ import { mcpGridI18n } from './mcp-grid.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { diffFindI18n } from './diff-find.i18n';
+import { markdownGithubI18n } from './markdown-github.i18n';
+import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
+import { workflowsI18n } from './workflows.i18n';
+import { sessionReferencesI18n } from './session-references.i18n';
 import { guestStatusViewI18n } from './guest-status-view.i18n';
 
 export const dict: Record<I18nKey, string> = {
@@ -187,6 +191,10 @@ export const dict: Record<I18nKey, string> = {
   ...pluginsGridI18n.uk,
   ...integrationsCatalogI18n['uk'],
   ...diffFindI18n['uk'],
+  ...markdownGithubI18n['uk'],
+  ...autocompleteScopeI18n['uk'],
+  ...workflowsI18n['uk'],
+  ...sessionReferencesI18n['uk'],
   ...guestStatusViewI18n['uk'],
   'terminalView.actions.attachSelection': 'Прикріпити вибраний вивід',
   'terminalView.actions.copySelection': 'Скопіювати вибраний вивід',
@@ -326,7 +334,6 @@ export const dict: Record<I18nKey, string> = {
   "mobile.menu.files": "Файли",
   "mobile.menu.git": "Git",
   "mobile.menu.terminal": "Термінал",
-  "mobile.menu.mcp": "MCP",
   "mobile.menu.instances": "Інстанси",
   "mobile.menu.update": "Оновити",
   "mobile.menu.settings": "Налаштування",
@@ -2291,6 +2298,7 @@ export const dict: Record<I18nKey, string> = {
   "session.githubIntegration.validation.branchAlreadyCheckedOut": "Гілку вже відкрито в worktree",
   "session.githubIntegration.validation.failed": "Помилка перевірки",
   "chat.fileAttachment.toast.attachFailed": "Не вдалося прикріпити файл",
+  "chat.fileAttachment.toast.tooLarge": "{name} завеликий, щоб прикріпити (понад {size}). Якщо файл є в проєкті, згадайте його через @.",
   "chat.fileAttachment.toast.someFilesSkipped": "Деякі файли були пропущені:\n{summary}",
   "chat.fileAttachment.toast.vscodePickFailed": "Не вдалося вибрати файли в VS Code",
   "chat.fileAttachment.fileFallback": "файл",
@@ -2406,8 +2414,6 @@ export const dict: Record<I18nKey, string> = {
   'chat.commandAutocomplete.command.btwDescription': 'Поставте побічне питання в тимчасовій дочірній сесії, не відволікаючи цей чат.',
   'chat.commandAutocomplete.command.forkDescription': 'Відгалузити цей чат від останньої завершеної відповіді й продовжити там; текст після /fork надсилається у відгалуження.',
   "chat.commandAutocomplete.command.exploreDescription": "Зорієнтуватись у кодовій базі: високорівневий тур архітектурою й основними частинами.",
-  "chat.commandAutocomplete.badge.command": "команда",
-  "chat.commandAutocomplete.badge.system": "система",
   "chat.commandAutocomplete.empty": "Команди не знайдено",
   "chat.agentMentionAutocomplete.badge.system": "система",
   "chat.agentMentionAutocomplete.empty": "Агентів не знайдено",
@@ -2551,8 +2557,6 @@ export const dict: Record<I18nKey, string> = {
   "chat.chatInput.actions.sendMessageAria": "Надіслати повідомлення",
   "chat.chatInput.actions.queueMessageAria": "Поставити повідомлення в чергу",
   "chat.chatInput.actions.stopGeneratingAria": "Припинити генерацію",
-  "chat.chatInput.focusMode.toggleAria": "Перемкнути режим фокусування",
-  "chat.chatInput.focusMode.label": "Режим фокусування",
   "chat.chatInput.linked.byAuthor": "за {author}",
   "chat.chatInput.linked.issue.openInBrowserAria": "Відкрити issue в браузері",
   "chat.chatInput.linked.issue.removeAria": "Видалити пов’язану issue",
@@ -2564,7 +2568,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.chatInput.placeholder.chat": "Плануйте, створюйте або запитуйте. @ щоб згадати, $ для навичок, / для команд",
   "chat.chatInput.placeholder.chatCompact": "Плануйте, створюйте або запитуйте",
   "chat.chatInput.placeholder.selectSession": "Виберіть або створіть сесію, щоб розпочати спілкування",
-  "chat.snippetAutocomplete.action.addNew": "+ Додати новий сніпет",
+  "chat.snippetAutocomplete.action.addNew": "Додати новий сніпет",
   "chat.snippetAutocomplete.empty": "Сніпети не знайдено",
   "chat.snippetAutocomplete.footer": "↑↓ навігація • Enter вибрати • Esc закрити",
   "snippets.source.global": "глобальний",
@@ -2955,6 +2959,20 @@ export const dict: Record<I18nKey, string> = {
   "projects.sharedTrust.actions": "Дії",
   "projects.sharedTrust.skip": "Не цього разу",
   "projects.sharedTrust.trust": "Довірити й виконати",
+  "projects.opencodeTrust.title": "Дозволити OpenCode запускати код із цієї папки?",
+  "projects.opencodeTrust.description": "OpenCode запускає плагіни й команди з конфігурації {path}, щойно відкриває папку. Довірте їм один раз, і OpenChamber спитає знову тільки тоді, коли вони зміняться.",
+  "projects.opencodeTrust.plugins": "Плагіни",
+  "projects.opencodeTrust.commands": "Команди",
+  "projects.opencodeTrust.kind.package": "{name} (пакет npm)",
+  "projects.opencodeTrust.kind.config": "{path}: файл конфігурації, який OpenChamber не може прочитати",
+  "projects.opencodeTrust.kind.mcp": "MCP-сервер {name}",
+  "projects.opencodeTrust.kind.lsp": "Мовний сервер {name}",
+  "projects.opencodeTrust.kind.formatter": "Форматувальник {name}",
+  "projects.opencodeTrust.kind.shell": "Оболонка",
+  "projects.opencodeTrust.paused": "Без довіри агенти в цій папці не працюватимуть, але переглядати файли й зміни Git можна.",
+  "projects.opencodeTrust.skip": "Не цього разу",
+  "projects.opencodeTrust.trust": "Довіряти й відкрити",
+  "projects.opencodeTrust.saveFailed": "Не вдалося зберегти відповідь. Спробуйте ще раз.",
   "projectActions.actions.autoDiscoverTooltip": "Автоматично знаходить і запускає сервер розробки",
   "projectActions.actions.chooseActionAria": "Вибрати дію проєкту",
   "projectActions.actions.openPreview": "Відкрити Preview",
@@ -3468,6 +3486,7 @@ export const dict: Record<I18nKey, string> = {
   "common.duration.minutesSecondsCompact": "{minutes}хв {seconds}с",
   "common.duration.hoursMinutesCompact": "{hours}год {minutes}хв",
   "contextFileOpen.failure.tooLarge": "File is too large to open (>{count} lines)",
+  "contextFileOpen.failure.tooLargeSize": "Файл завеликий, щоб його відкрити (понад {size})",
   "contextFileOpen.failure.missing": "File not found",
   "contextFileOpen.failure.unreadable": "Failed to open file",
   "quota.window.5h": "5 годин",
@@ -3493,6 +3512,7 @@ export const dict: Record<I18nKey, string> = {
   "quota.window.completions": "Доповнення коду",
   "quota.window.premiumInteractions": "Кредити ШІ",
   'chat.workStatus.ariaLabel': 'Стан роботи',
+  'chat.workStatus.mobileEmpty': 'Для цієї сесії поки нічого показати',
   'chat.workStatus.context.label': 'Контекст',
   'chat.workStatus.cost.breakdown': "Сеанс {session} · Субагенти {subagents}",
   'chat.workStatus.git.changedFileSingle': 'Змінено {count} файл',

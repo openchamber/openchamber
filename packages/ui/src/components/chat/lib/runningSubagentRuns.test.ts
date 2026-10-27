@@ -70,6 +70,16 @@ describe('selectRunningSubagentRuns', () => {
         expect(runs[0]?.time.created).toBe(10);
     });
 
+    test('leaves out a workflow run\'s agents, which its card and panel show', () => {
+        const runs = selectRunningSubagentRuns(
+            state({ sessions: [session('ses_child', 10), session('ses_agent', 11)], busy: ['ses_child', 'ses_agent'] }),
+            PARENT,
+            new Set(['ses_agent']),
+        );
+
+        expect(runs.map((run) => run.metadata?.childID)).toEqual(['ses_child']);
+    });
+
     test('ignores idle children and children of other sessions', () => {
         const runs = selectRunningSubagentRuns(state({
             sessions: [session('ses_idle', 10), session('ses_other', 10, 'ses_elsewhere')],

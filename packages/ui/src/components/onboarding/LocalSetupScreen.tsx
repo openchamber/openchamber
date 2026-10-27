@@ -329,7 +329,7 @@ export function LocalSetupScreen({
                 </>
               )}
             </div>
-            <div className="text-xs text-muted-foreground/70">
+            <div className="text-xs text-muted-foreground">
               {t(pinnedBinary === null ? 'onboarding.localSetup.helper.saveAndReload' : 'onboarding.localSetup.helper.pinnedByAdministrator')}
             </div>
           </div>
@@ -354,19 +354,19 @@ export function LocalSetupScreen({
         <div className="absolute bottom-8 inset-s-0 inset-e-0 text-center space-y-1">
           {platform === 'windows' ? (
             <>
-              <p className="text-sm text-muted-foreground/70">
+              <p className="text-sm text-muted-foreground">
                 {t('onboarding.localSetup.windows.hintDetectionFailed')}
               </p>
             </>
           ) : (
             <>
-              <p className="text-sm text-muted-foreground/70">
+              <p className="text-sm text-muted-foreground">
                 {t('onboarding.localSetup.hint.ensurePath')}
               </p>
-              <p className="text-sm text-muted-foreground/70">
+              <p className="text-sm text-muted-foreground">
                 {t('onboarding.localSetup.hint.setEnv')}
               </p>
-              <p className="text-sm text-muted-foreground/70">
+              <p className="text-sm text-muted-foreground">
                 {t('onboarding.localSetup.hint.missingRuntime')}
               </p>
             </>

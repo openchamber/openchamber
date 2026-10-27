@@ -7,6 +7,7 @@ import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
 import type { Snippet } from '@/types/snippet';
 import { useMobileAutocompleteMaxHeight } from './useMobileAutocompleteMaxHeight';
+import { AutocompleteRowDetail } from './composer/ui/AutocompleteRowParts';
 
 export interface SnippetAutocompleteHandle {
   handleKeyDown: (key: string) => void;
@@ -123,41 +124,35 @@ export const SnippetAutocomplete = React.forwardRef<SnippetAutocompleteHandle, S
   }), [chooseSnippet, filteredSnippets, onClose, openNewSnippetSettings]);
 
   return (
-    <div ref={containerRef} className="absolute z-[100] min-w-0 w-full max-w-[450px] max-h-60 oc-glass-popover oc-glass-floating rounded-xl bottom-full mb-2 inset-s-0 flex flex-col" style={mobileMaxHeight !== undefined ? { ...style, maxHeight: mobileMaxHeight } : style}>
-      <ScrollableOverlay preventOverscroll outerClassName="flex-1 min-h-0" className="px-0 pb-2">
+    <div ref={containerRef} className="absolute z-[100] min-w-0 w-full max-w-[420px] max-h-64 oc-glass-popover oc-glass-floating rounded-xl bottom-full mb-2 inset-s-0 flex flex-col" style={mobileMaxHeight !== undefined ? { ...style, maxHeight: mobileMaxHeight } : style}>
+      <ScrollableOverlay preventOverscroll outerClassName="flex-1 min-h-0" className="p-1">
         <div
           ref={(el) => { itemRefs.current[0] = el; }}
-          className={cn('flex items-center gap-2 px-3 py-1.5 cursor-pointer rounded-lg typography-ui-label', selectedIndex === 0 && 'bg-interactive-selection')}
+          className={cn('flex items-center gap-2 px-2 py-1.5 cursor-pointer rounded-lg typography-ui-label', selectedIndex === 0 && 'bg-interactive-selection')}
           onClick={openNewSnippetSettings}
           onMouseMove={() => setSelectedIndex(0)}
         >
           <Icon name="add" className="h-3.5 w-3.5 text-muted-foreground" />
-          <span className="font-medium text-foreground">{t('chat.snippetAutocomplete.action.addNew')}</span>
+          <span className="text-muted-foreground">{t('chat.snippetAutocomplete.action.addNew')}</span>
         </div>
         {filteredSnippets.length ? filteredSnippets.map((snippet, index) => (
           <div
             key={`${snippet.source}:${snippet.filePath}`}
             ref={(el) => { itemRefs.current[index + 1] = el; }}
-            className={cn('flex gap-2 px-3 py-1.5 cursor-pointer rounded-lg typography-ui-label', isMobile ? 'items-center' : 'items-start', index + 1 === selectedIndex && 'bg-interactive-selection')}
+            className={cn('flex items-center gap-2 px-2 py-1.5 cursor-pointer rounded-lg typography-ui-label', index + 1 === selectedIndex && 'bg-interactive-selection')}
             onClick={() => chooseSnippet(snippet)}
             onMouseMove={() => setSelectedIndex(index + 1)}
           >
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2">
-                <span className="font-semibold truncate">#{snippet.name}</span>
-                <span className="text-[0.625rem] leading-none uppercase font-bold tracking-tight px-1.5 py-1 rounded border flex-shrink-0 bg-[var(--surface-muted)] text-muted-foreground border-[var(--interactive-border)]/60">{t(`snippets.source.${snippet.source}`)}</span>
-              </div>
-              {!isMobile && (
-                <div className="typography-meta text-muted-foreground mt-0.5 truncate">{snippetPreview(snippet)}</div>
-              )}
-            </div>
+            <span className="max-w-[60%] shrink-0 truncate font-semibold">#{snippet.name}</span>
+            {/* A global snippet is the user's own, as a user skill or command is. */}
+            <AutocompleteRowDetail scope={snippet.source === 'project' ? 'project' : 'user'} description={snippetPreview(snippet)} />
           </div>
         )) : (
-          <div className="px-3 py-2 typography-ui-label text-muted-foreground">{t('chat.snippetAutocomplete.empty')}</div>
+          <div className="px-2 py-1.5 typography-ui-label text-muted-foreground">{t('chat.snippetAutocomplete.empty')}</div>
         )}
       </ScrollableOverlay>
       {!isMobile && (
-        <div className="px-3 pt-1 pb-1.5 border-t typography-meta text-muted-foreground">{t('chat.snippetAutocomplete.footer')}</div>
+        <div className="px-3 py-1.5 border-t typography-meta text-muted-foreground">{t('chat.snippetAutocomplete.footer')}</div>
       )}
     </div>
   );

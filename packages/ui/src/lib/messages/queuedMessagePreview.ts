@@ -23,6 +23,10 @@ function contextPreview(payload: ContextPartPayload): string {
         case 'guest-issue':
         case 'guest-pr':
             return payload.title.trim() || payload.url;
+        case 'session':
+            return payload.title;
+        case 'session-message':
+            return payload.excerpt;
     }
 }
 

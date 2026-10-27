@@ -9,8 +9,14 @@ import type { ContextPartMetadata } from '@/lib/messages/contextParts'
 import type { AttachedFile } from "@/stores/types/sessionTypes"
 import { prepareAttachmentFiles } from "./attachment-files"
 import { getChatDraftIdentityKey, subscribeChatDraftDeletion, type ChatDraftIdentity } from "@/lib/chatDraftPersistence"
+import { pathForDroppedFile } from "@/lib/desktop"
+import { formatFileSize } from "@/lib/fileSize"
+import { formatMessage, useI18nStore } from "@/lib/i18n/store"
 
 const FILE_URI_PREFIX = "file://"
+// Past this a file is not read into the prompt: base64 makes it a third
+// larger, and the send fails long before 100 MB.
+const MAX_INLINE_ATTACHMENT_BYTES = 10 * 1024 * 1024
 const MAX_ATTACHMENT_PREPARATION_ATTEMPTS = 3
 const pendingVSCodeSelectionKeys = new Set<string>()
 let attachmentReadGeneration = 0
@@ -327,6 +333,30 @@ export const useInputStore = create<InputState>()((set, get) => ({
   ),
 
   addAttachedFile: async (file: File) => {
+    if (file.size > MAX_INLINE_ATTACHMENT_BYTES) {
+      // Read whole into the prompt, a file this size fails the send. On the
+      // desktop the OpenCode server shares the disk, so the file goes by its
+      // path and the agent reads what it needs; elsewhere it is refused now.
+      const path = pathForDroppedFile(file)
+      if (!path) {
+        throw new Error(formatMessage(useI18nStore.getState().dictionary, 'chat.fileAttachment.toast.tooLarge', {
+          name: file.name,
+          size: formatFileSize(MAX_INLINE_ATTACHMENT_BYTES),
+        }))
+      }
+      const attached: AttachedFile = {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        file: new File([], file.name, { type: 'text/plain' }),
+        dataUrl: toFileUrl(path),
+        mimeType: 'text/plain',
+        filename: file.name,
+        size: file.size,
+        source: 'server',
+        serverPath: path,
+      }
+      set((state) => ({ attachedFiles: [...state.attachedFiles, attached] }))
+      return true
+    }
     const generation = attachmentReadGeneration
     for (let attempt = 0; attempt < MAX_ATTACHMENT_PREPARATION_ATTEMPTS; attempt += 1) {
       const reservedFilenames = get().attachedFiles.map((attachment) => attachment.filename)

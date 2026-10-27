@@ -10,7 +10,7 @@ import {
 } from '@/components/session/sidebar/projects/sessionProjectListActions';
 import { SessionSidebarRows } from '@/components/session/sidebar/SessionSidebarRows';
 import type { SessionSidebarRow } from '@/components/session/sidebar/sessionSidebarRowModel';
-import { isWorktreeWorkGroup } from '@/components/session/sidebar/works/sidebarWorks';
+import { isGroupWork } from '@/components/session/sidebar/works/sidebarWorks';
 import type { SessionNode } from '@/components/session/sidebar/types';
 import { useI18n } from '@/lib/i18n';
 import { useUIStore } from '@/stores/useUIStore';
@@ -121,7 +121,7 @@ export const MobileSessionList: React.FC<SessionProjectListProps> = ({ model, vi
         />;
       }
       case 'group-header':
-        return isWorktreeWorkGroup(row.group)
+        return isGroupWork(row.group)
           ? <MobileWorktreeRow row={row} geometry={geometry} onToggle={actions.group.onToggleCollapsedGroup} />
           : <MobileGroupHeader row={row} geometry={geometry} onToggle={actions.group.onToggleCollapsedGroup} />;
       case 'folder-header':

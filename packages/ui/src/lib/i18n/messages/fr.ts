@@ -32,6 +32,10 @@ import { mcpGridI18n } from './mcp-grid.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { diffFindI18n } from './diff-find.i18n';
+import { markdownGithubI18n } from './markdown-github.i18n';
+import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
+import { workflowsI18n } from './workflows.i18n';
+import { sessionReferencesI18n } from './session-references.i18n';
 import { guestStatusViewI18n } from './guest-status-view.i18n';
 
 export const dict = {
@@ -176,6 +180,10 @@ export const dict = {
   ...pluginsGridI18n.fr,
   ...integrationsCatalogI18n['fr'],
   ...diffFindI18n['fr'],
+  ...markdownGithubI18n['fr'],
+  ...autocompleteScopeI18n['fr'],
+  ...workflowsI18n['fr'],
+  ...sessionReferencesI18n['fr'],
   ...guestStatusViewI18n['fr'],
   'terminalView.actions.attachSelection': 'Joindre la sortie sélectionnée',
   'terminalView.actions.copySelection': 'Copier la sortie sélectionnée',
@@ -2069,6 +2077,7 @@ export const dict = {
   'session.githubIntegration.validation.branchAlreadyCheckedOut': 'La branche est déjà active dans un worktree',
   'session.githubIntegration.validation.failed': 'Échec de la validation',
   'chat.fileAttachment.toast.attachFailed': 'Impossible de joindre le fichier',
+  'chat.fileAttachment.toast.tooLarge': '{name} est trop volumineux pour être joint (plus de {size}). S\'il fait partie du projet, mentionnez-le avec @.',
   'chat.fileAttachment.toast.someFilesSkipped': 'Certains fichiers ont été ignorés :\n{summary}',
   'chat.fileAttachment.toast.vscodePickFailed': 'Échec de la sélection des fichiers dans VS Code',
   'chat.fileAttachment.fileFallback': 'fichier',
@@ -2153,8 +2162,6 @@ export const dict = {
   'chat.commandAutocomplete.command.compactDescription': 'Compresser l\'historique des sessions à l\'aide de l\'IA pour réduire la taille du contexte',
   'chat.commandAutocomplete.command.summaryDescription': 'Résumé de session non destructif. Indice de sujet facultatif après la commande.',
   'chat.commandAutocomplete.command.workspaceReviewDescription': 'Examine les modifications actuelles de l’espace de travail pour ne signaler que les problèmes importants.',
-  'chat.commandAutocomplete.badge.command': 'commande',
-  'chat.commandAutocomplete.badge.system': 'système',
   'chat.commandAutocomplete.empty': 'Aucune commande trouvée',
   'chat.agentMentionAutocomplete.badge.system': 'système',
   'chat.agentMentionAutocomplete.empty': 'Aucun agent trouvé',
@@ -2287,8 +2294,6 @@ export const dict = {
   'chat.chatInput.actions.sendMessageAria': 'Envoyer un message',
   'chat.chatInput.actions.queueMessageAria': 'Mettre le message en file d\'attente',
   'chat.chatInput.actions.stopGeneratingAria': 'Arrêter de générer',
-  'chat.chatInput.focusMode.toggleAria': 'Activer/désactiver le mode focus',
-  'chat.chatInput.focusMode.label': 'Mode focus',
   'chat.chatInput.linked.byAuthor': 'par {author}',
   'chat.chatInput.linked.issue.openInBrowserAria': 'Ouvrir l\'issue dans le navigateur',
   'chat.chatInput.linked.issue.removeAria': 'Supprimer l\'issue liée',
@@ -2312,7 +2317,7 @@ export const dict = {
   'chat.dictation.insertAndSend': 'Insérer et envoyer',
   'chat.dictation.retry': 'Réessayer la transcription',
   'chat.dictation.discard': 'Abandonner l\'enregistrement',
-  'chat.snippetAutocomplete.action.addNew': '+ Ajouter un nouvel extrait',
+  'chat.snippetAutocomplete.action.addNew': 'Ajouter un nouvel extrait',
   'chat.snippetAutocomplete.empty': 'Aucun extrait trouvé',
   'chat.snippetAutocomplete.footer': '↑↓ naviguer • Entrer sélectionner • Esc fermer',
   'snippets.source.global': 'mondial',
@@ -2685,6 +2690,20 @@ export const dict = {
   'projects.sharedTrust.actions': 'Actions',
   'projects.sharedTrust.skip': 'Pas cette fois',
   'projects.sharedTrust.trust': 'Faire confiance et exécuter',
+  'projects.opencodeTrust.title': 'Autoriser OpenCode à exécuter du code de ce dossier ?',
+  'projects.opencodeTrust.description': 'OpenCode exécute les plugins et commandes de la configuration de {path} dès qu\'il ouvre le dossier. Faites-leur confiance une fois, et OpenChamber ne redemandera que s\'ils changent.',
+  'projects.opencodeTrust.plugins': 'Plugins',
+  'projects.opencodeTrust.commands': 'Commandes',
+  'projects.opencodeTrust.kind.package': '{name} (paquet npm)',
+  'projects.opencodeTrust.kind.config': '{path} : un fichier de configuration qu\'OpenChamber ne peut pas lire',
+  'projects.opencodeTrust.kind.mcp': 'Serveur MCP {name}',
+  'projects.opencodeTrust.kind.lsp': 'Serveur de langage {name}',
+  'projects.opencodeTrust.kind.formatter': 'Formateur {name}',
+  'projects.opencodeTrust.kind.shell': 'Shell',
+  'projects.opencodeTrust.paused': 'Sans confiance, les agents ne peuvent pas travailler dans ce dossier, mais vous pouvez toujours parcourir ses fichiers et ses modifications Git.',
+  'projects.opencodeTrust.skip': 'Pas cette fois',
+  'projects.opencodeTrust.trust': 'Faire confiance et ouvrir',
+  'projects.opencodeTrust.saveFailed': 'Impossible d\'enregistrer votre réponse. Réessayez.',
   'projectActions.actions.autoDiscoverTooltip': 'Détecte et lance automatiquement le serveur de développement',
   'projectActions.actions.chooseActionAria': 'Choisir l\'action du projet',
   'projectActions.actions.openPreview': 'Ouvrir l\'aperçu',
@@ -3144,6 +3163,7 @@ export const dict = {
   'common.duration.minutesSecondsCompact': '{minutes}m {seconds}s',
   'common.duration.hoursMinutesCompact': '{hours}h {minutes}m',
   'contextFileOpen.failure.tooLarge': 'Le fichier est trop volumineux pour être ouvert (> {count} lignes)',
+  'contextFileOpen.failure.tooLargeSize': 'Le fichier est trop volumineux pour être ouvert (plus de {size})',
   'contextFileOpen.failure.missing': 'Fichier introuvable',
   'contextFileOpen.failure.unreadable': 'Impossible d’ouvrir le fichier',
   'quota.window.5h': '5 heures',
@@ -3238,7 +3258,6 @@ export const dict = {
   'mobile.menu.files': 'Fichiers',
   'mobile.menu.git': 'Git',
   'mobile.menu.terminal': 'Terminal',
-  'mobile.menu.mcp': 'MCP',
   'mobile.menu.instances': 'Instances',
   'mobile.menu.update': 'Mettre à jour',
   'mobile.menu.settings': 'Paramètres',
@@ -3500,6 +3519,7 @@ export const dict = {
   'vscodeLayout.actions.archiveAllError': 'Impossible d’archiver {count} session(s)',
   'vscodeLayout.actions.cancel': 'Annuler',
   'chat.workStatus.ariaLabel': 'État du travail',
+  'chat.workStatus.mobileEmpty': 'Rien à afficher pour cette session pour le moment',
   'chat.workStatus.context.label': 'Contexte',
   'chat.workStatus.cost.breakdown': 'Session {session} · Sous-agents {subagents}',
   'chat.workStatus.git.changedFileSingle': '{count} fichier modifié',

@@ -18,6 +18,7 @@ You have three tools: `read`, `grep`, and `glob`, limited to the repository chec
 
 The workflow fetched the discussion into `.oc-context/` at the repository root:
 
+- `item.md`: the title, body, comments, and review bodies as markdown. Read the text here: `item.json` holds each body on one line, and `read` cuts lines past 2,000 characters.
 - `item.json`: the issue or pull request with its body, author, state, labels, and comments. For a pull request it also holds reviews, commits, and check status.
 - `review-comments.json`: inline review comments, for pull requests only.
 

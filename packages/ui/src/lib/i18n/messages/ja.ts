@@ -33,6 +33,10 @@ import { mcpGridI18n } from './mcp-grid.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { diffFindI18n } from './diff-find.i18n';
+import { markdownGithubI18n } from './markdown-github.i18n';
+import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
+import { workflowsI18n } from './workflows.i18n';
+import { sessionReferencesI18n } from './session-references.i18n';
 import { guestStatusViewI18n } from './guest-status-view.i18n';
 
 export const dict: Record<I18nKey, string> = {
@@ -177,6 +181,10 @@ export const dict: Record<I18nKey, string> = {
   ...pluginsGridI18n.ja,
   ...integrationsCatalogI18n['ja'],
   ...diffFindI18n['ja'],
+  ...markdownGithubI18n['ja'],
+  ...autocompleteScopeI18n['ja'],
+  ...workflowsI18n['ja'],
+  ...sessionReferencesI18n['ja'],
   ...guestStatusViewI18n['ja'],
   'terminalView.actions.attachSelection': '選択した出力を添付',
   'terminalView.actions.copySelection': '選択した出力をコピー',
@@ -317,7 +325,6 @@ export const dict: Record<I18nKey, string> = {
   'mobile.menu.files': 'ファイル',
   'mobile.menu.git': 'Git',
   'mobile.menu.terminal': 'ターミナル',
-  'mobile.menu.mcp': 'MCP',
   'mobile.menu.update': '更新',
   'mobile.menu.settings': '設定',
   'mobile.sessions.footer.more': 'その他',
@@ -2318,6 +2325,7 @@ export const dict: Record<I18nKey, string> = {
   'session.githubIntegration.validation.branchAlreadyCheckedOut': 'ブランチはすでにワークツリーでチェックアウトされています',
   'session.githubIntegration.validation.failed': '検証に失敗しました',
   'chat.fileAttachment.toast.attachFailed': 'ファイルの添付に失敗しました',
+  'chat.fileAttachment.toast.tooLarge': '{name} は大きすぎるため添付できません（{size} 超）。プロジェクト内のファイルなら @ でメンションしてください。',
   'chat.fileAttachment.toast.someFilesSkipped': '一部のファイルがスキップされました:\n{summary}',
   'chat.fileAttachment.toast.vscodePickFailed': 'VS Codeでのファイル選択に失敗しました',
   'chat.fileAttachment.fileFallback': 'ファイル',
@@ -2433,8 +2441,6 @@ export const dict: Record<I18nKey, string> = {
   'chat.commandAutocomplete.command.btwDescription': 'このチャットを乱さず、一時的な子セッションで脇の質問をする',
   'chat.commandAutocomplete.command.forkDescription': '最後に完了した応答からこのチャットをフォークして続行します。/fork の後のテキストはフォーク先に送信されます。',
   'chat.commandAutocomplete.command.exploreDescription': 'このコードベースに慣れる: アーキテクチャと主要部分の概要ツアー。',
-  'chat.commandAutocomplete.badge.command': 'コマンド',
-  'chat.commandAutocomplete.badge.system': 'システム',
   'chat.commandAutocomplete.empty': 'コマンドが見つかりません',
   'chat.agentMentionAutocomplete.badge.system': 'システム',
   'chat.agentMentionAutocomplete.empty': 'エージェントが見つかりません',
@@ -2578,8 +2584,6 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.actions.sendMessageAria': 'メッセージを送信',
   'chat.chatInput.actions.queueMessageAria': 'メッセージをキュー',
   'chat.chatInput.actions.stopGeneratingAria': '生成を停止',
-  'chat.chatInput.focusMode.toggleAria': 'フォーカスモードの切り替え',
-  'chat.chatInput.focusMode.label': 'フォーカスモード',
   'chat.chatInput.linked.byAuthor': '{author}による',
   'chat.chatInput.linked.issue.openInBrowserAria': 'ブラウザでIssueを開く',
   'chat.chatInput.linked.issue.removeAria': 'リンクされたIssueを削除',
@@ -2603,7 +2607,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.dictation.insertAndSend': '挿入して送信',
   'chat.dictation.retry': '文字起こしを再試行',
   'chat.dictation.discard': '録音を破棄',
-  'chat.snippetAutocomplete.action.addNew': '+ 新しいスニペットを追加',
+  'chat.snippetAutocomplete.action.addNew': '新しいスニペットを追加',
   'chat.snippetAutocomplete.empty': 'スニペットが見つかりません',
   'chat.snippetAutocomplete.footer': '↑↓ 移動 • Enter 選択 • Esc 閉じる',
   'snippets.source.global': 'グローバル',
@@ -2997,6 +3001,20 @@ export const dict: Record<I18nKey, string> = {
   'projects.sharedTrust.actions': 'アクション',
   'projects.sharedTrust.skip': '今回は実行しない',
   'projects.sharedTrust.trust': '信頼して実行',
+  'projects.opencodeTrust.title': 'このフォルダーのコードを OpenCode に実行させますか？',
+  'projects.opencodeTrust.description': 'OpenCode はフォルダーを開いた時点で、{path} の設定にあるプラグインとコマンドを実行します。一度信頼すると、変更があった場合のみ OpenChamber が再度確認します。',
+  'projects.opencodeTrust.plugins': 'プラグイン',
+  'projects.opencodeTrust.commands': 'コマンド',
+  'projects.opencodeTrust.kind.package': '{name}（npm パッケージ）',
+  'projects.opencodeTrust.kind.config': '{path}：OpenChamber が読み取れない設定ファイル',
+  'projects.opencodeTrust.kind.mcp': 'MCP サーバー {name}',
+  'projects.opencodeTrust.kind.lsp': '言語サーバー {name}',
+  'projects.opencodeTrust.kind.formatter': 'フォーマッター {name}',
+  'projects.opencodeTrust.kind.shell': 'シェル',
+  'projects.opencodeTrust.paused': '信頼しない場合、このフォルダーではエージェントは動作しませんが、ファイルと Git の変更は引き続き閲覧できます。',
+  'projects.opencodeTrust.skip': '今回は開かない',
+  'projects.opencodeTrust.trust': '信頼して開く',
+  'projects.opencodeTrust.saveFailed': '回答を保存できませんでした。もう一度お試しください。',
   'projectActions.actions.autoDiscoverTooltip': '開発サーバーを自動的に検出して実行します',
   'projectActions.actions.chooseActionAria': 'プロジェクトアクションを選択',
   'projectActions.actions.openPreview': 'プレビューを開く',
@@ -3472,6 +3490,7 @@ export const dict: Record<I18nKey, string> = {
   'common.duration.minutesSecondsCompact': '{minutes}分{seconds}秒',
   'common.duration.hoursMinutesCompact': '{hours}時間{minutes}分',
   'contextFileOpen.failure.tooLarge': 'ファイルが大きすぎて開けません（>{count}行）',
+  'contextFileOpen.failure.tooLargeSize': 'ファイルが大きすぎるため開けません（{size} 超）',
   'contextFileOpen.failure.missing': 'ファイルが見つかりません',
   'contextFileOpen.failure.unreadable': 'ファイルを開けませんでした',
   'quota.window.5h': '5時間',
@@ -3501,6 +3520,7 @@ export const dict: Record<I18nKey, string> = {
   'quota.window.premiumInteractions': 'AIクレジット',
 
   'chat.workStatus.ariaLabel': '作業状況',
+  'chat.workStatus.mobileEmpty': 'このセッションにはまだ表示する内容がありません',
   'chat.workStatus.context.label': 'コンテキスト',
   'chat.workStatus.cost.breakdown': 'セッション {session} · サブエージェント {subagents}',
   'chat.workStatus.git.changedFileSingle': '{count} 件のファイルを変更',

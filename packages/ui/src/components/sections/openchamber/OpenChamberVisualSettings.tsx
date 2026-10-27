@@ -29,7 +29,7 @@ import {
 import { useDeviceInfo } from '@/lib/device';
 import { usePwaDetection } from '@/hooks/usePwaDetection';
 import { loadDesktopSettings, updateDesktopSettings } from '@/lib/persistence';
-import { CODE_FONT_OPTIONS, CUSTOM_FONT_ID, DEFAULT_MONO_FONT, DEFAULT_UI_FONT, UI_FONT_OPTIONS, type MonoFontOption, type UiFontOption } from '@/lib/fontOptions';
+import { CODE_FONT_OPTIONS, CUSTOM_FONT_ID, DEFAULT_MONO_FONT, DEFAULT_UI_FONT, UI_FONT_OPTIONS, UI_FONT_WEIGHT_OPTIONS, type MonoFontOption, type UiFontOption, type UiFontWeight } from '@/lib/fontOptions';
 import { useI18n } from '@/lib/i18n';
 import { useEnterpriseMode } from '@/stores/useEnterprisePolicyStore';
 import { useFontPreferences } from '@/hooks/useFontPreferences';
@@ -159,6 +159,12 @@ const WEEK_START_OPTIONS: Option<'auto' | 'monday' | 'sunday'>[] = [
 
 type VisibleSetting = 'theme' | 'windowControlsPosition' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'editorFontSize' | 'spacing' | 'scrollbars' | 'inputBarOffset' | 'animatedActivityIndicators';
 
+const UI_FONT_WEIGHT_LABEL_KEYS = {
+    regular: 'settings.openchamber.visual.option.uiFontWeight.regular',
+    balanced: 'settings.openchamber.visual.option.uiFontWeight.balanced',
+    strong: 'settings.openchamber.visual.option.uiFontWeight.strong',
+} as const satisfies Record<UiFontWeight, string>;
+
 const WINDOW_CONTROLS_POSITION_OPTIONS: Array<{ id: DesktopWindowControlsPosition; labelKey: string }> = [
     { id: 'left', labelKey: 'settings.openchamber.desktopNetwork.option.windowControlsLeft' },
     { id: 'right', labelKey: 'settings.openchamber.desktopNetwork.option.windowControlsRight' },
@@ -197,6 +203,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const customMonoFont = useUIStore(state => state.customMonoFont);
     const setCustomUiFont = useUIStore(state => state.setCustomUiFont);
     const setCustomMonoFont = useUIStore(state => state.setCustomMonoFont);
+    const uiFontWeight = useUIStore(state => state.uiFontWeight);
+    const setUiFontWeight = useUIStore(state => state.setUiFontWeight);
     const webFontsBlocked = useEnterpriseMode();
     const padding = useUIStore(state => state.padding);
     const setPadding = useUIStore(state => state.setPadding);
@@ -918,6 +926,24 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                 <Icon name="restart" className="h-3.5 w-3.5" />
                                             </Button>
                                         </div>
+                                    </SettingsStackedField>
+                                )}
+                                {shouldShow('fontSize') && !isMobile && (
+                                    <SettingsStackedField
+                                        label={t('settings.openchamber.visual.field.interfaceFontWeight')}
+                                        info={t('settings.openchamber.visual.field.interfaceFontWeightInfo')}
+                                        settingsItem="appearance.interface-font-weight"
+                                        controlClassName="w-full"
+                                    >
+                                        <SettingsChipGroup
+                                            value={uiFontWeight}
+                                            onChange={setUiFontWeight}
+                                            aria-label={t('settings.openchamber.visual.field.interfaceFontWeight')}
+                                            options={UI_FONT_WEIGHT_OPTIONS.map((weight) => ({
+                                                value: weight,
+                                                label: t(UI_FONT_WEIGHT_LABEL_KEYS[weight]),
+                                            }))}
+                                        />
                                     </SettingsStackedField>
                                 )}
                                 {shouldShow('terminalFontSize') && (

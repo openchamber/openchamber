@@ -1,4 +1,4 @@
-import { isPathSpec } from './plugin-spec.js';
+import { isPathSpec, isPluginControlSpec } from './plugin-spec.js';
 
 // The forms OpenCode 2 loads from the `plugins` config list. OpenCode installs
 // anything that is not a path with npm's own spec parser and accepts only a
@@ -46,6 +46,9 @@ function isNpmPackageSpec(spec) {
  * Return the plugin spec in the form OpenCode 2 loads, or null when it loads
  * no form of it.
  *
+ * A control entry (`-name`, `*`, `prefix.*`) is returned unchanged: OpenCode
+ * applies it to plugins it already knows and loads nothing for it.
+ *
  * Local paths (including `file://` URLs) are returned unchanged: OpenCode
  * reads them from disk and whether the folder exists is checked there. A
  * plain `https://` repository address is rewritten to `git+https://`.
@@ -54,6 +57,7 @@ function isNpmPackageSpec(spec) {
  * @returns {string | null}
  */
 export function toLoadablePluginSpec(spec) {
+  if (isPluginControlSpec(spec)) return spec;
   if (isPathSpec(spec) || spec.startsWith('file://')) return spec;
   if (isNpmPackageSpec(spec)) return spec;
   if (GIT_SPEC_PATTERNS.some((pattern) => pattern.test(spec))) return spec;

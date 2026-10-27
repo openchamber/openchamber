@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import simpleGit from 'simple-git';
+import { simpleGit } from 'simple-git';
 import { createWorktreeBootstrapStore } from './worktree-bootstrap-storage.js';
 import { loadSourceSections, parseSource, sourceKey } from '../walkthrough/sources.js';
 import { registerGitRoutes } from './routes.js';
@@ -39,6 +39,7 @@ import {
   listStashes,
   getWorktrees,
   setWorktreeTaskTitle,
+  setWorktreePinned,
   seedBranchTaskTitle,
   markGeneratedBranchName,
   readRenameableGeneratedBranch,
@@ -6303,16 +6304,17 @@ describe('git environment through simple-git', () => {
       EDITOR: 'project-editor',
       GIT_TERMINAL_PROMPT: '1',
       GIT_DIR: '/elsewhere/.git',
+      GIT_PROJECT_FLAG: 'from-project',
     }));
     configureGitEnvironment({ forDirectory });
     try {
       await withProcessEnv({ EDITOR: undefined, GIT_TERMINAL_PROMPT: undefined }, async () => {
-        const { repo, readHookLog } = createRepositoryLoggingHookEnv(['PROJECT_TOOL', 'EDITOR', 'GIT_TERMINAL_PROMPT', 'PATH']);
+        const { repo, readHookLog } = createRepositoryLoggingHookEnv(['PROJECT_TOOL', 'EDITOR', 'GIT_TERMINAL_PROMPT', 'GIT_PROJECT_FLAG', 'PATH']);
         await commit(repo, 'init', { addAll: true });
-        const [projectTool, editor, prompt, hookPath] = readHookLog().split('|');
+        const [projectTool, editor, prompt, projectFlag, hookPath] = readHookLog().split('|');
         // The commit landed in this repository, not in GIT_DIR's.
         expect((await getLog(repo, { maxCount: 1 })).all).toHaveLength(1);
-        expect([projectTool, editor, prompt]).toEqual(['from-project', '<unset>', '0']);
+        expect([projectTool, editor, prompt, projectFlag]).toEqual(['from-project', '<unset>', '0', 'from-project']);
         expect(hookPath.split(':')).toContain('/opt/project-tools/bin');
         expect(forDirectory).toHaveBeenCalledWith(repo);
       });
@@ -6346,23 +6348,43 @@ describe('git environment through simple-git', () => {
     }
   });
 
-  it('keeps working, and passes them to git, when the process env sets editor, pager, ssh or askpass programs', async () => {
+  it('keeps working, and passes them to git, when the process env sets editor, pager, ssh or askpass programs, a config path or other GIT_ variables', async () => {
     if (!canRunGit() || process.platform === 'win32') return;
     const programs = {
       EDITOR: 'vim',
+      VISUAL: 'vim',
       GIT_EDITOR: 'vim',
       PAGER: 'less',
       GIT_PAGER: 'less',
       GIT_SSH_COMMAND: 'ssh -i /tmp/openchamber-test-key -o IdentitiesOnly=yes',
       GIT_ASKPASS: '/usr/bin/true',
       SSH_ASKPASS: '/usr/bin/true',
+      GIT_SSH: '/usr/bin/ssh',
+      GIT_PROXY_COMMAND: '/usr/bin/true',
+      GIT_SEQUENCE_EDITOR: 'vim',
+      GIT_EXTERNAL_DIFF: '/usr/bin/true',
+      GIT_TEMPLATE_DIR: createTempDir(),
+      GIT_EXEC_PATH: execFileSync('git', ['--exec-path'], { encoding: 'utf8' }).trim(),
+      PREFIX: '/usr',
+      GIT_CONFIG_GLOBAL: os.devNull,
+      GIT_CONFIG_SYSTEM: os.devNull,
+      GIT_CONFIG_COUNT: '1',
+      GIT_CONFIG_KEY_0: 'openchamber.test',
+      GIT_CONFIG_VALUE_0: 'from-server',
+      GIT_CONFIG_PARAMETERS: "'openchamber.parameter'='from-server'",
+      GIT_INHERITED_FLAG: 'from-server',
     };
     // Git itself hands hooks GIT_EDITOR=: when a commit message needs no editor.
     const observed = Object.keys(programs).filter((name) => name !== 'GIT_EDITOR');
+    const { repo, readHookLog } = createRepositoryLoggingHookEnv(observed);
     await withProcessEnv(programs, async () => {
-      const { repo, readHookLog } = createRepositoryLoggingHookEnv(observed);
       await commit(repo, 'init', { addAll: true });
-      expect(readHookLog()).toBe(observed.map((name) => programs[name]).join('|'));
+      const values = readHookLog().split('|');
+      const logged = Object.fromEntries(observed.map((name, index) => [name, values[index]]));
+      // Git appends the -c options of the command it runs the hook from.
+      expect(logged.GIT_CONFIG_PARAMETERS.startsWith(programs.GIT_CONFIG_PARAMETERS)).toBe(true);
+      delete logged.GIT_CONFIG_PARAMETERS;
+      expect(logged).toEqual(Object.fromEntries(Object.keys(logged).map((name) => [name, programs[name]])));
       const status = await getStatus(repo);
       expect(status.current).toBe('main');
     });
@@ -6505,10 +6527,54 @@ describe('worktree task titles', () => {
     expect(await renameGeneratedWorktreeBranch(linked, 'fix/other')).toBeNull();
   });
 
+  it('records a generated name even while another git process holds the config lock', async () => {
+    const { repo, linked } = createLinkedWorktree();
+    const lock = path.join(repo, '.git', 'config.lock');
+    fs.writeFileSync(lock, '');
+    // Git holds the lock for a moment, as a worktree being made in the background does.
+    setTimeout(() => fs.rmSync(lock), 120);
+    await markGeneratedBranchName(repo, 'feature/task', 'feature/');
+    expect(await readRenameableGeneratedBranch(linked)).toBe('feature/task');
+  });
+
+  it('keeps the recorded prefix of an issue branch when renaming it', async () => {
+    const { repo, linked } = createLinkedWorktree();
+    runGit(linked, ['branch', '-m', 'feature/task', 'issue-180-merry-salamander']);
+    await markGeneratedBranchName(repo, 'issue-180-merry-salamander', 'issue-180-');
+
+    expect(await renameGeneratedWorktreeBranch(linked, 'fix/documentation-catalog'))
+      .toEqual({ from: 'issue-180-merry-salamander', to: 'issue-180-documentation-catalog' });
+  });
+
+  it('takes a name that already carries the prefix as it is', async () => {
+    const { repo, linked } = createLinkedWorktree();
+    runGit(linked, ['branch', '-m', 'feature/task', 'issue-180-merry-salamander']);
+    await markGeneratedBranchName(repo, 'issue-180-merry-salamander', 'issue-180-');
+
+    expect(await renameGeneratedWorktreeBranch(linked, 'issue-180-docs-catalog'))
+      .toEqual({ from: 'issue-180-merry-salamander', to: 'issue-180-docs-catalog' });
+  });
+
   it('refuses a detached worktree, which has no branch to hold a title', async () => {
     const { repo } = createLinkedWorktree();
     const detached = path.join(createTempDir(), 'detached');
     runGit(repo, ['worktree', 'add', '--detach', detached]);
     await expect(setWorktreeTaskTitle(detached, { title: 'Name', by: 'user' })).rejects.toMatchObject({ status: 409 });
+    await expect(setWorktreePinned(detached, true)).rejects.toMatchObject({ status: 409 });
+  });
+
+  it('pins a worktree in its branch config, listed with the time it was pinned', async () => {
+    const { repo, linked } = createLinkedWorktree();
+    const entryOf = async () => (await getWorktrees(repo)).find((worktree) => fs.realpathSync(worktree.path) === fs.realpathSync(linked));
+
+    expect((await entryOf())?.pinnedAt).toBeUndefined();
+    expect(await setWorktreePinned(linked, true, 1234)).toEqual({ pinned: true, branch: 'feature/task' });
+    expect((await entryOf())?.pinnedAt).toBe(1234);
+    // Pinning again keeps the first pin's time.
+    await setWorktreePinned(linked, true, 5678);
+    expect((await entryOf())?.pinnedAt).toBe(1234);
+
+    expect(await setWorktreePinned(linked, false)).toEqual({ pinned: false, branch: 'feature/task' });
+    expect((await entryOf())?.pinnedAt).toBeUndefined();
   });
 });

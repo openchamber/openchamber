@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import type { FilesAPI } from '@/lib/api/types';
+import { MAX_OPEN_FILE_BYTES } from '@/lib/fileOpenLimits';
 import { validateContextFileOpen } from './contextFileOpenGuard';
 
 const filesApi = (content: string): FilesAPI =>
@@ -29,6 +30,38 @@ describe('validateContextFileOpen', () => {
       ok: false,
       reason: 'binary',
     });
+  });
+
+  test('refuses a file past the size limit without reading it', async () => {
+    let reads = 0;
+    const files: FilesAPI = {
+      listDirectory: async () => ({ directory: '/', entries: [] }),
+      search: async () => [],
+      createDirectory: async () => ({ success: true, path: '/' }),
+      statFile: async (path) => ({ path, isFile: true, size: MAX_OPEN_FILE_BYTES + 1 }),
+      readFile: async (path) => {
+        reads += 1;
+        return { content: 'hello\n', path };
+      },
+    };
+
+    expect(await validateContextFileOpen(files, '/repo/place.rbxl', { directory: '/repo' })).toEqual({
+      ok: false,
+      reason: 'too-large-size',
+    });
+    expect(reads).toBe(0);
+  });
+
+  test('reads a file within the size limit', async () => {
+    const files: FilesAPI = {
+      listDirectory: async () => ({ directory: '/', entries: [] }),
+      search: async () => [],
+      createDirectory: async () => ({ success: true, path: '/' }),
+      statFile: async (path) => ({ path, isFile: true, size: MAX_OPEN_FILE_BYTES }),
+      readFile: async (path) => ({ content: 'hello\n', path }),
+    };
+
+    expect(await validateContextFileOpen(files, '/repo/notes.txt', { directory: '/repo' })).toEqual({ ok: true });
   });
 
   test('allows ordinary text files', async () => {

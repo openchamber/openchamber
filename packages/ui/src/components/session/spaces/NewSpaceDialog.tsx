@@ -480,7 +480,7 @@ export const NewSpaceDialog: React.FC<NewSpaceDialogProps> = ({ open, onOpenChan
       <DialogContent className="flex h-[min(30rem,85vh)] max-w-3xl flex-col">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Icon name="box-3" className="h-5 w-5" />
+            <Icon name="instance" className="h-5 w-5" />
             {t('spaces.create.title')}
           </DialogTitle>
           <DialogDescription>{t('spaces.create.description')}</DialogDescription>

@@ -15,6 +15,7 @@ type BuiltInContextSurfaceId =
   | 'notes'
   | 'context'
   | 'browser'
+  | 'workflows'
   | 'chat';
 
 export type ContextSurfaceId = BuiltInContextSurfaceId | `plugin:${string}`;
@@ -114,6 +115,14 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
     availability: 'always',
   },
   {
+    id: 'workflows',
+    descriptionKey: 'contextRail.surface.workflows.description',
+    mode: 'workflows',
+    icon: 'flow-chart',
+    labelKey: 'contextPanel.mode.workflows',
+    availability: 'always',
+  },
+  {
     id: 'chat',
     descriptionKey: 'contextRail.surface.chat.description',
     mode: 'chat',
@@ -177,6 +186,10 @@ type VisibleRailSurfacesOptions = {
       such as a Linear issue is open in it. Accounts are connected from
       Settings, so hiding the surface removes no entry point. */
   sourceControlConnected: boolean;
+  /** The Workflows icon shows while the session on screen has a workflow run,
+      or a Workflows tab is open, and never in a build without workflows. Runs
+      start from the chat, so hiding it removes no entry point. */
+  workflowsShown: boolean;
   /** Installed guest panels. Empty on VS Code and when the catalog has not
       loaded or failed. */
   extras?: readonly ContextSurfaceDescriptor[];
@@ -213,6 +226,9 @@ export const getVisibleContextRailSurfaces = (options: VisibleRailSurfacesOption
     }
     if (surface.id === 'pr' && !options.sourceControlConnected
       && !options.tabs.some((tab) => tab.mode === 'pr' && tab.targetPath)) {
+      return false;
+    }
+    if (surface.id === 'workflows' && (options.isVSCode || !options.workflowsShown)) {
       return false;
     }
     if (surface.availability === 'has-content') {

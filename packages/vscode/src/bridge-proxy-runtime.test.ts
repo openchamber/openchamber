@@ -294,3 +294,55 @@ describe('VS Code API proxy during a worktree removal', () => {
     }
   });
 });
+
+type ProxyAnswer = { status: number; bodyText: string };
+type ProxyRequest = { method: string; path: string; headers?: { [name: string]: string }; bodyBase64?: string };
+
+describe('VS Code API proxy folder trust', () => {
+  test('refuses an untrusted folder before OpenCode sees it and answers the trust route itself', async () => {
+    const { mkdir, mkdtemp, realpath, rm, writeFile } = await import('node:fs/promises');
+    const os = await import('node:os');
+    const path = await import('node:path');
+    const { createOpenCodeTrust } = await import('../../web/server/lib/opencode-trust/index.js');
+    const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'vscode-opencode-trust-')));
+    const repo = path.join(root, 'repo');
+    await mkdir(path.join(repo, '.opencode', 'plugins'), { recursive: true });
+    await writeFile(path.join(repo, '.opencode', 'plugins', 'probe.js'), 'export default {}');
+    const trustDeps = {
+      ...deps,
+      openCodeTrust: createOpenCodeTrust({ storePath: path.join(root, 'trust.json'), homeDirectory: path.join(root, 'home') }),
+    };
+    const proxy = async (payload: ProxyRequest): Promise<ProxyAnswer> => {
+      const response = await handleProxyBridgeMessage({ id: 'trust', type: 'api:proxy', payload }, ctx, trustDeps);
+      assert.ok(response);
+      // SAFETY: api:proxy always answers with an ApiProxyResponsePayload, and every answer here is JSON text.
+      return response.data as ProxyAnswer;
+    };
+    const originalFetch = globalThis.fetch;
+    let fetchCount = 0;
+    try {
+      // SAFETY: test double for the global fetch; the proxy only reads the status, headers and text.
+      globalThis.fetch = (async () => {
+        fetchCount += 1;
+        return new Response('{"ok":true}', { status: 200, headers: { 'content-type': 'application/json' } });
+      }) as typeof fetch;
+
+      const headers = { 'x-opencode-directory': encodeURIComponent(repo) };
+      const refused = await proxy({ method: 'GET', path: '/api/agent', headers });
+      assert.equal(refused.status, 403);
+      assert.equal(JSON.parse(refused.bodyText).code, 'opencode_trust_required');
+      assert.equal(fetchCount, 0);
+
+      const shown = await proxy({ method: 'GET', path: `/api/opencode/trust?directory=${encodeURIComponent(repo)}` });
+      const { fingerprint } = JSON.parse(shown.bodyText);
+      const body = Buffer.from(JSON.stringify({ directory: repo, fingerprint })).toString('base64');
+      assert.equal((await proxy({ method: 'POST', path: '/api/opencode/trust', bodyBase64: body })).status, 200);
+
+      assert.equal((await proxy({ method: 'GET', path: '/api/agent', headers })).status, 200);
+      assert.equal(fetchCount, 1);
+    } finally {
+      globalThis.fetch = originalFetch;
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});

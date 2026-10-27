@@ -150,7 +150,7 @@ export const ContextUsageDisplay: React.FC<ContextUsageDisplayProps> = ({
         'hover:bg-interactive-hover',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
       )
-      : 'text-muted-foreground/60',
+      : 'text-muted-foreground',
     className,
   );
 

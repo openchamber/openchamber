@@ -33,6 +33,10 @@ import { mcpGridI18n } from './mcp-grid.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { diffFindI18n } from './diff-find.i18n';
+import { markdownGithubI18n } from './markdown-github.i18n';
+import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
+import { workflowsI18n } from './workflows.i18n';
+import { sessionReferencesI18n } from './session-references.i18n';
 import { guestStatusViewI18n } from './guest-status-view.i18n';
 
 export const dict: Record<I18nKey, string> = {
@@ -177,6 +181,10 @@ export const dict: Record<I18nKey, string> = {
   ...pluginsGridI18n.pl,
   ...integrationsCatalogI18n['pl'],
   ...diffFindI18n['pl'],
+  ...markdownGithubI18n['pl'],
+  ...autocompleteScopeI18n['pl'],
+  ...workflowsI18n['pl'],
+  ...sessionReferencesI18n['pl'],
   ...guestStatusViewI18n['pl'],
   'terminalView.actions.attachSelection': 'Dołącz zaznaczone dane wyjściowe',
   'terminalView.actions.copySelection': 'Kopiuj zaznaczone dane wyjściowe',
@@ -317,7 +325,6 @@ export const dict: Record<I18nKey, string> = {
   'mobile.menu.files': 'Pliki',
   'mobile.menu.git': 'Git',
   'mobile.menu.terminal': 'Terminal',
-  'mobile.menu.mcp': 'MCP',
   'mobile.menu.instances': 'Instancje',
   'mobile.menu.update': 'Aktualizuj',
   'mobile.menu.settings': 'Ustawienia',
@@ -906,6 +913,7 @@ export const dict: Record<I18nKey, string> = {
   'session.githubIntegration.validation.branchAlreadyCheckedOut': 'Gałąź jest już wyewidencjonowana w drzewie pracy',
   'session.githubIntegration.validation.failed': 'Walidacja nie powiodła się',
   'chat.fileAttachment.toast.attachFailed': 'Nie udało się dołączyć pliku',
+  'chat.fileAttachment.toast.tooLarge': 'Plik {name} jest za duży, aby go załączyć (ponad {size}). Jeśli jest w projekcie, wspomnij go przez @.',
   'chat.fileAttachment.toast.someFilesSkipped': 'Niektóre pliki zostały pominięte:\n{summary}',
   'chat.fileAttachment.toast.vscodePickFailed': 'Nie udało się wybrać plików w VS Code',
   'chat.fileAttachment.fileFallback': 'plik',
@@ -1020,8 +1028,6 @@ export const dict: Record<I18nKey, string> = {
   'chat.commandAutocomplete.command.btwDescription': 'Zadaj pytanie poboczne w tymczasowej sesji potomnej, nie przerywając tego czatu.',
   'chat.commandAutocomplete.command.forkDescription': 'Rozgałęź ten czat od ostatniej zakończonej odpowiedzi i kontynuuj tam; tekst po /fork zostanie wysłany do nowej sesji.',
   'chat.commandAutocomplete.command.exploreDescription': 'Zorientuj się w bazie kodu: ogólny przegląd architektury i głównych części.',
-  'chat.commandAutocomplete.badge.command': 'polecenie',
-  'chat.commandAutocomplete.badge.system': 'system',
   'chat.commandAutocomplete.empty': 'Nie znaleziono poleceń',
   'chat.agentMentionAutocomplete.badge.system': 'system',
   'chat.agentMentionAutocomplete.empty': 'Nie znaleziono agentów',
@@ -1399,8 +1405,6 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.drop.attachFiles': 'Drop files here to attach',
   'chat.chatInput.drop.insertMention': 'Drop to insert as mention',
   'chat.chatInput.fileFallback': 'file',
-  'chat.chatInput.focusMode.label': 'Focus mode',
-  'chat.chatInput.focusMode.toggleAria': 'Toggle focus mode',
   'chat.chatInput.linked.byAuthor': 'by {author}',
   'chat.chatInput.linked.issue.openInBrowserAria': 'Otwórz zgłoszenie w przeglądarce',
   'chat.chatInput.linked.issue.removeAria': 'Usuń powiązane zgłoszenie',
@@ -1424,7 +1428,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.dictation.insertAndSend': 'Wstaw i wyślij',
   'chat.dictation.retry': 'Ponów transkrypcję',
   'chat.dictation.discard': 'Odrzuć nagranie',
-  'chat.snippetAutocomplete.action.addNew': '+ Dodaj nowy fragment',
+  'chat.snippetAutocomplete.action.addNew': 'Dodaj nowy fragment',
   'chat.snippetAutocomplete.empty': 'Nie znaleziono fragmentów',
   'chat.snippetAutocomplete.footer': '↑↓ nawigacja • Enter wybierz • Esc zamknij',
   'snippets.source.global': 'globalny',
@@ -3018,6 +3022,20 @@ export const dict: Record<I18nKey, string> = {
   'projects.sharedTrust.actions': 'Akcje',
   'projects.sharedTrust.skip': 'Nie tym razem',
   'projects.sharedTrust.trust': 'Zaufaj i uruchom',
+  'projects.opencodeTrust.title': 'Pozwolić OpenCode uruchamiać kod z tego folderu?',
+  'projects.opencodeTrust.description': 'OpenCode uruchamia wtyczki i polecenia z konfiguracji {path}, gdy tylko otworzy folder. Zaufaj im raz, a OpenChamber zapyta ponownie dopiero, gdy się zmienią.',
+  'projects.opencodeTrust.plugins': 'Wtyczki',
+  'projects.opencodeTrust.commands': 'Polecenia',
+  'projects.opencodeTrust.kind.package': '{name} (pakiet npm)',
+  'projects.opencodeTrust.kind.config': '{path}: plik konfiguracji, którego OpenChamber nie może odczytać',
+  'projects.opencodeTrust.kind.mcp': 'Serwer MCP {name}',
+  'projects.opencodeTrust.kind.lsp': 'Serwer języka {name}',
+  'projects.opencodeTrust.kind.formatter': 'Formater {name}',
+  'projects.opencodeTrust.kind.shell': 'Powłoka',
+  'projects.opencodeTrust.paused': 'Bez zaufania agenci nie mogą pracować w tym folderze, ale nadal możesz przeglądać jego pliki i zmiany Git.',
+  'projects.opencodeTrust.skip': 'Nie tym razem',
+  'projects.opencodeTrust.trust': 'Zaufaj i otwórz',
+  'projects.opencodeTrust.saveFailed': 'Nie udało się zapisać odpowiedzi. Spróbuj ponownie.',
   'projectActions.actions.autoDiscoverTooltip': 'Automatycznie wykrywa i uruchamia serwer deweloperski',
   'projectActions.actions.chooseActionAria': 'Wybierz akcję projektu',
   'projectActions.actions.openPreview': 'Otwórz podgląd',
@@ -3481,6 +3499,7 @@ export const dict: Record<I18nKey, string> = {
   'common.duration.minutesSecondsCompact': '{minutes}m {seconds}s',
   'common.duration.hoursMinutesCompact': '{hours}h {minutes}m',
   'contextFileOpen.failure.tooLarge': 'File is too large to open (>{count} lines)',
+  'contextFileOpen.failure.tooLargeSize': 'Plik jest za duży, aby go otworzyć (ponad {size})',
   'contextFileOpen.failure.missing': 'File not found',
   'contextFileOpen.failure.unreadable': 'Failed to open file',
   'quota.window.5h': '5 godzin',
@@ -3506,6 +3525,7 @@ export const dict: Record<I18nKey, string> = {
   'quota.window.completions': 'Uzupełnienia kodu',
   'quota.window.premiumInteractions': 'Kredyty AI',
   'chat.workStatus.ariaLabel': 'Stan pracy',
+  'chat.workStatus.mobileEmpty': 'Na razie nic do pokazania dla tej sesji',
   'chat.workStatus.context.label': 'Kontekst',
   'chat.workStatus.cost.breakdown': 'Sesja {session} · Podagenci {subagents}',
   'chat.workStatus.git.changedFileSingle': 'Zmieniono {count} plik',

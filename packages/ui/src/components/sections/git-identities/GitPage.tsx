@@ -320,7 +320,7 @@ const IdentityRow: React.FC<IdentityRowProps> = ({
               </span>
             )}
           </div>
-          <div className="typography-micro text-muted-foreground/60 truncate leading-tight">
+          <div className="typography-micro text-muted-foreground truncate leading-tight">
             {!isReadOnly && noteKey
               ? <span className={noteIsWarning ? 'text-[var(--status-warning)]' : undefined}>{t(noteKey)}</span>
               : profile.userEmail}

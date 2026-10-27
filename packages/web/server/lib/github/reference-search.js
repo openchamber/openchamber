@@ -196,7 +196,7 @@ query ReferenceDetail($owner: String!, $repo: String!, $number: Int!) {
             viewerCanUnresolve
             viewerCanReply
             comments(first: ${DETAIL_THREAD_COMMENT_LIMIT}) {
-              nodes { author { login avatarUrl } body createdAt url path line originalLine }
+              nodes { author { login avatarUrl } body createdAt url path line originalLine startLine originalStartLine diffHunk }
             }
           }
         }
@@ -413,6 +413,10 @@ const detailSchema = z.object({
                 path: z.string().nullable(),
                 line: z.number().int().nullable(),
                 originalLine: z.number().int().nullable(),
+                // Older hosts may not answer these; a comment without them shows no excerpt.
+                startLine: z.number().int().nullable().optional(),
+                originalStartLine: z.number().int().nullable().optional(),
+                diffHunk: z.string().nullable().optional(),
               })),
             }),
           })),
@@ -421,6 +425,29 @@ const detailSchema = z.object({
     ]).nullable(),
   }).nullable(),
 });
+
+// More lines than any suggestion a person reviews; a longer range shows no excerpt.
+const EXCERPT_LINE_LIMIT = 200;
+
+/**
+ * The lines a review comment sits on, as the new side of its diff showed
+ * them, so a suggestion in it can be drawn against them. GitHub's hunk ends
+ * at the comment's last line; an outdated comment reads its original lines.
+ * Undefined when the hunk does not cover the range.
+ */
+export const reviewCommentExcerpt = (comment) => {
+  const current = comment.line !== null && comment.line !== undefined;
+  const end = current ? comment.line : comment.originalLine;
+  const start = (current ? comment.startLine : comment.originalStartLine) ?? end;
+  if (!comment.diffHunk || !Number.isSafeInteger(end) || !Number.isSafeInteger(start) || start < 1 || start > end) return undefined;
+  const count = end - start + 1;
+  if (count > EXCERPT_LINE_LIMIT) return undefined;
+  const [header, ...body] = comment.diffHunk.replace(/\r\n/g, '\n').split('\n');
+  if (!header?.startsWith('@@')) return undefined;
+  const newSide = body.filter((line) => line.startsWith(' ') || line.startsWith('+')).map((line) => line.slice(1));
+  if (newSide.length < count) return undefined;
+  return { startLine: start, lines: newSide.slice(-count) };
+};
 
 // A stack is rarely taller than a handful of layers; GitHub pages the rest.
 const STACK_LAYER_LIMIT = 50;
@@ -621,15 +648,20 @@ export async function fetchReferenceDetail({ octokit, owner, repo, number }) {
       comments.push({ author: toAuthor(review.author), body: review.body, createdAt: review.createdAt, url: review.url, path: null, line: null, review: state });
     }
   }
-  const lineComment = (comment) => ({
-    author: toAuthor(comment.author),
-    body: comment.body,
-    createdAt: comment.createdAt,
-    url: comment.url,
-    path: comment.path,
-    line: comment.line ?? comment.originalLine,
-    review: 'commented',
-  });
+  const lineComment = (comment) => {
+    const result = {
+      author: toAuthor(comment.author),
+      body: comment.body,
+      createdAt: comment.createdAt,
+      url: comment.url,
+      path: comment.path,
+      line: comment.line ?? comment.originalLine,
+      review: 'commented',
+    };
+    const excerpt = reviewCommentExcerpt(comment);
+    if (excerpt) result.excerpt = excerpt;
+    return result;
+  };
   // A thread reads as its first comment with the answers under it.
   for (const thread of item.reviewThreads.nodes) {
     const [first, ...replies] = thread.comments.nodes;

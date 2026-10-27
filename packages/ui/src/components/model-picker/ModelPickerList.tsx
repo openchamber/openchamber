@@ -1080,7 +1080,7 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
           onClick={() => toggleSectionCollapsed(key)}
           onKeyDown={toggleKeyDown}
         >
-          <Icon name="draggable" className="size-3.5 flex-shrink-0 text-muted-foreground/70" />
+          <Icon name="draggable" className="size-3.5 flex-shrink-0 text-muted-foreground" />
           {icon}
           <span className="min-w-0 truncate">{label}</span>
           <span className="ms-auto flex size-4 flex-shrink-0 items-center justify-center text-muted-foreground">

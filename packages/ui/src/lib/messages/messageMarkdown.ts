@@ -52,6 +52,8 @@ function formatContext(payload: ContextPartPayload, originalText: string, fieldL
     case 'tracker-item':
     case 'guest-issue':
     case 'guest-pr':
+    case 'session':
+    case 'session-message':
       return fieldLimit ? excerptMarkdown(originalText, fieldLimit) : originalText;
   }
 }

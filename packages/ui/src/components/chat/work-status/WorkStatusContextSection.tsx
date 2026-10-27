@@ -34,6 +34,7 @@ import { resolveDraftPinnedKnowledge } from './draftKnowledge';
 import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
 import { refTintStyle } from '@/lib/source-control/prVisualState';
 import { cn } from '@/lib/utils';
+import { useLeaveWorkStatus } from './leaveWorkStatus';
 
 
 type Props = {
@@ -260,6 +261,7 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
     return looks;
   }, [branchPrSummary, changeSummaries, linkedTrackerEntries, linkedWorkItemStates, repositoryChanges, repositoryIssueRefs, repositoryIssueStates, t, urlMatcher]);
   const openTrackerItem = useOpenTrackerItem();
+  const leaveWorkStatus = useLeaveWorkStatus();
   const trackerDescriptors = useTrackerDescriptors();
   // Connected servers only. A disabled server contributes nothing to the
   // context, so counting it here contradicts the MCP section right above,
@@ -350,7 +352,7 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
   // The kind, never the author: an agent's link has no avatar, and a mix of
   // faces and icons hid which row was a PR. An issue reads as an issue
   // wherever it lives (GitHub, GitLab, an agent's or an extension's link) and
-  // wears its state's colour, muted, as on a sidebar row.
+  // wears its state's colour, as on a sidebar row.
   const renderLinkedIcon = (entry: (typeof linked)[number]) => {
     const color = liveLookOf(entry)?.color;
     return (
@@ -391,7 +393,10 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
           muted
           // In the Tracker, read through this session's project; Cmd or Ctrl,
           // and anything the app cannot show, opens the link.
-          onClick={(event) => openTrackerItem(entry.url, directory, event)}
+          onClick={(event) => {
+            openTrackerItem(entry.url, directory, event);
+            leaveWorkStatus?.();
+          }}
           // The panel that shows what a session carries is the one that can
           // take an item back off; a pinned row's control is the precedent.
           // This sits in the trailing value slot, where row actions live.
@@ -404,7 +409,7 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
                 event.stopPropagation();
                 unlinkLinkedThread(entry);
               }}
-              className="shrink-0 rounded p-0.5 text-muted-foreground/60 transition-colors hover:text-foreground disabled:opacity-40 disabled:hover:text-muted-foreground/60"
+              className="shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40 disabled:hover:text-muted-foreground"
             >
               <Icon name="close" className="size-3.5" />
             </button>

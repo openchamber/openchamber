@@ -8,11 +8,13 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenu
 import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import type { CISummary, ChangeRequestListStatus, ChangeRequestRevision, ChangeRequestRevisionKind, RepositoryReference, RepositoryReferenceComment, RepositoryReferenceDetail, TrackerItem, TrackerItemSummary, PullRequestStackLayer } from '@/lib/api/types';
+import { useEmojiShortcodes } from '@/lib/emoji/shortcodes';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 
 import type { CachedValue } from './referenceCache';
 import { ReferenceMarkdownRewriteContext, useProjectUploadRewrite } from './projectUploads';
+import { ReferenceLinksContext, useReferenceLinks } from './referenceLinks';
 import { useSourceControlProvider } from '@/lib/source-control/providers/registry';
 import { trackerPresentation } from '@/lib/trackers/presentation';
 import { useTrackerDescriptor } from '@/lib/trackers/registry';
@@ -230,8 +232,20 @@ const ChangeFlags: React.FC<{ reference: RepositoryReference }> = ({ reference }
 /** Description with images and the HTML GitHub allows; the agent gets the source. */
 const ReferenceBody: React.FC<{ content: string }> = ({ content }) => {
     const rewrite = React.useContext(ReferenceMarkdownRewriteContext);
+    const links = React.useContext(ReferenceLinksContext);
     const shown = React.useMemo(() => (rewrite ? rewrite(content) : content), [content, rewrite]);
-    return <SimpleMarkdownRenderer content={shown} className={MARKDOWN_CLASS} enableFileReferences={false} allowRawHtml />;
+    const emojiShortcodes = useEmojiShortcodes(shown);
+    return (
+        <SimpleMarkdownRenderer
+            content={shown}
+            className={MARKDOWN_CLASS}
+            enableFileReferences={false}
+            allowRawHtml
+            repositoryLinks={links.repository}
+            emojiShortcodes={emojiShortcodes}
+            directory={links.directory}
+        />
+    );
 };
 
 /** The thread section under the body: loading, failure, empty, or the comments. */
@@ -426,6 +440,7 @@ const RepositoryPreview: React.FC<{
                 location,
             };
             if (comment.answer) item.answer = comment.answer;
+            if (comment.excerpt) item.excerpt = comment.excerpt;
             if (comment.thread) {
                 item.thread = {
                     id: comment.thread.id,
@@ -672,7 +687,7 @@ const RelatedTrackerItem: React.FC<{
             type="button"
             onClick={() => onOpen(issue)}
             title={issue.title}
-            className={cn(className, 'rounded-sm text-muted-foreground/80 outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring')}
+            className={cn(className, 'rounded-sm text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring')}
         >
             {content}
         </button>
@@ -867,6 +882,7 @@ export const ReferencePreview: React.FC<{
 }> = ({ item, directory, pullStatus, trackerDetail, repositoryDetail, purpose, pinned, includeDiff, onIncludeDiffChange, now, footer, pullLinks, trackerStateControl, reply, labelsControl, reviewersControl, onOpenChecks, commentAttachments, stateMenu, onOpenTrackerItem, onRefresh, threadActions, onOpenStackLayer, revisionChoice }) => {
     const { t } = useI18n();
     const rewriteMarkdown = useProjectUploadRewrite(directory, item?.source === 'repository' ? item.reference : null);
+    const links = useReferenceLinks(directory, item?.source === 'repository' ? item.reference : null);
     if (!item) {
         return (
             <div className="flex h-full items-center justify-center px-6 text-center typography-meta text-muted-foreground">
@@ -879,28 +895,30 @@ export const ReferencePreview: React.FC<{
     }
     return (
         <ReferenceMarkdownRewriteContext.Provider value={rewriteMarkdown}>
-            <RepositoryPreview
-                reference={item.reference}
-                pullStatus={pullStatus}
-                detail={repositoryDetail}
-                purpose={purpose}
-                pinned={pinned}
-                includeDiff={includeDiff}
-                onIncludeDiffChange={onIncludeDiffChange}
-                now={now}
-                footer={footer}
-                pullLinks={pullLinks}
-                reply={reply}
-                labelsControl={labelsControl}
-                reviewersControl={reviewersControl}
-                onOpenChecks={onOpenChecks}
-                commentAttachments={commentAttachments}
-                stateMenu={stateMenu}
-                onRefresh={onRefresh}
-                threadActions={threadActions}
-                onOpenStackLayer={onOpenStackLayer}
-                revisionChoice={revisionChoice}
-            />
+            <ReferenceLinksContext.Provider value={links}>
+                <RepositoryPreview
+                    reference={item.reference}
+                    pullStatus={pullStatus}
+                    detail={repositoryDetail}
+                    purpose={purpose}
+                    pinned={pinned}
+                    includeDiff={includeDiff}
+                    onIncludeDiffChange={onIncludeDiffChange}
+                    now={now}
+                    footer={footer}
+                    pullLinks={pullLinks}
+                    reply={reply}
+                    labelsControl={labelsControl}
+                    reviewersControl={reviewersControl}
+                    onOpenChecks={onOpenChecks}
+                    commentAttachments={commentAttachments}
+                    stateMenu={stateMenu}
+                    onRefresh={onRefresh}
+                    threadActions={threadActions}
+                    onOpenStackLayer={onOpenStackLayer}
+                    revisionChoice={revisionChoice}
+                />
+            </ReferenceLinksContext.Provider>
         </ReferenceMarkdownRewriteContext.Provider>
     );
 };

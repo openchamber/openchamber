@@ -32,6 +32,10 @@ import { mcpGridI18n } from './mcp-grid.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { diffFindI18n } from './diff-find.i18n';
+import { markdownGithubI18n } from './markdown-github.i18n';
+import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
+import { workflowsI18n } from './workflows.i18n';
+import { sessionReferencesI18n } from './session-references.i18n';
 import { guestStatusViewI18n } from './guest-status-view.i18n';
 
 export const dict = {
@@ -276,7 +280,6 @@ export const dict = {
   'mobile.menu.files': 'קבצים',
   'mobile.menu.git': 'Git',
   'mobile.menu.terminal': 'מסוף',
-  'mobile.menu.mcp': 'MCP',
   'mobile.menu.instances': 'מופעים',
   'mobile.menu.update': 'עדכון',
   'mobile.menu.settings': 'הגדרות',
@@ -2258,6 +2261,7 @@ export const dict = {
   'session.githubIntegration.validation.branchAlreadyCheckedOut': 'הענף כבר פתוח בעץ עבודה',
   'session.githubIntegration.validation.failed': 'האימות נכשל',
   'chat.fileAttachment.toast.attachFailed': 'לא ניתן היה לצרף את הקובץ',
+  'chat.fileAttachment.toast.tooLarge': '{name} גדול מדי לצירוף (מעל {size}). אם הקובץ נמצא בפרויקט, אפשר לאזכר אותו עם @.',
   'chat.fileAttachment.toast.someFilesSkipped': "חלק מהקבצים דולגו:\n{summary}",
   'chat.fileAttachment.toast.vscodePickFailed': 'לא ניתן היה לבחור קבצים ב-VS Code',
   'chat.fileAttachment.fileFallback': 'קובץ',
@@ -2373,8 +2377,6 @@ export const dict = {
   'chat.commandAutocomplete.command.exploreDescription': 'היכרות עם בסיס הקוד: סיור כללי בארכיטקטורה ובחלקים העיקריים.',
   'chat.commandAutocomplete.command.btwDescription': 'שאלה צדדית בהפעלת משנה זמנית, בלי להסיט את הצ\'אט הזה.',
   'chat.commandAutocomplete.command.forkDescription': 'פיצול הצ\'אט מהתגובה האחרונה שהסתיימה והמשך שם; טקסט אחרי /fork נשלח להפעלה המפוצלת.',
-  'chat.commandAutocomplete.badge.command': 'פקודה',
-  'chat.commandAutocomplete.badge.system': 'מערכת',
   'chat.commandAutocomplete.empty': 'לא נמצאו פקודות',
   'chat.agentMentionAutocomplete.badge.system': 'מערכת',
   'chat.agentMentionAutocomplete.empty': 'לא נמצאו סוכנים',
@@ -2518,8 +2520,6 @@ export const dict = {
   'chat.chatInput.actions.sendMessageAria': 'שלח הודעה',
   'chat.chatInput.actions.queueMessageAria': 'הוסף הודעה לתור',
   'chat.chatInput.actions.stopGeneratingAria': 'עצור יצירה',
-  'chat.chatInput.focusMode.toggleAria': 'הפעל או כבה מצב מיקוד',
-  'chat.chatInput.focusMode.label': 'מצב מיקוד',
   'chat.chatInput.linked.byAuthor': 'מאת {author}',
   'chat.chatInput.linked.issue.openInBrowserAria': 'פתח את ה-issue בדפדפן',
   'chat.chatInput.linked.issue.removeAria': 'הסר את ה-issue המקושר',
@@ -2543,7 +2543,7 @@ export const dict = {
   'chat.dictation.insertAndSend': 'הוסף ושלח',
   'chat.dictation.retry': 'נסה לתמלל שוב',
   'chat.dictation.discard': 'מחק הקלטה',
-  'chat.snippetAutocomplete.action.addNew': '+ הוסף קטע קוד חדש',
+  'chat.snippetAutocomplete.action.addNew': 'הוסף קטע קוד חדש',
   'chat.snippetAutocomplete.empty': 'לא נמצאו קטעי קוד',
   'chat.snippetAutocomplete.footer': '↑↓ ניווט • Enter בחירה • Esc סגירה',
   'snippets.source.global': 'כללי',
@@ -2934,6 +2934,20 @@ export const dict = {
   'projects.sharedTrust.actions': 'פעולות',
   'projects.sharedTrust.skip': 'לא הפעם',
   'projects.sharedTrust.trust': 'אשר והרץ',
+  'projects.opencodeTrust.title': 'לאפשר ל-OpenCode להריץ קוד מהתיקייה הזו?',
+  'projects.opencodeTrust.description': 'OpenCode מריץ את התוספים והפקודות שבהגדרות של {path} מיד כשהוא פותח את התיקייה. אשרו אותם פעם אחת, ו-OpenChamber ישאל שוב רק כשהם ישתנו.',
+  'projects.opencodeTrust.plugins': 'תוספים',
+  'projects.opencodeTrust.commands': 'פקודות',
+  'projects.opencodeTrust.kind.package': '{name} (חבילת npm)',
+  'projects.opencodeTrust.kind.config': '{path}: קובץ הגדרות ש-OpenChamber לא מצליח לקרוא',
+  'projects.opencodeTrust.kind.mcp': 'שרת MCP ‏{name}',
+  'projects.opencodeTrust.kind.lsp': 'שרת שפה {name}',
+  'projects.opencodeTrust.kind.formatter': 'מעצב {name}',
+  'projects.opencodeTrust.kind.shell': 'מעטפת',
+  'projects.opencodeTrust.paused': 'בלי אישור, סוכנים לא יכולים לעבוד בתיקייה הזו, אבל עדיין אפשר לעיין בקבצים ובשינויי Git שלה.',
+  'projects.opencodeTrust.skip': 'לא הפעם',
+  'projects.opencodeTrust.trust': 'אשר ופתח',
+  'projects.opencodeTrust.saveFailed': 'לא ניתן לשמור את התשובה. נסו שוב.',
   'projectActions.actions.autoDiscoverTooltip': 'איתור והרצה אוטומטיים של שרת הפיתוח',
   'projectActions.actions.chooseActionAria': 'בחר פעולת פרויקט',
   'projectActions.actions.openPreview': 'פתח תצוגה מקדימה',
@@ -3415,6 +3429,7 @@ export const dict = {
   'common.duration.minutesSecondsCompact': '{minutes} דק׳ {seconds} שנ׳',
   'common.duration.hoursMinutesCompact': '{hours} שע׳ {minutes} דק׳',
   'contextFileOpen.failure.tooLarge': 'הקובץ גדול מדי לפתיחה (יותר מ-{count} שורות)',
+  'contextFileOpen.failure.tooLargeSize': 'הקובץ גדול מדי לפתיחה (מעל {size})',
   'contextFileOpen.failure.missing': 'הקובץ לא נמצא',
   'contextFileOpen.failure.unreadable': 'לא ניתן היה לפתוח את הקובץ',
   'quota.window.5h': '5 שעות',
@@ -3440,6 +3455,7 @@ export const dict = {
   'quota.window.completions': 'השלמות',
   'quota.window.premiumInteractions': 'קרדיטים של AI',
   'chat.workStatus.ariaLabel': 'מצב העבודה',
+  'chat.workStatus.mobileEmpty': 'אין עדיין מה להציג לסשן הזה',
   'chat.workStatus.context.label': 'הקשר',
   'chat.workStatus.cost.breakdown': 'הפעלה {session} · סוכני משנה {subagents}',
   'chat.workStatus.git.changedFileSingle': 'קובץ {count} השתנה',
@@ -3823,6 +3839,10 @@ export const dict = {
   ...pluginsGridI18n.he,
   ...integrationsCatalogI18n['he'],
   ...diffFindI18n['he'],
+  ...markdownGithubI18n['he'],
+  ...autocompleteScopeI18n['he'],
+  ...workflowsI18n['he'],
+  ...sessionReferencesI18n['he'],
   ...guestStatusViewI18n['he'],
   'settings.usage.page.state.claudeSignedOutTitle': 'לא מחובר ל-Claude Code',
   'settings.usage.page.state.claudeSignInCommand': 'יש להריץ את הפקודה הזו במסוף:',

@@ -18,7 +18,9 @@ terminal has no session to deliver into.
 
 - `runtime.js` — `createDispatchResultsRuntime(...)`: pending entries,
   persistence, the delivery loop, event handling; plus the pure
-  `readDispatchOutcome` and `buildDispatchResultMessage`.
+  `readDispatchOutcome` and `buildDispatchResultMessage`. Workflow runs
+  (`../workflows`) reuse `readDispatchOutcome` to tell when an agent's turn
+  ended, and `createMessageId` and `escapeAttribute` for their report.
 - `runtime.test.js` — delivery, waiting on running sessions and subagents,
   archived and deleted parents, a deleted dispatched session, idempotent
   retries, unknown versus idle, restart, a corrupt file.
@@ -34,9 +36,11 @@ comes from the agent tool (`contextSessionId`).
 `{ id, parentSessionId, sessionId, dispatchedAt, afterIdleId?, messageId? }` in
 `<data-dir>/dispatch-results.json`, written atomically through a serialized
 write chain, owner-readable only. `register` resolves once the entry is on
-disk, so a restart right after the tool answers still delivers. A missing file
-is nothing pending; a malformed file is moved aside as
-`dispatch-results.json.corrupt-<timestamp>`; a failed read keeps writes off
+disk, so a restart right after the tool answers still delivers; when the write
+fails it rejects and drops the entry, and the tool tells the agent no result is
+coming. A failed write leaves the chain running for the next one. A missing file
+is nothing pending; a file that is not JSON or has no `entries` array is moved
+aside as `dispatch-results.json.corrupt-<timestamp>`; a failed read keeps writes off
 until a load succeeds; one malformed entry is dropped alone. At most 200
 entries, oldest dropped with a warning.
 
@@ -87,9 +91,10 @@ A failed read retries with backoff (2 s doubling to 60 s).
 - `delivery: 'steer'`: a parent that is busy reads it at its next step, the
   way OpenCode delivers a subagent report; an idle one is woken by `resume`.
 - `resume: false` for an archived parent: the answer is recorded, nothing
-  runs behind the user's back.
+  runs behind the user's back. A failed archive lookup counts as not archived
+  and wakes the parent: the agent asked for this result.
 - `id`: minted in OpenCode's `msg_` format at the first attempt and persisted
-  before it. OpenCode refuses a second admission of the same id (409), so a
+  before it; when that write fails the attempt waits for the next retry. OpenCode refuses a second admission of the same id (409), so a
   retry after a crash or a lost response cannot deliver twice; 409 counts as
   delivered. 404 means the parent is gone and the entry is dropped. A deleted
   parent's entries also go on its `session.deleted` event.

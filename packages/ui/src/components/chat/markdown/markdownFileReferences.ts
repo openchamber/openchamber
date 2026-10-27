@@ -5,7 +5,9 @@ import type { ConfirmedCodePath } from './streamdownCode';
 import React from 'react';
 import { useMobileAppActions } from '@/apps/mobileAppContext';
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
-import { isDesktopLocalOriginActive, openDesktopPath } from '@/lib/desktop';
+import { isBrowserClientRuntime, isDesktopLocalOriginActive, openDesktopPath } from '@/lib/desktop';
+import { useI18n } from '@/lib/i18n';
+import { toast } from '@/components/ui';
 import { useUIStore } from '@/stores/useUIStore';
 import { useMarkdownPresentation } from './MarkdownPresentationContext';
 import { HighlightResultCache } from './highlightResultCache';
@@ -44,6 +46,26 @@ export function useOpenMarkdownFile() {
     // shows only once the drawer is open on Files (#5486).
     mobileActions?.openFiles();
   }, [directory, editor, isVSCode, mobileActions]);
+}
+
+// A `file:` link the click rules do not take as a file is usually a folder.
+// It opens in the system file manager, as "Reveal in Finder" in the Files
+// tree does, and only where that tree offers it: not in a browser, which
+// hides the item, and not in VS Code, which mounts no Files tree (#5521).
+export function useRevealMarkdownPath(): ((path: string) => void) | null {
+  const apis = React.useContext(RuntimeAPIContext);
+  const { t } = useI18n();
+  const files = apis?.files;
+  const platform = apis?.runtime.platform;
+  return React.useMemo(() => {
+    const reveal = files?.revealPath?.bind(files);
+    if (!reveal || !platform || platform === 'vscode' || isBrowserClientRuntime(platform)) return null;
+    return (path: string) => {
+      void reveal(path).catch(() => {
+        toast.error(t('sidebarFilesTree.toast.revealFailed'));
+      });
+    };
+  }, [files, platform, t]);
 }
 
 const KNOWN_FILE_BASENAMES = new Set(['dockerfile', 'makefile', 'readme', 'license', '.env', '.gitignore', '.npmrc']);

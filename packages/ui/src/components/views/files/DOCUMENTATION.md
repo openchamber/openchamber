@@ -187,6 +187,29 @@ through `getRuntimeUrlResolver().authenticatedAsset('/api/fs/raw', …)` with
 the scoped URL token; the server streams byte ranges so playback can seek.
 Images keep the object-URL/data-URL path.
 
+`useRawAssetUrl` makes that URL once per file, revision and runtime and holds
+it, so the shared token rotating never touches an open preview: a PDF stays
+on its page, a player keeps playing, a font stays registered. The server
+checks the token when a request starts, so a held URL keeps working for the
+document it already loads. A player asks for more ranges later, and one asked
+for after the token expired gets a 401; `MediaArtifact` then asks `renew` for
+a URL with a fresh token and resumes at the same position, speed and play
+state. One
+renewal per ten seconds; a renewal that returns the same URL, or fails, shows
+"cannot be played". A file changed on disk bumps the revision, which gives the
+preview a new URL and loads the new bytes.
+
+### Why the URL is held and not rebuilt with every new token
+
+A rebuilt URL is a new document: the iframe navigates and the media element
+reloads, which put PDFs back on page 1 and stopped playback each time the
+token rotated, about every 45 seconds. A longer token or a per-file grant
+like the HTML preview's would also keep late ranges authorized, but would
+widen what a URL in the page can open. A PDF and a font load their bytes when
+they open, so only media asks for ranges late, and the renewal covers it
+without changing any server check. A PDF still downloading when its token
+expires, a very large file over a slow link, is the case this leaves open.
+
 An HTML file's preview is untrusted content. `useHtmlPreviewUrl` asks the
 server for a grant (`POST /api/fs/preview`) and loads the page from
 `/api/fs/preview/<grant>/<path>`; the frame's `sandbox` has no

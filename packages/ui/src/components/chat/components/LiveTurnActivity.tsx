@@ -14,7 +14,7 @@ import { getLiveFinalMessage, getShownPages } from '../lib/turns/liveActivity';
 import { summarizeLiveActivity } from '../lib/turns/liveActivitySummary';
 import { LiveActivityCollapse } from './LiveActivityCollapse';
 import { LiveFinalActivityContext, LiveTurnHoistedPagesContext } from './liveActivityContext';
-import { ShownPage } from '../message/parts/HtmlRenderFrame';
+import { ShownToolCard } from '../message/parts/ShownToolCard';
 import { TurnMessageWindow } from './TurnMessageWindow';
 import { useActivityRowGlide } from './useActivityRowGlide';
 import { TurnMessageWindowContext, openedFoldMessageWindow } from '../lib/turns/turnMessageWindow';
@@ -166,7 +166,7 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, expanded, onToggle, 
                 </LiveActivityCollapse>
                 {!finalMessage && pages.length > 0 ? (
                     <div className="chat-message-column">
-                        {pages.map((part) => <ShownPage key={part.id} part={part} />)}
+                        {pages.map((part) => <ShownToolCard key={part.id} part={part} />)}
                     </div>
                 ) : null}
                 {messagesBelowPages.length > 0 ? (

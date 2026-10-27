@@ -133,6 +133,8 @@ export const githubDescriptor = Object.freeze({
       changeRequest: Object.freeze(['/{owner}/{repo}/pull/{number}']),
       issue: Object.freeze(['/{owner}/{repo}/issues/{number}']),
       discussion: Object.freeze(['/{owner}/{repo}/discussions/{number}']),
+      commit: Object.freeze(['/{owner}/{repo}/commit/{sha}']),
+      user: Object.freeze(['/{user}']),
     }),
     features: Object.freeze({
       referenceSearch: true, referenceDetail: true, listStatuses: true, referencesAcross: true,

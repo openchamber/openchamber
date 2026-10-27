@@ -288,7 +288,7 @@ export const relativeTimeOf = (iso: string | null | undefined, now: number): Rel
  * Ids, people, times and labels around an item. One step quieter than the
  * usual muted text, so titles and bodies stay the brightest thing on screen.
  */
-export const REFERENCE_META_TEXT = 'text-muted-foreground/60';
+export const REFERENCE_META_TEXT = 'text-muted-foreground';
 
 /** GitHub label colours come as bare hex; anything else gets the neutral chip. */
 export const labelColor = (color: string | null | undefined): string | null => {

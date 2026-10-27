@@ -41,6 +41,7 @@ import { currentTrackerAccountId, useTrackerAuthStore } from '@/stores/useTracke
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { normalizeProjectPath, resolveProjectForSessionDirectory } from '@/lib/projectResolution';
+import { useSpaceProjectDirectory } from '@/lib/spaces/spaces-store';
 import {
     rememberedRepositoryProvider,
     rememberRepositoryProvider,
@@ -239,11 +240,12 @@ export function useRepositoryReferenceProvider(directory: string | null): Source
     // A worktree shares its project's host, so the answer is kept per project.
     const projects = useProjectsStore((state) => state.projects);
     const worktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
+    const spaceProjectDirectory = useSpaceProjectDirectory(directory);
     const projectPath = React.useMemo(() => {
         if (!directory) return null;
-        const project = resolveProjectForSessionDirectory(projects, worktreesByProject, directory);
+        const project = resolveProjectForSessionDirectory(projects, worktreesByProject, directory, spaceProjectDirectory);
         return normalizeProjectPath(project?.path ?? directory);
-    }, [directory, projects, worktreesByProject]);
+    }, [directory, projects, spaceProjectDirectory, worktreesByProject]);
     const runtimeKey = getRuntimeKey();
     const remembered = React.useSyncExternalStore(
         subscribeRepositoryProviderMemory,

@@ -23,6 +23,7 @@ import { getLastOutputLine } from './parts/toolOutput';
 import { OPENCODE_TOOLS } from '@/lib/opencode/tools';
 import { isRunningSubagentRunMessage, readSubagentRun, type SubagentRun } from '@/lib/opencode/subagent-run';
 import { readDispatchedSessionResult, type DispatchedSessionResult } from '@/lib/opencode/dispatched-session';
+import { readWorkflowReport, type WorkflowReport } from '@/lib/workflows/report';
 import { readSessionNotice } from '@/lib/opencode/session-notices';
 import { SessionNoticeBlock } from './SessionNoticeBlock';
 import { openSessionLink } from '@/lib/router/openSessionFromRoute';
@@ -320,11 +321,54 @@ const DispatchedSessionNotice: React.FC<{ message: SyntheticMessage; result: Dis
     );
 };
 
+const WORKFLOW_REPORT_ICONS = {
+    completed: 'flow-chart',
+    failed: 'error-warning',
+    stopped: 'stop',
+    declined: 'close-circle',
+} satisfies Record<WorkflowReport['state'], IconName>;
+
+const WORKFLOW_REPORT_TITLE_KEYS = {
+    completed: 'chat.workflow.report.completed',
+    failed: 'chat.workflow.report.failed',
+    stopped: 'chat.workflow.report.stopped',
+    declined: 'chat.workflow.report.declined',
+} as const satisfies Record<WorkflowReport['state'], string>;
+
+/**
+ * The report of a workflow run this session proposed: one collapsed line
+ * saying how the run ended, opening to the report, like a dispatched
+ * session's result. The run itself stays in the card above and the
+ * work-status panel.
+ */
+const WorkflowReportNotice: React.FC<{ message: SyntheticMessage; report: WorkflowReport }> = ({ message, report }) => {
+    const { t } = useI18n();
+    return (
+        <NoticeRow>
+            <ReasoningTimelineBlock
+                text={report.output}
+                blockId={message.id}
+                presentation={{
+                    icon: WORKFLOW_REPORT_ICONS[report.state],
+                    iconClassName: report.state === 'failed' ? 'text-[var(--status-error)]' : undefined,
+                    title: t(WORKFLOW_REPORT_TITLE_KEYS[report.state], { name: report.name }),
+                    expandLabel: t('chat.workflow.report.show'),
+                    collapseLabel: t('chat.workflow.report.hide'),
+                    markdownVariant: 'assistant',
+                    maxHeightClassName: 'max-h-[60vh]',
+                }}
+            />
+        </NoticeRow>
+    );
+};
+
 const SubagentNotice: React.FC<{ message: SyntheticMessage }> = ({ message }) => {
     const run = React.useMemo(() => readSubagentRun(message), [message]);
     const dispatched = React.useMemo(() => (run ? undefined : readDispatchedSessionResult(message)), [message, run]);
+    const workflow = React.useMemo(() => (run || dispatched ? undefined : readWorkflowReport(message)), [dispatched, message, run]);
     if (run) return <SubagentRunNotice message={message} run={run} />;
-    return dispatched ? <DispatchedSessionNotice message={message} result={dispatched} /> : null;
+    if (dispatched) return <DispatchedSessionNotice message={message} result={dispatched} />;
+    return workflow ? <WorkflowReportNotice message={message} report={workflow} /> : null;
 };
 
 /**

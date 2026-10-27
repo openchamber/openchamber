@@ -218,7 +218,7 @@ export const createWorktreeCreation = ({
       // then rename it after the task (`readRenameableGeneratedBranch`).
       const generatedName = asNonEmptyString(requestInput?.generatedBranchName);
       if (generatedName && generatedName === result?.branch && markGeneratedBranchName instanceof Function) {
-        await markGeneratedBranchName(directory, generatedName);
+        await markGeneratedBranchName(directory, generatedName, asNonEmptyString(requestInput?.generatedBranchPrefix));
       }
       return result;
     } catch (error) {

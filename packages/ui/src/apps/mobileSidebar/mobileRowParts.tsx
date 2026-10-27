@@ -150,7 +150,7 @@ export const MobileShowControl: React.FC<{ more: boolean; indent: number; onClic
   return (
     <button
       type="button"
-      className="flex min-h-9 w-full items-center gap-2 py-1 pe-3 text-start text-muted-foreground/60 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+      className="flex min-h-9 w-full items-center gap-2 py-1 pe-3 text-start text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
       style={{ paddingInlineStart: indent, touchAction: 'manipulation' }}
       onClick={onClick}
     >

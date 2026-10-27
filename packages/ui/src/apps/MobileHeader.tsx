@@ -10,7 +10,6 @@ import { useGitStore, useIsGitRepo } from '@/stores/useGitStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSession } from '@/sync/sync-context';
 
-import { SpaceAccessButton } from '@/components/session/spaces/SpaceAccessButton';
 
 import { MobileSessionMetadataButton } from './MobileSessionMetadata';
 import { MobileSessionSwitcher } from './MobileSessionSwitcher';
@@ -142,12 +141,6 @@ export const MobileHeader: React.FC<{
               isNewSessionDraftOpen={isNewSessionDraftOpen}
             />
           )}
-
-          <SpaceAccessButton
-            directory={effectiveDirectory}
-            className="flex size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            iconClassName="size-5"
-          />
 
           <button
             type="button"

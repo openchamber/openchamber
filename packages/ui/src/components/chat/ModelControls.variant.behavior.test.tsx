@@ -821,13 +821,15 @@ describe('ModelControls effort restore', () => {
     try {
       const callsAfterHydration = getSessionModel.mock.calls.length;
 
-      await act(async () => useConfigStore.setState({ currentAgentName: 'plan' }));
+      await act(async () => useConfigStore.getState().setAgent('plan'));
 
       expect(getSessionModel.mock.calls.length).toBe(callsAfterHydration);
       expect(useConfigStore.getState().currentAgentName).toBe('plan');
     } finally {
       getSessionModel.mockRestore();
       await cleanup();
+      // The pick wrote a new state object that still carries the spy.
+      useSelectionStore.setState(selections);
     }
   });
 
@@ -971,6 +973,21 @@ describe('ModelControls effort restore', () => {
 
         expect(agentLabel(dom.container)).toBe('Plan');
         expect(useConfigStore.getState().currentAgentName).toBe('plan');
+      } finally {
+        await cleanup();
+      }
+    });
+
+    test('the agent sent comes back to the session agent shown when the app-wide one drifts', async () => {
+      setSessionRecord(recordOn(AGENT));
+      const { dom, cleanup } = await renderModelControls();
+      try {
+        // Another session or folder moved the app-wide agent; this session
+        // still holds Build, and the label shows Build.
+        await act(async () => useConfigStore.setState({ currentAgentName: 'plan' }));
+
+        expect(agentLabel(dom.container)).toBe('Build');
+        expect(useConfigStore.getState().currentAgentName).toBe(AGENT);
       } finally {
         await cleanup();
       }

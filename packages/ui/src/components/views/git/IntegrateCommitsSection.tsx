@@ -475,7 +475,7 @@ export const IntegrateCommitsSection: React.FC<{
                   <div className="typography-meta text-muted-foreground">{t('gitView.integrate.previewUnavailable')}</div>
                 )}
                 {ui.plan.commits.length > commitSummaries.length && (
-                  <div className="typography-micro text-muted-foreground/70">
+                  <div className="typography-micro text-muted-foreground">
                     {t('gitView.integrate.showingFirstCommits', { count: commitSummaries.length })}
                   </div>
                 )}
@@ -488,7 +488,7 @@ export const IntegrateCommitsSection: React.FC<{
               <div className="typography-meta text-foreground">
                 {t('gitView.integrate.conflictsInFiles', { count: ui.details.unmergedFiles.length })}
               </div>
-              <div className="typography-micro text-muted-foreground/80">
+              <div className="typography-micro text-muted-foreground">
                 {t('gitView.integrate.currentCommit')}: <span className="font-mono">{ui.state.currentCommit.slice(0, 7)}</span>
               </div>
               <div className="flex flex-wrap gap-1.5">

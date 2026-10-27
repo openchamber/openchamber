@@ -15,7 +15,6 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { getMessageQueueKey, useMessageQueueStore, type MessageQueueTarget, type QueuedMessage } from '@/stores/messageQueueStore';
-import { useInputStore } from '@/sync/input-store';
 import { useUIStore } from '@/stores/useUIStore';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useAgentColors } from '@/hooks/useAgentColors';
@@ -24,7 +23,6 @@ import { useI18n } from '@/lib/i18n';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { toast } from '@/components/ui';
 import { cn } from '@/lib/utils';
 import { getQueuedMessagePreview } from '@/lib/messages/queuedMessagePreview';
 import { withAttachmentChips } from './message/parts/attachmentCitationChips';
@@ -178,8 +176,8 @@ SortableQueuedMessageRow.displayName = 'SortableQueuedMessageRow';
 interface QueuedMessagesStripProps {
     target: MessageQueueTarget | null;
     composerAgentName: string | null | undefined;
-    /** The message was taken from the queue in full; the composer restores it. */
-    onEditMessage: (message: QueuedMessage) => void;
+    /** The composer takes the message out of the queue and restores it. */
+    onEditMessage: (messageId: string) => void;
     onSendMessage: (messageId: string) => void;
 }
 
@@ -207,7 +205,6 @@ export const QueuedMessagesStrip = memo(({ target, composerAgentName, onEditMess
             [queueKey]
         )
     );
-    const popToInput = useMessageQueueStore((state) => state.popToInput);
     const reorderQueue = useMessageQueueStore((state) => state.reorderQueue);
 
     const sensors = useSensors(
@@ -224,22 +221,8 @@ export const QueuedMessagesStrip = memo(({ target, composerAgentName, onEditMess
     }, [target, reorderQueue]);
 
     const handleEdit = React.useCallback((message: QueuedMessage) => {
-        if (!target) return;
-
-        // The full message (attachments included) comes back from the queue's
-        // owner; the row itself only knows the summary.
-        void popToInput(target, message.id).then((popped) => {
-            if (!popped) return;
-            if (popped.attachments && popped.attachments.length > 0) {
-                const currentAttachments = useInputStore.getState().attachedFiles;
-                useInputStore.getState().setAttachedFiles([...currentAttachments, ...popped.attachments]);
-            }
-            onEditMessage(popped);
-        }).catch((error) => {
-            console.warn('[queue] failed to take queued message for editing:', error);
-            toast.error(t('chat.queuedMessage.toast.takeFailed'));
-        });
-    }, [target, popToInput, onEditMessage, t]);
+        onEditMessage(message.id);
+    }, [onEditMessage]);
 
     const handleSend = React.useCallback((message: QueuedMessage) => {
         onSendMessage(message.id);

@@ -3,20 +3,17 @@ import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 
 /**
- * The header's trigger. It fades in with the header's hover, and stays visible
- * where nothing hovers (touch) and while the editor is open.
+ * The header's trigger, always visible like the header's other actions. It
+ * toggles: pressed while the editor is open, a second click closes the editor.
  */
 export function WholeFileCommentButton({
   onClick,
   active,
-  alwaysVisible = false,
-  hoverGroupClass,
+  className,
 }: {
   onClick: () => void;
   active: boolean;
-  alwaysVisible?: boolean;
-  /** The `group-hover/...` variant of the header this sits in. */
-  hoverGroupClass: string;
+  className?: string;
 }) {
   const { t } = useI18n();
   const label = t('inlineComment.actions.commentOnFile');
@@ -24,9 +21,9 @@ export function WholeFileCommentButton({
     <button
       type="button"
       className={cn(
-        'inline-flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none',
-        alwaysVisible || active ? 'opacity-100' : cn('opacity-0', hoverGroupClass),
-        active && 'text-foreground',
+        'inline-flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-none',
+        className,
+        active && 'text-foreground opacity-100',
       )}
       aria-label={label}
       aria-pressed={active}

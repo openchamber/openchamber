@@ -1051,9 +1051,25 @@ export function createOpenCodeManager(context: vscode.ExtensionContext): OpenCod
       // Upgrading the binary does not require a live managed server process.
       const binary = cliPath || resolveOpencodeCliPath();
       if (!binary) throw new Error('OpenCode CLI could not be found.');
-      await runOpenCodeCliUpgrade(resolveWindowsLaunchSpec(binary, []), {
+      const upgrade = () => runOpenCodeCliUpgrade(resolveWindowsLaunchSpec(binary, []), {
         cwd: serverWorkingDirectory(), env: process.env,
       });
+      // Windows cannot replace an executable that is running. npm then leaves
+      // the package without opencode.exe, and the next start fails. The server
+      // stops for the install and comes back on the new version either way.
+      if (process.platform !== 'win32' || !server) {
+        await upgrade();
+        return;
+      }
+      const revision = lifecycleRevision;
+      const restartDirectory = workingDirectory;
+      restartCount += 1;
+      await stopInternal();
+      try {
+        await upgrade();
+      } finally {
+        if (revision === lifecycleRevision) await startInternal(restartDirectory, { rotateManaged: true });
+      }
     }),
     setWorkingDirectory,
     getStatus: () => status,

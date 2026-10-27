@@ -35,7 +35,7 @@ export const watchZoneFit = ({ directoryKey, folded, readRowWidth }: ZoneFitWatc
     const panel = state.contextPanelByDirectory[directoryKey];
     const tab = shown && panel ? resolveZoneActiveTab(panel, state.contextSurfaceZones, side) : null;
     if (!tab) return 0;
-    return panel?.sizeByZone[side] ?? CONTEXT_ZONE_DEFAULT_WIDTH;
+    return state.contextZoneSizes[side] ?? CONTEXT_ZONE_DEFAULT_WIDTH;
   };
   // A zone shown expanded, as ContextPanel draws it: a side zone showing
   // only the file tree does not expand.

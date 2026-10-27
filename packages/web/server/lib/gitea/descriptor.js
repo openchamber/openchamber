@@ -91,6 +91,8 @@ export const giteaDescriptor = Object.freeze({
     urls: Object.freeze({
       changeRequest: Object.freeze(['/{owner}/{repo}/pulls/{number}']),
       issue: Object.freeze(['/{owner}/{repo}/issues/{number}']),
+      commit: Object.freeze(['/{owner}/{repo}/commit/{sha}']),
+      user: Object.freeze(['/{user}']),
     }),
     features: Object.freeze({
       referenceSearch: false, referenceDetail: false, listStatuses: false, referencesAcross: false,

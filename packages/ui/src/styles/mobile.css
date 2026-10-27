@@ -7,6 +7,7 @@
     --text-markdown: 1rem;
     --text-code: 0.875rem;
     --text-ui-header: 0.9375rem;
+    --text-ui-section: 1rem;
     --text-ui-label: 0.875rem;
     --text-meta: 0.875rem;
     --text-micro: 0.8125rem;
@@ -18,6 +19,7 @@
     --text-markdown: 1rem !important;
     --text-code: 0.875rem !important;
     --text-ui-header: 0.9375rem !important;
+    --text-ui-section: 1rem !important;
     --text-ui-label: 0.875rem !important;
     --text-meta: 0.875rem !important;
     --text-micro: 0.8125rem !important;
@@ -28,6 +30,7 @@
   :root.mobile-pointer:not(.desktop-runtime) .typography-markdown,
   :root.mobile-pointer:not(.desktop-runtime) .typography-code,
   :root.mobile-pointer:not(.desktop-runtime) .typography-ui-header,
+  :root.mobile-pointer:not(.desktop-runtime) .typography-ui-section,
   :root.mobile-pointer:not(.desktop-runtime) .typography-ui-label,
   :root.mobile-pointer:not(.desktop-runtime) .typography-meta,
   :root.mobile-pointer:not(.desktop-runtime) .typography-micro {
@@ -285,6 +288,10 @@
 
     .typography-ui-header {
       font-size: 0.9375rem !important;
+    }
+
+    .typography-ui-section {
+      font-size: 1rem !important;
     }
 
     .typography-ui-label {
@@ -639,6 +646,13 @@
      legs equal the keyboard height once settled, so the settle snap is
      geometry-neutral for the scroller. */
   padding-bottom: var(--oc-kb-scroll-inset, var(--oc-kb-layout, 0px));
+}
+
+/* The iPad sidebar stays where it is when the keyboard opens, as iPadOS apps
+   do: it extends behind the keyboard by exactly what the shell gives up (the
+   same leg as the scroller above), so only the chat column moves. */
+:root.oc-capacitor-app .oc-mobile-app-shell .oc-ipad-sidebar {
+  height: calc(100% + max(var(--oc-kb-layout, 0px) - var(--oc-app-bottom-safe, 0px), 0px));
 }
 
 /* The transcript's end fade band (index.css `.chat-scroll-fade--end`) is

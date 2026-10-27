@@ -117,6 +117,12 @@ jobs:
             gh issue view "$ITEM_NUMBER" --repo "$GITHUB_REPOSITORY" \
               --json title,body,author,state,labels,comments > "$context/item.json"
           fi
+          # JSON keeps each body on one line, and the agent's read tool cuts a
+          # line at 2,000 characters, so a long body arrived truncated.
+          jq -r '"# \(.title)\n\nBy @\(.author.login)\n\n\(.body // "")",
+            (.comments[] | "\n## Comment by @\(.author.login), \(.createdAt)\n\n\(.body)"),
+            ((.reviews // [])[] | select((.body // "") != "") | "\n## Review by @\(.author.login), \(.state), \(.submittedAt)\n\n\(.body)")' \
+            "$context/item.json" > "$context/item.md"
 
           ls -la "$context"
 

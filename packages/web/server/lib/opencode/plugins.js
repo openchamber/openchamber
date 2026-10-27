@@ -8,7 +8,7 @@ import {
   readConfigLayer,
   writeConfig,
 } from './shared.js';
-import { parsedKindForSpec } from './plugin-spec.js';
+import { isPluginControlSpec, parsedKindForSpec } from './plugin-spec.js';
 import { PLUGIN_SECTION, toPluginEntity, fromPluginEntity, readPluginList } from './config-v2.js';
 import { toLoadablePluginSpec } from './loadable-plugin-spec.js';
 
@@ -20,7 +20,7 @@ const PLUGIN_FILE_NAME_PATTERN = /^[a-z0-9][a-z0-9-_.]*\.(js|ts|mjs|cjs)$/;
 
 /**
  * @typedef {'user' | 'project'} PluginScope
- * @typedef {'npm' | 'path' | 'git'} PluginParsedKind
+ * @typedef {'control' | 'npm' | 'path' | 'git'} PluginParsedKind
  * @typedef {Object} PluginEntry
  * @property {string} id base64url encoded "config:scope:spec"
  * @property {string} spec
@@ -265,6 +265,11 @@ export function parsePluginRaw(raw) {
 /** @public Exposed to tests that dynamically import the plugins module. */
 export function serializePluginEntry(entry) {
   const spec = validatePluginSpec(entry?.spec);
+  // OpenCode reads only a bare `-name` string as a control entry; written as
+  // `{package, options}` it becomes a package to install.
+  if (isPluginControlSpec(spec) && hasOptions(entry?.options)) {
+    throw codedError(`Plugin control entry "${spec}" takes no options`, 'INVALID_SPEC');
+  }
   const serialized = fromPluginEntity({ package: spec, options: hasOptions(entry?.options) ? entry.options : undefined });
   if (serialized === null) {
     throw codedError('Plugin spec must be a non-empty string', 'INVALID_SPEC');

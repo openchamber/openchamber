@@ -286,6 +286,8 @@ const PanelsAndLinksSection: React.FC = () => {
   const { isMobile } = useDeviceInfo();
   const sessionTabsEnabled = useUIStore((state) => state.sessionTabsEnabled);
   const setSessionTabsEnabled = useUIStore((state) => state.setSessionTabsEnabled);
+  const sessionTabsPerWorkspace = useUIStore((state) => state.sessionTabsPerWorkspace);
+  const setSessionTabsPerWorkspace = useUIStore((state) => state.setSessionTabsPerWorkspace);
   const layoutAnimations = useUIStore((state) => state.layoutAnimations);
   const setLayoutAnimations = useUIStore((state) => state.setLayoutAnimations);
   const openLinksInBrowserPanel = useUIStore((state) => state.openLinksInBrowserPanel);
@@ -305,6 +307,16 @@ const PanelsAndLinksSection: React.FC = () => {
           ariaLabel={t('settings.openchamber.visual.field.sessionTabsAria')}
           info={t('settings.openchamber.visual.field.sessionTabsInfo')}
           settingsItem="appearance.session-tabs"
+        />
+      ) : null}
+      {!isMobile && sessionTabsEnabled ? (
+        <SettingsCheckboxRow
+          checked={sessionTabsPerWorkspace}
+          onChange={setSessionTabsPerWorkspace}
+          label={t('settings.openchamber.visual.field.sessionTabsPerWorkspace')}
+          ariaLabel={t('settings.openchamber.visual.field.sessionTabsPerWorkspaceAria')}
+          info={t('settings.openchamber.visual.field.sessionTabsPerWorkspaceInfo')}
+          className="ps-6"
         />
       ) : null}
       {!isMobile ? (

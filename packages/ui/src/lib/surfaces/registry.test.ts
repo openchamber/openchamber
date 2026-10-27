@@ -12,6 +12,7 @@ const baseOptions = {
   screenWidth: 1200,
   tabs: [],
   sourceControlConnected: true,
+  workflowsShown: false,
 } as const;
 
 describe('getVisibleContextRailSurfaces', () => {
@@ -58,6 +59,12 @@ describe('getVisibleContextRailSurfaces', () => {
     expect(getVisibleContextRailSurfaces({ ...baseOptions, sourceControlConnected: true }).some((s) => s.id === 'pr')).toBe(true);
     const tabs: { mode: 'pr'; targetPath: string }[] = [{ mode: 'pr', targetPath: 'https://linear.app/acme/issue/ENG-7' }];
     expect(getVisibleContextRailSurfaces({ ...baseOptions, sourceControlConnected: false, tabs }).some((s) => s.id === 'pr')).toBe(true);
+  });
+
+  test('offers Workflows only while the caller says so, and never in VS Code', () => {
+    expect(getVisibleContextRailSurfaces(baseOptions).some((s) => s.id === 'workflows')).toBe(false);
+    expect(getVisibleContextRailSurfaces({ ...baseOptions, workflowsShown: true }).some((s) => s.id === 'workflows')).toBe(true);
+    expect(getVisibleContextRailSurfaces({ ...baseOptions, workflowsShown: true, isVSCode: true }).some((s) => s.id === 'workflows')).toBe(false);
   });
 
   test('appends installed guest panels except on VS Code', () => {

@@ -1,6 +1,7 @@
 import React from 'react';
 import { focusChatInput } from '@/components/chat/composer/editor/dom';
 import { canUseElectronDesktopIPC, getMiniChatRuntimeArgs, invokeDesktop } from '@/lib/desktop';
+import { getNextFavoriteModel } from '@/lib/modelRefs';
 import { ShortcutDispatcher, getEffectiveShortcutCombo, shortcutRegistry } from '@/lib/shortcuts';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
@@ -26,19 +27,22 @@ export const useMiniChatKeyboardShortcuts = () => {
 
   const cycleFavoriteModel = (delta: number): boolean | void => {
     if (hasActiveBtwComposer()) return false;
-    const { favoriteModels, addRecentModel, setLastSelectedModel } = useUIStore.getState();
-    if (favoriteModels.length === 0) return false;
-
+    const { favoriteModels, hiddenModels, addRecentModel, setLastSelectedModel } = useUIStore.getState();
     const {
+      providers,
       currentProviderId,
       currentModelId,
       setProvider,
       setModel,
     } = useConfigStore.getState();
-    const currentIndex = favoriteModels.findIndex(
-      (favorite) => favorite.providerID === currentProviderId && favorite.modelID === currentModelId,
+    const next = getNextFavoriteModel(
+      favoriteModels,
+      providers,
+      hiddenModels,
+      { providerID: currentProviderId, modelID: currentModelId },
+      delta,
     );
-    const next = favoriteModels[(currentIndex + delta + favoriteModels.length) % favoriteModels.length];
+    if (!next) return false;
     setProvider(next.providerID);
     setModel(next.modelID);
     addRecentModel(next.providerID, next.modelID);

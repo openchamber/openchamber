@@ -9,6 +9,7 @@ import {
   setSessionParentResolver,
   useGlobalSessionStatusStore,
   replaceGlobalSessionStatusById,
+  resolveSessionTurnActivity,
 } from "./global-session-status"
 import { resetSessionOrdering, useSessionOrderingStore } from "./session-ordering"
 import { resetSessionActivityTiming, useSessionActivityTimingStore } from "./session-activity-timing"
@@ -231,6 +232,19 @@ describe("global session status index", () => {
     expect(useGlobalSessionStatusStore.getState().statusById.has("session-a")).toBe(false)
     expect(useSessionOrderingStore.getState().rankById.has("session-a")).toBe(false)
     expect(useSessionActivityTimingStore.getState().startedAt.has("session-a")).toBe(false)
+  })
+})
+
+describe("what a session row says keeps its turn open", () => {
+  test("its own run first, then a running workflow over its agents' subagent state, then a command", () => {
+    expect(resolveSessionTurnActivity("running", true, true)).toBe("running")
+    // A workflow's agents are subagents; the row names the workflow instead.
+    expect(resolveSessionTurnActivity("subagent", true, false)).toBe("workflow")
+    // Between phases no agent is busy, and the workflow still runs.
+    expect(resolveSessionTurnActivity(null, true, false)).toBe("workflow")
+    expect(resolveSessionTurnActivity("subagent", false, true)).toBe("subagent")
+    expect(resolveSessionTurnActivity(null, false, true)).toBe("shell")
+    expect(resolveSessionTurnActivity(null, false, false)).toBeNull()
   })
 })
 

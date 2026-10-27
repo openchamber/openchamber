@@ -68,7 +68,7 @@ describe('parseRepositoryItemUrl', () => {
     expect(parseRepositoryItemUrl('https://github.com/acme/app', registry, [])).toBeNull();
     expect(parseRepositoryItemUrl('not a url', registry, [])).toBeNull();
     expect(parseRepositoryItemUrl('ftp://github.com/acme/app/pull/1', registry, [])).toBeNull();
-    const broken = acmeDescriptor({ id: 'broken', urls: { changeRequest: ['/{owner}/{project}/pull/{number}', '/{repo}/{number}'], issue: [], discussion: [] } });
+    const broken = acmeDescriptor({ id: 'broken', urls: { changeRequest: ['/{owner}/{project}/pull/{number}', '/{repo}/{number}'], issue: [], discussion: [], commit: [], user: [] } });
     expect(parseRepositoryItemUrl('https://x.example/a/b/pull/1', [broken], [])).toBeNull();
   });
 });

@@ -16,7 +16,7 @@ const getTerminalTab = (directory: string) => getContextPanelTabs(directory).fin
 const originalPersistOptions = useUIStore.persist.getOptions();
 
 beforeEach(() => {
-  useUIStore.setState({ contextPanelByDirectory: {}, contextRailOrder: [] });
+  useUIStore.setState({ contextPanelByDirectory: {}, contextRailOrder: [], contextZoneSizes: {} });
   useTerminalStore.getState().clearAll();
 });
 
@@ -264,7 +264,6 @@ describe('useUIStore context panel tabs', () => {
         [directory]: {
           isOpen: true,
           expanded: false,
-          sizeByZone: {},
           touchedAt: 1,
           activeTabId: 'plan:proj_1:plan-1',
           tabs: [
@@ -322,7 +321,7 @@ describe('useUIStore context panel tabs', () => {
       const panel = useUIStore.getState().contextPanelByDirectory[directory];
       expect(panel).not.toHaveProperty('widthFractionByMode');
       expect(panel).not.toHaveProperty('widthByMode');
-      expect(panel?.sizeByZone).toEqual({});
+      expect(useUIStore.getState().contextZoneSizes).toEqual({});
     } finally {
       useUIStore.persist.setOptions(originalPersistOptions);
     }
@@ -451,7 +450,6 @@ describe('useUIStore context panel tabs', () => {
         '/repo-worktree': {
           isOpen: true,
           expanded: false,
-          sizeByZone: {},
           touchedAt: 1,
           activeTabId: 'terminal',
           tabs: [
@@ -486,7 +484,6 @@ describe('useUIStore context panel tabs', () => {
         '/repo-worktree': {
           isOpen: true,
           expanded: false,
-          sizeByZone: {},
           touchedAt: 1,
           activeTabId: 'terminal',
           tabs: [
@@ -530,7 +527,6 @@ describe('useUIStore context panel tabs', () => {
         '/repo-worktree': {
           isOpen: true,
           expanded: false,
-          sizeByZone: {},
           touchedAt: 1,
           activeTabId: 'git',
           tabs: [
@@ -891,7 +887,6 @@ describe('useUIStore closeContextPanelTab surface stability', () => {
     expect(activeTab?.targetPath).toBe(null);
     expect(state?.tabs.map((tab) => tab.mode)).toEqual(['terminal', 'file']);
     expect(useUIStore.getState().contextEditorTreeVisible).toBe(true);
-    expect(state?.sizeByZone).toEqual(stateBefore?.sizeByZone);
   });
 
   test('closing the empty editor tab itself still closes the file surface', () => {
@@ -955,7 +950,6 @@ describe('useUIStore closeContextPanelTabs bulk', () => {
     expect(activeTab?.targetPath).toBe(null);
     expect(state?.tabs.some((tab) => tab.mode === 'terminal')).toBe(true);
     expect(useUIStore.getState().contextEditorTreeVisible).toBe(true);
-    expect(state?.sizeByZone).toEqual(state0?.sizeByZone);
   });
 
   test('closing only inactive-mode tabs leaves the active tab and panel intact', () => {
@@ -1000,18 +994,28 @@ describe('useUIStore zone sizes', () => {
   test('a resize sets one clamped size for the zone, whatever surface it shows', () => {
     const store = useUIStore.getState();
     store.openContextPanelTab(directory, { mode: 'diff' });
-    store.setContextZoneSize(directory, 'right', 700.4);
+    store.setContextZoneSize('right', 700.4);
     store.openContextPanelTab(directory, { mode: 'git' });
 
-    expect(useUIStore.getState().contextPanelByDirectory[directory]?.sizeByZone).toEqual({ right: 700 });
-    store.setContextZoneSize(directory, 'right', 100);
-    store.setContextZoneSize(directory, 'bottom', 50);
-    expect(useUIStore.getState().contextPanelByDirectory[directory]?.sizeByZone).toEqual({ right: 320, bottom: 160 });
+    expect(useUIStore.getState().contextZoneSizes).toEqual({ right: 700 });
+    store.setContextZoneSize('right', 100);
+    store.setContextZoneSize('bottom', 50);
+    expect(useUIStore.getState().contextZoneSizes).toEqual({ right: 320, bottom: 160 });
+  });
+
+  test('another project or worktree opens the zone at the same size', () => {
+    const store = useUIStore.getState();
+    store.openContextPanelTab(directory, { mode: 'diff' });
+    store.setContextZoneSize('right', 760);
+    store.openContextPanelTab('/repo-worktree', { mode: 'git' });
+
+    expect(useUIStore.getState().contextZoneSizes.right).toBe(760);
+    expect(useUIStore.getState().contextPanelByDirectory['/repo-worktree']).not.toHaveProperty('sizeByZone');
   });
 
   test('tree resizing and visibility changes preserve the zone width', () => {
     const store = useUIStore.getState();
-    store.setContextZoneSize(directory, 'right', 800);
+    store.setContextZoneSize('right', 800);
     store.openContextFile(directory, '/repo/a.ts');
     store.setContextEditorTreeWidth(260);
     store.toggleContextEditor();
@@ -1022,13 +1026,12 @@ describe('useUIStore zone sizes', () => {
     const fileIds = useUIStore.getState().contextPanelByDirectory[directory]?.tabs.map((tab) => tab.id) ?? [];
     store.closeContextPanelTabs(directory, fileIds);
 
-    const panel = useUIStore.getState().contextPanelByDirectory[directory];
     expect(useUIStore.getState().contextEditorTreeWidth).toBe(300);
-    expect(panel?.sizeByZone).toEqual({ right: 800 });
+    expect(useUIStore.getState().contextZoneSizes).toEqual({ right: 800 });
   });
 
   type SavedZoneView = { isOpen: boolean; expanded: boolean; activeTabId: string | null };
-  // What older and current builds wrote, malformed values included.
+  // What older builds wrote per directory, malformed values included.
   type SavedPanel = {
     isOpen: boolean;
     expanded: boolean;
@@ -1040,10 +1043,14 @@ describe('useUIStore zone sizes', () => {
     widthByMode?: { [mode: string]: number };
     heightByMode?: { [mode: string]: number };
   };
-  const rehydrate = async (panelState: SavedPanel, extra: { contextEditorTreeWidth?: number } = {}) => {
+  const rehydrate = async (
+    panels: Record<string, SavedPanel>,
+    extra: { contextEditorTreeWidth?: number } = {},
+    version = 24,
+  ) => {
     useUIStore.persist.setOptions({
       storage: {
-        getItem: () => ({ version: 24, state: { ...extra, contextPanelByDirectory: { [directory]: panelState } } }),
+        getItem: () => ({ version, state: { ...extra, contextPanelByDirectory: panels } }),
         setItem: () => undefined,
         removeItem: () => undefined,
       },
@@ -1051,7 +1058,7 @@ describe('useUIStore zone sizes', () => {
     try {
       useUIStore.setState(useUIStore.getInitialState(), true);
       await useUIStore.persist.rehydrate();
-      return useUIStore.getState().contextPanelByDirectory[directory];
+      return useUIStore.getState().contextZoneSizes;
     } finally {
       useUIStore.persist.setOptions(originalPersistOptions);
     }
@@ -1059,7 +1066,7 @@ describe('useUIStore zone sizes', () => {
 
   test('per-surface sizes saved by older builds become the size of the surface each zone showed', async () => {
     const tab = (id: string, mode: string) => ({ id, mode, dedupeKey: id, touchedAt: 1 });
-    const panel = await rehydrate({
+    const sizes = await rehydrate({ [directory]: {
       isOpen: true,
       expanded: false,
       widthByMode: { git: 500, terminal: 700, diff: 900 },
@@ -1071,15 +1078,17 @@ describe('useUIStore zone sizes', () => {
         left: { isOpen: true, expanded: false, activeTabId: 'terminal' },
         bottom: { isOpen: false, expanded: false, activeTabId: 'notes' },
       },
-    });
+    } });
 
-    expect(panel?.sizeByZone).toEqual({ left: 700, right: 500, bottom: 250 });
+    expect(sizes).toEqual({ left: 700, right: 500, bottom: 250 });
+    const panel = useUIStore.getState().contextPanelByDirectory[directory];
     expect(panel).not.toHaveProperty('widthByMode');
     expect(panel).not.toHaveProperty('heightByMode');
+    expect(panel).not.toHaveProperty('sizeByZone');
   });
 
   test('zone sizes load as saved and win over per-surface sizes', async () => {
-    const panel = await rehydrate({
+    const sizes = await rehydrate({ [directory]: {
       isOpen: true,
       expanded: false,
       sizeByZone: { right: 610, bottom: 'tall', left: 5 },
@@ -1087,23 +1096,36 @@ describe('useUIStore zone sizes', () => {
       touchedAt: 1,
       activeTabId: 'git',
       tabs: [{ id: 'git', mode: 'git', dedupeKey: 'git', touchedAt: 1 }],
-    });
+    } }, {}, 25);
 
-    expect(panel?.sizeByZone).toEqual({ right: 610, left: 320 });
+    expect(sizes).toEqual({ right: 610, left: 320 });
+  });
+
+  test('the folder worked in last gives the sizes every folder shares', async () => {
+    const panel = (touchedAt: number, sizeByZone: SavedPanel['sizeByZone']): SavedPanel => ({
+      isOpen: true, expanded: false, touchedAt, activeTabId: null, tabs: [], sizeByZone,
+    });
+    const sizes = await rehydrate({
+      '/old': panel(1, { right: 500 }),
+      '/latest': panel(3, { right: 900 }),
+      '/untouched': panel(5, {}),
+    }, {}, 25);
+
+    expect(sizes).toEqual({ right: 900 });
   });
 
   test('restores the shared tree width and ignores obsolete tree-only panel widths', async () => {
-    const panel = await rehydrate({
+    const sizes = await rehydrate({ [directory]: {
       isOpen: true,
       expanded: false,
       widthByMode: { 'file-tree': 400, file: 800 },
       touchedAt: 1,
       activeTabId: null,
       tabs: [],
-    }, { contextEditorTreeWidth: 260 });
+    } }, { contextEditorTreeWidth: 260 });
 
     expect(useUIStore.getState().contextEditorTreeWidth).toBe(260);
-    expect(panel?.sizeByZone).toEqual({});
+    expect(sizes).toEqual({});
   });
 });
 
@@ -1187,7 +1209,6 @@ describe('useUIStore openAgentBrowserTab', () => {
         [directory]: {
           isOpen: false,
           expanded: false,
-          sizeByZone: {},
           touchedAt: 1,
           activeTabId: null,
           tabs: [{ id: 'browser:browser:agent:1-1', mode: 'browser', targetPath: 'https://old.test', dedupeKey: 'browser:agent:1-1', touchedAt: 1 }],
@@ -1387,7 +1408,7 @@ describe('useUIStore workspace zones', () => {
       await useUIStore.persist.rehydrate();
 
       expect(useUIStore.getState().contextSurfaceZones).toEqual({});
-      expect(panel()).toMatchObject({ isOpen: true, activeTabId: 'git', sizeByZone: {} });
+      expect(panel()).toMatchObject({ isOpen: true, activeTabId: 'git' });
       expect(panel()?.zones.left.isOpen).toBe(false);
       expect(panel()?.zones.bottom.isOpen).toBe(false);
     } finally {

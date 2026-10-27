@@ -100,6 +100,15 @@ describe("input-store attachments", () => {
     useInputStore.getState().setAttachedFiles([])
   })
 
+  testWithMockFileReader("refuses a file over 10 MB without reading it when it has no path on disk", async () => {
+    const big = new File([new Uint8Array(10 * 1024 * 1024 + 1)], "place.rbxl")
+
+    await expect(useInputStore.getState().addAttachedFile(big)).rejects.toThrow("place.rbxl")
+
+    expect(pendingReaders).toHaveLength(0)
+    expect(useInputStore.getState().attachedFiles).toEqual([])
+  })
+
   testWithMockFileReader("does not attach a local file that finishes reading after attachments are cleared", async () => {
     const addPromise = useInputStore.getState().addAttachedFile(new File(["hello"], "hello.txt", { type: "text/plain" }))
     expect(pendingReaders).toHaveLength(1)

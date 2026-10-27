@@ -66,6 +66,11 @@ Use this doc when you ask an agent to change tool/header/description behavior.
   - `lib/turns/liveActivity.ts` owns final-answer and interruption boundaries.
   - `lib/turns/liveActivitySummary.ts` derives the report from tool results.
 
+- `ShownToolCard.tsx`
+  - What a call drawn in place of its row shows (`isShownInPlace` in `@/lib/opencode/tools`): the run a completed `workflow.run` call proposed (`proposedWorkflowRunId`, read from the call's result envelope), else the page of an `openchamber_render` call. Both ask something of the user, so both are hoisted to the answer with the turn's pages when Activity is collapsed.
+  - The workflow card (`components/chat/workflows/WorkflowRunCard.tsx`) reads the run from the server's store, not from the call: the plan with its phases, the run's state, and Run and Don't run while it waits for approval, Stop while it runs, Resume after a failure or stop. The card is current after a reload and on every device; a run the server no longer has says so.
+  - The run's report arrives later as a synthetic message (`lib/workflows/report.ts`) and renders as one collapsed line in `TimelineNotice`, like a dispatched session's result, opening a turn of its own.
+
 - `HtmlRenderFrame.tsx` and `htmlRender.ts`
   - A completed `openchamber_render` call that OpenChamber accepted (`renderedPage` in `@/lib/opencode/tools`: `metadata.openchamber.ok` and an `html` input) is drawn as the page itself in place of its tool row. A refused call keeps its ordinary row, and so does a running one, except a page that waits for the user's answer (`awaitAnswer`): its call runs until the user answers, so it is drawn while it runs, and it stays with a "Not answered" line when the call ends in an error (the user stopped the turn).
   - The page loads through `srcdoc` in a frame sandboxed with `allow-scripts allow-forms` and never `allow-same-origin`, so its script runs in an opaque origin with no reach into the app. `buildHtmlRenderDocument` puts a bootstrap first in the page's head: the theme as CSS variables (`htmlRenderTheme`; the agent tool's description in `packages/web/server/lib/agent-tool/runtime.js` lists the same names; `--chart-1` is the theme's accent and `--chart-2` to `--chart-6` a fixed set per light and dark, `CHART_SERIES`, because the theme's syntax colors made near-identical series), a size report, and http(s) link clicks handed to the host, which opens them with `openExternalUrl`. A theme switch is posted to the page instead of rebuilding it, so the page keeps its script state. Messages are accepted only from the frame's own window. A focused frame keeps every key from the app, so the bootstrap passes on a Cmd/Ctrl chord the page left alone (not typed into its own fields, not handled by its script, not the clipboard, select-all or undo chords), and the host replays it as a keydown and keyup on the frame element. The app's shortcut handling then runs as for any key pressed outside a text field, with no list of shortcuts to keep in sync. A chord without Cmd or Ctrl is never replayed. A wheel up or vertical swipe over the page scrolls the chat around the frame while its events stay in the frame, so the bootstrap reports each one its script and its own scrolling boxes left alone (a direction only), and the host raises it on the frame element for the chat's follow (`lib/scroll/DOCUMENTATION.md`); without it a streaming reply kept pulling a reader who scrolled over a page back to the end. Pages are interactive within themselves (tooltips, tabs, sorting).
@@ -199,6 +204,11 @@ Code copy/wrap buttons remain visible without hover. File navigation is enabled
 only for settled content with file references enabled; mobile keeps navigation
 while skipping filesystem probes. Selection-ending clicks are consumed without
 opening a file, and platform-specific Cmd/Ctrl clicks retain external opening.
+A `file:` link the click rules do not take as a file, usually a folder, opens
+through the runtime's `files.revealPath` (the system file manager), on the same
+runtimes where the Files tree shows its reveal action: the desktop app. A
+browser client keeps the plain link, since the folder lives on the server's
+machine, and so does VS Code, which mounts no Files tree.
 
 #### Why KaTeX is pinned by an override
 
@@ -482,6 +492,16 @@ the same owner.
   reference descriptions/comments opt into safe raw HTML with `allowRawHtml`.
   Author styles, application classes and active content remain forbidden.
   Restricted disclosures have a dedicated remark parser in ordinary chat.
+  A summary that is a single `<h1>`-`<h6>` tag, as GitHub review bodies write
+  it, becomes a heading node there, so it renders as a heading in both modes.
+  GitHub alerts (`> [!NOTE]`, `[!TIP]`, `[!IMPORTANT]`, `[!WARNING]`,
+  `[!CAUTION]`) become titled callouts in every Markdown surface
+  (`remarkAlerts.ts`, `MarkdownBlockquote.tsx`); the kind travels as a
+  generated `data-oc-alert` the policy drops from authored HTML, and copying
+  writes the marker back. Item text in the references preview also links
+  repository references (`remarkRepositoryReferences.ts`, see
+  `components/references/DOCUMENTATION.md`) and draws review suggestions
+  (`markdownSuggestion.ts`).
   Safe custom application links keep the app-link confirmation flow; only
   existing session routes qualify as `openchamber:` links. VS Code keeps
   session links inert.

@@ -811,10 +811,10 @@ export function IntegrationsCatalogView(): React.ReactNode {
 
         <div className="mt-5 flex items-baseline gap-1.5 px-2 pb-1.5 typography-micro font-medium text-muted-foreground">
           {t('integrationsCatalog.filter.installed')}
-          <span className="text-muted-foreground/70">{installedEntries.length}</span>
+          <span className="text-muted-foreground">{installedEntries.length}</span>
         </div>
         {installedEntries.length === 0 ? (
-          <p className="px-2 typography-micro text-muted-foreground/80">{t('integrationsCatalog.rail.installedEmpty')}</p>
+          <p className="px-2 typography-micro text-muted-foreground">{t('integrationsCatalog.rail.installedEmpty')}</p>
         ) : installedEntries.map((entry) => {
           const selected = selectedId === entry.id;
           const status = statusOf(entry);
@@ -1070,7 +1070,7 @@ export function IntegrationsCatalogView(): React.ReactNode {
           <button type="button" onClick={() => showEntry(null)} className="rounded-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
             {t('integrationsCatalog.page.title')}
           </button>
-          <Icon name="arrow-right-s" className="size-4 text-muted-foreground/60" />
+          <Icon name="arrow-right-s" className="size-4 text-muted-foreground" />
           <span className="truncate text-foreground">{entry.name}</span>
         </nav>
 

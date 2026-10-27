@@ -22,7 +22,10 @@ export const acmeDescriptor = (overrides: Partial<SourceControlProviderDescripto
       { id: 'token', kind: 'personal-access-token', secret: true },
     ],
   },
-  urls: { changeRequest: ['/{owner}/{repo}/pulls/{number}'], issue: ['/{owner}/{repo}/issues/{number}'], discussion: [] },
+  urls: {
+    changeRequest: ['/{owner}/{repo}/pulls/{number}'], issue: ['/{owner}/{repo}/issues/{number}'], discussion: [],
+    commit: ['/{owner}/{repo}/commit/{sha}'], user: ['/{user}'],
+  },
   features: {
     referenceSearch: false, referenceDetail: false, listStatuses: false, referencesAcross: false,
     startThread: false, authorCanReview: false, projectUploads: false, issueCloseReason: true,
@@ -41,7 +44,10 @@ export const githubLikeDescriptor = (): SourceControlProviderDescriptor => acmeD
     format: 'host', defaultInstance: 'github.com', multiple: true, allowLoopbackHttp: false, allowPort: false,
     reserved: ['github.com'], placeholder: 'https://github.example.com',
   },
-  urls: { changeRequest: ['/{owner}/{repo}/pull/{number}'], issue: ['/{owner}/{repo}/issues/{number}'], discussion: ['/{owner}/{repo}/discussions/{number}'] },
+  urls: {
+    changeRequest: ['/{owner}/{repo}/pull/{number}'], issue: ['/{owner}/{repo}/issues/{number}'],
+    discussion: ['/{owner}/{repo}/discussions/{number}'], commit: ['/{owner}/{repo}/commit/{sha}'], user: ['/{user}'],
+  },
   features: { ...acmeDescriptor().features, discussions: true },
 });
 
@@ -63,6 +69,7 @@ export const gitlabLikeDescriptor = (): SourceControlProviderDescriptor => acmeD
     changeRequest: ['/{namespace+}/{repo}/-/merge_requests/{number}'],
     issue: ['/{namespace+}/{repo}/-/issues/{number}', '/{namespace+}/{repo}/-/work_items/{number}'],
     discussion: [],
+    commit: ['/{namespace+}/{repo}/-/commit/{sha}'], user: ['/{user}'],
   },
 });
 
@@ -85,7 +92,7 @@ export const changeHostDescriptor = (): SourceControlProviderDescriptor => {
       ],
     },
     repository: { nestedNamespaces: true, pathStyle: 'path' },
-    urls: { changeRequest: ['/c/{project+}/+/{number}'], issue: [], discussion: [] },
+    urls: { changeRequest: ['/c/{project+}/+/{number}'], issue: [], discussion: [], commit: [], user: [] },
     features: {
       ...base.features,
       reviewModel: 'votes', revisions: true, submitRequirements: true, createByPush: true, branchHeads: false,

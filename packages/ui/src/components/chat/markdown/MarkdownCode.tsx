@@ -17,6 +17,7 @@ import { useMarkdownPresentation } from './MarkdownPresentationContext';
 import { activateMarkdownFile, useOpenMarkdownFile } from './markdownFileReferences';
 import type { MarkdownCodePlugin } from './streamdownCode';
 import { MarkdownDiff } from './MarkdownDiff';
+import { MarkdownSuggestionContext, isSuggestionLanguage, suggestionPatch } from './markdownSuggestion';
 
 // Complete prefix rows keep their identity in the worker client, so appending
 // code only renders changed rows. React owns every node; no HTML patching.
@@ -120,8 +121,10 @@ export function MarkdownCode({ children, className, node, ...props }: React.Comp
     if (timer.current) clearTimeout(timer.current);
   }, []);
 
+  const suggestionBase = React.useContext(MarkdownSuggestionContext);
   const language = /language-([^\s]+)/.exec(className ?? '')?.[1] ?? '';
-  const proposal = language.toLowerCase() === 'diff';
+  const suggestion = suggestionBase !== null && isSuggestionLanguage(language);
+  const proposal = language.toLowerCase() === 'diff' || suggestion;
   const code = node?.children.map((child) => child.type === 'text' ? child.value : '').join('') ?? '';
   const copySource = code.replace(/\n$/, '');
   const { purpose, onExportCode } = presentation;
@@ -162,7 +165,7 @@ export function MarkdownCode({ children, className, node, ...props }: React.Comp
       onKeyDown={handleFileClick}
     >
       <CodeBlockContainer language={language} isIncomplete={incomplete} dir="ltr">
-        <CodeBlockHeader language={proposal ? t('markdownRenderer.code.proposal') : language.toLowerCase() || 'text'} />
+        <CodeBlockHeader language={suggestion ? t('chat.markdown.suggestion.title') : proposal ? t('markdownRenderer.code.proposal') : language.toLowerCase() || 'text'} />
         {!purpose && (
           <div className="pointer-events-none absolute top-0 end-0 flex items-center">
             <div
@@ -191,7 +194,9 @@ export function MarkdownCode({ children, className, node, ...props }: React.Comp
             </div>
           </div>
         )}
-        {proposal && !purpose ? <MarkdownDiff source={copySource} incomplete={incomplete} /> : <MarkdownCodeBody
+        {proposal && !purpose ? (
+          <MarkdownDiff source={suggestion ? suggestionPatch(copySource, suggestionBase.excerpt) : copySource} incomplete={incomplete} />
+        ) : <MarkdownCodeBody
           source={copySource}
           language={language}
           incomplete={incomplete}

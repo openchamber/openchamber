@@ -148,8 +148,14 @@ bars.
   label does not say. Explanations go behind an info hint, warnings and status
   stay visible (`settings-ui-patterns` owns the Settings policy). Wording rules
   are in `locale-ui-patterns` and `communication-style`.
-- **Readable secondary text.** Secondary text is muted, still comfortably
-  legible; never muted text on a muted fill, or a list whose every line is grey.
+- **Readable secondary text.** Secondary text is `text-muted-foreground` at
+  full strength, never a fraction of it (`/50`, `/70`): every theme keeps the
+  muted colour at 4.5:1, and an opacity on top drops it below. A quieter step
+  between body and muted text mixes the two instead: `oc-title-rest` for a
+  list title at rest, `oc-group-label` for a container's label. Only text
+  nobody needs to read may fade: separators (`·`, `/`), disabled controls,
+  calendar days outside the month, large empty-state illustrations. Never
+  muted text on a muted fill, or a list whose every line is grey.
 - **Dense, not cramped.** Rows are compact; tap targets meet the mobile touch
   floor; text never drops below the typography scale for density's sake.
 

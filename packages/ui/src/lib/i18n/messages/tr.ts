@@ -32,6 +32,10 @@ import { mcpGridI18n } from './mcp-grid.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { diffFindI18n } from './diff-find.i18n';
+import { markdownGithubI18n } from './markdown-github.i18n';
+import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
+import { workflowsI18n } from './workflows.i18n';
+import { sessionReferencesI18n } from './session-references.i18n';
 import { guestStatusViewI18n } from './guest-status-view.i18n';
 
 export const dict = {
@@ -115,6 +119,10 @@ export const dict = {
   ...pluginsGridI18n.tr,
   ...integrationsCatalogI18n['tr'],
   ...diffFindI18n['tr'],
+  ...markdownGithubI18n['tr'],
+  ...autocompleteScopeI18n['tr'],
+  ...workflowsI18n['tr'],
+  ...sessionReferencesI18n['tr'],
   ...guestStatusViewI18n['tr'],
   'terminalView.actions.attachSelection': 'Seçili çıktıyı ekle',
   'terminalView.actions.copySelection': 'Seçili çıktıyı kopyala',
@@ -237,7 +245,6 @@ export const dict = {
   'mobile.menu.files': 'Dosyalar',
   'mobile.menu.git': 'Git',
   'mobile.menu.terminal': 'Terminal',
-  'mobile.menu.mcp': 'MCP',
   'mobile.menu.instances': 'Instance\'lar',
   'mobile.menu.update': 'Güncelle',
   'mobile.menu.settings': 'Ayarlar',
@@ -2179,6 +2186,7 @@ export const dict = {
   'session.githubIntegration.validation.branchAlreadyCheckedOut': 'Branch zaten bir worktree\'de checkout edilmiş',
   'session.githubIntegration.validation.failed': 'Doğrulama başarısız',
   'chat.fileAttachment.toast.attachFailed': 'Dosya eklenemedi',
+  'chat.fileAttachment.toast.tooLarge': '{name} eklenemeyecek kadar büyük ({size} üzeri). Projedeyse @ ile anın.',
   'chat.fileAttachment.toast.someFilesSkipped': 'Bazı dosyalar atlandı:\n{summary}',
   'chat.fileAttachment.toast.vscodePickFailed': 'VS Code\'da dosya seçilemedi',
   'chat.fileAttachment.fileFallback': 'dosya',
@@ -2292,8 +2300,6 @@ export const dict = {
   'chat.commandAutocomplete.command.debugDescription': 'Düzeltme önermeden önce hatanın kök nedenini rehberli şekilde araştırır.',
   'chat.commandAutocomplete.command.weighDescription': 'Commit etmeden önce 2-3 yaklaşımı ödünleşimleriyle değerlendirir ve bir öneri sunar.',
   'chat.commandAutocomplete.command.exploreDescription': 'Bu kod tabanında yön bulmanı sağlar: mimarinin ve ana bölümlerin üst düzey bir turu.',
-  'chat.commandAutocomplete.badge.command': 'komut',
-  'chat.commandAutocomplete.badge.system': 'sistem',
   'chat.commandAutocomplete.empty': 'Komut bulunamadı',
   'chat.agentMentionAutocomplete.badge.system': 'sistem',
   'chat.agentMentionAutocomplete.empty': 'Agent bulunamadı',
@@ -2411,8 +2417,6 @@ export const dict = {
   'chat.chatInput.actions.sendMessageAria': 'Mesaj gönder',
   'chat.chatInput.actions.queueMessageAria': 'Mesajı kuyruğa ekle',
   'chat.chatInput.actions.stopGeneratingAria': 'Üretmeyi durdur',
-  'chat.chatInput.focusMode.toggleAria': 'Odak modunu aç/kapat',
-  'chat.chatInput.focusMode.label': 'Odak modu',
   'chat.chatInput.linked.byAuthor': '{author} tarafından',
   'chat.chatInput.linked.issue.openInBrowserAria': 'Issue\'ı tarayıcıda aç',
   'chat.chatInput.linked.issue.removeAria': 'Bağlı issue\'ı kaldır',
@@ -2436,7 +2440,7 @@ export const dict = {
   'chat.dictation.insertAndSend': 'Ekle ve gönder',
   'chat.dictation.retry': 'Yazıya dökmeyi yeniden dene',
   'chat.dictation.discard': 'Kaydı iptal et',
-  'chat.snippetAutocomplete.action.addNew': '+ Yeni snippet ekle',
+  'chat.snippetAutocomplete.action.addNew': 'Yeni snippet ekle',
   'chat.snippetAutocomplete.empty': 'Snippet bulunamadı',
   'chat.snippetAutocomplete.footer': '↑↓ gezin • Enter seç • Esc kapat',
   'snippets.source.global': 'genel',
@@ -2814,6 +2818,20 @@ export const dict = {
   'projects.sharedTrust.actions': 'Eylemler',
   'projects.sharedTrust.skip': 'Bu sefer değil',
   'projects.sharedTrust.trust': 'Güven ve çalıştır',
+  'projects.opencodeTrust.title': 'OpenCode bu klasördeki kodu çalıştırsın mı?',
+  'projects.opencodeTrust.description': 'OpenCode, {path} yapılandırmasındaki eklentileri ve komutları klasörü açar açmaz çalıştırır. Onlara bir kez güvenin; OpenChamber yalnızca değiştiklerinde yeniden sorar.',
+  'projects.opencodeTrust.plugins': 'Eklentiler',
+  'projects.opencodeTrust.commands': 'Komutlar',
+  'projects.opencodeTrust.kind.package': '{name} (npm paketi)',
+  'projects.opencodeTrust.kind.config': '{path}: OpenChamber\'ın okuyamadığı bir yapılandırma dosyası',
+  'projects.opencodeTrust.kind.mcp': 'MCP sunucusu {name}',
+  'projects.opencodeTrust.kind.lsp': 'Dil sunucusu {name}',
+  'projects.opencodeTrust.kind.formatter': 'Biçimlendirici {name}',
+  'projects.opencodeTrust.kind.shell': 'Kabuk',
+  'projects.opencodeTrust.paused': 'Güvenmeden ajanlar bu klasörde çalışamaz, ancak dosyalarına ve Git değişikliklerine yine de göz atabilirsiniz.',
+  'projects.opencodeTrust.skip': 'Bu sefer değil',
+  'projects.opencodeTrust.trust': 'Güven ve aç',
+  'projects.opencodeTrust.saveFailed': 'Yanıtınız kaydedilemedi. Yeniden deneyin.',
   'projectActions.actions.autoDiscoverTooltip': 'Geliştirme sunucusunu otomatik keşfeder ve çalıştırır',
   'projectActions.actions.chooseActionAria': 'Proje eylemini seç',
   'projectActions.actions.openPreview': 'Önizlemeyi Aç',
@@ -3278,6 +3296,7 @@ export const dict = {
   'common.duration.minutesSecondsCompact': '{minutes}dk {seconds}sn',
   'common.duration.hoursMinutesCompact': '{hours}sa {minutes}dk',
   'contextFileOpen.failure.tooLarge': 'Dosya açmak için çok büyük (>{count} satır)',
+  'contextFileOpen.failure.tooLargeSize': 'Dosya açılamayacak kadar büyük ({size} üzeri)',
   'contextFileOpen.failure.missing': 'Dosya bulunamadı',
   'contextFileOpen.failure.unreadable': 'Dosya açılamadı',
   'quota.window.5h': '5 Saatlik',
@@ -3303,6 +3322,7 @@ export const dict = {
   'quota.window.completions': 'Kod Tamamlamaları',
   'quota.window.premiumInteractions': 'Premium etkileşimler',
   'chat.workStatus.ariaLabel': 'Çalışma durumu',
+  'chat.workStatus.mobileEmpty': 'Bu oturum için henüz gösterilecek bir şey yok',
   'chat.workStatus.context.label': 'Bağlam',
   'chat.workStatus.git.changedFileSingle': '{count} dosya değişti',
   'chat.workStatus.git.changedFilePlural': '{count} dosya değişti',

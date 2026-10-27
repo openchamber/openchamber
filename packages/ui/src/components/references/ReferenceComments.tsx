@@ -4,11 +4,15 @@ import { SimpleMarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
+import { useEmojiShortcodes } from '@/lib/emoji/shortcodes';
 import { useI18n } from '@/lib/i18n';
 import { isIMECompositionEvent } from '@/lib/ime';
 import { cn } from '@/lib/utils';
 
+import { MarkdownSuggestionContext } from '@/components/chat/markdown/markdownSuggestion';
+import { useOpenChatLink } from '@/components/chat/useOpenChatLink';
 import { ReferenceMarkdownRewriteContext } from './projectUploads';
+import { ReferenceLinksContext } from './referenceLinks';
 import { REFERENCE_META_TEXT, relativeTimeOf } from './referencePickerItems';
 import type { ReferenceCommentItem, ReferenceCommentThread, ReferenceCommitGroup, ReferenceTimelineEntry } from './referenceTimeline';
 
@@ -35,16 +39,26 @@ const Avatar: React.FC<{ comment: ReferenceCommentItem; className: string }> = (
     </div>
 );
 
-const CommentBody: React.FC<{ body: string }> = ({ body }) => {
+/** A comment's text; on a review line, its ```suggestion fences draw as diffs of that line. */
+const CommentBody: React.FC<{ comment: ReferenceCommentItem }> = ({ comment }) => {
+    const { body, location, excerpt } = comment;
     const rewrite = React.useContext(ReferenceMarkdownRewriteContext);
+    const links = React.useContext(ReferenceLinksContext);
     const shown = React.useMemo(() => (rewrite ? rewrite(body) : body), [body, rewrite]);
+    const emojiShortcodes = useEmojiShortcodes(shown);
+    const suggestionBase = React.useMemo(() => (location ? { excerpt: excerpt ?? null } : null), [excerpt, location]);
     return shown.trim() ? (
-        <SimpleMarkdownRenderer
-            content={shown}
-            className="mt-1 [&_img]:h-auto [&_img]:max-w-full"
-            enableFileReferences={false}
-            allowRawHtml
-        />
+        <MarkdownSuggestionContext.Provider value={suggestionBase}>
+            <SimpleMarkdownRenderer
+                content={shown}
+                className="mt-1 [&_img]:h-auto [&_img]:max-w-full"
+                enableFileReferences={false}
+                allowRawHtml
+                repositoryLinks={links.repository}
+                emojiShortcodes={emojiShortcodes}
+                directory={links.directory}
+            />
+        </MarkdownSuggestionContext.Provider>
     ) : null;
 };
 
@@ -131,7 +145,7 @@ const ThreadRest: React.FC<{
 
     return (
         <>
-            <CommentBody body={comment.body} />
+            <CommentBody comment={comment} />
             {count > 0 ? (
                 <ul className="mt-2 flex flex-col gap-3 border-s border-border/60 ps-3">
                     {thread.replies.map((reply) => (
@@ -151,7 +165,7 @@ const ThreadRest: React.FC<{
                                     </button>
                                 ) : null}
                             </div>
-                            <CommentBody body={reply.body} />
+                            <CommentBody comment={reply} />
                         </li>
                     ))}
                 </ul>
@@ -230,6 +244,9 @@ const relativeLabel = (t: ReturnType<typeof useI18n>['t'], iso: string | null, n
 
 const CommitGroup: React.FC<{ group: ReferenceCommitGroup; now: number }> = ({ group, now }) => {
     const { t } = useI18n();
+    const { directory } = React.useContext(ReferenceLinksContext);
+    // A commit the folder's repository has opens in the Diff view; any other on its host.
+    const openLink = useOpenChatLink(directory ?? '');
     const count = group.commits.length;
     return (
         <>
@@ -246,7 +263,19 @@ const CommitGroup: React.FC<{ group: ReferenceCommitGroup; now: number }> = ({ g
                     return (
                         <li key={commit.sha} className="flex min-w-0 items-baseline gap-2 typography-meta">
                             {commit.url ? (
-                                <a href={commit.url} target="_blank" rel="noopener noreferrer" className={cn('shrink-0 font-mono typography-micro hover:text-foreground', REFERENCE_META_TEXT)}>{sha}</a>
+                                <a
+                                    href={commit.url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className={cn('shrink-0 font-mono typography-micro hover:text-foreground', REFERENCE_META_TEXT)}
+                                    onClick={(event) => {
+                                        if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || !commit.url) return;
+                                        event.preventDefault();
+                                        openLink(commit.url);
+                                    }}
+                                >
+                                    {sha}
+                                </a>
                             ) : (
                                 <span className={cn('shrink-0 font-mono typography-micro', REFERENCE_META_TEXT)}>{sha}</span>
                             )}
@@ -315,7 +344,7 @@ export const ReferenceComments: React.FC<{
                                 </div>
                                 {entry.thread ? (
                                     <ThreadRest comment={entry} thread={entry.thread} now={now} actions={threadActions} onAttachComment={onAttachComment} />
-                                ) : <CommentBody body={entry.body} />}
+                                ) : <CommentBody comment={entry} />}
                             </>
                         )}
                     </div>

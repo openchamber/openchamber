@@ -62,6 +62,12 @@ describe('opencode plugins data layer', () => {
     expect(plugins.serializePluginEntry({ spec: 'foo', options: { a: 1 } })).toEqual({ package: 'foo', options: { a: 1 } });
   });
 
+  test('keeps a control entry a bare string and refuses options for it', () => {
+    // OpenCode reads `{package: "-hooks"}` as a package to install.
+    expect(plugins.serializePluginEntry({ spec: '-hooks' })).toBe('-hooks');
+    expect(() => plugins.serializePluginEntry({ spec: '-hooks', options: { a: 1 } })).toThrow('takes no options');
+  });
+
   test('rejects invalid specs and file names', () => {
     expect(() => plugins.createPluginEntry({ spec: 123, scope: 'user' }, projectDir)).toThrow('Plugin spec');
     expect(() => plugins.writePluginDirFile({ fileName: '', content: '', scope: 'project' }, projectDir)).toThrow('Plugin file name');
@@ -105,6 +111,19 @@ describe('opencode plugins data layer', () => {
 
     plugins.updatePluginEntry(plugins.encodePluginId('config', `user:${legacy}`), { spec: legacy, options: { a: 1 } }, projectDir);
     expect(readJson(userConfigPath).plugins).toEqual([{ package: legacy, options: { a: 1 } }]);
+  });
+
+  test('keeps control entries in place when other entries are written', () => {
+    writeJson(userConfigPath, { plugins: ['-hooks', 'alpha', '*'] });
+
+    plugins.createPluginEntry({ spec: 'beta', scope: 'user' }, projectDir);
+    plugins.updatePluginEntry(plugins.encodePluginId('config', 'user:alpha'), { spec: 'alpha', options: { a: 1 } }, projectDir);
+    expect(readJson(userConfigPath).plugins).toEqual(['-hooks', { package: 'alpha', options: { a: 1 } }, '*', 'beta']);
+    expect(plugins.listPluginEntries(projectDir).filter((entry) => entry.parsedKind === 'control').map((entry) => entry.spec))
+      .toEqual(['-hooks', '*']);
+
+    plugins.deletePluginEntry(plugins.encodePluginId('config', 'user:-hooks'), projectDir);
+    expect(readJson(userConfigPath).plugins).toEqual([{ package: 'alpha', options: { a: 1 } }, '*', 'beta']);
   });
 
   test('routes project entries to project config and user entries to custom user config', () => {

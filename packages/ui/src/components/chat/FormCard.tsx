@@ -172,7 +172,7 @@ const GenericFormCard: React.FC<FormCardProps> = ({ form }) => {
                                     onClick={() => void handleCopy('markdown')}
                                     title={t('chat.questionCard.copyMarkdown')}
                                     aria-label={t('chat.questionCard.copyMarkdown')}
-                                    className="rounded p-1 text-muted-foreground/70 transition-colors hover:bg-interactive-hover/30 hover:text-foreground"
+                                    className="rounded p-1 text-muted-foreground transition-colors hover:bg-interactive-hover/30 hover:text-foreground"
                                 >
                                     <Icon name="file-text" className="h-3 w-3" />
                                 </button>
@@ -181,7 +181,7 @@ const GenericFormCard: React.FC<FormCardProps> = ({ form }) => {
                                     onClick={() => void handleCopy('json')}
                                     title={t('chat.questionCard.copyJson')}
                                     aria-label={t('chat.questionCard.copyJson')}
-                                    className="rounded p-1 text-muted-foreground/70 transition-colors hover:bg-interactive-hover/30 hover:text-foreground"
+                                    className="rounded p-1 text-muted-foreground transition-colors hover:bg-interactive-hover/30 hover:text-foreground"
                                 >
                                     <Icon name="code" className="h-3 w-3" />
                                 </button>

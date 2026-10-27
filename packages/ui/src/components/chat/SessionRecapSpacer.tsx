@@ -25,8 +25,8 @@ export const SessionRecapNote: React.FC<SessionRecapNoteProps> = React.memo(({ s
 
   return (
     <div aria-label={t('chat.recap.aria')} className="px-1">
-      <span className={`typography-meta text-muted-foreground/70 ${isMobile ? 'line-clamp-3' : 'line-clamp-2'}`}>
-        <span className="italic text-muted-foreground/50">{t('chat.recap.label')} </span>
+      <span className={`typography-meta text-muted-foreground ${isMobile ? 'line-clamp-3' : 'line-clamp-2'}`}>
+        <span className="italic text-muted-foreground">{t('chat.recap.label')} </span>
         {visibleRecap}
       </span>
     </div>

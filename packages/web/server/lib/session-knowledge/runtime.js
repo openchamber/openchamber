@@ -61,7 +61,8 @@ const describeCheckout = ({ directory, branch, placeholder = false }) => {
 const placeholderBranchGuidance = (branch) => `Its name \`${branch}\` is a placeholder OpenChamber generated, not one the user chose,`
   + ' and it is not pushed yet. Name the task with work.name, passing branch too: work.name renames the branch to it.'
   + " Follow the naming the repository's other branches use (`git branch -a`); with none, `<type>/<short-kebab-case>`"
-  + ' with the conventional commit types, such as `fix/login-timeout`. No tool or app prefix.';
+  + ' with the conventional commit types, such as `fix/login-timeout`. No tool or app prefix.'
+  + ' A placeholder made for an issue (`issue-180-merry-salamander`) keeps its `issue-180-`: work.name puts it in front of your name.';
 
 const renderMemorySection = (entries) => entries
   .slice()
@@ -187,11 +188,24 @@ const buildPinnedBlock = ({ notes, plans }) => {
   ].join('\n\n');
 };
 
-const buildGuidance = ({ linking, rendering, directTools }) => [
+/**
+ * When to reach for a workflow, stated in every session that has the
+ * `openchamber_workflow` tool. A run costs many agents, so the agent starts
+ * one only when the user asks; spotting a task that fits is the agent's job
+ * too, and it offers one instead of starting it.
+ */
+export const WORKFLOW_GUIDANCE = 'The openchamber_workflow tool runs a script that fans a large task out to many agents in the background.'
+  + ' Start one when the user asks for a workflow.'
+  + ' When the task in front of you has many similar independent pieces (a review per file, an audit across many routes, a migration of many files)'
+  + ' or needs results cross-checked at that scale, say so and offer a workflow; never start one unasked.'
+  + ' A single feature, a few steps or a short loop over files you can do yourself never gets one.';
+
+const buildGuidance = ({ linking, rendering, workflows, directTools }) => [
   linking ? SESSION_LINK_GUIDANCE : '',
   linking ? WORK_NAME_GUIDANCE : '',
   rendering ? RENDER_PAGE_GUIDANCE : '',
-  (linking || rendering) && directTools ? DIRECT_TOOLS_GUIDANCE : '',
+  workflows ? WORKFLOW_GUIDANCE : '',
+  (linking || rendering || workflows) && directTools ? DIRECT_TOOLS_GUIDANCE : '',
 ].filter(Boolean).join('\n\n');
 
 /**
@@ -199,11 +213,11 @@ const buildGuidance = ({ linking, rendering, directTools }) => [
  * away; a key left out keeps what the session holds, which is what a branch
  * that could not be read means.
  */
-export const buildKnowledgeEntries = ({ notes, plans, memory, linking = false, rendering = false, directTools = true, checkout = null }) => {
+export const buildKnowledgeEntries = ({ notes, plans, memory, linking = false, rendering = false, workflows = false, directTools = true, checkout = null }) => {
   const entries = {
     [KNOWLEDGE_ENTRY_KEYS.pinned]: truncate(buildPinnedBlock({ notes, plans })),
     [KNOWLEDGE_ENTRY_KEYS.memory]: truncate(buildMemoryBlock(memory)),
-    [KNOWLEDGE_ENTRY_KEYS.guidance]: buildGuidance({ linking, rendering, directTools }),
+    [KNOWLEDGE_ENTRY_KEYS.guidance]: buildGuidance({ linking, rendering, workflows, directTools }),
   };
   // The branch is told while the agent has the tool, whose worktree move is
   // the one thing it can do about a busy branch.
@@ -228,6 +242,8 @@ export const createSessionKnowledgeRuntime = (dependencies) => {
     readPlaceholderBranch = null,
     // Whether this session's agent has the `openchamber_render` tool.
     isPageRenderingAvailable = async () => false,
+    // Whether this session's agent has the `openchamber_workflow` tool.
+    isWorkflowAvailable = async () => false,
     // Whether the managed tools run through Code Mode's catalog rather than
     // as direct tools.
     areAgentToolsInCodeMode = async () => false,
@@ -328,9 +344,10 @@ export const createSessionKnowledgeRuntime = (dependencies) => {
     const checkout = branch !== null ? { directory, branch, placeholder } : null;
 
     const rendering = await Promise.resolve(isPageRenderingAvailable()).catch(() => false);
+    const workflows = await Promise.resolve(isWorkflowAvailable()).catch(() => false);
     const directTools = !(await Promise.resolve(areAgentToolsInCodeMode()).catch(() => false));
 
-    return { notes, plans, memory, linking, rendering, directTools, checkout };
+    return { notes, plans, memory, linking, rendering, workflows, directTools, checkout };
   };
 
   /**

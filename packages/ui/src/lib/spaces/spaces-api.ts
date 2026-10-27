@@ -137,8 +137,6 @@ const setupSchema = z.discriminatedUnion('state', [
   z.object({ state: z.literal('interrupted'), total: z.number().int().min(1) }),
 ]);
 
-export type SpaceSetup = z.infer<typeof setupSchema>;
-
 const spaceEntrySchema = z.object({
   id: spaceIdSchema,
   name: z.string(),
@@ -308,7 +306,7 @@ export const setSpaceMachine = async (machine: string): Promise<SpacePlace | nul
   (await request(`${SPACES_ROUTE}/machine`, z.object({ place: placeSchema.nullable() }), { method: 'PUT', body: JSON.stringify({ machine }) })).place;
 
 // The disk a place's spaces take, in bytes: the image (null when it is not there), the tools and
-// the spaces' own volumes, and what a clean-up would free now, the image among it or not.
+// the spaces' own volumes in all and by space, and what a clean-up would free now, the image among it or not.
 const spaceDiskSchema = z.object({
   imageBytes: z.number().min(0).nullable(),
   // A download of the image under way on the host, and how the last one ended while the image is absent.
@@ -316,6 +314,8 @@ const spaceDiskSchema = z.object({
   imageFailure: failureSchema.nullable().default(null),
   toolsBytes: z.number().min(0),
   spacesBytes: z.number().min(0),
+  // Each space's own volumes by its id, what deleting it gives back; empty from a host before it was counted.
+  bytesBySpace: z.record(z.string(), z.number().min(0)).default({}),
   freeBytes: z.number().min(0),
   freesImage: z.boolean(),
 });

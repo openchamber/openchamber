@@ -81,7 +81,7 @@ export const SnippetsSidebar: React.FC<SnippetsSidebarProps> = ({ onItemSelect }
                 <span className="typography-ui-label font-normal truncate text-foreground">#{snippet.name}</span>
                 <span className="typography-micro text-muted-foreground bg-muted px-1 rounded flex-shrink-0 leading-none pb-px border border-border/50">{t(`snippets.source.${snippet.source}`)}</span>
               </div>
-              <div className="typography-micro text-muted-foreground/60 truncate leading-tight">
+              <div className="typography-micro text-muted-foreground truncate leading-tight">
                 {snippet.description || snippet.content.replace(/\s+/g, ' ').substring(0, 80)}
               </div>
             </button>

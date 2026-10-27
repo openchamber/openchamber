@@ -46,7 +46,7 @@ const NoteMeta: React.FC<{ note: ProjectNote; pinned: boolean }> = ({ note, pinn
             event.stopPropagation();
             void openSessionLink(origin.sessionId, origin.messageId ?? null);
           }}
-          className="text-muted-foreground/80 underline decoration-dotted underline-offset-2 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="text-muted-foreground underline decoration-dotted underline-offset-2 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           title={t('rightSidebar.contextNotesTodo.notes.source.open')}
         >
           {sourceLabel}

@@ -295,7 +295,7 @@ export function ArchiveSessionsView({ layout, onLeave, initialQuery = '' }: {
       type="button"
       onClick={() => setVisibleCount((count) => count + PAGE_SIZE)}
       className={cn(
-        'flex items-center justify-start rounded-md text-start text-muted-foreground/70 leading-tight hover:text-foreground hover:underline',
+        'flex items-center justify-start rounded-md text-start text-muted-foreground leading-tight hover:text-foreground hover:underline',
         layout === 'mobile' ? 'min-h-10 px-3 typography-micro' : 'mt-1 px-2 py-1 text-xs',
       )}
     >
@@ -371,7 +371,7 @@ export function ArchiveSessionsView({ layout, onLeave, initialQuery = '' }: {
         onClick={onSelect}
         style={{ touchAction: 'manipulation' }}
       >
-        {fromDeletedSpace ? <Icon name="box-3" className="size-3.5" /> : null}
+        {fromDeletedSpace ? <Icon name="instance" className="size-3.5" /> : null}
         <span className="max-w-40 truncate">{label}</span>
         <span className="tabular-nums text-muted-foreground">{count}</span>
       </Button>
@@ -451,9 +451,9 @@ export function ArchiveSessionsView({ layout, onLeave, initialQuery = '' }: {
             : 'text-muted-foreground hover:bg-interactive-hover/50 hover:text-foreground',
         )}
       >
-        {fromDeletedSpace ? <Icon name="box-3" className="h-3.5 w-3.5 flex-shrink-0" /> : null}
+        {fromDeletedSpace ? <Icon name="instance" className="h-3.5 w-3.5 flex-shrink-0" /> : null}
         <span className="min-w-0 flex-1 truncate">{label}</span>
-        <span className="flex-shrink-0 typography-micro text-muted-foreground/70">{count}</span>
+        <span className="flex-shrink-0 typography-micro text-muted-foreground">{count}</span>
       </button>
       {sessionsForDelete ? (
         <Tooltip>
@@ -504,11 +504,11 @@ export function ArchiveSessionsView({ layout, onLeave, initialQuery = '' }: {
                       {session.title || t('sessions.sidebar.session.untitled')}
                     </span>
                     {normalizedQuery && directoryLabel ? (
-                      <span className="max-w-40 flex-shrink-0 truncate text-[0.72rem] text-muted-foreground/70" title={sessionDirectory}>
+                      <span className="max-w-40 flex-shrink-0 truncate text-[0.72rem] text-muted-foreground" title={sessionDirectory}>
                         {directoryLabel}
                       </span>
                     ) : null}
-                    <span className="flex-shrink-0 text-[0.72rem] text-muted-foreground/75">
+                    <span className="flex-shrink-0 text-[0.72rem] text-muted-foreground">
                       {formatSessionDateLabel(session.time?.archived ?? session.time?.updated ?? session.time?.created ?? Date.now())}
                     </span>
                     {restorable ? <button

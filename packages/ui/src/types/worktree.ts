@@ -24,6 +24,9 @@ export interface WorktreeMetadata {
    */
   title?: string;
 
+  /** When the user pinned the task to the top of the sidebar; absent while unpinned. */
+  pinnedAt?: number;
+
   kind?: 'pr' | 'standard';
 
   /**

@@ -540,7 +540,7 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
           </a>
         </div>
 
-        <p className="text-center typography-ui text-muted-foreground/60">
+        <p className="text-center typography-ui text-muted-foreground">
           {t('aboutDialog.footerNote')}
         </p>
 

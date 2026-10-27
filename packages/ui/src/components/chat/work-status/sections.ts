@@ -18,6 +18,7 @@ export const WORK_STATUS_SECTION_IDS = [
   'usage',
   'telemetry',
   'subagents',
+  'workflows',
   'mcp',
   'pinned',
   'contextSources',
@@ -31,6 +32,7 @@ export const WORK_STATUS_SECTION_LABEL_KEYS = {
   usage: 'chat.workStatus.section.usage',
   telemetry: 'chat.workStatus.section.telemetry',
   subagents: 'chat.workStatus.section.subagents',
+  workflows: 'chat.workStatus.section.workflows',
   mcp: 'chat.workStatus.section.mcp',
   pinned: 'chat.workStatus.section.pinned',
   contextSources: 'chat.workStatus.section.contextBreakdown',
@@ -80,14 +82,18 @@ export const sanitizeWorkStatusSectionOrder = (value: readonly string[] | null |
 /**
  * What the panel and the sections dialog show: the saved order with sections
  * of extensions that are not available here left out, and available ones the
- * saved order does not know appended in the order given.
+ * saved order does not know appended in the order given. Built-in sections
+ * the build lacks (`unavailable`) are left out too.
  */
 export const resolveWorkStatusSectionOrder = (
   stored: readonly string[] | null | undefined,
   extensionIds: readonly ExtensionSectionId[],
+  unavailable: readonly WorkStatusSectionId[] = [],
 ): WorkStatusPanelSectionId[] => {
   const available = new Set<string>(extensionIds);
-  const order = sanitizeWorkStatusSectionOrder(stored).filter((id) => !isExtensionSectionId(id) || available.has(id));
+  const missing = new Set<string>(unavailable);
+  const order = sanitizeWorkStatusSectionOrder(stored)
+    .filter((id) => !missing.has(id) && (!isExtensionSectionId(id) || available.has(id)));
   const placed = new Set<string>(order);
   for (const id of extensionIds) {
     if (!placed.has(id)) order.push(id);
@@ -112,9 +118,10 @@ export const isWorkStatusSectionVisible = (
 export const areAllWorkStatusSectionsHidden = (
   hidden: readonly string[] | null | undefined,
   extensionIds: readonly ExtensionSectionId[] = [],
+  unavailable: readonly WorkStatusSectionId[] = [],
 ): boolean =>
   hidden != null
-  && WORK_STATUS_SECTION_IDS.every((id) => hidden.includes(id))
+  && WORK_STATUS_SECTION_IDS.every((id) => unavailable.includes(id) || hidden.includes(id))
   && extensionIds.every((id) => hidden.includes(id));
 
 export const getWorkStatusPanelPresentation = ({

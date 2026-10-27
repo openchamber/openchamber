@@ -66,6 +66,18 @@ the user can want independently:
   `session.prompt` hook: a prompt for the session, from any sender, aborts the
   waiting call, which returns `{ answered: false, reason: "chat" }`, and the
   agent reads the message next.
+- `openchamber_workflow` — `workflow.*`, scripts that fan a large task out to
+  many agents, run by OpenChamber (`../workflows/DOCUMENTATION.md`). Only in
+  builds with `OPENCHAMBER_WORKFLOWS_ENABLE`; there it is on unless
+  `agentWorkflowToolEnabled` is `false`. How to write a script is the `script`
+  input's description, read while the agent writes one, for the same reason
+  render's page rules sit on `html`.
+- `openchamber_workflow_answer` — `workflow.answer`, how a workflow agent
+  asked for a schema answer hands it over. Registered with the workflow tool,
+  but the managed config denies it in every session (`managedPermissionRules`)
+  and only the session of such an agent allows it, so no other session carries
+  its declaration. Direct, never behind Code Mode: the agent's prompt names it,
+  and the sessions that see it are the ones that need it.
 
 Both default to on, are toggled in Settings → General → OpenChamber Tools, and take
 effect in the running OpenCode within a couple of seconds — OpenChamber rewrites

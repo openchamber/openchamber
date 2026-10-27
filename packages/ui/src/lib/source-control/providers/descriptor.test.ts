@@ -130,7 +130,7 @@ describe('source-control provider descriptors', () => {
     expect(fallback.terminology).toMatchObject({ changeRequest: 'pullRequest', changeRequestPrefix: '#', issuePrefix: '#' });
     expect(fallback.icon.sprite).toBe('git-branch');
     expect(fallback.auth.methods).toEqual([]);
-    expect(fallback.urls).toEqual({ changeRequest: [], issue: [], discussion: [] });
+    expect(fallback.urls).toEqual({ changeRequest: [], issue: [], discussion: [], commit: [], user: [] });
     // `branchHeads` is how every host has behaved, not a feature turned on.
     const { branchHeads, reviewModel, ...features } = fallback.features;
     expect(Object.values(features).filter((value) => value === true)).toEqual([]);

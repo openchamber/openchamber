@@ -6,7 +6,7 @@ import { useConfigStore } from '@/stores/useConfigStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
 import { getAllSyncSessionMap, getDirectoryState, getSyncChildStores } from '@/sync/sync-refs';
-import { getLinkedIssues } from '@/lib/linkedIssues';
+import { getLinkedIssues, isLinkedChange } from '@/lib/linkedIssues';
 import { normalizePath } from '@/lib/pathNormalization';
 import { checkoutHoldsDirectory, checkoutHoldsSubfolder } from '@/lib/worktrees/worktreePaths';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
@@ -46,6 +46,7 @@ const projectSession = (session: Session, projectId: string, guestId: string, wo
     ?? (attached && attachedRoot && checkoutHoldsDirectory(attachedRoot, sessionDirectory) ? toWorktree(attached) : null);
   const connected = useConfigStore.getState().isConnected;
   const statusInvalidated = child?.sessionStatusInvalidated?.[session.id] === true;
+  const linked = getLinkedIssues(session);
   let activity: GuestSessionRecord['activity'] = 'unknown';
   if (connected) {
     if (status?.type === 'busy') activity = 'running';
@@ -61,12 +62,16 @@ const projectSession = (session: Session, projectId: string, guestId: string, wo
     parentId: session.parentID ?? null, createdAt: session.time.created, updatedAt: session.time.updated,
     archivedAt: session.time.archived || null, worktree,
     activity, outcome: activity === 'idle' ? observed?.outcome ?? null : null,
-    items: getLinkedIssues(session).flatMap((item) => {
+    items: linked.flatMap((item) => {
       if (item.kind !== 'guest' || item.providerId !== guestId) return [];
       const reference: GuestSessionRecord['items'][number] = { id: item.identifier };
       if (item.data !== undefined) reference.data = item.data;
       return [reference];
     }),
+    // Every extension with `sessions` sees every link, the agent's and the
+    // user's too: no more than the session titles it already reads. Another
+    // extension's opaque `data` stays out.
+    links: linked.map((item) => ({ title: item.title, url: item.url, kind: isLinkedChange(item) ? 'change' : 'issue', linkedAt: item.linkedAt })),
   };
 };
 

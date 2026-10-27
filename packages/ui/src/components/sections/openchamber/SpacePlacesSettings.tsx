@@ -21,7 +21,8 @@ import { failureOfError, spaceFailureText } from '@/components/session/spaces/sp
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
-import { getCurrentIntlLocale, useI18n, type I18nKey } from '@/lib/i18n';
+import { useI18n, type I18nKey } from '@/lib/i18n';
+import { formatDiskSize } from '@/lib/spaces/space-disk';
 import { Input } from '@/components/ui/input';
 import { reportSettingsSaveState } from '@/lib/persistence';
 import {
@@ -41,21 +42,6 @@ import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
 import { SettingsControlGroup, SettingsFieldRow } from '../shared/SettingsSection';
 import { IMAGE_SETTLE_REFRESH_MS, nextDiskReadDelay } from './spacePlacesDisk';
-
-// Decimal units, as Docker and the Mac's own disk tools count; only the number is localised.
-const SIZE_UNITS = ['B', 'KB', 'MB', 'GB', 'TB'] as const;
-
-const formatDiskSize = (bytes: number): string => {
-  let value = bytes;
-  let unit = 0;
-  while (value >= 1000 && unit < SIZE_UNITS.length - 1) {
-    value /= 1000;
-    unit += 1;
-  }
-  const number = new Intl.NumberFormat(getCurrentIntlLocale(), { maximumFractionDigits: unit === 0 ? 0 : 1 }).format(value);
-  // A no-break space, so a narrow screen never puts the unit alone on the next line.
-  return `${number}\u00a0${SIZE_UNITS[unit]}`;
-};
 
 type Read<T> = { kind: 'reading' } | { kind: 'read'; value: T } | { kind: 'failed'; error: Error };
 
@@ -320,7 +306,7 @@ const PlaceBlock: React.FC<{ place: SpacePlace; title: string; field?: React.Rea
               </p>
               {spaces.map((entry) => (
                 <div key={entry.id} className="flex items-center gap-2 opacity-60">
-                  <Icon name="box-3" className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  <Icon name="instance" className="h-4 w-4 shrink-0 text-muted-foreground" />
                   {/* A name from the label: text to show. */}
                   <span className="typography-ui-label truncate text-foreground">{entry.name}</span>
                 </div>

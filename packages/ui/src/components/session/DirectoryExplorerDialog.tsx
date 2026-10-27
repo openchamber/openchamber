@@ -205,7 +205,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
   const { isMobile } = useDeviceInfo();
   const inputRef = React.useRef<HTMLInputElement>(null);
   const addButtonRef = React.useRef<HTMLButtonElement>(null);
-  const rowRefs = React.useRef(new Map<string, HTMLButtonElement>());
+  const rowRefs = React.useRef(new Map<string, HTMLDivElement>());
   const [dialogHomeDirectory, setDialogHomeDirectory] = React.useState('');
   const [query, setQuery] = React.useState('~/');
   const [entries, setEntries] = React.useState<BrowseEntry[]>([]);
@@ -844,7 +844,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
       ) : null}
       {/* A path field reads left to right in every language, like code. */}
       <div dir="ltr" className="relative">
-        <Icon name="folder-add" className="pointer-events-none absolute inset-s-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/80" />
+        <Icon name="folder-add" className="pointer-events-none absolute inset-s-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
         <Input
           ref={inputRef}
           value={query}
@@ -881,7 +881,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
   const resultsSection = (
     <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border/60 bg-[var(--surface-elevated)] shadow-sm">
       <ScrollableOverlay outerClassName="max-h-[min(28rem,58vh)]" className="p-2">
-        <div className="px-2 pb-1 pt-0.5 typography-meta font-medium uppercase tracking-wide text-muted-foreground/80">
+        <div className="px-2 pb-1 pt-0.5 typography-meta font-medium uppercase tracking-wide text-muted-foreground">
           {t('directoryExplorerDialog.browse.directories')}
         </div>
         {isLoading ? (
@@ -915,7 +915,9 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
             {rows.map((row, index) => {
               const isActive = index === highlightedIndex;
               return (
-                <button
+                // A div, not a button: a directory row holds its own select
+                // and quick-add buttons, and a button cannot contain buttons.
+                <div
                   key={row.value}
                   ref={(node) => {
                     if (node) {
@@ -924,11 +926,18 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
                       rowRefs.current.delete(row.value);
                     }
                   }}
-                  type="button"
-
+                  role="button"
+                  tabIndex={0}
                   onMouseEnter={() => setHighlightedIndex(index)}
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={() => executeRow(row)}
+                  onKeyDown={(event) => {
+                    if (event.target !== event.currentTarget) return;
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      executeRow(row);
+                    }
+                  }}
                   className={cn(
                     'flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-start transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                     isActive && 'bg-interactive-selection text-interactive-selection-foreground',
@@ -936,9 +945,9 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
                   )}
                 >
                   {row.type === 'up' ? (
-                    <Icon name="arrow-left-s" className="h-4 w-4 flex-shrink-0 text-muted-foreground/80" />
+                    <Icon name="arrow-left-s" className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
                   ) : (
-                    <Icon name="folder-6" className="h-4 w-4 flex-shrink-0 text-muted-foreground/80" />
+                    <Icon name="folder-6" className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
                   )}
                   <span className="flex min-w-0 flex-1 items-center gap-1.5">
                     <span className="truncate typography-ui-label text-foreground">{row.name}</span>
@@ -971,7 +980,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
                       </button>
                     </>
                   ) : null}
-                </button>
+                </div>
               );
             })}
           </div>

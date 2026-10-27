@@ -30,13 +30,18 @@ const matchesEntry = (value, pluginDirectory) => (
  * @param {string} purpose short noun phrase for the error message, e.g. "managed tool"
  * @returns {string} the merged config as JSON
  */
-export const appendManagedPlugin = (rawConfig, pluginDirectory, purpose) => {
+const parseConfigContent = (rawConfig, purpose) => {
   const errors = [];
   const text = (rawConfig ?? '').trim();
   const parsed = text ? parseJsonc(text, errors, { allowTrailingComma: true }) : {};
   if (errors.length > 0 || !isJsonObject(parsed)) {
     throw new Error(`OPENCODE_CONFIG_CONTENT must contain a valid JSON object before OpenChamber can inject its ${purpose}`);
   }
+  return parsed;
+};
+
+export const appendManagedPlugin = (rawConfig, pluginDirectory, purpose) => {
+  const parsed = parseConfigContent(rawConfig, purpose);
   for (const key of ['plugin', 'plugins']) {
     if (parsed[key] !== undefined && !Array.isArray(parsed[key])) {
       throw new Error(`OPENCODE_CONFIG_CONTENT ${key} must be an array before OpenChamber can inject its ${purpose}`);
@@ -50,6 +55,32 @@ export const appendManagedPlugin = (rawConfig, pluginDirectory, purpose) => {
   parsed.plugins = [
     ...configured.filter((value) => !matchesEntry(value, pluginDirectory)),
     pluginDirectory,
+  ];
+  return JSON.stringify(parsed);
+};
+
+const sameRule = (left, right) => isJsonObject(left)
+  && left.action === right.action && left.resource === right.resource && left.effect === right.effect;
+
+/**
+ * Append managed permission rules to the `permissions` list of an
+ * `OPENCODE_CONFIG_CONTENT` value, the fallback twin of the managed config
+ * file's `permissions`. The user's rules keep their place before ours, and a
+ * rule already there is not added twice across restarts.
+ *
+ * @param {string | undefined} rawConfig the current `OPENCODE_CONFIG_CONTENT`, JSONC or unset
+ * @param {{ action: string, resource: string, effect: string }[]} rules
+ * @returns {string} the merged config as JSON
+ */
+export const appendManagedPermissions = (rawConfig, rules) => {
+  const parsed = parseConfigContent(rawConfig, 'managed tool permissions');
+  if (parsed.permissions !== undefined && !Array.isArray(parsed.permissions)) {
+    throw new Error('OPENCODE_CONFIG_CONTENT permissions must be an array before OpenChamber can inject its managed tool permissions');
+  }
+  const configured = Array.isArray(parsed.permissions) ? parsed.permissions : [];
+  parsed.permissions = [
+    ...configured.filter((existing) => !rules.some((rule) => sameRule(existing, rule))),
+    ...rules,
   ];
   return JSON.stringify(parsed);
 };

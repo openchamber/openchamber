@@ -111,10 +111,10 @@
     },
     "markdown": {
       "link": "#006DCC",
-      "linkHover": "#3573F0",
+      "linkHover": "#336ee7",
       "inlineCode": "#067D17",
       "inlineCodeBackground": "#fcfcfc",
-      "blockquote": "#8C8C8C",
+      "blockquote": "#757575",
       "blockquoteBorder": "#E1E4EB",
       "listMarker": "#9E880D99",
       "bold": "#3e4044",

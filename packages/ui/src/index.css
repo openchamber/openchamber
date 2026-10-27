@@ -91,18 +91,26 @@
   }
 }
 
-/* A PR or issue reference coloured by its state (--oc-ref-tint). It is side
-   context, so it rests a little blended into the muted text, its state still
-   plain to read, and takes its full colour on hover or focus, its own or that
-   of an enclosing .oc-ref-tint-scope row. */
+/* A PR or issue mark coloured by its state (--oc-ref-tint). The mark alone
+   carries the state, its number stays neutral, so the colour shows at full
+   strength: blended into the muted text a 12px glyph read as grey. */
 @utility oc-ref-tint {
-  color: color-mix(in oklab, var(--oc-ref-tint) 75%, var(--muted-foreground));
+  color: var(--oc-ref-tint);
+}
 
-  &:hover,
-  &:focus-visible,
-  :where(.oc-ref-tint-scope:hover, .oc-ref-tint-scope:focus-within) & {
-    color: var(--oc-ref-tint);
-  }
+/* A list row's title at rest: halfway between body and muted text, so it stays
+   a step above the row's metadata (muted) and below a title that needs the
+   user (full strength). An opacity of the body colour would not do: light
+   themes keep body text soft, and at 80% it lands on or under the muted
+   colour. */
+@utility oc-title-rest {
+  color: color-mix(in oklab, var(--foreground) 50%, var(--muted-foreground));
+}
+
+/* A container's label (a worktree, folder or space in a list): a step above
+   the titles at rest inside it and below the full-strength header above it. */
+@utility oc-group-label {
+  color: color-mix(in oklab, var(--foreground) 75%, var(--muted-foreground));
 }
 
 /* Buttons should never look selectable. */
@@ -435,7 +443,7 @@ div[data-chat-input-footer="true"] {
    composites to the same pixels. The bands are later siblings of the
    scroller (ChatContainer) and follow its scroll-shadow attributes through
    `~`, so they switch in the same style pass the mask did. They sit under the
-   overlay scrollbar, the prompt rail and the composer, none of which the mask
+   overlay scrollbar, the prompt navigator and the composer, none of which the mask
    covered either. */
 .chat-scroll-fade {
   --scroll-shadow-size: 48px;
@@ -920,6 +928,33 @@ html:not(.dark) .chat-scroll {
   }
 }
 
+/* A text field's suggestion list (components/inline-picker), portalled with
+   fixed coordinates: the composer's pickers' motion, a fade with a short rise,
+   played on the list itself, since a moving wrapper would carry a fixed list
+   with it. `translate` composes with the list's own placement. */
+@keyframes oc-inline-picker-in {
+  from {
+    translate: 0 3px;
+    opacity: 0;
+  }
+}
+
+.oc-inline-picker > * {
+  animation: oc-inline-picker-in 90ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .oc-inline-picker > * {
+    animation-name: oc-fade-in-only;
+  }
+}
+
+@keyframes oc-fade-in-only {
+  from {
+    opacity: 0;
+  }
+}
+
 /* Every Pierre instance (Changes view, tool cards, the tool dialog, the Files
    view) renders into the shadow root of a `diffs-container`. Setting the font
    and line height on that host resolves `--text-code` where the instance sits, so local
@@ -1146,13 +1181,14 @@ diffs-container {
 /* Git panel header: gives up room in steps while its row does not fit, as
    measured by useToolbarFit in GitHeader. The repository picker shrinks
    first; the branch picker keeps its width until that is not enough. Then
-   the sync button drops its word, keeping its icon, counts and tooltip; the
-   counts go last. */
+   the sync button and an isolated space's Apply drop their words, keeping
+   their icons and names for the pointer; the counts go last. */
 [data-git-header-branch-shrinks] .branch-selector__trigger {
   flex-shrink: 1;
 }
 
 [data-git-header-compact] .sync-actions__label,
+[data-git-header-compact] .space-apply__label,
 [data-git-header-tight] .sync-actions__text {
   display: none;
 }
@@ -1221,6 +1257,15 @@ diffs-container {
 
 [data-walkthrough-header-narrow] .walkthrough-header__source-icon {
   display: inline;
+}
+
+/* Workflows panel header: gives up room in steps while its row does not fit,
+   as measured by useToolbarFit; each step keeps the ones before it. The view
+   labels go first, then the run action's label, last the run's name. */
+[data-workflows-header-compact] .workflows-header__label,
+[data-workflows-header-tight] .workflows-header__action-label,
+[data-workflows-header-narrow] .workflows-header__run-name {
+  display: none;
 }
 
 /* Pull request actions: the walkthrough label goes first, since merge controls
@@ -1613,7 +1658,9 @@ diffs-container {
 /* Inline code sits inside a sentence: the theme's code colour over its own
    quiet chip. The colour keeps the theme's value with a touch of transparency,
    and the chip fades into the background further, so neither shouts like the
-   original full-strength style. */
+   original full-strength style. Many themes paint the chip almost the canvas
+   colour, so a faint wash of the text colour on top keeps it visible as a
+   chip in every theme. */
 .markdown-content code[data-streamdown="inline-code"] {
   background-color: var(--markdown-inline-code-bg, var(--surface-subtle)) !important;
   color: var(--markdown-inline-code, var(--foreground)) !important;
@@ -1626,6 +1673,7 @@ diffs-container {
 @supports (color: color-mix(in lab, red, red)) {
   .markdown-content code[data-streamdown="inline-code"] {
     background-color: color-mix(in srgb, var(--markdown-inline-code-bg, var(--surface-subtle)) 50%, transparent) !important;
+    background-image: linear-gradient(color-mix(in srgb, var(--foreground) 4%, transparent), color-mix(in srgb, var(--foreground) 4%, transparent));
     color: color-mix(in srgb, var(--markdown-inline-code, var(--foreground)) 90%, transparent) !important;
   }
 }
@@ -1671,6 +1719,26 @@ diffs-container {
   padding-inline-start: 0.8rem;
   font-style: normal;
   color: var(--markdown-blockquote, var(--muted-foreground));
+}
+
+/* GitHub alerts (`> [!NOTE]`): the quote's edge and title take the kind's
+   status colour, and the body reads as ordinary text instead of a muted quote. */
+.markdown-content blockquote[data-oc-alert] {
+  --oc-alert-color: var(--status-info);
+  border-inline-start-color: var(--oc-alert-color);
+  color: var(--foreground);
+}
+
+.markdown-content blockquote[data-oc-alert="tip"] { --oc-alert-color: var(--status-success); }
+.markdown-content blockquote[data-oc-alert="warning"] { --oc-alert-color: var(--status-warning); }
+.markdown-content blockquote[data-oc-alert="caution"] { --oc-alert-color: var(--status-error); }
+
+.markdown-content blockquote[data-oc-alert] > [data-oc-alert-title] {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  color: var(--oc-alert-color);
+  font-weight: 500;
 }
 
 /* Markdown horizontal rule - use theme colors */

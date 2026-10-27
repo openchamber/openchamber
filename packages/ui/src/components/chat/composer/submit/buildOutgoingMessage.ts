@@ -78,7 +78,10 @@ export type ComposerContextReference =
         thread?: 'issue' | 'pull';
         /** Opaque guest payload; rides the context part metadata, not its text. */
         data?: JsonValue;
-    };
+    }
+    /** `messageId`: the message link that named this session, when the message had no text of its own. */
+    | { kind: 'session'; sessionId: string; title: string; contextText: string; messageId?: string }
+    | { kind: 'session-message'; sessionId: string; messageId: string; sessionTitle: string; excerpt: string; contextText: string };
 
 /** What the composer has attached besides text and files. */
 export interface ComposerContextInput {
@@ -246,6 +249,18 @@ export function buildComposerContext(
                     payload.data = data;
                 }
                 attach(createContextPart(payload, contextText));
+                break;
+            }
+            case 'session': {
+                const { sessionId, title, contextText, messageId } = reference;
+                const payload: Extract<ContextPartPayload, { kind: 'session' }> = { kind: 'session', sessionId, title };
+                if (messageId) payload.messageId = messageId;
+                attach(createContextPart(payload, contextText));
+                break;
+            }
+            case 'session-message': {
+                const { sessionId, messageId, sessionTitle, excerpt, contextText } = reference;
+                attach(createContextPart({ kind: 'session-message', sessionId, messageId, sessionTitle, excerpt }, contextText));
                 break;
             }
         }

@@ -442,9 +442,44 @@ const MAX_DESCRIBED_TOOL_CALLS = 4
 const MAX_TEXT_LENGTH = 120
 
 const OPENCHAMBER_RENDER_TOOL = "openchamber_render"
+const OPENCHAMBER_WORKFLOW_TOOL = "openchamber_workflow"
 
-/** The control, schedule, browser, memory, knowledge, notify and render tools OpenChamber gives every session. */
-const OPENCHAMBER_TOOLS = new Set(["openchamber", "openchamber_schedule", "openchamber_web", "openchamber_memory", "openchamber_knowledge", "openchamber_notify", OPENCHAMBER_RENDER_TOOL])
+/** The control, schedule, browser, memory, knowledge, notify, render and workflow tools OpenChamber gives a session. */
+const OPENCHAMBER_TOOLS = new Set(["openchamber", "openchamber_schedule", "openchamber_web", "openchamber_memory", "openchamber_knowledge", "openchamber_notify", OPENCHAMBER_RENDER_TOOL, OPENCHAMBER_WORKFLOW_TOOL])
+
+// The result envelope the agent tool returns as text (`agent-tool/runtime.js`).
+const proposedWorkflowResultSchema = z.object({
+  ok: z.literal(true),
+  action: z.literal("workflow.run"),
+  data: z.object({ runId: z.string().min(1) }),
+})
+
+/**
+ * The workflow run an `openchamber_workflow` call proposed with `workflow.run`,
+ * or null for any other part. The chat draws that run's card in place of the
+ * call's row, so the user approves the plan where the agent asked.
+ */
+export function proposedWorkflowRunId(toolName: ToolName, state: ToolState): string | null {
+  if (toolName !== OPENCHAMBER_WORKFLOW_TOOL || state.status !== "completed") return null
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(state.output)
+  } catch {
+    return null
+  }
+  const result = proposedWorkflowResultSchema.safeParse(parsed)
+  return result.success ? result.data.data.runId : null
+}
+
+/**
+ * Whether the chat draws what a call showed instead of its tool row: a page
+ * from `openchamber_render`, or the run a `workflow.run` call proposed. Both
+ * ask something of the user, so both are hoisted to the answer when Activity
+ * is collapsed.
+ */
+export const isShownInPlace = (toolName: ToolName, state: ToolState): boolean => (
+  renderedPage(toolName, state) !== null || proposedWorkflowRunId(toolName, state) !== null
+)
 
 const openChamberCallSchema = z
   .object({

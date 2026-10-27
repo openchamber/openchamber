@@ -6,28 +6,13 @@ import { ScrollShadow } from '@/components/ui/ScrollShadow';
 import { Button } from '@/components/ui/button';
 import { useUIStore } from '@/stores/useUIStore';
 import { WORK_STATUS_PANEL_WIDTH } from './useWorkStatusVisibility';
-import { setWorkStatusReserved } from '@/components/layout/rightSlot';
+import { setWorkStatusColumn } from '@/components/layout/rightSlot';
 import { LAYOUT_ANIMATION_EASING } from '@/lib/layoutAnimation';
 import { useLayoutAnimationMs } from '@/hooks/useLayoutAnimationMs';
-import { WorkStatusGoalRow } from './WorkStatusGoalRow';
-import { WorkStatusPrimaryGroup } from './WorkStatusPrimaryGroup';
-import { WorkStatusUsageSection } from './WorkStatusUsageSection';
-import { WorkStatusTelemetrySection } from './WorkStatusTelemetrySection';
-import { WorkStatusSubagentsSection } from './WorkStatusSubagentsSection';
-import { WorkStatusMcpSection } from './WorkStatusMcpSection';
-import { WorkStatusPinnedSection } from './WorkStatusPinnedSection';
-import { WorkStatusContextSection } from './WorkStatusContextSection';
 import { WorkStatusSectionsDialog } from './WorkStatusSectionsDialog';
-import { WorkStatusExtensionSection } from './WorkStatusExtensionSection';
-import {
-  areAllWorkStatusSectionsHidden,
-  getWorkStatusPanelPresentation,
-  isExtensionSectionId,
-  isWorkStatusSectionVisible,
-  resolveWorkStatusSectionOrder,
-  type WorkStatusSectionId,
-} from './sections';
-import { useWorkStatusExtensionSections } from './useWorkStatusExtensionSections';
+import { WorkStatusSectionList } from './WorkStatusSectionList';
+import { getWorkStatusPanelPresentation } from './sections';
+import { useWorkStatusSectionLayout } from './useWorkStatusSectionLayout';
 import { WorkStatusPresenceProvider } from './presence';
 import { Icon } from '@/components/icon/Icon';
 
@@ -45,6 +30,11 @@ type Props = {
    * the card too, so closing the panel goes straight back to the card.
    */
   reserved?: boolean;
+  /**
+   * Inline only: with `reserved`, the card keeps its column beside the open
+   * context panel too, because the chat area fits both and the transcript.
+   */
+  besidePanel?: boolean;
   /**
    * Floats over the transcript instead of sitting beside it, for when the chat
    * is too narrow to give it a column of its own.
@@ -74,28 +64,18 @@ const PANEL_TRANSITION_EASING = LAYOUT_ANIMATION_EASING;
  * eat a visible slice of every row's trailing value, and the shadows already
  * say there is more to see.
  */
-export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible, reserved = false, repositoryEnabled = true, overlay = false }) => {
+export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible, reserved = false, besidePanel = false, repositoryEnabled = true, overlay = false }) => {
   const { t, direction } = useI18n();
   // The card's fade and lift follow the side columns' animation setting.
   const panelTransitionMs = useLayoutAnimationMs();
   const setScrollTop = useUIStore((state) => state.setWorkStatusScrollTop);
   const setOverlayOpen = useUIStore((state) => state.setWorkStatusOverlayOpen);
-  const hiddenSections = useUIStore((state) => state.workStatusHiddenSections);
-  const storedOrder = useUIStore((state) => state.workStatusSectionOrder);
-  const extensionSections = useWorkStatusExtensionSections();
-  const sectionOrder = React.useMemo(
-    () => resolveWorkStatusSectionOrder(storedOrder, extensionSections.ids),
-    [extensionSections.ids, storedOrder],
-  );
+  const sectionLayout = useWorkStatusSectionLayout();
+  const { allSectionsHidden } = sectionLayout;
   const [sectionsDialogOpen, setSectionsDialogOpen] = React.useState(false);
   // Starts optimistic: sections report after their first commit, and rendering
   // nothing on the way in would make the card flash out and back on arrival.
   const [renderedSections, setRenderedSections] = React.useState(1);
-  const sectionVisible = React.useCallback(
-    (sectionId: Parameters<typeof isWorkStatusSectionVisible>[1]) =>
-      isWorkStatusSectionVisible(hiddenSections, sectionId),
-    [hiddenSections],
-  );
   const frameRef = React.useRef<number | null>(null);
 
   // Restoring the offset has to happen the moment the scroller attaches, and
@@ -112,7 +92,6 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
   // re-enable sections. The previous `renderedSections > 0` guard is preserved
   // for the transient "no data yet" state so the panel doesn't flash a bare
   // bordered card on first mount.
-  const allSectionsHidden = areAllWorkStatusSectionsHidden(hiddenSections, extensionSections.ids);
   const { interactive, showEmptyState } = getWorkStatusPanelPresentation({
     visible,
     contentMounted,
@@ -136,11 +115,12 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
   // sections all reported nothing gives it back, as its collapse did before.
   const empty = contentMounted && renderedSections === 0 && !allSectionsHidden;
   const wantsColumn = !overlay && reserved && !empty;
+  const wantsColumnBesidePanel = wantsColumn && besidePanel;
   React.useLayoutEffect(() => {
     if (overlay) return undefined;
-    setWorkStatusReserved(wantsColumn);
-    return () => setWorkStatusReserved(false);
-  }, [overlay, wantsColumn]);
+    setWorkStatusColumn(wantsColumn, wantsColumnBesidePanel);
+    return () => setWorkStatusColumn(false, false);
+  }, [overlay, wantsColumn, wantsColumnBesidePanel]);
 
   const restore = React.useCallback((node: HTMLElement | null) => {
     if (!node) return;
@@ -198,17 +178,6 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
       document.removeEventListener('keydown', onKeyDown);
     };
   }, [overlay, setOverlayOpen, visible, sectionsDialogOpen]);
-
-  // Keep these elements owned by the panel so primary readout updates do not
-  // rerender unrelated sections through the composition callback.
-  const secondarySections = {
-    usage: <WorkStatusUsageSection />,
-    telemetry: <WorkStatusTelemetrySection sessionId={sessionId} directory={directory} />,
-    subagents: <WorkStatusSubagentsSection sessionId={sessionId} directory={directory} />,
-    mcp: <WorkStatusMcpSection sessionId={sessionId} directory={directory} />,
-    pinned: <WorkStatusPinnedSection sessionId={sessionId} directory={directory} />,
-    contextSources: <WorkStatusContextSection sessionId={sessionId} directory={directory} />,
-  } satisfies Record<Exclude<WorkStatusSectionId, 'session' | 'repository'>, React.ReactNode>;
 
   return (
     <aside
@@ -306,22 +275,12 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
         // settings in the first rendered heading, regardless of saved order.
         className="oc-hide-scrollbar min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-2 [&>section:first-child>[data-work-status-heading]]:pe-7"
       >
-        <WorkStatusPrimaryGroup
+        <WorkStatusSectionList
           sessionId={sessionId}
           directory={directory}
-          showSession={sectionVisible('session')}
-          showRepository={repositoryEnabled && sectionVisible('repository')}
-          goalRow={<WorkStatusGoalRow sessionId={sessionId} directory={directory} />}
-        >
-          {(primary) => sectionOrder.map((id) => {
-            if (!sectionVisible(id)) return null;
-            if (isExtensionSectionId(id)) {
-              const guest = extensionSections.byId.get(id);
-              return guest ? <WorkStatusExtensionSection key={id} guest={guest} directory={directory} /> : null;
-            }
-            return <React.Fragment key={id}>{id === 'session' || id === 'repository' ? primary[id] : secondarySections[id]}</React.Fragment>;
-          })}
-        </WorkStatusPrimaryGroup>
+          repositoryEnabled={repositoryEnabled}
+          layout={sectionLayout}
+        />
       </ScrollShadow>
       </WorkStatusPresenceProvider>
       ) : null}

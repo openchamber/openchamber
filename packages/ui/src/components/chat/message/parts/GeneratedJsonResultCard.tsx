@@ -74,7 +74,7 @@ export const GeneratedJsonResultCard: React.FC<{ result: GeneratedResult }> = ({
               <ul className="space-y-1 text-sm text-muted-foreground">
                 {result.highlights.map((highlight, index) => (
                   <li key={`${index}-${highlight}`} className="flex gap-2">
-                    <span className="text-muted-foreground/70">-</span>
+                    <span className="text-muted-foreground">-</span>
                     <span>{highlight}</span>
                   </li>
                 ))}

@@ -230,7 +230,7 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
             </a>
           </div>
 
-          <p className="typography-meta text-muted-foreground/60 pt-2">
+          <p className="typography-meta text-muted-foreground pt-2">
             {t('aboutDialog.footerNote')}
           </p>
         </div>

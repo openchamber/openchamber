@@ -62,7 +62,7 @@ describe('section arrangement dialog', () => {
       }
     };
     ({ WorkStatusSectionsDialog } = await import('./WorkStatusSectionsDialog'));
-    useUIStore.setState({ workStatusSectionOrder: [...WORK_STATUS_SECTION_IDS], workStatusHiddenSections: [] });
+    useUIStore.setState({ workStatusSectionOrder: [...WORK_STATUS_SECTION_IDS], workStatusHiddenSections: [], isMobile: false, mobileWorkStatusHiddenSections: ['subagents'] });
     closeCount = 0;
     const container = document.createElement('div');
     document.body.appendChild(container);
@@ -141,6 +141,17 @@ describe('section arrangement dialog', () => {
     expect(closeCount).toBe(0);
   });
 
+  test('on the phone it edits the Status tab list, which hides Subagents and has no Usage', async () => {
+    await act(async () => useUIStore.setState({ isMobile: true }));
+    expect(order()).not.toContain('usage');
+    const subagents = rows().find((row) => row.dataset.settingsItem?.endsWith('.subagents'));
+    if (!subagents) throw new Error('Expected the Subagents row');
+    expect(subagents.getAttribute('aria-pressed')).toBe('false');
+    await act(async () => subagents.click());
+    expect(useUIStore.getState().mobileWorkStatusHiddenSections).toEqual([]);
+    expect(useUIStore.getState().workStatusHiddenSections).toEqual([]);
+  });
+
   test('touch requires a hold and commits the same order as mouse dragging', async () => {
     const first = handle(0);
     const touch = (y: number) => new Touch({ identifier: 1, target: first, clientX: 12, clientY: y });
@@ -150,7 +161,8 @@ describe('section arrangement dialog', () => {
     await act(async () => dispatch('touchstart', 18));
     await act(async () => dispatch('touchmove', 90));
     await act(async () => dispatch('touchend', 90));
-    expect(order()).toEqual([...WORK_STATUS_SECTION_IDS]);
+    // Workflows are not in this build, so their section is not listed.
+    expect(order()).toEqual(WORK_STATUS_SECTION_IDS.filter((id) => id !== 'workflows'));
     await act(async () => {
       dispatch('touchstart', 18);
       await new Promise((resolve) => setTimeout(resolve, 220));

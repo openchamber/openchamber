@@ -681,15 +681,37 @@ describe('openchamber session routes', () => {
     });
   });
 
-  it('records the session an agent dispatched it from, so the sidebar lists it under that work', async () => {
-    const { app, sessionMetadataStore } = createApp();
+  it('records on the prompt the session whose agent sent it, with its title', async () => {
+    const { app } = createApp();
+    sessionGetMock.mockImplementation(async ({ sessionID }) => ({ id: sessionID, title: 'PR triage', location: { directory: '/repo/app' } }));
     await request(app)
       .post('/api/openchamber/sessions')
-      .send({ directory: '/repo/app', originSessionId: 'ses_origin' })
+      .send({ directory: '/repo/app', prompt: 'Run this', model: 'openai/gpt-5.5', promptedBySessionId: 'ses_origin' })
       .expect(200);
 
-    expect(await sessionMetadataStore.get('ses_123', { directory: '/repo/app' }))
-      .toMatchObject({ openchamber: { originSessionID: 'ses_origin' } });
+    expect(sessionPromptMock).toHaveBeenCalledWith({
+      sessionID: 'ses_123',
+      text: 'Run this',
+      metadata: { openchamber: { promptedBy: { sessionID: 'ses_origin', title: 'PR triage' } } },
+    });
+  });
+
+  it('records the sender by id alone when its session cannot be read', async () => {
+    const { app } = createApp();
+    sessionGetMock.mockImplementation(async ({ sessionID }) => {
+      if (sessionID === 'ses_origin') throw new Error('not found');
+      return { id: sessionID, location: { directory: '/repo/app' } };
+    });
+    await request(app)
+      .post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', prompt: 'Run this', model: 'openai/gpt-5.5', promptedBySessionId: 'ses_origin' })
+      .expect(200);
+
+    expect(sessionPromptMock).toHaveBeenCalledWith({
+      sessionID: 'ses_123',
+      text: 'Run this',
+      metadata: { openchamber: { promptedBy: { sessionID: 'ses_origin' } } },
+    });
   });
 
   it('percent-encodes the directory header for non-ASCII checkout paths', async () => {

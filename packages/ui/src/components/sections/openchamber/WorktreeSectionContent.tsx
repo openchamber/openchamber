@@ -180,7 +180,7 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
         {isLoadingWorktrees ? (
           <p className="typography-meta text-muted-foreground">{t('settings.openchamber.worktrees.list.loading')}</p>
         ) : availableWorktrees.length === 0 ? (
-          <p className="typography-meta text-muted-foreground/70">
+          <p className="typography-meta text-muted-foreground">
             {t('settings.openchamber.worktrees.list.empty')}
           </p>
         ) : (
@@ -196,7 +196,7 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
                       {worktree.label || worktree.branch || t('settings.openchamber.worktrees.list.detachedHead')}
                     </p>
                   </div>
-                  <p className="typography-micro truncate text-muted-foreground/60">
+                  <p className="typography-micro truncate text-muted-foreground">
                     {formatPathForDisplay(worktree.path, homeDirectory)}
                   </p>
                 </div>
@@ -204,7 +204,7 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
                   type="button"
                   onClick={() => handleDeleteWorktree(worktree)}
                   className={cn(
-                    'flex h-7 w-7 shrink-0 items-center justify-center rounded text-muted-foreground/50 transition-opacity hover:bg-destructive/10 hover:text-destructive focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                    'flex h-7 w-7 shrink-0 items-center justify-center rounded text-muted-foreground transition-opacity hover:bg-destructive/10 hover:text-destructive focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                     alwaysShowActions ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
                   )}
                   aria-label={t('settings.openchamber.worktrees.list.deleteWorktreeAria', { name: worktree.branch || worktree.label || worktree.path })}
@@ -225,7 +225,7 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
                 <div key={archive.id} className="group flex w-full items-center gap-2 py-1.5">
                   <div className="min-w-0 flex-1">
                     <p dir="auto" className="typography-meta min-w-0 truncate oc-ui-start-align text-foreground">{label}</p>
-                    <p className="typography-micro truncate text-muted-foreground/60">
+                    <p className="typography-micro truncate text-muted-foreground">
                       {archive.branch && archive.branch !== label ? `${archive.branch} · ` : ''}{formatPathForDisplay(archive.path, homeDirectory)}
                     </p>
                   </div>
@@ -246,7 +246,7 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
                     disabled={busy}
                     onClick={() => { void archiveActions.remove(projectRef, archive); }}
                     className={cn(
-                      'flex h-7 w-7 shrink-0 items-center justify-center rounded text-muted-foreground/50 transition-opacity hover:bg-destructive/10 hover:text-destructive focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                      'flex h-7 w-7 shrink-0 items-center justify-center rounded text-muted-foreground transition-opacity hover:bg-destructive/10 hover:text-destructive focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                       alwaysShowActions ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
                     )}
                     aria-label={t('sessions.archive.worktree.deleteAria', { label })}

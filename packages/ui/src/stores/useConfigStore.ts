@@ -21,6 +21,7 @@ import { loadDesktopSettings, updateDesktopSettings } from "@/lib/persistence";
 import { useDirectoryStore } from "@/stores/useDirectoryStore";
 import { useProjectsStore } from "@/stores/useProjectsStore";
 import { resolveProjectForSessionDirectory } from "@/lib/projectResolution";
+import { isSpaceDirectory } from "@/lib/spaces/space-route";
 import { streamDebugEnabled } from "@/stores/utils/streamDebug";
 import { parseModelIdentifier, parseModelSelection } from "@/lib/modelIdentifier";
 import type { ModelRef } from "@/lib/settings/parsers";
@@ -989,6 +990,9 @@ const resolveProjectDirectory = (directory: string | null | undefined): string |
     const projects = getKnownProjectDirectories();
     if (!dir) return null;
     if (projects.includes(dir)) return dir;
+    // A space's sessions take their models from what the space was given, never from the host
+    // project's defaults, so its directory maps to no project here (see `space-catalog-sync.ts`).
+    if (isSpaceDirectory(dir)) return null;
 
     // 1. Persisted mapping — resolves synchronously when the async worktree
     //    discovery has not populated the runtime map yet.
@@ -4223,7 +4227,8 @@ export const useConfigStore = create<ConfigStore>()(
                             const initialDirectory = opencodeClient.getDirectory()
                                 ?? useDirectoryStore.getState().currentDirectory
                                 ?? fromDirectoryKey(get().activeDirectoryKey);
-                            const resolvedProject = resolveProjectForSessionDirectory(
+                            // A space's directory loads no project config of the host (see resolveProjectDirectory).
+                            const resolvedProject = isSpaceDirectory(initialDirectory) ? null : resolveProjectForSessionDirectory(
                                 useProjectsStore.getState().projects,
                                 useSessionUIStore.getState().availableWorktreesByProject,
                                 initialDirectory ?? null,

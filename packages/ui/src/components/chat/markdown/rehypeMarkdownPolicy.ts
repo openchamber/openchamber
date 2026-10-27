@@ -49,6 +49,8 @@ export function rehypeMarkdownPolicy({ isVSCode }: { isVSCode: boolean }) {
             (key === 'className' && ['code', 'li', 'ul', 'ol', 'section', 'h2', 'a'].includes(node.tagName))
             || (key === 'metastring' && node.tagName === 'code')
             || ['id', 'ariaDescribedBy', 'ariaLabel', 'dataFootnoteRef', 'dataFootnoteBackref', 'dataFootnotes'].includes(key)
+            || (key === 'dataOcAlert' && node.tagName === 'blockquote')
+            || (key === 'dataOcReference' && node.tagName === 'a')
           );
           if (!allowedAttributes.has(key) && !generated) delete node.properties[key];
         }

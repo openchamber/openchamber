@@ -1,4 +1,4 @@
-import type { Root, RootContent, Paragraph, Parent } from 'mdast';
+import type { Heading, PhrasingContent, Root, RootContent, Parent } from 'mdast';
 import type { Processor } from 'unified';
 
 function isMarkdownRoot(tree: ReturnType<Processor['parse']>): tree is Root {
@@ -25,6 +25,19 @@ function rebasePositions(tree: Root | RootContent, source: string, offset: numbe
   walk(tree);
 }
 
+// GitHub review bodies title disclosures with a heading tag. Inside the summary
+// that tag forms its own HTML block, so it is read here into a heading node:
+// the heading renders with and without raw HTML instead of as literal markup.
+// Its attributes (GitHub bodies use align) are dropped with the tag.
+const headingTag = /^(\s*<h([1-6])(?:\s+[^\s"'<>/=]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'<>=]+))?)*\s*>)([\s\S]*?)<\/h\2\s*>\s*$/i;
+const headingDepths: Heading['depth'][] = [1, 2, 3, 4, 5, 6];
+
+interface DisclosureSummary extends Parent {
+  type: 'ocDisclosureSummary';
+  children: Array<PhrasingContent | Heading>;
+  data: { hName: 'summary' };
+}
+
 interface Disclosure extends Parent {
   type: 'ocDisclosure';
   children: RootContent[];
@@ -33,7 +46,7 @@ interface Disclosure extends Parent {
 
 declare module 'mdast' {
   interface BlockContentMap { ocDisclosure: Disclosure }
-  interface RootContentMap { ocDisclosure: Disclosure }
+  interface RootContentMap { ocDisclosure: Disclosure; ocDisclosureSummary: DisclosureSummary }
 }
 
 // The scanner only identifies the disclosure boundary. Its body and summary
@@ -126,15 +139,19 @@ export function remarkDisclosures(this: Processor) {
       const body = parse(bodySource);
       transform(body, bodySource);
       rebasePositions(body, source, bodyStart);
-      const summarySource = match[2] ?? '';
-      const summaryTree = parse(summarySource);
       const summaryMarker = /<summary\s*>/i.exec(match[0]);
       const summaryStart = start + (summaryMarker?.index ?? 0) + (summaryMarker?.[0].length ?? 0);
-      rebasePositions(summaryTree, source, summaryStart);
+      const summarySource = match[2] ?? '';
+      const tag = headingTag.exec(summarySource);
+      const textSource = tag ? tag[3] : summarySource;
+      const summaryTree = parse(textSource);
+      rebasePositions(summaryTree, source, summaryStart + (tag?.[1].length ?? 0));
       const first = summaryTree.children[0];
-      const summary: Paragraph = {
-        type: 'paragraph', data: { hName: 'summary' },
-        children: first?.type === 'paragraph' ? first.children : [{ type: 'text', value: summarySource }],
+      const text = first?.type === 'paragraph' ? first.children : [{ type: 'text' as const, value: textSource }];
+      const depth = headingDepths.find((value) => String(value) === tag?.[2]);
+      const summary: DisclosureSummary = {
+        type: 'ocDisclosureSummary', data: { hName: 'summary' },
+        children: depth ? [{ type: 'heading', depth, children: text }] : text,
       };
       const disclosure: Disclosure = { type: 'ocDisclosure', data: { hName: 'details', hProperties: match[1] ? { open: true } : {} }, children: [summary, ...body.children] };
       let count = 1;

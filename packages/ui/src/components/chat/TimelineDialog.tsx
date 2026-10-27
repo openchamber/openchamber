@@ -278,7 +278,7 @@ const TimelineDialogBody: React.FC<TimelineDialogBodyProps> = ({
         <>
             <button
                 type="button"
-                className="text-[0.6875rem] uppercase tracking-wide text-muted-foreground/90 hover:text-foreground"
+                className="text-[0.6875rem] uppercase tracking-wide text-muted-foreground hover:text-foreground"
                 onClick={() => {
                     void onScrollByTurnOffset?.(-1);
                     onOpenChange(false);
@@ -289,7 +289,7 @@ const TimelineDialogBody: React.FC<TimelineDialogBodyProps> = ({
             <span className="text-muted-foreground/50">/</span>
             <button
                 type="button"
-                className="text-[0.6875rem] uppercase tracking-wide text-muted-foreground/90 hover:text-foreground"
+                className="text-[0.6875rem] uppercase tracking-wide text-muted-foreground hover:text-foreground"
                 onClick={() => {
                     onResumeToLatest?.();
                     onOpenChange(false);

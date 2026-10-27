@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   buildReferenceSearchQuery, fetchDiscussionDetail, fetchReferenceDetail, parseReferenceLookup, readPullStatusRefs,
-  readReferencePeople, readReferenceState, searchGitHubReferences, searchGitHubReferencesAcross, toReference,
+  readReferencePeople, readReferenceState, reviewCommentExcerpt, searchGitHubReferences, searchGitHubReferencesAcross, toReference,
 } from './reference-search.js';
 
 const origin = { owner: 'acme', repo: 'app', source: 'origin' };
@@ -451,6 +451,27 @@ describe('fetchReferenceDetail', () => {
       replies: [{ author: null, body: 'done', createdAt: '2026-10-01T10:00:00Z', url: 'c2', path: 'src/a.ts', line: 3, review: 'commented' }],
     });
     expect(detail?.comments.some((comment) => comment.url === 'c2')).toBe(false);
+  });
+
+  it('carries the lines a review comment sits on, read from the end of its hunk', async () => {
+    const diffHunk = '@@ -10,4 +10,5 @@ export function run() {\n   const a = 1;\n-  const b = 2;\n+  const b = 3;\n+  const c = 4;\n   return a;';
+    const detail = await fetchReferenceDetail({ octokit: graphqlReturning(pull([], [{
+      id: 'PRRT_three', isResolved: false, viewerCanResolve: true, viewerCanUnresolve: false, viewerCanReply: true,
+      comments: { nodes: [
+        { author, body: '```suggestion\n  const c = 5;\n```', createdAt: '2026-10-01T09:00:00Z', url: 'c1', path: 'src/a.ts', line: 13, originalLine: 13, startLine: 12, originalStartLine: 12, diffHunk },
+      ] },
+    }])), owner: 'acme', repo: 'app', number: 9 });
+    expect(detail?.comments.find((comment) => comment.url === 'c1')?.excerpt).toEqual({ startLine: 12, lines: ['  const c = 4;', '  return a;'] });
+  });
+
+  it('leaves the excerpt out where the hunk does not cover the comment', () => {
+    const base = { line: 5, originalLine: 5, startLine: null, originalStartLine: null };
+    expect(reviewCommentExcerpt({ ...base, diffHunk: null })).toBeUndefined();
+    expect(reviewCommentExcerpt({ ...base, startLine: 1, diffHunk: '@@ -1 +1 @@\n+only' })).toBeUndefined();
+    expect(reviewCommentExcerpt({ ...base, diffHunk: 'not a hunk' })).toBeUndefined();
+    // An outdated comment reads its original range.
+    expect(reviewCommentExcerpt({ line: null, originalLine: 2, startLine: null, originalStartLine: null, diffHunk: '@@ -1,2 +1,2 @@\n one\n+two' }))
+      .toEqual({ startLine: 2, lines: ['two'] });
   });
 
   it('answers null for a missing number', async () => {

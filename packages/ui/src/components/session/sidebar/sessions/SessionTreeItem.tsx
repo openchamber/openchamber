@@ -40,6 +40,8 @@ type SessionTreeItemRenderProps = Context & Pick<SessionNodeItemProps,
   node: SessionNode;
   pinnedSessionIds: Set<string>;
   depth?: number;
+  /** A work of its own; on by default for a top row, never for what nests under it. */
+  ownsWork?: boolean;
   renderExtras?: SessionNodeRenderExtras;
 };
 
@@ -67,6 +69,7 @@ const EMPTY_SUBTREE_CONTAINS_EDITING: Set<string> = new Set();
 function SessionTreeItemComponent({
   node,
   depth = 0,
+  ownsWork = true,
   groupDirectory,
   projectId,
   folderOwnerKey,
@@ -184,6 +187,7 @@ function SessionTreeItemComponent({
         pinnedSessionIds={pinnedSessionIds}
       node={node}
       depth={depth}
+      ownsWork={ownsWork}
       groupDirectory={groupDirectory}
       projectId={projectId}
       folderOwnerKey={folderOwnerKey}
@@ -227,6 +231,7 @@ function SessionTreeItemComponent({
            mobileVariant={mobileVariant}
            alwaysShowActions={alwaysShowActions}
            depth={depth + 1}
+           ownsWork={false}
            folderOwnerKey={folderOwnerKey}
            selectionScopeKey={selectionScopeKey}
           {...childContext}
@@ -274,7 +279,7 @@ const areSessionTreeItemPropsEqual = (prev: SessionTreeItemProps, next: SessionT
   if ((prev.secondaryMeta?.branchLabel ?? null) !== (next.secondaryMeta?.branchLabel ?? null)) return false;
   if ((prev.secondaryMeta?.inSpace ?? false) !== (next.secondaryMeta?.inSpace ?? false)) return false;
   const scalarKeys = [
-    'depth', 'groupDirectory', 'projectId', 'folderOwnerKey', 'selectionScopeKey', 'archivedBucket',
+    'depth', 'ownsWork', 'groupDirectory', 'projectId', 'folderOwnerKey', 'selectionScopeKey', 'archivedBucket',
     'renderContext', 'detailed', 'rowKey', 'dragKey', 'renderChildren',
     'hasSessionSearchQuery', 'normalizedSessionSearchQuery',
     'editingId', 'editingRowKey', 'editTitle', 'openSidebarMenuKey',

@@ -32,6 +32,10 @@ import { mcpGridI18n } from './mcp-grid.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { diffFindI18n } from './diff-find.i18n';
+import { markdownGithubI18n } from './markdown-github.i18n';
+import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
+import { workflowsI18n } from './workflows.i18n';
+import { sessionReferencesI18n } from './session-references.i18n';
 import { guestStatusViewI18n } from './guest-status-view.i18n';
 
 export const dict = {
@@ -276,7 +280,6 @@ export const dict = {
   'mobile.menu.files': 'الملفات',
   'mobile.menu.git': 'Git',
   'mobile.menu.terminal': 'الطرفية',
-  'mobile.menu.mcp': 'MCP',
   'mobile.menu.instances': 'النسخ',
   'mobile.menu.update': 'تحديث',
   'mobile.menu.settings': 'الإعدادات',
@@ -2258,6 +2261,7 @@ export const dict = {
   'session.githubIntegration.validation.branchAlreadyCheckedOut': 'الفرع مسحوب بالفعل في شجرة عمل (worktree)',
   'session.githubIntegration.validation.failed': 'تعذّر التحقق',
   'chat.fileAttachment.toast.attachFailed': 'تعذّر إرفاق الملف',
+  'chat.fileAttachment.toast.tooLarge': '{name} كبير جدًا بحيث لا يمكن إرفاقه (أكثر من {size}). إذا كان ضمن المشروع، فاذكره باستخدام @.',
   'chat.fileAttachment.toast.someFilesSkipped': "تم تخطي بعض الملفات:\n{summary}",
   'chat.fileAttachment.toast.vscodePickFailed': 'تعذّر اختيار الملفات في VS Code',
   'chat.fileAttachment.fileFallback': 'ملف',
@@ -2373,8 +2377,6 @@ export const dict = {
   'chat.commandAutocomplete.command.exploreDescription': 'تعرّف على قاعدة الشيفرة هذه: جولة عامة في البنية والأجزاء الرئيسية.',
   'chat.commandAutocomplete.command.btwDescription': 'اطرح سؤالًا جانبيًا في جلسة فرعية مؤقتة دون تشتيت هذه المحادثة.',
   'chat.commandAutocomplete.command.forkDescription': 'اشتقاق هذه المحادثة من آخر رد مكتمل والمتابعة هناك؛ يُرسل النص بعد /fork إلى النسخة المشتقة.',
-  'chat.commandAutocomplete.badge.command': 'أمر',
-  'chat.commandAutocomplete.badge.system': 'النظام',
   'chat.commandAutocomplete.empty': 'لم يتم العثور على أوامر',
   'chat.agentMentionAutocomplete.badge.system': 'النظام',
   'chat.agentMentionAutocomplete.empty': 'لم يتم العثور على وكلاء',
@@ -2518,8 +2520,6 @@ export const dict = {
   'chat.chatInput.actions.sendMessageAria': 'إرسال الرسالة',
   'chat.chatInput.actions.queueMessageAria': 'إضافة الرسالة إلى قائمة الانتظار',
   'chat.chatInput.actions.stopGeneratingAria': 'إيقاف التوليد',
-  'chat.chatInput.focusMode.toggleAria': 'تبديل وضع التركيز',
-  'chat.chatInput.focusMode.label': 'وضع التركيز',
   'chat.chatInput.linked.byAuthor': 'بواسطة {author}',
   'chat.chatInput.linked.issue.openInBrowserAria': 'فتح المشكلة في المتصفح',
   'chat.chatInput.linked.issue.removeAria': 'إزالة المشكلة المرتبطة',
@@ -2543,7 +2543,7 @@ export const dict = {
   'chat.dictation.insertAndSend': 'إدراج وإرسال',
   'chat.dictation.retry': 'إعادة محاولة التفريغ النصي',
   'chat.dictation.discard': 'تجاهل التسجيل',
-  'chat.snippetAutocomplete.action.addNew': '+ إضافة مقتطف جديد',
+  'chat.snippetAutocomplete.action.addNew': 'إضافة مقتطف جديد',
   'chat.snippetAutocomplete.empty': 'لم يتم العثور على مقتطفات',
   'chat.snippetAutocomplete.footer': '↑↓ للتنقل • Enter للاختيار • Esc للإغلاق',
   'snippets.source.global': 'عام',
@@ -2934,6 +2934,20 @@ export const dict = {
   'projects.sharedTrust.actions': 'الإجراءات',
   'projects.sharedTrust.skip': 'ليس هذه المرة',
   'projects.sharedTrust.trust': 'الثقة والتشغيل',
+  'projects.opencodeTrust.title': 'هل تسمح لـ OpenCode بتشغيل التعليمات البرمجية من هذا المجلد؟',
+  'projects.opencodeTrust.description': 'يشغّل OpenCode الإضافات والأوامر الموجودة في إعدادات {path} بمجرد فتح المجلد. ثق بها مرة واحدة، ولن يسألك OpenChamber مجددًا إلا عند تغييرها.',
+  'projects.opencodeTrust.plugins': 'الإضافات',
+  'projects.opencodeTrust.commands': 'الأوامر',
+  'projects.opencodeTrust.kind.package': '{name} (حزمة npm)',
+  'projects.opencodeTrust.kind.config': '{path}: ملف إعدادات لا يستطيع OpenChamber قراءته',
+  'projects.opencodeTrust.kind.mcp': 'خادم MCP ‏{name}',
+  'projects.opencodeTrust.kind.lsp': 'خادم اللغة {name}',
+  'projects.opencodeTrust.kind.formatter': 'أداة التنسيق {name}',
+  'projects.opencodeTrust.kind.shell': 'الصدفة',
+  'projects.opencodeTrust.paused': 'من دون الثقة، لا يمكن للوكلاء العمل في هذا المجلد، لكن لا يزال بإمكانك تصفح ملفاته وتغييرات Git.',
+  'projects.opencodeTrust.skip': 'ليس هذه المرة',
+  'projects.opencodeTrust.trust': 'الثقة والفتح',
+  'projects.opencodeTrust.saveFailed': 'تعذّر حفظ إجابتك. حاول مرة أخرى.',
   'projectActions.actions.autoDiscoverTooltip': 'اكتشاف خادم التطوير وتشغيله تلقائيًا',
   'projectActions.actions.chooseActionAria': 'اختيار إجراء المشروع',
   'projectActions.actions.openPreview': 'فتح المعاينة',
@@ -3415,6 +3429,7 @@ export const dict = {
   'common.duration.minutesSecondsCompact': '{minutes} د {seconds} ث',
   'common.duration.hoursMinutesCompact': '{hours} س {minutes} د',
   'contextFileOpen.failure.tooLarge': 'الملف أكبر من أن يُفتح (>{count} سطر)',
+  'contextFileOpen.failure.tooLargeSize': 'الملف كبير جدًا بحيث لا يمكن فتحه (أكثر من {size})',
   'contextFileOpen.failure.missing': 'الملف غير موجود',
   'contextFileOpen.failure.unreadable': 'تعذّر فتح الملف',
   'quota.window.5h': '5 ساعات',
@@ -3440,6 +3455,7 @@ export const dict = {
   'quota.window.completions': 'الإكمالات',
   'quota.window.premiumInteractions': 'أرصدة الذكاء الاصطناعي',
   'chat.workStatus.ariaLabel': 'حالة العمل',
+  'chat.workStatus.mobileEmpty': 'لا يوجد ما يُعرض لهذه الجلسة بعد',
   'chat.workStatus.context.label': 'السياق',
   'chat.workStatus.cost.breakdown': 'الجلسة {session} · الوكلاء الفرعيون {subagents}',
   'chat.workStatus.git.changedFileSingle': 'تغيّر {count} ملف',
@@ -3823,6 +3839,10 @@ export const dict = {
   ...pluginsGridI18n.ar,
   ...integrationsCatalogI18n['ar'],
   ...diffFindI18n['ar'],
+  ...markdownGithubI18n['ar'],
+  ...autocompleteScopeI18n['ar'],
+  ...workflowsI18n['ar'],
+  ...sessionReferencesI18n['ar'],
   ...guestStatusViewI18n['ar'],
   'settings.usage.page.state.claudeSignedOutTitle': 'لم يتم تسجيل الدخول إلى Claude Code',
   'settings.usage.page.state.claudeSignInCommand': 'شغّل هذا الأمر في الطرفية:',

@@ -53,7 +53,10 @@ export const BUILT_IN_SOURCE_CONTROL_PROVIDERS: readonly PublishedSourceControlP
         { id: 'token', kind: 'personal-access-token', secret: true },
       ],
     },
-    urls: { changeRequest: ['/{owner}/{repo}/pull/{number}'], issue: ['/{owner}/{repo}/issues/{number}'] },
+    urls: {
+      changeRequest: ['/{owner}/{repo}/pull/{number}'], issue: ['/{owner}/{repo}/issues/{number}'],
+      commit: ['/{owner}/{repo}/commit/{sha}'], user: ['/{user}'],
+    },
     features: {
       ...BUILT_IN_FEATURES_OFF,
       referenceSearch: true, referenceDetail: true, listStatuses: true, referencesAcross: true, issueCloseReason: true,
@@ -87,6 +90,7 @@ export const BUILT_IN_SOURCE_CONTROL_PROVIDERS: readonly PublishedSourceControlP
     urls: {
       changeRequest: ['/{namespace+}/{repo}/-/merge_requests/{number}'],
       issue: ['/{namespace+}/{repo}/-/issues/{number}', '/{namespace+}/{repo}/-/work_items/{number}'],
+      commit: ['/{namespace+}/{repo}/-/commit/{sha}'], user: ['/{user}'],
     },
     features: {
       ...BUILT_IN_FEATURES_OFF,

@@ -76,6 +76,16 @@ const DUPLICATE_OVERLAP_THRESHOLD = 0.75;
 const DUPLICATE_MIN_TOKENS = 4;
 
 /**
+ * A new entry sharing this much wording with a stored one is reported back as
+ * related. A reversed decision ("unit tests moved from bun to vitest") is
+ * phrased too differently to count as a duplicate, so without the report it
+ * lands beside the entry it contradicts. Set low on purpose: a false match
+ * costs the agent one line to ignore, and the agent decides what replaces what.
+ */
+const RELATED_OVERLAP_THRESHOLD = 0.4;
+const RELATED_LIMIT = 3;
+
+/**
  * Words carried by almost every sentence, so their overlap says nothing about
  * whether two memories mean the same thing.
  */
@@ -132,6 +142,18 @@ const findSupersededEntry = (entries, title, body) => {
     }
   }
   return best;
+};
+
+/** Stored entries close enough in wording that a new one may reverse them, closest first. */
+const findRelatedEntries = (entries, title, body) => {
+  const incoming = tokenize(`${title} ${body}`);
+  if (incoming.size < DUPLICATE_MIN_TOKENS) return [];
+  return entries
+    .map((entry) => ({ entry, score: overlapFraction(incoming, tokenize(`${entry.title} ${entry.body}`)) }))
+    .filter(({ score }) => score >= RELATED_OVERLAP_THRESHOLD)
+    .sort((left, right) => right.score - left.score)
+    .slice(0, RELATED_LIMIT)
+    .map(({ entry }) => entry);
 };
 
 const clampLength = (value, maxLength) => {
@@ -363,9 +385,10 @@ export const createAgentMemoryRuntime = (deps) => {
         ...(findThreatPattern(`${title}\n${body}`) ? { flagged: true } : {}),
         ...(sessionId ? { sessionId } : {}),
       };
+      const related = findRelatedEntries(current.entries, title, body);
       const entries = [entry, ...current.entries];
       await write(resolved, entries);
-      return { entry, entries, replaced: false };
+      return { entry, entries, replaced: false, related };
     });
   };
 

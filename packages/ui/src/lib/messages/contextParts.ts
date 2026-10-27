@@ -152,6 +152,27 @@ type GuestPrContext = {
     data?: JsonValue;
 };
 
+/**
+ * Another session the user mentioned; the model reads it with the openchamber
+ * tool. `messageId` is set when the mention was a link to one of its messages
+ * that had no text of its own, so the link still finds its chip.
+ */
+type SessionContext = {
+    kind: 'session';
+    sessionId: string;
+    title: string;
+    messageId?: string;
+};
+
+/** One message of another session, sent whole; `excerpt` is what its chip shows. */
+type SessionMessageContext = {
+    kind: 'session-message';
+    sessionId: string;
+    messageId: string;
+    sessionTitle: string;
+    excerpt: string;
+};
+
 export type ContextPartPayload =
     | CodeCommentContext
     | TerminalContextPayload
@@ -165,7 +186,9 @@ export type ContextPartPayload =
     | ChangeRequestContext
     | TrackerItemContext
     | GuestIssueContext
-    | GuestPrContext;
+    | GuestPrContext
+    | SessionContext
+    | SessionMessageContext;
 
 type OpenCodeCommentMetadata = {
     path: string;
@@ -260,7 +283,9 @@ export function formatContextText(payload: ContextPartPayload): string {
         case 'tracker-item':
         case 'guest-issue':
         case 'guest-pr':
-            // Linked issues/PRs carry picker-built context text;
+        case 'session':
+        case 'session-message':
+            // Linked items carry context text built when they were attached;
             // there is no default text to derive here.
             return '';
     }
@@ -454,6 +479,19 @@ const canonicalContextPayloadSchema = z.discriminatedUnion('kind', [
         url: z.string(),
         data: z.json().optional(),
     }),
+    z.object({
+        kind: z.literal('session'),
+        sessionId: z.string().min(1),
+        title: z.string(),
+        messageId: z.string().min(1).optional(),
+    }),
+    z.object({
+        kind: z.literal('session-message'),
+        sessionId: z.string().min(1),
+        messageId: z.string().min(1),
+        sessionTitle: z.string(),
+        excerpt: z.string(),
+    }),
 ]);
 const contextPayloadSchema = z.union([
     canonicalContextPayloadSchema,
@@ -634,6 +672,8 @@ export function draftFromContextPayload(
         case 'tracker-item':
         case 'guest-issue':
         case 'guest-pr':
+        case 'session':
+        case 'session-message':
             return null;
     }
 }

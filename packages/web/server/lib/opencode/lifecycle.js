@@ -880,13 +880,23 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     throw lastError;
   };
 
-  const restartOpenCode = async (reason = 'managed-restart') => {
+  // `whileStopped` runs after the managed process has exited and before the
+  // new one starts. Its failure is reported after the restart, so the server
+  // comes back either way.
+  const restartOpenCode = async (reason = 'managed-restart', { whileStopped } = {}) => {
     if (state.isShuttingDown) return;
+    if (whileStopped && state.isExternalOpenCode) throw new Error('An external OpenCode server cannot be stopped by OpenChamber.');
     if (state.currentRestartPromise) {
-      await state.currentRestartPromise;
-      return;
+      if (!whileStopped) {
+        await state.currentRestartPromise;
+        return;
+      }
+      // A restart already in flight never ran this task; restart once more for it.
+      await state.currentRestartPromise.catch(() => {});
+      if (state.isShuttingDown) return;
     }
 
+    let whileStoppedError = null;
     state.currentRestartPromise = (async () => {
       managedPreflight = null;
       state.isRestartingOpenCode = true;
@@ -940,6 +950,14 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       killProcessOnPort(portToKill);
       if (!(await waitForPortRelease(portToKill, 5000))) {
         console.warn(`Timed out waiting for OpenCode port ${portToKill} to be released`);
+      }
+
+      if (whileStopped) {
+        try {
+          await whileStopped();
+        } catch (error) {
+          whileStoppedError = error;
+        }
       }
 
       if (env.ENV_CONFIGURED_OPENCODE_PORT) {
@@ -997,6 +1015,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       state.currentRestartPromise = null;
       state.isRestartingOpenCode = false;
     }
+    if (whileStoppedError) throw whileStoppedError;
   };
 
   const waitForOpenCodeReady = async (timeoutMs = 20000, intervalMs = 400) => {

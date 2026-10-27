@@ -85,7 +85,7 @@ LRU promotion changes visibility without moving retained iframe DOM.
 
 ## Row identity
 
-- **A row keeps its React tree when it becomes or stops being the live tail.** Every row renders through `TimelineRowContent` in `MessageList.tsx`; only the tail subscribes to streaming parts. The tail moves on every send and on a revert. When the tail had its own component type, the moving row remounted, its state reset for one commit (a long user message lost its "Show full message" link, 28 px), and LegendList measured that commit in its layout effect. The `ResizeObserver` never corrects such a size, because the short height was never painted, so the row below sat that much too high until a later re-measure: 40-80 ms after a send, and from the revert until 200 ms into the next send. Anything that remounts or resets state inside a mounted row has the same effect.
+- **A row keeps its React tree when it becomes or stops being the live tail.** Every row renders through `TimelineRowContent` in `MessageList.tsx`; only the tail subscribes to streaming parts. The tail moves on every send and on a revert. When the tail had its own component type, the moving row remounted, its state reset for one commit (a long user message lost its "Show more" link, 28 px), and LegendList measured that commit in its layout effect. The `ResizeObserver` never corrects such a size, because the short height was never painted, so the row below sat that much too high until a later re-measure: 40-80 ms after a send, and from the revert until 200 ms into the next send. Anything that remounts or resets state inside a mounted row has the same effect.
 
 ## Measuring
 

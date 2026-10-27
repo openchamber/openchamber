@@ -21,6 +21,7 @@ import { useWorktreeChangeRequests } from './useWorktreeChangeRequests';
 import { readOverviewWorktreeGit, sessionsInWorktree, type OverviewWorktreeGit, type OverviewWorktreeTarget } from './overviewActions';
 import { normalizePath } from '@/lib/pathNormalization';
 import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
+import { spaceProjectDirectoryIn, useSpacesStore } from '@/lib/spaces/spaces-store';
 import { resolveProjectColor } from '@/lib/projectMeta';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { repositoryThread, workItem } from '@/lib/trackedItems/fromLinks';
@@ -420,11 +421,15 @@ export function useOverviewData(): OverviewData {
     return rows;
   }, [gitOf, isWorktreeInUse, now, sessionsIn, workEnabled, worktrees]);
 
+  // A space's session belongs to the project the space was made from, once the space list names it.
+  const spaceMarks = useSpacesStore((state) => state.spaces);
+  const spacesJourney = useSpacesStore((state) => state.journey);
   const projectOf = React.useCallback((session: Session) => {
     const directory = resolveGlobalSessionDirectory(session) ?? session.directory;
-    const project = resolveProjectForSessionDirectory(projects, worktreesByProject, directory);
+    const spaceProject = spaceProjectDirectoryIn({ spaces: spaceMarks, journey: spacesJourney }, directory);
+    const project = resolveProjectForSessionDirectory(projects, worktreesByProject, directory, spaceProject);
     return { label: projectLabel(project, directory), color: resolveProjectColor(project?.color) };
-  }, [projects, worktreesByProject]);
+  }, [projects, spaceMarks, spacesJourney, worktreesByProject]);
 
   return {
     ready: hasLoaded || sessionsStatus === 'ready',

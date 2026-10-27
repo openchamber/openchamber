@@ -380,6 +380,12 @@ Invariants:
   `urls.discussion` patterns are read only while `features.discussions` is on,
   so a link reads as `kind: 'discussion'` only on a host that keeps them; a
   server from before discussions names neither, and both read as off.
+- `urls.commit` (`{sha}` in place of `{number}`) and `urls.user` (`/{user}`)
+  are where a host keeps commits and people. `repositoryLinks.ts` fills the
+  first pattern of each kind to link `#12`, `@someone` and commit ids in item
+  text, and reads commit pages back (`commitShaOfUrl`) so a click can open the
+  commit locally. Both default to none: a server or extension that names
+  neither gets no such links, never a guessed GitHub shape.
 - Remotes are recognised on the instances a caller passes:
   `resolveSourceControlTarget`, `getBoundSourceControlReadContexts` and
   `repositoryLinkFromRemotes` take the connected instances plus each

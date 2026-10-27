@@ -25,7 +25,7 @@ import { cn } from '@/lib/utils';
 import { useSnippetsStore } from '@/stores/useSnippetsStore';
 import { useInputStore } from '@/sync/input-store';
 import type { CommentImagePaste } from './useCommentImagePaste';
-import { useCommentSnippetPicker } from './useCommentSnippetPicker';
+import { useCommentFieldPicker } from './useCommentFieldPicker';
 
 const EMPTY_NAMES: ReadonlySet<string> = new Set();
 
@@ -89,7 +89,8 @@ export function CommentTextEditor({
         editorRef.current?.replaceRange(from, to, insert);
         editorRef.current?.focus();
     }, []);
-    const snippetPicker = useCommentSnippetPicker({ text: value, getCaret, replaceRange });
+    const caretCoords = React.useCallback((position: number) => editorRef.current?.caretCoords(position) ?? null, []);
+    const fieldPicker = useCommentFieldPicker({ text: value, getCaret, replaceRange, caretCoords });
 
     // Every surface opens its field ready to type, caret after any text the
     // comment started with (a keystroke that opened it, or the saved comment).
@@ -102,7 +103,7 @@ export function CommentTextEditor({
 
     const handleKeyDown = (event: KeyboardEvent): boolean => {
         if (isIMECompositionEvent(event)) return false;
-        if (snippetPicker.handleKeyDown(event)) return true;
+        if (fieldPicker.handleKeyDown(event)) return true;
         if (event.key === 'Enter' && !event.shiftKey && (enterSubmits || event.metaKey || event.ctrlKey)) {
             event.preventDefault();
             onSubmit();
@@ -128,7 +129,7 @@ export function CommentTextEditor({
 
     return (
         <div className={cn('relative min-w-0 flex-1', className)}>
-            {snippetPicker.picker}
+            {fieldPicker.picker}
             <ComposerEditor
                 ref={editorRef}
                 dataChatInput="comment"
@@ -136,9 +137,9 @@ export function CommentTextEditor({
                 languageContext={languageContext}
                 onChange={(change) => {
                     onChange(change.value);
-                    snippetPicker.sync(change.value, change.selection.start);
+                    fieldPicker.sync(change.value, change.selection.start, !change.fromPaste && !change.fromValueProp);
                 }}
-                onSelectionChange={(selection) => snippetPicker.sync(editorRef.current?.getValue() ?? value, selection.start)}
+                onSelectionChange={(selection) => fieldPicker.sync(editorRef.current?.getValue() ?? value, selection.start, false)}
                 onKeyDown={handleKeyDown}
                 onPaste={handlePaste}
                 onBlur={onBlur}

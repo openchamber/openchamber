@@ -233,6 +233,23 @@ host switcher, a mobile instance switch). Four rules hold that:
   no host (disconnected) records none. A host whose home lookup failed still
   has a directory, and it is recorded.
 
+`useSessionTabsStore` keeps the header's working sets of session tabs on the
+device. With "Separate tabs for each project, worktree and space" off there is
+one set, `global`. With it on each project root, worktree, isolated space and
+the chats get their own, keyed by instance and folder
+(`lib/sessionTabScope.ts`), so switching servers never mixes their tabs and
+another browser keeps its own sets (tabs are what one window looks at;
+drafts and pins, which are data, live on the server). The shown set is
+`tabIds`/`previewTabId`, so every action works on what the strip shows;
+`enterScope` swaps it with the stored one. A worktree or space shown for the
+first time opens with the sessions the user started there as pinned tabs, no
+subagents; a project root opens with none, since it can hold hundreds. The
+strip enters a new scope only once the global session list has loaded, so a
+seed is never taken from a partial list and stored empty for good. At most 40
+other scopes are kept, the least recently shown dropped first. `removeTabs`
+clears a gone session from every set. Version 1 moved the version-0 single
+set into the global scope.
+
 ### Session / project coordination stores
 
 `useMultiRunStore` creates ID-bound multi-run members. Runs are projected from
@@ -398,6 +415,15 @@ an unchanged record leaves a pick made after it in place across session
 switches and reloads. Following moves the agent only (`setAgent(name, {
 keepModel: true })`): the session keeps running on its own model, so neither
 the agent's pinned nor its remembered model is applied, and Auto stays.
+
+The agent shown is the agent sent. The picker labels an open session with its
+`sessionAgentSelections` entry, while a send carries the config store's
+`currentAgentName`, which other sessions, directory snapshots and agent-list
+reloads also write. `ModelControls` therefore brings `currentAgentName` back to
+the session's entry whenever the two differ, through `setAgent` so the
+session's remembered model for that agent comes with it (`keepModel` under
+Auto). Without it, returning to a session could show Build and send the agent
+another session left behind.
 
 The model follows the same rule through `isSessionModelSwitched` /
 `markSessionModelFollowed`, keyed `provider/model#variant`. A record model the

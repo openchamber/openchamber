@@ -298,7 +298,11 @@ session in the project (`memoryTidy.ts`) with the default model and agent
 (`lib/defaultSendSelection.ts`), sends the `memory.tidy` magic prompt with every
 entry of both scopes in full, and switches to that session. The agent checks the
 entries against the project, deletes, merges and rewrites by `memoryId` on its
-own, asks only about real contradictions, and ends with a report. Nothing waits
+own, and ends with a report. A reversed decision is rewritten to the one that
+holds now with a line on what it replaced, never just deleted: the abandoned
+choice and its reason are what the code does not keep. Two contradicting
+entries are settled by their dates when the newer one records a decision; the
+agent asks only when it merely proposes one or the dates cannot tell. Nothing waits
 for approval and nothing is backed up: if the user disputes a change, the agent
 restores it from the text it was given.
 

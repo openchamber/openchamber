@@ -10,7 +10,6 @@ import type { WalkthroughStopView, WalkthroughView } from '@/lib/walkthrough/mod
 import type { WalkthroughHunk, WalkthroughObservationKind, WalkthroughStopImportance } from '@/lib/walkthrough/types';
 import type { DiffCommentOrigin } from '@/lib/diffCommentOrigin';
 import { useWholeFileComment, WholeFileCommentButton } from '@/components/comments';
-import { useDeviceInfo } from '@/lib/device';
 import { cn } from '@/lib/utils';
 import { WalkthroughHunkRun } from './WalkthroughHunkRun';
 import { findRunKey, UNCOVERED_STOP_ID } from './walkthroughFind';
@@ -139,21 +138,21 @@ const StopHeader = ({ stopView }: { stopView: WalkthroughStopView }) => {
  * caption it was easy to scroll straight past.
  */
 const FileHeader = ({ path, commentOrigin }: { path: string; commentOrigin?: DiffCommentOrigin }) => {
-  const { isMobile } = useDeviceInfo();
   const wholeFileComment = useWholeFileComment({ fileLabel: path, origin: commentOrigin });
   return (
     <>
-      <div className="group/file sticky top-0 z-10 flex items-center gap-1.5 border-b border-[var(--interactive-border)]/35 bg-[var(--surface-elevated)]/90 px-4 py-1.5 backdrop-blur-md supports-[backdrop-filter]:bg-[var(--surface-elevated)]/80">
-        <FileTypeIcon filePath={path} className="size-3.5 shrink-0" />
-        <ChangedPathLabel path={path} className="typography-meta min-w-0 flex-1 font-mono" />
-        <WholeFileCommentButton
-          onClick={wholeFileComment.open}
-          active={wholeFileComment.isOpen}
-          alwaysVisible={isMobile}
-          hoverGroupClass="group-hover/file:opacity-100"
-        />
+      <div className="sticky top-0 z-10 border-b border-[var(--interactive-border)]/35 bg-[var(--surface-elevated)]/90 backdrop-blur-md supports-[backdrop-filter]:bg-[var(--surface-elevated)]/80">
+        <div className="flex items-center gap-1.5 px-4 py-1.5">
+          <FileTypeIcon filePath={path} className="size-3.5 shrink-0" />
+          <ChangedPathLabel path={path} className="typography-meta min-w-0 flex-1 font-mono" />
+          <WholeFileCommentButton
+            onClick={wholeFileComment.toggle}
+            active={wholeFileComment.isOpen}
+          />
+        </div>
+        {wholeFileComment.editor}
       </div>
-      {wholeFileComment.body}
+      {wholeFileComment.cards}
     </>
   );
 };

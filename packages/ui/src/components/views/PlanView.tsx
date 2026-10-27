@@ -12,7 +12,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { buildCodeMirrorCommentWidgets, FilePreviewCommentMenu, normalizeLineRange, useInlineCommentController } from '@/components/comments';
+import { buildCodeMirrorCommentWidgets, FilePreviewCommentMenu, normalizeLineRange, useInlineCommentController, useLineNumberDragSelection } from '@/components/comments';
 
 import { useDeviceInfo } from '@/lib/device';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
@@ -265,20 +265,6 @@ export const PlanView: React.FC<PlanViewProps> = ({ visible = true, savedProject
       // ignore
     }
   }, []);
-  const isSelectingRef = React.useRef(false);
-  const selectionStartRef = React.useRef<number | null>(null);
-  const [isDragging, setIsDragging] = React.useState(false);
-
-  React.useEffect(() => {
-    const handleGlobalMouseUp = () => {
-      isSelectingRef.current = false;
-      selectionStartRef.current = null;
-      setIsDragging(false);
-    };
-    document.addEventListener('mouseup', handleGlobalMouseUp);
-    return () => document.removeEventListener('mouseup', handleGlobalMouseUp);
-  }, []);
-
   const extractSelectedCode = React.useCallback((text: string, range: SelectedLineRange): string => {
     const lines = text.split('\n');
     const startLine = Math.max(1, range.start);
@@ -308,6 +294,13 @@ export const PlanView: React.FC<PlanViewProps> = ({ visible = true, savedProject
     startEdit,
     deleteDraft,
   } = commentController;
+
+  const { isDragging, lineNumbersConfig, isDragReleaseClick } = useLineNumberDragSelection({
+    lineSelection,
+    setLineSelection,
+    onClear: cancel,
+    isMobile,
+  });
 
   React.useEffect(() => {
     setLineSelection(null);
@@ -339,6 +332,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ visible = true, savedProject
     }
 
     const handleClickOutside = (e: MouseEvent) => {
+      if (isDragReleaseClick()) return;
       const target = e.target as HTMLElement;
       if (
         target.closest('[data-comment-card="true"]') ||
@@ -365,7 +359,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ visible = true, savedProject
       window.clearTimeout(timeoutId);
       document.removeEventListener('click', handleClickOutside);
     };
-  }, [cancel, commentText, editingDraftId, isMobile, lineSelection]);
+  }, [cancel, commentText, editingDraftId, isDragReleaseClick, isMobile, lineSelection]);
 
   const editorFontSize = useUIStore((state) => state.editorFontSize);
 
@@ -973,71 +967,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ visible = true, savedProject
                           end: Math.max(lineSelection.start, lineSelection.end),
                         }
                         : undefined}
-                      lineNumbersConfig={{
-                        domEventHandlers: {
-                          mousedown: (view, line, event) => {
-                            if (!(event instanceof MouseEvent)) return false;
-                            if (event.button !== 0) return false;
-                            event.preventDefault();
-                            const lineNumber = view.state.doc.lineAt(line.from).number;
-
-                            if (
-                              lineSelection &&
-                              !event.shiftKey &&
-                              Math.min(lineSelection.start, lineSelection.end) === lineNumber &&
-                              Math.max(lineSelection.start, lineSelection.end) === lineNumber
-                            ) {
-                              setLineSelection(null);
-                              cancel();
-                              isSelectingRef.current = false;
-                              selectionStartRef.current = null;
-                              setIsDragging(false);
-                              return true;
-                            }
-
-                            if (isMobile && lineSelection && !event.shiftKey) {
-                              const start = Math.min(lineSelection.start, lineSelection.end, lineNumber);
-                              const end = Math.max(lineSelection.start, lineSelection.end, lineNumber);
-                              setLineSelection({ start, end });
-                              isSelectingRef.current = false;
-                              selectionStartRef.current = null;
-                              setIsDragging(false);
-                              return true;
-                            }
-
-                            isSelectingRef.current = true;
-                            selectionStartRef.current = lineNumber;
-                            setIsDragging(true);
-
-                            if (lineSelection && event.shiftKey) {
-                              const start = Math.min(lineSelection.start, lineNumber);
-                              const end = Math.max(lineSelection.end, lineNumber);
-                              setLineSelection({ start, end });
-                            } else {
-                              setLineSelection({ start: lineNumber, end: lineNumber });
-                            }
-
-                            return true;
-                          },
-                          mouseover: (view, line, event) => {
-                            if (!(event instanceof MouseEvent)) return false;
-                            if (event.buttons !== 1) return false;
-                            if (!isSelectingRef.current || selectionStartRef.current === null) return false;
-                            const lineNumber = view.state.doc.lineAt(line.from).number;
-                            const start = Math.min(selectionStartRef.current, lineNumber);
-                            const end = Math.max(selectionStartRef.current, lineNumber);
-                            setLineSelection({ start, end });
-                            setIsDragging(true);
-                            return false;
-                          },
-                          mouseup: () => {
-                            isSelectingRef.current = false;
-                            selectionStartRef.current = null;
-                            setIsDragging(false);
-                            return false;
-                          },
-                        },
-                    }}
+                      lineNumbersConfig={lineNumbersConfig}
                   />
                 </div>
                 )}

@@ -112,7 +112,7 @@ export const WebSearchResults: React.FC<{ output: WebSearchOutput; providerId: s
                 </ul>
             )}
             {providerName ? (
-                <div className="px-2 typography-micro text-muted-foreground/80">
+                <div className="px-2 typography-micro text-muted-foreground">
                     {t('chat.webSearch.provider', { provider: providerName })}
                 </div>
             ) : null}

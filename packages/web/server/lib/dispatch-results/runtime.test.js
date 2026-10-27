@@ -342,13 +342,24 @@ describe('dispatch results runtime', () => {
     expect(openCode.state.synthetic).toEqual([expect.objectContaining({ sessionID: 'ses_parent', text: expect.stringContaining('After restart') })]);
   });
 
-  it('keeps an unreadable file aside instead of overwriting it', async () => {
+  it.each([['not JSON', '{ not json'], ['JSON of another shape', '{"version":1}']])('keeps a file that is %s aside instead of overwriting it', async (_label, content) => {
     const dataDir = await makeDataDir();
-    await fs.writeFile(path.join(dataDir, 'dispatch-results.json'), '{ not json');
+    await fs.writeFile(path.join(dataDir, 'dispatch-results.json'), content);
     const { runtime } = await createRuntime({ dataDir });
     await runtime.load();
     const files = await fs.readdir(dataDir);
     expect(files.some((name) => name.startsWith('dispatch-results.json.corrupt-'))).toBe(true);
+    expect(runtime.pending()).toEqual([]);
+  });
+
+  it('fails a registration that did not reach the disk and forgets the entry', async () => {
+    const dataDir = await makeDataDir();
+    const { runtime, openCode } = await createRuntime({ dataDir });
+    openCode.state.active.ses_child = { type: 'running' };
+    await runtime.load();
+    // A directory where the file goes makes the atomic rename fail.
+    await fs.mkdir(path.join(dataDir, 'dispatch-results.json'));
+    await expect(runtime.register({ parentSessionId: 'ses_parent', sessionId: 'ses_child', dispatchedAt: 10 })).rejects.toThrow();
     expect(runtime.pending()).toEqual([]);
   });
 

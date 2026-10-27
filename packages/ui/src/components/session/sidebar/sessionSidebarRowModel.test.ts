@@ -541,6 +541,25 @@ describe('buildSessionSidebarRowModel', () => {
       ]);
     });
 
+    test('a space nobody has chatted in leads its project list, where an empty worktree closes it past Show more', () => {
+      const space = group([], {
+        id: 'space:0123456789ab', label: 'quick-falcon', isMain: false, directory: '/spaces/0123456789ab/repo', folderScopeKey: '/spaces/0123456789ab/repo',
+        space: { id: '0123456789ab', name: 'quick-falcon', state: 'complete', projectDirectory: '/repo', directory: '/spaces/0123456789ab/repo' },
+      });
+      const roots = Array.from({ length: 8 }, (_, index) => node(`r${index}`));
+      const input = args([project([group(roots), worktree([], 'empty'), space])]);
+      input.sessionOrderIndex = new Map(roots.map((root, index) => [root.session.id, index] as const));
+      input.liveSpaceIds = new Set(['0123456789ab']);
+
+      const listed = listedOf(buildSessionSidebarRowModel(input).rows);
+      expect(listed.slice(0, 3)).toEqual(['project:project-a', 'work:space:0123456789ab@0', 'project:r0@0']);
+      expect(listed).not.toContain('work:worktree:/empty@0');
+
+      // Failed or gone, it closes the list as an empty worktree does.
+      input.liveSpaceIds = new Set();
+      expect(listedOf(buildSessionSidebarRowModel(input).rows)).not.toContain('work:space:0123456789ab@0');
+    });
+
     test('Detailed rows give the works under a project two lines, and keep what nests inside them on one', () => {
       const work = worktree([node('wt-1')]);
       const input = args([project([group([node('root', [node('child')])]), work])]);
@@ -557,6 +576,63 @@ describe('buildSessionSidebarRowModel', () => {
               : []
       ));
       expect(detailedOf).toEqual(['draft:true', 'root:true', 'child:false', 'work:true', 'wt-1:false']);
+    });
+
+    test('only the rows that are works of their own own their work', () => {
+      const work = worktree([node('wt-1', [node('wt-child')])]);
+      const input = args([project([group([node('root', [node('child')]), node('lane-1'), node('lane-2')]), work])]);
+      input.runIndex = buildMultiRunIndex(['lane-1', 'lane-2'].map((id) => ({
+        ...session(id),
+        metadata: withMultiRunMembership({}, {
+          version: 1, sessionID: id, group: { kind: 'id', id: '9f512893-6e63-4e49-a534-5de733ca103e' },
+          groupSlug: 'fix-auth', role: 'run', providerID: 'anthropic', modelID: 'claude', title: 'Fix auth',
+        }),
+      })), () => '/repo');
+      const runKey = [...input.runIndex.runs.keys()][0] ?? '';
+      input.expandedParents = new Set(['mixed-compact:active:root', 'project:active:root', 'project:active:wt-1', runExpansionKey('project', runKey)]);
+      input.workEntries = sessionWorks([timelineItem('root', { node: node('root', [node('child')]) })]);
+      input.zoneSessionIds = new Set(['root', 'child']);
+
+      const owners = buildSessionSidebarRowModel(input).rows.flatMap((row) => (
+        row.kind === 'session' ? [`${row.renderContext}:${row.node.session.id}:${row.ownsWork}`] : []
+      ));
+      expect(owners).toEqual([
+        'mixed-compact:root:true', 'mixed-compact:child:false',
+        'project:lane-1:false', 'project:lane-2:false',
+        'project:root:true', 'project:child:false',
+        'project:wt-1:false', 'project:wt-child:false',
+      ]);
+    });
+
+    test('a worktree stands where its archived sessions hold it', () => {
+      const input = args([project([group([node('r0'), node('r1')]), worktree([node('wt-old')])])]);
+      input.sessionOrderIndex = new Map([['r0', 0], ['r1', 1], ['wt-old', 2]]);
+      input.worktreeArchiveAnchors = new Map([['project-a:worktree:/wt', 0.5]]);
+      input.collapsedGroups = new Set(['project-a:worktree:/wt']);
+      expect(listedOf(buildSessionSidebarRowModel(input).rows)).toEqual(['project:project-a', 'project:r0@0', 'work:worktree:/wt@0', 'project:r1@0']);
+    });
+
+    test('a pinned worktree is listed in Pinned after the pinned sessions, and leads its project while the section is hidden', () => {
+      const pinnedWork = group([node('a1')], {
+        id: 'worktree:/wt', label: 'wt', branch: 'feature/wt', isMain: false, directory: '/wt', folderScopeKey: '/wt',
+        worktree: { path: '/wt', projectDirectory: '/repo', branch: 'feature/wt', label: 'wt', pinnedAt: 1 },
+      });
+      const input = args([project([group([node('r0'), node('pinned')]), pinnedWork])]);
+      input.sessionOrderIndex = new Map([['r0', 0], ['a1', 1]]);
+      input.collapsedGroups = new Set(['project-a:worktree:/wt']);
+      input.pinnedItems = [timelineItem('pinned')];
+      input.pinnedWorktrees = [{ kind: 'group', groupKey: 'project-a:worktree:/wt', projectId: 'project-a', group: pinnedWork }];
+      input.movedSessionIds = new Set(['pinned']);
+      input.movedGroupKeys = new Set(['project-a:worktree:/wt']);
+      expect(listedOf(buildSessionSidebarRowModel(input).rows)).toEqual([
+        'zone:pinned', 'mixed-compact:pinned@0', 'work:worktree:/wt@0:mixed', 'project:project-a', 'project:r0@0',
+      ]);
+
+      input.pinnedItems = [];
+      input.pinnedWorktrees = [];
+      input.movedSessionIds = new Set();
+      input.movedGroupKeys = new Set();
+      expect(listedOf(buildSessionSidebarRowModel(input).rows).slice(0, 3)).toEqual(['project:project-a', 'work:worktree:/wt@0', 'project:r0@0']);
     });
 
     test('a worktree with no session closes the project root list', () => {
@@ -579,7 +655,7 @@ describe('buildSessionSidebarRowModel', () => {
     test('a worktree work In work lists is its group row naming its project, out of the drag sort, and leaves its project', () => {
       const work = worktree([node('a1'), node('a2')]);
       const input = args([project([group([node('root')]), work])]);
-      input.workEntries = [{ kind: 'worktree', groupKey: 'project-a:worktree:/wt', projectId: 'project-a', group: work }];
+      input.workEntries = [{ kind: 'group', groupKey: 'project-a:worktree:/wt', projectId: 'project-a', group: work }];
       input.movedGroupKeys = new Set(['project-a:worktree:/wt']);
 
       const model = buildSessionSidebarRowModel(input);
@@ -591,7 +667,7 @@ describe('buildSessionSidebarRowModel', () => {
     test('a worktree work kept in its project too keeps every row key unique and shares its collapse', () => {
       const work = worktree([node('a1')]);
       const input = args([project([group([]), work])]);
-      input.workEntries = [{ kind: 'worktree', groupKey: 'project-a:worktree:/wt', projectId: 'project-a', group: work }];
+      input.workEntries = [{ kind: 'group', groupKey: 'project-a:worktree:/wt', projectId: 'project-a', group: work }];
       input.collapsedGroups = new Set(['project-a:worktree:/wt']);
 
       const model = buildSessionSidebarRowModel(input);
@@ -608,7 +684,7 @@ describe('buildSessionSidebarRowModel', () => {
       input.workEntries = sessionWorks([timelineItem('working')]);
       input.timeEntries = [
         { kind: 'session', item: timelineItem('b1', { projectId: 'project-b' }) },
-        { kind: 'worktree', groupKey: 'project-a:worktree:/wt', projectId: 'project-a', group: work },
+        { kind: 'group', groupKey: 'project-a:worktree:/wt', projectId: 'project-a', group: work },
         { kind: 'session', item: timelineItem('root') },
       ];
 
@@ -660,7 +736,7 @@ describe('buildSessionSidebarRowModel', () => {
 
       // Folded away In work, the folder holds nothing of it.
       input.movedGroupKeys = new Set(['project-a:worktree:/wt']);
-      input.workEntries = [{ kind: 'worktree', groupKey: 'project-a:worktree:/wt', projectId: 'project-a', group: work }];
+      input.workEntries = [{ kind: 'group', groupKey: 'project-a:worktree:/wt', projectId: 'project-a', group: work }];
       expect(listedOf(buildSessionSidebarRowModel(input).rows)).toEqual([
         'zone:work', 'work:worktree:/wt@0:mixed', 'project:a1@1', 'project:project-a', 'folder:Releases', 'project:root@0',
       ]);
@@ -687,7 +763,7 @@ describe('buildSessionSidebarRowModel', () => {
       input.runIndex = runIndex;
       input.workEntries = [
         { kind: 'session', item: timelineItem('lane-1') },
-        { kind: 'worktree', groupKey: 'project-a:worktree:/wt', projectId: 'project-a', group: work },
+        { kind: 'group', groupKey: 'project-a:worktree:/wt', projectId: 'project-a', group: work },
         { kind: 'session', item: timelineItem('lane-2') },
       ];
       input.movedSessionIds = new Set(['lane-1', 'lane-2']);

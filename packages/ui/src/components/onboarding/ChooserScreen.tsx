@@ -378,7 +378,7 @@ export function ChooserScreen({ onCliAvailable, localAvailable = true }: Chooser
                       </>
                     )}
                   </div>
-                  <p className="text-xs text-muted-foreground/70">
+                  <p className="text-xs text-muted-foreground">
                     {t(pinnedBinary === null ? 'onboarding.localSetup.helper.saveAndReload' : 'onboarding.localSetup.helper.pinnedByAdministrator')}
                   </p>
                 </div>

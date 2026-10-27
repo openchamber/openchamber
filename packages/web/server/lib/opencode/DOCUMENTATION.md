@@ -63,6 +63,15 @@ result has no `title` (it travels in `metadata`) and must not carry `output`
 unless an output schema is declared; and a tool call no longer receives
 `context.directory` or `context.abort`, so the callback sends `context.sessionID`
 and OpenChamber resolves the directory itself.
+
+The managed config file also carries `permissions` a managed tool needs
+(`managedPermissionRules` in `../agent-tool/runtime.js`). OpenCode appends the
+`permissions` of every config layer to each agent and reads a session's own
+rules after the agent's, so a rule here adds to the user's rules and replaces
+none, and a session can allow what this layer denies. A user rule after ours
+(such as a project-wide allow-all) wins, which only puts the declaration back
+in that user's sessions. On the fallback path the same rules are merged into
+`OPENCODE_CONFIG_CONTENT` (`appendManagedPermissions`).
 - `packages/web/server/lib/opencode/server-utils-runtime.js`: shared server runtime utilities for OpenCode proxy wiring, OpenCode port/readiness helpers, and snapshot fetchers.
 - `packages/web/server/lib/opencode/openchamber-routes.js`: OpenChamber update and models metadata route registration.
 - `packages/web/server/lib/opencode/model-discovery.js`: bounded custom-provider `/models` discovery and optional models.dev enrichment. It accepts only http(s), does not follow redirects, filters transport headers, never returns credentials, and treats models.dev failure as unenriched success. Edit requests may name the provider so the host can fall back to a stored credential when the form leaves the key blank — the key from OpenCode's credential store or, failing that, the provider's stored config entry (`settings.apiKey`, else the first `env` variable name that is set in the server environment) — but only while the form's base URL still matches the saved one, so a changed URL never receives the stored credential; an explicitly entered replacement key wins.
@@ -271,12 +280,24 @@ CLI use this server path. VS Code uses the same executor from its extension host
 Bundled Desktop, external URL connections, and unavailable CLIs remain
 unsupported at the host boundary.
 
-An upgrade leaves the current server running. The toast's Reload action restarts
-it using the installed version. Failed installations return an error and can be
+On macOS and Linux an upgrade leaves the current server running, and the toast's
+Reload action restarts it using the installed version. On Windows the managed
+server stops for the install and starts again afterwards, also when the install
+fails (`restartOpenCode(reason, { whileStopped })`; VS Code does the same with
+its own stop and start). Failed installations return an error and can be
 retried; installer output is not returned or logged because it can contain registry
 credentials. Requests from multiple clients share the in-flight operation. The
 executor supplies EOF and bounds captured output; installation has no fixed time
 limit, and the VS Code bridge does not apply its usual 30-second request timeout.
+
+### Why Windows stops the server for an upgrade and not lets OpenCode handle it
+
+Windows refuses to delete the last link of a running executable. OpenCode guards
+its own upgrade process and `serve --service` by holding a second link in its
+cache, but our `serve --stdio` server gets no such link. npm then cannot replace
+`opencode.exe` and leaves the package without it, so every later start fails
+until the user reinstalls OpenCode. Stopping the server costs a few seconds of
+downtime that the Reload action would cost anyway.
 
 ### Migrating an installed v1 CLI
 
@@ -554,8 +575,14 @@ page; a package directory or a v1 `plugin/` file is listed as a package that
 OpenCode loads and OpenChamber does not touch.
 
 A configured plugin spec is classified by `parsedKindForSpec`
-(`plugin-spec.js`): a filesystem path is `path`, a Git package spec is `git`,
-anything else is `npm`. The Git forms are the ones OpenCode 2 documents — the
+(`plugin-spec.js`): an OpenCode 2 control entry is `control`, a filesystem path
+is `path`, a Git package spec is `git`, anything else is `npm`. A control entry
+switches plugins OpenCode already knows: `-name` disables the plugin with that
+id (`-*` and `-prefix.*` disable a group), and `*`, `prefix.*` and
+`opencode.<name>` enable them again. It names no package, so the registry route
+skips it, the card shows no load status, and it takes no options: OpenCode reads
+`-name` as a control entry only as a bare string, and `{package: "-name"}` as a
+package to install. The Git forms are the ones OpenCode 2 documents — the
 hosted shortcuts (`github:`, `gitlab:`, `bitbucket:`, `gist:`), the `git+`
 transports (`git+https://`, `git+ssh://`, `git+file://`) and bare `git://`,
 each with an optional `#ref` and npm `::path:` subdirectory. A Git spec must
@@ -619,7 +646,7 @@ A plugin entry is written only when OpenCode 2 can load its spec
 (`Npm.isInstallablePackage` in `packages/util/src/npm.ts`): an npm name with
 an optional version, tag or range, a Git spec (`github:owner/repo`,
 `git+https://…`, `git+ssh://…#ref`, `git@host:owner/repo.git`, `owner/repo`),
-or a local path. Anything else is refused with `UNLOADABLE_SPEC`, which the route
+a local path, or a control entry. Anything else is refused with `UNLOADABLE_SPEC`, which the route
 answers as 400 with `code`, and the add dialog shows under the field. An
 existing entry keeps its spec when only its options change, so a config that
 already holds an unloadable spec stays editable.
@@ -1009,6 +1036,7 @@ Discovery already reads each skill's frontmatter and body. Source lookup uses th
   - Session list forwarding on every platform, preserving V2 query filters and pagination cursors. Global reads use OpenCode's cross-directory list rather than merging per-project pages on Windows.
   - OpenCode readiness gate for proxied `/api` requests
   - Worktree checkout gate before directory-scoped upstream reads and writes
+  - Folder trust gate (`../opencode-trust`): a request for a folder whose OpenCode configuration runs code answers 403 `opencode_trust_required` until the user trusts it, and `GET`/`POST /api/opencode/trust` serve the prompt. Registered ahead of the readiness hold, since the answer needs no running OpenCode.
 
 Git bootstrap must reach `git-ready` before OpenCode can cache a new worktree's
 project identity or config. Setup scripts may still be running; the optional UI
@@ -1098,7 +1126,7 @@ under a running child.
   a tool switched on later then reaches a process that can already call back.
 - `persistSettings` rewrites the file (temp + rename) whenever
   `agentControlToolEnabled`, `agentScheduleToolEnabled`, `agentWebToolEnabled`, `agentMemoryToolEnabled`,
-  `agentKnowledgeToolEnabled`, `agentNotifyToolEnabled`, `agentRenderToolEnabled` or `agentToolsCodeMode` changes. Plugin directories are written before the
+  `agentKnowledgeToolEnabled`, `agentNotifyToolEnabled`, `agentRenderToolEnabled`, `agentWorkflowToolEnabled` or `agentToolsCodeMode` changes. Plugin directories are written before the
   file names them, and a disabled plugin is removed from the list. OpenCode
   reloads within a couple of seconds; no restart is involved.
 - Fallback: when the user's own environment already sets `OPENCODE_CONFIG`,

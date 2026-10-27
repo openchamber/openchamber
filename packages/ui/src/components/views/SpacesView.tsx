@@ -29,19 +29,22 @@ export function SpacesView(): React.ReactNode {
     <div className="absolute inset-0 z-10 flex flex-col bg-background">
       <div className="flex-1 overflow-y-auto px-6 py-4">
         <div className="mx-auto w-full max-w-4xl space-y-4">
-          <div className="flex items-center">
-            <Button size="sm" onClick={() => setCreating(true)}>
-              <Icon name="box-3" className="me-1 h-3.5 w-3.5" />
-              {t('spaces.page.new')}
-            </Button>
-          </div>
-          <SettingsSection title={t('spaces.page.listTitle')}>
+          {/* One header row: the list's title and the way to add to it. */}
+          <SettingsSection
+            title={t('spaces.page.listTitle')}
+            headerAction={(
+              <Button size="sm" onClick={() => setCreating(true)}>
+                <Icon name="instance" className="me-1 h-3.5 w-3.5" />
+                {t('spaces.page.new')}
+              </Button>
+            )}
+          >
             {error ? (
               <p className="typography-meta text-[var(--status-error)]">{t('spaces.page.loadFailed', { reason: spaceFailureText(t, failureOfError(error)) })}</p>
             ) : null}
             {journey === null && !error ? <p className="typography-meta text-muted-foreground">{t('spaces.page.loading')}</p> : null}
             {/* A read that failed says so and leaves the last list; it never says there are none. */}
-            {journey !== null && !error && spaces.length === 0 ? <p className="typography-meta text-muted-foreground/70">{t('spaces.page.empty')}</p> : null}
+            {journey !== null && !error && spaces.length === 0 ? <p className="typography-meta text-muted-foreground">{t('spaces.page.empty')}</p> : null}
             {spaces.length > 0 ? (
               <div className="space-y-1">
                 {spaces.map((entry) => <SpaceRow key={entry.id} entry={entry} actions="menu" />)}

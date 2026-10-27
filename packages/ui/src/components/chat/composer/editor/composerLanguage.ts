@@ -16,10 +16,11 @@
 import { RangeSetBuilder, StateEffect, StateField, type Transaction } from '@codemirror/state';
 import { Decoration, Direction, EditorView, WidgetType, type DecorationSet } from '@codemirror/view';
 
-import { INLINE_REFERENCE_CHIP_CLASS, SKILL_CHIP_ICON_HREF } from '@/lib/messages/inlineMessageLinks';
+import { CHIP_TRAILING_PUNCTUATION, INLINE_REFERENCE_CHIP_CLASS, REFERENCE_CHIP_LABEL_CLASS, SKILL_CHIP_ICON_HREF } from '@/lib/messages/inlineMessageLinks';
 import { getFileTypeIconHref } from '@/lib/fileTypeIcons';
 import { findAttachmentCitationRanges } from '../../attachmentCitations';
 import { resolveHighlightSegments, DEFAULT_HIGHLIGHT_CLASS, type HighlightRange } from '../../composerHighlight';
+import { findSessionLinks, sessionLinkKey } from '@/lib/sessionLinks';
 import { filterKnownTokens, scanPrefixTokens } from '../language/prefixTokens';
 import { tokenizeComposer, tokenizeMentions, type ComposerLanguageContext } from '../language/tokenize';
 
@@ -113,7 +114,10 @@ class ReferenceChipWidget extends WidgetType {
         const use = doc.createElementNS('http://www.w3.org/2000/svg', 'use');
         use.setAttribute('href', this.iconHref);
         svg.appendChild(use);
-        chip.append(svg, doc.createTextNode(this.label));
+        const label = doc.createElement('span');
+        label.className = REFERENCE_CHIP_LABEL_CLASS;
+        label.textContent = this.label;
+        chip.append(svg, label);
         return chip;
     }
 
@@ -136,7 +140,8 @@ const basename = (path: string): string => {
 
 /**
  * Chips for the references the composer recognizes: attachment citations,
- * file and agent mentions, skills and snippets. Commands keep their color.
+ * file and agent mentions, skills, snippets, and mentioned sessions and
+ * messages. Commands keep their color.
  *
  * `typingEnd` is where the change being typed right now ended. A token ending
  * exactly there is still being written and stays text, so `$review` does not
@@ -144,8 +149,11 @@ const basename = (path: string): string => {
  * already follows the caret). It becomes a chip once anything is typed after
  * it or an edit happens elsewhere. Citations are complete when inserted.
  */
-function referenceChips(text: string, context: ComposerLanguageContext, typingEnd: number | null): DecorationSet {
-    if (context.inputMode === 'shell' || !text) return Decoration.none;
+/** The chips, and the marks that keep each one on a line with the punctuation after it. */
+type ReferenceChipDecorations = { chips: DecorationSet; glue: DecorationSet };
+
+function referenceChips(text: string, context: ComposerLanguageContext, typingEnd: number | null): ReferenceChipDecorations {
+    if (context.inputMode === 'shell' || !text) return { chips: Decoration.none, glue: Decoration.none };
     const themeVariant = context.fileIconVariant ?? 'dark';
     const chips: ChipRange[] = [];
     const addToken = (start: number, end: number, widget: ReferenceChipWidget) => {
@@ -185,16 +193,31 @@ function referenceChips(text: string, context: ComposerLanguageContext, typingEn
         addToken(token.start, token.end, new ReferenceChipWidget(token.name, `#${token.name}`, SNIPPET_CHIP_ICON_HREF));
     }
 
+    // A mentioned session or message is complete once resolved, like a citation.
+    if (context.sessionLinkChips?.size) {
+        for (const range of findSessionLinks(text, context.sessionLinkOrigins ?? [])) {
+            const chip = context.sessionLinkChips.get(sessionLinkKey(range.target));
+            if (chip) chips.push({ start: range.start, end: range.end, widget: new ReferenceChipWidget(chip.label, chip.title, chip.iconHref) });
+        }
+    }
+
     chips.sort((a, b) => a.start - b.start);
     const builder = new RangeSetBuilder<Decoration>();
+    const glue = new RangeSetBuilder<Decoration>();
     let lastEnd = -1;
     for (const chip of chips) {
         if (chip.start < lastEnd) continue;
         builder.add(chip.start, chip.end, Decoration.replace({ widget: chip.widget }));
         lastEnd = chip.end;
+        const trailing = CHIP_TRAILING_PUNCTUATION.exec(text.slice(chip.end, chip.end + 8))?.[0];
+        if (trailing) glue.add(chip.start, chip.end + trailing.length, chipGlue);
     }
-    return builder.finish();
+    return { chips: builder.finish(), glue: glue.finish() };
 }
+
+// Keeps a chip and the punctuation typed after it on one line, as a word and
+// its comma are; outside the chip, so the punctuation stays ordinary text.
+const chipGlue = Decoration.mark({ attributes: { style: 'white-space: nowrap' } });
 
 /**
  * Reuse the prompt's existing tokenization for both color and direction.
@@ -211,7 +234,7 @@ function buildDecorations(text: string, context: ComposerLanguageContext, typing
     }
     return {
         highlights: builder.finish(),
-        chips: referenceChips(text, context, typingEnd),
+        ...referenceChips(text, context, typingEnd),
         isolates: context.inputMode === 'shell' && text.length > 0
             ? Decoration.set([ltrIsolate.range(0, text.length)])
             : technicalIsolates(ranges),
@@ -255,6 +278,7 @@ const decorationField = StateField.define<DecorationState>({
         EditorView.decorations.from(field, (value) => value.chips),
         EditorView.atomicRanges.of((view) => view.state.field(field).chips),
         EditorView.outerDecorations.from(field, (value) => value.isolates),
+        EditorView.outerDecorations.from(field, (value) => value.glue),
         EditorView.bidiIsolatedRanges.from(field, (value) => value.isolates),
     ],
 });

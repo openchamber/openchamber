@@ -33,7 +33,11 @@ import { dropdownMenuItemClass, dropdownMenuPopupClass, dropdownMenuSeparatorCla
 import { Icon } from '@/components/icon/Icon';
 import { cn } from '@/lib/utils';
 import { isRightToLeft, useI18n } from '@/lib/i18n';
-import { useSessionTabsStore } from '@/stores/useSessionTabsStore';
+import { GLOBAL_SESSION_TAB_SCOPE, useSessionTabsStore } from '@/stores/useSessionTabsStore';
+import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useUIStore } from '@/stores/useUIStore';
+import { getRuntimeKey } from '@/lib/runtime-switch';
+import { sessionTabChatsScope, sessionTabScopeFor, sessionTabSeedFor } from '@/lib/sessionTabScope';
 import { closeSessionTabAndActivateNeighbour } from '@/lib/sessionTabs';
 import { useGlobalSessionsStore, resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -332,13 +336,45 @@ export const SessionTabsStrip: React.FC<{
   const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
   const activeSessions = useGlobalSessionsStore((state) => state.activeSessions);
 
+  // With separate tabs per workspace the strip shows the working set of the
+  // place the user is: the open session's folder, else the open draft's.
+  const perWorkspace = useUIStore((state) => state.sessionTabsPerWorkspace);
+  const enterScope = useSessionTabsStore((state) => state.enterScope);
+  const sessionsLoaded = useGlobalSessionsStore((state) => state.hasLoaded);
+  const currentSessionDirectory = useSessionUIStore((state) => state.currentSessionDirectory);
+  const draftOpen = useSessionUIStore((state) => state.newSessionDraft.open);
+  const draftIsChat = useSessionUIStore((state) => state.newSessionDraft.target === 'chat');
+  const draftDirectory = useSessionUIStore((state) => state.newSessionDraft.directoryOverride);
+  const draftProjectId = useSessionUIStore((state) => state.newSessionDraft.selectedProjectId ?? null);
+  const draftProjectPath = useProjectsStore((state) => {
+    const projectId = draftProjectId ?? state.activeProjectId;
+    return state.projects.find((project) => project.id === projectId)?.path ?? null;
+  });
+
   // Opening a session anywhere (sidebar, palette, deep link) shows it in the
   // preview tab. The lanes of one multi-run share a tab: opening another lane
   // reuses it.
   const currentRunMemberIds = useMultiRunMemberIds(currentSessionId);
   React.useEffect(() => {
+    if (!perWorkspace) {
+      enterScope(GLOBAL_SESSION_TAB_SCOPE, () => []);
+    } else {
+      // A first visit seeds a worktree's or space's tabs from its sessions,
+      // which need the complete session list; until then nothing moves.
+      if (!sessionsLoaded) return;
+      const runtimeKey = getRuntimeKey();
+      const chatDraft = !currentSessionId && draftOpen && draftIsChat;
+      const directory = currentSessionId ? currentSessionDirectory : draftOpen && !draftIsChat ? draftDirectory ?? draftProjectPath : null;
+      const scope = chatDraft ? sessionTabChatsScope(runtimeKey) : sessionTabScopeFor(runtimeKey, directory);
+      if (!scope) return;
+      enterScope(scope, () => sessionTabSeedFor(
+        directory,
+        useGlobalSessionsStore.getState().activeSessions,
+        useProjectsStore.getState().projects.map((project) => project.path),
+      ));
+    }
     if (currentSessionId) ensureTab(currentSessionId, currentRunMemberIds);
-  }, [currentSessionId, currentRunMemberIds, ensureTab]);
+  }, [currentRunMemberIds, currentSessionDirectory, currentSessionId, draftDirectory, draftIsChat, draftOpen, draftProjectPath, ensureTab, enterScope, perWorkspace, sessionsLoaded]);
 
   const sessionsById = React.useMemo(() => {
     const map = new Map<string, Session>();

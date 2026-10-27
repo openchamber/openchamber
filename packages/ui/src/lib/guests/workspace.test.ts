@@ -116,6 +116,23 @@ describe('extension workspace projection', () => {
     await Promise.resolve();
     expect(snapshots.length).toBe(baseline + 1);
   });
+  test('links show every thread on the session, whoever linked it, without another extension data', () => {
+    useGlobalSessionsStore.getState().applySnapshot([{ ...session('b-session', '/b-tree'), metadata: { openchamber: { linked_issues: [
+      { id: 'link:https://gitlab.com/g/r/-/merge_requests/4', kind: 'external', thread: 'change', identifier: '!4', title: 'Agent MR', url: 'https://gitlab.com/g/r/-/merge_requests/4', linkedAt: 2 },
+      { id: 'openchamber/openchamber#7', number: 7, kind: 'issue', title: 'User issue', url: 'https://github.com/openchamber/openchamber/issues/7', linkedAt: 3 },
+      { id: 'guest:other:X-1', kind: 'guest', providerId: 'other', identifier: 'X-1', title: 'Other card', url: 'https://other.example/X-1', data: { secret: true }, linkedAt: 4 },
+      { id: 'guest:board:B-2', kind: 'guest', providerId: 'board', identifier: 'B-2', title: 'Own card', url: 'https://board.example/B-2', data: { column: 'todo' }, linkedAt: 5 },
+    ] } } }], [], 'ready');
+
+    const [record] = readB().sessions;
+    expect(record.items).toEqual([{ id: 'B-2', data: { column: 'todo' } }]);
+    expect(record.links).toEqual([
+      { title: 'Agent MR', url: 'https://gitlab.com/g/r/-/merge_requests/4', kind: 'change', linkedAt: 2 },
+      { title: 'User issue', url: 'https://github.com/openchamber/openchamber/issues/7', kind: 'issue', linkedAt: 3 },
+      { title: 'Other card', url: 'https://other.example/X-1', kind: 'issue', linkedAt: 4 },
+      { title: 'Own card', url: 'https://board.example/B-2', kind: 'issue', linkedAt: 5 },
+    ]);
+  });
   test('blocking requests and retries expose state without conversation data', () => {
     const child = manager.ensureChild('/b-tree', { bootstrap: false });
     applyGlobalSessionStatusEvent('/b-tree', { type: 'session.status', properties: { sessionID: 'b-session', status: { type: 'retry', attempt: 1, message: 'Wait', next: 1 } } });

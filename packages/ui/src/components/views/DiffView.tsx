@@ -1369,9 +1369,9 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                             </Button>
                         ) : null}
                         <WholeFileCommentButton
-                            onClick={wholeFileComment.open}
+                            onClick={wholeFileComment.toggle}
                             active={wholeFileComment.isOpen}
-                            hoverGroupClass="group-hover/header:opacity-70"
+                            className="opacity-70"
                         />
                         <DiffViewToggle
                             mode={renderSideBySide ? 'side-by-side' : 'unified'}
@@ -1384,8 +1384,9 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                         />
                     </div>
                 </div>
+                {wholeFileComment.editor}
             </div>
-            {wholeFileComment.body}
+            {wholeFileComment.cards}
             {isExpanded && (
                 // Clip, not hidden: a hidden overflow is a scroll box of its
                 // own, and the diff's sticky scrollbar would stick to it

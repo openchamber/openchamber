@@ -51,6 +51,8 @@ export async function listGlobalSessionPages(
     listPage: SessionPageLister,
     options: {
         directory?: string;
+        /** Only the direct children of this session. */
+        parentID?: string;
         pageSize: number;
         onPage?: (sessions: GlobalSessionRecord[]) => void;
         /** The first page's isolated-space marks: `null` when the page carried none. */
@@ -73,6 +75,7 @@ export async function listGlobalSessionPages(
                 attempts += 1;
                 return await listPage({
                     ...(options.directory ? { directory: options.directory } : { global: true }),
+                    parentID: options.parentID,
                     limit: options.pageSize,
                     ...(cursor !== undefined ? { cursor } : {}),
                 });

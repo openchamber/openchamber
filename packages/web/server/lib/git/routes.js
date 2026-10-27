@@ -69,6 +69,7 @@ const createWorktreeInstanceDisposer = ({ buildOpenCodeUrl, getOpenCodeAuthHeade
 // hooks find the project's tools; reads the UI repeats on its own may not
 // (lib/environment/refresh-scope.js).
 const worktreeTitleBodySchema = z.object({ title: z.string() });
+const worktreePinBodySchema = z.object({ pinned: z.boolean() });
 
 const userAction = (handler) => (req, res, next) => runAsUserAction(() => handler(req, res, next));
 
@@ -1680,6 +1681,25 @@ export function registerGitRoutes(app, {
     } catch (error) {
       console.error('Failed to set the worktree task title:', error);
       res.status(Number.isInteger(error?.status) ? error.status : 500).json({ error: error.message || 'Failed to set the task title' });
+    }
+  }));
+
+  // The user pinning a worktree's task to the top of the sidebar, or unpinning it.
+  app.put('/api/git/worktrees/pin', userAction(async (req, res) => {
+    const { setWorktreePinned } = await getGitLibraries();
+    try {
+      const directory = resolveDirectoryQuery(req.query.directory);
+      if (!directory) {
+        return res.status(400).json({ error: 'directory parameter is required' });
+      }
+      const body = worktreePinBodySchema.safeParse(req.body);
+      if (!body.success) {
+        return res.status(400).json({ error: 'pinned must be a boolean' });
+      }
+      res.json(await setWorktreePinned(directory, body.data.pinned));
+    } catch (error) {
+      console.error('Failed to pin the worktree:', error);
+      res.status(Number.isInteger(error?.status) ? error.status : 500).json({ error: error.message || 'Failed to pin the worktree' });
     }
   }));
 

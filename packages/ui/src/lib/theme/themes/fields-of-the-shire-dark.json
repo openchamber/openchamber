@@ -25,7 +25,7 @@
       "background": "#1b1815",
       "foreground": "#e9decf",
       "muted": "#161311",
-      "mutedForeground": "#9f9686",
+      "mutedForeground": "#948b7c",
       "elevated": "#24211e",
       "overlay": "#1b1815cc",
       "subtle": "#282320"
@@ -106,7 +106,7 @@
       "background": "#1b1815"
     },
     "markdown": {
-      "link": "#5a6d7a",
+      "link": "#75858f",
       "linkHover": "#93a56b",
       "inlineCode": "#93a56b",
       "inlineCodeBackground": "#191613",

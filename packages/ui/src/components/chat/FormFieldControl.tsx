@@ -1,5 +1,6 @@
 import React from 'react';
 import type { FormField } from '@opencode/client';
+import { useEmojiPicker } from '@/components/emoji/useEmojiPicker';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Radio } from '@/components/ui/radio';
 import { Icon } from '@/components/icon/Icon';
@@ -41,6 +42,7 @@ const AutoGrowTextarea = React.memo(function AutoGrowTextarea({
     onKeyDown,
 }: AutoGrowTextareaProps) {
     const textareaRef = React.useRef<HTMLTextAreaElement | null>(null);
+    const emojiPicker = useEmojiPicker(textareaRef);
     const [localValue, setLocalValue] = React.useState(value);
     const [height, setHeight] = React.useState(FORM_CUSTOM_TEXTAREA_MIN_HEIGHT);
     const [isScrollable, setIsScrollable] = React.useState(false);
@@ -62,26 +64,29 @@ const AutoGrowTextarea = React.memo(function AutoGrowTextarea({
     }, [height, isScrollable, localValue]);
 
     return (
-        <textarea
-            ref={textareaRef}
-            value={localValue}
-            placeholder={placeholder}
-            disabled={disabled}
-            autoFocus={autoFocus}
-            style={{ height }}
-            onChange={(event) => {
-                setLocalValue(event.target.value);
-                onValueChange(event.target.value);
-            }}
-            onKeyDown={onKeyDown}
-            className={cn(
-                'w-full resize-none rounded border border-border/30 bg-background/50 px-2 py-1',
-                'typography-meta text-foreground placeholder:text-muted-foreground/60',
-                'focus:outline-none focus:border-border/60',
-                isScrollable ? 'overflow-y-auto' : 'overflow-y-hidden',
-                disabled ? 'opacity-60' : null,
-            )}
-        />
+        <>
+            <textarea
+                ref={textareaRef}
+                value={localValue}
+                placeholder={placeholder}
+                disabled={disabled}
+                autoFocus={autoFocus}
+                style={{ height }}
+                onChange={(event) => {
+                    setLocalValue(event.target.value);
+                    onValueChange(event.target.value);
+                }}
+                onKeyDown={onKeyDown}
+                className={cn(
+                    'w-full resize-none rounded border border-border/30 bg-background/50 px-2 py-1',
+                    'typography-meta text-foreground placeholder:text-muted-foreground',
+                    'focus:outline-none focus:border-border/60',
+                    isScrollable ? 'overflow-y-auto' : 'overflow-y-hidden',
+                    disabled ? 'opacity-60' : null,
+                )}
+            />
+            {emojiPicker}
+        </>
     );
 });
 
@@ -238,7 +243,7 @@ return (
                                 <div className="flex items-center gap-2">
                                     <Icon
                                         name="edit"
-                                        className={cn('h-3.5 w-3.5', value.custom ? 'text-primary' : 'text-muted-foreground/50')}
+                                        className={cn('h-3.5 w-3.5', value.custom ? 'text-primary' : 'text-muted-foreground')}
                                     />
                                     <span
                                         className={cn(

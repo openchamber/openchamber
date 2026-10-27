@@ -49,9 +49,19 @@ export const runMobileSubtreeAction = (action: SessionSubtreeAction, session: Se
   );
 };
 
-export const toggleMobileSessionWork = async (session: Session, inWork: boolean, t: Translate): Promise<void> => {
+/**
+ * Track a root session's work, or with sessions of it in work, mark all of
+ * them done, as the desktop row does.
+ */
+export const toggleMobileSessionWork = async (session: Session, sessionsInWork: readonly Session[], t: Translate): Promise<void> => {
   try {
-    await setSessionWorkState(session.id, getSessionDirectory(session) || null, inWork ? 'done' : 'open');
+    if (sessionsInWork.length === 0) {
+      await setSessionWorkState(session.id, getSessionDirectory(session) || null, 'open');
+      return;
+    }
+    for (const entry of sessionsInWork) {
+      await setSessionWorkState(entry.id, getSessionDirectory(entry) || getSessionDirectory(session) || null, 'done');
+    }
   } catch (error) {
     toastSessionWorkFailure(error instanceof SessionDirectoryMissingError, () => { void runMobileSubtreeAction('archive', session, t); }, t);
   }

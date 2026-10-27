@@ -107,7 +107,7 @@ const ConsentBody: React.FC<{
                 </Button>
                 {pending ? <Icon name="loader-4" className="size-3.5 animate-spin text-muted-foreground" /> : null}
             </div>
-            <p className="typography-micro text-muted-foreground/80">{t('chat.webSearchConsent.settingsHint')}</p>
+            <p className="typography-micro text-muted-foreground">{t('chat.webSearchConsent.settingsHint')}</p>
         </div>
     );
 };

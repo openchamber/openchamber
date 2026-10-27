@@ -4,6 +4,7 @@ import { defaultRehypePlugins, defaultRemarkPlugins, type MathPlugin, type Strea
 import type { Processor } from 'unified';
 import type { Root, RootContent } from 'mdast';
 import rehypeSanitize from 'rehype-sanitize';
+import { remarkAlerts, MARKDOWN_ALERT_KINDS } from './remarkAlerts';
 import { remarkDisclosures } from './remarkDisclosures';
 import { remarkMathCompatibility } from './remarkMathCompatibility';
 import { rehypeMarkdownPolicy, rehypeRestoreMarkdownLinks } from './rehypeMarkdownPolicy';
@@ -26,8 +27,9 @@ const schema: NonNullable<Parameters<typeof rehypeSanitize>[0]> = {
   strip: ['script', 'style', 'iframe', 'object', 'embed', 'svg', 'math', 'form'],
   attributes: {
     '*': ['align', 'alt', 'checked', 'colSpan', 'height', 'media', 'open', 'rowSpan', 'start', 'title', 'width'],
-    a: ['href', 'id', 'ariaDescribedBy', 'ariaLabel', 'dataFootnoteRef', 'dataFootnoteBackref', 'dataOcLinkSource'],
-    code: [['className', /^language-[\w#+.-]+$/, 'math-inline', 'math-display'], 'metastring'],
+    a: ['href', 'id', 'ariaDescribedBy', 'ariaLabel', 'dataFootnoteRef', 'dataFootnoteBackref', 'dataOcLinkSource', 'dataOcReference'],
+    // `:` for GitLab's suggestion fences (`suggestion:-0+2`).
+    code: [['className', /^language-[\w#+.:-]+$/, 'math-inline', 'math-display'], 'metastring'],
     img: ['src', 'srcSet', 'alt', 'dataOcMediaSource'],
     source: ['src', 'srcSet', 'type', 'media', 'dataOcMediaSource'],
     video: ['src', 'controls', 'playsInline', 'preload', 'dataOcMediaSource'],
@@ -37,6 +39,7 @@ const schema: NonNullable<Parameters<typeof rehypeSanitize>[0]> = {
     ol: [['className', 'contains-task-list']],
     section: ['dataFootnotes', ['className', 'footnotes']],
     h2: ['id', ['className', 'sr-only']],
+    blockquote: [['dataOcAlert', ...MARKDOWN_ALERT_KINDS]],
   },
   // href has already passed the application URL classifier. Media still only
   // uses HTTP(S)/relative src; local files travel as validated source metadata.
@@ -87,7 +90,7 @@ function remarkVisibleBlocks() {
 
 function createOptions(allowRawHtml: boolean, isVSCode: boolean): Pick<StreamdownProps, 'remarkPlugins' | 'rehypePlugins'> {
   return {
-    remarkPlugins: [...Object.values(defaultRemarkPlugins), remarkDisclosures, remarkVisibleBlocks, remarkSessionLinks],
+    remarkPlugins: [...Object.values(defaultRemarkPlugins), remarkDisclosures, remarkAlerts, remarkVisibleBlocks, remarkSessionLinks],
     rehypePlugins: [
       ...(allowRawHtml ? [defaultRehypePlugins.raw] : []),
       [rehypeMarkdownPolicy, { isVSCode }],

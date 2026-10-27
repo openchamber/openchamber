@@ -32,6 +32,10 @@ import { mcpGridI18n } from './mcp-grid.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 import { diffFindI18n } from './diff-find.i18n';
+import { markdownGithubI18n } from './markdown-github.i18n';
+import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
+import { workflowsI18n } from './workflows.i18n';
+import { sessionReferencesI18n } from './session-references.i18n';
 import { guestStatusViewI18n } from './guest-status-view.i18n';
 
 export const dict = {
@@ -176,6 +180,10 @@ export const dict = {
   ...pluginsGridI18n.de,
   ...integrationsCatalogI18n['de'],
   ...diffFindI18n['de'],
+  ...markdownGithubI18n['de'],
+  ...autocompleteScopeI18n['de'],
+  ...workflowsI18n['de'],
+  ...sessionReferencesI18n['de'],
   ...guestStatusViewI18n['de'],
   'common.language.german': 'Deutsch',
   'common.loading': 'Wird geladen...',
@@ -271,7 +279,6 @@ export const dict = {
   'mobile.menu.titleAria': 'Arbeitsbereichstools',
   'mobile.menu.files': 'Dateien',
   'mobile.menu.git': 'Git',
-  'mobile.menu.mcp': 'MCP',
   'mobile.menu.instances': 'Instanzen',
   'mobile.menu.update': 'Aktualisieren',
   'mobile.menu.settings': 'Einstellungen',
@@ -2054,6 +2061,7 @@ export const dict = {
   'session.githubIntegration.validation.branchAlreadyCheckedOut': 'Branch ist bereits in einem Worktree ausgecheckt',
   'session.githubIntegration.validation.failed': 'Validierung fehlgeschlagen',
   'chat.fileAttachment.toast.attachFailed': 'Fehler beim Anhängen der Datei',
+  'chat.fileAttachment.toast.tooLarge': '{name} ist zu groß zum Anhängen (über {size}). Liegt die Datei im Projekt, erwähne sie mit @.',
   'chat.fileAttachment.toast.someFilesSkipped': 'Einige Dateien wurden übersprungen:\n{summary}',
   'chat.fileAttachment.toast.vscodePickFailed': 'Fehler beim Auswählen von Dateien in VS Code',
   'chat.fileAttachment.fileFallback': 'Datei',
@@ -2165,8 +2173,6 @@ export const dict = {
   'chat.commandAutocomplete.command.btwDescription': 'Stelle eine Neben-Frage in einer temporären Kind-Sitzung, ohne diesen Chat zu unterbrechen.',
   'chat.commandAutocomplete.command.forkDescription': 'Diesen Chat ab der letzten abgeschlossenen Antwort abzweigen und dort weitermachen; Text nach /fork wird an die Abzweigung gesendet.',
   'chat.commandAutocomplete.command.exploreDescription': 'Vertraut machen mit diesem Codebase: Eine Übersicht über die Architektur und Hauptbestandteile.',
-  'chat.commandAutocomplete.badge.command': 'Befehl',
-  'chat.commandAutocomplete.badge.system': 'System',
   'chat.commandAutocomplete.empty': 'Keine Befehle gefunden',
   'chat.agentMentionAutocomplete.badge.system': 'System',
   'chat.agentMentionAutocomplete.empty': 'Keine Agenten gefunden',
@@ -2296,8 +2302,6 @@ export const dict = {
   'chat.chatInput.actions.sendMessageAria': 'Nachricht senden',
   'chat.chatInput.actions.queueMessageAria': 'Nachricht in die Warteschlange stellen',
   'chat.chatInput.actions.stopGeneratingAria': 'Generierung stoppen',
-  'chat.chatInput.focusMode.toggleAria': 'Fokusmodus umschalten',
-  'chat.chatInput.focusMode.label': 'Fokusmodus',
   'chat.chatInput.linked.byAuthor': 'von {author}',
   'chat.chatInput.linked.issue.openInBrowserAria': 'Issue im Browser öffnen',
   'chat.chatInput.linked.issue.removeAria': 'Verknüpftes Issue entfernen',
@@ -2321,7 +2325,7 @@ export const dict = {
   'chat.dictation.insertAndSend': 'Einfügen und senden',
   'chat.dictation.retry': 'Transkription erneut versuchen',
   'chat.dictation.discard': 'Aufnahme verwerfen',
-  'chat.snippetAutocomplete.action.addNew': '+ Neues Snippet hinzufügen',
+  'chat.snippetAutocomplete.action.addNew': 'Neues Snippet hinzufügen',
   'chat.snippetAutocomplete.empty': 'Keine Snippets gefunden',
   'chat.snippetAutocomplete.footer': '↑↓ navigieren • Enter auswählen • Esc schließen',
   'snippets.source.global': 'global',
@@ -2706,6 +2710,20 @@ export const dict = {
   'projects.sharedTrust.actions': 'Aktionen',
   'projects.sharedTrust.skip': 'Diesmal nicht',
   'projects.sharedTrust.trust': 'Vertrauen und ausführen',
+  'projects.opencodeTrust.title': 'OpenCode Code aus diesem Ordner ausführen lassen?',
+  'projects.opencodeTrust.description': 'OpenCode führt die Plugins und Befehle aus der Konfiguration von {path} aus, sobald es den Ordner öffnet. Vertraue ihnen einmal, und OpenChamber fragt erst wieder, wenn sie sich ändern.',
+  'projects.opencodeTrust.plugins': 'Plugins',
+  'projects.opencodeTrust.commands': 'Befehle',
+  'projects.opencodeTrust.kind.package': '{name} (npm-Paket)',
+  'projects.opencodeTrust.kind.config': '{path}: eine Konfigurationsdatei, die OpenChamber nicht lesen kann',
+  'projects.opencodeTrust.kind.mcp': 'MCP-Server {name}',
+  'projects.opencodeTrust.kind.lsp': 'Sprachserver {name}',
+  'projects.opencodeTrust.kind.formatter': 'Formatierer {name}',
+  'projects.opencodeTrust.kind.shell': 'Shell',
+  'projects.opencodeTrust.paused': 'Ohne Vertrauen können Agenten in diesem Ordner nicht arbeiten, aber Dateien und Git-Änderungen kannst du weiter ansehen.',
+  'projects.opencodeTrust.skip': 'Diesmal nicht',
+  'projects.opencodeTrust.trust': 'Vertrauen und öffnen',
+  'projects.opencodeTrust.saveFailed': 'Deine Antwort konnte nicht gespeichert werden. Versuche es erneut.',
   'projectActions.actions.chooseActionAria': 'Projektaktion auswählen',
   'projectActions.actions.openPreview': 'Vorschau öffnen',
   'projectActions.actions.runNamedAria': '{name} ausführen',
@@ -3179,6 +3197,7 @@ export const dict = {
   'common.duration.minutesSecondsCompact': '{minutes}m {seconds}s',
   'common.duration.hoursMinutesCompact': '{hours}h {minutes}m',
   'contextFileOpen.failure.tooLarge': 'Datei ist zu groß zum Öffnen (>{count} Zeilen)',
+  'contextFileOpen.failure.tooLargeSize': 'Datei ist zu groß zum Öffnen (über {size})',
   'contextFileOpen.failure.missing': 'Datei nicht gefunden',
   'contextFileOpen.failure.unreadable': 'Fehler beim Öffnen der Datei',
   'quota.window.5h': '5-Stunden-Limit',
@@ -3499,6 +3518,7 @@ export const dict = {
   'onboarding.localSetup.status.autoContinue': 'Wir fahren automatisch fort, sobald die Installation erkannt wurde.',
   'updateDialog.changelog.title': 'Neuigkeiten',
   'chat.workStatus.ariaLabel': 'Arbeitsstatus',
+  'chat.workStatus.mobileEmpty': 'Für diese Sitzung gibt es noch nichts anzuzeigen',
   'chat.workStatus.context.label': 'Kontext',
   'chat.workStatus.cost.breakdown': 'Sitzung {session} · Unteragenten {subagents}',
   'chat.workStatus.git.changedFileSingle': '{count} Datei geändert',

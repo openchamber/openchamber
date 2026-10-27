@@ -250,6 +250,12 @@ test('tasks, disclosure and media source metadata keep their source semantics', 
   expect(serializeRenderedMarkdown(root)).toBe('- [x] done\n- [ ] next\n\n<details>\n<summary>More</summary>\n\nBody\n\n</details>\n\n![image](original.png)![plain](plain.png)');
 });
 
+test('an alert copies back to its GitHub marker, and as its drawn title in plain text', () => {
+  const html = '<blockquote data-oc-alert="note"><p data-oc-alert-title="NOTE"><span>Note</span></p><p>Body</p></blockquote>';
+  expect(serializeRenderedMarkdown(render(html))).toBe('> [!NOTE]\n>\n> Body');
+  expect(serializeRenderedMarkdown(render(html), 'plain')).toBe('Note\n\nBody');
+});
+
 test('native code element offsets preserve partial rows and selected empty lines', () => {
   const root = render('<div data-streamdown="code-block" data-language="ts" data-oc-code-source="alpha\n\nbeta\n\n"><div data-streamdown="code-block-body" data-language="ts"><pre><code><span><span>alpha</span></span><span>\n</span><span><span>beta</span></span></code></pre></div></div>');
   const code = root.querySelector('code');

@@ -1,12 +1,13 @@
 import React from 'react';
+import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { selectAvailableSkillsForDirectory, useSkillsStore } from '@/stores/useSkillsStore';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useUIStore } from '@/stores/useUIStore';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { useMobileAutocompleteMaxHeight } from './useMobileAutocompleteMaxHeight';
-import { AutocompleteRowTooltip } from './composer/ui/AutocompleteRowTooltip';
-import { useAutocompleteDetails } from './composer/ui/useAutocompleteDetails';
+import { AutocompleteRowDetail } from './composer/ui/AutocompleteRowParts';
+import { useAutocompleteSelectionScroll } from './composer/ui/useAutocompleteSelectionScroll';
 import { rankSkillAutocompleteItems } from './skillAutocompleteItems';
 
 interface SkillInfo {
@@ -33,16 +34,15 @@ export const SkillAutocomplete = React.forwardRef<SkillAutocompleteHandle, Skill
   onClose,
   style,
 }, ref) => {
+  const { t } = useI18n();
   const containerRef = React.useRef<HTMLDivElement | null>(null);
   const isMobile = useUIStore((state) => state.isMobile);
   const mobileMaxHeight = useMobileAutocompleteMaxHeight(containerRef, true, 240);
   const [selectedIndex, setSelectedIndex] = React.useState(0);
   const selectedIndexRef = React.useRef(0);
-  const keyboardNavigationRef = React.useRef(false);
   const [filteredSkills, setFilteredSkills] = React.useState<SkillInfo[]>([]);
   const itemRefs = React.useRef<(HTMLDivElement | null)[]>([]);
-  const { listRef, detailsVisible, onListScroll, onItemMouseMove, onKeyboardNavigate } =
-    useAutocompleteDetails(selectedIndex, itemRefs);
+  const { listRef, onKeyboardNavigate } = useAutocompleteSelectionScroll(selectedIndex, itemRefs);
   // Skills of the directory the composer sends to (session directory, or the
   // Chats root for a chat draft), not of the project the app was on last.
   const effectiveDirectory = useEffectiveDirectory();
@@ -92,14 +92,12 @@ export const SkillAutocomplete = React.forwardRef<SkillAutocompleteHandle, Skill
       }
 
       if (key === 'ArrowDown') {
-        keyboardNavigationRef.current = true;
         onKeyboardNavigate();
         setSelectedIndex((prev) => (prev + 1) % filteredSkills.length);
         return;
       }
 
       if (key === 'ArrowUp') {
-        keyboardNavigationRef.current = true;
         onKeyboardNavigate();
         setSelectedIndex((prev) => (prev - 1 + filteredSkills.length) % filteredSkills.length);
         return;
@@ -116,68 +114,47 @@ export const SkillAutocomplete = React.forwardRef<SkillAutocompleteHandle, Skill
   }), [filteredSkills, onSkillSelect, onClose, onKeyboardNavigate]);
 
   const renderSkill = (skill: SkillInfo, index: number) => {
-    const isProject = skill.scope === 'project';
-    const source = skill.source || 'opencode';
     return (
-      <AutocompleteRowTooltip description={skill.description} active={!isMobile && index === selectedIndex && detailsVisible}>
       <div
         key={`${skill.name}-${skill.scope}`}
         ref={(el) => {
           itemRefs.current[index] = el;
         }}
-          className={cn(
-            'flex gap-2 px-3 py-1.5 cursor-pointer rounded-lg typography-ui-label',
-            isMobile ? 'items-center' : 'items-start',
+        className={cn(
+          'flex items-center gap-2 px-2 py-1.5 cursor-pointer rounded-lg typography-ui-label',
           index === selectedIndex && 'bg-interactive-selection'
         )}
         onClick={() => onSkillSelect(skill.name)}
         onMouseMove={() => {
-          keyboardNavigationRef.current = false;
-          onItemMouseMove();
           setSelectedIndex(index);
         }}
       >
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <span className="font-semibold truncate">{skill.name}</span>
-            <span className={cn(
-              "text-[0.625rem] leading-none uppercase font-bold tracking-tight px-1.5 py-1 rounded border flex-shrink-0 transition-colors",
-              isProject 
-                ? "bg-[var(--status-info-background)] text-[var(--status-info)] border-[var(--status-info-border)]"
-                : "bg-[var(--status-success-background)] text-[var(--status-success)] border-[var(--status-success-border)]"
-            )}>
-              {skill.scope}
-            </span>
-            <span className="text-[0.625rem] leading-none uppercase font-bold tracking-tight px-1.5 py-1 rounded border flex-shrink-0 bg-[var(--surface-muted)] text-muted-foreground border-[var(--interactive-border)]/60">
-              {source}
-            </span>
-          </div>
-        </div>
+        <span className="max-w-[60%] shrink-0 truncate font-semibold">{skill.name}</span>
+        <AutocompleteRowDetail scope={skill.scope === 'project' ? 'project' : 'user'} description={skill.description} />
       </div>
-      </AutocompleteRowTooltip>
     );
   };
 
   return (
     <div
       ref={containerRef}
-      className="absolute z-[100] min-w-0 w-full max-w-[450px] max-h-60 oc-glass-popover oc-glass-floating rounded-xl bottom-full mb-2 inset-s-0 flex flex-col"
+      className="absolute z-[100] min-w-0 w-full max-w-[420px] max-h-64 oc-glass-popover oc-glass-floating rounded-xl bottom-full mb-2 inset-s-0 flex flex-col"
       style={mobileMaxHeight !== undefined ? { ...style, maxHeight: mobileMaxHeight } : style}
     >
-      <ScrollableOverlay ref={listRef} onScroll={onListScroll} preventOverscroll outerClassName="flex-1 min-h-0" className="px-0 pb-2">
+      <ScrollableOverlay ref={listRef} preventOverscroll outerClassName="flex-1 min-h-0" className="p-1">
         {filteredSkills.length ? (
           <div>
             {filteredSkills.map((skill, index) => renderSkill(skill, index))}
           </div>
         ) : (
-          <div className="px-3 py-2 typography-ui-label text-muted-foreground">
-            No skills found
+          <div className="px-2 py-1.5 typography-ui-label text-muted-foreground">
+            {t('chat.autocomplete.skillsEmpty')}
           </div>
         )}
       </ScrollableOverlay>
       {!isMobile && (
-        <div className="px-3 pt-1 pb-1.5 border-t typography-meta text-muted-foreground">
-          ↑↓ navigate • Enter select • Esc close
+        <div className="px-3 py-1.5 border-t typography-meta text-muted-foreground">
+          {t('chat.autocomplete.keyboardHint')}
         </div>
       )}
     </div>

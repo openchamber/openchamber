@@ -305,6 +305,37 @@ describe('restated duplicates', () => {
     expect(result.entries).toHaveLength(2);
   });
 
+  test('a reversed decision is stored beside the entry it contradicts and reports it as related', async () => {
+    const original = await runtime.create(PROJECT, {
+      title: 'Unit tests run with bun',
+      body: 'Run the unit suites with bun test.',
+    });
+    await runtime.create(PROJECT, { title: 'Package manager', body: 'Dependencies install with bun install here.' });
+
+    const result = await runtime.create(PROJECT, {
+      title: 'Unit tests moved to vitest',
+      body: 'Unit suites now run through vitest; bun test no longer runs them.',
+    });
+
+    expect(result.replaced).toBe(false);
+    expect(result.entries).toHaveLength(3);
+    expect(result.related.map((entry) => entry.id)).toEqual([original.entry.id]);
+  });
+
+  test('an unrelated new entry reports nothing related', async () => {
+    await runtime.create(PROJECT, {
+      title: 'Package manager',
+      body: 'This project installs dependencies with bun install.',
+    });
+
+    const result = await runtime.create(PROJECT, {
+      title: 'Test runner',
+      body: 'This project executes its unit suites through vitest.',
+    });
+
+    expect(result.related).toEqual([]);
+  });
+
   test('short entries fall back to exact-title matching', async () => {
     await runtime.create(PROJECT, { title: 'Runtime', body: 'Use bun.' });
     const result = await runtime.create(PROJECT, { title: 'Bundler', body: 'Use vite.' });

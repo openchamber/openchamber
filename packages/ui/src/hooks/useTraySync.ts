@@ -90,8 +90,9 @@ type TraySnapshot = {
   // dropdown (same "configured to show" rule as the header/mobile). Empty
   // groups → the tray omits the Usage submenu entirely.
   usage: TrayUsage;
-  // Number of chats (root sessions) with unseen activity, for the macOS dock
-  // badge. 0 when the user disabled the badge — the main process clears it.
+  // Number of chats (root sessions with a sidebar row) with unseen activity,
+  // for the macOS dock badge. 0 when the user disabled the badge — the main
+  // process clears it.
   dockBadgeCount: number;
 };
 
@@ -314,11 +315,35 @@ const buildSnapshot = (instanceName: string, includeTray: boolean): TraySnapshot
     lineage.descendantsOf(rootId, 'active').map((session) => session.id)
   );
 
+  const projects = useProjectsStore.getState().projects;
+  const worktreesByProject = useSessionUIStore.getState().availableWorktreesByProject;
+
+  // The tray and the dock badge cover the sessions that have a sidebar row
+  // (`sessionHasSidebarRow`). Sessions from unconfigured directories (an eval
+  // run in /tmp, a removed project, a /btw fork) have none, cannot be opened
+  // or removed from there, so they would take the tray's limited slots and
+  // hold a dock count the user has no way to clear. Pending approvals stay
+  // listed below regardless.
+  const pinnedIds = useSessionPinnedStore.getState().ids;
+  const isPlacedBySidebar = (session: Session): boolean => {
+    const directory = resolveGlobalSessionDirectory(session);
+    // A managed chat keeps its identity when its directory no longer sits under
+    // the chats root, so the project id admits it too.
+    if (isChatDirectoryPath(directory) || session.projectID === CHAT_DRAFT_PROJECT_ID) return true;
+    if (isSpaceDirectory(directory)) return true;
+    return resolveProjectForSessionDirectory(projects, worktreesByProject, directory) !== null;
+  };
+  const hasSidebarRow = (session: Session): boolean => sessionHasSidebarRow(session, {
+    isPlaced: isPlacedBySidebar(session),
+    isPinned: isSessionPinned(pinnedIds, session.directory, session.id),
+  });
+
   // Count the full root list, independently of the tray's visibility and limit.
-  const ui = useUIStore.getState();
   // Only top-level sessions are ever unread (`isSessionUnread`); a subtask
   // reports to its parent.
-  const dockBadgeCount = ui.dockBadgeEnabled ? allSessions.filter(isSessionUnread).length : 0;
+  const dockBadgeCount = useUIStore.getState().dockBadgeEnabled
+    ? allSessions.filter((session) => isSessionUnread(session) && hasSidebarRow(session)).length
+    : 0;
   if (!includeTray) {
     return { sessions: [], approvals: [], instanceName, usage: { mode: 'usage', groups: [] }, dockBadgeCount };
   }
@@ -346,29 +371,6 @@ const buildSnapshot = (instanceName: string, includeTray: boolean): TraySnapshot
     if (statuses.includes('retry')) return 'retry';
     return 'idle';
   };
-
-  const projects = useProjectsStore.getState().projects;
-  const worktreesByProject = useSessionUIStore.getState().availableWorktreesByProject;
-
-  // The tray is a short recent-work list, not a dump of everything the store
-  // keeps: a session belongs here when it has a sidebar row
-  // (`sessionHasSidebarRow`). Sessions from unconfigured directories (an eval
-  // run in /tmp, a deleted scratch folder) have none, cannot be opened or
-  // removed from there, and would otherwise take the tray's limited slots.
-  // Pending approvals stay listed below regardless.
-  const pinnedIds = useSessionPinnedStore.getState().ids;
-  const isPlacedBySidebar = (session: Session): boolean => {
-    const directory = resolveGlobalSessionDirectory(session);
-    // A managed chat keeps its identity when its directory no longer sits under
-    // the chats root, so the project id admits it too.
-    if (isChatDirectoryPath(directory) || session.projectID === CHAT_DRAFT_PROJECT_ID) return true;
-    if (isSpaceDirectory(directory)) return true;
-    return resolveProjectForSessionDirectory(projects, worktreesByProject, directory) !== null;
-  };
-  const hasSidebarRow = (session: Session): boolean => sessionHasSidebarRow(session, {
-    isPlaced: isPlacedBySidebar(session),
-    isPinned: isSessionPinned(pinnedIds, session.directory, session.id),
-  });
 
   const sessions: TraySession[] = allSessions
     .filter((s) => s?.id && !s.parentID) // root rows; sub-session work rolls up
@@ -451,11 +453,20 @@ export const useTraySync = (): void => {
         scheduleFlush();
       }
     });
+    // Projects, discovered worktrees and pins decide which sessions have a
+    // sidebar row, so they move the badge as well as the tray list and its
+    // "project · branch" subtitles (deduped, so cheap).
+    const unsubscribeProjects = useProjectsStore.subscribe(() => scheduleFlush());
+    const unsubscribeWorktrees = useSessionUIStore.subscribe(() => scheduleFlush());
+    const unsubscribePins = useSessionPinnedStore.subscribe(() => scheduleFlush());
     const stopBadgeSync = () => {
       disposed = true;
       if (flushTimer !== null) window.clearTimeout(flushTimer);
       unsubscribeGlobal();
       unsubscribeUI();
+      unsubscribeProjects();
+      unsubscribeWorktrees();
+      unsubscribePins();
     };
 
     if (!trayEnabled) {
@@ -508,10 +519,6 @@ export const useTraySync = (): void => {
     }
     rebindStores();
 
-    // Project labels and discovered worktrees feed the "project · branch"
-    // subtitle; refresh the tray when they change (deduped, so cheap).
-    const unsubscribeProjects = useProjectsStore.subscribe(() => scheduleFlush());
-    const unsubscribeWorktrees = useSessionUIStore.subscribe(() => scheduleFlush());
     const unsubscribeGit = useGitStore.subscribe(() => scheduleFlush());
     // Cross-project status map: fed live by the sync dispatcher from the global
     // event stream and seeded from the host by the root global-sessions poll.
@@ -542,8 +549,6 @@ export const useTraySync = (): void => {
     return () => {
       stopBadgeSync();
       window.clearInterval(interval);
-      unsubscribeProjects();
-      unsubscribeWorktrees();
       unsubscribeGit();
       unsubscribeGlobalStatus();
       unsubscribeGlobalRequests();

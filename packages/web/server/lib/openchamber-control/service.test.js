@@ -221,10 +221,17 @@ describe('OpenChamber control service', () => {
     expect(sessionService.create).toHaveBeenCalledWith({ directory: '/repo', title: 'From tool' });
   });
 
-  it('records the calling session as the origin of a session it creates', async () => {
+  it('names the calling session as the sender of the prompt it dispatches', async () => {
     const { service, sessionService } = createService();
-    await service.execute('session.create', { title: 'Side task' }, '/repo', { contextSessionId: 'ses_caller' });
-    expect(sessionService.create).toHaveBeenCalledWith({ directory: '/repo', title: 'Side task', originSessionId: 'ses_caller' });
+    await service.execute('session.create', { title: 'Side task', prompt: 'Go' }, '/repo', { contextSessionId: 'ses_caller' });
+    expect(sessionService.create).toHaveBeenCalledWith({ directory: '/repo', title: 'Side task', prompt: 'Go', promptedBySessionId: 'ses_caller' });
+
+    await service.execute('session.send', { sessionId: 'ses_other', directory: '/repo', prompt: 'Go' }, '/repo', { contextSessionId: 'ses_caller' });
+    expect(sessionService.send).toHaveBeenLastCalledWith('ses_other', { directory: '/repo', prompt: 'Go', promptedBySessionId: 'ses_caller' });
+
+    // A session prompting itself has nothing to link back to.
+    await service.execute('session.send', { sessionId: 'ses_caller', directory: '/repo', prompt: 'Go' }, '/repo', { contextSessionId: 'ses_caller' });
+    expect(sessionService.send).toHaveBeenLastCalledWith('ses_caller', { directory: '/repo', prompt: 'Go' });
   });
 
   it('names the calling session\'s task, and says so when the server cannot', async () => {

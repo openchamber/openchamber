@@ -2,8 +2,10 @@ import React from 'react';
 import type { Part } from '@/lib/opencode/model';
 
 import { Icon } from '@/components/icon/Icon';
+import { handleDropdownNavigationKey } from '@/components/ui/dropdown-navigation';
 import { useI18n, type I18nKey, type I18nParams } from '@/lib/i18n';
 import { useUIStore } from '@/stores/useUIStore';
+import { useSessionMessageLoader } from '@/sync/sync-context';
 import { useSourceControlDescriptorOf, type SourceControlDescriptorOf } from '@/lib/source-control/providers/registry';
 import { cn } from '@/lib/utils';
 import { getMessagePreview } from '../lib/messagePreview';
@@ -15,6 +17,8 @@ type PromptEntry = {
 };
 
 type PromptNavigatorRailProps = {
+    sessionId: string;
+    directory?: string;
     turnIds: string[];
     previewsByTurnId: Map<string, Part[]>;
     activeTurnId: string | null;
@@ -24,43 +28,16 @@ type PromptNavigatorRailProps = {
     onLoadEarlier: () => void;
 };
 
+// One line per row; the full text stays in the row's tooltip.
 const PREVIEW_MAX_CHARS = 160;
-// The whole gutter is one hover/click target: the cursor's vertical position
-// maps to the nearest tick, so tick density never demands pointer precision.
-// When the centered message column extends under the full-width gutter (narrow
-// windows), the hit zone shrinks so it can't swallow clicks on the right edge
-// of user bubbles (expand/collapse).
-const GUTTER_WIDTH_PX = 28;
-const GUTTER_NARROW_WIDTH_PX = 12;
-// Keeps the ticks a visible gap away from the chat's overlay scrollbar thumb
-// (6px wide, 4px from the edge).
-const GUTTER_RIGHT_OFFSET_PX = 14;
-// The rail shows at most a window of ticks; hovering the gutter edges
-// carousels the window through the rest of the prompts.
-const MAX_VISIBLE_TICKS = 30;
-const TICK_PITCH_PX = 12;
-const EDGE_ZONE_PX = 18;
-const CAROUSEL_INTERVAL_MS = 80;
-const TICK_OVERSCAN = 4;
-// Tick lengths for the proximity wave around the cursor.
-const TICK_BASE_WIDTH_PX = 10;
-const TICK_ACTIVE_WIDTH_PX = 14;
-const TICK_FOCUS_WIDTH_PX = 20;
-// The hover preview is a scrolling mini-list of all prompts: the highlighted
-// row stays centered while the list glides, and the panel itself is
-// interactive so imprecise gutter hits can be corrected inside the list.
-// Rows are fixed-pitch and fit up to two preview lines; short prompts just
-// center vertically. Fixed pitch keeps the glide/virtualization math simple.
-// Each row renders as a bordered card inset within its pitch slot so
-// neighbouring prompts read as separate items instead of one text run.
-const PANEL_ROW_HEIGHT_PX = 54;
-const PANEL_ROW_INSET_Y_PX = 4;
-const PANEL_MAX_ROWS = 8;
-const PANEL_SCROLL_MARGIN_ROWS = 2;
+// The indicator is a fixed glyph in the chat's top end corner: its size never
+// depends on the prompt count, and the brighter tick only says roughly where
+// the reader is in the session. Navigation happens in the panel.
+const INDICATOR_TICKS = 5;
+// A pointer resting on the indicator opens the panel; one only passing the
+// corner on its way elsewhere does not.
+const PANEL_SHOW_DELAY_MS = 120;
 const PANEL_HIDE_DELAY_MS = 160;
-// A pointer only passing over the rail on its way elsewhere must not flash
-// the panel open; it opens once the pointer rests on the rail this long.
-const PANEL_SHOW_DELAY_MS = 220;
 
 const buildPromptEntries = (
     turnIds: string[],
@@ -77,24 +54,19 @@ const buildPromptEntries = (
     });
 };
 
-// Codex-style wave: the highlighted tick stretches, neighbours taper off.
-const PROXIMITY_FALLOFF = [1, 0.6, 0.35, 0.15];
-
-const resolveTickWidth = (
-    index: number,
-    highlightedIndex: number | null,
-    isActive: boolean,
-): number => {
-    const base = isActive ? TICK_ACTIVE_WIDTH_PX : TICK_BASE_WIDTH_PX;
-    if (highlightedIndex === null) {
-        return base;
+/** Which of the indicator's ticks stands for the prompt at `index`. */
+const resolveIndicatorTick = (index: number, total: number, ticks: number): number => {
+    if (total <= 1 || ticks <= 1) {
+        return 0;
     }
-    const distance = Math.abs(index - highlightedIndex);
-    const factor = PROXIMITY_FALLOFF[distance] ?? 0;
-    return Math.round(base + (TICK_FOCUS_WIDTH_PX - base) * factor);
+    return Math.round((index / (total - 1)) * (ticks - 1));
 };
 
+const rowId = (turnId: string) => `prompt-navigator-row-${turnId}`;
+
 export function PromptNavigatorRail({
+    sessionId,
+    directory,
     turnIds,
     previewsByTurnId,
     activeTurnId,
@@ -105,340 +77,197 @@ export function PromptNavigatorRail({
 }: PromptNavigatorRailProps) {
     const { t } = useI18n();
     const descriptorOf = useSourceControlDescriptorOf();
-    // The keyboard shortcut drives the main chat's rail; a pinned column's
-    // rail neither opens on it nor closes it.
+    // The keyboard shortcut drives the main chat's navigator; a pinned
+    // column's navigator neither opens on it nor closes it.
     const { pinned } = useChatColumnActions();
     const isKeyboardNavOpen = useUIStore((state) => (pinned ? false : state.isPromptNavigatorPanelOpen));
     const setPromptNavigatorPanelOpen = useUIStore((state) => state.setPromptNavigatorPanelOpen);
-    const gutterRef = React.useRef<HTMLDivElement | null>(null);
-    const navRef = React.useRef<HTMLElement | null>(null);
+    const listRef = React.useRef<HTMLDivElement | null>(null);
+    const [isHoverOpen, setIsHoverOpen] = React.useState(false);
     const [highlightedIndex, setHighlightedIndex] = React.useState<number | null>(null);
-    const [windowStart, setWindowStart] = React.useState(0);
-    const [isNarrowGutter, setIsNarrowGutter] = React.useState(false);
+    const isOpen = isHoverOpen || isKeyboardNavOpen;
 
-    // Shrink the hit zone whenever the message column reaches under the
-    // full-width gutter, so bubble clicks (expand/collapse) stay clickable.
+    // A reader at the chat's end has the history above the loaded window cut
+    // back a moment after the turn count changes, and loading earlier prompts
+    // changes it. While the panel is open its list is what the reader looks
+    // at, so it holds the history like a reader scrolled up does.
+    const messageLoader = useSessionMessageLoader();
     React.useEffect(() => {
-        const container = navRef.current?.parentElement;
-        if (!container || typeof ResizeObserver === 'undefined') {
+        if (!isOpen || !directory) {
             return;
         }
-        const measure = () => {
-            const column = container.querySelector('.chat-message-column');
-            if (!column) {
-                setIsNarrowGutter(false);
-                return;
-            }
-            const containerRect = container.getBoundingClientRect();
-            const columnRect = column.getBoundingClientRect();
-            const fullGutterLeft = containerRect.right - GUTTER_RIGHT_OFFSET_PX - GUTTER_WIDTH_PX;
-            setIsNarrowGutter(columnRect.right > fullGutterLeft);
-        };
-        measure();
-        const observer = new ResizeObserver(measure);
-        observer.observe(container);
-        return () => observer.disconnect();
-    }, []);
+        return messageLoader.retainSessionHistory({ directory, sessionID: sessionId }, 'browsing');
+    }, [directory, isOpen, messageLoader, sessionId]);
 
     const prompts = React.useMemo(
         () => buildPromptEntries(turnIds, previewsByTurnId, t, descriptorOf),
         [descriptorOf, previewsByTurnId, t, turnIds],
     );
-
-    const visibleCount = Math.min(prompts.length, MAX_VISIBLE_TICKS);
-    const maxWindowStart = Math.max(0, prompts.length - visibleCount);
-    const clampedWindowStart = Math.min(windowStart, maxWindowStart);
-    const windowEnd = clampedWindowStart + visibleCount;
-    const hasMoreAbove = clampedWindowStart > 0;
-    const hasMoreBelow = windowEnd < prompts.length;
-
-    const emptyPreviewLabel = t('chat.timeline.noTextContent');
-    const currentPromptLabel = t('chat.promptNavigator.currentPrompt');
-    const loadMoreLabel = t('chat.promptNavigator.loadMore');
-
     const activeIndex = React.useMemo(() => {
         if (!activeTurnId) {
             return -1;
         }
         return prompts.findIndex((prompt) => prompt.turnId === activeTurnId);
     }, [activeTurnId, prompts]);
+    const currentIndex = activeIndex >= 0 ? activeIndex : prompts.length - 1;
 
-    // Refs mirroring hot values so the carousel interval reads fresh state.
-    const windowStartRef = React.useRef(clampedWindowStart);
-    windowStartRef.current = clampedWindowStart;
-    const promptsLengthRef = React.useRef(prompts.length);
-    promptsLengthRef.current = prompts.length;
-    const pointerYRef = React.useRef<number | null>(null);
-    const carouselTimerRef = React.useRef<number | null>(null);
-    const carouselDirRef = React.useRef<0 | 1 | -1>(0);
+    const emptyPreviewLabel = t('chat.timeline.noTextContent');
+    const currentPromptLabel = t('chat.promptNavigator.currentPrompt');
+    const loadMoreLabel = t('chat.promptNavigator.loadMore');
 
-    const ensureWindowContains = React.useCallback((index: number) => {
-        setWindowStart((start) => {
-            const length = promptsLengthRef.current;
-            const count = Math.min(length, MAX_VISIBLE_TICKS);
-            const maxStart = Math.max(0, length - count);
-            const clamped = Math.min(start, maxStart);
-            if (index < clamped) {
-                return index;
-            }
-            if (index >= clamped + count) {
-                return Math.min(maxStart, index - count + 1);
-            }
-            return clamped;
-        });
-    }, []);
-
-    // Load-earlier prepends shift every index; move the window with them so
-    // the visible ticks (and the active one) don't jump around.
-    const firstTurnIdRef = React.useRef<string | undefined>(prompts[0]?.turnId);
-    const prevLengthRef = React.useRef(prompts.length);
-    React.useLayoutEffect(() => {
-        const prevFirst = firstTurnIdRef.current;
-        const prevLength = prevLengthRef.current;
-        const added = prompts.length - prevLength;
-        if (added > 0 && prevLength > 0 && prevFirst && prompts[0]?.turnId !== prevFirst) {
-            setWindowStart((start) => start + added);
-            setHighlightedIndex((index) => (index === null ? null : index + added));
-        }
-        firstTurnIdRef.current = prompts[0]?.turnId;
-        prevLengthRef.current = prompts.length;
-    }, [prompts]);
-
-    // While the user isn't interacting with the rail, the tape glides so the
-    // active prompt stays centered — the scale moves, not the marker.
-    React.useEffect(() => {
-        if (highlightedIndex !== null) {
-            return;
-        }
-        const target = activeIndex >= 0 ? activeIndex : prompts.length - 1;
-        setWindowStart(() => {
-            const length = promptsLengthRef.current;
-            const count = Math.min(length, MAX_VISIBLE_TICKS);
-            const maxStart = Math.max(0, length - count);
-            return Math.max(0, Math.min(maxStart, target - Math.floor(count / 2)));
-        });
-    }, [activeIndex, highlightedIndex, prompts.length]);
-
-    const relativeIndexFromPointer = React.useCallback((clientY: number): number | null => {
-        const gutter = gutterRef.current;
-        if (!gutter) {
-            return null;
-        }
-        const rect = gutter.getBoundingClientRect();
-        const raw = Math.floor((clientY - rect.top) / TICK_PITCH_PX);
-        const count = Math.min(promptsLengthRef.current, MAX_VISIBLE_TICKS);
-        if (count === 0) {
-            return null;
-        }
-        return Math.max(0, Math.min(count - 1, raw));
-    }, []);
-
-    const stopCarousel = React.useCallback(() => {
-        carouselDirRef.current = 0;
-        if (carouselTimerRef.current !== null) {
-            window.clearInterval(carouselTimerRef.current);
-            carouselTimerRef.current = null;
-        }
-    }, []);
-
-    const carouselStep = React.useCallback(() => {
-        const dir = carouselDirRef.current;
-        if (dir === 0) {
-            stopCarousel();
-            return;
-        }
-        const length = promptsLengthRef.current;
-        const count = Math.min(length, MAX_VISIBLE_TICKS);
-        const maxStart = Math.max(0, length - count);
-        const current = Math.min(windowStartRef.current, maxStart);
-        const next = Math.max(0, Math.min(maxStart, current + dir));
-        if (next === current) {
-            stopCarousel();
-            return;
-        }
-        windowStartRef.current = next;
-        setWindowStart(next);
-        const pointerY = pointerYRef.current;
-        if (pointerY !== null) {
-            const relative = relativeIndexFromPointer(pointerY);
-            if (relative !== null) {
-                setHighlightedIndex(Math.min(length - 1, next + relative));
-            }
-        }
-    }, [relativeIndexFromPointer, stopCarousel]);
-
-    const updateCarousel = React.useCallback((clientY: number) => {
-        const gutter = gutterRef.current;
-        if (!gutter) {
-            return;
-        }
-        const rect = gutter.getBoundingClientRect();
-        const y = clientY - rect.top;
-        let dir: 0 | 1 | -1 = 0;
-        if (y <= EDGE_ZONE_PX && hasMoreAbove) {
-            dir = -1;
-        } else if (y >= rect.height - EDGE_ZONE_PX && hasMoreBelow) {
-            dir = 1;
-        }
-        carouselDirRef.current = dir;
-        if (dir === 0) {
-            stopCarousel();
-            return;
-        }
-        if (carouselTimerRef.current === null) {
-            carouselTimerRef.current = window.setInterval(carouselStep, CAROUSEL_INTERVAL_MS);
-        }
-    }, [carouselStep, hasMoreAbove, hasMoreBelow, stopCarousel]);
-
-    React.useEffect(() => () => {
-        if (carouselTimerRef.current !== null) {
-            window.clearInterval(carouselTimerRef.current);
-        }
-    }, []);
-
-    // Leaving the gutter hides the panel after a short grace period so the
-    // pointer can travel into the panel and interact with the list directly.
-    const hideTimerRef = React.useRef<number | null>(null);
-    const cancelScheduledHide = React.useCallback(() => {
-        if (hideTimerRef.current !== null) {
-            window.clearTimeout(hideTimerRef.current);
-            hideTimerRef.current = null;
-        }
-    }, []);
-    const scheduleHide = React.useCallback(() => {
-        cancelScheduledHide();
-        hideTimerRef.current = window.setTimeout(() => {
-            hideTimerRef.current = null;
-            setHighlightedIndex(null);
-        }, PANEL_HIDE_DELAY_MS);
-    }, [cancelScheduledHide]);
-    React.useEffect(() => () => {
-        if (hideTimerRef.current !== null) {
-            window.clearTimeout(hideTimerRef.current);
-        }
-    }, []);
-
-    const highlightedIndexRef = React.useRef(highlightedIndex);
-    highlightedIndexRef.current = highlightedIndex;
     const showTimerRef = React.useRef<number | null>(null);
-    const cancelScheduledShow = React.useCallback(() => {
+    const hideTimerRef = React.useRef<number | null>(null);
+    // After a pick the panel closes under a pointer that may rest on the
+    // indicator; it opens again only once the pointer has left the corner.
+    const suppressHoverRef = React.useRef(false);
+    const clearTimers = React.useCallback(() => {
         if (showTimerRef.current !== null) {
             window.clearTimeout(showTimerRef.current);
             showTimerRef.current = null;
         }
+        if (hideTimerRef.current !== null) {
+            window.clearTimeout(hideTimerRef.current);
+            hideTimerRef.current = null;
+        }
     }, []);
-    React.useEffect(() => cancelScheduledShow, [cancelScheduledShow]);
-
-    const highlightFromPointer = React.useCallback((clientY: number) => {
-        const relative = relativeIndexFromPointer(clientY);
-        if (relative !== null) {
-            setHighlightedIndex(
-                Math.min(promptsLengthRef.current - 1, windowStartRef.current + relative),
-            );
-        }
-    }, [relativeIndexFromPointer]);
-
-    const handlePointerMove = React.useCallback((event: React.MouseEvent<HTMLDivElement>) => {
-        cancelScheduledHide();
-        pointerYRef.current = event.clientY;
-        if (highlightedIndexRef.current !== null) {
-            // Open: the highlight follows the pointer at once.
-            highlightFromPointer(event.clientY);
-        } else if (showTimerRef.current === null) {
-            // Closed: open after a short rest, at wherever the pointer is then.
-            showTimerRef.current = window.setTimeout(() => {
-                showTimerRef.current = null;
-                if (pointerYRef.current !== null) highlightFromPointer(pointerYRef.current);
-            }, PANEL_SHOW_DELAY_MS);
-        }
-        updateCarousel(event.clientY);
-    }, [cancelScheduledHide, highlightFromPointer, updateCarousel]);
-
-    const handlePointerLeave = React.useCallback(() => {
-        pointerYRef.current = null;
-        cancelScheduledShow();
-        stopCarousel();
-        scheduleHide();
-    }, [cancelScheduledShow, scheduleHide, stopCarousel]);
+    React.useEffect(() => clearTimers, [clearTimers]);
 
     const closeKeyboardNav = React.useCallback(() => {
         if (!pinned) setPromptNavigatorPanelOpen(false);
     }, [pinned, setPromptNavigatorPanelOpen]);
+    React.useEffect(() => () => {
+        if (!pinned) setPromptNavigatorPanelOpen(false);
+    }, [pinned, setPromptNavigatorPanelOpen]);
 
-    const handleSelect = React.useCallback((index: number | null) => {
-        if (index === null) {
+    const close = React.useCallback(() => {
+        clearTimers();
+        setIsHoverOpen(false);
+        setHighlightedIndex(null);
+        closeKeyboardNav();
+    }, [clearTimers, closeKeyboardNav]);
+
+    const handleIndicatorEnter = React.useCallback(() => {
+        if (suppressHoverRef.current) {
             return;
         }
+        clearTimers();
+        showTimerRef.current = window.setTimeout(() => {
+            showTimerRef.current = null;
+            setIsHoverOpen(true);
+        }, PANEL_SHOW_DELAY_MS);
+    }, [clearTimers]);
+
+    const handleNavEnter = React.useCallback(() => {
+        if (hideTimerRef.current !== null) {
+            window.clearTimeout(hideTimerRef.current);
+            hideTimerRef.current = null;
+        }
+    }, []);
+
+    const handleNavLeave = React.useCallback(() => {
+        suppressHoverRef.current = false;
+        clearTimers();
+        // The keyboard-opened panel stays until a pick, Escape or blur.
+        if (!isHoverOpen || isKeyboardNavOpen) {
+            return;
+        }
+        hideTimerRef.current = window.setTimeout(() => {
+            hideTimerRef.current = null;
+            setIsHoverOpen(false);
+            setHighlightedIndex(null);
+        }, PANEL_HIDE_DELAY_MS);
+    }, [clearTimers, isHoverOpen, isKeyboardNavOpen]);
+
+    const handleSelect = React.useCallback((index: number) => {
         const prompt = prompts[index];
         if (!prompt) {
             return;
         }
         onSelectTurn(prompt.turnId);
-        cancelScheduledShow();
-        stopCarousel();
-        setHighlightedIndex(null);
-        closeKeyboardNav();
-        gutterRef.current?.blur();
-    }, [cancelScheduledShow, closeKeyboardNav, onSelectTurn, prompts, stopCarousel]);
+        suppressHoverRef.current = true;
+        close();
+    }, [close, onSelectTurn, prompts]);
 
-    const handleGutterClick = React.useCallback((event: React.MouseEvent<HTMLDivElement>) => {
-        const relative = relativeIndexFromPointer(event.clientY);
-        if (relative === null) {
+    // Each opening shows the current prompt in the middle of the list; the
+    // list then scrolls natively. Read through a ref: later updates (a new
+    // prompt, the chat scrolling underneath) must not move the open list.
+    const currentIndexRef = React.useRef(currentIndex);
+    currentIndexRef.current = currentIndex;
+    React.useLayoutEffect(() => {
+        if (!isOpen) {
             return;
         }
-        handleSelect(Math.min(prompts.length - 1, windowStartRef.current + relative));
-    }, [handleSelect, prompts.length, relativeIndexFromPointer]);
+        const list = listRef.current;
+        const row = list?.querySelector<HTMLElement>(`[data-prompt-index="${currentIndexRef.current}"]`);
+        if (!list || !row) {
+            return;
+        }
+        list.scrollTop = row.offsetTop - (list.clientHeight - row.offsetHeight) / 2;
+    }, [isOpen]);
 
-    // Keyboard shortcut flips the store flag; entering keyboard mode focuses
-    // the gutter and highlights the active (or last) prompt.
+    // Earlier prompts load into the top of the list; the prompt that was
+    // first stays where it was on screen, and the highlight stays on its row.
+    const firstTurnIdRef = React.useRef<string | undefined>(prompts[0]?.turnId);
+    const prevLengthRef = React.useRef(prompts.length);
+    React.useLayoutEffect(() => {
+        const previousFirst = firstTurnIdRef.current;
+        const added = prompts.length - prevLengthRef.current;
+        firstTurnIdRef.current = prompts[0]?.turnId;
+        prevLengthRef.current = prompts.length;
+        if (added <= 0 || !previousFirst || prompts[0]?.turnId === previousFirst) {
+            return;
+        }
+        setHighlightedIndex((index) => (index === null ? null : index + added));
+        const list = listRef.current;
+        const oldFirstRow = list ? document.getElementById(rowId(previousFirst)) : null;
+        const newFirstRow = list?.firstElementChild;
+        if (list && oldFirstRow && newFirstRow instanceof HTMLElement) {
+            list.scrollTop += oldFirstRow.offsetTop - newFirstRow.offsetTop;
+        }
+    }, [prompts]);
+
+    // The shortcut opens the panel with the keyboard in it.
     React.useEffect(() => {
         if (!isKeyboardNavOpen) {
             return;
         }
-        const gutter = gutterRef.current;
-        if (!gutter || gutter === document.activeElement) {
+        listRef.current?.focus();
+        setHighlightedIndex((index) => index ?? currentIndex);
+    }, [currentIndex, isKeyboardNavOpen]);
+
+    const moveHighlight = React.useCallback((index: number) => {
+        const next = Math.max(0, Math.min(prompts.length - 1, index));
+        setHighlightedIndex(next);
+        // Scrolls the list only; scrollIntoView would also move the chat.
+        const list = listRef.current;
+        const prompt = prompts[next];
+        const row = list && prompt ? document.getElementById(rowId(prompt.turnId)) : null;
+        if (!list || !row) {
             return;
         }
-        gutter.focus();
-        setHighlightedIndex((current) => {
-            if (current !== null) {
-                return current;
-            }
-            const target = activeIndex >= 0 ? activeIndex : prompts.length - 1;
-            ensureWindowContains(target);
-            return target;
-        });
-    }, [activeIndex, ensureWindowContains, isKeyboardNavOpen, prompts.length]);
-
-    React.useEffect(() => () => {
-        if (!pinned) setPromptNavigatorPanelOpen(false);
-    }, [pinned, setPromptNavigatorPanelOpen]);
+        if (row.offsetTop < list.scrollTop) {
+            list.scrollTop = row.offsetTop;
+        } else if (row.offsetTop + row.offsetHeight > list.scrollTop + list.clientHeight) {
+            list.scrollTop = row.offsetTop + row.offsetHeight - list.clientHeight;
+        }
+    }, [prompts]);
 
     const handleKeyDown = React.useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
         if (prompts.length === 0) {
             return;
         }
-        const current = highlightedIndex ?? (activeIndex >= 0 ? activeIndex : prompts.length - 1);
-
-        const moveTo = (index: number) => {
-            const next = Math.max(0, Math.min(prompts.length - 1, index));
-            ensureWindowContains(next);
-            setHighlightedIndex(next);
-        };
-
+        const current = highlightedIndex ?? currentIndex;
+        if (handleDropdownNavigationKey(event, (key) => moveHighlight(current + (key === 'ArrowUp' ? -1 : 1)))) {
+            return;
+        }
         if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
             event.preventDefault();
-            moveTo(current + (event.key === 'ArrowUp' ? -1 : 1));
+            moveHighlight(current + (event.key === 'ArrowUp' ? -1 : 1));
             return;
         }
-        if (event.key === 'Home') {
+        if (event.key === 'Home' || event.key === 'End') {
             event.preventDefault();
-            moveTo(0);
-            return;
-        }
-        if (event.key === 'End') {
-            event.preventDefault();
-            moveTo(prompts.length - 1);
+            moveHighlight(event.key === 'Home' ? 0 : prompts.length - 1);
             return;
         }
         if (event.key === 'Enter' || event.key === ' ') {
@@ -448,296 +277,151 @@ export function PromptNavigatorRail({
         }
         if (event.key === 'Escape') {
             event.preventDefault();
-            setHighlightedIndex(null);
-            closeKeyboardNav();
-            gutterRef.current?.blur();
+            close();
+            listRef.current?.blur();
         }
-    }, [activeIndex, closeKeyboardNav, ensureWindowContains, handleSelect, highlightedIndex, prompts.length]);
+    }, [close, currentIndex, handleSelect, highlightedIndex, moveHighlight, prompts.length]);
 
-    const handleBlur = React.useCallback(() => {
-        cancelScheduledShow();
-        stopCarousel();
-        setHighlightedIndex(null);
-        closeKeyboardNav();
-    }, [cancelScheduledShow, closeKeyboardNav, stopCarousel]);
-
-    // Wheel over the panel steps the highlight instead of scrolling the chat
-    // underneath; a native non-passive listener is required for preventDefault.
-    const panelRef = React.useRef<HTMLDivElement | null>(null);
-    const isPanelVisible = highlightedIndex !== null;
-    const wheelRemainderRef = React.useRef(0);
-    React.useEffect(() => {
-        const panel = panelRef.current;
-        if (!panel) {
+    const handleListBlur = React.useCallback((event: React.FocusEvent<HTMLDivElement>) => {
+        if (event.currentTarget.contains(event.relatedTarget)) {
             return;
         }
-        const handleWheel = (event: WheelEvent) => {
-            event.preventDefault();
-            event.stopPropagation();
-            wheelRemainderRef.current += event.deltaY;
-            const steps = Math.trunc(wheelRemainderRef.current / PANEL_ROW_HEIGHT_PX);
-            if (steps === 0) {
-                return;
-            }
-            wheelRemainderRef.current -= steps * PANEL_ROW_HEIGHT_PX;
-            const current = highlightedIndexRef.current;
-            if (current === null) {
-                return;
-            }
-            const next = Math.max(0, Math.min(promptsLengthRef.current - 1, current + steps));
-            if (next !== current) {
-                ensureWindowContains(next);
-                setHighlightedIndex(next);
-            }
-        };
-        panel.addEventListener('wheel', handleWheel, { passive: false });
-        return () => panel.removeEventListener('wheel', handleWheel);
-    }, [ensureWindowContains, isPanelVisible]);
-
-    const highlightedPrompt = highlightedIndex !== null ? prompts[highlightedIndex] : undefined;
-    // Panel list geometry: centered on the highlight when the panel opens,
-    // then a dead zone — the list only glides when the highlighted row gets
-    // within one row of the window edge, so small pointer moves don't scroll.
-    const panelVisibleRows = Math.min(prompts.length, PANEL_MAX_ROWS);
-    const panelHeight = panelVisibleRows * PANEL_ROW_HEIGHT_PX;
-    const panelMaxOffset = prompts.length * PANEL_ROW_HEIGHT_PX - panelHeight;
-    const clampPanelOffset = (offset: number) => Math.max(0, Math.min(panelMaxOffset, offset));
-    const panelOffsetRef = React.useRef<number | null>(null);
-    let panelScrollOffset = 0;
-    if (highlightedIndex === null) {
-        panelOffsetRef.current = null;
-    } else if (panelOffsetRef.current === null) {
-        panelScrollOffset = clampPanelOffset(
-            highlightedIndex * PANEL_ROW_HEIGHT_PX - (panelHeight - PANEL_ROW_HEIGHT_PX) / 2,
-        );
-        panelOffsetRef.current = panelScrollOffset;
-    } else {
-        let offset = panelOffsetRef.current;
-        // Keep two rows of context visible above and below the highlight —
-        // the dead zone is the middle third of the window, so the list glides
-        // noticeably before the highlight reaches the edge but small pointer
-        // moves around the center don't scroll.
-        const highestAllowed = (highlightedIndex - PANEL_SCROLL_MARGIN_ROWS) * PANEL_ROW_HEIGHT_PX;
-        const lowestAllowed =
-            (highlightedIndex + 1 + PANEL_SCROLL_MARGIN_ROWS) * PANEL_ROW_HEIGHT_PX - panelHeight;
-        if (offset > highestAllowed) {
-            offset = highestAllowed;
-        } else if (offset < lowestAllowed) {
-            offset = lowestAllowed;
+        if (isKeyboardNavOpen) {
+            close();
         }
-        panelScrollOffset = clampPanelOffset(offset);
-        panelOffsetRef.current = panelScrollOffset;
-    }
-    // Only rows near the visible window are rendered; extra rows slide in
-    // under the mask during the glide instead of popping in at the edges.
-    const panelFirstVisibleRow = Math.floor(panelScrollOffset / PANEL_ROW_HEIGHT_PX);
-    const panelSliceStart = Math.max(0, panelFirstVisibleRow - TICK_OVERSCAN);
-    const panelSliceEnd = Math.min(prompts.length, panelFirstVisibleRow + panelVisibleRows + TICK_OVERSCAN);
-    const panelClippedAbove = panelScrollOffset > 0;
-    const panelClippedBelow = panelScrollOffset < panelMaxOffset;
-    const panelMask = panelClippedAbove || panelClippedBelow
-        ? `linear-gradient(to bottom, ${panelClippedAbove ? 'transparent, black 10%' : 'black'}, ${panelClippedBelow ? 'black 90%, transparent' : 'black'})`
-        : undefined;
-    // Overscan a few ticks beyond the window so they slide in under the
-    // gradient mask instead of popping into existence at the edges.
-    const overscanStart = Math.max(0, clampedWindowStart - TICK_OVERSCAN);
-    const overscanEnd = Math.min(prompts.length, windowEnd + TICK_OVERSCAN);
-    const visiblePrompts = prompts.slice(overscanStart, overscanEnd);
-    const gutterMask = hasMoreAbove || hasMoreBelow
-        ? `linear-gradient(to bottom, ${hasMoreAbove ? 'transparent, black 14%' : 'black'}, ${hasMoreBelow ? 'black 86%, transparent' : 'black'})`
-        : undefined;
+    }, [close, isKeyboardNavOpen]);
 
     if (prompts.length === 0) {
         return null;
     }
 
+    const tickCount = Math.min(prompts.length, INDICATOR_TICKS);
+    const currentTick = resolveIndicatorTick(currentIndex, prompts.length, tickCount);
+    const highlightedPrompt = highlightedIndex !== null ? prompts[highlightedIndex] : undefined;
+
     return (
         <nav
-            ref={navRef}
             aria-label={t('chat.promptNavigator.aria')}
-            className="pointer-events-none absolute inset-e-3.5 top-1/2 z-20 -translate-y-1/2"
+            // Spans the chat so the panel can take the room it needs; only the
+            // indicator and the panel take the pointer.
+            className="pointer-events-none absolute inset-3 z-20 flex flex-col items-end"
+            onMouseEnter={handleNavEnter}
+            onMouseLeave={handleNavLeave}
         >
-            <div className="pointer-events-auto flex flex-col items-end">
-                {canLoadEarlier ? (
-                    <button
-                        type="button"
-                        tabIndex={-1}
-                        className={cn(
-                            // Nudge so the icon centers over the tick column
-                            // (ticks sit at inset-e-1 with a 10px base width).
-                            '-me-px mb-1.5 flex size-5 shrink-0 items-center justify-center rounded-full',
-                            'text-muted-foreground transition-colors',
-                            'hover:bg-interactive-hover/60 hover:text-foreground',
-                            isLoadingOlder ? 'cursor-wait opacity-70' : undefined,
-                        )}
-                        aria-label={loadMoreLabel}
-                        title={loadMoreLabel}
-                        disabled={isLoadingOlder}
-                        onClick={(event) => {
-                            event.stopPropagation();
-                            if (!isLoadingOlder) {
-                                onLoadEarlier();
-                            }
-                        }}
-                    >
-                        {isLoadingOlder ? (
-                            <Icon name="loader-4" className="size-3.5 animate-spin" />
-                        ) : (
-                            <Icon name="arrow-up-s" className="size-3.5" />
-                        )}
-                    </button>
-                ) : null}
+            {isOpen ? (
+                // Opens over the indicator, in its place.
                 <div
-                    ref={gutterRef}
-                    role="listbox"
-                    tabIndex={-1}
-                    aria-activedescendant={
-                        highlightedPrompt ? `prompt-rail-tick-${highlightedPrompt.turnId}` : undefined
-                    }
-                    className="relative cursor-pointer outline-none"
-                    style={{
-                        width: `${isNarrowGutter ? GUTTER_NARROW_WIDTH_PX : GUTTER_WIDTH_PX}px`,
-                        height: `${visibleCount * TICK_PITCH_PX}px`,
-                    }}
-                    onMouseMove={handlePointerMove}
-                    onMouseLeave={handlePointerLeave}
-                    onClick={handleGutterClick}
-                    onKeyDown={handleKeyDown}
-                    onBlur={handleBlur}
+                    className={cn(
+                        // About a dozen rows, less in a short chat; the rest scrolls.
+                        'pointer-events-auto flex max-h-[min(100%,24rem)] w-full max-w-80 flex-col overflow-hidden rounded-xl',
+                        'oc-glass-popover oc-glass-floating',
+                    )}
                 >
-                    <div
-                        className="absolute inset-0 overflow-hidden"
-                        style={gutterMask ? { maskImage: gutterMask, WebkitMaskImage: gutterMask } : undefined}
-                    >
-                        {/* The tape: ticks keep their absolute position on the
-                            strip, and the strip itself glides. */}
-                        <div
-                            // Remount on prepend so the index shift doesn't
-                            // play as a spurious slide animation.
-                            key={prompts[0]?.turnId}
-                            className="absolute inset-x-0 top-0 transition-transform duration-300 ease-out"
-                            style={{ transform: `translateY(-${clampedWindowStart * TICK_PITCH_PX}px)` }}
-                        >
-                            {visiblePrompts.map((prompt, slot) => {
-                                const index = overscanStart + slot;
-                                const isActive = prompt.turnId === activeTurnId;
-                                const isHighlighted = highlightedIndex === index;
-                                const tickWidth = resolveTickWidth(index, highlightedIndex, isActive);
-
-                                return (
-                                    <div
-                                        key={prompt.turnId}
-                                        id={`prompt-rail-tick-${prompt.turnId}`}
-                                        role="option"
-                                        aria-selected={isHighlighted}
-                                        aria-current={isActive ? 'true' : undefined}
-                                        aria-label={prompt.preview.trim() || emptyPreviewLabel}
-                                        className="pointer-events-none absolute inset-e-1 flex items-center justify-end"
-                                        style={{ top: `${index * TICK_PITCH_PX}px`, height: `${TICK_PITCH_PX}px` }}
-                                    >
-                                        <span
-                                            aria-hidden="true"
-                                            className={cn(
-                                                'block h-0.5 rounded-full transition-all duration-200 ease-out',
-                                                isActive
-                                                    ? 'bg-[var(--surface-foreground)]'
-                                                    : isHighlighted
-                                                        ? 'bg-[var(--surface-foreground)]/80'
-                                                        : 'bg-[var(--surface-foreground)]/30',
-                                            )}
-                                            style={{ width: `${tickWidth}px` }}
-                                        />
-                                    </div>
-                                );
-                            })}
-                        </div>
-                    </div>
-                    {highlightedPrompt && highlightedIndex !== null ? (
-                        <div
-                            ref={panelRef}
+                    {canLoadEarlier ? (
+                        <button
+                            type="button"
+                            tabIndex={-1}
                             className={cn(
-                                'pointer-events-auto absolute inset-e-full top-1/2 z-30 me-3 -translate-y-1/2',
-                                'w-[min(20rem,calc(100vw-6rem))] overflow-hidden rounded-xl',
-                                // Reads as a dropdown: the menus' glass and light, plain rows.
-                                'oc-glass-popover oc-glass-floating py-1',
+                                'mx-1 mt-1 flex shrink-0 items-center gap-1.5 rounded-lg px-2 py-1.5 text-start',
+                                'typography-meta text-muted-foreground transition-colors hover:text-foreground',
+                                isLoadingOlder && 'cursor-wait',
                             )}
-                            onMouseEnter={cancelScheduledHide}
-                            onMouseLeave={scheduleHide}
-                            onMouseMove={(event) => event.stopPropagation()}
-                            onClick={(event) => event.stopPropagation()}
+                            disabled={isLoadingOlder}
+                            // Keeps the keyboard in the list.
+                            onMouseDown={(event) => event.preventDefault()}
+                            onClick={() => {
+                                if (!isLoadingOlder) {
+                                    onLoadEarlier();
+                                }
+                            }}
                         >
-                            <div
-                                className="relative overflow-hidden"
-                                style={{
-                                    height: `${panelVisibleRows * PANEL_ROW_HEIGHT_PX}px`,
-                                    maskImage: panelMask,
-                                    WebkitMaskImage: panelMask,
-                                }}
-                            >
-                                {/* The list glides so the highlighted row stays
-                                    centered while scrubbing the rail. */}
-                                <div
-                                    className="absolute inset-x-0 top-0 transition-transform duration-200 ease-out"
-                                    style={{
-                                        height: `${prompts.length * PANEL_ROW_HEIGHT_PX}px`,
-                                        transform: `translateY(-${panelScrollOffset}px)`,
-                                    }}
-                                >
-                                    {prompts.slice(panelSliceStart, panelSliceEnd).map((prompt, slot) => {
-                                        const index = panelSliceStart + slot;
-                                        const isActive = prompt.turnId === activeTurnId;
-                                        const isHighlighted = highlightedIndex === index;
-                                        return (
-                                            <div
-                                                key={prompt.turnId}
-                                                role="option"
-                                                aria-selected={isHighlighted}
-                                                aria-current={isActive ? 'true' : undefined}
-                                                title={isActive ? currentPromptLabel : undefined}
-                                                className="absolute inset-x-0 cursor-pointer px-1.5"
-                                                style={{
-                                                    top: `${index * PANEL_ROW_HEIGHT_PX + PANEL_ROW_INSET_Y_PX}px`,
-                                                    height: `${PANEL_ROW_HEIGHT_PX - PANEL_ROW_INSET_Y_PX * 2}px`,
-                                                }}
-                                                onMouseMove={() => {
-                                                    cancelScheduledHide();
-                                                    if (highlightedIndexRef.current !== index) {
-                                                        ensureWindowContains(index);
-                                                        setHighlightedIndex(index);
-                                                    }
-                                                }}
-                                                onClick={() => handleSelect(index)}
-                                            >
-                                                <div
-                                                    className={cn(
-                                                        'flex h-full items-center rounded-lg px-2',
-                                                        isActive
-                                                            ? 'bg-[var(--interactive-selection)]'
-                                                            : isHighlighted && 'bg-[var(--interactive-hover)]',
-                                                    )}
-                                                >
-                                                    <span
-                                                        className={cn(
-                                                            // Fill both clamp lines to the edge instead of
-                                                            // leaving a ragged gap before a long next word.
-                                                            'min-w-0 flex-1 line-clamp-2 [overflow-wrap:anywhere] typography-meta',
-                                                            isActive
-                                                                ? 'text-interactive-selection-foreground'
-                                                                : isHighlighted ? 'text-foreground' : 'text-foreground/75',
-                                                        )}
-                                                    >
-                                                        {prompt.preview.trim() || emptyPreviewLabel}
-                                                    </span>
-                                                </div>
-                                            </div>
-                                        );
-                                    })}
-                                </div>
-                            </div>
-                        </div>
+                            {isLoadingOlder ? (
+                                <Icon name="loader-4" className="size-3.5 shrink-0 animate-spin" />
+                            ) : (
+                                <Icon name="arrow-up-s" className="size-3.5 shrink-0" />
+                            )}
+                            <span className="truncate">{loadMoreLabel}</span>
+                        </button>
                     ) : null}
+                    <div
+                        ref={listRef}
+                        role="listbox"
+                        tabIndex={-1}
+                        aria-label={t('chat.promptNavigator.aria')}
+                        aria-activedescendant={highlightedPrompt ? rowId(highlightedPrompt.turnId) : undefined}
+                        // Positioned, so row offsets are measured within the list.
+                        className="relative min-h-0 overflow-y-auto overscroll-contain p-1 outline-none"
+                        onKeyDown={handleKeyDown}
+                        onBlur={handleListBlur}
+                    >
+                        {prompts.map((prompt, index) => {
+                            const isActive = index === activeIndex;
+                            const isHighlighted = index === highlightedIndex;
+                            const text = prompt.preview.trim() || emptyPreviewLabel;
+                            return (
+                                <div
+                                    key={prompt.turnId}
+                                    id={rowId(prompt.turnId)}
+                                    role="option"
+                                    aria-selected={isHighlighted}
+                                    aria-current={isActive ? 'true' : undefined}
+                                    data-prompt-index={index}
+                                    title={isActive ? `${currentPromptLabel}: ${text}` : text}
+                                    // The current prompt carries the only fill; the row
+                                    // under the pointer or keyboard brightens its text.
+                                    className={cn(
+                                        'cursor-pointer truncate rounded-lg px-2 py-1.5 typography-meta',
+                                        isActive
+                                            ? 'bg-interactive-selection text-interactive-selection-foreground'
+                                            : isHighlighted
+                                                ? 'text-foreground'
+                                                : 'oc-title-rest',
+                                    )}
+                                    onMouseMove={() => {
+                                        if (highlightedIndex !== index) {
+                                            setHighlightedIndex(index);
+                                        }
+                                    }}
+                                    onMouseDown={(event) => event.preventDefault()}
+                                    onClick={() => handleSelect(index)}
+                                >
+                                    {text}
+                                </div>
+                            );
+                        })}
+                    </div>
                 </div>
-            </div>
+            ) : (
+                <button
+                    type="button"
+                    tabIndex={-1}
+                    aria-label={t('chat.promptNavigator.aria')}
+                    aria-haspopup="listbox"
+                    aria-expanded={false}
+                    // A backing in the chat's colour keeps text scrolling under
+                    // the corner from running through the ticks. Opaque enough,
+                    // no blur: a blur here is redrawn every streamed frame.
+                    className="pointer-events-auto flex flex-col items-end gap-[3px] rounded-md bg-background/85 p-1.5"
+                    onMouseEnter={handleIndicatorEnter}
+                    onClick={() => {
+                        clearTimers();
+                        setIsHoverOpen(true);
+                    }}
+                >
+                    {Array.from({ length: tickCount }, (_, tick) => (
+                        <span
+                            key={tick}
+                            aria-hidden="true"
+                            className={cn(
+                                'block h-0.5 w-3 rounded-full',
+                                tick === currentTick
+                                    ? 'bg-[var(--surface-foreground)]'
+                                    : 'bg-[var(--surface-foreground)]/30',
+                            )}
+                        />
+                    ))}
+                </button>
+            )}
         </nav>
     );
 }

@@ -11,7 +11,7 @@ afterEach(async () => {
   await Promise.all(temporaryDirectories.splice(0).map((directory) => fs.rm(directory, { recursive: true, force: true })));
 });
 
-const createHarness = async ({ settings = {}, env = {}, memoryAvailable = true } = {}) => {
+const createHarness = async ({ settings = {}, env = {}, memoryAvailable = true, workflowAvailable = false } = {}) => {
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'openchamber-managed-config-'));
   temporaryDirectories.push(dataDir);
   const agentToolRuntime = {
@@ -36,6 +36,7 @@ const createHarness = async ({ settings = {}, env = {}, memoryAvailable = true }
     agentToolRuntime,
     readSettings: () => current.settings,
     isAgentMemoryAvailable: () => memoryAvailable,
+    isWorkflowAvailable: () => workflowAvailable,
   });
   const readConfigFile = async () => JSON.parse(await fs.readFile(path.join(dataDir, MANAGED_CONFIG_FILE_NAME), 'utf8'));
   return { dataDir, runtime, agentToolRuntime, current, readConfigFile, titleDirectory };
@@ -147,6 +148,7 @@ describe('managed OpenCode config file', () => {
       includeKnowledge: false,
       includeNotify: false,
       includeRender: false,
+      includeWorkflow: false,
       codeMode: false,
     });
   });
@@ -199,6 +201,7 @@ describe('managed OpenCode config file', () => {
       includeKnowledge: false,
       includeNotify: true,
       includeRender: false,
+      includeWorkflow: false,
       codeMode: false,
     });
   });
@@ -218,6 +221,7 @@ describe('managed OpenCode config file', () => {
       includeKnowledge: true,
       includeNotify: false,
       includeRender: true,
+      includeWorkflow: false,
       codeMode: true,
     });
   });
@@ -260,5 +264,22 @@ describe('managed OpenCode config file', () => {
 
     expect(agentToolRuntime.materializePlugin).not.toHaveBeenCalled();
     expect(await readConfigFile()).toEqual({ plugins: ['-opencode.browser', titleDirectory] });
+  });
+
+  it('injects the workflow tool by default only in a build that has workflows', async () => {
+    const toolsOff = { agentControlToolEnabled: false, agentScheduleToolEnabled: false, agentWebToolEnabled: false, agentKnowledgeToolEnabled: false, agentRenderToolEnabled: false };
+    const absent = await createHarness({ settings: toolsOff });
+    await absent.runtime.buildManagedChildEnv();
+    expect(absent.agentToolRuntime.materializePlugin).not.toHaveBeenCalled();
+
+    const present = await createHarness({ settings: toolsOff, workflowAvailable: true });
+    await present.runtime.buildManagedChildEnv();
+    expect(present.agentToolRuntime.materializePlugin).toHaveBeenCalledWith(expect.objectContaining({ includeWorkflow: true }));
+    // The answer tool is denied everywhere; a workflow agent's session allows it.
+    expect((await present.readConfigFile()).permissions).toEqual([{ action: 'openchamber_workflow_answer', resource: '*', effect: 'deny' }]);
+
+    present.current.settings = { ...toolsOff, agentWorkflowToolEnabled: false };
+    await present.runtime.refreshManagedConfigFile();
+    expect(await present.readConfigFile()).toEqual({ plugins: ['-opencode.browser', present.titleDirectory] });
   });
 });

@@ -940,11 +940,18 @@ export interface GitWorktreeInfo {
   path: string;
   /** The task's name: the first line of the branch description, when set. */
   title?: string;
+  /** When the user pinned the task to the top of the sidebar; absent while unpinned. */
+  pinnedAt?: number;
   provenance?: GitContributorWorktreeProvenance;
 }
 
 export interface GitWorktreeTitleResult {
   title: string;
+  branch: string;
+}
+
+export interface GitWorktreePinResult {
+  pinned: boolean;
   branch: string;
 }
 
@@ -1028,6 +1035,8 @@ export interface CreateGitWorktreePayload {
   taskTitle?: string;
   /** Set to the branch name when OpenChamber generated it, so the agent may later rename it after the task. */
   generatedBranchName?: string;
+  /** The part of a generated name the rename keeps, such as an issue's `issue-180-`. */
+  generatedBranchPrefix?: string;
 }
 
 export interface GitChangeRequestSourceRequest {
@@ -1164,6 +1173,8 @@ interface GitWorktreeAPI {
   remove?(directory: string, payload: RemoveGitWorktreePayload): Promise<{ success: boolean }>;
   /** Sets the task title of the worktree at `directory` as the user's; an empty title clears it. */
   setTitle?(directory: string, title: string): Promise<GitWorktreeTitleResult>;
+  /** Pins or unpins the task of the worktree at `directory`. */
+  setPinned?(directory: string, pinned: boolean): Promise<GitWorktreePinResult>;
   /** `directory` is the worktree to snapshot. */
   snapshot?(directory: string, payload: GitWorktreeSnapshotPayload): Promise<GitWorktreeSnapshotResult>;
   /** `directory` is the project; the worktree is removed, its branch kept. */
@@ -1733,6 +1744,8 @@ export type RepositoryChangeRequestReference = RepositoryReferenceCommon & {
   revisionNumber?: number;
 };
 
+export type ReviewCommentExcerpt = { startLine: number; lines: string[] };
+
 /** A comment as the picker preview shows it; review entries carry their verdict or file and line. */
 export type RepositoryReferenceComment = {
   author: { login: string; avatarUrl?: string } | null;
@@ -1742,6 +1755,8 @@ export type RepositoryReferenceComment = {
   path: string | null;
   line: number | null;
   review: 'approved' | 'changes_requested' | 'commented' | 'dismissed' | null;
+  /** A line comment's lines as its diff showed them (new side), where the host sends them; a suggestion is drawn against them. */
+  excerpt?: ReviewCommentExcerpt;
   /** Set when the comment opens a review thread, or on a discussion, the thread of its replies. */
   thread?: RepositoryReferenceThread;
   /** A discussion comment in a category that takes answers: whether it is the answer, and whether this account may change that. */
