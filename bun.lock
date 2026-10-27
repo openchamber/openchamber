@@ -34,7 +34,7 @@
         "@ibm/plex": "^6.4.1",
         "@lezer/highlight": "^1.2.3",
         "@octokit/rest": "^22.0.1",
-        "@opencode-ai/sdk": "^1.4.41",
+        "@opencode-ai/sdk": "^1.19.4",
         "@radix-ui/react-collapsible": "^1.1.12",
         "@radix-ui/react-dialog": "^1.1.15",
         "@radix-ui/react-dropdown-menu": "^2.1.16",
@@ -916,7 +916,7 @@
 
     "@openchamber/web": ["@openchamber/web@workspace:packages/web"],
 
-    "@opencode-ai/sdk": ["@opencode-ai/sdk@1.14.41", "", { "dependencies": { "cross-spawn": "7.0.6" } }, "sha512-RYb2dCUv0TWIvBNnnO6ANbAPYri6rKuWizSoVFw/Pw+SCDj9ASHM5gAZ+jkskp8gYMfLLHe/Fpkun/9mr8m0IQ=="],
+    "@opencode-ai/sdk": ["@opencode-ai/sdk@1.19.4", "", { "dependencies": { "cross-spawn": "7.0.6" } }, "sha512-3Wuc4t8gEuWKHbX1Na9oDK6PgOveid70l4Ks5RCjRIo2RcP8FQN3NS6Mg3XWc2+WiUfpfrmvBWlh5u1zeQfDQw=="],
 
     "@paralleldrive/cuid2": ["@paralleldrive/cuid2@2.3.1", "", { "dependencies": { "@noble/hashes": "^1.1.5" } }, "sha512-XO7cAxhnTZl0Yggq6jOgjiOHhbgcO4NqFqwSmQpjK3b6TEE6Uj/jfSk6wzYyemh3+I0sHirKSetjQwn5cZktFw=="],
 

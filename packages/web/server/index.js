@@ -457,7 +457,7 @@ let server = null;
 let expressApp = null;
 let currentRestartPromise = null;
 let isRestartingOpenCode = false;
-let openCodeApiPrefix = '';
+let openCodeApiPrefix = '/api';
 let openCodeApiPrefixDetected = true;
 let openCodeApiDetectionTimer = null;
 let lastOpenCodeError = null;
@@ -622,7 +622,7 @@ const ENV_CONFIGURED_API_PREFIX = normalizeApiPrefix(
 );
 
   if (ENV_CONFIGURED_API_PREFIX && ENV_CONFIGURED_API_PREFIX !== '') {
-  console.warn('Ignoring configured OpenCode API prefix; API runs at root.');
+  console.warn(`Ignoring OPENCODE_API_PREFIX/OPENCHAMBER_API_PREFIX (${ENV_CONFIGURED_API_PREFIX}); using the built-in default.`);
 }
 
 let cachedLoginShellEnvSnapshot;
@@ -1150,7 +1150,7 @@ async function main(options = {}) {
         openCodeRunning: Boolean(openCodePort && isOpenCodeReady && !isRestartingOpenCode),
         openCodeSecureConnection: isOpenCodeConnectionSecure(),
         openCodeAuthSource: openCodeAuthSource || null,
-        openCodeApiPrefix: '',
+        openCodeApiPrefix: '/api',
         openCodeApiPrefixDetected: true,
         isOpenCodeReady,
         lastOpenCodeError,

@@ -142,6 +142,7 @@ describe('OpenCode backend runtime baseline contract', () => {
       agent: 'build',
       variant: 'high',
       parts: [{ type: 'text', text: 'Hello' }],
+      text: 'Hello',
     }, { throwOnError: true });
     expect(client.session.command).toHaveBeenCalledWith({
       sessionID: 'session-1',

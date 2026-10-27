@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Harness/OpenCode: run against OpenCode **v2** (`/api`-prefixed API) — default API prefix, v2 startup banner + readiness probe, v2 prompt/message routes (with SDK fallback), and per-session model switching.
+
 ## [1.10.3] - 2026-05-08
 
 - Desktop/Electron: added Mini Chat windows for focused conversations without the full workspace shell, including session/draft handoff back to the main window, always-on-top pinning, and quick access from the header, session list, command palette, and keyboard shortcuts.

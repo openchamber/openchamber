@@ -272,7 +272,8 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         stdout += chunk.toString();
         const lines = stdout.split('\n');
         for (const line of lines) {
-          if (!line.startsWith('opencode server listening')) continue;
+          // v1 prints "opencode server listening on ..."; v2 prints "server listening on ...".
+          if (!line.startsWith('opencode server listening') && !line.startsWith('server listening')) continue;
           const match = line.match(/on\s+(https?:\/\/[^\s]+)/);
           if (!match) {
             finish(reject, new Error(`Failed to parse server url from output: ${line}`));
@@ -356,21 +357,27 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       return false;
     }
 
-    try {
-      const response = await fetch(buildOpenCodeUrl('/global/health', ''), {
-        method: 'GET',
-        headers: {
-          Accept: 'application/json',
-          ...getOpenCodeAuthHeaders(),
-        },
-        signal: AbortSignal.timeout(5000),
-      });
-      if (!response.ok) return false;
-      const body = await response.json().catch(() => null);
-      return body?.healthy === true;
-    } catch {
-      return false;
+    // v2 exposes /info; v1 exposes /global/health (with a `healthy` flag).
+    for (const path of ['/info', '/global/health']) {
+      try {
+        const response = await fetch(buildOpenCodeUrl(path, ''), {
+          method: 'GET',
+          headers: {
+            Accept: 'application/json',
+            ...getOpenCodeAuthHeaders(),
+          },
+          signal: AbortSignal.timeout(5000),
+        });
+        if (!response.ok) continue;
+        const body = await response.json().catch(() => null);
+        if (body?.healthy === true || path === '/info') {
+          return true;
+        }
+      } catch {
+        // try the next candidate
+      }
     }
+    return false;
   };
 
   const probeExternalOpenCode = async (port, origin) => {
@@ -382,18 +389,28 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 3000);
       const base = origin ?? `http://127.0.0.1:${port}`;
-      const response = await fetch(`${base}/global/health`, {
-        method: 'GET',
-        headers: {
-          Accept: 'application/json',
-          ...getOpenCodeAuthHeaders(),
-        },
-        signal: controller.signal,
-      });
+      for (const path of ['/api/info', '/global/health']) {
+        try {
+          const response = await fetch(`${base}${path}`, {
+            method: 'GET',
+            headers: {
+              Accept: 'application/json',
+              ...getOpenCodeAuthHeaders(),
+            },
+            signal: controller.signal,
+          });
+          if (!response.ok) continue;
+          const body = await response.json().catch(() => null);
+          if (body?.healthy === true || path === '/api/info') {
+            clearTimeout(timeout);
+            return true;
+          }
+        } catch {
+          // try the next candidate
+        }
+      }
       clearTimeout(timeout);
-      if (!response.ok) return false;
-      const body = await response.json().catch(() => null);
-      return body?.healthy === true;
+      return false;
     } catch {
       return false;
     }
