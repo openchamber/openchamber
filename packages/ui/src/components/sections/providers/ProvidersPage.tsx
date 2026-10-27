@@ -920,8 +920,8 @@ export const ProvidersPage: React.FC = () => {
         )}
       </SettingsSection>
 
-      {selectedProvider.id === 'openai' && usedIntegrationId === 'openai' ? (
-        <AccountRotationSettings accounts={usedCredentials} directory={settingsDirectory ?? null} />
+      {usedIntegrationId === selectedProvider.id ? (
+        <AccountRotationSettings providerID={selectedProvider.id} accounts={usedCredentials} directory={settingsDirectory ?? null} />
       ) : null}
 
       {showModelsSection ? (

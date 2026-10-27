@@ -17,7 +17,6 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { z } from 'zod';
 
 import { assertPromptResponse } from '../opencode/prompt-response.js';
 import { GOAL_OBJECTIVE_CHAR_LIMIT, readObjective } from './objectives.js';
@@ -31,7 +30,6 @@ import {
 import { readMergedSettingsSync } from '../opencode/settings-files.js';
 import { createSessionActivityProbe } from '../opencode/session-activity.js';
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
-import { openAIUsageLimit } from '../account-rotation/runtime.js';
 
 const OPENCHAMBER_SETTINGS_FILE = path.join(
   process.env.OPENCHAMBER_DATA_DIR
@@ -193,7 +191,6 @@ const parseGoalMetadata = (session) => {
     evaluationProviderID: typeof goal.evaluationProviderID === 'string' ? goal.evaluationProviderID : '',
     evaluationModelID: typeof goal.evaluationModelID === 'string' ? goal.evaluationModelID : '',
     lastAccountedMessageID: typeof goal.lastAccountedMessageID === 'string' ? goal.lastAccountedMessageID : '',
-    lastQuotaRecoveryMessageID: z.string().catch('').parse(goal.lastQuotaRecoveryMessageID),
     createdAt: Number.isFinite(goal.createdAt) ? goal.createdAt : 0,
     updatedAt: Number.isFinite(goal.updatedAt) ? goal.updatedAt : 0,
   };
@@ -358,7 +355,6 @@ export const createSessionGoalRuntime = ({
   getMaxAutoTurns = () => readGoalSettings().maxAutoTurns,
   persistSessionGoal = null,
   readSessionMetadata = null,
-  recoverUsageLimit = async () => false,
 }) => {
   const timers = new Map();
   const inflight = new Set();
@@ -721,7 +717,6 @@ export const createSessionGoalRuntime = ({
     const hasError = error !== null && error !== undefined;
     const abortedTail = errorName === 'MessageAbortedError';
     const lengthTail = isLengthTruncated(lastAssistantInfo, errorName);
-    const quotaTail = lastAssistantInfo.providerID === 'openai' && openAIUsageLimit(error) !== null;
     if (abortedTail && goal.statusReason !== 'resumed') {
       await writeGoal(sessionId, directory, goal.id, () => ({
         status: 'paused',
@@ -738,7 +733,7 @@ export const createSessionGoalRuntime = ({
     // Non-length turn error → blocked (prevents runaway auto-continuation into
     // failures). Recognized length cutoffs are in-progress continuations, not
     // hard failures.
-    if (!abortedTail && !lengthTail && hasError && !quotaTail) {
+    if (!abortedTail && !lengthTail && hasError) {
       await settleGoal({
         sessionId, directory, goal, status: 'blocked', statusReason: errorName || 'assistant turn failed', tokensUsed, tokensBaseline, tokensCommitted, lastAccountedMessageID,
       });
@@ -761,41 +756,6 @@ export const createSessionGoalRuntime = ({
       return;
     }
 
-    if (quotaTail) {
-      // Claim this failed reply durably before account activation. Duplicate
-      // idle events or a restart cannot rotate and re-send over the same tail.
-      if (goal.lastQuotaRecoveryMessageID === lastAssistantInfo.id && goal.statusReason !== 'resumed') {
-        await settleGoal({
-          sessionId, directory, goal, status: 'blocked', statusReason: 'OpenAI account recovery already attempted; resume to try again',
-          tokensUsed, tokensBaseline, tokensCommitted, lastAccountedMessageID,
-        });
-        return;
-      }
-      const claimed = await writeGoal(sessionId, directory, goal.id, () => ({
-        lastQuotaRecoveryMessageID: lastAssistantInfo.id,
-      }));
-      if (!claimed) return;
-      let recovered = false;
-      try {
-        recovered = await recoverUsageLimit({
-          providerID: lastAssistantInfo.providerID,
-          error,
-          startedAt: lastAssistantInfo.time?.created ?? 0,
-          directory,
-        });
-      } catch {
-        // Keep provider response bodies and account identifiers out of logs.
-        console.warn('[session-goal] account rotation failed');
-      }
-      if (!recovered) {
-        await settleGoal({
-          sessionId, directory, goal, status: 'blocked', statusReason: 'OpenAI usage limit reached; no account available for rotation',
-          tokensUsed, tokensBaseline, tokensCommitted, lastAccountedMessageID,
-        });
-        return;
-      }
-    }
-
     // A second consecutive completed, non-summary length-truncated turn is a
     // bounded recovery failure. Derive this from the loaded transcript rather
     // than persisting another goal counter.
@@ -816,7 +776,7 @@ export const createSessionGoalRuntime = ({
     // No check; continue unconditionally.
     let audit = null;
     let auditFailStreak = goal.auditFailStreak;
-    if (!(lastAssistantInfo.summary === true || abortedTail || lengthTail || quotaTail)) {
+    if (!(lastAssistantInfo.summary === true || abortedTail || lengthTail)) {
       audit = await runAudit({ goal: { ...goal, objective: effectiveObjective }, assistantText, directory, lastAssistantInfo: executionInfo ?? lastAssistantInfo });
 
       // No check could run: tolerate one consecutive failure (transient
@@ -885,15 +845,7 @@ export const createSessionGoalRuntime = ({
     if (stopped || currentGoal?.id !== goal.id || currentGoal.status !== 'active') return;
 
     console.log(`[session-goal] continuing ${sessionId} (turn ${written.turnsUsed}/${maxAutoTurns}, tokens ${written.tokensUsed}${written.tokenBudget ? `/${written.tokenBudget}` : ''})`);
-    try {
-      await sendContinuation({ sessionId, directory, goal: { ...written, objective: effectiveObjective }, maxAutoTurns });
-    } catch (error) {
-      if (!quotaTail) throw error;
-      await settleGoal({
-        sessionId, directory, goal: written, status: 'blocked', statusReason: 'OpenAI account switched; continuation failed',
-        tokensUsed, tokensBaseline, tokensCommitted, lastAccountedMessageID,
-      });
-    }
+    await sendContinuation({ sessionId, directory, goal: { ...written, objective: effectiveObjective }, maxAutoTurns });
   };
 
   const armTimer = (sessionId, directory, quietMs) => {
@@ -970,7 +922,7 @@ export const createSessionGoalRuntime = ({
     const aborted = extractAbortedAssistant(payload);
     if (aborted) {
       clearTimer(aborted.sessionId);
-      // An account activation or an audit can be awaiting IO when Stop arrives.
+      // An audit can be awaiting IO when Stop arrives.
       // Pause even during that tick; its final active-goal check cancels the send.
       void pauseAfterAbort(aborted.sessionId, directoryHint)
         .catch((error) => {

@@ -67,11 +67,13 @@ writes when the dialog closes, while a new file is only created on confirm.
 
 ## Providers
 
-OpenAI details includes an explicit-save account-rotation setting for active
-goals. It uses the OpenChamber-owned `/api/provider/account-rotation` route and
-the page's quiet save indicator. Selection is limited to saved OAuth accounts;
-the server validates the pool again before enabling. A visible warning explains
-that switching affects all sessions. VS Code returns 501 and hides the setting.
+Provider details includes an explicit-save account-rotation toggle when at least
+2 usable sign-ins exist, or when already enabled. The server currently supports
+OpenAI. It uses `/api/provider/:providerID/account-rotation` and the page's quiet
+save indicator. Every save reports its terminal state even after unmount or a
+directory change. The server validates saved OAuth accounts before enabling. A
+visible warning explains that switching affects the whole app. Unsupported
+providers, external OpenCode, and extension-only VS Code return 501 and hide it.
 Settings search does not target this selected-provider-only control. Backend
 ownership and runtime coverage are in
 `packages/web/server/lib/account-rotation/DOCUMENTATION.md`.

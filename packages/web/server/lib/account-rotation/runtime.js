@@ -6,14 +6,14 @@ import { writeFileAtomic } from '../opencode/atomic-write.js';
 
 const configSchema = z.object({
   enabled: z.boolean(),
-  accountIds: z.array(z.string().min(1).max(200)).max(100),
-}).strict().refine((value) => new Set(value.accountIds).size === value.accountIds.length);
-const stateSchema = z.object({
+}).strict();
+const providerStateSchema = z.object({
   config: configSchema,
   exhausted: z.record(z.string(), z.number().finite().nonnegative()),
   switchedAt: z.number().finite().nonnegative(),
   switchedTo: z.string().nullable(),
 }).strict();
+const stateSchema = z.record(z.string(), providerStateSchema);
 const errorSchema = z.object({
   message: z.string(),
   status: z.number().optional(),
@@ -39,6 +39,10 @@ export const openAIUsageLimit = (error) => {
   return { resetAt: body?.resets_at ? body.resets_at * 1000 : null };
 };
 
+// A provider opts in only after its quota classifier has been implemented.
+const providers = new Map([['openai', { usageLimit: openAIUsageLimit }]]);
+const emptyProvider = () => ({ config: { enabled: false }, exhausted: {}, switchedAt: 0, switchedTo: null });
+
 /** Only metadata from the integration catalog is read. Tokens stay in OpenCode. */
 export const openCodeRotationAccounts = ({ buildOpenCodeUrl, getOpenCodeAuthHeaders }) => {
   const client = (directory) => {
@@ -47,19 +51,19 @@ export const openCodeRotationAccounts = ({ buildOpenCodeUrl, getOpenCodeAuthHead
     return OpenCode.make({ baseUrl: buildOpenCodeUrl('', '').replace(/\/+$/, ''), headers });
   };
   return {
-    list: async (directory) => {
+    list: async (directory, providerID) => {
       if (!directory) throw new Error('A working directory is required');
       const { data } = await client(directory).integration.list();
-      return data.find((integration) => integration.id === 'openai')?.connections ?? [];
+      return data.find((integration) => integration.id === providerID)?.connections ?? [];
     },
     activate: (credentialID) => client().credential.activate({ credentialID }),
   };
 };
 
-export const createAccountRotationRuntime = ({ dataDir, accounts, now = Date.now }) => {
+export const createAccountRotationRuntime = ({ dataDir, accounts, now = Date.now, isAvailable = () => true }) => {
   const file = path.join(dataDir, 'account-rotation.json');
   let pending = Promise.resolve();
-  // Settings and recoveries share one sequence: two failed goals cannot both
+  // Settings and recoveries share one sequence: two failed turns cannot both
   // exhaust the account the first one just activated.
   const serial = (operation) => {
     const result = pending.then(operation);
@@ -69,7 +73,7 @@ export const createAccountRotationRuntime = ({ dataDir, accounts, now = Date.now
   const read = () => {
     try { return stateSchema.parse(JSON.parse(fs.readFileSync(file, 'utf8'))); }
     catch (error) {
-      if (error.code === 'ENOENT') return { config: { enabled: false, accountIds: [] }, exhausted: {}, switchedAt: 0, switchedTo: null };
+      if (error.code === 'ENOENT') return {};
       throw new Error('Could not read account rotation settings');
     }
   };
@@ -82,65 +86,70 @@ export const createAccountRotationRuntime = ({ dataDir, accounts, now = Date.now
   ));
 
   return {
-    describe: () => serial(() => read().config),
-    save: (input, directory) => serial(async () => {
+    supports: (providerID) => isAvailable() && providers.has(providerID),
+    describe: (providerID) => serial(() => (read()[providerID] ?? emptyProvider()).config),
+    save: (providerID, input, directory) => serial(async () => {
+      if (!isAvailable() || !providers.has(providerID)) throw Object.assign(new Error('Account rotation is unavailable for this provider'), { statusCode: 501 });
       const parsed = configSchema.safeParse(input);
-      if (!parsed.success || (parsed.data.enabled && parsed.data.accountIds.length < 2)) {
-        throw Object.assign(new Error('Select at least two distinct saved sign-ins'), { statusCode: 400 });
-      }
+      if (!parsed.success) throw Object.assign(new Error('Invalid account rotation settings'), { statusCode: 400 });
       const config = parsed.data;
       if (config.enabled) {
-        const connections = eligible(await accounts.list(directory));
-        if (config.accountIds.some((id) => !connections.some((connection) => connection.id === id))) {
-          throw Object.assign(new Error('An account is missing or needs a new sign-in'), { statusCode: 400 });
+        const connections = eligible(await accounts.list(directory, providerID));
+        if (connections.length < 2) {
+          throw Object.assign(new Error('At least two saved sign-ins are required'), { statusCode: 400 });
         }
       }
       const state = read();
-      write({ ...state, config });
+      write({ ...state, [providerID]: { ...(state[providerID] ?? emptyProvider()), config } });
       return config;
     }),
-    recover: ({ providerID, error, startedAt, directory }) => serial(async () => {
-      const limit = providerID === 'openai' ? openAIUsageLimit(error) : null;
-      if (!limit) return false;
-      const state = read();
-      if (!state.config.enabled) return false;
-      const connections = await accounts.list(directory);
+    recover: ({ providerID, error, startedAt, directory, allowSwitch = true }) => serial(async () => {
+      const limit = isAvailable() ? providers.get(providerID)?.usageLimit(error) : null;
+      if (!limit) return { limited: false, retry: false };
+      const declined = { limited: true, retry: false };
+      const stored = read();
+      const state = stored[providerID] ?? emptyProvider();
+      if (!state.config.enabled) return { limited: false, retry: false };
+      const persist = (next) => write({ ...stored, [providerID]: next });
+      const connections = await accounts.list(directory, providerID);
       const active = connections.find((connection) => connection.type === 'credential');
-      const pool = eligible(connections).filter((connection) => state.config.accountIds.includes(connection.id));
-      if (!active || !pool.some((connection) => connection.id === active.id)) return false;
+      const pool = eligible(connections);
+      if (!active || !pool.some((connection) => connection.id === active.id)) return declined;
+      const recovered = (account) => ({ limited: true, retry: true, accountLabel: account.label || account.id });
       const time = now();
-      // An older request may fail AFTER another goal switches the account.
+      // An older request may fail AFTER another turn switches the account.
       // Its start time prevents charging that failure to the newly active one.
       if (startedAt > 0 && startedAt <= state.switchedAt && active.id === state.switchedTo) {
-        return (state.exhausted[active.id] ?? 0) <= time;
+        return allowSwitch && (state.exhausted[active.id] ?? 0) <= time ? recovered(active) : declined;
       }
       const exhausted = Object.fromEntries(Object.entries(state.exhausted).filter(([, reset]) => reset > time));
       exhausted[active.id] = limit.resetAt > time ? limit.resetAt : time + HOUR_MS;
-      const ordered = state.config.accountIds;
-      const start = ordered.indexOf(active.id);
-      const next = Array.from({ length: ordered.length - 1 }, (_, offset) => ordered[(start + offset + 1) % ordered.length])
-        .find((id) => !exhausted[id] && pool.some((connection) => connection.id === id));
+      const start = pool.findIndex((connection) => connection.id === active.id);
+      const next = Array.from({ length: pool.length - 1 }, (_, offset) => pool[(start + offset + 1) % pool.length])
+        .find((connection) => !exhausted[connection.id]);
       // Record exhaustion before activation. A failed activation must never
       // turn a failed account back into an eligible one.
-      write({ ...state, exhausted });
-      if (!next) return false;
-      await accounts.activate(next);
-      write({ ...state, exhausted, switchedAt: now(), switchedTo: next });
-      return true;
+      persist({ ...state, exhausted });
+      if (!allowSwitch || !next) return declined;
+      await accounts.activate(next.id);
+      persist({ ...state, exhausted, switchedAt: now(), switchedTo: next.id });
+      return recovered(next);
     }),
   };
 };
 
 export const registerAccountRotationRoutes = (app, { runtime, resolveProjectDirectory }) => {
-  app.get('/api/provider/account-rotation', async (_req, res) => {
-    try { res.json(await runtime.describe()); }
+  app.get('/api/provider/:providerID/account-rotation', async (req, res) => {
+    if (!runtime.supports(req.params.providerID)) return res.status(501).json({ error: 'Account rotation is unavailable for this provider' });
+    try { res.json(await runtime.describe(req.params.providerID)); }
     catch { res.status(500).json({ error: 'Could not read account rotation settings' }); }
   });
-  app.put('/api/provider/account-rotation', async (req, res) => {
+  app.put('/api/provider/:providerID/account-rotation', async (req, res) => {
+    if (!runtime.supports(req.params.providerID)) return res.status(501).json({ error: 'Account rotation is unavailable for this provider' });
     try {
       const resolved = await resolveProjectDirectory(req);
       if (!resolved.directory) return res.status(400).json({ error: 'A working directory is required' });
-      return res.json(await runtime.save(req.body, resolved.directory));
+      return res.json(await runtime.save(req.params.providerID, req.body, resolved.directory));
     } catch (error) {
       return res.status(error.statusCode ?? 500).json({ error: error.statusCode === 400 ? error.message : 'Could not save account rotation settings' });
     }

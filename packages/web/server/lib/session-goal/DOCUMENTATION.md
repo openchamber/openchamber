@@ -24,7 +24,6 @@ the web server and survives UI disconnects.
   evaluationProviderID,    // provider of the latest check; '' when Jev answered
   evaluationModelID,       // model of the latest check (Jev's model id for Jev)
   lastAccountedMessageID,  // incremental accounting cursor
-  lastQuotaRecoveryMessageID, // failed reply already claimed for account rotation
   createdAt, updatedAt
 }
 ```
@@ -129,8 +128,7 @@ before touching the filesystem). Rationale: metadata rides every
      stop), with a tick-side safety net. Messages sent while paused leave
      the goal alone; Resume re-arms the loop, and resuming over an aborted
      tail skips the audit and goes straight to a continuation nudge;
-     - terminal checks, cheapest first: assistant turn error → `blocked`, except
-       recognized OpenAI usage exhaustion with account rotation configured;
+     - terminal checks, cheapest first: assistant turn error → `blocked`;
       `tokensUsed >= tokenBudget` → `budgetLimited`;
       `turnsUsed >= ` the turn limit (Settings → Goal, `sessionGoalMaxAutoTurns`, 1–200, default 20; read on every tick) → `blocked`;
     - error classification is independent of `finish`: `MessageAbortedError`
@@ -150,19 +148,12 @@ before touching the filesystem). Rationale: metadata rides every
       one new recovery attempt over the same transcript; the continuation
       consumes that permission, so another truncation blocks again. Resume
        does not bypass assistant errors or the token budget;
-     - recognized OpenAI usage exhaustion can continue through the injected
-       account-rotation runtime after the budget and turn-cap checks. It skips
-       the progress audit for that failed reply and consumes an ordinary
-       continuation turn. See `../account-rotation/DOCUMENTATION.md` for account
-       eligibility, persistence, cooldowns, and global-switch behavior. A durable
-       `lastQuotaRecoveryMessageID` claim prevents replaying the same failed tail
-       on duplicate events or restart. Explicit Resume grants another attempt.
-       A failed continuation send blocks visibly. A later tick over the same
-       claimed tail also blocks, so a crash after the claim requires Resume
-       instead of silently retrying. No original user prompt or tool call is
-       replayed. The tick
-       checks the current goal ID and active status again before sending, and
-       abort events pause the goal even while a tick is awaiting IO;
+     - provider account rotation runs inside OpenCode's current execution before
+       a terminal error reaches this loop. See
+       `../account-rotation/DOCUMENTATION.md`. A terminal quota error blocks like
+       any other assistant error. The tick checks the current goal ID and active
+       status again before sending, and abort events pause the goal even while
+       a tick is awaiting IO;
    - otherwise, a progress check of the objective + the last assistant turn
      only — no conversation history and no continuation prompts (`audit.js`).
      Three yes/no questions: does the report say all requested work is done

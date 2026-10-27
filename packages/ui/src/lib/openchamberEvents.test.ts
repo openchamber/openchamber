@@ -22,6 +22,24 @@ class MockEventSource {
 }
 
 describe('openchamber events', () => {
+  test('delivers validated account takeover notices', async () => {
+    const { subscribeOpenchamberEvents } = await import('./openchamberEvents');
+    const notices: string[] = [];
+    const unsubscribe = subscribeOpenchamberEvents((event) => {
+      if (event.type === 'account-rotated') notices.push(event.accountLabel);
+    });
+    try {
+      const source = MockEventSource.instances.at(-1);
+      source?.onmessage?.({ data: JSON.stringify({ type: 'openchamber:account-rotated', properties: {
+        providerID: 'openai', sessionID: 'ses_test', accountLabel: 'Backup account',
+      } }) });
+      source?.onmessage?.({ data: JSON.stringify({ type: 'openchamber:account-rotated', properties: {
+        providerID: 'openai', sessionID: 'ses_test',
+      } }) });
+      expect(notices).toEqual(['Backup account']);
+    } finally { unsubscribe(); }
+  });
+
   beforeEach(() => {
     MockEventSource.instances = [];
     Object.defineProperty(globalThis, 'window', {

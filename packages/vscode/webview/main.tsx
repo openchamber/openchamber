@@ -1268,8 +1268,8 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
     }
   }
 
-  if (pathname === '/api/provider/account-rotation') {
-    return unsupportedWebRouteResponse('Goal account rotation');
+  if (/^\/api\/provider\/[^/]+\/account-rotation$/.test(pathname)) {
+    return unsupportedWebRouteResponse('Provider account rotation');
   }
 
   // Handle provider source lookup: GET /api/provider/:providerId/source

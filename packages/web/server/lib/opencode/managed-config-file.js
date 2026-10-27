@@ -1,4 +1,5 @@
 import { appendManagedPlugin } from './managed-plugin-config.js';
+import { materializeRotationPlugin } from '../account-rotation/plugin.js';
 
 export const MANAGED_CONFIG_FILE_NAME = 'opencode.managed.json';
 
@@ -87,6 +88,9 @@ export const createManagedConfigRuntime = ({
     const codeMode = settings?.agentToolsCodeMode === true;
 
     const directories = [];
+    // Recovery is independent of the agent tool toggles. Its server setting
+    // stays off by default and is checked on every callback.
+    directories.push(await materializeRotationPlugin(dataDir));
     if (agentToolRuntime && (includeControl || includeWeb || includeMemory || includeKnowledge || includeNotify || includeRender)) {
       directories.push(await agentToolRuntime.materializePlugin({ includeControl, includeWeb, includeMemory, includeKnowledge, includeNotify, includeRender, codeMode }));
     }

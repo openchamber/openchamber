@@ -3,6 +3,11 @@
 ## Purpose
 This module provides OpenCode server integration utilities for the web server runtime, including configuration management and provider authentication.
 
+The managed config always includes the account-rotation plugin, independently of
+agent-tool toggles. Recovery stays off until its provider setting is enabled.
+It uses the managed child's existing callback URL and token; the account-rotation
+module owns retry policy and cooldowns. See `../account-rotation/DOCUMENTATION.md`.
+
 Diagnostic logging for the timeline export (`proxy.js` error lines, the lifecycle journal, the local diagnostics route in `core-routes.js`) is described in `../diagnostics/DOCUMENTATION.md`.
 
 ## Entrypoints and structure

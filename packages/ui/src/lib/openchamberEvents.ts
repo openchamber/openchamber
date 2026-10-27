@@ -113,6 +113,9 @@ const browserProviderResetSchema = z.object({
 });
 type BrowserProviderResetEvent = { type: 'browser-provider-reset' } & z.infer<typeof browserProviderResetSchema>;
 
+const accountRotatedSchema = z.object({ providerID: z.string().min(1), accountLabel: z.string().min(1), sessionID: z.string().min(1) });
+type AccountRotatedEvent = { type: 'account-rotated' } & z.infer<typeof accountRotatedSchema>;
+
 /** Jev routing events; each carries what the routing store needs and nothing the UI must re-derive. */
 const routingUpdatedSchema = z.object({
   available: z.boolean(),
@@ -196,6 +199,7 @@ type OpenChamberEvent =
   | FileOpenRequestEvent
   | PlanOpenRequestEvent
   | BrowserProviderResetEvent
+  | AccountRotatedEvent
   | ProjectContextChangedEvent
   | AgentMemoryChangedEvent;
 type Listener = (event: OpenChamberEvent) => void;
@@ -445,6 +449,12 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
   if (envelope.type === 'openchamber:browser-provider-reset') {
     const parsed = browserProviderResetSchema.safeParse(envelope.properties);
     if (parsed.success) for (const listener of listeners) listener({ type: 'browser-provider-reset', ...parsed.data });
+    return;
+  }
+
+  if (envelope.type === 'openchamber:account-rotated') {
+    const parsed = accountRotatedSchema.safeParse(envelope.properties);
+    if (parsed.success) for (const listener of listeners) listener({ type: 'account-rotated', ...parsed.data });
     return;
   }
 

@@ -89,6 +89,7 @@ import { createOpenCodeWatcherRuntime } from './lib/opencode/watcher.js';
 import { createSessionAssistRuntime } from './lib/session-assist/runtime.js';
 import { createSessionGoalRuntime } from './lib/session-goal/runtime.js';
 import { createAccountRotationRuntime, openCodeRotationAccounts } from './lib/account-rotation/runtime.js';
+import { registerRotationPluginRoute } from './lib/account-rotation/plugin.js';
 import { createContextObligatoryRuntime } from './lib/context-obligatory/runtime.js';
 import { createLinearSessionStatusRuntime } from './lib/linear/status-runtime.js';
 import { createSessionKnowledgeRuntime } from './lib/session-knowledge/runtime.js';
@@ -972,6 +973,7 @@ const sessionAssistRuntime = createSessionAssistRuntime({
 const accountRotationRuntime = createAccountRotationRuntime({
   dataDir: OPENCHAMBER_DATA_DIR,
   accounts: openCodeRotationAccounts({ buildOpenCodeUrl, getOpenCodeAuthHeaders }),
+  isAvailable: () => !isExternalOpenCode && !ENV_SKIP_OPENCODE_START,
 });
 
 const sessionGoalRuntime = createSessionGoalRuntime({
@@ -981,7 +983,6 @@ const sessionGoalRuntime = createSessionGoalRuntime({
   classifierEndpoint: () => routingRuntime.classifierEndpoint(),
   jev: createJevClient(),
   readSessionMetadata: readStoredSessionMetadata,
-  recoverUsageLimit: (input) => accountRotationRuntime.recover(input),
   persistSessionGoal: (sessionID, directory, goal) =>
     persistSessionMetadataPatch(sessionID, { openchamber: { goal } }, { directory }),
   emitGoalNotification: async ({ sessionId, directory, status, goal }) => {
@@ -1386,7 +1387,15 @@ const bootstrapRuntime = createBootstrapRuntime({
   registerTtsRoutes,
   registerNotificationRoutes,
   registerOpenChamberRoutes,
-  registerAgentToolRoutes: (app, options) => options.agentToolRuntime.registerRoutes(app, options.express),
+  registerAgentToolRoutes: (app, options) => {
+    options.agentToolRuntime.registerRoutes(app, options.express);
+    registerRotationPluginRoute(app, {
+      express: options.express,
+      runtime: accountRotationRuntime,
+      authorize: (req) => options.agentToolRuntime.authorizeRequest(req),
+      broadcast: broadcastOpenChamberUiEvent,
+    });
+  },
   express,
 });
 const tunnelWiringRuntime = createTunnelWiringRuntime({

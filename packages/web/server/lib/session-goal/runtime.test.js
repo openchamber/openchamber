@@ -135,123 +135,17 @@ const runTick = async (runtime) => {
 };
 
 describe('session goal tick on v2 messages', () => {
-  it('rotates a quota-limited goal and continues once on the same model without auditing the error', async () => {
-    quiet();
-    const { calls } = v2OpenCode({ messages: [assistantRecord({
-      model: { providerID: 'openai', id: 'gpt-test' },
-      error: { type: 'provider.error', status: 429, message: "You've hit your usage limit" },
-    })] });
-    let stored = { openchamber: { goal: activeGoal() } };
-    const persistSessionGoal = vi.fn(async (_id, _directory, goal) => { stored = { openchamber: { goal } }; });
-    const recoverUsageLimit = vi.fn(async () => true);
-    const { runtime, getSmallModelService } = makeRuntime({
-      readSessionMetadata: async () => stored,
-      persistSessionGoal,
-      recoverUsageLimit,
-    });
-    await runTick(runtime);
-    expect(recoverUsageLimit).toHaveBeenCalledWith(expect.objectContaining({ providerID: 'openai', directory: '/repo', startedAt: 10 }));
-    expect(getSmallModelService).not.toHaveBeenCalled();
-    expect(stored.openchamber.goal).toMatchObject({ status: 'active', turnsUsed: 1, lastQuotaRecoveryMessageID: 'msg_a1' });
-    expect(calls.filter((call) => call.method === 'POST')).toHaveLength(1);
-    runtime.processPayload(idle(), '/repo');
-    await new Promise((resolve) => setTimeout(resolve, 30));
-    expect(recoverUsageLimit).toHaveBeenCalledTimes(1);
-    expect(calls.filter((call) => call.method === 'POST')).toHaveLength(1);
-    expect(stored.openchamber.goal.status).toBe('blocked');
-  });
-
-  it('blocks visibly when sending the quota-recovery continuation fails', async () => {
-    quiet();
-    v2OpenCode({ messages: [assistantRecord({
-      model: { providerID: 'openai', id: 'gpt-test' },
-      error: { type: 'provider.quota', message: "You've hit your usage limit" },
-    })] });
-    const upstreamFetch = globalThis.fetch;
-    vi.stubGlobal('fetch', vi.fn((input, init) => new URL(String(input)).pathname.endsWith('/prompt')
-      ? Promise.reject(new Error('Connection lost')) : upstreamFetch(input, init)));
-    let stored = { openchamber: { goal: activeGoal() } };
-    const { runtime } = makeRuntime({
-      readSessionMetadata: async () => stored,
-      persistSessionGoal: async (_id, _directory, goal) => { stored = { openchamber: { goal } }; },
-      recoverUsageLimit: async () => true,
-    });
-    await runTick(runtime);
-    expect(stored.openchamber.goal).toMatchObject({ status: 'blocked', statusReason: 'OpenAI account switched; continuation failed', turnsUsed: 1 });
-  });
-
-  it.each([false, 'throw'])('blocks without sending when rotation is unavailable: %s', async (result) => {
+  it('blocks on terminal quota errors without sending a recovery prompt', async () => {
     quiet();
     const { calls } = v2OpenCode({ messages: [assistantRecord({
       model: { providerID: 'openai', id: 'gpt-test' },
       error: { type: 'provider.error', status: 429, message: "You've hit your usage limit" },
     })] });
     const seam = wired({ openchamber: { goal: activeGoal() } });
-    const { runtime } = makeRuntime({ ...seam, recoverUsageLimit: async () => {
-      if (result === 'throw') throw new Error('Offline');
-      return result;
-    } });
+    const { runtime, getSmallModelService } = makeRuntime(seam);
     await runTick(runtime);
-    expect(seam.persistSessionGoal.mock.calls.at(-1)[2]).toMatchObject({ status: 'blocked' });
-    expect(calls.filter((call) => call.method === 'POST')).toEqual([]);
-  });
-
-  it.each([{ tokenBudget: 1 }, { turnsUsed: 20 }])('keeps hard goal limits ahead of quota recovery: %j', async (limits) => {
-    quiet();
-    const { calls } = v2OpenCode({ messages: [assistantRecord({
-      model: { providerID: 'openai', id: 'gpt-test' },
-      error: { type: 'provider.error', status: 429, message: "You've hit your usage limit" },
-    })] });
-    const recoverUsageLimit = vi.fn(async () => true);
-    const { runtime } = makeRuntime({ ...wired({ openchamber: { goal: activeGoal(limits) } }), recoverUsageLimit });
-    await runTick(runtime);
-    expect(recoverUsageLimit).not.toHaveBeenCalled();
-    expect(calls.filter((call) => call.method === 'POST')).toEqual([]);
-  });
-
-  it('respects a pause while rotation is awaiting IO', async () => {
-    quiet();
-    const { calls } = v2OpenCode({ messages: [assistantRecord({
-      model: { providerID: 'openai', id: 'gpt-test' },
-      error: { type: 'provider.error', status: 429, message: "You've hit your usage limit" },
-    })] });
-    let stored = { openchamber: { goal: activeGoal() } };
-    const { runtime } = makeRuntime({
-      readSessionMetadata: async () => stored,
-      persistSessionGoal: async (_id, _directory, goal) => { stored = { openchamber: { goal } }; },
-      recoverUsageLimit: async () => {
-        stored.openchamber.goal.status = 'paused';
-        return true;
-      },
-    });
-    await runTick(runtime);
-    expect(stored.openchamber.goal.status).toBe('paused');
-    expect(calls.filter((call) => call.method === 'POST')).toEqual([]);
-  });
-
-  it('handles Stop during an in-flight quota recovery before allowing a continuation', async () => {
-    quiet();
-    const { calls } = v2OpenCode({ messages: [assistantRecord({
-      model: { providerID: 'openai', id: 'gpt-test' },
-      error: { type: 'provider.quota', message: "You've hit your usage limit" },
-    })] });
-    let stored = { openchamber: { goal: activeGoal() } };
-    let didPause;
-    const paused = new Promise((resolve) => { didPause = resolve; });
-    const { runtime } = makeRuntime({
-      readSessionMetadata: async () => stored,
-      persistSessionGoal: async (_id, _directory, goal) => {
-        stored = { openchamber: { goal } };
-        if (goal.status === 'paused') didPause();
-      },
-      recoverUsageLimit: async () => {
-        runtime.processPayload({ type: 'session.idle', properties: { sessionID: SESSION_ID, aborted: true } }, '/repo');
-        await paused;
-        return true;
-      },
-    });
-    await runTick(runtime);
-    expect(stored.openchamber.goal.status).toBe('paused');
+    expect(getSmallModelService).not.toHaveBeenCalled();
+    expect(seam.persistSessionGoal.mock.calls.at(-1)[2]).toMatchObject({ status: 'blocked', statusReason: 'provider.error', turnsUsed: 0 });
     expect(calls.filter((call) => call.method === 'POST')).toEqual([]);
   });
 

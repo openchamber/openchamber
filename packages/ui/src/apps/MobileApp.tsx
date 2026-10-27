@@ -40,6 +40,7 @@ import { readTabletLayout, useOrientation, useTabletLayout } from '@/lib/device'
 import { useHardwareKeyboard } from '@/lib/hardwareKeyboard';
 import { useI18n } from '@/lib/i18n';
 import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
+import { useAccountRotationNotice } from '@/hooks/useAccountRotationNotice';
 import { getRuntimeApiBaseUrl, subscribeRuntimeEndpointChanged, switchRuntimeEndpoint, MOBILE_DISCONNECTED_RUNTIME_KEY } from '@/lib/runtime-switch';
 import { subscribeActiveRelayTunnelStatus } from '@/lib/relay/runtime-tunnel';
 import { isRelayLimitReached } from '@/lib/relay/tunnel-client';
@@ -789,6 +790,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
 };
 
 function MobileAppContent({ apis }: MobileAppProps) {
+  useAccountRotationNotice();
   const isolatedSpacesEnabled = useUIStore((state) => state.isolatedSpacesEnabled);
   const { t } = useI18n();
   const initializeApp = useConfigStore((state) => state.initializeApp);
