@@ -8,8 +8,7 @@ import { getReadableThemeColors } from '@/lib/theme/readableColors';
 import type { Theme } from '@/types/theme';
 
 /**
- * Pages an agent shows with the `openchamber_render` tool. The page is the
- * call's own `html` input; the chat draws it in a sandboxed frame without
+ * Evaluated OpenUI HtmlView documents. The chat draws each in a frame without
  * `allow-same-origin`, so its scripts run in an opaque origin with no access to
  * OpenChamber's storage, credentials or DOM.
  *
@@ -19,7 +18,7 @@ import type { Theme } from '@/types/theme';
  * http(s) link clicks to the host, which opens them in the browser; a page
  * never navigates the frame away from itself.
  *
- * A page that waits for the user's answer (`awaitAnswer`) sends it with
+ * An interactive page sends the user's answer with
  * `openchamber.submit(data, summary)`, an MCP Apps `ui/message` request the
  * host answers with a JSON-RPC result or error.
  */
@@ -487,6 +486,8 @@ const BOOTSTRAP_SCRIPT = `(function(){var s=document.getElementById("oc-html-ren
 export interface HtmlRenderAnswerState {
     waiting: boolean;
     answer: JsonValue | null;
+    pending?: boolean;
+    terminal?: string;
 }
 
 // `openchamber.submit` checks what it can in the page (the host checks the
@@ -495,21 +496,22 @@ export interface HtmlRenderAnswerState {
 // The host's reply settles the promise; a state message from the host ends
 // the wait when it ended elsewhere (another device answered, or the user
 // wrote in the chat).
-const ANSWER_SCRIPT = `(function(){if(window.parent===window)return;var S=JSON.parse(document.getElementById("oc-html-render-answer").textContent),I=0,R={};`
+const ANSWER_SCRIPT = `(function(){if(window.parent===window)return;var S=JSON.parse(document.getElementById("oc-html-render-answer").textContent),N=JSON.parse(document.getElementById("oc-html-render-nonce").textContent),I=0,R={};function X(m){var k;for(k in R){R[k].rej(new Error(m));delete R[k];}}`
     + `var o=window.openchamber={answer:S.answer===null?undefined:S.answer,submit:function(data,summary){return new Promise(function(res,rej){`
-    + `if(!S.waiting)return rej(new Error("This page is not waiting for an answer"));`
+    + `if(!S.waiting||S.pending)return rej(new Error(S.terminal||"This page is not waiting for an answer"));`
     + `if(navigator.userActivation&&!navigator.userActivation.isActive)return rej(new Error("openchamber.submit works only from a click"));`
     + `if(typeof summary!=="string"||!summary.trim())return rej(new Error("summary is required: the choice in a few words"));`
     + `var id=++I,v=data===undefined?null:data;R[id]={res:res,rej:rej,data:v};`
-    + `try{window.parent.postMessage({jsonrpc:"2.0",id:id,method:"ui/message",params:{role:"user",content:[{type:"text",text:summary}],_meta:{"openchamber/data":v}}},"*");}catch(x){delete R[id];rej(x);}});}};`
+    + `try{window.parent.postMessage({jsonrpc:"2.0",id:id,method:"ui/message",params:{role:"user",content:[{type:"text",text:summary}],_meta:{"openchamber/data":v,"openchamber/nonce":N}}},"*");}catch(x){delete R[id];rej(x);}});}};`
     + `window.addEventListener("message",function(e){var d=e.data,r;if(e.source!==window.parent||!d)return;`
-    + `if(d.type===${JSON.stringify(ANSWER_STATE_MESSAGE)}){S={waiting:d.waiting===true,answer:d.answer===undefined?null:d.answer};o.answer=S.answer===null?undefined:S.answer;return;}`
-    + `if(d.jsonrpc!=="2.0"||!R[d.id])return;r=R[d.id];delete R[d.id];`
-    + `if(d.error)r.rej(new Error(String(d.error.message||"The answer was not sent")));else{S={waiting:false,answer:r.data};o.answer=r.data;r.res();}});})();`;
+    + `if(d.type===${JSON.stringify(ANSWER_STATE_MESSAGE)}){if(d.nonce!==N)return;S={waiting:d.waiting===true,answer:d.answer===undefined?null:d.answer,pending:d.pending===true,terminal:typeof d.terminal==="string"?d.terminal:""};o.answer=S.answer===null?undefined:S.answer;if(!S.waiting)X(S.terminal||"This page is no longer current");return;}`
+    + `if(d.type==="openchamber:html-render:unload"&&d.nonce===N)X("This page is no longer current");`
+    + `if(d.jsonrpc!=="2.0"||d.nonce!==N||!R[d.id])return;r=R[d.id];delete R[d.id];`
+    + `if(d.error)r.rej(new Error(String(d.error.message||"The answer was not sent")));else{S={waiting:d.result&&d.result.waiting===true,answer:r.data,pending:d.result&&d.result.pending===true,terminal:d.result&&typeof d.result.terminal==="string"?d.result.terminal:""};o.answer=S.answer===null?undefined:S.answer;r.res();}});})();`;
 
 // JSON inside a script element: "<" is escaped so no "</script>" in the data
 // can close it.
-const scriptJson = (value: HtmlRenderAnswerState): string => JSON.stringify(value).replace(/</g, '\\u003c');
+const scriptJson = (value: unknown): string => JSON.stringify(value).replace(/</g, '\\u003c');
 
 // Comments and raw-text elements are blanked to the same length before the
 // head is located, so a "<head>" written inside a script or comment is never
@@ -529,7 +531,7 @@ const blankNonMarkup = (html: string): string => html.replace(
 export function buildHtmlRenderDocument(
     html: string,
     theme: HtmlRenderTheme,
-    { contained = false, answerState = { waiting: false, answer: null } }: { contained?: boolean; answerState?: HtmlRenderAnswerState } = {},
+    { contained = false, answerState = { waiting: false, answer: null }, nonce = '' }: { contained?: boolean; answerState?: HtmlRenderAnswerState; nonce?: string } = {},
 ): string {
     const scan = blankNonMarkup(html);
     const bootstrap = [
@@ -540,6 +542,7 @@ export function buildHtmlRenderDocument(
         contained ? '<style>html{overscroll-behavior:none}</style>' : '',
         `<script>${BOOTSTRAP_SCRIPT}</script>`,
         `<script type="application/json" id="oc-html-render-answer">${scriptJson(answerState)}</script>`,
+        `<script type="application/json" id="oc-html-render-nonce">${scriptJson(nonce)}</script>`,
         `<script>${ANSWER_SCRIPT}</script>`,
     ].join('');
     const headOpen = /<head(?:\s[^>]*)?>/i.exec(scan);
@@ -564,14 +567,16 @@ export const htmlRenderThemeMessage = (theme: HtmlRenderTheme) => ({ type: THEME
 
 export const htmlRenderPointerMessage = (over: boolean) => ({ type: POINTER_MESSAGE, over });
 
-export const htmlRenderAnswerStateMessage = (state: HtmlRenderAnswerState) => ({ type: ANSWER_STATE_MESSAGE, ...state });
+export const htmlRenderAnswerStateMessage = (state: HtmlRenderAnswerState, nonce: string) => ({ type: ANSWER_STATE_MESSAGE, nonce, ...state });
+
+export const htmlRenderUnloadMessage = (nonce: string) => ({ type: 'openchamber:html-render:unload', nonce });
 
 type JsonRpcId = number | string;
 
 /** The host's reply to a page's `ui/message`: an empty result, or an error the page's promise rejects with. */
-export const htmlRenderSubmitReply = (id: JsonRpcId, error?: string) => (error === undefined
-    ? { jsonrpc: '2.0', id, result: {} }
-    : { jsonrpc: '2.0', id, error: { code: -32000, message: error } });
+export const htmlRenderSubmitReply = (id: JsonRpcId, nonce: string, state: HtmlRenderAnswerState, error?: string) => (error === undefined
+    ? { jsonrpc: '2.0', id, nonce, result: { waiting: state.waiting, pending: state.pending === true, terminal: state.terminal ?? '' } }
+    : { jsonrpc: '2.0', id, nonce, error: { code: -32000, message: error } });
 
 export const htmlRenderClearSelectionMessage = () => ({ type: CLEAR_SELECTION_MESSAGE });
 
@@ -603,6 +608,7 @@ export type HtmlRenderKeyChord = z.infer<typeof keyChordSchema>;
 export interface HtmlRenderSubmission {
     summary: string;
     data: JsonValue;
+    nonce?: string;
 }
 
 const selectionRectSchema = z.object({
@@ -665,7 +671,7 @@ const uiMessageSchema = z.object({
     params: z.object({
         role: z.literal('user'),
         content: z.array(z.object({ type: z.literal('text'), text: z.string() })).min(1),
-        _meta: z.object({ 'openchamber/data': z.json().optional() }).optional(),
+        _meta: z.object({ 'openchamber/data': z.json().optional(), 'openchamber/nonce': z.string().max(128).optional() }).optional(),
     }),
 });
 
@@ -674,13 +680,15 @@ export function readHtmlRenderFrameMessage(event: Pick<MessageEvent, 'data'>): H
     const submit = uiMessageSchema.safeParse(event.data);
     if (submit.success) {
         const { id, params } = submit.data;
+        const submission: HtmlRenderSubmission = {
+            summary: params.content.map((block) => block.text).join('\n').trim(),
+            data: params._meta?.['openchamber/data'] ?? null,
+        };
+        if (params._meta?.['openchamber/nonce']) submission.nonce = params._meta['openchamber/nonce'];
         return {
             kind: 'submit',
             id,
-            submission: {
-                summary: params.content.map((block) => block.text).join('\n').trim(),
-                data: params._meta?.['openchamber/data'] ?? null,
-            },
+            submission,
         };
     }
     const parsed = frameMessageSchema.safeParse(event.data);

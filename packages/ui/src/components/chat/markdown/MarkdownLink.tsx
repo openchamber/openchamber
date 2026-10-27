@@ -63,7 +63,7 @@ export function MarkdownInlineCode({ children, node: _node, ...props }: React.Co
 }
 
 export function MarkdownLink(props: React.ComponentProps<'a'> & ExtraProps) {
-  const { purpose } = useMarkdownPresentation();
+  const { purpose, embedded } = useMarkdownPresentation();
   if (purpose) {
     const { node: _node, children, ...rest } = props;
     return (
@@ -72,7 +72,18 @@ export function MarkdownLink(props: React.ComponentProps<'a'> & ExtraProps) {
       </a>
     );
   }
+  if (embedded) return <EmbeddedMarkdownLink {...props} />;
   return <ScreenMarkdownLink {...props} />;
+}
+
+function EmbeddedMarkdownLink({ href = '', node: _node, children, ...props }: React.ComponentProps<'a'> & ExtraProps) {
+  const { directory } = useMarkdownPresentation();
+  const open = useOpenChatLink(directory);
+  if (!isExternalHttpUrl(href)) return <span>{children}</span>;
+  return <a {...props} href={href} target="_blank" rel="noopener noreferrer" onClick={(event) => {
+    event.preventDefault();
+    open(href);
+  }}>{children}</a>;
 }
 
 // The favicon sits before its link, framed, loads lazily, and goes away when

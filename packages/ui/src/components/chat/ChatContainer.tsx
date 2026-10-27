@@ -120,6 +120,7 @@ import { useSpaceDirectoryStopped } from '@/lib/spaces/spaces-store';
 import { SpaceChatPlaceholder } from '@/components/session/spaces/SpaceChatPlaceholder';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
+import { OpenUISessionProvider } from './openuiSession';
 import { createFirstVisibleSessionPerformanceTracker } from '@/sync/session-load-performance';
 import { isChatDirectoryPath } from '@/lib/chatDirectories';
 
@@ -562,6 +563,7 @@ const ChatViewport = React.memo(({
                         capacity={retainedTimelines()}
                     >
                         <ChatColumnSessionContext.Provider value={session}>
+                            <OpenUISessionProvider sessionId={currentSessionId} directory={directory ?? ''}>
                             <MessageList
                                 key={currentSessionKey}
                                 ref={messageListRef}
@@ -585,6 +587,7 @@ const ChatViewport = React.memo(({
                                 listFooter={listFooter}
                                 scrollContainerProps={scrollContainerProps}
                             />
+                            </OpenUISessionProvider>
                         </ChatColumnSessionContext.Provider>
                     </KeepAlive>
                     {/* The transcript's edge fades must follow the scroller. */}

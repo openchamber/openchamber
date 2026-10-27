@@ -69,10 +69,8 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, expanded, onToggle, 
     const previouslySettled = React.useRef(settled);
     const animateFinalCollapse = settled && !previouslySettled.current;
     React.useLayoutEffect(() => { previouslySettled.current = settled; }, [settled]);
-    // A page the agent showed is never folded away: it sits below the fold,
-    // above the answer once one arrives, and stays there in a turn that ended
-    // without one. The fold no longer holds it, so it moves at most from the
-    // bottom of the fold to the top of the answer.
+    // OpenUI prompts stay outside the fold while waiting, then return to
+    // their Activity rows.
     const pages = React.useMemo(() => getShownPages(turn.assistantMessages), [turn.assistantMessages]);
     // While the turn works, what the agent does after its last page (more
     // steps, the reply it is still writing) is drawn below the page, in the

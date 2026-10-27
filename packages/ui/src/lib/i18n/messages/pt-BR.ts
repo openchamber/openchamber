@@ -14,6 +14,7 @@ import { fileContentSearchI18n } from './file-content-search.i18n';
 import { fileEditorAidsI18n } from './file-editor-aids.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
 import { documentToolbarI18n } from './document-toolbar.i18n';
+import { openUiI18n } from './openui.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
@@ -176,6 +177,7 @@ export const dict: Record<I18nKey, string> = {
   ...fileEditorAidsI18n['pt-BR'],
   ...htmlRenderI18n['pt-BR'],
   ...documentToolbarI18n['pt-BR'],
+  ...openUiI18n['pt-BR'],
   ...sessionNoticesI18n['pt-BR'],
   ...usageStatsI18n['pt-BR'],
   ...webSearchI18n['pt-BR'],

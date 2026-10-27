@@ -3,6 +3,7 @@ import { deriveOpenUICatalog } from './openuiCatalog.schema';
 import { OPENUI_COMPONENT_NAMES, OPENUI_RESIDENT_COMPONENT_NAMES } from './openuiSchema';
 import { inspectOpenUIProgram, walkRenderedOpenUINodes } from '../../../../../web/shared/openui/program.js';
 import { createParser } from '@openuidev/lang-core';
+import { readFileSync } from 'node:fs';
 
 describe('OpenUI catalog', () => {
   test('accepts responsive grids, upstream collections and component options', () => {
@@ -17,6 +18,13 @@ describe('OpenUI catalog', () => {
     ], null, null, null, null, null, {maxWidth: 48, padding: "m"})`;
     expect(inspectOpenUIProgram(source, catalog.schema, catalog.componentSlots)).toMatchObject({ valid: true });
     expect(catalog.componentSlots).toContainEqual({ component: 'Grid', prop: 'children', allowed: expect.arrayContaining(['GridItem', 'ImageGallery']) });
+  });
+  test('ships the same schema and signatures consumed by the live library', async () => {
+    const { chamberLibrary } = await import('./openuiCatalog');
+    const catalog = JSON.parse(readFileSync(new URL('../../../../../web/server/lib/openui/context/generated/gen.schema.json', import.meta.url), 'utf8'));
+    expect(catalog.schema).toEqual(chamberLibrary.toJSONSchema());
+    expect(catalog.components).toEqual(chamberLibrary.toSpec().components);
+    expect(catalog.root).toBe('Stack');
   });
 
   test('derives the selected component catalog with HtmlView in Card children', () => {

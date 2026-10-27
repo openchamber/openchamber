@@ -26,7 +26,7 @@ Root `instruction.md` owns resident host rules and routes. Group `instruction.md
 files contain local behavior only, except for the two composition patterns in
 `examples`. Advanced has no handwritten file. Markdown changes are read immediately
 without regeneration. `tools.js`
-owns the group whitelist.
+owns the tool/action descriptions, parameter schemas and group whitelist.
 
 Run `bun run openui:generate` after changing the catalog or official library.
 `generate.mjs` separates three sources within the existing groups:

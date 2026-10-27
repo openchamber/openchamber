@@ -14,6 +14,7 @@
  * carry the same context as the ones a tab sends to.
  */
 import { isRecord } from '../shared/guards.js';
+import { readOpenUIGuidance } from '../openui/context/assets.js';
 
 const PINS_METADATA_KEY = 'project_context_pins';
 
@@ -26,6 +27,7 @@ export const KNOWLEDGE_ENTRY_KEYS = {
   pinned: 'openchamber.pinned',
   memory: 'openchamber.memory',
   guidance: 'openchamber.guidance',
+  openui: 'openchamber.openui',
 };
 
 /** Budget for each entry; anything past it is cut, loudly. */
@@ -112,29 +114,8 @@ export const WORK_NAME_GUIDANCE = "Name the task with the openchamber tool's wor
  * catalog, and a model that called `tools.openchamber(...)` from a script got
  * "Unknown tool", concluded the tool did not exist and never named its task.
  */
-export const DIRECT_TOOLS_GUIDANCE = "The openchamber tools (openchamber, openchamber_render and the others) are direct tool calls:"
+export const DIRECT_TOOLS_GUIDANCE = "The openchamber tools are direct tool calls:"
   + " never call them from inside a Code Mode execute script, where they do not exist.";
-
-/**
- * When to draw a page, stated in every session that has the
- * `openchamber_render` tool, and only here. Stated only in the tool
- * description, it went unread: asked for a breakdown of lines of code per
- * package, an agent answered with a list and drew the chart only when asked.
- * Interface mockups are named on their own: listed only as data, the cases
- * read to a literal model as "charts only", while a proposed UI change is
- * where a page helps most. The limits matter as much as the cases: a page for
- * two numbers is worse than a sentence.
- */
-export const RENDER_PAGE_GUIDANCE = "The openchamber_render tool draws a chart, table, diagram or interface mockup inline in the chat."
-  + " Use it when the answer is mostly data or structure the user would otherwise picture:"
-  + " numbers across several items (sizes, counts, timings, costs, test results), shares of a whole,"
-  + " a trend, options compared on several criteria, a timeline, how components connect;"
-  + " or how something looks: a proposed interface change, before and after, layout options."
-  + " Skip it for a few numbers, a short list, code, or when the user asked for plain text."
-  + " At most one page per answer."
-  + " A mockup of the user's own project takes its look from that project's code (theme tokens, CSS variables, styles), not from OpenChamber's theme."
-  + " Draw a page that only shows right before your final reply, and keep the reply to what the page does not show."
-  + " For a choice a page shows better than text, such as layouts or designs, ask on a page with awaitAnswer and continue from the answer.";
 
 /**
  * Titles only for memory, never bodies: an index carrying full text grows
@@ -204,7 +185,6 @@ export const WORKFLOW_GUIDANCE = 'The openchamber_workflow tool runs a script th
 const buildGuidance = ({ linking, rendering, workflows, directTools }) => [
   linking ? SESSION_LINK_GUIDANCE : '',
   linking ? WORK_NAME_GUIDANCE : '',
-  rendering ? RENDER_PAGE_GUIDANCE : '',
   workflows ? WORKFLOW_GUIDANCE : '',
   (linking || rendering || workflows) && directTools ? DIRECT_TOOLS_GUIDANCE : '',
 ].filter(Boolean).join('\n\n');
@@ -214,11 +194,12 @@ const buildGuidance = ({ linking, rendering, workflows, directTools }) => [
  * away; a key left out keeps what the session holds, which is what a branch
  * that could not be read means.
  */
-export const buildKnowledgeEntries = ({ notes, plans, memory, linking = false, rendering = false, workflows = false, directTools = true, checkout = null }) => {
+export const buildKnowledgeEntries = ({ notes, plans, memory, linking = false, rendering = false, openui, workflows = false, directTools = true, checkout = null }) => {
   const entries = {
     [KNOWLEDGE_ENTRY_KEYS.pinned]: truncate(buildPinnedBlock({ notes, plans })),
     [KNOWLEDGE_ENTRY_KEYS.memory]: truncate(buildMemoryBlock(memory)),
     [KNOWLEDGE_ENTRY_KEYS.guidance]: buildGuidance({ linking, rendering, workflows, directTools }),
+    ...(openui === undefined ? {} : { [KNOWLEDGE_ENTRY_KEYS.openui]: openui }),
   };
   // The branch is told while the agent has the tool, whose worktree move is
   // the one thing it can do about a busy branch.
@@ -241,8 +222,9 @@ export const createSessionKnowledgeRuntime = (dependencies) => {
     // `(directory, branch)`: that checked-out branch while its name is
     // OpenChamber's placeholder and it was never pushed, else null.
     readPlaceholderBranch = null,
-    // Whether this session's agent has the `openchamber_render` tool.
+    // Whether this session has OpenUI tools.
     isPageRenderingAvailable = async () => false,
+    getOpenUIGuidance = readOpenUIGuidance,
     // Whether this session's agent has the `openchamber_workflow` tool.
     isWorkflowAvailable = async () => false,
     // Whether the managed tools run through Code Mode's catalog rather than
@@ -344,11 +326,20 @@ export const createSessionKnowledgeRuntime = (dependencies) => {
       : false;
     const checkout = branch !== null ? { directory, branch, placeholder } : null;
 
-    const rendering = await Promise.resolve(isPageRenderingAvailable()).catch(() => false);
+    let openui;
+    try {
+      const rendering = await Promise.resolve(isPageRenderingAvailable());
+      openui = rendering ? await Promise.resolve(getOpenUIGuidance()) : '';
+    } catch {
+      // A settings or asset read that failed is not an authoritative off state.
+      // Omitting this key preserves an instruction OpenCode already holds.
+      openui = undefined;
+    }
+
+    const rendering = openui !== undefined && openui !== '';
     const workflows = await Promise.resolve(isWorkflowAvailable()).catch(() => false);
     const directTools = !(await Promise.resolve(areAgentToolsInCodeMode()).catch(() => false));
-
-    return { notes, plans, memory, linking, rendering, workflows, directTools, checkout };
+    return { notes, plans, memory, linking, rendering, openui, workflows, directTools, checkout };
   };
 
   /**

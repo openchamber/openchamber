@@ -108,12 +108,18 @@ describe('answer state', () => {
         const start = document.indexOf('<script type="application/json" id="oc-html-render-answer">');
         const json = document.slice(document.indexOf('>', start) + 1, document.indexOf('</script>', start));
         expect(JSON.parse(json)).toEqual({ waiting: false, answer: { note: '</script><script>alert(1)</script>' } });
-        // The bootstrap, the answer state and the answer script, nothing more.
-        expect(document.match(/<\/script>/g)?.length).toBe(3);
+        // The bootstrap, answer state, document nonce and answer script.
+        expect(document.match(/<\/script>/g)?.length).toBe(4);
     });
 
     test('starts a page as not waiting unless told', () => {
         expect(buildHtmlRenderDocument('<p>a</p>', theme)).toContain('{"waiting":false,"answer":null}');
+    });
+
+    test('gives each document nonce to its submit bridge', () => {
+        const document = buildHtmlRenderDocument('<p>a</p>', theme, { nonce: 'current-document' });
+        expect(document).toContain('"openchamber/nonce":N');
+        expect(document).toContain('>"current-document"</script>');
     });
 });
 
@@ -132,9 +138,20 @@ describe('readHtmlRenderFrameMessage', () => {
         expect(readHtmlRenderFrameMessage({ data: { ...data, params: { ...data.params, role: 'assistant' } } })).toBeNull();
     });
 
+    test('reads a document nonce only from the reserved metadata field', () => {
+        const data = {
+            jsonrpc: '2.0',
+            id: 1,
+            method: 'ui/message',
+            params: { role: 'user', content: [{ type: 'text', text: 'Layout B' }], _meta: { 'openchamber/data': null, 'openchamber/nonce': 'current-document' } },
+        };
+        expect(readHtmlRenderFrameMessage({ data })).toEqual({ kind: 'submit', id: 1, submission: { summary: 'Layout B', data: null, nonce: 'current-document' } });
+    });
+
     test('answers a submit with an empty result or an error', () => {
-        expect(htmlRenderSubmitReply(3)).toEqual({ jsonrpc: '2.0', id: 3, result: {} });
-        expect(htmlRenderSubmitReply(3, 'nope')).toEqual({ jsonrpc: '2.0', id: 3, error: { code: -32000, message: 'nope' } });
+        const state = { waiting: true, answer: null };
+        expect(htmlRenderSubmitReply(3, 'nonce', state)).toEqual({ jsonrpc: '2.0', id: 3, nonce: 'nonce', result: { waiting: true, pending: false, terminal: '' } });
+        expect(htmlRenderSubmitReply(3, 'nonce', state, 'nope')).toEqual({ jsonrpc: '2.0', id: 3, nonce: 'nonce', error: { code: -32000, message: 'nope' } });
     });
 
     test('reads the size and link messages the bootstrap posts', () => {

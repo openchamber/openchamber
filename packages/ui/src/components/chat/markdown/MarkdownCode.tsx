@@ -18,6 +18,7 @@ import { activateMarkdownFile, useOpenMarkdownFile } from './markdownFileReferen
 import type { MarkdownCodePlugin } from './streamdownCode';
 import { MarkdownDiff } from './MarkdownDiff';
 import { MarkdownSuggestionContext, isSuggestionLanguage, suggestionPatch } from './markdownSuggestion';
+import { OpenUIFenceContext, useOpenUIFence } from './openuiMarkdownContext';
 
 // Complete prefix rows keep their identity in the worker client, so appending
 // code only renders changed rows. React owns every node; no HTML patching.
@@ -127,16 +128,31 @@ export function MarkdownCode({ children, className, node, ...props }: React.Comp
   const proposal = language.toLowerCase() === 'diff' || suggestion;
   const code = node?.children.map((child) => child.type === 'text' ? child.value : '').join('') ?? '';
   const copySource = code.replace(/\n$/, '');
+  const openui = useOpenUIFence(node, code);
   const { purpose, onExportCode } = presentation;
   React.useLayoutEffect(() => {
     if (purpose && language !== 'mermaid') onExportCode?.(code, language);
   }, [purpose, onExportCode, code, language]);
+
+  if (presentation.embedded) {
+    return <pre dir="ltr"><code className={className}>{copySource}</code></pre>;
+  }
 
   if (language === 'mermaid') {
     return (
       <defaultComponents.code {...props} node={node} className={className}>
         {children}
       </defaultComponents.code>
+    );
+  }
+
+  if (language === 'openui-lang' && openui && !purpose) {
+    return (
+      <OpenUIFenceContext.Provider value={openui}>
+        <defaultComponents.code {...props} node={node} className={className}>
+          {children}
+        </defaultComponents.code>
+      </OpenUIFenceContext.Provider>
     );
   }
 

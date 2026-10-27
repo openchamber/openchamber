@@ -15,6 +15,8 @@ filesystem access, React components, or runtime credentials.
 - Default-tree traversal follows declared rendered slots. The browser selects
   initial media from those slots; unused declarations, object data, edited
   fields and restored snapshots cannot add media sources.
+- Native image extraction recognizes `Image.src` and `ImageGallery.images[].src`
+  only on their evaluated component nodes. The browser uses this helper.
 - JavaScript is executed directly by Node and included by browser builds.
   Adjacent declarations describe the typed UI imports. Neither file is generated.
 

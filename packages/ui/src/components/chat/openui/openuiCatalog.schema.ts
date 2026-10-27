@@ -4,10 +4,10 @@ import { z } from 'zod/v4';
 import { OPENUI_COMPONENT_NAMES, type OpenUICatalog } from './openuiSchema';
 import { deriveOpenUIComponentSlots } from '../../../../../web/shared/openui/program.js';
 
-const htmlViewProps = z.object({ html: z.string(), height: z.number().optional(), title: z.string().optional() });
+export const htmlViewProps = z.object({ html: z.string(), height: z.number().optional(), title: z.string().optional() });
 const spacing = z.enum(['none', 'xs', 's', 'm', 'l', 'xl', '2xl']);
 const dimension = z.union([z.number().min(0).max(200), z.enum(['auto', 'full'])]);
-const layoutOptions = z.object({
+export const layoutOptions = z.object({
   width: dimension.optional(),
   maxWidth: dimension.optional(),
   minWidth: dimension.optional(),
@@ -15,17 +15,17 @@ const layoutOptions = z.object({
   shrink: z.number().min(0).max(1).optional(),
   padding: spacing.optional(),
 });
-const imageOptions = z.object({
+export const imageOptions = z.object({
   aspectRatio: z.number().positive().max(20).optional(),
   fit: z.enum(['contain', 'cover']).optional(),
   caption: z.string().optional(),
   source: z.string().url().optional(),
 });
-const iconOptions = z.object({
+export const iconOptions = z.object({
   size: z.enum(['sm', 'md', 'lg', 'xl']).optional(),
   tone: z.enum(['default', 'muted', 'info', 'success', 'warning', 'danger']).optional(),
 });
-const chartOptions = z.object({
+export const chartOptions = z.object({
   layout: z.enum(['fit', 'scroll']).optional(),
   density: z.enum(['compact', 'default', 'spacious']).optional(),
   legend: z.boolean().optional(),
@@ -34,8 +34,8 @@ const chartOptions = z.object({
   tickVariant: z.enum(['singleLine', 'multiLine', 'angled']).optional(),
   palette: z.array(z.number().int().min(1).max(6)).min(1).max(12).optional(),
 });
-const barOptions = chartOptions.extend({ orientation: z.enum(['vertical', 'horizontal']).optional() });
-const pieOptions = chartOptions.pick({ legend: true, palette: true });
+export const barOptions = chartOptions.extend({ orientation: z.enum(['vertical', 'horizontal']).optional() });
+export const pieOptions = chartOptions.pick({ legend: true, palette: true });
 const htmlView = defineComponent({
   name: 'HtmlView',
   description: 'A sandboxed HTML document rendered by the host.',
@@ -53,7 +53,7 @@ const visualNames = [
   'DatePicker', 'Slider', 'Chips', 'OptionCards',
 ] as const;
 const visual = z.union([htmlView.ref, ...visualNames.map((name) => openuiLibrary.components[name].ref)]);
-const gridItemProps = z.object({
+export const gridItemProps = z.object({
   children: z.array(visual),
   colSpan: z.number().int().min(1).max(12).optional(),
   rowSpan: z.number().int().min(1).max(12).optional(),
@@ -64,7 +64,7 @@ const gridItem = defineComponent({
   props: gridItemProps,
   component: () => null,
 });
-const gridProps = z.object({
+export const gridProps = z.object({
   children: z.array(z.union([visual, gridItem.ref])),
   options: z.object({
     columns: z.union([
@@ -94,7 +94,7 @@ const optionSchemas = {
   AreaChart: chartOptions,
   PieChart: pieOptions,
 };
-const openuiCatalogBase = openuiLibrary.extend({
+export const openuiCatalogBase = openuiLibrary.extend({
   components: {
     remove: removedOpenUIComponents,
     override: [defineComponent({

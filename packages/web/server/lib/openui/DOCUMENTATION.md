@@ -4,7 +4,7 @@
 
 This module owns OpenUI prompt admission, saved-source verification,
 instruction reads, and feature revocation through `runtime.js`.
-Callers construct the runtime with settings, session lookup and wait notifications.
+The control service creates the runtime for prompt and answer routes.
 `answers.js` owns live waits, JSON limits and exactly-once settlement. The official
 `@openuidev/lang-core` parser and evaluator run through ordinary shared ESM
 source in `packages/web/shared/`. Server code never imports the React catalog.
@@ -13,15 +13,17 @@ For prompt text, example or disclosure changes, read
 [OpenUI context](context/DOCUMENTATION.md). It covers the context-as-skill mapping,
 content sources and managed-tool delivery choice. Context sources, generation,
 reading and tests live there; this module owns program admission and waits.
+Media uses the existing stat/raw routes in `../fs/`; shared UI owns media
+selection, format checks and each HtmlView's page budget.
 
 ## Invariants
 
 - Instruction reads use fixed group names and module-relative assets. Missing,
   empty or oversized instruction assets return 503. The server requires the
   exported catalog at startup.
-- Prompts wait in the runtime's session/call map. Their source revision is
-  a SHA-256 digest of the complete UTF-8 program. The answer method accepts
-  a summary of at most 500 characters
+- `prompt_openui` waits in the runtime's session/call map. Its source revision is
+  a SHA-256 digest of the complete UTF-8 program. The chat answers through
+  `POST /api/openchamber/openui/answer`, with a summary of at most 500 characters
   and data of at most 16,000 characters as JSON. Settled or unknown calls return 404.
 - Answers must match the live revision and the saved `prompt_openui` input.
   Source reads page newest-first with the prompt request's abort signal. A
@@ -39,17 +41,27 @@ reading and tests live there; this module owns program admission and waits.
   assets; `gen.schema.json` is validator data, not injected prompt text.
 - Official parser diagnostics retain component, property path, statement and
   signature details. Admission returns them through `OpenChamberControlError`
-  before registering a wait. Callers receive them through the error message.
+  before registering a wait. The existing agent-tool error envelope returns
+  them to the model; this module creates no messages or automatic repair loop.
 - Server-owned parser calls use the official telemetry disable flag.
 
 ## Decisions
+
+### Why media uses existing file routes
+
+Authenticated file reads already support outside-workspace paths. Re-reading
+messages and parsing OpenUI on the server adds no file-read authorization.
+Markdown and OpenUI share stat/raw loading and media validation in the UI.
+Native media uses authenticated file URLs, and HtmlView retains its validation
+of the bytes it embeds. Initial-source selection and complete-page budgets stay
+with rendering. A separate media endpoint would duplicate file access.
 
 ### Why cancellation covers pending admission
 
 Settings reads can return a stale enabled value after the disable callback has
 cancelled existing waits. A runtime-local cancellation generation also retires
-those pending admissions, including across a disable/re-enable cycle.
-Prompts enter the runtime before directory resolution so that lookup belongs to
+those pending admissions, including across a disable/re-enable cycle. Managed
+prompts enter the runtime before directory resolution so that lookup belongs to
 the same admission lifetime.
 
 ### Why export catalog data
