@@ -1,0 +1,3157 @@
+{
+  "root": "Stack",
+  "components": {
+    "Card": {
+      "signature": "Card(children: (TextContent | CardHeader | Callout | Image | ImageGallery | Separator | PieChart | AreaChart | BarChart | LineChart | Table | TagBlock | Form | Buttons | IconButton | Tabs | Carousel | Stack | Card | Icon | HtmlView | Grid)[], variant?: \"card\" | \"sunk\" | \"clear\", direction?: \"row\" | \"column\", gap?: \"none\" | \"xs\" | \"s\" | \"m\" | \"l\" | \"xl\" | \"2xl\", align?: \"start\" | \"center\" | \"end\" | \"stretch\" | \"baseline\", justify?: \"start\" | \"center\" | \"end\" | \"between\" | \"around\" | \"evenly\", wrap?: boolean, options?: {width?: number | \"auto\" | \"full\", maxWidth?: number | \"auto\" | \"full\", minWidth?: number | \"auto\" | \"full\", grow?: number, shrink?: number, padding?: \"none\" | \"xs\" | \"s\" | \"m\" | \"l\" | \"xl\" | \"2xl\"})",
+      "description": "Styled container. variant: \"card\" (default, elevated) | \"sunk\" (recessed) | \"clear\" (transparent). Always full width. Accepts all Stack flex params (default: direction \"column\"). Cards flex to share space in row/wrap layouts."
+    },
+    "CardHeader": {
+      "signature": "CardHeader(title?: string, subtitle?: string)",
+      "description": "Header with optional title and subtitle"
+    },
+    "TextContent": {
+      "signature": "TextContent(text: string, size?: \"small\" | \"default\" | \"large\" | \"small-heavy\" | \"large-heavy\")",
+      "description": "Text block. Supports markdown. Optional size: \"small\" | \"default\" | \"large\" | \"small-heavy\" | \"large-heavy\"."
+    },
+    "Callout": {
+      "signature": "Callout(variant: \"info\" | \"warning\" | \"error\" | \"success\" | \"neutral\", title: string, description: string, visible?: $binding<boolean>)",
+      "description": "Callout banner. Optional visible is a reactive $boolean — auto-dismisses after 3s by setting $visible to false."
+    },
+    "Image": {
+      "signature": "Image(alt: string, src?: string, options?: {aspectRatio?: number, fit?: \"contain\" | \"cover\", caption?: string, source?: string})",
+      "description": "Image with alt text and optional URL"
+    },
+    "ImageGallery": {
+      "signature": "ImageGallery(images: {src: string, alt?: string, details?: string}[])",
+      "description": "Gallery grid of images with modal preview"
+    },
+    "Table": {
+      "signature": "Table(columns: Col[])",
+      "description": "Data table — column-oriented. Each Col holds its own data array."
+    },
+    "Col": {
+      "signature": "Col(label: string, data: any, type?: \"string\" | \"number\" | \"action\")",
+      "description": "Column definition — holds label + data array"
+    },
+    "BarChart": {
+      "signature": "BarChart(labels: string[], series: Series[], variant?: \"grouped\" | \"stacked\", xLabel?: string, yLabel?: string, height?: number, options?: {layout?: \"fit\" | \"scroll\", density?: \"compact\" | \"default\" | \"spacious\", legend?: boolean, grid?: boolean, showYAxis?: boolean, tickVariant?: \"singleLine\" | \"multiLine\" | \"angled\", palette?: number[], orientation?: \"vertical\" | \"horizontal\"})",
+      "description": "Vertical bars; use for comparing values across categories with one or more series"
+    },
+    "LineChart": {
+      "signature": "LineChart(labels: string[], series: Series[], variant?: \"linear\" | \"natural\" | \"step\", xLabel?: string, yLabel?: string, height?: number, options?: {layout?: \"fit\" | \"scroll\", density?: \"compact\" | \"default\" | \"spacious\", legend?: boolean, grid?: boolean, showYAxis?: boolean, tickVariant?: \"singleLine\" | \"multiLine\" | \"angled\", palette?: number[]})",
+      "description": "Lines over categories; use for trends and continuous data over time"
+    },
+    "AreaChart": {
+      "signature": "AreaChart(labels: string[], series: Series[], variant?: \"linear\" | \"natural\" | \"step\", xLabel?: string, yLabel?: string, height?: number, options?: {layout?: \"fit\" | \"scroll\", density?: \"compact\" | \"default\" | \"spacious\", legend?: boolean, grid?: boolean, showYAxis?: boolean, tickVariant?: \"singleLine\" | \"multiLine\" | \"angled\", palette?: number[]})",
+      "description": "Filled area under lines; use for cumulative totals or volume trends over time"
+    },
+    "Series": {
+      "signature": "Series(category: string, values: number[])",
+      "description": "One data series"
+    },
+    "PieChart": {
+      "signature": "PieChart(labels: string[], values: number[], variant?: \"pie\" | \"donut\", appearance?: \"circular\" | \"semiCircular\", options?: {legend?: boolean, palette?: number[]})",
+      "description": "Circular slices; use plucked arrays: PieChart(data.categories, data.values)"
+    },
+    "Form": {
+      "signature": "Form(name: string, buttons: Buttons, fields?: FormControl[])",
+      "description": "Form container with fields and explicit action buttons"
+    },
+    "FormControl": {
+      "signature": "FormControl(label: string, input: Input | TextArea | Select | DatePicker | Slider | CheckBoxGroup | RadioGroup | Chips | OptionCards, hint?: string)",
+      "description": "Field with label, input component, and optional hint text"
+    },
+    "Label": {
+      "signature": "Label(text: string)",
+      "description": "Text label"
+    },
+    "Input": {
+      "signature": "Input(name: string, placeholder?: string, type?: \"text\" | \"email\" | \"password\" | \"number\" | \"url\", rules?: {required?: boolean, email?: boolean, url?: boolean, numeric?: boolean, min?: number, max?: number, minLength?: number, maxLength?: number, pattern?: string}, value?: $binding<string>)",
+      "description": ""
+    },
+    "TextArea": {
+      "signature": "TextArea(name: string, placeholder?: string, rows?: number, rules?: {required?: boolean, email?: boolean, url?: boolean, numeric?: boolean, min?: number, max?: number, minLength?: number, maxLength?: number, pattern?: string}, value?: $binding<string>)",
+      "description": ""
+    },
+    "Select": {
+      "signature": "Select(name: string, items: SelectItem[], placeholder?: string, rules?: {required?: boolean, email?: boolean, url?: boolean, numeric?: boolean, min?: number, max?: number, minLength?: number, maxLength?: number, pattern?: string}, value?: $binding<string>, size?: \"small\" | \"medium\" | \"large\")",
+      "description": ""
+    },
+    "SelectItem": {
+      "signature": "SelectItem(value: string, label: string)",
+      "description": "Option for Select"
+    },
+    "DatePicker": {
+      "signature": "DatePicker(name: string, mode?: \"single\" | \"range\", rules?: {required?: boolean, email?: boolean, url?: boolean, numeric?: boolean, min?: number, max?: number, minLength?: number, maxLength?: number, pattern?: string}, value?: $binding<any>)",
+      "description": ""
+    },
+    "Slider": {
+      "signature": "Slider(name: string, variant: \"continuous\" | \"discrete\", min: number, max: number, step?: number, defaultValue?: number[], label?: string, rules?: {required?: boolean, email?: boolean, url?: boolean, numeric?: boolean, min?: number, max?: number, minLength?: number, maxLength?: number, pattern?: string}, value?: $binding<number[]>)",
+      "description": "Numeric slider input; supports continuous and discrete (stepped) variants"
+    },
+    "CheckBoxGroup": {
+      "signature": "CheckBoxGroup(name: string, items: CheckBoxItem[], rules?: {required?: boolean, email?: boolean, url?: boolean, numeric?: boolean, min?: number, max?: number, minLength?: number, maxLength?: number, pattern?: string}, value?: $binding<Record<string, boolean>>)",
+      "description": ""
+    },
+    "CheckBoxItem": {
+      "signature": "CheckBoxItem(label: string, description: string, name: string, defaultChecked?: boolean)",
+      "description": ""
+    },
+    "RadioGroup": {
+      "signature": "RadioGroup(name: string, items: RadioItem[], defaultValue?: string, rules?: {required?: boolean, email?: boolean, url?: boolean, numeric?: boolean, min?: number, max?: number, minLength?: number, maxLength?: number, pattern?: string}, value?: $binding<string>)",
+      "description": ""
+    },
+    "RadioItem": {
+      "signature": "RadioItem(label: string, description: string, value: string)",
+      "description": ""
+    },
+    "SwitchGroup": {
+      "signature": "SwitchGroup(name: string, items: SwitchItem[], variant?: \"clear\" | \"card\" | \"sunk\", value?: $binding<Record<string, boolean>>)",
+      "description": "Group of switch toggles"
+    },
+    "SwitchItem": {
+      "signature": "SwitchItem(label?: string, description?: string, name: string, defaultChecked?: boolean)",
+      "description": "Individual switch toggle"
+    },
+    "ChipItem": {
+      "signature": "ChipItem(value: string, label: string, icon?: Icon, disabled?: boolean)",
+      "description": "A single selectable chip inside a Chips group, with a value, label and optional icon."
+    },
+    "Chips": {
+      "signature": "Chips(name: string, type?: \"single\" | \"multiple\", items?: ChipItem[], rules?: {required?: boolean, email?: boolean, url?: boolean, numeric?: boolean, min?: number, max?: number, minLength?: number, maxLength?: number, pattern?: string}, defaultValue?: string | string[])",
+      "description": "A form field of compact selectable chips for choosing one or many short options; the selection is stored under `name`."
+    },
+    "OptionCard": {
+      "signature": "OptionCard(value: string, title: string, subtitle?: string, topContent?: Icon | Image, disabled?: boolean)",
+      "description": "A single selectable card inside an OptionCards group, with a value, title, optional subtitle and an optional Icon or Image on top."
+    },
+    "OptionCards": {
+      "signature": "OptionCards(name: string, type?: \"single\" | \"multiple\", items?: OptionCard[], rules?: {required?: boolean, email?: boolean, url?: boolean, numeric?: boolean, min?: number, max?: number, minLength?: number, maxLength?: number, pattern?: string}, defaultValue?: string | string[])",
+      "description": "A form field of selectable cards (title, optional subtitle, optional icon or image) laid out in a responsive grid for choosing one or many options; the selection is stored under `name`."
+    },
+    "Button": {
+      "signature": "Button(label: string, action?: ActionExpression, variant?: \"primary\" | \"secondary\" | \"tertiary\", type?: \"normal\" | \"destructive\", size?: \"extra-small\" | \"small\" | \"medium\" | \"large\")",
+      "description": "Clickable button"
+    },
+    "Buttons": {
+      "signature": "Buttons(buttons: Button[], direction?: \"row\" | \"column\")",
+      "description": "Group of Button components. direction: \"row\" (default) | \"column\"."
+    },
+    "IconButton": {
+      "signature": "IconButton(name: string, icon: Icon, action?: ActionExpression, variant?: \"primary\" | \"secondary\" | \"tertiary\", size?: \"extra-small\" | \"small\" | \"medium\" | \"large\", shape?: \"square\" | \"circle\")",
+      "description": "Icon-only button. name is the accessible label and the action label; icon is an Icon; action fires on click."
+    },
+    "Stack": {
+      "signature": "Stack(children: any[], direction?: \"row\" | \"column\", gap?: \"none\" | \"xs\" | \"s\" | \"m\" | \"l\" | \"xl\" | \"2xl\", align?: \"start\" | \"center\" | \"end\" | \"stretch\" | \"baseline\", justify?: \"start\" | \"center\" | \"end\" | \"between\" | \"around\" | \"evenly\", wrap?: boolean, options?: {width?: number | \"auto\" | \"full\", maxWidth?: number | \"auto\" | \"full\", minWidth?: number | \"auto\" | \"full\", grow?: number, shrink?: number, padding?: \"none\" | \"xs\" | \"s\" | \"m\" | \"l\" | \"xl\" | \"2xl\"})",
+      "description": "Flex container. direction: \"row\"|\"column\" (default \"column\"). gap: \"none\"|\"xs\"|\"s\"|\"m\"|\"l\"|\"xl\"|\"2xl\" (default \"m\"). align: \"start\"|\"center\"|\"end\"|\"stretch\"|\"baseline\". justify: \"start\"|\"center\"|\"end\"|\"between\"|\"around\"|\"evenly\"."
+    },
+    "Tabs": {
+      "signature": "Tabs(items: TabItem[])",
+      "description": "Tabbed container"
+    },
+    "TabItem": {
+      "signature": "TabItem(value: string, trigger: string, content: (TextContent | CardHeader | Callout | Image | ImageGallery | Separator | PieChart | AreaChart | BarChart | LineChart | Table | TagBlock | Form | Buttons | IconButton | Grid)[])",
+      "description": "value is unique id, trigger is tab label, content is array of components"
+    },
+    "Accordion": {
+      "signature": "Accordion(items: AccordionItem[])",
+      "description": "Collapsible sections"
+    },
+    "AccordionItem": {
+      "signature": "AccordionItem(value: string, trigger: string, content: (TextContent | CardHeader | Callout | Image | ImageGallery | Separator | PieChart | AreaChart | BarChart | LineChart | Table | TagBlock | Form | Buttons | IconButton | Grid)[])",
+      "description": "value is unique id, trigger is section title"
+    },
+    "Carousel": {
+      "signature": "Carousel(children: (TextContent | CardHeader | Callout | Image | ImageGallery | Separator | PieChart | AreaChart | BarChart | LineChart | Table | TagBlock | Form | Buttons | IconButton | Grid)[][], variant?: \"card\" | \"sunk\")",
+      "description": "Horizontal scrollable carousel"
+    },
+    "Separator": {
+      "signature": "Separator(orientation?: \"horizontal\" | \"vertical\", decorative?: boolean)",
+      "description": "Visual divider between content sections"
+    },
+    "TagBlock": {
+      "signature": "TagBlock(tags: string[], size?: \"sm\" | \"md\" | \"lg\")",
+      "description": "tags is an array of strings; optional size sm | md | lg"
+    },
+    "Tag": {
+      "signature": "Tag(text: string, icon?: Icon, size?: \"sm\" | \"md\" | \"lg\", variant?: \"neutral\" | \"info\" | \"success\" | \"warning\" | \"danger\")",
+      "description": "Styled tag/badge with optional Icon and variant"
+    },
+    "Icon": {
+      "signature": "Icon(name: string, options?: {size?: \"sm\" | \"md\" | \"lg\" | \"xl\", tone?: \"default\" | \"muted\" | \"info\" | \"success\" | \"warning\" | \"danger\"})",
+      "description": "An official Remix React icon by standard kebab-case name, including its line or fill suffix. Options control size and semantic tone."
+    },
+    "HtmlView": {
+      "signature": "HtmlView(html: string, height?: number, title?: string)",
+      "description": "A sandboxed HTML document rendered by the host."
+    },
+    "Grid": {
+      "signature": "Grid(children: (HtmlView | Stack | Card | CardHeader | TextContent | Callout | Image | ImageGallery | Carousel | Separator | Table | BarChart | LineChart | AreaChart | PieChart | Form | Buttons | IconButton | Tabs | Accordion | Tag | TagBlock | Icon | Label | Input | TextArea | Select | CheckBoxGroup | RadioGroup | SwitchGroup | DatePicker | Slider | Chips | OptionCards | GridItem)[], options?: {columns?: number | number[], gap?: \"none\" | \"xs\" | \"s\" | \"m\" | \"l\" | \"xl\" | \"2xl\", minChildWidth?: number})",
+      "description": "Responsive grid. Numeric columns are equal tracks; arrays are fractional weights. minChildWidth is in rem."
+    },
+    "GridItem": {
+      "signature": "GridItem(children: (HtmlView | Stack | Card | CardHeader | TextContent | Callout | Image | ImageGallery | Carousel | Separator | Table | BarChart | LineChart | AreaChart | PieChart | Form | Buttons | IconButton | Tabs | Accordion | Tag | TagBlock | Icon | Label | Input | TextArea | Select | CheckBoxGroup | RadioGroup | SwitchGroup | DatePicker | Slider | Chips | OptionCards)[], colSpan?: number, rowSpan?: number)",
+      "description": "An optional spanning group inside Grid."
+    }
+  },
+  "componentGroups": [
+    {
+      "name": "Layout",
+      "components": [
+        "Stack",
+        "Tabs",
+        "TabItem",
+        "Accordion",
+        "AccordionItem",
+        "Carousel",
+        "Separator"
+      ],
+      "notes": [
+        "- For grid-like layouts, use Stack with direction \"row\" and wrap set to true.",
+        "- Prefer justify \"start\" (or omit justify) with wrap=true for stable columns instead of uneven gutters.",
+        "- Use nested Stacks when you need explicit rows/sections.",
+        "- Show/hide sections: $editId != \"\" ? Card([editForm]) : null",
+        "- Modal: Modal(\"Title\", $showModal, [content]) — $showModal is boolean, X/Escape auto-closes. Put Form with its own buttons inside children.",
+        "- Use Tabs for alternative views (chart types, data sections) — no $variable needed",
+        "- Shared filter across Tabs: same $days binding in Query args works across all TabItems"
+      ]
+    },
+    {
+      "name": "Content",
+      "components": [
+        "Card",
+        "CardHeader",
+        "TextContent",
+        "Callout",
+        "Image",
+        "ImageGallery"
+      ],
+      "notes": [
+        "- InlineHeader is a compact heading + description pair for labelling a block (lighter than CardHeader).",
+        "- Use Cards to group related KPIs or sections. Stack with direction \"row\" for side-by-side layouts.",
+        "- Success toast: Callout(\"success\", \"Saved\", \"Done.\", $showSuccess) — use @Set($showSuccess, true) in save action, auto-dismisses after 3s. For errors: result.status == \"error\" ? Callout(\"error\", \"Failed\", result.error) : null",
+        "- KPI card: Card([TextContent(\"Label\", \"small\"), TextContent(\"\" + @Count(@Filter(data.rows, \"field\", \"==\", \"value\")), \"large-heavy\")])"
+      ]
+    },
+    {
+      "name": "Tables",
+      "components": [
+        "Table",
+        "Col"
+      ],
+      "notes": [
+        "- EditableTable lets the user edit cells inline. Give it a unique name, columns of { type, key, header } with type one of text | number | date-single | select | url (select also needs options: [{ value, label }]).",
+        "- data is an array of { id, values } rows where values are ordered positionally to match columns. Edited data is submitted when the user clicks Save Changes.",
+        "- Table is COLUMN-oriented: Table([Col(\"Label\", dataArray), Col(\"Count\", countArray, \"number\")]). Use array pluck for data: data.rows.fieldName",
+        "- Col data can be component arrays for styled cells: Col(\"Status\", @Each(data.rows, \"item\", Tag(item.status, null, \"sm\", item.status == \"open\" ? \"success\" : \"danger\")))",
+        "- Row actions: Col(\"Actions\", @Each(data.rows, \"t\", Button(\"Edit\", Action([@Set($showEdit, true), @Set($editId, t.id)]))))",
+        "- Sortable: sorted = @Sort(data.rows, $sortField, \"desc\"). Bind $sortField to Select. Use sorted.fieldName for Col data",
+        "- Searchable: filtered = @Filter(data.rows, \"title\", \"contains\", $search). Bind $search to Input",
+        "- Chain sort + filter: filtered = @Filter(...) then sorted = @Sort(filtered, ...) — use sorted for both Table and Charts",
+        "- Empty state: @Count(data.rows) > 0 ? Table([...]) : TextContent(\"No data yet\")"
+      ]
+    },
+    {
+      "name": "Charts (2D)",
+      "components": [
+        "BarChart",
+        "LineChart",
+        "AreaChart",
+        "Series"
+      ],
+      "notes": [
+        "- Charts accept column arrays: LineChart(labels, [Series(\"Name\", values)]). Use array pluck: LineChart(data.rows.day, [Series(\"Views\", data.rows.views)])",
+        "- Use Cards to wrap charts with CardHeader for titled sections",
+        "- Chart + Table from same source: use @Sort or @Filter result for both LineChart and Table Col data",
+        "- Multiple chart views: use Tabs — Tabs([TabItem(\"line\", \"Line\", [LineChart(...)]), TabItem(\"bar\", \"Bar\", [BarChart(...)])])"
+      ]
+    },
+    {
+      "name": "Charts (1D)",
+      "components": [
+        "PieChart"
+      ],
+      "notes": [
+        "- PieChart and BarChart need NUMBERS, not objects. For list data, use @Count(@Filter(...)) to aggregate:",
+        "- PieChart from list: `PieChart([\"Low\", \"Med\", \"High\"], [@Count(@Filter(data.rows, \"priority\", \"==\", \"low\")), @Count(@Filter(data.rows, \"priority\", \"==\", \"medium\")), @Count(@Filter(data.rows, \"priority\", \"==\", \"high\"))], \"donut\")`",
+        "- KPI from count: `TextContent(\"\" + @Count(@Filter(data.rows, \"status\", \"==\", \"open\")), \"large-heavy\")`"
+      ]
+    },
+    {
+      "name": "Forms",
+      "components": [
+        "Form",
+        "FormControl",
+        "Label",
+        "Input",
+        "TextArea",
+        "Select",
+        "SelectItem",
+        "DatePicker",
+        "Slider",
+        "CheckBoxGroup",
+        "CheckBoxItem",
+        "RadioGroup",
+        "RadioItem",
+        "SwitchGroup",
+        "SwitchItem",
+        "Chips",
+        "ChipItem",
+        "OptionCards",
+        "OptionCard"
+      ],
+      "notes": [
+        "- Chips: compact single/multiple selection pills. Use ChipItem references for each option.",
+        "- OptionCards: larger selectable cards with title, subtitle and an optional Icon or Image on top. Use OptionCard references for each option.",
+        "- For Form fields, define EACH FormControl as its own reference — do NOT inline all controls in one array. This allows progressive field-by-field streaming.",
+        "- NEVER nest Form inside Form — each Form should be a standalone container.",
+        "- Form requires explicit buttons. Always pass a Buttons(...) reference as the third Form argument.",
+        "- rules is an optional object: {required: true, email: true, minLength: 8, maxLength: 100}",
+        "- Available rules: required, email, min, max, minLength, maxLength, pattern, url, numeric",
+        "- The renderer shows error messages automatically — do NOT generate error text in the UI",
+        "- Conditional fields: $country == \"US\" ? stateField : $country == \"UK\" ? postcodeField : addressField",
+        "- Edit form in Modal: Modal(\"Edit\", $showEdit, [Form(\"edit\", Buttons([saveBtn, cancelBtn]), [fields...])]). Save button should include @Set($showEdit, false) to close modal."
+      ]
+    },
+    {
+      "name": "Buttons",
+      "components": [
+        "Button",
+        "Buttons",
+        "IconButton"
+      ],
+      "notes": [
+        "- Icon renders a lucide icon by kebab-case name; it is also used as the icon of IconButton, IconText and OptionCard.",
+        "- Toggle in @Each: @Each(rows, \"t\", Button(t.status == \"open\" ? \"Close\" : \"Reopen\", Action([...])))"
+      ]
+    },
+    {
+      "name": "Data Display",
+      "components": [
+        "TagBlock",
+        "Tag",
+        "Icon"
+      ],
+      "notes": [
+        "- Color-mapped Tag: Tag(value, null, \"sm\", value == \"high\" ? \"danger\" : value == \"medium\" ? \"warning\" : \"neutral\")",
+        "- EntityList is a compact two-column list of { left, right } rows (e.g. name / value). size='default' also supports a header and footer row; size='small' does not.",
+        "- ListBlock is a numbered or image list of ListItem references. An action on ListItem is optional."
+      ]
+    }
+  ],
+  "schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "Card": {
+        "$ref": "#/$defs/Card"
+      },
+      "CardHeader": {
+        "$ref": "#/$defs/CardHeader"
+      },
+      "TextContent": {
+        "$ref": "#/$defs/TextContent"
+      },
+      "Callout": {
+        "$ref": "#/$defs/Callout"
+      },
+      "Image": {
+        "$ref": "#/$defs/Image"
+      },
+      "ImageGallery": {
+        "$ref": "#/$defs/ImageGallery"
+      },
+      "Table": {
+        "$ref": "#/$defs/Table"
+      },
+      "Col": {
+        "$ref": "#/$defs/Col"
+      },
+      "BarChart": {
+        "$ref": "#/$defs/BarChart"
+      },
+      "LineChart": {
+        "$ref": "#/$defs/LineChart"
+      },
+      "AreaChart": {
+        "$ref": "#/$defs/AreaChart"
+      },
+      "Series": {
+        "$ref": "#/$defs/Series"
+      },
+      "PieChart": {
+        "$ref": "#/$defs/PieChart"
+      },
+      "Form": {
+        "$ref": "#/$defs/Form"
+      },
+      "FormControl": {
+        "$ref": "#/$defs/FormControl"
+      },
+      "Label": {
+        "$ref": "#/$defs/Label"
+      },
+      "Input": {
+        "$ref": "#/$defs/Input"
+      },
+      "TextArea": {
+        "$ref": "#/$defs/TextArea"
+      },
+      "Select": {
+        "$ref": "#/$defs/Select"
+      },
+      "SelectItem": {
+        "$ref": "#/$defs/SelectItem"
+      },
+      "DatePicker": {
+        "$ref": "#/$defs/DatePicker"
+      },
+      "Slider": {
+        "$ref": "#/$defs/Slider"
+      },
+      "CheckBoxGroup": {
+        "$ref": "#/$defs/CheckBoxGroup"
+      },
+      "CheckBoxItem": {
+        "$ref": "#/$defs/CheckBoxItem"
+      },
+      "RadioGroup": {
+        "$ref": "#/$defs/RadioGroup"
+      },
+      "RadioItem": {
+        "$ref": "#/$defs/RadioItem"
+      },
+      "SwitchGroup": {
+        "$ref": "#/$defs/SwitchGroup"
+      },
+      "SwitchItem": {
+        "$ref": "#/$defs/SwitchItem"
+      },
+      "ChipItem": {
+        "$ref": "#/$defs/ChipItem"
+      },
+      "Chips": {
+        "$ref": "#/$defs/Chips"
+      },
+      "OptionCard": {
+        "$ref": "#/$defs/OptionCard"
+      },
+      "OptionCards": {
+        "$ref": "#/$defs/OptionCards"
+      },
+      "Button": {
+        "$ref": "#/$defs/Button"
+      },
+      "Buttons": {
+        "$ref": "#/$defs/Buttons"
+      },
+      "IconButton": {
+        "$ref": "#/$defs/IconButton"
+      },
+      "Stack": {
+        "$ref": "#/$defs/Stack"
+      },
+      "Tabs": {
+        "$ref": "#/$defs/Tabs"
+      },
+      "TabItem": {
+        "$ref": "#/$defs/TabItem"
+      },
+      "Accordion": {
+        "$ref": "#/$defs/Accordion"
+      },
+      "AccordionItem": {
+        "$ref": "#/$defs/AccordionItem"
+      },
+      "Carousel": {
+        "$ref": "#/$defs/Carousel"
+      },
+      "Separator": {
+        "$ref": "#/$defs/Separator"
+      },
+      "TagBlock": {
+        "$ref": "#/$defs/TagBlock"
+      },
+      "Tag": {
+        "$ref": "#/$defs/Tag"
+      },
+      "Icon": {
+        "$ref": "#/$defs/Icon"
+      },
+      "HtmlView": {
+        "$ref": "#/$defs/HtmlView"
+      },
+      "Grid": {
+        "$ref": "#/$defs/Grid"
+      },
+      "GridItem": {
+        "$ref": "#/$defs/GridItem"
+      }
+    },
+    "required": [
+      "Card",
+      "CardHeader",
+      "TextContent",
+      "Callout",
+      "Image",
+      "ImageGallery",
+      "Table",
+      "Col",
+      "BarChart",
+      "LineChart",
+      "AreaChart",
+      "Series",
+      "PieChart",
+      "Form",
+      "FormControl",
+      "Label",
+      "Input",
+      "TextArea",
+      "Select",
+      "SelectItem",
+      "DatePicker",
+      "Slider",
+      "CheckBoxGroup",
+      "CheckBoxItem",
+      "RadioGroup",
+      "RadioItem",
+      "SwitchGroup",
+      "SwitchItem",
+      "ChipItem",
+      "Chips",
+      "OptionCard",
+      "OptionCards",
+      "Button",
+      "Buttons",
+      "IconButton",
+      "Stack",
+      "Tabs",
+      "TabItem",
+      "Accordion",
+      "AccordionItem",
+      "Carousel",
+      "Separator",
+      "TagBlock",
+      "Tag",
+      "Icon",
+      "HtmlView",
+      "Grid",
+      "GridItem"
+    ],
+    "additionalProperties": false,
+    "$defs": {
+      "Card": {
+        "type": "object",
+        "properties": {
+          "children": {
+            "type": "array",
+            "items": {
+              "anyOf": [
+                {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/TextContent"
+                    },
+                    {
+                      "$ref": "#/$defs/CardHeader"
+                    },
+                    {
+                      "$ref": "#/$defs/Callout"
+                    },
+                    {
+                      "$ref": "#/$defs/Image"
+                    },
+                    {
+                      "$ref": "#/$defs/ImageGallery"
+                    },
+                    {
+                      "$ref": "#/$defs/Separator"
+                    },
+                    {
+                      "$ref": "#/$defs/PieChart"
+                    },
+                    {
+                      "$ref": "#/$defs/AreaChart"
+                    },
+                    {
+                      "$ref": "#/$defs/BarChart"
+                    },
+                    {
+                      "$ref": "#/$defs/LineChart"
+                    },
+                    {
+                      "$ref": "#/$defs/Table"
+                    },
+                    {
+                      "$ref": "#/$defs/TagBlock"
+                    },
+                    {
+                      "$ref": "#/$defs/Form"
+                    },
+                    {
+                      "$ref": "#/$defs/Buttons"
+                    },
+                    {
+                      "$ref": "#/$defs/IconButton"
+                    },
+                    {
+                      "$ref": "#/$defs/Tabs"
+                    },
+                    {
+                      "$ref": "#/$defs/Carousel"
+                    },
+                    {
+                      "$ref": "#/$defs/Stack"
+                    }
+                  ]
+                },
+                {
+                  "$ref": "#/$defs/Card"
+                },
+                {
+                  "$ref": "#/$defs/Icon"
+                },
+                {
+                  "$ref": "#/$defs/HtmlView"
+                },
+                {
+                  "$ref": "#/$defs/Grid"
+                }
+              ]
+            }
+          },
+          "variant": {
+            "type": "string",
+            "enum": [
+              "card",
+              "sunk",
+              "clear"
+            ]
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "row",
+              "column"
+            ]
+          },
+          "gap": {
+            "type": "string",
+            "enum": [
+              "none",
+              "xs",
+              "s",
+              "m",
+              "l",
+              "xl",
+              "2xl"
+            ]
+          },
+          "align": {
+            "type": "string",
+            "enum": [
+              "start",
+              "center",
+              "end",
+              "stretch",
+              "baseline"
+            ]
+          },
+          "justify": {
+            "type": "string",
+            "enum": [
+              "start",
+              "center",
+              "end",
+              "between",
+              "around",
+              "evenly"
+            ]
+          },
+          "wrap": {
+            "type": "boolean"
+          },
+          "options": {
+            "type": "object",
+            "properties": {
+              "width": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 200
+                  },
+                  {
+                    "type": "string",
+                    "enum": [
+                      "auto",
+                      "full"
+                    ]
+                  }
+                ]
+              },
+              "maxWidth": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 200
+                  },
+                  {
+                    "type": "string",
+                    "enum": [
+                      "auto",
+                      "full"
+                    ]
+                  }
+                ]
+              },
+              "minWidth": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 200
+                  },
+                  {
+                    "type": "string",
+                    "enum": [
+                      "auto",
+                      "full"
+                    ]
+                  }
+                ]
+              },
+              "grow": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 12
+              },
+              "shrink": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "padding": {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "xs",
+                  "s",
+                  "m",
+                  "l",
+                  "xl",
+                  "2xl"
+                ]
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "children"
+        ],
+        "additionalProperties": false,
+        "id": "Card",
+        "description": "Styled container. variant: \"card\" (default, elevated) | \"sunk\" (recessed) | \"clear\" (transparent). Always full width. Accepts all Stack flex params (default: direction \"column\"). Cards flex to share space in row/wrap layouts."
+      },
+      "TextContent": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string"
+          },
+          "size": {
+            "type": "string",
+            "enum": [
+              "small",
+              "default",
+              "large",
+              "small-heavy",
+              "large-heavy"
+            ]
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "additionalProperties": false,
+        "id": "TextContent",
+        "description": "Text block. Supports markdown. Optional size: \"small\" | \"default\" | \"large\" | \"small-heavy\" | \"large-heavy\"."
+      },
+      "CardHeader": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "subtitle": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "id": "CardHeader",
+        "description": "Header with optional title and subtitle"
+      },
+      "Callout": {
+        "type": "object",
+        "properties": {
+          "variant": {
+            "type": "string",
+            "enum": [
+              "info",
+              "warning",
+              "error",
+              "success",
+              "neutral"
+            ]
+          },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "visible": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "variant",
+          "title",
+          "description"
+        ],
+        "additionalProperties": false,
+        "id": "Callout",
+        "description": "Callout banner. Optional visible is a reactive $boolean — auto-dismisses after 3s by setting $visible to false."
+      },
+      "Image": {
+        "type": "object",
+        "properties": {
+          "alt": {
+            "type": "string"
+          },
+          "src": {
+            "type": "string"
+          },
+          "options": {
+            "type": "object",
+            "properties": {
+              "aspectRatio": {
+                "type": "number",
+                "exclusiveMinimum": 0,
+                "maximum": 20
+              },
+              "fit": {
+                "type": "string",
+                "enum": [
+                  "contain",
+                  "cover"
+                ]
+              },
+              "caption": {
+                "type": "string"
+              },
+              "source": {
+                "type": "string",
+                "format": "uri"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "alt"
+        ],
+        "additionalProperties": false,
+        "id": "Image",
+        "description": "Image with alt text and optional URL"
+      },
+      "ImageGallery": {
+        "type": "object",
+        "properties": {
+          "images": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "src": {
+                  "type": "string"
+                },
+                "alt": {
+                  "type": "string"
+                },
+                "details": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "src"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "images"
+        ],
+        "additionalProperties": false,
+        "id": "ImageGallery",
+        "description": "Gallery grid of images with modal preview"
+      },
+      "Separator": {
+        "type": "object",
+        "properties": {
+          "orientation": {
+            "type": "string",
+            "enum": [
+              "horizontal",
+              "vertical"
+            ]
+          },
+          "decorative": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false,
+        "id": "Separator",
+        "description": "Visual divider between content sections"
+      },
+      "PieChart": {
+        "type": "object",
+        "properties": {
+          "labels": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "values": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            }
+          },
+          "variant": {
+            "type": "string",
+            "enum": [
+              "pie",
+              "donut"
+            ]
+          },
+          "appearance": {
+            "type": "string",
+            "enum": [
+              "circular",
+              "semiCircular"
+            ]
+          },
+          "options": {
+            "type": "object",
+            "properties": {
+              "legend": {
+                "type": "boolean"
+              },
+              "palette": {
+                "minItems": 1,
+                "maxItems": 12,
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 6
+                }
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "labels",
+          "values"
+        ],
+        "additionalProperties": false,
+        "id": "PieChart",
+        "description": "Circular slices; use plucked arrays: PieChart(data.categories, data.values)"
+      },
+      "AreaChart": {
+        "type": "object",
+        "properties": {
+          "labels": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "series": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/Series"
+            }
+          },
+          "variant": {
+            "type": "string",
+            "enum": [
+              "linear",
+              "natural",
+              "step"
+            ]
+          },
+          "xLabel": {
+            "type": "string"
+          },
+          "yLabel": {
+            "type": "string"
+          },
+          "height": {
+            "type": "number"
+          },
+          "options": {
+            "type": "object",
+            "properties": {
+              "layout": {
+                "type": "string",
+                "enum": [
+                  "fit",
+                  "scroll"
+                ]
+              },
+              "density": {
+                "type": "string",
+                "enum": [
+                  "compact",
+                  "default",
+                  "spacious"
+                ]
+              },
+              "legend": {
+                "type": "boolean"
+              },
+              "grid": {
+                "type": "boolean"
+              },
+              "showYAxis": {
+                "type": "boolean"
+              },
+              "tickVariant": {
+                "type": "string",
+                "enum": [
+                  "singleLine",
+                  "multiLine",
+                  "angled"
+                ]
+              },
+              "palette": {
+                "minItems": 1,
+                "maxItems": 12,
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 6
+                }
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "labels",
+          "series"
+        ],
+        "additionalProperties": false,
+        "id": "AreaChart",
+        "description": "Filled area under lines; use for cumulative totals or volume trends over time"
+      },
+      "Series": {
+        "type": "object",
+        "properties": {
+          "category": {
+            "type": "string"
+          },
+          "values": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            }
+          }
+        },
+        "required": [
+          "category",
+          "values"
+        ],
+        "additionalProperties": false,
+        "id": "Series",
+        "description": "One data series"
+      },
+      "BarChart": {
+        "type": "object",
+        "properties": {
+          "labels": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "series": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/Series"
+            }
+          },
+          "variant": {
+            "type": "string",
+            "enum": [
+              "grouped",
+              "stacked"
+            ]
+          },
+          "xLabel": {
+            "type": "string"
+          },
+          "yLabel": {
+            "type": "string"
+          },
+          "height": {
+            "type": "number"
+          },
+          "options": {
+            "type": "object",
+            "properties": {
+              "layout": {
+                "type": "string",
+                "enum": [
+                  "fit",
+                  "scroll"
+                ]
+              },
+              "density": {
+                "type": "string",
+                "enum": [
+                  "compact",
+                  "default",
+                  "spacious"
+                ]
+              },
+              "legend": {
+                "type": "boolean"
+              },
+              "grid": {
+                "type": "boolean"
+              },
+              "showYAxis": {
+                "type": "boolean"
+              },
+              "tickVariant": {
+                "type": "string",
+                "enum": [
+                  "singleLine",
+                  "multiLine",
+                  "angled"
+                ]
+              },
+              "palette": {
+                "minItems": 1,
+                "maxItems": 12,
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 6
+                }
+              },
+              "orientation": {
+                "type": "string",
+                "enum": [
+                  "vertical",
+                  "horizontal"
+                ]
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "labels",
+          "series"
+        ],
+        "additionalProperties": false,
+        "id": "BarChart",
+        "description": "Vertical bars; use for comparing values across categories with one or more series"
+      },
+      "LineChart": {
+        "type": "object",
+        "properties": {
+          "labels": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "series": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/Series"
+            }
+          },
+          "variant": {
+            "type": "string",
+            "enum": [
+              "linear",
+              "natural",
+              "step"
+            ]
+          },
+          "xLabel": {
+            "type": "string"
+          },
+          "yLabel": {
+            "type": "string"
+          },
+          "height": {
+            "type": "number"
+          },
+          "options": {
+            "type": "object",
+            "properties": {
+              "layout": {
+                "type": "string",
+                "enum": [
+                  "fit",
+                  "scroll"
+                ]
+              },
+              "density": {
+                "type": "string",
+                "enum": [
+                  "compact",
+                  "default",
+                  "spacious"
+                ]
+              },
+              "legend": {
+                "type": "boolean"
+              },
+              "grid": {
+                "type": "boolean"
+              },
+              "showYAxis": {
+                "type": "boolean"
+              },
+              "tickVariant": {
+                "type": "string",
+                "enum": [
+                  "singleLine",
+                  "multiLine",
+                  "angled"
+                ]
+              },
+              "palette": {
+                "minItems": 1,
+                "maxItems": 12,
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 6
+                }
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "labels",
+          "series"
+        ],
+        "additionalProperties": false,
+        "id": "LineChart",
+        "description": "Lines over categories; use for trends and continuous data over time"
+      },
+      "Table": {
+        "type": "object",
+        "properties": {
+          "columns": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/Col"
+            }
+          }
+        },
+        "required": [
+          "columns"
+        ],
+        "additionalProperties": false,
+        "id": "Table",
+        "description": "Data table — column-oriented. Each Col holds its own data array."
+      },
+      "Col": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "data": {},
+          "type": {
+            "type": "string",
+            "enum": [
+              "string",
+              "number",
+              "action"
+            ]
+          }
+        },
+        "required": [
+          "label",
+          "data"
+        ],
+        "additionalProperties": false,
+        "id": "Col",
+        "description": "Column definition — holds label + data array"
+      },
+      "TagBlock": {
+        "type": "object",
+        "properties": {
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "size": {
+            "type": "string",
+            "enum": [
+              "sm",
+              "md",
+              "lg"
+            ]
+          }
+        },
+        "required": [
+          "tags"
+        ],
+        "additionalProperties": false,
+        "id": "TagBlock",
+        "description": "tags is an array of strings; optional size sm | md | lg"
+      },
+      "Form": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "buttons": {
+            "$ref": "#/$defs/Buttons"
+          },
+          "fields": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/FormControl"
+            }
+          }
+        },
+        "required": [
+          "name",
+          "buttons",
+          "fields"
+        ],
+        "additionalProperties": false,
+        "id": "Form",
+        "description": "Form container with fields and explicit action buttons"
+      },
+      "Buttons": {
+        "type": "object",
+        "properties": {
+          "buttons": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/Button"
+            }
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "row",
+              "column"
+            ]
+          }
+        },
+        "required": [
+          "buttons"
+        ],
+        "additionalProperties": false,
+        "id": "Buttons",
+        "description": "Group of Button components. direction: \"row\" (default) | \"column\"."
+      },
+      "Button": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "action": {
+            "$ref": "#/$defs/ActionExpression"
+          },
+          "variant": {
+            "type": "string",
+            "enum": [
+              "primary",
+              "secondary",
+              "tertiary"
+            ]
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "normal",
+              "destructive"
+            ]
+          },
+          "size": {
+            "type": "string",
+            "enum": [
+              "extra-small",
+              "small",
+              "medium",
+              "large"
+            ]
+          }
+        },
+        "required": [
+          "label"
+        ],
+        "additionalProperties": false,
+        "id": "Button",
+        "description": "Clickable button"
+      },
+      "ActionExpression": {
+        "anyOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "const": "open_url"
+              },
+              "url": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "url"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "const": "continue_conversation"
+              },
+              "context": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string"
+              },
+              "params": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {}
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "additionalProperties": false
+          }
+        ],
+        "id": "ActionExpression"
+      },
+      "FormControl": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "input": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Input"
+              },
+              {
+                "$ref": "#/$defs/TextArea"
+              },
+              {
+                "$ref": "#/$defs/Select"
+              },
+              {
+                "$ref": "#/$defs/DatePicker"
+              },
+              {
+                "$ref": "#/$defs/Slider"
+              },
+              {
+                "$ref": "#/$defs/CheckBoxGroup"
+              },
+              {
+                "$ref": "#/$defs/RadioGroup"
+              },
+              {
+                "$ref": "#/$defs/Chips"
+              },
+              {
+                "$ref": "#/$defs/OptionCards"
+              }
+            ]
+          },
+          "hint": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "label",
+          "input"
+        ],
+        "additionalProperties": false,
+        "id": "FormControl",
+        "description": "Field with label, input component, and optional hint text"
+      },
+      "Input": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "placeholder": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "text",
+              "email",
+              "password",
+              "number",
+              "url"
+            ]
+          },
+          "rules": {
+            "type": "object",
+            "properties": {
+              "required": {
+                "type": "boolean"
+              },
+              "email": {
+                "type": "boolean"
+              },
+              "url": {
+                "type": "boolean"
+              },
+              "numeric": {
+                "type": "boolean"
+              },
+              "min": {
+                "type": "number"
+              },
+              "max": {
+                "type": "number"
+              },
+              "minLength": {
+                "type": "number"
+              },
+              "maxLength": {
+                "type": "number"
+              },
+              "pattern": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false,
+        "id": "Input"
+      },
+      "TextArea": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "placeholder": {
+            "type": "string"
+          },
+          "rows": {
+            "type": "number"
+          },
+          "rules": {
+            "type": "object",
+            "properties": {
+              "required": {
+                "type": "boolean"
+              },
+              "email": {
+                "type": "boolean"
+              },
+              "url": {
+                "type": "boolean"
+              },
+              "numeric": {
+                "type": "boolean"
+              },
+              "min": {
+                "type": "number"
+              },
+              "max": {
+                "type": "number"
+              },
+              "minLength": {
+                "type": "number"
+              },
+              "maxLength": {
+                "type": "number"
+              },
+              "pattern": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false,
+        "id": "TextArea"
+      },
+      "Select": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/SelectItem"
+            }
+          },
+          "placeholder": {
+            "type": "string"
+          },
+          "rules": {
+            "type": "object",
+            "properties": {
+              "required": {
+                "type": "boolean"
+              },
+              "email": {
+                "type": "boolean"
+              },
+              "url": {
+                "type": "boolean"
+              },
+              "numeric": {
+                "type": "boolean"
+              },
+              "min": {
+                "type": "number"
+              },
+              "max": {
+                "type": "number"
+              },
+              "minLength": {
+                "type": "number"
+              },
+              "maxLength": {
+                "type": "number"
+              },
+              "pattern": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          "value": {
+            "type": "string"
+          },
+          "size": {
+            "type": "string",
+            "enum": [
+              "small",
+              "medium",
+              "large"
+            ]
+          }
+        },
+        "required": [
+          "name",
+          "items"
+        ],
+        "additionalProperties": false,
+        "id": "Select"
+      },
+      "SelectItem": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "value",
+          "label"
+        ],
+        "additionalProperties": false,
+        "id": "SelectItem",
+        "description": "Option for Select"
+      },
+      "DatePicker": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "single",
+              "range"
+            ]
+          },
+          "rules": {
+            "type": "object",
+            "properties": {
+              "required": {
+                "type": "boolean"
+              },
+              "email": {
+                "type": "boolean"
+              },
+              "url": {
+                "type": "boolean"
+              },
+              "numeric": {
+                "type": "boolean"
+              },
+              "min": {
+                "type": "number"
+              },
+              "max": {
+                "type": "number"
+              },
+              "minLength": {
+                "type": "number"
+              },
+              "maxLength": {
+                "type": "number"
+              },
+              "pattern": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          "value": {}
+        },
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false,
+        "id": "DatePicker"
+      },
+      "Slider": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "variant": {
+            "type": "string",
+            "enum": [
+              "continuous",
+              "discrete"
+            ]
+          },
+          "min": {
+            "type": "number"
+          },
+          "max": {
+            "type": "number"
+          },
+          "step": {
+            "type": "number"
+          },
+          "defaultValue": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            }
+          },
+          "label": {
+            "type": "string"
+          },
+          "rules": {
+            "type": "object",
+            "properties": {
+              "required": {
+                "type": "boolean"
+              },
+              "email": {
+                "type": "boolean"
+              },
+              "url": {
+                "type": "boolean"
+              },
+              "numeric": {
+                "type": "boolean"
+              },
+              "min": {
+                "type": "number"
+              },
+              "max": {
+                "type": "number"
+              },
+              "minLength": {
+                "type": "number"
+              },
+              "maxLength": {
+                "type": "number"
+              },
+              "pattern": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          "value": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            }
+          }
+        },
+        "required": [
+          "name",
+          "variant",
+          "min",
+          "max"
+        ],
+        "additionalProperties": false,
+        "id": "Slider",
+        "description": "Numeric slider input; supports continuous and discrete (stepped) variants"
+      },
+      "CheckBoxGroup": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/CheckBoxItem"
+            }
+          },
+          "rules": {
+            "type": "object",
+            "properties": {
+              "required": {
+                "type": "boolean"
+              },
+              "email": {
+                "type": "boolean"
+              },
+              "url": {
+                "type": "boolean"
+              },
+              "numeric": {
+                "type": "boolean"
+              },
+              "min": {
+                "type": "number"
+              },
+              "max": {
+                "type": "number"
+              },
+              "minLength": {
+                "type": "number"
+              },
+              "maxLength": {
+                "type": "number"
+              },
+              "pattern": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          "value": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "boolean"
+            }
+          }
+        },
+        "required": [
+          "name",
+          "items"
+        ],
+        "additionalProperties": false,
+        "id": "CheckBoxGroup"
+      },
+      "CheckBoxItem": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "defaultChecked": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "label",
+          "description",
+          "name"
+        ],
+        "additionalProperties": false,
+        "id": "CheckBoxItem"
+      },
+      "RadioGroup": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/RadioItem"
+            }
+          },
+          "defaultValue": {
+            "type": "string"
+          },
+          "rules": {
+            "type": "object",
+            "properties": {
+              "required": {
+                "type": "boolean"
+              },
+              "email": {
+                "type": "boolean"
+              },
+              "url": {
+                "type": "boolean"
+              },
+              "numeric": {
+                "type": "boolean"
+              },
+              "min": {
+                "type": "number"
+              },
+              "max": {
+                "type": "number"
+              },
+              "minLength": {
+                "type": "number"
+              },
+              "maxLength": {
+                "type": "number"
+              },
+              "pattern": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "items"
+        ],
+        "additionalProperties": false,
+        "id": "RadioGroup"
+      },
+      "RadioItem": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "label",
+          "description",
+          "value"
+        ],
+        "additionalProperties": false,
+        "id": "RadioItem"
+      },
+      "Chips": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "default": "multiple",
+            "type": "string",
+            "enum": [
+              "single",
+              "multiple"
+            ]
+          },
+          "items": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/ChipItem"
+            }
+          },
+          "rules": {
+            "type": "object",
+            "properties": {
+              "required": {
+                "type": "boolean"
+              },
+              "email": {
+                "type": "boolean"
+              },
+              "url": {
+                "type": "boolean"
+              },
+              "numeric": {
+                "type": "boolean"
+              },
+              "min": {
+                "type": "number"
+              },
+              "max": {
+                "type": "number"
+              },
+              "minLength": {
+                "type": "number"
+              },
+              "maxLength": {
+                "type": "number"
+              },
+              "pattern": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          "defaultValue": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ]
+          }
+        },
+        "required": [
+          "name",
+          "type",
+          "items"
+        ],
+        "additionalProperties": false,
+        "id": "Chips",
+        "description": "A form field of compact selectable chips for choosing one or many short options; the selection is stored under `name`."
+      },
+      "ChipItem": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "icon": {
+            "$ref": "#/$defs/Icon"
+          },
+          "disabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "value",
+          "label"
+        ],
+        "additionalProperties": false,
+        "id": "ChipItem",
+        "description": "A single selectable chip inside a Chips group, with a value, label and optional icon."
+      },
+      "Icon": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "options": {
+            "type": "object",
+            "properties": {
+              "size": {
+                "type": "string",
+                "enum": [
+                  "sm",
+                  "md",
+                  "lg",
+                  "xl"
+                ]
+              },
+              "tone": {
+                "type": "string",
+                "enum": [
+                  "default",
+                  "muted",
+                  "info",
+                  "success",
+                  "warning",
+                  "danger"
+                ]
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false,
+        "id": "Icon",
+        "description": "An official Remix React icon by standard kebab-case name, including its line or fill suffix. Options control size and semantic tone."
+      },
+      "OptionCards": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "default": "single",
+            "type": "string",
+            "enum": [
+              "single",
+              "multiple"
+            ]
+          },
+          "items": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/OptionCard"
+            }
+          },
+          "rules": {
+            "type": "object",
+            "properties": {
+              "required": {
+                "type": "boolean"
+              },
+              "email": {
+                "type": "boolean"
+              },
+              "url": {
+                "type": "boolean"
+              },
+              "numeric": {
+                "type": "boolean"
+              },
+              "min": {
+                "type": "number"
+              },
+              "max": {
+                "type": "number"
+              },
+              "minLength": {
+                "type": "number"
+              },
+              "maxLength": {
+                "type": "number"
+              },
+              "pattern": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          "defaultValue": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ]
+          }
+        },
+        "required": [
+          "name",
+          "type",
+          "items"
+        ],
+        "additionalProperties": false,
+        "id": "OptionCards",
+        "description": "A form field of selectable cards (title, optional subtitle, optional icon or image) laid out in a responsive grid for choosing one or many options; the selection is stored under `name`."
+      },
+      "OptionCard": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "subtitle": {
+            "type": "string"
+          },
+          "topContent": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Icon"
+              },
+              {
+                "$ref": "#/$defs/Image"
+              }
+            ]
+          },
+          "disabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "value",
+          "title"
+        ],
+        "additionalProperties": false,
+        "id": "OptionCard",
+        "description": "A single selectable card inside an OptionCards group, with a value, title, optional subtitle and an optional Icon or Image on top."
+      },
+      "IconButton": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "icon": {
+            "$ref": "#/$defs/Icon"
+          },
+          "action": {
+            "$ref": "#/$defs/ActionExpression"
+          },
+          "variant": {
+            "type": "string",
+            "enum": [
+              "primary",
+              "secondary",
+              "tertiary"
+            ]
+          },
+          "size": {
+            "type": "string",
+            "enum": [
+              "extra-small",
+              "small",
+              "medium",
+              "large"
+            ]
+          },
+          "shape": {
+            "type": "string",
+            "enum": [
+              "square",
+              "circle"
+            ]
+          }
+        },
+        "required": [
+          "name",
+          "icon"
+        ],
+        "additionalProperties": false,
+        "id": "IconButton",
+        "description": "Icon-only button. name is the accessible label and the action label; icon is an Icon; action fires on click."
+      },
+      "Tabs": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/TabItem"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "additionalProperties": false,
+        "id": "Tabs",
+        "description": "Tabbed container"
+      },
+      "TabItem": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          },
+          "trigger": {
+            "type": "string"
+          },
+          "content": {
+            "type": "array",
+            "items": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TextContent"
+                },
+                {
+                  "$ref": "#/$defs/CardHeader"
+                },
+                {
+                  "$ref": "#/$defs/Callout"
+                },
+                {
+                  "$ref": "#/$defs/Image"
+                },
+                {
+                  "$ref": "#/$defs/ImageGallery"
+                },
+                {
+                  "$ref": "#/$defs/Separator"
+                },
+                {
+                  "$ref": "#/$defs/PieChart"
+                },
+                {
+                  "$ref": "#/$defs/AreaChart"
+                },
+                {
+                  "$ref": "#/$defs/BarChart"
+                },
+                {
+                  "$ref": "#/$defs/LineChart"
+                },
+                {
+                  "$ref": "#/$defs/Table"
+                },
+                {
+                  "$ref": "#/$defs/TagBlock"
+                },
+                {
+                  "$ref": "#/$defs/Form"
+                },
+                {
+                  "$ref": "#/$defs/Buttons"
+                },
+                {
+                  "$ref": "#/$defs/IconButton"
+                },
+                {
+                  "$ref": "#/$defs/Grid"
+                }
+              ]
+            }
+          }
+        },
+        "required": [
+          "value",
+          "trigger",
+          "content"
+        ],
+        "additionalProperties": false,
+        "id": "TabItem",
+        "description": "value is unique id, trigger is tab label, content is array of components"
+      },
+      "Grid": {
+        "type": "object",
+        "properties": {
+          "children": {
+            "type": "array",
+            "items": {
+              "anyOf": [
+                {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/HtmlView"
+                    },
+                    {
+                      "$ref": "#/$defs/Stack"
+                    },
+                    {
+                      "$ref": "#/$defs/Card"
+                    },
+                    {
+                      "$ref": "#/$defs/CardHeader"
+                    },
+                    {
+                      "$ref": "#/$defs/TextContent"
+                    },
+                    {
+                      "$ref": "#/$defs/Callout"
+                    },
+                    {
+                      "$ref": "#/$defs/Image"
+                    },
+                    {
+                      "$ref": "#/$defs/ImageGallery"
+                    },
+                    {
+                      "$ref": "#/$defs/Carousel"
+                    },
+                    {
+                      "$ref": "#/$defs/Separator"
+                    },
+                    {
+                      "$ref": "#/$defs/Table"
+                    },
+                    {
+                      "$ref": "#/$defs/BarChart"
+                    },
+                    {
+                      "$ref": "#/$defs/LineChart"
+                    },
+                    {
+                      "$ref": "#/$defs/AreaChart"
+                    },
+                    {
+                      "$ref": "#/$defs/PieChart"
+                    },
+                    {
+                      "$ref": "#/$defs/Form"
+                    },
+                    {
+                      "$ref": "#/$defs/Buttons"
+                    },
+                    {
+                      "$ref": "#/$defs/IconButton"
+                    },
+                    {
+                      "$ref": "#/$defs/Tabs"
+                    },
+                    {
+                      "$ref": "#/$defs/Accordion"
+                    },
+                    {
+                      "$ref": "#/$defs/Tag"
+                    },
+                    {
+                      "$ref": "#/$defs/TagBlock"
+                    },
+                    {
+                      "$ref": "#/$defs/Icon"
+                    },
+                    {
+                      "$ref": "#/$defs/Label"
+                    },
+                    {
+                      "$ref": "#/$defs/Input"
+                    },
+                    {
+                      "$ref": "#/$defs/TextArea"
+                    },
+                    {
+                      "$ref": "#/$defs/Select"
+                    },
+                    {
+                      "$ref": "#/$defs/CheckBoxGroup"
+                    },
+                    {
+                      "$ref": "#/$defs/RadioGroup"
+                    },
+                    {
+                      "$ref": "#/$defs/SwitchGroup"
+                    },
+                    {
+                      "$ref": "#/$defs/DatePicker"
+                    },
+                    {
+                      "$ref": "#/$defs/Slider"
+                    },
+                    {
+                      "$ref": "#/$defs/Chips"
+                    },
+                    {
+                      "$ref": "#/$defs/OptionCards"
+                    }
+                  ]
+                },
+                {
+                  "$ref": "#/$defs/GridItem"
+                }
+              ]
+            }
+          },
+          "options": {
+            "type": "object",
+            "properties": {
+              "columns": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 12
+                  },
+                  {
+                    "minItems": 1,
+                    "maxItems": 12,
+                    "type": "array",
+                    "items": {
+                      "type": "number",
+                      "exclusiveMinimum": 0,
+                      "maximum": 12
+                    }
+                  }
+                ]
+              },
+              "gap": {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "xs",
+                  "s",
+                  "m",
+                  "l",
+                  "xl",
+                  "2xl"
+                ]
+              },
+              "minChildWidth": {
+                "type": "number",
+                "minimum": 4,
+                "maximum": 80
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "children"
+        ],
+        "additionalProperties": false,
+        "id": "Grid",
+        "description": "Responsive grid. Numeric columns are equal tracks; arrays are fractional weights. minChildWidth is in rem."
+      },
+      "HtmlView": {
+        "type": "object",
+        "properties": {
+          "html": {
+            "type": "string"
+          },
+          "height": {
+            "type": "number"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "html"
+        ],
+        "additionalProperties": false,
+        "id": "HtmlView",
+        "description": "A sandboxed HTML document rendered by the host."
+      },
+      "Stack": {
+        "type": "object",
+        "properties": {
+          "children": {
+            "type": "array",
+            "items": {}
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "row",
+              "column"
+            ]
+          },
+          "gap": {
+            "type": "string",
+            "enum": [
+              "none",
+              "xs",
+              "s",
+              "m",
+              "l",
+              "xl",
+              "2xl"
+            ]
+          },
+          "align": {
+            "type": "string",
+            "enum": [
+              "start",
+              "center",
+              "end",
+              "stretch",
+              "baseline"
+            ]
+          },
+          "justify": {
+            "type": "string",
+            "enum": [
+              "start",
+              "center",
+              "end",
+              "between",
+              "around",
+              "evenly"
+            ]
+          },
+          "wrap": {
+            "type": "boolean"
+          },
+          "options": {
+            "type": "object",
+            "properties": {
+              "width": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 200
+                  },
+                  {
+                    "type": "string",
+                    "enum": [
+                      "auto",
+                      "full"
+                    ]
+                  }
+                ]
+              },
+              "maxWidth": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 200
+                  },
+                  {
+                    "type": "string",
+                    "enum": [
+                      "auto",
+                      "full"
+                    ]
+                  }
+                ]
+              },
+              "minWidth": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 200
+                  },
+                  {
+                    "type": "string",
+                    "enum": [
+                      "auto",
+                      "full"
+                    ]
+                  }
+                ]
+              },
+              "grow": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 12
+              },
+              "shrink": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "padding": {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "xs",
+                  "s",
+                  "m",
+                  "l",
+                  "xl",
+                  "2xl"
+                ]
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "children"
+        ],
+        "additionalProperties": false,
+        "id": "Stack",
+        "description": "Flex container. direction: \"row\"|\"column\" (default \"column\"). gap: \"none\"|\"xs\"|\"s\"|\"m\"|\"l\"|\"xl\"|\"2xl\" (default \"m\"). align: \"start\"|\"center\"|\"end\"|\"stretch\"|\"baseline\". justify: \"start\"|\"center\"|\"end\"|\"between\"|\"around\"|\"evenly\"."
+      },
+      "Carousel": {
+        "type": "object",
+        "properties": {
+          "children": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/TextContent"
+                  },
+                  {
+                    "$ref": "#/$defs/CardHeader"
+                  },
+                  {
+                    "$ref": "#/$defs/Callout"
+                  },
+                  {
+                    "$ref": "#/$defs/Image"
+                  },
+                  {
+                    "$ref": "#/$defs/ImageGallery"
+                  },
+                  {
+                    "$ref": "#/$defs/Separator"
+                  },
+                  {
+                    "$ref": "#/$defs/PieChart"
+                  },
+                  {
+                    "$ref": "#/$defs/AreaChart"
+                  },
+                  {
+                    "$ref": "#/$defs/BarChart"
+                  },
+                  {
+                    "$ref": "#/$defs/LineChart"
+                  },
+                  {
+                    "$ref": "#/$defs/Table"
+                  },
+                  {
+                    "$ref": "#/$defs/TagBlock"
+                  },
+                  {
+                    "$ref": "#/$defs/Form"
+                  },
+                  {
+                    "$ref": "#/$defs/Buttons"
+                  },
+                  {
+                    "$ref": "#/$defs/IconButton"
+                  },
+                  {
+                    "$ref": "#/$defs/Grid"
+                  }
+                ]
+              }
+            }
+          },
+          "variant": {
+            "type": "string",
+            "enum": [
+              "card",
+              "sunk"
+            ]
+          }
+        },
+        "required": [
+          "children"
+        ],
+        "additionalProperties": false,
+        "id": "Carousel",
+        "description": "Horizontal scrollable carousel"
+      },
+      "Accordion": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/AccordionItem"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "additionalProperties": false,
+        "id": "Accordion",
+        "description": "Collapsible sections"
+      },
+      "AccordionItem": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          },
+          "trigger": {
+            "type": "string"
+          },
+          "content": {
+            "type": "array",
+            "items": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TextContent"
+                },
+                {
+                  "$ref": "#/$defs/CardHeader"
+                },
+                {
+                  "$ref": "#/$defs/Callout"
+                },
+                {
+                  "$ref": "#/$defs/Image"
+                },
+                {
+                  "$ref": "#/$defs/ImageGallery"
+                },
+                {
+                  "$ref": "#/$defs/Separator"
+                },
+                {
+                  "$ref": "#/$defs/PieChart"
+                },
+                {
+                  "$ref": "#/$defs/AreaChart"
+                },
+                {
+                  "$ref": "#/$defs/BarChart"
+                },
+                {
+                  "$ref": "#/$defs/LineChart"
+                },
+                {
+                  "$ref": "#/$defs/Table"
+                },
+                {
+                  "$ref": "#/$defs/TagBlock"
+                },
+                {
+                  "$ref": "#/$defs/Form"
+                },
+                {
+                  "$ref": "#/$defs/Buttons"
+                },
+                {
+                  "$ref": "#/$defs/IconButton"
+                },
+                {
+                  "$ref": "#/$defs/Grid"
+                }
+              ]
+            }
+          }
+        },
+        "required": [
+          "value",
+          "trigger",
+          "content"
+        ],
+        "additionalProperties": false,
+        "id": "AccordionItem",
+        "description": "value is unique id, trigger is section title"
+      },
+      "Tag": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string"
+          },
+          "icon": {
+            "$ref": "#/$defs/Icon"
+          },
+          "size": {
+            "type": "string",
+            "enum": [
+              "sm",
+              "md",
+              "lg"
+            ]
+          },
+          "variant": {
+            "type": "string",
+            "enum": [
+              "neutral",
+              "info",
+              "success",
+              "warning",
+              "danger"
+            ]
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "additionalProperties": false,
+        "id": "Tag",
+        "description": "Styled tag/badge with optional Icon and variant"
+      },
+      "Label": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "additionalProperties": false,
+        "id": "Label",
+        "description": "Text label"
+      },
+      "SwitchGroup": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/SwitchItem"
+            }
+          },
+          "variant": {
+            "type": "string",
+            "enum": [
+              "clear",
+              "card",
+              "sunk"
+            ]
+          },
+          "value": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "boolean"
+            }
+          }
+        },
+        "required": [
+          "name",
+          "items"
+        ],
+        "additionalProperties": false,
+        "id": "SwitchGroup",
+        "description": "Group of switch toggles"
+      },
+      "SwitchItem": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "defaultChecked": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false,
+        "id": "SwitchItem",
+        "description": "Individual switch toggle"
+      },
+      "GridItem": {
+        "type": "object",
+        "properties": {
+          "children": {
+            "type": "array",
+            "items": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/HtmlView"
+                },
+                {
+                  "$ref": "#/$defs/Stack"
+                },
+                {
+                  "$ref": "#/$defs/Card"
+                },
+                {
+                  "$ref": "#/$defs/CardHeader"
+                },
+                {
+                  "$ref": "#/$defs/TextContent"
+                },
+                {
+                  "$ref": "#/$defs/Callout"
+                },
+                {
+                  "$ref": "#/$defs/Image"
+                },
+                {
+                  "$ref": "#/$defs/ImageGallery"
+                },
+                {
+                  "$ref": "#/$defs/Carousel"
+                },
+                {
+                  "$ref": "#/$defs/Separator"
+                },
+                {
+                  "$ref": "#/$defs/Table"
+                },
+                {
+                  "$ref": "#/$defs/BarChart"
+                },
+                {
+                  "$ref": "#/$defs/LineChart"
+                },
+                {
+                  "$ref": "#/$defs/AreaChart"
+                },
+                {
+                  "$ref": "#/$defs/PieChart"
+                },
+                {
+                  "$ref": "#/$defs/Form"
+                },
+                {
+                  "$ref": "#/$defs/Buttons"
+                },
+                {
+                  "$ref": "#/$defs/IconButton"
+                },
+                {
+                  "$ref": "#/$defs/Tabs"
+                },
+                {
+                  "$ref": "#/$defs/Accordion"
+                },
+                {
+                  "$ref": "#/$defs/Tag"
+                },
+                {
+                  "$ref": "#/$defs/TagBlock"
+                },
+                {
+                  "$ref": "#/$defs/Icon"
+                },
+                {
+                  "$ref": "#/$defs/Label"
+                },
+                {
+                  "$ref": "#/$defs/Input"
+                },
+                {
+                  "$ref": "#/$defs/TextArea"
+                },
+                {
+                  "$ref": "#/$defs/Select"
+                },
+                {
+                  "$ref": "#/$defs/CheckBoxGroup"
+                },
+                {
+                  "$ref": "#/$defs/RadioGroup"
+                },
+                {
+                  "$ref": "#/$defs/SwitchGroup"
+                },
+                {
+                  "$ref": "#/$defs/DatePicker"
+                },
+                {
+                  "$ref": "#/$defs/Slider"
+                },
+                {
+                  "$ref": "#/$defs/Chips"
+                },
+                {
+                  "$ref": "#/$defs/OptionCards"
+                }
+              ]
+            }
+          },
+          "colSpan": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 12
+          },
+          "rowSpan": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 12
+          }
+        },
+        "required": [
+          "children"
+        ],
+        "additionalProperties": false,
+        "id": "GridItem",
+        "description": "An optional spanning group inside Grid."
+      }
+    }
+  }
+}

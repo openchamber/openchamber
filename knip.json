@@ -33,6 +33,7 @@
     "packages/web": {
       "entry": [
         "bin/cli.js",
+        "server/lib/openui/context/generate.mjs",
         "src/mobile-main.tsx",
         "src/mini-chat-main.tsx",
         "src/main.tsx",
@@ -44,6 +45,7 @@
       "project": [
         "bin/**/*.js",
         "server/**/*.{js,mjs,cjs}",
+        "shared/**/*.js",
         "src/**/*.{ts,tsx}"
       ]
     },

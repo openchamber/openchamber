@@ -34,6 +34,7 @@
     "@openchamber/sdk": "workspace:*",
     "@opencode/client": "2.2.0",
     "@opencode/schema": "2.2.0",
+    "@openuidev/lang-core": "1.0.1",
     "@simplewebauthn/server": "13.3.3",
     "@vscode/ripgrep": "^1.18.0",
     "bun-pty": "0.5.1",
@@ -106,6 +107,7 @@
   "files": [
     "dist",
     "server",
+    "shared",
     "bin",
     "public",
     "package.json",
