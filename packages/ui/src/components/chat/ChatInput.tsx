@@ -2639,6 +2639,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             return;
         }
 
+        if (e.key === 'Enter' && e.altKey && !e.ctrlKey && !e.metaKey) {
+            e.preventDefault();
+            composerRef.current?.insertText('\n');
+            return;
+        }
+
         if (isBtwActive && currentSessionId && e.key === 'Escape') {
             e.preventDefault();
             e.stopPropagation();
