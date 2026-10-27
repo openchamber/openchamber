@@ -8,7 +8,7 @@ import {
   walkAST,
 } from '@openuidev/lang-core';
 import { z } from 'zod/v4';
-import { isSupportedOpenUIAction } from './actions.js';
+import { supportedOpenUIAction } from './actions.js';
 
 /** Component references describe rendered child slots, not arbitrary object data. */
 export function deriveOpenUIComponentSlots(schema) {
@@ -50,7 +50,7 @@ function hasSupportedActions(value, slots) {
   if (Array.isArray(value)) return value.map((child) => hasSupportedActions(child, slots)).find(Boolean) ?? null;
   if (!isElementNode(value)) return null;
   if ((value.typeName === 'Button' || value.typeName === 'IconButton')
-    && value.props.action != null && !isSupportedOpenUIAction(value.props.action)) {
+    && value.props.action != null && !supportedOpenUIAction.safeParse(value.props.action).success) {
     return { message: 'This OpenUI action plan is not supported.' };
   }
   for (const slot of slots) {

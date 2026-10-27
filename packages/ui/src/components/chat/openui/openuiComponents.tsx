@@ -34,7 +34,7 @@ import { useI18n } from '@/lib/i18n';
 import { MarkdownContent } from '@/components/chat/MarkdownRendererImpl';
 import { iconOptions, chartOptions, barOptions, pieOptions, layoutOptions } from './openuiCatalog.schema';
 import { OpenUIOccurrence as Occurrence, useOpenUIHost } from './openuiHost';
-import { isSupportedOpenUIAction, isTerminalOpenUIAction } from '../../../../../web/shared/openui/actions.js';
+import { supportedOpenUIAction, isTerminalOpenUIAction } from '../../../../../web/shared/openui/actions.js';
 import './openui.css';
 
 type Props<N extends keyof OpenUIProps> = OpenUIProps[N];
@@ -150,10 +150,10 @@ function useAction(action: OpenUIProps['Button']['action'], label: string) {
   const validation = useFormValidation();
   const gate = useInteractionGate();
   return {
-    disabled: gate.disabled || !isSupportedOpenUIAction(action),
+    disabled: gate.disabled || !supportedOpenUIAction.safeParse(action).success,
     onClick: () => {
       // Reactive props may change after admission. Validate the actual plan again at the event.
-      if (!gate.canInteract() || !isSupportedOpenUIAction(action)) return;
+      if (!gate.canInteract() || !action || !supportedOpenUIAction.safeParse(action).success) return;
       if (isTerminalOpenUIAction(action) && validation && !validation.validateForm()) return;
       triggerAction(label, formName, action);
     },
@@ -600,7 +600,7 @@ function openUIFlexStyle(props: OpenUIProps['Stack'], card = false): React.CSSPr
   };
   const options = layoutOptions.safeParse(props.options).data ?? {};
   const size = (length: typeof options.width) => (
-    typeof length === 'number' ? `${length}rem` : length === 'full' ? '100%' : length
+    length === undefined || length === 'auto' ? length : length === 'full' ? '100%' : `${length}rem`
   );
   const gap = (spacing: NonNullable<OpenUIProps['Stack']['gap']>) => (
     spacing === 'none' ? '0px' : `var(--openui-space-${spacing})`

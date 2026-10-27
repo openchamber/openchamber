@@ -1,6 +1,7 @@
 import { act } from 'react';
 import { afterEach, expect, test } from 'bun:test';
 import { Window } from 'happy-dom';
+import { z } from 'zod';
 
 import { ThemeSystemContext, type ThemeContextValue } from '@/contexts/theme-system-context';
 import { getDefaultTheme } from '@/lib/theme/themes';
@@ -114,16 +115,17 @@ test('keeps one document through pending and theme rerenders, then unloads it on
     const frame = container.querySelector('iframe')!;
     const source = frame.srcdoc;
     const messages: unknown[] = [];
+    const unload = z.object({ type: z.literal('openchamber:html-render:unload') });
     const contentWindow = frame.contentWindow!;
-    contentWindow.postMessage = (message: unknown) => { messages.push(message); };
+    contentWindow.postMessage = (message) => { messages.push(message); };
 
     await render(dark, () => {});
     expect(container.querySelector('iframe')).toBe(frame);
     expect(frame.srcdoc).toBe(source);
-    expect(messages.filter((message) => (message as { type?: string }).type === 'openchamber:html-render:unload')).toHaveLength(0);
+    expect(messages.filter((message) => unload.safeParse(message).success)).toHaveLength(0);
 
     await act(async () => { root.unmount(); });
-    expect(messages.filter((message) => (message as { type?: string }).type === 'openchamber:html-render:unload')).toHaveLength(1);
+    expect(messages.filter((message) => unload.safeParse(message).success)).toHaveLength(1);
   } finally {
     await win.happyDOM.abort();
   }
@@ -166,7 +168,7 @@ test('HtmlView relays the current nonce once and keeps reusable Markdown answers
     if (!frame?.contentWindow) throw new Error('Missing HtmlView frame');
     const page = new win.DOMParser().parseFromString(frame.srcdoc, 'text/html');
     const nonce = JSON.parse(page.getElementById('oc-html-render-nonce')?.textContent ?? 'null');
-    frame.contentWindow.postMessage = (message: unknown) => { replies.push(message); };
+    frame.contentWindow.postMessage = (message) => { replies.push(message); };
     const send = (nonce: string) => window.dispatchEvent(new MessageEvent('message', {
       source: frame.contentWindow,
       data: { jsonrpc: '2.0', id: answers.length + 1, method: 'ui/message', params: {

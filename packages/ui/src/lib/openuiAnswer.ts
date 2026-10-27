@@ -10,9 +10,10 @@ type OpenUIAnswer = {
   sourceRevision: string;
 };
 
-export const answerOpenUI = async (answer: OpenUIAnswer): Promise<void> => {
+export const answerOpenUI = async (answer: OpenUIAnswer, directory: string): Promise<void> => {
   const response = await runtimeFetch('/api/openchamber/openui/answer', {
     method: 'POST',
+    directory,
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(answer),
   });

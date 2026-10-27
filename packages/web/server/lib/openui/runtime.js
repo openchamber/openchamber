@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { z } from 'zod';
 import { asNonEmptyString } from '../shared/guards.js';
 import { OpenChamberControlError } from '../openchamber-control/error.js';
 import { createOpenUIAnswers } from './answers.js';
@@ -43,8 +44,9 @@ export const createOpenUIRuntime = ({ isEnabled, onWaitChange, getClient, resolv
     const admittedBefore = cancellation;
     await requireEnabled();
     if (admittedBefore !== cancellation) throw disabled();
-    const ui = typeof input.ui === 'string' ? input.ui : '';
-    if (!ui.trim()) throw new OpenChamberControlError('ui is required: send one complete OpenUI program', 400);
+    const parsed = z.string().safeParse(input.ui);
+    if (!parsed.success || !parsed.data.trim()) throw new OpenChamberControlError('ui is required: send one complete OpenUI program', 400);
+    const ui = parsed.data;
     if (ui.length > 200_000) throw new OpenChamberControlError(`ui is ${ui.length} characters; the limit is 200000`, 400);
     if (Buffer.byteLength(JSON.stringify({ input: { action: 'openui.prompt', ui } }), 'utf8') >= 1_000_000) {
       throw new OpenChamberControlError('ui is too large after JSON encoding; make the program smaller', 413);

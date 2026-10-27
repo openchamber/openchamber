@@ -94,6 +94,22 @@ const optionSchemas = {
   AreaChart: chartOptions,
   PieChart: pieOptions,
 };
+// Reuse the official Card children without copying its component list. Refuse
+// an upstream schema change that cannot be reconstructed as the same union.
+const officialCardChildren = z.strictObject({
+  type: z.literal('array'),
+  items: z.strictObject({
+    anyOf: z.array(z.strictObject({
+      $ref: z.string().regex(/^#\/\$defs\/[^/]+$/),
+    })).min(2),
+  }),
+}).parse(openuiLibrary.toJSONSchema().$defs?.Card?.properties?.children);
+const officialCardChildUnion = z.union(officialCardChildren.items.anyOf.map(({ $ref }) => {
+  const name = $ref.slice('#/$defs/'.length);
+  const component = openuiLibrary.components[name];
+  if (!component) throw new Error(`Unknown official Card child "${name}"`);
+  return component.ref;
+}));
 export const openuiCatalogBase = openuiLibrary.extend({
   components: {
     remove: removedOpenUIComponents,
@@ -101,19 +117,20 @@ export const openuiCatalogBase = openuiLibrary.extend({
       ...openuiLibrary.components.Icon,
       props: z.object({ name: z.string(), options: iconOptions.optional() }),
       description: 'An official Remix React icon by standard kebab-case name, including its line or fill suffix. Options control size and semantic tone.',
-    }), ...Object.entries(optionSchemas).map(([name, options]) => defineComponent({
-      ...openuiLibrary.components[name],
-      props: openuiLibrary.components[name].props.extend({
-        ...(name === 'Card' ? {
+    }), ...Object.entries(optionSchemas).map(([name, options]) => {
+      const original = openuiLibrary.components[name];
+      const props = original.props.extend({ options: options.optional() });
+      return defineComponent({
+        ...original,
+        props: name === 'Card' ? props.extend({
           children: z.array(z.union([
-            openuiLibrary.components.Card.props.shape.children.element,
+            officialCardChildUnion,
             openuiLibrary.components.Card.ref,
             openuiLibrary.components.Icon.ref,
           ])),
-        } : {}),
-        options: options.optional(),
-      }),
-    }))],
+        }) : props,
+      });
+    })],
     add: [
       { component: htmlView, slots: ['Card.children'] },
       { component: grid, slots: ['Card.children', 'TabItem.content', 'AccordionItem.content', 'Carousel.children'] },

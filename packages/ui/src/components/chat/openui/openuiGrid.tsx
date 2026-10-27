@@ -5,11 +5,14 @@ import { gridProps, gridItemProps } from './openuiCatalog.schema';
 import { OpenUIOccurrence } from './openuiHost';
 
 const ColumnsContext = React.createContext(1);
+const gridOptions = gridProps.pick({ options: true });
+const columnSpan = gridItemProps.pick({ colSpan: true });
+const rowSpan = gridItemProps.pick({ rowSpan: true });
 
 export function ChamberGrid({ props, renderNode }: ComponentRenderProps<OpenUIProps['Grid']>) {
   // The streaming parser does not enforce JSON-schema numeric bounds. Keep
   // geometry bounded at the adapter too, including locally edited options.
-  const options = gridProps.shape.options.safeParse(props.options).data;
+  const options = gridOptions.safeParse({ options: props.options }).data?.options;
   const requested = options?.columns ?? 2;
   const weights = Array.isArray(requested) ? requested : Array.from({ length: requested }, () => 1);
   const count = weights.length;
@@ -55,8 +58,10 @@ export function ChamberGrid({ props, renderNode }: ComponentRenderProps<OpenUIPr
 
 export function ChamberGridItem({ props, renderNode }: ComponentRenderProps<OpenUIProps['GridItem']>) {
   const columns = React.useContext(ColumnsContext);
-  const columnCount = Math.min(columns, gridItemProps.shape.colSpan.safeParse(props.colSpan).data ?? 1);
-  const rowCount = columns === 1 ? 1 : gridItemProps.shape.rowSpan.safeParse(props.rowSpan).data ?? 1;
+  const column = columnSpan.safeParse({ colSpan: props.colSpan });
+  const row = rowSpan.safeParse({ rowSpan: props.rowSpan });
+  const columnCount = Math.min(columns, column.data?.colSpan ?? 1);
+  const rowCount = columns === 1 ? 1 : row.data?.rowSpan ?? 1;
   return (
     <div className="openui-grid-item" style={{ gridColumn: `span ${columnCount}`, gridRow: `span ${rowCount}` }}>
       {(props.children ?? []).map((child, index) => (

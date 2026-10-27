@@ -1,4 +1,5 @@
 import type { ActionPlan, ElementNode, SubComponentOf } from '@openuidev/react-lang';
+import type { IconButtonProps } from '@openuidev/react-ui';
 import type { z } from 'zod/v4';
 import type { htmlViewProps, layoutOptions, imageOptions, iconOptions, chartOptions, barOptions, pieOptions, gridProps, gridItemProps } from './openuiCatalog.schema';
 
@@ -68,10 +69,9 @@ export interface OpenUIProps {
     type?: 'normal' | 'destructive';
     size?: 'extra-small' | 'small' | 'medium' | 'large';
   };
-  IconButton: Omit<OpenUIProps['Button'], 'label' | 'type'> & {
+  IconButton: Omit<OpenUIProps['Button'], 'label' | 'type'> & Pick<IconButtonProps, 'shape'> & {
     name: string;
     icon: SubComponentOf<OpenUIProps['Icon']>;
-    shape?: 'square' | 'circle';
   };
   TextContent: { text: string; size?: 'small' | 'default' | 'large' | 'small-heavy' | 'large-heavy' };
   Callout: { variant: 'info' | 'warning' | 'error' | 'success' | 'neutral'; title: string; description: string; visible?: boolean };

@@ -513,7 +513,7 @@ const ANSWER_SCRIPT = `(function(){if(window.parent===window)return;var S=JSON.p
 
 // JSON inside a script element: "<" is escaped so no "</script>" in the data
 // can close it.
-const scriptJson = (value: unknown): string => JSON.stringify(value).replace(/</g, '\\u003c');
+const scriptJson = (value: HtmlRenderAnswerState | string): string => JSON.stringify(value).replace(/</g, '\\u003c');
 
 // Comments and raw-text elements are blanked to the same length before the
 // head is located, so a "<head>" written inside a script or comment is never

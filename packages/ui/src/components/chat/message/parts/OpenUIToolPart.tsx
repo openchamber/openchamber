@@ -87,8 +87,8 @@ function OpenUIToolPart({ part, prompt }: { part: ToolPart; prompt: NonNullable<
       callId: part.callID,
       sourceRevision,
       ...submission,
-    });
-  }, [isLiveWait, part.callID, part.sessionID, sourceRevision]);
+    }, owner.directory);
+  }, [isLiveWait, owner.directory, part.callID, part.sessionID, sourceRevision]);
 
   const status = prompt.ask.kind === 'answered'
     ? t('chat.htmlRender.answered', { summary: prompt.ask.summary })

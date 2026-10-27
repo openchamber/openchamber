@@ -166,7 +166,7 @@ const openchamberPageWaitingSchema = z.object({
   properties: z.object({
     sessionID: z.string().min(1),
     directory: z.string().min(1).nullable().catch(null),
-    page: z.object({ id: z.string().min(1), title: z.string() }),
+    page: z.object({ id: z.string().min(1), title: z.string(), kind: z.literal('openui').optional(), sourceRevision: z.string().min(1).optional() }),
   }),
 })
 
