@@ -256,36 +256,48 @@ describe("execute call details", () => {
 describe("openuiPrompt", () => {
   const running = (input: ToolInput): ToolState => ({ status: "running", input, time: { start: 1 } })
 
-  test("accepts only the direct flat prompt_openui input", () => {
-    expect(openuiPrompt("prompt_openui", running({ ui: "root = Stack([])" }))).toEqual({
-      source: "root = Stack([])",
-      ask: { kind: "waiting" },
-      accepted: true,
-    })
+  test("recognizes unified prompt actions without rendering reference reads", () => {
+    const ui = "root = Stack([])"
+    const prompts: ToolInput[] = [
+      { action: "openui.prompt", parameters: { ui } },
+      { action: " prompt ", ui },
+      { action: "openui.prompt", ui: "ignored", parameters: { ui } },
+    ]
+    for (const input of prompts) expect(openuiPrompt("openchamber_openui", running(input))?.source).toBe(ui)
+    const otherInputs: ToolInput[] = [
+      { action: "openui.read", parameters: { ui } },
+      { ui },
+      { action: "openui.prompt", ui, parameters: { ui: " " } },
+    ]
+    for (const input of otherInputs) expect(openuiPrompt("openchamber_openui", running(input))).toBeNull()
+    expect(openuiPrompt("execute", running({ action: "openui.prompt", ui }))).toBeNull()
+  })
+
+  test("rejects the removed tool and unrelated calls", () => {
+    expect(openuiPrompt("prompt_openui", running({ ui: "root = Stack([])" }))).toBeNull()
     expect(openuiPrompt("execute", running({ ui: "root = Stack([])" }))).toBeNull()
-    expect(openuiPrompt("openchamber.prompt_openui", running({ ui: "root = Stack([])" }))).toBeNull()
-    expect(openuiPrompt("prompt_openui", running({ parameters: { ui: "root = Stack([])" } }))).toBeNull()
-    expect(openuiPrompt("prompt_openui", running({ ui: "  " }))).toBeNull()
+    expect(openuiPrompt("openchamber.openchamber_openui", running({ action: "openui.prompt", ui: "root = Stack([])" }))).toBeNull()
+    expect(openuiPrompt("openchamber_openui", running({ action: "openui.prompt", ui: "  " }))).toBeNull()
   })
 
   test("keeps completed answers and refused calls distinguishable", () => {
-    const input = { ui: "root = Stack([])" }
+    const input = { action: "openui.prompt", ui: "root = Stack([])" }
     const completed = (metadata?: Metadata): ToolState => ({ status: "completed", input, output: "", metadata, time: { start: 1, end: 2 } })
-    expect(openuiPrompt("prompt_openui", completed({ openchamber: { ok: true, answer: { answered: true, summary: "Picked", data: { choice: "a" } } } })))
+    expect(openuiPrompt("openchamber_openui", completed({ openchamber: { ok: true, answer: { answered: true, summary: "Picked", data: { choice: "a" } } } })))
       .toEqual({ source: input.ui, ask: { kind: "answered", summary: "Picked", data: { choice: "a" } }, accepted: true })
-    expect(openuiPrompt("prompt_openui", completed({ openchamber: { ok: true } })))
+    expect(openuiPrompt("openchamber_openui", completed({ openchamber: { ok: true } })))
       .toEqual({ source: input.ui, ask: { kind: "show" }, accepted: true })
-    expect(openuiPrompt("prompt_openui", completed({ openchamber: { ok: false } }))).toBeNull()
-    expect(openuiPrompt("prompt_openui", completed())).toBeNull()
-    expect(openuiPrompt("prompt_openui", completed({ openchamber: { ok: true, answer: { answered: false } } }))?.ask)
+    expect(openuiPrompt("openchamber_openui", completed({ openchamber: { ok: false } }))).toBeNull()
+    expect(openuiPrompt("openchamber_openui", completed())).toBeNull()
+    expect(openuiPrompt("openchamber_openui", completed({ openchamber: { ok: true, answer: { answered: false } } }))?.ask)
       .toEqual({ kind: "answered-in-chat" })
-    expect(openuiPrompt("prompt_openui", { status: "error", input, error: "aborted", time: { start: 1, end: 2 } })?.ask)
+    expect(openuiPrompt("openchamber_openui", { status: "error", input, error: "aborted", time: { start: 1, end: 2 } })?.ask)
       .toEqual({ kind: "unanswered" })
-    expect(openuiPrompt("prompt_openui", {
+    expect(openuiPrompt("openchamber_openui", {
       status: "error", input, error: "refused", metadata: { openchamber: { ok: false } }, time: { start: 1, end: 2 },
     })).toBeNull()
-    expect(openuiPrompt("prompt_openui", {
-      status: "running", input: { ui: " \nroot = Stack([])\n " }, time: { start: 1 },
+    expect(openuiPrompt("openchamber_openui", {
+      status: "running", input: { action: "openui.prompt", ui: " \nroot = Stack([])\n " }, time: { start: 1 },
     })?.source).toBe(" \nroot = Stack([])\n ")
   })
 })

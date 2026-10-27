@@ -80,14 +80,14 @@ describe('live turn boundaries', () => {
     test('hoists workflow proposals and waiting OpenUI prompts in call order, leaving answered prompts in Activity', () => {
         const messages = [assistant('tools', [
             tool('workflow', 'openchamber_workflow', { output: JSON.stringify({ ok: true, action: 'workflow.run', data: { runId: 'run-1' } }) }),
-            tool('answered', 'prompt_openui', { input: { ui: 'root = Stack([])' }, metadata: { openchamber: { ok: true, answer: { answered: true, summary: 'Continue', data: null } } } }),
-            tool('waiting', 'prompt_openui', { status: 'running', input: { ui: 'root = Stack([])' } }),
+            tool('answered', 'openchamber_openui', { input: { action: 'openui.prompt', ui: 'root = Stack([])' }, metadata: { openchamber: { ok: true, answer: { answered: true, summary: 'Continue', data: null } } } }),
+            tool('waiting', 'openchamber_openui', { status: 'running', input: { action: 'openui.prompt', ui: 'root = Stack([])' } }),
         ])];
         expect(getShownPages(messages).map((part) => part.callID)).toEqual(['workflow', 'waiting']);
     });
     test('keeps direct OpenUI prompts visible while their tool call waits', () => {
-        const messages = [assistant('prompt', [tool('prompt', 'prompt_openui', {
-            status: 'running', input: { ui: 'root = Stack([])' },
+        const messages = [assistant('prompt', [tool('prompt', 'openchamber_openui', {
+            status: 'running', input: { action: 'openui.prompt', ui: 'root = Stack([])' },
         })])];
         expect(getShownPages(messages).map((part) => part.callID)).toEqual(['prompt']);
     });
@@ -100,8 +100,8 @@ describe('live turn boundaries', () => {
         { name: 'refused', status: 'completed' as const, metadata: { openchamber: { ok: false } } },
     ]) {
         test(`returns an OpenUI prompt to Activity when ${name}`, () => {
-            const settled = tool('settled', 'prompt_openui', { status, metadata, input: { ui: 'root = Stack([])' } });
-            const waiting = tool('waiting', 'prompt_openui', { status: 'running', input: { ui: 'root = Stack([])' } });
+            const settled = tool('settled', 'openchamber_openui', { status, metadata, input: { action: 'openui.prompt', ui: 'root = Stack([])' } });
+            const waiting = tool('waiting', 'openchamber_openui', { status: 'running', input: { action: 'openui.prompt', ui: 'root = Stack([])' } });
             expect(getShownPages([assistant('tools', [settled, waiting])]).map((part) => part.callID))
                 .toEqual(['waiting']);
         });

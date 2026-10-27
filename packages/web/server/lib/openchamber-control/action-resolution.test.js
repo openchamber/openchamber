@@ -64,10 +64,9 @@ describe('what an unresolvable action reports', () => {
     expect(error).toContain('missing');
   });
 
-  test('an unknown tool falls back to the full action list', () => {
-    const { error } = resolveAgentToolAction('nonsense', 'openchamber_future');
-
-    expect(error).toContain('memory.read');
-    expect(error).toContain('browser.open');
+  test.each(['openchamber_future', 'prompt_openui'])('refuses an unregistered tool %s even with a valid action', (tool) => {
+    const result = resolveAgentToolAction('openui.prompt', tool);
+    expect(result.action).toBeUndefined();
+    expect(result.error).toContain('Unsupported OpenChamber tool');
   });
 });

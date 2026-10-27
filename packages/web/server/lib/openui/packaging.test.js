@@ -52,7 +52,7 @@ const invalid = inspectOpenUI('root = Stack([Input()])');
 assert.equal(invalid.valid, false);
 assert.ok(invalid.diagnostics.some(error => error.component === 'Input' && error.path === '/name' && error.message.includes('signature:')));
 const ui = 'root = Stack([Image("Preview", "/tmp/preview.png")])';
-const message = { type: 'assistant', content: [{type: 'tool', id: 'call_1', name: 'prompt_openui', state: {input: {ui}}}] };
+const message = { type: 'assistant', content: [{type: 'tool', id: 'call_1', name: 'openchamber_openui', state: {input: {action: 'openui.prompt', parameters: {ui}}}}] };
 const started = Promise.withResolvers();
 const runtime = createOpenUIRuntime({isEnabled: async () => true, onWaitChange: event => { if (event.type === 'waiting') started.resolve(event); }, getClient: async () => ({message: {list: async () => ({data: [message]})}})});
 const pending = runtime.prompt({ui}, {sessionId: 'ses_1', callId: 'call_1', directory: '/repo'});

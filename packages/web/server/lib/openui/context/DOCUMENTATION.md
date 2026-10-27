@@ -17,8 +17,8 @@ groups for `openchamber_openui`. The surrounding modules handle delivery.
 | On-demand `data`, `interaction`, `html` | Capability contracts, behavior and relevant examples. |
 | On-demand `advanced` | Reactive-language references. |
 | On-demand `examples` | Native composition patterns for staged explanations and relationship comparisons. |
-| `openchamber_openui` declaration and `groups` | Interface for selecting and reading context. |
-| `prompt_openui` | Execution tool for presenting UI and waiting for an answer. |
+| `openchamber_openui` with `openui.read` and `parameters.groups` | Interface for selecting and reading context. |
+| `openchamber_openui` with `openui.prompt` and `parameters.ui` | Presents UI and waits for an answer. |
 
 ### Content sources
 

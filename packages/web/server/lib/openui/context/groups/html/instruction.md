@@ -12,7 +12,7 @@ Ready classes: oc-box, oc-muted, oc-table on a div around table, oc-num, oc-badg
 
 ## Media and execution
 HTML images may use HTTPS, embedded image data or local image paths. The iframe has no app DOM or session access. Links use the host's HTTP(S) opener.
-Scripts manage local interactions. From the final submit button's click, await openchamber.submit(data, summary). summary is a short description of the user's choice; data is the JSON needed next. In Markdown UI the host sends a new user turn; inside prompt_openui it returns this call's result. Local edits alone send nothing. The script never supplies sessionId/callId or selects the delivery mode.
+Scripts manage local interactions. From the final submit button's click, await openchamber.submit(data, summary). summary is a short description of the user's choice; data is the JSON needed next. In Markdown UI the host sends a new user turn; inside openui.prompt it returns this call's result. Local edits alone send nothing. The script never supplies sessionId/callId or selects the delivery mode.
 Keep values until the promise resolves; disable duplicate clicks while pending and show acceptance only after success. On rejection retain values and allow an appropriate retry. Summary is limited to 500 characters and JSON data to 16000 characters. The host checks source, current generation, user gesture and whether the waiting call is still live. A stale or completed prompt cannot submit again. On replay, openchamber.answer contains accepted data so the page can show the saved choice. Chat answers, stop and cancellation close a waiting prompt. Do not simulate waiting with a page-local flag.
 
 ## String encoding

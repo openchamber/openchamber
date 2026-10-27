@@ -233,6 +233,11 @@ const openChamberResultSchema = z
 const openuiPromptInputSchema = z.object({
   ui: z.string().refine((value) => value.trim().length > 0),
 })
+const openuiActionInputSchema = z.object({
+  action: z.string().trim().pipe(z.enum(["openui.prompt", "prompt"])),
+  ui: z.json().optional(),
+  parameters: z.object({ ui: z.json().optional() }).optional(),
+})
 
 /** One entry of a tool's `metadata.files` (`FileDiff.Info` on the wire). */
 export type ToolFileDiff = z.infer<typeof fileDiffSchema> & { file: string }
@@ -356,13 +361,15 @@ type OpenUIPromptAnswer =
   | { kind: "answered-in-chat" }
   | { kind: "unanswered" }
 
-/** A direct `prompt_openui` call and the state the transcript can safely show. */
+/** A direct OpenUI prompt and the state the transcript can safely show. */
 export function openuiPrompt(
   toolName: ToolName,
   state: ToolState,
 ): { source: string; ask: OpenUIPromptAnswer; accepted: true } | null {
-  if (toolName?.trim().toLowerCase().replace(/:\d+$/, "") !== "prompt_openui") return null
-  const parsed = openuiPromptInputSchema.safeParse(state.input ?? {})
+  if (toolName?.trim().toLowerCase().replace(/:\d+$/, "") !== "openchamber_openui") return null
+  const action = openuiActionInputSchema.safeParse(state.input ?? {})
+  if (!action.success) return null
+  const parsed = openuiPromptInputSchema.safeParse({ ...action.data, ...action.data.parameters })
   if (!parsed.success) return null
   if (state.status === "running") return { source: parsed.data.ui, ask: { kind: "waiting" }, accepted: true }
   if (state.status === "error") {

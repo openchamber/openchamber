@@ -30,8 +30,8 @@ same-version references and reread when missing or stale. Omit groups for root g
 
 Deliver explanatory diagrams and locally interactive views inline as complete,
 independent triple-backtick openui-lang blocks; never patch earlier blocks. Mark code
-examples openui-lang literal. Use prompt_openui only for input needed to continue:
-pass one complete program in ui, without fences, at most 200000 characters, with a
+examples openui-lang literal. Use openchamber_openui with action="openui.prompt" only for input needed to continue:
+pass one complete program in parameters.ui, without fences, at most 200000 characters, with a
 terminal submit action. It waits for the user; accept chat answers too.
 
 ### Structure and representation

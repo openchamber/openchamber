@@ -227,7 +227,7 @@ test('uncommitted field handles cannot save or consume the draft budget', async 
   expect(session.field('speculative-0', lease).initialState).toBeUndefined();
 });
 
-test('tracks only a direct prompt_openui tool source and revokes a rejected tool', () => {
+test('tracks only a direct OpenUI prompt source and revokes a rejected tool', () => {
   const session = new OpenUISession(owner);
   const prompt = session.trackPart('message', 'tool', 'root = Stack([])');
   const tool: Extract<Part, { type: 'tool' }> = {
@@ -236,8 +236,8 @@ test('tracks only a direct prompt_openui tool source and revokes a rejected tool
     messageID: 'message',
     type: 'tool',
     callID: 'call',
-    tool: 'prompt_openui',
-    state: { status: 'running', input: { ui: 'root = Stack([])' }, time: { start: 0 } },
+    tool: 'openchamber_openui',
+    state: { status: 'running', input: { action: 'openui.prompt', parameters: { ui: 'root = Stack([])' } }, time: { start: 0 } },
   };
 
   session.reconcileMessage('message', [tool]);

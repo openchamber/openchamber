@@ -443,9 +443,9 @@ describe('live Activity with the real message body', () => {
 
     test('keeps a waiting HtmlView outside a retired Activity fold without duplicate mounts', async () => {
         const page: Part = {
-            type: 'tool', tool: 'prompt_openui', id: 'page', callID: 'page', sessionID: 'session', messageID: 'progress',
+            type: 'tool', tool: 'openchamber_openui', id: 'page', callID: 'page', sessionID: 'session', messageID: 'progress',
             state: {
-                status: 'running', input: { ui: 'root = Stack([HtmlView("<p>pick</p>", null, "Pick a layout")])' },
+                status: 'running', input: { action: 'openui.prompt', ui: 'root = Stack([HtmlView("<p>pick</p>", null, "Pick a layout")])' },
                 time: { start: 1 },
             },
         };
@@ -470,8 +470,8 @@ describe('live Activity with the real message body', () => {
 
     test('returns an answered OpenUI prompt and subsequent work to Activity', async () => {
         const prompt: ToolPart = {
-            type: 'tool', tool: 'prompt_openui', id: 'prompt', callID: 'prompt', sessionID: 'session', messageID: 'asked',
-            state: { status: 'running', input: { ui: 'root = Stack([TextContent("Choose the next step"), HtmlView("<p>pick</p>", null, "Pick a layout")])' }, time: { start: 1 } },
+            type: 'tool', tool: 'openchamber_openui', id: 'prompt', callID: 'prompt', sessionID: 'session', messageID: 'asked',
+            state: { status: 'running', input: { action: 'openui.prompt', ui: 'root = Stack([TextContent("Choose the next step"), HtmlView("<p>pick</p>", null, "Pick a layout")])' }, time: { start: 1 } },
         };
         const asked = assistant('asked', [prompt], 'tool-calls');
         await act(async () => root.render(<Harness record={turn([asked])} />));
@@ -514,8 +514,8 @@ describe('live Activity with the real message body', () => {
 
     test('folds a stopped OpenUI prompt in a retired turn and restores it on expansion', async () => {
         const stopped: ToolPart = {
-            type: 'tool', tool: 'prompt_openui', id: 'prompt', callID: 'prompt', sessionID: 'session', messageID: 'asked',
-            state: { status: 'error', input: { ui: 'root = Stack([TextContent("Choose the next step")])' }, error: 'Stopped', time: { start: 1, end: 2 } },
+            type: 'tool', tool: 'openchamber_openui', id: 'prompt', callID: 'prompt', sessionID: 'session', messageID: 'asked',
+            state: { status: 'error', input: { action: 'openui.prompt', ui: 'root = Stack([TextContent("Choose the next step")])' }, error: 'Stopped', time: { start: 1, end: 2 } },
         };
         await act(async () => root.render(<Harness record={turn([assistant('asked', [stopped], 'tool-calls')])} retired />));
         expect(container.querySelectorAll('[data-oc-openui-source]').length).toBe(0);
@@ -526,9 +526,9 @@ describe('live Activity with the real message body', () => {
 
     test('folds a settled OpenUI prompt in the final message with its other tool parts', async () => {
         const prompt: ToolPart = {
-            type: 'tool', tool: 'prompt_openui', id: 'prompt', callID: 'prompt', sessionID: 'session', messageID: 'final',
+            type: 'tool', tool: 'openchamber_openui', id: 'prompt', callID: 'prompt', sessionID: 'session', messageID: 'final',
             state: {
-                status: 'completed', input: { ui: 'root = Stack([TextContent("Choose the next step")])' }, output: '',
+                status: 'completed', input: { action: 'openui.prompt', ui: 'root = Stack([TextContent("Choose the next step")])' }, output: '',
                 metadata: { openchamber: { ok: true, answer: { answered: false, reason: 'chat' } } }, time: { start: 1, end: 2 },
             },
         };

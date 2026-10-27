@@ -33,22 +33,22 @@ the user can want independently:
   `agentKnowledgeToolEnabled` is not `false`, and the control service refuses
   these actions when it is, so a stale plugin cannot keep writing. Writes are
   attributed to the session OpenCode reported, never to a payload field.
-- `prompt_openui` — a direct waiting tool with one flat `ui` input. It always
-  waits through the OpenUI runtime's answer owner.
-  `openchamber_openui` reads fixed capability and task groups. Common display
+- `openchamber_openui` reads fixed capability and task groups with `openui.read`
+  and collects required input with `openui.prompt`. Prompt calls wait through
+  the OpenUI runtime's answer owner. Common display
   contracts are resident; data, interaction, HTML, advanced DSL and composition examples
   are read on demand. The resident instructions route by task;
-  several matching groups can be read together. Both tools are
+  several matching groups can be read together. The tool is
   present only for managed OpenCode while the render setting is enabled.
 
 OpenUI's [context-as-skill mapping](../openui/context/DOCUMENTATION.md#context-as-a-skill)
 guides its tool descriptions and reference groups. Their definitions live in
 `../openui/context/tools.js`; this adapter registers them.
 
-The generated adapter has one explicit prompt mode. It registers the chat
-cancellation hook, disables the fetch idle timeout, and persists the answer
-metadata while sharing callback transport and failure handling with action
-tools. The OpenUI runtime owns admission, source verification, and live waits.
+The generated adapter applies chat cancellation, disabled fetch idle timeout,
+and answer metadata only to `openui.prompt`, including its bare `prompt` alias.
+Reference reads use ordinary action behavior. The OpenUI runtime owns admission,
+source verification, and live waits.
 Managed prompts delegate before resolving the session directory; OpenUI performs
 that lookup inside its cancellable admission. Other actions retain the adapter's
 directory fallback.
@@ -101,8 +101,8 @@ both settings are `false`.
   size-limited catalog; with a few large MCP servers ours dropped out of it and
   agents concluded the tool did not exist. `agentToolsCodeMode: true` (the
   "Run through Code Mode" checkbox in the same section, off by default) flips
-  all of them to `codemode: true`, except `prompt_openui`: it must stay direct
-  so its callback can remain open until the user submits.
+  all of them to `codemode: true`, except `openchamber_openui`: it stays direct
+  so chat can identify prompt inputs and its callback can wait for submission.
 - The plugin accepts the action's inputs either inside `parameters` or beside
   `action`, because models produce both shapes; an explicit `parameters` object
   wins on a conflict. Rejecting the flattened shape turned a call that plainly
@@ -111,6 +111,12 @@ both settings are `false`.
   `parameters`, and `additionalProperties: true` at the root lets flattened
   inputs and unknown fields (a stale `wait` or `timeout`) through to the
   adapter.
+
+### Why OpenUI uses one direct tool
+
+Reference reads and required-input prompts share one action-based entry point.
+Keeping that tool direct preserves a visible prompt record under Code Mode;
+only prompt actions acquire a cancellable wait.
 
 ### Why scheduling is its own tool and not part of `openchamber`
 
