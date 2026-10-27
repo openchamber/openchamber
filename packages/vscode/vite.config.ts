@@ -64,6 +64,11 @@ export default defineConfig(({ mode }) => ({
       input: path.resolve(__dirname, 'webview/index.html'),
       external: ['node:child_process', 'node:fs', 'node:path', 'node:url'],
       output: {
+        manualChunks(id) {
+          // Vite's import lexer rejects ELK's generated loops when they share
+          // a chunk with dynamic imports. Keep the layout engine separate.
+          if (id.includes('/node_modules/elkjs/')) return 'vendor-elk';
+        },
         entryFileNames: 'assets/[name].js',
         chunkFileNames: 'assets/[name].js',
         assetFileNames: 'assets/[name].[ext]',
