@@ -7,7 +7,6 @@ type OpenUIAnswer = {
   callId: string;
   summary: string;
   data: JsonValue;
-  sourceRevision: string;
 };
 
 export const answerOpenUI = async (answer: OpenUIAnswer, directory: string): Promise<void> => {

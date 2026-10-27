@@ -12,7 +12,7 @@ test('routes an OpenUI answer to its space and leaves host requests unscoped', a
       headers.push(new Headers(init?.headers));
       return new Response(null, { status: 204 });
     };
-    const answer = { sessionId: 's', callId: 'c', summary: 'Yes', data: null, sourceRevision: 'revision' };
+    const answer = { sessionId: 's', callId: 'c', summary: 'Yes', data: null };
     await answerOpenUI(answer, '/spaces/123456789abc/project');
     await answerOpenUI(answer, '/repo');
     expect(headers[0].get('x-opencode-directory')).toBe('%2Fspaces%2F123456789abc%2Fproject');

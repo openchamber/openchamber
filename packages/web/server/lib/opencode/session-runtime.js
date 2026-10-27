@@ -93,12 +93,7 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
     if (!sessionId || !callId) return;
     if (change.type === 'waiting') {
       const title = typeof change.title === 'string' ? change.title : '';
-      const page = { id: callId, sessionID: sessionId, title };
-      if (change.kind === 'openui') {
-        page.kind = 'openui';
-        page.sourceRevision = change.sourceRevision;
-      }
-      getOrCreatePendingRequests(sessionId).pages.set(callId, page);
+      getOrCreatePendingRequests(sessionId).pages.set(callId, { id: callId, sessionID: sessionId, title });
       return;
     }
     if (change.type === 'settled') settlePendingRequest('pages', sessionId, callId);

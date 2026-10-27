@@ -57,7 +57,7 @@ other.
 - `service.js` creates and exposes `openui`, the runtime owned by
   [the OpenUI module](../openui/DOCUMENTATION.md). It delegates `openui.prompt`
   and `openui.read` to that runtime. Settings disable calls its cancellation
-  method. OpenUI's saved-source rules
+  method. OpenUI's program admission and page waits
   stay in that module. The runtime receives the service's session-directory
   resolver so prompt admission covers that asynchronous lookup. The chat answers through
   `POST /api/openchamber/openui/answer`; Markdown submissions use the existing

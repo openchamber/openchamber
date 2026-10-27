@@ -29,7 +29,7 @@ export type BlockingFormRequest = Pick<FormRequest, 'id' | 'sessionID' | 'title'
  * one, but it is answered on the page in the chat: it is kept apart from
  * forms so nothing tries to answer it as a form. `id` is the tool call id.
  */
-type BlockingPageRequest = { id: string; sessionID: string; title: string; kind?: 'openui'; sourceRevision?: string };
+type BlockingPageRequest = { id: string; sessionID: string; title: string };
 
 type PendingBlockingRequests = {
   directory: string;
@@ -206,7 +206,7 @@ export const applyWaitingPageEvent = (
     const { sessionID, page } = event.properties;
     const directory = event.properties.directory ?? resolveDirectory(sessionID);
     if (!directory) return;
-    reducer.ask(normalizeDirectory(directory), sessionID, { kind: 'page', request: { id: page.id, sessionID, title: page.title, kind: page.kind, sourceRevision: page.sourceRevision } });
+    reducer.ask(normalizeDirectory(directory), sessionID, { kind: 'page', request: { id: page.id, sessionID, title: page.title } });
   }
   reducer.publish();
 };
@@ -235,8 +235,6 @@ export const readHostBlockingRequestsSnapshot = async (
       id: event.properties.page.id,
       sessionID: sessionId,
       title: event.properties.page.title,
-      kind: event.properties.page.kind,
-      sourceRevision: event.properties.page.sourceRevision,
     });
     changes.set(sessionId, pages);
   };

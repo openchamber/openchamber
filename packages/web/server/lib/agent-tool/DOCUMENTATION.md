@@ -47,8 +47,8 @@ guides its tool descriptions and reference groups. Their definitions live in
 
 The generated adapter applies chat cancellation, disabled fetch idle timeout,
 and answer metadata only to `openui.prompt`, including its bare `prompt` alias.
-Reference reads use ordinary action behavior. The OpenUI runtime owns admission,
-source verification, and live waits.
+Reference reads use ordinary action behavior. The OpenUI runtime owns program
+admission and live waits.
 Managed prompts delegate before resolving the session directory; OpenUI performs
 that lookup inside its cancellable admission. Other actions retain the adapter's
 directory fallback.

@@ -69,8 +69,7 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, expanded, onToggle, 
     const previouslySettled = React.useRef(settled);
     const animateFinalCollapse = settled && !previouslySettled.current;
     React.useLayoutEffect(() => { previouslySettled.current = settled; }, [settled]);
-    // OpenUI prompts stay outside the fold while waiting, then return to
-    // their Activity rows.
+    // Waiting prompts remain visible until answered, then follow Activity rows.
     const pages = React.useMemo(() => getShownPages(turn.assistantMessages), [turn.assistantMessages]);
     // While the turn works, what the agent does after its last page (more
     // steps, the reply it is still writing) is drawn below the page, in the

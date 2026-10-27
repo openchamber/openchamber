@@ -29,11 +29,6 @@ it('reads media through existing file routes independently of OpenUI waits', asy
   const source = path.join(root, 'preview.png');
   await fsPromises.writeFile(source, Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex'));
   const ui = `root = Stack([Image("Preview", ${JSON.stringify(source)})])`;
-  const message = {
-    id: 'msg_1', type: 'assistant', content: [{
-      type: 'tool', id: 'call_1', name: 'openchamber_openui', state: { status: 'running', input: { action: 'openui.prompt', parameters: { ui } } },
-    }],
-  };
   const fetch = vi.fn(async () => { throw new Error('File preparation must not fetch messages'); });
   vi.stubGlobal('fetch', fetch);
   const onPageWaitChange = vi.fn();
@@ -41,7 +36,6 @@ it('reads media through existing file routes independently of OpenUI waits', asy
   const getOpenCodeAuthHeaders = () => ({});
   const service = createOpenChamberControlService({
     buildOpenCodeUrl, getOpenCodeAuthHeaders, onPageWaitChange,
-    createClient: () => ({ message: { list: async () => ({ data: [message] }) } }),
   });
   const app = express();
   registerCommonRequestMiddleware(app, { express });
@@ -70,14 +64,13 @@ it('reads media through existing file routes independently of OpenUI waits', asy
   try {
     await vi.waitFor(() => expect(onPageWaitChange).toHaveBeenCalled());
     expect((await stat()).body.isFile).toBe(true);
-    const sourceRevision = onPageWaitChange.mock.calls[0][0].sourceRevision;
     await request(app).post('/api/openchamber/openui/answer')
-      .send({ sessionId: 'ses_1', callId: 'call_1', sourceRevision, summary: 'Done' }).expect(200);
+      .send({ sessionId: 'ses_1', callId: 'call_1', summary: 'Done' }).expect(200);
     await expect(pending).resolves.toMatchObject({ answer: { summary: 'Done' } });
     expect((await stat()).body.isFile).toBe(true);
     expect(fetch).not.toHaveBeenCalled();
     await request(app).post('/api/openchamber/openui/answer')
-      .send({ sessionId: 'ses_1', callId: 'call_1', sourceRevision, summary: 'Again' }).expect(404);
+      .send({ sessionId: 'ses_1', callId: 'call_1', summary: 'Again' }).expect(404);
   } finally {
     controller.abort();
     await pending.catch(() => {});

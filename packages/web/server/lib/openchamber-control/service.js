@@ -540,7 +540,7 @@ export const createOpenChamberControlService = (dependencies) => {
     }
   };
 
-  const openui = createOpenUIRuntime({ isEnabled: isOpenUIEnabled, onWaitChange: onPageWaitChange, getClient, resolveSessionDirectory });
+  const openui = createOpenUIRuntime({ isEnabled: isOpenUIEnabled, onWaitChange: onPageWaitChange, resolveSessionDirectory });
 
   // Checked before anything is created or sent: a result nobody can deliver
   // must fail the call, not leave a dispatched session the agent waits on.

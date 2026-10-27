@@ -571,12 +571,14 @@ Directories that are not bootstrapped get their initial activity from the host i
 Pending permissions and forms get the same treatment in `global-blocking-requests.ts`: the dispatcher feeds it `permission.asked`/`permission.replied`, `form.created`/`form.settled`, and `session.deleted` for every directory, and the host seed adds the `pending` map the server keeps from its own stream (`getPendingBlockingRequestsSnapshot` in `session-runtime.js`; dropped on reply, deletion, and OpenCode restart, so it carries no age cutoff). The index keeps only the fields its consumers render (`id`/`sessionID`/`action`/`resources`/`save` for a permission, `id`/`sessionID`/`title` for a form), which is also everything the host can carry. Permission and form seeding is additive and never clears by absence. Directory stores stay the source for open directories; desktop row badges also count the index's forms while that directory's store has not completed a bootstrap, because such a store learns only of live ones. Once the bootstrap completes, the store alone answers for forms, since its reply and reconnect paths clear forms the index can keep after a lost `form.settled`; a status change notifies form subscribers so rows switch source. The index serves the tray's approval list and any surface without a mounted row. The mobile shell has no global poller, so its sessions sheet runs the seed after the list load it does each time it opens; without it, phone rows, which read only the index, miss every request already waiting at startup.
 
 OpenUI prompts use the `pages` collection with the tool call `id`, `sessionID`,
-`title`, `kind` and `sourceRevision`. The server owns these waits, announces
+and `title`. The server owns these waits, announces
 `openchamber:page-waiting` and `openchamber:page-settled`, and lists them in the
 host seed. `applyWaitingPageEvent` uses the session directory when the event
 omits it. Rows, run overviews and the tray count them as forms; the form dock
 does not answer them. While a prompt waits, the composer sends chat replies
 immediately so the managed plugin can close the wait and resume the turn.
+Tool UI permits submission from the tool state; receiving a page notification
+is not a prerequisite for answering.
 
 ### Why page snapshots replace waits while form and permission seeds stay additive
 

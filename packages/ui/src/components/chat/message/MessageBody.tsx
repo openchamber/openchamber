@@ -1859,8 +1859,8 @@ const AssistantMessageBody = React.memo(({
                     continue;
                 }
 
-                // A workflow proposal or OpenUI prompt is drawn in place of its
-                // row unless Activity hoisted it. Settled prompts stay in Activity.
+                // Shown tools replace their rows unless Activity hoisted them.
+                // Answered OpenUI prompts return to their Activity rows.
                 if (isShownInPlace(toolPart.tool, toolPart.state)) {
                     if (!hoistedPages?.has(toolPart.id)) {
                         rendered.push(<ShownToolCard key={`page-${toolPart.id}`} part={toolPart} onShowPopup={onShowPopup} />);

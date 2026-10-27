@@ -118,7 +118,6 @@ describe('managed agent tool runtime', () => {
       isOpenUIEnabled: async () => enabled,
       createClient: () => ({
         session: { list: async () => { reading.resolve(); return directoryRead.promise; } },
-        message: { list: async () => ({ data: [{ type: 'assistant', content: [{ type: 'tool', id: 'new', name: 'openchamber_openui', state: { input: { action: 'openui.prompt', parameters: { ui } } } }] }] }) },
       }),
       onPageWaitChange: (event) => { waits.push(event); if (event.type === 'waiting') observed.resolve('waiting'); },
     });
@@ -140,7 +139,7 @@ describe('managed agent tool runtime', () => {
       expect(await pending).toMatchObject({ ok: false, error: { kind: 'usage' } });
       const current = runtime.execute({ ...payload, callID: 'new' });
       await vi.waitFor(() => expect(waits).toHaveLength(1));
-      await service.openui.answer({ sessionId: 's', callId: 'new', sourceRevision: waits[0].sourceRevision, summary: 'Done' });
+      await service.openui.answer({ sessionId: 's', callId: 'new', summary: 'Done' });
       expect(await current).toMatchObject({ ok: true });
     } finally {
       service.openui.cancel();
@@ -149,7 +148,6 @@ describe('managed agent tool runtime', () => {
   });
 
   it('answers native and HtmlView OpenUI waits through the generated plugin and authenticated HTTP', async () => {
-    const sources = new Map();
     const waits = [];
     const hooks = {};
     const { runtime, dataDir } = await createRuntime({
@@ -167,9 +165,6 @@ describe('managed agent tool runtime', () => {
       getOpenCodeAuthHeaders: () => ({}),
       createClient: () => ({
         session: { list: async () => ({ data: [{ id: 'ses_1', location: { directory: '/repo' } }] }) },
-        message: { list: async () => ({ data: [{ type: 'assistant', content: [...sources].map(([id, ui]) => ({
-          type: 'tool', id, name: 'openchamber_openui', state: { input: { action: 'openui.prompt', parameters: { ui } } },
-        })) }] }) },
       }),
       onPageWaitChange: (change) => waits.push(change),
     });
@@ -214,19 +209,17 @@ describe('managed agent tool runtime', () => {
       ];
       for (const [index, ui] of programs.entries()) {
         const callId = `call_${index}`;
-        sources.set(callId, ui);
         const input = index === 0
           ? { action: 'openui.prompt', ui: 'ignored', parameters: { ui } }
           : { action: ' prompt ', ui };
         const result = tools.openchamber_openui.execute(input, { sessionID: 'ses_1', id: callId, progress: async () => {} });
-        await vi.waitFor(() => expect(waits).toContainEqual(expect.objectContaining({ type: 'waiting', callId, kind: 'openui' })));
-        const sourceRevision = waits.find((wait) => wait.callId === callId).sourceRevision;
-        await expect(service.openui.answer({ sessionId: 'ses_1', callId, sourceRevision, summary: 'Choose one', data: { choice: 1 } }))
-          .resolves.toEqual({ answered: true });
+        await vi.waitFor(() => expect(waits).toContainEqual(expect.objectContaining({ type: 'waiting', callId })));
+        expect(service.openui.answer({ sessionId: 'ses_1', callId, summary: 'Choose one', data: { choice: 1 } }))
+          .toEqual({ answered: true });
         const completed = await result;
         expect(JSON.parse(completed.content)).toMatchObject({ ok: true, data: { answer: { answered: true, data: { choice: 1 } } } });
         expect(completed.metadata.openchamber.answer).toEqual({ answered: true, summary: 'Choose one', data: { choice: 1 } });
-        expect(() => service.openui.answer({ sessionId: 'ses_1', callId, sourceRevision, summary: 'Again', data: null })).toThrow();
+        expect(() => service.openui.answer({ sessionId: 'ses_1', callId, summary: 'Again', data: null })).toThrow();
       }
       const chatCall = 'answered-in-chat';
       const pending = tools.openchamber_openui.execute(

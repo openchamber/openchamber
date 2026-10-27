@@ -216,8 +216,8 @@ describe("createEventPipeline", () => {
     expect(events[1]).toEqual({ type: "openchamber.page-settled", properties: { sessionID: "ses_1", pageID: "call_1" } })
   })
 
-  test("preserves the OpenUI source revision on a live waiting event", async () => {
-    const page = { id: "call_1", title: "OpenUI response", kind: "openui", sourceRevision: "abc123" }
+  test("preserves the page identity on a live waiting event", async () => {
+    const page = { id: "call_1", title: "OpenUI response" }
     const { events } = await collect([
       { type: "openchamber:page-waiting", properties: { sessionID: "ses_1", directory: "/repo", page } as never },
     ], 1)

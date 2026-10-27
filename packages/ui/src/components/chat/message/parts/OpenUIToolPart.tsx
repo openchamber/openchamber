@@ -5,20 +5,11 @@ import { getRuntimeKey } from '@/lib/runtime-switch';
 import { answerOpenUI } from '@/lib/openuiAnswer';
 import { useOnDemandComponent } from '@/hooks/useOnDemandComponent';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
-import { useGlobalBlockingRequestsStore } from '@/sync/global-blocking-requests';
 import { useUIStore } from '@/stores/useUIStore';
 import { useI18n } from '@/lib/i18n';
 import { useOpenUIDraft } from '../../openuiSession';
 import { getLoadedOpenUIModule, loadOpenUIProgram } from '../../openuiRendererLoader';
 import type { OpenUIProgramProps } from '../../OpenUIRenderer';
-
-const EMPTY_PAGES: readonly { id: string; sessionID: string; title: string; kind?: 'openui'; sourceRevision?: string }[] = [];
-
-const digestSource = async (source: string): Promise<string | null> => {
-  if (!globalThis.crypto?.subtle) return null;
-  const digest = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(source));
-  return [...new Uint8Array(digest)].map((value) => value.toString(16).padStart(2, '0')).join('');
-};
 
 function OpenUIToolPart({ part, prompt }: { part: ToolPart; prompt: NonNullable<ReturnType<typeof openuiPrompt>> }) {
   const { t } = useI18n();
@@ -33,52 +24,29 @@ function OpenUIToolPart({ part, prompt }: { part: ToolPart; prompt: NonNullable<
   }), [directory, part.id, part.messageID, part.sessionID, runtimeKey]);
   const draft = useOpenUIDraft(owner, prompt.source);
   const isDraftCurrent = draft.isCurrent;
-  const pages = useGlobalBlockingRequestsStore((state) => state.bySession.get(part.sessionID)?.pages ?? EMPTY_PAGES);
-  const [revision, setRevision] = React.useState<{ source: string; value: string | null } | null>(null);
   const [failed, setFailed] = React.useState(false);
-  const sourceRevision = revision?.source === prompt.source ? revision.value : null;
   const loaded = getLoadedOpenUIModule()?.OpenUIProgram;
-  const requested = useOnDemandComponent(Boolean(sourceRevision) && !failed && !loaded, loadOpenUIProgram, () => setFailed(true));
+  const requested = useOnDemandComponent(!failed && !loaded, loadOpenUIProgram, () => setFailed(true));
   const Program = loaded ?? requested;
 
   React.useEffect(() => {
     setFailed(false);
   }, [prompt.source]);
 
-  React.useEffect(() => {
-    let cancelled = false;
-    void digestSource(prompt.source).then((value) => {
-      if (!cancelled) setRevision({ source: prompt.source, value });
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [prompt.source]);
-
-  const isLiveWait = React.useCallback(() => {
-    if (!sourceRevision || part.state.status !== 'running') return false;
-    const page = useGlobalBlockingRequestsStore.getState().bySession.get(part.sessionID)?.pages
-      .find((entry) => entry.id === part.callID);
-    return getRuntimeKey() === owner.runtimeKey
-      && isDraftCurrent()
-      && useUIStore.getState().agentRenderToolEnabled
-      && page?.sessionID === part.sessionID
-      && page.kind === 'openui'
-      && page.sourceRevision === sourceRevision;
-  }, [owner.runtimeKey, part.callID, part.sessionID, part.state.status, isDraftCurrent, sourceRevision]);
-  const active = part.state.status === 'running' && pages.some((page) => (
-    page.id === part.callID && page.sessionID === part.sessionID
-    && page.kind === 'openui' && page.sourceRevision === sourceRevision
-  ));
+  const waiting = prompt.ask.kind === 'waiting';
+  const canSubmit = React.useCallback(() => (
+    waiting && getRuntimeKey() === owner.runtimeKey
+       && isDraftCurrent()
+       && useUIStore.getState().agentRenderToolEnabled
+  ), [waiting, owner.runtimeKey, isDraftCurrent]);
   const submit = React.useCallback<OpenUIProgramProps['submit']>(async (submission) => {
-    if (!isLiveWait() || !sourceRevision) throw new Error();
+    if (!canSubmit()) throw new Error();
     await answerOpenUI({
       sessionId: part.sessionID,
       callId: part.callID,
-      sourceRevision,
       ...submission,
     }, owner.directory);
-  }, [isLiveWait, owner.directory, part.callID, part.sessionID, sourceRevision]);
+  }, [canSubmit, owner.directory, part.callID, part.sessionID]);
 
   const status = prompt.ask.kind === 'answered'
     ? t('chat.htmlRender.answered', { summary: prompt.ask.summary })
@@ -88,7 +56,7 @@ function OpenUIToolPart({ part, prompt }: { part: ToolPart; prompt: NonNullable<
         ? t('chat.htmlRender.unanswered')
         : null;
 
-  if (!sourceRevision || !Program || failed) {
+  if (!Program || failed) {
     return (
       <>
         <div data-oc-openui-source={prompt.source} data-oc-code-source={prompt.source}>
@@ -103,14 +71,14 @@ function OpenUIToolPart({ part, prompt }: { part: ToolPart; prompt: NonNullable<
     <>
       <div data-oc-openui-source={prompt.source} data-oc-code-source={prompt.source}>
         <Program
-          key={`${draft.key}\0${sourceRevision}`}
+          key={draft.key}
           source={prompt.source}
           owner={owner}
-          renderKey={sourceRevision}
-          canInteract={isLiveWait}
+          renderKey={draft.key}
+          canInteract={canSubmit}
           submit={submit}
           repeatable={false}
-          terminal={!active}
+          terminal={!waiting}
           answer={prompt.ask.kind === 'answered' ? prompt.ask.data : undefined}
           initialState={draft.initialState}
           onStateUpdate={draft.onStateUpdate}

@@ -254,7 +254,7 @@ describe('live Activity with the real message body', () => {
         expect(container.querySelector('iframe')).toBe(firstFrame);
     });
 
-    test('keeps a waiting HtmlView outside a retired Activity fold without duplicate mounts', async () => {
+    test('keeps a waiting HtmlView outside folded Activity without duplicate mounts', async () => {
         const page: Part = {
             type: 'tool', tool: 'openchamber_openui', id: 'page', callID: 'page', sessionID: 'session', messageID: 'progress',
             state: {
@@ -266,11 +266,13 @@ describe('live Activity with the real message body', () => {
         await act(async () => root.render(<Harness record={record} retired />));
         await waitForFrames(container, 1);
         expect(container.textContent).not.toContain('Asking');
-        expect([...container.querySelectorAll('iframe')].map((frame) => frame.getAttribute('title'))).toEqual(['Pick a layout']);
         const frame = container.querySelector('iframe');
         expect(frame?.closest('[data-live-activity-content]')).toBeNull();
         await act(async () => container.querySelector<HTMLButtonElement>('button[aria-controls]')?.click());
         expect(container.textContent).toContain('Asking');
+        expect(container.querySelectorAll('iframe')).toHaveLength(1);
+        expect(container.querySelector('iframe')).toBe(frame);
+        await act(async () => container.querySelector<HTMLButtonElement>('button[aria-controls]')?.click());
         expect(container.querySelectorAll('iframe')).toHaveLength(1);
         expect(container.querySelector('iframe')).toBe(frame);
     });
@@ -285,7 +287,7 @@ describe('live Activity with the real message body', () => {
         await waitForFrames(container, 1);
         const interfaces = () => container.querySelectorAll('[data-oc-openui-source]');
         expect(interfaces().length).toBe(1);
-        expect(interfaces()[0].closest('[data-live-activity-content]') === null).toBe(true);
+        expect(interfaces()[0].closest('[data-live-activity-content]')).toBeNull();
 
         const answered: ToolPart = { ...prompt, state: {
             status: 'completed', input: prompt.state.input, output: '', time: { start: 1, end: 2 },
