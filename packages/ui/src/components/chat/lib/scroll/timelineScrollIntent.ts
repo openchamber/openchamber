@@ -35,7 +35,7 @@ export const nestedScrollableConsumesWheelUp = (root: HTMLElement, target: Event
     return nested !== null && nested.scrollTop > 0;
 };
 
-// A wheel or swipe over a sandboxed page frame (`openchamber_render`) scrolls
+// A wheel or swipe over a sandboxed OpenUI HtmlView scrolls
 // the timeline, but its events stay in the frame. The frame's owner reports
 // the gesture's direction as this event from the frame element, so the
 // timeline holding that frame hears it like its own wheel or touch.

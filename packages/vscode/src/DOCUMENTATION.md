@@ -109,9 +109,9 @@ The webview build emits each worker as one self-contained file. VS Code webviews
   - Local `/api/fs/read` and `/api/fs/raw` proxy helpers and shared proxy utility helpers.
   - `/api/fs/directory-stat` and `/api/fs/directory-stats` return 501 locally. Directory-availability probes remain unknown in VS Code rather than falling through to OpenCode.
   - Workspace-contained Markdown gallery images use these local filesystem
-    routes without calling the server grant route. Grant requests for OpenCode
-    temporary-directory images return an explicit unsupported response instead
-    of being forwarded to OpenCode.
+    routes. OpenUI images and HtmlView reuse the same workspace bridge.
+    Outside-workspace media stays unavailable. Images use stat followed by raw
+    through this bridge; videos remain unsupported.
 
 - `bridge-proxy-runtime.ts`
   - Proxy route handlers (`api:proxy`, `api:session:message`) with injected helper dependencies.

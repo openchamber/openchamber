@@ -22,6 +22,7 @@ export interface MarkdownPresentation {
   /** A preview button next to loopback links; only chat messages show it. */
   loopbackPreview: boolean;
   purpose?: 'copy' | 'image';
+  embedded?: boolean;
   disableLinkSafety?: boolean;
   theme: Theme;
   mermaidControls: MermaidControls;

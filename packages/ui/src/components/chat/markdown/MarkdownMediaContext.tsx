@@ -34,7 +34,7 @@ export function MarkdownMediaProvider({
   const filePath = documentAssets?.filePath;
   const workspaceRoot = documentAssets?.workspaceRoot;
   // Color scheme and link callbacks can change without revoking loaded assets.
-  // A settled assistant part's grants are checked against its text, so new
+  // A settled assistant part owns the media selected by its text, so new
   // text is a new owner. While it streams it loads nothing, and tool output,
   // reasoning and documents read their media by path: keying any of these on
   // the text rebuilt the owner, or reloaded every image, on each update.

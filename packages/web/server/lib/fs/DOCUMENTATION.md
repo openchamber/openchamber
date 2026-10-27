@@ -10,6 +10,8 @@ Own filesystem API behavior for the web server runtime, including workspace-boun
 - `packages/web/server/lib/fs/ripgrep.js`: where the ripgrep binary comes from.
 
 ## Public exports
+- `mintOutsideFileGrant` remains the existing Electron file-picker IPC export.
+  Markdown and OpenUI media do not call it. Read/raw/stat routes ignore its token.
 - `registerFsRoutes(app, dependencies)` from `routes.js`
   - Registers all filesystem routes:
     - `GET /api/fs/home`
@@ -161,7 +163,10 @@ The Git service validates a selected commit identity before planning or spawning
 - File read, raw and stat routes accept outside paths with `allowOutsideWorkspace=true` under the normal server authentication and OS permissions. They do not require a separate file grant. Legacy grant parameters are ignored. Workspace-scoped reads resolve symlinks after checking the requested path. Write routes keep canonical-target boundary checks.
 - Read, raw and stat preserve whitespace in absolute file targets. These paths are already resolved filenames; applying pasted-directory cleanup would read a different file. Relative and tilde inputs keep directory normalization, and workspace and symlink authorization remain unchanged.
 - `GET /api/fs/stat?optional=true` answers `{ path, exists: false }` without error logging for `ENOENT`, `ENOTDIR`, `EINVAL`, and `ENAMETOOLONG` from the target's `realpath` or `stat`. Chat-token probes can produce invalid paths or invalid ASAR names, so these expected misses stay quiet. Unexpected failures such as `EIO`, `EMFILE`, and internal errors still log and return `500`; OS permission errors remain `403`. Without `optional=true`, a missing path returns `404` and other non-permission failures log and return `500`. VS Code's local filesystem proxy is unchanged and retains its own error mapping.
-- If adding new `/api/fs/*` endpoints, add them in `routes.js` and extend this document.
+- Filesystem endpoints belong to this module. Markdown and OpenUI reuse
+  `stat` for metadata and `raw` for bytes. Shared UI owns media display limits
+  and validates image bytes before embedding data URLs.
+  Extend this document when adding an endpoint.
 - `routes.js` and the sibling modules it imports (`byte-range.js`, `workspace-file-names.js`, `content-search.js`, `../shared/guards.js`, `../git/redaction.js`, `../path-realpath-cache.js`) load with Node built-ins only: `routes.test.js` imports a copy of them in a bare Node process without `node_modules`, the way a packaged desktop build once failed to load them. A new sibling module goes into that test's copy list and takes its value guards from `../shared/guards.js` rather than from a dependency.
 - `GET /api/fs/list` may resolve symlinks with `realpath` to read directory contents, but the response `path` and each entry `path` must stay in the caller's requested path space (`path.join(requestedPath, name)`). Returning real paths breaks file-tree expansion for directories reached through workspace symlinks.
 - `POST /api/fs/upload` accepts one `application/octet-stream` body with `path` and optional `overwrite=true` query parameters. The body streams into a same-directory temp file with a 100 MiB default cap configurable through `OPENCHAMBER_FS_UPLOAD_MAX_BYTES`; failed and oversized uploads clean up that temp file. New files commit through an atomic no-replace link, existing files return `409` unless overwrite is explicit, directory targets are rejected, and the destination parent resolves before writing so uploads cannot escape through workspace symlinks.

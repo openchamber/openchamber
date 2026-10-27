@@ -13,7 +13,7 @@ import { MarkdownMediaLinkContext, useMarkdownMedia } from './markdown-media-con
 import { isBareVideoUrl, isVideoSource, hasMarkdownMediaCredentials as hasCredentials, markdownMediaCopySource as copySource, markdownMediaFilename as filename } from './markdownVideo';
 
 type NodeProps = { node?: Element; 'data-oc-media-source'?: string };
-type ImageProps = React.ComponentProps<'img'> & NodeProps;
+type ImageProps = React.ComponentProps<'img'> & NodeProps & { presentation?: { aspectRatio?: number; fit?: 'contain' | 'cover' } };
 type VideoProps = React.ComponentProps<'video'> & NodeProps;
 const remoteSource = (source: string) => /^(?:https?:)?\/\//i.test(source);
 const incomplete = (source: string) => source === 'streamdown:incomplete-image';
@@ -185,6 +185,7 @@ function OwnedImage({
   height,
   onLoad,
   onError,
+  presentation,
   ...props
 }: ImageProps & { source: string }) {
   const context = useMarkdownMedia();
@@ -233,7 +234,15 @@ function OwnedImage({
       height={height}
       // A document image keeps its box until its address arrives; without one it would show its alt text.
       className={cn(documentMode ? className : 'block h-auto max-h-[30rem] w-auto max-w-full object-contain', documentMode ? !url && 'invisible' : !drawn && 'hidden')}
-      style={documentMode ? { ...style, ...documentImageSize(width, height) } : { ...style, width: row?.ready ? '100%' : style?.width }}
+      style={presentation ? {
+        inlineSize: '100%',
+        blockSize: presentation.aspectRatio ? '100%' : 'auto',
+        maxHeight: 'none',
+        objectFit: presentation.fit ?? 'contain',
+        aspectRatio: presentation.aspectRatio,
+      } : documentMode
+        ? { ...style, ...documentImageSize(width, height) }
+        : { ...style, width: row?.ready ? '100%' : style?.width }}
       data-oc-media-source={copySource(source)}
       data-oc-media-srcset={srcSet}
       decoding="async"
@@ -265,8 +274,8 @@ function OwnedImage({
   return (
     <span
       ref={setRef}
-      className={drawn ? 'inline-block max-w-[min(100%,30rem)] align-top my-1 me-1' : undefined}
-      style={rowStyle}
+      className={presentation ? 'openui-owned-image' : drawn ? 'inline-block max-w-[min(100%,30rem)] align-top my-1 me-1' : undefined}
+      style={presentation ? { display: 'block', inlineSize: '100%', blockSize: presentation.aspectRatio ? '100%' : undefined } : rowStyle}
       data-oc-media-source={copySource(source)}
     >
       {!drawn && <MediaLabel source={source} name={name} title={title} linked={linked} state={failed ? 'failed' : active ? 'loading' : undefined} />}
@@ -275,6 +284,7 @@ function OwnedImage({
         <Button
           variant="ghost"
           className={cn('block h-auto max-w-full overflow-hidden rounded-lg bg-muted/10 p-0 cursor-zoom-in', !drawn && 'hidden')}
+          style={presentation ? { inlineSize: '100%', blockSize: presentation.aspectRatio ? '100%' : undefined } : undefined}
           aria-label={name}
           data-oc-media-gallery="true"
           onClick={() => {

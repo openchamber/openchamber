@@ -69,6 +69,13 @@ describe('per-tool view of an ordered rule list', () => {
     expect(Object.keys(model.keys)).toEqual(['shell']);
   });
 
+  test('stored rules for the retired render tool remain editable and round-trip', () => {
+    const rules = [rule('openchamber_render', '*', 'deny')];
+    const model = parseRules(rules);
+    expect(model.keys.openchamber_render).toEqual({ effect: 'deny', patterns: [] });
+    expect(serializeRules(model)).toEqual(rules);
+  });
+
   test('MCP and plugin tools survive as their own rows', () => {
     const model = parseRules([rule('playwright_click', '*', 'ask')]);
     expect(model.keys.playwright_click).toEqual({ effect: 'ask', patterns: [] });

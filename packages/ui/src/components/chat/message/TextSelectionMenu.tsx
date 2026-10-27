@@ -52,7 +52,7 @@ interface TextSelectionMenuProps {
   readingKey: string;
   canReadAloud: boolean;
   // This menu answers to the selections made in the page frames inside its
-  // container (`openchamber_render`), not to the container's own text. Each
+  // container (OpenUI HtmlView), not to the container's own text. Each
   // page has its own such menu (HtmlRenderFrame), so a page works wherever it
   // is drawn: in a message, in the live turn's hoisted pages, or full screen.
   // `readingKey` is then the id of the message the page belongs to.
@@ -557,7 +557,7 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
     };
   }, [containerRef, handleSelectionChange, hideMenu, showMenu]);
 
-  // A selection made inside a page frame (`openchamber_render`) arrives as an
+  // A selection made inside an OpenUI HtmlView arrives as an
   // event from the frame, never through window.getSelection().
   React.useEffect(() => {
     const container = containerRef.current;

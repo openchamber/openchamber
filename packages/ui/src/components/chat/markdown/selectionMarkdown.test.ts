@@ -482,3 +482,36 @@ test('a selection across two separate documents stays native', () => {
   const second = render('<p>Another one.</p>');
   expect(getMarkdownSelectionText(selectionOf(textIn(first, 'p'), 0, textIn(second, 'p'), 3))).toBeNull();
 });
+
+test('OpenUI selections always copy canonical source across partial and mixed ranges', () => {
+  const root = render('<p>before</p><section data-oc-openui-source="root = Form()\n\n" data-oc-code-source="wrong"><input value="private"><iframe>preview secret</iframe><span>live secret</span></section><p>after</p>');
+  const ui = root.querySelector('section');
+  if (!ui) throw new Error('Missing OpenUI wrapper');
+  const live = ui.querySelector('span')?.firstChild;
+  if (!live) throw new Error('Missing live field');
+  const partial = selectionOf(live, 2, live, 6);
+  expect(getMarkdownSelectionText(partial)).toBe('```openui-lang\nroot = Form()\n\n```');
+  const before = textIn(root, 'p:first-child');
+  const across = selectionOf(before, 2, live, 6);
+  expect(getMarkdownSelectionText(across)).toBe('fore\n\n```openui-lang\nroot = Form()\n\n```');
+  const full = document.createRange();
+  full.selectNodeContents(root);
+  expect(getMarkdownSelectionText(full)).toContain('root = Form()');
+  expect(getMarkdownSelectionText(full)).not.toContain('live secret');
+  expect(getMarkdownSelectionText(full)).not.toContain('private');
+  expect(getMarkdownSelectionText(full)).not.toContain('preview secret');
+  expect(serializeRenderedMarkdown(root, 'plain')).toContain('root = Form()');
+  expect(ui.textContent).toContain('live secret');
+});
+
+test('detached rich copy replaces complete OpenUI subtree with semantic source', () => {
+  const live = render('<div data-oc-openui-source="root = Form()\nfield = TextInput()"><input value="draft secret"><select><option>draft secret</option></select><iframe>preview secret</iframe><span>live secret</span></div>');
+  const copy = live.cloneNode(true) as HTMLElement;
+  normalizeMarkdownCopyContent(copy);
+  expect(copy.querySelector('pre code')?.className).toBe('language-openui-lang');
+  expect(copy.querySelector('pre code')?.textContent).toBe('root = Form()\nfield = TextInput()');
+  expect(copy.textContent).not.toContain('draft secret');
+  expect(copy.textContent).not.toContain('preview secret');
+  expect(copy.textContent).not.toContain('live secret');
+  expect(live.querySelector('input')).not.toBeNull();
+});

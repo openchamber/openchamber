@@ -24,12 +24,12 @@ import { isSpaceDirectory } from '@/lib/spaces/space-route';
 export type BlockingPermissionRequest = Pick<PermissionRequest, 'id' | 'sessionID' | 'action' | 'resources' | 'save'>;
 export type BlockingFormRequest = Pick<FormRequest, 'id' | 'sessionID' | 'title'>;
 /**
- * A page an agent showed that waits for the user's answer (render.page with
- * awaitAnswer). It blocks the agent like a form, so every surface shows it as
+ * An OpenUI prompt waiting for the user's answer. It blocks the agent like a
+ * form, so every surface shows it as
  * one, but it is answered on the page in the chat: it is kept apart from
  * forms so nothing tries to answer it as a form. `id` is the tool call id.
  */
-type BlockingPageRequest = { id: string; sessionID: string; title: string };
+type BlockingPageRequest = { id: string; sessionID: string; title: string; kind?: 'openui'; sourceRevision?: string };
 
 type PendingBlockingRequests = {
   directory: string;
@@ -206,7 +206,7 @@ export const applyWaitingPageEvent = (
     const { sessionID, page } = event.properties;
     const directory = event.properties.directory ?? resolveDirectory(sessionID);
     if (!directory) return;
-    reducer.ask(normalizeDirectory(directory), sessionID, { kind: 'page', request: { id: page.id, sessionID, title: page.title } });
+    reducer.ask(normalizeDirectory(directory), sessionID, { kind: 'page', request: { id: page.id, sessionID, title: page.title, kind: page.kind, sourceRevision: page.sourceRevision } });
   }
   reducer.publish();
 };
@@ -231,7 +231,13 @@ export const readHostBlockingRequestsSnapshot = async (
     }
     const pages = changes.get(sessionId) ?? new Map<string, BlockingPageRequest | null>();
     if (event.type === 'openchamber.page-settled') pages.set(event.properties.pageID, null);
-    else pages.set(event.properties.page.id, { id: event.properties.page.id, sessionID: sessionId, title: event.properties.page.title });
+    else pages.set(event.properties.page.id, {
+      id: event.properties.page.id,
+      sessionID: sessionId,
+      title: event.properties.page.title,
+      kind: event.properties.page.kind,
+      sourceRevision: event.properties.page.sourceRevision,
+    });
     changes.set(sessionId, pages);
   };
   pageSnapshotObservers.add(observe);

@@ -15,7 +15,7 @@
 import type { ContextPartMetadata } from "@/lib/messages/contextParts"
 import { readEffortRevision, rememberEffort } from "@/lib/modelEfforts"
 import { create } from "zustand"
-import { type Metadata, type Part, type Session, type TextPart } from "@/lib/opencode/model"
+import { type JsonValue, type Metadata, type Part, type Session, type TextPart } from "@/lib/opencode/model"
 import type { AttachedFile, SessionWorktreeAttachment } from "@/stores/types/sessionTypes"
 import { permissionModeForNewSession, type PermissionMode } from "@/stores/utils/permissionAutoAccept"
 import type { WorktreeMetadata } from "@/types/worktree"
@@ -367,6 +367,57 @@ type CapturedSendTarget = {
   runtimeKey: string
   sessionId: string
   directory: string
+}
+
+/** A generated interface submits a user turn without consuming composer state. */
+export async function sendOpenUIResponse(input: CapturedSendTarget & {
+  summary: string
+  data: JsonValue
+  isCurrent: () => boolean
+}): Promise<void> {
+  if (input.runtimeKey !== getRuntimeKey()) throw new Error("The connection changed before the answer was sent")
+  const assertCurrent = () => {
+    if (!input.isCurrent()) throw new Error("The interface changed before the answer was sent")
+  }
+  assertCurrent()
+  const summary = input.summary.trim()
+  const data = JSON.stringify(input.data)
+  if (!summary || summary.length > 500 || data.length > 16000) {
+    throw new Error("The answer exceeds the submission limits")
+  }
+
+  const session = getSyncSessions(input.directory).find((item) => item.id === input.sessionId)
+  const providerID = session?.model?.providerID
+    ?? findLatestUserModelChoice(
+      getSyncMessages(input.sessionId, input.directory),
+      (messageId) => getSyncParts(messageId, input.directory),
+    )?.providerID
+    ?? useSelectionStore.getState().getSessionModelSelection(input.sessionId)?.providerId
+    ?? useConfigStore.getState().currentProviderId
+  if (!providerID) throw new Error("The session's model provider is unavailable")
+
+  const content = `${summary}\n\n${data}`
+  await optimisticSend({
+    runtimeKey: input.runtimeKey,
+    sessionId: input.sessionId,
+    directory: input.directory,
+    content,
+    beforeOptimisticInsert: assertCurrent,
+    ready: fetchResponseStyleInstruction()
+      .catch(() => undefined)
+      .then((style) => syncSessionKnowledge(input.directory, input.sessionId, style, input.runtimeKey)),
+    send: async (messageId) => {
+      assertCurrent()
+      await opencodeClient.sendMessage({
+        runtimeKey: input.runtimeKey,
+        id: input.sessionId,
+        directory: input.directory,
+        providerID,
+        text: content,
+        messageId,
+      })
+    },
+  })
 }
 
 type SendMessageOptions = {

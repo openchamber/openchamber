@@ -7,13 +7,13 @@ import { dirname, resolve } from 'node:path';
 import { createRoot, type Root } from 'react-dom/client';
 import { Window } from 'happy-dom';
 import { OpenCode } from '@opencode/client';
-import type { Part, AssistantMessage } from '@/lib/opencode/model';
+import type { Part, AssistantMessage, ToolPart } from '@/lib/opencode/model';
 import { I18nProvider, useI18nStore } from '@/lib/i18n';
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import { ThemeSystemContext, type ThemeContextValue } from '@/contexts/theme-system-context';
 import { getDefaultTheme } from '@/lib/theme/themes';
 import type { RuntimeAPIs } from '@/lib/api/types';
-import { SyncProvider } from '@/sync/sync-context';
+import { SyncProvider, useDirectoryStore as useSyncDirectoryStore } from '@/sync/sync-context';
 import { useUIStore } from '@/stores/useUIStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { projectTurnRecords } from '../lib/turns/projectTurnRecords';
@@ -30,6 +30,9 @@ import { WorkflowsPanel } from '../workflows/WorkflowsPanel';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { getSyncChildStores } from '@/sync/sync-refs';
 import { ChatColumnSessionContext } from '../chatColumnSession';
+import { loadOpenUIProgram } from '../openuiRendererLoader';
+import { configureRuntimeUrlResolver } from '@/lib/runtime-url';
+import { opencodeClient } from '@/lib/opencode/client';
 
 plugin({
     name: 'live-activity-worker-url',
@@ -69,7 +72,23 @@ const themeContext: ThemeContextValue = {
     themeMode: 'dark', setThemeMode: unexpectedThemeChange, lightThemeId: getDefaultTheme(false).metadata.id,
     darkThemeId: theme.metadata.id, setLightThemePreference: unexpectedThemeChange, setDarkThemePreference: unexpectedThemeChange,
 };
-const sdk = OpenCode.make({ baseUrl: 'http://localhost', fetch: async () => new Response('[]', { headers: { 'Content-Type': 'application/json' } }) });
+const fixtureFetch: typeof fetch = async (input, init) => {
+    const url = input instanceof Request ? input.url : String(input);
+    if (url.includes('/event')) return new Response(new ReadableStream({ start(controller) {
+        init?.signal?.addEventListener('abort', () => controller.close(), { once: true });
+    } }), { headers: { 'content-type': 'text/event-stream' } });
+    if (url.includes('/session-warming')) return Response.json({ revision: 1, enabled: false, minutes: 5, sessions: [] });
+    if (url.includes('/api/fs/home')) return Response.json({ home: '/home/test' });
+    if (url.includes('/api/location')) return Response.json({ directory: '/project', project: { directory: '/project' } });
+    if (url.includes('/api/project') || url.includes('/api/config')) return Response.json([]);
+    if (url.includes('/api/form') || url.includes('/api/permission')) return Response.json({ data: [] });
+    if (url.includes('/api/vcs')) return Response.json({ data: { branch: { current: 'main', default: 'main' } } });
+    if (url.includes('/api/session/active')) return Response.json({ data: {} });
+    if (url.includes('/api/shell')) return Response.json({ location: { directory: '/project' }, data: [] });
+    if (url.includes('/api/session')) return Response.json({ data: [], cursor: {} });
+    throw new Error(`Unexpected Activity request: ${url}`);
+};
+const sdk = OpenCode.make({ baseUrl: 'http://localhost', fetch: fixtureFetch });
 // The answer's action bar also has an aria-expanded button, the branch menu
 // trigger, so the changed-file toggle is the one that opens no popup.
 const changedFilesToggle = () => document.querySelector<HTMLButtonElement>('[data-fixture-message="final"] button[aria-expanded]:not([aria-haspopup])');
@@ -127,6 +146,23 @@ function TurnRows({ record, retired, expanded, onToggle, renderMessage }: {
     </LiveTurnHoistedPagesContext.Provider>;
 }
 
+function SavedParts({ record, children }: { record: TurnRecord; children: React.ReactNode }) {
+    const store = useSyncDirectoryStore('/project', { bootstrap: false });
+    const [saved, setSaved] = React.useState<TurnRecord | null>(null);
+    React.useLayoutEffect(() => {
+        store.setState({ part: Object.fromEntries(record.assistantMessages.map((message) => [message.info.id, message.parts])) });
+        setSaved(record);
+    }, [record, store]);
+    return saved ? children : null;
+}
+
+async function waitForFrames(container: HTMLElement, count: number) {
+    for (let attempt = 0; attempt < 25 && container.querySelectorAll('iframe').length !== count; attempt++) {
+        await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+    }
+    expect(container.querySelectorAll('iframe')).toHaveLength(count);
+}
+
 function Harness({ record, retired = false, changedFiles, isLatestTurn = true, onCopyMessage, onCopyTurn }: {
     record: TurnRecord;
     retired?: boolean;
@@ -158,10 +194,12 @@ function Harness({ record, retired = false, changedFiles, isLatestTurn = true, o
     return <RuntimeAPIContext.Provider value={runtimeApis}>
         <ThemeSystemContext.Provider value={themeContext}>
             <SyncProvider sdk={sdk} directory="/project">
+                <SavedParts record={record}>
                 <I18nProvider>
                     <TurnRows record={record} retired={retired} expanded={expanded}
                         onToggle={() => setExpanded((value) => !value)} renderMessage={renderMessage} />
                 </I18nProvider>
+                </SavedParts>
             </SyncProvider>
         </ThemeSystemContext.Provider>
     </RuntimeAPIContext.Provider>;
@@ -178,6 +216,7 @@ describe('live Activity with the real message body', () => {
     let restore: () => void;
     beforeEach(async () => {
         const win = new Window({ url: 'http://localhost', settings: { device: { prefersReducedMotion: 'reduce' } } });
+        win.document.write('<!doctype html><html><head></head><body></body></html>');
         const globals = {
             window: win, document: win.document, navigator: win.navigator, localStorage: win.localStorage,
             customElements: win.customElements,
@@ -186,12 +225,14 @@ describe('live Activity with the real message body', () => {
             MutationObserver: win.MutationObserver, ResizeObserver: win.ResizeObserver,
             requestAnimationFrame: win.requestAnimationFrame.bind(win), cancelAnimationFrame: win.cancelAnimationFrame.bind(win),
             getComputedStyle: win.getComputedStyle.bind(win), IS_REACT_ACT_ENVIRONMENT: true,
+            fetch: fixtureFetch,
         };
         const previous = Object.keys(globals).map((name) => [name, Object.getOwnPropertyDescriptor(globalThis, name)] as const);
         for (const [name, value] of Object.entries(globals)) Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
         // Reduced motion makes the disclosure lifecycle deterministic without
         // replacing the real component or animation module.
         restore = () => {
+            void win.happyDOM.abort();
             for (const [name, descriptor] of previous) {
                 if (descriptor) Object.defineProperty(globalThis, name, descriptor);
                 else Reflect.deleteProperty(globalThis, name);
@@ -200,10 +241,13 @@ describe('live Activity with the real message body', () => {
         container = document.createElement('div');
         document.body.append(container);
         root = createRoot(container);
-        useUIStore.setState({ collapsibleThinkingBlocks: false, showSplitAssistantMessageActions: false });
+        useUIStore.setState({ collapsibleThinkingBlocks: false, showSplitAssistantMessageActions: false, agentRenderToolEnabled: true });
         useDirectoryStore.setState({ currentDirectory: '/project' });
         useI18nStore.getState().setLocale('en');
+        configureRuntimeUrlResolver({ apiBaseUrl: 'http://localhost' });
+        opencodeClient.reconnectToRuntimeBaseUrl();
         MessageBody = (await import('../message/MessageBody')).default;
+        await loadOpenUIProgram();
     });
     afterEach(async () => {
         await act(async () => root.unmount());
@@ -343,7 +387,7 @@ describe('live Activity with the real message body', () => {
             expect(decline).not.toBeNull();
             await act(async () => decline?.click());
             expect(requests.filter((request) => request.url.endsWith('/pending/decline'))).toEqual([
-                { url: '/api/openchamber/workflows/pending/decline', method: 'POST' },
+                { url: 'http://localhost/api/openchamber/workflows/pending/decline', method: 'POST' },
             ]);
             expect(approve?.disabled).toBe(true);
             expect(decline?.disabled).toBe(true);
@@ -378,82 +422,124 @@ describe('live Activity with the real message body', () => {
         expect(header?.getAttribute('aria-expanded')).toBe('true');
     });
 
-    test('draws a page the agent showed above the answer, outside the folded Activity', async () => {
-        const pagePart = (id: string, messageID: string, ok: boolean): Part => ({
-            type: 'tool', tool: 'openchamber_render', id, callID: id, sessionID: 'session', messageID,
-            state: {
-                status: 'completed', input: { action: 'render.page', parameters: { html: '<p>chart</p>', title: `Page ${id}` } },
-                output: '{}', metadata: { openchamber: { ok } }, time: { start: 1, end: 2 },
-            },
-        });
-        const progress = assistant('progress', [text('progress-text', 'Drawing'), readPart, pagePart('early', 'progress', true), pagePart('refused', 'progress', false)], 'tool-calls');
-        const final = assistant('final', [pagePart('late', 'final', true), text('final-text', 'Here it is')], 'stop');
+    test('keeps Markdown HtmlViews with the final answer and mounts each once when Activity opens', async () => {
+        const ui = 'root = Stack([HtmlView("<p>First</p>", null, "First page"), HtmlView("<p>Second</p>", null, "Second page")])';
+        const progress = assistant('progress', [text('progress-text', 'Drawing'), readPart], 'tool-calls');
+        const final = assistant('final', [{ ...text('final-text', `\`\`\`openui-lang\n${ui}\n\`\`\`\n\nHere it is`), messageID: 'final' }], 'stop');
         await act(async () => root.render(<Harness record={turn([progress, final])} />));
+        await waitForFrames(container, 2);
         const frames = () => [...container.querySelectorAll('iframe')].map((frame) => frame.getAttribute('title'));
-        // Both accepted pages sit with the answer, in the order they ran; the refused one does not.
-        expect(frames()).toEqual(['Page early', 'Page late']);
+        expect(frames()).toEqual(['First page', 'Second page']);
         const finalMessage = container.querySelector('[data-fixture-message="final"]');
-        expect(finalMessage?.textContent?.indexOf('Here it is')).toBeGreaterThan(-1);
+        expect(finalMessage?.textContent).toContain('Here it is');
         expect(finalMessage?.querySelectorAll('iframe')).toHaveLength(2);
         expect(container.querySelector('iframe')?.getAttribute('sandbox')).toBe('allow-scripts allow-forms');
-        // Opening Activity shows the steps without drawing the pages a second time.
+        const firstFrame = container.querySelector('iframe');
         await act(async () => container.querySelector<HTMLButtonElement>('button[aria-controls]')?.click());
         expect(container.textContent).toContain('Drawing');
-        expect(frames()).toEqual(['Page early', 'Page late']);
+        expect(frames()).toEqual(['First page', 'Second page']);
+        expect(container.querySelector('iframe')).toBe(firstFrame);
     });
 
-    test('keeps a page in view in a turn that ended without an answer', async () => {
+    test('keeps a waiting HtmlView outside a retired Activity fold without duplicate mounts', async () => {
         const page: Part = {
-            type: 'tool', tool: 'openchamber_render', id: 'page', callID: 'page', sessionID: 'session', messageID: 'progress',
+            type: 'tool', tool: 'prompt_openui', id: 'page', callID: 'page', sessionID: 'session', messageID: 'progress',
             state: {
-                status: 'completed', input: { action: 'render.page', html: '<p>chart</p>', title: 'Drawn page' },
-                output: '{}', metadata: { openchamber: { ok: true } }, time: { start: 1, end: 2 },
-            },
-        };
-        const record = turn([assistant('progress', [text('progress-text', 'Still working'), readPart, page], 'tool-calls')]);
-        await act(async () => root.render(<Harness record={record} retired />));
-        // The steps fold away; the page stays below the fold, drawn once.
-        expect(container.textContent).not.toContain('Still working');
-        expect([...container.querySelectorAll('iframe')].map((frame) => frame.getAttribute('title'))).toEqual(['Drawn page']);
-        await act(async () => container.querySelector<HTMLButtonElement>('button[aria-controls]')?.click());
-        expect(container.textContent).toContain('Still working');
-        expect(container.querySelectorAll('iframe')).toHaveLength(1);
-    });
-
-    test('draws what the agent does after a page below it while the turn works', async () => {
-        const page: Part = {
-            type: 'tool', tool: 'openchamber_render', id: 'page', callID: 'page', sessionID: 'session', messageID: 'asked',
-            state: {
-                status: 'completed', input: { action: 'render.page', html: '<p>pick</p>', title: 'Pick a layout', awaitAnswer: true },
-                output: '{}', metadata: { openchamber: { ok: true, answer: { answered: true, summary: 'B', data: null } } }, time: { start: 1, end: 2 },
-            },
-        };
-        const before = assistant('before', [text('before-text', 'Looking around'), readPart], 'tool-calls');
-        const asked = assistant('asked', [page], 'tool-calls');
-        // The reply is still being written: not yet marked final.
-        const writing = assistant('writing', [text('writing-text', 'Building layout B')], undefined);
-        await act(async () => root.render(<Harness record={turn([before, asked, writing])} />));
-
-        const html = container.innerHTML;
-        expect(html.indexOf('title="Pick a layout"')).toBeGreaterThan(-1);
-        expect(html.indexOf('Building layout B')).toBeGreaterThan(html.indexOf('title="Pick a layout"'));
-        expect(html.indexOf('Looking around')).toBeLessThan(html.indexOf('title="Pick a layout"'));
-        expect(container.querySelectorAll('iframe')).toHaveLength(1);
-    });
-
-    test('keeps a page that waits for the user\'s answer in view while its call runs', async () => {
-        const page: Part = {
-            type: 'tool', tool: 'openchamber_render', id: 'page', callID: 'page', sessionID: 'session', messageID: 'progress',
-            state: {
-                status: 'running', input: { action: 'render.page', html: '<p>pick</p>', title: 'Pick a layout', awaitAnswer: true },
+                status: 'running', input: { ui: 'root = Stack([HtmlView("<p>pick</p>", null, "Pick a layout")])' },
                 time: { start: 1 },
             },
         };
         const record = turn([assistant('progress', [text('progress-text', 'Asking'), readPart, page], 'tool-calls')]);
         await act(async () => root.render(<Harness record={record} retired />));
+        await waitForFrames(container, 1);
         expect(container.textContent).not.toContain('Asking');
         expect([...container.querySelectorAll('iframe')].map((frame) => frame.getAttribute('title'))).toEqual(['Pick a layout']);
-        expect(container.querySelector('[data-html-render-status="waiting"]')).not.toBeNull();
+        const frame = container.querySelector('iframe');
+        const source = container.querySelector('[data-oc-openui-source]');
+        expect(frame?.closest('[data-live-activity-content]')).toBeNull();
+        await act(async () => container.querySelector<HTMLButtonElement>('button[aria-controls]')?.click());
+        expect(container.textContent).toContain('Asking');
+        expect(container.querySelectorAll('iframe')).toHaveLength(1);
+        expect(container.querySelector('iframe')).toBe(frame);
+        expect(container.querySelector('[data-oc-openui-source]')).toBe(source);
+        await act(async () => container.querySelector<HTMLButtonElement>('button[aria-controls]')?.click());
+        expect(container.textContent).not.toContain('Asking');
+        expect(container.querySelector('iframe')).toBe(frame);
+        expect(container.querySelector('[data-oc-openui-source]')).toBe(source);
+    });
+
+    test('returns an answered OpenUI prompt and subsequent work to Activity', async () => {
+        const prompt: ToolPart = {
+            type: 'tool', tool: 'prompt_openui', id: 'prompt', callID: 'prompt', sessionID: 'session', messageID: 'asked',
+            state: { status: 'running', input: { ui: 'root = Stack([TextContent("Choose the next step"), HtmlView("<p>pick</p>", null, "Pick a layout")])' }, time: { start: 1 } },
+        };
+        const asked = assistant('asked', [prompt], 'tool-calls');
+        await act(async () => root.render(<Harness record={turn([asked])} />));
+        await waitForFrames(container, 1);
+        const interfaces = () => container.querySelectorAll('[data-oc-openui-source]');
+        expect(interfaces().length).toBe(1);
+        expect(interfaces()[0].closest('[data-live-activity-content]') === null).toBe(true);
+
+        const answered: ToolPart = { ...prompt, state: {
+            status: 'completed', input: prompt.state.input, output: '', time: { start: 1, end: 2 },
+            metadata: { openchamber: { ok: true, answer: { answered: true, summary: 'Start implementation', data: null } } },
+        } };
+        const continued = assistant('continued', [text('working', 'Implementing the chosen direction'), readPart], 'tool-calls');
+        const before = assistant('before', [text('before-text', 'Looking around')], 'tool-calls');
+        const progress = [before, assistant('asked', [answered], 'tool-calls'), continued];
+        await act(async () => root.render(<Harness record={turn(progress)} />));
+        await waitForFrames(container, 1);
+        expect(interfaces().length).toBe(1);
+        expect(interfaces()[0].closest('[data-live-activity-content]') !== null).toBe(true);
+        expect(container.querySelector('[data-live-activity-content] [data-fixture-message="continued"]') !== null).toBe(true);
+        expect(container.innerHTML.indexOf('Looking around')).toBeLessThan(container.innerHTML.indexOf('title="Pick a layout"'));
+        expect(container.innerHTML.indexOf('Implementing the chosen direction')).toBeGreaterThan(container.innerHTML.indexOf('title="Pick a layout"'));
+
+        const final = assistant('final', [text('answer', 'Implementation complete')], 'stop');
+        await act(async () => root.render(<Harness record={turn([...progress, final])} />));
+        expect(interfaces().length).toBe(0);
+        expect(container.querySelectorAll('iframe')).toHaveLength(0);
+        expect(container.textContent).toContain('Implementation complete');
+        expect(container.textContent).not.toContain('Implementing the chosen direction');
+
+        const header = container.querySelector<HTMLButtonElement>('button[aria-controls]');
+        await act(async () => header?.click());
+        await waitForFrames(container, 1);
+        expect(interfaces().length).toBe(1);
+        expect(container.textContent).toContain('Answered: Start implementation');
+        await act(async () => header?.click());
+        expect(interfaces().length).toBe(0);
+        expect(container.querySelectorAll('iframe')).toHaveLength(0);
+    });
+
+    test('folds a stopped OpenUI prompt in a retired turn and restores it on expansion', async () => {
+        const stopped: ToolPart = {
+            type: 'tool', tool: 'prompt_openui', id: 'prompt', callID: 'prompt', sessionID: 'session', messageID: 'asked',
+            state: { status: 'error', input: { ui: 'root = Stack([TextContent("Choose the next step")])' }, error: 'Stopped', time: { start: 1, end: 2 } },
+        };
+        await act(async () => root.render(<Harness record={turn([assistant('asked', [stopped], 'tool-calls')])} retired />));
+        expect(container.querySelectorAll('[data-oc-openui-source]').length).toBe(0);
+        await act(async () => container.querySelector<HTMLButtonElement>('button[aria-controls]')?.click());
+        expect(container.querySelectorAll('[data-oc-openui-source]').length).toBe(1);
+        expect(container.textContent).toContain('Not answered');
+    });
+
+    test('folds a settled OpenUI prompt in the final message with its other tool parts', async () => {
+        const prompt: ToolPart = {
+            type: 'tool', tool: 'prompt_openui', id: 'prompt', callID: 'prompt', sessionID: 'session', messageID: 'final',
+            state: {
+                status: 'completed', input: { ui: 'root = Stack([TextContent("Choose the next step")])' }, output: '',
+                metadata: { openchamber: { ok: true, answer: { answered: false, reason: 'chat' } } }, time: { start: 1, end: 2 },
+            },
+        };
+        const final = assistant('final', [prompt, text('answer', 'Continuing from your chat reply')], 'stop');
+        await act(async () => root.render(<Harness record={turn([final])} />));
+        expect(container.querySelectorAll('[data-oc-openui-source]').length).toBe(0);
+        expect(container.textContent).toContain('Continuing from your chat reply');
+        await act(async () => container.querySelector<HTMLButtonElement>('button[aria-controls]')?.click());
+        expect(container.querySelectorAll('[data-oc-openui-source]').length).toBe(1);
+        expect(container.querySelector('[data-live-activity-content] [data-oc-openui-source]') !== null).toBe(true);
+        expect(container.textContent).toContain('Answered in the chat');
     });
 
     test('keeps thinking in the final message inside Activity, not outside with the answer', async () => {

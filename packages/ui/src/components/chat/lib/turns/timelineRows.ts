@@ -134,14 +134,16 @@ const turnRows = (entry: TurnEntry, options: TimelineRowsOptions): TimelineRow[]
         // turn's latest steps, the pages and the steps after them. Opened,
         // every step is a row of its own.
         rows.push({ kind: 'turn-fold', key: `fold:${turn.turnId}`, ...fields });
+        const pages = finalMessage ? [] : getShownPages(turn.assistantMessages);
         if (options.expandedTurns.get(turn.turnId) === true) {
-            const pages = finalMessage ? [] : getShownPages(turn.assistantMessages);
             // A working turn draws what came after its last page below it.
             const lastPageMessageId = pages[pages.length - 1]?.messageID;
             const split = lastPageMessageId ? activityMessages.findIndex((message) => message.info.id === lastPageMessageId) + 1 : 0;
             activityMessages.slice(0, split > 0 ? split : activityMessages.length).forEach((message) => addMessage(message));
             if (pages.length > 0) rows.push({ kind: 'turn-pages', key: `pages:${turn.turnId}`, ...fields });
             if (split > 0) activityMessages.slice(split).forEach((message) => addMessage(message));
+        } else if (entry.hasLaterAssistant && pages.length > 0) {
+            rows.push({ kind: 'turn-pages', key: `pages:${turn.turnId}`, ...fields });
         }
         if (finalMessage) addMessage(finalMessage, true);
     } else {

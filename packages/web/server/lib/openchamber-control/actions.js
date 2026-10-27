@@ -1,3 +1,5 @@
+import { OPENCHAMBER_OPENUI_PROMPT_ACTIONS, OPENCHAMBER_OPENUI_READ_ACTIONS } from '../openui/context/tools.js';
+
 /**
  * Two capabilities, two tools.
  *
@@ -135,20 +137,6 @@ export const OPENCHAMBER_NOTIFY_ACTIONS = Object.freeze(
 );
 
 /**
- * Render is its own tool: a page drawn into the chat is a distinct intent from
- * any of the others, and its long layout guidance should cost context only for
- * users who keep it on. The page itself travels in the call's input, which the
- * chat already stores and syncs, so the action only checks it.
- */
-export const OPENCHAMBER_RENDER_ACTION_DEFINITIONS = Object.freeze([
-  { action: 'render.page', title: 'Show a page', description: 'Requires html and title' },
-]);
-
-export const OPENCHAMBER_RENDER_ACTIONS = Object.freeze(
-  OPENCHAMBER_RENDER_ACTION_DEFINITIONS.map(({ action }) => action),
-);
-
-/**
  * Image generation is its own tool: off by default, and while on it calls a
  * second model the user chose, which costs money of its own.
  */
@@ -227,7 +215,8 @@ const ACTIONS_BY_TOOL = Object.freeze({
   openchamber_memory: OPENCHAMBER_MEMORY_ACTIONS,
   openchamber_knowledge: OPENCHAMBER_KNOWLEDGE_ACTIONS,
   openchamber_notify: OPENCHAMBER_NOTIFY_ACTIONS,
-  openchamber_render: OPENCHAMBER_RENDER_ACTIONS,
+  prompt_openui: OPENCHAMBER_OPENUI_PROMPT_ACTIONS,
+  openchamber_openui: OPENCHAMBER_OPENUI_READ_ACTIONS,
   openchamber_image: OPENCHAMBER_IMAGE_ACTIONS,
   openchamber_secret: OPENCHAMBER_SECRET_ACTIONS,
   openchamber_workflow: OPENCHAMBER_WORKFLOW_ACTIONS,
@@ -280,7 +269,8 @@ export const OPENCHAMBER_ALL_ACTIONS = Object.freeze([
   ...OPENCHAMBER_MEMORY_ACTIONS,
   ...OPENCHAMBER_KNOWLEDGE_ACTIONS,
   ...OPENCHAMBER_NOTIFY_ACTIONS,
-  ...OPENCHAMBER_RENDER_ACTIONS,
+  ...OPENCHAMBER_OPENUI_PROMPT_ACTIONS,
+  ...OPENCHAMBER_OPENUI_READ_ACTIONS,
   ...OPENCHAMBER_IMAGE_ACTIONS,
   ...OPENCHAMBER_SECRET_ACTIONS,
   ...OPENCHAMBER_WORKFLOW_ACTIONS,

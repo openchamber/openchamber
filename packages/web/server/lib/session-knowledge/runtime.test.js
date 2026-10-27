@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { DIRECT_TOOLS_GUIDANCE, KNOWLEDGE_ENTRY_KEYS, RENDER_PAGE_GUIDANCE, SECRET_REQUEST_GUIDANCE, SESSION_LINK_GUIDANCE, WORK_NAME_GUIDANCE, WORKFLOW_GUIDANCE, buildKnowledgeEntries, createSessionKnowledgeRuntime } from './runtime.js';
+import { DIRECT_TOOLS_GUIDANCE, KNOWLEDGE_ENTRY_KEYS, SECRET_REQUEST_GUIDANCE, SESSION_LINK_GUIDANCE, WORK_NAME_GUIDANCE, WORKFLOW_GUIDANCE, buildKnowledgeEntries, createSessionKnowledgeRuntime } from './runtime.js';
 
 const DIRECTORY = '/work/project';
 const PROJECT_ID = 'path_project';
@@ -39,7 +39,7 @@ const createRuntime = (overrides = {}) => {
   };
   for (const key of [
     'readSessionMetadata', 'persistSessionMetadata', 'isAgentMemoryEnabled', 'isSessionLinkingAvailable',
-    'isPageRenderingAvailable', 'isSecretRequestAvailable', 'isWorkflowAvailable', 'areAgentToolsInCodeMode', 'readCheckoutBranch', 'readPlaceholderBranch', 'instructionEntries',
+    'isPageRenderingAvailable', 'getOpenUIGuidance', 'isSecretRequestAvailable', 'isWorkflowAvailable', 'areAgentToolsInCodeMode', 'readCheckoutBranch', 'readPlaceholderBranch', 'instructionEntries',
   ]) {
     if (key in overrides) dependencies[key] = overrides[key];
   }
@@ -172,6 +172,21 @@ describe('writing the knowledge into a session', () => {
     expect(instructionEntries.held.get(MEMORY)).toContain('Uses bun');
   });
 
+  test('keeps prior OpenUI guidance when the generated asset is unavailable', async () => {
+    const instructionEntries = createEntriesStub();
+    instructionEntries.held.set(KNOWLEDGE_ENTRY_KEYS.openui, 'Earlier OpenUI guidance');
+    const runtime = createRuntime({
+      ...pinnedStore(),
+      instructionEntries,
+      isPageRenderingAvailable: async () => true,
+      getOpenUIGuidance: async () => { throw new Error('asset unavailable'); },
+    });
+
+    expect(await runtime.sync('ses_a', DIRECTORY)).toBe(true);
+    expect(instructionEntries.held.get(KNOWLEDGE_ENTRY_KEYS.openui)).toBe('Earlier OpenUI guidance');
+    expect(instructionEntries.calls.some((call) => call[3] === KNOWLEDGE_ENTRY_KEYS.openui)).toBe(false);
+  });
+
   test('never throws, so a send goes out without its background', async () => {
     const instructionEntries = createEntriesStub();
     const runtime = createRuntime({
@@ -220,24 +235,29 @@ describe('when to link', () => {
   });
 });
 
-describe('when to draw a page', () => {
+describe('OpenUI guidance', () => {
   const bare = {
     isAgentMemoryEnabled: async () => false,
     projectContextRuntime: { readContext: async () => ({ notes: [], todos: [], plans: [] }) },
   };
 
-  test('is told in a session whose agent has the render tool', async () => {
-    const entries = await entriesFor(createRuntime({ ...bare, isPageRenderingAvailable: async () => true }), NO_PINS);
+  test('does not retain legacy render guidance when OpenUI is available', async () => {
+    const entries = await entriesFor(createRuntime({
+      ...bare,
+      isPageRenderingAvailable: async () => true,
+      getOpenUIGuidance: async () => 'Complete OpenUI guidance',
+    }), NO_PINS);
 
-    expect(entries[GUIDANCE]).toBe(`${RENDER_PAGE_GUIDANCE}\n\n${DIRECT_TOOLS_GUIDANCE}`);
-    expect(entries[GUIDANCE]).toContain('Skip it for a few numbers');
+    expect(entries[GUIDANCE]).toBe(DIRECT_TOOLS_GUIDANCE);
+    expect(entries[KNOWLEDGE_ENTRY_KEYS.openui]).toBe('Complete OpenUI guidance');
   });
 
-  test('is left out without the tool, or when the check fails', async () => {
-    for (const isPageRenderingAvailable of [async () => false, async () => { throw new Error('settings unreadable'); }]) {
-      const entries = await entriesFor(createRuntime({ ...bare, isPageRenderingAvailable }), NO_PINS);
-      expect(entries[GUIDANCE]).toBe('');
-    }
+  test('removes the entry when known off and preserves it when the capability read fails', async () => {
+    const off = await entriesFor(createRuntime({ ...bare, isPageRenderingAvailable: async () => false }), NO_PINS);
+    expect(off[KNOWLEDGE_ENTRY_KEYS.openui]).toBe('');
+
+    const failed = await entriesFor(createRuntime({ ...bare, isPageRenderingAvailable: async () => { throw new Error('settings unreadable'); } }), NO_PINS);
+    expect(failed).not.toHaveProperty(KNOWLEDGE_ENTRY_KEYS.openui);
   });
 });
 

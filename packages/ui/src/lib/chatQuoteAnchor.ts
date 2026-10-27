@@ -24,11 +24,11 @@ export type ChatQuoteAnchor = {
     /** Stream offset at capture time; a tie-breaker, not a position. */
     start: number;
     /**
-     * Set when the text lives in a page the agent showed (`openchamber_render`)
+     * Set when the text lives in an OpenUI HtmlView
      * instead of the message's own text: the stream is then that page's body,
      * measured and re-found inside its frame. Anchors without it are unchanged.
      */
-    page?: { partId: string };
+    page?: { partId: string; viewId?: string };
 };
 
 export const chatQuoteAnchorSchema = z.object({
@@ -36,7 +36,7 @@ export const chatQuoteAnchorSchema = z.object({
     prefix: z.string(),
     suffix: z.string(),
     start: z.number(),
-    page: z.object({ partId: z.string() }).optional(),
+    page: z.object({ partId: z.string(), viewId: z.string().optional() }).optional(),
 });
 
 // The page bootstrap (message/parts/htmlRender.ts) repeats both numbers.

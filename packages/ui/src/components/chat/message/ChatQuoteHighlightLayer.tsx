@@ -19,7 +19,7 @@
  * re-renders or remounts in the virtualized list. Runtimes without
  * `CSS.highlights` get the scroll without the highlight.
  *
- * A quote taken inside a page the agent showed (`openchamber_render`) has a
+ * A quote taken inside an OpenUI HtmlView has a
  * `page` in its anchor and lives in the page's frame, out of reach here. Its
  * marks, reveal and clicks go through `pageQuoteBridge.ts` to the frame, which
  * paints, scrolls and hit-tests in the page. Its popover opens on click only:
@@ -297,7 +297,7 @@ export const ChatQuoteHighlightLayer = React.memo(function ChatQuoteHighlightLay
                 for (let attempt = 0; attempt < REVEAL_ATTEMPTS; attempt += 1) {
                     await nextFrame();
                     if (!isCurrent()) return;
-                    if (revealPageMark(partId, anchor)) return;
+                    if (revealPageMark(partId, anchor, anchor.page.viewId)) return;
                 }
                 return;
             }
@@ -408,7 +408,7 @@ export const ChatQuoteHighlightLayer = React.memo(function ChatQuoteHighlightLay
         }
         // Another column's mark, one already gone, or one the reporting page
         // does not hold: a page only opens the popovers of its own marks.
-        if (!marksRef.current.some((mark) => mark.id === click.markId && mark.anchor.page?.partId === click.partId)) return;
+        if (!marksRef.current.some((mark) => mark.id === click.markId && mark.anchor.page?.partId === click.partId && mark.anchor.page?.viewId === click.viewId)) return;
         if (popoverRef.current?.markId === click.markId) {
             closePopover();
             return;

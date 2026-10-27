@@ -28,6 +28,7 @@ interface AssistantTextPartProps {
      * several transcript rows (`timelineRows.ts`).
      */
     range?: { start: number; end?: number };
+    allowOpenUI?: boolean;
 }
 
 const AssistantTextPart: React.FC<AssistantTextPartProps> = ({
@@ -36,6 +37,7 @@ const AssistantTextPart: React.FC<AssistantTextPartProps> = ({
     streamPhase,
     onShowPopup,
     range,
+    allowOpenUI = false,
 }) => {
     // Use part directly from props — parent provides the latest version from the store.
     // No store subscription here to avoid re-render cascade from unrelated delta events.
@@ -66,11 +68,14 @@ const AssistantTextPart: React.FC<AssistantTextPartProps> = ({
         identityKey: `${messageId}:${part.id ?? 'text'}`,
     });
 
-    const displayTextContent = resolveAssistantDisplayText({
-        textContent,
-        throttledTextContent,
+    const displayedSource = isStreaming ? throttledTextContent : textContent;
+    const display = React.useMemo(() => resolveAssistantDisplayText({
+        textContent: displayedSource,
+        throttledTextContent: displayedSource,
         isStreaming,
-    });
+        allowOpenUI,
+    }), [displayedSource, isStreaming, allowOpenUI]);
+    const displayTextContent = display.content;
 
     streamPerfObserve('ui.assistant_text_part.display_len', displayTextContent.length);
 
@@ -121,6 +126,11 @@ const AssistantTextPart: React.FC<AssistantTextPartProps> = ({
                 variant={part.type === 'reasoning' ? 'reasoning' : 'assistant'}
                 enableFileReferences={isFinalized}
                 onShowPopup={onShowPopup}
+                allowOpenUI={allowOpenUI}
+                canonicalContent={textContent}
+                openuiFullSource={fullText}
+                openuiRange={range}
+                openuiSource={display.openuiSource}
             />
         </div>
     );

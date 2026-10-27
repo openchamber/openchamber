@@ -1,23 +1,12 @@
 import React from 'react';
 
-import { toast } from '@/components/ui';
 import { ToolbarTooltipButton } from '@/components/ui/action-toolbar';
-import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
-import { useFrameAnnotation } from '@/components/browser/useFrameAnnotation';
-import { useWaitingBlink } from '@/hooks/useDurationTicker';
-import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
-import type { BrowserAnnotationPayload } from '@/lib/browser/contract';
-import { isVSCodeRuntime } from '@/lib/desktop';
-import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
-import type { ToolPart } from '@/lib/opencode/model';
-import { renderedPage, type RenderedPageAsk } from '@/lib/opencode/tools';
-import { answerRenderedPage } from '@/lib/renderPageAnswer';
 import { openExternalUrl } from '@/lib/url';
 import type { ChatQuoteAnchor } from '@/lib/chatQuoteAnchor';
 import { useConfigStore } from '@/stores/useConfigStore';
-import { dispatchFrameScroll, dispatchPageWaiting } from '@/components/chat/lib/scroll/timelineScrollIntent';
+import { dispatchFrameScroll } from '@/components/chat/lib/scroll/timelineScrollIntent';
 import { useChatSurfaceMode } from '@/components/chat/useChatSurfaceMode';
 import { dispatchFrameSelection, frameRectInApp } from '../frameSelection';
 import {
@@ -30,39 +19,21 @@ import {
 } from '../pageQuoteBridge';
 import { TextSelectionMenu } from '../TextSelectionMenu';
 import {
-    HTML_RENDER_MIN_HEIGHT,
     buildHtmlRenderDocument,
-    clampHtmlRenderHeight,
     htmlRenderAnswerStateMessage,
     htmlRenderClearSelectionMessage,
-    htmlRenderFileName,
     htmlRenderMarksMessage,
     htmlRenderPointerMessage,
     htmlRenderRevealMessage,
     htmlRenderSubmitReply,
     htmlRenderThemeMessage,
+    htmlRenderUnloadMessage,
     readHtmlRenderFrameMessage,
     type HtmlRenderAnswerState,
     type HtmlRenderKeyChord,
     type HtmlRenderSubmission,
 } from './htmlRender';
-import { useRenderPageHtml } from './renderPageImages';
-import { saveFile } from './saveFile';
 import { useHtmlRenderTheme } from './useHtmlRenderTheme';
-
-// A timeline row unmounts when it scrolls away and mounts again when it comes
-// back. The page's last height is kept per call, so it comes back at its size
-// instead of growing from the minimum under the reader's scroll.
-const MAX_REMEMBERED_HEIGHTS = 500;
-const rememberedHeights = new Map<string, number>();
-const rememberHeight = (id: string, height: number) => {
-    rememberedHeights.delete(id);
-    rememberedHeights.set(id, height);
-    if (rememberedHeights.size > MAX_REMEMBERED_HEIGHTS) {
-        const oldest = rememberedHeights.keys().next().value;
-        if (oldest !== undefined) rememberedHeights.delete(oldest);
-    }
-};
 
 /**
  * Replays a chord the page passed on as if it had been pressed on the frame
@@ -80,8 +51,10 @@ const NO_ANSWER: HtmlRenderAnswerState = { waiting: false, answer: null };
 const NO_RECT = { top: 0, left: 0, width: 0, height: 0 };
 
 interface HtmlRenderDocumentProps {
-    /** The `openchamber_render` call this page belongs to: quotes taken in it are anchored to it. */
+    /** The message part that owns this HtmlView and its quotes. */
     partId: string;
+    /** The trusted evaluated HtmlView identity. */
+    viewId?: string;
     html: string;
     title: string;
     className?: string;
@@ -103,13 +76,14 @@ interface HtmlRenderDocumentProps {
  * state its script holds survives. The page's selections, quote marks and
  * reveals pass through here to the chat (see pageQuoteBridge.ts).
  */
-function HtmlRenderDocument({ partId, html, title, className, style, contained = false, answerState = NO_ANSWER, onSubmit, onContentHeight, frameRef: outerFrameRef }: HtmlRenderDocumentProps) {
+export function HtmlRenderDocument({ partId, viewId, html, title, className, style, contained = false, answerState = NO_ANSWER, onSubmit, onContentHeight, frameRef: outerFrameRef }: HtmlRenderDocumentProps) {
     const theme = useHtmlRenderTheme();
     const [initialTheme] = React.useState(theme);
     const [initialAnswerState] = React.useState(answerState);
+    const [nonce] = React.useState(() => crypto.randomUUID());
     const srcDoc = React.useMemo(
-        () => buildHtmlRenderDocument(html, initialTheme, { contained, answerState: initialAnswerState }),
-        [contained, html, initialAnswerState, initialTheme],
+        () => buildHtmlRenderDocument(html, initialTheme, { contained, answerState: initialAnswerState, nonce }),
+        [contained, html, initialAnswerState, initialTheme, nonce],
     );
     const frameRef = React.useRef<HTMLIFrameElement>(null);
     const setFrame = React.useCallback((node: HTMLIFrameElement | null) => {
@@ -126,18 +100,22 @@ function HtmlRenderDocument({ partId, html, title, className, style, contained =
     const postState = React.useCallback(() => {
         // An opaque-origin page accepts messages only addressed to any origin.
         frameRef.current?.contentWindow?.postMessage(htmlRenderThemeMessage(theme), '*');
-        frameRef.current?.contentWindow?.postMessage(htmlRenderAnswerStateMessage(answerState), '*');
-    }, [answerState, theme]);
+        frameRef.current?.contentWindow?.postMessage(htmlRenderAnswerStateMessage(answerState, nonce), '*');
+    }, [answerState, nonce, theme]);
     React.useEffect(postState, [postState]);
 
     const submitRef = React.useRef({ answerState, onSubmit });
     React.useLayoutEffect(() => {
         submitRef.current = { answerState, onSubmit };
     }, [answerState, onSubmit]);
+    const contentHeightRef = React.useRef(onContentHeight);
+    React.useLayoutEffect(() => {
+        contentHeightRef.current = onContentHeight;
+    }, [onContentHeight]);
 
     const postMarks = React.useCallback(() => {
-        frameRef.current?.contentWindow?.postMessage(htmlRenderMarksMessage(getPageMarks(partId)), '*');
-    }, [partId]);
+        frameRef.current?.contentWindow?.postMessage(htmlRenderMarksMessage(getPageMarks(partId, viewId)), '*');
+    }, [partId, viewId]);
     React.useEffect(() => {
         postMarks();
         return subscribePageMarks(partId, postMarks);
@@ -179,6 +157,7 @@ function HtmlRenderDocument({ partId, html, title, className, style, contained =
         if (!frame) return;
         const handle: PageFrameHandle = {
             partId,
+            viewId,
             reveal: (anchor) => {
                 frame.scrollIntoView({ block: 'center', inline: 'nearest' });
                 if (loadedRef.current) {
@@ -200,7 +179,7 @@ function HtmlRenderDocument({ partId, html, title, className, style, contained =
             unregister();
             handleRef.current = null;
         };
-    }, [partId]);
+    }, [partId, viewId]);
 
     React.useEffect(() => {
         const handleMessage = (event: MessageEvent) => {
@@ -209,15 +188,16 @@ function HtmlRenderDocument({ partId, html, title, className, style, contained =
             const message = readHtmlRenderFrameMessage(event);
             if (message?.kind === 'size') {
                 setShown(true);
-                onContentHeight?.(message.height);
+                contentHeightRef.current?.(message.height);
             }
             if (message?.kind === 'open-link') void openExternalUrl(message.url);
             if (message?.kind === 'key') replayKeyChord(frame, message.chord);
             if (message?.kind === 'scroll') dispatchFrameScroll(frame, message.direction);
             if (message?.kind === 'submit') {
-                const reply = (error?: string) => frame.contentWindow?.postMessage(htmlRenderSubmitReply(message.id, error), '*');
+                const reply = (error?: string) => frame.contentWindow?.postMessage(htmlRenderSubmitReply(message.id, nonce, submitRef.current.answerState, error), '*');
                 const { answerState: current, onSubmit: deliver } = submitRef.current;
                 if (!deliver || !current.waiting) return reply('This page is not waiting for an answer');
+                if (message.submission.nonce !== nonce) return reply('This page is no longer current');
                 // The page's own check can be skipped by the page, so the
                 // gesture is checked here too: a click in the frame activates
                 // this window as well, and a page that sends on its own does not.
@@ -233,10 +213,11 @@ function HtmlRenderDocument({ partId, html, title, className, style, contained =
                     window.getSelection()?.removeAllRanges();
                     if (handle) clearOtherPageSelections(handle);
                 }
+                const page = { partId, viewId };
                 dispatchFrameSelection(frame, {
                     text: message.text,
                     rect: message.rect,
-                    anchor: message.anchor ? { ...message.anchor, page: { partId } } : undefined,
+                    anchor: message.anchor ? { ...message.anchor, page } : undefined,
                     clear: handle?.clearSelection,
                 });
             }
@@ -246,6 +227,7 @@ function HtmlRenderDocument({ partId, html, title, className, style, contained =
             if (message?.kind === 'mark-click') {
                 emitPageMarkClick({
                     partId,
+                    viewId,
                     markId: message.id,
                     measure: () => frameRectInApp(frame, message.rect),
                     // In the full-screen dialog the popover must render inside it to be usable.
@@ -253,9 +235,13 @@ function HtmlRenderDocument({ partId, html, title, className, style, contained =
                 });
             }
         };
+        const documentWindow = frameRef.current?.contentWindow;
         window.addEventListener('message', handleMessage);
-        return () => window.removeEventListener('message', handleMessage);
-    }, [onContentHeight, partId]);
+        return () => {
+            documentWindow?.postMessage(htmlRenderUnloadMessage(nonce), '*');
+            window.removeEventListener('message', handleMessage);
+        };
+    }, [nonce, partId, viewId]);
 
     return (
         <iframe
@@ -275,46 +261,12 @@ function HtmlRenderDocument({ partId, html, title, className, style, contained =
 }
 
 /**
- * The page in the full-screen dialog: inset from the dialog's edges, and as
- * tall as it needs. The dialog grows with it up to the window and the page
- * scrolls inside past that, so a short page leaves no empty half-screen.
- */
-function FullscreenPage({ partId, messageId, html, title, initialHeight, answerState, onSubmit }: {
-    partId: string;
-    messageId: string;
-    html: string;
-    title: string;
-    initialHeight: number;
-    answerState: HtmlRenderAnswerState;
-    onSubmit: (submission: HtmlRenderSubmission) => Promise<void>;
-}) {
-    const [height, setHeight] = React.useState(initialHeight);
-    const handleContentHeight = React.useCallback((contentHeight: number) => setHeight(Math.ceil(contentHeight)), []);
-    return (
-        <PageSelectionScope messageId={messageId} className="flex min-h-0 flex-col px-5 pb-5">
-            <HtmlRenderDocument
-                partId={partId}
-                html={html}
-                title={title}
-                className="block min-h-0 w-full shrink border-0 bg-transparent"
-                style={{ height }}
-                contained
-                answerState={answerState}
-                onSubmit={onSubmit}
-                onContentHeight={handleContentHeight}
-            />
-        </PageSelectionScope>
-    );
-}
-
-/**
  * Wraps a page with the selection menu for the text selected in it. Every page
  * owns its menu, so the page works wherever it is drawn: in its message, hoisted
  * into the live turn (outside any message body), or full screen in a dialog.
- * The menu attributes the selection to `messageId`, the message that owns the
- * `openchamber_render` call.
+ * The menu attributes the selection to the message that owns the HtmlView.
  */
-function PageSelectionScope({
+export function PageSelectionScope({
     messageId,
     className,
     style,
@@ -343,189 +295,29 @@ function PageSelectionScope({
     );
 }
 
-/** The page an `openchamber_render` call showed, or nothing for any other part. */
-export function ShownPage({ part }: { part: ToolPart }) {
-    // Kept while the call's state is the same object, so the page is not sent
-    // its answer state again on every render.
-    const { t } = useI18n();
-    const page = React.useMemo(() => renderedPage(part.tool, part.state), [part.tool, part.state]);
-    return page ? <HtmlRenderFrame part={part} html={page.html} title={page.title || t('chat.htmlRender.untitled')} ask={page.ask} /> : null;
-}
-
-interface HtmlRenderFrameProps {
-    /** The call; selections and quotes in the page are attributed to its message. */
-    part: ToolPart;
-    html: string;
-    title: string;
-    ask: RenderedPageAsk;
-}
-
-/**
- * A page an agent showed with `openchamber_render`, inline in the reply. The
- * frame takes the height the page reports, so the page scrolls with the chat;
- * annotation, full screen and download sit in a row above it.
- */
-// Its own component: the blink re-renders this dot once a second, not the page around it.
-function WaitingDot() {
-    const blink = useWaitingBlink(true);
-    return <span aria-hidden="true" className={cn('size-1.5 shrink-0 rounded-full bg-[var(--primary-base)]', blink)} />;
-}
-
-function HtmlRenderFrame({ part, html, title, ask }: HtmlRenderFrameProps) {
-    const { t } = useI18n();
-    const partId = part.id;
-    const messageId = part.messageID;
-    const theme = useHtmlRenderTheme();
-    // The page with its local images in place; null while they load, and the
-    // frame keeps the page's space meanwhile.
-    const loadedHtml = useRenderPageHtml(part, html);
-    const pageHtml = loadedHtml ?? html;
-    const [height, setHeight] = React.useState(() => rememberedHeights.get(partId) ?? HTML_RENDER_MIN_HEIGHT);
-    const [fullscreen, setFullscreen] = React.useState(false);
-
-    // The browser panel's annotation, on the page in its message: the agent
-    // learns which element or area the user means, with a screenshot on the
-    // desktop. Like the panel, a pointer tool: phones and VS Code do not get it.
-    const frameRef = React.useRef<HTMLIFrameElement>(null);
-    const directory = useEffectiveDirectory() ?? '';
-    const describePage = React.useCallback((payload: BrowserAnnotationPayload): BrowserAnnotationPayload => (
-        // The frame's own address is about:srcdoc; the page's title is what names it in the chat.
-        { ...payload, pageUrl: '', pageTitle: title }
-    ), [title]);
-    const annotation = useFrameAnnotation({
-        frameRef,
-        directory,
-        pageKey: partId,
-        intro: t('chat.htmlRender.annotate.intro'),
-        describePage,
-    });
-    const canAnnotate = !isVSCodeRuntime() && loadedHtml !== null;
-
-    const handleContentHeight = React.useCallback((contentHeight: number) => {
-        const next = clampHtmlRenderHeight(contentHeight);
-        rememberHeight(partId, next);
-        setHeight(next);
-    }, [partId]);
-
-    // On a phone the page is already as wide as the screen, so neither a
-    // bigger view nor a saved file helps there. VS Code has no save route for
-    // HTML, so it offers no download either.
+export function HtmlRenderToolbar({
+    annotate,
+    canAnnotate,
+    fullscreen,
+    download,
+    annotationActive,
+}: {
+    annotate?: { label: string; pressed: boolean; onClick: () => void };
+    canAnnotate: boolean;
+    fullscreen: { label: string; onClick: () => void };
+    download?: { label: string; onClick: () => void };
+    annotationActive: boolean;
+}) {
     const isMobile = useUIStore((state) => state.isMobile);
-    const canDownload = !isVSCodeRuntime();
-    const handleDownload = React.useCallback(async () => {
-        const fileName = htmlRenderFileName(title);
-        // The saved page carries the theme it was viewed in, so it opens the
-        // same way outside the app.
-        const file = new File([buildHtmlRenderDocument(pageHtml, theme)], fileName, { type: 'text/html' });
-        try {
-            await saveFile(file);
-        } catch {
-            toast.error(t('chat.htmlRender.downloadFailed'));
-        }
-    }, [pageHtml, t, theme, title]);
-
-    // What this client sent, shown until the call completes with the answer
-    // OpenCode stores.
-    const [sent, setSent] = React.useState<HtmlRenderSubmission | null>(null);
-    const answerState = React.useMemo<HtmlRenderAnswerState>(() => {
-        if (ask.kind === 'answered') return { waiting: false, answer: ask.data };
-        if (sent) return { waiting: false, answer: sent.data };
-        return { waiting: ask.kind === 'waiting', answer: null };
-    }, [ask, sent]);
-    const handleSubmit = React.useCallback(async (submission: HtmlRenderSubmission) => {
-        try {
-            await answerRenderedPage({ sessionId: part.sessionID, callId: part.callID, ...submission });
-            setSent(submission);
-        } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            toast.error(t('chat.htmlRender.answerFailed'), { description: message });
-            throw error;
-        }
-    }, [part.callID, part.sessionID, t]);
-    const answeredSummary = ask.kind === 'answered' ? ask.summary : sent?.summary;
-    const status = answeredSummary !== undefined
-        ? t('chat.htmlRender.answered', { summary: answeredSummary })
-        : ask.kind === 'waiting'
-            ? t('chat.htmlRender.waiting')
-            : ask.kind === 'answered-in-chat'
-                ? t('chat.htmlRender.answeredInChat')
-                : ask.kind === 'chat-sent-earlier'
-                    ? t('chat.htmlRender.chatSentEarlier')
-                    : ask.kind === 'unanswered' ? t('chat.htmlRender.unanswered') : null;
-    const waiting = ask.kind === 'waiting' && answeredSummary === undefined;
-    // The chat brings a page that waits for an answer into view, and again
-    // as its height arrives: an off-screen frame reports its size only once
-    // it is scrolled into view.
-    const blockRef = React.useRef<HTMLDivElement>(null);
-    React.useEffect(() => {
-        if (waiting) dispatchPageWaiting(blockRef.current);
-    }, [height, waiting]);
-
+    if (isMobile) return null;
     return (
-        <div ref={blockRef} className="group/html-render my-2" data-waiting-page={waiting ? partId : undefined}>
-        {isMobile ? null : (
-            // A row of its own above the page: over the page the buttons
-            // covered its own controls in the top corner. The row keeps its
-            // height while the buttons fade in, so hovering moves nothing.
-            <div className={cn(
-                'flex h-6 items-center justify-end gap-0.5 opacity-0 transition-opacity duration-150 focus-within:opacity-100 group-hover/html-render:opacity-100 pointer-coarse:opacity-100',
-                // The way out of annotation stays in view while it runs.
-                annotation.isAnnotating && 'opacity-100',
-            )}>
-                {canAnnotate ? (
-                    <ToolbarTooltipButton
-                        label={t('contextPanel.browser.annotate.toggle')}
-                        icon="markup"
-                        pressed={annotation.isAnnotating}
-                        onClick={annotation.toggle}
-                    />
-                ) : null}
-                <ToolbarTooltipButton label={t('chat.htmlRender.fullscreen')} icon="fullscreen" onClick={() => setFullscreen(true)} />
-                {canDownload ? (
-                    <ToolbarTooltipButton label={t('chat.htmlRender.download')} icon="download" onClick={() => { void handleDownload(); }} />
-                ) : null}
-            </div>
-        )}
-        <PageSelectionScope messageId={messageId} partId={partId} className="relative" style={{ height }}>
-            {loadedHtml === null ? null : (
-                <HtmlRenderDocument
-                    partId={partId}
-                    html={loadedHtml}
-                    title={title}
-                    className="block size-full border-0 bg-transparent"
-                    answerState={answerState}
-                    onSubmit={handleSubmit}
-                    onContentHeight={handleContentHeight}
-                    frameRef={frameRef}
-                />
-            )}
-            {isMobile ? null : (
-                <>
-                    <Dialog open={fullscreen} onOpenChange={setFullscreen}>
-                        <DialogContent className="max-w-[min(72rem,100%)] gap-0 overflow-hidden bg-background p-0">
-                            <DialogTitle className="truncate px-5 py-4 pe-12">{title}</DialogTitle>
-                            {fullscreen ? (
-                                <FullscreenPage
-                                    partId={partId}
-                                    messageId={messageId}
-                                    html={pageHtml}
-                                    title={title}
-                                    initialHeight={height}
-                                    answerState={answerState}
-                                    onSubmit={handleSubmit}
-                                />
-                            ) : null}
-                        </DialogContent>
-                    </Dialog>
-                </>
-            )}
-        </PageSelectionScope>
-        {status ? (
-            <div className="mt-1 flex items-center gap-1.5 typography-meta text-muted-foreground" data-html-render-status={ask.kind}>
-                {waiting ? <WaitingDot /> : null}
-                <span className="min-w-0 truncate" title={status}>{status}</span>
-            </div>
-        ) : null}
+        <div className={cn(
+            'flex h-6 items-center justify-end gap-0.5 opacity-0 transition-opacity duration-150 focus-within:opacity-100 group-hover/html-render:opacity-100 pointer-coarse:opacity-100',
+            annotationActive && 'opacity-100',
+        )}>
+            {canAnnotate && annotate ? <ToolbarTooltipButton label={annotate.label} icon="markup" pressed={annotate.pressed} onClick={annotate.onClick} /> : null}
+            <ToolbarTooltipButton label={fullscreen.label} icon="fullscreen" onClick={fullscreen.onClick} />
+            {download ? <ToolbarTooltipButton label={download.label} icon="download" onClick={download.onClick} /> : null}
         </div>
     );
 }

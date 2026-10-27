@@ -32,9 +32,9 @@ describe('global blocking requests index', () => {
   test('keeps a waiting page beside the session\'s forms until the server says it stopped waiting', () => {
     const noDirectory = () => null;
     applyGlobalBlockingRequestEvents('/far', [formCreated(form('q1', 's1'))]);
-    applyWaitingPageEvent({ type: 'openchamber.page-waiting', properties: { sessionID: 's1', directory: '/far/', page: { id: 'call_1', title: 'Pick a layout' } } }, noDirectory);
+    applyWaitingPageEvent({ type: 'openchamber.page-waiting', properties: { sessionID: 's1', directory: '/far/', page: { id: 'call_1', title: 'Pick a layout', kind: 'openui', sourceRevision: 'sha256' } } }, noDirectory);
 
-    expect(bySession().get('s1')).toEqual({ directory: '/far', permissions: [], forms: [form('q1', 's1')], pages: [{ id: 'call_1', sessionID: 's1', title: 'Pick a layout' }] });
+    expect(bySession().get('s1')).toEqual({ directory: '/far', permissions: [], forms: [form('q1', 's1')], pages: [{ id: 'call_1', sessionID: 's1', title: 'Pick a layout', kind: 'openui', sourceRevision: 'sha256' }] });
 
     // Settling the form leaves the page; settling the page empties the session.
     applyGlobalBlockingRequestEvents('/far', [{ type: 'form.settled', properties: { sessionID: 's1', formID: 'q1' } }]);
@@ -55,6 +55,13 @@ describe('global blocking requests index', () => {
   test('seeds waiting pages from the host', async () => {
     await readHostBlockingRequestsSnapshot(hostSnapshot({ s1: { permissions: [], forms: [], pages: [{ id: 'call_1', sessionID: 's1', title: 'Pick' }] } }), () => '/other');
     expect(bySession().get('s1')?.pages.map((page) => page.id)).toEqual(['call_1']);
+  });
+
+  test('keeps optional OpenUI wait fields from the host snapshot', async () => {
+    await readHostBlockingRequestsSnapshot(hostSnapshot({
+      s1: { permissions: [], forms: [], pages: [{ id: 'call_1', sessionID: 's1', title: 'Pick', kind: 'openui', sourceRevision: 'sha256' }] },
+    }), () => '/other');
+    expect(bySession().get('s1')?.pages).toEqual([{ id: 'call_1', sessionID: 's1', title: 'Pick', kind: 'openui', sourceRevision: 'sha256' }]);
   });
 
   test('tracks asks per session and settles them by request id', () => {

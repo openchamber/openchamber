@@ -71,6 +71,33 @@ describe('secret.request', () => {
     expect(await fs.readdir(directory)).toEqual([]);
   });
 
+  it('removes the file when the request aborts while the secret is being written', async () => {
+    const { directory, files } = await createHarness();
+    let releaseWrite;
+    let writing;
+    const started = new Promise((resolve) => { writing = resolve; });
+    const blockedFiles = {
+      ...files,
+      write: async (value) => {
+        const file = await files.write(value);
+        writing();
+        await new Promise((resolve) => { releaseWrite = resolve; });
+        return file;
+      },
+    };
+    const requests = createSecretRequests({ isEnabled: async () => true, files: blockedFiles });
+    const controller = new AbortController();
+    const pending = requests.request(ask, { ...call, signal: controller.signal });
+    await settle();
+    const answering = requests.answer({ sessionId: 'ses_1', callId: 'call_1', value: 'private' });
+    await started;
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ statusCode: 499 });
+    releaseWrite();
+    await expect(answering).rejects.toMatchObject({ statusCode: 404 });
+    expect(await fs.readdir(directory)).toEqual([]);
+  });
+
   it('keeps waiting after an empty value', async () => {
     const { requests } = await createHarness();
     const pending = requests.request(ask, call);

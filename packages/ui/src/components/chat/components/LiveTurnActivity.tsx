@@ -135,7 +135,7 @@ export function TurnFold({ turn, hasLaterAssistant, expanded, finalMessageId, on
                             </ActivityRowSkipContext.Provider>
                         </div>
                     </LiveActivityCollapse>
-                    {!finalMessage && pages.length > 0 ? <TurnPages pages={pages} /> : null}
+                    {!finalMessage && !hasLaterAssistant && pages.length > 0 ? <TurnPages pages={pages} /> : null}
                     {messagesBelowPages.length > 0 ? (
                         <ActivityRowSkipContext.Provider value={rowSkip}>
                             {messagesBelowPages.map((message) => (

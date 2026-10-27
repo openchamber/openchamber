@@ -6,7 +6,7 @@ import { OpenChamberControlError, asControlError } from './error.js';
 import { OPENCHAMBER_ALL_ACTIONS, OPENCHAMBER_KNOWLEDGE_ACTIONS } from './actions.js';
 import { writeScreenshot } from './screenshots.js';
 import { createProjectKnowledgeActions } from './project-knowledge.js';
-import { createPageAnswers, createRenderPageAction } from './render-page.js';
+import { createOpenUIRuntime } from '../openui/runtime.js';
 import { createImageGenerationAction } from './generate-image.js';
 import { createSecretRequests } from './secret-request.js';
 import { createWorkNamer } from '../openchamber-sessions/work-naming.js';
@@ -233,13 +233,12 @@ export const createOpenChamberControlService = (dependencies) => {
     projectContextRuntime = null,
     resolveProjectContextId = null,
     isKnowledgeToolEnabled = async () => true,
-    isRenderToolEnabled = async () => true,
+    isOpenUIEnabled = async () => true,
     isSecretToolEnabled = async () => true,
     // Where `secret.request` writes what the user saves
     // (`createSecretFiles`); absent means the server cannot take secrets.
     secretFiles = null,
-    // Hears when a page an agent shows starts and stops waiting for the
-    // user's answer (render.page with awaitAnswer, and secret.request).
+    // Hears when an OpenUI prompt or secret request starts and stops waiting for an answer.
     onPageWaitChange = () => {},
     // Puts a plan in front of the user; answers how many windows it reached.
     showPlan = null,
@@ -381,8 +380,6 @@ export const createOpenChamberControlService = (dependencies) => {
       return false;
     }
   };
-  const pageAnswers = createPageAnswers({ onWaitChange: onPageWaitChange });
-  const renderPage = createRenderPageAction({ isEnabled: isRenderToolEnabled, pageAnswers, hasUnreadChat });
   const secretRequests = createSecretRequests({ isEnabled: isSecretToolEnabled, files: secretFiles, onWaitChange: onPageWaitChange, hasUnreadChat });
   const generateImage = createImageGenerationAction({
     getClient,
@@ -567,6 +564,8 @@ export const createOpenChamberControlService = (dependencies) => {
       return null;
     }
   };
+
+  const openui = createOpenUIRuntime({ isEnabled: isOpenUIEnabled, onWaitChange: onPageWaitChange, getClient, resolveSessionDirectory });
 
   // Checked before anything is created or sent: a result nobody can deliver
   // must fail the call, not leave a dispatched session the agent waits on.
@@ -916,13 +915,16 @@ export const createOpenChamberControlService = (dependencies) => {
           directory: asNonEmptyString(contextDirectory),
         });
       }
-      if (action === 'render.page') {
-        return await renderPage(input, {
+      if (action === 'openui.prompt') {
+        return openui.prompt(input, {
           sessionId: asNonEmptyString(options.contextSessionId),
           callId: asNonEmptyString(options.contextCallId),
           directory: asNonEmptyString(contextDirectory),
           signal: options.signal,
         });
+      }
+      if (action === 'openui.read') {
+        return openui.read(input.groups);
       }
       if (action === 'image.generate') {
         return await generateImage(input, { directory: asNonEmptyString(contextDirectory), signal: options.signal });
@@ -1129,7 +1131,10 @@ export const createOpenChamberControlService = (dependencies) => {
   // The managed agent-tool plugin can no longer report the session's directory
   // (v2 dropped `context.directory` from a tool call), so it sends the session
   // id and the directory is resolved here, where it is authoritative.
-  // `answerPage` is the chat's side of a page that waits (render.page with
-  // awaitAnswer), `answerSecret` the chat's side of a secret.request card.
-  return { execute, resolveSessionDirectory, answerPage: pageAnswers.answer, answerSecret: secretRequests.answer };
+  return {
+    execute,
+    resolveSessionDirectory,
+    openui,
+    answerSecret: secretRequests.answer,
+  };
 };

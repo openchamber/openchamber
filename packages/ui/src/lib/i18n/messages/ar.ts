@@ -15,6 +15,7 @@ import { htmlRenderI18n } from './html-render.i18n';
 import { documentToolbarI18n } from './document-toolbar.i18n';
 import { updateDialogCanaryI18n } from './update-dialog-canary.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
+import { openUiI18n } from './openui.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
@@ -3858,6 +3859,7 @@ export const dict = {
   ...documentToolbarI18n.ar,
   ...updateDialogCanaryI18n.ar,
   ...secretRequestI18n.ar,
+  ...openUiI18n.ar,
   ...sessionNoticesI18n.ar,
   ...usageStatsI18n.ar,
   ...webSearchI18n.ar,

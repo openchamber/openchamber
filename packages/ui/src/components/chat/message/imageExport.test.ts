@@ -162,6 +162,18 @@ describe('message image export', () => {
             wrapper.remove();
         }
     });
+
+    test('image clone exports OpenUI source and removes live field descendants', () => {
+        const source = document.createElement('div');
+        source.innerHTML = '<section data-oc-openui-source="root = Form()" data-oc-code-source="wrong"><input value="draft secret"><textarea>draft secret</textarea><select><option>draft secret</option></select><iframe>preview secret</iframe><span>live secret</span></section>';
+        const clone = cloneMessageImageExportSource(source);
+        expect(clone.querySelector('pre code')?.className).toBe('language-openui-lang');
+        expect(clone.querySelector('pre code')?.textContent).toBe('root = Form()');
+        expect(clone.textContent).not.toContain('draft secret');
+        expect(clone.textContent).not.toContain('preview secret');
+        expect(clone.textContent).not.toContain('live secret');
+        expect(source.querySelector('input')).not.toBeNull();
+    });
 });
 
 describe('turn image export', () => {

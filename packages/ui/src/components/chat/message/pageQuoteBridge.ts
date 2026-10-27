@@ -1,6 +1,6 @@
 /**
  * Where the chat's quote highlights meet the pages the agent showed
- * (`openchamber_render`). A page's text is out of the chat's reach, so the
+ * through OpenUI HtmlView. A page's text is out of the chat's reach, so the
  * highlight layer (`ChatQuoteHighlightLayer.tsx`) cannot paint, hit-test or
  * scroll to a quote inside one; it hands the work to the page's frame through
  * this module instead:
@@ -21,6 +21,8 @@ import type { HtmlRenderMark } from './parts/htmlRender';
 
 export interface PageFrameHandle {
     partId: string;
+    /** Distinguishes evaluated HtmlViews that share one message part. */
+    viewId?: string;
     /** Scroll to the quote in the page and flash it. */
     reveal: (anchor: ChatQuoteAnchor) => void;
     /** Drop the page's selection and tell the selection menu it is gone. */
@@ -35,8 +37,8 @@ export function registerPageFrame(handle: PageFrameHandle): () => void {
 }
 
 /** True when a frame of that page was there to take it. */
-export function revealPageMark(partId: string, anchor: ChatQuoteAnchor): boolean {
-    const handle = [...frames].reverse().find((candidate) => candidate.partId === partId);
+export function revealPageMark(partId: string, anchor: ChatQuoteAnchor, viewId?: string): boolean {
+    const handle = [...frames].reverse().find((candidate) => candidate.partId === partId && candidate.viewId === viewId);
     handle?.reveal(anchor);
     return Boolean(handle);
 }
@@ -69,8 +71,10 @@ export function setPageMarks(owner: PageMarksOwner, byPart: Map<string, HtmlRend
     }
 }
 
-export function getPageMarks(partId: string): HtmlRenderMark[] {
-    return [...marksByOwner.values()].flatMap((byPart) => byPart.get(partId) ?? []);
+export function getPageMarks(partId: string, viewId?: string): HtmlRenderMark[] {
+    return [...marksByOwner.values()]
+        .flatMap((byPart) => byPart.get(partId) ?? [])
+        .filter((mark) => mark.anchor.page?.viewId === viewId);
 }
 
 export function subscribePageMarks(partId: string, listener: () => void): () => void {
@@ -85,6 +89,7 @@ export function subscribePageMarks(partId: string, listener: () => void): () => 
 
 export interface PageMarkClick {
     partId: string;
+    viewId?: string;
     /** Empty for a click on no mark. */
     markId: string;
     /** The mark's box in the app's viewport, from the frame's current position. */

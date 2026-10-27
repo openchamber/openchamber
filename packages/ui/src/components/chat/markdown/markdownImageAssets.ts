@@ -2,10 +2,14 @@ import { runtimeFetch } from '@/lib/runtime-fetch';
 import { readAssetBlob } from '@/lib/runtime-asset';
 import { getRuntimeUrlResolver, type RuntimeUrlResolver } from '@/lib/runtime-url';
 import { isFilePathWithinDirectory, toAbsoluteFilePath } from '@/lib/path-utils';
+import { z } from 'zod';
 
 const MAX_MARKDOWN_IMAGE_BYTES = 10 * 1024 * 1024;
+const MAX_VIDEO_BYTES = 1024 * 1024 * 1024;
+const VIDEO_EXTENSION_RE = /\.(?:mp4|m4v|mov|webm)$/i;
 const MAX_PREPARE_CACHE_ENTRIES = 1024;
 const NON_READY_CACHE_MS = 30_000;
+const OUTSIDE_IMAGE_CACHE_MS = 10 * 60 * 1000;
 const SUPPORTED_IMAGE_MIME_TYPES = new Set([
   'image/png',
   'image/jpeg',
@@ -14,11 +18,17 @@ const SUPPORTED_IMAGE_MIME_TYPES = new Set([
 ]);
 
 export type PreparedMarkdownImage =
-  | { status: 'ready'; path: string; outsideFileGrant?: string; expiresAt?: number }
+  | { status: 'ready'; path: string; outsideWorkspace: boolean }
   | { status: 'missing' | 'error' };
 
+const fileStat = z.union([z.object({
+  isFile: z.literal(true),
+  path: z.string().min(1),
+  size: z.number().int().nonnegative(),
+}), z.object({ exists: z.literal(false) })]);
+
 type PrepareCacheEntry = {
-  result: Map<string, PreparedMarkdownImage>;
+  result: Map<string, PreparedMarkdownImage> | null;
   expiresAt: number;
 };
 
@@ -104,13 +114,6 @@ const validateDataImage = async (source: string): Promise<void> => {
   await validateImageBlob(new Blob([bytes]), match[1].toLowerCase());
 };
 
-/** A grant request the server refused; `status` is its HTTP status. */
-export class ImageGrantRequestError extends Error {
-  constructor(readonly status: number) {
-    super(`Unable to prepare images (${status})`);
-  }
-}
-
 export const isLocalMarkdownImageSource = (source: string): boolean => (
   !/^(?:https?:)?\/\//i.test(source)
   && !/^data:image\/(?:png|jpeg|gif|webp);base64,/i.test(source)
@@ -121,16 +124,15 @@ export const prepareLocalMarkdownImages = async ({
   directory,
   sessionId,
   messageId,
-  callId,
   signal,
+  refresh = false,
 }: {
   sources: readonly string[];
   directory: string;
   sessionId: string;
   messageId: string;
-  /** The openchamber_render call whose page names the sources: the server then shows them up to the page's weight budget. */
-  callId?: string;
   signal: AbortSignal;
+  refresh?: boolean;
 }): Promise<Map<string, PreparedMarkdownImage>> => {
   const resolver = getRuntimeUrlResolver();
   let cache = prepareCaches.get(resolver);
@@ -138,64 +140,54 @@ export const prepareLocalMarkdownImages = async ({
     cache = new Map();
     prepareCaches.set(resolver, cache);
   }
-  const key = `${sessionId}\0${messageId}\0${callId ?? ''}\0${directory}\0${sources.join('\0')}`;
+  throwIfAborted(signal);
+  const key = `${sessionId}\0${messageId}\0${directory}\0${sources.join('\0')}`;
   const cached = cache.get(key);
-  if (cached && cached.expiresAt > Date.now()) {
+  if (!refresh && cached?.result && cached.expiresAt > Date.now()) {
     cache.delete(key);
     cache.set(key, cached);
     return cached.result;
   }
   if (cached) cache.delete(key);
+  while (cache.size >= MAX_PREPARE_CACHE_ENTRIES) cache.delete(cache.keys().next().value!);
+  const entry: PrepareCacheEntry = { result: null, expiresAt: 0 };
+  cache.set(key, entry);
 
-  const response = await runtimeFetch(
-    `/api/openchamber/sessions/${encodeURIComponent(sessionId)}/markdown-image-grants`,
-    {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ directory, messageId, callId, sources }),
-      // The grant is issued by the server that holds the file: a space's for a space directory.
-      directory,
-      signal,
-    },
-  );
-  if (!response.ok) throw new ImageGrantRequestError(response.status);
-  const payload = await response.json() as {
-    results?: Array<{
-      source?: string;
-      status?: string;
-      path?: string;
-      outsideFileGrant?: string;
-      expiresAt?: number;
-    }>;
-  };
   const prepared = new Map<string, PreparedMarkdownImage>();
-  for (const result of payload.results ?? []) {
-    if (!result.source) continue;
-    if (result.status === 'ready' && result.path) {
-      prepared.set(result.source, {
-        status: 'ready',
-        path: result.path,
-        outsideFileGrant: result.outsideFileGrant,
-        expiresAt: result.expiresAt,
+  for (const source of new Set(sources)) {
+    throwIfAborted(signal);
+    try {
+      const localPath = parseLocalImagePath(source);
+      if (!directory || !localPath) throw new Error('Missing image path');
+      const path = toAbsoluteFilePath(directory, localPath);
+      const response = await runtimeFetch('/api/fs/stat', {
+        query: { path, directory, optional: 'true', allowOutsideWorkspace: 'true' },
+        signal,
       });
-    } else if (result.status === 'missing') {
-      prepared.set(result.source, { status: 'missing' });
-    } else {
-      prepared.set(result.source, { status: 'error' });
+      if (!response.ok) throw new Error(`Unable to inspect media (${response.status})`);
+      const stat = fileStat.parse(await response.json());
+      if ('exists' in stat) {
+        prepared.set(source, { status: 'missing' });
+        continue;
+      }
+      const video = VIDEO_EXTENSION_RE.test(path);
+      if (stat.size > (video ? MAX_VIDEO_BYTES : MAX_MARKDOWN_IMAGE_BYTES)) {
+        throw new Error('Media file is too large');
+      }
+      prepared.set(source, { status: 'ready', path: stat.path, outsideWorkspace: !isFilePathWithinDirectory(stat.path, directory) });
+    } catch {
+      prepared.set(source, { status: 'error' });
     }
   }
-  for (const source of sources) {
-    if (!prepared.has(source)) prepared.set(source, { status: 'error' });
-  }
-  while (cache.size >= MAX_PREPARE_CACHE_ENTRIES) cache.delete(cache.keys().next().value!);
+  throwIfAborted(signal);
   const allReady = [...prepared.values()].every((value) => value.status === 'ready');
-  const grantExpiry = Math.min(...[...prepared.values()]
-    .filter((value): value is Extract<PreparedMarkdownImage, { status: 'ready' }> => value.status === 'ready')
-    .map((value) => value.expiresAt ?? Number.POSITIVE_INFINITY));
-  cache.set(key, {
-    result: prepared,
-    expiresAt: allReady ? grantExpiry : Date.now() + NON_READY_CACHE_MS,
-  });
+  const hasOutsideImage = [...prepared.values()].some((value) => value.status === 'ready' && value.outsideWorkspace);
+  // A later refresh owns this slot even when an older, independent read finishes last.
+  if (cache.get(key) === entry) {
+    entry.result = prepared;
+    entry.expiresAt = !allReady ? Date.now() + NON_READY_CACHE_MS
+      : hasOutsideImage ? Date.now() + OUTSIDE_IMAGE_CACHE_MS : Number.POSITIVE_INFINITY;
+  }
   return prepared;
 };
 
@@ -213,9 +205,12 @@ export const resolveMarkdownImageSource = async (
   throw new Error('Local image has not been prepared');
 };
 
-/** Reads an image through `/api/fs/raw`, after the same size and signature checks a drawn image gets. */
-const loadRawImageBlob = async (
-  query: { path: string; directory: string; allowOutsideWorkspace?: string; outsideFileGrant?: string },
+/**
+ * Reads and validates image bytes through `/api/fs/raw`. HtmlView embeds these
+ * bytes because its opaque origin cannot use the authenticated asset URL.
+ */
+const loadRawImage = async (
+  query: { path: string; directory: string; allowOutsideWorkspace?: string },
   signal: AbortSignal,
 ): Promise<Blob> => {
   const response = await runtimeFetch('/api/fs/raw', { query, signal });
@@ -224,9 +219,9 @@ const loadRawImageBlob = async (
   const mimeType = (response.headers.get('content-type') ?? '').split(';', 1)[0]?.toLowerCase() ?? '';
   const contentLength = Number(response.headers.get('content-length'));
   if (Number.isFinite(contentLength) && contentLength > MAX_MARKDOWN_IMAGE_BYTES) {
+    await response.body?.cancel();
     throw new Error('Image is too large');
   }
-
   const blob = await readAssetBlob(response, MAX_MARKDOWN_IMAGE_BYTES, signal);
   await validateImageBlob(blob, mimeType);
   throwIfAborted(signal);
@@ -234,18 +229,7 @@ const loadRawImageBlob = async (
 };
 
 /**
- * An image as a data URL, for a page that cannot load the asset URL itself:
- * an `openchamber_render` page runs in an opaque origin, and the asset URL
- * would hand its script the URL auth token.
- */
-const loadRawImageAsDataUrl = async (
-  query: { path: string; directory: string; allowOutsideWorkspace?: string; outsideFileGrant?: string },
-  signal: AbortSignal,
-): Promise<string> => blobToDataUrl(await loadRawImageBlob(query, signal));
-
-/**
- * VS Code has no OpenChamber server route for message-scoped temporary-file
- * grants. Preserve its existing workspace-only gallery path through the local
+ * VS Code uses its workspace-only gallery path through the local
  * filesystem bridge, including the same size and signature validation.
  */
 export const resolveWorkspaceMarkdownImageSource = async (
@@ -271,7 +255,7 @@ export const resolveWorkspaceMarkdownImageSource = async (
     throw new Error('Image is too large');
   }
 
-  return loadRawImageAsDataUrl({ path: absolutePath, directory }, signal);
+  return blobToDataUrl(await loadRawImage({ path: absolutePath, directory }, signal));
 };
 
 export const getPreparedMarkdownImageUrl = (
@@ -282,43 +266,33 @@ export const getPreparedMarkdownImageUrl = (
   {
     path: image.path,
     directory,
-    allowOutsideWorkspace: image.outsideFileGrant ? 'true' : undefined,
-    outsideFileGrant: image.outsideFileGrant,
+    allowOutsideWorkspace: image.outsideWorkspace ? 'true' : undefined,
   },
   );
 
-/**
- * The own bytes, at full size, of a local image a message references, to save
- * as a file: the grant that drew it, then the whole file.
- */
+/** Loads the full validated image for saving. */
 export const loadMessageImageBlob = async ({ source, directory, sessionId, messageId, signal }: {
-  source: string;
-  directory: string;
-  sessionId: string;
-  messageId: string;
-  signal: AbortSignal;
+  source: string; directory: string; sessionId: string; messageId: string; signal: AbortSignal;
 }): Promise<Blob> => {
   const resolver = getRuntimeUrlResolver();
   const prepared = (await prepareLocalMarkdownImages({ sources: [source], directory, sessionId, messageId, signal })).get(source);
   if (prepared?.status !== 'ready') throw new Error('Image is unavailable');
-  // The grant names a file on the server that issued it; another server may hold a different one at that path.
   if (getRuntimeUrlResolver() !== resolver) throw new DOMException('Runtime changed', 'AbortError');
-  return loadRawImageBlob({
-    path: prepared.path,
-    directory,
-    allowOutsideWorkspace: prepared.outsideFileGrant ? 'true' : undefined,
-    outsideFileGrant: prepared.outsideFileGrant,
-  }, signal);
+  return loadRawImage({ path: prepared.path, directory, allowOutsideWorkspace: prepared.outsideWorkspace ? 'true' : undefined }, signal);
 };
 
-/** A prepared local image as a data URL, for a page that cannot load the asset URL (see loadRawImageAsDataUrl). */
-export const loadPreparedImageAsDataUrl = (
+/** A validated image and its byte size, or null when it exceeds the page's remaining budget. */
+export const loadPreparedImageAsDataUrl = async (
   image: Extract<PreparedMarkdownImage, { status: 'ready' }>,
   directory: string,
   signal: AbortSignal,
-): Promise<string> => loadRawImageAsDataUrl({
-  path: image.path,
-  directory,
-  allowOutsideWorkspace: image.outsideFileGrant ? 'true' : undefined,
-  outsideFileGrant: image.outsideFileGrant,
-}, signal);
+  remainingBytes: number,
+): Promise<{ url: string; size: number } | null> => {
+  const blob = await loadRawImage({
+    path: image.path,
+    directory,
+    allowOutsideWorkspace: image.outsideWorkspace ? 'true' : undefined,
+  }, signal);
+  if (blob.size > remainingBytes) return null;
+  return { url: await blobToDataUrl(blob), size: blob.size };
+};

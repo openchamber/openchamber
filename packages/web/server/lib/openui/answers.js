@@ -17,7 +17,7 @@ export const createOpenUIAnswers = ({ onWaitChange = () => {} } = {}) => {
     }
   };
 
-  const wait = ({ sessionId, callId, directory, signal, sourceRevision, validate }) => new Promise((resolve, reject) => {
+  const wait = ({ sessionId, callId, directory, signal, sourceRevision, validate, title = 'OpenUI response', kind = 'openui' }) => new Promise((resolve, reject) => {
     const key = pageKey(sessionId, callId);
     if (waiting.has(key)) {
       reject(new OpenChamberControlError('This call already shows a page that waits for an answer', 409));
@@ -44,7 +44,7 @@ export const createOpenUIAnswers = ({ onWaitChange = () => {} } = {}) => {
     const onAbort = () => entry.reject(stopped());
     waiting.set(key, entry);
     signal?.addEventListener('abort', onAbort, { once: true });
-    announce({ type: 'waiting', sessionId, callId, title: 'OpenUI response', directory: directory || null, kind: 'openui', sourceRevision });
+    announce({ type: 'waiting', sessionId, callId, title, directory: directory || null, ...(kind && { kind, sourceRevision }) });
   });
 
   const answer = (input = {}) => {
@@ -67,6 +67,7 @@ export const createOpenUIAnswers = ({ onWaitChange = () => {} } = {}) => {
     const result = { answered: true, summary, data };
     // The policy may refuse synchronously or read authoritative source before
     // settling. Both paths finish only the entry that received this answer.
+    if (!entry.validate) return entry.settle(result);
     return Promise.resolve(entry.validate(input, entry.reject)).then(() => entry.settle(result));
   };
 

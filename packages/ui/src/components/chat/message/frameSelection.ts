@@ -1,5 +1,5 @@
 /**
- * A selection made inside a sandboxed page frame (`openchamber_render`). The
+ * A selection made inside a sandboxed OpenUI HtmlView. The
  * app cannot read it, so the frame reports it and the selection menu of the
  * page picks it up (`frameSelections` on TextSelectionMenu). It travels as a
  * DOM event from the frame element, so only the menu whose container holds

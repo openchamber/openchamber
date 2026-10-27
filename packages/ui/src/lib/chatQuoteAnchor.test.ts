@@ -117,8 +117,8 @@ describe('chat quote anchor schema', () => {
         expect('page' in parsed).toBe(false);
     });
 
-    test('an anchor in a shown page carries which page', () => {
-        expect(chatQuoteAnchorSchema.parse({ ...base, page: { partId: 'prt_1' } })).toEqual({ ...base, page: { partId: 'prt_1' } });
+    test('an anchor in a shown page can distinguish HtmlViews in one part', () => {
+        expect(chatQuoteAnchorSchema.parse({ ...base, page: { partId: 'prt_1', viewId: 'view_1' } })).toEqual({ ...base, page: { partId: 'prt_1', viewId: 'view_1' } });
     });
 
     test('a malformed page is rejected rather than read as a message anchor', () => {

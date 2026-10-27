@@ -7,8 +7,9 @@ const saved = { type: 'assistant', content: [{ type: 'tool', id: call.callId, na
 const fixture = () => {
   const onWaitChange = vi.fn();
   const list = vi.fn(async () => ({ data: [saved] }));
+  const inbox = vi.fn(async () => []);
   const isEnabled = vi.fn(async () => true);
-  const runtime = createOpenUIRuntime({ isEnabled, onWaitChange, getClient: async () => ({ message: { list } }) });
+  const runtime = createOpenUIRuntime({ isEnabled, onWaitChange, getClient: async () => ({ message: { list }, session: { inbox: { list: inbox } } }) });
   const start = async (signal) => {
     const started = Promise.withResolvers();
     onWaitChange.mockImplementation((event) => { if (event.type === 'waiting') started.resolve(event); });
@@ -18,7 +19,7 @@ const fixture = () => {
     const answer = (fields = {}) => runtime.answer({ ...call, sourceRevision: event.sourceRevision, summary: 'Done', ...fields });
     return { pending, answer };
   };
-  return { runtime, list, isEnabled, onWaitChange, start };
+  return { runtime, list, inbox, isEnabled, onWaitChange, start };
 };
 
 it('finds saved source newest-first and follows opaque cursors without order', async () => {
@@ -36,6 +37,66 @@ it('finds saved source newest-first and follows opaque cursors without order', a
     [{ sessionID: 'ses_1', limit: 100, order: 'desc' }, { signal: controller.signal }],
     [{ sessionID: 'ses_1', limit: 100, cursor: 'older' }, { signal: controller.signal }],
   ]);
+});
+
+it.each(['queued and synthetic', 'failed inbox read'])('waits when there is only %s', async (scenario) => {
+  const { inbox, start } = fixture();
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  if (scenario === 'failed inbox read') inbox.mockRejectedValueOnce(new Error('offline'));
+  else inbox.mockResolvedValueOnce([{ type: 'synthetic', delivery: 'steer' }, { type: 'user', delivery: 'queue' }]);
+  try {
+    const { pending, answer } = await start();
+    await answer();
+    await expect(pending).resolves.toMatchObject({ answer: { answered: true } });
+  } finally { warn.mockRestore(); }
+});
+
+it('honors cancellation while the inbox read is pending', async () => {
+  const { runtime, inbox, onWaitChange } = fixture();
+  const reading = Promise.withResolvers();
+  const response = Promise.withResolvers();
+  inbox.mockImplementationOnce(() => { reading.resolve(); return response.promise; });
+  const pending = runtime.prompt({ ui }, call);
+  await reading.promise;
+  runtime.cancel();
+  response.resolve([{ type: 'user', delivery: 'steer' }]);
+  await expect(pending).rejects.toMatchObject({ statusCode: 403 });
+  expect(onWaitChange).not.toHaveBeenCalled();
+});
+
+it('honors an aborted request while the inbox read is pending', async () => {
+  const { runtime, inbox, onWaitChange } = fixture();
+  const reading = Promise.withResolvers();
+  const response = Promise.withResolvers();
+  inbox.mockImplementationOnce(() => { reading.resolve(); return response.promise; });
+  const controller = new AbortController();
+  const pending = runtime.prompt({ ui }, { ...call, signal: controller.signal });
+  await reading.promise;
+  controller.abort();
+  response.resolve([{ type: 'user', delivery: 'steer' }]);
+  await expect(pending).rejects.toMatchObject({ statusCode: 499 });
+  expect(onWaitChange).not.toHaveBeenCalled();
+});
+
+it('returns an earlier steered chat message without announcing a wait', async () => {
+  const onWaitChange = vi.fn();
+  const runtime = createOpenUIRuntime({
+    isEnabled: async () => true, onWaitChange,
+    getClient: async () => ({ session: { inbox: { list: async () => [
+      { type: 'user', delivery: 'steer' },
+    ] } } }),
+  });
+  const outcome = Promise.withResolvers();
+  onWaitChange.mockImplementation(() => outcome.resolve('waiting'));
+  const pending = runtime.prompt({ ui }, call);
+  pending.then(outcome.resolve, outcome.reject);
+  try {
+    expect(await outcome.promise).toMatchObject({ answer: { answered: false, reason: 'chat-sent-earlier' }, note: expect.stringContaining('not an answer') });
+    expect(onWaitChange).not.toHaveBeenCalled();
+  } finally {
+    runtime.cancel();
+    await pending.catch(() => {});
+  }
 });
 
 it.each(['network', 'malformed', 'cursor-loop'])('keeps a wait available after a %s source read failure', async (failure) => {

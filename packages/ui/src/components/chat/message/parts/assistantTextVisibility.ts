@@ -1,5 +1,7 @@
 import { commitStreamedText } from '../../lib/streamTextCommit';
 import type { StreamPhase } from '../types';
+import { collectOpenUIFences, normalizeOpenUISource } from '../../markdown/openuiFences';
+import type { OpenUIAnalyzedSource } from '../../markdown/openuiMarkdownContext';
 
 // A text part sealed with `time.end` can no longer receive tokens, so the
 // block-commit hold — which exists to keep a growing paragraph from mutating
@@ -22,11 +24,18 @@ export const resolveAssistantDisplayText = (input: {
     textContent: string;
     throttledTextContent: string;
     isStreaming: boolean;
-}): string => {
+    allowOpenUI?: boolean;
+}): { content: string; openuiSource?: OpenUIAnalyzedSource } => {
     // While streaming, reveal whole blocks only: rendering stops at the end of
     // the last finished block so a shown paragraph never mutates in place.
     // The held tail lands when its block ends (or with the finalize pass).
-    return input.isStreaming
-        ? commitStreamedText(input.throttledTextContent)
-        : input.textContent;
+    if (!input.isStreaming) return { content: input.textContent };
+    const displayed = input.allowOpenUI && input.throttledTextContent.includes('openui-lang')
+        ? normalizeOpenUISource(input.throttledTextContent) : input.throttledTextContent;
+    const committed = commitStreamedText(displayed);
+    if (!input.allowOpenUI || !displayed.includes('openui-lang')) return { content: committed };
+    const fences = collectOpenUIFences(displayed);
+    const fence = [...fences].reverse().find((item) => !item.literal && !item.meta);
+    const content = fence && fence.end > committed.length ? displayed.slice(0, fence.end) : committed;
+    return { content, openuiSource: { source: content, fences: fences.filter((item) => item.end <= content.length) } };
 };

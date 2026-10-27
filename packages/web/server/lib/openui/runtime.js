@@ -61,6 +61,22 @@ export const createOpenUIRuntime = ({ isEnabled, onWaitChange, getClient, resolv
     const revision = sourceRevision(ui);
     if (!directory && resolveSessionDirectory) directory = await resolveSessionDirectory(sessionId);
     if (admittedBefore !== cancellation) throw disabled();
+    let hasEarlierChat = false;
+    try {
+      const client = await getClient();
+      const items = await client.session.inbox.list({ sessionID: sessionId });
+      hasEarlierChat = items.some((item) => item.type === 'user' && item.delivery === 'steer');
+    } catch (error) {
+      console.warn('[openui] could not read the session inbox:', error?.message ?? error);
+    }
+    if (admittedBefore !== cancellation) throw disabled();
+    if (signal?.aborted) throw new OpenChamberControlError('The page stopped waiting before the user answered', 499);
+    if (hasEarlierChat) {
+      return {
+        answer: { answered: false, reason: 'chat-sent-earlier' }, sourceRevision: revision,
+        note: 'The page did not wait: the user had already written in the chat before it appeared, and that message follows this result. They wrote it without seeing the page, so it is not an answer to it. Continue from that message; show the page again only if it still fits.',
+      };
+    }
     const verifySource = async (retire) => {
       try {
         await requireEnabled();

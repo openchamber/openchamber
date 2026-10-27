@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { isString } from '../shared/guards.js';
 import { OpenChamberControlError } from './error.js';
-import { createPageAnswers } from './render-page.js';
+import { createOpenUIAnswers } from '../openui/answers.js';
 
 export const SECRET_REQUEST_MAX_LABEL_LENGTH = 120;
 export const SECRET_REQUEST_MAX_REASON_LENGTH = 1000;
@@ -66,7 +66,7 @@ export const createSecretFiles = ({ directory, now = Date.now, fsPromises = fs }
 /**
  * `secret.request`: the chat shows a card for the call, and the call waits
  * until the user saves a value or declines. The wait is a page wait
- * (`createPageAnswers`), so the session shows as waiting for the user the way
+ * (`createOpenUIAnswers`), so the session shows as waiting for the user the way
  * it does for a page, with the same pending list, events and notification.
  * Its answer carries `saved` or `declined` as the summary and the file path
  * as the data; the value itself never reaches the call.
@@ -76,7 +76,7 @@ export const createSecretFiles = ({ directory, now = Date.now, fsPromises = fs }
  * this call returns, so waiting would hold it back.
  */
 export const createSecretRequests = ({ isEnabled, files, onWaitChange, hasUnreadChat = async () => false }) => {
-  const waits = createPageAnswers({ onWaitChange });
+  const waits = createOpenUIAnswers({ onWaitChange });
 
   const request = async (input, { sessionId, callId, directory, signal } = {}) => {
     if (!await isEnabled()) {
@@ -107,7 +107,7 @@ export const createSecretRequests = ({ isEnabled, files, onWaitChange, hasUnread
     if (await hasUnreadChat(sessionId)) {
       return { answer: { answered: false, reason: 'chat-sent-earlier' }, note: CHAT_SENT_EARLIER_NOTE };
     }
-    const answer = await waits.wait({ sessionId, callId, title: label, directory, signal });
+    const answer = await waits.wait({ sessionId, callId, title: label, directory, signal, kind: null });
     const file = isString(answer.data?.file) ? answer.data.file : null;
     // The answer can settle the wait just as the call ends (Stop, a chat
     // message): nobody will read the path, so the file goes too.

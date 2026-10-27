@@ -98,6 +98,7 @@ describe('agent tool action allowlist', () => {
   it.each([
     'session.delete',
     'schedule.status',
+    'render.page',
   ])('rejects %s outside the agent allowlist without invoking the service', async (action) => {
     const { runtime, executeAction } = await createRuntime();
     await expect(runtime.execute({ input: { action } })).resolves.toEqual(expect.objectContaining({
@@ -110,6 +111,130 @@ describe('agent tool action allowlist', () => {
 });
 
 describe('managed agent tool runtime', () => {
+  it('revokes a prompt still resolving its directory across disable and re-enable', async () => {
+    const directoryRead = Promise.withResolvers();
+    const reading = Promise.withResolvers();
+    const observed = Promise.withResolvers();
+    let enabled = true;
+    const ui = 'root = Stack([])';
+    const waits = [];
+    const service = createOpenChamberControlService({
+      buildOpenCodeUrl: () => 'http://opencode.test', getOpenCodeAuthHeaders: () => ({}),
+      isOpenUIEnabled: async () => enabled,
+      createClient: () => ({
+        session: { list: async () => { reading.resolve(); return directoryRead.promise; } },
+        message: { list: async () => ({ data: [{ type: 'assistant', content: [{ type: 'tool', id: 'new', name: 'prompt_openui', state: { input: { ui } } }] }] }) },
+      }),
+      onPageWaitChange: (event) => { waits.push(event); if (event.type === 'waiting') observed.resolve('waiting'); },
+    });
+    const { runtime } = await createRuntime({
+      resolveSessionDirectory: service.resolveSessionDirectory,
+      executeAction: service.execute,
+    });
+    const payload = { tool: 'prompt_openui', input: { action: 'openui.prompt', ui }, sessionID: 's', callID: 'old' };
+    const pending = runtime.execute(payload);
+    pending.then((result) => observed.resolve(result.ok));
+    await reading.promise;
+    enabled = false;
+    service.openui.cancel();
+    enabled = true;
+    directoryRead.resolve({ data: [{ id: 's', location: { directory: '/repo' } }] });
+    try {
+      expect(await observed.promise).toBe(false);
+      expect(waits).toEqual([]);
+      expect(await pending).toMatchObject({ ok: false, error: { kind: 'usage' } });
+      const current = runtime.execute({ ...payload, callID: 'new' });
+      await vi.waitFor(() => expect(waits).toHaveLength(1));
+      await service.openui.answer({ sessionId: 's', callId: 'new', sourceRevision: waits[0].sourceRevision, summary: 'Done' });
+      expect(await current).toMatchObject({ ok: true });
+    } finally {
+      service.openui.cancel();
+      await pending;
+    }
+  });
+
+  it('answers native and HtmlView OpenUI waits through the generated plugin and authenticated HTTP', async () => {
+    const sources = new Map();
+    const waits = [];
+    const { runtime, dataDir } = await createRuntime({
+      resolveSessionDirectory: async () => '/repo',
+      executeAction: (...args) => service.execute(...args),
+    });
+    const service = createOpenChamberControlService({
+      sessionService: { resolveDirectory: async () => '/repo' },
+      waitForOpenCodeReady: async () => {},
+      buildOpenCodeUrl: () => 'http://opencode.test',
+      getOpenCodeAuthHeaders: () => ({}),
+      createClient: () => ({
+        session: { list: async () => ({ data: [{ id: 'ses_1', location: { directory: '/repo' } }] }) },
+        message: { list: async () => ({ data: [{ type: 'assistant', content: [...sources].map(([id, ui]) => ({
+          type: 'tool', id, name: 'prompt_openui', state: { input: { ui } },
+        })) }] }) },
+      }),
+      onPageWaitChange: (change) => waits.push(change),
+    });
+    const prepared = await prepareManagedEnv(runtime, { includeControl: false, includeOpenUI: true });
+    const tools = await loadTools(dataDir, 'openui-http');
+    expect(tools.openchamber_render).toBeUndefined();
+    const app = express();
+    runtime.registerRoutes(app, express);
+    const server = await new Promise((resolve) => {
+      const listener = app.listen(0, '127.0.0.1', () => resolve(listener));
+    });
+    const previousUrl = process.env.OPENCHAMBER_AGENT_TOOL_URL;
+    const previousToken = process.env.OPENCHAMBER_AGENT_TOOL_TOKEN;
+    process.env.OPENCHAMBER_AGENT_TOOL_URL = `http://127.0.0.1:${server.address().port}/api/openchamber/agent-tool`;
+    process.env.OPENCHAMBER_AGENT_TOOL_TOKEN = prepared.OPENCHAMBER_AGENT_TOOL_TOKEN;
+    try {
+      const examples = await tools.openchamber_openui.execute(
+        { parameters: { groups: ['interaction', 'advanced'] } },
+        { sessionID: 'ses_1', id: 'read-examples', progress: async () => {} },
+      );
+      expect(JSON.parse(examples.content)).toMatchObject({ ok: true, data: { groups: ['interaction', 'advanced'], content: expect.any(String) } });
+      for (const [ui, details] of [
+        ['root = Stack([Input()])', ['Input', '/name', 'signature:', 'root']],
+        ['root = Stack([Input(42)])', ['Input', '/name', 'expects string', 'root']],
+        ['root = Stack([Missing()])', ['Missing', 'Unknown component', 'root']],
+        ['root = Stack([missing])', ['Unresolved references: missing']],
+      ]) {
+        const rejected = await tools.prompt_openui.execute(
+          { ui },
+          { sessionID: 'ses_1', id: 'invalid-call', progress: async () => {} },
+        );
+        const content = JSON.parse(rejected.content);
+        expect(content).toMatchObject({ ok: false, error: { kind: 'usage' } });
+        for (const detail of details) expect(content.error.message).toContain(detail);
+        expect(rejected.metadata.openchamber.ok).toBe(false);
+        expect(waits).toEqual([]);
+      }
+      const programs = [
+        'root = Stack([Buttons([Button("Choose A", @ToAssistant("Choose A"))])])',
+        'root = Stack([HtmlView("<button onclick=\\"openchamber.submit({choice:1}, \'Choose one\')\\">Choose one</button>")])',
+      ];
+      for (const [index, ui] of programs.entries()) {
+        const callId = `call_${index}`;
+        sources.set(callId, ui);
+        const result = tools.prompt_openui.execute({ ui }, { sessionID: 'ses_1', id: callId, progress: async () => {} });
+        await vi.waitFor(() => expect(waits).toContainEqual(expect.objectContaining({ type: 'waiting', callId, kind: 'openui' })));
+        const sourceRevision = waits.find((wait) => wait.callId === callId).sourceRevision;
+        await expect(service.openui.answer({ sessionId: 'ses_1', callId, sourceRevision, summary: 'Choose one', data: { choice: 1 } }))
+          .resolves.toEqual({ answered: true });
+        const completed = await result;
+        expect(JSON.parse(completed.content)).toMatchObject({ ok: true, data: { answer: { answered: true, data: { choice: 1 } } } });
+        expect(completed.metadata.openchamber.answer).toEqual({ answered: true, summary: 'Choose one', data: { choice: 1 } });
+        expect(() => service.openui.answer({ sessionId: 'ses_1', callId, sourceRevision, summary: 'Again', data: null })).toThrow();
+      }
+    } finally {
+      service.openui.cancel();
+      if (previousUrl === undefined) delete process.env.OPENCHAMBER_AGENT_TOOL_URL;
+      else process.env.OPENCHAMBER_AGENT_TOOL_URL = previousUrl;
+      if (previousToken === undefined) delete process.env.OPENCHAMBER_AGENT_TOOL_TOKEN;
+      else process.env.OPENCHAMBER_AGENT_TOOL_TOKEN = previousToken;
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+
   it('rejects a stale note replacement from a second session without a write or event', async () => {
     const owner = createProjectIdFromPath('/repo');
     const onChanged = vi.fn();
@@ -434,7 +559,7 @@ describe('managed agent tool runtime', () => {
 
   it('declares inputs only inside parameters and lets flattened ones through', async () => {
     const { runtime, dataDir } = await createRuntime();
-    await prepareManagedEnv(runtime, { includeControl: true, includeWeb: true, includeMemory: true, includeKnowledge: true, includeNotify: true, includeRender: true });
+    await prepareManagedEnv(runtime, { includeControl: true, includeWeb: true, includeMemory: true, includeKnowledge: true, includeNotify: true, includeSecret: true });
     const tools = await loadTools(dataDir, 'root-shape');
 
     for (const tool of Object.values(tools)) {
@@ -513,12 +638,12 @@ describe('managed agent tool runtime', () => {
 
   it('runs the one action of a single-action tool, reviving a call stuffed into the action as JSON', async () => {
     const { runtime, dataDir } = await createRuntime();
-    const prepared = await prepareManagedEnv(runtime, { includeControl: true, includeRender: true });
+    const prepared = await prepareManagedEnv(runtime, { includeControl: true, includeNotify: true });
     const tools = await loadTools(dataDir, 'single-action');
 
     // Nothing to choose: the schema takes any string and does not require one.
-    expect(tools.openchamber_render.input.properties.action).toEqual({ type: 'string', description: expect.stringContaining('render.page: ') });
-    expect(tools.openchamber_render.input.required).toEqual([]);
+    expect(tools.openchamber_notify.input.properties.action).toEqual({ type: 'string', description: expect.stringContaining('notify.send: ') });
+    expect(tools.openchamber_notify.input.required).toEqual([]);
     // A tool with several actions keeps its strict list.
     expect(tools.openchamber.input.properties.action.oneOf.length).toBeGreaterThan(1);
     expect(tools.openchamber.input.required).toEqual(['action']);
@@ -531,26 +656,26 @@ describe('managed agent tool runtime', () => {
     process.env.OPENCHAMBER_AGENT_TOOL_TOKEN = prepared.OPENCHAMBER_AGENT_TOOL_TOKEN;
     globalThis.fetch = async (_endpoint, init) => {
       sent.push(JSON.parse(init.body));
-      return new Response(JSON.stringify({ schemaVersion: 1, ok: true, action: 'render.page', data: {} }));
+      return new Response(JSON.stringify({ schemaVersion: 1, ok: true, action: 'notify.send', data: {} }));
     };
     const context = { sessionID: 'ses_1', agent: 'build', messageID: 'msg_1', id: 'call_1', signal: new AbortController().signal, progress: async () => {} };
 
     try {
-      // The shape a model produced: title inside a JSON action, html beside it.
-      await tools.openchamber_render.execute({ action: '{"action": "render.page", "title": "Commits"}', html: '<p>a</p>' }, context);
+      // The shape a model produced: title inside a JSON action, body beside it.
+      await tools.openchamber_notify.execute({ action: '{"action": "notify.send", "title": "Commits"}', body: 'a' }, context);
       // A revived field never replaces one the call carried itself.
-      await tools.openchamber_render.execute({ action: '{"parameters": {"title": "Stuffed"}}', parameters: { html: '<p>b</p>', title: 'Real' } }, context);
+      await tools.openchamber_notify.execute({ action: '{"parameters": {"title": "Stuffed"}}', parameters: { body: 'b', title: 'Real' } }, context);
       // No action at all still runs the only one.
-      await tools.openchamber_render.execute({ parameters: { html: '<p>c</p>', title: 'Bare' } }, context);
+      await tools.openchamber_notify.execute({ parameters: { body: 'c', title: 'Bare' } }, context);
     } finally {
       globalThis.fetch = originalFetch;
       process.env.OPENCHAMBER_AGENT_TOOL_URL = originalUrl;
       process.env.OPENCHAMBER_AGENT_TOOL_TOKEN = originalToken;
     }
 
-    expect(sent[0].input).toEqual({ action: 'render.page', html: '<p>a</p>', title: 'Commits' });
-    expect(sent[1].input).toEqual({ action: 'render.page', html: '<p>b</p>', title: 'Real' });
-    expect(sent[2].input).toEqual({ action: 'render.page', html: '<p>c</p>', title: 'Bare' });
+    expect(sent[0].input).toEqual({ action: 'notify.send', body: 'a', title: 'Commits' });
+    expect(sent[1].input).toEqual({ action: 'notify.send', body: 'b', title: 'Real' });
+    expect(sent[2].input).toEqual({ action: 'notify.send', body: 'c', title: 'Bare' });
   });
 
   it('normalizes the two string boolean spellings a model sends, and nothing else', async () => {
@@ -672,23 +797,6 @@ describe('managed agent tool runtime', () => {
     expect(tool.openchamber_image.description.length).toBeLessThanOrEqual(2048);
   });
 
-  it('exposes render as its own tool carrying only the page and its title', async () => {
-    const { runtime, dataDir } = await createRuntime();
-    await prepareManagedEnv(runtime, { includeControl: true, includeWeb: false, includeMemory: false, includeRender: true });
-    const tool = await loadTools(dataDir, 'render');
-
-    expect(Object.keys(tool)).toEqual(['openchamber', 'openchamber_render']);
-    expect(Object.keys(tool.openchamber_render.input.properties.parameters.properties).sort()).toEqual(['awaitAnswer', 'html', 'title']);
-    expect(Object.keys(tool.openchamber.input.properties.parameters.properties)).not.toContain('html');
-    // How to write the page rides on its input, which no client cuts short.
-    expect(tool.openchamber_render.input.properties.parameters.properties.html.description).toContain('--chart-1');
-    expect(tool.openchamber_render.input.properties.parameters.properties.html.description)
-      .toContain('do not build paths from directory and filename fragments');
-    expect(tool.openchamber_render.input.properties.parameters.properties.html.description)
-      .toContain("image.src = images[key]");
-    expect(tool.openchamber_render.description).toContain('add no outer card, border or banner title');
-  });
-
   it('exposes secret as its own direct tool whose every call waits for the user', async () => {
     const { runtime, dataDir } = await createRuntime();
     await prepareManagedEnv(runtime, { includeControl: false, includeWeb: false, includeMemory: false, includeSecret: true, codeMode: true });
@@ -751,7 +859,8 @@ describe('managed agent tool runtime', () => {
       includeSchedule: true,
       includeKnowledge: true,
       includeNotify: true,
-      includeRender: true,
+      includeOpenUI: true,
+      includeSecret: true,
       includeWorkflow: true,
       includeImage: true,
     });
@@ -763,11 +872,13 @@ describe('managed agent tool runtime', () => {
       'openchamber_knowledge',
       'openchamber_memory',
       'openchamber_notify',
-      'openchamber_render',
+      'openchamber_openui',
       'openchamber_schedule',
+      'openchamber_secret',
       'openchamber_web',
       'openchamber_workflow',
       'openchamber_workflow_answer',
+      'prompt_openui',
     ]);
     for (const tool of Object.values(tools)) {
       // Claude Code before 2.1.296 cuts an MCP tool description at 2048
@@ -776,63 +887,28 @@ describe('managed agent tool runtime', () => {
     }
   });
 
-  it('returns the answer a page waited for, or ends the wait when the user writes in the chat', async () => {
-    const service = createOpenChamberControlService({ sessionService: { resolveDirectory: async () => '/repo' } });
-    const { runtime, dataDir } = await createRuntime({
-      resolveSessionDirectory: async () => '/repo',
-      executeAction: (...args) => service.execute(...args),
-    });
-    const prepared = await prepareManagedEnv(runtime, { includeControl: false, includeWeb: false, includeMemory: false, includeRender: true });
-    const hooks = {};
-    const tools = await loadTools(dataDir, 'render-answer', hooks);
-    const app = express();
-    runtime.registerRoutes(app, express);
-    const server = await new Promise((resolve) => {
-      const listener = app.listen(0, '127.0.0.1', () => resolve(listener));
-    });
-    const originalUrl = process.env.OPENCHAMBER_AGENT_TOOL_URL;
-    const originalToken = process.env.OPENCHAMBER_AGENT_TOOL_TOKEN;
-    process.env.OPENCHAMBER_AGENT_TOOL_URL = `http://127.0.0.1:${server.address().port}/api/openchamber/agent-tool`;
-    process.env.OPENCHAMBER_AGENT_TOOL_TOKEN = prepared.OPENCHAMBER_AGENT_TOOL_TOKEN;
-    const ask = (id, awaitAnswer = true) => tools.openchamber_render.execute(
-      { action: 'render.page', parameters: { html: '<p>Pick</p>', title: 'Pick a layout', awaitAnswer } },
-      { sessionID: 'ses_caller', id, signal: new AbortController().signal, progress: async () => {} },
-    );
-    const fetchSpy = vi.spyOn(globalThis, 'fetch');
-    try {
-      const answered = ask('call_1');
-      await vi.waitFor(() => service.answerPage({ sessionId: 'ses_caller', callId: 'call_1', summary: 'Layout B', data: { layout: 'b' } }));
-      const result = await answered;
-      expect(JSON.parse(result.content)).toMatchObject({ ok: true, data: { answer: { answered: true, summary: 'Layout B', data: { layout: 'b' } } } });
-      expect(result.metadata.openchamber).toMatchObject({ ok: true, answer: { answered: true, summary: 'Layout B', data: { layout: 'b' } } });
-      // Bun would otherwise end the waiting request after about six minutes;
-      // a page that only shows keeps the default.
-      expect(fetchSpy.mock.lastCall?.[1]).toMatchObject({ timeout: false });
-      await ask('call_shown', false);
-      expect(fetchSpy.mock.lastCall?.[1]).not.toHaveProperty('timeout');
+  it('registers OpenUI as a direct flat prompt and a separate read tool', async () => {
+    const { runtime, dataDir } = await createRuntime();
+    await prepareManagedEnv(runtime, { includeControl: false, includeWeb: false, includeMemory: false, includeOpenUI: true, codeMode: true });
+    const tools = await loadTools(dataDir, 'openui');
 
-      const closed = ask('call_2');
-      // Lets the call reach the server and start waiting there.
-      await new Promise((resolve) => setTimeout(resolve, 50));
-      await hooks.prompt({ sessionID: 'ses_other' });
-      await hooks.prompt({ sessionID: 'ses_caller' });
-      const closedResult = await closed;
-      expect(JSON.parse(closedResult.content)).toMatchObject({ ok: true, data: { answer: { answered: false, reason: 'chat' } } });
-      expect(closedResult.metadata.openchamber).toMatchObject({ ok: true, answer: { answered: false, reason: 'chat' } });
-      // The server let go of the page too, so a late answer finds nothing.
-      await vi.waitFor(() => expect(() => service.answerPage({ sessionId: 'ses_caller', callId: 'call_2', summary: 'B' }))
-        .toThrow(expect.objectContaining({ statusCode: 404 })));
-    } finally {
-      fetchSpy.mockRestore();
-      if (originalUrl === undefined) delete process.env.OPENCHAMBER_AGENT_TOOL_URL;
-      else process.env.OPENCHAMBER_AGENT_TOOL_URL = originalUrl;
-      if (originalToken === undefined) delete process.env.OPENCHAMBER_AGENT_TOOL_TOKEN;
-      else process.env.OPENCHAMBER_AGENT_TOOL_TOKEN = originalToken;
-      await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
-    }
+    expect(tools.prompt_openui.options).toEqual({ codemode: false });
+    expect(tools.prompt_openui.input).toEqual({
+      type: 'object',
+      properties: expect.objectContaining({ ui: expect.objectContaining({ type: 'string' }) }),
+      required: ['ui'],
+      additionalProperties: false,
+    });
+    expect(tools.prompt_openui.input.properties).not.toHaveProperty('action');
+    expect(tools.openchamber_openui.options).toEqual({ codemode: true });
+    expect(tools.openchamber_openui.input.properties.parameters.properties.groups).toMatchObject({
+      items: { enum: ['data', 'interaction', 'html', 'advanced', 'examples'] },
+      maxItems: 5,
+    });
+    expect(tools).not.toHaveProperty('openchamber_render');
   });
 
-  it('registers every tool as a direct tool unless Code Mode is asked for, and the render tool always direct', async () => {
+  it('keeps prompt_openui direct when Code Mode is enabled', async () => {
     const { runtime, dataDir } = await createRuntime();
     await prepareManagedEnv(runtime, { includeControl: true, includeWeb: true, includeMemory: true, includeNotify: true });
     const direct = await loadTools(dataDir, 'direct');
@@ -840,13 +916,13 @@ describe('managed agent tool runtime', () => {
       expect(tool.options).toEqual({ codemode: false });
     }
 
-    await prepareManagedEnv(runtime, { includeControl: true, includeWeb: true, includeMemory: true, includeNotify: true, includeRender: true, codeMode: true });
-    const { openchamber_render: render, ...behindExecute } = await loadTools(dataDir, 'codemode');
+    await prepareManagedEnv(runtime, { includeControl: true, includeWeb: true, includeMemory: true, includeNotify: true, includeOpenUI: true, codeMode: true });
+    const { prompt_openui: prompt, ...behindExecute } = await loadTools(dataDir, 'codemode');
     expect(Object.keys(behindExecute).length).toBeGreaterThan(0);
     for (const tool of Object.values(behindExecute)) {
       expect(tool.options).toEqual({ codemode: true });
     }
-    expect(render.options).toEqual({ codemode: false });
+    expect(prompt.options).toEqual({ codemode: false });
   });
 
   it('refuses to inject a plugin with no tools in it', async () => {

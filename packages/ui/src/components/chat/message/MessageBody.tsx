@@ -1737,6 +1737,7 @@ const AssistantMessageBody = React.memo(({
                     <div key={`assistant-text-${messageId}-${i}`} ref={messageTextContentRef} data-message-text-export-source="true">
                         <AssistantTextPart
                             part={part}
+                            allowOpenUI
                             sessionId={sessionId}
                             messageId={messageId}
                             streamPhase={effectiveStreamPhase}
@@ -1816,9 +1817,8 @@ const AssistantMessageBody = React.memo(({
                     continue;
                 }
 
-                // A page the agent showed, or a workflow it proposed, is drawn
-                // in place of its row. With Activity collapsed, the final
-                // answer draws it instead.
+                // A workflow proposal or OpenUI prompt is drawn in place of its
+                // row unless Activity hoisted it. Settled prompts stay in Activity.
                 if (isShownInPlace(toolPart.tool, toolPart.state)) {
                     if (!hoistedPages?.has(toolPart.id)) {
                         rendered.push(<ShownToolCard key={`page-${toolPart.id}`} part={toolPart} onShowPopup={onShowPopup} />);

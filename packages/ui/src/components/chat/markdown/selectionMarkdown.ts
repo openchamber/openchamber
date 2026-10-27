@@ -1,5 +1,5 @@
 import { MESSAGE_IMAGE_EXPORT_EXCLUDE_ATTRIBUTE } from '../message/imageExport';
-import { cloneSelectionAncestor, cloneSelectionContent } from './selectionRange';
+import { cloneSelectionAncestor, cloneSelectionContent, isOpenUISourceNode, normalizeOpenUISourceNodes } from './selectionRange';
 
 // Turns a selection inside rendered chat markdown back into Markdown, so Cmd+C
 // on part of a response pastes the formatting the message copy button gives.
@@ -115,6 +115,9 @@ const codeBlockText = (element: Element): string => {
   }).join('\n');
 };
 
+const openUISource = (element: Element): string | null =>
+  isOpenUISourceNode(element) ? element.getAttribute('data-oc-openui-source') ?? element.getAttribute('data-oc-code-source') : null;
+
 const escapeTableCell = (text: string): string => text.replace(/\|/g, '\\|').replace(/\n+/g, ' ').trim();
 
 const serializeTable = (table: Element, format: RenderedCopyFormat): string => {
@@ -171,6 +174,8 @@ const serializeList = (list: Element, format: RenderedCopyFormat): string => {
 
 const serializeBlockElement = (element: Element, format: RenderedCopyFormat): string => {
   const plain = format === 'plain';
+  const openui = openUISource(element);
+  if (openui !== null) return plain ? openui : fence(openui, 'openui-lang');
   if (element.matches('[data-streamdown="mermaid-block"]')) {
     const source = element.getAttribute('data-oc-mermaid-source') ?? '';
     return plain ? source : fence(source, 'mermaid');
@@ -227,6 +232,8 @@ const serializeBlockElement = (element: Element, format: RenderedCopyFormat): st
 
 const serializeInlineElement = (element: Element, format: RenderedCopyFormat): string => {
   const plain = format === 'plain';
+  const openui = openUISource(element);
+  if (openui !== null) return plain ? openui : fence(openui, 'openui-lang');
   if (element.matches('.katex')) {
     const tex = texOf(element);
     const rendered = element.querySelector('.katex-html')?.textContent ?? element.textContent ?? '';
@@ -337,6 +344,7 @@ export const renderedMarkdownHtmlToPlainText = (html: string, doc: Document): st
 export const normalizeMarkdownCopyContent = (root: HTMLElement): void => {
   if (root.isConnected) throw new Error('Markdown copy normalization requires a detached root');
   const doc = root.ownerDocument;
+  normalizeOpenUISourceNodes(root);
   // Read semantic source before removing application metadata or chrome.
   for (const diagram of Array.from(root.querySelectorAll('[data-streamdown="mermaid-block"]'))) {
     const pre = doc.createElement('pre');
