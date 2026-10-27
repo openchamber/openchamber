@@ -186,7 +186,18 @@ bottom of the transcript (`ChatContainer`), and the input box is an opaque
 surface (`oc-surface-floating`): it is always on screen over the moving
 transcript, and a blur there was redrawn on every streamed frame (see the rule
 in `design-system.css`). The draft screen and the expanded editor keep the slot
-in flow. A `ResizeObserver` on the slot publishes its height as
+in flow. A sent draft leaves the draft screen at once, while its session is
+still being created (`draftSent`, sync documentation rule 15): the composer
+floats over the sent message and the draft's title, target selectors and
+starter chips go, as they do when a session is opened. The composer hands the
+store the draft's response-style read unfinished (`responseStyle`), so the
+message shows without waiting for that settings round trip. On a phone the
+composer folds into its pill right after the send; the sent draft's timeline
+holds its first paint until the fold (at most 700ms), because the list lays its
+end out again when the composer below it shrinks and would hide the message for
+about 150ms. The wait follows the sent draft's timeline, so a session that
+arrives before the fold does not cut it short, and a composer that stays open
+(hardware keyboard, tablet layout) takes none. A `ResizeObserver` on the slot publishes its height as
 `--chat-composer-inset` and the timeline's tail spacer height as
 `--chat-composer-tail-inset`, written onto the elements that read them (the
 end fade band and the tail spacer, registered through

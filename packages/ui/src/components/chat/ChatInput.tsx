@@ -394,6 +394,8 @@ interface ChatInputProps {
     scrollToLatest?: () => void;
     active?: boolean;
     draftPresentationExiting?: boolean;
+    /** The draft's first message is on screen while its session is being created. */
+    draftSent?: boolean;
 }
 
 // A new Chat's working directory moves from the Chats root to a prepared
@@ -454,6 +456,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     scrollToLatest,
     active = true,
     draftPresentationExiting = false,
+    draftSent = false,
 }) => {
     const { t } = useI18n();
     // The session this composer belongs to: its column's (see
@@ -2039,6 +2042,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             delivery?: 'steer';
             skills?: SkillMentions;
             queuedGoal?: QueuedMessageGoal | null;
+            responseStyle?: Promise<string | null>;
         } | undefined;
         if (isBtwActive && btwSessionId && btwDirectory) {
             sendMessageOptions = {
@@ -2255,7 +2259,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         // btw mode: the fork already carries the question plus full history,
         // so the response-style instruction never applies there.
         const shouldAddResponseStyle = !isBtwActive && (newSessionDraftOpen || (currentSessionId ? !hasUserMessages(currentSessionId, currentSessionDirectory) : false));
-        if (shouldAddResponseStyle) {
+        if (shouldAddResponseStyle && capturedDraftSnapshot && !capturedTarget) {
+            // A draft's message shows before its session exists; the store
+            // adds the response style once the session does, so the message
+            // does not wait for the settings read.
+            sendMessageOptions = { ...sendMessageOptions, responseStyle: fetchResponseStyleInstruction().catch(() => null) };
+        } else if (shouldAddResponseStyle) {
             const responseStyleInstruction = await fetchResponseStyleInstruction().catch(() => null);
             if (responseStyleInstruction) {
                 additionalParts.push({
@@ -4098,7 +4107,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
     const chatSurfaceMode = useChatSurfaceMode();
     const isMiniChatSurface = chatSurfaceMode === 'mini-chat';
-    const showDesktopDraftPresentation = (newSessionDraftOpen || draftPresentationExiting)
+    // A sent draft keeps its target until its session exists, but no longer
+    // shows the draft screen around the composer.
+    const showDraftScreen = showDraftTargetSelectors && !draftSent;
+    const showDesktopDraftPresentation = ((newSessionDraftOpen && !draftSent) || draftPresentationExiting)
         && !isDesktopExpanded
         && !isMobile
         && !isVSCode
@@ -4554,7 +4566,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                     furniture (chips, banners, draft selectors) stays in state
                     and returns unchanged when the comment exits. */}
                 {!mobileCommentActive ? (<>
-                {!isMobile && (showDraftTargetSelectors || draftPresentationExiting) && selectedDraftProject ? (
+                {!isMobile && (showDraftScreen || draftPresentationExiting) && selectedDraftProject ? (
                     <div className={draftPresentationClassName}>
                         <DraftTargetSelectors
                             projects={draftProjects}
@@ -4577,7 +4589,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         />
                     </div>
                 ) : null}
-                {isMobile && showDraftTargetSelectors && selectedDraftProject ? (
+                {isMobile && showDraftScreen && selectedDraftProject ? (
                     <MobileDraftTargetTriggers
                         selectedProject={selectedDraftProject}
                         selectedBranchLabel={selectedDraftBranchLabel}
@@ -5046,7 +5058,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
         {/* Mobile draft target pickers: bottom sheets replacing the inline
             project/branch Selects (which desktop keeps). */}
-        {isMobile && showDraftTargetSelectors && selectedDraftProject ? (
+        {isMobile && showDraftScreen && selectedDraftProject ? (
             <MobileDraftTargetSheets
                 projects={draftProjects}
                 selectedProject={selectedDraftProject}

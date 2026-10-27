@@ -3,8 +3,7 @@
  * Replaces the action methods from the old useSessionStore.
  */
 
-import type { FilePart, FormRequest, JsonValue, Message, Metadata, ModelSelection, Part, PermissionRequest, Session, SyntheticMessage, TextPart, UserMessage } from "@/lib/opencode/model"
-import { compact, partIds } from "@/lib/opencode/model"
+import type { FilePart, FormRequest, JsonValue, Message, Metadata, ModelSelection, Part, PermissionRequest, Session, TextPart } from "@/lib/opencode/model"
 import { readSubagentRun } from "@/lib/opencode/subagent-run"
 import { readDispatchedSessionResult } from "@/lib/opencode/dispatched-session"
 import { readWorkflowReport } from "@/lib/workflows/report"
@@ -16,8 +15,7 @@ import { computeSubtreeIds } from "./scoped-blocking-requests"
 import { withUserWorkTitle } from "@/lib/sessionWorkTitle"
 import { opencodeClient, type SyntheticContextInput } from "@/lib/opencode/client"
 import { findMessagePageItem } from "@/lib/opencode/messagePaging"
-import { toJsonRecord } from "@/lib/opencode/json"
-import { ascendingId } from "@/lib/opencode/ids"
+import { buildOptimisticPrompt, type OptimisticPromptIds } from "./optimistic-prompt"
 import { mergeSessionDirectoryMetadata, resolveGlobalSessionDirectory, useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
 import { readGlobalSessionLineage } from "@/stores/sessionLineage"
 import { isRestorableOnItsOwn } from "./session-restore-rule"
@@ -2010,6 +2008,8 @@ export async function optimisticSend(input: {
    * reject.
    */
   ready?: Promise<void>
+  /** Ids minted when the prompt was shown before its session existed. */
+  ids?: OptimisticPromptIds
   appendSubmissions?: () => void
   onOptimisticInsert?: () => void
   onMessageID?: (messageID: string) => void
@@ -2074,69 +2074,21 @@ export async function optimisticSend(input: {
     }
   }
 
-  // Context ids come first so they sort before the prompt the way the server
-  // admits them. The client skips blank items, so they get no record here.
-  const context = (input.context ?? [])
-    .filter((item) => item.text.trim())
-    .map((item) => ({ ...item, id: ascendingId("msg") }))
-  const messageID = ascendingId("msg")
+  const prompt = buildOptimisticPrompt({
+    sessionId: input.sessionId,
+    content: input.content,
+    files: input.files,
+    context: input.context,
+    ids: input.ids,
+  })
+  const { context, messageID } = prompt
   input.onMessageID?.(messageID)
-  const optimisticIDs = [...context.map((item) => item.id), messageID]
-
-  // Part ids follow `partIds`, the same derivation the projection uses for the
-  // server's echo of this message. Identical ids let the echo reconcile in
-  // place instead of rendering the prompt twice.
-  const optimisticParts: Part[] = [
-    { id: partIds.userText(messageID), sessionID: input.sessionId, messageID, type: "text", text: input.content },
-  ]
-  if (input.files) {
-    input.files.forEach((file, index) => {
-      optimisticParts.push({
-        id: partIds.userFile(messageID, index),
-        sessionID: input.sessionId,
-        messageID,
-        type: "file",
-        mime: file.mime,
-        url: file.url,
-        filename: file.filename,
-      })
-    })
-  }
-
-  // A user message carries no model or agent in the v2 domain model: the turn's
-  // provider and agent belong to the assistant message the server produces.
-  const created = Date.now()
-  const optimisticMessage: UserMessage = {
-    id: messageID,
-    role: "user",
-    sessionID: input.sessionId,
-    // A user message never completes a turn; only assistant messages carry
-    // `time.completed`, and readers treat its presence as "turn finished".
-    time: { created },
-  }
+  const optimisticIDs = prompt.records.map((record) => record.info.id)
 
   // Insert into store + register in shadow Map (for mergeOptimisticPage cleanup).
-  // The context records carry the prompt's timestamp, so the timeline folds
-  // them onto the prompt from the first frame.
-  const addSyntheticContext = (item: SyntheticContextInput & { id: string }) => {
-    const synthetic: SyntheticMessage = compact({
-      id: item.id,
-      role: "synthetic",
-      sessionID: input.sessionId,
-      time: { created },
-      text: item.text,
-      description: item.description,
-      metadata: item.metadata ? toJsonRecord(item.metadata) : undefined,
-    })
-    optimisticAdd({ sessionID: input.sessionId, directory: targetDirectory, message: synthetic, parts: [] })
+  for (const record of prompt.records) {
+    optimisticAdd({ sessionID: input.sessionId, directory: targetDirectory, message: record.info, parts: record.parts })
   }
-  for (const item of context) addSyntheticContext(item)
-  optimisticAdd({
-    sessionID: input.sessionId,
-    directory: targetDirectory,
-    message: optimisticMessage,
-    parts: optimisticParts,
-  })
   input.onOptimisticInsert?.()
 
   // Set busy status

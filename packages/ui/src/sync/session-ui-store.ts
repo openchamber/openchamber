@@ -85,6 +85,7 @@ import {
   type UnarchiveSessionsOptions,
 } from "./session-actions"
 import { useInputStore, type SyntheticContextPart } from "./input-store"
+import { buildOptimisticPrompt, mintOptimisticPromptIds, type OptimisticPromptIds, type OptimisticPromptRecord } from "./optimistic-prompt"
 import { useSessionGoalArmStore } from "@/stores/useSessionGoalArmStore"
 import type { QueuedMessageGoal } from "@/stores/messageQueueStore"
 import { setSessionGoal } from "@/lib/sessionGoalActions"
@@ -194,6 +195,10 @@ export async function routeMessage(params: {
    * appears without waiting for it; only the request does. Never rejects.
    */
   knowledgeSync?: Promise<void>
+  /** Ids of the prompt already on screen, so the optimistic message is that one. */
+  promptIds?: OptimisticPromptIds
+  /** Called once the prompt is in the session as its optimistic message. */
+  onPromptShown?: () => void
 }): Promise<'command' | 'prompt' | 'shell'> {
   const requestDirectory = params.directory ?? undefined
   // The session carries its own model and agent server-side. Sending them on
@@ -319,6 +324,8 @@ export async function routeMessage(params: {
     files: sendFiles,
     context: contextItems,
     ready: params.knowledgeSync,
+    ids: params.promptIds,
+    onOptimisticInsert: params.onPromptShown,
     appendSubmissions: params.appendSubmissions,
     send: (messageID, context) => opencodeClient.sendMessage({
       runtimeKey: params.runtimeKey,
@@ -357,6 +364,12 @@ type SendMessageOptions = {
   delivery?: 'steer'
   /** Skills named inline, attached to the prompt once the session exists. */
   skills?: SkillMentions
+  /**
+   * A new session's response-style instruction, still being read. Only the
+   * send that creates the draft's session adds it; a send joining that
+   * session leaves it out.
+   */
+  responseStyle?: Promise<string | null>
   /**
    * A queued message carries its own goal intent. Set (a goal or `null`), it
    * replaces the composer's armed goal, which belongs to the composer text.
@@ -433,10 +446,22 @@ export type NewSessionDraftState = {
   workDraftId?: string
 }
 
+/**
+ * The prompt a draft's first send shows while its session is being created.
+ * The chat renders `records` in place of the draft screen, and the session's
+ * own optimistic message, inserted under the same ids, replaces it.
+ */
+export type DraftSendPreview = {
+  runtimeKey: string
+  draftId: number
+  records: OptimisticPromptRecord[]
+}
+
 export type SessionUIState = {
   currentSessionId: string | null
   currentSessionDirectory: string | null
   materializedDraftSessionId: string | null
+  draftSendPreview: DraftSendPreview | null
   newSessionDraft: NewSessionDraftState
   abortPromptSessionId: string | null
   abortPromptExpiresAt: number | null
@@ -806,6 +831,12 @@ const DEFAULT_DRAFT: NewSessionDraftState = {
 }
 let nextDraftId = 1
 const pendingChatDirectoryByDraft = new Map<string, Promise<string | null>>()
+// The session a draft's first send created or is creating, keyed by runtime and
+// draft. A later send carrying the same draft (a second Enter before the session
+// existed, or a send held through OpenCode startup) goes to that session instead
+// of creating a second one. Only a failed creation leaves the map; an entry per
+// sent draft for the page's lifetime is the cost.
+const materializingDraftSessions = new Map<string, Promise<MaterializedDraftSession | null>>()
 
 const activeSessionByRuntime = new Map<string, string | null>()
 type RuntimeSessionMemory = {
@@ -1212,6 +1243,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   currentSessionId: null,
   currentSessionDirectory: null,
   materializedDraftSessionId: null,
+  draftSendPreview: null,
   newSessionDraft: { ...DEFAULT_DRAFT },
   abortPromptSessionId: null,
   abortPromptExpiresAt: null,
@@ -1903,81 +1935,140 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       }
 
       // ---- New session from draft ----
-      if (!capturedTarget && !options?.sessionId && draft?.open) {
-        const createdDraftSession = await materializeOpenDraftSession({
-          providerID,
-          modelID,
-          agent: trimmedAgent,
-          variant,
-        }, options?.draftSnapshot)
-        if (!createdDraftSession) throw new Error("Failed to create session")
-        // The draft is a session now: it leaves the drafts every client lists.
-        if (draft.workDraftId) void useSessionDraftsStore.getState().discard(draft.workDraftId, { final: true }).catch(() => undefined)
-
-        const draftParts: Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean; metadata?: ContextPartMetadata }> | undefined = createdDraftSession.syntheticParts?.length
-          ? [...(additionalParts || []), ...createdDraftSession.syntheticParts]
-          : additionalParts
-        // The server writes the project knowledge into the new session while
-        // the message is already on screen: only the prompt request waits.
-        const draftKnowledgeSync = inputMode === "shell"
-          ? undefined
-          : syncSessionKnowledge(createdDraftSession.directory, createdDraftSession.sessionId)
-        const historyIdentity = createInputHistoryIdentity(
-          capturedRuntimeKey,
-          createdDraftSession.directory ?? '',
-          createdDraftSession.sessionId,
-        )
-        const historySubmissions = options?.historySubmissions
-        const appendSubmissions = historyIdentity && historySubmissions?.length
-          ? () => useInputHistoryStore.getState().appendSubmissions(historyIdentity, historySubmissions)
+      const draftKey = !capturedTarget && !options?.sessionId && draft?.open
+        ? `${capturedRuntimeKey}:${draft.draftId}`
+        : null
+      const sessionBeingCreated = draftKey ? materializingDraftSessions.get(draftKey) : undefined
+      let joinedDraftSession: MaterializedDraftSession | null = null
+      if (sessionBeingCreated) {
+        // A send made while the draft's session is still being created goes
+        // to that session, as it does once the session exists.
+        joinedDraftSession = await sessionBeingCreated
+        if (!joinedDraftSession) throw new Error("Failed to create session")
+        if (getRuntimeKey() !== capturedRuntimeKey) {
+          throw new Error("Message was not sent because the runtime changed.")
+        }
+      } else if (draftKey) {
+        // Sends that join the session wait until this one's message is in it,
+        // or until it ended, so the messages keep the order they were sent in.
+        let settleFirstSend: (session: MaterializedDraftSession | null) => void = () => {}
+        materializingDraftSessions.set(draftKey, new Promise((resolve) => { settleFirstSend = resolve }))
+        let createdDraftSession: MaterializedDraftSession | null = null
+        // A prompt is on screen at once, as in an existing session, while the
+        // session is still being created; the session's optimistic message
+        // takes its place under the same ids. Commands and shell sends show
+        // no optimistic message in a session either.
+        // The context is the one the session gets: the composer's, then the
+        // draft's own, then the response style, which arrives later and gets
+        // an id kept for it, so every context id still sorts before the prompt.
+        const toPromptFile = (file: AttachedFile) => ({ type: "file" as const, mime: file.mimeType, url: file.dataUrl, filename: file.filename })
+        const promptParts = [...(additionalParts ?? []), ...(draft.syntheticParts ?? [])]
+        const promptContext = promptParts.map((part) => ({ text: part.text, metadata: part.metadata }))
+        const promptIds = inputMode !== "shell" && !content.startsWith("/")
+          ? mintOptimisticPromptIds(promptContext.filter((item) => item.text.trim()).length + (options?.responseStyle ? 1 : 0))
           : undefined
+        const preview: DraftSendPreview | null = promptIds
+          ? {
+            runtimeKey: capturedRuntimeKey,
+            draftId: draft.draftId,
+            records: buildOptimisticPrompt({
+              sessionId: "",
+              content,
+              files: [
+                ...(attachments ?? []).map(toPromptFile),
+                ...promptParts.flatMap((part) => (part.attachments ?? []).map(toPromptFile)),
+              ],
+              context: promptContext,
+              ids: promptIds,
+            }).records,
+          }
+          : null
+        if (preview) set({ draftSendPreview: preview })
+        const clearPreview = () => {
+          if (preview && get().draftSendPreview === preview) set({ draftSendPreview: null })
+        }
+        try {
+          createdDraftSession = await materializeOpenDraftSession({
+            providerID,
+            modelID,
+            agent: trimmedAgent,
+            variant,
+          }, options?.draftSnapshot)
+          if (!createdDraftSession) throw new Error("Failed to create session")
+          // The draft is a session now: it leaves the drafts every client lists.
+          if (draft.workDraftId) void useSessionDraftsStore.getState().discard(draft.workDraftId, { final: true }).catch(() => undefined)
 
-        notifyMessageSent(createdDraftSession.sessionId)
-        // Sending a message means working in the session: its tab stays.
-        useSessionTabsStore.getState().pinTab(createdDraftSession.sessionId)
+          const responseStyle = await options?.responseStyle
+          const draftParts: Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean; metadata?: ContextPartMetadata }> = [
+            ...(additionalParts ?? []),
+            ...(createdDraftSession.syntheticParts ?? []),
+            ...(responseStyle ? [{ text: wrapSystemReminder(responseStyle), synthetic: true }] : []),
+          ]
+          // The server writes the project knowledge into the new session while
+          // the message is already on screen: only the prompt request waits.
+          const draftKnowledgeSync = inputMode === "shell"
+            ? undefined
+            : syncSessionKnowledge(createdDraftSession.directory, createdDraftSession.sessionId)
+          const historyIdentity = createInputHistoryIdentity(
+            capturedRuntimeKey,
+            createdDraftSession.directory ?? '',
+            createdDraftSession.sessionId,
+          )
+          const historySubmissions = options?.historySubmissions
+          const appendSubmissions = historyIdentity && historySubmissions?.length
+            ? () => useInputHistoryStore.getState().appendSubmissions(historyIdentity, historySubmissions)
+            : undefined
 
-        markPendingUserSendAnimation(createdDraftSession.sessionId)
+          notifyMessageSent(createdDraftSession.sessionId)
+          // Sending a message means working in the session: its tab stays.
+          useSessionTabsStore.getState().pinTab(createdDraftSession.sessionId)
 
-        const files = attachments?.map((a) => ({
-          type: "file" as const,
-          mime: a.mimeType,
-          url: a.dataUrl,
-          filename: a.filename,
-        }))
+          // A prompt already on screen came in with the timeline; it does not
+          // enter the session's timeline a second time.
+          if (!preview) markPendingUserSendAnimation(createdDraftSession.sessionId)
 
-        await applyArmedGoal(createdDraftSession.sessionId, createdDraftSession.directory)
-        await routeMessage({
-          sessionId: createdDraftSession.sessionId,
-          directory: createdDraftSession.directory,
-          content,
-          providerID,
-          modelID,
-          agent: createdDraftSession.agent,
-          agentMentionName,
-          variant,
-          inputMode,
-          files,
-          appendSubmissions,
-          delivery: options?.delivery,
-          skills: options?.skills,
-          knowledgeSync: draftKnowledgeSync,
-          additionalParts: draftParts?.map((p) => ({
-            text: p.text,
-            synthetic: p.synthetic,
-            metadata: p.metadata,
-            files: p.attachments?.map((a: AttachedFile) => ({
-              type: "file" as const,
-              mime: a.mimeType,
-              url: a.dataUrl,
-              filename: a.filename,
+          const files = attachments?.map(toPromptFile)
+
+          await applyArmedGoal(createdDraftSession.sessionId, createdDraftSession.directory)
+          await routeMessage({
+            sessionId: createdDraftSession.sessionId,
+            directory: createdDraftSession.directory,
+            content,
+            providerID,
+            modelID,
+            agent: createdDraftSession.agent,
+            agentMentionName,
+            variant,
+            inputMode,
+            files,
+            appendSubmissions,
+            delivery: options?.delivery,
+            skills: options?.skills,
+            knowledgeSync: draftKnowledgeSync,
+            additionalParts: draftParts.map((p) => ({
+              text: p.text,
+              synthetic: p.synthetic,
+              metadata: p.metadata,
+              files: p.attachments?.map(toPromptFile),
             })),
-          })),
-        })
+            promptIds,
+            // Sends that joined this one show their own message once this
+            // one is in the session.
+            onPromptShown: () => {
+              clearPreview()
+              settleFirstSend(createdDraftSession)
+            },
+          })
+        } finally {
+          clearPreview()
+          if (!createdDraftSession) materializingDraftSessions.delete(draftKey)
+          settleFirstSend(createdDraftSession)
+        }
         return
       }
 
       // ---- Existing session ----
-      const targetSessionId = capturedTarget?.sessionId ?? options?.sessionId ?? get().currentSessionId
+      const targetSessionId = joinedDraftSession?.sessionId ?? capturedTarget?.sessionId ?? options?.sessionId ?? get().currentSessionId
       const resumeAfterSend = options?.userInitiated && inputMode !== 'shell' && targetSessionId
         ? prepareUserMessageResume(targetSessionId, capturedRuntimeKey)
         : undefined
@@ -2020,7 +2111,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       }
 
       const currentSessionDirectory = targetSessionId
-        ? normalizePath(capturedTarget?.directory ?? options?.directory ?? get().getDirectoryForSession(targetSessionId))
+        ? normalizePath(joinedDraftSession?.directory ?? capturedTarget?.directory ?? options?.directory ?? get().getDirectoryForSession(targetSessionId))
         : null
       if (targetSessionId) {
         notifyMessageSent(targetSessionId)
@@ -2060,7 +2151,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         : undefined
 
       await routeMessage({
-        runtimeKey: capturedTarget?.runtimeKey,
+        runtimeKey: capturedTarget?.runtimeKey ?? (joinedDraftSession ? capturedRuntimeKey : undefined),
         sessionId: targetSessionId || "",
         directory: currentSessionDirectory,
         content,

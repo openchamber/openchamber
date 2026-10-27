@@ -128,6 +128,8 @@ const CHAT_FORCE_SCROLL_BOTTOM_EVENT = 'openchamber:chat-force-scroll-bottom';
 const DEFAULT_RETRY_MESSAGE = 'Quota limit reached. Retrying automatically.';
 const DRAFT_EXIT_DURATION_MS = 120;
 const COMPOSER_MOVE_DURATION_MS = 180;
+// Longest a sent draft's first paint waits for the phone composer to fold.
+const MOBILE_COMPOSER_FOLD_WAIT_MS = 700;
 const CHAT_SCROLL_STYLE = {
     overflowAnchor: 'none',
     overscrollBehavior: 'contain',
@@ -213,6 +215,8 @@ type ChatViewportProps = {
     placeholder: React.ReactNode;
     currentSessionId: string;
     currentSessionKey: string;
+    /** What the timeline is kept mounted under: the session id, or the sent draft it continues. */
+    retainKey: string;
     isDesktopExpandedInput: boolean;
     isMobile: boolean;
     /** The composer floats over the transcript and reserves its band via
@@ -268,6 +272,7 @@ const ChatViewport = React.memo(({
     placeholder,
     currentSessionId,
     currentSessionKey,
+    retainKey,
     isDesktopExpandedInput,
     isMobile,
     floatingComposer,
@@ -557,7 +562,7 @@ const ChatViewport = React.memo(({
                         session. The list still remounts on a key change. */}
                     <KeepAlive
                         key={getRuntimeKey()}
-                        cacheKey={showingTranscript ? currentSessionId : null}
+                        cacheKey={showingTranscript ? retainKey : null}
                         capacity={retainedTimelines()}
                     >
                         <ChatColumnSessionContext.Provider value={session}>
@@ -565,6 +570,7 @@ const ChatViewport = React.memo(({
                                 key={currentSessionKey}
                                 ref={messageListRef}
                                 sessionKey={currentSessionId}
+                                listKey={retainKey}
                                 messages={renderedMessages}
                                 sessionIsWorking={sessionIsWorking}
                                 activeStreamingMessageId={streamingMessageId}
@@ -623,6 +629,7 @@ const ChatViewport = React.memo(({
     return prev.currentSessionId === next.currentSessionId
         && prev.placeholder === next.placeholder
         && prev.currentSessionKey === next.currentSessionKey
+        && prev.retainKey === next.retainKey
         && prev.isDesktopExpandedInput === next.isDesktopExpandedInput
         && prev.isMobile === next.isMobile
         && prev.floatingComposer === next.floatingComposer
@@ -904,9 +911,37 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         }]);
         return () => childStores.clearBootstrapDemand(columnDemandOwner);
     }, [childStores, columnDemandOwner, effectiveSessionDirectory, pinned]);
-    const currentSessionKey = currentSessionId
+    // A draft's first message shows at once, before its session exists
+    // (`draftSendPreview`), in place of the draft screen. The timeline it shows
+    // in keeps its key once the session arrives, so the message stays put
+    // instead of the timeline remounting and revealing it again. The session
+    // keeps that key in this column, so a return to it finds its timeline.
+    const draftSendPreview = useSessionUIStore((s) => (pinned ? null : s.draftSendPreview));
+    const shownDraftSendPreview = draftSendPreview?.runtimeKey === getRuntimeKey() ? draftSendPreview : null;
+    const draftSent = Boolean(
+        shownDraftSendPreview && newSessionDraft.open && newSessionDraft.draftId === shownDraftSendPreview.draftId,
+    );
+    const draftSendTimelineRef = React.useRef<{ key: string; sessionId: string | null } | null>(null);
+    const draftSentSessionKeysRef = React.useRef(new Map<string, string>());
+    if (draftSent && shownDraftSendPreview) {
+        const key = JSON.stringify([getRuntimeKey(), 'draft-send', shownDraftSendPreview.draftId]);
+        if (draftSendTimelineRef.current?.key !== key) draftSendTimelineRef.current = { key, sessionId: null };
+    } else if (draftSendTimelineRef.current) {
+        const bound = draftSendTimelineRef.current;
+        const sessionId = bound.sessionId
+            ?? (currentSessionId && currentSessionId === materializedDraftSessionId ? currentSessionId : null);
+        // `setCurrentSession` closes the draft before it selects the session.
+        const sessionArriving = !bound.sessionId && !currentSessionId && Boolean(materializedDraftSessionId);
+        if (sessionId) draftSentSessionKeysRef.current.set(sessionId, bound.key);
+        draftSendTimelineRef.current = (sessionId && sessionId === currentSessionId) || sessionArriving
+            ? { key: bound.key, sessionId }
+            : null;
+    }
+    const timelineKey = draftSendTimelineRef.current?.key
+        ?? (currentSessionId ? draftSentSessionKeysRef.current.get(currentSessionId) : undefined);
+    const currentSessionKey = timelineKey ?? (currentSessionId
         ? JSON.stringify([getRuntimeKey(), effectiveSessionDirectory, currentSessionId])
-        : null;
+        : null);
     // A deferred switch can keep the previous transcript on screen after the
     // selected session changes. Protect what is actually rendered until commit.
     React.useLayoutEffect(() => {
@@ -980,7 +1015,16 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         suspendPartUpdates: Boolean(streamingMessageId),
         suspendPartUpdatesForMessageId: streamingMessageId,
     });
-    const sessionMessages = currentSessionId ? sessionMessageRecords : EMPTY_MESSAGES;
+    // The sent draft's message shows until the session holds its own copy.
+    const draftSendRecords = shownDraftSendPreview?.records;
+    const draftSendTimeline = draftSendTimelineRef.current;
+    const showDraftSendRecords = Boolean(draftSendRecords && draftSendTimeline && (
+        !currentSessionId
+        || (draftSendTimeline.sessionId === currentSessionId && sessionMessageRecords.length === 0)
+    ));
+    const sessionMessages = showDraftSendRecords && draftSendRecords
+        ? draftSendRecords
+        : currentSessionId ? sessionMessageRecords : EMPTY_MESSAGES;
     const authSessionExpired = useAuthSessionStore((store) => store.state !== 'ok');
     const wasAuthExpiredRef = React.useRef(false);
     const sessionMessageLoadState = useSessionMessageLoadState(
@@ -1633,16 +1677,47 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         composerSlotRef.current = node;
         setComposerSlotNode(node);
     }, []);
+    // On a phone the composer folds into its pill right after a send. A sent
+    // draft's timeline mounts before that, and the list lays its end out again
+    // when the composer below it shrinks, hiding its rows for a moment; the
+    // timeline's first paint waits for the fold instead. Keyed on the sent
+    // draft's timeline, which the session keeps when it arrives, so a session
+    // that arrives before the fold does not reveal early. A composer that stays
+    // open (hardware keyboard, tablet layout) announces no expanded state and
+    // takes no wait.
+    const onDraftSendTimeline = Boolean(draftSendTimeline);
+    React.useLayoutEffect(() => {
+        if (!onDraftSendTimeline || !isMobile) return;
+        const root = document.documentElement;
+        const folding = () => root.classList.contains('oc-composer-expanded');
+        if (!folding()) return;
+        const release = revealGate.hold();
+        if (!release) return;
+        revealGate.extendCap(MOBILE_COMPOSER_FOLD_WAIT_MS);
+        const observer = new MutationObserver(() => {
+            if (folding()) return;
+            observer.disconnect();
+            release();
+        });
+        observer.observe(root, { attributes: true, attributeFilter: ['class'] });
+        return () => {
+            observer.disconnect();
+            release();
+        };
+    }, [isMobile, onDraftSendTimeline, revealGate]);
     const previousComposerRectRef = React.useRef<DOMRect | null>(null);
-    const previousDraftOpenRef = React.useRef(draftOpen);
-    const previousDraftLayoutVisibleRef = React.useRef(draftOpen);
+    // A sent draft leaves its screen the way a created session does: its
+    // message is on screen while the session is still being created.
+    const draftScreenOpen = draftOpen && !draftSent;
+    const previousDraftOpenRef = React.useRef(draftScreenOpen);
+    const previousDraftLayoutVisibleRef = React.useRef(draftScreenOpen);
     const [draftExitAnimating, setDraftExitAnimating] = React.useState(false);
-    const shouldAnimateDraftTransition = Boolean(
+    const shouldAnimateDraftTransition = draftSent || Boolean(
         currentSessionId && materializedDraftSessionId === currentSessionId,
     );
     const draftPresentationExiting = draftExitAnimating
-        || (previousDraftOpenRef.current && !draftOpen && shouldAnimateDraftTransition);
-    const draftLayoutVisible = draftOpen || draftPresentationExiting;
+        || (previousDraftOpenRef.current && !draftScreenOpen && shouldAnimateDraftTransition);
+    const draftLayoutVisible = draftScreenOpen || draftPresentationExiting;
     // The composer floats over the transcript in a normal session view; the
     // draft screen (centred composer) and the expanded editor keep it in flow.
     // On mobile the keyboard choreography still moves the form inside the
@@ -1689,7 +1764,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     });
 
     React.useLayoutEffect(() => {
-        if (draftOpen) {
+        if (draftScreenOpen) {
             setDraftExitAnimating(false);
             return;
         }
@@ -1698,11 +1773,11 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         setDraftExitAnimating(true);
         const timeoutId = window.setTimeout(() => setDraftExitAnimating(false), DRAFT_EXIT_DURATION_MS);
         return () => window.clearTimeout(timeoutId);
-    }, [draftOpen, shouldAnimateDraftTransition]);
+    }, [draftScreenOpen, shouldAnimateDraftTransition]);
 
     React.useLayoutEffect(() => {
-        previousDraftOpenRef.current = draftOpen;
-    }, [draftOpen]);
+        previousDraftOpenRef.current = draftScreenOpen;
+    }, [draftScreenOpen]);
 
     React.useLayoutEffect(() => {
         const composerSlot = composerSlotRef.current;
@@ -1713,7 +1788,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         const previousRect = previousComposerRectRef.current;
         const leftDraftLayout = previousDraftLayoutVisibleRef.current
             && !draftLayoutVisible
-            && Boolean(currentSessionId);
+            && (Boolean(currentSessionId) || draftSent);
         const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
 
         const shouldMoveComposer = leftDraftLayout && shouldAnimateDraftTransition;
@@ -1730,19 +1805,24 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         }
         previousComposerRectRef.current = currentRect;
         previousDraftLayoutVisibleRef.current = draftLayoutVisible;
-        if (leftDraftLayout && currentSessionId) {
+        // A sent draft left its screen before its session existed.
+        if (!draftLayoutVisible && currentSessionId && currentSessionId === materializedDraftSessionId) {
             clearMaterializedDraftSession(currentSessionId);
         }
     }, [
         clearMaterializedDraftSession,
         currentSessionId,
         draftLayoutVisible,
+        draftSent,
+        materializedDraftSessionId,
         isDesktopExpandedInput,
         shouldAnimateDraftTransition,
         useCompactDraftLayout,
     ]);
 
-	if (!currentSessionId && !draftOpen) {
+	// A sent draft's session is selected right after its draft closes; the
+	// timeline showing its message stays mounted across that step.
+	if (!currentSessionId && !draftOpen && !draftSendTimeline) {
 		// The auto-open effect runs on the next tick. Use a neutral background
 		// until then instead of flashing the standard empty state.
 		if (autoOpenDraft && !initError) {
@@ -1756,7 +1836,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
 	}
 
     const sessionPlaceholder = (() => {
-        if (draftOpen || draftPresentationExiting) {
+        if (draftScreenOpen || draftPresentationExiting) {
             if (!useCompactDraftLayout || isDesktopExpandedInput) {
                 return null;
             }
@@ -1831,6 +1911,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
             placeholder={sessionPlaceholder}
             currentSessionId={currentSessionId ?? ''}
             currentSessionKey={currentSessionKey ?? currentSessionId ?? ''}
+            retainKey={timelineKey ?? currentSessionId ?? ''}
             isDesktopExpandedInput={isDesktopExpandedInput}
             isMobile={isMobile}
             floatingComposer={floatingComposer}
@@ -2025,6 +2106,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                         scrollToBottom={scrollToBottomOnSend}
                         scrollToLatest={resumeToLatestInstant}
                         draftPresentationExiting={draftPresentationExiting}
+                        draftSent={draftSent}
                     />
                 )}
             </div>

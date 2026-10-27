@@ -101,6 +101,8 @@ const isAssistantMessageCompleted = (message: ChatMessageEntry): boolean => {
 
 interface MessageListProps {
     sessionKey: string;
+    /** Identity of the list itself; a change remounts it. Defaults to `sessionKey`. */
+    listKey?: string;
     messages: ChatMessageEntry[];
     sessionIsWorking?: boolean;
     activeStreamingMessageId?: string | null;
@@ -800,6 +802,7 @@ TimelineRowContent.displayName = 'TimelineRowContent';
 
 const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     sessionKey,
+    listKey,
     messages,
     sessionIsWorking = false,
     activeStreamingMessageId = null,
@@ -1394,7 +1397,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         <FadeInDisabledProvider disabled>
             <TurnMessageWindowContext.Provider value={turnMessageWindow}>
                 <TimelineList
-                    key={sessionKey}
+                    key={listKey ?? sessionKey}
                     entries={allEntries}
                     streamingTailKey={trailingStreamingEntry?.key ?? null}
                     registerList={handleRegisterList}
