@@ -95,15 +95,27 @@ export const runtimeKeyForDeepLinkHost = (rawHostId) => {
   return hostId === LOCAL_HOST_ENTRY_ID ? LOCAL_HOST_ENTRY_ID : `${HOST_RUNTIME_KEY_PREFIX}${hostId}`;
 };
 
+// The host a forwarding window shows, for stamping its notifications. Same
+// identity rules as the reuse lookup: the runtime the window reported wins, so
+// a window opened for a host and switched in place since stamps the instance
+// it shows now; its creation-time tag answers only while it has not reported.
+// A reported key that resolves to no host gives no id, and the stale tag must
+// not take over.
+export const resolveSenderHostId = ({ runtimeKey, hostWindowId }, { hosts, localUrl, localClientToken }) => {
+  const reported = readTrimmedString(runtimeKey);
+  if (!reported) return readTrimmedString(hostWindowId) || null;
+  return resolveHostEntryForRuntimeKey(reported, { hosts, localUrl, localClientToken })?.id || null;
+};
+
 // A forwarded notification must name the owning runtime in the resolver's
-// vocabulary ('local' | 'host:<id>'). The forwarding window's own tag is
+// vocabulary ('local' | 'host:<id>'). The forwarding window's host is
 // authoritative: a direct host window's renderer computes an unroutable
 // 'url:<origin>' key or inherits a stale one, while the shell knows which
-// host the window was opened for. Windows without a host tag (the primary
-// window) keep the renderer-provided key, which tracks in-place switches.
+// host the window shows. Windows without a host keep the renderer-provided
+// key.
 export const resolveForwardedNotificationRuntimeKey = ({ runtimeKey, hostWindowId }) => {
   const hostId = readTrimmedString(hostWindowId);
-  if (hostId) return `${HOST_RUNTIME_KEY_PREFIX}${hostId}`;
+  if (hostId) return runtimeKeyForDeepLinkHost(hostId);
   return readTrimmedString(runtimeKey);
 };
 

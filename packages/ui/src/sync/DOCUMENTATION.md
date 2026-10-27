@@ -1247,7 +1247,9 @@ and `openHostWindow` looks for a window to reuse first by the live key,
 then by the creation-time tag: a link that names an instance lands in
 whichever open window shows it, including a main window switched in place
 and a switcher window opened for a direct instance, which main marks the
-same way it marks relay windows. A notification click brings the receiving
+same way it marks relay windows. A notification a window forwards names its
+owner by the same rule: the instance the window reports, and the creation-time
+tag only before it has reported. A notification click brings the receiving
 window forward only when it already shows the instance that owns the
 session; otherwise the window it hands the session to is the one raised.
 

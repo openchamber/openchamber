@@ -62,7 +62,7 @@ import {
 import { sanitizeRuntimeRequestHeaders } from './runtime-request-headers.mjs';
 import { isSplashColor, redactHostsConfigForRemote } from './remote-page-policy.mjs';
 import { connectDefaultSshInstanceAtStartup, resolveDefaultSshInstanceId } from './startup-ssh.mjs';
-import { findReusableHostWindowIndex, normalizeNotificationInput, readTrimmedString, resolveHostEntryForRuntimeKey, runtimeKeyForDeepLinkHost, stampForwardedNotification } from './notification-host-routing.mjs';
+import { findReusableHostWindowIndex, normalizeNotificationInput, readTrimmedString, resolveHostEntryForRuntimeKey, resolveSenderHostId, runtimeKeyForDeepLinkHost, stampForwardedNotification } from './notification-host-routing.mjs';
 import { isPackagedUiRuntimeRequest } from './packaged-ui-routing.mjs';
 import { RUNTIME_CONFIG_SCRIPT_PATHNAME, claimRuntimeConfigScriptRequest, createRuntimeConfigGate, injectRuntimeConfig } from './packaged-runtime-config.mjs';
 import { settleMainProcessCompileCache } from './compile-cache.mjs';
@@ -4958,7 +4958,14 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       // Stamp the forwarding window's own host identity: the renderer of a
       // direct host window cannot name its host (it sees only the API URL).
       const senderHostId = browserWindow && !browserWindow.isDestroyed()
-        ? readTrimmedString(browserWindow.__ocHostWindowId) || null
+        ? resolveSenderHostId(
+          { runtimeKey: browserWindow.__ocRuntimeKey, hostWindowId: browserWindow.__ocHostWindowId },
+          {
+            hosts: readDesktopHostsConfig()?.hosts || [],
+            localUrl: state.sidecarUrl || null,
+            localClientToken: readDesktopLocalClientToken(),
+          },
+        )
         : null;
       maybeShowNativeNotification(stampForwardedNotification(args, senderHostId));
       return null;

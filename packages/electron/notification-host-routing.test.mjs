@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { findReusableHostWindowIndex, resolveForwardedNotificationRuntimeKey, resolveHostEntryForRuntimeKey, runtimeKeyForDeepLinkHost, stampForwardedNotification } from './notification-host-routing.mjs';
+import { findReusableHostWindowIndex, resolveForwardedNotificationRuntimeKey, resolveHostEntryForRuntimeKey, resolveSenderHostId, runtimeKeyForDeepLinkHost, stampForwardedNotification } from './notification-host-routing.mjs';
 
 test('local runtime key resolves to a local host entry', () => {
   assert.deepEqual(resolveHostEntryForRuntimeKey('local', {
@@ -145,6 +145,29 @@ test('host windows forward their own host id regardless of the renderer key', ()
   assert.equal(resolveForwardedNotificationRuntimeKey({ runtimeKey: 'local', hostWindowId: 'host-b' }), 'host:host-b');
   assert.equal(resolveForwardedNotificationRuntimeKey({ runtimeKey: '', hostWindowId: 'host-b' }), 'host:host-b');
   assert.equal(resolveForwardedNotificationRuntimeKey({ runtimeKey: undefined, hostWindowId: ' host-b ' }), 'host:host-b');
+});
+
+test('a window tagged for the local instance forwards the local key', () => {
+  assert.equal(resolveForwardedNotificationRuntimeKey({ runtimeKey: 'host:x', hostWindowId: 'local' }), 'local');
+});
+
+test('the sender host is the runtime the window reports, not its creation tag', () => {
+  // Opened for host-a, switched in place to Local: its notifications are Local.
+  assert.equal(resolveSenderHostId({ runtimeKey: 'local', hostWindowId: 'host-a' }, reuseDeps), 'local');
+  assert.equal(resolveSenderHostId({ runtimeKey: 'host:host-b', hostWindowId: 'host-a' }, reuseDeps), 'host-b');
+  assert.equal(resolveSenderHostId({ runtimeKey: 'url:https://api.b.example.com', hostWindowId: null }, reuseDeps), 'host-b');
+  const stamped = stampForwardedNotification(
+    { payload: { sessionId: 'ses_x', runtimeKey: 'local' } },
+    resolveSenderHostId({ runtimeKey: 'local', hostWindowId: 'host-a' }, reuseDeps),
+  );
+  assert.equal(stamped.runtimeKey, 'local');
+});
+
+test('the sender host falls back to the creation tag only before the window reports', () => {
+  assert.equal(resolveSenderHostId({ runtimeKey: '', hostWindowId: 'host-a' }, reuseDeps), 'host-a');
+  assert.equal(resolveSenderHostId({ runtimeKey: null, hostWindowId: null }, reuseDeps), null);
+  // A reported key that names no saved host leaves the renderer key in charge.
+  assert.equal(resolveSenderHostId({ runtimeKey: 'url:https://gone.example', hostWindowId: 'host-a' }, reuseDeps), null);
 });
 
 test('untagged windows keep the renderer-provided runtime key', () => {
