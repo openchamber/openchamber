@@ -6,20 +6,20 @@ export interface EnterKeyPolicyInput {
     shiftKey: boolean;
     ctrlKey: boolean;
     metaKey: boolean;
+    altKey: boolean;
     /** Mobile return-key send (enterkeyhint="send"); desktop ignores it. */
     returnKeySends?: boolean;
 }
 
 export const shouldSubmitEnter = (input: EnterKeyPolicyInput): boolean => {
     const isCtrlEnter = input.ctrlKey || input.metaKey;
-    if (input.isMobile) return isCtrlEnter || (input.returnKeySends === true && !input.shiftKey);
+    if (input.isMobile) return isCtrlEnter || (input.returnKeySends === true && !input.shiftKey && !input.altKey);
     if (input.isDesktopExpanded) return isCtrlEnter;
 
-    const enterSendsByDefault = !input.isMobile;
     if (!input.enterToSendConfigured) {
-        return !input.shiftKey && (enterSendsByDefault || isCtrlEnter);
+        return !input.shiftKey && (!input.altKey || isCtrlEnter);
     }
-    const sendsWithEnter = input.enterToSend && !input.shiftKey;
+    const sendsWithEnter = input.enterToSend && !input.shiftKey && !input.altKey;
 
     return isCtrlEnter || sendsWithEnter;
 };
@@ -28,6 +28,7 @@ export interface EnterModifierState {
     shiftKey: boolean;
     ctrlKey: boolean;
     metaKey: boolean;
+    altKey?: boolean;
 }
 
 export const restoreDeferredEnterModifiers = (
@@ -40,4 +41,5 @@ export const restoreDeferredEnterModifiers = (
     }
     if (modifiers.ctrlKey) Object.defineProperty(event, 'ctrlKey', { value: true });
     if (modifiers.metaKey) Object.defineProperty(event, 'metaKey', { value: true });
+    if (modifiers.altKey) Object.defineProperty(event, 'altKey', { value: true });
 };

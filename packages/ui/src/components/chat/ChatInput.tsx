@@ -2743,6 +2743,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             shiftKey: e.shiftKey,
             ctrlKey: e.ctrlKey,
             metaKey: e.metaKey,
+            altKey: e.altKey,
         })) {
             e.preventDefault();
 

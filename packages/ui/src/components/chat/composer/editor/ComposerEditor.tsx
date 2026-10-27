@@ -243,10 +243,10 @@ export const ComposerEditor = React.memo(React.forwardRef<ComposerEditorHandle, 
 
         // CodeMirror defers Enter on iOS and Chrome Android, then re-dispatches
         // a synthetic keydown. Keep modifiers only for that short handoff.
-        const lastRealEnterModsRef = React.useRef({ shiftKey: false, ctrlKey: false, metaKey: false });
+        const lastRealEnterModsRef = React.useRef({ shiftKey: false, ctrlKey: false, metaKey: false, altKey: false });
         const deferredEnterModsTimeoutRef = React.useRef<number | null>(null);
         const clearDeferredEnterModifiers = () => {
-            lastRealEnterModsRef.current = { shiftKey: false, ctrlKey: false, metaKey: false };
+            lastRealEnterModsRef.current = { shiftKey: false, ctrlKey: false, metaKey: false, altKey: false };
             if (deferredEnterModsTimeoutRef.current !== null) {
                 window.clearTimeout(deferredEnterModsTimeoutRef.current);
                 deferredEnterModsTimeoutRef.current = null;
@@ -410,6 +410,7 @@ export const ComposerEditor = React.memo(React.forwardRef<ComposerEditorHandle, 
                     shiftKey: event.shiftKey,
                     ctrlKey: event.ctrlKey,
                     metaKey: event.metaKey,
+                    altKey: event.altKey,
                 };
                 deferredEnterModsTimeoutRef.current = window.setTimeout(clearDeferredEnterModifiers, 500);
             };

@@ -1125,12 +1125,15 @@ The mobile "Return key sends" setting relabels the keycap with
 `enterkeyhint="send"` and makes it submit. Its deferred Enter restores the real
 Shift only while a hardware keyboard is attached: iOS autocapitalization reports
 a phantom Shift at sentence starts, so a soft-keyboard Send always submits, while
-a hardware Shift+Enter still inserts a newline. Ctrl/Cmd+Enter is unchanged.
+a hardware Shift+Enter still inserts a newline. Alt/Option+Enter inserts a
+newline, and Ctrl/Cmd+Enter is unchanged.
 
-The expanded desktop composer always inserts a newline with Enter, including
-Shift+Enter, and sends with Ctrl/Cmd+Enter; it ignores the Enter-to-send preference.
+The expanded desktop composer always inserts a newline with Enter, Shift+Enter
+and Alt/Option+Enter, and sends with Ctrl/Cmd+Enter; it ignores the Enter-to-send
+preference.
 
 Outside mobile and expanded mode, desktop Enter sends by default. The Chat
 setting controls plain Enter there: "Send with Enter" sends on Enter, "Send with
-Ctrl/Cmd+Enter" inserts a newline. Shift+Enter always inserts a newline, and
-Ctrl/Cmd+Enter always sends.
+Ctrl/Cmd+Enter" inserts a newline. Shift+Enter and Alt/Option+Enter always insert
+a newline, and Ctrl/Cmd+Enter always sends. Ctrl/Cmd+Alt/Option+Enter keeps
+the Ctrl/Cmd+Enter send behavior.
