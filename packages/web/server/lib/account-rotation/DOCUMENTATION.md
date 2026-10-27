@@ -25,8 +25,10 @@ account adapter reads integration metadata only; credentials stay in OpenCode.
   compaction, and transient generation requests do not participate. The plugin is
   independent of the agent-tool toggles, and reads the current server setting on
   each callback.
-- OpenCode numbers the first retry decision as attempt 2. Only that decision can
-  rotate and request one immediate retry. A subsequent quota failure records the
+- OpenCode numbers each step's first retry decision as attempt 2, which resets
+  the plugin's account-retry allowance. Ordinary transient retries leave that
+  allowance available for a later first quota failure. One account switch can
+  request one immediate retry. A subsequent quota failure records the
   new account's cooldown and declines further retries. An exhausted pool also
   declines, preserving the provider error. There is no prompt replay, timer, or
   automatic resumption when a cooldown expires.
@@ -52,6 +54,9 @@ account adapter reads integration metadata only; credentials stay in OpenCode.
   are never logged.
 - Successful, failed, interrupted, and deleted executions clear request
   attribution. Plugin disposal aborts the event stream and outstanding callbacks.
+  Terminal types are checked locally because OpenCode 2.0.32 can ignore the
+  subscription's type filter. Late callback results cannot change a stopped or
+  superseded request's retry decision.
   OpenCode owns interrupting the retry; OpenChamber never sends another prompt
   after Stop.
 

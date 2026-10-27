@@ -92,6 +92,27 @@ it('preserves the default retry policy for transient rate limits', async () => {
   expect(accounts.activate).not.toHaveBeenCalled();
 });
 
+it('allows the first account recovery after an ordinary transient retry', async () => {
+  const { request, hooks, fail, accounts } = await harness();
+  request();
+  await hooks.get('retry')({ sessionID: 'chat', attempt: 2, model: { providerID: 'openai' },
+    error: { message: 'Too many requests', status: 429 }, decision: { retry: true, delay: 2000 } });
+  request();
+  expect((await fail('chat', 3)).decision).toEqual({ retry: true, delay: 0 });
+  request();
+  expect((await fail('chat', 4)).decision).toEqual({ retry: false });
+  expect(accounts.activate).toHaveBeenCalledTimes(1);
+});
+
+it('permits account recovery again for a later logical step', async () => {
+  const { request, fail } = await harness();
+  request();
+  await fail();
+  // The next step's first decision restarts native numbering at 2.
+  request();
+  expect((await fail('chat', 2)).decision).toEqual({ retry: true, delay: 0 });
+});
+
 it('keeps rotation disabled and prevents duplicate callback recovery', async () => {
   const { request, fail, hooks, accounts } = await harness({ enabled: false });
   request();
@@ -111,6 +132,31 @@ it('clears request attribution when a session stops', async () => {
   await new Promise((resolve) => setTimeout(resolve, 0));
   expect((await fail()).decision).toEqual({ retry: false });
   expect(accounts.activate).not.toHaveBeenCalled();
+});
+
+it('ignores unrelated events even when OpenCode ignores the subscription filter', async () => {
+  const { request, fail, events } = await harness();
+  request();
+  events.enqueue({ type: 'session.renamed', data: { sessionID: 'chat' } });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect((await fail()).decision).toEqual({ retry: true, delay: 0 });
+});
+
+it('ignores a recovery result that arrives after Stop', async () => {
+  const { request, fail, accounts, events } = await harness();
+  let release;
+  let didStart;
+  const held = new Promise((resolve) => { release = resolve; });
+  const started = new Promise((resolve) => { didStart = resolve; });
+  const activate = accounts.activate.getMockImplementation();
+  accounts.activate.mockImplementationOnce(async (id) => { didStart(); await held; await activate(id); });
+  request();
+  const result = fail();
+  await started;
+  events.enqueue({ type: 'session.execution.interrupted', data: { sessionID: 'chat' } });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  release();
+  expect((await result).decision).toEqual({ retry: false });
 });
 
 it('fails closed on callback failure and rejects unauthorized or malformed requests', async () => {
