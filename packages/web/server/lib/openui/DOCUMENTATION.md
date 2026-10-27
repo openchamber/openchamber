@@ -21,11 +21,13 @@ selection, format checks and each HtmlView's page budget.
 - Instruction reads use fixed group names and module-relative assets. Missing,
   empty or oversized instruction assets return 503. The server requires the
   exported catalog at startup.
-- `prompt_openui` waits in the runtime's session/call map. Its source revision is
+- `openchamber_openui` with `openui.prompt` waits in the runtime's session/call map. Its source revision is
   a SHA-256 digest of the complete UTF-8 program. The chat answers through
   `POST /api/openchamber/openui/answer`, with a summary of at most 500 characters
   and data of at most 16,000 characters as JSON. Settled or unknown calls return 404.
-- Answers must match the live revision and the saved `prompt_openui` input.
+- Answers must match the live revision and the saved prompt input. Unified calls
+  require `openui.prompt` or its bare `prompt` alias; nested parameters override
+  flat fields.
   Source reads page newest-first with the prompt request's abort signal. A
   complete read that finds a replaced or missing call returns 409 and retires
   that wait. A failed read returns 503 and leaves the wait available for retry.

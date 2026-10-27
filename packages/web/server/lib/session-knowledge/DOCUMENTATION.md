@@ -141,7 +141,7 @@ contains base, index and catalog revision; this module handles entry delivery.
 OpenUI's [context-as-skill mapping](../openui/context/DOCUMENTATION.md#context-as-a-skill)
 guides what remains resident and what loads on demand.
 
-`prompt_openui` is the only managed waiting UI tool. Its flat `ui` program
+`openchamber_openui` is the managed UI tool. Its `openui.prompt` action accepts a `parameters.ui` program and
 returns the current tool result after the user submits. Markdown OpenUI remains
 ordinary assistant content and does not use the managed tool.
 

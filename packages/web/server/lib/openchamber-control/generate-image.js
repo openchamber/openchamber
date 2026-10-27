@@ -10,8 +10,8 @@
  * megabytes per call. The agent gets the path and reads the file when it
  * wants to look. Without a path of its own the file lands in OpenCode's
  * temporary folder, which OpenCode tells agents they may read and write
- * without asking. The chat draws the files from the call's result
- * (`../markdown-image-grants/routes.js`).
+ * without asking. The chat draws the files from the call's result through
+ * the authenticated filesystem routes.
  */
 
 import { constants as fsConstants } from 'node:fs';
@@ -208,20 +208,3 @@ export const createImageGenerationAction = ({ getClient, readSettings, fsPromise
     return output;
   }
 );
-
-/**
- * The files an `image.generate` result names, from the text the tool stored:
- * the plugin's JSON envelope. Anything else names none.
- */
-export const generatedImagePaths = (text) => {
-  let envelope;
-  try {
-    envelope = JSON.parse(text);
-  } catch {
-    return [];
-  }
-  const images = envelope?.ok === true ? envelope.data?.images : null;
-  return Array.isArray(images)
-    ? images.map((image) => asNonEmptyString(image?.path)).filter(Boolean)
-    : [];
-};

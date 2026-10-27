@@ -85,17 +85,17 @@ const part = (ui = source): ToolPart => ({
   id: 'part',
   callID: 'call',
   type: 'tool',
-  tool: 'prompt_openui',
+  tool: 'openchamber_openui',
   messageID: 'message',
   sessionID: 'session',
-  state: { status: 'running', input: { ui }, time: { start: 1 } },
+  state: { status: 'running', input: { action: 'openui.prompt', parameters: { ui } }, time: { start: 1 } },
 });
 
 const answeredPart = (): ToolPart => ({
   ...part(),
   state: {
     status: 'completed',
-    input: { ui: source },
+    input: { action: 'openui.prompt', parameters: { ui: source } },
     output: '',
     metadata: { openchamber: { ok: true, answer: { answered: true, summary: 'Use compact cards', data: { layout: 'compact' } } } },
     time: { start: 1, end: 2 },
@@ -106,7 +106,7 @@ const terminalPart = (answer: { answered: false } | { answered: true; summary: s
   ...part(),
   state: {
     status: 'completed',
-    input: { ui: source },
+    input: { action: 'openui.prompt', parameters: { ui: source } },
     output: '',
     metadata: { openchamber: { ok: true, answer } },
     time: { start: 1, end: 2 },
@@ -238,7 +238,7 @@ for (const answered of [true, false]) test(`completed prompts retain images afte
   const ui = `root = Stack([Image("Saved", "completed-${answered}.png"), Input("answer")])`;
   const tool: ToolPart = {
     ...part(ui),
-    state: { status: 'completed', input: { ui }, output: '', time: { start: 1, end: 2 },
+    state: { status: 'completed', input: { action: 'openui.prompt', parameters: { ui } }, output: '', time: { start: 1, end: 2 },
       metadata: { openchamber: { ok: true, answer: answered ? { answered: true, summary: 'Saved', data: {} } : { answered: false } } } },
   };
   try {
@@ -650,7 +650,7 @@ test('labels answers delivered in chat and requests that ended unanswered', asyn
 
   await render({
     ...part(),
-    state: { status: 'error', input: { ui: source }, error: 'stopped', time: { start: 1, end: 2 } },
+    state: { status: 'error', input: { action: 'openui.prompt', parameters: { ui: source } }, error: 'stopped', time: { start: 1, end: 2 } },
   });
   expect(host.textContent).toContain('Not answered');
 });

@@ -1,4 +1,4 @@
-import { OPENCHAMBER_OPENUI_PROMPT_ACTIONS, OPENCHAMBER_OPENUI_READ_ACTIONS } from '../openui/context/tools.js';
+import { OPENCHAMBER_OPENUI_ACTIONS } from '../openui/context/tools.js';
 
 /**
  * Two capabilities, two tools.
@@ -202,8 +202,7 @@ const ACTIONS_BY_TOOL = Object.freeze({
   openchamber_memory: OPENCHAMBER_MEMORY_ACTIONS,
   openchamber_knowledge: OPENCHAMBER_KNOWLEDGE_ACTIONS,
   openchamber_notify: OPENCHAMBER_NOTIFY_ACTIONS,
-  prompt_openui: OPENCHAMBER_OPENUI_PROMPT_ACTIONS,
-  openchamber_openui: OPENCHAMBER_OPENUI_READ_ACTIONS,
+  openchamber_openui: OPENCHAMBER_OPENUI_ACTIONS,
   openchamber_image: OPENCHAMBER_IMAGE_ACTIONS,
   openchamber_workflow: OPENCHAMBER_WORKFLOW_ACTIONS,
   [WORKFLOW_ANSWER_TOOL]: OPENCHAMBER_WORKFLOW_ANSWER_ACTIONS,
@@ -227,6 +226,9 @@ const uniqueMatch = (candidates, requested) => {
  */
 export const resolveAgentToolAction = (requested, toolName) => {
   const value = typeof requested === 'string' ? requested.trim() : '';
+  if (toolName && !Object.hasOwn(ACTIONS_BY_TOOL, toolName)) {
+    return { error: `Unsupported OpenChamber tool: ${toolName}` };
+  }
   const scoped = ACTIONS_BY_TOOL[toolName] ?? null;
   const known = scoped ?? OPENCHAMBER_ALL_ACTIONS;
 
@@ -255,8 +257,7 @@ export const OPENCHAMBER_ALL_ACTIONS = Object.freeze([
   ...OPENCHAMBER_MEMORY_ACTIONS,
   ...OPENCHAMBER_KNOWLEDGE_ACTIONS,
   ...OPENCHAMBER_NOTIFY_ACTIONS,
-  ...OPENCHAMBER_OPENUI_PROMPT_ACTIONS,
-  ...OPENCHAMBER_OPENUI_READ_ACTIONS,
+  ...OPENCHAMBER_OPENUI_ACTIONS,
   ...OPENCHAMBER_IMAGE_ACTIONS,
   ...OPENCHAMBER_WORKFLOW_ACTIONS,
   ...OPENCHAMBER_WORKFLOW_ANSWER_ACTIONS,

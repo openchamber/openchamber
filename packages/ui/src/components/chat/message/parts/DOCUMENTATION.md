@@ -72,7 +72,7 @@ Use this doc when you ask an agent to change tool/header/description behavior.
   - The run's report arrives later as a synthetic message (`lib/workflows/report.ts`) and renders as one collapsed line in `TimelineNotice`, like a dispatched session's result, opening a turn of its own.
 
 - `HtmlRenderFrame.tsx` and `htmlRender.ts`
-  - `OpenUIHtmlView.tsx` mounts `HtmlRenderDocument` for an evaluated `HtmlView`. Its identity comes from the trusted OpenUI owner, occurrence and render key. The OpenUI host owns submission admission and separates access from submission progress; the frame relays an explicit page submission. `prompt_openui` uses its stored input and result through `openuiPrompt`; refused calls retain their ordinary tool row.
+  - `OpenUIHtmlView.tsx` mounts `HtmlRenderDocument` for an evaluated `HtmlView`. Its identity comes from the trusted OpenUI owner, occurrence and render key. The OpenUI host owns submission admission and separates access from submission progress; the frame relays an explicit page submission. `openchamber_openui` prompt calls use their stored input and result through `openuiPrompt`; refused calls retain their ordinary tool row.
   - The page loads through `srcdoc` in a frame sandboxed with `allow-scripts allow-forms` and never `allow-same-origin`, so its script runs in an opaque origin with no reach into the app. `buildHtmlRenderDocument` puts a bootstrap first in the page's head: the theme as CSS variables (`htmlRenderTheme`; the agent tool's description in `packages/web/server/lib/agent-tool/runtime.js` lists the same names; `--chart-1` is the theme's accent and `--chart-2` to `--chart-6` a fixed set per light and dark, `CHART_SERIES`, because the theme's syntax colors made near-identical series), a size report, and http(s) link clicks handed to the host, which opens them with `openExternalUrl`. A theme switch is posted to the page instead of rebuilding it, so the page keeps its script state. Messages are accepted only from the frame's own window. A focused frame keeps every key from the app, so the bootstrap passes on a Cmd/Ctrl chord the page left alone (not typed into its own fields, not handled by its script, not the clipboard, select-all or undo chords), and the host replays it as a keydown and keyup on the frame element. The app's shortcut handling then runs as for any key pressed outside a text field, with no list of shortcuts to keep in sync. A chord without Cmd or Ctrl is never replayed. A wheel up or vertical swipe over the page scrolls the chat around the frame while its events stay in the frame, so the bootstrap reports each one its script and its own scrolling boxes left alone (a direction only), and the host raises it on the frame element for the chat's follow (`lib/scroll/DOCUMENTATION.md`); without it a streaming reply kept pulling a reader who scrolled over a page back to the end. Pages are interactive within themselves (tooltips, tabs, sorting).
   - An interactive HtmlView submits with `openchamber.submit(data, summary)`, posted as an MCP Apps `ui/message` request. The host checks the frame window, document nonce and user gesture, then replies with a JSON-RPC result or error. The OpenUI host routes tool answers through `answerOpenUI` in `@/lib/openuiAnswer`; Markdown submissions send a normal user turn. `openchamber.answer` carries the initial answer in an escaped JSON script element and receives posted updates without reloading the document. Submission errors reject the page's promise and appear in the OpenUI status line.
   - `KIT_CSS` supplies optional themed classes for HTML pages, including `.oc-box`, `.oc-table`, `.oc-option`, `.oc-button`, `.oc-input`, `.oc-switch` and `.oc-segmented`. Selection uses `--oc-selection`; actions use the button tokens from `htmlRenderTheme`. `--oc-rem` and `--radius` follow the interface-size setting. Pages can use their own styles when reproducing another product's design.
@@ -114,7 +114,7 @@ accounting. Failed files keep their paths and consume neither budget.
 
 ### Why completed ask-user interfaces return to Activity
 
-`prompt_openui` stays outside the Activity fold only while `openuiPrompt` classifies
+An `openchamber_openui` prompt stays outside the Activity fold only while `openuiPrompt` classifies
 it as `waiting`, so the user can answer without opening Activity. Answered,
 answered-in-chat, completed and stopped prompts follow normal Activity folding.
 Expanding Activity mounts each prompt once at its tool position, including prompts
@@ -124,6 +124,9 @@ answered forms and their subsequent steps permanently visible.
 
 This placement rule uses the stored tool state. Live blocking-request authority
 and source-revision checks still govern whether a prompt can accept an answer.
+Reference reads remain ordinary tool rows. The classifier recognizes the unified
+tool's `openui.prompt` action and bare `prompt` alias, with nested parameters
+overriding flat fields.
 
 ### Bidirectional prose
 

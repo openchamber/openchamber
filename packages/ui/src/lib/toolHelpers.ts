@@ -240,15 +240,8 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
       inputFields: []
     },
 
-     prompt_openui: {
-       displayName: 'OpenUI',
-       category: 'system',
-       outputLanguage: 'json',
-       inputFields: []
-     },
-
      openchamber_openui: {
-       displayName: 'OpenUI Reference',
+       displayName: 'OpenUI',
        category: 'system',
        outputLanguage: 'json',
        inputFields: []

@@ -8,6 +8,18 @@ import { readOpenUIInstructionGroups } from './context/assets.js';
 
 const sourceRevision = (source) => createHash('sha256').update(source, 'utf8').digest('hex');
 const disabled = () => new OpenChamberControlError('OpenUI is turned off in OpenChamber settings', 403);
+const promptInput = z.object({
+  action: z.string().trim().pipe(z.enum(['openui.prompt', 'prompt'])),
+  ui: z.json().optional(),
+  parameters: z.object({ ui: z.json().optional() }).optional(),
+});
+
+const savedPromptSource = (part) => {
+  if (part?.name !== 'openchamber_openui') return undefined;
+  const parsed = promptInput.safeParse(part.state?.input);
+  if (!parsed.success) return undefined;
+  return { ...parsed.data, ...parsed.data.parameters }.ui;
+};
 
 /** Owns OpenUI policy; transports and shared waits do not interpret tool records. */
 export const createOpenUIRuntime = ({ isEnabled, onWaitChange, getClient, resolveSessionDirectory }) => {
@@ -67,7 +79,7 @@ export const createOpenUIRuntime = ({ isEnabled, onWaitChange, getClient, resolv
       try {
         await requireEnabled();
         const part = await readSource({ sessionId, callId, directory, signal });
-        if (!part || part.name !== 'prompt_openui' || part.state?.input?.ui !== ui) {
+        if (savedPromptSource(part) !== ui) {
           throw new OpenChamberControlError('This OpenUI source has changed', 409);
         }
         await requireEnabled();

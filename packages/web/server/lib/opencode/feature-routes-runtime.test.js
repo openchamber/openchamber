@@ -31,7 +31,7 @@ it('reads media through existing file routes independently of OpenUI waits', asy
   const ui = `root = Stack([Image("Preview", ${JSON.stringify(source)})])`;
   const message = {
     id: 'msg_1', type: 'assistant', content: [{
-      type: 'tool', id: 'call_1', name: 'prompt_openui', state: { status: 'running', input: { ui } },
+      type: 'tool', id: 'call_1', name: 'openchamber_openui', state: { status: 'running', input: { action: 'openui.prompt', parameters: { ui } } },
     }],
   };
   const fetch = vi.fn(async () => { throw new Error('File preparation must not fetch messages'); });

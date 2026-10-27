@@ -25,12 +25,9 @@ import {
 } from '../openchamber-control/actions.js';
 import { MAX_AGENTS_PER_RUN, MAX_CONCURRENT_AGENTS } from '../workflows/runtime.js';
 import {
-  OPENCHAMBER_OPENUI_PROMPT_ACTION_DEFINITIONS,
-  OPENCHAMBER_OPENUI_PROMPT_ACTIONS,
-  OPENCHAMBER_OPENUI_READ_ACTION_DEFINITIONS,
-  OPENCHAMBER_OPENUI_READ_ACTIONS,
-  OPENUI_PROMPT_TOOL,
-  OPENUI_READ_TOOL,
+  OPENCHAMBER_OPENUI_ACTION_DEFINITIONS,
+  OPENCHAMBER_OPENUI_ACTIONS,
+  OPENUI_TOOL,
 } from '../openui/context/tools.js';
 import { createCallbackAddress } from './callback-address.js';
 
@@ -45,8 +42,7 @@ const ACTIONS = new Set([
   ...OPENCHAMBER_MEMORY_ACTIONS,
   ...OPENCHAMBER_KNOWLEDGE_ACTIONS,
   ...OPENCHAMBER_NOTIFY_ACTIONS,
-  ...OPENCHAMBER_OPENUI_PROMPT_ACTIONS,
-  ...OPENCHAMBER_OPENUI_READ_ACTIONS,
+  ...OPENCHAMBER_OPENUI_ACTIONS,
   ...OPENCHAMBER_IMAGE_ACTIONS,
   ...OPENCHAMBER_WORKFLOW_ACTIONS,
   ...OPENCHAMBER_WORKFLOW_ANSWER_ACTIONS,
@@ -59,8 +55,7 @@ const AGENT_TOOL_ACTION_TITLES = Object.fromEntries(
     ...OPENCHAMBER_MEMORY_ACTION_DEFINITIONS,
     ...OPENCHAMBER_KNOWLEDGE_ACTION_DEFINITIONS,
     ...OPENCHAMBER_NOTIFY_ACTION_DEFINITIONS,
-    ...OPENCHAMBER_OPENUI_PROMPT_ACTION_DEFINITIONS,
-    ...OPENCHAMBER_OPENUI_READ_ACTION_DEFINITIONS,
+    ...OPENCHAMBER_OPENUI_ACTION_DEFINITIONS,
     ...OPENCHAMBER_IMAGE_ACTION_DEFINITIONS,
     ...OPENCHAMBER_WORKFLOW_ACTION_DEFINITIONS,
     ...OPENCHAMBER_WORKFLOW_ANSWER_ACTION_DEFINITIONS,
@@ -362,16 +357,20 @@ const createResult = ({ ok, action, data, error, exitCode }) => ({
  * chat" and the agent reads the message next.
  */
 const ANSWER_WAIT_SETUP = String.raw`        const chatController = new AbortController()
-        const set = pagesWaitingForChat.get(context.sessionID) ?? new Set()
-        set.add(chatController)
-        pagesWaitingForChat.set(context.sessionID, set)
+        const requested = typeof args.action === "string" ? args.action.trim() : ""
+        const waitingForAnswer = requested === "openui.prompt" || requested === "prompt"
+        if (waitingForAnswer) {
+          const set = pagesWaitingForChat.get(context.sessionID) ?? new Set()
+          set.add(chatController)
+          pagesWaitingForChat.set(context.sessionID, set)
+        }
         const releaseWait = () => {
           const set = pagesWaitingForChat.get(context.sessionID)
           if (!set) return
           set.delete(chatController)
           if (set.size === 0) pagesWaitingForChat.delete(context.sessionID)
         }
-        const waitSignal = AbortSignal.any([context.signal, chatController.signal].filter(Boolean))
+        const waitSignal = waitingForAnswer ? AbortSignal.any([context.signal, chatController.signal].filter(Boolean)) : context.signal
 `;
 
 // Bun's fetch ends a request that gets no response for about six minutes with
@@ -379,11 +378,11 @@ const ANSWER_WAIT_SETUP = String.raw`        const chatController = new AbortCon
 // own `timeout: false` lifts that; Stop and a chat message still end the wait
 // through waitSignal.
 const ANSWER_FETCH_TIMEOUT = String.raw`
-            timeout: false,`;
+            ...(waitingForAnswer ? { timeout: false } : {}),`;
 
 // The answer also lands in the call's metadata, which OpenCode stores and
 // syncs, so every client shows the page as answered after a reload.
-const ANSWER_METADATA = String.raw`, ...(result.ok === true && result.data && typeof result.data.answer === "object" && result.data.answer !== null ? { answer: result.data.answer } : {})`;
+const ANSWER_METADATA = String.raw`, ...(waitingForAnswer && result.ok === true && result.data && typeof result.data.answer === "object" && result.data.answer !== null ? { answer: result.data.answer } : {})`;
 
 const ANSWER_WAIT_RELEASE = String.raw` finally {
           releaseWait()
@@ -498,12 +497,7 @@ const createToolEntry = ({ name, description, definitions, parameters, codeMode,
       // catalog, and with a few large MCP servers ours dropped out of it, so
       // agents concluded the tool did not exist. Direct is the default.
       options: { codemode: ${codeMode ? 'true' : 'false'} },
-      input: ${prompt ? String.raw`{
-        type: "object",
-        properties: ${JSON.stringify(parameters)},
-        required: ["ui"],
-        additionalProperties: false,
-      }` : String.raw`{
+      input: {
         type: "object",
         properties: {
           action: ${JSON.stringify(actionSchema.property)},
@@ -513,10 +507,9 @@ const createToolEntry = ({ name, description, definitions, parameters, codeMode,
         // Models routinely put the inputs next to the action; the schema has to
         // let that reach execute() instead of rejecting the call.
         additionalProperties: true,
-      }`},
+      },
       async execute(input, context) {
-${prompt ? String.raw`        const args = { ui: input.ui, action: ${JSON.stringify(definitions[0].action)} }
-` : String.raw`        // Models routinely put the inputs next to the action instead of inside
+        // Models routinely put the inputs next to the action instead of inside
         // the parameters object, and dropping them there produced a
         // "url is required" error for a call that plainly carried a url. Both
         // shapes are accepted; an explicit parameters object wins on a conflict.
@@ -533,7 +526,7 @@ ${prompt ? String.raw`        const args = { ui: input.ui, action: ${JSON.string
             if (revived !== null && typeof revived === 'object' && !Array.isArray(revived)) args.link = revived
           } catch {}
         }
-${reviveDependsOn}${actionSchema.normalize}${normalizeBooleans}`}        const actionTitles = ${JSON.stringify(AGENT_TOOL_ACTION_TITLES)}
+${reviveDependsOn}${actionSchema.normalize}${normalizeBooleans}        const actionTitles = ${JSON.stringify(AGENT_TOOL_ACTION_TITLES)}
         const title = Object.hasOwn(actionTitles, args.action) ? actionTitles[args.action] : args.action
         const progress = (extra) => context.progress({
           ${name}: {
@@ -660,13 +653,9 @@ const createPluginSource = ({ includeControl, includeSchedule, includeWeb, inclu
   }
   if (includeOpenUI) {
     entries.push(createToolEntry({
-      ...OPENUI_PROMPT_TOOL,
+      ...OPENUI_TOOL,
       codeMode: false,
       prompt: true,
-    }));
-    entries.push(createToolEntry({
-      ...OPENUI_READ_TOOL,
-      codeMode,
     }));
   }
   if (includeImage) {

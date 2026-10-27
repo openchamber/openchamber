@@ -3,7 +3,7 @@ import { createOpenUIRuntime } from './runtime.js';
 
 const ui = 'root = Stack([])';
 const call = { sessionId: 'ses_1', callId: 'call_1', directory: '/repo' };
-const saved = { type: 'assistant', content: [{ type: 'tool', id: call.callId, name: 'prompt_openui', state: { input: { ui } } }] };
+const saved = { type: 'assistant', content: [{ type: 'tool', id: call.callId, name: 'openchamber_openui', state: { input: { action: 'openui.prompt', parameters: { ui } } } }] };
 const fixture = () => {
   const onWaitChange = vi.fn();
   const list = vi.fn(async () => ({ data: [saved] }));
@@ -38,6 +38,30 @@ it('finds saved source newest-first and follows opaque cursors without order', a
   ]);
 });
 
+it.each([
+  { action: 'openui.prompt', parameters: { ui } },
+  { action: ' prompt ', ui },
+  { action: 'openui.prompt', ui: 'ignored', parameters: { ui } },
+])('verifies unified prompt source %j', async (input) => {
+  const { list, start } = fixture();
+  list.mockResolvedValue({ data: [{ ...saved, content: [{ ...saved.content[0], name: 'openchamber_openui', state: { input } }] }] });
+  const { pending, answer } = await start();
+  await expect(answer()).resolves.toEqual({ answered: true });
+  await expect(pending).resolves.toMatchObject({ answer: { answered: true } });
+});
+
+it.each([
+  { action: 'openui.read', parameters: { ui } },
+  { ui },
+  { action: 'openui.prompt', ui, parameters: { ui: 'changed' } },
+])('refuses a unified call that is no longer the admitted prompt %j', async (input) => {
+  const { list, start } = fixture();
+  list.mockResolvedValue({ data: [{ ...saved, content: [{ ...saved.content[0], name: 'openchamber_openui', state: { input } }] }] });
+  const { pending, answer } = await start();
+  await expect(answer()).rejects.toMatchObject({ statusCode: 409 });
+  await expect(pending).rejects.toMatchObject({ statusCode: 409 });
+});
+
 it.each(['network', 'malformed', 'cursor-loop'])('keeps a wait available after a %s source read failure', async (failure) => {
   const { list, start, onWaitChange } = fixture();
   if (failure === 'network') list.mockRejectedValueOnce(new Error('offline'));
@@ -55,7 +79,7 @@ it.each(['network', 'malformed', 'cursor-loop'])('keeps a wait available after a
 
 it.each(['removed', 'replaced'])('retires the wait when saved source is %s', async (reason) => {
   const { list, start, onWaitChange } = fixture();
-  list.mockResolvedValue({ data: reason === 'removed' ? [] : [{ ...saved, content: [{ ...saved.content[0], state: { input: { ui: 'root = Stack([TextContent("Changed")])' } } }] }] });
+  list.mockResolvedValue({ data: reason === 'removed' ? [] : [{ ...saved, content: [{ ...saved.content[0], state: { input: { action: 'openui.prompt', ui: 'root = Stack([TextContent("Changed")])' } } }] }] });
   const { pending, answer } = await start();
   await expect(answer()).rejects.toMatchObject({ statusCode: 409 });
   await expect(pending).rejects.toMatchObject({ statusCode: 409 });
@@ -92,7 +116,7 @@ it.each(['unchanged', 'replaced'])('keeps a new wait after a cancelled source re
   controller.abort();
   await expect(old.pending).rejects.toMatchObject({ statusCode: 499 });
   const current = await start();
-  const changed = { ...saved, content: [{ ...saved.content[0], state: { input: { ui: 'root = Stack([TextContent("Changed")])' } } }] };
+  const changed = { ...saved, content: [{ ...saved.content[0], state: { input: { action: 'openui.prompt', ui: 'root = Stack([TextContent("Changed")])' } } }] };
   late.resolve({ data: [result === 'unchanged' ? saved : changed] });
   await expect(submitted).rejects.toMatchObject({ statusCode: result === 'unchanged' ? 404 : 409 });
   expect(onWaitChange.mock.calls.map(([event]) => event.type)).toEqual(['waiting', 'settled', 'waiting']);
