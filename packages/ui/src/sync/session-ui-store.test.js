@@ -1295,7 +1295,7 @@ describe('sendMessage draft snapshot (issues #2222 / #2315)', () => {
     expect(useSessionDisplayStore.getState().singleProjectId).toBe('project-alpha');
   });
 
-  test('a second send from the same draft joins the session the first send is creating (#5681)', async () => {
+  test('a second send from a draft whose session is being created is refused before it does anything (#5681)', async () => {
     let finishCreate;
     opencodeClient.createSession = (_params, directory) => {
       createSessionCalls.push(directory);
@@ -1311,16 +1311,105 @@ describe('sendMessage draft snapshot (issues #2222 / #2315)', () => {
 
     const first = send('first');
     await new Promise((resolve) => setTimeout(resolve, 0));
-    const second = send('second');
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(useSessionUIStore.getState().draftSessionsCreating).toEqual([{ runtimeKey: getRuntimeKey(), draftId: 5681 }]);
+    await expect(send('second')).rejects.toThrow('still being created');
     finishCreate();
-    await Promise.all([first, second]);
+    await first;
 
     expect(createSessionCalls).toHaveLength(1);
-    expect(sendMessageCalls.map((call) => [call.id, call.directory, call.text])).toEqual([
-      ['session-materialized', '/projects/alpha', 'first'],
-      ['session-materialized', '/projects/alpha', 'second'],
-    ]);
+    expect(sendMessageCalls.map((call) => call.text)).toEqual(['first']);
+    expect(useSessionUIStore.getState().draftSessionsCreating).toEqual([]);
+  });
+
+  test('the new session takes no other send until the draft\'s first prompt went out (#5681)', async () => {
+    let deliverFirst;
+    opencodeClient.sendMessage = (params) => new Promise((resolve) => {
+      deliverFirst = () => {
+        sendMessageCalls.push(params);
+        resolve('msg');
+      };
+    });
+    const draftSnapshot = { open: true, draftId: 5683, directoryOverride: '/projects/alpha', parentID: null };
+    useSessionUIStore.setState({ currentSessionId: null, currentSessionDirectory: null, newSessionDraft: draftSnapshot });
+
+    const first = useSessionUIStore.getState().sendMessage(
+      'first', 'provider-a', 'model-a', undefined, undefined, undefined, undefined, undefined, 'normal', { draftSnapshot },
+    );
+    for (let i = 0; i < 20 && !deliverFirst; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(useSessionUIStore.getState().currentSessionId).toBe('session-materialized');
+    expect(useSessionUIStore.getState().draftSessionsCreating.map((entry) => entry.sessionId)).toEqual(['session-materialized']);
+    const sendToSession = () => useSessionUIStore.getState().sendMessage(
+      'second', 'provider-a', 'model-a', undefined, undefined, undefined, undefined, undefined, 'normal',
+    );
+    await expect(sendToSession()).rejects.toThrow('still being created');
+
+    deliverFirst();
+    await first;
+    expect(useSessionUIStore.getState().draftSessionsCreating).toEqual([]);
+    opencodeClient.sendMessage = async (params) => {
+      sendMessageCalls.push(params);
+      return 'msg';
+    };
+    await sendToSession();
+    expect(sendMessageCalls.map((call) => call.text)).toEqual(['first', 'second']);
+  });
+
+  test('two drafts sending at once each keep their own wait (#5681)', async () => {
+    const creations = [];
+    opencodeClient.createSession = (_params, directory) => {
+      createSessionCalls.push(directory);
+      return new Promise((resolve) => {
+        const id = `session-${creations.length + 1}`;
+        creations.push(() => resolve({ id, directory: '/projects/alpha', time: { created: 1, updated: 1 } }));
+      });
+    };
+    const draftA = { open: true, draftId: 5691, directoryOverride: '/projects/alpha', parentID: null };
+    const draftB = { open: true, draftId: 5692, directoryOverride: '/projects/alpha', parentID: null };
+    const send = (text, draftSnapshot) => useSessionUIStore.getState().sendMessage(
+      text, 'provider-a', 'model-a', undefined, undefined, undefined, undefined, undefined, 'normal', { draftSnapshot },
+    );
+    const waits = () => useSessionUIStore.getState().draftSessionsCreating
+      .map((entry) => [entry.draftId, entry.sessionId ?? null]);
+
+    useSessionUIStore.setState({ currentSessionId: null, currentSessionDirectory: null, newSessionDraft: draftA });
+    const sendingA = send('from A', draftA);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    useSessionUIStore.setState({ newSessionDraft: draftB });
+    const sendingB = send('from B', draftB);
+    for (let i = 0; i < 20 && creations.length < 2; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(waits()).toEqual([[5691, null], [5692, null]]);
+
+    creations[0]();
+    for (let i = 0; i < 20 && waits().length > 1; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
+    await sendingA;
+    expect(waits()).toEqual([[5692, null]]);
+
+    creations[1]();
+    await sendingB;
+    expect(waits()).toEqual([]);
+    expect(sendMessageCalls.map((call) => [call.id, call.text])).toEqual([['session-1', 'from A'], ['session-2', 'from B']]);
+  });
+
+  test('a draft send that cannot create its session ends the wait, and the next send creates again (#5681)', async () => {
+    opencodeClient.createSession = async () => {
+      throw new Error('offline');
+    };
+    const draftSnapshot = { open: true, draftId: 5682, directoryOverride: '/projects/alpha', parentID: null };
+    useSessionUIStore.setState({ currentSessionId: null, currentSessionDirectory: null, newSessionDraft: draftSnapshot });
+    const send = (text) => useSessionUIStore.getState().sendMessage(
+      text, 'provider-a', 'model-a', undefined, undefined, undefined, undefined, undefined, 'normal', { draftSnapshot },
+    );
+
+    await expect(send('first')).rejects.toThrow('Failed to create session');
+    expect(useSessionUIStore.getState().draftSessionsCreating).toEqual([]);
+
+    opencodeClient.createSession = async (_params, directory) => {
+      createSessionCalls.push(directory);
+      return { id: 'session-retry', directory: '/projects/alpha', time: { created: 1, updated: 1 } };
+    };
+    await send('retry');
+    expect(createSessionCalls).toHaveLength(1);
+    expect(sendMessageCalls.map((call) => call.id)).toEqual(['session-retry']);
   });
 
   test('a draft\'s first message is shown while its session is created and becomes its optimistic message (#5681)', async () => {
@@ -1405,59 +1494,6 @@ describe('sendMessage draft snapshot (issues #2222 / #2315)', () => {
     failCreate();
     expect(await outcome).toBe('Failed to create session');
     expect(useSessionUIStore.getState().draftSendPreview).toBeNull();
-  });
-
-  test('a send carrying an already materialized draft goes to its session (#5681)', async () => {
-    const draftSnapshot = { open: true, draftId: 5683, directoryOverride: '/projects/alpha', parentID: null };
-    useSessionUIStore.setState({ currentSessionId: null, currentSessionDirectory: null, newSessionDraft: draftSnapshot });
-    const send = (text) => useSessionUIStore.getState().sendMessage(
-      text, 'provider-a', 'model-a', undefined, undefined, undefined, undefined, undefined, 'normal', { draftSnapshot },
-    );
-
-    // The second send was snapshotted while the draft was open but reaches
-    // the store only after the first one finished, as a send held through
-    // OpenCode startup does.
-    await send('first');
-    await send('second');
-
-    expect(createSessionCalls).toHaveLength(1);
-    expect(sendMessageCalls.map((call) => [call.id, call.text])).toEqual([
-      ['session-materialized', 'first'],
-      ['session-materialized', 'second'],
-    ]);
-  });
-
-  test('a send joining a failed draft creation fails too, and the next send creates again (#5681)', async () => {
-    let failCreate;
-    opencodeClient.createSession = (_params, directory) => {
-      createSessionCalls.push(directory);
-      return new Promise((_resolve, reject) => {
-        failCreate = () => reject(new Error('offline'));
-      });
-    };
-    const draftSnapshot = { open: true, draftId: 5682, directoryOverride: '/projects/alpha', parentID: null };
-    useSessionUIStore.setState({ currentSessionId: null, currentSessionDirectory: null, newSessionDraft: draftSnapshot });
-    const send = (text) => useSessionUIStore.getState().sendMessage(
-      text, 'provider-a', 'model-a', undefined, undefined, undefined, undefined, undefined, 'normal', { draftSnapshot },
-    );
-
-    const first = send('first');
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    const second = send('second');
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    failCreate();
-    const outcomes = await Promise.allSettled([first, second]);
-    expect(outcomes.map((outcome) => outcome.reason?.message)).toEqual(['Failed to create session', 'Failed to create session']);
-    expect(createSessionCalls).toHaveLength(1);
-    expect(sendMessageCalls).toHaveLength(0);
-
-    opencodeClient.createSession = async (_params, directory) => {
-      createSessionCalls.push(directory);
-      return { id: 'session-retry', directory: '/projects/alpha', time: { created: 1, updated: 1 } };
-    };
-    await send('retry');
-    expect(createSessionCalls).toHaveLength(2);
-    expect(sendMessageCalls.map((call) => call.id)).toEqual(['session-retry']);
   });
 
   test('existing-session send keeps the submit-time target even when selection changes', async () => {

@@ -3864,6 +3864,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.moveChatToProject.success': 'チャットをプロジェクトへ移動しました',
   'sessions.moveChatToProject.failed': 'チャットを移動できませんでした',
   'chat.worktreeSetup.running': 'worktree を準備中: プロジェクトのセットアップコマンドを実行しています…',
+  'chat.draftSession.creating': 'セッションを作成中…',
   'desktopHostSwitcher.startup.fellBackToLocal': '接続を開けなかったため、OpenChamber は Local で起動しました。到達できるようになったら、インスタンス切り替えから接続してください。',
   'desktopSafeStart.title': 'OpenChamber が繰り返しクラッシュしました',
   'desktopSafeStart.description': 'パネルを閉じ、フォルダを折りたたみました。',

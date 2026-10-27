@@ -67,6 +67,12 @@ export interface ComposerDraftOptions {
      * and changes when a new draft opens.
      */
     newSessionDraftId?: number | null;
+    /**
+     * The session a new-session draft just became, with that draft's id, or
+     * null. Text typed in that draft while the session was being created goes
+     * along into it; any other draft keeps its text.
+     */
+    materializedDraft?: { sessionId: string; draftId: number } | null;
     /** Called when the composer switches to a different draft identity. */
     onIdentityChange?: () => void;
     /** Called after restoring a saved draft or fork replay, to select its text. */
@@ -97,6 +103,7 @@ export function useComposerDraft(options: ComposerDraftOptions): ComposerDraftCo
         selectAttachmentsOnIdentityChange = true,
         initialDraft,
         newSessionDraftId = null,
+        materializedDraft = null,
         onIdentityChange,
         onDraftRestored,
     } = options;
@@ -174,7 +181,8 @@ export function useComposerDraft(options: ComposerDraftOptions): ComposerDraftCo
     // same draft moving from a new draft replacing it.
     const previousNewSessionDraftIdRef = React.useRef<number | null>(newSessionDraftId);
     React.useEffect(() => {
-        const sameNewSessionDraft = newSessionDraftId !== null && previousNewSessionDraftIdRef.current === newSessionDraftId;
+        const previousNewSessionDraftId = previousNewSessionDraftIdRef.current;
+        const sameNewSessionDraft = newSessionDraftId !== null && previousNewSessionDraftId === newSessionDraftId;
         previousNewSessionDraftIdRef.current = newSessionDraftId;
         const previous = previousIdentityRef.current;
         const previousKey = previous ? getChatDraftIdentityKey(previous) : null;
@@ -194,13 +202,18 @@ export function useComposerDraft(options: ComposerDraftOptions): ComposerDraftCo
         // files go along instead of staying with the old directory. A new
         // draft opened elsewhere gets a new id and leaves this one in place.
         // A session moved to another directory keeps its id, so the same
-        // session in a new directory is the same draft too.
+        // session in a new directory is the same draft too. A draft that just
+        // became its session is the same draft as well: what was typed while
+        // the session was being created stays in the composer.
         const sameDraftMoved = !skipOutgoingDraftRef.current
             && previous !== null
             && identity !== null
             && previous.runtimeKey === identity.runtimeKey
             && (isNewSessionDraftIdentity(previous)
-                ? sameNewSessionDraft && isNewSessionDraftIdentity(identity)
+                ? (sameNewSessionDraft && isNewSessionDraftIdentity(identity))
+                    || (materializedDraft !== null
+                        && identity.sessionId === materializedDraft.sessionId
+                        && previousNewSessionDraftId === materializedDraft.draftId)
                 : previous.sessionId === identity.sessionId);
         const carriesText = sameDraftMoved && outgoing.text.length > 0;
         if (sameDraftMoved) useInputStore.getState().moveAttachedFiles(previous, identity);
@@ -233,7 +246,7 @@ export function useComposerDraft(options: ComposerDraftOptions): ComposerDraftCo
         } else if (restored.text) {
             requestAnimationFrame(() => callbacksRef.current.onDraftRestored?.('saved'));
         }
-    }, [clearPending, confirmedMentionsRef, identity, messageRef, newSessionDraftId, persistNow, setMessage]);
+    }, [clearPending, confirmedMentionsRef, identity, materializedDraft, messageRef, newSessionDraftId, persistNow, setMessage]);
 
     // The chat column can still show the source after navigation selects a fork.
     // Apply its replay only after the destination's draft has been loaded above.

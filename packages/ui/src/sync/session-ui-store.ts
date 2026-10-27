@@ -365,9 +365,8 @@ type SendMessageOptions = {
   /** Skills named inline, attached to the prompt once the session exists. */
   skills?: SkillMentions
   /**
-   * A new session's response-style instruction, still being read. Only the
-   * send that creates the draft's session adds it; a send joining that
-   * session leaves it out.
+   * A new session's response-style instruction, still being read. The draft
+   * send adds it once the session exists, so the message does not wait for it.
    */
   responseStyle?: Promise<string | null>
   /**
@@ -457,11 +456,38 @@ export type DraftSendPreview = {
   records: OptimisticPromptRecord[]
 }
 
+/** `sessionId` is set the moment the draft's session exists and is selected. */
+export type DraftSessionCreating = { runtimeKey: string; draftId: number; sessionId?: string }
+
+/** The send under way for this draft, if any. */
+export const findDraftSessionCreating = (
+  creating: readonly DraftSessionCreating[],
+  runtimeKey: string,
+  draftId: number,
+): DraftSessionCreating | undefined => creating.find((entry) => entry.runtimeKey === runtimeKey && entry.draftId === draftId)
+
+/** The send under way that created this session, if any. */
+export const findSessionCreating = (
+  creating: readonly DraftSessionCreating[],
+  runtimeKey: string,
+  sessionId: string | null,
+): DraftSessionCreating | undefined => (sessionId
+  ? creating.find((entry) => entry.runtimeKey === runtimeKey && entry.sessionId === sessionId)
+  : undefined)
+
 export type SessionUIState = {
   currentSessionId: string | null
   currentSessionDirectory: string | null
   materializedDraftSessionId: string | null
   draftSendPreview: DraftSendPreview | null
+  /**
+   * The drafts whose send is under way, one entry each: added when the send
+   * starts, removed when it ends (its prompt handed to OpenCode, or the send
+   * failed). Until then neither the draft nor the session it became sends
+   * anything else, so a draft makes one session and its first message reaches
+   * OpenCode first.
+   */
+  draftSessionsCreating: DraftSessionCreating[]
   newSessionDraft: NewSessionDraftState
   abortPromptSessionId: string | null
   abortPromptExpiresAt: number | null
@@ -482,6 +508,8 @@ export type SessionUIState = {
     id: string | null,
     directoryHint?: string | null,
     transition?: "submitted-draft",
+    /** The draft a submitted-draft session was created from. */
+    submittedDraftId?: number,
   ) => void
   clearMaterializedDraftSession: (sessionId: string) => void
   prepareForRuntimeSwitch: (apiBaseUrl?: string | null) => void
@@ -831,12 +859,6 @@ const DEFAULT_DRAFT: NewSessionDraftState = {
 }
 let nextDraftId = 1
 const pendingChatDirectoryByDraft = new Map<string, Promise<string | null>>()
-// The session a draft's first send created or is creating, keyed by runtime and
-// draft. A later send carrying the same draft (a second Enter before the session
-// existed, or a send held through OpenCode startup) goes to that session instead
-// of creating a second one. Only a failed creation leaves the map; an entry per
-// sent draft for the page's lifetime is the cost.
-const materializingDraftSessions = new Map<string, Promise<MaterializedDraftSession | null>>()
 
 const activeSessionByRuntime = new Map<string, string | null>()
 type RuntimeSessionMemory = {
@@ -1028,6 +1050,7 @@ const createSessionWithDraftLifecycle = async (
   metadata?: Metadata,
   selectionTransition?: "submitted-draft",
   selection?: SessionCreateSelection,
+  submittedDraftId?: number,
 ): Promise<Session | null> => {
   const store = useSessionUIStore.getState()
   const draft = store.newSessionDraft
@@ -1037,7 +1060,7 @@ const createSessionWithDraftLifecycle = async (
     const resolved = await resolveCreatableDraftDirectory(draft, directoryOverride)
     if (resolved.status === "aborted") return null
     const directory = resolved.directory
-    const session = await createSessionAction(title, directory, metadata, selectionTransition, selection)
+    const session = await createSessionAction(title, directory, metadata, selectionTransition, selection, "open", submittedDraftId)
     if (!session) return null
 
     useSessionUIStore.getState().closeNewSessionDraft()
@@ -1140,6 +1163,7 @@ export async function materializeOpenDraftSession(selection: {
       model: { providerID: selection.providerID, id: selection.modelID, variant: selection.variant },
       agent: trimmedAgent,
     },
+    draft.draftId,
   )
   if (!created?.id) {
     if (isChatDraft && draftDirectoryOverride) {
@@ -1244,6 +1268,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   currentSessionDirectory: null,
   materializedDraftSessionId: null,
   draftSendPreview: null,
+  draftSessionsCreating: [],
   newSessionDraft: { ...DEFAULT_DRAFT },
   abortPromptSessionId: null,
   abortPromptExpiresAt: null,
@@ -1261,8 +1286,21 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   // ---------------------------------------------------------------------------
   // setCurrentSession
   // ---------------------------------------------------------------------------
-  setCurrentSession: (id, directoryHint?: string | null, transition?: "submitted-draft") => {
+  setCurrentSession: (id, directoryHint?: string | null, transition?: "submitted-draft", submittedDraftId?: number) => {
     const materializedDraftSessionId = id && transition === "submitted-draft" ? id : null
+    // The send still under way now belongs to this session too, in the same
+    // step that closes its draft, so nothing can send in between.
+    if (materializedDraftSessionId && submittedDraftId !== undefined) {
+      const runtimeKey = getRuntimeKey()
+      const creating = findDraftSessionCreating(get().draftSessionsCreating, runtimeKey, submittedDraftId)
+      if (creating && !creating.sessionId) {
+        set({
+          draftSessionsCreating: get().draftSessionsCreating.map((entry) => (
+            entry === creating ? { ...entry, sessionId: materializedDraftSessionId } : entry
+          )),
+        })
+      }
+    }
     // Publish the transition identity before closing the draft. Those are two
     // separate store updates, and ChatContainer must never observe a closed
     // draft with the previous transition identity.
@@ -1880,6 +1918,29 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     if (capturedTarget && capturedTarget.runtimeKey !== getRuntimeKey()) {
       throw new Error("Message was not sent because the runtime changed.")
     }
+    // A draft makes one session: while its send is under way, from the moment
+    // it starts (even while it waits for OpenCode) to the moment it ends,
+    // another send from the same draft is refused before anything happens.
+    const entryDraft = options?.draftSnapshot ?? get().newSessionDraft
+    const draftCreating: DraftSessionCreating | null = !capturedTarget && !options?.sessionId && entryDraft?.open
+      ? { runtimeKey: capturedRuntimeKey, draftId: entryDraft.draftId }
+      : null
+    const underWay = get().draftSessionsCreating
+    const entrySessionId = capturedTarget?.sessionId ?? options?.sessionId ?? get().currentSessionId
+    const waitsForDraftSend = draftCreating
+      ? findDraftSessionCreating(underWay, draftCreating.runtimeKey, draftCreating.draftId)
+      : findSessionCreating(underWay, capturedRuntimeKey, entrySessionId)
+    if (waitsForDraftSend) {
+      throw new Error("The session for this message is still being created.")
+    }
+    if (draftCreating) set({ draftSessionsCreating: [...underWay, draftCreating] })
+    const endDraftCreating = () => {
+      if (!draftCreating) return
+      const remaining = get().draftSessionsCreating.filter((entry) => (
+        entry.runtimeKey !== draftCreating.runtimeKey || entry.draftId !== draftCreating.draftId
+      ))
+      set({ draftSessionsCreating: remaining })
+    }
     // A message sent while OpenCode is still starting waits for it here, ahead
     // of session creation, commands and shell, all of which need OpenCode.
     // Held sends go out one after another, in the order they were made.
@@ -1935,24 +1996,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       }
 
       // ---- New session from draft ----
-      const draftKey = !capturedTarget && !options?.sessionId && draft?.open
-        ? `${capturedRuntimeKey}:${draft.draftId}`
-        : null
-      const sessionBeingCreated = draftKey ? materializingDraftSessions.get(draftKey) : undefined
-      let joinedDraftSession: MaterializedDraftSession | null = null
-      if (sessionBeingCreated) {
-        // A send made while the draft's session is still being created goes
-        // to that session, as it does once the session exists.
-        joinedDraftSession = await sessionBeingCreated
-        if (!joinedDraftSession) throw new Error("Failed to create session")
-        if (getRuntimeKey() !== capturedRuntimeKey) {
-          throw new Error("Message was not sent because the runtime changed.")
-        }
-      } else if (draftKey) {
-        // Sends that join the session wait until this one's message is in it,
-        // or until it ended, so the messages keep the order they were sent in.
-        let settleFirstSend: (session: MaterializedDraftSession | null) => void = () => {}
-        materializingDraftSessions.set(draftKey, new Promise((resolve) => { settleFirstSend = resolve }))
+      if (!capturedTarget && !options?.sessionId && draft?.open) {
         let createdDraftSession: MaterializedDraftSession | null = null
         // A prompt is on screen at once, as in an existing session, while the
         // session is still being created; the session's optimistic message
@@ -2052,23 +2096,16 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
               files: p.attachments?.map(toPromptFile),
             })),
             promptIds,
-            // Sends that joined this one show their own message once this
-            // one is in the session.
-            onPromptShown: () => {
-              clearPreview()
-              settleFirstSend(createdDraftSession)
-            },
+            onPromptShown: clearPreview,
           })
         } finally {
           clearPreview()
-          if (!createdDraftSession) materializingDraftSessions.delete(draftKey)
-          settleFirstSend(createdDraftSession)
         }
         return
       }
 
       // ---- Existing session ----
-      const targetSessionId = joinedDraftSession?.sessionId ?? capturedTarget?.sessionId ?? options?.sessionId ?? get().currentSessionId
+      const targetSessionId = capturedTarget?.sessionId ?? options?.sessionId ?? get().currentSessionId
       const resumeAfterSend = options?.userInitiated && inputMode !== 'shell' && targetSessionId
         ? prepareUserMessageResume(targetSessionId, capturedRuntimeKey)
         : undefined
@@ -2111,7 +2148,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       }
 
       const currentSessionDirectory = targetSessionId
-        ? normalizePath(joinedDraftSession?.directory ?? capturedTarget?.directory ?? options?.directory ?? get().getDirectoryForSession(targetSessionId))
+        ? normalizePath(capturedTarget?.directory ?? options?.directory ?? get().getDirectoryForSession(targetSessionId))
         : null
       if (targetSessionId) {
         notifyMessageSent(targetSessionId)
@@ -2151,7 +2188,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         : undefined
 
       await routeMessage({
-        runtimeKey: capturedTarget?.runtimeKey ?? (joinedDraftSession ? capturedRuntimeKey : undefined),
+        runtimeKey: capturedTarget?.runtimeKey,
         sessionId: targetSessionId || "",
         directory: currentSessionDirectory,
         content,
@@ -2180,7 +2217,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       })
       // Keep restore failures outside the send promise and its retry path.
       void resumeAfterSend?.().catch(console.warn)
-    })
+    }).finally(endDraftCreating)
   },
 
   // ---------------------------------------------------------------------------

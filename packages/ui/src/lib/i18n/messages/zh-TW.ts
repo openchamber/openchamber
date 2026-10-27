@@ -3864,6 +3864,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.moveChatToProject.success': '已將聊天移動到專案',
   'sessions.moveChatToProject.failed': '無法移動聊天',
   'chat.worktreeSetup.running': '正在設定 worktree：正在執行專案的設定命令…',
+  'chat.draftSession.creating': '正在建立會話…',
   'desktopHostSwitcher.startup.fellBackToLocal': '未能建立連線，因此 OpenChamber 以 Local 啟動。待其可連線後，請在實例切換器中連線。',
   'desktopSafeStart.title': 'OpenChamber 多次當機',
   'desktopSafeStart.description': '面板已關閉，資料夾已摺疊。',

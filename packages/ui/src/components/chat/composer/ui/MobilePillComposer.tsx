@@ -31,6 +31,8 @@ export interface MobilePillComposerProps {
     sessionId: string | null;
     newSessionDraftOpen: boolean;
     hasContent: boolean;
+    /** Sending waits (the draft's session is being created): the send control shows disabled. */
+    sendWaits?: boolean;
     isVSCode: boolean;
     canAbort: boolean;
     footerIconButtonClass: string;
@@ -62,6 +64,7 @@ export function MobilePillComposer(props: MobilePillComposerProps) {
         sessionId: currentSessionId,
         newSessionDraftOpen,
         hasContent,
+        sendWaits = false,
         isVSCode,
         canAbort,
         footerIconButtonClass,
@@ -163,7 +166,8 @@ export function MobilePillComposer(props: MobilePillComposerProps) {
                 {showFollowUpAction ? (
                     <button
                         type="button"
-                        className={cn(footerIconButtonClass, 'text-primary hover:text-primary')}
+                        disabled={sendWaits}
+                        className={cn(footerIconButtonClass, sendWaits ? 'opacity-30' : 'text-primary hover:text-primary')}
                         onClick={onPrimaryAction}
                         title={followUpLabel}
                         aria-label={followUpLabel}
@@ -202,7 +206,8 @@ export function MobilePillComposer(props: MobilePillComposerProps) {
                         type="button"
                         variant="ghost"
                         size="icon"
-                        className="text-primary hover:text-primary"
+                        disabled={sendWaits}
+                        className={sendWaits ? 'opacity-30' : 'text-primary hover:text-primary'}
                         onClick={onPrimaryAction}
                         title={t('chat.chatInput.actions.sendMessageAria')}
                         aria-label={t('chat.chatInput.actions.sendMessageAria')}

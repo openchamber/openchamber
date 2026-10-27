@@ -3794,6 +3794,7 @@ export const dict = {
   'sessions.moveChatToProject.success': 'تم نقل المحادثة إلى المشروع',
   'sessions.moveChatToProject.failed': 'تعذّر نقل المحادثة',
   'chat.worktreeSetup.running': 'جارٍ إعداد شجرة العمل: تشغيل أوامر الإعداد الخاصة بالمشروع…',
+  'chat.draftSession.creating': 'جارٍ إنشاء الجلسة…',
   'desktopHostSwitcher.startup.fellBackToLocal': 'لم يُفتح اتصالها، لذا بدأ OpenChamber على النسخة المحلية. اتصل بها من مبدّل النسخ عندما يصبح الوصول إليها ممكنًا.',
   'desktopSafeStart.title': 'تعطّل OpenChamber مرارًا',
   'desktopSafeStart.description': 'أُغلقت اللوحات وطُويت المجلدات.',

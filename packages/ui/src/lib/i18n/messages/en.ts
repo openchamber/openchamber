@@ -3864,6 +3864,7 @@ export const dict = {
   'sessions.moveChatToProject.success': 'Chat moved to the project',
   'sessions.moveChatToProject.failed': 'Could not move the chat',
   'chat.worktreeSetup.running': 'Setting up the worktree: running the project\'s setup commands…',
+  'chat.draftSession.creating': 'Creating session…',
   'desktopHostSwitcher.startup.fellBackToLocal': 'Its connection didn\'t open, so OpenChamber started on Local. Connect it from the instance switcher once it\'s reachable.',
   'desktopSafeStart.title': 'OpenChamber kept crashing',
   'desktopSafeStart.description': 'Panels are closed and folders collapsed.',

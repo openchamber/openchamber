@@ -10,7 +10,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { isServerOwnedMessageQueue, createMessageQueueTarget, getMessageQueueKey, useMessageQueueStore, type QueuedContextPart, type QueuedMessage, type QueuedMessageGoal } from '@/stores/messageQueueStore';
 import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
 import { useSessionGoalArmStore } from '@/stores/useSessionGoalArmStore';
-import { useSessionUIStore, type NewSessionDraftState } from '@/sync/session-ui-store';
+import { findDraftSessionCreating, findSessionCreating, useSessionUIStore, type NewSessionDraftState } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import { prepareUserMessageResume } from '@/sync/user-message-resume';
 import { prepareLocalAttachments, useDraftAttachedFiles, useInputStore, type SyntheticContextPart } from '@/sync/input-store';
@@ -596,6 +596,26 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const newSessionDraft = useSessionUIStore((s) => s.newSessionDraft);
     // The new-session draft is the main chat's; a pinned composer is never on it.
     const newSessionDraftOpen = !columnPinned && Boolean(newSessionDraft?.open);
+    const materializedDraftSessionId = useSessionUIStore((s) => (columnPinned ? null : s.materializedDraftSessionId));
+    // While the draft's session is being created, and until its first message
+    // has gone out, the composer keeps taking text but sending waits: the
+    // draft makes one session, and its first message reaches OpenCode first.
+    const draftSessionCreating = useSessionUIStore((s) => {
+        if (columnPinned) return false;
+        return Boolean(newSessionDraftOpen
+            ? findDraftSessionCreating(s.draftSessionsCreating, activeRuntimeKey, newSessionDraft.draftId)
+            : findSessionCreating(s.draftSessionsCreating, activeRuntimeKey, currentSessionId));
+    });
+    // The draft the open session was just created from, while its first send
+    // is under way: text typed in that draft meanwhile moves into the session.
+    const materializedFromDraftId = useSessionUIStore((s) => (
+        columnPinned ? null : findSessionCreating(s.draftSessionsCreating, activeRuntimeKey, materializedDraftSessionId)?.draftId ?? null
+    ));
+    const materializedDraft = React.useMemo(() => (
+        materializedDraftSessionId !== null && materializedFromDraftId !== null
+            ? { sessionId: materializedDraftSessionId, draftId: materializedFromDraftId }
+            : null
+    ), [materializedDraftSessionId, materializedFromDraftId]);
     const draftPermissionMode = useSessionUIStore((s) => (
         s.newSessionDraft?.open ? s.newSessionDraft.permissionMode : undefined
     ));
@@ -1263,6 +1283,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             identity: initialDraftIdentityRef.current,
         },
         newSessionDraftId: newSessionDraftOpen ? newSessionDraft.draftId : null,
+        materializedDraft,
         onIdentityChange: () => {
             setInputMode('normal');
             draftCaretModeRef.current.atEnd = isBtwActive || draftCaretModeRef.current.btw;
@@ -1421,7 +1442,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const composerQueuedMessages = selectComposerQueue(queuedMessages);
     const hasQueuedMessages = !isBtwActive && composerQueuedMessages.length > 0;
     const preparingBtwSend = useBtwStore((state) => Boolean(currentSessionId && state.byParent[currentSessionId]?.pendingSend));
-    const canSend = (hasContent || hasQueuedMessages) && !(isBtwActive && (btwPanel.creating || preparingBtwSend));
+    const canSend = (hasContent || hasQueuedMessages) && !draftSessionCreating && !(isBtwActive && (btwPanel.creating || preparingBtwSend));
 
     const canAbort = sessionPhase !== 'idle';
     // While a page the agent showed waits for the user's answer, the turn
@@ -1460,6 +1481,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         // The comment's exit paths are attach/cancel; queueing a real prompt
         // underneath comment mode must never fire.
         if (isMobileCommentOpen()) return;
+        // Queueing takes the text too; it waits like a send.
+        if (draftSessionCreating) return;
         const inputSnapshot = getCurrentInputSnapshot();
         if (!inputSnapshot.hasContent || !currentSessionId || !messageQueueTarget) return;
 
@@ -1599,7 +1622,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         }
         void resumeAfterQueue().catch(console.warn);
         recordLinkedReferences(queueSessionId, queueTarget.directory, linked);
-    }, [getCurrentInputSnapshot, currentSessionId, messageQueueTarget, inputMode, hasDrafts, guestCommands, attachedFiles, sanitizeAttachmentsForSend, prepareReadOnSendMentions, extractInlineFileMentions, agents, currentDirectory, consumePendingSyntheticParts, mailboxTarget, inlineDraftTarget, consumeDrafts, linkedReferences, scrollToLatest, clearAttachedFiles, chatDraftIdentity, isMobile, isMobileCommentOpen, addToQueue, currentProviderId, currentModelId, currentAgentName, currentVariant, t, readSessionMentionsBeforeSend, sessionMentionsIn]);
+    }, [getCurrentInputSnapshot, currentSessionId, draftSessionCreating, messageQueueTarget, inputMode, hasDrafts, guestCommands, attachedFiles, sanitizeAttachmentsForSend, prepareReadOnSendMentions, extractInlineFileMentions, agents, currentDirectory, consumePendingSyntheticParts, mailboxTarget, inlineDraftTarget, consumeDrafts, linkedReferences, scrollToLatest, clearAttachedFiles, chatDraftIdentity, isMobile, isMobileCommentOpen, addToQueue, currentProviderId, currentModelId, currentAgentName, currentVariant, t, readSessionMentionsBeforeSend, sessionMentionsIn]);
 
     /** Put the context a queued message was captured with back on the composer chips. */
     const restoreQueuedContext = React.useCallback((context: readonly QueuedContextPart[]) => {
@@ -1750,6 +1773,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         // Comment mode's only submit is attach; every other send path must be
         // inert while it is open.
         if (isMobileCommentOpen()) return;
+        // Nothing sends, and nothing typed is taken, until the session exists.
+        if (draftSessionCreating) return;
         if (isBtwActive && currentSessionId && (btwPanel.creating || useBtwStore.getState().byParent[currentSessionId]?.pendingSend)) return;
         // "Run in parallel" launches the run instead of sending a message.
         if (parallel.isActive && !options?.queuedOnly) {
@@ -4336,6 +4361,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const spaceWaitRow = showDraftTargetSelectors && messageWaitsForSpace
         ? <ComposerStatusStrip icon="time" text={t('spaces.draft.queued')} />
         : null;
+    // One line per wait: a worktree setup or a space being made already says
+    // why the message has not gone out.
+    const draftSessionRow = draftSessionCreating && !worktreeSetupRow && !spaceWaitRow
+        ? <ComposerStatusStrip icon="loader-4" spin text={t('chat.draftSession.creating')} />
+        : null;
     const autoReviewRow = !isBtwActive && !newSessionDraftOpen ? <AutoReviewStrip /> : null;
     // The session's goal, then what is still running, then what waits for it.
     const goalRow = !isBtwActive ? (
@@ -4360,8 +4390,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     ) : null;
     // Null exactly when the suggestion row alone would have been: the mobile
     // pill picks its shape from whether a top row exists.
-    const composerTopRows = worktreeSetupRow || spaceWaitRow || goalRow || autoReviewRow || backgroundShellsRow || revertRow || queueRow || doneHintRow || reviewHintRow || suggestionRow ? (
+    const composerTopRows = draftSessionRow || worktreeSetupRow || spaceWaitRow || goalRow || autoReviewRow || backgroundShellsRow || revertRow || queueRow || doneHintRow || reviewHintRow || suggestionRow ? (
         <>
+            {draftSessionRow}
             {worktreeSetupRow}
             {spaceWaitRow}
             {goalRow}
@@ -4627,6 +4658,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         sessionId={currentSessionId}
                         newSessionDraftOpen={newSessionDraftOpen}
                         hasContent={Boolean(hasContent)}
+                        sendWaits={draftSessionCreating}
                         isVSCode={isVSCode}
                         canAbort={canAbort}
                         footerIconButtonClass={footerIconButtonClass}

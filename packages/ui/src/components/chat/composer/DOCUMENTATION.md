@@ -189,7 +189,14 @@ in `design-system.css`). The draft screen and the expanded editor keep the slot
 in flow. A sent draft leaves the draft screen at once, while its session is
 still being created (`draftSent`, sync documentation rule 15): the composer
 floats over the sent message and the draft's title, target selectors and
-starter chips go, as they do when a session is opened. The composer hands the
+starter chips go, as they do when a session is opened. Until the session
+exists and the first message has gone out, the composer keeps taking text but
+does not send: the Send button is disabled, Enter does nothing, and a
+"Creating session…" status line (the same `ComposerStatusStrip` a worktree
+setup uses) sits above it, unless a worktree setup or space wait line already
+says why (sync documentation rule 14). What was typed
+meanwhile stays in the composer when the draft becomes its session. The
+composer hands the
 store the draft's response-style read unfinished (`responseStyle`), so the
 message shows without waiting for that settings round trip. On a phone the
 composer folds into its pill right after the send; the sent draft's timeline
