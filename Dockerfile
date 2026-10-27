@@ -73,6 +73,7 @@ COPY --from=builder /app/packages/sdk/package.json ./packages/sdk/package.json
 COPY --from=builder /app/packages/sdk/dist ./packages/sdk/dist
 COPY --from=builder /app/packages/web/bin ./packages/web/bin
 COPY --from=builder /app/packages/web/server ./packages/web/server
+COPY --from=builder /app/packages/web/shared ./packages/web/shared
 COPY --from=builder /app/packages/web/dist ./packages/web/dist
 
 EXPOSE 3000

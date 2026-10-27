@@ -12,6 +12,10 @@ declare module "bun:test" {
     toBeNull(): void;
     toThrow(expected?: string | RegExp | (new (...args: never[]) => unknown)): void;
     toContain(expected: unknown): void;
+    toContainEqual(expected: unknown): void;
+    toMatch(expected: string | RegExp): void;
+    toHaveBeenCalled(): void;
+    toHaveBeenCalledTimes(expected: number): void;
     toBeDefined(): void;
     toBeUndefined(): void;
     toMatchObject(expected: unknown): void;
@@ -33,9 +37,15 @@ declare module "bun:test" {
       toContain(expected: unknown): void;
       toBeNull(): void;
       toHaveProperty(path: string): void;
+      toMatch(expected: string | RegExp): void;
+      toBeUndefined(): void;
+      toHaveBeenCalled(): void;
     };
   }
   export function expect(value: unknown): ExpectResult;
+  export namespace expect {
+    function arrayContaining(value: unknown[]): unknown[];
+  }
   export function beforeAll(fn: () => void | Promise<void>): void;
   export function beforeEach(fn: () => void | Promise<void>): void;
   export function afterEach(fn: () => void | Promise<void>): void;

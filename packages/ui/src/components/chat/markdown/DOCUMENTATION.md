@@ -1,8 +1,8 @@
-# Markdown file references
+# Markdown rendering
 
 ## Ownership
 
-The shared renderer classifies and confirms local references before opening them through the active runtime's file viewer or editor. Filesystem access and authorization remain with the runtime adapters.
+The shared renderer classifies and confirms local references before opening them through the active runtime's file viewer or editor. Filesystem access and authorization remain with the runtime adapters. `openuiFences.ts` identifies authored OpenUI code blocks for source checks and context-example tests, using the existing `remarkDisclosures` plugin shared with Markdown rendering.
 
 ## Invariants
 
@@ -12,6 +12,7 @@ The shared renderer classifies and confirms local references before opening them
 - Existing file-URL handling, file classification, and final-path containment checks remain in place.
 - Ordinary local hrefs bypass prose-only filename filters. External schemes and protocol-relative URLs are rejected before decoding.
 - Encoded edge spaces remain part of the filename during resolution, existence checks, and file-tab navigation.
+- OpenUI fence positions use UTF-16 offsets after BOM and line-ending normalization. Only an authored closing fence proves a block is complete. Literal and unknown fence metadata remain available to callers, which decide eligibility for execution.
 
 ## Decisions
 
@@ -30,3 +31,9 @@ A link target can contain repeated spaces, angle brackets, or encoded `://` in i
 ### Why decoded href paths preserve whitespace
 
 Text references are trimmed as prose, but an href's encoded edge spaces identify a different file. Href resolution opts out of trimming, and stat checks and absolute file-tab targets retain those spaces.
+### Why source checks use the rendering parser
+
+Remark handles nested lists, quotes and disclosures consistently with the screen
+renderer. The closure extension observes its existing tokens without replacing
+fenced-code parsing. Server asset tests use this UI helper during development;
+the shipped server runtime has no Markdown parser dependency.
