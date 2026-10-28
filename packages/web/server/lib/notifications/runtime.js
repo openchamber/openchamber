@@ -697,9 +697,8 @@ export const createNotificationTriggerRuntime = (deps) => {
       return;
     }
 
-    // A form, and a page an agent shows that waits for the user's answer
-    // (render.page with awaitAnswer, announced by this server), both mean the
-    // agent waits for the user, so they notify the same way.
+    // Forms and server-announced OpenUI prompts both wait for the user and
+    // use the same notification behavior.
     const ask = payload.type === 'form.created' ? readFormAsk(payload)
       : payload.type === 'openchamber:page-waiting' ? readPageAsk(payload)
         : null;

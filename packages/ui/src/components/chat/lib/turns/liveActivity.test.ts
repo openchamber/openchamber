@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { AssistantMessage, Part, ToolPart, ToolStateCompleted } from '@/lib/opencode/model';
 import { attachSyntheticContext } from '../attachSyntheticContext';
-import { getLiveFinalMessage, getTurnsWithLaterAssistant, hasLiveActivity } from './liveActivity';
+import { getLiveFinalMessage, getShownPages, getTurnsWithLaterAssistant, hasLiveActivity } from './liveActivity';
 import { projectTurnRecords } from './projectTurnRecords';
 import { summarizeLiveActivity } from './liveActivitySummary';
 import type { ChatMessageEntry } from './types';
@@ -43,13 +43,14 @@ function tool(id: string, name: string, options: {
     input?: ToolStateCompleted['input'];
     metadata?: ToolStateCompleted['metadata'];
     error?: string;
+    output?: string;
 } = {}): ToolPart {
     const common = { input: options.input ?? {}, metadata: options.metadata ?? {}, time: { start: 1, end: 2 } };
     const state: ToolPart['state'] = options.status === 'error'
         ? { ...common, status: 'error', error: options.error ?? 'failed' }
         : options.status === 'running'
             ? { ...common, status: 'running' }
-            : { ...common, status: 'completed', output: '' };
+            : { ...common, status: 'completed', output: options.output ?? '' };
     return {
         id, callID: id, type: 'tool', tool: name, messageID: 'message', sessionID: 'session',
         state,
@@ -59,6 +60,51 @@ function tool(id: string, name: string, options: {
 const diff = '@@ -1,1 +1,2 @@\n-before\n+after\n+added';
 
 describe('live turn boundaries', () => {
+    test('keeps completed generated images visible alongside a waiting prompt', () => {
+        const image = tool('image', 'openchamber_image', { output: JSON.stringify({ schemaVersion: 1, ok: true, action: 'image.generate', data: { images: [{ path: '/tmp/my image.png' }] } }) });
+        const failed = tool('failed', 'openchamber_image', { output: JSON.stringify({ schemaVersion: 1, ok: false, action: 'image.generate', data: { images: [{ path: '/tmp/failed.png' }] } }) });
+        const waiting = tool('waiting', 'openchamber_openui', { status: 'running', input: { action: 'openui.prompt', ui: 'root = Stack([])' } });
+        expect(getShownPages([assistant('tools', [image, failed, waiting])]).map((part) => part.callID)).toEqual(['image', 'waiting']);
+    });
+    test('hoists workflow proposals and waiting OpenUI prompts in call order, leaving answered prompts in Activity', () => {
+        const messages = [assistant('tools', [
+            tool('workflow', 'openchamber_workflow', { output: JSON.stringify({ ok: true, action: 'workflow.run', data: { runId: 'run-1' } }) }),
+            tool('answered', 'openchamber_openui', { input: { action: 'openui.prompt', ui: 'root = Stack([])' }, metadata: { openchamber: { ok: true, answer: { answered: true, summary: 'Continue', data: null } } } }),
+            tool('waiting', 'openchamber_openui', { status: 'running', input: { action: 'openui.prompt', ui: 'root = Stack([])' } }),
+        ])];
+        expect(getShownPages(messages).map((part) => part.callID)).toEqual(['workflow', 'waiting']);
+    });
+    test('keeps waiting OpenUI prompts outside Activity', () => {
+        const messages = [assistant('prompt', [tool('prompt', 'openchamber_openui', {
+            status: 'running', input: { action: 'openui.prompt', ui: 'root = Stack([])' },
+        })])];
+        expect(getShownPages(messages).map((part) => part.callID)).toEqual(['prompt']);
+    });
+
+    for (const { name, status, metadata } of [
+        { name: 'answered', status: 'completed' as const, metadata: { openchamber: { ok: true, answer: { answered: true, summary: 'Continue', data: null } } } },
+        { name: 'answered in chat', status: 'completed' as const, metadata: { openchamber: { ok: true, answer: { answered: false, reason: 'chat' } } } },
+        { name: 'completed without an answer', status: 'completed' as const, metadata: { openchamber: { ok: true } } },
+        { name: 'stopped', status: 'error' as const, metadata: {} },
+        { name: 'refused', status: 'completed' as const, metadata: { openchamber: { ok: false } } },
+    ]) {
+        test(`returns an OpenUI prompt to Activity when ${name}`, () => {
+            const settled = tool('settled', 'openchamber_openui', { status, metadata, input: { action: 'openui.prompt', ui: 'root = Stack([])' } });
+            const waiting = tool('waiting', 'openchamber_openui', { status: 'running', input: { action: 'openui.prompt', ui: 'root = Stack([])' } });
+            expect(getShownPages([assistant('tools', [settled, waiting])]).map((part) => part.callID))
+                .toEqual(['waiting']);
+        });
+    }
+
+    test('does not treat an execute input or ordinary tool as an OpenUI prompt', () => {
+        const messages = [assistant('tools', [
+            tool('nested', 'execute', { status: 'running', input: { ui: 'root = Stack([])' } }),
+            tool('other', 'custom', { status: 'running', input: { ui: 'root = Stack([])' } }),
+            tool('retired', 'openchamber_render', { input: { html: '<p>Old page</p>' }, metadata: { openchamber: { ok: true } } }),
+        ])];
+        expect(getShownPages(messages)).toEqual([]);
+    });
+
     test('a queued user message does not collapse the previous turn', () => {
         const turns = projectTurnRecords([user(), assistant('a', [tool('read', 'read')]), user('next')]).turns;
         expect(getTurnsWithLaterAssistant(turns).size).toBe(0);

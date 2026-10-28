@@ -57,6 +57,13 @@ describe('global blocking requests index', () => {
     expect(bySession().get('s1')?.pages.map((page) => page.id)).toEqual(['call_1']);
   });
 
+  test('keeps optional OpenUI wait fields from the host snapshot', async () => {
+    await readHostBlockingRequestsSnapshot(hostSnapshot({
+      s1: { permissions: [], forms: [], pages: [{ id: 'call_1', sessionID: 's1', title: 'Pick' }] },
+    }), () => '/other');
+    expect(bySession().get('s1')?.pages).toEqual([{ id: 'call_1', sessionID: 's1', title: 'Pick' }]);
+  });
+
   test('tracks asks per session and settles them by request id', () => {
     applyGlobalBlockingRequestEvents('/far/', [permissionAsked(permission('p1', 's1')), formCreated(form('q1', 's1')), permissionAsked(permission('p2', 's2'))]);
 

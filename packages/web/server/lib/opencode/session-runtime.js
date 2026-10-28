@@ -62,7 +62,7 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
   // is their seed. Entries live until the matching reply, the session's
   // deletion, or an OpenCode restart, which drops every pending request.
   // Pages an agent shows that wait for the user's answer sit beside them; they
-  // come from this server's own render.page calls, not from OpenCode, and
+  // come from this server's OpenUI prompt runtime and
   // leave when the call stops waiting (`trackWaitingPage`).
   const pendingRequestsBySession = new Map();
   let activeSessionCount = 0;

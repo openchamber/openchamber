@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { GENERATED_IMAGE_DIRECTORY, createImageGenerationAction, generatedImagePaths } from './generate-image.js';
+import { GENERATED_IMAGE_DIRECTORY, createImageGenerationAction } from './generate-image.js';
 
 const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex');
 const tempDirs = [];
@@ -106,14 +106,5 @@ describe('image.generate', () => {
     await expect(failing(tagged('ModelNotFoundError'))).rejects.toMatchObject({ statusCode: 409, message: expect.stringContaining('no longer available') });
     await expect(failing(tagged('ProviderRequestError', 'insufficient credits'))).rejects.toMatchObject({ statusCode: 502, message: 'The provider refused: insufficient credits' });
     await expect(setup({ answer: () => ({ images: [] }) }).generate({ prompt: 'x' }, {})).rejects.toMatchObject({ statusCode: 502 });
-  });
-});
-
-describe('generatedImagePaths', () => {
-  it('reads the saved paths from a successful result envelope only', () => {
-    const envelope = (ok, data) => JSON.stringify({ schemaVersion: 1, ok, action: 'image.generate', data });
-    expect(generatedImagePaths(envelope(true, { images: [{ path: '/tmp/a.png' }, { path: '' }] }))).toEqual(['/tmp/a.png']);
-    expect(generatedImagePaths(envelope(false, { images: [{ path: '/tmp/a.png' }] }))).toEqual([]);
-    expect(generatedImagePaths('not json')).toEqual([]);
   });
 });

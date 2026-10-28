@@ -33,51 +33,38 @@ the user can want independently:
   `agentKnowledgeToolEnabled` is not `false`, and the control service refuses
   these actions when it is, so a stale plugin cannot keep writing. Writes are
   attributed to the session OpenCode reported, never to a payload field.
-- `openchamber_render` — `render.page`, a self-contained HTML page (`html`,
-  `title`) the chat draws inline above the agent's answer, such as a chart or
-  table. The page travels in the call's input, which OpenCode stores and
-  syncs, so the server keeps no copy: `../openchamber-control/render-page.js`
-  only checks the input (`html` at most 200,000 characters so the callback
-  body stays under its 1 MB limit, `title` at most 120) and the setting.
-  On by default: enabled while `agentRenderToolEnabled` is not `false`, and the
-  control service refuses the action when it is, so a stale plugin cannot
-  keep drawing. When to draw is stated only in the line every session carries
-  (`../session-knowledge/DOCUMENTATION.md`, *When to draw a page*), along with
-  the mockup exception: a mockup of the user's own project takes its look from
-  that project's code. The tool description keeps the look rules agents broke
-  most (no page background, no outer card, theme variables). How to write the
-  page is the `html` input's description: layout, boxes, the theme variables
-  the chat injects (`packages/ui/src/components/chat/message/parts/htmlRender.ts`;
-  change both together), how a page with its own colors, such as a project
-  mockup, keeps clear of them (a color on all its text and a background of its
-  own, since the injected base stylesheet colors unset text and the frame is
-  transparent), image files by path from anywhere on the machine as
-  the image grant route allows, and the temporary directory to save a
-  screenshot in (`os.tmpdir()/opencode`) so it stays out of the project. How
-  to ask on a page is the `awaitAnswer` input's description.
-  With `awaitAnswer` the call waits for the user's answer on the page. The
-  plugin sends the call id (`context.id`) with the callback so the server can
-  find the waiting call when the chat answers it, and copies the answer into
-  the call's metadata (`metadata.openchamber.answer`), so every client shows
-  the page as answered. The waiting callback sends Bun's `timeout: false`,
-  since Bun's fetch otherwise ends a request with no response after about six
-  minutes. While the call waits, OpenCode holds any chat message
-  for that session until the call returns, so the plugin registers a
-  `session.prompt` hook: a prompt for the session, from any sender, aborts the
-  waiting call, which returns `{ answered: false, reason: "chat" }`, and the
-  agent reads the message next.
+- `openchamber_openui` reads fixed capability and task groups with `openui.read`
+  and collects required input with `openui.prompt`. Prompt calls wait through
+  the OpenUI runtime's answer owner. Common display
+  contracts are resident; data, interaction, HTML, advanced DSL and composition examples
+  are read on demand. The resident instructions route by task;
+  several matching groups can be read together. The tool is
+  present only for managed OpenCode while the render setting is enabled.
+
+OpenUI's [context-as-skill mapping](../openui/context/DOCUMENTATION.md#context-as-a-skill)
+guides its tool descriptions and reference groups. Their definitions live in
+`../openui/context/tools.js`; this adapter registers them.
+
+The generated adapter applies chat cancellation, disabled fetch idle timeout,
+and answer metadata only to `openui.prompt`, including its bare `prompt` alias.
+Reference reads use ordinary action behavior. The OpenUI runtime owns program
+admission and live waits.
+Managed prompts delegate before resolving the session directory; OpenUI performs
+that lookup inside its cancellable admission. Other actions retain the adapter's
+directory fallback.
+
 - `openchamber_image` — `image.generate`, images made or edited by the image
   model the user chose in Settings (`../openchamber-control/generate-image.js`).
   Off by default: enabled only while `agentImageToolEnabled` is `true`, and
   the control service refuses the action when it is not. Never behind Code
-  Mode, like render: the chat draws the images in place of the call's row from
+  Mode, like OpenUI: the chat draws the images in place of the call's row from
   its stored result, which an `execute` script would hide.
 - `openchamber_workflow` — `workflow.*`, scripts that fan a large task out to
   many agents, run by OpenChamber (`../workflows/DOCUMENTATION.md`). Only in
   builds with `OPENCHAMBER_WORKFLOWS_ENABLE`; there it is on unless
   `agentWorkflowToolEnabled` is `false`. How to write a script is the `script`
   input's description, read while the agent writes one, for the same reason
-  render's page rules sit on `html`.
+  the script input carries its authoring rules.
 - `openchamber_workflow_answer` — `workflow.answer`, how a workflow agent
   asked for a schema answer hands it over. Registered with the workflow tool,
   but the managed config denies it in every session (`managedPermissionRules`)
@@ -102,10 +89,8 @@ both settings are `false`.
   size-limited catalog; with a few large MCP servers ours dropped out of it and
   agents concluded the tool did not exist. `agentToolsCodeMode: true` (the
   "Run through Code Mode" checkbox in the same section, off by default) flips
-  all of them to `codemode: true`, except `openchamber_render`: the chat draws
-  a page from that tool's own call (its input and stored result), and inside
-  an `execute` script the call is only an entry in `execute`'s list, so the
-  page never showed.
+  all of them to `codemode: true`, except `openchamber_openui`: it stays direct
+  so chat can identify prompt inputs and its callback can wait for submission.
 - The plugin accepts the action's inputs either inside `parameters` or beside
   `action`, because models produce both shapes; an explicit `parameters` object
   wins on a conflict. Rejecting the flattened shape turned a call that plainly
@@ -114,6 +99,12 @@ both settings are `false`.
   `parameters`, and `additionalProperties: true` at the root lets flattened
   inputs and unknown fields (a stale `wait` or `timeout`) through to the
   adapter.
+
+### Why OpenUI uses one direct tool
+
+Reference reads and required-input prompts share one action-based entry point.
+Keeping that tool direct preserves a visible prompt record under Code Mode;
+only prompt actions acquire a cancellable wait.
 
 ### Why scheduling is its own tool and not part of `openchamber`
 
@@ -176,19 +167,16 @@ default and when to set it. Field names and JSON types carry the rest.
   Claude Code before 2.1.296 passes an MCP tool description on only up to
   2048 characters (4096 after), and the plugin that runs it uses whichever CLI
   the user installed; the input schema reaches the model whole. A rule that
-  only matters while writing one input, such as the page layout rules on
-  `html`, is that input's description.
+  only matters while writing one input, such as workflow script rules, is that
+  input's description.
 - The tool exposes one shared parameter object rather than repeating parameters
   in a large per-action union.
 - The action schema carries `oneOf` and no `enum`. A node combining `enum` and
   `oneOf` is valid JSON Schema, but some OpenAI-compatible gateways reject it
   and answer with an empty completion instead of an error.
-- A tool with a single action (render, notify) declares `action` as a plain,
-  optional string and always runs its one action. A weaker model put the whole
-  render call into `action` as a JSON string, title included, with the html
-  beside it; the strict `oneOf` refused that before the tool ran, and every
-  retry sent the whole page again. Such a string is revived, and its fields
-  fill only what the call did not already carry.
+- A single-action tool such as notify declares `action` as an optional string
+  and always runs its one action. A JSON-stringified action is revived, and its
+  fields fill only what the call did not already carry.
 - Obvious fields rely on their names and JSON types. Parameter descriptions are
   reserved for formats, dependencies, scope, and behavior that cannot be safely
   inferred from the field name.

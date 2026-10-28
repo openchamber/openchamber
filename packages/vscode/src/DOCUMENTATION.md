@@ -90,13 +90,19 @@ The sidebar installs a script-free CSP bootstrap document before changing webvie
 
 The webview build emits each worker as one self-contained file. VS Code webviews cannot load workers directly from extension resource URLs or load module imports from inside a worker. The shared Shiki client therefore fetches the built worker, starts it from a `blob:` URL, and relies on the worker CSP allowance above.
 
+The webview build keeps `elkjs` in a separate vendor chunk. Vite 7.3.1's
+bundled import lexer rejects a generated ELK loop after minification when ELK
+shares a chunk with dynamic imports. Isolating the layout engine keeps those
+generated functions out of Vite's dynamic-import preload rewrite while retaining
+the lazy Mermaid loading path.
+
 - `bridge-localfs-proxy-runtime.ts`
   - Local `/api/fs/read` and `/api/fs/raw` proxy helpers and shared proxy utility helpers.
   - `/api/fs/directory-stat` and `/api/fs/directory-stats` return 501 locally. Directory-availability probes remain unknown in VS Code rather than falling through to OpenCode.
   - Workspace-contained Markdown gallery images use these local filesystem
-    routes without calling the server grant route. Grant requests for OpenCode
-    temporary-directory images return an explicit unsupported response instead
-    of being forwarded to OpenCode.
+    routes. OpenUI images and HtmlView reuse the same workspace bridge.
+    Outside-workspace media stays unavailable. Images use stat followed by raw
+    through this bridge; videos remain unsupported.
 
 - `bridge-proxy-runtime.ts`
   - Proxy route handlers (`api:proxy`, `api:session:message`) with injected helper dependencies.

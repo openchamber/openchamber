@@ -197,20 +197,7 @@ type ParsedInput = z.infer<typeof inputSchema>
 
 const readInput = (input: ToolInput | undefined): ParsedInput => inputSchema.parse(input ?? {})
 
-const renderPageFields = z.object({
-  html: z.string().optional().catch(undefined),
-  title: optionalText,
-  awaitAnswer: z.boolean().optional().catch(undefined),
-})
-
-// The plugin accepts the inputs inside `parameters` or beside `action`, and an
-// explicit `parameters` object wins, so the page is read the same way.
-const renderPageInputSchema = renderPageFields
-  .extend({ parameters: renderPageFields.optional().catch(undefined) })
-  .catch({})
-
-// What the user answered on a page that waited (render.page with
-// awaitAnswer), as the plugin records it in the call's metadata.
+// The OpenUI answer recorded in the tool's metadata.
 const pageAnswerSchema = z.union([
   z.object({ answered: z.literal(true), summary: z.string(), data: z.json().catch(null) }),
   z.object({ answered: z.literal(false) }),
@@ -224,6 +211,15 @@ const openChamberResultSchema = z
     }).optional().catch(undefined),
   })
   .catch({})
+
+const openuiPromptInputSchema = z.object({
+  ui: z.string().refine((value) => value.trim().length > 0),
+})
+const openuiActionInputSchema = z.object({
+  action: z.string().trim().pipe(z.enum(["openui.prompt", "prompt"])),
+  ui: z.json().optional(),
+  parameters: z.object({ ui: z.json().optional() }).optional(),
+})
 
 /** One entry of a tool's `metadata.files` (`FileDiff.Info` on the wire). */
 export type ToolFileDiff = z.infer<typeof fileDiffSchema> & { file: string }
@@ -339,63 +335,36 @@ export function executeScript(input: ToolInput | undefined): string | undefined 
   return readInput(input).code
 }
 
-/** The agent a `subagent` call runs (`input.agent`). */
-const isRenderTool = (toolName: ToolName): boolean => toolName === OPENCHAMBER_RENDER_TOOL
-
-/** Where a page stands on the user's answer. */
-export type RenderedPageAsk =
+/** Where an OpenUI prompt stands on the user's answer. */
+type OpenUIPromptAnswer =
   | { kind: "show" }
   | { kind: "waiting" }
   | { kind: "answered"; summary: string; data: JsonValue }
   | { kind: "answered-in-chat" }
   | { kind: "unanswered" }
 
-// A page sent without a title is named after its own <title>, else its first
-// h1 to h3: the server accepts such a call and names it with the same rule
-// (renderPageTitleFromHtml in
-// packages/web/server/lib/openchamber-control/render-page.js); change both
-// together. The server's last resort, "Page", is the chat's own localized word.
-const TITLE_ENTITIES = { amp: "&", lt: "<", gt: ">", quot: "\"", "#39": "'", apos: "'", nbsp: " " } as const
-const RENDER_PAGE_MAX_TITLE_LENGTH = 120
-const elementText = (html: string, pattern: RegExp): string => (pattern.exec(html)?.[1] ?? "")
-  .replace(/<[^>]*>/g, " ")
-  .replace(/&(amp|lt|gt|quot|#39|apos|nbsp);/g, (_, entity: keyof typeof TITLE_ENTITIES) => TITLE_ENTITIES[entity])
-  .replace(/\s+/g, " ")
-  .trim()
-const pageTitleFromHtml = (html: string): string => (
-  elementText(html, /<title\b[^>]*>([\s\S]*?)<\/title>/i)
-  || elementText(html, /<h[1-3]\b[^>]*>([\s\S]*?)<\/h[1-3]>/i)
-).slice(0, RENDER_PAGE_MAX_TITLE_LENGTH).trim()
-
-/**
- * The page an `openchamber_render` call showed: present once OpenChamber
- * accepted the call, so a refused or unfinished call keeps its tool row. A
- * page that waits for the user's answer shows while its call runs, since the
- * call runs until the user answers, and after a call that failed while waiting.
- */
-export function renderedPage(
+/** A direct OpenUI prompt and the state the transcript can safely show. */
+export function openuiPrompt(
   toolName: ToolName,
   state: ToolState,
-): { html: string; title: string; ask: RenderedPageAsk } | null {
-  if (!isRenderTool(toolName)) return null
-  const parsed = renderPageInputSchema.parse(state.input ?? {})
-  const html = parsed.parameters?.html ?? parsed.html
-  if (!html?.trim()) return null
-  // Empty when neither the call nor the page names it; the chat shows its own word then.
-  const title = (parsed.parameters?.title ?? parsed.title)?.trim() || pageTitleFromHtml(html)
-  // A page that waited stays in the chat when its call ends without an
-  // answer (the user stopped the turn), so the question it asked is still there.
-  if ((parsed.parameters?.awaitAnswer ?? parsed.awaitAnswer) === true) {
-    if (state.status === "running") return { html, title, ask: { kind: "waiting" } }
-    if (state.status === "error") return { html, title, ask: { kind: "unanswered" } }
+): { source: string; ask: OpenUIPromptAnswer; accepted: true } | null {
+  if (toolName?.trim().toLowerCase().replace(/:\d+$/, "") !== "openchamber_openui") return null
+  const action = openuiActionInputSchema.safeParse(state.input ?? {})
+  if (!action.success) return null
+  const parsed = openuiPromptInputSchema.safeParse({ ...action.data, ...action.data.parameters })
+  if (!parsed.success) return null
+  if (state.status === "running") return { source: parsed.data.ui, ask: { kind: "waiting" }, accepted: true }
+  if (state.status === "error") {
+    if (openChamberResultSchema.parse(state.metadata ?? {}).openchamber?.ok === false) return null
+    return { source: parsed.data.ui, ask: { kind: "unanswered" }, accepted: true }
   }
   if (state.status !== "completed") return null
   const result = openChamberResultSchema.parse(state.metadata ?? {}).openchamber
   if (result?.ok !== true) return null
   const answer = result.answer
-  if (answer?.answered === true) return { html, title, ask: { kind: "answered", summary: answer.summary, data: answer.data } }
-  if (answer?.answered === false) return { html, title, ask: { kind: "answered-in-chat" } }
-  return { html, title, ask: { kind: "show" } }
+  if (answer?.answered === true) return { source: parsed.data.ui, ask: { kind: "answered", summary: answer.summary, data: answer.data }, accepted: true }
+  if (answer?.answered === false) return { source: parsed.data.ui, ask: { kind: "answered-in-chat" }, accepted: true }
+  return { source: parsed.data.ui, ask: { kind: "show" }, accepted: true }
 }
 
 export function subagentAgent(input: ToolInput | undefined): string | undefined {
@@ -493,15 +462,11 @@ export function generatedImagePaths(toolName: ToolName, state: ToolState): strin
 }
 
 /**
- * Whether the chat draws what a call showed instead of its tool row: a page
- * from `openchamber_render`, the run a `workflow.run` call proposed, or the
- * images `image.generate` made. The user is meant to see all three, so they
- * are hoisted to the answer when Activity is collapsed.
+ * Whether the chat draws a direct OpenUI prompt or a proposed workflow run
+ * in place of its ordinary tool row. Activity decides which calls to hoist.
  */
 export const isShownInPlace = (toolName: ToolName, state: ToolState): boolean => (
-  renderedPage(toolName, state) !== null
-  || proposedWorkflowRunId(toolName, state) !== null
-  || generatedImagePaths(toolName, state).length > 0
+  openuiPrompt(toolName, state) !== null || proposedWorkflowRunId(toolName, state) !== null || generatedImagePaths(toolName, state).length > 0
 )
 
 const openChamberCallSchema = z

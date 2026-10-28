@@ -97,7 +97,7 @@ export class MarkdownMediaOwner {
       return pending;
     }
     // Tool/reasoning local mode retains its direct local-source behavior.
-    // Only assistant media uses the message grant / workspace bridge policy.
+    // Assistant media uses file inspection or the workspace bridge.
     if (mode === 'local') return source;
     if (isVSCodeRuntime()) {
       if (video) throw new Error('Video bridge is unavailable');
@@ -115,7 +115,7 @@ export class MarkdownMediaOwner {
     if (!this.batch || refresh) {
       if (refresh && this.refreshing) this.batch = this.refreshing;
       else {
-        this.batch = prepareLocalMarkdownImages({ sources: sources.filter(isLocalMarkdownImageSource), directory, sessionId, messageId, signal });
+        this.batch = prepareLocalMarkdownImages({ sources: sources.filter(isLocalMarkdownImageSource), directory, sessionId, messageId, signal, refresh });
         if (refresh) {
           const pending = this.batch;
           this.refreshing = pending;

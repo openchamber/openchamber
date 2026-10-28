@@ -485,7 +485,10 @@ const settingsRuntime = createSettingsRuntime({
   syncManagedRemoteTunnelConfigWithPresets,
   upsertManagedRemoteTunnelToken,
   chatRoots: [path.join(OPENCHAMBER_USER_CONFIG_ROOT, 'chats'), OPENCHAMBER_CHATS_DIR],
-  onManagedPluginSettingsChanged: () => managedConfigRuntime?.refreshManagedConfigFile(),
+  onManagedPluginSettingsChanged: (settings) => {
+    if (settings?.agentRenderToolEnabled === false) openChamberControlService?.openui.cancel();
+    return managedConfigRuntime?.refreshManagedConfigFile();
+  },
   // Declared further down; settings are only saved once the server serves requests.
   onMessageSearchEnabledChanged: (enabled) => messageSearchRuntime.setEnabled(enabled),
   onMessageSearchReasoningChanged: (enabled) => messageSearchRuntime.setReasoningEnabled(enabled),
@@ -1132,7 +1135,7 @@ const sessionKnowledgeRuntime = createSessionKnowledgeRuntime({
   readPlaceholderBranch: readRenameableGeneratedBranch,
   isPageRenderingAvailable: async () => {
     if (isExternalOpenCode || ENV_SKIP_OPENCODE_START) return false;
-    const settings = await readSettingsFromDiskMigrated().catch(() => null);
+    const settings = await readSettingsFromDiskMigrated();
     return settings?.agentRenderToolEnabled !== false;
   },
   isWorkflowAvailable: async () => {
@@ -2061,9 +2064,9 @@ const openChamberControlService = createOpenChamberControlService({
     const settings = await readSettingsFromDiskMigrated().catch(() => null);
     return settings?.agentKnowledgeToolEnabled !== false;
   },
-  // On by default, like knowledge.
-  isRenderToolEnabled: async () => {
-    const settings = await readSettingsFromDiskMigrated().catch(() => null);
+  isOpenUIEnabled: async () => {
+    if (isExternalOpenCode || ENV_SKIP_OPENCODE_START) return false;
+    const settings = await readSettingsFromDiskMigrated();
     return settings?.agentRenderToolEnabled !== false;
   },
   // A page that waits for the user's answer shows the session as waiting
@@ -2072,9 +2075,14 @@ const openChamberControlService = createOpenChamberControlService({
   onPageWaitChange: (change) => {
     sessionRuntime.trackWaitingPage(change);
     if (change.type === 'waiting') {
+      const page = { id: change.callId, title: change.title };
       const payload = {
         type: 'openchamber:page-waiting',
-        properties: { sessionID: change.sessionId, directory: change.directory, page: { id: change.callId, title: change.title } },
+        properties: {
+          sessionID: change.sessionId,
+          directory: change.directory,
+          page,
+        },
       };
       broadcastOpenChamberUiEvent(payload);
       void maybeSendPushForTrigger(payload);

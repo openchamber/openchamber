@@ -54,6 +54,9 @@ import { getMarkdownSyntaxVars } from './markdown/markdownSyntaxVars';
 import { splitFrontmatter } from './markdown/frontmatter';
 import { FrontmatterProperties } from './markdown/FrontmatterProperties';
 import { isBareVideoUrl, markdownMediaCopySource, markdownMediaFilename } from './markdown/markdownVideo';
+import { getDirectoryState } from '@/sync/sync-refs';
+import { MarkdownOpenUI, OpenUIBlockSource } from './markdown/openuiMarkdown';
+import { useOpenUIDisplay, createOpenUIDocument, OpenUIDocumentContext, type OpenUIAnalyzedSource } from './markdown/openuiMarkdownContext';
 
 export type MarkdownVariant = 'assistant' | 'tool' | 'reasoning';
 
@@ -68,6 +71,9 @@ export interface MarkdownRendererProps {
   variant?: MarkdownVariant;
   onShowPopup?: (content: ToolPopupContent) => void;
   enableFileReferences?: boolean;
+  allowOpenUI?: boolean;
+  canonicalContent?: string;
+  openuiSource?: OpenUIAnalyzedSource;
 }
 
 const defaultMermaidControls: MermaidControls = {
@@ -77,8 +83,8 @@ const defaultMermaidControls: MermaidControls = {
 };
 
 const ExportSafeImage: typeof MarkdownImage = (props) => {
-  const { purpose } = useMarkdownPresentation();
-  if (!purpose) return <MarkdownImage {...props} />;
+  const { purpose, embedded } = useMarkdownPresentation();
+  if (!purpose && !embedded) return <MarkdownImage {...props} />;
   const source = props['data-oc-media-source'] ?? (typeof props.src === 'string' ? props.src : '');
   return (
     <span data-oc-media-source={markdownMediaCopySource(source) || undefined} data-oc-media-label="true">
@@ -88,8 +94,8 @@ const ExportSafeImage: typeof MarkdownImage = (props) => {
 };
 
 const ExportSafeVideo: typeof MarkdownVideo = (props) => {
-  const { purpose } = useMarkdownPresentation();
-  if (!purpose) return <MarkdownVideo {...props} />;
+  const { purpose, embedded } = useMarkdownPresentation();
+  if (!purpose && !embedded) return <MarkdownVideo {...props} />;
   const source = props['data-oc-media-source'] ?? props.src ?? '';
   return (
     <span data-oc-media-source={markdownMediaCopySource(source) || undefined} data-oc-media-label="true">
@@ -99,13 +105,13 @@ const ExportSafeVideo: typeof MarkdownVideo = (props) => {
 };
 
 const ExportSafeSource: typeof MarkdownSource = (props) => {
-  const { purpose } = useMarkdownPresentation();
-  return purpose ? null : <MarkdownSource {...props} />;
+  const { purpose, embedded } = useMarkdownPresentation();
+  return purpose || embedded ? null : <MarkdownSource {...props} />;
 };
 
 const MarkdownBodyParagraph: typeof MarkdownParagraph = (props) => {
-  const { purpose } = useMarkdownPresentation();
-  if (purpose) {
+  const { purpose, embedded } = useMarkdownPresentation();
+  if (purpose || embedded) {
     const children = props.node?.children.filter((child) => child.type !== 'text' || child.value.trim());
     const only = children?.length === 1 ? children[0] : undefined;
     if (only?.type === 'element' && only.tagName === 'a') {
@@ -153,7 +159,10 @@ const components: Components = {
     </summary>
   ),
 };
-const renderers = [{ language: 'mermaid', component: MarkdownMermaid }];
+const renderers = [
+  { language: 'mermaid', component: MarkdownMermaid },
+  { language: 'openui-lang', component: MarkdownOpenUI },
+];
 const linkSafety = { enabled: false };
 const remend: StreamdownProps['remend'] = { linkMode: 'text-only', singleTilde: false };
 // Static mode renders the document whole and never reads the block split, but
@@ -187,7 +196,9 @@ const MarkdownArrivalBlock = React.memo(function MarkdownArrivalBlock(props: Blo
       className={delay === null ? undefined : 'oc-md-block-enter'}
       style={delay ? arrivalDelayStyle(delay) : undefined}
     >
-      <Block {...props} />
+      <OpenUIBlockSource content={props.content} index={props.index}>
+        <Block {...props} />
+      </OpenUIBlockSource>
     </div>
   );
 });
@@ -267,12 +278,18 @@ export interface MarkdownContentProps {
   mermaidControls?: MermaidControls;
   allowMermaidWheelEvents?: boolean;
   purpose?: 'copy' | 'image';
+  /** Component text uses screen links and compact type, without media or executable blocks. */
+  embedded?: boolean;
   preparedHighlights?: ReadonlyMap<string, ReadonlyMap<string, HighlightResult>>;
   onExportCode?: (source: string, language: string) => void;
   /** Item text of this repository: `#12`, `@someone` and commit ids link as its host links them. Keep the object stable. */
   repositoryLinks?: RepositoryLinkContext | null;
   /** `:tada:` reads as 🎉 with these names (`useEmojiShortcodes`); text keeps its shortcodes without them. */
   emojiShortcodes?: EmojiShortcodes | null;
+  openuiOwner?: { sessionId: string; messageId: string; partId: string };
+  canonicalContent?: string;
+  openuiFinalized?: boolean;
+  openuiSource?: OpenUIAnalyzedSource;
 }
 
 /** Shared screen/copy/image renderer. Streamdown owns the Markdown subtree. */
@@ -296,10 +313,15 @@ export function MarkdownContent({
   mermaidControls = defaultMermaidControls,
   allowMermaidWheelEvents,
   purpose,
+  embedded = false,
   preparedHighlights,
   onExportCode,
   repositoryLinks,
   emojiShortcodes,
+  openuiOwner,
+  canonicalContent = content,
+  openuiFinalized = !isStreaming,
+  openuiSource,
 }: MarkdownContentProps) {
   const themeSystem = useOptionalThemeSystem();
   const theme = themeSystem?.currentTheme ?? getDefaultTheme(
@@ -308,6 +330,31 @@ export function MarkdownContent({
   const runtimeKey = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeKey, getRuntimeKey);
   const codeWrap = useUIStore((state) => state.codeBlockLineWrap);
   const tableWrap = useUIStore((state) => state.tableCellWrap);
+  const openuiEnabled = useUIStore((state) => state.agentRenderToolEnabled);
+  const openuiSessionId = openuiOwner?.sessionId;
+  const openuiMessageId = openuiOwner?.messageId;
+  const openuiPartId = openuiOwner?.partId;
+  const openuiDisplay = useOpenUIDisplay(
+    !purpose && !embedded && openuiPartId && content.includes('openui-lang') ? content : null,
+    openuiSource,
+  );
+  const openui = React.useMemo(() => {
+    if (!openuiDisplay || !canonicalContent.includes('openui-lang')
+      || !openuiSessionId || !openuiMessageId || !openuiPartId) return null;
+    return createOpenUIDocument({
+      displayed: openuiDisplay,
+      canonical: canonicalContent,
+      isStreaming,
+      finalized: openuiFinalized,
+      owner: { runtimeKey, directory, sessionId: openuiSessionId, messageId: openuiMessageId, partId: openuiPartId },
+      currentSource: () => {
+        if (getRuntimeKey() !== runtimeKey || !useUIStore.getState().agentRenderToolEnabled) return null;
+        const state = getDirectoryState(directory);
+        const part = state?.part[openuiMessageId]?.find((item) => item.id === openuiPartId);
+        return part?.type === 'text' ? part.text : null;
+      },
+    });
+  }, [openuiDisplay, isStreaming, openuiFinalized, openuiSessionId, openuiMessageId, openuiPartId, runtimeKey, directory, canonicalContent]);
   const container = React.useRef<HTMLDivElement>(null);
   // Null until the first commit: blocks in the first render were not committed
   // by the stream, they were already there when the message mounted.
@@ -326,7 +373,7 @@ export function MarkdownContent({
 
   React.useEffect(() => {
     const element = container.current;
-    if (!element || purpose) return;
+    if (!element || purpose || embedded) return;
 
     const copy = (event: ClipboardEvent) => {
       if (event.defaultPrevented || !event.clipboardData) return;
@@ -357,10 +404,10 @@ export function MarkdownContent({
       element.ownerDocument.removeEventListener('copy', copy, true);
       element.ownerDocument.defaultView?.removeEventListener('openchamber:copy', menuCopy);
     };
-  }, [purpose]);
+  }, [purpose, embedded]);
 
   const isVSCode = isVSCodeRuntime();
-  const fileNavigation = enableFileReferences && settled && !purpose;
+  const fileNavigation = enableFileReferences && settled && !purpose && !embedded;
   const fileReferences = fileNavigation && !isMobileSurfaceRuntime();
   const confirmFile = React.useMemo(() => {
     const results = new Map<string, Promise<string | null>>();
@@ -402,6 +449,7 @@ export function MarkdownContent({
     loopbackPreview,
     settled,
     purpose,
+    embedded,
     disableLinkSafety,
     theme,
     mermaidControls,
@@ -411,7 +459,7 @@ export function MarkdownContent({
     confirmFile,
     code,
   }), [
-    directory, fileReferences, fileNavigation, loopbackPreview, settled, purpose, disableLinkSafety, theme,
+    directory, fileReferences, fileNavigation, loopbackPreview, settled, purpose, embedded, disableLinkSafety, theme,
     mermaidControls, allowMermaidWheelEvents, onShowPopup, onExportCode, confirmFile, code,
   ]);
 
@@ -424,7 +472,7 @@ export function MarkdownContent({
       mode={mode}
       isAnimating={isStreaming}
       BlockComponent={MarkdownArrivalBlock}
-      parseMarkdownIntoBlocksFn={mode === 'static' ? wholeDocument : undefined}
+      parseMarkdownIntoBlocksFn={openuiDisplay?.split ?? (mode === 'static' ? wholeDocument : undefined)}
       parseIncompleteMarkdown={isStreaming}
       normalizeHtmlIndentation={false}
       animated={false}
@@ -443,11 +491,13 @@ export function MarkdownContent({
       data-table-wrap={tableWrap ? 'true' : 'false'}
       className="min-w-0 space-y-0"
     >
-      {content}
+      {openuiDisplay?.displayed ?? content}
     </Streamdown>
   );
 
-  if (!purpose) {
+  body = <OpenUIDocumentContext.Provider value={openuiEnabled ? openui?.document ?? null : null}>{body}</OpenUIDocumentContext.Provider>;
+
+  if (!purpose && !embedded) {
     body = (
       <MarkdownMediaProvider
         content={content}
@@ -475,6 +525,7 @@ export function MarkdownContent({
         'markdown-content break-words w-full min-w-0',
         {
           'markdown-tool': variant === 'tool',
+          'markdown-embedded': embedded,
           'markdown-reasoning': variant === 'reasoning',
           'leading-relaxed': variant === 'assistant',
         },
@@ -502,6 +553,9 @@ export const MarkdownRenderer = React.memo(function MarkdownRenderer({
   variant = 'assistant',
   onShowPopup,
   enableFileReferences = true,
+  allowOpenUI = false,
+  canonicalContent = content,
+  openuiSource,
 }: MarkdownRendererProps) {
   const directory = useEffectiveDirectory() ?? '';
   const settledPart = part && (part.type === 'text' || part.type === 'reasoning') && part.time?.end !== undefined
@@ -531,6 +585,14 @@ export const MarkdownRenderer = React.memo(function MarkdownRenderer({
       onShowPopup={onShowPopup}
       enableFileReferences={enableFileReferences}
       loopbackPreview
+      canonicalContent={canonicalContent}
+      openuiSource={openuiSource}
+      openuiFinalized={Boolean(settledPart)}
+      openuiOwner={allowOpenUI && part?.type === 'text' ? {
+        sessionId: part.sessionID,
+        messageId,
+        partId: part.id,
+      } : undefined}
     />
   );
 
@@ -544,7 +606,7 @@ export const MarkdownRenderer = React.memo(function MarkdownRenderer({
 
 export interface SimpleMarkdownRendererProps extends Omit<
   MarkdownContentProps,
-  'directory' | 'mode' | 'mediaMode' | 'isStreaming' | 'settled' | 'purpose' | 'preparedHighlights' | 'onExportCode'
+  'directory' | 'mode' | 'mediaMode' | 'isStreaming' | 'settled' | 'purpose' | 'preparedHighlights' | 'onExportCode' | 'openuiOwner' | 'canonicalContent' | 'openuiFinalized' | 'openuiSource'
 > {
   frontmatter?: 'hide' | 'properties';
   /** The folder links and media resolve against; the effective directory when absent. */

@@ -1,0 +1,25 @@
+### Types
+Rules = {required?: boolean, email?: boolean, url?: boolean, numeric?: boolean, min?: number, max?: number, minLength?: number, maxLength?: number, pattern?: string}
+
+### Components
+Form(name: string, buttons: Buttons, fields?: FormControl[])
+FormControl(label: string, input: Input | TextArea | Select | DatePicker | Slider | CheckBoxGroup | RadioGroup | Chips | OptionCards, hint?: string)
+Input(name: string, placeholder?: string, type?: "text" | "email" | "password" | "number" | "url", rules?: Rules, value?: $binding<string>)
+TextArea(name: string, placeholder?: string, rows?: number, rules?: Rules, value?: $binding<string>)
+Select(name: string, items: SelectItem[], placeholder?: string, rules?: Rules, value?: $binding<string>, size?: "small" | "medium" | "large")
+SelectItem(value: string, label: string)
+DatePicker(name: string, mode?: "single" | "range", rules?: Rules, value?: $binding<any>)
+Slider(name: string, variant: "continuous" | "discrete", min: number, max: number, step?: number, defaultValue?: number[], label?: string, rules?: Rules, value?: $binding<number[]>)
+CheckBoxGroup(name: string, items: CheckBoxItem[], rules?: Rules, value?: $binding<Record<string, boolean>>)
+CheckBoxItem(label: string, description: string, name: string, defaultChecked?: boolean)
+RadioGroup(name: string, items: RadioItem[], defaultValue?: string, rules?: Rules, value?: $binding<string>)
+RadioItem(label: string, description: string, value: string)
+SwitchGroup(name: string, items: SwitchItem[], variant?: "clear" | "card" | "sunk", value?: $binding<Record<string, boolean>>)
+SwitchItem(label?: string, description?: string, name: string, defaultChecked?: boolean)
+Chips(name: string, type?: "single" | "multiple", items?: ChipItem[], rules?: Rules, defaultValue?: string | string[])
+ChipItem(value: string, label: string, icon?: Icon, disabled?: boolean)
+OptionCards(name: string, type?: "single" | "multiple", items?: OptionCard[], rules?: Rules, defaultValue?: string | string[])
+OptionCard(value: string, title: string, subtitle?: string, topContent?: Icon | Image, disabled?: boolean)
+Button(label: string, action?: ActionExpression, variant?: "primary" | "secondary" | "tertiary", type?: "normal" | "destructive", size?: "extra-small" | "small" | "medium" | "large")
+Buttons(buttons: Button[], direction?: "row" | "column")
+IconButton(name: string, icon: Icon, action?: ActionExpression, variant?: "primary" | "secondary" | "tertiary", size?: "extra-small" | "small" | "medium" | "large", shape?: "square" | "circle")

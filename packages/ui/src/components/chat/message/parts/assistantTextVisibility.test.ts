@@ -39,7 +39,7 @@ describe('resolveAssistantDisplayText', () => {
             textContent: text,
             throttledTextContent: text,
             isStreaming: true,
-        })).toBe('line nine, fully written\n\n');
+        }).content).toBe('line nine, fully written\n\n');
     });
 
     test('reveals the full text once the part is not streaming', () => {
@@ -48,7 +48,32 @@ describe('resolveAssistantDisplayText', () => {
             textContent: text,
             throttledTextContent: text,
             isStreaming: false,
-        })).toBe(text);
+        }).content).toBe(text);
+    });
+
+    test('authorized OpenUI reveals the current program while ordinary Markdown keeps its block hold', () => {
+        const open = 'Intro.\n\n```openui-lang\nroot = Stack([TextContent("Partial';
+        const display = (text: string, allowOpenUI = true) => resolveAssistantDisplayText({
+            textContent: text, throttledTextContent: text, isStreaming: true, allowOpenUI,
+        }).content;
+        expect(display(open)).toBe(open);
+        expect(display(open, false)).toBe('Intro.\n\n');
+        const closed = open + '")])\n```';
+        expect(display(closed)).toBe(closed);
+        expect(display(closed + '\n\nStill typing')).toBe(closed + '\n');
+        for (const source of [
+            open.replace('openui-lang', 'openui-lang literal'),
+            open.replace('openui-lang', 'openui-lang title="example"'),
+            open.replace('openui-lang', 'typescript'),
+        ]) expect(display(source)).toBe('Intro.\n\n');
+    });
+
+    test('OpenUI reveal uses the same normalized coordinates as its fence parser', () => {
+        const normalized = 'Intro.\n\n```openui-lang\nroot = Stack([])\n```';
+        for (const source of [normalized.replaceAll('\n', '\r\n'), `\uFEFF${normalized}`, `\uFEFF${normalized.replaceAll('\n', '\r\n')}`]) {
+            expect(resolveAssistantDisplayText({
+                textContent: source, throttledTextContent: source, isStreaming: true, allowOpenUI: true,
+            }).content).toBe(normalized);
+        }
     });
 });
-

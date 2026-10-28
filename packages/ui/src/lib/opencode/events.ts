@@ -179,7 +179,7 @@ export type SyncEvent =
   | { type: "openchamber.permission-auto-accept"; properties: { sessions: Record<string, boolean>; modes?: Record<string, "ask" | "safety" | "auto">; revision?: number; spaceId?: string } }
   /** The server did not answer this request on the user's behalf: it waits for the user. */
   | { type: "openchamber.permission-left-for-user"; properties: { permissionId: string; sessionId: string; directory: string | null; spaceId?: string } }
-  /** A page an agent showed waits for the user's answer (render.page with awaitAnswer). */
+  /** An OpenUI prompt waits for the user's answer. */
   | { type: "openchamber.page-waiting"; properties: { sessionID: string; directory: string | null; page: { id: string; title: string } } }
   /** That page stopped waiting: answered, answered in the chat, or its turn ended. */
   | { type: "openchamber.page-settled"; properties: { sessionID: string; pageID: string } }

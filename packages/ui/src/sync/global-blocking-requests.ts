@@ -24,8 +24,8 @@ import { isSpaceDirectory } from '@/lib/spaces/space-route';
 export type BlockingPermissionRequest = Pick<PermissionRequest, 'id' | 'sessionID' | 'action' | 'resources' | 'save'>;
 export type BlockingFormRequest = Pick<FormRequest, 'id' | 'sessionID' | 'title'>;
 /**
- * A page an agent showed that waits for the user's answer (render.page with
- * awaitAnswer). It blocks the agent like a form, so every surface shows it as
+ * An OpenUI prompt waiting for the user's answer. It blocks the agent like a
+ * form, so every surface shows it as
  * one, but it is answered on the page in the chat: it is kept apart from
  * forms so nothing tries to answer it as a form. `id` is the tool call id.
  */
@@ -231,7 +231,11 @@ export const readHostBlockingRequestsSnapshot = async (
     }
     const pages = changes.get(sessionId) ?? new Map<string, BlockingPageRequest | null>();
     if (event.type === 'openchamber.page-settled') pages.set(event.properties.pageID, null);
-    else pages.set(event.properties.page.id, { id: event.properties.page.id, sessionID: sessionId, title: event.properties.page.title });
+    else pages.set(event.properties.page.id, {
+      id: event.properties.page.id,
+      sessionID: sessionId,
+      title: event.properties.page.title,
+    });
     changes.set(sessionId, pages);
   };
   pageSnapshotObservers.add(observe);

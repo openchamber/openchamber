@@ -21,7 +21,8 @@ const hostFormRequestSchema = z.object({
   title: z.string(),
 })
 // A page an agent showed that waits for the user's answer: same projection.
-const hostPageRequestSchema = hostFormRequestSchema
+const hostPageRequestSchema = hostFormRequestSchema.extend({
+})
 
 // Cross-project status kept by the OpenChamber host (web server or VS Code
 // extension host) from its single upstream event stream. Entries carry the

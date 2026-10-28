@@ -34,11 +34,9 @@ export const registerOpenChamberControlRoutes = (app, { controlService }) => {
     }
   });
 
-  // The user answered a page an agent is waiting on (render.page with
-  // awaitAnswer). The agent's call holds the matching request open.
-  app.post('/api/openchamber/render/answer', express.json({ limit: '64kb' }), (req, res) => {
+  app.post('/api/openchamber/openui/answer', express.json({ limit: '64kb' }), async (req, res) => {
     try {
-      return res.json(controlService.answerPage(req.body ?? {}));
+      return res.json(await controlService.openui.answer(req.body ?? {}));
     } catch (error) {
       const controlError = asControlError(error, 'Could not deliver the answer');
       return res.status(controlError.statusCode).json({ error: controlError.message });

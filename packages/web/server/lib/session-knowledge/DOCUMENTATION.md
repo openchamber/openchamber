@@ -31,7 +31,8 @@ source:
 |---|---|
 | `openchamber.pinned` | pinned notes and plan bodies |
 | `openchamber.memory` | the memory index and when to save |
-| `openchamber.guidance` | when to link, when to draw a page, where the tools are called |
+| `openchamber.guidance` | linking, task naming, workflows, and tool calling guidance |
+| `openchamber.openui` | generated OpenUI authoring contract when the managed tools are available |
 | `openchamber.checkout` | the directory and branch the session works on |
 
 `sync` writes all of them right before a message goes out: the UI awaits it
@@ -44,7 +45,12 @@ a value that changed or went away is announced to the agent at its next step as
 a system message, and an unchanged write tells it nothing. Compaction keeps the
 current values, revert does not cut them, and a fork copies them. So OpenChamber
 keeps no record of what a session was told, and the knowledge is never a
-message in the transcript.
+ message in the transcript.
+
+`openchamber.openui` is removed when the setting is known to be off or the
+managed OpenCode process is unavailable. A settings or generated-asset failure
+leaves the entry untouched, so a transient read failure cannot erase valid
+guidance already held by the session.
 
 It used to be one. The block went in as a synthetic message ahead of the prompt,
 a signature in the session metadata recorded what was delivered, compaction
@@ -126,19 +132,18 @@ introduced in the tool's own description (`../agent-tool/DOCUMENTATION.md`),
 never stated here as a rule. Whether a busy checkout calls for a worktree
 depends on how the user works.
 
-## When to draw a page
+## OpenUI authoring guidance
 
-A session whose agent has the managed `openchamber_render` tool (the setting is
-on and OpenChamber launched OpenCode, read through `isPageRenderingAvailable`)
-is told when a chart, table, diagram or interface mockup beats prose
-(`RENDER_PAGE_GUIDANCE`).
-Stated only in the tool description, it went unread: asked for a breakdown of
-lines of code per package, an agent answered with a list and drew the chart
-only when asked again. The guidance holds the cases and the limits (no page for
-a few numbers, at most one per answer), the mockup exception, and asking with a
-page (`awaitAnswer`) when the user has to choose between visual options; the
-tool description repeats none of it. It goes into `openchamber.guidance`, so a
-change to the text reaches running sessions on their next message.
+Managed sessions receive the guidance assembled by
+`../openui/context/assets.js` in the separate `openchamber.openui` entry. It
+contains base, index and catalog revision; this module handles entry delivery.
+
+OpenUI's [context-as-skill mapping](../openui/context/DOCUMENTATION.md#context-as-a-skill)
+guides what remains resident and what loads on demand.
+
+`openchamber_openui` is the managed UI tool. Its `openui.prompt` action accepts a `parameters.ui` program and
+returns the current tool result after the user submits. Markdown OpenUI remains
+ordinary assistant content and does not use the managed tool.
 
 ## When to offer a workflow
 

@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Window } from 'happy-dom';
-import { z } from 'zod';
 import { configureRuntimeUrlResolver } from '@/lib/runtime-url';
 import { switchRuntimeEndpoint } from '@/lib/runtime-switch';
 import { MarkdownMediaProvider } from './MarkdownMediaContext';
@@ -17,7 +16,7 @@ const originalFetch = globalThis.fetch;
 let root: Root;
 let host: HTMLDivElement;
 let requests: string[];
-let batches: string[][];
+let inspected: string[];
 let revoked: string[];
 const flush = async () => { await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); }); };
 function Chat({ children, settled = true, id = 'message' }: { children: React.ReactNode; settled?: boolean; id?: string }) {
@@ -31,15 +30,15 @@ beforeEach(() => {
   Object.defineProperty(dom, 'IntersectionObserver', { configurable: true, value: undefined });
   Object.assign(globalThis, { window: dom, document: dom.document, localStorage: dom.localStorage, sessionStorage: dom.sessionStorage, navigator: dom.navigator, HTMLElement: dom.HTMLElement, Element: dom.Element, HTMLImageElement: dom.HTMLImageElement, IS_REACT_ACT_ENVIRONMENT: true });
   configureRuntimeUrlResolver({ apiBaseUrl: 'https://runtime.test' });
-  requests = []; batches = []; revoked = [];
+  requests = []; inspected = []; revoked = [];
   Object.assign(URL, { createObjectURL: () => 'blob:document-image', revokeObjectURL: (url: string) => revoked.push(url) });
-  globalThis.fetch = async (input, init) => {
+  globalThis.fetch = async (input) => {
     const url = String(input); requests.push(url);
     if (url.includes('/auth/url-token')) return Response.json({ token: 'short-lived', expiresAt: Date.now() + 60_000 });
-    if (url.includes('markdown-image-grants')) {
-      const body = z.object({ sources: z.array(z.string()) }).parse(JSON.parse(String(init?.body)));
-      batches.push(body.sources);
-      return Response.json({ results: body.sources.map((source) => ({ source, status: 'ready', path: `/repo/${source}`, expiresAt: Date.now() + 60_000 })) });
+    const path = new URL(url).searchParams.get('path') ?? '';
+    if (url.includes('/api/fs/stat')) {
+      inspected.push(path);
+      return Response.json({ isFile: true, path, size: png.length });
     }
     return new Response(png, { headers: { 'content-type': 'image/png' } });
   };
@@ -60,16 +59,27 @@ describe('React-owned Markdown media', () => {
     expect(host.textContent).toBe('');
     expect(host.querySelector('img')).toBeNull();
   });
-  test('waits for settlement and batches at most 12 unique local sources', async () => {
+  test('waits for settlement and inspects at most 12 unique local sources', async () => {
     const children = Array.from({ length: 13 }, (_, i) => <MarkdownImage key={i} src={`${i}.png`} />);
     await act(async () => root.render(<Chat settled={false} id="batch">{children}</Chat>));
     await flush(); expect(requests).toEqual([]);
     await act(async () => root.render(<Chat id="batch">{children}</Chat>));
     await flush(); await flush();
-    expect(batches).toEqual([Array.from({ length: 12 }, (_, i) => `${i}.png`)]);
+    expect(inspected).toEqual(Array.from({ length: 12 }, (_, i) => `/repo/${i}.png`));
     expect(host.querySelectorAll('img')).toHaveLength(12);
     expect(host.textContent).toContain('12.png');
     expect(host.querySelector('img')?.getAttribute('data-oc-media-source')).toBe('0.png');
+  });
+  test('reference-style Markdown images load while inline and fenced examples stay source', async () => {
+    const content = '![Reference][shot]\n\n[shot]: reference%20shot(1).png\n\n`![Inline](inline.png)`\n\n```md\n![Example](example.png)\n```';
+    await act(async () => root.render(<Chat id="references">
+      <Streamdown {...getMarkdownProcessingOptions(true, false)} components={{ img: MarkdownImage }}>{content}</Streamdown>
+    </Chat>));
+    await flush(); await flush();
+    expect(inspected).toEqual(['/repo/reference shot(1).png']);
+    expect(host.querySelectorAll('img')).toHaveLength(1);
+    expect(host.querySelector('img')?.getAttribute('alt')).toBe('Reference');
+    expect(host.textContent).toContain('![Example](example.png)');
   });
   test('resolves document sources and srcsets against the file directory and revokes owned URLs', async () => {
     await act(async () => root.render(<Document><MarkdownPicture><MarkdownSource media="(prefers-color-scheme: dark)" srcSet="./dark.png 1x, https://cdn.test/dark.png 2x" /><MarkdownImage src="../../outside.png" alt="outside" /></MarkdownPicture></Document>));
@@ -111,12 +121,6 @@ describe('React-owned Markdown media', () => {
   });
   test('reconnects loaded media and gallery after a real hidden interval', async () => {
     const popups: import('../message/types').ToolPopupContent[] = [];
-    globalThis.fetch = async (input, init) => {
-      if (String(input).includes('url-token')) return Response.json({ token: 'short', expiresAt: Date.now() + 60_000 });
-      const body = z.object({ sources: z.array(z.string()) }).parse(JSON.parse(String(init?.body)));
-      batches.push(body.sources);
-      return Response.json({ results: body.sources.map((source) => ({ source, status: 'ready', path: `/repo/${source}`, expiresAt: 1 })) });
-    };
     const render = (mode: 'visible' | 'hidden') => root.render(
       <React.Activity mode={mode}>
         <MarkdownMediaProvider
@@ -138,11 +142,11 @@ describe('React-owned Markdown media', () => {
     Object.defineProperties(image, { naturalWidth: { value: 100 }, naturalHeight: { value: 100 } });
     await act(async () => image.dispatchEvent(new window.Event('load')));
     await act(async () => render('hidden')); await flush();
-    const hiddenBatches = batches.length;
+    const hiddenInspections = inspected.length;
     await act(async () => render('visible')); await flush();
     expect(host.querySelector('img')).toBe(image);
     await act(async () => host.querySelector('button')?.click()); await flush();
-    expect(batches.length).toBeGreaterThan(hiddenBatches);
+    expect(inspected.length).toBeGreaterThan(hiddenInspections);
     expect(popups).toHaveLength(1);
     expect(popups[0]?.image?.gallery).toHaveLength(1);
   });
@@ -214,14 +218,14 @@ describe('React-owned Markdown media', () => {
     );
     await act(async () => render('visible'));
     expect(observers).toBe(1);
-    expect(batches).toHaveLength(0);
+    expect(inspected).toHaveLength(0);
     await act(async () => render('hidden')); await flush();
     expect(observers).toBe(0);
     await act(async () => render('visible'));
     expect(observers).toBe(1);
     await act(async () => enter?.()); await flush();
     expect(observers).toBe(0);
-    expect(batches).toEqual([['late.png']]);
+    expect(inspected).toEqual(['/repo/late.png']);
     expect(host.querySelector('img')?.getAttribute('src')).toContain('/api/fs/raw');
   });
   test('aborts runtime-owned reads synchronously and rejects their late completion', async () => {
@@ -243,15 +247,14 @@ describe('React-owned Markdown media', () => {
     expect(urls).toBe(1);
     expect(host.querySelector('img')?.getAttribute('src')).toBe('blob:runtime-1');
   });
-  test('does not open an obsolete gallery when its grant finishes after reconnect', async () => {
+  test('does not open an obsolete gallery when its file inspection finishes after reconnect', async () => {
     const popups: import('../message/types').ToolPopupContent[] = [];
     let complete: (() => void) | undefined;
+    const fileFetch = globalThis.fetch;
     globalThis.fetch = async (input, init) => {
-      if (String(input).includes('url-token')) return Response.json({ token: 'short', expiresAt: Date.now() + 60_000 });
-      const body = z.object({ sources: z.array(z.string()) }).parse(JSON.parse(String(init?.body)));
-      batches.push(body.sources);
-      if (batches.length === 2) await new Promise<void>((resolve) => { complete = resolve; });
-      return Response.json({ results: body.sources.map((source) => ({ source, status: 'ready', path: `/repo/${source}`, expiresAt: 1 })) });
+      const response = await fileFetch(input, init);
+      if (String(input).includes('/api/fs/stat') && inspected.length === 2) await new Promise<void>((resolve) => { complete = resolve; });
+      return response;
     };
     const render = (mode: 'visible' | 'hidden') => root.render(
       <React.Activity mode={mode}>
@@ -325,7 +328,7 @@ describe('React-owned Markdown media', () => {
       await act(async () => root.render(<Chat id="viewport"><MarkdownImage src="near.png" /></Chat>));
       await flush(); expect(requests).toEqual([]);
       await act(async () => enter?.()); await flush();
-      expect(batches).toEqual([['near.png']]);
+      expect(inspected).toEqual(['/repo/near.png']);
     } finally { Object.defineProperty(window, 'IntersectionObserver', { configurable: true, value: previous }); }
   });
   test('a document reads an image or a picture only once it comes near the visible part of its scroller', async () => {
@@ -408,18 +411,18 @@ describe('React-owned Markdown media', () => {
     expect(host.querySelector('video')).toBeNull(); expect(requests).toEqual([]);
   });
   test('uses original safe source metadata when sanitation removed src and isolates failed media', async () => {
+    const fileFetch = globalThis.fetch;
     globalThis.fetch = async (input, init) => {
-      requests.push(String(input));
-      if (String(input).includes('url-token')) return Response.json({ token: 'short', expiresAt: Date.now() + 60_000 });
-      const body = JSON.parse(String(init?.body)) as { sources: string[] };
-      batches.push(body.sources);
-      return Response.json({ results: body.sources.map((source) => source === 'bad.png' ? { source, status: 'missing' } : { source, status: 'ready', path: `/repo/${source}` }) });
+      const response = await fileFetch(input, init);
+      const url = new URL(String(input));
+      return url.pathname === '/api/fs/stat' && url.searchParams.get('path') === '/repo/bad.png'
+        ? Response.json({ exists: false }) : response;
     };
     await act(async () => root.render(<Chat id="metadata"><MarkdownImage data-oc-media-source="original.png" /><MarkdownImage src="bad.png" /><MarkdownImage src="data:image/png;base64,YmFk" /></Chat>)); await flush();
     expect(host.querySelectorAll('img')).toHaveLength(1);
     expect(host.querySelector('img')?.getAttribute('data-oc-media-source')).toBe('original.png');
     expect(host.textContent).toContain('bad.png');
-    expect(batches).toEqual([['original.png', 'bad.png']]);
+    expect(inspected).toEqual(['/repo/original.png', '/repo/bad.png']);
   });
   test('groups a paragraph only once every image has known dimensions', async () => {
     const node = { type: 'element' as const, tagName: 'p', properties: {}, children: ['one.png', 'two.png'].map((src) => ({ type: 'element' as const, tagName: 'img', properties: { src }, children: [] })) };
@@ -434,7 +437,7 @@ describe('React-owned Markdown media', () => {
     expect(images[0]?.style.width).toBe('100%');
     expect(host.querySelector('p')?.style.maxWidth).toContain('100px');
   });
-  test('VS Code rejects outside and oversized workspace images without grant requests or raw-file reads', async () => {
+  test('VS Code rejects outside and oversized workspace images before raw-file reads', async () => {
     Object.defineProperty(window, '__VSCODE_CONFIG__', { configurable: true, value: { workspaceFolder: '/repo' } });
     globalThis.fetch = async (input) => { requests.push(String(input)); return Response.json({ isFile: true, size: 11 * 1024 * 1024 }); };
     await act(async () => root.render(<Chat id="bridge-images"><MarkdownImage src="/outside/secret.png" /><MarkdownImage src="large.png" /></Chat>)); await flush();
@@ -449,21 +452,16 @@ describe('React-owned Markdown media', () => {
     expect(host.querySelector('picture > span')).toBeNull();
     expect(host.querySelector('picture > img')?.hasAttribute('src')).toBe(false);
   });
-  test('refreshes expired grants once per part when opening a multi-image gallery', async () => {
+  test('refreshes each file once when opening a multi-image gallery', async () => {
     const part = <MarkdownMediaProvider content="expiry" mode="assistant" sessionId="expiry" messageId="expiry" directory="/repo" settled onShowPopup={() => {}}><MarkdownImage src="first.png" /><MarkdownImage src="second.png" /></MarkdownMediaProvider>;
-    globalThis.fetch = async (input, init) => {
-      if (String(input).includes('url-token')) return Response.json({ token: 'short', expiresAt: Date.now() + 60_000 });
-      const body = JSON.parse(String(init?.body)) as { sources: string[] }; batches.push(body.sources);
-      return Response.json({ results: body.sources.map((source) => ({ source, status: 'ready', path: `/repo/${source}`, expiresAt: 1 })) });
-    };
     await act(async () => root.render(part)); await flush();
     for (const image of host.querySelectorAll('img')) {
       Object.defineProperties(image, { naturalWidth: { value: 100 }, naturalHeight: { value: 100 } });
       await act(async () => image.dispatchEvent(new window.Event('load')));
     }
-    expect(batches).toHaveLength(1);
+    expect(inspected).toEqual(['/repo/first.png', '/repo/second.png']);
     await act(async () => host.querySelector('button')?.click()); await flush();
-    expect(batches).toHaveLength(2);
+    expect(inspected).toEqual(['/repo/first.png', '/repo/second.png', '/repo/first.png', '/repo/second.png']);
   });
   test('reference documents without a file owner preserve their inline local source', async () => {
     await act(async () => root.render(<MarkdownMediaProvider content="reference" mode="document" directory="/repo" settled><MarkdownImage src="reference.png" /></MarkdownMediaProvider>)); await flush();

@@ -1,3 +1,5 @@
+/* Lazy OpenUI visuals sit above resets, below application chrome/utilities. */
+@layer theme, base, openui, components, utilities;
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "./styles/design-system.css";

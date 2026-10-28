@@ -5,6 +5,7 @@ import { locateChatQuote } from '@/lib/chatQuoteAnchor';
 
 import {
     buildHtmlRenderDocument,
+    htmlRenderAnswerStateMessage,
     htmlRenderClearSelectionMessage,
     htmlRenderMarksMessage,
     htmlRenderPointerMessage,
@@ -53,13 +54,14 @@ const mountPage = (answerState?: HtmlRenderAnswerState, body = BODY) => {
     const css = { highlights: customHighlights };
     Object.defineProperty(win, 'Highlight', { value: FakeHighlight, configurable: true });
     Object.defineProperty(win, 'CSS', { value: css, configurable: true });
-    const source = buildHtmlRenderDocument(`<!doctype html><html><head></head><body>${BODY}</body></html>`, theme, { answerState });
+    const source = buildHtmlRenderDocument(`<!doctype html><html><head></head><body>${BODY}</body></html>`, theme, { answerState, nonce: 'test-document' });
     // The bootstrap and the answer script, in the order the page runs them.
     const script = [...source.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((match) => match[1]).join(';');
     if (!script) throw new Error('no bootstrap');
     const answerJson = /<script type="application\/json" id="oc-html-render-answer">[\s\S]*?<\/script>/.exec(source)?.[0] ?? '';
+    const nonceJson = /<script type="application\/json" id="oc-html-render-nonce">[\s\S]*?<\/script>/.exec(source)?.[0] ?? '';
     win.document.body.innerHTML = body;
-    win.document.head.innerHTML = `<style id="oc-html-render-theme"></style>${answerJson}`;
+    win.document.head.innerHTML = `<style id="oc-html-render-theme"></style>${answerJson}${nonceJson}`;
     // happy-dom does not run a script the test appends, so the scripts run
     // with the page's globals passed in by name.
     const globals = {
@@ -469,10 +471,29 @@ describe('a page that waits for an answer', () => {
 
         // The page's own script, as an option's click handler would run it.
         page.run('window.openchamber.submit({layout:"b"},"Layout B").then(function(){window.parent.postMessage({type:"test:sent",answer:window.openchamber.answer},"*");});');
-        expect(page.reports.at(-1)).toEqual({ kind: 'submit', id: 1, submission: { summary: 'Layout B', data: { layout: 'b' } } });
+        expect(page.reports.at(-1)).toEqual({ kind: 'submit', id: 1, submission: { summary: 'Layout B', data: { layout: 'b' }, nonce: 'test-document' } });
 
-        page.send(htmlRenderSubmitReply(1));
+        page.send(htmlRenderSubmitReply(1, 'test-document', { waiting: false, answer: null }));
         await settle();
         expect(page.sent).toContain(JSON.stringify({ type: 'test:sent', answer: { layout: 'b' } }));
+    });
+
+    test('keeps Markdown pages reusable after a successful host reply', async () => {
+        const page = mountPage({ waiting: true, answer: null });
+        page.run('window.openchamber.submit({layout:"a"},"Layout A");');
+        page.send(htmlRenderSubmitReply(1, 'test-document', { waiting: true, answer: { layout: 'a' } }));
+        await settle();
+
+        page.run('window.openchamber.submit({layout:"b"},"Layout B");');
+        expect(page.reports.at(-1)).toEqual({ kind: 'submit', id: 2, submission: { summary: 'Layout B', data: { layout: 'b' }, nonce: 'test-document' } });
+    });
+
+    test('rejects outstanding page promises when a terminal state arrives', async () => {
+        const page = mountPage({ waiting: true, answer: null });
+        page.run('window.openchamber.submit({layout:"a"},"Layout A").then(function(){window.parent.postMessage({type:"resolved"},"*");},function(e){window.parent.postMessage({type:"rejected",message:e.message},"*");});');
+        page.send(htmlRenderAnswerStateMessage({ waiting: false, answer: null, terminal: 'This page is no longer current' }, 'test-document'));
+        await settle();
+
+        expect(page.sent).toContain(JSON.stringify({ type: 'rejected', message: 'This page is no longer current' }));
     });
 });

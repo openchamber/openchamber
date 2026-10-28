@@ -14,7 +14,7 @@ import {
   isSubagentTool,
   isWebTool,
   normalizeToolName,
-  renderedPage,
+  openuiPrompt,
   subagentSessionId,
   toolDescription,
   toolFileDiffs,
@@ -251,49 +251,52 @@ describe("execute call details", () => {
   })
 })
 
-describe("renderedPage", () => {
-  const accepted = { openchamber: { ok: true } }
-  const completed = (input: ToolInput, metadata?: Metadata): ToolState => ({ status: "completed", input, output: "", metadata, time: { start: 1, end: 2 } })
+describe("openuiPrompt", () => {
   const running = (input: ToolInput): ToolState => ({ status: "running", input, time: { start: 1 } })
 
-  test("reads the page from parameters, or beside the action, once OpenChamber accepted it", () => {
-    expect(renderedPage("openchamber_render", completed({ action: "render.page", parameters: { html: "<p>a</p>", title: "Chart" } }, accepted)))
-      .toEqual({ html: "<p>a</p>", title: "Chart", ask: { kind: "show" } })
-    expect(renderedPage("openchamber_render", completed({ action: "render.page", html: "<p>b</p>", title: "Flat" }, accepted)))
-      .toEqual({ html: "<p>b</p>", title: "Flat", ask: { kind: "show" } })
-    // An explicit parameters object wins, as it does in the plugin.
-    expect(renderedPage("openchamber_render", completed({ html: "<p>flat</p>", parameters: { html: "<p>nested</p>", title: "T" } }, accepted)))
-      .toEqual({ html: "<p>nested</p>", title: "T", ask: { kind: "show" } })
+  test("recognizes unified prompt actions without rendering reference reads", () => {
+    const ui = "root = Stack([])"
+    const prompts: ToolInput[] = [
+      { action: "openui.prompt", parameters: { ui } },
+      { action: " prompt ", ui },
+      { action: "openui.prompt", ui: "ignored", parameters: { ui } },
+    ]
+    for (const input of prompts) expect(openuiPrompt("openchamber_openui", running(input))?.source).toBe(ui)
+    const otherInputs: ToolInput[] = [
+      { action: "openui.read", parameters: { ui } },
+      { ui },
+      { action: "openui.prompt", ui, parameters: { ui: " " } },
+    ]
+    for (const input of otherInputs) expect(openuiPrompt("openchamber_openui", running(input))).toBeNull()
+    expect(openuiPrompt("execute", running({ action: "openui.prompt", ui }))).toBeNull()
   })
 
-  test("shows a page that waits while its call runs, and its answer once it completes", () => {
-    const input = { action: "render.page", parameters: { html: "<p>a</p>", title: "Pick", awaitAnswer: true } }
-    expect(renderedPage("openchamber_render", running(input))?.ask).toEqual({ kind: "waiting" })
-    expect(renderedPage("openchamber_render", completed(input, { openchamber: { ok: true, answer: { answered: true, summary: "Layout B", data: { layout: "b" } } } }))?.ask)
-      .toEqual({ kind: "answered", summary: "Layout B", data: { layout: "b" } })
-    expect(renderedPage("openchamber_render", completed(input, { openchamber: { ok: true, answer: { answered: false, reason: "chat" } } }))?.ask)
+  test("rejects the removed tool and unrelated calls", () => {
+    expect(openuiPrompt("prompt_openui", running({ ui: "root = Stack([])" }))).toBeNull()
+    expect(openuiPrompt("execute", running({ ui: "root = Stack([])" }))).toBeNull()
+    expect(openuiPrompt("openchamber.openchamber_openui", running({ action: "openui.prompt", ui: "root = Stack([])" }))).toBeNull()
+    expect(openuiPrompt("openchamber_openui", running({ action: "openui.prompt", ui: "  " }))).toBeNull()
+  })
+
+  test("keeps completed answers and refused calls distinguishable", () => {
+    const input = { action: "openui.prompt", ui: "root = Stack([])" }
+    const completed = (metadata?: Metadata): ToolState => ({ status: "completed", input, output: "", metadata, time: { start: 1, end: 2 } })
+    expect(openuiPrompt("openchamber_openui", completed({ openchamber: { ok: true, answer: { answered: true, summary: "Picked", data: { choice: "a" } } } })))
+      .toEqual({ source: input.ui, ask: { kind: "answered", summary: "Picked", data: { choice: "a" } }, accepted: true })
+    expect(openuiPrompt("openchamber_openui", completed({ openchamber: { ok: true } })))
+      .toEqual({ source: input.ui, ask: { kind: "show" }, accepted: true })
+    expect(openuiPrompt("openchamber_openui", completed({ openchamber: { ok: false } }))).toBeNull()
+    expect(openuiPrompt("openchamber_openui", completed())).toBeNull()
+    expect(openuiPrompt("openchamber_openui", completed({ openchamber: { ok: true, answer: { answered: false } } }))?.ask)
       .toEqual({ kind: "answered-in-chat" })
-    const stopped: ToolState = { status: "error", input, error: "aborted", time: { start: 1, end: 2 } }
-    expect(renderedPage("openchamber_render", stopped)?.ask).toEqual({ kind: "unanswered" })
-  })
-
-  test("leaves a refused, unfinished, empty or foreign call to its tool row", () => {
-    const input = { action: "render.page", parameters: { html: "<p>a</p>", title: "Chart" } }
-    expect(renderedPage("openchamber_render", completed(input, { openchamber: { ok: false } }))).toBeNull()
-    expect(renderedPage("openchamber_render", completed(input))).toBeNull()
-    expect(renderedPage("openchamber_render", running(input))).toBeNull()
-    expect(renderedPage("openchamber_render", { status: "error", input, error: "refused", time: { start: 1, end: 2 } })).toBeNull()
-    expect(renderedPage("openchamber_render", completed({ parameters: { html: "  ", title: "Chart" } }, accepted))).toBeNull()
-    expect(renderedPage("openchamber", completed(input, accepted))).toBeNull()
-  })
-
-  test("names a page sent without a title after its own title or first heading, as the server does", () => {
-    const titled = (html: string) => renderedPage("openchamber_render", completed({ parameters: { html } }, accepted))?.title
-    expect(titled("<title> Q3 &amp; Q4 </title><h1>Other</h1>")).toBe("Q3 & Q4")
-    expect(titled("<title></title><h2>Release <b>2.4</b></h2>")).toBe("Release 2.4")
-    expect(titled(`<h1>${"x".repeat(200)}</h1>`)).toBe("x".repeat(120))
-    // Nothing names it: the chat shows its own word.
-    expect(titled("<p>a</p>")).toBe("")
+    expect(openuiPrompt("openchamber_openui", { status: "error", input, error: "aborted", time: { start: 1, end: 2 } })?.ask)
+      .toEqual({ kind: "unanswered" })
+    expect(openuiPrompt("openchamber_openui", {
+      status: "error", input, error: "refused", metadata: { openchamber: { ok: false } }, time: { start: 1, end: 2 },
+    })).toBeNull()
+    expect(openuiPrompt("openchamber_openui", {
+      status: "running", input: { action: "openui.prompt", ui: " \nroot = Stack([])\n " }, time: { start: 1 },
+    })?.source).toBe(" \nroot = Stack([])\n ")
   })
 })
 

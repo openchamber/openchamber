@@ -96,7 +96,7 @@ export const createManagedConfigRuntime = ({
     const includeMemory = isAgentMemoryAvailable() && settings?.agentMemoryToolEnabled === true;
     const includeKnowledge = settings?.agentKnowledgeToolEnabled !== false;
     const includeNotify = settings?.agentNotifyToolEnabled === true;
-    const includeRender = settings?.agentRenderToolEnabled !== false;
+    const includeOpenUI = settings?.agentRenderToolEnabled !== false;
     const includeImage = settings?.agentImageToolEnabled === true;
     // On by default wherever the build has workflows: the build flag is the opt-in.
     const includeWorkflow = isWorkflowAvailable() && settings?.agentWorkflowToolEnabled !== false;
@@ -104,8 +104,8 @@ export const createManagedConfigRuntime = ({
 
     const directories = [];
     let permissions = [];
-    if (agentToolRuntime && (includeControl || includeSchedule || includeWeb || includeMemory || includeKnowledge || includeNotify || includeRender || includeImage || includeWorkflow)) {
-      directories.push(await agentToolRuntime.materializePlugin({ includeControl, includeSchedule, includeWeb, includeMemory, includeKnowledge, includeNotify, includeRender, includeImage, includeWorkflow, codeMode }));
+    if (agentToolRuntime && (includeControl || includeSchedule || includeWeb || includeMemory || includeKnowledge || includeNotify || includeOpenUI || includeImage || includeWorkflow)) {
+      directories.push(await agentToolRuntime.materializePlugin({ includeControl, includeSchedule, includeWeb, includeMemory, includeKnowledge, includeNotify, includeOpenUI, includeImage, includeWorkflow, codeMode }));
       permissions = managedPermissionRules({ includeWorkflow });
     }
     // Only while an option is on: otherwise every limit error would cost the
