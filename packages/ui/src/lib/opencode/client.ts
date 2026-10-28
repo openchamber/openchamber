@@ -1451,9 +1451,15 @@ class OpencodeService {
         }),
       )
     }
+    let beforeSendFailed = false
     const prompt = (skills: readonly SkillAttachmentRef[]) => {
       this.assertRuntimeUnchanged(params.runtimeKey)
-      params.beforeSend?.()
+      try {
+        params.beforeSend?.()
+      } catch (error) {
+        beforeSendFailed = true
+        throw error
+      }
       return call("session.prompt", () =>
         this.clientFor(params.directory).session.prompt({
           sessionID: params.id,
@@ -1482,7 +1488,7 @@ class OpencodeService {
         // The skill list and the prompt are two requests: a skill removed in
         // between fails preparation before anything is admitted, so the same
         // message id is safe to send again without the attachment.
-        if (skills.attached.length === 0 || !(error instanceof OpencodeApiError) || !isSkillNotFound(error)) throw error
+        if (beforeSendFailed || skills.attached.length === 0 || !(error instanceof OpencodeApiError) || !isSkillNotFound(error)) throw error
         const instruction = params.skills?.instructionFor(skills.attached.map((skill) => skill.name)) ?? null
         if (instruction) await admitSynthetic({ text: instruction })
         await prompt([])
@@ -1491,7 +1497,7 @@ class OpencodeService {
       // Do not retry a prompt after a transport failure: through a remote
       // tunnel the POST may already be running server-side even though the
       // client lost the response.
-      if (!(error instanceof Error && isDefiniteTransportFailure(error))) {
+      if (!beforeSendFailed && !(error instanceof Error && isDefiniteTransportFailure(error))) {
         recordProviderError(params.providerID, error instanceof OpencodeApiError ? error.status : undefined)
       }
       throw error

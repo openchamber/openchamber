@@ -431,6 +431,25 @@ describe("sendMessage", () => {
     ])
   })
 
+  test("canceled beforeSend does not count as a provider failure", async () => {
+    const providerID = "stale-cancellation"
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      await expect(opencodeClient.sendMessage({
+        id: "ses_1", providerID, text: "hello",
+        beforeSend: () => { throw new Error("stale source") },
+      })).rejects.toThrow("stale source")
+    }
+    expect(requests).toHaveLength(0)
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      responses.push(json({ message: "unavailable" }, 503))
+      await expect(opencodeClient.sendMessage({ id: "ses_1", providerID, text: "hello" })).rejects.toBeInstanceOf(OpencodeApiError)
+    }
+    expect(requests).toHaveLength(3)
+    await expect(opencodeClient.sendMessage({ id: "ses_1", providerID, text: "hello" })).rejects.toThrow("temporarily unavailable")
+    expect(requests).toHaveLength(3)
+  })
+
   test("context ids travel with the synthetic messages and sort below the prompt id", async () => {
     responses.push(json({ id: "a" }), json({ id: "b" }), json({ id: "c" }))
     const id = await opencodeClient.sendMessage({

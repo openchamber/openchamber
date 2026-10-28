@@ -431,6 +431,7 @@ export async function sendOpenUIResponse(input: CapturedSendTarget & {
         providerID,
         text: content,
         messageId,
+        beforeSend: assertCurrent,
       })
     },
   })

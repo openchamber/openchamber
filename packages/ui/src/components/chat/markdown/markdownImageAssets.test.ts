@@ -88,7 +88,7 @@ describe('Markdown image asset preparation', () => {
       currentResolver = { ...resolver };
       return Response.json({ isFile: true, path: '/tmp/image.png', size: PNG.byteLength });
     };
-    await expect(loadMessageImageBlob({ source: '/tmp/image.png', directory: '/repo', sessionId: 'generated', messageId: 'switch', signal: new AbortController().signal })).rejects.toMatchObject({ name: 'AbortError' });
+    await expect(loadMessageImageBlob({ source: '/tmp/image.png', directory: '/repo', sessionId: 'generated', messageId: 'switch', signal: new AbortController().signal })).rejects.toThrow('Runtime changed');
     expect(requestPaths).toEqual(['/api/fs/stat']);
   });
   test('prepares many images through existing file metadata requests', async () => {
