@@ -1132,7 +1132,7 @@ export const settingsDict = {
   'settings.openchamber.messageSearch.actions.delete': 'Index verwijderen',
   'settings.openchamber.messageSearch.actions.working': 'Bezig…',
   'settings.openchamber.sessionWork.title': 'Sessies in uitvoering',
-  'settings.openchamber.sessionWork.info': 'Een blok in de zijbalk, onder Chats, voor de sessies waaraan u werkt. Een sessie komt daar zodra u er een bericht in stuurt, blijft ook in haar project staan en verdwijnt wanneer u haar als afgerond markeert: beweeg er met de muis overheen en gebruik het vinkje, of gebruik het sessiemenu. Als een beurt op het einde van het werk lijkt, wordt het vinkje grijs als hint.',
+  'settings.openchamber.sessionWork.info': 'Een blok in de zijbalk, onder Chats, voor de sessies waaraan u werkt. Een sessie verschijnt daar zodra u een bericht stuurt. Standaard staat ze alleen in dit blok. Schakel "Werk in uitvoering ook onder projecten tonen" in via het zijbalkmenu om haar ook in haar project te tonen. In VS Code verschijnen sessies altijd in hun projecten. Markeer een sessie als afgerond met het vinkje of via het sessiemenu. Als een beurt op het einde van het werk lijkt, wordt het vinkje grijs als hint.',
   'settings.openchamber.sessionWork.field.enabled': 'Sessies in uitvoering tonen',
   'settings.openchamber.sessionRetention.field.onlyArchived': 'Alleen gearchiveerde sessies',
   'settings.openchamber.sessionRetention.field.onlyArchivedDescription': 'Gebruikt Verwijderen en telt de bewaartermijn vanaf het archiveren. Niet-gearchiveerde sessies blijven behouden.',

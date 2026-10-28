@@ -1099,7 +1099,7 @@ export const settingsDict = {
   "settings.openchamber.messageSearch.actions.delete": "Eliminar índice",
   "settings.openchamber.messageSearch.actions.working": "Procesando…",
   "settings.openchamber.sessionWork.title": "Sesiones en curso",
-  "settings.openchamber.sessionWork.info": "Un bloque en la barra lateral, debajo de los chats, para las sesiones en las que estás trabajando. Una sesión llega ahí en cuanto envías un mensaje en ella, sigue también en su proyecto y sale cuando la marcas como hecha: pasa el cursor y usa la marca, o usa el menú de la sesión. Cuando un turno parece el final del trabajo, la marca se vuelve gris como pista.",
+  "settings.openchamber.sessionWork.info": "Un bloque en la barra lateral, debajo de los chats, para las sesiones en las que estás trabajando. La sesión aparece ahí cuando envías un mensaje. De forma predeterminada, solo aparece en este bloque. Activa «Mostrar también lo que está en curso bajo los proyectos» en el menú de la barra lateral para mantenerla también en su proyecto. En VS Code, las sesiones siempre se muestran en sus proyectos. Márcala como terminada con la marca o el menú de la sesión. Cuando un turno parece el final del trabajo, la marca se vuelve gris como pista.",
   "settings.openchamber.sessionWork.field.enabled": "Mostrar sesiones en curso",
   "settings.openchamber.sessionRetention.field.onlyArchived": "Solo sesiones archivadas",
   "settings.openchamber.sessionRetention.field.onlyArchivedDescription": "Usa Eliminar y cuenta el periodo de retención desde el archivado. Las sesiones no archivadas se conservan.",

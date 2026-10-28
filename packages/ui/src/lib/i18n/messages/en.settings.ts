@@ -1131,7 +1131,7 @@ export const settingsDict = {
   'settings.openchamber.messageSearch.actions.delete': 'Delete index',
   'settings.openchamber.messageSearch.actions.working': 'Working…',
   'settings.openchamber.sessionWork.title': 'Sessions in work',
-  'settings.openchamber.sessionWork.info': 'A block in the sidebar, under Chats, for the sessions you\'re working in. A session goes there when you send a message in it, stays in its project as well, and leaves when you mark it done: hover it and use the check, or use the session menu. When a turn looks like the end of the work, the check turns grey as a hint.',
+  'settings.openchamber.sessionWork.info': 'A block in the sidebar, under Chats, for the sessions you\'re working in. A session goes there when you send a message in it. By default, it appears only in this block; turn on "Also show in work under projects" in the sidebar menu to keep it in its project too. VS Code always shows sessions in their projects. Mark a session done with the check or the session menu. When a turn looks like the end of the work, the check turns grey as a hint.',
   'settings.openchamber.sessionWork.field.enabled': 'Show sessions in work',
   'settings.openchamber.sessionRetention.field.onlyArchived': 'Only archived sessions',
   'settings.openchamber.sessionRetention.field.onlyArchivedDescription': 'Uses Delete and counts the retention period from archiving. Unarchived sessions are kept.',

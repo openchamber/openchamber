@@ -1070,7 +1070,7 @@ export const settingsDict = {
   'settings.openchamber.messageSearch.actions.delete': 'Usuń indeks',
   'settings.openchamber.messageSearch.actions.working': 'Trwa…',
   'settings.openchamber.sessionWork.title': 'Sesje w toku',
-  'settings.openchamber.sessionWork.info': 'Blok na pasku bocznym, pod czatami, dla sesji, nad którymi pracujesz. Sesja trafia tam, gdy wyślesz w niej wiadomość, zostaje też w swoim projekcie i znika, gdy oznaczysz ją jako gotową: najedź na nią i użyj znacznika albo skorzystaj z menu sesji. Gdy tura wygląda na koniec pracy, znacznik szarzeje jako podpowiedź.',
+  'settings.openchamber.sessionWork.info': 'Blok na pasku bocznym pod czatami, przeznaczony dla sesji, nad którymi pracujesz. Sesja pojawia się tam po wysłaniu wiadomości. Domyślnie jest widoczna tylko w tym bloku. Włącz „Pokazuj też prace w toku pod projektami” w menu paska bocznego, aby była widoczna również w swoim projekcie. W VS Code sesje są zawsze widoczne w projektach. Oznacz sesję jako gotową znacznikiem lub w jej menu. Gdy tura wygląda na koniec pracy, znacznik szarzeje jako podpowiedź.',
   'settings.openchamber.sessionWork.field.enabled': 'Pokazuj sesje w toku',
   'settings.openchamber.sessionRetention.field.onlyArchived': 'Tylko zarchiwizowane sesje',
   'settings.openchamber.sessionRetention.field.onlyArchivedDescription': 'Używa opcji Usuń i liczy okres przechowywania od archiwizacji. Niezarchiwizowane sesje pozostają zachowane.',

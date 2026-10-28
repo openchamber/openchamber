@@ -1081,7 +1081,7 @@ export const settingsDict = {
   'settings.openchamber.messageSearch.actions.delete': 'Index löschen',
   'settings.openchamber.messageSearch.actions.working': 'Wird ausgeführt…',
   'settings.openchamber.sessionWork.title': 'Sitzungen in Arbeit',
-  'settings.openchamber.sessionWork.info': 'Ein Bereich in der Seitenleiste unter den Chats für die Sitzungen, an denen Sie arbeiten. Eine Sitzung kommt dorthin, sobald Sie darin eine Nachricht senden, bleibt auch in ihrem Projekt und verschwindet, wenn Sie sie als erledigt markieren: Fahren Sie darüber und nutzen Sie den Haken, oder verwenden Sie das Sitzungsmenü. Sieht ein Durchgang nach dem Ende der Arbeit aus, wird der Haken als Hinweis grau.',
+  'settings.openchamber.sessionWork.info': 'Ein Bereich in der Seitenleiste unter den Chats für die Sitzungen, an denen Sie arbeiten. Eine Sitzung erscheint dort, sobald Sie eine Nachricht senden. Standardmäßig wird sie nur in diesem Bereich angezeigt. Aktivieren Sie im Seitenleistenmenü „In Arbeit auch unter Projekten“, damit sie auch in ihrem Projekt erscheint. In VS Code werden Sitzungen immer in ihren Projekten angezeigt. Markieren Sie eine Sitzung über den Haken oder das Sitzungsmenü als erledigt. Sieht ein Durchgang nach dem Ende der Arbeit aus, wird der Haken als Hinweis grau.',
   'settings.openchamber.sessionWork.field.enabled': 'Sitzungen in Arbeit anzeigen',
   'settings.openchamber.sessionRetention.field.onlyArchived': 'Nur archivierte Sitzungen',
   'settings.openchamber.sessionRetention.field.onlyArchivedDescription': 'Verwendet Löschen und zählt die Aufbewahrungsdauer ab der Archivierung. Nicht archivierte Sitzungen bleiben erhalten.',

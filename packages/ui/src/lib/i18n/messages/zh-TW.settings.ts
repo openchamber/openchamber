@@ -1096,7 +1096,7 @@ export const settingsDict = {
   'settings.openchamber.messageSearch.actions.delete': '刪除索引',
   'settings.openchamber.messageSearch.actions.working': '處理中…',
   'settings.openchamber.sessionWork.title': '進行中的工作階段',
-  'settings.openchamber.sessionWork.info': '側邊欄中位於聊天下方的一個區塊，用來放置你正在處理的工作階段。你在工作階段中傳送訊息後，它就會進入這裡，同時仍留在所屬專案中；標記為完成後才會離開：將游標移到工作階段上點勾號，或使用工作階段選單。當某一輪看起來像工作的結尾時，勾號會變灰作為提示。',
+  'settings.openchamber.sessionWork.info': '側邊欄中位於聊天下方的區塊，用來顯示正在處理的工作階段。傳送訊息後，工作階段就會顯示在這裡。預設只會顯示在此區塊。若要同時顯示在所屬專案下，請在側邊欄選單中開啟「在專案下也顯示進行中的工作」。VS Code 一律會在專案下顯示工作階段。點選勾號或使用工作階段選單即可將其標記為完成。當某一輪看起來像工作的結尾時，勾號會變灰作為提示。',
   'settings.openchamber.sessionWork.field.enabled': '顯示進行中的工作階段',
   'settings.openchamber.sessionRetention.field.onlyArchived': '僅已封存的工作階段',
   'settings.openchamber.sessionRetention.field.onlyArchivedDescription': '使用刪除操作，並從封存時開始計算保留期限。未封存的工作階段會保留。',

@@ -1131,7 +1131,7 @@ export const settingsDict = {
   'settings.openchamber.messageSearch.actions.delete': 'حذف الفهرس',
   'settings.openchamber.messageSearch.actions.working': 'جارٍ العمل…',
   'settings.openchamber.sessionWork.title': 'الجلسات قيد العمل',
-  'settings.openchamber.sessionWork.info': 'قسم في الشريط الجانبي، أسفل المحادثات، للجلسات التي يجري فيها عمل فعلي. تبقى الجلسة فيه حتى تعلّمها منتهية: مرّر المؤشر فوقها واستخدم العين لتتبعها أو علامة الصح لتعليمها منتهية، أو استخدم قائمة الجلسة.',
+  'settings.openchamber.sessionWork.info': 'قسم في الشريط الجانبي أسفل المحادثات للجلسات التي تعمل عليها. تظهر الجلسة هنا عند إرسال رسالة فيها. افتراضيًا، تظهر في هذا القسم فقط. فعّل «إظهار العمل الجاري تحت المشاريع أيضًا» من قائمة الشريط الجانبي لعرضها في مشروعها كذلك. في VS Code تظهر الجلسات دائمًا ضمن مشاريعها. علّم الجلسة كمنتهية باستخدام علامة الصح أو قائمة الجلسة. عندما تبدو الجولة نهايةً للعمل، تتحول علامة الصح إلى الرمادي كتلميح.',
   'settings.openchamber.sessionWork.field.enabled': 'إظهار الجلسات قيد العمل',
   'settings.openchamber.sessionRetention.field.onlyArchived': 'الجلسات المؤرشفة فقط',
   'settings.openchamber.sessionRetention.field.onlyArchivedDescription': 'يستخدم الحذف ويحسب مدة الاحتفاظ من وقت الأرشفة. تُحفظ الجلسات غير المؤرشفة.',

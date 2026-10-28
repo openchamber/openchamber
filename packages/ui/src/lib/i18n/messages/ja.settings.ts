@@ -1132,7 +1132,7 @@ export const settingsDict = {
   'settings.openchamber.messageSearch.actions.delete': 'インデックスを削除',
   'settings.openchamber.messageSearch.actions.working': '処理中…',
   'settings.openchamber.sessionWork.title': '作業中のセッション',
-  'settings.openchamber.sessionWork.info': '作業中のセッションを、サイドバーのチャットの下にまとめるブロックです。セッションでメッセージを送るとここに入り、プロジェクトにも残ったまま、完了にすると外れます。セッションにカーソルを合わせてチェックを使うか、セッションメニューを使います。ターンが作業の終わりに見えると、ヒントとしてチェックが灰色になります。',
+  'settings.openchamber.sessionWork.info': '作業中のセッションを、サイドバーのチャットの下にまとめるブロックです。セッションでメッセージを送るとここに表示されます。既定ではこのブロックだけに表示されます。プロジェクトにも残すには、サイドバーのメニューで「作業中の項目もプロジェクトの下に表示」を有効にしてください。VS Code では常にプロジェクト内にも表示されます。チェックまたはセッションメニューから完了にできます。ターンが作業の終わりに見えると、ヒントとしてチェックが灰色になります。',
   'settings.openchamber.sessionWork.field.enabled': '作業中のセッションを表示',
   'settings.openchamber.sessionRetention.field.onlyArchived': 'アーカイブ済みのセッションのみ',
   'settings.openchamber.sessionRetention.field.onlyArchivedDescription': '削除を選択し、アーカイブ時点から保持期間を数えます。未アーカイブのセッションは保持されます。',

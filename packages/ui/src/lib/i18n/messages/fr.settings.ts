@@ -1002,7 +1002,7 @@ export const settingsDict = {
   'settings.openchamber.messageSearch.actions.delete': 'Supprimer l’index',
   'settings.openchamber.messageSearch.actions.working': 'En cours…',
   'settings.openchamber.sessionWork.title': 'Sessions en cours',
-  'settings.openchamber.sessionWork.info': 'Un bloc dans la barre latérale, sous les discussions, pour les sessions sur lesquelles vous travaillez. Une session y arrive dès que vous y envoyez un message, reste aussi dans son projet et en sort quand vous la marquez comme terminée : survolez-la et utilisez la coche, ou passez par le menu de la session. Quand un tour ressemble à la fin du travail, la coche devient grise en guise d\'indice.',
+  'settings.openchamber.sessionWork.info': 'Un bloc dans la barre latérale, sous les discussions, pour les sessions sur lesquelles vous travaillez. Une session y apparaît dès que vous lui envoyez un message. Par défaut, elle apparaît uniquement dans ce bloc. Activez « Afficher aussi le travail en cours sous les projets » dans le menu de la barre latérale pour la garder aussi dans son projet. Dans VS Code, les sessions restent toujours dans leur projet. Marquez une session comme terminée avec la coche ou son menu. Quand un tour ressemble à la fin du travail, la coche devient grise en guise d’indice.',
   'settings.openchamber.sessionWork.field.enabled': 'Afficher les sessions en cours',
   'settings.openchamber.sessionRetention.field.onlyArchived': 'Uniquement les sessions archivées',
   'settings.openchamber.sessionRetention.field.onlyArchivedDescription': 'Utilise Supprimer et compte la période de conservation depuis l\'archivage. Les sessions non archivées sont conservées.',

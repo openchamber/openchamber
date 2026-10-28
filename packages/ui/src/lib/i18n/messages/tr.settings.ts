@@ -1107,7 +1107,7 @@ export const settingsDict = {
   'settings.openchamber.messageSearch.actions.delete': 'Dizini sil',
   'settings.openchamber.messageSearch.actions.working': 'İşleniyor…',
   'settings.openchamber.sessionWork.title': 'Devam eden oturumlar',
-  'settings.openchamber.sessionWork.info': 'Kenar çubuğunda, sohbetlerin altında, üzerinde çalıştığınız oturumlar için bir bölüm. Bir oturum, içinde mesaj gönderdiğiniz anda buraya gelir, projesinde de kalır ve tamamlandı olarak işaretlediğinizde çıkar: üzerine gelip onay işaretini kullanın ya da oturum menüsünü kullanın. Bir tur işin sonu gibi göründüğünde onay işareti ipucu olarak griye döner.',
+  'settings.openchamber.sessionWork.info': 'Üzerinde çalıştığınız oturumlar için kenar çubuğunda sohbetlerin altındaki bölüm. Bir oturum, mesaj gönderdiğinizde burada görünür. Varsayılan olarak yalnızca bu bölümde görünür. Projesinde de görünmesi için kenar çubuğu menüsünden "Devam eden işleri projelerin altında da göster" seçeneğini açın. VS Code oturumları her zaman projelerinde gösterir. Onay işaretiyle veya oturum menüsünden tamamlandı olarak işaretleyin. Bir tur işin sonu gibi göründüğünde onay işareti ipucu olarak griye döner.',
   'settings.openchamber.sessionWork.field.enabled': 'Devam eden oturumları göster',
   'settings.openchamber.sessionRetention.field.onlyArchived': 'Yalnızca arşivlenmiş oturumlar',
   'settings.openchamber.sessionRetention.field.onlyArchivedDescription': 'Sil seçeneğini kullanır ve saklama süresini arşivleme tarihinden itibaren sayar. Arşivlenmemiş oturumlar korunur.',

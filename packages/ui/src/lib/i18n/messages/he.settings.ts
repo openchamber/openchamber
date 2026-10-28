@@ -1131,7 +1131,7 @@ export const settingsDict = {
   'settings.openchamber.messageSearch.actions.delete': 'מחק את האינדקס',
   'settings.openchamber.messageSearch.actions.working': 'עובד…',
   'settings.openchamber.sessionWork.title': 'הפעלות בעבודה',
-  'settings.openchamber.sessionWork.info': 'אזור בסרגל הצד, מתחת לצ\'אטים, להפעלות שבהן מתבצעת עבודה ממשית. הפעלה נשארת שם עד שמסמנים אותה כגמורה: מעבירים מעליה את העכבר ולוחצים על העין כדי לעקוב אחריה או על סימן הווי כדי לסמן אותה כגמורה, או משתמשים בתפריט ההפעלה.',
+  'settings.openchamber.sessionWork.info': 'אזור בסרגל הצד, מתחת לצ\'אטים, להפעלות שבהן עובדים. הפעלה מופיעה כאן כששולחים בה הודעה. כברירת מחדל היא מופיעה באזור הזה בלבד. כדי להציג אותה גם בפרויקט שלה, הפעילו בתפריט סרגל הצד את „להציג עבודה פעילה גם תחת הפרויקטים”. ב-VS Code ההפעלות מופיעות תמיד בפרויקטים שלהן. סמנו הפעלה כהושלמה באמצעות סימן הווי או תפריט ההפעלה. כשנראה שתור מסיים את העבודה, סימן הווי הופך לאפור כרמז.',
   'settings.openchamber.sessionWork.field.enabled': 'הצג הפעלות בעבודה',
   'settings.openchamber.sessionRetention.field.onlyArchived': 'רק הפעלות בארכיון',
   'settings.openchamber.sessionRetention.field.onlyArchivedDescription': 'משתמש במחיקה וסופר את תקופת השמירה מרגע ההעברה לארכיון. הפעלות שלא בארכיון נשמרות.',

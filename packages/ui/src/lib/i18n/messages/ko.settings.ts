@@ -1099,7 +1099,7 @@ export const settingsDict = {
   'settings.openchamber.messageSearch.actions.delete': '인덱스 삭제',
   'settings.openchamber.messageSearch.actions.working': '처리 중…',
   'settings.openchamber.sessionWork.title': '작업 중인 세션',
-  'settings.openchamber.sessionWork.info': '작업 중인 세션을 사이드바의 채팅 아래에 모아 두는 영역입니다. 세션에서 메시지를 보내면 이곳에 들어오고, 프로젝트에도 그대로 남으며, 완료로 표시하면 빠집니다. 세션에 마우스를 올려 체크를 누르거나 세션 메뉴를 사용하세요. 턴이 작업의 끝처럼 보이면 힌트로 체크가 회색으로 바뀝니다.',
+  'settings.openchamber.sessionWork.info': '작업 중인 세션을 사이드바의 채팅 아래에 모아 두는 영역입니다. 세션에서 메시지를 보내면 이곳에 표시됩니다. 기본적으로 이 영역에만 표시됩니다. 프로젝트에도 표시하려면 사이드바 메뉴에서 "진행 중인 작업을 프로젝트 아래에도 표시"를 켜세요. VS Code에서는 항상 프로젝트에도 표시됩니다. 체크 표시나 세션 메뉴에서 완료로 표시할 수 있습니다. 턴이 작업의 끝처럼 보이면 힌트로 체크가 회색으로 바뀝니다.',
   'settings.openchamber.sessionWork.field.enabled': '작업 중인 세션 표시',
   'settings.openchamber.sessionRetention.field.onlyArchived': '보관된 세션만',
   'settings.openchamber.sessionRetention.field.onlyArchivedDescription': '삭제를 사용하며 보관 시점부터 보존 기간을 계산합니다. 보관되지 않은 세션은 유지됩니다.',

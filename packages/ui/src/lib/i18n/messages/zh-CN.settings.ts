@@ -1099,7 +1099,7 @@ export const settingsDict = {
   'settings.openchamber.messageSearch.actions.delete': '删除索引',
   'settings.openchamber.messageSearch.actions.working': '处理中…',
   'settings.openchamber.sessionWork.title': '进行中的会话',
-  'settings.openchamber.sessionWork.info': '侧边栏中位于聊天下方的一个区块，用于放置你正在处理的会话。你在会话中发送消息后，它就会进入这里，同时仍留在所属项目中；标记为完成后才会离开：悬停在会话上点对勾，或使用会话菜单。当某一轮看起来像工作的结尾时，对勾会变灰作为提示。',
+  'settings.openchamber.sessionWork.info': '侧边栏中位于聊天下方的区块，用于显示正在处理的会话。发送消息后，会话就会显示在这里。默认情况下，会话只显示在此区块中。若要同时在所属项目下显示，请在侧边栏菜单中开启“在项目下也显示进行中的工作”。VS Code 始终会在项目下显示会话。点击对勾或使用会话菜单可将会话标记为完成。当某一轮看起来像工作的结尾时，对勾会变灰作为提示。',
   'settings.openchamber.sessionWork.field.enabled': '显示进行中的会话',
   'settings.openchamber.sessionRetention.field.onlyArchived': '仅已归档的会话',
   'settings.openchamber.sessionRetention.field.onlyArchivedDescription': '使用删除操作，并从归档时开始计算保留期限。未归档的会话会保留。',
