@@ -61,6 +61,29 @@ test('a stale runtime cannot deliver an OpenUI answer', async () => {
   }
 });
 
+test('source revocation during connection wait prevents optimistic insertion', async () => {
+  globalThis.fetch = async () => Response.json({ ok: true });
+  useConfigStore.setState({ currentProviderId: 'provider', isConnected: true, hasEverConnected: true });
+  const stores = new ChildStoreManager();
+  setActionRefs(stores, () => '/openui');
+  const inserted: string[] = [];
+  setOptimisticRefs(({ message }) => inserted.push(message.id), () => {});
+  const send = spyOn(opencodeClient, 'sendMessage');
+  let current = true;
+  try {
+    const submission = sendOpenUIResponse({
+      runtimeKey: getRuntimeKey(), sessionId: 'waiting', directory: '/openui',
+      summary: 'Choose A', data: null, isCurrent: () => current,
+    });
+    current = false;
+    await expect(submission).rejects.toThrow('interface changed');
+    expect(inserted).toEqual([]);
+    expect(send).not.toHaveBeenCalled();
+  } finally {
+    send.mockRestore();
+  }
+});
+
 test('source revocation during instruction sync rolls back without delivering an answer', async () => {
   let finishKnowledge: ((value: Response) => void) | undefined;
   let current = true;

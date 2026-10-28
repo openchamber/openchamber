@@ -2099,6 +2099,8 @@ export async function optimisticSend(input: {
    */
   ready?: Promise<void>
   appendSubmissions?: () => void
+  /** Reject a stale source after the connection wait and before any optimistic mutation. */
+  beforeOptimisticInsert?: () => void
   onOptimisticInsert?: () => void
   /**
    * Whether the insert marks the session busy (the default). A session that
@@ -2127,6 +2129,7 @@ export async function optimisticSend(input: {
   assertRuntimeUnchanged()
   await waitForConnectionOrThrow()
   assertRuntimeUnchanged()
+  input.beforeOptimisticInsert?.()
   input.appendSubmissions?.()
 
   const targetDirectory = input.directory ?? dir()
