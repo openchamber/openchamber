@@ -252,6 +252,108 @@ describe('apns runtime relay mode (default)', () => {
     expect(plain).toMatchObject({ title: 'Agent response is ready', body: 'Fix the login bug' });
   });
 
+  describe('when the relay cannot be reached', () => {
+    const refused = () => Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNREFUSED' } });
+    const timedOut = () => new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+
+    afterEach(() => {
+      vi.useRealTimers();
+      vi.restoreAllMocks();
+    });
+
+    it('limits every relay request in time', async () => {
+      const fetchMock = vi.fn(async () => jsonResponse({ ok: true, results: [] }));
+      vi.stubGlobal('fetch', fetchMock);
+      const runtime = createApnsRuntime(makeDeps());
+      await runtime.addOrUpdateApnsToken('s1', 'tokenA');
+      await runtime.sendApnsToAllUiSessions({ title: 't', body: 'b' });
+
+      expect(fetchMock.mock.calls).toHaveLength(2);
+      for (const [, init] of fetchMock.mock.calls) expect(init.signal).toBeInstanceOf(AbortSignal);
+    });
+
+    it('sends once more after a short delay when the request never left', async () => {
+      const runtime = createApnsRuntime(makeDeps());
+      vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ ok: true })));
+      await runtime.addOrUpdateApnsToken('s1', 'tokenA');
+      const fetchMock = vi.fn()
+        .mockRejectedValueOnce(refused())
+        .mockResolvedValueOnce(jsonResponse({ results: [] }));
+      vi.stubGlobal('fetch', fetchMock);
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      vi.useFakeTimers({ toFake: ['setTimeout'] });
+
+      const sending = runtime.sendApnsToAllUiSessions({ title: 't', body: 'b' });
+      await vi.advanceTimersByTimeAsync(4_999);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+      await sending;
+
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(fetchMock.mock.calls[1][1].body).toBe(fetchMock.mock.calls[0][1].body);
+    });
+
+    it('does not send again when the relay may have the request', async () => {
+      const runtime = createApnsRuntime(makeDeps());
+      vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ ok: true })));
+      await runtime.addOrUpdateApnsToken('s1', 'tokenA');
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      for (const error of [timedOut(), Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNRESET' } })]) {
+        const fetchMock = vi.fn().mockRejectedValue(error);
+        vi.stubGlobal('fetch', fetchMock);
+        await runtime.sendApnsToAllUiSessions({ title: 't', body: 'b' });
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+      }
+      expect(warn.mock.calls.map((call) => call.join(' '))).toEqual([
+        '[APNs relay] request failed: no answer in 15 s, not retried',
+        '[APNs relay] request failed: fetch failed (ECONNRESET)',
+      ]);
+    });
+
+    it('logs once more and gives up when the retry fails too', async () => {
+      const runtime = createApnsRuntime(makeDeps());
+      vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ ok: true })));
+      await runtime.addOrUpdateApnsToken('s1', 'tokenA');
+      const fetchMock = vi.fn().mockRejectedValue(refused());
+      vi.stubGlobal('fetch', fetchMock);
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      vi.useFakeTimers({ toFake: ['setTimeout'] });
+
+      const sending = runtime.sendApnsToAllUiSessions({ title: 't', body: 'b' });
+      await vi.advanceTimersByTimeAsync(5_000);
+      await sending;
+
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(warn.mock.calls.map((call) => call.join(' '))).toEqual([
+        '[APNs relay] unreachable (ECONNREFUSED), retrying in 5 s',
+        '[APNs relay] request failed: fetch failed (ECONNREFUSED)',
+      ]);
+    });
+
+    it('sends to other devices while one send waits for its retry', async () => {
+      const runtime = createApnsRuntime(makeDeps());
+      vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ ok: true })));
+      // Each device with a push key is its own send, in registration order.
+      await runtime.addOrUpdateApnsToken('s1', 'tokenRefused', undefined, 'ios', 'production', crypto.randomBytes(32).toString('base64'));
+      await runtime.addOrUpdateApnsToken('s2', 'tokenOther', undefined, 'android', 'production', crypto.randomBytes(32).toString('base64'));
+      const fetchMock = vi.fn(async (_url, init) => {
+        if (JSON.parse(init.body).tokens.includes('tokenRefused')) throw refused();
+        return jsonResponse({ results: [] });
+      });
+      vi.stubGlobal('fetch', fetchMock);
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      vi.useFakeTimers({ toFake: ['setTimeout'] });
+
+      const sending = runtime.sendApnsToAllUiSessions({ title: 't', body: 'b' });
+      await vi.advanceTimersByTimeAsync(0);
+      const sentTo = fetchMock.mock.calls.map(([, init]) => JSON.parse(init.body).tokens[0]);
+      expect(new Set(sentTo)).toEqual(new Set(['tokenRefused', 'tokenOther']));
+      await vi.advanceTimersByTimeAsync(5_000);
+      await sending;
+    });
+  });
+
   it('no-ops (no relay call) when no tokens are registered', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
