@@ -1912,6 +1912,7 @@ const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader; subage
         part,
         shouldRenderExpandedContent || (presentation !== null && guestToolHeaderReadsOutput(presentation)),
     );
+    const renderedState = contentCompletion.status === 'whole' ? (contentCompletion.state ?? state) : state;
     // Shell and subagent rows carry their duration: live while they run, final once settled.
     // Image generation takes tens of seconds; the ticking time shows it is still at work.
     const showsDuration = isShellTool(normalizedPartTool) || isTaskTool || part.tool === 'openchamber_image';
@@ -2143,7 +2144,7 @@ const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader; subage
                         {contentCompletion.status === 'whole' ? (
                             <ToolExpandedContent
                                 part={part}
-                                state={state}
+                                state={renderedState}
                                 currentDirectory={currentDirectory}
                                 isExpanded={isExpanded}
                                 onShowPopup={onShowPopup}
