@@ -23,6 +23,25 @@ let cachedDetection = null;
 function getSpawnSyncBaseOptions() {
   return process.platform === 'win32' ? { windowsHide: true } : {};
 }
+
+function quoteWindowsArgument(value) {
+  const argument = String(value);
+  return /\s/.test(argument) ? `"${argument}"` : argument;
+}
+
+/**
+ * Run a package manager command. On Windows npm, pnpm and yarn ship as .cmd
+ * shims, which spawnSync cannot launch directly (ENOENT/EINVAL without a
+ * shell), so the command line goes through the command shell instead.
+ */
+function spawnPackageManagerSync(command, args, options) {
+  if (process.platform !== 'win32') {
+    return spawnSync(command, args, options);
+  }
+
+  const commandLine = [command, ...args].map(quoteWindowsArgument).join(' ');
+  return spawnSync(commandLine, { ...options, shell: true });
+}
 const UPDATE_CHECK_URL = process.env.OPENCHAMBER_UPDATE_API_URL || 'https://api.openchamber.dev/v1/update/check';
 
 function getOpenChamberConfigDir() {
@@ -248,7 +267,7 @@ function getUniquePaths(paths) {
 
 function getCommandOutput(command, args) {
   try {
-    const result = spawnSync(command, args, {
+    const result = spawnPackageManagerSync(command, args, {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
       timeout: 10000,
@@ -580,7 +599,7 @@ function quoteCommand(command) {
 
 function isCommandAvailable(command) {
   try {
-    const result = spawnSync(command, ['--version'], {
+    const result = spawnPackageManagerSync(command, ['--version'], {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
       timeout: 5000,
@@ -610,7 +629,7 @@ function isPackageInstalledWith(pm) {
     const pmCommand = resolvePackageManagerCommand(pm);
     const args = getGlobalListArgs(pm);
 
-    const result = spawnSync(pmCommand, args, {
+    const result = spawnPackageManagerSync(pmCommand, args, {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
       timeout: 10000,
@@ -637,7 +656,7 @@ const GLOBAL_VERSION_PATTERN = /@openchamber\/web[@\s]+v?(\d[\w.+-]*)/;
 function getInstalledGlobalVersion(pm) {
   try {
     const pmCommand = resolvePackageManagerCommand(pm);
-    const result = spawnSync(pmCommand, getGlobalListArgs(pm), {
+    const result = spawnPackageManagerSync(pmCommand, getGlobalListArgs(pm), {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
       timeout: 10000,

@@ -9,6 +9,12 @@ vi.mock('node:child_process', () => ({
   spawnSync: vi.fn(() => ({ status: 0, stdout: '/usr/local/bin', stderr: '' })),
 }));
 
+// Package manager commands only take the shell on Windows. Pin the platform so
+// the suite reads the same everywhere; Windows has its own spec below.
+beforeEach(() => {
+  vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
+});
+
 const {
   checkForUpdates,
   detectPackageManager,
@@ -532,6 +538,32 @@ describe('executeUpdate', () => {
     const result = executeUpdate('npm');
     expect(result.success).toBe(true);
     expect(result.installedVersion).toBeNull();
+  });
+});
+
+describe('Windows package manager commands', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    spawnSync.mockReset();
+  });
+
+  it('runs the global listing through the shell so .cmd shims launch', () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
+    spawnSync.mockImplementation((command) => {
+      if (String(command).includes(' list -g ')) {
+        return { status: 0, stdout: '`-- @openchamber/web@1.24.1', stderr: '' };
+      }
+      return { status: 0, stdout: '', stderr: '' };
+    });
+
+    const result = executeUpdate('npm', { targetVersion: '1.24.1' });
+
+    expect(result.success).toBe(true);
+    expect(result.installedVersion).toBe('1.24.1');
+    expect(spawnSync).toHaveBeenCalledWith(
+      expect.stringContaining('npm list -g --depth=0 @openchamber/web'),
+      expect.objectContaining({ shell: true }),
+    );
   });
 });
 
