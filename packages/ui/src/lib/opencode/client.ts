@@ -1995,6 +1995,10 @@ class OpencodeService {
    * space as usual. Since OpenCode 2.2 the model and provider routes both wait for their
    * directory's plugins, so a directory OpenCode has not started answers complete.
    *
+   * Models are asked for chat and image types: OpenCode lists chat models only by default, and
+   * a provider whose models all generate images has to stay visible in Settings → Providers.
+   * The store keeps image models out of the chat pickers.
+   *
    * `fresh`: a request already in flight started before the caller's reason to re-read (a
    * catalog event), so it may carry the old catalog. Wait it out and read again.
    */
@@ -2015,7 +2019,7 @@ class OpencodeService {
       const client = this.clientFor(effectiveDirectory)
       const providerClient = isSpaceDirectory(effectiveDirectory) ? this.hostClientOfSpace(effectiveDirectory) : client
       const [models, fallback, providers] = await Promise.all([
-        call("model.list", () => client.model.list().then((r) => r.data)),
+        call("model.list", () => client.model.list({ types: ["chat", "image"] }).then((r) => r.data)),
         call("model.default", () => client.model.default().then((r) => r.data)).catch(() => undefined),
         call("provider.list", () => providerClient.provider.list().then((r) => r.data)),
       ])

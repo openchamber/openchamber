@@ -78,6 +78,7 @@ export interface ModelCompatibility {
 export interface ProviderModelEntity {
   modelID?: string;
   name?: string;
+  type?: string;
   family?: string;
   compatibility?: ModelCompatibility;
   package?: string;

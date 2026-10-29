@@ -293,6 +293,57 @@ describe('custom provider config persistence (VS Code parity)', () => {
     });
   });
 
+  test('a form save keeps the type of a hand-marked image model', () => {
+    const configPath = path.join(projectDir, '.opencode', 'opencode.json');
+    writeJson(configPath, {
+      providers: {
+        wawa: {
+          name: 'Wawa',
+          package: 'aisdk:@ai-sdk/openai-compatible',
+          env: ['WAWA_KEY'],
+          settings: { baseURL: 'https://wawa.example.com/v1' },
+          models: { flare: { modelID: 'flare', name: 'Flare', type: 'image' } },
+        },
+      },
+    });
+
+    upsertProviderConfig('wawa', {
+      name: 'Wawa',
+      env: ['WAWA_KEY'],
+      settings: { baseURL: 'https://wawa.example.com/v1' },
+      models: { flare: { name: 'Flare' } },
+    }, projectDir, 'project');
+
+    assert.deepEqual(readJson(configPath).providers.wawa.models.flare, { modelID: 'flare', name: 'Flare', type: 'image' });
+  });
+
+  test('a form save writes the type it sends, any type OpenCode knows', () => {
+    const configPath = path.join(projectDir, '.opencode', 'opencode.json');
+    writeJson(configPath, {
+      providers: {
+        wawa: {
+          name: 'Wawa',
+          package: 'aisdk:@ai-sdk/openai-compatible',
+          env: ['WAWA_KEY'],
+          settings: { baseURL: 'https://wawa.example.com/v1' },
+          models: { flare: { modelID: 'flare', name: 'Flare', type: 'image' } },
+        },
+      },
+    });
+
+    upsertProviderConfig('wawa', {
+      name: 'Wawa',
+      env: ['WAWA_KEY'],
+      settings: { baseURL: 'https://wawa.example.com/v1' },
+      models: { flare: { name: 'Flare', type: 'chat' }, judge: { name: 'Judge', type: 'decision' } },
+    }, projectDir, 'project');
+
+    assert.deepEqual(readJson(configPath).providers.wawa.models, {
+      flare: { modelID: 'flare', name: 'Flare', type: 'chat' },
+      judge: { modelID: 'judge', name: 'Judge', type: 'decision' },
+    });
+  });
+
   test('upsertProviderConfig preserves metadata while migrating the legacy providers alias', () => {
     const configPath = path.join(projectDir, 'opencode.json');
     writeJson(configPath, {

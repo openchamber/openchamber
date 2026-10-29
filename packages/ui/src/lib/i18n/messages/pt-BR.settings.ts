@@ -1807,6 +1807,7 @@ export const settingsDict = {
   "settings.providers.page.custom.models.inputCapabilities": "Recursos de entrada",
   "settings.providers.page.custom.models.outputCapabilities": "Recursos de saída",
   "settings.providers.page.custom.models.tools": "Chamadas de ferramentas",
+  "settings.providers.page.custom.models.imageGeneration": "Modelo de geração de imagens",
   "settings.providers.page.custom.models.toolsOff": "sem chamadas de ferramentas",
   "settings.providers.page.custom.error.positiveInteger": "Insira um número inteiro positivo",
   "settings.providers.page.toast.customProviderSaveFailed": "Falha ao salvar o provedor personalizado",

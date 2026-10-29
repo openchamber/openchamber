@@ -1635,6 +1635,7 @@ export const settingsDict = {
   'settings.providers.page.custom.models.inputCapabilities': 'Capacités d’entrée',
   'settings.providers.page.custom.models.outputCapabilities': 'Capacités de sortie',
   'settings.providers.page.custom.models.tools': 'Appels d’outils',
+  'settings.providers.page.custom.models.imageGeneration': 'Modèle de génération d’images',
   'settings.providers.page.custom.models.toolsOff': 'pas d’appels d’outils',
   'settings.providers.page.custom.error.positiveInteger': 'Saisissez un nombre entier positif',
   'settings.providers.page.custom.authFailure.keyAfterConfig': 'Le fournisseur a été enregistré, mais pas sa clé API. Enregistrez à nouveau pour réessayer la clé, ou déconnectez-le pour supprimer le fournisseur.',

@@ -247,6 +247,7 @@ const {
   useConfigStore,
   selectConfigAgentsForDirectory,
   selectProvidersForDirectory,
+  selectImageOnlyProvidersForDirectory,
   selectCatalogLoadedForDirectory,
   markConfigCatalogStale,
   selectKnownAgent,
@@ -534,6 +535,29 @@ describe('useConfigStore provider persistence', () => {
 
     expect(useConfigStore.getState().activeDirectoryKey).toBe(worktree);
     expect(useConfigStore.getState().currentAgentName).toBe('review');
+  });
+
+  test('image models stay out of the chat catalog, and an image-only provider is kept for Settings', async () => {
+    const imageModel = (providerId: string, modelId: string) => Object.assign(model(providerId, modelId), { type: 'image' });
+    getProvidersForConfigImpl = async () => ({
+      providers: [providerInfo('chat'), providerInfo('mixed'), providerInfo('wawa')],
+      models: [model('chat', 'talk'), model('mixed', 'talk'), imageModel('mixed', 'draw'), imageModel('wawa', 'flare')],
+      default: { providerID: 'chat', id: 'talk' },
+    });
+    await useConfigStore.getState().activateDirectory(DIRECTORY);
+
+    const state = useConfigStore.getState();
+    expect(state.providers.map((entry) => [entry.id, entry.models.map((item) => item.modelID)])).toEqual([
+      ['chat', ['talk']],
+      ['mixed', ['talk']],
+    ]);
+    expect(selectImageOnlyProvidersForDirectory(state, DIRECTORY).map((entry) => [entry.id, entry.models.map((item) => item.modelID)])).toEqual([
+      ['wawa', ['flare']],
+    ]);
+    expect(selectImageOnlyProvidersForDirectory(state, OTHER_DIRECTORY)).toEqual([]);
+
+    useConfigStore.getState().invalidateProviderCache(DIRECTORY);
+    expect(selectImageOnlyProvidersForDirectory(useConfigStore.getState(), DIRECTORY)).toEqual([]);
   });
 
   test('Settings without a project reads the active catalog', () => {

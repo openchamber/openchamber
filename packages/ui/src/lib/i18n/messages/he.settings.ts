@@ -1732,6 +1732,7 @@ export const settingsDict = {
   'settings.providers.page.custom.models.inputCapabilities': 'יכולות קלט',
   'settings.providers.page.custom.models.outputCapabilities': 'יכולות פלט',
   'settings.providers.page.custom.models.tools': 'קריאות לכלים',
+  'settings.providers.page.custom.models.imageGeneration': 'מודל ליצירת תמונות',
   'settings.providers.page.custom.models.toolsOff': 'ללא קריאות לכלים',
   'settings.providers.page.custom.models.variantsLabel': 'רמות חשיבה',
   'settings.providers.page.custom.models.variantsPlaceholder': 'low, medium, high',

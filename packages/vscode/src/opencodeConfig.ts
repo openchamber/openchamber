@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import yaml from 'yaml';
+import { z } from 'zod';
 import {
   applyEdits,
   createScanner,
@@ -2677,7 +2678,7 @@ type NormalizedCustomProviderConfig = {
   name: string;
   settings: Record<string, unknown> & { baseURL: string };
   headers?: Record<string, string>;
-  models: Record<string, { modelID: string; name: string }>;
+  models: Record<string, { modelID: string; name: string; type?: string }>;
   env?: string[];
 };
 
@@ -2731,7 +2732,7 @@ export const validateCustomProviderConfig = (
     return { ok: false as const, error: 'At least one model is required' };
   }
 
-  const normalizedModels: Record<string, { modelID: string; name: string }> = {};
+  const normalizedModels: NormalizedCustomProviderConfig['models'] = {};
   for (const [modelId, modelValue] of Object.entries(models)) {
     const trimmedId = typeof modelId === 'string' ? modelId.trim() : '';
     if (!trimmedId) {
@@ -2745,6 +2746,9 @@ export const validateCustomProviderConfig = (
       return { ok: false as const, error: `Model "${trimmedId}" requires a name` };
     }
     normalizedModels[trimmedId] = { modelID: trimmedId, name: modelName };
+    // Any type OpenCode knows passes through; absent keeps the stored one.
+    const modelType = z.string().trim().min(1).safeParse(modelValue.type).data;
+    if (modelType) normalizedModels[trimmedId].type = modelType;
   }
 
   const normalized: NormalizedCustomProviderConfig = {

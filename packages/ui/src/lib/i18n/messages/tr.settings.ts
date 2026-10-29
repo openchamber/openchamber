@@ -1659,6 +1659,7 @@ export const settingsDict = {
   'settings.providers.page.custom.models.inputCapabilities': 'Girdi yetenekleri',
   'settings.providers.page.custom.models.outputCapabilities': 'Çıktı yetenekleri',
   'settings.providers.page.custom.models.tools': 'Araç çağrıları',
+  'settings.providers.page.custom.models.imageGeneration': 'Görsel üretim modeli',
   'settings.providers.page.custom.models.toolsOff': 'araç çağrısı yok',
   'settings.providers.page.custom.error.positiveInteger': 'Pozitif bir tam sayı girin',
   'settings.providers.page.custom.authFailure.keyAfterConfig': 'Provider kaydedildi ancak API anahtarı kaydedilmedi. Anahtarı yeniden denemek için tekrar kaydedin veya provider’ı kaldırmak için bağlantıyı kesin.',

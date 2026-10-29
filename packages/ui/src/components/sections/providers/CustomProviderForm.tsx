@@ -429,6 +429,12 @@ export const CustomProviderForm: React.FC<CustomProviderFormProps> = ({
                 ...previous,
                 models: previous.models.map((entry, rowIndex) => rowIndex === index ? { ...entry, tools, capabilitiesKnown: true, metadataSource: 'manual' } : entry),
               }))}
+              // Unchecked writes `chat` explicitly: the save merges over the
+              // stored entry, so leaving `type` out would keep `image`.
+              onImageGenerationChange={(imageGeneration) => setForm((previous) => ({
+                ...previous,
+                models: previous.models.map((entry, rowIndex) => rowIndex === index ? { ...entry, type: imageGeneration ? 'image' : 'chat' } : entry),
+              }))}
               onRemove={form.models.length > 1 ? () => {
                 setForm((prev) => ({
                   ...prev,

@@ -1782,6 +1782,7 @@ export const settingsDict = {
   'settings.providers.page.custom.models.inputCapabilities': 'Możliwości wejścia',
   'settings.providers.page.custom.models.outputCapabilities': 'Możliwości wyjścia',
   'settings.providers.page.custom.models.tools': 'Wywołania narzędzi',
+  'settings.providers.page.custom.models.imageGeneration': 'Model generowania obrazów',
   'settings.providers.page.custom.models.toolsOff': 'bez wywołań narzędzi',
   'settings.providers.page.custom.error.positiveInteger': 'Wpisz dodatnią liczbę całkowitą',
   'settings.providers.page.custom.authFailure.keyAfterConfig': 'Dostawca został zapisany, ale jego klucz API nie. Zapisz ponownie, aby ponowić zapis klucza, lub rozłącz, aby usunąć dostawcę.',

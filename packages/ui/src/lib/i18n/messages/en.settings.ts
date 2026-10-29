@@ -1734,6 +1734,7 @@ export const settingsDict = {
   'settings.providers.page.custom.models.inputCapabilities': 'Input capabilities',
   'settings.providers.page.custom.models.outputCapabilities': 'Output capabilities',
   'settings.providers.page.custom.models.tools': 'Tool calls',
+  'settings.providers.page.custom.models.imageGeneration': 'Image generation model',
   'settings.providers.page.custom.models.toolsOff': 'no tool calls',
   'settings.providers.page.custom.models.variantsLabel': 'Reasoning levels',
   'settings.providers.page.custom.models.variantsPlaceholder': 'low, medium, high',

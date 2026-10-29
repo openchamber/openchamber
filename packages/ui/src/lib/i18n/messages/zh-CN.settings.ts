@@ -1732,6 +1732,7 @@ export const settingsDict = {
   'settings.providers.page.custom.models.inputCapabilities': '输入能力',
   'settings.providers.page.custom.models.outputCapabilities': '输出能力',
   'settings.providers.page.custom.models.tools': '工具调用',
+  'settings.providers.page.custom.models.imageGeneration': '图像生成模型',
   'settings.providers.page.custom.models.toolsOff': '不支持工具调用',
   'settings.providers.page.custom.error.positiveInteger': '请输入正整数',
   'settings.providers.page.custom.authFailure.keyAfterConfig': '提供商已保存，但其 API 密钥未保存。请再次保存以重试密钥，或断开连接以移除该提供商。',

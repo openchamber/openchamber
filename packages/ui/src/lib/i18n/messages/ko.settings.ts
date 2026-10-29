@@ -1732,6 +1732,7 @@ export const settingsDict = {
   'settings.providers.page.custom.models.inputCapabilities': '입력 기능',
   'settings.providers.page.custom.models.outputCapabilities': '출력 기능',
   'settings.providers.page.custom.models.tools': '도구 호출',
+  'settings.providers.page.custom.models.imageGeneration': '이미지 생성 모델',
   'settings.providers.page.custom.models.toolsOff': '도구 호출 없음',
   'settings.providers.page.custom.error.positiveInteger': '양의 정수를 입력하세요',
   'settings.providers.page.custom.authFailure.keyAfterConfig': '공급자는 저장되었지만 API 키는 저장되지 않았습니다. 다시 저장하여 키를 재시도하거나, 연결을 해제하여 공급자를 제거하세요.',

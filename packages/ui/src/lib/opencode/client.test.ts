@@ -833,6 +833,10 @@ describe("messages and config", () => {
     expect(catalog.providers).toEqual([{ id: "openai", name: "OpenAI" }])
     expect(catalog.models).toHaveLength(1)
     expect(catalog.default).toEqual({ id: "x", providerID: "openai" })
+    // Without types OpenCode lists chat models only, and an image-only provider
+    // would vanish from Settings → Providers.
+    const modelList = requests.find((request) => request.url.pathname === "/api/model")
+    expect(modelList?.url.searchParams.getAll("types")).toEqual(["chat", "image"])
   })
 
   for (const { label, variants } of [

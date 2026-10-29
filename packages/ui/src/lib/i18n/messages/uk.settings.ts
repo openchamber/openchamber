@@ -1807,6 +1807,7 @@ export const settingsDict = {
   "settings.providers.page.custom.models.inputCapabilities": "Вхідні можливості",
   "settings.providers.page.custom.models.outputCapabilities": "Вихідні можливості",
   "settings.providers.page.custom.models.tools": "Виклики інструментів",
+  "settings.providers.page.custom.models.imageGeneration": "Модель для генерації зображень",
   "settings.providers.page.custom.models.toolsOff": "без викликів інструментів",
   "settings.providers.page.custom.error.positiveInteger": "Введіть додатне ціле число",
   "settings.providers.page.toast.customProviderSaveFailed": "Не вдалося зберегти власного провайдера",

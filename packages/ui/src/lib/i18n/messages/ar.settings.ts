@@ -1732,6 +1732,7 @@ export const settingsDict = {
   'settings.providers.page.custom.models.inputCapabilities': 'قدرات الإدخال',
   'settings.providers.page.custom.models.outputCapabilities': 'قدرات المخرجات',
   'settings.providers.page.custom.models.tools': 'استدعاءات الأدوات',
+  'settings.providers.page.custom.models.imageGeneration': 'نموذج لتوليد الصور',
   'settings.providers.page.custom.models.toolsOff': 'بدون استدعاءات أدوات',
   'settings.providers.page.custom.models.variantsLabel': 'مستويات التفكير',
   'settings.providers.page.custom.models.variantsPlaceholder': 'low، medium، high',

@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import {
   CONFIG_FILE,
   readConfigLayers,
@@ -16,6 +17,7 @@ import {
   toNpmPackage,
 } from './config-v2.js';
 
+const MODEL_TYPE_SCHEMA = z.string().trim().min(1);
 const PROVIDER_ID_PATTERN = /^[a-z0-9][a-z0-9-_]*$/;
 const BASE_URL_PATTERN = /^https?:\/\//;
 const OPENAI_COMPATIBLE_NPM = '@ai-sdk/openai-compatible';
@@ -122,6 +124,10 @@ function validateCustomProviderConfig(providerId, config, options = {}) {
       return { ok: false, error: `Model "${trimmedId}" requires a name` };
     }
     normalizedModels[trimmedId] = { modelID: trimmedId, name: modelName };
+    // Any type OpenCode knows (`chat`, `image`, `decision`, ...) passes through;
+    // absent keeps the stored one.
+    const modelType = MODEL_TYPE_SCHEMA.safeParse(modelValue.type).data;
+    if (modelType) normalizedModels[trimmedId].type = modelType;
     if (isPlainObject(modelValue.limit)) {
       const context = modelValue.limit.context;
       const output = modelValue.limit.output;

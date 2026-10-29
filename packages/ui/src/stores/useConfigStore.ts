@@ -1166,6 +1166,7 @@ subscribeRuntimeEndpointChanged((detail) => {
         directoryScoped: {},
         projectConfigErrors: {},
         lastInitFailure: null,
+        imageOnlyProviders: {},
         providers: [],
         agents: [],
         providersLoaded: false,
@@ -1440,6 +1441,12 @@ interface ConfigStore {
     lastInitFailure: InitFailure | null;
     /** Projects whose OpenCode config OpenCode refused to load, keyed by config-directory key. Runtime-only. */
     projectConfigErrors: Record<string, ProjectConfigError>;
+    /**
+     * Per config-directory key: providers whose every model generates images.
+     * Kept apart from `providers`, which feeds the chat pickers; only Settings →
+     * Providers lists them. Runtime-only.
+     */
+    imageOnlyProviders: Record<string, ProviderWithModelList[]>;
     isInitialized: boolean;
     modelsMetadata: Map<string, ModelMetadata>;
     // OpenChamber settings-based defaults (take precedence over agent preferences)
@@ -1634,6 +1641,18 @@ export const selectProvidersForDirectory = (
 const EMPTY_PROVIDERS: ProviderWithModelList[] = [];
 const EMPTY_AGENTS: Agent[] = [];
 
+/**
+ * Providers of one project that offer only image models. Settings → Providers
+ * lists them next to `selectProvidersForDirectory`; no chat picker reads them.
+ */
+export const selectImageOnlyProvidersForDirectory = (
+    state: Pick<ConfigStore, "imageOnlyProviders" | "activeDirectoryKey">,
+    directory?: string | null,
+): ProviderWithModelList[] => {
+    const directoryKey = directory == null ? state.activeDirectoryKey : toConfigDirectoryKey(directory);
+    return state.imageOnlyProviders[directoryKey] ?? EMPTY_PROVIDERS;
+};
+
 export const selectConfigAgentsForDirectory = (
     state: Pick<ConfigStore, 'agents' | 'directoryScoped' | 'activeDirectoryKey'>,
     directory?: string | null,
@@ -1744,6 +1763,7 @@ export const useConfigStore = create<ConfigStore>()(
                 lastDisconnectReason: null,
                 lastInitFailure: null,
                 projectConfigErrors: {},
+                imageOnlyProviders: {},
                 isInitialized: false,
                 modelsMetadata: new Map<string, ModelMetadata>(),
                 settingsDefaultModel: undefined,
@@ -2154,6 +2174,14 @@ export const useConfigStore = create<ConfigStore>()(
                             nextState.directoryScoped = nextDirectoryScoped;
                         }
 
+                        if (targetDirectoryKey === null) {
+                            if (Object.keys(state.imageOnlyProviders).length > 0) nextState.imageOnlyProviders = {};
+                        } else if (state.imageOnlyProviders[targetDirectoryKey]) {
+                            const { [targetDirectoryKey]: _cleared, ...imageOnlyProviders } = state.imageOnlyProviders;
+                            void _cleared;
+                            nextState.imageOnlyProviders = imageOnlyProviders;
+                        }
+
                         if (targetDirectoryKey === null || targetDirectoryKey === state.activeDirectoryKey) {
                             nextState.providersLoaded = false;
                             if (state.providers.length > 0) {
@@ -2230,12 +2258,16 @@ export const useConfigStore = create<ConfigStore>()(
                                 ? { [apiResult.default.providerID]: apiResult.default.id }
                                 : {};
 
+                            // The catalog carries chat and image models. Only chat models
+                            // (an unset type is chat) reach `providers` and the pickers.
                             const modelsByProvider = new Map<string, ProviderModel[]>();
+                            const imageModelsByProvider = new Map<string, ProviderModel[]>();
                             for (const model of catalogModels) {
                                 if (!model.enabled) continue;
-                                const bucket = modelsByProvider.get(model.providerID);
+                                const byProvider = model.type === "image" ? imageModelsByProvider : modelsByProvider;
+                                const bucket = byProvider.get(model.providerID);
                                 if (bucket) bucket.push(model);
-                                else modelsByProvider.set(model.providerID, [model]);
+                                else byProvider.set(model.providerID, [model]);
                             }
                             // A provider the user switched off, or one with no usable
                             // model, is not offerable — v2 replaced the `connected` list
@@ -2246,8 +2278,24 @@ export const useConfigStore = create<ConfigStore>()(
                                     ...provider,
                                     models: modelsByProvider.get(provider.id) ?? [],
                                 }));
+                            // A provider with image models only is still configured and
+                            // manageable, so Settings lists it; chat never offers it.
+                            const imageOnlyProviders: ProviderWithModelList[] = providers
+                                .filter((provider) => provider.activation !== "disabled"
+                                    && !modelsByProvider.has(provider.id)
+                                    && imageModelsByProvider.has(provider.id))
+                                .map((provider) => ({
+                                    ...provider,
+                                    models: imageModelsByProvider.get(provider.id) ?? [],
+                                }));
 
                             if (!isConfigRuntimeContextCurrent(runtimeContext)) return;
+                            set((state) => {
+                                const previous = state.imageOnlyProviders[directoryKey] ?? EMPTY_PROVIDERS;
+                                return isSameProviderCatalog(previous, imageOnlyProviders)
+                                    ? state
+                                    : { imageOnlyProviders: { ...state.imageOnlyProviders, [directoryKey]: imageOnlyProviders } };
+                            });
                             // A re-read that returns the same catalog keeps the arrays the
                             // store already holds, so nothing subscribed to them re-renders.
                             const nextProviders = isSameProviderCatalog(previousProviders, processedProviders)

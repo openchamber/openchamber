@@ -1617,6 +1617,7 @@ export const settingsDict = {
   'settings.providers.page.custom.models.inputCapabilities': '輸入能力',
   'settings.providers.page.custom.models.outputCapabilities': '輸出能力',
   'settings.providers.page.custom.models.tools': '工具呼叫',
+  'settings.providers.page.custom.models.imageGeneration': '影像生成模型',
   'settings.providers.page.custom.models.toolsOff': '不支援工具呼叫',
   'settings.providers.page.custom.error.positiveInteger': '請輸入正整數',
   'settings.providers.page.custom.authFailure.keyAfterConfig': '提供者已儲存，但其 API 金鑰未儲存。請再次儲存以重試金鑰，或中斷連線以移除該提供者。',

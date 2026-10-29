@@ -1702,6 +1702,7 @@ export const settingsDict = {
   'settings.providers.page.custom.models.inputCapabilities': 'Eingabefähigkeiten',
   'settings.providers.page.custom.models.outputCapabilities': 'Ausgabefähigkeiten',
   'settings.providers.page.custom.models.tools': 'Tool-Aufrufe',
+  'settings.providers.page.custom.models.imageGeneration': 'Bildgenerierungsmodell',
   'settings.providers.page.custom.models.toolsOff': 'keine Tool-Aufrufe',
   'settings.providers.page.custom.error.positiveInteger': 'Geben Sie eine positive ganze Zahl ein',
   'settings.providers.page.custom.authFailure.keyAfterConfig': 'Der Anbieter wurde gespeichert, sein API-Schlüssel jedoch nicht. Speichern Sie erneut, um den Schlüssel noch einmal zu versuchen, oder trennen Sie die Verbindung, um den Anbieter zu entfernen.',

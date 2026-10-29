@@ -698,6 +698,25 @@ describe('edit form from the stored config entry', () => {
     expect(config?.models.vision?.capabilities).toEqual({ tools: true, input: ['text', 'image'], output: ['text'] });
   });
 
+  test('a saved model type loads and saves as it is, image or any other', () => {
+    const stored = storedProviderEntrySchema.parse({
+      name: 'Campus LLM',
+      settings: { baseURL: 'https://llm.example.edu/v1' },
+      models: {
+        flare: { name: 'Flare', type: 'image' },
+        judge: { name: 'Judge', type: 'decision' },
+        fast: { name: 'Fast' },
+      },
+    });
+    const form = providerToEditFormState(live, stored);
+
+    expect(form.models.map((model) => [model.id, model.type])).toEqual([['flare', 'image'], ['judge', 'decision'], ['fast', undefined]]);
+    const models = editAndSave(form)?.models;
+    expect(models?.flare.type).toBe('image');
+    expect(models?.judge.type).toBe('decision');
+    expect(models?.fast?.type).toBeUndefined();
+  });
+
   test('a stored model without levels saves without the generated ones', () => {
     const stored = storedProviderEntrySchema.parse({
       name: 'Campus LLM',

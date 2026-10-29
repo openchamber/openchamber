@@ -1765,6 +1765,7 @@ export const settingsDict = {
   'settings.providers.page.custom.models.inputCapabilities': '入力機能',
   'settings.providers.page.custom.models.outputCapabilities': '出力機能',
   'settings.providers.page.custom.models.tools': 'ツール呼び出し',
+  'settings.providers.page.custom.models.imageGeneration': '画像生成モデル',
   'settings.providers.page.custom.models.toolsOff': 'ツール呼び出しなし',
   'settings.providers.page.custom.error.positiveInteger': '正の整数を入力してください',
   'settings.providers.page.custom.authFailure.keyAfterConfig': 'プロバイダーは保存されましたが、API キーは保存されませんでした。もう一度保存してキーを再試行するか、切断してプロバイダーを削除してください。',

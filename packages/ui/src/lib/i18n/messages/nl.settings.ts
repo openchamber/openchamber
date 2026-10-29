@@ -1761,6 +1761,7 @@ export const settingsDict = {
   'settings.providers.page.custom.models.inputCapabilities': 'Invoermogelijkheden',
   'settings.providers.page.custom.models.outputCapabilities': 'Uitvoermogelijkheden',
   'settings.providers.page.custom.models.tools': 'Toolaanroepen',
+  'settings.providers.page.custom.models.imageGeneration': 'Model voor beeldgeneratie',
   'settings.providers.page.custom.models.toolsOff': 'geen toolaanroepen',
   'settings.providers.page.custom.error.positiveInteger': 'Voer een positief geheel getal in',
   'settings.providers.page.custom.authFailure.keyAfterConfig': 'De provider is opgeslagen, maar de API-sleutel niet. Sla opnieuw op om de sleutel opnieuw te proberen, of verbreek de verbinding om de provider te verwijderen.',
