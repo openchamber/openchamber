@@ -1600,7 +1600,17 @@ const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader; subage
         if (!isExpanded) dispatchRowExpand(rowRef.current);
         toggleRow(toolId);
     };
-    const state = part.state;
+    const presentation = useGuestToolPresentation(part.tool);
+    // A shelled call (the server leaves finished results out of message pages)
+    // is read whole only while this row shows it; until then the stored call
+    // renders as it arrived.
+    const shouldRenderExpandedContent = useDeferredExpandedContent(isExpanded);
+    const contentCompletion = useToolContentCompletion(
+        part,
+        shouldRenderExpandedContent || (presentation !== null && guestToolHeaderReadsOutput(presentation)),
+    );
+    const renderedPart = contentCompletion.status === 'whole' ? contentCompletion.part : part;
+    const state = renderedPart.state;
     const stateWithData = state as ToolStateWithMetadata;
     const metadata = stateWithData.metadata;
     const input = stateWithData.input;
@@ -1609,9 +1619,6 @@ const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader; subage
 
     const normalizedPartTool = normalizeToolName(part.tool);
     const isTaskTool = isSubagentTool(normalizedPartTool);
-    // The registry sees the full name OpenCode reported (`mcp.jira.search`);
-    // the built-in switches below keep the normalized one.
-    const presentation = useGuestToolPresentation(part.tool);
 
     const status = state?.status as string | undefined;
     const isFinalized = status === 'completed' || status === 'error' || status === 'aborted' || status === 'failed' || status === 'timeout' || status === 'cancelled';
@@ -1907,11 +1914,6 @@ const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader; subage
 
     const iconStyle = isError ? TOOL_ERROR_ICON_STYLE : TOOL_NORMAL_ICON_STYLE;
     const titleStyle = isError ? TOOL_ERROR_TITLE_STYLE : TOOL_NORMAL_TITLE_STYLE;
-    const shouldRenderExpandedContent = useDeferredExpandedContent(isExpanded);
-    const contentCompletion = useToolContentCompletion(
-        part,
-        shouldRenderExpandedContent || (presentation !== null && guestToolHeaderReadsOutput(presentation)),
-    );
     // Shell and subagent rows carry their duration: live while they run, final once settled.
     // Image generation takes tens of seconds; the ticking time shows it is still at work.
     const showsDuration = isShellTool(normalizedPartTool) || isTaskTool || part.tool === 'openchamber_image';
@@ -2142,8 +2144,8 @@ const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader; subage
                         <BlockLine onToggle={() => onToggle(part.id)} topOffset={1} />
                         {contentCompletion.status === 'whole' ? (
                             <ToolExpandedContent
-                                part={part}
-                                state={state}
+                                part={contentCompletion.part}
+                                state={contentCompletion.part.state}
                                 currentDirectory={currentDirectory}
                                 isExpanded={isExpanded}
                                 onShowPopup={onShowPopup}

@@ -1133,7 +1133,8 @@ export class SessionMessageLoader {
       const page = await retry(async () => {
         attempts += 1
         // Finished tool results arrive as shells; a row that shows one
-        // completes its message (`tool-content-completion.ts`).
+        // reads the message by id and renders that call only
+        // (`useToolContentCompletion.ts`).
         return this.sdk.getSessionMessages(target.sessionID, { limit, cursor, partShells: true }, target.directory)
       })
       const records = page.items.filter((record) => Boolean(record?.info?.id))
