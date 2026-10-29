@@ -877,7 +877,13 @@ including in memory when persistence is disabled.
 Both modes reuse `ComposerEditor` and `ModelControls`; BTW transitions put the
 caret at the end. BTW copies the main model/effort once, including explicit
 Default, and uses `plan` or the first selectable agent. Its controlled model
-path only writes BTW selections. Files attach as in the normal composer
+path only writes BTW selections. The cycle-favorite-model shortcuts step the
+BTW model from the one its chip shows and save it as the BTW model picker
+does; the app-wide handlers decline while BTW is open, so the parent's model
+never moves, and an open overlay stops both. As with permission keys, a key
+pressed in a chat pinned in the side panel moves only that chat's BTW model,
+and a key pressed anywhere else only the main chat's. The other model, effort and agent
+shortcuts stay off in BTW. Files attach as in the normal composer
 (picker, paste, drop) and live in the BTW draft identity's attachment slot,
 so they never mix with the main draft's files; the attach control offers
 only local files. Goals, expansion, shell, linked context (issues, PRs,

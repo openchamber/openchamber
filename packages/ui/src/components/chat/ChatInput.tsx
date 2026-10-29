@@ -148,7 +148,8 @@ import { usePermissionStore } from '@/stores/permissionStore';
 import { cyclePermissionMode } from './permissionAutoAccept';
 import { displayedPermissionMode, nextPermissionMode } from '@/stores/utils/permissionAutoAccept';
 import { selectAutoReady, selectSafetyNetAvailable, useRoutingStore } from '@/stores/useRoutingStore';
-import { useKeybind } from '@/hooks/useKeybind';
+import { useKeybind, useKeybinds } from '@/hooks/useKeybind';
+import { getNextFavoriteModel } from '@/lib/modelRefs';
 import { hasOpenDropdown } from '@/hooks/keyboard-shortcut-dom';
 import { useAuthSessionStore } from '@/lib/runtime-auth-expiry';
 import { useI18n } from '@/lib/i18n';
@@ -716,6 +717,38 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         selections.saveAgentModelForSession(btwComposerSessionId, agent, model.providerId, model.modelId);
         selections.saveAgentModelVariantForSession(btwComposerSessionId, agent, model.providerId, model.modelId, variant);
     }, [btwComposerSessionId, effectiveBtwSelection, isBtwActive]);
+    // While BTW is open the app-wide favorite-model handlers decline, so the
+    // parent's model never moves; these step the BTW model from the one its
+    // chip shows and save it the way the BTW model picker does (#5914). As
+    // with permission keys, a key pressed in a chat pinned in the side panel
+    // is that chat's and a key pressed anywhere else is the main chat's.
+    const cycleBtwFavoriteModel = (event: KeyboardEvent, delta: number): boolean | void => {
+        const keyColumn = event.target instanceof Element ? event.target.closest('[data-chat-column="pinned"]') : null;
+        if (columnPinned ? !keyColumn?.contains(composerFormRef.current) : keyColumn) return false;
+        const ui = useUIStore.getState();
+        const hasOverlay = ui.isSettingsDialogOpen
+            || ui.isCommandPaletteOpen
+            || ui.isHelpDialogOpen
+            || ui.isSessionSwitcherOpen
+            || ui.isAboutDialogOpen;
+        if (hasOverlay || !btwComposerSessionId) return false;
+        const { model, agent } = effectiveBtwSelection;
+        const next = getNextFavoriteModel(
+            ui.favoriteModels,
+            providerCatalog,
+            ui.hiddenModels,
+            { providerID: model?.providerId ?? '', modelID: model?.modelId ?? '' },
+            delta,
+        );
+        if (!next) return false;
+        const selections = useSelectionStore.getState();
+        selections.saveSessionModelSelection(btwComposerSessionId, next.providerID, next.modelID);
+        if (agent) selections.saveAgentModelForSession(btwComposerSessionId, agent, next.providerID, next.modelID);
+    };
+    useKeybinds(isBtwActive ? {
+        cycle_favorite_model_forward: (event) => cycleBtwFavoriteModel(event, 1),
+        cycle_favorite_model_backward: (event) => cycleBtwFavoriteModel(event, -1),
+    } : {});
     const isMobile = useUIStore((state) => state.isMobile);
     const hasHardwareKeyboard = useHardwareKeyboard();
     const enterToSend = useUIStore((state) => state.enterToSend);
