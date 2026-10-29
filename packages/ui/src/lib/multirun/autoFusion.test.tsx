@@ -20,7 +20,7 @@ mock.module('@/lib/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) 
 
 const { RunAutoFusion } = await import('./autoFusion');
 
-test('automatic fusion waits for direct and nested subagents and starts once after the parent finishes', async () => {
+test('automatic fusion waits for subagents and a newer parent completion, including a batched resumption', async () => {
   const dom = new Window({ url: 'http://fusion.test' });
   const originals = new Map<string, PropertyDescriptor | undefined>();
   for (const [name, value] of Object.entries({
@@ -70,8 +70,13 @@ test('automatic fusion waits for direct and nested subagents and starts once aft
     // The child can settle before the parent receives and processes its result.
     await update();
     expect(fusionCalls.length).toBe(0);
-    await update('lane-a');
+    await update('unrelated');
     expect(fusionCalls.length).toBe(0);
+    // A fast parent resumption may publish its busy and idle events together.
+    // Its newer completion is authoritative even without a busy render.
+    const parent = sessionById.get('lane-a');
+    if (!parent) throw new Error('Missing parent fixture');
+    sessionById.set(parent.id, { ...parent, time: { ...parent.time, updated: 3, idle: 3 } });
     await update('unrelated');
     expect(fusionCalls.length).toBe(1);
     expect(fusionCalls[0]?.sourceIds).toEqual(['lane-a', 'lane-b']);

@@ -123,9 +123,10 @@ the page that launched the run (`RUN_LAUNCHER_ID`), when every lane was seen
 running on this page and has since left the live busy set with an outcome,
 with no running subagent below it. The descendant check uses the same merged
 session map as run membership, so it covers nested children across directories.
-An idle lane with a running descendant must be seen running again before it
-can finish, so a gap between the child settling and the parent resuming cannot
-start fusion with the earlier outcome.
+An idle lane with a running descendant must record a newer `time.idle` before
+it can finish, so a gap between the child settling and the parent resuming
+cannot start fusion with the earlier outcome. The completion timestamp also
+covers a parent resumption that starts and finishes within one UI update.
 Persisted history never counts as finished; another client, or the launcher
 after a reload, fuses from the overview instead.
 

@@ -21,10 +21,10 @@ export const resolveFusionJudge = (selection: { providerID: string; modelID: str
 
 const startedRunKeys = new Set<string>();
 // Lanes seen running on this page. A lane is finished only after it was seen
-// running and then left the live busy set with an outcome. Idling for a
-// subagent clears that observation until the parent resumes, so the child-to-
-// parent handoff cannot fuse the parent's preliminary answer.
+// running and then left the live busy set with an outcome. A parent idling for
+// a subagent must record a newer completion before its answer can be fused.
 const seenRunningLaneIds = new Set<string>();
+const waitingLaneIdleTimes = new Map<string, number | undefined>();
 
 type FusionStart = (run: MultiRunSummary) => Promise<void>;
 export type AutoFusionFailure = 'no-outputs' | 'failed';
@@ -57,13 +57,15 @@ function useRunAutoFusion(onStartFailed: (failure: AutoFusionFailure) => void): 
       for (const lane of run.lanes) {
         if (activeSessionIds.has(lane.sessionId)) seenRunningLaneIds.add(lane.sessionId);
         else if (hasActiveSubagent(lane.sessionId, activeSessionIds, (id) => sessionById.get(id)?.parentID)) {
-          seenRunningLaneIds.delete(lane.sessionId);
+          waitingLaneIdleTimes.set(lane.sessionId, sessionById.get(lane.sessionId)?.time.idle);
         }
       }
       const finished = run.lanes.every((lane) => (
         seenRunningLaneIds.has(lane.sessionId)
         && !activeSessionIds.has(lane.sessionId)
         && sessionById.get(lane.sessionId)?.outcome !== undefined
+        && (!waitingLaneIdleTimes.has(lane.sessionId)
+          || (sessionById.get(lane.sessionId)?.time.idle ?? 0) > (waitingLaneIdleTimes.get(lane.sessionId) ?? 0))
       ));
       if (finished) void start(run);
     }
