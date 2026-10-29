@@ -218,6 +218,21 @@ describe('createOpenCodeTrust', () => {
     expect((await trust.refusalFor({ ...prompt, resolveSessionDirectory: async () => { throw new Error('down'); } }))?.status).toBe(503);
   });
 
+  it('checks an MCP form reply against the folder it names, without looking up a session', async () => {
+    const resolveSessionDirectory = async () => { throw new Error('global is not a session'); };
+    const reply = {
+      method: 'POST',
+      path: '/api/session/global/form/frm_1/reply',
+      headers: { 'x-opencode-directory': encodeURIComponent(repo) },
+      resolveSessionDirectory,
+    };
+    expect(await makeTrust().refusalFor(reply)).toBeNull();
+    expect(await makeTrust().refusalFor({ ...reply, method: 'DELETE', path: '/api/session/global/form/frm_1' })).toBeNull();
+
+    await write('.opencode/plugins/probe.js', 'export default {}');
+    expect((await makeTrust().refusalFor(reply))?.status).toBe(403);
+  });
+
   it('reads the folder from the location query as well', async () => {
     await write('.opencode/plugins/probe.js', 'export default {}');
     const refusal = await makeTrust().refusalFor({

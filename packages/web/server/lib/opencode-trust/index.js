@@ -40,6 +40,9 @@ const GLOBAL_MUTATIONS = [
 ];
 
 const SESSION_SCOPED = /^\/api\/(?:experimental\/)?session\/([^/]+)\/.+$/;
+// OpenCode files MCP elicitation forms under this owner, which is not a
+// session: its routes run in the folder the request names.
+const LOCATION_SCOPED_FORM_OWNER = 'global';
 
 const trustQuerySchema = z.object({ directory: z.string().trim().min(1) });
 const trustAnswerSchema = z.object({ directory: z.string().trim().min(1), fingerprint: z.string().nullable() });
@@ -215,7 +218,7 @@ export const createOpenCodeTrust = ({
     if (isGlobalRoute(normalizedMethod, url.pathname)) return null;
     const directories = directoriesNamedBy(url, lowercaseKeys(headers));
     const sessionID = SESSION_SCOPED.exec(url.pathname)?.[1];
-    if (sessionID && resolveSessionDirectory) {
+    if (sessionID && sessionID !== LOCATION_SCOPED_FORM_OWNER && resolveSessionDirectory) {
       let sessionDirectory;
       try {
         sessionDirectory = await resolveSessionDirectory(decodeURIComponent(sessionID));

@@ -45,6 +45,12 @@ Where the check runs:
   event stream, credentials, deleting, moving or viewing a session, unloading a
   location) pass, so a paused folder still lists and shows its sessions. Any
   other route, including ones OpenCode adds later, is checked.
+- A session route is checked against the session's folder as well, read from
+  OpenCode's session record. The `global` owner is the exception: OpenCode
+  files MCP elicitation forms under it, it has no session record, and its
+  routes, such as a form's reply and cancel, run in the folder the request
+  names, so only that folder is checked. A lookup of `global` answers 400, which would refuse
+  every reply to such a form.
 - Trust is per repository: every worktree of one repository shares the
   answers, and a worktree whose configuration differs from every trusted one
   asks. The latest 20 fingerprints per repository are kept, so switching
