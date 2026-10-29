@@ -8,6 +8,7 @@ import { useTraySync } from './useTraySync';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
+import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { getPinnedSessionKey } from '@/lib/sessionPins';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -67,7 +68,8 @@ describe('Dock badge with the macOS menu bar disabled', () => {
     });
     useProjectsStore.setState({ projects: [{ id: 'project', path: '/project' }] });
     useGlobalSessionsStore.setState({ activeSessions: [session('root'), session('child', 'root')] });
-    useUIStore.setState({ dockBadgeEnabled: true, notifyOnSubtasks: false });
+    useUIStore.setState({ dockBadgeEnabled: true, notifyOnSubtasks: false, sessionWorkEnabled: true });
+    useSessionDisplayStore.setState({ showChatsSection: true, showPinnedSection: true, showWorkSection: true });
     counts.length = 0;
     listenerCount = 0;
     intervalCount = 0;
@@ -96,6 +98,47 @@ describe('Dock badge with the macOS menu bar disabled', () => {
     useProjectsStore.setState({ projects: [] });
     await flush();
     expect(counts).toEqual([1, 0]);
+  });
+
+  test('counts a chat while the Chats section is shown', async () => {
+    // Pinned and in work, it still has no row elsewhere: those zones leave chats out.
+    useGlobalSessionsStore.setState({
+      activeSessions: [{
+        ...session('chat', undefined, '/tmp/chats', CHAT_DRAFT_PROJECT_ID),
+        metadata: { openchamber: { pinned: { at: 1 }, work: { state: 'open' } } },
+      }],
+    });
+    useSessionDisplayStore.setState({ showChatsSection: false });
+    finishTurn('chat');
+    await act(async () => root.render(<Harness />));
+    expect(counts).toEqual([0]);
+    useSessionDisplayStore.setState({ showChatsSection: true });
+    await flush();
+    expect(counts).toEqual([0, 1]);
+  });
+
+  test('counts a session only the Pinned or In work zone lists while that zone is shown', async () => {
+    useGlobalSessionsStore.setState({
+      activeSessions: [
+        { ...session('in-work', undefined, '/tmp/eval-run'), metadata: { openchamber: { work: { state: 'open' } } } },
+        { ...session('pinned', undefined, '/tmp/eval-run'), metadata: { openchamber: { pinned: { at: 1 } } } },
+      ],
+    });
+    useSessionDisplayStore.setState({ showPinnedSection: false, showWorkSection: false });
+    finishTurn('in-work');
+    finishTurn('pinned');
+    await act(async () => root.render(<Harness />));
+    expect(counts).toEqual([0]);
+    useSessionDisplayStore.setState({ showPinnedSection: true });
+    await flush();
+    expect(counts).toEqual([0, 1]);
+    useSessionDisplayStore.setState({ showWorkSection: true });
+    await flush();
+    expect(counts).toEqual([0, 1, 2]);
+    // Turning the work feature off hides the In work zone too.
+    useUIStore.setState({ sessionWorkEnabled: false });
+    await flush();
+    expect(counts).toEqual([0, 1, 2, 1]);
   });
 
   test('publishes unread chats, clears viewed chats, and respects the badge toggle without tray timers or listeners', async () => {
@@ -309,6 +352,7 @@ describe('Tray sessions follow the configured projects', () => {
       ],
     });
     useUIStore.setState({ dockBadgeEnabled: true, notifyOnSubtasks: false });
+    useSessionDisplayStore.setState({ showChatsSection: true, showPinnedSection: true, showWorkSection: true });
     snapshots.length = 0;
     root = createRoot(document.createElement('div'));
   });
@@ -341,6 +385,10 @@ describe('Tray sessions follow the configured projects', () => {
       ],
     });
     await act(async () => root.render(<Harness />));
+    await flush();
+    expect(lastSnapshot()?.sessions?.map((entry) => entry.id).sort()).toEqual(['chat', 'space']);
+    // With the Chats section hidden the tray still lists the chat.
+    useSessionDisplayStore.setState({ showChatsSection: false });
     await flush();
     expect(lastSnapshot()?.sessions?.map((entry) => entry.id).sort()).toEqual(['chat', 'space']);
   });
@@ -376,6 +424,11 @@ describe('Tray sessions follow the configured projects', () => {
     const pinKey = getPinnedSessionKey(getRuntimeKey(), '/tmp/removed-too', 'pinned');
     useSessionPinnedStore.setState({ ids: new Set(pinKey ? [pinKey] : []) });
     await act(async () => root.render(<Harness />));
+    await flush();
+    expect(lastSnapshot()?.sessions?.map((entry) => entry.id).sort()).toEqual(['in-work', 'pinned']);
+    // With the zones hidden the tray still lists them: a tray row opens the
+    // session directly.
+    useSessionDisplayStore.setState({ showPinnedSection: false, showWorkSection: false });
     await flush();
     expect(lastSnapshot()?.sessions?.map((entry) => entry.id).sort()).toEqual(['in-work', 'pinned']);
     useSessionPinnedStore.setState({ ids: new Set() });
