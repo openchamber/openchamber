@@ -18,7 +18,9 @@ const PROGRESS_DELAY_MS = 500;
 
 /** The call to render from a message read by id, matched by the part id. */
 const resolveToolPart = (parts: Part[], part: ToolPart): ToolPart | null => {
-  const match = parts.find((candidate) => candidate.type === 'tool' && candidate.id === part.id);
+  const match = parts.find(
+    (candidate): candidate is ToolPart => candidate.type === 'tool' && candidate.id === part.id,
+  );
   return match ?? null;
 };
 
