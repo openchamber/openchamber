@@ -7,7 +7,9 @@ const browser = new Window({ url: 'http://localhost' });
 let root: Root;
 const descriptors = new Map<string, PropertyDescriptor | undefined>();
 // React DOM detects input-event support when imported, so install the DOM first.
-for (const [key, value] of Object.entries({ window: browser, document: browser.document, navigator: browser.navigator, localStorage: browser.localStorage, Element: browser.Element, HTMLElement: browser.HTMLElement, IS_REACT_ACT_ENVIRONMENT: true })) {
+for (const [key, value] of Object.entries({ window: browser, document: browser.document, navigator: browser.navigator, localStorage: browser.localStorage, Element: browser.Element, HTMLElement: browser.HTMLElement, IS_REACT_ACT_ENVIRONMENT: true,
+  // The row's context menu orders its items and animates its popup.
+  Node: browser.Node, MouseEvent: browser.MouseEvent, DOMRect: browser.DOMRect, getComputedStyle: browser.getComputedStyle.bind(browser), requestAnimationFrame: (callback: FrameRequestCallback) => { callback(0); return 1; }, cancelAnimationFrame: () => undefined })) {
   descriptors.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
   Object.defineProperty(globalThis, key, { value, configurable: true });
 }
@@ -100,6 +102,25 @@ test('the chats of a deleted space are grouped under its name and cannot be rest
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test('right-clicking an archived row offers to copy its session ID', async () => {
+  useGlobalSessionsStore.setState({
+    archivedSessions: [session('ses_copy1', 'Copy me')],
+    activeSessions: [],
+  });
+  await act(async () => root.render(<I18nProvider><ArchiveView /></I18nProvider>));
+  const row = [...document.querySelectorAll('[role="button"]')].find((element) => element.textContent?.startsWith('Copy me'));
+  if (!row) throw new Error('Archived session row missing');
+  await act(async () => {
+    row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 }));
+  });
+  const items = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+  expect(items.map((item) => item.textContent)).toEqual(['Copy session ID', 'Restore', 'Delete']);
+  await act(async () => { items[0]?.click(); });
+  expect(await browser.navigator.clipboard.readText()).toBe('ses_copy1');
+  // Copying keeps the archive open; only a plain click opens the session.
+  expect(useUIStore.getState().isArchivePageOpen).toBe(true);
 });
 
 test('the mobile layout names each row\'s project, offers Restore without Delete, and leaves when a session opens', async () => {

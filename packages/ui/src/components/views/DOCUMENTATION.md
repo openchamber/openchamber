@@ -435,6 +435,10 @@ joined, not repeated: a session's subsessions come back one by one, and each
 would start it. Deleting an archive for good deletes only its sessions still in
 the archive that no other archive of the project holds.
 
+A right-click on a desktop row opens a menu of three items named as in the
+sidebar: Copy session ID, Restore where the row offers it, and Delete. The
+session ID is otherwise reachable only by opening the session.
+
 The phone shows the same page in one column: the groups are a row of chips
 that scrolls sideways (hidden while searching, since a search spans them
 all), and a selected project's archived worktrees are tiles above its other
