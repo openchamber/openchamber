@@ -120,9 +120,21 @@ and no answer at all is `NoFusionOutputsError`.
 Fusion results keep the group identity with role `fusion`, so they join the run
 as its first card. `autoFusion.ts` starts the configured fusion exactly once, on
 the page that launched the run (`RUN_LAUNCHER_ID`), when every lane was seen
-running on this page and has since left the live busy set with an outcome.
+running on this page and has since left the live busy set with an outcome,
+with no running subagent below it. The descendant check uses the same merged
+session map as run membership, so it covers nested children across directories.
+An idle lane with a running descendant must be seen running again before it
+can finish, so a gap between the child settling and the parent resuming cannot
+start fusion with the earlier outcome.
 Persisted history never counts as finished; another client, or the launcher
 after a reload, fuses from the overview instead.
+
+### Why automatic fusion waits for descendants
+
+A parent can report idle with an outcome while a background subagent still
+runs, then resume to incorporate its result. Checking the parent's status
+alone would send its preliminary answer to fusion. The shared live subagent
+check keeps automatic fusion pending through that pause.
 
 ## Overview
 

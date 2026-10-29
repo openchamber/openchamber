@@ -1,7 +1,7 @@
 import React from 'react';
 import { toast } from '@/components/ui';
 import { useConfigStore } from '@/stores/useConfigStore';
-import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
+import { hasActiveSubagent, useGlobalSessionStatusStore } from '@/sync/global-session-status';
 import { useI18n } from '@/lib/i18n';
 import { NoFusionOutputsError, startRunFusion, type FusionJudge } from './fusion';
 import type { MultiRunSummary } from './runs';
@@ -21,8 +21,9 @@ export const resolveFusionJudge = (selection: { providerID: string; modelID: str
 
 const startedRunKeys = new Set<string>();
 // Lanes seen running on this page. A lane is finished only after it was seen
-// running and then left the live busy set with an outcome: persisted history
-// or a missing status entry never counts as finished.
+// running and then left the live busy set with an outcome. Idling for a
+// subagent clears that observation until the parent resumes, so the child-to-
+// parent handoff cannot fuse the parent's preliminary answer.
 const seenRunningLaneIds = new Set<string>();
 
 type FusionStart = (run: MultiRunSummary) => Promise<void>;
@@ -55,6 +56,9 @@ function useRunAutoFusion(onStartFailed: (failure: AutoFusionFailure) => void): 
       if (run.autoFusion?.launcherId !== RUN_LAUNCHER_ID || startedRunKeys.has(run.key) || run.fusions.length > 0) continue;
       for (const lane of run.lanes) {
         if (activeSessionIds.has(lane.sessionId)) seenRunningLaneIds.add(lane.sessionId);
+        else if (hasActiveSubagent(lane.sessionId, activeSessionIds, (id) => sessionById.get(id)?.parentID)) {
+          seenRunningLaneIds.delete(lane.sessionId);
+        }
       }
       const finished = run.lanes.every((lane) => (
         seenRunningLaneIds.has(lane.sessionId)
