@@ -65,7 +65,7 @@ export interface HtmlRenderTheme {
     variables: Record<string, string>;
 }
 
-interface HtmlRenderMetrics {
+export interface HtmlRenderMetrics {
     /** The app's rem in px: the interface size setting scales it, and the controls with it. */
     rem: number;
     /** The chat's body text size in px: the page's root font size, so the page's rem follows the interface size. */

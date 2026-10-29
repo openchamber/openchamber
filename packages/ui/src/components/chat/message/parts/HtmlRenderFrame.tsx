@@ -3,7 +3,6 @@ import React from 'react';
 import { toast } from '@/components/ui';
 import { ToolbarTooltipButton } from '@/components/ui/action-toolbar';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
-import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useFrameAnnotation } from '@/components/browser/useFrameAnnotation';
 import { useWaitingBlink } from '@/hooks/useDurationTicker';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
@@ -41,41 +40,15 @@ import {
     htmlRenderPointerMessage,
     htmlRenderRevealMessage,
     htmlRenderSubmitReply,
-    htmlRenderTheme,
     htmlRenderThemeMessage,
     readHtmlRenderFrameMessage,
     type HtmlRenderAnswerState,
     type HtmlRenderKeyChord,
     type HtmlRenderSubmission,
-    type HtmlRenderTheme,
 } from './htmlRender';
 import { useRenderPageHtml } from './renderPageImages';
 import { saveFile } from './saveFile';
-
-const DEFAULT_SANS = '-apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif';
-const DEFAULT_MONO = 'ui-monospace, "SFMono-Regular", Menlo, monospace';
-
-/** The app theme as the page's variables, following theme and interface size switches live. */
-function useHtmlRenderTheme(): HtmlRenderTheme {
-    const { currentTheme } = useThemeSystem();
-    // The interface size setting scales the root font, and the app's
-    // controls with it; read again whenever it changes.
-    const interfaceSize = useUIStore((state) => state.fontSize);
-    return React.useMemo(() => {
-        // The user's font settings land on the root as these variables.
-        const style = getComputedStyle(document.documentElement);
-        const rem = Number.parseFloat(style.fontSize) || 16;
-        // The chat's body text size, which the styles set in rem (0.875, and
-        // 1 on phones).
-        const text = (Number.parseFloat(style.getPropertyValue('--text-markdown')) || 0.875) * rem;
-        return htmlRenderTheme(currentTheme, {
-            rem,
-            text,
-            sans: style.getPropertyValue('--font-sans').trim() || DEFAULT_SANS,
-            mono: style.getPropertyValue('--font-mono').trim() || DEFAULT_MONO,
-        });
-    }, [currentTheme, interfaceSize]);
-}
+import { useHtmlRenderTheme } from './useHtmlRenderTheme';
 
 // A timeline row unmounts when it scrolls away and mounts again when it comes
 // back. The page's last height is kept per call, so it comes back at its size

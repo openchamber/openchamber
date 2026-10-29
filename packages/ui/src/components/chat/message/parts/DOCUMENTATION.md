@@ -484,6 +484,18 @@ covered immediate StrictMode replay and left longer hidden intervals unusable.
 Document consumers clear revoked URLs before paint and load fresh ones through
 the same owner.
 
+### Why a drawn page reads the app's fonts in a passive effect
+
+A page's root font size and font families come from the app's root
+(`useHtmlRenderTheme.ts`), which the interface size and font settings write in
+layout effects (`ThemeProvider`, `useAppFontEffects`). Those run after the
+page's host renders, so a read during the render a setting change causes saw
+the old values, and the page kept its old size until a theme switch (#5884).
+The host reads in a passive effect, which runs after every layout effect of the
+same commit; `useAppFontEffects` is a layout effect for that reason. A read one
+frame later was the alternative: it works too, but leaves a frame at the old
+size and depends on frame timing.
+
 ### Why a running shell row reads its output only while expanded
 
 OpenCode has no output event, so every running row that shows output costs one
