@@ -3,7 +3,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import yaml from 'yaml';
-import { z } from 'zod';
 import {
   applyEdits,
   createScanner,
@@ -20,6 +19,7 @@ import { resolveNpmRegistryRequest } from '../../web/server/lib/opencode/npm-reg
 import { writeFileAtomic } from '../../web/server/lib/opencode/atomic-write.js';
 import { toLoadablePluginSpec } from '../../web/server/lib/opencode/loadable-plugin-spec.js';
 import { isGitSpec, isPluginControlSpec } from '../../web/server/lib/opencode/plugin-spec.js';
+import { mergeCustomProviderConfig, validateCustomProviderConfig } from '../../web/server/lib/opencode/providers.js';
 import {
   toAgentEntity,
   fromAgentEntity,
@@ -28,10 +28,7 @@ import {
   fromCommandEntity,
   isLegacyCommandFrontmatter,
   toMcpEntity,
-  toProviderEntity,
   readStoredProviderEntry,
-  toProviderPackage,
-  toNpmPackage,
   toPluginEntity,
   fromPluginEntity,
   readPluginList,
@@ -2662,168 +2659,8 @@ export const removeProviderConfig = (providerId: string, workingDirectory?: stri
   return true;
 };
 
-const PROVIDER_ID_PATTERN = /^[a-z0-9][a-z0-9-_]*$/;
-const BASE_URL_PATTERN = /^https?:\/\//;
-const OPENAI_COMPATIBLE_NPM = '@ai-sdk/openai-compatible';
-const CUSTOM_PROVIDER_NPM_PACKAGES = new Set([
-  OPENAI_COMPATIBLE_NPM,
-  '@ai-sdk/openai',
-  '@ai-sdk/anthropic',
-]);
-
 export type JsonValue = string | number | boolean | null | JsonObject | JsonValue[];
 export type JsonObject = { [key: string]: JsonValue };
-type NormalizedCustomProviderConfig = {
-  package: string;
-  name: string;
-  settings: Record<string, unknown> & { baseURL: string };
-  headers?: Record<string, string>;
-  models: Record<string, { modelID: string; name: string; type?: string }>;
-  env?: string[];
-};
-
-/**
- * Accepts the v2 spelling (`package`, `settings.baseURL`) and the v1 spelling
- * (`npm`, `options.baseURL`); the normalized value is always v2.
- */
-export const validateCustomProviderConfig = (
-  providerId: string,
-  config: unknown,
-  options: { hasStoredAuth?: boolean } = {},
-) => {
-  if (!providerId || typeof providerId !== 'string' || !PROVIDER_ID_PATTERN.test(providerId)) {
-    return { ok: false as const, error: 'Provider ID must match /^[a-z0-9][a-z0-9-_]*$/' };
-  }
-
-  if (!isPlainObject(config)) {
-    return { ok: false as const, error: 'Provider config must be an object' };
-  }
-
-  const name = typeof config.name === 'string' ? config.name.trim() : '';
-  if (!name) {
-    return { ok: false as const, error: 'Provider name is required' };
-  }
-
-  const npm = toNpmPackage(config.package ?? config.npm) || OPENAI_COMPATIBLE_NPM;
-  if (!CUSTOM_PROVIDER_NPM_PACKAGES.has(npm)) {
-    return {
-      ok: false as const,
-      error: 'Custom providers must use @ai-sdk/openai-compatible, @ai-sdk/openai, or @ai-sdk/anthropic',
-    };
-  }
-
-  const settingsBlock = isPlainObject(config.settings)
-    ? config.settings
-    : (isPlainObject(config.options) ? config.options : null);
-  if (!settingsBlock) {
-    return { ok: false as const, error: 'Provider settings are required' };
-  }
-
-  const baseURL = typeof settingsBlock.baseURL === 'string' ? settingsBlock.baseURL.trim() : '';
-  if (!baseURL) {
-    return { ok: false as const, error: 'Base URL is required' };
-  }
-  if (!BASE_URL_PATTERN.test(baseURL)) {
-    return { ok: false as const, error: 'Base URL must start with http:// or https://' };
-  }
-
-  const models = isPlainObject(config.models) ? config.models : null;
-  if (!models || Object.keys(models).length === 0) {
-    return { ok: false as const, error: 'At least one model is required' };
-  }
-
-  const normalizedModels: NormalizedCustomProviderConfig['models'] = {};
-  for (const [modelId, modelValue] of Object.entries(models)) {
-    const trimmedId = typeof modelId === 'string' ? modelId.trim() : '';
-    if (!trimmedId) {
-      return { ok: false as const, error: 'Model id is required' };
-    }
-    if (!isPlainObject(modelValue)) {
-      return { ok: false as const, error: `Model "${trimmedId}" must be an object` };
-    }
-    const modelName = typeof modelValue.name === 'string' ? modelValue.name.trim() : '';
-    if (!modelName) {
-      return { ok: false as const, error: `Model "${trimmedId}" requires a name` };
-    }
-    normalizedModels[trimmedId] = { modelID: trimmedId, name: modelName };
-    // Any type OpenCode knows passes through; absent keeps the stored one.
-    const modelType = z.string().trim().min(1).safeParse(modelValue.type).data;
-    if (modelType) normalizedModels[trimmedId].type = modelType;
-  }
-
-  const normalized: NormalizedCustomProviderConfig = {
-    package: toProviderPackage(npm) as string,
-    name,
-    settings: { baseURL },
-    models: normalizedModels,
-  };
-
-  let env: string[] = [];
-  if (Array.isArray(config.env)) {
-    env = config.env
-      .filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
-      .map((entry) => entry.trim());
-    if (env.length > 0) {
-      normalized.env = env;
-    }
-  }
-
-  if (env.length === 0 && !options.hasStoredAuth) {
-    return { ok: false as const, error: 'API key or {env:VAR} credentials are required' };
-  }
-
-  const headerSource = isPlainObject(config.headers) ? config.headers : settingsBlock.headers;
-  if (isPlainObject(headerSource)) {
-    const headers: Record<string, string> = {};
-    for (const [headerKey, headerValue] of Object.entries(headerSource)) {
-      if (typeof headerKey !== 'string' || !headerKey.trim()) {
-        continue;
-      }
-      if (typeof headerValue !== 'string' || !headerValue.trim()) {
-        return { ok: false as const, error: `Header "${headerKey}" requires a non-empty value` };
-      }
-      headers[headerKey.trim()] = headerValue.trim();
-    }
-    if (Object.keys(headers).length > 0) {
-      normalized.headers = headers;
-    }
-  }
-
-  return { ok: true as const, value: { providerId, config: normalized } };
-};
-
-const mergeCustomProviderConfig = (
-  existingValue: unknown,
-  normalizedConfig: NormalizedCustomProviderConfig,
-) => {
-  // Read the existing entry through the v2 projection so a legacy
-  // `npm`/`api`/`options` block is carried forward in native shape.
-  const existing = toProviderEntity(existingValue);
-  const mergedSettings = { ...(existing.settings ?? {}), ...normalizedConfig.settings };
-
-  const existingModels = isPlainObject(existing.models) ? existing.models : {};
-  const mergedModels = Object.fromEntries(
-    Object.entries(normalizedConfig.models).map(([modelId, normalizedModel]) => {
-      const existingModel = isPlainObject(existingModels[modelId]) ? existingModels[modelId] : {};
-      return [modelId, { ...existingModel, ...normalizedModel }];
-    }),
-  );
-
-  const merged: Record<string, unknown> = {
-    ...existing,
-    ...normalizedConfig,
-    settings: mergedSettings,
-    models: mergedModels,
-  };
-  // Headers and env are explicit removals when the form omits them.
-  if (!Object.prototype.hasOwnProperty.call(normalizedConfig, 'headers')) {
-    delete merged.headers;
-  }
-  if (!Object.prototype.hasOwnProperty.call(normalizedConfig, 'env')) {
-    delete merged.env;
-  }
-  return toProviderEntity(merged);
-};
 
 export const upsertProviderConfig = (
   providerId: string,
