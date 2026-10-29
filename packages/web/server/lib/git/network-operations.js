@@ -13,7 +13,7 @@ import { createNetworkOperationPlanner, isChangeReviewRemote } from './network-o
 import { createNetworkOperationRegistry } from './network-operation-registry.js';
 import { createGitRedactor, redactGitText } from './redaction.js';
 import { parseSubmoduleManifest, SUBMODULE_DISCOVERY_LIMITS } from './submodule-discovery.js';
-import { discoverLfs, parseTreeObjects, scanLfsFiles, scanLfsPushObjects, resolveLfsPushConfig, LFS_DISCOVERY_LIMITS } from './lfs-discovery.js';
+import { discoverLfs, parseTreeObjects, scanLfsFiles, scanLfsPushObjects, resolveLfsPushConfig, LFS_DISCOVERY_LIMITS, SAFE_FILTERS } from './lfs-discovery.js';
 import { resolveGitRelativeEndpoint } from './discovery-endpoint.js';
 import { fingerprintRemoteUrl, redactRemoteUrl } from '../source-control/url-redaction.js';
 
@@ -42,6 +42,8 @@ const MANAGED_ENV_NAMES = new Set([
   'NO_PROXY', 'http_proxy', 'https_proxy', 'all_proxy', 'no_proxy', 'NETRC',
 ]);
 const SHA_PATTERN = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/i;
+// What decides how Git converts line endings between the working tree and the index.
+const LINE_ENDING_CONFIG_PATTERN = 'core\\.(autocrlf|eol|safecrlf|attributesfile)';
 
 // The details are often a Git process result, whose `code` is the exit
 // status; the operation's own code and status are applied over them.
@@ -915,6 +917,15 @@ export function createNetworkOperations({
     }
   };
 
+  /**
+   * The context pull and sync integrate in, after the credential is revoked:
+   * no network, hooks, autostash or executable content filters. Git's
+   * clean-tree check before the rebase must still read the working tree the
+   * way the person's own Git and the panel do, or a tree they see as clean is
+   * refused as "unstaged changes" (#5887). So the line-ending settings come
+   * from the person's configuration, and so does the canonical LFS clean
+   * filter, which only hashes a file locally; smudge stays off.
+   */
   const localIntegrationContext = async (directory, controls, deadline) => {
     const env = {
       ...await managedGitEnvironment(),
@@ -923,25 +934,56 @@ export function createNetworkOperations({
     const configArgs = [
       '-c', `core.hooksPath=${platform === 'win32' ? 'NUL' : '/dev/null'}`,
       '-c', 'core.fsmonitor=false', '-c', 'submodule.recurse=false', '-c', 'merge.autoStash=false',
-      '-c', 'filter.lfs.process=', '-c', 'filter.lfs.smudge=', '-c', 'filter.lfs.clean=', '-c', 'filter.lfs.required=false',
+      '-c', 'filter.lfs.smudge=', '-c', 'filter.lfs.required=false',
     ];
+    // `git config --null --get-regexp` entries: `key\nvalue`, or a bare key
+    // for names only and for a boolean written without a value.
+    const readConfig = async (configEnv, args, unavailable) => {
+      const result = await run({
+        cwd: directory, env: configEnv, controls, deadline, requireCompleteOutput: true,
+        args: ['config', '--includes', '--null', ...args],
+      });
+      if (result.cancelled || result.timedOut) {
+        throw operationError(result.timedOut ? 'TIMEOUT' : 'CANCELLED', 'Local integration was interrupted', 409, result);
+      }
+      if (![0, 1].includes(result.code) || (result.stdout && !result.stdout.endsWith('\0'))) {
+        throw operationError('STALE_CONFIG', unavailable, 409);
+      }
+      return result.stdout.split('\0').filter(Boolean).map((entry) => {
+        const separator = entry.indexOf('\n');
+        return separator < 0 ? [entry] : [entry.slice(0, separator), entry.slice(separator + 1)];
+      });
+    };
     const blocked = phaseError(controls, deadline);
     if (blocked) throw blocked;
-    const filters = await run({
-      cwd: directory, env, controls, deadline, requireCompleteOutput: true,
-      args: ['config', '--includes', '--null', '--name-only', '--get-regexp', '^filter\\..*\\.(process|smudge|clean|required)$'],
-    });
-    if (filters.cancelled || filters.timedOut) {
-      throw operationError(filters.timedOut ? 'TIMEOUT' : 'CANCELLED', 'Local integration was interrupted', 409, filters);
-    }
-    if (![0, 1].includes(filters.code) || (filters.stdout && !filters.stdout.endsWith('\0'))) {
-      throw operationError('STALE_CONFIG', 'Local Git filter configuration is unavailable', 409);
-    }
-    for (const key of filters.stdout.split('\0').filter(Boolean)) {
+    // The filters this context still sees, from the repository's own configuration.
+    const filterKeys = (await readConfig(env, [
+      '--name-only', '--get-regexp', '^filter\\..*\\.(process|smudge|clean|required)$',
+    ], 'Local Git filter configuration is unavailable')).map(([key]) => key);
+    for (const key of filterKeys) {
       if (!/^filter\.[^\0\r\n=]+\.(process|smudge|clean|required)$/i.test(key)) {
         throw operationError('STALE_CONFIG', 'Local Git filter configuration is invalid', 409);
       }
       configArgs.push('-c', `${key}=${key.toLowerCase().endsWith('.required') ? 'false' : ''}`);
+    }
+    // The person's own settings, as their Git reads them in this repository.
+    let lfsClean;
+    let lfsExtension = false;
+    for (const [key, value] of await readConfig({ ...inheritedEnv, GIT_CONFIG: undefined }, [
+      '--get-regexp', `^(${LINE_ENDING_CONFIG_PATTERN}|filter\\.lfs\\.clean|lfs\\.extension\\..*)$`,
+    ], 'Git configuration is unavailable')) {
+      if (key === 'filter.lfs.clean') lfsClean = value;
+      else if (key.startsWith('lfs.extension.')) lfsExtension = true;
+      else configArgs.push('-c', value === undefined ? key : `${key}=${value}`);
+    }
+    // Any `process` setting, an empty one included, keeps Git from running
+    // `clean`, so the clean filter returns only where none is set here. An
+    // LFS extension is a program `git-lfs clean` would run, so it keeps the
+    // filter off.
+    if (lfsClean === SAFE_FILTERS['filter.lfs.clean'] && !lfsExtension && !filterKeys.includes('filter.lfs.process')) {
+      configArgs.push('-c', `filter.lfs.clean=${lfsClean}`);
+    } else {
+      configArgs.push('-c', 'filter.lfs.process=', '-c', 'filter.lfs.clean=');
     }
     return { env, configArgs, secrets: [] };
   };

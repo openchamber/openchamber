@@ -21,7 +21,7 @@ export const LFS_DISCOVERY_LIMITS = Object.freeze({
 const CONTROL_PATTERN = /[\0-\x1f\x7f]/;
 const OID_PATTERN = /^sha256:([0-9a-f]{64})$/;
 const SIZE_PATTERN = /^(0|[1-9][0-9]*)$/;
-const SAFE_FILTERS = Object.freeze({
+export const SAFE_FILTERS = Object.freeze({
   'filter.lfs.clean': 'git-lfs clean -- %f',
   'filter.lfs.smudge': 'git-lfs smudge -- %f',
   'filter.lfs.process': 'git-lfs filter-process',

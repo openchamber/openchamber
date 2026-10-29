@@ -33,6 +33,8 @@ const CLONE_CREDENTIAL = {
 };
 const temporaryDirectories = [];
 const execFileAsync = promisify(execFile);
+// The read of the person's own line-ending and LFS settings before a pull rebase.
+const OWN_CONFIG_PATTERN = '^(core\\.(autocrlf|eol|safecrlf|attributesfile)|filter\\.lfs\\.clean|lfs\\.extension\\..*)$';
 
 const createLocalRepository = async () => {
   const parent = await fs.mkdtemp(path.join(os.tmpdir(), 'openchamber-local-integration-'));
@@ -165,6 +167,7 @@ const setup = ({ mode = 'managed', transport = 'https', credentialId = 'opaque-c
       return { ...response, code: 0, stdout: SHA };
     }
     return response ?? (call.args.includes('^filter\\..*\\.(process|smudge|clean|required)$')
+      || call.args.includes(OWN_CONFIG_PATTERN)
       || call.args.includes('HEAD:.gitmodules') || call.args.includes('ls-tree') || call.args.includes('ls-files') || call.args.includes('rev-list')
       ? { code: 0 } : undefined);
   });
@@ -3041,6 +3044,97 @@ process.exit(safe ? 0 : 1);
     expect(operation.credentialBroker.revoke).toHaveBeenCalledWith(planned.operationId);
   });
 
+  it.each([
+    ['a tree their Git calls clean', false],
+    ['a real unstaged edit', true],
+  ])('sync pull reads line endings from the person\'s own Git configuration: %s', async (_name, edited) => {
+    const { parent, directory, env, git } = await createLocalRepository();
+    await git('checkout', '-b', 'incoming');
+    await fs.writeFile(path.join(directory, 'incoming.txt'), 'incoming content\n');
+    await git('add', '.');
+    await git('commit', '-m', 'incoming');
+    const incomingSha = await git('rev-parse', 'HEAD');
+    await git('checkout', 'published');
+    const oldHead = await git('rev-parse', 'HEAD');
+    // Their global configuration converts line endings, as Git for Windows sets up by default.
+    const globalConfig = path.join(parent, 'global.config');
+    await fs.writeFile(globalConfig, '[core]\n\tautocrlf = true\n');
+    const userEnv = { ...env, GIT_CONFIG_GLOBAL: globalConfig, GIT_OPTIONAL_LOCKS: '0' };
+    const userGit = async (...args) => (await execFileAsync('git', args, { cwd: directory, env: userEnv })).stdout;
+    const readme = path.join(directory, 'README.md');
+    await fs.rm(readme);
+    await userGit('checkout', '--', 'README.md');
+    expect(await fs.readFile(readme, 'utf8')).toBe('ordinary content\r\n');
+    // A save without changes: the index no longer vouches for the file, so Git compares content.
+    const later = new Date(Date.now() + 5_000);
+    await fs.utimes(readme, later, later);
+    if (edited) await fs.appendFile(readme, 'local edit\r\n');
+    expect(await userGit('status', '--porcelain')).toBe(edited ? ' M README.md\n' : '');
+    const operations = createNetworkOperations({
+      validateGitTransportContext: async () => ({ endpoint: ENDPOINT, endpointFingerprint: fingerprintRemoteUrl(ENDPOINT),
+        transportMode: 'system', transportRevision: 'one' }),
+      credentialResolver: { resolve: vi.fn() },
+      inheritedEnv: userEnv,
+      runtimeIdentity: { id: 'fixture', platform: 'web' },
+      spawnImpl: (binary, args, options) => {
+        // Transfers use locally seeded objects; integration runs real Git unchanged.
+        const transfer = args.findIndex((arg) => arg === 'fetch' || arg === 'push');
+        if (transfer >= 0) {
+          const replacement = args[transfer] === 'fetch'
+            ? ['update-ref', args.at(-1).split(':')[1], incomingSha] : ['rev-parse', 'HEAD'];
+          return spawn(binary, [...args.slice(0, transfer), ...replacement], options);
+        }
+        return spawn(binary, args, options);
+      },
+    });
+    const system = { transportMode: 'system' };
+    const base = syncRequest();
+    const plan = await operations.plan(syncRequest({
+      directory, fetch: { ...base.fetch, ...system }, push: { ...base.push, ...system },
+    }));
+    const result = await operations.execute(plan.operationId);
+    if (edited) {
+      // Real changes still stop the pull, untouched: there is no autostash.
+      expect(result).toMatchObject({ state: 'partial', stepResults: [
+        { step: 'fetch', status: 'succeeded' },
+        { step: 'pull', status: 'failed', error: { message: expect.stringContaining('You have unstaged changes') } },
+        { step: 'push', status: 'skipped' },
+      ] });
+      expect(await git('rev-parse', 'HEAD')).toBe(oldHead);
+      expect(await fs.readFile(readme, 'utf8')).toBe('ordinary content\r\nlocal edit\r\n');
+    } else {
+      expect(result, JSON.stringify(result)).toMatchObject({ state: 'succeeded', stepResults: [
+        { step: 'fetch', status: 'succeeded' }, { step: 'pull', status: 'succeeded' }, { step: 'push', status: 'succeeded' },
+      ] });
+      await git('merge-base', '--is-ancestor', incomingSha, 'HEAD');
+      // The rebase writes files with the line endings their own Git would.
+      expect(await fs.readFile(path.join(directory, 'incoming.txt'), 'utf8')).toBe('incoming content\r\n');
+      expect(await userGit('status', '--porcelain')).toBe('');
+    }
+  }, 20_000);
+
+  it.each([
+    ['the canonical LFS clean filter', '', 'filter.lfs.clean\ngit-lfs clean -- %f\0', true],
+    ['an LFS extension git-lfs would run', '', 'filter.lfs.clean\ngit-lfs clean -- %f\0lfs.extension.custom.clean\nprogram %f\0', false],
+    ['a process filter the repository sets', 'filter.lfs.process\0', 'filter.lfs.clean\ngit-lfs clean -- %f\0', false],
+    ['another clean command', '', 'filter.lfs.clean\nprogram %f\0', false],
+  ])('sync pull runs the LFS clean filter only for %s', async (_name, repositoryFilters, ownConfig, cleans) => {
+    const operation = setup({ spawnResponder: ({ args }) => {
+      if (args.includes('^filter\\..*\\.(process|smudge|clean|required)$')) return { code: 0, stdout: repositoryFilters };
+      if (args.includes(OWN_CONFIG_PATTERN)) return { code: 0, stdout: `core.autocrlf\ntrue\0${ownConfig}` };
+      return undefined;
+    } });
+    const planned = await operation.service.plan(syncRequest());
+    await operation.service.execute(planned.operationId);
+    const rebase = operation.calls.find((call) => call.args.includes('rebase')).args;
+    expect(rebase).toContain('core.autocrlf=true');
+    expect(rebase).toContain('filter.lfs.smudge=');
+    expect(rebase.includes('filter.lfs.clean=git-lfs clean -- %f')).toBe(cleans);
+    // An empty `process` would stop Git from running `clean` at all.
+    expect(rebase.includes('filter.lfs.process=')).toBe(!cleans);
+    expect(rebase.some((arg) => arg.startsWith('lfs.extension.'))).toBe(false);
+  });
+
   it('fails closed when local filter discovery is truncated or fails, before merge', async () => {
     for (const response of [{ code: 128 }, { stdout: 'filter.custom.process' }, { stdout: 'filter.custom.process\0'.repeat(4_000) }]) {
       const operation = setup({ spawnResponder: ({ args }) => args.includes('--name-only') ? response : { code: 0 } });
@@ -3068,7 +3162,8 @@ process.exit(safe ? 0 : 1);
         { step: 'push', status: 'skipped' },
       ],
     });
-    expect(setupValue.calls).toHaveLength(3);
+    // Fetch, the two local configuration reads, the rebase.
+    expect(setupValue.calls).toHaveLength(4);
   });
 
   it('honors cancellation between sync steps without starting the next process', async () => {
