@@ -65,7 +65,9 @@ const BRIDGE_GIT_MODEL_CATALOG_CACHE_TTL_MS = 30 * 1000;
 
 // Model lists are directory-scoped, so the cached catalog belongs to the
 // directory it was read for; a flow in another repository must not inherit it.
-// `disabled` holds the refs OpenCode lists with `enabled: false`.
+// `disabled` holds the refs OpenCode lists with `enabled: false`, and zen's
+// free models without a login (`settings.apiKey` is OpenCode's `"public"`
+// placeholder), which the generate route refuses like the server's resolver says.
 type BridgeGitModelCatalog = { disabled: Set<string>; variants: Map<string, Set<string>> };
 let bridgeGitModelCatalogCache: { directory: string; catalog: BridgeGitModelCatalog; at: number } | null = null;
 
@@ -107,7 +109,7 @@ const fetchBridgeGitModelCatalog = async (
     const providerID = model.providerID.trim();
     const modelID = model.id.trim();
     if (!providerID || !modelID) continue;
-    if (model.enabled === false) {
+    if (model.enabled === false || (providerID === 'opencode' && model.settings?.apiKey === 'public')) {
       catalog.disabled.add(`${providerID}/${modelID}`);
     }
     const variants = Array.isArray(model.variants)

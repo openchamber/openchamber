@@ -35,9 +35,26 @@ credentials, the provider dispatch and the token refresh. Routes live under
 ## Free tier and the session fallback
 
 OpenCode's free zen models are listed as enabled without a login, but
-`/api/experimental/generate/text` refuses them ("free tier can only be used in OpenCode") and
-`/api/model/default` answers nothing, so on a fresh install with no provider
-login `generateSmallModelText` throws `404`. What happens next is per feature:
+`/api/experimental/generate/text` refuses every one of them: "free tier can
+only be used in OpenCode" on early 2.x, 429 "Free usage limit reached. Free
+models work in OpenCode" on 2.2.1 (checked 2026-10-29). Without a zen login
+OpenCode puts the placeholder `apiKey: "public"` in those models' `settings`
+on `GET /api/model` and `/api/model/default`; a zen login or key removes the
+placeholder and enables the paid models.
+
+A model carrying the placeholder is never resolved here, at any step of
+*Model resolution*: a saved Small Model, a walkthrough model, an
+`agents.title.model`, the session's own model and OpenCode's default all count
+as unset when they name one. Since 2.2 `/api/model/default` answers a free zen
+model (`big-pickle`) without a login, so this is what keeps the fresh install
+at "no small model" instead of a call that always fails. The pickers leave
+them out for the same reason (*Which providers the pickers may offer*). A
+model is told apart by the placeholder, which is OpenCode's own test in its
+zen plugin (`plugin/provider/opencode.ts`), and never by a `-free` name:
+with a zen login the free models stay listed, without the placeholder.
+
+On a fresh install with no provider login `generateSmallModelText` therefore
+throws `404`. What happens next is per feature:
 
 - Commit message and PR description (`packages/ui/src/lib/gitApi.ts`) fall back
   to `POST /api/session/:id/generate`, which runs on the open session's own
@@ -221,7 +238,9 @@ capability is not knowable before the call, and callers must read `null` as
 `listAuthenticatedProviders(directory)` answers one question for the Small Model and
 Changes Walkthrough pickers: which providers OpenCode can call right now. A
 provider counts when it has at least one enabled model in `GET /api/model` —
-the same test OpenCode applies before letting a chat turn use it. The model
+the same test OpenCode applies before letting a chat turn use it — other than
+zen's free models without a login (*Free tier and the session fallback*). On
+a setup with no login both pickers are therefore empty. The model
 list is directory-scoped, so `directory` scopes this answer the same way
 `describeSmallModel` scopes its own; without one the server default applies,
 and a default directory with no model config would report no providers for

@@ -212,6 +212,9 @@ const modelLabel = (model) => `${model.providerID}/${model.modelID}`;
  * Resolve the model for this feature. An explicit per-review choice outranks the
  * saved setting, which in turn outranks the small-model chain — the user picking
  * a roomier model for a risky change is the most specific intent there is.
+ * A free zen model without a login counts as unset here, and the small-model
+ * chain decides (`../small-model/DOCUMENTATION.md`, *Free tier and the
+ * session fallback*).
  */
 // `providerID` / `modelID` are the user's composer: without a model of its
 // own choosing, the walkthrough stays on that provider rather than on

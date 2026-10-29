@@ -190,8 +190,18 @@ export const smallModelTierOf = (model) => {
  */
 export const pickSmallModelInProvider = (models, providerID) => pickSmallModel(models, (model) => model.providerID === providerID);
 
+// Without a zen login OpenCode gives zen this placeholder instead of a key and
+// trims it to the free models. Those serve OpenCode's own sessions only:
+// `/api/experimental/generate/text` answers every one of them with "Free usage
+// limit reached", so this module never resolves to one, whichever step names it.
+// A zen login or key removes the placeholder.
+const ZEN_ANONYMOUS_API_KEY = 'public';
+const isAnonymousZenModel = (model) => model?.providerID === 'opencode'
+  && model.settings?.apiKey === ZEN_ANONYMOUS_API_KEY;
+
 /** Enabled, active, text in and text out; a field OpenCode does not report counts as fine. */
 const isUsableTextModel = (model) => model.enabled !== false
+  && !isAnonymousZenModel(model)
   && (model.status === undefined || model.status === 'active')
   && (model.capabilities?.input ?? ['text']).some((item) => String(item).startsWith('text'))
   && (model.capabilities?.output ?? ['text']).some((item) => String(item).startsWith('text'));
@@ -230,8 +240,13 @@ const pickSmallModel = (models, accept) => {
  * only where the user sent their own work or configured on purpose.
  */
 const resolveSmallModel = async ({ client, directory, model, variant, preferredProviderID, preferredModelID }) => {
+  const models = await listModelInfos(client, directory);
+  // A free zen model saved or configured anywhere counts as not set: the
+  // resolution moves on as it would without it.
+  const isCallable = ({ providerID, modelID }) => !isAnonymousZenModel(findModelInfo(models, providerID, modelID));
+
   const explicit = parseModelRef(model);
-  if (explicit) {
+  if (explicit && isCallable(explicit)) {
     // A caller naming its model may name its thinking level with it.
     const explicitVariant = asNonEmptyString(variant);
     if (explicitVariant) explicit.variant = explicitVariant;
@@ -239,19 +254,18 @@ const resolveSmallModel = async ({ client, directory, model, variant, preferredP
   }
 
   const fromSettings = readSmallModelSettingsOverride();
-  if (fromSettings) return { ...fromSettings, source: 'settings' };
+  if (fromSettings && isCallable(fromSettings)) return { ...fromSettings, source: 'settings' };
 
   // A config can outlive the login behind it. OpenCode's own titles then move
   // on to another model, so a model it lists as disabled is skipped here too;
   // one it does not list (a plugin model still loading) is kept.
   const fromConfig = await getConfiguredSmallModelRef(client);
   if (fromConfig) {
-    const info = findModelInfo(await listModelInfos(client, directory), fromConfig.providerID, fromConfig.modelID);
-    if (info?.enabled !== false) return { ...fromConfig, source: 'config' };
+    const info = findModelInfo(models, fromConfig.providerID, fromConfig.modelID);
+    if (info?.enabled !== false && isCallable(fromConfig)) return { ...fromConfig, source: 'config' };
   }
 
   if (preferredProviderID) {
-    const models = await listModelInfos(client, directory);
     // A session already on a small model keeps the side work there: another
     // small model of the same gateway can be another lab the user did not
     // pick, with its own retention terms. One OpenCode reports unusable (its
@@ -265,11 +279,14 @@ const resolveSmallModel = async ({ client, directory, model, variant, preferredP
     const small = pickSmallModelInProvider(models, preferredProviderID);
     if (small) return { ...small, source: 'session-provider-small' };
     // OpenCode's own titles end here too: the model the user works with.
-    if (preferredModelID) return { providerID: preferredProviderID, modelID: preferredModelID, source: 'session-model' };
+    if (preferredModelID && isCallable({ providerID: preferredProviderID, modelID: preferredModelID })) {
+      return { providerID: preferredProviderID, modelID: preferredModelID, source: 'session-model' };
+    }
   }
 
   const fallback = await getDefaultModelInfo(client);
-  if (!fallback) return null;
+  // Without a login OpenCode's default is a free zen model.
+  if (!fallback || isAnonymousZenModel(fallback)) return null;
   // Without a configured default, OpenCode answers with its first available
   // model, from any provider. A caller that named its provider stays on it.
   if (preferredProviderID && fallback.providerID !== preferredProviderID) return null;
@@ -469,7 +486,8 @@ export async function generateSmallModelText({ prompt, system, maxOutputTokens, 
 /**
  * Provider ids the small model can actually call. A provider counts when
  * OpenCode has at least one enabled model for it — that is the same test
- * OpenCode applies before letting a chat turn use it. The model list is
+ * OpenCode applies before letting a chat turn use it — other than the free zen
+ * models it lists without a login, which this module never calls. The model list is
  * directory-scoped, so `directory` scopes this answer the same way
  * `describeSmallModel` scopes its own; without one the server default applies.
  *
@@ -487,7 +505,7 @@ export async function listAuthenticatedProviders(directory) {
     ]);
     const enabled = new Set();
     for (const model of models) {
-      if (model?.enabled === false) continue;
+      if (model?.enabled === false || isAnonymousZenModel(model)) continue;
       if (typeof model?.providerID === 'string' && model.providerID) enabled.add(model.providerID);
     }
     const ids = new Set();
@@ -526,7 +544,8 @@ export async function describeSmallModel({ directory, preferredProviderID, prefe
   if (!client) return null;
 
   // A caller with its own model setting (the diff walkthrough) outranks the
-  // small-model chain entirely — it asked for this model on purpose.
+  // small-model chain entirely — it asked for this model on purpose. A free
+  // zen model without a login is the exception: it counts as unset.
   const resolved = await resolveSmallModel({
     client,
     directory,
