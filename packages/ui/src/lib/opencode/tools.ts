@@ -359,6 +359,7 @@ type OpenUIPromptAnswer =
   | { kind: "waiting" }
   | { kind: "answered"; summary: string; data: JsonValue }
   | { kind: "answered-in-chat" }
+  | { kind: "chat-sent-earlier" }
   | { kind: "unanswered" }
 
 /** A direct OpenUI prompt and the state the transcript can safely show. */
@@ -381,7 +382,7 @@ export function openuiPrompt(
   if (result?.ok !== true) return null
   const answer = result.answer
   if (answer?.answered === true) return { source: parsed.data.ui, ask: { kind: "answered", summary: answer.summary, data: answer.data }, accepted: true }
-  if (answer?.answered === false) return { source: parsed.data.ui, ask: { kind: "answered-in-chat" }, accepted: true }
+  if (answer?.answered === false) return { source: parsed.data.ui, ask: { kind: answer.reason === "chat-sent-earlier" ? "chat-sent-earlier" : "answered-in-chat" }, accepted: true }
   return { source: parsed.data.ui, ask: { kind: "show" }, accepted: true }
 }
 

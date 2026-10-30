@@ -291,6 +291,8 @@ describe("openuiPrompt", () => {
     expect(openuiPrompt("openchamber_openui", completed())).toBeNull()
     expect(openuiPrompt("openchamber_openui", completed({ openchamber: { ok: true, answer: { answered: false } } }))?.ask)
       .toEqual({ kind: "answered-in-chat" })
+    expect(openuiPrompt("openchamber_openui", completed({ openchamber: { ok: true, answer: { answered: false, reason: "chat-sent-earlier" } } }))?.ask)
+      .toEqual({ kind: "chat-sent-earlier" })
     expect(openuiPrompt("openchamber_openui", { status: "error", input, error: "aborted", time: { start: 1, end: 2 } })?.ask)
       .toEqual({ kind: "unanswered" })
     expect(openuiPrompt("openchamber_openui", {

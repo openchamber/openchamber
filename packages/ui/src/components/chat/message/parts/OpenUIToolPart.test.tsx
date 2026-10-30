@@ -98,7 +98,7 @@ const answeredPart = (): ToolPart => ({
   },
 });
 
-const terminalPart = (answer: { answered: false } | { answered: true; summary: string; data: Record<string, string> }): ToolPart => ({
+const terminalPart = (answer: { answered: false; reason?: string } | { answered: true; summary: string; data: Record<string, string> }): ToolPart => ({
   ...part(),
   state: {
     status: 'completed',
@@ -652,4 +652,10 @@ test('labels answers delivered in chat and requests that ended unanswered', asyn
     state: { status: 'error', input: { action: 'openui.prompt', parameters: { ui: source } }, error: 'stopped', time: { start: 1, end: 2 } },
   });
   expect(host.textContent).toContain('Not answered');
+});
+
+test('shows an earlier chat message as preceding the prompt, not answering it', async () => {
+  await render(terminalPart({ answered: false, reason: 'chat-sent-earlier' }));
+  expect(host.textContent).toContain('You wrote in the chat before this page');
+  expect(host.textContent).not.toContain('Answered in the chat');
 });

@@ -52,8 +52,25 @@ const invalid = inspectOpenUI('root = Stack([Input()])');
 assert.equal(invalid.valid, false);
 assert.ok(invalid.diagnostics.some(error => error.component === 'Input' && error.path === '/name' && error.message.includes('signature:')));
 const ui = 'root = Stack([Image("Preview", "/tmp/preview.png")])';
+const events = [];
+const outcome = Promise.withResolvers();
+const earlier = createOpenUIRuntime({
+  isEnabled: async () => true,
+  onWaitChange: event => { events.push(event); if (event.type === 'waiting') outcome.resolve('waiting'); },
+  getClient: async () => ({ session: { inbox: { list: async () => [{ type: 'user', delivery: 'steer' }] } } }),
+});
+const earlierPending = earlier.prompt({ui}, {sessionId: 'ses_1', callId: 'earlier', directory: '/repo'});
+earlierPending.then(outcome.resolve, outcome.reject);
+try {
+  const earlierResult = await outcome.promise;
+  assert.equal(earlierResult.answer?.reason, 'chat-sent-earlier');
+  assert.deepEqual(events, []);
+} finally {
+  earlier.cancel();
+  await earlierPending.catch(() => {});
+}
 const started = Promise.withResolvers();
-const runtime = createOpenUIRuntime({isEnabled: async () => true, onWaitChange: event => { if (event.type === 'waiting') started.resolve(); }});
+const runtime = createOpenUIRuntime({isEnabled: async () => true, getClient: async () => ({ session: { inbox: { list: async () => { throw new Error('inbox unavailable'); } } } }), onWaitChange: event => { if (event.type === 'waiting') started.resolve(); }});
 const pending = runtime.prompt({ui}, {sessionId: 'ses_1', callId: 'call_1', directory: '/repo'});
 await started.promise;
 await runtime.answer({sessionId: 'ses_1', callId: 'call_1', summary: 'Done'});

@@ -62,9 +62,11 @@ function OpenUIToolPart({ part, prompt }: { part: ToolPart; prompt: NonNullable<
     ? t('chat.htmlRender.answered', { summary: prompt.ask.summary })
     : prompt.ask.kind === 'answered-in-chat'
       ? t('chat.htmlRender.answeredInChat')
-      : prompt.ask.kind === 'unanswered'
-        ? t('chat.htmlRender.unanswered')
-        : null;
+      : prompt.ask.kind === 'chat-sent-earlier'
+        ? t('chat.htmlRender.chatSentEarlier')
+        : prompt.ask.kind === 'unanswered'
+          ? t('chat.htmlRender.unanswered')
+          : null;
 
   if (!Program || failed) {
     return (
