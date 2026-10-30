@@ -2434,6 +2434,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.revert.toast.restored': 'すべてのメッセージを復元しました',
   'chat.toast.opencodeRestartInterrupted.title': 'チャットが中断されました',
   'chat.toast.opencodeRestartInterrupted.description': '応答の生成中に OpenCode が再起動しました。続行するにはメッセージを送信してください。',
+  'chat.toast.opencodeRestartInterrupted.autoResumeDescription': '応答の生成中に OpenCode が再起動しました。チャットは自動的に再開されます。再開しない場合はメッセージを送信してください。',
   'chat.toast.opencodeRestartInterrupted.openSession': 'セッションを開く',
   'chat.errorBoundary.title': 'チャットエラー',
   'chat.errorBoundary.description': 'チャットインターフェースでエラーが発生しました。一時的なネットワーク問題または破損したメッセージデータが原因の可能性があります。',

@@ -85,10 +85,14 @@ mock.module("sonner", () => ({
 }))
 
 const infoToasts: Array<{ title: string; id?: string }> = []
+const infoToastDescriptions: Array<string | undefined> = []
 
 mock.module("@/components/ui", () => ({
   toast: {
-    info: (title: string, options?: { id?: string }) => { infoToasts.push({ title, id: options?.id }) },
+    info: (title: string, options?: { id?: string; description?: string }) => {
+      infoToasts.push({ title, id: options?.id })
+      infoToastDescriptions.push(options?.description)
+    },
     error: () => undefined,
     success: () => undefined,
     dismiss: () => undefined,
@@ -482,42 +486,47 @@ describe("OpenChamber-native frames", () => {
     Reflect.deleteProperty(globalThis, "document")
   })
 
-  test("raises the restart-interrupted toast and dispatches the agent-completion notification", () => {
-    const childStores = new ChildStoreManager()
-    const routingIndex = createEventRoutingIndex()
-    const event: SyncEvent = {
-      type: "openchamber.notification",
-      properties: {
-        kind: "opencode-restart-interrupted",
-        sessionId: "ses_a",
-        directory: "/repo",
-        title: "Agent finished",
-        body: "The turn completed",
-        tag: "ses_a",
-      },
-    }
+  for (const kind of ["opencode-restart-interrupted", "opencode-restart-resuming"]) {
+    test(`raises the ${kind} toast and dispatches the agent-completion notification`, () => {
+      const childStores = new ChildStoreManager()
+      const routingIndex = createEventRoutingIndex()
+      const event: SyncEvent = {
+        type: "openchamber.notification",
+        properties: {
+          kind,
+          sessionId: "ses_a",
+          directory: "/repo",
+          title: "Agent finished",
+          body: "The turn completed",
+          tag: "ses_a",
+        },
+      }
 
-    try {
-      handleEvent("global", event, childStores, routingIndex, getRuntimeKey())
+      try {
+        handleEvent("global", event, childStores, routingIndex, getRuntimeKey())
 
-      expect(infoToasts.map((entry) => entry.id)).toEqual(["opencode-restart-interrupted"])
-      expect(agentCompletions).toHaveLength(1)
-      expect(agentCompletions[0]).toMatchObject({
-        title: "Agent finished",
-        body: "The turn completed",
-        tag: "ses_a",
-        kind: "opencode-restart-interrupted",
-        sessionId: "ses_a",
-        directory: "/repo",
-        runtimeKey: getRuntimeKey(),
-        requireHidden: false,
-      })
-      // A global frame must not materialize a directory store on its way through.
-      expect(childStores.children.size).toBe(0)
-    } finally {
-      childStores.disposeAll()
-    }
-  })
+        expect(infoToasts.map((entry) => entry.id)).toEqual(["opencode-restart-interrupted"])
+        expect(infoToastDescriptions.at(-1)).toBe(kind === "opencode-restart-resuming"
+          ? "OpenCode restarted while a response was still running. The chat will resume automatically; send a message if it does not."
+          : "OpenCode restarted while a response was still running. Send a message to continue.")
+        expect(agentCompletions).toHaveLength(1)
+        expect(agentCompletions[0]).toMatchObject({
+          title: "Agent finished",
+          body: "The turn completed",
+          tag: "ses_a",
+          kind,
+          sessionId: "ses_a",
+          directory: "/repo",
+          runtimeKey: getRuntimeKey(),
+          requireHidden: false,
+        })
+        // A global frame must not materialize a directory store on its way through.
+        expect(childStores.children.size).toBe(0)
+      } finally {
+        childStores.disposeAll()
+      }
+    })
+  }
 
   test("raises an in-app toast for plugin notifications", () => {
     const childStores = new ChildStoreManager()

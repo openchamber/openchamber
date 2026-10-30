@@ -1,33 +1,22 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { createSessionRuntime } from './session-runtime.js';
+import { buildRestartNotification } from './restart-notification.js';
+import { createSessionRuntime, RESTART_RESUME_GRACE_MS } from './session-runtime.js';
 
 describe('managed OpenCode restart session recovery', () => {
-  it('settles busy sessions and broadcasts one interruption notification', () => {
+  afterEach(() => vi.useRealTimers());
+
+  it('settles busy sessions and switches to manual guidance after automatic recovery', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     const events = [];
-    const broadcastUiNotification = vi.fn();
-    const rebindUpstream = vi.fn();
     const sessionRuntime = createSessionRuntime({
       writeSseEvent() {},
       getNotificationClients: () => new Set(),
       broadcastEvent: (event) => events.push(event),
+      buildOpenCodeUrl: (path) => `http://localhost:49722${path}`,
+      getOpenCodeAuthHeaders: () => ({}),
+      fetchImpl: async () => ({ ok: true }),
     });
-    const onOpenCodeRestarted = () => {
-      rebindUpstream();
-      const { sessionIds } = sessionRuntime.interruptBusySessionsAfterRestart();
-      if (sessionIds.length > 0) {
-        const multiple = sessionIds.length > 1;
-        broadcastUiNotification({
-          title: multiple ? 'Chats interrupted' : 'Chat interrupted',
-          body: multiple
-            ? 'OpenCode restarted during running responses. Send a message in each chat to continue.'
-            : 'OpenCode restarted during a running response. Send a message to continue.',
-          tag: 'opencode-restart-interrupted',
-          kind: 'opencode-restart-interrupted',
-          sessionId: sessionIds[0],
-        });
-      }
-    };
     const markBusy = (sessionID) => sessionRuntime.processOpenCodeSsePayload({
       type: 'session.status',
       properties: { sessionID, status: { type: 'busy' } },
@@ -38,22 +27,38 @@ describe('managed OpenCode restart session recovery', () => {
       markBusy('session-2');
       markBusy('session-3');
       events.length = 0;
+      const recovery = sessionRuntime.interruptBusySessionsAfterRestart();
 
-      onOpenCodeRestarted();
-
-      expect(rebindUpstream).toHaveBeenCalledOnce();
       expect(sessionRuntime.getActiveSessionCount()).toBe(0);
       expect(Object.values(sessionRuntime.getSessionStateSnapshot()).map((state) => state.status))
         .toEqual(['idle', 'idle', 'idle']);
       expect(events.filter((event) => event.type === 'openchamber:session-status')).toHaveLength(3);
       expect(events.filter((event) => event.type === 'session.error')).toHaveLength(3);
-      expect(broadcastUiNotification).toHaveBeenCalledOnce();
-      expect(broadcastUiNotification).toHaveBeenCalledWith(expect.objectContaining({
-        kind: 'opencode-restart-interrupted',
+      expect(buildRestartNotification(recovery)).toMatchObject({
+        kind: 'opencode-restart-resuming',
         sessionId: 'session-1',
-      }));
+        body: expect.stringContaining('resume automatically'),
+      });
+
+      await vi.advanceTimersByTimeAsync(RESTART_RESUME_GRACE_MS);
+      markBusy('session-1');
+      const repeated = sessionRuntime.interruptBusySessionsAfterRestart();
+      expect(repeated.autoResumeSessionIds).toEqual([]);
+      expect(buildRestartNotification(repeated)).toMatchObject({
+        kind: 'opencode-restart-interrupted',
+        body: 'OpenCode restarted during a running response. Send a message to continue.',
+      });
+      expect(buildRestartNotification(sessionRuntime.interruptBusySessionsAfterRestart())).toBeNull();
     } finally {
       sessionRuntime.dispose();
     }
+  });
+
+  it('uses manual guidance for a batch with an exhausted session', () => {
+    expect(buildRestartNotification({ sessionIds: ['used', 'new'], autoResumeSessionIds: ['new'] }))
+      .toMatchObject({
+        kind: 'opencode-restart-interrupted',
+        body: 'OpenCode restarted during running responses. Send a message in each chat to continue.',
+      });
   });
 });

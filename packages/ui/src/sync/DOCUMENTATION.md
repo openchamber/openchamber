@@ -2,6 +2,8 @@
 
 ## Scope
 
+Managed restart notifications use `opencode-restart-resuming` only when every interrupted chat has an automatic continuation scheduled. `opencode-restart-interrupted` keeps manual guidance, including after a turn's recovery budget is spent. Both show the same persistent toast; the server owns eligibility and the client chooses the matching localized description.
+
 This document covers the current client-side session/data architecture in `packages/ui/src/sync` and the rules for updating stores safely.
 
 There are **two distinct session data scopes** in the UI:

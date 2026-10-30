@@ -2367,6 +2367,7 @@ export const dict = {
   'chat.revert.toast.restored': 'כל ההודעות שוחזרו',
   'chat.toast.opencodeRestartInterrupted.title': 'הצ\'אט נקטע',
   'chat.toast.opencodeRestartInterrupted.description': 'OpenCode הופעל מחדש בזמן שתגובה עדיין רצה. אפשר לשלוח הודעה כדי להמשיך.',
+  'chat.toast.opencodeRestartInterrupted.autoResumeDescription': 'OpenCode הופעל מחדש בזמן שתגובה עדיין רצה. השיחה תמשיך אוטומטית; שלחו הודעה אם לא.',
   'chat.toast.opencodeRestartInterrupted.openSession': 'פתח הפעלה',
   'chat.errorBoundary.title': 'שגיאת צ\'אט',
   'chat.errorBoundary.description': 'אירעה שגיאה בממשק הצ\'אט. ייתכן שהסיבה היא בעיית רשת זמנית או נתוני הודעה פגומים.',
