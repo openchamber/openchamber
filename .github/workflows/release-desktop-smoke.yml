@@ -224,6 +224,17 @@ jobs:
           repository: ${{ inputs.repository || github.repository }}
           ref: ${{ inputs.ref || github.ref }}
 
+      # SignPath verifies the origin from this run, so a signed build must be
+      # the run's own commit, never another repository or ref.
+      - name: Require the run's own commit for signing
+        if: ${{ inputs.sign_windows }}
+        shell: bash
+        env:
+          REPOSITORY: ${{ inputs.repository || github.repository }}
+        run: |
+          test "$REPOSITORY" = "$GITHUB_REPOSITORY" || { echo "Signing builds only $GITHUB_REPOSITORY, got $REPOSITORY"; exit 1; }
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA" || { echo "Signing builds only the commit of this run ($GITHUB_SHA); set ref to the branch the workflow runs from"; exit 1; }
+
       - name: Setup bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
 
@@ -396,11 +407,8 @@ jobs:
       matrix:
         arch: [x64, arm64]
     steps:
-      - name: Checkout selected ref
+      - name: Checkout the run's commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: ${{ inputs.repository || github.repository }}
-          ref: ${{ inputs.ref || github.ref }}
 
       - name: Setup bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -451,11 +459,8 @@ jobs:
     env:
       VERSION: ${{ needs.build-windows-electron.outputs.version }}
     steps:
-      - name: Checkout selected ref
+      - name: Checkout the run's commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: ${{ inputs.repository || github.repository }}
-          ref: ${{ inputs.ref || github.ref }}
 
       - name: Setup bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
