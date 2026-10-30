@@ -152,7 +152,45 @@ const OPEN_QUIET_MAX_MS = 5_000;
 const OPEN_SETTLE_BUDGET_MS = 30_000;
 /** Shorter for a capture: a page that keeps changing is shot as it is. */
 const CAPTURE_QUIET_MAX_MS = 3_000;
+/** Two frames take ~33 ms in a drawn window; none in this long means it draws nothing. */
+const CAPTURE_FRAME_WAIT_MAX_MS = 1_000;
+/** A timer this late ran behind a busy thread, which says nothing about frames. */
+const CAPTURE_FRAME_TIMER_LATE_MS = 250;
 const quietResultSchema = z.object({ quiet: z.boolean() });
+
+/**
+ * Whether the window draws: true after two animation frames, false when a
+ * whole wait passes on time without one. A Wayland compositor sends no frame
+ * callbacks to a window it is not showing (minimized, on a hidden workspace,
+ * the screen locked or off), and such a window never runs these callbacks.
+ * A wait that saw a frame, or whose timer ran late, starts over.
+ */
+const waitForTwoFrames = (): Promise<boolean> => new Promise((resolve) => {
+  let frames = 0;
+  let framesAtArm = 0;
+  let due = 0;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const finish = (drawn: boolean) => {
+    clearTimeout(timer);
+    resolve(drawn);
+  };
+  const onFrame = () => {
+    frames += 1;
+    if (frames >= 2) finish(true);
+    else requestAnimationFrame(onFrame);
+  };
+  const arm = () => {
+    framesAtArm = frames;
+    due = performance.now() + CAPTURE_FRAME_WAIT_MAX_MS;
+    timer = setTimeout(check, CAPTURE_FRAME_WAIT_MAX_MS);
+  };
+  const check = () => {
+    if (frames > framesAtArm || performance.now() - due > CAPTURE_FRAME_TIMER_LATE_MS) arm();
+    else finish(false);
+  };
+  requestAnimationFrame(onFrame);
+  arm();
+});
 
 /**
  * Puts a stage where the compositor draws it but the user cannot see it, for a
@@ -535,9 +573,12 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tab
       // made visible at zero opacity. The panel itself never moves.
       const restoreStage = revealStageForCapture(stageRef.current);
       try {
-        await new Promise<void>((resolve) => {
-          requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
-        });
+        // Two frames put the revealed stage into the compositor. A window
+        // that draws none has no surface to copy either, so the capture
+        // answers at once instead of waiting out the server's timeout.
+        if (!await waitForTwoFrames()) {
+          throw new Error('The OpenChamber window is not being drawn (minimized, on a workspace or tab that is not shown, or the screen is locked or off), so nothing can be captured. browser.snapshot still reads the page.');
+        }
         // Wait for a settled page first: a screenshot of a half-painted layout is
         // worse than none, because it looks like a finished one.
         if (await waitForIdle()) await waitForQuiet(webview, CAPTURE_QUIET_MAX_MS);

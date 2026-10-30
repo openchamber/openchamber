@@ -1345,7 +1345,8 @@ swaps the normal composer (pill or expanded, plus its chips and footers) for
 draft is hidden, not cleared, and comes back unchanged — and keys the shell by
 generation so a replaced open remounts it with fresh dictation callbacks.
 Every send path (submit, queue, primary action) is inert during comment mode;
-the form submit attaches.
+the form submit attaches. The return key follows the same policy as the prompt
+composer (see "Enter preference"): its Send action attaches.
 
 While the comment is open, the selection menu keeps the quoted range painted
 through its existing highlight overlay (rAF on scroll/resize, no polling); the
@@ -1412,6 +1413,14 @@ Shift only while a hardware keyboard is attached: iOS autocapitalization reports
 a phantom Shift at sentence starts, so a soft-keyboard Send always submits, while
 a hardware Shift+Enter still inserts a newline. Alt/Option+Enter inserts a
 newline, and Ctrl/Cmd+Enter is unchanged.
+
+Comment fields use `components/comments/useCommentEnterSubmit.ts` for the same
+policy. Enter attaches on desktop; on mobile it follows "Return key sends".
+Shift+Enter and Alt/Option+Enter insert a newline, and Ctrl/Cmd+Enter attaches
+regardless of the setting. This applies to selection comments, pending comments,
+marked quote comments and diff/file/file-preview line comments. Attaching never
+sends the message. CodeMirror comment fields inherit the IME cleanup below
+through `ComposerEditor`; textarea fields keep native newline handling.
 
 ### Why IME cleanup requires DOM padding evidence
 

@@ -96,6 +96,24 @@ describe('settings runtime', () => {
     } finally { await cleanup(); }
   });
 
+  it('persists imported projects and their completion marker in the instance document', async () => {
+    const { runtime, settingsFilePath, tempRoot, cleanup } = await createRuntime({
+      mergePersistedSettings: (current, changes) => ({ ...current, ...changes }),
+    });
+    try {
+      const directory = path.join(tempRoot, 'imported');
+      await fsPromises.mkdir(directory);
+      await runtime.persistSettings({ projects: [{ path: directory }], openCodeProjectImportCompleted: true });
+      const saved = JSON.parse(await fsPromises.readFile(settingsFilePath, 'utf8'));
+      expect(saved.openCodeProjectImportCompleted).toBe(true);
+      expect(saved.projects.map((project) => project.path)).toEqual([directory]);
+      await runtime.persistSettings({ lightThemeId: 'openchamber-light' });
+      expect((await runtime.readSettingsFromDisk()).openCodeProjectImportCompleted).toBe(true);
+    } finally {
+      await cleanup();
+    }
+  });
+
   it('reports the directory the UI moved to, once per change', async () => {
     const onLastDirectoryChanged = vi.fn();
     const { runtime, cleanup } = await createRuntime({

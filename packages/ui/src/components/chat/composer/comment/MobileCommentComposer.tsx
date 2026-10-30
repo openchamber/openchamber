@@ -9,11 +9,13 @@
 
 import React from 'react';
 
+import { useCommentEnterSubmit } from '@/components/comments/useCommentEnterSubmit';
 import { useCommentFieldPicker } from '@/components/comments/useCommentFieldPicker';
 import { ComposerDictation } from '@/components/dictation/ComposerDictation';
 import { Button } from '@/components/ui/button';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
+import { isIMECompositionEvent } from '@/lib/ime';
 import { cn } from '@/lib/utils';
 import { useSnippetsStore } from '@/stores/useSnippetsStore';
 import type { Theme } from '@/types/theme';
@@ -73,6 +75,7 @@ export function MobileCommentComposer({ draft, theme: currentTheme, handlers }: 
     const { t } = useI18n();
     const editorRef = React.useRef<ComposerEditorHandle>(null);
     const snippets = useSnippetsStore((state) => state.snippets);
+    const commentKeys = useCommentEnterSubmit();
     const languageContext = React.useMemo(() => {
         const triggers = new Set<string>();
         for (const snippet of snippets) {
@@ -88,6 +91,17 @@ export function MobileCommentComposer({ draft, theme: currentTheme, handlers }: 
     }, []);
     const caretCoords = React.useCallback((position: number) => editorRef.current?.caretCoords(position) ?? null, []);
     const fieldPicker = useCommentFieldPicker({ text: draft.text, getCaret, replaceRange, caretCoords });
+
+    const handleKeyDown = (event: KeyboardEvent): boolean => {
+        if (isIMECompositionEvent(event)) return false;
+        if (fieldPicker.handleKeyDown(event)) return true;
+        if (event.key === 'Enter' && commentKeys.shouldSubmit(event)) {
+            event.preventDefault();
+            handlers.onAttach();
+            return true;
+        }
+        return false;
+    };
 
     // The opening tap flushes the controller update through React before it
     // returns, so this focus still runs inside the gesture's call stack — the
@@ -140,13 +154,15 @@ export function MobileCommentComposer({ draft, theme: currentTheme, handlers }: 
                         fieldPicker.sync(change.value, change.selection.start, !change.fromPaste && !change.fromValueProp);
                     }}
                     onSelectionChange={(selection) => fieldPicker.sync(editorRef.current?.getValue() ?? draft.text, selection.start, false)}
-                    onKeyDown={fieldPicker.handleKeyDown}
+                    onKeyDown={handleKeyDown}
                     onFocus={handlers.onEditorFocus}
                     onBlur={handlers.onEditorBlur}
                     placeholder={t('chat.textSelection.comment.placeholder')}
                     editable
                     autoCorrect={composerAutoCorrect({ isMobile: true })}
                     autoCapitalize="sentences"
+                    preserveDeferredEnterShift={commentKeys.preserveDeferredEnterShift}
+                    returnKeySends={commentKeys.returnKeySends}
                     spellCheck
                     maxLines={MOBILE_COMMENT_MAX_LINES}
                     className="min-h-[44px] flex-1 px-2.5 py-2 typography-markdown"

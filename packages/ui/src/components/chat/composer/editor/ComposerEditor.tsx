@@ -22,7 +22,7 @@
  */
 
 import React from 'react';
-import { history, historyKeymap, standardKeymap } from '@codemirror/commands';
+import { history, historyKeymap, insertNewline, standardKeymap } from '@codemirror/commands';
 import { Annotation, Compartment, EditorState, Prec, type ChangeDesc, type Extension } from '@codemirror/state';
 import {
     EditorView,
@@ -335,6 +335,7 @@ export const ComposerEditor = React.memo(React.forwardRef<ComposerEditorHandle, 
                         // walks history, Escape closes a picker).
                         Prec.highest(keymap.of(interceptKeys)),
                         keymap.of([
+                            { key: 'Alt-Enter', run: insertNewline },
                             // At a document boundary these commands return false.
                             // Chromium's native page movement can then scroll
                             // hidden-overflow ancestors of the empty placeholder.

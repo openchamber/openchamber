@@ -9,6 +9,7 @@ import { isIMECompositionEvent } from '@/lib/ime';
 import { formatShortcutForDisplay } from '@/lib/shortcuts';
 import { useCommentImagePaste } from './useCommentImagePaste';
 import { useCommentFieldPicker } from './useCommentFieldPicker';
+import { useCommentEnterSubmit } from './useCommentEnterSubmit';
 
 export interface InlineCommentInputProps {
   initialText?: string;
@@ -139,6 +140,7 @@ export function InlineCommentInput({
   const getCaret = React.useCallback(() => textareaRef.current?.selectionStart ?? 0, []);
   const caretCoords = React.useCallback((position: number) => (textareaRef.current ? textareaCaretCoords(textareaRef.current, position) : null), []);
   const fieldPicker = useCommentFieldPicker({ text, getCaret, replaceRange, caretCoords });
+  const commentKeys = useCommentEnterSubmit();
 
   const handlePaste = (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
     const field = event.currentTarget;
@@ -161,9 +163,7 @@ export function InlineCommentInput({
   const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (isIMECompositionEvent(event)) return;
     if (fieldPicker.handleKeyDown(event)) return;
-    // Desktop Enter attaches; Shift+Enter and mobile Enter break the line.
-    // Cmd/Ctrl+Enter stays available for hardware keyboards on mobile.
-    if (event.key === 'Enter' && !event.shiftKey && (!isMobile || event.metaKey || event.ctrlKey)) {
+    if (event.key === 'Enter' && commentKeys.shouldSubmit(event)) {
       event.preventDefault();
       save();
     } else if (event.key === 'Escape') {
@@ -213,6 +213,7 @@ export function InlineCommentInput({
           onSelect={(event) => fieldPicker.sync(event.currentTarget.value, event.currentTarget.selectionStart, false)}
           onKeyDown={handleKeyDown}
           onPaste={handlePaste}
+          enterKeyHint={commentKeys.returnKeySends ? 'send' : undefined}
           placeholder={isMobile
             ? t('inlineComment.input.placeholderShort')
             : t('inlineComment.input.placeholder', { shortcut: saveShortcut })}

@@ -591,6 +591,18 @@ describe('settings helpers', () => {
     });
   });
 
+  it('round-trips project import completion and rejects malformed markers', () => {
+    const helpers = createTestHelpers();
+    for (const value of [true, false]) {
+      const settings = helpers.sanitizeSettingsUpdate({ openCodeProjectImportCompleted: value });
+      expect(settings).toEqual({ openCodeProjectImportCompleted: value });
+      expect(helpers.formatSettingsResponse(settings).openCodeProjectImportCompleted).toBe(value);
+    }
+    for (const value of ['true', 1, null, {}]) {
+      expect(helpers.sanitizeSettingsUpdate({ openCodeProjectImportCompleted: value })).toEqual({});
+    }
+  });
+
   it('rejects non-boolean collapsibleThinkingBlocks values', () => {
     const helpers = createTestHelpers();
 
@@ -856,6 +868,7 @@ describe('settings registry gate', () => {
   // stops accepting a key the registry still lists — that is the drift the
   // registry exists to end.
   const validValues = {
+    openCodeProjectImportCompleted: true,
     themeId: 'openchamber-dark', locale: 'zh-CN', useSystemTheme: true, themeVariant: 'dark', lightThemeId: 'openchamber-light', darkThemeId: 'openchamber-dark',
     splashBgLight: '#fff', splashFgLight: '#000', splashBgDark: '#000', splashFgDark: '#fff',
     lastDirectory: '/home/testuser/project', homeDirectory: '/home/testuser', opencodeBinary: '/usr/local/bin/opencode',

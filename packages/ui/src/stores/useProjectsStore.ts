@@ -16,7 +16,7 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { getArchivedScopeKey } from '@/lib/sessionFolders/folderScopes';
 import { useSessionFoldersStore } from './useSessionFoldersStore';
 import { runtimeFetch } from '@/lib/runtime-fetch';
-import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
+import { getRuntimeApiBaseUrl, getRuntimeKey } from '@/lib/runtime-switch';
 import { getVSCodeBootstrapConfig } from '@/lib/vscodeBootstrap';
 import { isVSCodeRuntime } from './utils/vscodeRuntime';
 import { z } from 'zod';
@@ -60,8 +60,8 @@ interface ProjectsStore {
   manualProjectOrder: string[];
 
   addProject: (path: string, options?: { label?: string; id?: string }) => Promise<ProjectEntry | null>;
-  addProjects: (paths: string[]) => Promise<ProjectEntry[]>;
   adoptSessionProject: (sessionId: string, directory: string, isCurrent: () => boolean) => Promise<boolean>;
+  addProjects: (paths: string[], options?: { fromOpenCode?: boolean }) => Promise<ProjectEntry[]>;
   removeProject: (id: string) => void;
   setActiveProject: (id: string) => void;
   setActiveProjectIdOnly: (id: string) => void;
@@ -705,8 +705,9 @@ export const useProjectsStore = create<ProjectsStore>()(
       return entry;
     },
 
-    addProjects: async (paths: string[]) => {
+    addProjects: async (paths: string[], options?: { fromOpenCode?: boolean }) => {
       if (isVSCodeProjectsRuntime) {
+        if (options?.fromOpenCode) throw new Error('OpenCode project import is unavailable in VS Code');
         // VS Code paths are added via runtimeApis.vscode.addWorkspaceFolder,
         // which is reached only by addProject. Iterate so valid selections
         // succeed instead of silently returning []. Dedupe by path so the
@@ -725,6 +726,9 @@ export const useProjectsStore = create<ProjectsStore>()(
       }
       const current = get();
       const existingPaths = new Set(current.projects.map((project) => project.path));
+      if (options?.fromOpenCode && (!current.hasServerSnapshot || current.serverSnapshotFailed)) {
+        throw new Error('Project settings are unavailable');
+      }
       const now = Date.now();
       const entries: ProjectEntry[] = [];
       const seenPaths = new Set<string>();
@@ -750,11 +754,27 @@ export const useProjectsStore = create<ProjectsStore>()(
         });
       }
 
-      if (entries.length === 0) {
+      if (entries.length === 0 && !options?.fromOpenCode) {
         return [];
       }
 
       const nextProjects = [...current.projects, ...entries];
+      if (options?.fromOpenCode) {
+        const runtime = getRuntimeKey();
+        // Save the list and the retirement marker together. Failed saves leave
+        // the current list intact and the suggestion available for retry.
+        const result = await updateDesktopSettings({
+          projects: nextProjects,
+          openCodeProjectImportCompleted: true,
+        });
+        if (!result.ok || runtime !== getRuntimeKey()) throw new Error('Failed to save imported projects');
+        // Settings synchronization supplies the server-validated list. A folder
+        // removed during the import must not be put back by this continuation.
+        const ids = new Set(entries.map((entry) => entry.id));
+        const added = get().projects.filter((entry) => ids.has(entry.id));
+        for (const entry of added) void get().discoverProjectIcon(entry.id);
+        return added;
+      }
       set({ projects: nextProjects });
 
       if (streamDebugEnabled()) {

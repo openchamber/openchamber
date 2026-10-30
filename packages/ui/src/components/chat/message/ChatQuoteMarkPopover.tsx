@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 
 import { useEmojiPicker } from '@/components/emoji/useEmojiPicker';
 import { Icon } from '@/components/icon/Icon';
+import { useCommentEnterSubmit } from '@/components/comments/useCommentEnterSubmit';
 import { useI18n } from '@/lib/i18n';
 import { isIMECompositionEvent } from '@/lib/ime';
 import { cn } from '@/lib/utils';
@@ -46,6 +47,7 @@ export function ChatQuoteMarkPopover({
     const [draft, setDraft] = React.useState(comment);
     const inputRef = React.useRef<HTMLTextAreaElement>(null);
     const emojiPicker = useEmojiPicker(inputRef, editing);
+    const commentKeys = useCommentEnterSubmit();
 
     const resizeInput = React.useCallback(() => {
         const element = inputRef.current;
@@ -106,7 +108,7 @@ export function ChatQuoteMarkPopover({
                         }}
                         onKeyDown={(event) => {
                             if (isIMECompositionEvent(event)) return;
-                            if (event.key === 'Enter' && !event.shiftKey) {
+                            if (event.key === 'Enter' && commentKeys.shouldSubmit(event)) {
                                 event.preventDefault();
                                 save();
                             } else if (event.key === 'Escape') {
@@ -114,6 +116,7 @@ export function ChatQuoteMarkPopover({
                                 onEditingChange(false);
                             }
                         }}
+                        enterKeyHint={commentKeys.returnKeySends ? 'send' : undefined}
                         placeholder={t('chat.textSelection.comment.placeholder')}
                         className="min-w-0 w-64 max-w-[70vw] flex-1 resize-none bg-transparent py-1.5 text-sm leading-5 text-foreground outline-none placeholder:text-muted-foreground placeholder:opacity-60"
                         style={{ minHeight: 0, height: 'auto' }}

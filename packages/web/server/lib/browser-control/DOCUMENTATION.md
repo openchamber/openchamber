@@ -96,6 +96,17 @@ itself; it can only ask and wait.
   pane. `browser.capture` never opens the panel or switches its tab: a hidden
   pane is drawn at zero opacity inside the window for the screenshot, because
   Chromium composites a transparent webview but not a hidden or clipped one.
+  A Wayland compositor sends no frame callbacks to a window it is not showing
+  (minimized, on a hidden workspace or tab, the screen locked or off). Such a
+  window has no frame to put the stage in and no surface to copy, so the
+  capture waits for two frames and answers with an error that names the cause
+  and points to `browser.snapshot` once 1 s passes without one. A wait that
+  saw a frame, or whose timer ran late behind a busy thread, starts over.
+  Without that limit it waited out the broker's 20 s timeout, and agents
+  retried it. Forcing a frame
+  by capturing the host window with `stayHidden` and retrying was tried and
+  rejected: the first capture came back, every later one hung until the
+  timeout.
   A hidden page also gets no animation frames, so `browser.scroll` waits for
   two frames at most 100 ms (`pageActions.ts`) and then answers anyway.
   `browser.open` reports `settled` only once the page has loaded and then gone

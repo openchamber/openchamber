@@ -9,10 +9,10 @@
  * `#snippet` references as snippet chips, Markdown is highlighted. Agents,
  * commands and file mentions do not resolve in a comment.
  *
- * Keys: Enter submits (Shift+Enter breaks the line; with `enterSubmits` off,
- * as on touch, only Cmd/Ctrl+Enter submits), Escape cancels. Both wait for an
- * IME composition to finish, since Enter and Escape also confirm or abandon a
- * candidate.
+ * Keys: Enter submits (Shift+Enter breaks the line; on mobile the field
+ * follows the "Return key sends" setting through `useCommentEnterSubmit`),
+ * Escape cancels. Both wait for an IME composition to finish, since Enter and
+ * Escape also confirm or abandon a candidate.
  */
 
 import React from 'react';
@@ -26,6 +26,7 @@ import { useSnippetsStore } from '@/stores/useSnippetsStore';
 import { useInputStore } from '@/sync/input-store';
 import type { CommentImagePaste } from './useCommentImagePaste';
 import { useCommentFieldPicker } from './useCommentFieldPicker';
+import { useCommentEnterSubmit } from './useCommentEnterSubmit';
 
 const EMPTY_NAMES: ReadonlySet<string> = new Set();
 
@@ -34,7 +35,7 @@ export interface CommentTextEditorProps {
     onChange: (value: string) => void;
     onSubmit: () => void;
     onCancel: () => void;
-    /** Bare Enter submits. Off on touch, where Enter breaks the line. */
+    /** Bare Enter submits on desktop; mobile follows the profile setting. */
     enterSubmits: boolean;
     /** The host's paste state: it attaches the cited images when the comment is saved. */
     imagePaste: CommentImagePaste;
@@ -91,6 +92,7 @@ export function CommentTextEditor({
     }, []);
     const caretCoords = React.useCallback((position: number) => editorRef.current?.caretCoords(position) ?? null, []);
     const fieldPicker = useCommentFieldPicker({ text: value, getCaret, replaceRange, caretCoords });
+    const commentKeys = useCommentEnterSubmit(enterSubmits);
 
     // Every surface opens its field ready to type, caret after any text the
     // comment started with (a keystroke that opened it, or the saved comment).
@@ -104,7 +106,7 @@ export function CommentTextEditor({
     const handleKeyDown = (event: KeyboardEvent): boolean => {
         if (isIMECompositionEvent(event)) return false;
         if (fieldPicker.handleKeyDown(event)) return true;
-        if (event.key === 'Enter' && !event.shiftKey && (enterSubmits || event.metaKey || event.ctrlKey)) {
+        if (event.key === 'Enter' && commentKeys.shouldSubmit(event)) {
             event.preventDefault();
             onSubmit();
             return true;
@@ -143,6 +145,8 @@ export function CommentTextEditor({
                 onKeyDown={handleKeyDown}
                 onPaste={handlePaste}
                 onBlur={onBlur}
+                returnKeySends={commentKeys.returnKeySends}
+                preserveDeferredEnterShift={commentKeys.preserveDeferredEnterShift}
                 placeholder={placeholder}
                 spellCheck
                 maxLines={maxLines}

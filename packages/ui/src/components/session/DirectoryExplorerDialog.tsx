@@ -36,6 +36,7 @@ import { Input } from '@/components/ui/input';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { initialBrowseQuery } from './directoryExplorerStart';
+import { OpenCodeProjectImport } from './project-import/OpenCodeProjectImport';
 import { formatShortcutForDisplay } from '@/lib/shortcuts';
 import { useUIStore } from '@/stores/useUIStore';
 import { useGitIdentitiesStore } from '@/stores/useGitIdentitiesStore';
@@ -214,7 +215,12 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
   const [browseErrorReason, setBrowseErrorReason] = React.useState<FilesystemErrorReason | null>(null);
   const [browseReloadKey, setBrowseReloadKey] = React.useState(0);
   const [highlightedIndex, setHighlightedIndex] = React.useState(0);
-  const [isConfirming, setIsConfirming] = React.useState(false);
+  const [isAddingProject, setIsAddingProject] = React.useState(false);
+  const [importingRuntime, setImportingRuntime] = React.useState<string | null>(null);
+  const isConfirming = isAddingProject || importingRuntime === runtimeKey;
+  const handleImportBusyChange = React.useCallback((busy: boolean) => {
+    setImportingRuntime((current) => busy ? runtimeKey : current === runtimeKey ? null : current);
+  }, [runtimeKey]);
   const [isOpeningFinder, setIsOpeningFinder] = React.useState(false);
   const [addButtonWidth, setAddButtonWidth] = React.useState(0);
   const [isCloneMode, setIsCloneMode] = React.useState(false);
@@ -239,7 +245,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
     setQuery('~/');
     setEntries([]);
     setHighlightedIndex(0);
-    setIsConfirming(false);
+    setIsAddingProject(false);
     setIsOpeningFinder(false);
     setIsCloneMode(false);
     setCloneRemoteUrl('');
@@ -568,6 +574,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
 
   const handleQuickAdd = React.useCallback(async (event: React.MouseEvent, path: string) => {
     event.stopPropagation();
+    if (isConfirming) return;
     const normalized = normalizeDirectoryPath(path);
     if (normalized && addedProjectPaths.has(normalized)) return;
     const project = await addProject(path);
@@ -578,7 +585,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
       return;
     }
     openProjectDraft(project.id, project.path);
-  }, [addProject, addedProjectPaths, openProjectDraft, t]);
+  }, [addProject, addedProjectPaths, isConfirming, openProjectDraft, t]);
 
   const finalizeSelection = React.useCallback(async (target: string) => {
     if (runtimeKey !== getRuntimeKey()) return;
@@ -598,7 +605,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
     let selectedTarget = target;
     let setupRequired = false;
 
-    setIsConfirming(true);
+    setIsAddingProject(true);
     try {
       const shouldCreateSelection = !isCloneMode && shouldCreateTarget && normalizeDirectoryPath(target) === normalizeDirectoryPath(targetPath);
       if (isCloneMode) {
@@ -685,7 +692,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
       });
     } finally {
       cloneController.current = null;
-      setIsConfirming(false);
+      setIsAddingProject(false);
     }
   }, [addProject, addProjects, addedProjectPaths, canSubmitClone, cloneRecovery, cloneSelection, identityChosen, cloneRemoteUrl, existingRepository, git, handleClose, isCloneMode, isConfirming, mobileActions, openContextSurface, openProjectDraft, runtimeKey, selectedGitIdentity, selectedPaths, shouldCreateTarget, sourceControl, targetPath, t]);
 
@@ -881,6 +888,9 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
   const resultsSection = (
     <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-edge bg-[var(--surface-elevated)] shadow-sm">
       <ScrollableOverlay outerClassName="max-h-[min(28rem,58vh)]" className="p-2">
+        {open && !runtime.isVSCode && !isCloneMode ? (
+          <OpenCodeProjectImport key={runtimeKey} busy={isConfirming} onBusyChange={handleImportBusyChange} />
+        ) : null}
         <div className="px-2 pb-1 pt-0.5 typography-meta font-medium uppercase tracking-wide text-muted-foreground">
           {t('directoryExplorerDialog.browse.directories')}
         </div>
@@ -973,6 +983,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
                         type="button"
                         onMouseDown={(event) => event.stopPropagation()}
                         onClick={(event) => handleQuickAdd(event, row.path)}
+                        disabled={isConfirming}
                         className="flex-shrink-0 rounded-full p-1 text-muted-foreground transition-colors hover:bg-interactive-hover/60 hover:text-foreground"
                         title={t('directoryExplorerDialog.browse.quickAdd')}
                       >

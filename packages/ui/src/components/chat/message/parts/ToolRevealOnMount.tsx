@@ -112,11 +112,17 @@ export const ToolRevealOnMount: React.FC<ToolRevealOnMountProps> = ({
                 fill: 'forwards',
             });
 
-            animation.finished
+            const running = animation;
+            running.finished
                 .catch(() => undefined)
                 .finally(() => {
                     const target = rootRef.current;
                     clearRevealStyles(target);
+                    // A finished `forwards` animation keeps filling for the
+                    // row's lifetime, and the turn's rows piled them up. Its
+                    // last keyframe is the row's own look, so releasing it in
+                    // the same task changes nothing on screen.
+                    running.cancel();
                 });
         });
 
