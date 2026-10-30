@@ -84,16 +84,15 @@ export const parseScheduledCommandPrompt = (prompt) => {
     return null;
   }
 
-  const firstLine = trimmed.split(/\r?\n/, 1)[0] || '';
-  const [head, ...tail] = firstLine.split(/\s+/);
-  const commandName = (head || '').slice(1).trim();
+  const commandToken = trimmed.match(/^\/(\S+)/);
+  const commandName = commandToken?.[1];
   if (!commandName) {
     return null;
   }
 
   return {
     command: commandName,
-    arguments: tail.join(' ').trim(),
+    arguments: trimmed.slice(commandToken[0].length).replace(/^[ \t]*(?:\r?\n)?/, ''),
   };
 };
 
