@@ -1203,9 +1203,17 @@ export const registerFsRoutes = (app, dependencies) => {
         return res.status(400).json({ error: resolved.error });
       }
 
-      const canonicalPath = await fsPromises.realpath(resolved.resolved);
-
-      const stats = await fsPromises.stat(canonicalPath);
+      let canonicalPath;
+      let stats;
+      try {
+        canonicalPath = await fsPromises.realpath(resolved.resolved);
+        stats = await fsPromises.stat(canonicalPath);
+      } catch (error) {
+        if (optional && ['ENOENT', 'ENOTDIR', 'EINVAL', 'ENAMETOOLONG'].includes(error?.code)) {
+          return res.json({ path: filePath, exists: false });
+        }
+        throw error;
+      }
       if (!stats.isFile()) {
         return res.status(400).json({ error: 'Specified path is not a file' });
       }

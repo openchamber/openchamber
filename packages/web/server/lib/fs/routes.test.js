@@ -194,6 +194,26 @@ const registerRead = (fsPromises, resolveProjectDirectory = async () => ({ direc
   return getRoute('GET', '/api/fs/read');
 };
 
+const registerStat = (fsPromises, resolveProjectDirectory = async () => ({ directory: '/repo' })) => {
+  const { app, getRoute } = createRouteRegistry();
+  registerFsRoutes(app, {
+    os: { homedir: () => '/home/user' },
+    path: path.posix,
+    fsPromises: {
+      realpath: async (targetPath) => targetPath,
+      ...fsPromises,
+    },
+    spawn: vi.fn(),
+    crypto: { randomUUID: () => 'job-0' },
+    normalizeDirectoryPath: (p) => p,
+    resolveProjectDirectory,
+    buildAugmentedPath: () => '/usr/bin',
+    resolveGitBinaryForSpawn: () => 'git',
+    openchamberUserConfigRoot: '/home/user/.config',
+  });
+  return getRoute('GET', '/api/fs/stat');
+};
+
 const registerRaw = (fsPromises) => {
   const { app, getRoute } = createRouteRegistry();
   registerFsRoutes(app, {
@@ -1063,6 +1083,76 @@ describe('fs read', () => {
     const res = await callRead(getRoute('GET', '/api/fs/stat'), { path: '/tmp/plan.txt', allowOutsideWorkspace: 'true' });
     expect(res.statusCode).toBe(200);
     expect(res.body).toEqual({ path: '/tmp/plan.txt', isFile: true, size: 100, mtimeMs: 123 });
+  });
+
+  it.each(['realpath', 'stat'].flatMap((operation) =>
+    ['ENOENT', 'ENOTDIR', 'EINVAL', 'ENAMETOOLONG'].map((code) => [operation, code])
+  ))('returns an optional missing result for %s %s without logging', async (operation, code) => {
+    const error = Object.assign(new Error(code), { code });
+    const logError = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      const res = await callRead(registerStat({ [operation]: async () => { throw error; } }), {
+        path: '/repo/app.asar',
+        optional: 'true',
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body).toEqual({ path: '/repo/app.asar', exists: false });
+      expect(logError).not.toHaveBeenCalled();
+    } finally {
+      logError.mockRestore();
+    }
+  });
+
+  it('logs and returns 500 for non-optional non-ENOENT filesystem errors', async () => {
+    const error = Object.assign(new Error('Invalid package'), { code: 'EINVAL' });
+    const logError = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      const res = await callRead(registerStat({ realpath: async () => { throw error; } }), {
+        path: '/repo/app.asar',
+      });
+
+      expect(res.statusCode).toBe(500);
+      expect(res.body).toEqual({ error: 'Invalid package' });
+      expect(logError).toHaveBeenCalledWith('Failed to stat file:', error);
+    } finally {
+      logError.mockRestore();
+    }
+  });
+
+  it.each(['EACCES', 'EPERM'])('keeps %s denied when the stat is optional', async (code) => {
+    const error = Object.assign(new Error('denied'), { code });
+
+    const res = await callRead(registerStat({ realpath: async () => { throw error; } }), {
+      path: '/repo/protected.asar',
+      optional: 'true',
+    });
+
+    expect(res.statusCode).toBe(403);
+    expect(res.body).toEqual({ error: 'Access to file denied', reason: 'os-permission' });
+  });
+
+  it.each(['realpath', 'stat', 'workspace'].flatMap((operation) =>
+    ['EIO', 'EMFILE', undefined].map((code) => [operation, code])
+  ).concat([['workspace', 'EINVAL']]))('logs and returns 500 for optional %s failure %s', async (operation, code) => {
+    const error = Object.assign(new Error('Unexpected failure'), { code });
+    const fail = async () => { throw error; };
+    const handler = operation === 'workspace'
+      ? registerStat({}, fail)
+      : registerStat({ [operation]: fail });
+    const logError = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      const res = await callRead(handler, { path: '/repo/app.asar', optional: 'true' });
+
+      expect(res.statusCode).toBe(500);
+      expect(res.body).toEqual({ error: 'Unexpected failure' });
+      expect(logError).toHaveBeenCalledWith('Failed to stat file:', error);
+    } finally {
+      logError.mockRestore();
+    }
   });
 
   it.each([
@@ -2778,7 +2868,7 @@ describe('GET /api/fs/find-in-files', () => {
 
   it('builds result paths under the root the client asked for when it is a symlink', async () => {
     const link = `${repo}-link`;
-    await nativeFs.symlink(repo, link);
+    await nativeFs.symlink(repo, link, 'junction');
     try {
       const ask = await register({
         resolveProjectDirectory: async () => ({ directory: repo, requestedDirectory: link }),
