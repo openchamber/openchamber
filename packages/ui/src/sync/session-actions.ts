@@ -73,6 +73,7 @@ import { recordSessionActionFailure } from "./session-action-failures"
 import { applyForkInheritance } from "@/lib/sessionForkInheritance"
 import { getSessionGoal } from "@/lib/sessionGoalMetadata"
 import { fetchGoalObjectiveContent, writeGoalObjectiveFile } from "@/lib/goalObjectiveFiles"
+import { isVSCodeRuntime } from "@/lib/desktop"
 
 const MESSAGE_REFETCH_LIMIT = 100
 const SEND_CONFIRMATION_REFETCH_LIMIT = 30
@@ -2847,7 +2848,24 @@ function openForkedSession(store: DirectoryStoreApi, forkedSession: Session, dir
  * The objective copy re-reads the fork's goal id first and is skipped when the
  * user armed a new goal on the fork in the meantime.
  */
-function inheritForkMetadata(sourceSessionId: string, forkedSession: Session, directory: string | null | undefined, expectedRuntimeKey: string) {
+async function inheritForkState(sourceSessionId: string, forkedSession: Session, directory: string | null | undefined, expectedRuntimeKey: string) {
+  // VS Code keeps its permission policy in the extension host; other runtimes
+  // inherit it server-side when OpenCode announces session.forked.
+  if (isVSCodeRuntime()) {
+    try {
+      const { usePermissionStore } = await import("@/stores/permissionStore")
+      if (isStaleRuntime(expectedRuntimeKey)) return
+      await usePermissionStore.getState().hydrate()
+      if (isStaleRuntime(expectedRuntimeKey)) return
+      const permissions = usePermissionStore.getState()
+      if (!Object.hasOwn(permissions.modes, forkedSession.id)) {
+        await permissions.setSessionMode(forkedSession.id, permissions.getSessionMode(sourceSessionId))
+      }
+    } catch (error) {
+      console.warn("[fork] failed to copy the permission mode to the fork", error)
+    }
+    if (isStaleRuntime(expectedRuntimeKey)) return
+  }
   return applyForkInheritance(sourceSessionId, forkedSession, {
     readGoalId: async (sessionId) => getSessionGoal(await opencodeClient.getSession(sessionId, directory))?.id ?? null,
     readObjective: fetchGoalObjectiveContent,
@@ -2872,7 +2890,7 @@ export async function forkAfterMessage(sessionId: string, messageId: string): Pr
   if (isStaleRuntime(expectedRuntimeKey)) return null
   const forkDirectory = resolveSessionOwnedDirectory(forkedSession) ?? directory
   openForkedSession(store, forkedSession, forkDirectory)
-  await inheritForkMetadata(sessionId, forkedSession, forkDirectory, expectedRuntimeKey)
+  await inheritForkState(sessionId, forkedSession, forkDirectory, expectedRuntimeKey)
   return forkedSession
 }
 
@@ -2990,7 +3008,7 @@ export async function forkFromMessage(sessionId: string, messageId: string): Pro
     contextCarriersForMessage(state.message[sessionId] ?? [], messageId),
     { directory: target.directory, sessionKey: forkedSession.id },
   )
-  await inheritForkMetadata(sessionId, forkedSession, target.directory, expectedRuntimeKey)
+  await inheritForkState(sessionId, forkedSession, target.directory, expectedRuntimeKey)
 }
 
 export async function fetchMessagesForSession(sessionID: string, directory?: string | null): Promise<void> {

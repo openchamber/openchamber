@@ -107,6 +107,12 @@ export function translateWireEvent(payload) {
       })];
     }
 
+    case 'session.forked': {
+      const parentID = trimmed(data.parentID);
+      if (!sessionID || !parentID) return [];
+      return [event('session.forked', { sessionID, parentID })];
+    }
+
     case 'session.renamed':
       if (!sessionID) return [];
       return [event('session.updated', {
