@@ -42,8 +42,8 @@ export const createVSCodeFilesAPI = (): FilesAPI => ({
       directory,
       query: payload.query,
       limit: payload.maxResults,
-      includeHidden: false,
-      respectGitignore: true,
+      includeHidden: payload.includeHidden === true,
+      respectGitignore: payload.respectGitignore !== false,
     });
 
     const files = Array.isArray(data?.files) ? data.files : [];

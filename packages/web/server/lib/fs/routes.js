@@ -3,7 +3,7 @@ import { redactGitText } from '../git/redaction.js';
 import { resolveByteRange } from './byte-range.js';
 import { injectPreviewBridge } from './preview-bridge.js';
 import { createWorkspaceFileNameIndex } from './workspace-file-names.js';
-import { createGitCheckIgnoreTimeoutMs } from './search.js';
+import { createFsSearchRuntime, createGitCheckIgnoreTimeoutMs } from './search.js';
 import {
   CONTENT_SEARCH_DEFAULT_LIMIT,
   CONTENT_SEARCH_MAX_LIMIT,
@@ -1018,6 +1018,66 @@ export const registerFsRoutes = (app, dependencies) => {
       return res.status(400).json({ error: project.error || 'Active workspace is required' });
     }
     return res.json({ paths: await workspaceFileNames.find(project.directory, name) });
+  });
+
+  app.get('/api/fs/search', async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    const query = isString(req.query.query) ? String(req.query.query) : '';
+    const requestedLimit = isString(req.query.limit) ? Number.parseInt(String(req.query.limit), 10) : Number.NaN;
+    const limit = Number.isInteger(requestedLimit)
+      ? Math.min(Math.max(1, requestedLimit), 500)
+      : 60;
+    const includeHidden = req.query.includeHidden === 'true';
+    const respectGitignore = req.query.respectGitignore !== 'false';
+
+    const rawPath = typeof req.query.directory === 'string' && req.query.directory.trim().length > 0
+      ? req.query.directory.trim()
+      : '';
+    let requestedPath = '';
+    let resolvedPath = '';
+    try {
+      if (rawPath) {
+        requestedPath = path.resolve(normalizeDirectoryPath(rawPath));
+      } else {
+        const project = await resolveProjectDirectory(req);
+        if (!project.directory) {
+          return res.status(400).json({ error: project.error || 'Active workspace is required' });
+        }
+        requestedPath = path.resolve(normalizeDirectoryPath(project.requestedDirectory || project.directory));
+      }
+      resolvedPath = await realpathCache.resolve(requestedPath);
+      const stats = await fsPromises.stat(resolvedPath);
+      if (!stats.isDirectory()) {
+        return res.status(400).json({ error: 'Specified path is not a directory', reason: 'not-directory' });
+      }
+    } catch (error) {
+      const err = error;
+      const code = err && typeof err === 'object' && 'code' in err ? err.code : undefined;
+      if (code === 'ENOENT') {
+        return res.status(404).json({ error: 'Directory not found', reason: 'not-found' });
+      }
+      if (isOsPermissionError(err)) {
+        return sendOsPermissionDenied(res, 'Access to directory denied');
+      }
+      return res.status(500).json({ error: (error && error.message) || 'Failed to search files' });
+    }
+
+    const fsSearch = createFsSearchRuntime({ fsPromises, path, spawn, resolveGitBinaryForSpawn, workspaceSearch: true });
+    const results = await fsSearch.searchFilesystemFiles(resolvedPath, {
+      query,
+      limit,
+      includeHidden,
+      respectGitignore,
+    });
+
+    const mapped = results.map((file) => ({
+      name: file.name,
+      path: path.join(requestedPath, file.relativePath),
+      relativePath: file.relativePath,
+      extension: file.extension,
+    }));
+
+    return res.json({ files: mapped });
   });
 
   // Find in files: lines of workspace files containing a text or a regex,

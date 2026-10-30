@@ -5,7 +5,7 @@ Own filesystem API behavior for the web server runtime, including workspace-boun
 
 ## Entrypoints and structure
 - `packages/web/server/lib/fs/routes.js`: route registration and runtime-owned state for `/api/fs/*` endpoints.
-- `packages/web/server/lib/fs/search.js`: fuzzy filesystem search runtime used by non-FS routes (for example project icon discovery).
+- `packages/web/server/lib/fs/search.js`: fuzzy filesystem search for workspace supplements and project icon discovery.
 - `packages/web/server/lib/fs/content-search.js`: find in files, run by ripgrep (`GET /api/fs/find-in-files`).
 - `packages/web/server/lib/fs/ripgrep.js`: where the ripgrep binary comes from.
 
@@ -37,7 +37,12 @@ Own filesystem API behavior for the web server runtime, including workspace-boun
      - `POST /api/fs/clone`
      - `POST /api/fs/exec`
     - `GET /api/fs/exec/:jobId`
-    - `GET /api/fs/list`
+     - `GET /api/fs/list`
+     - `GET /api/fs/search` returns `{ files }` with name, absolute path,
+       relative path and extension. It accepts `directory` (active workspace
+       when omitted), `query`, `limit` (default 60, clamped to 1..500),
+       `includeHidden=true` and `respectGitignore=false`. Paths stay under the
+       requested root, including symlink aliases.
     - `GET /api/fs/find-in-files` — find in files, see below.
     - `GET /api/fs/git-dirs` — shallow nested git repository discovery for the
       Git tab (breadth-first readdir walk, capped at depth 3 and 100 visited
@@ -56,7 +61,24 @@ Own filesystem API behavior for the web server runtime, including workspace-boun
 - `createFsSearchRuntime({ fsPromises, path, spawn, resolveGitBinaryForSpawn })` from `search.js`
   - Returns `{ searchFilesystemFiles(rootPath, options) }`.
   - Supports fuzzy matching, hidden-file handling, and optional `git check-ignore` filtering.
-  - An empty query stops at `limit` candidates. A query walks the tree until it is exhausted or 10,000 files are inspected (`FILE_SEARCH_MAX_VISITED_FILES`): weak shallow matches would otherwise exhaust a candidate budget before exact deeper matches are ever visited. The ceiling mirrors `packages/vscode/src/bridge-fs-helpers-runtime.ts`, and both suites pin the two runtimes' agreement.
+   - An empty query stops at `limit` candidates. A query walks the tree until it is exhausted or 10,000 files are inspected (`FILE_SEARCH_MAX_VISITED_FILES`): weak shallow matches would otherwise exhaust a candidate budget before exact deeper matches are ever visited. The ceiling mirrors `packages/vscode/src/bridge-fs-helpers-runtime.ts`, and both suites pin the two runtimes' agreement.
+
+### Why workspace search supplements OpenCode
+
+The shared file-search store keeps OpenCode's indexed hits in their original
+order, appends unique filesystem hits for non-default toggles, then applies the
+caller's result limit. Replacing the index with the icon-discovery walk would
+drop normal results. Web, desktop, hosted mobile and Capacitor use this endpoint;
+VS Code forwards the same flags to its extension-host search.
+
+Search ignore checks send and receive NUL-delimited names with
+`git check-ignore --stdin -z`, preserving Unicode, whitespace and newlines.
+Git's quoted line output cannot be compared directly with filesystem names.
+
+`workspaceSearch: true` searches generated directories such as `build` and
+`dist`, excludes only `.git` and `node_modules`, and removes the icon walk's
+10,000-file ceiling. A 30-second deadline fails the search rather than returning
+an unmarked partial answer. Default icon discovery keeps its existing bounds.
 
 ### Find in files
 

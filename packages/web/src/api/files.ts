@@ -105,6 +105,10 @@ const contentSearchErrorSchema = z.object({
   reason: z.string().optional(),
 });
 
+const fileSearchResponseSchema = z.object({
+  files: z.array(z.object({ path: z.string(), relativePath: z.string() })),
+});
+
 export const createWebFilesAPI = ({ getDirectory, searchFiles = defaultSearchFiles }: WebFilesAPIOptions): FilesAPI => ({
   async listDirectory(path: string, options): Promise<DirectoryListResult> {
     const target = normalizePath(path);
@@ -140,9 +144,40 @@ export const createWebFilesAPI = ({ getDirectory, searchFiles = defaultSearchFil
   },
 
   async search(payload: FileSearchQuery): Promise<FileSearchResult[]> {
+    const directory = normalizePath(payload.directory);
+    const includeHidden = Boolean(payload.includeHidden);
+    const respectGitignore = payload.respectGitignore !== false;
+
+    if (includeHidden || !respectGitignore) {
+      const params = new URLSearchParams();
+      params.set('query', payload.query);
+      if (directory) params.set('directory', directory);
+      if (typeof payload.maxResults === 'number' && Number.isFinite(payload.maxResults)) {
+        params.set('limit', String(payload.maxResults));
+      }
+      if (includeHidden) params.set('includeHidden', 'true');
+      if (!respectGitignore) params.set('respectGitignore', 'false');
+
+      const response = await runtimeFetch('/api/fs/search', {
+        query: params,
+        headers: directoryHeaders(getDirectory, directory),
+      });
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ error: response.statusText })) as { error?: string };
+        throw new Error(error.error || 'Failed to search files');
+      }
+      const result = fileSearchResponseSchema.safeParse(await response.json().catch(() => null));
+      if (!result.success) {
+        throw new FilesystemError('File search returned an invalid response', { reason: 'invalid-response' });
+      }
+      return result.data.files.map((file) => ({
+        path: normalizePath(file.path),
+        preview: [normalizePath(file.relativePath)],
+      }));
+    }
+
     // file.find answers file search on OpenCode 2.x; /api/find/file has no
     // route there and falls through the generic proxy to a 404.
-    const directory = normalizePath(payload.directory);
     const hits = await searchFiles(payload.query, {
       directory,
       limit: typeof payload.maxResults === 'number' && Number.isFinite(payload.maxResults)

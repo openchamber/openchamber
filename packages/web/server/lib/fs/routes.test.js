@@ -2625,6 +2625,63 @@ describe('GET /api/fs/find-by-name', () => {
   });
 });
 
+describe('GET /api/fs/search', () => {
+  let repo;
+  beforeEach(async () => {
+    repo = await mkdtemp(path.join(tmpdir(), 'oc-file-search-route-'));
+    execFileSync('git', ['init', '-q'], { cwd: repo });
+    await mkdir(path.join(repo, 'build'));
+    await nativeFs.writeFile(path.join(repo, 'build/needle.ts'), '');
+    await nativeFs.writeFile(path.join(repo, '.needle.ts'), '');
+    await nativeFs.writeFile(path.join(repo, 'needle.ts'), '');
+    await nativeFs.writeFile(path.join(repo, '.gitignore'), 'build/\n');
+  });
+  afterEach(async () => {
+    await rm(repo, { recursive: true, force: true });
+  });
+
+  const register = async () => {
+    const { spawn } = await import('node:child_process');
+    const { app, getRoute } = createRouteRegistry();
+    registerFsRoutes(app, {
+      os: { homedir: () => '/home/user' }, path, fsPromises: nativeFs, spawn,
+      crypto: { randomUUID: () => 'job-0' }, normalizeDirectoryPath: (p) => p,
+      resolveProjectDirectory: async () => ({ directory: repo }),
+      buildAugmentedPath: () => '/usr/bin', resolveGitBinaryForSpawn: () => 'git',
+      openchamberUserConfigRoot: '/home/user/.config',
+    });
+    return async (query) => {
+      const response = createMockResponse();
+      await getRoute('GET', '/api/fs/search')({ query, headers: {} }, response);
+      return response;
+    };
+  };
+
+  it('honors both toggles including gitignored build directories', async () => {
+    const ask = await register();
+    expect((await ask({ query: 'needle' })).body.files.map((file) => file.relativePath)).toEqual(['needle.ts']);
+    expect((await ask({ query: 'needle', includeHidden: 'true' })).body.files.map((file) => file.relativePath).sort())
+      .toEqual(['.needle.ts', 'needle.ts']);
+    const expanded = await ask({ query: 'needle', respectGitignore: 'false' });
+    expect(expanded.body.files.map((file) => file.relativePath).sort()).toEqual(['build/needle.ts', 'needle.ts']);
+    expect(expanded.getHeader('cache-control')).toBe('no-store');
+    expect((await ask({ query: 'needle', includeHidden: 'true', respectGitignore: 'false', limit: '1' })).body.files).toHaveLength(1);
+  });
+
+  it('returns paths under the requested symlink and reports missing directories', async () => {
+    const link = `${repo}-link`;
+    await nativeFs.symlink(repo, link);
+    try {
+      const ask = await register();
+      const response = await ask({ directory: link, query: 'needle', respectGitignore: 'false' });
+      expect(response.body.files.every((file) => file.path.startsWith(`${link}${path.sep}`))).toBe(true);
+      expect((await ask({ directory: path.join(repo, 'absent') })).statusCode).toBe(404);
+    } finally {
+      await rm(link, { force: true });
+    }
+  });
+});
+
 describe('GET /api/fs/find-in-files', () => {
   let repo;
   beforeEach(async () => {
