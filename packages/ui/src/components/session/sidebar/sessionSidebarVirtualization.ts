@@ -87,7 +87,7 @@ export const sectionWrapperClass = (row: SessionSidebarRow, nextRow: SessionSide
     // A run is a project row when its root sits at the project root; a lane's
     // own worktree does not make the run a worktree row.
     : row.kind === 'run'
-      ? row.laneNodes.some((node) => Boolean(node.worktree))
+      ? row.depth > 0
       : row.kind === 'group-header' && isGroupWork(row.group);
   const deepWithoutContext = !('renderContext' in row) && 'depth' in row && (row.depth ?? 0) > 0;
   const inWorktree = rowWorktree || deepWithoutContext;
