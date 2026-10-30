@@ -275,7 +275,7 @@ export const useProjectIdentityForm = (project: EditableProject | null) => {
     }
   }, [clearPendingUploadIcon, discoverProjectIcon, isDiscoveringIcon, project, t]);
 
-  const prepareSaveData = React.useCallback(async (options?: { silent?: boolean }): Promise<ProjectIdentitySaveData | null> => {
+  const prepareSaveData = React.useCallback(async (options?: { silent?: boolean; skipIconChanges?: boolean }): Promise<ProjectIdentitySaveData | null> => {
     const silent = options?.silent === true;
     if (!project) {
       return null;
@@ -286,7 +286,7 @@ export const useProjectIdentityForm = (project: EditableProject | null) => {
       return null;
     }
 
-    if (pendingUploadIconFile) {
+    if (pendingUploadIconFile && !options?.skipIconChanges) {
       setIsUploadingIcon(true);
       const uploadResult = await uploadProjectIcon(project.id, pendingUploadIconFile);
       setIsUploadingIcon(false);
@@ -303,7 +303,7 @@ export const useProjectIdentityForm = (project: EditableProject | null) => {
 
     const willRemoveImageIcon = pendingRemoveImageIcon && Boolean(project.iconImage);
 
-    if (willRemoveImageIcon) {
+    if (willRemoveImageIcon && !options?.skipIconChanges) {
       setIsRemovingCustomIcon(true);
       const removeResult = await removeProjectIcon(project.id);
       setIsRemovingCustomIcon(false);
