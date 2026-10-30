@@ -589,6 +589,12 @@ Extension session subscriptions project these same stores through `lib/guests/wo
 
 The session creation action accepts `navigation: "preserve"` for background extension launches. It still registers the returned directory, initializes message loading, marks the session as OpenChamber-created, and updates the global cache, but never selects it. Explicit guest `openSession` performs selection later. `session-ui-store.worktreeDiscoveryByProject` publishes topology loading/ready/error separately from retained worktree records; the existing sidebar discovery and control-event refresh own these flags.
 
+An explicit creation title is recorded as `metadata.openchamber.workTitle`
+with `by: "user"`, preserving the caller's other metadata. Titleless creation
+leaves metadata unchanged. The title and its ownership reach OpenCode in the
+same create request, so `work.name` cannot replace a user-given title before
+a later metadata write completes.
+
 Use the sync hooks backed by aggregated child stores when the UI needs **live truth** for sessions or statuses across all initialized directories.
 
 Current consumers:

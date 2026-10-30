@@ -241,7 +241,10 @@ other.
   dependency; without it the action answers 503). In a linked worktree it sets
   the branch description (`setWorktreeTaskTitle` in `../git`); in the main
   checkout it renames the task's root session, found through the same lineage
-  the sidebar nests by, and records `metadata.openchamber.workTitle`. A name
+  the sidebar nests by, and records `metadata.openchamber.workTitle`. Explicit
+  creation titles from the shared UI and `POST /api/openchamber/sessions`
+  carry `by: 'user'` in that same creation request. The agent's `session.create`
+  does not claim user ownership, so the agent can still rename its own tasks. A name
   the user gave stays: the call changes nothing and answers `named: false`
   with the current name. When to call it is in the session context, next to
   the linking guidance (`WORK_NAME_GUIDANCE`). While the worktree's branch is

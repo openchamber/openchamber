@@ -59,10 +59,14 @@ const AMBIGUOUS_TRANSPORT_FAILURE = Symbol("ambiguous-transport-failure")
 
 const notFound = (kind: string) => Object.assign(new Error(`${kind}NotFoundError`), { status: 404 })
 
+const sdkClient = {}
+
 mock.module("@/lib/opencode/client", () => ({
   ascendingId: (prefix: string) => `${prefix}_${(idCounter += 1).toString(16).padStart(12, "0")}`,
   opencodeClient: {
     getDirectory: () => "/test/project",
+    getSdkClient: () => sdkClient,
+    captureSessionCleanup: async () => async () => undefined,
     getActiveSessionStatuses: mock((directory?: string | null) => readActiveStatusSnapshot(directory)),
     getSession: mock(async (sessionId: string, directory?: string | null): Promise<Session> => {
       replyCalls.push({ method: "session.get", params: { sessionID: sessionId, directory } })
@@ -200,6 +204,7 @@ mock.module("./session-ui-store", () => ({
       setCurrentSession: (sessionId: string | null, directoryHint?: string | null) => {
         selectedSessions.push({ sessionId, directoryHint })
       },
+      markSessionAsOpenChamberCreated: () => {},
       setWorktreeMetadata: () => {},
       setSessionDirectory: (sessionID: string, directory: string) => {
         movedSessionDirectories.push({ sessionID, directory })
@@ -353,6 +358,7 @@ mock.module("./session-message-loader", () => ({
     invalidateSession: () => {},
     ensure: async () => {},
     refreshTail: async () => {},
+    initializeCreatedSession: () => {},
     getSnapshot: () => ({ status: "ready" as const }),
   }),
 }))
@@ -3765,5 +3771,40 @@ describe("sendRecoveredFormAnswer", () => {
 
     expect(sendMessageCalls).toHaveLength(1)
     expect(useRecoverableQuestionsStore.getState().outcomes.has("frm_recovered")).toBe(false)
+  })
+})
+
+describe("a session created with a title", () => {
+  beforeEach(() => {
+    replyCalls.length = 0
+    globalUpsertedSessions.length = 0
+    registeredSessionDirectories.length = 0
+  })
+
+  test("records the user's title and preserves existing metadata", async () => {
+    const source = createStore({}, { session: [] })
+    const { createSession, setActionRefs } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", source]]), () => "/test/project")
+
+    const session = await createSession("My task", "/test/project", { custom: "kept", openchamber: { kind: "review" } })
+
+    expect(session?.id).toBe("created")
+    const created = replyCalls.find((call) => call.method === "session.create")
+    expect(created?.params.metadata).toEqual({
+      custom: "kept",
+      openchamber: { kind: "review", workTitle: { title: "My task", by: "user" } },
+    })
+  })
+
+  test("leaves the metadata alone when no title is given", async () => {
+    const source = createStore({}, { session: [] })
+    const { createSession, setActionRefs } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", source]]), () => "/test/project")
+
+    const session = await createSession(undefined, "/test/project")
+
+    expect(session?.id).toBe("created")
+    const created = replyCalls.find((call) => call.method === "session.create")
+    expect(created?.params.metadata).toBeUndefined()
   })
 })

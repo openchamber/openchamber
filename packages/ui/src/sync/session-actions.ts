@@ -1060,8 +1060,9 @@ export async function createSession(
     const effectiveDirectory = directoryOverride ?? dir()
     const cleanupSession = await opencodeClient.captureSessionCleanup(effectiveDirectory, runtimeKey)
     if (getRuntimeKey() !== runtimeKey || opencodeClient.getSdkClient() !== runtimeClient) return null
+    const sessionMetadata = title ? withUserWorkTitle(metadata ?? {}, title) : metadata
     const session = await opencodeClient.createSession(
-      { id, title, metadata, model: selection?.model, agent: selection?.agent },
+      { id, title, metadata: sessionMetadata, model: selection?.model, agent: selection?.agent },
       effectiveDirectory,
     )
 
