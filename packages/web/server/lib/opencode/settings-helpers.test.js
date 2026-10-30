@@ -411,6 +411,8 @@ describe('settings helpers', () => {
     expect(helpers.sanitizeSettingsUpdate({ desktopUpdateChannel: 'canary' })).toEqual({ desktopUpdateChannel: 'canary' });
     expect(helpers.sanitizeSettingsUpdate({ desktopUpdateChannel: 'stable' })).toEqual({ desktopUpdateChannel: 'stable' });
     expect(helpers.sanitizeSettingsUpdate({ desktopUpdateChannel: 'beta' })).toEqual({});
+    expect(helpers.sanitizeSettingsUpdate({ serverUpdateChannel: 'canary' })).toEqual({ serverUpdateChannel: 'canary' });
+    expect(helpers.sanitizeSettingsUpdate({ serverUpdateChannel: 'beta' })).toEqual({});
   });
 
   it('accepts desktopMinimizeToTrayEnabled as a persisted shared setting', () => {
@@ -882,7 +884,7 @@ describe('settings registry gate', () => {
     lastDirectory: '/home/testuser/project', homeDirectory: '/home/testuser', opencodeBinary: '/usr/local/bin/opencode',
     projects: [{ id: 'p', path: '/home/testuser/project' }], activeProjectId: 'p',
     securityScopedBookmarks: ['bookmark'], pinnedDirectories: ['/home/testuser/project'],
-    desktopLanAccessEnabled: true, desktopKeepAwakeEnabled: true, desktopMinimizeToTrayEnabled: true, desktopUpdateChannel: 'canary', desktopMacMenuBarEnabled: true, desktopLinuxNativeFrame: true, sidebarShowChatsSection: false, sidebarShowWorkSection: false, sidebarShowPinnedSection: true, sidebarDetailedZoneRows: true, sidebarWorktreeNameByBranch: true,
+    desktopLanAccessEnabled: true, desktopKeepAwakeEnabled: true, desktopMinimizeToTrayEnabled: true, desktopUpdateChannel: 'canary', serverUpdateChannel: 'canary', desktopMacMenuBarEnabled: true, desktopLinuxNativeFrame: true, sidebarShowChatsSection: false, sidebarShowWorkSection: false, sidebarShowPinnedSection: true, sidebarDetailedZoneRows: true, sidebarWorktreeNameByBranch: true,
     desktopUiPassword: 'secret', githubClientId: 'client', githubScopes: 'repo', gitlabClientId: 'gitlab-client', skillCatalogs: [{ id: 'c', label: 'C', source: 'https://x' }],
     defaultGitIdentityId: 'global', permissionAutoAccept: { sessions: { s: true }, revision: 1 }, permissionDefaultMode: 'safety', messageSearchEnabled: true, messageSearchReasoningEnabled: true,
     agentControlToolEnabled: true, agentScheduleToolEnabled: true, agentWebToolEnabled: true, browserProvider: 'builtin', agentMemoryToolEnabled: true, agentKnowledgeToolEnabled: true, agentNotifyToolEnabled: true, agentRenderToolEnabled: true, agentImageToolEnabled: true, agentSecretToolEnabled: true, agentImageModel: 'openrouter/openai/gpt-image-2', agentWorkflowToolEnabled: true, agentToolsCodeMode: true, isolatedSpacesEnabled: true, isolatedSpacesIdleStop: { enabled: true, hours: 4 }, isolatedSpacesSshHost: 'me@box.local:2222', openCodeUpdateToastDismissedVersion: '1.0.0',

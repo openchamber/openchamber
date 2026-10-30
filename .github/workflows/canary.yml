@@ -8,7 +8,8 @@ name: Canary
 # tagged `canary`, whose files are replaced on every run; the Stable channel
 # reads only the latest full release and never sees them. The tag is created
 # once and never moved (a moved tag breaks `git fetch --tags` for everyone);
-# each build's commit is in the release notes.
+# each build's commit is in the release notes. The same version goes to npm
+# under the `canary` dist-tag for servers installed from npm.
 
 on:
   schedule:
@@ -431,8 +432,69 @@ jobs:
           if-no-files-found: error
           retention-days: 3
 
+  # The same build for servers installed from npm: `@openchamber/web` (and the
+  # SDK it links to) at the Canary version under the `canary` dist-tag, so
+  # `latest`, and with it every Stable install, never sees it. A server on the
+  # Canary channel (Settings → About in its browser page) reads that dist-tag.
+  publish-npm:
+    needs: prepare
+    if: ${{ needs.prepare.outputs.build == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+
+      - name: Setup bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # The SDK too: bun rewrites the web package's `workspace:*` link to the
+      # SDK's version, which must then exist on npm.
+      - name: Set the Canary version
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          npm pkg set version="$VERSION" \
+            --workspace @openchamber/web \
+            --workspace @openchamber/ui \
+            --workspace @openchamber/sdk \
+            --include-workspace-root
+
+      - name: Build packages
+        run: bun run build
+
+      # A re-run after the web publish failed finds this SDK already there.
+      - name: Publish SDK to npm
+        working-directory: packages/sdk
+        env:
+          NPM_CONFIG_TOKEN: ${{ secrets.NPM_TOKEN }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          if npm view "@openchamber/sdk@$VERSION" version >/dev/null 2>&1; then
+            echo "@openchamber/sdk@$VERSION is already published."
+          else
+            bun publish --access public --tag canary
+          fi
+
+      - name: Publish to npm
+        working-directory: packages/web
+        run: bun publish --access public --tag canary
+        env:
+          NPM_CONFIG_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  # Last, after npm too: the release notes name the commit the next night
+  # compares main against, so a build that did not reach npm is retried.
   publish:
-    needs: [prepare, build-macos, build-windows, build-linux]
+    needs: [prepare, build-macos, build-windows, build-linux, publish-npm]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -473,7 +535,7 @@ jobs:
       - name: Publish to the canary pre-release
         run: |
           set -euo pipefail
-          NOTES="OpenChamber Canary ${VERSION}, built from ${SHA}. The nightly build of main. In the desktop app, Settings → About → Updates: pick Canary to update into it, Stable to go back. Expect rough edges."
+          NOTES="OpenChamber Canary ${VERSION}, built from ${SHA}. The nightly build of main. In the desktop app, or in the browser page of a server installed from npm (@openchamber/web@canary), Settings → About → Updates: pick Canary to update into it, Stable to go back. Expect rough edges."
           if ! gh release view canary >/dev/null 2>&1; then
             gh release create canary --prerelease --latest=false --target "$SHA" --title "OpenChamber Canary" --notes "$NOTES"
           fi

@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { spawnSync } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -15,6 +17,7 @@ const {
   executeUpdate,
   getCurrentVersion,
   getUpdateCommand,
+  readUpdateChannel,
 } = await import('./package-manager.js');
 
 /** Helper: create a fetch mock that routes by URL pattern */
@@ -44,15 +47,21 @@ function createFetchMock() {
 describe('checkForUpdates', () => {
   let fetchMock;
   let originalFetch;
+  let previousDataDir;
 
   beforeEach(() => {
     fetchMock = createFetchMock();
     originalFetch = globalThis.fetch;
     globalThis.fetch = fetchMock;
+    // No channel picked: these are the release checks, whatever the machine's own settings say.
+    previousDataDir = process.env.OPENCHAMBER_DATA_DIR;
+    process.env.OPENCHAMBER_DATA_DIR = path.join(os.tmpdir(), 'oc-update-check-no-settings');
   });
 
   afterEach(() => {
     globalThis.fetch = originalFetch;
+    if (previousDataDir === undefined) delete process.env.OPENCHAMBER_DATA_DIR;
+    else process.env.OPENCHAMBER_DATA_DIR = previousDataDir;
   });
 
   // --- Scenario: API says update available, npm confirms ---
@@ -418,6 +427,107 @@ describe('checkForUpdates', () => {
 
     const result = await checkForUpdates({ currentVersion: '1.9.10' });
 
+    expect(result.available).toBe(false);
+  });
+});
+
+describe('checkForUpdates on the update channels', () => {
+  let fetchMock;
+  let originalFetch;
+  let dataDir;
+  let previousDataDir;
+
+  const pickChannel = (channel) => {
+    fs.writeFileSync(path.join(dataDir, 'settings.json'), JSON.stringify({ serverUpdateChannel: channel }));
+  };
+  const serveDistTags = (distTags) => {
+    fetchMock
+      .when('api.openchamber.dev', { ok: true, json: async () => ({ latestVersion: '2.5.3', updateAvailable: true }) })
+      .when('registry.npmjs.org', { ok: true, json: async () => ({ 'dist-tags': distTags }) });
+  };
+
+  beforeEach(() => {
+    fetchMock = createFetchMock();
+    originalFetch = globalThis.fetch;
+    globalThis.fetch = fetchMock;
+    previousDataDir = process.env.OPENCHAMBER_DATA_DIR;
+    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-update-channel-'));
+    process.env.OPENCHAMBER_DATA_DIR = dataDir;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    if (previousDataDir === undefined) delete process.env.OPENCHAMBER_DATA_DIR;
+    else process.env.OPENCHAMBER_DATA_DIR = previousDataDir;
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  it('offers the Canary build once Canary is picked', async () => {
+    pickChannel('canary');
+    serveDistTags({ latest: '2.5.3', canary: '2.5.4-canary.20261031.7' });
+
+    const result = await checkForUpdates({ currentVersion: '2.5.3' });
+
+    expect(result).toMatchObject({ available: true, version: '2.5.4-canary.20261031.7', updateCommand: 'openchamber update' });
+    // The website still counts the check-in.
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('api.openchamber.dev'))).toBe(true);
+  });
+
+  it('offers the next night and not the same or an earlier one', async () => {
+    pickChannel('canary');
+    serveDistTags({ latest: '2.5.3', canary: '2.5.4-canary.20261031.7' });
+
+    expect((await checkForUpdates({ currentVersion: '2.5.4-canary.20261030.6' })).available).toBe(true);
+    expect((await checkForUpdates({ currentVersion: '2.5.4-canary.20261031.7' })).available).toBe(false);
+    expect((await checkForUpdates({ currentVersion: '2.5.4-canary.20261101.8' })).available).toBe(false);
+  });
+
+  it('is up to date on Canary before the first Canary is published', async () => {
+    pickChannel('canary');
+    serveDistTags({ latest: '2.5.3' });
+
+    const result = await checkForUpdates({ currentVersion: '2.5.3' });
+
+    expect(result.available).toBe(false);
+    expect(result.error).toBeUndefined();
+  });
+
+  it('reports an unreadable registry as a failed check, not as up to date', async () => {
+    pickChannel('canary');
+    fetchMock
+      .when('api.openchamber.dev', { ok: true, json: async () => ({ latestVersion: '2.5.3', updateAvailable: false }) })
+      .when('registry.npmjs.org', Promise.reject(new Error('Registry unreachable')));
+
+    const result = await checkForUpdates({ currentVersion: '2.5.3' });
+
+    expect(result.available).toBe(false);
+    expect(result.error).toBe('Unable to determine versions');
+  });
+
+  it('offers the older release on Stable from a Canary build', async () => {
+    pickChannel('stable');
+    serveDistTags({ latest: '2.5.3', canary: '2.5.4-canary.20261031.7' });
+
+    const result = await checkForUpdates({ currentVersion: '2.5.4-canary.20261031.7' });
+
+    expect(result).toMatchObject({ available: true, version: '2.5.3' });
+  });
+
+  it('keeps a Canary build installed from the terminal on Canary until a channel is picked', async () => {
+    serveDistTags({ latest: '2.5.3', canary: '2.5.4-canary.20261031.7' });
+
+    expect(readUpdateChannel('2.5.4-canary.20261031.7')).toBe('canary');
+    expect(readUpdateChannel('2.5.3')).toBe('stable');
+    expect((await checkForUpdates({ currentVersion: '2.5.4-canary.20261031.7' })).available).toBe(false);
+  });
+
+  it('leaves the desktop app, VS Code and phones on releases', async () => {
+    pickChannel('canary');
+    serveDistTags({ latest: '2.5.3', canary: '2.5.4-canary.20261031.7' });
+
+    const result = await checkForUpdates({ currentVersion: '2.5.3', appType: 'vscode' });
+
+    expect(result.version).toBe('2.5.3');
     expect(result.available).toBe(false);
   });
 });

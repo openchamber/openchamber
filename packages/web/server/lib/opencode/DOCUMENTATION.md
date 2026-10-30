@@ -983,6 +983,16 @@ within a ten-minute overall deadline.
 
 - `registerOpenChamberRoutes(app, dependencies)`: registers OpenChamber endpoints:
   - `GET /api/openchamber/update-check`
+    - A server installed from npm follows the update channel picked in
+      Settings → About (`serverUpdateChannel` in `settings.json`; without a
+      pick, Canary for a Canary build and Stable otherwise). On Canary the
+      target is the `canary` npm dist-tag, published nightly by
+      `.github/workflows/canary.yml`; Stable from a Canary build offers the
+      `latest` dist-tag even though it is older, which is the way back. Both
+      read npm, since the website API serves only the release; it still gets
+      the check-in. The install route and `openchamber update` read the same
+      channel through `checkForUpdates`. The desktop app keeps its own
+      `desktopUpdateChannel`, and other app types stay on releases.
   - `POST /api/openchamber/update-install`
     - A copy no package manager installed answers 409 before any command
       runs: a global install would add a second copy and leave the running

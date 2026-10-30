@@ -716,10 +716,36 @@ export function getCurrentVersion() {
   }
 }
 
+const UPDATE_CHANNELS = new Set(['stable', 'canary']);
+
+/** A nightly Canary build: 2.5.4-canary.20261030.123. */
+const isCanaryVersion = (version) => /-canary\./.test(String(version || ''));
+
+function getSettingsFilePath() {
+  const dataDir = process.env.OPENCHAMBER_DATA_DIR?.trim();
+  return path.join(dataDir ? path.resolve(dataDir) : path.join(os.homedir(), '.config', 'openchamber'), 'settings.json');
+}
+
 /**
- * Fetch latest version from npm registry
+ * The channel this install takes its updates from: the one picked in
+ * Settings → About (`serverUpdateChannel`). Without a pick, a Canary build
+ * (installed with `npm i -g @openchamber/web@canary`) follows Canary, so its
+ * first check does not offer the release as a way back nobody asked for.
  */
-async function getLatestVersion() {
+export function readUpdateChannel(currentVersion = getCurrentVersion()) {
+  try {
+    const settings = JSON.parse(fs.readFileSync(getSettingsFilePath(), 'utf8'));
+    if (UPDATE_CHANNELS.has(settings?.serverUpdateChannel)) return settings.serverUpdateChannel;
+  } catch {
+  }
+  return isCanaryVersion(currentVersion) ? 'canary' : 'stable';
+}
+
+/**
+ * The package's npm dist-tags (`latest`, and `canary` once the nightly
+ * published one), or null when the registry could not be read.
+ */
+async function fetchDistTags() {
   try {
     const request = resolveNpmRegistryRequest(PACKAGE_NAME);
     const response = await fetch(request.url, {
@@ -732,10 +758,17 @@ async function getLatestVersion() {
     }
 
     const data = await response.json();
-    return data['dist-tags']?.latest || null;
+    return data?.['dist-tags'] ?? {};
   } catch (error) {
     return null;
   }
+}
+
+/**
+ * Fetch latest version from npm registry
+ */
+async function getLatestVersion() {
+  return (await fetchDistTags())?.latest || null;
 }
 
 /**
@@ -752,8 +785,30 @@ function parseVersionForComparison(value) {
 
   return {
     parts,
-    prerelease: prereleaseIndex >= 0,
+    prerelease: prereleaseIndex >= 0 ? normalized.slice(prereleaseIndex + 1).split('.') : null,
   };
+}
+
+// Semver precedence of two pre-release tags: numeric identifiers compare as
+// numbers and before text, so 2.5.4-canary.20261031.7 follows
+// 2.5.4-canary.20261030.6.
+function comparePrerelease(a, b) {
+  const length = Math.max(a.length, b.length);
+  for (let index = 0; index < length; index += 1) {
+    if (a[index] === undefined) return -1;
+    if (b[index] === undefined) return 1;
+    const aNumeric = /^\d+$/.test(a[index]);
+    const bNumeric = /^\d+$/.test(b[index]);
+    if (aNumeric && bNumeric) {
+      const diff = Number(a[index]) - Number(b[index]);
+      if (diff !== 0) return diff;
+    } else if (aNumeric !== bNumeric) {
+      return aNumeric ? -1 : 1;
+    } else if (a[index] !== b[index]) {
+      return a[index] < b[index] ? -1 : 1;
+    }
+  }
+  return 0;
 }
 
 function compareVersions(left, right) {
@@ -766,11 +821,12 @@ function compareVersions(left, right) {
     if (diff !== 0) return diff;
   }
 
-  if (a.prerelease !== b.prerelease) {
-    return a.prerelease ? -1 : 1;
+  if (!a.prerelease || !b.prerelease) {
+    if (a.prerelease) return -1;
+    return b.prerelease ? 1 : 0;
   }
 
-  return 0;
+  return comparePrerelease(a.prerelease, b.prerelease);
 }
 
 /** Release notes between the installed and the offered version, or undefined. */
@@ -778,11 +834,51 @@ async function fetchChangelogNotes(fromVersion, toVersion) {
   return (await fetchUpdateNotes(fromVersion, toVersion, compareVersions)) ?? undefined;
 }
 
+/**
+ * Canary, and the way back from it. The target is what the channel's npm
+ * dist-tag points at; Stable from a Canary build offers the release even
+ * though it is older. The website still gets the check-in, so usage counts
+ * include it, but its answer is about releases only.
+ */
+async function checkChannelForUpdates(channel, currentVersion, options) {
+  const [, distTags] = await Promise.all([
+    checkForUpdatesFromApi(currentVersion, options),
+    fetchDistTags(),
+  ]);
+  if (!distTags) {
+    return { available: false, currentVersion, error: 'Unable to determine versions' };
+  }
+  const target = normalizeTargetVersion(channel === 'canary' ? distTags.canary : distTags.latest);
+  // No Canary published yet: nothing to install, which is not an error.
+  if (!target) {
+    return { available: false, currentVersion };
+  }
+  return {
+    available: channel === 'canary' ? compareVersions(target, currentVersion) > 0 : target !== currentVersion,
+    version: target,
+    currentVersion,
+    releaseUrl: channel === 'canary' ? `${GITHUB_RELEASES_URL}/tag/canary` : `${GITHUB_RELEASES_URL}/tag/v${target}`,
+  };
+}
+
 export async function checkForUpdates(options = {}) {
   const currentVersion = options.currentVersion || getCurrentVersion();
   const pm = detectPackageManager();
   const appType = normalizeAppType(options.appType);
   const platform = normalizePlatform(options.platform);
+
+  // The channel belongs to the npm server; the desktop app, VS Code and the
+  // phones ask about their own builds and stay on releases here.
+  if (appType === 'web' && currentVersion !== 'unknown') {
+    const channel = readUpdateChannel(currentVersion);
+    if (channel === 'canary' || isCanaryVersion(currentVersion)) {
+      return {
+        ...await checkChannelForUpdates(channel, currentVersion, options),
+        packageManager: pm,
+        updateCommand: 'openchamber update',
+      };
+    }
+  }
 
   if (currentVersion !== 'unknown') {
     const remote = await checkForUpdatesFromApi(currentVersion, options);

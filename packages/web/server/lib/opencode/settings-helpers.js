@@ -315,6 +315,9 @@ export const createSettingsHelpers = (dependencies) => {
     if (candidate.desktopUpdateChannel === 'stable' || candidate.desktopUpdateChannel === 'canary') {
       result.desktopUpdateChannel = candidate.desktopUpdateChannel;
     }
+    if (candidate.serverUpdateChannel === 'stable' || candidate.serverUpdateChannel === 'canary') {
+      result.serverUpdateChannel = candidate.serverUpdateChannel;
+    }
     if (typeof candidate.desktopMacMenuBarEnabled === 'boolean') {
       result.desktopMacMenuBarEnabled = candidate.desktopMacMenuBarEnabled;
     }

@@ -1,9 +1,11 @@
 /**
- * Where the desktop app takes its updates from: the releases, or Canary, the
- * nightly build of the latest code. Picking Canary makes the next update
- * replace the app with the Canary build, and later checks follow Canary until
- * the person goes back to Stable. The desktop main process stores the choice
- * (`desktopUpdateChannel`) and points its updater at the channel's feed.
+ * Where the desktop app, or a server installed from npm, takes its updates
+ * from: the releases, or Canary, the nightly build of the latest code. Picking
+ * Canary makes the next update replace the install with the Canary build, and
+ * later checks follow Canary until the person goes back to Stable. The desktop
+ * main process stores its choice (`desktopUpdateChannel`) and points its
+ * updater at the channel's feed; the npm server stores its own
+ * (`serverUpdateChannel`) and reads the channel's npm dist-tag.
  */
 export type UpdateChannel = 'stable' | 'canary';
 

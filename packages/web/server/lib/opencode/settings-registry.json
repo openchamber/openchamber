@@ -34,6 +34,12 @@
     "opencodeBinary": {
       "scope": "instance"
     },
+    "serverUpdateChannel": {
+      "scope": "instance",
+      "surfaces": [
+        "web"
+      ]
+    },
     "projects": {
       "scope": "instance"
     },
