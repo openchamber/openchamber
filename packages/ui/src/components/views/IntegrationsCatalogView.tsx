@@ -899,12 +899,16 @@ export function IntegrationsCatalogView(): React.ReactNode {
   /**
    * Where the installed MCP server stands, with the sign-in when it asks for
    * one. A failed OAuth server offers it too: the service may have rejected
-   * the stored token, and only a fresh sign-in replaces it.
+   * the stored token, and only a fresh sign-in replaces it. A connected one
+   * offers it as well — a live transport does not prove the user authorized
+   * the tools (#5934).
    */
   const renderConnection = (entry: CatalogEntry, mcp: CatalogMcpComponent): React.ReactNode => {
     const runtime = readMcpStatusName(mcpStatuses[entry.id]);
     const disabled = mcpServers.find((candidate) => candidate.name === entry.id)?.disabled === true;
-    const offersSignIn = !disabled && (runtime === 'needs_auth' || (runtime === 'failed' && mcp.auth === 'oauth'));
+    const offersSignIn = !disabled
+      && (runtime === 'needs_auth'
+        || (mcp.auth === 'oauth' && (runtime === 'failed' || runtime === 'connected')));
     const state: { label: string; tone: IntegrationCatalogStatusTone } = disabled
       ? { label: t('integrationsCatalog.status.disabled'), tone: 'neutral' }
       : runtime === 'connected'
@@ -933,7 +937,11 @@ export function IntegrationsCatalogView(): React.ReactNode {
                 serverName={entry.id}
                 directory={currentDirectory}
                 autoStart={runtime === 'needs_auth' && pendingSignInId === entry.id}
-                connectLabel={runtime === 'failed' ? t('settings.mcp.page.actions.signInAgain') : undefined}
+                connectLabel={runtime === 'failed'
+                  ? t('settings.mcp.page.actions.signInAgain')
+                  : runtime === 'connected'
+                    ? t('settings.mcp.page.actions.authorize')
+                    : undefined}
                 onConnected={() => { void useMcpStore.getState().connect(entry.id, currentDirectory); }}
               />
             </div>
