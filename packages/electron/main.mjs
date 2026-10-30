@@ -3597,6 +3597,9 @@ const readUpdateChannel = () => normalizeUpdateChannel(readSettingsRoot().deskto
  */
 const applyUpdaterChannel = (channel) => {
   if (state.updaterChannel === channel) return;
+  // An update found on the other channel is not this channel's; the next
+  // check starts clean (a failed feed otherwise keeps it, #5921).
+  if (state.updaterChannel !== null) state.pendingUpdate = null;
   const feed = resolveUpdaterFeed({ testBuild: UPDATER_E2E_BUILD, channel });
   // Both published feeds carry the Windows ARM64 manifest; the E2E fixture does not.
   const updaterChannel = feed === PRODUCTION_UPDATER_FEED || feed === CANARY_UPDATER_FEED

@@ -787,7 +787,7 @@ export const settingsDict = {
   'settings.openchamber.about.toast.serverLatestVersion': 'Serwer ma najnowszą wersję OpenChamber',
   'settings.openchamber.about.field.version': 'Wersja',
   'settings.openchamber.about.field.updateChannel': 'Aktualizacje',
-  'settings.openchamber.about.field.updateChannelHint': 'Canary jest budowane co noc z najnowszego kodu, mogą być błędy. Stable wraca do ostatniego wydania.',
+  'settings.openchamber.about.field.updateChannelHint': 'Co noc świeży OpenChamber, czasem z zadziorami. Stable przywraca wydanie.',
   'settings.openchamber.about.option.updateChannel.stable': 'Stabilne',
   'settings.openchamber.about.option.updateChannel.canary': 'Canary',
   'settings.openchamber.about.canaryVersion': '{version} Canary · {date}',

@@ -508,6 +508,11 @@
   /* The chat's page colour, kept under its own name because the panel rules
      below redefine --surface-background and cannot mix from themselves. */
   --oc-chat-background: var(--surface-background);
+  /* The Canary icon's colours, the violet tile and the yellow bird, for the
+     Canary update channel's controls. The icon is the same in every theme,
+     so these are too. */
+  --brand-canary: oklch(0.545 0.197 285.6); /* #6b54db */
+  --brand-canary-foreground: oklch(0.877 0.174 92.5); /* #ffd21f */
 }
 
 .oc-panel-edge:not([data-edge-floating]) {

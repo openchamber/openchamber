@@ -579,7 +579,7 @@ export const settingsDict = {
   "settings.openchamber.about.title": "Sobre o OpenChamber",
   "settings.openchamber.about.field.version": "Versão",
   "settings.openchamber.about.field.updateChannel": "Atualizações",
-  "settings.openchamber.about.field.updateChannelHint": "O Canary é compilado toda noite com o código mais recente e pode ter falhas. O Stable volta à última versão.",
+  "settings.openchamber.about.field.updateChannelHint": "Um OpenChamber novinho toda noite, com algumas arestas. Stable traz você de volta à versão publicada.",
   "settings.openchamber.about.option.updateChannel.stable": "Estável",
   "settings.openchamber.about.option.updateChannel.canary": "Canary",
   "settings.openchamber.about.canaryVersion": "{version} Canary · {date}",

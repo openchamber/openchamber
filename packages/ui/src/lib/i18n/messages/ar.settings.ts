@@ -611,7 +611,7 @@ export const settingsDict = {
   'settings.openchamber.about.title': 'حول OpenChamber',
   'settings.openchamber.about.field.version': 'الإصدار',
   'settings.openchamber.about.field.updateChannel': 'التحديثات',
-  'settings.openchamber.about.field.updateChannelHint': 'يُبنى Canary كل ليلة من أحدث شيفرة وقد يحتوي على أخطاء. يعيدك Stable إلى أحدث إصدار.',
+  'settings.openchamber.about.field.updateChannelHint': 'OpenChamber طازج كل ليلة، مع بعض الهنات. يعيدك Stable إلى الإصدار.',
   'settings.openchamber.about.option.updateChannel.stable': 'المستقر',
   'settings.openchamber.about.option.updateChannel.canary': 'Canary',
   'settings.openchamber.about.canaryVersion': '{version} Canary · {date}',

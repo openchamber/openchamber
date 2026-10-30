@@ -584,7 +584,7 @@ export const settingsDict = {
   'settings.openchamber.about.title': 'OpenChamber hakkında',
   'settings.openchamber.about.field.version': 'Sürüm',
   'settings.openchamber.about.field.updateChannel': 'Güncellemeler',
-  'settings.openchamber.about.field.updateChannelHint': 'Canary her gece en yeni koddan derlenir, hatalar olabilir. Stable son sürüme geri döner.',
+  'settings.openchamber.about.field.updateChannelHint': 'Her gece taze bir OpenChamber, pürüzleriyle birlikte. Stable sizi sürüme geri götürür.',
   'settings.openchamber.about.option.updateChannel.stable': 'Kararlı',
   'settings.openchamber.about.option.updateChannel.canary': 'Canary',
   'settings.openchamber.about.canaryVersion': '{version} Canary · {date}',

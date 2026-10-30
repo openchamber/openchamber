@@ -579,7 +579,7 @@ export const settingsDict = {
   'settings.openchamber.about.title': 'OpenChamber 정보',
   'settings.openchamber.about.field.version': '버전',
   'settings.openchamber.about.field.updateChannel': '업데이트',
-  'settings.openchamber.about.field.updateChannelHint': 'Canary는 매일 밤 최신 코드로 빌드되며 오류가 있을 수 있습니다. Stable은 최신 릴리스로 돌아갑니다.',
+  'settings.openchamber.about.field.updateChannelHint': '매일 밤 갓 만든 OpenChamber, 거친 부분도 있어요. Stable을 고르면 정식 릴리스로 돌아갑니다.',
   'settings.openchamber.about.option.updateChannel.stable': '안정 버전',
   'settings.openchamber.about.option.updateChannel.canary': 'Canary',
   'settings.openchamber.about.canaryVersion': '{version} Canary · {date}',

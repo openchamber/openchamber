@@ -285,6 +285,8 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
     }
     void update.checkForUpdates();
   };
+  // The chosen Canary wears the colours of its icon: the violet tile and the yellow bird.
+  const CANARY_COLOURS = 'bg-[var(--brand-canary)] text-[var(--brand-canary-foreground)] hover:bg-[var(--brand-canary)] hover:text-[var(--brand-canary-foreground)]';
   const updateChannelControl = updateChannel && (
     <SettingsChipGroup
       value={updateChannel}
@@ -293,7 +295,16 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
       className="flex-nowrap"
       options={[
         { value: 'stable', label: t('settings.openchamber.about.option.updateChannel.stable') },
-        { value: 'canary', label: t('settings.openchamber.about.option.updateChannel.canary') },
+        {
+          value: 'canary',
+          label: (
+            <span className="inline-flex items-center gap-1">
+              <span aria-hidden="true">🐤</span>
+              {t('settings.openchamber.about.option.updateChannel.canary')}
+            </span>
+          ),
+          selectedClassName: CANARY_COLOURS,
+        },
       ]}
     />
   );

@@ -612,7 +612,7 @@ export const settingsDict = {
   'settings.openchamber.about.title': 'OpenChamber について',
   'settings.openchamber.about.field.version': 'バージョン',
   'settings.openchamber.about.field.updateChannel': '更新',
-  'settings.openchamber.about.field.updateChannelHint': 'Canary は毎晩最新のコードからビルドされ、不具合があるかもしれません。Stable は最新リリースに戻ります。',
+  'settings.openchamber.about.field.updateChannelHint': '毎晩できたての OpenChamber。多少の粗さはご愛嬌。Stable でリリース版に戻れます。',
   'settings.openchamber.about.option.updateChannel.stable': '安定版',
   'settings.openchamber.about.option.updateChannel.canary': 'Canary',
   'settings.openchamber.about.canaryVersion': '{version} Canary · {date}',

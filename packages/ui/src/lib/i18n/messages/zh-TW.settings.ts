@@ -576,7 +576,7 @@ export const settingsDict = {
   'settings.openchamber.about.title': '關於 OpenChamber',
   'settings.openchamber.about.field.version': '版本',
   'settings.openchamber.about.field.updateChannel': '更新',
-  'settings.openchamber.about.field.updateChannelHint': 'Canary 每晚從最新程式碼建置，可能不穩定。Stable 回到最新正式版。',
+  'settings.openchamber.about.field.updateChannelHint': '每晚一個新鮮出爐的 OpenChamber，難免有點毛邊。選 Stable 回到正式版。',
   'settings.openchamber.about.option.updateChannel.stable': '穩定版',
   'settings.openchamber.about.option.updateChannel.canary': 'Canary',
   'settings.openchamber.about.canaryVersion': '{version} Canary · {date}',
