@@ -22,6 +22,7 @@ export const SessionSidebarActivityHeader: React.FC<{
       type="button"
       onClick={forceExpanded ? undefined : onToggle}
       disabled={forceExpanded}
+      data-sidebar-header-toggle=""
       className={cn('group flex w-full items-center gap-1 py-1 ps-4 text-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50', chats ? 'pe-10' : 'pe-3.5')}
       aria-expanded={!collapsed}
     >

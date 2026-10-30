@@ -1043,17 +1043,65 @@ html:not(.dark) .chat-scroll {
 
 /* A project section closes with a hairline before the next project. The mask
    fades both ends from the very edge, so the boundary reads as a soft edge
-   instead of a rule across the sidebar. */
-.oc-sidebar-project-divider::after {
-  content: '';
-  position: absolute;
-  inset-inline: 8px;
-  bottom: 6px;
-  height: 1px;
-  pointer-events: none;
+   instead of a rule across the sidebar. A truncated project draws the same
+   line as its draggable reveal control. */
+.oc-sidebar-project-divider::after,
+.oc-sidebar-reveal-line {
   background: color-mix(in oklab, var(--border), var(--foreground) 10%);
   -webkit-mask-image: linear-gradient(to right, transparent, #000 25%, #000 75%, transparent);
   mask-image: linear-gradient(to right, transparent, #000 25%, #000 75%, transparent);
+}
+
+.oc-sidebar-project-divider::after {
+  content: '';
+  position: absolute;
+  inset-inline-start: 26px;
+  inset-inline-end: 8px;
+  bottom: 6px;
+  height: 1px;
+  pointer-events: none;
+}
+
+.oc-sidebar-reveal-line {
+  height: 1px;
+  margin-inline: 8px;
+}
+
+[data-reveal-level="project"] .oc-sidebar-reveal-line {
+  margin-inline-start: 26px;
+}
+
+[data-reveal-level="worktree"] .oc-sidebar-reveal-line {
+  margin-inline-start: 38px;
+}
+
+/* The static line of an open section follows the same 8/26/38 insets. */
+.oc-sidebar-project-divider--section::after {
+  inset-inline-start: 8px;
+}
+
+.oc-sidebar-project-divider--worktree::after {
+  inset-inline-start: 38px;
+}
+
+/* A keyboard user needs to see the focused line; a mouse drag does not change
+   the line's look. */
+.oc-sidebar-reveal-divider:focus-visible .oc-sidebar-reveal-line {
+  outline: 1px solid var(--primary);
+  outline-offset: 2px;
+}
+
+/* While a reveal line is dragged, rows ease into the space it uncovers instead
+   of jumping a row at a time. Only the drag turns this on; scrolling and list
+   changes stay instant. */
+[data-sidebar-reveal-drag="true"] [data-sidebar-row-key] {
+  transition: transform 120ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-sidebar-reveal-drag="true"] [data-sidebar-row-key] {
+    transition: none;
+  }
 }
 
 /* The collapsed session sidebar sliding out over the chat on hover

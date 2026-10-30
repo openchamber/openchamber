@@ -368,7 +368,7 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
     }
   }, [canGrantBootstrapAccess, failedBootstrapDirectory, isRequestingBootstrapAccess, retryFailedBootstrap]);
   const maxVisible = sessionBatchSize ?? (hideDirectoryControls ? 10 : 7);
-  const nonArchivedVisibleCount = Math.max(maxVisible, visibleSessionCount ?? maxVisible);
+  const nonArchivedVisibleCount = Math.max(0, visibleSessionCount ?? maxVisible);
   const groupMatchesSearch = hasSessionSearchQuery ? searchData?.groupMatches === true : false;
   const shouldFilterGroupContents = hasSessionSearchQuery;
   const sourceGroupNodes = React.useMemo(
@@ -976,6 +976,7 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
           onClick: () => onToggleCollapsedGroup(groupKey),
           role: 'button',
           tabIndex: 0,
+          'data-sidebar-header-toggle': '',
           onKeyDown: (event: React.KeyboardEvent) => {
             if (event.key === 'Enter' || event.key === ' ') {
               event.preventDefault();

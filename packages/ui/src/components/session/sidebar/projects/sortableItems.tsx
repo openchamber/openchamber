@@ -326,6 +326,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                   <DropdownMenuTrigger asChild>
                     <button
                       type="button"
+                      data-sidebar-header-toggle=""
                       className={cn(
                         '@container flex min-w-0 flex-1 items-center gap-1.5 rounded-md text-start focus-visible:outline-none',
                         alwaysShowActions
@@ -356,6 +357,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                       type="button"
                       onClick={handleToggleClick}
                       {...listeners}
+                      data-sidebar-header-toggle=""
                       className={cn(
                         '@container flex-1 min-w-0 flex items-center gap-1.5 text-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-md cursor-grab active:cursor-grabbing',
                         alwaysShowActions

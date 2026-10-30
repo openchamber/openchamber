@@ -104,8 +104,8 @@ describe('SessionSidebarRows section spacing', () => {
     expect(control).toBeGreaterThanOrEqual(0);
     expect(truncated[control + 1]?.kind).toBe('project-header');
     const wrapper = sectionWrapperClass(truncated[control], truncated[control + 1]);
-    expect(wrapper).toContain('pb-3');
-    expect(wrapper).toContain('oc-sidebar-project-divider');
+    expect(wrapper).toContain('pb-0.5');
+    expect(wrapper).not.toContain('oc-sidebar-project-divider');
 
     const collapsed = buildSessionSidebarRowModel({
       ...input(false),
@@ -116,7 +116,24 @@ describe('SessionSidebarRows section spacing', () => {
     const firstHeader = collapsed.findIndex((row) => row.kind === 'project-header' && row.section.project.id === 'project-a');
     expect(firstHeader).toBeGreaterThanOrEqual(0);
     expect(collapsed[firstHeader + 1]?.kind).toBe('project-header');
-    expect(sectionWrapperClass(collapsed[firstHeader], collapsed[firstHeader + 1])).toContain('oc-sidebar-project-divider');
+    expect(sectionWrapperClass(collapsed[firstHeader], collapsed[firstHeader + 1])).not.toContain('oc-sidebar-project-divider');
+
+    const openSections: ProjectSection[] = [
+      {
+        project: { id: 'project-a', normalizedPath: '/repo' },
+        groups: [{ id: 'main', label: 'main', branch: null, description: null, isMain: true, worktree: null, directory: '/repo', folderScopeKey: '/repo', sessions: [node('a'), node('b')] }],
+      },
+      {
+        project: { id: 'project-b', normalizedPath: '/other' },
+        groups: [{ id: 'main', label: 'main', branch: null, description: null, isMain: true, worktree: null, directory: '/other', folderScopeKey: '/other', sessions: [node('other')] }],
+      },
+    ];
+    const open = buildSessionSidebarRowModel({ ...input(false), sections: openSections, authoritativeSections: openSections }).rows;
+    const nextProject = open.findIndex((row) => row.kind === 'project-header' && row.section.project.id === 'project-b');
+    expect(nextProject).toBeGreaterThan(0);
+    expect(open[nextProject - 1]?.kind).toBe('session');
+    expect(sectionWrapperClass(open[nextProject - 1], open[nextProject])).toContain('oc-sidebar-project-divider');
+    expect(sectionWrapperClass(open[nextProject - 1], open[nextProject])).toContain('oc-sidebar-project-divider--project');
 
     const captioned = buildSessionSidebarRowModel({
       ...input(false),

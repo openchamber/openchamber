@@ -57,6 +57,8 @@ type Props = {
   guideSlotStartPx?: number;
   /** Brings a row to the middle of the list; a new `id` asks again for the same row. */
   scrollRequest?: { index: number; id: number } | null;
+  /** A reveal drag moves rows itself; the disclosure motion would fight it. */
+  suspendDisclosure?: boolean;
 };
 
 export function SessionSidebarRows({
@@ -67,6 +69,7 @@ export function SessionSidebarRows({
   onFirstVisibleIndexChange,
   guideSlotStartPx = SESSION_TREE_BASE_PADDING_PX,
   scrollRequest = null,
+  suspendDisclosure = false,
 }: Props): React.ReactNode {
   const rows = model.rows;
   const getScrollElement = React.useCallback(() => scrollElement, [scrollElement]);
@@ -149,7 +152,7 @@ export function SessionSidebarRows({
   // renders before paint too, so the first frame drawn is the motion's start.
   React.useLayoutEffect(() => {
     const last = lastLayoutRef.current;
-    if (!last || last.rows === rows || !scrollElement || prefersReducedMotion()) return;
+    if (!last || last.rows === rows || !scrollElement || suspendDisclosure || prefersReducedMotion()) return;
     const disclosure = findSessionSidebarDisclosure(last.rows, rows);
     if (!disclosure) return;
     const before = last.measurements;
@@ -185,7 +188,7 @@ export function SessionSidebarRows({
     }
     motionIdRef.current += 1;
     setMotion({ id: motionIdRef.current, revealKeys, ghosts, followingIndex, from, to, slidingIndexes });
-  }, [rows, scrollElement, virtualizer]);
+  }, [rows, scrollElement, suspendDisclosure, virtualizer]);
 
   // Recorded after the planning effect above reads it, on every commit, so it
   // always holds the layout the user last saw.

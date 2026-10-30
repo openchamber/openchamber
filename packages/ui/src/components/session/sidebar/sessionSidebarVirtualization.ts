@@ -70,11 +70,30 @@ export const estimateSessionSidebarRowSize = (
   return (measured.height ?? row.estimateSize) + gap;
 };
 
-/** The classes of a row's wrapper: its trailing gap, and the divider a project section closes with. */
+/** The classes of a row's wrapper: its trailing gap, and the divider an open project section closes with. */
 export const sectionWrapperClass = (row: SessionSidebarRow, nextRow: SessionSidebarRow | undefined): string => {
   const spacing = sectionSpacingAfter(row, nextRow) ?? '';
-  const closesProject = nextRow?.kind === 'project-header' && row.kind !== 'caption';
-  return [spacing, closesProject ? 'oc-sidebar-project-divider' : ''].filter(Boolean).join(' ');
+  // A line belongs to an open list. A closed section shows only its header, and
+  // a reveal control draws its own line.
+  const closedHeader = row.kind === 'project-header'
+    || row.kind === 'activity-header'
+    || row.kind === 'caption'
+    || ((row.kind === 'group-header' || row.kind === 'folder-header') && row.collapsed);
+  const closesProject = nextRow?.kind === 'project-header' && row.kind !== 'show-control' && !closedHeader;
+  const isZoneRow = 'renderContext' in row && (row.renderContext === 'mixed-compact' || row.renderContext === 'timeline-mixed' || row.renderContext === 'tree-chat');
+  const isTimelineStatus = row.kind === 'status' && row.flat === true;
+  const rowWorktree = row.kind === 'session'
+    ? Boolean(row.node.worktree)
+    // A run is a project row when its root sits at the project root; a lane's
+    // own worktree does not make the run a worktree row.
+    : row.kind === 'run'
+      ? row.laneNodes.some((node) => Boolean(node.worktree))
+      : row.kind === 'group-header' && isGroupWork(row.group);
+  const deepWithoutContext = !('renderContext' in row) && 'depth' in row && (row.depth ?? 0) > 0;
+  const inWorktree = rowWorktree || deepWithoutContext;
+  const dividerLevel = isZoneRow || isTimelineStatus ? 'section' : inWorktree ? 'worktree' : 'project';
+  const dividerClass = closesProject ? `oc-sidebar-project-divider oc-sidebar-project-divider--${dividerLevel}` : '';
+  return [spacing, dividerClass].filter(Boolean).join(' ');
 };
 
 export const sectionSpacingAfter = (row: SessionSidebarRow, nextRow: SessionSidebarRow | undefined): SectionSpacing | undefined => {
@@ -87,8 +106,11 @@ export const sectionSpacingAfter = (row: SessionSidebarRow, nextRow: SessionSide
   // own. A worktree is a work row among session rows and opens none.
   if (nextRow?.kind === 'project-header') {
     if (row.kind === 'caption') return undefined;
+    if (row.kind === 'show-control') return 'pb-0.5';
     return 'pb-3';
   }
-  if (nextRow?.kind === 'activity-header' || nextRow?.kind === 'caption') return 'pb-5';
+  if (nextRow?.kind === 'activity-header' || nextRow?.kind === 'caption') {
+    return row.kind === 'show-control' ? 'pb-3' : 'pb-5';
+  }
   return nextRow?.kind === 'group-header' && !isGroupWork(nextRow.group) && row.kind !== 'project-header' ? 'pb-1.5' : undefined;
 };

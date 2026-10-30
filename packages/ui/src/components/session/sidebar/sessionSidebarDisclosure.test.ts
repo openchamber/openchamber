@@ -19,7 +19,10 @@ const child = (key: string): SessionSidebarRow => ({
   fewer: false,
   containerKey: key,
   currentCount: 7,
+  minCount: 0,
+  maxCount: 14,
   increment: 7,
+  revealLevel: 'project',
 });
 
 // SAFETY: the disclosure reads only a row's kind, key and expansion fields.

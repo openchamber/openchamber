@@ -473,6 +473,7 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
             <div
               role="button"
               tabIndex={0}
+              data-sidebar-header-toggle=""
               className={cn('@container relative flex h-5 min-w-0 flex-1 items-center gap-1 focus-visible:outline-none', actionsReserve)}
               aria-label={t('sessions.sidebar.work.openAria', { label })}
               onClick={openWork}

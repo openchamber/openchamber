@@ -206,6 +206,12 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
   const showMoreGroupSessions = React.useCallback((groupId: string, currentVisibleCount: number, increment = 7) => {
     setVisibleSessionCountByGroup((current) => new Map(current).set(groupId, currentVisibleCount + increment));
   }, []);
+  const setGroupSessionLimit = React.useCallback((groupId: string, count: number) => {
+    setVisibleSessionCountByGroup((current) => {
+      if (current.get(groupId) === count) return current;
+      return new Map(current).set(groupId, count);
+    });
+  }, []);
   const resetGroupSessionLimit = React.useCallback((groupId: string) => {
     setVisibleSessionCountByGroup((current) => {
       if (!current.has(groupId)) return current;
@@ -990,6 +996,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
   ]);
   const groupActions = React.useMemo(() => ({
     showMoreGroupSessions,
+    setGroupSessionLimit,
     resetGroupSessionLimit,
     setActiveProjectIdOnly: scrollerActions.setActiveProjectIdOnly,
     setSessionSwitcherOpen: scrollerActions.setSessionSwitcherOpen,
@@ -997,6 +1004,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     onToggleCollapsedGroup: toggleGroupOrWork,
   }), [
     resetGroupSessionLimit,
+    setGroupSessionLimit,
     showMoreGroupSessions,
     toggleGroupOrWork,
     scrollerActions.openNewSessionDraft,
@@ -1035,6 +1043,9 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     mode: view.hasSessionSearchQuery ? 'search' : 'normal',
     sections: orderedSectionsForRender,
     authoritativeSections: projectSections,
+    // The desktop and VS Code draw the reveal line under every open project;
+    // the phone's own rows keep their Show more control.
+    alwaysShowRevealControl: !view.renderList,
     // Hidden only from the list: folders and search keep the group.
     chatGroup: showChatsSection ? chatGroup : null,
     archivedChatGroup: showChatsSection ? archivedChatGroup : null,
@@ -1071,7 +1082,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     projectsCaption: !view.hideDirectoryControls,
     sessionBatchSize: singleProjectMode && !view.useGroupedSections ? 20 : undefined,
     runIndex,
-  }), [runIndex, archivedChatGroup, chatGroup, showChatsSection, projectView.collapsedActivities, pinnedItems, pinnedWorktreeEntries, workEntries, timeEntries, draftPlacement, movedSessionIds, movedGroupKeys, zoneSessionIds, detailedZoneRows, collapsedFolderIds, collection.pinnedSessionIds, expandedParents, folderAuthorityByOwner, foldersMap, groupSearchDataByGroup, groupStatusByKey, orderedSectionsForRender, ownership.bySessionId, projectSections, collapsedGroups, projectView.collapsedProjects, selectedSingleProjectId, sessionOrderIndex, singleProjectMode, view.activeProjectId, view.hasSessionSearchQuery, view.hideDirectoryControls, view.normalizedSessionSearchQuery, view.showOnlyMainWorkspace, view.useGroupedSections, visibleCountByContainer, worktreeArchiveAnchors, liveSpaceIds]);
+  }), [runIndex, archivedChatGroup, chatGroup, showChatsSection, projectView.collapsedActivities, pinnedItems, pinnedWorktreeEntries, workEntries, timeEntries, draftPlacement, movedSessionIds, movedGroupKeys, zoneSessionIds, detailedZoneRows, collapsedFolderIds, collection.pinnedSessionIds, expandedParents, folderAuthorityByOwner, foldersMap, groupSearchDataByGroup, groupStatusByKey, orderedSectionsForRender, ownership.bySessionId, projectSections, collapsedGroups, projectView.collapsedProjects, selectedSingleProjectId, sessionOrderIndex, singleProjectMode, view.activeProjectId, view.hasSessionSearchQuery, view.hideDirectoryControls, view.renderList, view.normalizedSessionSearchQuery, view.showOnlyMainWorkspace, view.useGroupedSections, visibleCountByContainer, worktreeArchiveAnchors, liveSpaceIds]);
   React.useEffect(() => {
     onSearchMatchCountChange(sidebarRowModel.searchMatchCount);
   }, [onSearchMatchCountChange, sidebarRowModel.searchMatchCount]);

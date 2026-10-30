@@ -424,7 +424,8 @@ describe('buildSessionSidebarRowModel', () => {
     const model = buildSessionSidebarRowModel(args([project([group(sessions)])]));
 
     expect(model.rows.filter((row) => row.kind === 'session')).toHaveLength(7);
-    expect(model.rows.some((row) => row.kind === 'show-control' && row.more)).toBe(true);
+    const control = model.rows.find((row) => row.kind === 'show-control' && row.more);
+    expect(control).toMatchObject({ minCount: 0, maxCount: 25_000 });
   });
 
   test('single-project flat mode reveals twenty at a time and resets without changing Chats', () => {
@@ -449,13 +450,79 @@ describe('buildSessionSidebarRowModel', () => {
     expect(buildSessionSidebarRowModel(input).rows.filter((row) => row.kind === 'session' && row.projectId === 'project-a')).toHaveLength(20);
   });
 
+  test('an open project keeps its reveal line, and a closed one has none', () => {
+    const input = args([project([group([node('a'), node('b')])])]);
+    input.alwaysShowRevealControl = true;
+
+    const shownControl = buildSessionSidebarRowModel(input).rows.find((row) => row.kind === 'show-control');
+    expect(shownControl).toMatchObject({ currentCount: 2, minCount: 0, maxCount: 2, revealLevel: 'project' });
+
+    input.collapsedGroups = new Set(['project-a:main']);
+    expect(buildSessionSidebarRowModel(input).rows.some((row) => row.kind === 'show-control')).toBe(false);
+  });
+
+  test('every zone keeps a reveal line, so each section closes the same way', () => {
+    const input = args([project([group([node('project-session')])])]);
+    input.alwaysShowRevealControl = true;
+    input.pinnedItems = [timelineItem('p1'), timelineItem('p2')];
+    input.workEntries = sessionWorks([timelineItem('w1'), timelineItem('w2')]);
+
+    const expanded = buildSessionSidebarRowModel(input).rows;
+    expect(expanded.find((row) => row.kind === 'show-control' && row.activityKey === 'work')).toMatchObject({ currentCount: 2, maxCount: 2, revealLevel: 'section' });
+    expect(expanded.find((row) => row.kind === 'show-control' && row.activityKey === 'pinned')).toMatchObject({ currentCount: 2, maxCount: 2, revealLevel: 'section' });
+
+    input.visibleCountByContainer = new Map([['activity:work', 1]]);
+    const shortened = buildSessionSidebarRowModel(input).rows;
+    expect(shortened.some((row) => row.kind === 'session' && row.node.session.id === 'w1')).toBe(true);
+    expect(shortened.some((row) => row.kind === 'session' && row.node.session.id === 'w2')).toBe(false);
+    expect(shortened.find((row) => row.kind === 'show-control' && row.activityKey === 'work')).toMatchObject({ currentCount: 1, maxCount: 2 });
+
+    input.collapsedActivities = new Set(['work']);
+    const collapsed = buildSessionSidebarRowModel(input).rows;
+    expect(collapsed.some((row) => row.kind === 'session' && (row.node.session.id === 'w1' || row.node.session.id === 'w2'))).toBe(false);
+    expect(collapsed.some((row) => row.kind === 'show-control' && row.activityKey === 'work')).toBe(false);
+  });
+
+  test('In work opens on its five newest works', () => {
+    const input = args([]);
+    input.alwaysShowRevealControl = true;
+    input.workEntries = sessionWorks(Array.from({ length: 8 }, (_, index) => timelineItem(`w${index}`)));
+
+    const rows = buildSessionSidebarRowModel(input).rows;
+    expect(rows.filter((row) => row.kind === 'session')).toHaveLength(5);
+    expect(rows.find((row) => row.kind === 'show-control' && row.activityKey === 'work')).toMatchObject({ currentCount: 5, maxCount: 8 });
+  });
+
+  test('search lists every matching In work entry and draws no reveal line', () => {
+    const input = args([]);
+    input.mode = 'search';
+    input.normalizedQuery = 'w';
+    input.alwaysShowRevealControl = true;
+    input.workEntries = sessionWorks(Array.from({ length: 8 }, (_, index) => timelineItem(`w${index}`)));
+
+    const model = buildSessionSidebarRowModel(input);
+    expect(model.rows.filter((row) => row.kind === 'session')).toHaveLength(8);
+    expect(model.rows.some((row) => row.kind === 'show-control')).toBe(false);
+    expect(model.searchMatchCount).toBe(8);
+  });
+
   test('Chats keep the tree slot', () => {
     const input = args([]);
     input.chatGroup = group(Array.from({ length: 5 }, (_, index) => node(`chat-${index}`)), { id: 'managed-chats' });
     const rows = buildSessionSidebarRowModel(input).rows;
 
     expect([...new Set(rows.flatMap((row) => (row.kind === 'session' ? [row.renderContext] : [])))]).toEqual(['tree-chat']);
-    expect(rows.find((row) => row.kind === 'show-control')).toMatchObject({ flat: false });
+    expect(rows.find((row) => row.kind === 'show-control')).toMatchObject({ flat: false, revealLevel: 'section' });
+  });
+
+  test('a collapsed Chats zone has no reveal line', () => {
+    const input = args([]);
+    input.alwaysShowRevealControl = true;
+    input.chatGroup = group(Array.from({ length: 5 }, (_, index) => node(`chat-${index}`)), { id: 'managed-chats' });
+    input.collapsedActivities = new Set(['chats']);
+
+    const rows = buildSessionSidebarRowModel(input).rows;
+    expect(rows.some((row) => row.kind === 'show-control')).toBe(false);
   });
 
   test('Chats failure stays visible beside retained sessions', () => {

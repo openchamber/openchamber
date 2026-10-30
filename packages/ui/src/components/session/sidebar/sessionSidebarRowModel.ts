@@ -41,6 +41,9 @@ export type SessionSidebarWorkEntry =
 // them by time.
 export type SessionSidebarActivityKey = 'pinned' | 'work' | 'chats' | 'timeline';
 
+/** How deep the list a reveal line closes sits: a zone, a project, or a worktree inside one. */
+export type SessionRevealLevel = 'section' | 'project' | 'worktree';
+
 /** Activity sections; the display menu's Collapse all / Expand all drive them with the projects. */
 export const SIDEBAR_ACTIVITY_KEYS: readonly SessionSidebarActivityKey[] = ['chats', 'pinned', 'work', 'timeline'];
 /** The `collapsedActivities` key of the Projects caption. */
@@ -100,8 +103,8 @@ export type SessionSidebarRow =
   // gutterless timeline-style rows, otherwise with the tree level `depth`.
   | (RowBase & { kind: 'empty'; emptyKind: 'sidebar' | 'search' | 'archived'; depth?: number })
   | (RowBase & { kind: 'status'; status: SessionSidebarGroupStatus; group: SessionGroup; groupKey: string; depth?: number; flat?: boolean })
-  /** Show more while rows remain hidden, Show less once more than the first batch shows; one row holds both. */
-  | (RowBase & { kind: 'show-control'; more: boolean; fewer: boolean; containerKey: string; currentCount: number; increment: number; depth?: number; flat?: boolean });
+  /** The reveal row: a draggable hairline on a computer, Show more and Show less on the phone; one row holds it. */
+  | (RowBase & { kind: 'show-control'; more: boolean; fewer: boolean; containerKey: string; currentCount: number; minCount: number; maxCount: number; increment: number; depth?: number; flat?: boolean; activityKey?: SessionSidebarActivityKey; revealLevel: SessionRevealLevel; headerKey?: string });
 
 export type SessionSidebarStickyHeader = {
   rowIndex: number;
@@ -170,6 +173,12 @@ export type SessionSidebarRowModelArgs = {
   collapsedActivities: ReadonlySet<string>;
   expandedParents: ReadonlySet<string>;
   visibleCountByContainer: ReadonlyMap<string, number>;
+  /**
+   * Draw the reveal line under every open project and worktree, including one
+   * with nothing hidden, so the separator itself is always the control. The
+   * phone keeps its Show more row.
+   */
+  alwaysShowRevealControl?: boolean;
   pinnedSessionIds: ReadonlySet<string>;
   sessionOrderIndex: ReadonlyMap<string, number>;
   /**
@@ -279,11 +288,15 @@ const CHATS_INCREMENT = 7;
 // Project and worktree lists reveal 7 sessions per page.
 const SESSIONS_INITIAL_LIMIT = 7;
 const SESSIONS_INCREMENT = 7;
+/** In work opens on its newest works; the reveal line brings the rest back. */
+const WORK_INITIAL_LIMIT = 5;
 
 const HEADER_ESTIMATE = 32;
 // Zone and project headers and the Projects caption, with the room around their labels.
 const SECTION_HEADER_ESTIMATE = 34;
 const STATUS_ESTIMATE = 28;
+// The draggable reveal line: a 16px hit area around a 1px hairline.
+const REVEAL_ESTIMATE = 16;
 
 /**
  * A row's level in the drawn tree, or null for a row outside it: headers of
@@ -642,7 +655,7 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     groupKey: string,
     projectId: string | null,
     hideHeader: boolean,
-    limits?: { initial?: number; increment?: number; pinnedAlwaysVisible?: boolean; renderContext: SessionSidebarRenderContext },
+    limits?: { initial?: number; increment?: number; pinnedAlwaysVisible?: boolean; renderContext: SessionSidebarRenderContext; activityKey?: SessionSidebarActivityKey },
     placement: GroupPlacement = PROJECT_PLACEMENT,
     // The project's worktree groups by folder member id, for the root group,
     // whose folders may hold whole worktrees.
@@ -704,7 +717,12 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
       const estimateSize = detailed ? TIMELINE_SESSION_ESTIMATE : isGroupWork(group) ? SESSION_ESTIMATE : HEADER_ESTIMATE;
       push({ kind: 'group-header', key: `${rowKeyBase}:header`, estimateSize, group, groupKey, projectId, collapsed: storedCollapsed && !empty, forceExpanded: search, empty, allSessions: Object.freeze(allSessions), depth: placement.depth, mixed: placement.mixed, detailed });
     }
-    // An empty group is always open, so its first session shows at once.
+    const sessionBatchSize = projectId ? args.sessionBatchSize : undefined;
+    const initialLimit = limits?.initial ?? sessionBatchSize ?? (args.hideDirectoryControls ? 10 : SESSIONS_INITIAL_LIMIT);
+    const increment = limits?.increment ?? sessionBatchSize ?? SESSIONS_INCREMENT;
+    // An empty group is always open, so its first session shows at once. A
+    // collapsed one shows only its header: the reveal line belongs to the open
+    // list, so nothing marks a closed section.
     if (storedCollapsed && !empty) return;
 
     const folderEntries = getSessionFolderScopes(group).flatMap(({ scopeKey, directory }) => (
@@ -808,10 +826,7 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     };
     for (const folder of roots) appendFolder(folder, '');
 
-    const sessionBatchSize = projectId ? args.sessionBatchSize : undefined;
-    const initialLimit = limits?.initial ?? sessionBatchSize ?? (args.hideDirectoryControls ? 10 : SESSIONS_INITIAL_LIMIT);
-    const increment = limits?.increment ?? sessionBatchSize ?? SESSIONS_INCREMENT;
-    const requested = Math.max(initialLimit, args.visibleCountByContainer.get(groupKey) ?? initialLimit);
+    const requested = Math.max(0, args.visibleCountByContainer.get(groupKey) ?? initialLimit);
     // Pinned sessions are the user's own always-on shortlist: they stay
     // visible whatever the reveal limit is, and they do not spend it.
     const isPinnedNode = (entry: ListedEntry): boolean => !isWorktreeEntry(entry) && !isRunEntry(entry) && limits?.pinnedAlwaysVisible === true
@@ -852,10 +867,15 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     if (!group.isMain) appendDrafts();
     const remaining = ungroupedEntries.length - visibleEntries.length;
     const limitedVisibleCount = requested - budget;
+    const maxCount = limitedVisibleCount + remaining;
     const more = remaining > 0;
     const fewer = requested > initialLimit && limitedNodes.length > initialLimit;
-    if (!search && !group.isArchivedBucket && (more || fewer)) {
-      push({ kind: 'show-control', key: `${rowKeyBase}:show`, estimateSize: STATUS_ESTIMATE, more, fewer, containerKey: groupKey, currentCount: limitedVisibleCount, increment, depth: contentDepth, flat: false });
+    const drawsReveal = !search
+      && !group.isArchivedBucket
+      && sourceNodes.length > 0
+      && (args.alwaysShowRevealControl === true || more || fewer);
+    if (drawsReveal) {
+      push({ kind: 'show-control', key: `${rowKeyBase}:show`, estimateSize: REVEAL_ESTIMATE, more, fewer, containerKey: groupKey, currentCount: limitedVisibleCount, minCount: 0, maxCount, increment, depth: contentDepth, flat: false, activityKey: limits?.activityKey, revealLevel: limits?.activityKey ? 'section' : group.isMain ? 'project' : 'worktree', headerKey: limits?.activityKey ? `activity:${limits.activityKey}:header` : hideHeader && projectId ? `project:${projectId}:header` : `${rowKeyBase}:header` });
     }
 
     // An empty group lists nothing: its header has no chevron, and new
@@ -946,6 +966,21 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     }
   };
 
+  const appendZoneReveal = (
+    activityKey: SessionSidebarActivityKey,
+    totalCount: number,
+    currentCount: number,
+  ): void => {
+    if (search || args.alwaysShowRevealControl !== true || totalCount <= 0) return;
+    push({
+      kind: 'show-control', key: `activity:${activityKey}:show`, estimateSize: REVEAL_ESTIMATE,
+      more: currentCount < totalCount, fewer: currentCount > 0,
+      containerKey: `activity:${activityKey}`, activityKey,
+      currentCount, minCount: 0, maxCount: totalCount,
+      increment: SESSIONS_INCREMENT, depth: 0, flat: true, revealLevel: 'section', headerKey: `activity:${activityKey}:header`,
+    });
+  };
+
   if (args.chatGroup) {
     if (!search || groupSearchMatches(args.chatGroup) > 0 || (args.archivedChatGroup && groupSearchMatches(args.archivedChatGroup) > 0)) {
       const collapsed = appendActivityHeader('chats');
@@ -954,7 +989,7 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
         // that pinned chats do not spend.
         appendGroup(args.chatGroup, 'activity:chats', null, true, {
           initial: CHATS_INITIAL_LIMIT, increment: CHATS_INCREMENT, pinnedAlwaysVisible: true,
-          renderContext: 'tree-chat',
+          renderContext: 'tree-chat', activityKey: 'chats',
         });
         if (args.archivedChatGroup) {
           appendGroup(args.archivedChatGroup, 'activity:chats:archived', null, false, { renderContext: 'tree-chat' });
@@ -1001,8 +1036,29 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     });
   };
 
-  const appendWorkEntries = (allEntries: readonly SessionSidebarWorkEntry[], containerKey: string): void => {
-    const entries = gatherRunMembers(allEntries);
+  const groupWorkEntries = (entries: readonly SessionSidebarWorkEntry[]): readonly (readonly SessionSidebarWorkEntry[])[] => {
+    const gathered = gatherRunMembers(entries);
+    const groups: SessionSidebarWorkEntry[][] = [];
+    let current: SessionSidebarWorkEntry[] = [];
+    let currentRunKey: string | undefined;
+    for (const entry of gathered) {
+      const runKey = entry.kind === 'session' ? runIndex.runKeyBySessionId.get(entry.item.node.session.id) : undefined;
+      if (runKey && runKey === currentRunKey) {
+        current.push(entry);
+        continue;
+      }
+      if (current.length > 0) groups.push(current);
+      current = [entry];
+      currentRunKey = runKey;
+    }
+    if (current.length > 0) groups.push(current);
+    return groups;
+  };
+
+  const appendWorkEntries = (allEntries: readonly SessionSidebarWorkEntry[], containerKey: string, limit?: number): void => {
+    const groups = groupWorkEntries(allEntries);
+    const visibleGroups = limit === undefined ? groups : groups.slice(0, Math.max(0, limit));
+    const entries = visibleGroups.flat();
     let pending: SessionSidebarActivityItem[] = [];
     const flush = (): void => {
       if (pending.length === 0) return;
@@ -1037,17 +1093,36 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
   );
   const pinnedItems = args.pinnedItems ?? [];
   const pinnedWorktrees = (args.pinnedWorktrees ?? []).filter(matchesSearch);
-  if (pinnedItems.length > 0 || pinnedWorktrees.length > 0) {
+  const storedZoneLimit = (activityKey: SessionSidebarActivityKey, total: number, initial: number): number => {
+    const stored = args.visibleCountByContainer.get(`activity:${activityKey}`);
+    return stored === undefined ? Math.min(total, initial) : Math.min(total, Math.max(0, stored));
+  };
+  const zoneLimit = (activityKey: SessionSidebarActivityKey, total: number, initial: number): number => (
+    search || args.alwaysShowRevealControl !== true ? total : storedZoneLimit(activityKey, total, initial)
+  );
+  const pinnedSessionGroups = groupWorkEntries(pinnedItems.map((item): SessionSidebarWorkEntry => ({ kind: 'session', item })));
+  const pinnedTotal = pinnedSessionGroups.length + pinnedWorktrees.length;
+  if (pinnedTotal > 0) {
     const collapsed = appendActivityHeader('pinned');
+    const limit = collapsed ? 0 : zoneLimit('pinned', pinnedTotal, pinnedTotal);
     if (!collapsed) {
-      appendActivityItems(pinnedItems, 'activity:pinned', zoneRenderContext);
-      appendWorkEntries(pinnedWorktrees, 'activity:pinned');
+      const sessionGroups = pinnedSessionGroups.slice(0, Math.min(limit, pinnedSessionGroups.length));
+      const visibleItems = sessionGroups.flat().flatMap((entry) => (entry.kind === 'session' ? [entry.item] : []));
+      const visibleWorktrees = pinnedWorktrees.slice(0, Math.max(0, limit - pinnedSessionGroups.length));
+      appendActivityItems(visibleItems, 'activity:pinned', zoneRenderContext);
+      appendWorkEntries(visibleWorktrees, 'activity:pinned');
+      appendZoneReveal('pinned', pinnedTotal, limit);
     }
   }
   const workEntries = (args.workEntries ?? []).filter(matchesSearch);
-  if (workEntries.length > 0) {
+  const workTotal = workEntries.length > 0 ? groupWorkEntries(workEntries).length : 0;
+  if (workTotal > 0) {
     const collapsed = appendActivityHeader('work');
-    if (!collapsed) appendWorkEntries(workEntries, 'activity:work');
+    const limit = collapsed ? 0 : zoneLimit('work', workTotal, WORK_INITIAL_LIMIT);
+    if (!collapsed) {
+      appendWorkEntries(workEntries, 'activity:work', limit);
+      appendZoneReveal('work', workTotal, limit);
+    }
   }
 
   // Keep the selected project's picker even when search has no matches there.
@@ -1060,11 +1135,16 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
   const timeEntries = args.singleProjectMode ? null : args.timeEntries ?? null;
   if (timeEntries) {
     // One list of every other work of every project, most recent first, under
-    // one zone header. It is virtualized, so it reveals all of them at once.
+    // one zone header. Its reveal line starts with every work shown.
     const entries = timeEntries.filter(matchesSearch);
-    if (entries.length > 0) {
+    const total = entries.length > 0 ? groupWorkEntries(entries).length : 0;
+    if (total > 0) {
       const collapsed = appendActivityHeader('timeline');
-      if (!collapsed) appendWorkEntries(entries, 'activity:timeline');
+      const limit = collapsed ? 0 : zoneLimit('timeline', total, total);
+      if (!collapsed) {
+        appendWorkEntries(entries, 'activity:timeline', limit);
+        appendZoneReveal('timeline', total, limit);
+      }
     }
     // The list has no project headers to hold a load status, so it closes
     // with one line per distinct status of a project it lists nothing for,

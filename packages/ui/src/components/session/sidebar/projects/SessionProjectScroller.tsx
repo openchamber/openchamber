@@ -40,10 +40,11 @@ import { WorktreeWorkRow } from '../works/WorktreeWorkRow';
 import { SessionDraftRow } from '../works/SessionDraftRow';
 import { isGroupWork } from '../works/sidebarWorks';
 import { SessionGroupSection, type SessionGroupSectionProps } from './SessionGroupSection';
+import { SessionRevealDivider, SESSION_REVEAL_DRAG_STEP_PX } from './SessionRevealDivider';
 import type { ProjectSection } from './sessionProjectRender';
 import { CrossfadeZoneHeader, CrossfadeZoneHeaders } from './CrossfadeZoneHeaders';
 import { prepareSessionProjectAction } from './sessionProjectActionContext';
-import { applyShowControl, getProjectLabel, grantGroupAccess, retryGroupStatus, toggleActivityZone, toggleProjectsCaption } from './sessionProjectListActions';
+import { getProjectLabel, grantGroupAccess, retryGroupStatus, setShowControlCount, toggleActivityZone, toggleProjectsCaption, toggleShowControlZone } from './sessionProjectListActions';
 import { countArchiveAllOutcome, selectArchiveAllSessionIds, withArchiveAllSubtrees } from './archiveAllSessions';
 import { collectSessionSubtreeIds } from '../sessions/sessionSubtreeActions';
 import { useConfirmDialog } from '@/components/ui/confirm-dialog';
@@ -83,7 +84,23 @@ type GroupProps = Pick<SessionGroupSectionProps,
 type GroupActions = Pick<SessionGroupSectionProps,
   | 'showMoreGroupSessions' | 'resetGroupSessionLimit' | 'setActiveProjectIdOnly'
   | 'setSessionSwitcherOpen' | 'openNewSessionDraft' | 'onToggleCollapsedGroup'
->;
+> & {
+  /** The reveal line sets an absolute count instead of moving one batch. */
+  setGroupSessionLimit: (groupKey: string, count: number) => void;
+};
+
+/** A reveal line being dragged: the list owns it, because the line can move or disappear while the pointer is down. */
+type RevealDrag = {
+  pointerId: number;
+  startY: number;
+  startCount: number;
+  lastCount: number;
+  minCount: number;
+  maxCount: number;
+  collapsed: boolean;
+  setCount: (count: number) => void;
+  toggle: () => void;
+};
 
 export type SessionProjectScrollerModel = {
   rowModel: SessionSidebarRowModel;
@@ -146,6 +163,10 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
   // Only project headers sort; a worktree is a work among the project's
   // works, ordered by activity like the rest.
   const [isProjectDragging, setProjectDragging] = React.useState(false);
+  const revealDragRef = React.useRef<RevealDrag | null>(null);
+  const [revealDragKey, setRevealDragKey] = React.useState<string | null>(null);
+  const [revealFocusScrollRequest, setRevealFocusScrollRequest] = React.useState<{ index: number; id: number } | null>(null);
+  const revealFocusRequestIdRef = React.useRef(0);
   const scrollContainerRef = React.useRef<HTMLElement | null>(null);
   const sensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 8 } }),
@@ -156,6 +177,102 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
     scrollContainerRef.current = element;
     setScrollElement(element);
   }, []);
+
+  const focusRevealHeader = React.useCallback((headerKey: string | undefined) => {
+    if (!headerKey) return;
+    const selector = `[data-sidebar-row-key="${CSS.escape(headerKey)}"]`;
+    const focus = () => {
+      const row = document.querySelector<HTMLElement>(selector);
+      const control = row?.querySelector<HTMLElement>('[data-sidebar-header-toggle], [role="button"], button');
+      control?.focus({ preventScroll: true });
+    };
+    if (document.querySelector(selector)) {
+      focus();
+      return;
+    }
+    const index = model.rowModel.rowIndexByKey.get(headerKey);
+    if (index !== undefined) {
+      revealFocusRequestIdRef.current += 1;
+      setRevealFocusScrollRequest({ index, id: revealFocusRequestIdRef.current });
+    }
+    window.requestAnimationFrame(() => window.requestAnimationFrame(focus));
+  }, [model.rowModel.rowIndexByKey]);
+
+  const startRevealDrag = React.useCallback((event: React.PointerEvent<HTMLElement>, row: Extract<SessionSidebarRow, { kind: 'show-control' }>) => {
+    const toggle = row.activityKey
+      ? () => toggleShowControlZone(row, { model, actions })
+      : () => actions.group.onToggleCollapsedGroup(row.containerKey);
+    const drag: RevealDrag = {
+      pointerId: event.pointerId,
+      startY: event.clientY,
+      startCount: row.currentCount,
+      lastCount: row.currentCount,
+      minCount: row.minCount,
+      maxCount: row.maxCount,
+      collapsed: false,
+      setCount: (count: number) => setShowControlCount(row, count, { model, actions }),
+      toggle,
+    };
+    revealDragRef.current = drag;
+    setRevealDragKey(row.key);
+
+    const captureTarget = event.currentTarget;
+    const previousCursor = document.body.style.cursor;
+    const previousUserSelect = document.body.style.userSelect;
+    document.body.style.userSelect = 'none';
+    const canExpand = row.currentCount < row.maxCount;
+    const canCollapse = Boolean(toggle);
+    document.body.style.cursor = canExpand && canCollapse ? 'ns-resize' : canExpand ? 's-resize' : 'n-resize';
+
+    const move = (moveEvent: PointerEvent) => {
+      if (moveEvent.pointerId !== drag.pointerId) return;
+      const steps = Math.round((moveEvent.clientY - drag.startY) / SESSION_REVEAL_DRAG_STEP_PX);
+      if (drag.collapsed) {
+        if (steps <= 0) return;
+        drag.toggle();
+        drag.collapsed = false;
+        drag.startCount = drag.minCount;
+        drag.lastCount = drag.minCount;
+      }
+      const next = drag.startCount + steps;
+      if (next <= drag.minCount) {
+        if (drag.collapsed) return;
+        drag.collapsed = true;
+        drag.startCount = drag.minCount;
+        drag.lastCount = drag.minCount;
+        drag.setCount(drag.minCount);
+        drag.toggle();
+        return;
+      }
+      const clamped = Math.min(drag.maxCount, Math.max(drag.minCount, next));
+      if (drag.lastCount === clamped) return;
+      drag.lastCount = clamped;
+      drag.setCount(clamped);
+    };
+    const finish = () => {
+      if (revealDragRef.current !== drag) return;
+      revealDragRef.current = null;
+      setRevealDragKey(null);
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', end);
+      window.removeEventListener('pointercancel', end);
+      window.removeEventListener('blur', finish);
+      window.removeEventListener('pagehide', finish);
+      captureTarget.removeEventListener('lostpointercapture', finish);
+      document.body.style.cursor = previousCursor;
+      document.body.style.userSelect = previousUserSelect;
+    };
+    const end = (endEvent: PointerEvent) => {
+      if (endEvent.pointerId !== drag.pointerId) return;
+      finish();
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', end);
+    window.addEventListener('pointercancel', end);
+    window.addEventListener('blur', finish);
+    window.addEventListener('pagehide', finish);
+    captureTarget.addEventListener('lostpointercapture', finish);
+  }, [actions, model]);
 
   const projectPickerProjects = React.useMemo(() => model.projectSections.map((section) => section.project), [model.projectSections]);
   const orderedPickerProjects = useProjectsInSidebarOrder(projectPickerProjects, model.singleProjectMode);
@@ -444,26 +561,29 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
         toggleParent={model.groupProps.toggleParent}
       />;
     }
-    // Show more and the archive's empty line align with the text of the rows
-    // they close: 10px in under gutterless timeline-style rows; past the tree
-    // level's chevron slot on tree rows.
-    const rowTextInset = row.kind === 'show-control' && row.flat === true
-      ? FLAT_TEXT_INSET_PX
-      : sessionTreeTextInset(row.kind === 'show-control' || row.kind === 'empty' ? row.depth ?? 0 : 0);
+    // The archive's empty line aligns with the text of the rows it closes:
+    // past the tree level's chevron slot.
+    const rowTextInset = row.kind === 'empty' ? sessionTreeTextInset(row.depth ?? 0) : 0;
     if (row.kind === 'show-control') {
-      // Small and short, so it reads as a control under the list, not a row of it.
-      const control = (kind: 'more' | 'fewer') => (
-        <button type="button" className="rounded-md py-0.5 typography-micro text-muted-foreground leading-tight hover:text-foreground hover:underline" onClick={() => applyShowControl(row, kind, { model, actions })}>
-          {t(kind === 'more' ? 'sessions.sidebar.group.showMore' : 'sessions.sidebar.group.showFewer')}
-        </button>
-      );
-      return (
-        <div className="mt-0.5 flex items-center gap-1.5 pe-1.5" style={{ paddingInlineStart: rowTextInset }}>
-          {row.more ? control('more') : null}
-          {row.more && row.fewer ? <span aria-hidden="true" className="typography-micro text-muted-foreground/50">·</span> : null}
-          {row.fewer ? control('fewer') : null}
-        </div>
-      );
+      const toggleCollapsed = row.activityKey
+        ? () => toggleShowControlZone(row, { model, actions })
+        : () => actions.group.onToggleCollapsedGroup(row.containerKey);
+      const collapseAndFocus = row.headerKey
+        ? () => {
+          toggleCollapsed();
+          focusRevealHeader(row.headerKey);
+        }
+        : toggleCollapsed;
+      return <SessionRevealDivider
+        currentCount={row.currentCount}
+        minCount={row.minCount}
+        maxCount={row.maxCount}
+        pageStep={row.increment}
+        revealLevel={row.revealLevel}
+        onStartDrag={(event) => startRevealDrag(event, row)}
+        onSetCount={(count) => setShowControlCount(row, count, { model, actions })}
+        onCollapse={collapseAndFocus}
+      />;
     }
     if (row.kind === 'status') return renderStatus(row);
     if (row.kind === 'caption') {
@@ -479,7 +599,7 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
     return <div className="py-1 text-start typography-micro text-muted-foreground" style={{ paddingInlineStart: rowTextInset }}>
       {t('sessions.sidebar.group.empty.noArchivedSessions')}
     </div>;
-  }, [actions, deleteFolder, files, model, openProjectFolder, openProjectOnBoard, projectPickerOptions, renameFolder, renderStatus, requestArchiveAll, showDeletionDialog, spacesPageAvailable, t, toggleFolderCollapse, view]);
+  }, [actions, deleteFolder, files, model, openProjectFolder, openProjectOnBoard, projectPickerOptions, renameFolder, renderStatus, requestArchiveAll, showDeletionDialog, spacesPageAvailable, startRevealDrag, focusRevealHeader, t, toggleFolderCollapse, view]);
 
   const structuralIds = React.useMemo(() => model.rowModel.rows.flatMap((row) => (
     row.kind === 'project-header' ? [row.section.project.id] : []
@@ -500,6 +620,7 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
       <ScrollableOverlay
         // Sticky zone headers replace the top shadow.
         ref={setScrollContainer} useScrollShadow hideTopScrollShadow scrollShadowSize={40}
+        data-sidebar-reveal-drag={revealDragKey ? 'true' : undefined}
         outerClassName="flex-1 min-h-0" className="oc-sidebar-scroller pb-1 ps-2.5 pe-2 [overflow-anchor:none]"
       >
         <SessionFolderOwnersProvider ownerKeys={folderDropOwnerKeys}>
@@ -540,7 +661,7 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
           }
         }}>
           <SortableContext items={structuralIds} strategy={verticalListSortingStrategy}>
-            <SessionSidebarRows model={model.rowModel} scrollElement={scrollElement} pinnedRowIndexes={pinnedRowIndexes} renderRow={renderRow} onFirstVisibleIndexChange={handleFirstVisibleIndexChange} />
+            <SessionSidebarRows model={model.rowModel} scrollElement={scrollElement} pinnedRowIndexes={pinnedRowIndexes} renderRow={renderRow} onFirstVisibleIndexChange={handleFirstVisibleIndexChange} scrollRequest={revealFocusScrollRequest} suspendDisclosure={revealDragKey !== null} />
           </SortableContext>
         </DndContext>
         </SessionFolderOwnersProvider>
