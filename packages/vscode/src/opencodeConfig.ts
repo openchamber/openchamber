@@ -20,6 +20,7 @@ import { writeFileAtomic } from '../../web/server/lib/opencode/atomic-write.js';
 import { toLoadablePluginSpec } from '../../web/server/lib/opencode/loadable-plugin-spec.js';
 import { isGitSpec, isPluginControlSpec } from '../../web/server/lib/opencode/plugin-spec.js';
 import { mergeCustomProviderConfig, validateCustomProviderConfig } from '../../web/server/lib/opencode/providers.js';
+import { canonicalPluginPath, resolveLocalPluginPath } from '../../web/server/lib/opencode/plugin-paths.js';
 import {
   toAgentEntity,
   fromAgentEntity,
@@ -114,6 +115,7 @@ export type PluginEntry = {
   scope: PluginScope;
   kind: 'config';
   parsedKind: PluginParsedKind;
+  resolvedPath?: string;
 };
 
 export type PluginFile = {
@@ -121,6 +123,8 @@ export type PluginFile = {
   fileName: string;
   scope: PluginScope;
   kind: 'file';
+  absolutePath: string;
+  resolvedPath?: string;
 };
 
 export type PluginRegistryResult =
@@ -1396,7 +1400,11 @@ const getPluginTarget = (id: string, workingDirectory?: string | null): null | {
 
 export const listPluginEntries = (workingDirectory?: string): PluginEntry[] => {
   const entries: PluginEntry[] = [];
+  const seenSources = new Set<string>();
   for (const source of getPluginConfigSources(workingDirectory)) {
+    const sourcePath = canonicalPluginPath(source.path);
+    if (source.scope === 'project' && seenSources.has(sourcePath)) continue;
+    seenSources.add(sourcePath);
     for (const item of readPluginList(source.config)) {
       const entry: PluginEntry = {
         id: encodePluginId('config', `${source.scope}:${item.entry.package}`),
@@ -1404,6 +1412,7 @@ export const listPluginEntries = (workingDirectory?: string): PluginEntry[] => {
         scope: source.scope,
         kind: 'config',
         parsedKind: pluginParsedKind(item.entry.package),
+        resolvedPath: resolveLocalPluginPath(item.entry.package, source.path),
       };
       if (item.entry.options) entry.options = item.entry.options;
       entries.push(entry);
@@ -1489,6 +1498,8 @@ export const listPluginDirFiles = (workingDirectory?: string): PluginFile[] => {
           fileName,
           scope,
           kind: 'file',
+          absolutePath: path.join(dir, fileName),
+          resolvedPath: canonicalPluginPath(path.join(dir, fileName)),
         });
       } catch {
         // Ignore unsupported files in the plugins directory.

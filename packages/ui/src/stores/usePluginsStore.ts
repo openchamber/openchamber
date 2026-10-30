@@ -27,6 +27,8 @@ export interface PluginEntry {
   parsedKind: PluginParsedKind;
   /** The config file that declares the entry; relative path specs resolve against its directory. */
   sourcePath?: string;
+  /** Host-resolved local target used only to filter duplicate discovery records. */
+  resolvedPath?: string;
 }
 
 export interface PluginFile {
@@ -36,6 +38,8 @@ export interface PluginFile {
   /** `file` is a `.ts`/`.js` OpenChamber can open; `package` is a plugin directory (or a v1 `plugin/` file) OpenCode loads but the page only lists. */
   kind: 'file' | 'package';
   absolutePath?: string;
+  /** Host-resolved local target used only to filter duplicate discovery records. */
+  resolvedPath?: string;
 }
 
 export interface PluginDraft {

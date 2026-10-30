@@ -11,6 +11,7 @@ import {
 import { isPluginControlSpec, parsedKindForSpec } from './plugin-spec.js';
 import { PLUGIN_SECTION, toPluginEntity, fromPluginEntity, readPluginList } from './config-v2.js';
 import { toLoadablePluginSpec } from './loadable-plugin-spec.js';
+import { canonicalPluginPath, resolveLocalPluginPath } from './plugin-paths.js';
 
 // OpenCode 2 reads `plugins` (bare string or `{package, options}`) and still
 // decodes the v1 `plugin` array with its `[spec, options]` tuples. OpenChamber
@@ -29,12 +30,14 @@ const PLUGIN_FILE_NAME_PATTERN = /^[a-z0-9][a-z0-9-_.]*\.(js|ts|mjs|cjs)$/;
  * @property {'config'} kind
  * @property {PluginParsedKind} parsedKind
  * @property {string} sourcePath absolute path to the config file
+ * @property {string} [resolvedPath] canonical local target for display deduplication
  * @typedef {Object} PluginFile
  * @property {string} id base64url encoded "file:scope:fileName"
  * @property {string} fileName
  * @property {PluginScope} scope
  * @property {'file'} kind
  * @property {string} absolutePath
+ * @property {string} [resolvedPath] canonical local target for display deduplication
  */
 
 function codedError(message, code) {
@@ -310,7 +313,11 @@ function pluginArrayForWrite(config) {
 
 function listPluginEntries(workingDirectory) {
   const layers = readPluginConfigLayers(workingDirectory);
+  const seenSources = new Set();
   const entries = configSources(layers).flatMap((source) => {
+    const sourcePath = canonicalPluginPath(source.filePath);
+    if (source.scope === AGENT_SCOPE.PROJECT && seenSources.has(sourcePath)) return [];
+    seenSources.add(sourcePath);
     return readPluginList(source.config).map((item) => {
       const entry = {
         id: encodePluginId('config', `${source.scope}:${item.entry.package}`),
@@ -319,6 +326,7 @@ function listPluginEntries(workingDirectory) {
         kind: 'config',
         parsedKind: parsedKindForSpec(item.entry.package),
         sourcePath: source.filePath,
+        resolvedPath: resolveLocalPluginPath(item.entry.package, source.filePath),
         legacy: item.legacy,
       };
       if (item.entry.options !== undefined) entry.options = item.entry.options;
@@ -402,17 +410,18 @@ function listPluginDirFiles(workingDirectory) {
     return fs.readdirSync(dir, { withFileTypes: true })
       .filter((entry) => !entry.name.includes('..') && !entry.name.startsWith('.'))
       .flatMap((entry) => {
+        const absolutePath = path.join(dir, entry.name);
         if (entry.isFile() && PLUGIN_FILE_NAME_PATTERN.test(entry.name)) {
           // Only files in the v2 `plugins/` directory are editable through
           // the file id; a v1 `plugin/` file is listed for what it is.
           return editable
-            ? [{ id: encodePluginId('file', `${scope}:${entry.name}`), fileName: entry.name, scope, kind: 'file', absolutePath: path.join(dir, entry.name) }]
-            : [{ id: encodePluginId('legacy', `${scope}:${entry.name}`), fileName: entry.name, scope, kind: 'package', absolutePath: path.join(dir, entry.name) }];
+            ? [{ id: encodePluginId('file', `${scope}:${entry.name}`), fileName: entry.name, scope, kind: 'file', absolutePath, resolvedPath: canonicalPluginPath(absolutePath) }]
+            : [{ id: encodePluginId('legacy', `${scope}:${entry.name}`), fileName: entry.name, scope, kind: 'package', absolutePath, resolvedPath: canonicalPluginPath(absolutePath) }];
         }
         if (entry.isDirectory()) {
           // A plugin package (a directory with its own entry point): OpenCode
           // loads it, OpenChamber only lists it.
-          return [{ id: encodePluginId('package', `${scope}:${entry.name}`), fileName: entry.name, scope, kind: 'package', absolutePath: path.join(dir, entry.name) }];
+          return [{ id: encodePluginId('package', `${scope}:${entry.name}`), fileName: entry.name, scope, kind: 'package', absolutePath, resolvedPath: canonicalPluginPath(absolutePath) }];
         }
         return [];
       });

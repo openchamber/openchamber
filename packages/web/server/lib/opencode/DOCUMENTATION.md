@@ -586,6 +586,18 @@ files stay in the global `plugins/` folder: OpenCode scans plugin folders only
 in config directories, never next to the `OPENCODE_CONFIG` file. The VS Code
 bridge (`opencodeConfig.ts`) keeps the same rules.
 
+Plugin lists omit project configs already represented by a user config,
+retaining user scope when the selected project is the global config folder.
+Global/custom aliases keep custom precedence and resolve relative targets from
+that config path. Distinct declaration IDs
+retain their separate entries and options. Local entries include `resolvedPath`,
+resolved from their declaring config; discovered records include canonical
+`resolvedPath` alongside the original `absolutePath`. Runtime status matches
+`absolutePath`, preserving symlink aliases reported by OpenCode. The shared UI
+compares `resolvedPath` to hide redundant package
+cards. Editable local file cards remain visible even when declared in config.
+This metadata does not change registry validation or mutation targets.
+
 A configured plugin spec is classified by `parsedKindForSpec`
 (`plugin-spec.js`): an OpenCode 2 control entry is `control`, a filesystem path
 is `path`, a Git package spec is `git`, anything else is `npm`. A control entry
