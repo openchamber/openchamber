@@ -82,7 +82,7 @@ import { requestRemoteHostUpdate } from './remote-host-update.mjs';
 import { assertUpdaterCapability, readLinuxPackageType } from './updater-capability.mjs';
 import { relaunchAfterExit } from './linux-relaunch.mjs';
 import { installLinuxPackage } from './linux-package-install.mjs';
-import { checkForDesktopUpdate } from './updater-check.mjs';
+import { checkForDesktopUpdate, downloadPendingDesktopUpdate, markDesktopUpdateDownloaded } from './updater-check.mjs';
 import { resolveUpdaterChannel } from './updater-channel.mjs';
 import { convertShortcutComboToAccelerator, MINI_CHAT_GLOBAL_SHORTCUT_SETTING_KEY, normalizeStoredShortcutCombo, selectMiniChatGlobalShortcutAction } from './mini-chat-global-shortcut.mjs';
 import {
@@ -315,6 +315,8 @@ const state = {
   // path may end the process: the update sequence owns the exit.
   updateInstallPending: false,
   pendingUpdate: null,
+  updateDownloadPromise: null,
+  updateDownloadVersion: null,
   unreachableHosts: new Set(),
   windowCounter: 1,
   // Quake Mode: the main window's normal geometry while it is showing the
@@ -3613,10 +3615,7 @@ const setupAutoUpdater = () => {
   autoUpdater.on('update-downloaded', (info) => {
     log.info(`[electron] update-downloaded version=${info?.version || 'unknown'}`);
     setTaskbarProgress(-1);
-    if (state.pendingUpdate) {
-      state.pendingUpdate.downloaded = true;
-      if (info?.downloadedFile) state.pendingUpdate.downloadedFile = info.downloadedFile;
-    }
+    markDesktopUpdateDownloaded(state.pendingUpdate, info);
   });
 
   autoUpdater.on('error', (err) => {
@@ -5037,16 +5036,19 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
     case 'desktop_check_for_updates': {
       assertUpdaterCapability({ packaged: app.isPackaged });
       const currentVersion = APP_VERSION;
-      const { available, updateInfo, updateResult, nextVersion, pendingUpdate } = await checkForDesktopUpdate({
+      const { available, updateInfo, nextVersion, pendingUpdate } = await checkForDesktopUpdate({
         autoUpdater,
         currentVersion,
         pendingUpdate: state.pendingUpdate,
         compareVersions: compareSemver,
       });
+      // Assign before the changelog fetch: a download can finish while the
+      // notes load and mark this record as downloaded. Assigning after that
+      // await would replace it with the pre-await copy and drop the payload.
+      state.pendingUpdate = pendingUpdate;
       const body =
         (typeof updateInfo?.releaseNotes === 'string' && updateInfo.releaseNotes.trim() ? updateInfo.releaseNotes : null) ||
         await parseRelevantChangelogNotes(currentVersion, nextVersion);
-      state.pendingUpdate = pendingUpdate;
       return {
         available,
         currentVersion,
@@ -5071,44 +5073,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
         },
       }));
       try {
-        if (!state.pendingUpdate.electronUpdate) {
-          throw new Error('Electron updater metadata is not available for this build');
-        }
-        if (!state.pendingUpdate.downloaded) {
-          await new Promise((resolve, reject) => {
-            let settled = false;
-            const cleanup = () => {
-              autoUpdater.off('update-downloaded', onDownloaded);
-              autoUpdater.off('error', onError);
-            };
-            const finish = (callback, value) => {
-              if (settled) return;
-              settled = true;
-              cleanup();
-              callback(value);
-            };
-            const onDownloaded = () => finish(resolve, null);
-            const onError = (error) => finish(reject, error);
-            autoUpdater.on('update-downloaded', onDownloaded);
-            autoUpdater.on('error', onError);
-            // downloadUpdate() resolves once the payload is on disk. It stays
-            // the authoritative signal: when the file was already cached the
-            // updater emits no 'update-downloaded', and waiting only for the
-            // event left this promise pending and its listeners attached on
-            // every retry.
-            Promise.resolve(autoUpdater.downloadUpdate())
-              .then((files) => {
-                // The installer comes first; Linux packages install from it.
-                if (state.pendingUpdate && files?.[0]) state.pendingUpdate.downloadedFile = files[0];
-                finish(resolve, null);
-              })
-              .catch((error) => finish(reject, error));
-          });
-        }
-        // The 'update-downloaded' event does not fire for an already cached
-        // payload, so record the payload as ready here too; otherwise restart
-        // would relaunch without installing anything.
-        state.pendingUpdate.downloaded = true;
+        await downloadPendingDesktopUpdate({ autoUpdater, state });
         emitToAllWindows('openchamber:update-progress', mapUpdaterProgressEvent({
           event: 'Finished',
           data: {},
