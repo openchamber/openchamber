@@ -35,7 +35,7 @@ import { useDeviceInfo } from '@/lib/device';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
-import { getContextFileOpenFailureMessage, validateContextFileOpen } from '@/lib/contextFileOpenGuard';
+import { toastContextFileOpenFailure, validateContextFileOpen } from '@/lib/contextFileOpenGuard';
 import { toast } from '@/components/ui';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import type { Session } from '@/lib/opencode/model';
@@ -69,6 +69,7 @@ import { MessageHitItem, MessageSearchFilters, type MessageAuthor, type MessageS
 import { requestReasoningReveal } from '@/components/chat/search/reasoningReveal';
 import { useObserveProjectActionRuns, useProjectActions } from '@/components/layout/projectActionsRunnerContext';
 import { resolveProjectActionIconName } from '@/lib/projectActions';
+import { isSessionDirectoryAdmitted } from '@/sync/session-admission-rule';
 
 type CommandEntry = {
   id: string;
@@ -586,9 +587,12 @@ export const CommandPalette: React.FC = () => {
   // ---------------------------------------------------------------------------
   // Sessions
   // ---------------------------------------------------------------------------
+  const worktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
   const orderedActiveSessions = React.useMemo(
-    () => orderVisibleRootSessions(activeSessions, pinnedSessionIds, sessionOrderRanks),
-    [activeSessions, pinnedSessionIds, sessionOrderRanks],
+    () => orderVisibleRootSessions(activeSessions.filter((session) => (
+      isSessionDirectoryAdmitted(resolveGlobalSessionDirectory(session), projects, worktreesByProject)
+    )), pinnedSessionIds, sessionOrderRanks),
+    [activeSessions, pinnedSessionIds, projects, sessionOrderRanks, worktreesByProject],
   );
 
   const allBranches = useGitAllBranches();
@@ -818,7 +822,7 @@ export const CommandPalette: React.FC = () => {
       if (!currentRoot) return;
       const validation = await validateContextFileOpen(filesApi, filePath, { directory: currentRoot });
       if (!validation.ok) {
-        toast.error(getContextFileOpenFailureMessage(validation.reason));
+        toastContextFileOpenFailure(filePath, validation);
         return;
       }
       openContextFile(currentRoot, filePath);

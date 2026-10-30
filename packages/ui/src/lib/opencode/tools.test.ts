@@ -16,7 +16,6 @@ import {
   normalizeToolName,
   openChamberToolCall,
   renderedPage,
-  openChamberToolCall,
   requestedSecret,
   subagentSessionId,
   toolDescription,

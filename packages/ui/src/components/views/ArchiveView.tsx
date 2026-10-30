@@ -26,6 +26,7 @@ import { useGlobalSyncStore } from '@/sync/global-sync-store';
 import { loadWorktreeArchives, useWorktreeArchivesByProject } from '@/lib/worktrees/worktreeArchive';
 import { ArchivedWorktreeRow } from './archive/ArchivedWorktreeRow';
 import { useWorktreeArchiveActions } from './archive/useWorktreeArchiveActions';
+import { isSessionDirectoryAdmitted } from '@/sync/session-admission-rule';
 
 /**
  * A group in the panel on the left: a project with its worktrees (archived
@@ -88,6 +89,8 @@ export function ArchiveSessionsView({ layout, onLeave, initialQuery = '' }: {
   const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
   const unarchiveSession = useSessionUIStore((state) => state.unarchiveSession);
   const homeDirectory = useDirectoryStore((state) => state.homeDirectory);
+  const projects = useProjectsStore((state) => state.projects);
+  const worktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
   // Narrow selections: the cache's entity map changes with every active
   // session update, and the page only depends on which archived sessions are
   // listed and on their parents' titles.
@@ -121,8 +124,11 @@ export function ArchiveSessionsView({ layout, onLeave, initialQuery = '' }: {
   // not listed. One archived while its parent stays active would otherwise
   // show nowhere, so it is listed under its parent's title and restored alone.
   const sortedSessions = React.useMemo(
-    () => [...listedSessions].sort((a, b) => (b.time?.archived ?? 0) - (a.time?.archived ?? 0)),
-    [listedSessions],
+    () => listedSessions.filter((session) => {
+      const directory = resolveGlobalSessionDirectory(session);
+      return isSessionDirectoryAdmitted(directory, projects, worktreesByProject) || Boolean(directory && spaceArchives?.has(directory));
+    }).sort((a, b) => (b.time?.archived ?? 0) - (a.time?.archived ?? 0)),
+    [listedSessions, projects, spaceArchives, worktreesByProject],
   );
 
   const parentTitles = React.useMemo(() => {
@@ -138,8 +144,6 @@ export function ArchiveSessionsView({ layout, onLeave, initialQuery = '' }: {
     return parentTitles.get(parentID) || t('sessions.sidebar.session.untitled');
   };
 
-  const projects = useProjectsStore((state) => state.projects);
-  const worktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
   const openCodeProjects = useGlobalSyncStore((state) => state.projects);
   const archivesByProject = useWorktreeArchivesByProject();
   const archiveActions = useWorktreeArchiveActions();

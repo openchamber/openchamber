@@ -270,7 +270,7 @@ export const UsagePage: React.FC = () => {
                 >
                   <CollapsibleTrigger className="flex w-full items-center justify-between py-0.5 group">
                     <div className="flex items-center gap-1.5 text-start">
-                      <span className="typography-ui-label font-normal text-foreground">{family.label}</span>
+                      <span className="typography-ui-label font-normal text-foreground">{family.labelKey ? t(family.labelKey) : family.label}</span>
                       <span className="typography-micro text-muted-foreground">
                         ({familyModels.length})
                       </span>

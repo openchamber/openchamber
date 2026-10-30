@@ -19,6 +19,7 @@ import {
     useSessionStatus,
     useScopedBlockingPermissions,
     useScopedBlockingForms,
+    useRecoveredQuestions,
 } from '@/sync/sync-context';
 import { useStreamingStore } from '@/sync/streaming';
 import { ScrollShadow } from '@/components/ui/ScrollShadow';
@@ -123,6 +124,7 @@ type BtwSessionData = {
     activeStreamingPhase: 'streaming' | 'cooldown' | 'completed' | null;
     sessionPermissions: ReturnType<typeof useScopedBlockingPermissions>;
     sessionForms: ReturnType<typeof useScopedBlockingForms>;
+    sessionRecoveredQuestions: ReturnType<typeof useRecoveredQuestions>;
     isEmpty: boolean;
 };
 
@@ -156,6 +158,7 @@ const useBtwSessionData = (
     );
     const sessionPermissions = useScopedBlockingPermissions(sessionId, directory);
     const sessionForms = useScopedBlockingForms(sessionId, directory);
+    const sessionRecoveredQuestions = useRecoveredQuestions(sessionId, directory);
 
     const tailRecords = React.useMemo(
         () => filterBtwTailMessages(messageRecords, boundaryMessageID),
@@ -182,6 +185,7 @@ const useBtwSessionData = (
         activeStreamingPhase,
         sessionPermissions,
         sessionForms,
+        sessionRecoveredQuestions,
         isEmpty: tailRecords.length === 0,
     };
 };
@@ -457,10 +461,13 @@ const BtwMessages: React.FC<{
                         }
                     />
                 ))}
-                {data.sessionForms.length > 0 || data.sessionPermissions.length > 0 ? (
+                {data.sessionForms.length > 0 || data.sessionPermissions.length > 0 || data.sessionRecoveredQuestions.length > 0 ? (
                     <div>
                         {data.sessionForms.map((form) => (
                             <FormCard key={form.id} form={form} />
+                        ))}
+                        {data.sessionRecoveredQuestions.map((question) => (
+                            <FormCard key={question.form.id} form={question.form} recovered={question} />
                         ))}
                         {data.sessionPermissions.map((permission) => (
                             <PermissionCard key={permission.id} permission={permission} />

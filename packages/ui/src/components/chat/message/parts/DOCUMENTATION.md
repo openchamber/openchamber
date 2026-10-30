@@ -94,6 +94,8 @@ Use this doc when you ask an agent to change tool/header/description behavior.
 
 - `BlockLine.tsx`
   - The vertical connector line left of a collapsible block's body. It is also a click target: clicking it folds/expands the block via its header toggle handler (`onToggle`), or toggles the nearest native `<details>` when no handler is passed (JSON summary sections). Geometry is inline-styled (12px hit strip centered on the 1px line) so it does not depend on compiled Tailwind classes.
+  - `BlockBody` is the expanded body of every collapsible block (reasoning, tool calls): the line, a 12px inset from it, 4px above and 8px below. Content inside adds no inline padding of its own, so every block's text starts at the same distance from the line. Tool input and output boxes have no fill on any runtime, so padding on them only shifted text; boxes with a fill (error, LSP diagnostics) and diffs keep their own inner padding, with their outer edge on the inset.
+  - Two text roles apply across blocks. Prose, including reasoning, tool markdown and subagent prompts, is upright sans at `--text-meta`. Code, including shell commands, tool parameters and text output, is mono with the code-block line height.
 
 ## Current important behavior
 
@@ -134,6 +136,26 @@ run a second Markdown parser. Ordinary code selections copy raw code;
 prose follows the Markdown/plain setting and retains safe rich HTML. The
 desktop `openchamber:copy` event follows the same selection policy.
 
+### Why image exports keep prose at the visible column width
+
+The export clone keeps the live message column width, including whole-turn
+exports whose source is detached. Shrink-to-fit sizing let the widest line
+stretch every paragraph. Code wraps for the image; only unwrappable blocks
+grow the canvas. Their clipping ancestors clear both overflow axes because a
+hidden y axis makes visible x overflow compute to auto. Non-root ancestors
+also release width caps such as KaTeX's `max-width: 100%`; the clone root stays
+column-sized so surrounding prose does not reflow.
+
+The canvas uses LTR physical placement while the clone retains its inherited
+text direction. Overflow is measured on both edges after releasing width caps;
+left overflow adds a physical offset to the clone. Growing the canvas therefore
+cannot right-align and move the fixed-width text column in an RTL interface.
+
+Overflow measurement skips hidden and clipped content, including KaTeX's
+invisible MathML twin, and tolerates 1 CSS pixel of rounding. Pixel density
+falls from 2 toward 0.5 near html-to-image's 16384-device-pixel limit. Beyond
+32768 CSS pixels the floor still permits the library's existing squash behavior.
+
 ### Why selection cloning follows the Range boundaries
 
 `markdown/selectionRange.ts` owns code-source coverage for Markdown selection,
@@ -157,6 +179,14 @@ components own navigation, file references, media, Mermaid and controls;
 clipboard and image rendering share this configuration. The stable consumer
 root is `.markdown-content[data-markdown-content]`; code and table consumers
 use native `data-streamdown` markers.
+
+#### Why chat requires double tildes for strikethrough
+
+Single tildes in agent prose often mark ranges such as `5~20s`. Both GFM and
+the CJK extension disable single-tilde strikethrough for chat because micromark
+merges their registrations. Chat callers and exports pass `singleTilde={false}`.
+Documents, file previews, plans, notes and release notes retain the default GFM
+rendering, including GitHub's `~text~` in host-authored descriptions and comments.
 
 Fenced `diff` blocks carry a translated Proposal label and a source-copy button.
 Completed, bounded patches use the same read-only diff preview as tool cards,
@@ -547,7 +577,12 @@ update, with the `shellID`, when the command starts.
   component state, using image aspect ratios and wrapping at small widths.
   Mixed prose paragraphs keep their normal flow. No label scan or detached
   DOM restoration participates in loading.
-  An image that is missing, too large or fails validation keeps its label.
+  While it loads the label's icon spins; an image that is missing, too large
+  or fails validation keeps its label with a warning icon and "Image couldn't
+  load" in its tooltip (`data-oc-media-state`). Image attachments, the preview
+  overlay and diff images draw through `StatusImage`
+  (`components/ui/status-image.tsx`), which shows loading and failure in the
+  image's own frame.
   Remote model/tool Markdown images stay labels or links, so a model or a
   fetched page cannot learn when the user read the message. Documents and
   references retain their explicit inline-image policy. A click on loaded

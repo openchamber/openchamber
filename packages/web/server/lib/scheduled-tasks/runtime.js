@@ -84,16 +84,15 @@ export const parseScheduledCommandPrompt = (prompt) => {
     return null;
   }
 
-  const firstLine = trimmed.split(/\r?\n/, 1)[0] || '';
-  const [head, ...tail] = firstLine.split(/\s+/);
-  const commandName = (head || '').slice(1).trim();
+  const commandToken = trimmed.match(/^\/(\S+)/);
+  const commandName = commandToken?.[1];
   if (!commandName) {
     return null;
   }
 
   return {
     command: commandName,
-    arguments: tail.join(' ').trim(),
+    arguments: trimmed.slice(commandToken[0].length).replace(/^[ \t]*(?:\r?\n)?/, ''),
   };
 };
 
@@ -537,7 +536,7 @@ export const createScheduledTasksRuntime = (deps) => {
   // Never fails the run (`sync` does not throw): a task that executes without
   // its background is a lesser loss than a task that does not execute.
   const syncKnowledge = (sessionID, projectPath) => (sessionKnowledgeRuntime
-    ? sessionKnowledgeRuntime.sync(sessionID, projectPath)
+    ? sessionKnowledgeRuntime.sync(sessionID, projectPath, '')
     : Promise.resolve(false));
 
   const runPrompt = async ({ client, sessionID, projectPath, task }) => {
@@ -947,7 +946,7 @@ export const createScheduledTasksRuntime = (deps) => {
         }
       }
 
-      let status = 'success';
+      let status = 'sent';
       let sessionID;
       let sessionDirectory;
       let durationMs = 0;
@@ -988,9 +987,8 @@ export const createScheduledTasksRuntime = (deps) => {
         sessionID = result.sessionID;
         sessionDirectory = result.directory;
         durationMs = result.durationMs;
-        status = 'success';
         logger.info?.(
-          '[ScheduledTasks] run completed',
+          '[ScheduledTasks] run dispatched',
           { projectID, taskID, status, reason, sessionID, durationMs }
         );
       } catch (error) {
@@ -1102,7 +1100,7 @@ export const createScheduledTasksRuntime = (deps) => {
         // The session already ran — surface persist failure without treating a
         // successful dispatch as a hard run failure (manual runNow would 500).
         return {
-          ok: status === 'success',
+          ok: status === 'sent',
           status,
           sessionID,
           directory: sessionDirectory,
@@ -1125,7 +1123,7 @@ export const createScheduledTasksRuntime = (deps) => {
       }
 
       return {
-        ok: status === 'success',
+        ok: status === 'sent',
         status,
         sessionID,
         directory: sessionDirectory,

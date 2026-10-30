@@ -64,6 +64,7 @@ export const restoreLastActiveSession = async (options: {
     void latest.setCurrentSession(
         session.id,
         resolveGlobalSessionDirectory(session) ?? persisted.directory ?? undefined,
+        { keepSingleProject: true },
     );
     return 'restored';
 };
@@ -85,7 +86,7 @@ const reopenLastActiveSession = (): ReopenedSession | null => {
     const cached = useGlobalSessionsStore.getState().entityById.get(persisted.sessionId);
     const directory = persisted.directory ?? (cached ? resolveGlobalSessionDirectory(cached) : null);
     if (!directory) return null;
-    void ui.setCurrentSession(persisted.sessionId, directory);
+    void ui.setCurrentSession(persisted.sessionId, directory, { keepSingleProject: true });
     return { runtimeKey, sessionId: persisted.sessionId };
 };
 
@@ -106,7 +107,7 @@ const confirmReopenedSession = async (reopened: ReopenedSession): Promise<LastSe
     if (session) {
         const directory = normalizePath(resolveGlobalSessionDirectory(session));
         if (stillOpen && directory && directory !== latest.currentSessionDirectory) {
-            void latest.setCurrentSession(session.id, directory);
+            void latest.setCurrentSession(session.id, directory, { keepSingleProject: latest.currentSessionKeepsSingleProject });
         }
         return 'restored';
     }

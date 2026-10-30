@@ -9,6 +9,7 @@ import { ChildStoreManager } from '@/sync/child-store';
 import { setSyncRefs } from '@/sync/sync-refs';
 import { createRuntimeOpencodeClient } from '@/lib/opencode/client';
 import { applyGlobalSessionStatusEvent, replaceGlobalSessionStatusById } from '@/sync/global-session-status';
+import { applySessionEventToGlobalSessions } from '@/sync/session-event-router';
 import { readGuestWorkspace, observeGuestWorkspace } from './workspace';
 import { guestMay } from './capabilities';
 
@@ -56,6 +57,49 @@ describe('extension workspace projection', () => {
       expect(fetch.mock.calls.length).toBe(0);
     } finally { fetch.mockRestore(); }
   });
+  test('forwards the session agent to extensions and publishes changes', async () => {
+    useGlobalSessionsStore.getState().applySnapshot([
+      { ...session('b-session', '/b-tree'), agent: 'fixer' },
+      session('a-session', '/a'),
+    ], [], 'ready');
+    const snapshot = readB();
+    expect(snapshot.sessions.map((entry) => [entry.id, entry.agent])).toEqual([['b-session', 'fixer']]);
+    const agents: (string | undefined)[] = [];
+    const stop = observeGuestWorkspace({ kind: 'sessions', projectId: 'b' }, 'board', (next) => {
+      if (next.kind === 'sessions') agents.push(next.sessions[0].agent);
+    });
+    try {
+      useGlobalSessionsStore.getState().applySnapshot([{ ...session('b-session', '/b-tree'), agent: 'review', time: { created: 1, updated: 2 } }], [], 'ready');
+      await Promise.resolve();
+      useGlobalSessionsStore.getState().applySnapshot([{ ...session('b-session', '/b-tree'), time: { created: 1, updated: 3 } }], [], 'ready');
+      await Promise.resolve();
+      expect(agents.length).toBe(3);
+      expect(agents).toEqual(['fixer', 'review', undefined]);
+      expect(Object.hasOwn(readB().sessions[0], 'agent')).toBe(false);
+    } finally { stop(); }
+  });
+  for (const updated of [1, 2]) {
+    test(`publishes agent patches immediately with updated timestamp ${updated}`, async () => {
+      const agents: (string | undefined)[] = [];
+      const stop = observeGuestWorkspace({ kind: 'sessions', projectId: 'b' }, 'board', (next) => {
+        if (next.kind === 'sessions') agents.push(next.sessions[0].agent);
+      });
+      try {
+        for (const agent of ['fixer', 'review']) {
+          applySessionEventToGlobalSessions({
+            type: 'session.patched',
+            properties: { sessionID: 'b-session', patch: { agent, time: { updated } } },
+          });
+          await Promise.resolve();
+          expect(readB().sessions[0].agent).toBe(agent);
+        }
+        expect(agents).toEqual([undefined, 'fixer', 'review']);
+      } finally {
+        stop();
+        applySessionEventToGlobalSessions({ type: 'session.idle', properties: { sessionID: 'b-session' } });
+      }
+    });
+  }
   test('a session in the project folder of a worktree belongs to the project and to that worktree', () => {
     useGlobalSessionsStore.getState().applySnapshot([
       session('b-session', '/b-tree/ai'),

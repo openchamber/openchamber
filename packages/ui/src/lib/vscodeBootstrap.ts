@@ -22,6 +22,15 @@ export const getVSCodeBootstrapWorkspaceFolder = (): string | null => {
   return getVSCodeBootstrapConfig()?.workspaceFolder?.trim() || null;
 };
 
+/** Workspace membership comes from the host, never the selected session's directory. */
+export const isVSCodeWithoutWorkspace = (): boolean => {
+  const config = getVSCodeBootstrapConfig();
+  if (!config) return false;
+  return Array.isArray(config.workspaceFolders)
+    ? config.workspaceFolders.length === 0
+    : !config.workspaceFolder?.trim();
+};
+
 export const isVSCodeBootstrapPresent = (
   bootstrapConfig: VSCodeBootstrapConfig | null = getVSCodeBootstrapConfig(),
 ): boolean => Boolean(bootstrapConfig);

@@ -112,7 +112,11 @@ export const SessionRetentionSettings: React.FC = () => {
         <SettingsFieldRow
           settingsItem="sessions.retention-only-archived"
           label={t('settings.layout.sessions.retention.target')}
-          info={t('settings.openchamber.sessionRetention.field.onlyArchivedDescription')}
+          info={t(onlyArchived
+            ? 'settings.openchamber.sessionRetention.field.archivedDescription'
+            : action === 'archive'
+              ? 'settings.openchamber.sessionRetention.field.unarchivedArchiveDescription'
+              : 'settings.openchamber.sessionRetention.field.unarchivedDeleteDescription')}
         >
           <SettingsChipGroup
             value={onlyArchived ? 'archived' : 'unarchived'}

@@ -4,7 +4,7 @@ import { useMobileAppActions } from '@/apps/mobileAppContext';
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import { cn } from '@/lib/utils';
 import { SimpleMarkdownRenderer } from '../../MarkdownRenderer';
-import { BlockLine } from './BlockLine';
+import { BlockBody } from './BlockLine';
 import { FormMarkdown } from '../../FormMarkdown';
 import { MessageFilesDisplay } from '../../FileAttachment';
 import { getToolMetadata } from '@/lib/toolHelpers';
@@ -544,7 +544,7 @@ const ToolScrollableSection: React.FC<ToolScrollableSectionProps> = ({
                     lastScrollTopRef.current = element.scrollTop;
                 }}
                 className={cn(
-                    'tool-output-surface p-2 rounded-xl w-full min-w-0',
+                    'tool-output-surface w-full min-w-0',
                     maxHeightClass,
                     disableHorizontal ? 'overflow-y-auto overflow-x-hidden' : 'overflow-auto',
                     className,
@@ -681,8 +681,8 @@ const JsonToolOutput: React.FC<{
     const textOutput = jsonViewMode === 'summary' ? unwrapTextBlocks(jsonResult.data) : null;
 
     return (
-        <div className="tool-output-surface relative p-2 rounded-xl w-full min-w-0">
-            <div className="absolute inset-e-2 top-2 z-10 flex items-center gap-1">
+        <div className="relative w-full min-w-0">
+            <div className="absolute inset-e-0 top-0 z-10 flex items-center gap-1">
                 <Button
                     variant="ghost"
                     size="icon"
@@ -779,7 +779,7 @@ const ToolScrollableTextOutput: React.FC<{
     if (forcedMode === 'markdown') {
         return (
             <div className="w-full min-w-0">
-                <SimpleMarkdownRenderer content={renderedOutput} variant="tool" onShowPopup={onShowPopup} />
+                <SimpleMarkdownRenderer content={renderedOutput} singleTilde={false} variant="tool" onShowPopup={onShowPopup} />
             </div>
         );
     }
@@ -1112,7 +1112,6 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
         () => getDiffPatchEntries(metadata, diffContent ?? undefined, (path) => getRelativePath(path, currentDirectory)),
         [currentDirectory, diffContent, metadata]
     );
-    const hasVisualDiffEntry = diffEntries.some((entry) => entry.renderMode === 'diff');
     // `execute` renders its script and its call list itself, below.
     const hideToolInputPreview = part.tool === 'openchamber'
         || part.tool === 'openchamber_schedule'
@@ -1279,8 +1278,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                     input={input}
                     presentation={presentation}
                     onShowPopup={onShowPopup}
-                />,
-                { className: 'p-1' }
+                />
             );
         }
 
@@ -1352,7 +1350,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
         if (isSubagentTool(part.tool) && hasStringOutput) {
             return renderScrollableBlock(
                 <div className="w-full min-w-0">
-                    <SimpleMarkdownRenderer content={prepareTaskToolOutput(outputString)} variant="tool" onShowPopup={onShowPopup} />
+                    <SimpleMarkdownRenderer content={prepareTaskToolOutput(outputString)} singleTilde={false} variant="tool" onShowPopup={onShowPopup} />
                 </div>
             );
         }
@@ -1362,10 +1360,16 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                 <div className="space-y-3">
                     {diffEntries.map((entry) => (
                         <div key={entry.id} className="w-full min-w-0">
-                            <div className="mb-1 flex min-w-0 items-center gap-1 px-2 py-1">
+                            <div className="mb-1 flex min-w-0 items-center gap-1 py-1">
                                 <div className="min-w-0 flex-1 typography-meta font-medium text-muted-foreground">
                                     {renderPathLikeGitChanges(entry.title)}
                                 </div>
+                                {entry.renderMode === 'diff' ? (
+                                    <DiffViewToggle
+                                        mode={diffViewMode}
+                                        onModeChange={setDiffViewMode}
+                                    />
+                                ) : null}
                                 <Button
                                     variant="ghost"
                                     size="icon"
@@ -1398,8 +1402,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                         </div>
                     ))}
                     {renderDiagnosticsSection()}
-                </div>,
-                { className: 'p-1' }
+                </div>
             );
         }
 
@@ -1407,8 +1410,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
             return renderScrollableBlock(
                 <div className="space-y-3">
                     {renderDiagnosticsSection()}
-                </div>,
-                { className: 'p-1' },
+                </div>
             );
         }
 
@@ -1419,7 +1421,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
         if (webSearchOutput) {
             return renderScrollableBlock(
                 <WebSearchResults output={webSearchOutput} providerId={webSearchProviderOf(metadata)} />,
-                { className: 'p-1', maxHeightClass: 'max-h-[50vh]' }
+                { maxHeightClass: 'max-h-[50vh]' }
             );
         }
 
@@ -1437,7 +1439,6 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
             return renderScrollableBlock(
                 output,
                 {
-                    className: isShellTool(part.tool) ? 'p-1 rounded-none' : 'p-1',
                     maxHeightClass: isShellTool(part.tool) ? 'max-h-[46vh]' : undefined,
                     followKey: isStreamingBash ? outputString : undefined,
                 }
@@ -1455,17 +1456,13 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
         || (isShellTool(part.tool) && hasVisibleOutput);
 
     return (
-        <div
-            className={cn(
-                'relative pe-2 pb-2 pt-2 space-y-2 ps-4'
-            )}
-        >
+        <div className="relative space-y-2">
             {isQuestionTool(part.tool) ? (
                 renderResultContent()
             ) : (
                 <>
                     {isExecute ? (
-                        <div className="my-1 space-y-2">
+                        <div className="space-y-2">
                             {executeCode ? renderScrollableBlock(
                                 <WorkerHighlightedCode
                                     language="javascript"
@@ -1508,41 +1505,32 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                         </div>
                     ) : null}
 
-                    {hasInputText ? (
-                        <div className="my-1">
-                            {renderScrollableBlock(
-                                isShellTool(part.tool) ? (
-                                    <pre className="tool-input-text whitespace-pre-wrap break-words typography-code text-muted-foreground m-0 p-0">
-                                        {inputTextContent}
-                                    </pre>
-                                ) : isWriteLikeTool && writeLikeInputPatch ? (
-                                    <DiffPreview
-                                        diff={writeLikeInputPatch}
-                                        diffViewMode={diffViewMode}
-                                    />
-                                ) : (
-                                    <blockquote className="tool-input-text whitespace-pre-wrap break-words typography-meta italic text-muted-foreground">
-                                        {inputTextContent}
-                                    </blockquote>
-                                ),
-                                {
-                                    maxHeightClass: isWriteLikeTool && writeLikeInputPatch && isExpanded ? 'max-h-[50vh]' : 'max-h-60',
-                                    className: isShellTool(part.tool) ? 'tool-input-surface p-0 rounded-none' : 'tool-input-surface',
-                                }
-                            )}
-                        </div>
+                    {hasInputText ? renderScrollableBlock(
+                        isWriteLikeTool && writeLikeInputPatch ? (
+                            <DiffPreview
+                                diff={writeLikeInputPatch}
+                                diffViewMode={diffViewMode}
+                            />
+                        ) : isSubagentTool(part.tool) ? (
+                            <div className="tool-input-text tool-prose-text whitespace-pre-wrap break-words text-muted-foreground">
+                                {inputTextContent}
+                            </div>
+                        ) : (
+                            <pre
+                                className="tool-input-text whitespace-pre-wrap break-words text-muted-foreground m-0"
+                                style={TOOL_COLLAPSED_CUSTOM_STYLE}
+                            >
+                                {inputTextContent}
+                            </pre>
+                        ),
+                        {
+                            maxHeightClass: isWriteLikeTool && writeLikeInputPatch && isExpanded ? 'max-h-[50vh]' : 'max-h-60',
+                            className: 'tool-input-surface',
+                        }
                     ) : null}
 
                     {shouldRenderResult && (
                         <div>
-                            {isFileChangeTool(part.tool) && hasVisualDiffEntry ? (
-                                <div className="mb-1 flex items-center justify-end gap-2">
-                                    <DiffViewToggle
-                                        mode={diffViewMode}
-                                        onModeChange={setDiffViewMode}
-                                    />
-                                </div>
-                            ) : null}
                             {renderResultContent()}
                             {executeTruncation ? (
                                 <div className="typography-meta mt-1 text-muted-foreground">
@@ -2137,10 +2125,7 @@ const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader; subage
                 }}
             >
                 {shouldRenderExpandedContent ? (
-                    <div
-                        className="relative ms-2 ps-3"
-                    >
-                        <BlockLine onToggle={() => onToggle(part.id)} topOffset={1} />
+                    <BlockBody onToggle={() => onToggle(part.id)}>
                         {contentCompletion.status === 'whole' ? (
                             <ToolExpandedContent
                                 part={part}
@@ -2152,19 +2137,19 @@ const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader; subage
                             />
                         ) : contentCompletion.status === 'loading' ? (
                             contentCompletion.showProgress ? (
-                                <div className="typography-meta py-1 text-muted-foreground">
+                                <div className="typography-meta text-muted-foreground">
                                     {t('chat.toolPart.content.loading')}
                                 </div>
                             ) : null
                         ) : (
-                            <div className="typography-meta flex items-center gap-2 py-1 text-muted-foreground">
+                            <div className="typography-meta flex items-center gap-2 text-muted-foreground">
                                 <span>{t('chat.toolPart.content.loadFailed')}</span>
                                 <Button variant="ghost" size="xs" onClick={contentCompletion.retry}>
                                     {t('chat.toolPart.content.retry')}
                                 </Button>
                             </div>
                         )}
-                    </div>
+                    </BlockBody>
                 ) : null}
             </div>
         </div>

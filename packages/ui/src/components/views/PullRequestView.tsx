@@ -37,9 +37,9 @@ export const PullRequestView: React.FC = () => {
   const { t } = useI18n();
   const { git, sourceControl } = useRuntimeAPIs();
   const currentDirectory = useEffectiveDirectory();
-  // When the root is not itself a repository, the pull-request workflow
-  // operates on the resolved nested repository instead.
-  const { rootIsGitRepo, gitDirectory, nestedRepos, repositoryOptions } = useNestedGitDirectory(currentDirectory ?? null);
+  // The pull-request workflow operates on the picked repository, or the root
+  // when nothing is picked.
+  const { rootIsGitRepo, gitDirectory, nestedRepos, repositoryOptions } = useNestedGitDirectory(currentDirectory ?? null, { recheckOnOpen: true });
   const status = useGitStatus(gitDirectory ?? null);
   const branches = useGitBranches(gitDirectory ?? null);
   const isGitRepo = useIsGitRepo(gitDirectory ?? null);

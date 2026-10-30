@@ -2118,11 +2118,21 @@ export interface RelayHostStatus {
   identityConflict: boolean;
 }
 
+export interface ClipboardAPI {
+  /** Present on a Linux desktop, the only runtime that can reach PRIMARY. */
+  selection: {
+    readText(): Promise<string>;
+    writeText(text: string): Promise<void>;
+  };
+}
+
 export interface RuntimeAPIs {
   /** Native local picker. Web/mobile fall back to their browser file input; VS Code does not import themes. */
   themeFiles?: {
     pick(): Promise<{ status: 'unsupported' } | { status: 'picked'; file: { name: string; size: number; text: string } | null }>;
   };
+  /** Linux desktop's native PRIMARY buffer; absent in browsers, mobile, VS Code and remote pages. */
+  clipboard?: ClipboardAPI;
   runtime: RuntimeDescriptor;
   terminal: TerminalAPI;
   git: GitAPI;

@@ -3,6 +3,7 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useUIStore, type ContextPanelMode } from '@/stores/useUIStore';
 import { parseRoute, updateBrowserURL, hasRouteParams } from '@/lib/router';
 import { openSessionLink } from '@/lib/router/openSessionFromRoute';
+import { listenForNotificationNavigation } from '@/lib/router/notificationNavigation';
 import type { RouteState, AppRouteState } from '@/lib/router';
 import { resolveSettingsSlug } from '@/lib/settings/metadata';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
@@ -164,6 +165,23 @@ export function useRouter(): void {
 
     void initializeRoute();
   }, [applyRoute, getCurrentAppState, isVSCode, syncURLFromState]);
+
+  React.useEffect(() => {
+    if (isVSCode) return;
+
+    return listenForNotificationNavigation((target) => {
+      // Do not acknowledge a route that applyRoute would drop during startup.
+      if (isApplyingRouteRef.current) return false;
+      const route = parseRoute(target.searchParams);
+      window.history.pushState({}, '', target.href);
+      // Acceptance acknowledges ownership, not completion of session fetching.
+      // Slow network reads must not cause the worker to reload a responsive app.
+      void applyRoute(route).catch((error) => {
+        console.error('[PWA] notification navigation failed:', error);
+      });
+      return true;
+    });
+  }, [applyRoute, isVSCode]);
 
   // Subscribe to session changes
   React.useEffect(() => {

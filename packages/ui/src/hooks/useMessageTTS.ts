@@ -14,6 +14,7 @@ import { browserVoiceService } from '@/lib/voice/browserVoiceService';
 import { ensureLineTerminalPunctuation, sanitizeForTTS } from '@/lib/voice/summarize';
 import { requestSmallModel } from '@/lib/smallModelRequest';
 import {
+    createReadingPlaybackGuard,
     finishReading,
     isCurrentReading,
     startReading,
@@ -53,6 +54,8 @@ async function summarizeForSpeech(
 }
 
 export interface PlayMessageTTSOptions {
+    /** Rechecked immediately before the first audio starts, after preparation. */
+    canStart?: () => boolean;
     /** False reads the text as-is even when the voice settings ask for a summary. */
     summarize?: boolean;
 }
@@ -89,6 +92,7 @@ export function useMessageTTS(readingKey?: string): UseMessageTTSReturn {
     const openaiCompatibleVoice = useConfigStore((state) => state.openaiCompatibleVoice);
     const openaiCompatibleUrl = useConfigStore((state) => state.openaiCompatibleUrl);
     const openaiCompatibleTtsModel = useConfigStore((state) => state.openaiCompatibleTtsModel);
+    const openaiCompatibleTtsEndpointPath = useConfigStore((state) => state.openaiCompatibleTtsEndpointPath);
     const showMessageTTSButtons = useConfigStore((state) => state.showMessageTTSButtons);
     const autoReadAloudEnabled = useConfigStore((state) => state.autoReadAloudEnabled);
     const ttsInputMode = useConfigStore((state) => state.ttsInputMode);
@@ -133,6 +137,7 @@ export function useMessageTTS(readingKey?: string): UseMessageTTSReturn {
         const token = startReading(key, stopPlayback);
         ownTokenRef.current = token;
         const finish = () => finishReading(token);
+        const beforePlayback = createReadingPlaybackGuard(token, options?.canStart);
         
         try {
             // Summarized mode: replace long replies with a short spoken-prose
@@ -163,6 +168,7 @@ export function useMessageTTS(readingKey?: string): UseMessageTTSReturn {
                 const voice = voiceProvider === 'openai-compatible' ? openaiCompatibleVoice : openaiVoice;
                 const baseURL = voiceProvider === 'openai-compatible' ? openaiCompatibleUrl : undefined;
                 const model = voiceProvider === 'openai-compatible' ? openaiCompatibleTtsModel : undefined;
+                const endpointPath = voiceProvider === 'openai-compatible' ? openaiCompatibleTtsEndpointPath : undefined;
                 await speakServerTTS(textToSpeak, {
                     voice,
                     model,
@@ -171,6 +177,8 @@ export function useMessageTTS(readingKey?: string): UseMessageTTSReturn {
                     volume: speechVolume,
                     summarize: false,
                     baseURL,
+                    beforePlayback,
+                    endpointPath,
                     onEnd: finish,
                     onError: finish,
                 });
@@ -180,6 +188,7 @@ export function useMessageTTS(readingKey?: string): UseMessageTTSReturn {
                     speakerId: localTtsVoiceId,
                     speed: speechRate,
                     language: ttsFollowTextLanguage ? 'auto' : undefined,
+                    beforePlayback,
                     onEnd: finish,
                     onError: finish,
                 });
@@ -189,6 +198,7 @@ export function useMessageTTS(readingKey?: string): UseMessageTTSReturn {
                     voice: sayVoice,
                     rate: wordsPerMinute,
                     language: ttsFollowTextLanguage ? 'auto' : undefined,
+                    beforePlayback,
                     onEnd: finish,
                     onError: finish,
                 });
@@ -206,10 +216,15 @@ export function useMessageTTS(readingKey?: string): UseMessageTTSReturn {
                         pitch: speechPitch,
                         volume: speechVolume,
                         voiceName: browserVoice || undefined,
+                        beforePlayback,
                     }
                 );
             }
         } catch (err) {
+            if (err instanceof Error && err.name === 'AbortError') {
+                finish();
+                return;
+            }
             console.error('[useMessageTTS] Playback error:', err);
             finish();
         }
@@ -225,6 +240,7 @@ export function useMessageTTS(readingKey?: string): UseMessageTTSReturn {
         openaiCompatibleVoice,
         openaiCompatibleUrl,
         openaiCompatibleTtsModel,
+        openaiCompatibleTtsEndpointPath,
         isServerTTSAvailable,
         isSayTTSAvailable,
         ttsInputMode,

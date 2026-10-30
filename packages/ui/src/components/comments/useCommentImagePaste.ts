@@ -9,6 +9,8 @@ import {
 import { buildImagePasteInsertion, withInlineInsertionBoundaries } from '@/components/chat/composer/text';
 import { useI18n } from '@/lib/i18n';
 import { useInputStore } from '@/sync/input-store';
+import { readComposerAttachmentTarget } from '@/hooks/useComposerAddress';
+import type { ChatDraftIdentity } from '@/lib/chatDraftPersistence';
 
 const clipboardImages = (data: DataTransfer): File[] => {
   // The same image often arrives both as a file and as a file item.
@@ -77,7 +79,7 @@ export const useCommentImagePaste = () => {
   }, []);
 
   /** Attaches the pasted images still cited in the final comment text. */
-  const attachCitedImages = React.useCallback(async (commentText: string): Promise<void> => {
+  const attachCitedImages = React.useCallback(async (commentText: string, target: ChatDraftIdentity | null = readComposerAttachmentTarget()): Promise<void> => {
     const cited = Array.from(pendingRef.current)
       .filter(([filename]) => commentText.includes(buildAttachmentCitationText([filename])))
       .map(([, file]) => file);
@@ -86,7 +88,7 @@ export const useCommentImagePaste = () => {
 
     const { addAttachedFile } = useInputStore.getState();
     for (const file of cited) {
-      const attached = await addAttachedFile(file).catch(() => false);
+      const attached = await addAttachedFile(file, target).catch(() => false);
       if (!attached) toast.error(t('chat.chatInput.toast.clipboardAttachFailed'));
     }
   }, [t]);

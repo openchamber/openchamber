@@ -181,6 +181,20 @@ export interface OpenCodeWarmingConfig {
   warming?: boolean | { prompt?: string; interval?: string; duration?: string };
 }
 export function writeWarmingDuration(config: OpenCodeWarmingConfig, minutes: number): boolean;
+/** A compaction settings update: a token count, `null` for OpenCode's default, or omitted to leave it. */
+export const compactionUpdateSchema: z.ZodObject<{
+  auto: z.ZodOptional<z.ZodBoolean>;
+  buffer: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
+  keepTokens: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
+  background: z.ZodOptional<z.ZodBoolean>;
+}>;
+export type CompactionUpdate = z.infer<typeof compactionUpdateSchema>;
+/** The keys of an OpenCode config file a compaction update edits. */
+export interface OpenCodeCompactionConfig {
+  compaction?: { auto?: boolean; buffer?: number; keep?: { tokens?: number } };
+  experimental?: { background_compaction?: boolean };
+}
+export function writeCompactionSettings(config: OpenCodeCompactionConfig, update: CompactionUpdate): boolean;
 /** A skill switch request: an OpenCode skill id (no wildcards, no path separators), on or off, and the skill's scope. */
 export const skillSwitchRequestSchema: z.ZodObject<{
   id: z.ZodString;

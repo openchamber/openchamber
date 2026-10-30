@@ -1,10 +1,11 @@
 import { ensureChatsRootDirectory } from '@/lib/chatDirectories';
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
+import * as gitHttp from '@/lib/gitApiHttp';
 import { opencodeClient } from '@/lib/opencode/client';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useSessionWorktreeStore } from './session-worktree-store';
-import { expandSlashCommandGoalObjective, resolveSendSelection, routeMessage, useSessionUIStore } from './session-ui-store';
+import { expandSlashCommandGoalObjective, materializeOpenDraftSession, resolveSendSelection, routeMessage, useSessionUIStore } from './session-ui-store';
 import { ChildStoreManager } from './child-store';
 import { setSyncRefs } from './sync-refs';
 import { setActionRefs, setOptimisticRefs } from './session-actions';
@@ -14,12 +15,14 @@ import { useCommandsStore } from '@/stores/useCommandsStore';
 import { useSessionGoalArmStore } from '@/stores/useSessionGoalArmStore';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useSelectionStore } from './selection-store';
-import { getRuntimeKey } from '@/lib/runtime-switch';
+import { getRuntimeApiBaseUrl, getRuntimeKey, initializeRuntimeEndpoint, switchRuntimeEndpoint } from '@/lib/runtime-switch';
 import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
 import { CHAT_DRAFT_PROJECT_ID } from '@/lib/chatDirectories';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { createContextPart } from '@/lib/messages/contextParts';
+import { useSpacesStore } from '@/lib/spaces/spaces-store';
+import { subscribeSpaceSessionProject } from './space-session-project';
 
 /**
  * Unit tests for session worktree routing through the authoritative store.
@@ -210,7 +213,9 @@ describe('session-worktree-store worktree routing', () => {
 });
 
 describe('draft materialization transition identity', () => {
+  const projectsBefore = useProjectsStore.getState().projects;
   beforeEach(() => {
+    useProjectsStore.setState({ projects: [{ id: 'alpha', path: '/projects/alpha' }] });
     useSessionUIStore.setState({
       currentSessionId: null,
       currentSessionDirectory: null,
@@ -218,12 +223,13 @@ describe('draft materialization transition identity', () => {
       newSessionDraft: { open: true, target: 'project', directoryOverride: '/projects/alpha' },
     });
   });
+  afterEach(() => useProjectsStore.setState({ projects: projectsBefore }));
 
   test('marks and consumes only the submitted draft session', () => {
     useSessionUIStore.getState().setCurrentSession(
       'session-created',
       '/projects/alpha',
-      'submitted-draft',
+      { transition: 'submitted-draft' },
     );
 
     expect(useSessionUIStore.getState().materializedDraftSessionId).toBe('session-created');
@@ -239,7 +245,7 @@ describe('draft materialization transition identity', () => {
     useSessionUIStore.getState().setCurrentSession(
       'session-created',
       '/projects/alpha',
-      'submitted-draft',
+      { transition: 'submitted-draft' },
     );
     useSessionUIStore.setState({
       newSessionDraft: { open: true, target: 'project', directoryOverride: '/projects/alpha' },
@@ -355,6 +361,7 @@ describe('routeMessage inline skills', () => {
 
 describe('sendMessage captured target', () => {
   let originalSendMessage;
+  let originalFetch;
   const calls = [];
 
   beforeEach(() => {
@@ -378,6 +385,14 @@ describe('sendMessage captured target', () => {
     });
 
     originalSendMessage = opencodeClient.sendMessage;
+    originalFetch = globalThis.fetch;
+    globalThis.fetch = async (input) => {
+      const url = input?.href ?? input?.url ?? String(input);
+      if (url.includes('/api/config/settings')) {
+        return Response.json({ responseStyleEnabled: true, responseStylePreset: 'concise' });
+      }
+      return Response.json({});
+    };
     opencodeClient.sendMessage = async (params) => {
       calls.push(params);
       return 'msg';
@@ -386,6 +401,7 @@ describe('sendMessage captured target', () => {
 
   afterEach(() => {
     opencodeClient.sendMessage = originalSendMessage;
+    globalThis.fetch = originalFetch;
   });
 
   const sendToTarget = (target) => useSessionUIStore.getState().sendMessage(
@@ -458,6 +474,68 @@ describe('slash-command goal objectives', () => {
 });
 
 describe('runtime worktree topology', () => {
+  test('resumes a pending start folder after A -> B -> A and rejects the old completion', async () => {
+    const originalUI = useSessionUIStore.getState();
+    const originalProjects = useProjectsStore.getState();
+    const originalConfig = useConfigStore.getState();
+    const originalDirectory = useDirectoryStore.getState();
+    const originalRuntime = { apiBaseUrl: getRuntimeApiBaseUrl(), runtimeKey: getRuntimeKey() };
+    const project = { id: 'runtime-folder-project', path: '/runtime-project/ai' };
+    const root = '/runtime-worktree';
+    const a = 'https://draft-a.test';
+    const b = 'https://draft-b.test';
+    const prefixResolvers = [];
+    const prefixes = spyOn(gitHttp, 'resolveGitRepositoryPrefix').mockImplementation(() => new Promise((resolve) => prefixResolvers.push(resolve)));
+    const validation = spyOn(gitHttp, 'validateWorktreeDirectory').mockImplementation(async (directory, worktreeRoot) => ({
+      valid: true, insideWorktreeRoot: true, resolvedWorktreeRoot: worktreeRoot, resolvedCwd: directory,
+    }));
+    const fetch = spyOn(globalThis, 'fetch').mockImplementation(async () => new Response(null, { status: 404 }));
+    const activated = [];
+    const flush = async () => { await Bun.sleep(0); };
+    try {
+      initializeRuntimeEndpoint({ apiBaseUrl: a });
+      useProjectsStore.setState({ projects: [project], activeProjectId: project.id });
+      useDirectoryStore.setState({ currentDirectory: root, homeDirectory: '/home', isHomeReady: true });
+      useConfigStore.setState({ activateDirectory: async (directory) => { activated.push(directory); } });
+      useSessionUIStore.setState({
+        currentSessionId: null,
+        newSessionDraft: { ...originalUI.newSessionDraft, open: false },
+        availableWorktreesByProject: new Map([[project.path, [{ path: root, projectDirectory: project.path, branch: 'test', label: 'test' }]]]),
+      });
+      useSessionUIStore.getState().openNewSessionDraft({ selectedProjectId: project.id, directoryOverride: root });
+      const draftId = useSessionUIStore.getState().newSessionDraft.draftId;
+      expect(useSessionUIStore.getState().newSessionDraft.worktreeStartDirectory).toEqual({ worktreeRoot: root, directory: null });
+      expect(prefixResolvers).toHaveLength(1);
+      useSessionUIStore.getState().prepareForRuntimeSwitch(a);
+      switchRuntimeEndpoint({ apiBaseUrl: b });
+      useSessionUIStore.getState().restoreForRuntimeSwitch(b, `url:${a}`);
+      prefixResolvers[0]('ai');
+      await flush();
+      expect(activated).toEqual([]);
+      useSessionUIStore.getState().prepareForRuntimeSwitch(b);
+      switchRuntimeEndpoint({ apiBaseUrl: a });
+      useSessionUIStore.getState().restoreForRuntimeSwitch(a, `url:${b}`);
+      expect(useSessionUIStore.getState().newSessionDraft.draftId).toBe(draftId);
+      expect(prefixResolvers).toHaveLength(2);
+      expect(activated).toEqual([]);
+      prefixResolvers[1]('ai');
+      await flush();
+      expect(useSessionUIStore.getState().newSessionDraft.worktreeStartDirectory).toEqual({ worktreeRoot: root, directory: `${root}/ai` });
+      expect(activated).toEqual([`${root}/ai`]);
+    } finally {
+      for (const resolve of prefixResolvers) resolve('ai');
+      await flush();
+      prefixes.mockRestore();
+      validation.mockRestore();
+      switchRuntimeEndpoint(originalRuntime);
+      fetch.mockRestore();
+      useSessionUIStore.setState(originalUI);
+      useProjectsStore.setState(originalProjects);
+      useConfigStore.setState(originalConfig);
+      useDirectoryStore.setState(originalDirectory);
+    }
+  });
+
   test('restores independent in-memory maps across A -> B -> A', () => {
     const topologyA = new Map([['/repo', [{ path: '/repo/a', branch: 'a' }]]]);
     const topologyB = new Map([['/repo', [{ path: '/repo/b', branch: 'b' }]]]);
@@ -1323,6 +1401,64 @@ describe('sendMessage draft snapshot (issues #2222 / #2315)', () => {
     expect(sendMessageCalls).toHaveLength(1);
     expect(sendMessageCalls[0].id).toBe('session-project-a');
     expect(sendMessageCalls[0].directory).toBe('/projects/alpha');
+  });
+});
+
+describe('setCurrentSession and the one-project picker', () => {
+  beforeEach(() => {
+    useProjectsStore.setState({
+      projects: [
+        { id: 'project-alpha', path: '/projects/alpha', label: 'Alpha' },
+        { id: 'project-beta', path: '/projects/beta', label: 'Beta' },
+      ],
+      activeProjectId: 'project-beta',
+    });
+    useSessionDisplayStore.setState({ singleProjectId: 'project-beta' });
+    useSessionUIStore.setState({ currentSessionId: null, currentSessionDirectory: null });
+    useDirectoryStore.setState({ currentDirectory: '/projects/alpha' });
+  });
+
+  afterEach(() => {
+    useSpacesStore.getState().applyMarks([]);
+    useProjectsStore.setState({ projects: [], activeProjectId: null });
+    useSessionDisplayStore.setState({ singleProjectId: null });
+    useSessionUIStore.setState({ currentSessionId: null, currentSessionDirectory: null });
+  });
+
+  test('following a session the user opened moves the picker to its project', () => {
+    useSessionUIStore.getState().setCurrentSession('session-alpha', '/projects/alpha');
+
+    expect(useSessionDisplayStore.getState().singleProjectId).toBe('project-alpha');
+  });
+
+  test('a launch restore keeps the remembered picker and still makes its project active', () => {
+    useSessionUIStore.getState().setCurrentSession('session-alpha', '/projects/alpha', { keepSingleProject: true });
+
+    expect(useProjectsStore.getState().activeProjectId).toBe('project-alpha');
+    expect(useSessionDisplayStore.getState().singleProjectId).toBe('project-beta');
+  });
+
+  test.each([
+    ['launch restore', true, false, 'project-beta'],
+    ['user navigation', false, false, 'project-alpha'],
+    ['explicitly reopening the restored session', true, true, 'project-alpha'],
+  ])('late space metadata follows the picker policy after %s', (_name, keepSingleProject, reopen, expectedProject) => {
+    const spaceId = 'a1b2c3d4e5f6';
+    const directory = `/spaces/${spaceId}/app`;
+    useSpacesStore.getState().applyMarks([]);
+    useSessionUIStore.getState().setCurrentSession('session-picker-space', directory, { keepSingleProject });
+    if (reopen) useSessionUIStore.getState().setCurrentSession('session-picker-space', directory);
+    const unsubscribe = subscribeSpaceSessionProject(getRuntimeKey());
+    try {
+      useSpacesStore.getState().applyMarks([{
+        id: spaceId, name: 'test-space', state: 'complete',
+        projectDirectory: '/projects/alpha', directory,
+      }]);
+      expect(useProjectsStore.getState().activeProjectId).toBe('project-alpha');
+      expect(useSessionDisplayStore.getState().singleProjectId).toBe(expectedProject);
+    } finally {
+      unsubscribe();
+    }
   });
 });
 
@@ -2239,6 +2375,9 @@ describe('send does not wait for session knowledge before showing the message', 
     const writes = [];
     globalThis.fetch = async (input, init) => {
       const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (url.includes('/api/config/settings')) {
+        return Response.json({ responseStyleEnabled: true, responseStylePreset: 'concise' });
+      }
       if (url.includes('/api/session-knowledge/sync')) {
         writes.push(JSON.parse(init.body));
         return new Promise((resolve) => {
@@ -2266,7 +2405,8 @@ describe('send does not wait for session knowledge before showing the message', 
 
     // The bubble is already there; the prompt request waits for the write.
     expect(added.map((message) => message.role)).toEqual(['user']);
-    expect(writes).toEqual([{ directory: '/repo', sessionId: 'session-knowledge' }]);
+    expect(writes).toHaveLength(1);
+    expect(JSON.stringify(writes[0])).toContain('Keep replies short.');
     expect(sendCalls).toHaveLength(0);
 
     finishWrite();
@@ -2277,5 +2417,103 @@ describe('send does not wait for session knowledge before showing the message', 
     expect(sendCalls).toHaveLength(1);
     expect(sendCalls[0].messageId).toBe(added[0].id);
     expect(sendCalls[0].context).toBeUndefined();
+  });
+
+  test('does not send when the runtime changes during the knowledge write', async () => {
+    let state = { session: [], message: {}, part: {}, session_status: {} };
+    const childStore = {
+      getState: () => state,
+      setState: (patch) => { state = { ...state, ...patch }; },
+    };
+    setActionRefs({ children: new Map(), ensureChild: () => childStore, getChild: () => childStore }, () => '/repo');
+    setOptimisticRefs(() => {}, () => {});
+
+    const originalSendMessage = opencodeClient.sendMessage;
+    const originalApiBaseUrl = getRuntimeApiBaseUrl();
+    const originalRuntimeKey = getRuntimeKey();
+    let finishKnowledge;
+    const knowledgeSync = new Promise((resolve) => { finishKnowledge = resolve; });
+    const sendCalls = [];
+    opencodeClient.sendMessage = async (params) => {
+      sendCalls.push(params);
+      return 'msg';
+    };
+
+    try {
+      const sending = routeMessage({
+        runtimeKey: originalRuntimeKey,
+        sessionId: 'session-knowledge',
+        directory: '/repo',
+        content: 'hello',
+        providerID: 'provider-a',
+        modelID: 'model-a',
+        ready: knowledgeSync,
+      });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      switchRuntimeEndpoint({ apiBaseUrl: 'https://runtime-change.invalid', runtimeKey: 'runtime-changed' });
+      finishKnowledge();
+      await expect(sending).rejects.toThrow('runtime changed');
+      expect(sendCalls).toHaveLength(0);
+    } finally {
+      opencodeClient.sendMessage = originalSendMessage;
+      switchRuntimeEndpoint({ apiBaseUrl: originalApiBaseUrl, runtimeKey: originalRuntimeKey });
+    }
+  });
+
+  test('keeps the draft open when the runtime changes during materialisation', async () => {
+    const originalCreateSession = opencodeClient.createSession;
+    const originalGetSdkClient = opencodeClient.getSdkClient;
+    const originalGetScopedSdkClient = opencodeClient.getScopedSdkClient;
+    const originalFetch = globalThis.fetch;
+    const originalApiBaseUrl = getRuntimeApiBaseUrl();
+    const originalRuntimeKey = getRuntimeKey();
+    const previousDraft = useSessionUIStore.getState().newSessionDraft;
+    const removedSessions = [];
+    switchRuntimeEndpoint({ apiBaseUrl: 'https://cleanup-owner.test', runtimeKey: originalRuntimeKey });
+    opencodeClient.reconnectToRuntimeBaseUrl();
+    const oldSdkClient = {};
+    let currentSdkClient = oldSdkClient;
+    opencodeClient.getSdkClient = () => currentSdkClient;
+    opencodeClient.getScopedSdkClient = () => currentSdkClient;
+    globalThis.fetch = async (input, init) => {
+      const method = init?.method ?? (input instanceof Request ? input.method : 'GET');
+      if (method === 'DELETE') removedSessions.push(String(input instanceof Request ? input.url : input).split('/').pop());
+      return new Response(null, { status: 204 });
+    };
+    let finishCreate;
+    opencodeClient.createSession = async () => {
+      await new Promise((resolve) => { finishCreate = resolve; });
+      return { id: 'session-created-on-old-runtime', directory: '/repo', metadata: {} };
+    };
+    useSessionUIStore.setState({
+      newSessionDraft: {
+        ...previousDraft,
+        open: true,
+        target: 'project',
+        directoryOverride: '/repo',
+        preserveDirectoryOverride: true,
+      },
+    });
+
+    try {
+      const materialising = materializeOpenDraftSession({ providerID: 'provider-a', modelID: 'model-a' }, undefined, originalRuntimeKey);
+      for (let tick = 0; tick < 50 && !finishCreate; tick += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+      switchRuntimeEndpoint({ apiBaseUrl: 'https://runtime-change.invalid', runtimeKey: 'runtime-changed' });
+      currentSdkClient = { session: { remove: async () => undefined } };
+      finishCreate();
+      await expect(materialising).rejects.toThrow('runtime changed');
+      expect(useSessionUIStore.getState().newSessionDraft.open).toBe(true);
+      expect(removedSessions).toEqual(['session-created-on-old-runtime']);
+    } finally {
+      opencodeClient.createSession = originalCreateSession;
+      opencodeClient.getSdkClient = originalGetSdkClient;
+      opencodeClient.getScopedSdkClient = originalGetScopedSdkClient;
+      globalThis.fetch = originalFetch;
+      useSessionUIStore.setState({ newSessionDraft: previousDraft });
+      switchRuntimeEndpoint({ apiBaseUrl: originalApiBaseUrl, runtimeKey: originalRuntimeKey });
+      opencodeClient.reconnectToRuntimeBaseUrl();
+    }
   });
 });

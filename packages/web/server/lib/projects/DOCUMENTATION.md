@@ -89,6 +89,23 @@ UI (`packages/ui/src/lib/sharedTrustConfirmation.ts`).
 
 ## Modules
 
+`session-directory.js` serves `POST /api/projects/session-directory` for a
+session's unregistered host destination. It validates the directory, verifies
+the session still lives there, and checks the existing OpenCode fingerprint
+trust before appending. Empty configurations and already trusted fingerprints
+need no new answer. Untrusted code answers 403 `opencode_trust_required`; a
+changed destination answers 409; failed writes answer 503. It creates no folder,
+runs no project code, and never changes active-project or directory pointers.
+Web, desktop and both mobile surfaces use the active server. VS Code registers
+through its workspace-folder bridge instead.
+
+### Why registration uses the settings write queue
+
+A background session and another window can update settings together. Resolving
+the project against the latest registry inside its write queue preserves other
+projects and metadata. Reading settings before enqueueing a whole replacement
+would lose an intervening append. A malformed registry fails without repair.
+
 - `project-id.js` — `createProjectIdFromPath` / `projectPathFromId`: the path-derived id (`path_<base64url>`) that names the file, and the checkout path back from it. The shared UI derives the same id (`packages/ui/src/lib/projectId.ts`); both sides must agree. `projectConfigFileStemOf`: the stem that names the file and the sibling folder for an id, see the file name invariant below.
 - `project-config.js` — `createProjectConfigRuntime`: raw read, atomic write, the cross-process file lock (Electron and a CLI `serve` can share one projects dir), scheduled-task normalization, and the project-setup read/update.
 - `project-setup.js` — sanitizers, the shared-file parser (`parseSharedProjectConfig`, `normalizePlansDir`), the merge (`mergeProjectSetup`), and the personal view for the setup keys. Mirrored in the VS Code extension host (`packages/vscode/src/project-setup.ts`), which owns the same file when the webview has no OpenChamber server; keep the two in sync.

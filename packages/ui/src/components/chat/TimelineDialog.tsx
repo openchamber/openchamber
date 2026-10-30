@@ -9,7 +9,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useSessionMessageRecords } from '@/sync/sync-context';
+import { useSessionMessageLoader, useSessionMessageRecords, useSyncDirectory } from '@/sync/sync-context';
 import { useChatSessionSelection } from './chatColumnSession';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Icon } from "@/components/icon/Icon";
@@ -111,6 +111,14 @@ const TimelineDialogBody: React.FC<TimelineDialogBodyProps> = ({
     const { t } = useI18n();
     const descriptorOf = useSourceControlDescriptorOf();
     const messages = useSessionMessageRecords(currentSessionId, currentSessionDirectory);
+    const messageLoader = useSessionMessageLoader();
+    const syncDirectory = useSyncDirectory();
+    const historyDirectory = currentSessionDirectory ?? syncDirectory;
+    // Keep the chat's background trim from removing prompts shown in the dialog.
+    React.useEffect(() => {
+        if (!historyDirectory) return;
+        return messageLoader.retainSessionHistory({ directory: historyDirectory, sessionID: currentSessionId }, 'browsing');
+    }, [currentSessionId, historyDirectory, messageLoader]);
     const revertToMessage = useSessionUIStore((state) => state.revertToMessage);
     const forkFromMessage = useSessionUIStore((state) => state.forkFromMessage);
     const { isMobile, isTablet } = useDeviceInfo();

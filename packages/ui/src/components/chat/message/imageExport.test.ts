@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, spyOn, test } from 'bun:test';
 import { Window } from 'happy-dom';
 
-import { buildTurnImageExportSource, cloneMessageImageExportSource, MESSAGE_IMAGE_EXPORT_EXCLUDE_ATTRIBUTE } from './imageExport';
+import { buildTurnImageExportSource, cloneMessageImageExportSource, fitMessageImageExportLayout, MESSAGE_IMAGE_EXPORT_EXCLUDE_ATTRIBUTE, resolveMessageImageExportPixelRatio, resolveMessageImageExportWidth, widenMessageImageExportOverflow } from './imageExport';
 
 const browser = new Window({ url: 'http://localhost/' });
 browser.document.write('<!doctype html><html><head></head><body></body></html>');
@@ -19,6 +19,7 @@ Object.assign(globalThis, {
     SVGElement: browser.SVGElement,
     MutationObserver: browser.MutationObserver,
     DOMParser: browser.DOMParser,
+    DOMRect: browser.DOMRect,
     XMLSerializer: browser.XMLSerializer,
     IntersectionObserver: browser.IntersectionObserver,
     ResizeObserver: browser.ResizeObserver,
@@ -56,6 +57,110 @@ describe('message image export', () => {
         expect(Boolean(clone.querySelector('img[alt="Message image"]'))).toBe(true);
         expect(Boolean(source.querySelector(`[${MESSAGE_IMAGE_EXPORT_EXCLUDE_ATTRIBUTE}="true"]`))).toBe(true);
         expect(Boolean(source.querySelector('[data-export-ignore]'))).toBe(true);
+    });
+
+    test('canvas width follows the message column instead of the widest line', () => {
+        const column = document.createElement('div');
+        column.getBoundingClientRect = () => ({ width: 720.5 }) as DOMRect;
+        expect(resolveMessageImageExportWidth(column)).toBe(721);
+        expect(resolveMessageImageExportWidth(document.createElement('div'))).toBe(0);
+        expect(resolveMessageImageExportWidth(null)).toBe(0);
+    });
+
+    test('pixel ratio decreases near the squash limit and stops at the density floor', () => {
+        expect(resolveMessageImageExportPixelRatio(769, 1055)).toBe(2);
+        expect(resolveMessageImageExportPixelRatio(10000, 1000)).toBe(1.63);
+        expect(resolveMessageImageExportPixelRatio(40000, 1000)).toBe(0.5);
+        expect(resolveMessageImageExportPixelRatio(1000, 40000)).toBe(0.5);
+    });
+
+    test('un-clips an unwrappable block and reports the canvas growth it needs', () => {
+        const root = document.createElement('div');
+        const scroller = document.createElement('div');
+        scroller.style.overflowX = 'auto';
+        scroller.style.overflowY = 'hidden';
+        scroller.style.maxWidth = '100%';
+        root.style.width = '721px';
+        const table = document.createElement('table');
+        const paragraph = document.createElement('p');
+        scroller.append(table);
+        root.append(scroller, paragraph);
+        root.getBoundingClientRect = () => new DOMRect(0, 0, 721, 100);
+        table.getBoundingClientRect = () => new DOMRect(0, 0, 961, 50);
+        paragraph.getBoundingClientRect = () => new DOMRect(0, 50, 700, 50);
+
+        expect(widenMessageImageExportOverflow(root)).toEqual({ left: 0, right: 240 });
+        expect(scroller.style.overflowX).toBe('visible');
+        expect(scroller.style.overflowY).toBe('visible');
+        expect(scroller.style.width).toBe('max-content');
+        expect(scroller.style.maxWidth).toBe('none');
+        expect(root.style.width).toBe('721px');
+    });
+
+    test('ignores overflow in the clipped MathML twin of a visible formula', () => {
+        const root = document.createElement('div');
+        root.innerHTML = '<span style="clip: rect(1px, 1px, 1px, 1px)"><span>MathML</span></span><span>Visible formula</span>';
+        document.body.append(root);
+        const hiddenFormula = root.querySelector('span span')!;
+        root.getBoundingClientRect = () => new DOMRect(0, 0, 721, 100);
+        hiddenFormula.getBoundingClientRect = () => new DOMRect(-1000, 0, 2000, 50);
+        root.lastElementChild!.getBoundingClientRect = () => new DOMRect(0, 0, 700, 50);
+        try {
+            expect(widenMessageImageExportOverflow(root)).toEqual({ left: 0, right: 0 });
+            expect(root.firstElementChild!.getAttribute('style')).toBe('clip: rect(1px, 1px, 1px, 1px)');
+        } finally {
+            root.remove();
+        }
+    });
+
+    test('leaves the layout alone when every block fits the column', () => {
+        const root = document.createElement('div');
+        const scroller = document.createElement('div');
+        scroller.style.overflowX = 'auto';
+        const paragraph = document.createElement('p');
+        scroller.append(paragraph);
+        root.append(scroller);
+        root.getBoundingClientRect = () => new DOMRect(0, 0, 721, 100);
+        paragraph.getBoundingClientRect = () => new DOMRect(0, 0, 700, 50);
+
+        expect(widenMessageImageExportOverflow(root)).toEqual({ left: 0, right: 0 });
+        expect(scroller.style.overflowX).toBe('auto');
+        expect(scroller.style.width).toBe('');
+    });
+
+    test('measures both edges again after releasing a formula width cap', () => {
+        const root = document.createElement('div');
+        root.innerHTML = '<div style="overflow: hidden"><span>Formula</span></div>';
+        const scroller = root.firstElementChild as HTMLElement;
+        const formula = scroller.firstElementChild!;
+        root.getBoundingClientRect = () => new DOMRect(100, 0, 721, 100);
+        formula.getBoundingClientRect = () => scroller.style.width === 'max-content'
+            ? new DOMRect(-100, 0, 1100, 50)
+            : new DOMRect(100, 0, 1000, 50);
+        expect(widenMessageImageExportOverflow(root)).toEqual({ left: 200, right: 179 });
+    });
+
+    test('reserves left overflow and anchors an RTL column without changing its text direction', () => {
+        const wrapper = document.createElement('div');
+        wrapper.style.direction = 'rtl';
+        const root = document.createElement('div');
+        root.innerHTML = '<div style="overflow: auto"><table></table></div>';
+        wrapper.append(root);
+        document.body.append(wrapper);
+        root.getBoundingClientRect = () => new DOMRect(100, 0, 721, 100);
+        root.querySelector('table')!.getBoundingClientRect = () => new DOMRect(-140, 0, 961, 50);
+        try {
+            fitMessageImageExportLayout(wrapper, root, 721);
+            expect(wrapper.style.direction).toBe('ltr');
+            expect(root.style.direction).toBe('rtl');
+            expect(root.style.width).toBe('721px');
+            expect(root.style.marginLeft).toBe('240px');
+            expect(root.style.marginRight).toBe('auto');
+            expect(wrapper.style.width).toBe('961px');
+            expect((root.firstElementChild as HTMLElement).style.overflowX).toBe('visible');
+        } finally {
+            wrapper.remove();
+        }
     });
 });
 

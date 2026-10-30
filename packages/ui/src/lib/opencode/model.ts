@@ -372,6 +372,10 @@ type ToolStateError = {
   status: "error"
   input: ToolInput
   error: string
+  /** Structured failure kind, retained for question recovery. */
+  errorType?: string
+  /** A local interrupted-turn mark yields to later server transitions. */
+  errorSource?: "local"
   /** Partial text content the tool produced before failing, if any. */
   output?: string
   metadata?: Metadata

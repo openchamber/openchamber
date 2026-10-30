@@ -33,6 +33,7 @@ import * as zenmux from './zenmux.js';
 import * as ollamaCloud from './ollama-cloud.js';
 import * as wafer from './wafer.js';
 import * as opencodeGo from './opencode-go.js';
+import * as opencode from './opencode.js';
 import * as xai from './xai.js';
 
 const registry = {
@@ -168,6 +169,12 @@ const registry = {
     isConfigured: opencodeGo.isConfigured,
     fetchQuota: opencodeGo.fetchQuota
   },
+  opencode: {
+    providerId: opencode.providerId,
+    providerName: opencode.providerName,
+    isConfigured: opencode.isConfigured,
+    fetchQuota: opencode.fetchQuota
+  },
   neuralwatt: {
     providerId: neuralwatt.providerId,
     providerName: neuralwatt.providerName,
@@ -277,3 +284,4 @@ export const fetchMinimaxCnCodingPlanQuota = minimaxCnCodingPlan.fetchQuota;
 export const fetchOllamaCloudQuota = ollamaCloud.fetchQuota;
 export const fetchWaferQuota = wafer.fetchQuota;
 export const fetchZhipuaiQuota = zhipuaiCodingPlan.fetchQuota;
+export const fetchOpenCodeQuota = opencode.fetchQuota;

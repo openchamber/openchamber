@@ -36,6 +36,7 @@ interface MobileComposerHolders {
     draftPickerOpen: boolean;
     /** The repository or tracker reference picker. */
     referencePickerOpen: boolean;
+    promptHistorySearchOpen: boolean;
     isDragging: boolean;
 }
 
@@ -339,6 +340,7 @@ export function useMobileComposerShell(
         || holders.attachMenuOpen
         || holders.draftPickerOpen
         || holders.referencePickerOpen
+        || holders.promptHistorySearchOpen
         || holders.isDragging;
 
     React.useEffect(() => {

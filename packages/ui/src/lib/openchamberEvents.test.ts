@@ -132,6 +132,27 @@ describe('openchamber events', () => {
     }
   });
 
+  test('preserves scheduled task dispatch and legacy outcome statuses', async () => {
+    const { subscribeOpenchamberEvents } = await import('./openchamberEvents');
+    const statuses: string[] = [];
+    const unsubscribe = subscribeOpenchamberEvents((event) => {
+      if (event.type === 'scheduled-task-ran') statuses.push(event.status);
+    });
+    try {
+      for (const status of ['running', 'sent', 'success', 'error']) {
+        MockEventSource.instances[0].onmessage?.({
+          data: JSON.stringify({
+            type: 'openchamber:scheduled-task-ran',
+            properties: { projectId: 'project_1', taskId: 'task_1', ranAt: 123, status },
+          }),
+        });
+      }
+      expect(statuses).toEqual(['running', 'sent', 'success', 'error']);
+    } finally {
+      unsubscribe();
+    }
+  });
+
   test('dispatches externally created session events', async () => {
     const { subscribeOpenchamberEvents } = await import('./openchamberEvents');
     const events: unknown[] = [];

@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 
-import { normalizeReferencePath } from './fileReferenceParser';
+import { normalizeFilePath } from '@/lib/path-utils';
 
 const FILE_REFERENCE_STAT_CONCURRENCY = 4;
 const FILE_REFERENCE_STAT_CACHE_MAX = 1000;
@@ -22,7 +22,7 @@ const getFileReferenceStatCacheMax = (): number => (
 const statCacheKey = (directory: string, normalizedPath: string): string => `${directory}\u0000${normalizedPath}`;
 
 export const fileReferenceExists = (resolvedPath: string, effectiveDirectory: string): Promise<boolean> => {
-  const normalizedPath = normalizeReferencePath(resolvedPath);
+  const normalizedPath = normalizeFilePath(resolvedPath, { preserveWhitespace: true });
   if (!normalizedPath) {
     return Promise.resolve(false);
   }

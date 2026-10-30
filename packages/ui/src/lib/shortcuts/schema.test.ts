@@ -62,6 +62,17 @@ describe('shortcut schema', () => {
     expect(getShortcutAction('focus_input')?.category).toBe('session');
   });
 
+  test('exposes prompt history search as a customizable session shortcut', () => {
+    const action = getShortcutAction('search_prompt_history');
+
+    expect(action?.category).toBe('session');
+    expect(action?.defaultBinding).toBe('mod+arrowup');
+    expect(action?.customizable).toBe(true);
+    if (action?.customizable !== true) throw new Error('search_prompt_history must be customizable');
+    expect(action.settingsLabelKey)
+      .toBe('settings.openchamber.keyboardShortcuts.action.search_prompt_history.label');
+  });
+
   test('splits the held digit prefixes between session tabs and surfaces', () => {
     expect(getShortcutAction('switch_session_tab')?.defaultBinding).toBe('mod');
     expect(getShortcutAction('switch_context_surface')?.defaultBinding).toBe('mod+alt');

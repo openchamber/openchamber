@@ -909,6 +909,9 @@ export function registerGitRoutes(app, {
       res.json({ diff, submodule });
     } catch (error) {
       if (sendGitPathError(res, error)) return;
+      if (isNonRepoGitError(error)) {
+        return res.status(409).json({ error: 'This directory is not a Git repository.', code: 'not_repository' });
+      }
       console.error('Failed to get git diff:', error);
       res.status(500).json({ error: error.message || 'Failed to get git diff' });
     }
@@ -941,6 +944,9 @@ export function registerGitRoutes(app, {
 
       res.json({ diffs });
     } catch (error) {
+      if (isNonRepoGitError(error)) {
+        return res.status(409).json({ error: 'This directory is not a Git repository.', code: 'not_repository' });
+      }
       console.error('Failed to get git diffs:', error);
       res.status(500).json({ error: error.message || 'Failed to get git diffs' });
     }
@@ -975,6 +981,9 @@ export function registerGitRoutes(app, {
       });
     } catch (error) {
       if (sendGitPathError(res, error)) return;
+      if (isNonRepoGitError(error)) {
+        return res.status(409).json({ error: 'This directory is not a Git repository.', code: 'not_repository' });
+      }
       console.error('Failed to get git file diff:', error);
       res.status(500).json({ error: error.message || 'Failed to get git file diff' });
     }

@@ -571,6 +571,9 @@ export function createMessageQueueRuntime({
 
     // Standing project context is written into the session first, exactly as
     // a UI send does it; a failed write sends without it rather than not at all.
+    // The response style is left out: a queued message is the user's own, and
+    // this server delivery has no style text of its own, so the entry the
+    // session already holds stays as it is.
     if (sessionKnowledgeRuntime) await sessionKnowledgeRuntime.sync(sessionId, directory);
 
     // A message queued as a goal starts it now, as a direct send would. The

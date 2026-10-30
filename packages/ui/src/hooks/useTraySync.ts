@@ -20,18 +20,20 @@ import {
 } from '@/stores/useGlobalSessionsStore';
 import { createSessionLineage } from '@/stores/sessionLineage';
 import { useQuotaStore } from '@/stores/useQuotaStore';
-import { QUOTA_PROVIDERS, formatWindowLabel, formatQuotaValueLabel } from '@/lib/quota';
+import { QUOTA_PROVIDERS, formatWindowLabel, formatQuotaWindowValueLabel } from '@/lib/quota';
+import { formatMessage, useI18nStore } from '@/lib/i18n';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useGitStore } from '@/stores/useGitStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { resolveProjectForSessionDirectory, normalizeProjectPath } from '@/lib/projectResolution';
+import { isSessionDirectoryAdmitted } from '@/sync/session-admission-rule';
 import { CHAT_DRAFT_PROJECT_ID, isChatDirectoryPath } from '@/lib/chatDirectories';
 import { isSpaceDirectory } from '@/lib/spaces/space-route';
-import { sessionHasSidebarRow } from '@/lib/sidebarSessionRows';
 import { isSessionPinned } from '@/lib/sessionPins';
 import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
+import { sessionHasSidebarRow } from '@/lib/sidebarSessionRows';
 import { findWorktreeHoldingDirectory } from '@/lib/worktrees/worktreePaths';
 import type { ProjectEntry } from '@/lib/api/types';
 import type { WorktreeMetadata } from '@/types/worktree';
@@ -185,6 +187,8 @@ const resolveSessionSubtitle = (
 // user enabled for the dropdown AND that report as configured. Window rows only
 // (the headline limits) — model breakdowns stay in the full UI.
 const buildUsage = (): TrayUsage => {
+  const { dictionary } = useI18nStore.getState();
+  const t = (key: Parameters<typeof formatMessage>[1], params?: Parameters<typeof formatMessage>[2]) => formatMessage(dictionary, key, params);
   const { results, dropdownProviderIds, displayMode } = useQuotaStore.getState();
   const mode: TrayUsage['mode'] = displayMode === 'remaining' ? 'remaining' : 'usage';
   if (!dropdownProviderIds.length) return { mode, groups: [] };
@@ -199,7 +203,7 @@ const buildUsage = (): TrayUsage => {
     const rows: TrayUsageRow[] = [];
     for (const [label, window] of Object.entries(result.usage?.windows ?? {})) {
       const percent = mode === 'remaining' ? window.remainingPercent : window.usedPercent;
-      rows.push({ label: formatWindowLabel(label), value: formatQuotaValueLabel(window.valueLabel, percent) });
+      rows.push({ label: formatWindowLabel(label), value: formatQuotaWindowValueLabel(window, percent, t) });
     }
 
     const status = !result.ok && result.error
@@ -323,19 +327,21 @@ const buildSnapshot = (instanceName: string, includeTray: boolean): TraySnapshot
   // (`sessionHasSidebarRow`). Sessions from unconfigured directories (an eval
   // run in /tmp, a removed project, a /btw fork) have none, cannot be opened
   // or removed from there, so they would take the tray's limited slots and
-  // hold a dock count the user has no way to clear. Pending approvals stay
-  // listed below regardless.
+  // hold a dock count the user has no way to clear. Pending approvals use the
+  // same admission rule below.
   const pinnedIds = useSessionPinnedStore.getState().ids;
   type Sections = { chats: boolean; pinned: boolean; work: boolean };
   const hasRowIn = (session: Session, sections: Sections): boolean => {
     const directory = resolveGlobalSessionDirectory(session);
+    const isAdmitted = isSessionDirectoryAdmitted(directory, projects, worktreesByProject);
     // A managed chat keeps its identity when its directory no longer sits under
-    // the chats root, so the project id admits it too. Only the Chats section
+    // the chats root, so the project id identifies it too. Only the Chats section
     // lists a chat: the Pinned and In work zones leave chats out.
     if (isChatDirectoryPath(directory) || session.projectID === CHAT_DRAFT_PROJECT_ID) {
-      return sessionHasSidebarRow(session, { isPlaced: sections.chats, isPinned: false, zones: { pinned: false, work: false } });
+      return sessionHasSidebarRow(session, { isAdmitted, isPlaced: sections.chats, isPinned: false, zones: { pinned: false, work: false } });
     }
     return sessionHasSidebarRow(session, {
+      isAdmitted,
       isPlaced: isSpaceDirectory(directory)
         || resolveProjectForSessionDirectory(projects, worktreesByProject, directory) !== null,
       isPinned: isSessionPinned(pinnedIds, session.directory, session.id),
@@ -429,7 +435,11 @@ const buildSnapshot = (instanceName: string, includeTray: boolean): TraySnapshot
     }
   }
 
-  return { sessions, approvals, instanceName, usage: buildUsage(), dockBadgeCount };
+  return {
+    sessions,
+    approvals: approvals.filter((approval) => isSessionDirectoryAdmitted(approval.directory, projects, worktreesByProject)),
+    instanceName, usage: buildUsage(), dockBadgeCount,
+  };
 };
 
 export const useTraySync = (): void => {

@@ -19,7 +19,7 @@ type ScheduledTaskRanEvent = {
   projectId: string;
   taskId: string;
   ranAt: number;
-  status: 'running' | 'success' | 'error';
+  status: 'running' | 'sent' | 'success' | 'error';
   sessionId?: string;
 };
 
@@ -665,7 +665,7 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
   const taskId = typeof properties?.taskId === 'string' ? properties.taskId : '';
   const ranAt = typeof properties?.ranAt === 'number' ? properties.ranAt : Date.now();
   const rawStatus = properties?.status;
-  const status = rawStatus === 'running' || rawStatus === 'error' ? rawStatus : 'success';
+  const status = rawStatus === 'running' || rawStatus === 'sent' || rawStatus === 'error' ? rawStatus : 'success';
   if (!projectId || !taskId) {
     return;
   }

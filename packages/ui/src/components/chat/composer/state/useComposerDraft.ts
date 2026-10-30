@@ -10,11 +10,13 @@
  *
  * Writes are debounced while typing but forced at every edge where the page
  * may stop running — tab hidden, frozen, unloading, unmounting — because a
- * pending timer is not a saved draft.
+ * pending timer is not a saved draft. The one identity that is never written
+ * is a `/btw` fork still being created: it is a placeholder, not a session.
  */
 
 import React from 'react';
 import { useInputStore } from '@/sync/input-store';
+import { isBtwPendingComposerKey } from '@/lib/btw';
 
 import {
     getChatDraftIdentityKey,
@@ -144,6 +146,11 @@ export function useComposerDraft(options: ComposerDraftOptions): ComposerDraftCo
         }
         confirmedMentionsRef.current = activeMentions;
 
+        if (isBtwPendingComposerKey(target.sessionId)) {
+            draftMemoryRef.current.set(key, { text: draft, confirmedMentions: activeMentions });
+            return;
+        }
+
         const signature = draftSignature(draft, activeMentions);
         if (lastPersistedRef.current.get(key) === signature) return;
 
@@ -214,7 +221,9 @@ export function useComposerDraft(options: ComposerDraftOptions): ComposerDraftCo
         skipOutgoingDraftRef.current = false;
 
         const saved = (currentKey && draftMemoryRef.current.get(currentKey))
-            || readChatDraftClaimingFolderDraft(identity);
+            || (identity && isBtwPendingComposerKey(identity.sessionId)
+                ? { text: '', confirmedMentions: new Set<string>() }
+                : readChatDraftClaimingFolderDraft(identity));
         // Mentions name files of the old directory, so only the text travels.
         // A draft already saved for the new directory is kept above it.
         const restored = carriesText
@@ -323,7 +332,8 @@ export function useComposerDraft(options: ComposerDraftOptions): ComposerDraftCo
         const isCurrent = target && current && getChatDraftIdentityKey(target) === getChatDraftIdentityKey(current);
         const existing = isCurrent
             ? { text: messageRef.current, confirmedMentions: confirmedMentionsRef.current }
-            : (targetKey && draftMemoryRef.current.get(targetKey)) || readChatDraft(target);
+            : (targetKey && draftMemoryRef.current.get(targetKey))
+                || (isBtwPendingComposerKey(target?.sessionId) ? null : readChatDraft(target));
         const text = existing?.text && existing.text !== draft ? `${existing.text}\n\n${draft}` : draft;
         const mentions = new Set([...(existing?.confirmedMentions ?? []), ...confirmedMentions]);
         if (targetKey) draftMemoryRef.current.set(targetKey, { text, confirmedMentions: mentions });
@@ -332,7 +342,7 @@ export function useComposerDraft(options: ComposerDraftOptions): ComposerDraftCo
             confirmedMentionsRef.current = new Set(mentions);
             setMessage(text);
         }
-        if (target) {
+        if (target && !isBtwPendingComposerKey(target.sessionId)) {
             writeChatDraft(target, text, mentions);
             lastPersistedRef.current.set(getChatDraftIdentityKey(target), draftSignature(text, mentions));
         }
@@ -365,11 +375,21 @@ export function useComposerDraft(options: ComposerDraftOptions): ComposerDraftCo
         const draft = from && current && getChatDraftIdentityKey(from) === getChatDraftIdentityKey(current)
             ? { text: messageRef.current, confirmedMentions: new Set(confirmedMentionsRef.current) }
             : (from && draftMemoryRef.current.get(getChatDraftIdentityKey(from)))
-            || readChatDraft(from);
+            || (isBtwPendingComposerKey(from?.sessionId)
+                ? { text: '', confirmedMentions: new Set<string>() }
+                : readChatDraft(from));
         draftMemoryRef.current.set(getChatDraftIdentityKey(to), { text: draft.text, confirmedMentions: new Set(draft.confirmedMentions) });
         writeChatDraft(to, draft.text, draft.confirmedMentions);
         lastPersistedRef.current.set(getChatDraftIdentityKey(to), draftSignature(draft.text, draft.confirmedMentions));
-    }, [confirmedMentionsRef, messageRef]);
+        if (from) draftMemoryRef.current.set(getChatDraftIdentityKey(from), { text: '', confirmedMentions: new Set() });
+        if (from && current && getChatDraftIdentityKey(from) === getChatDraftIdentityKey(current)) {
+            clearPending();
+            skipOutgoingDraftRef.current = true;
+            messageRef.current = '';
+            confirmedMentionsRef.current = new Set();
+            setMessage('');
+        }
+    }, [clearPending, confirmedMentionsRef, messageRef, setMessage]);
 
     return { persistNow, handoffDraft, restoreDraft, migrateDraft };
 }

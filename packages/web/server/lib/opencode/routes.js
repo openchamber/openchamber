@@ -10,8 +10,8 @@ import {
 import { getClaudeCliAuthStatus } from './claude-cli-auth.js';
 import { OPENCODE_CONFIG_DIR, readConfigLayers } from './shared.js';
 import { settingsSurfaceOf } from './settings-files.js';
-import { parseWebSearchSelection, readSectionEntry, toProviderEntity } from './config-v2.js';
-import { getWebSearchSource, setWarmingEnabled, setWebSearchSelection } from './websearch-config.js';
+import { compactionUpdateSchema, parseWebSearchSelection, readSectionEntry, toProviderEntity } from './config-v2.js';
+import { getWebSearchSource, setCompactionSettings, setWarmingEnabled, setWebSearchSelection } from './websearch-config.js';
 import {
   CREDENTIAL_LIST_ERROR,
   ENTERPRISE_MODE_ERROR,
@@ -526,6 +526,22 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
     } catch (error) {
       console.error('Failed to save session warming:', error);
       return res.status(500).json({ error: error.message || 'Failed to save session warming' });
+    }
+  });
+
+  // Compaction settings (`compaction` and `experimental.background_compaction`
+  // in OpenCode config), written the same way. Settings reads them from OpenCode.
+  app.put('/api/config/compaction', (req, res) => {
+    const parsed = compactionUpdateSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'buffer and keepTokens must be token counts or null, auto and background booleans' });
+    }
+    try {
+      const result = setCompactionSettings(parsed.data);
+      return res.json({ success: true, changed: result.changed });
+    } catch (error) {
+      console.error('Failed to save compaction settings:', error);
+      return res.status(500).json({ error: error.message || 'Failed to save compaction settings' });
     }
   });
 

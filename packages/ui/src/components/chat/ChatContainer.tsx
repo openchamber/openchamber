@@ -850,8 +850,8 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     // new session id. A pinned column does not subscribe to the selection.
     const globalSessionId = useSessionUIStore((s) => (pinned ? null : s.currentSessionId));
     const globalSessionDirectory = useSessionUIStore((s) => (pinned ? null : s.currentSessionDirectory));
-    const liveSessionId = pinned ? pinnedSelection?.sessionId ?? null : globalSessionId;
     const pinnedSessionDirectory = usePinnedSessionDirectory(pinned ? pinnedSelection : null);
+    const liveSessionId = pinned ? (pinnedSessionDirectory ? pinnedSelection?.sessionId ?? null : null) : globalSessionId;
     const liveSessionDirectory = pinned ? pinnedSessionDirectory : globalSessionDirectory;
     const materializedDraftSessionId = useSessionUIStore((s) => (pinned ? null : s.materializedDraftSessionId));
     const liveSelection = React.useMemo(
@@ -1436,7 +1436,8 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     // the turn's last block, its footer and the turn-end glide land first. A
     // reader away from the end holds the history, so another column showing
     // this session never cuts what they look at.
-    const turnCount = timelineController.turnIds.length;
+    // Prepending older turns must not re-arm the trim timer.
+    const newestTurnId = timelineController.turnIds[timelineController.turnIds.length - 1] ?? null;
     const isPinnedRef = React.useRef(isPinned);
     isPinnedRef.current = isPinned;
     React.useEffect(() => {
@@ -1446,7 +1447,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
             messageLoader.trimHistory({ directory: effectiveSessionDirectory, sessionID: currentSessionId });
         }, HISTORY_TRIM_DELAY_MS);
         return () => window.clearTimeout(timer);
-    }, [active, currentSessionId, effectiveSessionDirectory, messageLoader, sessionIsWorking, turnCount]);
+    }, [active, currentSessionId, effectiveSessionDirectory, messageLoader, sessionIsWorking, newestTurnId]);
     React.useEffect(() => {
         if (isPinned || !currentSessionId || !effectiveSessionDirectory) return;
         return messageLoader.retainSessionHistory({ directory: effectiveSessionDirectory, sessionID: currentSessionId }, 'browsing');

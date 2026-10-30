@@ -38,7 +38,8 @@ export const MobileModelButton: React.FC<MobileModelButtonProps> = ({ onOpenMode
                 }
             }}
             className={cn(
-                'inline-flex h-[26px] min-h-0 min-w-0 items-stretch',
+                // 36px to tap, drawn in the row's 26px: the margin keeps the row's height.
+                'inline-flex h-9 -my-[5px] min-h-0 min-w-0 items-stretch',
                 'rounded-lg',
                 'typography-micro font-medium text-foreground/80',
                 'focus:outline-none hover:bg-[var(--interactive-hover)]',

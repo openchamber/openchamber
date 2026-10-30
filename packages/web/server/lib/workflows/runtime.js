@@ -160,6 +160,16 @@ const reportText = (run) => {
   return `<openchamber-workflow ${attributes}>\n${lines.join('\n')}\n</openchamber-workflow>`;
 };
 
+const isPidAlive = (pid) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    // EPERM: the process exists but belongs to someone else.
+    return error?.code === 'EPERM';
+  }
+};
+
 /**
  * Workflow runs: scripts an agent writes that fan work out to many agents,
  * run here in OpenChamber's server so the agent that asked stays free. The
@@ -178,6 +188,8 @@ export const createWorkflowRuntime = ({
   sleep = (duration) => new Promise((resolve) => setTimeout(resolve, duration)),
   maxConcurrentAgents = MAX_CONCURRENT_AGENTS,
   maxAgentsPerRun = MAX_AGENTS_PER_RUN,
+  pid = process.pid,
+  isProcessAlive = isPidAlive,
 }) => {
   // Run id -> { controller, terminate, sessions: Set<sessionId> } while it runs.
   const active = new Map();
@@ -522,7 +534,7 @@ export const createWorkflowRuntime = ({
       sandbox: null,
     };
     active.set(run.id, execution);
-    Object.assign(run, { state: 'running', attempt: run.attempt + 1, startedAt: now(), agents: [], currentPhase: null });
+    Object.assign(run, { state: 'running', attempt: run.attempt + 1, startedAt: now(), agents: [], currentPhase: null, ownerPid: pid });
     delete run.endedAt;
     delete run.error;
     delete run.result;
@@ -832,12 +844,15 @@ export const createWorkflowRuntime = ({
   /**
    * After a restart the scripts that were running are gone: each such run is
    * marked stopped and says so. Reports go out with deliverPending once
-   * OpenCode answers.
+   * OpenCode answers. A run whose server process is still alive is left
+   * alone: a second OpenChamber over the same data directory (a dev server
+   * started next to the desktop app) must not stop another server's run.
    */
   const start = () => {
     restored = (async () => {
       for (const run of await store.list()) {
         if (run.state !== 'running') continue;
+        if (run.ownerPid && run.ownerPid !== pid && isProcessAlive(run.ownerPid)) continue;
         for (const agent of run.agents) {
           if (agent.state === 'running' || agent.state === 'queued') Object.assign(agent, { state: 'stopped', error: 'OpenChamber restarted' });
         }

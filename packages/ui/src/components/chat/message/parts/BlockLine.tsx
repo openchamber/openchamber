@@ -39,3 +39,16 @@ export const BlockLine: React.FC<BlockLineProps> = ({ onToggle, topOffset = 0, b
         />
     </span>
 );
+
+type BlockBodyProps = {
+    onToggle: () => void;
+    style?: React.CSSProperties;
+    children: React.ReactNode;
+};
+
+export const BlockBody: React.FC<BlockBodyProps> = ({ onToggle, style, children }) => (
+    <div className="relative ms-2 ps-3 pt-1 pb-2" style={style}>
+        <BlockLine onToggle={onToggle} />
+        {children}
+    </div>
+);

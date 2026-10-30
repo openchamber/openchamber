@@ -238,6 +238,16 @@ function applyMessagePatch(message: Message, patch: MessagePatch): Message {
   return message
 }
 
+/**
+ * A terminal tool state this client manufactured while finalizing an
+ * interrupted turn. The server never confirmed it, so an authoritative
+ * transition that arrives later supersedes it; every other final state is
+ * OpenCode's and stands (a stale replay must not regress it).
+ */
+function isLocallyMarkedToolState(state: ToolPart["state"]): boolean {
+  return state.status === "error" && state.errorSource === "local"
+}
+
 function applyToolTransition(part: ToolPart, transition: ToolTransition): ToolPart {
   const state = part.state
   switch (transition.kind) {
@@ -255,8 +265,8 @@ function applyToolTransition(part: ToolPart, transition: ToolTransition): ToolPa
       if (state.status !== "running") return part
       return { ...part, state: { ...state, metadata: transition.metadata } }
     case "success": {
-      if (isFinalToolStatus(state.status)) return part
-      const start = state.status === "running" ? state.time.start : transition.end
+      if (isFinalToolStatus(state.status) && !isLocallyMarkedToolState(state)) return part
+      const start = state.status === "pending" ? transition.end : state.time.start
       const attachments = transition.attachments
       return withoutUnshownResult({
         ...part,
@@ -272,8 +282,8 @@ function applyToolTransition(part: ToolPart, transition: ToolTransition): ToolPa
       })
     }
     case "failed": {
-      if (isFinalToolStatus(state.status)) return part
-      const start = state.status === "running" ? state.time.start : transition.end
+      if (isFinalToolStatus(state.status) && !isLocallyMarkedToolState(state)) return part
+      const start = state.status === "pending" ? transition.end : state.time.start
       return withoutUnshownResult({
         ...part,
         executed: transition.executed,
@@ -281,6 +291,7 @@ function applyToolTransition(part: ToolPart, transition: ToolTransition): ToolPa
           status: "error",
           input: state.input,
           error: transition.error,
+          errorType: transition.errorType,
           output: transition.output,
           metadata: transition.metadata ?? (state.status === "running" ? state.metadata : undefined),
           time: { start, end: transition.end },

@@ -236,7 +236,7 @@ const StatusDot: React.FC<{ className: string; waiting?: boolean }> = ({ classNa
 };
 
 // Added through a relay pairing link: reachable only over the relay, no address.
-const isRelayOnlyHost = (host: DesktopHost): boolean => Boolean(host.relay) && !host.apiUrl;
+const isRelayOnlyHost = (host: DesktopHost): boolean => Boolean(host.relay) && !normalizeHostUrl(host.url);
 
 const buildForwardLabel = (forward: DesktopSshPortForward): string => {
   if (forward.type === 'dynamic') {
@@ -801,7 +801,7 @@ export const RemoteInstancesPage: React.FC = () => {
 
   const saveDirectHostEdit = React.useCallback(async () => {
     if (!directEditingId) return;
-    // Relay-only hosts have no address, token or headers to edit; only the name.
+    // Keep relay pairing credentials and learned addresses intact on rename.
     if (directEditingHost && directEditingRelayOnly) {
       const label = directEditLabel.trim() || directEditingHost.label;
       const nextHosts = directHosts.map((host) => host.id === directEditingId ? { ...host, label } : host);
@@ -880,9 +880,13 @@ export const RemoteInstancesPage: React.FC = () => {
       if (!url) {
         return [host.id, host.relay ? await relayProbe() : ({ status: 'unreachable', latencyMs: 0 } as HostProbeResult)] as const;
       }
-      const direct = await desktopHostProbe(url, { clientToken: host.clientToken || null, requestHeaders: host.requestHeaders || null })
+      const direct = await desktopHostProbe(url, {
+        clientToken: host.clientToken || null,
+        requestHeaders: host.requestHeaders || null,
+        expectedServerId: host.relay?.serverId ?? null,
+      })
         .catch((): HostProbeResult => ({ status: 'unreachable', latencyMs: 0 }));
-      if (direct.status === 'unreachable' && host.relay) {
+      if ((direct.status === 'unreachable' || direct.status === 'wrong-service' || direct.status === 'incompatible') && host.relay) {
         const relayResult = await relayProbe();
         if (relayResult.status === 'ok' || relayResult.status === 'relay-limit') return [host.id, relayResult] as const;
       }

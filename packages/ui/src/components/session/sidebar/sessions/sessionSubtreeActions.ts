@@ -29,8 +29,8 @@ type SessionSubtreeOutcome = {
  * Every descendant an archive or delete should reach, resolved when the user
  * acts rather than while rows render.
  *
- * `knownDescendantIds` is what the surface already sees: the rendered tree on
- * desktop, the active list on mobile. Both stop at an archived child, so an
+ * `knownDescendantIds` is what the surface already sees: a row's `parentID`
+ * children on desktop, the active list on mobile. Both stop at an archived child, so an
  * active subagent under an archived intermediate stayed behind (an edge #2580
  * pointed out). The global lineage reaches through archived intermediates:
  * archive takes the active sessions below, since it must not restamp archived
@@ -46,6 +46,20 @@ export const collectSessionSubtreeIds = (
   for (const descendant of descendants) ids.add(descendant.id);
   ids.delete(rootId);
   return [...ids];
+};
+
+/** Rendered subsessions only; the global action lineage adds linked reviews. */
+export const collectParentIdDescendantIds = (root: SessionNode): string[] => {
+  const ids: string[] = [];
+  const visit = (node: SessionNode): void => {
+    for (const child of node.children) {
+      if (child.session.parentID !== node.session.id) continue;
+      ids.push(child.session.id);
+      visit(child);
+    }
+  };
+  visit(root);
+  return ids;
 };
 
 /**

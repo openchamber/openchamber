@@ -4,7 +4,7 @@ import { getRuntimeKey } from '@/lib/runtime-switch';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { clearLastActiveSession, persistLastActiveSession, readLastActiveSession } from './last-session-cache';
 import { beginLastSessionRestore, restoreLastActiveSession } from './last-session-restore';
-import { useSessionUIStore } from './session-ui-store';
+import { useSessionUIStore, type SetCurrentSessionOptions } from './session-ui-store';
 
 const session = (id: string): Session => ({
     id,
@@ -18,12 +18,18 @@ const session = (id: string): Session => ({
 
 const originalSetCurrentSession = useSessionUIStore.getState().setCurrentSession;
 let selected: Array<{ id: string | null; directory: string | null | undefined }> = [];
+let selectedOptions: Array<SetCurrentSessionOptions | undefined> = [];
 
 beforeEach(() => {
     selected = [];
+    selectedOptions = [];
     useSessionUIStore.setState({
         currentSessionId: null,
-        setCurrentSession: (id, directory) => { selected.push({ id, directory }); },
+        currentSessionKeepsSingleProject: false,
+        setCurrentSession: (id, directory, options) => {
+            selected.push({ id, directory });
+            selectedOptions.push(options);
+        },
     });
     useGlobalSessionsStore.setState({
         hasLoaded: true,
@@ -35,7 +41,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-    useSessionUIStore.setState({ setCurrentSession: originalSetCurrentSession, currentSessionId: null, currentSessionDirectory: null });
+    useSessionUIStore.setState({ setCurrentSession: originalSetCurrentSession, currentSessionId: null, currentSessionDirectory: null, currentSessionKeepsSingleProject: false });
     clearLastActiveSession(getRuntimeKey());
 });
 
@@ -45,6 +51,7 @@ describe('restoreLastActiveSession', () => {
 
         expect(await restoreLastActiveSession({ refresh: false })).toBe('restored');
         expect(selected).toEqual([{ id: 'ses_open', directory: '/repo' }]);
+        expect(selectedOptions).toEqual([{ keepSingleProject: true }]);
     });
 
     test('leaves the launch alone without a pointer', async () => {
@@ -124,9 +131,14 @@ describe('beginLastSessionRestore', () => {
     // opened something else" can be told apart from "still on the restored one".
     beforeEach(() => {
         useSessionUIStore.setState({
-            setCurrentSession: (id, directory) => {
+            setCurrentSession: (id, directory, options) => {
                 selected.push({ id, directory });
-                useSessionUIStore.setState({ currentSessionId: id, currentSessionDirectory: id ? directory ?? null : null });
+                selectedOptions.push(options);
+                useSessionUIStore.setState({
+                    currentSessionId: id,
+                    currentSessionDirectory: id ? directory ?? null : null,
+                    currentSessionKeepsSingleProject: Boolean(id && options?.keepSingleProject),
+                });
             },
         });
     });
@@ -167,6 +179,7 @@ describe('beginLastSessionRestore', () => {
             const attempt = beginLastSessionRestore({ selectNow: true });
             // Selected synchronously, before the list was even asked for.
             expect(selected).toEqual([{ id: 'ses_open', directory: '/repo' }]);
+            expect(selectedOptions).toEqual([{ keepSingleProject: true }]);
             expect(list.loads()).toBe(0);
 
             const result = attempt();
@@ -178,6 +191,30 @@ describe('beginLastSessionRestore', () => {
             list.restore();
         }
     });
+
+    for (const explicitReopen of [false, true]) {
+        test(`preserves the current picker policy when the confirmed directory changes, explicit reopen: ${explicitReopen}`, async () => {
+            persistLastActiveSession(getRuntimeKey(), { sessionId: 'ses_open', directory: '/repo' });
+            const list = holdSessionList();
+            try {
+                const attempt = beginLastSessionRestore({ selectNow: true });
+                const result = attempt();
+                expect(useSessionUIStore.getState().currentSessionKeepsSingleProject).toBe(true);
+
+                if (explicitReopen) {
+                    useSessionUIStore.getState().setCurrentSession('ses_open', '/repo');
+                }
+                list.answer([{ ...session('ses_open'), directory: '/other-project', projectID: 'other-project' }]);
+
+                expect(await result).toBe('restored');
+                expect(selected.at(-1)).toEqual({ id: 'ses_open', directory: '/other-project' });
+                expect(selectedOptions.at(-1)).toEqual({ keepSingleProject: !explicitReopen });
+                expect(useSessionUIStore.getState().currentSessionKeepsSingleProject).toBe(!explicitReopen);
+            } finally {
+                list.restore();
+            }
+        });
+    }
 
     test('takes the directory from the persisted session list when the pointer has none', () => {
         persistLastActiveSession(getRuntimeKey(), { sessionId: 'ses_open', directory: null });

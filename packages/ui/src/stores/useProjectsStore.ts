@@ -19,6 +19,9 @@ import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
 import { getVSCodeBootstrapConfig } from '@/lib/vscodeBootstrap';
 import { isVSCodeRuntime } from './utils/vscodeRuntime';
+import { z } from 'zod';
+import { requestOpenCodeTrust } from '@/lib/opencodeTrust';
+import { runBackgroundNetworkTask } from '@/lib/background-network';
 
 /** Pick the preset colour least used among existing projects */
 const pickAutoColor = (projects: ProjectEntry[]): string => {
@@ -58,6 +61,7 @@ interface ProjectsStore {
 
   addProject: (path: string, options?: { label?: string; id?: string }) => Promise<ProjectEntry | null>;
   addProjects: (paths: string[]) => Promise<ProjectEntry[]>;
+  adoptSessionProject: (sessionId: string, directory: string, isCurrent: () => boolean) => Promise<boolean>;
   removeProject: (id: string) => void;
   setActiveProject: (id: string) => void;
   setActiveProjectIdOnly: (id: string) => void;
@@ -211,7 +215,7 @@ const sanitizeProjectIconImage = (value: unknown): ProjectEntry['iconImage'] | u
   return { mime, updatedAt, source };
 };
 
-const resolveUploadMime = (file: File): 'image/png' | 'image/jpeg' | 'image/svg+xml' | null => {
+export const resolveUploadMime = (file: File): 'image/png' | 'image/jpeg' | 'image/svg+xml' | null => {
   const rawType = typeof file.type === 'string' ? file.type.trim().toLowerCase() : '';
   if (rawType === 'image/png' || rawType === 'image/jpeg' || rawType === 'image/svg+xml') {
     return rawType;
@@ -596,6 +600,40 @@ export const useProjectsStore = create<ProjectsStore>()(
       return { ok: true, normalizedPath: normalized };
     },
 
+    adoptSessionProject: async (sessionId, directory, isCurrent) => {
+      if (!isCurrent()) return false;
+      if (isVSCodeProjectsRuntime) {
+        const add = getRegisteredRuntimeAPIs()?.vscode?.addWorkspaceFolder;
+        if (!add) throw new Error('Adding workspace folders is unavailable');
+        const folders = await add(directory);
+        if (!isCurrent()) return false;
+        get().syncVSCodeWorkspaceFolders(folders);
+        if (!get().projects.some((entry) => entry.path === directory)) throw new Error('The session workspace folder was not added');
+        return true;
+      }
+      const response = await runBackgroundNetworkTask(() => isCurrent() ? runtimeFetch('/api/projects/session-directory', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId, directory }),
+      }) : Promise.resolve(null));
+      if (!response) return false;
+      if (!response.ok) throw new Error(`Session project registration answered ${response.status}`);
+      const { project } = z.object({ project: z.object({
+        id: z.string().min(1), path: z.string().min(1), label: z.string().optional(),
+        addedAt: z.number().optional(), lastOpenedAt: z.number().optional(),
+      }) }).parse(await response.json());
+      if (!isCurrent()) return false;
+      // This response owns only an append, never a replacement or activation.
+      if (!get().projects.some((entry) => entry.id === project.id)) {
+        const projects = [...get().projects, project];
+        set({ projects });
+        cacheProjects(projects, get().activeProjectId);
+      }
+      // Join the append to this window's pending full-registry mutations. An
+      // older debounced manual add must not overwrite the confirmed project.
+      void updateDesktopSettings({ projects: get().projects });
+      return true;
+    },
+
     addProject: async (path: string, options?: { label?: string; id?: string }) => {
       if (isVSCodeProjectsRuntime) {
         // Projects are scoped to VS Code workspace folders in this runtime.
@@ -613,6 +651,7 @@ export const useProjectsStore = create<ProjectsStore>()(
         const runtimeApis = getRegisteredRuntimeAPIs();
         if (runtimeApis?.vscode?.addWorkspaceFolder) {
           try {
+            if (!await requestOpenCodeTrust(normalizedPath, { deliberate: true })) return null;
             const folders = await runtimeApis.vscode.addWorkspaceFolder(normalizedPath);
             return get().syncVSCodeWorkspaceFolders(folders, normalizedPath);
           } catch {
@@ -1114,7 +1153,7 @@ export const useProjectsStore = create<ProjectsStore>()(
         cacheProjects(result.projects, result.activeProjectId);
       }
 
-      if (result.activeProject) {
+      if (result.activeProject && (activeChanged || activePath)) {
         opencodeClient.setDirectory(result.activeProject.path);
         useDirectoryStore.getState().setDirectory(result.activeProject.path, { showOverlay: false });
       }

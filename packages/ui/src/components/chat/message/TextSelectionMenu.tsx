@@ -1,4 +1,5 @@
 import React from 'react';
+import { createChatDraftIdentity } from '@/lib/chatDraftPersistence';
 import { createPortal, flushSync } from 'react-dom';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useChatColumnActions, useChatSessionSelection } from '../chatColumnSession';
@@ -263,7 +264,6 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
 
   const addMarkdownToChat = React.useCallback((markdownText: string) => {
     const markdownBlock = wrapMarkdownSelectionForChat(markdownText);
-    // Quoted inside a chat pinned in the side panel, it goes to that chat's composer.
     setPendingInputText(markdownBlock, 'append', columnPinned ? currentSessionId : null);
 
     hideMenu();
@@ -681,21 +681,24 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
   }, [captureCommentAnchor, hideMenu, mobileCommentController, selectedMessageId, selectedText, selectedTextMarkdown, updateCommentRects]);
 
   const handleAttachComment = React.useCallback(() => {
-    const sessionKey = currentSessionId ?? (newSessionDraftOpen ? 'draft' : null);
-    if (!selectedTextMarkdown || !sessionKey || !effectiveDirectory) {
+    const composerTarget = mobileCommentController?.getScope() ?? null;
+    if (!selectedTextMarkdown || !composerTarget) {
       hideMenu();
       return;
     }
-    const draftId = addContextDraft({ directory: effectiveDirectory, sessionKey }, {
-      source: 'chat-quote',
-      fileLabel: selectedMessageId ?? '',
-      startLine: 1,
-      endLine: 1,
-      code: selectedTextMarkdown,
-      language: '',
-      text: commentText.trim(),
-      anchor: selectedAnchor ?? undefined,
-    });
+    const draftId = addContextDraft(
+      { directory: composerTarget.directory, sessionKey: composerTarget.sessionKey },
+      {
+        source: 'chat-quote',
+        fileLabel: selectedMessageId ?? '',
+        startLine: 1,
+        endLine: 1,
+        code: selectedTextMarkdown,
+        language: '',
+        text: commentText.trim(),
+        anchor: selectedAnchor ?? undefined,
+      },
+    );
     if (!draftId) {
       toast.error(t('chat.textSelection.comment.attachFailed'));
       return;
@@ -705,9 +708,11 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
       // Focus first: it hands the attachment slot to this column's composer,
       // where the comment's images belong.
       focusColumnInput();
-      void attachCitedImages(commentText);
+      void attachCitedImages(commentText, createChatDraftIdentity(
+        composerTarget.runtimeKey, composerTarget.directory, composerTarget.sessionKey,
+      ));
     });
-  }, [addContextDraft, attachCitedImages, commentText, currentSessionId, effectiveDirectory, focusColumnInput, hideMenu, newSessionDraftOpen, selectedAnchor, selectedMessageId, selectedTextMarkdown, t]);
+  }, [addContextDraft, attachCitedImages, commentText, focusColumnInput, hideMenu, mobileCommentController, selectedAnchor, selectedMessageId, selectedTextMarkdown, t]);
 
   const selectionDirectory = effectiveDirectory ?? currentSessionDirectory ?? '';
   const spaceProjectDirectory = useSpaceProjectDirectory(selectionDirectory);

@@ -30,6 +30,7 @@ import { FilesystemError, parseFilesystemErrorReason } from "@/lib/api/files-err
 import type { ContextPartMetadata } from "@/lib/messages/contextParts"
 import { getRuntimeUrlResolver } from "@/lib/runtime-url"
 import { runtimeFetch } from "@/lib/runtime-fetch"
+import { captureRuntimeCleanup } from "@/lib/runtime-cleanup"
 import { forgetOpenCodeTrustDeclines, isDeliberateOpenCodeRequest, openCodeTrustRefusalDirectory, requestOpenCodeTrust } from "@/lib/opencodeTrust"
 import { isRelayModeActive } from "@/lib/relay/runtime-tunnel"
 import { isSpaceDirectory, spaceIdOfDirectory } from "@/lib/spaces/space-route"
@@ -70,6 +71,7 @@ import { ascendingId } from "./ids"
 import { runningShellFromWire, shellCancellationNote, type RunningShell, type ShellToStop } from "./background-shell"
 import { subagentCancellationNote } from "./subagent-run"
 import { toJsonRecord } from "./json"
+import { readMessageThroughAncestors } from "./message-ownership"
 import {
   deniesAnyProvider,
   mergeConfigDocuments,
@@ -734,6 +736,30 @@ class OpencodeService {
     return this.client
   }
 
+  async setResponseStyleInstruction(directory: string, sessionID: string, instruction: string | null): Promise<void> {
+    const entry = this.getScopedSdkClient(directory).experimental.session.instructions.entry
+    const key = "openchamber.response-style"
+    const value = instruction?.trim()
+    if (value) await entry.put({ sessionID, key, value })
+    else await entry.remove({ sessionID, key })
+  }
+
+  async captureSessionCleanup(directory: string | null | undefined, runtimeKey: string): Promise<(sessionID: string) => Promise<void>> {
+    const cleanup = await captureRuntimeCleanup(runtimeKey)
+    return (sessionID) => cleanup(async ({ fetch, baseUrl }) => {
+      const client = OpenCode.make({
+        baseUrl: ensureAbsoluteBaseUrl(baseUrl || "/"),
+        headers: directory ? { [OPENCODE_DIRECTORY_HEADER]: encodeURIComponent(directory) } : undefined,
+        fetch,
+      })
+      try {
+        await client.session.remove({ sessionID })
+      } catch (error) {
+        if (!isOpencodeNotFound(normalizeOpencodeError("session.remove", error))) throw error
+      }
+    })
+  }
+
   /** Raw client whose every request resolves the given directory's Location. */
   getScopedSdkClient(directory: string): OpenCodeClient {
     const normalized = this.normalizeCandidatePath(directory) ?? directory
@@ -1211,6 +1237,18 @@ class OpencodeService {
 
   async getSessionMessage(id: string, messageID: string, directory?: string | null): Promise<{ info: Message; parts: Part[] }> {
     const info = await call("session.message.get", () => this.clientFor(directory).session.message.get({ sessionID: id, messageID }))
+    const [projected] = projectMessages([info], id)
+    return { info: projected.message, parts: projected.parts }
+  }
+
+  async getToolContentMessage(id: string, messageID: string, directory: string): Promise<{ info: Message; parts: Part[] }> {
+    const runtimeKey = getRuntimeKey()
+    const info = await readMessageThroughAncestors(id, {
+      readMessage: (sessionID) => call("session.message.get", () => this.clientFor(directory).session.message.get({ sessionID, messageID })),
+      readParentID: async (sessionID) => (await this.getSession(sessionID, directory)).parentID,
+      isNotFound: isOpencodeNotFound,
+      isCurrent: () => getRuntimeKey() === runtimeKey,
+    })
     const [projected] = projectMessages([info], id)
     return { info: projected.message, parts: projected.parts }
   }

@@ -16,25 +16,25 @@ import { useI18n } from '@/lib/i18n';
 import { parseAgentHref, parseAttachmentHref, parseSkillHref, INLINE_REFERENCE_CHIP_CLASS, INTERACTIVE_REFERENCE_CHIP_CLASS, REFERENCE_CHIP_LABEL_CLASS, buildAgentMentionUrl } from '@/lib/messages/inlineMessageLinks';
 import { openAppLinkWithConfirmation } from '../appLinkConfirmation';
 import { useOpenChatLink } from '../useOpenChatLink';
-import { useMarkdownPresentation } from './MarkdownPresentationContext';
+import { useMarkdownPresentation, type FileReferenceSource } from './MarkdownPresentationContext';
 import { activateMarkdownFile, resolveMarkdownFile, useOpenMarkdownFile, useRevealMarkdownPath } from './markdownFileReferences';
 import { localPathFromFileUrl } from '../fileReferenceParser';
 import { MarkdownMediaLinkContext, useMarkdownMedia } from './markdown-media-context';
 import { openMarkdownDocumentLink } from '@/components/views/files/previews/useMarkdownLocalAssets';
 
-function useConfirmedInlineFile(raw: string): string | null {
+function useConfirmedInlineFile(raw: string, inputKind: FileReferenceSource = 'path'): string | null {
   const { directory, fileReferences, confirmFile } = useMarkdownPresentation();
   const runtimeKey = getRuntimeKey();
-  const [confirmed, setConfirmed] = React.useState<{ raw: string; directory: string; runtimeKey: string; path: string } | null>(null);
+  const [confirmed, setConfirmed] = React.useState<{ raw: string; inputKind: FileReferenceSource; directory: string; runtimeKey: string; path: string } | null>(null);
   React.useEffect(() => {
     if (!fileReferences) return;
     let active = true;
-    void confirmFile(raw).then((path) => {
-      if (active && runtimeKey === getRuntimeKey()) setConfirmed(path ? { raw, directory, runtimeKey, path } : null);
+    void confirmFile(raw, inputKind).then((path) => {
+      if (active && runtimeKey === getRuntimeKey()) setConfirmed(path ? { raw, inputKind, directory, runtimeKey, path } : null);
     });
     return () => { active = false; };
-  }, [raw, directory, fileReferences, runtimeKey, confirmFile]);
-  return fileReferences && confirmed?.raw === raw && confirmed.directory === directory && confirmed.runtimeKey === runtimeKey ? confirmed.path : null;
+  }, [raw, inputKind, directory, fileReferences, runtimeKey, confirmFile]);
+  return fileReferences && confirmed?.raw === raw && confirmed.inputKind === inputKind && confirmed.directory === directory && confirmed.runtimeKey === runtimeKey ? confirmed.path : null;
 }
 
 export function MarkdownInlineCode({ children, node: _node, ...props }: React.ComponentProps<'code'> & ExtraProps) {
@@ -131,14 +131,15 @@ function ScreenMarkdownHref({ href, children: originalChildren, node, ...props }
   const mentionChips = React.useContext(SessionMentionChipsContext);
   const mentionChip = session ? mentionChips.get(sessionLinkKey(session)) : undefined;
   const app = isAppLinkUrl(href);
-  const file = presentation.fileNavigation && resolveMarkdownFile(href, directory, 'click');
+  const file = presentation.fileNavigation && resolveMarkdownFile(href, directory, 'click', 'href');
   const revealPath = useRevealMarkdownPath();
   const folder = presentation.fileNavigation && !file && revealPath ? localPathFromFileUrl(href) : null;
   // A link whose URL is not a file but whose text is a path opens that file
   // once the file is confirmed, as the old annotation pass did.
-  const probe = file || folder || app || session || skill || agent || attachment ? href : text;
-  const path = useConfirmedInlineFile(probe);
-  const textFile = Boolean(path && probe !== href);
+  const probeHref = Boolean(file || folder || app || session || skill || agent || attachment);
+  const probe = probeHref ? href : text;
+  const path = useConfirmedInlineFile(probe, probeHref ? 'href' : 'path');
+  const textFile = Boolean(path && !probeHref);
   const external = isExternalHttpUrl(href);
   // A host's own reference (`#12`, a commit) reads as part of the text, without the site's mark.
   const reference = node?.properties.dataOcReference !== undefined;
@@ -166,7 +167,7 @@ function ScreenMarkdownHref({ href, children: originalChildren, node, ...props }
     }
     if (skill) return;
     if (file) {
-      activateMarkdownFile(event, (external) => { void openFile(href, path ?? undefined, external); });
+      activateMarkdownFile(event, (external) => { void openFile(href, path ?? undefined, external, 'href'); });
       return;
     }
     if (folder && revealPath) {

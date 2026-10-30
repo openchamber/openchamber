@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { findRuntimeMatches, pluginFileRuntimeTarget, resolveLoadState } from '../../ui/src/components/sections/plugins/pluginLoadState.ts';
 
 mock.module('vscode', () => ({
   workspace: {
@@ -58,6 +59,67 @@ afterEach(() => {
 const readJson = (filePath) => JSON.parse(fs.readFileSync(filePath, 'utf8'));
 
 describe('VS Code config bridge plugin parity', () => {
+  test('lists a config once and exposes paths for existing file discovery', async () => {
+    const root = path.join(scratchConfigRoot, 'xdg', 'opencode');
+    fs.mkdirSync(root, { recursive: true });
+    tempRoots.push(root);
+    process.env.OPENCODE_CONFIG = path.join(root, 'opencode.jsonc');
+    fs.writeFileSync(process.env.OPENCODE_CONFIG, JSON.stringify({ plugins: [{ package: './plugins/memory.ts', options: { enabled: true } }] }));
+    fs.mkdirSync(path.join(root, 'plugins'));
+    fs.writeFileSync(path.join(root, 'plugins', 'memory.ts'), 'export default {}');
+    const listed = await handleConfigBridgeMessage({ id: 'list', type: 'api:config/plugins', payload: { target: 'list', directory: root } }, createCtx(root), deps);
+    expect(listed.success).toBe(true);
+    expect(listed.data.entries).toHaveLength(1);
+    expect(listed.data.entries[0]).toMatchObject({ scope: 'user', options: { enabled: true } });
+    expect(listed.data.files).toHaveLength(1);
+    expect(listed.data.files[0]).toMatchObject({ kind: 'file', absolutePath: path.join(root, 'plugins', 'memory.ts'), resolvedPath: listed.data.entries[0].resolvedPath });
+  });
+
+  test('preserves runtime status through a symlinked config directory', async () => {
+    const physicalDir = fs.mkdtempSync(path.join(scratchConfigRoot, 'physical-'));
+    const globalDir = path.join(process.env.XDG_CONFIG_HOME, 'opencode');
+    tempRoots.push(globalDir, physicalDir);
+    fs.mkdirSync(path.dirname(globalDir), { recursive: true });
+    fs.mkdirSync(path.join(physicalDir, 'plugins'));
+    fs.symlinkSync(physicalDir, globalDir, 'dir');
+    const originalPath = path.join(globalDir, 'plugins', 'memory.ts');
+    fs.writeFileSync(originalPath, 'export default {}');
+    const listed = await handleConfigBridgeMessage({ id: 'list-link', type: 'api:config/plugins', payload: { target: 'list', directory: physicalDir } }, createCtx(physicalDir), deps);
+    expect(listed.success).toBe(true);
+    const file = listed.data.files.find((file) => file.scope === 'user');
+    expect(file).toMatchObject({ absolutePath: originalPath, resolvedPath: fs.realpathSync(originalPath) });
+    const target = pluginFileRuntimeTarget(file.absolutePath);
+    for (const state of [{ kind: 'active' }, { kind: 'failed', error: 'load failed', ref: 'err_local' }]) {
+      const result = resolveLoadState(findRuntimeMatches(target, [{ source: { kind: 'local', path: originalPath }, state }]));
+      expect(result).toEqual(state.kind === 'active' ? { kind: 'active', version: null } : state);
+    }
+  });
+
+  test('keeps custom relative targets when the global config is a symlink alias', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-vscode-plugin-alias-'));
+    const globalDir = path.join(process.env.XDG_CONFIG_HOME, 'opencode');
+    tempRoots.push(root, globalDir);
+    const configPath = path.join(root, 'opencode.json');
+    const spec = './plugins/memory';
+    fs.writeFileSync(configPath, JSON.stringify({ plugins: [{ package: spec, options: { owner: 'custom' } }] }));
+    const customPluginPath = path.join(root, 'plugins', 'memory');
+    fs.mkdirSync(customPluginPath, { recursive: true });
+    fs.mkdirSync(path.join(globalDir, 'plugins', 'memory'), { recursive: true });
+    fs.symlinkSync(configPath, path.join(globalDir, 'opencode.json'));
+    process.env.OPENCODE_CONFIG = configPath;
+
+    const listed = await handleConfigBridgeMessage({
+      id: 'list-alias', type: 'api:config/plugins', payload: { target: 'list', directory: globalDir },
+    }, createCtx(globalDir), deps);
+    expect(listed.success).toBe(true);
+    expect(listed.data.entries).toEqual([
+      expect.objectContaining({
+        id: Buffer.from(`config:user:${spec}`).toString('base64url'),
+        spec, scope: 'user', resolvedPath: fs.realpathSync(customPluginPath), options: { owner: 'custom' },
+      }),
+    ]);
+  });
+
   test('explicit config reload restarts OpenCode', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-vscode-reload-'));
     tempRoots.push(root);

@@ -393,6 +393,26 @@ own `dir="ltr"` element so an RTL sentence never reorders them.
 
 The page is hidden in VS Code (`metadata.ts`).
 
+## Plugin duplicate sources
+
+`plugins/PluginsGrid.tsx` keeps every configuration entry and its editing target.
+A discovered package card is hidden when its normalized target is already
+represented by a declaration or another discovery record. Distinct declarations
+and their options remain separate, including declarations of the same target.
+Editable local files always keep their own cards and file edit/delete actions,
+including files declared in config.
+
+### Why paths determine discovery duplicates
+
+Names can match for unrelated plugins, and OpenCode's runtime list can omit
+disabled or not-yet-loaded plugins. Only exact target paths filter discovery;
+runtime status never controls card membership. Web, Electron and mobile use the
+server's path metadata; VS Code's file-only discovery stays visible.
+
+Discovery records keep their original `absolutePath` for runtime matching and
+their canonical `resolvedPath` for duplicate filtering. Resolving symlinks in
+the runtime path would lose statuses reported through the original alias.
+
 ## Entity shapes: OpenCode 2 only
 
 Every OpenCode entity these pages read and write speaks the v2 shape defined in
@@ -472,7 +492,26 @@ Agents page uses) and the symbol or image, and the name is edited in place. Belo
 it a tab strip splits the rest: General (new-chat defaults, the team file, trust,
 plans folder), Actions (a card grid with an editor dialog), Worktrees (setup
 commands and a link to the worktrees page) and Environment (not in VS Code).
-Identity fields autosave through `useProjectIdentityAutoSave`, as before.
+Identity fields autosave through `useProjectIdentityAutoSave` after 450 ms.
+Unmounting flushes the pending valid name. Writes run serially and retain the
+latest committed edit during a write, including after unmount, with the captured
+project and save callback. Pending snapshots are retained per project when the
+mounted panel switches projects. A trailing edit reuses a completed icon operation.
+Queues for the same project drain in order across editor remounts; other projects
+do not wait for them. Queue tails are released after success or failure.
+Empty names are never saved. Failed saves show an error toast.
+
+### Why identity saves finish after unmount
+
+Closing the editor accepts its edits, so canceling the debounce or a queued
+follow-up would lose the last name typed. The mobile session sheet's separate
+editor keeps its explicit Save action. VS Code rejects project metadata writes.
+
+### Why identity queues share a project tail
+
+An upload may finish after its editor closes. A reopened editor waits for that
+editor's writes and trailing edit before saving, so an old snapshot cannot
+overwrite the newer name. A per-mount saving flag cannot order these writes.
 
 The Settings page also carries Close project in its header. It calls the same
 `removeProject` as the sidebar's Close project, after a confirm dialog like the

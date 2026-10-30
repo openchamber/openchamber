@@ -58,11 +58,12 @@ import {
   previewSnippet,
   setWebSearchSelection,
   setWarmingEnabled,
+  setCompactionSettings,
   setSkillEnabled,
   getWebSearchSource,
   type SnippetScope,
 } from './opencodeConfig';
-import { parseWebSearchSelection, skillSwitchRequestSchema } from './opencode-config-v2';
+import { compactionUpdateSchema, parseWebSearchSelection, skillSwitchRequestSchema } from './opencode-config-v2';
 import {
   getSkillsCatalogSourceItems,
   getSkillsCatalogSources,
@@ -409,6 +410,17 @@ export async function handleConfigBridgeMessage(
         return { id, type, success: false, error: 'enabled must be a boolean' };
       }
       const result = setWarmingEnabled(enabled);
+      return { id, type, success: true, data: { success: true, changed: result.changed } };
+    }
+
+    // PUT /api/config/compaction — see the web route in
+    // packages/web/server/lib/opencode/routes.js.
+    case 'api:config/compaction': {
+      const parsed = compactionUpdateSchema.safeParse(payload ?? {});
+      if (!parsed.success) {
+        return { id, type, success: false, error: 'buffer and keepTokens must be token counts or null, auto and background booleans' };
+      }
+      const result = setCompactionSettings(parsed.data);
       return { id, type, success: true, data: { success: true, changed: result.changed } };
     }
 

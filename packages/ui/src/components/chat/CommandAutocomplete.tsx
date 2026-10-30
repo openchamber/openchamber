@@ -2,7 +2,8 @@ import React from 'react';
 import { cn } from '@/lib/utils';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useChatSessionSelection } from './chatColumnSession';
-import { isCommandOfferedInComposer, selectCommandsForDirectory, useCommandsStore } from '@/stores/useCommandsStore';
+import { isCommandOfferedInComposer, selectCommandsForComposer, useCommandsStore } from '@/stores/useCommandsStore';
+import { useComposerConfigDirectory } from '@/hooks/useComposerConfigDirectory';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { useI18n } from '@/lib/i18n';
@@ -69,9 +70,13 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
   // own directory, or the Chats root for a chat draft — not to the project
   // the app was on last.
   const effectiveDirectory = useEffectiveDirectory();
-  const commandsWithMetadata = useCommandsStore((s) => selectCommandsForDirectory(s, effectiveDirectory));
+  const commandsTarget = useComposerConfigDirectory(effectiveDirectory);
+  const commandsWithMetadata = useCommandsStore((s) => selectCommandsForComposer(s, commandsTarget));
   const loadCommandsForDirectory = useCommandsStore((s) => s.loadCommands);
-  const refreshCommands = React.useCallback(() => loadCommandsForDirectory(effectiveDirectory), [effectiveDirectory, loadCommandsForDirectory]);
+  const refreshCommands = React.useCallback(() => {
+    if (commandsTarget.status === 'pending') return;
+    return loadCommandsForDirectory(commandsTarget.directory);
+  }, [commandsTarget, loadCommandsForDirectory]);
   const [selectedIndex, setSelectedIndex] = React.useState(0);
   const selectedIndexRef = React.useRef(0);
   const itemRefs = React.useRef<(HTMLDivElement | null)[]>([]);

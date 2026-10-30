@@ -33,9 +33,9 @@ const DIFF_CACHE_MAX_GLOBAL_ENTRIES = 200;
 type GitStatusFetchMode = 'full' | 'light';
 type GitStatusRequestOptions = { mode?: 'light'; fresh?: boolean };
 
-// Discovery outcome for a root that is not itself a git repository. The three
-// states are mutually exclusive: a repository list (possibly empty), a failed
-// scan (`null`), or a runtime without the discovery route (`'unsupported'`).
+// Discovery outcome for the repositories under a root. The three states are
+// mutually exclusive: a repository list (possibly empty), a failed scan
+// (`null`), or a runtime without the discovery route (`'unsupported'`).
 export type NestedRepoDiscovery = string[] | null | 'unsupported';
 
 /** Two-sided file contents; `submodule` is set when the path is a submodule, whose contents are only commit lines. */
@@ -102,13 +102,20 @@ interface GitStore {
 
   setLogMaxCount: (directory: string, maxCount: number) => void;
 
-  // Nested repository discovery: when the root directory is not itself a git
-  // repository, these hold the discovered repositories and the user's pick.
-  // `nestedReposByRoot` values are `null` when discovery failed — never a
-  // valid empty result — `'unsupported'` when the runtime has no discovery
-  // route, and absent when discovery has not run yet.
+  // Nested repository discovery: the repositories under a root (its own
+  // submodules included), and the user's pick among them. `nestedReposByRoot`
+  // values are `null` when discovery failed — never a valid empty result —
+  // `'unsupported'` when the runtime has no discovery route, and absent when
+  // discovery has not run yet.
   nestedReposByRoot: Map<string, NestedRepoDiscovery>;
   nestedRepoSelection: Map<string, string>;
+  /**
+   * Roots whose current selection was made by auto-select rather than by the
+   * user. A guess only holds while the root has nothing of its own to show, so
+   * it is dropped once the root becomes a repository with commits; an explicit
+   * pick persists and keeps winning. The automatic markers are session-only.
+   */
+  autoNestedRepoSelections: Set<string>;
   /**
    * Repositories whose selection was dropped because their probe reported
    * them as no longer a repository (corrupt or missing gitdir). Session-only
@@ -117,7 +124,13 @@ interface GitStore {
    */
   staleClearedSelections: Map<string, Set<string>>;
   ensureNestedRepos: (root: string, options?: { force?: boolean }) => Promise<void>;
-  selectNestedRepo: (root: string, repository: string) => void;
+  /**
+   * Switches a root to one of its repositories. Picking the root itself drops
+   * the selection. `persist: false` marks the pick as auto-select's guess: it
+   * holds for this session only and is dropped when the root becomes a
+   * repository with commits, so an automatic choice never outlives its reason.
+   */
+  selectNestedRepo: (root: string, repository: string, options?: { persist?: boolean }) => void;
   clearNestedRepoSelection: (root: string) => void;
 
   /**
@@ -348,19 +361,21 @@ const GIT_NESTED_REPO_SELECTION_KEY = 'oc.gitNestedRepoSelection.v1';
 const MAX_NESTED_REPO_RUNTIMES = 8;
 const MAX_NESTED_REPO_ROOTS = 50;
 type NestedRepoSelectionEnvelope = {
-  version: 1;
+  version: 2;
   runtimes: Record<string, { updatedAt: number; roots: Record<string, string> }>;
 };
 
-const emptyNestedRepoSelection = (): NestedRepoSelectionEnvelope => ({ version: 1, runtimes: {} });
+const emptyNestedRepoSelection = (): NestedRepoSelectionEnvelope => ({ version: 2, runtimes: {} });
 
 const readNestedRepoSelectionEnvelope = (): NestedRepoSelectionEnvelope => {
   try {
     const storage = getDeferredSafeStorage();
     const raw = storage.getItem(GIT_NESTED_REPO_SELECTION_KEY);
     const parsed = raw ? JSON.parse(raw) as Partial<NestedRepoSelectionEnvelope> : emptyNestedRepoSelection();
-    return parsed?.version === 1 && parsed.runtimes && typeof parsed.runtimes === 'object'
-      ? { version: 1, runtimes: parsed.runtimes }
+    // Version 1 also saved automatic choices. Their intent cannot be recovered,
+    // so none may seed an explicit choice; non-repository roots discover again.
+    return parsed?.version === 2 && parsed.runtimes && typeof parsed.runtimes === 'object'
+      ? { version: 2, runtimes: parsed.runtimes }
       : emptyNestedRepoSelection();
   } catch {
     return emptyNestedRepoSelection();
@@ -707,6 +722,7 @@ export const useGitStore = create<GitStore>()(
       activeDirectory: null,
       nestedReposByRoot: new Map(),
       nestedRepoSelection: seedNestedRepoSelection(initialGitRuntimeKey),
+      autoNestedRepoSelections: new Set(),
       staleClearedSelections: new Map(),
 
       resetForRuntimeSwitch: (runtimeKey) => {
@@ -729,6 +745,7 @@ export const useGitStore = create<GitStore>()(
           activeDirectory: null,
           nestedReposByRoot: new Map(),
           nestedRepoSelection: seedNestedRepoSelection(runtimeKey),
+          autoNestedRepoSelections: new Set(),
           staleClearedSelections: new Map(),
         });
       },
@@ -1404,20 +1421,24 @@ export const useGitStore = create<GitStore>()(
         }
       },
 
-      selectNestedRepo: (root, repository) => {
+      selectNestedRepo: (root, repository, options = {}) => {
         if (!root || !repository) return;
+        const { persist = true } = options;
         const next = new Map(get().nestedRepoSelection);
-        // Picking the root itself (offered when it has no commits yet) is no
-        // nested selection: the root resolves to itself without one, and
-        // auto-select stays free to pick again if the root stops being a
-        // repository.
+        const nextAuto = new Set(get().autoNestedRepoSelections);
+        // Picking the root itself is no nested selection: the root resolves
+        // to itself without one, and auto-select stays free to pick again if
+        // the root stops being a repository.
         if (repository === root) {
           next.delete(root);
+          nextAuto.delete(root);
         } else {
           next.set(root, repository);
+          if (persist) nextAuto.delete(root);
+          else nextAuto.add(root);
         }
-        set({ nestedRepoSelection: next });
-        writeCachedNestedRepoSelection(getRuntimeKey(), Object.fromEntries(next));
+        set({ nestedRepoSelection: next, autoNestedRepoSelections: nextAuto });
+        if (persist) writeCachedNestedRepoSelection(getRuntimeKey(), Object.fromEntries([...next].filter(([key]) => !nextAuto.has(key))));
       },
 
       clearNestedRepoSelection: (root) => {
@@ -1426,7 +1447,9 @@ export const useGitStore = create<GitStore>()(
         if (cleared === undefined) return;
         const next = new Map(get().nestedRepoSelection);
         next.delete(root);
-        set({ nestedRepoSelection: next });
+        const nextAuto = new Set(get().autoNestedRepoSelections);
+        nextAuto.delete(root);
+        set({ nestedRepoSelection: next, autoNestedRepoSelections: nextAuto });
         // Remember the drop so auto-select does not re-pick the same path
         // before its probe can tell the difference. Only stale-probe
         // recovery clears, so every clear here is a failed selection.
@@ -1435,7 +1458,7 @@ export const useGitStore = create<GitStore>()(
         forRoot.add(cleared);
         nextStale.set(root, forRoot);
         set({ staleClearedSelections: nextStale });
-        writeCachedNestedRepoSelection(getRuntimeKey(), Object.fromEntries(next));
+        writeCachedNestedRepoSelection(getRuntimeKey(), Object.fromEntries([...next].filter(([key]) => !nextAuto.has(key))));
       },
 
       recheckRepository: async (directory, git) => {
@@ -1554,17 +1577,12 @@ export const useIsUnbornGitRepo = (directory: string | null) => {
   return useGitStore((state) => (directory ? isUnbornRepository(state.directories.get(directory)) : false));
 };
 
-// Resolves the directory the Git tab operates on. A root repository with
-// commits is always used directly; otherwise (no repository, or one with no
-// commits yet) a per-root nested-repo selection, when present, becomes the
-// effective directory.
+// Resolves the directory the Git tab operates on. A per-root nested-repository
+// selection — a repository under a non-repository root, or a submodule of an
+// established one — always wins; without one the root itself is the repository.
 export const useEffectiveGitDirectory = (root: string | null) => {
   return useGitStore((state) => {
     if (!root) return null;
-    const rootState = state.directories.get(root);
-    if (rootState?.isGitRepo === true && !isUnbornRepository(rootState)) {
-      return root;
-    }
     return state.nestedRepoSelection.get(root) ?? root;
   });
 };
@@ -1584,6 +1602,12 @@ export const useNestedRepoSelection = (root: string | null) => {
     if (!root) return null;
     return state.nestedRepoSelection.get(root) ?? null;
   });
+};
+
+// Whether this root's selection was auto-select's guess rather than the user's
+// pick. Such a selection yields to the root once it becomes a repository.
+export const useAutoNestedRepoSelection = (root: string | null) => {
+  return useGitStore((state) => (root ? state.autoNestedRepoSelections.has(root) : false));
 };
 
 // Repositories of this root whose selection already failed its probe. Auto-

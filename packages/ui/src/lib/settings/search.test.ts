@@ -2,7 +2,9 @@ import { describe, expect, test } from 'bun:test';
 import type { I18nKey, I18nParams } from '@/lib/i18n/store';
 import { acmeTrackerDescriptor, linearLikeTrackerDescriptor } from '@/lib/trackers/descriptor.fixture';
 import { acmeDescriptor, githubLikeDescriptor, gitlabLikeDescriptor } from '@/lib/source-control/providers/descriptor.fixture';
-import { buildSettingsSearchResults } from './search';
+import { buildSettingsSearchResults, SETTINGS_ANCHOR_PAGES } from './search';
+import { useConfigStore } from '@/stores/useConfigStore';
+import { dict as ukDict } from '@/lib/i18n/messages/uk';
 
 const trackers = [linearLikeTrackerDescriptor()];
 const sourceControlProviders = [githubLikeDescriptor(), gitlabLikeDescriptor()];
@@ -24,6 +26,43 @@ const runtimeCtx = {
 };
 
 describe('settings search', () => {
+  test('indexes the retention target under its current label and existing anchor', () => {
+    const results = buildSettingsSearchResults({ query: 'retention', runtimeCtx, t, getPageTitle: (page) => page });
+    const target = results.find((result) => result.id === 'sessions.retention-only-archived');
+    expect(target?.page).toBe('sessions');
+    expect(target?.title).toBe('settings.layout.sessions.retention.target');
+    expect(target?.description).toBeNull();
+  });
+
+  test('finds localized endpoint fields only while their controls are visible', () => {
+    const initial = useConfigStore.getState();
+    try {
+      for (const context of [runtimeCtx, { ...runtimeCtx, isDesktop: true }, { ...runtimeCtx, isMobile: true }, { ...runtimeCtx, isVSCode: true }]) {
+        for (const enabled of [false, true]) {
+          for (const custom of [false, true]) {
+            useConfigStore.setState({
+              voiceProvider: custom ? 'openai-compatible' : 'local',
+              sttProvider: custom ? 'openai-compatible' : 'local',
+              showMessageTTSButtons: enabled,
+              autoReadAloudEnabled: false,
+              dictationEnabled: enabled,
+            });
+            for (const query of ['endpoint path', 'custom endpoint', 'resource path', ukDict['settings.voice.page.field.endpointPath']]) {
+              const results = buildSettingsSearchResults({ query, runtimeCtx: context, t: (key) => ukDict[key], getPageTitle: (page) => page });
+              const ids = results.map((result) => result.id);
+              expect(ids.includes('voice.tts-endpoint-path')).toBe(enabled && custom && !context.isVSCode);
+              expect(ids.includes('voice.stt-endpoint-path')).toBe(enabled && custom && !context.isVSCode);
+            }
+          }
+        }
+      }
+      useConfigStore.setState({ voiceProvider: 'openai-compatible', showMessageTTSButtons: false, autoReadAloudEnabled: true });
+      expect(buildSettingsSearchResults({ query: 'endpoint path', runtimeCtx, t, getPageTitle: (page) => page })
+        .some((result) => result.id === 'voice.tts-endpoint-path')).toBe(true);
+    } finally {
+      useConfigStore.setState(initial);
+    }
+  });
   test('finds double-paste on every shared Settings surface', () => {
     for (const query of ['double paste', 'ctrl v', 'cmd v']) {
       for (const context of [runtimeCtx, { ...runtimeCtx, isDesktop: true }, { ...runtimeCtx, isVSCode: true }, { ...runtimeCtx, isMobile: true }]) {
@@ -193,6 +232,36 @@ describe('settings search', () => {
 
     const unserved = buildSettingsSearchResults({ query: 'gitlab', runtimeCtx, t, getPageTitle: (page) => page });
     expect(unserved.some((result) => result.id.startsWith('integrations.source-control.'))).toBe(false);
+  });
+
+  test('server-served integration entries never enter the new-badge anchor map', () => {
+    const providerResults = buildSettingsSearchResults({
+      query: 'acme',
+      runtimeCtx,
+      t,
+      getPageTitle: (page) => page,
+      sourceControlProviders: [...sourceControlProviders, acmeDescriptor()],
+    });
+    const providerIds = providerResults.map((result) => result.id);
+    expect(providerIds).toEqual([
+      'integrations.source-control.acme',
+      'integrations.source-control.acme.connect',
+    ]);
+
+    const trackerResults = buildSettingsSearchResults({
+      query: 'linear',
+      runtimeCtx,
+      t,
+      getPageTitle: (page) => page,
+      trackers,
+    });
+    const trackerIds = trackerResults.map((result) => result.id)
+      .filter((id) => id.startsWith('integrations.linear'));
+    expect(trackerIds.length).toBeGreaterThan(0);
+
+    for (const id of [...providerIds, ...trackerIds]) {
+      expect(SETTINGS_ANCHOR_PAGES.has(id)).toBe(false);
+    }
   });
 
   test('keeps repository transport and provider controls out of VS Code Settings search', () => {

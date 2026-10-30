@@ -8,6 +8,7 @@ import { useSessionUIStore } from '@/sync/session-ui-store'
 import { SyncProvider, useDirectoryStore } from '@/sync/sync-context'
 import { installHookTestDom } from '../session/sidebar/test-utils/testDom'
 import { ContextUsageRingIcon } from './ContextRailUsage'
+import { useProjectsStore } from '@/stores/useProjectsStore'
 
 // The rail ring sits beside the transcript for the whole session, so a
 // streamed step that leaves the context reading unchanged must not render it.
@@ -88,6 +89,7 @@ describe('ContextUsageRingIcon', () => {
     ]
     restoreSpies = spies.map((spy) => () => spy.mockRestore())
     previousSessionUI = useSessionUIStore.getState()
+    useProjectsStore.setState({ projects: [{ id: 'repo', path: DIR }] })
     useSessionUIStore.setState({ currentSessionId: SESSION_ID, currentSessionDirectory: DIR })
     root = createRoot(dom.container)
     store = null

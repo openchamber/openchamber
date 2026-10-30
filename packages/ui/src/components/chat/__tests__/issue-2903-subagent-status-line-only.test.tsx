@@ -25,6 +25,7 @@ mock.module('@/components/ui', () => ({
 }));
 let mockIdCounter = 0;
 mock.module('@/lib/opencode/client', () => ({
+  isOpencodeNotFound: () => false,
   OpencodeApiError: Error,
   normalizeOpencodeError: (operation: string, error: unknown) => new Error(`${operation}: ${String(error)}`),
   ascendingId: (prefix: string) => `${prefix}_${(mockIdCounter += 1).toString(16).padStart(12, '0')}`,

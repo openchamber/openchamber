@@ -57,6 +57,14 @@ beforeEach(async () => {
     globals.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
     Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
   }
+  // happy-dom lays nothing out; the list's scroller gets a menu's height so
+  // the virtual list mounts the rows in view, as it does in a browser.
+  for (const [name, size] of [['clientHeight', 400], ['clientWidth', 380]] as const) {
+    Object.defineProperty(dom.HTMLElement.prototype, name, {
+      configurable: true,
+      get(this: HTMLElement) { return this.classList.contains('overlay-scrollbar-target') ? size : 0; },
+    });
+  }
   // The stores this list reads start background loads; keep them pending.
   const fetch = spyOn(globalThis, 'fetch').mockImplementation(() => new Promise<Response>(() => undefined));
   restoreFetch = () => fetch.mockRestore();

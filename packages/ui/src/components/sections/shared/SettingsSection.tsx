@@ -97,6 +97,12 @@ export const SETTINGS_CALLOUT_TITLE_CLASS = 'typography-meta font-medium text-fo
 export const SETTINGS_BRAND_TITLE_CLASS =
   'typography-settings-section-title text-foreground';
 
+export const SettingsBadge: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+  <span className="shrink-0 typography-micro px-1 rounded leading-none pb-px text-[var(--status-warning)] bg-[var(--status-warning)]/10">
+    {children}
+  </span>
+);
+
 interface SettingsSectionProps {
   /** Section title. Strings render as the shared h2 style. */
   title?: React.ReactNode;
@@ -305,6 +311,8 @@ interface SettingsFieldRowProps {
   settingsItem?: string;
   className?: string;
   controlClassName?: string;
+  /** Extra node next to the label, before the info hint (e.g. a "new" badge). */
+  labelAccessory?: React.ReactNode;
   /** Align control to the trailing edge on desktop. @default true */
   alignEnd?: boolean;
 }
@@ -325,6 +333,7 @@ export const SettingsFieldRow: React.FC<SettingsFieldRowProps> = ({
   settingsItem,
   className,
   controlClassName,
+  labelAccessory,
   alignEnd = true,
 }) => {
   return (
@@ -338,6 +347,7 @@ export const SettingsFieldRow: React.FC<SettingsFieldRowProps> = ({
       <div className="min-w-0 @xl:w-56 @xl:shrink-0">
         <div className="flex min-w-0 items-center gap-1.5">
           <div className={cn('min-w-0 truncate', SETTINGS_FIELD_LABEL_CLASS)}>{label}</div>
+          {labelAccessory}
           {info != null ? <SettingsInfoHint>{info}</SettingsInfoHint> : null}
         </div>
         {description != null ? (

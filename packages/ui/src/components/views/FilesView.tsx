@@ -60,7 +60,6 @@ import { cn, getRevealLabelKey } from '@/lib/utils';
 import { getLanguageFromExtension, getImageMimeType, isAudioFile, isBinaryFile, isDelimitedTableFile, isDrawioFile, isExcalidrawFile, isFontFile, isImageFile, isMermaidFile, isPdfFile, isSvgFile, isVideoFile, looksLikeBinaryText } from '@/lib/toolHelpers';
 import { shouldAllowFileDraftSave, shouldScheduleFileAutosave } from '@/lib/fileEditorAutosave';
 import { MAX_OPEN_FILE_BYTES } from '@/lib/fileOpenLimits';
-import { formatFileSize } from '@/lib/fileSize';
 import { LARGE_FILE_CHAR_THRESHOLD, initialFileTextMode, makeFileContentCacheKey, prepareFileEditorContent, serializeEditorContent, type FileLineEnding } from './fileEditorContent';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { subscribeToFileContentInvalidation } from '@/lib/fileContentInvalidation';
@@ -108,6 +107,8 @@ import { opencodeClient } from '@/lib/opencode/client';
 import { useDirectoryShowHidden } from '@/lib/directoryShowHidden';
 import { useFilesViewShowGitignored } from '@/lib/filesViewShowGitignored';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
+import { ContentLoadingState, ContentState } from '@/components/ui/content-state';
+import { getContextFileSizeLimitMessage } from '@/lib/contextFileOpenGuard';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useDraftSpaceTarget } from '@/lib/spaces/useDraftSpaceTarget';
 import { panelContentDirectory } from '@/lib/spaces/space-creation-requests';
@@ -117,12 +118,15 @@ import {
   FileTreeFileMarkers,
   FileTreeFolderBadge,
   FileTreeIndentGuides,
+  FileTreeRowEnd,
 } from './files/FileTreeRowParts';
 import {
+  fileTreeRowMenuFillClassName,
   fileTreeRowPaddingLeft,
   fileTreeRowStateClassName,
   type FileTreeGitStatus,
 } from './files/fileTreeRow';
+import { useFileTreeDisclosure } from './files/useFileTreeDisclosure';
 import { Icon } from "@/components/icon/Icon";
 import { useMessageTTS } from '@/hooks/useMessageTTS';
 import { ensurePierreThemeRegistered } from '@/lib/shiki/appThemeRegistry';
@@ -578,14 +582,14 @@ const FileRow: React.FC<FileRowProps> = ({
 
   return (
     <ContextMenu open={rightClickMenuPath === node.path} onOpenChange={(open) => setRightClickMenuPath(open ? node.path : null)}>
-      <ContextMenuTrigger render={<div className="group relative flex items-center" onContextMenu={!isMobile ? handleContextMenu : undefined} />}>
+      <ContextMenuTrigger render={<div className="group relative flex items-center" data-tree-disclosure-path={node.path} onContextMenu={!isMobile ? handleContextMenu : undefined} />}>
       <FileTreeIndentGuides depth={depth} />
       <button
         type="button"
         onClick={handleInteraction}
         onContextMenu={!isMobile ? handleContextMenu : undefined}
         className={cn(
-          'flex w-full items-center gap-1.5 rounded-md py-1 pe-8 text-start transition-colors select-none',
+          'oc-file-tree-row flex w-full items-center gap-1.5 rounded-md py-1 text-start select-none',
           fileTreeRowStateClassName(isActive)
         )}
         style={{ paddingLeft: fileTreeRowPaddingLeft(depth) }}
@@ -596,17 +600,21 @@ const FileRow: React.FC<FileRowProps> = ({
           <FileTypeIcon filePath={node.path} extension={node.extension} className="ms-0.5 size-3.5" />
         )}
         <span
-          className="min-w-0 flex-1 truncate typography-meta"
+          className="oc-file-tree-row-name typography-meta"
           title={node.path}
         >
           {node.name}
         </span>
-        {!isDir && <FileTreeFileMarkers isOpen={isOpen} status={status} />}
-        {isDir && badge && <FileTreeFolderBadge badge={badge} />}
+        <FileTreeRowEnd className="pe-2">
+          {!isDir && <FileTreeFileMarkers isOpen={isOpen} status={status} />}
+          {isDir && badge && <FileTreeFolderBadge badge={badge} />}
+        </FileTreeRowEnd>
       </button>
       {hasMenuActions && (
+        // Takes no width and fades in over the row's end lane, with its own fade over the name.
         <div className={cn(
-          "absolute inset-e-1 top-1/2 -translate-y-1/2",
+          "oc-file-tree-row-end -ms-7 w-7 pe-1 transition-opacity",
+          fileTreeRowMenuFillClassName(isActive),
           alwaysShowActions ? "opacity-100" : "opacity-0 focus-within:opacity-100 group-hover:opacity-100"
         )}>
           <DropdownMenu
@@ -2111,7 +2119,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     if (sizeStat && sizeStat.size > MAX_OPEN_FILE_BYTES) {
       setFileContent('');
       setDraftContent('');
-      setFileError(t('contextFileOpen.failure.tooLargeSize', { size: formatFileSize(MAX_OPEN_FILE_BYTES) }));
+      setFileError(getContextFileSizeLimitMessage(sizeStat.size, t));
       setFailedFilePath(node.path);
       lastLoadedFileStatRef.current = null;
       setFileLoading(false);
@@ -2325,6 +2333,16 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
   const isDirtyRef = React.useRef(isDirty);
   isDirtyRef.current = isDirty;
 
+  const reloadSelectedFile = React.useCallback(() => {
+    activeFileLoadIdRef.current += 1;
+    loadingFilePathRef.current = null;
+    lastLoadedFileStatRef.current = null;
+    setDesktopImageSrc('');
+    setFileError(null);
+    setLoadedFilePath(null);
+    setFileContentRevision((revision) => revision + 1);
+  }, []);
+
   React.useEffect(() => subscribeToFileContentInvalidation(({ runtimeKey, paths }) => {
     const selectedPath = selectedFile?.path;
     if (
@@ -2336,14 +2354,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
       return;
     }
 
-    activeFileLoadIdRef.current += 1;
-    loadingFilePathRef.current = null;
-    lastLoadedFileStatRef.current = null;
-    setDesktopImageSrc('');
-    setFileError(null);
-    setLoadedFilePath(null);
-    setFileContentRevision((revision) => revision + 1);
-  }), [selectedFile?.path]);
+    reloadSelectedFile();
+  }), [reloadSelectedFile, selectedFile?.path]);
 
   // Poll open file for external changes. Metadata is compared first so an
   // unchanged file never reads content, and a changed text file swaps content
@@ -2626,16 +2638,19 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     return statusIndex.badgeByDir.get(relativeDir) ?? null;
   }, [gitStatus, statusIndex, root]);
 
+  const treeListRef = React.useRef<HTMLUListElement>(null);
+  const toggleWithMotion = useFileTreeDisclosure(treeListRef);
   const toggleDirectory = React.useCallback(async (dirPath: string) => {
     const normalized = normalizePath(dirPath);
     if (!root) return;
 
-    toggleExpandedPath(root, normalized);
+    const expanded = useFilesViewTabsStore.getState().byRoot[root]?.expandedPaths.includes(normalized) ?? false;
+    toggleWithMotion(dirPath, expanded, () => toggleExpandedPath(root, normalized));
 
     if (!loadedDirsRef.current.has(normalized)) {
       await loadDirectory(normalized);
     }
-  }, [loadDirectory, root, toggleExpandedPath]);
+  }, [loadDirectory, root, toggleExpandedPath, toggleWithMotion]);
 
   const fileRowPermissions = React.useMemo(
     () => ({ canRename, canCreateFile, canCreateFolder, canDelete, canReveal }),
@@ -2680,9 +2695,12 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
           {isDir && isExpanded && (
             <ul className="flex flex-col">
               {loadErrorsByDir[node.path] ? (
+                // As wide as the pane and held at its start, so a tree widened by a long
+                // name keeps the message and its button on screen.
                 <li
-                  className="relative flex items-center gap-2 py-1 pe-2 typography-meta text-muted-foreground"
+                  className="sticky inset-s-0 flex w-[100cqw] items-center gap-2 py-1 pe-2 typography-meta text-muted-foreground"
                   style={{ paddingLeft: fileTreeRowPaddingLeft(depth + 1) }}
+                  data-tree-disclosure-path={`${node.path}/`}
                 >
                   <FileTreeIndentGuides depth={depth + 1} />
                   <span className="min-w-0 flex-1 truncate text-[var(--status-error)]" title={loadErrorsByDir[node.path]}>{loadErrorsByDir[node.path]}</span>
@@ -3807,7 +3825,16 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
   // for both the docked and the fullscreen viewer, so they cannot drift.
   const renderArtifactPreview = (file: FileNode): React.ReactNode => {
     if (isSelectedImage && !isSvgSource) {
-      return <ImageArtifact src={imageSrc} name={file.name} sizeBytes={artifactSize} neighbors={imageNeighbors} />;
+      return (
+        <ImageArtifact
+          src={imageSrc}
+          name={file.name}
+          sizeBytes={artifactSize}
+          neighbors={imageNeighbors}
+          onRetry={reloadSelectedFile}
+          download={downloadButton}
+        />
+      );
     }
     if (isSelectedPdf) {
       return <PdfArtifact src={pdfSrc} name={file.name} sizeBytes={artifactSize} download={downloadButton} />;
@@ -3862,6 +3889,24 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     ? renderArtifactPreview(selectedFile)
     : null;
 
+  const fileLoadingState = suppressFileLoadingIndicator
+    ? <div className="h-full" />
+    : <ContentLoadingState label={t('filesView.artifact.state.loading')} />;
+  const renderFileErrorState = (file: FileNode) => (
+    <ContentState
+      icon={<Icon name="error-warning" className="size-10 text-[color:var(--status-error)]" />}
+      title={t('filesView.artifact.state.readFailed', { name: file.name })}
+      // The generic fallback adds nothing to the title; a server's reason does.
+      description={fileError && fileError !== assetAuthErrorFallback ? fileError : undefined}
+      actions={(
+        <Button type="button" variant="outline" size="sm" onClick={reloadSelectedFile}>
+          <Icon name="refresh" className="me-2 size-4" />
+          {t('filesView.artifact.state.retry')}
+        </Button>
+      )}
+    />
+  );
+
   React.useEffect(() => {
     let cancelled = false;
     let objectUrl = '';
@@ -3914,7 +3959,10 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
           if (!cancelled) {
             setDesktopImageSrc('');
             setFileError(error instanceof Error ? error.message : t('filesView.error.readFileFailed'));
-            setLoadedFilePath(null);
+            // Marked failed like a text read. Clearing the loaded path would make
+            // the selection effect load the file again, which wipes this error
+            // without fetching the image and leaves the viewer empty.
+            setFailedFilePath(selectedFile.path);
           }
         })
         .finally(() => {
@@ -4769,17 +4817,10 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
           {!selectedFile ? (
             <div className="p-3 typography-ui text-muted-foreground">{t('filesView.editor.pickFileFromTree')}</div>
           ) : (fileLoading || isPdfAssetAuthLoading) ? (
-            suppressFileLoadingIndicator
-              ? <div className="p-3" />
-              : (
-                <div className="p-3 flex items-center gap-2 typography-ui text-muted-foreground">
-                  <Icon name="loader-4" className="size-4 animate-spin" />
-                  {t('filesView.state.loading')}
-                </div>
-              )
+            fileLoadingState
           ) : fileError ? (
-            <div className="p-3 typography-ui text-[color:var(--status-error)]">{fileError}</div>
-) : showCanvas ? (
+            renderFileErrorState(selectedFile)
+          ) : showCanvas ? (
             // Ahead of the built-in previews: a binary editor may claim an image or PDF.
             // Shown fullscreen instead while the overlay is open: one canvas instance.
             canvasInFullscreen ? <div className="h-full" /> : canvasElement
@@ -4962,6 +5003,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
   const hasTree = Boolean(root && childrenByDir[root]);
   const rootLoadError = root ? loadErrorsByDir[root] : null;
   const isSearchActive = debouncedSearchQuery.trim().length > 0;
+  const showsTree = hasTree && !searching && !isSearchActive && searchResults.length === 0 && !rootLoadError;
 
   const treePanel = treeEnabled ? (
     <section className={cn(
@@ -5029,8 +5071,10 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
         </div>
       </div>
 
-      <ScrollableOverlay outerClassName="flex-1 min-h-0" className={cn("py-2", isMobile ? "px-3" : "px-2")}>
-        <ul className="flex flex-col">
+      {/* A container, so an error row can take the pane's width in a wider tree. */}
+      <ScrollableOverlay outerClassName="flex-1 min-h-0" className={cn("@container py-2", isMobile ? "px-3" : "px-2")}>
+        {/* The tree is as wide as its widest row and scrolls sideways; search results truncate. */}
+        <ul ref={treeListRef} className={cn('relative flex flex-col', showsTree && 'w-max min-w-full')}>
           {searching ? (
             <li className="flex items-center gap-1.5 px-2 py-1 typography-meta text-muted-foreground">
               <Icon name="loader-4" className="size-4 animate-spin" />
@@ -5092,17 +5136,10 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
         </div>
         <ScrollableOverlay ref={setFullscreenPreviewScroller} outerClassName="h-full min-w-0" className={cn('h-full min-w-0', isLargeFile && '[overflow-anchor:none]')}>
           {(fileLoading || isPdfAssetAuthLoading) ? (
-            suppressFileLoadingIndicator
-              ? <div className="p-4" />
-              : (
-                <div className="p-4 flex items-center gap-2 typography-ui text-muted-foreground">
-                  <Icon name="loader-4" className="size-4 animate-spin" />
-                  Loading…
-                </div>
-              )
+            fileLoadingState
           ) : fileError ? (
-            <div className="p-4 typography-ui text-[color:var(--status-error)]">{fileError}</div>
-) : showCanvas ? (
+            renderFileErrorState(selectedFile)
+          ) : showCanvas ? (
             canvasElement
           ) : artifactPreview ? (
             artifactPreview

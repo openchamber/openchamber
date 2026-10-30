@@ -1,8 +1,9 @@
 import { EventEmitter } from 'node:events';
+import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createFsSearchRuntime } from './search.js';
 
 // i, n, d, e and x in order, each buried under filler characters with the
@@ -17,6 +18,22 @@ const neverSpawn = () => {
 };
 
 describe('filesystem search', () => {
+  it('respects ignored Unicode and whitespace names when hidden files are included', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-fs-search-'));
+    try {
+      execFileSync('git', ['init', '-q'], { cwd: root });
+      await fs.writeFile(path.join(root, '.gitignore'), '.ігнор.ts\n*ignored.ts\n space.ts\\ \n');
+      for (const name of ['.ігнор.ts', '.line\nignored.ts', ' space.ts ', '.visible.ts']) {
+        await fs.writeFile(path.join(root, name), '');
+      }
+      const search = createFsSearchRuntime({ fsPromises: fs, path, spawn, resolveGitBinaryForSpawn: () => 'git', workspaceSearch: true });
+      const files = await search.searchFilesystemFiles(root, { query: 'ts', limit: 60, includeHidden: true, respectGitignore: true });
+      expect(files.map((file) => file.name)).toEqual(['.visible.ts']);
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('reaches an exact deep match after weak shallow subsequence matches', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-fs-search-'));
     try {
@@ -66,6 +83,53 @@ describe('filesystem search', () => {
     }
   });
 
+  it('workspace search includes generated directories and goes past the icon-search ceiling', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-workspace-search-'));
+    try {
+      await fs.mkdir(path.join(root, 'build'));
+      await fs.writeFile(path.join(root, 'build/needle.ts'), '');
+      const search = createFsSearchRuntime({
+        fsPromises: {
+          ...fs,
+          async readdir(directory, options) {
+            if (directory !== root) return fs.readdir(directory, options);
+            return [
+              ...Array.from({ length: 10_001 }, (_, index) => ({ name: `ordinary-${index}.ts`, isDirectory: () => false, isFile: () => true })),
+              ...(await fs.readdir(directory, options)),
+            ];
+          },
+        },
+        path, spawn: neverSpawn, resolveGitBinaryForSpawn: () => 'git', workspaceSearch: true,
+      });
+      expect((await search.searchFilesystemFiles(root, { query: 'needle', limit: 10, respectGitignore: false }))
+        .map((file) => file.relativePath)).toEqual(['build/needle.ts']);
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects unreadable workspace searches instead of returning an empty success', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-workspace-search-'));
+    try {
+      const search = createFsSearchRuntime({ fsPromises: fs, path, spawn: neverSpawn, workspaceSearch: true });
+      await expect(search.searchFilesystemFiles(path.join(root, 'missing'), { query: 'needle', limit: 10, respectGitignore: false }))
+        .rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a workspace search that completes after its deadline', async () => {
+    const clock = vi.spyOn(Date, 'now').mockReturnValueOnce(0).mockReturnValueOnce(0).mockReturnValue(30_001);
+    try {
+      const search = createFsSearchRuntime({ fsPromises: { readdir: async () => [] }, path, spawn: neverSpawn, workspaceSearch: true });
+      await expect(search.searchFilesystemFiles('/repo', { query: 'needle', limit: 10, respectGitignore: false }))
+        .rejects.toThrow('File search exceeded its time limit');
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
   it('kills a stuck git check-ignore instead of hanging the search', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-fs-search-'));
     const previousTimeout = process.env.OPENCHAMBER_GIT_CHECK_IGNORE_TIMEOUT_MS;
@@ -78,6 +142,7 @@ describe('filesystem search', () => {
       const neverCloses = () => {
         const child = new EventEmitter();
         child.stdout = new EventEmitter();
+        child.stdin = { on() {}, end() {} };
         child.kill = (signal) => {
           kills.push(signal);
           child.emit('close');

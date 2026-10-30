@@ -5,7 +5,7 @@ import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { preloadProviderLogos } from '@/hooks/useProviderLogo';
-import { formatQuotaResetLabel, formatQuotaValueLabel } from '@/lib/quota';
+import { formatQuotaResetLabel, formatQuotaWindowValueLabel } from '@/lib/quota';
 import { useQuotaAutoRefresh, useQuotaStore } from '@/stores/useQuotaStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useUsageProviderGroups } from '@/components/usage/usageGroups';
@@ -83,9 +83,10 @@ export const WorkStatusUsageSection: React.FC = () => {
   // showing some other provider's quota as if it were the active one.
   const headline = pickUsageHeadline(groups, currentProviderId);
   const headlineMetric = headline
-    ? formatQuotaValueLabel(
-      headline.row.window.valueLabel,
+    ? formatQuotaWindowValueLabel(
+      headline.row.window,
       displayMode === 'remaining' ? headline.row.window.remainingPercent : headline.row.window.usedPercent,
+      t,
     )
     : null;
 
@@ -138,7 +139,7 @@ export const WorkStatusUsageSection: React.FC = () => {
             const displayPercent = displayMode === 'remaining'
               ? row.window.remainingPercent
               : row.window.usedPercent;
-            const metricLabel = formatQuotaValueLabel(row.window.valueLabel, displayPercent);
+            const metricLabel = formatQuotaWindowValueLabel(row.window, displayPercent, t);
             const resetLabel = formatQuotaResetLabel(
               row.window.resetAt,
               row.window.resetAfterFormatted ?? row.window.resetAtFormatted,

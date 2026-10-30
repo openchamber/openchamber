@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'bun:tes
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { findRuntimeMatches, pluginFileRuntimeTarget, resolveLoadState } from '../../../../ui/src/components/sections/plugins/pluginLoadState.ts';
 
 let rootDir;
 let projectDir;
@@ -176,6 +177,30 @@ describe('opencode plugins data layer', () => {
     ]);
   });
 
+  test('preserves runtime paths through a symlinked config directory', () => {
+    const physicalDir = fs.mkdtempSync(path.join(rootDir, 'physical-'));
+    fs.symlinkSync(physicalDir, globalDir, 'dir');
+    for (const name of ['plugins/local', 'plugin/legacy']) {
+      fs.mkdirSync(path.join(globalDir, name), { recursive: true });
+    }
+    fs.writeFileSync(path.join(globalDir, 'plugins', 'editable.ts'), '');
+    fs.writeFileSync(path.join(globalDir, 'plugin', 'legacy.ts'), '');
+
+    const files = plugins.listPluginDirFiles(projectDir);
+    for (const file of files) {
+      const folder = file.fileName.startsWith('legacy') ? 'plugin' : 'plugins';
+      const originalPath = path.join(globalDir, folder, file.fileName);
+      expect(file.absolutePath).toBe(originalPath);
+      expect(file.resolvedPath).toBe(fs.realpathSync(originalPath));
+      const target = pluginFileRuntimeTarget(file.absolutePath);
+      const active = { source: { kind: 'local', path: file.kind === 'file' || file.fileName.endsWith('.ts') ? originalPath : path.join(originalPath, 'index.js') }, state: { kind: 'active' } };
+      expect(resolveLoadState(findRuntimeMatches(target, [active]))).toEqual({ kind: 'active', version: null });
+      const failed = { source: { kind: 'local', path: originalPath }, state: { kind: 'failed', error: 'load failed', ref: 'err_local' } };
+      expect(resolveLoadState(findRuntimeMatches(target, [failed]))).toEqual({ kind: 'failed', error: 'load failed', ref: 'err_local' });
+    }
+    expect(files).toHaveLength(4);
+  });
+
   test('lists global and OPENCODE_CONFIG entries together and edits each in its own file', () => {
     const globalConfigPath = path.join(globalDir, 'opencode.json');
     writeJson(globalConfigPath, { plugins: ['global-plugin', 'shared-plugin'] });
@@ -193,6 +218,23 @@ describe('opencode plugins data layer', () => {
     plugins.deletePluginEntry(plugins.encodePluginId('config', 'user:shared-plugin'), projectDir);
     expect(readJson(globalConfigPath).plugins).toEqual([{ package: 'global-plugin', options: { a: 1 } }, 'shared-plugin']);
     expect(readJson(userConfigPath).plugins).toEqual(['custom-plugin']);
+  });
+
+  test('keeps custom relative targets when the global config is a symlink alias', () => {
+    const spec = './plugins/memory';
+    writeJson(userConfigPath, { plugins: [{ package: spec, options: { owner: 'custom' } }] });
+    const customPluginPath = path.join(rootDir, 'plugins', 'memory');
+    fs.mkdirSync(customPluginPath, { recursive: true });
+    fs.mkdirSync(path.join(globalDir, 'plugins', 'memory'), { recursive: true });
+    fs.symlinkSync(userConfigPath, path.join(globalDir, 'opencode.json'));
+
+    expect(plugins.listPluginEntries(globalDir)).toEqual([
+      expect.objectContaining({
+        id: plugins.encodePluginId('config', `user:${spec}`),
+        spec, scope: 'user', sourcePath: userConfigPath,
+        resolvedPath: fs.realpathSync(customPluginPath), options: { owner: 'custom' },
+      }),
+    ]);
   });
 
   test('rewrites a v1 plugin array into v2 plugins when one entry is updated', () => {
@@ -261,6 +303,24 @@ describe('opencode plugins data layer', () => {
   test('encodes and decodes ids', () => {
     const id = plugins.encodePluginId('config', 'user:oh-my-openagent@4.3.0');
     expect(plugins.decodePluginId(id)).toEqual({ prefix: 'config', value: 'user:oh-my-openagent@4.3.0' });
+  });
+
+  test('lists a physical config once while retaining declarations from independent configs', () => {
+    const configPath = path.join(globalDir, 'opencode.jsonc');
+    process.env.OPENCODE_CONFIG = configPath;
+    writeJson(configPath, { plugins: [{ package: './plugins/memory', options: { owner: 'user' } }] });
+    const pluginPath = path.join(globalDir, 'plugins', 'memory');
+    fs.mkdirSync(pluginPath, { recursive: true });
+    const entries = plugins.listPluginEntries(globalDir);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ scope: 'user', sourcePath: configPath, resolvedPath: fs.realpathSync(pluginPath), options: { owner: 'user' } });
+    expect(plugins.listPluginDirFiles(globalDir).find((file) => file.fileName === 'memory')).toMatchObject({ absolutePath: pluginPath, resolvedPath: entries[0].resolvedPath });
+
+    writeJson(path.join(projectDir, '.opencode', 'opencode.json'), { plugins: [{ package: pluginPath, options: { owner: 'project' } }] });
+    expect(plugins.listPluginEntries(projectDir).map((entry) => ({ scope: entry.scope, path: entry.resolvedPath, options: entry.options }))).toEqual([
+      { scope: 'user', path: fs.realpathSync(pluginPath), options: { owner: 'user' } },
+      { scope: 'project', path: fs.realpathSync(pluginPath), options: { owner: 'project' } },
+    ]);
   });
 
   test('round-trips plugin dir files', () => {

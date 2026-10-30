@@ -122,6 +122,22 @@ describe('scheduled-tasks runtime helpers', () => {
   it('returns null when prompt is not a slash command', () => {
     expect(parseScheduledCommandPrompt('Summarize open issues')).toBeNull();
     expect(parseScheduledCommandPrompt('/')).toBeNull();
+    expect(parseScheduledCommandPrompt(undefined)).toBeNull();
+    expect(parseScheduledCommandPrompt('/ review')).toBeNull();
+    expect(parseScheduledCommandPrompt('/\nreview')).toBeNull();
+  });
+
+  it.each([
+    ['/review first line\n\n  indented text\nlast line', 'first line\n\n  indented text\nlast line'],
+    ['/review \t\n  first line\n\n    indented text', '  first line\n\n    indented text'],
+    ['/review\n\n  indented text', '\n  indented text'],
+    ['/review\r\n  first line\r\n\r\n    indented text', '  first line\r\n\r\n    indented text'],
+    ['/review first  second\tthird', 'first  second\tthird'],
+    ['  /review \t first second \t\r\n', 'first second'],
+    ['/review', ''],
+    ['/review \t\r\n', ''],
+  ])('preserves the argument body of %j after outer trimming', (prompt, argumentsText) => {
+    expect(parseScheduledCommandPrompt(prompt)).toEqual({ command: 'review', arguments: argumentsText });
   });
 
   it('expands command arguments into the goal objective', () => {
@@ -305,6 +321,51 @@ describe('scheduled-tasks runtime prompt dispatch', () => {
     vi.unstubAllGlobals();
   });
 
+  it('sends the complete multiline command body to OpenCode', async () => {
+    const posts = [];
+    vi.stubGlobal('fetch', vi.fn(async (input, init = {}) => {
+      const { pathname } = new URL(String(input));
+      if (init.method === 'POST') posts.push({ pathname, body: JSON.parse(init.body) });
+      if (pathname === '/api/session/ses_run/command') return new Response(null, { status: 204 });
+      const data = pathname === '/api/session' ? { id: 'ses_run' } : pathname === '/api/command' ? [{ name: 'review' }] : {};
+      return new Response(JSON.stringify({ location: { directory: '/repo' }, data }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }));
+    const task = {
+      id: 'task-1',
+      name: 'Nightly',
+      enabled: true,
+      schedule: { kind: 'daily', times: ['03:00'], timezone: 'UTC' },
+      execution: { prompt: '/review\r\nfirst  line\r\n\r\n  indented text', providerID: 'openai', modelID: 'gpt-5' },
+      state: { createdAt: 1, updatedAt: 1 },
+    };
+    const runtime = createScheduledTasksRuntime({
+      projectConfigRuntime: {
+        listScheduledTasks: async () => [task],
+        reconcileLoopTasks: async () => [task],
+        updateScheduledTaskState: async () => ({ task, updated: true }),
+        updateScheduledTaskStateIf: async () => ({ task, updated: true }),
+      },
+      listProjects: async () => [{ id: 'proj', path: '/repo' }],
+      buildOpenCodeUrl: () => 'http://127.0.0.1:1/',
+      getOpenCodeAuthHeaders: () => ({}),
+      waitForOpenCodeReady: async () => {},
+      logger: { info: () => {}, warn: () => {}, error: () => {} },
+    });
+    try {
+      await runtime.start();
+      const result = await runtime.runNow('proj', 'task-1');
+      expect(result.error).toBeUndefined();
+      expect(result).toMatchObject({ ok: true });
+      expect(posts.find((post) => post.pathname === '/api/session/ses_run/command')?.body).toEqual({
+        name: 'review',
+        text: 'first  line\r\n\r\n  indented text',
+      });
+      expect(posts.some((post) => post.pathname.endsWith('/prompt'))).toBe(false);
+    } finally {
+      runtime.stop();
+    }
+  });
+
   it('parks the briefing with resume: false so execution starts on the task prompt', async () => {
     const posts = [];
     vi.stubGlobal('fetch', vi.fn(async (input, init = {}) => {
@@ -334,7 +395,10 @@ describe('scheduled-tasks runtime prompt dispatch', () => {
       waitForOpenCodeReady: async () => {},
       persistSessionGoal: async () => undefined,
       sessionKnowledgeRuntime: {
-        sync: async (sessionID, directory) => { posts.push({ pathname: `knowledge:${sessionID}`, body: { directory } }); return true; },
+        sync: async (sessionID, directory, responseStyleInstruction) => {
+          posts.push({ pathname: `knowledge:${sessionID}`, body: { directory, responseStyleInstruction } });
+          return true;
+        },
       },
       logger: { info: () => {}, warn: () => {}, error: () => {} },
     });
@@ -347,7 +411,7 @@ describe('scheduled-tasks runtime prompt dispatch', () => {
     // The project knowledge is written into the session before anything is sent to it.
     const dispatch = posts.filter((post) => post.pathname.startsWith('/api/session/ses_run/') || post.pathname.startsWith('knowledge:'));
     expect(dispatch.map((post) => post.pathname.split('/').at(-1))).toEqual(['knowledge:ses_run', 'synthetic', 'prompt']);
-    expect(dispatch[0].body).toEqual({ directory: '/repo' });
+    expect(dispatch[0].body).toEqual({ directory: '/repo', responseStyleInstruction: '' });
     expect(dispatch[1].body.resume).toBe(false);
     expect(dispatch[2].body).toMatchObject({ text: 'Review open issues' });
     expect(dispatch[2].body.resume).toBeUndefined();
@@ -399,6 +463,46 @@ describe('scheduled-tasks runtime prompt dispatch', () => {
     expect(patches[startIndex].lastSessionId).toBeUndefined();
     expect(patches[startIndex + 1]).toEqual({ lastSessionId: 'ses_failed' });
     expect(patches.at(-1)).toMatchObject({ lastStatus: 'error', lastSessionId: 'ses_failed' });
+  });
+
+  it('records a dispatched prompt as sent instead of a completed success', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input, init = {}) => {
+      const { pathname } = new URL(String(input));
+      const data = pathname === '/api/session' ? { id: 'ses_run' } : pathname === '/api/command' ? [] : {};
+      return new Response(JSON.stringify({ location: { directory: '/repo' }, data }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }));
+    const task = {
+      id: 'task-1',
+      name: 'Nightly',
+      enabled: true,
+      schedule: { kind: 'daily', times: ['03:00'], timezone: 'UTC' },
+      execution: { prompt: 'Review open issues', providerID: 'openai', modelID: 'gpt-5' },
+      state: { createdAt: 1, updatedAt: 1 },
+    };
+    const patches = [];
+    const runtime = createScheduledTasksRuntime({
+      projectConfigRuntime: {
+        listScheduledTasks: async () => [task],
+        reconcileLoopTasks: async () => [task],
+        updateScheduledTaskState: async (_projectID, _taskID, patch) => {
+          patches.push(patch);
+          return { task, updated: true };
+        },
+        updateScheduledTaskStateIf: async () => ({ task, updated: true }),
+      },
+      listProjects: async () => [{ id: 'proj', path: '/repo' }],
+      buildOpenCodeUrl: () => 'http://127.0.0.1:1/',
+      getOpenCodeAuthHeaders: () => ({}),
+      waitForOpenCodeReady: async () => {},
+      logger: { info: () => {}, warn: () => {}, error: () => {} },
+    });
+    await runtime.start();
+    const result = await runtime.runNow('proj', 'task-1');
+    runtime.stop();
+
+    expect(result.ok).toBe(true);
+    expect(patches.at(-1)).toMatchObject({ lastStatus: 'sent', lastSessionId: 'ses_run' });
+    expect(patches.at(-1).lastError).toBeUndefined();
   });
 });
 

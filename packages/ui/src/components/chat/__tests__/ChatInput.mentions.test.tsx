@@ -26,14 +26,27 @@ Object.assign(globalThis, {
 });
 
 const DIRECTORY = '/mention-fixture';
+const skillRequests: string[] = [];
+let liveSessions: Session[] = [];
 const location = { directory: DIRECTORY, project: { id: 'project', directory: DIRECTORY, canonical: DIRECTORY } };
 // External catalogs and backend data are isolated; composer/editor/picker modules are real.
 const responseFor = (input: RequestInfo | URL) => {
   const path = new URL(input instanceof Request ? input.url : input.toString(), 'http://localhost/').pathname;
+  if (path === '/api/config/skills') {
+    const url = new URL(input instanceof Request ? input.url : input.toString(), 'http://localhost/');
+    const directory = url.searchParams.get('directory') ?? '';
+    skillRequests.push(directory);
+    const name = directory === DIRECTORY ? 'root-skill' : 'folder-skill';
+    return Response.json({ skills: [{ id: name, name, path: `${directory}/.opencode/skills/${name}/SKILL.md`, scope: 'project' }] });
+  }
   if (path.endsWith('/event')) return new Response(new ReadableStream(), { headers: { 'content-type': 'text/event-stream' } });
   if (path.endsWith('/location')) return Response.json(location);
   if (path.endsWith('/session/active')) return Response.json({ data: {} });
-  if (path === '/api/session') return Response.json({ location, data: [], cursor: {} });
+  if (path === '/api/session') return Response.json({
+    location,
+    data: liveSessions.map((record) => ({ ...record, location: { directory: record.directory } })),
+    cursor: {},
+  });
   if (path === '/api/config') return Response.json([]);
   if (path === '/api/project') return Response.json([]);
   if (path.endsWith('/vcs')) return Response.json({ data: { branch: { current: 'main', default: 'main' } } });
@@ -70,9 +83,15 @@ const { useConfigStore } = await import('@/stores/useConfigStore');
 const { useGlobalSessionsStore } = await import('@/stores/useGlobalSessionsStore');
 const { useFileSearchStore } = await import('@/stores/useFileSearchStore');
 const { useSessionUIStore } = await import('@/sync/session-ui-store');
+const { useProjectsStore } = await import('@/stores/useProjectsStore');
 const { writeChatDraft } = await import('@/lib/chatDraftPersistence');
 const { getRuntimeKey } = await import('@/lib/runtime-switch');
 const { OpenCode } = await import('@opencode/client');
+const { opencodeClient } = await import('@/lib/opencode/client');
+const { useCommandsStore, invalidateCommandsLoadCache } = await import('@/stores/useCommandsStore');
+const { useSkillsStore, invalidateSkillsLoadCache } = await import('@/stores/useSkillsStore');
+const { ChatColumnSessionContext, ChatColumnActionsContext } = await import('../chatColumnSession');
+const { getSyncChildStores } = await import('@/sync/sync-refs');
 
 const sdk = OpenCode.make({ baseUrl: 'https://sync.test', fetch: async (request) => responseFor(request) });
 // SAFETY: Same minimal offline runtime as sibling composer integration tests.
@@ -101,10 +120,20 @@ type Composer = {
 };
 
 let composerCount = 0;
-const withComposer = async (run: (composer: Composer) => Promise<void>) => {
+const withComposer = async (run: (composer: Composer) => Promise<void>, options?: { startDirectory: string | null; pinned?: boolean; column?: boolean }) => {
+  useProjectsStore.setState({ projects: [{ id: 'project', path: DIRECTORY }] });
   const sessionId = `ses_composer_${++composerCount}`;
   useDirectoryStore.setState({ currentDirectory: DIRECTORY });
-  useSessionUIStore.setState({ currentSessionId: sessionId, currentSessionDirectory: DIRECTORY });
+  useSessionUIStore.setState({
+    currentSessionId: options ? null : sessionId,
+    currentSessionDirectory: DIRECTORY,
+    newSessionDraft: {
+      ...useSessionUIStore.getState().newSessionDraft,
+      open: Boolean(options && !options.column), draftId: composerCount, target: 'project', parentID: null,
+      selectedProjectId: null, directoryOverride: DIRECTORY, bootstrapPendingDirectory: null,
+      worktreeStartDirectory: options ? { worktreeRoot: DIRECTORY, directory: options.startDirectory } : null,
+    },
+  });
   useConfigStore.setState({
     currentProviderId: 'provider', currentModelId: 'model', isConnected: true, hasEverConnected: true,
     agents: [{
@@ -119,7 +148,13 @@ const withComposer = async (run: (composer: Composer) => Promise<void>) => {
   try {
     await act(async () => root.render(
       <RuntimeAPIContext.Provider value={runtimeAPIs}><ThemeSystemProvider><I18nProvider>
-        <SyncProvider sdk={sdk} directory={DIRECTORY}><ChatInput /></SyncProvider>
+        <SyncProvider sdk={sdk} directory={DIRECTORY}>
+          <ChatColumnSessionContext.Provider value={options?.pinned || options?.column ? { sessionId, directory: DIRECTORY } : null}>
+            <ChatColumnActionsContext.Provider value={{ pinned: Boolean(options?.pinned), openSession: () => {}, openTimelineDialog: () => {}, focusInput: () => {} }}>
+              <ChatInput />
+            </ChatColumnActionsContext.Provider>
+          </ChatColumnSessionContext.Provider>
+        </SyncProvider>
       </I18nProvider></ThemeSystemProvider></RuntimeAPIContext.Provider>,
     ));
     await settle();
@@ -290,4 +325,147 @@ test('switching same-text composer documents clears completion without auto-open
     expect(view.state.doc.toString()).toBe('@coder ');
     expect(rows().length).toBe(0);
   });
+});
+
+test('a pending worktree draft does no discovery, then commands, skills and files use its start folder', async () => {
+  const commands = spyOn(opencodeClient, 'listCommands').mockImplementation(async () => [{ name: 'folder-command', description: 'Fixture command' }]);
+  invalidateCommandsLoadCache();
+  invalidateSkillsLoadCache(DIRECTORY);
+  invalidateSkillsLoadCache(`${DIRECTORY}/ai`);
+  useCommandsStore.setState({ commandsByDirectory: {} });
+  useSkillsStore.setState({ skills: [], skillsByDirectory: {} });
+  skillRequests.length = 0;
+  const searches: string[] = [];
+  try {
+    await withComposer(async ({ view, type, key, rows }) => {
+      expect(useSessionUIStore.getState().currentSessionId).toBeNull();
+      expect(useSessionUIStore.getState().newSessionDraft.worktreeStartDirectory).toEqual({ worktreeRoot: DIRECTORY, directory: null });
+      useFileSearchStore.setState({ searchFiles: async (directory) => { searches.push(directory); return []; } });
+      await type('/folder');
+      expect(rows().some((row) => row.textContent?.includes('folder-command'))).toBe(false);
+      await act(async () => view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: '' } }));
+      await type('$root');
+      expect(rows().some((row) => row.textContent?.includes('root-skill'))).toBe(false);
+      await key('Escape');
+      await type(' @file');
+      expect(searches).toEqual([]);
+      expect(commands.mock.calls).toEqual([]);
+      expect(skillRequests).toEqual([]);
+      await key('Escape');
+      await act(async () => {
+        const draft = useSessionUIStore.getState().newSessionDraft;
+        useSessionUIStore.getState().setDraftWorktreeStartDirectory(draft.draftId, DIRECTORY, `${DIRECTORY}/ai`);
+      });
+      await settle();
+      expect(commands.mock.calls.map(([directory]) => directory)).toEqual([`${DIRECTORY}/ai`]);
+      expect(skillRequests).toEqual([`${DIRECTORY}/ai`]);
+      await act(async () => view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: '' } }));
+      await type('/folder');
+      expect(rows().some((row) => row.textContent?.includes('folder-command'))).toBe(true);
+      await key('Escape');
+      await type(' @file');
+      expect(searches.length).toBeGreaterThan(0);
+      expect(new Set(searches)).toEqual(new Set([`${DIRECTORY}/ai`]));
+      await key('Escape');
+      await type(' $folder');
+      expect(rows().some((row) => row.textContent?.includes('folder-skill'))).toBe(true);
+      expect(rows().some((row) => row.textContent?.includes('root-skill'))).toBe(false);
+    }, { startDirectory: null });
+  } finally {
+    commands.mockRestore();
+  }
+});
+
+for (const pinned of [false, true]) {
+  test(pinned ? 'a pinned composer ignores the neighboring pending draft' : 'a root fallback is used by composer discovery', async () => {
+    const commands = spyOn(opencodeClient, 'listCommands').mockImplementation(async () => []);
+    invalidateCommandsLoadCache();
+    invalidateSkillsLoadCache(DIRECTORY);
+    useCommandsStore.setState({ commandsByDirectory: {} });
+    useSkillsStore.setState({ skills: [], skillsByDirectory: {} });
+    skillRequests.length = 0;
+    const searches: string[] = [];
+    try {
+      await withComposer(async ({ type, rows }) => {
+        useFileSearchStore.setState({ searchFiles: async (directory) => { searches.push(directory); return []; } });
+        expect(commands.mock.calls.map(([directory]) => directory)).toEqual(pinned ? [] : [DIRECTORY]);
+        expect(skillRequests).toEqual(pinned ? [] : [DIRECTORY]);
+        await type('@file');
+        expect(searches.length).toBeGreaterThan(0);
+        expect(new Set(searches)).toEqual(new Set([DIRECTORY]));
+        await type(' $root');
+        expect(rows().some((row) => row.textContent?.includes('root-skill'))).toBe(true);
+      }, { startDirectory: pinned ? null : DIRECTORY, pinned });
+    } finally {
+      commands.mockRestore();
+    }
+  });
+}
+
+for (const pinned of [false, true]) {
+  for (const otherStore of [false, true]) {
+    test(`a ${pinned ? 'pinned' : 'main'} column follows a session arriving in ${otherStore ? 'another' : 'its hinted'} live store`, async () => {
+      const send = spyOn(useSessionUIStore.getState(), 'sendMessage').mockResolvedValue(undefined);
+      const commands = spyOn(opencodeClient, 'listCommands').mockResolvedValue([{ name: 'folder-command', description: 'Fixture command' }]);
+      const folder = `${DIRECTORY}/ai`;
+      invalidateCommandsLoadCache();
+      invalidateSkillsLoadCache(folder);
+      useCommandsStore.setState({ commandsByDirectory: {} });
+      useSkillsStore.setState({ skills: [], skillsByDirectory: {} });
+      try {
+        await withComposer(async ({ sessionId, container, view, type, key, choose, rows }) => {
+          const searches: string[] = [];
+          useFileSearchStore.setState({ searchFiles: async (directory) => { searches.push(directory); return []; } });
+          await act(async () => {
+            useSessionUIStore.setState({ worktreeMetadata: new Map([[sessionId, { path: DIRECTORY, projectDirectory: DIRECTORY, branch: 'test', label: 'test' }]]) });
+          });
+          await settle();
+          await act(async () => {
+            liveSessions = [{ ...session(sessionId, 'Folder session'), directory: folder }];
+            const child = getSyncChildStores().ensureChild(otherStore ? folder : DIRECTORY, { bootstrap: false });
+            child.setState({ session: liveSessions, sessionTotal: 1 });
+          });
+          await type('/folder');
+          expect(rows().some((row) => row.textContent?.includes('folder-command'))).toBe(true);
+          expect(commands.mock.calls.map(([directory]) => directory)).toEqual([folder]);
+          await key('Escape');
+          await act(async () => view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: '' } }));
+          await type('@file');
+          expect(searches.length).toBeGreaterThan(0);
+          expect(new Set(searches)).toEqual(new Set([folder]));
+          await key('Escape');
+          await type(' $folder');
+          await choose('folder-skill');
+          expect(container.querySelector('[title="$folder-skill"]')).not.toBeNull();
+          await key('Enter');
+          expect(send.mock.calls.length).toBe(1);
+          expect(send.mock.calls[0]?.[9]?.skills?.names).toEqual(['folder-skill']);
+        }, { startDirectory: null, pinned, column: true });
+      } finally {
+        liveSessions = [];
+        send.mockRestore();
+        commands.mockRestore();
+      }
+    });
+  }
+}
+
+test('opening an existing composer leaves command and skill discovery lazy', async () => {
+  const commands = spyOn(opencodeClient, 'listCommands').mockResolvedValue([]);
+  invalidateCommandsLoadCache();
+  invalidateSkillsLoadCache(DIRECTORY);
+  useCommandsStore.setState({ commandsByDirectory: {} });
+  useSkillsStore.setState({ skills: [], skillsByDirectory: {} });
+  skillRequests.length = 0;
+  try {
+    await withComposer(async ({ type }) => {
+      expect(commands.mock.calls).toEqual([]);
+      expect(skillRequests).toEqual([]);
+      await type('/fixture');
+      expect(commands.mock.calls.map(([directory]) => directory)).toEqual([DIRECTORY]);
+      expect(skillRequests).toEqual([]);
+    });
+  } finally {
+    commands.mockRestore();
+  }
 });

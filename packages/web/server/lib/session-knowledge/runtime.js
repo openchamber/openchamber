@@ -26,6 +26,7 @@ export const KNOWLEDGE_ENTRY_KEYS = {
   pinned: 'openchamber.pinned',
   memory: 'openchamber.memory',
   guidance: 'openchamber.guidance',
+  responseStyle: 'openchamber.response-style',
 };
 
 /** Budget for each entry; anything past it is cut, loudly. */
@@ -224,12 +225,15 @@ const buildGuidance = ({ linking, rendering, secrets, workflows, directTools }) 
  * away; a key left out keeps what the session holds, which is what a branch
  * that could not be read means.
  */
-export const buildKnowledgeEntries = ({ notes, plans, memory, linking = false, rendering = false, secrets = false, workflows = false, directTools = true, checkout = null }) => {
+export const buildKnowledgeEntries = ({ notes, plans, memory, linking = false, rendering = false, secrets = false, workflows = false, directTools = true, checkout = null, responseStyleInstruction }) => {
   const entries = {
     [KNOWLEDGE_ENTRY_KEYS.pinned]: truncate(buildPinnedBlock({ notes, plans })),
     [KNOWLEDGE_ENTRY_KEYS.memory]: truncate(buildMemoryBlock(memory)),
     [KNOWLEDGE_ENTRY_KEYS.guidance]: buildGuidance({ linking, rendering, secrets, workflows, directTools }),
   };
+  if (responseStyleInstruction !== undefined) {
+    entries[KNOWLEDGE_ENTRY_KEYS.responseStyle] = (responseStyleInstruction ?? '').trim();
+  }
   // The branch is told while the agent has the tool, whose worktree move is
   // the one thing it can do about a busy branch.
   if (!linking) entries[KNOWLEDGE_ENTRY_KEYS.checkout] = '';
@@ -421,11 +425,14 @@ export const createSessionKnowledgeRuntime = (dependencies) => {
    * some context, a failed send costs the user their message. One entry that
    * will not write does not hold back the others.
    */
-  const sync = async (sessionId, directory) => {
+  const syncOnce = async (sessionId, directory, responseStyleInstruction) => {
     if (!instructionEntries || !sessionId) return false;
     try {
       const session = await readStoredSession(sessionId).catch(() => null);
-      const entries = buildKnowledgeEntries(await collect(directory, readPins(session)));
+      const entries = buildKnowledgeEntries({
+        ...await collect(directory, readPins(session)),
+        responseStyleInstruction,
+      });
       const writes = await Promise.allSettled(Object.entries(entries).map(([key, text]) => (text
         ? instructionEntries.put(sessionId, directory, key, text)
         : instructionEntries.remove(sessionId, directory, key))));
@@ -436,6 +443,19 @@ export const createSessionKnowledgeRuntime = (dependencies) => {
       console.warn('[session-knowledge] sync failed:', error?.message || error);
       return false;
     }
+  };
+
+  const syncTails = new Map();
+  const sync = (sessionId, directory, responseStyleInstruction) => {
+    if (!sessionId) return Promise.resolve(false);
+    const previous = syncTails.get(sessionId) ?? Promise.resolve(false);
+    const current = previous
+      .catch(() => false)
+      .then(() => syncOnce(sessionId, directory, responseStyleInstruction));
+    syncTails.set(sessionId, current);
+    return current.finally(() => {
+      if (syncTails.get(sessionId) === current) syncTails.delete(sessionId);
+    });
   };
 
   const setPin = async (sessionId, directory, kind, id, pinned) => {

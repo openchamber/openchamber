@@ -87,7 +87,8 @@ export const MobileAgentButton: React.FC<MobileAgentButtonProps> = ({ onCycleAge
             onContextMenu={(e) => e.preventDefault()}
             onMouseDown={(e) => e.preventDefault()}
             className={cn(
-                'inline-flex h-[26px] min-h-0 min-w-0 items-stretch select-none',
+                // 36px to tap, drawn in the row's 26px: the margin keeps the row's height.
+                'inline-flex h-9 -my-[5px] min-h-0 min-w-0 items-stretch select-none',
                 'rounded-lg',
                 'typography-micro font-medium',
                 'focus:outline-none hover:bg-[var(--interactive-hover)]',

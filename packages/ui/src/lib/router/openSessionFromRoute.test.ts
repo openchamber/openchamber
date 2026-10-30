@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, test } from 'bun:test';
 import type { Session } from '@/lib/opencode/model';
 
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
+import { useProjectsStore } from '@/stores/useProjectsStore';
 import { getRememberedSessionDirectory, useSessionUIStore } from '@/sync/session-ui-store';
 
 import { openSessionFromRoute } from './openSessionFromRoute';
@@ -20,6 +21,7 @@ const buildSession = (id: string, directory: string): Session => ({
 
 describe('openSessionFromRoute', () => {
   beforeEach(() => {
+    useProjectsStore.setState({ projects: [PROJECT_DIR, OTHER_DIR, WORKTREE_DIR].map((path) => ({ id: path, path })) });
     useSessionUIStore.getState().setCurrentSession(null);
     useGlobalSessionsStore.setState({
       activeSessions: [],

@@ -218,8 +218,7 @@ export async function activate(context: vscode.ExtensionContext) {
     let folderPath = directory;
 
     if (!folderPath && candidates.length === 0) {
-      vscode.window.showInformationMessage('OpenChamber: No folder is open. Open a folder to start a new session.');
-      return;
+      return { directory: undefined, workspaceFolders: candidates };
     }
 
     if (!folderPath) {

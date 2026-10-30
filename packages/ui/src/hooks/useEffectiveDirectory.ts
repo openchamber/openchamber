@@ -24,8 +24,8 @@ type EffectiveDirectoryInputs = {
  * two cannot drift apart.
  *
  * Priority order:
- * 1. Worktree attachment / metadata path (for worktree sessions)
- * 2. Session directory (for active sessions)
+ * 1. Session directory (for active sessions)
+ * 2. Worktree attachment / metadata path (until the session record arrives)
  * 3. Draft session directoryOverride (when creating a new session)
  * 4. For a Chat draft, the prepared chat directory or the managed Chats root —
  *    never the project the app was on before, which would leak that
@@ -44,15 +44,15 @@ const pickEffectiveDirectory = ({
 }: EffectiveDirectoryInputs): string | undefined => {
     // If we have an active session, use its directory
     if (currentSessionId) {
+        if (currentSessionDirectory) {
+            return currentSessionDirectory;
+        }
         const attachmentDirectory = getAttachedSessionDirectory(worktreeAttachment);
         if (attachmentDirectory) {
             return attachmentDirectory;
         }
         if (worktreePath) {
             return worktreePath;
-        }
-        if (currentSessionDirectory) {
-            return currentSessionDirectory;
         }
     }
 
@@ -78,7 +78,7 @@ const pickEffectiveDirectory = ({
 export const useEffectiveDirectory = (): string | undefined => {
     // Inside a chat column the session is the column's: a chat pinned in the
     // side panel resolves its own session's directory, not the main chat's.
-    const currentSessionId = useChatSessionSelection().sessionId;
+    const { sessionId: currentSessionId, directory: selectedDirectory } = useChatSessionSelection();
     const newSessionDraft = useSessionUIStore((s) => s.newSessionDraft);
     const currentSessionDirectory = useSessionDirectory(currentSessionId);
     const worktreeAttachment = useSessionWorktreeStore((s) => currentSessionId ? s.getAttachment(currentSessionId) : undefined);
@@ -92,7 +92,7 @@ export const useEffectiveDirectory = (): string | undefined => {
         currentSessionDirectory,
         worktreeAttachment,
         worktreePath,
-        fallbackDirectory,
+        fallbackDirectory: currentSessionId ? selectedDirectory ?? fallbackDirectory : fallbackDirectory,
         chatsRoot,
     });
 };

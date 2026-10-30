@@ -338,7 +338,7 @@ mock.module("../session-actions", () => ({
       sessionDirectoryRegistry.set(session.id, sessionDirectory)
     }
     const { useSessionUIStore: store } = await import("../session-ui-store")
-    store.getState().setCurrentSession(session.id, sessionDirectory, selectionTransition)
+    store.getState().setCurrentSession(session.id, sessionDirectory, { transition: selectionTransition })
     store.getState().markSessionAsOpenChamberCreated(session.id)
     return session
   }),
@@ -804,6 +804,7 @@ describe("issue 2039 draft auto-accept", () => {
   })
 
   test("uses the server-authoritative directory after worktree session creation", async () => {
+    projectsState.projects = [{ id: "canonical", path: "/canonical/worktree" }]
     createdSessionDirectory = "/canonical/worktree"
     useSessionUIStore.getState().openNewSessionDraft({
       directoryOverride: "/requested/worktree",

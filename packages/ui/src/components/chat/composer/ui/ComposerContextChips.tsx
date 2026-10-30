@@ -431,7 +431,9 @@ function ComposerContextChipsView({ draftTarget, colors, previewHost }: Composer
                 <div
                     key="context-preview"
                     ref={previewRef}
-                    className="absolute bottom-full inset-s-0 z-30 mb-1.5 w-full max-w-[480px]"
+                    // A menu over the composer, so it sits above the docks that
+                    // share this band (btw, permission, form) at z-30.
+                    className="absolute bottom-full inset-s-0 z-50 mb-1.5 w-full max-w-[480px]"
                     onMouseEnter={cancelClose}
                     onMouseLeave={scheduleClose}
                 >

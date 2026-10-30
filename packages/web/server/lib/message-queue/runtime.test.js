@@ -952,7 +952,9 @@ describe('message queue runtime', () => {
   it('writes the project knowledge into the session before a queued command', async () => {
     const openCode = createOpenCode();
     const knowledge = {
-      sync: async (sessionId, directory) => { openCode.state.sent.push({ path: 'knowledge', body: { sessionId, directory } }); },
+      sync: async (sessionId, directory, responseStyleInstruction) => {
+        openCode.state.sent.push({ path: 'knowledge', body: { sessionId, directory, responseStyleInstruction } });
+      },
     };
     const { runtime, emit } = createRuntime({ openCode, knowledge });
     runtime.start();
@@ -999,7 +1001,10 @@ describe('message queue runtime', () => {
     const openCode = createOpenCode();
     const knowledge = {
       // `sync` reports failure by resolving false; it never throws.
-      sync: async (sessionId, directory) => { openCode.state.sent.push({ path: 'knowledge', body: { sessionId, directory } }); return false; },
+      sync: async (sessionId, directory, responseStyleInstruction) => {
+        openCode.state.sent.push({ path: 'knowledge', body: { sessionId, directory, responseStyleInstruction } });
+        return false;
+      },
     };
     const { runtime, emit } = createRuntime({ openCode, knowledge });
     runtime.start();

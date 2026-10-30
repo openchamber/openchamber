@@ -9,10 +9,21 @@ import { useBtwStore } from '@/stores/useBtwStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import { getSyncChildStores, getSyncMessages, registerSessionDirectory } from '@/sync/sync-refs';
+import { forkAtTranscriptCut, transcriptCutAfterMessage } from '@/sync/transcript-cut';
 import { Binary } from '@/sync/binary';
 import type { ContextPartMetadata } from '@/lib/messages/contextParts';
 import type { AttachedFile } from '@/stores/types/sessionTypes';
 import { getRuntimeKey } from '@/lib/runtime-switch';
+
+/**
+ * The composer identity a `/btw` fork takes while the fork is still being
+ * created. Its text stays in memory until migration or discard; it must never
+ * be persisted because the next `/btw` for this parent reuses the key.
+ */
+export const btwPendingComposerKey = (parentSessionId: string): string => `btw-pending:${parentSessionId}`;
+
+export const isBtwPendingComposerKey = (sessionId: string | null | undefined): boolean =>
+  Boolean(sessionId?.startsWith('btw-pending:'));
 
 /**
  * `/btw <question>`: fork the main session into a temporary session and send
@@ -124,8 +135,7 @@ const btwBoundaryParts = (): Array<{ text: string; synthetic: true }> =>
  * context. Anchoring the fork to the last completed turn instead means the
  * inherited transcript is always a settled conversation.
  *
- * Returns `null` when the parent has no completed assistant turn yet (a brand
- * new session); the caller then keeps the previous fork-at-HEAD behavior.
+ * Returns `null` when the parent has no completed assistant turn yet.
  */
 export const findLastCompletedAssistantMessageID = (messages: readonly Message[]): string | null => {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
@@ -199,16 +209,16 @@ export async function startBtwSession(input: StartBtwInput): Promise<Session> {
   try {
     await sessionActions.waitForConnectionOrThrow();
     if (getRuntimeKey() !== expectedRuntimeKey) throw new Error('runtime changed');
-    // Fork at the parent's last completed assistant turn rather than at HEAD,
-    // so a `/btw` typed mid-turn does not inherit a half-finished one.
+    // Fork after the parent's last completed assistant turn rather than at
+    // HEAD, so a `/btw` typed mid-turn does not inherit a half-finished one.
     const parentMessages = getSyncMessages(input.parentSessionId, input.directory);
     const forkPointMessageID = findLastCompletedAssistantMessageID(parentMessages);
-    // No completed turn to fork at means take the whole parent transcript,
-    // which is what an omitted `before` asks for.
-    const forked = await opencodeClient.forkSession(input.parentSessionId, {
-      before: forkPointMessageID ?? undefined,
-      directory: input.directory,
-    });
+    if (!forkPointMessageID) throw new Error('No completed turn to fork from');
+    const before = transcriptCutAfterMessage(parentMessages, forkPointMessageID);
+    // The server can already have a new turn that this window has not received.
+    // Only an explicit `before` bounds the fork even when local history is idle.
+    if (!before) throw new Error('No safe transcript boundary to fork from');
+    const forked = await forkAtTranscriptCut(input.parentSessionId, before, input.directory, expectedRuntimeKey);
 
     // The server may canonicalize the worktree path; the prompt must use the
     // same directory identity as the forked session.
@@ -282,7 +292,12 @@ export async function startBtwSession(input: StartBtwInput): Promise<Session> {
           [...btwBoundaryParts(), ...(input.additionalParts ?? [])],
           input.variant ?? undefined,
           'normal',
-          { sessionId: forked.id, directory: sessionDirectory, skills: input.skills },
+          {
+            target: { runtimeKey: expectedRuntimeKey, sessionId: forked.id, directory: sessionDirectory },
+            sessionId: forked.id,
+            directory: sessionDirectory,
+            skills: input.skills,
+          },
         );
       } catch (error) {
         // A fork without its first question is not a usable btw session:

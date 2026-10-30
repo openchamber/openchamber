@@ -33,11 +33,22 @@ source:
 | `openchamber.memory` | the memory index and when to save |
 | `openchamber.guidance` | when to link, when to draw a page, where the tools are called |
 | `openchamber.checkout` | the directory and branch the session works on |
+| `openchamber.response-style` | the user's current response style |
 
 `sync` writes all of them right before a message goes out: the UI awaits it
 before the prompt request, the queue, scheduled tasks and dispatched sessions
 call it in process. An empty text removes the entry. A key left out of
-`buildKnowledgeEntries` keeps what the session holds.
+`buildKnowledgeEntries` keeps what the session holds. User-facing UI sends pass
+the current style, including main chat, btw forks, UI-queued messages and fusion
+judges. A disabled setting returns empty text and removes the entry. A failed
+settings read omits the style and preserves the existing entry.
+
+Internal subagents, scheduled tasks and multi-run lanes pass an explicit empty
+style to clear one inherited from an earlier user-facing send. A send into the
+user's own session, including `session.send`, server-delivered queued messages,
+review handoffs, review feedback and auto-review, omits the style and preserves
+the entry. A review session starts with no entry of its own, so its sends leave
+it that way too.
 
 OpenCode does the rest. The first values go into the session's system prompt;
 a value that changed or went away is announced to the agent at its next step as
@@ -76,6 +87,13 @@ rather than indexed as empty, which would teach the agent to store again what it
 already has.
 
 Each of the pinned and memory entries is cut at 8,000 characters, and says so.
+The response style keeps the full custom text allowed by settings, up to 50,000
+characters. It has no knowledge-entry truncation budget.
+
+VS Code has no OpenChamber session-knowledge route. Its shared UI writes or
+removes only `openchamber.response-style` through the directory-scoped OpenCode
+SDK before sending. An omitted style still preserves the entry. Web, desktop,
+hosted mobile and Capacitor use the server sync above.
 
 ## When to link
 

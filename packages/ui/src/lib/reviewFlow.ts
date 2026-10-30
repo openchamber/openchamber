@@ -163,6 +163,7 @@ const sendPlainMessage = async (
   /** Context items sent ahead of the prompt as synthetic messages. */
   context?: Array<{ text: string }>,
 ): Promise<void> => {
+  const runtimeKey = getRuntimeKey();
   const resolved = modelContext ?? resolveModelContext(sessionID);
   if (!resolved) throw new Error('Select a model before sending review flow messages');
   const selection = useSelectionStore.getState();
@@ -174,9 +175,13 @@ const sendPlainMessage = async (
   }
   // Review sessions are real work sessions, so they carry the project's
   // standing context (pinned notes, memory) exactly as a composer send would.
-  await syncSessionKnowledge(directory, sessionID);
+  // The response style is left out: the handoff and the feedback land in the
+  // user's own session, whose entry must stay as it is, and a review session
+  // starts with no entry of its own.
+  await syncSessionKnowledge(directory, sessionID, undefined, runtimeKey);
   markPendingUserSendAnimation(sessionID);
   await optimisticSend({
+    runtimeKey,
     sessionId: sessionID,
     content: text,
     directory,
@@ -187,6 +192,7 @@ const sendPlainMessage = async (
       // created on this selection, so normally nothing is switched.
       const selection = resolveSendSelection(sessionID, directory, resolved);
       return opencodeClient.sendMessage({
+        runtimeKey,
         id: sessionID,
         directory,
         providerID: resolved.providerID,

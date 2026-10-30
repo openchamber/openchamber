@@ -21,6 +21,12 @@ const session = (id: string, directory: string | null): Session => {
 };
 
 describe('projectSidebarActiveSessions', () => {
+  test('admits project descendants but not sibling prefixes or differently cased host paths', () => {
+    expect(projectSidebarActiveSessions({
+      globalActiveSessions: [session('child', '/Kept/subdir'), session('sibling', '/Kept-other'), session('case', '/kept')],
+      liveSessions: [], knownDirectories: new Set(['/Kept']), isVSCode: false,
+    }).map(entry => entry.id)).toEqual(['child']);
+  });
   test('keeps case-insensitive membership local to projection without rewriting request paths', () => {
     const knownDirectories = new Set(['/Users/Developer/Project']);
     const input = {
@@ -61,7 +67,7 @@ describe('projectSidebarActiveSessions', () => {
     }).map((entry) => entry.id)).toEqual(['known']);
   });
 
-  test('allows missing or unknown directories for web when no directories are known', () => {
+  test('hides missing or unknown directories for web when no projects are registered', () => {
     const sessions = [session('unknown', '/workspace/unknown'), session('empty', null)];
 
     expect(projectSidebarActiveSessions({
@@ -69,10 +75,10 @@ describe('projectSidebarActiveSessions', () => {
       liveSessions: [],
       knownDirectories: new Set(),
       isVSCode: false,
-    }).map((entry) => entry.id)).toEqual(['unknown', 'empty']);
+    }).map((entry) => entry.id)).toEqual([]);
   });
 
-  test('retains unknown active full-app records when topology directories are known', () => {
+  test('hides unknown active full-app records without removing raw input records', () => {
     const restored = { ...session('restored', '/deleted/worktrees/feature'), time: { created: 1, updated: 1 } };
 
     expect(projectSidebarActiveSessions({
@@ -80,10 +86,11 @@ describe('projectSidebarActiveSessions', () => {
       liveSessions: [],
       knownDirectories: new Set(['/workspace/known']),
       isVSCode: false,
-    }).map((entry) => entry.id)).toEqual(['restored']);
+    }).map((entry) => entry.id)).toEqual([]);
+    expect(restored.id).toBe('restored');
   });
 
-  test('keeps archived sessions despite directory filtering', () => {
+  test('hides archived sessions in unregistered directories too', () => {
     const archived = session('archived', '/workspace/unknown');
     archived.time.archived = 1;
 
@@ -92,7 +99,7 @@ describe('projectSidebarActiveSessions', () => {
       liveSessions: [],
       knownDirectories: new Set(['/workspace/known']),
       isVSCode: true,
-    }).map((entry) => entry.id)).toEqual(['archived']);
+    }).map((entry) => entry.id)).toEqual([]);
   });
 
   test('does not replace a filtered global record with a live duplicate', () => {

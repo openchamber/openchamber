@@ -127,6 +127,23 @@ above already fill the panel, so it never grows mid-rise (`ModelControls`).
 Each cut 25–35 ms from tap to motion. Measure tap to `transitionrun` with
 `profile:ios eval`.
 
+**What follows the keyboard changes its layout once and rides on a transform.**
+A `bottom` or `height` that transitions with the keyboard re-lays the page
+out on every frame, on the main thread, and climbs in 60 Hz steps beside the
+120 Hz keyboard. The shell and every keyboard-inset surface (drawers,
+dialogs, the comment bar, `.oc-keyboard-inset-surface` in `mobile.css`) take
+the keyboard into their layout where the change is invisible
+(`--oc-kb-layout` for the shell, `--oc-kb-surface` for the surfaces over it:
+when it has landed, as it starts to fall); a keyboard opened for a field over
+the shell leaves the shell and its transcript as they are. What sits at
+their bottom carries `data-keyboard-rider` (a factor, `0.5` for a centred
+card) and rides the keyboard meanwhile on keyframes, with the composer
+(`slideMovers` in `apps/mobileNativeChrome.ts`). `MobileOverlayPanel` snaps
+its anchor when the keyboard starts instead, because its sheet is capped by
+the space above the keyboard, and slides the sheet itself. A new surface that
+follows the keyboard marks its bottom content as a rider; the guard test fails
+on a layout property transitioning with the keyboard.
+
 **The keyboard is a spring.** A critically damped spring with a 0.255 s
 response, settled in 375 ms (`lib/mobileKeyboardTiming.ts`). Motion that
 follows the keyboard uses that curve and that duration; a cubic-bezier of the

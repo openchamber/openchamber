@@ -45,6 +45,7 @@ export interface OpenCodeTrustRouteRequest {
 }
 
 export interface OpenCodeTrust {
+  assess(directory: string, options?: { fresh?: boolean }): Promise<{ trusted: boolean }>;
   isTrusted(directory: string): Promise<boolean>;
   refusalFor(request: OpenCodeTrustRequest): Promise<OpenCodeTrustAnswer | null>;
   handleRoute(request: OpenCodeTrustRouteRequest): Promise<OpenCodeTrustAnswer>;

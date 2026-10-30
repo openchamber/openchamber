@@ -187,6 +187,7 @@ describe("projectToolPart", () => {
       status: "error",
       input: { command: "false" },
       error: "exit 1",
+      errorType: "tool.failed",
       output: "partial",
       time: { start: 6, end: 9 },
     })

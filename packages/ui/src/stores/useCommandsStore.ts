@@ -13,6 +13,7 @@ import { createDeferredSafeJSONStorage } from "./utils/safeStorage";
 import { useProjectsStore } from "@/stores/useProjectsStore";
 import { runtimeFetch } from "@/lib/runtime-fetch";
 import { runBackgroundNetworkTask } from '@/lib/background-network';
+import { normalizePath } from '@/lib/pathNormalization';
 
 
 export type CommandScope = 'user' | 'project';
@@ -256,6 +257,33 @@ export const selectCommandsForDirectory = (
   const cacheKey = getCommandsCacheKey(resolveDirectory(directory));
   return state.commandsByDirectory[cacheKey] ?? EMPTY_COMMANDS;
 };
+
+type CommandDirectorySource = {
+  open: boolean;
+  worktreeStartDirectory?: { worktreeRoot: string; directory: string | null } | null;
+};
+
+type ComposerCommandDirectory =
+  | { status: 'pending' }
+  | { status: 'resolved'; directory: string | null | undefined };
+
+/** A draft uses its start folder; pending discovery must never request the root. */
+export const resolveCommandDirectory = (
+  directory: string | null | undefined,
+  draft: CommandDirectorySource | null,
+): ComposerCommandDirectory => {
+  const start = draft?.open ? draft.worktreeStartDirectory : null;
+  if (!start || !directory || normalizePath(directory) !== start.worktreeRoot) {
+    return { status: 'resolved', directory };
+  }
+  if (start.directory === null) return { status: 'pending' };
+  return { status: 'resolved', directory: start.directory };
+};
+
+export const selectCommandsForComposer = (
+  state: Pick<CommandsStore, 'commandsByDirectory'>,
+  target: ComposerCommandDirectory,
+): Command[] => (target.status === 'pending' ? EMPTY_COMMANDS : selectCommandsForDirectory(state, target.directory));
 
 export const useCommandsStore = create<CommandsStore>()(
   devtools(

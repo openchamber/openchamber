@@ -36,6 +36,17 @@ const pathOnInstance = (value, instance) => {
   }
 };
 
+/** Gitea Actions reports relative links; external CI may link to another host. */
+const absoluteHttpUrl = (value, instance) => {
+  if (!value) return null;
+  try {
+    const url = new URL(value, instance);
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.href : null;
+  } catch {
+    return null;
+  }
+};
+
 /**
  * A repository, only when its web and clone addresses are on the instance
  * and name the repository it says it is.
@@ -250,7 +261,8 @@ export function mapGiteaCI(combined, identity) {
       status: status.status === 'pending' ? 'in_progress' : 'completed',
       conclusion: SUCCESS.has(status.status) ? 'success' : FAILURE.has(status.status) ? 'failure' : null,
     };
-    if (text(status.target_url)) run.detailsUrl = status.target_url;
+    const detailsUrl = absoluteHttpUrl(text(status.target_url), identity.instance);
+    if (detailsUrl) run.detailsUrl = detailsUrl;
     if (text(status.description)) run.output = { title: status.description };
     if (text(status.created_at)) run.startedAt = status.created_at;
     if (status.status !== 'pending' && text(status.updated_at)) run.completedAt = status.updated_at;

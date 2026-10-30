@@ -6,7 +6,13 @@ const DIRECTORY = '/work/project';
 const PROJECT_ID = 'path_project';
 const PINS = { notes: ['n1'], plans: ['p1'] };
 const NO_PINS = { notes: [], plans: [] };
-const { checkout: CHECKOUT, pinned: PINNED, memory: MEMORY, guidance: GUIDANCE } = KNOWLEDGE_ENTRY_KEYS;
+const {
+  checkout: CHECKOUT,
+  pinned: PINNED,
+  memory: MEMORY,
+  guidance: GUIDANCE,
+  responseStyle: RESPONSE_STYLE,
+} = KNOWLEDGE_ENTRY_KEYS;
 
 const note = (overrides = {}) => ({
   id: 'n1', body: 'Pinned note body.', createdAt: 1, updatedAt: 1, pinned: true, source: 'manual', ...overrides,
@@ -88,11 +94,12 @@ describe('writing the knowledge into a session', () => {
     const instructionEntries = createEntriesStub();
     const runtime = createRuntime({ ...pinnedStore(), instructionEntries });
 
-    expect(await runtime.sync('ses_a', DIRECTORY)).toBe(true);
+    expect(await runtime.sync('ses_a', DIRECTORY, 'Keep replies short.')).toBe(true);
 
     expect(instructionEntries.held.get(PINNED)).toContain('Pinned note body.');
     expect(instructionEntries.held.get(PINNED)).toContain('Plan body.');
     expect(instructionEntries.held.get(MEMORY)).toContain('Uses bun');
+    expect(instructionEntries.held.get(RESPONSE_STYLE)).toBe('Keep replies short.');
     // No tool: no guidance and no branch, so those keys are cleared.
     expect(instructionEntries.calls).toContainEqual(['remove', 'ses_a', DIRECTORY, GUIDANCE]);
     expect(instructionEntries.calls).toContainEqual(['remove', 'ses_a', DIRECTORY, CHECKOUT]);
@@ -110,6 +117,51 @@ describe('writing the knowledge into a session', () => {
     await runtime.sync('ses_a', DIRECTORY);
 
     expect(instructionEntries.held.has(PINNED)).toBe(false);
+  });
+
+  test('an omitted response style leaves the existing entry alone, while an empty one clears it', async () => {
+    const instructionEntries = createEntriesStub();
+    const runtime = createRuntime({ ...pinnedStore(), instructionEntries });
+
+    await runtime.sync('ses_a', DIRECTORY, 'Keep replies short.');
+    await runtime.sync('ses_a', DIRECTORY);
+    expect(instructionEntries.held.get(RESPONSE_STYLE)).toBe('Keep replies short.');
+
+    await runtime.sync('ses_a', DIRECTORY, '');
+    expect(instructionEntries.held.has(RESPONSE_STYLE)).toBe(false);
+  });
+
+  test('serialises concurrent syncs for one session', async () => {
+    const held = new Map();
+    const calls = [];
+    let releaseFirst;
+    let firstPutStarted;
+    const firstPut = new Promise((resolve) => { firstPutStarted = resolve; });
+    let first = true;
+    const instructionEntries = {
+      put: async (sessionId, directory, key, value) => {
+        calls.push([sessionId, directory, key, value]);
+        if (first) {
+          first = false;
+          firstPutStarted();
+          await new Promise((resolve) => { releaseFirst = resolve; });
+        }
+        held.set(key, value);
+      },
+      remove: async (_sessionId, _directory, key) => { held.delete(key); },
+    };
+    const runtime = createRuntime({ ...pinnedStore(), instructionEntries });
+    const firstSync = runtime.sync('ses_a', DIRECTORY, 'old style');
+    await firstPut;
+    const secondSync = runtime.sync('ses_a', DIRECTORY, 'new style');
+
+    expect(calls.filter((call) => call[2] === RESPONSE_STYLE).map((call) => call[3])).toEqual(['old style']);
+    releaseFirst();
+    await firstSync;
+    await secondSync;
+
+    expect(held.get(RESPONSE_STYLE)).toBe('new style');
+    expect(calls.filter((call) => call[2] === RESPONSE_STYLE).map((call) => call[3])).toEqual(['old style', 'new style']);
   });
 
   test('one entry that will not write does not hold back the others', async () => {
@@ -509,6 +561,30 @@ describe('size', () => {
 
     expect(entries[PINNED].length).toBeLessThan(8_100);
     expect(entries[PINNED]).toContain('(truncated)');
+  });
+});
+
+describe('response style', () => {
+  test('preserves the full custom instruction without increasing knowledge budgets', () => {
+    const instruction = `${'x'.repeat(49900)}\nUse this final instruction.`;
+    const entries = buildKnowledgeEntries({
+      notes: [note({ body: 'n'.repeat(10000) })], plans: [],
+      memory: { global: [], project: [] }, responseStyleInstruction: instruction,
+    });
+    expect(entries[RESPONSE_STYLE]).toBe(instruction);
+    expect(entries[PINNED]).toContain('(truncated)');
+    expect(entries[PINNED].length).toBeLessThan(8100);
+  });
+
+  test('keeps the user response style in a session instruction entry', () => {
+    const entries = buildKnowledgeEntries({
+      notes: [],
+      plans: [],
+      memory: { global: [], project: [] },
+      responseStyleInstruction: 'Keep replies short and informal.',
+    });
+
+    expect(entries[RESPONSE_STYLE]).toBe('Keep replies short and informal.');
   });
 });
 

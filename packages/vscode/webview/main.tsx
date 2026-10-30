@@ -800,6 +800,14 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
     }
   }
 
+  if (pathname === '/api/config/warming' && method === 'PUT') {
+    return bridgeJsonRoute('api:config/warming', await extractJsonBody(input, init, method));
+  }
+
+  if (pathname === '/api/config/compaction' && method === 'PUT') {
+    return bridgeJsonRoute('api:config/compaction', await extractJsonBody(input, init, method));
+  }
+
   if (pathname === '/api/config/skill-switch' && method === 'PUT') {
     const body = await extractJsonBody(input, init, method);
     const directory = getRequestDirectoryHint(url, input, init);

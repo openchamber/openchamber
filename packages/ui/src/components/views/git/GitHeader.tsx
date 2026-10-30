@@ -89,9 +89,9 @@ interface GitHeaderProps {
   /** The chain the branch's change is in, as its status names it (hosts that create changes by pushing for review). */
   pullRequestStack?: PullRequestStack | null;
   onOpenPullRequest?: () => void;
-  // Nested repository picker: shown when the Git tab's root is not a
-  // repository, or is one with no commits yet, and has repositories nested
-  // inside it. Options are absolute repository paths; `repositoryRoot` is the
+  // Nested repository picker: shown when the Git tab's root has repositories
+  // nested inside it (submodules included), whether or not the root is one
+  // itself. Options are absolute repository paths; `repositoryRoot` is the
   // root those paths are relative to.
   repositoryOptions?: string[];
   selectedRepository?: string | null;

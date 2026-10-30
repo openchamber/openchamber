@@ -742,13 +742,31 @@ describe('managed agent tool runtime', () => {
 
   it('keeps every tool description within the length Claude Code passes on whole', async () => {
     const { runtime, dataDir } = await createRuntime();
-    await prepareManagedEnv(runtime, { includeSchedule: true, includeKnowledge: true, includeNotify: true, includeRender: true });
+    await prepareManagedEnv(runtime, {
+      includeSchedule: true,
+      includeKnowledge: true,
+      includeNotify: true,
+      includeRender: true,
+      includeWorkflow: true,
+      includeImage: true,
+    });
     const tools = await loadTools(dataDir, 'description-length');
 
-    expect(Object.keys(tools).sort()).toEqual(['openchamber', 'openchamber_knowledge', 'openchamber_memory', 'openchamber_notify', 'openchamber_render', 'openchamber_schedule', 'openchamber_web']);
+    expect(Object.keys(tools).sort()).toEqual([
+      'openchamber',
+      'openchamber_image',
+      'openchamber_knowledge',
+      'openchamber_memory',
+      'openchamber_notify',
+      'openchamber_render',
+      'openchamber_schedule',
+      'openchamber_web',
+      'openchamber_workflow',
+      'openchamber_workflow_answer',
+    ]);
     for (const tool of Object.values(tools)) {
       // Claude Code before 2.1.296 cuts an MCP tool description at 2048
-      // characters, and the plugin runs whichever CLI the user installed.
+      // characters, and OpenCode's Claude Agent provider cuts at 2048 itself.
       expect(tool.description.length).toBeLessThanOrEqual(2048);
     }
   });

@@ -10,6 +10,7 @@ import { earlierAssistantText } from './lib/turns/earlierAssistantText';
 import { areOptionalRenderRelevantMessagesEqual, areRelevantTurnGroupingContextsEqual, areRenderRelevantMessagesEqual } from './message/renderCompare';
 import TurnItem from './components/TurnItem';
 import { LiveTurnActivity } from './components/LiveTurnActivity';
+import { PendingWorkflowApprovals } from './workflows/PendingWorkflowApprovals';
 import { getTurnsWithLaterAssistant, hasLiveActivity } from './lib/turns/liveActivity';
 import type { ChatMessageEntry, TurnRecord, TurnGroupingContext } from './lib/turns/types';
 import { useTurnRecords } from './hooks/useTurnRecords';
@@ -945,6 +946,20 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         } satisfies RenderEntry;
     }, [displayMessages, projection.lastTurnId, projection.ungroupedMessageIds, streamingTurn]);
 
+    const approvalLiveMessageIds = React.useMemo(() => {
+        if (!trailingStreamingEntry) return EMPTY_ROW_MESSAGE_IDS;
+        return trailingStreamingEntry.kind === 'turn'
+            ? trailingStreamingEntry.turn.assistantMessageIds
+            : [trailingStreamingEntry.message.info.id];
+    }, [trailingStreamingEntry]);
+    const footerWithApprovals = React.useMemo(() => (
+        <>
+            <PendingWorkflowApprovals sessionId={sessionKey} messages={baseDisplayMessages}
+                liveMessageIds={approvalLiveMessageIds} directory={directory} />
+            {listFooter}
+        </>
+    ), [approvalLiveMessageIds, baseDisplayMessages, directory, listFooter, sessionKey]);
+
     if (trailingStreamingEntry) {
         streamPerfCount('ui.message_list.render.streaming');
     }
@@ -1403,7 +1418,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                     onListMetricsChange={stableListMetricsChange}
                     onTimelineDataChange={stableTimelineDataChange}
                     listHeader={listHeader}
-                    listFooter={listFooter}
+                    listFooter={footerWithApprovals}
                     scrollContainerProps={scrollContainerProps}
                     rowContext={rowContext}
                     endPinningReleased={endPinningReleased}

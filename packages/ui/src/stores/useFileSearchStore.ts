@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
 import { opencodeClient, type ProjectFileSearchHit } from '@/lib/opencode/client';
 import { getRuntimeKey } from '@/lib/runtime-switch';
+import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 
 const CACHE_TTL_MS = 30_000;
 const MAX_CACHE_ENTRIES = 40;
@@ -79,16 +80,53 @@ export const useFileSearchStore = create<FileSearchStoreState>()(
           return inflight;
         }
 
-        const searchPromise = opencodeClient
-          // OpenCode v2's file search takes a type filter only; hidden-file and
-          // gitignore handling are the server's, so those options stay in the
-          // cache key but are not sent.
-          .searchFiles(normalizedQuery, {
-            directory: normalizedDirectory,
-            limit,
-            type,
+        const runtimeFiles = getRegisteredRuntimeAPIs()?.files;
+        const indexedSearch = opencodeClient.searchFiles(normalizedQuery, {
+          directory: normalizedDirectory,
+          limit,
+          type,
+        });
+        let supplementalFailed = false;
+        const supplementalSearch = type === 'file' && (includeHidden || !respectGitignore) && runtimeFiles
+          ? runtimeFiles.search({
+              directory: normalizedDirectory,
+              query: normalizedQuery,
+              maxResults: limit,
+              includeHidden,
+              respectGitignore,
+            }).then((results) =>
+              results.map((result) => {
+                const normalizedPath = result.path.replace(/\\/g, '/');
+                const previewPath = result.preview?.[0]
+                  ? result.preview[0].replace(/\\/g, '/')
+                  : normalizedPath;
+                const name = previewPath.split('/').filter(Boolean).pop() || normalizedPath.split('/').filter(Boolean).pop() || '';
+                return {
+                  name,
+                  path: normalizedPath,
+                  relativePath: previewPath,
+                  extension: name.includes('.') ? name.split('.').pop()?.toLowerCase() : undefined,
+                };
+              })
+            ).catch((error: unknown) => {
+              supplementalFailed = true;
+              console.warn('Supplemental file search failed; keeping indexed results:', error);
+              return [];
+            })
+          : Promise.resolve([]);
+
+        const searchPromise = Promise.all([indexedSearch, supplementalSearch])
+          .then(([indexed, supplemental]) => {
+            if (supplemental.length === 0) return indexed;
+            const seen = new Set(indexed.map((file) => file.path.replace(/\\/g, '/')));
+            return [...indexed, ...supplemental.filter((file) => {
+              if (seen.has(file.path)) return false;
+              seen.add(file.path);
+              return true;
+            })].slice(0, limit);
           })
           .then((files) => {
+            if (supplementalFailed) return files;
             set((state) => {
               if (state.inFlight[key] !== searchPromise) {
                 return state;

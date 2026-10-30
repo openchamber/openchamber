@@ -1,5 +1,5 @@
 import type { QuotaProviderId, UsageWindow } from '@/types';
-import { formatQuotaValueLabel, formatQuotaResetLabel, formatWindowLabel } from '@/lib/quota';
+import { formatQuotaWindowValueLabel, formatQuotaResetLabel, formatWindowLabel } from '@/lib/quota';
 import { UsageProgressBar } from './UsageProgressBar';
 import { useQuotaStore } from '@/stores/useQuotaStore';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -38,7 +38,7 @@ export const UsageCard: React.FC<UsageCardProps> = ({
   const barLabel = displayMode === 'remaining'
     ? t('settings.usage.card.bar.remaining')
     : t('settings.usage.card.bar.used');
-  const percentLabel = formatQuotaValueLabel(window.valueLabel, displayPercent);
+  const percentLabel = formatQuotaWindowValueLabel(window, displayPercent, t);
   const resetLabel = formatQuotaResetLabel(window.resetAt, window.resetAfterFormatted ?? window.resetAtFormatted, timeFormatPreference);
   const resetText = resetLabel ? t('settings.usage.card.resetsAt', { time: resetLabel }) : '';
   const windowLabel = formatWindowLabel(title);

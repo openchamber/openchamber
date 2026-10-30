@@ -11,6 +11,11 @@ const windowSchema = z.object({
   resetAtFormatted: z.string().nullable(),
   resetAfterFormatted: z.string().nullable(),
   valueLabel: z.string().nullable().optional(),
+  value: z.discriminatedUnion('kind', [
+    z.object({ kind: z.literal('requests'), count: z.number().finite().nonnegative() }),
+    z.object({ kind: z.literal('spend'), spent: z.number().finite().nonnegative(), limit: z.number().finite().positive().nullable() }),
+  ]).optional(),
+  creditsUsed: z.number().finite().nonnegative().optional(),
   giftReset: z.object({ recordId: z.number(), expireAt: z.number() }).nullable().optional(),
 });
 const windowsSchema = z.record(z.string(), windowSchema);

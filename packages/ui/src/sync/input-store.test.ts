@@ -138,6 +138,48 @@ describe("input-store attachments", () => {
     expect(useInputStore.getState().attachedFiles).toBe(ready)
   })
 
+  testWithMockFileReader("files an attachment into the named slot without taking the current one", async () => {
+    const current = { runtimeKey: "runtime", directory: "/repo", sessionId: "current" }
+    const composer = { runtimeKey: "runtime", directory: "/repo", sessionId: "fork" }
+    const input = useInputStore.getState()
+    input.selectAttachmentDraft(current)
+
+    const addPromise = input.addAttachedFile(new File(["hello"], "hello.txt", { type: "text/plain" }), composer)
+    await waitForReaderCount(1)
+    resolveReader(pendingReaders[0], "data:text/plain;base64,aGVsbG8=")
+    await addPromise
+
+    expect(input.getAttachedFiles()).toEqual([])
+    expect(input.getAttachedFiles(composer).map((attachment) => attachment.filename)).toEqual(["hello.txt"])
+    expect(useInputStore.getState().attachmentDraftKey).toBe(getChatDraftIdentityKey(current))
+  })
+
+  testWithMockFileReader("restores an attachment into the named slot", async () => {
+    const current = { runtimeKey: "runtime", directory: "/repo", sessionId: "current" }
+    const composer = { runtimeKey: "runtime", directory: "/repo", sessionId: "fork" }
+    const input = useInputStore.getState()
+    input.selectAttachmentDraft(current)
+
+    input.addRestoredAttachment({ url: "data:text/plain;base64,aGVsbG8=", mimeType: "text/plain", filename: "ready.txt" }, composer)
+
+    expect(input.getAttachedFiles()).toEqual([])
+    expect(input.getAttachedFiles(composer).map((attachment) => attachment.filename)).toEqual(["ready.txt"])
+  })
+
+  testWithMockFileReader("keeps concurrent appends into the selected named slot", async () => {
+    const target = { runtimeKey: "runtime", directory: "/repo", sessionId: "fork" }
+    const input = useInputStore.getState()
+    input.selectAttachmentDraft(target)
+    const first = input.addAttachedFile(new File(["one"], "one.txt", { type: "text/plain" }), target)
+    const second = input.addAttachedFile(new File(["two"], "two.txt", { type: "text/plain" }), target)
+    await waitForReaderCount(2)
+    resolveReader(pendingReaders[0], "data:text/plain;base64,b25l")
+    expect(await first).toBe(true)
+    resolveReader(pendingReaders[1], "data:text/plain;base64,dHdv")
+    expect(await second).toBe(true)
+    expect(input.getAttachedFiles(target).map((file) => file.filename)).toEqual(["one.txt", "two.txt"])
+  })
+
   testWithMockFileReader("does not attach a local file after attached files are replaced", async () => {
     const addPromise = useInputStore.getState().addAttachedFile(new File(["hello"], "hello.txt", { type: "text/plain" }))
     expect(pendingReaders).toHaveLength(1)

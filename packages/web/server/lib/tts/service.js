@@ -8,6 +8,9 @@
 import { readOpenCodeCredentials } from '../opencode/auth.js';
 import { loadOpenAI } from './openai-sdk.js';
 import { normalizeCustomOpenAIBaseURL } from './base-url.js';
+import { createEndpointPathFetch, normalizeEndpointPath } from './endpoint-path.js';
+
+const DEFAULT_SPEECH_PATH = '/audio/speech';
 
 // Voice options from OpenAI
 /** @public */
@@ -84,6 +87,7 @@ export class TTSService {
       instructions,
       apiKey,
       baseURL,
+      endpointPath,
     } = options;
 
     const normalizedBaseURLResult = normalizeCustomOpenAIBaseURL(baseURL);
@@ -92,6 +96,15 @@ export class TTSService {
     }
     const normalizedBaseURL = normalizedBaseURLResult.value;
 
+    const endpointPathResult = normalizeEndpointPath(endpointPath);
+    if (endpointPathResult.error) {
+      throw new Error(endpointPathResult.error);
+    }
+    const normalizedEndpointPath = endpointPathResult.value;
+    if (normalizedEndpointPath && !normalizedBaseURL) {
+      throw new Error('A custom endpoint path needs a custom server URL');
+    }
+
     // Use provided API key / baseURL or fall back to configured key
     let client;
     if (normalizedBaseURL || apiKey) {
@@ -99,6 +112,12 @@ export class TTSService {
       if (apiKey) clientOpts.apiKey = apiKey;
       if (!apiKey) clientOpts.apiKey = 'not-required';
       if (normalizedBaseURL) clientOpts.baseURL = normalizedBaseURL;
+      if (normalizedEndpointPath) {
+        clientOpts.fetch = createEndpointPathFetch({
+          endpointPath: normalizedEndpointPath,
+          defaultPath: DEFAULT_SPEECH_PATH,
+        });
+      }
       const OpenAI = await loadOpenAI();
       client = new OpenAI(clientOpts);
     } else {

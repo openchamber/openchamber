@@ -939,7 +939,9 @@ async function performConfigRefresh(options: {
     }
     if (refreshCommands) {
       invalidateCommandsLoadCache(currentDirectory);
-      uiRefreshTasks.push(commandsStore.loadCommands().then(() => undefined));
+      // The directory the user works in, as the agents and providers above: a
+      // worktree session's folder is not the active project's path.
+      uiRefreshTasks.push(commandsStore.loadCommands(currentDirectory).then(() => undefined));
     }
     if (refreshSkills) {
       // Match loadSkills cache key (active-project-first). Passing client/directory-store

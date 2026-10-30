@@ -1,15 +1,18 @@
-import path from 'path';
-import fs from 'fs';
 import {
   AGENT_SCOPE,
-  findWorktreeRoot,
-  getAncestors,
+  getFolderConfigPaths,
   getJsonWriteTarget,
   readConfigFile,
   readConfigLayers,
   writeConfig,
 } from './shared.js';
-import { findWebSearchProjectOverride, writeWarmingDuration, writeWarmingEnabled, writeWebSearchSelection } from './config-v2.js';
+import {
+  findWebSearchProjectOverride,
+  writeCompactionSettings,
+  writeWarmingDuration,
+  writeWarmingEnabled,
+  writeWebSearchSelection,
+} from './config-v2.js';
 
 /**
  * Writes the `websearch` choice into the config OpenCode reads last among the
@@ -48,6 +51,19 @@ export function setWarmingDuration(minutes) {
 }
 
 /**
+ * Writes the compaction settings (`compaction.buffer`, `compaction.keep.tokens`,
+ * `experimental.background_compaction`) to the same file; `update` comes from
+ * `compactionUpdateSchema`.
+ */
+export function setCompactionSettings(update) {
+  const layers = readConfigLayers(null);
+  const target = getJsonWriteTarget(layers, AGENT_SCOPE.USER);
+  const changed = writeCompactionSettings(target.config, update);
+  if (changed) writeConfig(target.config, target.path);
+  return { path: target.path, changed };
+}
+
+/**
  * Where the effective `websearch` value for `directory` comes from, as far as
  * a Settings write is concerned: `projectPath` is the project config that
  * overrides whatever Settings writes, or `null` when a Settings write applies.
@@ -56,31 +72,20 @@ export function getWebSearchSource(directory) {
   return { projectPath: findWebSearchProjectOverride(readConfigLayers(directory), readProjectConfigFiles(directory)) };
 }
 
-const PROJECT_CONFIG_NAMES = [
-  path.join('.opencode', 'opencode.jsonc'),
-  path.join('.opencode', 'opencode.json'),
-  'opencode.jsonc',
-  'opencode.json',
-];
 
 /**
- * Every existing project config file OpenCode merges for `directory`, deepest
- * first, from the directory up to its worktree root. An unreadable file is
- * skipped: it can't be told apart from one without the key.
+ * Every project config file OpenCode merges for `directory`, up to the
+ * filesystem root, the one that wins first (`getFolderConfigPaths` gives them
+ * in load order). An unreadable file is skipped: it can't be told apart from
+ * one without the key.
  */
 function readProjectConfigFiles(directory) {
-  if (!directory) return [];
-  const root = findWorktreeRoot(directory) || path.resolve(directory);
   const files = [];
-  for (const base of getAncestors(directory, root)) {
-    for (const name of PROJECT_CONFIG_NAMES) {
-      const filePath = path.join(base, name);
-      if (!fs.existsSync(filePath)) continue;
-      try {
-        files.push({ path: filePath, config: readConfigFile(filePath) });
-      } catch {
-        // Skipped; see above.
-      }
+  for (const filePath of getFolderConfigPaths(directory).reverse()) {
+    try {
+      files.push({ path: filePath, config: readConfigFile(filePath) });
+    } catch {
+      // Skipped; see above.
     }
   }
   return files;

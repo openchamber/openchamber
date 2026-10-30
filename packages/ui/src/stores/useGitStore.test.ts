@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, mock, spyOn, test } from 'bun:test';
 import type { GitStatus } from '@/lib/api/types';
 import { useGitStore } from './useGitStore';
 import { getRuntimeKey } from '@/lib/runtime-switch';
+import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
 import { notifyGitStatusInvalidated } from '@/lib/gitStatusInvalidation';
 import { clearWorktreeBootstrapState, markWorktreeBootstrapPending } from '@/lib/worktrees/worktreeBootstrap';
 
@@ -736,12 +737,46 @@ describe('useGitStore nested repository discovery', () => {
     expect(useGitStore.getState().nestedRepoSelection.get('/root-a')).toBe('/root-a/repo-one');
   });
 
+  test('legacy selections cannot become explicit picks after upgrade', () => {
+    const runtime = getRuntimeKey();
+    const storage = getDeferredSafeStorage();
+    storage.setItem('oc.gitNestedRepoSelection.v1', JSON.stringify({
+      version: 1,
+      runtimes: { [runtime]: { updatedAt: Date.now(), roots: { '/legacy': '/legacy/child' } } },
+    }));
+    useGitStore.getState().resetForRuntimeSwitch(runtime);
+    expect(useGitStore.getState().nestedRepoSelection.has('/legacy')).toBe(false);
+    useGitStore.getState().selectNestedRepo('/explicit-new', '/explicit-new/child');
+    useGitStore.getState().resetForRuntimeSwitch(runtime);
+    expect(useGitStore.getState().nestedRepoSelection.get('/explicit-new')).toBe('/explicit-new/child');
+    expect(useGitStore.getState().nestedRepoSelection.has('/legacy')).toBe(false);
+  });
+
   test('keeps selections isolated per root', () => {
     useGitStore.getState().selectNestedRepo('/root-a', '/root-a/one');
     useGitStore.getState().selectNestedRepo('/root-b', '/root-b/two');
 
     expect(useGitStore.getState().nestedRepoSelection.get('/root-a')).toBe('/root-a/one');
     expect(useGitStore.getState().nestedRepoSelection.get('/root-b')).toBe('/root-b/two');
+  });
+
+  test('persisting another root never saves automatic selections', () => {
+    const store = useGitStore.getState();
+    store.selectNestedRepo('/automatic', '/automatic/child', { persist: false });
+    store.selectNestedRepo('/explicit', '/explicit/child');
+    store.resetForRuntimeSwitch(getRuntimeKey());
+    expect(useGitStore.getState().nestedRepoSelection.has('/automatic')).toBe(false);
+    expect(useGitStore.getState().nestedRepoSelection.get('/explicit')).toBe('/explicit/child');
+  });
+
+  test('clearing another root never saves automatic selections', () => {
+    const store = useGitStore.getState();
+    store.selectNestedRepo('/cleared', '/cleared/child');
+    store.selectNestedRepo('/automatic-clear', '/automatic-clear/child', { persist: false });
+    store.clearNestedRepoSelection('/cleared');
+    store.resetForRuntimeSwitch(getRuntimeKey());
+    expect(useGitStore.getState().nestedRepoSelection.has('/automatic-clear')).toBe(false);
+    expect(useGitStore.getState().nestedRepoSelection.has('/cleared')).toBe(false);
   });
 
   test('clears only the given root selection', () => {

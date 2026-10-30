@@ -11,6 +11,16 @@ import {
 } from './path-utils';
 
 describe('path-utils', () => {
+  test('preserves filename whitespace only when requested', () => {
+    const options = { preserveWhitespace: true };
+    expect(normalizeFilePath('  report.md  ')).toBe('report.md');
+    expect(normalizeFilePath('  report.md  ', options)).toBe('  report.md  ');
+    expect(toAbsoluteFilePath('/repo', '  report.md  ', options)).toBe('/repo/  report.md  ');
+    expect(toAbsoluteFilePath('/repo', '/other/report.md  ', options)).toBe('/other/report.md  ');
+    expect(toAbsoluteFilePath('/repo', '  /other.md', options)).toBe('/repo/  /other.md');
+    expect(toAbsoluteFilePath('C:/repo', '../report.md  ', options)).toBe('C:/report.md  ');
+  });
+
   test('normalizes Windows paths without losing drive roots', () => {
     expect(normalizeFilePath('C:\\Users\\Bohdan Triapitsyn\\projects\\openchamber\\')).toBe('C:/Users/Bohdan Triapitsyn/projects/openchamber');
     expect(normalizeFilePath('C:/')).toBe('C:/');

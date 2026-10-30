@@ -59,6 +59,7 @@ const projectSession = (session: Session, projectId: string, guestId: string, wo
   }
   return {
     id: session.id, title: session.title || session.id, projectId, directory,
+    ...(session.agent ? { agent: session.agent } : {}),
     parentId: session.parentID ?? null, createdAt: session.time.created, updatedAt: session.time.updated,
     archivedAt: session.time.archived || null, worktree,
     activity, outcome: activity === 'idle' ? observed?.outcome ?? null : null,

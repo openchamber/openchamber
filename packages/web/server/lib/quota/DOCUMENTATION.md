@@ -44,7 +44,7 @@ asked, `/api/quota/providers` answers 500 instead of an empty list.
 | `hyper` | Charm Hyper | `providers/hyper.js` | `hyper` (API key under `key` or `token`) |
 | `github-copilot` | GitHub Copilot | `providers/copilot.js` | `github-copilot`, `copilot` |
 | `github-copilot-addon` | GitHub Copilot Add-on | `providers/copilot.js` | `github-copilot`, `copilot` |
-| `kimi-for-coding` | Kimi for Coding | `providers/kimi.js` | `kimi-code-plan-cn`, `kimi-for-coding`, `kimi`, `kimi-code-plan-global` (first match wins) |
+| `kimi-for-coding` | Kimi for Coding | `providers/kimi.js` | `kimi-code-plan-cn`, `kimi-for-coding`, `kimi`, `kimi-code-plan-global` (preference order; fallback after 401/403 only) |
 | `nano-gpt` | NanoGPT | `providers/nanogpt.js` | `nano-gpt`, `nanogpt`, `nano_gpt` |
 | `openrouter` | OpenRouter | `providers/openrouter.js` | `openrouter` |
 | `zai-coding-plan` | z.ai | `providers/zai.js` | `zai-coding-plan`, `zai`, `z.ai` |
@@ -54,6 +54,7 @@ asked, `/api/quota/providers` answers 500 instead of an empty list.
 | `ollama-cloud` | Ollama Cloud | `providers/ollama-cloud.js` | `ollama-cloud` / `ollamacloud` API key from OpenCode's credential store |
 | `wafer` | Wafer.ai | `providers/wafer.js` | `wafer`, `wafer-ai`, `wafer_ai`, `wafer.ai` |
 | `opencode-go` | OpenCode Go | `providers/opencode-go.js` | API key on the `opencode-go` integration or, without one, on the shared `opencode` integration; or an OpenCode Console OAuth sign-in on `opencode` |
+| `opencode` | OpenCode Zen | `providers/opencode.js` | API key on the shared `opencode` integration, or an OpenCode Console OAuth sign-in on `opencode` |
 | `neuralwatt` | NeuralWatt | `providers/neuralwatt.js` | `neuralwatt` (API key under `key` or `token`) |
 | `kilo` | Kilo Code | `providers/kilo.js` | `kilo`, `kilocode`, `kilo-code` (API key under `key`, `token`, or OAuth `access`; organization id under `kilocodeOrganizationId`, `organizationId`, or OAuth `accountId`, else OpenCode `provider.kilo.options.kilocodeOrganizationId`) |
 | `zenmux` | ZenMux | `providers/zenmux.js` | Optional Platform API key stored under `~/.config/openchamber/quota/zenmux.json` (`platformApiKey`). The OpenCode chat key is not used. |
@@ -99,6 +100,25 @@ The OpenCode Go result also carries the Console budgets of the same sign-in, the
 - **Go meters stay ours.** The same route also reports the Go allowance, but only for a Console sign-in; the provider above also covers API keys and the credit balance, so it keeps reading the Console itself.
 
 On the first OpenCode Go usage refresh after upgrading, OpenChamber deletes the obsolete `quota/opencode-go.json` credential file without reading its cookie value.
+
+## OpenCode Zen credential and quota semantics
+
+OpenCode Zen is the Console workspace behind the shared `opencode` integration: the free models plus pay-as-you-go spend on the credits the account holds. A workspace with an OpenCode Go subscription is reported by the separate `opencode-go` provider, which reads the Go meters.
+
+Zen has no request meters, so the Console exposes counters instead: the request counts per range, the spend of the current billing cycle, and the models that served those requests. The provider reads `GET https://opencode.ai/console/api/usage/summary?range=24h|7d|30d`, `GET https://opencode.ai/console/api/usage/models?range=30d&page=1&pageSize=50`, and `GET https://opencode.ai/console/api/budgets/service-accounts/status`. These endpoints are not publicly documented, so re-check them against the live Console page before assuming they are still current.
+
+- **Credential selection**: an API key on the shared `opencode` integration serves Zen, and so does an OpenCode Console OAuth sign-in on the same integration (`server` is `https://opencode.ai/console` and `orgID` matches `^(?:org|wrk)_[A-Za-z0-9]+$`). The sign-in wins when both exist. The credential is read through `../opencode/auth.js` on every fetch, so switching accounts drops the previous account instead of showing stale numbers, and OpenChamber never refreshes it: OpenCode owns that.
+- **Counters**: the `daily` and `weekly` windows carry no percent. Request counts and USD spend travel as structured `value` data; shared UI formats them in the active locale, so changing language needs no quota refresh. Every count and amount is decoded at the HTTP boundary; blank strings are missing data and zero remains valid.
+- **Spend**: every usable service-account budget carries its account ID and name, current-cycle spend (`spentMicroCents`), optional cap (`limitMicroCents`) and reset (`resetsAt`). Each becomes its own window, titled `name (serviceAccountId)`, or just the ID when unnamed. Rows without an account ID are omitted because their ownership is unknown. The workspace `monthly` window always reports its 30-day request count; an account budget never replaces it. Capped accounts report their share and spend; uncapped accounts report spend alone. The Console counts `100_000_000` micro-cents per USD. The budget read remains best-effort.
+- **Models**: the per-model request counters of the last 30 days are reported as `usage.models`, one window per model. All pages declared by `pageInfo.pageCount` are read sequentially, with one request per page and no unbounded parallel fan-out. A failed or unreadable later page fails the refresh so a truncated list cannot look complete.
+- **Trusted origin**: requests go only to the fixed Console API base URL with `redirect: 'error'`, so the bearer token is never forwarded to another origin.
+- **Failure classes stay distinct**: not configured (no credential), rejected credential (401/403), and a malformed or failed response each return their own configured flag and message.
+- **Partial responses**: an unusable successful response drops only its window or model rows. No usable windows or models is a failed refresh. HTTP and network failures of the usage endpoints still fail the refresh; the budget read remains best-effort.
+- `providers/opencode-zen.js` owns the Console HTTP requests, boundary parsing and window construction for both web and VS Code. Runtime wrappers own credential discovery and result envelopes.
+
+### Why one shared Zen reader
+
+Both runtimes read the same Console contract. Sharing the reader keeps budget ownership, pagination and numeric validation identical without maintaining two parsers. Account budgets use the existing named-window contract so every usage surface retains account identity without treating an account's spend as a workspace total.
 
 ## Codex credit balance semantics
 
@@ -240,9 +260,15 @@ The payload may also carry `boosterWallet`, the pay-as-you-go top-up wallet that
 
 **Counted payload.** Plans that have not migrated return a single weekly `usage` block plus `limits[]` rate-limit entries. This shape is inconsistent about which field carries consumption: the `usage` block returns `used` (consumed) with no `remaining` field, while each `limits[].detail` block returns `remaining` (available) with no `used` field. The provider computes `usedPercent` from whichever of the two is present, `used` taking precedence when both exist, rather than assuming one field name. A `limits[]` entry whose window is exactly five hours is labeled `Rate Limit (<raw duration>)` to set it apart from a plain duration.
 
-Credentials resolve in alias order, first match wins. OpenCode's China plan id `kimi-code-plan-cn` (kimi.com) comes before the pre-split `kimi-for-coding` and `kimi` ids, because a leftover pre-split key can hold a dead credential that would otherwise shadow the live China plan key and return 401. The global plan id `kimi-code-plan-global` (kimi.ai) stays last. Kimi's client uses `https://api.kimi.ai/coding/v1/usages` for global accounts, while this provider calls `api.kimi.com` for every alias, so a global-only key gets a 401 here. That gap is known and unfixed.
+Credentials resolve in preference order: `kimi-code-plan-cn`, `kimi-for-coding`, `kimi`, then `kimi-code-plan-global`. A non-empty `key` or `token` supplies each candidate. Global credentials use `https://api.kimi.ai/coding/v1/usages`; the other aliases use `api.kimi.com`. Candidates are deduplicated by endpoint and key, preserving a repeated key's opportunity to work at the other regional endpoint.
 
-Many Kimi users hold a pay-as-you-go Moonshot platform key (prepaid vouchers, no Kimi Code subscription) under `KIMI_API_KEY`. The Kimi Code usage address refuses such a key with 401. On a 401 or 403 the provider therefore asks `GET https://api.moonshot.ai/v1/users/me/balance` with the same key and, when that answers with a numeric `data.available_balance`, reports it as a `credits_balance` window (USD, remaining only). If the balance read also fails, the original `API error: <status>` is returned; other HTTP errors never try the balance address.
+### Why fallback only follows an authentication rejection
+
+A stale alias must not hide a working credential. After a usage 401/403 and an unsuccessful Moonshot balance probe, the next candidate is tried. Other HTTP errors, transport failures, timeouts and unreadable usage JSON end the refresh with an error, because switching accounts on a temporary failure could display another account's quota. When every candidate is rejected, the first candidate's status is reported. A successful Moonshot balance returns immediately, preserving the existing preference order.
+
+Usage requests and balance probes each have a 5-second deadline, including body reads, and share a 25-second budget below the UI's 30-second timeout. A failed or timed-out balance probe remains best-effort after the usage authentication rejection; an expired shared budget stops further candidates.
+
+Many Kimi users hold a pay-as-you-go Moonshot platform key (prepaid vouchers, no Kimi Code subscription) under `KIMI_API_KEY`. The Kimi Code usage address refuses such a key with 401. On a 401 or 403 the provider therefore asks `GET https://api.moonshot.ai/v1/users/me/balance` with the same key and, when that answers with a numeric `data.available_balance`, reports it as a `credits_balance` window (USD, remaining only). Other usage HTTP errors never try the balance address.
 
 Both `packages/web/server/lib/quota/providers/kimi.js` and `packages/vscode/src/quotaProviders.ts` (`fetchKimiQuota`) must stay in sync — the VS Code extension duplicates this parsing logic rather than importing it.
 
@@ -292,7 +318,8 @@ what `microsoft/vscode-copilot-chat` consumes (`CopilotUserQuotaInfo`). Each
 snapshot carries `entitlement`, `remaining`, `unlimited`, and
 `percent_remaining`. Providers must honor these rules:
 
-- `unlimited: true` renders a percent-less window with an "Unlimited" value label.
+- `unlimited: true` renders a percent-less window. When `credits_used` is a finite non-negative number and `has_quota !== false`, both runtimes carry it as numeric `creditsUsed`; shared UI renders the complete localized credits-used message. Otherwise the value label remains "Unlimited".
+- `copilot_plan` / `access_type_sku` / `can_signup_for_limited` are parsed to resolve `planLabel` (`Copilot Free`, `Copilot Pro`, `Copilot Pro+`, `Copilot Max`, `Copilot Business`, `Copilot Enterprise`, `Copilot Student`), matching VS Code's entitlement mapping. Unknown or unmapped combinations resolve to null (no badge).
 - Percent math requires a positive `entitlement`; entitlements of `0`, `-1`, or null are unusable.
 - When entitlement/remaining are unusable, fall back to `100 - percent_remaining`.
 - Snapshots other than `premium_interactions` (legacy annual plans) yield zero windows.
@@ -312,9 +339,12 @@ one derivation.
 Reporting the remaining axis instead (`39078 / 60000 left`) contradicted what the
 row's own percent, progress bar, and the used/remaining display toggle reported,
 and stated the opposite of VS Code for the same account at the same moment.
-`credits_used` (20,910 live) is monotonic consumption since the last reset and is
-deliberately not used as the label: it lags `percent_remaining` and would not sum
-to the entitlement.
+For metered plans with an entitlement, `credits_used` (20,910 live) is monotonic
+consumption since the last reset and is deliberately not used as the label: it
+lags `percent_remaining` and would not sum to the entitlement. For unlimited plans
+where entitlement is unbounded (`-1` or null), `credits_used` provides the only
+meaningful consumption indicator. It crosses the quota response as numeric
+`creditsUsed` so changing the UI locale translates the message without refetching.
 
 The label is fixed to the used axis, so with the display preference set to
 `remaining` the bar and its caption flip to remaining while the number still reads

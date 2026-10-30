@@ -23,7 +23,7 @@ Component interaction keys that are not application commands, such as list navig
 - `registry.ts` owns the active handler for each action ID and stack-safe temporary suspension of all application handlers.
 - `dispatcher.ts` resolves current bindings and turns keyboard events into registered command calls.
 - `useKeybind.ts` ties registrations to React component lifetimes while keeping handlers current without re-registering after every render.
-- Runtime hooks install one dispatcher listener for their window. The main application and Mini Chat have separate windows but use the same contracts.
+- Runtime hooks install one dispatcher listener for their window. The main application and Mini Chat have separate windows but use the same contracts. Focus-routed composer actions register once in each runtime hook and dispatch through the focused composer's DOM-scoped route, so the event target selects the owning composer independently of mount order.
 
 # Binding rules
 

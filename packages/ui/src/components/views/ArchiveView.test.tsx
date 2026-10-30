@@ -17,9 +17,11 @@ const { createRoot } = await import('react-dom/client');
 const { I18nProvider } = await import('@/lib/i18n');
 const { useUIStore } = await import('@/stores/useUIStore');
 const { useGlobalSessionsStore } = await import('@/stores/useGlobalSessionsStore');
+const { useProjectsStore } = await import('@/stores/useProjectsStore');
 const { ArchiveSessionsView, ArchiveView } = await import('./ArchiveView');
 const initialUI = useUIStore.getState();
 const initialSessions = useGlobalSessionsStore.getState();
+const initialProjects = useProjectsStore.getState();
 const session = (id: string, title: string, archived = 2): Session => ({
   id, title, projectID: 'project', cost: 0, tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }, directory: '/workspace',
   time: { created: 1, updated: 1, archived },
@@ -30,12 +32,14 @@ beforeEach(() => {
   document.body.append(host);
   root = createRoot(host);
   useUIStore.setState({ isArchivePageOpen: true });
+  useProjectsStore.setState({ projects: [{ id: 'project', path: '/workspace' }] });
 });
 
 afterEach(async () => {
   await act(async () => root.unmount());
   useUIStore.setState(initialUI);
   useGlobalSessionsStore.setState(initialSessions);
+  useProjectsStore.setState(initialProjects);
   document.body.replaceChildren();
 });
 
@@ -77,6 +81,17 @@ test('archive search uses exact IDs and preserves title search and archive membe
   expect(await search('release')).toEqual(['Release notes']);
   expect(await search('releaze')).toEqual(['Release notes']);
   expect(await search('')).toHaveLength(2);
+});
+
+test('archive rows hide unregistered destinations while preserving raw archived records', async () => {
+  useGlobalSessionsStore.setState({ archivedSessions: [
+    session('kept-archive', 'Kept archive'),
+    { ...session('blocked-archive', 'Blocked archive'), directory: '/unregistered' },
+  ] });
+  await act(async () => root.render(<I18nProvider><ArchiveView /></I18nProvider>));
+  expect(document.body.textContent).toContain('Kept archive');
+  expect(document.body.textContent).not.toContain('Blocked archive');
+  expect(useGlobalSessionsStore.getState().archivedSessions).toHaveLength(2);
 });
 
 test('the chats of a deleted space are grouped under its name and cannot be restored', async () => {

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { parseGiteaRemoteUrl, resolveGiteaReposFromDirectory } from './repo.js';
 
 const origin = 'https://gitea.example.com:3000';
@@ -24,6 +24,50 @@ describe('Gitea remotes', () => {
 
   it('reads plain HTTP only for a loopback instance', () => {
     expect(parseGiteaRemoteUrl('http://localhost:3000/alice/app.git', 'http://localhost:3000')?.repoPath).toBe('alice/app');
+  });
+
+  it.each(['', 'origin'])('reads an SSH alias with remote selection "%s"', async (explicitRemote) => {
+    const remotes = [
+      { name: 'origin', fetchUrl: 'forgejo:alice/app.git', pushUrl: 'forgejo:alice/app.git' },
+      { name: 'elsewhere', fetchUrl: 'other:alice/app.git', pushUrl: 'other:alice/app.git' },
+    ];
+    const sshHostReaches = async (host, hostname) => host === 'forgejo' && hostname === 'gitea.example.com';
+    const resolved = await resolveGiteaReposFromDirectory('/repo', origin, explicitRemote, {
+      getRemotes: async () => remotes, getStatus: async () => ({}), sshHostReaches,
+    });
+
+    expect(resolved.repos.map((repo) => [repo.remoteName, repo.repoPath])).toEqual([['origin', 'alice/app']]);
+    expect(parseGiteaRemoteUrl('forgejo:alice/app.git', origin)).toBeNull();
+    expect(parseGiteaRemoteUrl('forgejo:alice/app.git', origin, new Set(['forgejo:alice/app.git']))?.repoPath).toBe('alice/app');
+  });
+
+  it.each(['git@forgejo:mallory/app.git', 'ssh://git@forgejo:2222/mallory/app.git', 'git+ssh://git@forgejo/mallory/app.git'])(
+    'does not let another user on the same alias authorize %s', async (remoteUrl) => {
+      const remotes = [
+        { name: 'origin', fetchUrl: 'deploy@forgejo:alice/app.git', pushUrl: remoteUrl },
+        { name: 'other', fetchUrl: remoteUrl },
+      ];
+      const sshHostReaches = vi.fn(async (_host, _hostname, user) => user === 'deploy');
+      const resolved = await resolveGiteaReposFromDirectory('/repo', origin, '', {
+        getRemotes: async () => remotes, getStatus: async () => ({}), sshHostReaches,
+      });
+      expect(resolved.repos.map((repo) => [repo.remoteName, repo.repoPath])).toEqual([['origin', 'alice/app']]);
+      expect(sshHostReaches).toHaveBeenCalledWith('forgejo', 'gitea.example.com', 'git');
+      expect(sshHostReaches).toHaveBeenCalledWith('forgejo', 'gitea.example.com', 'deploy');
+    },
+  );
+
+  it('leaves remotes on the instance alone without reading the SSH configuration', async () => {
+    const sshHostReaches = vi.fn(async () => false);
+    const remotes = [
+      { name: 'origin', fetchUrl: `${origin}/alice/app.git`, pushUrl: `${origin}/alice/app.git` },
+      { name: 'elsewhere', fetchUrl: 'other:alice/app.git' },
+    ];
+
+    const resolved = await resolveGiteaReposFromDirectory('/repo', origin, 'origin', { getRemotes: async () => remotes, sshHostReaches });
+
+    expect(resolved.repos.map((repo) => repo.repoPath)).toEqual(['alice/app']);
+    expect(sshHostReaches).not.toHaveBeenCalled();
   });
 
   it('reads only the named remote when one is given', async () => {

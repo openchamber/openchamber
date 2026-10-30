@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
 import type { Agent, Config } from '@/lib/opencode/model';
+import type { ModelMetadata } from '@/types';
 import type { DesktopSettings } from '@/lib/desktop';
 import { getRuntimeKey, switchRuntimeEndpoint } from '@/lib/runtime-switch';
 
@@ -146,6 +147,7 @@ mock.module('@/stores/useProjectsStore', () => ({
 let directoryAvailability: 'available' | 'missing' | 'unknown' = 'available';
 
 mock.module('@/lib/opencode/client', () => ({
+  isOpencodeNotFound: () => false,
   OpencodeApiError: Error,
   normalizeOpencodeError: (operation: string, error: unknown) => new Error(`${operation}: ${String(error)}`),
   opencodeClient: {
@@ -200,7 +202,9 @@ mock.module('@/contexts/runtimeAPIRegistry', () => ({
   getRegisteredRuntimeAPIs: mock(() => null),
 }));
 
+const runtimeFetchModule = await import('@/lib/runtime-fetch');
 mock.module('@/lib/runtime-fetch', () => ({
+  ...runtimeFetchModule,
   runtimeFetch: mock(async () => new Response(JSON.stringify({}), {
     headers: { 'Content-Type': 'application/json' },
   })),
@@ -3424,5 +3428,799 @@ describe('getModelMetadata limits', () => {
     });
 
     expect(useConfigStore.getState().getModelMetadata('custom', 'local')?.limit).toEqual({ context: 32_000, output: 4_000 });
+  });
+});
+
+describe('getModelMetadata release dates', () => {
+  test('projects the runtime release date without a metadata catalog', () => {
+    const live = provider('agent-openai', 'gpt-6.1-sol');
+    live.models[0].time.released = 1790640000000;
+    useConfigStore.setState({ providers: [live], modelsMetadata: new Map() });
+    expect(useConfigStore.getState()
+      .getModelMetadata('agent-openai', 'gpt-6.1-sol')?.release_date)
+      .toBe('2026-09-29');
+  });
+
+  const invalidReleaseTimes: ReadonlyArray<number | string | null | undefined> = [
+    undefined, null, 0, -1, NaN, Infinity, -Infinity,
+    '1790640000000', '', Number.MAX_VALUE, 253402300800000,
+  ];
+  for (const released of invalidReleaseTimes) {
+    test(`does not project invalid release time ${String(released)}`, () => {
+      const live = provider('custom', 'local');
+      Reflect.set(live.models[0].time, 'released', released);
+      useConfigStore.setState({ providers: [live], modelsMetadata: new Map() });
+      expect(useConfigStore.getState().getModelMetadata('custom', 'local')?.release_date)
+        .toBeUndefined();
+    });
+  }
+
+  test('does not project a release date when the runtime time object is missing', () => {
+    const live = provider('custom', 'local');
+    Reflect.deleteProperty(live.models[0], 'time');
+    useConfigStore.setState({ providers: [live], modelsMetadata: new Map() });
+    expect(useConfigStore.getState().getModelMetadata('custom', 'local')?.release_date)
+      .toBeUndefined();
+  });
+
+  test('does not project a release date when the runtime released field is missing', () => {
+    const live = provider('custom', 'local');
+    Reflect.deleteProperty(live.models[0].time, 'released');
+    useConfigStore.setState({ providers: [live], modelsMetadata: new Map() });
+    expect(useConfigStore.getState().getModelMetadata('custom', 'local')?.release_date)
+      .toBeUndefined();
+  });
+
+  test('projects a UTC midnight timestamp as that calendar day', () => {
+    const live = provider('custom', 'local');
+    live.models[0].time.released = 1704067200000;
+    useConfigStore.setState({ providers: [live], modelsMetadata: new Map() });
+    expect(useConfigStore.getState().getModelMetadata('custom', 'local')?.release_date)
+      .toBe('2024-01-01');
+  });
+
+  test('projects a late UTC day as that calendar day', () => {
+    const live = provider('custom', 'local');
+    live.models[0].time.released = 1790726399999;
+    useConfigStore.setState({ providers: [live], modelsMetadata: new Map() });
+    expect(useConfigStore.getState().getModelMetadata('custom', 'local')?.release_date)
+      .toBe('2026-09-29');
+  });
+
+  test('a valid runtime release date overrides an older exact catalog date when context is zero', () => {
+    const live = provider('openai', 'gpt-6-astra');
+    live.models[0].time.released = 1790640000000;
+    const cached = {
+      id: 'gpt-6-astra',
+      providerId: 'openai',
+      name: 'GPT-6 Astra',
+      tool_call: false,
+      attachment: true,
+      cost: { input: 3, output: 15, cache_read: 0.3, cache_write: 3.75 },
+      limit: { context: 32_000, output: 4_000 },
+      knowledge: '2025-08',
+      release_date: '2025-08-01',
+      last_updated: '2025-09-01',
+    };
+    useConfigStore.setState({
+      providers: [live],
+      modelsMetadata: new Map([['openai/gpt-6-astra', cached]]),
+    });
+
+    const metadata = useConfigStore.getState().getModelMetadata('openai', 'gpt-6-astra');
+
+    expect(metadata?.release_date).toBe('2026-09-29');
+    expect(metadata?.limit).toEqual({ context: 32_000, output: 4_000 });
+    expect(metadata?.cost).toEqual(cached.cost);
+    expect(metadata?.tool_call).toBe(false);
+    expect(metadata?.attachment).toBe(true);
+    expect(metadata?.knowledge).toBe('2025-08');
+    expect(metadata?.name).toBe('GPT-6 Astra');
+    expect(cached.release_date).toBe('2025-08-01');
+    expect(cached.limit).toEqual({ context: 32_000, output: 4_000 });
+  });
+
+  test('a valid runtime release date overrides an older exact catalog date when context is positive', () => {
+    const live = provider('openai', 'gpt-6-astra');
+    live.models[0].time.released = 1790640000000;
+    live.models[0].limit = { context: 400_000, output: 128_000 };
+    const cached = {
+      id: 'gpt-6-astra',
+      providerId: 'openai',
+      name: 'GPT-6 Astra',
+      tool_call: false,
+      attachment: true,
+      cost: { input: 3, output: 15, cache_read: 0.3, cache_write: 3.75 },
+      limit: { context: 1_050_000, output: 128_000 },
+      knowledge: '2025-08',
+      release_date: '2025-08-01',
+      last_updated: '2025-09-01',
+    };
+    useConfigStore.setState({
+      providers: [live],
+      modelsMetadata: new Map([['openai/gpt-6-astra', cached]]),
+    });
+
+    const metadata = useConfigStore.getState().getModelMetadata('openai', 'gpt-6-astra');
+
+    expect(metadata?.release_date).toBe('2026-09-29');
+    expect(metadata?.limit).toEqual({ context: 400_000, output: 128_000 });
+    expect(metadata?.cost).toEqual(cached.cost);
+    expect(metadata?.tool_call).toBe(false);
+    expect(metadata?.attachment).toBe(true);
+    expect(metadata?.knowledge).toBe('2025-08');
+    expect(metadata?.last_updated).toBe('2025-09-01');
+    expect(metadata?.name).toBe('GPT-6 Astra');
+    expect(cached.release_date).toBe('2025-08-01');
+    expect(cached.limit).toEqual({ context: 1_050_000, output: 128_000 });
+  });
+
+  test('an invalid runtime release time keeps the exact catalog date', () => {
+    const live = provider('openai', 'gpt-6-astra');
+    live.models[0].time.released = 0;
+    live.models[0].limit = { context: 400_000, output: 8_000 };
+    useConfigStore.setState({
+      providers: [live],
+      modelsMetadata: new Map([['openai/gpt-6-astra', {
+        id: 'gpt-6-astra',
+        providerId: 'openai',
+        name: 'GPT-6 Astra',
+        cost: { input: 3, output: 15 },
+        limit: { context: 1_050_000, output: 128_000 },
+        release_date: '2025-08-01',
+      }]]),
+    });
+
+    const metadata = useConfigStore.getState().getModelMetadata('openai', 'gpt-6-astra');
+
+    expect(metadata?.release_date).toBe('2025-08-01');
+    expect(metadata?.limit).toEqual({ context: 400_000, output: 8_000 });
+    expect(metadata?.cost).toEqual({ input: 3, output: 15 });
+  });
+
+  test('a missing runtime time keeps the exact catalog date', () => {
+    const live = provider('custom', 'local');
+    Reflect.deleteProperty(live.models[0], 'time');
+    useConfigStore.setState({
+      providers: [live],
+      modelsMetadata: new Map([['custom/local', {
+        id: 'local',
+        providerId: 'custom',
+        limit: { context: 32_000, output: 4_000 },
+        release_date: '2024-03-01',
+      }]]),
+    });
+
+    const metadata = useConfigStore.getState().getModelMetadata('custom', 'local');
+
+    expect(metadata?.release_date).toBe('2024-03-01');
+    expect(metadata?.limit).toEqual({ context: 32_000, output: 4_000 });
+  });
+
+  test('a missing runtime model keeps the exact catalog entry', () => {
+    const cached = {
+      id: 'local',
+      providerId: 'custom',
+      name: 'Local',
+      limit: { context: 32_000, output: 4_000 },
+      cost: { input: 1, output: 2 },
+      knowledge: '2024-01',
+      release_date: '2024-03-01',
+    };
+    useConfigStore.setState({
+      providers: [],
+      modelsMetadata: new Map([['custom/local', cached]]),
+    });
+
+    expect(useConfigStore.getState().getModelMetadata('custom', 'local')).toEqual(cached);
+  });
+});
+
+describe('getModelMetadata descriptive fallback', () => {
+  const catalogEntry = (
+    providerId: string,
+    fields: Partial<ModelMetadata> = {},
+  ): ModelMetadata => ({
+    id: 'different-entry-id',
+    providerId,
+    ...fields,
+  });
+
+  test('supplements a Fast alias using actual modelID without replacing gateway data', () => {
+    const standard = model('agent-openai', 'gpt-6.1-sol');
+    const fast = {
+      ...standard,
+      id: 'gpt-6.1-sol-fast',
+      canonical: 'openai',
+      name: 'Gateway Fast',
+      cost: [{ input: 9, output: 18, cache: { read: 0, write: 7 } }],
+      limit: { context: 123000, output: 5000 },
+      capabilities: { tools: false, input: ['text'], output: ['text'] },
+      time: { released: 1790640000000 },
+    };
+    const entry: ModelMetadata = {
+      id: 'gpt-6.1-sol', providerId: 'openai', name: 'Standard',
+      knowledge: '2026-04-30', release_date: '2026-01-01', last_updated: '2026-10-01',
+      cost: { input: 1, output: 2, cache_read: 3, cache_write: 4 },
+      limit: { context: 1000000, output: 100000 },
+      tool_call: true, attachment: true, reasoning: true, temperature: true,
+      structured_output: true, modalities: { input: ['text', 'image'], output: ['image'] },
+    };
+    useConfigStore.setState({
+      providers: [{ ...provider('agent-openai'), models: [standard, fast] }],
+      modelsMetadata: new Map([['openai/gpt-6.1-sol', entry]]),
+    });
+    const result = useConfigStore.getState().getModelMetadata('agent-openai', fast.id);
+    expect(result).toMatchObject({
+      id: 'gpt-6.1-sol', providerId: 'agent-openai', name: 'Gateway Fast',
+      knowledge: '2026-04-30', release_date: '2026-09-29', last_updated: '2026-10-01',
+      cost: { input: 9, output: 18, cache_read: 0, cache_write: 7 },
+      limit: fast.limit, tool_call: false, attachment: false,
+      modalities: { input: ['text'], output: ['text'] },
+    });
+    expect(result?.reasoning).toBeUndefined();
+    expect(result?.temperature).toBeUndefined();
+    expect(result?.structured_output).toBeUndefined();
+  });
+
+  test('uses provider canonical when the model has none', () => {
+    const live = provider('agent-openai', 'gpt-6.1-sol');
+    useConfigStore.setState({
+      providers: [{ ...live, canonical: 'openai' }],
+      modelsMetadata: new Map([[
+        'openai/gpt-6.1-sol',
+        catalogEntry('openai', { knowledge: '2026-04-30', last_updated: '2026-10-01' }),
+      ]]),
+    });
+    const result = useConfigStore.getState().getModelMetadata('agent-openai', 'gpt-6.1-sol');
+    expect(result?.knowledge).toBe('2026-04-30');
+    expect(result?.last_updated).toBe('2026-10-01');
+    expect(result?.providerId).toBe('agent-openai');
+    expect(result?.id).toBe('gpt-6.1-sol');
+  });
+
+  test('prefers model canonical over a conflicting provider canonical', () => {
+    const live = provider('agent-openai', 'gpt-6.1-sol');
+    useConfigStore.setState({
+      providers: [{
+        ...live,
+        canonical: 'other',
+        models: [{ ...live.models[0], canonical: 'openai' }],
+      }],
+      modelsMetadata: new Map([
+        ['openai/gpt-6.1-sol', catalogEntry('openai', { knowledge: 'from-model' })],
+        ['other/gpt-6.1-sol', catalogEntry('other', { knowledge: 'from-provider' })],
+      ]),
+    });
+    expect(useConfigStore.getState().getModelMetadata('agent-openai', 'gpt-6.1-sol')?.knowledge)
+      .toBe('from-model');
+  });
+
+  test('does not search elsewhere when the explicit canonical entry is missing', () => {
+    const live = provider('agent-openai', 'gpt-6.1-sol');
+    useConfigStore.setState({
+      providers: [{
+        ...live,
+        canonical: 'openai',
+        models: [{ ...live.models[0], canonical: 'declared-missing' }],
+      }],
+      modelsMetadata: new Map([
+        ['openai/gpt-6.1-sol', catalogEntry('openai', { knowledge: 'from-elsewhere' })],
+      ]),
+    });
+    expect(useConfigStore.getState().getModelMetadata('agent-openai', 'gpt-6.1-sol')?.knowledge)
+      .toBeUndefined();
+  });
+
+  test('matches a canonical provider id with surrounding whitespace', () => {
+    const live = provider('agent-openai', 'gpt-6.1-sol');
+    useConfigStore.setState({
+      providers: [{
+        ...live,
+        models: [{ ...live.models[0], canonical: '  OpenAI  ' }],
+      }],
+      modelsMetadata: new Map([[
+        'openai/gpt-6.1-sol',
+        catalogEntry('openai', { knowledge: '2026-04-30' }),
+      ]]),
+    });
+    expect(useConfigStore.getState().getModelMetadata('agent-openai', 'gpt-6.1-sol')?.knowledge)
+      .toBe('2026-04-30');
+  });
+
+  test('a blank canonical does not block a unique modelID match', () => {
+    const live = provider('agent-openai', 'gpt-6.1-sol');
+    useConfigStore.setState({
+      providers: [{
+        ...live,
+        canonical: '   ',
+        models: [{ ...live.models[0], canonical: '   ' }],
+      }],
+      modelsMetadata: new Map([[
+        'openai/gpt-6.1-sol',
+        catalogEntry('openai', { knowledge: '2026-04-30' }),
+      ]]),
+    });
+    expect(useConfigStore.getState().getModelMetadata('agent-openai', 'gpt-6.1-sol')?.knowledge)
+      .toBe('2026-04-30');
+  });
+
+  test('uses the canonical release date when runtime time is invalid', () => {
+    const live = provider('agent-openai', 'gpt-6.1-sol');
+    useConfigStore.setState({
+      providers: [{
+        ...live,
+        models: [{ ...live.models[0], canonical: 'openai', time: { released: 0 } }],
+      }],
+      modelsMetadata: new Map([[
+        'openai/gpt-6.1-sol',
+        catalogEntry('openai', {
+          knowledge: '2026-04-30',
+          release_date: '2026-01-01',
+          last_updated: '2026-10-01',
+        }),
+      ]]),
+    });
+    const result = useConfigStore.getState().getModelMetadata('agent-openai', 'gpt-6.1-sol');
+    expect(result?.release_date).toBe('2026-01-01');
+    expect(result?.knowledge).toBe('2026-04-30');
+    expect(result?.last_updated).toBe('2026-10-01');
+  });
+
+  test('an exact catalog entry wins over canonical metadata', () => {
+    const live = provider('agent-openai', 'gpt-6.1-sol');
+    const exact = {
+      id: 'gpt-6.1-sol',
+      providerId: 'agent-openai',
+      name: 'Exact custom',
+      knowledge: 'exact-knowledge',
+      release_date: '2020-01-01',
+      cost: { input: 4, output: 5, cache_read: 6, cache_write: 7 },
+      limit: { context: 32_000, output: 4_000 },
+    };
+    useConfigStore.setState({
+      providers: [{
+        ...live,
+        canonical: 'openai',
+        models: [{
+          ...live.models[0],
+          canonical: 'openai',
+          time: { released: 1790640000000 },
+          limit: { context: 0, output: 0 },
+        }],
+      }],
+      modelsMetadata: new Map<string, ModelMetadata>([
+        ['agent-openai/gpt-6.1-sol', exact],
+        ['openai/gpt-6.1-sol', catalogEntry('openai', {
+          name: 'Canonical',
+          knowledge: 'canonical-knowledge',
+          release_date: '2024-06-01',
+          cost: { input: 1, output: 2 },
+          limit: { context: 1_000_000, output: 100_000 },
+        })],
+      ]),
+    });
+    const result = useConfigStore.getState().getModelMetadata('agent-openai', 'gpt-6.1-sol');
+    expect(result?.knowledge).toBe('exact-knowledge');
+    expect(result?.name).toBe('Exact custom');
+    expect(result?.release_date).toBe('2026-09-29');
+    expect(result?.cost).toEqual(exact.cost);
+    expect(result?.limit).toEqual(exact.limit);
+    expect(exact.release_date).toBe('2020-01-01');
+  });
+
+  test('keeps explicit zero runtime prices when descriptive metadata matches', () => {
+    const live = provider('agent-openai', 'gpt-6.1-sol');
+    useConfigStore.setState({
+      providers: [{
+        ...live,
+        models: [{
+          ...live.models[0],
+          canonical: 'openai',
+          cost: [{ input: 0, output: 0, cache: { read: 0, write: 0 } }],
+        }],
+      }],
+      modelsMetadata: new Map([[
+        'openai/gpt-6.1-sol',
+        catalogEntry('openai', {
+          knowledge: '2026-04-30',
+          cost: { input: 1, output: 2, cache_read: 3, cache_write: 4 },
+        }),
+      ]]),
+    });
+    const result = useConfigStore.getState().getModelMetadata('agent-openai', 'gpt-6.1-sol');
+    expect(result?.knowledge).toBe('2026-04-30');
+    expect(result?.cost).toEqual({ input: 0, output: 0, cache_read: 0, cache_write: 0 });
+  });
+
+  test('leaves runtime cost missing when the runtime cost list is empty', () => {
+    const live = provider('agent-openai', 'gpt-6.1-sol');
+    useConfigStore.setState({
+      providers: [{
+        ...live,
+        models: [{ ...live.models[0], canonical: 'openai', cost: [] }],
+      }],
+      modelsMetadata: new Map([[
+        'openai/gpt-6.1-sol',
+        catalogEntry('openai', {
+          knowledge: '2026-04-30',
+          cost: { input: 1, output: 2, cache_read: 3, cache_write: 4 },
+        }),
+      ]]),
+    });
+    const result = useConfigStore.getState().getModelMetadata('agent-openai', 'gpt-6.1-sol');
+    expect(result?.knowledge).toBe('2026-04-30');
+    expect(result?.cost).toBeUndefined();
+  });
+
+  test('keeps explicit zero runtime limits from another provider catalog', () => {
+    const live = provider('agent-openai', 'gpt-6.1-sol');
+    useConfigStore.setState({
+      providers: [{
+        ...live,
+        models: [{
+          ...live.models[0],
+          canonical: 'openai',
+          limit: { context: 0, output: 0 },
+        }],
+      }],
+      modelsMetadata: new Map([[
+        'openai/gpt-6.1-sol',
+        catalogEntry('openai', {
+          knowledge: '2026-04-30',
+          limit: { context: 1_000_000, output: 100_000 },
+        }),
+      ]]),
+    });
+    const result = useConfigStore.getState().getModelMetadata('agent-openai', 'gpt-6.1-sol');
+    expect(result?.knowledge).toBe('2026-04-30');
+    expect(result?.limit).toEqual({ context: 0, output: 0 });
+  });
+
+  const identityCases = [
+    { modelID: 'gpt-6.1-sol', keys: ['openai/gpt-6.1-sol'], matched: true },
+    { modelID: 'gpt-6.1-sol', keys: ['openai/gpt-6.1-sol', 'other/gpt-6.1-sol'], matched: false },
+    { modelID: 'gpt-6.1-sol-fast', keys: ['openai/gpt-6.1-sol'], matched: false },
+    { modelID: 'fast-gpt-6.1-sol', keys: ['openai/gpt-6.1-sol'], matched: false },
+    { modelID: 'GPT-6.1-SOL', keys: ['openai/gpt-6.1-sol'], matched: false },
+    { modelID: 'vendor/model', keys: ['gateway/vendor/model'], matched: true },
+    { modelID: 'model', keys: ['gateway/vendor/model'], matched: false },
+  ];
+
+  for (const { modelID, keys, matched } of identityCases) {
+    test(`uses complete modelID ${modelID} with ${keys.join(',')}`, () => {
+      const live = provider('agent-openai', modelID);
+      const entries = keys.map((key): [string, ModelMetadata] => [key, {
+        id: 'different-entry-id', providerId: key.slice(0, key.indexOf('/')),
+        knowledge: '2026-04-30',
+      }]);
+      useConfigStore.setState({ providers: [live], modelsMetadata: new Map(entries) });
+      expect(useConfigStore.getState().getModelMetadata('agent-openai', modelID)?.knowledge)
+        .toBe(matched ? '2026-04-30' : undefined);
+    });
+  }
+
+  test('keeps runtime identity when the catalog entry id differs', () => {
+    const live = provider('agent-openai', 'gpt-6.1-sol');
+    const gateway = {
+      ...live.models[0],
+      name: 'Gateway name',
+    };
+    useConfigStore.setState({
+      providers: [{ ...live, models: [gateway] }],
+      modelsMetadata: new Map([['openai/gpt-6.1-sol', {
+        id: 'different-entry-id',
+        providerId: 'openai',
+        name: 'Catalog name',
+        knowledge: '2026-04-30',
+        tool_call: false,
+        attachment: true,
+        reasoning: true,
+        temperature: true,
+        structured_output: true,
+        cost: { input: 8, output: 9, cache_read: 1, cache_write: 2 },
+        limit: { context: 999, output: 999 },
+        modalities: { input: ['text', 'image'], output: ['image'] },
+      }]]),
+    });
+    const result = useConfigStore.getState().getModelMetadata('agent-openai', 'gpt-6.1-sol');
+    expect(result).toMatchObject({
+      id: 'gpt-6.1-sol',
+      providerId: 'agent-openai',
+      name: 'Gateway name',
+      knowledge: '2026-04-30',
+      tool_call: true,
+      attachment: false,
+      modalities: { input: ['text'], output: ['text'] },
+    });
+    expect(result?.reasoning).toBeUndefined();
+    expect(result?.temperature).toBeUndefined();
+    expect(result?.structured_output).toBeUndefined();
+  });
+
+  test('does not match an unknown alias by display name or family', () => {
+    const live = provider('agent-openai', 'private-alias');
+    useConfigStore.setState({
+      providers: [{
+        ...live,
+        models: [{
+          ...live.models[0],
+          name: 'GPT-6.1 Sol',
+          family: 'gpt-6.1-sol',
+        }],
+      }],
+      modelsMetadata: new Map([[
+        'openai/gpt-6.1-sol',
+        catalogEntry('openai', { name: 'GPT-6.1 Sol', knowledge: '2026-04-30' }),
+      ]]),
+    });
+    expect(useConfigStore.getState().getModelMetadata('agent-openai', 'private-alias')?.knowledge)
+      .toBeUndefined();
+  });
+
+  test('treats duplicate model ids as unknown in either map order', () => {
+    const live = provider('agent-openai', 'gpt-6.1-sol');
+    const alpha = catalogEntry('alpha', { knowledge: '2026-04-30' });
+    const beta = catalogEntry('beta', { knowledge: '2026-04-30' });
+    for (const entries of [
+      [['alpha/gpt-6.1-sol', alpha], ['beta/gpt-6.1-sol', beta]],
+      [['beta/gpt-6.1-sol', beta], ['alpha/gpt-6.1-sol', alpha]],
+    ] as const) {
+      useConfigStore.setState({
+        providers: [live],
+        modelsMetadata: new Map(entries),
+      });
+      expect(useConfigStore.getState().getModelMetadata('agent-openai', 'gpt-6.1-sol')?.knowledge)
+        .toBeUndefined();
+    }
+  });
+
+  test('does not infer a cross-provider identity when the runtime model is missing', () => {
+    useConfigStore.setState({
+      providers: [],
+      modelsMetadata: new Map([[
+        'openai/gpt-6.1-sol',
+        catalogEntry('openai', { knowledge: '2026-04-30' }),
+      ]]),
+    });
+    expect(useConfigStore.getState().getModelMetadata('agent-openai', 'gpt-6.1-sol'))
+      .toBeUndefined();
+  });
+
+  test('keeps an exact entry when the runtime model is missing', () => {
+    const exact = {
+      id: 'gpt-6.1-sol',
+      providerId: 'agent-openai',
+      name: 'Exact custom',
+      knowledge: 'exact-knowledge',
+      release_date: '2020-01-01',
+    };
+    useConfigStore.setState({
+      providers: [],
+      modelsMetadata: new Map<string, ModelMetadata>([
+        ['agent-openai/gpt-6.1-sol', exact],
+        ['openai/gpt-6.1-sol', catalogEntry('openai', { knowledge: 'canonical-knowledge' })],
+      ]),
+    });
+    expect(useConfigStore.getState().getModelMetadata('agent-openai', 'gpt-6.1-sol'))
+      .toEqual(exact);
+  });
+
+  test('projects a runtime date and no borrowed fields from an empty catalog', () => {
+    const live = provider('agent-openai', 'gpt-6.1-sol');
+    useConfigStore.setState({
+      providers: [{
+        ...live,
+        canonical: 'openai',
+        models: [{
+          ...live.models[0],
+          canonical: 'openai',
+          time: { released: 1790640000000 },
+        }],
+      }],
+      modelsMetadata: new Map(),
+    });
+    const result = useConfigStore.getState().getModelMetadata('agent-openai', 'gpt-6.1-sol');
+    expect(result?.release_date).toBe('2026-09-29');
+    expect(result?.knowledge).toBeUndefined();
+    expect(result?.last_updated).toBeUndefined();
+  });
+
+  test('keeps present descriptive text and drops blank descriptive fields', () => {
+    const live = provider('agent-openai', 'gpt-6.1-sol');
+    useConfigStore.setState({
+      providers: [{
+        ...live,
+        models: [{ ...live.models[0], canonical: 'openai', time: { released: 0 } }],
+      }],
+      modelsMetadata: new Map([[
+        'openai/gpt-6.1-sol',
+        catalogEntry('openai', {
+          knowledge: '  2026-04-30  ',
+          release_date: '   ',
+          last_updated: '',
+        }),
+      ]]),
+    });
+    const result = useConfigStore.getState().getModelMetadata('agent-openai', 'gpt-6.1-sol');
+    expect(result?.knowledge).toBe('2026-04-30');
+    expect(result?.release_date).toBeUndefined();
+    expect(result?.last_updated).toBeUndefined();
+  });
+
+  test('does not match when the runtime modelID is missing', () => {
+    const live = provider('agent-openai', 'gpt-6.1-sol');
+    useConfigStore.setState({
+      providers: [{
+        ...live,
+        canonical: 'openai',
+        models: [{
+          ...live.models[0],
+          id: 'gpt-6.1-sol',
+          modelID: '',
+          canonical: 'openai',
+          name: 'GPT-6.1 Sol',
+          family: 'gpt-6.1-sol',
+        }],
+      }],
+      modelsMetadata: new Map([[
+        'openai/gpt-6.1-sol',
+        catalogEntry('openai', { knowledge: '2026-04-30' }),
+      ]]),
+    });
+    expect(useConfigStore.getState().getModelMetadata('agent-openai', 'gpt-6.1-sol')?.knowledge)
+      .toBeUndefined();
+  });
+
+  test('does not parse a canonical value as a provider and model alias', () => {
+    const live = provider('agent-openai', 'gpt-6.1-sol');
+    useConfigStore.setState({
+      providers: [{
+        ...live,
+        canonical: 'openai',
+        models: [{ ...live.models[0], canonical: 'openai/gpt-6.1-sol' }],
+      }],
+      modelsMetadata: new Map([[
+        'openai/gpt-6.1-sol',
+        catalogEntry('openai', { knowledge: '2026-04-30' }),
+      ]]),
+    });
+    expect(useConfigStore.getState().getModelMetadata('agent-openai', 'gpt-6.1-sol')?.knowledge)
+      .toBeUndefined();
+  });
+
+  test('does not keep a previous match after the catalog becomes ambiguous or empty', () => {
+    const live = provider('agent-openai', 'gpt-6.1-sol');
+    const read = () => useConfigStore.getState().getModelMetadata('agent-openai', 'gpt-6.1-sol')?.knowledge;
+    useConfigStore.setState({
+      providers: [live],
+      modelsMetadata: new Map([[
+        'openai/gpt-6.1-sol',
+        catalogEntry('openai', { knowledge: '2026-04-30' }),
+      ]]),
+    });
+    expect(read()).toBe('2026-04-30');
+
+    useConfigStore.setState({
+      providers: [live],
+      modelsMetadata: new Map([
+        ['other/gpt-6.1-sol', catalogEntry('other', { knowledge: '2026-05-01' })],
+        ['openai/gpt-6.1-sol', catalogEntry('openai', { knowledge: '2026-04-30' })],
+      ]),
+    });
+    expect(read()).toBeUndefined();
+
+    useConfigStore.setState({ providers: [live], modelsMetadata: new Map() });
+    expect(read()).toBeUndefined();
+  });
+
+  test('leaves runtime and catalog inputs unchanged and does not fetch', () => {
+    const exactModel = {
+      ...model('openai', 'gpt-6-astra'),
+      time: { released: 1790640000000 },
+      limit: { context: 400_000, output: 128_000 },
+    };
+    const exactProvider = { ...provider('openai', 'gpt-6-astra'), models: [exactModel] };
+    const exactEntry: ModelMetadata = {
+      id: 'gpt-6-astra',
+      providerId: 'openai',
+      name: 'GPT-6 Astra',
+      knowledge: '2025-08',
+      release_date: '2025-08-01',
+      last_updated: '2025-09-01',
+      cost: { input: 3, output: 15, cache_read: 0.3, cache_write: 3.75 },
+      limit: { context: 1_050_000, output: 128_000 },
+    };
+    const crossModel = {
+      ...model('agent-openai', 'gpt-6.1-sol'),
+      canonical: 'openai',
+      name: 'Gateway Fast',
+      time: { released: 1790640000000 },
+      cost: [{ input: 9, output: 18, cache: { read: 0, write: 7 } }],
+      limit: { context: 123_000, output: 5_000 },
+    };
+    const crossProvider = {
+      ...provider('agent-openai'),
+      canonical: 'other',
+      models: [crossModel],
+    };
+    const crossEntry = catalogEntry('openai', {
+      name: 'Standard',
+      knowledge: '2026-04-30',
+      release_date: '2026-01-01',
+      last_updated: '2026-10-01',
+      cost: { input: 1, output: 2, cache_read: 3, cache_write: 4 },
+      limit: { context: 1_000_000, output: 100_000 },
+    });
+    const calls: string[] = [];
+    const originalFetch = globalThis.fetch;
+    function recordingFetch(input: RequestInfo | URL): Promise<Response> {
+      calls.push(String(input));
+      return Promise.reject(new Error('metadata lookup must not fetch'));
+    }
+    globalThis.fetch = recordingFetch;
+
+    try {
+      const exactEntryBefore = structuredClone(exactEntry);
+      const exactModelBefore = structuredClone(exactModel);
+      useConfigStore.setState({
+        providers: [exactProvider],
+        modelsMetadata: new Map([['openai/gpt-6-astra', exactEntry]]),
+      });
+      const exactResult = useConfigStore.getState().getModelMetadata('openai', 'gpt-6-astra');
+      expect(exactResult?.release_date).toBe('2026-09-29');
+      expect(exactResult?.knowledge).toBe('2025-08');
+      expect(exactResult?.limit).toEqual({ context: 400_000, output: 128_000 });
+      expect(exactEntry).toEqual(exactEntryBefore);
+      expect(exactModel).toEqual(exactModelBefore);
+
+      const crossEntryBefore = structuredClone(crossEntry);
+      const crossModelBefore = structuredClone(crossModel);
+      const crossProviderBefore = structuredClone(crossProvider);
+      useConfigStore.setState({
+        providers: [crossProvider],
+        modelsMetadata: new Map([['openai/gpt-6.1-sol', crossEntry]]),
+      });
+      const crossResult = useConfigStore.getState().getModelMetadata('agent-openai', 'gpt-6.1-sol');
+      expect(crossResult?.knowledge).toBe('2026-04-30');
+      expect(crossResult?.release_date).toBe('2026-09-29');
+      expect(crossResult?.last_updated).toBe('2026-10-01');
+      expect(crossResult?.id).toBe('gpt-6.1-sol');
+      expect(crossResult?.providerId).toBe('agent-openai');
+      expect(crossResult?.name).toBe('Gateway Fast');
+      expect(crossResult?.cost).toEqual({ input: 9, output: 18, cache_read: 0, cache_write: 7 });
+      expect(crossEntry).toEqual(crossEntryBefore);
+      expect(crossModel).toEqual(crossModelBefore);
+      expect(crossProvider).toEqual(crossProviderBefore);
+      expect(calls).toEqual([]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
+
+describe('voice endpoint path settings', () => {
+  beforeEach(() => {
+    storage = new Map<string, string>();
+    Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: makeStorage() });
+  });
+
+  test('defaults both endpoint paths to empty', () => {
+    expect(useConfigStore.getState().openaiCompatibleTtsEndpointPath).toBe('');
+    expect(useConfigStore.getState().sttEndpointPath).toBe('');
+  });
+
+  test('keeps the tts endpoint path in local storage', () => {
+    useConfigStore.getState().setOpenaiCompatibleTtsEndpointPath('/custom/speech');
+
+    expect(useConfigStore.getState().openaiCompatibleTtsEndpointPath).toBe('/custom/speech');
+    expect(localStorage.getItem('openaiCompatibleTtsEndpointPath')).toBe('/custom/speech');
+  });
+
+  test('keeps the stt endpoint path in local storage', () => {
+    useConfigStore.getState().setSttEndpointPath('/speech_to_text');
+
+    expect(useConfigStore.getState().sttEndpointPath).toBe('/speech_to_text');
+    expect(localStorage.getItem('sttEndpointPath')).toBe('/speech_to_text');
   });
 });

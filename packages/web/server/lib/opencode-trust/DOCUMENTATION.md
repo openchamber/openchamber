@@ -27,6 +27,13 @@ The prompt lives in the shared UI (`packages/ui/src/lib/opencodeTrust.ts`,
 refusal to it, shows what would run, saves a "trust" answer here and sends the
 refused request again.
 
+Session admission also uses this prompt before registering an unknown host
+destination as a project. A configuration that runs nothing or whose current
+fingerprint is trusted registers without another dialog. There is no separate
+folder-consent store. The destination registration route and VS Code workspace
+bridge recheck trust before changing the registry. Runtime switches dismiss
+pending UI prompts and invalidate their continuations.
+
 Where the check runs:
 
 | Runtime | Path to OpenCode | Check |

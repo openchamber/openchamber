@@ -27,6 +27,7 @@ let listedAgents: AgentWithExtras[] = [];
 let failingConfigLookups = new Set<string>();
 const fetchSpy = spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
   const path = new URL(input instanceof Request ? input.url : String(input), 'http://localhost').pathname;
+  if (path === '/api/config/settings') return Response.json({ projects: [{ id: 'project', path: DIRECTORY }], activeProjectId: 'project' });
   if (path.endsWith('/agent')) return Response.json({ data: listedAgents });
   if (path.startsWith('/api/config/agents/')) {
     const name = decodeURIComponent(path.slice('/api/config/agents/'.length).replace(/\/config$/, ''));

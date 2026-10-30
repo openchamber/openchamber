@@ -161,17 +161,23 @@ const ScriptView: React.FC<{ detail: WorkflowRunDetail | null; failed: boolean }
   );
 };
 
-/** The one action that fits the run's state, in the header beside its picker. */
+/** The actions for the run's state, in the header beside its picker. */
 const RunAction: React.FC<{ run: WorkflowRun }> = ({ run }) => {
   const { t } = useI18n();
   const { pending, act } = useWorkflowRunAction();
   const busy = pending === run.id;
   if (run.state === 'awaiting-approval') {
     return (
-      <Button type="button" size="sm" disabled={busy} onClick={() => act(run.id, 'approve')} aria-label={t('chat.workflow.action.run')}>
-        <Icon name="play" className="size-3.5" />
-        <span className="workflows-header__action-label">{t('chat.workflow.action.run')}</span>
-      </Button>
+      <>
+        <Button type="button" size="sm" disabled={busy} onClick={() => act(run.id, 'approve')} aria-label={t('chat.workflow.action.run')}>
+          <Icon name="play" className="size-3.5" />
+          <span className="workflows-header__action-label">{t('chat.workflow.action.run')}</span>
+        </Button>
+        <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => act(run.id, 'decline')} aria-label={t('chat.workflow.action.decline')}>
+          <Icon name="close" className="size-3.5" />
+          <span className="workflows-header__action-label">{t('chat.workflow.action.decline')}</span>
+        </Button>
+      </>
     );
   }
   if (run.state === 'running') {

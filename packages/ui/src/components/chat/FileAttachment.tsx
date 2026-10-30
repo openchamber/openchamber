@@ -15,6 +15,7 @@ import { ProviderIcon } from '@/components/sourceControl/ProviderIcon';
 import { useSourceControlProvider } from '@/lib/source-control/providers/registry';
 import { useOpenAttachment } from './message/useOpenAttachment';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
+import { StatusImage } from '@/components/ui/status-image';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { Icon } from "@/components/icon/Icon";
@@ -227,11 +228,13 @@ const ImagePreview = memo(({ file, onRemove, onShowPopup, gallery, index = 0 }: 
       className="relative h-16 w-16 rounded-lg border border-edge bg-background overflow-hidden flex-shrink-0 cursor-zoom-in focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       aria-label={displayName}
     >
-      <img
+      <StatusImage
         src={imageUrl}
         alt={displayName}
-        className="h-full w-full object-cover"
-        loading="lazy"
+        variant="thumbnail"
+        className="h-full w-full"
+        imgClassName="h-full w-full object-cover"
+        lazy
       />
       <button
         onClick={(event) => {
@@ -717,15 +720,13 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false, 
                         aria-label={filename}
                       >
                         {file.url ? (
-                          <img
+                          <StatusImage
                             src={file.url}
                             alt={filename}
-                            className="h-full w-full object-cover"
-                            loading="lazy"
-                            onError={(e) => {
-                              const target = e.target as HTMLImageElement;
-                              target.style.visibility = 'hidden';
-                            }}
+                            variant="thumbnail"
+                            className="h-full w-full"
+                            imgClassName="h-full w-full object-cover"
+                            lazy
                           />
                         ) : (
                           <div className="h-full w-full flex items-center justify-center bg-muted/30 text-muted-foreground">
@@ -765,11 +766,13 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false, 
               key={file.url || `${fileName}-${index}`}
               className="relative aspect-video rounded-lg border border-edge-muted bg-muted/10 overflow-hidden group"
             >
-              <img
+              <StatusImage
                 src={file.url}
                 alt={fileName}
-                className="h-full w-full object-cover"
-                loading="lazy"
+                variant="thumbnail"
+                className="h-full w-full"
+                imgClassName="h-full w-full object-cover"
+                lazy
               />
               <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
               <div className="absolute bottom-0 inset-s-0 inset-e-0 p-2 text-white opacity-0 group-hover:opacity-100 transition-opacity">

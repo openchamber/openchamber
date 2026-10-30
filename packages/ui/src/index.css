@@ -91,6 +91,110 @@
   }
 }
 
+/* File tree rows keep the whole name on one line, and a tree wider than its
+   pane scrolls sideways. Every row ends in a lane (its git marks) that sticks
+   to the pane's end while long rows scroll under it; a row's hover menu is a
+   second lane that fades in over it. The name fades out over 1rem before the
+   lane, and the lane redraws the row's rounded end, so a row running past the
+   pane looks like a row that fits. The lane paints the row's fill
+   (--oc-file-tree-row-fill, set with its hover and selection, and the hover
+   fill keyboard focus adds, see :focus-visible in design-system.css) over the
+   pane colour, --background where the tree sits, and the row's drop ring
+   (--oc-file-tree-row-ring) over both. Over the last 1rem of the sideways
+   scroll the fade narrows away, so at the end the widest name shows whole. */
+@property --oc-file-tree-row-fill {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: transparent;
+}
+
+/* How much of the 1rem fade is left, 1 to 0. A number, because a registered
+   length cannot start at 1rem. */
+@property --oc-file-tree-fade {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 1;
+}
+
+@keyframes oc-file-tree-fade-clear {
+  to {
+    --oc-file-tree-fade: 0;
+  }
+}
+
+@utility oc-file-tree-row {
+  min-width: max-content;
+  transition-property: color, background-color, --oc-file-tree-row-fill;
+  transition-duration: 150ms;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+
+  &:focus-visible {
+    --oc-file-tree-row-focus: var(--interactive-hover);
+  }
+}
+
+@utility oc-file-tree-row-name {
+  flex: 1 0 auto;
+  white-space: nowrap;
+}
+
+@utility oc-file-tree-row-end {
+  position: sticky;
+  inset-inline-end: 0;
+  z-index: 1;
+  flex: none;
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+
+  &::before,
+  &::after {
+    content: "";
+    position: absolute;
+    inset-block: 0;
+    z-index: -1;
+    pointer-events: none;
+  }
+
+  /* The pane past the lane, under the rounded end's corners, up to the
+     scroller's edge. Shadows, because a box reaching past the row widened the
+     scroll of a tree whose rows all fit; two of them leave no gap after a lane
+     narrower than the reach. */
+  &::before {
+    inset-inline: 0;
+    background: var(--background);
+    box-shadow: 0.375rem 0 var(--background), 0.75rem 0 var(--background);
+  }
+
+  &:where(:root[dir="rtl"] *)::before {
+    box-shadow: -0.375rem 0 var(--background), -0.75rem 0 var(--background);
+  }
+
+  /* The row's colour, fill over pane, faded in as a whole by the mask: fading
+     the fill and the pane apart darkened the middle of the fade. */
+  &::after {
+    inset-inline: -1rem 0;
+    border-start-end-radius: var(--radius-md);
+    border-end-end-radius: var(--radius-md);
+    background:
+      linear-gradient(var(--oc-file-tree-row-focus, transparent), var(--oc-file-tree-row-focus, transparent)),
+      linear-gradient(var(--oc-file-tree-row-fill), var(--oc-file-tree-row-fill)),
+      var(--background);
+    /* The ring's start side would show through the start of the fade. */
+    border: 2px solid var(--oc-file-tree-row-ring, transparent);
+    border-inline-start-width: 0;
+    mask-image: linear-gradient(var(--oc-to-inline-end), transparent calc(1rem * (1 - var(--oc-file-tree-fade))), #000 1rem);
+  }
+
+  @supports (animation-timeline: scroll()) {
+    &::after {
+      animation: oc-file-tree-fade-clear linear both;
+      animation-timeline: scroll(nearest inline);
+      animation-range: calc(100% - 1rem) 100%;
+    }
+  }
+}
+
 /* A PR or issue mark coloured by its state (--oc-ref-tint). The mark alone
    carries the state, its number stays neutral, so the colour shows at full
    strength: blended into the muted text a 12px glyph read as grey. */
@@ -542,11 +646,19 @@ div[data-chat-input-footer="true"] {
    data-top-bottom-scroll when content is both above and below. */
 .oc-sticky-fade-overlay {
   opacity: 0;
+  /* Hidden, it must not catch the clicks meant for the rows under it. */
+  pointer-events: none;
 }
 
 .oc-sticky-fade-root:has(.oc-sticky-fade-scroller[data-top-scroll="true"]) .oc-sticky-fade-overlay,
 .oc-sticky-fade-root:has(.oc-sticky-fade-scroller[data-top-bottom-scroll="true"]) .oc-sticky-fade-overlay {
   opacity: 1;
+}
+
+/* The model picker's sticky caption folds its section, once it shows. */
+.oc-sticky-fade-root:has(.oc-sticky-fade-scroller[data-top-scroll="true"]) .oc-sticky-fade-overlay[data-model-picker-sticky-header],
+.oc-sticky-fade-root:has(.oc-sticky-fade-scroller[data-top-bottom-scroll="true"]) .oc-sticky-fade-overlay[data-model-picker-sticky-header] {
+  pointer-events: auto;
 }
 
 [data-scroll-shadow="true"][data-orientation="vertical"][data-bottom-scroll="true"]:not(.chat-scroll) {
@@ -1090,13 +1202,19 @@ diffs-container {
    Minimal overrides - fonts only, using Streamdown defaults
    ============================================ */
 
-/* VS Code webviews can inject default pre/code/blockquote backgrounds; tool input/output should inherit the card surface. */
+/* VS Code webviews can inject default pre/code backgrounds; tool input/output should inherit the card surface. */
 .tool-input-surface pre,
 .tool-input-surface code,
-.tool-input-surface blockquote,
 .tool-input-text {
   background: transparent !important;
   background-color: transparent !important;
+}
+
+/* Plain-text prose in an expanded tool (a subagent's prompt), set like tool and reasoning markdown. */
+.tool-prose-text {
+  font-family: var(--font-sans);
+  font-size: var(--text-meta);
+  line-height: round(1.625em, 1px);
 }
 
 /* VSCode: tool cards should honor semantic code sizing, even when syntax themes inject sizes. */
@@ -1123,9 +1241,19 @@ diffs-container {
   }
 }
 
+/* The effort trigger is "/ medium" after the model; collapsed, its icon stands in. */
+.model-controls__variant-icon {
+  display: none;
+}
+
 @container model-controls (max-width: 14rem) {
-  :root:not(.vscode-runtime) .model-controls__variant-label {
+  :root:not(.vscode-runtime) .model-controls__variant-label,
+  :root:not(.vscode-runtime) .model-controls__variant-slash {
     display: none;
+  }
+
+  :root:not(.vscode-runtime) .model-controls__variant-icon {
+    display: block;
   }
 }
 
@@ -1143,8 +1271,13 @@ diffs-container {
 }
 
 @container model-controls (max-width: 9rem) {
-  :root.vscode-runtime .model-controls__variant-label {
+  :root.vscode-runtime .model-controls__variant-label,
+  :root.vscode-runtime .model-controls__variant-slash {
     display: none;
+  }
+
+  :root.vscode-runtime .model-controls__variant-icon {
+    display: block;
   }
 }
 
@@ -1483,6 +1616,46 @@ diffs-container {
   margin: var(--markdown-paragraph-spacing) 0;
 }
 
+/* A collapsed user message keeps its two lines: code blocks run inline with
+   the text and blocks lose their margins. A data attribute, not utility classes:
+   classes spelling out "code-block" fell under the phone's [class*="code"] font
+   rule (mobile.css) and shrank the whole message to code size. */
+@layer utilities {
+  [data-user-message-collapsed] > .markdown-content .markdown-content > * {
+    margin-block: 0;
+  }
+  [data-user-message-collapsed] > .markdown-content [data-oc-streamdown] > *,
+  [data-user-message-collapsed] > .markdown-content [data-oc-markdown-block] > * {
+    margin-block: 0 !important;
+  }
+  [data-user-message-collapsed] > .markdown-content [data-streamdown='code-block'] {
+    display: inline !important;
+    margin-block: 0 !important;
+    border-width: 0 !important;
+    background-color: transparent !important;
+  }
+  [data-user-message-collapsed] > .markdown-content [data-streamdown='code-block-header'],
+  [data-user-message-collapsed] > .markdown-content [data-streamdown='code-block-actions'] {
+    display: none !important;
+  }
+  [data-user-message-collapsed] > .markdown-content [data-streamdown='code-block-body'],
+  [data-user-message-collapsed] > .markdown-content [data-streamdown='code-block-body'] pre {
+    display: inline !important;
+    padding: 0 !important;
+  }
+  [data-user-message-collapsed] > .markdown-content [data-streamdown='code-block-body'] code {
+    display: inline !important;
+    padding-inline-start: 0 !important;
+    background-image: none !important;
+  }
+  [data-user-message-collapsed] > .markdown-content [data-streamdown='code-block-body'] code > span {
+    display: block !important;
+  }
+  [data-user-message-collapsed] > .markdown-content [data-streamdown='code-block-body'] code > span::before {
+    display: none !important;
+  }
+}
+
 /* The native root and arrival wrappers add no rhythm of their own. Static
    mode renders blocks directly; streaming mode wraps each official Block. */
 .markdown-content > [data-oc-streamdown],
@@ -1551,7 +1724,7 @@ diffs-container {
   margin-block-end: var(--oc-block-edge-end, var(--oc-block-margin-end)) !important;
 }
 
-/* Tool cards (code size) and reasoning (meta size, dimmed) are intentionally
+/* Tool and reasoning markdown (meta size) are intentionally
    compact — keep their paragraphs tight, matching prior behavior. */
 .markdown-content.markdown-tool p,
 .markdown-content.markdown-reasoning p {
@@ -1559,9 +1732,9 @@ diffs-container {
   margin-bottom: 0;
 }
 
-/* Tool markdown should render at code size to match tool card typography. */
+/* Prose in an expanded chat block (tool markdown, reasoning) shares the meta size. */
 .markdown-content.markdown-tool {
-  font-size: var(--text-code) !important;
+  font-size: var(--text-meta) !important;
 }
 
 .form-markdown > .markdown-content.markdown-tool {
@@ -1570,7 +1743,7 @@ diffs-container {
 
 /* Reasoning markdown renders at meta size, dimmed. */
 .markdown-content.markdown-reasoning {
-  font-size: var(--text-markdown);
+  font-size: var(--text-meta);
   color: var(--surface-muted-foreground);
   --markdown-link: inherit;
   --markdown-link-hover: var(--surface-foreground);

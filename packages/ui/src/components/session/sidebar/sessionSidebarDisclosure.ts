@@ -9,10 +9,6 @@ import type { SessionSidebarRow } from './sessionSidebarRowModel';
  * changing height would.
  */
 
-/** As long as a reasoning block takes to open and close in the chat. */
-export const SIDEBAR_DISCLOSURE_MS = 200;
-export const SIDEBAR_DISCLOSURE_EASING = 'ease-out';
-
 /** Whether a header row is open; null for rows that show or hide nothing, and while search forces every header open. */
 const disclosureOpen = (row: SessionSidebarRow): boolean | null => {
   switch (row.kind) {
@@ -85,44 +81,4 @@ export const findSessionSidebarDisclosure = (
     blockStart,
     blockEnd,
   };
-};
-
-/**
- * Keyframes that show the part of a row, `size` tall at `start`, lying above a
- * boundary that moves evenly from `from` to `to`. Offsets are progress along
- * the eased timing, so the reveal keeps pace with the rows sliding below it.
- */
-export const boundaryClipKeyframes = (start: number, size: number, from: number, to: number): Keyframe[] => {
-  const offsets = [0, 1];
-  if (to !== from) {
-    for (const edge of [start, start + size]) {
-      const progress = (edge - from) / (to - from);
-      if (progress > 0 && progress < 1) offsets.push(progress);
-    }
-  }
-  offsets.sort((left, right) => left - right);
-  return offsets.map((offset) => {
-    const boundary = from + (to - from) * offset;
-    const visible = Math.min(Math.max(boundary - start, 0), size);
-    return { offset, clipPath: `inset(0 0 ${size - visible}px 0)` };
-  });
-};
-
-/**
- * Keyframes that fade in a row, `size` tall at `start`, as a boundary moving
- * `from` → `to` uncovers it: clear until the boundary reaches the row, solid
- * once half of it shows. Tied to the boundary, the row keeps up with the gap
- * opening for it; a fade on a clock of its own left the first rows under a
- * header empty while the rows below already slid away.
- */
-export const boundaryFadeInKeyframes = (start: number, size: number, from: number, to: number): Keyframe[] => {
-  if (to === from) return [{ opacity: 1 }, { opacity: 1 }];
-  const progressAt = (edge: number) => Math.min(Math.max((edge - from) / (to - from), 0), 1);
-  const shown = progressAt(start);
-  const solid = Math.max(progressAt(start + size / 2), shown);
-  const keyframes: Keyframe[] = [{ offset: 0, opacity: 0 }];
-  if (shown > 0) keyframes.push({ offset: shown, opacity: 0 });
-  keyframes.push({ offset: solid, opacity: 1 });
-  if (solid < 1) keyframes.push({ offset: 1, opacity: 1 });
-  return keyframes;
 };

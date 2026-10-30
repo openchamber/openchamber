@@ -1,5 +1,11 @@
 # Retained context views
 
+Archive session rows apply the shared session-admission directory rule before
+search, counts and grouping. Unregistered host destinations stay hidden without
+removing their records from the global archive cache. Managed chats, live spaces
+and catalogued read-only space archives retain their existing ownership. Opening
+an archive row still passes through the shared session-selection gate.
+
 `ContextPanel` keeps file, diff and walkthrough views mounted to preserve
 navigation, expanded sections and editor state. Its `visible` prop combines
 the panel's open state with the selected tab. Hiding via CSS alone does not
@@ -122,8 +128,15 @@ is one `dir/` row in the parent's status; its diff read answers
 and lists its changed files, each diff read from that repository when the row
 opens, read-only: no stage, discard or hunk actions. "Open as project" adds the
 folder as a project and opens a new session draft in it, where the Git panel
-commits. The listing reads again when the entry's `contentRevision` moves.
-Mobile Changes still shows only the note for such a row.
+commits. A repository row inside that listing keeps the separate-repository
+note without recursively reading its changes. The listing reads again when
+the entry's `contentRevision` moves. Mobile Changes still shows
+only the note for such a row.
+
+Git, Changes, Walkthrough, pull requests and mobile Changes use the shared
+repository picker. Selection, discovery refresh and persistence belong to
+[`useGitStore`](../../stores/DOCUMENTATION.md#usegitstorets) and
+`useNestedGitDirectory`; diff rows do not change that selection.
 
 ## Find in changes
 

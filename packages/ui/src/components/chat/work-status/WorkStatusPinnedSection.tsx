@@ -7,6 +7,7 @@ import { useDirectorySync, useSession } from '@/sync/sync-context';
 import { opencodeClient } from '@/lib/opencode/client';
 import type { Part } from '@/lib/opencode/model';
 import { readMessageFocusInFlight, requestMessageFocus, subscribeMessageFocusStatus } from '@/lib/router/messageFocus';
+import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { getContextObligatoryMessages } from '@/lib/contextObligatoryMessages';
 import { setContextObligatoryMessage } from '@/sync/session-actions';
 import { WorkStatusRow, WorkStatusSection } from './WorkStatusPrimitives';
@@ -24,9 +25,11 @@ type Props = {
  * markdown marks (fences, quotes, emphasis) that read as noise when the row
  * shows it as plain text.
  */
-const firstText = (parts: readonly Part[] | undefined): string | null => {
+const firstText = (parts: readonly Part[] | undefined, sessionID?: string, messageID?: string): string | null => {
   const text = (parts ?? []).find(
-    (part): part is Extract<Part, { type: 'text' }> => part.type === 'text',
+    (part): part is Extract<Part, { type: 'text' }> => part.type === 'text'
+      && (!sessionID || part.sessionID === sessionID)
+      && (!messageID || part.messageID === messageID),
   )?.text;
   if (!text) return null;
   const plain = text
@@ -47,12 +50,17 @@ const firstText = (parts: readonly Part[] | undefined): string | null => {
  */
 export const WorkStatusPinnedSection: React.FC<Props> = ({ sessionId, directory }) => {
   const { t } = useI18n();
-  const session = useSession(sessionId ?? '', directory ?? undefined);
+  const directorySession = useSession(sessionId ?? '', directory ?? undefined);
+  const globalSession = useGlobalSessionsStore(React.useCallback(
+    (state) => sessionId ? state.entityById.get(sessionId) : undefined,
+    [sessionId],
+  ));
+  const session = directorySession ?? globalSession;
   const entries = React.useMemo(() => getContextObligatoryMessages(session), [session]);
   // Select only the pinned texts. Selecting the whole part map would re-render
   // on every streamed part and, through this render's closures, keep every
   // evicted transcript's parts alive for as long as the section is mounted.
-  const loadedTexts = useDirectorySync(useShallow((state: State) => entries.map((entry) => firstText(state.part[entry.id]))));
+  const loadedTexts = useDirectorySync(useShallow((state: State) => entries.map((entry) => firstText(state.part[entry.id], sessionId ?? undefined, entry.id))), directory ?? undefined);
   const [busyId, setBusyId] = React.useState<string | null>(null);
 
   // Pins are most useful on a long session, which is exactly when the pinned
@@ -74,7 +82,7 @@ export const WorkStatusPinnedSection: React.FC<Props> = ({ sessionId, directory 
     let cancelled = false;
     const ids = unresolvedKey.split(' ');
     void Promise.all(ids.map((id) => opencodeClient.getSessionMessage(sessionId, id, directory)
-      .then((message) => firstText(message.parts))
+      .then((message) => firstText(message.parts, sessionId, id))
       .catch(() => null)))
       .then((texts) => {
         if (cancelled) return;

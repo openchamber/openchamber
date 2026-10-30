@@ -304,7 +304,11 @@ describe("translateWireEvent", () => {
     })
     expect(form[0]).toMatchObject({ type: "form.created", properties: { form: { id: "form_1" } } })
     const settled = translateWireEvent({ ...base, type: "form.cancelled", data: { id: "form_1", sessionID: "ses_1" } })
-    expect(settled).toEqual([{ type: "form.settled", properties: { sessionID: "ses_1", formID: "form_1" } }])
+    // The two settle events collapse for the reducer but keep their
+    // disposition: recovery must tell an answer from a cancellation.
+    expect(settled).toEqual([{ type: "form.settled", properties: { sessionID: "ses_1", formID: "form_1", disposition: "cancelled" } }])
+    const replied = translateWireEvent({ ...base, type: "form.replied", data: { id: "form_1", sessionID: "ses_1", answer: { a: true } } })
+    expect(replied).toEqual([{ type: "form.settled", properties: { sessionID: "ses_1", formID: "form_1", disposition: "replied" } }])
   })
 
   test("catalog rebuilds name the list that has to be re-read", () => {

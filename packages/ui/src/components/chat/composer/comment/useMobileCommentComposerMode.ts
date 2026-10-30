@@ -40,13 +40,16 @@ export function useMobileCommentComposerMode(options: MobileCommentModeOptions):
     const active = isMobile && draft.status === 'open';
 
     const scope = React.useMemo<MobileCommentScope | null>(
-        () => (!isMobile || !runtimeKey || !directory || !sessionKey
+        () => (!runtimeKey || !directory || !sessionKey
             ? null
             : { runtimeKey, directory, sessionKey }),
-        [isMobile, directory, runtimeKey, sessionKey],
+        [directory, runtimeKey, sessionKey],
     );
     // Publish the committed composer's target before a selection-menu tap can
-    // open a comment. The menu must not derive a second target from the parent.
+    // file anything. The menu must not derive a second target from the parent:
+    // an expanded `/btw` fork retargets the composer while the column keeps
+    // showing the parent session. Mobile's shell captures this scope when a
+    // comment opens; desktop's floating input writes its draft into it.
     React.useLayoutEffect(() => {
         controller?.setScope(scope);
         return () => controller?.setScope(null);

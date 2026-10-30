@@ -454,6 +454,25 @@ describe('workflow runtime', () => {
     expect(await act('workflow.run', { name: 'test-flow' })).toMatchObject({ state: 'awaiting-approval', name: 'test-flow' });
   });
 
+  it('leaves a run alone when the server running it is still alive', async () => {
+    const agents = fakeAgentSessions({ hang: ['slow'] });
+    const first = await setup(agents);
+    const { runId } = await first.act('workflow.run', { script: script("return agent('slow')") });
+    await first.runtime.approve({ runId });
+    await waitFor(async () => (await first.act('workflow.status', { runId })).agents.length === 1);
+    await first.store.flush();
+
+    // A second OpenChamber over the same data directory, while the first still runs it.
+    const store = createWorkflowRunStore({ fsPromises: fs, path, dataDir: first.dataDir });
+    const second = createWorkflowRuntime({ store, agentSessions: agents, postSynthetic: async () => {}, fsPromises: fs, path, sleep: async () => {}, pid: process.pid + 1, isProcessAlive: () => true });
+    await second.start();
+    expect(await second.executeAction('workflow.status', { runId }, { sessionId: 'ses_parent', directory: first.dataDir })).toMatchObject({ state: 'running' });
+
+    first.runtime.shutdown();
+    await waitFor(async () => (await first.act('workflow.status', { runId })).state !== 'running');
+    await first.store.flush();
+  });
+
   it('marks a run that was going when the server stopped, and reports it once OpenCode answers', async () => {
     const agents = fakeAgentSessions({ hang: ['slow'] });
     const first = await setup(agents);

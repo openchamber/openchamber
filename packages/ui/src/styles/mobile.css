@@ -562,8 +562,8 @@
            and slide down with the keyboard.
 
    `keyboardWillShow` fires at the start of the iOS keyboard animation with the final
-   height; the motion follows the keyboard's own spring (lib/mobileKeyboardTiming.ts,
-   written to --oc-kb-duration / --oc-kb-easing). (visualViewport live-tracking would be exact
+   height; the motion follows the keyboard's own spring (lib/mobileKeyboardTiming.ts).
+   (visualViewport live-tracking would be exact
    but doesn't report under WKWebView's `resize: 'none'`, so this is the best signal.) */
 /* Registered non-inherited and written only on the elements that read them
    (lib/mobileKeyboardInsets.ts): set on the root, every keyboard open or close
@@ -575,6 +575,12 @@
 }
 
 @property --oc-kb-layout {
+  syntax: '<length>';
+  inherits: false;
+  initial-value: 0px;
+}
+
+@property --oc-kb-surface {
   syntax: '<length>';
   inherits: false;
   initial-value: 0px;
@@ -594,22 +600,66 @@
   padding-bottom: max(0px, calc(var(--oc-app-bottom-safe, 0px) - var(--oc-kb-layout, 0px)));
 }
 
-/* Portal surfaces (bottom sheets, overlay panels) render at <body> level, outside
-   the app shell, so they don't inherit the shell's keyboard inset. They're full-
-   height `fixed inset-0` scrims with a bottom-anchored (`mt-auto`) sheet, so raising
-   their bottom edge by the keyboard height shrinks scrim + sheet together and lifts
-   any input above the keyboard instead of hiding it underneath. The opacity term
-   preserves the scrim's enter fade (Tailwind's `transition-opacity` would otherwise
-   be overridden by this rule's `transition` shorthand). */
+/* Portal surfaces (drawers, dialogs, overlay panels, the comment bar) render
+   at <body> level, outside the app shell, so they take the keyboard into their
+   own layout: their bottom edge rises by the keyboard height. Like the shell,
+   they take it once, where the change is invisible (--oc-kb-surface: at the end
+   of a rise, at the start of a fall), and what sits at their bottom rides the
+   keyboard meanwhile on a compositor transform (`data-keyboard-rider`,
+   mobileNativeChrome.ts). A `bottom` transitioning with the keyboard re-laid
+   the surface out on every frame, on the main thread, and climbed in 60 Hz
+   steps beside the keyboard. The opacity term keeps a scrim's enter fade. */
 :root.oc-capacitor-app .oc-keyboard-inset-surface {
-  bottom: var(--oc-keyboard-inset, 0px);
-  transition: bottom var(--oc-kb-duration, 0.25s) var(--oc-kb-easing, ease-out), opacity 0.2s ease-out;
-}
-/* While a panel is playing its enter animation, its bottom anchor snaps
-   instead of transitioning — opening an overlay typically dismisses the
-   keyboard in the same moment, and animating both made the entrance jerky. */
-:root.oc-capacitor-app .oc-keyboard-inset-surface.oc-keyboard-inset-snap {
+  bottom: var(--oc-kb-surface, 0px);
   transition: opacity 0.2s ease-out;
+}
+/* MobileOverlayPanel's anchor snaps when the keyboard starts instead: its
+   sheet is capped by the space above the keyboard (below), so it takes that
+   space at once and slides its sheet there itself. While the keyboard rises
+   past the snapped anchor, the scrim reaches down under it, so the strip
+   between them never shows the app undimmed. */
+:root.oc-capacitor-app .oc-keyboard-inset-surface.oc-keyboard-inset-snap {
+  bottom: var(--oc-keyboard-inset, 0px);
+}
+/* A rider rides the keyboard by keyframes fitted to it, so a sliver can open
+   between the two for a frame; while they move, the background of a rider on
+   the keyboard's edge (full travel, `data-keyboard-rider=""`) reaches down
+   under it, and what it left behind never shows through. A rider at a
+   fraction of the travel (a dialog's centred card) does not touch the
+   keyboard, and keeps its own positioning. */
+:root.oc-capacitor-app.oc-kb-animating [data-keyboard-rider=""] {
+  position: relative;
+}
+:root.oc-capacitor-app.oc-kb-animating [data-keyboard-rider=""]::after {
+  content: '';
+  position: absolute;
+  inset-inline: 0;
+  top: 100%;
+  height: 100dvh;
+  background: inherit;
+  pointer-events: none;
+}
+
+/* Over the raised keyboard the overlay's sheet floats, so it takes the same
+   rounded corners below as above. */
+:root.oc-capacitor-app.oc-keyboard-open .pwa-overlay-panel {
+  border-bottom-width: 1px;
+  border-bottom-left-radius: var(--radius-xl, 0.75rem);
+  border-bottom-right-radius: var(--radius-xl, 0.75rem);
+}
+
+/* A screen tall, since the keyboard inset does not inherit into it; below
+   the sheet (z-index -1 inside the scrim's stacking context), which starts
+   its slide under the snapped anchor. */
+:root.oc-capacitor-app .oc-keyboard-inset-surface.oc-keyboard-inset-snap::after {
+  content: '';
+  position: absolute;
+  inset-inline: 0;
+  top: 100%;
+  height: 100dvh;
+  z-index: -1;
+  background: inherit;
+  pointer-events: none;
 }
 
 /* Bottom-sheet overlays live inside a keyboard-inset surface whose bottom is
@@ -627,14 +677,15 @@
 }
 
 /* Full-screen scroll views (e.g. the connect/login screen) live outside the app
-   shell, so shrink them by the keyboard height the same way the shell does. Capping
-   the height (instead of min-height: 100dvh) is what makes overflow-y-auto actually
-   scroll, so a field near the bottom lifts above the keyboard rather than staying
-   hidden behind it. min-height: 0 neutralises the Tailwind min-h-dvh baseline. */
+   shell, so shrink them by the keyboard height. Capping the height (instead of
+   min-height: 100dvh) is what makes overflow-y-auto actually scroll, so a field
+   near the bottom lifts above the keyboard rather than staying hidden behind it.
+   They take the height once, as the keyboard starts, so the field shows from the
+   first frame; the strip they give up is the page's own background.
+   min-height: 0 neutralises the Tailwind min-h-dvh baseline. */
 :root.oc-capacitor-app .oc-keyboard-fill-screen {
   height: calc(100dvh - var(--oc-keyboard-inset, 0px));
   min-height: 0;
-  transition: height var(--oc-kb-duration, 0.25s) var(--oc-kb-easing, ease-out);
 }
 
 /* Keyboard slide choreography: the composer (and the draft title, see

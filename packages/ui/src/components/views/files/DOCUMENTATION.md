@@ -114,6 +114,58 @@ it no longer hides the file's git state. Change the look there, not per tree.
 The JSON tree viewer (`components/ui/JsonTreeViewer.tsx`) takes the same
 indent and guides and copies the chevron's look; keep the copy in step.
 
+A name never truncates. The tree is as wide as its widest row and scrolls
+sideways, and every row is that wide, so fills and marks span the scroll.
+The git marks sit in an end lane (`FileTreeRowEnd`, `oc-file-tree-row-end`
+in `index.css`) that sticks to the pane's end, fades the name out over 1rem
+and redraws the row's rounded end in the row's colour, drop ring included.
+Over the last 1rem of the sideways scroll the fade narrows away, so the
+widest name shows whole at the end without a gap kept after every name. The hover menu is a
+second lane of the same kind that takes no width and fades in over the end,
+so a row reserves no room for it. Error rows stay as wide as the pane
+(`100cqw` of the scroller) and held at its start. The non-virtual trees get
+their width from CSS (`w-max`). The sidebar's virtual list cannot, because
+only some rows are mounted: it remembers, by path, each row seen wider than
+the list, takes the widest as its width, and forgets rows that leave the
+tree. That keeps the sideways scroll when wide rows scroll out of view or
+another folder opens.
+
+### Why the end lane paints the row's colour under a mask
+
+The fade has to cover the name with exactly the colour of the row behind it,
+which is a translucent hover or selection fill over the pane. Fading the
+fill and the pane colour as separate gradients darkened the middle of the
+fade on a selected row. The lane paints the composed colour solid and a mask
+fades it in as a whole.
+
+## Opening and closing a folder
+
+All three trees open and close folders with the sessions sidebar's motion
+(`lib/motion/rowDisclosure.ts`, 200ms ease-out): a folder's rows are revealed
+above a boundary moving down from the folder row and fade in as it uncovers
+them, and every row below slides with the boundary. `useFileTreeDisclosure`
+wraps each tree's toggle. It works on the rows in the document, which carry
+their path in `data-tree-disclosure-path` (a load error row carries its
+folder's path plus `/`), so one hook serves nested lists, a flat list and the
+virtual list. A folder whose children load after opening animates when they
+arrive. Reduced motion, Collapse all, search and auto-expand do not animate.
+
+### Why closing commits at once and draws copies
+
+The tree's state closes the folder immediately, and inert clones of the closing
+rows that were on screen fold away at their old place while the rows below
+slide up. Holding the state open until the motion ended would leave the virtual
+list without the rows that slide into view, which the virtualizer only mounts
+for the closed layout. While the copies fold, the list keeps its old height, so
+a list scrolled to its end does not jump.
+
+### Why the sidebar tree pins rows while a folder opens
+
+In the virtual tree, the rows on screen below an opening folder move past the
+virtual range at once. `SidebarFilesTree` keeps them mounted
+(`slidingRowPaths`) until the motion settles; without that the list under the
+boundary was empty while it moved.
+
 ## Refreshing after file changes
 
 The sidebar tree and the phone browser re-list folders when the agent changed
@@ -169,7 +221,26 @@ throwaway `FontFace` family removed when the tab closes), `TableArtifact`
 (CSV/TSV through `delimitedText.ts`, capped rows stated in the meta line),
 and `BinaryArtifact` (name, type, size, download; never a decode attempt).
 `FilesView.renderArtifactPreview` is the single switch both the docked and
-the fullscreen viewer use. SVG, Mermaid (`.mmd`) and delimited files are text
+the fullscreen viewer use.
+
+A file that cannot be shown fills the pane with `ContentState`
+(`components/ui/content-state.tsx`): icon, title, one sentence, actions. A
+failed read names the file, adds the server's reason when there is one, and
+offers Retry (`reloadSelectedFile`, the same reload a content invalidation
+runs); the binary, media and font states use it too. `ContentLoadingState`
+shows the spinner only after 200 ms, so switching between quick files does not
+flash it. `ImageArtifact` keeps the loading state until the image decodes
+(an empty `src` is a fetch still running) and shows its own failure with Retry
+and download for data the browser cannot decode. A failed image fetch marks
+the file failed (`failedFilePath`) like a text read and keeps the loaded path:
+clearing it made the selection effect load the file again, which wiped the
+error without fetching the image.
+
+Opening a file from the sidebar tree, the command palette or a diff runs
+`validateContextFileOpen` first. A file over `MAX_OPEN_FILE_BYTES` or
+`MAX_OPEN_FILE_LINES`, or one that cannot be read, never opens;
+`toastContextFileOpenFailure` names it and adds the limit and its size, or the
+server's reason. SVG, Mermaid (`.mmd`) and delimited files are text
 with an artifact view: each has a per-path preview/source toggle, and opens
 in preview regardless of the text-first setting because an agent-produced
 artifact is opened to be looked at.
@@ -296,6 +367,9 @@ preview changes or unmounts. Relative links open through the supplied
 files view. Fragment links find a heading within the Markdown root. A source's
 `prefers-color-scheme` condition follows the app theme through its rendered
 `media` prop. Content, file and runtime changes retire older asset results.
+A document image keeps its box hidden until its object URL arrives, and one
+that cannot be read or decoded is replaced by its name after a warning icon,
+with "Image couldn't load" as the tooltip.
 
 A document image is read once it comes within one height of the preview's
 scroller of its visible part (`useNearMedia` with the nearest ancestor that

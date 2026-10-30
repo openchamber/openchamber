@@ -69,6 +69,7 @@ mock.module('./quotaCredentials', () => ({
 mock.module('./sessionActivityWatcher', () => ({ getSessionActivitySnapshot: mock() }));
 
 const { handleSystemBridgeMessage } = await import('./bridge-system-runtime.ts');
+const { openCodeTrust } = await import('./opencodeTrust.ts');
 
 const deps = {
   resolveUserPath: (value) => value,
@@ -119,6 +120,18 @@ describe('VS Code system bridge api:workspace:addFolder', () => {
   beforeEach(() => {
     updateWorkspaceFolders.mockClear();
     currentWorkspaceFolders = [];
+  });
+
+  test('refuses untrusted OpenCode configuration before changing workspace folders', async () => {
+    const original = openCodeTrust.assess;
+    openCodeTrust.assess = async () => ({ trusted: false });
+    try {
+      const response = await handleSystemBridgeMessage({
+        id: 'untrusted-folder', type: 'api:workspace:addFolder', payload: { path: '/untrusted/project' },
+      }, undefined, deps);
+      expect(response.success).toBe(false);
+      expect(updateWorkspaceFolders).not.toHaveBeenCalled();
+    } finally { openCodeTrust.assess = original; }
   });
 
   test('adds a folder to the workspace and returns the folder list', async () => {

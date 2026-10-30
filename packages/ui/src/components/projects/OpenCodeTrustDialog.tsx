@@ -69,7 +69,7 @@ export const OpenCodeTrustDialog = () => {
       <DialogContent layerClassName="z-[70]" backdropProps={{ className: 'z-[70]' }}>
         <DialogHeader>
           <DialogTitle>{t('projects.opencodeTrust.title')}</DialogTitle>
-          <DialogDescription>{t('projects.opencodeTrust.description', { path: request?.directory ?? '' })}</DialogDescription>
+          <DialogDescription className="[overflow-wrap:anywhere]">{t('projects.opencodeTrust.description', { path: request?.directory ?? '' })}</DialogDescription>
         </DialogHeader>
         <div className="max-h-[40vh] space-y-3 overflow-y-auto">
           {plugins.length > 0 ? (

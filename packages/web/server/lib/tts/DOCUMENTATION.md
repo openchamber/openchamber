@@ -5,7 +5,7 @@ This module provides server-side Text-to-Speech services using OpenAI's TTS API.
 
 ## Entrypoints and structure
 - `packages/web/server/lib/tts/index.js`: Public entrypoint imported by `packages/web/server/index.js`.
-- `packages/web/server/lib/tts/routes.js`: Express route registration for `/api/voice/*`, `/api/tts/*`, and `/api/stt/*` endpoints.
+- `packages/web/server/lib/tts/routes.js`: Express route registration for `/api/voice/*`, `/api/tts/*`, and `/api/stt/*` endpoints. `/api/tts/speak` takes an optional JSON `endpointPath`; `/api/stt/transcribe` takes an optional `X-Endpoint-Path` header. Both answer 400 for an invalid path before contacting the upstream server.
 - `packages/web/server/lib/tts/capability-runtime.js`: runtime helper for probing local macOS `say` TTS voice capability.
 - `packages/web/server/lib/tts/service.js`: TTS service implementation with OpenAI integration.
 - `packages/web/server/lib/text/summarization.js`: Shared text summarization stub and sanitization utilities. It performs no external Zen calls.
@@ -13,6 +13,7 @@ This module provides server-side Text-to-Speech services using OpenAI's TTS API.
 - `packages/web/server/lib/tts/voice-keys.js`: the API keys typed in Voice settings (`openai`, `openaiCompatible`, `stt`), stored in `voice-keys.json` in the data dir, mode 0600. `GET /api/voice/keys` answers only which are set; `PUT /api/voice/keys` sets (string) or removes (null) them. `/api/tts/speak`, the STT route and dictation fill a request's key from here, so the UI never holds or sends one. A key in a request body still wins: older clients sent theirs that way. Keys earlier builds kept in the browser's localStorage are moved here by the UI on first read (`packages/ui/src/lib/voiceKeysApi.ts`).
 - The server's own `OPENAI_API_KEY` is used only for OpenAI itself, never sent to a custom server URL (`service.js`, `stt.js`).
 - `packages/web/server/lib/tts/base-url.js`: shared base URL validation and normalization for custom OpenAI-compatible endpoints.
+- `packages/web/server/lib/tts/endpoint-path.js`: validation and request rewriting for a custom resource path. `normalizeEndpointPath` turns a user string into `/resource/path` or `{ error }`; `createEndpointPathFetch` wraps a fetch implementation and replaces only the OpenAI SDK's fixed last path segment (`/audio/speech`, `/audio/transcriptions`), keeping the origin, base URL prefix, query and every request option. A server that copies the OpenAI request body, auth and response but names the resource differently needs exactly this.
 - `packages/web/server/lib/tts/language-detect.js`: dependency-free language detection for voice selection (`detectTextLanguage`, `pickVoiceForLanguage`, `languageOfLocale`). Used by the macOS `say` route (`language: 'auto'` switches to an installed voice whose locale matches the text; the response carries `X-Speech-Voice` — percent-encoded, because macOS voice names may be localized — and `X-Speech-Language`) and by the dictation module's local TTS model choice.
 
 ## Public exports
@@ -26,6 +27,10 @@ This module provides server-side Text-to-Speech services using OpenAI's TTS API.
 - `summarizeText({ text, threshold, maxLength, zenModel, mode })`: Retired shared text summarizer retained as a stub. TTS uses `mode: 'tts'`; `zenModel` is ignored.
 - `sanitizeForTTS(text)`: Sanitizes text by removing markdown, URLs, file paths, and other non-speakable content.
 - `sanitizeForNote(text)`: Re-exported for note-mode callers that still import through the TTS surface.
+
+### Endpoint path (from endpoint-path.js)
+- `normalizeEndpointPath(value)`: `{ value }` with a leading slash, `{ value: undefined }` for an empty value (no override), or `{ error }` for an absolute URL, protocol-relative URL, query or fragment, backslash, whitespace, control character, dot segment, bare `/`, or a value over 1024 characters.
+- `createEndpointPathFetch({ endpointPath, defaultPath, baseFetch })`: fetch wrapper that rewrites only requests whose pathname ends with `defaultPath`.
 
 ### Capability runtime (capability-runtime.js)
 - `detectSayTtsCapability(processLike)`: probes local `say -v "?"` support and returns `{ available, voices, reason }`.
@@ -50,7 +55,8 @@ Returns boolean indicating whether OpenAI API key is configured (checks environm
 
 ### `generateSpeechStream(options)`
 Generates speech and returns as a web stream for direct streaming to clients.
-- Options: `text` (required), `voice`, `model`, `speed`, `instructions`, `apiKey`.
+- Options: `text` (required), `voice`, `model`, `speed`, `instructions`, `apiKey`, `baseURL`, `endpointPath`.
+- `endpointPath` is only accepted together with a custom `baseURL`; without one the call throws before any request. An empty value leaves the SDK's `/audio/speech` untouched, so default behavior does not pass through the wrapper at all.
 - Upstream `/v1/audio/speech` requests always carry `response_format: 'mp3'` (the documented default; strict servers such as OpenRouter reject requests without it). With a custom baseURL the request omits `instructions` because compatible servers do not universally support it.
 - Returns: `{ stream: ReadableStream, contentType: string }` — `contentType` is the upstream response's `Content-Type` header, falling back to `'audio/mpeg'` when the server omits it.
 - Throws: Error if API key not configured or text is empty.

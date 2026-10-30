@@ -15,6 +15,10 @@ import { SourceControlProviderCard } from './SourceControlProviderCard';
 import { TrackerSettings } from './TrackerSettings';
 import { ThirdPartyIntegrationsSection } from './ThirdPartyIntegrationsSection';
 import { CatalogExtensionsSection } from './CatalogExtensionsSection';
+import { Button } from '@/components/ui/button';
+import { Icon } from '@/components/icon/Icon';
+import { useDeviceInfo } from '@/lib/device';
+import { useUIStore } from '@/stores/useUIStore';
 
 export const IntegrationsPage: React.FC = () => {
   const { t } = useI18n();
@@ -34,13 +38,37 @@ export const IntegrationsPage: React.FC = () => {
   // Each card here installs a plugin that adds a model provider. In enterprise
   // mode providers come from the administrator's OpenCode config, whose
   // `provider.use` policy also governs plugin providers, so none is offered.
-  const hasThirdParty = !useEnterpriseMode();
+  const enterpriseMode = useEnterpriseMode();
+  const hasThirdParty = !enterpriseMode;
+  // The catalog is a main-window page, opened the way the sidebar opens it;
+  // enterprise mode hides it until administrators can curate its sources.
+  const { isMobile } = useDeviceInfo();
+  const canBrowseCatalog = !enterpriseMode && !isMobile && !isVSCodeRuntime() && !isMobileSurfaceRuntime();
+  const openCatalog = () => {
+    const ui = useUIStore.getState();
+    ui.setSettingsDialogOpen(false);
+    ui.setIntegrationsCatalogOpen(true);
+  };
 
   return (
     <SettingsPageLayout
       title={t('settings.page.integrations.title')}
       description={t('settings.page.integrations.description')}
       showSaveStatus
+      headerEnd={canBrowseCatalog ? (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-9 shrink-0 gap-1.5"
+          data-settings-item="integrations.browse"
+          title={t('settings.integrations.browse.hint')}
+          onClick={openCatalog}
+        >
+          <Icon name="store-2" className="size-4" />
+          {t('settings.integrations.browse.label')}
+        </Button>
+      ) : null}
     >
       {hasBuiltIn ? (
         <SettingsSection
