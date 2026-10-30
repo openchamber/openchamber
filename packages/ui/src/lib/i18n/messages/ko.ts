@@ -878,6 +878,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.group.showMoreSingle': '세션 {count}개 더 보기',
   'sessions.sidebar.group.showMorePlural': '세션 {count}개 더 보기',
   'sessions.sidebar.group.showFewer': '접기',
+  'sessions.sidebar.group.revealDrag': '드래그하여 표시할 세션 수 조절',
   'sessions.sidebar.group.expandAria': '펼치기 {label}',
   'sessions.sidebar.group.collapseAria': '접기 {label}',
   'sessions.sidebar.group.actions.deleteArchivedInGroupAria': '{label}의 보관된 세션 삭제',

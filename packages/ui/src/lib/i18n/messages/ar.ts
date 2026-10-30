@@ -827,6 +827,7 @@ export const dict = {
   'sessions.sidebar.group.showMoreSingle': 'إظهار {count} جلسة أخرى',
   'sessions.sidebar.group.showMorePlural': 'إظهار {count} جلسات أخرى',
   'sessions.sidebar.group.showFewer': 'إظهار أقل',
+  'sessions.sidebar.group.revealDrag': 'اسحب لعرض جلسات أقل أو أكثر',
   'sessions.sidebar.group.expandAria': 'توسيع {label}',
   'sessions.sidebar.group.collapseAria': 'طي {label}',
   'sessions.sidebar.group.actions.deleteArchivedInGroupAria': 'حذف الجلسات المؤرشفة في {label}',

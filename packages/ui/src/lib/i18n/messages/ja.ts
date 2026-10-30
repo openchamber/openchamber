@@ -878,6 +878,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.group.showMoreSingle': 'さらに{count}セッションを表示',
   'sessions.sidebar.group.showMorePlural': 'さらに{count}セッションを表示',
   'sessions.sidebar.group.showFewer': '表示を減らす',
+  'sessions.sidebar.group.revealDrag': 'ドラッグして表示するセッションを増減',
   'sessions.sidebar.group.expandAria': '{label}を展開',
   'sessions.sidebar.group.collapseAria': '{label}を折りたたむ',
   'sessions.sidebar.group.actions.deleteArchivedInGroupAria': '{label}のアーカイブ済みセッションを削除',

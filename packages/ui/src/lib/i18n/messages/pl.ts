@@ -878,6 +878,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.group.showMoreSingle': 'Pokaż {count} więcej sesji',
   'sessions.sidebar.group.showMorePlural': 'Pokaż {count} więcej sesji',
   'sessions.sidebar.group.showFewer': 'Pokaż mniej',
+  'sessions.sidebar.group.revealDrag': 'Przeciągnij, aby pokazać mniej lub więcej sesji',
   'sessions.sidebar.group.expandAria': 'Rozwiń {label}',
   'sessions.sidebar.group.collapseAria': 'Zwiń {label}',
   'sessions.sidebar.group.actions.deleteArchivedInGroupAria': 'Usuń zarchiwizowane sesje w {label}',

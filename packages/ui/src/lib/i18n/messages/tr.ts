@@ -789,6 +789,7 @@ export const dict = {
   'sessions.sidebar.group.showMoreSingle': '{count} session daha göster',
   'sessions.sidebar.group.showMorePlural': '{count} session daha göster',
   'sessions.sidebar.group.showFewer': 'Daha az göster',
+  'sessions.sidebar.group.revealDrag': 'Daha az veya daha çok oturum göstermek için sürükleyin',
   'sessions.sidebar.group.expandAria': '{label} öğesini genişlet',
   'sessions.sidebar.group.collapseAria': '{label} öğesini daralt',
   'sessions.sidebar.group.actions.deleteArchivedInGroupAria': '{label} içindeki arşivlenmiş session\'ları sil',

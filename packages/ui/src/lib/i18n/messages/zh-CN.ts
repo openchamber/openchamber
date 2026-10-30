@@ -878,6 +878,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.group.showMoreSingle': '再显示 {count} 个会话',
   'sessions.sidebar.group.showMorePlural': '再显示 {count} 个会话',
   'sessions.sidebar.group.showFewer': '收起',
+  'sessions.sidebar.group.revealDrag': '拖动以显示更少或更多会话',
   'sessions.sidebar.group.expandAria': '展开 {label}',
   'sessions.sidebar.group.collapseAria': '折叠 {label}',
   'sessions.sidebar.group.actions.deleteArchivedInGroupAria': '删除 {label} 中已归档会话',

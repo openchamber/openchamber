@@ -872,6 +872,7 @@ export const dict = {
   'sessions.sidebar.group.showMoreSingle': 'Nog {count} sessie tonen',
   'sessions.sidebar.group.showMorePlural': 'Nog {count} sessies tonen',
   'sessions.sidebar.group.showFewer': 'Minder tonen',
+  'sessions.sidebar.group.revealDrag': 'Sleep om minder of meer sessies te tonen',
   'sessions.sidebar.group.expandAria': '{label} uitklappen',
   'sessions.sidebar.group.collapseAria': '{label} inklappen',
   'sessions.sidebar.group.actions.deleteArchivedInGroupAria': 'Gearchiveerde sessies in {label} verwijderen',

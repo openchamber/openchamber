@@ -711,6 +711,7 @@ export const dict = {
   'sessions.sidebar.group.showMoreSingle': 'Afficher {count} session de plus',
   'sessions.sidebar.group.showMorePlural': 'Afficher {count} sessions de plus',
   'sessions.sidebar.group.showFewer': 'Afficher moins',
+  'sessions.sidebar.group.revealDrag': 'Faites glisser pour afficher moins ou plus de sessions',
   'sessions.sidebar.group.expandAria': 'Développer {label}',
   'sessions.sidebar.group.collapseAria': 'Réduire {label}',
   'sessions.sidebar.group.actions.deleteArchivedInGroupAria': 'Supprimer les sessions archivées dans {label}',

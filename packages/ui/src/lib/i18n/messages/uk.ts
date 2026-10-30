@@ -882,6 +882,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.group.showMoreSingle": "Показати більше сесій {count}",
   "sessions.sidebar.group.showMorePlural": "Показати більше сесій {count}",
   "sessions.sidebar.group.showFewer": "Показати менше",
+  "sessions.sidebar.group.revealDrag": "Перетягніть, щоб показати менше або більше сесій",
   "sessions.sidebar.group.expandAria": "Розгорнути {label}",
   "sessions.sidebar.group.collapseAria": "Згорнути {label}",
   "sessions.sidebar.group.actions.deleteArchivedInGroupAria": "Видалити заархівовані сесії в {label}",

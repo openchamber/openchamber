@@ -877,6 +877,7 @@ export const dict = {
   'sessions.sidebar.group.showMoreSingle': 'Show {count} more session',
   'sessions.sidebar.group.showMorePlural': 'Show {count} more sessions',
   'sessions.sidebar.group.showFewer': 'Show less',
+  'sessions.sidebar.group.revealDrag': 'Drag to show fewer or more sessions',
   'sessions.sidebar.group.expandAria': 'Expand {label}',
   'sessions.sidebar.group.collapseAria': 'Collapse {label}',
   'sessions.sidebar.group.actions.deleteArchivedInGroupAria': 'Delete archived sessions in {label}',

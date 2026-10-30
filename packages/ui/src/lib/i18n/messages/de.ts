@@ -778,6 +778,7 @@ export const dict = {
   'sessions.sidebar.group.showMoreSingle': '{count} weitere Sitzung anzeigen',
   'sessions.sidebar.group.showMorePlural': '{count} weitere Sitzungen anzeigen',
   'sessions.sidebar.group.showFewer': 'Weniger anzeigen',
+  'sessions.sidebar.group.revealDrag': 'Ziehen, um weniger oder mehr Sitzungen anzuzeigen',
   'sessions.sidebar.group.expandAria': '{label} erweitern',
   'sessions.sidebar.group.collapseAria': '{label} einklappen',
   'sessions.sidebar.group.actions.deleteArchivedInGroupAria': 'Archivierte Sitzungen in {label} löschen',

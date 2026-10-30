@@ -827,6 +827,7 @@ export const dict = {
   'sessions.sidebar.group.showMoreSingle': 'הצג עוד {count} הפעלה',
   'sessions.sidebar.group.showMorePlural': 'הצג עוד {count} הפעלות',
   'sessions.sidebar.group.showFewer': 'הצג פחות',
+  'sessions.sidebar.group.revealDrag': 'גררו כדי להציג פחות או יותר הפעלות',
   'sessions.sidebar.group.expandAria': 'הרחב את {label}',
   'sessions.sidebar.group.collapseAria': 'כווץ את {label}',
   'sessions.sidebar.group.actions.deleteArchivedInGroupAria': 'מחק את ההפעלות בארכיון של {label}',
