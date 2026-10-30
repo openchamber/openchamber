@@ -4,6 +4,7 @@ import { SessionSidebar } from '@/components/session/SessionSidebar';
 import { SessionDialogs } from '@/components/session/SessionDialogs';
 import { ChatView } from '@/components/views/ChatView';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { openSession } from '@/lib/router/openSessionFromRoute';
 import { useViewportStore } from '@/sync/viewport-store';
 import { useSessions, useDirectorySync, useSessionMessages, useSessionMessagesResolved } from '@/sync/sync-context';
 import { useSubagentCostRollup } from '@/components/chat/work-status/useSubagentCostRollup';
@@ -463,7 +464,7 @@ export const VSCodeLayout: React.FC = () => {
     }
 
     hasAppliedInitialSession.current = true;
-    void useSessionUIStore.getState().setCurrentSession(initialSessionId, initialSessionDirectory);
+    void openSession(initialSessionId, { directory: initialSessionDirectory });
   }, [bootstrapWorkspaceFolder, connectionStatus, hasInitializedOnce, initialParallelComposer, initialSessionDirectory, initialSessionId, openNewSessionDraft, viewMode]);
 
   // Track container width for the expanded sessions/chat layout.

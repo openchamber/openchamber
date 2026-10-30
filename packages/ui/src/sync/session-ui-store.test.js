@@ -20,6 +20,7 @@ import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
 import { CHAT_DRAFT_PROJECT_ID } from '@/lib/chatDirectories';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
+import { useUIStore } from '@/stores/useUIStore';
 import { createContextPart } from '@/lib/messages/contextParts';
 import { useSpacesStore } from '@/lib/spaces/spaces-store';
 import { subscribeSpaceSessionProject } from './space-session-project';
@@ -445,6 +446,99 @@ describe('sendMessage captured target', () => {
     expect(error).toBeInstanceOf(Error);
     expect(error.message).toContain('runtime changed');
     expect(calls).toHaveLength(0);
+  });
+
+  const sendWithEffort = (variant, recordEffort) => useSessionUIStore.getState().sendMessage(
+    'message',
+    'provider-a',
+    'model-a',
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    variant,
+    'normal',
+    {
+      target: { runtimeKey: getRuntimeKey(), sessionId: 'session-captured', directory: '/captured/project' },
+      recordEffort,
+    },
+  );
+
+  test('records the level a composer send carried', async () => {
+    useUIStore.setState({ lastUsedEfforts: {} });
+
+    await sendWithEffort('high', true);
+
+    expect(useUIStore.getState().lastUsedEfforts).toEqual({ 'provider-a/model-a': 'high' });
+  });
+
+  test('records an explicit Default as a real choice', async () => {
+    useUIStore.setState({ lastUsedEfforts: {} });
+
+    await sendWithEffort(null, true);
+
+    expect(useUIStore.getState().lastUsedEfforts).toEqual({ 'provider-a/model-a': null });
+  });
+
+  test('background and queued sends leave the remembered level alone', async () => {
+    useUIStore.setState({ lastUsedEfforts: { 'provider-a/model-a': 'low' } });
+
+    await sendWithEffort('high', false);
+
+    expect(useUIStore.getState().lastUsedEfforts).toEqual({ 'provider-a/model-a': 'low' });
+  });
+
+  test('a pending send preserves newer picker choices, including a return to the same value', async () => {
+    const { rememberEffort } = await import('../lib/modelEfforts');
+    for (const choices of [['high'], ['high', 'low']]) {
+      rememberEffort('provider-a', 'model-a', 'low');
+      let finish;
+      let started;
+      const pending = new Promise((resolve) => { started = resolve; });
+      opencodeClient.sendMessage = () => new Promise((resolve) => {
+        finish = resolve;
+        started();
+      });
+      const sending = sendWithEffort(null, true);
+      await pending;
+      for (const choice of choices) rememberEffort('provider-a', 'model-a', choice);
+      finish('msg');
+      await sending;
+      expect(useUIStore.getState().lastUsedEfforts['provider-a/model-a']).toBe(choices.at(-1));
+    }
+  });
+
+  test.each([false, true])('a completed send cannot record effort after a runtime switch, round trip %s', async (roundTrip) => {
+    const apiBaseUrl = getRuntimeApiBaseUrl();
+    const runtimeKey = getRuntimeKey();
+    useUIStore.setState({ lastUsedEfforts: { 'provider-a/model-a': 'low' } });
+    let finish;
+    let started;
+    const pending = new Promise((resolve) => { started = resolve; });
+    opencodeClient.sendMessage = () => new Promise((resolve) => {
+      finish = resolve;
+      started();
+    });
+    try {
+      const sending = sendWithEffort(null, true);
+      await pending;
+      switchRuntimeEndpoint({ apiBaseUrl: 'https://effort-other.test', runtimeKey: 'effort-other' });
+      if (roundTrip) switchRuntimeEndpoint({ apiBaseUrl, runtimeKey });
+      finish('msg');
+      await sending;
+      expect(useUIStore.getState().lastUsedEfforts['provider-a/model-a']).toBe('low');
+    } finally {
+      switchRuntimeEndpoint({ apiBaseUrl, runtimeKey });
+    }
+  });
+
+  test('a failed composer send preserves the last chosen level', async () => {
+    useUIStore.setState({ lastUsedEfforts: { 'provider-a/model-a': 'low' } });
+    opencodeClient.sendMessage = async () => { throw new Error('offline'); };
+
+    await expect(sendWithEffort('high', true)).rejects.toThrow('offline');
+
+    expect(useUIStore.getState().lastUsedEfforts).toEqual({ 'provider-a/model-a': 'low' });
   });
 });
 
@@ -1324,6 +1418,68 @@ describe('sendMessage draft snapshot (issues #2222 / #2315)', () => {
     });
     useProjectsStore.setState({ projects: [], activeProjectId: null });
     useSessionDisplayStore.setState({ singleProjectId: null });
+  });
+
+  test.each([
+    { recordEffort: true, fails: false, expected: 'high' },
+    { recordEffort: true, fails: true, expected: 'low' },
+    { recordEffort: false, fails: false, expected: 'low' },
+  ])('draft effort recording $recordEffort with send failure $fails', async ({ recordEffort, fails, expected }) => {
+    useUIStore.setState({ lastUsedEfforts: { 'provider-a/model-a': 'low' } });
+    const draftSnapshot = {
+      draftId: `effort-${recordEffort}-${fails}`,
+      open: true,
+      directoryOverride: '/projects/alpha',
+      parentID: null,
+    };
+    useSessionUIStore.setState({
+      currentSessionId: null,
+      currentSessionDirectory: null,
+      newSessionDraft: draftSnapshot,
+    });
+    if (fails) opencodeClient.sendMessage = async () => { throw new Error('offline'); };
+
+    const send = useSessionUIStore.getState().sendMessage(
+      'message', 'provider-a', 'model-a', undefined, undefined, undefined, undefined,
+      'high', 'normal', { draftSnapshot, recordEffort },
+    );
+    if (fails) {
+      await expect(send).rejects.toThrow('offline');
+    } else {
+      await send;
+    }
+
+    expect(createSessionCalls).toHaveLength(1);
+    expect(useUIStore.getState().lastUsedEfforts).toEqual({ 'provider-a/model-a': expected });
+  });
+
+  test.each([false, true])('a completed draft send cannot record effort after a runtime switch, round trip %s', async (roundTrip) => {
+    const apiBaseUrl = getRuntimeApiBaseUrl();
+    const runtimeKey = getRuntimeKey();
+    const draftSnapshot = { draftId: `runtime-effort-${roundTrip}`, open: true, directoryOverride: '/projects/alpha', parentID: null };
+    useSessionUIStore.setState({ currentSessionId: null, currentSessionDirectory: null, newSessionDraft: draftSnapshot });
+    useUIStore.setState({ lastUsedEfforts: { 'provider-a/model-a': 'low' } });
+    let finish;
+    let started;
+    const pending = new Promise((resolve) => { started = resolve; });
+    opencodeClient.sendMessage = () => new Promise((resolve) => {
+      finish = resolve;
+      started();
+    });
+    try {
+      const sending = useSessionUIStore.getState().sendMessage(
+        'message', 'provider-a', 'model-a', undefined, undefined, undefined, undefined,
+        'high', 'normal', { draftSnapshot, recordEffort: true },
+      );
+      await pending;
+      switchRuntimeEndpoint({ apiBaseUrl: 'https://effort-other.test', runtimeKey: 'effort-other' });
+      if (roundTrip) switchRuntimeEndpoint({ apiBaseUrl, runtimeKey });
+      finish('msg');
+      await sending;
+      expect(useUIStore.getState().lastUsedEfforts['provider-a/model-a']).toBe('low');
+    } finally {
+      switchRuntimeEndpoint({ apiBaseUrl, runtimeKey });
+    }
   });
 
   test('draft send snapshots the draft; switching to another project mid-flight still targets the materialized session', async () => {

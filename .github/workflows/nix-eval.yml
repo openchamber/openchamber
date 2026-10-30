@@ -1,7 +1,6 @@
-# Catches anything that breaks the flake's evaluation before merge: a PR
-# touching the flake (or packages/electron/package.json, whose Electron
-# devDependency and opencodeCli.version the flake reads at eval time) must
-# still evaluate every package. Read-only: no builds, no cache, no write permissions.
+# Evaluates and builds server and desktop packages on each supported system.
+# Evaluation uses import-from-derivation to generate the Bun dependency cache,
+# so even nix eval and nix flake check --no-build may build the converter.
 name: nix-eval
 
 on:
@@ -10,7 +9,11 @@ on:
       - flake.nix
       - flake.lock
       - nix/**
-      - packages/electron/package.json
+      - bun.lock
+      - package.json
+      - packages/**/package.json
+      - bun-patches/**
+      - .github/workflows/nix-eval.yml
   workflow_dispatch:
 
 permissions:
@@ -18,7 +21,18 @@ permissions:
 
 jobs:
   eval:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - system: x86_64-linux
+            runner: ubuntu-latest
+          - system: aarch64-linux
+            runner: ubuntu-24.04-arm
+          - system: aarch64-darwin
+            runner: macos-15
+    name: nix (${{ matrix.system }})
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -27,6 +41,7 @@ jobs:
         with:
           extra_nix_config: |
             experimental-features = nix-command flakes
+            allow-import-from-derivation = true
 
       - name: Evaluate the flake's outputs
         run: |
@@ -36,3 +51,6 @@ jobs:
           nix eval --raw .#openchamber.bunDeps.drvPath
           nix eval --raw .#opencode-cli.node_modules.drvPath
           nix flake check --no-build
+
+      - name: Build server and desktop
+        run: nix build --no-link -L .#openchamber .#openchamber-desktop

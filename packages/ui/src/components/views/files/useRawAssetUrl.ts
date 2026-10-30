@@ -2,6 +2,9 @@ import React from 'react';
 import { refreshRuntimeUrlAuthToken } from '@/lib/runtime-auth';
 import { getRuntimeUrlResolver } from '@/lib/runtime-url';
 import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
+import { runtimeFetch } from '@/lib/runtime-fetch';
+import { readAssetBlob, runtimeAssetsNeedHeaders } from '@/lib/runtime-asset';
+import { MAX_OPEN_FILE_BYTES } from '@/lib/fileOpenLimits';
 
 /**
  * A PDF, audio, video or font preview is a URL the browser owns, so it carries
@@ -46,6 +49,7 @@ export const useRawAssetUrl = (
   const directory = request?.directory ?? '';
   const revision = request?.revision ?? '';
   const outsideWorkspace = request?.outsideWorkspace ?? false;
+  const needsHeaders = runtimeAssetsNeedHeaders();
   const key = path ? JSON.stringify([runtime, path, directory, revision, outsideWorkspace]) : '';
   const [held, setHeld] = React.useState<{ key: string; url: string } | null>(null);
 
@@ -57,30 +61,49 @@ export const useRawAssetUrl = (
   React.useEffect(() => {
     if (!key) return;
     let cancelled = false;
+    const controller = new AbortController();
+    let objectUrl: string | undefined;
     const load = async () => {
       try {
-        const url = await mint();
+        let url: string;
+        if (needsHeaders) {
+          const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(30_000)]);
+          const response = await runtimeFetch('/api/fs/raw', {
+            query: { path, directory: directory || undefined, allowOutsideWorkspace: outsideWorkspace ? 'true' : undefined },
+            signal,
+          });
+          if (!response.ok) throw new Error(errorFallback);
+          const blob = await readAssetBlob(response, MAX_OPEN_FILE_BYTES, signal);
+          if (cancelled) return;
+          objectUrl = URL.createObjectURL(blob);
+          url = objectUrl;
+        } else {
+          url = await mint();
+        }
         if (cancelled) return;
         setHeld({ key, url });
         reportError(null);
       } catch (error) {
         if (cancelled) return;
-        reportError(error instanceof Error ? error.message : errorFallback);
-        setHeld({ key, url: rawAssetUrl({ path, directory, outsideWorkspace }) });
+        reportError(needsHeaders ? errorFallback : error instanceof Error ? error.message : errorFallback);
+        setHeld({ key, url: needsHeaders ? '' : rawAssetUrl({ path, directory, outsideWorkspace }) });
       }
     };
     void load();
     return () => {
       cancelled = true;
+      controller.abort();
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [key, mint, reportError, errorFallback, path, directory, outsideWorkspace]);
+  }, [key, mint, reportError, errorFallback, path, directory, outsideWorkspace, needsHeaders]);
 
   const renew = React.useCallback(async (): Promise<string> => {
+    if (needsHeaders) return held?.key === key ? held.url : '';
     const url = await mint();
     setHeld((current) => (current?.key === key ? { key, url } : current));
     return url;
-  }, [key, mint]);
+  }, [key, mint, needsHeaders, held]);
 
   const src = key && held?.key === key ? held.url : '';
-  return { src, loading: Boolean(key) && !src, renew };
+  return { src, loading: Boolean(key) && held?.key !== key, renew };
 };

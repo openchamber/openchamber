@@ -10,6 +10,14 @@ import type { MessageListHandle } from './MessageList';
 import { KeepAlive } from '@/components/ui/KeepAlive';
 import { ChatColumnSessionContext } from './chatColumnSession';
 import { useChatTimelineScroll, type TimelineListHandle } from '@/hooks/useChatTimelineScroll';
+import { I18nProvider } from '@/lib/i18n';
+import { useUIStore } from '@/stores/useUIStore';
+import { useChatQuoteHighlightStore, type ChatQuoteHighlightStore } from './hooks/chatQuoteHighlightStore';
+import { ChatQuoteHighlightLayer } from './message/ChatQuoteHighlightLayer';
+import type { ChatMessageEntry } from './lib/turns/types';
+import { ThemeSystemProvider } from '@/contexts/ThemeSystemContext';
+import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
+import type { RuntimeAPIs } from '@/lib/api/types';
 
 // Bun does not implement Vite's worker URL imports.
 plugin({
@@ -23,6 +31,150 @@ plugin({
 });
 const { default: MessageList } = await import('./MessageList');
 const { MarkdownContent } = await import('./MarkdownRendererImpl');
+
+test('quote reveal opens real folded Activity, including a source prepended from history', async () => {
+    const dom = new Window({ url: 'https://app.test' });
+    const frames = new Map<number, FrameRequestCallback>();
+    let nextFrame = 0;
+    const requestAnimationFrame = (callback: FrameRequestCallback) => { frames.set(++nextFrame, callback); return nextFrame; };
+    const cancelAnimationFrame = (id: number) => { frames.delete(id); };
+    class TestHighlight extends Set<Range> {
+        priority = 0;
+        constructor(...ranges: Range[]) { super(ranges); }
+    }
+    const highlights = new Map<string, TestHighlight>();
+    Object.assign(dom, { requestAnimationFrame, cancelAnimationFrame, Highlight: TestHighlight });
+    Object.defineProperties(dom.HTMLElement.prototype, {
+        clientHeight: { configurable: true, get: () => 800 },
+        clientWidth: { configurable: true, get: () => 800 },
+    });
+    dom.HTMLElement.prototype.getBoundingClientRect = () => new dom.DOMRect(0, 0, 800, 320);
+    const matchMedia = dom.matchMedia.bind(dom);
+    dom.matchMedia = (query) => {
+        const result = matchMedia(query);
+        if (query.includes('prefers-reduced-motion')) Object.defineProperty(result, 'matches', { value: true });
+        return result;
+    };
+    const values = {
+        window: dom, document: dom.document, navigator: dom.navigator, HTMLElement: dom.HTMLElement, Element: dom.Element,
+        Node: dom.Node, localStorage: dom.localStorage, sessionStorage: dom.sessionStorage,
+        getComputedStyle: dom.getComputedStyle.bind(dom), ResizeObserver: dom.ResizeObserver, MutationObserver: dom.MutationObserver,
+        requestAnimationFrame, cancelAnimationFrame, Highlight: TestHighlight,
+        CSS: { highlights, escape: (value: string) => value }, IS_REACT_ACT_ENVIRONMENT: true,
+    };
+    const previous = Object.keys(values).map((name) => [name, Object.getOwnPropertyDescriptor(globalThis, name)] as const);
+    for (const [name, value] of Object.entries(values)) Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = () => new Promise(() => {});
+    const sdk = OpenCode.make({ baseUrl: 'https://timeline.test', fetch: () => new Promise<Response>(() => {}) });
+    const unavailable = (): never => { throw new Error('Quote navigation must not call runtime APIs'); };
+    const runtime: RuntimeAPIs = {
+        runtime: { platform: 'web', isDesktop: false, isVSCode: false },
+        get terminal() { return unavailable(); }, get git() { return unavailable(); },
+        get files() { return unavailable(); }, get settings() { return unavailable(); },
+        get permissions() { return unavailable(); }, get notifications() { return unavailable(); },
+        get sourceControl() { return unavailable(); },
+    };
+    const previousMode = useUIStore.getState().activityRenderMode;
+    const previousReasoning = useUIStore.getState().showReasoningTraces;
+    useUIStore.setState({ activityRenderMode: 'collapsed', showReasoningTraces: true });
+    const turn = (prefix: string, created: number): ChatMessageEntry[] => {
+        const userId = `${prefix}-user`;
+        return [
+            { info: { id: userId, sessionID: 'quote-navigation', role: 'user', time: { created } }, parts: [
+                { id: `${prefix}-prompt`, sessionID: 'quote-navigation', messageID: userId, type: 'text', text: 'Check this.' },
+            ] },
+            ...['source', 'answer'].map((kind, index): ChatMessageEntry => {
+                const id = `${prefix}-${kind}`;
+                return {
+                    info: { id, sessionID: 'quote-navigation', role: 'assistant', agent: 'build', providerID: 'mock', modelID: 'mock', finish: index === 0 ? 'tool-calls' : 'stop', time: { created: created + index + 1, completed: created + index + 2 } },
+                    parts: [
+                        ...(index === 0 ? [{ id: `${id}-reasoning`, sessionID: 'quote-navigation', messageID: id, type: 'reasoning' as const, text: 'Checking.', time: { start: created, end: created + 1 } }] : []),
+                        { id: `${id}-text`, sessionID: 'quote-navigation', messageID: id, type: 'text', text: index === 0 ? `Earlier **${prefix} quoted text** here.` : 'Done.' },
+                    ],
+                };
+            }),
+        ];
+    };
+    const recent = turn('recent', 10);
+    const older = turn('older', 1);
+    let messages = recent;
+    let store: ChatQuoteHighlightStore | undefined;
+    let finishLoad: ((loaded: boolean) => void) | undefined;
+    const ref = React.createRef<MessageListHandle>();
+    const host = document.createElement('div'); document.body.append(host);
+    const root = createRoot(host);
+    function Harness() {
+        const quoteStore = useChatQuoteHighlightStore();
+        store = quoteStore;
+        const [scrollNode, setScrollNode] = React.useState<HTMLElement | null>(null);
+        const register = React.useCallback((list: TimelineListHandle | null) => { setScrollNode(list?.getScrollableNode() ?? null); }, []);
+        return <>
+            <MessageList ref={ref} sessionKey="quote-navigation" messages={messages} isLoadingOlder={false} registerList={register} scrollContainerProps={{ 'data-scrollbar': 'chat' }} />
+            <ChatQuoteHighlightLayer store={quoteStore} scrollNode={scrollNode}
+                loadHistoryUntilMessage={async (id) => messages.some((message) => message.info.id === id) || new Promise<boolean>((resolve) => { finishLoad = resolve; })}
+                scrollToMessage={async (id, options) => ref.current?.scrollToMessageId(id, options) ?? false} />
+        </>;
+    }
+    const render = () => act(async () => {
+        root.render(
+            <RuntimeAPIContext.Provider value={runtime}>
+                <ThemeSystemProvider>
+                    <SyncProvider sdk={sdk} directory="/repo">
+                        <I18nProvider>
+                            <ChatColumnSessionContext.Provider value={{ sessionId: 'quote-navigation', directory: '/repo' }}>
+                                <Harness />
+                            </ChatColumnSessionContext.Provider>
+                        </I18nProvider>
+                    </SyncProvider>
+                </ThemeSystemProvider>
+            </RuntimeAPIContext.Provider>,
+        );
+    });
+    const flush = async () => {
+        await act(async () => {
+            await new Promise<void>((resolve) => dom.setTimeout(resolve, 0));
+            const pending = [...frames.values()]; frames.clear();
+            pending.forEach((callback) => callback(0));
+        });
+    };
+    const reveal = (prefix: string) => act(async () => {
+        store?.reveal(`${prefix}-source`, { text: `${prefix} quoted text`, prefix: '', suffix: '', start: 0 });
+    });
+    const expectHighlight = async (prefix: string) => {
+        for (let index = 0; index < 30 && !highlights.has('oc-chat-quote'); index += 1) await flush();
+        const source = host.querySelector(`[data-message-id="${prefix}-source"]`);
+        expect(source).not.toBeNull();
+        expect(source?.closest('[data-live-activity-content]')?.getAttribute('aria-hidden')).toBe('false');
+        expect(source?.textContent).toContain(`${prefix} quoted text`);
+        expect([...highlights.get('oc-chat-quote') ?? []].map((range) => range.toString())).toEqual([`${prefix} quoted text`]);
+    };
+    try {
+        await render();
+        for (let index = 0; index < 5; index += 1) await flush();
+        expect(host.querySelector('[data-message-id="recent-source"]')).toBeNull();
+        await reveal('recent');
+        await expectHighlight('recent');
+        highlights.clear();
+        await reveal('older');
+        expect(finishLoad).toBeDefined();
+        messages = [...older, ...recent];
+        await render();
+        for (let index = 0; index < 5; index += 1) await flush();
+        expect(host.querySelector('[data-message-id="older-source"]')).toBeNull();
+        await act(async () => finishLoad?.(true));
+        await expectHighlight('older');
+    } finally {
+        await act(async () => root.unmount());
+        useUIStore.setState({ activityRenderMode: previousMode, showReasoningTraces: previousReasoning });
+        globalThis.fetch = originalFetch;
+        for (const [name, descriptor] of previous) {
+            if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+            else Reflect.deleteProperty(globalThis, name);
+        }
+        await dom.happyDOM.close();
+    }
+});
 
 test('retains real lists and Markdown while reconnecting only the selected scroller', async () => {
     const dom = new Window({ url: 'https://app.test' });

@@ -65,6 +65,14 @@ time. Keeping the client alone can send a rollback to the newly selected
 server, or omit the old server's credentials. Only rollback captures transport;
 ordinary feature requests continue to resolve the active runtime at call time.
 
+### Why compaction checks runtime ownership after switching the model
+
+Manual compaction captures the runtime instance before reconciling the composer's
+model pick. If that instance changes while the model switch is pending, the action
+rejects before compacting. The shared client resolves the active server at call
+time, so continuing could compact an unrelated session with the same ID. Returning
+to the original runtime does not resume the cancelled operation.
+
 ## OpenCode compatibility before bootstrap
 
 The desktop/web/VS Code App entry and MobileApp entry wrap the application in
@@ -143,6 +151,14 @@ attachment address together at attach time and keeps both through screenshot
 preparation, including when the callback was saved before a BTW transition.
 
 Local chat attachments are normalized by `attachment-files.ts` before entering `input-store.ts`. PNG, JPEG, GIF, WebP, and PDF retain their media type; HEIC/HEIF is converted to JPEG; recognized text/code formats and unknown files whose first 4 KB are text are sent as `text/plain`; binary files outside the supported media types are rejected. Jupyter notebooks become readable markdown with non-text outputs omitted. HAR credentials, cookies, and sensitive URL parameters are redacted, while request/response body text is omitted. SVG and Draw.io files are attached as source text, not executable/rendered content. Browser and VS Code pickers expose the same allowlist, while drag-and-drop may still accept an unknown extension after content inspection. Large plain-text clipboard pastes can become in-memory `text/plain` attachments named `pasted-context-N.txt` through the composer paste path; they use the same normalization and send pipeline as manually attached `.txt` files.
+
+### Why desktop attachments keep their original path
+
+A local desktop drop or picker resolves the original file's on-disk path through `pathForDroppedFile` and stores it as `agentPath`. `attachmentWireName` sends that path as OpenCode's prompt-file name, falling back to `filename` when unavailable. This lets the model locate files outside the session directory without searching by basename. Web, VS Code, hosted mobile, Capacitor, and remote desktop hosts do not resolve a native path.
+
+HAR and IPYNB never carry `agentPath`, because reopening the original bypasses credential redaction or output omission. A document's first prepared entry, its extracted text, carries the original path; extracted images do not. Converted HEIC/HEIF carries the original path with JPEG bytes. Attachments carrying a path keep the original basename as `filename`, including converted HEIC/HEIF, so composer citations match the transcript's `attachmentBasename`. Queue serialization preserves `agentPath` for automatic delivery and manual take.
+
+Sent-message citation lookup uses the same `attachmentBasename` rule as display. Restoring a sent attachment for editing or forking splits its wire name back into the UI basename and `agentPath`, preserving the original name on resend without breaking `[basename]` citations.
 
 Office and OpenDocument packages are metadata-validated before asynchronous extraction, with limits of 20 MB compressed input, 5,000 archive entries, 25 MB per entry, 8 MB per XML part, and 100 MB total uncompressed content. Unsafe or non-canonical archive paths reject the whole attachment, and only XML, relationship, and supported image entries are decompressed and retained. Extracted text, including its explicit truncation notice, is bounded to 500,000 characters so compact but dense Office files cannot consume an entire model context window. XLSX dense rows are serialized as quoted TSV under a single source range instead of repeating every cell address; highly sparse rows retain explicit cell coordinates so distant cells do not generate vast empty TSV spans. Confirmed Office/OpenDocument `@file` mentions are loaded through the runtime filesystem route before submit and use this same extraction pipeline instead of being forwarded as `text/plain` `file://` parts that OpenCode rejects as binary. Confirmed PNG, JPEG, GIF, WebP, and HEIC/HEIF mentions load through the same route and attach like a picked file, with their real type and a data URL, so the message shows the image and the model receives its bytes (`isReadOnSendMentionFilename`). PDF mentions stay `file://` references: OpenCode reads them itself, and a model without PDF input can still extract the text with tools. A failed mention load or extraction leaves the composer intact, and a runtime switch discards preparation from the previous runtime. At most 50 signature-validated PNG, JPEG, GIF, or WebP images and 40 MB of image bytes are retained, with a 20 MB per-image limit; unsupported, invalid, omitted, and truncated content remains explicit in the extracted text. Images whose citations fall beyond text truncation are not attached. Extracted document content remains a `text/plain` file attachment with the original document filename, rather than becoming visible user-message text. Supported embedded images become separate image file parts; the extracted text contains `[filename]` citations at the source paragraph, slide object, spreadsheet cell anchor, or OpenDocument text position. Generated image filenames are re-evaluated if the composer changes during asynchronous preparation, avoiding collisions. The store publishes all generated parts atomically only after every data URL is ready.
 
@@ -403,6 +419,21 @@ persists, per session, the session-record agent and model the composer last
 followed; a different record value is a newer switch and replaces the pick
 (Auto excepted), while an unchanged one keeps an unsent pick
 (`packages/ui/src/stores/DOCUMENTATION.md`).
+
+A picker change records the chosen level for that model in the profile
+(`lastUsedEfforts`, `lib/modelEfforts.ts`) immediately, including an explicit
+Default and the left/right keys inside the model picker. A successful user
+composer send also records the level it carried, unless a newer choice for
+that model was recorded after submit started, including during attachment
+preparation. The composer captures that revision with the message selection;
+completion can record it only in the same runtime instance, so switching away
+and back also supersedes the send's write. A session's own saved pick
+stays above the remembered value; without one, a level configured for the
+model, then the remembered level, then Default applies. A BTW fork reads the
+map but never writes it; queued delivery, scheduled tasks and other background
+sends never write it either. A level is only ever read back for the same
+`provider/model`. The server's tool-facing session routes and the new-session
+send dialogs read the same profile map; they never write it.
 Agent and model switch events stamp the session's `time.updated`, as OpenCode's
 own record does.
 
@@ -462,6 +493,10 @@ returned before the roots query catches up during cold startup, retain or
 recover its referenced parent instead of exposing an orphan-only snapshot.
 
 Session message loads use runtime, normalized directory, session ID, SDK epoch, and loader generation as commit authority. Eviction, archive, delete, move, directory disposal, and runtime switching invalidate the applicable loader generation before stale in-flight work can publish. A move invalidates both source and destination loader targets.
+
+### Why auto-read keeps older-page reply provenance
+
+`SessionMessageLoadState.olderCompletedReplyIds` remembers completed answers returned by successful older-history batches for that loader entry. Auto-read combines it with the opening baseline and already-read replies, so trimming to an answer loaded after opening cannot start playback. Scanning all current messages after each load would also suppress answers completed live during the request. Failed and stale batches publish no IDs; surviving revert windows keep them, while entry resets and eviction clear them. This metadata is not persisted or inferred from message ordering, and live updates do not rescan history.
 
 An authoritative `session.deleted` event also clears persisted UI state before routing metadata can be removed. Confirmed local deletion and accepted `404` deletion do the same directly instead of depending on the event echo. Cleanup is identity-owned by runtime, normalized directory, and session ID: queued messages, persisted todos, composer drafts, per-session input-history buckets, inline-comment drafts, and pins clear only that tuple, while the active runtime's folder store removes the session from every active or archived folder scope. Stale-runtime events and unresolved/global directory identities do not mutate persisted state.
 
@@ -1377,6 +1412,10 @@ batches while the timeline stays hidden; that hold raises the gate's cap to
 the end first, and the reader is moved only if the message arrives and they
 have neither scrolled nor sent in the meantime. Mobile skips that search because it
 loads history only on an explicit tap.
+
+Session-only navigation and `/btw` parent resolution belong to the
+[router](../lib/router/DOCUMENTATION.md). Its `openSession` registers the opener
+a toast uses, so the session store keeps no dependency on the router.
 
 A message link opens the session on one message instead. Links are built and
 parsed in `lib/sessionLinks.ts`: the web copies `?session=<id>&message=<id>` on

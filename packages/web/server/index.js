@@ -1928,6 +1928,7 @@ const scheduledTaskService = createScheduledTaskService({
   resolvePrimaryWorktreeRoot,
 });
 const openChamberSessionService = createOpenChamberSessionService({
+  chatsScope: scheduledChatsScope,
   readSettingsFromDiskMigrated,
   sanitizeProjects,
   validateDirectoryPath,
@@ -2043,6 +2044,7 @@ void secretFiles.sweep();
 setInterval(() => { void secretFiles.sweep(); }, 60 * 60 * 1000).unref();
 
 const openChamberControlService = createOpenChamberControlService({
+  chatsScope: scheduledChatsScope,
   readSettingsFromDiskMigrated,
   sanitizeProjects,
   buildOpenCodeUrl,

@@ -144,8 +144,8 @@ gap.
 - Pinned version: `opencodeCli.version` in `packages/electron/package.json`
   (the bundled binary) and `@opencode/client` / `@opencode/schema` in the
   root, ui, web and vscode manifests, plus `@opencode/cli@` in the
-  Dockerfile. They move together. The `opencode.url` tag in `flake.nix` is the
-  exception: it follows `opencodeCli.version` on its own (see the bump steps).
+  Dockerfile. They move together, including `opencode.url` in `flake.nix`
+  (see the bump steps).
 
 ## "What's new in OpenCode 2.x?"
 
@@ -172,8 +172,11 @@ tests. A new message `type` or event needs a case in `model.ts` and
 `events.ts` before it renders. Verify `@opencode/cli@<tag>` exists on npm:
 the desktop packaging and the Docker image install it.
 
-Leave `flake.nix`, `flake.lock` and `nix/hashes.json` at the old tag. When the
-bump reaches `main`, the `nix-hashes` workflow runs `nix run .#update-hashes`:
-it moves the `flake.nix` tag to `opencodeCli.version`, re-bakes the hashes, and
-opens a PR. The hashes come only from a Linux nix build, so a tag moved by hand
-still leaves the flake broken until that PR lands.
+Set `opencode.url` in `flake.nix` to the same `vX.Y.Z` tag and run
+`nix flake update opencode` from the OpenChamber root. Include `flake.nix` and
+`flake.lock` in the bump. OpenChamber's Bun cache derives from `bun.lock` through
+bun2nix; OpenCode's dependency hashes come from the pinned upstream source.
+There is no hash-baking workflow to repair a mismatched pin after merge.
+Run `nix build --no-link .#openchamber .#openchamber-desktop`; `nix-eval` CI
+also evaluates and builds both on x86_64-linux, aarch64-linux and aarch64-darwin.
+If Nix is unavailable locally, report that and require those CI jobs to pass.

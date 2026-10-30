@@ -20,6 +20,7 @@ type Args = {
    * the scope is missing here it is treated as a plain directory scope.
    */
   getFolderScopesForProject: (projectId: string) => readonly { scopeKey: string; directory: string | null }[];
+  folderOwnerKeyBySessionId: ReadonlyMap<string, string>;
   addSessionsToFolder: (scopeKey: string, folderId: string, sessionIds: string[]) => void;
   removeSessionsFromFolders: (scopeKey: string, sessionIds: string[]) => void;
   createFolderAndStartRename: (scopeKey: string, parentId?: string | null) => { id: string } | null;
@@ -39,6 +40,22 @@ export const resolveSelectionFolderScopes = (
   return projectScopes.length > 0
     ? projectScopes.map((scope) => scope.scopeKey)
     : [selectionScope];
+};
+
+export const resolveSelectionFolderIds = (
+  sessionIds: readonly string[],
+  ownerKey: string | null,
+  folderOwnerKeyBySessionId: ReadonlyMap<string, string>,
+): string[] => {
+  if (!ownerKey) return [];
+  const ids: string[] = [];
+  for (const sessionId of sessionIds) {
+    const owner = folderOwnerKeyBySessionId.get(sessionId);
+    if (!owner) return [];
+    // Subtree selection also includes descendants displayed under another owner.
+    if (owner === ownerKey) ids.push(sessionId);
+  }
+  return ids;
 };
 
 export const resolveBulkDeleteConfirmation = (
@@ -85,6 +102,7 @@ export const useSidebarBulkActions = (args: Args) => {
     showDeletionDialog,
     foldersMap,
     getFolderScopesForProject,
+    folderOwnerKeyBySessionId,
     addSessionsToFolder,
     removeSessionsFromFolders,
     createFolderAndStartRename,
@@ -119,6 +137,10 @@ export const useSidebarBulkActions = (args: Args) => {
     return null;
   }, [selectionScopeKey]);
 
+  const folderSelectionIds = React.useMemo(() => resolveSelectionFolderIds(
+    Array.from(selectedIds), derivedSelectionScope, folderOwnerKeyBySessionId,
+  ), [selectedIds, derivedSelectionScope, folderOwnerKeyBySessionId]);
+
   // The selection scope is a project id; folders live per directory scope
   // (project root + each worktree). Resolve all of them, in project order.
   const selectionFolderScopes = React.useMemo<string[]>(() => {
@@ -149,7 +171,8 @@ export const useSidebarBulkActions = (args: Args) => {
   }, [foldersMap, selectionFolderScopes, hasSelection, selectedIds]);
 
   const moveSelectionToFolder = React.useCallback((targetScope: string, folderId: string) => {
-    const ids = Array.from(selectedIds);
+    const ids = folderSelectionIds;
+    if (ids.length === 0) return;
     // Clear memberships in every other scope first — the store only dedupes
     // within one scope, and a session must live in a single folder.
     for (const scope of selectionFolderScopes) {
@@ -157,7 +180,7 @@ export const useSidebarBulkActions = (args: Args) => {
       removeSessionsFromFolders(scope, ids);
     }
     addSessionsToFolder(targetScope, folderId, ids);
-  }, [addSessionsToFolder, removeSessionsFromFolders, selectedIds, selectionFolderScopes]);
+  }, [addSessionsToFolder, folderSelectionIds, removeSessionsFromFolders, selectionFolderScopes]);
 
   const handleBulkMoveToFolder = React.useCallback((folderId: string) => {
     if (!hasSelection) return;
@@ -169,18 +192,20 @@ export const useSidebarBulkActions = (args: Args) => {
   const handleBulkCreateFolderAndMove = React.useCallback(() => {
     const targetScope = selectionFolderScopes[0];
     if (!targetScope || !hasSelection) return;
+    if (folderSelectionIds.length === 0) return;
     const newFolder = createFolderAndStartRename(targetScope);
     if (!newFolder) return;
     moveSelectionToFolder(targetScope, newFolder.id);
-  }, [createFolderAndStartRename, hasSelection, moveSelectionToFolder, selectionFolderScopes]);
+  }, [createFolderAndStartRename, folderSelectionIds, hasSelection, moveSelectionToFolder, selectionFolderScopes]);
 
   const handleBulkRemoveFromFolder = React.useCallback(() => {
     if (!hasSelection) return;
-    const ids = Array.from(selectedIds);
+    const ids = folderSelectionIds;
+    if (ids.length === 0) return;
     for (const scope of selectionFolderScopes) {
       removeSessionsFromFolders(scope, ids);
     }
-  }, [removeSessionsFromFolders, selectedIds, selectionFolderScopes, hasSelection]);
+  }, [folderSelectionIds, removeSessionsFromFolders, selectionFolderScopes, hasSelection]);
 
   const executeBulkDelete = React.useCallback(async (ids: string[], archivedBucket: boolean) => {
     if (ids.length === 0) return;

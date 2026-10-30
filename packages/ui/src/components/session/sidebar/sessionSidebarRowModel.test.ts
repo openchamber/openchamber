@@ -8,6 +8,8 @@ import { buildMultiRunIndex } from '@/lib/multirun/runs';
 import { withMultiRunMembership } from '@/lib/multirun/identity';
 import { getPinnedSessionKey } from '@/lib/sessionPins';
 import { getRuntimeKey } from '@/lib/runtime-switch';
+import { ensureChatsRootDirectory } from '@/lib/chatDirectories';
+import { opencodeClient } from '@/lib/opencode/client';
 
 const timelineItem = (id: string, overrides: Partial<SessionSidebarActivityItem> = {}): SessionSidebarActivityItem => ({
   node: { session: session(id), children: [], worktree: null },
@@ -73,6 +75,7 @@ const args = (sections: ProjectSection[]): SessionSidebarRowModelArgs => ({
   sessionOrderIndex: new Map(),
   groupStatusByKey: new Map(),
   folderAuthorityByOwner: new Map([['project-a', { scopeKeys: ['/repo'], complete: true }]]),
+  sessionOwnerById: new Map(),
   activeProjectId: 'project-a',
   singleProjectMode: false,
   singleProjectId: null,
@@ -96,6 +99,84 @@ describe('buildSessionSidebarRowModel', () => {
     expect(model.sessionById.get('archived-chat')).toBe(archived.session);
     input.archivedChatGroup = null;
     expect(buildSessionSidebarRowModel(input).rows.filter((row) => row.kind === 'session').map((row) => row.node.session.id)).toEqual(['active-chat']);
+  });
+
+  test('keeps a cross-project child display-nested while folder actions use its own project', () => {
+    const child = node('child');
+    child.session.directory = '/project-b/worktree';
+    const input = args([project([group([node('parent', [child])])])]);
+    input.expandedParents = new Set(['project:active:parent']);
+    input.sessionOwnerById = new Map([['child', {
+      projectId: 'project-b',
+      projectRoot: '/project-b',
+      scopeDirectory: '/project-b/worktree',
+      kind: 'worktree',
+    }]]);
+
+    const childRow = buildSessionSidebarRowModel(input).rows
+      .find((row) => row.kind === 'session' && row.node.session.id === 'child');
+
+    expect(childRow).toMatchObject({
+      projectId: 'project-a',
+      ownerProjectId: 'project-b',
+      ownerKey: 'project-b',
+      selectionScopeKey: 'project-b',
+    });
+  });
+
+  test('gives an unresolved child no folder mutation owner from its display parent', () => {
+    const child = node('unresolved-child');
+    child.session.directory = '/outside-known-projects';
+    const input = args([project([group([node('parent', [child])])])]);
+    input.expandedParents = new Set(['project:active:parent']);
+    input.sessionOwnerById = new Map([['parent', {
+      projectId: 'project-a',
+      projectRoot: '/repo',
+      scopeDirectory: '/repo',
+      kind: 'project',
+    }]]);
+
+    const model = buildSessionSidebarRowModel(input);
+    const childRow = model.rows.find((row) => row.kind === 'session' && row.node.session.id === 'unresolved-child');
+
+    expect(childRow).toMatchObject({ ownerProjectId: null, ownerKey: null, selectionScopeKey: null });
+    expect(model.folderOwnerKeyBySessionId.has('unresolved-child')).toBe(false);
+  });
+
+  test('derives managed Chat folder ownership without a project owner record', () => {
+    const chat = node('chat');
+    chat.session.directory = '/home/.config/openchamber/chats/2026-10-26/session-chat';
+    const input = args([]);
+    input.chatGroup = group([chat], {
+      id: 'managed-chats',
+      directory: '/home/.config/openchamber/chats',
+      folderScopeKey: '/home/.config/openchamber/chats',
+    });
+
+    const model = buildSessionSidebarRowModel(input);
+
+    expect(model.folderOwnerKeyBySessionId.get('chat')).toBe('/home/.config/openchamber/chats');
+  });
+
+  test('does not give an outside child the managed Chat parent owner', () => {
+    const child = node('outside-child');
+    child.session.directory = '/outside-known-projects';
+    const parent = node('chat-parent', [child]);
+    parent.session.directory = '/home/.config/openchamber/chats/2026-10-26/session-parent';
+    const input = args([]);
+    input.chatGroup = group([parent], {
+      id: 'managed-chats',
+      directory: '/home/.config/openchamber/chats',
+      folderScopeKey: '/home/.config/openchamber/chats',
+    });
+    input.expandedParents = new Set(['tree-chat:active:chat-parent']);
+
+    const model = buildSessionSidebarRowModel(input);
+    const childRow = model.rows.find((row) => row.kind === 'session' && row.node.session.id === 'outside-child');
+
+    expect(model.folderOwnerKeyBySessionId.get('chat-parent')).toBe('/home/.config/openchamber/chats');
+    expect(model.folderOwnerKeyBySessionId.has('outside-child')).toBe(false);
+    expect(childRow).toMatchObject({ ownerProjectId: null, ownerKey: null, selectionScopeKey: null });
   });
 
   test('a session in work is in the top block and stays in its project group', () => {
@@ -871,3 +952,12 @@ describe('buildSessionSidebarRowModel', () => {
     expect(buildSessionSidebarRowModel(input).sessionById.get('hidden')?.id).toBe('hidden');
   });
 });
+
+const originalHomeInfo = opencodeClient.getFilesystemHomeInfo;
+opencodeClient.getFilesystemHomeInfo = async () => ({
+  home: '/home',
+  canonicalChatsRoot: '/home/.config/openchamber/chats',
+  canonicalLegacyChatsRoot: '/home/.config/openchamber/chats',
+});
+await ensureChatsRootDirectory();
+opencodeClient.getFilesystemHomeInfo = originalHomeInfo;

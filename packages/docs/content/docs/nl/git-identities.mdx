@@ -28,6 +28,10 @@ Kies de identiteitsknop bovenaan de [Git-weergave](/nl/git/) en kies een identit
 
 Toepassen schrijft de identiteit naar de **lokale** Git-configuratie van de repository. Alleen die repository verandert, uw algemene instelling blijft gelijk. Git in de terminal en de shell van de agent gebruiken haar ook. **Systeemidentiteit** verwijdert wat OpenChamber heeft geschreven, zodat uw eigen Git-configuratie weer geldt.
 
+## Wachtwoordzinnen voor SSH-sleutels
+
+Voer voor een versleutelde SSH-sleutel de optionele wachtwoordzin in voordat je in `~/.ssh` zoekt. Bevestig daarna de vingerafdruk en voeg de sleutel toe. OpenChamber houdt de sleutel versleuteld en slaat de wachtwoordzin op in de referentieopslag van OpenCode. Opgeslagen wachtwoordzinnen werken alleen voor Git-acties in de app. Git-opdrachten in de terminal of van agents halen ze niet op. Een versleutelde beheerde sleutel kan zich via die route dus niet aanmelden.
+
 ## Zie ook
 
 - [Git-workflows](/nl/git/) om met de ingestelde identiteit te committen

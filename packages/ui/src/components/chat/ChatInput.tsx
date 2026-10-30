@@ -9,6 +9,7 @@ import { useConfigStore } from '@/stores/useConfigStore';
 import { filterVisibleAgents } from '@/stores/useAgentsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { isServerOwnedMessageQueue, createMessageQueueTarget, getMessageQueueKey, useMessageQueueStore, type QueuedContextPart, type QueuedMessage, type QueuedMessageGoal } from '@/stores/messageQueueStore';
+import { readEffortRevision } from '@/lib/modelEfforts';
 import { selectAutoReviewRunning, useAutoReviewStore } from '@/stores/useAutoReviewStore';
 import { useSessionGoalArmStore } from '@/stores/useSessionGoalArmStore';
 import { DraftSendError, useSessionUIStore, type NewSessionDraftState } from '@/sync/session-ui-store';
@@ -119,7 +120,8 @@ import { findSessionLinks, sessionLinkKey, type SessionLinkTarget } from '@/lib/
 import { sessionMentionChip } from '@/lib/messages/sessionMentionChip';
 import { appOwnOrigins } from '@/lib/router/appOrigins';
 import type { Session } from '@/lib/opencode/model';
-import { usePendingComposerReferences } from './composer/pendingComposerReferences';
+import { usePendingComposerReferences, resolveComposerReferenceHandoffTarget, type ComposerReferenceHandoff } from './composer/pendingComposerReferences';
+import { readLinkedReferences, useDraftLinkedReferences, useLinkedReferenceDrafts } from './composer/linkedReferenceDrafts';
 import { postTrackerSessionStarted } from '@/lib/trackers/sessionStatus';
 import { trackerPresentation } from '@/lib/trackers/presentation';
 import { useTrackerDescriptors } from '@/lib/trackers/registry';
@@ -643,7 +645,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const setPendingInputText = useInputStore((s) => s.setPendingInputText);
     const pendingGuestIssue = useInputStore((s) => s.pendingGuestIssue);
     const consumePendingGuestIssue = useInputStore((s) => s.consumePendingGuestIssue);
-    const pendingComposerReferenceCount = usePendingComposerReferences((s) => s.references.length);
+    const pendingComposerReferenceCount = usePendingComposerReferences((s) => s.pending.length);
 
     React.useEffect(() => {
         if (!newSessionDraftOpen || newSessionDraft.target !== 'chat' || message.trim().length === 0) return;
@@ -1220,8 +1222,23 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     });
     const mobileComposerExpanded = mobileShell.expanded;
     const mobileTextareaFocused = mobileShell.focused;
-    // Issues, PRs and tracker items on the composer, in attach order.
-    const [linkedReferences, setLinkedReferences] = React.useState<ComposerReference[]>([]);
+    const linkedReferences = useDraftLinkedReferences(chatDraftIdentity);
+    const setLinkedReferencesFor = React.useCallback((
+        target: ChatDraftIdentity | null,
+        references: ComposerReference[],
+    ) => {
+        useLinkedReferenceDrafts.getState().set(references, target);
+    }, []);
+    const updateLinkedReferencesFor = React.useCallback((
+        target: ChatDraftIdentity | null,
+        update: (current: ComposerReference[]) => ComposerReference[],
+    ) => {
+        useLinkedReferenceDrafts.getState().set(update(readLinkedReferences(target)), target);
+    }, []);
+    // UI actions act on the draft on screen now; a send keeps its own target.
+    const updateLinkedReferences = React.useCallback((update: (current: ComposerReference[]) => ComposerReference[]) => {
+        updateLinkedReferencesFor(currentChatDraftIdentityRef.current, update);
+    }, [updateLinkedReferencesFor]);
     const [contextPreviewHost, setContextPreviewHost] = React.useState<HTMLDivElement | null>(null);
     const [attachDialogGuestId, setAttachDialogGuestId] = React.useState<string | null>(null);
     // The chip the attach dialog was opened from; null when opened from the + menu.
@@ -1688,7 +1705,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         if (composerAttachments.length > 0) {
             clearAttachedFiles(chatDraftIdentity);
         }
-        setLinkedReferences([]);
+        setLinkedReferencesFor(chatDraftIdentity, []);
         if (!isMobile) {
             composerRef.current?.focus();
         }
@@ -1730,12 +1747,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 useInputStore.getState().setPendingSyntheticParts(syntheticParts, mailboxTarget);
             }
             // Anything attached while the queue write was out stays, after these.
-            setLinkedReferences((current) => withComposerReferences(linked, current));
+            updateLinkedReferencesFor(chatDraftIdentity, (current) => withComposerReferences(linked, current));
             return;
         }
         void resumeAfterQueue().catch(console.warn);
         recordLinkedReferences(queueSessionId, queueTarget.directory, linked);
-    }, [getCurrentInputSnapshot, currentSessionId, messageQueueTarget, inputMode, hasDrafts, guestCommands, attachedFiles, sanitizeAttachmentsForSend, prepareReadOnSendMentions, extractInlineFileMentions, agents, availableSkills, consumePendingSyntheticParts, mailboxTarget, inlineDraftTarget, consumeDrafts, linkedReferences, scrollToLatest, clearAttachedFiles, chatDraftIdentity, isMobile, isMobileCommentOpen, addToQueue, currentProviderId, currentModelId, currentAgentName, currentVariant, t, readSessionMentionsBeforeSend, sessionMentionsIn]);
+    }, [getCurrentInputSnapshot, currentSessionId, messageQueueTarget, inputMode, hasDrafts, guestCommands, attachedFiles, sanitizeAttachmentsForSend, prepareReadOnSendMentions, extractInlineFileMentions, agents, availableSkills, consumePendingSyntheticParts, mailboxTarget, inlineDraftTarget, consumeDrafts, linkedReferences, scrollToLatest, clearAttachedFiles, chatDraftIdentity, setLinkedReferencesFor, updateLinkedReferencesFor, isMobile, isMobileCommentOpen, addToQueue, currentProviderId, currentModelId, currentAgentName, currentVariant, t, readSessionMentionsBeforeSend, sessionMentionsIn]);
 
     /** Put the context a queued message was captured with back on the composer chips. */
     const restoreQueuedContext = React.useCallback((context: readonly QueuedContextPart[]) => {
@@ -1817,14 +1834,14 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             }
         }
         if (restored.length > 0) {
-            setLinkedReferences((current) => withComposerReferences(current, restored));
+            updateLinkedReferences((current) => withComposerReferences(current, restored));
         }
         rememberSessionMentions(mentions);
         if (synthetic.length > 0) {
             const pending = useInputStore.getState().getPendingSyntheticParts(mailboxTarget) ?? [];
             useInputStore.getState().setPendingSyntheticParts([...pending, ...synthetic], mailboxTarget);
         }
-    }, [inlineDraftTarget, mailboxTarget, rememberSessionMentions]);
+    }, [inlineDraftTarget, mailboxTarget, rememberSessionMentions, updateLinkedReferences]);
 
     // Editing takes the message out of the queue, so sending it again queues
     // one message, not a copy.
@@ -1868,8 +1885,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const repositoryDescriptor = useSourceControlProvider(repositoryProvider);
     const descriptorOf = useSourceControlDescriptorOf();
     const addLinkedReferences = React.useCallback((references: ComposerReference[]) => {
-        setLinkedReferences((current) => withComposerReferences(current, references));
-    }, []);
+        if (isBtwActive) return;
+        // The picker keeps this callback while context loads, including across a session switch.
+        updateLinkedReferencesFor(chatDraftIdentity, (current) => withComposerReferences(current, references));
+    }, [chatDraftIdentity, isBtwActive, updateLinkedReferencesFor]);
     const attachReferences = useAttachReferences(referencePickerDirectory, addLinkedReferences);
 
     const trackerDescriptors = useTrackerDescriptors();
@@ -1901,6 +1920,19 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         // Snapshot the draft and current-session identity before the first
         // async gap so a later sidebar selection cannot reroute the send.
         const capturedDraftSnapshot = newSessionDraftOpen ? { ...newSessionDraft } : null;
+        // Capture the level and its revision together, before mention reads or
+        // any other preparation can yield to a newer picker choice.
+        const queuedProjection = queuedMessageId
+            ? composerQueuedMessages.filter((message) => message.id === queuedMessageId)
+            : composerQueuedMessages;
+        const capturedSendConfig = queuedOnly ? queuedProjection[0]?.sendConfig : undefined;
+        const providerIdToSend = capturedSendConfig?.providerID ?? (isBtwActive ? effectiveBtwSelection.model?.providerId : currentProviderId);
+        const modelIdToSend = capturedSendConfig?.modelID ?? (isBtwActive ? effectiveBtwSelection.model?.modelId : currentModelId);
+        const agentNameToSend = capturedSendConfig?.agent ?? (isBtwActive ? effectiveBtwSelection.agent : currentAgentName);
+        const variantToSend = capturedSendConfig?.variant ?? (isBtwActive ? effectiveBtwSelection.variant : currentVariant);
+        const effortRevision = providerIdToSend && modelIdToSend
+            ? readEffortRevision(providerIdToSend, modelIdToSend)
+            : undefined;
         // Magic prompts come from the directory this send lands in, routed the
         // way sendMessage routes it: the /btw fork, the session, else the
         // draft. A new chat has no folder yet and reads the global prompts.
@@ -2015,18 +2047,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 : t('chat.chatInput.toast.guestCommandUnavailable', { name: guestRoute.entry.guestName }));
             return;
         }
-
-        // The projection knows the captured send configuration; the full
-        // messages are taken from the queue only once nothing below can still
-        // bail out, so an early return leaves the queue untouched.
-        const queuedProjection = queuedMessageId
-            ? composerQueuedMessages.filter((message) => message.id === queuedMessageId)
-            : composerQueuedMessages;
-        const capturedSendConfig = queuedOnly ? queuedProjection[0]?.sendConfig : undefined;
-        const providerIdToSend = capturedSendConfig?.providerID ?? (isBtwActive ? effectiveBtwSelection.model?.providerId : currentProviderId);
-        const modelIdToSend = capturedSendConfig?.modelID ?? (isBtwActive ? effectiveBtwSelection.model?.modelId : currentModelId);
-        const agentNameToSend = capturedSendConfig?.agent ?? (isBtwActive ? effectiveBtwSelection.agent : currentAgentName);
-        const variantToSend = capturedSendConfig?.variant ?? (isBtwActive ? effectiveBtwSelection.variant : currentVariant);
 
         // The isolated space the message targets, if any: a session by its directory, a draft by
         // the creation request it still waits on or by its directory.
@@ -2155,7 +2175,15 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 } else if (actionName === 'compact') {
                     await sessionActions.waitForConnectionOrThrow();
                     const compactDirectory = useSessionUIStore.getState().getDirectoryForSession(currentSessionId) || currentDirectory || undefined;
-                    await opencodeClient.compactSession(currentSessionId, compactDirectory);
+                    // Compaction belongs to the main session, including its
+                    // model and effort while BTW owns the composer.
+                    await sessionActions.compactSession(
+                        currentSessionId,
+                        currentProviderId && currentModelId
+                            ? { providerID: currentProviderId, modelID: currentModelId, variant: currentVariant }
+                            : null,
+                        compactDirectory,
+                    );
                 }
             } catch (error) {
                 restoreComposerText();
@@ -2181,6 +2209,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             delivery?: 'steer';
             skills?: SkillMentions;
             queuedGoal?: QueuedMessageGoal | null;
+            recordEffort?: boolean;
+            effortRevision?: number;
         } | undefined;
         if (isBtwActive && btwSessionId && btwDirectory) {
             sendMessageOptions = {
@@ -2194,7 +2224,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             if (capturedDraftSnapshot) sendMessageOptions.draftSnapshot = capturedDraftSnapshot;
         }
         if (delivery && sendMessageOptions) sendMessageOptions.delivery = delivery;
-        sendMessageOptions = { ...sendMessageOptions, userInitiated: true };
+        // BTW and queued-only sends carry their own saved configuration and
+        // leave the main composer's remembered level alone.
+        sendMessageOptions = { ...sendMessageOptions, userInitiated: true, recordEffort: !isBtwActive && !queuedOnly, effortRevision };
 
         // Queued messages resolved their mentions when they were queued; only
         // the composer's own text can still name a file to read.
@@ -2530,10 +2562,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 }
             }
 
-            // The sent references leave the composer; one attached while the
-            // send was out stays for the next message.
+            // Clear only the draft captured by this send; newly attached references stay.
             const sentKeys = new Set(linkedReferences.map(composerReferenceKey));
-            setLinkedReferences((current) => current.filter((reference) => !sentKeys.has(composerReferenceKey(reference))));
+            updateLinkedReferencesFor(chatDraftIdentity, (current) => current.filter((reference) => !sentKeys.has(composerReferenceKey(reference))));
         }).catch((error: unknown) => {
             const rawMessage =
                 error instanceof Error
@@ -2568,6 +2599,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 clearChatDraft(failedSessionIdentity);
             }
             const restoreTarget = (failedDraftSend?.sessionCreated ? failedSessionIdentity : null) ?? chatDraftIdentity;
+            if (failedDraftSend?.sessionCreated) {
+                useLinkedReferenceDrafts.getState().move(chatDraftIdentity, restoreTarget);
+            }
             restoreComposerText(restoreTarget);
 
             const isSoftNetworkError =
@@ -4101,6 +4135,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         setAttachDialogGuestId(issue.providerId);
     }, [currentDirectory, guestAttachItems, t]);
     const handleGuestAttach = React.useCallback((issue: AttachIssueRequest) => {
+        if (isBtwActive) return;
         const contextText = issue.text
             ?? `Attached ${issue.providerId} ${issue.id}: ${issue.title}\n${issue.url}`;
         const reference: ComposerReference = {
@@ -4116,29 +4151,39 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             base: issue.branches?.base,
             data: issue.data,
         };
-        setLinkedReferences((current) => withComposerReferences(current, [reference]));
+        updateLinkedReferences((current) => withComposerReferences(current, [reference]));
         setAttachDialogGuestId(null);
         setAttachDialogItem(null);
         // A message or session action may have opened the guest in the
         // layout-level dialog; attaching from there closes it the same way.
         useGuestDialogStore.getState().close();
-    }, []);
+    }, [isBtwActive, updateLinkedReferences]);
     React.useEffect(() => {
-        if (!pendingGuestIssue || columnPinned) {
+        if (!pendingGuestIssue || columnPinned || isBtwActive) {
             return;
         }
         const issue = consumePendingGuestIssue();
         if (issue) {
             handleGuestAttach(issue);
         }
-    }, [columnPinned, consumePendingGuestIssue, handleGuestAttach, pendingGuestIssue]);
+    }, [columnPinned, consumePendingGuestIssue, handleGuestAttach, isBtwActive, pendingGuestIssue]);
+    const composerReferenceHandoffTarget = React.useMemo<ComposerReferenceHandoff | null>(() => (
+        resolveComposerReferenceHandoffTarget({
+            columnPinned,
+            btwActive: isBtwActive,
+            currentSessionId,
+            draftOpen: newSessionDraftOpen,
+            workDraftId: newSessionDraft?.workDraftId ?? null,
+            runtimeKey: activeRuntimeKey,
+        })
+    ), [activeRuntimeKey, columnPinned, currentSessionId, isBtwActive, newSessionDraft?.workDraftId, newSessionDraftOpen]);
     React.useEffect(() => {
-        if (pendingComposerReferenceCount === 0 || columnPinned) return;
-        const references = usePendingComposerReferences.getState().consume();
+        if (pendingComposerReferenceCount === 0 || !composerReferenceHandoffTarget) return;
+        const references = usePendingComposerReferences.getState().consume(composerReferenceHandoffTarget);
         if (references.length > 0) {
-            setLinkedReferences((current) => withComposerReferences(current, references));
+            updateLinkedReferences((current) => withComposerReferences(current, references));
         }
-    }, [columnPinned, pendingComposerReferenceCount]);
+    }, [composerReferenceHandoffTarget, pendingComposerReferenceCount, updateLinkedReferences]);
     // Only signed-in trackers are offered; connecting one happens in Settings.
     const trackerPickers = React.useMemo<readonly ComposerTrackerPicker[]>(() => (
         !isVSCode
@@ -4364,7 +4409,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         <div className="flex flex-wrap items-center gap-2 pt-2">
             {linkedReferences.map((reference) => {
                 const key = composerReferenceKey(reference);
-                const remove = () => setLinkedReferences((current) => withoutComposerReference(current, key));
+                const remove = () => updateLinkedReferences((current) => withoutComposerReference(current, key));
                 switch (reference.kind) {
                     case 'repository-issue':
                         return (
@@ -4965,6 +5010,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                                     className="flex-1 min-w-0"
                                     sessionId={btwComposerSessionId}
                                     selection={effectiveBtwSelection}
+                                    rememberVariantPicks={false}
                                 />
                             </div>
                         ) : null}

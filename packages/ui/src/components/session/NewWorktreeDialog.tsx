@@ -24,6 +24,7 @@ import { ProviderIcon } from '@/components/sourceControl/ProviderIcon';
 import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { getRuntimeKey } from '@/lib/runtime-switch';
 import { validateWorktreeCreate } from '@/lib/worktrees/worktreeManager';
 import { createWorktreeWithDefaults } from '@/lib/worktrees/worktreeCreate';
 import { waitForWorktreeBootstrap } from '@/lib/worktrees/worktreeBootstrap';
@@ -404,6 +405,9 @@ export function NewWorktreeDialog({
       useInputStore.getState().setPendingGuestIssue(item.guest);
       return;
     }
+    const draft = useSessionUIStore.getState().newSessionDraft;
+    if (!draft.open || !draft.workDraftId) return;
+    const target = { kind: 'draft', workDraftId: draft.workDraftId, runtimeKey: getRuntimeKey() } as const;
     void resolveComposerReferences([item.selection], {
       sourceControl,
       context: item.kind === 'pr' ? item.context : (repositoryContext && repositoryContext !== 'missing' ? repositoryContext : null),
@@ -412,7 +416,9 @@ export function NewWorktreeDialog({
         : Promise.reject(new Error('Trackers are not available here'))),
       trackerName: (provider) => readTrackerDescriptor(provider).name,
     }).then(({ references, failures }) => {
-      if (references.length > 0) usePendingComposerReferences.getState().push(references);
+      if (references.length > 0) {
+        usePendingComposerReferences.getState().push(references, target);
+      }
       const failure = failures[0];
       if (failure) {
         toast.error(t('session.newWorktree.error.attachLinkedFailed', { item: failure.label }), { description: failure.error });

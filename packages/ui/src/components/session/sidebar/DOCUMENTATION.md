@@ -231,6 +231,12 @@ no Shift.
   history read costs mobile data, and its list never did.
 
 
+### Why project trees resolve lineage globally
+
+The shared project tree checks parent presence against the global active and archived cache plus the merged active session list. Child expansion uses the lifecycle-ordered global graph. A child whose parent is known renders only beneath that parent, even when its own directory belongs to another project or worktree. An archived parent or intermediate never allows an active descendant to become an independent root. Project buckets contain roots only, so children do not consume root pagination or make a child-only worktree expandable. Temporary `/btw` forks and archived children remain hidden. Selection still uses each session's own directory. VS Code applies the same rule after its exact workspace filter.
+
+Bucket-local lineage promoted cross-project subagents to independent rows and left their parent without an expansion control. The missing-parent fallback applies only while both active and archived sources lack the parent, and clears when either parent arrives. The project-section cache tracks each project's visible ancestors and descendants, including their order and record identity, so a lineage or same-ID semantic change rebuilds the affected trees without replacing unrelated project sections.
+
 Both project display modes use `projects/CrossfadeZoneHeaders.tsx` for sticky
 zone headers. The live header keeps one portal host as it moves between its
 virtual row placeholder and a stationary layer inside the native scroller,
@@ -966,6 +972,15 @@ matching and ordering. Search does not fetch sessions or broaden list membership
   folder that accepts drops (`SessionFolderOwnersProvider`): a drag with
   nowhere to land swallowed the click that started it when the mouse moved
   8 px during the press.
+  A cross-project child keeps its display parent, while its folder menu, drag
+  payload, bulk-selection scope and Tracker links use the authoritative owner
+  of the child's own directory. The drop action resolves the current row
+  occurrence and checks that owner again before any folder write; a rejected
+  cross-owner or stale-row drop changes no memberships. Bulk folder actions
+  require a resolved owner for every selected session, including managed Chats
+  resolved from their chat root. Once resolved, folder actions include only
+  sessions owned by the selection scope: a foreign descendant automatically
+  included by subtree selection or Select all keeps its own folder memberships.
 - Session rows allow vertical touch panning before the long-press drag activates.
   The TouchSensor owns movement only after activation; disabling touch panning on
   the whole row prevents quick swipes from scrolling even when no drag starts.

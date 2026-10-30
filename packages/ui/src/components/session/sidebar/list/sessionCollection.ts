@@ -182,24 +182,9 @@ const buildSidebarSessionStructure = ({
     .filter((session) => isKnownActiveSessionDirectory(session, knownDirectoryKeys, isVSCode));
   const sessions = [...projectSessions, ...partition.chatSessions];
   const sessionById = new Map(sessions.map((session) => [session.id, session]));
-  const projectSessionIds = new Set(projectSessions.map((session) => session.id));
-  const nestingParentOf = nestingParentResolver(sessionById);
-  const indexedRootIds = globalStructure?.activeRootIds ?? [];
-  const indexedRootIdSet = new Set(indexedRootIds);
-  const rootSessions = [
-    ...indexedRootIds.flatMap((sessionId) => {
-      if (!projectSessionIds.has(sessionId)) return [];
-      const session = sessionById.get(sessionId);
-      return session && !nestingParentOf(session) ? [session] : [];
-    }),
-    ...projectSessions.filter((session) => (
-      !indexedRootIdSet.has(session.id) && !nestingParentOf(session)
-    )),
-  ];
   return {
     chatSessionIds: new Set(partition.chatSessions.map((session) => session.id)),
     projectSessions,
-    rootSessions,
     sessionById,
     sessions,
     hierarchy: globalStructure ? {
@@ -251,9 +236,10 @@ export const buildSidebarSessionProjection = ({
     isVSCode,
   });
   const ordering = orderSidebarSessionStructure(structure, pinnedSessionIds, sessionOrderRanks);
+  const projectSessionIds = new Set(structure.projectSessions.map((session) => session.id));
   return {
     ...ordering,
-    projectSessions: structure.projectSessions,
+    projectSessions: ordering.orderedSessions.filter((session) => projectSessionIds.has(session.id)),
     sessionById: structure.sessionById,
   };
 };
@@ -307,12 +293,6 @@ export const useSessionProjectCollection = ({
     [pinnedSessionIds, sessionOrderRanks, structure],
   );
   const { chatSessions, orderedSessions } = ordering;
-  // Sessions a row nests under another one: they are never roots of their own.
-  const nestedSessionIds = React.useMemo(
-    () => new Set([...ordering.childrenMap.values()].flat().map((session) => session.id)),
-    [ordering.childrenMap],
-  );
-  const sessions = structure.projectSessions;
   const sessionById = React.useMemo(() => new Map(
     [...structure.sessions, ...archivedSessions].map((session) => [session.id, session]),
   ), [archivedSessions, structure.sessions]);
@@ -329,6 +309,29 @@ export const useSessionProjectCollection = ({
     }
     return children;
   }, [archivedSessions, ordering.childrenMap]);
+  // A missing parent may temporarily leave its child as a root. Once either
+  // the active or archived cache supplies that parent, the child is no longer
+  // a root in its own project bucket.
+  const nestedSessionIds = React.useMemo(() => {
+    const nested = new Set<string>();
+    for (const [parentId, children] of childrenMap) {
+      if (!sessionById.has(parentId)) continue;
+      for (const child of children) nested.add(child.id);
+    }
+    return nested;
+  }, [childrenMap, sessionById]);
+  const projectSessionIds = React.useMemo(
+    () => new Set(structure.projectSessions.map((session) => session.id)),
+    [structure.projectSessions],
+  );
+  const sessions = React.useMemo(
+    () => orderedSessions.filter((session) => projectSessionIds.has(session.id)),
+    [orderedSessions, projectSessionIds],
+  );
+  const rootSessions = React.useMemo(
+    () => sessions.filter((session) => !nestedSessionIds.has(session.id)),
+    [nestedSessionIds, sessions],
+  );
   const getDescendantIdsForAction = React.useCallback(
     (sessionId: string, options: { includeArchived: boolean }) => getDescendantIds(childrenMap, sessionId)
       .filter((id) => options.includeArchived || !sessionById.get(id)?.time?.archived),
@@ -346,7 +349,7 @@ export const useSessionProjectCollection = ({
     pinnedSessionIds,
     sessionOrderRanks,
     sessions,
-    rootSessions: structure.rootSessions,
+    rootSessions,
     sessionById,
   };
 };

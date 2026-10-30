@@ -676,9 +676,24 @@ command can leave the queue untouched and delivery can take only part of it.
   no instructions guess what the user wants from it (the PR review
   instructions were removed); a queued message captured before that still
   delivers its `instructions` part first. A flow outside the composer hands
-  references to the next draft through `pendingComposerReferences.ts`
-  (New Worktree does), which `ChatInput` consumes into its chips; a draft's
-  first send with a tracker item attached posts that tracker's session-started
+  references to a named session or draft through `pendingComposerReferences.ts`
+  (New Worktree and the source board do); `ChatInput` consumes only the entries
+  addressed to the draft it shows, and keeps the chips per draft in
+  `linkedReferenceDrafts.ts` keyed by `chatDraftIdentity`. One `ChatInput` stays
+  mounted across a session switch, so component-level chips followed the next
+  session and were linked there (#5706); a draft's chips must outlive the
+  composer showing another draft. A pinned column and an expanded `/btw` panel
+  take no handoff: neither is the main draft, and a chip written there would be
+   stranded. The entry waits for the main composer. Picker confirmation captures
+   its draft identity before loading context. New Worktree likewise captures its
+   opened draft before the read; an unnamed draft never takes a handoff.
+   Draft handoffs use the runtime and stable `workDraftId`, so reopening a saved
+   draft can receive context that finished loading after navigation away.
+   A failed first send that created its session moves the draft's chips into
+   that session for retry, merging chips attached while the request ran.
+   Guest attaches are rejected in expanded `/btw`, and pending guest items wait
+   for the normal composer before being consumed. A draft's first send with a
+  tracker item attached posts that tracker's session-started
   status (`lib/trackers/sessionStatus.ts`), for a tracker whose descriptor
   offers `sessionComments`. Tracker chips are `tracker-item` references keyed
   `${provider}:${IDENTIFIER}`; a queued or restored message from before
@@ -743,7 +758,14 @@ command can leave the queue untouched and delivery can take only part of it.
   instead. `/fork [text]` (`submit/forkCommand.ts`) forks after the last
   finished turn (a running turn and its completed steps are skipped and left
   running), opens the fork, and sends the text there; a failed fork restores
-  the command, a failed send puts the text into the fork's composer. A failed prompt command restores everything it consumed: text,
+  the command, a failed send puts the text into the fork's composer. `/compact`
+  switches the session to its main-chat model and reasoning effort selection
+  first when either differs from the session record, then compacts; a failed
+  switch compacts nothing and restores the command. An open BTW keeps its own
+  model and effort separate: `/compact` still uses the main session's selection.
+  An Auto pick leaves the
+  session as it is, because compaction carries no prompt for the router to
+  resolve from. A failed prompt command restores everything it consumed: text,
   confirmed mentions, files, comment drafts, and pending synthetic context.
 - `state/useComposerDraft.ts` — a draft belongs to a (runtime, directory,
   session) identity. Writes are debounced while typing but forced at every edge
@@ -756,7 +778,7 @@ command can leave the queue untouched and delivery can take only part of it.
   (`ChatInput` passes the id). A session moved to another directory (the
   sidebar's move actions, an agent's `session_move`) keeps its session id
   while its directory changes. Either switch moves the draft: its attached
-  files and non-empty text go to the new directory, the old directory's text
+   files, linked reference chips and non-empty text go to the new directory, the old directory's text
   is cleared, and confirmed mentions are dropped because they name the old
   directory's files. A draft already saved for the new directory stays above
   the moved text, and the moved text is not selected as a restored draft.
@@ -1020,7 +1042,10 @@ one app-wide composer state is split per column:
   agent. Its picker is `ModelControls` in controlled mode with
   `agentSelectable`, so the agent pick is saved for the session and never
   changes the main chat's agent. "Run in parallel" is offered only in the main
-  chat.
+  chat. Picker changes record the chosen level for that model in the profile
+  immediately, and a successful send records the level it carried; a later
+  composer on the same model starts there when neither the session nor the
+  model's configuration names a level.
 - **Attachments.** Each draft's files live under its draft identity in the
   input store, and `useDraftAttachedFiles(identity)` shows a composer its own
   files. The selected slot (`attachedFiles`) belongs to the composer the user
@@ -1387,6 +1412,21 @@ Shift only while a hardware keyboard is attached: iOS autocapitalization reports
 a phantom Shift at sentence starts, so a soft-keyboard Send always submits, while
 a hardware Shift+Enter still inserts a newline. Alt/Option+Enter inserts a
 newline, and Ctrl/Cmd+Enter is unchanged.
+
+### Why IME cleanup requires DOM padding evidence
+
+On iOS in Send mode, Sogou's long press can commit a newline followed by a
+padding space and a cleanup Backspace. If the padding reaches only the DOM,
+CodeMirror's replayed Backspace can delete the document's newline.
+`editor/imeNewline.ts` consumes one deletion only after observing a DOM line
+with exactly one extra leading space and a native caret after that space.
+The mark belongs to the specific native newline insertion and expires after
+400 ms. Other input, document edits, selection changes, pointer interaction,
+blur and Enter clear it. Padding already in the document uses normal deletion.
+The extension lives in the return-key compartment, enabled only for iOS Send
+mode; switching to Return removes it. A time window alone would swallow an
+ordinary Backspace. With confirmed padding, a user's Backspace within the same
+window is still indistinguishable from the keyboard's cleanup.
 
 The expanded desktop composer always inserts a newline with Enter, Shift+Enter
 and Alt/Option+Enter, and sends with Ctrl/Cmd+Enter; it ignores the Enter-to-send

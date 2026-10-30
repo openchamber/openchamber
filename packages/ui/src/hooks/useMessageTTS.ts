@@ -11,13 +11,11 @@ import { useServerTTS } from './useServerTTS';
 import { useSayTTS } from './useSayTTS';
 import { useLocalTTS } from './useLocalTTS';
 import { browserVoiceService } from '@/lib/voice/browserVoiceService';
+import { startFocusedReading } from '@/lib/voice/readingAudioFocus';
 import { ensureLineTerminalPunctuation, sanitizeForTTS } from '@/lib/voice/summarize';
 import { requestSmallModel } from '@/lib/smallModelRequest';
 import {
-    createReadingPlaybackGuard,
-    finishReading,
     isCurrentReading,
-    startReading,
     stopActiveReading,
     stopReadingUnderKey,
     useIsReading,
@@ -134,10 +132,8 @@ export function useMessageTTS(readingKey?: string): UseMessageTTSReturn {
     const play = useCallback(async (text: string, options?: PlayMessageTTSOptions) => {
         if (!text.trim()) return;
         
-        const token = startReading(key, stopPlayback);
+        const { token, finish, beforePlayback } = startFocusedReading(key, stopPlayback, options?.canStart);
         ownTokenRef.current = token;
-        const finish = () => finishReading(token);
-        const beforePlayback = createReadingPlaybackGuard(token, options?.canStart);
         
         try {
             // Summarized mode: replace long replies with a short spoken-prose
@@ -217,6 +213,7 @@ export function useMessageTTS(readingKey?: string): UseMessageTTSReturn {
                         volume: speechVolume,
                         voiceName: browserVoice || undefined,
                         beforePlayback,
+                        onError: finish,
                     }
                 );
             }

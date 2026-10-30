@@ -1,7 +1,8 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { SETTINGS_HELPER_CLASS, SettingsCheckboxRow } from '../shared/SettingsSection';
+import { SETTINGS_HELPER_CLASS, SettingsCheckboxRow, SettingsStackedField } from '../shared/SettingsSection';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
@@ -41,6 +42,7 @@ export function ManagedSshCredentials({ selection, disabled = false }: {
   const [state, setState] = React.useState<InventoryState>(initialState);
   const [hostSetup, setHostSetup] = React.useState(false);
   const [confirmedCandidateId, setConfirmedCandidateId] = React.useState('');
+  const [passphrase, setPassphrase] = React.useState('');
   const generation = React.useRef(0);
   const onSelectionChange = selection?.onChange;
   React.useLayoutEffect(() => {
@@ -49,6 +51,7 @@ export function ManagedSshCredentials({ selection, disabled = false }: {
       setState(initialState());
       setHostSetup(false);
       setConfirmedCandidateId('');
+      setPassphrase('');
     };
     // Mounting keeps the identity's saved key; only a runtime switch makes it
     // name a key on another machine, so only that clears it.
@@ -94,13 +97,12 @@ export function ManagedSshCredentials({ selection, disabled = false }: {
       }
       setConfirmedCandidateId('');
       selection?.onChange(result.selectedCredential.credentialId);
-      const importedCandidateId = intent.operation === 'import' ? intent.candidateId : '';
+      setPassphrase('');
       setState((current) => ({
         ...current,
         status: 'ready',
         credentials: result.credentials,
-        candidates: current.candidates.filter((candidate) => !('candidateId' in candidate)
-          || candidate.candidateId !== importedCandidateId),
+        candidates: [],
         truncated: false,
         discoveryAttempted: false,
         imported: true,
@@ -159,7 +161,19 @@ export function ManagedSshCredentials({ selection, disabled = false }: {
 
   // The editor draws the field's label; this is the control column of its row.
   return <div className="flex min-w-0 flex-1 flex-col gap-2">
-    <div className="flex min-w-0 flex-wrap items-center gap-2">
+    <SettingsStackedField label={t('settings.sourceControl.ssh.passphrase')}
+      info={t('settings.sourceControl.ssh.passphraseHint')}>
+      <Input type="password" value={passphrase} autoComplete="off" maxLength={1024} className="h-8 rounded-md px-3"
+        aria-label={t('settings.sourceControl.ssh.passphrase')} disabled={controlsDisabled}
+        onChange={(event) => {
+          setPassphrase(event.target.value);
+          setConfirmedCandidateId('');
+          setState((current) => ({ ...current, candidates: [], discoveryAttempted: false }));
+        }} />
+    </SettingsStackedField>
+    {/* Keep actions on the same line as the disabled stand-in. Long selected
+        fingerprints truncate within the remaining width instead of wrapping actions. */}
+    <div className="flex min-w-0 items-center gap-2">
       <Select value={selection.value} onValueChange={selection.onChange} disabled={disabled || state.status !== 'ready'}>
         <SelectTrigger className="min-w-0 max-w-full" aria-label={t('settings.sourceControl.ssh.title')}>
           <SelectValue placeholder={t('settings.sourceControl.ssh.title')}>
@@ -174,11 +188,11 @@ export function ManagedSshCredentials({ selection, disabled = false }: {
       {/* The list loads as the editor opens; this only brings it back after
           a failed read or a runtime switch. */}
       {state.status === 'idle' || state.status === 'error' ? (
-        <Button size="sm" variant="outline" disabled={controlsDisabled} onClick={() => void send({ operation: 'inventory' })}>
+        <Button size="sm" variant="outline" className="shrink-0" disabled={controlsDisabled} onClick={() => void send({ operation: 'inventory' })}>
           {t('settings.sourceControl.ssh.load')}
         </Button>
       ) : null}
-      <Button size="sm" variant="outline" disabled={controlsDisabled} onClick={() => void send({ operation: 'discover' })}>
+      <Button size="sm" variant="outline" className="shrink-0" disabled={controlsDisabled} onClick={() => void send({ operation: 'discover', passphrase: passphrase || undefined })}>
         {t('settings.sourceControl.ssh.discover')}
       </Button>
     </div>
@@ -195,7 +209,8 @@ export function ManagedSshCredentials({ selection, disabled = false }: {
           ariaLabel={t('settings.sourceControl.ssh.confirmFingerprint', { fingerprint: candidate.fingerprint })}
         />
         <Button size="sm" variant="default" disabled={disabled || state.status === 'loading' || confirmedCandidateId !== candidate.candidateId}
-          onClick={() => void send({ operation: 'import', candidateId: candidate.candidateId, expectedFingerprint: candidate.fingerprint, confirmed: true })}>
+          onClick={() => void send({ operation: 'import', candidateId: candidate.candidateId, expectedFingerprint: candidate.fingerprint, confirmed: true,
+            passphrase: passphrase || undefined })}>
           {t('settings.sourceControl.ssh.import')}
         </Button>
       </div> : <p key={`${candidate.label}-${index}`} className={SETTINGS_HELPER_CLASS}>

@@ -1,6 +1,7 @@
 import { getActiveRelayTunnel } from './relay/runtime-tunnel';
 import { TUNNEL_PARSE_BASE } from './relay/tunnel-payloads';
-import { buildRuntimeAuthHeaders } from './runtime-auth';
+import { buildRuntimeAuthHeaders, getRuntimeExtraHeadersSync } from './runtime-auth';
+import { isCapacitorApp } from './platform';
 import { observeRuntimeAuthResponse } from './runtime-auth-expiry';
 import { getRuntimeUrlResolver, type RuntimeUrlQuery } from './runtime-url';
 import { spaceDirectoryHeaders } from './spaces/space-route';
@@ -168,6 +169,12 @@ const shouldAttachRuntimeAuth = (input: string | URL | Request): boolean => {
     return false;
   }
 };
+
+// Redirects can forward custom credentials outside the configured address.
+const mobileRedirectPolicy = (input: string | URL | Request, init?: RequestInit): RequestInit | undefined =>
+  Object.keys(getRuntimeExtraHeadersSync()).length > 0 && isCapacitorApp() && shouldAttachRuntimeAuth(input)
+    ? { ...init, redirect: 'error' }
+    : init;
 
 // Headers API only accepts ISO-8859-1 (Latin-1) characters. Any value containing
 // characters outside \u0000-\u00FF causes "Failed to construct/set 'Headers':
@@ -350,9 +357,10 @@ export const runtimeFetch = async (rawInput: string | URL | Request, init: Runti
       : resolvedInput instanceof URL ? resolvedInput.toString()
       : String(resolvedInput);
     addRuntimeProxyHeaders(resolvedUrl, headers);
+    const networkInit = mobileRedirectPolicy(resolvedInput, { ...requestInit, headers });
     doFetch = resolvedInput instanceof Request
-      ? () => fetch(new Request(resolvedInput, { ...requestInit, headers }))
-      : () => fetch(resolvedInput, { ...requestInit, headers });
+      ? () => fetch(new Request(resolvedInput, networkInit))
+      : () => fetch(resolvedInput, networkInit);
     scopeHeaders = headers;
     url = resolvedUrl;
     method = String(
@@ -401,8 +409,10 @@ export const installRuntimeFetchBridge = (): void => {
   if (runtimeFetchBridgeInstalled || typeof window === 'undefined') return;
   runtimeFetchBridgeInstalled = true;
 
-  const nativeFetch = window.fetch.bind(window);
-  fetchBypassingRuntimeBridgeImpl = nativeFetch;
+  const originalFetch = window.fetch.bind(window);
+  fetchBypassingRuntimeBridgeImpl = originalFetch;
+  const nativeFetch = (input: RequestInfo | URL, init?: RequestInit): Promise<Response> =>
+    originalFetch(input, mobileRedirectPolicy(input, init));
   window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const relayResponse = await tryRelayFetch(input, init ?? {});
     if (relayResponse) return relayResponse;

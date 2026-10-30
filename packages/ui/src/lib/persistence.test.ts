@@ -150,6 +150,7 @@ const resetModelPrefsState = (): void => {
     recentAgents: [],
     favoriteAgents: [],
     recentEfforts: {},
+    lastUsedEfforts: {},
   });
 };
 
@@ -832,6 +833,7 @@ describe('updateDesktopSettings', () => {
       recentModels: [{ providerID: 'google', modelID: 'gemini-pro' }],
       recentAgents: ['build', 'plan'],
       recentEfforts: { 'anthropic/claude-haiku-4': ['high', 'default'] },
+      lastUsedEfforts: { 'anthropic/claude-haiku-4': 'high', 'openai/gpt-5': null },
       draftStartersCraftGoalAdded: true, draftStartersScheduleTaskAdded: true,
     } satisfies SettingsPayload;
     registerSettingsApi(async () => ({}), async () => ({ settings, source: 'web' }));
@@ -845,6 +847,7 @@ describe('updateDesktopSettings', () => {
     expect(state.recentModels).toEqual(settings.recentModels);
     expect(state.recentAgents).toEqual(settings.recentAgents);
     expect(state.recentEfforts).toEqual(settings.recentEfforts);
+    expect(state.lastUsedEfforts).toEqual(settings.lastUsedEfforts);
   });
 
   test('applies the persisted terminal shell from server settings', async () => {
@@ -882,6 +885,7 @@ describe('updateDesktopSettings', () => {
         recentAgents: ['build'],
         favoriteAgents: ['plan'],
         recentEfforts: { 'openai/gpt-5': ['low'] },
+        lastUsedEfforts: { 'openai/gpt-5': 'low', 'openai/gpt-5-mini': null },
       });
 
       await delay(1500);
@@ -895,6 +899,7 @@ describe('updateDesktopSettings', () => {
         recentAgents: ['build'],
         favoriteAgents: ['plan'],
         recentEfforts: { 'openai/gpt-5': ['low'] },
+        lastUsedEfforts: { 'openai/gpt-5': 'low', 'openai/gpt-5-mini': null },
         customProviderIcons: {},
       });
     } finally {
@@ -923,6 +928,7 @@ describe('updateDesktopSettings', () => {
         recentAgents: [],
         favoriteAgents: [],
         recentEfforts: {},
+        lastUsedEfforts: {},
         customProviderIcons: {},
       }]);
     } finally {
@@ -1528,6 +1534,7 @@ describe('unload lifecycle flush (#2197)', () => {
         recentAgents: [],
         favoriteAgents: [],
         recentEfforts: {},
+        lastUsedEfforts: {},
         customProviderIcons: {},
       }]);
     } finally {

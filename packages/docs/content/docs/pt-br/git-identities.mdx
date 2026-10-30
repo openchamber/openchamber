@@ -28,6 +28,10 @@ Escolha o botão de identidade no topo do [painel Git](/pt-br/git/) e selecione 
 
 Aplicar uma identidade a escreve na configuração git **local** daquele repositório, então afeta só aquele repositório e sua configuração global fica como está. O Git no terminal e o shell do agente também a usam. **Identidade do sistema** remove o que o OpenChamber escreveu, e sua própria configuração do Git volta a valer.
 
+## Senhas de chaves SSH
+
+Para uma chave SSH criptografada, digite a senha opcional antes de buscar em `~/.ssh`. Depois, confirme a impressão digital e adicione a chave. O OpenChamber mantém a chave criptografada e salva a senha no armazenamento de credenciais do OpenCode. As senhas salvas funcionam apenas nas ações do Git no aplicativo. Comandos do Git no terminal ou executados por agentes não as recuperam, portanto uma chave gerenciada criptografada não pode se autenticar por esse caminho.
+
 ## Relacionado
 
 - [Fluxos de Git](/pt-br/git/): faça commit usando a identidade que você definiu

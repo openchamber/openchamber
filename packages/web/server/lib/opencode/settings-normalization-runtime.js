@@ -210,6 +210,9 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
       const resolvedPath = rawPath ? safeRealpathSync(path.resolve(normalizeDirectoryPath(rawPath))) : '';
       const normalizedPath = resolvedPath ? normalizePathForPersistence(resolvedPath, { resolveRealpath: false }) : '';
       const label = typeof candidate.label === 'string' ? candidate.label.trim() : '';
+      const labelSource = candidate.labelSource === 'manual' || candidate.labelSource === 'auto'
+        ? candidate.labelSource
+        : '';
       const icon = typeof candidate.icon === 'string' ? candidate.icon.trim() : '';
       const iconImage = candidate.iconImage && typeof candidate.iconImage === 'object'
         ? candidate.iconImage
@@ -245,6 +248,8 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
         ...(Number.isFinite(addedAt) && addedAt >= 0 ? { addedAt } : {}),
         ...(Number.isFinite(lastOpenedAt) && lastOpenedAt >= 0 ? { lastOpenedAt } : {}),
       };
+
+      if (label && labelSource) project.labelSource = labelSource;
 
       if (candidate.iconImage === null) {
         project.iconImage = null;

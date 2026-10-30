@@ -8,11 +8,11 @@
  * visible in a shared schema.
  */
 export const OPENCHAMBER_CONTROL_ACTION_DEFINITIONS = Object.freeze([
-  { action: 'projects.list', title: 'List configured projects', description: 'No parameters' },
+  { action: 'projects.list', title: 'List session destinations', description: 'Projects and Chats; use an id as projectId for session.create. No parameters' },
   { action: 'models.list', title: 'Show model preferences', description: 'Default, favorite and recent models; no parameters' },
   { action: 'models.search', title: 'Search models', description: 'The model catalog, favorites and recent models first; optional query, provider, all, limit, offset' },
   { action: 'session.list', title: 'List sessions', description: 'Optional limit, all, withStatus' },
-  { action: 'session.create', title: 'Create a session', description: 'In this directory by default; prompt optional' },
+  { action: 'session.create', title: 'Create a session', description: 'In this directory by default; projectId from projects.list selects a project or openchamber:chats for a new Chat. Use the returned directory for later session actions. Prompt optional' },
   { action: 'session.send', title: 'Send a prompt', description: 'New prompt to sessionId' },
   { action: 'session.fork', title: 'Fork a session', description: 'Fork sessionId at messageId; prompt optional' },
   { action: 'session.status', title: 'Check session status', description: 'Status of sessionId' },

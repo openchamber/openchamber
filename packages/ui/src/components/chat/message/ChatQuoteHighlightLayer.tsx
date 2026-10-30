@@ -35,6 +35,7 @@ import {
 } from '@/lib/chatQuoteAnchor';
 
 import type { ChatQuoteHighlightStore } from '../hooks/chatQuoteHighlightStore';
+import { ChatColumnSessionContext } from '../chatColumnSession';
 import { ChatQuoteMarkPopover } from './ChatQuoteMarkPopover';
 import type { HtmlRenderMark } from './parts/htmlRender';
 import { onPageMarkClick, revealPageMark, setPageMarks } from './pageQuoteBridge';
@@ -47,9 +48,8 @@ const FLASH_DURATION_MS = 1600;
 const POPOVER_OPEN_DELAY_MS = 400;
 const POPOVER_CLOSE_DELAY_MS = 250;
 const CORRIDOR_PADDING_PX = 6;
-// A page's frame may not be mounted yet (or just scrolled into place) when a
-// reveal arrives; it is retried for about this many frames.
-const PAGE_REVEAL_ATTEMPTS = 10;
+// Page frames may mount after scrolling.
+const REVEAL_ATTEMPTS = 10;
 
 const supportsHighlights = (): boolean => 'Highlight' in window && 'highlights' in CSS;
 
@@ -87,6 +87,7 @@ const nextFrame = (): Promise<void> => new Promise((resolve) => {
 interface ChatQuoteHighlightLayerProps {
     store: ChatQuoteHighlightStore;
     scrollNode: HTMLElement | null;
+    loadHistoryUntilMessage: (messageId: string) => Promise<boolean>;
     scrollToMessage: (messageId: string, options?: { behavior?: ScrollBehavior }) => Promise<boolean>;
 }
 
@@ -112,8 +113,10 @@ type PopoverState = {
 export const ChatQuoteHighlightLayer = React.memo(function ChatQuoteHighlightLayer({
     store,
     scrollNode,
+    loadHistoryUntilMessage,
     scrollToMessage,
 }: ChatQuoteHighlightLayerProps) {
+    const session = React.useContext(ChatColumnSessionContext);
     const marks = React.useSyncExternalStore(store.subscribe, store.getMarks);
     const chipFocusedMarkId = React.useSyncExternalStore(store.subscribe, store.getChipFocus);
     const [popover, setPopover] = React.useState<PopoverState | null>(null);
@@ -134,7 +137,16 @@ export const ChatQuoteHighlightLayer = React.memo(function ChatQuoteHighlightLay
     scrollNodeRef.current = scrollNode;
     const scrollToMessageRef = React.useRef(scrollToMessage);
     scrollToMessageRef.current = scrollToMessage;
+    const loadHistoryUntilMessageRef = React.useRef(loadHistoryUntilMessage);
+    loadHistoryUntilMessageRef.current = loadHistoryUntilMessage;
+    const revealGenerationRef = React.useRef(0);
     const flashTimerRef = React.useRef<number | null>(null);
+    const cancelRevealRef = React.useRef<(() => void) | null>(null);
+
+    React.useEffect(() => () => {
+        revealGenerationRef.current += 1;
+        cancelRevealRef.current?.();
+    }, [scrollNode, store, session?.sessionId, session?.directory]);
 
     React.useEffect(() => {
         if (!scrollNode || marks.length === 0) return;
@@ -211,45 +223,96 @@ export const ChatQuoteHighlightLayer = React.memo(function ChatQuoteHighlightLay
     }, [paintFlash]);
 
     const reveal = React.useCallback((messageId: string, anchor: ChatQuoteAnchor) => {
+        cancelRevealRef.current?.();
+        const scrollToMessage = scrollToMessageRef.current;
+        const scrollNode = scrollNodeRef.current;
+        const generation = ++revealGenerationRef.current;
+        let cancelled = false;
+        let observer: MutationObserver | null = null;
+        let frame: number | null = null;
+        const isCurrent = () => !cancelled && generation === revealGenerationRef.current && scrollNode === scrollNodeRef.current;
+        const cancel = () => {
+            cancelled = true;
+            observer?.disconnect();
+            if (frame !== null) window.cancelAnimationFrame(frame);
+            frame = null;
+            for (const event of ['wheel', 'touchstart', 'pointerdown', 'openchamber:frame-scroll']) {
+                scrollNode?.removeEventListener(event, cancel);
+            }
+            scrollNode?.removeEventListener('keydown', cancelOnKey);
+            if (cancelRevealRef.current === cancel) cancelRevealRef.current = null;
+        };
+        const cancelOnKey = (event: KeyboardEvent) => {
+            if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(event.key)) cancel();
+        };
+        cancelRevealRef.current = cancel;
+        for (const event of ['wheel', 'touchstart', 'pointerdown', 'openchamber:frame-scroll']) {
+            scrollNode?.addEventListener(event, cancel, { passive: true });
+        }
+        scrollNode?.addEventListener('keydown', cancelOnKey);
         void (async () => {
+            const loaded = await loadHistoryUntilMessageRef.current(messageId).catch(() => false);
+            if (!loaded || !isCurrent()) return;
+
             if (anchor.page) {
-                // Bring the message to the page's frame, then let the frame
-                // scroll and flash inside the page. The row may still be
-                // mounting; the controller knowing no such message is no stop.
+                // Scroll to the frame before revealing the quote inside it.
+                // The row may still be mounting after the scroll request.
                 const { partId } = anchor.page;
-                await scrollToMessageRef.current(messageId, { behavior: 'auto' }).catch(() => false);
-                for (let attempt = 0; attempt < PAGE_REVEAL_ATTEMPTS; attempt += 1) {
+                await scrollToMessage(messageId, { behavior: 'auto' }).catch(() => false);
+                for (let attempt = 0; attempt < REVEAL_ATTEMPTS; attempt += 1) {
                     await nextFrame();
+                    if (!isCurrent()) return;
                     if (revealPageMark(partId, anchor)) return;
                 }
                 return;
             }
             // Scrolling through the timeline controller releases live follow
-            // and mounts the row when the virtualized list dropped it. The
-            // controller only knows messages it could place in a turn; a row
-            // already on screen is scrolled to directly below.
+            // and mounts the row when the virtualized list dropped it.
             const mounted = scrollNodeRef.current ? findChatQuoteRoot(scrollNodeRef.current, messageId) : null;
-            const scrolled = await scrollToMessageRef.current(messageId, { behavior: 'auto' });
+            const scrolled = await scrollToMessage(messageId, { behavior: 'auto' }).catch(() => false);
+            if (!isCurrent() || !scrollNode) return;
             if (!scrolled && !mounted) return;
-            await nextFrame();
-            const node = scrollNodeRef.current;
-            const root = node ? findChatQuoteRoot(node, messageId) : null;
-            const range = root ? resolveChatQuoteAnchor(root, anchor) : null;
-            if (!range) return;
-
-            range.startContainer.parentElement?.scrollIntoView({ block: 'center', inline: 'nearest' });
-            if (flashTimerRef.current !== null) window.clearTimeout(flashTimerRef.current);
-            paintFlash([range]);
-            flashTimerRef.current = window.setTimeout(() => {
-                flashTimerRef.current = null;
-                paintFlash([]);
-            }, FLASH_DURATION_MS);
-        })();
+            const tryReveal = () => {
+                frame = null;
+                if (!isCurrent()) { cancel(); return; }
+                const root = findChatQuoteRoot(scrollNode, messageId);
+                // A lazy fallback can contain raw Markdown on mobile. Wait for
+                // the renderer before treating a failed match as final.
+                if (!root || root.querySelector('[data-chat-quote-pending]')) return;
+                const range = resolveChatQuoteAnchor(root, anchor);
+                cancel();
+                if (!range) return;
+                range.startContainer.parentElement?.scrollIntoView({ block: 'center', inline: 'nearest' });
+                if (flashTimerRef.current !== null) window.clearTimeout(flashTimerRef.current);
+                paintFlash([range]);
+                flashTimerRef.current = window.setTimeout(() => {
+                    flashTimerRef.current = null;
+                    paintFlash([]);
+                }, FLASH_DURATION_MS);
+            };
+            const selector = `[data-message-id="${CSS.escape(messageId)}"]`;
+            observer = new MutationObserver((records) => {
+                if (frame !== null) return;
+                const relevant = records.some((record) => {
+                    const element = record.target instanceof Element ? record.target : record.target.parentElement;
+                    const message = element?.closest('[data-message-id]');
+                    if (message) return message.getAttribute('data-message-id') === messageId;
+                    return [...record.addedNodes].some((node) => node instanceof Element
+                        && (node.matches(selector) || node.querySelector(selector)));
+                });
+                if (relevant) frame = window.requestAnimationFrame(tryReveal);
+            });
+            observer.observe(scrollNode, { childList: true, subtree: true, characterData: true });
+            tryReveal();
+        })().finally(() => { if (!observer) cancel(); });
     }, [paintFlash]);
 
     React.useEffect(() => {
         store.setRevealHandler(reveal);
-        return () => store.setRevealHandler(null);
+        return () => {
+            revealGenerationRef.current += 1;
+            store.setRevealHandler(null);
+        };
     }, [reveal, store]);
 
     const openMark = popover ? marks.find((mark) => mark.id === popover.markId) ?? null : null;

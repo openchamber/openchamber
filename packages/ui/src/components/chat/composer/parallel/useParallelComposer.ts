@@ -4,6 +4,7 @@ import { useI18n } from '@/lib/i18n';
 import { isAutoModel } from '@/lib/routing/autoModel';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useInputStore } from '@/sync/input-store';
+import { attachmentWireName } from '@/lib/attachmentIdentity';
 import { useMultiRunStore } from '@/stores/useMultiRunStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useUIStore } from '@/stores/useUIStore';
@@ -206,7 +207,7 @@ export function useParallelComposer(input: {
       isolateRuns: current.isolate,
       worktreeBaseBranch: current.isolate ? current.baseBranch || undefined : undefined,
       files: attachments.length > 0
-        ? attachments.map((file) => ({ mime: file.mimeType, filename: file.filename, url: file.dataUrl }))
+        ? attachments.map((file) => ({ mime: file.mimeType, filename: attachmentWireName(file), url: file.dataUrl }))
         : undefined,
       setupCommands: current.isolate ? current.setupCommands?.filter((command) => command.trim()) : undefined,
       autoFusion: current.fuse

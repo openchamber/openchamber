@@ -1,10 +1,14 @@
-import { describe, expect, mock, test } from 'bun:test';
+import { describe, expect, mock, spyOn, test } from 'bun:test';
 
 import { adoptRelayTunnel, getActiveRelayTunnel } from '@/lib/relay/runtime-tunnel';
 import type { RelayTunnelClient } from '@/lib/relay/tunnel-client';
 import { switchRuntimeEndpoint } from '@/lib/runtime-switch';
+import { runtimeFetch } from '@/lib/runtime-fetch';
+import { getRuntimeExtraHeadersSync } from '@/lib/runtime-auth';
+import { serveTestHttp } from '@/lib/test-http-server';
 
-import { autoConnectLastInstance, createMobilePasswordOperationTracker, isActiveRuntimeConnection, loadMobileConnections, migrateLegacyInlineTokenRecords, upsertMobileConnection, validateMobileConnectionSession, type MobileRelayConfig } from './mobileConnections';
+import { autoConnectLastInstance, createMobilePasswordOperationTracker, isActiveRuntimeConnection, loadMobileConnectionHeaders, loadMobileConnections, migrateLegacyInlineTokenRecords, reprobeActiveConnection, upsertMobileConnection, validateMobileConnectionSession, type MobileRelayConfig } from './mobileConnections';
+import { buildMobileHeaderValues } from './mobileRequestHeaders';
 
 const originalFetch = globalThis.fetch;
 const originalWindow = globalThis.window;
@@ -44,6 +48,106 @@ const testRelay: MobileRelayConfig = {
   serverId: 'srv_test123',
   hostEncPubJwk: { kty: 'EC', crv: 'P-256', x: 'eHhY', y: 'eVlZ' },
 };
+
+describe('mobile HTTP headers', () => {
+  const url = 'https://protected.example';
+  const config = { url, values: { 'CF-Access-Client-Id': 'client-id', 'CF-Access-Client-Secret': 'client-secret' } };
+
+  test('connection checks refuse redirects before proxy credentials reach another address', async () => {
+    installTestWindow();
+    let targetRequests = 0;
+    const target = await serveTestHttp((_request, response) => {
+      targetRequests += 1;
+      response.setHeader('Content-Type', 'application/json');
+      response.end(JSON.stringify({ authenticated: true }));
+    });
+    const source = await serveTestHttp((_request, response) => {
+      response.writeHead(302, { Location: target.url.toString() });
+      response.end();
+    });
+    const address = source.url.toString().replace(/\/$/, '');
+    try {
+      expect(await validateMobileConnectionSession({ url: address, requestHeaders: { url: address, values: config.values } })).toBe(false);
+      expect(targetRequests).toBe(0);
+      expect(await validateMobileConnectionSession({ url: address })).toBe(true);
+      expect(targetRequests).toBe(2);
+    } finally {
+      source.close();
+      target.close();
+      restoreGlobals();
+    }
+  });
+
+  test('reload, reconnect and resume send headers; switching instances clears them', async () => {
+    installTestWindow();
+    const requests: { url: string; headers: Headers }[] = [];
+    const fetchSpy = spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const requestUrl = input instanceof Request ? input.url : String(input);
+      const headers = new Headers(init?.headers);
+      requests.push({ url: requestUrl, headers });
+      if (requestUrl.startsWith(url) && headers.get('CF-Access-Client-Secret') !== 'client-secret') return new Response(null, { status: 403 });
+      if (requestUrl.endsWith('/health')) return Response.json({ status: 'ok' });
+      if (requestUrl.endsWith('/auth/session')) return Response.json({ authenticated: true });
+      return Response.json({ ok: true });
+    });
+    try {
+      const saved = await upsertMobileConnection({ label: 'Protected', candidates: [{ kind: 'direct', url }], clientToken: 'client-token', requestHeaders: config });
+      expect(await loadMobileConnectionHeaders(saved[0].id)).toEqual(config);
+      expect(await autoConnectLastInstance({ fast: false })).toEqual({ status: 'connected' });
+      expect(await reprobeActiveConnection({ fast: false })).toBe('unchanged');
+      expect((await runtimeFetch('/api/config/settings')).ok).toBe(true);
+      const session = requests.find((request) => request.url === `${url}/auth/session`);
+      expect(session?.headers.get('Authorization')).toBe('Bearer client-token');
+      expect(requests[0].headers.has('Authorization')).toBe(false);
+      expect(requests.filter((request) => request.url.startsWith(url)).every((request) => request.headers.get('CF-Access-Client-Id') === 'client-id')).toBe(true);
+
+      await upsertMobileConnection({ label: 'Other', candidates: [{ kind: 'direct', url: 'https://other.example' }] });
+      expect(await autoConnectLastInstance({ fast: false })).toEqual({ status: 'connected' });
+      expect(getRuntimeExtraHeadersSync()).toEqual({});
+      expect(requests.filter((request) => request.url.startsWith('https://other.example')).every((request) => !request.headers.has('CF-Access-Client-Secret'))).toBe(true);
+    } finally {
+      switchRuntimeEndpoint({ apiBaseUrl: '', clientToken: null });
+      fetchSpy.mockRestore();
+      restoreGlobals();
+    }
+  });
+
+  test('headers never follow a fallback address, and explicit removal survives reload', async () => {
+    installTestWindow();
+    const fallbackHeaders: Headers[] = [];
+    const fetchSpy = spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const target = String(input);
+      if (target.startsWith(url)) return new Response(null, { status: 503 });
+      fallbackHeaders.push(new Headers(init?.headers));
+      return Response.json(target.endsWith('/health') ? { status: 'ok' } : { authenticated: true });
+    });
+    try {
+      const candidates: Parameters<typeof upsertMobileConnection>[0]['candidates'] = [{ kind: 'direct', url }, { kind: 'direct', url: 'https://fallback.example' }];
+      const saved = await upsertMobileConnection({ label: 'Protected', candidates, requestHeaders: config });
+      await upsertMobileConnection({ id: saved[0].id, label: 'Renamed', candidates });
+      expect(await loadMobileConnectionHeaders(saved[0].id)).toEqual(config);
+      expect(await autoConnectLastInstance({ fast: false })).toEqual({ status: 'connected' });
+      expect(fallbackHeaders.every((headers) => !headers.has('CF-Access-Client-Secret'))).toBe(true);
+      expect(getRuntimeExtraHeadersSync()).toEqual({});
+      await upsertMobileConnection({ id: saved[0].id, label: 'Renamed', candidates, requestHeaders: null });
+      expect(await loadMobileConnectionHeaders(saved[0].id)).toBeUndefined();
+    } finally {
+      switchRuntimeEndpoint({ apiBaseUrl: '', clientToken: null });
+      fetchSpy.mockRestore();
+      restoreGlobals();
+    }
+  });
+
+  test('header drafts normalize duplicates and reserve Authorization for the token', () => {
+    expect(buildMobileHeaderValues([
+      { name: ' X-Proxy ', value: ' first ' },
+      { name: 'x-proxy', value: 'second' },
+      { name: ' AUTHORIZATION ', value: 'wrong-token' },
+      { name: '', value: 'unused' },
+    ])).toEqual({ 'x-proxy': 'second' });
+    expect(() => buildMobileHeaderValues([{ name: 'X-Proxy', value: 'value\r\nInjected: yes' }])).toThrow();
+  });
+});
 
 describe('mobile connection storage', () => {
   test('native LAN metadata keeps both instances and their secure-token flags', async () => {

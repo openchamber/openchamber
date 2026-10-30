@@ -6,6 +6,7 @@ import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
 import { useSourceControlDescriptorOf, type SourceControlDescriptorOf } from '@/lib/source-control/providers/registry';
 import { clearStagedRevert } from '@/sync/session-actions';
+import { attachmentBasename } from '@/lib/attachmentIdentity';
 import { useDirectorySync } from '@/sync/sync-context';
 import { readSubagentRun } from '@/lib/opencode/subagent-run';
 import { attachSyntheticContext } from './lib/attachSyntheticContext';
@@ -30,7 +31,7 @@ const getRevertedPreview = (
     const text = getPromptPreviewText(parts, t, descriptorOf).replace(/\s+/g, ' ').trim();
     if (text) return text;
     const filePart = parts.find((part) => part.type === 'file');
-    return filePart?.filename ? `[${filePart.filename}]` : fallback;
+    return filePart?.filename ? `[${attachmentBasename(filePart.filename)}]` : fallback;
 };
 
 const ROW_CLASS = 'flex oc-composer-row min-w-0 items-center gap-2 ps-3 pe-1.5';

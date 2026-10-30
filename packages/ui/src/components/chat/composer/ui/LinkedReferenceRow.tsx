@@ -11,6 +11,7 @@
 import React from 'react';
 
 import { Icon } from '@/components/icon/Icon';
+import { useAvatarImage } from '@/hooks/useAvatarImage';
 import { useI18n } from '@/lib/i18n';
 
 export interface LinkedReferenceRowProps {
@@ -40,6 +41,7 @@ export function LinkedReferenceRow(props: LinkedReferenceRowProps) {
         onReopenPicker,
         onRemove,
     } = props;
+    const { broken: authorBroken, onError } = useAvatarImage(author?.avatarUrl);
 
     return (
         <div
@@ -51,12 +53,17 @@ export function LinkedReferenceRow(props: LinkedReferenceRowProps) {
                 onClick={onReopenPicker}
                 className="flex min-w-0 flex-1 items-center gap-1.5 text-start hover:opacity-80 transition-opacity"
             >
-                {author?.avatarUrl ? (
+                {author?.avatarUrl && !authorBroken ? (
                     <img
                         src={author.avatarUrl}
                         alt={author.login}
                         className="h-4 w-4 rounded-full flex-shrink-0"
+                        onError={onError}
                     />
+                ) : author?.avatarUrl ? (
+                    <span className="flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full bg-surface-muted text-[0.625rem] leading-none">
+                        {author.login.slice(0, 1).toUpperCase()}
+                    </span>
                 ) : null}
                 <span className="text-muted-foreground flex-shrink-0">
                     {numberLabel}

@@ -90,6 +90,22 @@ describe('settings registry', () => {
     expect(parseSettingsDocument({ locale: 'xx' })).toEqual({});
     expect(parseSettingsDocument({ locale: 3 })).toEqual({});
   });
+
+  test('round-trips last-used efforts with an explicit Default', () => {
+    const original = useUIStore.getState().lastUsedEfforts;
+    try {
+      const input = { 'anthropic/claude': 'high', 'openai/gpt-5': null };
+      const parsed = parseSettingsDocument({ lastUsedEfforts: input });
+      expect(parsed).toEqual({ lastUsedEfforts: input });
+      if (!parsed) throw new Error('Expected valid settings');
+      applySettingsToStores(parsed);
+      expect(useUIStore.getState().lastUsedEfforts).toEqual(input);
+      expect(parseSettingsDocument({ lastUsedEfforts: { 'anthropic/claude': 3 } })).toEqual({});
+      expect(parseSettingsDocument({ lastUsedEfforts: { 'anthropic/claude': '' } })).toEqual({});
+    } finally {
+      useUIStore.setState({ lastUsedEfforts: original });
+    }
+  });
   test('project paths retain absolute Windows roots across parsing and serialization', () => {
     const parsed = parseSettingsDocument({ projects: [
       { path: 'c:\\', label: 'Drive' },
@@ -98,6 +114,26 @@ describe('settings registry', () => {
       { path: '\\\\Server\\Share\\' },
     ] });
     expect(parsed?.projects?.map((project) => project.path)).toEqual(['C:/', 'C:/Users/Developer/Project', '//Server/Share']);
+    expect(parseSettingsDocument(JSON.parse(JSON.stringify(parsed)))).toEqual(parsed);
+  });
+
+  test('round-trips project label provenance and drops invalid or orphan sources', () => {
+    const parsed = parseSettingsDocument({ projects: [
+      { path: '/example', label: ' Example ', labelSource: 'manual' },
+      { path: '/auto', label: 'auto', labelSource: 'auto' },
+      { path: '/invalid', label: 'Keep me', labelSource: 'unknown' },
+      { path: '/orphan', labelSource: 'manual' },
+      { path: '/blank', label: '  ', labelSource: 'auto' },
+      { path: '/legacy', label: 'Legacy' },
+    ] });
+    expect(parsed?.projects?.map(({ path, label, labelSource }) => ({ path, label, labelSource }))).toEqual([
+      { path: '/example', label: 'Example', labelSource: 'manual' },
+      { path: '/auto', label: 'auto', labelSource: 'auto' },
+      { path: '/invalid', label: 'Keep me', labelSource: undefined },
+      { path: '/orphan', label: undefined, labelSource: undefined },
+      { path: '/blank', label: undefined, labelSource: undefined },
+      { path: '/legacy', label: 'Legacy', labelSource: undefined },
+    ]);
     expect(parseSettingsDocument(JSON.parse(JSON.stringify(parsed)))).toEqual(parsed);
   });
 

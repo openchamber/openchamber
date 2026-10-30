@@ -1896,6 +1896,152 @@ describe('openchamber session routes', () => {
     });
   });
 
+  it('applies the level a model was last sent with when a tool names only the model', async () => {
+    useCatalog({ models: [{ id: 'gpt-5.5', modelID: 'gpt-5.5', providerID: 'openai', variants: [{ id: 'high' }] }] });
+    const { app } = createApp({
+      readSettingsFromDiskMigrated: async () => ({
+        lastUsedEfforts: { 'openai/gpt-5.5': 'high' },
+        projects: [{ id: 'proj_1', path: '/repo/app' }],
+      }),
+    });
+    await request(app)
+      .post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', prompt: 'Run this', model: 'openai/gpt-5.5', agent: 'build' })
+      .expect(200);
+
+    expect(sessionSwitchModelMock).toHaveBeenCalledWith({
+      sessionID: 'ses_123',
+      model: { id: 'gpt-5.5', providerID: 'openai', variant: 'high' },
+    });
+  });
+
+  it('keeps an explicit Default remembered for the model', async () => {
+    useCatalog({ models: [{ id: 'gpt-5.5', modelID: 'gpt-5.5', providerID: 'openai', variants: [{ id: 'high' }] }] });
+    const { app } = createApp({
+      readSettingsFromDiskMigrated: async () => ({
+        lastUsedEfforts: { 'openai/gpt-5.5': null },
+        projects: [{ id: 'proj_1', path: '/repo/app' }],
+      }),
+    });
+    await request(app)
+      .post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', prompt: 'Run this', model: 'openai/gpt-5.5', agent: 'build' })
+      .expect(200);
+
+    expect(sessionSwitchModelMock).toHaveBeenCalledWith({
+      sessionID: 'ses_123',
+      model: { id: 'gpt-5.5', providerID: 'openai' },
+    });
+  });
+
+  it('uses memory when the project default model has no effort, overriding global effort', async () => {
+    useCatalog({ models: [{ id: 'gpt-5.5', modelID: 'gpt-5.5', providerID: 'openai', variants: [{ id: 'low' }, { id: 'high' }] }] });
+    const { app } = createApp({
+      readSettingsFromDiskMigrated: async () => ({
+        defaultModel: 'openai/gpt-5.5',
+        defaultVariant: 'high',
+        lastUsedEfforts: { 'openai/gpt-5.5': 'low' },
+        projects: [{ id: 'proj_1', path: '/repo/app', defaultModel: 'openai/gpt-5.5' }],
+      }),
+    });
+    await request(app)
+      .post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', prompt: 'Run this', agent: 'build' })
+      .expect(200);
+    expect(sessionSwitchModelMock).toHaveBeenCalledWith({
+      sessionID: 'ses_123',
+      model: { id: 'gpt-5.5', providerID: 'openai', variant: 'low' },
+    });
+  });
+
+  it('ignores a remembered level the model no longer offers', async () => {
+    useCatalog({ models: [{ id: 'gpt-5.5', modelID: 'gpt-5.5', providerID: 'openai', variants: [{ id: 'high' }] }] });
+    const { app } = createApp({
+      readSettingsFromDiskMigrated: async () => ({
+        lastUsedEfforts: { 'openai/gpt-5.5': 'removed' },
+        projects: [{ id: 'proj_1', path: '/repo/app' }],
+      }),
+    });
+    await request(app)
+      .post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', prompt: 'Run this', model: 'openai/gpt-5.5', agent: 'build' })
+      .expect(200);
+
+    expect(sessionSwitchModelMock).toHaveBeenCalledWith({
+      sessionID: 'ses_123',
+      model: { id: 'gpt-5.5', providerID: 'openai' },
+    });
+  });
+
+  it('lets configuration and an agent pin win over the remembered level', async () => {
+    useCatalog({
+      models: [{ id: 'gpt-5.5', modelID: 'gpt-5.5', providerID: 'openai', variants: [{ id: 'low' }, { id: 'high' }] }],
+      agents: [{ id: 'plan', name: 'plan', mode: 'primary', hidden: false, model: { providerID: 'openai', id: 'gpt-5.5', variant: 'high' } }],
+    });
+    const { app } = createApp({
+      readSettingsFromDiskMigrated: async () => ({
+        defaultModel: 'openai/gpt-5.5',
+        defaultVariant: 'low',
+        lastUsedEfforts: { 'openai/gpt-5.5': 'low' },
+        projects: [{ id: 'proj_1', path: '/repo/app' }],
+      }),
+    });
+    await request(app)
+      .post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', prompt: 'Run this', model: 'openai/gpt-5.5', agent: 'plan' })
+      .expect(200);
+
+    expect(sessionSwitchModelMock).toHaveBeenCalledWith({
+      sessionID: 'ses_123',
+      model: { id: 'gpt-5.5', providerID: 'openai', variant: 'high' },
+    });
+  });
+
+  it('uses the remembered level for a send that names a model', async () => {
+    useCatalog({ models: [{ id: 'gpt-5.5', modelID: 'gpt-5.5', providerID: 'openai', variants: [{ id: 'high' }] }] });
+    const { app } = createApp({
+      readSettingsFromDiskMigrated: async () => ({
+        lastUsedEfforts: { 'openai/gpt-5.5': 'high' },
+        projects: [{ id: 'proj_1', path: '/repo/app' }],
+      }),
+    });
+    await request(app)
+      .post('/api/openchamber/sessions/ses_source/send')
+      .send({ directory: '/repo/app', prompt: 'Continue', model: 'openai/gpt-5.5', agent: 'build' })
+      .expect(200);
+
+    expect(sessionSwitchModelMock).toHaveBeenCalledWith({
+      sessionID: 'ses_source',
+      model: { id: 'gpt-5.5', providerID: 'openai', variant: 'high' },
+    });
+  });
+
+  it('keeps the session record above the remembered level when send names no model', async () => {
+    sessionGetMock.mockImplementation(async ({ sessionID }) => ({
+      id: sessionID,
+      agent: 'plan',
+      model: { providerID: 'anthropic', id: 'claude-sonnet-5', variant: 'high' },
+      location: { directory: '/repo/app' },
+    }));
+    useCatalog({ models: [{ id: 'claude-sonnet-5', modelID: 'claude-sonnet-5', providerID: 'anthropic', variants: [{ id: 'low' }, { id: 'high' }] }] });
+    const { app } = createApp({
+      readSettingsFromDiskMigrated: async () => ({
+        lastUsedEfforts: { 'anthropic/claude-sonnet-5': 'low' },
+        projects: [{ id: 'proj_1', path: '/repo/app' }],
+      }),
+    });
+    const response = await request(app)
+      .post('/api/openchamber/sessions/ses_source/send')
+      .send({ directory: '/repo/app', prompt: 'Continue' })
+      .expect(200);
+
+    expect(response.body.variant).toBe('high');
+    expect(sessionSwitchModelMock).toHaveBeenCalledWith({
+      sessionID: 'ses_source',
+      model: { id: 'claude-sonnet-5', providerID: 'anthropic', variant: 'high' },
+    });
+  });
+
   it('applies the config default model variant when the prompt omits a model', async () => {
     useCatalog({
       config: [{

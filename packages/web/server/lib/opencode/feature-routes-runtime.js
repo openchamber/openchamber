@@ -85,6 +85,8 @@ import { managedSshCommand } from '../git/network-operations.js';
 import { createNetworkOperations, createTrustedDirectoriesConfig } from '../git/network-operations.js';
 import { createManagedSshCredentialStore } from '../git/ssh-credential-storage.js';
 import { createManagedSshInventory } from '../git/credentials.js';
+import { createSshPassphraseStore } from '../git/ssh-passphrases.js';
+import { openCodeCredentialSource } from './auth.js';
 import { createContributorProvenanceStore } from '../git/contributor-provenance-storage.js';
 import { createGitNetworkOperationStore } from '../git/network-operation-storage.js';
 import { readEffectiveGitTransportRevision } from '../git/transport-config.js';
@@ -479,7 +481,9 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       filePath: path.join(openchamberDataDir, 'git-ssh-credentials.json'),
       fsImpl: fsPromises,
     });
+    const sshPassphrases = createSshPassphraseStore(openCodeCredentialSource({ buildOpenCodeUrl, getOpenCodeAuthHeaders }));
     const managedSshInventory = createManagedSshInventory({
+      passphrases: sshPassphrases,
       store: sshCredentialStore,
       snapshotRoot: path.join(openchamberDataDir, 'git-ssh-operation-keys'),
       discoveryRoot: path.join(os.homedir(), '.ssh'),
@@ -616,6 +620,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       fsImpl: fsPromises,
     });
     const gitCredentialResolver = createGitCredentialResolver({
+      passphrases: sshPassphrases,
       readTransportCredential: sourceControlProviders.readTransportCredential,
       describeProvider: sourceControlProviders.describe,
       lookupManagedSshKey: sshCredentialStore.lookup,

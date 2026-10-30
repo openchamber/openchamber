@@ -1157,7 +1157,7 @@ describe('managed agent tool runtime', () => {
 
   it('executes through the materialized plugin and authenticated callback', async () => {
     let activePort = null;
-    const { runtime, dataDir } = await createRuntime({ getActivePort: () => activePort });
+    const { runtime, dataDir, executeAction } = await createRuntime({ getActivePort: () => activePort });
     const app = express();
     runtime.registerRoutes(app, express);
     const server = await new Promise((resolve) => {
@@ -1187,10 +1187,21 @@ describe('managed agent tool runtime', () => {
         action: 'projects.list',
         data: { projects: [] },
       });
-      expect(result.metadata.openchamber.description).toBe('List configured projects');
+      expect(result.metadata.openchamber.description).toBe('List session destinations');
       expect(progress).toHaveBeenCalledWith(expect.objectContaining({
-        openchamber: expect.objectContaining({ description: 'List configured projects' }),
+        openchamber: expect.objectContaining({ description: 'List session destinations' }),
       }));
+      const created = await tool.openchamber.execute(
+        { action: 'session.create', parameters: { projectId: 'openchamber:chats', prompt: 'Plan the week' } },
+        { sessionID: 'ses_1', agent: 'build', messageID: 'msg_1', id: 'call_2', progress },
+      );
+      expect(JSON.parse(created.content).ok).toBe(true);
+      expect(executeAction).toHaveBeenLastCalledWith(
+        'session.create',
+        expect.objectContaining({ projectId: 'openchamber:chats', prompt: 'Plan the week' }),
+        undefined,
+        expect.objectContaining({ contextSessionId: 'ses_1' }),
+      );
     } finally {
       if (previousUrl === undefined) delete process.env.OPENCHAMBER_AGENT_TOOL_URL;
       else process.env.OPENCHAMBER_AGENT_TOOL_URL = previousUrl;

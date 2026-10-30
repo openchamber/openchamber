@@ -16,6 +16,7 @@ import { useAgentsStore } from '@/stores/useAgentsStore';
 import { isPrimaryMode } from '@/components/chat/mobileControlsUtils';
 import { useI18n } from '@/lib/i18n';
 import { listModelVariantIds, type ModelVariantSource } from '@/lib/modelVariants';
+import { resolveEffortForModelSelection } from '@/lib/modelEfforts';
 
 type TodoSendTarget = 'session' | 'worktree';
 
@@ -71,6 +72,20 @@ export function TodoSendDialog(props: TodoSendDialogProps) {
     agent: currentAgentName,
   }));
 
+  const resolveVariantForModel = React.useCallback((providerID: string, modelID: string, agentName: string) => {
+    const provider = providers.find((item) => item.id === providerID);
+    const model = provider?.models?.find((item) => item.id === modelID) as { variants?: ModelVariantSource } | undefined;
+    const configState = useConfigStore.getState();
+    return resolveEffortForModelSelection({
+      providerID,
+      modelID,
+      variants: listModelVariantIds(model?.variants),
+      agents: configState.agents,
+      agentName,
+      configuredVariant: configState.getDefaultVariantForModel(providerID, modelID),
+    }) ?? '';
+  }, [providers]);
+
   React.useEffect(() => {
     if (!open) return;
     void loadProviders({ directory: projectDirectory, source: 'todoSendDialog' });
@@ -98,13 +113,17 @@ export function TodoSendDialog(props: TodoSendDialogProps) {
 
     if (provider?.id === execution.providerID && hasModel) return;
 
-    setExecution((prev) => ({
-      ...prev,
-      providerID: provider?.id ?? '',
-      modelID: hasModel ? prev.modelID : fallbackModelID,
-      variant: '',
-    }));
-  }, [open, providers, execution.providerID, execution.modelID]);
+    setExecution((prev) => {
+      const nextProviderID = provider?.id ?? '';
+      const nextModelID = hasModel ? prev.modelID : fallbackModelID;
+      return {
+        ...prev,
+        providerID: nextProviderID,
+        modelID: nextModelID,
+        variant: resolveVariantForModel(nextProviderID, nextModelID, prev.agent),
+      };
+    });
+  }, [open, providers, execution.providerID, execution.modelID, resolveVariantForModel]);
 
   const agentFilter = React.useCallback((agent: { mode?: string }) => isPrimaryMode(agent.mode), []);
 
@@ -160,7 +179,12 @@ export function TodoSendDialog(props: TodoSendDialogProps) {
               className="max-w-[320px] justify-between"
               dropdownPortalToBody
               onChange={(providerID, modelID) => {
-                setExecution((prev) => ({ ...prev, providerID, modelID, variant: '' }));
+                setExecution((prev) => ({
+                  ...prev,
+                  providerID,
+                  modelID,
+                  variant: resolveVariantForModel(providerID, modelID, prev.agent),
+                }));
               }}
             />
           </div>

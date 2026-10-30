@@ -32,6 +32,7 @@ const location = { directory: DIRECTORY, project: { id: 'project', directory: DI
 // External catalogs and backend data are isolated; composer/editor/picker modules are real.
 const responseFor = (input: RequestInfo | URL) => {
   const path = new URL(input instanceof Request ? input.url : input.toString(), 'http://localhost/').pathname;
+  if (path === '/api/config/settings') return Response.json({ projects: [{ id: 'project', path: DIRECTORY }] });
   if (path === '/api/config/skills') {
     const url = new URL(input instanceof Request ? input.url : input.toString(), 'http://localhost/');
     const directory = url.searchParams.get('directory') ?? '';
@@ -92,6 +93,11 @@ const { useCommandsStore, invalidateCommandsLoadCache } = await import('@/stores
 const { useSkillsStore, invalidateSkillsLoadCache } = await import('@/stores/useSkillsStore');
 const { ChatColumnSessionContext, ChatColumnActionsContext } = await import('../chatColumnSession');
 const { getSyncChildStores } = await import('@/sync/sync-refs');
+const { rememberEffort } = await import('@/lib/modelEfforts');
+const { useUIStore } = await import('@/stores/useUIStore');
+const { useMessageQueueStore, getMessageQueueKey } = await import('@/stores/messageQueueStore');
+const attachmentInput = await import('@/sync/input-store');
+const { setOptimisticRefs } = await import('@/sync/session-actions');
 
 const sdk = OpenCode.make({ baseUrl: 'https://sync.test', fetch: async (request) => responseFor(request) });
 // SAFETY: Same minimal offline runtime as sibling composer integration tests.
@@ -163,6 +169,7 @@ const withComposer = async (run: (composer: Composer) => Promise<void>, options?
     const view = content && EditorView.findFromDOM(content);
     if (!view || !content) throw new Error('The real composer editor did not mount');
     const rows = () => Array.from(container.querySelectorAll<HTMLElement>('.cursor-pointer.typography-ui-label'));
+    setOptimisticRefs(() => {}, () => {});
     await run({
       sessionId, container, view, rows,
       type: async (text) => {
@@ -192,6 +199,79 @@ const withComposer = async (run: (composer: Composer) => Promise<void>, options?
 };
 
 afterAll(() => browser.close());
+
+test('a picker choice during attachment preparation survives the composer send', async () => {
+  const originalFetch = globalThis.fetch;
+  const send = spyOn(opencodeClient, 'sendMessage').mockResolvedValue('msg');
+  // FileReader is browser-owned; the mention read and composer submit stay real.
+  const prepare = spyOn(attachmentInput, 'prepareLocalAttachments').mockImplementation(async (file) => [{
+    id: 'shot', file, filename: file.name, mimeType: 'image/png', size: file.size,
+    dataUrl: 'data:image/png;base64,c2hvdA==', source: 'local',
+  }]);
+  let release!: (response: Response) => void;
+  let started!: () => void;
+  const preparing = new Promise<void>((resolve) => { started = resolve; });
+  globalThis.fetch = async (input, init) => {
+    if (String(input).includes('/api/fs/raw')) {
+      started();
+      return new Promise<Response>((resolve) => { release = resolve; });
+    }
+    return originalFetch(input, init);
+  };
+  try {
+    await withComposer(async ({ container, type, choose }) => {
+      useFileSearchStore.setState({ searchFiles: async () => [{ name: 'shot.png', path: `${DIRECTORY}/shot.png`, relativePath: 'shot.png' }] });
+      await type('@shot');
+      await choose('shot.png');
+      await act(async () => {
+        useConfigStore.setState({ currentVariant: 'low' });
+        rememberEffort('provider', 'model', 'low');
+      });
+      await act(async () => {
+        container.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+        await preparing;
+        rememberEffort('provider', 'model', 'high');
+        release(new Response('image bytes'));
+      });
+      await settle();
+      expect(send.mock.calls.length).toBe(1);
+      expect(send.mock.calls[0]?.[0].model?.variant).toBe('low');
+      expect(useUIStore.getState().lastUsedEfforts['provider/model']).toBe('high');
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+    prepare.mockRestore();
+    send.mockRestore();
+  }
+});
+
+test('the queued row Send preserves the newer remembered effort', async () => {
+  const send = spyOn(opencodeClient, 'sendMessage').mockResolvedValue('msg');
+  const queued = { id: 'queued-effort', content: 'queued low', text: 'queued low', createdAt: 1, sendConfig: { providerID: 'provider', modelID: 'model', variant: 'low' } };
+  const take = spyOn(useMessageQueueStore.getState(), 'takeForSend').mockResolvedValue([queued]);
+  try {
+    await withComposer(async ({ sessionId, container }) => {
+      await act(async () => {
+        rememberEffort('provider', 'model', 'high');
+        const key = getMessageQueueKey({ runtimeKey: getRuntimeKey(), directory: DIRECTORY, sessionId });
+        useMessageQueueStore.setState({ queuedMessages: { [key]: [queued] } });
+      });
+      const group = container.querySelector('[role="group"][aria-label="Queued messages"]');
+      const button = Array.from(group?.querySelectorAll('button') ?? []).find((button) => button.textContent?.trim() === 'send');
+      expect(button).toBeDefined();
+      await act(async () => button!.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+      await settle();
+      expect(take.mock.calls.length).toBe(1);
+      expect(send.mock.calls.length).toBe(1);
+      expect(send.mock.calls[0]?.[0].model?.variant).toBe('low');
+      expect(useUIStore.getState().lastUsedEfforts['provider/model']).toBe('high');
+    });
+  } finally {
+    useMessageQueueStore.setState({ queuedMessages: {} });
+    take.mockRestore();
+    send.mockRestore();
+  }
+});
 
 test('hand-typed @coder review keeps the session selectable even after coder becomes a chip', async () => {
   await withComposer(async ({ container, view, type, rows, choose }) => {

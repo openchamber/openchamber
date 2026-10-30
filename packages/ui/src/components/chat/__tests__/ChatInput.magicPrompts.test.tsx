@@ -6,6 +6,7 @@ import { pathToFileURL } from 'node:url';
 import { Window } from 'happy-dom';
 import type { RuntimeAPIs } from '@/lib/api/types';
 import type { AttachedFile } from '@/stores/types/sessionTypes';
+import type { ModelSelection, Session } from '@/lib/opencode/model';
 
 /**
  * A magic prompt command typed in the composer reads the prompts that apply
@@ -102,6 +103,7 @@ const { SyncProvider } = await import('@/sync/sync-context');
 const { useDirectoryStore } = await import('@/stores/useDirectoryStore');
 const { useConfigStore } = await import('@/stores/useConfigStore');
 const { useSessionUIStore } = await import('@/sync/session-ui-store');
+const { useSelectionStore } = await import('@/sync/selection-store');
 const { useInputStore } = await import('@/sync/input-store');
 const { getSyncChildStores } = await import('@/sync/sync-refs');
 const { useMessageQueueStore, createMessageQueueTarget, getMessageQueueKey } = await import('@/stores/messageQueueStore');
@@ -158,7 +160,7 @@ afterAll(() => {
 });
 
 /** Mounts the composer, types `text`, submits it and returns the editor text afterwards. */
-const submitInComposer = async (text: string, options?: { attachment: AttachedFile; queue: boolean }): Promise<string> => {
+const submitInComposer = async (text: string, options?: { attachment: AttachedFile; queue: boolean }, setup?: () => void, beforeSubmit?: () => void): Promise<string> => {
   const container = document.createElement('div');
   document.body.appendChild(container);
   const root = createRoot(container);
@@ -177,6 +179,7 @@ const submitInComposer = async (text: string, options?: { attachment: AttachedFi
       );
     });
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+    if (setup) await act(async () => { setup(); });
 
     if (options) {
       await act(async () => {
@@ -202,6 +205,7 @@ const submitInComposer = async (text: string, options?: { attachment: AttachedFi
       useConfigStore.setState({ currentProviderId: 'provider', currentModelId: 'model' });
     });
     await act(async () => {
+      beforeSubmit?.();
       if (options?.queue) {
         const button = container.querySelector<HTMLButtonElement>('button[aria-label="Queue message"]');
         if (!button) throw new Error('Queue button did not mount');
@@ -336,3 +340,60 @@ test('a new chat, which has no folder yet, reads the global prompts', async () =
 test('a project draft reads the prompts of the folder it opens in', async () => {
   expect(await promptDirectoryForDraft({ target: 'project', directoryOverride: '/repo' })).toBe('/repo');
 });
+
+const setupBtwCompaction = () => {
+  const parent: Session = {
+    id: 'ses_feature', projectID: 'project', directory: WORKTREE, title: 'Main',
+    model: { providerID: 'provider', id: 'old-model', variant: 'medium' },
+    metadata: { openchamber: { btwSessionID: 'ses_btw' } },
+    time: { created: 1, updated: 1 }, cost: 0,
+    tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+  };
+  getSyncChildStores().ensureChild(WORKTREE, { bootstrap: false }).setState({
+    session: [parent, {
+      ...parent, id: 'ses_btw', title: 'BTW',
+      model: { providerID: 'btw-provider', id: 'btw-model', variant: 'low' },
+      metadata: { openchamber: { kind: 'btw', originalSessionID: parent.id } },
+    }],
+  });
+  const selection = useSelectionStore.getState();
+  selection.saveSessionAgentSelection('ses_btw', 'plan');
+  selection.saveSessionModelSelection('ses_btw', 'btw-provider', 'btw-model');
+  selection.saveAgentModelVariantForSession('ses_btw', 'plan', 'btw-provider', 'btw-model', 'low');
+  useConfigStore.setState({ currentVariant: 'high', agents: [{
+    id: 'plan', name: 'plan', displayName: 'Plan', mode: 'primary', hidden: false,
+    request: { settings: {}, headers: {}, body: {} }, permissions: [],
+  }] });
+};
+
+for (const switchFails of [false, true]) {
+  test(`BTW /compact keeps the main selection${switchFails ? ' and restores a failed command' : ''}`, async () => {
+    const calls: { method: string; id: string; model?: ModelSelection; directory?: string | null }[] = [];
+    const switchSpy = spyOn(opencodeClient, 'switchSessionModel').mockImplementation(async (id, model, directory) => {
+      calls.push({ method: 'switch', id, model, directory });
+      if (switchFails) throw new Error('switch refused');
+    });
+    const compactSpy = spyOn(opencodeClient, 'compactSession').mockImplementation(async (id, directory) => {
+      calls.push({ method: 'compact', id, directory });
+    });
+    const file = new File(['context'], 'context.txt', { type: 'text/plain' });
+    const attachment = { id: 'compact-context', file, filename: file.name, size: file.size,
+      dataUrl: 'data:text/plain;base64,Y29udGV4dA==', mimeType: file.type, source: 'local' as const };
+    try {
+      const remaining = await submitInComposer('/compact', undefined, setupBtwCompaction, () => {
+        expect(useInputStore.getState().composerAddress?.attachments?.sessionId).toBe('ses_btw');
+        useInputStore.getState().setAttachedFiles([attachment]);
+      });
+      expect(calls).toEqual([
+        { method: 'switch', id: 'ses_feature', model: { providerID: 'provider', id: 'model', variant: 'high' }, directory: WORKTREE },
+        ...(switchFails ? [] : [{ method: 'compact', id: 'ses_feature', directory: WORKTREE }]),
+      ]);
+      expect(remaining).toBe(switchFails ? '/compact' : '');
+      expect(useInputStore.getState().attachedFiles).toEqual([attachment]);
+      expect(sent).toEqual([]);
+    } finally {
+      switchSpy.mockRestore();
+      compactSpy.mockRestore();
+    }
+  });
+}

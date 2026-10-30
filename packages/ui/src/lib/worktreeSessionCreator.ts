@@ -13,6 +13,8 @@ import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { checkIsGitRepository, resolveGitPrimaryRoot, resolveGitRepositoryPrefix } from '@/lib/gitApi';
 import { generateBranchName } from '@/lib/git/branchNameGenerator';
 import { parseModelIdentifier } from '@/lib/modelIdentifier';
+import { resolveEffortForModelSelection } from '@/lib/modelEfforts';
+import { modelVariantNames } from '@/lib/modelVariants';
 import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
 import { getWorktreeSetupWaitEnabled } from '@/lib/openchamberConfig';
 import {
@@ -162,23 +164,23 @@ const applyDefaultAgentAndModelSelection = (sessionId: string, configState = use
     useContextStore.getState().saveSessionModelSelection(sessionId, providerId, modelId);
     useContextStore.getState().saveAgentModelForSession(sessionId, agentName, providerId, modelId);
 
-    const settingsDefaultVariant = configState.settingsDefaultVariant;
-    if (!settingsDefaultVariant) {
+    const provider = configState.providers.find((p) => p.id === providerId);
+    const model = provider?.models.find((entry) => entry.id === modelId);
+    // Same resolution as the composer: the agent's pin for this model and the
+    // configured level first, then the level it was last sent with.
+    const variant = resolveEffortForModelSelection({
+      providerID: providerId, modelID: modelId, variants: modelVariantNames(model),
+      agents: configState.agents, agentName,
+      configuredVariant: configState.getDefaultVariantForModel(providerId, modelId),
+    });
+    if (variant === undefined) {
       return;
     }
 
-    const provider = configState.providers.find((p) => p.id === providerId);
-    const model = provider?.models.find((m: Record<string, unknown>) => (m as { id?: string }).id === modelId) as
-      | { variants?: Record<string, unknown> }
-      | undefined;
-    const variants = model?.variants;
-
-    if (variants && Object.prototype.hasOwnProperty.call(variants, settingsDefaultVariant)) {
-      configState.setCurrentVariant(settingsDefaultVariant);
-      useContextStore
-        .getState()
-        .saveAgentModelVariantForSession(sessionId, agentName, providerId, modelId, settingsDefaultVariant);
-    }
+    configState.setCurrentVariant(variant ?? undefined);
+    useContextStore
+      .getState()
+      .saveAgentModelVariantForSession(sessionId, agentName, providerId, modelId, variant);
   } catch {
     // Ignore errors setting default agent
   }

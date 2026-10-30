@@ -107,6 +107,8 @@ const parseAttachment = (value) => {
   };
   const serverPath = asNonEmptyString(raw.serverPath);
   if (serverPath) attachment.serverPath = serverPath;
+  const agentPath = asNonEmptyString(raw.agentPath);
+  if (agentPath) attachment.agentPath = agentPath;
   attachment.dataUrl = dataUrl;
   return attachment;
 };
@@ -511,7 +513,7 @@ export function createMessageQueueRuntime({
   // v2 takes prompt attachments as URIs; a data URL is one.
   const toPromptFile = (attachment) => ({
     uri: attachment.dataUrl,
-    ...(attachment.filename ? { name: attachment.filename } : {}),
+    ...(attachment.agentPath || attachment.filename ? { name: attachment.agentPath || attachment.filename } : {}),
   });
 
   /**

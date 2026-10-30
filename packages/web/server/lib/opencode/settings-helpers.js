@@ -103,6 +103,8 @@ export const createSettingsHelpers = (dependencies) => {
   const HIDDEN_MODELS_MAX = 1024;
   const RECENT_EFFORTS_MAX_KEYS = 128;
   const RECENT_EFFORTS_MAX_VARIANTS_PER_KEY = 5;
+  const LAST_USED_EFFORTS_MAX_KEYS = 512;
+  const lastUsedEffortsSchema = z.record(z.string(), z.string().trim().min(1).nullable().catch(undefined));
 
   const sanitizeShortcutOverrides = (value) => {
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -143,6 +145,26 @@ export const createSettingsHelpers = (dependencies) => {
       result[key] = variants;
       count += 1;
       if (count >= RECENT_EFFORTS_MAX_KEYS) break;
+    }
+    return count > 0 ? result : null;
+  };
+
+  // One explicit Default (`null`) or variant name per model. A missing entry is
+  // "never sent", which is not the same as Default.
+  const sanitizeLastUsedEfforts = (value) => {
+    const parsed = lastUsedEffortsSchema.safeParse(value);
+    if (!parsed.success) return null;
+    const result = {};
+    const seenKeys = new Set();
+    let count = 0;
+    for (const [rawKey, effort] of Object.entries(parsed.data)) {
+      const key = rawKey.trim();
+      if (!key || seenKeys.has(key)) continue;
+      if (effort === undefined) continue;
+      seenKeys.add(key);
+      result[key] = effort;
+      count += 1;
+      if (count >= LAST_USED_EFFORTS_MAX_KEYS) break;
     }
     return count > 0 ? result : null;
   };
@@ -958,6 +980,11 @@ export const createSettingsHelpers = (dependencies) => {
     const recentEfforts = sanitizeRecentEfforts(candidate.recentEfforts);
     if (recentEfforts) {
       result.recentEfforts = recentEfforts;
+    }
+
+    const lastUsedEfforts = sanitizeLastUsedEfforts(candidate.lastUsedEfforts);
+    if (lastUsedEfforts) {
+      result.lastUsedEfforts = lastUsedEfforts;
     }
     if (typeof candidate.diffLayoutPreference === 'string') {
       const mode = candidate.diffLayoutPreference.trim();

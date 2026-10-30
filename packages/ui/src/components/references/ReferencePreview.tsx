@@ -8,6 +8,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenu
 import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import type { CISummary, ChangeRequestListStatus, ChangeRequestRevision, ChangeRequestRevisionKind, RepositoryReference, RepositoryReferenceComment, RepositoryReferenceDetail, TrackerItem, TrackerItemSummary, PullRequestStackLayer } from '@/lib/api/types';
+import { useAvatarImage } from '@/hooks/useAvatarImage';
 import { useEmojiShortcodes } from '@/lib/emoji/shortcodes';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
@@ -423,6 +424,7 @@ const RepositoryPreview: React.FC<{
 }> = ({ reference, pullStatus, detail, purpose, pinned, includeDiff, onIncludeDiffChange, now, footer: footerOverride, pullLinks, reply, labelsControl, reviewersControl, onOpenChecks, commentAttachments, stateMenu, onRefresh, threadActions, onOpenStackLayer, revisionChoice }) => {
     const { t } = useI18n();
     const [refreshing, setRefreshing] = React.useState(false);
+    const { broken: authorBroken, onError } = useAvatarImage(reference.author?.avatarUrl);
     const refresh = onRefresh ? () => {
         setRefreshing(true);
         void onRefresh().finally(() => setRefreshing(false));
@@ -550,8 +552,12 @@ const RepositoryPreview: React.FC<{
                     {reference.author ? (
                         <MetaRow label={t('references.picker.preview.author')}>
                             <span className="inline-flex items-center gap-1.5">
-                                {reference.author.avatarUrl ? (
-                                    <img src={reference.author.avatarUrl} alt="" className="size-4 rounded-full" loading="lazy" />
+                                {reference.author.avatarUrl && !authorBroken ? (
+                                    <img src={reference.author.avatarUrl} alt="" className="size-4 rounded-full" loading="lazy" onError={onError} />
+                                ) : reference.author.avatarUrl ? (
+                                    <span className="flex size-4 items-center justify-center rounded-full bg-surface-muted text-[0.625rem] leading-none">
+                                        {reference.author.login.slice(0, 1).toUpperCase()}
+                                    </span>
                                 ) : null}
                                 {reference.author.login}
                             </span>

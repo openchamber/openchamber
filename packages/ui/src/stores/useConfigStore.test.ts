@@ -146,7 +146,9 @@ mock.module('@/stores/useProjectsStore', () => ({
 
 let directoryAvailability: 'available' | 'missing' | 'unknown' = 'available';
 
+const opencodeClientModule = await import('@/lib/opencode/client');
 mock.module('@/lib/opencode/client', () => ({
+  ...opencodeClientModule,
   isOpencodeNotFound: () => false,
   OpencodeApiError: Error,
   normalizeOpencodeError: (operation: string, error: unknown) => new Error(`${operation}: ${String(error)}`),
@@ -303,7 +305,7 @@ describe('useConfigStore provider persistence', () => {
       lastUsedProvider: null,
     });
     useSessionUIStore.setState({ currentSessionId: null, availableWorktreesByProject: new Map() });
-    useUIStore.setState({ hiddenModels: [], lastSelectedModel: undefined });
+    useUIStore.setState({ hiddenModels: [], lastSelectedModel: undefined, lastUsedEfforts: {} });
     useConfigStore.setState({
       activeDirectoryKey: DIRECTORY,
       directoryScoped: {},
@@ -1012,6 +1014,29 @@ describe('useConfigStore provider persistence', () => {
     expect(useConfigStore.getState().currentVariant).toBe(undefined);
   });
 
+  test('cycleCurrentVariant remembers the chosen level without a send', () => {
+    useConfigStore.setState({
+      providers: [provider('openai', 'gpt-5.6-sol', ['low', 'high'])],
+      currentProviderId: 'openai',
+      currentModelId: 'gpt-5.6-sol',
+      currentVariant: undefined,
+      currentVariantSelection: { override: undefined, inherited: undefined },
+      directoryScoped: {},
+    });
+    useUIStore.setState({ lastUsedEfforts: {} });
+
+    const next = useConfigStore.getState().cycleCurrentVariant();
+
+    expect(next).toBe('low');
+    expect(useUIStore.getState().lastUsedEfforts).toEqual({ 'openai/gpt-5.6-sol': 'low' });
+
+    // Cycling all the way to Default stores the explicit Default sentinel.
+    useConfigStore.setState({ currentVariant: 'low', currentVariantSelection: { override: 'low', inherited: undefined } });
+    expect(useConfigStore.getState().cycleCurrentVariant()).toBe('high');
+    expect(useConfigStore.getState().cycleCurrentVariant()).toBeUndefined();
+    expect(useUIStore.getState().lastUsedEfforts).toEqual({ 'openai/gpt-5.6-sol': null });
+  });
+
   test('an unavailable explicit variant cycles back to Default', () => {
     useConfigStore.setState({
       providers: [provider('openai', 'changed', ['low', 'high'])],
@@ -1172,6 +1197,160 @@ describe('useConfigStore provider persistence', () => {
     expect(state.currentVariantSelection).toEqual({ override: undefined, inherited: undefined });
     expect(state.getDefaultVariantForModel('openai', 'other-model')).toBe('high');
     expect(state.getDefaultVariantForModel('openai', 'gpt-5.5')).toBe(undefined);
+  });
+
+  test('a new draft starts on the level its model was last sent with', () => {
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      providers: [provider('openai', 'gpt-5.5', ['low', 'high'])],
+      agents: [testAgent('build')],
+      settingsDefaultModel: 'openai/gpt-5.5',
+      currentProviderId: '',
+      currentModelId: '',
+      currentVariant: undefined,
+      directoryScoped: {},
+    });
+    useUIStore.setState({ lastUsedEfforts: { 'openai/gpt-5.5': 'high' } });
+
+    useConfigStore.getState().applyDefaultModelAgentSelection();
+
+    const state = useConfigStore.getState();
+    expect(state.currentModelId).toBe('gpt-5.5');
+    expect(state.currentVariant).toBe('high');
+    expect(state.currentVariantSelection).toEqual({ override: undefined, inherited: 'high' });
+    // Remembered is not configured: the model's configured level is still unset.
+    expect(state.getDefaultVariantForModel('openai', 'gpt-5.5')).toBeUndefined();
+  });
+
+  test('a configured level for the default model wins over the remembered one', () => {
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      providers: [provider('openai', 'gpt-5.5', ['low', 'high'])],
+      agents: [testAgent('build')],
+      settingsDefaultModel: 'openai/gpt-5.5',
+      settingsDefaultVariant: 'low',
+      currentProviderId: '',
+      currentModelId: '',
+      currentVariant: undefined,
+      directoryScoped: {},
+    });
+    useUIStore.setState({ lastUsedEfforts: { 'openai/gpt-5.5': 'high' } });
+
+    useConfigStore.getState().applyDefaultModelAgentSelection();
+
+    expect(useConfigStore.getState().currentVariant).toBe('low');
+    expect(useConfigStore.getState().currentVariantSelection).toEqual({ override: undefined, inherited: 'low' });
+  });
+
+  test('an agent pin for the default model wins over the remembered level', () => {
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      providers: [provider('openai', 'gpt-5.5', ['low', 'high'])],
+      agents: [testAgent('plan', {
+        model: { providerID: 'openai', modelID: 'gpt-5.5' },
+        variant: 'low',
+      })],
+      settingsDefaultModel: 'openai/gpt-5.5',
+      settingsDefaultAgent: 'plan',
+      currentProviderId: '',
+      currentModelId: '',
+      currentVariant: undefined,
+      directoryScoped: {},
+    });
+    useUIStore.setState({ lastUsedEfforts: { 'openai/gpt-5.5': 'high' } });
+
+    useConfigStore.getState().applyDefaultModelAgentSelection();
+
+    expect(useConfigStore.getState().currentVariant).toBe('low');
+    expect(useConfigStore.getState().currentVariantSelection).toEqual({ override: undefined, inherited: 'low' });
+  });
+
+  test('an explicit Default remembered for a model is kept as a choice', () => {
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      providers: [provider('openai', 'gpt-5.5', ['low', 'high'])],
+      agents: [testAgent('build')],
+      settingsDefaultModel: 'openai/gpt-5.5',
+      currentProviderId: '',
+      currentModelId: '',
+      currentVariant: undefined,
+      directoryScoped: {},
+    });
+    useUIStore.setState({ lastUsedEfforts: { 'openai/gpt-5.5': null } });
+
+    useConfigStore.getState().applyDefaultModelAgentSelection();
+
+    const state = useConfigStore.getState();
+    expect(state.currentVariant).toBeUndefined();
+    expect(state.currentVariantSelection).toEqual({ override: undefined, inherited: null });
+  });
+
+  test('a remembered level the model no longer offers is ignored', () => {
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      providers: [provider('openai', 'gpt-5.5', ['low', 'high'])],
+      agents: [testAgent('build')],
+      settingsDefaultModel: 'openai/gpt-5.5',
+      currentProviderId: '',
+      currentModelId: '',
+      currentVariant: undefined,
+      directoryScoped: {},
+    });
+    useUIStore.setState({ lastUsedEfforts: { 'openai/gpt-5.5': 'removed' } });
+
+    useConfigStore.getState().applyDefaultModelAgentSelection();
+
+    const state = useConfigStore.getState();
+    expect(state.currentVariant).toBeUndefined();
+    // Not lowercased into an explicit Default the user never picked.
+    expect(state.currentVariantSelection).toEqual({ override: undefined, inherited: undefined });
+  });
+
+  test('[issue-4601] a remembered level never moves to another model', () => {
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      providers: [{
+        ...provider('openai', 'model-a', ['low', 'high']),
+        models: [
+          provider('openai', 'model-a', ['low', 'high']).models[0],
+          provider('openai', 'model-b', ['low', 'high']).models[0],
+        ],
+      }],
+      agents: [testAgent('plan', { model: { providerID: 'openai', modelID: 'model-b' } })],
+      currentProviderId: 'openai',
+      currentModelId: 'model-a',
+      currentAgentName: 'build',
+      currentVariant: undefined,
+      directoryScoped: {},
+    });
+    useUIStore.setState({ lastUsedEfforts: { 'openai/model-a': 'high' } });
+
+    useConfigStore.getState().setAgent('plan');
+
+    const state = useConfigStore.getState();
+    expect(state.currentModelId).toBe('model-b');
+    expect(state.currentVariant).toBeUndefined();
+    expect(state.currentVariantSelection).toEqual({ override: undefined, inherited: undefined });
+  });
+
+  test('setAgent uses the remembered level for the agent-pinned model', () => {
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      providers: [provider('openai', 'gpt-5.5', ['low', 'high'])],
+      agents: [testAgent('plan', { model: { providerID: 'openai', modelID: 'gpt-5.5' } })],
+      currentProviderId: 'openai',
+      currentModelId: 'gpt-5.5',
+      currentAgentName: 'build',
+      currentVariant: undefined,
+      directoryScoped: {},
+    });
+    useUIStore.setState({ lastUsedEfforts: { 'openai/gpt-5.5': 'high' } });
+
+    useConfigStore.getState().setAgent('plan');
+
+    const state = useConfigStore.getState();
+    expect(state.currentVariant).toBe('high');
+    expect(state.currentVariantSelection).toEqual({ override: undefined, inherited: 'high' });
   });
 
   test('[issue-4601] an agent effort stays with the agent model', () => {

@@ -10,7 +10,7 @@ import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { useConfirmDialog } from '@/components/ui/confirm-dialog';
-import { usePendingComposerReferences } from '@/components/chat/composer/pendingComposerReferences';
+import { usePendingComposerReferences, type ComposerReferenceHandoff } from '@/components/chat/composer/pendingComposerReferences';
 import type { ReferencePickerItem, ReferencePickerSelection } from '@/components/references/referencePickerItems';
 import { readTrackerItemDetail } from '@/components/references/referenceSources';
 import { readTrackerDescriptor } from '@/lib/trackers/registry';
@@ -28,6 +28,7 @@ import { usePullRequestSelectionStore } from '@/stores/usePullRequestSelectionSt
 import { useUIStore } from '@/stores/useUIStore';
 import { useWalkthroughStore } from '@/stores/useWalkthroughStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { getRuntimeKey } from '@/lib/runtime-switch';
 import { useSession } from '@/sync/sync-context';
 import { resolvePullLinkTarget } from './boardRepository';
 import { landsWithIt, mergeChoiceOf } from './mergeChoice';
@@ -146,7 +147,7 @@ export const SourceBoardActions: React.FC<{
     const currentSession = useSession(currentSessionId, currentSessionId ? useSessionUIStore.getState().getDirectoryForSession(currentSessionId) ?? undefined : undefined);
 
     // The item lands on the composer as a chip, never as a sent message.
-    const attachToComposer = () => {
+    const attachToComposer = (target: ComposerReferenceHandoff) => {
         void resolveComposerReferences([selectionOf(item)], {
             sourceControl,
             context,
@@ -155,7 +156,7 @@ export const SourceBoardActions: React.FC<{
                 : Promise.reject(new Error('Trackers are not available here'))),
             trackerName: (provider) => readTrackerDescriptor(provider).name,
         }).then(({ references, failures }) => {
-            if (references.length > 0) usePendingComposerReferences.getState().push(references);
+            if (references.length > 0) usePendingComposerReferences.getState().push(references, target);
             const failure = failures[0];
             if (failure) toast.error(t('sourceBoard.error.attachFailed', { item: failure.label }), { description: failure.error });
         });
@@ -166,14 +167,16 @@ export const SourceBoardActions: React.FC<{
         useSessionUIStore.getState().openNewSessionDraft({ selectedProjectId: project.id, directoryOverride: project.path });
         onLeave?.();
         // The draft opens first, so the chip lands on its composer.
-        attachToComposer();
+        const { workDraftId } = useSessionUIStore.getState().newSessionDraft;
+        if (workDraftId) attachToComposer({ kind: 'draft', workDraftId, runtimeKey: getRuntimeKey() });
     };
 
     // Back to the chat the board covered; its composer takes the chip.
     const attachToCurrentSession = () => {
+        if (!currentSessionId) return;
         useUIStore.getState().closeMainSurfaces();
         onLeave?.();
-        attachToComposer();
+        attachToComposer({ kind: 'session', sessionId: currentSessionId });
     };
 
     // The last method chosen anywhere, while this repository allows it.

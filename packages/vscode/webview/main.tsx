@@ -1,4 +1,3 @@
-import { z } from 'zod';
 import { createVSCodeAPIs } from './api';
 import { createRemovalTombstones } from './inlineCommentRemovals';
 import { resolveCommentTarget } from './inlineCommentTarget';
@@ -27,6 +26,7 @@ import { focusChatInput } from '@openchamber/ui/components/chat/composer/editor/
 import { hostViewerStateSchema, reportHostViewerState } from '@openchamber/ui/lib/surfaceAttention';
 import { vscodeSettingsNavigationSchema } from '@openchamber/ui/lib/settings/vscodeNavigation';
 import { applyVSCodeSettingsNavigation } from '@openchamber/ui/apps/vscodeSettingsNavigation';
+import { applyVSCodeSessionNavigation, vscodeSessionNavigationSchema } from '@openchamber/ui/apps/vscodeSessionNavigation';
 
 type ConnectionStatus = 'connecting' | 'connected' | 'error' | 'disconnected';
 
@@ -1859,16 +1859,10 @@ const showOpenChamberNotification = (payload: { title: string; body: string; ses
   void sendBridgeMessage('api:notifications:show', payload).catch(() => undefined);
 };
 
-const openSessionPayloadSchema = z.object({ sessionId: z.string().min(1) });
-
 // "Open Session" on a notification.
 onCommand('openSession', (payload) => {
-  const sessionId = openSessionPayloadSchema.safeParse(payload).data?.sessionId;
-  if (!sessionId) return;
-  void import('@/sync/session-ui-store').then(({ useSessionUIStore }) => {
-    useSessionUIStore.getState().setCurrentSession(sessionId);
-  });
-  window.dispatchEvent(new CustomEvent('openchamber:navigate', { detail: { view: 'chat' } }));
+  const navigation = vscodeSessionNavigationSchema.safeParse(payload);
+  if (navigation.success) applyVSCodeSessionNavigation(navigation.data);
 });
 
 onCommand('viewerStateChanged', (payload) => {

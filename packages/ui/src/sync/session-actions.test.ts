@@ -455,6 +455,7 @@ mock.module("./sync-refs", () => ({
   getAllSyncSessionMap: () => sessionRecords,
   getDirectoryState: () => undefined,
   getSyncSessionDirectory: () => null,
+  getAllSyncSessions: () => [],
   registerSessionDirectory: (sessionID: string, directory: string) => {
     registeredSessionDirectories.push({ sessionID, directory })
   },

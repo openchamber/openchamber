@@ -1,5 +1,7 @@
 import { asNonEmptyString } from '../shared/guards.js';
 import express from 'express';
+import { z } from 'zod';
+import path from 'node:path';
 import {
   createWorktree as createWorktreeDefault,
   getBranches as getBranchesDefault,
@@ -19,6 +21,7 @@ import { parseModelSelection } from '../opencode/config-v2.js';
 import { expandSnippets } from '../opencode/snippets.js';
 import { AUTO_MODEL_REF, isAutoModel } from '../routing/defaults.js';
 import { parseScheduledCommandPrompt } from '../scheduled-tasks/runtime.js';
+import { CHATS_SCOPE_PUBLIC_ID } from '../scheduled-tasks/chats-scope.js';
 import { buildGoalIntroText, createSessionGoal } from '../session-goal/create.js';
 import { OpenChamberControlError, asControlError } from '../openchamber-control/error.js';
 import { readObjective, writeObjective } from '../session-goal/objectives.js';
@@ -110,6 +113,59 @@ const resolveVariant = (models, providerID, modelID, variant) => {
   return asList(model.variants).some((entry) => entry?.id === normalized) ? normalized : undefined;
 };
 
+const findAgentBySetting = (agents, wantedName) => {
+  const wanted = asNonEmptyString(wantedName)?.toLowerCase();
+  if (!wanted) return null;
+  return agents.find((agent) => agent?.id === wantedName)
+    || agents.find((agent) => typeof agent?.name === 'string' && agent.name.toLowerCase() === wanted)
+    || agents.find((agent) => typeof agent?.id === 'string' && agent.id.toLowerCase() === wanted)
+    || null;
+};
+
+/**
+ * The level a tool-created session should run on for `providerID/modelID`:
+ * the agent's pin and the project or Settings default for that same model
+ * win, then the level the model was last sent with, then Default. A model the
+ * catalog does not list, or a level it no longer offers, is ignored.
+ */
+const resolveSelectionVariant = ({
+  settings,
+  projectDefaults,
+  agents,
+  agentName,
+  models,
+  providerID,
+  modelID,
+}) => {
+  const model = findCatalogModel(models, providerID, modelID);
+  if (!model) return undefined;
+  const offered = asList(model.variants)
+    .map((entry) => asNonEmptyString(entry?.id))
+    .filter(Boolean);
+  if (offered.length === 0) return undefined;
+
+  const agent = findAgentBySetting(agents, agentName);
+  const agentModel = agent?.model;
+  const agentVariant = agentModel?.providerID === providerID && agentModel?.id === modelID
+    ? agentModel.variant
+    : undefined;
+  const projectDefaultModel = splitModel(projectDefaults?.defaultModel);
+  const settingsDefaultModel = splitModel(settings?.defaultModel);
+  const configuredVariant = projectDefaultModel?.providerID === providerID && projectDefaultModel.modelID === modelID
+    ? projectDefaults?.defaultVariant ?? undefined
+    : settingsDefaultModel?.providerID === providerID && settingsDefaultModel.modelID === modelID
+      ? settings?.defaultVariant ?? undefined
+      : undefined;
+  const remembered = settings?.lastUsedEfforts?.[`${providerID}/${modelID}`];
+
+  for (const source of [agentVariant, configuredVariant, remembered]) {
+    if (source === null) return null;
+    const parsed = z.enum(offered).safeParse(source);
+    if (parsed.success) return parsed.data;
+  }
+  return undefined;
+};
+
 const isModelHidden = (hiddenModels, providerID, modelID) => hiddenModels.some(
   (hidden) => hidden?.providerID === providerID && hidden?.modelID === modelID,
 );
@@ -187,19 +243,12 @@ const resolveDefaultSelection = ({ agents, models, settings, projectDefaults, co
   // The project's default agent wins over the global one. v1 stored the agent's
   // display name; v2 agents are addressed by id (`build` vs `Build`), so a
   // setting saved before the upgrade still resolves.
-  const findAgentBySetting = (wantedName) => {
-    const wanted = wantedName.toLowerCase();
-    return agents.find((agent) => agent?.id === wantedName)
-      || agents.find((agent) => typeof agent?.name === 'string' && agent.name.toLowerCase() === wanted)
-      || agents.find((agent) => typeof agent?.id === 'string' && agent.id.toLowerCase() === wanted)
-      || null;
-  };
   const configuredAgent = projectDefaultAgent || settingsDefaultAgent || opencodeDefaultAgent;
-  if (requireDefaultAgent && configuredAgent && !findAgentBySetting(configuredAgent)) {
+  if (requireDefaultAgent && configuredAgent && !findAgentBySetting(agents, configuredAgent)) {
     throw new OpenChamberControlError(`Configured agent '${configuredAgent}' is not available in this directory. Update the default agent in project/global settings or OpenCode config, or pass an explicit agent.`, 503);
   }
-  if (projectDefaultAgent) resolvedAgent = findAgentBySetting(projectDefaultAgent);
-  if (!resolvedAgent && settingsDefaultAgent) resolvedAgent = findAgentBySetting(settingsDefaultAgent);
+  if (projectDefaultAgent) resolvedAgent = findAgentBySetting(agents, projectDefaultAgent);
+  if (!resolvedAgent && settingsDefaultAgent) resolvedAgent = findAgentBySetting(agents, settingsDefaultAgent);
   if (!resolvedAgent && opencodeDefaultAgent) {
     const candidate = agents.find((agent) => agent?.id === opencodeDefaultAgent) || null;
     if (candidate && isPrimaryAgentMode(candidate.mode) && candidate.hidden !== true) {
@@ -407,7 +456,7 @@ const parseArchiveRequest = (payload) => {
   return { ok: true, ids: parsed.ids, archivedAt: archivedAt ?? Date.now() };
 };
 
-const resolveRequestedDirectory = async ({ payload, readSettingsFromDiskMigrated, sanitizeProjects, validateDirectoryPath }) => {
+const resolveRequestedDirectory = async ({ payload, readSettingsFromDiskMigrated, sanitizeProjects, validateDirectoryPath, chatsScope }) => {
   const projectID = asNonEmptyString(payload?.projectId) || asNonEmptyString(payload?.projectID);
   if (projectID) {
     const settings = await readSettingsFromDiskMigrated();
@@ -425,6 +474,15 @@ const resolveRequestedDirectory = async ({ payload, readSettingsFromDiskMigrated
   const directory = asNonEmptyString(payload?.directory);
   const validated = await validateDirectoryPath(directory);
   if (!validated.ok) return { ok: false, status: 400, error: validated.error || 'Invalid directory' };
+  if (chatsScope) {
+    const chatsRoot = await validateDirectoryPath(chatsScope.root);
+    if (chatsRoot.ok) {
+      const relative = path.relative(chatsRoot.directory, validated.directory);
+      if (relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative))) {
+        return { ok: true, directory: validated.directory };
+      }
+    }
+  }
   const settings = await readSettingsFromDiskMigrated();
   const projects = sanitizeProjects(settings?.projects || []);
   let project = projects.find((entry) => entry.path === validated.directory);
@@ -481,6 +539,7 @@ const resolveWorktreeInput = (payload) => {
 
 export const createOpenChamberSessionService = (dependencies) => {
   const {
+    chatsScope = null,
     readSettingsFromDiskMigrated,
     sanitizeProjects,
     validateDirectoryPath,
@@ -630,6 +689,7 @@ export const createOpenChamberSessionService = (dependencies) => {
       if (inPrimaryCheckout) return inPrimaryCheckout;
     }
     const resolved = await resolveRequestedDirectory({
+      chatsScope,
       payload: { directory },
       readSettingsFromDiskMigrated,
       sanitizeProjects,
@@ -730,6 +790,13 @@ export const createOpenChamberSessionService = (dependencies) => {
     let model = requestedModel;
     let agent = requestedAgent;
     let variant = requestedVariant;
+    let selectionInputs = null;
+    const readSelectionInputs = async () => {
+      if (!selectionInputs) {
+        selectionInputs = await fetchSelectionInputs({ client, readSettingsFromDiskMigrated });
+      }
+      return selectionInputs;
+    };
     if (reuseSessionSelection && (!model || !agent)) {
       const previous = await fetchSessionSelection({ client, sessionID });
       if (previous) {
@@ -741,7 +808,7 @@ export const createOpenChamberSessionService = (dependencies) => {
       }
     }
     if (!model || !agent) {
-      const inputs = await fetchSelectionInputs({ client, readSettingsFromDiskMigrated });
+      const inputs = await readSelectionInputs();
       if (!inputs.agents?.length || inputs.config === null) {
         throw new OpenChamberControlError('Session selection is not ready: agent configuration is unavailable', 503);
       }
@@ -780,6 +847,26 @@ export const createOpenChamberSessionService = (dependencies) => {
       const error = new Error('No model is configured or available for the requested directory');
       error.statusCode = 400;
       throw error;
+    }
+    // A new session, or a send that names a model, has no saved session
+    // choice for it. The same source order as the composer applies: the
+    // model's configured level, then the level it was last sent with.
+    if (variant == null && !isAutoModel(model) && (!reuseSessionSelection || requestedModel)) {
+      try {
+        const inputs = await readSelectionInputs();
+        variant = resolveSelectionVariant({
+          settings: inputs.settings,
+          projectDefaults: resolveProjectDefaults(inputs.settings, directory, projectId),
+          agents: inputs.agents,
+          agentName: agent,
+          models: inputs.models,
+          providerID: model.providerID,
+          modelID: model.modelID,
+        });
+      } catch {
+        // The remembered level is an enhancement. A settings read that fails
+        // must not turn a valid model-only dispatch into an error.
+      }
     }
     return { model, agent, variant };
   };
@@ -1032,7 +1119,7 @@ export const createOpenChamberSessionService = (dependencies) => {
     return sessionArchive.unarchive(parsed.ids);
   };
 
-  const create = async (payload = {}, { titleByUser = false } = {}) => {
+  const createInDirectory = async (payload, { titleByUser = false } = {}, onCreated = () => {}) => {
     const title = asNonEmptyString(payload.title);
     const prompt = asNonEmptyString(payload.prompt);
     const goalInput = resolveGoalInput(payload, prompt);
@@ -1043,12 +1130,16 @@ export const createOpenChamberSessionService = (dependencies) => {
     const agent = asNonEmptyString(payload.agent);
     const variant = asNonEmptyString(payload.variant);
 
-    const resolvedDirectory = await resolveRequestedDirectory({
-      payload,
-      readSettingsFromDiskMigrated,
-      sanitizeProjects,
-      validateDirectoryPath,
-    });
+    // Explicit Chats stay projectless even when their root is inside a checkout.
+    const resolvedDirectory = payload.projectId === CHATS_SCOPE_PUBLIC_ID
+      ? await validateDirectoryPath(payload.directory)
+      : await resolveRequestedDirectory({
+        chatsScope,
+        payload,
+        readSettingsFromDiskMigrated,
+        sanitizeProjects,
+        validateDirectoryPath,
+      });
     if (!resolvedDirectory.ok) {
       throw new OpenChamberControlError(resolvedDirectory.error, resolvedDirectory.status || 400);
     }
@@ -1148,6 +1239,8 @@ export const createOpenChamberSessionService = (dependencies) => {
       ...(title ? { title } : {}),
       titleByUser,
     });
+    onCreated();
+
     let dispatch = { model, agent, variant, promptDispatched: false, dispatchedAsCommand: false };
     if (prompt) {
       dispatch = await dispatchPrompt({
@@ -1255,6 +1348,26 @@ export const createOpenChamberSessionService = (dependencies) => {
     }
   };
 
+  const create = async (payload = {}, options = {}) => {
+    const projectId = asNonEmptyString(payload.projectId) || asNonEmptyString(payload.projectID);
+    if (projectId !== CHATS_SCOPE_PUBLIC_ID) return createInDirectory(payload, options);
+    if (asNonEmptyString(payload.directory)) {
+      throw new OpenChamberControlError('Provide only one of projectId or directory', 400);
+    }
+    if (payload.worktree !== undefined || payload.pullRequest !== undefined) {
+      throw new OpenChamberControlError('Chats cannot create a worktree; choose a project', 400);
+    }
+    if (!chatsScope) throw new OpenChamberControlError('Chats are not available on this server', 503);
+    const directory = await chatsScope.createChatDirectory();
+    let created = false;
+    try {
+      return await createInDirectory({ ...payload, projectId: CHATS_SCOPE_PUBLIC_ID, directory }, options, () => { created = true; });
+    } finally {
+      // A prompt can fail after the session exists. Keep that session's folder.
+      if (!created) await chatsScope.discardChatDirectory(directory);
+    }
+  };
+
   const runExisting = async (action, sourceSessionId, payload = {}) => {
     const sourceSessionID = asNonEmptyString(sourceSessionId);
     const prompt = asNonEmptyString(payload.prompt);
@@ -1269,6 +1382,7 @@ export const createOpenChamberSessionService = (dependencies) => {
     let directory = null;
     try {
       const resolvedDirectory = await resolveRequestedDirectory({
+        chatsScope,
         payload,
         readSettingsFromDiskMigrated,
         sanitizeProjects,
@@ -1439,6 +1553,7 @@ export const createOpenChamberSessionService = (dependencies) => {
   // folder fails the same way everywhere.
   const resolveDirectory = async (payload) => {
     const resolved = await resolveRequestedDirectory({
+      chatsScope,
       payload,
       readSettingsFromDiskMigrated,
       sanitizeProjects,

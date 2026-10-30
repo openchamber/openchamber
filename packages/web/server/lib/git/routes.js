@@ -207,9 +207,12 @@ export function registerGitRoutes(app, {
   app.post('/api/git/managed-ssh-credentials', async (req, res) => {
     const input = req.body;
     const keys = input?.operation === 'import' ? ['operation', 'candidateId', 'expectedFingerprint', 'confirmed'] : ['operation'];
+    if (input?.operation !== 'inventory' && Object.hasOwn(input ?? {}, 'passphrase')) keys.push('passphrase');
     if (!input || Object.getPrototypeOf(input) !== Object.prototype
       || !['inventory', 'discover', 'import'].includes(input.operation)
       || Object.keys(input).length !== keys.length || !keys.every((key) => Object.hasOwn(input, key))
+      || (Object.hasOwn(input, 'passphrase') && (!isString(input.passphrase)
+        || input.passphrase.length > 1024 || /[\0\r\n]/.test(input.passphrase)))
       || (input.operation === 'import' && (input.confirmed !== true || !isString(input.candidateId)
         || !/^[A-Za-z0-9_-]{1,200}$/.test(input.candidateId) || !isString(input.expectedFingerprint)
         || !/^SHA256:[A-Za-z0-9+/]{43}=?$/.test(input.expectedFingerprint)))) {

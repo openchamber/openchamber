@@ -58,7 +58,7 @@ let forcePreserveManualOverride: boolean | null = null;
 /** Every effort written for the session, in order, including `undefined`. */
 const variantWrites: VariantChoice[] = [];
 /** Every `(override, inherited)` pair pushed into the config store. */
-const overrideWrites: Array<{ override: VariantChoice; inherited: string | undefined }> = [];
+const overrideWrites: Array<{ override: VariantChoice; inherited: VariantChoice }> = [];
 /** Every model remembered as the last chat pick. */
 const lastSelectedWrites: string[] = [];
 
@@ -72,7 +72,7 @@ type ConfigState = {
   currentProviderId: string;
   currentModelId: string;
   currentVariant: string | undefined;
-  currentVariantSelection: { override: VariantChoice; inherited: string | undefined };
+  currentVariantSelection: { override: VariantChoice; inherited: VariantChoice };
   currentAgentName: string | undefined;
   settingsDefaultModel: string | undefined;
   settingsDefaultVariant: string | undefined;
@@ -83,7 +83,7 @@ type ConfigState = {
   setModel: (modelId: string) => void;
   setAgent: (agentName: string, options?: { keepModel?: boolean }) => void;
   setCurrentVariant: (variant: string | undefined) => void;
-  setCurrentVariantOverride: (override: VariantChoice, inherited: string | undefined) => void;
+  setCurrentVariantOverride: (override: VariantChoice, inherited: VariantChoice) => void;
   getCurrentProvider: () => typeof provider | undefined;
   getCurrentAgent: () => TestAgent;
   getVisibleAgents: () => TestAgent[];
@@ -128,7 +128,7 @@ const useConfigStore = create<ConfigState>((set, get) => ({
   },
   setCurrentVariantOverride: (override, inherited) => {
     set((state) => {
-      const currentVariant = override === null ? undefined : override ?? inherited;
+      const currentVariant = override === null ? undefined : (override ?? inherited) ?? undefined;
       if (
         state.currentVariant === currentVariant
         && state.currentVariantSelection.override === override
@@ -217,7 +217,30 @@ const useSessionUIStore = create<SessionUIState>(() => ({
   getDirectoryForSession: () => '/workspace/project',
 }));
 
-const useUIStore = create(() => ({
+type UIStoreMock = {
+  isMobile: boolean;
+  isModelSelectorOpen: boolean;
+  hiddenModels: Array<{ providerID: string; modelID: string }>;
+  favoriteAgents: string[];
+  toggleFavoriteAgent: (agentName: string) => void;
+  providerOrder: string[];
+  shortcutOverrides: Record<string, string>;
+  isFavoriteModel: (providerID: string, modelID: string) => boolean;
+  toggleFavoriteModel: (providerID: string, modelID: string) => void;
+  reorderFavoriteModel: (providerID: string, modelID: string, targetIndex: number) => void;
+  setProviderOrder: (order: string[]) => void;
+  setModelSelectorOpen: (open: boolean) => void;
+  setSettingsDialogOpen: (open: boolean) => void;
+  setSettingsPage: (page: string) => void;
+  addRecentAgent: (agentName: string) => void;
+  addRecentModel: (providerID: string, modelID: string) => void;
+  setLastSelectedModel: (providerID: string, modelID: string) => void;
+  addRecentEffort: (providerID: string, modelID: string, variant: string | undefined) => void;
+  lastUsedEfforts: Record<string, string | null>;
+  rememberLastUsedEffort: (providerID: string, modelID: string, variant: string | null) => void;
+};
+
+const useUIStore = create<UIStoreMock>((set) => ({
   isMobile: false,
   isModelSelectorOpen: false,
   hiddenModels: [],
@@ -236,6 +259,10 @@ const useUIStore = create(() => ({
   addRecentModel: () => undefined,
   setLastSelectedModel: (providerID: string, modelID: string) => { lastSelectedWrites.push(`${providerID}/${modelID}`); },
   addRecentEffort: () => undefined,
+  lastUsedEfforts: {} as Record<string, string | null>,
+  rememberLastUsedEffort: (providerID: string, modelID: string, variant: string | null) => set((state) => ({
+    lastUsedEfforts: { ...state.lastUsedEfforts, [`${providerID}/${modelID}`]: variant },
+  })),
 }));
 
 const passthrough = ({ children }: React.PropsWithChildren) => <div>{children}</div>;
@@ -323,8 +350,13 @@ mock.module('@/components/ui/tooltip', () => ({
 }));
 mock.module('@/components/icon/Icon', () => ({ Icon: () => null }));
 mock.module('@/components/model-picker/ModelPickerList', () => ({
-  ModelPickerList: ({ onSelect }: React.ComponentProps<typeof import('@/components/model-picker/ModelPickerList').ModelPickerList>) => (
-    <button onClick={() => onSelect({ providerID: PROVIDER_ID, modelID: MODEL_ID, model })}>{MODEL_ID}</button>
+  ModelPickerList: ({ onSelect, onActiveKeyDown }: React.ComponentProps<typeof import('@/components/model-picker/ModelPickerList').ModelPickerList>) => (
+    <div
+      data-testid="model-picker-host"
+      onKeyDown={(event) => onActiveKeyDown?.(event, { providerID: PROVIDER_ID, modelID: MODEL_ID, model })}
+    >
+      <button onClick={() => onSelect({ providerID: PROVIDER_ID, modelID: MODEL_ID, model })}>{MODEL_ID}</button>
+    </div>
   ),
   ModelPickerCardBody: () => null,
 }));
@@ -442,7 +474,7 @@ describe('ModelControls effort restore', () => {
     setSessionRecord(undefined);
     forcePreserveManualOverride = null;
     useSessionUIStore.setState({ currentSessionId: SESSION_ID });
-    useUIStore.setState({ isMobile: false, isModelSelectorOpen: false });
+    useUIStore.setState({ isMobile: false, isModelSelectorOpen: false, lastUsedEfforts: {} });
     useSelectionStore.setState({
       savedVariant: undefined,
       sessionAgentSelections: new Map([[SESSION_ID, AGENT]]),
@@ -646,6 +678,153 @@ describe('ModelControls effort restore', () => {
 
   const OTHER_MODEL_ID = 'gpt-other';
   const twoModelProvider = { ...provider, models: [model, { ...model, id: OTHER_MODEL_ID, name: OTHER_MODEL_ID }] };
+
+  test('a draft starts on the level its model was last sent with', async () => {
+    useSessionUIStore.setState({ currentSessionId: null });
+    useUIStore.setState({ lastUsedEfforts: { [`${PROVIDER_ID}/${MODEL_ID}`]: 'high' } });
+
+    const { dom, cleanup } = await renderModelControls();
+    try {
+      expect(useConfigStore.getState().currentVariant).toBe('high');
+      expect(useConfigStore.getState().currentVariantSelection).toEqual({
+        override: undefined,
+        inherited: 'high',
+      });
+      // The tooltip names it as remembered, not as the model's configured default.
+      expect(dom.container.textContent).toContain('last used with this model');
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('a configured level wins over the remembered level', async () => {
+    useSessionUIStore.setState({ currentSessionId: null });
+    useConfigStore.setState({
+      settingsDefaultModel: `${PROVIDER_ID}/${MODEL_ID}`,
+      settingsDefaultVariant: 'low',
+    });
+    useUIStore.setState({ lastUsedEfforts: { [`${PROVIDER_ID}/${MODEL_ID}`]: 'high' } });
+
+    const { dom, cleanup } = await renderModelControls();
+    try {
+      expect(useConfigStore.getState().currentVariant).toBe('low');
+      expect(dom.container.textContent).toContain("this model's default");
+      expect(dom.container.textContent).not.toContain('last used with this model');
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('an explicit Default remembered for a model is kept as a choice', async () => {
+    useSessionUIStore.setState({ currentSessionId: null });
+    useUIStore.setState({ lastUsedEfforts: { [`${PROVIDER_ID}/${MODEL_ID}`]: null } });
+
+    const { dom, cleanup } = await renderModelControls();
+    try {
+      expect(useConfigStore.getState().currentVariant).toBeUndefined();
+      expect(useConfigStore.getState().currentVariantSelection).toEqual({
+        override: undefined,
+        inherited: null,
+      });
+      expect(dom.container.querySelector('.model-controls__variant-label')?.textContent?.trim()).toBe('Default');
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('a remembered level the model no longer offers is ignored', async () => {
+    useSessionUIStore.setState({ currentSessionId: null });
+    useUIStore.setState({ lastUsedEfforts: { [`${PROVIDER_ID}/${MODEL_ID}`]: 'removed' } });
+
+    const { cleanup } = await renderModelControls();
+    try {
+      expect(useConfigStore.getState().currentVariant).toBeUndefined();
+      // Not an explicit Default the user never picked.
+      expect(useConfigStore.getState().currentVariantSelection).toEqual({
+        override: undefined,
+        inherited: undefined,
+      });
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('[issue-4601] a remembered level does not follow the user to another model', async () => {
+    useSessionUIStore.setState({ currentSessionId: null });
+    useConfigStore.setState({ providers: [twoModelProvider] });
+    useUIStore.setState({ lastUsedEfforts: { [`${PROVIDER_ID}/${MODEL_ID}`]: 'high' } });
+
+    const { dom, cleanup } = await renderModelControls();
+    try {
+      expect(useConfigStore.getState().currentVariant).toBe('high');
+
+      await act(async () => { useConfigStore.getState().setModel(OTHER_MODEL_ID); });
+      expect(useConfigStore.getState().currentVariant).toBeUndefined();
+      expect(useConfigStore.getState().currentVariantSelection).toEqual({
+        override: undefined,
+        inherited: undefined,
+      });
+      expect(dom.container.querySelector('.model-controls__variant-label')?.textContent?.trim()).toBe('Default');
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('choosing a level in the picker remembers it without a send', async () => {
+    useSessionUIStore.setState({ currentSessionId: null });
+    useConfigStore.setState({ currentVariantSelection: { override: undefined, inherited: undefined } });
+
+    const { dom, cleanup } = await renderModelControls();
+    try {
+      await act(async () => dom.container.querySelector<HTMLButtonElement>('.model-controls__variant-trigger')?.click());
+      const highButton = Array.from(dom.container.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'High');
+      await act(async () => highButton?.click());
+
+      expect(useConfigStore.getState().currentVariantSelection.override).toBe('high');
+      expect(useUIStore.getState().lastUsedEfforts).toEqual({ [`${PROVIDER_ID}/${MODEL_ID}`]: 'high' });
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('choosing Default in the picker remembers it as a real choice', async () => {
+    useSessionUIStore.setState({ currentSessionId: null });
+    useConfigStore.setState({ currentVariantSelection: { override: undefined, inherited: undefined } });
+
+    const { dom, cleanup } = await renderModelControls();
+    try {
+      await act(async () => dom.container.querySelector<HTMLButtonElement>('.model-controls__variant-trigger')?.click());
+      const defaultButton = Array.from(dom.container.querySelectorAll('button'))
+        .filter((button) => button.textContent?.trim() === 'Default')
+        .at(-1);
+      await act(async () => defaultButton?.click());
+
+      expect(useConfigStore.getState().currentVariantSelection.override).toBeNull();
+      expect(useUIStore.getState().lastUsedEfforts).toEqual({ [`${PROVIDER_ID}/${MODEL_ID}`]: null });
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('arrow keys in the model picker remember the adjusted level before a model is chosen', async () => {
+    useUIStore.setState({ isModelSelectorOpen: true });
+
+    const { dom, cleanup } = await renderModelControls();
+    try {
+      const host = dom.container.querySelector('[data-testid="model-picker-host"]');
+      await act(async () => {
+        host?.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+      });
+
+      // Default -> low on the row's own line, remembered for that model.
+      expect(useUIStore.getState().lastUsedEfforts).toEqual({ [`${PROVIDER_ID}/${MODEL_ID}`]: 'low' });
+      // The row is still adjusting its pending level; no session choice was
+      // written for the model.
+      expect(variantWrites).toEqual([]);
+    } finally {
+      await cleanup();
+    }
+  });
 
   test('[issue-4601] the settings effort applies on the settings model only', async () => {
     useSessionUIStore.setState({ currentSessionId: null });
@@ -893,6 +1072,7 @@ describe('ModelControls effort restore', () => {
       const { dom, cleanup } = await renderModelControls({
         sessionId: btwSessionId,
         selection: { model: { providerId: PROVIDER_ID, modelId: MODEL_ID }, agent: 'plan', variant },
+        rememberVariantPicks: false,
       });
       try {
         expect(overrideWrites).toEqual([]);
@@ -911,9 +1091,15 @@ describe('ModelControls effort restore', () => {
         expect(saveAgentModel.mock.calls.at(-1)).toEqual([btwSessionId, 'plan', PROVIDER_ID, MODEL_ID]);
 
         await act(async () => dom.container.querySelector<HTMLButtonElement>('.model-controls__variant-trigger')?.click());
-        const defaultButton = Array.from(dom.container.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Default');
+        // On mobile the trigger itself reads "Default" too; the last one is the
+        // panel entry that actually picks it.
+        const defaultButton = Array.from(dom.container.querySelectorAll('button'))
+          .filter((button) => button.textContent?.trim() === 'Default')
+          .at(-1);
         await act(async () => defaultButton?.click());
         expect(saveVariant.mock.calls.at(-1)).toEqual([btwSessionId, 'plan', PROVIDER_ID, MODEL_ID, null]);
+        // A BTW picker sees the model's memory but never rewrites it.
+        expect(useUIStore.getState().lastUsedEfforts).toEqual({});
         const config = useConfigStore.getState();
         expect([config.currentProviderId, config.currentModelId, config.currentAgentName, config.currentVariant])
           .toEqual(['main-provider', 'main-model', AGENT, 'low']);
@@ -922,6 +1108,52 @@ describe('ModelControls effort restore', () => {
         await cleanup();
         for (const write of [saveModel, saveAgentModel, saveVariant]) write.mockRestore();
         useSelectionStore.setState(selections);
+      }
+    });
+  }
+
+  for (const isMobile of [false, true]) {
+    test(`reselecting the controlled model preserves Default (mobile: ${isMobile})`, async () => {
+      useUIStore.setState({ isMobile, lastUsedEfforts: { [`${PROVIDER_ID}/${MODEL_ID}`]: 'high' } });
+      const saveVariant = spyOn(useSelectionStore.getState(), 'saveAgentModelVariantForSession');
+      const { dom, cleanup } = await renderModelControls({
+        sessionId: 'pinned-default',
+        selection: { model: { providerId: PROVIDER_ID, modelId: MODEL_ID }, agent: 'plan', variant: null },
+      });
+      try {
+        await act(async () => dom.container.querySelector<HTMLButtonElement>('.model-controls__model-trigger')?.click());
+        const modelButton = Array.from(dom.container.querySelectorAll<HTMLButtonElement>('button:not(.model-controls__model-trigger)'))
+          .find((button) => button.textContent?.trim() === MODEL_ID);
+        expect(modelButton).toBeDefined();
+        await act(async () => modelButton?.click());
+        expect(saveVariant.mock.calls.at(-1)).toEqual(['pinned-default', 'plan', PROVIDER_ID, MODEL_ID, null]);
+      } finally {
+        await cleanup();
+        saveVariant.mockRestore();
+      }
+    });
+
+    test(`a controlled model pick applies its remembered effort without rewriting it (mobile: ${isMobile})`, async () => {
+      useUIStore.setState({ isMobile, lastUsedEfforts: { [`${PROVIDER_ID}/${MODEL_ID}`]: 'high' } });
+      useConfigStore.setState({ providers: [twoModelProvider] });
+      const saveVariant = spyOn(useSelectionStore.getState(), 'saveAgentModelVariantForSession');
+      const { dom, cleanup } = await renderModelControls({
+        sessionId: 'btw-pending:ses_restore',
+        selection: { model: { providerId: PROVIDER_ID, modelId: OTHER_MODEL_ID }, agent: 'plan', variant: 'low' },
+        rememberVariantPicks: false,
+      });
+      try {
+        await act(async () => dom.container.querySelector<HTMLButtonElement>('.model-controls__model-trigger')?.click());
+        const modelButton = Array.from(dom.container.querySelectorAll<HTMLButtonElement>('button:not(.model-controls__model-trigger)'))
+          .find((button) => button.textContent?.trim() === MODEL_ID);
+        expect(modelButton).toBeDefined();
+        await act(async () => modelButton?.click());
+
+        expect(saveVariant.mock.calls.at(-1)).toEqual(['btw-pending:ses_restore', 'plan', PROVIDER_ID, MODEL_ID, 'high']);
+        expect(useUIStore.getState().lastUsedEfforts).toEqual({ [`${PROVIDER_ID}/${MODEL_ID}`]: 'high' });
+      } finally {
+        await cleanup();
+        saveVariant.mockRestore();
       }
     });
   }

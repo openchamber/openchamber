@@ -13,6 +13,7 @@ import type { TurnChangedFile, TurnGroupingContext } from '../lib/turns/types';
 import { cn } from '@/lib/utils';
 import { isEmptyTextPart, extractTextContent } from './partUtils';
 import { isInvisibleText } from '@/lib/invisibleText';
+import { attachmentBasename } from '@/lib/attachmentIdentity';
 import { FadeInOnReveal } from './FadeInOnReveal';
 import { SessionNoticeBlock } from './SessionNoticeBlock';
 import { readSessionNoticePart } from '@/lib/opencode/session-notices';
@@ -456,7 +457,7 @@ const UserMessageBody = React.memo(({ messageId, parts, messageCreatedAt, isMobi
 
     const sessionMentionChips = React.useMemo(() => sessionMentionChipsOf(parts), [parts]);
     const attachmentFilenames = React.useMemo(() => parts.flatMap((part) => (
-        part.type === 'file' && part.filename ? [part.filename] : []
+        part.type === 'file' && part.filename ? [attachmentBasename(part.filename)] : []
     )), [parts]);
 
     const attachmentFiles = React.useMemo(() => parts.filter((part): part is FilePart => (

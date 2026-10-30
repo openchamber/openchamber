@@ -264,6 +264,14 @@ through `getRuntimeUrlResolver().authenticatedAsset('/api/fs/raw', …)` with
 the scoped URL token; the server streams byte ranges so playback can seek.
 Images keep the object-URL/data-URL path.
 
+On Capacitor with active proxy headers, `useRawAssetUrl` reads PDF, audio,
+video and fonts through `runtimeFetch` into an object URL. Reads retain at
+most the existing 10 MiB file-open limit and have a 30-second deadline. A
+file, revision or runtime change aborts the old read and revokes its URL;
+unmount does the same. Failed reads show the existing error without falling
+back to an unauthenticated browser URL. Playback seeks within the downloaded
+file and needs no URL-token renewal. Other runtimes keep streamed byte ranges.
+
 `useRawAssetUrl` makes that URL once per file, revision and runtime and holds
 it, so the shared token rotating never touches an open preview: a PDF stays
 on its page, a player keeps playing, a font stays registered. The server
@@ -275,6 +283,14 @@ state. One
 renewal per ten seconds; a renewal that returns the same URL, or fails, shows
 "cannot be played". A file changed on disk bumps the revision, which gives the
 preview a new URL and loads the new bytes.
+
+### Why proxy-protected mobile previews buffer the file
+
+Browser media elements cannot attach proxy headers, and a scoped URL token
+only authenticates to OpenChamber. Reading through the shared HTTP transport
+keeps proxy credentials out of URLs and preserves redirect refusal. The
+existing file-open limit bounds retained bytes, at the cost of waiting for
+the file to finish downloading before playback starts.
 
 ### Why the URL is held and not rebuilt with every new token
 

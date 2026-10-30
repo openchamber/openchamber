@@ -13,8 +13,9 @@
  */
 
 import type { ContextPartMetadata } from "@/lib/messages/contextParts"
+import { readEffortRevision, rememberEffort } from "@/lib/modelEfforts"
 import { create } from "zustand"
-import { isSameModelRef, toModelRef, type Metadata, type ModelRef, type Part, type Session, type TextPart } from "@/lib/opencode/model"
+import { type Metadata, type Part, type Session, type TextPart } from "@/lib/opencode/model"
 import type { AttachedFile, SessionWorktreeAttachment } from "@/stores/types/sessionTypes"
 import { permissionModeForNewSession, type PermissionMode } from "@/stores/utils/permissionAutoAccept"
 import type { WorktreeMetadata } from "@/types/worktree"
@@ -27,6 +28,7 @@ import { useProjectsStore } from "@/stores/useProjectsStore"
 import { useSessionDisplayStore } from "@/stores/useSessionDisplayStore"
 import { syncSessionKnowledge } from "@/lib/sessionKnowledgeApi"
 import { fetchResponseStyleInstruction } from "@/lib/responseStyle"
+import { attachmentWireName } from "@/lib/attachmentIdentity"
 import { useGlobalSessionsStore, resolveGlobalSessionDirectory } from "@/stores/useGlobalSessionsStore"
 import { isDirectoryUnknown, useDirectoryStore } from "@/stores/useDirectoryStore"
 import { useSessionFoldersStore } from "@/stores/useSessionFoldersStore"
@@ -66,6 +68,9 @@ import {
   type SessionDirectoryResolution,
   type SessionDirectorySources,
 } from "./session-directory-resolution"
+import { resolveSendSelection } from "./session-selection"
+
+export { resolveSendSelection } from "./session-selection"
 import { markSessionViewed } from "./notification-store"
 import { setActiveSession } from "./sync-context"
 import {
@@ -102,8 +107,7 @@ import { useSelectionStore } from "./selection-store"
 import { getViewportSessionMemory, useViewportStore, viewportSessionKey } from "./viewport-store"
 import { useSessionWorktreeStore } from "./session-worktree-store"
 import { getAttachedSessionDirectory } from "./session-worktree-contract"
-import { setSessionOpener } from "./session-navigation"
-import { getRuntimeKey, isTransientRuntimeKey } from "@/lib/runtime-switch"
+import { captureRuntimeInstance, getRuntimeKey, isTransientRuntimeKey } from "@/lib/runtime-switch"
 import { clearLastActiveSession, persistLastActiveSession, readLastActiveSession } from "./last-session-cache"
 import { createSessionDraftId, useSessionDraftsStore } from "@/stores/useSessionDraftsStore"
 import { persistWorktreeTopology, readPersistedWorktreeTopology } from "./worktree-topology-cache"
@@ -147,38 +151,6 @@ export function expandSlashCommandGoalObjective(content: string, commands: GoalC
 // ---------------------------------------------------------------------------
 // Send routing — shell mode, slash commands, or normal prompt
 // ---------------------------------------------------------------------------
-
-/**
- * The model and agent a send has to switch the session to, or nothing.
- *
- * OpenCode 2.x keeps the selection on the session: `session.model` and
- * `session.agent` are what the next turn runs on. Passing the composer's
- * current pick on every prompt would re-switch the session constantly and
- * write a switch record into the transcript, so only a difference from the
- * session's own record travels.
- */
-/**
- * The model/agent a send has to switch the session to, or nothing when the
- * session already runs on the desired selection. Sending them on every turn
- * would make OpenCode record a switch (and two round trips) each time.
- */
-export function resolveSendSelection(
-  sessionId: string,
-  directory: string | undefined,
-  desired: { providerID: string; modelID: string; variant?: string | null; agent?: string },
-): { model?: ModelRef; agent?: string } {
-  const sessions = getDirectoryState(directory)?.session ?? getAllSyncSessions()
-  const session = sessions.find((candidate) => candidate.id === sessionId)
-  // Compared in wire form: an explicit `Default` (null) switches the session
-  // off an effort once, then matches the `"default"` OpenCode records for it.
-  const model = toModelRef({ providerID: desired.providerID, id: desired.modelID, variant: desired.variant })
-  const modelChanged = !session?.model || !isSameModelRef(session.model, model)
-  const agentChanged = Boolean(desired.agent) && session?.agent !== desired.agent
-  return {
-    model: modelChanged ? model : undefined,
-    agent: agentChanged ? desired.agent : undefined,
-  }
-}
 
 export async function routeMessage(params: {
   runtimeKey?: string
@@ -402,6 +374,14 @@ type SendMessageOptions = {
    * replaces the composer's armed goal, which belongs to the composer text.
    */
   queuedGoal?: QueuedMessageGoal | null
+  /**
+   * A person sent this from a composer: after a successful prompt, remember
+   * the level it actually carried for that model. Background, BTW and queued
+   * delivery leave this unset and never overwrite the remembered level.
+   */
+  recordEffort?: boolean
+  /** Revision captured with the composer's selection, before async preparation. */
+  effortRevision?: number
 }
 
 type AssistantMessageSessionExecution = {
@@ -2170,6 +2150,8 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     options?: SendMessageOptions,
   ) => {
     const capturedTarget = options?.target
+    const effortRevision = options?.effortRevision ?? readEffortRevision(providerID, modelID)
+    const isCurrentRuntimeInstance = captureRuntimeInstance()
     const capturedRuntimeKey = capturedTarget?.runtimeKey ?? getRuntimeKey()
     if (capturedTarget && capturedTarget.runtimeKey !== getRuntimeKey()) {
       throw new Error("Message was not sent because the runtime changed.")
@@ -2354,11 +2336,11 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
           type: "file" as const,
           mime: a.mimeType,
           url: a.dataUrl,
-          filename: a.filename,
+          filename: attachmentWireName(a),
         }))
 
         try {
-          await routeMessage({
+          const draftRoute = await routeMessage({
             runtimeKey: capturedRuntimeKey,
             sessionId,
             directory: sessionDirectory,
@@ -2384,10 +2366,13 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
                 type: "file" as const,
                 mime: a.mimeType,
                 url: a.dataUrl,
-                filename: a.filename,
+                filename: attachmentWireName(a),
               })),
             })),
           })
+          if (draftRoute !== "shell" && options?.recordEffort && isCurrentRuntimeInstance()) {
+            rememberEffort(providerID, modelID, variant ?? null, effortRevision)
+          }
         } catch (error) {
           // The send can fail before the create response (a lost connection,
           // a command lookup): the creation still settles, and what the
@@ -2468,7 +2453,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         type: "file" as const,
         mime: a.mimeType,
         url: a.dataUrl,
-        filename: a.filename,
+        filename: attachmentWireName(a),
       }))
 
       // Standing project context (pinned notes and plans, the memory index) and
@@ -2492,7 +2477,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         ? () => useInputHistoryStore.getState().appendSubmissions(historyIdentity, historySubmissions)
         : undefined
 
-      await routeMessage({
+      const routed = await routeMessage({
         runtimeKey: capturedRuntimeKey,
         sessionId: targetSessionId || "",
         directory: currentSessionDirectory,
@@ -2516,10 +2501,13 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
             type: "file" as const,
             mime: a.mimeType,
             url: a.dataUrl,
-            filename: a.filename,
+            filename: attachmentWireName(a),
           })),
         })),
       })
+      if (routed !== "shell" && options?.recordEffort && isCurrentRuntimeInstance()) {
+        rememberEffort(providerID, modelID, variant ?? null, effortRevision)
+      }
       // Keep restore failures outside the send promise and its retry path.
       void resumeAfterSend?.().catch(console.warn)
     })
@@ -2889,10 +2877,6 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     }
   },
 }))
-
-setSessionOpener((sessionID, directory) => {
-  useSessionUIStore.getState().setCurrentSession(sessionID, directory)
-})
 
 // Write-through persist of the worktree map whenever discovery refreshes it.
 // Reference-equality guard filters hot session updates; the serialized
