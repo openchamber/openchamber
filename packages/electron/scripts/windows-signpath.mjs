@@ -33,13 +33,13 @@ const DIR_ENV = 'OPENCHAMBER_SIGNPATH_DIR';
 // electron-builder writes the uninstaller next to the installer under this suffix.
 const BUILDER_UNINSTALLER_SUFFIX = '__uninstaller.exe';
 
-export const APP_EXE = 'OpenChamber.exe';
-export const UNINSTALLER_EXE = 'uninstaller.exe';
+const APP_EXE = 'OpenChamber.exe';
+const UNINSTALLER_EXE = 'uninstaller.exe';
 
-export const unpackedDirName = (arch) => (arch === 'x64' ? 'win-unpacked' : `win-${arch}-unpacked`);
+const unpackedDirName = (arch) => (arch === 'x64' ? 'win-unpacked' : `win-${arch}-unpacked`);
 
 /** Whether a PE file carries an Authenticode signature (a non-empty certificate table). */
-export const hasAuthenticodeSignature = (filePath) => {
+const hasAuthenticodeSignature = (filePath) => {
   const bytes = fs.readFileSync(filePath);
   const peOffset = bytes.readUInt32LE(0x3c);
   const optionalHeader = peOffset + 24;
@@ -115,7 +115,7 @@ const requireSigned = (filePath) => {
 };
 
 /** Pass 1: build the app unsigned and stage our executables in `outDir` for signing. */
-export const buildApp = (arch, outDir) => {
+const buildApp = (arch, outDir) => {
   fs.rmSync(outDir, { recursive: true, force: true });
   runPackage(arch, 'collect', outDir, []);
   fs.copyFileSync(path.join(ELECTRON_DIR, 'dist', unpackedDirName(arch), APP_EXE), path.join(outDir, APP_EXE));
@@ -125,7 +125,7 @@ export const buildApp = (arch, outDir) => {
 };
 
 /** Pass 2: build the installer from the unpacked app in `unpackedDir` and the signed files in `signedDir`. */
-export const buildInstaller = (arch, unpackedDir, signedDir) => {
+const buildInstaller = (arch, unpackedDir, signedDir) => {
   requireSigned(path.join(signedDir, APP_EXE));
   requireSigned(path.join(signedDir, UNINSTALLER_EXE));
   const actual = readPeArchitecture(path.join(signedDir, APP_EXE));
@@ -135,7 +135,7 @@ export const buildInstaller = (arch, unpackedDir, signedDir) => {
 };
 
 /** After the installer in `dir` is signed: regenerate its blockmap and point latest.yml at the signed bytes. */
-export const finalizeInstaller = async (dir, version) => {
+const finalizeInstaller = async (dir, version) => {
   const installers = fs.readdirSync(dir).filter((name) => name.endsWith('.exe'));
   if (installers.length !== 1) throw new Error(`Expected one installer in ${dir}, found ${installers.join(', ') || 'none'}`);
   const installer = path.join(dir, installers[0]);
