@@ -48,6 +48,33 @@ The loader owns shared history coverage and request reconciliation. A viewport
 owns only its navigation continuation, so ending that viewport's effects stops
 local movement and subsequent demand without discarding a valid shared read.
 
+### Quote source navigation
+
+Clicking a quote loads older history before scrolling to its source. A source
+already loaded needs no request. Before paging, the client checks whether the
+source still exists. A confirmed 404 stops the search and shows the
+missing-message notice. Other lookup failures leave its existence unknown, so
+history loading still runs. Pending quote reveal stops on user scroll input,
+including while history is loading, or when the chat changes sessions or unmounts.
+
+Assistant replies without `parentID` are absent from the controller's turn
+index. Quotes use the rendered message list's own index to reach these replies.
+The controller's turn indexing stays unchanged.
+
+### Why quote reveal waits for text
+
+Message navigation opens folded Activity before aligning the source. Its body
+and lazy Markdown can mount after the scroll completes, so quote reveal observes
+source mutations until the renderer is ready. Lazy Markdown fallbacks carry
+`data-chat-quote-pending`, including the raw-text mobile fallback. Once the source
+has mounted without a fallback, an unresolved anchor ends the search. Mutations
+inside unrelated messages do not schedule another lookup. A new reveal, user
+input, scroller/session change or unmount disconnects that observer. There is no
+per-frame polling while waiting.
+Legacy quotes use GFM with chat's double-tilde rule and preserve the renderer's
+structural whitespace and code headers before matching the rendered text stream; a repeated
+fragment without context remains ambiguous. Saved modern anchors stay literal.
+
 ## Session list retention
 
 `ChatViewport` keeps up to four `MessageList` subtrees, including the visible

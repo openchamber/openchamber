@@ -3,6 +3,7 @@ import { Window } from 'happy-dom';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { getDefaultTheme } from '@/lib/theme/themes';
+import { legacyChatQuoteAnchor, resolveChatQuoteAnchor } from '@/lib/chatQuoteAnchor';
 
 const browser = new Window({ url: 'http://localhost/' });
 Object.assign(globalThis, { window: browser, document: browser.document, navigator: browser.navigator,
@@ -56,6 +57,17 @@ test('renders semantic Markdown through native Streamdown code and table compone
   expect(tableWrapper?.lastElementChild?.querySelector('table')).not.toBeNull();
   expect(Array.from(host.querySelector('pre code')?.children ?? []).map((line) => line.textContent).join('\n')).toBe('first\nsecond');
   expect(host.querySelector('[data-oc-code-source]')?.getAttribute('data-oc-code-source')).toBe('first\nsecond');
+});
+
+test('legacy quotes cross prose and fenced code in the application renderer', async () => {
+  for (const language of ['js', 'JS', '']) {
+    const markdown = `Before\n\n\`\`\`${language}\nconst x=1;\n\`\`\`\n\nAfter`;
+    await render(markdown);
+    const content = host.querySelector('[data-markdown-content]')!;
+    const anchor = legacyChatQuoteAnchor(markdown);
+    expect(anchor.text).toBe(content.textContent?.trim());
+    expect(resolveChatQuoteAnchor(content, anchor)?.toString()).toBe(anchor.text);
+  }
 });
 
 test('invisible-only blocks leave no paragraphs or arrival wrappers in either render mode', async () => {
