@@ -4,6 +4,7 @@ const gitLibraries = {
   getPathDiff: vi.fn(),
   getPathDiffs: vi.fn(),
   getFileDiff: vi.fn(),
+  getLog: vi.fn(),
   stageFiles: vi.fn(),
   unstageFiles: vi.fn(),
   isGitRepository: vi.fn(),
@@ -37,6 +38,7 @@ vi.mock('./index.js', () => ({
   getPathDiff: gitLibraries.getPathDiff,
   getPathDiffs: gitLibraries.getPathDiffs,
   getFileDiff: gitLibraries.getFileDiff,
+  getLog: gitLibraries.getLog,
   stageFiles: gitLibraries.stageFiles,
   unstageFiles: gitLibraries.unstageFiles,
   isGitRepository: gitLibraries.isGitRepository,
@@ -324,6 +326,39 @@ describe('git route renderer DTOs', () => {
     };
     expect(gitLibraries.setLocalIdentity).toHaveBeenCalledWith('/repo', publicProfile);
     expect(response.body).toEqual({ success: true, profile: publicProfile });
+  });
+});
+
+describe('git log errors', () => {
+  it('returns a missing revision as 404 without logging a server failure', async () => {
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app);
+    gitLibraries.getLog.mockRejectedValueOnce(Object.assign(new Error("Revision 'feature' not found"), { code: 'revision_not_found' }));
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const res = createMockResponse();
+      await getRoute('GET', '/api/git/log')({ query: { directory: '/repo', to: 'feature' } }, res);
+      expect(res.statusCode).toBe(404);
+      expect(res.body).toMatchObject({ code: 'revision_not_found' });
+      expect(log).not.toHaveBeenCalled();
+    } finally {
+      log.mockRestore();
+    }
+  });
+
+  it('keeps unexpected Git failures as server errors', async () => {
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app);
+    gitLibraries.getLog.mockRejectedValueOnce(new Error('Git failed'));
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const res = createMockResponse();
+      await getRoute('GET', '/api/git/log')({ query: { directory: '/repo', to: 'feature' } }, res);
+      expect(res.statusCode).toBe(500);
+      expect(log).toHaveBeenCalledOnce();
+    } finally {
+      log.mockRestore();
+    }
   });
 });
 

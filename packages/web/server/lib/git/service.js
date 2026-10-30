@@ -7091,6 +7091,15 @@ export async function getLog(directory, options = {}) {
 
     const resolvedFrom = await resolveBaseRefForLog(options.from, checkRef);
 
+    if (options.to) {
+      // Inspect the exit status: Git errors are localized and simple-git treats silent exit 1 as success.
+      const probe = await runGitCommand(repoRoot, ['rev-parse', '--verify', '--quiet', '--end-of-options', `${options.to}^{commit}`]);
+      if (!probe.success && probe.exitCode === 1) {
+        throw Object.assign(new Error(`Revision '${options.to}' not found`), { code: 'revision_not_found' });
+      }
+      if (!probe.success) throw new Error(probe.message || 'Failed to verify revision');
+    }
+
     // simple-git's `to` alone means HEAD..to, which is empty for the current
     // branch. A single requested ref means its reachable history instead.
     const baseLog = options.to && !resolvedFrom
@@ -7182,7 +7191,7 @@ export async function getLog(directory, options = {}) {
       total: baseLog.total
     };
   } catch (error) {
-    console.error('Failed to get log:', error);
+    if (error?.code !== 'revision_not_found') console.error('Failed to get log:', error);
     throw error;
   }
 }
