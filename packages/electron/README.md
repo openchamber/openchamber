@@ -291,7 +291,7 @@ macOS builds produce `dmg` and `zip` artifacts. Windows builds produce an NSIS i
 
 ### Windows signing through SignPath
 
-`.github/workflows/windows-signed-build.yml` builds and signs the Windows app; the signing policy, organization and project are the `env` block at its top. Two workflows call it: the desktop smoke workflow (`sign_windows` input) and `release-windows.yml`, which adds the signed files to the draft release and publishes it. Releases still come unsigned from `release.yml` until the SignPath Foundation certificate is issued. `scripts/windows-signpath.mjs` drives the build in two passes, each followed by one signing request that holds both architectures, so a build needs two approvals in SignPath:
+`.github/workflows/windows-signed-build.yml` builds and signs the Windows app; the signing policy, organization and project are the `env` block at its top. Two workflows call it: the desktop smoke workflow (`sign_windows` input) and `release-windows.yml`, run from a release tag. Releases still come unsigned from `release.yml` until the SignPath Foundation certificate is issued; then `release.yml` stops building Windows and publishing, and `release-windows.yml` adds the signed files to the draft and publishes it. `scripts/windows-signpath.mjs` drives the build in two passes, each followed by one signing request that holds both architectures, so a build needs two approvals in SignPath:
 
 1. `build-app` builds the app and stages `OpenChamber.exe` and the NSIS uninstaller. The request uses the `windows-app` artifact configuration.
 2. `build-installer` puts the signed `OpenChamber.exe` into the same unpacked app and builds the installer from it (`--prepackaged`), with the signed uninstaller in place. The request uses `windows-installer`.

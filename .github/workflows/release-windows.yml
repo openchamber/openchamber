@@ -1,71 +1,44 @@
 name: Release Windows
 
-# Builds and signs the Windows desktop app of a release, adds it to the draft
-# release that release.yml made, and publishes the release. It is its own
+# Builds and signs the Windows desktop app of a release tag. It is its own
 # workflow because SignPath refuses a signing request from any run that also
-# has a job on a Blacksmith runner, and release.yml has several. Its signing
-# requests wait for an approval in SignPath, so it finishes after release.yml
-# and publishes last.
+# has a job on a Blacksmith runner, and release.yml has several.
 #
 # Run it from the release tag (Actions > Release Windows > Use workflow from:
-# the tag). It is not started by tags yet: release.yml still builds Windows
-# unsigned and publishes, until the SignPath Foundation certificate exists.
+# the tag). For now it only produces the signed installers as artifacts:
+# release.yml still builds Windows unsigned and publishes, and two workflows
+# writing the same files to one draft would leave manifests that do not match
+# the installers. Adding the files to the release and publishing move here
+# together with that release.yml change, once the SignPath Foundation
+# certificate exists.
 
 on:
   workflow_dispatch:
-    inputs:
-      dry_run:
-        description: Build and sign only; leave the release untouched
-        required: false
-        default: true
-        type: boolean
 
 permissions:
   actions: read
   contents: read
 
 jobs:
+  # Fails before any signing request, so a run from the wrong ref costs no approvals.
+  check-tag:
+    name: Require a release tag
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: packages/electron/package.json
+          sparse-checkout-cone-mode: false
+
+      - name: Require the tag of the app version
+        run: |
+          tag="v$(node -p "require('./packages/electron/package.json').version")"
+          test "$GITHUB_REF" = "refs/tags/$tag" || { echo "Run this workflow from the tag $tag, not $GITHUB_REF"; exit 1; }
+
   build:
+    needs: check-tag
     uses: ./.github/workflows/windows-signed-build.yml
+    with:
+      retention_days: 7
     secrets:
       SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
-
-  publish:
-    needs: build
-    if: ${{ !inputs.dry_run }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    env:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      GH_REPO: ${{ github.repository }}
-      TAG: v${{ needs.build.outputs.version }}
-    steps:
-      - name: Require a draft release for the tag this run built
-        run: |
-          test "$GITHUB_REF" = "refs/tags/$TAG" || { echo "Run this workflow from the tag $TAG, not $GITHUB_REF"; exit 1; }
-          test "$(gh release view "$TAG" --json isDraft --jq .isDraft)" = true || { echo "$TAG has no draft release"; exit 1; }
-
-      - name: Download signed installers
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          pattern: windows-signed-*
-          path: signed
-
-      # x64 keeps latest.yml; arm64 updates from the latest-arm64 channel.
-      - name: Add the Windows files to the release
-        run: |
-          set -euo pipefail
-          mv signed/windows-signed-arm64/latest.yml signed/windows-signed-arm64/latest-arm64.yml
-          gh release upload "$TAG" --clobber signed/windows-signed-x64/* signed/windows-signed-arm64/*
-
-      - name: Require every platform before publishing
-        run: |
-          set -euo pipefail
-          assets=$(gh release view "$TAG" --json assets --jq '.assets[].name')
-          for name in latest.yml latest-arm64.yml latest-mac.yml latest-linux.yml latest-linux-arm64.yml; do
-            grep -qx "$name" <<<"$assets" || { echo "$TAG has no $name yet; publish it once release.yml has finished"; exit 1; }
-          done
-
-      - name: Publish release
-        run: gh release edit "$TAG" --draft=false
