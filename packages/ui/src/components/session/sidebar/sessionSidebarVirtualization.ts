@@ -70,23 +70,24 @@ export const estimateSessionSidebarRowSize = (
   return (measured.height ?? row.estimateSize) + gap;
 };
 
-/** The classes of a row's wrapper: its trailing gap. */
-export const sectionWrapperClass = (row: SessionSidebarRow, nextRow: SessionSidebarRow | undefined): string => (
-  sectionSpacingAfter(row, nextRow) ?? ''
-);
+/** The classes of a row's wrapper: its trailing gap, and the divider a project section closes with. */
+export const sectionWrapperClass = (row: SessionSidebarRow, nextRow: SessionSidebarRow | undefined): string => {
+  const spacing = sectionSpacingAfter(row, nextRow) ?? '';
+  const closesProject = nextRow?.kind === 'project-header' && row.kind !== 'caption';
+  return [spacing, closesProject ? 'oc-sidebar-project-divider' : ''].filter(Boolean).join(' ');
+};
 
 export const sectionSpacingAfter = (row: SessionSidebarRow, nextRow: SessionSidebarRow | undefined): SectionSpacing | undefined => {
-  // Projects are set apart by space alone, with no line between them. A
-  // project after rows (an open project, a zone) opens with the widest gap;
-  // one right after a collapsed project keeps a narrow one, so a run of
-  // collapsed projects reads as a list. A zone opens with the widest gap, so its
-  // bare label reads as a caption of what follows. A
-  // space or archive header opens a smaller one inside its project, so its
-  // sessions read as a group of their own. A worktree is a work row among
-  // session rows and opens none.
+  // A project opens with the widest gap, whether it follows rows or another
+  // project: the gap holds the faded hairline that closes the section above
+  // (`oc-sidebar-project-divider`). A flush hairline striped a run of collapsed
+  // projects and was dropped. A zone opens with the widest gap, so its bare
+  // label reads as a caption of what follows. A space or archive header opens a
+  // smaller one inside its project, so its sessions read as a group of their
+  // own. A worktree is a work row among session rows and opens none.
   if (nextRow?.kind === 'project-header') {
     if (row.kind === 'caption') return undefined;
-    return row.kind === 'project-header' ? 'pb-0.5' : 'pb-3';
+    return 'pb-3';
   }
   if (nextRow?.kind === 'activity-header' || nextRow?.kind === 'caption') return 'pb-5';
   return nextRow?.kind === 'group-header' && !isGroupWork(nextRow.group) && row.kind !== 'project-header' ? 'pb-1.5' : undefined;

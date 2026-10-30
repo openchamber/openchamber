@@ -534,9 +534,9 @@ all / Expand all.
   zones made the list read as a document of sections, and a quiet label with
   an icon in the projects' column read as one more row (maintainer,
   2026-10-28). Projects are set apart by
-  space alone (`sectionSpacingAfter`): 12px before a project that has rows
-  above it, 2px after a collapsed project, so a run of collapsed projects
-  reads as a list. A hairline between projects was tried and dropped: with
+  space (`sectionSpacingAfter`): 12px before every project, so a project
+  section's faded hairline (`oc-sidebar-project-divider`) has room above the
+  next header. A flush hairline between projects was tried and dropped: with
   projects collapsed it striped every row (maintainer, 2026-10-28).
 - Rows of zones that mix projects (Pinned, In work, the list by time) are
   `'mixed-compact'`: one line with no project icon (the room goes to the

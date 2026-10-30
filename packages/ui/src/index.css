@@ -1041,6 +1041,21 @@ html:not(.dark) .chat-scroll {
   margin: 0;
 }
 
+/* A project section closes with a hairline before the next project. The mask
+   fades both ends from the very edge, so the boundary reads as a soft edge
+   instead of a rule across the sidebar. */
+.oc-sidebar-project-divider::after {
+  content: '';
+  position: absolute;
+  inset-inline: 8px;
+  bottom: 6px;
+  height: 1px;
+  pointer-events: none;
+  background: color-mix(in oklab, var(--border), var(--foreground) 10%);
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 25%, #000 75%, transparent);
+  mask-image: linear-gradient(to right, transparent, #000 25%, #000 75%, transparent);
+}
+
 /* The collapsed session sidebar sliding out over the chat on hover
    (Sidebar.tsx). `--oc-peek-offset` is the start side's sign. */
 @keyframes oc-sidebar-peek-in {

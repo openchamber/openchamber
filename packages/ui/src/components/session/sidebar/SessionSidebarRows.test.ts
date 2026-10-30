@@ -5,6 +5,7 @@ import {
   getInitialSessionSidebarRowIndexes,
   mergeSessionSidebarVirtualIndexes,
   sectionSpacingAfter,
+  sectionWrapperClass,
   sessionSidebarRowVirtualKey,
   sessionSidebarRowSizeKey,
 } from './sessionSidebarVirtualization';
@@ -84,6 +85,48 @@ describe('SessionSidebarRows section spacing', () => {
     const closed = buildSessionSidebarRowModel({ ...input(true), projectsCaption: true, collapsedActivities: new Set(['projects']) }).rows;
     expect(closed.at(-1)?.kind).toBe('caption');
     expect(closed.some((row) => row.kind === 'project-header')).toBe(false);
+  });
+
+  test('a project section closes with a fading divider before the next project', () => {
+    const many = Array.from({ length: 9 }, (_, index) => node(`s${index}`));
+    const sections: ProjectSection[] = [
+      {
+        project: { id: 'project-a', normalizedPath: '/repo' },
+        groups: [{ id: 'main', label: 'main', branch: null, description: null, isMain: true, worktree: null, directory: '/repo', folderScopeKey: '/repo', sessions: many }],
+      },
+      {
+        project: { id: 'project-b', normalizedPath: '/other' },
+        groups: [{ id: 'main', label: 'main', branch: null, description: null, isMain: true, worktree: null, directory: '/other', folderScopeKey: '/other', sessions: [node('other')] }],
+      },
+    ];
+    const truncated = buildSessionSidebarRowModel({ ...input(false), sections, authoritativeSections: sections }).rows;
+    const control = truncated.findIndex((row) => row.kind === 'show-control');
+    expect(control).toBeGreaterThanOrEqual(0);
+    expect(truncated[control + 1]?.kind).toBe('project-header');
+    const wrapper = sectionWrapperClass(truncated[control], truncated[control + 1]);
+    expect(wrapper).toContain('pb-3');
+    expect(wrapper).toContain('oc-sidebar-project-divider');
+
+    const collapsed = buildSessionSidebarRowModel({
+      ...input(false),
+      sections,
+      authoritativeSections: sections,
+      collapsedProjects: new Set(['project-a']),
+    }).rows;
+    const firstHeader = collapsed.findIndex((row) => row.kind === 'project-header' && row.section.project.id === 'project-a');
+    expect(firstHeader).toBeGreaterThanOrEqual(0);
+    expect(collapsed[firstHeader + 1]?.kind).toBe('project-header');
+    expect(sectionWrapperClass(collapsed[firstHeader], collapsed[firstHeader + 1])).toContain('oc-sidebar-project-divider');
+
+    const captioned = buildSessionSidebarRowModel({
+      ...input(false),
+      sections,
+      authoritativeSections: sections,
+      projectsCaption: true,
+    }).rows;
+    const caption = captioned.findIndex((row) => row.kind === 'caption');
+    expect(caption).toBeGreaterThanOrEqual(0);
+    expect(sectionWrapperClass(captioned[caption], captioned[caption + 1])).not.toContain('oc-sidebar-project-divider');
   });
 
   test('a row that ends a section is estimated as its siblings plus its gap', () => {
