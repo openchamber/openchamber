@@ -23,6 +23,7 @@ import { opencodeClient } from '@/lib/opencode/client';
 import { getIntegrationClient, loadIntegrationCatalog, peekIntegrationCatalog, subscribeCredentialChanges, type IntegrationCatalog } from '@/lib/opencode/integration-catalog';
 import { fetchDisabledProviders, setProviderDisabled as setProviderDisabledRequest } from '@/lib/disabledProviders';
 import { listConnectableProviders } from './connectableProviders';
+import { listUnlistedConnectedProviders, toProviderWithModels } from './unlistedProviders';
 import { ProviderConnectPicker } from './ProviderConnectPicker';
 import {
   providerHasCredentials,
@@ -257,6 +258,25 @@ export const ProvidersPage: React.FC = () => {
     [providers]
   );
 
+  // A stored account OpenCode reports no provider for: connected, but serving
+  // no chat model, so neither the grid nor the connect page would show it.
+  // Listed here so it keeps a card to open, where the account can be switched
+  // or removed.
+  const unlistedConnected = React.useMemo(
+    () => (catalog ? listUnlistedConnectedProviders(catalog, connectedProviderIds) : []),
+    [catalog, connectedProviderIds]
+  );
+  const unlistedProviderIds = React.useMemo(
+    () => new Set(unlistedConnected.map((provider) => provider.id)),
+    [unlistedConnected]
+  );
+  // What the grid and the detail view work with: OpenCode's providers first,
+  // then the connections it left out.
+  const listedProviders = React.useMemo(
+    () => [...providers, ...unlistedConnected.map(toProviderWithModels)],
+    [providers, unlistedConnected]
+  );
+
   const unconnectedProviders = React.useMemo(
     () => (catalog ? listConnectableProviders(catalog, connectedProviderIds) : null),
     [catalog, connectedProviderIds]
@@ -297,6 +317,11 @@ export const ProvidersPage: React.FC = () => {
 
   React.useEffect(() => {
     if (!selectedProviderId || selectedProviderId === ADD_PROVIDER_ID || selectedProviderId === CLASSIFICATION_PAGE_ID) {
+      return;
+    }
+    // A provider OpenCode does not list has no config entry to read; the form
+    // that would show one is never opened for it.
+    if (unlistedProviderIds.has(selectedProviderId)) {
       return;
     }
 
@@ -341,7 +366,7 @@ export const ProvidersPage: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [selectedProviderId, providerSourcesRevision, settingsDirectory, t]);
+  }, [selectedProviderId, providerSourcesRevision, settingsDirectory, t, unlistedProviderIds]);
 
   const refreshProviderSources = React.useCallback(() => {
     setProviderSourcesRevision((revision) => revision + 1);
@@ -369,7 +394,7 @@ export const ProvidersPage: React.FC = () => {
     refreshIntegrations();
   }, [refreshIntegrations, refreshProviderSources, setSelectedProvider]);
 
-  const selectedProvider = providers.find((provider) => provider.id === selectedProviderId);
+  const selectedProvider = listedProviders.find((provider) => provider.id === selectedProviderId);
   const selectedSources = selectedProviderId ? providerSources[selectedProviderId] : undefined;
 
   const handleSaveCustomProvider = async (plan: CustomProviderPersistPlan) => {
@@ -548,7 +573,7 @@ export const ProvidersPage: React.FC = () => {
   // A classification source that needs a key links to the provider holding it:
   // its own page when OpenCode already lists it, the connect form otherwise.
   const openProviderForKey = (providerId: string) => {
-    if (providers.some((provider) => provider.id === providerId)) {
+    if (listedProviders.some((provider) => provider.id === providerId)) {
       setSelectedProvider(providerId);
       return;
     }
@@ -655,8 +680,9 @@ export const ProvidersPage: React.FC = () => {
   if (!selectedProvider) {
     return (
       <ProviderGrid
-        providers={providers}
+        providers={listedProviders}
         integrations={integrations}
+        unlistedProviderIds={unlistedProviderIds}
         directory={settingsDirectory}
         onSelect={setSelectedProvider}
         onConnect={() => setSelectedProvider(ADD_PROVIDER_ID)}
@@ -677,6 +703,9 @@ export const ProvidersPage: React.FC = () => {
   const sourcesLoaded = Boolean(selectedSources);
   const isEditableCustomProvider = sourcesLoaded
     && isConfigDefinedCustomProvider(selectedProvider, selectedSources);
+  // OpenCode lists no provider for this id, so only the stored connection is
+  // known: no models, and nothing in the config to edit.
+  const isUnlistedProvider = unlistedProviderIds.has(selectedProvider.id);
   const hasCredentials = providerHasCredentials({
     connections: getProviderConnections(integrations ?? [], selectedProvider.id),
     optionsApiKey: readProviderApiKeySetting(selectedProvider),
@@ -802,7 +831,7 @@ export const ProvidersPage: React.FC = () => {
                 {t('settings.providers.page.actions.edit')}
               </Button>
             ) : null}
-            {disabledProviders !== null ? (
+            {disabledProviders !== null && !isUnlistedProvider ? (
               <Button
                 variant="outline"
                 size="xs"
@@ -818,6 +847,15 @@ export const ProvidersPage: React.FC = () => {
         settingsItem="providers.auth"
         contentClassName="space-y-4"
       >
+        {isUnlistedProvider ? (
+          // The account is stored but OpenCode serves no model from it, so
+          // nothing else on this page can work until the account changes.
+          <div className="flex items-start gap-2 rounded-lg bg-[var(--status-warning)]/10 p-3">
+            <Icon name="error-warning" className="mt-0.5 size-4 shrink-0 text-[var(--status-warning)]" />
+            <p className="typography-meta text-foreground">{t('settings.providers.page.noModels')}</p>
+          </div>
+        ) : null}
+
         {environmentConnections.length > 0 ? (
           <ProviderAccounts
             connections={environmentConnections}

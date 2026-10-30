@@ -6,6 +6,7 @@ import {
   getKeyMethod,
   getProviderConnections,
   getProviderCardStatus,
+  getProviderIdForSignInIntegration,
   getSignInIntegrationId,
   getSignInMethods,
   providerHasCredentials,
@@ -71,6 +72,11 @@ describe('Console sign-in for OpenCode Go', () => {
   test('OpenCode Go signs in through the Console integration; others use their own', () => {
     expect(getSignInIntegrationId('opencode-go')).toBe('opencode');
     expect(getSignInIntegrationId('anthropic')).toBe('anthropic');
+  });
+
+  test('the mapping reads back from the integration to the provider it signs in', () => {
+    expect(getProviderIdForSignInIntegration('opencode')).toBe('opencode-go');
+    expect(getProviderIdForSignInIntegration('anthropic')).toBe('anthropic');
   });
 
   test('a Console sign-in counts as OpenCode Go credentials', () => {
@@ -208,6 +214,25 @@ describe('getProviderCardStatus', () => {
 
   test('a provider with no integration gets no status instead of a false warning', () => {
     expect(status([integration({ id: 'openai' })])).toBe(null);
+  });
+
+  test('a provider OpenCode does not list is connected with no models', () => {
+    // Its integration holds the account, but no chat model is served, so the
+    // card must not fall through to a sign-in prompt.
+    expect(getProviderCardStatus({
+      integrations: [integration({ connections: [credential] })],
+      providerId: 'anthropic',
+      unlisted: true,
+    })).toEqual({ kind: 'noModels' });
+  });
+
+  test('a connection that needs a new sign-in outranks the missing models', () => {
+    const expired: ConnectionInfo = { ...second, status: { status: 'needs_auth', message: 'Signed out.' } };
+    expect(getProviderCardStatus({
+      integrations: [integration({ connections: [expired] })],
+      providerId: 'anthropic',
+      unlisted: true,
+    })).toEqual({ kind: 'reauthNeeded' });
   });
 });
 

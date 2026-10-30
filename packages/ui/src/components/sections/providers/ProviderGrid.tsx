@@ -7,7 +7,7 @@ import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { rankByQuery } from '@/lib/search/fuzzySearch';
-import type { Model, Provider } from '@/lib/opencode/model';
+import type { ProviderWithModels } from './unlistedProviders';
 import {
   SETTINGS_CARD_GRID_CLASS,
   SettingsAddCard,
@@ -141,12 +141,17 @@ const ClassificationCard: React.FC<{ onOpen: () => void }> = ({ onOpen }) => {
   );
 };
 
-type GridProvider = Provider & { models: Model[] };
+type GridProvider = ProviderWithModels;
 
 interface ProviderGridProps {
   providers: readonly GridProvider[];
   /** Null while the integration list is loading; cards then show no status. */
   integrations: readonly IntegrationInfo[] | null;
+  /**
+   * Providers OpenCode reports no entry for; their card says they are
+   * connected without a model rather than inventing a sign-in prompt.
+   */
+  unlistedProviderIds: ReadonlySet<string>;
   directory: string | null;
   onSelect: (providerId: string) => void;
   onConnect: () => void;
@@ -200,10 +205,11 @@ const StatusPill: React.FC<{ status: ProviderCardStatus }> = ({ status }) => {
     case 'reauthNeeded': label = t('settings.providers.card.status.reauthNeeded'); break;
     case 'accounts': label = t('settings.providers.card.status.accounts', { count: status.count }); break;
     case 'connected': label = t('settings.providers.card.status.connected'); break;
+    case 'noModels': label = t('settings.providers.card.status.noModels'); break;
     case 'environment': label = t('settings.providers.card.status.environment'); break;
     case 'signInNeeded': label = t('settings.providers.card.status.signInNeeded'); break;
   }
-  const tone: SettingsCardTone = status.kind === 'signInNeeded' || status.kind === 'reauthNeeded'
+  const tone: SettingsCardTone = status.kind === 'signInNeeded' || status.kind === 'reauthNeeded' || status.kind === 'noModels'
     ? 'warning'
     : status.kind === 'environment'
       ? 'neutral'
@@ -211,8 +217,12 @@ const StatusPill: React.FC<{ status: ProviderCardStatus }> = ({ status }) => {
   return <SettingsCardPill tone={tone}>{label}</SettingsCardPill>;
 };
 
-/** Browse view of the Providers page: one card per provider OpenCode reports. */
-export const ProviderGrid: React.FC<ProviderGridProps> = ({ providers, integrations, directory, onSelect, onConnect, onOpenClassification, disabledProviders, onEnableProvider }) => {
+/**
+ * Browse view of the Providers page: one card per provider OpenCode reports,
+ * plus one for a connection it reports no provider for (see
+ * `unlistedProviders.ts`), so that account stays reachable.
+ */
+export const ProviderGrid: React.FC<ProviderGridProps> = ({ providers, integrations, unlistedProviderIds, directory, onSelect, onConnect, onOpenClassification, disabledProviders, onEnableProvider }) => {
   const { t } = useI18n();
   const [query, setQuery] = React.useState('');
   const projectIds = useProjectProviderIds(providers, directory);
@@ -259,6 +269,7 @@ export const ProviderGrid: React.FC<ProviderGridProps> = ({ providers, integrati
             providerId: provider.id,
             optionsApiKey: readProviderApiKeySetting(provider),
             machineCredentials: usesMachineCredentials(provider),
+            unlisted: unlistedProviderIds.has(provider.id),
           });
           return (
             <SettingsCard

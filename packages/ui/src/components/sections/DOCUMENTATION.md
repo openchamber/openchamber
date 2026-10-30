@@ -169,6 +169,19 @@ in the fixed order of `POPULAR_PROVIDERS`, with a one-line note and a
 Recommended pill on the ones the maintainer recommends; every other provider
 is a compact row behind "Show all", and the search covers all of them.
 
+A provider that OpenCode does not list, although its integration holds a
+connection, keeps a card on the grid (`providers/unlistedProviders.ts`). This
+is where an account ends up when it currently serves no chat model: Copilot
+Free, a plan whose quota ran out, a sign-in whose models are all disabled.
+`GET /api/provider` omits such a provider, and the connect page drops
+anything with a connection, so without this the account would be unreachable —
+no card to open, no way to switch or remove it. The card says "Connected · no
+models" and opens the usual provider page, where the accounts are listed and
+can be switched, added or removed; that page also says why no model is offered
+and hides Disable and the model section, which have nothing to act on. The
+Console login that signs OpenCode Go in is shown as Go, on the integration that
+holds the credential (`getProviderIdForSignInIntegration`).
+
 The integration list is kept for the app session by
 `lib/opencode/integration-catalog.ts`, so the page opens on it without a
 loading state. The desktop/web/VS Code app reads it once at startup when the

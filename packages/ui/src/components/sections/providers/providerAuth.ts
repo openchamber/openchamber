@@ -52,13 +52,26 @@ export const findIntegrationForProvider = (
 ): IntegrationInfo | undefined => integrations.find((integration) => integration.id === providerId);
 
 /**
- * OpenCode Go bills through the OpenCode Console, so it signs in through the
- * Console's `opencode` integration; its own integration only accepts a
- * service-account key. OpenCode's own connect dialog makes the same mapping.
- * Returns the integration whose OAuth methods sign a provider in.
+ * Providers whose sign-in lands on another integration. OpenCode Go bills
+ * through the OpenCode Console, so it signs in through the Console's `opencode`
+ * integration; its own integration only accepts a service-account key.
+ * OpenCode's own connect dialog makes the same mapping. One table so the
+ * direction a screen needs is derived rather than spelled out twice.
  */
+const SIGN_IN_INTEGRATION_BY_PROVIDER: Readonly<Record<string, string>> = { 'opencode-go': 'opencode' };
+
+/** The integration whose OAuth methods sign a provider in. */
 export const getSignInIntegrationId = (providerId: string): string =>
-  providerId === 'opencode-go' ? 'opencode' : providerId;
+  SIGN_IN_INTEGRATION_BY_PROVIDER[providerId] ?? providerId;
+
+/**
+ * The provider a sign-in integration's connections belong to, for the reverse
+ * question: a Console login with no OpenCode Go provider listed is still Go's.
+ */
+export const getProviderIdForSignInIntegration = (integrationId: string): string =>
+  Object.keys(SIGN_IN_INTEGRATION_BY_PROVIDER)
+    .find((providerId) => SIGN_IN_INTEGRATION_BY_PROVIDER[providerId] === integrationId)
+  ?? integrationId;
 
 /**
  * Connections that give a provider credentials: its own, plus the sign-in
@@ -152,6 +165,7 @@ export type ProviderCardStatus =
   | { kind: 'reauthNeeded' }
   | { kind: 'accounts'; count: number }
   | { kind: 'connected' }
+  | { kind: 'noModels' }
   | { kind: 'environment' }
   | { kind: 'signInNeeded' };
 
@@ -165,10 +179,18 @@ export const getProviderCardStatus = (input: {
   providerId: string;
   optionsApiKey?: string | null;
   machineCredentials?: boolean;
+  /**
+   * OpenCode lists no provider for this id, so the only thing known about it is
+   * the connection its integration holds: connected, and serving no model.
+   */
+  unlisted?: boolean;
 }): ProviderCardStatus | null => {
   if (input.integrations === null) return null;
   const connections = getProviderConnections(input.integrations, input.providerId);
   if ((connections ?? []).some(connectionNeedsAuth)) return { kind: 'reauthNeeded' };
+  // A connection that needs a new sign-in is worth saying even when the account
+  // serves no model: that is the action that fixes it.
+  if (input.unlisted) return { kind: 'noModels' };
   const credentialCount = (connections ?? []).filter((connection) => connection.type === 'credential').length;
   if (credentialCount > 1) return { kind: 'accounts', count: credentialCount };
   if (credentialCount === 1 || (input.optionsApiKey?.trim().length ?? 0) > 0) return { kind: 'connected' };
