@@ -3,7 +3,7 @@ import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { cn } from '@/lib/utils';
 import { getLoadedMarkdownRendererModule, loadMarkdownRendererModule } from './markdownRendererLoader';
-import type { MarkdownRendererProps, SimpleMarkdownRendererProps as SimpleRendererProps } from './MarkdownRendererImpl';
+import type { MarkdownContentProps, MarkdownRendererProps, SimpleMarkdownRendererProps as SimpleRendererProps } from './MarkdownRendererImpl';
 
 // Thin lazy wrapper around the MarkdownRenderer implementation.
 // Streamdown, its official plugins and beautiful-mermaid load on demand, keeping the
@@ -15,6 +15,10 @@ const MarkdownRendererLazy = lazyWithChunkRecovery(() =>
 
 const SimpleMarkdownRendererLazy = lazyWithChunkRecovery(() =>
   loadMarkdownRendererModule().then((m) => ({ default: m.SimpleMarkdownRenderer }))
+);
+
+const MarkdownContentLazy = lazyWithChunkRecovery(() =>
+  loadMarkdownRendererModule().then((m) => ({ default: m.MarkdownContent }))
 );
 
 const fallback = <div data-chat-quote-pending className="break-words w-full min-w-0" />;
@@ -43,6 +47,18 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = (props) => {
   return (
     <React.Suspense fallback={<MobileMarkdownFallback {...props} />}>
       <MarkdownRendererLazy {...props} />
+    </React.Suspense>
+  );
+};
+
+export const MarkdownContent: React.FC<MarkdownContentProps> = (props) => {
+  // Chosen once per mount: swapping the lazy component for the loaded one at
+  // the same spot would remount the content and load its media again.
+  const [loaded] = React.useState(getLoadedMarkdownRendererModule);
+  if (loaded) return <loaded.MarkdownContent {...props} />;
+  return (
+    <React.Suspense fallback={fallback}>
+      <MarkdownContentLazy {...props} />
     </React.Suspense>
   );
 };

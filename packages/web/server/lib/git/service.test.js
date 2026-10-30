@@ -226,6 +226,32 @@ describe('getLog on a repository with no commits yet', () => {
 });
 
 describe('getLog with a base', () => {
+  it('accepts branches, commits, tags and relative revisions as targets', async () => {
+    const { tmpDir, git } = await createTempRepo();
+    await git.commit('first', { '--allow-empty': null });
+    const first = (await git.revparse(['HEAD'])).trim();
+    await git.raw(['tag', 'first']);
+    await git.commit('second', { '--allow-empty': null });
+    for (const to of ['main', first, 'first', 'HEAD~1']) {
+      const result = await getLog(tmpDir, { to });
+      expect(result.all.length).toBeGreaterThan(0);
+    }
+  });
+  it('reports a deleted target revision without logging a server failure', async () => {
+    const { tmpDir, git } = await createTempRepo();
+    await git.commit('one', { '--allow-empty': null });
+    await git.raw(['branch', 'feature']);
+    await git.raw(['branch', '-D', 'feature']);
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      for (const from of ['main', undefined]) {
+        await expect(getLog(tmpDir, { from, to: 'feature' })).rejects.toMatchObject({ code: 'revision_not_found' });
+      }
+      expect(log).not.toHaveBeenCalled();
+    } finally {
+      log.mockRestore();
+    }
+  });
   it('lists only the commits the target adds, never what the base gained since', async () => {
     const { tmpDir, git } = await createTempRepo();
     await git.commit('one', { '--allow-empty': null });

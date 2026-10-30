@@ -2001,6 +2001,9 @@ export function registerGitRoutes(app, {
       });
       res.json(log);
     } catch (error) {
+      if (error?.code === 'revision_not_found') {
+        return res.status(404).json({ error: error.message, code: error.code });
+      }
       console.error('Failed to get log:', error);
       res.status(500).json({ error: error.message || 'Failed to get commit log' });
     }

@@ -9,7 +9,7 @@ import { useI18n } from '@/lib/i18n';
 import type { ToolPart } from '@/lib/opencode/model';
 import { useUIStore } from '@/stores/useUIStore';
 import { loadMessageImageBlob } from '../../markdown/markdownImageAssets';
-import { MarkdownContent } from '../../MarkdownRendererImpl';
+import { MarkdownContent } from '../../MarkdownRenderer';
 import type { ToolPopupContent } from '../types';
 import { generatedImageDestination } from './generatedImageDestination';
 import { ToolbarTooltipButton } from '@/components/ui/action-toolbar';

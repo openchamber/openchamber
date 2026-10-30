@@ -357,6 +357,15 @@ Linux updates are supported when the packaged app runs from a writable AppImage 
 
 ### Updater End-to-End Fixture
 
+Updater checks preserve downloaded payloads for the same version. Feed errors
+preserve an existing pending record; a missing feed with no pending record
+keeps the first-release "no update" behavior. An authoritative no-update
+response clears the record. Downloads for the same version share one process-wide
+promise until the payload is on disk, including cached downloads without an event.
+A request for another version fails as busy until that promise settles. Both the
+download event and promise completion mark readiness only for their own version,
+so an intervening check for a newer release cannot attach the old installer to it.
+
 A loopback-only updater fixture is available for contributor QA of N-to-N+1 AppImage replacement and restart behavior. It is test infrastructure, not a user-configurable update source. See [`scripts/updater-e2e-fixture.md`](./scripts/updater-e2e-fixture.md) for the controlled test procedure. Unit tests cover feed selection, check failures, no-update results, and fixture generation; actual AppImage replacement and restart remains a manual native N-to-N+1 release boundary because it requires executing two packaged versions on each supported architecture.
 
 The package supports macOS, Windows, and Linux desktop features. Linux builds include in-app window controls, auto-update, system tray (right-click Show / Hide / Close), and launch-at-login (XDG autostart). Opening files in installed apps, installed-app discovery, and FreeDesktop icon lookup (including the default file manager) work on macOS, Windows, and Linux.

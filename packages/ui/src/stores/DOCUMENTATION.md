@@ -141,6 +141,19 @@ verbatim, a reply spoken in full) do not consult it; they silence the 404 on
 
 ### UI state stores
 
+`useUpdateStore` projects desktop package readiness by version. A failed native
+check preserves the offered package; a successful no-update result clears its
+readiness. A changed offer clears readiness while an active download remains
+locked until its promise settles. Completion can mark only the version that
+download started for as ready. Electron owns the installer record and its
+process-wide download lock.
+
+### Why update checks keep the download lock
+
+A check can offer B while A is still downloading. Keeping the lock until A
+settles prevents a second download from sharing the updater's mutable state;
+version matching prevents A's completion from enabling B's restart button.
+
 Absolute context-panel file targets retain filename edge spaces, including in path-derived tab deduplication keys. Trimming a resolved target would open or reuse a different file; relative text inputs still receive the existing whitespace cleanup.
 
 `useFilesViewTabsStore` also preserves whitespace in file and folder targets through selection, close, move, and expansion. These inputs come from resolved filesystem paths; only workspace-root inputs receive whitespace cleanup.

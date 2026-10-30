@@ -180,6 +180,21 @@ clipboard and image rendering share this configuration. The stable consumer
 root is `.markdown-content[data-markdown-content]`; code and table consumers
 use native `data-streamdown` markers.
 
+#### Why Markdown consumers use the lazy wrapper
+
+`markdownRendererLoader.ts` dynamically imports the renderer and its imports,
+including Streamdown, KaTeX, Shiki and beautiful-mermaid with ELK.
+The web and mobile entry points start that import at boot without making the
+first render wait for it.
+Components take `MarkdownRenderer`, `SimpleMarkdownRenderer` or
+`MarkdownContent` from `MarkdownRenderer.tsx`; a static value import of
+`MarkdownRendererImpl` from anywhere in the startup graph pulls all of it back
+in front of React's first render. The regression guard is
+`components/chat/__tests__/markdownRendererStaysLazy.test.ts`. The
+`MarkdownContent` wrapper picks the lazy or the loaded component once per
+mount, so content that mounted before the module arrived is not remounted when
+it does.
+
 #### Why chat requires double tildes for strikethrough
 
 Single tildes in agent prose often mark ranges such as `5~20s`. Both GFM and
