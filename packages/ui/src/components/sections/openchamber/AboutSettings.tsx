@@ -317,12 +317,7 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
         { value: 'stable', label: t('settings.openchamber.about.option.updateChannel.stable') },
         {
           value: 'canary',
-          label: (
-            <span className="inline-flex items-center gap-1">
-              <span aria-hidden="true">🐤</span>
-              {t('settings.openchamber.about.option.updateChannel.canary')}
-            </span>
-          ),
+          label: t('settings.openchamber.about.option.updateChannel.canary'),
           selectedClassName: CANARY_COLOURS,
         },
       ]}
