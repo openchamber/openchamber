@@ -357,6 +357,15 @@ In the local (VS Code) mode the store keeps a queued message until its own send 
 
 Each action used to walk the parent links itself: some over the rendered row, some over active sessions only, one over the active-plus-archived cache. A flat row then silently changed what Move and Export reached (#4837, #4842), and "Archive all" reached no subagents at all. With one module the policies differ by name and the graph they walk is the same.
 
+### Why destructive actions include reviews
+
+Archive, delete and restore policies also follow a review's `originalSessionID`
+when it has no `parentID`. The maintainer chose to keep reviews with the reviewed
+session while forks and promoted `/btw` conversations remain independent. The
+`active` policy used by move, export, relocation and tray activity keeps OpenCode's
+`parentID` graph only. Both graphs are indexed once per action and share cycle
+protection; display nesting and directory placement do not decide ownership.
+
 User-visible session ordering is also not owned by the global cache array order. `sync/session-ordering.ts` combines lifecycle rank with timestamp fallbacks, and session surfaces must use that shared comparator instead of independently sorting global sessions by `time.updated`.
 
 Global refresh rules:

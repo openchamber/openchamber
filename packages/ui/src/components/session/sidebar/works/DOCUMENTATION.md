@@ -38,8 +38,9 @@ view, In work, Drafts, Folders with worktrees) describes how they are laid out.
 
 Invariants:
 
-- Lineage is display only (`lib/sessionWorkLineage.ts`). Archive, restore,
-  move and the Archive page follow OpenCode's `parentID`.
+- Display lineage belongs to `lib/sessionWorkLineage.ts`. Archive, delete and
+  restore follow OpenCode's `parentID` plus linked reviews. Forks and promoted
+  `/btw` conversations remain independent; move also carries the rendered tree.
 - The folder decides before origin: a session never nests under a session of
   another folder, so a worktree's sessions are all of that worktree's work.
 - A subagent's work state never puts a work in work and is not counted on a

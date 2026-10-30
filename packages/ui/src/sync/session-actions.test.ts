@@ -1210,6 +1210,27 @@ describe("session restore (unarchive)", () => {
     expect(openchamberRouteRequests.map((request) => request.body.ids)).toEqual([["parent"], ["child"], ["grandchild"]])
   })
 
+  test("restores linked reviews with the source while leaving archived forks untouched", async () => {
+    globalArchivedSessions.push(
+      { ...archivedFixture("review"), metadata: { openchamber: { kind: "review", originalSessionID: "session-a" } } },
+      { ...archivedFixture("review-child"), parentID: "review" },
+      { ...archivedFixture("fork"), fork: { sessionID: "session-a", boundary: { type: "through", messageID: "message" } } },
+      { ...archivedFixture("promoted"), metadata: { openchamber: { btwPromoted: true } }, fork: { sessionID: "session-a", boundary: { type: "through", messageID: "message" } } },
+    )
+    beforeArchiveRouteResolve = (path) => {
+      if (!path.endsWith("/unarchive")) return
+      const ids = openchamberRouteRequests.at(-1)?.body.ids
+      const id = Array.isArray(ids) ? String(ids[0]) : ""
+      unarchiveBatchResponse = { status: 200, body: { restored: [{ id, archivedAt: null }], failedIds: [] } }
+    }
+    const source = createStore({}, { session: [] })
+    const { unarchiveSession, setActionRefs } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", source]]), () => "/test/project")
+
+    expect(await unarchiveSession("session-a")).toBe(true)
+    expect(openchamberRouteRequests.map((request) => request.body.ids)).toEqual([["session-a"], ["review"], ["review-child"]])
+  })
+
   test("restores a subsession on its own when its parent is active", async () => {
     globalActiveSessions = [sessionFixture("parent")]
     globalArchivedSessions.push({ ...archivedFixture("child"), parentID: "parent" }, { ...archivedFixture("grandchild"), parentID: "child" })
