@@ -919,7 +919,11 @@ An explicitly user-initiated composer send restores an archived top-level
 session after OpenCode accepts the prompt or command. Queueing from the
 composer is the same intent: the session is restored once the queue accepts
 the message, so delivery itself never restores anything and the server queue
-has no archive logic. Opening the archive, typing, shell commands, scheduled
+has no archive logic. A prompt an agent or the CLI sends through
+`session.send` is the same intent, and the server restores the session there
+once OpenCode accepts it (`restoreAfterSend` in
+`packages/web/server/lib/openchamber-sessions/routes.js`), with its archived
+subsessions. Opening the archive, typing, shell commands, scheduled
 tasks and automated continuations do not restore it. The send captures the
 session's archive timestamp and runtime; a newer archive, manual restore or
 runtime switch supersedes that intent. Restoration uses the existing tree

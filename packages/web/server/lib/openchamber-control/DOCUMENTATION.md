@@ -224,6 +224,10 @@ other.
   directory and does not erase other session results.
 - Destructive session/worktree deletion and project-path registration are not
   part of the action contract.
+- `session.send` to an archived top-level session restores it, with its
+  archived subsessions, once OpenCode accepts the prompt, as a send from the
+  composer does: the user follows that session and would otherwise find it
+  only in the archive. A failed restore is logged and leaves the send standing.
 - `session.create`, `session.send` and `session.fork` called from a session
   pass that session as `promptedBySessionId` (except a send to the caller
   itself). The session service records it on the prompt's message as

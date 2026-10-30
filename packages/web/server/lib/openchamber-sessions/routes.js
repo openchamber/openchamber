@@ -1148,6 +1148,51 @@ export const createOpenChamberSessionService = (dependencies) => {
     return result;
   };
 
+  /** Archived subsessions under a session, each parent before its children. */
+  const listArchivedSubsessions = async (client, rootID) => {
+    const seen = new Set([rootID]);
+    const seenCursors = new Set();
+    const parents = [rootID];
+    while (parents.length > 0) {
+      const parentID = parents.shift();
+      let cursor;
+      do {
+        const page = await client.session.list(cursor ? { cursor } : { parentID, archived: true });
+        for (const child of page?.data ?? []) {
+          if (!child?.id || !child.time?.archived || seen.has(child.id)) continue;
+          seen.add(child.id);
+          parents.push(child.id);
+        }
+        // A repeated cursor would spin the walk and hold the send open.
+        cursor = page?.data?.length ? page.cursor?.next : undefined;
+        if (cursor && seenCursors.has(cursor)) cursor = undefined;
+        if (cursor) seenCursors.add(cursor);
+      } while (cursor);
+    }
+    seen.delete(rootID);
+    return [...seen];
+  };
+
+  /**
+   * A prompt sent to an archived top-level session brings it back with its
+   * archived subsessions, as a send from the composer does
+   * (`packages/ui/src/sync/user-message-resume.ts`). The prompt is already
+   * accepted, so a failed restore is logged and never fails the send.
+   */
+  const restoreAfterSend = async (client, sessionID) => {
+    try {
+      const session = await client.session.get({ sessionID });
+      if (session?.parentID || !(await sessionArchive.isArchived(sessionID))) return;
+      // Read before the root changes state, as the composer's tree restore does.
+      const subsessionIDs = await listArchivedSubsessions(client, sessionID);
+      const { failedIds } = await sessionArchive.unarchive([sessionID]);
+      if (failedIds.length > 0) return;
+      if (subsessionIDs.length > 0) await sessionArchive.unarchive(subsessionIDs);
+    } catch (error) {
+      console.warn(`[openchamber-sessions] could not restore ${sessionID} after a send:`, error?.message ?? error);
+    }
+  };
+
   const runExisting = async (action, sourceSessionId, payload = {}) => {
     const sourceSessionID = asNonEmptyString(sourceSessionId);
     const prompt = asNonEmptyString(payload.prompt);
@@ -1222,6 +1267,7 @@ export const createOpenChamberSessionService = (dependencies) => {
         reuseSessionSelection: true,
         promptedBySessionId: asNonEmptyString(payload.promptedBySessionId),
       });
+      if (action === 'send' && dispatch.promptDispatched) await restoreAfterSend(client, targetSessionID);
       const result = {
         action,
         sessionId: targetSessionID,

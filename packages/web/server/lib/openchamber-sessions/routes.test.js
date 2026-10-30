@@ -25,6 +25,7 @@ const sessionCreateMock = vi.fn(async () => ({ id: 'ses_123' }));
 const sessionForkMock = vi.fn(async () => ({ id: 'ses_fork', title: 'Forked session' }));
 const sessionMessagesMock = vi.fn(async () => ({ data: [] }));
 const sessionGetMock = vi.fn(async ({ sessionID }) => ({ id: sessionID, location: { directory: '/repo/app' } }));
+const sessionListMock = vi.fn(async () => ({ data: [] }));
 const sessionUpdateMock = vi.fn(async () => undefined);
 const sessionMoveMock = vi.fn(async () => undefined);
 const sessionPromptMock = vi.fn(async () => ({ id: 'msg_dispatched' }));
@@ -100,6 +101,7 @@ vi.mock('@opencode/client', () => ({
           create: sessionCreateMock,
           fork: sessionForkMock,
           get: sessionGetMock,
+          list: sessionListMock,
           update: sessionUpdateMock,
           move: sessionMoveMock,
           command: sessionCommandMock,
@@ -251,6 +253,8 @@ describe('openchamber session routes', () => {
     commandListMock.mockResolvedValue({ data: [] });
     sessionGetMock.mockReset();
     sessionGetMock.mockImplementation(async ({ sessionID }) => ({ id: sessionID, location: { directory: '/repo/app' } }));
+    sessionListMock.mockReset();
+    sessionListMock.mockImplementation(async () => ({ data: [] }));
     sessionPromptMock.mockReset();
     sessionPromptMock.mockImplementation(async () => ({ id: 'msg_dispatched' }));
     sessionSyntheticMock.mockReset();
@@ -1629,6 +1633,75 @@ describe('openchamber session routes', () => {
     // The default-selection catalogue must not be consulted.
     expect(modelListMock).not.toHaveBeenCalled();
     expect(agentListMock).not.toHaveBeenCalled();
+  });
+
+  describe('a send to an archived session', () => {
+    const archivedTree = [
+      { id: 'ses_root', time: { created: 1, archived: 1700 } },
+      { id: 'ses_child', parentID: 'ses_root', time: { created: 1, archived: 1700 } },
+      { id: 'ses_grandchild', parentID: 'ses_child', time: { created: 1, archived: 1700 } },
+      { id: 'ses_active_child', parentID: 'ses_root', time: { created: 1 } },
+    ];
+    const useTree = (tree) => {
+      sessionGetMock.mockImplementation(async ({ sessionID }) => ({
+        ...tree.find((session) => session.id === sessionID),
+        location: { directory: '/repo/app' },
+      }));
+      sessionListMock.mockImplementation(async ({ parentID, archived }) => ({
+        data: tree.filter((session) => session.parentID === parentID && (!archived || session.time.archived)),
+      }));
+    };
+    const send = (app, sessionID) => request(app)
+      .post(`/api/openchamber/sessions/${sessionID}/send`)
+      .send({ directory: '/repo/app', prompt: 'Continue', model: 'openai/gpt-5.5' })
+      .expect(200);
+    const restoredIds = () => sessionUpdateMock.mock.calls
+      .filter(([input]) => input.archived === false)
+      .map(([input]) => input.sessionID);
+
+    it('brings a top-level session back with its archived subsessions once the prompt is accepted', async () => {
+      useTree(archivedTree);
+      const { app } = createApp();
+
+      const response = await send(app, 'ses_root');
+
+      expect(response.body.promptDispatched).toBe(true);
+      expect(restoredIds().sort()).toEqual(['ses_child', 'ses_grandchild', 'ses_root']);
+    });
+
+    it('leaves an archived subsession for its parent to bring back', async () => {
+      useTree(archivedTree);
+      const { app } = createApp();
+
+      await send(app, 'ses_child');
+
+      expect(restoredIds()).toEqual([]);
+    });
+
+    it('restores nothing when the prompt was not accepted', async () => {
+      useTree(archivedTree);
+      sessionPromptMock.mockResolvedValue({});
+      const { app } = createApp();
+
+      const response = await send(app, 'ses_root');
+
+      expect(response.body.promptDispatched).toBe(false);
+      expect(restoredIds()).toEqual([]);
+    }, 20_000);
+
+    it('keeps the accepted send when the restore fails', async () => {
+      useTree(archivedTree);
+      sessionUpdateMock.mockImplementation(async () => {
+        throw Object.assign(new Error('UnknownError'), { _tag: 'UnknownError' });
+      });
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const { app } = createApp();
+
+      const response = await send(app, 'ses_root');
+
+      expect(response.body).toMatchObject({ action: 'send', sessionId: 'ses_root', promptDispatched: true });
+      expect(restoredIds()).toEqual(['ses_root']);
+    });
   });
 
   it('forks from a message, dispatches the prompt, and emits the new session', async () => {
