@@ -1,3 +1,4 @@
+import { isBoolean } from '../shared/guards.js';
 import { createProjectIdFromPath, projectConfigFileStemOf } from '../projects/project-id.js';
 import {
   buildPreferencesFields,
@@ -23,6 +24,9 @@ const EMPTY_NOTIFICATION_TEMPLATES = {
   error: { title: '', message: '' },
   question: { title: '', message: '' },
   subtask: { title: '', message: '' },
+  workDone: { title: '', message: '' },
+  reviewReady: { title: '', message: '' },
+  waitingOnYou: { title: '', message: '' },
 };
 
 const emptyNotificationTemplates = () => Object.fromEntries(
@@ -988,6 +992,20 @@ export const createSettingsRuntime = (deps) => {
     }
     if (typeof settings.notifyOnQuestion !== 'boolean') {
       next.notifyOnQuestion = true;
+      changed = true;
+    }
+    // Verdict events are opt-in: each enabled one adds a classifier request
+    // per completed turn, so an install that never touched them stays off.
+    if (!isBoolean(settings.notifyOnWorkDone)) {
+      next.notifyOnWorkDone = false;
+      changed = true;
+    }
+    if (!isBoolean(settings.notifyOnReviewReady)) {
+      next.notifyOnReviewReady = false;
+      changed = true;
+    }
+    if (!isBoolean(settings.notifyOnWaitingOnYou)) {
+      next.notifyOnWaitingOnYou = false;
       changed = true;
     }
 

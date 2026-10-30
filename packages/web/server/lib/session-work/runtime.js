@@ -22,7 +22,7 @@ import { z } from 'zod';
 import { readMergedSettingsSync } from '../opencode/settings-files.js';
 import { loadAssistContext } from '../session-assist/context.js';
 import { turnsToHistory, excerptHead, excerptHeadTail } from '../routing/history.js';
-import { buildTurnEndRequest, decideAssist, decideReviewReady, decideWrapUp } from './questions.js';
+import { buildTurnEndRequest, decideAssist, decideReviewReady, decideWrapUp, turnEndScores } from './questions.js';
 import { clearSuggestionPatch, offerReviewPatch, openPatch, readWork, suggestDonePatch } from './state.js';
 
 const OPENCHAMBER_SETTINGS_FILE = path.join(
@@ -32,12 +32,17 @@ const OPENCHAMBER_SETTINGS_FILE = path.join(
   'settings.json',
 );
 
-/** In work defaults on, the review offer off; read at every use so a change applies without a restart. */
+/** In work defaults on, the review offer off; read at every use so a change applies without a restart.
+ * The three `notify*` verdicts default off too — each one on adds a question
+ * to the battery, so they extend the gates below rather than owning a call. */
 const readSessionWorkSettings = () => {
   const settings = readMergedSettingsSync({ fs, path, settingsFilePath: OPENCHAMBER_SETTINGS_FILE });
   return {
     enabled: settings.sessionWorkEnabled !== false,
     reviewOffer: settings.sessionReviewOfferEnabled === true,
+    notifyWorkDone: settings.notifyOnWorkDone === true,
+    notifyReviewReady: settings.notifyOnReviewReady === true,
+    notifyWaitingOnYou: settings.notifyOnWaitingOnYou === true,
   };
 };
 
@@ -118,6 +123,13 @@ export function createSessionWorkRuntime({
   // after a turn start, and its late answer is dropped rather than accepted.
   const turnGenerations = new Map();
   let lastTurnGeneration = 0;
+
+  // The verdict of the turn that just ended, per session, as a promise: set
+  // when `evaluateTurnEnd` starts (so a consumer awaiting at the idle event
+  // already finds it in flight), resolved with `turnEndScores` or null. The
+  // entry stays until the next turn's check replaces it, so a late consumer
+  // still reads the settled answer instead of a false "nothing ran".
+  const pendingVerdicts = new Map();
   const turnGeneration = (sessionId) => turnGenerations.get(sessionId) ?? 0;
   const advanceTurn = (sessionId) => {
     lastTurnGeneration += 1;
@@ -223,14 +235,24 @@ export function createSessionWorkRuntime({
    * has on. Resolves which of them are worth the Small Model, or null when Jev
    * was not asked about them (no Jev, a failure, an ineligible session): the
    * caller then behaves as it always did.
+   *
+   * The same answers feed the turn-end verdict notifications through the
+   * `pendingVerdicts` promise: one request per turn, one truth for the
+   * composer hints and the notification. The notify settings widen which
+   * questions are asked — they never widen what the hints write, which stay
+   * gated by their own settings below.
    */
   const evaluateTurnEnd = async ({ sessionId, directory, assist }) => {
     if (stopped || lineage?.isChild(sessionId) === true) return null;
     const settings = getSettings();
-    if (!settings.enabled && !settings.reviewOffer && !assist.recap && !assist.suggestion) return null;
+    const notifyVerdicts = settings.notifyWorkDone || settings.notifyReviewReady || settings.notifyWaitingOnYou;
+    if (!settings.enabled && !settings.reviewOffer && !assist.recap && !assist.suggestion && !notifyVerdicts) return null;
     // Never capture 0: an evicted session also reads 0.
     if (!turnGenerations.has(sessionId)) advanceTurn(sessionId);
     const generation = turnGeneration(sessionId);
+    let settleVerdict = () => {};
+    pendingVerdicts.set(sessionId, new Promise((resolve) => { settleVerdict = resolve; }));
+    let scores = null;
     try {
       const endpoint = await classifierEndpoint();
       if (!endpoint) return null;
@@ -239,9 +261,14 @@ export function createSessionWorkRuntime({
       const session = await eligibleSession(client, sessionId, signal);
       if (!session || session.revert?.messageID) return null;
       const work = settings.enabled ? readWork(await readMetadata(sessionId, directory)) : null;
+      // The hint gates are what the patches write; the ask gates are the
+      // union with the notification events, so a shared answer covers both.
+      const hintWrapUp = settings.enabled && work?.state === 'open';
+      const hintReview = settings.reviewOffer;
       const ask = {
-        wrapUp: settings.enabled && work?.state === 'open',
-        reviewReady: settings.reviewOffer,
+        wrapUp: hintWrapUp || settings.notifyWorkDone,
+        reviewReady: hintReview || settings.notifyReviewReady,
+        needsYou: settings.notifyWaitingOnYou,
         recap: assist.recap,
         nextStep: assist.suggestion,
       };
@@ -257,10 +284,11 @@ export function createSessionWorkRuntime({
       if (!request) return null;
       const { answers } = await jev.ask(request, endpoint);
       if (stopped) return null;
+      scores = turnEndScores(answers);
       // Looks done wins over a review offer from the same turn.
-      const suggest = ask.wrapUp && decideWrapUp(answers)
+      const suggest = hintWrapUp && decideWrapUp(answers)
         ? suggestDonePatch
-        : ask.reviewReady && decideReviewReady(answers) ? offerReviewPatch : null;
+        : hintReview && decideReviewReady(answers) ? offerReviewPatch : null;
       if (suggest) {
         // Decided at write time: a turn that started while Jev was answering
         // makes this answer about an older turn.
@@ -275,15 +303,24 @@ export function createSessionWorkRuntime({
     } catch (error) {
       console.warn('[session-work] turn-end check failed:', errorMessage(error));
       return null;
+    } finally {
+      settleVerdict(scores);
     }
   };
+
+  /**
+   * The pending (or settled) verdict promise for a session's latest turn, or
+   * null when no check ran — never a thrown promise: every path settles.
+   */
+  const turnEndVerdictFor = (sessionId) => pendingVerdicts.get(sessionId) ?? null;
 
   const stop = () => {
     stopped = true;
     seenMessages.clear();
     suggested.clear();
     turnGenerations.clear();
+    pendingVerdicts.clear();
   };
 
-  return { processPayload, evaluateTurnEnd, stop };
+  return { processPayload, evaluateTurnEnd, turnEndVerdictFor, stop };
 }

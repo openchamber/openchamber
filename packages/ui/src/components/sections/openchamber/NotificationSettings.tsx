@@ -9,12 +9,15 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { getClientPlatform } from '@/lib/platform';
 import { useI18n } from '@/lib/i18n';
+import { JevAccessNote } from '@/components/sections/classification/JevAccessNote';
 import {
   SettingsSection,
   SettingsTwoColumn,
   SettingsCheckboxRow,
+  SETTINGS_HELPER_CLASS,
   SettingsGroupTitle,
   SETTINGS_OPTION_STACK_CLASS,
+  SETTINGS_FIELDS_STACK_CLASS,
 } from '@/components/sections/shared/SettingsSection';
 
 const DEFAULT_NOTIFICATION_TEMPLATES = {
@@ -34,6 +37,18 @@ const DEFAULT_NOTIFICATION_TEMPLATES = {
     titleKey: 'settings.notifications.page.template.defaults.subtask.title',
     messageKey: 'settings.notifications.page.template.defaults.subtask.message',
   },
+  workDone: {
+    titleKey: 'settings.notifications.page.template.defaults.workDone.title',
+    messageKey: 'settings.notifications.page.template.defaults.workDone.message',
+  },
+  reviewReady: {
+    titleKey: 'settings.notifications.page.template.defaults.reviewReady.title',
+    messageKey: 'settings.notifications.page.template.defaults.reviewReady.message',
+  },
+  waitingOnYou: {
+    titleKey: 'settings.notifications.page.template.defaults.waitingOnYou.title',
+    messageKey: 'settings.notifications.page.template.defaults.waitingOnYou.message',
+  },
 } as const;
 type NotificationTemplateEvent = keyof typeof DEFAULT_NOTIFICATION_TEMPLATES;
 const TEMPLATE_EVENT_LABEL_KEYS = {
@@ -41,6 +56,9 @@ const TEMPLATE_EVENT_LABEL_KEYS = {
   subtask: 'settings.notifications.page.template.event.subtask',
   error: 'settings.notifications.page.template.event.error',
   question: 'settings.notifications.page.template.event.question',
+  workDone: 'settings.notifications.page.template.event.workDone',
+  reviewReady: 'settings.notifications.page.template.event.reviewReady',
+  waitingOnYou: 'settings.notifications.page.template.event.waitingOnYou',
 } as const satisfies Record<NotificationTemplateEvent, string>;
 
 export const NotificationSettings: React.FC = () => {
@@ -68,6 +86,12 @@ export const NotificationSettings: React.FC = () => {
   const setNotifyOnError = useUIStore(state => state.setNotifyOnError);
   const notifyOnQuestion = useUIStore(state => state.notifyOnQuestion);
   const setNotifyOnQuestion = useUIStore(state => state.setNotifyOnQuestion);
+  const notifyOnWorkDone = useUIStore(state => state.notifyOnWorkDone);
+  const setNotifyOnWorkDone = useUIStore(state => state.setNotifyOnWorkDone);
+  const notifyOnReviewReady = useUIStore(state => state.notifyOnReviewReady);
+  const setNotifyOnReviewReady = useUIStore(state => state.setNotifyOnReviewReady);
+  const notifyOnWaitingOnYou = useUIStore(state => state.notifyOnWaitingOnYou);
+  const setNotifyOnWaitingOnYou = useUIStore(state => state.setNotifyOnWaitingOnYou);
   const notificationTemplates = useUIStore(state => state.notificationTemplates);
   const setNotificationTemplates = useUIStore(state => state.setNotificationTemplates);
 
@@ -151,7 +175,7 @@ export const NotificationSettings: React.FC = () => {
   const canShowNotifications = isDesktop || isVSCode || isNativeApp || (isBrowser && typeof Notification !== 'undefined' && Notification.permission === 'granted');
 
   const updateTemplate = (
-    event: 'completion' | 'error' | 'question' | 'subtask',
+    event: NotificationTemplateEvent,
     field: 'title' | 'message',
     value: string,
   ) => {
@@ -558,6 +582,42 @@ export const NotificationSettings: React.FC = () => {
               </div>
             </SettingsSection>
 
+            <SettingsSection
+              settingsItem="notifications.verdicts"
+              title={t('settings.notifications.page.verdicts.title')}
+              description={t('settings.notifications.page.verdicts.description')}
+              contentClassName={SETTINGS_FIELDS_STACK_CLASS}
+            >
+              <div className={SETTINGS_OPTION_STACK_CLASS}>
+                <SettingsCheckboxRow
+                  checked={notifyOnWorkDone}
+                  onChange={setNotifyOnWorkDone}
+                  label={t('settings.notifications.page.verdicts.workDoneLabel')}
+                  ariaLabel={t('settings.notifications.page.verdicts.workDoneAria')}
+                />
+
+                <SettingsCheckboxRow
+                  checked={notifyOnReviewReady}
+                  onChange={setNotifyOnReviewReady}
+                  label={t('settings.notifications.page.verdicts.reviewReadyLabel')}
+                  ariaLabel={t('settings.notifications.page.verdicts.reviewReadyAria')}
+                />
+
+                <SettingsCheckboxRow
+                  checked={notifyOnWaitingOnYou}
+                  onChange={setNotifyOnWaitingOnYou}
+                  label={t('settings.notifications.page.verdicts.waitingOnYouLabel')}
+                  ariaLabel={t('settings.notifications.page.verdicts.waitingOnYouAria')}
+                />
+              </div>
+
+              {(notifyOnWorkDone || notifyOnReviewReady || notifyOnWaitingOnYou) && !notifyOnCompletion && (
+                <p className={SETTINGS_HELPER_CLASS}>{t('settings.notifications.page.verdicts.completionOffWarning')}</p>
+              )}
+
+              {(notifyOnWorkDone || notifyOnReviewReady || notifyOnWaitingOnYou) && <JevAccessNote />}
+            </SettingsSection>
+
             {!isNativeApp && (
             <SettingsSection
               title={t('settings.notifications.page.template.title')}
@@ -575,7 +635,7 @@ export const NotificationSettings: React.FC = () => {
               )}
             >
               <SettingsTwoColumn className="gap-2 md:grid-cols-2 md:gap-3 lg:gap-3">
-                {(['completion', 'subtask', 'error', 'question'] as const).map((event: NotificationTemplateEvent) => (
+                {(['completion', 'subtask', 'error', 'question', 'workDone', 'reviewReady', 'waitingOnYou'] as const).map((event: NotificationTemplateEvent) => (
                   <section key={event} className="p-2">
                     <SettingsGroupTitle className="capitalize">
                       {t(TEMPLATE_EVENT_LABEL_KEYS[event])}

@@ -747,6 +747,15 @@
     "notifyOnQuestion": {
       "scope": "profile"
     },
+    "notifyOnWorkDone": {
+      "scope": "profile"
+    },
+    "notifyOnReviewReady": {
+      "scope": "profile"
+    },
+    "notifyOnWaitingOnYou": {
+      "scope": "profile"
+    },
     "notificationTemplates": {
       "scope": "profile"
     },

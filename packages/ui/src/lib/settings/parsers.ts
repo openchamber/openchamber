@@ -32,6 +32,9 @@ export type NotificationTemplates = {
   error: { title: string; message: string };
   question: { title: string; message: string };
   subtask: { title: string; message: string };
+  workDone: { title: string; message: string };
+  reviewReady: { title: string; message: string };
+  waitingOnYou: { title: string; message: string };
 };
 
 export type UsageModelGroups = Record<string, {
@@ -192,6 +195,11 @@ const DEFAULT_NOTIFICATION_TEMPLATES: NotificationTemplates = {
   error: { title: 'Error Occurred', message: 'An error occurred while processing your task.' },
   question: { title: 'Input Needed', message: 'Please provide input to continue.' },
   subtask: { title: 'Subtask Complete', message: 'A subtask has finished.' },
+  // Empty means "no custom text": the server renders the locale default,
+  // so nothing gets seeded over a user's language.
+  workDone: { title: '', message: '' },
+  reviewReady: { title: '', message: '' },
+  waitingOnYou: { title: '', message: '' },
 };
 
 const notificationTemplateSchema = z.object({
@@ -209,12 +217,18 @@ export const parseNotificationTemplates = fromSchema(
     const error = read('error');
     const question = read('question');
     const subtask = read('subtask');
-    if (!completion && !error && !question && !subtask) return undefined;
+    const workDone = read('workDone');
+    const reviewReady = read('reviewReady');
+    const waitingOnYou = read('waitingOnYou');
+    if (!completion && !error && !question && !subtask && !workDone && !reviewReady && !waitingOnYou) return undefined;
     return {
       completion: completion ?? DEFAULT_NOTIFICATION_TEMPLATES.completion,
       error: error ?? DEFAULT_NOTIFICATION_TEMPLATES.error,
       question: question ?? DEFAULT_NOTIFICATION_TEMPLATES.question,
       subtask: subtask ?? DEFAULT_NOTIFICATION_TEMPLATES.subtask,
+      workDone: workDone ?? DEFAULT_NOTIFICATION_TEMPLATES.workDone,
+      reviewReady: reviewReady ?? DEFAULT_NOTIFICATION_TEMPLATES.reviewReady,
+      waitingOnYou: waitingOnYou ?? DEFAULT_NOTIFICATION_TEMPLATES.waitingOnYou,
     };
   }).pipe(z.custom<NotificationTemplates>((value) => value !== undefined)),
 );

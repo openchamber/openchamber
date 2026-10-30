@@ -1526,6 +1526,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['completion', 'subtasks', 'errors', 'questions'],
   },
   {
+    id: 'notifications.verdicts',
+    page: 'notifications',
+    titleKey: 'settings.notifications.page.verdicts.title',
+    descriptionKey: 'settings.notifications.page.verdicts.description',
+    keywords: ['verdict', 'classifier', 'work done', 'review ready', 'waiting on you', 'turn end'],
+  },
+  {
     id: 'notifications.push',
     page: 'notifications',
     titleKey: 'settings.notifications.page.push.title',

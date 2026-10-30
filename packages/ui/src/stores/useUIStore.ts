@@ -160,6 +160,9 @@ const EMPTY_NOTIFICATION_TEMPLATES = {
   error: { title: '', message: '' },
   question: { title: '', message: '' },
   subtask: { title: '', message: '' },
+  workDone: { title: '', message: '' },
+  reviewReady: { title: '', message: '' },
+  waitingOnYou: { title: '', message: '' },
 } as const;
 
 const isSameTemplateValue = (
@@ -1101,6 +1104,11 @@ interface UIStore {
   notifyOnCompletion: boolean;
   notifyOnError: boolean;
   notifyOnQuestion: boolean;
+  // Turn-end verdict events: judged by the classifier at each turn end, so
+  // each enabled one adds a classifier request per completed turn.
+  notifyOnWorkDone: boolean;
+  notifyOnReviewReady: boolean;
+  notifyOnWaitingOnYou: boolean;
 
   // Per-event notification templates
   notificationTemplates: {
@@ -1108,6 +1116,9 @@ interface UIStore {
     error: { title: string; message: string };
     question: { title: string; message: string };
     subtask: { title: string; message: string };
+    workDone: { title: string; message: string };
+    reviewReady: { title: string; message: string };
+    waitingOnYou: { title: string; message: string };
   };
 
   // Summarization settings
@@ -1417,6 +1428,9 @@ interface UIStore {
   setNotifyOnCompletion: (value: boolean) => void;
   setNotifyOnError: (value: boolean) => void;
   setNotifyOnQuestion: (value: boolean) => void;
+  setNotifyOnWorkDone: (value: boolean) => void;
+  setNotifyOnReviewReady: (value: boolean) => void;
+  setNotifyOnWaitingOnYou: (value: boolean) => void;
   setNotificationTemplates: (
     templates: UIStore['notificationTemplates'] | ((current: UIStore['notificationTemplates']) => UIStore['notificationTemplates']),
   ) => void;
@@ -1652,11 +1666,17 @@ export const useUIStore = create<UIStore>()(
         notifyOnCompletion: true,
         notifyOnError: true,
         notifyOnQuestion: true,
+        notifyOnWorkDone: false,
+        notifyOnReviewReady: false,
+        notifyOnWaitingOnYou: false,
         notificationTemplates: {
           completion: { ...EMPTY_NOTIFICATION_TEMPLATES.completion },
           error: { ...EMPTY_NOTIFICATION_TEMPLATES.error },
           question: { ...EMPTY_NOTIFICATION_TEMPLATES.question },
           subtask: { ...EMPTY_NOTIFICATION_TEMPLATES.subtask },
+          workDone: { ...EMPTY_NOTIFICATION_TEMPLATES.workDone },
+          reviewReady: { ...EMPTY_NOTIFICATION_TEMPLATES.reviewReady },
+          waitingOnYou: { ...EMPTY_NOTIFICATION_TEMPLATES.waitingOnYou },
         },
 
         // Summarization settings
@@ -3262,6 +3282,9 @@ export const useUIStore = create<UIStore>()(
         setNotifyOnCompletion: (value) => { set({ notifyOnCompletion: value }); },
         setNotifyOnError: (value) => { set({ notifyOnError: value }); },
         setNotifyOnQuestion: (value) => { set({ notifyOnQuestion: value }); },
+        setNotifyOnWorkDone: (value) => { set({ notifyOnWorkDone: value }); },
+        setNotifyOnReviewReady: (value) => { set({ notifyOnReviewReady: value }); },
+        setNotifyOnWaitingOnYou: (value) => { set({ notifyOnWaitingOnYou: value }); },
         setNotificationTemplates: (templates) => {
           set((state) => ({
             notificationTemplates: typeof templates === 'function'
@@ -3850,6 +3873,9 @@ export const useUIStore = create<UIStore>()(
           notifyOnCompletion: state.notifyOnCompletion,
           notifyOnError: state.notifyOnError,
           notifyOnQuestion: state.notifyOnQuestion,
+          notifyOnWorkDone: state.notifyOnWorkDone,
+          notifyOnReviewReady: state.notifyOnReviewReady,
+          notifyOnWaitingOnYou: state.notifyOnWaitingOnYou,
           notificationTemplates: state.notificationTemplates,
           summarizeLastMessage: state.summarizeLastMessage,
           summaryThreshold: state.summaryThreshold,

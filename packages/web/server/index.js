@@ -1009,6 +1009,10 @@ const notificationTriggerRuntime = createNotificationTriggerRuntime({
   isAnyInteractiveClientVisible,
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
+  // The turn-end verdict rides the session-work battery's Jev call (one
+  // classifier request per turn, answers shared with the composer hints).
+  // Declared further down; only ever called after startup.
+  turnEndVerdictFor: (sessionId) => sessionWorkRuntime.turnEndVerdictFor(sessionId),
   readSessionMetadata: readStoredSessionMetadata,
   // Read at call time: the isolated-spaces switch turns the host on and off live.
   spaceFetchFor: (spaceId) => spacesHost?.openCodeFetchFor(spaceId) ?? null,

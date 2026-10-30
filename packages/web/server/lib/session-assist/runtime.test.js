@@ -371,6 +371,46 @@ describe('session assist runtime', () => {
     expect(getSmallModelService).not.toHaveBeenCalled();
   });
 
+  it('asks the turn-end check for a verdict notification with both assist fields off', async () => {
+    const persistSessionAssist = vi.fn(async () => undefined);
+    const getSmallModelService = vi.fn(async () => {
+      throw new Error('the small model must not be woken');
+    });
+    const evaluateTurn = vi.fn(async () => null);
+    const { runtime, buildOpenCodeUrl } = makeRuntime({
+      persistSessionAssist,
+      getSmallModelService,
+      evaluateTurn,
+      getTargets: () => ({ recap: false, suggestion: false, turnEndVerdicts: true }),
+    });
+
+    runtime.processPayload(idle());
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    expect(evaluateTurn).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: 'ses_1',
+      directory: '',
+      assist: expect.objectContaining({ recap: false, suggestion: false }),
+    }));
+    expect(buildOpenCodeUrl).not.toHaveBeenCalled();
+    expect(getSmallModelService).not.toHaveBeenCalled();
+  });
+
+  it('asks nothing when both assist fields and every verdict notification are off', async () => {
+    const evaluateTurn = vi.fn(async () => null);
+    const { runtime, buildOpenCodeUrl } = makeRuntime({
+      persistSessionAssist: vi.fn(async () => undefined),
+      evaluateTurn,
+      getTargets: () => ({ recap: false, suggestion: false, turnEndVerdicts: false }),
+    });
+
+    runtime.processPayload(idle());
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    expect(evaluateTurn).not.toHaveBeenCalled();
+    expect(buildOpenCodeUrl).not.toHaveBeenCalled();
+  });
+
   it('arms nothing for a known subsession: no gate, no timer, no read', async () => {
     const lineage = createSessionLineage();
     lineage.remember('ses_1', 'ses_parent');
