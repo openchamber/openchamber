@@ -2,6 +2,7 @@ import * as React from 'react';
 
 import { Icon } from '@/components/icon/Icon';
 import { Checkbox } from '@/components/ui/checkbox';
+import { useAvatarImage } from '@/hooks/useAvatarImage';
 import type { CISummary, Label, ChangeRequestListStatus, RepositoryDiscussionReference, TrackerLabel, TrackerProgress } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
 import { useSourceControlProvider } from '@/lib/source-control/providers/registry';
@@ -39,18 +40,21 @@ const rowAvatarUrl = (url: string): string => {
 };
 
 /** Who an item belongs to: avatar, or the name's initial, then the name. */
-const RowPerson: React.FC<{ name: string; avatarUrl: string | null | undefined }> = ({ name, avatarUrl }) => (
-    <span className="inline-flex min-w-0 items-center gap-1">
-        {avatarUrl ? (
-            <img src={rowAvatarUrl(avatarUrl)} alt="" loading="lazy" className="size-4 shrink-0 rounded-full bg-surface-muted" />
-        ) : (
-            <span className="flex size-4 shrink-0 items-center justify-center rounded-full bg-surface-muted text-[0.625rem] leading-none">
-                {name.slice(0, 1).toUpperCase()}
-            </span>
-        )}
-        <span className="truncate">{name}</span>
-    </span>
-);
+const RowPerson: React.FC<{ name: string; avatarUrl: string | null | undefined }> = ({ name, avatarUrl }) => {
+    const { broken, onError } = useAvatarImage(avatarUrl);
+    return (
+        <span className="inline-flex min-w-0 items-center gap-1">
+            {avatarUrl && !broken ? (
+                <img src={rowAvatarUrl(avatarUrl)} alt="" loading="lazy" className="size-4 shrink-0 rounded-full bg-surface-muted" onError={onError} />
+            ) : (
+                <span className="flex size-4 shrink-0 items-center justify-center rounded-full bg-surface-muted text-[0.625rem] leading-none">
+                    {name.slice(0, 1).toUpperCase()}
+                </span>
+            )}
+            <span className="truncate">{name}</span>
+        </span>
+    );
+};
 
 export const ReferenceLabelChips: React.FC<{ labels: ChipLabel[]; max?: number }> = ({ labels, max }) => {
     if (labels.length === 0) return null;

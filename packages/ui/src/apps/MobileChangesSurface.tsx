@@ -1441,7 +1441,8 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
               onVisiblePathsChange={setVisibleChangePaths}
             />
           </div>
-          <div className="shrink-0 border-t border-edge px-4 pb-4 pt-3">
+          {/* Held at the bottom of the panel: it rides the keyboard over the list. */}
+          <div data-keyboard-rider="" className="shrink-0 border-t border-edge bg-background px-4 pb-4 pt-3">
             <CommitSection
               stagedCount={stagedChangeEntries.length}
               commitMessage={commitMessage}

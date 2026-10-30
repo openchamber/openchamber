@@ -4,6 +4,7 @@ import { SimpleMarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
+import { useAvatarImage } from '@/hooks/useAvatarImage';
 import { useEmojiShortcodes } from '@/lib/emoji/shortcodes';
 import { useI18n } from '@/lib/i18n';
 import { isIMECompositionEvent } from '@/lib/ime';
@@ -29,15 +30,18 @@ export type ReferenceThreadActions = {
 // Text actions under a thread: a colour change on hover, no fill.
 const THREAD_ACTION_CLASS = cn('h-6 px-1.5 hover:bg-transparent hover:text-foreground', REFERENCE_META_TEXT);
 
-const Avatar: React.FC<{ comment: ReferenceCommentItem; className: string }> = ({ comment, className }) => (
-    <div className={cn('flex shrink-0 items-center justify-center overflow-hidden rounded-full border border-edge bg-surface-elevated typography-micro text-muted-foreground', className)}>
-        {comment.avatarUrl ? (
-            <img src={comment.avatarUrl} alt="" className="size-full object-cover" loading="lazy" />
-        ) : (
-            <span>{(comment.author ?? '?').slice(0, 1).toUpperCase()}</span>
-        )}
-    </div>
-);
+const Avatar: React.FC<{ comment: ReferenceCommentItem; className: string }> = ({ comment, className }) => {
+    const { broken, onError } = useAvatarImage(comment.avatarUrl);
+    return (
+        <div className={cn('flex shrink-0 items-center justify-center overflow-hidden rounded-full border border-edge bg-surface-elevated typography-micro text-muted-foreground', className)}>
+            {comment.avatarUrl && !broken ? (
+                <img src={comment.avatarUrl} alt="" className="size-full object-cover" loading="lazy" onError={onError} />
+            ) : (
+                <span>{(comment.author ?? '?').slice(0, 1).toUpperCase()}</span>
+            )}
+        </div>
+    );
+};
 
 /** A comment's text; on a review line, its ```suggestion fences draw as diffs of that line. */
 const CommentBody: React.FC<{ comment: ReferenceCommentItem }> = ({ comment }) => {
@@ -237,6 +241,15 @@ const ThreadRest: React.FC<{
     );
 };
 
+const CommitAuthorAvatar: React.FC<{ name: string; avatarUrl: string }> = ({ name, avatarUrl }) => {
+    const { broken, onError } = useAvatarImage(avatarUrl);
+    return broken ? (
+        <span className="flex size-3.5 shrink-0 items-center justify-center rounded-full bg-surface-muted leading-none">{name.slice(0, 1).toUpperCase()}</span>
+    ) : (
+        <img src={avatarUrl} alt="" className="size-3.5 shrink-0 rounded-full" loading="lazy" onError={onError} />
+    );
+};
+
 const relativeLabel = (t: ReturnType<typeof useI18n>['t'], iso: string | null, now: number) => {
     const relative = relativeTimeOf(iso, now);
     if (!relative) return null;
@@ -284,7 +297,7 @@ const CommitGroup: React.FC<{ group: ReferenceCommitGroup; now: number }> = ({ g
                             {commit.author ? (
                                 <span className={cn('inline-flex min-w-0 max-w-[40%] shrink-0 items-center gap-1 self-center typography-micro', REFERENCE_META_TEXT)}>
                                     {commit.avatarUrl ? (
-                                        <img src={commit.avatarUrl} alt="" className="size-3.5 shrink-0 rounded-full" loading="lazy" />
+                                        <CommitAuthorAvatar name={commit.author} avatarUrl={commit.avatarUrl} />
                                     ) : null}
                                     <span className="truncate">{commit.author}</span>
                                 </span>

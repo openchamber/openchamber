@@ -1231,11 +1231,31 @@ export const createSettingsRuntime = (deps) => {
     return result;
   };
 
+  // A background session may discover a project while another window saves
+  // settings. Resolve the append inside the settings queue, without activation.
+  const registerSessionProject = (resolveProject) => {
+    const result = persistSettingsLock.then(async () => {
+      const current = await readSettingsFromDiskStrict();
+      if (Array.isArray(current) || (current.projects !== undefined && !Array.isArray(current.projects))) {
+        throw new Error('Project registry is malformed');
+      }
+      const projects = sanitizeProjects(current.projects) || [];
+      const project = await resolveProject(projects);
+      if (!projects.some((entry) => entry.id === project.id)) {
+        await writeJsonFileAtomic(SETTINGS_FILE_PATH, JSON.stringify({ ...current, projects: [...(current.projects || []), project] }, null, 2));
+      }
+      return project;
+    });
+    persistSettingsLock = result.catch(() => {});
+    return result;
+  };
+
   return {
     readSettingsFromDisk,
     readSettingsFromDiskStrict,
     readSettingsFromDiskMigrated,
     writeSettingsToDisk,
     persistSettings,
+    registerSessionProject,
   };
 };

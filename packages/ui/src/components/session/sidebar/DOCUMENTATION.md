@@ -231,6 +231,12 @@ no Shift.
   history read costs mobile data, and its list never did.
 
 
+### Why project trees resolve lineage globally
+
+The shared project tree checks parent presence against the global active and archived cache plus the merged active session list. Child expansion uses the lifecycle-ordered global graph. A child whose parent is known renders only beneath that parent, even when its own directory belongs to another project or worktree. An archived parent or intermediate never allows an active descendant to become an independent root. Project buckets contain roots only, so children do not consume root pagination or make a child-only worktree expandable. Temporary `/btw` forks and archived children remain hidden. Selection still uses each session's own directory. VS Code applies the same rule after its exact workspace filter.
+
+Bucket-local lineage promoted cross-project subagents to independent rows and left their parent without an expansion control. The missing-parent fallback applies only while both active and archived sources lack the parent, and clears when either parent arrives. The project-section cache tracks each project's visible ancestors and descendants, including their order and record identity, so a lineage or same-ID semantic change rebuilds the affected trees without replacing unrelated project sections.
+
 Both project display modes use `projects/CrossfadeZoneHeaders.tsx` for sticky
 zone headers. The live header keeps one portal host as it moves between its
 virtual row placeholder and a stationary layer inside the native scroller,
@@ -587,13 +593,11 @@ is removing keeps its place in the block until git is done
 never counts. `list/SessionProjectCollection.tsx` orders the works by the first of
 their sessions in the shared lifecycle order (`orderInWorkWorks` in
 `works/sidebarWorks.ts`) and passes `workEntries` to the row model. In work
-spans projects: a session in work whose directory no added project holds (an
-agent moved it into another repository, say) is listed under the work of the
-top-level session it nests under (`buildSessionRootIndex`, over the
-collection's root sessions and `childrenMap`), with no project, as
-`lib/sidebarSessionRows.ts` describes for the tray. While the zone is shown it
-is the only place such a session appears: the list by time does not add these,
-so Done takes one out of the sidebar. A work In work lists leaves its project
+spans registered projects. A session whose destination has no registered project
+stays out of In work, Pinned and search until `sync/session-admission.ts` checks
+its OpenCode configuration and registers its folder. Pins and work state cannot
+admit a destination, including in the tray. The raw global cache retains these
+sessions for cleanup and lineage. A work In work lists leaves its project
 or folder (`movedSessionIds`, `movedGroupKeys`) unless "Also show in work
 under projects" is on; search lists every zone session once, in its zone,
 either way. VS Code always keeps them in place. Chats are never in work and
@@ -924,7 +928,9 @@ matching and ordering. Search does not fetch sessions or broaden list membership
   focus.
 - Opening and closing a zone, project, worktree, folder, multi-run or a
   session's subsessions animates like a reasoning block in the chat (200ms
-  ease-out, `sessionSidebarDisclosure.ts`; a session row with subsessions
+  ease-out, `sessionSidebarDisclosure.ts` finds the block and
+  `lib/motion/rowDisclosure.ts` holds the timing and keyframes the file trees
+  share; a session row with subsessions
   carries `expanded` for it). The rows are flat virtual rows, so no
   container changes height: `SessionSidebarRows` compares each new row list
   with the one last drawn, and when exactly one header changed state with one
@@ -966,6 +972,15 @@ matching and ordering. Search does not fetch sessions or broaden list membership
   folder that accepts drops (`SessionFolderOwnersProvider`): a drag with
   nowhere to land swallowed the click that started it when the mouse moved
   8 px during the press.
+  A cross-project child keeps its display parent, while its folder menu, drag
+  payload, bulk-selection scope and Tracker links use the authoritative owner
+  of the child's own directory. The drop action resolves the current row
+  occurrence and checks that owner again before any folder write; a rejected
+  cross-owner or stale-row drop changes no memberships. Bulk folder actions
+  require a resolved owner for every selected session, including managed Chats
+  resolved from their chat root. Once resolved, folder actions include only
+  sessions owned by the selection scope: a foreign descendant automatically
+  included by subtree selection or Select all keeps its own folder memberships.
 - Session rows allow vertical touch panning before the long-press drag activates.
   The TouchSensor owns movement only after activation; disabling touch panning on
   the whole row prevents quick swipes from scrolling even when no drag starts.

@@ -129,7 +129,10 @@ session proposed. `workflow.save` writes a script to
   and saved, so a retry never delivers twice (409 counts as delivered).
 - A run that was `running` when the server stopped is marked `stopped` with
   "OpenChamber restarted…" on the next start; its report goes out once the
-  OpenCode event hub connects (`deliverPending`).
+  OpenCode event hub connects (`deliverPending`). The run records the server
+  process that runs it (`ownerPid`); a start in another process leaves the run
+  alone while that process is alive, so a second OpenChamber over the same
+  data directory (a dev server next to the desktop app) cannot stop it.
 - A run is in the runtime's `active` map from the moment it is `running`
   until its end is saved; a stop that arrives before the worker exists is
   honoured once it does. The report goes out after the run left `active`, so a

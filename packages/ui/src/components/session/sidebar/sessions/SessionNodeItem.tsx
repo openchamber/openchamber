@@ -114,6 +114,7 @@ export type SessionNodeItemProps = {
   groupDirectory?: string | null;
   projectId?: string | null;
   folderOwnerKey?: string | null;
+  ownerProjectId?: string | null;
   selectionScopeKey?: string | null;
   archivedBucket?: boolean;
   pinnedSessionIds: Set<string>;
@@ -306,6 +307,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
     groupDirectory,
     projectId,
     folderOwnerKey,
+    ownerProjectId,
     selectionScopeKey: explicitSelectionScopeKey,
     archivedBucket = false,
     pinnedSessionIds,
@@ -451,11 +453,11 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
   const isActive = isCurrentSession && !runOverviewOpen;
 
   const sessionDirectory = normalizePath(session.directory ?? null) ?? normalizePath(groupDirectory ?? null);
-  // Ref chips open their item in the Tracker through the row's project. The
-  // project's root path resolves without the live worktree map, which a
-  // session in a worktree outside the root does not until that map arrives.
+  const sessionProjectId = ownerProjectId === undefined ? projectId : ownerProjectId;
+  // A nested cross-project row uses its own repository for Tracker links.
+  // The project root also resolves before the live worktree map arrives.
   const projectRootDirectory = useProjectsStore((state) =>
-    projectId ? state.projects.find((entry) => entry.id === projectId)?.path ?? null : null,
+    sessionProjectId ? state.projects.find((entry) => entry.id === sessionProjectId)?.path ?? null : null,
   );
   const trackerDirectory = projectRootDirectory ?? sessionDirectory;
   // Multi-select scope: sessions are flat per project, so selection groups by
@@ -464,6 +466,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
   const selectionScopeKey = explicitSelectionScopeKey !== undefined
     ? explicitSelectionScopeKey
     : projectId ?? sessionDirectory ?? null;
+  const hasFolderMutationAuthority = folderOwnerKey === undefined ? true : Boolean(folderOwnerKey);
   const loadExportRecords = useSessionMessageRecordsForExport();
   const prefetchSessionMessages = usePrefetchSessionMessages();
   // Same gate as the sidebar's neighbor prefetch: the VS Code webview keeps
@@ -1393,7 +1396,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
         </SessionMenuItemHint>
       ) : null}
 
-      {sessionDirectory && !archivedBucket && !isTimelineRow ? (() => {
+      {sessionDirectory && !archivedBucket && !isTimelineRow && hasFolderMutationAuthority ? (() => {
         // Folders are flat per project: list folders from every scope of the
         // owning project (root + all worktrees) so sessions can be filed
         // across worktrees. Each action targets the folder's owning scope,
@@ -1403,8 +1406,8 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
           const normalized = normalizePath(candidate ?? null);
           if (normalized && !scopes.includes(normalized)) scopes.push(normalized);
         };
-        if (projectId && !isVSCode) {
-          const project = useProjectsStore.getState().projects.find((entry) => entry.id === projectId);
+        if (sessionProjectId && !isVSCode) {
+          const project = useProjectsStore.getState().projects.find((entry) => entry.id === sessionProjectId);
           const projectRoot = normalizePath(project?.path ?? null);
           pushScope(projectRoot);
           if (projectRoot) {
@@ -1438,8 +1441,8 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
                           removeSessionFromFolder(scope, session.id);
                           return;
                         }
-                        if (currentEntry && currentEntry.scope !== scope) {
-                          removeSessionFromFolder(currentEntry.scope, session.id);
+                        for (const candidateScope of scopes) {
+                          if (candidateScope !== scope) removeSessionFromFolder(candidateScope, session.id);
                         }
                         addSessionToFolder(scope, folder.id, session.id);
                       }}>
@@ -1454,8 +1457,8 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
                    const newFolder = createFolderAndStartRename(defaultScope);
                    if (!newFolder) return;
                    pendingFolderCreateRef.current = true;
-                  if (currentEntry && currentEntry.scope !== defaultScope) {
-                    removeSessionFromFolder(currentEntry.scope, session.id);
+                  for (const scope of scopes) {
+                    if (scope !== defaultScope) removeSessionFromFolder(scope, session.id);
                   }
                   addSessionToFolder(defaultScope, newFolder.id, session.id);
                 }}>
@@ -2101,6 +2104,9 @@ const sessionNodeItemPropsChange = (prev: SessionNodeItemProps, next: SessionNod
   if (prev.ownsWork !== next.ownsWork) return 'ownsWork';
   if (prev.groupDirectory !== next.groupDirectory) return 'groupDirectory';
   if (prev.projectId !== next.projectId) return 'projectId';
+  if (prev.ownerProjectId !== next.ownerProjectId) return 'ownerProjectId';
+  if (prev.folderOwnerKey !== next.folderOwnerKey) return 'folderOwnerKey';
+  if (prev.selectionScopeKey !== next.selectionScopeKey) return 'selectionScopeKey';
   if (prev.archivedBucket !== next.archivedBucket) return 'archivedBucket';
   if ((prev.renderContext ?? 'project') !== (next.renderContext ?? 'project')) return 'renderContext';
   if ((prev.detailed ?? false) !== (next.detailed ?? false)) return 'detailed';

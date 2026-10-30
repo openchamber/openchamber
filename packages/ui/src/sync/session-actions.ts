@@ -12,7 +12,6 @@ import { forkAtTranscriptCut, isTurnBoundary, transcriptCutAfterMessage, transcr
 import { useSessionUIStore } from "./session-ui-store"
 import { useSelectionStore } from "./selection-store"
 import {
-  markRecoveredQuestionAnswered,
   noteLocalFormCancelled,
   noteLocalFormReplied,
   submitRecoveredAnswer,
@@ -2604,7 +2603,7 @@ export async function sendRecoveredFormAnswer(question: RecoveredQuestion, text:
         target: { runtimeKey, sessionId: question.sessionID, directory: question.directory },
       },
     )
-    if (isCurrentRuntime()) markRecoveredQuestionAnswered(question.form.id)
+    if (isCurrentRuntime()) noteLocalFormReplied(question.form.id)
   })
 }
 

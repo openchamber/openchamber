@@ -34,7 +34,8 @@ const MANAGED_ENV_NAMES = new Set([
   'GIT_ASKPASS', 'SSH_ASKPASS', 'SSH_ASKPASS_REQUIRE', 'GIT_CONFIG_COUNT',
   'GIT_CONFIG', 'GIT_CONFIG_PARAMETERS', 'GIT_CONFIG_GLOBAL', 'GIT_CONFIG_NOSYSTEM',
   'GIT_SSH', 'GIT_SSH_COMMAND', 'GIT_SSH_VARIANT',
-  'GIT_PROXY_COMMAND', 'SSH_AUTH_SOCK', 'OPENCHAMBER_GIT_SSH_KEY',
+  'GIT_PROXY_COMMAND', 'SSH_AUTH_SOCK', 'OPENCHAMBER_GIT_SSH_KEY', 'OPENCHAMBER_GIT_SSH_PASSPHRASE',
+  'OPENCHAMBER_GIT_SSH_EXECUTABLE',
   'GIT_SSL_CERT', 'GIT_SSL_KEY', 'GIT_SSL_CAINFO', 'GIT_SSL_CAPATH',
   'GIT_SSL_CIPHER_LIST', 'GIT_SSL_VERSION', 'GIT_SSL_NO_VERIFY',
   'GIT_SSL_CERT_PASSWORD_PROTECTED', 'CURL_CA_BUNDLE', 'SSL_CERT_FILE',
@@ -822,6 +823,7 @@ export function createNetworkOperations({
       throw operationError('AUTHENTICATION_REQUIRED', 'Managed Git credential is unavailable', 409);
     }
     env.OPENCHAMBER_GIT_SSH_KEY = credential.key.privateKeyPath;
+    Object.assign(env, credential.key.askpassEnv);
     env.GIT_SSH_COMMAND = helperShellCommand(SSH_WRAPPER_PATH);
     env.GIT_SSH_VARIANT = 'ssh';
     controls.updateTransportMetadata({ fingerprint: credential.key.fingerprint }, plan.transportRole);
@@ -831,7 +833,8 @@ export function createNetworkOperations({
       revoke: async () => {
         try { return credential.key.cleanup ? await credential.key.cleanup() : true; } catch { return false; }
       },
-      secrets: [credential.key.sourcePath, credential.key.privateKeyPath],
+      secrets: [credential.key.sourcePath, credential.key.privateKeyPath,
+        ...(credential.key.askpassEnv ? [credential.key.askpassEnv.OPENCHAMBER_GIT_SSH_PASSPHRASE] : [])],
     };
   };
 

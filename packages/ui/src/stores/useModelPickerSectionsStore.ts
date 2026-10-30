@@ -14,6 +14,12 @@ import { persist } from 'zustand/middleware';
 type ModelPickerSectionsStore = {
   collapsedSections: Record<string, boolean>;
   toggleSection: (key: string) => void;
+  /**
+   * Sets a section open or closed outright, for a picker whose providers start
+   * closed (the phone's): an opened one is kept as `open:<key>`, since the
+   * default there is closed.
+   */
+  setSectionCollapsed: (key: string, collapsed: boolean) => void;
 };
 
 export const useModelPickerSectionsStore = create<ModelPickerSectionsStore>()(
@@ -25,6 +31,18 @@ export const useModelPickerSectionsStore = create<ModelPickerSectionsStore>()(
           const next = { ...state.collapsedSections };
           if (next[key]) delete next[key];
           else next[key] = true;
+          return { collapsedSections: next };
+        }),
+      setSectionCollapsed: (key, collapsed) =>
+        set((state) => {
+          const next = { ...state.collapsedSections };
+          if (collapsed) {
+            next[key] = true;
+            delete next[`open:${key}`];
+          } else {
+            delete next[key];
+            next[`open:${key}`] = true;
+          }
           return { collapsedSections: next };
         }),
     }),

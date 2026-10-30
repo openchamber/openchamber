@@ -799,25 +799,81 @@ function writeWarmingDuration(config, minutes) {
   return JSON.stringify(config.warming) !== before;
 }
 
-const hasWebSearchKey = (config) => config != null && Object.hasOwn(config, 'websearch');
+// ============== COMPACTION ==============
+
+const compactionTokens = z.number().int().min(0).max(10_000_000).nullable().optional();
+
+/**
+ * A `PUT /api/config/compaction` body: `auto` sets `compaction.auto`,
+ * `buffer` and `keepTokens` set `compaction.buffer` and
+ * `compaction.keep.tokens` (`null` removes the key, so OpenCode's default
+ * applies), `background` sets `experimental.background_compaction`. An
+ * omitted field is left as it is.
+ */
+const compactionUpdateSchema = z.object({
+  auto: z.boolean().optional(),
+  buffer: compactionTokens,
+  keepTokens: compactionTokens,
+  background: z.boolean().optional(),
+}).strict();
+
+/** Sets `owner[key]`, or removes it for `null`. */
+const setOrDelete = (owner, key, value) => {
+  if (value === null) delete owner[key];
+  else owner[key] = value;
+};
+
+const nestedRecord = (owner, key) => (isRecord(owner[key]) ? { ...owner[key] } : {});
+
+const assignOrDrop = (owner, key, record) => {
+  if (Object.keys(record).length > 0) owner[key] = record;
+  else delete owner[key];
+};
+
+/**
+ * Applies a parsed compaction update to a config object, in place. Other keys
+ * under `compaction` and `experimental` stay; a section left empty is
+ * removed. The booleans are written as they are, `false` included: the target
+ * can be `OPENCODE_CONFIG`, and removing the key there would let a `true` in
+ * the user config underneath apply. Returns whether the config changed.
+ */
+function writeCompactionSettings(config, update) {
+  const before = JSON.stringify([config.compaction, config.experimental]);
+  if (update.auto !== undefined || update.buffer !== undefined || update.keepTokens !== undefined) {
+    const compaction = nestedRecord(config, 'compaction');
+    if (update.auto !== undefined) compaction.auto = update.auto;
+    if (update.buffer !== undefined) setOrDelete(compaction, 'buffer', update.buffer);
+    if (update.keepTokens !== undefined) {
+      const keep = nestedRecord(compaction, 'keep');
+      setOrDelete(keep, 'tokens', update.keepTokens);
+      assignOrDrop(compaction, 'keep', keep);
+    }
+    assignOrDrop(config, 'compaction', compaction);
+  }
+  if (update.background !== undefined) {
+    const experimental = nestedRecord(config, 'experimental');
+    setOrDelete(experimental, 'background_compaction', update.background);
+    assignOrDrop(config, 'experimental', experimental);
+  }
+  return JSON.stringify([config.compaction, config.experimental]) !== before;
+}
 
 /**
  * The project config path whose `websearch` wins over the file the Settings
- * choice is written to, or `null`. OpenCode merges user < project files (every
- * `opencode.json[c]` and `.opencode/opencode.json[c]` from the directory up to
- * the project root) < `OPENCODE_CONFIG`, so any project file with the key
- * decides unless `OPENCODE_CONFIG` sets it too. `layers` is what
- * `readConfigLayers(directory)` returns; `projectFiles` lists the existing
- * project config files deepest first, as `{ path, config }`.
+ * choice is written to, or `null`. OpenCode loads the user config, then
+ * `OPENCODE_CONFIG`, then the project files (`getFolderConfigPaths` order),
+ * and the last file that sets a key wins, so any project file with the key
+ * beats both files Settings can write to. `OPENCODE_CONFIG` can name a project
+ * file too; when that file is the winner, the Settings write lands in it and
+ * applies. `layers` is what `readConfigLayers(directory)` returns;
+ * `projectFiles` lists the project config files the winning one first, as
+ * `{ path, config }`.
  */
 function findWebSearchProjectOverride(layers, projectFiles) {
-  if (hasWebSearchKey(layers?.customConfig)) return null;
   const userPath = layers?.paths?.userPath ?? null;
-  for (const file of projectFiles ?? []) {
-    if (!file?.path || file.path === userPath) continue;
-    if (hasWebSearchKey(file.config)) return file.path;
-  }
-  return null;
+  const winner = (projectFiles ?? [])
+    .find((file) => file?.path && file.path !== userPath && isRecord(file.config) && Object.hasOwn(file.config, 'websearch'));
+  return winner && winner.path !== layers?.paths?.customPath ? winner.path : null;
 }
 
 // ============== SKILL SWITCHES ==============
@@ -912,6 +968,8 @@ export {
   findWebSearchProjectOverride,
   writeWarmingEnabled,
   writeWarmingDuration,
+  compactionUpdateSchema,
+  writeCompactionSettings,
   skillSwitchRequestSchema,
   writeSkillDisabled,
 };

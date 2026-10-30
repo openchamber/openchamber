@@ -25,6 +25,9 @@ type Args = {
   sessionOrderRanks: ReadonlyMap<string, number>;
   gitBranches: Map<string, string | null>;
   isVSCode: boolean;
+  sessionById: ReadonlyMap<string, Session>;
+  childrenMap: ReadonlyMap<string, readonly Session[]>;
+  nestedSessionIds: ReadonlySet<string>;
   sessionOwners?: ReadonlyMap<string, { scopeDirectory: string }>;
   /** The isolated spaces of each project, by the project's normalized root. */
   spacesByProject?: ReadonlyMap<string, readonly SpaceMark[]>;
@@ -61,6 +64,12 @@ export const useSessionGrouping = (args: Args) => {
   // section cache compares the ranks of each project's own sessions instead.
   const sessionOrderRanksRef = React.useRef(args.sessionOrderRanks);
   sessionOrderRanksRef.current = args.sessionOrderRanks;
+  const sessionByIdRef = React.useRef(args.sessionById);
+  sessionByIdRef.current = args.sessionById;
+  const childrenMapRef = React.useRef(args.childrenMap);
+  childrenMapRef.current = args.childrenMap;
+  const nestedSessionIdsRef = React.useRef(args.nestedSessionIds);
+  nestedSessionIdsRef.current = args.nestedSessionIds;
   // The ownership index is rebuilt on every session-list change (a rename, a
   // recency flush), while grouping reads only each session's scope directory.
   // Keeping the map while those scopes are equal keeps the builder, and with it
@@ -123,26 +132,7 @@ export const useSessionGrouping = (args: Args) => {
       // ownership buckets are built. Dedupe retains that root/sibling order.
       const sortedProjectSessions = dedupeSessionsById(projectSessions);
 
-      const sessionMap = new Map(sortedProjectSessions.map((session) => [session.id, session]));
-      // Subagents nest under their run, and a session that grew out of
-      // another one in the same folder under that one (`lib/sessionWorkLineage`).
-      const nestingParentById = new Map(sortedProjectSessions.map((session) => [
-        session.id,
-        resolveSessionNestingParentId(session, (id) => sessionMap.get(id)),
-      ]));
-      const childrenMap = new Map<string, Session[]>();
-      sortedProjectSessions.forEach((session) => {
-        const parentID = nestingParentById.get(session.id);
-        if (!parentID) return;
-        const parentSession = sessionMap.get(parentID);
-        // Only active subsessions nest; the archive shows top-level sessions.
-        if (!parentSession || isArchivedSession(parentSession) || isArchivedSession(session)) {
-          return;
-        }
-        const collection = childrenMap.get(parentID) ?? [];
-        collection.push(session);
-        childrenMap.set(parentID, collection);
-      });
+      const sessionMap = sessionByIdRef.current;
 
       const worktreeByPath = buildProjectWorktreeIndex(availableWorktrees, normalizedProjectRoot);
       // A space's group is keyed by the project's path inside the space, as its sessions are owned.
@@ -169,10 +159,10 @@ export const useSessionGrouping = (args: Args) => {
       const claimedSessionIds = new Set<string>();
       const buildProjectNode = (session: Session): SessionNode => {
         claimedSessionIds.add(session.id);
-        const children = childrenMap.get(session.id) ?? [];
+        const children = isArchivedSession(session) ? [] : childrenMapRef.current.get(session.id) ?? [];
         const childNodes: SessionNode[] = [];
         for (const child of children) {
-          if (claimedSessionIds.has(child.id)) continue;
+          if (isArchivedSession(child) || claimedSessionIds.has(child.id)) continue;
           childNodes.push(buildProjectNode(child));
         }
         return { session, children: childNodes, worktree: getSessionWorktree(session) };
@@ -191,10 +181,21 @@ export const useSessionGrouping = (args: Args) => {
       };
 
       const rootCandidates = sortedProjectSessions.filter((session) => {
-        const parentID = nestingParentById.get(session.id);
-        if (!parentID) return true;
-        return !sessionMap.has(parentID) && !isHiddenSubsession(session);
+        if (isArchivedSession(session)) return !session.parentID;
+        return !nestedSessionIdsRef.current.has(session.id);
       });
+
+      const isInNestingCycle = (session: Session): boolean => {
+        const seen = new Set<string>();
+        let current: Session | undefined = session;
+        while (current && !isArchivedSession(current)) {
+          if (seen.has(current.id)) return true;
+          seen.add(current.id);
+          const parentId = resolveSessionNestingParentId(current, (id) => sessionMap.get(id));
+          current = parentId && sessionMap.has(parentId) ? sessionMap.get(parentId) : undefined;
+        }
+        return false;
+      };
 
       // A malformed cycle has no structural root. Start with normal roots,
       // then expose each still-unclaimed component from its first input row.
@@ -205,7 +206,7 @@ export const useSessionGrouping = (args: Args) => {
       };
       rootCandidates.forEach(addRoot);
       sortedProjectSessions.forEach((session) => {
-        if (!isHiddenSubsession(session)) addRoot(session);
+        if (!claimedSessionIds.has(session.id) && !isHiddenSubsession(session) && isInNestingCycle(session)) addRoot(session);
       });
 
       const groupedNodes = new Map<string, SessionNode[]>();
@@ -378,10 +379,45 @@ export const useSessionGrouping = (args: Args) => {
     [args.homeDirectory, args.worktreeMetadata, args.isVSCode, sessionOwners, args.spacesByProject, args.runKeyBySessionId, t],
   );
 
+  const getGroupingSessions = React.useCallback((projectSessions: readonly Session[]): Session[] => {
+    const sessionMap = sessionByIdRef.current;
+    const included = new Set<string>();
+    const traversedDescendants = new Set<string>();
+    const result: Session[] = [];
+    const add = (session: Session): void => {
+      if (included.has(session.id)) return;
+      included.add(session.id);
+      result.push(session);
+    };
+    const visitDescendants = (session: Session): void => {
+      if (traversedDescendants.has(session.id)) return;
+      traversedDescendants.add(session.id);
+      add(session);
+      for (const child of childrenMapRef.current.get(session.id) ?? []) {
+        visitDescendants(child);
+      }
+    };
+    for (const session of projectSessions) {
+      visitDescendants(session);
+      const ancestors = new Set<string>([session.id]);
+      let current = session;
+      while (true) {
+        const parentId = resolveSessionNestingParentId(current, (id) => sessionMap.get(id));
+        const parent = parentId ? sessionMap.get(parentId) : undefined;
+        if (!parent || ancestors.has(parent.id)) break;
+        ancestors.add(parent.id);
+        add(parent);
+        current = parent;
+      }
+    }
+    return result;
+  }, []);
+
   return {
     buildGroupSearchText,
     buildSessionSearchText,
     filterSessionNodesForSearch,
     buildGroupedSessions,
+    getGroupingSessions,
   };
 };

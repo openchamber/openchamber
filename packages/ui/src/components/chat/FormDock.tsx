@@ -24,7 +24,7 @@ import { WebSearchConsentDock } from './WebSearchConsent';
 import { FormMarkdown } from './FormMarkdown';
 import { serializeFormAnswerAsMarkdown, serializeFormAsJson, serializeFormAsMarkdown } from './formSerializers';
 import { formDraftScope, loadFormDraft, saveFormDraft, dropFormDraft } from './formDrafts';
-import { dismissRecoveredQuestion } from '@/sync/recoverable-questions';
+import { noteLocalFormCancelled } from '@/sync/recoverable-questions';
 import {
     type FormValues,
     buildFormAnswer,
@@ -233,7 +233,7 @@ const FormDockPanel: React.FC<{
         setIsResponding(true);
         try {
             if (recovered) {
-                dismissRecoveredQuestion(recovered.form.id);
+                noteLocalFormCancelled(recovered.form.id);
             } else {
                 await sessionActions.cancelForm(form.sessionID, form.id);
             }

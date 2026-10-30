@@ -13,8 +13,10 @@ import { registerGitRoutes } from './routes.js';
 import { createBindingService } from '../source-control/binding-service.js';
 import { createBindingStore } from '../source-control/binding-storage.js';
 import { fingerprintRemoteUrl } from '../source-control/url-redaction.js';
+import { createSshPassphraseStore } from './ssh-passphrases.js';
 
-const run = promisify(execFile);
+const execFileAsync = promisify(execFile);
+const run = (file, args, options = {}) => execFileAsync(file, args, { windowsHide: true, ...options });
 const roots = [];
 afterEach(async () => { for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true }); });
 const fixture = async (inventoryOptions = {}) => {
@@ -38,6 +40,95 @@ const fixture = async (inventoryOptions = {}) => {
 };
 
 describe('connected-server managed SSH inventory', () => {
+  it('imports encrypted bytes, stores only a credential reference, and unlocks operation snapshots', async () => {
+    const entries = [];
+    const passphrases = createSshPassphraseStore({
+      create: async (entry) => { entries.push(entry); }, list: async () => entries,
+      remove: async (id) => { entries.splice(entries.findIndex((entry) => entry.id === id), 1); },
+    });
+    const passphrase = 'fixture secret $"\\ with spaces';
+    const { inventory, app, record, store, filePath, snapshotRoot } = await fixture({ passphrases });
+    await run('ssh-keygen', ['-p', '-P', '', '-N', passphrase, '-f', record.privateKeyPath]);
+    for (const supplied of ['', 'incorrect']) {
+      const result = await inventory.discover({ passphrase: supplied });
+      expect(result.candidates[0].capability.status).toBe('unavailable');
+      expect(await fs.readdir(snapshotRoot)).toEqual([]);
+      const candidate = (await inventory.discover({ passphrase })).candidates[0];
+      expect(await inventory.import({ candidateId: candidate.candidateId, expectedFingerprint: candidate.fingerprint,
+        confirmed: true, passphrase: supplied })).toEqual({ status: 'rejected', reason: 'candidate-unavailable' });
+      expect((await store.read()).keys).toEqual([]);
+      expect(entries).toEqual([]);
+      expect(await fs.readdir(snapshotRoot)).toEqual([]);
+    }
+    const discovery = await request(app).post('/api/git/managed-ssh-credentials')
+      .send({ operation: 'discover', passphrase }).expect(200);
+    const candidate = discovery.body.candidates[0];
+    expect(candidate.fingerprint).toBe(record.fingerprint);
+    expect(entries).toEqual([]);
+    const imported = await request(app).post('/api/git/managed-ssh-credentials').send({ operation: 'import',
+      candidateId: candidate.candidateId, expectedFingerprint: candidate.fingerprint, confirmed: true, passphrase }).expect(200);
+    expect(imported.body.selectedCredential.capability.status).toBe('ready');
+    expect(JSON.stringify(imported.body)).not.toContain(passphrase);
+    const saved = (await store.read()).keys[0];
+    expect(entries).toEqual([{ id: saved.passphraseCredentialId, integrationID: 'openchamber-git-ssh',
+      label: 'Git SSH key', value: { type: 'key', key: passphrase }, activate: false }]);
+    expect(await fs.readFile(saved.privateKeyPath)).toEqual(await fs.readFile(record.privateKeyPath));
+    expect(await fs.readFile(filePath, 'utf8')).not.toContain(passphrase);
+    await expect(run('ssh-keygen', ['-y', '-P', '', '-f', saved.privateKeyPath])).rejects.toThrow();
+    const intent = { mode: 'managed', credentialId: imported.body.selectedCredential.credentialId,
+      operationId: 'encrypted_execution', endpoint: { protocol: 'ssh', host: 'example.com', path: 'team/repo.git' } };
+    const reopenResolver = () => createGitCredentialResolver({
+      lookupManagedSshKey: createManagedSshCredentialStore({ filePath }).lookup, snapshotRoot,
+      passphrases: createSshPassphraseStore({ list: async () => entries }),
+    });
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const resolved = await reopenResolver().resolve(intent);
+      try {
+        const windows = process.platform === 'win32';
+        const helperPath = `${resolved.key.privateKeyPath}.askpass${windows ? '.ps1' : ''}`;
+        expect(await fs.readFile(helperPath, 'utf8')).not.toContain(passphrase);
+        expect(resolved.key.askpassEnv.SSH_ASKPASS).not.toContain(passphrase);
+        let keygen = 'ssh-keygen';
+        if (windows) {
+          keygen = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'OpenSSH', 'ssh-keygen.exe');
+          expect(resolved.key.askpassEnv.SSH_ASKPASS).toContain('-WindowStyle Hidden');
+          expect(resolved.key.askpassEnv.OPENCHAMBER_GIT_SSH_EXECUTABLE).toBe(path.join(path.dirname(keygen), 'ssh.exe'));
+        }
+        const publicKey = await run(keygen, ['-y', '-f', resolved.key.privateKeyPath], {
+          env: { ...process.env, ...resolved.key.askpassEnv },
+        });
+        expect(publicKey.stdout).toContain('ssh-ed25519');
+      } finally {
+        expect(await resolved.key.cleanup()).toBe(true);
+      }
+      expect(await fs.readdir(snapshotRoot)).toEqual([]);
+    }
+    entries[0].value.key = 'incorrect saved passphrase';
+    await expect(reopenResolver().resolve(intent)).rejects.toMatchObject({ code: 'SSH_KEY_UNVERIFIABLE' });
+    expect(await fs.readdir(snapshotRoot)).toEqual([]);
+    entries.length = 0;
+    await expect(reopenResolver().resolve(intent)).rejects.toMatchObject({ code: 'SSH_KEY_UNVERIFIABLE' });
+  });
+
+  it.each(['credential', 'inventory'])('rolls back the encrypted copy and saved passphrase after a failed %s write', async (failure) => {
+    const values = new Map();
+    const passphrases = { create: async (id, value) => {
+      values.set(id, value);
+      if (failure === 'credential') throw new Error('store denied');
+    },
+      read: async (id) => values.get(id), remove: async (id) => { values.delete(id); } };
+    const context = await fixture();
+    await run('ssh-keygen', ['-p', '-P', '', '-N', 'fixture-passphrase', '-f', context.record.privateKeyPath]);
+    const inventory = createManagedSshInventory({ ...context, passphrases,
+      store: { ...context.store, append: async () => { throw new Error('store denied'); } } });
+    const candidate = (await inventory.discover({ passphrase: 'fixture-passphrase' })).candidates[0];
+    await expect(inventory.import({ candidateId: candidate.candidateId, expectedFingerprint: candidate.fingerprint,
+      confirmed: true, passphrase: 'fixture-passphrase' })).rejects.toThrow('store denied');
+    expect(values.size).toBe(0);
+    expect(await fs.readdir(context.managedKeyRoot)).toEqual([]);
+    expect(await fs.readdir(context.snapshotRoot)).toEqual([]);
+  });
+
   it('discovers keys on a runtime whose directory close returns no promise', async () => {
     // Bun's Dir.close() returns undefined where Node returns a promise, and the
     // async iterator has already closed the directory. Assuming a promise threw
@@ -230,6 +321,8 @@ describe('connected-server managed SSH inventory', () => {
   it('rejects raw paths, key content, unconfirmed imports, malformed stores and read failures without leaking details', async () => {
     const { record, store, app, filePath } = await fixture();
     for (const body of [{ operation: 'inventory', path: record.privateKeyPath }, { operation: 'discover', roots: ['/'] },
+      { operation: 'inventory', passphrase: 'secret' }, { operation: 'discover', passphrase: 123 },
+      { operation: 'discover', passphrase: 'a\nb' }, { operation: 'discover', passphrase: 'x'.repeat(1025) },
       { operation: 'import', privateKey: 'PRIVATE KEY' },
       { operation: 'import', candidateId: 'candidate', expectedFingerprint: record.fingerprint, confirmed: false }]) {
       const response = await request(app).post('/api/git/managed-ssh-credentials').send(body).expect(400);

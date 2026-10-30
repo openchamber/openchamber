@@ -7,6 +7,8 @@ import type { Session } from '@/lib/opencode/model';
 import { adoptSessionMove } from '@/sync/session-actions';
 import { SyncProvider } from '@/sync/sync-context';
 import { getSyncChildStores } from '@/sync/sync-refs';
+import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 
 import { usePinnedSessionDirectory } from './usePinnedSessionDirectory';
 
@@ -27,6 +29,8 @@ const child = (directory: string): Session => ({
 });
 
 describe('a pinned chat column follows its session across a move', () => {
+  const previousProjects = useProjectsStore.getState().projects;
+  const previousWorktrees = useSessionUIStore.getState().availableWorktreesByProject;
   let win: Window;
   let root: Root;
   let restoreGlobals: () => void;
@@ -53,6 +57,10 @@ describe('a pinned chat column follows its session across a move', () => {
     run += 1;
     parentDirectory = `/pinned-${run}/repo`;
     worktreeDirectory = `/pinned-${run}/repo-wt`;
+    useProjectsStore.setState({ projects: [{ id: 'project', path: parentDirectory }] });
+    useSessionUIStore.setState({ availableWorktreesByProject: new Map([
+      [parentDirectory, [{ path: worktreeDirectory, projectDirectory: parentDirectory, branch: 'task', label: 'task' }]],
+    ]) });
     win = new Window({ url: 'http://localhost' });
     const values = { window: win, document: win.document, navigator: win.navigator, localStorage: win.localStorage, IS_REACT_ACT_ENVIRONMENT: true };
     const previous = Object.keys(values).map((name) => [name, Object.getOwnPropertyDescriptor(globalThis, name)] as const);
@@ -71,6 +79,8 @@ describe('a pinned chat column follows its session across a move', () => {
     await act(async () => root.unmount());
     await win.happyDOM.close();
     restoreGlobals();
+    useProjectsStore.setState({ projects: previousProjects });
+    useSessionUIStore.setState({ availableWorktreesByProject: previousWorktrees });
   });
 
   test('reads the destination once OpenCode moves the session', async () => {
@@ -89,5 +99,12 @@ describe('a pinned chat column follows its session across a move', () => {
 
     await publishChild(child(`${parentDirectory}/`));
     expect(shown).toBe(parentDirectory);
+  });
+
+  test('does not expose an unregistered destination to the pinned chat renderer', async () => {
+    await render(parentDirectory);
+    await publishChild(child(parentDirectory));
+    await act(async () => adoptSessionMove('child', parentDirectory, `/unregistered-pinned-${run}`));
+    expect(shown).toBeNull();
   });
 });

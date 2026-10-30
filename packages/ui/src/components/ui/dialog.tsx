@@ -116,7 +116,11 @@ function DialogContent({
   return (
     <DialogPortal>
       <DialogOverlay className="rounded-none" {...backdropProps} />
-      <div className={cn("fixed inset-0 z-50 flex items-center justify-center pointer-events-none p-4", layerClassName)}>
+      {/* In the iOS app the layer takes the keyboard into its layout and
+          a centred window rides half its travel (mobileNativeChrome), so a
+          field in it stays above the keyboard; a window held to the top
+          (the command palette) does not move. Elsewhere both do nothing. */}
+      <div data-keyboard-rider={layerClassName?.includes('items-start') ? undefined : '0.5'} className={cn("oc-keyboard-inset-surface fixed inset-0 z-50 flex items-center justify-center pointer-events-none p-4", layerClassName)}>
         <BaseDialog.Popup
           ref={setPopupRef}
           initialFocus={initialFocus ?? defaultInitialFocus}

@@ -266,7 +266,8 @@ export const MobileFullscreenSurface: React.FC<MobileFullscreenSurfaceProps> = (
       }}
       onClick={onClose}
     >
-      <div className="flex w-full max-w-[720px] justify-center" onClick={(event) => event.stopPropagation()}>
+      {/* Centred over the space above the keyboard: half its travel. */}
+      <div data-keyboard-rider="0.5" className="flex w-full max-w-[720px] justify-center" onClick={(event) => event.stopPropagation()}>
         {surface}
       </div>
     </div>,

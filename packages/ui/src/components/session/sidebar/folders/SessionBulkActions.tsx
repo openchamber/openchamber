@@ -10,10 +10,11 @@ type Props = {
   getFolderScopesForProject: (projectId: string) => readonly { scopeKey: string; directory: string | null }[];
   isInlineEditing: boolean;
   startFolderRename: (scopeKey: string, folder: { id: string; name: string }) => void;
+  folderOwnerKeyBySessionId: ReadonlyMap<string, string>;
 };
 
 /** Owns the sidebar selection projection and its destructive confirmation. */
-export function SessionBulkActions({ getFolderScopesForProject, isInlineEditing, startFolderRename }: Props): React.ReactNode {
+export function SessionBulkActions({ getFolderScopesForProject, isInlineEditing, startFolderRename, folderOwnerKeyBySessionId }: Props): React.ReactNode {
   const [bulkDeleteConfirm, setBulkDeleteConfirm] = React.useState<BulkDeleteSessionsConfirmState>(null);
   const showDeletionDialog = useUIStore((state) => state.showDeletionDialog);
   const setShowDeletionDialog = useUIStore((state) => state.setShowDeletionDialog);
@@ -29,6 +30,7 @@ export function SessionBulkActions({ getFolderScopesForProject, isInlineEditing,
     showDeletionDialog,
     foldersMap,
     getFolderScopesForProject,
+    folderOwnerKeyBySessionId,
     addSessionsToFolder,
     removeSessionsFromFolders,
     createFolderAndStartRename: (scopeKey) => {

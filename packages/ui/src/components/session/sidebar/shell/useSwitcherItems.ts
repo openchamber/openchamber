@@ -15,6 +15,7 @@ import { isVSCodeRuntime } from '@/lib/desktop';
 import { isVSCodeWithoutWorkspace } from '@/lib/vscodeBootstrap';
 import { isChatDirectoryPath } from '@/lib/chatDirectories';
 import { spaceProjectDirectoryIn, useSpacesStore } from '@/lib/spaces/spaces-store';
+import { isSessionDirectoryAdmitted } from '@/sync/session-admission-rule';
 
 export type SwitcherItem = {
   node: SessionNode;
@@ -154,6 +155,7 @@ export const useSwitcherItems = (enabled: boolean, options: SwitcherItemsOptions
 
     const childrenByParent = new Map<string, Session[]>();
     for (const session of activeSessions) {
+      if (!isSessionDirectoryAdmitted(resolveGlobalSessionDirectory(session), projects, availableWorktreesByProject)) continue;
       const parentId = (session as Session & { parentID?: string | null }).parentID;
       if (!parentId) continue;
       if (session.time?.archived) continue;
@@ -177,7 +179,8 @@ export const useSwitcherItems = (enabled: boolean, options: SwitcherItemsOptions
       (session) => findProjectForDirectory(resolveGlobalSessionDirectory(session))?.id ?? null,
       maxParents,
       // btw forks stay hidden until promoted to a full session
-      (session) => isBtwSession(session) || (isVSCode && !isVSCodeWithoutWorkspace() && isChatDirectoryPath(resolveGlobalSessionDirectory(session))),
+      (session) => isBtwSession(session) || (isVSCode && !isVSCodeWithoutWorkspace() && isChatDirectoryPath(resolveGlobalSessionDirectory(session)))
+        || !isSessionDirectoryAdmitted(resolveGlobalSessionDirectory(session), projects, availableWorktreesByProject),
     );
 
     const buildNode = (session: Session): SessionNode => {
@@ -208,7 +211,7 @@ export const useSwitcherItems = (enabled: boolean, options: SwitcherItemsOptions
         },
       };
     });
-  }, [activeSessions, branchesByDirectory, currentSessionId, enabled, findProjectForDirectory, isVSCode, maxParents, pinnedSessionIds, scopeProjectId, sessionOrderRanks, worktreeByPath]);
+  }, [activeSessions, availableWorktreesByProject, branchesByDirectory, currentSessionId, enabled, findProjectForDirectory, isVSCode, maxParents, pinnedSessionIds, projects, scopeProjectId, sessionOrderRanks, worktreeByPath]);
 
   return items;
 };

@@ -4,8 +4,8 @@ import { canUseElectronDesktopIPC, getMiniChatRuntimeArgs, invokeDesktop } from 
 import { getNextFavoriteModel } from '@/lib/modelRefs';
 import { ShortcutDispatcher, getEffectiveShortcutCombo, shortcutRegistry } from '@/lib/shortcuts';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { cycleThinkingVariant } from '@/lib/cycleThinkingVariant';
 import { useUIStore } from '@/stores/useUIStore';
-import { useSelectionStore } from '@/sync/selection-store';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useKeybinds } from './useKeybind';
 import { hasActiveBtwComposer, isEditableEventTarget } from './keyboard-shortcut-dom';
@@ -79,25 +79,7 @@ export const useMiniChatKeyboardShortcuts = () => {
     },
     cycle_thinking_variant: () => {
       if (hasActiveBtwComposer()) return false;
-      const configState = useConfigStore.getState();
-      if (configState.getCurrentModelVariants().length === 0) return false;
-
-      const nextVariantOverride = configState.cycleCurrentVariant();
-      const sessionId = useSessionUIStore.getState().currentSessionId;
-      const {
-        currentAgentName,
-        currentProviderId,
-        currentModelId,
-      } = useConfigStore.getState();
-      if (sessionId && currentAgentName && currentProviderId && currentModelId) {
-        useSelectionStore.getState().saveAgentModelVariantForSession(
-          sessionId,
-          currentAgentName,
-          currentProviderId,
-          currentModelId,
-          nextVariantOverride,
-        );
-      }
+      if (!cycleThinkingVariant(useSessionUIStore.getState().currentSessionId)) return false;
     },
     cycle_favorite_model_forward: () => cycleFavoriteModel(1),
     cycle_favorite_model_backward: () => cycleFavoriteModel(-1),

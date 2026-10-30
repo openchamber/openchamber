@@ -1,0 +1,44 @@
+name: Release Windows
+
+# Builds and signs the Windows desktop app of a release tag. It is its own
+# workflow because SignPath refuses a signing request from any run that also
+# has a job on a Blacksmith runner, and release.yml has several.
+#
+# Run it from the release tag (Actions > Release Windows > Use workflow from:
+# the tag). For now it only produces the signed installers as artifacts:
+# release.yml still builds Windows unsigned and publishes, and two workflows
+# writing the same files to one draft would leave manifests that do not match
+# the installers. Adding the files to the release and publishing move here
+# together with that release.yml change, once the SignPath Foundation
+# certificate exists.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  # Fails before any signing request, so a run from the wrong ref costs no approvals.
+  check-tag:
+    name: Require a release tag
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: packages/electron/package.json
+          sparse-checkout-cone-mode: false
+
+      - name: Require the tag of the app version
+        run: |
+          tag="v$(node -p "require('./packages/electron/package.json').version")"
+          test "$GITHUB_REF" = "refs/tags/$tag" || { echo "Run this workflow from the tag $tag, not $GITHUB_REF"; exit 1; }
+
+  build:
+    needs: check-tag
+    uses: ./.github/workflows/windows-signed-build.yml
+    with:
+      retention_days: 7
+    secrets:
+      SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}

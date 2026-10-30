@@ -28,6 +28,10 @@ Choose the identity button at the top of the [Git panel](/git/) and pick one. Th
 
 Applying an identity writes it to that repository's **local** git config, so it affects only that repo and your global setting stays as it is. Git in the terminal and the agent's shell use it too. **System identity** removes what OpenChamber wrote, so your own Git configuration answers again.
 
+## SSH key passphrases
+
+For an encrypted SSH key, enter its optional passphrase before **Find keys in ~/.ssh**, then confirm the fingerprint and add the key. OpenChamber keeps the key encrypted and saves the passphrase in OpenCode's credential store. Saved passphrases work only for Git actions in the app. Terminal and agent-run Git commands do not retrieve them, so an encrypted managed key cannot authenticate through that path.
+
 ## Related
 
 - [Git Workflows](/git/): commit using the identity you set

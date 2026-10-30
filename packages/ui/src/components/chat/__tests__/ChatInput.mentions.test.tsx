@@ -83,6 +83,7 @@ const { useConfigStore } = await import('@/stores/useConfigStore');
 const { useGlobalSessionsStore } = await import('@/stores/useGlobalSessionsStore');
 const { useFileSearchStore } = await import('@/stores/useFileSearchStore');
 const { useSessionUIStore } = await import('@/sync/session-ui-store');
+const { useProjectsStore } = await import('@/stores/useProjectsStore');
 const { writeChatDraft } = await import('@/lib/chatDraftPersistence');
 const { getRuntimeKey } = await import('@/lib/runtime-switch');
 const { OpenCode } = await import('@opencode/client');
@@ -120,6 +121,7 @@ type Composer = {
 
 let composerCount = 0;
 const withComposer = async (run: (composer: Composer) => Promise<void>, options?: { startDirectory: string | null; pinned?: boolean; column?: boolean }) => {
+  useProjectsStore.setState({ projects: [{ id: 'project', path: DIRECTORY }] });
   const sessionId = `ses_composer_${++composerCount}`;
   useDirectoryStore.setState({ currentDirectory: DIRECTORY });
   useSessionUIStore.setState({

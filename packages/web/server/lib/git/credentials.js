@@ -64,6 +64,7 @@ export function createManagedSshInventory({
   managedKeyRoot,
   fsImpl = fsp,
   executeFile,
+  passphrases,
   now = Date.now,
   idFactory = randomUUID,
   candidateTtlMs = 5 * 60_000,
@@ -91,7 +92,7 @@ export function createManagedSshInventory({
   const inspectRecord = async (record, deadline = now() + 10_000) => {
     if (!SAFE_ID.test(record.id)) throw new Error('Managed SSH credential ID is invalid');
     return { credentialId: createSshCredentialReference(record.id), label: 'SSH', fingerprint: record.fingerprint,
-      capability: await inspectManagedSshCredential(record, { snapshotRoot, fsImpl, executeFile, deadline }) };
+      capability: await inspectManagedSshCredential(record, { snapshotRoot, fsImpl, executeFile, deadline, passphrases }) };
   };
   const inventoryFromState = async ({ keys }) => {
     if (keys.length > 256) throw new Error('Managed SSH inventory exceeds the supported limit');
@@ -105,7 +106,7 @@ export function createManagedSshInventory({
   };
   const inventory = async () => ({ status: 'available', credentials: await inventoryFromState(await store.read()) });
 
-  const discover = async () => {
+  const discover = async ({ passphrase = '' } = {}) => {
     pruneExpiredCandidates();
     let approvedRoot;
     let directory;
@@ -161,6 +162,7 @@ export function createManagedSshInventory({
           approvedRoot,
           requirePrivateMode: true,
           rejectSymlinkPath: true,
+          passphrase,
         });
         if (!await snapshot.cleanup()) throw new Error('Managed SSH credential discovery cleanup failed');
         const candidateId = `ssh_candidate_${idFactory().replaceAll('-', '_')}`;
@@ -197,7 +199,7 @@ export function createManagedSshInventory({
     return { status: 'discovered', candidates: discovered, truncated };
   };
 
-  const importCandidate = async ({ candidateId, expectedFingerprint, confirmed } = {}) => {
+  const importCandidate = async ({ candidateId, expectedFingerprint, confirmed, passphrase = '' } = {}) => {
     if (confirmed !== true || !SAFE_ID.test(candidateId) || !SSH_FINGERPRINT.test(expectedFingerprint)) {
       throw new Error('Managed SSH credential import is invalid');
     }
@@ -211,6 +213,7 @@ export function createManagedSshInventory({
     let managedKeyPath;
     let managedKeyIdentity;
     let recordCommitted = false;
+    let passphraseCredentialId;
     try {
       try {
         snapshot = await snapshotSshPrivateKey({
@@ -225,6 +228,7 @@ export function createManagedSshInventory({
           expectedSourceIdentity: candidate.sourceIdentity,
           requirePrivateMode: true,
           rejectSymlinkPath: true,
+          passphrase,
         });
       } catch (error) {
         candidates.delete(candidateId);
@@ -249,11 +253,17 @@ export function createManagedSshInventory({
       const recordId = `ssh_${idFactory().replaceAll('-', '_')}`;
       managedKeyPath = path.join(managedKeyRoot, `${recordId}.key`);
       managedKeyIdentity = await copyVerifiedSnapshot(snapshot, managedKeyPath, fsImpl);
+      if (snapshot.askpassEnv) {
+        passphraseCredentialId = `cred_${idFactory().replaceAll('-', '_')}`;
+        await passphrases.create(passphraseCredentialId, passphrase);
+      }
       if (!await snapshot.cleanup()) throw new Error('Managed SSH credential import cleanup failed');
       snapshot = null;
       let state;
       try {
-        state = await store.append({ id: recordId, privateKeyPath: managedKeyPath, fingerprint: expectedFingerprint });
+        const record = { id: recordId, privateKeyPath: managedKeyPath, fingerprint: expectedFingerprint };
+        if (passphraseCredentialId) record.passphraseCredentialId = passphraseCredentialId;
+        state = await store.append(record);
       } catch (error) {
         if (error?.managedSshRecordCommitted === true) {
           recordCommitted = true;
@@ -275,11 +285,11 @@ export function createManagedSshInventory({
       return { status: 'imported', credentials, selectedCredential };
     } finally {
       inUseCandidates.delete(candidateId);
-      if (snapshot && !await snapshot.cleanup()) throw new Error('Managed SSH credential import cleanup failed');
-      if (!recordCommitted && managedKeyPath && managedKeyIdentity
-        && !await removeOwnedFile(managedKeyPath, managedKeyIdentity, fsImpl)) {
-        throw new Error('Managed SSH credential import rollback failed');
-      }
+      const snapshotRemoved = !snapshot || await snapshot.cleanup();
+      const keyRemoved = recordCommitted || !managedKeyPath || !managedKeyIdentity
+        || await removeOwnedFile(managedKeyPath, managedKeyIdentity, fsImpl);
+      if (!recordCommitted && passphraseCredentialId) await passphrases.remove(passphraseCredentialId);
+      if (!snapshotRemoved || !keyRemoved) throw new Error('Managed SSH credential import cleanup failed');
     }
   };
 
@@ -307,4 +317,3 @@ export function createManagedSshInventory({
     },
   });
 }
-

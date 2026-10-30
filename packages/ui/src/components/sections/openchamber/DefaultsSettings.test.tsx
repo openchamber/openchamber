@@ -101,6 +101,7 @@ mock.module('@/lib/opencode/client', () => ({
 }));
 mock.module('@/lib/i18n', () => ({
   useI18n: () => ({ t: (key: string) => key }),
+  getCurrentIntlLocale: () => 'en-US',
 }));
 mock.module('@/components/chat/mobileControlsUtils', () => ({
   isPrimaryMode: (mode: string | undefined) => mode === 'primary',

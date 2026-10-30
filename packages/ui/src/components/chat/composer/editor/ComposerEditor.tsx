@@ -39,9 +39,10 @@ import { composerBidi } from './bidi';
 import { replaceWithCaret } from './documentEdits';
 import type { ComposerEditorViewStore } from './viewStore';
 import { ComposerEditorView } from './ComposerEditorView';
-import { composerEditorTheme, composerSelectionExtension } from './theme';
+import { composerEditorTheme, composerSelectionExtension, isCodeMirrorIOSNavigator } from './theme';
 import { handleComposerHostMouseDown } from './hostMouseDown';
 import { getComposerHeightLimit, isComposerContentCapped } from './heightLimit';
+import { imeNewlineCleanup } from './imeNewline';
 import { restoreDeferredEnterModifiers } from '../keyboardPolicy';
 import { timerCaretBlink } from '@/lib/codemirror/caretBlink';
 
@@ -192,8 +193,15 @@ const enterKeyHintCompartment = new Compartment();
  * that only re-evaluates on the next editor update would lag one keystroke
  * behind the setting.
  */
-const enterKeyHintExtension = (send: boolean): Extension =>
-    send ? EditorView.contentAttributes.of({ enterkeyhint: 'send' }) : [];
+const enterKeyHintExtension = (send: boolean): Extension => {
+    if (!send) return [];
+    const nav = globalThis.navigator;
+    return [
+        EditorView.contentAttributes.of({ enterkeyhint: 'send' }),
+        nav && isCodeMirrorIOSNavigator(nav.userAgent, nav.vendor, nav.maxTouchPoints)
+            ? imeNewlineCleanup() : [],
+    ];
+};
 
 /**
  * CSS placeholder, not CodeMirror's `placeholder()` widget: a widget at

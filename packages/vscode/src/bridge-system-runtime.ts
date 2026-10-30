@@ -19,6 +19,7 @@ import { reconstructOriginalContentFromPatch } from './patchReconstruction';
 import type { BridgeContext, BridgeResponse } from './bridge';
 import { ENTERPRISE_MODE_ERROR, isEnterpriseMode, publicEnterprisePolicy } from '../../web/server/lib/enterprise-mode.js';
 import { discoverProviderModels } from './model-discovery';
+import { openCodeTrust } from './opencodeTrust';
 
 /** The base URL a custom provider was saved with; discovery sends its stored key only there. */
 const readStoredProviderBaseURL = (providerID: string): string | undefined => {
@@ -637,6 +638,9 @@ export async function handleSystemBridgeMessage(
           (folder) => pathsEqualWithNormalizedDriveLetter(folder.uri.fsPath, uri.fsPath),
         );
         if (!alreadyAdded) {
+          if (!(await openCodeTrust.assess(uri.fsPath, { fresh: true })).trusted) {
+            return { id, type, success: false, error: 'Folder trust is required before adding the workspace folder' };
+          }
           const updated = await vscode.workspace.updateWorkspaceFolders(folders.length, null, { uri });
           if (!updated) {
             return { id, type, success: false, error: 'Failed to add workspace folder' };

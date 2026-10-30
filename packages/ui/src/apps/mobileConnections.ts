@@ -18,6 +18,7 @@
 import { SecureStorage } from '@aparajita/capacitor-secure-storage';
 import { Capacitor } from '@capacitor/core';
 import React from 'react';
+import { z } from 'zod';
 
 import { useI18n } from '@/lib/i18n';
 import type { PairingConnectionPayload, PairingEndpointCandidate } from '@/lib/connectionPayload';
@@ -25,14 +26,17 @@ import { isCapacitorApp } from '@/lib/platform';
 import { adoptRelayTunnel, getActiveRelayDescriptor, getActiveRelayTunnel, isRelayModeActive } from '@/lib/relay/runtime-tunnel';
 import { createRelayTunnelClient, isRelayLimitReached } from '@/lib/relay/tunnel-client';
 import { addRuntimeProxyHeaders, runtimeFetch } from '@/lib/runtime-fetch';
+import { getRuntimeBearerTokenSync } from '@/lib/runtime-auth';
 import { getRuntimeApiBaseUrl, getRuntimeKey, switchRuntimeEndpoint } from '@/lib/runtime-switch';
 
 import { recordMobileConnectDebug } from './mobileConnectionDebug';
 import { fetchThroughRelayOnce, fetchThroughRelayWithRetry } from './mobileRelayFetch';
+import { mobileHeadersForUrl, mobileRequestHeadersSchema, type MobileRequestHeaders } from './mobileRequestHeaders';
 
 const MOBILE_CONNECTIONS_STORAGE_KEY = 'openchamber.mobile.connections.v1';
 const MOBILE_SECURE_STORAGE_PREFIX = 'openchamber.mobile.';
 const MOBILE_DEVICE_ID_STORAGE_KEY = 'openchamber.mobile.deviceId';
+const mobileHeadersKeySchema = z.string().startsWith(`${MOBILE_SECURE_STORAGE_PREFIX}headers.`);
 
 // Stable per-install identifier for this phone, persisted in localStorage. Used
 // as the client dedupe key so every way this device authenticates to a given
@@ -120,6 +124,9 @@ type MobileSavedConnection = {
   hasToken?: boolean;
   // Web only: the token stored inline. On native this stays undefined in the list.
   clientToken?: string;
+  // Native metadata references an immutable secure-store entry. Web stores inline.
+  requestHeadersKey?: string;
+  requestHeaders?: MobileRequestHeaders;
 };
 
 type MobilePendingConnection = {
@@ -130,6 +137,7 @@ type MobilePendingConnection = {
   // Present when the password unlock must ride the relay tunnel.
   relay?: MobileRelayConfig;
   relayGrant?: string;
+  requestHeaders?: MobileRequestHeaders;
 };
 
 // Input to `connect`. Either a raw URL/candidates for a NEW connection, or an
@@ -142,6 +150,7 @@ type MobileConnectInput = {
   label?: string;
   relay?: MobileRelayConfig;
   relayGrant?: string;
+  requestHeaders?: Record<string, string>;
 };
 
 type MobileFetchResponse = {
@@ -372,6 +381,7 @@ const nativeHttpRequest = async (url: string, init?: RequestInit): Promise<Mobil
       method: init?.method || 'GET',
       headers: Object.fromEntries(requestHeaders.entries()),
       data: getJsonRequestData(init?.body),
+      disableRedirects: init?.redirect === 'error',
     });
     return {
       ok: response.status >= 200 && response.status < 300,
@@ -625,6 +635,8 @@ const readConnections = (): MobileSavedConnection[] => {
         candidates,
         serverId: typeof c.serverId === 'string' && c.serverId.trim() ? c.serverId : undefined,
         lastUsedAt: typeof c.lastUsedAt === 'number' ? c.lastUsedAt : 0,
+        requestHeadersKey: native ? mobileHeadersKeySchema.safeParse(c.requestHeadersKey).data : undefined,
+        requestHeaders: native ? undefined : mobileRequestHeadersSchema.safeParse(c.requestHeaders).data,
       };
       if (native) return [{ ...base, hasToken: Boolean(c.hasToken) || Boolean(inlineToken) }];
       return [{ ...base, clientToken: inlineToken, hasToken: Boolean(inlineToken) }];
@@ -637,8 +649,8 @@ const serializeCandidate = (c: MobileTransportCandidate): unknown =>
     ? { kind: 'relay', relay: { relayUrl: c.relay.relayUrl, serverId: c.relay.serverId, hostEncPubJwk: c.relay.hostEncPubJwk } }
     : { kind: 'direct', url: c.url };
 
-const writeConnections = (connections: MobileSavedConnection[]): void => {
-  if (typeof window === 'undefined') return;
+const writeConnections = (connections: MobileSavedConnection[]): boolean => {
+  if (typeof window === 'undefined') return false;
   const native = isCapacitorApp();
   const serialized = connections.slice(0, MOBILE_CONNECTIONS_LIMIT).map((c) => {
     // grant/token never land here — only transport metadata.
@@ -650,13 +662,15 @@ const writeConnections = (connections: MobileSavedConnection[]): void => {
       lastUsedAt: c.lastUsedAt,
     };
     return native
-      ? { ...shared, hasToken: Boolean(c.hasToken || c.clientToken) }
-      : { ...shared, clientToken: c.clientToken };
+      ? { ...shared, hasToken: Boolean(c.hasToken || c.clientToken), requestHeadersKey: c.requestHeadersKey }
+      : { ...shared, clientToken: c.clientToken, requestHeaders: c.requestHeaders };
   });
   try {
     window.localStorage.setItem(MOBILE_CONNECTIONS_STORAGE_KEY, JSON.stringify(serialized));
+    return true;
   } catch (error) {
     console.warn('[mobile-storage] failed to persist connection metadata', error);
+    return false;
   }
 };
 
@@ -674,6 +688,8 @@ const upsertConnectionInList = (
     label: draft.label,
     candidates: draft.candidates,
     serverId: draft.serverId ?? existing?.serverId,
+    requestHeadersKey: existing?.requestHeadersKey,
+    requestHeaders: existing?.requestHeaders,
     lastUsedAt: Date.now(),
     ...(native
       ? { hasToken: draft.hasToken ?? (Boolean(draft.clientToken) || existing?.hasToken || false) }
@@ -769,6 +785,45 @@ const deleteSecureToken = async (key: string): Promise<void> => {
   }, false);
 };
 
+class MobileHeaderStorageError extends Error {
+  constructor() { super('Mobile header storage unavailable'); }
+}
+
+const readConnectionHeaders = async (connection?: MobileSavedConnection): Promise<MobileRequestHeaders | undefined> => {
+  if (!connection) return undefined;
+  if (!isCapacitorApp()) return connection.requestHeaders;
+  const prefixedKey = connection.requestHeadersKey;
+  if (!prefixedKey) return undefined;
+  const data = await withTimeout(nativeSecure.internalGetItem({ prefixedKey, sync: false }).then((result) => result.data), null);
+  if (!data) throw new MobileHeaderStorageError();
+  try {
+    const headers = mobileRequestHeadersSchema.parse(JSON.parse(data));
+    normalizeConnectionUrl(headers.url);
+    mobileHeadersForUrl(headers.url, headers);
+    return headers;
+  } catch {
+    throw new MobileHeaderStorageError();
+  }
+};
+
+export const loadMobileConnectionHeaders = async (id: string): Promise<MobileRequestHeaders | undefined> =>
+  readConnectionHeaders(readConnections().find((connection) => connection.id === id));
+
+const deleteSecureHeaders = async (prefixedKey: string): Promise<void> => {
+  await withTimeout(nativeSecure.internalRemoveItem({ prefixedKey, sync: false }), null);
+};
+
+const resolveConnectionHeaders = async (
+  input: MobileConnectInput,
+  candidates: MobileTransportCandidate[],
+  saved?: MobileSavedConnection,
+): Promise<MobileRequestHeaders | undefined> => {
+  if (input.requestHeaders === undefined) return readConnectionHeaders(saved);
+  const url = normalizeConnectionUrl(input.url || connectionDisplayUrl({ candidates }));
+  const values = mobileHeadersForUrl(url, { url, values: input.requestHeaders });
+  return Object.keys(values).length ? { url, values } : undefined;
+};
+
 // ---------------------------------------------------------------------------
 // Public storage API
 // ---------------------------------------------------------------------------
@@ -836,11 +891,40 @@ export const loadMobileConnections = async (): Promise<MobileSavedConnection[]> 
   return readConnections();
 };
 
-export const upsertMobileConnection = async (
-  connection: { id?: string; label: string; candidates: MobileTransportCandidate[]; serverId?: string; clientToken?: string },
+const persistMobileConnection = async (
+  connection: { id?: string; label: string; candidates: MobileTransportCandidate[]; serverId?: string; clientToken?: string; requestHeaders?: MobileRequestHeaders | null },
 ): Promise<MobileSavedConnection[]> => {
-  const next = upsertConnectionInList(readConnections(), connection);
-  writeConnections(next);
+  let newHeadersKey: string | undefined;
+  // Write a fresh secret before publishing its reference. A failed metadata
+  // write leaves the old credentials intact; no token migration is required.
+  if (isCapacitorApp() && connection.requestHeaders) {
+    const prefixedKey = `${MOBILE_SECURE_STORAGE_PREFIX}headers.${crypto.randomUUID()}`;
+    const ok = await withTimeout(nativeSecure.internalSetItem({ prefixedKey, data: JSON.stringify(connection.requestHeaders), sync: false, access: KEYCHAIN_ACCESS_WHEN_UNLOCKED }).then(() => true), false);
+    if (!ok) throw new MobileHeaderStorageError();
+    newHeadersKey = prefixedKey;
+  }
+  const previous = readConnections();
+  const next = upsertConnectionInList(previous, connection);
+  if (connection.requestHeaders !== undefined) {
+    next[0].requestHeadersKey = newHeadersKey;
+    next[0].requestHeaders = isCapacitorApp() ? undefined : connection.requestHeaders ?? undefined;
+  }
+  if (!writeConnections(next)) {
+    if (newHeadersKey) await deleteSecureHeaders(newHeadersKey);
+    throw new MobileHeaderStorageError();
+  }
+  for (const item of previous) {
+    if (item.requestHeadersKey && !next.some((saved) => saved.requestHeadersKey === item.requestHeadersKey)) {
+      await deleteSecureHeaders(item.requestHeadersKey);
+    }
+  }
+  return next;
+};
+
+export const upsertMobileConnection = async (
+  connection: Parameters<typeof persistMobileConnection>[0],
+): Promise<MobileSavedConnection[]> => {
+  const next = await persistMobileConnection(connection);
   if (isCapacitorApp() && connection.clientToken) {
     await writeSecureToken(secureTokenKeyOf(next[0]), connection.clientToken);
   }
@@ -851,7 +935,8 @@ const deleteMobileConnection = async (id: string): Promise<MobileSavedConnection
   const connections = readConnections();
   const removed = connections.find((connection) => connection.id === id) ?? null;
   const next = connections.filter((connection) => connection.id !== id);
-  writeConnections(next);
+  if (!writeConnections(next)) throw new MobileHeaderStorageError();
+  if (removed?.requestHeadersKey) await deleteSecureHeaders(removed.requestHeadersKey);
   if (removed && isCapacitorApp()) await deleteSecureToken(secureTokenKeyOf(removed));
   return next;
 };
@@ -888,7 +973,7 @@ const RELAY_RACE_HEADSTART_MS = 1_500;
 const probeConnectionCandidates = async (
   candidates: MobileTransportCandidate[],
   token: string | undefined,
-  options?: { fast?: boolean },
+  options?: { fast?: boolean; requestHeaders?: MobileRequestHeaders },
 ): Promise<ProbeResult> => {
   const requestOptions = options?.fast ? { totalTimeoutMs: MOBILE_FAST_PROBE_TIMEOUT_MS } : undefined;
   // Identity gate for direct probes: when the device knows its server's identity
@@ -903,10 +988,12 @@ const probeConnectionCandidates = async (
   const probeDirectChain = async (): Promise<ProbeResult> => {
     for (const candidate of directList) {
       const url = normalizeConnectionUrl(candidate.url) || candidate.url;
-      const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
+      const headers = mobileHeadersForUrl(url, options?.requestHeaders);
+      const redirect = Object.keys(headers).length ? 'error' : undefined;
+      if (token) headers.Authorization = `Bearer ${token}`;
       // /health is unauthenticated by design — never send the bearer token to an
       // address whose identity has not been checked yet.
-      const health = await requestWithTimeout(`${url}/health`, { method: 'GET' }, requestOptions);
+      const health = await requestWithTimeout(`${url}/health`, { method: 'GET', headers: mobileHeadersForUrl(url, options?.requestHeaders), redirect }, requestOptions);
       logConnect('probe:direct:health', { url, ok: health?.ok === true, status: health?.status ?? null, source: health?.source ?? null });
       if (!health?.ok) continue;
       if (expectedServerId) {
@@ -921,7 +1008,7 @@ const probeConnectionCandidates = async (
       // WebView otherwise answers "authenticated" for a revoked/expired token,
       // the probe passes, and the app dies later on bootstrap's bearer-only
       // requests. Cookie auth stays for the token-less (browser) flow.
-      const session = await requestWithTimeout(`${url}/auth/session`, { method: 'GET', credentials: token ? 'omit' : 'include', headers }, requestOptions);
+      const session = await requestWithTimeout(`${url}/auth/session`, { method: 'GET', credentials: token ? 'omit' : 'include', headers, redirect }, requestOptions);
       logConnect('probe:direct:session', { url, ok: session?.ok === true, status: session?.status ?? null, source: session?.source ?? null, hasToken: Boolean(token) });
       if (session?.status === 401) return { status: 'needs-login' };
       if (!session || (!session.ok && session.status !== 404)) continue;
@@ -1032,13 +1119,13 @@ const probeConnectionCandidates = async (
 const switchToTransport = (
   transport: ChosenTransport,
   token: string | null,
-  options?: { runtimeKey?: string; grant?: string },
+  options?: { runtimeKey?: string; grant?: string; requestHeaders?: MobileRequestHeaders },
 ): void => {
   autoConnectSuppressed = false;
   if (transport.kind === 'relay') {
     switchToRelayRuntime(transport.relay, token, options?.grant, options?.runtimeKey, transport.tunnel?.client);
   } else {
-    switchRuntimeEndpoint({ apiBaseUrl: transport.url, clientToken: token, runtimeKey: options?.runtimeKey });
+    switchRuntimeEndpoint({ apiBaseUrl: transport.url, clientToken: token, runtimeKey: options?.runtimeKey, requestHeaders: mobileHeadersForUrl(transport.url, options?.requestHeaders) });
   }
   // Every live connection is an opportunity to learn the server's CURRENT LAN
   // addresses (pairing-payload candidates go stale when DHCP reassigns the
@@ -1113,7 +1200,13 @@ export const autoConnectLastInstance = async (options?: { fast?: boolean; skipIf
   // Callers retrying after an 'unreachable' verdict pass fast:false so the slow
   // retry gets the full connect budget (relay cold starts — TLS + WS + E2EE
   // handshake — regularly overrun the fast window).
-  const result = await probeConnectionCandidates(candidate.candidates, token, { fast });
+  let requestHeaders: MobileRequestHeaders | undefined;
+  try {
+    requestHeaders = await readConnectionHeaders(candidate);
+  } catch {
+    return { status: 'unreachable', label: candidate.label };
+  }
+  const result = await probeConnectionCandidates(candidate.candidates, token, { fast, requestHeaders });
   logConnect('auto-connect:probe', { status: result.status, candidates: candidate.candidates.map((c) => c.kind) });
   if (result.status === 'needs-login') return { status: 'needs-login', label: candidate.label };
   if (result.status === 'relay-limit') return { status: 'relay-limit', label: candidate.label };
@@ -1128,14 +1221,20 @@ export const autoConnectLastInstance = async (options?: { fast?: boolean; skipIf
     logConnect('auto-connect:superseded', {});
     return { status: 'no-candidate' };
   }
-  await upsertMobileConnection({ id: candidate.id, label: candidate.label, candidates: candidate.candidates }); // bump lastUsedAt (keeps token)
-  switchToTransport(result.transport, token ?? null, { runtimeKey: secureTokenKeyOf(candidate) });
+  try {
+    await upsertMobileConnection({ id: candidate.id, label: candidate.label, candidates: candidate.candidates }); // bump lastUsedAt (keeps token)
+  } catch {
+    if (result.transport.kind === 'relay') releaseHeldRelayTunnel(result.transport.tunnel);
+    return { status: 'unreachable', label: candidate.label };
+  }
+  switchToTransport(result.transport, token ?? null, { runtimeKey: secureTokenKeyOf(candidate), requestHeaders });
   return { status: 'connected' };
 };
 
 export const validateMobileConnectionSession = async (input: {
   url: string;
   clientToken?: string | null;
+  requestHeaders?: MobileRequestHeaders;
 }, options?: { fast?: boolean }): Promise<boolean> => {
   let url = '';
   try {
@@ -1146,15 +1245,17 @@ export const validateMobileConnectionSession = async (input: {
   if (!url) return false;
 
   const token = input.clientToken?.trim() || undefined;
-  const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
+  const headers = mobileHeadersForUrl(url, input.requestHeaders);
+  const redirect = Object.keys(headers).length ? 'error' : undefined;
+  if (token) headers.Authorization = `Bearer ${token}`;
   const requestOptions = options?.fast ? { totalTimeoutMs: MOBILE_FAST_PROBE_TIMEOUT_MS } : undefined;
 
-  const health = await requestWithTimeout(`${url}/health`, { method: 'GET', headers }, requestOptions);
+  const health = await requestWithTimeout(`${url}/health`, { method: 'GET', headers, redirect }, requestOptions);
   if (!health?.ok) return false;
 
   // Bearer-only when a token is present — see the probe note about stale
   // session cookies masking a revoked token.
-  const session = await requestWithTimeout(`${url}/auth/session`, { method: 'GET', credentials: token ? 'omit' : 'include', headers }, requestOptions);
+  const session = await requestWithTimeout(`${url}/auth/session`, { method: 'GET', credentials: token ? 'omit' : 'include', headers, redirect }, requestOptions);
   if (!session || (!session.ok && session.status !== 404)) return false;
 
   const status = await readSessionStatus(session);
@@ -1214,6 +1315,7 @@ const pairingCandidatesToMobile = (candidates: PairingEndpointCandidate[]): Mobi
 // when nothing answered and the relay refused the tunnel over its limits.
 const establishLiveTransport = async (
   candidates: MobileTransportCandidate[],
+  requestHeaders?: MobileRequestHeaders,
 ): Promise<LiveTransport | 'relay-limit' | null> => {
   let relayLimited = false;
   // Same identity gate as probeConnectionCandidates: a redeem/login must not send
@@ -1236,7 +1338,8 @@ const establishLiveTransport = async (
       continue;
     }
     const url = normalizeConnectionUrl(candidate.url) || candidate.url;
-    const health = await requestWithTimeout(`${url}/health`, { method: 'GET' });
+    const headers = mobileHeadersForUrl(url, requestHeaders);
+    const health = await requestWithTimeout(`${url}/health`, { method: 'GET', headers, redirect: Object.keys(headers).length ? 'error' : undefined });
     logConnect('establish:direct:health', { ok: health?.ok === true, status: health?.status ?? null });
     if (!health?.ok) continue;
     const serverId = await readHealthServerId(health);
@@ -1261,6 +1364,7 @@ type ActiveSessionCheck = 'valid' | 'invalid' | 'relay-limit';
 const validateActiveRuntimeSession = async (input: {
   url: string;
   clientToken?: string | null;
+  requestHeaders?: MobileRequestHeaders;
 }, options?: { fast?: boolean }): Promise<ActiveSessionCheck> => {
   if (!isRelayModeActive()) return await validateMobileConnectionSession(input, options) ? 'valid' : 'invalid';
   const session = await raceWithTimeout(
@@ -1336,11 +1440,22 @@ export const reprobeActiveConnection = async (options?: { fast?: boolean }): Pro
 
   // 1. A higher-priority transport becoming reachable means "came home" (relay → LAN).
   const higher = currentIndex >= 0 ? active.candidates.slice(0, currentIndex) : active.candidates;
-  const better = await probeConnectionCandidates(higher, token, { fast });
+  let requestHeaders: MobileRequestHeaders | undefined;
+  try {
+    requestHeaders = await readConnectionHeaders(active);
+  } catch {
+    return 'unreachable';
+  }
+  const better = await probeConnectionCandidates(higher, token, { fast, requestHeaders });
   logConnect('reprobe:better', { status: better.status, probed: higher.length });
   if (better.status === 'ok') {
-    await upsertMobileConnection({ id: active.id, label: active.label, candidates: active.candidates });
-    switchToTransport(better.transport, token ?? null, { runtimeKey: secureTokenKeyOf(active) });
+    try {
+      await upsertMobileConnection({ id: active.id, label: active.label, candidates: active.candidates });
+    } catch {
+      if (better.transport.kind === 'relay') releaseHeldRelayTunnel(better.transport.tunnel);
+      return 'unreachable';
+    }
+    switchToTransport(better.transport, token ?? null, { runtimeKey: secureTokenKeyOf(active), requestHeaders });
     return 'switched';
   }
   // The shared token was explicitly rejected — no transport will accept it.
@@ -1349,7 +1464,7 @@ export const reprobeActiveConnection = async (options?: { fast?: boolean }): Pro
   // 2. No better transport — is the current one still alive on its live channel?
   let current: ActiveSessionCheck | null = null;
   if (currentIndex >= 0) {
-    current = await validateActiveRuntimeSession({ url: getRuntimeApiBaseUrl(), clientToken: token }, { fast });
+    current = await validateActiveRuntimeSession({ url: getRuntimeApiBaseUrl(), clientToken: token, requestHeaders }, { fast });
     logConnect('reprobe:current', { current });
     if (current === 'valid') {
       // Still on the same transport (typically: woke up on the relay, old LAN
@@ -1363,11 +1478,16 @@ export const reprobeActiveConnection = async (options?: { fast?: boolean }): Pro
 
   // 3. Current transport is dead — fall through to lower-priority candidates.
   const lower = currentIndex >= 0 ? active.candidates.slice(currentIndex + 1) : [];
-  const fallback = await probeConnectionCandidates(lower, token, { fast });
+  const fallback = await probeConnectionCandidates(lower, token, { fast, requestHeaders });
   logConnect('reprobe:fallback', { status: fallback.status, probed: lower.length });
   if (fallback.status === 'ok') {
-    await upsertMobileConnection({ id: active.id, label: active.label, candidates: active.candidates });
-    switchToTransport(fallback.transport, token ?? null, { runtimeKey: secureTokenKeyOf(active) });
+    try {
+      await upsertMobileConnection({ id: active.id, label: active.label, candidates: active.candidates });
+    } catch {
+      if (fallback.transport.kind === 'relay') releaseHeldRelayTunnel(fallback.transport.tunnel);
+      return 'unreachable';
+    }
+    switchToTransport(fallback.transport, token ?? null, { runtimeKey: secureTokenKeyOf(active), requestHeaders });
     return 'switched';
   }
   if (fallback.status === 'needs-login') return 'needs-login';
@@ -1541,16 +1661,16 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
   }, [applyConnections]);
 
   // Persist metadata for a connection and reflect it in state immediately.
-  const persistMetadata = React.useCallback((draft: { id?: string; label: string; candidates: MobileTransportCandidate[]; serverId?: string; clientToken?: string }) => {
-    const next = upsertConnectionInList(connectionsRef.current, draft);
+  const persistMetadata = React.useCallback(async (draft: Parameters<typeof upsertMobileConnection>[0]) => {
+    const next = await persistMobileConnection(draft);
     applyConnections(next);
-    writeConnections(next);
     return next;
   }, [applyConnections]);
 
   const connect = React.useCallback(async (input: MobileConnectInput) => {
     setError(null);
     beginBusy('connect');
+    let heldTunnel: HeldRelayTunnel | undefined;
     try {
       const candidates = buildCandidatesFromInput(input);
       if (candidates.length === 0) {
@@ -1561,6 +1681,8 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
         ? connectionsRef.current.find((c) => c.id === input.id)
         : connectionsRef.current.find((c) => candidateSetsMatch(c.candidates, candidates));
       const label = input.label?.trim() || saved?.label || getConnectionLabel(connectionDisplayUrl({ candidates }));
+      const requestHeaders = await resolveConnectionHeaders(input, candidates, saved);
+      const headerUpdate = input.requestHeaders === undefined ? undefined : requestHeaders ?? null;
       const grant = input.relayGrant;
       const tokenKey = secureTokenKeyOf({ candidates, serverId: saved?.serverId });
 
@@ -1576,7 +1698,8 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
       }
 
       logConnect('connect:start', { candidates: candidates.map((c) => c.kind), hasToken: Boolean(token) });
-      const result = await probeConnectionCandidates(candidates, token);
+      const result = await probeConnectionCandidates(candidates, token, { requestHeaders });
+      if (result.status === 'ok' && result.transport.kind === 'relay') heldTunnel = result.transport.tunnel;
       logConnect('connect:probe', { status: result.status });
 
       if (result.status === 'unreachable') {
@@ -1588,14 +1711,15 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
         return;
       }
       if (result.status === 'needs-login') {
-        persistMetadata({ id: saved?.id, label, candidates });
+        const next = await persistMetadata({ id: saved?.id, label, candidates, requestHeaders: headerUpdate });
         setPendingConnection({
-          id: saved?.id ?? crypto.randomUUID(),
+          id: next[0].id,
           label,
           candidates,
           serverId: saved?.serverId,
           relay: relayCandidateOf({ candidates }) ?? undefined,
           relayGrant: grant,
+          requestHeaders,
         });
         return;
       }
@@ -1605,13 +1729,15 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
       if (token && tokenIsNew && isCapacitorApp()) {
         await writeSecureToken(tokenKey, token);
       }
-      persistMetadata({ id: saved?.id, label, candidates, clientToken: token });
-      switchToTransport(result.transport, token ?? null, { runtimeKey: tokenKey, grant });
+      await persistMetadata({ id: saved?.id, label, candidates, clientToken: token, requestHeaders: headerUpdate });
+      switchToTransport(result.transport, token ?? null, { runtimeKey: tokenKey, grant, requestHeaders });
+      heldTunnel = undefined;
       onConnected();
     } catch (error) {
       console.warn('[mobile-connect] connect threw', error);
-      setError(t('mobile.connect.error.invalidUrl'));
+      setError(t(error instanceof MobileHeaderStorageError ? 'mobile.connect.headers.error' : 'mobile.connect.error.invalidUrl'));
     } finally {
+      releaseHeldRelayTunnel(heldTunnel);
       endBusy('connect');
     }
   }, [beginBusy, endBusy, onConnected, persistMetadata, t]);
@@ -1687,7 +1813,7 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
           return;
         }
       }
-      persistMetadata({ label, candidates: deviceCandidates, serverId, clientToken: issuedToken });
+      await persistMetadata({ label, candidates: deviceCandidates, serverId, clientToken: issuedToken });
       // A relay transport hands its live redeem tunnel to the runtime (adopted
       // inside switchToTransport) — closing it here would tear down the runtime.
       switchToTransport(
@@ -1712,7 +1838,7 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
     beginBusy('password');
     const operation = passwordOperationRef.current.begin();
     const isCurrentOperation = () => passwordOperationRef.current.isCurrent(operation);
-    const { id, label, candidates, serverId } = pendingConnection;
+    const { id, label, candidates, serverId, requestHeaders } = pendingConnection;
     const tokenKey = secureTokenKeyOf({ candidates, serverId });
     // A relay tunnel this flow opened is closed unless the switch adopted it as
     // the runtime tunnel; a borrowed runtime tunnel stays open.
@@ -1722,17 +1848,23 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
       // Log in over whichever transport is reachable. Relay login rides the
       // tunnel; cookies never cross it, so an issued bearer token is mandatory
       // there. `issueClientToken` mints the device's token in one round-trip.
-      const established = await establishLiveTransport(candidates);
+      const established = await establishLiveTransport(candidates, requestHeaders);
       if (established !== 'relay-limit') chosen = established;
       if (!isCurrentOperation()) return;
       if (!chosen) {
         setError(t(established === 'relay-limit' ? 'mobile.connect.error.relayLimit' : 'mobile.connect.error.unreachable'));
         return;
       }
+      const loginHeaders: Record<string, string> = {};
+      if (chosen.kind === 'direct') Object.assign(loginHeaders, mobileHeadersForUrl(chosen.url, requestHeaders));
+      const redirect: RequestRedirect | undefined = Object.keys(loginHeaders).length ? 'error' : undefined;
+      loginHeaders['Content-Type'] = 'application/json';
+      loginHeaders.Accept = 'application/json';
       const loginInit = {
         method: 'POST',
         credentials: 'include' as const,
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        headers: loginHeaders,
+        redirect,
         // Same dedupe key as pairing: re-authenticating after a token expires
         // reuses this phone's existing device record instead of duplicating it.
         body: JSON.stringify({ password, trustDevice: true, issueClientToken: true, clientLabel: 'OpenChamber Mobile', clientKind: 'mobile', devicePlatform: mobileDevicePlatform(), dedupeKey: mobileClientDedupeKey() }),
@@ -1758,9 +1890,10 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
       // direct connection in a browser.
       if (!issuedToken) {
         if (chosen.kind === 'direct' && !isCapacitorApp()) {
-          persistMetadata({ id, label, candidates });
+          await persistMetadata({ id, label, candidates });
+          if (!isCurrentOperation()) return;
           setPendingConnection(null);
-          switchToTransport({ kind: 'direct', url: chosen.url }, null, { runtimeKey: tokenKey });
+          switchToTransport({ kind: 'direct', url: chosen.url }, null, { runtimeKey: tokenKey, requestHeaders });
           onConnected();
           return;
         }
@@ -1775,14 +1908,15 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
         if (!isCurrentOperation()) return;
       }
       if (!isCurrentOperation()) return;
-      persistMetadata({ id, label, candidates, clientToken: issuedToken });
+      await persistMetadata({ id, label, candidates, clientToken: issuedToken });
+      if (!isCurrentOperation()) return;
       setPendingConnection(null);
       // A relay transport hands its live login tunnel to the runtime (adopted
       // inside switchToTransport) — closing it here would tear down the runtime.
       switchToTransport(
         chosen.kind === 'relay' ? { kind: 'relay', relay: chosen.relay, tunnel: { client: chosen.tunnel, owned: chosen.owned } } : { kind: 'direct', url: chosen.url },
         issuedToken,
-        { runtimeKey: tokenKey },
+        { runtimeKey: tokenKey, requestHeaders },
       );
       adopted = chosen.kind === 'relay';
       if (!isCurrentOperation()) return;
@@ -1790,7 +1924,7 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
     } catch (error) {
       if (!isCurrentOperation()) return;
       console.warn('[mobile-connect] password threw', error);
-      setError(t('mobile.connect.error.passwordFailed'));
+      setError(t(error instanceof MobileHeaderStorageError ? 'mobile.connect.headers.error' : 'mobile.connect.error.passwordFailed'));
     } finally {
       releaseLiveTransport(chosen, adopted);
       if (isCurrentOperation()) endBusy('password');
@@ -1851,16 +1985,32 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
       }
     }
     // The upserted connection always comes first.
-    const next = persistMetadata({ id: input.id, label, candidates, clientToken });
-    return next[0] ?? null;
+    try {
+      const requestHeaders = input.requestHeaders === undefined ? undefined : await resolveConnectionHeaders(input, candidates, existing ?? undefined) ?? null;
+      const next = await persistMetadata({ id: input.id, label, candidates, clientToken, requestHeaders });
+      if (existing && isActiveRuntimeConnection(existing) && !isRelayModeActive() && input.requestHeaders !== undefined) {
+        switchToTransport({ kind: 'direct', url: getRuntimeApiBaseUrl() }, getRuntimeBearerTokenSync() || null, {
+          runtimeKey: getRuntimeKey(), requestHeaders: requestHeaders ?? undefined,
+        });
+      }
+      return next[0] ?? null;
+    } catch {
+      setError(t('mobile.connect.headers.error'));
+      return null;
+    }
   }, [persistMetadata, t]);
 
   const removeConnection = React.useCallback(async (id: string): Promise<MobileSavedConnection | null> => {
     const removed = connectionsRef.current.find((connection) => connection.id === id) ?? null;
-    const next = await deleteMobileConnection(id);
-    applyConnections(next);
-    return removed;
-  }, [applyConnections]);
+    try {
+      const next = await deleteMobileConnection(id);
+      applyConnections(next);
+      return removed;
+    } catch {
+      setError(t('mobile.connect.headers.error'));
+      return null;
+    }
+  }, [applyConnections, t]);
 
   return {
     connections,

@@ -601,8 +601,9 @@ export type GitManagedSshCandidate =
       capability: { status: 'unavailable'; reason: 'unreadable' | 'encrypted-or-unverifiable' | 'insecure-permissions' };
     };
 
-export type GitManagedSshIntent = { operation: 'inventory' | 'discover' }
-  | { operation: 'import'; candidateId: string; expectedFingerprint: string; confirmed: true };
+export type GitManagedSshIntent = { operation: 'inventory' }
+  | { operation: 'discover'; passphrase?: string }
+  | { operation: 'import'; candidateId: string; expectedFingerprint: string; confirmed: true; passphrase?: string };
 
 export type GitManagedSshResult =
   | { status: 'available'; credentials: GitManagedSshCredential[] }
@@ -1461,6 +1462,8 @@ export interface ProjectEntry {
   id: string;
   path: string;
   label?: string;
+  /** Where `label` came from: the folder name, or a name the user typed. */
+  labelSource?: 'auto' | 'manual';
   icon?: string | null;
   iconImage?: {
     mime: string;

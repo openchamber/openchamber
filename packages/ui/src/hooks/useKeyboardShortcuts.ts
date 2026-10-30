@@ -14,6 +14,7 @@ import { useKeybinds } from '@/hooks/useKeybind';
 import { handleSettingsShortcut } from './useSettingsKeyboardShortcuts';
 import { createWorktreeSession } from '@/lib/worktreeSessionCreator';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { cycleThinkingVariant } from '@/lib/cycleThinkingVariant';
 import { canUseElectronDesktopIPC, getMiniChatRuntimeArgs, invokeDesktop, isVSCodeRuntime } from '@/lib/desktop';
 import {
   eventMatchesShortcut,
@@ -310,20 +311,7 @@ export const useKeyboardShortcuts = () => {
         || state.isSessionSwitcherOpen
         || state.isAboutDialogOpen;
       if (state.isSettingsDialogOpen || hasOverlay) return false;
-      const config = useConfigStore.getState();
-      if (config.getCurrentModelVariants().length === 0) return false;
-      const nextVariantOverride = config.cycleCurrentVariant();
-      const sessionId = useSessionUIStore.getState().currentSessionId;
-      const { currentAgentName, currentProviderId, currentModelId } = useConfigStore.getState();
-      if (sessionId && currentAgentName && currentProviderId && currentModelId) {
-        useSelectionStore.getState().saveAgentModelVariantForSession(
-          sessionId,
-          currentAgentName,
-          currentProviderId,
-          currentModelId,
-          nextVariantOverride,
-        );
-      }
+      if (!cycleThinkingVariant(useSessionUIStore.getState().currentSessionId)) return false;
     },
     cycle_favorite_model_forward: () => cycleFavoriteModel(1),
     cycle_favorite_model_backward: () => cycleFavoriteModel(-1),

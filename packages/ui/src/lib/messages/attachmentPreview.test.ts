@@ -101,6 +101,19 @@ describe('what opening a sent attachment does', () => {
 });
 
 describe('matching a citation to its attachment', () => {
+    for (const filename of ['/Users/me/Documents/report.txt', 'C:\\Users\\me\\report.txt', '/Users/me/Documents/photo.heic', '/home/me/weird\\name.txt']) {
+        test(`opens a basename citation for the sent path ${filename}`, () => {
+            const name = filename.startsWith('C:') ? 'report.txt' : filename.slice(filename.lastIndexOf('/') + 1);
+            const sent = file({ filename, mime: filename.endsWith('.heic') ? 'image/jpeg' : 'text/plain' });
+            const openable = collectOpenableAttachmentNames([sent]);
+
+            expect(isOpenableAttachmentName(openable, name)).toBe(true);
+            expect(findAttachmentPart(name, [sent])).toBe(sent);
+            expect(resolveAttachmentOpenTarget(findAttachmentPart(name, [sent]), [sent])?.kind).toBe('popup');
+            expect(sent.filename).toBe(filename);
+        });
+    }
+
     test('finds the file a citation names, ignoring case and spaces like citations do', () => {
         const pasted = file();
         expect(findAttachmentPart('  Pasted-Context-1.TXT ', [pasted])).toBe(pasted);

@@ -18,6 +18,8 @@
 import { z } from 'zod';
 
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import { subscribeRuntimeEndpointWillChange } from '@/lib/runtime-switch';
+import { runBackgroundNetworkTask } from '@/lib/background-network';
 
 const OPENCODE_TRUST_ROUTE = '/api/opencode/trust';
 const OPENCODE_TRUST_REQUIRED = 'opencode_trust_required';
@@ -56,9 +58,15 @@ type PendingOpenCodeTrustRequest = {
 
 let pendingRequest: PendingOpenCodeTrustRequest | null = null;
 const listeners = new Set<() => void>();
+const answerListeners = new Set<() => void>();
+export const subscribeOpenCodeTrustAnswers = (listener: () => void): (() => void) => {
+  answerListeners.add(listener);
+  return () => { answerListeners.delete(listener); };
+};
 const inFlight = new Map<string, Promise<boolean>>();
 const declined = new Set<string>();
 let promptQueue: Promise<unknown> = Promise.resolve();
+let runtimeGeneration = 0;
 
 const emitChange = (): void => {
   for (const listener of listeners) listener();
@@ -77,6 +85,14 @@ export const subscribeOpenCodeTrust = (listener: () => void): (() => void) => {
 export const settleOpenCodeTrust = (choice: OpenCodeTrustChoice): Promise<OpenCodeTrustOutcome> => (
   pendingRequest ? pendingRequest.settle(choice) : Promise.resolve('skipped')
 );
+
+subscribeRuntimeEndpointWillChange(() => {
+  runtimeGeneration += 1;
+  void pendingRequest?.settle('skip');
+  inFlight.clear();
+  declined.clear();
+  promptQueue = Promise.resolve();
+});
 
 /** Opening a folder asks again for any folder the user declined before. */
 export const forgetOpenCodeTrustDeclines = (): void => {
@@ -122,8 +138,9 @@ const recordTrust = async (assessment: OpenCodeTrustAssessment): Promise<TrustAn
  * the user declines. Configuration that changed while on screen is shown
  * again with the new contents.
  */
-const askForTrust = (assessment: OpenCodeTrustAssessment): Promise<boolean> => new Promise<boolean>((resolve) => {
+const askForTrust = (assessment: OpenCodeTrustAssessment, generation: number): Promise<boolean> => new Promise<boolean>((resolve) => {
   const show = (current: OpenCodeTrustAssessment): void => {
+    if (generation !== runtimeGeneration) { resolve(false); return; }
     pendingRequest = {
       directory: current.directory,
       items: current.items,
@@ -142,6 +159,7 @@ const askForTrust = (assessment: OpenCodeTrustAssessment): Promise<boolean> => n
           console.warn('[opencode-trust] Failed to save the answer:', error);
           return 'failed';
         }
+        if (generation !== runtimeGeneration) return 'skipped';
         if (answer.kind === 'changed') {
           show(answer.assessment);
           return 'changed';
@@ -149,6 +167,7 @@ const askForTrust = (assessment: OpenCodeTrustAssessment): Promise<boolean> => n
         pendingRequest = null;
         emitChange();
         resolve(true);
+        for (const listener of answerListeners) listener();
         return 'saved';
       },
     };
@@ -162,31 +181,37 @@ const askForTrust = (assessment: OpenCodeTrustAssessment): Promise<boolean> => n
  * Resolves true when the request that was refused can be sent again.
  * `deliberate` marks a request the user just made, which asks even after a
  * "Not this time" for the same configuration.
+ * Admission uses `throwOnError` to retry read failures separately from declines.
  */
-export const requestOpenCodeTrust = (directory: string, { deliberate }: { deliberate: boolean }): Promise<boolean> => {
+export const requestOpenCodeTrust = (directory: string, { deliberate, background = false, throwOnError = false }: { deliberate: boolean; background?: boolean; throwOnError?: boolean }): Promise<boolean> => {
+  const resultForCaller = (request: Promise<boolean>): Promise<boolean> => throwOnError ? request : request.catch((error) => {
+    console.warn('[opencode-trust] Could not check the folder:', error);
+    return false;
+  });
   const existing = inFlight.get(directory);
-  if (existing) return existing;
+  if (existing) return resultForCaller(existing);
+  const generation = runtimeGeneration;
   const request = (async () => {
-    const assessment = await fetchAssessment(directory);
+    const assessment = await (background
+      ? runBackgroundNetworkTask(() => generation === runtimeGeneration ? fetchAssessment(directory) : Promise.resolve(null))
+      : fetchAssessment(directory));
+    if (!assessment || generation !== runtimeGeneration) return false;
     if (assessment.trusted) return true;
     if (!deliberate && declined.has(`${assessment.directory}\n${assessment.fingerprint}`)) return false;
     // Another worktree may be trusted while this folder waits its turn.
     const turn = promptQueue.then(async () => {
+      if (generation !== runtimeGeneration) return false;
       const current = await fetchAssessment(directory);
+      if (generation !== runtimeGeneration) return false;
       if (current.trusted) return true;
       if (!deliberate && declined.has(`${current.directory}\n${current.fingerprint}`)) return false;
-      return askForTrust(current);
+      return askForTrust(current, generation);
     });
     promptQueue = turn.catch(() => undefined);
     return turn;
-  })()
-    .catch((error) => {
-      console.warn('[opencode-trust] Could not check the folder:', error);
-      return false;
-    })
-    .finally(() => inFlight.delete(directory));
+  })().finally(() => { if (inFlight.get(directory) === request) inFlight.delete(directory); });
   inFlight.set(directory, request);
-  return request;
+  return resultForCaller(request);
 };
 
 // Matched at the end: a runtime may serve the API under a base path.

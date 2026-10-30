@@ -1,5 +1,11 @@
 # Retained context views
 
+Archive session rows apply the shared session-admission directory rule before
+search, counts and grouping. Unregistered host destinations stay hidden without
+removing their records from the global archive cache. Managed chats, live spaces
+and catalogued read-only space archives retain their existing ownership. Opening
+an archive row still passes through the shared session-selection gate.
+
 `ContextPanel` keeps file, diff and walkthrough views mounted to preserve
 navigation, expanded sections and editor state. Its `visible` prop combines
 the panel's open state with the selected tab. Hiding via CSS alone does not

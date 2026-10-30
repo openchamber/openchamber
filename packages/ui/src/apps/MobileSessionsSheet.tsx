@@ -516,7 +516,11 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
             header's More menu. */}
         {footer ? (
           <div
-            className="flex shrink-0 items-center justify-between gap-2 border-t border-edge px-3 pt-1.5"
+            // At the bottom of the phone's drawer it rides the keyboard. The
+            // iPad's sidebar keeps its height under the raised keyboard
+            // (mobile.css), so its footer stays where it is.
+            data-keyboard-rider={variant === 'drawer' ? '' : undefined}
+            className="flex shrink-0 items-center justify-between gap-2 border-t border-edge bg-background px-3 pt-1.5"
             style={{ paddingBottom: 'calc(0.375rem + var(--oc-safe-area-bottom, 0px))' }}
           >
             <div className="flex min-w-0 items-center">
@@ -541,7 +545,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
                   type="button"
                   variant="chip"
                   size="lg"
-                  className="w-10 px-0"
+                  className="relative w-10 px-0"
                   onClick={footer.onOpenUpdate}
                   aria-label={t('mobile.menu.update')}
                   title={t('mobile.menu.update')}

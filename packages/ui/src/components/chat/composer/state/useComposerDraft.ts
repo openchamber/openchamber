@@ -17,6 +17,7 @@
 import React from 'react';
 import { useInputStore } from '@/sync/input-store';
 import { isBtwPendingComposerKey } from '@/lib/btw';
+import { useLinkedReferenceDrafts } from '../linkedReferenceDrafts';
 
 import {
     getChatDraftIdentityKey,
@@ -210,7 +211,10 @@ export function useComposerDraft(options: ComposerDraftOptions): ComposerDraftCo
                 ? sameNewSessionDraft && isNewSessionDraftIdentity(identity)
                 : previous.sessionId === identity.sessionId);
         const carriesText = sameDraftMoved && outgoing.text.length > 0;
-        if (sameDraftMoved) useInputStore.getState().moveAttachedFiles(previous, identity);
+        if (sameDraftMoved) {
+            useInputStore.getState().moveAttachedFiles(previous, identity);
+            useLinkedReferenceDrafts.getState().move(previous, identity);
+        }
         if (carriesText && previousKey) {
             draftMemoryRef.current.set(previousKey, { text: '', confirmedMentions: new Set() });
             persistNow(previous, '');

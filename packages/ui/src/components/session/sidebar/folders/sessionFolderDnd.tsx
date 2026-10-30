@@ -12,7 +12,7 @@ import {
 } from '@dnd-kit/core';
 import { Icon } from "@/components/icon/Icon";
 import { sessionFolderCollision } from './sessionFolderCollision';
-import { getSessionFolderIdentityKey, isArchivedFolderScope } from '../sessions/sessionFolderIdentity';
+import { getSessionDragId, getSessionFolderDropId, isArchivedFolderScope } from '../sessions/sessionFolderIdentity';
 
 type SessionFolderDropTarget = {
   folderId: string;
@@ -50,7 +50,7 @@ export const DraggableSessionRow: React.FC<{
   const folderOwners = React.useContext(SessionFolderOwnersContext);
   const hasFolderToDropInto = folderOwners === null || (ownerKey !== null && folderOwners.has(ownerKey));
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
-    id: `session-drag:${dragKey ?? sessionId}`,
+    id: getSessionDragId(dragKey ?? sessionId),
     disabled: archivedBucket || !hasFolderToDropInto,
     data: { type: 'session', sessionId, ownerKey, sessionDirectory, sessionTitle, archivedBucket },
   });
@@ -90,7 +90,7 @@ export const DroppableFolderWrapper: React.FC<{
   ) => React.ReactNode;
 }> = ({ folderId, scopeKey, ownerKey, disabled = false, children }) => {
   const { setNodeRef, isOver } = useDroppable({
-    id: `folder-drop:${getSessionFolderIdentityKey(scopeKey, folderId)}`,
+    id: getSessionFolderDropId(scopeKey, folderId),
     disabled: disabled || isArchivedFolderScope(scopeKey),
     data: { type: 'folder', folderId, scopeKey, ownerKey },
   });

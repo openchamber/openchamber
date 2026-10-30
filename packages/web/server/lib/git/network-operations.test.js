@@ -1694,6 +1694,29 @@ process.exit(safe ? 0 : 1);
     expect(setupValue.calls[0].options.shell).toBe(false);
   });
 
+  it('forwards only the resolved SSH passphrase and redacts it from failed transfers', async () => {
+    const passphrase = 'ssh-passphrase-canary';
+    const setupValue = setup({ transport: 'ssh', env: { OPENCHAMBER_GIT_SSH_PASSPHRASE: 'ambient-secret',
+      OPENCHAMBER_GIT_SSH_EXECUTABLE: '/ambient/ssh',
+      SSH_ASKPASS: '/ambient/helper' }, spawnResults: [{ code: 1, stderr: `Permission denied ${passphrase}` }] });
+    const cleanup = vi.fn(async () => true);
+    const askpassEnv = { SSH_ASKPASS: '/owned/helper', SSH_ASKPASS_REQUIRE: 'force', DISPLAY: ':0',
+      OPENCHAMBER_GIT_SSH_PASSPHRASE: passphrase };
+    setupValue.credentialResolver.resolve.mockResolvedValue({ mode: 'managed', transport: 'ssh', key: {
+      privateKeyPath: '/owned/key', sourcePath: '/original/key', fingerprint: `SHA256:${'a'.repeat(43)}`,
+      askpassEnv, cleanup,
+    } });
+    const plan = await setupValue.service.plan(request('fetch', { remote: { name: 'publish',
+      endpoint: { displayUrl: 'git@example.com:owner/repository.git', fingerprint: setupValue.authority.endpointFingerprint } } }));
+    const result = await setupValue.service.execute(plan.operationId);
+    expect(setupValue.calls[0].options.env).toMatchObject(askpassEnv);
+    expect(setupValue.calls[0].options.env).not.toHaveProperty('OPENCHAMBER_GIT_SSH_EXECUTABLE');
+    expect(JSON.stringify(setupValue.calls[0].args)).not.toContain(passphrase);
+    expect(result.state).toBe('failed');
+    expect(JSON.stringify(result)).not.toContain(passphrase);
+    expect(cleanup).toHaveBeenCalled();
+  });
+
   it('rejects config, remote, or source changes before spawning', async () => {
     const setupValue = setup();
     const plan = await setupValue.service.plan(request());

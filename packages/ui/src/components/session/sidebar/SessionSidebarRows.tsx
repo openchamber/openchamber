@@ -3,13 +3,14 @@ import { defaultRangeExtractor, measureElement, useVirtualizer, type VirtualItem
 import type { SessionSidebarRow, SessionSidebarRowModel } from './sessionSidebarRowModel';
 import { SessionTreeGuides } from './sessions/SessionTreeGuides';
 import { SESSION_TREE_BASE_PADDING_PX } from './sessions/sessionTreeGeometry';
+import { findSessionSidebarDisclosure } from './sessionSidebarDisclosure';
 import {
   boundaryClipKeyframes,
   boundaryFadeInKeyframes,
-  findSessionSidebarDisclosure,
-  SIDEBAR_DISCLOSURE_EASING,
-  SIDEBAR_DISCLOSURE_MS,
-} from './sessionSidebarDisclosure';
+  ROW_DISCLOSURE_EASING,
+  ROW_DISCLOSURE_FADE_OUT,
+  ROW_DISCLOSURE_MS,
+} from '@/lib/motion/rowDisclosure';
 import {
   estimateSessionSidebarRowSize,
   findFirstVisibleSessionSidebarRowIndex,
@@ -42,10 +43,6 @@ type DisclosureMotion = {
    */
   slidingIndexes: readonly number[];
 };
-
-// Closing rows are gone well before the boundary reaches them; opening rows
-// come up as the boundary uncovers them (`boundaryFadeInKeyframes`).
-const DISCLOSURE_FADE_OUT: Keyframe[] = [{ opacity: 1 }, { opacity: 0, offset: 0.6 }, { opacity: 0 }];
 
 const prefersReducedMotion = (): boolean =>
   globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true;
@@ -199,7 +196,7 @@ export function SessionSidebarRows({
   React.useLayoutEffect(() => {
     const container = containerRef.current;
     if (!motion || !container) return;
-    const timing: KeyframeAnimationOptions = { duration: SIDEBAR_DISCLOSURE_MS, easing: SIDEBAR_DISCLOSURE_EASING };
+    const timing: KeyframeAnimationOptions = { duration: ROW_DISCLOSURE_MS, easing: ROW_DISCLOSURE_EASING };
     const distance = motion.from - motion.to;
     const animations: Animation[] = [];
     for (const element of container.children) {
@@ -210,9 +207,7 @@ export function SessionSidebarRows({
         // Held shut after the end: the ghost unmounts a render later, and
         // unclipped for that frame it would flash over the rows below.
         animations.push(element.animate(boundaryClipKeyframes(start, element.offsetHeight, motion.from, motion.to), { ...timing, fill: 'forwards' }));
-        // It fades as it goes: kept at full strength, the rows sliding up
-        // read as cutting through text that is still there.
-        animations.push(element.animate(DISCLOSURE_FADE_OUT, { ...timing, fill: 'forwards' }));
+        animations.push(element.animate(ROW_DISCLOSURE_FADE_OUT, { ...timing, fill: 'forwards' }));
       } else if (motion.revealKeys.has(key)) {
         animations.push(element.animate(boundaryClipKeyframes(start, element.offsetHeight, motion.from, motion.to), timing));
         animations.push(element.animate(boundaryFadeInKeyframes(start, element.offsetHeight, motion.from, motion.to), timing));

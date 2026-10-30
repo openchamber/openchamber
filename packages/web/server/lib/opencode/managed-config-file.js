@@ -17,8 +17,8 @@ export const MANAGED_CONFIG_FILE_NAME = 'opencode.managed.json';
 const DISABLED_BUILTIN_PLUGINS = ['-opencode.browser'];
 
 /**
- * OpenCode's own `image_generate` tool (2.2.1+, opt-in through
- * `experimental.image_generate`), switched off while `openchamber_image` is
+ * OpenCode's own `experimental_image_generate` tool (2.2.1+, on by default
+ * since 2.2.2), switched off while `openchamber_image` is
  * on, so the agent sees one image tool, the one using the model the user chose.
  */
 const BUILTIN_IMAGE_PLUGIN = '-opencode.tool.image-generate';

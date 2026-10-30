@@ -9,6 +9,7 @@ const json = (data: unknown, status = 200) => new Response(JSON.stringify(data),
   status, headers: { "content-type": "application/json" },
 })
 const runtime = await import("@/lib/runtime-switch")
+const runtimeFetchModule = await import("@/lib/runtime-fetch")
 mock.module("@/lib/runtime-url", () => ({ getRuntimeUrlResolver: () => ({ api: () => "http://runtime.test/api" }) }))
 mock.module("@/lib/runtime-switch", () => ({
   ...runtime,
@@ -18,7 +19,6 @@ mock.module("@/lib/runtime-switch", () => ({
     return () => captured === runtimeKey
   },
 }))
-const runtimeFetchModule = await import("@/lib/runtime-fetch");
 mock.module("@/lib/runtime-fetch", () => ({
   ...runtimeFetchModule,
   runtimeFetch: async (input: string | URL | Request) => {

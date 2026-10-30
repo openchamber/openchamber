@@ -101,6 +101,26 @@ describe('settings registry', () => {
     expect(parseSettingsDocument(JSON.parse(JSON.stringify(parsed)))).toEqual(parsed);
   });
 
+  test('round-trips project label provenance and drops invalid or orphan sources', () => {
+    const parsed = parseSettingsDocument({ projects: [
+      { path: '/example', label: ' Example ', labelSource: 'manual' },
+      { path: '/auto', label: 'auto', labelSource: 'auto' },
+      { path: '/invalid', label: 'Keep me', labelSource: 'unknown' },
+      { path: '/orphan', labelSource: 'manual' },
+      { path: '/blank', label: '  ', labelSource: 'auto' },
+      { path: '/legacy', label: 'Legacy' },
+    ] });
+    expect(parsed?.projects?.map(({ path, label, labelSource }) => ({ path, label, labelSource }))).toEqual([
+      { path: '/example', label: 'Example', labelSource: 'manual' },
+      { path: '/auto', label: 'auto', labelSource: 'auto' },
+      { path: '/invalid', label: 'Keep me', labelSource: undefined },
+      { path: '/orphan', label: undefined, labelSource: undefined },
+      { path: '/blank', label: undefined, labelSource: undefined },
+      { path: '/legacy', label: 'Legacy', labelSource: undefined },
+    ]);
+    expect(parseSettingsDocument(JSON.parse(JSON.stringify(parsed)))).toEqual(parsed);
+  });
+
   test('round-trips section order without coupling it to visibility or partial snapshots', () => {
     const initial = useUIStore.getState().workStatusSectionOrder;
     const hidden = useUIStore.getState().workStatusHiddenSections;

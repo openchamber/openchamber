@@ -676,9 +676,24 @@ command can leave the queue untouched and delivery can take only part of it.
   no instructions guess what the user wants from it (the PR review
   instructions were removed); a queued message captured before that still
   delivers its `instructions` part first. A flow outside the composer hands
-  references to the next draft through `pendingComposerReferences.ts`
-  (New Worktree does), which `ChatInput` consumes into its chips; a draft's
-  first send with a tracker item attached posts that tracker's session-started
+  references to a named session or draft through `pendingComposerReferences.ts`
+  (New Worktree and the source board do); `ChatInput` consumes only the entries
+  addressed to the draft it shows, and keeps the chips per draft in
+  `linkedReferenceDrafts.ts` keyed by `chatDraftIdentity`. One `ChatInput` stays
+  mounted across a session switch, so component-level chips followed the next
+  session and were linked there (#5706); a draft's chips must outlive the
+  composer showing another draft. A pinned column and an expanded `/btw` panel
+  take no handoff: neither is the main draft, and a chip written there would be
+   stranded. The entry waits for the main composer. Picker confirmation captures
+   its draft identity before loading context. New Worktree likewise captures its
+   opened draft before the read; an unnamed draft never takes a handoff.
+   Draft handoffs use the runtime and stable `workDraftId`, so reopening a saved
+   draft can receive context that finished loading after navigation away.
+   A failed first send that created its session moves the draft's chips into
+   that session for retry, merging chips attached while the request ran.
+   Guest attaches are rejected in expanded `/btw`, and pending guest items wait
+   for the normal composer before being consumed. A draft's first send with a
+  tracker item attached posts that tracker's session-started
   status (`lib/trackers/sessionStatus.ts`), for a tracker whose descriptor
   offers `sessionComments`. Tracker chips are `tracker-item` references keyed
   `${provider}:${IDENTIFIER}`; a queued or restored message from before
@@ -756,7 +771,7 @@ command can leave the queue untouched and delivery can take only part of it.
   (`ChatInput` passes the id). A session moved to another directory (the
   sidebar's move actions, an agent's `session_move`) keeps its session id
   while its directory changes. Either switch moves the draft: its attached
-  files and non-empty text go to the new directory, the old directory's text
+   files, linked reference chips and non-empty text go to the new directory, the old directory's text
   is cleared, and confirmed mentions are dropped because they name the old
   directory's files. A draft already saved for the new directory stays above
   the moved text, and the moved text is not selected as a restored draft.
@@ -1168,10 +1183,18 @@ skill, `references/ios-webkit.md`; `lib/iosWebKitMotion.test.ts` guards them.
   upward one adds no scrollable overflow), with the opposite one on a stuck
   user header. A leg on which one sticky header hands over to another cannot
   be shown by one offset, so it falls back to scrollTop per frame.
+- **The shell follows only its own keyboard.** A keyboard opened for a field
+  on a surface over the shell (a drawer's search, the Git commit box, a
+  dialog) leaves the shell's strip, layout and movers as they are, and the
+  glide does not run (`inShell: false` on `oc:keyboard-anim`): the covered
+  transcript, following its end, chased every change of it. Focus moving out
+  of the shell with the keyboard up gives back what the shell took.
 - **Keyboard geometry is written through `lib/mobileKeyboardInsets.ts`.** The
-  three values are registered non-inherited and written on their readers
-  only; a new reader joins the module's selector list. On the root they
-  restyled the whole page on every open and close.
+  values (the keyboard's height from its start, the shell's and the
+  surfaces' layout heights, the transcript's strip) are registered
+  non-inherited and written on their readers only; a new reader joins the
+  module's selector list. On the root they restyled the whole page on every
+  open and close.
 - **Swap first, then focus in the next frame.** WKWebView stops presenting
   frames once focus starts the keyboard transition and holds the last one until
   about mid-transition, so a swap committed in the same task as `focus()` stays
@@ -1379,6 +1402,21 @@ Shift only while a hardware keyboard is attached: iOS autocapitalization reports
 a phantom Shift at sentence starts, so a soft-keyboard Send always submits, while
 a hardware Shift+Enter still inserts a newline. Alt/Option+Enter inserts a
 newline, and Ctrl/Cmd+Enter is unchanged.
+
+### Why IME cleanup requires DOM padding evidence
+
+On iOS in Send mode, Sogou's long press can commit a newline followed by a
+padding space and a cleanup Backspace. If the padding reaches only the DOM,
+CodeMirror's replayed Backspace can delete the document's newline.
+`editor/imeNewline.ts` consumes one deletion only after observing a DOM line
+with exactly one extra leading space and a native caret after that space.
+The mark belongs to the specific native newline insertion and expires after
+400 ms. Other input, document edits, selection changes, pointer interaction,
+blur and Enter clear it. Padding already in the document uses normal deletion.
+The extension lives in the return-key compartment, enabled only for iOS Send
+mode; switching to Return removes it. A time window alone would swallow an
+ordinary Backspace. With confirmed padding, a user's Backspace within the same
+window is still indistinguishable from the keyboard's cleanup.
 
 The expanded desktop composer always inserts a newline with Enter, Shift+Enter
 and Alt/Option+Enter, and sends with Ctrl/Cmd+Enter; it ignores the Enter-to-send

@@ -370,6 +370,7 @@ const UserTextPart: React.FC<UserTextPartProps> = ({
                     isCollapsed && "line-clamp-2",
                     collapsibleUserMessages && isTruncated && !messageExpanded && "cursor-pointer"
                 )}
+                data-user-message-collapsed={isCollapsed && normalizedRenderingMode === 'markdown' ? '' : undefined}
                 ref={textRef}
                 onClick={handleClick}
                 onKeyDown={handleKeyDown}
@@ -379,29 +380,8 @@ const UserTextPart: React.FC<UserTextPartProps> = ({
                         <SimpleMarkdownRenderer
                             singleTilde={false}
                             content={processedMarkdownContent}
-                            className={cn(
-                                "[&_.markdown-content>*:first-child]:mt-0 [&_.markdown-content>*:last-child]:mb-0",
-                                isCollapsed && [
-                                    "[&_.markdown-content>*]:my-0",
-                                    "[&_[data-oc-streamdown]>*]:![margin-block:0]",
-                                    "[&_[data-oc-markdown-block]>*]:![margin-block:0]",
-                                    "[&_[data-streamdown='code-block']]:!my-0",
-                                    "[&_[data-streamdown='code-block']]:!inline",
-                                    "[&_[data-streamdown='code-block']]:!border-0",
-                                    "[&_[data-streamdown='code-block']]:!bg-transparent",
-                                    "[&_[data-streamdown='code-block-header']]:!hidden",
-                                    "[&_[data-streamdown='code-block-actions']]:!hidden",
-                                    "[&_[data-streamdown='code-block-body']]:!inline",
-                                    "[&_[data-streamdown='code-block-body']]:!p-0",
-                                    "[&_[data-streamdown='code-block-body']_pre]:!inline",
-                                    "[&_[data-streamdown='code-block-body']_pre]:!p-0",
-                                    "[&_[data-streamdown='code-block-body']_code]:!inline",
-                                    "[&_[data-streamdown='code-block-body']_code]:!ps-0",
-                                    "[&_[data-streamdown='code-block-body']_code]:![background-image:none]",
-                                    "[&_[data-streamdown='code-block-body']_code>span]:!block",
-                                    "[&_[data-streamdown='code-block-body']_code>span]:before:!hidden",
-                                 ]
-                            )}
+                            // The collapsed look lives in index.css under data-user-message-collapsed.
+                            className="[&_.markdown-content>*:first-child]:mt-0 [&_.markdown-content>*:last-child]:mb-0"
                             disableLinkSafety
                             enableFileReferences={false}
                         />

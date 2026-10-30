@@ -17,7 +17,7 @@ const SimpleMarkdownRendererLazy = lazyWithChunkRecovery(() =>
   loadMarkdownRendererModule().then((m) => ({ default: m.SimpleMarkdownRenderer }))
 );
 
-const fallback = <div className="break-words w-full min-w-0" />;
+const fallback = <div data-chat-quote-pending className="break-words w-full min-w-0" />;
 
 const fallbackContentClassName = (variant: unknown): string => {
   if (variant === 'tool') return 'markdown-content markdown-tool';
@@ -31,7 +31,7 @@ const MobileMarkdownFallback = (props: { content?: unknown; className?: unknown;
   }
 
   return (
-    <div className={cn('break-words w-full min-w-0 whitespace-pre-wrap', fallbackContentClassName(props.variant), typeof props.className === 'string' ? props.className : undefined)}>
+    <div data-chat-quote-pending className={cn('break-words w-full min-w-0 whitespace-pre-wrap', fallbackContentClassName(props.variant), typeof props.className === 'string' ? props.className : undefined)}>
       {props.content}
     </div>
   );
@@ -55,7 +55,7 @@ export const SimpleMarkdownRenderer: React.FC<SimpleMarkdownRendererProps> = ({ 
   const loaded = getLoadedMarkdownRendererModule();
   if (loaded) return <loaded.SimpleMarkdownRenderer {...props} />;
   return (
-    <React.Suspense fallback={fallbackContent ?? <MobileMarkdownFallback {...props} />}>
+    <React.Suspense fallback={fallbackContent == null ? <MobileMarkdownFallback {...props} /> : <div data-chat-quote-pending>{fallbackContent}</div>}>
       <SimpleMarkdownRendererLazy {...props} />
     </React.Suspense>
   );

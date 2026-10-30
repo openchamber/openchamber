@@ -5,6 +5,7 @@ import type { MessagePage } from "@/lib/opencode/client"
 import { getRuntimeApiBaseUrl, getRuntimeKey, switchRuntimeEndpoint } from "@/lib/runtime-switch"
 import { createPendingDraftWorktreeRequest, resolvePendingDraftWorktreeRequest } from "@/lib/worktrees/pendingDraftWorktree"
 import { useConfigStore } from "@/stores/useConfigStore"
+import { useProjectsStore } from "@/stores/useProjectsStore"
 import { useSessionGoalArmStore } from "@/stores/useSessionGoalArmStore"
 import { ChildStoreManager } from "./child-store"
 import { sendRecoveredFormAnswer, setActionRefs, setOptimisticRefs } from "./session-actions"
@@ -134,6 +135,7 @@ afterAll(() => {
 })
 
 beforeEach(() => {
+  useProjectsStore.setState({ projects: [{ id: "project", path: DIRECTORY }] })
   historyReads = 0
   creation = deferred<void>()
   createSessionCalls = []

@@ -6,7 +6,6 @@ import {
   applyRecoverableQuestionEvents,
   classifyQuestionToolError,
   deriveRecoveredQuestions,
-  dismissRecoveredQuestion,
   noteLocalFormCancelled,
   noteLocalFormReplied,
   noteQuestionFormSnapshot,
@@ -378,7 +377,7 @@ describe("lifecycle", () => {
   test("a repeated snapshot cannot reopen a dismissed captured question", () => {
     const form = questionForm("frm_1")
     noteQuestionFormSnapshot("/repo", [form])
-    dismissRecoveredQuestion(form.id)
+    noteLocalFormCancelled(form.id)
     noteQuestionFormSnapshot("/repo", [form])
     expect(deriveRecoveredQuestions(viewWith(turnDeathPart()), recoveryView(), allSessions)).toEqual([])
   })
@@ -386,7 +385,7 @@ describe("lifecycle", () => {
   test("dismissing a recovered card leaves a tombstone", () => {
     applyRecoverableQuestionEvents("/repo", [formCreated(questionForm("frm_1"))])
     expect(deriveRecoveredQuestions(viewWith(turnDeathPart()), recoveryView(), allSessions)).toHaveLength(1)
-    dismissRecoveredQuestion("frm_1")
+    noteLocalFormCancelled("frm_1")
     expect(deriveRecoveredQuestions(viewWith(turnDeathPart()), recoveryView(), allSessions)).toEqual([])
     expect(useRecoverableQuestionsStore.getState().outcomes.get("frm_1")).toBe("dismissed")
   })

@@ -114,6 +114,58 @@ it no longer hides the file's git state. Change the look there, not per tree.
 The JSON tree viewer (`components/ui/JsonTreeViewer.tsx`) takes the same
 indent and guides and copies the chevron's look; keep the copy in step.
 
+A name never truncates. The tree is as wide as its widest row and scrolls
+sideways, and every row is that wide, so fills and marks span the scroll.
+The git marks sit in an end lane (`FileTreeRowEnd`, `oc-file-tree-row-end`
+in `index.css`) that sticks to the pane's end, fades the name out over 1rem
+and redraws the row's rounded end in the row's colour, drop ring included.
+Over the last 1rem of the sideways scroll the fade narrows away, so the
+widest name shows whole at the end without a gap kept after every name. The hover menu is a
+second lane of the same kind that takes no width and fades in over the end,
+so a row reserves no room for it. Error rows stay as wide as the pane
+(`100cqw` of the scroller) and held at its start. The non-virtual trees get
+their width from CSS (`w-max`). The sidebar's virtual list cannot, because
+only some rows are mounted: it remembers, by path, each row seen wider than
+the list, takes the widest as its width, and forgets rows that leave the
+tree. That keeps the sideways scroll when wide rows scroll out of view or
+another folder opens.
+
+### Why the end lane paints the row's colour under a mask
+
+The fade has to cover the name with exactly the colour of the row behind it,
+which is a translucent hover or selection fill over the pane. Fading the
+fill and the pane colour as separate gradients darkened the middle of the
+fade on a selected row. The lane paints the composed colour solid and a mask
+fades it in as a whole.
+
+## Opening and closing a folder
+
+All three trees open and close folders with the sessions sidebar's motion
+(`lib/motion/rowDisclosure.ts`, 200ms ease-out): a folder's rows are revealed
+above a boundary moving down from the folder row and fade in as it uncovers
+them, and every row below slides with the boundary. `useFileTreeDisclosure`
+wraps each tree's toggle. It works on the rows in the document, which carry
+their path in `data-tree-disclosure-path` (a load error row carries its
+folder's path plus `/`), so one hook serves nested lists, a flat list and the
+virtual list. A folder whose children load after opening animates when they
+arrive. Reduced motion, Collapse all, search and auto-expand do not animate.
+
+### Why closing commits at once and draws copies
+
+The tree's state closes the folder immediately, and inert clones of the closing
+rows that were on screen fold away at their old place while the rows below
+slide up. Holding the state open until the motion ended would leave the virtual
+list without the rows that slide into view, which the virtualizer only mounts
+for the closed layout. While the copies fold, the list keeps its old height, so
+a list scrolled to its end does not jump.
+
+### Why the sidebar tree pins rows while a folder opens
+
+In the virtual tree, the rows on screen below an opening folder move past the
+virtual range at once. `SidebarFilesTree` keeps them mounted
+(`slidingRowPaths`) until the motion settles; without that the list under the
+boundary was empty while it moved.
+
 ## Refreshing after file changes
 
 The sidebar tree and the phone browser re-list folders when the agent changed
@@ -212,6 +264,14 @@ through `getRuntimeUrlResolver().authenticatedAsset('/api/fs/raw', …)` with
 the scoped URL token; the server streams byte ranges so playback can seek.
 Images keep the object-URL/data-URL path.
 
+On Capacitor with active proxy headers, `useRawAssetUrl` reads PDF, audio,
+video and fonts through `runtimeFetch` into an object URL. Reads retain at
+most the existing 10 MiB file-open limit and have a 30-second deadline. A
+file, revision or runtime change aborts the old read and revokes its URL;
+unmount does the same. Failed reads show the existing error without falling
+back to an unauthenticated browser URL. Playback seeks within the downloaded
+file and needs no URL-token renewal. Other runtimes keep streamed byte ranges.
+
 `useRawAssetUrl` makes that URL once per file, revision and runtime and holds
 it, so the shared token rotating never touches an open preview: a PDF stays
 on its page, a player keeps playing, a font stays registered. The server
@@ -223,6 +283,14 @@ state. One
 renewal per ten seconds; a renewal that returns the same URL, or fails, shows
 "cannot be played". A file changed on disk bumps the revision, which gives the
 preview a new URL and loads the new bytes.
+
+### Why proxy-protected mobile previews buffer the file
+
+Browser media elements cannot attach proxy headers, and a scoped URL token
+only authenticates to OpenChamber. Reading through the shared HTTP transport
+keeps proxy credentials out of URLs and preserves redirect refusal. The
+existing file-open limit bounds retained bytes, at the cost of waiting for
+the file to finish downloading before playback starts.
 
 ### Why the URL is held and not rebuilt with every new token
 

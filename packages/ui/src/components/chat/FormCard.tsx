@@ -7,7 +7,7 @@ import { isIMECompositionEvent } from '@/lib/ime';
 import { toast } from '@/components/ui';
 import type { FormRequest } from '@/lib/opencode/model';
 import type { RecoveredQuestion } from '@/sync/recoverable-questions';
-import { dismissRecoveredQuestion } from '@/sync/recoverable-questions';
+import { noteLocalFormCancelled } from '@/sync/recoverable-questions';
 import { readWebSearchConsent } from '@/lib/opencode/websearch';
 import { useUIStore } from '@/stores/useUIStore';
 import { useChatSessionSelection } from './chatColumnSession';
@@ -149,7 +149,7 @@ const GenericFormCard: React.FC<FormCardProps> = ({ form, recovered }) => {
         setIsResponding(true);
         try {
             if (recovered) {
-                dismissRecoveredQuestion(recovered.form.id);
+                noteLocalFormCancelled(recovered.form.id);
                 if (draftScope) dropFormDraft(draftScope);
             } else {
                 await sessionActions.cancelForm(form.sessionID, form.id);

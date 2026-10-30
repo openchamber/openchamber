@@ -8,6 +8,13 @@ Keep `bridge.ts` as a thin orchestration layer that delegates message handling t
 
 ## Runtime modules
 
+Session admission uses the shared UI's OpenCode fingerprint trust dialog before
+adding an unknown destination through `api:workspace:addFolder`. The extension
+host rechecks its current fingerprint before changing workspace folders, so a
+changed configuration cannot be added on a stale answer. Empty configurations
+and trusted fingerprints add without a prompt. Declining leaves the workspace
+unchanged; raw global session records remain available for cleanup.
+
 - `bridge.ts`
   - Entry orchestration layer for bridge messages.
   - Delegates to specialized runtimes in order and handles only unmatched fallthrough cases.
@@ -426,6 +433,10 @@ Bridge surface (`bridge-config-runtime.ts`), matching the web routes:
 - `api:config/warming` — `PUT /api/config/warming`; `{ enabled }` turns session
   warming on (`true`, keeping a hand-tuned object) or off (removes the key),
   written with the shared `writeWarmingEnabled` to the same file.
+- `api:config/compaction` — `PUT /api/config/compaction`; `{ auto, buffer,
+  keepTokens, background }` (each optional) parsed by the shared
+  `compactionUpdateSchema` and written with `writeCompactionSettings` to the
+  same file.
 - `api:config/skill-switch` — `PUT /api/config/skill-switch`; `{ id, enabled,
   scope, directory }` turns a skill off or on with the shared
   `writeSkillDisabled`, in the same files the web route edits

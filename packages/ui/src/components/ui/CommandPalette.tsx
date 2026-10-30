@@ -69,6 +69,7 @@ import { MessageHitItem, MessageSearchFilters, type MessageAuthor, type MessageS
 import { requestReasoningReveal } from '@/components/chat/search/reasoningReveal';
 import { useObserveProjectActionRuns, useProjectActions } from '@/components/layout/projectActionsRunnerContext';
 import { resolveProjectActionIconName } from '@/lib/projectActions';
+import { isSessionDirectoryAdmitted } from '@/sync/session-admission-rule';
 
 type CommandEntry = {
   id: string;
@@ -586,9 +587,12 @@ export const CommandPalette: React.FC = () => {
   // ---------------------------------------------------------------------------
   // Sessions
   // ---------------------------------------------------------------------------
+  const worktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
   const orderedActiveSessions = React.useMemo(
-    () => orderVisibleRootSessions(activeSessions, pinnedSessionIds, sessionOrderRanks),
-    [activeSessions, pinnedSessionIds, sessionOrderRanks],
+    () => orderVisibleRootSessions(activeSessions.filter((session) => (
+      isSessionDirectoryAdmitted(resolveGlobalSessionDirectory(session), projects, worktreesByProject)
+    )), pinnedSessionIds, sessionOrderRanks),
+    [activeSessions, pinnedSessionIds, projects, sessionOrderRanks, worktreesByProject],
   );
 
   const allBranches = useGitAllBranches();

@@ -3,6 +3,8 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    bun2nix.url = "github:nix-community/bun2nix";
+    bun2nix.inputs.nixpkgs.follows = "nixpkgs";
     # OpenCode CLI, pinned to the tag matching OpenChamber's OpenCode 2.x
     # requirement. Keep in sync with packages/electron/package.json
     # (opencodeCli.version) and the @opencode/client pin. Bump all together.
@@ -13,13 +15,14 @@
     {
       self,
       nixpkgs,
+      bun2nix,
       opencode,
     }:
     let
       systems = [
-        # aarch64-linux is dropped until its dependency hash is verified on
-        # that hardware; re-add it with a baked hash from an aarch64 build.
         "x86_64-linux"
+        "aarch64-linux"
+        "aarch64-darwin"
       ];
       version = (builtins.fromJSON (builtins.readFile ./package.json)).version;
       opencodeCliVersion =
@@ -52,32 +55,14 @@
           electron =
             pkgs.${"electron_${electronMajor}"}
               or (throw "packages/electron pins electron ${electronSpec}, but nixpkgs has no electron_${electronMajor}. Pin an older electron in packages/electron or wait for nixpkgs-unstable to carry the major.");
-          # OpenCode CLI built from upstream's own nix recipe at the pinned
-          # tag. Three tag quirks handled here: upstream's nix/hashes.json
-          # predates the bun in our nixpkgs pin (pass the hash it actually
-          # produces; other systems fall back to upstream's hashes.json),
-          # their completion-generation postInstall fails with this tag's
-          # compiled binary — the AppImage ships no completions either, so
-          # drop it — and at 2.0.28 the CLI's build script imports
-          # NativeArch from the monorepo root, which their src filter
-          # doesn't ship (copy the root script/ dir in before the build).
           opencode-cli =
-            # The opencode input's locked tag must be "v" + the CLI version
-            # packages/electron pins, so drift fails nix-eval before merge.
-            # Scoped to this binding so apps.update-hashes, which repairs the
-            # drift, stays evaluable while the pair is out of sync.
             nixpkgs.lib.throwIf (opencodeTag != "v${opencodeCliVersion}")
-              "flake pins opencode ${opencodeTag}, but packages/electron pins opencode CLI ${opencodeCliVersion}; the pair must match. Re-bake with: nix run .#update-hashes"
+              "flake pins opencode ${opencodeTag}, but packages/electron pins opencode CLI ${opencodeCliVersion}; update the opencode input URL and run nix flake update opencode"
               (
                 (pkgs.callPackage "${opencode}/nix/opencode.nix" {
                   node_modules = pkgs.callPackage "${opencode}/nix/node_modules.nix" {
-                    # Their recipe derives the version suffix from the flake rev.
                     rev = opencode.rev or "dirty";
-                    hash =
-                      if pkgs.stdenv.hostPlatform.isx86_64 then
-                        (builtins.fromJSON (builtins.readFile ./nix/hashes.json)).opencodeNodeModules
-                      else
-                        (builtins.fromJSON (builtins.readFile "${opencode}/nix/hashes.json")).nodeModules.${system};
+                    hash = (builtins.fromJSON (builtins.readFile "${opencode}/nix/hashes.json")).nodeModules.${system};
                   };
                 }).overrideAttrs
                   (old: {
@@ -99,6 +84,7 @@
         (rec {
           openchamber = pkgs.callPackage ./nix/package.nix {
             inherit self version;
+            bun2nix = bun2nix.packages.${system}.default;
             opencodeCli = opencode-cli;
           };
           openchamber-desktop = pkgs.callPackage ./nix/gui.nix {
@@ -126,16 +112,6 @@
         gui = {
           type = "app";
           program = "${self.packages.${system}.openchamber-desktop}/bin/openchamber-desktop";
-        };
-        update-hashes = {
-          type = "app";
-          program =
-            toString (
-              nixpkgs.legacyPackages.${system}.writeShellScriptBin "update-hashes" (
-                builtins.readFile (self + "/nix/update-hashes.sh")
-              )
-            )
-            + "/bin/update-hashes";
         };
         default = openchamber;
       });

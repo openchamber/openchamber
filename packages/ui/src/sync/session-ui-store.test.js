@@ -213,7 +213,9 @@ describe('session-worktree-store worktree routing', () => {
 });
 
 describe('draft materialization transition identity', () => {
+  const projectsBefore = useProjectsStore.getState().projects;
   beforeEach(() => {
+    useProjectsStore.setState({ projects: [{ id: 'alpha', path: '/projects/alpha' }] });
     useSessionUIStore.setState({
       currentSessionId: null,
       currentSessionDirectory: null,
@@ -221,6 +223,7 @@ describe('draft materialization transition identity', () => {
       newSessionDraft: { open: true, target: 'project', directoryOverride: '/projects/alpha' },
     });
   });
+  afterEach(() => useProjectsStore.setState({ projects: projectsBefore }));
 
   test('marks and consumes only the submitted draft session', () => {
     useSessionUIStore.getState().setCurrentSession(

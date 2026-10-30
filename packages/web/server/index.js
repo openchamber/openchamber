@@ -77,6 +77,7 @@ import {
 import { registerOpenChamberRoutes } from './lib/opencode/openchamber-routes.js';
 import { createServerUtilsRuntime } from './lib/opencode/server-utils-runtime.js';
 import { createOpenCodeTrust } from './lib/opencode-trust/index.js';
+import { registerSessionProjectRoutes } from './lib/projects/session-directory.js';
 import { guardOpenCodeFetch } from './lib/opencode-trust/fetch-guard.js';
 import { createStaticRoutesRuntime } from './lib/opencode/static-routes-runtime.js';
 import { createSettingsRuntime } from './lib/opencode/settings-runtime.js';
@@ -1927,6 +1928,7 @@ const scheduledTaskService = createScheduledTaskService({
   resolvePrimaryWorktreeRoot,
 });
 const openChamberSessionService = createOpenChamberSessionService({
+  chatsScope: scheduledChatsScope,
   readSettingsFromDiskMigrated,
   sanitizeProjects,
   validateDirectoryPath,
@@ -2042,6 +2044,7 @@ void secretFiles.sweep();
 setInterval(() => { void secretFiles.sweep(); }, 60 * 60 * 1000).unref();
 
 const openChamberControlService = createOpenChamberControlService({
+  chatsScope: scheduledChatsScope,
   readSettingsFromDiskMigrated,
   sanitizeProjects,
   buildOpenCodeUrl,
@@ -2802,6 +2805,12 @@ async function main(options = {}) {
     logger: console,
   });
 
+  registerSessionProjectRoutes(app, {
+    validateDirectoryPath,
+    openCodeTrust,
+    registerSessionProject: settingsRuntime.registerSessionProject,
+    resolveSessionDirectory: async (sessionID) => (await openCodeSessionClient().session.get({ sessionID })).location.directory,
+  });
   await featureRoutesRuntime.registerRoutes(app, {
     environmentStore,
     environmentRuntime,

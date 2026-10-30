@@ -2,12 +2,13 @@ import React from 'react';
 import type { ToolPopupContent } from '../message/types';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import { runtimeAssetsNeedHeaders } from '@/lib/runtime-asset';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { refreshRuntimeUrlAuthToken } from '@/lib/runtime-auth';
 import { getRuntimeUrlResolver } from '@/lib/runtime-url';
 import { isFilePathWithinDirectory } from '@/lib/path-utils';
 import { isMarkdownDocumentReference, resolveMarkdownDocumentReference } from '@/components/views/files/previews/useMarkdownLocalAssets';
-import { getPreparedMarkdownImageUrl, isLocalMarkdownImageSource, loadMessageImageBlob, prepareLocalMarkdownImages, resolveMarkdownImageSource, resolveWorkspaceMarkdownImageSource, type PreparedMarkdownImage } from './markdownImageAssets';
+import { getPreparedMarkdownImageUrl, isLocalMarkdownImageSource, loadMessageImageBlob, loadPreparedImageAsDataUrl, prepareLocalMarkdownImages, resolveMarkdownImageSource, resolveWorkspaceMarkdownImageSource, type PreparedMarkdownImage } from './markdownImageAssets';
 
 export type MarkdownDocumentAssets = {
   filePath: string;
@@ -126,6 +127,11 @@ export class MarkdownMediaOwner {
     const prepared = (await this.batch).get(source);
     this.check(signal);
     if (prepared?.status !== 'ready') throw new Error('Image is unavailable');
+    if (!video && runtimeAssetsNeedHeaders()) {
+      const url = await loadPreparedImageAsDataUrl(prepared, directory, signal);
+      this.check(signal);
+      return url;
+    }
     await refreshRuntimeUrlAuthToken();
     this.check(signal);
     return getPreparedMarkdownImageUrl(prepared, directory);

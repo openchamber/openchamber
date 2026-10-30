@@ -1,5 +1,6 @@
 import { asNonEmptyString } from '../shared/guards.js';
 import express from 'express';
+import path from 'node:path';
 import {
   createWorktree as createWorktreeDefault,
   getBranches as getBranchesDefault,
@@ -19,6 +20,7 @@ import { parseModelSelection } from '../opencode/config-v2.js';
 import { expandSnippets } from '../opencode/snippets.js';
 import { AUTO_MODEL_REF, isAutoModel } from '../routing/defaults.js';
 import { parseScheduledCommandPrompt } from '../scheduled-tasks/runtime.js';
+import { CHATS_SCOPE_PUBLIC_ID } from '../scheduled-tasks/chats-scope.js';
 import { buildGoalIntroText, createSessionGoal } from '../session-goal/create.js';
 import { OpenChamberControlError, asControlError } from '../openchamber-control/error.js';
 import { readObjective, writeObjective } from '../session-goal/objectives.js';
@@ -407,7 +409,7 @@ const parseArchiveRequest = (payload) => {
   return { ok: true, ids: parsed.ids, archivedAt: archivedAt ?? Date.now() };
 };
 
-const resolveRequestedDirectory = async ({ payload, readSettingsFromDiskMigrated, sanitizeProjects, validateDirectoryPath }) => {
+const resolveRequestedDirectory = async ({ payload, readSettingsFromDiskMigrated, sanitizeProjects, validateDirectoryPath, chatsScope }) => {
   const projectID = asNonEmptyString(payload?.projectId) || asNonEmptyString(payload?.projectID);
   if (projectID) {
     const settings = await readSettingsFromDiskMigrated();
@@ -425,6 +427,15 @@ const resolveRequestedDirectory = async ({ payload, readSettingsFromDiskMigrated
   const directory = asNonEmptyString(payload?.directory);
   const validated = await validateDirectoryPath(directory);
   if (!validated.ok) return { ok: false, status: 400, error: validated.error || 'Invalid directory' };
+  if (chatsScope) {
+    const chatsRoot = await validateDirectoryPath(chatsScope.root);
+    if (chatsRoot.ok) {
+      const relative = path.relative(chatsRoot.directory, validated.directory);
+      if (relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative))) {
+        return { ok: true, directory: validated.directory };
+      }
+    }
+  }
   const settings = await readSettingsFromDiskMigrated();
   const projects = sanitizeProjects(settings?.projects || []);
   let project = projects.find((entry) => entry.path === validated.directory);
@@ -481,6 +492,7 @@ const resolveWorktreeInput = (payload) => {
 
 export const createOpenChamberSessionService = (dependencies) => {
   const {
+    chatsScope = null,
     readSettingsFromDiskMigrated,
     sanitizeProjects,
     validateDirectoryPath,
@@ -630,6 +642,7 @@ export const createOpenChamberSessionService = (dependencies) => {
       if (inPrimaryCheckout) return inPrimaryCheckout;
     }
     const resolved = await resolveRequestedDirectory({
+      chatsScope,
       payload: { directory },
       readSettingsFromDiskMigrated,
       sanitizeProjects,
@@ -1032,7 +1045,7 @@ export const createOpenChamberSessionService = (dependencies) => {
     return sessionArchive.unarchive(parsed.ids);
   };
 
-  const create = async (payload = {}, { titleByUser = false } = {}) => {
+  const createInDirectory = async (payload, { titleByUser = false } = {}, onCreated = () => {}) => {
     const title = asNonEmptyString(payload.title);
     const prompt = asNonEmptyString(payload.prompt);
     const goalInput = resolveGoalInput(payload, prompt);
@@ -1043,12 +1056,16 @@ export const createOpenChamberSessionService = (dependencies) => {
     const agent = asNonEmptyString(payload.agent);
     const variant = asNonEmptyString(payload.variant);
 
-    const resolvedDirectory = await resolveRequestedDirectory({
-      payload,
-      readSettingsFromDiskMigrated,
-      sanitizeProjects,
-      validateDirectoryPath,
-    });
+    // Explicit Chats stay projectless even when their root is inside a checkout.
+    const resolvedDirectory = payload.projectId === CHATS_SCOPE_PUBLIC_ID
+      ? await validateDirectoryPath(payload.directory)
+      : await resolveRequestedDirectory({
+        chatsScope,
+        payload,
+        readSettingsFromDiskMigrated,
+        sanitizeProjects,
+        validateDirectoryPath,
+      });
     if (!resolvedDirectory.ok) {
       throw new OpenChamberControlError(resolvedDirectory.error, resolvedDirectory.status || 400);
     }
@@ -1148,6 +1165,8 @@ export const createOpenChamberSessionService = (dependencies) => {
       ...(title ? { title } : {}),
       titleByUser,
     });
+    onCreated();
+
     let dispatch = { model, agent, variant, promptDispatched: false, dispatchedAsCommand: false };
     if (prompt) {
       dispatch = await dispatchPrompt({
@@ -1255,6 +1274,26 @@ export const createOpenChamberSessionService = (dependencies) => {
     }
   };
 
+  const create = async (payload = {}, options = {}) => {
+    const projectId = asNonEmptyString(payload.projectId) || asNonEmptyString(payload.projectID);
+    if (projectId !== CHATS_SCOPE_PUBLIC_ID) return createInDirectory(payload, options);
+    if (asNonEmptyString(payload.directory)) {
+      throw new OpenChamberControlError('Provide only one of projectId or directory', 400);
+    }
+    if (payload.worktree !== undefined || payload.pullRequest !== undefined) {
+      throw new OpenChamberControlError('Chats cannot create a worktree; choose a project', 400);
+    }
+    if (!chatsScope) throw new OpenChamberControlError('Chats are not available on this server', 503);
+    const directory = await chatsScope.createChatDirectory();
+    let created = false;
+    try {
+      return await createInDirectory({ ...payload, projectId: CHATS_SCOPE_PUBLIC_ID, directory }, options, () => { created = true; });
+    } finally {
+      // A prompt can fail after the session exists. Keep that session's folder.
+      if (!created) await chatsScope.discardChatDirectory(directory);
+    }
+  };
+
   const runExisting = async (action, sourceSessionId, payload = {}) => {
     const sourceSessionID = asNonEmptyString(sourceSessionId);
     const prompt = asNonEmptyString(payload.prompt);
@@ -1269,6 +1308,7 @@ export const createOpenChamberSessionService = (dependencies) => {
     let directory = null;
     try {
       const resolvedDirectory = await resolveRequestedDirectory({
+        chatsScope,
         payload,
         readSettingsFromDiskMigrated,
         sanitizeProjects,
@@ -1439,6 +1479,7 @@ export const createOpenChamberSessionService = (dependencies) => {
   // folder fails the same way everywhere.
   const resolveDirectory = async (payload) => {
     const resolved = await resolveRequestedDirectory({
+      chatsScope,
       payload,
       readSettingsFromDiskMigrated,
       sanitizeProjects,

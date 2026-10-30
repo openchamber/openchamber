@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { Window } from 'happy-dom';
+import React from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { Streamdown } from 'streamdown';
+import { getMarkdownProcessingOptions } from '@/components/chat/markdown/streamdownPlugins';
 
 import {
     captureChatQuoteAnchor,
@@ -69,6 +73,38 @@ describe('chat quote anchors', () => {
         range.collapse(true);
         expect(captureChatQuoteAnchor(root, range)).toBeNull();
     });
+
+    test('legacy Markdown quotes match rendered bold, lists and inline code', () => {
+        const root = renderRoot(renderToStaticMarkup(React.createElement(Streamdown, {
+            mode: 'static', children: 'Use **bold** text and `some_code()`.\n\n- First item\n- Second item',
+        })));
+        for (const quote of ['**bold** text', '`some_code()`', '- First item\n- Second item']) {
+            const anchor = legacyChatQuoteAnchor(quote);
+            expect(resolveChatQuoteAnchor(root, anchor)?.toString()).toBe(anchor.text);
+        }
+    });
+
+    test('legacy formatting does not disambiguate repeated visible text or alter modern anchors', () => {
+        const root = renderRoot('<p><strong>same</strong></p><p>same</p><p>Literal **bold**</p>');
+        expect(resolveChatQuoteAnchor(root, legacyChatQuoteAnchor('**same**'))).toBeNull();
+        const modern = { text: '**bold**', prefix: 'Literal ', suffix: '', start: 16 };
+        expect(resolveChatQuoteAnchor(root, modern)?.toString()).toBe('**bold**');
+    });
+
+    test('legacy list text matches the Markdown renderer text stream', () => {
+        const markdown = '- First item\n- Second item';
+        const root = renderRoot(renderToStaticMarkup(React.createElement(Streamdown, { mode: 'static', children: markdown })));
+        expect(resolveChatQuoteAnchor(root, legacyChatQuoteAnchor(markdown))?.toString()).toBe('First item\nSecond item');
+    });
+
+    for (const markdown of ['- First\n  - Nested\n- Second', 'line 1  \nline 2', '~~deleted~~ text', '- First\n\n- Second', '5~20s', '~literal~', 'Before\n\n```js\nconst x=1;\n```\n\nAfter']) {
+        test(`legacy quote matches renderer: ${JSON.stringify(markdown)}`, () => {
+            const root = renderRoot(renderToStaticMarkup(React.createElement(Streamdown, { ...getMarkdownProcessingOptions(false, false), mode: 'static', children: markdown })));
+            const anchor = legacyChatQuoteAnchor(markdown);
+            expect(anchor.text).toBe(root.textContent?.trim() ?? '');
+            expect(resolveChatQuoteAnchor(root, anchor)?.toString()).toBe(anchor.text);
+        });
+    }
 });
 
 describe('chat quote anchor schema', () => {

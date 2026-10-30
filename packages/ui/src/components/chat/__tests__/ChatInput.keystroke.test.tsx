@@ -117,9 +117,10 @@ Object.assign(globalThis, {
   IS_REACT_ACT_ENVIRONMENT: true,
 });
 
-// Nothing typed here reaches a server; every request answers empty.
+// Nothing typed here reaches a server; settings retain the admitted project.
 spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
   const path = new URL(input instanceof Request ? input.url : input.toString(), 'http://localhost/').pathname;
+  if (path === '/api/config/settings') return Response.json({ projects: [{ id: 'project', path: '/workspace' }] });
   if (path.endsWith('/location')) {
     return Response.json({ directory: '/workspace', project: { id: 'project', directory: '/workspace', canonical: '/workspace' } });
   }
@@ -155,7 +156,8 @@ const { ThemeSystemProvider } = await import('@/contexts/ThemeSystemContext');
 const { RuntimeAPIContext } = await import('@/contexts/runtimeAPIContext');
 const { ChatInput } = await import('../ChatInput');
 const { SyncProvider } = await import('@/sync/sync-context');
-const { useDirectoryStore } = await import('@/stores/useDirectoryStore');
+const { useDirectoryStore, ensureHomeDirectoryResolved } = await import('@/stores/useDirectoryStore');
+const { updateDesktopSettings } = await import('@/lib/persistence');
 const { getSyncChildStores } = await import('@/sync/sync-refs');
 const { OpenCode } = await import('@opencode/client');
 
@@ -179,6 +181,8 @@ const sdk = OpenCode.make({
 const runtimeAPIs = { runtime: { platform: 'web', isDesktop: false, isVSCode: false }, sourceControl: {} } as RuntimeAPIs;
 
 const { useSessionUIStore } = await import('@/sync/session-ui-store');
+const { useProjectsStore } = await import('@/stores/useProjectsStore');
+useProjectsStore.setState({ projects: [{ id: 'project', path: '/workspace' }] });
 const { dispatchPromptHistorySearch } = await import('../composer/state/promptHistorySearchRoute');
 const { createInputHistoryIdentity, useInputHistoryStore } = await import('@/stores/useInputHistoryStore');
 const { getRuntimeKey } = await import('@/lib/runtime-switch');
@@ -243,7 +247,12 @@ const countComposerRenders = async (
         </RuntimeAPIContext.Provider>,
       );
     });
-    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+    await act(async () => {
+      // Home discovery queues a settings echo that can otherwise land during typing.
+      await ensureHomeDirectoryResolved();
+      await updateDesktopSettings({});
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    });
 
     const content = container.querySelector<HTMLElement>('.cm-content');
     const view = content ? EditorView.findFromDOM(content) : null;

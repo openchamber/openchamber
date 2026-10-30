@@ -12,9 +12,10 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import type { ReadingPlayback } from '@/lib/voice/readingAudioFocus';
 
 export interface LocalTTSSpeakOptions {
-    beforePlayback?: () => Promise<void>;
+    beforePlayback?: (playback: ReadingPlayback) => Promise<void>;
     /** Catalog id of the local model to use; defaults to the server's default model. */
     model?: string;
     /** Speaker id within the model (Kokoro voices; Piper models have one) */
@@ -213,7 +214,7 @@ export function useLocalTTS(): UseLocalTTSReturn {
             if (session.cancelled) {
                 return;
             }
-            await options?.beforePlayback?.();
+            await options?.beforePlayback?.({ pause: () => ctx.suspend(), resume: () => ctx.resume() });
             if (session.cancelled) return;
             await new Promise<void>((resolve) => {
                 const source = ctx.createBufferSource();

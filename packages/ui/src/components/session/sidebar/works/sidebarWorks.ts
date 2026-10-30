@@ -97,9 +97,7 @@ export const buildSidebarWorkIndex = (sections: readonly ProjectSection[]): Side
  * so a work moves up when any of its sessions does). With `archiveAnchors`
  * (`buildWorktreeArchiveAnchors`) a worktree work also stands where its
  * archived sessions hold it, and is listed for them alone. With `rootOf` a
- * session no project section holds (its directory belongs to no added project)
- * belongs to the work of the top-level session it nests under, with no
- * project, instead of being left out (`orderInWorkWorks`).
+ * nested session can resolve through its root's registered project work.
  */
 export const orderSidebarWorks = (
   orderedSessions: readonly Session[],
@@ -112,9 +110,7 @@ export const orderSidebarWorks = (
   orderedSessions.forEach((session, position) => {
     if (!include(session)) return;
     const rootSessionId = rootOf?.get(session.id);
-    const ref = index.bySessionId.get(session.id) ?? (rootSessionId
-      ? { kind: 'session', key: sessionWorkKey(rootSessionId), projectId: null, rootSessionId } satisfies SidebarWorkRef
-      : undefined);
+    const ref = index.bySessionId.get(session.id) ?? (rootSessionId ? index.bySessionId.get(rootSessionId) : undefined);
     if (ref && !rankByKey.has(ref.key)) rankByKey.set(ref.key, { ref, rank: position });
   });
   if (archiveAnchors.size === 0) return [...rankByKey.values()].map((entry) => entry.ref);
@@ -152,9 +148,8 @@ export const buildSessionRootIndex = (
 /**
  * The works In work lists, before Pinned takes its own: a work is in work when
  * its root or a session nested under it, past subagents, is. In work spans
- * projects, so a session no added project holds is listed under the work of
- * its top-level session (`rootOf`) rather than dropped: the sidebar shows it
- * nowhere else, and the tray counts it (`lib/sidebarSessionRows.ts`).
+ * projects. A session without a registered project work stays hidden until
+ * session admission has checked its configuration and registered its folder.
  */
 export const orderInWorkWorks = (
   orderedSessions: readonly Session[],

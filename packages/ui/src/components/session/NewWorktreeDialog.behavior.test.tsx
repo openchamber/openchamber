@@ -31,6 +31,8 @@ let lastCreateNames: { branchName?: string; worktreeName?: string } | undefined;
 let validatedNames: Array<{ branchName?: string; worktreeName?: string }> = [];
 let referenceProvider = 'github';
 let readContext: import('@/lib/api/types').SourceControlReadContext | null = null;
+let createdPath: string | null = null;
+let readIssue: () => Promise<import('@/lib/api/types').Issue | null> = async () => null;
 
 const selectProjectState = <T,>(selector: (state: typeof projectStoreState) => T): T => selector(projectStoreState);
 const selectSourceControlAuthEntry = () => githubAuthState;
@@ -136,7 +138,7 @@ mock.module('@/sync/session-actions', () => ({
   updateSessionTitle: async () => undefined,
 }));
 mock.module('@/hooks/useRuntimeAPIs', () => ({
-  useRuntimeAPIs: () => ({ sourceControl: {}, git: null }),
+  useRuntimeAPIs: () => ({ sourceControl: { issueGet: () => readIssue(), issueComments: async () => [] }, git: null }),
 }));
 mock.module('@/stores/useGitStore', () => ({
   ...actualGitStore,
@@ -155,7 +157,7 @@ mock.module('@/lib/worktrees/worktreeCreate', () => ({ createWorktreeWithDefault
   worktreeCreations += 1;
   lastSetupCommands = args.setupCommands;
   lastCreateNames = { branchName: args.branchName, worktreeName: args.worktreeName };
-  return null;
+  return createdPath ? { path: createdPath, branch: args.branchName, name: args.worktreeName } : null;
 } }));
 mock.module('@/lib/worktrees/worktreeBootstrap', () => ({ waitForWorktreeBootstrap: async () => undefined }));
 mock.module('@/lib/openchamberConfig', () => ({
@@ -255,6 +257,64 @@ const installDom = () => {
 };
 
 describe('NewWorktreeDialog behavior', () => {
+  test('linked context arriving after another draft opens keeps the created draft target', async () => {
+    const dom = installDom();
+    const root = createRoot(dom.container);
+    const { useSessionUIStore } = actualSessionUIStore;
+    const previousSession = useSessionUIStore.getState();
+    const { usePendingComposerReferences } = await import('@/components/chat/composer/pendingComposerReferences');
+    const { getRuntimeKey } = await import('@/lib/runtime-switch');
+    let resolveIssue!: (issue: import('@/lib/api/types').Issue) => void;
+    const issueRead = new Promise<import('@/lib/api/types').Issue>((resolve) => { resolveIssue = resolve; });
+    createdPath = '/workspace/worktree';
+    readIssue = () => issueRead;
+    readContext = {
+      provider: 'github', instance: 'github.com', directory: project.path, repositoryId: 'repo',
+      accountId: 'account', bindingRevision: 1, primaryRemote: 'origin',
+    };
+    usePendingComposerReferences.setState({ pending: [] });
+    try {
+      await act(async () => root.render(
+        <I18nProvider><NewWorktreeDialog open onOpenChange={() => undefined}
+          onWorktreeCreated={() => useSessionUIStore.setState({
+            currentSessionId: null,
+            newSessionDraft: { ...useSessionUIStore.getState().newSessionDraft, open: true, draftId: 700, workDraftId: 'work-a' },
+          })}
+          initialSelection={{
+            source: 'repository', includeDiff: false,
+            reference: {
+              kind: 'issue', provider: 'github', number: 7, title: 'Worktree issue', url: 'https://github.com/acme/app/issues/7',
+              body: '', bodyTruncated: false, createdAt: null, updatedAt: null, author: null, labels: [], commentCount: 0,
+              sourceRepo: { owner: 'acme', repo: 'app', source: 'origin' }, state: 'open',
+            },
+          }}
+        /></I18nProvider>,
+      ));
+      await clickButton(dom.container, (button) => button.textContent === 'Create worktree', 'create button');
+      expect(useSessionUIStore.getState().newSessionDraft.draftId).toBe(700);
+      expect(usePendingComposerReferences.getState().pending).toHaveLength(0);
+      await act(async () => useSessionUIStore.setState({
+        newSessionDraft: { ...useSessionUIStore.getState().newSessionDraft, draftId: 701, workDraftId: 'work-b' },
+      }));
+      await act(async () => resolveIssue({
+        provider: 'github', instance: 'github.com', id: '7', number: 7, title: 'Worktree issue', url: 'https://github.com/acme/app/issues/7',
+        project: { id: 'repo', owner: 'acme', name: 'app', provider: 'github', instance: 'github.com', url: 'https://github.com/acme/app' }, state: 'open',
+      }));
+      expect(usePendingComposerReferences.getState().consume({ kind: 'draft', workDraftId: 'work-b', runtimeKey: getRuntimeKey() })).toEqual([]);
+      expect(usePendingComposerReferences.getState().consume({ kind: 'draft', workDraftId: 'work-a', runtimeKey: getRuntimeKey() })).toMatchObject([
+        { kind: 'repository-issue', number: 7 },
+      ]);
+    } finally {
+      await act(async () => root.unmount());
+      useSessionUIStore.setState(previousSession);
+      usePendingComposerReferences.setState({ pending: [] });
+      createdPath = null;
+      readIssue = async () => null;
+      readContext = null;
+      dom.restore();
+    }
+  });
+
   for (const isMobile of [false, true]) {
     test(`${isMobile ? 'mobile' : 'desktop'} Enter in branch search does not create a worktree`, async () => {
       const dom = installDom();

@@ -32,7 +32,8 @@ mock.module('@/lib/opencode/client', () => ({ opencodeClient: {
     return { home, chatsRoot };
   },
 } }));
-mock.module('@/lib/runtime-switch', () => ({ getRuntimeApiBaseUrl: () => '', getRuntimeKey: () => 'vscode-chats-startup', subscribeRuntimeEndpointChanged: () => () => {} }));
+const runtimeSwitchModule = await import('@/lib/runtime-switch');
+mock.module('@/lib/runtime-switch', () => ({ ...runtimeSwitchModule, getRuntimeKey: () => 'vscode-chats-startup', subscribeRuntimeEndpointChanged: () => () => {} }));
 mock.module('@/lib/persistence', () => ({ updateDesktopSettings: async () => {} }));
 mock.module('@/stores/useFileSearchStore', () => ({ useFileSearchStore: { getState: () => ({ invalidateDirectory() {} }) } }));
 

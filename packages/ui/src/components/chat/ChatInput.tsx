@@ -79,6 +79,8 @@ import { usePinnedComposerSelection } from './pinnedComposerSelection';
 import { useChatSurfaceMode } from './useChatSurfaceMode';
 import { MobileAgentButton } from './MobileAgentButton';
 import { MobileModelButton } from './MobileModelButton';
+import { MobileEffortButton } from './MobileEffortButton';
+import { cycleThinkingVariant } from '@/lib/cycleThinkingVariant';
 import { useSessionActivity } from '@/hooks/useSessionActivity';
 import { useGlobalBlockingRequestsStore } from '@/sync/global-blocking-requests';
 import { toast } from '@/components/ui';
@@ -117,7 +119,8 @@ import { findSessionLinks, sessionLinkKey, type SessionLinkTarget } from '@/lib/
 import { sessionMentionChip } from '@/lib/messages/sessionMentionChip';
 import { appOwnOrigins } from '@/lib/router/appOrigins';
 import type { Session } from '@/lib/opencode/model';
-import { usePendingComposerReferences } from './composer/pendingComposerReferences';
+import { usePendingComposerReferences, resolveComposerReferenceHandoffTarget, type ComposerReferenceHandoff } from './composer/pendingComposerReferences';
+import { readLinkedReferences, useDraftLinkedReferences, useLinkedReferenceDrafts } from './composer/linkedReferenceDrafts';
 import { postTrackerSessionStarted } from '@/lib/trackers/sessionStatus';
 import { trackerPresentation } from '@/lib/trackers/presentation';
 import { useTrackerDescriptors } from '@/lib/trackers/registry';
@@ -391,6 +394,7 @@ const MemoComposerDictation = React.memo(ComposerDictation);
 const MemoMobileAgentButton = React.memo(MobileAgentButton);
 
 const MemoMobileModelButton = React.memo(MobileModelButton);
+const MemoMobileEffortButton = React.memo(MobileEffortButton);
 
 interface ChatInputProps {
     onOpenSettings?: () => void;
@@ -640,7 +644,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const setPendingInputText = useInputStore((s) => s.setPendingInputText);
     const pendingGuestIssue = useInputStore((s) => s.pendingGuestIssue);
     const consumePendingGuestIssue = useInputStore((s) => s.consumePendingGuestIssue);
-    const pendingComposerReferenceCount = usePendingComposerReferences((s) => s.references.length);
+    const pendingComposerReferenceCount = usePendingComposerReferences((s) => s.pending.length);
 
     React.useEffect(() => {
         if (!newSessionDraftOpen || newSessionDraft.target !== 'chat' || message.trim().length === 0) return;
@@ -1217,8 +1221,23 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     });
     const mobileComposerExpanded = mobileShell.expanded;
     const mobileTextareaFocused = mobileShell.focused;
-    // Issues, PRs and tracker items on the composer, in attach order.
-    const [linkedReferences, setLinkedReferences] = React.useState<ComposerReference[]>([]);
+    const linkedReferences = useDraftLinkedReferences(chatDraftIdentity);
+    const setLinkedReferencesFor = React.useCallback((
+        target: ChatDraftIdentity | null,
+        references: ComposerReference[],
+    ) => {
+        useLinkedReferenceDrafts.getState().set(references, target);
+    }, []);
+    const updateLinkedReferencesFor = React.useCallback((
+        target: ChatDraftIdentity | null,
+        update: (current: ComposerReference[]) => ComposerReference[],
+    ) => {
+        useLinkedReferenceDrafts.getState().set(update(readLinkedReferences(target)), target);
+    }, []);
+    // UI actions act on the draft on screen now; a send keeps its own target.
+    const updateLinkedReferences = React.useCallback((update: (current: ComposerReference[]) => ComposerReference[]) => {
+        updateLinkedReferencesFor(currentChatDraftIdentityRef.current, update);
+    }, [updateLinkedReferencesFor]);
     const [contextPreviewHost, setContextPreviewHost] = React.useState<HTMLDivElement | null>(null);
     const [attachDialogGuestId, setAttachDialogGuestId] = React.useState<string | null>(null);
     // The chip the attach dialog was opened from; null when opened from the + menu.
@@ -1685,7 +1704,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         if (composerAttachments.length > 0) {
             clearAttachedFiles(chatDraftIdentity);
         }
-        setLinkedReferences([]);
+        setLinkedReferencesFor(chatDraftIdentity, []);
         if (!isMobile) {
             composerRef.current?.focus();
         }
@@ -1727,12 +1746,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 useInputStore.getState().setPendingSyntheticParts(syntheticParts, mailboxTarget);
             }
             // Anything attached while the queue write was out stays, after these.
-            setLinkedReferences((current) => withComposerReferences(linked, current));
+            updateLinkedReferencesFor(chatDraftIdentity, (current) => withComposerReferences(linked, current));
             return;
         }
         void resumeAfterQueue().catch(console.warn);
         recordLinkedReferences(queueSessionId, queueTarget.directory, linked);
-    }, [getCurrentInputSnapshot, currentSessionId, messageQueueTarget, inputMode, hasDrafts, guestCommands, attachedFiles, sanitizeAttachmentsForSend, prepareReadOnSendMentions, extractInlineFileMentions, agents, availableSkills, consumePendingSyntheticParts, mailboxTarget, inlineDraftTarget, consumeDrafts, linkedReferences, scrollToLatest, clearAttachedFiles, chatDraftIdentity, isMobile, isMobileCommentOpen, addToQueue, currentProviderId, currentModelId, currentAgentName, currentVariant, t, readSessionMentionsBeforeSend, sessionMentionsIn]);
+    }, [getCurrentInputSnapshot, currentSessionId, messageQueueTarget, inputMode, hasDrafts, guestCommands, attachedFiles, sanitizeAttachmentsForSend, prepareReadOnSendMentions, extractInlineFileMentions, agents, availableSkills, consumePendingSyntheticParts, mailboxTarget, inlineDraftTarget, consumeDrafts, linkedReferences, scrollToLatest, clearAttachedFiles, chatDraftIdentity, setLinkedReferencesFor, updateLinkedReferencesFor, isMobile, isMobileCommentOpen, addToQueue, currentProviderId, currentModelId, currentAgentName, currentVariant, t, readSessionMentionsBeforeSend, sessionMentionsIn]);
 
     /** Put the context a queued message was captured with back on the composer chips. */
     const restoreQueuedContext = React.useCallback((context: readonly QueuedContextPart[]) => {
@@ -1814,14 +1833,14 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             }
         }
         if (restored.length > 0) {
-            setLinkedReferences((current) => withComposerReferences(current, restored));
+            updateLinkedReferences((current) => withComposerReferences(current, restored));
         }
         rememberSessionMentions(mentions);
         if (synthetic.length > 0) {
             const pending = useInputStore.getState().getPendingSyntheticParts(mailboxTarget) ?? [];
             useInputStore.getState().setPendingSyntheticParts([...pending, ...synthetic], mailboxTarget);
         }
-    }, [inlineDraftTarget, mailboxTarget, rememberSessionMentions]);
+    }, [inlineDraftTarget, mailboxTarget, rememberSessionMentions, updateLinkedReferences]);
 
     // Editing takes the message out of the queue, so sending it again queues
     // one message, not a copy.
@@ -1865,8 +1884,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const repositoryDescriptor = useSourceControlProvider(repositoryProvider);
     const descriptorOf = useSourceControlDescriptorOf();
     const addLinkedReferences = React.useCallback((references: ComposerReference[]) => {
-        setLinkedReferences((current) => withComposerReferences(current, references));
-    }, []);
+        if (isBtwActive) return;
+        // The picker keeps this callback while context loads, including across a session switch.
+        updateLinkedReferencesFor(chatDraftIdentity, (current) => withComposerReferences(current, references));
+    }, [chatDraftIdentity, isBtwActive, updateLinkedReferencesFor]);
     const attachReferences = useAttachReferences(referencePickerDirectory, addLinkedReferences);
 
     const trackerDescriptors = useTrackerDescriptors();
@@ -2527,10 +2548,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 }
             }
 
-            // The sent references leave the composer; one attached while the
-            // send was out stays for the next message.
+            // Clear only the draft captured by this send; newly attached references stay.
             const sentKeys = new Set(linkedReferences.map(composerReferenceKey));
-            setLinkedReferences((current) => current.filter((reference) => !sentKeys.has(composerReferenceKey(reference))));
+            updateLinkedReferencesFor(chatDraftIdentity, (current) => current.filter((reference) => !sentKeys.has(composerReferenceKey(reference))));
         }).catch((error: unknown) => {
             const rawMessage =
                 error instanceof Error
@@ -2565,6 +2585,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 clearChatDraft(failedSessionIdentity);
             }
             const restoreTarget = (failedDraftSend?.sessionCreated ? failedSessionIdentity : null) ?? chatDraftIdentity;
+            if (failedDraftSend?.sessionCreated) {
+                useLinkedReferenceDrafts.getState().move(chatDraftIdentity, restoreTarget);
+            }
             restoreComposerText(restoreTarget);
 
             const isSoftNetworkError =
@@ -2963,6 +2986,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         const abortTarget = isBtwActive && btwSessionId ? btwSessionId : currentSessionId;
         void abortCurrentOperation(abortTarget || undefined);
     }, [abortCurrentOperation, btwSessionId, clearAbortPrompt, currentSessionId, isBtwActive]);
+
+    const handleCycleThinking = React.useCallback(() => {
+        cycleThinkingVariant(currentSessionId);
+    }, [currentSessionId]);
+    const handleOpenThinkingPanel = React.useCallback(() => handleOpenMobilePanel('variant'), [handleOpenMobilePanel]);
 
     const handleCycleAgent = React.useCallback((direction: 1 | -1 = 1) => {
         // Auto hides the agent control, so the shortcut must not change a
@@ -4093,6 +4121,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         setAttachDialogGuestId(issue.providerId);
     }, [currentDirectory, guestAttachItems, t]);
     const handleGuestAttach = React.useCallback((issue: AttachIssueRequest) => {
+        if (isBtwActive) return;
         const contextText = issue.text
             ?? `Attached ${issue.providerId} ${issue.id}: ${issue.title}\n${issue.url}`;
         const reference: ComposerReference = {
@@ -4108,29 +4137,39 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             base: issue.branches?.base,
             data: issue.data,
         };
-        setLinkedReferences((current) => withComposerReferences(current, [reference]));
+        updateLinkedReferences((current) => withComposerReferences(current, [reference]));
         setAttachDialogGuestId(null);
         setAttachDialogItem(null);
         // A message or session action may have opened the guest in the
         // layout-level dialog; attaching from there closes it the same way.
         useGuestDialogStore.getState().close();
-    }, []);
+    }, [isBtwActive, updateLinkedReferences]);
     React.useEffect(() => {
-        if (!pendingGuestIssue || columnPinned) {
+        if (!pendingGuestIssue || columnPinned || isBtwActive) {
             return;
         }
         const issue = consumePendingGuestIssue();
         if (issue) {
             handleGuestAttach(issue);
         }
-    }, [columnPinned, consumePendingGuestIssue, handleGuestAttach, pendingGuestIssue]);
+    }, [columnPinned, consumePendingGuestIssue, handleGuestAttach, isBtwActive, pendingGuestIssue]);
+    const composerReferenceHandoffTarget = React.useMemo<ComposerReferenceHandoff | null>(() => (
+        resolveComposerReferenceHandoffTarget({
+            columnPinned,
+            btwActive: isBtwActive,
+            currentSessionId,
+            draftOpen: newSessionDraftOpen,
+            workDraftId: newSessionDraft?.workDraftId ?? null,
+            runtimeKey: activeRuntimeKey,
+        })
+    ), [activeRuntimeKey, columnPinned, currentSessionId, isBtwActive, newSessionDraft?.workDraftId, newSessionDraftOpen]);
     React.useEffect(() => {
-        if (pendingComposerReferenceCount === 0 || columnPinned) return;
-        const references = usePendingComposerReferences.getState().consume();
+        if (pendingComposerReferenceCount === 0 || !composerReferenceHandoffTarget) return;
+        const references = usePendingComposerReferences.getState().consume(composerReferenceHandoffTarget);
         if (references.length > 0) {
-            setLinkedReferences((current) => withComposerReferences(current, references));
+            updateLinkedReferences((current) => withComposerReferences(current, references));
         }
-    }, [columnPinned, pendingComposerReferenceCount]);
+    }, [composerReferenceHandoffTarget, pendingComposerReferenceCount, updateLinkedReferences]);
     // Only signed-in trackers are offered; connecting one happens in Settings.
     const trackerPickers = React.useMemo<readonly ComposerTrackerPicker[]>(() => (
         !isVSCode
@@ -4356,7 +4395,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         <div className="flex flex-wrap items-center gap-2 pt-2">
             {linkedReferences.map((reference) => {
                 const key = composerReferenceKey(reference);
-                const remove = () => setLinkedReferences((current) => withoutComposerReference(current, key));
+                const remove = () => updateLinkedReferences((current) => withoutComposerReference(current, key));
                 switch (reference.kind) {
                     case 'repository-issue':
                         return (
@@ -4557,7 +4596,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         // and mic icons above them; the buttons drop their own padding so the
         // row alone owns the inset.
         <div className="flex items-center justify-between gap-x-2 px-3.5 pb-2 pt-0.5">
-            <MemoMobileModelButton onOpenModel={() => handleOpenMobilePanel('model')} className="min-w-0 px-0" />
+            {/* The effort follows the model as its suffix, as on the desktop. */}
+            <div className="flex min-w-0 items-center gap-0.5">
+                <MemoMobileModelButton onOpenModel={() => handleOpenMobilePanel('model')} className="min-w-0 px-0" />
+                <MemoMobileEffortButton onCycleThinking={handleCycleThinking} onOpenThinking={handleOpenThinkingPanel} />
+            </div>
             <MemoMobileAgentButton
                 onOpenAgentPanel={handleOpenAgentPanel}
                 onCycleAgent={handleCycleAgent}

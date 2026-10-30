@@ -13,9 +13,13 @@
 
 const READERS = {
     // The keyboard's height from the moment it starts to rise.
-    '--oc-keyboard-inset': '.oc-keyboard-inset-surface, .pwa-overlay-panel, .oc-keyboard-fill-screen, [data-keyboard-inset-reader]',
-    // The same height applied to the shell's layout once the keyboard has landed.
+    '--oc-keyboard-inset': '.oc-keyboard-inset-snap, .pwa-overlay-panel, .oc-keyboard-fill-screen, [data-keyboard-inset-reader]',
+    // The same height applied to the shell's layout where the change is
+    // invisible (once the keyboard has landed, as it starts to fall), for a
+    // keyboard opened in the shell.
     '--oc-kb-layout': '.oc-mobile-app-shell, .oc-mobile-app-shell .chat-scroll, .oc-mobile-app-shell .chat-scroll-fade--end, .oc-mobile-app-shell .oc-ipad-sidebar',
+    // The same, for the surfaces over the shell, whichever field opened it.
+    '--oc-kb-surface': '.oc-keyboard-inset-surface',
     // The strip the chat scroller reserves for the keyboard from the start of the rise.
     '--oc-kb-scroll-inset': '.oc-mobile-app-shell .chat-scroll',
 } as const satisfies Record<string, string>;

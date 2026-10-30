@@ -610,6 +610,34 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['warming', 'warm', 'cache', 'prompt cache', 'keep-alive', 'idle', 'per session', 'keep warm', 'duration', 'how long', 'hour'],
   },
   {
+    id: 'sessions.compaction-auto',
+    page: 'sessions',
+    titleKey: 'settings.openchamber.defaults.compaction.auto',
+    descriptionKey: 'settings.openchamber.defaults.compaction.autoInfo',
+    keywords: ['compaction', 'compact', 'auto', 'automatic', 'context limit', 'summary', 'overflow'],
+  },
+  {
+    id: 'sessions.compaction-buffer',
+    page: 'sessions',
+    titleKey: 'settings.openchamber.defaults.compaction.buffer',
+    descriptionKey: 'settings.openchamber.defaults.compaction.bufferInfo',
+    keywords: ['compaction', 'compact', 'buffer', 'threshold', 'context limit', 'context window', 'summary', 'tokens'],
+  },
+  {
+    id: 'sessions.compaction-keep',
+    page: 'sessions',
+    titleKey: 'settings.openchamber.defaults.compaction.keep',
+    descriptionKey: 'settings.openchamber.defaults.compaction.keepInfo',
+    keywords: ['compaction', 'compact', 'keep', 'recent', 'tail', 'summary', 'tokens'],
+  },
+  {
+    id: 'sessions.background-compaction',
+    page: 'sessions',
+    titleKey: 'settings.openchamber.defaults.compaction.background',
+    descriptionKey: 'settings.openchamber.defaults.compaction.backgroundInfo',
+    keywords: ['compaction', 'compact', 'background', 'experimental', 'precompute', 'summary', 'background_compaction'],
+  },
+  {
     id: 'sessions.permission-default',
     page: 'sessions',
     titleKey: 'settings.sessions.permissions.defaultMode',
@@ -1570,6 +1598,14 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => ctx.isWeb && !ctx.isDesktop && !ctx.isVSCode,
   },
 
+  {
+    id: 'integrations.browse',
+    page: 'integrations',
+    titleKey: 'settings.integrations.browse.label',
+    descriptionKey: 'settings.integrations.browse.hint',
+    keywords: ['catalog', 'marketplace', 'store', 'discover', 'find', 'mcp', 'plugin', 'skill', 'extension'],
+    isAvailable: (ctx) => !ctx.isVSCode && !ctx.isMobile && !ctx.enterpriseMode,
+  },
   {
     id: 'integrations.first-party',
     page: 'integrations',

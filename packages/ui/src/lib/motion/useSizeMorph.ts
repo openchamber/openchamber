@@ -23,6 +23,7 @@ const watchSize = (element: HTMLElement, axis: MorphAxis): (() => void) => {
   if (typeof MutationObserver === 'undefined' || !('animate' in element)) return () => undefined;
   const morphingAttribute = `data-${axis}-morphing`;
   let settledSize = measure(element, axis);
+  let laidOut = false;
   let running: { animation: Animation; from: number; to: number } | null = null;
 
   const start = (from: number, to: number, duration: number, currentTime: number) => {
@@ -44,6 +45,14 @@ const watchSize = (element: HTMLElement, axis: MorphAxis): (() => void) => {
   };
 
   const onContentChange = () => {
+    // Until the first layout is reported, the size measured at mount is not
+    // one the user saw: a popup is the full height of its list until its
+    // positioner caps it, and a list that re-measured its rows in that window
+    // (the model picker's first open) eased the menu down from that height.
+    if (!laidOut) {
+      settledSize = measure(element, axis);
+      return;
+    }
     const moving = running?.animation.playState === 'running' ? running : null;
     const from = moving ? measure(element, axis) : settledSize;
     const elapsed = Number(moving?.animation.currentTime ?? 0);
@@ -72,9 +81,12 @@ const watchSize = (element: HTMLElement, axis: MorphAxis): (() => void) => {
   // its list until its positioner caps it, and the first change after that
   // (a hovered row) eased it from that stale height down to the real one.
   const sizes = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => {
+    laidOut = true;
     if (running?.animation.playState !== 'running') settledSize = measure(element, axis);
   });
   sizes?.observe(element);
+  // Without a ResizeObserver there is no first layout to wait for.
+  if (!sizes) laidOut = true;
   return () => {
     observer.disconnect();
     sizes?.disconnect();

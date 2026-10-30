@@ -9,6 +9,7 @@ import { useInputStore } from '@/sync/input-store';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
 import { useInlineCommentController } from '../useInlineCommentController';
+import { useProjectsStore } from '@/stores/useProjectsStore';
 
 const directory = '/repo';
 
@@ -45,6 +46,7 @@ describe('inline comment target', () => {
     Object.defineProperty(globalThis, 'requestAnimationFrame', { configurable: true, value: () => 0 });
     const { createRoot } = await import('react-dom/client');
     root = createRoot(dom.container);
+    useProjectsStore.setState({ projects: [{ id: 'repo', path: directory }] });
     useSessionUIStore.setState({ currentSessionId: 'ses_parent', currentSessionDirectory: directory });
     useInputStore.setState({ composerAddress: null });
     useInlineCommentDraftStore.setState({ drafts: {}, touchedAt: {} });

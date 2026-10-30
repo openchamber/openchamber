@@ -132,8 +132,6 @@ function closeQuestion(formID: string, outcome: ClosedOutcome): void {
 
 export const noteLocalFormReplied = (formID: string): void => closeQuestion(formID, "answered")
 export const noteLocalFormCancelled = (formID: string): void => closeQuestion(formID, "dismissed")
-export const dismissRecoveredQuestion = noteLocalFormCancelled
-export const markRecoveredQuestionAnswered = noteLocalFormReplied
 
 export function submitRecoveredAnswer(formID: string, send: () => Promise<void>): Promise<void> {
   const state = useRecoverableQuestionsStore.getState()

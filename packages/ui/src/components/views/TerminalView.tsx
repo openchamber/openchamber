@@ -1536,7 +1536,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
                 )}
             </div>
             {isTouchTerminal && showQuickKeys ? (
-                <div data-keyboard-inset-reader="" className="shrink-0 overflow-x-auto border-t border-edge-muted bg-[var(--surface-background)] px-2 pt-1.5 pb-[max(0.375rem,calc(var(--oc-app-bottom-safe,0px)-var(--oc-keyboard-inset,0px)))] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                <div data-keyboard-inset-reader="" data-keyboard-rider="" className="shrink-0 overflow-x-auto border-t border-edge-muted bg-[var(--surface-background)] px-2 pt-1.5 pb-[max(0.375rem,calc(var(--oc-app-bottom-safe,0px)-var(--oc-keyboard-inset,0px)))] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                     {/* Keys are physical: arrows keep pointing where the key does. */}
                     <div dir="ltr" className="flex min-w-max items-center gap-1.5">
                         {quickKeysControls}

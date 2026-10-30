@@ -41,7 +41,8 @@ describe('resolveQuotaProviderId', () => {
     expect(resolveQuotaProviderId('kilo-code')).toBe('kilo');
   });
 
-  test('maps the opencode-claude integration provider onto Claude quota', () => {
+  test('maps both Claude Code providers onto Claude quota', () => {
+    expect(resolveQuotaProviderId('claude-agent')).toBe('claude');
     expect(resolveQuotaProviderId('claude-code')).toBe('claude');
   });
 

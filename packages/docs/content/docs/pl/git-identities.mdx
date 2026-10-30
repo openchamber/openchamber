@@ -28,6 +28,10 @@ Kliknij przycisk tożsamości u góry [panelu Git](/pl/git/) i wybierz jedną. E
 
 Zastosowanie tożsamości zapisuje ją do **lokalnej** konfiguracji git tego repozytorium, więc wpływa tylko na to repozytorium, a Twoje ustawienie globalne zostaje bez zmian. Git w terminalu i powłoka agenta też jej używają. **Tożsamość systemowa** usuwa to, co zapisał OpenChamber, więc znów obowiązuje Twoja własna konfiguracja Git.
 
+## Hasła kluczy SSH
+
+W przypadku zaszyfrowanego klucza SSH wpisz opcjonalne hasło przed wyszukiwaniem w `~/.ssh`, a następnie potwierdź odcisk i dodaj klucz. OpenChamber zachowuje zaszyfrowany klucz i zapisuje hasło w magazynie poświadczeń OpenCode. Zapisane hasła działają tylko dla operacji Git w aplikacji. Polecenia Git w terminalu lub uruchamiane przez agentów nie pobierają ich, więc zaszyfrowany zarządzany klucz nie może uwierzytelnić się w ten sposób.
+
 ## Powiązane
 
 - [Przepływy Git](/pl/git/): commituj, używając ustawionej tożsamości

@@ -62,6 +62,7 @@ let promptsStatus = 200;
 
 spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
   const url = new URL(input instanceof Request ? input.url : input.toString(), 'http://localhost/');
+  if (url.pathname === '/api/config/settings') return Response.json({ projects: [{ id: 'project', path: WORKTREE }, { id: 'repo', path: '/repo' }] });
   if (url.pathname === '/api/magic-prompts') {
     promptReads.push(url);
     return Response.json(promptsStatus === 200
@@ -105,6 +106,7 @@ const { useInputStore } = await import('@/sync/input-store');
 const { getSyncChildStores } = await import('@/sync/sync-refs');
 const { useMessageQueueStore, createMessageQueueTarget, getMessageQueueKey } = await import('@/stores/messageQueueStore');
 const { opencodeClient } = await import('@/lib/opencode/client');
+const { useProjectsStore } = await import('@/stores/useProjectsStore');
 const { OpenCode } = await import('@opencode/client');
 
 const sdk = OpenCode.make({
@@ -130,6 +132,7 @@ type SentMessage = { content: string; synthetic: string[]; attachments: Attached
 let sent: SentMessage[] = [];
 
 beforeEach(() => {
+  useProjectsStore.setState({ projects: [{ id: 'project', path: WORKTREE }, { id: 'repo', path: '/repo' }] });
   promptReads = [];
   promptsStatus = 200;
   sent = [];
@@ -192,6 +195,11 @@ const submitInComposer = async (text: string, options?: { attachment: AttachedFi
     await act(async () => {
       // Replaces the whole draft: a draft an earlier send gave back is restored on mount.
       view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text }, userEvent: 'input.type' });
+    });
+    await act(async () => {
+      // Project activation can apply defaults after typing. Catalog discovery
+      // is outside this test, so select the fixture's model before sending.
+      useConfigStore.setState({ currentProviderId: 'provider', currentModelId: 'model' });
     });
     await act(async () => {
       if (options?.queue) {
@@ -308,7 +316,11 @@ const promptDirectoryForDraft = async (draft: DraftTarget): Promise<string | nul
   useSessionUIStore.setState({
     currentSessionId: null,
     currentSessionDirectory: null,
-    newSessionDraft: { draftId: 7, open: true, parentID: null, ...draft },
+    newSessionDraft: {
+      draftId: 7, open: true, parentID: null,
+      selectedProjectId: draft.target === 'project' ? 'repo' : null,
+      ...draft,
+    },
   });
 
   await submitInComposer('/workspace-review');

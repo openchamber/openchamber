@@ -48,6 +48,8 @@ import {
   formatModelSelection,
   writeWebSearchSelection,
   writeWarmingEnabled,
+  writeCompactionSettings,
+  type CompactionUpdate,
   writeSkillDisabled,
   findWebSearchProjectOverride,
   type AgentEntity,
@@ -1976,6 +1978,15 @@ export const setWarmingEnabled = (enabled: boolean): { changed: boolean } => {
   return { changed };
 };
 
+/** Mirror of the web server's `setCompactionSettings`: same target file as the web search choice. */
+export const setCompactionSettings = (update: CompactionUpdate) => {
+  const layers = readConfigLayers();
+  const target = getJsonWriteTarget(layers, AGENT_SCOPE.USER);
+  const changed = writeCompactionSettings(target.config, update);
+  if (changed) writeConfig(target.config, target.path);
+  return { changed };
+};
+
 /** A config file to clear a skill's deny from, or null when it cannot be parsed: it is skipped, never rewritten. */
 const readConfigFileForSkillSwitch = (filePath: string) => {
   try {
@@ -2024,27 +2035,15 @@ export const getWebSearchSource = (workingDirectory?: string) => ({
   projectPath: findWebSearchProjectOverride(readConfigLayers(workingDirectory), readProjectConfigFiles(workingDirectory)),
 });
 
-const PROJECT_CONFIG_NAMES = [
-  path.join('.opencode', 'opencode.jsonc'),
-  path.join('.opencode', 'opencode.json'),
-  'opencode.jsonc',
-  'opencode.json',
-];
 
-/** Mirror of the web server's `readProjectConfigFiles`: existing project configs, deepest first; unreadable ones skipped. */
+/** Mirror of the web server's `readProjectConfigFiles`: project configs, the winning one first; unreadable ones skipped. */
 const readProjectConfigFiles = (workingDirectory?: string): Array<{ path: string; config: Record<string, unknown> }> => {
-  if (!workingDirectory) return [];
-  const root = findWorktreeRoot(workingDirectory) || path.resolve(workingDirectory);
   const files: Array<{ path: string; config: Record<string, unknown> }> = [];
-  for (const base of getAncestors(workingDirectory, root)) {
-    for (const name of PROJECT_CONFIG_NAMES) {
-      const filePath = path.join(base, name);
-      if (!fs.existsSync(filePath)) continue;
-      try {
-        files.push({ path: filePath, config: readConfigFile(filePath) });
-      } catch {
-        // Skipped: an unreadable file can't be told apart from one without the key.
-      }
+  for (const filePath of getFolderConfigPaths(workingDirectory).reverse()) {
+    try {
+      files.push({ path: filePath, config: readConfigFile(filePath) });
+    } catch {
+      // Skipped: an unreadable file can't be told apart from one without the key.
     }
   }
   return files;

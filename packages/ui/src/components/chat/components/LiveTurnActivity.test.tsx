@@ -1,5 +1,5 @@
 import React, { act } from 'react';
-import { afterEach, beforeEach, describe, expect, setDefaultTimeout, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, setDefaultTimeout, spyOn, test } from 'bun:test';
 import { plugin } from 'bun';
 import { pathToFileURL } from 'node:url';
 import { readFileSync, readdirSync } from 'node:fs';
@@ -19,6 +19,13 @@ import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { projectTurnRecords } from '../lib/turns/projectTurnRecords';
 import type { ChatMessageEntry, TurnChangedFile, TurnRecord } from '../lib/turns/types';
 import { LiveTurnActivity } from './LiveTurnActivity';
+import { useWorkflowRunsStore } from '@/lib/workflows/store';
+import type { WorkflowRun } from '@/lib/workflows/model';
+import { PendingWorkflowApprovals } from '../workflows/PendingWorkflowApprovals';
+import { WorkflowsPanel } from '../workflows/WorkflowsPanel';
+import { useSessionUIStore } from '@/sync/session-ui-store';
+import { getSyncChildStores } from '@/sync/sync-refs';
+import { ChatColumnSessionContext } from '../chatColumnSession';
 
 plugin({
     name: 'live-activity-worker-url',
@@ -166,7 +173,153 @@ describe('live Activity with the real message body', () => {
     });
     afterEach(async () => {
         await act(async () => root.unmount());
+        useWorkflowRunsStore.getState().reset();
         restore();
+    });
+
+    test('keeps both proposed workflow cards outside Activity while approval is pending', async () => {
+        useUIStore.setState({ agentWorkflowFeatureAvailable: true });
+        const proposal = (id: string, messageID: string): Part => ({
+            type: 'tool', tool: 'openchamber_workflow', id, callID: id, sessionID: 'session', messageID,
+            state: { status: 'completed', input: { action: 'workflow.run' },
+                output: JSON.stringify({ ok: true, action: 'workflow.run', data: { runId: id } }),
+                time: { start: 1, end: 2 } },
+        });
+        const runs: WorkflowRun[] = ['first', 'second'].map((id) => ({
+            id, parentSessionId: 'session', directory: '/project', name: `Workflow ${id}`, description: 'Review files',
+            state: 'awaiting-approval', attempt: 0, createdAt: 1, currentPhase: null, phases: ['Review'], agents: [], logs: [],
+        }));
+        useWorkflowRunsStore.setState({ bySession: { session: { status: 'ready', runs } } });
+        const first = assistant('first-step', [proposal('first', 'first-step')], 'tool-calls');
+        await act(async () => root.render(<Harness record={turn([first])} />));
+        expect(container.querySelectorAll('[data-component="workflow-run"]')).toHaveLength(1);
+        const second = assistant('second-step', [proposal('second', 'second-step')], 'tool-calls');
+        const record = turn([first, second, assistant('final', [text('answer', 'Choose the plans')], 'stop')]);
+        await act(async () => root.render(<Harness record={record} />));
+        const cards = () => [...container.querySelectorAll('[data-component="workflow-run"]')].map((card) => card.textContent);
+        expect(cards()).toHaveLength(2);
+        expect(cards()[0]).toContain('Workflow first');
+        expect(cards()[1]).toContain('Workflow second');
+        await act(async () => container.querySelector<HTMLButtonElement>('button[aria-controls]')?.click());
+        expect(cards()).toHaveLength(2);
+    });
+
+    test('shows every pending run missing from loaded calls, then hands it over without duplication', async () => {
+        useUIStore.setState({ agentWorkflowFeatureAvailable: true });
+        const runs: WorkflowRun[] = ['first', 'second'].map((id) => ({
+            id, parentSessionId: 'session', directory: '/project', name: `Workflow ${id}`, description: 'Review files',
+            state: 'awaiting-approval', attempt: 0, createdAt: 1, currentPhase: null, phases: [], agents: [], logs: [],
+        }));
+        useWorkflowRunsStore.setState({ bySession: { session: { status: 'ready', runs } } });
+        const draw = (messages: ChatMessageEntry[], sessionId = 'session') => <SyncProvider sdk={sdk} directory="/project">
+            <I18nProvider><PendingWorkflowApprovals sessionId={sessionId} messages={messages} /></I18nProvider>
+        </SyncProvider>;
+        await act(async () => root.render(draw([])));
+        expect(container.querySelectorAll('[data-component="workflow-run"]')).toHaveLength(2);
+        const call: Part = {
+            type: 'tool', tool: 'openchamber_workflow', id: 'call', callID: 'call', sessionID: 'session', messageID: 'step',
+            state: { status: 'completed', input: { action: 'workflow.run' },
+                output: JSON.stringify({ ok: true, action: 'workflow.run', data: { runId: 'first' } }), time: { start: 1, end: 2 } },
+        };
+        await act(async () => root.render(draw([assistant('step', [call], 'tool-calls')])));
+        expect(container.querySelectorAll('[data-component="workflow-run"]')).toHaveLength(1);
+        expect(container.textContent).toContain('Workflow second');
+        await act(async () => useWorkflowRunsStore.getState().apply({ ...runs[1], state: 'declined' }));
+        expect(container.querySelectorAll('[data-component="workflow-run"]')).toHaveLength(0);
+        await act(async () => root.render(draw([], 'other')));
+        expect(container.querySelectorAll('[data-component="workflow-run"]')).toHaveLength(0);
+    });
+
+    test('the real live row and footer share workflow call parts while the message snapshot stays stale', async () => {
+        // Happy DOM has no layout. Give the real virtualized list a viewport
+        // so its row and footer both mount rather than remaining unmeasured.
+        const geometry = spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+            return new window.DOMRect(0, 0, 720, 600);
+        });
+        const { default: MessageList } = await import('../MessageList');
+        // Leave bootstrap pending so only the test publishes the real live store.
+        const liveSdk = OpenCode.make({ baseUrl: 'http://workflow.test', fetch: () => new Promise<Response>(() => {}) });
+        useUIStore.setState({ agentWorkflowFeatureAvailable: true, activityRenderMode: 'summary' });
+        const run: WorkflowRun = {
+            id: 'streaming-run', parentSessionId: 'session', directory: '/project', name: 'Streaming approval', description: 'Review files',
+            state: 'awaiting-approval', attempt: 0, createdAt: 1, currentPhase: null, phases: [], agents: [], logs: [],
+        };
+        useWorkflowRunsStore.setState({ bySession: { session: { status: 'ready', runs: [run] } } });
+        const step = assistant('live-step', [text('progress', 'Preparing approval')]);
+        const record = turn([step]);
+        let messages = [record.userMessage, step];
+        const draw = () => <RuntimeAPIContext.Provider value={runtimeApis}>
+            <ThemeSystemContext.Provider value={themeContext}>
+                <SyncProvider sdk={liveSdk} directory="/project">
+                    <I18nProvider>
+                        <ChatColumnSessionContext.Provider value={{ sessionId: 'session', directory: '/project' }}>
+                            <MessageList sessionKey="session" directory="/project" messages={messages}
+                                sessionIsWorking activeStreamingMessageId={messages.at(-1)?.info.id} activeStreamingPhase="streaming" isLoadingOlder={false} />
+                        </ChatColumnSessionContext.Provider>
+                    </I18nProvider>
+                </SyncProvider>
+            </ThemeSystemContext.Provider>
+        </RuntimeAPIContext.Provider>;
+        await act(async () => root.render(draw()));
+        expect(container.querySelectorAll('[data-component="workflow-run"]')).toHaveLength(1);
+        const store = getSyncChildStores().getChild('/project');
+        if (!store) throw new Error('Expected mounted directory store');
+        const call: Part = {
+            type: 'tool', tool: 'openchamber_workflow', id: 'live-call', callID: 'live-call', sessionID: 'session', messageID: 'live-step',
+            state: { status: 'completed', input: { action: 'workflow.run' },
+                output: JSON.stringify({ ok: true, action: 'workflow.run', data: { runId: run.id } }), time: { start: 1, end: 2 } },
+        };
+        await act(async () => store.setState({ part: { 'live-step': [...step.parts, call] } }));
+        expect(messages[1].parts).toEqual(step.parts);
+        expect(container.querySelectorAll('[data-turn-id] [data-component="workflow-run"]')).toHaveLength(1);
+        expect(container.querySelectorAll('[data-component="workflow-run"]')).toHaveLength(1);
+        await act(async () => useUIStore.setState({ activityRenderMode: 'collapsed' }));
+        expect(container.querySelectorAll('[data-component="workflow-run"]')).toHaveLength(1);
+        // A later step can stream while the preceding completed call still lives
+        // only in the part store. Both consumers must keep overlaying that step.
+        const next = assistant('next-step', [text('continuation', 'Continuing the work')]);
+        messages = [...messages, next];
+        await act(async () => root.render(draw()));
+        expect(container.querySelectorAll('[data-turn-id] [data-component="workflow-run"]')).toHaveLength(1);
+        expect(container.querySelectorAll('[data-component="workflow-run"]')).toHaveLength(1);
+        geometry.mockRestore();
+    });
+
+    test('the panel declines through the same endpoint and holds both approval buttons during the request', async () => {
+        useUIStore.setState({ agentWorkflowFeatureAvailable: true });
+        useSessionUIStore.setState({ currentSessionId: 'session' });
+        const run: WorkflowRun = {
+            id: 'pending', parentSessionId: 'session', directory: '/project', name: 'Review files', description: 'Review files',
+            state: 'awaiting-approval', attempt: 0, createdAt: 1, currentPhase: null, phases: [], agents: [], logs: [],
+        };
+        useWorkflowRunsStore.setState({ bySession: { session: { status: 'ready', runs: [run] } }, byDirectory: { '/project': 'ready' } });
+        const requests: { url: string; method?: string }[] = [];
+        let finish: () => void = () => {};
+        const fetchSpy = spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+            const url = String(input);
+            requests.push({ url, method: init?.method });
+            if (url.endsWith('/pending/decline')) await new Promise<void>((resolve) => { finish = resolve; });
+            return Response.json(url.includes('/saved') ? { workflows: [] } : {});
+        });
+        try {
+            await act(async () => root.render(<I18nProvider><WorkflowsPanel directory="/project" /></I18nProvider>));
+            const approve = container.querySelector<HTMLButtonElement>('button[aria-label="Run workflow"]');
+            const decline = [...container.querySelectorAll('button')].find((button) => button.getAttribute('aria-label') === "Don't run");
+            expect(approve).not.toBeNull();
+            expect(decline).not.toBeNull();
+            await act(async () => decline?.click());
+            expect(requests.filter((request) => request.url.endsWith('/pending/decline'))).toEqual([
+                { url: '/api/openchamber/workflows/pending/decline', method: 'POST' },
+            ]);
+            expect(approve?.disabled).toBe(true);
+            expect(decline?.disabled).toBe(true);
+            await act(async () => finish());
+            expect(approve?.disabled).toBe(false);
+            expect(decline?.disabled).toBe(false);
+        } finally {
+            finish();
+            fetchSpy.mockRestore();
+        }
     });
 
     test('keeps active prose and tools visible; stop folds history but leaves the answer', async () => {

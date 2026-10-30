@@ -2,8 +2,8 @@ import React from 'react';
 import { useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { openExternalUrl } from '@/lib/url';
-import { Button } from '@/components/ui/button';
 import { Icon } from '@/components/icon/Icon';
+import { SettingsFieldRow } from '@/components/sections/shared/SettingsSection';
 
 type InstanceServiceInfo = {
   port: number | null;
@@ -18,16 +18,16 @@ type InstanceService = {
 
 /**
  * Shows the active instance's service URLs (local server port + tunnel URL,
- * when a tunnel is active) as labeled buttons that open the URL in the
- * browser. The data comes from `/api/system/info`, which the server derives
- * from its own runtime state — this is what makes each Git-worktree instance
+ * when a tunnel is active) as links that open the URL in the browser. The
+ * data comes from `/api/system/info`, which the server derives from its own
+ * runtime state — this is what makes each Git-worktree instance
  * distinguishable in the UI without reading terminal output.
  *
- * The section stays hidden when the endpoint is unavailable or reports no
- * port/tunnel (e.g. VS Code runtime), so a failed fetch never renders stale
- * or wrong URLs.
+ * Nothing renders, `label` included, when the endpoint is unavailable or
+ * reports no port/tunnel (e.g. VS Code runtime), so a failed fetch never
+ * renders stale or wrong URLs and no label is left without a value.
  */
-export const InstanceServiceUrls: React.FC = () => {
+export const InstanceServiceUrls: React.FC<{ label?: string }> = ({ label }) => {
   const { t } = useI18n();
   const [info, setInfo] = React.useState<InstanceServiceInfo | null>(null);
 
@@ -83,24 +83,24 @@ export const InstanceServiceUrls: React.FC = () => {
     return null;
   }
 
-  return (
-    <div className="flex flex-wrap items-center gap-2">
+  const links = (
+    <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1">
       {services.map((service) => (
-        <Button
+        <button
           key={service.key}
           type="button"
-          variant="outline"
-          size="sm"
           title={service.label}
-          className="max-w-full gap-1.5 px-2.5"
+          className="inline-flex max-w-full items-center gap-1.5 typography-meta text-muted-foreground transition-colors hover:text-foreground"
           onClick={() => {
             void openExternalUrl(service.url);
           }}
         >
+          <span className="max-w-64 truncate font-mono">{service.url}</span>
           <Icon name="external-link" className="size-3.5 shrink-0" />
-          <span className="max-w-64 truncate font-mono typography-micro">{service.url}</span>
-        </Button>
+        </button>
       ))}
     </div>
   );
+
+  return label ? <SettingsFieldRow label={label}>{links}</SettingsFieldRow> : links;
 };

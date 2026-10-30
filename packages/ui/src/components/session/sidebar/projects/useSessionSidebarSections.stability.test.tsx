@@ -7,6 +7,7 @@ import type { WorktreeMetadata } from '@/types/worktree';
 import { I18nProvider } from '@/lib/i18n';
 import { useSessionGrouping } from './useSessionGrouping';
 import { useSessionSidebarSections } from './useSessionSidebarSections';
+import { buildSidebarSessionProjection } from '../list/sessionCollection';
 
 // The sidebar's group headers are memoized on the section's group objects and
 // the shared search-data map. These tests pin which inputs may replace them:
@@ -29,7 +30,8 @@ const worktree = (projectDirectory: string, name: string): WorktreeMetadata => (
 
 const projectA = { id: 'a', path: '/a', normalizedPath: '/a' };
 const projectB = { id: 'b', path: '/b', normalizedPath: '/b' };
-const projects = [projectA, projectB];
+const projectC = { id: 'c', path: '/c', normalizedPath: '/c' };
+const projects = [projectA, projectB, projectC];
 const worktreesByProject = new Map([
   ['/a', [worktree('/a', 'one'), worktree('/a', 'two')]],
   ['/b', [worktree('/b', 'one'), worktree('/b', 'two')]],
@@ -38,12 +40,13 @@ const a1 = session('a1', '/a/.wt/one');
 const a2 = session('a2', '/a/.wt/two');
 const b1 = session('b1', '/b/.wt/one');
 const b2 = session('b2', '/b/.wt/two');
-const sessionsByProject = new Map([['a', [a1, a2]], ['b', [b1, b2]]]);
+const c1 = session('c1', '/c');
+const sessionsByProject = new Map([['a', [a1, a2]], ['b', [b1, b2]], ['c', [c1]]]);
 const EMPTY: Session[] = [];
 const stableMaps = { worktreeMetadata: new Map(), pinnedSessionIds: new Set<string>(), gitBranches: new Map<string, string | null>(), projectRepoStatus: new Map(), projectRootBranches: new Map(), foldersMap: {} };
 
 type Owners = ReadonlyMap<string, { scopeDirectory: string }>;
-type Inputs = { ranks: ReadonlyMap<string, number>; owners: Owners };
+type Inputs = { ranks: ReadonlyMap<string, number>; owners: Owners; sessions?: ReadonlyMap<string, Session[]> };
 type Sections = ReturnType<typeof useSessionSidebarSections>;
 
 // Each project's sessions are listed under the project; the ownership map
@@ -51,9 +54,31 @@ type Sections = ReturnType<typeof useSessionSidebarSections>;
 const ownersFor = (scopes: Record<string, string>): Owners => new Map(
   Object.entries(scopes).map(([id, scopeDirectory]) => [id, { scopeDirectory }]),
 );
-const defaultScopes = { a1: '/a/.wt/one', a2: '/a/.wt/two', b1: '/b/.wt/one', b2: '/b/.wt/two' };
+const defaultScopes = { a1: '/a/.wt/one', a2: '/a/.wt/two', b1: '/b/.wt/one', b2: '/b/.wt/two', c1: '/c' };
 
 const Harness = ({ inputs, capture }: { inputs: Inputs; capture: (sections: Sections) => void }) => {
+  const currentSessions = inputs.sessions ?? sessionsByProject;
+  const allSessions = [...currentSessions.values()].flat();
+  const projectIdBySessionId = new Map(
+    [...currentSessions].flatMap(([projectId, sessions]) => sessions.map((entry) => [entry.id, projectId] as const)),
+  );
+  const projection = buildSidebarSessionProjection({
+    globalActiveSessions: allSessions,
+    liveSessions: [],
+    knownDirectories: new Set(),
+    isVSCode: false,
+    pinnedSessionIds: stableMaps.pinnedSessionIds,
+    sessionOrderRanks: inputs.ranks,
+  });
+  const projectedSessions = new Map(projects.map((project) => [
+    project.id,
+    projection.projectSessions.filter((entry) => projectIdBySessionId.get(entry.id) === project.id),
+  ]));
+  const nestedSessionIds = new Set(
+    [...projection.childrenMap]
+      .filter(([parentId]) => projection.sessionById.has(parentId))
+      .flatMap(([, children]) => children.map((child) => child.id)),
+  );
   const grouping = useSessionGrouping({
     homeDirectory: null,
     worktreeMetadata: stableMaps.worktreeMetadata,
@@ -62,9 +87,12 @@ const Harness = ({ inputs, capture }: { inputs: Inputs; capture: (sections: Sect
     gitBranches: stableMaps.gitBranches,
     isVSCode: false,
     sessionOwners: inputs.owners,
+    sessionById: projection.sessionById,
+    childrenMap: projection.childrenMap,
+    nestedSessionIds,
   });
   // Rebuilt on every render, the way the sidebar rebuilds the ownership index.
-  const getSessionsForProject = React.useCallback((projectId: string) => [...(sessionsByProject.get(projectId) ?? [])], []);
+  const getSessionsForProject = (projectId: string) => projectedSessions.get(projectId) ?? EMPTY;
   const getArchivedSessionsForProject = React.useCallback(() => EMPTY, []);
   capture(useSessionSidebarSections({
     normalizedProjects: projects,
@@ -77,6 +105,7 @@ const Harness = ({ inputs, capture }: { inputs: Inputs; capture: (sections: Sect
     sessionOrderRanks: inputs.ranks,
     lastRepoStatus: true,
     buildGroupedSessions: grouping.buildGroupedSessions,
+    getGroupingSessions: grouping.getGroupingSessions,
     hasSessionSearchQuery: false,
     normalizedSessionSearchQuery: '',
     filterSessionNodesForSearch: grouping.filterSessionNodesForSearch,
@@ -168,5 +197,70 @@ describe('sidebar project sections keep references across unrelated updates', ()
     expect(worktreeLabels(current(), 'a')).toEqual(['two', 'one']);
     expect(section('b')).toBe(sectionB);
     expect(current().groupSearchDataByGroup).toBe(before.groupSearchDataByGroup);
+  });
+
+  test('a same-ID descendant update rebuilds its parent project tree', async () => {
+    const child = { ...b1, parentID: 'a1' };
+    const beforeSessions = new Map([['a', [a1, a2]], ['b', [child, b2]]]);
+    const owners = ownersFor(defaultScopes);
+    await render({ ranks: new Map(), owners, sessions: beforeSessions });
+    const sectionA = section('a');
+    expect(sectionA?.groups.flatMap((group) => group.sessions).find((node) => node.session.id === 'a1')
+      ?.children.map((node) => node.session.title)).toContain('b1');
+
+    const updatedChild = { ...child, title: 'renamed child' };
+    await render({
+      ranks: new Map(),
+      owners,
+      sessions: new Map([['a', [a1, a2]], ['b', [updatedChild, b2]]]),
+    });
+
+    expect(section('a')).not.toBe(sectionA);
+    expect(section('a')?.groups.flatMap((group) => group.sessions).find((node) => node.session.id === 'a1')
+      ?.children.map((node) => node.session.title)).toContain('renamed child');
+  });
+
+  test('a cross-project sibling rank change rebuilds the parent tree in lifecycle order', async () => {
+    const childOne = { ...b1, parentID: 'a1' };
+    const childTwo = { ...b2, parentID: 'a1' };
+    const sessions = new Map([['a', [a1, a2]], ['b', [childOne, childTwo]]]);
+    const owners = ownersFor(defaultScopes);
+    const childIds = () => section('a')?.groups.flatMap((group) => group.sessions)
+      .find((node) => node.session.id === 'a1')?.children.map((node) => node.session.id);
+
+    await render({ ranks: new Map([['b1', 3], ['b2', 2]]), owners, sessions });
+    const parentSection = section('a');
+    expect(childIds()).toEqual(['b1', 'b2']);
+
+    await render({ ranks: new Map([['b1', 2], ['b2', 4]]), owners, sessions });
+
+    expect(section('a')).not.toBe(parentSection);
+    expect(childIds()).toEqual(['b2', 'b1']);
+  });
+
+  test('a foreign child arriving after a newer review invalidates only affected project trees', async () => {
+    const review = {
+      ...session('review', a1.directory),
+      metadata: { openchamber: { kind: 'review', originalSessionID: 'a1' } },
+    };
+    const owners = ownersFor({ ...defaultScopes, review: a1.directory });
+    const ranks = new Map([['review', 10], ['a1', 5]]);
+    const beforeSessions = new Map([['a', [a1, review, a2]], ['b', [b2]], ['c', [c1]]]);
+    await render({ ranks, owners, sessions: beforeSessions });
+    const beforeA = section('a');
+    const beforeC = section('c');
+
+    const foreignChild = { ...b1, parentID: 'a1' };
+    await render({
+      ranks,
+      owners,
+      sessions: new Map([['a', [a1, review, a2]], ['b', [foreignChild, b2]], ['c', [c1]]]),
+    });
+
+    const original = section('a')?.groups.flatMap((group) => group.sessions)
+      .find((node) => node.session.id === 'a1');
+    expect(section('a')).not.toBe(beforeA);
+    expect(original?.children.map((node) => node.session.id)).toEqual(['review', 'b1']);
+    expect(section('c')).toBe(beforeC);
   });
 });

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import type { ProjectEntry } from "@/lib/api/types"
 import type { DesktopSettings } from "@/lib/desktop"
+import { parseSettingsDocument } from "@/lib/settings/registry"
 import { useProjectsStore } from "./useProjectsStore"
 import { useDirectoryStore } from "./useDirectoryStore"
 import { opencodeClient } from "../lib/opencode/client"
@@ -232,5 +233,80 @@ describe("useProjectsStore.addProjects", () => {
 
     const home = useDirectoryStore.getState().homeDirectory;
     expect(added.map((p) => p.path)).toEqual(["/repo", "C:/repo", home ? `${home}/project` : "~/project"])
+  })
+})
+
+describe("useProjectsStore project labels", () => {
+  const resetProjects = () => {
+    useProjectsStore.setState({
+      projects: [],
+      activeProjectId: null,
+      manualProjectOrder: [],
+    })
+  }
+
+  for (const { path, label, method } of [
+    { path: "/home/me/code/example", label: "Example", method: "renameProject" },
+    { path: "/home/me/code/web-client", label: "Web Client", method: "updateProjectMeta" },
+  ] as const) {
+    test(`keeps ${label} after ${method} through parsed save and reload responses`, () => {
+      const previous = useProjectsStore.getState()
+      try {
+        resetProjects()
+        const initial = parseSettingsDocument({ projects: [{ path }] })
+        if (!initial) throw new Error("Expected valid settings")
+        useProjectsStore.getState().synchronizeFromSettings(initial)
+        const project = useProjectsStore.getState().projects[0]
+        expect(project).toBeDefined()
+
+        if (method === "renameProject") useProjectsStore.getState().renameProject(project.id, label)
+        else useProjectsStore.getState().updateProjectMeta(project.id, { label })
+
+        const saved = JSON.stringify({ projects: useProjectsStore.getState().projects })
+        for (const response of ["PUT", "GET"]) {
+          if (response === "GET") resetProjects()
+          const parsed = parseSettingsDocument(JSON.parse(saved))
+          if (!parsed) throw new Error("Expected valid settings")
+          useProjectsStore.getState().synchronizeFromSettings(parsed)
+          expect(useProjectsStore.getState().projects[0]?.label).toBe(label)
+          expect(useProjectsStore.getState().projects[0]?.labelSource).toBe("manual")
+        }
+      } finally {
+        useProjectsStore.setState(previous, true)
+      }
+    })
+  }
+
+  test("lowers a legacy auto-derived label that carries no provenance", () => {
+    const previous = useProjectsStore.getState()
+    try {
+      resetProjects()
+      const parsed = parseSettingsDocument({
+        projects: [{ path: "/home/me/code/example", label: "Example" }],
+      })
+      if (!parsed) throw new Error("Expected valid settings")
+      useProjectsStore.getState().synchronizeFromSettings(parsed)
+
+      expect(useProjectsStore.getState().projects[0]?.label).toBe("example")
+    } finally {
+      useProjectsStore.setState(previous, true)
+    }
+  })
+
+  test("marks a derived label as auto and a rename as manual", async () => {
+    const previous = useProjectsStore.getState()
+    try {
+      resetProjects()
+      const [added] = await useProjectsStore.getState().addProjects(["/home/me/code/example"])
+      expect(added?.labelSource).toBe("auto")
+
+      useProjectsStore.getState().renameProject(added.id, "Example")
+
+      const project = useProjectsStore.getState().projects[0]
+      expect(project?.label).toBe("Example")
+      expect(project?.labelSource).toBe("manual")
+    } finally {
+      useProjectsStore.setState(previous, true)
+    }
   })
 })

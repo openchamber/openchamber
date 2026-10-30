@@ -28,6 +28,10 @@ Wähle die Identitäts-Schaltfläche oben im [Git-Panel](/git/) und dort eine Id
 
 Das Anwenden einer Identität schreibt sie in die **lokale** Git-Konfiguration dieses Repositories. Sie betrifft also nur dieses Repo, und deine globale Einstellung bleibt, wie sie ist. Auch Git im Terminal und die Shell des Agenten nutzen sie. **System-Identität** entfernt, was OpenChamber geschrieben hat, sodass wieder deine eigene Git-Konfiguration gilt.
 
+## Passphrasen für SSH-Schlüssel
+
+Gib bei einem verschlüsselten SSH-Schlüssel die optionale Passphrase vor der Suche in `~/.ssh` ein. Bestätige dann den Fingerabdruck und füge den Schlüssel hinzu. OpenChamber lässt den Schlüssel verschlüsselt und speichert die Passphrase im Anmeldedatenspeicher von OpenCode. Gespeicherte Passphrasen gelten nur für Git-Aktionen in der App. Git-Befehle im Terminal oder durch Agenten rufen sie nicht ab. Ein verschlüsselter verwalteter Schlüssel kann sich über diesen Weg daher nicht authentifizieren.
+
 ## Verwandt
 
 - [Git-Workflows](/git/): mit der von dir festgelegten Identität committen

@@ -24,6 +24,7 @@ import { resolveManagedOpenCodeCwd } from './opencode-cwd.mjs';
 import { stopEmbeddedServer } from './server-shutdown.mjs';
 import { describeStartupEnvironmentOverrides, resolveStartupUrlProbePlan } from './startup-url-selection.mjs';
 import { clearAppCache } from './app-cache.mjs';
+import { hideWindow, isWindowHidePending, showWindow } from './window-hide.mjs';
 import { parseExternalUrl } from './external-url-policy.mjs';
 import {
   BACKGROUND_START_ARG,
@@ -581,7 +582,7 @@ const requestQuitWithConfirmation = async () => {
   if (!visible) {
     const hidden = windows.find((window) => !window.isVisible());
     if (hidden) {
-      hidden.show();
+      showWindow(hidden);
       hidden.focus();
     }
   }
@@ -1334,7 +1335,7 @@ const focusForegroundWindow = () => {
   // unless app.focus runs first.
   if (process.platform === 'darwin') app.focus({ steal: true });
   if (target.isMinimized()) target.restore();
-  target.show();
+  showWindow(target);
   target.focus();
   if (typeof target.moveTop === 'function') target.moveTop();
 };
@@ -2075,7 +2076,7 @@ const confirmConnectDeepLink = async (payload) => {
   // BEFORE writing anything to the hosts config. Never surface the token.
   const visible = BrowserWindow.getAllWindows().find((window) => !window.isDestroyed() && window.isVisible());
   if (visible) {
-    visible.show();
+    showWindow(visible);
     visible.focus();
   }
   const options = {
@@ -2131,7 +2132,7 @@ const dispatchDeepLink = (link) => {
       : BrowserWindow.getAllWindows().find((window) => !window.isDestroyed());
     if (target) {
       if (target.isMinimized()) target.restore();
-      target.show();
+      showWindow(target);
       target.focus();
     }
     emitToAllWindows('openchamber:deep-link-focus', { reason: link.value || null });
@@ -2282,10 +2283,10 @@ const handleMiniChatGlobalShortcut = () => {
   if (action.type === 'hide' || action.type === 'focus') {
     const target = BrowserWindow.fromId(action.windowId);
     if (!target || target.isDestroyed()) return;
-    if (action.type === 'hide') {
-      target.hide();
+    if (action.type === 'hide' && !isWindowHidePending(target)) {
+      hideWindow(target);
     } else {
-      if (!target.isVisible()) target.show();
+      showWindow(target);
       target.focus();
     }
     return;
@@ -2416,7 +2417,7 @@ const showQuakeWindow = (browserWindow, heightFraction) => {
     if (displayBounds) {
       browserWindow.setBounds(computeQuakeBounds(displayBounds, heightFraction));
     }
-    if (!browserWindow.isVisible()) browserWindow.show();
+    showWindow(browserWindow);
     browserWindow.focus();
     browserWindow.moveTop();
     state.quakeActive = true;
@@ -2427,14 +2428,14 @@ const showQuakeWindow = (browserWindow, heightFraction) => {
   }
 };
 
-const hideQuakeWindow = (browserWindow) => {
+const hideQuakeWindow = (browserWindow, { restoreFullScreen = true } = {}) => {
   if (!browserWindow || browserWindow.isDestroyed()) return;
   try {
     debounceWindowStatePersist(browserWindow, true);
   } catch {
     // Persist is best-effort; hiding must not fail because of it.
   }
-  browserWindow.hide();
+  hideWindow(browserWindow, process.platform, { restoreFullScreen });
 };
 
 // Leaves the dropdown and puts the normal window back: the bounds and the
@@ -2462,7 +2463,7 @@ const handleQuakeModeGlobalShortcut = () => {
   const mainWindow = state.mainWindow && !state.mainWindow.isDestroyed() ? state.mainWindow : null;
   const action = selectQuakeToggleAction({
     windowExists: mainWindow !== null,
-    isVisible: mainWindow?.isVisible() === true,
+    isVisible: mainWindow?.isVisible() === true && !isWindowHidePending(mainWindow),
     isMinimized: mainWindow?.isMinimized() === true,
     isFocused: mainWindow?.isFocused() === true,
   });
@@ -2662,13 +2663,13 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {}, 
     if (!state.quitRequested && shouldHideMainWindowToTray(browserWindow)) {
       debounceWindowStatePersist(browserWindow, true);
       event.preventDefault();
-      browserWindow.hide();
+      hideWindow(browserWindow, process.platform, { restoreFullScreen: false });
       return;
     }
 
     if (!state.quitRequested && shouldHideMainWindowToQuake(browserWindow)) {
       event.preventDefault();
-      hideQuakeWindow(browserWindow);
+      hideQuakeWindow(browserWindow, { restoreFullScreen: false });
       return;
     }
 
@@ -2680,7 +2681,7 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {}, 
       if (remainingVisible <= 1) {
         debounceWindowStatePersist(browserWindow, true);
         event.preventDefault();
-        browserWindow.hide();
+        hideWindow(browserWindow, process.platform, { restoreFullScreen: false });
         return;
       }
     }
@@ -2851,7 +2852,7 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {}, 
           documentClass: classifyStartupDocument(browserWindow.webContents.getURL()),
         });
       }
-      browserWindow.show();
+      showWindow(browserWindow);
       browserWindow.focus();
     });
   }
@@ -2943,7 +2944,7 @@ const activateMainWindow = async (url, localOrigin, bootOutcome, runtimeConfig =
     } else {
       await navigateWindow(mainWindow, url, { allowAbort: true });
     }
-    mainWindow.show();
+    showWindow(mainWindow);
     mainWindow.focus();
     return mainWindow;
   }
@@ -2968,6 +2969,13 @@ const openMainWindow = async () => {
   const host = config.defaultHostId && config.defaultHostId !== LOCAL_HOST_ID
     ? config.hosts.find((entry) => entry.id === config.defaultHostId)
     : null;
+  if (host && state.bootOutcome?.sshStartupFallbackHostId === host.id) {
+    return activateMainWindow(localUiUrl, state.localOrigin, state.bootOutcome, {
+      apiBaseUrl: state.sidecarUrl || state.localOrigin || '',
+      clientToken: readDesktopLocalClientToken(),
+      requestHeaders: {},
+    });
+  }
   const relayHost = host && host.relay && typeof host.relay === 'object' ? host : null;
   if (relayHost) {
     // Relay hosts have no reachable HTTP base. Boot the LOCAL UI with the local
@@ -3083,7 +3091,7 @@ const openHostWindow = async (host, route = null, { reuseOpenWindow = false } = 
     // Activate first, the same way focusForegroundWindow does.
     if (process.platform === 'darwin') app.focus({ steal: true });
     if (existing.isMinimized()) existing.restore();
-    existing.show();
+    showWindow(existing);
     existing.focus();
     if (!route) return;
     // A window still booting has no listener yet; it reloads on the route.
@@ -3195,7 +3203,7 @@ const createMiniChatWindow = async ({ mode, sessionId = '', directory = '', proj
     const existing = state.miniChatWindowsBySession.get(sessionWindowKey);
     if (existing && !existing.isDestroyed()) {
       if (existing.isMinimized()) existing.restore();
-      existing.show();
+      showWindow(existing);
       existing.focus();
       return existing;
     }
@@ -3276,7 +3284,7 @@ const createMiniChatWindow = async ({ mode, sessionId = '', directory = '', proj
   }
 
   browserWindow.once('ready-to-show', () => {
-    browserWindow.show();
+    showWindow(browserWindow);
     browserWindow.focus();
   });
 
@@ -4176,7 +4184,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
         : (state.mainWindow && !state.mainWindow.isDestroyed() ? state.mainWindow : null);
       if (!target) return false;
       if (target.isMinimized()) target.restore();
-      target.show();
+      showWindow(target);
       target.focus();
       app.focus?.({ steal: true });
       return true;
@@ -5174,7 +5182,8 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       if (config.defaultHostId && config.defaultHostId !== LOCAL_HOST_ID) {
         const host = config.hosts.find((entry) => entry.id === config.defaultHostId);
         const apiUrl = host?.apiUrl || host?.url;
-        if (host?.url && apiUrl && !state.unreachableHosts.has(apiUrl)) {
+        if (host?.url && apiUrl && !state.unreachableHosts.has(apiUrl)
+          && state.bootOutcome?.sshStartupFallbackHostId !== host.id) {
           targetUrl = shouldUsePackagedUi() ? buildPackagedUiUrl('/index.html') : host.url;
           runtimeConfig = {
             apiBaseUrl: normalizeHostUrl(apiUrl),
@@ -5291,7 +5300,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       }
 
       if (state.mainWindow.isMinimized()) state.mainWindow.restore();
-      state.mainWindow.show();
+      showWindow(state.mainWindow);
       state.mainWindow.focus();
       if (sessionId) {
         emitToWindow(state.mainWindow, 'openchamber:open-session', { sessionId, directory });
@@ -5993,7 +6002,7 @@ const revealMainWindow = async () => {
   }
   if (target && !target.isDestroyed()) {
     if (target.isMinimized()) target.restore();
-    target.show();
+    showWindow(target);
     target.focus();
   }
   return target;
@@ -6006,7 +6015,7 @@ const revealMainWindow = async () => {
 const focusMainWindowWithSession = async (sessionId, directory) => {
   if (state.mainWindow && !state.mainWindow.isDestroyed()) {
     if (state.mainWindow.isMinimized()) state.mainWindow.restore();
-    state.mainWindow.show();
+    showWindow(state.mainWindow);
     state.mainWindow.focus();
     if (sessionId) {
       emitToWindow(state.mainWindow, 'openchamber:open-session', { sessionId, directory: directory || '' });
@@ -6031,7 +6040,7 @@ const dispatchTrayAction = async (action) => {
       : BrowserWindow.getFocusedWindow();
     if (target && !target.isDestroyed() && target.isVisible()) {
       debounceWindowStatePersist(target, true);
-      target.hide();
+      hideWindow(target);
     }
     return;
   }
@@ -6040,9 +6049,9 @@ const dispatchTrayAction = async (action) => {
     const target = (state.mainWindow && !state.mainWindow.isDestroyed())
       ? state.mainWindow
       : null;
-    if (target && target.isVisible() && !target.isMinimized()) {
+    if (target && target.isVisible() && !target.isMinimized() && !isWindowHidePending(target)) {
       debounceWindowStatePersist(target, true);
-      target.hide();
+      hideWindow(target);
       return;
     }
     await revealMainWindow();
@@ -6074,7 +6083,7 @@ const dispatchTrayAction = async (action) => {
     const surface = resolveTraySurface();
     if (surface && surface.__ocMiniChat === true && action.sessionId) {
       if (surface.isMinimized()) surface.restore();
-      surface.show();
+      showWindow(surface);
       surface.focus();
       emitToWindow(surface, 'openchamber:open-session', {
         sessionId: action.sessionId,
@@ -6190,7 +6199,7 @@ app.on('activate', async () => {
     ? remembered
     : (windows.find((window) => window.isVisible() && !window.isMinimized()) || windows[0]);
   if (targetWindow.isMinimized()) targetWindow.restore();
-  targetWindow.show();
+  showWindow(targetWindow);
   targetWindow.focus();
 });
 

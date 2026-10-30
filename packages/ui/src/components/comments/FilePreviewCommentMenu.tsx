@@ -251,6 +251,8 @@ export function FilePreviewCommentMenu({ containerRef, filePath, fileContent }: 
         {highlightOverlay}
         <div
           ref={menuRef}
+          // The field rides the keyboard; the highlight beside it stays put.
+          data-keyboard-rider=""
           className="pointer-events-auto mx-auto max-w-[420px] px-3"
           style={{ paddingBottom: 'calc(0.5rem + env(safe-area-inset-bottom, 0px))' }}
         >

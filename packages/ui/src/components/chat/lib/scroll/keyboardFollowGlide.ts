@@ -40,6 +40,8 @@ interface KeyboardAnimEventDetail {
     phase: 'show' | 'hide';
     slide: number;
     durationMs: number;
+    /** False when the field the keyboard is for is on a surface over the shell. */
+    inShell?: boolean;
 }
 
 interface KeyboardSettledEventDetail {
@@ -292,6 +294,9 @@ export function createKeyboardFollowGlide(options: KeyboardFollowGlideOptions): 
         // SAFETY: oc:keyboard-anim is dispatched only by useNativeMobileChrome
         // as a CustomEvent carrying phase, slide and durationMs.
         const detail = (event as CustomEvent<KeyboardAnimEventDetail>).detail;
+        // A keyboard for a field over the chat (a drawer's, a dialog's)
+        // leaves the transcript where it is: it is covered.
+        if (detail.inShell === false) return;
         glide(detail.phase, detail.slide, detail.durationMs);
         if (held) keyboardLeg = true;
     };

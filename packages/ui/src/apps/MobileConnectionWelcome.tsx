@@ -13,6 +13,8 @@ import { MobileConnectionDebugPanel } from './MobileConnectionDebugPanel';
 import { isQrScanSupported, parseConnectionPayload, scanConnectionQr } from './mobileQrScan';
 import { mobileConnectionInputClass, mobileInputKeyboardProps } from './mobileConnectionUi';
 import { MobileQrConnectionLoading, MobileQrScannerOverlay } from './MobileQrScannerOverlay';
+import { MobileConnectionHeaders } from './MobileConnectionHeaders';
+import { buildMobileHeaderValues, type MobileHeaderDraft } from './mobileRequestHeaders';
 
 export type MobileConnectionNotice = {
   kind: 'unreachable' | 'relay-limit' | 'auth-expired';
@@ -30,6 +32,7 @@ export const MobileConnectionWelcome: React.FC<{
   const [serverUrl, setServerUrl] = React.useState('');
   const [connectionName, setConnectionName] = React.useState('');
   const [clientToken, setClientToken] = React.useState('');
+  const [headers, setHeaders] = React.useState<MobileHeaderDraft[]>([]);
   const [isScanning, setIsScanning] = React.useState(false);
   const scanBlink = useWaitingBlink(isScanning);
   const [isCompletingScan, setIsCompletingScan] = React.useState(false);
@@ -48,8 +51,10 @@ export const MobileConnectionWelcome: React.FC<{
 
   const handleSubmit = React.useCallback((event: React.FormEvent) => {
     event.preventDefault();
-    void conn.connect({ url: serverUrl, clientToken, label: connectionName });
-  }, [clientToken, conn, connectionName, serverUrl]);
+    const requestHeaders = headers.some(({ name, value }) => name.trim() || value.trim())
+      ? buildMobileHeaderValues(headers) : undefined;
+    void conn.connect({ url: serverUrl, clientToken, label: connectionName, requestHeaders });
+  }, [clientToken, conn, connectionName, headers, serverUrl]);
 
   // Accept a pasted pairing link (openchamber://connect?...) in the URL field and
   // split it back into the server URL + token.
@@ -318,6 +323,7 @@ export const MobileConnectionWelcome: React.FC<{
                       className={cn(mobileConnectionInputClass, 'text-center')}
                     />
                     <p className="px-1 text-center typography-micro text-muted-foreground">{t('mobile.connect.token.hint')}</p>
+                    <MobileConnectionHeaders value={headers} onChange={setHeaders} disabled={!manualOpen || isBusy} />
                     {error ? <p className="px-1 text-center typography-small text-[var(--status-error)]">{error}</p> : null}
                     <Button type="submit" variant={qrScanSupported ? 'outline' : 'default'} size="lg" className="h-12 w-full" disabled={isBusy || isScanning || !serverUrl.trim()}>
                       {isBusy ? t('mobile.connect.connecting') : t('mobile.connect.connectButton')}

@@ -144,6 +144,14 @@ preparation, including when the callback was saved before a BTW transition.
 
 Local chat attachments are normalized by `attachment-files.ts` before entering `input-store.ts`. PNG, JPEG, GIF, WebP, and PDF retain their media type; HEIC/HEIF is converted to JPEG; recognized text/code formats and unknown files whose first 4 KB are text are sent as `text/plain`; binary files outside the supported media types are rejected. Jupyter notebooks become readable markdown with non-text outputs omitted. HAR credentials, cookies, and sensitive URL parameters are redacted, while request/response body text is omitted. SVG and Draw.io files are attached as source text, not executable/rendered content. Browser and VS Code pickers expose the same allowlist, while drag-and-drop may still accept an unknown extension after content inspection. Large plain-text clipboard pastes can become in-memory `text/plain` attachments named `pasted-context-N.txt` through the composer paste path; they use the same normalization and send pipeline as manually attached `.txt` files.
 
+### Why desktop attachments keep their original path
+
+A local desktop drop or picker resolves the original file's on-disk path through `pathForDroppedFile` and stores it as `agentPath`. `attachmentWireName` sends that path as OpenCode's prompt-file name, falling back to `filename` when unavailable. This lets the model locate files outside the session directory without searching by basename. Web, VS Code, hosted mobile, Capacitor, and remote desktop hosts do not resolve a native path.
+
+HAR and IPYNB never carry `agentPath`, because reopening the original bypasses credential redaction or output omission. A document's first prepared entry, its extracted text, carries the original path; extracted images do not. Converted HEIC/HEIF carries the original path with JPEG bytes. Attachments carrying a path keep the original basename as `filename`, including converted HEIC/HEIF, so composer citations match the transcript's `attachmentBasename`. Queue serialization preserves `agentPath` for automatic delivery and manual take.
+
+Sent-message citation lookup uses the same `attachmentBasename` rule as display. Restoring a sent attachment for editing or forking splits its wire name back into the UI basename and `agentPath`, preserving the original name on resend without breaking `[basename]` citations.
+
 Office and OpenDocument packages are metadata-validated before asynchronous extraction, with limits of 20 MB compressed input, 5,000 archive entries, 25 MB per entry, 8 MB per XML part, and 100 MB total uncompressed content. Unsafe or non-canonical archive paths reject the whole attachment, and only XML, relationship, and supported image entries are decompressed and retained. Extracted text, including its explicit truncation notice, is bounded to 500,000 characters so compact but dense Office files cannot consume an entire model context window. XLSX dense rows are serialized as quoted TSV under a single source range instead of repeating every cell address; highly sparse rows retain explicit cell coordinates so distant cells do not generate vast empty TSV spans. Confirmed Office/OpenDocument `@file` mentions are loaded through the runtime filesystem route before submit and use this same extraction pipeline instead of being forwarded as `text/plain` `file://` parts that OpenCode rejects as binary. Confirmed PNG, JPEG, GIF, WebP, and HEIC/HEIF mentions load through the same route and attach like a picked file, with their real type and a data URL, so the message shows the image and the model receives its bytes (`isReadOnSendMentionFilename`). PDF mentions stay `file://` references: OpenCode reads them itself, and a model without PDF input can still extract the text with tools. A failed mention load or extraction leaves the composer intact, and a runtime switch discards preparation from the previous runtime. At most 50 signature-validated PNG, JPEG, GIF, or WebP images and 40 MB of image bytes are retained, with a 20 MB per-image limit; unsupported, invalid, omitted, and truncated content remains explicit in the extracted text. Images whose citations fall beyond text truncation are not attached. Extracted document content remains a `text/plain` file attachment with the original document filename, rather than becoming visible user-message text. Supported embedded images become separate image file parts; the extracted text contains `[filename]` citations at the source paragraph, slide object, spreadsheet cell anchor, or OpenDocument text position. Generated image filenames are re-evaluated if the composer changes during asynchronous preparation, avoiding collisions. The store publishes all generated parts atomically only after every data URL is ready.
 
 The composer compares normalized attachment MIME types with the selected model's declared input modalities. It warns when a newly attached file or an existing attachment after a model change requires an unsupported modality, but does not block sending. Missing modality metadata remains unknown and does not produce a warning.
@@ -330,6 +338,56 @@ reports the authoritative state.
 
 ## Session list rules
 
+### Session admission
+
+`session-admission.ts` owns admission of host sessions whose folder is outside
+the registered project and worktree topology. It observes active directory
+membership, archived records and completed global loads, rather than streamed session updates. The raw global
+cache stays complete for cleanup and lineage. Managed chats and isolated spaces
+retain their own directory ownership.
+
+Discovery uses the active directory index and deduplicates archived folders. Its
+trust reads and registration writes share the background network budget; waiting
+for a trust answer holds no network slot. Queued requests recheck their runtime
+before sending, and managed-chat roots must resolve before importing folders.
+
+An unknown folder first goes through the existing OpenCode fingerprint trust
+check. Empty configurations and previously trusted fingerprints register without
+a prompt. Other configurations show `OpenCodeTrustDialog` immediately. Declining
+keeps the folder unregistered and suppresses repeated background prompts for that
+fingerprint. A deliberate open can ask again. Trust saved elsewhere in this UI
+rechecks pending admission; completed global loads discover answers from other
+clients. Failed checks and registrations preserve the raw session and retry at
+1, 2 and 4 seconds. Declines do not retry. Disposal, a vanished destination or a
+runtime switch invalidates retries; after the bounded attempts, a later completed
+global load can try again. A failed trust read stays distinct from a user's answer
+even when a refused SDK request shares the same pending check.
+
+`setCurrentSession` gates unknown destinations before fetching messages,
+publishing selection or changing directories. Unknown links resolve session
+detail without starting an OpenCode location. A newer navigation or runtime
+switch invalidates the continuation. Moves of the viewed session clear selection
+before admitting their new destination, including moves seen only in the global
+stream. Runtime-memory restoration uses the same gate. Sidebar projections, the switcher and
+tray never use pins or work state as admission.
+Pinned chat columns also gate their rendered session identity and directory;
+following a move cannot mount a denied destination through a side composer.
+Archive rows filter admission without changing the raw archived cache.
+
+Web, Electron, hosted mobile and Capacitor register through the active server's
+`POST /api/projects/session-directory`. The server rechecks the fingerprint at
+the settings write boundary and serializes an append without changing navigation.
+VS Code uses its existing `addWorkspaceFolder` bridge; the extension host checks
+trust again before changing the workspace. Workspace list synchronization leaves
+the active directory alone when the active project has not changed.
+
+### Why admission leaves the global cache complete
+
+Hidden sessions still exist in OpenCode. Removing them from the raw cache would
+turn an admission decision into a deletion signal for authoritative cleanup.
+Admission filters navigation projections and selection while the runtime trust
+guard continues to authorize every location-starting request.
+
 Opening a new draft applies its configured model identifier immediately, then
 reconciles after project config activation. That continuation belongs to the
 same runtime and draft object and yields to a manual choice made while loading.
@@ -413,6 +471,10 @@ recover its referenced parent instead of exposing an orphan-only snapshot.
 
 Session message loads use runtime, normalized directory, session ID, SDK epoch, and loader generation as commit authority. Eviction, archive, delete, move, directory disposal, and runtime switching invalidate the applicable loader generation before stale in-flight work can publish. A move invalidates both source and destination loader targets.
 
+### Why auto-read keeps older-page reply provenance
+
+`SessionMessageLoadState.olderCompletedReplyIds` remembers completed answers returned by successful older-history batches for that loader entry. Auto-read combines it with the opening baseline and already-read replies, so trimming to an answer loaded after opening cannot start playback. Scanning all current messages after each load would also suppress answers completed live during the request. Failed and stale batches publish no IDs; surviving revert windows keep them, while entry resets and eviction clear them. This metadata is not persisted or inferred from message ordering, and live updates do not rescan history.
+
 An authoritative `session.deleted` event also clears persisted UI state before routing metadata can be removed. Confirmed local deletion and accepted `404` deletion do the same directly instead of depending on the event echo. Cleanup is identity-owned by runtime, normalized directory, and session ID: queued messages, persisted todos, composer drafts, per-session input-history buckets, inline-comment drafts, and pins clear only that tuple, while the active runtime's folder store removes the session from every active or archived folder scope. Stale-runtime events and unresolved/global directory identities do not mutate persisted state.
 
 Persisted sidebar state is never reconciled destructively from the first successful startup list. That list establishes an authoritative active+archived baseline. Only a session present in that baseline and omitted from a later complete snapshot is treated as a missed external deletion, and that judgment commits the same reconciliation as a confirmed deletion through `reconcileExternallyDeletedSession`: the session leaves every live store and the global cache, the current-session pointer clears when it pointed there, and `cleanupPersistedSessionState` runs. Clearing only persisted state was the earlier behavior, and it left the session in every live store, in the sidebar, and as the open chat still prompting an id the server no longer has when the `session.deleted` event was lost. The reconciliation is rechecked against the captured runtime before it mutates the non-runtime-scoped live, global, and UI stores. Archive and directory moves retain the session ID across snapshots and are not deletion cleanup. The judgment runs in `MainLayout` and `VSCodeLayout` through `useSessionListSync`, which see a snapshot every 45-second global poll, and in the mobile shell's `MobileAppContent`, which has no poller and sees a snapshot whenever the sessions sheet opens or the last session is restored. This favors harmless hidden stale metadata over irreversible user-state loss when startup data is incomplete.
@@ -456,8 +518,7 @@ full-list timers. The tray renders only the sessions the sidebar can place — a
 configured project or worktree, a managed chat, or an isolated space — because
 its twenty rows are the recent-work shortcut, and a session from an
 unconfigured or deleted directory has no row in the sidebar's project or chat
-lists (Pinned and In work can still list one). Pending approvals from a hidden
-session still appear. Surface-specific refreshes, such
+lists. Pending approvals follow the same admission rule. Surface-specific refreshes, such
 as opening the mobile session sheet or returning from suspension, may still
 request freshness at their explicit lifecycle edge; the store coalesces an
 overlapping in-flight load.
@@ -1328,6 +1389,10 @@ batches while the timeline stays hidden; that hold raises the gate's cap to
 the end first, and the reader is moved only if the message arrives and they
 have neither scrolled nor sent in the meantime. Mobile skips that search because it
 loads history only on an explicit tap.
+
+Session-only navigation and `/btw` parent resolution belong to the
+[router](../lib/router/DOCUMENTATION.md). Its `openSession` registers the opener
+a toast uses, so the session store keeps no dependency on the router.
 
 A message link opens the session on one message instead. Links are built and
 parsed in `lib/sessionLinks.ts`: the web copies `?session=<id>&message=<id>` on

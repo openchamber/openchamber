@@ -28,6 +28,7 @@ import { RunSidebarRow } from '../sessions/RunSidebarRow';
 import { computeNodeStructureKey, nodeContainsSessionId } from '../sessions/sessionNodeItemUtils';
 import { DroppableFolderWrapper, SessionFolderOwnersProvider } from '../folders/sessionFolderDnd';
 import { sessionFolderCollision } from '../folders/sessionFolderCollision';
+import { applySessionFolderDrop, resolveCurrentSessionFolderDropSource, resolveCurrentSessionFolderDropTarget } from '../folders/sessionFolderDrop';
 import { FolderDeleteConfirmDialog, type DeleteFolderConfirmState } from '../shell/ConfirmDialogs';
 import type { SessionGroup } from '../types';
 import { SessionSidebarRows } from '../SessionSidebarRows';
@@ -409,6 +410,7 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
         <SessionTreeItem
           {...model.groupProps}
           node={row.node} depth={row.depth} ownsWork={row.ownsWork} groupDirectory={row.groupDirectory} projectId={row.projectId}
+          ownerProjectId={row.ownerProjectId}
           folderOwnerKey={row.ownerKey} selectionScopeKey={row.selectionScopeKey}
           archivedBucket={row.archived} renderContext={row.renderContext} detailed={row.detailed} rowKey={row.key} dragKey={row.key}
           secondaryMeta={row.secondaryMeta} renderChildren={false}
@@ -508,18 +510,23 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
           setProjectDragging(false);
           if (!event.over) return;
           // SAFETY: session and folder payloads are created by the sidebar's draggable and droppable row components.
-          const activeData = event.active.data.current as { type?: string; sessionId?: string; ownerKey?: string | null; archivedBucket?: boolean } | undefined;
+          const activeData = event.active.data.current as { type?: string; sessionId?: string } | undefined;
           // SAFETY: session and folder payloads are created by the sidebar's draggable and droppable row components.
-          const overData = event.over.data.current as { type?: string; folderId?: string; scopeKey?: string; ownerKey?: string | null } | undefined;
-          if (activeData?.type === 'session' && activeData.sessionId && activeData.ownerKey && activeData.archivedBucket !== true && overData?.type === 'folder' && overData.folderId && overData.scopeKey && overData.ownerKey === activeData.ownerKey) {
-            const dropTarget = model.rowModel.folderDropTargets.find((entry) => entry.folderId === overData.folderId && entry.scopeKey === overData.scopeKey && entry.ownerKey === activeData.ownerKey);
-            const authority = model.rowModel.folderAuthorityByOwner.get(activeData.ownerKey);
-            if (!dropTarget?.enabled || authority?.complete !== true) return;
+          const overData = event.over.data.current as { type?: string; folderId?: string; scopeKey?: string } | undefined;
+          if (activeData?.type === 'session' && activeData.sessionId && overData?.type === 'folder' && overData.folderId && overData.scopeKey) {
+            const source = resolveCurrentSessionFolderDropSource(model.rowModel.rows, String(event.active.id), activeData.sessionId);
+            if (!source) return;
+            const dropTarget = resolveCurrentSessionFolderDropTarget(model.rowModel.folderDropTargets, String(event.over.id), overData.scopeKey, overData.folderId);
+            const authority = model.rowModel.folderAuthorityByOwner.get(source.ownerKey);
             const store = useSessionFoldersStore.getState();
-            for (const scopeKey of authority.scopeKeys) {
-              if (scopeKey !== overData.scopeKey) store.removeSessionFromFolder(scopeKey, activeData.sessionId);
-            }
-            addSessionToFolder(overData.scopeKey, overData.folderId, activeData.sessionId);
+            applySessionFolderDrop({
+              sessionId: source.sessionId,
+              sessionOwnerKey: source.ownerKey,
+              target: dropTarget,
+              authority,
+              removeSessionFromFolder: store.removeSessionFromFolder,
+              addSessionToFolder,
+            });
             return;
           }
           if (view.hasSessionSearchQuery || model.state.editingId !== null || event.active.id === event.over.id) return;

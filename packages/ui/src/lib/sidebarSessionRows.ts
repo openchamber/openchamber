@@ -8,13 +8,13 @@ import { isSessionInWork } from '@/lib/sessionWorkMetadata';
  * project, worktree, chat or space does, and so does a pinned or in-work
  * session while its zone renders (`zones`, as `SessionProjectCollection`
  * gates them), since the Pinned and In work zones list it whether or not its
- * project still exists. Surfaces that list sessions outside the sidebar (the
+ * project still exists, provided its destination is admitted. Surfaces that list sessions outside the sidebar (the
  * desktop tray and dock badge) use this, so the two agree.
  */
 export const sessionHasSidebarRow = (
   session: Session,
-  { isPlaced, isPinned, zones }: { isPlaced: boolean; isPinned: boolean; zones: { pinned: boolean; work: boolean } },
+  { isAdmitted, isPlaced, isPinned, zones }: { isAdmitted: boolean; isPlaced: boolean; isPinned: boolean; zones: { pinned: boolean; work: boolean } },
 ): boolean => {
-  if (session.parentID || session.time?.archived || isBtwSession(session)) return false;
+  if (!isAdmitted || session.parentID || session.time?.archived || isBtwSession(session)) return false;
   return isPlaced || (zones.pinned && isPinned) || (zones.work && isSessionInWork(session));
 };

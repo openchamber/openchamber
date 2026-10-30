@@ -44,7 +44,7 @@ send never re-resolves mutable UI state:
   contextPreview?, // bounded display-only summary captured by the UI
   text,           // text to deliver (agent mention stripped, file mentions resolved); defaults to content
   agentMention?,  // delivered as an `agent` part
-  attachments: [{ id, filename, mimeType, size, source, serverPath?, dataUrl }],
+  attachments: [{ id, filename, mimeType, size, source, serverPath?, agentPath?, dataUrl }],
   context: [      // what the composer had attached, in send order
     { kind: 'context', text, metadata, instructions? },  // a draft chip or linked issue/PR; metadata is the UI's structured payload
     { kind: 'instruction', text },                       // derived from the text (skill instruction)
@@ -67,6 +67,12 @@ synthetic text part, an entry's `instructions` going out as its own part just
 before it and its `metadata` riding the part verbatim so the timeline renders
 the context block back. The payload inside `metadata` is the UI's contract
 (`lib/messages/contextParts.ts`), parsed by the UI on the way back.
+
+An attachment's `agentPath` — the file's on-disk location the desktop client
+resolved at intake — travels to OpenCode as the prompt file's `name`, the
+field the model reads as the file identity, falling back to `filename` when
+absent. `filename` itself still rides the attachment unchanged for the UI's
+own display.
 
 `parseQueuedItemInput` rejects anything the server could not deliver later
 (no text, attachments, or context; missing model; malformed attachment or

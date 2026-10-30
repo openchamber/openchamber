@@ -27,6 +27,7 @@ import { useProjectsStore } from "@/stores/useProjectsStore"
 import { useSessionDisplayStore } from "@/stores/useSessionDisplayStore"
 import { syncSessionKnowledge } from "@/lib/sessionKnowledgeApi"
 import { fetchResponseStyleInstruction } from "@/lib/responseStyle"
+import { attachmentWireName } from "@/lib/attachmentIdentity"
 import { useGlobalSessionsStore, resolveGlobalSessionDirectory } from "@/stores/useGlobalSessionsStore"
 import { isDirectoryUnknown, useDirectoryStore } from "@/stores/useDirectoryStore"
 import { useSessionFoldersStore } from "@/stores/useSessionFoldersStore"
@@ -51,6 +52,8 @@ import { waitForWorktreeBootstrap } from "@/lib/worktrees/worktreeBootstrap"
 import { getWorktreeSetupWaitEnabled } from "@/lib/openchamberConfig"
 import { resolveCreatedWorktreeStartDirectory, resolveStartDirectory, resolveWorktreeStartDirectory } from "@/lib/worktrees/worktreeStartDirectory"
 import { resolveProjectForSessionDirectory } from "@/lib/projectResolution"
+import { admitSession, isSessionAdmitted } from "./session-admission"
+import { isSessionDirectoryAdmitted } from "./session-admission-rule"
 import {
   getSyncSessions,
   getAllSyncSessions,
@@ -100,7 +103,6 @@ import { useSelectionStore } from "./selection-store"
 import { getViewportSessionMemory, useViewportStore, viewportSessionKey } from "./viewport-store"
 import { useSessionWorktreeStore } from "./session-worktree-store"
 import { getAttachedSessionDirectory } from "./session-worktree-contract"
-import { setSessionOpener } from "./session-navigation"
 import { getRuntimeKey, isTransientRuntimeKey } from "@/lib/runtime-switch"
 import { clearLastActiveSession, persistLastActiveSession, readLastActiveSession } from "./last-session-cache"
 import { createSessionDraftId, useSessionDraftsStore } from "@/stores/useSessionDraftsStore"
@@ -698,6 +700,7 @@ export const getRememberedSessionDirectory = (sessionId: string): {
  * a guess, not a selection.
  */
 let guessedSelectionSessionId: string | null = null
+let admissionNavigationRevision = 0
 
 const collectSessionDirectorySources = (
   sessionId: string,
@@ -1512,6 +1515,26 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   // setCurrentSession
   // ---------------------------------------------------------------------------
   setCurrentSession: (id, directoryHint?: string | null, options?: SetCurrentSessionOptions) => {
+    const navigationRevision = ++admissionNavigationRevision
+    if (id) {
+      const record = useGlobalSessionsStore.getState().entityById.get(id)
+      const directory = (record ? resolveGlobalSessionDirectory(record) : null)
+        ?? resolveSessionDirectory(id, (sid) => get().worktreeMetadata.get(sid))
+        ?? normalizePath(directoryHint)
+      if (!directory || !isSessionAdmitted(directory)) {
+        const runtimeKey = getRuntimeKey()
+        const stillSelected = () => navigationRevision === admissionNavigationRevision && runtimeKey === getRuntimeKey()
+        void (async () => {
+          // Session detail starts no OpenCode location. Resolve unknown links
+          // before trusting any fallback to the currently selected project.
+          const destination = directory ?? resolveGlobalSessionDirectory(await opencodeClient.getSession(id))
+          if (!destination || !stillSelected() || !await admitSession(id, destination, true) || !stillSelected()) return
+          get().setCurrentSession(id, destination, options)
+        })().catch((error) => console.warn('[session-admission] Could not open the session:', error))
+        return
+      }
+      directoryHint = directory
+    }
     const materializedDraftSessionId = id && options?.transition === "submitted-draft" ? id : null
     // Publish the transition identity before closing the draft. Those are two
     // separate store updates, and ChatContainer must never observe a closed
@@ -1665,7 +1688,8 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     const restoredDirectory = memory?.directory ?? null
     const availableWorktreesByProject = memory?.availableWorktreesByProject
       ?? readPersistedWorktreeTopology(key)
-    if (restoredDirectory) {
+    const admitted = restoredSessionId && isSessionDirectoryAdmitted(restoredDirectory, useProjectsStore.getState().projects, availableWorktreesByProject)
+    if (restoredDirectory && (!restoredSessionId || admitted)) {
       useDirectoryStore.getState().setDirectory(restoredDirectory, { showOverlay: false })
     } else if (previousRuntimeKey && previousRuntimeKey !== key && !isTransientRuntimeKey(previousRuntimeKey)) {
       // Nothing is remembered here and the directory was in use on the host
@@ -1675,8 +1699,8 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       useDirectoryStore.getState().resetForRuntimeSwitch()
     }
     set({
-      currentSessionId: restoredSessionId,
-      currentSessionDirectory: restoredSessionId ? restoredDirectory : null,
+      currentSessionId: admitted ? restoredSessionId : null,
+      currentSessionDirectory: admitted ? restoredDirectory : null,
       currentSessionKeepsSingleProject: false,
       newSessionDraft: restoredSessionId ? { ...DEFAULT_DRAFT } : restoredDraft,
       abortPromptSessionId: null,
@@ -1687,13 +1711,14 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       availableWorktreesByProject,
       sessionAbortFlags: new Map(),
         })
-    if (restoredSessionId) {
+    if (admitted) {
       setActiveSession(restoredDirectory ?? opencodeClient.getDirectory() ?? "", restoredSessionId)
     } else {
       setActiveSession("", "")
-      if (restoredDraft.open && restoredDraft.worktreeStartDirectory?.directory === null) {
+      if (!restoredSessionId && restoredDraft.open && restoredDraft.worktreeStartDirectory?.directory === null) {
         applyDraftTargetSelectionDefaults(restoredDraft, availableWorktreesByProject, undefined, restoredDraft)
       }
+      if (restoredSessionId) get().setCurrentSession(restoredSessionId, restoredDirectory)
     }
   },
 
@@ -1703,6 +1728,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
 
 
   openNewSessionDraft: (options) => {
+    if (!options?.automatic) admissionNavigationRevision += 1
     // A USER-initiated draft open is a navigation choice: the next cold launch
     // should land on the draft, not re-open the session left behind — drop the
     // persisted last-session pointer for this runtime. `automatic: true` marks
@@ -2328,7 +2354,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
           type: "file" as const,
           mime: a.mimeType,
           url: a.dataUrl,
-          filename: a.filename,
+          filename: attachmentWireName(a),
         }))
 
         try {
@@ -2358,7 +2384,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
                 type: "file" as const,
                 mime: a.mimeType,
                 url: a.dataUrl,
-                filename: a.filename,
+                filename: attachmentWireName(a),
               })),
             })),
           })
@@ -2442,7 +2468,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         type: "file" as const,
         mime: a.mimeType,
         url: a.dataUrl,
-        filename: a.filename,
+        filename: attachmentWireName(a),
       }))
 
       // Standing project context (pinned notes and plans, the memory index) and
@@ -2490,7 +2516,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
             type: "file" as const,
             mime: a.mimeType,
             url: a.dataUrl,
-            filename: a.filename,
+            filename: attachmentWireName(a),
           })),
         })),
       })
@@ -2852,16 +2878,17 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       guessedSelectionSessionId = null
     }
     if (sessionId === get().currentSessionId) {
+      if (normalized && !isSessionAdmitted(normalized)) {
+        get().setCurrentSession(null)
+        get().setCurrentSession(sessionId, normalized)
+        return
+      }
       set({ currentSessionDirectory: normalized })
       setActiveSession(normalized ?? "", sessionId)
       writeRuntimeSessionMemory(runtimeMemoryKey(), { sessionId, directory: normalized })
     }
   },
 }))
-
-setSessionOpener((sessionID, directory) => {
-  useSessionUIStore.getState().setCurrentSession(sessionID, directory)
-})
 
 // Write-through persist of the worktree map whenever discovery refreshes it.
 // Reference-equality guard filters hot session updates; the serialized
