@@ -99,3 +99,45 @@ describe('useProjectIdentityAutoSave', () => {
     }
   });
 });
+
+describe('useProjectIdentityForm icon upload validation', () => {
+  test('rejects invalid icon files before they become pending', async () => {
+    const dom = installHookTestDom();
+    const root = createRoot(dom.container);
+    type Capture = { form?: ReturnType<typeof useProjectIdentityForm> };
+    const capture: Capture = {};
+    const Harness = ({ entry }: { entry: ProjectEntry | null }) => {
+      capture.form = useProjectIdentityForm(entry);
+      return null;
+    };
+    const render = (entry: ProjectEntry | null) => act(async () => root.render(
+      React.createElement(I18nProvider, null, React.createElement(Harness, { entry })),
+    ));
+    try {
+      await render(project('app', 'App'));
+
+      const tooBig = new File([new Uint8Array(5 * 1024 * 1024 + 1)], 'big.png', { type: 'image/png' });
+      await act(async () => { capture.form?.handleUploadIcon(tooBig); });
+      expect(capture.form?.pendingUploadIconFile).toBeNull();
+      expect(capture.form?.pendingUploadIconPreviewUrl).toBeNull();
+
+      const badType = new File(['x'], 'note.txt', { type: 'text/plain' });
+      await act(async () => { capture.form?.handleUploadIcon(badType); });
+      expect(capture.form?.pendingUploadIconFile).toBeNull();
+      expect(capture.form?.pendingUploadIconPreviewUrl).toBeNull();
+
+      const empty = new File([], 'empty.png', { type: 'image/png' });
+      await act(async () => { capture.form?.handleUploadIcon(empty); });
+      expect(capture.form?.pendingUploadIconFile).toBeNull();
+      expect(capture.form?.pendingUploadIconPreviewUrl).toBeNull();
+
+      const valid = new File(['x'], 'ok.png', { type: 'image/png' });
+      await act(async () => { capture.form?.handleUploadIcon(valid); });
+      expect(capture.form?.pendingUploadIconFile).toBe(valid);
+      expect(capture.form?.pendingUploadIconPreviewUrl).toBeTruthy();
+    } finally {
+      await act(async () => root.unmount());
+      dom.restore();
+    }
+  });
+});
